@@ -47,7 +47,7 @@ function refreshStopButtons(): void {
   }
 }
 
-@action({ UUID: 'com.anthropic.claude-code.stop-button' })
+@action({ UUID: 'bound.serendipity.claude-code.stop-button' })
 export class StopButtonAction extends SingletonAction {
   override async onWillAppear(ev: WillAppearEvent): Promise<void> {
     if (!actionIds.includes(ev.action.id)) {

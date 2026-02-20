@@ -11,7 +11,7 @@
       ],
       "Controllers": ["Keypad"],
       "SupportedInMultiActions": true,
-      "UUID": "com.anthropic.claude-code.response-button"
+      "UUID": "bound.serendipity.claude-code.response-button"
     },
     {
       "Icon": "static/imgs/stop",
@@ -23,7 +23,7 @@
         }
       ],
       "Controllers": ["Keypad"],
-      "UUID": "com.anthropic.claude-code.stop-button"
+      "UUID": "bound.serendipity.claude-code.stop-button"
     },
     {
       "Icon": "static/imgs/mode",
@@ -35,7 +35,7 @@
         }
       ],
       "Controllers": ["Keypad"],
-      "UUID": "com.anthropic.claude-code.mode-button"
+      "UUID": "bound.serendipity.claude-code.mode-button"
     },
     {
       "Icon": "static/imgs/status",
@@ -47,7 +47,7 @@
         }
       ],
       "Controllers": ["Keypad"],
-      "UUID": "com.anthropic.claude-code.session-button"
+      "UUID": "bound.serendipity.claude-code.session-button"
     },
     {
       "Icon": "static/imgs/usage",
@@ -59,7 +59,7 @@
         }
       ],
       "Controllers": ["Keypad"],
-      "UUID": "com.anthropic.claude-code.usage-button"
+      "UUID": "bound.serendipity.claude-code.usage-button"
     },
     {
       "Icon": "static/imgs/option",
@@ -78,7 +78,7 @@
           "Touch": "Show option"
         }
       },
-      "UUID": "com.anthropic.claude-code.option-dial"
+      "UUID": "bound.serendipity.claude-code.option-dial"
     },
     {
       "Icon": "static/imgs/option",
@@ -97,7 +97,7 @@
           "Touch": "Show command"
         }
       },
-      "UUID": "com.anthropic.claude-code.command-dial"
+      "UUID": "bound.serendipity.claude-code.command-dial"
     },
     {
       "Icon": "static/imgs/voice",
@@ -116,7 +116,7 @@
           "Touch": "Show status"
         }
       },
-      "UUID": "com.anthropic.claude-code.voice-dial"
+      "UUID": "bound.serendipity.claude-code.voice-dial"
     }
   ],
   "Author": "StreamDeck-Claude",
@@ -125,7 +125,7 @@
   "CodePath": "bin/plugin.js",
   "Description": "Control Claude Code CLI with Stream Deck+",
   "Icon": "static/imgs/plugin",
-  "UUID": "com.anthropic.claude-code",
+  "UUID": "bound.serendipity.claude-code",
   "Name": "Claude Code Controller",
   "SDKVersion": 2,
   "Software": {

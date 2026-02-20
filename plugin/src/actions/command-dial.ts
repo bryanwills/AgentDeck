@@ -49,7 +49,7 @@ function getCommandFeedback(): Record<string, unknown> {
   };
 }
 
-@action({ UUID: 'com.anthropic.claude-code.command-dial' })
+@action({ UUID: 'bound.serendipity.claude-code.command-dial' })
 export class CommandDialAction extends SingletonAction {
   static actionIds: string[] = [];
 

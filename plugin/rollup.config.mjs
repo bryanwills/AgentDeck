@@ -5,7 +5,7 @@ import replace from '@rollup/plugin-replace';
 
 const isWatching = !!process.env.ROLLUP_WATCH;
 const isProd = process.env.SDC_PROD === '1';
-const sdPlugin = 'com.anthropic.claude-code.sdPlugin';
+const sdPlugin = 'bound.serendipity.claude-code.sdPlugin';
 
 export default {
   input: 'src/plugin.ts',
