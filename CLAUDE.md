@@ -55,6 +55,7 @@ sdc stop           # stop bridge and session
 - **Plugin UUID**: `bound.serendipity.agentdeck` (확정 — 배포 후 변경 불가)
 - **Package scope**: `@agentdeck/*` (shared, bridge, plugin, hooks)
 - **User data dir**: `~/.agentdeck/sessions.json`
+- **BillingType detection**: PTY `model_info` parser event의 `plan` 필드로 subscription/api/unknown 판별. API 사용자는 OAuth fetch 스킵 + session 페이지만 표시
 
 ## v3 Layout (0.3.0)
 
