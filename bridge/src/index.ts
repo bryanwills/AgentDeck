@@ -320,6 +320,12 @@ async function startBridge(port: number, command: string): Promise<void> {
         stateMachine.handleUserAction('interrupt');
         break;
 
+      case 'escape':
+        debug('sdc', 'escape: sending Esc');
+        ptyManager.write('\x1b');
+        stateMachine.handleUserAction('interrupt');
+        break;
+
       case 'voice':
         handleVoiceCommand(cmd.action, voiceManager, ptyManager, wsServer);
         break;
@@ -360,6 +366,23 @@ async function startBridge(port: number, command: string): Promise<void> {
       billingType: snapshot.billingType,
     };
     wsServer.sendTo(ws, stateEvent);
+
+    // Restore prompt options for reconnecting clients (e.g. after session switch)
+    if (snapshot.options.length > 0) {
+      let promptType: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review' = 'multi_select';
+      if (snapshot.state === State.AWAITING_PERMISSION) {
+        promptType = snapshot.options.length > 2 ? 'yes_no_always' : 'yes_no';
+      } else if (snapshot.state === State.AWAITING_DIFF) {
+        promptType = 'diff_review';
+      }
+      wsServer.sendTo(ws, {
+        type: 'prompt_options',
+        promptType,
+        question: snapshot.question ?? undefined,
+        options: snapshot.options,
+      });
+    }
+
     wsServer.sendTo(ws, buildUsageEvent(snapshot, cachedApiUsage));
 
     const connectEvt: BridgeEvent = {

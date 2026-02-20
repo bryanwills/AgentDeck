@@ -101,6 +101,10 @@ export interface InterruptCommand {
   type: 'interrupt'; // Ctrl+C
 }
 
+export interface EscapeCommand {
+  type: 'escape'; // Esc key — cancel prompt/selection
+}
+
 export interface VoiceCommand {
   type: 'voice';
   action: 'start' | 'stop' | 'cancel';
@@ -116,6 +120,7 @@ export type PluginCommand =
   | SendPromptCommand
   | SwitchModeCommand
   | InterruptCommand
+  | EscapeCommand
   | VoiceCommand
   | QueryUsageCommand;
 

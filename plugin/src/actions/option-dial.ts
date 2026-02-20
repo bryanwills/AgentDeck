@@ -15,14 +15,6 @@ let currentState = State.DISCONNECTED;
 let currentOptions: PromptOption[] = [];
 let selectedIndex = 0;
 
-// Permission mode options for dial navigation
-const PERMISSION_OPTIONS: PromptOption[] = [
-  { index: 0, label: 'Yes', shortcut: 'y' },
-  { index: 1, label: 'No', shortcut: 'n' },
-  { index: 2, label: 'Always', shortcut: 'a' },
-];
-let permissionIndex = 0;
-
 export function initOptionDial(b: BridgeClient): void {
   bridge = b;
 }
@@ -33,12 +25,9 @@ export function updateOptionDialState(
 ): void {
   currentState = state;
   currentOptions = options;
-  if (state === State.AWAITING_OPTION) {
+  if (state === State.AWAITING_OPTION || state === State.AWAITING_PERMISSION) {
     selectedIndex = 0;
     dlog('OptDial', `options received: ${options.length} items`);
-  }
-  if (state === State.AWAITING_PERMISSION) {
-    permissionIndex = 0;
   }
   refreshOptionDials();
 }
@@ -62,15 +51,15 @@ function refreshOptionDials(): void {
           },
         })
         .catch(() => {});
-    } else if (currentState === State.AWAITING_PERMISSION) {
-      const opt = PERMISSION_OPTIONS[permissionIndex];
+    } else if (currentState === State.AWAITING_PERMISSION && currentOptions.length > 0) {
+      const opt = currentOptions[selectedIndex];
       void dial
         .setFeedback({
           title: 'PERMISSION',
-          value: opt?.label ?? '',
+          value: truncate(opt?.label ?? '', 30),
           indicator: {
             value: Math.round(
-              ((permissionIndex + 1) / PERMISSION_OPTIONS.length) * 100,
+              ((selectedIndex + 1) / currentOptions.length) * 100,
             ),
             bar_fill_c: '#f87171',
           },
@@ -113,20 +102,16 @@ export class OptionDialAction extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
-    if (currentState === State.AWAITING_OPTION && currentOptions.length > 0) {
+    if (
+      (currentState === State.AWAITING_OPTION || currentState === State.AWAITING_PERMISSION) &&
+      currentOptions.length > 0
+    ) {
       if (ev.payload.ticks > 0) {
-        selectedIndex = Math.min(selectedIndex + 1, currentOptions.length - 1);
+        selectedIndex = (selectedIndex + 1) % currentOptions.length;
       } else {
-        selectedIndex = Math.max(selectedIndex - 1, 0);
+        selectedIndex = (selectedIndex - 1 + currentOptions.length) % currentOptions.length;
       }
       dlog('OptDial', `rotate: idx=${selectedIndex}/${currentOptions.length} "${currentOptions[selectedIndex]?.label}"`);
-      refreshOptionDials();
-    } else if (currentState === State.AWAITING_PERMISSION) {
-      if (ev.payload.ticks > 0) {
-        permissionIndex = (permissionIndex + 1) % PERMISSION_OPTIONS.length;
-      } else {
-        permissionIndex = (permissionIndex - 1 + PERMISSION_OPTIONS.length) % PERMISSION_OPTIONS.length;
-      }
       refreshOptionDials();
     }
   }
@@ -135,8 +120,8 @@ export class OptionDialAction extends SingletonAction {
     if (currentState === State.AWAITING_OPTION && currentOptions.length > 0) {
       dlog('OptDial', `push: select_option idx=${selectedIndex} "${currentOptions[selectedIndex]?.label}"`);
       bridge.send({ type: 'select_option', index: selectedIndex });
-    } else if (currentState === State.AWAITING_PERMISSION) {
-      const opt = PERMISSION_OPTIONS[permissionIndex];
+    } else if (currentState === State.AWAITING_PERMISSION && currentOptions.length > 0) {
+      const opt = currentOptions[selectedIndex];
       if (opt?.shortcut) {
         dlog('OptDial', `push: respond "${opt.label}" (${opt.shortcut})`);
         bridge.send({ type: 'respond', value: opt.shortcut });

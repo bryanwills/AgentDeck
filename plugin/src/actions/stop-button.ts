@@ -24,19 +24,27 @@ export function updateStopState(state: State): void {
   refreshStopButtons();
 }
 
-function refreshStopButtons(): void {
-  const isActive =
-    currentState === State.PROCESSING ||
-    currentState === State.AWAITING_PERMISSION ||
-    currentState === State.AWAITING_OPTION ||
-    currentState === State.AWAITING_DIFF;
+function isAwaiting(state: State): boolean {
+  return (
+    state === State.AWAITING_PERMISSION ||
+    state === State.AWAITING_OPTION ||
+    state === State.AWAITING_DIFF
+  );
+}
 
-  const svg = renderButton({
-    title: 'STOP',
-    color: isActive ? '#cc0000' : '#3a1111',
-    textColor: isActive ? '#ffffff' : '#666666',
-    enabled: isActive,
-  });
+function getButtonConfig(state: State) {
+  if (state === State.PROCESSING) {
+    return { title: 'STOP', color: '#cc0000', textColor: '#ffffff', enabled: true };
+  }
+  if (isAwaiting(state)) {
+    return { title: 'ESC', color: '#b45309', textColor: '#ffffff', enabled: true };
+  }
+  return { title: 'STOP', color: '#3a1111', textColor: '#666666', enabled: false };
+}
+
+function refreshStopButtons(): void {
+  const cfg = getButtonConfig(currentState);
+  const svg = renderButton(cfg);
   const dataUrl = svgToDataUrl(svg);
 
   for (const id of actionIds) {
@@ -53,24 +61,19 @@ export class StopButtonAction extends SingletonAction {
     if (!actionIds.includes(ev.action.id)) {
       actionIds.push(ev.action.id);
     }
-    const isActive =
-      currentState === State.PROCESSING ||
-      currentState === State.AWAITING_PERMISSION ||
-      currentState === State.AWAITING_OPTION ||
-      currentState === State.AWAITING_DIFF;
-
-    const svg = renderButton({
-      title: 'STOP',
-      color: isActive ? '#cc0000' : '#3a1111',
-      textColor: isActive ? '#ffffff' : '#666666',
-      enabled: isActive,
-    });
+    const cfg = getButtonConfig(currentState);
+    const svg = renderButton(cfg);
     await ev.action.setImage(svgToDataUrl(svg));
   }
 
   override async onKeyDown(_ev: KeyDownEvent): Promise<void> {
-    dlog('StpBut', `keyDown: interrupt (state=${currentState})`);
-    bridge.send({ type: 'interrupt' });
+    if (isAwaiting(currentState)) {
+      dlog('StpBut', `keyDown: escape (state=${currentState})`);
+      bridge.send({ type: 'escape' });
+    } else {
+      dlog('StpBut', `keyDown: interrupt (state=${currentState})`);
+      bridge.send({ type: 'interrupt' });
+    }
   }
 
   override onWillDisappear(ev: WillDisappearEvent): void {

@@ -155,13 +155,12 @@ describe('StateMachine', () => {
   // === Strict Transition Validation ===
 
   describe('strict transitions', () => {
-    it('blocks invalid transition: IDLE → AWAITING_PERMISSION', () => {
+    it('allows IDLE → AWAITING_PERMISSION (prompt without spinner)', () => {
       const sm = bootToIdle();
-      // permission_prompt while IDLE (not PROCESSING) — should be blocked
       sm.handleParserEvent('permission_prompt', {
         options: [{ index: 0, label: 'Yes' }],
       });
-      expect(sm.getState()).toBe(State.IDLE);
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
     });
 
     it('blocks invalid transition: DISCONNECTED → PROCESSING', () => {

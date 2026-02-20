@@ -11,7 +11,8 @@ const SPINNER_CHARS = /[✢✳✶✻✽]/;
 const YES_NO_ALWAYS = /Yes,\s*allow once|No,\s*deny|Always allow/i;
 const PERMISSION_YN = /\(Y\)es.*\/\(N\)o|\(y\/n\)/i;
 const DIFF_PROMPT = /\(V\)iew diff.*\(A\)pply.*\(D\)eny|\(a\)pply.*\(d\)eny.*\(v\)iew/i;
-const OPTION_NUMBERED = /^\s*❯?\s*\d+[.)]\s+.+/m;
+// ANSI stripping can remove spaces (e.g. "❯3.Haiku" instead of "❯ 3. Haiku")
+const OPTION_NUMBERED = /^\s*❯?\s*\d+[.)]\s*.+/m;
 const OPTION_BULLET = /^\s*[►▸●○]\s+.+/m;
 
 // Claude Code uses ❯ as its prompt char. May have \u00A0 (nbsp) or spaces around it.
@@ -94,25 +95,38 @@ export class OutputParser extends EventEmitter {
     this.parseUsageInfo(chunk);
     this.parseModeSwitchLine(chunk);
 
-    // --- Idle prompt detection (highest priority — needed for seenFirstIdle) ---
+    // --- Pre-scan: idle prompt & interactive content detection ---
     const hasIdlePrompt = IDLE_PROMPT.test(chunk);
+    const hasInteractive =
+      DIFF_PROMPT.test(chunk) || YES_NO_ALWAYS.test(chunk) ||
+      PERMISSION_YN.test(chunk) ||
+      OPTION_NUMBERED.test(chunk) || OPTION_BULLET.test(chunk);
 
-    if (hasIdlePrompt && this.spinnerActive) {
-      // Idle prompt during spinner → spinner is done, transition to idle
-      debug('Parser', 'idle prompt during spinner — stopping spinner, emitting idle');
-      this.resetSpinnerTimer();
-      this.spinnerActive = false;
-      this.seenFirstIdle = true;
-
-      // Emit both spinner_stop AND idle immediately
-      // Don't debounce — we know for certain Claude is idle
-      this.emit('spinner_stop');
-      this.resetIdleTimer();
-      this.idleTimer = setTimeout(() => {
-        debug('Parser', 'EMIT idle');
-        this.emit('idle');
-      }, IDLE_DEBOUNCE_MS);
-      return;
+    // --- Spinner + prompt handling ---
+    if (this.spinnerActive) {
+      if (hasInteractive) {
+        // Interactive prompt arrived during spinner (e.g. "❯ 1. Yes")
+        // Stop spinner but DON'T emit idle — fall through to prompt detection
+        debug('Parser', 'interactive prompt during spinner — stopping spinner');
+        this.resetSpinnerTimer();
+        this.spinnerActive = false;
+        this.seenFirstIdle = true;
+        this.emit('spinner_stop');
+        // Fall through to prompt detection below
+      } else if (hasIdlePrompt) {
+        // Pure idle prompt during spinner → spinner is done, transition to idle
+        debug('Parser', 'idle prompt during spinner — stopping spinner, emitting idle');
+        this.resetSpinnerTimer();
+        this.spinnerActive = false;
+        this.seenFirstIdle = true;
+        this.emit('spinner_stop');
+        this.resetIdleTimer();
+        this.idleTimer = setTimeout(() => {
+          debug('Parser', 'EMIT idle');
+          this.emit('idle');
+        }, IDLE_DEBOUNCE_MS);
+        return;
+      }
     }
 
     // --- Spinner detection (only after first idle prompt seen) ---
@@ -187,7 +201,9 @@ export class OutputParser extends EventEmitter {
 
     // --- Option list ---
     if (OPTION_NUMBERED.test(chunk) || OPTION_BULLET.test(chunk)) {
-      const options = this.parseOptions(chunk);
+      // Use buffer (already includes chunk) to capture all option lines
+      // even if they arrived across multiple PTY chunks
+      const options = this.parseOptions(this.buffer.slice(-1000));
       if (options.length > 0) {
         debug('Parser', `EMIT option_prompt (${options.length} options)`);
         this.resetIdleTimer();
@@ -418,19 +434,22 @@ export class OutputParser extends EventEmitter {
   }
 
   private parseOptions(text: string): PromptOption[] {
-    const options: PromptOption[] = [];
+    // Use a Map keyed by index so later (newer) lines overwrite earlier (stale) ones
+    const byIndex = new Map<number, PromptOption>();
     for (const line of text.split('\n')) {
-      const nm = line.match(/^\s*❯?\s*(\d+)[.)]\s+(.+)/);
+      const nm = line.match(/^\s*❯?\s*(\d+)[.)]\s*(.+)/);
       if (nm) {
-        options.push({ index: parseInt(nm[1], 10) - 1, label: nm[2].trim() });
+        const idx = parseInt(nm[1], 10) - 1;
+        byIndex.set(idx, { index: idx, label: nm[2].trim() });
         continue;
       }
       const bm = line.match(/^\s*([►▸●○])\s+(.+)/);
       if (bm) {
-        options.push({ index: options.length, label: bm[2].trim() });
+        const idx = byIndex.size;
+        byIndex.set(idx, { index: idx, label: bm[2].trim() });
       }
     }
-    return options;
+    return Array.from(byIndex.values());
   }
 
   private resetSpinnerTimer(): void {

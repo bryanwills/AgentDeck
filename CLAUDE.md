@@ -48,7 +48,7 @@ sdc stop           # stop bridge and session
 - **ES modules** throughout (type: "module")
 - **Node16 module resolution** in TypeScript
 - **Port 9120–9129** for multi-session (base 9120, auto-increment). `AGENTDECK_PORT` env var injected into Claude process so hooks POST to correct bridge
-- **Shift+Tab** (`\x1b[Z`) for Claude Code mode switching (800ms debounce)
+- **Shift+Tab** (`\x1b[Z`) for Claude Code mode switching (100ms debounce)
 - **sox/rec** for audio capture, **whisper.cpp** for transcription
 - Hook scripts use `|| true` to avoid blocking Claude when bridge is down
 - **Action ID pattern**: All SD actions store string IDs and use `getActionById()` — never store action object references
@@ -67,7 +67,7 @@ sdc stop           # stop bridge and session
 | 1 | SESSION & STATUS | Project + state + session switch (merged from v2 Session + Status) |
 | 2 | USAGE | Usage dashboard (5h/7d/extra/session pages) |
 | 3-5 | DYNAMIC ×3 | TPL1/TPL2/COMPACT (idle) or YES/NO/ALWAYS (permission) |
-| 6 | STOP | Interrupt |
+| 6 | STOP / ESC | Interrupt (processing) or Escape (awaiting prompt) |
 
 **Encoders (4 slots):**
 

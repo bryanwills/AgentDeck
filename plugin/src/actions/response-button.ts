@@ -17,6 +17,9 @@ let currentState = State.DISCONNECTED;
 let currentMode = 'default';
 let currentOptions: PromptOption[] = [];
 
+// Simple string[] — same pattern as Mode/Stop/Session buttons
+const actionIds: string[] = [];
+
 export function initResponseButtons(
   b: BridgeClient,
   lm: LayoutManager,
@@ -43,81 +46,59 @@ function refreshAllButtons(): void {
     currentOptions,
   );
 
-  const contexts = ResponseButtonAction.getContexts();
-  for (const ctx of contexts) {
-    const slot = ctx.slot ?? 0;
-    if (slot >= 0 && slot < buttons.length) {
-      applyButtonConfig(ctx.context, buttons[slot]);
+  dlog('RspBut', `refresh: state=${currentState} ids=${actionIds.length} buttons=[${buttons.map(b => b.title || 'DIM').join(',')}]`);
+  for (let i = 0; i < actionIds.length; i++) {
+    if (i < buttons.length) {
+      applyButtonConfig(actionIds[i], buttons[i]);
+    } else {
+      // Extra buttons beyond 3 slots → dim them
+      applyButtonConfig(actionIds[i], { title: '', color: '#1a1a1a', textColor: '#444444', enabled: false });
     }
   }
 }
 
-function applyButtonConfig(context: string, config: ButtonConfig): void {
+function applyButtonConfig(actionId: string, config: ButtonConfig): void {
   const svg = renderButton(config);
   const dataUrl = svgToDataUrl(svg);
-  const act = streamDeck.actions.getActionById(context);
+  const act = streamDeck.actions.getActionById(actionId);
   if (act) {
-    void act.setImage(dataUrl).catch(() => {});
-    void act.setTitle(config.title).catch(() => {});
+    void act.setImage(dataUrl).catch((e) => {
+      dlog('RspBut', `setImage error: ${e}`);
+    });
   }
-}
-
-type ResponseSettings = {
-  slot?: number;
-};
-
-interface ContextEntry {
-  context: string;
-  slot: number;
 }
 
 @action({ UUID: 'bound.serendipity.agentdeck.response-button' })
 export class ResponseButtonAction extends SingletonAction {
-  private static contexts: ContextEntry[] = [];
-
-  static getContexts(): ContextEntry[] {
-    return ResponseButtonAction.contexts;
-  }
-
-  override async onWillAppear(
-    ev: WillAppearEvent,
-  ): Promise<void> {
-    const settings = (ev.payload.settings ?? {}) as Record<string, any>;
-    const slot = settings.slot ?? ResponseButtonAction.contexts.length;
-
-    // Store slot in settings if not set
-    if (settings.slot === undefined) {
-      await ev.action.setSettings({ slot } as any);
+  override async onWillAppear(ev: WillAppearEvent): Promise<void> {
+    if (!actionIds.includes(ev.action.id)) {
+      actionIds.push(ev.action.id);
     }
+    const slot = actionIds.indexOf(ev.action.id);
+    dlog('RspBut', `onWillAppear: id=${ev.action.id} slot=${slot} total=${actionIds.length}`);
 
-    ResponseButtonAction.contexts.push({
-      context: ev.action.id,
-      slot,
-    });
-
-    // Render initial state
     const buttons = layoutManager.getButtonLayout(
       currentState,
       currentMode as any,
       currentOptions,
     );
-    if (slot >= 0 && slot < buttons.length) {
-      const svg = renderButton(buttons[slot]);
-      await ev.action.setImage(svgToDataUrl(svg));
-    }
+    const config = (slot >= 0 && slot < buttons.length)
+      ? buttons[slot]
+      : { title: '', color: '#1a1a1a', textColor: '#444444', enabled: false };
+    await ev.action.setImage(svgToDataUrl(renderButton(config)));
   }
 
-  override async onKeyDown(
-    ev: KeyDownEvent,
-  ): Promise<void> {
-    const slot = (ev.payload.settings as any)?.slot ?? 0;
+  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+    const slot = actionIds.indexOf(ev.action.id);
+    if (slot < 0) return;
+
     const buttons = layoutManager.getButtonLayout(
       currentState,
       currentMode as any,
       currentOptions,
     );
 
-    if (slot < 0 || slot >= buttons.length) return;
+    if (slot >= buttons.length) return;
 
     const config = buttons[slot];
     if (!config.enabled || !config.action) return;
@@ -150,11 +131,9 @@ export class ResponseButtonAction extends SingletonAction {
   }
 
   override onWillDisappear(ev: WillDisappearEvent): void {
-    const idx = ResponseButtonAction.contexts.findIndex(
-      (c) => c.context === ev.action.id,
-    );
+    const idx = actionIds.indexOf(ev.action.id);
     if (idx !== -1) {
-      ResponseButtonAction.contexts.splice(idx, 1);
+      actionIds.splice(idx, 1);
     }
   }
 }

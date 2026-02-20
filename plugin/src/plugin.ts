@@ -97,8 +97,12 @@ bridge.on('state_update', (ev: StateUpdateEvent) => {
   if (ev.modelName) currentModelName = ev.modelName;
   if (ev.billingType) currentBillingType = ev.billingType;
 
-  // Clear options when leaving option state
-  if (ev.state !== State.AWAITING_OPTION) {
+  // Clear options when leaving interactive states
+  if (
+    ev.state !== State.AWAITING_OPTION &&
+    ev.state !== State.AWAITING_PERMISSION &&
+    ev.state !== State.AWAITING_DIFF
+  ) {
     currentOptions = [];
   }
 
