@@ -235,20 +235,33 @@ function renderSessionSvg(): string {
     }
 
     case State.PROCESSING: {
-      // Change 5: Star spinner animation
+      // Change 5: Star spinner animation — auto-centered
       const tool = truncate(currentTool || 'Thinking...', 14);
+      const BUTTON_CENTER = 72;
+      const starH = 20;
+      const runFs = 24;
+      const toolFs = 16;
+      const gap1 = 6;   // star ↔ RUNNING
+      const gap2 = 8;   // RUNNING ↔ tool
+      const span = starH / 2 + gap1 + runFs / 2 + runFs / 2 + gap2 + toolFs / 2;
+      let cy = BUTTON_CENTER - span / 2;
+      const starY = Math.round(cy);
+      cy += starH / 2 + gap1 + runFs / 2;
+      const runBaseline = Math.round(cy + runFs * 0.35);
+      cy += runFs / 2 + gap2 + toolFs / 2;
+      const toolBaseline = Math.round(cy + toolFs * 0.35);
       return [
         `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">`,
         `<rect width="${SIZE}" height="${SIZE}" rx="12" fill="#2a1f00"/>`,
         // 4-point star with rotation + breathing opacity
-        `<g transform="translate(72, 28)">`,
+        `<g transform="translate(72, ${starY})">`,
         `<path d="M0,-10 L2,-3 L10,0 L2,3 L0,10 L-2,3 L-10,0 L-2,-3Z" fill="#fbbf24">`,
         `<animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="2s" repeatCount="indefinite"/>`,
         `<animate attributeName="opacity" values="0.9;0.5;0.9" dur="1.2s" repeatCount="indefinite"/>`,
         `</path>`,
         `</g>`,
-        `<text x="72" y="68" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="#fbbf24">RUNNING</text>`,
-        `<text x="72" y="96" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#fbbf24" opacity="0.7">${escXml(tool)}</text>`,
+        `<text x="72" y="${runBaseline}" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="#fbbf24">RUNNING</text>`,
+        `<text x="72" y="${toolBaseline}" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#fbbf24" opacity="0.7">${escXml(tool)}</text>`,
         `</svg>`,
       ].join('');
     }
