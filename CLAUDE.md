@@ -51,6 +51,9 @@ sdc stop           # stop bridge and session
 - **sox/rec** for audio capture, **whisper.cpp** for transcription
 - Hook scripts use `|| true` to avoid blocking Claude when bridge is down
 - **Action ID pattern**: All SD actions store string IDs and use `getActionById()` — never store action object references
+- **Plugin UUID**: `bound.serendipity.agentdeck` (확정 — 배포 후 변경 불가)
+- **Package scope**: `@agentdeck/*` (shared, bridge, plugin, hooks)
+- **User data dir**: `~/.agentdeck/sessions.json`
 
 ## v3 Layout (0.3.0)
 
