@@ -14,7 +14,7 @@ importers:
 
   bridge:
     dependencies:
-      '@streamdeck-claude/shared':
+      '@agentdeck/shared':
         specifier: workspace:*
         version: link:../shared
       commander:
@@ -57,12 +57,12 @@ importers:
 
   plugin:
     dependencies:
+      '@agentdeck/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@elgato/streamdeck':
         specifier: ^2.0.0
         version: 2.0.1
-      '@streamdeck-claude/shared':
-        specifier: workspace:*
-        version: link:../shared
       ws:
         specifier: ^8.18.0
         version: 8.19.0

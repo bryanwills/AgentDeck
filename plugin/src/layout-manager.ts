@@ -1,4 +1,4 @@
-import { State, PermissionMode, PromptOption } from '@streamdeck-claude/shared';
+import { State, PermissionMode, PromptOption } from '@agentdeck/shared';
 
 export interface ButtonConfig {
   title: string;

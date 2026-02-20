@@ -5,7 +5,7 @@ import {
   PluginCommand,
   BRIDGE_WS_PORT,
   RECONNECT_INTERVAL_MS,
-} from '@streamdeck-claude/shared';
+} from '@agentdeck/shared';
 import { dlog, dwarn, derr } from './log.js';
 
 export class BridgeClient extends EventEmitter {

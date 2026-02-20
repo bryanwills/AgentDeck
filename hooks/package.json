@@ -1,5 +1,5 @@
 {
-  "name": "@streamdeck-claude/hooks",
+  "name": "@agentdeck/hooks",
   "version": "0.1.0",
   "private": true,
   "type": "module",

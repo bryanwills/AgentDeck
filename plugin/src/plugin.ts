@@ -8,7 +8,7 @@ import {
   VoiceStateEvent,
   State,
   PermissionMode,
-} from '@streamdeck-claude/shared';
+} from '@agentdeck/shared';
 
 import { BridgeClient } from './bridge-client.js';
 import { LayoutManager } from './layout-manager.js';
@@ -68,7 +68,7 @@ let currentMode = PermissionMode.DEFAULT;
 let currentTool: string | undefined;
 let currentProjectName: string | undefined;
 let currentModelName: string | undefined;
-let currentOptions: import('@streamdeck-claude/shared').PromptOption[] = [];
+let currentOptions: import('@agentdeck/shared').PromptOption[] = [];
 
 // ---- Instances ----
 const bridge = new BridgeClient();

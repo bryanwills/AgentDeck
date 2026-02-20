@@ -5,7 +5,7 @@ import streamDeck, {
   WillAppearEvent,
   WillDisappearEvent,
 } from '@elgato/streamdeck';
-import { State } from '@streamdeck-claude/shared';
+import { State } from '@agentdeck/shared';
 import { BridgeClient } from '../bridge-client.js';
 import { renderButton, svgToDataUrl } from '../renderers/button-renderer.js';
 import { dlog } from '../log.js';

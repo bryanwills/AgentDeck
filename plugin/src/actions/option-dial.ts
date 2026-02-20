@@ -6,7 +6,7 @@ import streamDeck, {
   WillAppearEvent,
   WillDisappearEvent,
 } from '@elgato/streamdeck';
-import { State, PromptOption } from '@streamdeck-claude/shared';
+import { State, PromptOption } from '@agentdeck/shared';
 import { BridgeClient } from '../bridge-client.js';
 import { dlog } from '../log.js';
 

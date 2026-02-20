@@ -4,7 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { debug } from './logger.js';
 
-const SESSIONS_DIR = join(homedir(), '.streamdeck-claude');
+const SESSIONS_DIR = join(homedir(), '.agentdeck');
 const SESSIONS_FILE = join(SESSIONS_DIR, 'sessions.json');
 const BASE_PORT = 9120;
 const MAX_PORT = 9129;

@@ -6,7 +6,7 @@ import streamDeck, {
   WillAppearEvent,
   WillDisappearEvent,
 } from '@elgato/streamdeck';
-import { State, PermissionMode } from '@streamdeck-claude/shared';
+import { State, PermissionMode } from '@agentdeck/shared';
 import { BridgeClient } from '../bridge-client.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { dlog } from '../log.js';
@@ -16,7 +16,7 @@ import { homedir } from 'os';
 
 const SIZE = 144;
 const LONG_PRESS_MS = 500;
-const SESSIONS_FILE = `${homedir()}/.streamdeck-claude/sessions.json`;
+const SESSIONS_FILE = `${homedir()}/.agentdeck/sessions.json`;
 
 interface SessionEntry {
   id: string;

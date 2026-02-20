@@ -1,5 +1,5 @@
 {
-  "name": "@streamdeck-claude/plugin",
+  "name": "@agentdeck/plugin",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@elgato/streamdeck": "^2.0.0",
-    "@streamdeck-claude/shared": "workspace:*",
+    "@agentdeck/shared": "workspace:*",
     "ws": "^8.18.0"
   },
   "devDependencies": {

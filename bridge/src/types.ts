@@ -7,7 +7,7 @@ export {
   transitions,
   type PromptOption,
   type StateSnapshot,
-} from '@streamdeck-claude/shared';
+} from '@agentdeck/shared';
 
 export {
   type StateUpdateEvent,
@@ -30,7 +30,7 @@ export {
   BRIDGE_HTTP_PORT,
   RECONNECT_INTERVAL_MS,
   STUCK_TIMEOUT_MS,
-} from '@streamdeck-claude/shared';
+} from '@agentdeck/shared';
 
 // ===== Bridge-specific types =====
 
