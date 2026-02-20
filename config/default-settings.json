@@ -1,0 +1,9 @@
+{
+  "bridgePort": 9120,
+  "autoRestart": false,
+  "voiceLanguage": "ko",
+  "voiceAutoSend": true,
+  "whisperModel": "large-v3-turbo",
+  "stuckTimeoutMs": 300000,
+  "reconnectIntervalMs": 3000
+}

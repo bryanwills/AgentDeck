@@ -1,0 +1,106 @@
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { execSync } from 'child_process';
+import { join } from 'path';
+import { homedir } from 'os';
+import { debug } from './logger.js';
+
+const SESSIONS_DIR = join(homedir(), '.streamdeck-claude');
+const SESSIONS_FILE = join(SESSIONS_DIR, 'sessions.json');
+const BASE_PORT = 9120;
+const MAX_PORT = 9129;
+
+export interface SessionEntry {
+  id: string;
+  port: number;
+  pid: number;
+  projectName: string;
+  tmuxSession?: string;
+  startedAt: string;
+}
+
+function ensureDir(): void {
+  if (!existsSync(SESSIONS_DIR)) {
+    mkdirSync(SESSIONS_DIR, { recursive: true });
+  }
+}
+
+function readSessions(): SessionEntry[] {
+  try {
+    const data = readFileSync(SESSIONS_FILE, 'utf-8');
+    return JSON.parse(data) as SessionEntry[];
+  } catch {
+    return [];
+  }
+}
+
+function writeSessions(sessions: SessionEntry[]): void {
+  ensureDir();
+  writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
+}
+
+/** Check if a PID is alive */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Remove dead sessions (PID no longer alive) */
+function pruneDeadSessions(sessions: SessionEntry[]): SessionEntry[] {
+  return sessions.filter((s) => isProcessAlive(s.pid));
+}
+
+export function register(entry: SessionEntry): void {
+  const sessions = pruneDeadSessions(readSessions());
+  // Remove any stale entry with same id
+  const filtered = sessions.filter((s) => s.id !== entry.id);
+  filtered.push(entry);
+  writeSessions(filtered);
+  debug('SessionRegistry', `Registered session ${entry.id} on port ${entry.port}`);
+}
+
+export function deregister(id: string): void {
+  const sessions = readSessions();
+  const filtered = sessions.filter((s) => s.id !== id);
+  writeSessions(filtered);
+  debug('SessionRegistry', `Deregistered session ${id}`);
+}
+
+export function listActive(): SessionEntry[] {
+  const sessions = readSessions();
+  const alive = pruneDeadSessions(sessions);
+  // Write back pruned list if any were removed
+  if (alive.length !== sessions.length) {
+    writeSessions(alive);
+  }
+  return alive;
+}
+
+export function findAvailablePort(): number {
+  const sessions = listActive();
+  const usedPorts = new Set(sessions.map((s) => s.port));
+  for (let port = BASE_PORT; port <= MAX_PORT; port++) {
+    if (!usedPorts.has(port)) {
+      return port;
+    }
+  }
+  // Fall back to base port if all taken
+  return BASE_PORT;
+}
+
+/** Detect tmux session name if running inside tmux */
+export function detectTmuxSession(): string | undefined {
+  if (!process.env.TMUX) return undefined;
+  try {
+    const result = execSync('tmux display-message -p "#S:#I"', {
+      encoding: 'utf-8',
+      timeout: 2000,
+    }).trim();
+    return result || undefined;
+  } catch {
+    return undefined;
+  }
+}

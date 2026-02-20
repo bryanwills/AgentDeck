@@ -1,0 +1,8 @@
+{
+  "templates": [
+    { "label": "Fix Bug", "prompt": "Please fix the bug described above" },
+    { "label": "Test", "prompt": "Write tests for the changes made" },
+    { "label": "Review", "prompt": "Review the code for issues and suggest improvements" },
+    { "label": "Explain", "prompt": "Explain how this code works step by step" }
+  ]
+}

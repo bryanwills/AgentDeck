@@ -1,0 +1,9 @@
+packages:
+  - shared
+  - bridge
+  - plugin
+  - hooks
+
+onlyBuiltDependencies:
+  - node-pty
+  - sharp

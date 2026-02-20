@@ -1,0 +1,145 @@
+{
+  "Actions": [
+    {
+      "Icon": "static/imgs/response",
+      "Name": "Response Button",
+      "States": [
+        {
+          "Image": "static/imgs/response",
+          "TitleAlignment": "middle"
+        }
+      ],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": true,
+      "UUID": "com.anthropic.claude-code.response-button"
+    },
+    {
+      "Icon": "static/imgs/stop",
+      "Name": "Stop / Interrupt",
+      "States": [
+        {
+          "Image": "static/imgs/stop",
+          "TitleAlignment": "middle"
+        }
+      ],
+      "Controllers": ["Keypad"],
+      "UUID": "com.anthropic.claude-code.stop-button"
+    },
+    {
+      "Icon": "static/imgs/mode",
+      "Name": "Mode Toggle",
+      "States": [
+        {
+          "Image": "static/imgs/mode",
+          "TitleAlignment": "middle"
+        }
+      ],
+      "Controllers": ["Keypad"],
+      "UUID": "com.anthropic.claude-code.mode-button"
+    },
+    {
+      "Icon": "static/imgs/status",
+      "Name": "Session & Status",
+      "States": [
+        {
+          "Image": "static/imgs/status",
+          "TitleAlignment": "middle"
+        }
+      ],
+      "Controllers": ["Keypad"],
+      "UUID": "com.anthropic.claude-code.session-button"
+    },
+    {
+      "Icon": "static/imgs/usage",
+      "Name": "Usage Dashboard",
+      "States": [
+        {
+          "Image": "static/imgs/usage",
+          "TitleAlignment": "middle"
+        }
+      ],
+      "Controllers": ["Keypad"],
+      "UUID": "com.anthropic.claude-code.usage-button"
+    },
+    {
+      "Icon": "static/imgs/option",
+      "Name": "Option Selector",
+      "States": [
+        {
+          "Image": "static/imgs/option"
+        }
+      ],
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Scroll options",
+          "Push": "Select option",
+          "Touch": "Show option"
+        }
+      },
+      "UUID": "com.anthropic.claude-code.option-dial"
+    },
+    {
+      "Icon": "static/imgs/option",
+      "Name": "Quick Command",
+      "States": [
+        {
+          "Image": "static/imgs/option"
+        }
+      ],
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Cycle commands",
+          "Push": "Execute command",
+          "Touch": "Show command"
+        }
+      },
+      "UUID": "com.anthropic.claude-code.command-dial"
+    },
+    {
+      "Icon": "static/imgs/voice",
+      "Name": "Voice Input",
+      "States": [
+        {
+          "Image": "static/imgs/voice"
+        }
+      ],
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "layouts/voice-layout.json",
+        "TriggerDescription": {
+          "Rotate": "Scroll text",
+          "Push": "Record voice",
+          "Touch": "Show status"
+        }
+      },
+      "UUID": "com.anthropic.claude-code.voice-dial"
+    }
+  ],
+  "Author": "StreamDeck-Claude",
+  "Category": "Claude Code Controller",
+  "CategoryIcon": "static/imgs/category",
+  "CodePath": "bin/plugin.js",
+  "Description": "Control Claude Code CLI with Stream Deck+",
+  "Icon": "static/imgs/plugin",
+  "UUID": "com.anthropic.claude-code",
+  "Name": "Claude Code Controller",
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.7"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "14.0"
+    }
+  ],
+  "Nodejs": {
+    "Version": "20",
+    "Debug": "enabled"
+  },
+  "Version": "0.3.0.0"
+}

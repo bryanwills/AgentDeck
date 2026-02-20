@@ -1,0 +1,21 @@
+{
+  "name": "streamdeck-claude",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stream Deck+ controller for Claude Code CLI",
+  "scripts": {
+    "build": "pnpm --filter @streamdeck-claude/shared build && pnpm --filter '!@streamdeck-claude/shared' -r build",
+    "dev": "pnpm -r --parallel dev",
+    "clean": "pnpm -r clean",
+    "typecheck": "pnpm -r typecheck",
+    "generate-icons": "node scripts/generate-icons.mjs",
+    "package": "bash scripts/package-plugin.sh",
+    "setup": "bash scripts/install.sh"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
+  }
+}
