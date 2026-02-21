@@ -11,6 +11,7 @@ export interface StateUpdateEvent {
   state: State;
   permissionMode: PermissionMode;
   currentTool?: string;
+  toolInput?: string;
   toolProgress?: string;
   projectName?: string;
   modelName?: string;
@@ -20,6 +21,7 @@ export interface StateUpdateEvent {
   question?: string;
   navigable?: boolean;
   cursorIndex?: number;
+  suggestedPrompt?: string;
 }
 
 export interface PromptOptionsEvent {

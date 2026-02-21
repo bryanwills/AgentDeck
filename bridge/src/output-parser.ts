@@ -26,8 +26,8 @@ const STATUS_LINE = /(\d+m\s*\d+s)\s*·\s*↓\s*([\d.]+)k?\s*tokens/;
 // Project dir from Claude startup banner: "~/github/ProjectName"
 const PROJECT_DIR = /[~\/][\w.\-\/]+\/(\w[\w.\-]*)\s*$/m;
 
-// Tool action: "⏺ ToolName(description)"
-const TOOL_ACTION = /⏺\s+(\w+)\(/;
+// Tool action: "⏺ ToolName(description)" — capture args inside parens
+const TOOL_ACTION = /⏺\s+(\w+)\(([^)]*)\)/;
 
 // User prompt echo: "❯ some text" — text the user typed
 // Require at least one word character to avoid matching box-drawing lines (─────)
@@ -55,6 +55,10 @@ const MODEL_INFO = /((?:Opus|Sonnet|Haiku)\s*[\d.]+|Claude\s*[\d.]+\s*(?:Opus|So
 const SPINNER_DEBOUNCE_MS = 2000;
 const IDLE_DEBOUNCE_MS = 300;
 const OPTION_DEBOUNCE_MS = 150;
+const SUGGESTION_DEBOUNCE_MS = 500;
+
+// Ghost text: dim(2), bright black(90), 256-color grays(240-255)
+const GHOST_TEXT_RE = /\x1b\[(?:2|90|38;5;2[4-5]\d)m([^\x1b]+)/;
 
 export class OutputParser extends EventEmitter {
   private buffer = '';
@@ -70,8 +74,14 @@ export class OutputParser extends EventEmitter {
   // Track pending mode switch: after Shift+Tab, wait for mode confirmation or idle
   private pendingModeSwitch = false;
   private modeSwitchTimer: ReturnType<typeof setTimeout> | null = null;
+  // Ghost text suggestion detection
+  private suggestedPromptTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastSuggestedPrompt: string | null = null;
 
   feed(rawData: string): void {
+    // Detect ghost text from raw ANSI before stripping
+    this.detectGhostText(rawData);
+
     const clean = stripAnsi(rawData);
     this.buffer += clean;
 
@@ -87,12 +97,60 @@ export class OutputParser extends EventEmitter {
     this.detectPatterns(clean);
   }
 
+  /** Detect ghost text (dim/gray ANSI-styled autocomplete suggestions) from raw PTY data */
+  private detectGhostText(rawData: string): void {
+    if (!this.seenFirstIdle) return;
+
+    const match = rawData.match(GHOST_TEXT_RE);
+    if (!match) return;
+
+    let text = match[1].trim();
+    if (!text || text.length < 2) return;
+
+    // Unwrap Try "..." wrapper (including smart quotes)
+    const tryMatch = text.match(/^Try\s+["\u201C](.+)["\u201D]$/i);
+    if (tryMatch) {
+      text = tryMatch[1].trim();
+    }
+
+    // Filter out UI chrome fragments
+    if (/^[?]$|^esc\b|^shift\b|^ctrl\b|^enter\b|for\s+shortcuts/i.test(text)) return;
+
+    // Skip if same as last suggestion
+    if (text === this.lastSuggestedPrompt) return;
+
+    // Debounce: rapid PTY updates may send partial ghost text
+    if (this.suggestedPromptTimer) clearTimeout(this.suggestedPromptTimer);
+    this.suggestedPromptTimer = setTimeout(() => {
+      this.suggestedPromptTimer = null;
+      this.lastSuggestedPrompt = text;
+      debug('Parser', `EMIT suggested_prompt: "${text.slice(0, 60)}"`);
+      this.emit('suggested_prompt', { text });
+    }, SUGGESTION_DEBOUNCE_MS);
+  }
+
+  /** Clear any pending or active suggestion */
+  private clearSuggestion(): void {
+    if (this.suggestedPromptTimer) {
+      clearTimeout(this.suggestedPromptTimer);
+      this.suggestedPromptTimer = null;
+    }
+    if (this.lastSuggestedPrompt !== null) {
+      this.lastSuggestedPrompt = null;
+      this.emit('suggested_prompt', { text: null });
+    }
+  }
+
   private detectPatterns(chunk: string): void {
     // --- Always extract metadata ---
     this.parseStatusLine(chunk);
     this.parseToolAction(chunk);
     this.parseProjectName(chunk);
-    this.parseModelInfo(chunk);
+    // Skip model parsing when chunk contains numbered options — option labels
+    // like "Opus 4.6" match MODEL_INFO and overwrite the real model name
+    if (!OPTION_NUMBERED.test(chunk)) {
+      this.parseModelInfo(chunk);
+    }
     this.parseUserPrompt(chunk);
     this.parseUsageInfo(chunk);
     this.parseModeSwitchLine(chunk);
@@ -146,6 +204,7 @@ export class OutputParser extends EventEmitter {
       if (nonWs < 80) {
         if (!this.spinnerActive) {
           this.spinnerActive = true;
+          this.clearSuggestion();
           debug('Parser', 'EMIT spinner_start');
           this.emit('spinner_start');
         }
@@ -287,8 +346,9 @@ export class OutputParser extends EventEmitter {
   private parseToolAction(chunk: string): void {
     const match = chunk.match(TOOL_ACTION);
     if (match) {
-      debug('Parser', `tool_action: ${match[1]}`);
-      this.emit('tool_action', { toolName: match[1] });
+      const toolArgs = match[2]?.trim() || null;
+      debug('Parser', `tool_action: ${match[1]}${toolArgs ? `(${toolArgs.slice(0, 60)})` : ''}`);
+      this.emit('tool_action', { toolName: match[1], toolArgs });
     }
   }
 
@@ -303,13 +363,15 @@ export class OutputParser extends EventEmitter {
   }
 
   private parseModelInfo(chunk: string): void {
-    if (this.modelName) return;
     const match = chunk.match(MODEL_INFO);
     if (match && match[1]) {
-      this.modelName = match[1].trim();
+      const newModel = match[1].trim();
       const plan = match[2]?.trim();
-      debug('Parser', `model_info: ${this.modelName}${plan ? ` (${plan})` : ''}`);
-      this.emit('model_info', { model: this.modelName, plan: plan || null });
+      if (newModel !== this.modelName) {
+        this.modelName = newModel;
+        debug('Parser', `model_info: ${this.modelName}${plan ? ` (${plan})` : ''}`);
+        this.emit('model_info', { model: this.modelName, plan: plan || null });
+      }
     }
   }
 
@@ -597,12 +659,17 @@ export class OutputParser extends EventEmitter {
     this.pendingModeSwitch = false;
     this.projectName = null;
     this.modelName = null;
+    this.lastSuggestedPrompt = null;
     this.resetSpinnerTimer();
     this.resetIdleTimer();
     this.resetOptionTimer();
     if (this.modeSwitchTimer) {
       clearTimeout(this.modeSwitchTimer);
       this.modeSwitchTimer = null;
+    }
+    if (this.suggestedPromptTimer) {
+      clearTimeout(this.suggestedPromptTimer);
+      this.suggestedPromptTimer = null;
     }
   }
 }

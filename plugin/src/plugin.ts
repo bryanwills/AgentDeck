@@ -19,6 +19,7 @@ import {
   enterEncoderTakeover,
   exitEncoderTakeover,
 } from './encoder-takeover.js';
+import { setVoiceTextExitCallback } from './encoder-registry.js';
 import { dlog, dinfo } from './log.js';
 
 // Keypad button actions
@@ -57,7 +58,7 @@ import {
 
 // Encoder actions
 import {
-  OptionDialAction,
+  ResponseDialAction,
   initOptionDial,
   updateOptionDialState,
 } from './actions/option-dial.js';
@@ -70,24 +71,21 @@ import {
   setVoiceError,
 } from './actions/voice-dial.js';
 import {
-  CommandDialAction,
-  initCommandDial,
-  updateCommandDialState,
-} from './actions/command-dial.js';
-import {
-  ContextDialAction,
-  updateContextDialState,
-} from './actions/context-dial.js';
-import {
   UtilityDialAction,
   initUtilityDial,
   updateUtilityDialState,
 } from './actions/utility-dial.js';
+import {
+  ItermDialAction,
+  initItermDial,
+  updateItermDialState,
+} from './actions/iterm-dial.js';
 
 // ---- Shared state ----
 let currentState = State.DISCONNECTED;
 let currentMode = PermissionMode.DEFAULT;
 let currentTool: string | undefined;
+let currentToolInput: string | undefined;
 let currentProjectName: string | undefined;
 let currentModelName: string | undefined;
 let currentBillingType: BillingType = 'unknown';
@@ -95,6 +93,7 @@ let currentOptions: import('@agentdeck/shared').PromptOption[] = [];
 let currentQuestion: string | undefined;
 let currentNavigable = false;
 let currentCursorIndex = 0;
+let currentSuggestedPrompt: string | undefined;
 
 // ---- Expanded mode state ----
 let expandedMode = false;
@@ -124,8 +123,15 @@ initSessionButton(bridge);
 initUsageButton(bridge);
 initOptionDial(bridge);
 initVoiceDial(bridge);
-initCommandDial(bridge);
 initUtilityDial();
+initItermDial();
+
+// Refresh other dials when voice text takeover exits
+setVoiceTextExitCallback(() => {
+  updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt);
+  updateUtilityDialState(currentState);
+  updateItermDialState(currentState);
+});
 
 // ---- Bridge event handlers ----
 
@@ -134,6 +140,7 @@ bridge.on('state_update', (ev: StateUpdateEvent) => {
   currentState = ev.state;
   currentMode = ev.permissionMode;
   currentTool = ev.currentTool;
+  currentToolInput = ev.toolInput;
   if (ev.projectName) currentProjectName = ev.projectName;
   if (ev.modelName) currentModelName = ev.modelName;
   if (ev.billingType) currentBillingType = ev.billingType;
@@ -151,6 +158,15 @@ bridge.on('state_update', (ev: StateUpdateEvent) => {
     currentCursorIndex = ev.cursorIndex;
   }
 
+  // Capture suggested prompt
+  if (ev.suggestedPrompt !== undefined) {
+    currentSuggestedPrompt = ev.suggestedPrompt;
+  }
+  // Clear suggestion on non-IDLE states
+  if (ev.state !== State.IDLE) {
+    currentSuggestedPrompt = undefined;
+  }
+
   // Use options from state_update atomically (avoids race with separate prompt_options)
   if (ev.options && ev.options.length > 0) {
     currentOptions = ev.options;
@@ -163,6 +179,7 @@ bridge.on('state_update', (ev: StateUpdateEvent) => {
     currentQuestion = undefined;
     currentNavigable = false;
     currentCursorIndex = 0;
+    currentToolInput = undefined;
   }
 
   broadcastStateUpdate();
@@ -201,6 +218,8 @@ bridge.on('connection', (ev: ConnectionEvent) => {
     currentQuestion = undefined;
     currentNavigable = false;
     currentCursorIndex = 0;
+    currentToolInput = undefined;
+    currentSuggestedPrompt = undefined;
     broadcastStateUpdate();
   }
   // 'connected' case: state_update (sent before connection event) already
@@ -242,6 +261,8 @@ bridge.on('disconnected', () => {
   currentQuestion = undefined;
   currentNavigable = false;
   currentCursorIndex = 0;
+  currentToolInput = undefined;
+  currentSuggestedPrompt = undefined;
   broadcastStateUpdate();
 });
 
@@ -292,35 +313,37 @@ function broadcastStateUpdate(): void {
   const shouldTakeover = isInteractiveState(currentState) && currentOptions.length > 0;
 
   if (shouldTakeover && !isEncoderTakeoverActive()) {
+    // Exit VT before encoder takeover (clears all panels atomically)
+    updateVoiceDialState(currentState);
     // Enter takeover, then update option dial with full context
     void enterEncoderTakeover().then(() => {
       updateOptionDialState(
         currentState, currentOptions, currentQuestion, currentTool,
-        currentNavigable, currentCursorIndex,
+        currentNavigable, currentCursorIndex, currentToolInput,
+        currentSuggestedPrompt,
       );
     });
   } else if (!shouldTakeover && isEncoderTakeoverActive()) {
     // Exit takeover, then restore all dials
     void exitEncoderTakeover().then(() => {
       updateVoiceDialState(currentState);
-      updateCommandDialState(currentState);
-      updateContextDialState(currentState);
       updateUtilityDialState(currentState);
+      updateItermDialState(currentState);
     });
-    updateOptionDialState(currentState, currentOptions);
+    updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt);
   } else if (shouldTakeover) {
     // Already in takeover — just refresh
     updateOptionDialState(
       currentState, currentOptions, currentQuestion, currentTool,
-      currentNavigable, currentCursorIndex,
+      currentNavigable, currentCursorIndex, currentToolInput,
+      currentSuggestedPrompt,
     );
   } else {
     // Not in takeover, not entering — normal updates
-    updateOptionDialState(currentState, currentOptions);
+    updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt);
     updateVoiceDialState(currentState);
-    updateCommandDialState(currentState);
-    updateContextDialState(currentState);
     updateUtilityDialState(currentState);
+    updateItermDialState(currentState);
   }
 }
 
@@ -330,11 +353,10 @@ streamDeck.actions.registerAction(new StopButtonAction());
 streamDeck.actions.registerAction(new ModeButtonAction());
 streamDeck.actions.registerAction(new SessionButtonAction());
 streamDeck.actions.registerAction(new UsageButtonAction());
-streamDeck.actions.registerAction(new OptionDialAction());
+streamDeck.actions.registerAction(new ResponseDialAction());
 streamDeck.actions.registerAction(new VoiceDialAction());
-streamDeck.actions.registerAction(new CommandDialAction());
-streamDeck.actions.registerAction(new ContextDialAction());
 streamDeck.actions.registerAction(new UtilityDialAction());
+streamDeck.actions.registerAction(new ItermDialAction());
 
 // ---- Connect ----
 streamDeck.connect().then(() => {

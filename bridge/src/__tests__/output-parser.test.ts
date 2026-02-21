@@ -1459,4 +1459,141 @@ describe('OutputParser', () => {
       expect(alwaysOpt?.shortcut).toBe('a');
     });
   });
+
+  // === Ghost Text / Suggested Prompt ===
+
+  describe('ghost text suggestion', () => {
+    it('detects SGR 2 (dim) ghost text', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Raw ANSI: dim text "refactor the code"
+      p.feed('\x1b[2mrefactor the code\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('refactor the code');
+    });
+
+    it('detects SGR 90 (bright black) ghost text', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('\x1b[90mwrite unit tests\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('write unit tests');
+    });
+
+    it('unwraps Try "..." wrapper with smart quotes', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('\x1b[2mTry \u201Crefactor the code\u201D\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('refactor the code');
+    });
+
+    it('unwraps Try "..." wrapper with straight quotes', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('\x1b[2mTry "fix the bug"\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('fix the bug');
+    });
+
+    it('ignores ghost text before seenFirstIdle', () => {
+      const p = createParser(); // no idle yet
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('\x1b[2mrefactor the code\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('clears suggestion on spinner start', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // First, establish a suggestion
+      p.feed('\x1b[2mrefactor the code\x1b[0m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('refactor the code');
+
+      // Spinner starts — should clear
+      p.feed('✻');
+      expect(events).toHaveLength(2);
+      expect(events[1].text).toBeNull();
+    });
+
+    it('debounces rapid updates', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Rapid-fire ghost text updates
+      p.feed('\x1b[2mfirst\x1b[0m');
+      vi.advanceTimersByTime(100);
+      p.feed('\x1b[2msecond\x1b[0m');
+      vi.advanceTimersByTime(100);
+      p.feed('\x1b[2mthird\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      // Only the last one should have been emitted
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('third');
+    });
+
+    it('filters UI chrome fragments', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('\x1b[2m?\x1b[0m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(0);
+
+      p.feed('\x1b[90mesc to cancel\x1b[0m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(0);
+
+      p.feed('\x1b[2mshift+tab to cycle\x1b[0m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(0);
+    });
+
+    it('detects 256-color gray ghost text', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // 256-color gray (e.g. color 245)
+      p.feed('\x1b[38;5;245mexplain this function\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('explain this function');
+    });
+  });
 });

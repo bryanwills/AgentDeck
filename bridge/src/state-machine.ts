@@ -12,10 +12,48 @@ import type { BillingType } from '@agentdeck/shared';
 import { UsageTracker } from './usage-tracker.js';
 import { debug } from './logger.js';
 
+/** Extract the most useful field from tool_input for display on E4 */
+function formatToolInput(toolName: string | null, input: Record<string, unknown> | undefined): string | null {
+  if (!input || !toolName) return null;
+
+  // Tool-specific key extraction
+  const keyMap: Record<string, string> = {
+    Bash: 'command',
+    Read: 'file_path',
+    Write: 'file_path',
+    Edit: 'file_path',
+    Glob: 'pattern',
+    Grep: 'pattern',
+    WebFetch: 'url',
+    WebSearch: 'query',
+    Task: 'prompt',
+  };
+
+  const key = keyMap[toolName];
+  if (key && typeof input[key] === 'string') {
+    return truncateToolInput(input[key] as string);
+  }
+
+  // Fallback: first short string value
+  for (const v of Object.values(input)) {
+    if (typeof v === 'string' && v.length > 0 && v.length < 200) {
+      return truncateToolInput(v);
+    }
+  }
+  return null;
+}
+
+function truncateToolInput(s: string): string {
+  // Take first line, max 120 chars
+  const line = s.split('\n')[0];
+  return line.length > 120 ? line.slice(0, 119) + '\u2026' : line;
+}
+
 export class StateMachine extends EventEmitter {
   private state: State = State.DISCONNECTED;
   private permissionMode: PermissionMode = PermissionMode.DEFAULT;
   private currentTool: string | null = null;
+  private toolInput: string | null = null;
   private toolProgress: string | null = null;
   private options: PromptOption[] = [];
   private question: string | null = null;
@@ -24,6 +62,7 @@ export class StateMachine extends EventEmitter {
   private projectName: string | null = null;
   private modelName: string | null = null;
   private billingType: BillingType = 'unknown';
+  private suggestedPrompt: string | null = null;
   private usageTracker: UsageTracker;
   private stuckTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -41,12 +80,15 @@ export class StateMachine extends EventEmitter {
         break;
 
       case 'UserPromptSubmit':
+        this.suggestedPrompt = null;
         this.transition(State.PROCESSING, 'user_prompt_submit', 'hook');
         break;
 
       case 'PreToolUse': {
         const toolName = (data.tool_name as string) || null;
+        const toolInputData = data.tool_input as Record<string, unknown> | undefined;
         this.currentTool = toolName;
+        this.toolInput = formatToolInput(toolName, toolInputData);
         this.toolProgress = `Using ${toolName}`;
         this.emitSnapshot();
         break;
@@ -55,6 +97,7 @@ export class StateMachine extends EventEmitter {
       case 'PostToolUse': {
         this.usageTracker.addToolCall(data);
         this.currentTool = null;
+        this.toolInput = null;
         this.toolProgress = null;
         this.emitSnapshot();
         break;
@@ -62,6 +105,7 @@ export class StateMachine extends EventEmitter {
 
       case 'Stop':
         this.currentTool = null;
+        this.toolInput = null;
         this.toolProgress = null;
         this.options = [];
         this.question = null;
@@ -120,7 +164,14 @@ export class StateMachine extends EventEmitter {
         break;
       }
 
+      case 'suggested_prompt': {
+        this.suggestedPrompt = (data?.text as string) ?? null;
+        this.emitSnapshot();
+        break;
+      }
+
       case 'spinner_start':
+        this.suggestedPrompt = null;
         if (this.state !== State.PROCESSING) {
           // Clean up awaiting state data if recovering from a prompt
           if (
@@ -132,6 +183,7 @@ export class StateMachine extends EventEmitter {
             this.question = null;
             this.navigable = false;
             this.cursorIndex = 0;
+            this.toolInput = null;
           }
           this.transition(State.PROCESSING, 'spinner_start', 'pty');
         }
@@ -146,6 +198,7 @@ export class StateMachine extends EventEmitter {
           this.state === State.AWAITING_DIFF
         ) {
           this.currentTool = null;
+          this.toolInput = null;
           this.toolProgress = null;
           this.options = [];
           this.question = null;
@@ -163,6 +216,7 @@ export class StateMachine extends EventEmitter {
           this.state === State.AWAITING_DIFF
         ) {
           this.currentTool = null;
+          this.toolInput = null;
           this.toolProgress = null;
           this.options = [];
           this.question = null;
@@ -201,9 +255,14 @@ export class StateMachine extends EventEmitter {
 
       case 'tool_action': {
         const toolName = data?.toolName as string | undefined;
+        const toolArgs = data?.toolArgs as string | undefined;
         if (toolName) {
           this.currentTool = toolName;
           this.toolProgress = `Using ${toolName}`;
+          // PTY args as fallback when hook data hasn't provided toolInput
+          if (toolArgs && !this.toolInput) {
+            this.toolInput = toolArgs;
+          }
           this.usageTracker.incrementToolCalls();
           this.emitSnapshot();
         }
@@ -266,6 +325,7 @@ export class StateMachine extends EventEmitter {
           this.question = null;
           this.navigable = false;
           this.cursorIndex = 0;
+          this.toolInput = null;
           this.transition(State.PROCESSING, 'user_response', 'user');
         }
         break;
@@ -275,12 +335,21 @@ export class StateMachine extends EventEmitter {
           this.options = [];
           this.navigable = false;
           this.cursorIndex = 0;
+          this.toolInput = null;
           this.transition(State.PROCESSING, 'user_selection', 'user');
+        }
+        break;
+
+      case 'send_prompt':
+        if (this.state === State.IDLE) {
+          this.suggestedPrompt = null;
+          this.transition(State.PROCESSING, 'user_prompt_submit', 'hook');
         }
         break;
 
       case 'interrupt':
         this.currentTool = null;
+        this.toolInput = null;
         this.toolProgress = null;
         this.options = [];
         this.question = null;
@@ -321,6 +390,7 @@ export class StateMachine extends EventEmitter {
       this.stuckTimer = setTimeout(() => {
         debug('SM', `Stuck timeout: ${to} for >${STUCK_TIMEOUT_MS / 1000}s, recovering to IDLE`);
         this.currentTool = null;
+        this.toolInput = null;
         this.toolProgress = null;
         this.options = [];
         this.question = null;
@@ -367,6 +437,7 @@ export class StateMachine extends EventEmitter {
       state: this.state,
       permissionMode: this.permissionMode,
       currentTool: this.currentTool,
+      toolInput: this.toolInput,
       toolProgress: this.toolProgress,
       options: this.options,
       question: this.question,
@@ -385,6 +456,7 @@ export class StateMachine extends EventEmitter {
       costLimit: usage.costLimit,
       resetTime: usage.resetTime,
       resetDate: usage.resetDate,
+      suggestedPrompt: this.suggestedPrompt,
     };
   }
 

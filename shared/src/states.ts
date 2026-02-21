@@ -66,6 +66,7 @@ export interface StateSnapshot {
   state: State;
   permissionMode: PermissionMode;
   currentTool: string | null;
+  toolInput: string | null;
   toolProgress: string | null;
   options: PromptOption[];
   question: string | null;
@@ -84,4 +85,5 @@ export interface StateSnapshot {
   costLimit: number | null;
   resetTime: string | null;
   resetDate: string | null;
+  suggestedPrompt: string | null;
 }

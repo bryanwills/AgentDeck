@@ -170,7 +170,12 @@ async function startBridge(port: number, command: string): Promise<void> {
   const stateMachine = new StateMachine(usageTracker);
   const ptyManager = new PtyManager();
   const outputParser = new OutputParser();
-  const voiceManager = new VoiceManager();
+  const voiceManager = new VoiceManager(port);
+
+  // 1b. Start whisper-server in background (non-blocking — don't delay bridge startup)
+  voiceManager.startServer().catch((err) => {
+    debug('sdc', `whisper-server startup failed (will use whisper-cli): ${err}`);
+  });
 
   // 2. Start HTTP server
   try {
@@ -207,6 +212,7 @@ async function startBridge(port: number, command: string): Promise<void> {
     'project_name',
     'model_info',
     'mode_change',
+    'suggested_prompt',
   ];
   for (const eventName of parserEvents) {
     outputParser.on(eventName, (data?: Record<string, unknown>) => {
@@ -252,6 +258,7 @@ async function startBridge(port: number, command: string): Promise<void> {
       state: snapshot.state,
       permissionMode: snapshot.permissionMode,
       currentTool: snapshot.currentTool ?? undefined,
+      toolInput: snapshot.toolInput ?? undefined,
       toolProgress: snapshot.toolProgress ?? undefined,
       projectName: snapshot.projectName ?? undefined,
       modelName: snapshot.modelName ?? undefined,
@@ -261,6 +268,7 @@ async function startBridge(port: number, command: string): Promise<void> {
       question: snapshot.question ?? undefined,
       navigable: snapshot.navigable || undefined,
       cursorIndex: snapshot.navigable ? snapshot.cursorIndex : undefined,
+      suggestedPrompt: snapshot.suggestedPrompt ?? undefined,
     };
     wsServer.broadcast(stateEvent);
 
@@ -284,7 +292,7 @@ async function startBridge(port: number, command: string): Promise<void> {
     switch (cmd.type) {
       case 'respond':
         debug('sdc', `respond: "${cmd.value}"`);
-        ptyManager.write(cmd.value + '\n');
+        ptyManager.write(cmd.value + '\r');
         stateMachine.handleUserAction('respond');
         break;
 
@@ -302,11 +310,11 @@ async function startBridge(port: number, command: string): Promise<void> {
           }
           // Brief delay for PTY to process arrow keys, then confirm with Enter
           setTimeout(() => {
-            ptyManager.write('\n');
+            ptyManager.write('\r');
           }, 50);
         } else {
           // Number input mode: type the 1-based index
-          ptyManager.write(String(cmd.index + 1) + '\n');
+          ptyManager.write(String(cmd.index + 1) + '\r');
         }
         stateMachine.handleUserAction('select_option');
         break;
@@ -342,7 +350,9 @@ async function startBridge(port: number, command: string): Promise<void> {
           }
         }
         if (text) {
-          ptyManager.write(text + '\n');
+          ptyManager.write(text);
+          setTimeout(() => ptyManager.write('\r'), 50);
+          stateMachine.handleUserAction('send_prompt');
         }
         break;
       }
@@ -414,6 +424,7 @@ async function startBridge(port: number, command: string): Promise<void> {
       state: snapshot.state,
       permissionMode: snapshot.permissionMode,
       currentTool: snapshot.currentTool ?? undefined,
+      toolInput: snapshot.toolInput ?? undefined,
       toolProgress: snapshot.toolProgress ?? undefined,
       projectName: snapshot.projectName ?? undefined,
       modelName: snapshot.modelName ?? undefined,
@@ -423,6 +434,7 @@ async function startBridge(port: number, command: string): Promise<void> {
       question: snapshot.question ?? undefined,
       navigable: snapshot.navigable || undefined,
       cursorIndex: snapshot.navigable ? snapshot.cursorIndex : undefined,
+      suggestedPrompt: snapshot.suggestedPrompt ?? undefined,
     };
     wsServer.sendTo(ws, stateEvent);
 
@@ -562,6 +574,8 @@ async function startBridge(port: number, command: string): Promise<void> {
       process.stdin.setRawMode(false);
     }
 
+    voiceManager.stopServer();
+
     if (ptyManager.isAlive()) {
       ptyManager.kill();
     }
@@ -628,9 +642,7 @@ function handleVoiceCommand(
       wsServer.broadcast({ type: 'voice_state', state: 'transcribing' } as any);
       voiceManager.stopRecording().then((text) => {
         debug('sdc', `Voice result: "${text?.slice(0, 60) || '(empty)'}"`);
-        if (text) {
-          ptyManager.write(text + '\n');
-        }
+        // Don't auto-send — plugin shows review UI; user confirms via send_prompt
         wsServer.broadcast({ type: 'voice_state', state: 'idle', text: text || '' } as any);
       }).catch((err) => {
         debug('sdc', `Voice transcription error: ${err}`);

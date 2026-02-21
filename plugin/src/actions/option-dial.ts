@@ -3,15 +3,48 @@ import streamDeck, {
   SingletonAction,
   DialRotateEvent,
   DialDownEvent,
+  DialUpEvent,
+  TouchTapEvent,
   WillAppearEvent,
   WillDisappearEvent,
+  DidReceiveSettingsEvent,
 } from '@elgato/streamdeck';
 import { State, PromptOption } from '@agentdeck/shared';
 import { BridgeClient } from '../bridge-client.js';
 import { isEncoderTakeoverActive, refreshEncoderTakeover } from '../encoder-takeover.js';
-import { encoderRegistry } from '../encoder-registry.js';
+import { encoderRegistry, encoderLayout, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
+import { svgToDataUrl } from '../renderers/button-renderer.js';
+import {
+  renderResponseIdle,
+  renderResponseProcessing,
+  renderResponseDisconnected,
+  renderResponseDisabled,
+  renderResponseInteractive,
+  renderResponseSuggestion,
+} from '../renderers/response-renderer.js';
 import { dlog } from '../log.js';
 
+import type { JsonValue } from '@elgato/utils';
+
+interface ResponseDialSettings {
+  [key: string]: JsonValue;
+  commandList?: string;
+}
+
+const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
+
+// ---- Prompt list (IDLE mode) ----
+const DEFAULT_PROMPTS = [
+  'Review this code for issues',
+  'Write tests for this',
+  'Refactor for clarity',
+  '/compact',
+  '/clear',
+];
+let prompts = [...DEFAULT_PROMPTS];
+let promptIndex = 0;
+
+// ---- Option state (interactive mode) ----
 let bridge: BridgeClient;
 let currentState = State.DISCONNECTED;
 let currentOptions: PromptOption[] = [];
@@ -19,7 +52,9 @@ let selectedIndex = 0;
 let navigable = false;
 let currentQuestion: string | undefined;
 let currentTool: string | undefined;
+let currentToolInput: string | undefined;
 let rotateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let currentSuggestedPrompt: string | null = null;
 
 export function initOptionDial(b: BridgeClient): void {
   bridge = b;
@@ -32,22 +67,35 @@ export function updateOptionDialState(
   tool?: string,
   nav?: boolean,
   cursorIdx?: number,
+  toolInput?: string,
+  suggestedPrompt?: string,
 ): void {
+  const prevSuggestion = currentSuggestedPrompt;
   currentState = state;
   currentOptions = options;
   currentQuestion = question;
   currentTool = tool;
+  currentToolInput = toolInput;
   navigable = nav ?? false;
+  currentSuggestedPrompt = suggestedPrompt ?? null;
+
+  // When suggestion arrives, reset to index 0 (show suggestion first)
+  if (currentSuggestedPrompt && !prevSuggestion && state === State.IDLE) {
+    promptIndex = 0;
+  }
+  // When suggestion disappears, adjust index (suggestion was at position 0)
+  if (!currentSuggestedPrompt && prevSuggestion && state === State.IDLE) {
+    promptIndex = promptIndex > 0 ? promptIndex - 1 : 0;
+  }
 
   if (isInteractive() && options.length > 0) {
     // Sync cursor from PTY if provided, otherwise reset to 0 on new prompt
     if (cursorIdx !== undefined && cursorIdx >= 0 && cursorIdx < options.length) {
       selectedIndex = cursorIdx;
     } else if (state !== currentState || options !== currentOptions) {
-      // New options set — only reset if we're entering a new prompt
       selectedIndex = 0;
     }
-    dlog('OptDial', `options received: ${options.length} items, nav=${navigable}, cursor=${selectedIndex}`);
+    dlog('ResDial', `options received: ${options.length} items, nav=${navigable}, cursor=${selectedIndex}`);
   }
   refreshOptionDials();
 }
@@ -65,8 +113,34 @@ function isInteractive(): boolean {
   );
 }
 
+function getEffectivePrompts(): { list: string[]; hasSuggestion: boolean } {
+  if (currentSuggestedPrompt && currentState === State.IDLE) {
+    return { list: [currentSuggestedPrompt, ...prompts], hasSuggestion: true };
+  }
+  return { list: prompts, hasSuggestion: false };
+}
+
+function ensurePixmapLayout(): void {
+  if (encoderLayout.option === PIXMAP_LAYOUT) return;
+  encoderLayout.option = PIXMAP_LAYOUT;
+  for (const id of encoderRegistry.optionIds) {
+    const dial = streamDeck.actions.getActionById(id) as any;
+    if (dial) void dial.setFeedbackLayout(PIXMAP_LAYOUT).catch(() => {});
+  }
+}
+
+function setCanvasFeedback(svg: string): void {
+  const feedback = { canvas: svgToDataUrl(svg) };
+  for (const id of encoderRegistry.optionIds) {
+    const dial = streamDeck.actions.getActionById(id) as any;
+    if (dial) void dial.setFeedback(feedback).catch(() => {});
+  }
+}
+
 function refreshOptionDials(): void {
-  // When takeover is active, delegate to encoder-takeover for all 3 encoders
+  // Voice text takeover: skip option dial refresh (voice-dial handles all panels)
+  if (isVoiceTextTakeoverActive()) return;
+  // When takeover is active, delegate to encoder-takeover for all encoders
   if (isEncoderTakeoverActive()) {
     refreshEncoderTakeover(
       currentState,
@@ -74,65 +148,50 @@ function refreshOptionDials(): void {
       selectedIndex,
       currentQuestion,
       currentTool,
+      currentToolInput,
     );
     return;
   }
 
-  // Fallback: $B1 layout on E1 only
-  for (const id of encoderRegistry.optionIds) {
-    const dial = streamDeck.actions.getActionById(id) as any;
-    if (!dial) continue;
+  ensurePixmapLayout();
 
-    if (currentState === State.AWAITING_OPTION && currentOptions.length > 0) {
-      const opt = currentOptions[selectedIndex];
-      void dial
-        .setFeedback({
-          title: `OPT ${selectedIndex + 1}/${currentOptions.length}`,
-          value: truncate(opt?.label ?? '', 30),
-          indicator: {
-            value: Math.round(
-              ((selectedIndex + 1) / currentOptions.length) * 100,
-            ),
-            bar_fill_c: '#2563eb',
-          },
-        })
-        .catch(() => {});
-    } else if (
-      (currentState === State.AWAITING_PERMISSION || currentState === State.AWAITING_DIFF) &&
-      currentOptions.length > 0
-    ) {
-      const opt = currentOptions[selectedIndex];
-      void dial
-        .setFeedback({
-          title: currentState === State.AWAITING_DIFF ? 'DIFF' : 'PERMISSION',
-          value: truncate(opt?.label ?? '', 30),
-          indicator: {
-            value: Math.round(
-              ((selectedIndex + 1) / currentOptions.length) * 100,
-            ),
-            bar_fill_c: '#f87171',
-          },
-        })
-        .catch(() => {});
+  let svg: string;
+
+  if (currentState === State.AWAITING_OPTION && currentOptions.length > 0) {
+    const opt = currentOptions[selectedIndex];
+    svg = renderResponseInteractive(
+      opt?.label ?? '', selectedIndex, currentOptions.length,
+      'SELECT', '#93c5fd', '#2563eb',
+    );
+  } else if (
+    (currentState === State.AWAITING_PERMISSION || currentState === State.AWAITING_DIFF) &&
+    currentOptions.length > 0
+  ) {
+    const opt = currentOptions[selectedIndex];
+    const isDiff = currentState === State.AWAITING_DIFF;
+    svg = renderResponseInteractive(
+      opt?.label ?? '', selectedIndex, currentOptions.length,
+      isDiff ? 'DIFF' : 'PERMIT',
+      isDiff ? '#fcd34d' : '#fca5a5',
+      isDiff ? '#f59e0b' : '#dc2626',
+    );
+  } else if (currentState === State.IDLE) {
+    const { list, hasSuggestion } = getEffectivePrompts();
+    const text = list[promptIndex] ?? '';
+    if (hasSuggestion && promptIndex === 0) {
+      svg = renderResponseSuggestion(text, promptIndex, list.length);
     } else {
-      const idleText =
-        currentState === State.IDLE ? 'Ready'
-        : currentState === State.PROCESSING ? 'Working...'
-        : currentState === State.DISCONNECTED ? 'Offline'
-        : '--';
-      void dial
-        .setFeedback({
-          title: 'OPTIONS',
-          value: idleText,
-          indicator: { value: 0, bar_fill_c: '#2563eb' },
-        })
-        .catch(() => {});
+      svg = renderResponseIdle(text, promptIndex, list.length);
     }
+  } else if (currentState === State.PROCESSING) {
+    svg = renderResponseProcessing();
+  } else if (currentState === State.DISCONNECTED) {
+    svg = renderResponseDisconnected();
+  } else {
+    svg = renderResponseDisabled();
   }
-}
 
-function truncate(str: string, max: number): string {
-  return str.length > max ? str.substring(0, max - 1) + '\u2026' : str;
+  setCanvasFeedback(svg);
 }
 
 /**
@@ -141,7 +200,7 @@ function truncate(str: string, max: number): string {
  */
 export function handleTakeoverPush(): void {
   if (currentState === State.AWAITING_OPTION && currentOptions.length > 0) {
-    dlog('OptDial', `takeoverPush: select_option idx=${selectedIndex} "${currentOptions[selectedIndex]?.label}"`);
+    dlog('ResDial', `takeoverPush: select_option idx=${selectedIndex} "${currentOptions[selectedIndex]?.label}"`);
     bridge.send({ type: 'select_option', index: selectedIndex });
   } else if (
     (currentState === State.AWAITING_PERMISSION || currentState === State.AWAITING_DIFF) &&
@@ -149,7 +208,7 @@ export function handleTakeoverPush(): void {
   ) {
     const opt = currentOptions[selectedIndex];
     if (opt?.shortcut) {
-      dlog('OptDial', `takeoverPush: respond "${opt.label}" (${opt.shortcut})`);
+      dlog('ResDial', `takeoverPush: respond "${opt.label}" (${opt.shortcut})`);
       bridge.send({ type: 'respond', value: opt.shortcut });
     }
   }
@@ -173,7 +232,7 @@ export function handleTakeoverRotate(ticks: number): void {
     bridge.send({ type: 'navigate_option', direction: dir });
   }
 
-  dlog('OptDial', `takeoverRotate: idx=${selectedIndex}/${currentOptions.length}`);
+  dlog('ResDial', `takeoverRotate: idx=${selectedIndex}/${currentOptions.length}`);
   if (rotateDebounceTimer) clearTimeout(rotateDebounceTimer);
   rotateDebounceTimer = setTimeout(() => {
     rotateDebounceTimer = null;
@@ -182,49 +241,82 @@ export function handleTakeoverRotate(ticks: number): void {
 }
 
 @action({ UUID: 'bound.serendipity.agentdeck.option-dial' })
-export class OptionDialAction extends SingletonAction {
+export class ResponseDialAction extends SingletonAction {
   static get actionIds(): string[] { return encoderRegistry.optionIds; }
 
   override async onWillAppear(ev: WillAppearEvent): Promise<void> {
     if (!encoderRegistry.optionIds.includes(ev.action.id)) {
       encoderRegistry.optionIds.push(ev.action.id);
     }
-    await (ev.action as any).setFeedback({
-      title: 'OPTIONS',
-      value: '--',
-      indicator: { value: 0, bar_fill_c: '#2563eb' },
-    });
+    // Load saved prompt list from settings
+    const settings = (ev.payload?.settings ?? {}) as ResponseDialSettings;
+    if (settings.commandList?.trim()) {
+      const parsed = settings.commandList.split('\n').map((s: string) => s.trim()).filter(Boolean);
+      if (parsed.length > 0) {
+        prompts = parsed;
+        if (promptIndex >= prompts.length) promptIndex = 0;
+      }
+    } else {
+      const defaults: ResponseDialSettings = { commandList: DEFAULT_PROMPTS.join('\n') };
+      void ev.action.setSettings(defaults).catch(() => {});
+    }
+    encoderLayout.option = PIXMAP_LAYOUT;
+    refreshOptionDials();
+  }
+
+  override onDidReceiveSettings(ev: DidReceiveSettingsEvent<ResponseDialSettings>): void {
+    const list = ev.payload.settings.commandList;
+    dlog('ResDial', `onDidReceiveSettings: commandList=${list}`);
+    if (list?.trim()) {
+      const parsed = list.split('\n').map((s: string) => s.trim()).filter(Boolean);
+      if (parsed.length > 0) {
+        prompts = parsed;
+        if (promptIndex >= prompts.length) promptIndex = 0;
+        refreshOptionDials();
+      }
+    }
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
-    if (!isInteractive() || currentOptions.length === 0) return;
+    if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
 
-    // Update local index immediately for responsive LCD
-    if (ev.payload.ticks > 0) {
-      selectedIndex = (selectedIndex + 1) % currentOptions.length;
-    } else {
-      selectedIndex = (selectedIndex - 1 + currentOptions.length) % currentOptions.length;
+    // Interactive mode: scroll options
+    if (isInteractive() && currentOptions.length > 0) {
+      if (ev.payload.ticks > 0) {
+        selectedIndex = (selectedIndex + 1) % currentOptions.length;
+      } else {
+        selectedIndex = (selectedIndex - 1 + currentOptions.length) % currentOptions.length;
+      }
+      if (navigable) {
+        const dir = ev.payload.ticks > 0 ? 'down' : 'up';
+        bridge.send({ type: 'navigate_option', direction: dir });
+      }
+      dlog('ResDial', `rotate options: idx=${selectedIndex}/${currentOptions.length}`);
+      if (rotateDebounceTimer) clearTimeout(rotateDebounceTimer);
+      rotateDebounceTimer = setTimeout(() => {
+        rotateDebounceTimer = null;
+        refreshOptionDials();
+      }, 16);
+      return;
     }
 
-    // Navigable prompt: also send arrow key to terminal
-    if (navigable) {
-      const dir = ev.payload.ticks > 0 ? 'down' : 'up';
-      bridge.send({ type: 'navigate_option', direction: dir });
-    }
-
-    dlog('OptDial', `rotate: idx=${selectedIndex}/${currentOptions.length} "${currentOptions[selectedIndex]?.label}" nav=${navigable}`);
-
-    // Debounced LCD refresh (16ms) to avoid excessive setFeedback during fast rotation
-    if (rotateDebounceTimer) clearTimeout(rotateDebounceTimer);
-    rotateDebounceTimer = setTimeout(() => {
-      rotateDebounceTimer = null;
+    // IDLE mode: cycle prompts (including suggestion if present)
+    if (currentState === State.IDLE) {
+      const { list } = getEffectivePrompts();
+      if (ev.payload.ticks > 0) {
+        promptIndex = (promptIndex + 1) % list.length;
+      } else {
+        promptIndex = (promptIndex - 1 + list.length) % list.length;
+      }
+      dlog('ResDial', `rotate prompt: ${list[promptIndex]}`);
       refreshOptionDials();
-    }, 16);
+    }
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
+    if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
     if (currentState === State.AWAITING_OPTION && currentOptions.length > 0) {
-      dlog('OptDial', `push: select_option idx=${selectedIndex} "${currentOptions[selectedIndex]?.label}"`);
+      dlog('ResDial', `push: select_option idx=${selectedIndex} "${currentOptions[selectedIndex]?.label}"`);
       bridge.send({ type: 'select_option', index: selectedIndex });
     } else if (
       (currentState === State.AWAITING_PERMISSION || currentState === State.AWAITING_DIFF) &&
@@ -232,10 +324,23 @@ export class OptionDialAction extends SingletonAction {
     ) {
       const opt = currentOptions[selectedIndex];
       if (opt?.shortcut) {
-        dlog('OptDial', `push: respond "${opt.label}" (${opt.shortcut})`);
+        dlog('ResDial', `push: respond "${opt.label}" (${opt.shortcut})`);
         bridge.send({ type: 'respond', value: opt.shortcut });
       }
+    } else if (currentState === State.IDLE && bridge) {
+      const { list } = getEffectivePrompts();
+      const cmd = list[promptIndex];
+      dlog('ResDial', `push: send_prompt "${cmd}"`);
+      bridge.send({ type: 'send_prompt', text: cmd });
     }
+  }
+
+  override async onDialUp(_ev: DialUpEvent): Promise<void> {
+    if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
+  }
+
+  override async onTouchTap(_ev: TouchTapEvent): Promise<void> {
+    if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
   }
 
   override onWillDisappear(ev: WillDisappearEvent): void {
