@@ -1777,4 +1777,118 @@ describe('OutputParser', () => {
       expect(opts[2]).toMatchObject({ index: 2, label: 'Haiku' });
     });
   });
+
+  // === ANSI sequence split across chunks ===
+
+  describe('split ANSI sequence buffering', () => {
+    it('handles ANSI SGR codes split across chunks', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      // Chunk 1: incomplete SGR sequence (cut in the middle of color params)
+      p.feed('❯ 1. Opus\x1b[0m\n  2. \x1b[38;2;177;185;249');
+      // Chunk 2: completes the SGR sequence + text
+      p.feed('mSonnet\x1b[0m\n  3. Haiku\n');
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      const opts: PromptOption[] = events[0].options;
+      expect(opts).toHaveLength(3);
+      expect(opts[0]).toMatchObject({ index: 0, label: 'Opus' });
+      expect(opts[1]).toMatchObject({ index: 1, label: 'Sonnet' });
+      expect(opts[2]).toMatchObject({ index: 2, label: 'Haiku' });
+    });
+
+    it('handles bare ESC at end of chunk', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      p.feed('  1. Option A\n  2. Option B\x1b');
+      p.feed('[0m\n');
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      const opts: PromptOption[] = events[0].options;
+      expect(opts).toHaveLength(2);
+      expect(opts[0]).toMatchObject({ index: 0, label: 'Option A' });
+      expect(opts[1]).toMatchObject({ index: 1, label: 'Option B' });
+    });
+
+    it('does not buffer complete ANSI sequences', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      // Complete SGR — should not be held back
+      p.feed('  1. \x1b[1mBold\x1b[0m\n  2. Normal\n');
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].options[0]).toMatchObject({ index: 0, label: 'Bold' });
+    });
+  });
+
+  // === Large chunk guard: numbered lists in response text ===
+
+  describe('large chunk guard for option detection', () => {
+    it('does NOT detect numbered items in large response chunks as options', () => {
+      const p = armParser();
+      const optionEvents = collectEvents(p, 'option_prompt');
+      const permEvents = collectEvents(p, 'permission_prompt');
+      const diffEvents = collectEvents(p, 'diff_prompt');
+
+      // Simulate a large Claude response containing numbered items (>200 non-ws chars)
+      const longResponse = [
+        '잠재적 해결 방향:',
+        '1. Output parser에서 AWAITING_DIFF 상태 중 diff 패턴이 사라진 청크(idle prompt나 spinner)를 감지하면 즉시 상태 전환하여 복구',
+        '2. detectPatterns()에서 hasIdlePrompt와 hasInteractive가 동시 참일 때 현재 AWAITING 상태이면 idle를 우선하는 로직을 추가하여 해결',
+        '3. Diff prompt가 ESC를 무시하는 경우라면 STUCK_TIMEOUT(현재 5분)을 더 짧게 조정하거나 PTY 입력 모니터링으로 ESC 키 입력을 감지하여 처리',
+      ].join('\n');
+      p.feed(longResponse + '\n');
+      vi.advanceTimersByTime(200);
+
+      expect(optionEvents).toHaveLength(0);
+      expect(permEvents).toHaveLength(0);
+      expect(diffEvents).toHaveLength(0);
+    });
+
+    it('still detects real options in small TUI chunks', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      // Small chunk — real interactive option prompt
+      p.feed('  1. Default\n  2. Sonnet\n  3. Haiku\n');
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].options).toHaveLength(3);
+    });
+  });
+
+  // === CJK ghost text suggestion ===
+
+  describe('CJK suggestion detection', () => {
+    it('accepts ghost text containing CJK characters', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Strategy 1: "Try ..." pattern with CJK
+      p.feed('❯ Try "코드를 리팩토링해봐"\n');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('코드를 리팩토링해봐');
+    });
+
+    it('accepts ghost text that is purely CJK (no ASCII words)', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Strategy 2: gray ANSI segments with pure CJK on prompt line
+      p.feed('❯ \x1b[90m버그를 수정해줘\x1b[0m\n');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('버그를 수정해줘');
+    });
+  });
 });

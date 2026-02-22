@@ -38,14 +38,21 @@ const userSettingsMap = new Map<string, ResponseButtonSettings>();
 
 /** Compute effective settings for a button: slot defaults + user overrides (disconnected* always from defaults) */
 function effectiveSettings(actionId: string): ResponseButtonSettings {
-  const sortedIds = getSortedIds();
-  const slot = sortedIds.indexOf(actionId);
+  const slot = actionSlots.get(actionId) ?? -1;
   const defaults = (slot >= 0 && slot < DEFAULT_IDLE_SETTINGS.length) ? DEFAULT_IDLE_SETTINGS[slot] : {};
   const user = userSettingsMap.get(actionId);
   if (!user) return defaults;
   // User settings override label/action only; disconnected* always from slot defaults
   const { disconnectedLabel: _dl, disconnectedAction: _da, ...piOnly } = user;
   return { ...defaults, ...piOnly };
+}
+
+/** Check if settings contain user customizations that differ from slot defaults */
+function hasUserCustomizations(settings: ResponseButtonSettings, slotIndex: number): boolean {
+  const defaults = (slotIndex >= 0 && slotIndex < DEFAULT_IDLE_SETTINGS.length)
+    ? DEFAULT_IDLE_SETTINGS[slotIndex] : {};
+  return (!!settings.label && settings.label !== defaults.label) ||
+         (!!settings.action && settings.action !== defaults.action);
 }
 
 let bridge: BridgeClient;
@@ -144,7 +151,7 @@ function refreshAllButtons(): void {
     dlog('RspBut', `refresh IDLE: ids=${sorted.length}`);
     for (let i = 0; i < sorted.length; i++) {
       const s = effectiveSettings(sorted[i]);
-      applyButtonConfig(sorted[i], idleButtonConfig(s), i);
+      applyButtonConfig(sorted[i], idleButtonConfig(s), actionSlots.get(sorted[i]));
     }
     return;
   }
@@ -154,9 +161,9 @@ function refreshAllButtons(): void {
     dlog('RspBut', `refresh expanded: ids=${sorted.length} configs=${overrideConfigs.length}`);
     for (let i = 0; i < sorted.length; i++) {
       if (i < overrideConfigs.length) {
-        applyButtonConfig(sorted[i], overrideConfigs[i], i);
+        applyButtonConfig(sorted[i], overrideConfigs[i], actionSlots.get(sorted[i]));
       } else {
-        applyButtonConfig(sorted[i], { title: '', color: '#1a1a1a', textColor: '#444444', enabled: false }, i);
+        applyButtonConfig(sorted[i], { title: '', color: '#1a1a1a', textColor: '#444444', enabled: false }, actionSlots.get(sorted[i]));
       }
     }
     return;
@@ -167,17 +174,18 @@ function refreshAllButtons(): void {
     dlog('RspBut', `refresh DISCONNECTED: ids=${sorted.length}`);
     for (let i = 0; i < sorted.length; i++) {
       const s = effectiveSettings(sorted[i]);
-      applyButtonConfig(sorted[i], disconnectedButtonConfig(s), i);
+      applyButtonConfig(sorted[i], disconnectedButtonConfig(s), actionSlots.get(sorted[i]));
     }
     return;
   }
 
-  // PROCESSING: show idle labels dimmed
+  // PROCESSING: show START for slots with disconnectedAction, dim others
   if (currentState === State.PROCESSING) {
-    dlog('RspBut', `refresh PROCESSING: ids=${sorted.length} (dimmed idle labels)`);
+    dlog('RspBut', `refresh PROCESSING: ids=${sorted.length} (START + dimmed)`);
     for (let i = 0; i < sorted.length; i++) {
       const s = effectiveSettings(sorted[i]);
-      applyButtonConfig(sorted[i], dimButtonConfig(s), i);
+      const hasDisconnected = !!s.disconnectedAction?.trim();
+      applyButtonConfig(sorted[i], hasDisconnected ? disconnectedButtonConfig(s) : dimButtonConfig(s), actionSlots.get(sorted[i]));
     }
     return;
   }
@@ -192,9 +200,9 @@ function refreshAllButtons(): void {
   dlog('RspBut', `refresh: state=${currentState} ids=${sorted.length} buttons=[${buttons.map(b => b.title ? `"${b.badge ? b.badge + ' ' : ''}${b.title}${b.subtitle ? ' | ' + b.subtitle : ''}"` : 'DIM').join(', ')}]`);
   for (let i = 0; i < sorted.length; i++) {
     if (i < buttons.length) {
-      applyButtonConfig(sorted[i], buttons[i], i);
+      applyButtonConfig(sorted[i], buttons[i], actionSlots.get(sorted[i]));
     } else {
-      applyButtonConfig(sorted[i], { title: '', color: '#1a1a1a', textColor: '#444444', enabled: false }, i);
+      applyButtonConfig(sorted[i], { title: '', color: '#1a1a1a', textColor: '#444444', enabled: false }, actionSlots.get(sorted[i]));
     }
   }
 
@@ -232,43 +240,28 @@ export class ResponseButtonAction extends SingletonAction {
     const slot = sorted.indexOf(ev.action.id);
     dlog('RspBut', `onWillAppear: id=${ev.action.id} slotIndex=${slotIndex} slot=${slot} total=${sorted.length}`);
 
-    // Only cache user-customised PI settings; defaults are computed dynamically from slot position
-    if (settings.label || settings.action) {
+    // Only cache user-customised PI settings if they differ from slot defaults
+    if (hasUserCustomizations(settings, slotIndex)) {
       userSettingsMap.set(ev.action.id, settings);
     }
-    // If slotIndex was auto-assigned, persist it to settings
+    // If slotIndex was auto-assigned, persist only slotIndex (no defaults push)
     if (settings.slotIndex == null) {
-      void ev.action.setSettings({ ...settings, slotIndex }).catch(() => {});
+      void ev.action.setSettings({ slotIndex } as ResponseButtonSettings).catch(() => {});
     }
     // Refresh ALL buttons so every slot gets the correct number after sort
     refreshAllButtons();
-    // Sync PI defaults for ALL buttons (slot positions may have shifted)
-    this.syncAllPIDefaults();
-  }
-
-  /** Persist slot defaults to PI for buttons without user-customised settings */
-  private syncAllPIDefaults(): void {
-    const sorted = getSortedIds();
-    for (let i = 0; i < sorted.length; i++) {
-      const id = sorted[i];
-      if (userSettingsMap.has(id)) continue;  // User has custom settings
-      if (i >= DEFAULT_IDLE_SETTINGS.length) continue;
-      const defaults = DEFAULT_IDLE_SETTINGS[i];
-      const act = streamDeck.actions.getActionById(id);
-      if (act) {
-        void act.setSettings(defaults).catch(() => {});
-      }
-    }
   }
 
   override onDidReceiveSettings(ev: DidReceiveSettingsEvent<ResponseButtonSettings>): void {
     const settings = ev.payload.settings;
-    dlog('RspBut', `onDidReceiveSettings: id=${ev.action.id} slotIndex=${settings.slotIndex} label=${settings.label} action=${settings.action}`);
+    const slotIndex = settings.slotIndex != null ? Number(settings.slotIndex) : (actionSlots.get(ev.action.id) ?? -1);
+    dlog('RspBut', `onDidReceiveSettings: id=${ev.action.id} slotIndex=${slotIndex} label=${settings.label} action=${settings.action}`);
     // Update slot index if changed
     if (settings.slotIndex != null) {
-      actionSlots.set(ev.action.id, Number(settings.slotIndex));
+      actionSlots.set(ev.action.id, slotIndex);
     }
-    if (settings.label || settings.action) {
+    // Only track as user-custom if values differ from slot defaults
+    if (hasUserCustomizations(settings, slotIndex)) {
       userSettingsMap.set(ev.action.id, settings);
     } else {
       userSettingsMap.delete(ev.action.id);
@@ -286,7 +279,7 @@ export class ResponseButtonAction extends SingletonAction {
 
     let actionStr: string | undefined;
 
-    if (currentState === State.DISCONNECTED) {
+    if (currentState === State.DISCONNECTED || currentState === State.PROCESSING) {
       if (isPickerActive()) {
         // Picker active: button selects project
         selectByButtonSlot(slot);
@@ -295,10 +288,12 @@ export class ResponseButtonAction extends SingletonAction {
       const s = effectiveSettings(ev.action.id);
       const cmd = s.disconnectedAction?.trim();
       if (!cmd) {
-        dlog('RspBut', `keyDown slot=${slot} DISCONNECTED no cmd`);
+        if (currentState === State.DISCONNECTED) {
+          dlog('RspBut', `keyDown slot=${slot} DISCONNECTED no cmd`);
+        }
         return;
       }
-      dlog('RspBut', `keyDown slot=${slot} → openPicker`);
+      dlog('RspBut', `keyDown slot=${slot} → openPicker (state=${currentState})`);
       void openPicker();
       return;
     }

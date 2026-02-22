@@ -18,25 +18,36 @@
       border-radius: 3px;
       color: #ccc;
     }
+    .slot-defaults {
+      margin: 0 1em 0.5em;
+      padding: 0.5em 0.75em;
+      font-size: 11px;
+      color: #7aa2d4;
+      line-height: 1.5;
+      background: rgba(30, 58, 95, 0.3);
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
   <sdpi-item label="Slot Position">
     <sdpi-select setting="slotIndex">
-      <option value="0">Slot 1 (left)</option>
-      <option value="1">Slot 2 (center)</option>
-      <option value="2">Slot 3 (right)</option>
+      <option value="0">1 — GO ON</option>
+      <option value="1">2 — REVIEW</option>
+      <option value="2">3 — COMMIT</option>
+      <option value="3">4 — CLEAR</option>
     </sdpi-select>
   </sdpi-item>
-  <sdpi-item label="Button Label">
-    <sdpi-textfield setting="label" placeholder="FIX"></sdpi-textfield>
+  <div class="slot-defaults" id="slotInfo"></div>
+  <sdpi-item label="Custom Label">
+    <sdpi-textfield setting="label" id="piLabel" placeholder="GO ON"></sdpi-textfield>
   </sdpi-item>
-  <sdpi-item label="Action">
-    <sdpi-textarea setting="action" placeholder="Text or /command to send"></sdpi-textarea>
+  <sdpi-item label="Custom Action">
+    <sdpi-textarea setting="action" id="piAction" placeholder="continue"></sdpi-textarea>
   </sdpi-item>
   <div class="sdpi-info">
-    Examples:<br/>
-    <code>/compact</code> <code>/status</code> — slash command<br/>
+    Leave empty to use slot defaults.<br/>
+    Examples: <code>/compact</code> <code>/status</code> — slash command<br/>
     <code>Please fix the bug</code> — prompt to Claude
   </div>
   <hr />
@@ -49,5 +60,55 @@
   <div class="sdpi-info">
     Shell command to run when no session is connected.
   </div>
+  <script>
+    const SLOT_DEFAULTS = [
+      { label: 'GO ON', action: 'continue' },
+      { label: 'REVIEW', action: '/review' },
+      { label: 'COMMIT', action: '/commit' },
+      { label: 'CLEAR', action: '/clear' },
+    ];
+
+    function updatePlaceholders(slotIndex) {
+      const idx = Number(slotIndex);
+      const def = (idx >= 0 && idx < SLOT_DEFAULTS.length) ? SLOT_DEFAULTS[idx] : null;
+      const labelField = document.getElementById('piLabel');
+      const actionField = document.getElementById('piAction');
+      const infoDiv = document.getElementById('slotInfo');
+      if (labelField) labelField.setAttribute('placeholder', def ? def.label : '');
+      if (actionField) actionField.setAttribute('placeholder', def ? def.action : '');
+      if (infoDiv) {
+        infoDiv.textContent = def
+          ? 'Default: ' + def.label + ' \u2192 ' + def.action
+          : '';
+      }
+    }
+
+    // Listen for slot dropdown changes
+    const slotSelect = document.querySelector('sdpi-select[setting="slotIndex"]');
+    if (slotSelect) {
+      slotSelect.addEventListener('valuechange', function(e) {
+        updatePlaceholders(e.detail);
+      });
+    }
+
+    // Set initial placeholders from current settings
+    document.addEventListener('DOMContentLoaded', function() {
+      // sdpi-components fires didReceiveSettings after connect
+      const observer = new MutationObserver(function() {
+        const sel = document.querySelector('sdpi-select[setting="slotIndex"]');
+        if (sel && sel.value != null) {
+          updatePlaceholders(sel.value);
+          observer.disconnect();
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+      // Fallback: default to slot 0
+      setTimeout(function() {
+        observer.disconnect();
+        const sel = document.querySelector('sdpi-select[setting="slotIndex"]');
+        updatePlaceholders(sel && sel.value != null ? sel.value : 0);
+      }, 500);
+    });
+  </script>
 </body>
 </html>

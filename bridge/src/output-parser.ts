@@ -83,8 +83,30 @@ export class OutputParser extends EventEmitter {
   // Cursor-only redraw detection for navigable option lists
   private lastNavigableEmit = false;
   private lastCursorIndex = 0;
+  private pendingAnsi = '';
 
   feed(rawData: string): void {
+    const data = this.pendingAnsi + rawData;
+    this.pendingAnsi = '';
+
+    // Check for incomplete ANSI escape sequence at end of chunk
+    const lastEsc = data.lastIndexOf('\x1b');
+    if (lastEsc !== -1 && lastEsc >= data.length - 20) {
+      const tail = data.slice(lastEsc);
+      // CSI sequence: \x1b[ ... <final byte 0x40-0x7e> — incomplete if no final byte yet
+      // OSC sequence: \x1b] ... (terminated by ST or BEL) — incomplete if no terminator
+      // Bare ESC: just \x1b with nothing after
+      if (/^\x1b\[[\d;:]*$/.test(tail) || /^\x1b$/.test(tail) || /^\x1b\](?:(?!\x1b\\|\x07).)*$/.test(tail)) {
+        this.pendingAnsi = tail;
+        const complete = data.slice(0, lastEsc);
+        if (complete.length === 0) return;
+        return this.processFeed(complete);
+      }
+    }
+    this.processFeed(data);
+  }
+
+  private processFeed(rawData: string): void {
     // Detect ghost text from raw ANSI before stripping
     this.detectGhostText(rawData);
 
@@ -158,7 +180,8 @@ export class OutputParser extends EventEmitter {
     if (/^\d+$/.test(text)) return;
 
     // Must contain at least one word sequence of 2+ characters (not just symbols/spaces)
-    if (!/\w{2,}/.test(text)) return;
+    // \p{L} matches Unicode letters including CJK (Korean, Japanese, Chinese)
+    if (!/\w{2,}/u.test(text) && !/\p{L}{2,}/u.test(text)) return;
 
     // Filter out UI chrome fragments
     if (/^[?]$|^esc\b|^shift\b|^ctrl\b|^enter\b|for\s+shortcuts/i.test(text)) return;
@@ -325,7 +348,11 @@ export class OutputParser extends EventEmitter {
     }
 
     // --- Option list (debounced — PTY chunks may split option data) ---
-    if (OPTION_NUMBERED.test(chunk) || OPTION_BULLET.test(chunk)) {
+    // Guard: real interactive option prompts arrive in small TUI redraws (<200 non-ws chars).
+    // Large chunks (≥200) are Claude's response text which may contain numbered lists
+    // (e.g. "1. First approach\n2. Second approach") — these are NOT interactive options.
+    const chunkNonWs = chunk.replace(/\s/g, '').length;
+    if ((OPTION_NUMBERED.test(chunk) || OPTION_BULLET.test(chunk)) && chunkNonWs < 200) {
       debug('Parser', 'option pattern detected — starting/resetting debounce');
       this.resetIdleTimer();
       this.resetOptionTimer();
@@ -705,7 +732,7 @@ export class OutputParser extends EventEmitter {
    * Uses · (U+00B7 middle dot) as a reliable delimiter — it survives ANSI stripping.
    */
   private cleanOptionLabel(raw: string): string {
-    let text = raw
+    let text = stripAnsi(raw)
       .replace(/\s*\(recommended\)/i, '')
       .replace(/✔/g, ' ')
       .trim();
@@ -777,6 +804,7 @@ export class OutputParser extends EventEmitter {
 
   reset(): void {
     this.buffer = '';
+    this.pendingAnsi = '';
     this.spinnerActive = false;
     this.seenFirstIdle = false;
     this.pendingModeSwitch = false;
