@@ -6,6 +6,7 @@ export default defineConfig({
       'bridge/src/__tests__/**/*.test.ts',
       'hooks/src/__tests__/**/*.test.ts',
       'shared/src/__tests__/**/*.test.ts',
+      'plugin/src/__tests__/**/*.test.ts',
     ],
     testTimeout: 10_000,
   },
