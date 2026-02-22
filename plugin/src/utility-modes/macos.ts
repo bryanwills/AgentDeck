@@ -146,9 +146,29 @@ export interface ItermSession {
   sessionId: string;
   name: string;
   tty: string;
+  isGhost?: boolean;    // tmux alive + bridge dead
+  tmuxName?: string;    // bare tmux session name (for re-attach)
 }
 
 const TMUX_PATHS = ['/usr/local/bin/tmux', '/opt/homebrew/bin/tmux', '/usr/bin/tmux'];
+
+/** Get the set of currently live tmux session names. */
+export async function getLiveTmuxSessionNames(): Promise<Set<string>> {
+  const names = new Set<string>();
+  for (const tmuxBin of TMUX_PATHS) {
+    try {
+      const out = await new Promise<string>((resolve, reject) =>
+        execFile(tmuxBin, ['list-sessions', '-F', '#{session_name}'],
+          { timeout: 2000 }, (err, stdout) => err ? reject(err) : resolve(stdout.trim())),
+      );
+      for (const line of out.split('\n')) {
+        if (line) names.add(line);
+      }
+      break;
+    } catch {}
+  }
+  return names;
+}
 
 /** Build tty → tmux session name map from `tmux list-clients`. */
 export async function getTmuxSessionMap(): Promise<Map<string, string>> {

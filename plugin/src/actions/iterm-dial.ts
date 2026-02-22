@@ -12,7 +12,7 @@ import { isEncoderTakeoverActive } from '../encoder-takeover.js';
 import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
 import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
 import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
-import { getItermSessions, activateItermSession, attachTmuxInIterm, getActiveItermTty, getTmuxSessionMap, type ItermSession } from '../utility-modes/macos.js';
+import { getItermSessions, activateItermSession, attachTmuxInIterm, getActiveItermTty, getTmuxSessionMap, getLiveTmuxSessionNames, type ItermSession } from '../utility-modes/macos.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderItermPanel, renderItermReady } from '../renderers/iterm-renderer.js';
 import { switchToPort } from './session-button.js';
@@ -44,7 +44,10 @@ interface AgentDeckSession {
 
 function loadAgentDeckSessions(): AgentDeckSession[] {
   try {
-    return JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8')) as AgentDeckSession[];
+    const all = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8')) as AgentDeckSession[];
+    return all.filter((s) => {
+      try { process.kill(s.pid, 0); return true; } catch { return false; }
+    });
   } catch {
     return [];
   }
@@ -53,14 +56,37 @@ function loadAgentDeckSessions(): AgentDeckSession[] {
 /** Marker for virtual (detached tmux) entries in the session list. */
 const DETACHED_MARKER = '__detached__';
 
-function appendDetachedTmux(itermSessions: ItermSession[]): ItermSession[] {
-  const adSessions = loadAgentDeckSessions();
+interface DetachedTmuxContext {
+  adSessions: AgentDeckSession[];
+  tmuxClientMap: Map<string, string>;
+  liveTmuxNames: Set<string>;
+}
+
+function appendDetachedTmux(itermSessions: ItermSession[], ctx: DetachedTmuxContext): ItermSession[] {
+  const { adSessions, tmuxClientMap, liveTmuxNames } = ctx;
+  if (adSessions.length === 0) return itermSessions;
+
+  // Names already shown in iTerm session list
   const attachedNames = new Set(itermSessions.map((s) => s.name));
+
+  // TTYs of current iTerm sessions — if a tmux client is on one of these TTYs, it's attached
+  const itermTtys = new Set(itermSessions.map((s) => s.tty).filter(Boolean));
+
+  // Build set of tmux sessions that have an attached client on an iTerm TTY
+  const clientAttachedNames = new Set<string>();
+  for (const [tty, sessionName] of tmuxClientMap) {
+    if (itermTtys.has(tty)) clientAttachedNames.add(sessionName);
+  }
+
   const detached: ItermSession[] = [];
   for (const ad of adSessions) {
     if (!ad.tmuxSession) continue;
     const name = ad.tmuxSession.replace(/:.*$/, ''); // strip :window suffix
+    // Skip if tmux session no longer exists
+    if (!liveTmuxNames.has(name)) continue;
+    // Skip if already shown in iTerm list (name match) or has an attached client
     if (attachedNames.has(name)) continue;
+    if (clientAttachedNames.has(name)) continue;
     detached.push({
       windowId: DETACHED_MARKER,
       tabIndex: ad.tmuxSession,
@@ -77,11 +103,26 @@ async function syncFromSystem(): Promise<void> {
   if (Date.now() - lastActionAt < SKIP_AFTER_ACTION) return;
   polling = true;
   try {
-    const [rawSessions, activeTty] = await Promise.all([
+    const [rawSessions, activeTty, tmuxClientMap, liveTmuxNames] = await Promise.all([
       getItermSessions(),
       getActiveItermTty(),
+      getTmuxSessionMap(),
+      getLiveTmuxSessionNames(),
     ]);
-    const newSessions = appendDetachedTmux(rawSessions);
+    const adSessions = loadAgentDeckSessions();
+
+    // Ghost marking: tmux alive + bridge dead → ⚠ marker
+    const bridgedTmuxNames = new Set(
+      adSessions.filter(s => s.tmuxSession).map(s => s.tmuxSession!.replace(/:.*$/, '')),
+    );
+    const markedSessions = rawSessions.map(s => {
+      if (!s.tty) return s;
+      const tmuxName = tmuxClientMap.get(s.tty);
+      if (!tmuxName || bridgedTmuxNames.has(tmuxName) || !liveTmuxNames.has(tmuxName)) return s;
+      return { ...s, name: `⚠ ${tmuxName}`, isGhost: true, tmuxName };
+    });
+
+    const newSessions = appendDetachedTmux(markedSessions, { adSessions, tmuxClientMap, liveTmuxNames });
     dlog('ItermDial', `syncFromSystem: got ${newSessions.length} sessions (was ${sessions.length}), activeTty=${activeTty}`);
     if (JSON.stringify(newSessions) !== JSON.stringify(sessions)) {
       sessions = newSessions;
@@ -91,7 +132,6 @@ async function syncFromSystem(): Promise<void> {
 
     // Auto-switch bridge if focused iTerm tty matches an AgentDeck session
     if (activeTty && bridgeRef) {
-      const adSessions = loadAgentDeckSessions();
       const currentPort = bridgeRef.getPort();
 
       // 1. Direct tty match (non-tmux sessions)
@@ -99,8 +139,7 @@ async function syncFromSystem(): Promise<void> {
 
       // 2. tmux match: active tty → tmux session name → AgentDeck tmuxSession
       if (!match) {
-        const tmuxMap = await getTmuxSessionMap();
-        const tmuxName = tmuxMap.get(activeTty);
+        const tmuxName = tmuxClientMap.get(activeTty);
         if (tmuxName) {
           match = adSessions.find((s) => s.tmuxSession && s.tmuxSession.startsWith(tmuxName));
         }
@@ -110,6 +149,13 @@ async function syncFromSystem(): Promise<void> {
         dlog('ItermDial', `auto-switch: tty ${activeTty} → port ${match.port}`);
         lastActionAt = Date.now(); // suppress re-trigger for SKIP_AFTER_ACTION
         switchToPort(match.port);
+
+        // Sync dial display to the matched iTerm session
+        const itermIdx = sessions.findIndex((s) => s.tty === activeTty);
+        if (itermIdx !== -1) {
+          activeIndex = itermIdx;
+        }
+        refreshItermDials();
       }
     }
   } catch (e) {
@@ -238,7 +284,11 @@ export class ItermDialAction extends SingletonAction {
     const selected = sessions[activeIndex];
     if (!selected) return;
 
-    if (selected.windowId === DETACHED_MARKER) {
+    if (selected.isGhost && selected.tmuxName) {
+      // Ghost session — tmux alive but bridge dead, re-attach
+      dlog('ItermDial', `push: re-attach ghost tmux ${selected.tmuxName}`);
+      attachTmuxInIterm(selected.tmuxName);
+    } else if (selected.windowId === DETACHED_MARKER) {
       // Virtual entry — attach detached tmux session
       dlog('ItermDial', `push: attach tmux ${selected.tabIndex}`);
       attachTmuxInIterm(selected.tabIndex);
