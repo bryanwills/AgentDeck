@@ -490,15 +490,18 @@ export class OutputParser extends EventEmitter {
   private parseModeSwitchLine(chunk: string): void {
     if (MODE_PLAN.test(chunk)) {
       this.pendingModeSwitch = false;
+      if (this.modeSwitchTimer) { clearTimeout(this.modeSwitchTimer); this.modeSwitchTimer = null; }
       debug('Parser', 'EMIT mode_change: plan');
       this.emit('mode_change', { mode: 'plan' });
     } else if (MODE_ACCEPT.test(chunk)) {
       this.pendingModeSwitch = false;
+      if (this.modeSwitchTimer) { clearTimeout(this.modeSwitchTimer); this.modeSwitchTimer = null; }
       debug('Parser', 'EMIT mode_change: acceptEdits');
       this.emit('mode_change', { mode: 'acceptEdits' });
-    } else if (this.pendingModeSwitch && MODE_DEFAULT.test(chunk)) {
+    } else if (MODE_DEFAULT.test(chunk)) {
       this.pendingModeSwitch = false;
-      debug('Parser', 'EMIT mode_change: default (default banner detected)');
+      if (this.modeSwitchTimer) { clearTimeout(this.modeSwitchTimer); this.modeSwitchTimer = null; }
+      debug('Parser', 'EMIT mode_change: default');
       this.emit('mode_change', { mode: 'default' });
     }
   }
