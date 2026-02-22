@@ -1703,6 +1703,63 @@ describe('OutputParser', () => {
     });
   });
 
+  // === Ghost Option from Stale Buffer Content ===
+
+  describe('ghost option from stale buffer', () => {
+    it('excludes stale numbered list items before actual option prompt', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      // Simulates: Claude's plan response has "3. ...", "4. ...", "5. Deploy"
+      // followed by a 4-option approval prompt. The stale "5." should NOT
+      // appear as a ghost 5th option.
+      p.feed(
+        '3. Implement the feature\n' +
+        '4. Run tests\n' +
+        '5. Deploy to staging\n' +
+        '\n' +
+        'Would you like to proceed?\n' +
+        '\n' +
+        '❯ 1. Yes, clear context\n' +
+        '  2. Yes, auto-accept\n' +
+        '  3. Yes, manually approve\n' +
+        '  4. Type here\n' +
+        '\n' +
+        'ctrl-g to edit in VS Code\n',
+      );
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      const opts: PromptOption[] = events[0].options;
+      // Exactly 4 real options, no ghost 5th
+      expect(opts).toHaveLength(4);
+      expect(opts[0]).toMatchObject({ index: 0 });
+      expect(opts[3]).toMatchObject({ index: 3 });
+      expect(opts.every((o: PromptOption) => o.index < 4)).toBe(true);
+    });
+
+    it('still works with scrambled TUI order after backward scan', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      // Stale content + scrambled options (ink TUI renders 2,1,3)
+      p.feed(
+        '5. Some old step\n' +
+        '\n' +
+        'Choose:\n' +
+        '\n' +
+        '  2. Sonnet\n' +
+        '  1. Default\n' +
+        '  3. Haiku\n',
+      );
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].options).toHaveLength(3);
+      expect(events[0].options[0]).toMatchObject({ index: 0, label: 'Default' });
+    });
+  });
+
   describe('option index ordering', () => {
     it('returns options sorted by index even when TUI lines arrive out of order', () => {
       const p = armParser();

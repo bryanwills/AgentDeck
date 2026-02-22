@@ -360,7 +360,7 @@ export class OutputParser extends EventEmitter {
     // --- Cursor-only redraw detection (navigable option state) ---
     // ink's minimal redraw: only moves ❯ character. Chunk lacks digits, so
     // OPTION_NUMBERED won't match. Re-parse buffer tail to detect cursor change.
-    if (this.lastNavigableEmit && chunk.includes('❯')) {
+    if (this.lastNavigableEmit && chunk.includes('❯') && !hasIdlePrompt) {
       debug('Parser', 'cursor-only redraw detected — debouncing buffer re-parse');
       this.resetIdleTimer();
       this.resetOptionTimer();
@@ -627,12 +627,40 @@ export class OutputParser extends EventEmitter {
     // (?!\d) prevents matching version numbers like "4.6" in "Opus 4.6"
     const normalized = text.replace(/([^\n\d.])((?:\s*)❯?\s*\d{1,2}[.)](?!\d))/g, '$1\n$2');
 
+    // Backward scan: restrict to the last contiguous block of option lines.
+    // This prevents stale numbered list items (e.g. "5. Deploy") from earlier in the
+    // buffer being included as ghost options when a real option prompt follows.
+    const optLineRe = /^\s*❯?\s*\d{1,2}[.)]\s*.+|^\s*[►▸●○]\s+.+/;
+    const allLines = normalized.split('\n');
+    let blockEnd = allLines.length;
+    // Skip trailing non-option lines (footer like "ctrl-g to edit in VS Code")
+    while (blockEnd > 0 && !optLineRe.test(allLines[blockEnd - 1])) {
+      blockEnd--;
+    }
+    // Collect contiguous option lines (tolerate blank lines within the block)
+    let blockStart = blockEnd;
+    let foundOption = false;
+    while (blockStart > 0) {
+      const line = allLines[blockStart - 1];
+      if (optLineRe.test(line)) {
+        blockStart--;
+        foundOption = true;
+      } else if (line.trim() === '') {
+        // Blank line — tolerate within block, keep scanning
+        blockStart--;
+      } else {
+        // Non-blank, non-option line = block boundary
+        break;
+      }
+    }
+    const lines = foundOption ? allLines.slice(blockStart, blockEnd) : allLines;
+
     let navigable = false;
     let cursorIndex = 0;
 
     // Use a Map keyed by index so later (newer) lines overwrite earlier (stale) ones
     const byIndex = new Map<number, PromptOption>();
-    for (const line of normalized.split('\n')) {
+    for (const line of lines) {
       const hasCursor = /^\s*❯/.test(line);
       const nm = line.match(/^\s*❯?\s*(\d{1,2})[.)]\s*(.+)/);
       if (nm) {
