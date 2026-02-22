@@ -34,19 +34,19 @@ export function debouncedExec(key: string, script: string, delayMs = 100): void 
 
 export interface VolumeSettings {
   outputVolume: number;
-  inputVolume: number;
+  inputVolume: number | null;
   outputMuted: boolean;
 }
 
 export async function getVolumeSettings(): Promise<VolumeSettings> {
   const raw = await osascript('get volume settings');
   // "output volume:65, input volume:80, alert volume:100, output muted:false"
-  const num = (key: string) => {
-    const re = new RegExp(`${key}:(\\d+)`);
-    return parseInt(re.exec(raw)?.[1] ?? '0', 10);
+  const num = (key: string): number | null => {
+    const m = new RegExp(`${key}:(\\d+)`).exec(raw);
+    return m ? parseInt(m[1], 10) : null;
   };
   return {
-    outputVolume: num('output volume'),
+    outputVolume: num('output volume') ?? 0,
     inputVolume: num('input volume'),
     outputMuted: /output muted:true/.test(raw),
   };
