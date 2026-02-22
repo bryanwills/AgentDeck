@@ -13,7 +13,7 @@ import { ButtonConfig } from '../layout-manager.js';
 import { handleExpandedAction } from '../expanded-actions.js';
 import { dlog } from '../log.js';
 import { readFileSync, watchFile, unwatchFile } from 'fs';
-import { execSync } from 'child_process';
+import { execSync, execFile } from 'child_process';
 import { homedir } from 'os';
 
 const SIZE = 144;
@@ -495,7 +495,7 @@ function cycleSession(): void {
   }
 }
 
-function focusTerminal(): void {
+async function focusTerminal(): Promise<void> {
   try {
     const session = sessions[currentSessionIndex];
     execSync(
@@ -503,9 +503,13 @@ function focusTerminal(): void {
       { timeout: 3000 },
     );
     if (session?.tmuxSession) {
-      execSync(`tmux select-window -t ${session.tmuxSession}`, {
-        timeout: 2000,
-      });
+      try {
+        execSync(`tmux select-window -t ${session.tmuxSession}`, { timeout: 2000 });
+      } catch {
+        // select-window failed → tmux is likely detached, attach in new iTerm tab
+        const { attachTmuxInIterm } = await import('../utility-modes/macos.js');
+        attachTmuxInIterm(session.tmuxSession);
+      }
     }
   } catch {
     // Best effort

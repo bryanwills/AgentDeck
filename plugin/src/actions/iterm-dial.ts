@@ -11,7 +11,7 @@ import { State } from '@agentdeck/shared';
 import { isEncoderTakeoverActive } from '../encoder-takeover.js';
 import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
 import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
-import { getItermSessions, activateItermSession, getActiveItermTty, type ItermSession } from '../utility-modes/macos.js';
+import { getItermSessions, activateItermSession, attachTmuxInIterm, getActiveItermTty, type ItermSession } from '../utility-modes/macos.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderItermPanel, renderItermReady } from '../renderers/iterm-renderer.js';
 import { switchToPort } from './session-button.js';
@@ -38,6 +38,14 @@ interface AgentDeckSession {
   port: number;
   pid: number;
   tty?: string;
+  tmuxSession?: string;
+}
+
+function getCurrentTmuxSession(): string | undefined {
+  if (!bridgeRef) return undefined;
+  const adSessions = loadAgentDeckSessions();
+  const currentPort = bridgeRef.getPort();
+  return adSessions.find((s) => s.port === currentPort)?.tmuxSession;
 }
 
 function loadAgentDeckSessions(): AgentDeckSession[] {
@@ -192,12 +200,19 @@ export class ItermDialAction extends SingletonAction {
     if (isEncoderTakeoverActive()) return;
     if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
 
-    // Push = refresh session list
-    dlog('ItermDial', 'push: refresh sessions');
-    lastActionAt = Date.now();
-    sessions = await getItermSessions();
-    if (activeIndex >= sessions.length) activeIndex = Math.max(0, sessions.length - 1);
-    refreshItermDials();
+    // Push = activate selected session or attach detached tmux
+    const selected = sessions[activeIndex];
+    if (selected) {
+      dlog('ItermDial', `push: activate session ${selected.name}`);
+      activateItermSession(selected.windowId, selected.tabIndex, selected.sessionId);
+    } else {
+      // No iTerm session visible — try attaching detached tmux from current AgentDeck session
+      const tmuxSession = getCurrentTmuxSession();
+      if (tmuxSession) {
+        dlog('ItermDial', `push: attach tmux ${tmuxSession}`);
+        attachTmuxInIterm(tmuxSession);
+      }
+    }
   }
 
   override onWillDisappear(ev: WillDisappearEvent): void {

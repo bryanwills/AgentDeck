@@ -260,6 +260,19 @@ export async function getActiveItermTty(): Promise<string | null> {
   }
 }
 
+/** Open a new iTerm2 tab and attach to a tmux session. */
+export async function attachTmuxInIterm(sessionName: string): Promise<void> {
+  await osascript(
+    'tell application "iTerm2"\n' +
+    '  activate\n' +
+    '  tell current window\n' +
+    '    set newTab to (create tab with default profile)\n' +
+    `    tell current session of newTab to write text "tmux attach -t ${sessionName.replace(/"/g, '\\"')}"\n` +
+    '  end tell\n' +
+    'end tell',
+  ).catch(() => {});
+}
+
 // ---- Clipboard Paste (STT) ----
 
 /** Copy text to clipboard and simulate Cmd+V to paste at current cursor position. */
