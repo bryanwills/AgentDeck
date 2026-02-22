@@ -22,6 +22,7 @@ import {
   renderResponseInteractive,
   renderResponseSuggestion,
 } from '../renderers/response-renderer.js';
+import { isPickerActive, scrollPicker, selectProject, closePicker } from '../project-picker.js';
 import { dlog } from '../log.js';
 
 import type { JsonValue } from '@elgato/utils';
@@ -299,6 +300,7 @@ export class ResponseDialAction extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
 
     // Interactive mode: scroll options
@@ -344,6 +346,7 @@ export class ResponseDialAction extends SingletonAction {
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
+    if (isPickerActive()) { void selectProject(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
     if (currentState === State.AWAITING_OPTION && currentOptions.length > 0) {
       dlog('ResDial', `push: select_option idx=${selectedIndex} "${currentOptions[selectedIndex]?.label}"`);

@@ -65,7 +65,6 @@ export function createMediaMode(refresh: RefreshCallback, volumeStep = 1): Utili
   return {
     id: 'media',
     label: '\u266B',
-    layout: 'layouts/media-layout.json',
 
     async onActivate() {
       await fetchTrack();
@@ -78,6 +77,19 @@ export function createMediaMode(refresh: RefreshCallback, volumeStep = 1): Utili
 
     onDeactivate() {
       stopScroll();
+    },
+
+    onPause() {
+      stopScroll();
+    },
+
+    async onResume() {
+      await fetchTrack();
+      try {
+        const s = await getVolumeSettings();
+        volume = s.outputVolume;
+      } catch { /* keep local */ }
+      startScroll();
     },
 
     // Rotate = volume control
@@ -104,8 +116,8 @@ export function createMediaMode(refresh: RefreshCallback, volumeStep = 1): Utili
 
     getFeedback() {
       return {
-        title: '\u266B MEDIA',
-        state: playing ? '\u25B6' : '\u23F8',
+        title: 'MEDIA',
+        icon: playing ? '\u25B6' : '\u23F8',
         track: scrolledTrack(),
         artist: artistName || '',
         indicator: {

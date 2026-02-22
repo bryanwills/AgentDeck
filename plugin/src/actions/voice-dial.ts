@@ -11,12 +11,13 @@ import { State } from '@agentdeck/shared';
 import { BridgeClient } from '../bridge-client.js';
 import { isEncoderTakeoverActive } from '../encoder-takeover.js';
 import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
+import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
 import {
   encoderRegistry, resetEncoderLayouts,
   setVoiceTextTakeover,
 } from '../encoder-registry.js';
 import { dlog } from '../log.js';
-import { pasteText } from '../utility-modes/macos.js';
+import { pasteText, osascript } from '../utility-modes/macos.js';
 import { startLocalRecording, stopLocalRecording, cancelLocalRecording } from '../voice-local.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import {
@@ -208,17 +209,18 @@ function onVtDown(): void {
 
 function onVtUp(): void {
   const elapsed = Date.now() - vtDownTime;
+  dlog('VoiceDial', `onVtUp: elapsed=${elapsed}, hasText=${!!lastTranscription}, state=${currentState}, connected=${bridge.isConnected()}`);
   if (elapsed < VT_PRESS_THRESHOLD) {
     // Short press: confirm transcription
     if (lastTranscription) {
-      if (currentState === State.IDLE) {
-        // IDLE: send as prompt to Claude
+      if (currentState === State.IDLE && bridge.isConnected()) {
+        // IDLE + connected: send as prompt to Claude PTY
         dlog('VoiceDial', `vtSend: "${lastTranscription.slice(0, 60)}"`);
         bridge.send({ type: 'send_prompt', text: lastTranscription });
       } else {
-        // Non-IDLE: paste at cursor (standalone STT)
+        // Otherwise: paste at cursor
         dlog('VoiceDial', `vtPaste: "${lastTranscription.slice(0, 60)}"`);
-        pasteText(lastTranscription);
+        smartPaste(lastTranscription);
       }
     }
     lastTranscription = undefined;
@@ -233,6 +235,14 @@ function onVtUp(): void {
     exitVoiceTextTakeover();
     refreshVoiceDials();
   }
+}
+
+/**
+ * Paste text at cursor.
+ * Always copies to clipboard first (pbcopy), then Cmd+V.
+ */
+function smartPaste(text: string): void {
+  pasteText(text);
 }
 
 // --- Rendering ---
@@ -296,6 +306,7 @@ export class VoiceDialAction extends SingletonAction {
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
+    if (isPickerActive()) { void selectProject(); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
     if (vtActive) { onVtDown(); return; }
 
@@ -307,23 +318,21 @@ export class VoiceDialAction extends SingletonAction {
       return;
     }
 
-    if (!bridge.isConnected()) {
-      // Disconnected: local recording mode
-      dlog('VoiceDial', 'dialDown: start local recording (disconnected)');
-      recordStartTime = Date.now();
-      voiceState = 'recording';
-      startLocalRecording();
-      startAnimation(60);
-      refreshVoiceDials();
-      return;
-    }
-
-    dlog('VoiceDial', 'dialDown: start recording');
+    // Always use local recording (Terminal.app for mic permission)
+    // Bridge path only used for final delivery (send prompt when IDLE+connected)
+    dlog('VoiceDial', 'dialDown: start local recording');
     recordStartTime = Date.now();
     voiceState = 'recording';
-    bridge.send({ type: 'voice', action: 'start' });
     startAnimation(60);
     refreshVoiceDials();
+    try {
+      await startLocalRecording();
+    } catch (err) {
+      voiceState = 'error';
+      errorMessage = err instanceof Error ? err.message : String(err);
+      stopAnimation();
+      refreshVoiceDials();
+    }
   }
 
   override async onDialUp(_ev: DialUpEvent): Promise<void> {
@@ -333,41 +342,11 @@ export class VoiceDialAction extends SingletonAction {
 
     const elapsed = Date.now() - recordStartTime;
 
-    if (!bridge.isConnected()) {
-      // Disconnected: local recording mode
-      if (elapsed < MIN_RECORDING_MS) {
-        dlog('VoiceDial', `dialUp: cancel local (${elapsed}ms < ${MIN_RECORDING_MS}ms)`);
-        voiceState = 'idle';
-        cancelLocalRecording();
-        stopAnimation();
-        refreshVoiceDials();
-        return;
-      }
-
-      dlog('VoiceDial', `dialUp: stop local recording (${elapsed}ms)`);
-      voiceState = 'transcribing';
-      startAnimation(100);
-      refreshVoiceDials();
-      try {
-        const text = await stopLocalRecording();
-        lastTranscription = text;
-        voiceState = 'idle';
-        stopAnimation();
-        enterVoiceTextTakeover();
-        refreshVoiceDials();
-      } catch (err) {
-        voiceState = 'error';
-        errorMessage = err instanceof Error ? err.message : String(err);
-        stopAnimation();
-        refreshVoiceDials();
-      }
-      return;
-    }
-
+    // Always use local recording path
     if (elapsed < MIN_RECORDING_MS) {
       dlog('VoiceDial', `dialUp: cancel (${elapsed}ms < ${MIN_RECORDING_MS}ms)`);
       voiceState = 'idle';
-      bridge.send({ type: 'voice', action: 'cancel' });
+      await cancelLocalRecording();
       stopAnimation();
       refreshVoiceDials();
       return;
@@ -375,12 +354,32 @@ export class VoiceDialAction extends SingletonAction {
 
     dlog('VoiceDial', `dialUp: stop recording (${elapsed}ms)`);
     voiceState = 'transcribing';
-    bridge.send({ type: 'voice', action: 'stop' });
     startAnimation(100);
     refreshVoiceDials();
+    try {
+      const text = await stopLocalRecording();
+      if (!text || !text.trim()) {
+        voiceState = 'error';
+        errorMessage = 'Empty transcription — check mic permission for Terminal.app';
+        stopAnimation();
+        refreshVoiceDials();
+        return;
+      }
+      lastTranscription = text;
+      voiceState = 'idle';
+      stopAnimation();
+      enterVoiceTextTakeover();
+      refreshVoiceDials();
+    } catch (err) {
+      voiceState = 'error';
+      errorMessage = err instanceof Error ? err.message : String(err);
+      stopAnimation();
+      refreshVoiceDials();
+    }
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (vtActive) { onVtRotate(ev.payload.ticks); return; }
   }

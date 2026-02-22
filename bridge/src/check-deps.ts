@@ -26,6 +26,12 @@ const DEPS: DepCheck[] = [
     required: false,
     installHint: 'brew install whisper-cpp && whisper-cli --download-model large-v3-turbo',
   },
+  {
+    name: 'whisper-server',
+    command: 'which whisper-server',
+    required: false,
+    installHint: 'brew install whisper-cpp (includes whisper-server)',
+  },
 ];
 
 export function checkDependencies(): { ok: boolean; warnings: string[] } {

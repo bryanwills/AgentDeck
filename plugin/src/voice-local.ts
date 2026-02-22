@@ -1,22 +1,32 @@
 /**
  * Local voice recording & transcription for disconnected mode.
- * Uses rec (sox) for audio capture, whisper-server or whisper-cli for transcription.
+ *
+ * Recording uses an iTerm2 utility session to run `rec` — this inherits
+ * iTerm2's macOS microphone permission, bypassing the limitation that
+ * Stream Deck plugin processes cannot obtain mic access.
+ *
+ * Transcription uses whisper-server (discovery) or whisper-cli fallback.
  */
-import { spawn, execSync, type ChildProcess } from 'child_process';
-import { tmpdir, homedir } from 'os';
+import { spawn, execSync } from 'child_process';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { unlinkSync, existsSync, statSync, readFileSync } from 'fs';
 import {
   REC_CANDIDATES, SOX_CANDIDATES,
-  WHISPER_CANDIDATES, WHISPER_SERVER_CANDIDATES,
+  WHISPER_CANDIDATES,
   MODEL_SEARCH_DIRS, MODELS_WITH_METAL, MODELS_WITHOUT_METAL,
   WHISPER_SERVER_INFO_FILE,
 } from '@agentdeck/shared';
+import { osascript } from './utility-modes/macos.js';
 import { dlog } from './log.js';
 
 const TIMEOUT_BASE_MS = 15_000;
 const TIMEOUT_MULTIPLIER_METAL = 1;
 const TIMEOUT_MULTIPLIER_ROSETTA = 4;
+
+// Poll interval for waiting on audio file
+const FILE_POLL_MS = 100;
+const FILE_POLL_MAX_MS = 5000;
 
 function findBinary(candidates: string[], fallback: string): string {
   for (const path of candidates) {
@@ -69,7 +79,6 @@ let whisperModel: string;
 let hasMetal: boolean;
 
 let recording = false;
-let audioProcess: ChildProcess | null = null;
 let audioFile = '';
 
 function ensureInit(): void {
@@ -84,66 +93,88 @@ function ensureInit(): void {
   dlog('VoiceLocal', `init: rec=${recBin}, whisper=${whisperBin}, model=${whisperModel}, metal=${hasMetal}`);
 }
 
-export function startLocalRecording(): void {
+// ---- iTerm recording session (no write text — avoids paste dialog) ----
+
+/**
+ * Start rec in an iTerm2 window using `create window with default profile command`.
+ * The command runs as the session's initial process — no `write text` (avoids paste dialog).
+ * iTerm2 has macOS microphone permission, so rec inherits it.
+ */
+async function launchRecInIterm(recCommand: string): Promise<void> {
+  const escaped = recCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  await osascript(
+    'set prevApp to (path to frontmost application as text)\n' +
+    'tell application "iTerm2"\n' +
+    `  set newWin to (create window with default profile command "${escaped}")\n` +
+    '  set miniaturized of newWin to true\n' +
+    'end tell\n' +
+    'if prevApp does not contain "iTerm" then\n' +
+    '  tell application prevApp to activate\n' +
+    'end if',
+  );
+}
+
+/** Kill the rec process by matching the audio file path in its arguments. */
+function killRecProcess(): void {
+  try {
+    execSync(`pkill -INT -f "${audioFile}"`, { timeout: 2000 });
+    dlog('VoiceLocal', 'Sent SIGINT to rec via pkill');
+  } catch {
+    dlog('VoiceLocal', 'pkill: no matching rec process (may have already exited)');
+  }
+}
+
+// ---- Recording via iTerm ----
+
+export async function startLocalRecording(): Promise<void> {
   ensureInit();
   if (recording) return;
 
   audioFile = join(tmpdir(), `sdc-voice-local-${Date.now()}.wav`);
   recording = true;
 
-  audioProcess = spawn(recBin, [
-    '-r', '16000', '-c', '1', '-b', '16', audioFile,
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
-
-  audioProcess.stderr?.on('data', (data: Buffer) => {
-    const line = data.toString().trim();
-    if (line && !line.startsWith('In:') && !line.startsWith('Out:')) {
-      dlog('VoiceLocal', `rec: ${line}`);
-    }
-  });
-
-  audioProcess.on('error', (err) => {
-    dlog('VoiceLocal', `rec spawn error: ${err.message}`);
+  try {
+    const cmd = `${recBin} -r 16000 -c 1 -b 16 ${audioFile}`;
+    await launchRecInIterm(cmd);
+    dlog('VoiceLocal', `Recording started via iTerm → ${audioFile}`);
+  } catch (err) {
     recording = false;
-    audioProcess = null;
-  });
-
-  audioProcess.on('exit', (code) => {
-    dlog('VoiceLocal', `rec exited with code ${code}`);
-    audioProcess = null;
-  });
-
-  dlog('VoiceLocal', `Recording started → ${audioFile}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    dlog('VoiceLocal', `Failed to start recording via iTerm: ${msg}`);
+    throw new Error(`Failed to start recording: ${msg}`);
+  }
 }
 
 export async function stopLocalRecording(): Promise<string> {
-  if (!recording || !audioProcess) {
+  if (!recording) {
     throw new Error('Not currently recording');
   }
 
-  const proc = audioProcess;
   recording = false;
 
-  proc.kill('SIGINT');
-  dlog('VoiceLocal', 'Sent SIGINT to rec');
+  // Kill rec process directly (avoids iTerm paste dialog for control characters)
+  killRecProcess();
 
-  await new Promise<void>((resolve) => {
-    let done = false;
-    const finish = () => { if (!done) { done = true; resolve(); } };
-    proc.on('exit', finish);
-    setTimeout(finish, 3000);
-  });
+  // Wait for audio file to be finalized (rec needs a moment after Ctrl+C)
+  await waitForFile(audioFile, FILE_POLL_MAX_MS);
 
   if (!existsSync(audioFile)) {
-    const path = audioFile;
     cleanup();
-    throw new Error(`Recording file not created: ${path}`);
+    throw new Error(`Recording file not created: ${audioFile}`);
   }
   const sz = statSync(audioFile).size;
   dlog('VoiceLocal', `Recording file: ${sz} bytes`);
   if (sz < 100) {
     cleanup();
     throw new Error('Recording too short or empty');
+  }
+
+  // Check audio RMS to detect silence (whisper hallucinates on silent audio)
+  const rms = computeRms(audioFile);
+  dlog('VoiceLocal', `Audio RMS: ${rms.toFixed(4)}`);
+  if (rms < 0.001) {
+    cleanup();
+    throw new Error('No audio detected — check microphone permission for iTerm2');
   }
 
   try {
@@ -171,24 +202,52 @@ export async function stopLocalRecording(): Promise<string> {
   }
 }
 
-export function cancelLocalRecording(): void {
-  if (audioProcess) {
-    audioProcess.kill('SIGKILL');
-    audioProcess = null;
+export async function cancelLocalRecording(): Promise<void> {
+  if (recording) {
+    killRecProcess();
   }
   recording = false;
-  cleanup();
+  // Brief delay for rec to flush/exit, then cleanup
+  setTimeout(() => cleanup(), 300);
 }
 
 export function isLocalRecording(): boolean {
   return recording;
 }
 
+// ---- Helpers ----
+
+/** Wait for a file to appear and stabilize (size stops changing). */
+async function waitForFile(path: string, maxMs: number): Promise<void> {
+  const start = Date.now();
+  let lastSize = -1;
+  while (Date.now() - start < maxMs) {
+    await new Promise((r) => setTimeout(r, FILE_POLL_MS));
+    if (!existsSync(path)) continue;
+    const sz = statSync(path).size;
+    if (sz > 0 && sz === lastSize) return; // size stabilized
+    lastSize = sz;
+  }
+}
+
+/** Compute RMS energy of a 16-bit PCM WAV file (skip 44-byte header). */
+function computeRms(wavFile: string): number {
+  const buf = readFileSync(wavFile);
+  const headerSize = 44;
+  if (buf.length <= headerSize + 2) return 0;
+  const samples = (buf.length - headerSize) / 2;
+  let sumSq = 0;
+  for (let i = headerSize; i + 1 < buf.length; i += 2) {
+    const sample = buf.readInt16LE(i) / 32768;
+    sumSq += sample * sample;
+  }
+  return Math.sqrt(sumSq / samples);
+}
+
 function discoverWhisperServer(): number | null {
   try {
     const info = JSON.parse(readFileSync(WHISPER_SERVER_INFO_FILE, 'utf-8'));
     if (info?.port && info?.pid) {
-      // Check if PID is alive
       try { process.kill(info.pid, 0); } catch { return null; }
       return info.port;
     }

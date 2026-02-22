@@ -29,8 +29,9 @@ export function createDarkMode(): UtilityMode {
 
     getFeedback() {
       return {
-        title: isDark ? '\u263E DARK' : '\u2600 LIGHT',
-        value: isDark ? 'Dark Mode' : 'Light Mode',
+        title: 'THEME',
+        icon: isDark ? '\uD83C\uDF19' : '\u2600\uFE0F',
+        value: isDark ? 'Dark' : 'Light',
         indicator: {
           value: isDark ? 100 : 0,
           bar_fill_c: isDark ? '#6366f1' : '#fbbf24',

@@ -47,6 +47,7 @@ export function createBrightnessMode(): UtilityMode {
       const pct = Math.round((level / MAX) * 100);
       return {
         title: 'BRT',
+        icon: '\u2600\uFE0F',
         value: `${pct}%`,
         indicator: {
           value: pct,

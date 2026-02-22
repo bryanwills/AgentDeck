@@ -223,29 +223,23 @@ function refreshAll(): void {
   }
 }
 
-/** Split a project name into 1 or 2 lines at natural boundaries */
-function splitProjectName(name: string, maxChars: number): string[] {
-  if (name.length <= maxChars) return [name];
-
-  // Try splitting at camelCase boundary near midpoint
-  const mid = Math.floor(name.length / 2);
+/** Find best split point near target position in a string */
+function findSplitPoint(name: string, target: number, maxChars: number): number {
   let bestSplit = -1;
 
-  // Look for split points: camelCase, kebab-case, spaces
-  for (let i = Math.max(1, mid - 4); i <= Math.min(name.length - 1, mid + 4); i++) {
-    // camelCase boundary: lowercase followed by uppercase
+  // Look for split points near target: camelCase, kebab-case, spaces
+  for (let i = Math.max(1, target - 4); i <= Math.min(name.length - 1, target + 4); i++) {
     if (/[a-z]/.test(name[i - 1]) && /[A-Z]/.test(name[i])) {
       bestSplit = i;
       break;
     }
-    // kebab-case or space
     if (name[i] === '-' || name[i] === '_' || name[i] === ' ') {
       bestSplit = i + 1;
       break;
     }
   }
 
-  // Widen search if no split found near midpoint
+  // Widen search if no split found near target
   if (bestSplit === -1) {
     for (let i = 1; i < name.length; i++) {
       if (/[a-z]/.test(name[i - 1]) && /[A-Z]/.test(name[i])) {
@@ -264,14 +258,37 @@ function splitProjectName(name: string, maxChars: number): string[] {
     bestSplit = maxChars;
   }
 
-  const line1 = name.slice(0, bestSplit).replace(/[-_ ]$/, '');
-  const line2 = name.slice(bestSplit).replace(/^[-_ ]/, '');
+  return bestSplit;
+}
 
-  // Truncate each line if still too long
-  return [
-    truncate(line1, maxChars),
-    truncate(line2, maxChars),
-  ];
+/** Split a project name into 1–3 lines at natural boundaries */
+function splitProjectName(name: string, maxChars: number): string[] {
+  if (name.length <= maxChars) return [name];
+
+  const mid = Math.floor(name.length / 2);
+  const bestSplit = findSplitPoint(name, mid, maxChars);
+
+  const line1 = name.slice(0, bestSplit).replace(/[-_ ]$/, '');
+  const line2Raw = name.slice(bestSplit).replace(/^[-_ ]/, '');
+
+  // If both lines fit, return 2 lines
+  if (line1.length <= maxChars && line2Raw.length <= maxChars) {
+    return [truncate(line1, maxChars), truncate(line2Raw, maxChars)];
+  }
+
+  // Try splitting the longer line to make 3 lines
+  if (line1.length > maxChars) {
+    const split2 = findSplitPoint(line1, Math.floor(line1.length / 2), maxChars);
+    const l1 = line1.slice(0, split2).replace(/[-_ ]$/, '');
+    const l2 = line1.slice(split2).replace(/^[-_ ]/, '');
+    return [truncate(l1, maxChars), truncate(l2, maxChars), truncate(line2Raw, maxChars)];
+  }
+
+  // line2Raw is too long — split it
+  const split2 = findSplitPoint(line2Raw, Math.floor(line2Raw.length / 2), maxChars);
+  const l2 = line2Raw.slice(0, split2).replace(/[-_ ]$/, '');
+  const l3 = line2Raw.slice(split2).replace(/^[-_ ]/, '');
+  return [truncate(line1, maxChars), truncate(l2, maxChars), truncate(l3, maxChars)];
 }
 
 function getStatusInfo(): { label: string; detail: string; color: string; bg: string } {
@@ -325,11 +342,21 @@ function renderSessionSvg(): string {
       const name = currentSession
         ? getDisplayName(currentSession, sessions)
         : (currentProjectName || 'Session');
-      const nameLines = splitProjectName(name, MAX_CHARS_PER_LINE);
-      const isTwoLine = nameLines.length > 1;
+      // Adaptive maxChars: determine line count first, then use font-appropriate limit
+      // 26px → ~10 chars, 20px → ~12 chars, 16px → ~14 chars (144px button)
+      let nameLines = splitProjectName(name, MAX_CHARS_PER_LINE);
+      let nameFs: number;
+      if (nameLines.length === 1) {
+        nameFs = 26;
+      } else if (nameLines.length === 2) {
+        nameFs = 20;
+        nameLines = splitProjectName(name, 12); // re-split with wider limit
+      } else {
+        nameFs = 16;
+        nameLines = splitProjectName(name, 14); // re-split with wider limit
+      }
       const total = sessions.length;
       const modelLine = currentModel ? truncate(currentModel, 12) : '';
-      const nameFs = isTwoLine ? 20 : 26;
       const modelFs = 20;
 
       // Build text elements for auto-centering
@@ -387,35 +414,68 @@ function renderSessionSvg(): string {
       // Frame-based star spinner animation with state-specific colors
       const info = getStatusInfo();
       const detail = truncate(info.detail, 14);
-      const BUTTON_CENTER = 72;
+
+      // Project name (up to 3 lines, 13px) — centered together with star+label+detail
+      const currentSession = sessions[currentSessionIndex];
+      const projName = currentSession
+        ? getDisplayName(currentSession, sessions)
+        : (currentProjectName || '');
+      const projLines = projName ? splitProjectName(projName, 12) : [];
+      const projFs = 13;
+      const projLineH = 11; // line spacing for project name lines
+
+      // Build unified vertical stack: [projLines...] gap [star] gap [label] gap [detail]
       const starH = 20;
       const labelFs = 24;
       const detailFs = 16;
-      const gap1 = 6;   // star ↔ label
-      const gap2 = 8;   // label ↔ detail
-      const span = starH / 2 + gap1 + labelFs / 2 + labelFs / 2 + gap2 + detailFs / 2;
-      let cy = BUTTON_CENTER - span / 2;
-      const starY = Math.round(cy);
-      cy += starH / 2 + gap1 + labelFs / 2;
-      const labelBaseline = Math.round(cy + labelFs * 0.35);
-      cy += labelFs / 2 + gap2 + detailFs / 2;
-      const detailBaseline = Math.round(cy + detailFs * 0.35);
+      const gapProj = 4;  // proj ↔ star
+      const gap1 = 4;     // star ↔ label
+      const gap2 = 6;     // label ↔ detail
+
+      // Total span calculation
+      const projSpan = projLines.length > 0 ? (projLines.length - 1) * projLineH + projFs : 0;
+      const projGap = projLines.length > 0 ? gapProj : 0;
+      const totalSpan = projSpan + projGap + starH + gap1 + labelFs + gap2 + detailFs;
+
+      const BUTTON_CENTER = 72;
+      let cy = BUTTON_CENTER - totalSpan / 2;
 
       // Rotation: 360° over ANIM_TOTAL_FRAMES
       const angle = Math.round((animFrame / ANIM_TOTAL_FRAMES) * 360);
       // Breathing opacity: sinusoidal 0.5–1.0
       const opacity = (0.75 + 0.25 * Math.sin((animFrame / ANIM_TOTAL_FRAMES) * Math.PI * 2)).toFixed(2);
 
-      return [
+      const lines: string[] = [
         `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">`,
         `<rect width="${SIZE}" height="${SIZE}" rx="12" fill="${info.bg}"/>`,
+      ];
+
+      // Render project name lines
+      for (let i = 0; i < projLines.length; i++) {
+        const baseline = Math.round(cy + projFs * 0.35);
+        lines.push(
+          `<text x="72" y="${baseline}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${projFs}" fill="${info.color}" opacity="0.6">${escXml(truncate(projLines[i], 14))}</text>`,
+        );
+        cy += i < projLines.length - 1 ? projLineH : projFs / 2;
+      }
+      if (projLines.length > 0) cy += projGap + starH / 2;
+      else cy += starH / 2;
+
+      const starY = Math.round(cy);
+      cy += starH / 2 + gap1 + labelFs / 2;
+      const labelBaseline = Math.round(cy + labelFs * 0.35);
+      cy += labelFs / 2 + gap2 + detailFs / 2;
+      const detailBaseline = Math.round(cy + detailFs * 0.35);
+
+      lines.push(
         `<g transform="translate(72, ${starY}) rotate(${angle})">`,
         `<path d="M0,-10 L2,-3 L10,0 L2,3 L0,10 L-2,3 L-10,0 L-2,-3Z" fill="${info.color}" opacity="${opacity}"/>`,
         `</g>`,
         `<text x="72" y="${labelBaseline}" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="${info.color}">${info.label}</text>`,
         `<text x="72" y="${detailBaseline}" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="${info.color}" opacity="0.7">${escXml(detail)}</text>`,
         `</svg>`,
-      ].join('');
+      );
+      return lines.join('');
     }
 
     default:

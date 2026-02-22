@@ -3,6 +3,11 @@
  * Uses execFile (no shell) for safety. Debounced execution for rapid dial rotation.
  */
 import { execFile, spawn } from 'child_process';
+import { appendFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+
+const PASTE_LOG = join(homedir(), '.agentdeck', 'paste-debug.log');
 
 // ---- Core executor ----
 
@@ -275,13 +280,16 @@ export async function attachTmuxInIterm(sessionName: string): Promise<void> {
 
 /** Copy text to clipboard and simulate Cmd+V to paste at current cursor position. */
 export function pasteText(text: string): void {
-  const proc = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] });
-  proc.stdin.write(text);
-  proc.stdin.end();
-  proc.on('close', () => {
-    setTimeout(() => {
-      osascript('tell application "System Events" to keystroke "v" using command down').catch(() => {});
-    }, 50);
+  const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  appendFileSync(PASTE_LOG, `[${new Date().toISOString()}] pasteText called, text(${text.length}): "${text.slice(0, 80)}"\n`);
+  osascript(
+    `set the clipboard to "${escaped}"\n` +
+    'delay 0.1\n' +
+    'tell application "System Events" to keystroke "v" using command down',
+  ).then(() => {
+    appendFileSync(PASTE_LOG, `[${new Date().toISOString()}] osascript OK\n`);
+  }).catch((err) => {
+    appendFileSync(PASTE_LOG, `[${new Date().toISOString()}] osascript FAILED: ${err}\n`);
   });
 }
 

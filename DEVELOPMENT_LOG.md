@@ -2,6 +2,265 @@
 
 ---
 
+## 2026-02-22 — Security Guide 커서선택 UI 오분류 수정
+
+### 문제
+
+`sdc`로 새 프로젝트 진입 시 Security Guide("Yes, I trust this folder" / "No, exit")가 `permission_prompt`로 분류되어 `y\r`을 전송. 하지만 이 프롬프트는 커서 선택 UI(`Enter to confirm`)이므로 Enter 키만 필요.
+
+### 해결
+
+`isCursorSelectionUI()` 메서드 추가 — buffer에서 `Enter to confirm` 패턴 감지 시 `option_prompt`(navigable)로 분류하여 arrow key + Enter로 선택.
+
+### 교훈
+
+**ANSI 커서 제어로 공백이 제거되는 현상**: PTY 출력을 `stripAnsi()` 처리하면 ANSI cursor positioning(`\x1b[nC` 등)이 제거되면서 단어 사이 공백도 사라짐. 예: `"Enter to confirm"` → `"Entertoconfirm"`. output-parser에서 텍스트 패턴 매칭 시 **`\s+` 대신 `\s*`를 사용**해야 안전함. 이는 Claude Code TUI가 cursor positioning으로 텍스트를 배치하기 때문에 발생하는 구조적 특성.
+
+---
+
+## 2026-02-22 — Ghost Text 자동완성 제안 안정성 강화
+
+### 문제
+
+Response Dial의 suggested prompt 기능이 엉뚱한 텍스트를 표시하는 오탐 발생:
+1. `"try 'edit command-dial.ts to...'"` — `\x1b[2m` (dim) ANSI 코드가 Claude 응답 텍스트에도 쓰여 ghost text로 오인
+2. `"65"` — diff 출력의 라인 번호가 `\x1b[90m` (gray)으로 렌더되어 캡처됨
+3. 텍스트 잘림 (`"시 시도해봐"`) — `.match()` (첫 매칭만)으로 멀티 ANSI 세그먼트 일부 누락
+
+### 초기 접근
+
+rawData 전체에서 gray ANSI escape 코드(`\x1b[2m`, `\x1b[90m`, `38;5;240-255`)를 스캔.
+
+### 최종 해결
+
+**2단계 전략 + 보수적 필터:**
+
+1. **Strategy 1 (고신뢰)**: clean text에서 `❯ Try "..."` 패턴 직접 파싱.
+   - ANSI 파싱 완전 우회 → 오탐 없음
+   - Claude Code v2.1.49+ 기준 가장 흔한 ghost text 형식
+
+2. **Strategy 2 (ANSI 보조)**: `❯`가 포함된 라인에서만 gray 세그먼트 수집.
+   - rawData 전체 스캔 → `❯` 라인 스코프 제한으로 diff/상태바 배제
+   - `matchAll` + join으로 멀티 세그먼트 연결
+
+3. **`scheduleSuggestion` 검증 레이어**:
+   - `^\d+$` — 순수 숫자 거부 (diff 라인 번호)
+   - `\w{2,}` — 실제 단어 없으면 거부
+   - 길이 3~200자
+
+4. **`\x1b[2m` (dim) 제거**: UI 전반(상태바, 힌트, 인용)에 쓰이므로 ghost text 기준 부적합.
+
+### 설계 원칙
+
+오탐(엉뚱한 텍스트 표시) > 미탐(suggestion 놓침). 가끔 suggestion을 놓치더라도 잘못된 텍스트를 표시하지 않는 것이 UX상 우선.
+
+---
+
+## 2026-02-22 — whisper-server 통합으로 음성 전사 지연 해소
+
+### 문제
+
+음성 전사 호출마다 `whisper-cli`가 1.5GB `large-v3-turbo` 모델을 GPU 메모리에 로드→추론→언로드. 모델 로드/언로드 오버헤드가 추론보다 큰 병목 (호출당 ~5-10초).
+
+### 해결
+
+`whisper-server` (whisper.cpp 내장 HTTP 서버)를 브릿지 수명 주기에 통합하여 모델 상주:
+
+- **서버 수명 관리**: `VoiceManager.startServer()` / `stopServer()` — 브릿지 시작 시 비동기 스폰, 종료 시 SIGTERM+3s SIGKILL
+- **포트 할당**: `bridgePort + 10` (9120→9130) — 브릿지 포트 범위(9120-9129)와 겹치지 않음
+- **HTTP 전사**: `POST /inference` multipart form-data (외부 의존성 없이 수동 boundary 구성)
+- **라우팅**: `useServer && whisperServerReady` → 서버 모드, 실패 시 자동 CLI 폴백
+- **리샘플 스킵**: 서버 모드에서 sox 리샘플 생략 (`--convert` 플래그로 서버가 자체 변환) → ~100-300ms 추가 절감
+- **Readiness 폴링**: 500ms 간격 최대 30초, 모델 로드 완료 후 서버가 listen 시작하므로 아무 HTTP 응답 = ready
+- **크래시 복구**: 서버 프로세스 `exit` 이벤트에서 `useServer=false` 설정 → 다음 호출부터 CLI 폴백
+
+### 결과
+
+- 예상 지연: ~5-10s → <2s (모델 상주 + 리샘플 생략)
+- `whisper-server` 미설치 시 기존 `whisper-cli` 경로 100% 유지 (무손실 폴백)
+- `check-deps.ts`에 선택적 의존성 추가 (설치 안내만, 필수 아님)
+
+---
+
+## 2026-02-22 — Voice Text Wide Canvas + Encoder LCD 디자인 일관성 정비
+
+### 문제
+
+1. **전사 텍스트 가독성**: VT(Voice Text Takeover)가 패널별 독립 SVG → 텍스트가 패널 경계에서 끊김, 짧은 텍스트가 좁은 1패널에 갇힘
+2. **인코더 디자인 불일치**: 4개 다이얼(VOL, PROMPT, TERM, VOICE)의 헤더 정렬·폰트·바 높이·아이콘 크기가 제각각
+3. **Utility 모드 타이틀에 emoji 혼재**: "🔊 Vol", "☀️ Bright" 등 타이틀에 emoji가 포함되어 디자인 일관성 저해
+
+### 해결
+
+#### Voice Text Wide Canvas
+
+전체 인코더(최대 4패널 × 200px = 800px)를 하나의 와이드 캔버스로 렌더링:
+
+- **translate 슬라이싱**: `<g transform="translate(${-i*W},0)">` — SD의 viewBox offset 미지원 우회
+- **clipPath 스크롤**: 텍스트 영역 y=22..80 클리핑, `translate(0,${-scrollY})` 픽셀 스크롤
+- **적응형 폰트 5단계**: 48→36→24→18→16px, 짧은 텍스트는 크게, 긴 텍스트는 작게
+- **가운데 정렬**: 가로 `text-anchor="middle"`, 세로 자동 중앙 배치
+- **hint pills**: `tap ✓` / `hold ✕` (50×16, 56×16, 13px bold)
+- **VT 잔상 제거**: exit 시 blank SVG로 모든 패널 원자적 초기화, interactive 상태 진입 시 선제적 VT 종료
+
+#### 인코더 LCD 디자인 일관성
+
+**통일 규칙 확정**:
+
+| 요소 | 규격 |
+|------|------|
+| Header | 14px bold, `#94a3b8`, `text-anchor="middle" x="100"` |
+| Counter | 11px `#475569`, `text-anchor="end" x="190"` |
+| Icon (active) | 28px, accent color |
+| Icon (disabled) | 22px, `#475569` opacity=0.5 |
+| Bar (data) | `x=10 w=180 h=2 rx=1`, track `#1e293b` + fill |
+| Bar (decorative) | `x=60 w=80 h=2 rx=1`, accent opacity=0.2 |
+
+**수정 사항**:
+- Voice/Response/iTerm: 헤더 LEFT→CENTER 정렬 통일
+- iTerm Panel: y=14/11px/#06b6d4 → y=18/14px/#94a3b8
+- Response Interactive: bar h=3→2, counter #64748b→#475569
+- Response Disabled: icon 28→22px
+
+#### Utility 모드 Icon+Value 분리
+
+**이전**: 타이틀에 emoji 포함 ("🔊 Vol"), value만 독립 표시
+**이후**: 깔끔한 영문 타이틀 ("VOL") + icon+value 가운데 그룹 렌더링
+
+| Mode | title | icon | value |
+|------|-------|------|-------|
+| Volume | VOL | 🔊/🔇 | 50% / Muted |
+| Mic | MIC | 🎙 | 80% / Muted |
+| Brightness | BRT | ☀️ | 50% |
+| Timer | TIMER | ⏱️ | 05:00 |
+| Dark Mode | THEME | 🌙/☀️ | Dark / Light |
+| Media | MEDIA | ▶/⏸ | (track name) |
+
+Icon+Value 그룹 가운데 정렬:
+```typescript
+const groupX = Math.round(100 - (iconPx + gap + valPx) / 2);
+```
+
+### 핵심 설계 결정
+
+- **translate > viewBox**: SD SVG 렌더러가 non-origin viewBox offset 무시 → translate로 우회
+- **헤더 항상 가운데**: 모든 상태·모든 다이얼에서 일관된 시각적 무게중심
+- **Icon+Value 그룹 정렬**: 폭 추정(emoji=1em, char≈0.55em) 기반 동적 offset → 자연스러운 간격
+- **Space width 보정**: Arial space ≈ 0.28em (기존 0.55em 오류 수정) → 정확한 줄바꿈
+
+### Files
+
+| File | Action |
+|------|--------|
+| `plugin/src/renderers/voice-renderer.ts` | Modified — wide canvas, adaptive font, center align |
+| `plugin/src/renderers/utility-renderer.ts` | Modified — icon+value group, center header, media icon |
+| `plugin/src/renderers/response-renderer.ts` | Modified — center header, bar h=2, disabled icon 22px |
+| `plugin/src/renderers/iterm-renderer.ts` | Modified — center header, panel header 14px/#94a3b8 |
+| `plugin/src/actions/voice-dial.ts` | Modified — pixel scroll, wide canvas VT, atomic exit |
+| `plugin/src/actions/utility-dial.ts` | Modified — pass icon field |
+| `plugin/src/plugin.ts` | Modified — VT exit before takeover |
+| `plugin/src/utility-modes/volume.ts` | Modified — title/icon 분리 |
+| `plugin/src/utility-modes/mic.ts` | Modified — title/icon 분리 |
+| `plugin/src/utility-modes/brightness.ts` | Modified — title/icon 분리 |
+| `plugin/src/utility-modes/timer.ts` | Modified — title/icon 분리 |
+| `plugin/src/utility-modes/darkmode.ts` | Modified — title/icon 분리 |
+| `plugin/src/utility-modes/media.ts` | Modified — title/icon 분리 |
+
+---
+
+## 2026-02-21 — Encoder LCD 디자인 통일 (SVG Pixmap)
+
+### 문제
+
+Response Dial과 Utility Dial이 JSON layout 기반 렌더링 → Voice Dial의 SVG pixmap 렌더링과 시각적 불일치. JSON layout은 그라데이션, 아이콘 크기, 타이포그래피 제어에 한계가 있어 인코더 간 디자인 일체감이 부족.
+
+### 해결
+
+#### 통일된 디자인 언어
+
+Voice Dial의 SVG pixmap 패턴을 모든 인코더에 적용:
+- 배경: `#0f172a` (Deep Navy)
+- 헤더: 11px bold `#94a3b8` (기능 라벨)
+- 중앙: 주요 콘텐츠 (아이콘 or 값, accent color)
+- 하단: 2px accent bar
+
+#### SVG Renderer 분리
+
+| Renderer | File | 용도 |
+|----------|------|------|
+| response-renderer.ts | `renderers/` | IDLE(prompt), PROCESSING, DISCONNECTED, interactive fallback |
+| utility-renderer.ts | `renderers/` | generic mode (vol/mic/timer/brt), media mode (track/artist) |
+| voice-renderer.ts | `renderers/` | 원형(reference) — Ready, Recording, Transcribing, Error |
+| option-renderer.ts | `renderers/` | Encoder Takeover 패널 (Context/Focus/List) |
+
+#### 공용 Pixmap Layout
+
+모든 인코더가 `voice-layout.json` (200x100 pixmap) 사용 — JSON text/bar 레이아웃 폐기.
+Manifest, encoder-takeover exit, voice text takeover exit 모두 통일.
+
+### 핵심 설계 결정
+
+- **JSON layout → SVG pixmap**: 그라데이션, 커스텀 폰트, 아이콘 크기, opacity 제어 가능
+- **단일 pixmap layout**: `voice-layout.json` 하나로 모든 인코더 통일 (레이아웃 전환 불필요)
+- **Renderer 패턴**: 순수 함수 → SVG 문자열 → `svgToDataUrl()` → `setFeedback({ canvas })`
+- **디자인 가이드**: `memory/encoder-lcd-design.md`에 토큰/색상/패턴 문서화
+
+### Files
+
+| File | Action |
+|------|--------|
+| `plugin/src/renderers/response-renderer.ts` | New |
+| `plugin/src/renderers/utility-renderer.ts` | New |
+| `plugin/src/actions/option-dial.ts` | Modified (JSON → SVG) |
+| `plugin/src/actions/utility-dial.ts` | Modified (JSON → SVG) |
+| `plugin/src/encoder-takeover.ts` | Modified (exit restore) |
+| `plugin/src/actions/voice-dial.ts` | Modified (vt exit restore) |
+| `plugin/bound.../manifest.json` | Modified (layout refs) |
+
+---
+
+## 2026-02-21 — Usage Dashboard 개선 (독립 조회 · 수위 게이지 · 테두리 애니메이션)
+
+### 문제
+
+1. **billingType 미감지로 OAuth 조회 스킵**: billingType은 PTY 세션 배너에서만 감지 → 세션 시작 전엔 'unknown'이라 5h/7d 데이터 없음
+2. **슬립/웨이크 후 stale 캐시**: 브릿지가 살아있어도 60초 캐시가 구형 resets_at 시각을 계속 보여줌
+3. **세션 없을 때 사용량 미표시**: 브릿지(=claude 세션)가 없으면 플러그인이 아무것도 표시 못함
+4. **구독자 Session 페이지**: 0.0K만 보이는 무의미한 페이지
+5. **0.2fps 애니메이션**: 브릿지 업데이트 주기(5s)에 묶여 테두리 애니메이션이 뚝뚝 끊김
+
+### 해결책
+
+**브릿지 (`bridge/src/`)**
+- `usage-api.ts`: OAuth 응답에서 `inferredBillingType` 추론 — 5h/7d 필드 존재 시 `subscription`, 없으면 `api`
+- `state-machine.ts`: `inferBillingType()` 메서드 추가 — PTY 배너 전에도 API 응답으로 billingType 설정 가능
+- `index.ts`: billingType 조건 제거(항상 OAuth fetch), `lastApiFetchTime` 추적으로 5분 초과 시 강제 재조회, 60초 주기 갱신 시 실제 broadcast 추가
+
+**플러그인 (`plugin/src/`)**
+- `plugin.ts`: 브릿지 `connected` 이벤트 시 즉시 `query_usage` 전송(슬립/웨이크 복구)
+- `actions/usage-button.ts`:
+  - `fetchStandaloneUsage()` — 브릿지 없이 플러그인이 직접 macOS 키체인 + Anthropic OAuth API 조회 (60초 poll)
+  - 구독자 Session 페이지 제거 (`5h → 7d → extra` 만)
+  - **수위 게이지 SVG**: 사용률만큼 물이 차오르는 시각적 디스플레이 + 2겹 파도
+  - **독립 8fps 애니메이션 타이머**: `setInterval(125ms)` — 데이터 업데이트와 완전히 분리
+  - **테두리 스핀**: `State.PROCESSING`일 때만 활성화 — Claude 처리 중에만 테두리가 빠르게 회전 + 글로우
+  - 폰트: title 15→18px, sub 13→18px, opacity 강화
+  - 레이아웃: 리셋까지 남은 시간을 메인 값으로, `X% · +Y.YK` (처리 중) / `X% · Z.ZK` (누적) / `X% used` (세션 없음) subtitle
+
+### 핵심 설계 결정
+
+- **isActive 감지**: `tokenDelta > 500` (불안정) → `currentState === State.PROCESSING` (정확)
+- **독립 렌더 루프**: 8fps 타이머가 `borderFrame` / `waveFrameFine` 전진 → 데이터와 애니메이션 완전 분리
+- **수위 의미**: 사용률 높을수록 물 차오름 (위험 시 꽉 참), 색상 green→yellow→red 연동
+
+### Commits
+
+| Hash | Message |
+|------|---------|
+| `db1153e` | feat: encoder takeover, option navigation, utility dial modes, usage overhaul |
+
+---
+
 ## 2026-02-21 — Utility Dial (Multi-Mode Encoder for E1)
 
 ### 문제
@@ -37,11 +296,32 @@ E1 슬롯이 다른 플러그인(시스템 볼륨 등)으로 점유되어 있으
 | Timer | timer.ts | 시간 ±5분 | 시작/일시정지/리셋 |
 | Dark Mode | darkmode.ts | 없음 | 다크모드 토글 |
 
-#### Timer 모드 — 모드 전환 생존
+#### 모드 라이프사이클: onPause / onResume
 
-- Timer는 mode-switch 시 `onDeactivate` 호출하지 않음 (interval 유지)
-- `onActivate`에서 running 상태면 interval 재개
-- full cleanup (rebuildModes, onWillDisappear)에서만 `onDeactivate` 호출
+모드 전환 시 비활성 모드의 타이머/폴링이 계속 돌아가는 리소스 낭비 문제를 해결하기 위해 `onPause`/`onResume` 훅을 도입.
+
+| 훅 | 호출 시점 | 목적 |
+|---|---|---|
+| `onActivate` | 최초 진입 (rebuildModes) | 초기 상태 로드 + 타이머 시작 |
+| `onPause` | 다른 모드로 전환 (onTouchTap) | 타이머/폴링 중지, 상태 보존 |
+| `onResume` | 이 모드로 복귀 (onTouchTap) | 상태 재조회 + 타이머 재시작 |
+| `onDeactivate` | 완전 정리 (rebuildModes, onWillDisappear) | 전부 해제, 상태 초기화 |
+
+`onTouchTap` 흐름: `prev.onPause()` → `activeIndex++` → `next.onResume() ?? next.onActivate()`
+
+#### 시스템 볼륨/마이크 동기화 (osascript 폴링)
+
+외부에서 시스템 볼륨/마이크를 변경했을 때 Stream Deck에 반영되지 않는 문제.
+macOS Core Audio 이벤트 구독은 네이티브 애드온 필요 → 배포 복잡도 증가로 기각.
+
+**구현 (volume.ts, mic.ts)**:
+- 2초 간격 `osascript "get volume settings"` 폴링 (활성 모드일 때만)
+- `polling` 가드 — async 중첩 방지 (osascript 지연 시 동시 실행 차단)
+- `startPolling()` — 항상 기존 타이머 제거 후 새로 생성 (타이머 누적 방지)
+- `lastActionAt` + `SKIP_AFTER_ACTION(3s)` — 사용자 다이얼 조작 직후 폴링 스킵 (자기 변경 덮어쓰기 방지)
+- 값 변경 감지 시에만 `refresh()` 호출 (불필요한 LCD 갱신 방지)
+
+**시스템 부담**: 2초당 1회 execFile('osascript') — CPU 0.1% 미만, 일시 메모리 ~2MB (즉시 해제). 메모리 누수 없음.
 
 #### 4-Encoder Takeover 모드
 
@@ -82,6 +362,156 @@ E1 슬롯이 다른 플러그인(시스템 볼륨 등)으로 점유되어 있으
 | Hash | Message |
 |------|---------|
 | (unstaged) | feat: utility dial — multi-mode encoder with 6 macOS utility modes |
+
+---
+
+## 2026-02-22 — iTerm Dial "No sessions" 순간 깜빡임 수정
+
+### 문제
+
+가끔 "No sessions"가 순간적으로 표시됨. 두 가지 원인:
+
+1. **`updateItermDialState`가 매 state 업데이트마다 `currentLayout = ''` 리셋**
+   → `ensurePixmapLayout()`이 항상 `setFeedbackLayout` 호출
+   → SD 하드웨어가 레이아웃 전환 중 순간 클리어 → 빈 화면/No sessions 플래시
+
+2. **`onWillAppear`에서 sessions 없는 상태로 즉시 render**
+   → "No sessions" 첫 프레임 표시 후 fetch 완료 시 업데이트
+
+### 수정
+
+- `updateItermDialState`에서 `currentLayout = ''` 제거 — state 변경이 레이아웃을 바꾸지 않음
+- `resetItermLayout()` 함수 추가 — encoder takeover exit 시에만 명시적 호출
+- `encoder-takeover.ts` exit에서 `resetItermLayout()` 연결 (`resetEncoderLayouts()` 직후)
+- `onWillAppear`: sessions 캐시 있으면 즉시 표시, 없으면 fetch 완료 후에만 render
+
+### 핵심 패턴
+
+레이아웃 리셋은 실제로 레이아웃이 변경되는 시점(takeover enter/exit)에만 수행해야 함. 일반 state 업데이트에서 레이아웃을 리셋하면 SD 하드웨어가 불필요한 레이아웃 전환을 수행해 깜빡임 발생.
+
+### Files
+
+| File | Action |
+|------|--------|
+| `plugin/src/actions/iterm-dial.ts` | Modified — currentLayout 리셋 제거, resetItermLayout 추가, onWillAppear 플래시 수정 |
+| `plugin/src/encoder-takeover.ts` | Modified — resetItermLayout 연결 |
+
+---
+
+## 2026-02-22 — iTerm Dial 버그 수정 (세션 목록 · 이름 개선 · 탭 전환)
+
+### 문제 1: No sessions — AppleScript `index of t` 에러
+
+`index of t` (탭 속성 직접 조회)가 iTerm2에서 `-1728` 에러를 던짐 → `catch` 블록이 빈 배열 반환 → "No sessions" 표시.
+
+**수정**: 루프 내 수동 카운터 `ti`로 교체.
+
+### 문제 2: tmux 세션명 미표시 — PATH 제한
+
+플러그인은 제한된 PATH로 실행 → `execFile('tmux', ...)` 가 바이너리를 못 찾아 `catch` → tmuxMap 빈 상태 → "tmux (tmux)" 원본 표시.
+
+**수정**: 절대경로 폴백 리스트 `['/usr/local/bin/tmux', '/opt/homebrew/bin/tmux', '/usr/bin/tmux']` 순서로 시도.
+
+### 문제 3: `tty of s` → `missing value` 문자열 연결 에러
+
+일부 세션(node 프로세스 등)에서 `tty of s`가 `missing value` 반환 → 문자열 concatenation 실패 → 전체 AppleScript 에러.
+
+**수정**: `try/on error` 블록으로 tty 안전 추출, 실패 시 빈 문자열 사용.
+
+### 문제 4: `set current tab of w` — `-10000` 에러
+
+탭 전환 AppleScript에서 `set current tab of w to item N of tabs of w`가 AppleEvent 구조 실패.
+
+**수정**: `select item N of tabs of w` 로 변경 (직접 동작 확인).
+
+### 세션 이름 개선
+
+iTerm2 세션 이름이 길고 난잡한 문제 (e.g. `✳ Task Failure Analysis (sourcekit-lsp)`):
+
+| 이름 유형 | 변환 결과 |
+|-----------|-----------|
+| tmux 탭 (tty 매칭) | tmux 세션명 (e.g. `ViewLingo`) |
+| `✳ Task Failure Analysis (sourcekit-lsp)` | `Task Failure Analysis` |
+| `..thub/AgentDeck (-zsh)` | `AgentDeck` |
+
+**로직**: tty → tmuxMap 매칭 → 실패 시 앞 이모지 제거 + `(process)` 제거 + 경로면 마지막 폴더명 추출.
+
+### 세션 이름 멀티라인 렌더링
+
+긴 이름을 잘라내는 대신 2~3줄로 표시:
+- 14자 이하: 16px 1줄
+- 15~40자: 14px 2줄
+- 41자+: 14px 3줄 (단어 단위 줄바꿈, 초과 시 강제 분리)
+- 줄 수에 따라 수직 중앙 정렬 자동 계산
+
+### 기타: VT_COMPACT_FONT_SIZE / VT_COMPACT_LINE_HEIGHT 누락 상수 추가
+
+`voice-renderer.ts`에서 사용하되 선언되지 않은 상수 추가 → 빌드 경고 제거.
+
+### Files
+
+| File | Action |
+|------|--------|
+| `plugin/src/utility-modes/macos.ts` | Modified — tty 안전 추출, tmux 절대경로 폴백, 이름 파싱, 탭 전환 fix |
+| `plugin/src/renderers/iterm-renderer.ts` | Modified — 멀티라인 wrapText, 수직 중앙 정렬 |
+| `plugin/src/renderers/voice-renderer.ts` | Modified — VT_COMPACT_FONT_SIZE / VT_COMPACT_LINE_HEIGHT 추가 |
+
+### 핵심 설계 결정
+
+- **tmux 절대경로**: Stream Deck 플러그인 환경에서 PATH가 제한됨 → 시스템 바이너리는 절대경로 사용 필수
+- **tty 매핑**: iTerm2 세션 tty ↔ `tmux list-clients` tty로 tmux 세션명 해결
+- **SVG 멀티라인**: `<text>` 요소 복수 배치로 구현 (SVG `textLength`/`foreignObject` 불사용)
+
+---
+
+## 2026-02-22 — Response Dial 통합 (Option Selector + Quick Prompt → 단일 인코더)
+
+### 문제
+
+E2(Option Selector)는 선택지가 없는 IDLE 상태에서 "Ready"만 표시 — 슬롯 낭비. E3(Quick Prompt)는 IDLE에서 프롬프트 전송 + 선택지 있을 때 takeover List 뷰 표시. 두 다이얼이 rotate=탐색/push=확정이라는 동일 UX 패턴을 상황에 따라 다르게 쓸 뿐이라 인코더 슬롯 낭비.
+
+### 해결
+
+**Response Dial** (`option-dial` UUID 유지):
+- IDLE: rotate → 프롬프트 목록 순환, push → 선택된 프롬프트 전송
+- Interactive (AWAITING_OPTION/PERMISSION/DIFF): rotate → 옵션 스크롤, push → 선택 확정
+- PI 설정(`response-dial-pi.html`)으로 커스텀 프롬프트 목록 지원
+
+**Takeover 패널 재편** (E3 슬롯 해제):
+
+| 슬롯 | 평소 | Takeover 중 |
+|------|------|-------------|
+| E1 (Utility) | Utility | Context (상태·툴·질문) |
+| E2 (Response Dial) | Prompt 목록 | Focus (선택 옵션, 대형 폰트) |
+| E4 (Voice) | Voice | List (옵션 목록, 스크롤) |
+
+voiceIds가 기존 Detail 패널 역할 대신 List 패널을 담당 → 3패널 경험 유지.
+
+**렌더링 개선** (option-renderer.ts):
+- Focus 패널: 옵션 이름 24px (기존 16-20px), sub 13px, position counter 제거
+- List 패널: 행 폰트 15px, 행 높이 22px, 배지 제거 (색상으로만 구분)
+- Context 패널: 툴 라벨 18px bold, 질문 텍스트 13px, hint 텍스트 제거
+
+### 핵심 설계 결정
+
+- **UUID 유지**: `bound.serendipity.agentdeck.option-dial` — 배포 후 변경 불가, 기능만 확장
+- **단일 다이얼 이중 모드**: `isInteractive()` 분기로 IDLE/interactive 동작 전환
+- **voiceIds → List**: Detail 패널 폐기, List가 더 유용 (전체 옵션 목록 스크롤)
+- **배지 제거 from List**: Focus에만 유지, List는 row 배경색으로 구분
+
+### Files
+
+| File | Action |
+|------|--------|
+| `plugin/src/actions/option-dial.ts` | Modified — IDLE prompt 순환·전송 추가, class → ResponseDialAction |
+| `plugin/src/actions/command-dial.ts` | **Deleted** |
+| `plugin/src/encoder-registry.ts` | Modified — commandIds 제거 |
+| `plugin/src/encoder-takeover.ts` | Modified — voiceIds → List 패널, commandIds 참조 제거 |
+| `plugin/src/plugin.ts` | Modified — CommandDialAction 제거 |
+| `plugin/src/renderers/option-renderer.ts` | Modified — 폰트 증가, hint 제거, List 배지 제거 |
+| `plugin/bound.../manifest.json` | Modified — "Quick Prompt" 제거, "Response Dial" 이름 변경 |
+| `plugin/bound.../ui/response-dial-pi.html` | New |
+| `plugin/bound.../ui/command-dial-pi.html` | **Deleted** |
 
 ---
 

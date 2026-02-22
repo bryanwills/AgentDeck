@@ -110,6 +110,15 @@ const svgs = {
     <line x1="32" y1="8" x2="27.5" y2="12.5" stroke="white" stroke-width="3" stroke-linecap="round"/>
     <line x1="12.5" y1="27.5" x2="8" y2="32" stroke="white" stroke-width="3" stroke-linecap="round"/>
   </svg>`,
+
+  // Terminal — monitor with prompt cursor
+  terminal: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    <rect x="3" y="4" width="34" height="24" rx="3" fill="none" stroke="white" stroke-width="2.5"/>
+    <path d="M10 12l5 4-5 4" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="18" y1="20" x2="26" y2="20" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="14" y1="34" x2="26" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="20" y1="28" x2="20" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+  </svg>`,
 };
 
 // Size specs: plugin/category are 28/56, action icons are 20/40
@@ -127,6 +136,7 @@ const sizeMap = {
   command:  [20, 40],
   context:  [20, 40],
   utility:  [20, 40],
+  terminal: [20, 40],
 };
 
 let count = 0;

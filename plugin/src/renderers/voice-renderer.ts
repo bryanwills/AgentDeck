@@ -18,30 +18,10 @@ function svgWrap(inner: string, defs = ''): string {
 export function renderVoiceReady(): string {
   return svgWrap(`
     <rect width="${W}" height="${H}" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#94a3b8">VOICE</text>
+    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">VOICE</text>
     <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" fill="#67e8f9" opacity="0.8">🎙</text>
     <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#67e8f9" opacity="0.6">Ready</text>
     <rect x="60" y="90" width="80" height="2" rx="1" fill="#67e8f9" opacity="0.2"/>
-  `);
-}
-
-/** Idle — with transcription, scrollable */
-export function renderVoiceIdle(text: string, scrollPx: number, totalWidth: number): string {
-  const maxVisible = 180;
-  // Scroll progress bar
-  const progressW = totalWidth > maxVisible ? (maxVisible / totalWidth) * 180 : 180;
-  const progressX = totalWidth > maxVisible ? (scrollPx / totalWidth) * 180 + 10 : 10;
-
-  return svgWrap(`
-    <rect width="${W}" height="${H}" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#4ade80">✓ SENT</text>
-    <clipPath id="tc"><rect x="8" y="28" width="184" height="52"/></clipPath>
-    <g clip-path="url(#tc)">
-      <text x="${8 - scrollPx}" y="48" font-family="Arial,sans-serif" font-size="13" fill="#e2e8f0">${escapeXml(text)}</text>
-      <text x="${8 - scrollPx}" y="68" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8" opacity="0.5"> </text>
-    </g>
-    <rect x="10" y="88" width="180" height="3" rx="1.5" fill="#1e293b"/>
-    <rect x="${progressX}" y="88" width="${Math.max(10, progressW)}" height="3" rx="1.5" fill="#4ade80" opacity="0.5"/>
   `);
 }
 
@@ -116,12 +96,13 @@ export function renderVoiceError(msg?: string): string {
   `);
 }
 
-/** Disabled state (not idle) */
+/** Disabled state (disconnected) */
 export function renderVoiceDisabled(): string {
   return svgWrap(`
     <rect width="${W}" height="${H}" fill="#0f172a"/>
-    <text x="100" y="45" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#475569" opacity="0.5">🎙</text>
-    <text x="100" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#475569">--</text>
+    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#475569">VOICE</text>
+    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#475569" opacity="0.5">🎙</text>
+    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#475569">Offline</text>
   `);
 }
 
@@ -132,7 +113,208 @@ function lerpColor(a: number[], b: number[], t: number): string {
   return `rgb(${r},${g},${bl})`;
 }
 
-/** Estimate text width in pixels (approximate for 13px Arial) */
-export function estimateTextWidth(text: string, fontSize = 13): number {
-  return text.length * fontSize * 0.6;
+// === Voice Text Takeover (wide canvas word-wrapped display) ===
+
+export const VT_FONT_SIZE = 16;
+export const VT_COMPACT_FONT_SIZE = 13;
+const VT_LINE_HEIGHT = 20;
+const VT_COMPACT_LINE_HEIGHT = 17;
+
+/** Adaptive font tiers: try largest first, fall back to smaller */
+const FONT_TIERS = [
+  { fontSize: 48, lineHeight: 54, maxLines: 1 },
+  { fontSize: 36, lineHeight: 42, maxLines: 1 },
+  { fontSize: 24, lineHeight: 30, maxLines: 2 },
+  { fontSize: 18, lineHeight: 23, maxLines: 3 },
+  { fontSize: 16, lineHeight: 20, maxLines: Infinity },
+];
+
+const MAX_LINE_PX = 180; // fallback for single-panel
+
+// Wide canvas layout constants
+const HEADER_H = 22;     // header area (y=0..22)
+const TEXT_AREA_H = 58;  // text clipping area (y=22..80)
+const FOOTER_H = 20;     // action hints + accent bar (y=80..100)
+
+export { TEXT_AREA_H as VT_TEXT_AREA_H };
+
+const COMBINING_RE = /\p{M}/u;
+
+/** True for CJK / fullwidth characters (Hangul, Kanji, Kana, CJK symbols). */
+function isWide(code: number): boolean {
+  return (
+    (code >= 0x1100 && code <= 0x11FF) ||   // Hangul Jamo
+    (code >= 0x2E80 && code <= 0x9FFF) ||   // CJK radicals, symbols, ideographs
+    (code >= 0xAC00 && code <= 0xD7AF) ||   // Hangul Syllables
+    (code >= 0xF900 && code <= 0xFAFF) ||   // CJK Compatibility Ideographs
+    (code >= 0xFF00 && code <= 0xFF60) ||   // Fullwidth forms
+    (code >= 0xFFE0 && code <= 0xFFE6)      // Fullwidth signs
+  );
+}
+
+/** Pixel width of a single character at given font size. */
+function charPx(ch: string, fontSize: number): number {
+  if (COMBINING_RE.test(ch)) return 0;              // combining marks: zero width
+  if (isWide(ch.charCodeAt(0))) return fontSize;     // CJK: ~1em
+  return fontSize * 0.55;                            // Latin, Thai base, etc.: ~0.55em
+}
+
+/** Estimate pixel width of a string at given font size (Arial). */
+function estimatePx(s: string, fontSize: number): number {
+  let px = 0;
+  for (const ch of s) px += charPx(ch, fontSize);
+  return px;
+}
+
+/** Slice string so first part fits within maxPx. */
+function sliceByPx(s: string, maxPx: number, fontSize: number): [string, string] {
+  let px = 0;
+  let i = 0;
+  for (const ch of s) {
+    const cw = charPx(ch, fontSize);
+    if (cw > 0 && px + cw > maxPx) break;  // don't break before a combining mark
+    px += cw;
+    i += ch.length;
+  }
+  return [s.slice(0, i), s.slice(i)];
+}
+
+/** Word-wrap text by estimated pixel width (works naturally for all scripts). */
+export function wrapVoiceText(text: string, fontSize = VT_FONT_SIZE, maxPx = MAX_LINE_PX): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+  let currentPx = 0;
+  const spacePx = fontSize * 0.28;  // Arial space ≈ 0.25-0.28em
+
+  for (const word of words) {
+    const wordPx = estimatePx(word, fontSize);
+
+    // Flush current line if adding this word would overflow
+    if (current && currentPx + spacePx + wordPx > maxPx) {
+      lines.push(current);
+      current = '';
+      currentPx = 0;
+    }
+
+    // Word wider than one line → break at character boundaries
+    if (wordPx > maxPx) {
+      if (current) { lines.push(current); current = ''; currentPx = 0; }
+      let rem = word;
+      while (estimatePx(rem, fontSize) > maxPx) {
+        const [chunk, rest] = sliceByPx(rem, maxPx, fontSize);
+        lines.push(chunk);
+        rem = rest;
+      }
+      current = rem;
+      currentPx = estimatePx(rem, fontSize);
+    } else {
+      // Append word to current line
+      if (current) {
+        current += ' ' + word;
+        currentPx += spacePx + wordPx;
+      } else {
+        current = word;
+        currentPx = wordPx;
+      }
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/** Lines visible on a panel: first panel has header → fewer lines */
+export function vtLinesPerPanel(isFirst: boolean, compact = false): number {
+  if (compact) return isFirst ? 4 : 5;
+  return isFirst ? 3 : 4;
+}
+
+/** Total visible lines across N panels */
+export function vtTotalVisibleLines(panelCount: number, compact = false): number {
+  const first = compact ? 4 : 3;
+  const rest = compact ? 5 : 4;
+  return first + (panelCount - 1) * rest;
+}
+
+// === Wide Canvas Voice Text ===
+
+const FIRST_BASELINE_Y = 34;
+
+export interface WideVoiceTextResult {
+  panels: string[];
+  maxScrollY: number;
+  lineHeight: number;
+}
+
+/**
+ * Render transcription text as a wide canvas (panelCount × 200 px),
+ * then slice into per-panel SVGs via viewBox.
+ */
+export function renderWideVoiceText(
+  text: string,
+  panelCount: number,
+  scrollY: number,
+): WideVoiceTextResult {
+  const totalW = panelCount * W;
+  const maxLinePx = totalW - 20; // 10px margin each side
+
+  // Adaptive font: try largest font first, fall back until text fits
+  let lines: string[] = [];
+  let fontSize = VT_FONT_SIZE;
+  let lineHeight = VT_LINE_HEIGHT;
+
+  for (const tier of FONT_TIERS) {
+    lines = wrapVoiceText(text, tier.fontSize, maxLinePx);
+    if (lines.length <= tier.maxLines) {
+      fontSize = tier.fontSize;
+      lineHeight = tier.lineHeight;
+      break;
+    }
+  }
+
+  // Vertical centering: short text centered in clip area, long text top-aligned
+  const textBlockH = (lines.length - 1) * lineHeight;
+  const centeredY = HEADER_H + Math.round((TEXT_AREA_H - textBlockH) / 2) + Math.round(fontSize * 0.3);
+  const firstY = Math.max(FIRST_BASELINE_Y, centeredY);
+
+  // Max scroll: last line baseline at most bottom of text clip area
+  const maxScrollY = Math.max(0,
+    firstY + (lines.length - 1) * lineHeight - (HEADER_H + TEXT_AREA_H));
+  const sy = Math.max(0, Math.min(scrollY, maxScrollY));
+
+  // Text elements — center-aligned on wide canvas
+  const cx = Math.round(totalW / 2);
+  let textElements = '';
+  for (let i = 0; i < lines.length; i++) {
+    const y = firstY + i * lineHeight;
+    textElements += `<text x="${cx}" y="${y}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${fontSize}" fill="#e2e8f0">${escapeXml(lines[i])}</text>`;
+  }
+
+  // Action hint pills (anchored to right end, 10px padding from edge)
+  const hx = totalW - 120;
+  const hints = `<rect x="${hx}" y="80" width="50" height="16" rx="5" fill="#14532d"/>`
+    + `<text x="${hx + 25}" y="93" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#4ade80">tap \u2713</text>`
+    + `<rect x="${hx + 54}" y="80" width="56" height="16" rx="5" fill="#450a0a"/>`
+    + `<text x="${hx + 82}" y="93" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#f87171">hold \u2715</text>`;
+
+  // Assemble wide SVG content (800×100 coordinate system)
+  const defs = `<defs><clipPath id="ta"><rect x="0" y="${HEADER_H}" width="${totalW}" height="${TEXT_AREA_H}"/></clipPath></defs>`;
+  const content = `<rect width="${totalW}" height="${H}" fill="#0f172a"/>`
+    + `<text x="10" y="16" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#fbbf24">\uD83C\uDF99 REVIEW</text>`
+    + hints
+    + `<rect x="10" y="95" width="${totalW - 20}" height="2" rx="1" fill="#fbbf24" opacity="0.15"/>`
+    + `<g clip-path="url(#ta)"><g transform="translate(0,${-sy})">${textElements}</g></g>`;
+
+  // Slice into per-panel SVGs via translate (viewBox offset unreliable on SD renderer)
+  const panels: string[] = [];
+  for (let i = 0; i < panelCount; i++) {
+    panels.push(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+      + defs
+      + `<g transform="translate(${-i * W},0)">${content}</g>`
+      + `</svg>`,
+    );
+  }
+
+  return { panels, maxScrollY, lineHeight };
 }

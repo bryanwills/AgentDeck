@@ -35,19 +35,18 @@ export function createTimerMode(refresh: RefreshCallback, defaultMinutes = 5): U
     id: 'timer',
     label: '\u23F1',
 
-    // NOTE: onDeactivate intentionally only stops interval on full cleanup
-    // (rebuildModes / onWillDisappear). Mode-switch uses switchAway flag instead.
-    // The timer keeps its running state so it can resume on mode switch back.
     onDeactivate() {
       stopInterval();
       running = false;
     },
 
-    async onActivate() {
-      // Resume interval if timer was running before mode switch
-      if (running && !interval) {
-        startInterval();
-      }
+    onPause() {
+      // Stop ticking but preserve running state for resume
+      stopInterval();
+    },
+
+    async onResume() {
+      if (running) startInterval();
     },
 
     async onRotate(ticks) {
@@ -87,7 +86,8 @@ export function createTimerMode(refresh: RefreshCallback, defaultMinutes = 5): U
         : '#64748b';
 
       return {
-        title: running ? '\u23F1 RUN' : '\u23F1',
+        title: 'TIMER',
+        icon: '\u23F1\uFE0F',
         value: timeStr,
         indicator: {
           value: progress,

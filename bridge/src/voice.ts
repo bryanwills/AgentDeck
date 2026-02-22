@@ -66,6 +66,20 @@ function findFallbackModel(currentModel: string): string | null {
   return null;
 }
 
+/** Compute RMS energy of a 16-bit PCM WAV file (skip 44-byte header). */
+function computeRms(wavFile: string): number {
+  const buf = readFileSync(wavFile);
+  const headerSize = 44;
+  if (buf.length <= headerSize + 2) return 0;
+  const samples = (buf.length - headerSize) / 2;
+  let sumSq = 0;
+  for (let i = headerSize; i + 1 < buf.length; i += 2) {
+    const sample = buf.readInt16LE(i) / 32768;
+    sumSq += sample * sample;
+  }
+  return Math.sqrt(sumSq / samples);
+}
+
 export class VoiceManager extends EventEmitter {
   private recording = false;
   private audioProcess: ChildProcess | null = null;
@@ -181,6 +195,14 @@ export class VoiceManager extends EventEmitter {
     if (sz < 100) {
       this.cleanup();
       throw new Error('Recording too short or empty');
+    }
+
+    // Check audio RMS to detect silence (whisper hallucinates on silent audio)
+    const rms = computeRms(this.audioFile);
+    debug('Voice', `Audio RMS: ${rms.toFixed(4)}`);
+    if (rms < 0.001) {
+      this.cleanup();
+      throw new Error('No audio detected — check microphone permission');
     }
 
     // --- Transcription: prefer whisper-server, fallback to whisper-cli ---

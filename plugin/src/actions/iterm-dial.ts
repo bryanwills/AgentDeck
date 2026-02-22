@@ -10,6 +10,7 @@ import streamDeck, {
 import { State } from '@agentdeck/shared';
 import { isEncoderTakeoverActive } from '../encoder-takeover.js';
 import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
+import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
 import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
 import { getItermSessions, activateItermSession, attachTmuxInIterm, getActiveItermTty, getTmuxSessionMap, type ItermSession } from '../utility-modes/macos.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
@@ -209,6 +210,7 @@ export class ItermDialAction extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
     if (sessions.length === 0) return;
@@ -223,6 +225,7 @@ export class ItermDialAction extends SingletonAction {
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
+    if (isPickerActive()) { void selectProject(); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
   }

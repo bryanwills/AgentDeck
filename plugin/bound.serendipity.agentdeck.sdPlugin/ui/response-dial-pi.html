@@ -21,12 +21,12 @@
   </style>
 </head>
 <body>
-  <sdpi-item label="Commands (one per line)">
-    <sdpi-textarea setting="commandList" placeholder="/compact&#10;/status&#10;/usage&#10;/clear&#10;/model"></sdpi-textarea>
+  <sdpi-item label="Prompts (one per line)">
+    <sdpi-textarea setting="commandList" placeholder="Review this code for issues&#10;Write tests for this&#10;Refactor for clarity&#10;/compact&#10;/clear"></sdpi-textarea>
   </sdpi-item>
   <div class="sdpi-info">
-    Dial rotates through this list. Push executes the selected command.<br/>
-    Example: <code>/compact</code> <code>/status</code> <code>/clear</code>
+    Dial rotates through this list. Push sends the selected prompt.<br/>
+    Mix prompt templates and slash commands. Example: <code>Review this code</code> <code>/compact</code>
   </div>
 </body>
 </html>

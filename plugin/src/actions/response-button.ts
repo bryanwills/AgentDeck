@@ -6,13 +6,13 @@ import streamDeck, {
   WillDisappearEvent,
   DidReceiveSettingsEvent,
 } from '@elgato/streamdeck';
-import { exec } from 'child_process';
 import { State, PromptOption } from '@agentdeck/shared';
 import { BridgeClient } from '../bridge-client.js';
 import { LayoutManager, ButtonConfig } from '../layout-manager.js';
 import { renderButton, svgToDataUrl } from '../renderers/button-renderer.js';
 import { handleExpandedAction } from '../expanded-actions.js';
-import { dlog } from '../log.js';
+import { isPickerActive, selectByButtonSlot, openPicker, setPickerButtonCallback } from '../project-picker.js';
+import { dlog, derr } from '../log.js';
 
 import type { JsonValue } from '@elgato/utils';
 
@@ -31,8 +31,19 @@ const DEFAULT_IDLE_SETTINGS: ResponseButtonSettings[] = [
   { label: 'CLEAR', action: '/clear' },
 ];
 
-/** Per-instance IDLE settings cache */
-const idleSettingsMap = new Map<string, ResponseButtonSettings>();
+/** Per-instance user-customised PI settings (only fields explicitly set by user) */
+const userSettingsMap = new Map<string, ResponseButtonSettings>();
+
+/** Compute effective settings for a button: slot defaults + user overrides (disconnected* always from defaults) */
+function effectiveSettings(actionId: string): ResponseButtonSettings {
+  const slot = actionIds.indexOf(actionId);
+  const defaults = (slot >= 0 && slot < DEFAULT_IDLE_SETTINGS.length) ? DEFAULT_IDLE_SETTINGS[slot] : {};
+  const user = userSettingsMap.get(actionId);
+  if (!user) return defaults;
+  // User settings override label/action only; disconnected* always from slot defaults
+  const { disconnectedLabel: _dl, disconnectedAction: _da, ...piOnly } = user;
+  return { ...defaults, ...piOnly };
+}
 
 let bridge: BridgeClient;
 let layoutManager: LayoutManager;
@@ -40,9 +51,8 @@ let currentState = State.DISCONNECTED;
 let currentMode = 'default';
 let currentOptions: PromptOption[] = [];
 
-// Action IDs sorted by physical column position (deterministic slot numbering)
+// Action IDs in insertion order (slot = order added by user)
 const actionIds: string[] = [];
-const actionColumns = new Map<string, number>();
 
 export function initResponseButtons(
   b: BridgeClient,
@@ -50,6 +60,16 @@ export function initResponseButtons(
 ): void {
   bridge = b;
   layoutManager = lm;
+  // Wire picker button callback (avoids circular dep)
+  setPickerButtonCallback((configs) => {
+    if (configs) {
+      overrideConfigs = configs;
+      refreshAllButtons();
+    } else {
+      overrideConfigs = null;
+      refreshAllButtons();
+    }
+  });
 }
 
 let overrideConfigs: ButtonConfig[] | null = null;
@@ -99,8 +119,8 @@ function disconnectedButtonConfig(s: ResponseButtonSettings): ButtonConfig {
   const label = s.disconnectedLabel ?? cmd;
   return {
     title: label,
-    color: '#1e293b',
-    textColor: '#64748b',
+    color: '#0f3460',
+    textColor: '#e2e8f0',
     enabled: true,
     action: `shell:${cmd}`,
   };
@@ -111,7 +131,7 @@ function refreshAllButtons(): void {
     // IDLE: use per-instance PI settings
     dlog('RspBut', `refresh IDLE: ids=${actionIds.length}`);
     for (let i = 0; i < actionIds.length; i++) {
-      const s = idleSettingsMap.get(actionIds[i]) ?? DEFAULT_IDLE_SETTINGS[i] ?? {};
+      const s = effectiveSettings(actionIds[i]);
       applyButtonConfig(actionIds[i], idleButtonConfig(s), i);
     }
     return;
@@ -134,7 +154,7 @@ function refreshAllButtons(): void {
   if (currentState === State.DISCONNECTED) {
     dlog('RspBut', `refresh DISCONNECTED: ids=${actionIds.length}`);
     for (let i = 0; i < actionIds.length; i++) {
-      const s = idleSettingsMap.get(actionIds[i]) ?? DEFAULT_IDLE_SETTINGS[i] ?? {};
+      const s = effectiveSettings(actionIds[i]);
       applyButtonConfig(actionIds[i], disconnectedButtonConfig(s), i);
     }
     return;
@@ -144,7 +164,7 @@ function refreshAllButtons(): void {
   if (currentState === State.PROCESSING) {
     dlog('RspBut', `refresh PROCESSING: ids=${actionIds.length} (dimmed idle labels)`);
     for (let i = 0; i < actionIds.length; i++) {
-      const s = idleSettingsMap.get(actionIds[i]) ?? DEFAULT_IDLE_SETTINGS[i] ?? {};
+      const s = effectiveSettings(actionIds[i]);
       applyButtonConfig(actionIds[i], dimButtonConfig(s), i);
     }
     return;
@@ -182,54 +202,47 @@ function applyButtonConfig(actionId: string, config: ButtonConfig, slotIndex?: n
 @action({ UUID: 'bound.serendipity.agentdeck.response-button' })
 export class ResponseButtonAction extends SingletonAction {
   override async onWillAppear(ev: WillAppearEvent): Promise<void> {
-    const col = 'coordinates' in ev.payload ? (ev.payload as { coordinates: { column: number } }).coordinates.column : actionIds.length;
-    actionColumns.set(ev.action.id, col);
     if (!actionIds.includes(ev.action.id)) {
       actionIds.push(ev.action.id);
-      actionIds.sort((a, b) => (actionColumns.get(a) ?? 0) - (actionColumns.get(b) ?? 0));
     }
     const slot = actionIds.indexOf(ev.action.id);
     dlog('RspBut', `onWillAppear: id=${ev.action.id} slot=${slot} total=${actionIds.length}`);
 
-    // Persist slot defaults if settings are empty, so PI shows actual values
+    // Only cache user-customised PI settings; defaults are computed dynamically from slot position
     const settings = (ev.payload?.settings ?? {}) as ResponseButtonSettings;
     if (settings.label || settings.action) {
-      idleSettingsMap.set(ev.action.id, settings);
-    } else if (slot >= 0 && slot < DEFAULT_IDLE_SETTINGS.length) {
-      const defaults = DEFAULT_IDLE_SETTINGS[slot];
-      idleSettingsMap.set(ev.action.id, defaults);
-      void ev.action.setSettings(defaults).catch(() => {});
+      userSettingsMap.set(ev.action.id, settings);
     }
+    // Refresh ALL buttons so every slot gets the correct number after sort
+    refreshAllButtons();
+    // Sync PI defaults for ALL buttons (slot positions may have shifted)
+    this.syncAllPIDefaults();
+  }
 
-    const s = idleSettingsMap.get(ev.action.id) ?? DEFAULT_IDLE_SETTINGS[slot] ?? {};
-    let config: ButtonConfig;
-
-    if (currentState === State.IDLE) {
-      config = idleButtonConfig(s);
-    } else if (currentState === State.DISCONNECTED) {
-      config = disconnectedButtonConfig(s);
-    } else if (currentState === State.PROCESSING) {
-      config = dimButtonConfig(s);
-    } else {
-      const buttons = layoutManager.getButtonLayout(
-        currentState,
-        currentMode as any,
-        currentOptions,
-      );
-      config = (slot >= 0 && slot < buttons.length)
-        ? buttons[slot]
-        : { title: '', color: '#1a1a1a', textColor: '#444444', enabled: false };
+  /** Persist slot defaults to PI for buttons without user-customised settings */
+  private syncAllPIDefaults(): void {
+    for (let i = 0; i < actionIds.length; i++) {
+      const id = actionIds[i];
+      if (userSettingsMap.has(id)) continue;  // User has custom settings
+      if (i >= DEFAULT_IDLE_SETTINGS.length) continue;
+      const defaults = DEFAULT_IDLE_SETTINGS[i];
+      const act = streamDeck.actions.getActionById(id);
+      if (act) {
+        void act.setSettings(defaults).catch(() => {});
+      }
     }
-    config.slotNumber = slot + 1;
-    await ev.action.setImage(svgToDataUrl(renderButton(config)));
   }
 
   override onDidReceiveSettings(ev: DidReceiveSettingsEvent<ResponseButtonSettings>): void {
     const settings = ev.payload.settings;
     dlog('RspBut', `onDidReceiveSettings: id=${ev.action.id} label=${settings.label} action=${settings.action}`);
-    idleSettingsMap.set(ev.action.id, settings);
-    // Refresh to reflect changes immediately if IDLE
-    if (currentState === State.IDLE) {
+    if (settings.label || settings.action) {
+      userSettingsMap.set(ev.action.id, settings);
+    } else {
+      userSettingsMap.delete(ev.action.id);
+    }
+    // Refresh to reflect changes immediately
+    if (currentState === State.IDLE || currentState === State.DISCONNECTED) {
       refreshAllButtons();
     }
   }
@@ -241,13 +254,19 @@ export class ResponseButtonAction extends SingletonAction {
     let actionStr: string | undefined;
 
     if (currentState === State.DISCONNECTED) {
-      const s = idleSettingsMap.get(ev.action.id) ?? DEFAULT_IDLE_SETTINGS[slot] ?? {};
+      if (isPickerActive()) {
+        // Picker active: button selects project
+        selectByButtonSlot(slot);
+        return;
+      }
+      const s = effectiveSettings(ev.action.id);
       const cmd = s.disconnectedAction?.trim();
-      if (!cmd) return;
-      dlog('RspBut', `keyDown slot=${slot} shell="${cmd}"`);
-      exec(cmd, { cwd: process.env.HOME }, (err) => {
-        if (err) dlog('RspBut', `shell exec error: ${err.message}`);
-      });
+      if (!cmd) {
+        dlog('RspBut', `keyDown slot=${slot} DISCONNECTED no cmd`);
+        return;
+      }
+      dlog('RspBut', `keyDown slot=${slot} → openPicker`);
+      void openPicker();
       return;
     }
 
@@ -258,7 +277,7 @@ export class ResponseButtonAction extends SingletonAction {
       actionStr = config.action;
     } else if (currentState === State.IDLE) {
       // Use per-instance PI settings for IDLE
-      const s = idleSettingsMap.get(ev.action.id) ?? DEFAULT_IDLE_SETTINGS[slot] ?? {};
+      const s = effectiveSettings(ev.action.id);
       actionStr = `command:${s.action ?? ''}`;
     } else {
       const buttons = layoutManager.getButtonLayout(
@@ -302,5 +321,6 @@ export class ResponseButtonAction extends SingletonAction {
     if (idx !== -1) {
       actionIds.splice(idx, 1);
     }
+    userSettingsMap.delete(ev.action.id);
   }
 }

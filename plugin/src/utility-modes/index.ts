@@ -6,7 +6,6 @@ import { createVolumeMode } from './volume.js';
 import { createMicMode } from './mic.js';
 import { createMediaMode } from './media.js';
 import { createTimerMode } from './timer.js';
-
 export type { UtilityMode, RefreshCallback } from './types.js';
 
 const DEFAULT_ENABLED = ['volume'];
@@ -17,8 +16,8 @@ interface ModeFactoryOptions {
 
 /** All available mode factories, keyed by id. */
 const FACTORIES: Record<string, (opts: ModeFactoryOptions) => UtilityMode> = {
-  volume: () => createVolumeMode(),
-  mic: () => createMicMode(),
+  volume: (opts) => createVolumeMode(opts.refresh),
+  mic: (opts) => createMicMode(opts.refresh),
   media: (opts) => createMediaMode(opts.refresh),
   timer: (opts) => createTimerMode(opts.refresh),
 };

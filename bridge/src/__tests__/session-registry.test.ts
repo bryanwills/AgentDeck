@@ -104,7 +104,7 @@ describe('Session Registry Logic', () => {
 
   describe('port allocation logic', () => {
     const BASE_PORT = 9120;
-    const MAX_PORT = 9129;
+    const MAX_PORT = 9139;
 
     function findAvailablePort(usedPorts: Set<number>): number {
       for (let port = BASE_PORT; port <= MAX_PORT; port++) {
@@ -112,7 +112,7 @@ describe('Session Registry Logic', () => {
           return port;
         }
       }
-      return BASE_PORT;
+      throw new Error(`All AgentDeck ports (${BASE_PORT}–${MAX_PORT}) are in use. Stop an existing session first.`);
     }
 
     it('returns base port when no ports are used', () => {
@@ -131,10 +131,10 @@ describe('Session Registry Logic', () => {
       expect(findAvailablePort(new Set([9120, 9122]))).toBe(9121);
     });
 
-    it('falls back to base port when all taken', () => {
+    it('throws when all ports are taken', () => {
       const all = new Set<number>();
       for (let p = BASE_PORT; p <= MAX_PORT; p++) all.add(p);
-      expect(findAvailablePort(all)).toBe(BASE_PORT);
+      expect(() => findAvailablePort(all)).toThrow('All AgentDeck ports');
     });
   });
 

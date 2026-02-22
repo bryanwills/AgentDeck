@@ -2,11 +2,13 @@
   "Actions": [
     {
       "Icon": "static/imgs/response",
-      "Name": "Response Button",
+      "Name": "Quick Action",
       "States": [
         {
           "Image": "static/imgs/response",
-          "TitleAlignment": "middle"
+          "Name": "Quick Action",
+          "TitleAlignment": "middle",
+          "ShowTitle": false
         }
       ],
       "Controllers": ["Keypad"],
@@ -16,11 +18,13 @@
     },
     {
       "Icon": "static/imgs/stop",
-      "Name": "Stop / Interrupt",
+      "Name": "Stop",
       "States": [
         {
           "Image": "static/imgs/stop",
-          "TitleAlignment": "middle"
+          "Name": "Stop",
+          "TitleAlignment": "middle",
+          "ShowTitle": false
         }
       ],
       "Controllers": ["Keypad"],
@@ -28,11 +32,13 @@
     },
     {
       "Icon": "static/imgs/mode",
-      "Name": "Mode Toggle",
+      "Name": "Mode",
       "States": [
         {
           "Image": "static/imgs/mode",
-          "TitleAlignment": "middle"
+          "Name": "Mode",
+          "TitleAlignment": "middle",
+          "ShowTitle": false
         }
       ],
       "Controllers": ["Keypad"],
@@ -40,11 +46,13 @@
     },
     {
       "Icon": "static/imgs/session",
-      "Name": "Session & Status",
+      "Name": "Session",
       "States": [
         {
           "Image": "static/imgs/session",
-          "TitleAlignment": "middle"
+          "Name": "Session",
+          "TitleAlignment": "middle",
+          "ShowTitle": false
         }
       ],
       "Controllers": ["Keypad"],
@@ -52,11 +60,13 @@
     },
     {
       "Icon": "static/imgs/usage",
-      "Name": "Usage Dashboard",
+      "Name": "Usage",
       "States": [
         {
           "Image": "static/imgs/usage",
-          "TitleAlignment": "middle"
+          "Name": "Usage",
+          "TitleAlignment": "middle",
+          "ShowTitle": false
         }
       ],
       "Controllers": ["Keypad"],
@@ -64,39 +74,33 @@
     },
     {
       "Icon": "static/imgs/option",
-      "Name": "Option Selector",
-      "States": [{}],
+      "Name": "Action",
+      "States": [
+        {
+          "Name": "Action",
+          "ShowTitle": false
+        }
+      ],
       "Controllers": ["Encoder"],
       "Encoder": {
-        "layout": "$B1",
+        "layout": "layouts/voice-layout.json",
         "TriggerDescription": {
-          "Rotate": "Scroll options",
-          "Push": "Select option",
-          "Touch": "Show option"
+          "Rotate": "Scroll options / cycle prompts",
+          "Push": "Send prompt / Confirm"
         }
       },
+      "PropertyInspectorPath": "ui/response-dial-pi.html",
       "UUID": "bound.serendipity.agentdeck.option-dial"
     },
     {
-      "Icon": "static/imgs/command",
-      "Name": "Quick Command",
-      "States": [{}],
-      "Controllers": ["Encoder"],
-      "Encoder": {
-        "layout": "$B1",
-        "TriggerDescription": {
-          "Rotate": "Cycle commands",
-          "Push": "Execute command",
-          "Touch": "Show command"
-        }
-      },
-      "PropertyInspectorPath": "ui/command-dial-pi.html",
-      "UUID": "bound.serendipity.agentdeck.command-dial"
-    },
-    {
       "Icon": "static/imgs/voice",
-      "Name": "Voice Input",
-      "States": [{}],
+      "Name": "Voice",
+      "States": [
+        {
+          "Name": "Voice",
+          "ShowTitle": false
+        }
+      ],
       "Controllers": ["Encoder"],
       "Encoder": {
         "layout": "layouts/voice-layout.json",
@@ -109,27 +113,17 @@
       "UUID": "bound.serendipity.agentdeck.voice-dial"
     },
     {
-      "Icon": "static/imgs/context",
-      "Name": "Context Display",
-      "States": [{}],
-      "Controllers": ["Encoder"],
-      "Encoder": {
-        "layout": "$B1",
-        "TriggerDescription": {
-          "Rotate": "—",
-          "Push": "—",
-          "Touch": "Show context"
-        }
-      },
-      "UUID": "bound.serendipity.agentdeck.context-dial"
-    },
-    {
       "Icon": "static/imgs/utility",
-      "Name": "Utility Dial",
-      "States": [{}],
+      "Name": "Utility",
+      "States": [
+        {
+          "Name": "Utility",
+          "ShowTitle": false
+        }
+      ],
       "Controllers": ["Encoder"],
       "Encoder": {
-        "layout": "layouts/utility-layout.json",
+        "layout": "layouts/voice-layout.json",
         "TriggerDescription": {
           "Rotate": "Adjust value",
           "Push": "Toggle/Action",
@@ -138,16 +132,35 @@
       },
       "PropertyInspectorPath": "ui/utility-dial-pi.html",
       "UUID": "bound.serendipity.agentdeck.utility-dial"
+    },
+    {
+      "Icon": "static/imgs/terminal",
+      "Name": "Terminal",
+      "States": [
+        {
+          "Name": "Terminal",
+          "ShowTitle": false
+        }
+      ],
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "layouts/voice-layout.json",
+        "TriggerDescription": {
+          "Rotate": "Switch session",
+          "Push": "Refresh sessions"
+        }
+      },
+      "UUID": "bound.serendipity.agentdeck.iterm-dial"
     }
   ],
   "Author": "AgentDeck",
-  "Category": "Claude Code Controller",
+  "Category": "AgentDeck",
   "CategoryIcon": "static/imgs/category",
   "CodePath": "bin/plugin.js",
   "Description": "Control Claude Code CLI with Stream Deck+",
   "Icon": "static/imgs/plugin",
   "UUID": "bound.serendipity.agentdeck",
-  "Name": "Claude Code Controller",
+  "Name": "AgentDeck",
   "SDKVersion": 2,
   "Software": {
     "MinimumVersion": "6.7"

@@ -11,9 +11,12 @@ import streamDeck, {
 } from '@elgato/streamdeck';
 import { State } from '@agentdeck/shared';
 import { isEncoderTakeoverActive } from '../encoder-takeover.js';
-import { handleTakeoverPush, handleTakeoverRotate } from './option-dial.js';
-import { encoderRegistry } from '../encoder-registry.js';
+import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
+import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
+import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
 import { createModes, modeDots, type UtilityMode } from '../utility-modes/index.js';
+import { svgToDataUrl } from '../renderers/button-renderer.js';
+import { renderUtilityGeneric, renderUtilityMedia, type UtilityRenderData } from '../renderers/utility-renderer.js';
 import { dlog, dinfo, dwarn } from '../log.js';
 
 import type { JsonValue } from '@elgato/utils';
@@ -32,7 +35,7 @@ function normalizeEnabledModes(val: string | string[] | undefined): string {
   return DEFAULT_MODES.join(',');
 }
 
-const DEFAULT_LAYOUT = 'layouts/utility-layout.json';
+const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
 
 const LONG_PRESS_MS = 500;
 
@@ -40,7 +43,7 @@ let currentState = State.DISCONNECTED;
 let modes: UtilityMode[] = [];
 let activeIndex = 0;
 let settings: UtilityDialSettings = {};
-let currentLayout = DEFAULT_LAYOUT;
+let currentLayout = PIXMAP_LAYOUT;
 let dialDownTime = 0;
 
 function rebuildModes(): void {
@@ -75,40 +78,47 @@ export function updateUtilityDialState(state: State): void {
   refreshUtilityDials();
 }
 
+function ensurePixmapLayout(): void {
+  if (currentLayout === PIXMAP_LAYOUT) return;
+  currentLayout = PIXMAP_LAYOUT;
+  for (const id of encoderRegistry.utilityIds) {
+    const dial = streamDeck.actions.getActionById(id) as any;
+    if (dial) void dial.setFeedbackLayout(PIXMAP_LAYOUT).catch(() => {});
+  }
+}
+
 export function refreshUtilityDials(): void {
   if (isEncoderTakeoverActive()) return;
+  if (isVoiceTextTakeoverActive()) return;
   if (modes.length === 0) return;
 
+  ensurePixmapLayout();
+
   const mode = modes[activeIndex];
-  const targetLayout = mode.layout || DEFAULT_LAYOUT;
-
-  // Switch layout when mode changes (e.g. media ↔ volume)
-  if (targetLayout !== currentLayout) {
-    currentLayout = targetLayout;
-    for (const id of encoderRegistry.utilityIds) {
-      const dial = streamDeck.actions.getActionById(id) as any;
-      if (dial) void dial.setFeedbackLayout(targetLayout).catch(() => {});
-    }
-  }
-
   const feedback = mode.getFeedback();
   const dots = modeDots(activeIndex, modes.length);
 
-  // Generic payload: wrap primitives in { value }, pass objects through
-  const payload: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(feedback)) {
-    if (val === null || val === undefined) continue;
-    if (typeof val === 'object') {
-      payload[key] = val;
-    } else {
-      payload[key] = { value: val };
-    }
-  }
-  payload['mode-dots'] = { value: dots };
+  // Build render data from mode feedback
+  const indicator = (feedback.indicator as { value: number; bar_fill_c: string }) || { value: 0, bar_fill_c: '#333' };
+  const data: UtilityRenderData = {
+    title: String(feedback.title ?? ''),
+    icon: feedback.icon != null ? String(feedback.icon) : undefined,
+    value: feedback.value != null ? String(feedback.value) : undefined,
+    indicator,
+    dots,
+    state: feedback.state != null ? String(feedback.state) : undefined,
+    track: feedback.track != null ? String(feedback.track) : undefined,
+    artist: feedback.artist != null ? String(feedback.artist) : undefined,
+  };
+
+  // Media mode has track field; generic for everything else
+  const isMedia = data.track !== undefined;
+  const svg = isMedia ? renderUtilityMedia(data) : renderUtilityGeneric(data);
+  const canvasFeedback = { canvas: svgToDataUrl(svg) };
 
   for (const id of encoderRegistry.utilityIds) {
     const dial = streamDeck.actions.getActionById(id) as any;
-    if (dial) void dial.setFeedback(payload).catch(() => {});
+    if (dial) void dial.setFeedback(canvasFeedback).catch(() => {});
   }
 }
 
@@ -137,6 +147,11 @@ export class UtilityDialAction extends SingletonAction {
       void ev.action.setSettings(settings as Record<string, JsonValue>).catch(() => {});
     }
     rebuildModes();
+    // If encoder takeover is active, join the takeover rendering instead of utility feedback
+    if (isEncoderTakeoverActive()) {
+      requestTakeoverRefresh();
+      return;
+    }
     refreshUtilityDials();
   }
 
@@ -152,17 +167,19 @@ export class UtilityDialAction extends SingletonAction {
     if (isEncoderTakeoverActive()) return;
     if (modes.length <= 1) return;
 
-    // Don't call onDeactivate — modes survive mode-switch.
-    // Timer keeps its interval running; onActivate handles resume if needed.
-    activeIndex = (activeIndex + 1) % modes.length;
+    // Pause current mode (stops polling etc. but preserves state)
+    const prev = modes[activeIndex];
+    prev.onPause?.();
 
-    // Activate new mode (reads system state)
+    activeIndex = (activeIndex + 1) % modes.length;
     const next = modes[activeIndex];
     dlog('UtilDial', `touch: mode=${next.id} idx=${activeIndex}`);
 
-    if (next.onActivate) {
-      void next.onActivate().then(() => refreshUtilityDials()).catch((e) => {
-        dwarn('UtilDial', `onActivate error: ${e}`);
+    // Resume or activate new mode
+    const resumeOrActivate = next.onResume ?? next.onActivate;
+    if (resumeOrActivate) {
+      void resumeOrActivate().then(() => refreshUtilityDials()).catch((e) => {
+        dwarn('UtilDial', `onResume/Activate error: ${e}`);
       });
     }
     // Immediate refresh with local state (optimistic)
@@ -171,7 +188,9 @@ export class UtilityDialAction extends SingletonAction {
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     dlog('UtilDial', `onDialRotate: takeover=${isEncoderTakeoverActive()} modes=${modes.length} ticks=${ev.payload.ticks}`);
+    if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
+    if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
     if (modes.length === 0) return;
 
     await modes[activeIndex].onRotate(ev.payload.ticks);
@@ -181,12 +200,15 @@ export class UtilityDialAction extends SingletonAction {
 
   override async onDialDown(ev: DialDownEvent): Promise<void> {
     dlog('UtilDial', `onDialDown: takeover=${isEncoderTakeoverActive()} modes=${modes.length}`);
+    if (isPickerActive()) { void selectProject(); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
+    if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
     dialDownTime = Date.now();
   }
 
   override async onDialUp(_ev: DialUpEvent): Promise<void> {
     if (isEncoderTakeoverActive()) return;
+    if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
     if (modes.length === 0) return;
 
     const mode = modes[activeIndex];
