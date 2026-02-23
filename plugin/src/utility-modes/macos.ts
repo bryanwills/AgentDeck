@@ -268,6 +268,16 @@ export async function activateItermSession(windowId: string, tabIndex: string, _
   ).catch(() => {});
 }
 
+/** Check if iTerm2 is the frontmost application. */
+export async function isItermFrontmost(): Promise<boolean> {
+  try {
+    const name = await osascript(
+      'tell application "System Events" to name of first process whose frontmost is true',
+    );
+    return name === 'iTerm2';
+  } catch { return false; }
+}
+
 /** Get the tty of the active iTerm2 session (frontmost tab of frontmost window). */
 export async function getActiveItermTty(): Promise<string | null> {
   try {

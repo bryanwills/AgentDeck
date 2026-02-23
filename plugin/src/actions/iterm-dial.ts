@@ -12,7 +12,7 @@ import { isEncoderTakeoverActive } from '../encoder-takeover.js';
 import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
 import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
 import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
-import { getItermSessions, activateItermSession, attachTmuxInIterm, getActiveItermTty, getTmuxSessionMap, getLiveTmuxSessionNames, cycleItermWindowNext, cycleItermWindowPrev, enterItermExpose, exposeNavigate, exposeConfirm, exposeCancel, type ItermSession } from '../utility-modes/macos.js';
+import { getItermSessions, activateItermSession, attachTmuxInIterm, getActiveItermTty, getTmuxSessionMap, getLiveTmuxSessionNames, isItermFrontmost, cycleItermWindowNext, cycleItermWindowPrev, enterItermExpose, exposeNavigate, exposeConfirm, exposeCancel, type ItermSession } from '../utility-modes/macos.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderItermPanel, renderItermReady } from '../renderers/iterm-renderer.js';
 import { switchToPort } from './session-button.js';
@@ -124,11 +124,12 @@ async function syncFromSystem(): Promise<void> {
   if (Date.now() - lastActionAt < SKIP_AFTER_ACTION) return;
   polling = true;
   try {
-    const [rawSessions, activeTty, tmuxClientMap, liveTmuxNames] = await Promise.all([
+    const [rawSessions, activeTty, tmuxClientMap, liveTmuxNames, itermFront] = await Promise.all([
       getItermSessions(),
       getActiveItermTty(),
       getTmuxSessionMap(),
       getLiveTmuxSessionNames(),
+      isItermFrontmost(),
     ]);
     const adSessions = loadAgentDeckSessions();
 
@@ -152,7 +153,9 @@ async function syncFromSystem(): Promise<void> {
     }
 
     // Auto-switch bridge if focused iTerm tty matches an AgentDeck session
-    if (activeTty && bridgeRef) {
+    // Only when iTerm is frontmost — prevents overriding explicit session switches
+    // while user is in a non-terminal app (e.g. VS Code)
+    if (activeTty && bridgeRef && itermFront) {
       const currentPort = bridgeRef.getPort();
 
       // 1. parentTty match (non-tmux: sdc's stdin tty === iTerm tty)
