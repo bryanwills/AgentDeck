@@ -20,7 +20,9 @@ vi.mock('express', () => {
     get: vi.fn(),
     post: vi.fn(),
   };
-  const fn = vi.fn(() => app);
+  const fn = Object.assign(vi.fn(() => app), {
+    json: vi.fn(() => vi.fn()),
+  });
   return { default: fn };
 });
 
