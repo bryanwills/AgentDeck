@@ -49,7 +49,13 @@ class BridgeConnection private constructor() {
     var onEvent: ((BridgeEvent) -> Unit)? = null
 
     fun connect(wsUrl: String) {
+        // Cancel any existing connection/reconnect loop before starting fresh
+        shouldReconnect = false
+        webSocket?.close(1000, "New connection")
+        webSocket = null
+
         _url.value = wsUrl
+        _status.value = ConnectionStatus.DISCONNECTED
         shouldReconnect = true
         backoffMs = INITIAL_BACKOFF_MS
         doConnect(wsUrl)
@@ -57,6 +63,7 @@ class BridgeConnection private constructor() {
 
     fun disconnect() {
         shouldReconnect = false
+        _url.value = null
         webSocket?.close(1000, "User disconnect")
         webSocket = null
         _status.value = ConnectionStatus.DISCONNECTED
@@ -73,6 +80,13 @@ class BridgeConnection private constructor() {
     fun sendInterrupt() = send(PluginCommands.interrupt())
     fun sendEscape() = send(PluginCommands.escape())
     fun sendQueryUsage() = send(PluginCommands.queryUsage())
+
+    /** Connect to a saved URL if not already connected. */
+    fun autoConnect(savedUrl: String?) {
+        if (savedUrl != null && _status.value == ConnectionStatus.DISCONNECTED) {
+            connect(savedUrl)
+        }
+    }
 
     private fun doConnect(wsUrl: String) {
         if (_status.value == ConnectionStatus.CONNECTING) return

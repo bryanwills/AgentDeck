@@ -39,6 +39,9 @@ import dev.agentdeck.ui.screen.UsageScreen
 import dev.agentdeck.ui.theme.AgentDeckTheme
 import dev.agentdeck.util.EinkDetector
 import android.view.WindowManager
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
@@ -59,18 +62,19 @@ class MainActivity : ComponentActivity() {
 
         val isEink = EinkDetector.isEinkDevice()
 
+        // E-ink: immersive fullscreen — hide status bar and navigation bar
         if (isEink) {
-            window.statusBarColor = android.graphics.Color.WHITE
-            window.navigationBarColor = android.graphics.Color.WHITE
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = window.decorView.systemUiVisibility or
-                android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
-                android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            WindowInsetsControllerCompat(window, window.decorView).let { controller ->
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
         }
 
         val stateHolder = AgentStateHolder.instance
         val connection = BridgeConnection.instance
-        val displayPrefs = DisplayPreferences(this)
+        val displayPrefs = DisplayPreferences(this, isEink = isEink)
 
         // Apply saved orientation preference
         lifecycleScope.launch {

@@ -24,23 +24,6 @@ class BridgeDiscovery(context: Context) {
     fun discover(): Flow<List<DiscoveredBridge>> = callbackFlow {
         val bridges = mutableMapOf<String, DiscoveredBridge>()
 
-        val resolveListener = object : NsdManager.ResolveListener {
-            override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                // Resolve failed, ignore
-            }
-
-            override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                val host = serviceInfo.host?.hostAddress ?: return
-                val bridge = DiscoveredBridge(
-                    name = serviceInfo.serviceName,
-                    host = host,
-                    port = serviceInfo.port,
-                )
-                bridges[serviceInfo.serviceName] = bridge
-                trySend(bridges.values.toList())
-            }
-        }
-
         val discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) {}
 
@@ -48,6 +31,24 @@ class BridgeDiscovery(context: Context) {
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
                 if (serviceInfo.serviceType.contains("_agentdeck")) {
+                    // Each resolveService() call needs its own listener —
+                    // NsdManager throws if a listener is reused while active
+                    val resolveListener = object : NsdManager.ResolveListener {
+                        override fun onResolveFailed(si: NsdServiceInfo, errorCode: Int) {
+                            // Resolve failed, ignore
+                        }
+
+                        override fun onServiceResolved(si: NsdServiceInfo) {
+                            val host = si.host?.hostAddress ?: return
+                            val bridge = DiscoveredBridge(
+                                name = si.serviceName,
+                                host = host,
+                                port = si.port,
+                            )
+                            bridges[si.serviceName] = bridge
+                            trySend(bridges.values.toList())
+                        }
+                    }
                     nsdManager.resolveService(serviceInfo, resolveListener)
                 }
             }

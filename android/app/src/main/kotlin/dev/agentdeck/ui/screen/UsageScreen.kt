@@ -140,8 +140,9 @@ fun UsageScreen(
                 )
 
                 // Uptime from SessionMetrics
-                val uptimeText = if (metrics.connectedSince != null) {
-                    val elapsed = System.currentTimeMillis() - metrics.connectedSince
+                val connectedSince = metrics.connectedSince
+                val uptimeText = if (connectedSince != null) {
+                    val elapsed = System.currentTimeMillis() - connectedSince
                     formatDurationLong(elapsed)
                 } else {
                     formatDuration(usage.sessionDurationSec)

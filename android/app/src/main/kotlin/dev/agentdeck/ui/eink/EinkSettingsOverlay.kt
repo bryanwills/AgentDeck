@@ -1,6 +1,7 @@
 package dev.agentdeck.ui.eink
 
 import android.content.pm.ActivityInfo
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
@@ -24,21 +28,28 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.net.ConnectionStatus
+import dev.agentdeck.net.DiscoveredBridge
 import kotlinx.coroutines.launch
 
 @Composable
 fun EinkSettingsOverlay(
     connection: BridgeConnection,
     displayPrefs: DisplayPreferences,
+    discoveredBridges: List<DiscoveredBridge> = emptyList(),
     onDismiss: () -> Unit,
 ) {
     val connectionStatus by connection.status.collectAsState()
@@ -48,6 +59,8 @@ fun EinkSettingsOverlay(
     )
     val keepAwake by displayPrefs.keepAwakeFlow.collectAsState(initial = true)
     val scope = rememberCoroutineScope()
+
+    var urlInput by remember { mutableStateOf("") }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -69,7 +82,7 @@ fun EinkSettingsOverlay(
 
                 HorizontalDivider(thickness = 1.dp, color = Color.Black)
 
-                // Connection status
+                // Connection section
                 Text(
                     text = "Connection",
                     style = MaterialTheme.typography.titleMedium,
@@ -87,9 +100,114 @@ fun EinkSettingsOverlay(
                 if (currentUrl != null) {
                     Text(
                         text = currentUrl!!,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                        ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+
+                // Connected: show disconnect button
+                if (connectionStatus == ConnectionStatus.CONNECTED) {
+                    OutlinedButton(
+                        onClick = {
+                            connection.disconnect()
+                            scope.launch { displayPrefs.setLastBridgeUrl(null) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(1.dp, Color.Black),
+                    ) {
+                        Text("Disconnect", color = Color.Black)
+                    }
+                }
+
+                // Disconnected: show manual URL input + mDNS list
+                if (connectionStatus == ConnectionStatus.DISCONNECTED) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedTextField(
+                            value = urlInput,
+                            onValueChange = { urlInput = it },
+                            placeholder = {
+                                Text(
+                                    "192.168.1.5:9120",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Black,
+                                unfocusedBorderColor = Color.DarkGray,
+                                cursorColor = Color.Black,
+                            ),
+                        )
+                        Button(
+                            onClick = {
+                                val url = if (urlInput.startsWith("ws://")) urlInput
+                                          else "ws://$urlInput"
+                                connection.connect(url)
+                            },
+                            enabled = urlInput.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.Black,
+                                contentColor = Color.White,
+                            ),
+                            shape = RoundedCornerShape(4.dp),
+                        ) {
+                            Text("Connect")
+                        }
+                    }
+
+                    // mDNS discovered bridges
+                    if (discoveredBridges.isNotEmpty()) {
+                        Text(
+                            text = "Discovered",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        discoveredBridges.forEach { bridge ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, Color.DarkGray, RoundedCornerShape(4.dp))
+                                    .clickable {
+                                        connection.connect("ws://${bridge.host}:${bridge.port}")
+                                    }
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = "\u25CF",
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Column {
+                                    Text(
+                                        text = bridge.name,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        text = "${bridge.host}:${bridge.port}",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 HorizontalDivider(thickness = 1.dp, color = Color.Black)
