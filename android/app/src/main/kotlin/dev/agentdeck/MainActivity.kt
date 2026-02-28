@@ -20,21 +20,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.state.AgentStateHolder
 import dev.agentdeck.ui.screen.ControlScreen
 import dev.agentdeck.ui.screen.DashboardScreen
+import dev.agentdeck.ui.screen.EinkMonitorScreen
 import dev.agentdeck.ui.screen.PairingScreen
 import dev.agentdeck.ui.screen.SettingsScreen
 import dev.agentdeck.ui.screen.UsageScreen
 import dev.agentdeck.ui.theme.AgentDeckTheme
 import dev.agentdeck.util.EinkDetector
+import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     data object Dashboard : Screen("dashboard", "Dashboard", Icons.Default.Dashboard)
@@ -55,10 +59,22 @@ class MainActivity : ComponentActivity() {
         val isEink = EinkDetector.isEinkDevice()
         val stateHolder = AgentStateHolder.instance
         val connection = BridgeConnection.instance
+        val displayPrefs = DisplayPreferences(this)
+
+        // Apply saved orientation preference
+        lifecycleScope.launch {
+            displayPrefs.orientationFlow.collect { orientation ->
+                requestedOrientation = orientation
+            }
+        }
 
         setContent {
             AgentDeckTheme(isEink = isEink) {
-                MainNavigation(stateHolder, connection, isEink)
+                if (isEink) {
+                    EinkMonitorScreen(stateHolder, connection, displayPrefs)
+                } else {
+                    MainNavigation(stateHolder, connection, isEink)
+                }
             }
         }
     }

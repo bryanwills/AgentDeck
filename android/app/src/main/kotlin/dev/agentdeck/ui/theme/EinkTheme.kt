@@ -14,7 +14,7 @@ val EinkColorScheme = lightColorScheme(
     tertiary = Color.DarkGray,
     background = Color.White,
     surface = Color.White,
-    surfaceVariant = Color(0xFFE0E0E0),
+    surfaceVariant = Color.White,
     onBackground = Color.Black,
     onSurface = Color.Black,
     onSurfaceVariant = Color.DarkGray,
@@ -60,14 +60,14 @@ val EinkTypography = Typography(
     bodyMedium = TextStyle(
         fontFamily = FontFamily.Serif,
         fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
+        fontSize = 18.sp,
+        lineHeight = 26.sp,
     ),
     bodySmall = TextStyle(
         fontFamily = FontFamily.Serif,
         fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
+        fontSize = 16.sp,
+        lineHeight = 22.sp,
     ),
     labelLarge = TextStyle(
         fontFamily = FontFamily.Monospace,
