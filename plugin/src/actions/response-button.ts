@@ -69,6 +69,7 @@ let currentState = State.DISCONNECTED;
 let currentMode = 'default';
 let currentOptions: PromptOption[] = [];
 let currentAgentType: AgentType | null = null;
+let currentCapabilities: AgentCapabilities | null = null;
 let currentStandby = false;
 let currentNavigable = false;
 
@@ -115,12 +116,18 @@ export function updateResponseState(
   agentType?: AgentType | null,
   standby?: boolean,
   navigable?: boolean,
+  capabilities?: AgentCapabilities | null,
 ): void {
+  // Defensive: if agent doesn't support diff review, treat AWAITING_DIFF as AWAITING_PERMISSION
+  if (capabilities && !capabilities.hasDiffReview && state === State.AWAITING_DIFF) {
+    state = State.AWAITING_PERMISSION;
+  }
   currentState = state;
   currentMode = mode;
   currentOptions = options;
   overrideConfigs = expandedConfigs ?? null;
   if (agentType !== undefined) currentAgentType = agentType;
+  if (capabilities !== undefined) currentCapabilities = capabilities ?? null;
   if (standby !== undefined) currentStandby = standby;
   if (navigable !== undefined) currentNavigable = navigable;
   refreshAllButtons();

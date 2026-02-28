@@ -10,7 +10,7 @@ import streamDeck, {
   DidReceiveSettingsEvent,
 } from '@elgato/streamdeck';
 import { State, PromptOption } from '@agentdeck/shared';
-import type { AgentType, OcSessionStatus } from '@agentdeck/shared';
+import type { AgentType, AgentCapabilities, OcSessionStatus } from '@agentdeck/shared';
 import type { AgentLink } from '../agent-link.js';
 import { isEncoderTakeoverActive, refreshEncoderTakeover } from '../encoder-takeover.js';
 import { encoderRegistry, encoderLayout, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
@@ -61,6 +61,7 @@ let currentToolInput: string | undefined;
 let rotateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let currentSuggestedPrompt: string | null = null;
 let currentAgentType: AgentType | null = null;
+let currentCapabilities: AgentCapabilities | null = null;
 let currentSessionStatus: OcSessionStatus | null = null;
 
 export function setOptionSetupRequired(value: boolean): void {
@@ -72,7 +73,7 @@ export function initOptionDial(b: AgentLink): void {
   bridge = b;
   // Timeline store change → re-render left panel when in OC non-interactive mode
   timelineStore.onChange(() => {
-    if (currentAgentType === 'openclaw' && !isInteractive() && !isVoiceTextTakeoverActive() && !isEncoderTakeoverActive()) {
+    if (currentCapabilities && !currentCapabilities.hasTerminal && !isInteractive() && !isVoiceTextTakeoverActive() && !isEncoderTakeoverActive()) {
       renderTimelineLeftPanel();
     }
   });
@@ -104,8 +105,10 @@ export function updateOptionDialState(
   suggestedPrompt?: string,
   agentType?: AgentType | null,
   sessionStatus?: OcSessionStatus | null,
+  capabilities?: AgentCapabilities | null,
 ): void {
   if (agentType !== undefined) currentAgentType = agentType;
+  if (capabilities !== undefined) currentCapabilities = capabilities ?? null;
   if (sessionStatus !== undefined) currentSessionStatus = sessionStatus ?? null;
   const prevSuggestion = currentSuggestedPrompt;
   const prevState = currentState;
@@ -153,7 +156,7 @@ function isInteractive(): boolean {
 }
 
 function getEffectivePrompts(): { list: string[]; hasSuggestion: boolean } {
-  const basePrompts = currentAgentType === 'openclaw' ? ['continue'] : prompts;
+  const basePrompts = currentCapabilities && !currentCapabilities.hasSuggestedPrompts ? ['continue'] : prompts;
   if (currentSuggestedPrompt && currentState === State.IDLE) {
     return { list: [currentSuggestedPrompt, ...basePrompts], hasSuggestion: true };
   }
@@ -193,8 +196,8 @@ function refreshOptionDials(): void {
     return;
   }
 
-  // OC mode: show timeline when not in interactive mode
-  if (currentAgentType === 'openclaw' && !isInteractive()) {
+  // No-terminal mode: show timeline when not in interactive mode
+  if (currentCapabilities && !currentCapabilities.hasTerminal && !isInteractive()) {
     renderTimelineLeftPanel();
     return;
   }
@@ -354,8 +357,8 @@ export class ResponseDialAction extends SingletonAction {
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
 
-    // OC non-interactive: scroll timeline
-    if (currentAgentType === 'openclaw' && !isInteractive()) {
+    // No-terminal non-interactive: scroll timeline
+    if (currentCapabilities && !currentCapabilities.hasTerminal && !isInteractive()) {
       timelineStore.scroll(ev.payload.ticks);
       return;
     }
@@ -406,8 +409,8 @@ export class ResponseDialAction extends SingletonAction {
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
     if (isPickerActive()) { void selectProject(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
-    // OC non-interactive: toggle detail view
-    if (currentAgentType === 'openclaw' && !isInteractive()) {
+    // No-terminal non-interactive: toggle detail view
+    if (currentCapabilities && !currentCapabilities.hasTerminal && !isInteractive()) {
       timelineStore.toggleDetail();
       return;
     }

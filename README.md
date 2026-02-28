@@ -886,7 +886,7 @@ Stream Deck plugin logs: Stream Deck app → Settings → Logs.
 - ~~npm publish~~ — `@agentdeck/shared`, `@agentdeck/bridge`, `@agentdeck/setup` on npm
 
 ### Remaining
-- Plugin capability gating per agent (UI adaptation)
+- ~~Plugin capability gating per agent (UI adaptation)~~
 - Project-specific layout presets
 - Custom button icon support
 - Windows/Linux platform support

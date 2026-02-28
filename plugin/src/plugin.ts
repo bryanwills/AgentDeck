@@ -165,9 +165,10 @@ initItermDial(connMgr);
 // Refresh other dials when voice text takeover exits
 setVoiceTextExitCallback(() => {
   const agentType = connMgr.getActiveAgentType();
-  updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus);
+  const vtCaps = connMgr.getCapabilities();
+  updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, vtCaps);
   updateUtilityDialState(currentState);
-  updateItermDialState(currentState, agentType, currentSessionStatus);
+  updateItermDialState(currentState, agentType, currentSessionStatus, vtCaps);
 });
 
 // ---- Bridge event handlers ----
@@ -366,7 +367,7 @@ function broadcastStateUpdate(): void {
     overrideModeButton(configs[0]);
     overrideSessionButton(configs[1]);
     overrideUsageButton(configs[2]);
-    updateResponseState(currentState, currentMode as any, currentOptions, configs.slice(3, 7), agentType, standby, currentNavigable);
+    updateResponseState(currentState, currentMode as any, currentOptions, configs.slice(3, 7), agentType, standby, currentNavigable, caps);
     // With 7 options filling slots 0-6, stop button (slot 7) shows normal ESC/STOP
     overrideStopButton(null);
     updateStopState(currentState, undefined, standby);
@@ -378,7 +379,7 @@ function broadcastStateUpdate(): void {
     setUsageState(currentState);
     updateModeButton(currentState, currentMode, caps);
     updateSessionButton(currentState, currentMode, currentProjectName, currentTool, currentModelName, agentType, standby);
-    updateResponseState(currentState, currentMode as any, currentOptions, undefined, agentType, standby, currentNavigable);
+    updateResponseState(currentState, currentMode as any, currentOptions, undefined, agentType, standby, currentNavigable, caps);
 
     // Stop slot: may show 4th option or MORE button
     const stopOverride = layoutManager.getStopSlotOverride(currentState, currentOptions);
@@ -403,7 +404,7 @@ function broadcastStateUpdate(): void {
       updateOptionDialState(
         currentState, currentOptions, currentQuestion, currentTool,
         currentNavigable, currentCursorIndex, currentToolInput,
-        currentSuggestedPrompt, agentType, currentSessionStatus,
+        currentSuggestedPrompt, agentType, currentSessionStatus, caps,
       );
     });
   } else if (!shouldTakeover && isEncoderTakeoverActive()) {
@@ -413,22 +414,22 @@ function broadcastStateUpdate(): void {
       if (exitGen !== takeoverGeneration) return; // superseded by newer transition
       updateVoiceDialState(currentState);
       updateUtilityDialState(currentState);
-      updateItermDialState(currentState, agentType, currentSessionStatus);
+      updateItermDialState(currentState, agentType, currentSessionStatus, caps);
     });
-    updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus);
+    updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, caps);
   } else if (shouldTakeover) {
     // Already in takeover — just refresh
     updateOptionDialState(
       currentState, currentOptions, currentQuestion, currentTool,
       currentNavigable, currentCursorIndex, currentToolInput,
-      currentSuggestedPrompt, agentType, currentSessionStatus,
+      currentSuggestedPrompt, agentType, currentSessionStatus, caps,
     );
   } else {
     // Not in takeover, not entering — normal updates
-    updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus);
+    updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, caps);
     updateVoiceDialState(currentState);
     updateUtilityDialState(currentState);
-    updateItermDialState(currentState, agentType, currentSessionStatus);
+    updateItermDialState(currentState, agentType, currentSessionStatus, caps);
   }
 }
 

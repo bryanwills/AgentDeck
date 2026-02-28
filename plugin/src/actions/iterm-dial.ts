@@ -8,7 +8,7 @@ import streamDeck, {
   WillDisappearEvent,
 } from '@elgato/streamdeck';
 import { State } from '@agentdeck/shared';
-import type { AgentType, OcSessionStatus } from '@agentdeck/shared';
+import type { AgentType, AgentCapabilities, OcSessionStatus } from '@agentdeck/shared';
 import { isEncoderTakeoverActive } from '../encoder-takeover.js';
 import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
 import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
@@ -41,6 +41,7 @@ let polling = false;
 let currentLayout = PIXMAP_LAYOUT;
 let bridgeRef: ConnectionManager | null = null;
 let currentAgentType: AgentType | null = null;
+let currentCapabilities: AgentCapabilities | null = null;
 let currentSessionStatus: OcSessionStatus | null = null;
 let exposeActive = false;
 let exposeTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -215,7 +216,7 @@ export function initItermDial(bridge: ConnectionManager): void {
   dinfo('ItermDial', 'initItermDial called');
   // Timeline store change → re-render right panel when in OC mode
   timelineStore.onChange(() => {
-    if (currentAgentType === 'openclaw' && !isEncoderTakeoverActive() && !isVoiceTextTakeoverActive()) {
+    if (currentCapabilities && !currentCapabilities.hasTerminal && !isEncoderTakeoverActive() && !isVoiceTextTakeoverActive()) {
       renderTimelineRightPanel();
     }
   });
@@ -237,14 +238,15 @@ function renderTimelineRightPanel(): void {
   }
 }
 
-export function updateItermDialState(state: State, agentType?: AgentType | null, sessionStatus?: OcSessionStatus | null): void {
+export function updateItermDialState(state: State, agentType?: AgentType | null, sessionStatus?: OcSessionStatus | null, capabilities?: AgentCapabilities | null): void {
   currentState = state;
   if (agentType !== undefined) currentAgentType = agentType;
+  if (capabilities !== undefined) currentCapabilities = capabilities ?? null;
   if (sessionStatus !== undefined) currentSessionStatus = sessionStatus ?? null;
   // Do NOT reset currentLayout here — causes setFeedbackLayout on every state update → SD flicker.
   // Layout is reset only on encoder takeover exit (via resetEncoderLayouts hook below).
 
-  if (currentAgentType === 'openclaw') {
+  if (currentCapabilities && !currentCapabilities.hasTerminal) {
     stopPolling();
     renderTimelineRightPanel();
     return;
@@ -336,7 +338,7 @@ export class ItermDialAction extends SingletonAction {
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
-    if (currentAgentType === 'openclaw') {
+    if (currentCapabilities && !currentCapabilities.hasTerminal) {
       timelineStore.scroll(ev.payload.ticks);
       return;
     }
@@ -378,7 +380,7 @@ export class ItermDialAction extends SingletonAction {
     if (isPickerActive()) { void selectProject(); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
-    if (currentAgentType === 'openclaw') {
+    if (currentCapabilities && !currentCapabilities.hasTerminal) {
       timelineStore.toggleDetail();
       return;
     }
@@ -393,7 +395,7 @@ export class ItermDialAction extends SingletonAction {
   override async onDialUp(_ev: DialUpEvent): Promise<void> {
     if (isEncoderTakeoverActive()) return;
     if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
-    if (currentAgentType === 'openclaw') return;
+    if (currentCapabilities && !currentCapabilities.hasTerminal) return;
 
     if (exposeActive) {
       exposeActive = false;
