@@ -125,6 +125,8 @@ fun EinkMonitorScreen(
     // because LAN connections require an auth token. User can tap a bridge
     // in the not-connected screen or use Settings for manual URL entry.
 
+    val lastError by connection.lastError.collectAsState()
+
     // Show not-connected screen when disconnected AND not actively reconnecting
     val showNotConnected = connectionStatus != ConnectionStatus.CONNECTED &&
         state.agentState == AgentState.DISCONNECTED
@@ -138,8 +140,12 @@ fun EinkMonitorScreen(
             EinkNotConnectedScreen(
                 connectionStatus = connectionStatus,
                 discoveredBridges = discoveredBridges,
+                lastError = lastError,
                 onConnectToBridge = { bridge ->
                     connection.connect("ws://${bridge.host}:${bridge.port}")
+                },
+                onConnectLocalhost = {
+                    connection.connect("ws://127.0.0.1:9120")
                 },
                 onSettingsClick = { showSettings = true },
             )
@@ -204,7 +210,9 @@ fun EinkMonitorScreen(
 private fun EinkNotConnectedScreen(
     connectionStatus: ConnectionStatus,
     discoveredBridges: List<DiscoveredBridge>,
+    lastError: String?,
     onConnectToBridge: (DiscoveredBridge) -> Unit,
+    onConnectLocalhost: () -> Unit,
     onSettingsClick: () -> Unit,
 ) {
     Column(
@@ -224,7 +232,19 @@ private fun EinkNotConnectedScreen(
             color = MaterialTheme.colorScheme.onSurface,
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Error message from last connection attempt
+        if (lastError != null && connectionStatus == ConnectionStatus.DISCONNECTED) {
+            Text(
+                text = lastError,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         if (connectionStatus == ConnectionStatus.CONNECTING) {
             Text(
@@ -235,23 +255,50 @@ private fun EinkNotConnectedScreen(
         }
 
         if (connectionStatus == ConnectionStatus.DISCONNECTED) {
-            Text(
-                text = if (discoveredBridges.isNotEmpty()) "Found bridge on network"
-                       else "Searching for AgentDeck bridge...",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // USB (adb reverse) quick connect
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.6f)
+                    .clickable(onClick = onConnectLocalhost),
+                shape = RoundedCornerShape(4.dp),
+                border = BorderStroke(2.dp, Color.Black),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "\u2B50 USB (adb reverse)",
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "127.0.0.1:9120",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
+            // mDNS discovered bridges (require auth token)
             if (discoveredBridges.isNotEmpty()) {
+                Text(
+                    text = "Network (token required)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
                 discoveredBridges.forEach { bridge ->
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth(0.6f)
                             .clickable { onConnectToBridge(bridge) },
                         shape = RoundedCornerShape(4.dp),
-                        border = BorderStroke(2.dp, Color.Black),
+                        border = BorderStroke(1.dp, Color.Gray),
                         color = MaterialTheme.colorScheme.background,
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
@@ -271,12 +318,18 @@ private fun EinkNotConnectedScreen(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
+            } else {
+                Text(
+                    text = "Searching for bridges...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         Text(
             text = "\u2699 Settings",

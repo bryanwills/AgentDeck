@@ -49,6 +49,10 @@ class BridgeConnection private constructor() {
     private val _url = MutableStateFlow<String?>(null)
     val url: StateFlow<String?> = _url.asStateFlow()
 
+    /** Last connection error message (cleared on next connect attempt). */
+    private val _lastError = MutableStateFlow<String?>(null)
+    val lastError: StateFlow<String?> = _lastError.asStateFlow()
+
     var onEvent: ((BridgeEvent) -> Unit)? = null
 
     fun connect(wsUrl: String) {
@@ -60,6 +64,7 @@ class BridgeConnection private constructor() {
 
         _url.value = wsUrl
         _status.value = ConnectionStatus.DISCONNECTED
+        _lastError.value = null
         shouldReconnect = true
         backoffMs = INITIAL_BACKOFF_MS
         doConnect(wsUrl)
@@ -132,6 +137,7 @@ class BridgeConnection private constructor() {
                     Log.w(TAG, "Auth rejected (4001) — stopping reconnect")
                     shouldReconnect = false
                     _url.value = null
+                    _lastError.value = "Unauthorized — use adb reverse or pair with token"
                 } else {
                     scheduleReconnect()
                 }
@@ -140,6 +146,7 @@ class BridgeConnection private constructor() {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "onFailure — ${t.message}", t)
                 _status.value = ConnectionStatus.DISCONNECTED
+                _lastError.value = t.message
                 onEvent?.invoke(BridgeEvent.Disconnected)
                 scheduleReconnect()
             }
