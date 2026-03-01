@@ -15,7 +15,7 @@ import { isPickerActive, scrollPicker, selectProject } from '../project-picker.j
 import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
 import { getItermSessions, activateItermSession, attachTmuxInIterm, getActiveItermTty, getTmuxSessionMap, getLiveTmuxSessionNames, isItermFrontmost, cycleItermWindowNext, cycleItermWindowPrev, enterItermExpose, exposeNavigate, exposeConfirm, exposeCancel, type ItermSession } from '../utility-modes/macos.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
-import { renderItermPanel, renderItermReady, renderItermDisabled } from '../renderers/iterm-renderer.js';
+import { renderItermPanel, renderItermReady } from '../renderers/iterm-renderer.js';
 import { timelineStore } from '../timeline-store.js';
 import { renderTimeline } from '../renderers/timeline-renderer.js';
 import { switchToPort } from './session-button.js';
@@ -126,6 +126,7 @@ function appendDetachedTmux(itermSessions: ItermSession[], ctx: DetachedTmuxCont
 }
 
 async function syncFromSystem(): Promise<void> {
+  if (currentCapabilities && !currentCapabilities.hasTerminal) return;
   if (polling) return;
   if (Date.now() - lastActionAt < SKIP_AFTER_ACTION) return;
   polling = true;
@@ -273,24 +274,15 @@ function ensurePixmapLayout(): void {
   }
 }
 
-function renderItermDisabledForOc(): void {
-  if (isEncoderTakeoverActive()) return;
-  if (isVoiceTextTakeoverActive()) return;
-  if (encoderRegistry.itermIds.length === 0) return;
-
-  ensurePixmapLayout();
-  const svg = renderItermDisabled();
-  const feedback = { canvas: svgToDataUrl(svg) };
-  for (const id of encoderRegistry.itermIds) {
-    const dial = streamDeck.actions.getActionById(id) as any;
-    if (dial) void dial.setFeedback(feedback).catch(() => {});
-  }
-}
-
 function refreshItermDials(): void {
   if (isEncoderTakeoverActive()) return;
   if (isVoiceTextTakeoverActive()) return;
   if (encoderRegistry.itermIds.length === 0) return;
+  // OC mode: redirect to timeline rendering
+  if (currentCapabilities && !currentCapabilities.hasTerminal) {
+    renderTimelineRightPanel();
+    return;
+  }
 
   ensurePixmapLayout();
 
@@ -322,6 +314,11 @@ export class ItermDialAction extends SingletonAction {
     if (isEncoderTakeoverActive()) {
       requestTakeoverRefresh();
       startPolling();
+      return;
+    }
+    // OC mode: render timeline, skip iTerm polling
+    if (currentCapabilities && !currentCapabilities.hasTerminal) {
+      renderTimelineRightPanel();
       return;
     }
     // If sessions already cached, show immediately to avoid "No sessions" flash.

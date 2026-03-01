@@ -88,9 +88,9 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
 
     dinfo(TAG, `start(port=${port ?? 'auto'})`);
 
-    // Start both simultaneously
+    // Start bridge only — Gateway direct connection is unnecessary
+    // when daemon is running (daemon proxies Gateway sessions)
     this.bridge.connect(port);
-    this.gateway.connect();
   }
 
   /** Expose bridge's scanLatestPort setter for plugin.ts */
@@ -147,11 +147,6 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
     if (this.activeLink === this.bridge) return 'claude-code';
     if (this.activeLink === this.gateway) return 'openclaw';
     return null;
-  }
-
-  /** Whether we're in standby mode: auto + no bridge + gateway connected. */
-  isStandby(): boolean {
-    return this.userSelection === 'auto' && !this.bridge.isConnected() && this.gateway.isConnected();
   }
 
   /**
@@ -244,9 +239,9 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
       dinfo(TAG, 'Gateway connected');
       this.gatewayEverConnected = true;
 
-      // If user explicitly selected bridge, keep gateway on standby
+      // If user explicitly selected bridge, don't auto-switch
       if (this.userSelection === 'bridge') {
-        dlog(TAG, 'User selected bridge — gateway on standby');
+        dlog(TAG, 'User selected bridge — gateway ignored');
         return;
       }
 
@@ -264,7 +259,7 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
         this.activeLink = this.gateway;
         this.emit('connected');
       } else {
-        dlog(TAG, 'Bridge is active — gateway on standby');
+        dlog(TAG, 'Bridge is active — gateway not activated');
       }
     });
 

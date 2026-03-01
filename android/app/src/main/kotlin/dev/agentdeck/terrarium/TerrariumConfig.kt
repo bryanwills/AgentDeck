@@ -67,15 +67,15 @@ object TerrariumLayout {
     const val WATER_SURFACE_Y_FRACTION = 0.05f
 
     // Octopus sizing (fraction of canvas width)
-    const val OCTOPUS_BODY_RADIUS_FRACTION = 0.06f
+    const val OCTOPUS_BODY_RADIUS_FRACTION = 0.07f
     const val OCTOPUS_CENTER_X_FRACTION = 0.4f
     const val OCTOPUS_CENTER_Y_FRACTION = 0.45f
     // (TENTACLE_LENGTH_FRACTION removed — pixel mascot has no tentacles)
 
     // Crayfish sizing
-    const val CRAYFISH_WIDTH_FRACTION = 0.12f
+    const val CRAYFISH_WIDTH_FRACTION = 0.14f
     const val CRAYFISH_CENTER_X_FRACTION = 0.78f
-    const val CRAYFISH_CENTER_Y_FRACTION = 0.78f
+    const val CRAYFISH_CENTER_Y_FRACTION = 0.75f
 
     // Tetra sizing
     const val TETRA_SIZE_FRACTION = 0.015f

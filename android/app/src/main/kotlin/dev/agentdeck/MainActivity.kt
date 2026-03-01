@@ -7,8 +7,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -51,7 +51,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
-    data object Monitor : Screen("monitor", "Monitor", Icons.Default.Visibility)
+    data object Dashboard : Screen("dashboard", "Dashboard", Icons.Default.Dashboard)
     data object Deck : Screen("deck", "Deck", Icons.Default.GridView)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 }
@@ -133,7 +133,7 @@ fun MainNavigation(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
-    val bottomNavScreens = listOf(Screen.Monitor, Screen.Deck, Screen.Settings)
+    val bottomNavScreens = listOf(Screen.Dashboard, Screen.Deck, Screen.Settings)
 
     // Auto-connect to saved bridge URL on launch
     LaunchedEffect(Unit) {
@@ -187,12 +187,14 @@ fun MainNavigation(
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Monitor.route,
+            startDestination = Screen.Dashboard.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Monitor.route) {
+            composable(Screen.Dashboard.route) {
                 MonitorScreen(
                     stateHolder = stateHolder,
+                    connection = connection,
+                    displayPrefs = displayPrefs,
                 )
             }
             composable(Screen.Deck.route) {

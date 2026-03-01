@@ -11,7 +11,8 @@
   "files": ["dist", "!dist/__tests__"],
   "main": "./dist/index.js",
   "bin": {
-    "sdc": "./dist/index.js"
+    "sdc": "./dist/index.js",
+    "agentdeck": "./dist/daemon.js"
   },
   "scripts": {
     "build": "tsc",

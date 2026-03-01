@@ -8,6 +8,8 @@ import {
   VoiceStateEvent,
   State,
   PermissionMode,
+  OPENCLAW_CAPABILITIES,
+  type AgentType,
   type BillingType,
   type DeckSlotConfig,
   type DeckSlotMapEvent,
@@ -132,6 +134,7 @@ let currentCursorIndex = 0;
 let currentSuggestedPrompt: string | undefined;
 let currentSessionStatus: Record<string, unknown> | null = null;
 let takeoverGeneration = 0;
+let proxiedAgentType: AgentType | null = null;
 
 // ---- Expanded mode state ----
 let expandedMode = false;
@@ -166,8 +169,8 @@ initItermDial(connMgr);
 
 // Refresh other dials when voice text takeover exits
 setVoiceTextExitCallback(() => {
-  const agentType = connMgr.getActiveAgentType();
-  const vtCaps = connMgr.getCapabilities();
+  const agentType = proxiedAgentType ?? connMgr.getActiveAgentType();
+  const vtCaps = proxiedAgentType === 'openclaw' ? OPENCLAW_CAPABILITIES : connMgr.getCapabilities();
   updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, vtCaps);
   updateUtilityDialState(currentState);
   updateItermDialState(currentState, agentType, currentSessionStatus, vtCaps);
@@ -191,9 +194,17 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
   if (ev.modelName) currentModelName = ev.modelName;
   if (ev.billingType) currentBillingType = ev.billingType;
 
+  // Track proxied agent type from daemon (state_update.agentType overrides connection-level detection)
+  if (ev.agentType === 'openclaw' || ev.agentType === 'claude-code') {
+    proxiedAgentType = ev.agentType;
+  }
+
   // Update capabilities from state_update (Bridge sends agentCapabilities on client connect)
+  // When daemon proxies OpenClaw, it doesn't send agentCapabilities — derive from proxiedAgentType
   if (ev.agentCapabilities) {
     setUsageCapabilities(ev.agentCapabilities);
+  } else if (proxiedAgentType === 'openclaw') {
+    setUsageCapabilities(OPENCLAW_CAPABILITIES);
   }
 
   // Update model catalog if present
@@ -316,7 +327,7 @@ connMgr.on('voice_state', (ev: VoiceStateEvent) => {
 
 connMgr.on('active_agent_changed', (agentType: string) => {
   dinfo('Plugin', `active_agent_changed: ${agentType}`);
-  const caps = connMgr.getCapabilities();
+  const caps = proxiedAgentType === 'openclaw' ? OPENCLAW_CAPABILITIES : connMgr.getCapabilities();
   setUsageCapabilities(caps);
   broadcastStateUpdate();
 });
@@ -324,7 +335,8 @@ connMgr.on('active_agent_changed', (agentType: string) => {
 connMgr.on('connected', () => {
   dinfo('Plugin', `connected (activeAgent=${connMgr.getActiveAgentType()} prevState=${currentState})`);
   setUsageBridgeConnected(true);
-  setUsageCapabilities(connMgr.getCapabilities());
+  const connCaps = proxiedAgentType === 'openclaw' ? OPENCLAW_CAPABILITIES : connMgr.getCapabilities();
+  setUsageCapabilities(connCaps);
   // Request fresh usage data immediately on connect (covers sleep/wake recovery)
   connMgr.send({ type: 'query_usage' });
 });
@@ -333,6 +345,7 @@ connMgr.on('disconnected', () => {
   dinfo('Plugin', `disconnected (activeAgent=${connMgr.getActiveAgentType()} prevState=${currentState})`);
   setUsageBridgeConnected(false);
   setUsageCapabilities(null);
+  proxiedAgentType = null;
   currentState = State.DISCONNECTED;
   currentOptions = [];
   currentQuestion = undefined;
@@ -359,9 +372,10 @@ function broadcastStateUpdate(): void {
 
   dlog('Plugin', `broadcast: state=${currentState} mode=${currentMode} opts=${currentOptions.length} expanded=${expandedMode} takeover=${isEncoderTakeoverActive()}`);
 
-  const agentType = connMgr.getActiveAgentType();
-  const caps = connMgr.getCapabilities();
-  const standby = connMgr.isStandby();
+  const agentType = proxiedAgentType ?? connMgr.getActiveAgentType();
+  const caps = proxiedAgentType === 'openclaw'
+    ? OPENCLAW_CAPABILITIES
+    : connMgr.getCapabilities();
 
   if (expandedMode && currentOptions.length > 4) {
     // Expanded mode: all 7 keypad slots show options
@@ -369,10 +383,10 @@ function broadcastStateUpdate(): void {
     overrideModeButton(configs[0]);
     overrideSessionButton(configs[1]);
     overrideUsageButton(configs[2]);
-    updateResponseState(currentState, currentMode as any, currentOptions, configs.slice(3, 7), agentType, standby, currentNavigable, caps);
+    updateResponseState(currentState, currentMode as any, currentOptions, configs.slice(3, 7), agentType, currentNavigable, caps);
     // With 7 options filling slots 0-6, stop button (slot 7) shows normal ESC/STOP
     overrideStopButton(null);
-    updateStopState(currentState, undefined, standby);
+    updateStopState(currentState);
   } else {
     // Normal mode: clear overrides, render normally
     overrideModeButton(null);
@@ -380,8 +394,8 @@ function broadcastStateUpdate(): void {
     overrideUsageButton(null);
     setUsageState(currentState);
     updateModeButton(currentState, currentMode, caps);
-    updateSessionButton(currentState, currentMode, currentProjectName, currentTool, currentModelName, agentType, standby);
-    updateResponseState(currentState, currentMode as any, currentOptions, undefined, agentType, standby, currentNavigable, caps);
+    updateSessionButton(currentState, currentMode, currentProjectName, currentTool, currentModelName, agentType);
+    updateResponseState(currentState, currentMode as any, currentOptions, undefined, agentType, currentNavigable, caps);
 
     // Stop slot: may show 4th option or MORE button
     const stopOverride = layoutManager.getStopSlotOverride(currentState, currentOptions);
@@ -389,7 +403,7 @@ function broadcastStateUpdate(): void {
       overrideStopButton(stopOverride);
     } else {
       overrideStopButton(null);
-      updateStopState(currentState, undefined, standby);
+      updateStopState(currentState);
     }
   }
 

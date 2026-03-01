@@ -19,13 +19,15 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Claude Code pixel mascot — 10×7 blocky character (terracotta).
- * Wide rectangular body with animated arms and legs.
+ * Claude Code pixel mascot — 14×5 portrait-rectangle character (terracotta).
+ * Each pixel is 1:2 (w:h) ratio. Thin gap between blocks for visual separation.
+ * Rounded body with protruding animated arms and 4 stretch-animated tentacles.
  *
  * Pixel cell types:
- *   0=transparent, 1=body, 2=eye, 3=left arm, 4=right arm, 5=left leg, 6=right leg
+ *   0=transparent, 1=body, 2=eye, 3=left arm, 4=right arm,
+ *   5=left tentacle, 6=right tentacle
  *
- * Walking gait: left arm + right leg sync, right arm + left leg sync (natural bipedal).
+ * Arms bob vertically. Tentacles stretch height (no position shift, no gaps).
  * THINKING state shows rotating Anthropic starburst behind the body.
  */
 class OctopusCreature(
@@ -84,12 +86,13 @@ class OctopusCreature(
             drawStarburst(scope, centerX, effectiveCenterY, bodyRadius * 2.5f, bodyAlpha)
         }
 
-        // Draw pixel body with animated arms/legs
+        // Draw pixel body with animated tentacles
         drawPixelBody(scope, centerX, effectiveCenterY, bodyRadius, bodyAlpha)
 
         // Holographic keyboard for TYPING state
         if (visualState == OctopusVisualState.TYPING) {
-            val gridH = GRID_ROWS * (bodyRadius * 2f / GRID_COLS)
+            val pixelW = bodyRadius * 2f / GRID_COLS
+            val gridH = GRID_ROWS * pixelW * PIXEL_ASPECT
             val kbY = effectiveCenterY + gridH * 0.6f
             drawHolographicKeyboard(scope, centerX, kbY, bodyRadius)
         }
@@ -105,21 +108,11 @@ class OctopusCreature(
         }
     }
 
-    // --- Limb animation offsets ---
+    // --- Tentacle animation offsets ---
 
-    /**
-     * Compute Y-offset for limb animation.
-     * Natural bipedal gait: left arm ↔ right leg, right arm ↔ left leg.
-     */
-    private fun limbOffset(isLeft: Boolean, isArm: Boolean, pixelSize: Float): Float {
-        // Arm phase: 0 for left, PI for right
-        // Leg phase: PI for left, 0 for right (opposite to arm on same side)
-        val phase = when {
-            isArm && isLeft -> 0f
-            isArm && !isLeft -> PI.toFloat()
-            !isArm && isLeft -> PI.toFloat() // left leg syncs with right arm
-            else -> 0f // right leg syncs with left arm
-        }
+    /** Y-offset for tentacle animation. Left and right pairs sway in opposite phase. */
+    private fun tentacleOffset(isLeft: Boolean, pixelSize: Float): Float {
+        val phase = if (isLeft) PI.toFloat() else 0f
 
         val (speed, amplitude) = when (visualState) {
             OctopusVisualState.TYPING -> TerrariumTiming.TYPING_SPEED to 0.35f
@@ -134,15 +127,33 @@ class OctopusCreature(
         return sin(time * speed + phase) * pixelSize * amplitude
     }
 
+    /** Y-offset for arm animation. Gentle bob, opposite phase from tentacles. */
+    private fun armOffset(isLeft: Boolean, pixelSize: Float): Float {
+        val phase = if (isLeft) 0f else PI.toFloat()
+
+        val (speed, amplitude) = when (visualState) {
+            OctopusVisualState.TYPING -> 4.0f to 0.20f
+            OctopusVisualState.FLOATING -> 1.5f to 0.12f
+            OctopusVisualState.THINKING -> 1.0f to 0.06f
+            OctopusVisualState.OFFERING,
+            OctopusVisualState.PRESENTING -> 1.5f to 0.08f
+            OctopusVisualState.REVIEWING -> 0.8f to 0.04f
+            OctopusVisualState.SLEEPING -> return 0f
+        }
+
+        return sin(time * speed + phase) * pixelSize * amplitude
+    }
+
     private fun drawPixelBody(
         scope: DrawScope,
         cx: Float, cy: Float,
         bodyRadius: Float,
         alpha: Float,
     ) {
-        val pixelSize = bodyRadius * 2f / GRID_COLS
-        val gridW = GRID_COLS * pixelSize
-        val gridH = GRID_ROWS * pixelSize
+        val pixelW = bodyRadius * 2f / GRID_COLS
+        val pixelH = pixelW * PIXEL_ASPECT
+        val gridW = GRID_COLS * pixelW
+        val gridH = GRID_ROWS * pixelH
         val startX = cx - gridW / 2f
         val startY = cy - gridH / 2f
 
@@ -153,15 +164,15 @@ class OctopusCreature(
                 val cell = PIXEL_GRID[row][col]
                 if (cell == EMPTY) continue
 
-                val px = startX + col * pixelSize
-                var py = startY + row * pixelSize
+                val px = startX + col * pixelW
+                var py = startY + row * pixelH
 
-                // Apply limb animation offsets
+                // Apply animation offsets
                 when (cell) {
-                    LEFT_ARM -> py += limbOffset(isLeft = true, isArm = true, pixelSize)
-                    RIGHT_ARM -> py += limbOffset(isLeft = false, isArm = true, pixelSize)
-                    LEFT_LEG -> py += limbOffset(isLeft = true, isArm = false, pixelSize)
-                    RIGHT_LEG -> py += limbOffset(isLeft = false, isArm = false, pixelSize)
+                    LEFT_ARM -> py += armOffset(isLeft = true, pixelH)
+                    RIGHT_ARM -> py += armOffset(isLeft = false, pixelH)
+                    LEFT_LEG -> py += tentacleOffset(isLeft = true, pixelH)
+                    RIGHT_LEG -> py += tentacleOffset(isLeft = false, pixelH)
                 }
 
                 when (cell) {
@@ -170,23 +181,23 @@ class OctopusCreature(
                             // Closed eyes — thin horizontal line
                             scope.drawRect(
                                 color = TerrariumColors.ClaudeEye.copy(alpha = alpha * 0.6f),
-                                topLeft = Offset(px, py + pixelSize * 0.4f),
-                                size = Size(pixelSize, pixelSize * 0.2f),
+                                topLeft = Offset(px, py + pixelH * 0.4f),
+                                size = Size(pixelW, pixelH * 0.2f),
                             )
                         } else {
                             scope.drawRect(
                                 color = TerrariumColors.ClaudeEye.copy(alpha = alpha),
                                 topLeft = Offset(px, py),
-                                size = Size(pixelSize, pixelSize),
+                                size = Size(pixelW, pixelH),
                             )
                         }
                     }
                     else -> {
-                        // Body, arm, or leg pixel — all use body color
+                        // Body or tentacle pixel — all use body color
                         scope.drawRect(
                             color = bodyColor.copy(alpha = alpha),
                             topLeft = Offset(px, py),
-                            size = Size(pixelSize, pixelSize),
+                            size = Size(pixelW, pixelH),
                         )
                     }
                 }
@@ -349,19 +360,21 @@ class OctopusCreature(
         private const val LEFT_LEG = 5
         private const val RIGHT_LEG = 6
 
-        private const val GRID_COLS = 10
-        private const val GRID_ROWS = 7
+        private const val GRID_COLS = 12
+        private const val GRID_ROWS = 6
 
-        // Claude Code pixel mascot — 10 cols × 7 rows
-        // Wide rectangular body + arms on sides + 4 thin legs
+        /** Portrait pixel aspect ratio (height/width). */
+        private const val PIXEL_ASPECT = 1.7f
+
+        // Claude Code pixel mascot — 12 cols × 6 rows, portrait-rectangle pixels
+        // Rounded body (10w) with protruding arms (12w at row 2) + 4 tentacles
         private val PIXEL_GRID = arrayOf(
-            intArrayOf(0, 0, 1, 1, 1, 1, 1, 1, 0, 0), // row 0: head top
-            intArrayOf(0, 1, 1, 2, 1, 1, 2, 1, 1, 0), // row 1: head + eyes
-            intArrayOf(3, 1, 1, 1, 1, 1, 1, 1, 1, 4), // row 2: upper body + arms
-            intArrayOf(3, 1, 1, 1, 1, 1, 1, 1, 1, 4), // row 3: lower body + arms
-            intArrayOf(0, 0, 1, 1, 1, 1, 1, 1, 0, 0), // row 4: waist
-            intArrayOf(0, 0, 5, 0, 5, 6, 0, 6, 0, 0), // row 5: 4 legs upper
-            intArrayOf(0, 0, 5, 0, 0, 0, 0, 6, 0, 0), // row 6: outer legs longer
+            intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0), // row 0: head (10w)
+            intArrayOf(0, 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 0), // row 1: eyes (10w)
+            intArrayOf(3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4), // row 2: body + arms (12w)
+            intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0), // row 3: body (10w)
+            intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0), // row 4: waist (10w)
+            intArrayOf(0, 0, 5, 0, 5, 0, 0, 6, 0, 6, 0, 0), // row 5: tentacles ×4
         )
 
         // Starburst (Anthropic sparkle) — 10 arms with varying lengths

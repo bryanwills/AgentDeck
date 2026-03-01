@@ -70,8 +70,13 @@ let currentMode = 'default';
 let currentOptions: PromptOption[] = [];
 let currentAgentType: AgentType | null = null;
 let currentCapabilities: AgentCapabilities | null = null;
-let currentStandby = false;
 let currentNavigable = false;
+let ccNoSessionMode = false;
+
+export function setCcNoSessionMode(value: boolean): void {
+  ccNoSessionMode = value;
+  refreshAllButtons();
+}
 
 // Action ID → fixed slot index (0-based, from PI settings)
 const actionSlots = new Map<string, number>();
@@ -114,7 +119,6 @@ export function updateResponseState(
   options: PromptOption[],
   expandedConfigs?: ButtonConfig[],
   agentType?: AgentType | null,
-  standby?: boolean,
   navigable?: boolean,
   capabilities?: AgentCapabilities | null,
 ): void {
@@ -128,7 +132,6 @@ export function updateResponseState(
   overrideConfigs = expandedConfigs ?? null;
   if (agentType !== undefined) currentAgentType = agentType;
   if (capabilities !== undefined) currentCapabilities = capabilities ?? null;
-  if (standby !== undefined) currentStandby = standby;
   if (navigable !== undefined) currentNavigable = navigable;
   refreshAllButtons();
 }
@@ -250,16 +253,12 @@ function getOpenClawIdlePresets(): ButtonConfig[] {
 function refreshAllButtons(): void {
   const sorted = getSortedIds();
 
-  // Standby mode: all DIM only when IDLE
-  if (currentStandby && currentState === State.IDLE) {
+  // CC No Session mode: show DISCONNECTED buttons (START + dim)
+  if (ccNoSessionMode && !overrideConfigs) {
+    dlog('RspBut', `refresh ccNoSession: ids=${sorted.length}`);
     for (let i = 0; i < sorted.length; i++) {
-      // Keep slot 0 START button if it has a disconnectedAction
-      if (i === 0) {
-        const s = effectiveSettings(sorted[i]);
-        applyButtonConfig(sorted[i], disconnectedButtonConfig(s), actionSlots.get(sorted[i]));
-      } else {
-        applyButtonConfig(sorted[i], DIM_BUTTON, actionSlots.get(sorted[i]));
-      }
+      const s = effectiveSettings(sorted[i]);
+      applyButtonConfig(sorted[i], disconnectedButtonConfig(s), actionSlots.get(sorted[i]));
     }
     return;
   }
@@ -450,7 +449,7 @@ export class ResponseButtonAction extends SingletonAction {
     const slot = sorted.indexOf(ev.action.id);
     // === Guard A: action ID not in actionSlots ===
     dlog('RspBut', `keyDown ENTRY: id=${ev.action.id} slot=${slot} state=${currentState} ` +
-      `override=${!!overrideConfigs} standby=${currentStandby} sorted=${sorted.length}`);
+      `override=${!!overrideConfigs} sorted=${sorted.length}`);
     if (slot < 0) {
       dwarn('RspBut', `keyDown GUARD-A: action ID not in actionSlots! id=${ev.action.id} slots=[${sorted.join(',')}]`);
       return;
@@ -464,6 +463,21 @@ export class ResponseButtonAction extends SingletonAction {
         dlog('RspBut', `keyDown slot=0 → launchSetup`);
         void launchSetup();
       }
+      return;
+    }
+
+    // === Guard B0.5: CC No Session mode — only slot 0 START opens picker ===
+    if (ccNoSessionMode) {
+      if (isPickerActive()) {
+        selectByButtonSlot(slot);
+        return;
+      }
+      const s = effectiveSettings(ev.action.id);
+      const cmd = s.disconnectedAction?.trim();
+      if (!cmd) return;
+      dlog('RspBut', `keyDown slot=${slot} → openPicker (ccNoSession)`);
+      setPickerBaseDir(s.baseDir ?? '~/Documents');
+      void openPicker();
       return;
     }
 

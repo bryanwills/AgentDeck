@@ -14,7 +14,6 @@ import { dlog } from '../log.js';
 
 let bridge: AgentLink;
 let currentState = State.DISCONNECTED;
-let currentStandby = false;
 let overrideConfig: ButtonConfig | null = null;
 
 const actionIds: string[] = [];
@@ -23,9 +22,8 @@ export function initStopButton(b: AgentLink): void {
   bridge = b;
 }
 
-export function updateStopState(state: State, options?: PromptOption[], standby?: boolean): void {
+export function updateStopState(state: State, options?: PromptOption[]): void {
   currentState = state;
-  if (standby !== undefined) currentStandby = standby;
   // overrideConfig is set externally by overrideStopButton
   refreshStopButtons();
 }
@@ -44,10 +42,6 @@ function isAwaiting(state: State): boolean {
 }
 
 function getButtonConfig(state: State): ButtonConfig {
-  // Standby → DIM only when IDLE
-  if (currentStandby && state === State.IDLE) {
-    return { title: 'STOP', color: '#1a1a1a', textColor: '#444444', enabled: false };
-  }
   if (state === State.PROCESSING) {
     return { title: 'STOP', color: '#cc0000', textColor: '#ffffff', enabled: true };
   }

@@ -2,6 +2,60 @@
 
 ---
 
+## 2026-03-02 — Daemon 프록시 시 OpenClaw 스타일 미적용
+
+### 문제
+Daemon이 Gateway를 프록시할 때 Plugin은 bridge로 연결됨. `connMgr.getActiveAgentType()`은 bridge 연결이면 항상 `'claude-code'` 반환. daemon이 `state_update.agentType: 'openclaw'`을 보내지만 plugin이 이 값을 무시하여 모든 UI가 Claude Code 녹색 스타일로 표시. 추가로 Usage 버튼의 `currentCapabilities`도 올바른 값으로 설정되지 않아 OpenClaw model catalog/usage 페이지 미표시.
+
+### 해결
+`plugin.ts`에 `proxiedAgentType` 변수 도입. `state_update` 핸들러에서 `ev.agentType`을 저장하고, `broadcastStateUpdate()`에서 `proxiedAgentType ?? connMgr.getActiveAgentType()`으로 실제 에이전트 타입 결정. capabilities도 `proxiedAgentType === 'openclaw'`이면 `OPENCLAW_CAPABILITIES` 직접 적용 (daemon은 `agentCapabilities` 미전송).
+
+Usage 버튼: `state_update`에서 `ev.agentCapabilities` 없고 `proxiedAgentType === 'openclaw'`이면 `setUsageCapabilities(OPENCLAW_CAPABILITIES)` fallback 호출 추가. 이로써 model catalog poll + OC usage poll 시작.
+
+**근본 수정** (`daemon-server.ts`): daemon `state_update`에 `agentCapabilities: OPENCLAW_CAPABILITIES` + `modelCatalog` 추가. adapter `metadata` → `model_catalog` 이벤트 캐싱 + 즉시 broadcast. Gateway disconnect 시 `cachedModelCatalog = null` 초기화. Plugin fallback은 defense-in-depth로 유지.
+
+### 교훈 / 핵심 설계 결정
+- **프록시 계층은 원본 에이전트 정보를 투명하게 전달해야 함**: connection-level 감지(`getActiveAgentType()`)와 protocol-level 정보(`state_update.agentType`)가 불일치할 때, protocol-level이 우선해야 함
+- **독립 상태를 가진 컴포넌트는 명시적 setter 호출 필요**: `broadcastStateUpdate()`에서 caps를 올바르게 계산해도, Usage 버튼처럼 자체 `currentCapabilities` 상태를 가진 컴포넌트는 `setUsageCapabilities()` 명시 호출 없이는 반영 안 됨. 파생 값 전파 누락 주의
+- **daemon은 bridge와 동일한 프로토콜 계약 준수 필요**: `agentCapabilities`, `modelCatalog` 등 bridge가 보내는 필드를 daemon도 보내야 함. 누락 시 소비자(plugin/android)가 개별 fallback 필요 — 양쪽 수정(daemon 근본 + plugin defense-in-depth) 병행이 안전
+
+---
+
+## 2026-03-02 — OpenClaw ↔ NO SESSION 토글 + START 버튼
+
+### 문제
+CC 세션 없이 OpenClaw Gateway만 연결된 상태에서 Session 버튼을 누르면 아무 일도 안 됨 (cycle list에 OpenClaw 1개만 있어서 early return). 또한 NO SESSION 전환 시 Usage 버튼과 E2/E3 타임라인이 여전히 OpenClaw 모드로 남아있는 문제.
+
+### 해결
+**가상 `cc-nosession` CycleEntry 추가** (`session-button.ts`): Gateway 연결 + CC 세션 0개 → cycle list에 `cc-nosession` 가상 엔트리 삽입. OpenClaw ↔ NO SESSION 토글 가능. NO SESSION에서 response-button의 기존 START→picker→`sdc` 인프라 재활용.
+
+**`setNoSessionMode()` 헬퍼**: 진입/탈출 시 `setCcNoSessionMode` (response-button), `setUsageCapabilities(null/caps)`, `updateOptionDialState(caps: null/caps)`, `updateItermDialState(caps: null/caps)` 일괄 호출. capabilities null → usage는 CC 기본 페이지(5h/7d), E2/E3는 기본 동작(prompts/iTerm)으로 복귀.
+
+**자동 전환**: file watcher가 새 CC 세션 감지 시 NO SESSION 모드 자동 해제 + `resetToAuto()`. `updateSessionButton`에서 CC agentType 도착 시에도 해제.
+
+### 교훈 / 핵심 설계 결정
+- **가상 상태는 모든 컴포넌트에 전파해야 함**: session/response 버튼만 플래그를 알고 다른 컴포넌트(usage, encoder dial)는 여전히 gateway capabilities를 보면 UI 불일치. `setNoSessionMode()` 같은 일괄 전파 헬퍼가 필수
+- **"OC" 약자 사용 금지**: Opencode, Codex CLI 등 추가 예정으로 "OC"가 모호해짐. 코드/코멘트에서 풀네임(OpenClaw, Opencode 등) 사용
+
+---
+
+## 2026-03-01 — E3 인코더 OC 모드 혼합 표시 + standby 개념 제거
+
+### 문제
+1. **E3 혼합 표시**: Bridge 미연결 + Gateway 연결 시 E2(option-dial)는 OC 타임라인 LEFT 패널 정상 표시, E3(iterm-dial)는 "iTERM No sessions" 표시. `option-dial.ts`에는 모든 렌더링 경로에 capabilities 가드가 있지만 `iterm-dial.ts`에는 누락
+2. **standby 개념 불필요**: `isStandby()` (auto + !bridge + gateway) 상태에서 gateway가 이미 activeLink로 활성화되어 있음에도 별도 "standby" UI를 표시. 실제로는 정상 OC 모드와 동일한 상태
+
+### 해결
+**iterm-dial.ts 3중 가드 추가**: (1) `refreshItermDials()`에 `!hasTerminal` 체크 → 타임라인 RIGHT 패널 리디렉트 (2) `onWillAppear`에 OC 가드 → async 레이스 원천 차단 (syncFromSystem 200-500ms await 후 startPolling 재시작 방지) (3) `syncFromSystem()` 초입에 OC 가드 → 불필요한 osascript 호출 차단. 데드코드 `renderItermDisabledForOc()` 삭제.
+
+**standby 완전 제거** (6파일): `ConnectionManager.isStandby()` 삭제, `session-button`/`response-button`/`stop-button`/`plugin.ts`에서 standby 변수·파라미터·분기 전부 제거. Auto+!bridge+gateway 시 일반 OpenClaw UI(프리셋 버튼, 세션 표시 등) 표시.
+
+### 교훈 / 핵심 설계 결정
+- **인코더 capabilities 가드 패턴**: OC 타임라인처럼 두 인코더(E2+E3)가 합체 렌더링하는 경우, 양쪽 다이얼 모두 `refreshXxxDials()` 진입점에서 `!hasTerminal` 가드 필수. 한쪽만 가드하면 async 타이밍에 따라 혼합 표시 발생
+- **ConnectionManager에 UI 상태 없어야 함**: gateway가 activeLink로 활성화된 상태를 별도 "standby"로 분류하는 것은 불필요한 복잡성. activeLink/agentType만으로 모든 UI 분기 가능
+
+---
+
 ## 2026-03-01 — Terrarium 크리처 브랜딩 + 멀티세션 크리처 버그 수정
 
 ### 문제

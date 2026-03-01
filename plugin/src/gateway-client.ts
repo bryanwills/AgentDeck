@@ -835,12 +835,10 @@ export class GatewayClient extends EventEmitter implements AgentLink {
       );
       this.currentSessionKey = sorted[0].key;
 
-      const label = sorted[0].label || sorted[0].displayName;
-      if (label) {
-        this.projectName = label;
-        // Re-emit state with project name
-        this.emitStateUpdate();
-      }
+      // Use fixed name — Gateway session labels can be user identifiers
+      // (e.g. phone numbers) which are unsuitable as project names
+      this.projectName = 'OpenClaw';
+      this.emitStateUpdate();
 
       dlog(TAG, `Active session: ${this.currentSessionKey}`);
     } catch (err) {

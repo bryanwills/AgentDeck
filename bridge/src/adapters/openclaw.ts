@@ -101,6 +101,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
   private projectName: string | null = null;
   private alive = false;
   private shutdownRequested = false;
+  private externalHttpServer = false;
   private diagHandler: ((tail?: number) => unknown) | null = null;
   private rawDataCallback: ((data: string) => void) | null = null;
 
@@ -160,7 +161,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
     });
   }
 
-  async start(options: AdapterStartOptions): Promise<void> {
+  async start(options: AdapterStartOptions & { externalServer?: Server }): Promise<void> {
     if (options.gatewayUrl) {
       this.gatewayUrl = options.gatewayUrl;
     }
@@ -168,20 +169,27 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
     // Load device identity for Ed25519 auth (non-fatal if missing)
     this.loadDeviceIdentity();
 
-    // Start HTTP server for plugin WebSocket attachment
-    await new Promise<void>((resolve, reject) => {
-      this.httpServer.on('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === 'EADDRINUSE') {
-          reject(new Error(`Port ${options.port} is already in use.`));
-        } else {
-          reject(err);
-        }
+    if (options.externalServer) {
+      // Use externally provided HTTP server (daemon mode)
+      this.httpServer = options.externalServer;
+      this.externalHttpServer = true;
+      debug('adapter:openclaw', 'Using external HTTP server');
+    } else {
+      // Start own HTTP server for plugin WebSocket attachment
+      await new Promise<void>((resolve, reject) => {
+        this.httpServer.on('error', (err: NodeJS.ErrnoException) => {
+          if (err.code === 'EADDRINUSE') {
+            reject(new Error(`Port ${options.port} is already in use.`));
+          } else {
+            reject(err);
+          }
+        });
+        this.httpServer.listen(options.port, '0.0.0.0', () => {
+          debug('adapter:openclaw', `HTTP server listening on 0.0.0.0:${options.port}`);
+          resolve();
+        });
       });
-      this.httpServer.listen(options.port, '0.0.0.0', () => {
-        debug('adapter:openclaw', `HTTP server listening on 0.0.0.0:${options.port}`);
-        resolve();
-      });
-    });
+    }
 
     // Connect to OpenClaw Gateway
     this.connectGateway();
@@ -341,9 +349,11 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
 
     this.alive = false;
 
-    await new Promise<void>((resolve) => {
-      this.httpServer.close(() => resolve());
-    });
+    if (!this.externalHttpServer) {
+      await new Promise<void>((resolve) => {
+        this.httpServer.close(() => resolve());
+      });
+    }
   }
 
   // ===== Private: Device Identity =====
@@ -770,15 +780,14 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
       );
       this.currentSessionKey = sorted[0].key;
 
-      const label = sorted[0].label || sorted[0].displayName;
-      if (label) {
-        this.projectName = label;
-        this.emitAdapterEvent({
-          source: 'parser',
-          event: 'project_name',
-          data: { name: label },
-        });
-      }
+      // Use fixed name — Gateway session labels can be user identifiers
+      // (e.g. phone numbers) which are unsuitable as project names
+      this.projectName = 'OpenClaw';
+      this.emitAdapterEvent({
+        source: 'parser',
+        event: 'project_name',
+        data: { name: 'OpenClaw' },
+      });
 
       debug('adapter:openclaw', `Active session: ${this.currentSessionKey}`);
     } catch (err) {

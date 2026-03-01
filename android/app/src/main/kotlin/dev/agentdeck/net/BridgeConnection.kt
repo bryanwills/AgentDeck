@@ -77,6 +77,7 @@ class BridgeConnection private constructor() {
     fun disconnect() {
         shouldReconnect = false
         _url.value = null
+        _lastError.value = null
         webSocket?.close(1000, "User disconnect")
         webSocket = null
         _status.value = ConnectionStatus.DISCONNECTED

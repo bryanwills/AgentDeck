@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,13 +24,87 @@ import dev.agentdeck.terrarium.TetraVisualState
 import dev.agentdeck.terrarium.TerrariumState
 import dev.agentdeck.terrarium.TerrariumTiming
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+
+/** E-ink animation frame interval (ms). 800ms is safe for Crema A2 ~120ms refresh. */
+private const val EINK_ANIM_FRAME_MS = 800L
+
+// --- E-ink octopus pixel grid (12×9, matching OctopusCreature) ---
+
+private const val EINK_OCTOPUS_COLS = 12
+private const val EINK_OCTOPUS_ROWS = 6
+private const val EINK_PIXEL_ASPECT = 1.7f
+private val EINK_OCTOPUS_GRID = arrayOf(
+    intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0), // row 0: head (10w)
+    intArrayOf(0, 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 0), // row 1: eyes (10w)
+    intArrayOf(3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4), // row 2: body + arms (12w)
+    intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0), // row 3: body (10w)
+    intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0), // row 4: waist (10w)
+    intArrayOf(0, 0, 5, 0, 5, 0, 0, 6, 0, 6, 0, 0), // row 5: tentacles ×4
+)
+
+// --- E-ink crayfish SVG paths (cached, android.graphics.Path) ---
+
+private const val EINK_SVG_VIEWBOX = 120f
+
+private val einkCrayfishBodyPath: android.graphics.Path by lazy {
+    android.graphics.Path().apply {
+        moveTo(60f, 10f)
+        cubicTo(30f, 10f, 15f, 35f, 15f, 55f)
+        cubicTo(15f, 75f, 30f, 95f, 45f, 100f)
+        lineTo(45f, 110f)
+        lineTo(55f, 110f)
+        lineTo(55f, 100f)
+        cubicTo(55f, 100f, 60f, 102f, 65f, 100f)
+        lineTo(65f, 110f)
+        lineTo(75f, 110f)
+        lineTo(75f, 100f)
+        cubicTo(90f, 95f, 105f, 75f, 105f, 55f)
+        cubicTo(105f, 35f, 90f, 10f, 60f, 10f)
+        close()
+    }
+}
+
+private val einkCrayfishLeftClawPath: android.graphics.Path by lazy {
+    android.graphics.Path().apply {
+        moveTo(20f, 45f)
+        cubicTo(5f, 40f, 0f, 50f, 5f, 60f)
+        cubicTo(10f, 70f, 20f, 65f, 25f, 55f)
+        cubicTo(28f, 48f, 25f, 45f, 20f, 45f)
+        close()
+    }
+}
+
+private val einkCrayfishRightClawPath: android.graphics.Path by lazy {
+    android.graphics.Path().apply {
+        moveTo(100f, 45f)
+        cubicTo(115f, 40f, 120f, 50f, 115f, 60f)
+        cubicTo(110f, 70f, 100f, 65f, 95f, 55f)
+        cubicTo(92f, 48f, 95f, 45f, 100f, 45f)
+        close()
+    }
+}
+
+private val einkCrayfishLeftAntennaPath: android.graphics.Path by lazy {
+    android.graphics.Path().apply {
+        moveTo(45f, 15f)
+        quadTo(35f, 5f, 30f, 8f)
+    }
+}
+
+private val einkCrayfishRightAntennaPath: android.graphics.Path by lazy {
+    android.graphics.Path().apply {
+        moveTo(75f, 15f)
+        quadTo(85f, 5f, 90f, 8f)
+    }
+}
 
 /**
- * E-ink terrarium renderer — draws line art creatures into an offscreen bitmap,
+ * E-ink terrarium renderer — draws creatures into an offscreen bitmap,
  * applies Floyd-Steinberg dithering, then renders the 1-bit result.
  *
- * Style: "Marine biologist's journal" — pen drawing line art, high contrast.
- * Re-renders only on state changes (debounced 500ms).
+ * Style: "Marine biologist's journal" — pixel blocks + SVG outlines, high contrast.
+ * Supports slow 4-frame animation (800ms interval) for active states.
  */
 @Composable
 fun EinkTerrariumView(
@@ -39,6 +114,20 @@ fun EinkTerrariumView(
     var renderedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var lastRenderState by remember { mutableStateOf<TerrariumState?>(null) }
     var pendingRender by remember { mutableLongStateOf(0L) }
+    var animFrame by remember { mutableIntStateOf(0) }
+
+    val isAnimating = state.octopus != OctopusVisualState.SLEEPING ||
+        (state.crayfish != CrayfishVisualState.DORMANT && state.crayfish != CrayfishVisualState.SITTING)
+
+    // Animation loop for active states (4-frame, 800ms interval)
+    LaunchedEffect(isAnimating) {
+        if (!isAnimating) return@LaunchedEffect
+        while (isActive) {
+            delay(EINK_ANIM_FRAME_MS)
+            animFrame = (animFrame + 1) % 4
+            renderedBitmap = renderEinkFrame(state, EINK_WIDTH, EINK_HEIGHT, animFrame)
+        }
+    }
 
     // Debounced re-render on state change
     LaunchedEffect(state.octopus, state.crayfish, state.tetra, state.environment, state.agents.size) {
@@ -46,17 +135,17 @@ fun EinkTerrariumView(
         pendingRender = System.currentTimeMillis()
         delay(TerrariumTiming.EINK_DEBOUNCE_MS)
 
-        // Only render if no newer state arrived
         if (System.currentTimeMillis() - pendingRender >= TerrariumTiming.EINK_DEBOUNCE_MS - 50) {
             lastRenderState = state
-            renderedBitmap = renderEinkFrame(state, EINK_WIDTH, EINK_HEIGHT)
+            animFrame = 0
+            renderedBitmap = renderEinkFrame(state, EINK_WIDTH, EINK_HEIGHT, 0)
         }
     }
 
     // Initial render
     LaunchedEffect(Unit) {
         if (renderedBitmap == null) {
-            renderedBitmap = renderEinkFrame(state, EINK_WIDTH, EINK_HEIGHT)
+            renderedBitmap = renderEinkFrame(state, EINK_WIDTH, EINK_HEIGHT, 0)
             lastRenderState = state
         }
     }
@@ -70,8 +159,10 @@ fun EinkTerrariumView(
     }
 }
 
-/** Render a single e-ink frame: draw line art → dither → return 1-bit bitmap. */
-private fun renderEinkFrame(state: TerrariumState, width: Int, height: Int): Bitmap {
+/** Render a single e-ink frame with optional animation. */
+private fun renderEinkFrame(
+    state: TerrariumState, width: Int, height: Int, animFrame: Int = 0,
+): Bitmap {
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
     val paint = Paint().apply { isAntiAlias = false }
@@ -91,7 +182,7 @@ private fun renderEinkFrame(state: TerrariumState, width: Int, height: Int): Bit
     paint.strokeWidth = 1.5f
     canvas.drawLine(8f, surfaceY, width - 8f, surfaceY, paint)
 
-    // Wave marks on surface (more for wider canvas)
+    // Wave marks on surface
     paint.strokeWidth = 1f
     for (i in 0 until 8) {
         val x = width * (0.05f + i * 0.12f)
@@ -110,28 +201,26 @@ private fun renderEinkFrame(state: TerrariumState, width: Int, height: Int): Bit
         canvas.drawCircle(bx, by, 2f + i * 0.5f, paint)
     }
 
-    // Seaweed / plants
+    // Environment
     drawEinkSeaweed(canvas, paint, width, height)
-
-    // Bottom terrain (rocks silhouette)
     drawEinkRocks(canvas, paint, width, height)
     drawEinkGravel(canvas, paint, width, height)
 
-    // Creatures (line art)
+    // Creatures
     if (state.agents.size > 1) {
-        // Multi-session: draw each agent octopus at its layout position
         val slots = dev.agentdeck.terrarium.layoutOctopuses(state.agents.size)
         for (i in state.agents.indices) {
             val slot = slots.getOrElse(i) { slots.last() }
             drawEinkOctopus(canvas, paint, width, height,
                 state.agents[i].visualState, state.agents[i].agentType,
                 centerXFraction = slot.centerXFraction, centerYFraction = slot.centerYFraction,
-                scaleFactor = slot.scaleFactor)
+                scaleFactor = slot.scaleFactor, animFrame = animFrame)
         }
     } else {
-        drawEinkOctopus(canvas, paint, width, height, state.octopus, state.agentType)
+        drawEinkOctopus(canvas, paint, width, height, state.octopus, state.agentType,
+            animFrame = animFrame)
     }
-    drawEinkCrayfish(canvas, paint, width, height, state.crayfish)
+    drawEinkCrayfish(canvas, paint, width, height, state.crayfish, animFrame)
     drawEinkDataParticles(canvas, paint, width, height, state.tetra, state.agents.size)
 
     // State label at bottom
@@ -147,6 +236,8 @@ private fun renderEinkFrame(state: TerrariumState, width: Int, height: Int): Bit
 
     return bitmap
 }
+
+// --- Environment ---
 
 private fun drawEinkRocks(canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int) {
     val bottomY = h * 0.82f
@@ -234,6 +325,9 @@ private fun drawEinkGravel(canvas: android.graphics.Canvas, paint: Paint, w: Int
     canvas.drawOval(RectF(w * 0.60f, bottomY + 1f, w * 0.64f, bottomY + h * 0.03f), paint)
 }
 
+// --- Creatures ---
+
+/** E-ink octopus — 12×9 pixel block rendering matching the color OctopusCreature grid. */
 private fun drawEinkOctopus(
     canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int,
     state: OctopusVisualState,
@@ -241,136 +335,110 @@ private fun drawEinkOctopus(
     centerXFraction: Float = 0.38f,
     centerYFraction: Float = 0.42f,
     scaleFactor: Float = 1f,
+    animFrame: Int = 0,
 ) {
     paint.color = android.graphics.Color.BLACK
-    paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 2f * scaleFactor
 
     val cx = w * centerXFraction
     val cy = when (state) {
         OctopusVisualState.SLEEPING -> h * 0.75f
         else -> h * centerYFraction
     }
-    val bodyRx = w * 0.06f * scaleFactor
-    val bodyRy = w * 0.07f * scaleFactor
 
-    // Body outline
-    canvas.drawOval(RectF(cx - bodyRx, cy - bodyRy, cx + bodyRx, cy + bodyRy), paint)
+    // Pixel block grid — 12×7, portrait-rectangle pixels (1:1.3 aspect)
+    val bodyWidth = w * 0.14f * scaleFactor
+    val pixelW = bodyWidth / EINK_OCTOPUS_COLS
+    val pixelH = pixelW * EINK_PIXEL_ASPECT
+    val gridW = EINK_OCTOPUS_COLS * pixelW
+    val gridH = EINK_OCTOPUS_ROWS * pixelH
+    val startX = cx - gridW / 2f
+    val startY = cy - gridH / 2f
 
-    // Agent mark (simplified starburst for Claude Code)
-    if (agentType == "claude-code") {
-        paint.strokeWidth = 0.8f
-        val markR = bodyRx * 0.35f
-        val markCy = cy - bodyRy * 0.05f
-        // 6-pointed starburst
-        for (i in 0 until 6) {
-            val angle = (i.toFloat() / 6f) * 2f * Math.PI.toFloat()
-            canvas.drawLine(
-                cx + kotlin.math.cos(angle) * markR * 0.3f,
-                markCy + kotlin.math.sin(angle) * markR * 0.3f,
-                cx + kotlin.math.cos(angle) * markR,
-                markCy + kotlin.math.sin(angle) * markR,
-                paint,
-            )
-        }
-        paint.strokeWidth = 2f
-    }
+    // Animation offsets (4-frame, left/right opposite phase)
+    val isActive = state != OctopusVisualState.SLEEPING
+    val leftTentacleOffset = if (isActive) when (animFrame % 4) {
+        1 -> pixelH * 0.4f
+        3 -> -pixelH * 0.4f
+        else -> 0f
+    } else 0f
+    val rightTentacleOffset = -leftTentacleOffset
+    val leftArmOffset = if (isActive) when (animFrame % 4) {
+        0 -> pixelH * 0.2f
+        2 -> -pixelH * 0.2f
+        else -> 0f
+    } else 0f
+    val rightArmOffset = -leftArmOffset
 
-    // Eyes
-    val eyeR = bodyRx * 0.18f
-    if (state == OctopusVisualState.SLEEPING) {
-        // Closed eyes — lines
-        canvas.drawLine(cx - bodyRx * 0.35f - eyeR, cy - bodyRy * 0.15f,
-            cx - bodyRx * 0.35f + eyeR, cy - bodyRy * 0.15f, paint)
-        canvas.drawLine(cx + bodyRx * 0.35f - eyeR, cy - bodyRy * 0.15f,
-            cx + bodyRx * 0.35f + eyeR, cy - bodyRy * 0.15f, paint)
-    } else {
-        // Open eyes
-        paint.style = Paint.Style.FILL
-        canvas.drawCircle(cx - bodyRx * 0.35f, cy - bodyRy * 0.15f, eyeR, paint)
-        canvas.drawCircle(cx + bodyRx * 0.35f, cy - bodyRy * 0.15f, eyeR, paint)
-        paint.style = Paint.Style.STROKE
-    }
+    paint.style = Paint.Style.FILL
+    for (row in 0 until EINK_OCTOPUS_ROWS) {
+        for (col in 0 until EINK_OCTOPUS_COLS) {
+            val cell = EINK_OCTOPUS_GRID[row][col]
+            if (cell == 0) continue
 
-    // Tentacles (8 curved lines)
-    val tentacleBase = cy + bodyRy * 0.7f
-    for (i in 0 until 8) {
-        val angle = -0.8f * Math.PI.toFloat() + (i / 7f) * 1.6f * Math.PI.toFloat()
-        val startX = cx + kotlin.math.cos(angle) * bodyRx * 0.6f
-        val endX = startX + kotlin.math.cos(angle) * w * 0.08f
-        val endY = tentacleBase + w * 0.06f
+            val px = startX + col * pixelW
+            var py = startY + row * pixelH
 
-        val cpX = startX + kotlin.math.cos(angle) * w * 0.04f
-        val cpY = tentacleBase + w * 0.03f
-
-        when (state) {
-            OctopusVisualState.SLEEPING -> {
-                // Curled tentacles
-                val path = android.graphics.Path().apply {
-                    moveTo(startX, tentacleBase)
-                    quadTo(cpX, tentacleBase + w * 0.01f,
-                        startX + kotlin.math.cos(angle) * w * 0.02f, tentacleBase + w * 0.02f)
-                }
-                canvas.drawPath(path, paint)
+            // Apply animation offsets
+            when (cell) {
+                3 -> py += leftArmOffset        // LEFT_ARM
+                4 -> py += rightArmOffset        // RIGHT_ARM
+                5 -> py += leftTentacleOffset    // LEFT_LEG
+                6 -> py += rightTentacleOffset   // RIGHT_LEG
             }
-            OctopusVisualState.THINKING -> {
-                // Curled inward
-                val path = android.graphics.Path().apply {
-                    moveTo(startX, tentacleBase)
-                    cubicTo(cpX, cpY, cx, endY, cx + (startX - cx) * 0.3f, endY - w * 0.01f)
+
+            when (cell) {
+                2 -> { // EYE
+                    if (state == OctopusVisualState.SLEEPING) {
+                        // Closed eyes — thin horizontal line
+                        canvas.drawRect(
+                            px, py + pixelH * 0.4f,
+                            px + pixelW, py + pixelH * 0.6f, paint,
+                        )
+                    } else {
+                        canvas.drawRect(px, py, px + pixelW, py + pixelH, paint)
+                    }
                 }
-                canvas.drawPath(path, paint)
-            }
-            else -> {
-                // Normal flowing
-                val path = android.graphics.Path().apply {
-                    moveTo(startX, tentacleBase)
-                    cubicTo(cpX, cpY, cpX + (endX - cpX) * 0.5f, endY - w * 0.02f, endX, endY)
+                else -> {
+                    canvas.drawRect(px, py, px + pixelW, py + pixelH, paint)
                 }
-                canvas.drawPath(path, paint)
             }
         }
     }
 
     // State-specific decorations
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 1f * scaleFactor
     when (state) {
         OctopusVisualState.TYPING -> {
-            // Small keyboard rectangle below
-            paint.strokeWidth = 1f
-            val kbW = bodyRx * 3f
-            val kbH = bodyRy * 0.8f
-            val kbY = cy + bodyRy * 2.5f
+            val kbW = gridW * 0.8f
+            val kbH = gridH * 0.25f
+            val kbY = startY + gridH + pixelH
             canvas.drawRect(cx - kbW / 2, kbY, cx + kbW / 2, kbY + kbH, paint)
-            // Key grid
             for (r in 1 until 3) {
                 val y = kbY + r * kbH / 3
                 canvas.drawLine(cx - kbW / 2, y, cx + kbW / 2, y, paint)
             }
         }
         OctopusVisualState.OFFERING -> {
-            // Permission marks: checkmark and X
-            paint.strokeWidth = 2f
-            // Check
-            val checkX = cx - bodyRx * 2f
+            paint.strokeWidth = 2f * scaleFactor
+            val checkX = cx - gridW * 0.6f
             val checkY = cy
             canvas.drawLine(checkX - 6f, checkY, checkX, checkY + 6f, paint)
             canvas.drawLine(checkX, checkY + 6f, checkX + 10f, checkY - 8f, paint)
-            // X
-            val xX = cx + bodyRx * 2f
+            val xX = cx + gridW * 0.6f
             canvas.drawLine(xX - 6f, checkY - 6f, xX + 6f, checkY + 6f, paint)
             canvas.drawLine(xX + 6f, checkY - 6f, xX - 6f, checkY + 6f, paint)
         }
         OctopusVisualState.REVIEWING -> {
-            // Two small document outlines
-            paint.strokeWidth = 1f
+            val halfW = gridW / 2f
+            val halfH = gridH / 2f
             for (side in listOf(-1f, 1f)) {
-                val docX = cx + side * bodyRx * 2f
-                val docY = cy - bodyRy * 0.5f
-                canvas.drawRect(docX - bodyRx * 0.8f, docY, docX + bodyRx * 0.8f, docY + bodyRy * 1.5f, paint)
-                // Text lines
+                val docX = cx + side * halfW * 2f
+                val docY = cy - halfH * 0.5f
+                canvas.drawRect(docX - halfW * 0.8f, docY, docX + halfW * 0.8f, docY + halfH * 1.5f, paint)
                 for (l in 0 until 4) {
-                    val ly = docY + 4f + l * bodyRy * 0.35f
-                    canvas.drawLine(docX - bodyRx * 0.6f, ly, docX + bodyRx * 0.4f, ly, paint)
+                    val ly = docY + 4f + l * halfH * 0.35f
+                    canvas.drawLine(docX - halfW * 0.6f, ly, docX + halfW * 0.4f, ly, paint)
                 }
             }
         }
@@ -378,88 +446,119 @@ private fun drawEinkOctopus(
     }
 }
 
+/** E-ink crayfish — front-facing SVG path rendering with claw/antenna animation. */
 private fun drawEinkCrayfish(
     canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int,
     state: CrayfishVisualState,
+    animFrame: Int = 0,
 ) {
     paint.color = android.graphics.Color.BLACK
-    paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 1.5f
 
-    val cx = w * 0.78f
+    val cx = w * 0.75f
     val cy = when (state) {
-        CrayfishVisualState.DORMANT -> h * 0.82f  // Behind rocks
-        else -> h * 0.73f
+        CrayfishVisualState.DORMANT -> h * 0.82f
+        else -> h * 0.65f
     }
-    val bodyW = w * 0.07f
+    val bodyWidth = w * 0.14f
 
     if (state == CrayfishVisualState.DORMANT) {
         // Only show antenna tips above rocks
-        canvas.drawLine(cx - bodyW * 0.3f, cy - bodyW * 0.2f, cx - bodyW * 0.6f, cy - bodyW * 0.6f, paint)
-        canvas.drawLine(cx + bodyW * 0.1f, cy - bodyW * 0.2f, cx + bodyW * 0.3f, cy - bodyW * 0.5f, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.5f
+        canvas.drawLine(cx - bodyWidth * 0.1f, cy - bodyWidth * 0.1f,
+            cx - bodyWidth * 0.3f, cy - bodyWidth * 0.4f, paint)
+        canvas.drawLine(cx + bodyWidth * 0.1f, cy - bodyWidth * 0.1f,
+            cx + bodyWidth * 0.3f, cy - bodyWidth * 0.4f, paint)
         return
     }
 
-    // Carapace (oval)
-    canvas.drawOval(RectF(cx - bodyW * 0.3f, cy - bodyW * 0.15f,
-        cx + bodyW * 0.3f, cy + bodyW * 0.15f), paint)
+    val scale = bodyWidth / EINK_SVG_VIEWBOX
+    val offsetX = cx - EINK_SVG_VIEWBOX / 2f * scale
+    val offsetY = cy - EINK_SVG_VIEWBOX / 2f * scale
 
-    // Abdomen segments
-    for (i in 0 until 3) {
-        val segX = cx + bodyW * (0.3f + i * 0.12f)
-        canvas.drawOval(RectF(segX, cy - bodyW * 0.1f,
-            segX + bodyW * 0.13f, cy + bodyW * 0.1f), paint)
-    }
-
-    // Tail fan
-    val tailX = cx + bodyW * 0.65f
-    canvas.drawLine(tailX, cy, tailX + bodyW * 0.15f, cy - bodyW * 0.12f, paint)
-    canvas.drawLine(tailX, cy, tailX + bodyW * 0.18f, cy, paint)
-    canvas.drawLine(tailX, cy, tailX + bodyW * 0.15f, cy + bodyW * 0.12f, paint)
-
-    // Claws
-    val clawBaseX = cx - bodyW * 0.25f
-    for (side in listOf(-1f, 1f)) {
-        val clawY = cy + side * bodyW * 0.1f
-        val clawAngle = when (state) {
-            CrayfishVisualState.WAITING -> side * bodyW * 0.15f
-            else -> side * bodyW * 0.05f
+    // Claw animation based on animFrame and state
+    val isAnimated = state != CrayfishVisualState.SITTING && state != CrayfishVisualState.DORMANT
+    val clawAngle = if (isAnimated) when (state) {
+        CrayfishVisualState.ROUTING -> when (animFrame % 4) {
+            1 -> 15f; 3 -> -10f; else -> 0f
         }
-        // Arm
-        canvas.drawLine(clawBaseX, clawY, clawBaseX - bodyW * 0.25f, clawY + clawAngle, paint)
-        // Pincer
-        val pincerX = clawBaseX - bodyW * 0.25f
-        val pincerY = clawY + clawAngle
-        canvas.drawLine(pincerX, pincerY, pincerX - bodyW * 0.1f, pincerY - bodyW * 0.04f, paint)
-        canvas.drawLine(pincerX, pincerY, pincerX - bodyW * 0.1f, pincerY + bodyW * 0.04f, paint)
-    }
+        CrayfishVisualState.OBSERVING -> when (animFrame % 4) {
+            1 -> 8f; 3 -> -5f; else -> 3f
+        }
+        CrayfishVisualState.WAITING -> 12f  // claws open
+        else -> 0f
+    } else 0f
 
-    // Eyes
+    // Antenna wiggle (in SVG coordinate units)
+    val antennaWiggle = if (isAnimated) when (animFrame % 4) {
+        1 -> 2f; 3 -> -2f; else -> 0f
+    } else 0f
+
+    canvas.save()
+    canvas.translate(offsetX, offsetY)
+    canvas.scale(scale, scale)
+
+    // 1. Body — filled
     paint.style = Paint.Style.FILL
-    val eyeR = bodyW * 0.025f
-    canvas.drawCircle(cx - bodyW * 0.2f, cy - bodyW * 0.08f, eyeR, paint)
-    canvas.drawCircle(cx - bodyW * 0.2f, cy + bodyW * 0.08f, eyeR, paint)
+    canvas.drawPath(einkCrayfishBodyPath, paint)
 
-    // Antenna
+    // 2. Left claw with rotation
+    canvas.save()
+    canvas.rotate(-clawAngle, 20f, 45f)
+    canvas.drawPath(einkCrayfishLeftClawPath, paint)
+    canvas.restore()
+
+    // 3. Right claw with rotation
+    canvas.save()
+    canvas.rotate(clawAngle, 100f, 45f)
+    canvas.drawPath(einkCrayfishRightClawPath, paint)
+    canvas.restore()
+
+    // 4. Antennae — stroked
     paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 0.8f
-    canvas.drawLine(cx - bodyW * 0.25f, cy - bodyW * 0.05f,
-        cx - bodyW * 0.45f, cy - bodyW * 0.2f, paint)
-    canvas.drawLine(cx - bodyW * 0.25f, cy + bodyW * 0.05f,
-        cx - bodyW * 0.45f, cy + bodyW * 0.2f, paint)
+    paint.strokeWidth = 3f
+    paint.strokeCap = Paint.Cap.ROUND
 
-    // ROUTING: signal arcs
+    canvas.save()
+    canvas.translate(antennaWiggle, 0f)
+    canvas.drawPath(einkCrayfishLeftAntennaPath, paint)
+    canvas.restore()
+
+    canvas.save()
+    canvas.translate(-antennaWiggle, 0f)
+    canvas.drawPath(einkCrayfishRightAntennaPath, paint)
+    canvas.restore()
+
+    // 5. Eyes — white circles on black body
+    paint.style = Paint.Style.FILL
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawCircle(45f, 35f, 6f, paint)
+    canvas.drawCircle(75f, 35f, 6f, paint)
+
+    // Eye pupils
+    paint.color = android.graphics.Color.BLACK
+    canvas.drawCircle(46f, 34f, 2.5f, paint)
+    canvas.drawCircle(76f, 34f, 2.5f, paint)
+
+    canvas.restore() // main transform
+
+    // ROUTING: signal arcs (outside SVG transform)
     if (state == CrayfishVisualState.ROUTING) {
-        paint.strokeWidth = 1f
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.5f
+        paint.color = android.graphics.Color.BLACK
+        paint.strokeCap = Paint.Cap.BUTT
         for (i in 1..3) {
-            val r = bodyW * 0.2f * i
+            val r = bodyWidth * 0.15f * i
             canvas.drawArc(
-                RectF(cx - bodyW * 0.4f - r, cy - r, cx - bodyW * 0.4f + r, cy + r),
+                RectF(cx - r, cy - r, cx + r, cy + r),
                 150f, 60f, false, paint,
             )
         }
     }
 }
+
+// --- Data particles & labels ---
 
 private fun drawEinkDataParticles(
     canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int,

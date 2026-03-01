@@ -49,10 +49,8 @@ import dev.agentdeck.ui.eink.EinkContextArea
 import dev.agentdeck.ui.eink.EinkEventLog
 import dev.agentdeck.ui.eink.EinkFooterBar
 import dev.agentdeck.ui.eink.EinkAquariumFrame
-import dev.agentdeck.ui.eink.EinkPictureFrame
 import dev.agentdeck.ui.eink.EinkSettingsOverlay
 import dev.agentdeck.ui.eink.EinkStatusCompact
-import dev.agentdeck.ui.eink.EinkStatusPanel
 import dev.agentdeck.ui.eink.EinkTimelinePanel
 import dev.agentdeck.ui.eink.EinkUsageCompact
 import dev.agentdeck.ui.eink.compactStateMarker
@@ -150,7 +148,7 @@ fun EinkMonitorScreen(
                 discoveredBridges = discoveredBridges,
                 lastError = lastError,
                 onConnectToBridge = { bridge ->
-                    connection.connect("ws://${bridge.host}:${bridge.port}")
+                    connection.connect(bridge.wsUrl())
                 },
                 onConnectLocalhost = {
                     connection.connect("ws://127.0.0.1:9120")
@@ -301,9 +299,7 @@ private fun EinkNotConnectedScreen(
         if (lastError != null && connectionStatus == ConnectionStatus.DISCONNECTED) {
             Text(
                 text = lastError,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = FontFamily.Monospace,
-                ),
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -329,17 +325,13 @@ private fun EinkNotConnectedScreen(
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "\u2B50 USB (adb reverse)",
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                        ),
+                        text = "USB (adb reverse)",
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = "127.0.0.1:9120",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                        ),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -347,10 +339,10 @@ private fun EinkNotConnectedScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // mDNS discovered bridges (require auth token)
+            // mDNS discovered bridges
             if (discoveredBridges.isNotEmpty()) {
                 Text(
-                    text = "Network (token required)",
+                    text = "Discovered",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -367,16 +359,12 @@ private fun EinkNotConnectedScreen(
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text(
                                 text = "\u25CF ${bridge.name}",
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                ),
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Text(
                                 text = "${bridge.host}:${bridge.port}",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                ),
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }

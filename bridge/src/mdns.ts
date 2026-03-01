@@ -14,20 +14,26 @@ export function advertiseBridge(
   port: number,
   projectName: string,
   agentType: AgentType,
+  token?: string,
 ): () => void {
   try {
     instance = new Bonjour();
+
+    const txt: Record<string, string> = {
+      project: projectName,
+      agent: agentType,
+      v: '1',
+      port: String(port),
+    };
+    if (token) {
+      txt.token = token;
+    }
 
     const service = instance.publish({
       name: `AgentDeck-${projectName}`,
       type: 'agentdeck',
       port,
-      txt: {
-        project: projectName,
-        agent: agentType,
-        v: '1',
-        port: String(port),
-      },
+      txt,
     });
 
     debug('mDNS', `Published _agentdeck._tcp on port ${port} (project: ${projectName})`);

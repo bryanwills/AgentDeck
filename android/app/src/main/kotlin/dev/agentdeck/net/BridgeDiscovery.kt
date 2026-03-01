@@ -11,7 +11,14 @@ data class DiscoveredBridge(
     val name: String,
     val host: String,
     val port: Int,
-)
+    val token: String? = null,
+) {
+    /** Build WebSocket URL with auth token if available */
+    fun wsUrl(): String {
+        val base = "ws://$host:$port"
+        return if (token != null) "$base?token=$token" else base
+    }
+}
 
 class BridgeDiscovery(context: Context) {
 
@@ -40,10 +47,17 @@ class BridgeDiscovery(context: Context) {
 
                         override fun onServiceResolved(si: NsdServiceInfo) {
                             val host = si.host?.hostAddress ?: return
+                            // Parse token from mDNS TXT record
+                            val token = try {
+                                si.attributes["token"]?.let { bytes ->
+                                    String(bytes, Charsets.UTF_8)
+                                }
+                            } catch (_: Exception) { null }
                             val bridge = DiscoveredBridge(
                                 name = si.serviceName,
                                 host = host,
                                 port = si.port,
+                                token = token,
                             )
                             bridges[si.serviceName] = bridge
                             trySend(bridges.values.toList())

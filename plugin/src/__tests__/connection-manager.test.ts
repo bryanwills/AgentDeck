@@ -122,16 +122,14 @@ describe('ConnectionManager', () => {
     expect(cm.getCapabilities()).toBeNull();
   });
 
-  it('start() begins both bridge and gateway connections', () => {
+  it('start() begins bridge connection (gateway via daemon)', () => {
     const bridge = getBridge(cm);
-    const gateway = getGateway(cm);
     const bridgeConnect = vi.spyOn(bridge, 'connect');
-    const gatewayConnect = vi.spyOn(gateway, 'connect');
 
     cm.start(9125);
 
     expect(bridgeConnect).toHaveBeenCalledWith(9125);
-    expect(gatewayConnect).toHaveBeenCalled();
+    // Gateway is no longer started directly — daemon proxies gateway sessions
   });
 
   it('activates bridge when bridge connects first', () => {
@@ -309,32 +307,6 @@ describe('ConnectionManager', () => {
     });
   });
 
-  describe('isStandby()', () => {
-    it('returns true when auto + no bridge + gateway connected', () => {
-      cm.start();
-      getGateway(cm)._simulateConnect();
-
-      // auto mode, no bridge, gateway connected → standby
-      expect(cm.isStandby()).toBe(true);
-    });
-
-    it('returns false when user explicitly selected gateway', () => {
-      cm.start();
-      getGateway(cm)._simulateConnect();
-      cm.activateGateway();
-
-      expect(cm.isStandby()).toBe(false);
-    });
-
-    it('returns false when bridge is connected', () => {
-      cm.start();
-      getGateway(cm)._simulateConnect();
-      getBridge(cm)._simulateConnect();
-
-      expect(cm.isStandby()).toBe(false);
-    });
-  });
-
   describe('bridge disconnect + userSelection reset', () => {
     it('resets userSelection from bridge to auto on disconnect', () => {
       cm.start();
@@ -359,7 +331,6 @@ describe('ConnectionManager', () => {
       getBridge(cm)._simulateDisconnect();
 
       expect(cm.getActiveAgentType()).toBe('openclaw');
-      expect(cm.isStandby()).toBe(true); // auto + no bridge + gw connected
     });
   });
 

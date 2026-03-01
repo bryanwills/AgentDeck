@@ -8,17 +8,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -39,7 +34,7 @@ import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.net.BridgeDiscovery
 import dev.agentdeck.net.ConnectionStatus
 import dev.agentdeck.net.DiscoveredBridge
-import dev.agentdeck.ui.theme.AgentDeckColors
+import dev.agentdeck.ui.common.ConnectionPanel
 import kotlinx.coroutines.launch
 
 @Composable
@@ -56,7 +51,6 @@ fun SettingsScreen(
     val idleTimeoutMinutes by displayPrefs.idleTimeoutMinutesFlow.collectAsState(initial = 5)
     val coroutineScope = rememberCoroutineScope()
 
-    var manualUrl by remember { mutableStateOf("") }
     var discoveredBridges by remember { mutableStateOf(emptyList<DiscoveredBridge>()) }
 
     // mDNS discovery when disconnected
@@ -94,123 +88,20 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Status",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = when (connectionStatus) {
-                            ConnectionStatus.CONNECTED -> "Connected"
-                            ConnectionStatus.CONNECTING -> "Connecting..."
-                            ConnectionStatus.DISCONNECTED -> "Disconnected"
-                        },
-                        style = MaterialTheme.typography.labelLarge,
-                        color = when (connectionStatus) {
-                            ConnectionStatus.CONNECTED -> AgentDeckColors.Green
-                            ConnectionStatus.CONNECTING -> AgentDeckColors.Amber
-                            ConnectionStatus.DISCONNECTED -> AgentDeckColors.SlateText
-                        },
-                    )
-                }
-
-                if (currentUrl != null) {
-                    Text(
-                        text = currentUrl!!,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-
-                // Error display
-                if (lastError != null) {
-                    Text(
-                        text = lastError!!,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                if (connectionStatus == ConnectionStatus.CONNECTED) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
-                            connection.connect("ws://127.0.0.1:9120")
-                        }) {
-                            Text("USB Connect")
-                        }
-                        OutlinedButton(onClick = { connection.disconnect() }) {
-                            Text("Disconnect")
-                        }
-                    }
-                } else {
-                    // USB quick-connect
-                    Button(
-                        onClick = { connection.connect("ws://127.0.0.1:9120") },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("USB Connect")
-                    }
-
-                    // mDNS discovered bridges
-                    if (discoveredBridges.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Discovered Bridges",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        discoveredBridges.forEach { bridge ->
-                            OutlinedButton(
-                                onClick = {
-                                    connection.connect("ws://${bridge.host}:${bridge.port}")
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Column {
-                                    Text(bridge.name)
-                                    Text(
-                                        "${bridge.host}:${bridge.port}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Manual URL entry
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = manualUrl,
-                        onValueChange = { manualUrl = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("ws://192.168.1.x:9120?token=abc") },
-                        singleLine = true,
-                        label = { Text("Manual URL") },
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Button(
-                        onClick = {
-                            if (manualUrl.isNotBlank()) {
-                                connection.connect(manualUrl.trim())
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = manualUrl.isNotBlank(),
-                    ) {
-                        Text("Connect")
-                    }
-                }
+                ConnectionPanel(
+                    connectionStatus = connectionStatus,
+                    currentUrl = currentUrl,
+                    lastError = lastError,
+                    discoveredBridges = discoveredBridges,
+                    onConnectToBridge = { bridge ->
+                        connection.connect(bridge.wsUrl())
+                    },
+                    onConnectLocalhost = {
+                        connection.connect("ws://127.0.0.1:9120")
+                    },
+                    onConnectManualUrl = { url -> connection.connect(url) },
+                    onDisconnect = { connection.disconnect() },
+                )
             }
         }
 
