@@ -13,6 +13,10 @@ import { renderButton, svgToDataUrl } from '../renderers/button-renderer.js';
 import { agentLogoWatermark, CLAUDE_LOGO_PATH } from '../renderers/agent-logos.js';
 import { ButtonConfig } from '../layout-manager.js';
 import { handleExpandedAction } from '../expanded-actions.js';
+import { setCcNoSessionMode } from './response-button.js';
+import { setUsageCapabilities } from './usage-button.js';
+import { updateOptionDialState } from './option-dial.js';
+import { updateItermDialState } from './iterm-dial.js';
 import { dlog } from '../log.js';
 import { readFileSync, watchFile, unwatchFile } from 'fs';
 import { execSync, execFile } from 'child_process';
@@ -40,13 +44,32 @@ let currentProjectName: string | undefined;
 let currentTool: string | undefined;
 let currentModel: string | undefined;
 let currentAgentType: AgentType | null = null;
-let currentStandby = false;
 let currentSessionIndex = 0;
 let sessions: SessionEntry[] = [];
 let keyDownTime = 0;
 let animTimer: ReturnType<typeof setInterval> | null = null;
 let animFrame = 0;
 let fileWatchActive = false;
+let showingCcNoSession = false;
+
+/** Enter or exit NO SESSION mode, propagating to all affected components. */
+function setNoSessionMode(active: boolean): void {
+  showingCcNoSession = active;
+  setCcNoSessionMode(active);
+  if (active) {
+    // Clear capabilities so usage/dials revert to CC-disconnected behavior
+    setUsageCapabilities(null);
+    updateOptionDialState(currentState, [], undefined, undefined, undefined, undefined, undefined, undefined, null, null, null);
+    updateItermDialState(currentState, null, null, null);
+  } else {
+    // Restore gateway capabilities
+    const caps = bridge.getCapabilities();
+    const agentType = bridge.getActiveAgentType();
+    setUsageCapabilities(caps);
+    updateOptionDialState(currentState, [], undefined, undefined, undefined, undefined, undefined, undefined, agentType, null, caps);
+    updateItermDialState(currentState, agentType, null, caps);
+  }
+}
 
 const ANIM_INTERVAL_MS = 150; // ~6.7 FPS
 const ANIM_TOTAL_FRAMES = 24; // full rotation = 24 frames × 150ms = 3.6s
@@ -75,8 +98,12 @@ function startFileWatch(): void {
     sessions = loadSessions();
 
     if (sessions.length > prevCount) {
-      // New session added — only auto-switch if currently disconnected
-      if (currentState === State.DISCONNECTED) {
+      // New session added — auto-switch if disconnected or showing NO SESSION
+      if (currentState === State.DISCONNECTED || showingCcNoSession) {
+        if (showingCcNoSession) {
+          setNoSessionMode(false);
+          bridge.resetToAuto();
+        }
         const sorted = [...sessions].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
         const newest = sorted[0];
         if (newest && newest.port !== prevPort) {
@@ -123,7 +150,6 @@ export function updateSessionButton(
   tool?: string,
   model?: string,
   agentType?: AgentType | null,
-  standby?: boolean,
 ): void {
   const wasConnected = currentState !== State.DISCONNECTED;
   const wasIdle = currentState === State.IDLE;
@@ -136,7 +162,11 @@ export function updateSessionButton(
   }
   if (model) currentModel = model;
   if (agentType !== undefined) currentAgentType = agentType;
-  if (standby !== undefined) currentStandby = standby;
+
+  // CC connected — clear NO SESSION mode
+  if (showingCcNoSession && agentType === 'claude-code') {
+    setNoSessionMode(false);
+  }
 
   // Reload session list only on transition to IDLE (not on every render)
   if (state === State.IDLE && !wasIdle) {
@@ -210,8 +240,8 @@ function loadSessions(): SessionEntry[] {
   try {
     const data = readFileSync(SESSIONS_FILE, 'utf-8');
     const parsed = JSON.parse(data) as SessionEntry[];
-    // Filter out dead sessions (PID liveness check)
-    return parsed.filter((s) => isProcessAlive(s.pid));
+    // session cycling 목록에서 daemon 제외 (인프라스트럭처, 에이전트 아님)
+    return parsed.filter((s) => isProcessAlive(s.pid) && (s as any).agentType !== 'daemon');
   } catch {
     return [];
   }
@@ -362,12 +392,12 @@ function setupRequiredSvg(): string {
 }
 
 function renderSessionSvg(): string {
-  // Standby mode: gateway connected in auto mode, no bridge — only show in IDLE
-  if (currentStandby && currentState === State.IDLE) {
-    return renderStandbySvg();
+  // CC No Session virtual state
+  if (showingCcNoSession) {
+    return simpleSvg('NO', 'SESSION', '#666666', '#1a1a1a');
   }
 
-  // OpenClaw active (explicit selection or standby with active state)
+  // OpenClaw active
   if (currentAgentType === 'openclaw') {
     return renderOpenClawSvg();
   }
@@ -610,19 +640,6 @@ function renderOpenClawSvg(): string {
   return lines.join('');
 }
 
-function renderStandbySvg(): string {
-  const color = '#a78bfa'; // muted purple
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">`,
-    `<rect width="${SIZE}" height="${SIZE}" rx="12" fill="#1a1a1a"/>`,
-    agentLogoWatermark('openclaw', '#666666', 0.05),
-    `<circle cx="18" cy="18" r="5" fill="#4ade80"/>`,
-    `<text x="72" y="68" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="${color}" opacity="0.8">\u25B8 OC</text>`,
-    `<text x="72" y="96" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#666666">standby</text>`,
-    `</svg>`,
-  ].join('');
-}
-
 function simpleSvg(line1: string, line2: string, color: string, bg: string): string {
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">`,
@@ -683,11 +700,15 @@ export class SessionButtonAction extends SingletonAction {
 
 type CycleEntry =
   | { type: 'cc'; session: SessionEntry }
-  | { type: 'oc' };
+  | { type: 'oc' }
+  | { type: 'cc-nosession' };
 
 function buildCycleList(): CycleEntry[] {
   const ccEntries: CycleEntry[] = sessions.map(s => ({ type: 'cc' as const, session: s }));
   if (bridge.isGatewayAvailable()) {
+    if (ccEntries.length === 0) {
+      ccEntries.push({ type: 'cc-nosession' as const });
+    }
     ccEntries.push({ type: 'oc' as const });
   }
   return ccEntries;
@@ -695,14 +716,6 @@ function buildCycleList(): CycleEntry[] {
 
 function cycleSession(): void {
   sessions = loadSessions();
-
-  // Standby mode: pressing activates OC explicitly
-  if (currentStandby) {
-    dlog('SesBut', 'cycle: standby → activate OpenClaw');
-    bridge.activateGateway();
-    refreshAll();
-    return;
-  }
 
   const cycleList = buildCycleList();
 
@@ -712,7 +725,10 @@ function cycleSession(): void {
 
   // Find current position in cycle list
   let currentPos: number;
-  if (currentAgentType === 'openclaw') {
+  if (showingCcNoSession) {
+    currentPos = cycleList.findIndex(e => e.type === 'cc-nosession');
+    if (currentPos === -1) currentPos = 0;
+  } else if (currentAgentType === 'openclaw') {
     currentPos = cycleList.findIndex(e => e.type === 'oc');
     if (currentPos === -1) currentPos = cycleList.length - 1;
   } else {
@@ -725,10 +741,19 @@ function cycleSession(): void {
   const nextPos = (currentPos + 1) % cycleList.length;
   const next = cycleList[nextPos];
 
-  if (next.type === 'oc') {
+  if (next.type === 'cc-nosession') {
+    dlog('SesBut', `cycle: → NO SESSION`);
+    setNoSessionMode(true);
+  } else if (next.type === 'oc') {
     dlog('SesBut', `cycle: → OpenClaw`);
-    bridge.activateGateway();
+    const wasNoSession = showingCcNoSession;
+    setNoSessionMode(false);
+    if (!wasNoSession) {
+      bridge.activateGateway();
+    }
+    // wasNoSession: already on gateway, just clear the virtual state
   } else {
+    setNoSessionMode(false);
     const session = next.session;
     currentSessionIndex = sessions.indexOf(session);
     currentProjectName = session.projectName;
