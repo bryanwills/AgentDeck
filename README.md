@@ -693,7 +693,7 @@ The bridge combines hook events and PTY output parsing to maintain 6 states:
 
 Communication between the bridge (port 9120) and the Stream Deck plugin.
 
-### Bridge → Plugin
+### Bridge → Plugin / Android
 
 ```typescript
 // State change (includes tool context, options, cursor, suggested prompt)
@@ -703,9 +703,10 @@ Communication between the bridge (port 9120) and the Stream Deck plugin.
 // Prompt options (backward-compat, options-only)
 { type: 'prompt_options', promptType: 'yes_no_always', options: [{ index: 0, label: 'Yes' }, ...] }
 
-// Usage stats (session + API-sourced plan usage)
+// Usage stats (session + API-sourced plan usage + ollama status)
 { type: 'usage_update', sessionDurationSec: 120, inputTokens: 5000, outputTokens: 3000, toolCalls: 7,
-  fiveHourPercent: 42, sevenDayPercent: 15, extraUsageEnabled: true }
+  fiveHourPercent: 42, sevenDayPercent: 15, extraUsageEnabled: true, oauthConnected: true,
+  ollamaStatus: { running: true, models: [{ name: 'qwen2.5:7b', size: '4.5G' }] } }
 
 // Connection status
 { type: 'connection', status: 'connected' }
@@ -715,9 +716,26 @@ Communication between the bridge (port 9120) and the Stream Deck plugin.
 
 // User prompt echo (text user typed in terminal)
 { type: 'user_prompt', text: 'fix the login bug' }
+
+// Display sleep (LCD backlight sync)
+{ type: 'display_sleep', displayOn: true }
+
+// Active sessions list (multi-session + sibling state)
+{ type: 'sessions_list', sessions: [{ id: 'abc', project: 'MyApp', state: 'idle' }] }
+
+// --- Multi-surface events (Android Deck mirroring) ---
+
+// Encoder LCD state (4 encoder panels: utility/action/terminal/voice)
+{ type: 'encoder_state', encoders: [...], takeoverActive: false }
+
+// Button state (8 button slots with colors, labels, actions)
+{ type: 'button_state', buttons: [{ slot: 0, title: 'MODE', bgColor: '#1e293b', ... }] }
+
+// Stream Deck+ slot map (profile layout for dynamic mirroring)
+{ type: 'deck_slot_map', buttons: [...], encoders: [...] }
 ```
 
-### Plugin → Bridge
+### Plugin / Android → Bridge
 
 ```typescript
 { type: 'respond', value: 'y' }              // Yes/No/Always response (shortcut char)
@@ -729,6 +747,7 @@ Communication between the bridge (port 9120) and the Stream Deck plugin.
 { type: 'escape' }                           // Esc key (cancel prompt/selection)
 { type: 'voice', action: 'start' }           // Voice record start/stop/cancel
 { type: 'query_usage' }                      // Refresh API usage data
+{ type: 'utility', mode: 'volume', action: 'set', value: 75 }  // macOS utility proxy
 ```
 
 ---
@@ -749,14 +768,22 @@ AgentDeck/
 │       ├── index.ts              # sdc CLI entry (commander)
 │       ├── pty-manager.ts        # node-pty wrapper: spawn, proxy, interrupt
 │       ├── output-parser.ts      # ANSI parsing + pattern matching
-│       ├── hook-server.ts        # HTTP POST receiver (Claude Code hooks)
+│       ├── hook-server.ts        # HTTP POST receiver (Claude Code hooks) + SSE + voice endpoint
 │       ├── state-machine.ts      # Hook + PTY event → state management
-│       ├── ws-server.ts          # WebSocket server (plugin comms)
+│       ├── ws-server.ts          # WebSocket server (plugin comms + remote auth)
 │       ├── session-registry.ts   # Multi-session registry (~/.agentdeck/sessions.json)
 │       ├── usage-tracker.ts      # Session usage tracking (tokens, cost)
 │       ├── usage-api.ts          # Anthropic API usage fetch (OAuth + Keychain)
 │       ├── voice.ts              # sox capture + whisper.cpp transcription
 │       ├── whisper-server-manager.ts  # Singleton whisper-server lifecycle (port 9100)
+│       ├── mdns.ts               # mDNS advertising (_agentdeck._tcp)
+│       ├── auth.ts               # Auth token management (~/.agentdeck/auth-token)
+│       ├── utility-proxy.ts      # macOS osascript proxy (volume/brightness/media)
+│       ├── ollama-probe.ts       # Ollama process status + running models (5s polling)
+│       ├── model-catalog.ts      # OAuth model catalog fetch
+│       ├── gateway-probe.ts      # OpenClaw Gateway TCP probe (port 18789)
+│       ├── daemon-server.ts      # Daemon monitoring server (multi-session aggregation)
+│       ├── display-monitor.ts    # Display sleep sync (LCD backlight, screen wake)
 │       ├── adapters/
 │       │   ├── index.ts              # createAdapter() factory
 │       │   ├── claude-code.ts        # ClaudeCodeAdapter (PTY + Parser + HookServer)
@@ -831,13 +858,21 @@ AgentDeck/
 ├── android/                      # Android dashboard app (Jetpack Compose)
 │   ├── app/src/main/kotlin/
 │   │   └── dev/agentdeck/
-│   │       ├── net/              # WebSocket client, protocol parsing
-│   │       ├── state/            # AgentState, mDNS discovery
-│   │       ├── terrarium/        # Creature animation, renderer, e-ink engine
-│   │       ├── ui/monitor/       # Tablet HUD panels (activity, engine, timeline)
-│   │       ├── ui/eink/          # E-ink components (status, agent panel, aquarium)
-│   │       ├── ui/deck/          # SD+ mirror (buttons, encoder strip)
-│   │       └── ui/screen/        # Screen composables (Dashboard, Deck, Settings)
+│   │       ├── net/              # WebSocket client, protocol parsing, mDNS discovery
+│   │       ├── state/            # AgentStateHolder, SessionMetrics, TimelineStore
+│   │       ├── service/          # MonitorService (foreground, wake lock, screen wake)
+│   │       ├── data/             # DisplayPreferences (DataStore)
+│   │       ├── terrarium/        # Creature animation engine
+│   │       │   ├── creature/     #   OctopusCreature, CrayfishCreature, DataParticleSystem
+│   │       │   ├── environment/  #   WaterEffect, bubbles, seaweed
+│   │       │   ├── renderer/     #   ColorRenderer (tablet), EinkRenderer, DitherEngine
+│   │       │   └── anim/         #   Animation utilities
+│   │       ├── ui/monitor/       # Tablet HUD panels (activity, engine, multi-agent, timeline)
+│   │       ├── ui/eink/          # E-ink components (status, agent panel, aquarium, refresh zones)
+│   │       ├── ui/deck/          # SD+ mirror (buttons, encoder strip, gestures)
+│   │       ├── ui/screen/        # Screen composables (Dashboard, Deck, EinkMonitor, Settings)
+│   │       ├── voice/            # VoiceRecorder (AudioRecord → WAV → bridge transcription)
+│   │       └── util/             # TimeFormatUtils, helpers
 │   └── build.gradle.kts          # minSdk 29, CATEGORY_HOME launcher
 │
 ├── config/
@@ -909,6 +944,9 @@ Edit `config/prompt-templates.json` to customize the prompts cycled by the **Act
 | Hooks not firing | Hooks not installed or stale | `node hooks/dist/install.js` (re-installs all 7 hooks) |
 | Need to remove hooks | Uninstalling AgentDeck | `node hooks/dist/install.js uninstall` |
 | Plugin loads but buttons blank | Plugin needs rebuild | `pnpm build && pnpm generate-icons`, restart Stream Deck app |
+| Android app can't find bridge | mDNS blocked on network | Use QR pairing (`sdc qr`) or enter IP manually in Settings |
+| Android shows "Not Connected" | Bridge not reachable | Verify same LAN; for USB: `adb reverse tcp:9120 tcp:9120` then connect to 127.0.0.1:9120 |
+| E-ink ghosting on Crema | Missing full GC16 refresh | State transitions trigger full refresh automatically; force refresh by toggling bridge connection |
 
 ### tmux -CC Compatibility
 
