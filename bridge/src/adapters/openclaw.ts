@@ -12,6 +12,7 @@ import type {
   AdapterStartOptions,
   AdapterEvent,
   PluginCommand,
+  TimelineEntry,
 } from '../types.js';
 import { OPENCLAW_CAPABILITIES, OPENCLAW_GATEWAY_PORT } from '../types.js';
 import { fetchModelCatalog, getDefaultModelName, invalidateModelCache } from '../model-catalog.js';
@@ -116,6 +117,13 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
   private currentSessionKey: string | null = null;
   private currentRunId: string | null = null;
   private pendingApprovalId: string | null = null;
+
+  // Chat tracking for timeline events
+  private chatStarted = false;
+  private chatStartTime = 0;
+  private chatToolCount = 0;
+  private chatToolNames: string[] = [];
+  private lastPrompt: string | null = null;
 
   // Device identity (loaded once on start)
   private deviceIdentity: DeviceIdentity | null = null;
@@ -248,6 +256,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
 
       case 'send_prompt': {
         debug('adapter:openclaw', `send_prompt: "${cmd.text.slice(0, 60)}"`);
+        this.lastPrompt = cmd.text;
         if (this.currentSessionKey) {
           this.rpcCall('chat.send', {
             sessionKey: this.currentSessionKey,
@@ -612,6 +621,18 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
 
         switch (state) {
           case 'delta':
+            if (!this.chatStarted) {
+              this.chatStarted = true;
+              this.chatStartTime = Date.now();
+              this.chatToolCount = 0;
+              this.chatToolNames = [];
+              const promptSnippet = this.lastPrompt
+                ? (this.lastPrompt.length > 150 ? this.lastPrompt.slice(0, 147) + '...' : this.lastPrompt)
+                : 'Prompt sent';
+              this.emitTimelineEntry({
+                ts: Date.now(), type: 'chat_start', raw: promptSnippet,
+              });
+            }
             this.emitAdapterEvent({
               source: 'parser',
               event: 'spinner_start',
@@ -619,17 +640,61 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
             });
             break;
 
-          case 'final':
-          case 'aborted':
-            this.currentRunId = null;
-            this.emitAdapterEvent({ source: 'parser', event: 'idle' });
-            break;
+          case 'final': {
+            const duration = this.chatStarted ? Math.round((Date.now() - this.chatStartTime) / 1000) : 0;
+            const toolSummary = this.buildToolSummary();
+            const promptSnippet = this.lastPrompt
+              ? (this.lastPrompt.length > 60 ? this.lastPrompt.slice(0, 57) + '...' : this.lastPrompt)
+              : '';
+            const parts = ['Completed'];
+            if (duration > 0) parts.push(`${duration}s`);
+            if (toolSummary) parts.push(toolSummary);
+            if (promptSnippet) parts.push(promptSnippet);
+            this.emitTimelineEntry({
+              ts: Date.now(), type: 'chat_end', raw: parts.join(' \u00b7 '),
+            });
 
-          case 'error':
+            // Emit chat_response if content is available
+            const content = payload.content as string | undefined;
+            if (content && content.length > 10) {
+              this.emitTimelineEntry({
+                ts: Date.now(), type: 'chat_response',
+                raw: content.length > 200 ? content.slice(0, 197) + '...' : content,
+              });
+            }
+
+            this.chatStarted = false;
             this.currentRunId = null;
-            debug('adapter:openclaw', `Chat error: ${payload.errorMessage || 'unknown'}`);
             this.emitAdapterEvent({ source: 'parser', event: 'idle' });
             break;
+          }
+
+          case 'aborted': {
+            const abortDuration = this.chatStarted ? Math.round((Date.now() - this.chatStartTime) / 1000) : 0;
+            const abortToolSummary = this.buildToolSummary();
+            const abortParts = ['Aborted'];
+            if (abortDuration > 0) abortParts.push(`after ${abortDuration}s`);
+            if (abortToolSummary) abortParts.push(abortToolSummary);
+            this.emitTimelineEntry({
+              ts: Date.now(), type: 'chat_end', raw: abortParts.join(' \u00b7 '),
+            });
+            this.chatStarted = false;
+            this.currentRunId = null;
+            this.emitAdapterEvent({ source: 'parser', event: 'idle' });
+            break;
+          }
+
+          case 'error': {
+            const errMsg = (payload.errorMessage as string) || 'unknown';
+            this.emitTimelineEntry({
+              ts: Date.now(), type: 'error', raw: errMsg,
+            });
+            this.chatStarted = false;
+            this.currentRunId = null;
+            debug('adapter:openclaw', `Chat error: ${errMsg}`);
+            this.emitAdapterEvent({ source: 'parser', event: 'idle' });
+            break;
+          }
         }
         break;
       }
@@ -641,6 +706,19 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
         const ask = payload.ask as string | undefined;
 
         this.pendingApprovalId = approvalId;
+
+        // Track tool for chat summary
+        const toolName = command?.split(' ')[0] || 'tool';
+        this.chatToolCount++;
+        if (!this.chatToolNames.includes(toolName)) {
+          this.chatToolNames.push(toolName);
+        }
+
+        const toolRaw = ask ? `${command}: ${ask}` : (command || 'Approve tool execution?');
+        this.emitTimelineEntry({
+          ts: Date.now(), type: 'tool_request', raw: toolRaw,
+          approvalId, status: 'pending',
+        });
 
         this.emitAdapterEvent({
           source: 'parser',
@@ -658,11 +736,24 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
         break;
       }
 
-      case 'exec.approval.resolved':
+      case 'exec.approval.resolved': {
         // Approval resolved (by us or another client) → processing continues
+        const resolvedId = this.pendingApprovalId;
+        const decision = (payload.decision as string) || 'allow';
         this.pendingApprovalId = null;
+
+        if (resolvedId) {
+          this.emitTimelineEntry({
+            ts: Date.now(), type: 'tool_resolved',
+            raw: decision === 'allow' ? 'Approved' : 'Denied',
+            approvalId: resolvedId,
+            status: decision === 'allow' ? 'approved' : 'denied',
+          });
+        }
+
         this.emitAdapterEvent({ source: 'parser', event: 'spinner_start' });
         break;
+      }
 
       // ===== Presence / keepalive =====
       case 'presence':
@@ -846,6 +937,37 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
         debug('adapter:openclaw', 'Retrying model catalog in 10s');
         setTimeout(() => this.emitModelCatalog(false), 10_000);
       }
+    }
+  }
+
+  /** Build tool count summary like "Read(3), Bash(2)" */
+  private buildToolSummary(): string {
+    if (this.chatToolNames.length === 0) return '';
+    // Count occurrences (simplified — uses total count distributed)
+    return this.chatToolNames.join(', ');
+  }
+
+  /** Emit a timeline event through the adapter event system */
+  private emitTimelineEntry(entry: TimelineEntry): void {
+    this.emitAdapterEvent({ source: 'timeline', entry });
+  }
+
+  /** Fetch event history from Gateway via RPC (for offline recovery) */
+  async fetchHistory(since: number): Promise<TimelineEntry[]> {
+    try {
+      const result = await this.rpcCall('events.history', { since });
+      if (!result || !Array.isArray(result)) return [];
+      // Gateway returns raw event objects — map to TimelineEntry
+      return (result as Record<string, unknown>[]).filter(Boolean).map((e) => ({
+        ts: (e.ts as number) || Date.now(),
+        type: (e.type as TimelineEntry['type']) || 'user_action',
+        raw: (e.raw as string) || (e.summary as string) || '',
+        approvalId: e.approvalId as string | undefined,
+        status: e.status as TimelineEntry['status'],
+      }));
+    } catch (err) {
+      debug('adapter:openclaw', `fetchHistory failed: ${err}`);
+      return [];
     }
   }
 

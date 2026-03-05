@@ -1,5 +1,6 @@
 import { State, PermissionMode, PromptOption } from './states.js';
 import type { AgentType, AgentCapabilities } from './adapter.js';
+import type { TimelineEntry } from './timeline.js';
 
 // ===== Billing Type =====
 
@@ -108,6 +109,7 @@ export interface StateUpdateEvent {
   toolProgress?: string;
   projectName?: string;
   modelName?: string;
+  effortLevel?: string;
   billingType?: BillingType;
   options?: PromptOption[];
   promptType?: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review';
@@ -203,6 +205,16 @@ export interface SessionsListEvent {
   sessions: SessionInfo[];
 }
 
+export interface TimelineEventMsg {
+  type: 'timeline_event';
+  entry: TimelineEntry;
+}
+
+export interface TimelineHistoryMsg {
+  type: 'timeline_history';
+  entries: TimelineEntry[];
+}
+
 export type BridgeEvent =
   | StateUpdateEvent
   | PromptOptionsEvent
@@ -214,7 +226,9 @@ export type BridgeEvent =
   | SessionsListEvent
   | EncoderStateEvent
   | DeckSlotMapEvent
-  | ButtonStateEvent;
+  | ButtonStateEvent
+  | TimelineEventMsg
+  | TimelineHistoryMsg;
 
 // ===== Plugin → Bridge (Commands) =====
 

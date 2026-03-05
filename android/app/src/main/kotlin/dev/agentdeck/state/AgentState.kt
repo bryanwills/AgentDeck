@@ -16,6 +16,7 @@ import dev.agentdeck.net.SessionInfo
 import dev.agentdeck.net.StateUpdate
 import dev.agentdeck.net.UsageUpdate
 import dev.agentdeck.net.VoiceState
+import dev.agentdeck.net.toTimelineEntry
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +34,7 @@ data class DashboardState(
     val toolProgress: String? = null,
     val projectName: String? = null,
     val modelName: String? = null,
+    val effortLevel: String? = null,
     val billingType: String? = null,
     val options: List<PromptOption> = emptyList(),
     val promptType: String? = null,
@@ -96,6 +98,7 @@ class AgentStateHolder private constructor() {
                         toolProgress = event.data.toolProgress,
                         projectName = event.data.projectName ?: current.projectName,
                         modelName = event.data.modelName ?: current.modelName,
+                        effortLevel = event.data.effortLevel ?: current.effortLevel,
                         billingType = event.data.billingType ?: current.billingType,
                         options = event.data.options ?: emptyList(),
                         promptType = event.data.promptType,
@@ -166,6 +169,16 @@ class AgentStateHolder private constructor() {
                     buttonSlotMap = event.buttons,
                     encoderSlotMap = event.encoders,
                 ) }
+            }
+
+            is BridgeEvent.Timeline -> {
+                TimelineStore.instance.addEntry(event.entry.toTimelineEntry())
+                StateTimelineGenerator.instance.setReceivingBridgeTimeline(true)
+            }
+
+            is BridgeEvent.TimelineHistory -> {
+                TimelineStore.instance.addEntries(event.entries.map { it.toTimelineEntry() })
+                StateTimelineGenerator.instance.setReceivingBridgeTimeline(true)
             }
 
             is BridgeEvent.Disconnected -> {

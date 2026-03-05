@@ -11,13 +11,20 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
+import type { TimelineEntry as SharedTimelineEntry, TimelineEntryType as SharedType } from '@agentdeck/shared';
 
+// Plugin extends shared TimelineEntry with 'now_marker' (display-only, not persisted/relayed)
 export interface TimelineEntry {
   ts: number;
-  type: 'tool_request' | 'tool_resolved' | 'chat_start' | 'chat_end' | 'chat_response' | 'error' | 'scheduled' | 'user_action' | 'now_marker' | 'model_call' | 'model_response' | 'memory_recall' | 'tool_exec';
+  type: SharedType | 'now_marker';
   raw: string;
   approvalId?: string;
   status?: 'pending' | 'approved' | 'denied';
+}
+
+/** Convert shared TimelineEntry to plugin TimelineEntry (compatible — just re-type) */
+export function fromSharedEntry(e: SharedTimelineEntry): TimelineEntry {
+  return e;
 }
 
 /** Consecutive duplicates collapsed into one display item */

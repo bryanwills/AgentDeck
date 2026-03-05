@@ -82,6 +82,7 @@ private fun typeTag(type: String): String = when (type) {
     "tool_resolved" -> "[T]"
     "model_call" -> "[M]"
     "model_response" -> "[M]"
+    "chat_response" -> "[A]"
     "chat_start" -> "[C]"
     "chat_end" -> "[C]"
     "error" -> "[E]"

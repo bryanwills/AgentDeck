@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import type { Server } from 'http';
 import type { PluginCommand } from './protocol.js';
+import type { TimelineEntry } from './timeline.js';
 
 // ===== Agent Types =====
 
@@ -72,12 +73,19 @@ export interface AdapterConnectionEvent {
   status: 'connected' | 'disconnected';
 }
 
+/** Timeline event (OpenClaw rich events for Android relay) */
+export interface AdapterTimelineEvent {
+  source: 'timeline';
+  entry: TimelineEntry;
+}
+
 export type AdapterEvent =
   | AdapterHookEvent
   | AdapterParserEvent
   | AdapterMetadataEvent
   | AdapterActivityEvent
-  | AdapterConnectionEvent;
+  | AdapterConnectionEvent
+  | AdapterTimelineEvent;
 
 // ===== Adapter Interface =====
 

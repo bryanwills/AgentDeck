@@ -21,8 +21,15 @@ class StateTimelineGenerator private constructor() {
     @Volatile private var lastToolTime: Long = 0
     @Volatile private var lastAgentType: String? = null
     @Volatile private var chatStartTime: Long? = null
+    @Volatile private var receivingBridgeTimeline = false
+
+    /** When Bridge provides rich timeline, suppress local generation to avoid duplicates. */
+    fun setReceivingBridgeTimeline(receiving: Boolean) {
+        receivingBridgeTimeline = receiving
+    }
 
     fun onStateUpdate(update: StateUpdate) {
+        if (receivingBridgeTimeline) return  // Bridge provides rich timeline
         val now = System.currentTimeMillis()
         val newState = update.state
         val store = TimelineStore.instance
@@ -81,6 +88,7 @@ class StateTimelineGenerator private constructor() {
     }
 
     fun onDisconnected() {
+        receivingBridgeTimeline = false  // Reset on disconnect → local fallback
         val now = System.currentTimeMillis()
         if (previousState != AgentState.DISCONNECTED) {
             TimelineStore.instance.addEntry(

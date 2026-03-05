@@ -30,6 +30,8 @@ import {
   type UtilityCommand,
 } from './types.js';
 import { UtilityProxy } from './utility-proxy.js';
+import { BridgeTimelineStore } from './timeline-store.js';
+import { BridgeLogStream } from './log-stream.js';
 import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname, join } from 'path';
@@ -299,6 +301,10 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   // Slot map cache (plugin → bridge → Android relay)
   let cachedSlotMap: DeckSlotMapEvent | null = null;
 
+  // Timeline components (OpenClaw mode only)
+  const bridgeTimeline = agentType === 'openclaw' ? new BridgeTimelineStore() : null;
+  const bridgeLogStream = agentType === 'openclaw' ? new BridgeLogStream() : null;
+
   // 1b. Connect to singleton whisper-server (non-blocking — don't delay bridge startup)
   voiceManager.connectToServer().catch((err) => {
     debug('sdc', `whisper-server connection failed (will use whisper-cli): ${err}`);
@@ -428,10 +434,42 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
         const connEvt: BridgeEvent = { type: 'connection', status: evt.status };
         wsServer.broadcast(connEvt);
         broadcastSse(connEvt);
+
+        // Start/stop log stream on gateway connect/disconnect
+        if (evt.status === 'connected' && bridgeLogStream) {
+          bridgeLogStream.start();
+        } else if (evt.status === 'disconnected' && bridgeLogStream) {
+          bridgeLogStream.stop();
+        }
+        break;
+      }
+
+      case 'timeline': {
+        if (bridgeTimeline) {
+          bridgeTimeline.addEntry(evt.entry);
+          // Dedup: track tool_request in log stream
+          if (evt.entry.type === 'tool_request' && bridgeLogStream) {
+            bridgeLogStream.trackToolRequest(evt.entry.raw);
+          }
+        }
         break;
       }
     }
   });
+
+  // 4a-timeline. Wire log stream + timeline store → WS broadcast
+  if (bridgeLogStream && bridgeTimeline) {
+    bridgeLogStream.on('entry', (entry) => {
+      bridgeTimeline.addEntry(entry);
+    });
+  }
+  if (bridgeTimeline) {
+    bridgeTimeline.onEntry((entry) => {
+      const evt: BridgeEvent = { type: 'timeline_event', entry };
+      wsServer.broadcast(evt);
+      broadcastSse(evt);
+    });
+  }
 
   // 4b. Handle adapter exit (agent process died)
   adapter.on('exit', (_code: number, _signal: number) => {
@@ -476,6 +514,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
       toolProgress: snapshot.toolProgress ?? undefined,
       projectName: snapshot.projectName ?? undefined,
       modelName: snapshot.modelName ?? undefined,
+      effortLevel: snapshot.effortLevel ?? undefined,
       billingType: snapshot.billingType,
       options: snapshot.options.length > 0 ? snapshot.options : undefined,
       promptType,
@@ -732,6 +771,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
       toolProgress: snapshot.toolProgress ?? undefined,
       projectName: snapshot.projectName ?? undefined,
       modelName: snapshot.modelName ?? undefined,
+      effortLevel: snapshot.effortLevel ?? undefined,
       billingType: snapshot.billingType,
       options: snapshot.options.length > 0 ? snapshot.options : undefined,
       promptType: initPromptType,
@@ -788,6 +828,14 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     // Send cached slot map if available
     if (cachedSlotMap) {
       wsServer.sendTo(ws, cachedSlotMap);
+    }
+
+    // Send timeline history for OpenClaw mode
+    if (bridgeTimeline) {
+      const entries = bridgeTimeline.getHistory();
+      if (entries.length > 0) {
+        wsServer.sendTo(ws, { type: 'timeline_history', entries } as BridgeEvent);
+      }
     }
 
     // Fetch API usage on client connect:
@@ -1035,10 +1083,15 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
 
     // --- Slot 1: Session/Status ---
     if (st === State.IDLE) {
+      const effortSuffix = snapshot.effortLevel && snapshot.effortLevel !== 'medium'
+        ? snapshot.effortLevel : null;
+      const sessionSubtitle = effortSuffix && snapshot.modelName
+        ? `${snapshot.modelName} · ${effortSuffix}`
+        : snapshot.modelName ?? undefined;
       buttons.push({
         slot: 1,
         title: snapshot.projectName ?? '—',
-        subtitle: snapshot.modelName ?? undefined,
+        subtitle: sessionSubtitle,
         bgColor: '#1e293b',
         textColor: '#ffffff',
         enabled: false,
@@ -1240,6 +1293,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     displayMonitor.stop();
     utilityProxy.cleanup();
     voiceManager.disconnectFromServer();
+    bridgeLogStream?.stop();
     journal.close();
     wsServer.close();
     cleanupAdbReverse(port);

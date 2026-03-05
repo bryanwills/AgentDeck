@@ -119,6 +119,7 @@ private fun typePrefix(type: String): String = when (type) {
     "tool_resolved" -> "T"
     "model_call" -> "M"
     "model_response" -> "M"
+    "chat_response" -> "A"
     "memory_recall" -> "R"
     "tool_exec" -> "X"
     "chat_start" -> "C"
@@ -131,6 +132,7 @@ private fun typePrefix(type: String): String = when (type) {
 private fun typeColor(type: String) = when (type) {
     "tool_request", "tool_resolved", "tool_exec" -> TerrariumColors.LEDGreen
     "model_call", "model_response" -> TerrariumColors.TetraNeon
+    "chat_response" -> TerrariumColors.TetraNeon
     "memory_recall" -> TerrariumColors.ClaudeBody
     "chat_start", "chat_end" -> TerrariumColors.HUDText
     "error" -> TerrariumColors.LEDRed

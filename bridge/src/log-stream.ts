@@ -1,21 +1,20 @@
 /**
- * Log stream parser for OpenClaw — spawns `openclaw logs --follow --json`
- * and converts structured log lines into TimelineEntry events.
+ * Bridge-side log stream parser for OpenClaw — spawns `openclaw logs --follow --json`
+ * and emits TimelineEntry events for relay to Android/plugin clients.
  *
- * Defensive parsing: unrecognized log lines are silently ignored.
- * Dedup: tool_exec entries are skipped if a matching tool_request was
- * recently added via the Gateway WebSocket (within 5 seconds).
+ * Mirror of plugin/src/log-stream.ts but uses shared parseLogLine() and
+ * EventEmitter instead of directly writing to a store.
  */
 
+import { EventEmitter } from 'events';
 import { spawn, type ChildProcess } from 'child_process';
 import { createInterface } from 'readline';
-import { augmentedPath, resolveOpenClawBin, parseLogLine } from '@agentdeck/shared';
-import { timelineStore, type TimelineEntry } from './timeline-store.js';
-import { dlog, dwarn } from './log.js';
+import { augmentedPath, resolveOpenClawBin } from '@agentdeck/shared';
+import type { TimelineEntry } from './types.js';
+import { parseLogLine } from './types.js';
+import { debug } from './logger.js';
 
-const TAG = 'LogStream';
-
-export class LogStream {
+export class BridgeLogStream extends EventEmitter {
   private proc: ChildProcess | null = null;
   private running = false;
   /** Recent tool_request raw texts for dedup against log-based tool_exec */
@@ -26,7 +25,7 @@ export class LogStream {
     if (this.running) return;
 
     const bin = resolveOpenClawBin();
-    dlog(TAG, `Starting log stream: ${bin} logs --follow --json`);
+    debug('log-stream', `Starting log stream: ${bin} logs --follow --json`);
 
     try {
       this.proc = spawn(bin, ['logs', '--follow', '--json'], {
@@ -34,7 +33,7 @@ export class LogStream {
         env: { ...process.env, PATH: augmentedPath() },
       });
     } catch (err) {
-      dwarn(TAG, `Failed to spawn openclaw logs: ${err}`);
+      debug('log-stream', `Failed to spawn openclaw logs: ${err}`);
       return;
     }
 
@@ -53,25 +52,25 @@ export class LogStream {
             return;
           }
 
-          timelineStore.addEntry(entry);
+          this.emit('entry', entry);
         } catch {
           // Not valid JSON — ignore
         }
       });
 
       rl.on('close', () => {
-        dlog(TAG, 'Log stream closed');
+        debug('log-stream', 'Log stream closed');
         this.running = false;
       });
     }
 
     this.proc.on('error', (err) => {
-      dwarn(TAG, `Log stream error: ${err.message}`);
+      debug('log-stream', `Log stream error: ${err.message}`);
       this.running = false;
     });
 
     this.proc.on('exit', (code) => {
-      dlog(TAG, `Log stream exited (code=${code})`);
+      debug('log-stream', `Log stream exited (code=${code})`);
       this.running = false;
       this.proc = null;
     });
@@ -82,7 +81,7 @@ export class LogStream {
 
   stop(): void {
     if (this.proc) {
-      dlog(TAG, 'Stopping log stream');
+      debug('log-stream', 'Stopping log stream');
       this.proc.kill('SIGTERM');
       this.proc = null;
     }
@@ -109,7 +108,6 @@ export class LogStream {
   private isDuplicateToolExec(raw: string): boolean {
     const ts = this.recentToolRequests.get(raw);
     if (!ts) return false;
-    // Consider duplicate if within 5 seconds
     if (Date.now() - ts < 5_000) return true;
     this.recentToolRequests.delete(raw);
     return false;
@@ -122,5 +120,3 @@ export class LogStream {
     }
   }
 }
-
-export const logStream = new LogStream();

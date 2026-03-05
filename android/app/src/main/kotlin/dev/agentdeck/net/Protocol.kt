@@ -80,6 +80,7 @@ data class StateUpdate(
     val toolProgress: String? = null,
     val projectName: String? = null,
     val modelName: String? = null,
+    val effortLevel: String? = null,
     val billingType: String? = null,
     val options: List<PromptOption>? = null,
     val promptType: String? = null,
@@ -189,6 +190,26 @@ data class SessionInfo(
     val state: String? = null,
 )
 
+// --- Bridge timeline entry (rich OpenClaw events) ---
+
+@Serializable
+data class BridgeTimelineEntry(
+    val ts: Long,
+    val type: String,
+    val raw: String,
+    val approvalId: String? = null,
+    val status: String? = null,
+    val agentType: String? = null,
+)
+
+fun BridgeTimelineEntry.toTimelineEntry() = dev.agentdeck.state.TimelineEntry(
+    timestamp = ts,
+    type = type,
+    summary = raw,
+    detail = null,
+    agentType = agentType,
+)
+
 sealed class BridgeEvent {
     data class State(val data: StateUpdate) : BridgeEvent()
     data class Usage(val data: UsageUpdate) : BridgeEvent()
@@ -200,6 +221,8 @@ sealed class BridgeEvent {
     data class EncoderState(val encoders: List<EncoderSlotState>, val takeoverActive: Boolean) : BridgeEvent()
     data class ButtonState(val buttons: List<ButtonSlotState>) : BridgeEvent()
     data class SlotMap(val buttons: List<DeckSlotConfig>, val encoders: List<DeckSlotConfig>) : BridgeEvent()
+    data class Timeline(val entry: BridgeTimelineEntry) : BridgeEvent()
+    data class TimelineHistory(val entries: List<BridgeTimelineEntry>) : BridgeEvent()
 }
 
 // --- App -> Bridge commands ---
@@ -297,6 +320,20 @@ fun parseBridgeMessage(text: String): BridgeEvent? {
                     val buttons = protocolJson.decodeFromJsonElement<List<DeckSlotConfig>>(buttonsArray)
                     val encoders = protocolJson.decodeFromJsonElement<List<DeckSlotConfig>>(encodersArray)
                     BridgeEvent.SlotMap(buttons, encoders)
+                } else null
+            }
+            "timeline_event" -> {
+                val entryObj = obj["entry"]
+                if (entryObj != null) {
+                    val entry = protocolJson.decodeFromJsonElement<BridgeTimelineEntry>(entryObj)
+                    BridgeEvent.Timeline(entry)
+                } else null
+            }
+            "timeline_history" -> {
+                val entriesArray = obj["entries"]
+                if (entriesArray != null) {
+                    val entries = protocolJson.decodeFromJsonElement<List<BridgeTimelineEntry>>(entriesArray)
+                    BridgeEvent.TimelineHistory(entries)
                 } else null
             }
             else -> null
