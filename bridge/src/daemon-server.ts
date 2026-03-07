@@ -4,7 +4,7 @@ import { UsageTracker } from './usage-tracker.js';
 import { StateMachine } from './state-machine.js';
 import { WsServer } from './ws-server.js';
 import { OllamaProbe, type OllamaStatus } from './ollama-probe.js';
-import { probeGateway } from './gateway-probe.js';
+import { probeGateway, checkGatewayHealth } from './gateway-probe.js';
 import { fetchUsageFromApi, hasOAuthToken, type ApiUsageData } from './usage-api.js';
 import { advertiseBridge } from './mdns.js';
 import { getOrCreateToken, getWsUrl } from './auth.js';
@@ -63,6 +63,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   let oauthConnected = hasOAuthToken();
   let cachedOllamaStatus: OllamaStatus | null = null;
   let cachedGatewayAvailable = false;
+  let cachedGatewayHasError = false;
   let cachedModelCatalog: ModelCatalogEntry[] | null = null;
 
   // Core components (no PTY, no voice)
@@ -202,6 +203,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       modelCatalog: cachedModelCatalog ?? undefined,
       pairingUrl: wsUrl,
       ollamaStatus: cachedOllamaStatus ?? undefined,
+      gatewayAvailable: cachedGatewayAvailable || undefined,
+      gatewayHasError: cachedGatewayHasError || undefined,
     };
     wsServer.broadcast(stateEvent);
 
@@ -278,6 +281,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       modelCatalog: cachedModelCatalog ?? undefined,
       pairingUrl: wsUrl,
       ollamaStatus: cachedOllamaStatus ?? undefined,
+      gatewayAvailable: cachedGatewayAvailable || undefined,
+      gatewayHasError: cachedGatewayHasError || undefined,
     };
     wsServer.sendTo(ws, stateEvent);
     wsServer.sendTo(ws, buildUsageEvent(snapshot, cachedApiUsage, oauthConnected));
@@ -352,6 +357,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       connectGatewayAdapter();
     }
   });
+
+  // Gateway health check (30s cadence)
+  const healthInterval = setInterval(() => {
+    if (!cachedGatewayAvailable) return;
+    checkGatewayHealth().then((hasError) => {
+      cachedGatewayHasError = hasError;
+    });
+  }, 30_000);
+  setTimeout(() => {
+    checkGatewayHealth().then((hasError) => {
+      cachedGatewayHasError = hasError;
+    });
+  }, 5000);
 
   // Usage update (5s tick for session timer)
   const usageInterval = setInterval(() => {
@@ -508,6 +526,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     clearInterval(apiUsageInterval);
     clearInterval(ollamaInterval);
     clearInterval(gatewayInterval);
+    clearInterval(healthInterval);
     clearInterval(sessionsListInterval);
     displayMonitor.stop();
     deregisterSession(sessionId);

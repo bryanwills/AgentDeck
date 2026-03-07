@@ -60,7 +60,8 @@ fun EinkEventLog(
                     text = line,
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp,
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
                     ),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
@@ -78,22 +79,22 @@ private fun formatTimeHHMM(timestamp: Long): String {
 }
 
 private fun typeTag(type: String): String = when (type) {
-    "tool_request" -> "[T]"
-    "tool_resolved" -> "[T]"
-    "model_call" -> "[M]"
-    "model_response" -> "[M]"
-    "chat_response" -> "[A]"
-    "chat_start" -> "[C]"
-    "chat_end" -> "[C]"
-    "error" -> "[E]"
-    "memory_recall" -> "[R]"
-    "tool_exec" -> "[X]"
-    else -> "[S]"  // state changes and others
+    "tool_request" -> "Tool"
+    "tool_resolved" -> "Tool"
+    "model_call" -> "Model"
+    "model_response" -> "Model"
+    "chat_response" -> "Response"
+    "chat_start" -> "Chat"
+    "chat_end" -> "Chat"
+    "error" -> "Error"
+    "memory_recall" -> "Memory"
+    "tool_exec" -> "Exec"
+    else -> "State"
 }
 
 private fun agentTag(agentType: String?): String = when (agentType) {
-    "claude-code" -> "[CC]"
-    "openclaw" -> "[OC]"
+    "claude-code" -> "Claude "
+    "openclaw" -> "OpenClaw "
     null -> ""
-    else -> "[AG]"
+    else -> "Agent "
 }

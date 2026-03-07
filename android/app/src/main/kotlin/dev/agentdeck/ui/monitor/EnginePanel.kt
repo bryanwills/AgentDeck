@@ -44,6 +44,7 @@ fun TankStatusPanel(
     modifier: Modifier = Modifier,
 ) {
     val usage = state.usage
+    val staleSuffix = if (usage.usageStale == true) " !" else ""
     val oauthConnected = state.oauthConnected
     val ollamaStatus = state.ollamaStatus
     val modelName = state.modelName
@@ -71,14 +72,14 @@ fun TankStatusPanel(
             ) {
                 if (usage.fiveHourPercent != null) {
                     WaterGauge(
-                        label = "5h",
+                        label = "5h$staleSuffix",
                         percent = usage.fiveHourPercent,
                         resetTime = usage.fiveHourResetsAt?.let { formatResetTime(it) },
                     )
                 }
                 if (usage.sevenDayPercent != null) {
                     WaterGauge(
-                        label = "7d",
+                        label = "7d$staleSuffix",
                         percent = usage.sevenDayPercent,
                         resetTime = usage.sevenDayResetsAt?.let { formatResetTime(it) },
                     )

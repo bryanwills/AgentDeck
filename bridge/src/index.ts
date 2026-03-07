@@ -45,9 +45,9 @@ import {
   findAvailablePort,
   detectTmuxSession,
 } from './session-registry.js';
-import { fetchUsageFromApi, hasOAuthToken, type ApiUsageData } from './usage-api.js';
+import { fetchUsageFromApi, hasOAuthToken, didLastFetchFail, type ApiUsageData } from './usage-api.js';
 import { OllamaProbe, type OllamaStatus } from './ollama-probe.js';
-import { probeGateway } from './gateway-probe.js';
+import { probeGateway, checkGatewayHealth } from './gateway-probe.js';
 
 import { getOrCreateToken, getWsUrl } from './auth.js';
 import { buildEnrichedSessionsList } from './session-aggregator.js';
@@ -107,6 +107,7 @@ program
   .option('-a, --agent <type>', 'Agent type (claude-code|openclaw)', 'claude-code')
   .option('-g, --gateway <url>', 'OpenClaw gateway WebSocket URL')
   .option('-d, --debug', 'Enable debug logging to /tmp/sdc-debug.log')
+  .option('--no-update-check', 'Skip Claude Code version check and auto-update')
   .action(async (opts) => {
     if (opts.debug) {
       enableDebugLog();
@@ -114,7 +115,7 @@ program
     }
     const port = parseInt(opts.port, 10);
     const agentType = opts.agent as AgentType;
-    await startBridge(port, opts.command, agentType, opts.gateway);
+    await startBridge(port, opts.command, agentType, opts.gateway, opts.updateCheck === false);
   });
 
 program
@@ -237,13 +238,48 @@ program
 
 program.parse();
 
-async function startBridge(port: number, command: string, agentType: AgentType, gatewayUrl?: string): Promise<void> {
+/** Extract tool input for timeline display (mirrors state-machine.ts formatToolInput) */
+function formatToolInputForTimeline(toolName: string, input: Record<string, unknown> | undefined): string | null {
+  if (!input) return null;
+  const keyMap: Record<string, string> = {
+    Bash: 'command', Read: 'file_path', Write: 'file_path', Edit: 'file_path',
+    Glob: 'pattern', Grep: 'pattern', WebFetch: 'url', WebSearch: 'query', Task: 'prompt',
+  };
+  const key = keyMap[toolName];
+  if (key && typeof input[key] === 'string') {
+    const line = (input[key] as string).split('\n')[0];
+    return line.length > 120 ? line.slice(0, 119) + '\u2026' : line;
+  }
+  for (const v of Object.values(input)) {
+    if (typeof v === 'string' && v.length > 0 && v.length < 200) {
+      const line = v.split('\n')[0];
+      return line.length > 120 ? line.slice(0, 119) + '\u2026' : line;
+    }
+  }
+  return null;
+}
+
+async function startBridge(port: number, command: string, agentType: AgentType, gatewayUrl?: string, noUpdateCheck?: boolean): Promise<void> {
   const deps = checkDependencies();
   if (!deps.ok) {
     process.exit(1);
   }
   for (const w of deps.warnings) {
     log(`[sdc] WARNING: ${w}`);
+  }
+
+  // Version compatibility check + auto-update
+  const { checkVersionCompatibility } = await import('./version-check.js');
+  const versionResult = await checkVersionCompatibility({
+    skipCheck: noUpdateCheck,
+    claudeCodeVersion: deps.claudeCodeVersion,
+  });
+  for (const w of versionResult.warnings) {
+    log(`[sdc] WARNING: ${w}`);
+  }
+  if (versionResult.restartNeeded) {
+    log('[sdc] AgentDeck updated. Please restart sdc.');
+    process.exit(0);
   }
 
   // Multi-session: find available port if default is taken
@@ -278,6 +314,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   let cachedApiUsage: ApiUsageData | null = null;
   let lastApiFetchTime = 0;
   let oauthConnected = hasOAuthToken();
+  let apiUsageStale = false;
 
   // Ollama status probe
   const ollamaProbe = new OllamaProbe();
@@ -285,6 +322,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
 
   // Gateway availability probe
   let cachedGatewayAvailable = false;
+  let cachedGatewayHasError = false;
 
   // Model catalog (OpenClaw: from CLI)
   let cachedModelCatalog: ModelCatalogEntry[] | null = null;
@@ -301,8 +339,8 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   // Slot map cache (plugin → bridge → Android relay)
   let cachedSlotMap: DeckSlotMapEvent | null = null;
 
-  // Timeline components (OpenClaw mode only)
-  const bridgeTimeline = agentType === 'openclaw' ? new BridgeTimelineStore() : null;
+  // Timeline components (always-on for Android; log stream for OpenClaw only)
+  const bridgeTimeline = new BridgeTimelineStore();
   const bridgeLogStream = agentType === 'openclaw' ? new BridgeLogStream() : null;
 
   // 1b. Connect to singleton whisper-server (non-blocking — don't delay bridge startup)
@@ -396,7 +434,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
           case 'usage_info':
             usageTracker.setUsageInfo(evt.data);
             // Immediately broadcast updated usage
-            wsServer.broadcast(buildUsageEvent(stateMachine.getSnapshot(), cachedApiUsage, oauthConnected, cachedOllamaStatus));
+            wsServer.broadcast(buildUsageEvent(stateMachine.getSnapshot(), cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
             break;
           case 'user_prompt': {
             const text = evt.data?.text as string | undefined;
@@ -471,6 +509,95 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     });
   }
 
+  // 4a-cc-timeline. Wire Claude Code hook events → timeline entries
+  if (agentType === 'claude-code') {
+    let ccLastState: string | null = null;
+    let ccChatStart: number | null = null;
+    let ccPendingChatStart = false;
+    let ccPendingChatStartTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const emitChatStart = (text: string) => {
+      if (ccPendingChatStartTimer) {
+        clearTimeout(ccPendingChatStartTimer);
+        ccPendingChatStartTimer = null;
+      }
+      ccPendingChatStart = false;
+      const snippet = text.length > 100 ? text.slice(0, 97) + '...' : text;
+      bridgeTimeline.addEntry({
+        ts: ccChatStart ?? Date.now(), type: 'chat_start',
+        raw: snippet || 'Prompt sent',
+        agentType: 'claude-code',
+      });
+    };
+
+    // Listen for PTY user_prompt to get actual prompt text
+    adapter.on('event', (evt: AdapterEvent) => {
+      if (evt.source === 'metadata' && evt.event === 'user_prompt' && ccPendingChatStart) {
+        const text = (evt.data?.text as string) || '';
+        emitChatStart(text);
+      }
+    });
+
+    adapter.on('event', (evt: AdapterEvent) => {
+      if (evt.source === 'hook') {
+        const now = Date.now();
+        switch (evt.event) {
+          case 'UserPromptSubmit': {
+            ccChatStart = now;
+            usageTracker.resetToolCounts();
+            ccPendingChatStart = true;
+            // Fallback: if PTY user_prompt doesn't arrive within 500ms, emit with hook text
+            const hookText = (evt.data?.text as string) || '';
+            ccPendingChatStartTimer = setTimeout(() => {
+              if (ccPendingChatStart) {
+                emitChatStart(hookText);
+              }
+            }, 500);
+            break;
+          }
+          case 'PreToolUse': {
+            const toolName = (evt.data?.tool_name as string) || 'tool';
+            const toolInputData = evt.data?.tool_input as Record<string, unknown> | undefined;
+            const formatted = formatToolInputForTimeline(toolName, toolInputData);
+            bridgeTimeline.addEntry({
+              ts: now, type: 'tool_request',
+              raw: formatted ? `${toolName} ${formatted}` : toolName,
+              agentType: 'claude-code',
+            });
+            break;
+          }
+          case 'PostToolUse': {
+            bridgeTimeline.addEntry({
+              ts: now, type: 'tool_resolved',
+              raw: 'Approved',
+              agentType: 'claude-code',
+            });
+            break;
+          }
+          case 'Stop': {
+            // Flush any pending chat_start before emitting chat_end
+            if (ccPendingChatStart) {
+              emitChatStart('');
+            }
+            const duration = ccChatStart ? Math.round((now - ccChatStart) / 1000) : null;
+            const toolSummary = usageTracker.getToolSummary();
+            let summary = duration != null ? `Completed · ${duration}s` : 'Completed';
+            if (toolSummary) {
+              summary += ` · ${toolSummary}`;
+            }
+            ccChatStart = null;
+            bridgeTimeline.addEntry({
+              ts: now, type: 'chat_end',
+              raw: summary,
+              agentType: 'claude-code',
+            });
+            break;
+          }
+        }
+      }
+    });
+  }
+
   // 4b. Handle adapter exit (agent process died)
   adapter.on('exit', (_code: number, _signal: number) => {
     shutdown();
@@ -530,6 +657,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
       pairingUrl: wsUrl,
       ollamaStatus: cachedOllamaStatus ?? undefined,
       gatewayAvailable: cachedGatewayAvailable || undefined,
+      gatewayHasError: cachedGatewayHasError || undefined,
     };
     wsServer.broadcast(stateEvent);
     broadcastSse(stateEvent);
@@ -554,7 +682,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
       wsServer.broadcast(promptEvent);
     }
 
-    const usageEvt = buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus);
+    const usageEvt = buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale);
     wsServer.broadcast(usageEvt);
     broadcastSse(usageEvt);
 
@@ -681,12 +809,15 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
           if (apiUsage) {
             cachedApiUsage = apiUsage;
             lastApiFetchTime = Date.now();
+            apiUsageStale = false;
             if (apiUsage.inferredBillingType) {
               stateMachine.inferBillingType(apiUsage.inferredBillingType);
             }
+          } else if (cachedApiUsage) {
+            apiUsageStale = true;
           }
           const snapshot = stateMachine.getSnapshot();
-          wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus));
+          wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
         });
         break;
       }
@@ -786,6 +917,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
       pairingUrl: wsUrl,
       ollamaStatus: cachedOllamaStatus ?? undefined,
       gatewayAvailable: cachedGatewayAvailable || undefined,
+      gatewayHasError: cachedGatewayHasError || undefined,
     };
     wsServer.sendTo(ws, stateEvent);
 
@@ -799,7 +931,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
       });
     }
 
-    wsServer.sendTo(ws, buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus));
+    wsServer.sendTo(ws, buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
 
     const connectEvt: BridgeEvent = {
       type: 'connection',
@@ -849,13 +981,15 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
           cachedApiUsage = apiUsage;
           lastApiFetchTime = Date.now();
           oauthConnected = true;
+          apiUsageStale = false;
           if (apiUsage.inferredBillingType) {
             stateMachine.inferBillingType(apiUsage.inferredBillingType);
           }
           const snap2 = stateMachine.getSnapshot();
-          wsServer.broadcast(buildUsageEvent(snap2, cachedApiUsage, oauthConnected, cachedOllamaStatus));
+          wsServer.broadcast(buildUsageEvent(snap2, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
         } else {
           oauthConnected = hasOAuthToken();
+          if (cachedApiUsage) apiUsageStale = true;
         }
       });
     }
@@ -874,7 +1008,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   const usageInterval = setInterval(() => {
     if (wsServer.getClientCount() > 0) {
       const snapshot = stateMachine.getSnapshot();
-      wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus));
+      wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
     }
   }, 5000);
 
@@ -886,14 +1020,16 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
           cachedApiUsage = apiUsage;
           lastApiFetchTime = Date.now();
           oauthConnected = true;
+          apiUsageStale = false;
           if (apiUsage.inferredBillingType) {
             stateMachine.inferBillingType(apiUsage.inferredBillingType);
           }
           // Broadcast updated usage so clients see fresh rate-limit data
           const snapshot = stateMachine.getSnapshot();
-          wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus));
+          wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
         } else {
           oauthConnected = hasOAuthToken();
+          if (cachedApiUsage) apiUsageStale = true;
         }
       });
     }
@@ -920,6 +1056,24 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   probeGateway().then((status) => {
     cachedGatewayAvailable = status.available;
   });
+
+  // 9b4. Periodic Gateway health check (doctor warnings/errors, 30s cadence)
+  function updateGatewayHealth() {
+    checkGatewayHealth().then((hasError) => {
+      const changed = hasError !== cachedGatewayHasError;
+      cachedGatewayHasError = hasError;
+      if (changed) {
+        // Re-broadcast current state with updated gatewayHasError
+        stateMachine.emit('state_changed', stateMachine.getSnapshot());
+      }
+    });
+  }
+  const healthInterval = setInterval(() => {
+    if (!cachedGatewayAvailable) return; // skip if gateway is down
+    updateGatewayHealth();
+  }, 30_000);
+  // Initial check (delayed 5s to let gateway stabilize)
+  setTimeout(updateGatewayHealth, 5000);
 
   // 9c. Build enriched sessions list (shared with daemon-server)
   async function buildSessionsList() {
@@ -1283,6 +1437,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     clearInterval(apiUsageInterval);
     clearInterval(ollamaInterval);
     clearInterval(gatewayInterval);
+    clearInterval(healthInterval);
     clearInterval(sessionsListInterval);
     deregisterSession(sessionId);
 
@@ -1321,7 +1476,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   });
 }
 
-function buildUsageEvent(snapshot: StateSnapshot, apiUsage?: ApiUsageData | null, oauthStatus?: boolean, ollamaStatus?: OllamaStatus | null): BridgeEvent {
+function buildUsageEvent(snapshot: StateSnapshot, apiUsage?: ApiUsageData | null, oauthStatus?: boolean, ollamaStatus?: OllamaStatus | null, stale?: boolean): BridgeEvent {
   return {
     type: 'usage_update',
     sessionDurationSec: snapshot.sessionDurationSec,
@@ -1344,6 +1499,7 @@ function buildUsageEvent(snapshot: StateSnapshot, apiUsage?: ApiUsageData | null
     extraUsageUtilization: apiUsage?.extraUsageUtilization ?? undefined,
     oauthConnected: oauthStatus,
     ollamaStatus: ollamaStatus ?? undefined,
+    usageStale: stale || undefined,
   };
 }
 

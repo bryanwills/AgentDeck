@@ -41,10 +41,12 @@ import android.content.Intent
 import android.util.Log
 import android.view.WindowManager
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import dev.agentdeck.net.BridgeDiscovery
 import dev.agentdeck.service.MonitorService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -58,25 +60,22 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
 
 class MainActivity : ComponentActivity() {
 
+    private var isEinkDevice = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val isEink = EinkDetector.isEinkDevice()
+        isEinkDevice = EinkDetector.isEinkDevice()
 
         // E-ink: immersive fullscreen — hide status bar and navigation bar
-        if (isEink) {
-            WindowCompat.setDecorFitsSystemWindows(window, false)
-            WindowInsetsControllerCompat(window, window.decorView).let { controller ->
-                controller.hide(WindowInsetsCompat.Type.systemBars())
-                controller.systemBarsBehavior =
-                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
+        if (isEinkDevice) {
+            hideSystemBars()
         }
 
         val stateHolder = AgentStateHolder.instance
         val connection = BridgeConnection.instance
-        val displayPrefs = DisplayPreferences(this, isEink = isEink)
+        val displayPrefs = DisplayPreferences(this, isEink = isEinkDevice)
 
         // Apply saved orientation preference
         lifecycleScope.launch {
@@ -109,8 +108,8 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            AgentDeckTheme(isEink = isEink) {
-                if (isEink) {
+            AgentDeckTheme(isEink = isEinkDevice) {
+                if (isEinkDevice) {
                     EinkMonitorScreen(stateHolder, connection, displayPrefs)
                 } else {
                     MainNavigation(stateHolder, connection, displayPrefs)
@@ -118,10 +117,27 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Re-hide system bars after Dialog dismissal (Dialog creates a new window
+        // which resets immersive mode flags on the main window)
+        if (hasFocus && isEinkDevice) {
+            hideSystemBars()
+        }
+    }
+
+    private fun hideSystemBars() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).let { controller ->
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
 }
 
 private const val TAG = "MainActivity"
-private const val SAVED_URL_TIMEOUT_MS = 8_000L
 
 @Composable
 fun MainNavigation(
@@ -135,26 +151,34 @@ fun MainNavigation(
 
     val bottomNavScreens = listOf(Screen.Dashboard, Screen.Deck, Screen.Settings)
 
-    // Auto-connect to saved bridge URL on launch
+    val connectionStatus by connection.status.collectAsState()
+    val currentUrl by connection.url.collectAsState()
+    val context = LocalContext.current
+
+    // Auto-connect: saved URL first, then mDNS fallback
     LaunchedEffect(Unit) {
         val savedUrl = displayPrefs.lastBridgeUrlFlow.first()
         Log.i(TAG, "Auto-connect: savedUrl=$savedUrl")
         if (savedUrl != null) {
             connection.autoConnect(savedUrl)
-            delay(SAVED_URL_TIMEOUT_MS)
-            if (connection.status.value != ConnectionStatus.CONNECTED) {
-                Log.w(TAG, "Auto-connect timeout — disconnecting saved URL")
-                connection.disconnect()
-                displayPrefs.setLastBridgeUrl(null)
-            } else {
-                Log.i(TAG, "Auto-connect succeeded to $savedUrl")
+            // Wait for connection or timeout
+            delay(5000)
+        }
+        // If still disconnected, try mDNS discovery
+        if (connection.status.value != ConnectionStatus.CONNECTED) {
+            Log.i(TAG, "Saved URL failed, trying mDNS discovery...")
+            val discovery = BridgeDiscovery(context)
+            discovery.discover().collect { bridges ->
+                if (bridges.isNotEmpty() && connection.status.value != ConnectionStatus.CONNECTED) {
+                    val bridge = bridges.first()
+                    Log.i(TAG, "mDNS auto-connect: ${bridge.name} at ${bridge.wsUrl()}")
+                    connection.connect(bridge.wsUrl())
+                }
             }
         }
     }
 
     // Persist URL on successful connection
-    val connectionStatus by connection.status.collectAsState()
-    val currentUrl by connection.url.collectAsState()
     LaunchedEffect(connectionStatus) {
         if (connectionStatus == ConnectionStatus.CONNECTED) {
             val url = currentUrl

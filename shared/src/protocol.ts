@@ -128,6 +128,8 @@ export interface StateUpdateEvent {
   ollamaStatus?: OllamaStatus;
   /** OpenClaw Gateway reachability (port 18789) */
   gatewayAvailable?: boolean;
+  /** OpenClaw Gateway has doctor warnings/errors */
+  gatewayHasError?: boolean;
 }
 
 export interface PromptOptionsEvent {
@@ -164,6 +166,8 @@ export interface UsageEvent {
   oauthConnected?: boolean;
   // Ollama process status + running models (piggyback on usage polling)
   ollamaStatus?: OllamaStatus;
+  // True when displaying cached data after a fetch failure
+  usageStale?: boolean;
 }
 
 export interface ConnectionEvent {
@@ -312,3 +316,5 @@ export const BRIDGE_WS_PORT = 9120;
 export const BRIDGE_HTTP_PORT = 9120; // Same port, different path
 export const RECONNECT_INTERVAL_MS = 3000;
 export const STUCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+export const WS_PING_INTERVAL_MS = 15_000;
+export const WS_ACTIVITY_TIMEOUT_MS = 30_000;

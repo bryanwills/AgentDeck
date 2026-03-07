@@ -291,7 +291,7 @@ connMgr.on('usage_update', (ev: UsageEvent) => {
     extraUsageMonthlyLimit: ev.extraUsageMonthlyLimit,
     extraUsageUsedCredits: ev.extraUsageUsedCredits,
     extraUsageUtilization: ev.extraUsageUtilization,
-  }, currentBillingType);
+  }, currentBillingType, ev.usageStale);
 });
 
 connMgr.on('connection', (ev: ConnectionEvent) => {

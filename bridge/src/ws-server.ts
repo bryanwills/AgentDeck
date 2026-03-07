@@ -3,6 +3,7 @@ import type { Server, IncomingMessage } from 'http';
 import type { BridgeEvent, PluginCommand } from './types.js';
 import { isLocalConnection, validateToken } from './auth.js';
 import { debug } from './logger.js';
+import { WS_PING_INTERVAL_MS } from '@agentdeck/shared';
 
 export class WsServer {
   private wss: WebSocketServer;
@@ -10,9 +11,25 @@ export class WsServer {
   private rawMessageCallback: ((msg: Record<string, unknown>, sender: WebSocket) => boolean) | null = null;
   private onConnectCallback: ((ws: WebSocket) => void) | null = null;
   private onDisconnectCallback: (() => void) | null = null;
+  private clientAlive = new Map<WebSocket, boolean>();
+  private pingTimer: ReturnType<typeof setInterval>;
 
   constructor(server: Server) {
     this.wss = new WebSocketServer({ server });
+
+    // Server-side ping/pong to detect zombie connections
+    this.pingTimer = setInterval(() => {
+      for (const ws of this.wss.clients) {
+        if (this.clientAlive.get(ws) === false) {
+          debug('WS', 'Terminating unresponsive client');
+          this.clientAlive.delete(ws);
+          ws.terminate();
+          continue;
+        }
+        this.clientAlive.set(ws, false);
+        ws.ping();
+      }
+    }, WS_PING_INTERVAL_MS);
 
     this.wss.on('connection', (ws, req: IncomingMessage) => {
       // Token auth for remote connections
@@ -29,11 +46,16 @@ export class WsServer {
       }
 
       debug('WS', 'Plugin connected');
+      this.clientAlive.set(ws, true);
 
       // Send current state to newly connected client
       if (this.onConnectCallback) {
         this.onConnectCallback(ws);
       }
+
+      ws.on('pong', () => {
+        this.clientAlive.set(ws, true);
+      });
 
       ws.on('message', (data) => {
         try {
@@ -53,6 +75,7 @@ export class WsServer {
 
       ws.on('close', () => {
         debug('WS', 'Plugin disconnected');
+        this.clientAlive.delete(ws);
         if (this.onDisconnectCallback) {
           this.onDisconnectCallback();
         }
@@ -113,6 +136,8 @@ export class WsServer {
   }
 
   close(): void {
+    clearInterval(this.pingTimer);
+    this.clientAlive.clear();
     for (const client of this.wss.clients) {
       client.close();
     }

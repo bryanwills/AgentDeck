@@ -34,12 +34,12 @@ class BridgeConnection private constructor() {
     companion object {
         val instance: BridgeConnection by lazy { BridgeConnection() }
         private const val INITIAL_BACKOFF_MS = 1000L
-        private const val MAX_BACKOFF_MS = 30_000L
+        private const val MAX_BACKOFF_MS = 8_000L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS) // No read timeout for WS
+        .readTimeout(45, TimeUnit.SECONDS) // Detect half-open connections (server pings every 15s)
         .pingInterval(30, TimeUnit.SECONDS)
         .build()
 
@@ -57,6 +57,14 @@ class BridgeConnection private constructor() {
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
+    /** True when actively trying to reconnect to a known URL. */
+    private val _isReconnecting = MutableStateFlow(false)
+    val isReconnecting: StateFlow<Boolean> = _isReconnecting.asStateFlow()
+
+    /** Current reconnect attempt number (reset on connect/disconnect). */
+    private val _reconnectAttempt = MutableStateFlow(0)
+    val reconnectAttempt: StateFlow<Int> = _reconnectAttempt.asStateFlow()
+
     var onEvent: ((BridgeEvent) -> Unit)? = null
 
     fun connect(wsUrl: String) {
@@ -69,6 +77,8 @@ class BridgeConnection private constructor() {
         _url.value = wsUrl
         _status.value = ConnectionStatus.DISCONNECTED
         _lastError.value = null
+        _reconnectAttempt.value = 0
+        _isReconnecting.value = false
         shouldReconnect = true
         backoffMs = INITIAL_BACKOFF_MS
         doConnect(wsUrl)
@@ -76,6 +86,8 @@ class BridgeConnection private constructor() {
 
     fun disconnect() {
         shouldReconnect = false
+        _isReconnecting.value = false
+        _reconnectAttempt.value = 0
         _url.value = null
         _lastError.value = null
         webSocket?.close(1000, "User disconnect")
@@ -165,6 +177,8 @@ class BridgeConnection private constructor() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "onOpen — connected to $wsUrl")
                 _status.value = ConnectionStatus.CONNECTED
+                _isReconnecting.value = false
+                _reconnectAttempt.value = 0
                 backoffMs = INITIAL_BACKOFF_MS
             }
 
@@ -214,7 +228,9 @@ class BridgeConnection private constructor() {
         if (!shouldReconnect) return
         val currentUrl = _url.value ?: return
 
-        Log.d(TAG, "scheduleReconnect — backoff=${backoffMs}ms url=$currentUrl")
+        _isReconnecting.value = true
+        _reconnectAttempt.value++
+        Log.d(TAG, "scheduleReconnect — attempt=${_reconnectAttempt.value} backoff=${backoffMs}ms url=$currentUrl")
         scope.launch {
             delay(backoffMs)
             backoffMs = min(backoffMs * 2, MAX_BACKOFF_MS)

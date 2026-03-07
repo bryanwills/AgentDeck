@@ -187,6 +187,40 @@ function ensureDataDir() {
   }
 }
 
+// ─── 6b. Seed compatibility state ────────────────────────────────────
+
+function seedCompatibility() {
+  const compatPath = join(homedir(), '.agentdeck', 'compatibility.json');
+  if (existsSync(compatPath)) return;
+  try {
+    const claudeVer = execSync('claude --version', { encoding: 'utf-8', timeout: 5000 })
+      .trim()
+      .match(/^([\d.]+)/)?.[1];
+    let bridgeVer: string | null = null;
+    try {
+      const list = JSON.parse(
+        execSync('npm list -g @agentdeck/bridge --json 2>/dev/null', { encoding: 'utf-8' }),
+      );
+      bridgeVer = list?.dependencies?.['@agentdeck/bridge']?.version ?? null;
+    } catch { /* not installed globally yet */ }
+    if (claudeVer) {
+      writeFileSync(
+        compatPath,
+        JSON.stringify(
+          {
+            lastClaudeCodeVersion: claudeVer,
+            lastAgentDeckVersion: bridgeVer,
+            lastCheckTime: new Date().toISOString(),
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+      ok('Compatibility state initialized');
+    }
+  } catch { /* non-critical */ }
+}
+
 // ─── 7. Optional dependencies ────────────────────────────────────────
 
 function checkOptionalDeps() {
@@ -245,6 +279,7 @@ async function main() {
   console.log('');
   installHooks();
   ensureDataDir();
+  seedCompatibility();
   checkOptionalDeps();
   success();
 }

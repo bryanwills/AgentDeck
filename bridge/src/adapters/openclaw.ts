@@ -620,19 +620,25 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
         if (sessionKey) this.currentSessionKey = sessionKey;
 
         switch (state) {
-          case 'delta':
+          case 'delta': {
+            // Capture Gateway-initiated prompt from delta payload
+            const deltaPrompt = payload.prompt as string | undefined;
+            if (deltaPrompt && !this.lastPrompt) this.lastPrompt = deltaPrompt;
+
             if (!this.chatStarted) {
               this.chatStarted = true;
               this.chatStartTime = Date.now();
               this.chatToolCount = 0;
               this.chatToolNames = [];
-              const promptSnippet = this.lastPrompt
-                ? (this.lastPrompt.length > 150 ? this.lastPrompt.slice(0, 147) + '...' : this.lastPrompt)
-                : 'Prompt sent';
+              const prompt = this.lastPrompt || 'Prompt sent';
+              const promptRaw = prompt.length > 500 ? prompt.slice(0, 497) + '...' : prompt;
+              const promptDetail = prompt.length > 100 ? (prompt.length > 1000 ? prompt.slice(0, 997) + '...' : prompt) : undefined;
               this.emitTimelineEntry({
-                ts: Date.now(), type: 'chat_start', raw: promptSnippet,
+                ts: Date.now(), type: 'chat_start', raw: promptRaw,
+                ...(promptDetail ? { detail: promptDetail } : {}),
               });
             }
+          }
             this.emitAdapterEvent({
               source: 'parser',
               event: 'spinner_start',
@@ -650,20 +656,28 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
             if (duration > 0) parts.push(`${duration}s`);
             if (toolSummary) parts.push(toolSummary);
             if (promptSnippet) parts.push(promptSnippet);
+            const chatEndDetail = this.lastPrompt && this.lastPrompt.length > 60
+              ? (this.lastPrompt.length > 1000 ? this.lastPrompt.slice(0, 997) + '...' : this.lastPrompt)
+              : undefined;
             this.emitTimelineEntry({
               ts: Date.now(), type: 'chat_end', raw: parts.join(' \u00b7 '),
+              ...(chatEndDetail ? { detail: chatEndDetail } : {}),
             });
 
             // Emit chat_response if content is available
             const content = payload.content as string | undefined;
             if (content && content.length > 10) {
+              const contentRaw = content.length > 500 ? content.slice(0, 497) + '...' : content;
+              const contentDetail = content.length > 100 ? (content.length > 1000 ? content.slice(0, 997) + '...' : content) : undefined;
               this.emitTimelineEntry({
                 ts: Date.now(), type: 'chat_response',
-                raw: content.length > 200 ? content.slice(0, 197) + '...' : content,
+                raw: contentRaw,
+                ...(contentDetail ? { detail: contentDetail } : {}),
               });
             }
 
             this.chatStarted = false;
+            this.lastPrompt = null;
             this.currentRunId = null;
             this.emitAdapterEvent({ source: 'parser', event: 'idle' });
             break;
@@ -679,6 +693,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
               ts: Date.now(), type: 'chat_end', raw: abortParts.join(' \u00b7 '),
             });
             this.chatStarted = false;
+            this.lastPrompt = null;
             this.currentRunId = null;
             this.emitAdapterEvent({ source: 'parser', event: 'idle' });
             break;
@@ -690,6 +705,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
               ts: Date.now(), type: 'error', raw: errMsg,
             });
             this.chatStarted = false;
+            this.lastPrompt = null;
             this.currentRunId = null;
             debug('adapter:openclaw', `Chat error: ${errMsg}`);
             this.emitAdapterEvent({ source: 'parser', event: 'idle' });
@@ -715,8 +731,11 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
         }
 
         const toolRaw = ask ? `${command}: ${ask}` : (command || 'Approve tool execution?');
+        const toolRequestRaw = toolRaw.length > 500 ? toolRaw.slice(0, 497) + '...' : toolRaw;
+        const toolRequestDetail = ask && ask.length > 100 ? (ask.length > 1000 ? ask.slice(0, 997) + '...' : ask) : undefined;
         this.emitTimelineEntry({
-          ts: Date.now(), type: 'tool_request', raw: toolRaw,
+          ts: Date.now(), type: 'tool_request', raw: toolRequestRaw,
+          ...(toolRequestDetail ? { detail: toolRequestDetail } : {}),
           approvalId, status: 'pending',
         });
 

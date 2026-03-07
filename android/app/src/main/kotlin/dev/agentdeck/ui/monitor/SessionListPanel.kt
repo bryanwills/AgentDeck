@@ -25,6 +25,7 @@ import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.PermissionMode
 import dev.agentdeck.net.SessionInfo
 import dev.agentdeck.terrarium.TerrariumColors
+import dev.agentdeck.ui.component.AgentDeckLogo
 import dev.agentdeck.ui.component.stateColor
 import dev.agentdeck.ui.eink.agentIcon
 import dev.agentdeck.ui.eink.compactStateMarker
@@ -98,6 +99,10 @@ fun SessionListPanel(
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // Brand logo
+        AgentDeckLogo(isEink = false, modifier = Modifier.fillMaxWidth())
+        Spacer(modifier = Modifier.height(4.dp))
+
         // Permission mode badge (non-default only)
         if (permissionMode != PermissionMode.DEFAULT) {
             Text(

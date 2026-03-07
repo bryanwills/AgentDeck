@@ -62,6 +62,7 @@ data class DashboardState(
     val oauthConnected: Boolean? = null,
     val ollamaStatus: OllamaStatus? = null,
     val gatewayAvailable: Boolean? = null,
+    val gatewayHasError: Boolean? = null,
 )
 
 class AgentStateHolder private constructor() {
@@ -114,6 +115,7 @@ class AgentStateHolder private constructor() {
                         workerSessionCount = event.data.workerSessionCount ?: current.workerSessionCount,
                         ollamaStatus = event.data.ollamaStatus ?: current.ollamaStatus,
                         gatewayAvailable = event.data.gatewayAvailable ?: current.gatewayAvailable,
+                        gatewayHasError = event.data.gatewayHasError ?: current.gatewayHasError,
                     )
                 }
                 lastKnownState = _state.value

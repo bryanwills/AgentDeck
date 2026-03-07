@@ -46,13 +46,18 @@ class BridgeDiscovery(context: Context) {
                         }
 
                         override fun onServiceResolved(si: NsdServiceInfo) {
-                            val host = si.host?.hostAddress ?: return
-                            // Parse token from mDNS TXT record
+                            val resolvedHost = si.host?.hostAddress
+                            // Parse TXT records
                             val token = try {
-                                si.attributes["token"]?.let { bytes ->
-                                    String(bytes, Charsets.UTF_8)
-                                }
+                                si.attributes["token"]?.let { String(it, Charsets.UTF_8) }
                             } catch (_: Exception) { null }
+                            // Prefer explicit LAN IP from TXT over resolved address
+                            val txtIp = try {
+                                si.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
+                            } catch (_: Exception) { null }
+                            val host = txtIp ?: resolvedHost ?: return
+                            // Skip link-local addresses (169.254.x.x) — unreachable from WiFi
+                            if (host.startsWith("169.254.")) return
                             val bridge = DiscoveredBridge(
                                 name = si.serviceName,
                                 host = host,

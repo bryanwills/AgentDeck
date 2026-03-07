@@ -19,6 +19,7 @@ enum class CrayfishVisualState {
     OBSERVING,  // Watching activity — gentle claw fidget, eyes tracking
     ROUTING,    // Claws clap, eyes flash, signal lines emit (OpenClaw orchestrating)
     WAITING,    // Claws raised
+    SICK,       // Gateway has errors — desaturated, tilted, labored breathing
 }
 
 enum class TetraVisualState {
@@ -104,7 +105,14 @@ fun DashboardState.toTerrariumState(): TerrariumState {
         }
     }
 
-    val crayfishRouting = crayfish == CrayfishVisualState.ROUTING
+    // Override to SICK if gateway has errors (but not when DORMANT — gateway unreachable)
+    val effectiveCrayfish = if (gatewayHasError == true && crayfish != CrayfishVisualState.DORMANT) {
+        CrayfishVisualState.SICK
+    } else {
+        crayfish
+    }
+
+    val crayfishRouting = effectiveCrayfish == CrayfishVisualState.ROUTING
     val tetra = when (agentState) {
         AgentState.DISCONNECTED -> TetraVisualState.ABSENT
         AgentState.IDLE -> if (crayfishRouting) TetraVisualState.STREAMING else TetraVisualState.CIRCLING
@@ -174,7 +182,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
 
     return TerrariumState(
         octopus = octopus,
-        crayfish = crayfish,
+        crayfish = effectiveCrayfish,
         tetra = tetra,
         environment = environment,
         currentTool = currentTool,
@@ -182,6 +190,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
         projectName = projectName,
         modelName = modelName,
         agentType = agentType,
+        hasError = gatewayHasError == true,
         agents = agents,
         workerCrayfishCount = workerSessionCount ?: 0,
     )

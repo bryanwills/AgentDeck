@@ -18,6 +18,7 @@ export interface TimelineEntry {
   ts: number;
   type: SharedType | 'now_marker';
   raw: string;
+  detail?: string;
   approvalId?: string;
   status?: 'pending' | 'approved' | 'denied';
 }

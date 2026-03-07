@@ -6,6 +6,7 @@ import {
   AgentCapabilities,
   BRIDGE_WS_PORT,
   RECONNECT_INTERVAL_MS,
+  WS_ACTIVITY_TIMEOUT_MS,
 } from '@agentdeck/shared';
 import type { AgentLink } from './agent-link.js';
 import { dlog, dwarn, derr } from './log.js';
@@ -13,6 +14,8 @@ import { dlog, dwarn, derr } from './log.js';
 export class BridgeClient extends EventEmitter implements AgentLink {
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setInterval> | null = null;
+  private _watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private _lastActivityAt = 0;
   private _connected = false;
   private _port = BRIDGE_WS_PORT;
   private _connectGeneration = 0;
@@ -107,11 +110,18 @@ export class BridgeClient extends EventEmitter implements AgentLink {
         if (gen !== this._connectGeneration) return;
         dlog('Bridge', 'WebSocket open');
         this._connected = true;
+        this._lastActivityAt = Date.now();
+        this.startWatchdog(gen);
         this.emit('connected');
+      });
+
+      this.ws.on('ping', () => {
+        this._lastActivityAt = Date.now();
       });
 
       this.ws.on('message', (data: WebSocket.Data) => {
         if (gen !== this._connectGeneration) return;
+        this._lastActivityAt = Date.now();
         try {
           const event = JSON.parse(data.toString()) as BridgeEvent;
           dlog('Bridge', `recv(${event.type})`);
@@ -144,10 +154,30 @@ export class BridgeClient extends EventEmitter implements AgentLink {
     }
   }
 
+  private startWatchdog(gen: number): void {
+    this.stopWatchdog();
+    this._watchdogTimer = setInterval(() => {
+      if (gen !== this._connectGeneration || !this._connected) return;
+      const elapsed = Date.now() - this._lastActivityAt;
+      if (elapsed > WS_ACTIVITY_TIMEOUT_MS) {
+        dwarn('Bridge', `No activity for ${elapsed}ms — terminating connection`);
+        this.ws?.terminate();
+      }
+    }, 10_000);
+  }
+
+  private stopWatchdog(): void {
+    if (this._watchdogTimer) {
+      clearInterval(this._watchdogTimer);
+      this._watchdogTimer = null;
+    }
+  }
+
   private cleanup(): void {
     if (this.reconnectTimer) {
       clearInterval(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.stopWatchdog();
   }
 }

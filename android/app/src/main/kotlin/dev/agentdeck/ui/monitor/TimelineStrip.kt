@@ -85,47 +85,60 @@ private fun TimelineRow(entry: TimelineEntry) {
     val prefix = typePrefix(entry.type)
     val prefixColor = typeColor(entry.type)
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(
-            text = timeStr,
-            color = TerrariumColors.HUDSubtext.copy(alpha = 0.6f),
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
-        )
-        Text(
-            text = "$agentTag[$prefix]",
-            color = prefixColor,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-        )
-        Text(
-            text = entry.summary,
-            color = TerrariumColors.HUDText,
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = timeStr,
+                color = TerrariumColors.HUDSubtext.copy(alpha = 0.6f),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+            Text(
+                text = if (agentTag.isNotEmpty()) "$agentTag $prefix" else prefix,
+                color = prefixColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+            )
+            Text(
+                text = entry.summary,
+                color = TerrariumColors.HUDText,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (!entry.detail.isNullOrEmpty() && entry.detail != entry.summary) {
+            Text(
+                text = entry.detail,
+                color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 60.dp),
+            )
+        }
     }
 }
 
 private fun typePrefix(type: String): String = when (type) {
-    "tool_request" -> "T"
-    "tool_resolved" -> "T"
-    "model_call" -> "M"
-    "model_response" -> "M"
-    "chat_response" -> "A"
-    "memory_recall" -> "R"
-    "tool_exec" -> "X"
-    "chat_start" -> "C"
-    "chat_end" -> "C"
-    "error" -> "E"
-    "state_change" -> "S"
+    "tool_request" -> "Tool"
+    "tool_resolved" -> "Tool"
+    "model_call" -> "Model"
+    "model_response" -> "Model"
+    "chat_response" -> "Response"
+    "memory_recall" -> "Memory"
+    "tool_exec" -> "Exec"
+    "chat_start" -> "Chat"
+    "chat_end" -> "Chat"
+    "error" -> "Error"
+    "state_change" -> "State"
     else -> "?"
 }
 
@@ -141,8 +154,8 @@ private fun typeColor(type: String) = when (type) {
 }
 
 private fun agentTag(agentType: String?): String = when (agentType) {
-    "claude-code" -> "[CC]"
-    "openclaw" -> "[OC]"
+    "claude-code" -> "Claude"
+    "openclaw" -> "OpenClaw"
     null -> ""
-    else -> "[AG]"
+    else -> "Agent"
 }

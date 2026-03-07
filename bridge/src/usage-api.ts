@@ -17,6 +17,12 @@ export interface ApiUsageData {
   inferredBillingType: 'subscription' | 'api' | null;
 }
 
+let lastFetchFailed = false;
+
+export function didLastFetchFail(): boolean {
+  return lastFetchFailed;
+}
+
 function getOAuthToken(): string | null {
   try {
     const raw = execSync(
@@ -55,6 +61,7 @@ export async function fetchUsageFromApi(): Promise<ApiUsageData | null> {
 
     if (!res.ok) {
       debug('UsageAPI', `API returned ${res.status}: ${res.statusText}`);
+      lastFetchFailed = true;
       return null;
     }
 
@@ -62,6 +69,7 @@ export async function fetchUsageFromApi(): Promise<ApiUsageData | null> {
 
     if (data.error) {
       debug('UsageAPI', `API error: ${data.error.type}`);
+      lastFetchFailed = true;
       return null;
     }
 
@@ -80,9 +88,11 @@ export async function fetchUsageFromApi(): Promise<ApiUsageData | null> {
     };
 
     debug('UsageAPI', `5h: ${result.fiveHourPercent}%, 7d: ${result.sevenDayPercent}%, extra: ${result.extraUsageEnabled ? 'enabled' : 'disabled'}`);
+    lastFetchFailed = false;
     return result;
   } catch (err) {
     debug('UsageAPI', `Fetch failed: ${err}`);
+    lastFetchFailed = true;
     return null;
   }
 }

@@ -152,14 +152,15 @@ private fun EinkTimelineItem(entry: TimelineEntry) {
 }
 
 private fun typePrefix(type: String): String = when {
-    type.contains("tool") -> "[T]"
-    type.contains("model") || type.contains("chat") -> "[M]"
-    type.contains("error") -> "[!]"
-    type.contains("approval") || type.contains("permission") -> "[?]"
-    type.contains("memory") -> "[R]"
-    type.contains("scheduled") -> "[S]"
-    type.contains("user") -> "[U]"
-    else -> "[\u00B7]"  // [·]
+    type.contains("tool") -> "Tool"
+    type.contains("model") -> "Model"
+    type.contains("chat") -> "Chat"
+    type.contains("error") -> "Error"
+    type.contains("approval") || type.contains("permission") -> "Perm"
+    type.contains("memory") -> "Memory"
+    type.contains("scheduled") -> "Sched"
+    type.contains("user") -> "User"
+    else -> "\u00B7"
 }
 
 private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)

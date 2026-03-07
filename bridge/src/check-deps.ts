@@ -34,13 +34,19 @@ const DEPS: DepCheck[] = [
   },
 ];
 
-export function checkDependencies(): { ok: boolean; warnings: string[] } {
+export function checkDependencies(): { ok: boolean; warnings: string[]; claudeCodeVersion?: string } {
   const warnings: string[] = [];
   let ok = true;
+  let claudeCodeVersion: string | undefined;
 
   for (const dep of DEPS) {
     try {
-      execSync(dep.command, { stdio: 'ignore' });
+      if (dep.name === 'claude') {
+        const output = execSync(dep.command, { encoding: 'utf-8', timeout: 5000 }).trim();
+        claudeCodeVersion = output.match(/^([\d.]+)/)?.[1] ?? undefined;
+      } else {
+        execSync(dep.command, { stdio: 'ignore' });
+      }
     } catch {
       if (dep.required) {
         process.stderr.write(`[sdc] ERROR: ${dep.name} not found. Install: ${dep.installHint}\n`);
@@ -51,5 +57,5 @@ export function checkDependencies(): { ok: boolean; warnings: string[] } {
     }
   }
 
-  return { ok, warnings };
+  return { ok, warnings, claudeCodeVersion };
 }

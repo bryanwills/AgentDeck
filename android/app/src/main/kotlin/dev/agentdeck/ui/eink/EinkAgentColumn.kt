@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -18,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.state.DashboardState
+import dev.agentdeck.ui.component.AgentDeckLogo
 
 /**
  * LEFT zone (22%) — Agent panel for e-ink 3-zone layout.
@@ -79,13 +81,9 @@ fun EinkAgentPanel(
             .padding(horizontal = 8.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        // Brand logo — largest text at top
-        Text(
-            text = "AgentDeck",
-            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
+        // Brand logo — centered with accent bar
+        AgentDeckLogo(isEink = true, modifier = Modifier.fillMaxWidth())
+        Spacer(modifier = Modifier.height(6.dp))
 
         entries.forEach { entry ->
             val icon = agentIcon(entry.agentType)

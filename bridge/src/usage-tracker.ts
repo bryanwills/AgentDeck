@@ -6,6 +6,7 @@ export class UsageTracker {
   private inputTokens = 0;
   private outputTokens = 0;
   private toolCalls = 0;
+  private toolCallsByName = new Map<string, number>();
 
   // Plan-level usage from /usage command
   private sessionPercent: number | null = null;
@@ -23,6 +24,10 @@ export class UsageTracker {
 
   addToolCall(data: Record<string, unknown>): void {
     this.toolCalls++;
+    const name = data.tool_name as string | undefined;
+    if (name) {
+      this.toolCallsByName.set(name, (this.toolCallsByName.get(name) ?? 0) + 1);
+    }
     if (typeof data.input_tokens === 'number') {
       this.inputTokens += data.input_tokens;
     }
@@ -47,6 +52,19 @@ export class UsageTracker {
 
   incrementToolCalls(): void {
     this.toolCalls++;
+  }
+
+  /** Top 3 tool names by count, e.g. "Read×3, Edit×2, Bash×1" */
+  getToolSummary(): string {
+    return [...this.toolCallsByName.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([n, c]) => `${n}×${c}`)
+      .join(', ');
+  }
+
+  resetToolCounts(): void {
+    this.toolCallsByName.clear();
   }
 
   /** Update plan-level usage from /usage command output */
@@ -92,6 +110,7 @@ export class UsageTracker {
     this.inputTokens = 0;
     this.outputTokens = 0;
     this.toolCalls = 0;
+    this.toolCallsByName.clear();
     this.sessionPercent = null;
     this.costSpent = null;
     this.costLimit = null;

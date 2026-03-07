@@ -18,8 +18,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -73,12 +71,13 @@ fun EinkSettingsOverlay(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
                     text = "Settings",
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
 
@@ -87,7 +86,8 @@ fun EinkSettingsOverlay(
                 // Connection section
                 Text(
                     text = "Connection",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 ConnectionPanel(
@@ -113,7 +113,8 @@ fun EinkSettingsOverlay(
                 // Display settings
                 Text(
                     text = "Display",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Row(
@@ -123,7 +124,7 @@ fun EinkSettingsOverlay(
                 ) {
                     Text(
                         text = "Keep Awake",
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Switch(
@@ -148,33 +149,42 @@ fun EinkSettingsOverlay(
                 // Orientation selection
                 Text(
                     text = "Orientation",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
 
-                OrientationOption(
-                    label = "Portrait",
-                    selected = currentOrientation == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
-                    onClick = {
-                        scope.launch { displayPrefs.setOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) }
-                    },
-                )
-                OrientationOption(
-                    label = "Landscape",
-                    selected = currentOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
-                    onClick = {
-                        scope.launch { displayPrefs.setOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) }
-                    },
-                )
-                OrientationOption(
-                    label = "Auto",
-                    selected = currentOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,
-                    onClick = {
-                        scope.launch { displayPrefs.setOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) }
-                    },
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    SegmentOption(
+                        label = "Portrait",
+                        selected = currentOrientation == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                        onClick = {
+                            scope.launch { displayPrefs.setOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    SegmentOption(
+                        label = "Landscape",
+                        selected = currentOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+                        onClick = {
+                            scope.launch { displayPrefs.setOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    SegmentOption(
+                        label = "Auto",
+                        selected = currentOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,
+                        onClick = {
+                            scope.launch { displayPrefs.setOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(2.dp))
 
                 // Close button
                 Button(
@@ -194,31 +204,27 @@ fun EinkSettingsOverlay(
 }
 
 @Composable
-private fun OrientationOption(
+private fun SegmentOption(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(4.dp),
+        color = if (selected) Color.Black else MaterialTheme.colorScheme.background,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (selected) Color.Black else Color.DarkGray,
+        ),
     ) {
-        RadioButton(
-            selected = selected,
-            onClick = onClick,
-            colors = RadioButtonDefaults.colors(
-                selectedColor = Color.Black,
-                unselectedColor = Color.DarkGray,
-            ),
-        )
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
         )
     }
 }

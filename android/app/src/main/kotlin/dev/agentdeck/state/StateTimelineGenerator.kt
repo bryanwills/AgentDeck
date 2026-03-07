@@ -100,16 +100,20 @@ class StateTimelineGenerator private constructor() {
         chatStartTime = null
     }
 
-    /** Format tool summary with abbreviated path from toolInput. */
+    /** Format tool summary from toolInput (already extracted & truncated by bridge's formatToolInput). */
     private fun formatToolSummary(toolName: String, toolInput: String?): String {
         if (toolInput == null) return toolName
-        val arg = abbreviatePath(toolInput.trim())
-        return if (arg.isNotEmpty()) "$toolName $arg" else toolName
+        // Only abbreviate if it looks like a pure file path (contains / and no spaces)
+        val display = if (toolInput.contains('/') && !toolInput.contains(' ')) {
+            abbreviatePath(toolInput.trim())
+        } else {
+            toolInput.trim().lines().first().take(100)
+        }
+        return if (display.isNotEmpty()) "$toolName $display" else toolName
     }
 
     /** Abbreviate file paths to last 2 segments: "foo/bar/baz.kt" → "bar/baz.kt" */
     private fun abbreviatePath(input: String): String {
-        // Extract first meaningful argument (file path or short text)
         val arg = input.lineSequence().firstOrNull()?.trim()?.take(80) ?: return ""
         val parts = arg.split("/")
         return if (parts.size > 2) parts.takeLast(2).joinToString("/") else arg

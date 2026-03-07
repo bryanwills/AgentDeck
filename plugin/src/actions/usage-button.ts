@@ -32,6 +32,9 @@ let extraUsageMonthlyLimit: number | undefined;
 let extraUsageUsedCredits: number | undefined;
 let extraUsageUtilization: number | undefined;
 
+// Stale indicator (fetch failed but cache exists)
+let usageStale = false;
+
 // Session usage data
 let inputTokens = 0;
 let outputTokens = 0;
@@ -154,10 +157,12 @@ async function fetchStandaloneUsage(): Promise<void> {
     if (extra?.used_credits != null) extraUsageUsedCredits = extra.used_credits as number;
     if (extra?.utilization != null) extraUsageUtilization = extra.utilization as number;
 
+    usageStale = false;
     dlog('UsaBut', `standalone fetch: 5h=${fiveHourPercent ?? '-'}% 7d=${sevenDayPercent ?? '-'}% billing=${billingType}`);
     refreshAll();
   } catch {
-    // Ignore — no keychain access or network error
+    // Network error — mark stale if we have cached data
+    if (fiveHourPercent != null || sevenDayPercent != null) usageStale = true;
   }
 }
 
@@ -391,8 +396,10 @@ export function updateUsageButton(
     extraUsageUtilization?: number;
   },
   bt?: BillingType,
+  stale?: boolean,
 ): void {
   if (bt) billingType = bt;
+  usageStale = !!stale;
   currentState = state;
   const newTotal = usage.inputTokens + usage.outputTokens;
   tokenDelta = Math.max(0, newTotal - prevTotalTokens);
@@ -649,6 +656,8 @@ function waterFillSvg(
     `<text x="72" y="30" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="${color}" opacity="0.65">${escXml(title)}</text>`,
     `<text x="72" y="80" text-anchor="middle" font-family="Arial,sans-serif" font-size="32" font-weight="bold" fill="${color}" filter="url(#txt-glow)">${escXml(value)}</text>`,
     `<text x="72" y="112" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" fill="${color}" opacity="0.80">${escXml(sub)}</text>`,
+    // Stale indicator — amber "!" top-right when showing cached data after fetch failure
+    ...(usageStale ? [`<text x="132" y="20" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="bold" fill="#fbbf24">!</text>`] : []),
     dots,
     `</svg>`,
   ].join('');

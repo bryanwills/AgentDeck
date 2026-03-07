@@ -96,6 +96,7 @@ data class StateUpdate(
     val workerSessionCount: Int? = null,
     val ollamaStatus: OllamaStatus? = null,
     val gatewayAvailable: Boolean? = null,
+    val gatewayHasError: Boolean? = null,
 )
 
 @Serializable
@@ -115,6 +116,7 @@ data class UsageUpdate(
     val extraUsageUtilization: Double? = null,
     val oauthConnected: Boolean? = null,
     val ollamaStatus: OllamaStatus? = null,
+    val usageStale: Boolean? = null,
 )
 
 @Serializable
@@ -197,6 +199,7 @@ data class BridgeTimelineEntry(
     val ts: Long,
     val type: String,
     val raw: String,
+    val detail: String? = null,
     val approvalId: String? = null,
     val status: String? = null,
     val agentType: String? = null,
@@ -206,7 +209,7 @@ fun BridgeTimelineEntry.toTimelineEntry() = dev.agentdeck.state.TimelineEntry(
     timestamp = ts,
     type = type,
     summary = raw,
-    detail = null,
+    detail = detail,
     agentType = agentType,
 )
 

@@ -85,6 +85,7 @@ class CrayfishCreature(
 
         val alpha = when (visualState) {
             CrayfishVisualState.DORMANT -> 0.4f
+            CrayfishVisualState.SICK -> 0.7f
             else -> 1f
         }
 
@@ -102,6 +103,11 @@ class CrayfishCreature(
             CrayfishVisualState.SITTING -> {
                 effectiveCX = cx
                 effectiveCY = cy + sin(time * 0.5f) * bodyWidth * 0.008f
+            }
+            CrayfishVisualState.SICK -> {
+                // Slow labored breathing — droops slightly lower
+                effectiveCX = cx
+                effectiveCY = cy + bodyWidth * 0.08f + sin(time * 0.7f) * bodyWidth * 0.02f
             }
             else -> {
                 effectiveCX = cx
@@ -163,9 +169,14 @@ class CrayfishCreature(
 
         val brush = bodyBrush()
 
+        val sickTilt = if (visualState == CrayfishVisualState.SICK) -12f else 0f
+
         scope.withTransform({
             translate(left = offsetX, top = offsetY)
             scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
+            if (sickTilt != 0f) {
+                rotate(sickTilt, pivot = Offset(SVG_VIEWBOX / 2f, SVG_VIEWBOX / 2f))
+            }
         }) {
             // 1. Body with gradient
             drawPath(bodyPath, brush = brush, alpha = alpha)
@@ -193,11 +204,13 @@ class CrayfishCreature(
             val wiggleX = when (visualState) {
                 CrayfishVisualState.ROUTING -> sin(time * 7f) * 4f
                 CrayfishVisualState.SITTING -> sin(time * 0.8f) * 0.7f
+                CrayfishVisualState.SICK -> sin(time * 0.3f) * 0.4f
                 else -> 0f
             }
             val wiggleY = when (visualState) {
                 CrayfishVisualState.ROUTING -> sin(time * 5f) * 3f
                 CrayfishVisualState.SITTING -> sin(time * 0.5f) * 0.4f
+                CrayfishVisualState.SICK -> 2f + sin(time * 0.4f) * 0.5f  // antennae droop down
                 else -> 0f
             }
 
@@ -220,21 +233,34 @@ class CrayfishCreature(
     }
 
     private fun bodyBrush(): Brush {
-        return if (visualState == CrayfishVisualState.ROUTING) {
-            val pulse = (sin(time * 4f) * 0.5f + 0.5f) * 0.3f
-            val startColor = lerpColor(TerrariumColors.CrayfishShell, TerrariumColors.CrayfishBodyLight, pulse)
-            val endColor = lerpColor(TerrariumColors.CrayfishDark, TerrariumColors.CrayfishShell, pulse)
-            Brush.linearGradient(
-                colors = listOf(startColor, endColor),
-                start = Offset(0f, 0f),
-                end = Offset(SVG_VIEWBOX, SVG_VIEWBOX),
-            )
-        } else {
-            Brush.linearGradient(
-                colors = listOf(TerrariumColors.CrayfishShell, TerrariumColors.CrayfishDark),
-                start = Offset(0f, 0f),
-                end = Offset(SVG_VIEWBOX, SVG_VIEWBOX),
-            )
+        return when (visualState) {
+            CrayfishVisualState.ROUTING -> {
+                val pulse = (sin(time * 4f) * 0.5f + 0.5f) * 0.3f
+                val startColor = lerpColor(TerrariumColors.CrayfishShell, TerrariumColors.CrayfishBodyLight, pulse)
+                val endColor = lerpColor(TerrariumColors.CrayfishDark, TerrariumColors.CrayfishShell, pulse)
+                Brush.linearGradient(
+                    colors = listOf(startColor, endColor),
+                    start = Offset(0f, 0f),
+                    end = Offset(SVG_VIEWBOX, SVG_VIEWBOX),
+                )
+            }
+            CrayfishVisualState.SICK -> {
+                // Desaturated — gray-pinkish tint
+                val sickStart = lerpColor(TerrariumColors.CrayfishShell, Color(0xFF8B7B7B), 0.55f)
+                val sickEnd = lerpColor(TerrariumColors.CrayfishDark, Color(0xFF5A4A4A), 0.55f)
+                Brush.linearGradient(
+                    colors = listOf(sickStart, sickEnd),
+                    start = Offset(0f, 0f),
+                    end = Offset(SVG_VIEWBOX, SVG_VIEWBOX),
+                )
+            }
+            else -> {
+                Brush.linearGradient(
+                    colors = listOf(TerrariumColors.CrayfishShell, TerrariumColors.CrayfishDark),
+                    start = Offset(0f, 0f),
+                    end = Offset(SVG_VIEWBOX, SVG_VIEWBOX),
+                )
+            }
         }
     }
 
@@ -244,6 +270,7 @@ class CrayfishCreature(
                 val pulse = (sin(time * 4f) * 0.5f + 0.5f) * 0.3f
                 lerpColor(TerrariumColors.CrayfishShell, TerrariumColors.CrayfishBodyLight, pulse)
             }
+            CrayfishVisualState.SICK -> lerpColor(TerrariumColors.CrayfishShell, Color(0xFF8B7B7B), 0.55f)
             else -> TerrariumColors.CrayfishShell
         }
     }
@@ -260,6 +287,7 @@ class CrayfishCreature(
             }
             CrayfishVisualState.WAITING -> side * 15f
             CrayfishVisualState.OBSERVING -> side * (3f + sin(time * 2f) * 5f)
+            CrayfishVisualState.SICK -> side * (-8f + sin(time * 0.5f) * 2f)  // claws droop
             else -> 0f
         }
     }
@@ -274,6 +302,11 @@ class CrayfishCreature(
             CrayfishVisualState.SITTING -> {
                 val breath = sin(time * 0.6f) * 0.15f + 0.85f
                 TerrariumColors.CrayfishEye.copy(alpha = breath)
+            }
+            CrayfishVisualState.SICK -> {
+                // Dim, flickering eyes
+                val flicker = sin(time * 1.2f) * 0.1f + 0.45f
+                TerrariumColors.CrayfishEye.copy(alpha = flicker)
             }
             else -> TerrariumColors.CrayfishEye
         }

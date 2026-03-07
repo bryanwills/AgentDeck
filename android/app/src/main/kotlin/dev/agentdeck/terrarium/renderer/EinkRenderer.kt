@@ -690,9 +690,11 @@ private fun drawEinkCrayfish(
         CrayfishVisualState.ROUTING -> h * 0.55f
         CrayfishVisualState.OBSERVING -> h * 0.62f
         CrayfishVisualState.WAITING -> h * 0.60f
+        CrayfishVisualState.SICK -> h * 0.76f  // droops lower than sitting
     }
     val bobOffset = when (state) {
         CrayfishVisualState.ROUTING -> h * 0.015f * kotlin.math.sin(animFrame * kotlin.math.PI / 6).toFloat()
+        CrayfishVisualState.SICK -> h * 0.005f * kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat()  // very slow bob
         else -> 0f
     }
     val cy = baseY + bobOffset
@@ -726,6 +728,7 @@ private fun drawEinkCrayfish(
             0 -> 1f; 1 -> 3f; 2 -> 0f; 3 -> -2f; else -> 0f
         }
         CrayfishVisualState.WAITING -> 18f  // claws open wide
+        CrayfishVisualState.SICK -> -10f + (animFrame % 4) * 1f  // claws droop, tiny movement
         else -> 0f
     }
 
@@ -737,20 +740,26 @@ private fun drawEinkCrayfish(
         CrayfishVisualState.SITTING -> when (animFrame % 4) {
             0 -> 0f; 1 -> 1f; 2 -> 0f; 3 -> -1f; else -> 0f
         }
+        CrayfishVisualState.SICK -> when (animFrame % 4) {
+            0 -> 0f; 1 -> 0.5f; 2 -> 0f; 3 -> -0.5f; else -> 0f
+        }
         else -> 0f
     }
 
     canvas.save()
     canvas.translate(offsetX, offsetY)
     canvas.scale(scale, scale)
+    if (state == CrayfishVisualState.SICK) {
+        canvas.rotate(-10f, EINK_SVG_VIEWBOX / 2f, EINK_SVG_VIEWBOX / 2f)
+    }
 
-    // 1. Body — filled with body gray
+    // 1. Body — filled with body gray (lighter when sick)
     paint.style = Paint.Style.FILL
-    paint.color = GRAY_CRAY_BODY
+    paint.color = if (state == CrayfishVisualState.SICK) GRAY_CRAY_SICK else GRAY_CRAY_BODY
     canvas.drawPath(einkCrayfishBodyPath, paint)
 
     // 2. Left claw with rotation — darker claw gray
-    paint.color = GRAY_CRAY_CLAW
+    paint.color = if (state == CrayfishVisualState.SICK) GRAY_CRAY_BODY else GRAY_CRAY_CLAW
     canvas.save()
     canvas.rotate(-clawAngle, 20f, 45f)
     canvas.drawPath(einkCrayfishLeftClawPath, paint)
@@ -1188,6 +1197,7 @@ private const val GRAY_OCTO_BODY  = 0xFF444444.toInt()  // level 4 — octopus b
 private const val GRAY_OCTO_LIMB  = 0xFF333333.toInt()  // level 3 — octopus arms/tentacles (darker than body)
 private const val GRAY_CRAY_BODY  = 0xFF333333.toInt()  // level 3 — crayfish body (dark, stands out from rocks)
 private const val GRAY_CRAY_CLAW  = 0xFF222222.toInt()  // level 2 — crayfish claws (darkest)
+private const val GRAY_CRAY_SICK  = 0xFF666666.toInt()  // level 6 — washed out when sick
 private const val GRAY_STARBURST  = 0xFF999999.toInt()  // level 9 — WORKING starburst glow
 private const val GRAY_DECORATION = 0xFF444444.toInt()  // level 4 — keyboard, review docs
 private const val GRAY_SEAWEED    = 0xFF666666.toInt()  // level 6 — seaweed stems

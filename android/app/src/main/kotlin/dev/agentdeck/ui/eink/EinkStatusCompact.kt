@@ -1,7 +1,6 @@
 package dev.agentdeck.ui.eink
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -12,17 +11,18 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,8 +31,9 @@ import dev.agentdeck.util.formatBytes
 import dev.agentdeck.util.formatResetTime
 
 /**
- * Redesigned e-ink status display with 2 sections: Rate Limits + Models.
- * Adapts between wide (2-column) and narrow (2-column) layouts via BoxWithConstraints.
+ * E-ink status display — "Instrument Panel" with arc gauges.
+ * Side-by-side dials (thick strokes for e-ink), labels below.
+ * Both sections left-aligned.
  */
 @Composable
 fun EinkStatusCompact(
@@ -40,183 +41,164 @@ fun EinkStatusCompact(
     modifier: Modifier = Modifier,
 ) {
     val usage = state.usage
+    val staleSuffix = if (usage.usageStale == true) " !" else ""
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        if (maxWidth > 700.dp) {
-            // Wide layout: 3-column horizontal
-            WideStatusLayout(state = state, usage = usage)
-        } else {
-            // Narrow layout: vertical stack
-            NarrowStatusLayout(state = state, usage = usage)
-        }
-    }
-}
+        val isWide = maxWidth > 700.dp
+        // Adaptive dial size: ~55% of available height, clamped to reasonable range
+        val dialSize = (maxHeight * 0.55f).coerceIn(32.dp, 54.dp)
 
-// ── Wide layout (IDLE: full width, 2 columns) ──────────────────────────────
-
-@Composable
-private fun WideStatusLayout(
-    state: DashboardState,
-    usage: dev.agentdeck.net.UsageUpdate,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        // Left (50%): Rate Limits
-        Column(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 1.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SectionHeader("RATE LIMITS")
-            if (state.billingType == "api") {
-                DataText("API Key")
-            } else {
-                RateLimitRow(label = "5h", percent = usage.fiveHourPercent, resetAt = usage.fiveHourResetsAt)
-                RateLimitRow(label = "7d", percent = usage.sevenDayPercent, resetAt = usage.sevenDayResetsAt)
-                ExtraUsageRow(usage)
+            // Left: Rate Limits — side-by-side dials
+            Column(
+                modifier = Modifier.weight(0.30f).fillMaxHeight(),
+            ) {
+                SectionHeader("LIMITS")
+                Spacer(Modifier.height(1.dp))
+                if (state.billingType == "api") {
+                    DataText("API Key")
+                } else {
+                    // Dials side by side
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        if (usage.fiveHourPercent != null) {
+                            ArcGaugeWithLabel(
+                                percent = usage.fiveHourPercent,
+                                label = "5h$staleSuffix",
+                                resetTime = usage.fiveHourResetsAt,
+                                size = dialSize,
+                            )
+                        }
+                        if (usage.sevenDayPercent != null) {
+                            ArcGaugeWithLabel(
+                                percent = usage.sevenDayPercent,
+                                label = "7d$staleSuffix",
+                                resetTime = usage.sevenDayResetsAt,
+                                size = dialSize,
+                            )
+                        }
+                    }
+                    // Extra usage
+                    val extraPct = usage.extraUsageUtilization
+                    if (extraPct != null && usage.extraUsageEnabled == true) {
+                        Text(
+                            text = "Ex ${(extraPct * 100).toInt()}%",
+                            fontSize = 9.sp,
+                            lineHeight = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.DarkGray,
+                        )
+                    }
+                }
+            }
+
+            // Right: Models
+            Column(
+                modifier = Modifier.weight(0.70f).fillMaxHeight(),
+            ) {
+                SectionHeader("MODELS")
+                Spacer(Modifier.height(1.dp))
+                ModelsSection(state)
             }
         }
-
-        // Right (50%): Models
-        Column(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            SectionHeader("MODELS")
-            ModelsSection(state)
-        }
     }
 }
 
-// ── Narrow layout (ACTIVE: vertical stack) ──────────────────────────────────
+// -- Arc gauge with label + reset below ---------------------------------------
 
 @Composable
-private fun NarrowStatusLayout(
-    state: DashboardState,
-    usage: dev.agentdeck.net.UsageUpdate,
+private fun ArcGaugeWithLabel(
+    percent: Double,
+    label: String,
+    resetTime: String?,
+    size: Dp,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    val fillFraction = (percent / 100.0).coerceIn(0.0, 1.0).toFloat()
+    // Percentage font scales with dial size
+    val pctFontSize = if (size >= 44.dp) 12.sp else if (size >= 36.dp) 11.sp else 10.sp
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Left (50%): Rate Limits
-        Column(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+        Box(
+            modifier = Modifier.size(size),
+            contentAlignment = Alignment.Center,
         ) {
-            if (state.billingType == "api") {
-                SectionHeader("API Key")
-            } else {
-                SectionHeader("RATE LIMITS")
-                RateLimitRow(label = "5h", percent = usage.fiveHourPercent, resetAt = usage.fiveHourResetsAt)
-                RateLimitRow(label = "7d", percent = usage.sevenDayPercent, resetAt = usage.sevenDayResetsAt)
-                ExtraUsageRow(usage)
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                // Stroke scales with dial: ~7% track, ~15% fill
+                val strokeTrack = (this.size.width * 0.07f).coerceIn(2.dp.toPx(), 4.dp.toPx())
+                val strokeFill = (this.size.width * 0.15f).coerceIn(4.dp.toPx(), 8.dp.toPx())
+                val pad = strokeFill / 2f
+                val arcSize = androidx.compose.ui.geometry.Size(
+                    this.size.width - pad * 2,
+                    this.size.height - pad * 2,
+                )
+                val topLeft = androidx.compose.ui.geometry.Offset(pad, pad)
+                drawArc(
+                    color = Color.LightGray,
+                    startAngle = 135f,
+                    sweepAngle = 270f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokeTrack),
+                )
+                drawArc(
+                    color = Color.Black,
+                    startAngle = 135f,
+                    sweepAngle = 270f * fillFraction,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokeFill),
+                )
             }
+            Text(
+                text = "${percent.toInt()}%",
+                fontSize = pctFontSize,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = Color.Black,
+            )
         }
-
-        // Right (50%): Models
-        Column(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            SectionHeader("MODELS")
-            ModelsSection(state)
-        }
-    }
-}
-
-// ── Shared components ───────────────────────────────────────────────────────
-
-@Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelSmall.copy(
+        // Label + reset on one compact line
+        val suffix = resetTime?.let { " ${formatResetTime(it)}" } ?: ""
+        Text(
+            text = "$label$suffix",
+            fontSize = 8.sp,
+            lineHeight = 10.sp,
             fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp,
-        ),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
-
-@Composable
-private fun DataText(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-}
-
-@Composable
-private fun SmallDataText(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall.copy(
-            fontFamily = FontFamily.Monospace,
-            fontSize = 9.sp,
-            lineHeight = 12.sp,
-        ),
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-}
-
-@Composable
-private fun RateLimitRow(label: String, percent: Double?, resetAt: String?) {
-    if (percent == null) return
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        DataText(label)
-        EinkGaugeBar(
-            percent = percent,
-            modifier = Modifier.weight(1f),
+            color = Color.DarkGray,
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
         )
-        DataText("${percent.toInt()}%")
-        resetAt?.let { DataText(formatResetTime(it)) }
     }
 }
 
-@Composable
-private fun ExtraUsageRow(usage: dev.agentdeck.net.UsageUpdate) {
-    val extraPct = usage.extraUsageUtilization ?: return
-    if (usage.extraUsageEnabled != true) return
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        DataText("Ex")
-        EinkGaugeBar(
-            percent = extraPct * 100.0,
-            modifier = Modifier.weight(1f),
-        )
-        DataText("${(extraPct * 100).toInt()}%")
-    }
-}
+// -- Models -------------------------------------------------------------------
 
 @Composable
 private fun ModelsSection(state: DashboardState) {
-    // OAuth / model catalog
+    val lines = mutableListOf<String>()
+
     val catalog = state.modelCatalog
     if (state.oauthConnected == true) {
         if (catalog != null && catalog.isNotEmpty()) {
             val names = catalog.filter { it.available }.map { it.name }
-            SmallDataText("OAuth: ${names.joinToString(", ")}")
+            lines.add("OAuth: ${names.joinToString(", ")}")
         } else {
-            SmallDataText("OAuth: connected")
+            lines.add("OAuth: connected")
         }
     } else if (state.oauthConnected == false) {
-        SmallDataText("OAuth: disconnected")
+        lines.add("OAuth: disconnected")
     }
 
-    // Ollama — show disk size, VRAM when loaded
     val ollama = state.ollamaStatus
     if (ollama != null && ollama.available && ollama.models.isNotEmpty()) {
         val models = ollama.models.map { m ->
@@ -227,33 +209,43 @@ private fun ModelsSection(state: DashboardState) {
             }
             "${m.name}$sizeStr"
         }
-        SmallDataText("Ollama: ${models.joinToString(", ")}")
+        lines.add("Ollama: ${models.joinToString(", ")}")
+    }
+
+    if (lines.isNotEmpty()) {
+        Text(
+            text = lines.joinToString("\n"),
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            fontFamily = FontFamily.Monospace,
+            color = Color.Black,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
-/**
- * Compose Box-based gauge bar for e-ink: black fill + white empty + black border.
- * Maximum contrast without dithering artifacts.
- */
+// -- Shared -------------------------------------------------------------------
+
 @Composable
-private fun EinkGaugeBar(
-    percent: Double,
-    modifier: Modifier = Modifier,
-    height: Dp = 10.dp,
-) {
-    val fillFraction = (percent / 100.0).coerceIn(0.0, 1.0).toFloat()
-    Box(
-        modifier = modifier
-            .height(height)
-            .border(1.dp, Color.Black, RoundedCornerShape(2.dp))
-            .clip(RoundedCornerShape(2.dp))
-            .background(Color.White),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(fillFraction)
-                .background(Color.Black),
-        )
-    }
+private fun SectionHeader(text: String) {
+    Text(
+        text = text,
+        fontSize = 10.sp,
+        lineHeight = 12.sp,
+        fontWeight = FontWeight.Bold,
+        fontFamily = FontFamily.Monospace,
+        letterSpacing = 1.sp,
+        color = Color.DarkGray,
+    )
+}
+
+@Composable
+private fun DataText(text: String) {
+    Text(
+        text = text,
+        fontSize = 11.sp,
+        lineHeight = 14.sp,
+        fontFamily = FontFamily.Monospace,
+        color = Color.Black,
+    )
 }

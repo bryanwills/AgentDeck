@@ -12,6 +12,7 @@ export interface TimelineEntry {
   ts: number;
   type: TimelineEntryType;
   raw: string;
+  detail?: string;
   approvalId?: string;
   status?: 'pending' | 'approved' | 'denied';
   agentType?: string;
@@ -33,7 +34,7 @@ export function parseLogLine(json: unknown): TimelineEntry | null {
 
   // Model inference start
   if (model && (action === 'start' || action === 'request' || msg?.includes('inference start') || msg?.includes('model request'))) {
-    return { ts, type: 'model_call', raw: model };
+    return { ts, type: 'model_call', raw: `${model} inference started` };
   }
 
   // Model inference complete
@@ -43,7 +44,8 @@ export function parseLogLine(json: unknown): TimelineEntry | null {
     if (content && content.length > 10) {
       return {
         ts, type: 'chat_response',
-        raw: content.length > 200 ? content.slice(0, 197) + '...' : content,
+        raw: content.length > 500 ? content.slice(0, 497) + '...' : content,
+        detail: content.length > 1000 ? content.slice(0, 997) + '...' : content,
       };
     }
     const parts = [model];
@@ -57,14 +59,23 @@ export function parseLogLine(json: unknown): TimelineEntry | null {
   if (component === 'memory' || action === 'recall' || action === 'search' ||
       msg?.includes('memory search') || msg?.includes('memory recall')) {
     const query = (obj.query as string) || msg || 'memory search';
-    return { ts, type: 'memory_recall', raw: query };
+    return {
+      ts, type: 'memory_recall',
+      raw: `Memory: ${query}`,
+      detail: query.length > 50 ? query : undefined,
+    };
   }
 
   // Tool execution (non-approval tools, internal operations)
   if (tool || (component === 'tool' && action)) {
     const toolName = tool || action || 'tool';
-    const detail = (obj.detail as string) || (obj.command as string) || '';
-    return { ts, type: 'tool_exec', raw: detail ? `${toolName}: ${detail}` : toolName };
+    const toolDetail = (obj.detail as string) || (obj.command as string) || '';
+    const toolRaw = toolDetail ? `${toolName}: ${toolDetail}` : toolName;
+    return {
+      ts, type: 'tool_exec',
+      raw: toolRaw.length > 500 ? toolRaw.slice(0, 497) + '...' : toolRaw,
+      detail: toolDetail.length > 100 ? (toolDetail.length > 1000 ? toolDetail.slice(0, 997) + '...' : toolDetail) : undefined,
+    };
   }
 
   // Unrecognized — silently skip

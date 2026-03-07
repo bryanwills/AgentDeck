@@ -7,12 +7,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -36,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.BridgeConnection
@@ -48,14 +52,12 @@ import dev.agentdeck.state.TimelineStore
 import dev.agentdeck.ui.eink.EinkAgentPanel
 import dev.agentdeck.ui.eink.EinkContextArea
 import dev.agentdeck.ui.eink.EinkEventLog
-import dev.agentdeck.ui.eink.EinkFooterBar
 import dev.agentdeck.ui.eink.EinkAquariumFrame
 import dev.agentdeck.ui.eink.EinkSettingsOverlay
 import dev.agentdeck.ui.eink.EinkStatusCompact
-import dev.agentdeck.ui.eink.EinkTimelinePanel
-import dev.agentdeck.ui.eink.EinkUsageCompact
+import dev.agentdeck.ui.eink.agentIcon
 import dev.agentdeck.ui.eink.compactStateMarker
-import dev.agentdeck.terrarium.renderer.EinkTerrariumView
+import dev.agentdeck.ui.eink.mapSessionState
 import dev.agentdeck.terrarium.toTerrariumState
 import dev.agentdeck.ui.eink.EinkAnimatedRefreshZone
 import dev.agentdeck.ui.eink.EinkRefreshZone
@@ -65,8 +67,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 
 private const val TAG = "EinkMonitor"
-
-private const val SAVED_URL_TIMEOUT_MS = 8_000L
 
 @Composable
 fun EinkMonitorScreen(
@@ -90,54 +90,56 @@ fun EinkMonitorScreen(
     var discoveredBridges by remember { mutableStateOf<List<DiscoveredBridge>>(emptyList()) }
 
     // Discovery + URL save — keyed on both status AND url
-    // (disconnect() may clear url without changing status when already DISCONNECTED)
+    // Run mDNS discovery whenever not connected (including while reconnecting)
     LaunchedEffect(connectionStatus, currentUrl) {
         when {
-            connectionStatus == ConnectionStatus.DISCONNECTED && currentUrl == null -> {
-                // No active connection — run mDNS discovery
-                discovery.discover().collect { bridges ->
-                    discoveredBridges = bridges
-                }
-            }
             connectionStatus == ConnectionStatus.CONNECTED -> {
                 discoveredBridges = emptyList()
                 // Persist URL on successful connection
                 currentUrl?.let { displayPrefs.setLastBridgeUrl(it) }
             }
             else -> {
-                // CONNECTING or DISCONNECTED with url set (reconnecting)
-                discoveredBridges = emptyList()
+                // DISCONNECTED or CONNECTING — run mDNS to show alternatives
+                discovery.discover().collect { bridges ->
+                    discoveredBridges = bridges
+                }
             }
         }
     }
 
-    // Auto-connect: try saved URL on first launch with timeout fallback
+    // Auto-connect: saved URL first, then mDNS fallback
     LaunchedEffect(Unit) {
         val savedUrl = displayPrefs.lastBridgeUrlFlow.first()
         Log.i(TAG, "Auto-connect: savedUrl=$savedUrl")
         if (savedUrl != null) {
             connection.autoConnect(savedUrl)
-            // Give saved URL time to connect; if it fails, give up and let mDNS take over
-            delay(SAVED_URL_TIMEOUT_MS)
-            if (connection.status.value != ConnectionStatus.CONNECTED) {
-                Log.w(TAG, "Auto-connect timeout — disconnecting saved URL")
-                connection.disconnect() // clears url, stops reconnect loop
-                displayPrefs.setLastBridgeUrl(null)
-            } else {
-                Log.i(TAG, "Auto-connect succeeded to $savedUrl")
+            // Wait for connection or timeout
+            delay(5000)
+        }
+        // If still disconnected, try mDNS discovery
+        if (connection.status.value != ConnectionStatus.CONNECTED) {
+            Log.i(TAG, "Saved URL failed, trying mDNS discovery...")
+            discovery.discover().collect { bridges ->
+                if (bridges.isNotEmpty() && connection.status.value != ConnectionStatus.CONNECTED) {
+                    val bridge = bridges.first()
+                    Log.i(TAG, "mDNS auto-connect: ${bridge.name} at ${bridge.wsUrl()}")
+                    connection.connect(bridge.wsUrl())
+                }
             }
         }
     }
 
-    // NOTE: mDNS-discovered bridges are shown in the UI only (not auto-connected)
-    // because LAN connections require an auth token. User can tap a bridge
+    // mDNS-discovered bridges are also shown in the UI for manual selection
     // in the not-connected screen or use Settings for manual URL entry.
 
     val lastError by connection.lastError.collectAsState()
+    val isReconnecting by connection.isReconnecting.collectAsState()
+    val reconnectAttempt by connection.reconnectAttempt.collectAsState()
 
-    // Show not-connected screen when disconnected AND not actively reconnecting
+    // Show not-connected screen only when truly disconnected (not reconnecting)
     val showNotConnected = connectionStatus != ConnectionStatus.CONNECTED &&
-        state.agentState == AgentState.DISCONNECTED
+        state.agentState == AgentState.DISCONNECTED &&
+        !isReconnecting
 
     Box(
         modifier = Modifier
@@ -154,6 +156,16 @@ fun EinkMonitorScreen(
                 },
                 onConnectLocalhost = {
                     connection.connect("ws://127.0.0.1:9120")
+                },
+                onSettingsClick = { showSettings = true },
+            )
+        } else if (isReconnecting && state.agentState == AgentState.DISCONNECTED) {
+            EinkReconnectingScreen(
+                url = currentUrl,
+                attempt = reconnectAttempt,
+                discoveredBridges = discoveredBridges,
+                onConnectToBridge = { bridge ->
+                    connection.connect(bridge.wsUrl())
                 },
                 onSettingsClick = { showSettings = true },
             )
@@ -191,7 +203,7 @@ fun EinkMonitorScreen(
                     // Aquarium frame — animated EPD refresh via callback
                     EinkAnimatedRefreshZone(
                         stateKey = Pair(state.agentState, sessionsKey),
-                        modifier = Modifier.weight(0.48f).fillMaxWidth(),
+                        modifier = Modifier.weight(0.50f).fillMaxWidth(),
                     ) { onFrameRendered ->
                         EinkAquariumFrame(
                             state = terrariumState,
@@ -208,7 +220,7 @@ fun EinkMonitorScreen(
                             debounceMs = 200,
                             triggerKey = Triple(state.agentState, state.currentTool,
                                 listOf(state.usage, state.oauthConnected, state.ollamaStatus)),
-                            modifier = Modifier.weight(0.16f).fillMaxWidth(),
+                            modifier = Modifier.weight(0.12f).fillMaxWidth(),
                         ) {
                             Row(modifier = Modifier.fillMaxSize()) {
                                 // Context area (50%)
@@ -232,7 +244,7 @@ fun EinkMonitorScreen(
                             mode = RefreshMode.DU,
                             debounceMs = 2000,
                             triggerKey = listOf(state.usage, state.oauthConnected, state.ollamaStatus, state.modelCatalog?.size),
-                            modifier = Modifier.weight(0.16f).fillMaxWidth(),
+                            modifier = Modifier.weight(0.12f).fillMaxWidth(),
                         ) {
                             EinkStatusCompact(state = state)
                         }
@@ -245,7 +257,7 @@ fun EinkMonitorScreen(
                         mode = RefreshMode.A2,
                         debounceMs = 300,
                         triggerKey = timelineEntries.size,
-                        modifier = Modifier.weight(0.36f).fillMaxWidth(),
+                        modifier = Modifier.weight(0.38f).fillMaxWidth(),
                     ) {
                         EinkEventLog(entries = timelineEntries)
                     }
@@ -256,6 +268,7 @@ fun EinkMonitorScreen(
                 state = state,
                 timelineEntries = timelineEntries,
                 metrics = metrics,
+                connection = connection,
                 onSettingsClick = { showSettings = true },
             )
         }
@@ -396,123 +409,314 @@ private fun EinkNotConnectedScreen(
 }
 
 @Composable
-private fun EinkPortraitLayout(
-    state: dev.agentdeck.state.DashboardState,
-    timelineEntries: List<dev.agentdeck.state.TimelineEntry>,
-    metrics: dev.agentdeck.state.MetricsSnapshot,
+private fun EinkReconnectingScreen(
+    url: String?,
+    attempt: Int,
+    discoveredBridges: List<DiscoveredBridge>,
+    onConnectToBridge: (DiscoveredBridge) -> Unit,
     onSettingsClick: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Compact header: ~15% of screen
-        EinkCompactHeader(
-            agentState = state.agentState,
-            projectName = state.projectName,
-            modelName = state.modelName,
-            currentTool = state.currentTool,
-            toolProgress = state.toolProgress,
-            usage = state.usage,
-            onSettingsClick = onSettingsClick,
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "\u25CC  Reconnecting...",
+            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface,
         )
 
-        HorizontalDivider(thickness = 2.dp, color = Color.Black)
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // Terrarium band (~15%) — animated EPD refresh via callback
-        val terrariumState by remember { derivedStateOf { state.toTerrariumState() } }
-        EinkAnimatedRefreshZone(
-            stateKey = terrariumState.octopus to terrariumState.crayfish,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(0.15f),
-        ) { onFrameRendered ->
-            EinkTerrariumView(
-                state = terrariumState,
-                modifier = Modifier.fillMaxSize(),
-                onFrameRendered = onFrameRendered,
+        if (url != null) {
+            Text(
+                text = url,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        HorizontalDivider(thickness = 1.dp, color = Color.Black)
 
-        // Timeline: ~65% of screen
-        EinkTimelinePanel(
-            entries = timelineEntries,
-            modifier = Modifier.weight(0.65f),
+        Text(
+            text = "Attempt #$attempt",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        // Compact footer
-        HorizontalDivider(thickness = 1.dp, color = Color.Black)
-        EinkFooterBar(
-            metrics = metrics,
-            usage = state.usage,
-            isEink = true,
+        // Show discovered bridges as alternatives
+        if (discoveredBridges.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Or connect to:",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            discoveredBridges.forEach { bridge ->
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth(0.6f)
+                        .clickable { onConnectToBridge(bridge) },
+                    shape = RoundedCornerShape(4.dp),
+                    border = BorderStroke(1.dp, Color.Gray),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "\u25CF ${bridge.name}",
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "${bridge.host}:${bridge.port}",
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "\u2699 Settings",
+            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.clickable(onClick = onSettingsClick),
         )
     }
 }
 
 @Composable
-private fun EinkCompactHeader(
-    agentState: AgentState,
-    projectName: String?,
-    modelName: String?,
-    currentTool: String?,
-    toolProgress: String?,
-    usage: dev.agentdeck.net.UsageUpdate,
+private fun EinkPortraitLayout(
+    state: dev.agentdeck.state.DashboardState,
+    timelineEntries: List<dev.agentdeck.state.TimelineEntry>,
+    metrics: dev.agentdeck.state.MetricsSnapshot,
+    connection: BridgeConnection,
     onSettingsClick: () -> Unit,
 ) {
+    val terrariumState by remember { derivedStateOf { state.toTerrariumState() } }
+    val isActive = state.agentState == AgentState.PROCESSING ||
+        state.agentState == AgentState.AWAITING_PERMISSION ||
+        state.agentState == AgentState.AWAITING_OPTION ||
+        state.agentState == AgentState.AWAITING_DIFF
+    val sessionsKey = state.siblingSessions.joinToString(",") { "${it.id}:${it.state}" }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Header: logo + primary agent + state + settings gear
+        EinkPortraitHeader(state = state, onSettingsClick = onSettingsClick)
+
+        HorizontalDivider(thickness = 2.dp, color = Color.Black)
+
+        // Aquarium (35%) — landscape is 50% of 78% column ≈ 39% of total
+        EinkAnimatedRefreshZone(
+            stateKey = Pair(state.agentState, sessionsKey),
+            modifier = Modifier.weight(0.35f).fillMaxWidth(),
+        ) { onFrameRendered ->
+            EinkAquariumFrame(
+                state = terrariumState,
+                onFrameRendered = onFrameRendered,
+            )
+        }
+
+        HorizontalDivider(thickness = 1.dp, color = Color.Black)
+
+        // Status (10%) — compact: arc gauges + models fit in ~80dp
+        if (isActive) {
+            EinkRefreshZone(
+                mode = RefreshMode.A2,
+                debounceMs = 200,
+                triggerKey = Triple(state.agentState, state.currentTool,
+                    listOf(state.usage, state.oauthConnected, state.ollamaStatus)),
+                modifier = Modifier.weight(0.10f).fillMaxWidth(),
+            ) {
+                EinkStatusCompact(state = state)
+            }
+        } else {
+            EinkRefreshZone(
+                mode = RefreshMode.DU,
+                debounceMs = 2000,
+                triggerKey = listOf(state.usage, state.oauthConnected, state.ollamaStatus, state.modelCatalog?.size),
+                modifier = Modifier.weight(0.10f).fillMaxWidth(),
+            ) {
+                EinkStatusCompact(state = state)
+            }
+        }
+
+        HorizontalDivider(thickness = 1.dp, color = Color.Black)
+
+        // Context area (15%) — only when active
+        if (isActive) {
+            EinkRefreshZone(
+                mode = RefreshMode.A2,
+                debounceMs = 200,
+                triggerKey = Pair(state.agentState, state.currentTool),
+                modifier = Modifier.weight(0.15f).fillMaxWidth(),
+            ) {
+                EinkContextArea(
+                    state = state,
+                    timelineEntries = timelineEntries,
+                    onSelectOption = { index -> connection.sendSelectOption(index) },
+                )
+            }
+
+            HorizontalDivider(thickness = 1.dp, color = Color.Black)
+        }
+
+        // Timeline (remaining: 0.40 idle / 0.25 active)
+        EinkRefreshZone(
+            mode = RefreshMode.A2,
+            debounceMs = 300,
+            triggerKey = timelineEntries.size,
+            modifier = Modifier.weight(if (isActive) 0.25f else 0.40f).fillMaxWidth(),
+        ) {
+            EinkEventLog(entries = timelineEntries)
+        }
+
+    }
+}
+
+/**
+ * Portrait header — mirrors landscape EinkAgentPanel info in compact horizontal form.
+ * Row 1: "AgentDeck" brand + ⚙ settings
+ * Row 2+: All agents (primary + siblings) as FlowRow chips — handles any count.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EinkPortraitHeader(
+    state: dev.agentdeck.state.DashboardState,
+    onSettingsClick: () -> Unit,
+) {
+    // Build agent list — same logic as EinkAgentPanel
+    data class AgentEntry(
+        val projectName: String,
+        val agentType: String?,
+        val modelName: String?,
+        val effortLevel: String?,
+        val agentState: AgentState,
+    )
+
+    val entries = mutableListOf<AgentEntry>()
+    if (state.agentType != "daemon") {
+        entries += AgentEntry(
+            projectName = state.projectName ?: "Agent",
+            agentType = state.agentType,
+            modelName = state.modelName,
+            effortLevel = state.effortLevel,
+            agentState = state.agentState,
+        )
+    }
+    state.siblingSessions.forEach { session ->
+        if (session.id == state.sessionId) return@forEach
+        if (session.agentType == "daemon") return@forEach
+        entries += AgentEntry(
+            projectName = session.projectName ?: "Agent",
+            agentType = session.agentType,
+            modelName = null,
+            effortLevel = null,
+            agentState = mapSessionState(session),
+        )
+    }
+
+    // Dedup numbering per (name, type) — same as EinkAgentPanel
+    data class NameKey(val projectName: String, val agentType: String?)
+    val nameCounts = entries.groupBy { NameKey(it.projectName, it.agentType) }
+        .mapValues { it.value.size }
+    val nameCounters = mutableMapOf<NameKey, Int>()
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
-        // Row 1: state marker + project + model + gear
+        // Brand + gear
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = compactStateMarker(agentState),
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                text = "AgentDeck",
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                ),
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            if (projectName != null) {
+            Spacer(modifier = Modifier.weight(1f))
+            state.workerSessionCount?.takeIf { it > 0 }?.let {
                 Text(
-                    text = projectName,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                Spacer(modifier = Modifier.weight(1f))
-            }
-            if (modelName != null) {
-                Text(
-                    text = modelName,
+                    text = "W:$it",
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Spacer(modifier = Modifier.padding(horizontal = 4.dp))
             }
             Text(
-                text = "\u2699",
-                style = MaterialTheme.typography.titleMedium,
+                text = "\u2699 Settings",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clickable(onClick = onSettingsClick),
             )
         }
 
-        // Tool info if processing
-        if (currentTool != null && agentState == AgentState.PROCESSING) {
-            Text(
-                text = "> $currentTool" + (toolProgress?.let { " ($it)" } ?: ""),
-                style = MaterialTheme.typography.bodySmall.copy(
+        // Agent list — adaptive font: ≤4 normal, 5-8 smaller, 9+ compact
+        // Max 2 lines (≈80dp) to protect aquarium space
+        val fontSize = when {
+            entries.size <= 4 -> 13.sp
+            entries.size <= 8 -> 11.sp
+            else -> 9.sp
+        }
+        val gap = if (entries.size <= 4) 10.dp else 6.dp
+
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 80.dp),
+            horizontalArrangement = Arrangement.spacedBy(gap),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            entries.forEach { entry ->
+                val icon = agentIcon(entry.agentType)
+                val key = NameKey(entry.projectName, entry.agentType)
+                val needsSuffix = (nameCounts[key] ?: 1) > 1
+                val suffix = if (needsSuffix) {
+                    val idx = (nameCounters[key] ?: 0) + 1
+                    nameCounters[key] = idx
+                    "#$idx"
+                } else ""
+
+                val stateMarker = compactStateMarker(entry.agentState)
+                // Truncate project name for many agents
+                val name = if (entries.size > 8) {
+                    entry.projectName.take(6)
+                } else {
+                    entry.projectName
+                }
+                val modelPart = when {
+                    entry.modelName != null && entry.effortLevel != null && entry.effortLevel != "medium" ->
+                        "${entry.modelName}\u00B7${entry.effortLevel}"
+                    entry.modelName != null -> entry.modelName
+                    else -> null
+                }
+                val label = buildString {
+                    append("$icon $name$suffix ")
+                    if (modelPart != null) append("$modelPart ")
+                    append(stateMarker)
+                }
+
+                Text(
+                    text = label,
+                    fontSize = fontSize,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+            }
         }
-
-        // Row 2: compact usage
-        EinkUsageCompact(usage = usage)
     }
 }
