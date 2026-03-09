@@ -36,9 +36,40 @@ class KelpField {
         KelpStrand(0.55f, 0.18f, 3.0f, 2),
     )
 
+    // Ground cover: short grass blades in 3 clusters
+    private data class GrassBlade(
+        val baseX: Float,
+        val height: Float, // 0.03~0.06 canvas height
+        val phase: Float,
+        val width: Float,  // stroke width multiplier
+    )
+
+    private val grassBlades = listOf(
+        // Left cluster (near left rocks, 0.04~0.13)
+        GrassBlade(0.04f, 0.035f, 0.3f, 0.8f),
+        GrassBlade(0.06f, 0.050f, 1.1f, 1.0f),
+        GrassBlade(0.08f, 0.040f, 2.0f, 0.7f),
+        GrassBlade(0.10f, 0.055f, 0.7f, 0.9f),
+        GrassBlade(0.13f, 0.030f, 1.5f, 0.8f),
+        // Center cluster (0.42~0.48)
+        GrassBlade(0.42f, 0.045f, 2.3f, 0.9f),
+        GrassBlade(0.44f, 0.060f, 0.5f, 1.0f),
+        GrassBlade(0.46f, 0.040f, 1.8f, 0.8f),
+        GrassBlade(0.48f, 0.050f, 3.1f, 0.7f),
+        GrassBlade(0.43f, 0.035f, 2.8f, 0.9f),
+        // Right cluster (near right rocks, 0.83~0.91)
+        GrassBlade(0.83f, 0.040f, 0.9f, 0.8f),
+        GrassBlade(0.86f, 0.055f, 2.2f, 1.0f),
+        GrassBlade(0.88f, 0.035f, 1.4f, 0.7f),
+        GrassBlade(0.90f, 0.050f, 3.5f, 0.9f),
+        GrassBlade(0.91f, 0.030f, 0.2f, 0.8f),
+    )
+
     private var time by mutableFloatStateOf(0f)
     // Pre-allocated Path objects — one per strand, reused every frame
     private val strandPaths = Array(strands.size) { Path() }
+    // Pre-allocated grass paths
+    private val grassPaths = Array(grassBlades.size) { Path() }
 
     fun update(dt: Float) {
         time += dt * TerrariumTiming.KELP_SWAY_SPEED
@@ -48,9 +79,33 @@ class KelpField {
         val w = scope.size.width
         val h = scope.size.height
 
+        // Draw grass blades first (below kelp)
+        for (i in grassBlades.indices) {
+            drawGrassBlade(scope, grassBlades[i], w, h, grassPaths[i])
+        }
+
         for (i in strands.indices) {
             drawStrand(scope, strands[i], w, h, strandPaths[i])
         }
+    }
+
+    private fun drawGrassBlade(scope: DrawScope, blade: GrassBlade, w: Float, h: Float, path: Path) {
+        val baseX = blade.baseX * w
+        val baseY = h * (1f - TerrariumLayout.SAND_HEIGHT_FRACTION)
+        val tipY = baseY - blade.height * h
+
+        // Faster sway than kelp
+        val sway = sin(time * 1.5f + blade.phase) * w * 0.008f
+
+        path.reset()
+        path.moveTo(baseX, baseY)
+        path.quadraticBezierTo(baseX + sway, (baseY + tipY) * 0.5f, baseX + sway * 0.7f, tipY)
+
+        scope.drawPath(
+            path = path,
+            color = TerrariumColors.KelpDark.copy(alpha = 0.6f),
+            style = Stroke(width = w * 0.002f * blade.width, cap = StrokeCap.Round),
+        )
     }
 
     private fun drawStrand(scope: DrawScope, strand: KelpStrand, w: Float, h: Float, path: Path) {

@@ -165,7 +165,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun DisplaySettingsCard(
+internal fun DisplaySettingsCard(
     keepAwake: Boolean,
     displaySyncEnabled: Boolean,
     idleTimeoutMinutes: Int,
@@ -254,7 +254,7 @@ private fun DisplaySettingsCard(
 }
 
 @Composable
-private fun AboutFooter() {
+internal fun AboutFooter() {
     Text(
         text = "AgentDeck Android \u00B7 v0.1.0 \u00B7 Monitoring dashboard for AI coding agents",
         style = MaterialTheme.typography.bodySmall,

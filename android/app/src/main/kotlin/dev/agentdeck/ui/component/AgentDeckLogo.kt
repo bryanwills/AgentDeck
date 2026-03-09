@@ -67,11 +67,14 @@ private fun EinkLogo(modifier: Modifier) {
 private fun TabletLogo(modifier: Modifier) {
     val accentColor = Color(0xFF00E5FF) // Neon cyan
 
-    Column(modifier = modifier) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(
             text = "AgentDeck",
             color = TerrariumColors.HUDText,
-            fontSize = 14.sp,
+            fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
         )
@@ -79,7 +82,7 @@ private fun TabletLogo(modifier: Modifier) {
         // Glow layer (3dp, 30% opacity) + crisp bar (2dp)
         Box(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxWidth(0.8f)
                 .height(5.dp)
                 .drawBehind {
                     // Glow layer

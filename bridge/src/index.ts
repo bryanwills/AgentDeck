@@ -1286,10 +1286,10 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
 
     // --- Slot 2: Usage ---
     const pct = cachedApiUsage?.fiveHourPercent ?? null;
-    const usageText = pct != null ? `${Math.round(pct * 100)}%` : '—';
+    const usageText = pct != null ? `${Math.round(pct)}%` : '—';
     const usageBg = pct == null ? '#1e293b'
-      : pct >= 0.9 ? '#991b1b'
-      : pct >= 0.7 ? '#92400e'
+      : pct >= 90 ? '#991b1b'
+      : pct >= 70 ? '#92400e'
       : '#166534';
     buttons.push({
       slot: 2,

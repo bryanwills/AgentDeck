@@ -1,18 +1,33 @@
 package dev.agentdeck.ui.monitor
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,8 +42,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Bottom HUD strip — "TIMELINE"
- * Shows recent events with auto-scroll, type icons, grouping, status indicators.
+ * Bottom HUD strip — two-pane "Logbook" layout.
+ * Left (65%): compact log scroll. Right (35%): detail panel for focused entry.
+ * Activity density bar at the bottom.
  */
 @Composable
 fun TimelineStrip(
@@ -36,101 +52,319 @@ fun TimelineStrip(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val recentEntries = entries.takeLast(30)
+    val recentEntries = entries.takeLast(50)
     val grouped = remember(recentEntries) { groupConsecutive(recentEntries) }
 
-    // Auto-scroll to bottom on new entries
+    // Focus tracking: -1 = auto-follow latest
+    var focusedIndex by remember { mutableIntStateOf(-1) }
+
+    // Resolve which entry to show in detail pane
+    val focusedGroup: GroupedEntry? = when {
+        grouped.isEmpty() -> null
+        focusedIndex < 0 || focusedIndex >= grouped.size -> grouped.lastOrNull()
+        else -> grouped[focusedIndex]
+    }
+
+    // Auto-scroll to bottom on new entries when in auto-follow mode
     LaunchedEffect(grouped.size) {
-        if (grouped.isNotEmpty()) {
+        if (grouped.isNotEmpty() && focusedIndex < 0) {
             listState.animateScrollToItem(grouped.lastIndex)
         }
     }
 
     Column(
         modifier = modifier
-            .fillMaxWidth()
-            .padding(8.dp),
+            .fillMaxWidth(),
     ) {
+        // Main content: two-pane row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) {
+            // Left pane: compact log scroll (65%)
+            Column(
+                modifier = Modifier
+                    .weight(0.65f)
+                    .fillMaxHeight()
+                    .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+            ) {
+                Text(
+                    text = "TIMELINE",
+                    color = TerrariumColors.HUDSubtext,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(bottom = 2.dp),
+                )
+
+                if (grouped.isEmpty()) {
+                    Text(
+                        text = "No events yet",
+                        color = TerrariumColors.HUDSubtext,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(1.dp),
+                        modifier = Modifier.weight(1f, fill = false),
+                    ) {
+                        itemsIndexed(grouped) { index, group ->
+                            val isSelected = index == focusedIndex ||
+                                (focusedIndex < 0 && index == grouped.lastIndex)
+                            CompactLogRow(
+                                group = group,
+                                isSelected = isSelected,
+                                onClick = { focusedIndex = index },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Vertical divider
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(1.dp)
+                    .padding(vertical = 8.dp)
+                    .background(TerrariumColors.HUDSubtext.copy(alpha = 0.3f)),
+            )
+
+            // Right pane: detail panel (35%)
+            DetailPane(
+                focusedGroup = focusedGroup,
+                modifier = Modifier
+                    .weight(0.35f)
+                    .fillMaxHeight()
+                    .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            )
+        }
+
+        // Activity density bar
+        ActivityDensityBar(
+            entries = recentEntries,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.dp),
+        )
+    }
+}
+
+/**
+ * Compact single-line log row: `HH:mm icon summary [×N]`
+ */
+@Composable
+private fun CompactLogRow(
+    group: GroupedEntry,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    val entry = group.entry
+    val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    val timeStr = timeFormat.format(Date(entry.timestamp))
+    val icon = typeIcon(entry.type, entry.status)
+    val iconColor = typeColor(entry.type)
+    val countSuffix = if (group.count > 1) " ×${group.count}" else ""
+    val isChatEnd = entry.type == "chat_end"
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(2.dp))
+            .background(
+                if (isSelected) Color(0x20FFFFFF) else Color.Transparent,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 1.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Selected indicator bar
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .width(2.dp)
+                    .height(14.dp)
+                    .background(iconColor),
+            )
+        }
+
         Text(
-            text = "TIMELINE",
-            color = TerrariumColors.HUDSubtext,
+            text = timeStr,
+            color = TerrariumColors.HUDSubtext.copy(alpha = if (isChatEnd) 0.4f else 0.5f),
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+        Text(
+            text = icon,
+            color = iconColor.copy(alpha = if (isChatEnd) 0.6f else 1f),
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(bottom = 4.dp),
         )
+        Text(
+            text = entry.summary + countSuffix,
+            color = if (isChatEnd) TerrariumColors.HUDText.copy(alpha = 0.6f) else TerrariumColors.HUDText,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
 
-        if (grouped.isEmpty()) {
-            Text(
-                text = "No events yet",
-                color = TerrariumColors.HUDSubtext,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-            )
-        } else {
-            LazyColumn(
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.weight(1f, fill = false),
+/**
+ * Detail pane — shows full info for the focused entry.
+ */
+@Composable
+private fun DetailPane(
+    focusedGroup: GroupedEntry?,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0x30000000)),
+    ) {
+        if (focusedGroup == null) {
+            Box(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                contentAlignment = Alignment.Center,
             ) {
-                items(grouped) { group ->
-                    TimelineRow(group)
+                Text(
+                    text = "No events",
+                    color = TerrariumColors.HUDSubtext.copy(alpha = 0.5f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        } else {
+            val entry = focusedGroup.entry
+            val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+            val timeStr = timeFormat.format(Date(entry.timestamp))
+            val icon = typeIcon(entry.type, entry.status)
+            val iconColor = typeColor(entry.type)
+            val agentTag = agentTag(entry.agentType)
+            val countSuffix = if (focusedGroup.count > 1) " (×${focusedGroup.count})" else ""
+
+            // Header: type badge + timestamp
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Type badge chip
+                Text(
+                    text = " $icon ${formatType(entry.type)} ",
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(iconColor.copy(alpha = 0.7f))
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    text = timeStr,
+                    color = TerrariumColors.HUDSubtext,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+
+            // Agent tag if present
+            if (agentTag.isNotEmpty()) {
+                Text(
+                    text = agentTag + countSuffix,
+                    color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Summary
+            Text(
+                text = entry.summary,
+                color = TerrariumColors.HUDText,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+
+            // Detail text (word-wrapped, scrollable area)
+            if (!entry.detail.isNullOrEmpty() && entry.detail != entry.summary) {
+                Spacer(modifier = Modifier.height(4.dp))
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .padding(horizontal = 8.dp),
+                ) {
+                    item {
+                        Text(
+                            text = entry.detail,
+                            color = TerrariumColors.HUDSubtext.copy(alpha = 0.8f),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            softWrap = true,
+                        )
+                    }
                 }
             }
+
+            Spacer(modifier = Modifier.weight(1f))
         }
     }
 }
 
+/**
+ * Activity density bar — 10 segments showing event density over the last 60 seconds.
+ */
 @Composable
-private fun TimelineRow(group: GroupedEntry) {
-    val entry = group.entry
-    val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-    val timeStr = timeFormat.format(Date(entry.timestamp))
-    val agentTag = agentTag(entry.agentType)
-    val icon = typeIcon(entry.type, entry.status)
-    val iconColor = typeColor(entry.type)
-    val isChatStart = entry.type == "chat_start"
-    val isChatEnd = entry.type == "chat_end"
-    val countSuffix = if (group.count > 1) " (×${group.count})" else ""
+private fun ActivityDensityBar(
+    entries: List<TimelineEntry>,
+    modifier: Modifier = Modifier,
+) {
+    val now = System.currentTimeMillis()
+    val windowMs = 60_000L
+    val segments = 10
+    val segmentMs = windowMs / segments
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = timeStr,
-                color = TerrariumColors.HUDSubtext.copy(alpha = if (isChatEnd) 0.5f else 0.6f),
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-            )
-            Text(
-                text = if (agentTag.isNotEmpty()) "$agentTag $icon" else icon,
-                color = iconColor.copy(alpha = if (isChatEnd) 0.7f else 1f),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-            )
-            Text(
-                text = entry.summary + countSuffix,
-                color = if (isChatEnd) TerrariumColors.HUDText.copy(alpha = 0.7f) else TerrariumColors.HUDText,
-                fontSize = if (isChatStart) 11.sp else 10.sp,
-                fontWeight = if (isChatStart) FontWeight.Bold else FontWeight.Normal,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+    // Count events per segment
+    val counts = IntArray(segments)
+    for (entry in entries) {
+        val age = now - entry.timestamp
+        if (age in 0 until windowMs) {
+            val segIndex = ((windowMs - age - 1) / segmentMs).toInt().coerceIn(0, segments - 1)
+            counts[segIndex]++
         }
-        if (!entry.detail.isNullOrEmpty() && entry.detail != entry.summary) {
-            Text(
-                text = entry.detail,
-                color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 68.dp),
+    }
+    val maxCount = counts.max().coerceAtLeast(1)
+
+    Canvas(modifier = modifier) {
+        val segW = size.width / segments
+        for (i in 0 until segments) {
+            val alpha = if (counts[i] > 0) {
+                0.1f + 0.9f * (counts[i].toFloat() / maxCount)
+            } else {
+                0.05f
+            }
+            drawRect(
+                color = TerrariumColors.TetraNeon.copy(alpha = alpha),
+                topLeft = androidx.compose.ui.geometry.Offset(i * segW, 0f),
+                size = androidx.compose.ui.geometry.Size(segW - 1f, size.height),
             )
         }
     }
@@ -173,4 +407,21 @@ private fun agentTag(agentType: String?): String = when (agentType) {
     "openclaw" -> "OpenClaw"
     null -> ""
     else -> "Agent"
+}
+
+private fun formatType(type: String): String = when (type) {
+    "tool_request" -> "TOOL"
+    "tool_resolved" -> "DONE"
+    "tool_exec" -> "EXEC"
+    "model_call" -> "MODEL"
+    "model_response" -> "RESP"
+    "chat_start" -> "CHAT"
+    "chat_end" -> "END"
+    "chat_response" -> "REPLY"
+    "memory_recall" -> "MEM"
+    "error" -> "ERR"
+    "scheduled" -> "SCHED"
+    "user_action" -> "USER"
+    "state_change" -> "STATE"
+    else -> type.uppercase().take(5)
 }

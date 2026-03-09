@@ -91,7 +91,7 @@ private fun LimitsColumn(state: DashboardState) {
         }
         val extraPct = usage.extraUsageUtilization
         if (extraPct != null && usage.extraUsageEnabled == true) {
-            GaugeText("Ex", extraPct * 100, "", stale)
+            GaugeText("Ex", extraPct, "", stale)
         }
     } else if (state.billingType == "api") {
         DataLine("API Key")

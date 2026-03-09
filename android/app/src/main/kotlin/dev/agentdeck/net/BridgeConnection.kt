@@ -9,12 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -107,53 +103,6 @@ class BridgeConnection private constructor() {
     fun sendEscape() = send(PluginCommands.escape())
     fun sendQueryUsage() = send(PluginCommands.queryUsage())
     fun sendSwitchMode() = send(PluginCommands.switchMode())
-    fun sendUtility(action: String, value: Int? = null) = send(PluginCommands.utility(action, value))
-    fun sendNavigateOption(direction: String) = send(PluginCommands.navigateOption(direction))
-
-    /**
-     * Upload WAV audio data to bridge for transcription.
-     * Returns transcription text on success, null on failure.
-     */
-    suspend fun uploadVoiceForTranscription(wavData: ByteArray): String? {
-        val wsUrl = _url.value ?: return null
-        val httpUrl = wsUrl
-            .replace("ws://", "http://")
-            .replace("wss://", "https://")
-            .replace(Regex("/\\?.*"), "") // remove query params
-            .replace(Regex("/$"), "") // remove trailing slash
-        val url = "$httpUrl/voice/transcribe"
-
-        return try {
-            val body = wavData.toRequestBody("application/octet-stream".toMediaType())
-            val request = Request.Builder()
-                .url(url)
-                .post(body)
-                .build()
-
-            // Use a separate client with reasonable timeouts for HTTP
-            val httpClient = OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                val responseBody = response.body?.string()
-                // Bridge returns JSON: { "text": "transcription" }
-                if (responseBody != null) {
-                    val json = protocolJson.parseToJsonElement(responseBody).jsonObject
-                    json["text"]?.jsonPrimitive?.content
-                } else null
-            } else {
-                Log.e(TAG, "Voice upload failed: ${response.code} ${response.message}")
-                null
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Voice upload error: ${e.message}", e)
-            null
-        }
-    }
-
     /** Connect to a saved URL if not already connected. */
     fun autoConnect(savedUrl: String?) {
         if (savedUrl != null && _status.value == ConnectionStatus.DISCONNECTED) {

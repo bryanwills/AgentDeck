@@ -4,9 +4,6 @@ import dev.agentdeck.net.AgentCapabilities
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.net.BridgeEvent
-import dev.agentdeck.net.ButtonSlotState
-import dev.agentdeck.net.DeckSlotConfig
-import dev.agentdeck.net.EncoderSlotState
 import dev.agentdeck.net.ModelCatalogEntry
 import dev.agentdeck.net.OcSessionStatus
 import dev.agentdeck.net.OllamaStatus
@@ -54,11 +51,6 @@ data class DashboardState(
     val hostDisplayOn: Boolean = true,
     val siblingSessions: List<SessionInfo> = emptyList(),
     val workerSessionCount: Int? = null,
-    val encoderStates: List<EncoderSlotState> = emptyList(),
-    val encoderTakeoverActive: Boolean = false,
-    val buttonStates: List<ButtonSlotState> = emptyList(),
-    val buttonSlotMap: List<DeckSlotConfig>? = null,
-    val encoderSlotMap: List<DeckSlotConfig>? = null,
     val oauthConnected: Boolean? = null,
     val ollamaStatus: OllamaStatus? = null,
     val gatewayAvailable: Boolean? = null,
@@ -155,23 +147,11 @@ class AgentStateHolder private constructor() {
                 _state.update { it.copy(siblingSessions = event.sessions) }
             }
 
-            is BridgeEvent.EncoderState -> {
-                _state.update { it.copy(
-                    encoderStates = event.encoders,
-                    encoderTakeoverActive = event.takeoverActive,
-                ) }
-            }
+            is BridgeEvent.EncoderState -> { /* Deck tab removed — ignore */ }
 
-            is BridgeEvent.ButtonState -> {
-                _state.update { it.copy(buttonStates = event.buttons) }
-            }
+            is BridgeEvent.ButtonState -> { /* Deck tab removed — ignore */ }
 
-            is BridgeEvent.SlotMap -> {
-                _state.update { it.copy(
-                    buttonSlotMap = event.buttons,
-                    encoderSlotMap = event.encoders,
-                ) }
-            }
+            is BridgeEvent.SlotMap -> { /* Deck tab removed — ignore */ }
 
             is BridgeEvent.Timeline -> {
                 TimelineStore.instance.addEntry(event.entry.toTimelineEntry())

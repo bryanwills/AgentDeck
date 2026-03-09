@@ -15,8 +15,12 @@ import dev.agentdeck.terrarium.creature.CrayfishCreature
 import dev.agentdeck.terrarium.creature.OctopusCreature
 import dev.agentdeck.terrarium.creature.DataParticleSystem
 import dev.agentdeck.terrarium.environment.KelpField
+import dev.agentdeck.terrarium.environment.LightRaySystem
+import dev.agentdeck.terrarium.environment.PlanktonSystem
 import dev.agentdeck.terrarium.environment.RockFormation
+import dev.agentdeck.terrarium.environment.SandDisturbance
 import dev.agentdeck.terrarium.environment.WaterEffect
+import dev.agentdeck.terrarium.environment.WaterSurface
 
 /**
  * Main color terrarium renderer — composites all layers onto a Compose Canvas.
@@ -34,6 +38,10 @@ fun ColorTerrariumCanvas(
     dataParticles: DataParticleSystem,
     octopuses: List<OctopusCreature>,
     bubbleSystem: BubbleSystem,
+    lightRaySystem: LightRaySystem,
+    planktonSystem: PlanktonSystem,
+    waterSurface: WaterSurface,
+    sandDisturbance: SandDisturbance,
     modifier: Modifier = Modifier,
 ) {
     Canvas(modifier = modifier) {
@@ -46,10 +54,19 @@ fun ColorTerrariumCanvas(
         // Layer 2: Caustics overlay
         waterEffect.draw(this)
 
+        // Layer 2.5: God rays (light shafts from surface)
+        lightRaySystem.draw(this)
+
+        // Layer 2.7: Back-layer plankton (behind everything)
+        planktonSystem.drawBackLayer(this)
+
         // Layer 4: Rocks + sand (bottom)
         rockFormation.draw(this)
 
-        // Layer 5: Kelp
+        // Layer 4.5: Sand disturbance particles
+        sandDisturbance.draw(this)
+
+        // Layer 5: Kelp + ground cover grass
         kelpField.draw(this)
 
         // Layer 6: LED cables on rocks
@@ -70,8 +87,14 @@ fun ColorTerrariumCanvas(
         // Layer 9.5: Front-layer fish (in front of creatures for 3D depth)
         dataParticles.drawFrontLayer(this)
 
-        // Layer 10: Bubbles (on top of creatures)
+        // Layer 9.7: Front-layer plankton (in front of creatures)
+        planktonSystem.drawFrontLayer(this)
+
+        // Layer 10: Bubbles (on top of creatures, includes creature exhales)
         bubbleSystem.draw(this)
+
+        // Layer 10.5: Water surface line
+        waterSurface.draw(this)
 
         // Layer 11: Error tint overlay
         if (state.hasError) {
@@ -102,4 +125,3 @@ private fun DrawScope.drawDeepSeaBackground(w: Float, h: Float, env: Environment
         size = Size(w, h),
     )
 }
-
