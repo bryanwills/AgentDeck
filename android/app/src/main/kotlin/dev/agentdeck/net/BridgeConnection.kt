@@ -31,6 +31,8 @@ class BridgeConnection private constructor() {
         val instance: BridgeConnection by lazy { BridgeConnection() }
         private const val INITIAL_BACKOFF_MS = 1000L
         private const val MAX_BACKOFF_MS = 8_000L
+        /** Stop reconnecting to localhost after this many failures (allow mDNS fallback). */
+        private const val MAX_LOCALHOST_ATTEMPTS = 5
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -179,6 +181,19 @@ class BridgeConnection private constructor() {
 
         _isReconnecting.value = true
         _reconnectAttempt.value++
+
+        // Give up reconnecting to localhost after MAX_LOCALHOST_ATTEMPTS —
+        // adb reverse tunnel is likely broken, let user choose WiFi/mDNS instead
+        val isLocalhost = currentUrl.contains("127.0.0.1") || currentUrl.contains("localhost")
+        if (isLocalhost && _reconnectAttempt.value > MAX_LOCALHOST_ATTEMPTS) {
+            Log.w(TAG, "Giving up localhost reconnect after ${_reconnectAttempt.value} attempts — adb reverse likely broken")
+            shouldReconnect = false
+            _isReconnecting.value = false
+            _url.value = null  // Clear URL so mDNS discovery activates
+            _lastError.value = "USB tunnel lost — reconnect USB or use WiFi"
+            return
+        }
+
         Log.d(TAG, "scheduleReconnect — attempt=${_reconnectAttempt.value} backoff=${backoffMs}ms url=$currentUrl")
         scope.launch {
             delay(backoffMs)

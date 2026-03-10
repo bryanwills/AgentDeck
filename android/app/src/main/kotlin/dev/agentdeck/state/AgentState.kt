@@ -115,6 +115,10 @@ class AgentStateHolder private constructor() {
                 SessionMetrics.instance.onMessageReceived()
             }
 
+            is BridgeEvent.UserPrompt -> {
+                StateTimelineGenerator.instance.setLastUserPrompt(event.text)
+            }
+
             is BridgeEvent.Usage -> {
                 _state.update { it.copy(
                     usage = event.data,
@@ -154,7 +158,11 @@ class AgentStateHolder private constructor() {
             is BridgeEvent.SlotMap -> { /* Deck tab removed — ignore */ }
 
             is BridgeEvent.Timeline -> {
-                TimelineStore.instance.addEntry(event.entry.toTimelineEntry())
+                if (event.upsert) {
+                    TimelineStore.instance.upsertEntry(event.entry.toTimelineEntry())
+                } else {
+                    TimelineStore.instance.addEntry(event.entry.toTimelineEntry())
+                }
                 StateTimelineGenerator.instance.setReceivingBridgeTimeline(true)
             }
 

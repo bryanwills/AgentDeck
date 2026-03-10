@@ -212,6 +212,7 @@ export interface SessionsListEvent {
 export interface TimelineEventMsg {
   type: 'timeline_event';
   entry: TimelineEntry;
+  upsert?: boolean;
 }
 
 export interface TimelineHistoryMsg {

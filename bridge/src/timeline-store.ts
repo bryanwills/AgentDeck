@@ -6,7 +6,7 @@
 
 import type { TimelineEntry } from './types.js';
 
-type EntryListener = (entry: TimelineEntry) => void;
+type EntryListener = (entry: TimelineEntry, upsert?: boolean) => void;
 
 const MAX_ENTRIES = 200;
 
@@ -45,7 +45,7 @@ export class BridgeTimelineStore {
       const e = this.entries[i];
       if (e.type === entry.type && Math.abs(e.ts - entry.ts) < tolerance) {
         this.entries[i] = { ...e, raw: entry.raw, ...(entry.detail ? { detail: entry.detail } : {}) };
-        for (const cb of this.listeners) cb(this.entries[i]);
+        for (const cb of this.listeners) cb(this.entries[i], true);
         return;
       }
     }

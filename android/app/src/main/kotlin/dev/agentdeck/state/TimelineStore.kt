@@ -76,6 +76,28 @@ class TimelineStore private constructor() {
         _entries.value = (_entries.value + entry).takeLast(MAX_ENTRIES)
     }
 
+    /** Update the most recent entry matching [type] using [transform]. */
+    fun updateLastOfType(type: String, transform: (TimelineEntry) -> TimelineEntry) {
+        val list = _entries.value.toMutableList()
+        val idx = list.indexOfLast { it.type == type }
+        if (idx >= 0) {
+            list[idx] = transform(list[idx])
+            _entries.value = list
+        }
+    }
+
+    /** Update existing entry with same ts+type (1s tolerance), or add new */
+    fun upsertEntry(entry: TimelineEntry) {
+        val list = _entries.value.toMutableList()
+        val idx = list.indexOfLast { it.type == entry.type && kotlin.math.abs(it.timestamp - entry.timestamp) < 1000L }
+        if (idx >= 0) {
+            list[idx] = list[idx].copy(summary = entry.summary, detail = entry.detail ?: list[idx].detail)
+            _entries.value = list
+        } else {
+            addEntry(entry)
+        }
+    }
+
     fun addEntries(newEntries: List<TimelineEntry>) {
         _entries.value = (_entries.value + newEntries)
             .distinctBy { "${it.timestamp}-${it.type}-${it.summary}" }

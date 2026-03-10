@@ -87,6 +87,12 @@ export function listActive(): SessionEntry[] {
   return alive;
 }
 
+/** Find an existing live daemon session, if any */
+export function findExistingDaemon(): SessionEntry | null {
+  const sessions = listActive(); // prunes dead PIDs
+  return sessions.find((s) => s.agentType === 'daemon') ?? null;
+}
+
 /** Try to bind a TCP server to a port to verify it's actually free */
 function isPortFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {

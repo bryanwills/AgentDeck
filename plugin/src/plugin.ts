@@ -331,9 +331,19 @@ connMgr.on('voice_state', (ev: VoiceStateEvent) => {
   }
 });
 
-connMgr.on('timeline_event', (ev: { type: 'timeline_event'; entry: import('@agentdeck/shared').TimelineEntry }) => {
-  dlog('Plugin', `timeline_event from bridge: ${ev.entry.type} "${ev.entry.raw.slice(0, 60)}"`);
-  timelineStore.addEntry(ev.entry);
+connMgr.on('timeline_event', (ev: { type: 'timeline_event'; entry: import('@agentdeck/shared').TimelineEntry; upsert?: boolean }) => {
+  dlog('Plugin', `timeline_event from bridge: ${ev.entry.type} "${ev.entry.raw.slice(0, 60)}"${ev.upsert ? ' (upsert)' : ''}`);
+  if (ev.upsert) {
+    // Find existing entry with same type and ts within 1s tolerance
+    const idx = timelineStore.findLastIndex(ev.entry.type);
+    if (idx >= 0) {
+      timelineStore.updateEntryRaw(idx, ev.entry.raw);
+    } else {
+      timelineStore.addEntry(ev.entry);
+    }
+  } else {
+    timelineStore.addEntry(ev.entry);
+  }
 });
 
 connMgr.on('timeline_history', (ev: { type: 'timeline_history'; entries: import('@agentdeck/shared').TimelineEntry[] }) => {

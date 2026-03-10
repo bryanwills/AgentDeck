@@ -7,6 +7,7 @@ import { join } from 'path';
 import { execSync } from 'child_process';
 import { BRIDGE_WS_PORT } from './types.js';
 import { startDaemon } from './daemon-server.js';
+import { findExistingDaemon } from './session-registry.js';
 
 function log(msg: string): void {
   process.stderr.write(msg + '\n');
@@ -72,6 +73,12 @@ program
   .option('-p, --port <port>', 'Server port', String(BRIDGE_WS_PORT))
   .option('-d, --debug', 'Enable debug logging to /tmp/agentdeck-debug.log')
   .action(async (opts) => {
+    // Early singleton check before startDaemon (catches LaunchAgent restarts)
+    const existing = findExistingDaemon();
+    if (existing) {
+      log(`[agentdeck] Daemon already running on port ${existing.port} (PID ${existing.pid}). Use 'agentdeck stop' first.`);
+      process.exit(0);
+    }
     const port = parseInt(opts.port, 10);
     await startDaemon({ port, debug: opts.debug });
   });

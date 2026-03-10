@@ -22,10 +22,31 @@ class StateTimelineGenerator private constructor() {
     @Volatile private var lastAgentType: String? = null
     @Volatile private var chatStartTime: Long? = null
     @Volatile private var receivingBridgeTimeline = false
+    @Volatile private var lastUserPrompt: String? = null
+    @Volatile private var lastChatPrompt: String? = null
 
     /** When Bridge provides rich timeline, suppress local generation to avoid duplicates. */
     fun setReceivingBridgeTimeline(receiving: Boolean) {
         receivingBridgeTimeline = receiving
+    }
+
+    /** Set the latest user prompt text from bridge user_prompt event. */
+    fun setLastUserPrompt(text: String) {
+        lastUserPrompt = text
+        lastChatPrompt = text
+        // Retroactively update the most recent chat_start if it was "Prompt sent"
+        // (user_prompt WS event often arrives after the state_update that triggered chat_start)
+        if (!receivingBridgeTimeline) {
+            val snippet = if (text.length > 500) text.take(497) + "..." else text
+            val detail = if (text.length > 100) {
+                if (text.length > 1000) text.take(1000) + "..." else text
+            } else null
+            TimelineStore.instance.updateLastOfType("chat_start") { entry ->
+                if (entry.summary == "Prompt sent") {
+                    entry.copy(summary = snippet, detail = detail)
+                } else entry
+            }
+        }
     }
 
     fun onStateUpdate(update: StateUpdate) {
@@ -45,7 +66,16 @@ class StateTimelineGenerator private constructor() {
             // IDLE -> PROCESSING: chat started
             previousState == AgentState.IDLE && newState == AgentState.PROCESSING -> {
                 chatStartTime = now
-                store.addEntry(TimelineEntry(now, "chat_start", "Prompt sent", agentType = agent))
+                val prompt = lastUserPrompt
+                lastUserPrompt = null
+                lastChatPrompt = prompt
+                val raw = if (!prompt.isNullOrEmpty()) {
+                    if (prompt.length > 500) prompt.take(497) + "..." else prompt
+                } else "Prompt sent"
+                val detail = if (!prompt.isNullOrEmpty() && prompt.length > 100) {
+                    if (prompt.length > 1000) prompt.take(1000) + "..." else prompt
+                } else null
+                store.addEntry(TimelineEntry(now, "chat_start", raw, detail = detail, agentType = agent))
             }
 
             // -> AWAITING_PERMISSION: permission requested
@@ -62,9 +92,21 @@ class StateTimelineGenerator private constructor() {
             // PROCESSING -> IDLE: chat completed
             previousState == AgentState.PROCESSING && newState == AgentState.IDLE -> {
                 val duration = chatStartTime?.let { formatDurationCompact(now - it) }
-                val summary = if (duration != null) "Response received ($duration)" else "Chat completed"
+                val prompt = lastChatPrompt
+                lastChatPrompt = null
+                // Extract topic hint: first line of prompt, max 80 chars
+                val topicHint = prompt?.let {
+                    val firstLine = it.lines().firstOrNull()?.trim() ?: return@let null
+                    if (firstLine.length < 5) return@let null
+                    if (firstLine.length > 80) firstLine.take(77) + "..." else firstLine
+                }
+                val label = topicHint ?: "Completed"
+                val summary = if (duration != null) "$label · $duration" else label
+                val detail = prompt?.let {
+                    "Prompt: ${if (it.length > 200) it.take(200) + "..." else it}"
+                }
                 chatStartTime = null
-                store.addEntry(TimelineEntry(now, "chat_end", summary, agentType = agent))
+                store.addEntry(TimelineEntry(now, "chat_end", summary, detail = detail, agentType = agent))
             }
 
             // DISCONNECTED -> else: connected
@@ -98,6 +140,8 @@ class StateTimelineGenerator private constructor() {
         previousState = AgentState.DISCONNECTED
         lastToolName = null
         chatStartTime = null
+        lastUserPrompt = null
+        lastChatPrompt = null
     }
 
     /** Format tool summary from toolInput (already extracted & truncated by bridge's formatToolInput). */

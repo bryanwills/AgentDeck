@@ -225,8 +225,9 @@ sealed class BridgeEvent {
     data class EncoderState(val encoders: List<EncoderSlotState>, val takeoverActive: Boolean) : BridgeEvent()
     data class ButtonState(val buttons: List<ButtonSlotState>) : BridgeEvent()
     data class SlotMap(val buttons: List<DeckSlotConfig>, val encoders: List<DeckSlotConfig>) : BridgeEvent()
-    data class Timeline(val entry: BridgeTimelineEntry) : BridgeEvent()
+    data class Timeline(val entry: BridgeTimelineEntry, val upsert: Boolean = false) : BridgeEvent()
     data class TimelineHistory(val entries: List<BridgeTimelineEntry>) : BridgeEvent()
+    data class UserPrompt(val text: String) : BridgeEvent()
 }
 
 // --- App -> Bridge commands ---
@@ -326,11 +327,16 @@ fun parseBridgeMessage(text: String): BridgeEvent? {
                     BridgeEvent.SlotMap(buttons, encoders)
                 } else null
             }
+            "user_prompt" -> {
+                val promptText = obj["text"]?.jsonPrimitive?.content
+                if (promptText != null) BridgeEvent.UserPrompt(promptText) else null
+            }
             "timeline_event" -> {
                 val entryObj = obj["entry"]
+                val isUpsert = obj["upsert"]?.jsonPrimitive?.boolean ?: false
                 if (entryObj != null) {
                     val entry = protocolJson.decodeFromJsonElement<BridgeTimelineEntry>(entryObj)
-                    BridgeEvent.Timeline(entry)
+                    BridgeEvent.Timeline(entry, isUpsert)
                 } else null
             }
             "timeline_history" -> {
