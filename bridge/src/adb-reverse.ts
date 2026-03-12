@@ -89,6 +89,14 @@ export function startAdbReversePolling(port: number, intervalMs = 30_000): () =>
 }
 
 /**
+ * Get number of currently connected ADB devices (best-effort, cached from last poll).
+ */
+export function getAdbDeviceCount(): number {
+  if (!hasAdb()) return 0;
+  return getConnectedDevices().length;
+}
+
+/**
  * Remove `adb reverse` mappings on shutdown.
  */
 export function cleanupAdbReverse(port: number): void {

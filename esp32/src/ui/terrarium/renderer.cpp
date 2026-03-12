@@ -229,6 +229,26 @@ void render(float dt) {
     // 12. Water surface waves + sparkles
     Water::renderSurface(canvas_buf, SCREEN_W, SCREEN_H, totalTime);
 
+#if IS_ROUND
+    // 13. Circular mask — black out pixels outside the inscribed circle
+    {
+        const int cx = SCREEN_W / 2;
+        const int cy = SCREEN_H / 2;
+        const int r = min(SCREEN_W, SCREEN_H) / 2;
+        const int r2 = r * r;
+        for (int y = 0; y < SCREEN_H; y++) {
+            const int dy = y - cy;
+            const int dy2 = dy * dy;
+            for (int x = 0; x < SCREEN_W; x++) {
+                const int dx = x - cx;
+                if (dx * dx + dy2 > r2) {
+                    canvas_buf[y * SCREEN_W + x] = 0;  // AMOLED: black = off
+                }
+            }
+        }
+    }
+#endif
+
     // Invalidate LVGL canvas to trigger flush
     lv_obj_invalidate(canvas);
 }

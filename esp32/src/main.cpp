@@ -10,15 +10,12 @@
  *   Settings (long press on aquarium)
  *   Permission → octopus "?" speech bubble (no modal)
  *
- * Deep sleep after 5 minutes disconnected.
  */
 
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
-// Deep sleep removed — backlight-off power save instead (deep sleep needs physical reset)
-
 #include "config.h"
 #include "state/agent_state.h"
 #include "net/serial_client.h"
@@ -48,12 +45,6 @@ static enum {
     VIEW_TIMELINE,
     VIEW_SETTINGS
 } currentView = VIEW_SPLASH;
-
-// Deep sleep: 5 minutes (300s) without connection
-static constexpr uint32_t DEEP_SLEEP_TIMEOUT_MS = 5 * 60 * 1000;
-static uint32_t lastConnectedMs = 0;
-static bool everConnected = false;
-
 
 // ===== Network task (Core 0) =====
 static void networkTask(void* param) {
@@ -153,7 +144,6 @@ static void uiTask(void* param) {
 
     uint32_t lastFrameMs = millis();
     bool wasTimelineView = false;
-    lastConnectedMs = millis();
 
     while (true) {
         uint32_t now = millis();
@@ -170,12 +160,6 @@ static void uiTask(void* param) {
         bool connected = g_state.wsConnected;
         bool wantTimeline = g_state.timelineView;
         unlockState();
-
-        // Track connection for deep sleep
-        if (connected) {
-            lastConnectedMs = now;
-            everConnected = true;
-        }
 
         // Screen transitions
         if (currentView == VIEW_SPLASH && connected) {
@@ -198,7 +182,7 @@ static void uiTask(void* param) {
         wasTimelineView = wantTimeline;
 
         // Disconnect → splash (only if was previously connected)
-        if (!connected && everConnected && currentView != VIEW_SPLASH && currentView != VIEW_SETTINGS) {
+        if (!connected && currentView != VIEW_SPLASH && currentView != VIEW_SETTINGS) {
             lv_screen_load_anim(scrSplash, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
             currentView = VIEW_SPLASH;
             Screens::splashSetStatus("Reconnecting...");
@@ -222,23 +206,6 @@ static void uiTask(void* param) {
         // LVGL timer handler
         lv_timer_handler();
 
-        // Power save: backlight off after 5 minutes disconnected (not deep sleep —
-        // deep sleep requires physical reset button to wake, which is impractical).
-        // Backlight restores automatically when connection resumes.
-        static bool backlightOff = false;
-        if (everConnected && !connected &&
-            (now - lastConnectedMs > DEEP_SLEEP_TIMEOUT_MS)) {
-            if (!backlightOff) {
-                Serial.println("[Power] Backlight off — disconnected 5 min");
-                UI::setBrightness(0);
-                backlightOff = true;
-            }
-        } else if (backlightOff && connected) {
-            Serial.println("[Power] Backlight restored — reconnected");
-            UI::setBrightness(255);
-            backlightOff = false;
-        }
-
         // ~5ms yield for smooth animation
         vTaskDelay(pdMS_TO_TICKS(5));
     }
@@ -247,8 +214,11 @@ static void uiTask(void* param) {
 // ===== Arduino setup =====
 void setup() {
     Serial.begin(115200);
-    delay(100);
+    // Native USB CDC: wait for host connection (up to 3 seconds)
+    for (int i = 0; i < 30 && !Serial; i++) delay(100);
+    delay(200);
     Serial.println("\n=== AgentDeck ESP32-S3 Display ===");
+    Serial.flush();
     Serial.printf("Board: %s  Screen: %dx%d\n",
 #if defined(BOARD_IPS_35)
         "IPS 3.5\"",

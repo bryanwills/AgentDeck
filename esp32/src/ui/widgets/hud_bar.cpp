@@ -37,7 +37,11 @@ static bool visible = true;
 static constexpr int PANEL_TOP_Y = 28;
 
 // Gauge dimensions
+#if IS_ROUND
+static constexpr int GAUGE_SIZE = 44;
+#else
 static constexpr int GAUGE_SIZE = 58;
+#endif
 static constexpr int GAUGE_BORDER = 1;
 static constexpr int GAUGE_INNER = GAUGE_SIZE - GAUGE_BORDER * 2;
 static constexpr int GAUGE_GAP = 8;
@@ -108,6 +112,77 @@ static void createGauge(lv_obj_t* parent,
 }
 
 void init(lv_obj_t* parent) {
+#if IS_ROUND
+    // === Round AMOLED layout: top status bar + bottom gauges ===
+
+    // Top status bar — centered, narrow
+    panelLeft = lv_obj_create(parent);
+    lv_obj_set_size(panelLeft, 260, LV_SIZE_CONTENT);
+    lv_obj_align(panelLeft, LV_ALIGN_TOP_MID, 0, 20);
+    lv_obj_set_style_bg_color(panelLeft, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(panelLeft, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(panelLeft, 0, 0);
+    lv_obj_set_style_radius(panelLeft, 12, 0);
+    lv_obj_set_style_pad_top(panelLeft, 4, 0);
+    lv_obj_set_style_pad_bottom(panelLeft, 4, 0);
+    lv_obj_set_style_pad_left(panelLeft, 8, 0);
+    lv_obj_set_style_pad_right(panelLeft, 8, 0);
+    lv_obj_set_style_pad_row(panelLeft, 1, 0);
+    lv_obj_clear_flag(panelLeft, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(panelLeft, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(panelLeft, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    // Logo text — smaller for round display
+    lblLogo = lv_label_create(panelLeft);
+    lv_obj_set_style_text_color(lblLogo, lv_color_hex(Theme::HUDText), 0);
+    lv_obj_set_style_text_font(lblLogo, &lv_font_montserrat_14, 0);
+    lv_label_set_text(lblLogo, "AgentDeck");
+
+    // Accent underline
+    logoLine = lv_obj_create(panelLeft);
+    lv_obj_set_size(logoLine, 100, 2);
+    lv_obj_set_style_bg_color(logoLine, lv_color_hex(Theme::StatusBlue), 0);
+    lv_obj_set_style_bg_opa(logoLine, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(logoLine, 0, 0);
+    lv_obj_set_style_radius(logoLine, 1, 0);
+    lv_obj_set_style_pad_all(logoLine, 0, 0);
+    lv_obj_clear_flag(logoLine, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Session list — compact, 1-line per session
+    lblSessions = lv_label_create(panelLeft);
+    lv_obj_set_style_text_color(lblSessions, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_text_font(lblSessions, &lv_font_montserrat_10, 0);
+    lv_label_set_recolor(lblSessions, true);
+    lv_label_set_text(lblSessions, "");
+    lv_obj_set_width(lblSessions, 240);
+    lv_obj_set_style_text_align(lblSessions, LV_TEXT_ALIGN_CENTER, 0);
+
+    // Bottom gauge panel — centered at bottom of circle
+    panelRight = lv_obj_create(parent);
+    int panelW = GAUGE_SIZE * 2 + GAUGE_GAP + 16;
+    lv_obj_set_size(panelRight, panelW, LV_SIZE_CONTENT);
+    lv_obj_align(panelRight, LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_set_style_bg_color(panelRight, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(panelRight, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(panelRight, 0, 0);
+    lv_obj_set_style_radius(panelRight, 12, 0);
+    lv_obj_set_style_pad_top(panelRight, 3, 0);
+    lv_obj_set_style_pad_bottom(panelRight, 4, 0);
+    lv_obj_set_style_pad_left(panelRight, 8, 0);
+    lv_obj_set_style_pad_right(panelRight, 8, 0);
+    lv_obj_set_style_pad_row(panelRight, 1, 0);
+    lv_obj_set_style_pad_column(panelRight, GAUGE_GAP, 0);
+    lv_obj_clear_flag(panelRight, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(panelRight, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(panelRight, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    // No header for round — save space
+
+    lblTankHeader = nullptr;
+
+#else
+    // === Rectangular layout: left panel + right panel ===
+
     // === Left panel: AgentDeck logo + sessions ===
     panelLeft = lv_obj_create(parent);
     lv_obj_set_size(panelLeft, 170, LV_SIZE_CONTENT);
@@ -172,8 +247,9 @@ void init(lv_obj_t* parent) {
     lv_obj_set_style_text_color(lblTankHeader, lv_color_hex(Theme::HUDDim), 0);
     lv_obj_set_style_text_font(lblTankHeader, &lv_font_montserrat_10, 0);
     lv_label_set_text(lblTankHeader, "TANK STATUS");
+#endif
 
-    // Gauge row (horizontal)
+    // Gauge row (horizontal) — shared by both layouts
     lv_obj_t* gaugeRow = lv_obj_create(panelRight);
     lv_obj_set_size(gaugeRow, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(gaugeRow, LV_OPA_TRANSP, 0);

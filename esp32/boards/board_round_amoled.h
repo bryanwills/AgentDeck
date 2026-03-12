@@ -6,23 +6,24 @@
 // Manufacturer: Guition (Jingcai)
 
 // Display: ST77916 (QSPI interface)
+// Verified pinout from modi12jin, clowrey, freddy-, ESP32_Display_Panel #176
 #define BOARD_DISPLAY_TYPE   DISPLAY_ST77916_QSPI
-#define BOARD_PIN_QSPI_CS   14
-#define BOARD_PIN_QSPI_CLK  13
-#define BOARD_PIN_QSPI_D0   15
-#define BOARD_PIN_QSPI_D1   16
-#define BOARD_PIN_QSPI_D2   17
-#define BOARD_PIN_QSPI_D3   18
-#define BOARD_PIN_RST        21
-#define BOARD_PIN_BL         47
+#define BOARD_PIN_QSPI_CS   10
+#define BOARD_PIN_QSPI_CLK  9
+#define BOARD_PIN_QSPI_D0   11
+#define BOARD_PIN_QSPI_D1   12
+#define BOARD_PIN_QSPI_D2   13
+#define BOARD_PIN_QSPI_D3   14
+#define BOARD_PIN_RST        47
+#define BOARD_PIN_BL         15
 
 // Touch: CST816S (I2C)
 #define BOARD_TOUCH_TYPE     TOUCH_CST816S
 #define BOARD_TOUCH_ADDR     0x15
-#define BOARD_PIN_TOUCH_SDA  11
-#define BOARD_PIN_TOUCH_SCL  12
-#define BOARD_PIN_TOUCH_INT  9
-#define BOARD_PIN_TOUCH_RST  10
+#define BOARD_PIN_TOUCH_SDA  7
+#define BOARD_PIN_TOUCH_SCL  8
+#define BOARD_PIN_TOUCH_INT  41
+#define BOARD_PIN_TOUCH_RST  40
 
 // Display settings
 #define BOARD_ROTATION       0

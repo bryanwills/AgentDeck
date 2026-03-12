@@ -8,9 +8,10 @@
  * ESP32 side reads lines starting with '{' and passes to Protocol::parseMessage().
  */
 
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
 import { createWriteStream, type WriteStream } from 'fs';
 import type { BridgeEvent } from './types.js';
+import { SERIAL_FORWARDED_EVENTS } from '@agentdeck/shared/protocol';
 import { debug } from './logger.js';
 
 // Serial port patterns for ESP32 devices
@@ -38,37 +39,42 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let stateProvider: (() => BridgeEvent | null) | null = null;
 
-// Events to forward (same subset as Android WS client receives)
-const FORWARDED_EVENTS = new Set([
-  'state_update',
-  'usage_update',
-  'sessions_list',
-  'connection',
-  'timeline_event',
-  'timeline_history',
-]);
+// Events to forward — shared constant from @agentdeck/shared
+const FORWARDED_EVENTS = SERIAL_FORWARDED_EVENTS;
 
-function detectESP32Ports(): string[] {
+/** Run a shell command with timeout, escalating to SIGKILL if SIGTERM fails. */
+function execWithKill(cmd: string, timeoutMs = 3000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = exec(cmd, { encoding: 'utf-8', timeout: timeoutMs }, (err, stdout) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(stdout);
+      }
+    });
+    // When exec timeout fires, it sends SIGTERM. But stty stuck in kernel I/O
+    // ignores SIGTERM. Schedule a SIGKILL as escalation.
+    const killTimer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch { /* already dead */ }
+    }, timeoutMs + 1000);
+    child.on('exit', () => clearTimeout(killTimer));
+  });
+}
+
+async function detectESP32Ports(): Promise<string[]> {
   try {
-    // List serial ports on macOS/Linux
     const platform = process.platform;
-    let ports: string[];
+    let output: string;
 
     if (platform === 'darwin') {
-      const output = execSync('ls /dev/cu.usb* 2>/dev/null || true', {
-        encoding: 'utf-8',
-        timeout: 3000,
-      });
-      ports = output.trim().split('\n').filter(Boolean);
+      output = await execWithKill('ls /dev/cu.usb* 2>/dev/null || true');
     } else if (platform === 'linux') {
-      const output = execSync('ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null || true', {
-        encoding: 'utf-8',
-        timeout: 3000,
-      });
-      ports = output.trim().split('\n').filter(Boolean);
+      output = await execWithKill('ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null || true');
     } else {
       return [];
     }
+
+    const ports = output.trim().split('\n').filter(Boolean);
 
     // Filter to ESP32 patterns, exclude known non-ESP32
     return ports.filter(port => {
@@ -80,14 +86,14 @@ function detectESP32Ports(): string[] {
   }
 }
 
-function openPort(port: string): SerialConnection | null {
+async function openPort(port: string): Promise<SerialConnection | null> {
   try {
     // Configure baud rate + disable DTR/RTS to prevent ESP32 reset
     const platform = process.platform;
     if (platform === 'darwin') {
-      execSync(`stty -f ${port} 115200 cs8 -cstopb -parenb -hupcl`, { timeout: 3000 });
+      await execWithKill(`stty -f ${port} 115200 cs8 -cstopb -parenb -hupcl`);
     } else if (platform === 'linux') {
-      execSync(`stty -F ${port} 115200 cs8 -cstopb -parenb -hupcl`, { timeout: 3000 });
+      await execWithKill(`stty -F ${port} 115200 cs8 -cstopb -parenb -hupcl`);
     }
 
     const stream = createWriteStream(port, { flags: 'w' });
@@ -143,13 +149,22 @@ function sendHeartbeat(): void {
  * Start ESP32 serial bridge.
  * Detects USB serial ports and opens connections.
  * Call broadcast() to send events to all connected ESP32 devices.
+ *
+ * Non-blocking: initial device detection runs in background so a hung
+ * USB port (stty stuck in kernel I/O) cannot block bridge startup.
  */
 export function startESP32Serial(): void {
-  // Initial detection
-  pollForDevices();
+  // Fire-and-forget initial detection (non-blocking)
+  pollForDevices().catch(err => {
+    debug('ESP32', `Initial poll failed: ${err.message}`);
+  });
 
   // Poll for new/disconnected devices every 10 seconds
-  pollTimer = setInterval(pollForDevices, 10000);
+  pollTimer = setInterval(() => {
+    pollForDevices().catch(err => {
+      debug('ESP32', `Poll failed: ${err.message}`);
+    });
+  }, 10000);
 
   // Heartbeat: send current state every 5 seconds so ESP32 stays in sync
   heartbeatTimer = setInterval(sendHeartbeat, 5000);
@@ -157,8 +172,8 @@ export function startESP32Serial(): void {
   debug('ESP32', 'Serial bridge started');
 }
 
-function pollForDevices(): void {
-  const ports = detectESP32Ports();
+async function pollForDevices(): Promise<void> {
+  const ports = await detectESP32Ports();
 
   // Remove disconnected
   connections = connections.filter(c => {
@@ -172,7 +187,7 @@ function pollForDevices(): void {
   // Add new ports
   for (const port of ports) {
     if (!connections.some(c => c.port === port)) {
-      const conn = openPort(port);
+      const conn = await openPort(port);
       if (conn) {
         connections.push(conn);
       }
@@ -218,4 +233,11 @@ export function stopESP32Serial(): void {
  */
 export function esp32ConnectionCount(): number {
   return connections.filter(c => c.connected).length;
+}
+
+/**
+ * Get list of connected ESP32 serial port paths.
+ */
+export function getESP32Ports(): string[] {
+  return connections.filter(c => c.connected).map(c => c.port);
 }

@@ -83,6 +83,41 @@ namespace Layout {
 // Sand/terrain
 constexpr float SandHeightFrac = 0.35f;
 
+#if IS_ROUND
+// Round AMOLED: tighter swim boundaries to stay within circular mask
+// Octopus
+constexpr float OctBodyRadiusFrac = 0.060f;   // Slightly larger for small display
+constexpr float OctHomeX          = 0.42f;
+constexpr float OctStandingY      = 0.55f;
+constexpr float OctSleepY         = 0.70f;
+constexpr float OctWorkingY       = 0.40f;
+constexpr float OctSwimMinX       = 0.25f;
+constexpr float OctSwimMaxX       = 0.75f;
+constexpr float OctSwimMinY       = 0.15f;
+constexpr float OctSwimMaxY       = 0.58f;
+
+// Crayfish
+constexpr float CfWidthFrac  = 0.12f;
+constexpr float CfHomeX      = 0.72f;
+constexpr float CfHomeY      = 0.55f;
+constexpr float CfSittingY   = 0.68f;
+constexpr float CfRoutingY   = 0.52f;
+
+// Tetra
+constexpr float TetraSize     = 0.018f;
+constexpr float TetraSwimMinX = 0.10f;
+constexpr float TetraSwimMaxX = 0.90f;
+constexpr float TetraSwimMinY = 0.12f;
+constexpr float TetraSwimMaxY = 0.58f;
+
+// Water surface
+constexpr float SurfaceY = 0.06f;
+
+// HUD
+constexpr uint8_t HudHeight = 20;
+
+#else
+// Rectangular displays (480x480, 480x320)
 // Octopus
 constexpr float OctBodyRadiusFrac = 0.055f;
 constexpr float OctHomeX          = 0.40f;
@@ -113,5 +148,6 @@ constexpr float SurfaceY = 0.04f;
 
 // HUD
 constexpr uint8_t HudHeight = 24;
+#endif
 
 }  // namespace Layout
