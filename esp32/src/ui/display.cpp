@@ -564,10 +564,10 @@ void displayInit() {
     esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
     Serial.printf("[Display] SPI bus init: %s (0x%x)\n", esp_err_to_name(ret), ret);
 
-    // Add SPI device — half-duplex required for quad mode
+    // Add SPI device — cmd/addr bits = 0, overridden per-transaction via ext_t
     spi_device_interface_config_t devcfg = {};
-    devcfg.command_bits = 8;
-    devcfg.address_bits = 24;
+    devcfg.command_bits = 0;
+    devcfg.address_bits = 0;
     devcfg.mode = 0;
     devcfg.clock_speed_hz = 40 * 1000 * 1000;
     devcfg.spics_io_num = BOARD_PIN_QSPI_CS;
