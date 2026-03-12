@@ -2,6 +2,110 @@
 
 ---
 
+## 2026-03-13 — Apple (iOS/iPad/macOS) Dashboard 앱 Phase 1
+
+### 작업
+Android 태블릿/e-ink 대시보드 완성 후 Apple 플랫폼 확장. SwiftUI Multiplatform (iOS 17.0 / macOS 14.0) 단일 프로젝트로 iPhone, iPad, Mac 동시 지원.
+
+### 구현 (Phase 1: Protocol + Networking)
+- `apple/` 디렉토리 생성, 22 Swift 파일, `swiftc -typecheck` 전체 통과
+- **Model**: `shared/src/*.ts` → Swift Codable structs 포팅 (13 BridgeEvent 타입, 11 PluginCommand)
+- **Net**: `URLSessionWebSocketTask` + exponential backoff (1s→8s), `NWBrowser` mDNS, JSON type discriminator
+- **State**: `@Observable` AgentStateHolder (null-coalescing update 패턴 — Android 동일), TimelineStore (groupConsecutive)
+- **UI**: 3-tab 구조 (Dashboard/Deck/Settings), ConnectionOverlay, 기본 HUD, DeckButton/EncoderStrip
+- **Tests**: ProtocolTests (12), TimelineTests (9)
+- `project.yml` (xcodegen) → Xcode 프로젝트 자동 생성
+
+### 핵심 설계 결정
+- **xcodegen 사용**: `.xcodeproj` 수동 관리 대신 `project.yml` 선언형 → `xcodegen generate`
+- **iOS + macOS 분리 타겟**: `platform: [iOS, macOS]` 합체 타겟은 test dependency 이슈 → `AgentDeck_iOS` + `AgentDeck_macOS` 분리
+- **Swift 6 호환**: `@Observable` + `@unchecked Sendable` 패턴, `AnyCodable`은 `@unchecked Sendable`
+- **NWTXTRecord API**: `.keyValue` entry 패턴 매칭은 Swift 6에서 변경 → `.string` + key=value 파싱
+- **Bundle ID**: `dev.agentdeck.dashboard`
+
+### 남은 작업
+Phase 2 (Terrarium 60fps) → Phase 3 (HUD) → Phase 4 (Deck) → Phase 5 (Voice/QR) → Phase 6 (App Store)
+
+---
+
+## 2026-03-12 — Daemon 가재 DORMANT/SICK 비정상 표시 수정
+
+### 문제
+Android Dashboard에서 OpenClaw Gateway 실행 중임에도 가재가 DORMANT(투명) 또는 SICK(기울기+탈색)으로 표시. 3가지 원인이 겹쳐 있었음:
+
+1. **StateMachine 초기 state `DISCONNECTED` 미전환**: Daemon 모드에는 PTY가 없어 `SessionStart` hook이 안 들어옴 → Gateway 연결 후에도 state가 `DISCONNECTED` 유지 → Android에서 `agentType:"openclaw"` + `DISCONNECTED` → DORMANT
+2. **초기 probe 후 broadcast 누락**: `probeGateway()` 완료 후 `cachedGatewayAvailable = true` 갱신만 하고 `state_changed` emit 안 함
+3. **`openclaw doctor` timeout**: DOCTOR_TIMEOUT 5초인데 실제 실행 7초+ → timeout kill → `gatewayHasError: true` → 가재 SICK
+
+### 해결
+1. Gateway 연결(connection event `connected`) 시 StateMachine이 아직 DISCONNECTED이면 `handleHookEvent('SessionStart', {})` 호출 → IDLE 전환
+2. 초기 `probeGateway().then()` 완료 후 `stateMachine.emit('state_changed', ...)` 추가 (daemon-server.ts + index.ts)
+3. Adapter `.catch()` 에서도 state broadcast 추가 (adapter 실패해도 gatewayAvailable: true 전달)
+4. DOCTOR_TIMEOUT 5s → 15s
+
+### 교훈
+- **Daemon 모드는 PTY 없이 StateMachine이 `DISCONNECTED`에 고착**: 외부 adapter 연결이 session lifecycle을 대체해야 함
+- **`openclaw doctor`는 네트워크 체크 포함 7초+**: execFile timeout은 넉넉하게 (15초)
+- **복합 디버깅**: DORMANT(state 문제) → 수정 후 SICK(health check 문제) → 수정 후에도 SICK(다른 bridge가 구 코드) — 3중 원인이 순차적으로 드러남
+- **멀티 bridge 환경**: 태블릿이 daemon(9120)이 아닌 session bridge(9121-9123)에 mDNS로 연결될 수 있음 → 모든 bridge가 동일 코드로 실행되어야 일관된 상태 전달
+
+---
+
+## 2026-03-12 — ESP32 serial `stty` blocking 수정
+
+### 문제
+`sdc` 시작 시 `startESP32Serial()` → `execSync('stty -f /dev/cu.usbmodem201301 ...')`가 USB 디바이스 불량 상태(uninterruptible kernel I/O)에서 무한 블로킹. `execSync` timeout이 SIGTERM 보내지만 커널 I/O 대기 중인 `stty`는 SIGTERM 무시. Node.js 이벤트 루프 전체 정지 → WebSocket 서버 생성, 터미널 attach 모두 불가.
+
+### 해결
+`execSync` → async `exec` + Promise 래퍼 (`execWithKill`). 3초 timeout 후 SIGTERM, +1초 후 SIGKILL 에스컬레이션. `detectESP32Ports()`, `openPort()`, `pollForDevices()` 모두 async 전환. `startESP32Serial()`은 sync 유지하되 `pollForDevices().catch()` fire-and-forget 호출 — 브리지 startup을 절대 블로킹하지 않음. 10초 poll interval이 실패한 디바이스 자동 재시도.
+
+### 교훈
+- **Node.js에서 `execSync`는 시한폭탄**: 외부 프로세스가 커널 I/O에 갇히면 timeout+SIGTERM으로도 해결 불가. USB/시리얼 관련 명령은 반드시 async + SIGKILL 에스컬레이션
+- **Bridge startup path에 sync I/O 금지**: 하나의 불량 디바이스가 전체 서비스 startup을 막을 수 있음
+
+---
+
+## 2026-03-12 — ESP32 86 Box 완성 (데이터 파티클, 가재 수정, HUD, WiFi)
+
+### 문제
+1. **Reset time 깨짐**: Bridge가 ISO 8601 (`2026-03-11T16:00:00+00:00`) 전송 → ESP32가 20-char 버퍼에 truncate → 깨진 텍스트 표시. `mktime()` 비교도 NTP 없어서 무의미.
+2. **가재 안 보임**: `gatewayAvailable: true`가 relay에서 전송되지만, `crayfishState`가 `handleSessionsList()`에서만 설정됨. Relay는 `sessions_list`를 보내지 않아서 `crayfishState = DORMANT` 유지.
+3. **WORKING 효과 안 보임**: 옥토퍼스 스타버스트(선 방사) 효과가 작은 화면에서 잘 안 보임.
+4. **HUD 하단 여백**: 빈 stale label이 flex에서 공간 차지.
+
+### 해결
+1. **Reset time**: Relay에서 ISO→상대 시간 변환 후 전송 ("1h 30m", "2d 4h"). ESP32 파서는 'T' 없는 문자열은 그대로 사용, ISO면 NTP(WiFi 시) 파싱. WiFi 연결 시 `configTzTime("UTC", ...)` NTP 동기화.
+2. **가재**: `updateCreatureStates()`에 `crayfishCount == 0 && gatewayAvailable → SITTING` 폴백 추가. Relay도 daemon(9120) `/health`에서 gateway 상태 폴링.
+3. **데이터 파티클**: Android `DataParticleSystem` 포팅 — WORKING/ROUTING 시 3색 발광 입자(cyan/amber/green) 생성, 4중 동심원 렌더링, 테트라가 먹이로 추적/소비. 스타버스트 제거.
+4. **HUD**: `LV_OBJ_FLAG_HIDDEN`으로 빈 stale label 숨김, `pad_bottom=0`.
+
+### 교훈
+- **ESP32는 시계가 없다**: NTP 없이 time() = epoch 0. 시간 관련 계산은 호스트(relay/bridge)에서 선처리
+- **상태 파생은 모든 메시지 경로에 폴백 필요**: sessions_list 전용 로직은 serial relay 경로에서 누락됨
+- **daemon vs session bridge**: daemon(9120)만 gateway 상태 보유, session bridge(9124+)에는 없음
+- **LVGL flex에서 빈 라벨도 공간 차지**: `LV_OBJ_FLAG_HIDDEN`으로 제거해야 함
+
+---
+
+## 2026-03-12 — Usage 데이터 불일치 수정 (Android/ESP32/Plugin)
+
+### 문제
+Android LIMITS, ESP32 TANK STATUS, Claude 실제 사용량이 서로 다르게 표시. Bridge가 단일 소스로 동일 JSON broadcast하지만 3가지 버그로 표시값이 달라짐.
+
+### 해결
+**Bug 1 — `buildUsageEvent` DRY 위반**: `index.ts`(5개 파라미터)와 `daemon-server.ts`(4개, ollamaStatus 누락)에 동일 함수 복붙. → `bridge/src/usage-event.ts` 단일 파일로 추출, 양쪽 import. Daemon 8개 call site 모두 `cachedOllamaStatus` 추가.
+
+**Bug 2 — ESP32 sticky values**: Bridge에서 10분 TTL 만료 시 percent 필드 생략 → ESP32 `if (is<float>())` 조건부 파싱이 기존 값 유지 → 오래된 % 계속 표시. → sentinel `-1.0f` 패턴: 필드 부재 시 `-1.0f` 할당, reset 문자열도 빈 문자열로 클리어.
+
+**Bug 3 — ESP32 HUD no-data 표시**: `updateGauge()`에 sentinel 처리 추가 — `pct < 0` → "--" + 빈 게이지. stale 시 "72%!" 표시 (Android과 동일).
+
+### 교훈
+- **코드 복제 = drift 불가피**: `buildUsageEvent` 같은 함수를 2곳에 복붙하면 파라미터 추가 시 한쪽이 빠짐. 공용 모듈 추출 필수
+- **C/C++ 조건부 파싱의 함정**: `if (field.is<T>()) state = field` 패턴은 필드 부재 시 이전 값 유지 — JSON optional 필드에서는 반드시 else 분기로 sentinel/default 할당
+- **sentinel convention**: float에서 0은 유효 값이므로 -1.0f를 "no data" sentinel으로 사용. `reset()` 에서도 0이 아닌 -1.0f로 초기화
+
+---
+
 ## 2026-03-12 — Timeline 중복 표시 버그 (daemon upsert 누락)
 
 ### 문제

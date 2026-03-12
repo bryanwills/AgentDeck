@@ -1,0 +1,153 @@
+// AgentState.swift — State enums & prompt types
+// Ported from shared/src/states.ts
+
+import Foundation
+
+// MARK: - State
+
+enum AgentConnectionState: String, Codable, Sendable, CaseIterable {
+    case disconnected
+    case idle
+    case processing
+    case awaitingPermission = "awaiting_permission"
+    case awaitingOption = "awaiting_option"
+    case awaitingDiff = "awaiting_diff"
+
+    var isAwaiting: Bool {
+        switch self {
+        case .awaitingPermission, .awaitingOption, .awaitingDiff: true
+        default: false
+        }
+    }
+
+    var isActive: Bool {
+        self == .processing
+    }
+
+    var displayLabel: String {
+        switch self {
+        case .disconnected: "DISCONNECTED"
+        case .idle: "IDLE"
+        case .processing: "PROCESSING"
+        case .awaitingPermission: "PERMISSION"
+        case .awaitingOption: "SELECT"
+        case .awaitingDiff: "DIFF REVIEW"
+        }
+    }
+}
+
+// MARK: - Permission Mode
+
+enum PermissionMode: String, Codable, Sendable {
+    case `default`
+    case plan
+    case acceptEdits
+    case dontAsk
+    case bypassPermissions
+}
+
+// MARK: - Prompt Option
+
+struct PromptOption: Codable, Sendable, Identifiable {
+    let index: Int
+    let label: String
+    var shortcut: String?
+    var recommended: Bool?
+    var selected: Bool?
+
+    var id: Int { index }
+}
+
+// MARK: - Prompt Type
+
+enum PromptType: String, Codable, Sendable {
+    case yesNo = "yes_no"
+    case yesNoAlways = "yes_no_always"
+    case multiSelect = "multi_select"
+    case diffReview = "diff_review"
+}
+
+// MARK: - Dashboard State (composite observable state)
+
+struct DashboardState: Sendable {
+    // Connection
+    var bridgeConnected = false
+    var sessionId: String?
+
+    // Agent state
+    var state: AgentConnectionState = .disconnected
+    var permissionMode: PermissionMode = .default
+    var agentType: String?  // "claude-code" | "openclaw"
+    var agentCapabilities: AgentCapabilities?
+
+    // Tool info
+    var currentTool: String?
+    var toolInput: String?
+    var toolProgress: String?
+
+    // Project / Model
+    var projectName: String?
+    var modelName: String?
+    var effortLevel: String?
+    var billingType: BillingType = .unknown
+
+    // Prompt
+    var options: [PromptOption] = []
+    var promptType: PromptType?
+    var question: String?
+    var navigable = false
+    var cursorIndex = 0
+    var suggestedPrompt: String?
+
+    // Model catalog
+    var modelCatalog: [ModelCatalogEntry] = []
+    var sessionStatus: OcSessionStatus?
+
+    // Remote / Gateway
+    var remoteUrl: String?
+    var pairingUrl: String?
+    var workerSessionCount: Int?
+    var gatewayAvailable = false
+    var gatewayHasError = false
+
+    // Usage
+    var sessionDurationSec = 0
+    var inputTokens = 0
+    var outputTokens = 0
+    var toolCalls = 0
+    var estimatedCostUsd: Double?
+    var sessionPercent: Double?
+    var costSpent: Double?
+    var costLimit: Double?
+    var resetTime: String?
+    var resetDate: String?
+    var fiveHourPercent: Double?
+    var fiveHourResetsAt: String?
+    var sevenDayPercent: Double?
+    var sevenDayResetsAt: String?
+    var extraUsageEnabled: Bool?
+    var extraUsageMonthlyLimit: Double?
+    var extraUsageUsedCredits: Double?
+    var extraUsageUtilization: Double?
+    var oauthConnected: Bool?
+    var ollamaStatus: OllamaStatus?
+    var usageStale: Bool?
+
+    // Voice
+    var voiceState: String?  // idle | recording | transcribing | error
+    var voiceText: String?
+    var voiceError: String?
+
+    // Display
+    var hostDisplayOn = true
+
+    // Multi-session
+    var siblingSessions: [SessionInfo] = []
+
+    // Encoder / Button (for Deck tab)
+    var encoderStates: [EncoderSlotState] = []
+    var encoderTakeoverActive = false
+    var buttonStates: [ButtonSlotState] = []
+    var buttonSlotMap: [DeckSlotConfig] = []
+    var encoderSlotMap: [DeckSlotConfig] = []
+}

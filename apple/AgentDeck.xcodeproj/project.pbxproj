@@ -1,0 +1,843 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		10DE349A3E6CF8732C19FB99 /* AgentDeckApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D587189DB0E504028BE4BEF /* AgentDeckApp.swift */; };
+		13675372BAD515B5A8447296 /* BridgeConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A702CCCE11B4450E9EED163 /* BridgeConnection.swift */; };
+		1A25F581608D3C282D70FAF5 /* GaugeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCEE70EEDDCA2199E894D275 /* GaugeBar.swift */; };
+		1D193B9524AA5E561A899882 /* Adapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979988BB4CB2A4B5948FD360 /* Adapter.swift */; };
+		21AF157660FF2065535E3EE2 /* GaugeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCEE70EEDDCA2199E894D275 /* GaugeBar.swift */; };
+		27F0FAF7D849BC85134C3333 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */; };
+		2E7C2729C1B7011497854D53 /* Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E532E5457B6DFDE324D8F11C /* Protocol.swift */; };
+		3173BC2B844664891B8F3934 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */; };
+		38E9C043A76BB267FCACB4B7 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */; };
+		3C58A78598B065AC2EDD44B8 /* BridgeDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F34DE9E44936BAC6D96F19 /* BridgeDiscovery.swift */; };
+		4F6DEDF8FD3A71AFD059278D /* TimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7847FA7381FB8075331B0F12 /* TimelineTests.swift */; };
+		4FF0657D874D06594ED97850 /* BridgeDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F34DE9E44936BAC6D96F19 /* BridgeDiscovery.swift */; };
+		555F794C0467FB252D1B882E /* BridgeEventParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C930EA1785B14EE276FC29A /* BridgeEventParser.swift */; };
+		5885567AA794EB28CB6FF248 /* BridgeConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A702CCCE11B4450E9EED163 /* BridgeConnection.swift */; };
+		59639A63610FCE07B0AFA654 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB8FA0272112623E20C79FDC /* VoiceRecorder.swift */; };
+		5CE6EE06865BBDDF286217F9 /* DeckScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BAED670D622D2B931350B22 /* DeckScreen.swift */; };
+		5FBCFE8F4EBDCB7937FECA50 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2D2F35C5E4DF5DAE1C93F54B /* Assets.xcassets */; };
+		63CD385365058110A909E967 /* DeckButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CEBF8E8FDE2D7D93ADA93C2 /* DeckButton.swift */; };
+		6517B9BB944ABB74DCC81642 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB8FA0272112623E20C79FDC /* VoiceRecorder.swift */; };
+		67FA80518E8F347B39576FCC /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E6BEE1A730418C1EBDC048 /* StatusBadge.swift */; };
+		70568489EF1BE34061D43FEA /* AgentStateHolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F84E0AB4261F8308A45186 /* AgentStateHolder.swift */; };
+		71189CF707CC15B96AA46473 /* EncoderStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ADFBB660673D36A6267E75B /* EncoderStrip.swift */; };
+		7D1FA2E1BD47D35C7E3FEB23 /* Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E532E5457B6DFDE324D8F11C /* Protocol.swift */; };
+		7DBB3B78D2F8A74614C9047E /* Adapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979988BB4CB2A4B5948FD360 /* Adapter.swift */; };
+		809CC98B24E5F976E5E84AF9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2D2F35C5E4DF5DAE1C93F54B /* Assets.xcassets */; };
+		826BCA8436C33126337EA9C4 /* EncoderPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18DCACE5542166982D12C662 /* EncoderPanel.swift */; };
+		838450A0CF588614736D3F60 /* ConnectionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5A10C1FD79BB64BD2BB8D5 /* ConnectionOverlay.swift */; };
+		9E30D4D0BEE3CB402E8741D8 /* Timeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28DFE82D8F7AC7C7566940F3 /* Timeline.swift */; };
+		9ED5461741C1FC0A6ADC249F /* Timeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28DFE82D8F7AC7C7566940F3 /* Timeline.swift */; };
+		A50EA56C00F6A51F498DD20E /* MonitorScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7B4E454713DFE2DECC4D154 /* MonitorScreen.swift */; };
+		AC46A5F03466FF67A8EFD499 /* EncoderPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18DCACE5542166982D12C662 /* EncoderPanel.swift */; };
+		ACA8B3AC8A89039E02DB0B25 /* SessionMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558D3003B87503877CD1177F /* SessionMetrics.swift */; };
+		AF13EFF172BDC21B49AF6CFC /* DeckButtonLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08B164EDC818285036925D7C /* DeckButtonLayout.swift */; };
+		B5479F2C2CBAE673EB1C3D93 /* AgentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F55435772A15B8F0E92C1 /* AgentState.swift */; };
+		BBF5AD70DC28BE71141620C4 /* DeckScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BAED670D622D2B931350B22 /* DeckScreen.swift */; };
+		BC7898764CE415919C2E81AC /* BridgeEventParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C930EA1785B14EE276FC29A /* BridgeEventParser.swift */; };
+		D169DFD5EA54C323E1128E7B /* AgentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F55435772A15B8F0E92C1 /* AgentState.swift */; };
+		D53BC123AAE467EB342A5041 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */; };
+		DA958236FD13BC95BBE523B2 /* EncoderStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ADFBB660673D36A6267E75B /* EncoderStrip.swift */; };
+		DB3357B8FB7E0377BC728BB6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5200B4548DFE9F98AEE8D504 /* ContentView.swift */; };
+		DBDF1CEA6BCF9332097D55A1 /* ConnectionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5A10C1FD79BB64BD2BB8D5 /* ConnectionOverlay.swift */; };
+		DBE7242898F7F03CB3463B6D /* TimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7847FA7381FB8075331B0F12 /* TimelineTests.swift */; };
+		DCD31A20E9139F8661F0E321 /* TimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95824B0CF6571507DBAF27C5 /* TimelineStore.swift */; };
+		DCDA12FC8E9B9961BA2D8182 /* MonitorScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7B4E454713DFE2DECC4D154 /* MonitorScreen.swift */; };
+		DDE436CB226AAFC778EE8AE4 /* DeckButtonLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08B164EDC818285036925D7C /* DeckButtonLayout.swift */; };
+		DF804392C56333041A3C2784 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E6BEE1A730418C1EBDC048 /* StatusBadge.swift */; };
+		E082EDBFACADF5992BE8A9E0 /* AgentDeckApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D587189DB0E504028BE4BEF /* AgentDeckApp.swift */; };
+		E5B1774D921E5B4C508D73A0 /* AgentStateHolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F84E0AB4261F8308A45186 /* AgentStateHolder.swift */; };
+		E746E8ADB24CE54FF5BC2ECF /* DeckButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CEBF8E8FDE2D7D93ADA93C2 /* DeckButton.swift */; };
+		E940E2714946D07856C8FB37 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5200B4548DFE9F98AEE8D504 /* ContentView.swift */; };
+		EA32929C78C6088451DDF476 /* TimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95824B0CF6571507DBAF27C5 /* TimelineStore.swift */; };
+		EBFF02B51A6DD408055A8955 /* SessionMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558D3003B87503877CD1177F /* SessionMetrics.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		2F6375901F34A1EFEB0BE4CA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 829342115C44483C1C4BC729 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E4D80DB9ABDABC379778AF7C;
+			remoteInfo = AgentDeck_macOS;
+		};
+		F0488B9367BFD97E93209CE3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 829342115C44483C1C4BC729 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1B95C9515EBB97FD5022C08C;
+			remoteInfo = AgentDeck_iOS;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		08B164EDC818285036925D7C /* DeckButtonLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckButtonLayout.swift; sourceTree = "<group>"; };
+		0CEBF8E8FDE2D7D93ADA93C2 /* DeckButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckButton.swift; sourceTree = "<group>"; };
+		18DCACE5542166982D12C662 /* EncoderPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncoderPanel.swift; sourceTree = "<group>"; };
+		28DFE82D8F7AC7C7566940F3 /* Timeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Timeline.swift; sourceTree = "<group>"; };
+		2D2F35C5E4DF5DAE1C93F54B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		31F34DE9E44936BAC6D96F19 /* BridgeDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeDiscovery.swift; sourceTree = "<group>"; };
+		4D7EC34DCAF26B2F39F5257B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		4FD4B5CF393BD9B6CEDBCFAF /* AgentDeckTests_macOS.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgentDeckTests_macOS.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5200B4548DFE9F98AEE8D504 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		558D3003B87503877CD1177F /* SessionMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionMetrics.swift; sourceTree = "<group>"; };
+		5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
+		6BAED670D622D2B931350B22 /* DeckScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckScreen.swift; sourceTree = "<group>"; };
+		6C930EA1785B14EE276FC29A /* BridgeEventParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeEventParser.swift; sourceTree = "<group>"; };
+		6D587189DB0E504028BE4BEF /* AgentDeckApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDeckApp.swift; sourceTree = "<group>"; };
+		7847FA7381FB8075331B0F12 /* TimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTests.swift; sourceTree = "<group>"; };
+		7ADFBB660673D36A6267E75B /* EncoderStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncoderStrip.swift; sourceTree = "<group>"; };
+		83E77BCD933FB80831B3E6FD /* AgentDeck.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AgentDeck.entitlements; sourceTree = "<group>"; };
+		8A5A10C1FD79BB64BD2BB8D5 /* ConnectionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionOverlay.swift; sourceTree = "<group>"; };
+		8A702CCCE11B4450E9EED163 /* BridgeConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeConnection.swift; sourceTree = "<group>"; };
+		92F84E0AB4261F8308A45186 /* AgentStateHolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStateHolder.swift; sourceTree = "<group>"; };
+		93F845B5C2D610A38007523C /* AgentDeck_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AgentDeck_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		95824B0CF6571507DBAF27C5 /* TimelineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineStore.swift; sourceTree = "<group>"; };
+		960777CE6214381ADD730F6D /* AgentDeck_macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentDeck_macOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		979988BB4CB2A4B5948FD360 /* Adapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adapter.swift; sourceTree = "<group>"; };
+		BACE8D6702379152FF2F5E46 /* AgentDeckTests_iOS.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AgentDeckTests_iOS.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CCEE70EEDDCA2199E894D275 /* GaugeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GaugeBar.swift; sourceTree = "<group>"; };
+		DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
+		DB8FA0272112623E20C79FDC /* VoiceRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecorder.swift; sourceTree = "<group>"; };
+		E532E5457B6DFDE324D8F11C /* Protocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Protocol.swift; sourceTree = "<group>"; };
+		F15F55435772A15B8F0E92C1 /* AgentState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentState.swift; sourceTree = "<group>"; };
+		F2E6BEE1A730418C1EBDC048 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
+		F7B4E454713DFE2DECC4D154 /* MonitorScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorScreen.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		140AF97BD543A868D285A3E3 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				ECCAC6633BEC4D922A3FC2CB /* Common */,
+				E44E246FB02330DFC55951DC /* Deck */,
+				CCABBFDA44B079A6354EEBA1 /* Monitor */,
+				6B69A873A86B1E6F86029DAD /* Settings */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		2021734157E1CAD0CAE4DDDC /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				DB8FA0272112623E20C79FDC /* VoiceRecorder.swift */,
+			);
+			path = Voice;
+			sourceTree = "<group>";
+		};
+		27575881BC9A9C056429E9E3 /* Creatures */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Creatures;
+			sourceTree = "<group>";
+		};
+		2A19A20A106E79B114EDF545 /* AgentDeckTests */ = {
+			isa = PBXGroup;
+			children = (
+				5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */,
+				7847FA7381FB8075331B0F12 /* TimelineTests.swift */,
+			);
+			path = AgentDeckTests;
+			sourceTree = "<group>";
+		};
+		4BFA9357D1C2F3690DCD95CA /* State */ = {
+			isa = PBXGroup;
+			children = (
+				92F84E0AB4261F8308A45186 /* AgentStateHolder.swift */,
+				558D3003B87503877CD1177F /* SessionMetrics.swift */,
+				95824B0CF6571507DBAF27C5 /* TimelineStore.swift */,
+			);
+			path = State;
+			sourceTree = "<group>";
+		};
+		4D2FB249472FD031262748BA /* Terrarium */ = {
+			isa = PBXGroup;
+			children = (
+				DA7509A85639530DC5F90E62 /* Config */,
+				27575881BC9A9C056429E9E3 /* Creatures */,
+				5E0AB8CB80962BFB7CC02875 /* Environment */,
+			);
+			path = Terrarium;
+			sourceTree = "<group>";
+		};
+		5E0AB8CB80962BFB7CC02875 /* Environment */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Environment;
+			sourceTree = "<group>";
+		};
+		64AA1BD02816AC44948E2CFF /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				93F845B5C2D610A38007523C /* AgentDeck_iOS.app */,
+				960777CE6214381ADD730F6D /* AgentDeck_macOS.app */,
+				BACE8D6702379152FF2F5E46 /* AgentDeckTests_iOS.xctest */,
+				4FD4B5CF393BD9B6CEDBCFAF /* AgentDeckTests_macOS.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		670120DE2A7EB1192E335B94 = {
+			isa = PBXGroup;
+			children = (
+				AC651FF2220A85AE38F26FE6 /* AgentDeck */,
+				2A19A20A106E79B114EDF545 /* AgentDeckTests */,
+				64AA1BD02816AC44948E2CFF /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		6B69A873A86B1E6F86029DAD /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		A13E3E2DF830ADAA1EFA3D25 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				6D587189DB0E504028BE4BEF /* AgentDeckApp.swift */,
+				5200B4548DFE9F98AEE8D504 /* ContentView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		AC651FF2220A85AE38F26FE6 /* AgentDeck */ = {
+			isa = PBXGroup;
+			children = (
+				A13E3E2DF830ADAA1EFA3D25 /* App */,
+				EA3237691E872717C75DF805 /* Model */,
+				DCEC752C69312C74843D250D /* Net */,
+				AC7149D65EB34AE85760881A /* Resources */,
+				4BFA9357D1C2F3690DCD95CA /* State */,
+				4D2FB249472FD031262748BA /* Terrarium */,
+				140AF97BD543A868D285A3E3 /* UI */,
+				2021734157E1CAD0CAE4DDDC /* Voice */,
+			);
+			path = AgentDeck;
+			sourceTree = "<group>";
+		};
+		AC7149D65EB34AE85760881A /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				83E77BCD933FB80831B3E6FD /* AgentDeck.entitlements */,
+				2D2F35C5E4DF5DAE1C93F54B /* Assets.xcassets */,
+				4D7EC34DCAF26B2F39F5257B /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		CCABBFDA44B079A6354EEBA1 /* Monitor */ = {
+			isa = PBXGroup;
+			children = (
+				8A5A10C1FD79BB64BD2BB8D5 /* ConnectionOverlay.swift */,
+				F7B4E454713DFE2DECC4D154 /* MonitorScreen.swift */,
+			);
+			path = Monitor;
+			sourceTree = "<group>";
+		};
+		DA7509A85639530DC5F90E62 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		DCEC752C69312C74843D250D /* Net */ = {
+			isa = PBXGroup;
+			children = (
+				8A702CCCE11B4450E9EED163 /* BridgeConnection.swift */,
+				31F34DE9E44936BAC6D96F19 /* BridgeDiscovery.swift */,
+				6C930EA1785B14EE276FC29A /* BridgeEventParser.swift */,
+			);
+			path = Net;
+			sourceTree = "<group>";
+		};
+		E44E246FB02330DFC55951DC /* Deck */ = {
+			isa = PBXGroup;
+			children = (
+				0CEBF8E8FDE2D7D93ADA93C2 /* DeckButton.swift */,
+				08B164EDC818285036925D7C /* DeckButtonLayout.swift */,
+				6BAED670D622D2B931350B22 /* DeckScreen.swift */,
+				18DCACE5542166982D12C662 /* EncoderPanel.swift */,
+				7ADFBB660673D36A6267E75B /* EncoderStrip.swift */,
+			);
+			path = Deck;
+			sourceTree = "<group>";
+		};
+		EA3237691E872717C75DF805 /* Model */ = {
+			isa = PBXGroup;
+			children = (
+				979988BB4CB2A4B5948FD360 /* Adapter.swift */,
+				F15F55435772A15B8F0E92C1 /* AgentState.swift */,
+				E532E5457B6DFDE324D8F11C /* Protocol.swift */,
+				28DFE82D8F7AC7C7566940F3 /* Timeline.swift */,
+			);
+			path = Model;
+			sourceTree = "<group>";
+		};
+		ECCAC6633BEC4D922A3FC2CB /* Common */ = {
+			isa = PBXGroup;
+			children = (
+				CCEE70EEDDCA2199E894D275 /* GaugeBar.swift */,
+				F2E6BEE1A730418C1EBDC048 /* StatusBadge.swift */,
+			);
+			path = Common;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1B95C9515EBB97FD5022C08C /* AgentDeck_iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 28706EF474E36656FE6F358F /* Build configuration list for PBXNativeTarget "AgentDeck_iOS" */;
+			buildPhases = (
+				8B21BDA03326CA24C4D53936 /* Sources */,
+				CAF7450BFFDFB2ADFF6917A2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AgentDeck_iOS;
+			packageProductDependencies = (
+			);
+			productName = AgentDeck_iOS;
+			productReference = 93F845B5C2D610A38007523C /* AgentDeck_iOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		3BF710A3BC80FD9626668CA0 /* AgentDeckTests_macOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 173A599128D27D8011B994FF /* Build configuration list for PBXNativeTarget "AgentDeckTests_macOS" */;
+			buildPhases = (
+				4DC542605209BA53C7858E07 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5C58683826A84153DDDCAA83 /* PBXTargetDependency */,
+			);
+			name = AgentDeckTests_macOS;
+			packageProductDependencies = (
+			);
+			productName = AgentDeckTests_macOS;
+			productReference = 4FD4B5CF393BD9B6CEDBCFAF /* AgentDeckTests_macOS.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		CAB442A856E23517772A7850 /* AgentDeckTests_iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DBF2997FF90CFE9269D9B4A4 /* Build configuration list for PBXNativeTarget "AgentDeckTests_iOS" */;
+			buildPhases = (
+				74FC41604BE6B4D30AB7D502 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1565DB901A9FDE389E5508B7 /* PBXTargetDependency */,
+			);
+			name = AgentDeckTests_iOS;
+			packageProductDependencies = (
+			);
+			productName = AgentDeckTests_iOS;
+			productReference = BACE8D6702379152FF2F5E46 /* AgentDeckTests_iOS.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		E4D80DB9ABDABC379778AF7C /* AgentDeck_macOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 42C2CA2A040E2C6132174542 /* Build configuration list for PBXNativeTarget "AgentDeck_macOS" */;
+			buildPhases = (
+				8E44C96C113CBB97CA764F0B /* Sources */,
+				D764BEAE054E73967069EFBD /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AgentDeck_macOS;
+			packageProductDependencies = (
+			);
+			productName = AgentDeck_macOS;
+			productReference = 960777CE6214381ADD730F6D /* AgentDeck_macOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		829342115C44483C1C4BC729 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					1B95C9515EBB97FD5022C08C = {
+						ProvisioningStyle = Automatic;
+					};
+					E4D80DB9ABDABC379778AF7C = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 19A00758BFDB219F41274DBD /* Build configuration list for PBXProject "AgentDeck" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 670120DE2A7EB1192E335B94;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 64AA1BD02816AC44948E2CFF /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CAB442A856E23517772A7850 /* AgentDeckTests_iOS */,
+				3BF710A3BC80FD9626668CA0 /* AgentDeckTests_macOS */,
+				1B95C9515EBB97FD5022C08C /* AgentDeck_iOS */,
+				E4D80DB9ABDABC379778AF7C /* AgentDeck_macOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CAF7450BFFDFB2ADFF6917A2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				809CC98B24E5F976E5E84AF9 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D764BEAE054E73967069EFBD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5FBCFE8F4EBDCB7937FECA50 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4DC542605209BA53C7858E07 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				27F0FAF7D849BC85134C3333 /* ProtocolTests.swift in Sources */,
+				DBE7242898F7F03CB3463B6D /* TimelineTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		74FC41604BE6B4D30AB7D502 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3173BC2B844664891B8F3934 /* ProtocolTests.swift in Sources */,
+				4F6DEDF8FD3A71AFD059278D /* TimelineTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8B21BDA03326CA24C4D53936 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7DBB3B78D2F8A74614C9047E /* Adapter.swift in Sources */,
+				10DE349A3E6CF8732C19FB99 /* AgentDeckApp.swift in Sources */,
+				B5479F2C2CBAE673EB1C3D93 /* AgentState.swift in Sources */,
+				70568489EF1BE34061D43FEA /* AgentStateHolder.swift in Sources */,
+				5885567AA794EB28CB6FF248 /* BridgeConnection.swift in Sources */,
+				4FF0657D874D06594ED97850 /* BridgeDiscovery.swift in Sources */,
+				555F794C0467FB252D1B882E /* BridgeEventParser.swift in Sources */,
+				DBDF1CEA6BCF9332097D55A1 /* ConnectionOverlay.swift in Sources */,
+				DB3357B8FB7E0377BC728BB6 /* ContentView.swift in Sources */,
+				63CD385365058110A909E967 /* DeckButton.swift in Sources */,
+				AF13EFF172BDC21B49AF6CFC /* DeckButtonLayout.swift in Sources */,
+				5CE6EE06865BBDDF286217F9 /* DeckScreen.swift in Sources */,
+				826BCA8436C33126337EA9C4 /* EncoderPanel.swift in Sources */,
+				71189CF707CC15B96AA46473 /* EncoderStrip.swift in Sources */,
+				21AF157660FF2065535E3EE2 /* GaugeBar.swift in Sources */,
+				DCDA12FC8E9B9961BA2D8182 /* MonitorScreen.swift in Sources */,
+				7D1FA2E1BD47D35C7E3FEB23 /* Protocol.swift in Sources */,
+				EBFF02B51A6DD408055A8955 /* SessionMetrics.swift in Sources */,
+				D53BC123AAE467EB342A5041 /* SettingsScreen.swift in Sources */,
+				DF804392C56333041A3C2784 /* StatusBadge.swift in Sources */,
+				9ED5461741C1FC0A6ADC249F /* Timeline.swift in Sources */,
+				DCD31A20E9139F8661F0E321 /* TimelineStore.swift in Sources */,
+				59639A63610FCE07B0AFA654 /* VoiceRecorder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8E44C96C113CBB97CA764F0B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1D193B9524AA5E561A899882 /* Adapter.swift in Sources */,
+				E082EDBFACADF5992BE8A9E0 /* AgentDeckApp.swift in Sources */,
+				D169DFD5EA54C323E1128E7B /* AgentState.swift in Sources */,
+				E5B1774D921E5B4C508D73A0 /* AgentStateHolder.swift in Sources */,
+				13675372BAD515B5A8447296 /* BridgeConnection.swift in Sources */,
+				3C58A78598B065AC2EDD44B8 /* BridgeDiscovery.swift in Sources */,
+				BC7898764CE415919C2E81AC /* BridgeEventParser.swift in Sources */,
+				838450A0CF588614736D3F60 /* ConnectionOverlay.swift in Sources */,
+				E940E2714946D07856C8FB37 /* ContentView.swift in Sources */,
+				E746E8ADB24CE54FF5BC2ECF /* DeckButton.swift in Sources */,
+				DDE436CB226AAFC778EE8AE4 /* DeckButtonLayout.swift in Sources */,
+				BBF5AD70DC28BE71141620C4 /* DeckScreen.swift in Sources */,
+				AC46A5F03466FF67A8EFD499 /* EncoderPanel.swift in Sources */,
+				DA958236FD13BC95BBE523B2 /* EncoderStrip.swift in Sources */,
+				1A25F581608D3C282D70FAF5 /* GaugeBar.swift in Sources */,
+				A50EA56C00F6A51F498DD20E /* MonitorScreen.swift in Sources */,
+				2E7C2729C1B7011497854D53 /* Protocol.swift in Sources */,
+				ACA8B3AC8A89039E02DB0B25 /* SessionMetrics.swift in Sources */,
+				38E9C043A76BB267FCACB4B7 /* SettingsScreen.swift in Sources */,
+				67FA80518E8F347B39576FCC /* StatusBadge.swift in Sources */,
+				9E30D4D0BEE3CB402E8741D8 /* Timeline.swift in Sources */,
+				EA32929C78C6088451DDF476 /* TimelineStore.swift in Sources */,
+				6517B9BB944ABB74DCC81642 /* VoiceRecorder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1565DB901A9FDE389E5508B7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1B95C9515EBB97FD5022C08C /* AgentDeck_iOS */;
+			targetProxy = F0488B9367BFD97E93209CE3 /* PBXContainerItemProxy */;
+		};
+		5C58683826A84153DDDCAA83 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E4D80DB9ABDABC379778AF7C /* AgentDeck_macOS */;
+			targetProxy = 2F6375901F34A1EFEB0BE4CA /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0BA095AD5FA1EC9A5E44B3AB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentDeck_macOS.app/Contents/MacOS/AgentDeck_macOS";
+			};
+			name = Release;
+		};
+		2930907BF0471CB90D2D5459 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		5BAFD22D350185D90AE95421 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = AgentDeck/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard;
+				PRODUCT_NAME = AgentDeck;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5D0AE4EA8EA1CB6A7B30FF2D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		B261CB923F15B7919800AAA3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = AgentDeck/Resources/AgentDeck.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = AgentDeck/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard;
+				PRODUCT_NAME = AgentDeck;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		CCEA9484E73F4F23DF1BAFA8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentDeck_iOS.app/AgentDeck_iOS";
+			};
+			name = Release;
+		};
+		CDA97A11E586550BBBFF05C0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentDeck_macOS.app/Contents/MacOS/AgentDeck_macOS";
+			};
+			name = Debug;
+		};
+		E97D9DAD98830F00501B9250 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentDeck_iOS.app/AgentDeck_iOS";
+			};
+			name = Debug;
+		};
+		EB1BB193E5BE4E91F46BA5E0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = AgentDeck/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard;
+				PRODUCT_NAME = AgentDeck;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F1AC575B483B651F347D003B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = AgentDeck/Resources/AgentDeck.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = AgentDeck/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard;
+				PRODUCT_NAME = AgentDeck;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		173A599128D27D8011B994FF /* Build configuration list for PBXNativeTarget "AgentDeckTests_macOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CDA97A11E586550BBBFF05C0 /* Debug */,
+				0BA095AD5FA1EC9A5E44B3AB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		19A00758BFDB219F41274DBD /* Build configuration list for PBXProject "AgentDeck" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2930907BF0471CB90D2D5459 /* Debug */,
+				5D0AE4EA8EA1CB6A7B30FF2D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		28706EF474E36656FE6F358F /* Build configuration list for PBXNativeTarget "AgentDeck_iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5BAFD22D350185D90AE95421 /* Debug */,
+				EB1BB193E5BE4E91F46BA5E0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		42C2CA2A040E2C6132174542 /* Build configuration list for PBXNativeTarget "AgentDeck_macOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1AC575B483B651F347D003B /* Debug */,
+				B261CB923F15B7919800AAA3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DBF2997FF90CFE9269D9B4A4 /* Build configuration list for PBXNativeTarget "AgentDeckTests_iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E97D9DAD98830F00501B9250 /* Debug */,
+				CCEA9484E73F4F23DF1BAFA8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 829342115C44483C1C4BC729 /* Project object */;
+}
