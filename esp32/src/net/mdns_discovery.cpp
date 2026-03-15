@@ -33,26 +33,45 @@ bool mdnsPoll(BridgeInfo& out) {
     int n = MDNS.queryService("_agentdeck", "_tcp");
     if (n <= 0) return false;
 
-    // Pick first available service
+    // Prefer daemon bridge for consistent state (daemon aggregates all sessions)
+    int daemonIdx = -1;
+    int firstIdx = -1;
+
     for (int i = 0; i < n; i++) {
-#if defined(BOARD_ROUND_AMOLED) || defined(BOARD_IPS_35)
-        IPAddress ip = MDNS.address(i);  // ESP-IDF 5.x
-#else
-        IPAddress ip = MDNS.IP(i);       // ESP-IDF 4.4
-#endif
         uint16_t port = MDNS.port(i);
         if (port == 0) continue;
+        if (firstIdx < 0) firstIdx = i;
 
+        // Check agent TXT record for daemon type
+        int numKeys = MDNS.numTxt(i);
+        for (int k = 0; k < numKeys; k++) {
+            if (MDNS.txtKey(i, k) == "agent" && MDNS.txt(i, k) == "daemon") {
+                daemonIdx = i;
+                break;
+            }
+        }
+        if (daemonIdx >= 0) break;
+    }
+
+    int selected = (daemonIdx >= 0) ? daemonIdx : firstIdx;
+    if (selected < 0) return false;
+
+    {
+#if defined(BOARD_ROUND_AMOLED) || defined(BOARD_IPS_35)
+        IPAddress ip = MDNS.address(selected);  // ESP-IDF 5.x
+#else
+        IPAddress ip = MDNS.IP(selected);       // ESP-IDF 4.4
+#endif
         snprintf(discovered.ip, sizeof(discovered.ip),
                  "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-        discovered.port = port;
+        discovered.port = MDNS.port(selected);
         discovered.found = true;
 
         // Parse TXT records
-        int numKeys = MDNS.numTxt(i);
+        int numKeys = MDNS.numTxt(selected);
         for (int k = 0; k < numKeys; k++) {
-            String key = MDNS.txtKey(i, k);
-            String val = MDNS.txt(i, k);
+            String key = MDNS.txtKey(selected, k);
+            String val = MDNS.txt(selected, k);
             if (key == "token") {
                 strncpy(discovered.token, val.c_str(), sizeof(discovered.token) - 1);
             } else if (key == "project") {
@@ -62,8 +81,8 @@ bool mdnsPoll(BridgeInfo& out) {
             }
         }
 
-        Serial.printf("[mDNS] Found bridge: %s:%d project=%s\n",
-                       discovered.ip, discovered.port, discovered.project);
+        Serial.printf("[mDNS] Found bridge: %s:%d agent=%s project=%s\n",
+                       discovered.ip, discovered.port, discovered.agent, discovered.project);
         hasNew = true;
         out = discovered;
         return true;

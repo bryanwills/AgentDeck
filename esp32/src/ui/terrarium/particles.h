@@ -7,9 +7,11 @@ namespace Particles {
 
 void init();
 
-/** Spawn particles near working agents. Call every frame. */
+/** Spawn particles near working agents. Call every frame.
+ *  octStates: per-octopus state array (from renderer daemon mapping) */
 void update(float dt, float time, CreatureState octState, uint8_t octCount,
-            CrayfishState cfState, bool showCrayfish);
+            CrayfishState cfState, bool showCrayfish,
+            const CreatureState* octStates = nullptr);
 
 /** Render all active particles. */
 void render(uint16_t* buf, int w, int h, float time);

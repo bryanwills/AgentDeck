@@ -180,11 +180,73 @@ void render(float dt) {
 
     // Read state snapshot
     lockState();
+    bool hasData = g_state.dataReceived;
     CreatureState cState = g_state.creatureState;
     CrayfishState cfState = g_state.crayfishState;
     TetraState tState = g_state.tetraState;
-    uint8_t octCount = max((uint8_t)1, g_state.octopusCount);
-    bool showCrayfish = g_state.gatewayAvailable || g_state.crayfishCount > 0;
+    // Both "daemon" and "openclaw" agentType come from the daemon process.
+    // When gateway is alive, daemon reports "openclaw" — but it's still the daemon
+    // and still has sessions_list for per-session state mapping.
+    bool isDaemon = hasData && (strcmp(g_state.agentType, "daemon") == 0 ||
+                                 strcmp(g_state.agentType, "openclaw") == 0);
+    bool isOctopusAgent = hasData &&
+                          strcmp(g_state.agentType, "openclaw") != 0 &&
+                          strcmp(g_state.agentType, "daemon") != 0;
+    uint8_t octCount = hasData ? g_state.octopusCount : 0;
+    // Default to 1 octopus only for claude-code agents (before sessions_list arrives)
+    if (octCount == 0 && isOctopusAgent) octCount = 1;
+    bool showCrayfish = hasData && (g_state.gatewayAvailable || g_state.gatewayHasError || g_state.crayfishCount > 0);
+
+    // Per-octopus creature state: daemon reports its own state (always IDLE),
+    // but sibling sessions have their real states in sessions[].state
+    CreatureState octStates[MAX_OCTOPUS];
+    static uint32_t lastDbg = 0;
+    if (isDaemon && millis() - lastDbg > 3000) {
+        lastDbg = millis();
+        Serial.printf("[Terrarium] isDaemon=%d octCount=%d sessionCount=%d cState=%d\n",
+                      isDaemon, octCount, g_state.sessionCount, (int)cState);
+        for (uint8_t s = 0; s < g_state.sessionCount; s++) {
+            Serial.printf("  session[%d] type=%s state=%s alive=%d\n",
+                          s, g_state.sessions[s].agentType, g_state.sessions[s].state,
+                          g_state.sessions[s].alive);
+        }
+    }
+    if (isDaemon) {
+        // Map sibling session states to creature states
+        uint8_t octIdx = 0;
+        for (uint8_t s = 0; s < g_state.sessionCount && octIdx < MAX_OCTOPUS; s++) {
+            if (strcmp(g_state.sessions[s].agentType, "claude-code") != 0) continue;
+            if (!g_state.sessions[s].alive) continue;
+            if (strcmp(g_state.sessions[s].state, "processing") == 0) {
+                octStates[octIdx] = CreatureState::WORKING;
+            } else if (strcmp(g_state.sessions[s].state, "awaiting_permission") == 0 ||
+                       strcmp(g_state.sessions[s].state, "awaiting_option") == 0 ||
+                       strcmp(g_state.sessions[s].state, "awaiting_diff") == 0) {
+                octStates[octIdx] = CreatureState::ASKING;
+            } else if (strcmp(g_state.sessions[s].state, "idle") == 0) {
+                octStates[octIdx] = CreatureState::FLOATING;
+            } else {
+                octStates[octIdx] = CreatureState::FLOATING;
+            }
+            octIdx++;
+        }
+        // Fill remaining with daemon's own state
+        for (; octIdx < MAX_OCTOPUS; octIdx++) {
+            octStates[octIdx] = cState;
+        }
+        // Also update the "overall" cState for particles/bubbles/tetra
+        // Use the most active sibling state
+        if (octCount > 0) {
+            cState = octStates[0];
+            for (uint8_t i = 1; i < octCount; i++) {
+                if (octStates[i] == CreatureState::WORKING) cState = CreatureState::WORKING;
+            }
+        }
+    } else {
+        for (uint8_t i = 0; i < MAX_OCTOPUS; i++) {
+            octStates[i] = cState;
+        }
+    }
     unlockState();
 
     // Render layers bottom-to-top (direct buffer writes)
@@ -209,13 +271,13 @@ void render(float dt) {
         Crayfish::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime, cfState);
     }
 
-    // 7. Octopus(es)
+    // 7. Octopus(es) — per-instance state (daemon reports sibling states)
     for (uint8_t i = 0; i < octCount && i < MAX_OCTOPUS; i++) {
-        Octopus::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime, cState, i, octCount);
+        Octopus::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime, dt, octStates[i], i, octCount);
     }
 
     // 8. Data particles (food crumbs from working agents)
-    Particles::update(dt, totalTime, cState, octCount, cfState, showCrayfish);
+    Particles::update(dt, totalTime, cState, octCount, cfState, showCrayfish, octStates);
     Particles::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime);
 
     // 9. Neon tetra school (chases food particles)
@@ -225,8 +287,8 @@ void render(float dt) {
     // 10. Floating particles (plankton/dust)
     Water::renderParticles(canvas_buf, SCREEN_W, SCREEN_H, totalTime);
 
-    // 11. Bubbles
-    Bubbles::update(dt, totalTime, cState);
+    // 11. Bubbles — pass octCount so exhale comes from all octopuses
+    Bubbles::update(dt, totalTime, cState, octCount);
     Bubbles::render(canvas_buf, SCREEN_W, SCREEN_H);
 
     // 12. Water surface waves + sparkles

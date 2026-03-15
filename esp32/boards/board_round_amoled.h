@@ -1,7 +1,7 @@
 #pragma once
 
 // ===== JC3636W518 — 1.8" Round AMOLED 360x360 (ST77916 QSPI + CST816S) =====
-// Port: cu.usbmodem211201 (Native JTAG)
+// Port: cu.usbmodem201201 (Native JTAG)
 // MAC: D0:CF:13:1E:0B:64
 // Manufacturer: Guition (Jingcai)
 

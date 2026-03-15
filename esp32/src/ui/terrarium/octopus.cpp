@@ -5,8 +5,10 @@
 #include "../display.h"
 #include "config.h"
 #include "../../state/agent_state.h"
+#include <Arduino.h>
 #include <lvgl.h>
 #include <cstring>
+#include <cmath>
 
 // 14x5 pixel grid — exact replica of Android OctopusCreature.kt
 // 0=empty, 1=body, 2=eye, 3=left_arm, 4=right_arm, 5=left_leg, 6=right_leg
@@ -26,6 +28,22 @@ static float jitterX[MAX_OCTOPUS];
 static float jitterY[MAX_OCTOPUS];
 static float phaseOffset[MAX_OCTOPUS];
 
+// Swimming state per instance
+static float currentX[MAX_OCTOPUS];
+static float currentY[MAX_OCTOPUS];
+static float targetX[MAX_OCTOPUS];
+static float targetY[MAX_OCTOPUS];
+static float waypointTimer[MAX_OCTOPUS];
+static float waypointInterval[MAX_OCTOPUS];
+static CreatureState prevState[MAX_OCTOPUS];
+
+// Simple PRNG for waypoint selection
+static uint32_t swimRng = 54321;
+static float swimRngFloat() {
+    swimRng = swimRng * 1103515245 + 12345;
+    return (float)((swimRng >> 16) & 0x7FFF) / 32767.0f;
+}
+
 namespace Octopus {
 
 void init() {
@@ -34,17 +52,24 @@ void init() {
         jitterX[i] = ((i * 7 + 3) % 11 - 5) * 0.006f;  // ±0.03
         jitterY[i] = ((i * 13 + 5) % 9 - 4) * 0.005f;
         phaseOffset[i] = i * 1.7f;
+        currentX[i] = Layout::OctHomeX;
+        currentY[i] = Layout::OctWorkingY;
+        targetX[i] = currentX[i];
+        targetY[i] = currentY[i];
+        waypointTimer[i] = 0;
+        waypointInterval[i] = 1.5f + i * 0.3f;
+        prevState[i] = CreatureState::SLEEPING;
     }
 }
 
-void render(uint16_t* buf, int w, int h, float time,
+void render(uint16_t* buf, int w, int h, float time, float dt,
             CreatureState state, uint8_t idx, uint8_t total) {
 
     float bodyRadius = w * Layout::OctBodyRadiusFrac;
     float pixW = bodyRadius * 2.0f / 14.0f;
     float pixH = pixW * PIXEL_ASPECT;
 
-    // Calculate position
+    // Calculate home position
     float homeX;
     if (total <= 1) {
         homeX = Layout::OctHomeX;
@@ -69,6 +94,35 @@ void render(uint16_t* buf, int w, int h, float time,
     }
     // X-correlated depth offset
     homeY += (homeX - 0.4f) * 0.15f + jitterY[idx];
+
+    // --- Swimming logic (WORKING state) ---
+    bool justEnteredWorking = (state == CreatureState::WORKING && prevState[idx] != CreatureState::WORKING);
+    prevState[idx] = state;
+
+    float renderX, renderY;
+
+    if (state == CreatureState::WORKING) {
+        // Sin-based swimming: continuous smooth movement within swim bounds
+        // Per-instance phase offset for independent movement
+        float swimPhase = time * 0.4f + phaseOffset[idx];
+        float wanderX = fastSin(swimPhase) * 0.12f;
+        float wanderY = fastCos(swimPhase * 0.7f) * 0.08f;
+        renderX = homeX + wanderX;
+        renderY = homeY + wanderY;
+        // Clamp to swim bounds
+        if (renderX < Layout::OctSwimMinX) renderX = Layout::OctSwimMinX;
+        if (renderX > Layout::OctSwimMaxX) renderX = Layout::OctSwimMaxX;
+        if (renderY < Layout::OctSwimMinY) renderY = Layout::OctSwimMinY;
+        if (renderY > Layout::OctSwimMaxY) renderY = Layout::OctSwimMaxY;
+        // Track for particles/bubbles
+        currentX[idx] = renderX;
+        currentY[idx] = renderY;
+    } else {
+        renderX = homeX;
+        renderY = homeY;
+        currentX[idx] = homeX;
+        currentY[idx] = homeY;
+    }
 
     float t = time + phaseOffset[idx];
 
@@ -106,8 +160,8 @@ void render(uint16_t* buf, int w, int h, float time,
             break;
     }
 
-    int cx = (int)(homeX * w);
-    int cy = (int)(homeY * h + breathBob);
+    int cx = (int)(renderX * w);
+    int cy = (int)(renderY * h + breathBob);
     int gridW = (int)(14 * (pixW + PIXEL_GAP));
     int gridH = (int)(5 * (pixH + PIXEL_GAP));
     int startX = cx - gridW / 2;
@@ -194,7 +248,7 @@ void render(uint16_t* buf, int w, int h, float time,
     } else if (g_state.projectName[0]) {
         strncpy(name, g_state.projectName, sizeof(name) - 1);
     } else {
-        strncpy(name, "claude", sizeof(name) - 1);
+        strncpy(name, "", sizeof(name) - 1);
     }
     name[sizeof(name) - 1] = '\0';
     unlockState();
@@ -256,6 +310,16 @@ void render(uint16_t* buf, int w, int h, float time,
 
         lv_canvas_finish_layer(cvs, &layer);
     }
+}
+
+float getX(uint8_t idx) {
+    if (idx >= MAX_OCTOPUS) return Layout::OctHomeX;
+    return currentX[idx];
+}
+
+float getY(uint8_t idx) {
+    if (idx >= MAX_OCTOPUS) return Layout::OctStandingY;
+    return currentY[idx];
 }
 
 }  // namespace Octopus

@@ -127,7 +127,7 @@ static void uiTask(void* param) {
     // Create screens
     scrSplash = Screens::splashCreate();
     lv_screen_load(scrSplash);
-    Screens::splashSetStatus("Connecting...");
+    Screens::splashSetStatus("Searching for bridges...");
 
     scrAquarium = Screens::aquariumCreate();
     Screens::permissionCreate(scrAquarium);
@@ -144,12 +144,11 @@ static void uiTask(void* param) {
 
     uint32_t lastFrameMs = millis();
     uint32_t splashStartMs = millis();
-    uint32_t lastDisconnectSplashMs = 0;
     bool wasTimelineView = false;
     bool everConnected = false;
-    constexpr uint32_t SPLASH_AUTO_MS = 3000;       // Boot splash → aquarium after 3s
-    constexpr uint32_t RECONNECT_INTERVAL_MS = 30000; // Show reconnecting every 30s
-    constexpr uint32_t RECONNECT_SHOW_MS = 3000;     // Show reconnecting for 3s
+    bool prevConnStatus = false;   // Track connection changes for status overlay
+    bool prevWifiStatus = false;
+    constexpr uint32_t SPLASH_AUTO_MS = 1500;       // Boot splash → aquarium after 1.5s
 
     while (true) {
         uint32_t now = millis();
@@ -163,7 +162,7 @@ static void uiTask(void* param) {
 
         // Read view state
         lockState();
-        bool connected = g_state.wsConnected;
+        bool connected = g_state.wsConnected || Net::serialConnected();
         bool wantTimeline = g_state.timelineView;
         unlockState();
 
@@ -176,12 +175,17 @@ static void uiTask(void* param) {
                 lv_screen_load_anim(scrAquarium, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
                 currentView = VIEW_AQUARIUM;
             } else if (now - splashStartMs > SPLASH_AUTO_MS) {
-                // Not connected but splash timeout — show aquarium in demo mode
+                // Not connected but splash timeout — show aquarium with status overlay
                 lv_screen_load_anim(scrAquarium, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
                 currentView = VIEW_AQUARIUM;
-                lastDisconnectSplashMs = now;  // Reset interval timer
+                // Show initial connection status on aquarium
+                if (!Net::wifiConnected()) {
+                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::NO_WIFI);
+                } else {
+                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::SEARCHING);
+                }
             } else if (Net::wifiConnected()) {
-                Screens::splashSetStatus("Searching for bridge...");
+                Screens::splashSetStatus("Searching for bridges...");
             }
         }
 
@@ -195,14 +199,22 @@ static void uiTask(void* param) {
         }
         wasTimelineView = wantTimeline;
 
-        // Periodic reconnecting reminder while disconnected
-        if (!connected && currentView == VIEW_AQUARIUM
-            && now - lastDisconnectSplashMs > RECONNECT_INTERVAL_MS) {
-            lv_screen_load_anim(scrSplash, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
-            currentView = VIEW_SPLASH;
-            Screens::splashSetStatus(everConnected ? "Reconnecting..." : "Connecting...");
-            splashStartMs = now;
-            lastDisconnectSplashMs = now;
+        // Update connection status overlay on aquarium
+        bool wifiNow = Net::wifiConnected();
+        if (connected != prevConnStatus || wifiNow != prevWifiStatus) {
+            prevConnStatus = connected;
+            prevWifiStatus = wifiNow;
+            if (currentView == VIEW_AQUARIUM || currentView == VIEW_TIMELINE) {
+                if (connected) {
+                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::HIDDEN);
+                } else if (!wifiNow) {
+                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::NO_WIFI);
+                } else if (everConnected) {
+                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::RECONNECTING);
+                } else {
+                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::SEARCHING);
+                }
+            }
         }
 
         // Update current view
@@ -230,6 +242,7 @@ static void uiTask(void* param) {
 
 // ===== Arduino setup =====
 void setup() {
+    Serial.setRxBufferSize(2048);  // Default 256 too small for large JSON messages
     Serial.begin(115200);
     // Native USB CDC: wait for host connection (up to 3 seconds)
     for (int i = 0; i < 30 && !Serial; i++) delay(100);

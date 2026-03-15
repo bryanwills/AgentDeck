@@ -24,6 +24,9 @@ static void onReboot(lv_event_t* e) {
 static void onBrightnessChange(lv_event_t* e) {
     int val = lv_slider_get_value(slider);
     UI::setBrightness(val);
+    lockState();
+    g_state.userBrightness = (uint8_t)val;
+    unlockState();
     char buf[8];
     snprintf(buf, sizeof(buf), "%d%%", val * 100 / 255);
     lv_label_set_text(lblBrightVal, buf);

@@ -1,4 +1,5 @@
 #include "ws_client.h"
+#include "serial_client.h"
 #include "protocol.h"
 #include "config.h"
 #include "../state/agent_state.h"
@@ -22,9 +23,13 @@ static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
             Serial.println("[WS] Disconnected");
             connected = false;
             lockState();
-            g_state.wsConnected = false;
-            g_state.state = AgentState::DISCONNECTED;
-            g_state.updateCreatureStates();
+            // Only mark disconnected if serial is also not connected
+            // (serial data is authoritative — don't override it)
+            if (!Net::serialConnected()) {
+                g_state.wsConnected = false;
+                g_state.state = AgentState::DISCONNECTED;
+                g_state.updateCreatureStates();
+            }
             unlockState();
             break;
 

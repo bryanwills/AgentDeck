@@ -73,6 +73,9 @@ static void handleStateUpdate(JsonObject& obj) {
     g_state.gatewayAvailable = obj["gatewayAvailable"] | false;
     g_state.gatewayHasError = obj["gatewayHasError"] | false;
 
+    // Mark that we've received real data from bridge
+    g_state.dataReceived = true;
+
     // Derive creature states
     g_state.updateCreatureStates();
 
@@ -81,6 +84,7 @@ static void handleStateUpdate(JsonObject& obj) {
 
 static void handleUsageUpdate(JsonObject& obj) {
     lockState();
+    g_state.dataReceived = true;
 
     // Percent fields: use -1.0f sentinel for "no data" (0 is a valid value).
     // When bridge omits the field (stale TTL expired), clear to sentinel
@@ -180,6 +184,7 @@ static void handleUsageUpdate(JsonObject& obj) {
 
 static void handleSessionsList(JsonObject& obj) {
     lockState();
+    g_state.dataReceived = true;
 
     JsonArray sessions = obj["sessions"].as<JsonArray>();
     g_state.sessionCount = min((int)sessions.size(), 6);
@@ -212,7 +217,9 @@ static void handleSessionsList(JsonObject& obj) {
         }
     }
 
-    // Populate sessionNames for octopus name tags
+    // Populate sessionNames for octopus name tags (with dedup numbering)
+    // First pass: collect raw names
+    char rawNames[3][24];
     uint8_t nameIdx = 0;
     for (uint8_t i = 0; i < g_state.sessionCount && nameIdx < 3; i++) {
         if (g_state.sessions[i].alive &&
@@ -220,14 +227,36 @@ static void handleSessionsList(JsonObject& obj) {
             strcmp(g_state.sessions[i].agentType, "daemon") != 0) {
             const char* name = g_state.sessions[i].projectName;
             if (name[0]) {
-                strncpy(g_state.sessionNames[nameIdx], name,
-                        sizeof(g_state.sessionNames[nameIdx]) - 1);
-                g_state.sessionNames[nameIdx][sizeof(g_state.sessionNames[nameIdx]) - 1] = '\0';
+                strncpy(rawNames[nameIdx], name, sizeof(rawNames[nameIdx]) - 1);
+                rawNames[nameIdx][sizeof(rawNames[nameIdx]) - 1] = '\0';
             } else {
-                snprintf(g_state.sessionNames[nameIdx],
-                         sizeof(g_state.sessionNames[nameIdx]), "Session %d", nameIdx + 1);
+                snprintf(rawNames[nameIdx], sizeof(rawNames[nameIdx]), "Session %d", nameIdx + 1);
             }
             nameIdx++;
+        }
+    }
+    // Second pass: detect duplicates and add #1, #2 suffixes
+    for (uint8_t i = 0; i < nameIdx; i++) {
+        // Check if this name appears more than once
+        bool hasDup = false;
+        for (uint8_t j = 0; j < nameIdx; j++) {
+            if (j != i && strcmp(rawNames[i], rawNames[j]) == 0) {
+                hasDup = true;
+                break;
+            }
+        }
+        if (hasDup) {
+            // Count which occurrence this is (1-based)
+            uint8_t occurrence = 1;
+            for (uint8_t j = 0; j < i; j++) {
+                if (strcmp(rawNames[i], rawNames[j]) == 0) occurrence++;
+            }
+            snprintf(g_state.sessionNames[i], sizeof(g_state.sessionNames[i]),
+                     "%s #%d", rawNames[i], occurrence);
+        } else {
+            strncpy(g_state.sessionNames[i], rawNames[i],
+                    sizeof(g_state.sessionNames[i]) - 1);
+            g_state.sessionNames[i][sizeof(g_state.sessionNames[i]) - 1] = '\0';
         }
     }
 
@@ -394,10 +423,15 @@ void parseMessage(const char* json, size_t length) {
         handleWifiProvision(obj);
     } else if (strcmp(type, "device_info_request") == 0) {
         sendDeviceInfo();
+    } else if (strcmp(type, "display_state") == 0) {
+        bool displayOn = obj["displayOn"] | true;
+        lockState();
+        g_state.hostDisplayOn = displayOn;
+        unlockState();
     } else if (strcmp(type, "connection") == 0) {
         // Connection status is handled by WS event callbacks
     }
-    // Ignore: encoder_state, button_state, deck_slot_map, voice_state, display_state
+    // Ignore: encoder_state, button_state, deck_slot_map, voice_state
     // (not needed for display-only client)
 }
 

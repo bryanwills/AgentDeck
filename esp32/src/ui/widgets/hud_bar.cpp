@@ -343,6 +343,7 @@ void update() {
     if (!panelLeft) return;
 
     lockState();
+    bool hasData = g_state.dataReceived;
     float p5h = g_state.fiveHourPercent;
     float p7d = g_state.sevenDayPercent;
     char reset5h[20], reset7d[20];
@@ -353,7 +354,7 @@ void update() {
     bool usageStale = g_state.usageStale;
 
     // Copy session list
-    uint8_t sessionCount = g_state.sessionCount;
+    uint8_t sessionCount = hasData ? g_state.sessionCount : (uint8_t)0;
     SessionInfo sessions[6];
     memcpy(sessions, g_state.sessions, sizeof(sessions));
 
@@ -395,8 +396,8 @@ void update() {
                 sessions[i].projectName[0] ? sessions[i].projectName : sessions[i].id,
                 (unsigned long)sColor);
         }
-    } else {
-        // Fallback: show primary session info
+    } else if (hasData) {
+        // Fallback: show primary session info (only when real data received)
         uint32_t dotColor = (strstr(primaryAgent, "openclaw") != nullptr)
             ? Theme::CrayfishShell : Theme::ClaudeBody;
         uint32_t sColor = stateColor(primaryState);
@@ -404,8 +405,12 @@ void update() {
         pos += snprintf(buf + pos, sizeof(buf) - pos,
             "#%06lX " LV_SYMBOL_BULLET "# %s  #%06lX " LV_SYMBOL_BULLET "#\n",
             (unsigned long)dotColor,
-            primaryProject[0] ? primaryProject : "AgentDeck",
+            primaryProject[0] ? primaryProject : "Agent",
             (unsigned long)sColor);
+    } else {
+        // No data yet — show connecting message
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+            "#808080 Connecting...#\n");
     }
 
     // Gateway indicator (if available but no openclaw session shown)

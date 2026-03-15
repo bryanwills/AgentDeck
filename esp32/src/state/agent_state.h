@@ -122,6 +122,13 @@ struct DashboardState {
     CreatureState creatureState;
     TetraState tetraState;
 
+    // Data reception tracking
+    bool dataReceived;  // true after first state_update from bridge
+
+    // Display
+    bool hostDisplayOn;     // Mac display awake (from display_state event)
+    uint8_t userBrightness; // user-set brightness (restored when host wakes)
+
     // View state
     bool hudVisible;
     bool timelineView;  // true = timeline screen, false = aquarium
@@ -132,6 +139,8 @@ struct DashboardState {
         creatureState = CreatureState::SLEEPING;
         crayfishState = CrayfishState::DORMANT;
         tetraState = TetraState::HOVERING;
+        hostDisplayOn = true;
+        userBrightness = 255;
         hudVisible = true;
         timelineView = false;
         // Sentinel -1.0f = "no data" (0 is a valid usage value)

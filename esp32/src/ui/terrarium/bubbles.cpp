@@ -1,4 +1,5 @@
 #include "bubbles.h"
+#include "octopus.h"
 #include "draw.h"
 #include "../theme.h"
 #include "config.h"
@@ -55,7 +56,7 @@ void init() {
     }
 }
 
-void update(float dt, float time, CreatureState state) {
+void update(float dt, float time, CreatureState state, uint8_t octCount) {
     // Spawn interval based on state
     float interval;
     switch (state) {
@@ -74,13 +75,16 @@ void update(float dt, float time, CreatureState state) {
         spawnBubble(x, y, 1.0f);
     }
 
-    // Creature exhale bubbles (every ~2.5s when active)
+    // Creature exhale bubbles (every ~2.5s when active) — from ALL octopuses
     if (state == CreatureState::WORKING || state == CreatureState::FLOATING) {
         if (time - lastExhaleTime > 2.5f) {
             lastExhaleTime = time;
-            float octY = (state == CreatureState::WORKING)
-                ? Layout::OctWorkingY : Layout::OctStandingY;
-            emitAt(Layout::OctHomeX, octY - 0.03f, 2);
+            uint8_t count = (octCount > 0) ? octCount : 1;
+            for (uint8_t i = 0; i < count; i++) {
+                float octX = Octopus::getX(i);
+                float octY = Octopus::getY(i);
+                emitAt(octX, octY - 0.03f, 2);
+            }
         }
     }
 

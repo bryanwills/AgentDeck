@@ -88,7 +88,7 @@ constexpr float SandHeightFrac = 0.35f;
 // Octopus
 constexpr float OctBodyRadiusFrac = 0.060f;   // Slightly larger for small display
 constexpr float OctHomeX          = 0.42f;
-constexpr float OctStandingY      = 0.55f;
+constexpr float OctStandingY      = 0.62f;    // Just above sand (0.65)
 constexpr float OctSleepY         = 0.70f;
 constexpr float OctWorkingY       = 0.40f;
 constexpr float OctSwimMinX       = 0.25f;
@@ -121,7 +121,7 @@ constexpr uint8_t HudHeight = 20;
 // Octopus
 constexpr float OctBodyRadiusFrac = 0.055f;
 constexpr float OctHomeX          = 0.40f;
-constexpr float OctStandingY      = 0.59f;
+constexpr float OctStandingY      = 0.63f;    // Just above sand (0.65)
 constexpr float OctSleepY         = 0.75f;
 constexpr float OctWorkingY       = 0.42f;
 constexpr float OctSwimMinX       = 0.20f;

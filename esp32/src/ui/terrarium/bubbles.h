@@ -7,8 +7,9 @@ namespace Bubbles {
 
 void init();
 
-/** Update bubble positions (rise + wobble). */
-void update(float dt, float time, CreatureState state);
+/** Update bubble positions (rise + wobble).
+ *  octCount: number of octopuses to exhale from. */
+void update(float dt, float time, CreatureState state, uint8_t octCount = 1);
 
 /** Render all bubbles. */
 void render(uint16_t* buf, int w, int h);

@@ -1,4 +1,5 @@
 #include "particles.h"
+#include "octopus.h"
 #include "draw.h"
 #include "renderer.h"
 #include "../theme.h"
@@ -76,7 +77,8 @@ void init() {
 }
 
 void update(float dt, float time, CreatureState octState, uint8_t octCount,
-            CrayfishState cfState, bool showCrayfish) {
+            CrayfishState cfState, bool showCrayfish,
+            const CreatureState* octStates) {
     // Determine spawn rate
     bool octWorking = (octState == CreatureState::WORKING);
     bool cfRouting = showCrayfish && (cfState == CrayfishState::ROUTING);
@@ -93,11 +95,20 @@ void update(float dt, float time, CreatureState octState, uint8_t octCount,
     if (spawnTimer >= spawnInterval) {
         spawnTimer = 0;
 
-        // Spawn near working octopus
-        if (octWorking) {
-            float ox = Layout::OctHomeX;
-            float oy = Layout::OctWorkingY;
-            spawnCrumb(ox, oy);
+        // Spawn near working octopuses — round-robin across all WORKING instances
+        if (octWorking && octCount > 0) {
+            static uint8_t lastSpawnIdx = 0;
+            for (uint8_t tries = 0; tries < octCount; tries++) {
+                uint8_t idx = (lastSpawnIdx + tries) % octCount;
+                bool isWorking = octStates
+                    ? (octStates[idx] == CreatureState::WORKING)
+                    : (octState == CreatureState::WORKING);
+                if (isWorking) {
+                    spawnCrumb(Octopus::getX(idx), Octopus::getY(idx));
+                    lastSpawnIdx = (idx + 1) % octCount;
+                    break;
+                }
+            }
         }
         // Spawn near routing crayfish
         if (cfRouting) {

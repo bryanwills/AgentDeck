@@ -1,7 +1,7 @@
 #pragma once
 
 // ===== JC3248W535 — 3.5" IPS 320x480 (AXS15231B QSPI + integrated touch) =====
-// Port: cu.usbmodem201301 (Native JTAG)
+// Port: cu.usbmodem83201 (Native JTAG)
 // MAC: 3C:0F:02:D2:F7:38
 // Manufacturer: Guition (Jingcai)
 
