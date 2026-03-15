@@ -24,15 +24,19 @@ import type { SessionInfo } from '@agentdeck/shared/protocol';
 import {
   type RGB, COLORS, setPixel, blendPixel, glowPixel, fillRect, lerpColor,
   drawOctopus, drawCrayfish, drawTetra,
+  drawText,
   OCTO_WORLD_W, CF_WORLD_W,
 } from './pixoo-sprites.js';
 import {
-  type Camera, CAMERA_WIDE, blitWithCamera,
+  type Camera, type ActiveCreature, CAMERA_WIDE, blitWithCamera,
   updateDirector, setZone, setOverride, resetDirector,
   worldToScreen, isVisible,
 } from './pixoo-camera.js';
 
 const W = 64;
+
+// Track last render time for accurate dt calculation
+let lastRenderTime = 0;
 
 // ===== Layout (world-buffer pixel coords) =====
 const SAND_TOP = 54;
@@ -41,11 +45,122 @@ const SUBSTRATE_TOP = 60;
 const SURFACE_Y = 2;
 
 // ===== Creature World Positions (normalized 0~1) =====
-const OCTO_DEFAULT_X = 0.38;
-const OCTO_DEFAULT_Y = 0.45;
-const OCTO_GATEWAY_X = 0.34; // shift left when gateway present
 const CF_DEFAULT_X = 0.72;
-const CF_DEFAULT_Y = 0.58;
+const CF_DEFAULT_Y = 0.76; // just above sand line (sitting on ground)
+
+// ===== Creature Instance Management =====
+
+interface CreatureInstance {
+  sessionId: string;
+  agentType: string;
+  state: 'idle' | 'processing' | 'awaiting';
+  worldX: number;
+  worldY: number;
+  phaseOffset: number;
+}
+
+/** Golden ratio constant for position distribution. */
+const PHI = (1 + Math.sqrt(5)) / 2;
+
+/** Active creature instances keyed by sessionId. */
+const creatureInstances = new Map<string, CreatureInstance>();
+
+/** Agent types that represent coding agents (draw as octopus). */
+const CODING_AGENTS = new Set(['claude-code', 'codex-cli', 'opencode']);
+
+// Y positions by state — idle nearly on sand, active higher up
+const IDLE_Y = 0.78;      // just above sand line (sleeping on ground)
+const WORKING_Y = 0.42;   // mid-water (working/starburst)
+const ASKING_Y = 0.38;    // slightly higher (room for "?" bubble)
+
+function stateY(state: 'idle' | 'processing' | 'awaiting'): number {
+  if (state === 'processing') return WORKING_Y;
+  if (state === 'awaiting') return ASKING_Y;
+  return IDLE_Y;
+}
+
+/**
+ * Sync creature instances with current session data.
+ * Called every frame to add/remove/update creatures.
+ */
+function syncCreatures(
+  sessions: SessionInfo[] | null,
+  stateEvent: StateUpdateEvent | null,
+): void {
+  // Determine which sessions are alive coding agents
+  const aliveCoding: { id: string; agentType: string; state: string }[] = [];
+  if (sessions) {
+    for (const s of sessions) {
+      if (s.alive && s.agentType && CODING_AGENTS.has(s.agentType)) {
+        aliveCoding.push({ id: s.id, agentType: s.agentType, state: s.state ?? 'idle' });
+      }
+    }
+  }
+
+  // If no sessions data, use stateEvent as single session (only for coding agents)
+  const stateAgentType = (stateEvent?.agentType ?? 'claude-code') as string;
+  if (aliveCoding.length === 0 && stateEvent && CODING_AGENTS.has(stateAgentType)) {
+    aliveCoding.push({
+      id: '_primary',
+      agentType: stateAgentType,
+      state: simplifiedState(stateEvent.state ?? State.IDLE),
+    });
+  }
+
+  // Remove creatures for dead sessions
+  for (const id of creatureInstances.keys()) {
+    if (!aliveCoding.some(s => s.id === id)) {
+      creatureInstances.delete(id);
+    }
+  }
+
+  // Add/update creatures
+  for (let i = 0; i < aliveCoding.length; i++) {
+    const s = aliveCoding[i];
+    const existing = creatureInstances.get(s.id);
+    const sessionState = mapSessionState(s.state);
+
+    if (existing) {
+      existing.state = sessionState;
+      existing.agentType = s.agentType;
+      // Update Y position based on state (X stays fixed)
+      existing.worldY = stateY(sessionState);
+    } else {
+      // Golden ratio X distribution, Y by state
+      const x = aliveCoding.length === 1
+        ? 0.38  // single session: classic center-left
+        : 0.15 + ((i * PHI) % 1) * 0.70;
+      creatureInstances.set(s.id, {
+        sessionId: s.id,
+        agentType: s.agentType,
+        state: sessionState,
+        worldX: x,
+        worldY: stateY(sessionState),
+        phaseOffset: i * 5,
+      });
+    }
+  }
+
+  // Override primary session state from stateEvent (more precise than polling)
+  // Only when stateEvent is from a coding agent — daemon/openclaw report stale IDLE
+  const aType = stateEvent?.agentType as string | undefined;
+  const isCodingAgent = CODING_AGENTS.has(aType ?? '');
+  if (stateEvent && isCodingAgent && aliveCoding.length > 0) {
+    const primaryId = aliveCoding[0].id;
+    const primary = creatureInstances.get(primaryId);
+    if (primary) {
+      const st = simplifiedState(stateEvent.state ?? State.IDLE) as 'idle' | 'processing' | 'awaiting';
+      primary.state = st;
+      primary.worldY = stateY(st);
+    }
+  }
+}
+
+function mapSessionState(state: string): 'idle' | 'processing' | 'awaiting' {
+  if (state === 'processing') return 'processing';
+  if (state === 'awaiting' || state === 'awaiting_option' || state === 'awaiting_permission' || state === 'awaiting_diff') return 'awaiting';
+  return 'idle';
+}
 
 // ===== Water Color Zones =====
 
@@ -124,7 +239,7 @@ function initTetras(): TetraState[] {
       x: 12 + Math.random() * 40,
       y: 20 + Math.random() * 25,
       heading: Math.random() > 0.5 ? 1 : -1,
-      speed: 0.2 + Math.random() * 0.3,
+      speed: 0.08 + Math.random() * 0.12,  // slower — prevents teleporting at ~1fps
       phase: Math.random() * Math.PI * 2,
       schoolId: i < 7 ? 0 : 1,
     });
@@ -136,10 +251,10 @@ function updateTetras(frame: number, surfaceY: number, maxY: number): void {
   if (!tetras) tetras = initTetras();
 
   // Two school centers via Lissajous (meet and diverge every ~25s)
-  const sc0X = 24 + Math.sin(frame * 0.04) * 16;
-  const sc0Y = Math.max(surfaceY + 8, 22) + Math.cos(frame * 0.03) * 8;
-  const sc1X = 40 + Math.sin(frame * 0.035 + 2) * 16;
-  const sc1Y = Math.max(surfaceY + 8, 24) + Math.cos(frame * 0.045 + 1) * 8;
+  const sc0X = 24 + Math.sin(frame * 0.02) * 16;
+  const sc0Y = Math.max(surfaceY + 8, 22) + Math.cos(frame * 0.015) * 8;
+  const sc1X = 40 + Math.sin(frame * 0.0175 + 2) * 16;
+  const sc1Y = Math.max(surfaceY + 8, 24) + Math.cos(frame * 0.0225 + 1) * 8;
   const centers = [{ x: sc0X, y: sc0Y }, { x: sc1X, y: sc1Y }];
 
   for (const t of tetras) {
@@ -147,9 +262,9 @@ function updateTetras(frame: number, surfaceY: number, maxY: number): void {
     const dx = sc.x - t.x;
     const dy = sc.y - t.y;
 
-    // Cohesion + individual motion
-    t.x += dx * 0.03 + t.heading * t.speed;
-    t.y += dy * 0.03 + Math.sin(frame * 0.1 + t.phase) * 0.4;
+    // Cohesion + individual motion (stronger cohesion for tighter schooling)
+    t.x += dx * 0.025 + t.heading * (t.speed * 0.5);
+    t.y += dy * 0.025 + Math.sin(frame * 0.05 + t.phase) * 0.2;
 
     // Boundary
     const minY = surfaceY + 3;
@@ -193,8 +308,8 @@ function updateBubbles(frame: number, surfaceY: number, density: number): void {
   while (bubbles.length < maxBubbles) bubbles.push(spawnBubble());
 
   for (const b of bubbles) {
-    b.y -= b.speed;
-    b.x += Math.sin(frame * 0.15 + b.wobblePhase) * 0.3;
+    b.y -= (b.speed * 0.5);
+    b.x += Math.sin(frame * 0.075 + b.wobblePhase) * 0.15;
   }
 
   bubbles = bubbles.filter(b => b.y > surfaceY + 1);
@@ -210,19 +325,19 @@ interface DataParticle {
 let dataParticles: DataParticle[] = [];
 
 function updateDataParticles(frame: number, surfaceY: number, active: boolean): void {
-  if (active && frame % 3 === 0) {
+  if (active && frame % 6 === 0) { // spawn half as often
     dataParticles.push({
       x: 10 + Math.random() * 44,
       y: surfaceY + 2 + Math.random() * 3,
-      vy: 0.4 + Math.random() * 0.3,
-      life: 30 + Math.random() * 20,
+      vy: 0.2 + Math.random() * 0.15,
+      life: 60 + Math.random() * 40,
       green: Math.random() > 0.6,
     });
   }
 
   for (const p of dataParticles) {
     p.y += p.vy;
-    p.x += Math.sin(frame * 0.2 + p.x * 0.3) * 0.4;
+    p.x += Math.sin(frame * 0.1 + p.x * 0.3) * 0.2;
     p.life--;
   }
 
@@ -250,7 +365,7 @@ function drawSeaweed(buf: Uint8Array, frame: number, surfaceY: number): void {
 
     for (let i = 0; i < maxHeight; i++) {
       const swayAmount = (i / maxHeight) * 1.5;
-      const sway = Math.round(Math.sin(frame * 0.12 + sw.phase + i * 0.4) * swayAmount);
+      const sway = Math.round(Math.sin(frame * 0.06 + sw.phase + i * 0.4) * swayAmount);
       const color = i % 3 === 0 ? COLORS.seaweedLight
         : i % 2 === 0 ? COLORS.seaweed : COLORS.seaweedDark;
       const px = sw.x + sway;
@@ -264,9 +379,9 @@ function drawSeaweed(buf: Uint8Array, frame: number, surfaceY: number): void {
 
 function drawLightRays(buf: Uint8Array, frame: number, surfaceY: number): void {
   const rays = [
-    { baseX: 15 + Math.sin(frame * 0.04) * 5, angle: 0.15 },
-    { baseX: 35 + Math.sin(frame * 0.03 + 1) * 6, angle: -0.1 },
-    { baseX: 50 + Math.sin(frame * 0.05 + 2) * 4, angle: 0.2 },
+    { baseX: 15 + Math.sin(frame * 0.02) * 5, angle: 0.15 },
+    { baseX: 35 + Math.sin(frame * 0.015 + 1) * 6, angle: -0.1 },
+    { baseX: 50 + Math.sin(frame * 0.025 + 2) * 4, angle: 0.2 },
   ];
 
   for (const ray of rays) {
@@ -291,7 +406,7 @@ function drawLightRays(buf: Uint8Array, frame: number, surfaceY: number): void {
 function drawCaustics(buf: Uint8Array, frame: number, surfaceY: number): void {
   if (surfaceY >= SAND_TOP - 3) return;
   for (let x = 1; x < W - 1; x++) {
-    const pattern = Math.sin(x * 0.5 + frame * 0.1) * Math.cos(x * 0.3 - frame * 0.07);
+    const pattern = Math.sin(x * 0.5 + frame * 0.05) * Math.cos(x * 0.3 - frame * 0.035);
     if (pattern > 0.5) {
       const intensity = (pattern - 0.5) * 0.4;
       glowPixel(buf, x, SAND_TOP, COLORS.caustic, intensity);
@@ -311,11 +426,11 @@ function drawSurface(
       ? COLORS.stateAwaiting
       : COLORS.stateIdle;
 
-  const waveSpeed = state === State.PROCESSING ? 0.25 : 0.1;
+  const waveSpeed = state === State.PROCESSING ? 0.125 : 0.05;
   const waveAmp = state === State.PROCESSING ? 1.5 : 0.8;
   const shimmerIntensity = state === State.PROCESSING ? 0.35
     : (state === State.AWAITING_OPTION || state === State.AWAITING_PERMISSION || state === State.AWAITING_DIFF)
-      ? 0.25 + Math.sin(frame * 0.3) * 0.15
+      ? 0.25 + Math.sin(frame * 0.15) * 0.15
       : 0.15;
 
   for (let x = 0; x < W; x++) {
@@ -324,7 +439,7 @@ function drawSurface(
 
     blendPixel(buf, x, wy, palette.surface, 0.8);
     if (wave > waveAmp * 0.3) glowPixel(buf, x, wy, shimmerColor, shimmerIntensity);
-    if (wave > waveAmp * 0.6 && (x + frame) % 5 === 0) {
+    if (wave > waveAmp * 0.6 && (Math.floor(x + frame)) % 5 === 0) {
       glowPixel(buf, x, wy, COLORS.white, 0.15);
     }
   }
@@ -368,8 +483,12 @@ function drawTerrain(buf: Uint8Array): void {
 
 // ===== Main Render =====
 
-let animFrame = 0;
-let lastRenderTime = 0;
+// Time-based animation frame — ensures consistent speed regardless of who/how often
+// calls renderFrame() (device push vs preview endpoint won't interfere).
+// ~10 units/sec (100ms interval) to match 10fps loop.
+function getAnimFrame(timeOverrideMs?: number): number {
+  return Math.floor((timeOverrideMs ?? Date.now()) / 100); 
+}
 
 function creatureState(state: State): 'idle' | 'working' | 'sleeping' | 'asking' {
   switch (state) {
@@ -394,6 +513,82 @@ function simplifiedState(state: State): 'idle' | 'processing' | 'awaiting' {
   }
 }
 
+// ===== Usage HUD Helpers =====
+
+/** Gauge bar color based on usage percentage. */
+function gaugeColor(pct: number, animFrame: number): RGB {
+  if (pct >= 90) {
+    // Red with pulse
+    const pulse = (Math.sin(animFrame * 0.2) + 1) * 0.3;
+    return lerpColor(COLORS.stateError, COLORS.white, pulse) as RGB;
+  }
+  if (pct >= 70) return COLORS.stateAwaiting;  // amber
+  if (pct >= 50) return [0x00, 0xC8, 0xB4] as unknown as RGB;  // teal
+  return COLORS.stateProcessing;  // blue
+}
+
+/** Format remaining time from ISO reset timestamp — always show hours AND minutes. */
+function formatResetTime(resetsAt: string): string {
+  const ms = new Date(resetsAt).getTime() - Date.now();
+  if (ms <= 0) return '0m';
+  const totalMins = Math.max(1, Math.ceil(ms / 60000));
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hours > 0 && mins > 0) return `${hours}h${mins}`;
+  if (hours > 0) return `${hours}h`;
+  return `${mins}m`;
+}
+
+/** Draw Usage HUD in screen space (bottom-right, zoom-independent).
+ *  Text background itself acts as gauge bar — fills proportionally with gauge color.
+ */
+function drawUsageHUD(
+  buf: Uint8Array, usageEvent: UsageEvent | null, animFrame: number,
+): void {
+  // Skip HUD entirely when no usage data available
+  if (!usageEvent || usageEvent.fiveHourPercent == null) return;
+
+  const pct = usageEvent.fiveHourPercent;
+  const color = gaugeColor(pct, animFrame);
+
+  // Build text string
+  const pctStr = `${Math.round(pct)}%`;
+  const resetStr = usageEvent.fiveHourResetsAt
+    ? ` ${formatResetTime(usageEvent.fiveHourResetsAt)}`
+    : '';
+  const fullText = pctStr + resetStr;
+
+  // Text position: 3×5 pixel font, right-aligned at x=63, y row
+  const textY = 58;
+  const rightX = 63;
+  // Each char = 3px glyph + 1px gap = 4px. Total width = n*4 - 1 (no trailing gap)
+  const textW = fullText.length * 4 - 1;
+  const leftX = rightX - textW;
+
+  // Background area: 1px padding around text
+  const bgLeft = Math.max(0, leftX - 1);
+  const bgRight = 63;
+  const bgTop = textY - 1;
+  const bgBot = textY + 5;  // 5px font height
+  const bgW = bgRight - bgLeft + 1;
+  const fillW = Math.round(bgW * Math.max(0, Math.min(100, pct)) / 100);
+
+  // Draw background: gauge fill from left, dark remainder
+  for (let y = bgTop; y <= bgBot; y++) {
+    for (let x = bgLeft; x <= bgRight; x++) {
+      const rel = x - bgLeft;
+      if (rel < fillW) {
+        blendPixel(buf, x, y, color, 0.3);  // gauge fill
+      } else {
+        blendPixel(buf, x, y, COLORS.black, 0.5);  // dark background
+      }
+    }
+  }
+
+  // Draw text on top
+  drawText(buf, fullText, rightX, textY, color);
+}
+
 /**
  * Render a complete 64×64 frame with camera system.
  * Returns 12,288-byte RGB buffer.
@@ -402,31 +597,52 @@ export function renderFrame(
   stateEvent: StateUpdateEvent | null,
   usageEvent: UsageEvent | null,
   sessions: SessionInfo[] | null,
+  timeOverrideMs?: number,
 ): Uint8Array {
   const worldBuf = new Uint8Array(W * W * 3);
   const outputBuf = new Uint8Array(W * W * 3);
-  animFrame += 4; // smoother transitions (was 6 — too jumpy)
+  const animFrame = getAnimFrame(timeOverrideMs);
 
   const state = stateEvent?.state ?? State.IDLE;
   const usagePct = usageEvent?.fiveHourPercent ?? 0;
   const surfaceY = SURFACE_Y;
   const palette = getWaterPalette(usagePct);
 
-  const hasGateway = stateEvent?.gatewayAvailable ?? false;
-  const sessionCount = sessions?.filter(s => s.alive && s.agentType === 'claude-code').length ?? 1;
+  // Gateway available: stateEvent flag OR openclaw session in sessions list
+  const hasGateway = (stateEvent?.gatewayAvailable ?? false)
+    || (sessions?.some(s => s.agentType === 'openclaw') ?? false);
 
-  // === Compute creature world positions ===
-  const octoX = hasGateway ? OCTO_GATEWAY_X : OCTO_DEFAULT_X;
-  const octoY = OCTO_DEFAULT_Y;
+  // === Sync creature instances ===
+  syncCreatures(sessions, stateEvent);
+
+  // === Build active creatures list for camera ===
+  const activeCreatures: ActiveCreature[] = [];
+  for (const c of creatureInstances.values()) {
+    if (c.state === 'awaiting') {
+      activeCreatures.push({ x: c.worldX, y: c.worldY, priority: 0 });
+    } else if (c.state === 'processing') {
+      activeCreatures.push({ x: c.worldX, y: c.worldY, priority: 1 });
+    }
+  }
+
+  // Crayfish routing
   const cfX = CF_DEFAULT_X;
   const cfY = CF_DEFAULT_Y;
+  const crayfishRouting = hasGateway && (sessions?.some(s =>
+    s.agentType === 'openclaw' && s.state === 'processing'
+  ) ?? false);
+  if (crayfishRouting) {
+    activeCreatures.push({ x: cfX, y: cfY, priority: 2 });
+  }
 
   // === Update camera director ===
-  const dt = 1.2; // approximate seconds between frames at Pixoo push rate
+  const now = timeOverrideMs ?? Date.now();
+  const dt = lastRenderTime > 0 ? Math.min(5, (now - lastRenderTime) / 1000) : 1.0;
+  lastRenderTime = now;
   const schoolPos = getSchoolCenter();
   const camera = updateDirector(
-    simplifiedState(state), dt, hasGateway,
-    { x: octoX, y: octoY },
+    dt, activeCreatures, crayfishRouting,
+    hasGateway ? { x: cfX, y: cfY } : null,
     schoolPos,
   );
 
@@ -452,8 +668,15 @@ export function renderFrame(
   // Seaweed
   drawSeaweed(worldBuf, animFrame, surfaceY);
 
+  // Effective state: prefer creature-derived state over stateEvent (daemon may be stale)
+  const anyCreatureProcessing = [...creatureInstances.values()].some(c => c.state === 'processing');
+  const anyCreatureAwaiting = [...creatureInstances.values()].some(c => c.state === 'awaiting');
+  const effectiveState = anyCreatureProcessing ? State.PROCESSING
+    : anyCreatureAwaiting ? State.AWAITING_OPTION
+      : state;
+
   // Bubbles
-  const bubbleDensity = state === State.PROCESSING ? 10 : state === State.IDLE ? 3 : 5;
+  const bubbleDensity = effectiveState === State.PROCESSING ? 10 : effectiveState === State.IDLE ? 3 : 5;
   updateBubbles(animFrame, surfaceY, bubbleDensity);
   for (const b of bubbles) {
     const bx = Math.round(b.x);
@@ -461,20 +684,21 @@ export function renderFrame(
     blendPixel(worldBuf, bx, by, b.bright ? COLORS.bubbleBright : COLORS.bubble, 0.6);
   }
 
-  // Data particles
-  updateDataParticles(animFrame, surfaceY, state === State.PROCESSING);
+  // Data particles (spawn when any creature is processing)
+  const anyProcessing = [...creatureInstances.values()].some(c => c.state === 'processing');
+  updateDataParticles(animFrame, surfaceY, anyProcessing);
   for (const p of dataParticles) {
     const fadeAlpha = Math.min(1, p.life / 10);
     const color = p.green ? COLORS.dataParticleGreen : COLORS.dataParticle;
     glowPixel(worldBuf, Math.round(p.x), Math.round(p.y), color, 0.5 * fadeAlpha);
   }
 
-  // Tetras — update always, but world-buffer draw only at low zoom (prevents double-render)
+  // Tetras — update always
   const tetraMaxY = SAND_TOP - 3;
   updateTetras(animFrame, surfaceY, tetraMaxY);
 
-  // Surface waves
-  drawSurface(worldBuf, animFrame, surfaceY, palette, state);
+  // Surface waves — use effectiveState so daemon doesn't suppress wave animation
+  drawSurface(worldBuf, animFrame, surfaceY, palette, effectiveState);
 
   // ========================================
   // Phase 2: Blit world → output with camera
@@ -484,34 +708,27 @@ export function renderFrame(
   // ========================================
   // Phase 3: Draw scaled creatures → output
   // ========================================
-  const cState = creatureState(state);
 
-  // Tetras (camera-scaled, drawn on top of blitted environment for crispness)
+  // Tetras (always drawn — camera-scaled)
   if (tetras) {
     for (const t of tetras) {
       drawTetra(outputBuf, t.x / W, t.y / W, t.heading, camera);
     }
   }
 
-  // Octopus(es)
-  if (sessionCount <= 1) {
-    drawOctopus(outputBuf, octoX, octoY, cState, animFrame, camera);
-  } else {
-    const spacing = Math.min(0.18, 0.6 / sessionCount);
-    const startX = 0.5 - (sessionCount * spacing) / 2;
-    for (let i = 0; i < Math.min(sessionCount, 4); i++) {
-      const jitterY = Math.sin(i * 2.3) * 0.03;
-      const st = i === 0 ? cState : 'idle';
-      drawOctopus(outputBuf, startX + i * spacing, octoY + jitterY, st, animFrame + i * 5, camera);
-    }
+  // Octopus creatures — always drawn; IDLE = idle (body still, limbs animate gently)
+  for (const c of creatureInstances.values()) {
+    const spriteState: 'idle' | 'working' | 'sleeping' | 'asking' =
+      c.state === 'processing' ? 'working'
+        : c.state === 'awaiting' ? 'asking'
+          : 'idle'; // IDLE → idle (limbs move, body color preserved)
+    drawOctopus(outputBuf, c.worldX, c.worldY, spriteState, animFrame + c.phaseOffset, camera);
   }
 
-  // Crayfish
+  // Crayfish — always drawn when gateway available; IDLE = sitting (subtle breathing only)
   if (hasGateway) {
-    const routing = sessions?.some(s =>
-      s.agentType === 'openclaw' && s.state === 'processing'
-    ) ?? false;
-    drawCrayfish(outputBuf, cfX, cfY, routing, animFrame, camera);
+    const gatewayHasError = stateEvent?.gatewayHasError ?? false;
+    drawCrayfish(outputBuf, cfX, cfY, crayfishRouting, animFrame, camera, gatewayHasError);
   }
 
   // ========================================
@@ -520,7 +737,7 @@ export function renderFrame(
 
   // Danger flash (>90% usage)
   if (usagePct >= 90) {
-    const flashIntensity = (Math.sin(animFrame * 0.4) + 1) * 0.08;
+    const flashIntensity = (Math.sin(animFrame * 0.2) + 1) * 0.08;
     for (let y = 0; y < W; y++) {
       for (let x = 0; x < W; x++) {
         glowPixel(outputBuf, x, y, COLORS.stateError, flashIntensity);
@@ -528,26 +745,10 @@ export function renderFrame(
     }
   }
 
+  // Usage HUD (bottom-right, screen-space)
+  drawUsageHUD(outputBuf, usageEvent, animFrame);
+
   return outputBuf;
-}
-
-/**
- * Render IDLE breathing animation frames.
- */
-export function renderIdleAnimation(
-  stateEvent: StateUpdateEvent | null,
-  usageEvent: UsageEvent | null,
-  sessions: SessionInfo[] | null,
-): Uint8Array[] {
-  const frames: Uint8Array[] = [];
-  const savedFrame = animFrame;
-
-  for (let i = 0; i < 8; i++) {
-    frames.push(renderFrame(stateEvent, usageEvent, sessions));
-  }
-
-  animFrame = savedFrame + 32; // 8 frames × step 4
-  return frames;
 }
 
 // ===== Preview API (re-export camera controls) =====

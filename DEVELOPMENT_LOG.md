@@ -2,6 +2,152 @@
 
 ---
 
+## 2026-03-15 — Pixoo64 LED 픽셀아트 리디자인 + 활동 상태 표시 수정
+
+### 문제
+1. **문어 스프라이트 품질**: 14×5 그리드 + PIXEL_ASPECT 2.0 + outline/glow → LED에서 형태 불분명, 원본 캐릭터와 괴리
+2. **Daemon에서 활동 상태 미표시**: Pixoo 모듈이 daemon에서 실행될 때, daemon의 IDLE state가 세션의 실제 state를 덮어씀
+3. **agentType 판별 오류**: Daemon이 Gateway 연결 시 `agentType: 'openclaw'`로 보내므로 단순 negative-match 불충분
+4. **몸통 찢어짐**: 소수점 cellSz(1.067)에서 인접 셀의 정수 반올림 불일치 → 매 프레임 1px 갭 발생
+5. **가재 눈 표현 애매**: 그리드 셀 크기 의존 렌더링 → zoom/LOD에 따라 크기 변동
+6. **Idle 카메라 단조로움**: wide↔full-tank 간 zoom 차이 0.1로 거의 변화 없음
+
+### 해결
+
+**문어 LED 픽셀아트 리디자인** (`pixoo-sprites.ts`):
+- 그리드: 14×5 (PIXEL_ASPECT 2.0) → **13×13 정사각형** — 팩맨 고스트 스타일 각진 돔 머리
+- 셀 크기: `cellSz = 1` 고정 (1셀 = 1LED픽셀) — 소수점 반올림 갭 원천 차단
+- 모든 좌표/offset 정수: `Math.round(baseX)`, breathPx, dx 전부 integer
+- 눈: 검정 네거티브 스페이스 2행 (세로 2px), blink 애니메이션 제거
+- 팔: 3행 두께, body 동일 색상, 움직임 없음 (몸통 분리 방지)
+- 촉수만 `Math.round` 정수 dx로 애니메이션
+- 아웃라인/글로우 완전 제거 — LED 자체 발광으로 엣지 정의 충분
+
+**가재 렌더링 개선**:
+- 3×3 고정 눈: teal 중심 1px + 검정 8-neighbor surround (그리드 독립 오버레이)
+- 둥근 body 그리드 (head dome 확장, LOD 확장)
+- 하단 terrain: rock 색상 → warm earth 톤 (모래와 자연스러운 연결)
+
+**Daemon 상태 전파** (`pixoo-renderer.ts`):
+- `CODING_AGENTS` set 기반 positive-match: `claude-code`/`codex-cli`/`opencode`만 primary state override
+- `_primary` fallback도 CODING_AGENTS만 생성
+- `effectiveState`: creature 인스턴스 기반 state 산출 → bubbleDensity, drawSurface에 적용
+
+**카메라 시스템** (`pixoo-camera.ts`):
+- Active zoom: 2.0 → **3.2** (원본 캐릭터 수준 클로즈업)
+- Idle cycle: `wide(1.0) → pan-left(cx=0.35, 1.15) → wide → pan-right(cx=0.65, 1.15)` 좌우 패닝
+- CAMERA_WIDE zoom: 1.1 → 1.0
+
+**기타**:
+- Reset time "m" 표시: 분 단위만 남으면 `53m` 형태. 시간+분은 기존대로 `4h53`
+- Pixel font "m" 글리프: `101,111,101,101,101` (두 기둥 형태, "n"과 구별)
+
+### 교훈 / 핵심 설계 결정
+- **LED 픽셀아트는 1셀=1픽셀이 정답**: 소수점 셀 크기는 반올림 불일치로 갭/중복 유발. 정수 고정으로 원천 해결
+- **LED에서 아웃라인/글로우 불필요**: 각 LED 픽셀이 자체 발광하므로 외곽선 없이도 형태 인지 가능. 오히려 실루엣 번짐 유발
+- **Daemon agentType은 상황 가변**: Gateway 연결 시 `'openclaw'`, 미연결 시 `'daemon'`. `CODING_AGENTS` positive-match가 안정적
+- **팔 애니메이션은 body 분리 위험**: 인접 셀이 dx로 이동하면 gap 발생 → 팔은 고정, 촉수만 애니메이션이 안전
+
+---
+
+## 2026-03-15 — Unified Brand Icon + Disconnected Screen + Timeline 수정
+
+### 문제
+1. **브랜드 일관성 부재**: 각 플랫폼(Android/Apple/ESP32) disconnected 화면이 제각각 — 아이콘, 카드 레이아웃, 버튼 스타일 불일치
+2. **앱 아이콘 미설정**: Apple AppIcon 슬롯 전체 비어있음, Android는 기본 벡터 XML
+3. **Apple Timeline 미표시**: SwiftUI `@Observable` 중첩 객체 관찰 문제 — `TimelineStore`(nested @Observable) 변경이 UI에 전파 안 됨
+4. **OpenClaw 중복 표시**: Daemon이 `agentType=openclaw`로 primary 전송 + virtual `openclaw-gateway` sibling 주입 → #1, #2 중복
+5. **Apple reconnecting 버튼 깜빡임**: `connectInternal()`이 매 reconnect마다 `disconnect(reconnect: false)` 호출 → `isReconnecting=false` 리셋
+6. **Apple은 bridge timeline 이벤트에만 의존**: Daemon IDLE시 timeline_event 미전송 → Android(StateTimelineGenerator 로컬 생성)만 timeline 보임
+
+### 해결
+
+**브랜드 통일**:
+- `~/Desktop/agentdeck-icon.png` (640×640 3D 테라리움) → Android drawable + Apple imageset + ESP32 LVGL canvas
+- Android tablet: 80dp icon + card layout (기존 유지, icon 추가)
+- Android e-ink: 48dp grayscale icon (`setToSaturation(0f)`)
+- Apple: ZStack scrim + centered card (360pt, rounded 16) — `.secondary` → 명시적 `slateText` (#94A3B8)
+- ESP32: LVGL canvas 48×48 (jar + octopus silhouette 프리미티브 드로잉) — 사용자가 "{ }" 텍스트 아이콘으로 변경
+
+**앱 런처 아이콘**:
+- Apple: `sips` 리사이즈 7개 PNG (16~1024) → AppIcon.appiconset 11슬롯 매핑
+- Android: 5개 mipmap density (mdpi 48px ~ xxxhdpi 192px), adaptive icon XML 제거 → PNG 직접
+
+**Timeline 수정 (3단계 디버깅)**:
+- 1차: `@State grouped` + `onChange(of: entries.count)` → 중첩 Observable 미전파
+- 2차: `timelineVersion` counter + `onChange` → body에서 안 읽혀 observation 미등록
+- 최종: `timelineVersion` computed property + `.id(timelineVersion)` — body에서 반드시 읽히는 `.id()` 메커니즘으로 observation 강제 등록
+- **근본 해결**: `StateTimelineGenerator.swift` 추가 — Android와 동일하게 state 전환에서 로컬 timeline 생성, bridge rich timeline 수신 시 억제
+
+**OpenClaw 중복 수정**:
+- Apple SessionListPanel + Android 3곳 (SessionListPanel, EinkAgentColumn, EinkPortraitHeader)
+- 로직: sibling.agentType == primary agentType이고 이미 entries에 존재하면 skip
+
+**Reconnecting 깜빡임 수정**:
+- Apple `connectInternal()`: `disconnect(reconnect: false)` 대신 소켓만 직접 정리, `isReconnecting`/`reconnectAttempt` 보존
+- Android는 reconnect 경로에서 `doConnect()` 직접 호출 (disconnect 미경유) → 문제 없었음
+
+**iOS 화면 회전**:
+- `UIDevice.setValue` (deprecated, 미동작) → `UIWindowScene.requestGeometryUpdate()` (iOS 16+)
+- 아이콘: `arrow.triangle.2.circlepath` → `rectangle.portrait.rotate`, 투명도 0.6→0.35
+
+### 교훈 / 핵심 설계 결정
+- **SwiftUI @Observable 중첩 객체**: nested @Observable의 프로퍼티 변경은 부모의 body에서 추적 안 됨. 부모에 version counter 두고 `.id()` modifier로 강제 observation 등록이 가장 확실
+- **Timeline은 로컬 생성 필수**: Bridge가 timeline을 항상 보내는 것은 아님 (IDLE, 특정 adapter 미지원 등). 각 클라이언트가 state 변화에서 로컬 timeline을 생성하되, bridge rich timeline 수신 시 억제하는 2-tier 패턴
+- **Daemon primary agentType 치환**: Daemon이 Gateway 연결 시 primary를 `openclaw`로 보내면서 virtual sibling도 주입 → 모든 세션 리스트 UI에서 중복 방지 로직 필요
+- **Reconnect 상태 보존**: reconnect 시도 시 이전 연결을 정리할 때 reconnecting 상태 플래그를 리셋하면 안 됨 — Android 패턴(소켓만 정리, 상태 유지) 따를 것
+
+---
+
+## 2026-03-15 — Apple Monitor UI 2차 보정 + 멀티디바이스 상태 동기화
+
+### 문제
+1. Apple/Android Monitor UI 시각 차이: WaterEffect caustic 강도, Timeline 65/35 비율, TankStatus 줄간격, nil agentType 아이콘, macOS 버튼 테두리
+2. Apple 기기에서 OpenClaw 상태 변화 미반영 (terrarium 업데이트 안 됨)
+3. Apple 기기에서 bridge 단절 시 disconnect 상태 미표시
+4. 멀티디바이스 간 상태 불일치 — Apple/ESP32가 session bridge(10초 폴링)에 연결되어 daemon(실시간) 대비 지연
+
+### 해결
+**시각 보정**:
+- SwiftUI `plusLighter` blend mode는 Android `BlendMode.Plus`보다 ~20배 강함 → caustic alpha `0.85→0.04`, lineCount `8→5`, strokeWidth 절반
+- Timeline GeometryReader 감싸서 65/35 명시적 비율 적용
+- Android TankStatus `includeFontPadding=false` + spacing 4dp, Apple도 spacing 4pt 통일
+- nil agentType: Apple `🐙→●` (Android 일치), macOS `.buttonStyle(.plain)`, iOS 회전 버튼 추가
+
+**상태 동기화**:
+- Apple terrarium: `.onChange(of: siblingSessions.count)` → content-based `siblingStatesKey` 추가 (내부 state 변경 감지)
+- Apple disconnect: `BridgeConnection.onDisconnect` 콜백 추가 → `resetToDisconnected()` 호출
+- **Daemon-preference discovery**: 3 플랫폼 모두 mDNS auto-connect 시 `agentType == "daemon"` 우선 선택
+  - Apple: `discovery.bridges.first(where: { $0.agentType == "daemon" })`
+  - Android: `BridgeDiscovery.kt`에 `agentType` 필드 추가 + `agent` TXT 파싱, `firstOrNull { it.agentType == "daemon" }`
+  - ESP32: 2-pass scan — daemon TXT 먼저 검색, 없으면 첫 번째 사용
+
+### 교훈 / 핵심 설계 결정
+- SwiftUI와 Android의 blend mode 강도 차이가 매우 큼 — alpha 값을 플랫폼별로 독립 튜닝해야
+- `@Observable` `.onChange(of: collection.count)`는 요소 내부 변경 미감지 — content-based key 필요
+- WebSocket `receive` failure가 유일한 disconnect 감지 경로 — 별도 `onDisconnect` 콜백으로 UI 즉시 반영
+- **mDNS 서비스 선택이 상태 일관성의 핵심**: session bridge는 sibling 10초 폴링이라 OpenClaw 상태 변화가 최대 10초 지연. Daemon은 모든 세션을 직접 관리하므로 실시간
+
+---
+
+## 2026-03-14 — Pixoo64 HTTP 서버 크래시 (빈번한 요청)
+
+### 문제
+Pixoo64 테라리움 표시 후 ~54분(~6500프레임) 경과 시 기기 내장 HTTP 서버가 `ECONNREFUSED` 크래시. ping은 정상이나 HTTP 포트 80이 응답 거부. 전원 사이클 외에 복구 방법 없음.
+
+### 해결 (진행 중)
+1. `ANIM_INTERVAL_MS` 500→800 (2fps→1.25fps), `DEBOUNCE_MS` 400→600
+2. `switchToCustomChannel`을 fire-and-forget에서 **await**로 변경 — 프레임 전송과 채널 재확인이 동시에 Pixoo로 가는 것 방지
+3. `CHANNEL_REASSERT_INTERVAL` 25→50 (채널 재확인 빈도 절반)
+
+### 교훈 / 핵심 설계 결정
+- **Pixoo64 임베디드 HTTP 서버는 동시 요청에 극히 취약** — `maxSockets:1`만으로 부족, 코드 레벨에서 절대 동시 요청 안 되게 직렬화 필수
+- **감마 보정**: LED 디스플레이는 sRGB 감마 없음. `pow(v/255, 0.7) * 255` LUT로 디바이스 전송 직전에만 보정 (렌더러/프리뷰 미적용)
+- **animFrame 시간 기반**: `Date.now() / 166` — 프리뷰/디바이스 호출이 같은 카운터를 공유하면 속도 변동 발생
+- 800ms 간격 장기 안정성 미확인 — 다음 세션에서 전원 사이클 후 10분+ 테스트 필요
+
+---
+
 ## 2026-03-14 — Usage API 파싱 실패 + Bridge 종료 hang (2차)
 
 ### 문제

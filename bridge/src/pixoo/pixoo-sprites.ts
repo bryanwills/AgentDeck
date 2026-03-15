@@ -11,9 +11,9 @@
  *   2. Silhouette-first grids (round head, separated tentacles)
  *   3. Bright eye highlights (warm white — visible on LED)
  *   4. LOD sprites (chunky grids for zoom < 1.3)
- *   5. Glow halo (subtle radial glow behind creatures, stronger for LOD)
+ *   5. Glow halo (subtle radial glow behind creatures, moderate for LOD — ×1.5 intensity)
  *   6. Camera timing (wide zone zoom 1.2, shorter dwell)
- *   7. LOD outline reduction (alpha 0.4 instead of 0.8 — prevents shape smearing)
+ *   7. LOD outline (alpha 0.6 — visible silhouette without shape smearing)
  *   8. Composite breathing wave (sin + harmonic — organic rhythm)
  *   9. Minimum animation amplitude (1px floor — no invisible motion)
  *
@@ -36,41 +36,59 @@ const LEFT_LEG = 5;
 const RIGHT_LEG = 6;
 const ANTENNA = 7;
 
-// ===== Octopus 14×7 — rounded head + narrow waist + separated tentacles =====
+// ===== Octopus 13×13 — Pixoo64 LED pixel art (square pixels, no PIXEL_ASPECT) =====
+//
+// Designed for LED matrix: solid filled pixels, eyes as negative space (black).
+// No outline needed — LED pixel glow provides natural edge definition.
+// At zoom 3.2 with cellSize = zoom/3 ≈ 1.07, sprite ≈ 14×14 screen pixels.
+//
 export const OCTOPUS_GRID: number[][] = [
-  [0,0,0,1,1,1,1,1,1,1,1,0,0,0],  // rounded top (narrow)
-  [0,0,1,1,1,1,1,1,1,1,1,1,0,0],  // head
-  [0,0,1,1,2,1,1,1,1,2,1,1,0,0],  // eyes at col 4,9
-  [3,3,1,1,1,1,1,1,1,1,1,1,4,4],  // arms + body (widest)
-  [0,0,0,1,1,1,1,1,1,1,1,0,0,0],  // waist (narrow)
-  [0,0,5,0,5,0,1,1,0,6,0,6,0,0],  // upper tentacles + center
-  [0,0,0,5,0,0,0,0,0,0,6,0,0,0],  // lower tentacles (separated)
+  [0,0,1,1,1,1,1,1,1,1,1,0,0],  // flat top (9) — angular
+  [0,1,1,1,1,1,1,1,1,1,1,1,0],  // (11)
+  [0,1,1,1,1,1,1,1,1,1,1,1,0],  // (11)
+  [0,1,1,1,2,1,1,1,2,1,1,1,0],  // eyes top — col 4,8 (11)
+  [0,1,1,1,2,1,1,1,2,1,1,1,0],  // eyes bottom — 2px vertical (11)
+  [3,1,1,1,1,1,1,1,1,1,1,1,4],  // arms start + body (13)
+  [3,3,1,1,1,1,1,1,1,1,1,4,4],  // arms thick (13) — 2 rows, 2-3px wide
+  [3,3,1,1,1,1,1,1,1,1,1,4,4],  // arms continue (13)
+  [0,0,1,1,1,1,1,1,1,1,1,0,0],  // narrowing (9)
+  [0,0,1,1,1,1,1,1,1,1,1,0,0],  // (9)
+  [0,0,5,0,5,0,1,0,6,0,6,0,0],  // tentacles + center
+  [0,0,5,0,5,0,0,0,6,0,6,0,0],  // tentacles
+  [0,0,5,0,0,0,0,0,0,0,6,0,0],  // outer tentacles only
 ];
-const OCTO_COLS = 14;
-const OCTO_ROWS = 7;
-/** World width of octopus in normalized coords (7 world-pixels / 64). */
+const OCTO_COLS = 13;
+const OCTO_ROWS = 13;
+/** World width of octopus in normalized coords. */
 export const OCTO_WORLD_W = 7 / 64;
 
-// ===== Octopus LOD 7×5 — chunky grid for zoom < 1.3 =====
+// ===== Octopus LOD 7×7 — chunky grid for zoom < 1.3 =====
 const OCTOPUS_LOD: number[][] = [
-  [0,1,1,1,1,1,0],  // dome
-  [0,1,2,1,2,1,0],  // eyes (bright)
-  [1,1,1,1,1,1,1],  // body + arms
-  [0,1,0,1,0,1,0],  // tentacles
-  [0,0,1,0,1,0,0],  // tentacle tips
+  [0,1,1,1,1,1,0],  // flat top (5) — angular
+  [1,1,1,1,1,1,1],  // full width (7)
+  [1,1,2,1,2,1,1],  // eyes (7)
+  [1,1,1,1,1,1,1],  // body (7)
+  [0,1,1,1,1,1,0],  // waist (5)
+  [0,0,5,1,6,0,0],  // tentacles + center
+  [0,0,5,0,6,0,0],  // tentacle tips
 ];
 const OCTO_LOD_COLS = 7;
-const OCTO_LOD_ROWS = 5;
+const OCTO_LOD_ROWS = 7;
 
-// ===== Crayfish 12×8 — expanded front-facing sprite =====
+// ===== Crayfish 12×8 — front-facing, matches OpenClaw SVG =====
+//
+// OpenClaw SVG: rounded body, compact side claws, antennae from top,
+// dark eyes with teal (#00e5cc) highlights, red gradient body.
+// Body shape: oval (narrow top → wide middle → narrow bottom).
+//
 export const CRAYFISH_GRID: number[][] = [
-  [0,0,0,7,0,0,0,0,0,7,0,0],  // antennae tips (wide)
-  [0,0,0,0,7,0,0,7,0,0,0,0],  // antennae shafts
-  [3,3,0,0,0,1,1,0,0,0,4,4],  // claw tips (widest)
-  [0,0,3,0,1,1,1,1,0,4,0,0],  // claw arms + carapace
-  [0,0,0,1,2,1,1,2,1,0,0,0],  // head + eyes
-  [0,0,0,1,1,1,1,1,1,0,0,0],  // thorax
-  [0,0,0,0,1,1,1,1,0,0,0,0],  // abdomen
+  [0,0,7,0,0,0,0,0,0,7,0,0],  // antennae tips (wide spread)
+  [0,0,0,7,0,0,0,0,7,0,0,0],  // antennae shafts
+  [0,0,0,1,1,1,1,1,1,0,0,0],  // head dome top (6w — rounder)
+  [3,3,1,1,1,1,1,1,1,1,4,4],  // head + claw tips (8w body + 2+2 claws)
+  [0,3,1,1,2,1,1,2,1,1,4,0],  // eyes + claw arms (8w body)
+  [0,0,1,1,1,1,1,1,1,1,0,0],  // thorax widest (8w)
+  [0,0,0,1,1,1,1,1,1,0,0,0],  // abdomen (6w)
   [0,0,5,0,0,1,1,0,0,6,0,0],  // tail + walking legs
 ];
 const CF_COLS = 12;
@@ -78,13 +96,13 @@ const CF_ROWS = 8;
 /** World width of crayfish in normalized coords (12 world-pixels / 64). */
 export const CF_WORLD_W = 12 / 64;
 
-// ===== Crayfish LOD 8×6 — claws close to body =====
+// ===== Crayfish LOD 8×6 — compact for zoom < 1.3 =====
 const CRAYFISH_LOD: number[][] = [
-  [0,0,7,0,0,7,0,0],  // antennae
-  [3,0,0,1,1,0,0,4],  // claws (close to body)
-  [0,3,1,1,1,1,4,0],  // claw arms + carapace
-  [0,0,1,2,2,1,0,0],  // eyes (bright)
-  [0,0,1,1,1,1,0,0],  // thorax
+  [0,7,0,0,0,0,7,0],  // antennae (wider spread)
+  [0,0,1,1,1,1,0,0],  // head dome (4w — rounder)
+  [3,1,1,1,1,1,1,4],  // claws + body (6w — wider oval)
+  [0,1,2,1,1,2,1,0],  // eyes at col 2,5 (spaced for 3×3 rendering)
+  [0,0,1,1,1,1,0,0],  // lower body (4w)
   [0,5,0,1,1,0,6,0],  // legs + tail
 ];
 const CF_LOD_COLS = 8;
@@ -96,8 +114,8 @@ type RGB = readonly [number, number, number];
 export const COLORS = {
   // Octopus (terracotta — Android match)
   octopusBody:      [0xC0, 0x70, 0x58] as const,
-  octopusEyeHighlight: [0xFF, 0xF0, 0xD0] as const,  // warm white — LED visible
-  octopusEyePupil:     [0x40, 0x20, 0x18] as const,   // dark brown (not black)
+  octopusEye:          [0x10, 0x08, 0x08] as const,  // near-black — simple dot eyes
+  octopusEyePupil:     [0x10, 0x08, 0x08] as const,   // same as eye (unified)
   octopusArm:       [0xA0, 0x58, 0x40] as const,
   octopusLeg:       [0xA0, 0x58, 0x40] as const,
   octopusSleeping:  [0x80, 0x50, 0x40] as const,
@@ -106,12 +124,14 @@ export const COLORS = {
 
   // Crayfish (red — Android match)
   crayfishBody:    [0xFF, 0x4D, 0x4D] as const,
-  crayfishEye:     [0x00, 0xE5, 0xCC] as const,
+  crayfishEye:     [0x00, 0xE5, 0xCC] as const,  // teal — OpenClaw signature (1px center)
+  crayfishEyeRing: [0x10, 0x08, 0x08] as const,  // near-black surround (3×3 eye)
   crayfishClaw:    [0xCC, 0x44, 0x33] as const,  // brighter than body for visibility on dark water
   crayfishLeg:     [0xCC, 0x33, 0x33] as const,
   crayfishRouting: [0xFF, 0x6B, 0x6B] as const,
   crayfishAntenna: [0xDD, 0x55, 0x55] as const,
   crayfishGlow:    [0x80, 0x20, 0x20] as const,  // warm red glow
+  crayfishSick:    [0x88, 0x66, 0x66] as const,  // desaturated gray-red (gateway error)
 
   // Tetra (neon)
   tetraNeon: [0x00, 0xE5, 0xFF] as const,
@@ -147,8 +167,8 @@ export const COLORS = {
   sandLight: [0x4C, 0x3C, 0x28] as const,
   sandDark:  [0x28, 0x20, 0x14] as const,
   gravel:    [0x44, 0x36, 0x24] as const,
-  rock:      [0x24, 0x24, 0x3C] as const,
-  rockLight: [0x34, 0x34, 0x4C] as const,
+  rock:      [0x2C, 0x24, 0x1A] as const,  // dark earth (blends with sand)
+  rockLight: [0x38, 0x2E, 0x22] as const,  // warm earth (blends with sand)
 
   // Seaweed (Android green)
   seaweed:      [0x22, 0xC5, 0x5E] as const,
@@ -299,9 +319,9 @@ function drawCreatureGlow(
   intensity = 0.15,
   isLOD = false,
 ): void {
-  // LOD: stronger glow to compensate for smaller creature ("something is here" beacon)
-  const actualIntensity = isLOD ? intensity * 1.7 : intensity;
-  const spread = isLOD ? 1.5 : 1.3;
+  // LOD: moderate glow — enough to hint presence without blurring silhouette
+  const actualIntensity = isLOD ? intensity * 1.5 : intensity;
+  const spread = isLOD ? 1.2 : 1.3;
   const irx = Math.ceil(rx * spread);
   const iry = Math.ceil(ry * spread);
   for (let dy = -iry; dy <= iry; dy++) {
@@ -358,9 +378,7 @@ function getOctopusCellColor(
   switch (cellType) {
     case BODY: return state === 'working' ? COLORS.octopusStarburst : COLORS.octopusBody;
     case EYE:
-      if (blinkPhase) return state === 'working' ? COLORS.octopusStarburst : COLORS.octopusBody;
-      // LOD: single bright pixel. Detail: highlight (use pupil for adjacent cell if needed)
-      return isLOD ? COLORS.octopusEyeHighlight : COLORS.octopusEyeHighlight;
+      return COLORS.octopusEye; // always-on black dot (no blink — consistent 2px vertical)
     case LEFT_ARM: case RIGHT_ARM: return COLORS.octopusArm;
     case LEFT_LEG: case RIGHT_LEG: return COLORS.octopusLeg;
     default: return COLORS.octopusBody;
@@ -369,12 +387,22 @@ function getOctopusCellColor(
 
 // ===== Crayfish Cell Color =====
 
-function getCrayfishCellColor(cellType: number, routing: boolean): RGB | null {
+function getCrayfishCellColor(cellType: number, routing: boolean, sick = false): RGB | null {
   if (cellType === EMPTY) return null;
+  if (sick) {
+    // SICK: desaturated, muted colors — gateway error state
+    switch (cellType) {
+      case EYE: return COLORS.crayfishSick; // eyes drawn as overlay; grid cell = body
+      case LEFT_ARM: case RIGHT_ARM: return [0x77, 0x55, 0x55] as unknown as RGB;
+      case LEFT_LEG: case RIGHT_LEG: return [0x77, 0x55, 0x55] as unknown as RGB;
+      case ANTENNA: return [0x88, 0x66, 0x66] as unknown as RGB;
+      default: return COLORS.crayfishSick;
+    }
+  }
   const bodyColor = routing ? COLORS.crayfishRouting : COLORS.crayfishBody;
   switch (cellType) {
     case BODY: return bodyColor;
-    case EYE: return COLORS.crayfishEye;
+    case EYE: return bodyColor; // eyes drawn as fixed 3×3 overlay after grid
     case LEFT_ARM: case RIGHT_ARM: return COLORS.crayfishClaw;
     case LEFT_LEG: case RIGHT_LEG: return COLORS.crayfishLeg;
     case ANTENNA: return COLORS.crayfishAntenna;
@@ -395,9 +423,11 @@ function ensureMinAmplitude(value: number, minPx: number): number {
 // ===== Scaled Creature Renderers (camera-aware) =====
 
 /**
- * Draw octopus scaled by camera zoom.
- * @param worldX  Octopus center in normalized world X (0~1)
- * @param worldY  Octopus center in normalized world Y (0~1)
+ * Draw octopus — LED pixel art style (square pixels, no outline/glow).
+ *
+ * LED pixels glow naturally — no artificial outline or glow needed.
+ * Eyes rendered as negative space (black pixels within body).
+ * Body stays fixed; only arms and tentacles animate.
  */
 export function drawOctopus(
   buf: Uint8Array,
@@ -406,102 +436,70 @@ export function drawOctopus(
   animFrame: number,
   cam: Camera,
 ): void {
-  if (!isVisible(worldX, worldY, cam, 0.12)) return;
+  if (!isVisible(worldX, worldY, cam, 0.15)) return;
 
   const [scx, scy] = worldToScreen(worldX, worldY, cam);
 
-  // LOD selection — wide view (zoom 1.2) uses LOD for chunkier, visible cells
+  // LOD selection
   const useLOD = cam.zoom < 1.3;
   const grid = useLOD ? OCTOPUS_LOD : OCTOPUS_GRID;
   const cols = useLOD ? OCTO_LOD_COLS : OCTO_COLS;
   const rows = useLOD ? OCTO_LOD_ROWS : OCTO_ROWS;
 
-  // Cell size on screen
-  const cellW = useLOD ? cam.zoom : cam.zoom / 2;
-  const cellH = cellW * 2; // PIXEL_ASPECT 2.0
-  const spriteW = cols * cellW;
-  const spriteH = rows * cellH;
+  // Fixed 1px per cell — LED pixel art, no fractional sizes, no tearing
+  const cellSz = 1;
+  const spriteW = cols;
+  const spriteH = rows;
 
-  // Top-left
-  const baseX = scx - spriteW / 2;
-  const baseY = scy - spriteH / 2;
+  const baseX = Math.round(scx - spriteW / 2);
+  const baseY = Math.round(scy - spriteH / 2);
 
-  // Composite breathing — sin + harmonic for organic rhythm
-  let breathPx: number;
-  if (state === 'idle') {
-    const primary = Math.sin(animFrame * 0.35);
-    const harmonic = Math.sin(animFrame * 0.35 * 2.1) * 0.3;
-    breathPx = ensureMinAmplitude((primary + harmonic) * cellH, 1);
-  } else if (state === 'working') {
-    breathPx = ensureMinAmplitude(Math.sin(animFrame * 0.7) * cellW, 1);
-  } else {
-    breathPx = 0;
-  }
+  // Working: gentle vertical bob (integer pixels only)
+  const breathPx = state === 'working'
+    ? Math.round(Math.sin(animFrame * 0.3) * 1.5)
+    : 0;
 
-  // Blink every ~40 frames for 3 frames
-  const blinkPhase = (animFrame % 40) >= 37;
+  // Body color by state
+  const bodyColor = state === 'working' ? COLORS.octopusStarburst
+    : state === 'sleeping' ? COLORS.octopusSleeping
+      : COLORS.octopusBody;
 
-  // 1. Glow halo (before creature — stronger for LOD)
-  const glowRx = spriteW / 2 + 2;
-  const glowRy = spriteH / 2 + 2;
-  drawCreatureGlow(buf, scx, scy + breathPx, glowRx, glowRy, COLORS.octopusGlow, 0.15, useLOD);
-
-  // 2. Draw cells with pixel tracking
-  const trackedPixels = new Set<number>();
-
+  // Draw all cells — solid fill, no outline
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const cellType = grid[row][col];
-      const color = getOctopusCellColor(cellType, state, blinkPhase, useLOD);
-      if (!color) continue;
+      if (cellType === EMPTY) continue;
 
+      // Cell color — arms same as body (unified silhouette), eyes = negative space
+      let color: RGB;
+      if (cellType === EYE) {
+        color = COLORS.octopusEye; // black — negative space
+      } else if (cellType === LEFT_LEG || cellType === RIGHT_LEG) {
+        color = COLORS.octopusLeg;
+      } else {
+        color = bodyColor; // body + arms = same color
+      }
+
+      // Tentacle animation only — arms stay fixed (attached to body)
       let dx = 0;
-      // Tentacle swing — bidirectional, min 1px amplitude
-      if ((cellType === LEFT_LEG || cellType === RIGHT_LEG) && state !== 'sleeping') {
-        dx = ensureMinAmplitude(Math.sin(animFrame * 0.5 + col * 2) * cellW * 2, 1);
-      }
-      // Arm wave — bidirectional swing (not abs), symmetric
-      if ((cellType === LEFT_ARM || cellType === RIGHT_ARM) && state !== 'sleeping') {
-        const amp = state === 'working' ? 2 : 1;
-        const spd = state === 'working' ? 0.7 : 0.3;
-        const swing = Math.sin(animFrame * spd) * amp * cellW;
-        dx = ensureMinAmplitude(cellType === LEFT_ARM ? -swing : swing, 1);
+      if (state !== 'sleeping' && (cellType === LEFT_LEG || cellType === RIGHT_LEG)) {
+        dx = Math.round(Math.sin(animFrame * 0.2 + col * 1.8) * 1.5);
       }
 
-      fillCellTracked(buf,
-        baseX + col * cellW + dx,
-        baseY + row * cellH + breathPx,
-        cellW, cellH, color, trackedPixels,
+      fillCell(buf,
+        baseX + col * cellSz + dx,
+        baseY + row * cellSz + breathPx,
+        cellSz, cellSz, color,
       );
-
-      // Detail grid: draw pupil on EYE cells (bottom 1px of the cell)
-      if (!useLOD && cellType === EYE && !blinkPhase && state !== 'sleeping') {
-        const eyeX = Math.floor(baseX + col * cellW);
-        const eyeY = Math.floor(baseY + row * cellH + breathPx);
-        const eyeH = Math.max(1, Math.round(Math.floor(eyeY + cellH) - eyeY));
-        // Pupil: bottom portion of eye cell
-        if (eyeH >= 2) {
-          const pupilY = eyeY + eyeH - 1;
-          const pupilW = Math.max(1, Math.round(Math.floor(eyeX + cellW) - eyeX));
-          for (let px = 0; px < pupilW; px++) {
-            setPixel(buf, eyeX + px, pupilY, COLORS.octopusEyePupil);
-          }
-        }
-      }
     }
   }
 
-  // 3. Colored outline — reduced alpha for LOD (prevents shape smearing)
-  const outlineAlpha = useLOD ? 0.4 : 0.8;
-  drawCreatureOutline(buf, trackedPixels, COLORS.octopusBody, outlineAlpha);
-
-  // "?" bubble when asking (drawn after outline)
+  // "?" bubble when asking
   if (state === 'asking') {
-    const bobY = ensureMinAmplitude(Math.sin(animFrame * 0.5) * cellW, 1);
+    const bobY = Math.round(Math.sin(animFrame * 0.25));
     const bx = scx;
-    const by = baseY - cellH * 1.5 + breathPx + bobY;
-    const r = Math.max(2, Math.round(cellW * 2.5));
-    // More opaque bubble (0.7 instead of 0.5)
+    const by = baseY - 3 + bobY;
+    const r = 3;
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (dx * dx + dy * dy <= r * r) {
@@ -509,29 +507,23 @@ export function drawOctopus(
         }
       }
     }
-    // "?" shape: curved top (2-3px) + dot below
     const qx = Math.round(bx);
     const qy = Math.round(by);
-    // Upper curve
     setPixel(buf, qx + 1, qy - Math.round(r * 0.4), COLORS.stateAwaiting);
     setPixel(buf, qx + 1, qy - Math.round(r * 0.2), COLORS.stateAwaiting);
     setPixel(buf, qx, qy, COLORS.stateAwaiting);
-    // Dot
     setPixel(buf, qx, qy + Math.max(1, Math.round(r * 0.35)), COLORS.stateAwaiting);
   }
 
-  // Starburst particles when working — solid center + glow surround
+  // Starburst particles when working
   if (state === 'working') {
-    const sparkPhase = animFrame * 0.8;
-    const dist = (3 + Math.sin(animFrame * 0.6)) * cellW * 2;
+    const sparkPhase = animFrame * 0.35;
+    const dist = 5 + Math.sin(animFrame * 0.25) * 3;
     for (let i = 0; i < 6; i++) {
       const angle = sparkPhase + (i * Math.PI * 2 / 6);
       const sx = scx + Math.cos(angle) * dist;
       const sy = scy + breathPx + Math.sin(angle) * dist * 0.6;
-      // Solid center pixel for LED visibility
-      fillCell(buf, sx, sy, Math.max(1, Math.round(cellW)), Math.max(1, Math.round(cellW)), COLORS.octopusStarburst);
-      // Glow surround
-      glowCell(buf, sx - 1, sy - 1, Math.max(1, Math.round(cellW)) + 2, Math.max(1, Math.round(cellW)) + 2, COLORS.octopusGlow, 0.4);
+      setPixel(buf, Math.round(sx), Math.round(sy), COLORS.octopusStarburst);
     }
   }
 }
@@ -547,6 +539,7 @@ export function drawCrayfish(
   routing: boolean,
   animFrame: number,
   cam: Camera,
+  sick = false,
 ): void {
   if (!isVisible(worldX, worldY, cam, 0.15)) return;
 
@@ -566,16 +559,17 @@ export function drawCrayfish(
   const baseX = scx - spriteW / 2;
   const baseY = scy - spriteH / 2;
 
+  // SICK: suppress breathing, no heartbeat
   // Composite breathing — asymmetric (slow inhale, quick exhale)
-  const breathRaw = Math.pow(Math.abs(Math.sin(animFrame * 0.3)), 0.7)
-    * Math.sign(Math.sin(animFrame * 0.3));
-  const breathPx = ensureMinAmplitude(breathRaw * cellH * 0.5, 1);
+  const breathRaw = sick ? 0 : Math.pow(Math.abs(Math.sin(animFrame * 0.15)), 0.7)
+    * Math.sign(Math.sin(animFrame * 0.15));
+  const breathPx = sick ? 0 : ensureMinAmplitude(breathRaw * cellH * 0.5, 1);
 
   // Heartbeat glow (time-based for consistent 4s period regardless of frame step)
-  const heartPhase = (animFrame * 0.15) % (Math.PI * 2);
+  const heartPhase = (animFrame * 0.075) % (Math.PI * 2);
   const beat1 = Math.max(0, Math.sin(heartPhase * 2) * 0.8);
   const beat2 = Math.max(0, Math.sin(heartPhase * 2 + 1.2) * 0.5);
-  const heartGlow = Math.max(beat1, beat2);
+  const heartGlow = sick ? 0 : Math.max(beat1, beat2);
 
   // 1. Glow halo (before creature — stronger for LOD)
   const glowRx = spriteW / 2 + 2;
@@ -588,37 +582,49 @@ export function drawCrayfish(
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const cellType = grid[row][col];
-      const color = getCrayfishCellColor(cellType, routing);
+      const color = getCrayfishCellColor(cellType, routing, sick);
       if (!color) continue;
 
       let dx = 0;
       const dy = breathPx;
 
-      // Antenna wiggle — with occasional twitch
-      if (cellType === ANTENNA) {
-        const spd = routing ? 0.7 : 0.3;
-        const wiggle = Math.sin(animFrame * spd + col * 3) * cellW * 1.5;
-        // Random-ish twitch: sharp spike every ~30 frames
-        const twitch = ((animFrame + col * 17) % 30) < 2 ? cellW * 2 * (col < 6 ? -1 : 1) : 0;
-        dx = ensureMinAmplitude(wiggle + twitch, 1);
-      }
-
-      // Claw animation — routing: slower, wider clap; idle: gentle sway
-      if (cellType === LEFT_ARM || cellType === RIGHT_ARM) {
-        if (routing) {
-          const clap = Math.sin(animFrame * 0.6) * cellW * 3; // slower + wider
-          dx = ensureMinAmplitude(cellType === LEFT_ARM ? clap : -clap, 1);
-        } else {
-          const gentle = Math.sin(animFrame * 0.25) * cellW;
-          dx = ensureMinAmplitude(cellType === LEFT_ARM ? gentle : -gentle, 1);
+      if (!sick) {
+        // Antenna wiggle — with occasional twitch
+        if (cellType === ANTENNA) {
+          const spd = routing ? 0.35 : 0.15;
+          const wiggle = Math.sin(animFrame * spd + col * 3) * cellW * 1.5;
+          // Random-ish twitch: sharp spike every ~30 frames
+          const twitch = ((animFrame + col * 17) % 60) < 4 ? cellW * 2 * (col < 6 ? -1 : 1) : 0;
+          dx = ensureMinAmplitude(wiggle + twitch, 1);
         }
-      }
 
-      // Leg shift — larger amplitude for visibility
-      if (cellType === LEFT_LEG || cellType === RIGHT_LEG) {
-        dx = ensureMinAmplitude(
-          Math.sin(animFrame * 0.2 + (cellType === LEFT_LEG ? 0 : Math.PI)) * cellW * 1.2, 1
+        // Claw animation — routing: slower, wider clap; idle: gentle sway
+        if (cellType === LEFT_ARM || cellType === RIGHT_ARM) {
+          if (routing) {
+            const clap = Math.sin(animFrame * 0.3) * cellW * 3; // slower + wider
+            dx = ensureMinAmplitude(cellType === LEFT_ARM ? clap : -clap, 1);
+          } else {
+            const gentle = Math.sin(animFrame * 0.125) * cellW;
+            dx = ensureMinAmplitude(cellType === LEFT_ARM ? gentle : -gentle, 1);
+          }
+        }
+
+        // Leg shift — larger amplitude for visibility
+        if (cellType === LEFT_LEG || cellType === RIGHT_LEG) {
+          dx = ensureMinAmplitude(
+            Math.sin(animFrame * 0.1 + (cellType === LEFT_LEG ? 0 : Math.PI)) * cellW * 1.2, 1
+          );
+        }
+      } else {
+        // SICK: tilt — left side up, right side down (droopy posture)
+        const tiltPx = (col - cols / 2) * 0.15;
+        dx = col < cols / 2 ? 1 : -1; // slight inward collapse
+        fillCellTracked(buf,
+          baseX + col * cellW + dx,
+          baseY + row * cellH + dy + tiltPx,
+          cellW, cellH, color, trackedPixels,
         );
+        continue;
       }
 
       fillCellTracked(buf,
@@ -629,42 +635,44 @@ export function drawCrayfish(
     }
   }
 
-  // 3. Colored outline — reduced alpha for LOD
+  // 3. Colored outline — moderate alpha for LOD
   const bodyColor = routing ? COLORS.crayfishRouting : COLORS.crayfishBody;
-  const outlineAlpha = useLOD ? 0.4 : 0.8;
+  const outlineAlpha = useLOD ? 0.6 : 0.8;
   drawCreatureOutline(buf, trackedPixels, bodyColor, outlineAlpha);
 
-  // Eye glow pulse (after outline)
-  const eyeIntensity = routing ? heartGlow * 0.6 : heartGlow * 0.3;
-  if (useLOD) {
-    for (const ec of [3, 4]) {
-      glowCell(buf,
-        baseX + ec * cellW, baseY + 3 * cellH + breathPx,
-        cellW, cellH, COLORS.crayfishEye, eyeIntensity,
-      );
+  // Fixed 3×3 eyes (teal center + black ring) — drawn at grid eye positions
+  const eyeRow = useLOD ? 2 : 3;
+  const eyeCols = useLOD ? [2, 5] : [4, 7];
+  const sickEyeCenter: RGB = [0x44, 0x66, 0x60] as unknown as RGB; // dim teal for sick
+  const eyeCenter = sick ? sickEyeCenter : COLORS.crayfishEye;
+  const eyeRing = sick ? ([0x44, 0x33, 0x33] as unknown as RGB) : COLORS.crayfishEyeRing;
+  for (const ec of eyeCols) {
+    const ex = Math.round(baseX + (ec + 0.5) * cellW);
+    const ey = Math.round(baseY + (eyeRow + 0.5) * cellH + breathPx);
+    // Black surround (8 neighbors)
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        setPixel(buf, ex + dx, ey + dy, eyeRing);
+      }
     }
-  } else {
-    for (const ec of [4, 7]) {
-      glowCell(buf,
-        baseX + ec * cellW, baseY + 4 * cellH + breathPx,
-        cellW, cellH, COLORS.crayfishEye, eyeIntensity,
-      );
-    }
+    // Teal center
+    setPixel(buf, ex, ey, eyeCenter);
   }
 
   // Routing: signal wave particles (after outline)
   if (routing) {
-    const wavePhase = animFrame * 0.6;
+    const wavePhase = animFrame * 0.3;
     for (let i = 0; i < 4; i++) {
       const angle = wavePhase + (i * Math.PI / 2);
-      const dist = (4 + Math.sin(animFrame * 0.4 + i)) * cellW;
+      const dist = (4 + Math.sin(animFrame * 0.2 + i)) * cellW;
       const sx = scx + Math.cos(angle) * dist;
       const sy = scy + breathPx + Math.sin(angle) * dist * 0.5;
       glowCell(buf, sx, sy, cellW, cellW, COLORS.crayfishEye, 0.4);
     }
 
     // Body glow pulse
-    const bodyPulse = (Math.sin(animFrame * 0.5) + 1) * 0.15;
+    const bodyPulse = (Math.sin(animFrame * 0.25) + 1) * 0.15;
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
         if (grid[row]?.[col] !== EMPTY) {
@@ -716,4 +724,63 @@ export function drawTetraWorld(
   setPixel(buf, x, y, COLORS.tetraBody);
   const tailX = heading > 0 ? x - 1 : x + 1;
   setPixel(buf, tailX, y, COLORS.tetraNeon);
+}
+
+// ===== 3×5 Pixel Font + HUD Helpers =====
+
+/**
+ * 3×5 bitmask font for HUD numerals.
+ * Each glyph is 5 rows of 3 bits (MSB = left pixel).
+ */
+const PIXEL_FONT: Record<string, number[]> = {
+  '0': [0b111, 0b101, 0b101, 0b101, 0b111],
+  '1': [0b010, 0b110, 0b010, 0b010, 0b111],
+  '2': [0b111, 0b001, 0b111, 0b100, 0b111],
+  '3': [0b111, 0b001, 0b111, 0b001, 0b111],
+  '4': [0b101, 0b101, 0b111, 0b001, 0b001],
+  '5': [0b111, 0b100, 0b111, 0b001, 0b111],
+  '6': [0b111, 0b100, 0b111, 0b101, 0b111],
+  '7': [0b111, 0b001, 0b001, 0b001, 0b001],
+  '8': [0b111, 0b101, 0b111, 0b101, 0b111],
+  '9': [0b111, 0b101, 0b111, 0b001, 0b111],
+  '%': [0b101, 0b001, 0b010, 0b100, 0b101],
+  'h': [0b100, 0b100, 0b111, 0b101, 0b101],
+  'm': [0b101, 0b111, 0b101, 0b101, 0b101],  // two pillars joined — distinct from 'n'
+  ' ': [0b000, 0b000, 0b000, 0b000, 0b000],
+};
+
+/** Draw right-aligned text using 3×5 pixel font. */
+export function drawText(
+  buf: Uint8Array, text: string, rightX: number, y: number, color: RGB,
+): void {
+  let cursorX = rightX;
+  // Render right-to-left
+  for (let ci = text.length - 1; ci >= 0; ci--) {
+    const glyph = PIXEL_FONT[text[ci]];
+    if (!glyph) { cursorX -= 2; continue; } // unknown char = 1px gap
+    cursorX -= 3; // glyph width
+    for (let row = 0; row < 5; row++) {
+      const bits = glyph[row];
+      for (let col = 0; col < 3; col++) {
+        if (bits & (1 << (2 - col))) {
+          setPixel(buf, cursorX + col, y + row, color);
+        }
+      }
+    }
+    cursorX -= 1; // 1px kerning gap
+  }
+}
+
+/** Draw a horizontal gauge bar. */
+export function drawGaugeBar(
+  buf: Uint8Array, x: number, y: number,
+  width: number, height: number,
+  percent: number, color: RGB, bgColor: RGB,
+): void {
+  const filled = Math.round(width * Math.max(0, Math.min(1, percent / 100)));
+  for (let dy = 0; dy < height; dy++) {
+    for (let dx = 0; dx < width; dx++) {
+      setPixel(buf, x + dx, y + dy, dx < filled ? color : bgColor);
+    }
+  }
 }
