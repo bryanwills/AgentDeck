@@ -2,6 +2,56 @@
 
 ---
 
+## 2026-03-15 — iOS 앱 접속 불안정 수정 (ScenePhase + WebSocket 라이프사이클)
+
+### 문제
+iOS 앱이 Android 대비 접속 불안정. 핵심 원인: **ScenePhase 미처리** — 백그라운드 복귀 시 죽은 WebSocket을 감지/복구하는 로직 부재. Bridge 서버가 15초 ping interval로 30초 후 zombie terminate → iOS 앱은 죽은 소켓을 들고 있음.
+
+### 해결
+6가지 수정 적용 (4개 파일, +207/-21줄):
+
+1. **ContentView ScenePhase**: `@Environment(\.scenePhase)` + `.onChange` → `handleForegroundReturn()`/`handleBackgroundEntry()`
+2. **3-tier 복구 전략** (AgentStateHolder): suspend 시간 기반 — >20s=force disconnect+waterfall restart, 5~20s=health check(3s timeout), <5s=ping timer restart. `restartWaterfall()`로 waterfallStage 강제 idle 리셋
+3. **BridgeConnection health check**: `forceHealthCheck(completion:)` — 즉시 ping + 3초 timeout, NSLock 기반 thread-safe completion guard. `forceDisconnectAndRestart()`, `resetReconnectCount()` 추가
+4. **Ping 타이머 개선**: 30s→15s (서버와 동기화), RunLoop `.default`→`.common` (UI 스크롤 중에도 동작)
+5. **URLSession 설정**: `timeoutIntervalForRequest=15`, `waitsForConnectivity=false`. Max reconnect 10→20
+6. **handleDisconnect race guard**: `isHandlingDisconnect` flag — ping callback + receive loop 동시 호출 방지
+
+### 교훈 / 핵심 설계 결정
+1. **iOS 백그라운드 = 연결 소멸 수용**: Background Execution Mode 추가 불가 (VoIP/audio 앱이 아니므로 심사 거절). "백그라운드에서 끊어짐을 수용하고, 포그라운드 복귀 시 즉시 복구"가 올바른 iOS 패턴
+2. **Suspend 시간 기반 분기**: 짧은 suspend(<5s)에서 force reconnect하면 불필요한 재연결. 20s 이상이면 서버가 이미 terminate했으므로 health check 생략하고 바로 disconnect. 5~20s 구간만 실제 health check 필요
+3. **Ping interval 동기화**: 클라이언트 30s > 서버 15s → 서버가 먼저 zombie 판정. 동일 interval로 맞춰야 서버 terminate 전에 클라이언트가 감지 가능
+4. **RunLoop `.common` mode**: `.default` mode Timer는 UI 스크롤/애니메이션 중 suspend됨. 네트워크 heartbeat 같은 타이머는 반드시 `.common`으로 등록
+
+---
+
+## 2026-03-15 — TUI 테라리움 스케일링 + 멀티세션 표시 버그 수정
+
+### 문제
+1. **멀티세션 문어 1마리만 표시**: `setOctopi()`가 `o.name === s.name`으로 기존 문어 매칭 → 같은 프로젝트의 세션 2개가 동일 name이면 `find()`가 항상 첫 번째만 반환, 두 번째 문어 미생성
+2. **세션 목록 primary 누락**: renderer에서 `state.sessions.length > 0`이면 siblings만 표시하고 자기 자신(primary) 빠뜨림. session bridge 연결 시 항상 1개 부족
+3. **OpenClaw 목록 미표시**: gateway probe로만 감지된 OpenClaw가 sessions 목록에 없으면 좌측 패널에 안 나옴
+4. **이름 겹침**: 같은 프로젝트명 세션 구분 불가
+5. **이름표 위치**: large 스케일 시 `nameYOff=3`으로 문어와 2줄 간격
+
+### 해결
+- `OctopusInstance`에 `id` 필드 추가, 세션 `id`로 매칭 (name 매칭 제거)
+- 동일 `projectName` 세션 자동 번호 부여 (`AgentDeck #1`, `#2`)
+- renderer: daemon 연결=sessions만, session bridge=self+siblings 표시
+- `gatewayAvailable && !hasOcSession` → 가상 OpenClaw 엔트리 추가
+- 이름표 `oy - 1` 고정 (스케일 무관, 스프라이트 바로 위)
+- 가재 이름표 추가 (`ctx.crayfish.name || 'OpenClaw'`)
+- 3단계 스프라이트 스케일링: small(1×)/large(2×, 100×20)/xlarge(3×, 160×35)
+- 가재 ROUTING 시각 효과: signal wave rings + orbiting cyan dots
+- 테트라 인력 대상: processing octopus > routing crayfish > none
+
+### 교훈 / 핵심 설계 결정
+1. **`name` 매칭의 함정**: 같은 프로젝트 디렉토리에서 여러 세션 실행 시 `projectName`이 동일 → display name은 표시용이고 식별에는 session ID 사용 필수
+2. **Self vs Siblings 구분**: daemon은 모든 세션을 siblings로 보고, session bridge는 자신 제외 siblings만 전송. 렌더러가 "primary 포함 여부"를 `agentType`으로 분기해야 함
+3. **`scaleGridN(n)` 범용화**: 2× 전용 `scaleGrid()` 대신 N배율 범용 함수로, 추후 스케일 단계 추가 시 코드 변경 최소화
+
+---
+
 ## 2026-03-15 — TUI 모니터링 대시보드 (`agentdeck dashboard`)
 
 ### 문제
