@@ -3,6 +3,7 @@ package dev.agentdeck.util
 import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
+import kotlin.math.roundToInt
 
 /**
  * Format ISO 8601 timestamp to relative time string.
@@ -42,7 +43,7 @@ fun formatCount(n: Int): String = formatCount(n.toLong())
 
 /** Generate ASCII gauge bar: "████░░" */
 fun gaugeBar(percent: Double, width: Int = 6): String {
-    val filled = ((percent / 100.0) * width).toInt().coerceIn(0, width)
+    val filled = ((percent / 100.0) * width).roundToInt().coerceIn(0, width)
     val empty = width - filled
     return "█".repeat(filled) + "░".repeat(empty)
 }

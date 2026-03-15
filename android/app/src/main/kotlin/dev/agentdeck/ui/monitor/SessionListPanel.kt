@@ -72,10 +72,12 @@ fun SessionListPanel(
         )
     }
 
-    // Siblings (skip self and daemon)
+    // Siblings (skip self, daemon, and virtual gateway duplicate)
     siblingSessions.forEach { session ->
         if (session.id == sessionId) return@forEach
         if (session.agentType == "daemon") return@forEach
+        // Skip when primary already represents this agent type
+        if (session.agentType == agentType && entries.any { it.agentType == session.agentType }) return@forEach
         entries += SessionEntry(
             projectName = session.projectName ?: "Agent",
             agentType = session.agentType,

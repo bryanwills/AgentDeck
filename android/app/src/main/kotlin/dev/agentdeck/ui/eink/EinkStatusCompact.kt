@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.util.formatBytes
 import dev.agentdeck.util.formatResetTime
+import kotlin.math.roundToInt
 
 /**
  * E-ink status — 2-column layout: LIMITS (left) | MODELS (right).
@@ -60,11 +61,11 @@ fun EinkStatusCompact(
 
 // -- LIMITS column: Unicode block gauges --
 
-private const val GAUGE_LEN = 6
+private const val GAUGE_LEN = 8
 
 /** Build a text gauge: █████░░░░░ */
 private fun blockGauge(percent: Double): String {
-    val filled = ((percent / 100.0).coerceIn(0.0, 1.0) * GAUGE_LEN).toInt()
+    val filled = ((percent / 100.0).coerceIn(0.0, 1.0) * GAUGE_LEN).roundToInt()
     return "█".repeat(filled) + "░".repeat(GAUGE_LEN - filled)
 }
 
@@ -94,7 +95,20 @@ private fun LimitsColumn(state: DashboardState) {
             GaugeText("Ex", extraPct, "", stale)
         }
     } else if (state.billingType == "api") {
-        DataLine("API Key")
+        val cost = usage.costSpent
+        val limit = usage.costLimit
+        if (cost != null && limit != null && limit > 0) {
+            val pct = (cost / limit * 100.0).coerceIn(0.0, 100.0)
+            GaugeText("$${"%.2f".format(cost)}/$${"%.0f".format(limit)}", pct, "", stale)
+        } else if (cost != null) {
+            DataLine("$${"%.2f".format(cost)}$stale")
+        } else {
+            DataLine("API Key$stale")
+        }
+        val resetTimeStr = usage.resetTime?.let { formatResetTime(it) }
+        if (resetTimeStr != null) {
+            DataLine("\u27F2 $resetTimeStr")
+        }
     } else {
         DataLine("—")
     }

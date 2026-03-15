@@ -159,7 +159,7 @@ class BridgeConnection private constructor() {
                     Log.w(TAG, "Auth rejected (4001) — stopping reconnect")
                     shouldReconnect = false
                     _url.value = null
-                    _lastError.value = "Unauthorized — use adb reverse or pair with token"
+                    _lastError.value = "Unauthorized — check pairing token"
                 } else {
                     scheduleReconnect()
                 }
@@ -190,7 +190,7 @@ class BridgeConnection private constructor() {
             shouldReconnect = false
             _isReconnecting.value = false
             _url.value = null  // Clear URL so mDNS discovery activates
-            _lastError.value = "USB tunnel lost — reconnect USB or use WiFi"
+            _lastError.value = "USB connection lost"
             return
         }
 

@@ -140,8 +140,10 @@ fun TabletDashboard(
             val discovery = BridgeDiscovery(context)
             discovery.discover().collect { bridges ->
                 if (bridges.isNotEmpty() && connection.status.value != ConnectionStatus.CONNECTED) {
-                    val bridge = bridges.first()
-                    Log.i(TAG, "mDNS auto-connect: ${bridge.name} at ${bridge.wsUrl()}")
+                    // Prefer daemon bridge for consistent state (daemon aggregates all sessions)
+                    val bridge = bridges.firstOrNull { it.agentType == "daemon" }
+                        ?: bridges.first()
+                    Log.i(TAG, "mDNS auto-connect: ${bridge.name} (agent=${bridge.agentType}) at ${bridge.wsUrl()}")
                     connection.connect(bridge.wsUrl())
                 }
             }

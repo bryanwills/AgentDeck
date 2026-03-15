@@ -52,7 +52,7 @@ fun ConnectionStatusBadge(
             text = when (connectionStatus) {
                 ConnectionStatus.CONNECTED -> "\u25CF Connected"
                 ConnectionStatus.CONNECTING -> "\u25CB Connecting..."
-                ConnectionStatus.DISCONNECTED -> "\u25CB Disconnected"
+                ConnectionStatus.DISCONNECTED -> "\u25CB Searching..."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = if (isEink) {

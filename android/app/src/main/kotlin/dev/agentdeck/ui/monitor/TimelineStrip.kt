@@ -1,6 +1,5 @@
 package dev.agentdeck.ui.monitor
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +27,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,7 +45,6 @@ import java.util.Locale
 /**
  * Bottom HUD strip — two-pane "Logbook" layout.
  * Left (65%): compact log scroll. Right (35%): detail panel for focused entry.
- * Activity density bar at the bottom.
  */
 @Composable
 fun TimelineStrip(
@@ -108,7 +108,7 @@ fun TimelineStrip(
                 } else {
                     LazyColumn(
                         state = listState,
-                        verticalArrangement = Arrangement.spacedBy(1.dp),
+                        verticalArrangement = Arrangement.spacedBy(0.dp),
                         modifier = Modifier.weight(1f, fill = false),
                     ) {
                         itemsIndexed(grouped) { index, group ->
@@ -143,13 +143,6 @@ fun TimelineStrip(
             )
         }
 
-        // Activity density bar
-        ActivityDensityBar(
-            entries = recentEntries,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(2.dp),
-        )
     }
 }
 
@@ -169,6 +162,7 @@ private fun CompactLogRow(
     val iconColor = typeColor(entry.type)
     val countSuffix = if (group.count > 1) " ×${group.count}" else ""
     val isChatEnd = entry.type == "chat_end"
+    val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
 
     Row(
         modifier = Modifier
@@ -197,6 +191,7 @@ private fun CompactLogRow(
             color = TerrariumColors.HUDSubtext.copy(alpha = if (isChatEnd) 0.4f else 0.5f),
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
+            style = tight,
         )
         Text(
             text = icon,
@@ -204,6 +199,7 @@ private fun CompactLogRow(
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
+            style = tight,
         )
         Text(
             text = entry.summary + countSuffix,
@@ -213,6 +209,7 @@ private fun CompactLogRow(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
+            style = tight,
         )
     }
 }
@@ -325,47 +322,6 @@ private fun DetailPane(
             }
 
             Spacer(modifier = Modifier.weight(1f))
-        }
-    }
-}
-
-/**
- * Activity density bar — 10 segments showing event density over the last 60 seconds.
- */
-@Composable
-private fun ActivityDensityBar(
-    entries: List<TimelineEntry>,
-    modifier: Modifier = Modifier,
-) {
-    val now = System.currentTimeMillis()
-    val windowMs = 60_000L
-    val segments = 10
-    val segmentMs = windowMs / segments
-
-    // Count events per segment
-    val counts = IntArray(segments)
-    for (entry in entries) {
-        val age = now - entry.timestamp
-        if (age in 0 until windowMs) {
-            val segIndex = ((windowMs - age - 1) / segmentMs).toInt().coerceIn(0, segments - 1)
-            counts[segIndex]++
-        }
-    }
-    val maxCount = counts.max().coerceAtLeast(1)
-
-    Canvas(modifier = modifier) {
-        val segW = size.width / segments
-        for (i in 0 until segments) {
-            val alpha = if (counts[i] > 0) {
-                0.1f + 0.9f * (counts[i].toFloat() / maxCount)
-            } else {
-                0.05f
-            }
-            drawRect(
-                color = TerrariumColors.TetraNeon.copy(alpha = alpha),
-                topLeft = androidx.compose.ui.geometry.Offset(i * segW, 0f),
-                size = androidx.compose.ui.geometry.Size(segW - 1f, size.height),
-            )
         }
     }
 }

@@ -12,6 +12,7 @@ data class DiscoveredBridge(
     val host: String,
     val port: Int,
     val token: String? = null,
+    val agentType: String? = null,
 ) {
     /** Build WebSocket URL with auth token if available */
     fun wsUrl(): String {
@@ -55,6 +56,9 @@ class BridgeDiscovery(context: Context) {
                             val txtIp = try {
                                 si.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
                             } catch (_: Exception) { null }
+                            val agentType = try {
+                                si.attributes["agent"]?.let { String(it, Charsets.UTF_8) }
+                            } catch (_: Exception) { null }
                             val host = txtIp ?: resolvedHost ?: return
                             // Skip link-local addresses (169.254.x.x) — unreachable from WiFi
                             if (host.startsWith("169.254.")) return
@@ -63,6 +67,7 @@ class BridgeDiscovery(context: Context) {
                                 host = host,
                                 port = si.port,
                                 token = token,
+                                agentType = agentType,
                             )
                             bridges[si.serviceName] = bridge
                             trySend(bridges.values.toList())

@@ -2,6 +2,7 @@ package dev.agentdeck.ui.screen
 
 import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -34,12 +36,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.agentdeck.R
 import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.BridgeConnection
@@ -121,8 +129,10 @@ fun EinkMonitorScreen(
             Log.i(TAG, "Saved URL failed, trying mDNS discovery...")
             discovery.discover().collect { bridges ->
                 if (bridges.isNotEmpty() && connection.status.value != ConnectionStatus.CONNECTED) {
-                    val bridge = bridges.first()
-                    Log.i(TAG, "mDNS auto-connect: ${bridge.name} at ${bridge.wsUrl()}")
+                    // Prefer daemon bridge for consistent state (daemon aggregates all sessions)
+                    val bridge = bridges.firstOrNull { it.agentType == "daemon" }
+                        ?: bridges.first()
+                    Log.i(TAG, "mDNS auto-connect: ${bridge.name} (agent=${bridge.agentType}) at ${bridge.wsUrl()}")
                     connection.connect(bridge.wsUrl())
                 }
             }
@@ -163,10 +173,12 @@ fun EinkMonitorScreen(
             EinkReconnectingScreen(
                 url = currentUrl,
                 attempt = reconnectAttempt,
+                lastError = lastError,
                 discoveredBridges = discoveredBridges,
                 onConnectToBridge = { bridge ->
                     connection.connect(bridge.wsUrl())
                 },
+                onStopReconnecting = { connection.disconnect() },
                 onSettingsClick = { showSettings = true },
             )
         } else if (isLandscape) {
@@ -299,6 +311,9 @@ private fun EinkNotConnectedScreen(
     onConnectLocalhost: () -> Unit,
     onSettingsClick: () -> Unit,
 ) {
+    // Grayscale filter for e-ink
+    val grayscaleFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -306,14 +321,32 @@ private fun EinkNotConnectedScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        Image(
+            painter = painterResource(R.drawable.agentdeck_icon),
+            contentDescription = "AgentDeck",
+            modifier = Modifier.size(48.dp),
+            contentScale = ContentScale.Fit,
+            colorFilter = grayscaleFilter,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         Text(
-            text = when (connectionStatus) {
-                ConnectionStatus.DISCONNECTED -> "\u25CB  Not Connected"
-                ConnectionStatus.CONNECTING -> "\u25CC  Connecting..."
-                ConnectionStatus.CONNECTED -> "\u25CF  Connected"
-            },
+            text = "AgentDeck",
             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface,
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = when (connectionStatus) {
+                ConnectionStatus.DISCONNECTED -> "Searching for bridges..."
+                ConnectionStatus.CONNECTING -> "Connecting..."
+                ConnectionStatus.CONNECTED -> "Connected"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -322,15 +355,15 @@ private fun EinkNotConnectedScreen(
         if (lastError != null && connectionStatus == ConnectionStatus.DISCONNECTED) {
             Text(
                 text = lastError,
-                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
 
         if (connectionStatus == ConnectionStatus.CONNECTING) {
             Text(
-                text = "Trying to reach bridge...",
+                text = "Connecting...",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -342,7 +375,7 @@ private fun EinkNotConnectedScreen(
                 modifier = Modifier
                     .fillMaxWidth(0.6f)
                     .clickable(onClick = onConnectLocalhost),
-                shape = RoundedCornerShape(4.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(2.dp, Color.Black),
                 color = MaterialTheme.colorScheme.background,
             ) {
@@ -375,8 +408,8 @@ private fun EinkNotConnectedScreen(
                         modifier = Modifier
                             .fillMaxWidth(0.6f)
                             .clickable { onConnectToBridge(bridge) },
-                        shape = RoundedCornerShape(4.dp),
-                        border = BorderStroke(1.dp, Color.Gray),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, Color.Black),
                         color = MaterialTheme.colorScheme.background,
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
@@ -418,10 +451,15 @@ private fun EinkNotConnectedScreen(
 private fun EinkReconnectingScreen(
     url: String?,
     attempt: Int,
+    lastError: String?,
     discoveredBridges: List<DiscoveredBridge>,
     onConnectToBridge: (DiscoveredBridge) -> Unit,
+    onStopReconnecting: () -> Unit,
     onSettingsClick: () -> Unit,
 ) {
+    // Grayscale filter for e-ink
+    val grayscaleFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -429,10 +467,28 @@ private fun EinkReconnectingScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        Image(
+            painter = painterResource(R.drawable.agentdeck_icon),
+            contentDescription = "AgentDeck",
+            modifier = Modifier.size(48.dp),
+            contentScale = ContentScale.Fit,
+            colorFilter = grayscaleFilter,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         Text(
-            text = "\u25CC  Reconnecting...",
+            text = "AgentDeck",
             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface,
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Reconnecting...",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -446,16 +502,47 @@ private fun EinkReconnectingScreen(
         }
 
         Text(
-            text = "Attempt #$attempt",
+            text = "Attempt $attempt",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Stop reconnecting button
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.6f)
+                .clickable(onClick = onStopReconnecting),
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(2.dp, Color.Black),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            Text(
+                text = "Stop Reconnecting",
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(8.dp),
+            )
+        }
+
+        // Error message
+        if (lastError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = lastError,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+        }
 
         // Show discovered bridges as alternatives
         if (discoveredBridges.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "Or connect to:",
+                text = "Or connect via WiFi:",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -619,6 +706,7 @@ private fun EinkPortraitHeader(
     state.siblingSessions.forEach { session ->
         if (session.id == state.sessionId) return@forEach
         if (session.agentType == "daemon") return@forEach
+        if (session.agentType == state.agentType && entries.any { it.agentType == session.agentType }) return@forEach
         entries += AgentEntry(
             projectName = session.projectName ?: "Agent",
             agentType = session.agentType,

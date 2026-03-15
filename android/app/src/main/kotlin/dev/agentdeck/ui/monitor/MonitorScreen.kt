@@ -1,6 +1,8 @@
 package dev.agentdeck.ui.monitor
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,7 +45,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import dev.agentdeck.R
 import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.BridgeConnection
@@ -217,15 +223,31 @@ private fun ConnectionOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Image(
+                painter = painterResource(R.drawable.agentdeck_icon),
+                contentDescription = "AgentDeck",
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(RoundedCornerShape(16.dp)),
+                contentScale = ContentScale.Fit,
+            )
+
+            Text(
+                text = "AgentDeck",
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                color = AgentDeckColors.WhiteText,
+                textAlign = TextAlign.Center,
+            )
+
             Text(
                 text = when {
                     isReconnecting -> "Reconnecting..."
-                    connectionStatus == ConnectionStatus.DISCONNECTED -> "Not Connected"
+                    connectionStatus == ConnectionStatus.DISCONNECTED -> "Searching for bridges..."
                     connectionStatus == ConnectionStatus.CONNECTING -> "Connecting..."
                     else -> "Connected"
                 },
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                color = AgentDeckColors.WhiteText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = AgentDeckColors.SlateText,
                 textAlign = TextAlign.Center,
             )
 
@@ -237,7 +259,7 @@ private fun ConnectionOverlay(
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    text = "Attempt #$reconnectAttempt",
+                    text = "Attempt $reconnectAttempt",
                     style = MaterialTheme.typography.bodySmall,
                     color = AgentDeckColors.Amber,
                 )
@@ -253,13 +275,6 @@ private fun ConnectionOverlay(
                         color = AgentDeckColors.SlateText,
                     )
                 }
-            } else if (!isReconnecting) {
-                Text(
-                    text = "Connect to an AgentDeck bridge to start monitoring",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = AgentDeckColors.SlateText,
-                    textAlign = TextAlign.Center,
-                )
             }
 
             // Error message
@@ -274,7 +289,7 @@ private fun ConnectionOverlay(
 
             if (connectionStatus == ConnectionStatus.CONNECTING && !isReconnecting) {
                 Text(
-                    text = "Trying to reach bridge...",
+                    text = "Connecting...",
                     style = MaterialTheme.typography.bodyMedium,
                     color = AgentDeckColors.Amber,
                 )
@@ -309,7 +324,7 @@ private fun ConnectionOverlay(
                     }
                 } else if (!isReconnecting) {
                     Text(
-                        text = "Searching for bridges on network...",
+                        text = "Searching for bridges...",
                         style = MaterialTheme.typography.bodySmall,
                         color = AgentDeckColors.SlateText,
                     )
@@ -344,7 +359,7 @@ private fun ConnectionOverlay(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "Tap gear icon for manual URL entry",
+                text = "Manual URL entry in Settings",
                 style = MaterialTheme.typography.bodySmall,
                 color = AgentDeckColors.SlateText.copy(alpha = 0.7f),
                 textAlign = TextAlign.Center,

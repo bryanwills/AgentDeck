@@ -20,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -53,7 +55,7 @@ fun TankStatusPanel(
         modifier = modifier
             .background(TerrariumColors.HUDBg, RoundedCornerShape(8.dp))
             .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         // Header
         Text(
@@ -64,7 +66,7 @@ fun TankStatusPanel(
             fontFamily = FontFamily.Monospace,
         )
 
-        // Water gauges: 5h + 7d side by side
+        // Water gauges: 5h + 7d side by side (subscription billing)
         if (usage.fiveHourPercent != null || usage.sevenDayPercent != null) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -85,6 +87,16 @@ fun TankStatusPanel(
                     )
                 }
             }
+        }
+
+        // API billing: session cost gauge
+        if (state.billingType == "api" && usage.costSpent != null) {
+            ApiCostSection(
+                costSpent = usage.costSpent,
+                costLimit = usage.costLimit,
+                resetTime = usage.resetTime?.let { formatResetTime(it) },
+                stale = staleSuffix,
+            )
         }
 
         // Model info section
@@ -176,6 +188,81 @@ private fun WaterGauge(
 }
 
 /**
+ * API billing cost display — horizontal bar gauge for cost/limit.
+ */
+@Composable
+private fun ApiCostSection(
+    costSpent: Double,
+    costLimit: Double?,
+    resetTime: String?,
+    stale: String,
+) {
+    val tightStyle = PlatformTextStyle(includeFontPadding = false)
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = "API COST$stale",
+            color = TerrariumColors.HUDSubtext,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            style = TextStyle(platformStyle = tightStyle),
+        )
+
+        if (costLimit != null && costLimit > 0) {
+            val pct = (costSpent / costLimit * 100.0).coerceIn(0.0, 100.0)
+            val fillFraction = (pct / 100.0).toFloat()
+            val fillColor = when {
+                pct >= 90 -> TerrariumColors.LEDRed
+                pct >= 70 -> TerrariumColors.LEDAmber
+                else -> TerrariumColors.LEDGreen
+            }
+
+            // Horizontal bar gauge
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(18.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0x20FFFFFF)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fillFraction)
+                        .fillMaxHeight()
+                        .background(fillColor.copy(alpha = 0.5f)),
+                )
+                Text(
+                    text = "${"%.2f".format(costSpent)} / ${"%.0f".format(costLimit)}",
+                    color = TerrariumColors.HUDText,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.align(Alignment.Center),
+                    style = TextStyle(platformStyle = tightStyle),
+                )
+            }
+        } else {
+            Text(
+                text = "$${"%.2f".format(costSpent)}",
+                color = TerrariumColors.HUDText,
+                fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace,
+                style = TextStyle(platformStyle = tightStyle),
+            )
+        }
+
+        if (resetTime != null) {
+            Text(
+                text = "\u27F2 $resetTime",
+                color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                style = TextStyle(platformStyle = tightStyle),
+            )
+        }
+    }
+}
+
+/**
  * Current active model + available models from catalog.
  */
 @Composable
@@ -185,6 +272,7 @@ private fun ModelInfoSection(
 ) {
     if (modelName == null && modelCatalog.isEmpty()) return
 
+    val tightStyle = PlatformTextStyle(includeFontPadding = false)
     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
         Text(
             text = "MODEL",
@@ -192,6 +280,7 @@ private fun ModelInfoSection(
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
+            style = TextStyle(platformStyle = tightStyle),
         )
 
         // Current active model
@@ -201,6 +290,7 @@ private fun ModelInfoSection(
                 color = TerrariumColors.HUDText,
                 fontSize = 13.sp,
                 fontFamily = FontFamily.Monospace,
+                style = TextStyle(platformStyle = tightStyle),
             )
         }
 
@@ -214,6 +304,7 @@ private fun ModelInfoSection(
                 color = TerrariumColors.HUDSubtext,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
+                style = TextStyle(platformStyle = tightStyle),
             )
         }
     }
@@ -226,6 +317,7 @@ private fun ModelInfoSection(
 private fun OllamaInfoSection(ollamaStatus: OllamaStatus?) {
     if (ollamaStatus == null || !ollamaStatus.available || ollamaStatus.models.isEmpty()) return
 
+    val tightStyle2 = PlatformTextStyle(includeFontPadding = false)
     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
         Text(
             text = "OLLAMA",
@@ -233,6 +325,7 @@ private fun OllamaInfoSection(ollamaStatus: OllamaStatus?) {
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
+            style = TextStyle(platformStyle = tightStyle2),
         )
 
         ollamaStatus.models.forEach { model ->
@@ -256,6 +349,7 @@ private fun OllamaInfoSection(ollamaStatus: OllamaStatus?) {
                     color = TerrariumColors.HUDText,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
+                    style = TextStyle(platformStyle = tightStyle2),
                 )
             }
         }

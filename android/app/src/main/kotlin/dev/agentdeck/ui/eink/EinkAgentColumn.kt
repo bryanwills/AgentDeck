@@ -55,10 +55,11 @@ fun EinkAgentPanel(
         )
     }
 
-    // Siblings (skip self and daemon)
+    // Siblings (skip self, daemon, and virtual gateway duplicate)
     state.siblingSessions.forEach { session ->
         if (session.id == state.sessionId) return@forEach
         if (session.agentType == "daemon") return@forEach
+        if (session.agentType == state.agentType && entries.any { it.agentType == session.agentType }) return@forEach
         entries += AgentEntry(
             projectName = session.projectName ?: "Agent",
             agentType = session.agentType,
