@@ -97,6 +97,20 @@ pnpm package                # create dist/bound.serendipity.agentdeck.streamDeck
 bash scripts/uninstall.sh   # remove hooks, unlink CLI and plugin
 ```
 
+### Apple Release (TestFlight)
+
+```bash
+bash scripts/build-apple-release.sh --ios     # local iOS build
+bash scripts/build-apple-release.sh --macos   # local macOS build
+bash scripts/build-apple-release.sh --all     # both + TestFlight upload
+git tag apple-v1.0.0 && git push origin apple-v1.0.0  # CI → TestFlight
+```
+
+- **Apple Bundle ID**: `bound.serendipity.agentdeck.dashboard` (App Store Connect 앱명: "AgentDeck Dashboard")
+- **CI**: `.github/workflows/apple-release.yml` — `apple-v*` 태그 → macOS-15 runner → archive → TestFlight 업로드
+- **Secrets**: `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `ASC_API_KEY_ID`, `ASC_ISSUER_ID`, `ASC_API_KEY_BASE64`
+- **Note**: `bound.serendipity.agentdeck` (without `.dashboard`) is reserved by Personal Team — cannot use for App Store
+
 ## Development
 
 ```bash

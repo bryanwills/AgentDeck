@@ -154,13 +154,13 @@
 		8A5A10C1FD79BB64BD2BB8D5 /* ConnectionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionOverlay.swift; sourceTree = "<group>"; };
 		8A702CCCE11B4450E9EED163 /* BridgeConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeConnection.swift; sourceTree = "<group>"; };
 		92F84E0AB4261F8308A45186 /* AgentStateHolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStateHolder.swift; sourceTree = "<group>"; };
-		93F845B5C2D610A38007523C /* AgentDeck_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AgentDeck_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		93F845B5C2D610A38007523C /* AgentDeck.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentDeck.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		95824B0CF6571507DBAF27C5 /* TimelineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineStore.swift; sourceTree = "<group>"; };
-		960777CE6214381ADD730F6D /* AgentDeck_macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentDeck_macOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		960777CE6214381ADD730F6D /* AgentDeck.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentDeck.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		979988BB4CB2A4B5948FD360 /* Adapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adapter.swift; sourceTree = "<group>"; };
 		9F9B51FC480E3419A6334A20 /* SandDisturbance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandDisturbance.swift; sourceTree = "<group>"; };
 		A70843624A0EEB9E63435EC5 /* PlanktonSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanktonSystem.swift; sourceTree = "<group>"; };
-		BACE8D6702379152FF2F5E46 /* AgentDeckTests_iOS.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AgentDeckTests_iOS.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BACE8D6702379152FF2F5E46 /* AgentDeckTests_iOS.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgentDeckTests_iOS.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BF517661B1BEF3ACD330054D /* RockFormation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RockFormation.swift; sourceTree = "<group>"; };
 		CCEE70EEDDCA2199E894D275 /* GaugeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GaugeBar.swift; sourceTree = "<group>"; };
 		CF4F61CE4842A567D1BC861E /* TankStatusPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TankStatusPanel.swift; sourceTree = "<group>"; };
@@ -260,8 +260,8 @@
 		64AA1BD02816AC44948E2CFF /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				93F845B5C2D610A38007523C /* AgentDeck_iOS.app */,
-				960777CE6214381ADD730F6D /* AgentDeck_macOS.app */,
+				93F845B5C2D610A38007523C /* AgentDeck.app */,
+				960777CE6214381ADD730F6D /* AgentDeck.app */,
 				BACE8D6702379152FF2F5E46 /* AgentDeckTests_iOS.xctest */,
 				4FD4B5CF393BD9B6CEDBCFAF /* AgentDeckTests_macOS.xctest */,
 			);
@@ -390,7 +390,7 @@
 			packageProductDependencies = (
 			);
 			productName = AgentDeck_iOS;
-			productReference = 93F845B5C2D610A38007523C /* AgentDeck_iOS.app */;
+			productReference = 93F845B5C2D610A38007523C /* AgentDeck.app */;
 			productType = "com.apple.product-type.application";
 		};
 		3BF710A3BC80FD9626668CA0 /* AgentDeckTests_macOS */ = {
@@ -444,7 +444,7 @@
 			packageProductDependencies = (
 			);
 			productName = AgentDeck_macOS;
-			productReference = 960777CE6214381ADD730F6D /* AgentDeck_macOS.app */;
+			productReference = 960777CE6214381ADD730F6D /* AgentDeck.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -649,12 +649,13 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
+				"DEVELOPMENT_TEAM[sdk=macosx*]" = R22679GY5Z;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard.tests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentDeck_macOS.app/Contents/MacOS/AgentDeck_macOS";
 			};
@@ -738,7 +739,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard;
+				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard;
 				PRODUCT_NAME = AgentDeck;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -818,7 +819,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard;
+				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard;
 				PRODUCT_NAME = AgentDeck;
 				SDKROOT = macosx;
 			};
@@ -828,12 +829,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = R22679GY5Z;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentDeck_iOS.app/AgentDeck_iOS";
@@ -845,12 +847,13 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
+				"DEVELOPMENT_TEAM[sdk=macosx*]" = R22679GY5Z;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard.tests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentDeck_macOS.app/Contents/MacOS/AgentDeck_macOS";
 			};
@@ -860,12 +863,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = R22679GY5Z;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentDeck_iOS.app/AgentDeck_iOS";
@@ -885,7 +889,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard;
+				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard;
 				PRODUCT_NAME = AgentDeck;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -907,7 +911,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.agentdeck.dashboard;
+				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard;
 				PRODUCT_NAME = AgentDeck;
 				SDKROOT = macosx;
 			};

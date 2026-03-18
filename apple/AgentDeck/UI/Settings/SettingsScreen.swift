@@ -290,7 +290,7 @@ struct SettingsScreen: View {
         VStack(spacing: 4) {
             infoRow("App", "AgentDeck")
             infoRow("Version", "1.0.0")
-            infoRow("Bundle", "bound.serendipity.agentdeck")
+            infoRow("Bundle", "bound.serendipity.agentdeck.dashboard")
         }
     }
 
