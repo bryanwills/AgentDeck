@@ -11,8 +11,6 @@
 	<key>uploadSymbols</key>
 	<true/>
 	<key>signingStyle</key>
-	<string>manual</string>
-	<key>signingCertificate</key>
-	<string>Apple Distribution</string>
+	<string>automatic</string>
 </dict>
 </plist>
