@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.agentdeck.terrarium.renderer.EinkRefreshHelper
+import dev.agentdeck.terrarium.renderer.einkColorEnabled
 import kotlinx.coroutines.delay
 
 /**
@@ -82,8 +83,6 @@ fun EinkRefreshZone(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
-                // Force software rendering so EPD controller sees grayscale
-                // in the standard framebuffer path (GPU layers may bypass it)
                 setLayerType(View.LAYER_TYPE_SOFTWARE, null)
                 // Embed Compose content inside this View
                 val composeView = ComposeView(context).apply {

@@ -135,13 +135,21 @@ fun EinkTerrariumView(
         state.crayfish != CrayfishVisualState.DORMANT
 
     // Unified animation loop — handles both periodic frames and state-change renders.
-    // Keyed on isAnimating only; uses rememberUpdatedState to always see latest state.
-    // No separate debounce LaunchedEffect, so no animFrame reset race.
+    // Color e-ink (Kaleido 3): disable animation loop entirely. CFA color mapping
+    // triggers visible flicker on every frame. Render static scene on state changes only.
+    // B&W e-ink: normal 2.5fps animation loop.
     LaunchedEffect(isAnimating) {
-        if (!isAnimating) {
-            // Static state: render once with full dither
+        if (!isAnimating || einkColorEnabled) {
+            // Static render: once with full dither (B&W) or color
             val bmp = reusableBitmap ?: Bitmap.createBitmap(EINK_WIDTH, EINK_HEIGHT, Bitmap.Config.ARGB_8888)
                 .also { reusableBitmap = it }
+            // Color e-ink: advance fish positions once for a natural static scene
+            if (einkColorEnabled && isAnimating) {
+                val s = currentState
+                val streaming = s.tetra == TetraVisualState.STREAMING
+                val agentSlots = dev.agentdeck.terrarium.layoutOctopuses(s.agents.size.coerceAtLeast(1))
+                fishSchool.update(streaming, agentSlots, s.crayfish == CrayfishVisualState.ROUTING)
+            }
             renderedBitmap = renderEinkFrame(currentState, EINK_WIDTH, EINK_HEIGHT, 0, bmp, fishSchool = fishSchool)
             hostView.postInvalidate()
             onFrameRendered?.invoke(false)
@@ -332,10 +340,8 @@ private fun renderEinkFrame(
     // Front-layer fish (in front of creatures for 3D depth)
     drawEinkDataParticles(canvas, paint, width, height, state.tetra, state.agents.size, state.crayfish, animFrame, layer = 1, fishSchool = fishSchool)
 
-    // Snap to native 16-level grayscale — only needed on B&W e-ink state-change renders.
-    // Animation frames skip this because all draw colors are already pre-quantized
-    // gray values and isAntiAlias=false, so the 180K-pixel pass is essentially a no-op.
-    // Color e-ink: skip entirely — preserve RGB colors for CFA rendering.
+    // Snap to native 16-level grayscale — only on B&W e-ink state-change renders.
+    // Color e-ink: skip to preserve RGB colors for CFA rendering.
     if (!skipDither && !einkColorEnabled) {
         DitherEngine.snapToNearestGray(bitmap)
     }

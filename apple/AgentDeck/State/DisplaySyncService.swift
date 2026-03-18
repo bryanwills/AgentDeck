@@ -9,7 +9,7 @@ import UIKit
 #endif
 
 @Observable
-final class DisplaySyncService {
+final class DisplaySyncService: @unchecked Sendable {
     var enabled = true
 
     #if os(iOS)
@@ -24,28 +24,21 @@ final class DisplaySyncService {
         #if os(iOS)
         if !displayOn {
             if isAppActive {
-                // App is foreground — dim immediately
-                DispatchQueue.main.async {
-                    self.savedBrightness = UIScreen.main.brightness
-                    UIScreen.main.brightness = 0.0
-                }
+                let current = UIScreen.main.brightness
+                savedBrightness = current
+                UIScreen.main.brightness = 0.0
                 pendingDim = false
             } else {
-                // App is backgrounded — queue dim for when we return
                 pendingDim = true
             }
         } else {
             pendingDim = false
             if let saved = savedBrightness {
-                DispatchQueue.main.async {
-                    UIScreen.main.brightness = saved
-                }
+                UIScreen.main.brightness = saved
                 savedBrightness = nil
             }
         }
         #endif
-        // macOS: no system brightness API for third-party apps.
-        // The host Mac is the one sleeping anyway — no action needed.
     }
 
     #if os(iOS)
@@ -53,10 +46,8 @@ final class DisplaySyncService {
     func handleForegroundReturn(hostDisplayOn: Bool) {
         guard enabled else { return }
         if pendingDim && !hostDisplayOn {
-            DispatchQueue.main.async {
-                self.savedBrightness = UIScreen.main.brightness
-                UIScreen.main.brightness = 0.0
-            }
+            savedBrightness = UIScreen.main.brightness
+            UIScreen.main.brightness = 0.0
             pendingDim = false
         }
     }
@@ -65,9 +56,7 @@ final class DisplaySyncService {
     func restoreOnDisconnect() {
         pendingDim = false
         if let saved = savedBrightness {
-            DispatchQueue.main.async {
-                UIScreen.main.brightness = saved
-            }
+            UIScreen.main.brightness = saved
             savedBrightness = nil
         }
     }
