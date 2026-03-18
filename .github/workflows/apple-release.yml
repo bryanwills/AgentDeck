@@ -66,6 +66,7 @@ jobs:
             -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
             MARKETING_VERSION=${{ steps.version.outputs.VERSION }} \
             CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY=- \
             DEVELOPMENT_TEAM=R22679GY5Z
 
       - name: Export iOS IPA
@@ -166,6 +167,7 @@ jobs:
             -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
             MARKETING_VERSION=${{ steps.version.outputs.VERSION }} \
             CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY=- \
             DEVELOPMENT_TEAM=R22679GY5Z
 
       - name: Export macOS app
