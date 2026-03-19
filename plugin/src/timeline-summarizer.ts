@@ -27,11 +27,12 @@ export async function summarizeResponse(text: string): Promise<string | null> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'mlx-community/Qwen3.5-35B-A3B-4bit',
+        enable_thinking: false,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: input + '\n\n/no_think' },
+          { role: 'user', content: input },
         ],
-        max_tokens: 200,
+        max_tokens: 100,
         temperature: 0.3,
       }),
       signal: controller.signal,

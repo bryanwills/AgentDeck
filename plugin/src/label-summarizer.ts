@@ -71,7 +71,8 @@ async function summarizeViaMlx(label: string, maxChars: number): Promise<string 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: MLX_MODEL,
-        messages: [{ role: 'user', content: prompt + '\n\n/no_think' }],
+        enable_thinking: false,
+        messages: [{ role: 'user', content: prompt }],
         max_tokens: 60,
         temperature: 0.1,
       }),
