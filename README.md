@@ -4,6 +4,13 @@
 
 # AgentDeck
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://www.npmjs.com/package/@agentdeck/setup"><img src="https://img.shields.io/npm/v/@agentdeck/setup.svg" alt="npm version"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/node-%3E%3D20-green.svg" alt="Node.js >= 20">
+</p>
+
 **Stop Chatting. Start Steering.**
 
 AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **11 display surfaces simultaneously** — tablets, e-ink readers, phones, ESP32 modules, LED matrices, and terminals.
@@ -19,9 +26,7 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 </p>
 
 <p align="center">
-  <video src="docs/media/demo-clip.mp4" width="720" controls muted autoplay loop playsinline>
-    <a href="docs/media/demo-clip.mp4">Watch demo clip</a>
-  </video>
+  <img src="docs/media/desk-setup-2.png" width="720" alt="AgentDeck — TUI dashboard, Pixoo64, Stream Deck+, and all surfaces running simultaneously">
 </p>
 
 | | Requirement |
@@ -73,6 +78,9 @@ A **control surface** — like an audio mixing console, but for AI coding agents
 - **Switch modes** — cycle Plan / Accept Edits / Default
 - **Navigate options** — encoder scrolls and selects multi-choice prompts on a wide-canvas LCD
 - **Voice input** — push-to-talk → whisper.cpp → auto-send (offline, <2s on M-series)
+- **Voice assistant** — wake word detection → whisper.cpp STT → LLM → TTS response (fully offline)
+- **Display sync** — macOS sleep dims all connected surfaces; wake restores instantly
+- **Terminal postit** — agent state shown in iTerm2 tab titles and badges
 - **Monitor usage** — animated water-gauge dashboard with rate limit countdowns
 - **Quick actions** — GO ON / REVIEW / COMMIT / CLEAR; encoder cycles custom prompts
 - **System utilities** — volume, mic, media, timer from the Utility encoder
@@ -94,7 +102,7 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 |---|---------|-------------|
 | 1 | **Stream Deck+** | Primary — 8 keys, 4 encoders, LCD touch strip |
 | 2 | **Android Tablet** | Color terrarium + HUD overlay (60fps) |
-| 3 | **Crema S E-ink** | B&W aquarium + 16-level grayscale + partial refresh |
+| 3 | **E-ink Reader** | B&W 16-level grayscale + **Color E-ink** (Kaleido 3, 4096 colors) + partial refresh |
 | 4 | **iPhone** | SwiftUI app — mobile agent monitoring |
 | 5 | **iPad** | SwiftUI app — terrarium second screen |
 | 6 | **macOS** | SwiftUI app — desktop monitoring window |
@@ -642,11 +650,15 @@ Stream Deck plugin logs: Stream Deck app → Settings → Logs.
 
 - [x] Android tablet + e-ink dashboard (Jetpack Compose)
 - [x] Apple iOS/iPad/macOS dashboard (SwiftUI multiplatform)
+- [x] Apple TestFlight CI pipeline
 - [x] ESP32 compact displays (Round AMOLED, IPS LCD, B86 Box)
 - [x] TUI terminal dashboard (Unicode Braille + ANSI)
 - [x] Pixoo64 LED matrix pixel art
 - [x] Multi-agent visualization (Claude Code + OpenClaw creatures)
 - [x] Daemon mode with multi-session aggregation
+- [x] Voice assistant pipeline (wake word → STT → LLM → TTS)
+- [x] Display sleep/wake sync across all surfaces
+- [x] Color E-ink support (Kaleido 3)
 
 ### Planned
 
@@ -654,7 +666,7 @@ Stream Deck plugin logs: Stream Deck app → Settings → Logs.
 - Windows/Linux platform support
 - Project-specific layout presets
 - Custom button icon support
-- App Store distribution (Apple)
+- App Store / Play Store distribution
 
 ---
 
