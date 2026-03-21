@@ -108,7 +108,7 @@ describe('Usage relay — HTTP (Tier 1)', () => {
 
   it('fetches usage from sibling GET /usage', async () => {
     const res = await fetch(`http://127.0.0.1:${sibling.port}/usage`);
-    const data = await res.json();
+    const data = await res.json() as any;
 
     expect(data.status).toBe('ok');
     expect(data.usage).not.toBeNull();
@@ -121,7 +121,7 @@ describe('Usage relay — HTTP (Tier 1)', () => {
     sibling.setUsage(null);
 
     const res = await fetch(`http://127.0.0.1:${sibling.port}/usage`);
-    const data = await res.json();
+    const data = await res.json() as any;
 
     expect(data.usage).toBeNull();
   });
@@ -130,7 +130,7 @@ describe('Usage relay — HTTP (Tier 1)', () => {
     sibling.setUsage(sampleUsage(), Date.now() - 6 * 60 * 1000);
 
     const res = await fetch(`http://127.0.0.1:${sibling.port}/usage`);
-    const data = await res.json();
+    const data = await res.json() as any;
 
     // Data exists but is stale — caller should treat as relay failure
     expect(data.usage).not.toBeNull();
@@ -216,7 +216,7 @@ describe('HookServer GET /usage (relay source)', () => {
     hookServer.onApiUsage(() => ({ usage, fetchedAt }));
 
     const res = await fetch(`http://127.0.0.1:${port}/usage`);
-    const data = await res.json();
+    const data = await res.json() as any;
 
     expect(data.status).toBe('ok');
     expect(data.usage.fiveHourPercent).toBe(42);
@@ -231,7 +231,7 @@ describe('HookServer GET /usage (relay source)', () => {
 
     // First fetch
     const res1 = await fetch(`http://127.0.0.1:${port}/usage`);
-    const data1 = await res1.json();
+    const data1 = await res1.json() as any;
     expect(data1.usage.fiveHourPercent).toBe(20);
 
     // Update usage
@@ -240,7 +240,7 @@ describe('HookServer GET /usage (relay source)', () => {
 
     // Second fetch should reflect update
     const res2 = await fetch(`http://127.0.0.1:${port}/usage`);
-    const data2 = await res2.json();
+    const data2 = await res2.json() as any;
     expect(data2.usage.fiveHourPercent).toBe(75);
   });
 });
@@ -255,7 +255,7 @@ describe('429 prevention — relay-first strategy', () => {
 
     try {
       const res = await fetch(`http://127.0.0.1:${sibling.port}/usage`);
-      const data = await res.json();
+      const data = await res.json() as any;
 
       // Relay succeeded — daemon would use this and skip API
       expect(data.usage).not.toBeNull();
@@ -272,11 +272,11 @@ describe('429 prevention — relay-first strategy', () => {
     try {
       // Sibling 1 has no data
       const res1 = await fetch(`http://127.0.0.1:${sibling1.port}/usage`);
-      expect((await res1.json()).usage).toBeNull();
+      expect((await res1.json() as any).usage).toBeNull();
 
       // Sibling 2 has data — would be used
       const res2 = await fetch(`http://127.0.0.1:${sibling2.port}/usage`);
-      const data2 = await res2.json();
+      const data2 = await res2.json() as any;
       expect(data2.usage.fiveHourPercent).toBe(88);
     } finally {
       await sibling1.close();

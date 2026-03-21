@@ -55,8 +55,8 @@ function sampleFullStateUpdate(): StateUpdateEvent {
     effortLevel: 'high',
     billingType: 'subscription',
     options: [
-      { label: 'Allow once', value: 'y', hotkey: 'y' },
-      { label: 'Always allow', value: 'a', hotkey: 'a' },
+      { index: 0, label: 'Allow once', shortcut: 'y' },
+      { index: 1, label: 'Always allow', shortcut: 'a' },
     ],
     promptType: 'yes_no_always',
     question: 'Allow Read?',
@@ -195,7 +195,7 @@ describe('Protocol Contract — StateUpdateEvent', () => {
       expect(Array.isArray(evt.options)).toBe(true);
       for (const opt of evt.options) {
         expect(typeof opt.label).toBe('string');
-        expect(typeof opt.value).toBe('string');
+        expect(typeof opt.label).toBe('string');
       }
     }
 

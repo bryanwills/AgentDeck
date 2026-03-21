@@ -147,7 +147,7 @@ describe('Server Integration', () => {
     const res = await getEndpoint(port, '/health');
     expect(res.status).toBe(200);
 
-    const json = await res.json();
+    const json = await res.json() as any;
     expect(json.status).toBe('ok');
     expect(json.agentType).toBe('claude-code');
     expect(json.projectName).toBe('test-project');
@@ -159,7 +159,7 @@ describe('Server Integration', () => {
     hookServer.onApiUsage(() => ({ usage: mockUsage, fetchedAt: Date.now() }));
 
     const res = await getEndpoint(port, '/usage');
-    const json = await res.json();
+    const json = await res.json() as any;
     expect(json.status).toBe('ok');
     expect(json.usage).toEqual(mockUsage);
     expect(json.fetchedAt).toBeGreaterThan(0);
@@ -167,13 +167,13 @@ describe('Server Integration', () => {
 
   it('GET /usage returns null when no getter', async () => {
     const res = await getEndpoint(port, '/usage');
-    const json = await res.json();
+    const json = await res.json() as any;
     expect(json.usage).toBeNull();
   });
 
   it('GET /devices returns empty when no getter', async () => {
     const res = await getEndpoint(port, '/devices');
-    const json = await res.json();
+    const json = await res.json() as any;
     expect(json.devices).toEqual([]);
   });
 
@@ -188,7 +188,7 @@ describe('Server Integration', () => {
     const elapsed = Date.now() - start;
 
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json = await res.json() as any;
     expect(json.received).toBe(true);
     // Hook should respond quickly (< 100ms local)
     expect(elapsed).toBeLessThan(500);
@@ -265,15 +265,15 @@ describe('Server Integration', () => {
   // ─── WS command handling ──────────────────────────────────────────
 
   it('WS command from client triggers callback', async () => {
-    const commands: Record<string, unknown>[] = [];
+    const commands: unknown[] = [];
     wsServer.onCommand((cmd) => commands.push(cmd));
 
-    wsClient.send({ type: 'interrupt' });
+    wsClient.send({ type: 'interrupt' } as any);
 
     // Wait for command to arrive
     await new Promise((r) => setTimeout(r, 100));
     expect(commands).toHaveLength(1);
-    expect(commands[0].type).toBe('interrupt');
+    expect((commands[0] as any).type).toBe('interrupt');
   });
 
   // ─── Rapid events (race condition check) ──────────────────────────

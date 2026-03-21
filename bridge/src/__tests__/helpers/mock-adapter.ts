@@ -4,20 +4,18 @@
  */
 import { EventEmitter } from 'events';
 import type {
-  AgentAdapter,
   AgentCapabilities,
-  AdapterStartOptions,
   AdapterEvent,
   PluginCommand,
 } from '../../types.js';
 import { CLAUDE_CODE_CAPABILITIES } from '@agentdeck/shared';
 
-export class MockAdapter extends EventEmitter implements AgentAdapter {
+export class MockAdapter extends EventEmitter {
   capabilities: AgentCapabilities = { ...CLAUDE_CODE_CAPABILITIES };
   started = false;
   commands: PluginCommand[] = [];
 
-  async start(_options: AdapterStartOptions): Promise<void> {
+  async start(): Promise<void> {
     this.started = true;
   }
 
@@ -44,11 +42,11 @@ export class MockAdapter extends EventEmitter implements AgentAdapter {
 
   /** Simulate a hook event sequence */
   emitHookEvent(event: string, data: Record<string, unknown> = {}): void {
-    this.emitAdapterEvent({ kind: 'hook', event, data });
+    this.emitAdapterEvent({ source: 'hook', event, data });
   }
 
   /** Simulate a parser event */
   emitParserEvent(event: string, data?: Record<string, unknown>): void {
-    this.emitAdapterEvent({ kind: 'parser', event, data });
+    this.emitAdapterEvent({ source: 'parser', event, data } as AdapterEvent);
   }
 }

@@ -155,6 +155,8 @@ describe('prepareForSerial (source)', () => {
       state: State.IDLE,
       permissionMode: PermissionMode.DEFAULT,
       agentCapabilities: {
+        type: 'claude-code',
+        displayName: 'Claude Code',
         hasTerminal: true,
         hasModeSwitching: true,
         hasDiffReview: true,
@@ -166,7 +168,7 @@ describe('prepareForSerial (source)', () => {
       },
     };
 
-    const prepared = prepareForSerial(event) as Record<string, unknown>;
+    const prepared = prepareForSerial(event) as unknown as Record<string, unknown>;
     expect(prepared.agentCapabilities).toBeUndefined();
     expect(prepared.type).toBe('state_update');
     expect(prepared.state).toBe(State.IDLE);
@@ -181,7 +183,7 @@ describe('prepareForSerial (source)', () => {
       remoteUrl: 'https://example.com',
     };
 
-    const prepared = prepareForSerial(event) as Record<string, unknown>;
+    const prepared = prepareForSerial(event) as unknown as Record<string, unknown>;
     expect(prepared.billingType).toBeUndefined();
     expect(prepared.remoteUrl).toBeUndefined();
   });
@@ -195,12 +197,12 @@ describe('prepareForSerial (source)', () => {
       currentTool: 'Edit',
       projectName: 'AgentDeck',
       modelName: 'opus-4',
-      options: [{ label: 'Allow', value: 'y', hotkey: 'y' }],
+      options: [{ index: 0, label: 'Allow', shortcut: 'y' }],
       question: 'Allow Edit?',
       gatewayAvailable: true,
     };
 
-    const prepared = prepareForSerial(event) as Record<string, unknown>;
+    const prepared = prepareForSerial(event) as unknown as Record<string, unknown>;
     expect(prepared.state).toBe(State.AWAITING_PERMISSION);
     expect(prepared.agentType).toBe('claude-code');
     expect(prepared.currentTool).toBe('Edit');
@@ -226,7 +228,7 @@ describe('prepareForSerial (source)', () => {
       tokenStatus: 'valid',
     };
 
-    const prepared = prepareForSerial(event) as Record<string, unknown>;
+    const prepared = prepareForSerial(event) as unknown as Record<string, unknown>;
     expect(prepared.sessionPercent).toBeUndefined();
     expect(prepared.costSpent).toBeUndefined();
     expect(prepared.costLimit).toBeUndefined();

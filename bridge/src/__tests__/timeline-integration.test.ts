@@ -240,7 +240,7 @@ describe('TimelineEntry types', () => {
 
   it('common entry types have expected shape', () => {
     for (const type of validTypes) {
-      const entry = makeEntry({ type, raw: `Test ${type}` });
+      const entry = makeEntry({ type: type as any, raw: `Test ${type}` });
       expect(entry.type).toBe(type);
       expect(typeof entry.ts).toBe('number');
       expect(typeof entry.raw).toBe('string');

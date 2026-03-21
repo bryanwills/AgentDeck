@@ -101,8 +101,8 @@ describe('BridgeCore Orchestration', () => {
       core.stateMachine.handleHookEvent('UserPromptSubmit', {});
       core.stateMachine.handleParserEvent('permission_prompt', {
         options: [
-          { label: 'Allow once', value: 'y', hotkey: 'y' },
-          { label: 'Deny', value: 'n', hotkey: 'n' },
+          { index: 0, label: 'Allow once', shortcut: 'y' },
+          { index: 1, label: 'Deny', shortcut: 'n' },
         ],
         question: 'Allow Read?',
       });
@@ -120,9 +120,9 @@ describe('BridgeCore Orchestration', () => {
       core.stateMachine.handleHookEvent('UserPromptSubmit', {});
       core.stateMachine.handleParserEvent('permission_prompt', {
         options: [
-          { label: 'Allow once', value: 'y', hotkey: 'y' },
-          { label: 'Always allow', value: 'a', hotkey: 'a' },
-          { label: 'Deny', value: 'n', hotkey: 'n' },
+          { index: 0, label: 'Allow once', shortcut: 'y' },
+          { index: 2, label: 'Always allow', shortcut: 'a' },
+          { index: 1, label: 'Deny', shortcut: 'n' },
         ],
       });
 
