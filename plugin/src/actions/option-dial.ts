@@ -12,8 +12,8 @@ import streamDeck, {
 import { State, PromptOption } from '@agentdeck/shared';
 import type { AgentType, AgentCapabilities, OcSessionStatus } from '@agentdeck/shared';
 import type { AgentLink } from '../agent-link.js';
-import { isEncoderTakeoverActive, refreshEncoderTakeover } from '../encoder-takeover.js';
-import { encoderRegistry, encoderLayout, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
+import { isEncoderTakeoverActive } from '../encoder-takeover.js';
+import { encoderRegistry, encoderLayout, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, fireRefreshTakeover } from '../encoder-registry.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import {
   renderResponseIdle,
@@ -185,7 +185,7 @@ function refreshOptionDials(): void {
   if (isVoiceTextTakeoverActive()) return;
   // When takeover is active, delegate to encoder-takeover for all encoders
   if (isEncoderTakeoverActive()) {
-    refreshEncoderTakeover(
+    fireRefreshTakeover(
       currentState,
       currentOptions,
       selectedIndex,

@@ -16,11 +16,14 @@ import { handleExpandedAction } from '../expanded-actions.js';
 import { setCcNoSessionMode } from './response-button.js';
 import { setUsageCapabilities } from './usage-button.js';
 import { updateOptionDialState } from './option-dial.js';
-import { updateItermDialState, suppressAutoSwitch } from './iterm-dial.js';
+import { fireUpdateItermState, fireSuppressAutoSwitch, setSwitchToPortCallback } from '../encoder-registry.js';
 import { dlog } from '../log.js';
 import { readFileSync, watchFile, unwatchFile } from 'fs';
 import { execSync, execFile } from 'child_process';
 import { homedir } from 'os';
+
+// Register cross-module callback (breaks circular dep with iterm-dial)
+setSwitchToPortCallback((port: number) => switchToPort(port));
 
 const SIZE = 144;
 const LONG_PRESS_MS = 500;
@@ -69,14 +72,14 @@ function setNoSessionMode(active: boolean): void {
     // Clear capabilities so usage/dials revert to CC-disconnected behavior
     setUsageCapabilities(null);
     updateOptionDialState(currentState, [], undefined, undefined, undefined, undefined, undefined, undefined, null, null, null);
-    updateItermDialState(currentState, null, null, null);
+    fireUpdateItermState(currentState, null, null, null);
   } else {
     // Restore gateway capabilities
     const caps = bridge.getCapabilities();
     const agentType = bridge.getActiveAgentType();
     setUsageCapabilities(caps);
     updateOptionDialState(currentState, [], undefined, undefined, undefined, undefined, undefined, undefined, agentType, null, caps);
-    updateItermDialState(currentState, agentType, null, caps);
+    fireUpdateItermState(currentState, agentType, null, caps);
   }
 }
 
@@ -849,7 +852,7 @@ function cycleSession(): void {
     currentModel = undefined;
     currentEffortLevel = undefined;
     dlog('SesBut', `cycle: ${currentSessionIndex + 1}/${sessions.length} → ${getDisplayName(session, sessions)}:${session.port}`);
-    suppressAutoSwitch();
+    fireSuppressAutoSwitch();
     bridge.activateBridge();
     bridge.reconnectBridgeTo(session.port);
   }

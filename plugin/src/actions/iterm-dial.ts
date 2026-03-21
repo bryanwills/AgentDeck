@@ -12,17 +12,22 @@ import type { AgentType, AgentCapabilities, OcSessionStatus } from '@agentdeck/s
 import { isEncoderTakeoverActive } from '../encoder-takeover.js';
 import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
 import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
-import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
+import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, setTakeoverExitCallback, fireSwitchToPort, setUpdateItermStateCallback, setSuppressAutoSwitchCallback } from '../encoder-registry.js';
 import { getItermSessions, activateItermSession, attachTmuxInIterm, getActiveItermTty, getTmuxSessionMap, getLiveTmuxSessionNames, isItermFrontmost, cycleItermWindowNext, cycleItermWindowPrev, enterItermExpose, exposeNavigate, exposeConfirm, exposeCancel, type ItermSession } from '../utility-modes/macos.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderItermPanel, renderItermReady } from '../renderers/iterm-renderer.js';
 import { timelineStore } from '../timeline-store.js';
 import { renderTimeline } from '../renderers/timeline-renderer.js';
-import { switchToPort } from './session-button.js';
+// switchToPort accessed via fireSwitchToPort (encoder-registry) to avoid circular dep
 import { ConnectionManager } from '../connection-manager.js';
 import { dlog, dinfo } from '../log.js';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
+
+// Register cross-module callbacks (breaks circular deps via encoder-registry)
+setTakeoverExitCallback(() => resetItermLayout());
+setUpdateItermStateCallback((...args: any[]) => updateItermDialState(...args));
+setSuppressAutoSwitchCallback(() => suppressAutoSwitch());
 
 const POLL_INTERVAL = 2000;
 const SKIP_AFTER_ACTION = 3000;
@@ -183,7 +188,7 @@ async function syncFromSystem(): Promise<void> {
       if (match && match.port !== currentPort) {
         dlog('ItermDial', `auto-switch: tty ${activeTty} → port ${match.port}`);
         lastActionAt = Date.now(); // suppress re-trigger for SKIP_AFTER_ACTION
-        switchToPort(match.port);
+        fireSwitchToPort(match.port);
 
         // Sync dial display to the matched iTerm session
         const itermIdx = sessions.findIndex((s) => s.tty === activeTty);

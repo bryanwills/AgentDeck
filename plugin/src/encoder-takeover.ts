@@ -1,6 +1,6 @@
 import streamDeck from '@elgato/streamdeck';
 import { State, PromptOption } from '@agentdeck/shared';
-import { encoderRegistry, resetEncoderLayouts, isVoiceTextTakeoverActive, setVoiceTextTakeover } from './encoder-registry.js';
+import { encoderRegistry, resetEncoderLayouts, isVoiceTextTakeoverActive, setVoiceTextTakeover, fireTakeoverExit, setRefreshTakeoverCallback } from './encoder-registry.js';
 import { svgToDataUrl } from './renderers/button-renderer.js';
 import {
   renderContextPanel,
@@ -9,10 +9,12 @@ import {
   renderDetailPanel,
   renderWideOptionList,
 } from './renderers/option-renderer.js';
-import { resetItermLayout } from './actions/iterm-dial.js';
 import { dlog } from './log.js';
 
 const PIXMAP_LAYOUT = 'layouts/option-pixmap-layout.json';
+
+// Register cross-module callback (breaks circular dep with option-dial)
+setRefreshTakeoverCallback((...args: any[]) => refreshEncoderTakeover(...args));
 
 let active = false;
 let generation = 0;
@@ -98,7 +100,7 @@ export async function exitEncoderTakeover(): Promise<void> {
   dlog('Takeover', 'exit');
 
   resetEncoderLayouts();
-  resetItermLayout();
+  fireTakeoverExit();
 
   const promises: Promise<void>[] = [];
   for (const id of getAllIds()) {
