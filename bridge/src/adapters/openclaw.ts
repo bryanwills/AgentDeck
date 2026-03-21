@@ -128,6 +128,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
   private lastPrompt: string | null = null;
   private accumulatedResponse = '';
   private topicExtracted = false;
+  private chatIsAutomated = false;
 
   // Device identity (loaded once on start)
   private deviceIdentity: DeviceIdentity | null = null;
@@ -265,6 +266,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
         // Optimistic: immediate timeline + PROCESSING state (no waiting for delta)
         if (!this.chatStarted) {
           this.chatStarted = true;
+          this.chatIsAutomated = false;
           this.chatStartTime = Date.now();
           this.chatToolCount = 0;
           this.chatToolNames = [];
@@ -663,6 +665,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
             if (!this.chatStarted) {
               // Non-optimistic path: gateway-initiated chat (cron, web, etc.)
               this.chatStarted = true;
+              this.chatIsAutomated = !this.lastPrompt;
               this.chatStartTime = Date.now();
               this.chatToolCount = 0;
               this.chatToolNames = [];
@@ -674,6 +677,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
               this.emitTimelineEntry({
                 ts: Date.now(), type: 'chat_start', raw: promptRaw,
                 ...(promptDetail ? { detail: promptDetail } : {}),
+                ...(this.chatIsAutomated ? { automated: true } : {}),
               });
             } else {
               // Gateway always sends cumulative content — replace, never append
@@ -726,12 +730,14 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
             this.emitTimelineEntry({
               ts: chatEndTs, type: 'chat_end', raw: parts.join(' \u00b7 '),
               ...(responseDetail ? { detail: responseDetail } : {}),
+              ...(this.chatIsAutomated ? { automated: true } : {}),
             });
 
             // Async LLM summarization — fire-and-forget, upsert chat_end when ready
             if (responseContent && responseContent.length > 30) {
               const savedToolSummary = toolSummary;
               const savedDuration = duration;
+              const savedAutomated = this.chatIsAutomated;
               summarizeResponse(responseContent).then((summary) => {
                 if (summary) {
                   const enrichedParts = [summary];
@@ -743,6 +749,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
                     ts: chatEndTs, type: 'chat_end',
                     raw: enrichedParts.join(' \u00b7 '),
                     ...(responseDetail ? { detail: responseDetail } : {}),
+                    ...(savedAutomated ? { automated: true } : {}),
                   });
                 }
               }).catch(() => { /* summarization failed — keep heuristic */ });
@@ -766,6 +773,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
             this.emitTimelineEntry({
               ts: Date.now(), type: 'chat_end', raw: abortParts.join(' \u00b7 '),
               ...(abortDetail ? { detail: abortDetail } : {}),
+              ...(this.chatIsAutomated ? { automated: true } : {}),
             });
             this.chatStarted = false;
             this.lastPrompt = null;

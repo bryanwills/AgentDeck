@@ -120,6 +120,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
   private lastPrompt: string | null = null;
   private accumulatedResponse = '';
   private topicExtracted = false;
+  private chatIsAutomated = false;
 
   // Model catalog (fetched via CLI)
   private modelCatalog: ModelCatalogEntry[] | null = null;
@@ -180,6 +181,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
         // Optimistic: immediate timeline + state transition (no waiting for delta)
         if (!this.chatStarted) {
           this.chatStarted = true;
+          this.chatIsAutomated = false;
           this.chatStartTime = Date.now();
           this.chatToolCount = 0;
           this.chatToolNames = [];
@@ -582,6 +584,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
 
             if (!this.chatStarted) {
               this.chatStarted = true;
+              this.chatIsAutomated = !this.lastPrompt;
               this.chatStartTime = Date.now();
               this.chatToolCount = 0;
               this.chatToolNames = [];
@@ -595,6 +598,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
               this.addTimelineEntry({
                 ts: Date.now(), type: 'chat_start', raw: prompt,
                 ...(promptDetail ? { detail: promptDetail } : {}),
+                ...(this.chatIsAutomated ? { automated: true } : {}),
               });
               this.startStatusPoll();
             } else {
@@ -648,6 +652,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
             this.addTimelineEntry({
               ts: chatEndTs, type: 'chat_end', raw: parts.join(' · '),
               ...(responseDetail ? { detail: responseDetail } : {}),
+              ...(this.chatIsAutomated ? { automated: true } : {}),
             });
 
             // Async LLM summarization — upsert chat_end when ready
@@ -655,6 +660,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
               const savedToolSummary = toolSummary;
               const savedElapsed = elapsed;
               const savedDetail = responseDetail;
+              const savedAutomated = this.chatIsAutomated;
               summarizeResponse(responseContent).then((summary) => {
                 if (summary) {
                   const enriched = [summary];
@@ -664,6 +670,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
                     ts: chatEndTs, type: 'chat_end',
                     raw: enriched.join(' · '),
                     ...(savedDetail ? { detail: savedDetail } : {}),
+                    ...(savedAutomated ? { automated: true } : {}),
                   });
                 }
               }).catch(() => { /* summarization failure is non-fatal */ });
@@ -687,7 +694,10 @@ export class GatewayClient extends EventEmitter implements AgentLink {
             const abortParts: string[] = ['Aborted'];
             if (elapsed > 0) abortParts.push(`after ${elapsed}s`);
             if (abortToolSummary) abortParts.push(abortToolSummary);
-            this.addTimelineEntry({ ts: Date.now(), type: 'chat_end', raw: abortParts.join(' · ') });
+            this.addTimelineEntry({
+              ts: Date.now(), type: 'chat_end', raw: abortParts.join(' · '),
+              ...(this.chatIsAutomated ? { automated: true } : {}),
+            });
             this.currentRunId = null;
             this.lastPrompt = null;
             this.accumulatedResponse = '';
