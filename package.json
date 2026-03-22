@@ -9,9 +9,13 @@
     "clean": "pnpm -r clean",
     "typecheck": "pnpm -r typecheck",
     "generate-icons": "node scripts/generate-icons.mjs",
+    "generate-protocol": "bash scripts/generate-protocol.sh",
     "package": "bash scripts/package-plugin.sh",
     "setup": "bash scripts/install.sh",
     "test": "vitest run",
+    "test:report": "bash scripts/test-report.sh",
+    "test:android": "bash scripts/test-report.sh --android",
+    "test:html": "pnpm vitest run --coverage && python3 scripts/generate-html-report.py && open coverage/test-report/index.html",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -28,7 +32,9 @@
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.4.0",
     "prettier": "^3.8.1",
+    "quicktype": "^23.2.6",
     "sharp": "^0.34.5",
+    "ts-json-schema-generator": "^2.9.0",
     "typescript-eslint": "^8.57.1",
     "vitest": "^4.0.18"
   }

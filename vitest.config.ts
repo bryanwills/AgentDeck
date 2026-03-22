@@ -11,7 +11,7 @@ export default defineConfig({
     testTimeout: 10_000,
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'lcov'],
+      reporter: ['text', 'lcov', 'json-summary'],
       include: [
         'bridge/src/**/*.ts',
         'shared/src/**/*.ts',
@@ -23,6 +23,14 @@ export default defineConfig({
         '**/node_modules/**',
         '**/dist/**',
       ],
+      thresholds: {
+        // Regression guard — set slightly below current levels.
+        // Raise these as coverage improves.
+        lines: 17,
+        functions: 15,
+        branches: 14,
+        statements: 16,
+      },
     },
   },
 });

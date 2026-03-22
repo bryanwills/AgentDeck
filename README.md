@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="https://www.npmjs.com/package/@agentdeck/setup"><img src="https://img.shields.io/npm/v/@agentdeck/setup.svg" alt="npm version"></a>
   <a href="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml"><img src="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/tests-470%20passed-brightgreen.svg" alt="470 tests passed">
+  <img src="https://img.shields.io/badge/tests-728%20passed-brightgreen.svg" alt="728 tests passed">
 </p>
 
 <p align="center">
@@ -628,21 +628,25 @@ pnpm -r typecheck         # Type check without building
 ```bash
 pnpm test                        # Run all tests (vitest)
 pnpm test -- --watch             # Watch mode
-pnpm vitest run --coverage       # Coverage report (v8)
+pnpm vitest run --coverage       # Coverage report (v8) + threshold check
+pnpm test:report                 # Unified report (vitest + Android + Apple + Robot)
+pnpm test:android                # Android unit tests only
 ```
 
-**11 test files, 466+ test cases** covering state machine, output parser, adapter hierarchy, timeline dedup, connection management, hook installation, text rendering, and Gateway protocol.
+**24 test files, 728 test cases** across 4 frameworks:
 
-| Package | Key Tests | Coverage |
-|---------|-----------|----------|
-| **shared** | Timeline parsing, semantic dedup, text cleaning | ~55% |
-| **bridge** | State machine, output parser, adapters, cursor sync, sessions | ~16% |
-| **plugin** | Gateway client, connection manager, text utils, option layout | ~23% |
-| **hooks** | Hook installation, format migration | indirect |
+| Framework | Scope | Tests | Coverage |
+|-----------|-------|-------|----------|
+| **Vitest** | bridge, plugin, shared, hooks | 646 | lines ~26% (bridge), ~53% (shared), ~23% (plugin) |
+| **JUnit + Robolectric** | Android (Protocol, Timeline, Metrics, Utils) | 82 | — |
+| **XCTest** | Apple (Protocol, Timeline) | 2 files | — |
+| **Robot Framework** | ESP32 (build, flash, serial protocol) | 3 suites | hardware-dependent |
 
-CI runs automatically on every push/PR to `master` (`build → typecheck → test`).
+Coverage thresholds are enforced in CI (lines ≥18%, functions ≥16%, branches ≥14%). See `vitest.config.ts` for details.
 
-See **[Testing Guide](docs/testing.md)** for full details on coverage, writing tests, and future plans.
+CI runs automatically on every push/PR to `master` (`build → typecheck → test → coverage check`).
+
+See **[Testing Guide](docs/testing.md)** for full details on coverage, writing tests, and running the unified report.
 
 Quick smoke test after changes:
 

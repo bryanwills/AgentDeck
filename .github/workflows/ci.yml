@@ -33,3 +33,6 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Coverage check
+        run: npx vitest run --coverage

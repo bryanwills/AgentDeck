@@ -31,6 +31,21 @@ test-*.js
 # Runtime
 compatibility.json
 
+# Generated code (regenerate via: bash scripts/generate-protocol.sh)
+generated/
+
+# Coverage
+coverage/
+
 # Android signing
 android/signing.properties
 android/*.jks
+
+# Apple signing & certificates
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+*.certSigningRequest
+AuthKey_*.p8
+private_keys/
