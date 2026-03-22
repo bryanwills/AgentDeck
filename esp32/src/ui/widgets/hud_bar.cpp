@@ -378,10 +378,12 @@ void update() {
         for (uint8_t i = 0; i < sessionCount && i < 6; i++) {
             if (!sessions[i].alive) continue;
 
-            // Pick color: terracotta for claude-code, red for openclaw
+            // Pick color by agent type
             uint32_t dotColor;
             if (strstr(sessions[i].agentType, "openclaw") != nullptr) {
                 dotColor = Theme::CrayfishShell;  // red
+            } else if (strstr(sessions[i].agentType, "codex-cli") != nullptr) {
+                dotColor = Theme::CloudBody;       // indigo
             } else {
                 dotColor = Theme::ClaudeBody;     // terracotta
             }
@@ -398,8 +400,9 @@ void update() {
         }
     } else if (hasData) {
         // Fallback: show primary session info (only when real data received)
-        uint32_t dotColor = (strstr(primaryAgent, "openclaw") != nullptr)
-            ? Theme::CrayfishShell : Theme::ClaudeBody;
+        uint32_t dotColor = (strstr(primaryAgent, "openclaw") != nullptr) ? Theme::CrayfishShell
+            : (strstr(primaryAgent, "codex-cli") != nullptr) ? Theme::CloudBody
+            : Theme::ClaudeBody;
         uint32_t sColor = stateColor(primaryState);
 
         pos += snprintf(buf + pos, sizeof(buf) - pos,

@@ -5,10 +5,8 @@
 
 namespace MatrixPages {
 
-void renderState(CRGB* leds, float animTime);
-void renderText(CRGB* leds, float animTime);
-void renderGauge(CRGB* leds, float animTime);
-void renderTimeline(CRGB* leds, float animTime);
-void renderCreature(CRGB* leds, float animTime);
+void renderUsage(CRGB* leds, float animTime);
+void renderAgents(CRGB* leds, float animTime);
+void renderInfo(CRGB* leds, float animTime);
 
 } // namespace MatrixPages

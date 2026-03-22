@@ -198,19 +198,19 @@ function renderCrayfish(state: CrayfishState, frame: number, scale: SpriteScale)
 }
 
 // ===== Jellyfish Sprite =====
-// Codex CLI creature — dome-shaped bell + trailing tentacles
-// Small: 12×8 pixel → 6×2 braille, Large: 24×16 → 12×4 braille
+// Codex CLI creature — 6-lobe cloud + trailing tentacles (matches Codex icon)
+// Small: 10×8 pixel → 5×2 braille, Large: 20×16 → 10×4 braille
 
-// Cell types: 0=empty, 1=bell, 2=marking(>_), 3=bell_edge, 4=tentacle_left, 5=tentacle_right, 6=tentacle_center
+// Cell types: 0=empty, 1=cloud body, 2=marking(>_), 3=cloud edge(breathe), 4=tentacle_left, 5=tentacle_right, 6=tentacle_center
 const JELLYFISH_GRID_SMALL: number[][] = [
-  [0,0,0,1,1,1,1,1,1,0,0,0], // bell top
-  [0,0,1,1,1,1,1,1,1,1,0,0], // bell wide
-  [0,1,1,2,2,1,1,2,1,1,1,0], // bell with >_ marking
-  [0,0,3,1,1,1,1,1,1,3,0,0], // bell edge (contracts)
-  [0,0,0,3,3,3,3,3,3,0,0,0], // bell rim
-  [0,0,4,0,6,0,0,6,0,5,0,0], // tentacles upper
-  [0,4,0,0,0,6,6,0,0,0,5,0], // tentacles mid
-  [4,0,0,0,0,0,0,0,0,0,0,5], // tentacles lower
+  [0,0,1,1,0,0,1,1,0,0], // top lobes
+  [0,1,1,1,1,1,1,1,1,0], // wide body
+  [3,1,2,2,1,1,2,1,1,3], // body with >_ + side lobes
+  [0,1,1,1,1,1,1,1,1,0], // lower body
+  [0,0,3,1,1,1,1,3,0,0], // bottom edge
+  [0,0,4,0,6,0,6,0,5,0], // tentacles upper
+  [0,4,0,0,0,6,0,0,0,5], // tentacles mid
+  [4,0,0,0,0,0,0,0,0,5], // tentacles lower
 ];
 
 const JELLYFISH_GRID_LARGE = scaleGridN(JELLYFISH_GRID_SMALL, 2);
@@ -414,18 +414,20 @@ export function updateTerrarium(ctx: TerrariumContext, frame: number): void {
     oct.y += Math.sin((frame + oct.phaseOffset) * bobFreq) * bobAmp;
   }
 
-  // Animate jellyfish Y — jellyfish naturally float higher than octopi
+  // Animate jellyfish — near surface when processing, floor when idle
   for (const jf of ctx.jellyfish) {
-    const targetY = jf.state === 'processing' ? 0.20 :
-                    jf.state.startsWith('awaiting') ? 0.40 :
-                    0.55; // idle: mid-water float (jellyfish don't rest on floor)
-    jf.y += (targetY - jf.y) * 0.03; // slower drift than octopus
-    // Jellyfish pulse bob — gentle undulation
-    const bobAmp = jf.state === 'processing' ? 0.025 : 0.01;
-    const bobFreq = jf.state === 'processing' ? 0.12 : 0.03;
+    const isProcessing = jf.state === 'processing';
+    const targetY = isProcessing ? 0.10 :
+                    jf.state.startsWith('awaiting') ? 0.50 :
+                    0.85;
+    jf.y += (targetY - jf.y) * 0.03;
+    const bobAmp = isProcessing ? 0.015 : 0.01;
+    const bobFreq = isProcessing ? 0.12 : 0.03;
     jf.y += Math.sin((frame + jf.phaseOffset) * bobFreq) * bobAmp;
-    // Gentle horizontal drift
-    jf.x += Math.sin((frame + jf.phaseOffset) * 0.02) * 0.002;
+    // Processing: wide side-to-side drift near surface
+    const driftAmp = isProcessing ? 0.06 : 0.002;
+    const driftSpeed = isProcessing ? 0.02 : 0.02;
+    jf.x += Math.sin((frame + jf.phaseOffset) * driftSpeed) * driftAmp;
     jf.x = Math.max(0.08, Math.min(0.65, jf.x));
   }
 

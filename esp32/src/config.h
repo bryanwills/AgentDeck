@@ -33,6 +33,7 @@ constexpr uint32_t RENDER_INTERVAL_MS  = 33;  // ~30fps
 // ===== Terrarium =====
 #if defined(BOARD_ULANZI_TC001)
 constexpr uint8_t  MAX_OCTOPUS         = 1;
+constexpr uint8_t  MAX_CLOUD           = 0;
 constexpr uint8_t  MAX_TETRA           = 0;
 constexpr uint8_t  MAX_BUBBLES         = 0;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 0;
@@ -40,6 +41,7 @@ constexpr uint8_t  KELP_COUNT          = 0;
 constexpr uint8_t  WAVE_SEGMENTS       = 0;
 #elif IS_ROUND
 constexpr uint8_t  MAX_OCTOPUS         = 4;
+constexpr uint8_t  MAX_CLOUD           = 2;
 constexpr uint8_t  MAX_TETRA           = 4;
 constexpr uint8_t  MAX_BUBBLES         = 12;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 6;
@@ -47,6 +49,7 @@ constexpr uint8_t  KELP_COUNT          = 2;
 constexpr uint8_t  WAVE_SEGMENTS       = 14;
 #else
 constexpr uint8_t  MAX_OCTOPUS         = 6;
+constexpr uint8_t  MAX_CLOUD           = 4;
 constexpr uint8_t  MAX_TETRA           = 6;
 constexpr uint8_t  MAX_BUBBLES         = 20;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 10;
@@ -81,10 +84,10 @@ constexpr uint8_t  HUD_BAR_HEIGHT      = 24;
 
 // ===== Matrix (TC001) =====
 #if defined(BOARD_ULANZI_TC001)
-constexpr uint8_t  MATRIX_BRIGHTNESS_MIN = 5;
-constexpr uint8_t  MATRIX_BRIGHTNESS_MAX = 80;
-constexpr uint8_t  MATRIX_BRIGHTNESS_DEF = 40;
-constexpr uint32_t PAGE_AUTO_CYCLE_MS    = 5000;
+constexpr uint8_t  MATRIX_BRIGHTNESS_MIN = 3;
+constexpr uint8_t  MATRIX_BRIGHTNESS_MAX = 120;   // WS2812B max 255, capped for power stability
+constexpr uint8_t  MATRIX_BRIGHTNESS_DEF = 60;
+constexpr uint32_t PAGE_AUTO_CYCLE_MS    = 10000;  // 10s per page
 constexpr uint32_t SCROLL_SPEED_MS       = 60;
 constexpr uint8_t  FONT_CHAR_W           = 4;   // 3px glyph + 1px gap
 constexpr uint8_t  FONT_CHAR_H           = 5;

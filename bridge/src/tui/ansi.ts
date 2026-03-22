@@ -30,6 +30,34 @@ export const RESET = `${CSI}0m`;
 export const BOLD = `${CSI}1m`;
 export const DIM = `${CSI}2m`;
 
+// ===== Terminal Capabilities =====
+
+function isUtf8Locale(value: string | undefined): boolean {
+  if (!value) return false;
+  return /utf-?8/i.test(value);
+}
+
+function detectUnicodeSupport(): boolean {
+  return isUtf8Locale(process.env.LC_ALL) ||
+    isUtf8Locale(process.env.LC_CTYPE) ||
+    isUtf8Locale(process.env.LANG);
+}
+
+function detectTrueColorSupport(): boolean {
+  const colorTerm = process.env.COLORTERM || '';
+  const term = process.env.TERM || '';
+  const program = process.env.TERM_PROGRAM || '';
+  return /truecolor|24bit/i.test(colorTerm) ||
+    /direct/i.test(term) ||
+    /iTerm|WezTerm|Apple_Terminal|vscode/i.test(program);
+}
+
+export const terminalCaps = {
+  unicode: detectUnicodeSupport(),
+  trueColor: detectTrueColorSupport(),
+  emoji: detectUnicodeSupport(),
+};
+
 // ===== Color Helpers =====
 
 /** 24-bit truecolor foreground */
@@ -72,18 +100,18 @@ export const colors = {
   errorTl: sgr(31),     // red
 
   // Terrarium truecolors
-  octopus: fg(192, 112, 88),     // #C07058
-  crayfish: fg(255, 77, 77),     // #FF4D4D
-  tetraNeon: fg(0, 191, 255),    // #00BFFF
-  tetraStripe: fg(255, 99, 71),  // #FF6347
-  water: fg(30, 58, 95),         // #1e3a5f
-  waterDark: fg(10, 22, 40),     // #0a1628
-  sand: fg(194, 168, 120),       // #c2a878
-  seaweed: fg(34, 139, 34),      // forestgreen
-  bubble: fg(135, 206, 250),     // lightskyblue
-  crayfishGlow: fg(255, 107, 107), // #FF6B6B - signal wave color
-  jellyfish: fg(99, 102, 241),     // #6366F1 indigo
-  jellyfishGlow: fg(165, 180, 252), // #A5B4FC light indigo
+  octopus: terminalCaps.trueColor ? fg(192, 112, 88) : sgr(33),
+  crayfish: terminalCaps.trueColor ? fg(255, 77, 77) : sgr(31),
+  tetraNeon: terminalCaps.trueColor ? fg(0, 191, 255) : sgr(36),
+  tetraStripe: terminalCaps.trueColor ? fg(255, 99, 71) : sgr(33),
+  water: terminalCaps.trueColor ? fg(30, 58, 95) : sgr(34),
+  waterDark: terminalCaps.trueColor ? fg(10, 22, 40) : sgr(34),
+  sand: terminalCaps.trueColor ? fg(194, 168, 120) : sgr(33),
+  seaweed: terminalCaps.trueColor ? fg(34, 139, 34) : sgr(32),
+  bubble: terminalCaps.trueColor ? fg(135, 206, 250) : sgr(37),
+  crayfishGlow: terminalCaps.trueColor ? fg(255, 107, 107) : sgr(31),
+  jellyfish: terminalCaps.trueColor ? fg(99, 102, 241) : sgr(35),
+  jellyfishGlow: terminalCaps.trueColor ? fg(165, 180, 252) : sgr(37),
 };
 
 // ===== State to color mapping =====
@@ -101,6 +129,17 @@ export function stateColor(state: string): string {
 }
 
 export function stateIcon(state: string): string {
+  if (!terminalCaps.unicode) {
+    switch (state) {
+      case 'processing': return '*';
+      case 'awaiting_permission':
+      case 'awaiting_option':
+      case 'awaiting_diff': return '!';
+      case 'disconnected': return 'x';
+      case 'idle':
+      default: return 'o';
+    }
+  }
   switch (state) {
     case 'idle': return '\u25CB'; // ○
     case 'processing': return '\u25CF'; // ●
@@ -115,11 +154,17 @@ export function stateIcon(state: string): string {
 // ===== Box Drawing =====
 
 export const box = {
-  tl: '\u250C', tr: '\u2510', bl: '\u2514', br: '\u2518',
-  h: '\u2500', v: '\u2502',
-  tee: '\u252C', bTee: '\u2534',
-  lTee: '\u251C', rTee: '\u2524',
-  cross: '\u253C',
+  tl: terminalCaps.unicode ? '\u250C' : '+',
+  tr: terminalCaps.unicode ? '\u2510' : '+',
+  bl: terminalCaps.unicode ? '\u2514' : '+',
+  br: terminalCaps.unicode ? '\u2518' : '+',
+  h: terminalCaps.unicode ? '\u2500' : '-',
+  v: terminalCaps.unicode ? '\u2502' : '|',
+  tee: terminalCaps.unicode ? '\u252C' : '+',
+  bTee: terminalCaps.unicode ? '\u2534' : '+',
+  lTee: terminalCaps.unicode ? '\u251C' : '+',
+  rTee: terminalCaps.unicode ? '\u2524' : '+',
+  cross: terminalCaps.unicode ? '\u253C' : '+',
 };
 
 export function hLine(width: number, char = box.h): string {

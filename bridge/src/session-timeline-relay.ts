@@ -9,7 +9,7 @@
 import WebSocket from 'ws';
 import { listActive as listActiveSessions, type SessionEntry } from './session-registry.js';
 import type { BridgeTimelineStore } from './timeline-store.js';
-import type { TimelineEntry } from './types.js';
+import type { TimelineEntry, ModelCatalogEntry } from './types.js';
 import { debug } from './logger.js';
 
 const TAG = 'timeline-relay';
@@ -28,10 +28,16 @@ export class SessionTimelineRelay {
   private syncTimer: ReturnType<typeof setInterval> | null = null;
   private selfPort: number;
   private timeline: BridgeTimelineStore;
+  private onModelCatalog?: (models: ModelCatalogEntry[]) => void;
 
   constructor(selfPort: number, timeline: BridgeTimelineStore) {
     this.selfPort = selfPort;
     this.timeline = timeline;
+  }
+
+  /** Register callback for modelCatalog received from sibling state_update */
+  setOnModelCatalog(fn: (models: ModelCatalogEntry[]) => void): void {
+    this.onModelCatalog = fn;
   }
 
   /** Start periodic scanning for new/removed session bridges */
@@ -113,6 +119,8 @@ export class SessionTimelineRelay {
           for (const entry of evt.entries as TimelineEntry[]) {
             this.timeline.addEntry(entry);
           }
+        } else if (evt.type === 'state_update' && Array.isArray(evt.modelCatalog) && evt.modelCatalog.length > 0) {
+          this.onModelCatalog?.(evt.modelCatalog as ModelCatalogEntry[]);
         }
       } catch {
         // Ignore non-JSON or irrelevant messages

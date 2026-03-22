@@ -28,7 +28,6 @@ import {
   listActive as listActiveSessions,
   findAvailablePort,
   detectTmuxSession,
-  findExistingDaemon,
 } from './session-registry.js';
 import { fetchUsageFromApi, hasOAuthToken } from './usage-api.js';
 import { buildUsageEvent } from './usage-event.js';
@@ -331,19 +330,11 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
   // ===== Device modules =====
   const moduleConfigs: ModuleConfigs = opts.modules ?? {
-    mdns: false, // mDNS handled by daemon, not session (avoids collision)
+    mdns: false,   // daemon-only — session bridges never advertise mDNS
     adb: 'auto',
-    serial: 'auto',
-    pixoo: false, // Pixoo is daemon-only (like mDNS) — avoid PTY log pollution
+    serial: false, // daemon-only — session bridges never talk to ESP32
+    pixoo: false,  // daemon-only — session bridges never talk to Pixoo
   };
-
-  // When daemon is running, disable device modules unless explicitly enabled
-  // ('auto' from CLI default gets downgraded; explicit true would still work)
-  const daemonRunning = !!findExistingDaemon();
-  if (daemonRunning) {
-    if (moduleConfigs.serial === 'auto') moduleConfigs.serial = false;
-    if (moduleConfigs.pixoo === 'auto') moduleConfigs.pixoo = false;
-  }
   const deviceModules = createDefaultModules(agentType);
 
   // Set up ESP32 state provider before module init
@@ -551,7 +542,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
       }
     }
 
-    hookServer?.setMeta({ state: snapshot.state });
+    hookServer?.setMeta({ state: snapshot.state, modelName: snapshot.modelName ?? undefined });
     journal.write('state_change', 'internal', { state: snapshot.state, permissionMode: snapshot.permissionMode, suggestedPrompt: snapshot.suggestedPrompt });
 
     const stateEvent = core.buildStateEvent({

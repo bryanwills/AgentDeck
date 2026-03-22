@@ -29,6 +29,13 @@ enum class TetraVisualState {
     HOVERING,   // Formation near options area
 }
 
+enum class CloudVisualState {
+    DORMANT,     // Faded out — disconnected
+    DRIFTING,    // Gentle float — idle
+    COMPUTING,   // Pulsing glow — processing
+    WAITING,     // Soft blink — awaiting input
+}
+
 enum class EnvironmentVisualState {
     DARK,    // Disconnected — dim/off
     CALM,    // Idle — gentle caustics, slow bubbles
@@ -61,6 +68,8 @@ data class TerrariumState(
     val hasError: Boolean = false,
     /** Multi-session: all coding agent creatures (octopuses). */
     val agents: List<AgentCreatureState> = emptyList(),
+    /** Codex CLI cloud creatures. */
+    val cloudCreatures: List<AgentCreatureState> = emptyList(),
     /** OpenClaw backend worker count. */
     val workerCrayfishCount: Int = 0,
     /** Pop burst positions (normalized) — set for 1 frame when ASKING exits. */
@@ -169,8 +178,8 @@ fun DashboardState.toTerrariumState(): TerrariumState {
     // Build multi-agent creature list from sibling sessions
     val agents = mutableListOf<AgentCreatureState>()
 
-    // Primary agent — skip if disconnected (no session), daemon-like, or openclaw proxy
-    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType != "openclaw") {
+    // Primary agent — skip if disconnected (no session), daemon-like, openclaw proxy, or codex-cli
+    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType != "openclaw" && agentType != "codex-cli") {
         agents.add(
             AgentCreatureState(
                 sessionId = sessionId ?: "primary",
@@ -189,7 +198,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
     for (sibling in siblingSessions) {
         if (sessionId != null && sibling.id == sessionId) continue // skip self (null guard)
         val siblingType = sibling.agentType
-        if (siblingType == "openclaw" || siblingType == "daemon") continue // not octopus
+        if (siblingType == "openclaw" || siblingType == "daemon" || siblingType == "codex-cli") continue // not octopus
         agents.add(
             AgentCreatureState(
                 sessionId = sibling.id,
@@ -198,6 +207,40 @@ fun DashboardState.toTerrariumState(): TerrariumState {
                 visualState = mapSessionOctopusState(sibling.state),
                 isPrimary = false,
                 layoutSlot = slot++,
+                displayName = sibling.projectName,
+            )
+        )
+    }
+
+    // Build cloud creatures list from codex-cli sessions
+    val cloudCreatures = mutableListOf<AgentCreatureState>()
+    // Primary codex-cli agent
+    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType == "codex-cli") {
+        cloudCreatures.add(
+            AgentCreatureState(
+                sessionId = sessionId ?: "primary-cloud",
+                agentType = agentType,
+                mark = AgentMark.fromAgentType(agentType),
+                visualState = octopus, // reuse mapped state (will be converted to CloudVisualState at render)
+                isPrimary = true,
+                layoutSlot = 0,
+                displayName = projectName,
+            )
+        )
+    }
+    // Sibling codex-cli sessions
+    var cloudSlot = cloudCreatures.size
+    for (sibling in siblingSessions) {
+        if (sessionId != null && sibling.id == sessionId) continue
+        if (sibling.agentType != "codex-cli") continue
+        cloudCreatures.add(
+            AgentCreatureState(
+                sessionId = sibling.id,
+                agentType = sibling.agentType,
+                mark = AgentMark.fromAgentType(sibling.agentType),
+                visualState = mapSessionOctopusState(sibling.state),
+                isPrimary = false,
+                layoutSlot = cloudSlot++,
                 displayName = sibling.projectName,
             )
         )
@@ -227,6 +270,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
         agentType = agentType,
         hasError = gatewayHasError == true,
         agents = agents,
+        cloudCreatures = cloudCreatures,
         workerCrayfishCount = workerSessionCount ?: 0,
     )
 }

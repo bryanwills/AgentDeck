@@ -4,6 +4,7 @@
 #include "terrain.h"
 #include "kelp.h"
 #include "octopus.h"
+#include "cloud.h"
 #include "crayfish.h"
 #include "tetra.h"
 #include "particles.h"
@@ -164,6 +165,7 @@ void init(lv_obj_t* parent) {
     Terrain::init();
     Kelp::init();
     Octopus::init();
+    Cloud::init();
     Crayfish::init();
     Particles::init();
     Tetra::init();
@@ -191,60 +193,89 @@ void render(float dt) {
                                  strcmp(g_state.agentType, "openclaw") == 0);
     bool isOctopusAgent = hasData &&
                           strcmp(g_state.agentType, "openclaw") != 0 &&
+                          strcmp(g_state.agentType, "codex-cli") != 0 &&
                           strcmp(g_state.agentType, "daemon") != 0;
+    bool isCloudAgent = hasData &&
+                        strcmp(g_state.agentType, "codex-cli") == 0;
     uint8_t octCount = hasData ? g_state.octopusCount : 0;
     // Default to 1 octopus only for claude-code agents (before sessions_list arrives)
     if (octCount == 0 && isOctopusAgent) octCount = 1;
+    uint8_t cloudCount = hasData ? g_state.cloudCount : 0;
+    // Default to 1 cloud for codex-cli agents (before sessions_list arrives)
+    if (cloudCount == 0 && isCloudAgent) cloudCount = 1;
     bool showCrayfish = hasData && (g_state.gatewayAvailable || g_state.gatewayHasError || g_state.crayfishCount > 0);
 
     // Per-octopus creature state: daemon reports its own state (always IDLE),
     // but sibling sessions have their real states in sessions[].state
     CreatureState octStates[MAX_OCTOPUS];
+    CreatureState cloudStates[(MAX_CLOUD > 0) ? MAX_CLOUD : 1];
     static uint32_t lastDbg = 0;
     if (isDaemon && millis() - lastDbg > 3000) {
         lastDbg = millis();
-        Serial.printf("[Terrarium] isDaemon=%d octCount=%d sessionCount=%d cState=%d\n",
-                      isDaemon, octCount, g_state.sessionCount, (int)cState);
+        Serial.printf("[Terrarium] isDaemon=%d octCount=%d cloudCount=%d sessionCount=%d cState=%d\n",
+                      isDaemon, octCount, cloudCount, g_state.sessionCount, (int)cState);
         for (uint8_t s = 0; s < g_state.sessionCount; s++) {
             Serial.printf("  session[%d] type=%s state=%s alive=%d\n",
                           s, g_state.sessions[s].agentType, g_state.sessions[s].state,
                           g_state.sessions[s].alive);
         }
     }
+
+    // Helper lambda to map session state string to CreatureState
+    auto mapSessionState = [](const char* stateStr) -> CreatureState {
+        if (strcmp(stateStr, "processing") == 0) {
+            return CreatureState::WORKING;
+        } else if (strcmp(stateStr, "awaiting_permission") == 0 ||
+                   strcmp(stateStr, "awaiting_option") == 0 ||
+                   strcmp(stateStr, "awaiting_diff") == 0) {
+            return CreatureState::ASKING;
+        } else if (strcmp(stateStr, "idle") == 0) {
+            return CreatureState::FLOATING;
+        }
+        return CreatureState::FLOATING;
+    };
+
     if (isDaemon) {
         // Map sibling session states to creature states
         uint8_t octIdx = 0;
-        for (uint8_t s = 0; s < g_state.sessionCount && octIdx < MAX_OCTOPUS; s++) {
-            if (strcmp(g_state.sessions[s].agentType, "claude-code") != 0) continue;
+        uint8_t cloudIdx = 0;
+        for (uint8_t s = 0; s < g_state.sessionCount; s++) {
             if (!g_state.sessions[s].alive) continue;
-            if (strcmp(g_state.sessions[s].state, "processing") == 0) {
-                octStates[octIdx] = CreatureState::WORKING;
-            } else if (strcmp(g_state.sessions[s].state, "awaiting_permission") == 0 ||
-                       strcmp(g_state.sessions[s].state, "awaiting_option") == 0 ||
-                       strcmp(g_state.sessions[s].state, "awaiting_diff") == 0) {
-                octStates[octIdx] = CreatureState::ASKING;
-            } else if (strcmp(g_state.sessions[s].state, "idle") == 0) {
-                octStates[octIdx] = CreatureState::FLOATING;
-            } else {
-                octStates[octIdx] = CreatureState::FLOATING;
+
+            if (strcmp(g_state.sessions[s].agentType, "claude-code") == 0 && octIdx < MAX_OCTOPUS) {
+                octStates[octIdx] = mapSessionState(g_state.sessions[s].state);
+                octIdx++;
+            } else if (strcmp(g_state.sessions[s].agentType, "codex-cli") == 0 && cloudIdx < MAX_CLOUD) {
+                cloudStates[cloudIdx] = mapSessionState(g_state.sessions[s].state);
+                cloudIdx++;
             }
-            octIdx++;
         }
         // Fill remaining with daemon's own state
         for (; octIdx < MAX_OCTOPUS; octIdx++) {
             octStates[octIdx] = cState;
         }
+        for (; cloudIdx < MAX_CLOUD; cloudIdx++) {
+            cloudStates[cloudIdx] = cState;
+        }
         // Also update the "overall" cState for particles/bubbles/tetra
-        // Use the most active sibling state
-        if (octCount > 0) {
-            cState = octStates[0];
-            for (uint8_t i = 1; i < octCount; i++) {
-                if (octStates[i] == CreatureState::WORKING) cState = CreatureState::WORKING;
+        // Use the most active sibling state (across octopus + cloud)
+        if (octCount > 0 || cloudCount > 0) {
+            cState = CreatureState::FLOATING;
+            for (uint8_t i = 0; i < octCount && i < MAX_OCTOPUS; i++) {
+                if (octStates[i] == CreatureState::WORKING) { cState = CreatureState::WORKING; break; }
+            }
+            if (cState != CreatureState::WORKING) {
+                for (uint8_t i = 0; i < cloudCount && i < MAX_CLOUD; i++) {
+                    if (cloudStates[i] == CreatureState::WORKING) { cState = CreatureState::WORKING; break; }
+                }
             }
         }
     } else {
         for (uint8_t i = 0; i < MAX_OCTOPUS; i++) {
             octStates[i] = cState;
+        }
+        for (uint8_t i = 0; i < MAX_CLOUD; i++) {
+            cloudStates[i] = cState;
         }
     }
     unlockState();
@@ -274,6 +305,11 @@ void render(float dt) {
     // 7. Octopus(es) — per-instance state (daemon reports sibling states)
     for (uint8_t i = 0; i < octCount && i < MAX_OCTOPUS; i++) {
         Octopus::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime, dt, octStates[i], i, octCount);
+    }
+
+    // 7b. Cloud(s) — Codex CLI creatures (per-instance state)
+    for (uint8_t i = 0; i < cloudCount && i < MAX_CLOUD; i++) {
+        Cloud::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime, dt, cloudStates[i], i, cloudCount);
     }
 
     // 8. Data particles (food crumbs from working agents)

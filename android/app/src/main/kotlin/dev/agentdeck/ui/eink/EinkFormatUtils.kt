@@ -65,10 +65,19 @@ fun stateColor(state: AgentState): Color? {
     }
 }
 
+/** State priority for sorting: busiest first */
+fun stateRank(state: AgentState): Int = when (state) {
+    AgentState.PROCESSING -> 0
+    AgentState.AWAITING_PERMISSION, AgentState.AWAITING_OPTION, AgentState.AWAITING_DIFF -> 1
+    AgentState.IDLE -> 2
+    AgentState.DISCONNECTED -> 3
+}
+
 fun agentIcon(agentType: String?): String = when (agentType) {
-    "claude-code" -> "\uD83D\uDC19"  // octopus
-    "openclaw" -> "\uD83E\uDD9E"     // lobster (closest to crayfish)
-    else -> "\u25CF"                   // bullet
+    "claude-code" -> "\u273B"         // ✻ (Claude sparkle)
+    "openclaw" -> "\uD83E\uDD9E"     // 🦞 (crayfish)
+    "codex-cli" -> "\u276F"           // ❯ (terminal prompt)
+    else -> "\u25CF"                   // ● bullet
 }
 
 fun mapSessionState(session: dev.agentdeck.net.SessionInfo): AgentState {

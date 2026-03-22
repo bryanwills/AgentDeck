@@ -340,7 +340,7 @@ final class CrayfishCreature {
 
     // MARK: - SVG Path Parser
 
-    private static func parseSvgPath(_ data: String) -> SwiftUI.Path {
+    static func parseSvgPath(_ data: String) -> SwiftUI.Path {
         var path = SwiftUI.Path()
         let chars = Array(data)
         var idx = 0
@@ -494,6 +494,22 @@ final class CrayfishCreature {
                                   control: CGPoint(x: cx, y: cy))
                 lastCPX = cx; lastCPY = cy
                 currentX = x; currentY = y
+            case "A", "a":
+                let isRelative = cmd == "a"
+                while let rx = parseNumber(), let ry = parseNumber(),
+                      let xRotation = parseNumber(), let largeArcFlag = parseNumber(),
+                      let sweepFlag = parseNumber(), let rawX = parseNumber(), let rawY = parseNumber() {
+                    let endX = isRelative ? currentX + rawX : rawX
+                    let endY = isRelative ? currentY + rawY : rawY
+                    Self.svgArcToBeziers(
+                        &path, cx: currentX, cy: currentY,
+                        rx: abs(rx), ry: abs(ry),
+                        xRotationDeg: xRotation,
+                        largeArc: largeArcFlag != 0, sweep: sweepFlag != 0,
+                        ex: endX, ey: endY
+                    )
+                    currentX = endX; currentY = endY
+                }
             case "Z", "z":
                 path.closeSubpath()
                 currentX = startX; currentY = startY
@@ -503,5 +519,96 @@ final class CrayfishCreature {
         }
 
         return path
+    }
+
+    // MARK: - SVG Arc → Cubic Bezier (W3C SVG spec F.6)
+
+    private static func svgArcToBeziers(
+        _ path: inout SwiftUI.Path,
+        cx: CGFloat, cy: CGFloat,
+        rx inputRx: CGFloat, ry inputRy: CGFloat,
+        xRotationDeg: CGFloat,
+        largeArc: Bool, sweep: Bool,
+        ex: CGFloat, ey: CGFloat
+    ) {
+        var rx = inputRx, ry = inputRy
+        guard rx > 0 && ry > 0 else {
+            path.addLine(to: CGPoint(x: ex, y: ey))
+            return
+        }
+        if cx == ex && cy == ey { return }
+
+        let phi = xRotationDeg * .pi / 180
+        let cosPhi = cos(phi), sinPhi = sin(phi)
+
+        // F.6.5.1: compute (x1', y1')
+        let dx2 = (cx - ex) / 2, dy2 = (cy - ey) / 2
+        let x1p = cosPhi * dx2 + sinPhi * dy2
+        let y1p = -sinPhi * dx2 + cosPhi * dy2
+
+        // F.6.6: ensure radii large enough
+        let x1pSq = x1p * x1p, y1pSq = y1p * y1p
+        var rxSq = rx * rx, rySq = ry * ry
+        let lambda = x1pSq / rxSq + y1pSq / rySq
+        if lambda > 1 {
+            let s = sqrt(lambda)
+            rx *= s; ry *= s
+            rxSq = rx * rx; rySq = ry * ry
+        }
+
+        // F.6.5.2: compute (cx', cy')
+        var sq = (rxSq * rySq - rxSq * y1pSq - rySq * x1pSq) / (rxSq * y1pSq + rySq * x1pSq)
+        if sq < 0 { sq = 0 }
+        var root = sqrt(sq)
+        if largeArc == sweep { root = -root }
+        let cxp = root * rx * y1p / ry
+        let cyp = -root * ry * x1p / rx
+
+        // F.6.5.3: compute (cx, cy) center
+        let centerX = cosPhi * cxp - sinPhi * cyp + (cx + ex) / 2
+        let centerY = sinPhi * cxp + cosPhi * cyp + (cy + ey) / 2
+
+        // F.6.5.5-6: compute theta1 and dtheta
+        func angle(_ ux: CGFloat, _ uy: CGFloat, _ vx: CGFloat, _ vy: CGFloat) -> CGFloat {
+            let dot = ux * vx + uy * vy
+            let len = sqrt(ux * ux + uy * uy) * sqrt(vx * vx + vy * vy)
+            var a = acos(max(-1, min(1, dot / len)))
+            if ux * vy - uy * vx < 0 { a = -a }
+            return a
+        }
+
+        let theta1 = angle(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry)
+        var dtheta = angle((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry)
+        if !sweep && dtheta > 0 { dtheta -= 2 * .pi }
+        if sweep && dtheta < 0 { dtheta += 2 * .pi }
+
+        // Split into segments of at most pi/2
+        let segments = max(1, Int(ceil(abs(dtheta) / (.pi / 2))))
+        let segAngle = dtheta / CGFloat(segments)
+
+        for i in 0..<segments {
+            let t1 = theta1 + CGFloat(i) * segAngle
+            let t2 = t1 + segAngle
+            let alpha = sin(segAngle) * (sqrt(4 + 3 * pow(tan(segAngle / 2), 2)) - 1) / 3
+
+            let cos1 = cos(t1), sin1 = sin(t1)
+            let cos2 = cos(t2), sin2 = sin(t2)
+
+            let ep1x = rx * cos1, ep1y = ry * sin1
+            let ep2x = rx * cos2, ep2y = ry * sin2
+
+            let cp1x = cosPhi * (ep1x - alpha * rx * sin1) - sinPhi * (ep1y + alpha * ry * cos1) + centerX
+            let cp1y = sinPhi * (ep1x - alpha * rx * sin1) + cosPhi * (ep1y + alpha * ry * cos1) + centerY
+            let cp2x = cosPhi * (ep2x + alpha * rx * sin2) - sinPhi * (ep2y - alpha * ry * cos2) + centerX
+            let cp2y = sinPhi * (ep2x + alpha * rx * sin2) + cosPhi * (ep2y - alpha * ry * cos2) + centerY
+            let endPx = cosPhi * ep2x - sinPhi * ep2y + centerX
+            let endPy = sinPhi * ep2x + cosPhi * ep2y + centerY
+
+            path.addCurve(
+                to: CGPoint(x: endPx, y: endPy),
+                control1: CGPoint(x: cp1x, y: cp1y),
+                control2: CGPoint(x: cp2x, y: cp2y)
+            )
+        }
     }
 }

@@ -189,6 +189,7 @@ static void handleSessionsList(JsonObject& obj) {
     JsonArray sessions = obj["sessions"].as<JsonArray>();
     g_state.sessionCount = min((int)sessions.size(), 6);
     g_state.octopusCount = 0;
+    g_state.cloudCount = 0;
     g_state.crayfishCount = 0;
 
     for (uint8_t i = 0; i < g_state.sessionCount; i++) {
@@ -211,6 +212,8 @@ static void handleSessionsList(JsonObject& obj) {
                     g_state.crayfishState = CrayfishState::ROUTING;
                 else if (g_state.sessions[i].state[0] != '\0')
                     g_state.crayfishState = CrayfishState::SITTING;
+            } else if (strcmp(g_state.sessions[i].agentType, "codex-cli") == 0) {
+                g_state.cloudCount++;
             } else if (strcmp(g_state.sessions[i].agentType, "daemon") != 0) {
                 g_state.octopusCount++;
             }
@@ -223,8 +226,7 @@ static void handleSessionsList(JsonObject& obj) {
     uint8_t nameIdx = 0;
     for (uint8_t i = 0; i < g_state.sessionCount && nameIdx < MAX_OCTOPUS; i++) {
         if (g_state.sessions[i].alive &&
-            strcmp(g_state.sessions[i].agentType, "openclaw") != 0 &&
-            strcmp(g_state.sessions[i].agentType, "daemon") != 0) {
+            strcmp(g_state.sessions[i].agentType, "claude-code") == 0) {
             const char* name = g_state.sessions[i].projectName;
             if (name[0]) {
                 strncpy(rawNames[nameIdx], name, sizeof(rawNames[nameIdx]) - 1);
@@ -237,7 +239,6 @@ static void handleSessionsList(JsonObject& obj) {
     }
     // Second pass: detect duplicates and add #1, #2 suffixes
     for (uint8_t i = 0; i < nameIdx; i++) {
-        // Check if this name appears more than once
         bool hasDup = false;
         for (uint8_t j = 0; j < nameIdx; j++) {
             if (j != i && strcmp(rawNames[i], rawNames[j]) == 0) {
@@ -246,7 +247,6 @@ static void handleSessionsList(JsonObject& obj) {
             }
         }
         if (hasDup) {
-            // Count which occurrence this is (1-based)
             uint8_t occurrence = 1;
             for (uint8_t j = 0; j < i; j++) {
                 if (strcmp(rawNames[i], rawNames[j]) == 0) occurrence++;
@@ -259,6 +259,46 @@ static void handleSessionsList(JsonObject& obj) {
             g_state.sessionNames[i][sizeof(g_state.sessionNames[i]) - 1] = '\0';
         }
     }
+
+    // Populate cloudNames for cloud creature name tags (same dedup logic)
+#if MAX_CLOUD > 0
+    char cloudRawNames[MAX_CLOUD][24];
+    uint8_t cloudNameIdx = 0;
+    for (uint8_t i = 0; i < g_state.sessionCount && cloudNameIdx < MAX_CLOUD; i++) {
+        if (g_state.sessions[i].alive &&
+            strcmp(g_state.sessions[i].agentType, "codex-cli") == 0) {
+            const char* name = g_state.sessions[i].projectName;
+            if (name[0]) {
+                strncpy(cloudRawNames[cloudNameIdx], name, sizeof(cloudRawNames[cloudNameIdx]) - 1);
+                cloudRawNames[cloudNameIdx][sizeof(cloudRawNames[cloudNameIdx]) - 1] = '\0';
+            } else {
+                snprintf(cloudRawNames[cloudNameIdx], sizeof(cloudRawNames[cloudNameIdx]), "Codex %d", cloudNameIdx + 1);
+            }
+            cloudNameIdx++;
+        }
+    }
+    for (uint8_t i = 0; i < cloudNameIdx; i++) {
+        bool hasDup = false;
+        for (uint8_t j = 0; j < cloudNameIdx; j++) {
+            if (j != i && strcmp(cloudRawNames[i], cloudRawNames[j]) == 0) {
+                hasDup = true;
+                break;
+            }
+        }
+        if (hasDup) {
+            uint8_t occurrence = 1;
+            for (uint8_t j = 0; j < i; j++) {
+                if (strcmp(cloudRawNames[i], cloudRawNames[j]) == 0) occurrence++;
+            }
+            snprintf(g_state.cloudNames[i], sizeof(g_state.cloudNames[i]),
+                     "%s #%d", cloudRawNames[i], occurrence);
+        } else {
+            strncpy(g_state.cloudNames[i], cloudRawNames[i],
+                    sizeof(g_state.cloudNames[i]) - 1);
+            g_state.cloudNames[i][sizeof(g_state.cloudNames[i]) - 1] = '\0';
+        }
+    }
+#endif  // MAX_CLOUD > 0
 
     // No OpenClaw sessions: check gateway availability
     if (g_state.crayfishCount == 0) {

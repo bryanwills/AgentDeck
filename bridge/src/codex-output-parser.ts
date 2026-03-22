@@ -17,11 +17,16 @@ import { debug } from './logger.js';
 const BRAILLE_SPINNERS = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/;
 
 // Codex processing indicators
-const THINKING_TEXT = /\b(?:Thinking|Working|Processing|Generating)\b/i;
+// Real PTY output: "Working(0s • esc to interrupt)" and incremental "•Working•orking•rking•"
+const THINKING_TEXT = /\b(?:Thinking|Working|Processing|Generating|Waiting)\b/i;
+// "Working" followed by timing info "(0s •" or "(1m 2s •"
+const CODEX_WORKING_STATUS = /Working\s*\(\d+[sm]?\s*•/;
 
-// Codex idle prompt — the `>` prompt or the end-of-turn marker
-// Ink renders a `❯` or `>` prompt when waiting for input
-const IDLE_PROMPT = /^[❯>]\s/m;
+// Codex idle prompt — ›(U+203A) is the actual Codex prompt char
+// › can appear mid-line (after status text); > and ❯ only at line start
+const IDLE_PROMPT = /›\s|^[❯>]\s/m;
+// Codex status line with model info: "› prompt   gpt-5.4 medium · 47% left · ~/path"
+const CODEX_STATUS_LINE = /[❯›]\s.*(?:gpt-|o\d|codex)[\w.-]*\s.*·.*~/;
 
 // Sandbox approval prompts — Codex asks user to approve shell commands/file writes
 const APPROVAL_ALLOW = /\bAllow\b.*\bDeny\b|\bapprove\b.*\bdeny\b/i;
@@ -32,8 +37,10 @@ const APPROVAL_ALWAYS = /Always\s+allow|Allow\s+once/i;
 const TOOL_RUNNING = /(?:Running|Executing|Ran)(?:\s+in\s+\S+)?:\s*[`"]?(.+?)[`"]?\s*$/m;
 const FILE_OPERATION = /(?:Reading|Writing|Creating|Deleting|Editing|Patching)\s+(.+)/i;
 
-// Model info from Codex startup or status
+// Model info from Codex startup, status line, or prompt line
+// e.g. "gpt-5.4 medium · 47% left" or "model: o3"
 const MODEL_INFO = /(?:model|using)\s*:?\s*(gpt-[\w.-]+|o\d[\w.-]*|codex[\w.-]*)/i;
+const CODEX_MODEL_IN_STATUS = /(gpt-[\w.-]+|o\d[\w.-]*|codex[\w.-]*)\s+(?:high|medium|low)\s*·/;
 
 // Project/working directory
 const WORKDIR = /(?:Working\s+(?:directory|in)|cwd)\s*:?\s*(.+)/i;
@@ -99,14 +106,14 @@ export class CodexOutputParser extends EventEmitter {
     this.parseModelInfo(chunk);
 
     // --- Pre-scan ---
-    const hasIdlePrompt = IDLE_PROMPT.test(chunk);
+    const hasIdlePrompt = IDLE_PROMPT.test(chunk) || CODEX_STATUS_LINE.test(chunk);
     const hasApproval =
       APPROVAL_ALLOW.test(chunk) ||
       APPROVAL_YN.test(chunk) ||
       APPROVAL_ALWAYS.test(chunk);
 
     // --- Spinner + prompt handling ---
-    const hasSpinner = BRAILLE_SPINNERS.test(chunk) || THINKING_TEXT.test(chunk);
+    const hasSpinner = BRAILLE_SPINNERS.test(chunk) || THINKING_TEXT.test(chunk) || CODEX_WORKING_STATUS.test(chunk);
 
     // Approval prompt → AWAITING_PERMISSION
     if (hasApproval) {
@@ -240,7 +247,7 @@ export class CodexOutputParser extends EventEmitter {
   }
 
   private parseModelInfo(chunk: string): void {
-    const match = chunk.match(MODEL_INFO);
+    const match = chunk.match(MODEL_INFO) || chunk.match(CODEX_MODEL_IN_STATUS);
     if (match && match[1] !== this.modelName) {
       this.modelName = match[1];
       debug('CodexParser', `EMIT model_info: ${this.modelName}`);

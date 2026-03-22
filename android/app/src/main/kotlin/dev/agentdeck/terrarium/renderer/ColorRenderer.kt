@@ -12,6 +12,7 @@ import dev.agentdeck.terrarium.TerrariumState
 import dev.agentdeck.terrarium.EnvironmentVisualState
 import dev.agentdeck.terrarium.creature.BubbleSystem
 import dev.agentdeck.terrarium.creature.CrayfishCreature
+import dev.agentdeck.terrarium.creature.CloudCreature
 import dev.agentdeck.terrarium.creature.OctopusCreature
 import dev.agentdeck.terrarium.creature.DataParticleSystem
 import dev.agentdeck.terrarium.environment.KelpField
@@ -37,6 +38,7 @@ fun ColorTerrariumCanvas(
     workerCrayfish: List<CrayfishCreature> = emptyList(),
     dataParticles: DataParticleSystem,
     octopuses: List<OctopusCreature>,
+    cloudCreatures: List<CloudCreature> = emptyList(),
     bubbleSystem: BubbleSystem,
     lightRaySystem: LightRaySystem,
     planktonSystem: PlanktonSystem,
@@ -83,6 +85,9 @@ fun ColorTerrariumCanvas(
 
         // Layer 9: Octopuses (all coding agent avatars)
         for (oct in octopuses) oct.draw(this)
+
+        // Layer 9.2: Cloud creatures (Codex CLI agents — float above octopuses)
+        for (cloud in cloudCreatures) cloud.draw(this)
 
         // Layer 9.5: Front-layer fish (in front of creatures for 3D depth)
         dataParticles.drawFrontLayer(this)

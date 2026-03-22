@@ -74,18 +74,19 @@ fun EinkAgentPanel(
         )
     }
 
-    // Siblings (skip self and daemon)
-    state.siblingSessions.forEach { session ->
-        if (session.id == state.sessionId) return@forEach
-        if (session.agentType == "daemon") return@forEach
-        entries += AgentEntry(
-            projectName = session.projectName ?: "Agent",
-            agentType = session.agentType,
-            modelName = null,
-            effortLevel = null,
-            agentState = mapSessionState(session),
-        )
-    }
+    // Siblings (skip self and daemon), sorted by state priority + project name
+    state.siblingSessions
+        .filter { it.id != state.sessionId && it.agentType != "daemon" }
+        .sortedWith(compareBy<dev.agentdeck.net.SessionInfo> { stateRank(mapSessionState(it)) }.thenBy { it.projectName ?: "" })
+        .forEach { session ->
+            entries += AgentEntry(
+                projectName = session.projectName ?: "Agent",
+                agentType = session.agentType,
+                modelName = null,
+                effortLevel = null,
+                agentState = mapSessionState(session),
+            )
+        }
 
     // Count occurrences per (projectName, agentType) for #N suffix —
     // different agent types (🦞 vs 🐙) with the same project name don't need numbering

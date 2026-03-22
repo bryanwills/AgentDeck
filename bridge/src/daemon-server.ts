@@ -327,8 +327,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   core.wireTimeline(bridgeLogStream);
   core.wireDisplayMonitor();
 
-  // Subscribe to sibling session bridges' timelines for relay
+  // Subscribe to sibling session bridges' timelines + modelCatalog relay
   const timelineRelay = new SessionTimelineRelay(port, core.bridgeTimeline);
+  timelineRelay.setOnModelCatalog((models) => {
+    // Merge modelCatalog from sibling Claude Code sessions (daemon doesn't run PTY).
+    // Gateway may also set catalog — merge both, dedup by name.
+    const existing = core.cachedModelCatalog ?? [];
+    const existingNames = new Set(existing.map(m => m.name));
+    const merged = [...existing];
+    for (const m of models) {
+      if (!existingNames.has(m.name)) {
+        merged.push(m);
+        existingNames.add(m.name);
+      }
+    }
+    if (merged.length !== existing.length) {
+      core.cachedModelCatalog = merged;
+      debug('daemon', `Model catalog merged from sibling: ${merged.length} models total`);
+    }
+  });
   timelineRelay.start();
 
   // mDNS + device modules

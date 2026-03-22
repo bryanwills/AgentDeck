@@ -8,6 +8,7 @@ export interface EnrichedSession {
   agentType?: AgentType;
   alive: boolean;
   state?: string;
+  modelName?: string;
 }
 
 /**
@@ -30,8 +31,8 @@ export async function enrichSessionsWithState(
     if (s.id === ownSessionId) return { ...base, state: ownState };
     try {
       const res = await fetch(`http://127.0.0.1:${s.port}/health`, { signal: AbortSignal.timeout(2000) });
-      const data = await res.json() as { state?: string };
-      return { ...base, state: data.state };
+      const data = await res.json() as { state?: string; modelName?: string };
+      return { ...base, state: data.state, modelName: data.modelName };
     } catch {
       return base;
     }

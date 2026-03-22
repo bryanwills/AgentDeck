@@ -124,6 +124,50 @@ fun layoutOctopusesByProject(agents: List<AgentLayoutInfo>): List<CreatureSlot> 
 }
 
 /**
+ * Compute layout positions for cloud creatures (Codex CLI agents).
+ * Clouds float in the upper-center area, above octopuses.
+ */
+fun layoutCloudCreatures(count: Int): List<CreatureSlot> {
+    return when (count) {
+        0 -> emptyList()
+        1 -> listOf(
+            CreatureSlot(
+                TerrariumLayout.CLOUD_CENTER_X_FRACTION,
+                TerrariumLayout.CLOUD_CENTER_Y_FRACTION,
+                1.0f,
+            )
+        )
+        2 -> listOf(
+            CreatureSlot(0.40f, 0.18f, 0.85f),
+            CreatureSlot(0.62f, 0.22f, 0.85f),
+        )
+        3 -> listOf(
+            CreatureSlot(0.35f, 0.16f, 0.75f),
+            CreatureSlot(0.55f, 0.20f, 0.75f),
+            CreatureSlot(0.45f, 0.28f, 0.75f),
+        )
+        else -> {
+            val scale = max(0.50f, 0.75f - (count - 3) * 0.05f)
+            val cols = if (count <= 4) 2 else 3
+            val rows = (count + cols - 1) / cols
+            val startX = 0.30f
+            val endX = 0.65f
+            val startY = 0.12f
+            val endY = 0.30f
+            val dx = if (cols > 1) (endX - startX) / (cols - 1) else 0f
+            val dy = if (rows > 1) (endY - startY) / (rows - 1) else 0f
+            (0 until count).map { i ->
+                CreatureSlot(
+                    startX + (i % cols) * dx,
+                    startY + (i / cols) * dy,
+                    scale,
+                )
+            }
+        }
+    }
+}
+
+/**
  * Compute layout positions for OpenClaw worker crayfish.
  * Workers are smaller and arranged in an arc around the main crayfish position.
  */

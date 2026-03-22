@@ -39,12 +39,13 @@ enum TerrariumColors {
     static let tetraFin = Color(red: 1.0, green: 0.42, blue: 0.42)            // #FF6B6B
     static let tetraStripe = Color(red: 0.0, green: 0.898, blue: 1.0)         // #00E5FF
 
-    // Jellyfish (Codex CLI)
-    static let jellyfishBell = Color(red: 0.388, green: 0.400, blue: 0.945)      // #6366F1 indigo
-    static let jellyfishGlow = Color(red: 0.647, green: 0.706, blue: 0.988)      // #A5B4FC light indigo
-    static let jellyfishTentacle = Color(red: 0.506, green: 0.533, blue: 0.969)  // #8188F7 mid indigo
-    static let jellyfishMarking = Color(red: 0.878, green: 0.886, blue: 0.992)   // #E0E2FD near white
-    static let jellyfishNameBg = Color(red: 0.388, green: 0.400, blue: 0.945).opacity(0.6)
+    // Jellyfish (Codex CLI) — matches icon gradient: lavender/pink top → vivid blue bottom
+    static let jellyfishBell = Color(red: 0.380, green: 0.400, blue: 0.880)      // #6166E0 mid blue-indigo
+    static let jellyfishDeep = Color(red: 0.200, green: 0.260, blue: 0.780)      // #3342C7 vivid deep blue
+    static let jellyfishHighlight = Color(red: 0.700, green: 0.580, blue: 0.900) // #B394E5 lavender-pink (top glow)
+    static let jellyfishGlow = Color(red: 0.560, green: 0.580, blue: 0.950)      // #8F94F2 periwinkle
+    static let jellyfishTentacle = Color(red: 0.450, green: 0.490, blue: 0.920)  // #737DEA mid
+    static let jellyfishNameBg = Color(red: 0.333, green: 0.380, blue: 0.878).opacity(0.6)
 
     // Environment
     static let bubbleWhite = Color.white.opacity(0.25)      // 0x40FFFFFF

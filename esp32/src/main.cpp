@@ -273,6 +273,9 @@ void setup() {
     Serial.setRxBufferSize(2048);  // Default 256 too small for large JSON messages
     Serial.begin(115200);
 #ifdef BOARD_ULANZI_TC001
+    // Silence buzzer immediately (GPIO15 floats during boot → beep)
+    pinMode(15, OUTPUT);
+    digitalWrite(15, LOW);
     // CH340 UART: no CDC wait needed
     delay(200);
     Serial.println("\n=== AgentDeck Ulanzi TC001 LED Matrix ===");

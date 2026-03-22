@@ -110,6 +110,13 @@ const CF_LOD_ROWS = 6;
 
 // ===== Colors — Android-matching darker palette =====
 type RGB = readonly [number, number, number];
+export interface OctopusPalette {
+  body: RGB;
+  arm: RGB;
+  leg: RGB;
+  sleeping: RGB;
+  starburst: RGB;
+}
 
 export const COLORS = {
   // Octopus (terracotta — Android match)
@@ -198,6 +205,34 @@ export const COLORS = {
 };
 
 export { type RGB };
+
+const SESSION_TONE_FACTORS = [1.08, 1.0, 0.9, 0.8, 0.72, 0.64] as const;
+
+function scaleColor(color: RGB, factor: number): RGB {
+  return [
+    Math.max(0, Math.min(255, Math.round(color[0] * factor))),
+    Math.max(0, Math.min(255, Math.round(color[1] * factor))),
+    Math.max(0, Math.min(255, Math.round(color[2] * factor))),
+  ] as const;
+}
+
+/**
+ * Multi-session Pixoo creatures can't show textual #1/#2 labels well.
+ * Use a stable brightness ramp instead: first session stays slightly brighter,
+ * later sessions get progressively darker while preserving the base hue.
+ */
+export function getOctopusPaletteForSession(sessionIndex = 0): OctopusPalette {
+  const tone = SESSION_TONE_FACTORS[
+    Math.max(0, Math.min(SESSION_TONE_FACTORS.length - 1, sessionIndex))
+  ];
+  return {
+    body: scaleColor(COLORS.octopusBody, tone),
+    arm: scaleColor(COLORS.octopusArm, tone),
+    leg: scaleColor(COLORS.octopusLeg, tone),
+    sleeping: scaleColor(COLORS.octopusSleeping, tone),
+    starburst: scaleColor(COLORS.octopusStarburst, tone),
+  };
+}
 
 // ===== Pixel Operations =====
 
@@ -435,6 +470,7 @@ export function drawOctopus(
   state: 'idle' | 'working' | 'sleeping' | 'asking',
   animFrame: number,
   cam: Camera,
+  palette: OctopusPalette = getOctopusPaletteForSession(1),
 ): void {
   if (!isVisible(worldX, worldY, cam, 0.15)) return;
 
@@ -460,9 +496,9 @@ export function drawOctopus(
     : 0;
 
   // Body color by state
-  const bodyColor = state === 'working' ? COLORS.octopusStarburst
-    : state === 'sleeping' ? COLORS.octopusSleeping
-      : COLORS.octopusBody;
+  const bodyColor = state === 'working' ? palette.starburst
+    : state === 'sleeping' ? palette.sleeping
+      : palette.body;
 
   // Draw all cells — solid fill, no outline
   for (let row = 0; row < rows; row++) {
@@ -474,10 +510,12 @@ export function drawOctopus(
       let color: RGB;
       if (cellType === EYE) {
         color = COLORS.octopusEye; // black — negative space
+      } else if (cellType === LEFT_ARM || cellType === RIGHT_ARM) {
+        color = state === 'working' ? palette.starburst : palette.arm;
       } else if (cellType === LEFT_LEG || cellType === RIGHT_LEG) {
-        color = COLORS.octopusLeg;
+        color = palette.leg;
       } else {
-        color = bodyColor; // body + arms = same color
+        color = bodyColor;
       }
 
       // Tentacle animation only — arms stay fixed (attached to body)
@@ -523,7 +561,7 @@ export function drawOctopus(
       const angle = sparkPhase + (i * Math.PI * 2 / 6);
       const sx = scx + Math.cos(angle) * dist;
       const sy = scy + breathPx + Math.sin(angle) * dist * 0.6;
-      setPixel(buf, Math.round(sx), Math.round(sy), COLORS.octopusStarburst);
+      setPixel(buf, Math.round(sx), Math.round(sy), palette.starburst);
     }
   }
 }

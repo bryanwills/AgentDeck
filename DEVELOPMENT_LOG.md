@@ -2,6 +2,154 @@
 
 ---
 
+## 2026-03-22 — Codex CLI 어댑터 + 구름 크리처 전 플랫폼 구현
+
+### 문제
+AgentDeck이 Claude Code만 지원하여 다른 코딩 에이전트(OpenAI Codex CLI 등) 확장 불가.
+
+### 해결
+
+**1. Codex CLI 어댑터 (bridge)**
+- `CodexCliAdapter` extends `PtyAdapter` — `codex` PTY 스폰, `CodexOutputParser` 연결
+- `CodexOutputParser` — Codex Ink TUI 출력 패턴 감지: `›` 프롬프트(U+203A), `Working(0s •` 스피너, 상태줄 모델 추출
+- `agentdeck codex` CLI 명령 추가, agent-aware 의존성 체크 (`checkDependencies(agentType)`)
+- `AgentType` union에 `'codex-cli'` 이미 선언되어 있었으나 미구현 → 완전 구현
+
+**2. 구름 크리처 (전 플랫폼)**
+- **Apple**: 6개 원 겹치기 + `drawLayer` clip으로 seam-free 그라데이션. `>_` morphing 애니메이션
+- **Android LCD**: `CloudCreature.kt` — 동일 6-lobe 패턴, Compose Canvas `drawCircle` + `Brush.linearGradient`
+- **Android E-ink**: `drawEinkCloud()` — 16-level 그레이스케일
+- **TUI**: 14×10 braille grid
+- **ESP32**: `cloud.cpp` — LVGL filled circles + pixel `>_`
+
+**3. Apple 배포 인프라 완성**
+- Mac App Distribution + Mac Installer Distribution 인증서 생성
+- iOS + macOS TestFlight 업로드 성공 검증
+- CI workflow `if: false` 제거, ExportOptions-macOS.plist 분리
+- GitHub Secrets 7개 (인증서 + 프로파일 + ASC API key)
+
+**4. Apple 겹침/UX 버그 수정**
+- `CreatureLayout.swift`: `case 0` → 빈 배열, grid 경계 수정
+- `OctopusCreature.swift`: `currentY` 초기값 `standingY` → `homeY`
+- `BridgeDiscovery.swift`: `.waiting` 상태 감지 → 자동 `restartBrowser()` (로컬 네트워크 권한 후 앱 재시작 불필요)
+- `DisplaySyncService.swift`: 5분 안전 타이머, brightness 0.0 저장 방지
+
+### 교훈 / 핵심 설계 결정
+- **Codex CLI는 HTTP hooks 없음** — PTY 파싱만으로 상태 감지. `›` 프롬프트 + `Working(Ns •` 패턴이 핵심
+- **6-lobe circle 겹침선**: 개별 circle fill → alpha 중첩/even-odd 구멍. Apple은 `drawLayer` + clip으로 해결, Android는 동일 gradient brush 공유로 해결
+- **Pantone 6 (MOAAN)**: 앱 재설치 시 시스템 회전 설정 초기화 — `adb shell settings put system user_rotation 1` 필수
+- **macOS App Store 배포**: `LSApplicationCategoryType` Info.plist 필수, rsync Homebrew/system 충돌 주의
+
+---
+
+## 2026-03-22 — 에이전트 브랜드 아이콘 통합 (Apple + TUI)
+
+### 문제
+에이전트 세션 목록의 아이콘이 기기별로 파편화. Apple은 Anthropic "A" mark (claude-code), OpenAI knot (codex-cli), 🦞 이모지 (openclaw)를 혼용. TUI는 ✦, ☁️ 등 비관련 유니코드 사용. `assets/logos/`에 실제 브랜드 SVG가 준비되었으나 미적용 상태.
+
+### 해결
+- **Apple**: `BrandIcon`을 멀티패스 + `eoFill` 지원으로 확장. `claudeCodePath` (Antigravity 픽셀), `codexPath` (터미널 `>_`, evenodd), `openclawPaths` (가재 5-path) 적용. `parseSvgPath()`에 SVG arc(`A`/`a`) → cubic bezier 변환 알고리즘 추가 (W3C SVG spec F.6)
+- **TUI**: codex-cli `☁️` → `❯` (U+276F) 교체. `creatureBrandColor()` 헬퍼로 truecolor 터미널에서 에이전트별 브랜드색 (terracotta/red/indigo) 적용
+
+### 교훈 / 핵심 설계 결정
+- **SVG arc 파싱**: `parseSvgPath()`가 M/L/H/V/C/S/Q/Z만 지원하여 openclaw/codex SVG 렌더 불가 → arc→bezier 변환 추가. Flag 파라미터(0/1)가 공백 없이 연속될 수 있어 `parseNumber()`로 처리
+- **모노 SVG + 단색**: 13×13px에서 gradient는 무의미. 모노 variant(`fill=currentColor`) + 단색 적용이 최적
+- **eoFill 필요성**: Codex 아이콘의 `>_` 컷아웃은 `clip-rule="evenodd"`로 구현 — SwiftUI Canvas에서 `FillStyle(eoFill: true)` 필수
+
+---
+
+## 2026-03-22 — Pixoo 다중 세션 문어를 숫자 대신 색상 톤으로 구분
+
+### 문제
+Pixoo 64×64에서는 Claude Code/Codex CLI 다중 세션을 `#1`, `#2` 같은 텍스트로 붙여 구분하기가 어렵고, 좌상단 점 개수만으로는 각 개체를 대응해 보기 부족했음.
+
+### 해결
+- Pixoo 문어 스프라이트에 세션 인덱스 기반 terracotta 밝기 램프 추가
+- 첫 세션은 기존 톤 유지, 추가 세션은 조금씩 더 어두운 body/leg/starburst 팔레트 사용
+- OpenClaw 가재는 단일 개체 역할이므로 변경하지 않음
+
+### 교훈 / 핵심 설계 결정
+- **64×64 LED 매트릭스에서는 번호보다 색상 계조가 더 읽기 쉽다**
+- **멀티세션 구분은 hue 변경보다 동일 hue 내 밝기 차등이 안전하다** — 기존 Claude 계열 아이덴티티를 유지하면서도 개체 구분 가능
+
+---
+
+## 2026-03-22 — Pixoo Claude Code limit reset 시간 상세 표기 복구
+
+### 문제
+Pixoo HUD의 Claude Code limit reset 시간이 어느 시점부터 `1h`, `4d`처럼 한 단위만 보이도록 축약되어, 이전보다 정보 밀도가 떨어졌음.
+
+### 해결
+- Pixoo HUD 전용 reset formatter를 `1h23`, `4d6`, `59m` 형태의 상세 포맷으로 복구
+- 2컬럼 HUD에서는 공백을 제거해 픽셀 폭을 아껴 상세 시간을 유지
+- 숫자 뒤 배경 fill gauge는 제거하고, 각 컬럼 하단 1px usage bar로 변경
+
+### 교훈 / 핵심 설계 결정
+- **Pixoo도 완전한 한 단위 축약까지는 필요 없다** — `h+m`, `d+h` 조합이 시인성과 정보량의 균형이 가장 좋음
+- **좁은 HUD에서는 정보를 줄이기보다 공백을 줄이는 편이 낫다**
+- **텍스트 자체를 배경색으로 채우면 숫자 폭이 매 프레임 달라져 어색해진다** — 얇은 보조 게이지가 더 안정적
+
+---
+
+## 2026-03-22 — Session bridge에서 serial/pixoo 모듈 완전 분리
+
+### 문제
+`agentdeck claude`만 실행하고 daemon이 없을 때, Pixoo와 ESP32(TC001)가 session bridge로부터 직접 상태를 받고 있었음. 설계 원칙(daemon = sole hub for all dashboard devices)에 위배.
+
+### 해결
+- `cli.ts`: claude/codex 명령에서 `serial`/`pixoo`를 항상 `false`로 고정 (`--no-serial`/`--no-pixoo` 옵션도 제거)
+- `index.ts`: `findExistingDaemon()` 기반 다운그레이드 로직 제거 (불필요), 기본값도 `serial: false`로 변경
+
+### 핵심 설계 결정
+- **mDNS/serial/pixoo 3개 모듈 모두 daemon-only**. Session bridge는 adb만 `'auto'` (reverse tunnel은 session 단위 필요)
+- 이전 로직은 "daemon이 있으면 비활성화"였으나, 올바른 원칙은 "session bridge는 절대 활성화하지 않음". Daemon 유무와 무관하게 일관된 동작
+
+---
+
+## 2026-03-22 — TUI 모델명 미표시 수정 (데이터 경로 문제)
+
+### 문제
+TUI 대시보드의 MODELS 패널에 Claude Code OAuth 모델 카탈로그가 표시되지 않고, AGENTS 패널에 세션별 모델명이 없음. Codex에게 수정을 시켰으나 렌더러만 고치고 데이터 경로를 건드리지 않아 실질적 개선 없었음.
+
+### 해결
+**근본 원인**: TUI는 daemon에 연결되는데, daemon의 데이터에 Claude Code 세션 정보가 3가지 경로 모두 누락:
+1. `state_update.modelName` — daemon 자체 StateMachine 값이라 null (daemon은 coding agent가 아님)
+2. `state_update.modelCatalog` — Gateway(OpenClaw)에서만 설정됨, Claude Code 세션 catalog 미수집
+3. `sessions_list[].modelName` — `SessionInfo` 타입에 필드 자체가 없었음
+
+**수정**:
+- `SessionInfo.modelName?` 추가 (shared protocol) + `/health` 응답에 포함 + session-aggregator에서 매핑
+- `SessionTimelineRelay`에 `state_update.modelCatalog` 캡처 콜백 추가 → daemon이 sibling session의 Claude OAuth catalog을 merge
+- TUI renderer에서 daemon 모드 세션별 `modelName` 표시
+
+### 교훈 / 핵심 설계 결정
+- **렌더러 수정만으로는 안 됨**: daemon hub 아키텍처에서 데이터가 실제로 daemon까지 도달하는 경로를 먼저 확인해야 함. Codex가 놓친 건 "TUI→daemon→session bridge" 데이터 흐름 이해 부족
+- **daemon은 coding agent가 아님**: `modelName`, `modelCatalog` 등 세션 고유 데이터는 session bridge에서 daemon으로 relay되어야 TUI/Android/Apple에서 사용 가능
+- **`/health` 엔드포인트 확장**: `modelName` 추가로 `SessionInfo`가 풍부해짐 — 향후 다른 세션 메타데이터도 같은 패턴으로 확장 가능
+
+---
+
+## 2026-03-22 — Ulanzi TC001 LED Matrix 보드 추가
+
+### 문제
+새 ESP32 디바이스 Ulanzi TC001 추가. 기존 3대(ESP32-S3 + LCD/AMOLED)와 완전히 다른 하드웨어: ESP32 classic (D0WD), 8MB flash, no PSRAM, **WS2812B 8×32 LED matrix** (LCD 아님).
+
+### 해결
+1. **하드웨어 인식**: USB 연결 초기 미인식 → CH340 드라이버 설치 시도 중 USB 방향 바꿔 끼우니 인식됨. `esptool chip_id`로 ESP32-D0WD 확인
+2. **팩토리 백업**: `esptool --no-stub read_flash` (115200 baud, ~10분 소요) → `esp32/backups/ulanzi-tc001-factory-8MB.bin`
+3. **별도 렌더링 경로**: LVGL은 8×32에 사용 불가 → FastLED로 직접 픽셀 제어. `build_src_filter`로 LVGL 소스 제외 + `#ifdef BOARD_ULANZI_TC001`로 cpp guard
+4. **4페이지 대시보드**: USAGE(gradient gauge bars), AGENTS(5×6 creature sprites), INFO(model+project), TIMELINE(scroll+density bar)
+5. **밝기 튜닝**: 초기 렌더링 색상값이 낮아(~45/255) 밝은 방에서도 어둡게 보임 → 색상값 150-200 레벨로 올리고, auto-brightness 상한 80→200, ADC 매핑 범위 조정(300-2800)
+
+### 교훈 / 핵심 설계 결정
+- **WS2812B 밝기 = FastLED brightness × 렌더링 색상값**: brightness를 올려도 색상값이 낮으면 어두움. 양쪽 모두 높여야 함
+- **8×32 해상도에서 텍스트보다 컬러가 효과적**: 3×5 폰트로 8자/줄 한계. 게이지 바 그라디언트, 상태별 색상, 스프라이트 아이콘이 더 직관적
+- **ESP32 classic vs S3 격리**: `board = esp32dev` (not esp32-s3-devkitc-1), no PSRAM flag, no USB CDC, STACK_UI 4096 (vs 16384)
+- **PIO upload hang 우회**: PlatformIO mirror(contabostorage) 접속 불가 시 `pio run -t upload`가 무한 재시도. `esptool.py` 직접 사용으로 우회
+- **Serpentine wiring**: `idx = (y%2==0) ? y*32+x : y*32+(31-x)` — TC001 실기기에서 확인 완료
+
+---
+
 ## 2026-03-22 — 다중 클라이언트 파편화 진단 + Daemon Timeline Relay
 
 ### 문제

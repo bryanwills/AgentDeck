@@ -21,11 +21,11 @@
 import { State } from '../types.js';
 import type { StateUpdateEvent, UsageEvent } from '../types.js';
 import type { SessionInfo } from '@agentdeck/shared/protocol';
-import { formatResetTimeCompact } from '@agentdeck/shared';
 import {
   type RGB, COLORS, setPixel, blendPixel, glowPixel, fillRect, lerpColor,
   drawOctopus, drawCrayfish, drawTetra,
   drawText,
+  getOctopusPaletteForSession,
   OCTO_WORLD_W, CF_WORLD_W,
 } from './pixoo-sprites.js';
 import {
@@ -528,28 +528,21 @@ function gaugeColor(pct: number, animFrame: number): RGB {
   return COLORS.stateProcessing;  // blue
 }
 
-// formatResetTime removed — using shared formatResetTimeCompact
-
-/**
- * Compact reset time for HUD columns (one unit only — saves pixel space).
- * topUnit='h': hours only (5h side) — e.g. "4h", "59m"
- * topUnit='d': days only (7d side) — e.g. "6d", "23h", "59m"
- */
-function formatResetShort(resetsAt: string | undefined, topUnit: 'h' | 'd'): string {
+/** Pixoo HUD reset time: "1h23", "4d6", "59m". */
+function formatResetDetailed(resetsAt: string | undefined): string {
   if (!resetsAt) return '';
   const ms = new Date(resetsAt).getTime() - Date.now();
-  if (ms <= 0) return '';
+  if (ms <= 0) return '0m';
   const totalMins = Math.max(1, Math.ceil(ms / 60000));
   const hours = Math.floor(totalMins / 60);
   const days = Math.floor(hours / 24);
-  if (topUnit === 'd') {
-    if (days > 0) return `${days}d`;
-    if (hours > 0) return `${hours}h`;
-    return `${totalMins % 60}m`;
-  }
-  // topUnit='h': hours only (skip minutes)
+  const remHours = hours % 24;
+  const mins = totalMins % 60;
+  if (days > 0 && remHours > 0) return `${days}d${remHours}`;
+  if (days > 0) return `${days}d`;
+  if (hours > 0 && mins > 0) return `${hours}h${mins}`;
   if (hours > 0) return `${hours}h`;
-  return `${totalMins % 60}m`;
+  return `${mins}m`;
 }
 
 /** Draw Usage HUD in screen space (bottom right, zoom-independent).
@@ -573,15 +566,13 @@ function drawUsageHUD(
     }
   }
 
-  /** Render a zone: gauge fill overlay on dark base, then text on top. */
+  /** Render a zone: dark background + thin usage bar + text. */
   function renderZone(text: string, pct: number, leftX: number, rightX: number): void {
     const color = gaugeColor(pct, animFrame);
     const zoneW = rightX - leftX + 1;
     const fillW = Math.round(zoneW * Math.max(0, Math.min(100, pct)) / 100);
-    for (let y = bgTop; y <= bgBot; y++) {
-      for (let x = leftX; x < leftX + fillW; x++) {
-        blendPixel(buf, x, y, color, 0.3);  // gauge fill on top of dark base
-      }
+    for (let x = leftX; x < leftX + fillW; x++) {
+      blendPixel(buf, x, bgBot, color, 0.75);
     }
     drawText(buf, text, rightX, textY, color);
   }
@@ -591,17 +582,17 @@ function drawUsageHUD(
   if (usageEvent.sevenDayPercent == null) {
     // Single full-width zone
     const reset5 = usageEvent.fiveHourResetsAt
-      ? ` ${formatResetTimeCompact(usageEvent.fiveHourResetsAt)}` : '';
+      ? ` ${formatResetDetailed(usageEvent.fiveHourResetsAt)}` : '';
     renderZone(`${Math.round(pct5)}%${reset5}`, pct5, 0, 63);
     return;
   }
 
   // Two-column layout: [5h | 7d]
   const pct7 = usageEvent.sevenDayPercent;
-  const r5 = formatResetShort(usageEvent.fiveHourResetsAt, 'h');
-  const r7 = formatResetShort(usageEvent.sevenDayResetsAt, 'd');
-  renderZone(`${Math.round(pct5)}%${r5 ? ' ' + r5 : ''}`, pct5, 0, 30);
-  renderZone(`${Math.round(pct7)}%${r7 ? ' ' + r7 : ''}`, pct7, 32, 63);
+  const r5 = formatResetDetailed(usageEvent.fiveHourResetsAt);
+  const r7 = formatResetDetailed(usageEvent.sevenDayResetsAt);
+  renderZone(`${Math.round(pct5)}%${r5}`, pct5, 0, 30);
+  renderZone(`${Math.round(pct7)}%${r7}`, pct7, 32, 63);
 }
 
 /**
@@ -732,12 +723,22 @@ export function renderFrame(
   }
 
   // Octopus creatures — always drawn; IDLE = idle (body still, limbs animate gently)
+  const creatureOrder = [...creatureInstances.keys()];
   for (const c of creatureInstances.values()) {
+    const sessionToneIndex = creatureOrder.indexOf(c.sessionId);
     const spriteState: 'idle' | 'working' | 'sleeping' | 'asking' =
       c.state === 'processing' ? 'working'
         : c.state === 'awaiting' ? 'asking'
           : 'idle'; // IDLE → idle (limbs move, body color preserved)
-    drawOctopus(outputBuf, c.worldX, c.worldY, spriteState, animFrame + c.phaseOffset, camera);
+    drawOctopus(
+      outputBuf,
+      c.worldX,
+      c.worldY,
+      spriteState,
+      animFrame + c.phaseOffset,
+      camera,
+      getOctopusPaletteForSession(sessionToneIndex),
+    );
   }
 
   // Crayfish — always drawn when gateway available; IDLE = sitting (subtle breathing only)
@@ -765,10 +766,11 @@ export function renderFrame(
   if (sessionCount >= 2) {
     for (let i = 0; i < Math.min(sessionCount, 6); i++) {
       const dotX = 1 + i * 3;  // 2px dot + 1px gap
-      setPixel(outputBuf, dotX, 1, COLORS.octopusBody);
-      setPixel(outputBuf, dotX + 1, 1, COLORS.octopusBody);
-      setPixel(outputBuf, dotX, 2, COLORS.octopusBody);
-      setPixel(outputBuf, dotX + 1, 2, COLORS.octopusBody);
+      const palette = getOctopusPaletteForSession(i);
+      setPixel(outputBuf, dotX, 1, palette.body);
+      setPixel(outputBuf, dotX + 1, 1, palette.body);
+      setPixel(outputBuf, dotX, 2, palette.body);
+      setPixel(outputBuf, dotX + 1, 2, palette.body);
     }
   }
 

@@ -5,11 +5,9 @@
 namespace Matrix {
 
 enum class Page : uint8_t {
-    STATE,      // Full-screen state color + abbreviation
-    TEXT,       // Scrolling project name + model
-    GAUGE,      // Rate limit bars
-    TIMELINE,   // Activity dots
-    CREATURE,   // Mini octopus animation
+    USAGE,      // Rate limit battery gauges + reset times
+    AGENTS,     // Octopus/crayfish sprites with state colors
+    INFO,       // Project + model scrolling text
     PAGE_COUNT
 };
 
@@ -17,7 +15,6 @@ void init();
 void update(float dt);
 void render();
 
-// Called from button handlers
 void nextPage();
 void prevPage();
 void actionPress();

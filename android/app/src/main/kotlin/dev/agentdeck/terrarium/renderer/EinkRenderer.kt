@@ -132,7 +132,8 @@ fun EinkTerrariumView(
     val fishSchool = remember { EinkFishSchool() }
 
     val isAnimating = state.octopus != OctopusVisualState.SLEEPING ||
-        state.crayfish != CrayfishVisualState.DORMANT
+        state.crayfish != CrayfishVisualState.DORMANT ||
+        state.cloudCreatures.any { it.visualState != OctopusVisualState.SLEEPING }
 
     // Animation loop — platform-specific:
     // B&W e-ink: 2.5fps full animation (400ms).
@@ -170,7 +171,8 @@ fun EinkTerrariumView(
     // The animation loop picks up currentState automatically, but we also render
     // one frame immediately so the transition isn't delayed by up to 600ms.
     val agentsKey = state.agents.map { it.visualState }
-    LaunchedEffect(state.octopus, state.crayfish, state.tetra, state.environment, agentsKey) {
+    val cloudsKey = state.cloudCreatures.map { it.visualState }
+    LaunchedEffect(state.octopus, state.crayfish, state.tetra, state.environment, agentsKey, cloudsKey) {
         val bmp = reusableBitmap ?: Bitmap.createBitmap(EINK_WIDTH, EINK_HEIGHT, Bitmap.Config.ARGB_8888)
             .also { reusableBitmap = it }
         renderedBitmap = renderEinkFrame(currentState, EINK_WIDTH, EINK_HEIGHT, animFrame, bmp, fishSchool = fishSchool)
@@ -350,6 +352,22 @@ private fun renderEinkFrame(
     }
 
     drawEinkCrayfish(canvas, paint, width, height, state.crayfish, creatureFrame)
+
+    // Cloud creatures (Codex CLI agents — float in upper area)
+    if (state.cloudCreatures.isNotEmpty()) {
+        val cloudSlots = dev.agentdeck.terrarium.layoutCloudCreatures(state.cloudCreatures.size)
+        for (i in state.cloudCreatures.indices) {
+            val slot = cloudSlots.getOrElse(i) { cloudSlots.last() }
+            drawEinkCloud(canvas, paint, width, height,
+                state.cloudCreatures[i].visualState,
+                centerXFraction = slot.centerXFraction,
+                centerYFraction = slot.centerYFraction,
+                scaleFactor = slot.scaleFactor,
+                animFrame = creatureFrame,
+                swimFrame = animFrame,
+                displayName = state.cloudCreatures[i].displayName)
+        }
+    }
 
     // Front-layer fish (in front of creatures for 3D depth)
     drawEinkDataParticles(canvas, paint, width, height, state.tetra, state.agents.size, state.crayfish, animFrame, layer = 1, fishSchool = fishSchool)
@@ -836,6 +854,143 @@ private fun einkWrapToTwoLines(text: String, paint: Paint, maxWidth: Float): Lis
     }
 
     return listOf(text.substring(0, bestSplit), text.substring(bestSplit + 1))
+}
+
+// --- Cloud creature lobe offsets (matching CloudCreature 6-lobe layout) ---
+
+private val EINK_CLOUD_LOBE_OFFSETS = arrayOf(
+    -0.14f to -0.30f,  // top-left
+     0.16f to -0.26f,  // top-right
+     0.32f to -0.02f,  // right
+     0.14f to  0.26f,  // bottom-right
+    -0.16f to  0.26f,  // bottom-left
+    -0.32f to -0.02f,  // left
+)
+private val EINK_CLOUD_LOBE_RADII = floatArrayOf(
+    0.30f, 0.29f, 0.28f, 0.29f, 0.30f, 0.28f,
+)
+
+/**
+ * E-ink cloud creature (Codex CLI) — 6 overlapping circles forming a cloud/clover shape.
+ * Simpler than LCD version: no gradient, no glow particles.
+ * ">_" terminal prompt rendered in darker gray.
+ */
+private fun drawEinkCloud(
+    canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int,
+    state: OctopusVisualState,
+    centerXFraction: Float = 0.55f,
+    centerYFraction: Float = 0.20f,
+    scaleFactor: Float = 1f,
+    animFrame: Int = 0,
+    swimFrame: Int = 0,
+    displayName: String? = null,
+) {
+    // Horizontal wander when WORKING (same pattern as octopus)
+    val wanderX = if (state == OctopusVisualState.WORKING) {
+        val phase = swimFrame + ((centerXFraction * 100).toInt() * 11)
+        0.06f * kotlin.math.sin(phase * kotlin.math.PI / 16.0).toFloat()
+    } else 0f
+
+    val cx = w * (centerXFraction + wanderX)
+    // Y-position by state: idle=0.58, processing=0.12, asking=0.40, sleeping=0.75
+    val standingOffset = (centerXFraction - 0.55f) * 0.20f
+    val cy = when (state) {
+        OctopusVisualState.SLEEPING -> h * (0.75f + standingOffset * 0.5f)
+        OctopusVisualState.FLOATING -> h * (0.58f + standingOffset)
+        OctopusVisualState.ASKING -> h * (0.40f + standingOffset)
+        OctopusVisualState.WORKING -> h * (0.12f +
+            0.02f * kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat())
+    }
+
+    // Cloud body radius — similar sizing to octopus bodyWidth
+    val bodyRadius = w * 0.055f * scaleFactor
+
+    // Breath animation — subtle scale pulse for active states
+    val breathScale = when (state) {
+        OctopusVisualState.WORKING -> 1f + 0.04f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 2.0).toFloat()
+        OctopusVisualState.ASKING -> 1f + 0.02f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 2.0).toFloat()
+        OctopusVisualState.FLOATING -> 1f + 0.015f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 2.0).toFloat()
+        OctopusVisualState.SLEEPING -> 0.95f
+    }
+
+    val bodyColor = if (state == OctopusVisualState.SLEEPING) {
+        einkPick(GRAY_CLOUD_SLEEP, COLOR_CLOUD_SLEEP)
+    } else {
+        einkPick(GRAY_CLOUD_BODY, COLOR_CLOUD_BODY)
+    }
+
+    // Draw 6 overlapping lobe circles
+    paint.style = Paint.Style.FILL
+    paint.color = bodyColor
+    for (i in EINK_CLOUD_LOBE_OFFSETS.indices) {
+        val (dx, dy) = EINK_CLOUD_LOBE_OFFSETS[i]
+        val lobeRadius = bodyRadius * EINK_CLOUD_LOBE_RADII[i] * breathScale
+        val lobeCx = cx + bodyRadius * dx
+        val lobeCy = cy + bodyRadius * dy
+        canvas.drawCircle(lobeCx, lobeCy, lobeRadius, paint)
+    }
+
+    // Central fill circle to cover gaps between lobes
+    canvas.drawCircle(cx, cy, bodyRadius * 0.32f * breathScale, paint)
+
+    // Outline for e-ink contrast (slightly darker stroke around each lobe)
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 1.5f * scaleFactor
+    paint.color = einkPick(GRAY_CLOUD_PROMPT, COLOR_CLOUD_PROMPT)
+    for (i in EINK_CLOUD_LOBE_OFFSETS.indices) {
+        val (dx, dy) = EINK_CLOUD_LOBE_OFFSETS[i]
+        val lobeRadius = bodyRadius * EINK_CLOUD_LOBE_RADII[i] * breathScale
+        val lobeCx = cx + bodyRadius * dx
+        val lobeCy = cy + bodyRadius * dy
+        canvas.drawCircle(lobeCx, lobeCy, lobeRadius, paint)
+    }
+
+    // ">_" terminal prompt text inside cloud body
+    if (state != OctopusVisualState.SLEEPING) {
+        paint.style = Paint.Style.FILL
+        paint.color = einkPick(GRAY_CLOUD_PROMPT, COLOR_CLOUD_PROMPT)
+        paint.textAlign = Paint.Align.CENTER
+        paint.textSize = bodyRadius * 0.55f * scaleFactor
+        // Cursor blink for ASKING state (2-frame on, 2-frame off)
+        val promptText = when {
+            state == OctopusVisualState.ASKING && animFrame % 4 >= 2 -> ">_"
+            state == OctopusVisualState.ASKING -> "> "
+            else -> ">_"
+        }
+        canvas.drawText(promptText, cx, cy + bodyRadius * 0.15f, paint)
+        paint.textAlign = Paint.Align.LEFT
+    }
+
+    // Name tag above cloud (reuse the shared name tag renderer)
+    if (displayName != null) {
+        val topY = cy - bodyRadius * 0.35f * breathScale - bodyRadius * EINK_CLOUD_LOBE_RADII[0]
+        drawEinkNameTag(canvas, paint, cx, topY, scaleFactor, displayName, w)
+    }
+
+    // ASKING: speech bubble with "?" beside body (same pattern as octopus)
+    if (state == OctopusVisualState.ASKING) {
+        val bubbleR = bodyRadius * 0.25f * scaleFactor
+        val bubbleX = cx + bodyRadius * 0.55f
+        val bubbleY = cy
+
+        paint.color = einkPick(GRAY_AIR, COLOR_AIR)
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
+        paint.color = einkPick(GRAY_CLOUD_PROMPT, COLOR_CLOUD_PROMPT)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.5f * scaleFactor
+        canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
+
+        paint.color = android.graphics.Color.BLACK
+        paint.style = Paint.Style.FILL
+        paint.textSize = bubbleR * 1.4f
+        paint.textAlign = Paint.Align.CENTER
+        canvas.drawText("?", bubbleX, bubbleY + bubbleR * 0.45f, paint)
+        paint.textAlign = Paint.Align.LEFT
+    }
 }
 
 /** E-ink crayfish — front-facing SVG path rendering with claw/antenna animation. */
@@ -1508,6 +1663,9 @@ private const val GRAY_OCTO_LIMB  = 0xFF333333.toInt()  // level 3 — octopus a
 private const val GRAY_CRAY_BODY  = 0xFF555555.toInt()  // level 5 — crayfish body (medium, distinct from claws)
 private const val GRAY_CRAY_CLAW  = 0xFF333333.toInt()  // level 3 — crayfish claws (darker than body)
 private const val GRAY_CRAY_SICK  = 0xFF666666.toInt()  // level 6 — washed out when sick
+private const val GRAY_CLOUD_BODY = 0xFF555555.toInt()  // level 5 — cloud body (slightly lighter than octopus 0x44)
+private const val GRAY_CLOUD_PROMPT = 0xFF222222.toInt()  // level 2 — >_ terminal prompt text
+private const val GRAY_CLOUD_SLEEP = 0xFF888888.toInt()  // level 8 — dormant/sleeping cloud (faded)
 private const val GRAY_STARBURST  = 0xFF999999.toInt()  // level 9 — WORKING starburst glow
 private const val GRAY_DECORATION = 0xFF444444.toInt()  // level 4 — keyboard, review docs
 private const val GRAY_SEAWEED    = 0xFF666666.toInt()  // level 6 — seaweed stems
@@ -1564,6 +1722,11 @@ private val COLOR_CRAY_BODY    = 0xFFCC3333.toInt()  // vivid red
 private val COLOR_CRAY_CLAW    = 0xFF991111.toInt()  // dark red claws
 private val COLOR_CRAY_SICK    = 0xFF998877.toInt()  // warm gray sick
 private val COLOR_CRAY_SIGNAL  = 0xFF2A8B6E.toInt()  // teal signals
+
+// Cloud (Codex CLI brand: indigo-violet)
+private val COLOR_CLOUD_BODY   = 0xFF5561E0.toInt()  // primary indigo
+private val COLOR_CLOUD_PROMPT = 0xFF1A1A3A.toInt()  // dark navy prompt text
+private val COLOR_CLOUD_SLEEP  = 0xFF8888AA.toInt()  // muted lavender sleep
 
 // Fish — distinct against light water
 private val COLOR_FISH_BODY    = 0xFF3366AA.toInt()  // royal blue body

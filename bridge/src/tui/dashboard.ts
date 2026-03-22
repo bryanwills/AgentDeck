@@ -7,6 +7,7 @@ import WebSocket from 'ws';
 import type {
   BridgeEvent, StateUpdateEvent, UsageEvent,
   SessionsListEvent, SessionInfo, TimelineEventMsg, TimelineHistoryMsg,
+  ModelCatalogEntry,
 } from '@agentdeck/shared';
 import type { TimelineEntry } from '@agentdeck/shared';
 import { listActive, findDaemonPort } from '../session-registry.js';
@@ -32,7 +33,10 @@ export interface DashboardState {
   currentTool: string | null;
   sessions: SessionInfo[];
   usage: UsageEvent | null;
+  modelCatalog: ModelCatalogEntry[];
   timeline: TimelineEntry[];
+  helpVisible: boolean;
+  currentPort: number | null;
   agentType: string | null;
   gatewayAvailable: boolean;
   crayfishRouting: boolean;
@@ -45,6 +49,27 @@ export interface DashboardState {
 export interface DashboardOptions {
   port?: string;
   session?: string;
+}
+
+export function applyStateUpdate(state: DashboardState, e: StateUpdateEvent): void {
+  state.state = e.state;
+  state.projectName = e.projectName || state.projectName;
+  state.modelName = e.modelName || state.modelName;
+  state.currentTool = e.currentTool || null;
+  state.agentType = e.agentType || state.agentType;
+  if (e.modelCatalog !== undefined) {
+    state.modelCatalog = e.modelCatalog;
+  }
+  state.gatewayAvailable = e.gatewayAvailable || false;
+  state.gatewayHasError = e.gatewayHasError || false;
+  if (e.state === 'processing' && e.agentType === 'openclaw') {
+    state.crayfishRouting = true;
+  }
+  if (e.voiceAssistantState !== undefined) {
+    state.voiceAssistantState = e.voiceAssistantState;
+  }
+  state.voiceAssistantText = e.voiceAssistantText || null;
+  state.voiceAssistantResponseText = e.voiceAssistantResponseText || null;
 }
 
 // ===== Dashboard =====
@@ -85,7 +110,10 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
     currentTool: null,
     sessions: [],
     usage: null,
+    modelCatalog: [],
     timeline: [],
+    helpVisible: false,
+    currentPort: targetPort,
     agentType: null,
     gatewayAvailable: false,
     crayfishRouting: false,
@@ -141,10 +169,10 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
     const showTerr = shouldShowTerrarium(cols, rows);
     let terrLines: string[] = [];
     if (showTerr) {
-      // Larger screens → bigger terrarium (up to 55% for wide, 40% for standard)
+      // Keep terrarium visible, but leave more room for status/timeline in monitoring mode.
       const tH = layout === 'wide'
-        ? Math.max(3, Math.floor((rows - 3) * (rows >= 40 ? 0.55 : 0.45)))
-        : Math.max(3, Math.min(12, Math.floor((rows - 6) * 0.38)));
+        ? Math.max(3, Math.floor((rows - 3) * (rows >= 40 ? 0.42 : 0.34)))
+        : Math.max(3, Math.min(10, Math.floor((rows - 6) * 0.28)));
       const tW = layout === 'wide'
         ? cols - Math.max(20, Math.floor(cols * 0.22)) - 3
         : cols - 2;
@@ -161,17 +189,31 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
       case 'q':
         shutdown();
         break;
+      case 'h':
+      case '?':
+        state.helpVisible = !state.helpVisible;
+        render();
+        break;
+      case '\x1b':
+        if (state.helpVisible) {
+          state.helpVisible = false;
+          render();
+        }
+        break;
       case 'up':
       case 'k':
+        if (state.helpVisible) break;
         scrollOffset = Math.min(scrollOffset + 1, Math.max(0, state.timeline.length - 5));
         render();
         break;
       case 'down':
       case 'j':
+        if (state.helpVisible) break;
         scrollOffset = Math.max(0, scrollOffset - 1);
         render();
         break;
       default:
+        if (state.helpVisible) break;
         // 1-9: switch session
         if (key >= '1' && key <= '9') {
           const idx = parseInt(key, 10) - 1;
@@ -179,6 +221,7 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
             const sess = state.sessions[idx];
             if (sess.port && sess.port !== targetPort) {
               targetPort = sess.port;
+              state.currentPort = targetPort;
               reconnect();
             }
           }
@@ -191,36 +234,52 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
     if (terrariumTimer) clearInterval(terrariumTimer);
     if (renderTimer) clearInterval(renderTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
-    if (ws) {
-      ws.removeAllListeners();
-      ws.close();
-    }
+    closeSocket();
     screen.cleanup();
     process.exit(0);
   }
 
-  function connect(): void {
-    if (ws) {
-      ws.removeAllListeners();
-      ws.close();
+  function closeSocket(): void {
+    if (!ws) return;
+    const socket = ws;
+    ws = null;
+
+    // `ws` throws/aborts on CONNECTING close(). Swallow shutdown noise and
+    // ignore any late events from stale sockets.
+    socket.on('error', () => {});
+    socket.on('close', () => {});
+
+    try {
+      socket.close();
+    } catch {
+      // Ignore reconnect/shutdown race errors.
     }
+  }
+
+  function connect(): void {
+    closeSocket();
 
     state.connectionStatus = 'reconnecting';
 
+    let socket: WebSocket;
     try {
-      ws = new WebSocket(`ws://127.0.0.1:${targetPort}`);
+      socket = new WebSocket(`ws://127.0.0.1:${targetPort}`);
     } catch {
       scheduleReconnect();
       return;
     }
+    ws = socket;
 
-    ws.on('open', () => {
+    socket.on('open', () => {
+      if (socket !== ws) return;
       state.connectionStatus = 'connected';
       state.isStale = false;
+      state.currentPort = targetPort;
       render();
     });
 
-    ws.on('message', (data) => {
+    socket.on('message', (data) => {
+      if (socket !== ws) return;
       try {
         const event = JSON.parse(data.toString()) as BridgeEvent;
         handleEvent(event);
@@ -229,7 +288,8 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
       }
     });
 
-    ws.on('close', () => {
+    socket.on('close', () => {
+      if (socket !== ws) return;
       state.connectionStatus = 'disconnected';
       state.isStale = true;
       receivingBridgeTimeline = false; // Resume local generation on reconnect
@@ -237,7 +297,8 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
       scheduleReconnect();
     });
 
-    ws.on('error', () => {
+    socket.on('error', () => {
+      if (socket !== ws) return;
       // close event will fire after this
     });
   }
@@ -304,22 +365,7 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
       case 'state_update': {
         const e = event as StateUpdateEvent;
         generateLocalTimeline(e);
-        state.state = e.state;
-        state.projectName = e.projectName || state.projectName;
-        state.modelName = e.modelName || state.modelName;
-        state.currentTool = e.currentTool || null;
-        state.agentType = e.agentType || state.agentType;
-        state.gatewayAvailable = e.gatewayAvailable || false;
-        state.gatewayHasError = e.gatewayHasError || false;
-        if (e.state === 'processing' && e.agentType === 'openclaw') {
-          state.crayfishRouting = true;
-        }
-        // Voice assistant state piggybacked on state_update
-        if (e.voiceAssistantState !== undefined) {
-          state.voiceAssistantState = e.voiceAssistantState;
-        }
-        state.voiceAssistantText = e.voiceAssistantText || null;
-        state.voiceAssistantResponseText = e.voiceAssistantResponseText || null;
+        applyStateUpdate(state, e);
         break;
       }
       case 'usage_update': {

@@ -16,6 +16,12 @@ object TerrariumColors {
     val ClaudeBodyDark = Color(0xFFA05840)   // shadow
     val ClaudeEye = Color(0xFF2D1F16)        // dark brown
 
+    // Cloud (Codex CLI brand: indigo-violet)
+    val CloudBody = Color(0xFF5561E0)        // primary indigo
+    val CloudDeep = Color(0xFF3342C7)        // dark shadow
+    val CloudHighlight = Color(0xFFB394E5)   // light violet highlight
+    val CloudGlow = Color(0xFF8F94F2)        // processing pulse glow
+
     // Crayfish (OpenClaw brand: #FF4D4D→#991B1B gradient, #00E5CC teal eyes)
     val CrayfishShell = Color(0xFFFF4D4D)
     val CrayfishDark = Color(0xFF991B1B)
@@ -86,6 +92,11 @@ object TerrariumLayout {
     const val SWIM_MIN_Y = 0.10f   // below surface (0.05) margin
     const val SWIM_MAX_Y = 0.61f   // above sand (0.65)
 
+    // Cloud creature sizing (Codex CLI)
+    const val CLOUD_WIDTH_FRACTION = 0.09f
+    const val CLOUD_CENTER_X_FRACTION = 0.55f
+    const val CLOUD_CENTER_Y_FRACTION = 0.20f   // upper area — clouds float high
+
     // Neon Tetra swim boundaries — full aquarium range
     const val TETRA_SWIM_MIN_X = 0.03f   // near left wall
     const val TETRA_SWIM_MAX_X = 0.92f   // near right wall (seaweed at 0.93)
@@ -137,6 +148,7 @@ object TerrariumTiming {
     // Creature bubble exhales
     const val OCTO_BUBBLE_INTERVAL = 2.5f   // seconds between WORKING octopus exhales
     const val CRAYFISH_BUBBLE_INTERVAL = 1.5f // seconds between ROUTING crayfish exhales
+    const val CLOUD_BUBBLE_INTERVAL = 3.0f    // seconds between COMPUTING cloud exhales
 
     // Transitions
     const val STATE_TRANSITION_MS = 500f

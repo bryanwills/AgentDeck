@@ -235,6 +235,7 @@ export interface SessionInfo {
   agentType?: AgentType;
   alive: boolean;
   state?: string;  // sibling's current state from /health query
+  modelName?: string;  // sibling's current model from /health query
 }
 
 export interface SessionsListEvent {

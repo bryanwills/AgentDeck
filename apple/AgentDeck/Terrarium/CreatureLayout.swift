@@ -19,14 +19,14 @@ enum CreatureLayout {
             return [CreatureSlot(x: 0.4, y: 0.45, scale: 1.0)]
         case 2:
             return [
-                CreatureSlot(x: 0.25, y: 0.42, scale: 0.85),
-                CreatureSlot(x: 0.58, y: 0.48, scale: 0.85),
+                CreatureSlot(x: 0.28, y: 0.38, scale: 0.85),
+                CreatureSlot(x: 0.55, y: 0.50, scale: 0.85),
             ]
         case 3:
             return [
-                CreatureSlot(x: 0.22, y: 0.38, scale: 0.75),
-                CreatureSlot(x: 0.52, y: 0.44, scale: 0.75),
-                CreatureSlot(x: 0.36, y: 0.54, scale: 0.75),
+                CreatureSlot(x: 0.22, y: 0.35, scale: 0.75),
+                CreatureSlot(x: 0.52, y: 0.35, scale: 0.75),
+                CreatureSlot(x: 0.36, y: 0.52, scale: 0.75),
             ]
         default:
             return layoutGrid(count: count)

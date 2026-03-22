@@ -32,6 +32,12 @@ constexpr uint32_t ClaudeBodyLight = 0xD08870;
 constexpr uint32_t ClaudeBodyDark  = 0xA05840;
 constexpr uint32_t ClaudeEye       = 0x2D1F16;
 
+// --- Cloud (Codex CLI) ---
+constexpr uint32_t CloudBody       = 0x5561E0;
+constexpr uint32_t CloudBodyLight  = 0x7B85F0;
+constexpr uint32_t CloudBodyDark   = 0x3A45C0;
+constexpr uint32_t CloudPrompt     = 0xE2E8F0;  // ">_" text color
+
 // --- Crayfish (OpenClaw) ---
 constexpr uint32_t CrayfishShell     = 0xFF4D4D;
 constexpr uint32_t CrayfishDark      = 0x991B1B;
@@ -103,6 +109,17 @@ constexpr float CfHomeY      = 0.55f;
 constexpr float CfSittingY   = 0.68f;
 constexpr float CfRoutingY   = 0.52f;
 
+// Cloud (Codex CLI)
+constexpr float CloudRadiusFrac = 0.050f;
+constexpr float CloudHomeX      = 0.55f;
+constexpr float CloudStandingY  = 0.62f;
+constexpr float CloudSleepY     = 0.70f;
+constexpr float CloudWorkingY   = 0.35f;
+constexpr float CloudSwimMinX   = 0.25f;
+constexpr float CloudSwimMaxX   = 0.75f;
+constexpr float CloudSwimMinY   = 0.15f;
+constexpr float CloudSwimMaxY   = 0.58f;
+
 // Tetra
 constexpr float TetraSize     = 0.018f;
 constexpr float TetraSwimMinX = 0.10f;
@@ -135,6 +152,17 @@ constexpr float CfHomeX      = 0.78f;
 constexpr float CfHomeY      = 0.58f;
 constexpr float CfSittingY   = 0.72f;
 constexpr float CfRoutingY   = 0.55f;
+
+// Cloud (Codex CLI)
+constexpr float CloudRadiusFrac = 0.045f;
+constexpr float CloudHomeX      = 0.55f;
+constexpr float CloudStandingY  = 0.63f;
+constexpr float CloudSleepY     = 0.75f;
+constexpr float CloudWorkingY   = 0.38f;
+constexpr float CloudSwimMinX   = 0.20f;
+constexpr float CloudSwimMaxX   = 0.68f;
+constexpr float CloudSwimMinY   = 0.10f;
+constexpr float CloudSwimMaxY   = 0.61f;
 
 // Tetra
 constexpr float TetraSize     = 0.015f;

@@ -1,0 +1,21 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`activityDensityBar > empty timestamps — all dim 1`] = `"[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[0m"`;
+
+exports[`activityDensityBar > recent burst — bright right side 1`] = `"[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[90m░[36m█[0m"`;
+
+exports[`activityDensityBar > spread timestamps — distributed density 1`] = `"[36m▒[36m▓[36m▓[36m▓[36m▓[36m▓[36m▓[36m▓[36m▓[36m█[0m"`;
+
+exports[`blockGauge snapshots > 0% — all empty, green 1`] = `"[32m[90m░░░░░░░░░░[0m"`;
+
+exports[`blockGauge snapshots > 50% — half filled, green 1`] = `"[32m█████[90m░░░░░[0m"`;
+
+exports[`blockGauge snapshots > 75% — yellow threshold 1`] = `"[33m████████[90m░░[0m"`;
+
+exports[`blockGauge snapshots > 95% — red threshold 1`] = `"[31m██████████[90m[0m"`;
+
+exports[`blockGauge snapshots > 100% — all filled, red 1`] = `"[31m██████████[90m[0m"`;
+
+exports[`blockGauge snapshots > clamps above 100 1`] = `"[31m██████[90m[0m"`;
+
+exports[`blockGauge snapshots > clamps negative to 0 1`] = `"[32m[90m░░░░░░[0m"`;

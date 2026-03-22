@@ -86,10 +86,10 @@ extension DashboardState {
             && agentType != "openclaw"
             && agentType != "codex-cli"
 
-        // Octopus siblings (exclude daemon + openclaw + codex-cli)
-        let siblings = siblingSessions.filter {
-            $0.agentType != "daemon" && $0.agentType != "openclaw" && $0.agentType != "codex-cli"
-        }
+        // Octopus siblings (exclude daemon + openclaw + codex-cli), sorted by ID for stable positioning
+        let siblings = siblingSessions
+            .filter { $0.agentType != "daemon" && $0.agentType != "openclaw" && $0.agentType != "codex-cli" }
+            .sorted { ($0.id ?? "") < ($1.id ?? "") }
 
         let octopusCount = (primaryIsOctopus ? 1 : 0) + siblings.count
         let slots = CreatureLayout.layoutOctopuses(count: octopusCount)
@@ -158,7 +158,7 @@ extension DashboardState {
 
         // Jellyfish (Codex CLI sessions)
         let primaryIsJellyfish = state != .disconnected && agentType == "codex-cli"
-        let jellyfishSiblings = siblingSessions.filter { $0.agentType == "codex-cli" }
+        let jellyfishSiblings = siblingSessions.filter { $0.agentType == "codex-cli" }.sorted { ($0.id ?? "") < ($1.id ?? "") }
         let jellyfishCount = (primaryIsJellyfish ? 1 : 0) + jellyfishSiblings.count
         let jellySlots = CreatureLayout.layoutOctopuses(count: jellyfishCount) // reuse octopus layout
 

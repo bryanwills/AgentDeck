@@ -2,6 +2,7 @@
 //
 // When the Mac display sleeps (hostDisplayOn=false), dims the device screen.
 // When it wakes (hostDisplayOn=true), restores the previous brightness.
+// Safety: auto-restores after timeout to prevent permanently dimmed screen.
 
 import Foundation
 #if canImport(UIKit)
@@ -15,27 +16,30 @@ final class DisplaySyncService: @unchecked Sendable {
     #if os(iOS)
     private var savedBrightness: CGFloat?
     private var pendingDim = false
+    private var dimTimer: Timer?
+    /// Maximum time to keep screen dimmed (safety net — prevents stuck dim)
+    private static let maxDimDuration: TimeInterval = 300  // 5 minutes
     #endif
 
     /// Call when hostDisplayOn changes
-    func handleDisplayState(displayOn: Bool, isAppActive: Bool) {
+    func handleDisplayState(displayOn: Bool) {
         guard enabled else { return }
 
         #if os(iOS)
-        if !displayOn {
-            if isAppActive {
+        DispatchQueue.main.async { [self] in
+            if !displayOn {
                 let current = UIScreen.main.brightness
-                savedBrightness = current
+                // Don't save if already dimmed (avoid saving 0.0 as the "original")
+                if current > 0.01 {
+                    savedBrightness = current
+                }
                 UIScreen.main.brightness = 0.0
                 pendingDim = false
+                startDimTimer()
             } else {
-                pendingDim = true
-            }
-        } else {
-            pendingDim = false
-            if let saved = savedBrightness {
-                UIScreen.main.brightness = saved
-                savedBrightness = nil
+                cancelDimTimer()
+                pendingDim = false
+                restoreBrightness()
             }
         }
         #endif
@@ -46,19 +50,42 @@ final class DisplaySyncService: @unchecked Sendable {
     func handleForegroundReturn(hostDisplayOn: Bool) {
         guard enabled else { return }
         if pendingDim && !hostDisplayOn {
-            savedBrightness = UIScreen.main.brightness
+            let current = UIScreen.main.brightness
+            if current > 0.01 {
+                savedBrightness = current
+            }
             UIScreen.main.brightness = 0.0
             pendingDim = false
+            startDimTimer()
         }
     }
 
     /// Restore brightness on disconnect (safety net)
     func restoreOnDisconnect() {
+        cancelDimTimer()
         pendingDim = false
+        restoreBrightness()
+    }
+
+    private func restoreBrightness() {
         if let saved = savedBrightness {
             UIScreen.main.brightness = saved
             savedBrightness = nil
         }
+    }
+
+    /// Safety timer — auto-restore brightness after maxDimDuration
+    private func startDimTimer() {
+        cancelDimTimer()
+        dimTimer = Timer.scheduledTimer(withTimeInterval: Self.maxDimDuration, repeats: false) { [weak self] _ in
+            print("[DisplaySync] safety timeout — restoring brightness")
+            self?.restoreBrightness()
+        }
+    }
+
+    private func cancelDimTimer() {
+        dimTimer?.invalidate()
+        dimTimer = nil
     }
     #endif
 }

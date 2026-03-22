@@ -1,39 +1,47 @@
-// JellyfishCreature.swift — 12×10 pixel grid jellyfish for Codex CLI
-// Bell dome + trailing tentacles, bioluminescent glow when processing
+// JellyfishCreature.swift — Cloud creature for Codex CLI
+// 5-lobe clover shape (5 overlapping circles) matching the Codex CLI icon
+// Vertical gradient (lavender top → blue bottom), edge glow, morphing >_ prompt
 
 import SwiftUI
 
 // MARK: - Jellyfish Visual State
 
 enum JellyfishVisualState {
-    case dormant    // Hidden, no animation
-    case drifting   // Idle — slow bell pulse, gentle drift
-    case pulsing    // Processing — fast pulse, bioluminescent glow
-    case waiting    // Awaiting input — mid-water, "?" bubble
+    case dormant
+    case drifting   // Idle — gentle pulse, slow drift
+    case pulsing    // Processing — vivid gradient, glow, faster morph
+    case waiting    // Awaiting — "?" bubble
 }
 
 final class JellyfishCreature: Creature {
-    // MARK: - Pixel Grid
+    // MARK: - 5-Lobe Cloud Geometry
 
-    // Cell types: 0=transparent, 1=bell body, 2=marking(>_), 3=bell edge(pulse),
-    //             4=left tentacle, 5=right tentacle, 6=center tentacle
-    private static let grid: [[Int]] = [
-        [0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0],  // bell top
-        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],  // bell wide
-        [0, 1, 1, 2, 2, 1, 1, 2, 1, 1, 1, 0],  // bell with >_ marking
-        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],  // bell mid
-        [0, 0, 0, 3, 3, 3, 3, 3, 3, 0, 0, 0],  // bell rim (contracts)
-        [0, 0, 4, 0, 6, 0, 0, 6, 0, 5, 0, 0],  // tentacles upper
-        [0, 4, 0, 0, 0, 6, 6, 0, 0, 0, 5, 0],  // tentacles mid
-        [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5],  // tentacles lower
-        [0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0],  // tentacles trailing
-        [0, 0, 4, 0, 0, 0, 0, 0, 0, 5, 0, 0],  // tentacles end
+    /// Lobe centers relative to cloud center (0,0), radius fraction of bodyWidth
+    private struct Lobe {
+        let dx: Float  // offset from center (fraction of bodyWidth)
+        let dy: Float
+        let r: Float   // radius (fraction of bodyWidth)
+    }
+
+    // 6 lobes arranged in flower pattern (matches Codex icon)
+    // Slightly rotated clockwise — top-left lobe is highest
+    private static let lobes: [Lobe] = [
+        Lobe(dx: -0.14, dy: -0.30, r: 0.30),  // top-left (highest)
+        Lobe(dx:  0.16, dy: -0.26, r: 0.28),  // top-right
+        Lobe(dx:  0.32, dy: -0.02, r: 0.28),  // right
+        Lobe(dx:  0.14, dy:  0.26, r: 0.28),  // bottom-right
+        Lobe(dx: -0.16, dy:  0.26, r: 0.28),  // bottom-left
+        Lobe(dx: -0.32, dy: -0.02, r: 0.28),  // left
     ]
 
-    private static let gridCols = 12
-    private static let gridRows = 10
-    private static let pixelAspect: Float = 1.8  // slightly less than octopus for rounder bell
-    private static let pixelGap: Float = 0.5
+    // >_ morph animation: cycle through prompt symbol states
+    private static let promptStates: [(chevron: String, bar: String, chevronFlipped: Bool)] = [
+        (">", "_", false),   // >_
+        (">", "",  false),   // >
+        ("<", "=", true),    // =<
+        ("<", "|", true),    // |<
+        (">", "_", false),   // >_
+    ]
 
     // MARK: - Properties
 
@@ -44,18 +52,15 @@ final class JellyfishCreature: Creature {
     var homeY: Float
     var scale: Float
 
-    // Animation state
     private var time: Float = 0
     private(set) var currentX: Float
     private(set) var currentY: Float
     private var phaseOffset: Float
     private var driftPhase: Float
 
-    // Transition
     private var previousState: JellyfishVisualState?
     private var transitionProgress: Float = 1.0
 
-    // ASKING exit callback
     var onWaitingExit: (() -> Void)?
 
     // MARK: - Init
@@ -66,7 +71,7 @@ final class JellyfishCreature: Creature {
         self.homeY = homeY
         self.scale = scale
         self.currentX = homeX
-        self.currentY = 0.45  // jellyfish start mid-water
+        self.currentY = homeY
         self.phaseOffset = Float.random(in: 0...Float.pi * 2)
         self.driftPhase = Float.random(in: 0...Float.pi * 2)
     }
@@ -76,67 +81,49 @@ final class JellyfishCreature: Creature {
     func update(dt: Float, state: TerrariumState) {
         time += dt
 
-        // Find matching creature state
         if let creature = state.jellyfishCreatures.first(where: { $0.id == sessionId }) {
             let newState = creature.state
             if newState != visualState {
-                if visualState == .waiting {
-                    onWaitingExit?()
-                }
+                if visualState == .waiting { onWaitingExit?() }
                 previousState = visualState
                 transitionProgress = 0
                 visualState = newState
             }
         }
 
-        // Advance transition
         if transitionProgress < 1.0 {
             transitionProgress = min(1.0, transitionProgress + dt * 2.5)
         }
 
-        // Position
         updatePosition(dt: dt)
     }
 
     private func updatePosition(dt: Float) {
-        // Jellyfish float higher than octopi and drift more
-        let targetY: Float
-        switch visualState {
-        case .dormant:
-            targetY = 0.70  // sink low
-        case .drifting:
-            targetY = 0.45  // mid-water idle (jellyfish don't rest on floor)
-        case .pulsing:
-            targetY = 0.20  // float high when processing
-        case .waiting:
-            targetY = 0.35  // slightly higher than idle for awaiting
+        let targetY: Float = switch visualState {
+        case .dormant: 0.70
+        case .drifting: 0.58   // rest near floor (like octopus idle)
+        case .pulsing: 0.12   // float near surface when processing
+        case .waiting: 0.50   // mid-water when awaiting
         }
 
-        let lerpRate: Float = visualState == .pulsing ? 2.0 : 1.5  // slower, more graceful
-
-        // Vertical movement with pulse bob
-        let pulseSpeed: Float = visualState == .pulsing ? 0.25 : 0.08
-        let pulseAmp: Float = visualState == .pulsing ? 0.025 : 0.012
-        let pulseBob = sin((time + phaseOffset) * pulseSpeed * Float.pi * 2) * pulseAmp
+        let lerpRate: Float = visualState == .pulsing ? 2.0 : 1.5
+        let pulseSpeed: Float = visualState == .pulsing ? 1.5 : 0.5
+        let pulseAmp: Float = visualState == .pulsing ? 0.015 : 0.008
+        let pulseBob = sin((time + phaseOffset) * pulseSpeed) * pulseAmp
         currentY += (targetY + pulseBob - currentY) * dt * lerpRate
 
-        // Horizontal drift — jellyfish passively drift
-        let driftAmp: Float = visualState == .pulsing ? 0.015 : 0.008
-        let driftX = sin((time + driftPhase) * 0.3) * driftAmp
+        // Processing: wider horizontal drift (floating near surface, drifting side to side)
+        let driftAmp: Float = visualState == .pulsing ? 0.06 : 0.006
+        let driftSpeed: Float = visualState == .pulsing ? 0.15 : 0.3
+        let driftX = sin((time + driftPhase) * driftSpeed) * driftAmp
         currentX += (homeX + driftX - currentX) * dt * lerpRate
 
-        // Clamp to swim bounds (slightly wider than octopus)
         currentX = min(0.70, max(0.12, currentX))
         currentY = min(0.65, max(0.08, currentY))
     }
 
-    func currentPosition() -> (x: Float, y: Float) {
-        (currentX, currentY)
-    }
-
-    func isPulsing() -> Bool {
-        visualState == .pulsing
-    }
+    func currentPosition() -> (x: Float, y: Float) { (currentX, currentY) }
+    func isPulsing() -> Bool { visualState == .pulsing }
 
     // MARK: - Draw
 
@@ -145,199 +132,269 @@ final class JellyfishCreature: Creature {
 
         let w = Float(size.width)
         let h = Float(size.height)
-        let bodyRadius = w * 0.050 * scale  // slightly smaller than octopus
+        let bodyWidth = w * 0.060 * scale
 
-        let centerX = currentX * w
-        let bobOffset: Float = visualState == .pulsing ?
-            sin(time * 2 * Float.pi / 3.0) * h * 0.012 : 0
-        let centerY = currentY * h + bobOffset
+        let cx = CGFloat(currentX * w)
+        let bobOffset = visualState == .pulsing ? CGFloat(sin(time * 2.0) * h * 0.008) : 0
+        let cy = CGFloat(currentY * h) + bobOffset
 
-        let bodyAlpha: Float = visualState == .dormant ? 0.3 : 0.85  // jellyfish are translucent
-
-        drawPixelBody(context: &context, cx: centerX, cy: centerY,
-                      bodyRadius: bodyRadius, alpha: bodyAlpha)
-
-        // Bioluminescent glow when processing
+        // Glow behind cloud (processing)
         if visualState == .pulsing {
-            drawGlow(context: &context, cx: centerX, cy: centerY, radius: bodyRadius)
+            drawGlow(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
         }
 
-        // "?" bubble when waiting
+        // Cloud body (5 overlapping circles with gradient)
+        drawCloudBody(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
+
+        // >_ prompt
+        drawPrompt(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
+
+        // "?" bubble
         if visualState == .waiting {
-            drawSpeechBubble(context: &context, cx: CGFloat(centerX), cy: CGFloat(centerY),
-                             bodyRadius: CGFloat(bodyRadius))
+            drawSpeechBubble(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
         }
 
         // Name tag
         if let name = displayName {
-            drawNameTag(context: &context, name: name, cx: CGFloat(centerX),
-                        cy: CGFloat(centerY), bodyRadius: CGFloat(bodyRadius))
+            drawNameTag(context: &context, name: name, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
         }
     }
 
-    // MARK: - Pixel Body Drawing
+    // MARK: - Cloud Body (6 overlapping circles, rendered as unified shape)
 
-    private func drawPixelBody(context: inout GraphicsContext, cx: Float, cy: Float,
-                                bodyRadius: Float, alpha: Float) {
-        let pixelW = bodyRadius * 2 / Float(Self.gridCols)
-        let pixelH = pixelW * Self.pixelAspect
-        let gridW = Float(Self.gridCols) * pixelW
-        let gridH = Float(Self.gridRows) * pixelH
-        let startX = cx - gridW / 2
-        let startY = cy - gridH / 2
+    private func drawCloudBody(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
+        let alpha = visualState == .dormant ? 0.3 : 0.9
+        let breathScale: CGFloat = 1.0 + CGFloat(sin(time * (visualState == .pulsing ? 2.0 : 0.6)) * 0.03)
 
-        let bellColor = bellColorForState()
-        let tentacleColor = tentacleColorForState()
-        let gap = Self.pixelGap
+        // Precompute lobe rects
+        let lobeRects: [CGRect] = Self.lobes.map { lobe in
+            let lobeCx = cx + CGFloat(lobe.dx) * bodyW * breathScale
+            let lobeCy = cy + CGFloat(lobe.dy) * bodyW * breathScale
+            let lobeR = CGFloat(lobe.r) * bodyW * breathScale
+            return CGRect(x: lobeCx - lobeR, y: lobeCy - lobeR, width: lobeR * 2, height: lobeR * 2)
+        }
 
-        // Bell pulse: contracts/expands
-        let pulseSpeed: Float = visualState == .pulsing ? 0.25 : 0.06
-        let pulsePhase = sin((time + phaseOffset) * pulseSpeed * Float.pi * 2)
-        let contracting = pulsePhase < 0
+        let topY = cy - bodyW * 0.7
+        let bottomY = cy + bodyW * 0.6
 
-        for row in 0..<Self.gridRows {
-            for col in 0..<Self.gridCols {
-                let cell = Self.grid[row][col]
-                guard cell != 0 else { continue }
+        // Gradient colors
+        let topColor: Color
+        let bottomColor: Color
+        if visualState == .pulsing {
+            let pulse = sin(time * 2.5) * 0.3 + 0.7
+            topColor = TerrariumColors.lerpColor(
+                TerrariumColors.jellyfishHighlight, Color.white, Float(pulse) * 0.2)
+            bottomColor = TerrariumColors.lerpColor(
+                TerrariumColors.jellyfishDeep, TerrariumColors.jellyfishBell, Float(pulse) * 0.3)
+        } else {
+            topColor = TerrariumColors.jellyfishHighlight
+            bottomColor = TerrariumColors.jellyfishDeep
+        }
 
-                let px = startX + Float(col) * pixelW
-                var py = startY + Float(row) * pixelH
+        // Build bounding rect for gradient fill
+        let allMinX = lobeRects.map(\.minX).min() ?? cx
+        let allMinY = lobeRects.map(\.minY).min() ?? cy
+        let allMaxX = lobeRects.map(\.maxX).max() ?? cx
+        let allMaxY = lobeRects.map(\.maxY).max() ?? cy
+        let boundingRect = CGRect(x: allMinX, y: allMinY,
+                                  width: allMaxX - allMinX, height: allMaxY - allMinY)
 
-                switch cell {
-                case 1: // Bell body
-                    let rect = CGRect(x: CGFloat(px + gap), y: CGFloat(py + gap),
-                                      width: CGFloat(pixelW - gap * 2), height: CGFloat(pixelH - gap * 2))
-                    context.fill(Path(rect), with: .color(bellColor.opacity(Double(alpha))))
+        // 0. Outer edge glow — slightly expanded, behind body
+        context.drawLayer { glowCtx in
+            glowCtx.opacity = alpha * 0.12
+            for rect in lobeRects {
+                let expanded = rect.insetBy(dx: -rect.width * 0.04, dy: -rect.height * 0.04)
+                glowCtx.fill(Path(ellipseIn: expanded),
+                             with: .color(TerrariumColors.jellyfishGlow))
+            }
+        }
 
-                case 2: // >_ marking
-                    let markAlpha = ((Int(time * 10) % 60) > 5) ? alpha : alpha * 0.3
-                    let rect = CGRect(x: CGFloat(px + gap), y: CGFloat(py + gap),
-                                      width: CGFloat(pixelW - gap * 2), height: CGFloat(pixelH - gap * 2))
-                    context.fill(Path(rect), with: .color(TerrariumColors.jellyfishMarking.opacity(Double(markAlpha))))
+        // 1. Main body — single combined path, filled ONCE (no per-circle seams)
+        var cloudPath = SwiftUI.Path()
+        for rect in lobeRects {
+            cloudPath.addEllipse(in: rect)
+        }
+        // Center patch to guarantee no gap
+        let centerR = bodyW * 0.18
+        cloudPath.addEllipse(in: CGRect(x: cx - centerR, y: cy - centerR,
+                                         width: centerR * 2, height: centerR * 2))
 
-                case 3: // Bell edge — contracts during pulse
-                    if !contracting {
-                        let rect = CGRect(x: CGFloat(px + gap), y: CGFloat(py + gap),
-                                          width: CGFloat(pixelW - gap * 2), height: CGFloat(pixelH - gap * 2))
-                        context.fill(Path(rect), with: .color(bellColor.opacity(Double(alpha) * 0.7)))
-                    }
+        let nonZero = FillStyle(eoFill: false)  // non-zero winding = fills union
 
-                case 4, 5: // Outer tentacles — wave motion
-                    let tentPhase: Float = cell == 4 ? 0 : Float.pi
-                    let wave = sin(time * 0.8 + tentPhase + Float(row) * 0.5)
-                    if wave > -0.4 {
-                        let waveOffset = wave * pixelW * 0.3
-                        let rect = CGRect(x: CGFloat(px + gap + waveOffset), y: CGFloat(py + gap),
-                                          width: CGFloat(pixelW - gap * 2), height: CGFloat(pixelH - gap * 2))
-                        context.fill(Path(rect), with: .color(tentacleColor.opacity(Double(alpha) * 0.6)))
-                    }
+        context.drawLayer { bodyCtx in
+            bodyCtx.opacity = alpha
 
-                case 6: // Center tentacles
-                    let wave = sin(time * 0.6 + Float(col) * 0.3)
-                    if wave > -0.3 {
-                        let rect = CGRect(x: CGFloat(px + gap), y: CGFloat(py + gap),
-                                          width: CGFloat(pixelW - gap * 2), height: CGFloat(pixelH - gap * 2))
-                        context.fill(Path(rect), with: .color(tentacleColor.opacity(Double(alpha) * 0.5)))
-                    }
+            // Base gradient — single fill over entire union
+            bodyCtx.fill(cloudPath, with: .linearGradient(
+                Gradient(colors: [topColor, bottomColor]),
+                startPoint: CGPoint(x: cx, y: topY),
+                endPoint: CGPoint(x: cx, y: bottomY)
+            ), style: nonZero)
 
-                default:
-                    break
+            // 3D highlight — top-left glossy sheen
+            bodyCtx.fill(cloudPath, with: .linearGradient(
+                Gradient(colors: [Color.white.opacity(0.15), Color.white.opacity(0.04), Color.clear]),
+                startPoint: CGPoint(x: cx - bodyW * 0.35, y: topY - bodyW * 0.1),
+                endPoint: CGPoint(x: cx + bodyW * 0.2, y: cy + bodyW * 0.15)
+            ), style: nonZero)
+        }
+    }
+
+    // MARK: - >_ Morphing Prompt
+
+    private func drawPrompt(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
+        let promptAlpha = visualState == .pulsing ?
+            Double(sin(time * 3) * 0.1 + 0.9) : 0.9
+        let promptColor = Color.white.opacity(promptAlpha)
+
+        // Morph cycle: slower when idle, faster when processing
+        let morphSpeed: Float = visualState == .pulsing ? 0.4 : 0.15
+        let morphIndex = Int(time * morphSpeed) % Self.promptStates.count
+        let state = Self.promptStates[morphIndex]
+
+        let fontSize = bodyW * 0.45
+        let chevronSize = bodyW * 0.50
+
+        if state.chevronFlipped {
+            // Bar on left, chevron on right (e.g. =< or |<)
+            if !state.bar.isEmpty {
+                context.draw(
+                    Text(state.bar).font(.system(size: fontSize, weight: .bold, design: .rounded))
+                        .foregroundColor(promptColor),
+                    at: CGPoint(x: cx - bodyW * 0.18, y: cy + bodyW * 0.02)
+                )
+            }
+            context.draw(
+                Text(state.chevron).font(.system(size: chevronSize, weight: .bold, design: .rounded))
+                    .foregroundColor(promptColor),
+                at: CGPoint(x: cx + bodyW * 0.15, y: cy)
+            )
+        } else {
+            // Chevron on left, bar on right (e.g. >_ or >)
+            context.draw(
+                Text(state.chevron).font(.system(size: chevronSize, weight: .bold, design: .rounded))
+                    .foregroundColor(promptColor),
+                at: CGPoint(x: cx - bodyW * 0.10, y: cy)
+            )
+            if !state.bar.isEmpty {
+                let visible = state.bar == "_" ? (Int(time * 2) % 2 == 0) : true
+                if visible {
+                    context.draw(
+                        Text(state.bar).font(.system(size: fontSize, weight: .bold, design: .rounded))
+                            .foregroundColor(promptColor),
+                        at: CGPoint(x: cx + bodyW * 0.20, y: cy + bodyW * 0.02)
+                    )
                 }
             }
         }
     }
 
-    private func bellColorForState() -> Color {
-        if visualState == .pulsing {
-            let t = sin(time * 2.0) * 0.5 + 0.5
-            return TerrariumColors.lerpColor(TerrariumColors.jellyfishBell, TerrariumColors.jellyfishGlow, t)
+    // MARK: - Tentacles
+
+    private func drawTentacles(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
+        let tentacleAlpha = (visualState == .dormant ? 0.2 : 0.4)
+        let baseY = cy + bodyW * 0.55  // start below cloud
+
+        let positions: [CGFloat] = [-0.25, -0.12, 0.0, 0.12, 0.25]  // X offsets
+
+        for (i, xOff) in positions.enumerated() {
+            let phase = Float(i) * Float.pi / 2.5
+            let wiggle = CGFloat(sin(time * 0.8 + phase) * 3) * bodyW / 120
+
+            let startX = cx + xOff * bodyW + wiggle
+            let endY = baseY + bodyW * CGFloat(0.3 + sin(time * 0.5 + phase) * 0.05)
+
+            let t = Float(i) / Float(positions.count)
+            let color = TerrariumColors.lerpColor(
+                TerrariumColors.jellyfishGlow,
+                TerrariumColors.jellyfishDeep,
+                t
+            )
+
+            var path = SwiftUI.Path()
+            path.move(to: CGPoint(x: startX, y: baseY))
+            path.addQuadCurve(
+                to: CGPoint(x: startX + wiggle * 2, y: endY),
+                control: CGPoint(x: startX + wiggle * 3, y: baseY + (endY - baseY) * 0.6)
+            )
+
+            context.stroke(path,
+                           with: .color(color.opacity(tentacleAlpha)),
+                           style: StrokeStyle(lineWidth: bodyW * 0.018, lineCap: .round))
         }
-        return TerrariumColors.jellyfishBell
     }
 
-    private func tentacleColorForState() -> Color {
-        if visualState == .pulsing {
-            let t = sin(time * 1.5 + 1.0) * 0.5 + 0.5
-            return TerrariumColors.lerpColor(TerrariumColors.jellyfishTentacle, TerrariumColors.jellyfishGlow, t)
-        }
-        return TerrariumColors.jellyfishTentacle
-    }
+    // MARK: - Glow
 
-    // MARK: - Bioluminescent Glow
+    private func drawGlow(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
+        let glowPulse = CGFloat(sin(time * 2.5) * 0.3 + 0.7)
+        let glowR = bodyW * 1.0 * glowPulse
 
-    private func drawGlow(context: inout GraphicsContext, cx: Float, cy: Float, radius: Float) {
-        let glowPulse = sin(time * 2.5) * 0.3 + 0.7
-        let glowRadius = radius * 2.5 * glowPulse
+        let rect = CGRect(x: cx - glowR, y: cy - glowR, width: glowR * 2, height: glowR * 2)
+        context.fill(Path(ellipseIn: rect),
+                     with: .color(TerrariumColors.jellyfishGlow.opacity(0.1 * Double(glowPulse))))
 
-        // Soft radial glow
-        let glowRect = CGRect(x: CGFloat(cx - glowRadius), y: CGFloat(cy - glowRadius),
-                              width: CGFloat(glowRadius * 2), height: CGFloat(glowRadius * 2))
-        context.fill(
-            Path(ellipseIn: glowRect),
-            with: .color(TerrariumColors.jellyfishGlow.opacity(0.08 * Double(glowPulse)))
-        )
-
-        // 4 orbiting glow particles
         for i in 0..<4 {
-            let angle = Float(i) / 4 * Float.pi * 2 + time * 0.5
-            let orbitR = radius * 1.5
+            let angle = CGFloat(Float(i) / 4 * Float.pi * 2 + time * 0.5)
+            let orbitR = bodyW * 0.65
             let px = cx + cos(angle) * orbitR
             let py = cy + sin(angle) * orbitR * 0.6
-            let particleSize = radius * 0.15
-            let rect = CGRect(x: CGFloat(px - particleSize / 2), y: CGFloat(py - particleSize / 2),
-                              width: CGFloat(particleSize), height: CGFloat(particleSize))
-            context.fill(Path(ellipseIn: rect),
-                         with: .color(TerrariumColors.jellyfishGlow.opacity(0.4 * Double(glowPulse))))
+            let pSize = bodyW * 0.03
+            let pRect = CGRect(x: px - pSize, y: py - pSize, width: pSize * 2, height: pSize * 2)
+            context.fill(Path(ellipseIn: pRect),
+                         with: .color(TerrariumColors.jellyfishGlow.opacity(0.3 * Double(glowPulse))))
         }
     }
 
     // MARK: - Speech Bubble
 
-    private func drawSpeechBubble(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyRadius: CGFloat) {
-        let bubbleX = cx + bodyRadius * 1.2
-        let bubbleY = cy
-        let bubbleR = bodyRadius * 0.6
+    private func drawSpeechBubble(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
+        let bx = cx + bodyW * 0.55
+        let by = cy - bodyW * 0.1
+        let br = bodyW * 0.22
         let pulse = CGFloat(sin(time * 2.5)) * 0.08 + 1
-        let r = bubbleR * pulse
+        let r = br * pulse
 
-        let bubbleRect = CGRect(x: bubbleX - r, y: bubbleY - r, width: r * 2, height: r * 2)
-        context.fill(Path(ellipseIn: bubbleRect), with: .color(.white.opacity(0.25)))
-        context.stroke(Path(ellipseIn: bubbleRect),
+        let rect = CGRect(x: bx - r, y: by - r, width: r * 2, height: r * 2)
+        context.fill(Path(ellipseIn: rect), with: .color(.white.opacity(0.25)))
+        context.stroke(Path(ellipseIn: rect),
                        with: .color(TerrariumColors.hudText.opacity(0.5)),
-                       lineWidth: bodyRadius * 0.04)
+                       lineWidth: bodyW * 0.02)
 
-        var tail = Path()
-        tail.move(to: CGPoint(x: bubbleX - r * 0.3, y: bubbleY + r * 0.3))
-        tail.addLine(to: CGPoint(x: cx + bodyRadius * 0.5, y: cy))
-        tail.addLine(to: CGPoint(x: bubbleX - r * 0.05, y: bubbleY + r * 0.5))
+        var tail = SwiftUI.Path()
+        tail.move(to: CGPoint(x: bx - r * 0.3, y: by + r * 0.3))
+        tail.addLine(to: CGPoint(x: cx + bodyW * 0.28, y: cy))
+        tail.addLine(to: CGPoint(x: bx - r * 0.05, y: by + r * 0.5))
         tail.closeSubpath()
         context.fill(tail, with: .color(.white.opacity(0.25)))
 
         context.draw(
             Text("?").font(.system(size: r * 1.2, weight: .bold)).foregroundColor(TerrariumColors.hudText.opacity(0.7)),
-            at: CGPoint(x: bubbleX, y: bubbleY)
+            at: CGPoint(x: bx, y: by)
         )
     }
 
     // MARK: - Name Tag
 
     private func drawNameTag(context: inout GraphicsContext, name: String,
-                             cx: CGFloat, cy: CGFloat, bodyRadius: CGFloat) {
-        let pixelW = bodyRadius * 2 / CGFloat(Self.gridCols)
-        let gridH = CGFloat(Self.gridRows) * pixelW * CGFloat(Self.pixelAspect)
-        let hatY = cy - gridH / 2 - bodyRadius * 0.15
-        let hatWidth = bodyRadius * 1.8
-        let hatHeight = bodyRadius * 0.5
-        let fontSize = bodyRadius * 0.3
-
-        let bgRect = CGRect(x: cx - hatWidth / 2, y: hatY - hatHeight,
-                            width: hatWidth, height: hatHeight)
-        context.fill(Path(roundedRect: bgRect, cornerRadius: 4),
-                     with: .color(TerrariumColors.jellyfishNameBg))
+                             cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
+        let tagY = cy - bodyW * 0.55
+        // Match octopus font size: bodyRadius(0.055w) * 0.3 — use absolute reference
+        let fontSize = bodyW * 0.22
+        let padding = bodyW * 0.12
 
         let text = Text(name)
             .font(.system(size: fontSize, weight: .medium, design: .default))
             .foregroundColor(TerrariumColors.hudText.opacity(0.86))
-        context.draw(text, at: CGPoint(x: cx, y: hatY - hatHeight / 2))
+        let resolved = context.resolve(text)
+        let textSize = resolved.measure(in: CGSize(width: 500, height: 100))
+        let tagW = max(bodyW * 0.9, textSize.width + padding * 2)
+        let tagH = max(bodyW * 0.22, textSize.height + padding * 0.6)
+
+        let bgRect = CGRect(x: cx - tagW / 2, y: tagY - tagH, width: tagW, height: tagH)
+        context.fill(Path(roundedRect: bgRect, cornerRadius: 4),
+                     with: .color(TerrariumColors.jellyfishNameBg))
+
+        context.draw(resolved, at: CGPoint(x: cx, y: tagY - tagH / 2))
     }
 }

@@ -11,11 +11,12 @@
 import {
   cursor, screen as screenCodes, RESET, BOLD, DIM,
   colors, box, hLine, sgr, stateColor, stateIcon,
-  truncText, padRight, visLen,
+  truncText, padRight, visLen, terminalCaps, centerText,
+  fg,
 } from './ansi.js';
 import { blockGauge, resetTimeStr, formatUptime, formatTokens } from './gauge.js';
 import type { DashboardState, LayoutMode } from './dashboard.js';
-import type { TimelineEntry, TimelineEntryType } from '@agentdeck/shared';
+import type { ModelCatalogEntry, OllamaStatus, TimelineEntry, TimelineEntryType } from '@agentdeck/shared';
 
 // ===== Layout Breakpoints =====
 
@@ -74,13 +75,28 @@ function renderPixelFont(word: string): string[] {
   return result;
 }
 
-// Pre-render logo lines
-const LOGO_AGENT = renderPixelFont('AGENT'); // 3 lines, 24 chars each (5*4 + 4 spaces)
-const LOGO_DECK = renderPixelFont('DECK');   // 3 lines, 19 chars each (4*4 + 3 spaces)
+// Pre-render logo lines — "AGENT" + "DECK" stacked, sky blue
+const LOGO_AGENT = renderPixelFont('AGENT'); // 3 lines, 24 chars wide
+const LOGO_DECK = renderPixelFont('DECK');   // 3 lines, 19 chars wide
 
 // ===== Timeline Icons =====
 
 function typeIcon(type: TimelineEntryType): string {
+  if (!terminalCaps.unicode) {
+    switch (type) {
+      case 'chat_start': return '>';
+      case 'chat_end': return '=';
+      case 'chat_response': return ':';
+      case 'tool_request': case 'tool_exec': return '*';
+      case 'tool_resolved': return '+';
+      case 'error': return 'x';
+      case 'model_call': case 'model_response': return 'm';
+      case 'memory_recall': return 'r';
+      case 'scheduled': return 's';
+      case 'user_action': return 'u';
+      default: return '*';
+    }
+  }
   switch (type) {
     case 'chat_start': case 'user_action': return '\u25B6';
     case 'chat_end': return '\u25A0';
@@ -113,12 +129,76 @@ export function spinner(frame: number): string {
   return SPINNER_FRAMES[Math.floor(frame / 2) % SPINNER_FRAMES.length];
 }
 
-// ===== Creature Emoji Helper =====
+// ===== Creature Icon Helper =====
 
 function creatureEmoji(agentType?: string): string {
-  if ((agentType as string) === 'daemon') return '\u2699\uFE0F';
-  if ((agentType as string) === 'openclaw') return '\uD83E\uDD9E';
-  return '\uD83D\uDC19';
+  if (!terminalCaps.emoji) {
+    if ((agentType as string) === 'daemon') return 'D';
+    if ((agentType as string) === 'openclaw') return 'C';
+    if ((agentType as string) === 'codex-cli') return 'X';
+    return '*';
+  }
+  if ((agentType as string) === 'daemon') return '\u2699\uFE0F';      // ⚙️
+  if ((agentType as string) === 'openclaw') return '\uD83E\uDD9E';    // 🦞
+  if ((agentType as string) === 'codex-cli') return '\u276F';          // ❯ (terminal prompt)
+  return '\u273B';  // ✻ (teardrop-spoked asterisk — Claude sparkle)
+}
+
+function creatureBrandColor(agentType?: string): string {
+  if (!terminalCaps.trueColor) return '';
+  switch (agentType as string) {
+    case 'claude-code': return fg(192, 112, 88);    // terracotta
+    case 'openclaw': return fg(255, 77, 77);         // red
+    case 'codex-cli': return fg(177, 167, 255);      // indigo
+    default: return '';
+  }
+}
+
+function compactStateLabel(state: string): string {
+  switch (state) {
+    case 'processing': return 'PROC';
+    case 'awaiting_permission': return 'PERM';
+    case 'awaiting_option': return 'OPT';
+    case 'awaiting_diff': return 'DIFF';
+    case 'disconnected': return 'DISC';
+    case 'idle':
+    default:
+      return 'IDLE';
+  }
+}
+
+function currentSessionSummary(state: DashboardState, width: number): string {
+  const parts: string[] = [];
+  if (state.projectName) parts.push(state.projectName);
+  if (state.modelName) parts.push(state.modelName);
+  if (state.state) parts.push(compactStateLabel(state.state));
+  if (parts.length === 0) return 'No session';
+  return truncText(parts.join(' · '), width);
+}
+
+function stateRank(state: string | undefined): number {
+  switch (state) {
+    case 'processing': return 0;
+    case 'awaiting_permission':
+    case 'awaiting_option':
+    case 'awaiting_diff': return 1;
+    case 'idle': return 2;
+    case 'disconnected': return 3;
+    default: return 4;
+  }
+}
+
+function sortSessions<T extends { state?: string; projectName?: string }>(sessions: T[]): T[] {
+  return [...sessions].sort((a, b) => {
+    const rank = stateRank(a.state) - stateRank(b.state);
+    if (rank !== 0) return rank;
+    return (a.projectName || '').localeCompare(b.projectName || '');
+  });
+}
+
+function sessionHotkeyLabel(index: number | null): string {
+  if (index === null || index > 8) return '·';
+  return String(index + 1);
 }
 
 // ===== Panel Renderers =====
@@ -126,25 +206,26 @@ function creatureEmoji(agentType?: string): string {
 function renderAgentLines(state: DashboardState, maxWidth: number, useLogo: boolean): string[] {
   const lines: string[] = [];
 
-  // Big pixel-font logo (3 rows AGENT + 3 rows DECK) when wide enough
+  // Big pixel-font logo (AGENT + DECK stacked, sky blue)
+  const logoColor = terminalCaps.trueColor ? fg(100, 180, 255) : colors.header; // sky blue
   if (useLogo && maxWidth >= 24) {
-    for (const l of LOGO_AGENT) lines.push(`${colors.header}${l}${RESET}`);
-    lines.push('');
-    for (const l of LOGO_DECK) lines.push(`${colors.header} ${l}${RESET}`); // indent DECK
+    for (const l of LOGO_AGENT) lines.push(`${logoColor}${l}${RESET}`);
+    for (const l of LOGO_DECK) lines.push(`${logoColor} ${l}${RESET}`);
   } else if (useLogo && maxWidth >= 10) {
-    lines.push(`${colors.header} AgentDeck${RESET}`);
+    lines.push(`${logoColor} AgentDeck${RESET}`);
   }
   lines.push('');
 
   // Session list
   const renderSession = (
-    proj: string, model: string | undefined, sessState: string, agentType?: string,
+    proj: string, model: string | undefined, sessState: string, agentType: string | undefined, hotkeyIndex: number | null,
   ) => {
     const icon = stateIcon(sessState);
     const col = stateColor(sessState);
-    const name = truncText(proj, maxWidth - 12);
-    const emoji = creatureEmoji(agentType);
-    lines.push(` ${emoji} ${col}${name}${RESET}`);
+    const hotkey = `${colors.dim}[${sessionHotkeyLabel(hotkeyIndex)}]${RESET}`;
+    const name = truncText(proj, maxWidth - 16);
+    const emoji = `${creatureBrandColor(agentType)}${creatureEmoji(agentType)}${RESET}`;
+    lines.push(` ${hotkey} ${emoji} ${col}${name}${RESET}`);
     if (model) lines.push(`${colors.dim}    ${model}${RESET}`);
     lines.push(`    ${col}${icon} ${sessState.toUpperCase().replace(/_/g, ' ')}${RESET}`);
   };
@@ -155,18 +236,18 @@ function renderAgentLines(state: DashboardState, maxWidth: number, useLogo: bool
   const isDaemonLike = state.agentType === 'daemon' ||
     (state.agentType && state.sessions.some(s => s.agentType === state.agentType));
   if (isDaemonLike) {
-    for (const sess of state.sessions) {
-      renderSession(sess.projectName || 'unknown', undefined,
-        sess.state || 'idle', sess.agentType as string | undefined);
+    for (const [index, sess] of sortSessions(state.sessions).entries()) {
+      renderSession(sess.projectName || 'unknown', sess.modelName,
+        sess.state || 'idle', sess.agentType as string | undefined, index);
     }
   } else if (state.state) {
     // Self (primary session)
     renderSession(state.projectName || 'unknown', state.modelName ?? undefined,
-      state.state, state.agentType ?? undefined);
+      state.state, state.agentType ?? undefined, null);
     // Siblings (other sessions)
-    for (const sess of state.sessions) {
+    for (const [index, sess] of sortSessions(state.sessions).entries()) {
       renderSession(sess.projectName || 'unknown', undefined,
-        sess.state || 'idle', sess.agentType as string | undefined);
+        sess.state || 'idle', sess.agentType as string | undefined, index);
     }
   }
 
@@ -175,7 +256,7 @@ function renderAgentLines(state: DashboardState, maxWidth: number, useLogo: bool
     s.agentType === 'openclaw' || (s.agentType as string) === 'gateway'
   );
   if (state.gatewayAvailable && !hasOcSession) {
-    renderSession('OpenClaw', undefined, state.crayfishRouting ? 'processing' : 'idle', 'openclaw');
+    renderSession('OpenClaw', undefined, state.crayfishRouting ? 'processing' : 'idle', 'openclaw', null);
   }
 
   // Gateway error warning
@@ -244,17 +325,10 @@ function renderStatusModelsLines(state: DashboardState, width: number): string[]
   const u = state.usage;
   if (state.modelName) {
     const dot = u?.oauthConnected ? `${colors.idle}\u25CF${RESET}` : `${colors.dim}\u25CB${RESET}`;
-    lines.push(` ${dot} ${state.modelName}`);
+    lines.push(` ${dot} ${truncText(state.modelName, width - 4)}`);
   }
-  if (u?.ollamaStatus?.available && u.ollamaStatus.models.length > 0) {
-    lines.push(`${colors.dim} Ollama:${RESET}`);
-    for (const m of u.ollamaStatus.models.slice(0, 3)) {
-      const size = m.size > 0 ? ` ${(m.size / 1e9).toFixed(1)}G` : '';
-      lines.push(`${colors.dim}  ${truncText(m.name, width - 8)}${size}${RESET}`);
-    }
-  } else if (u?.ollamaStatus) {
-    lines.push(`${colors.dim} Ollama: stopped${RESET}`);
-  }
+  lines.push(...renderOauthCatalogLines(state.modelCatalog, u?.oauthConnected, width));
+  lines.push(...renderOllamaSummaryLines(u?.ollamaStatus, width));
   return lines;
 }
 
@@ -274,7 +348,69 @@ function renderStatusLines(state: DashboardState, width: number): string[] {
   }
   if (state.currentTool) lines.push(` ${colors.tool}Tool: ${truncText(state.currentTool, width - 8)}${RESET}`);
   if (state.modelName) lines.push(`${colors.dim} Model: ${state.modelName}${RESET}`);
+  lines.push(...renderOauthCatalogLines(state.modelCatalog, u?.oauthConnected, width));
+  const ollamaLines = renderOllamaSummaryLines(u?.ollamaStatus, width);
+  lines.push(...ollamaLines);
   return lines;
+}
+
+function renderOauthCatalogLines(
+  modelCatalog: ModelCatalogEntry[], oauthConnected: boolean | undefined,
+  width: number,
+): string[] {
+  const lines: string[] = [];
+  const models = modelCatalog.filter((m) => m.available).map((m) => m.name);
+
+  if (models.length > 0) {
+    return wrapCommaList(' OAuth: ', models, width);
+  }
+  if (oauthConnected === true) {
+    lines.push(`${colors.dim}${truncText(' OAuth: connected', width)}${RESET}`);
+  } else if (oauthConnected === false) {
+    lines.push(`${colors.dim}${truncText(' OAuth: disconnected', width)}${RESET}`);
+  }
+  return lines;
+}
+
+function wrapCommaList(prefix: string, items: string[], width: number): string[] {
+  const lines: string[] = [];
+  const indent = ' '.repeat(prefix.length);
+  let current = prefix;
+
+  for (let i = 0; i < items.length; i++) {
+    const chunk = i === 0 ? items[i] : `, ${items[i]}`;
+    if (visLen(current) + visLen(chunk) <= width) {
+      current += chunk;
+      continue;
+    }
+
+    if (visLen(current) > visLen(prefix)) {
+      lines.push(`${colors.dim}${padRight(current, width)}${RESET}`.trimEnd());
+      current = indent + items[i];
+      continue;
+    }
+
+    lines.push(`${colors.dim}${truncText(current + chunk, width)}${RESET}`);
+    current = indent;
+  }
+
+  if (visLen(current.trim()) > 0) {
+    lines.push(`${colors.dim}${truncText(current, width)}${RESET}`);
+  }
+  return lines;
+}
+
+function renderOllamaSummaryLines(ollamaStatus: OllamaStatus | undefined, width: number): string[] {
+  if (!ollamaStatus) return [];
+  if (!ollamaStatus.available || ollamaStatus.models.length === 0) {
+    return [`${colors.dim}${truncText(' Ollama: stopped', width)}${RESET}`];
+  }
+
+  return ollamaStatus.models.map((m) => {
+    const size = m.sizeVram > 0 ? m.sizeVram : m.size;
+    const sizeText = size > 0 ? ` ${(size / 1e9).toFixed(1)}G` : '';
+    return `${colors.dim}${truncText(` Ollama: ${m.name}${sizeText}`, width)}${RESET}`;
+  });
 }
 
 function renderTimelineLines(
@@ -299,10 +435,59 @@ function renderTimelineLines(
   return lines;
 }
 
+function timelineHeader(state: DashboardState, width: number, maxLines: number, scrollOffset: number): string {
+  const total = state.timeline.length;
+  if (total === 0) return `${colors.header} TIMELINE${RESET}`;
+  const shown = Math.min(total, maxLines);
+  const offset = scrollOffset > 0 ? ` · -${scrollOffset}` : '';
+  return truncText(`${colors.header} TIMELINE${RESET}${colors.dim} ${shown}/${total}${offset}${RESET}`, width);
+}
+
+function renderHelpOverlay(state: DashboardState, cols: number, rows: number): string {
+  const boxW = Math.min(cols - 4, 78);
+  const boxH = Math.min(rows - 4, 18);
+  const left = Math.max(1, Math.floor((cols - boxW) / 2));
+  const top = Math.max(1, Math.floor((rows - boxH) / 2));
+  const lines = [
+    `${colors.header}AgentDeck TUI Help${RESET}`,
+    '',
+    `${colors.bold}Navigation${RESET}`,
+    ' q        quit dashboard',
+    ' ? / h    toggle help',
+    ' ↑ ↓      scroll timeline',
+    ' j / k    vim-style timeline scroll',
+    ' 1-9      connect to listed session',
+    ' Esc      close help',
+    '',
+    `${colors.bold}Reading The UI${RESET}`,
+    ' Header   current project, model, and state',
+    ' Sessions busiest first, numbered for switching',
+    ' STATUS   limits, models, OAuth, Ollama',
+    ' TIMELINE shown/total and scroll offset',
+    '',
+    `${colors.bold}Terminal${RESET}`,
+    ` Unicode: ${terminalCaps.unicode ? 'on' : 'fallback'}  Color: ${terminalCaps.trueColor ? 'truecolor' : '16-color'}  Emoji: ${terminalCaps.emoji ? 'on' : 'fallback'}`,
+  ];
+
+  let output = cursor.moveTo(1, 1) + screenCodes.clear;
+  output += cursor.moveTo(top, left) + `${colors.border}${box.tl}${hLine(boxW - 2)}${box.tr}${RESET}`;
+  for (let i = 0; i < boxH - 2; i++) {
+    const content = lines[i] ?? '';
+    output += cursor.moveTo(top + 1 + i, left) +
+      `${colors.border}${box.v}${RESET}` +
+      padRight(i === 0 ? centerText(content, boxW - 2) : content, boxW - 2) +
+      `${colors.border}${box.v}${RESET}`;
+  }
+  output += cursor.moveTo(top + boxH - 1, left) + `${colors.border}${box.bl}${hLine(boxW - 2)}${box.br}${RESET}`;
+  output += cursor.moveTo(Math.min(rows, top + boxH), left) +
+    `${colors.dim}Press ? or Esc to return${RESET}`;
+  return output;
+}
+
 // ===== Output Helper =====
 
 /** Write buf lines to screen. Last row reserved for q quit hint. */
-function flushBuf(buf: string[], cols: number, rows: number): string {
+function flushBuf(buf: string[], cols: number, rows: number, footerHint: string): string {
   const maxBoxRows = rows - 1;
   let output = cursor.moveTo(1, 1);
   const limit = Math.min(buf.length, maxBoxRows);
@@ -314,7 +499,7 @@ function flushBuf(buf: string[], cols: number, rows: number): string {
   }
   // q quit on last row
   output += cursor.moveTo(rows, 1) + screenCodes.clearLine +
-    ` ${colors.dimCyan}q quit${RESET}`;
+    ` ${colors.dimCyan}${truncText(footerHint, cols - 2)}${RESET}`;
   return output;
 }
 
@@ -324,6 +509,9 @@ export function renderDashboard(
   state: DashboardState, cols: number, rows: number,
   terrariumLines: string[], frame: number, scrollOffset: number,
 ): string {
+  if (state.helpVisible) {
+    return renderHelpOverlay(state, cols, rows);
+  }
   const layout = getLayout(cols, rows);
   if (cols < 40 || rows < 10) {
     return cursor.moveTo(1, 1) + screenCodes.clear +
@@ -335,10 +523,13 @@ export function renderDashboard(
   const staleTag = state.isStale ? ` ${colors.error}[STALE]${RESET}` : '';
   const spinnerStr = state.state === 'processing'
     ? ` ${colors.processing}${spinner(frame)}${RESET}` : '';
+  const footerHint = state.sessions.length > 0
+    ? 'q quit  ↑↓/j k scroll  1-9 switch session'
+    : 'q quit  ↑↓/j k scroll';
 
-  if (layout === 'wide') return renderWideLayout(state, cols, rows, terrariumLines, frame, scrollOffset, connIcon, staleTag, spinnerStr);
-  if (layout === 'standard') return renderStandardLayout(state, cols, rows, terrariumLines, frame, scrollOffset, connIcon, staleTag, spinnerStr);
-  return renderNarrowLayout(state, cols, rows, frame, scrollOffset, connIcon, staleTag, spinnerStr);
+  if (layout === 'wide') return renderWideLayout(state, cols, rows, terrariumLines, frame, scrollOffset, connIcon, staleTag, spinnerStr, footerHint);
+  if (layout === 'standard') return renderStandardLayout(state, cols, rows, terrariumLines, frame, scrollOffset, connIcon, staleTag, spinnerStr, footerHint);
+  return renderNarrowLayout(state, cols, rows, frame, scrollOffset, connIcon, staleTag, spinnerStr, footerHint);
 }
 
 // ===== Wide Layout =====
@@ -346,15 +537,16 @@ export function renderDashboard(
 function renderWideLayout(
   state: DashboardState, cols: number, rows: number,
   terrariumLines: string[], frame: number, scrollOffset: number,
-  connIcon: string, staleTag: string, spinnerStr: string,
+  connIcon: string, staleTag: string, spinnerStr: string, footerHint: string,
 ): string {
   const leftW = Math.max(20, Math.floor(cols * 0.22));
   const rightW = cols - leftW - 3;
   const buf: string[] = [];
+  const summary = currentSessionSummary(state, Math.max(16, rightW - 16));
 
   // Top border
-  const topLeft = `${colors.border}${box.tl}${box.h} AGENTS ${RESET}`;
-  const topMid = `${colors.border}${box.tee}${box.h} TERRARIUM ${RESET}${connIcon}${RESET}${spinnerStr}${staleTag} `;
+  const topLeft = `${colors.border}${box.tl}${RESET}`;
+  const topMid = `${colors.border}${box.tee}${box.h} ${summary} ${RESET}${connIcon}${RESET}${spinnerStr}${staleTag} `;
   const topRight = `${colors.border}${box.tr}${RESET}`;
   const leftFillLen = Math.max(0, leftW + 1 - visLen(topLeft));
   const rightFillLen = Math.max(0, rightW + 2 - visLen(topMid) - visLen(topRight));
@@ -400,7 +592,7 @@ function renderWideLayout(
       rightContent = `${colors.border}${hLine(rightW)}${RESET}`;
     } else {
       const ti = r - tH - statusH - 2;
-      if (ti === 0) rightContent = `${colors.header} TIMELINE${RESET}`;
+      if (ti === 0) rightContent = timelineHeader(state, rightW, timelineH - 1, scrollOffset);
       else rightContent = ti - 1 < tlLines.length ? tlLines[ti - 1] : '';
     }
 
@@ -412,7 +604,7 @@ function renderWideLayout(
   }
 
   buf.push(`${colors.border}${box.bl}${hLine(leftW)}${box.bTee}${hLine(rightW)}${box.br}${RESET}`);
-  return flushBuf(buf, cols, rows);
+  return flushBuf(buf, cols, rows, footerHint);
 }
 
 // ===== Standard Layout =====
@@ -420,13 +612,14 @@ function renderWideLayout(
 function renderStandardLayout(
   state: DashboardState, cols: number, rows: number,
   terrariumLines: string[], frame: number, scrollOffset: number,
-  connIcon: string, staleTag: string, spinnerStr: string,
+  connIcon: string, staleTag: string, spinnerStr: string, footerHint: string,
 ): string {
   const w = cols - 2;
   const buf: string[] = [];
+  const summary = currentSessionSummary(state, Math.max(16, w - 18));
 
   buf.push(borderFill(
-    `${colors.border}${box.tl}${box.h} TERRARIUM ${RESET}${connIcon}${RESET}${spinnerStr}${staleTag} `,
+    `${colors.border}${box.tl}${box.h} ${summary} ${RESET}${connIcon}${RESET}${spinnerStr}${staleTag} `,
     `${colors.border}${box.tr}${RESET}`, cols));
 
   for (const tl of terrariumLines) {
@@ -437,7 +630,7 @@ function renderStandardLayout(
   const rightHalf = w - leftHalf - 1;
 
   const splitPrefix = `${colors.border}${box.lTee}${box.h} STATUS ${RESET}`;
-  const splitMid = `${colors.border}${box.tee}${box.h} AGENTS ${RESET}`;
+  const splitMid = `${colors.border}${box.tee}${RESET}`;
   const splitSuffix = `${colors.border}${box.rTee}${RESET}`;
   buf.push(
     splitPrefix + `${colors.border}${hLine(Math.max(0, leftHalf + 1 - visLen(splitPrefix)))}${RESET}` +
@@ -457,19 +650,19 @@ function renderStandardLayout(
   }
 
   buf.push(`${colors.border}${box.lTee}${hLine(leftHalf)}${box.bTee}${hLine(rightHalf)}${box.rTee}${RESET}`);
+  const tlAvailable = Math.max(2, rows - buf.length - 2);
   buf.push(
-    `${colors.border}${box.v}${RESET}${colors.header} TIMELINE${RESET}` +
-    `${' '.repeat(Math.max(0, w - 9))}${colors.border}${box.v}${RESET}`
+    `${colors.border}${box.v}${RESET}${padRight(timelineHeader(state, w, tlAvailable, scrollOffset), w)}` +
+    `${colors.border}${box.v}${RESET}`
   );
 
-  const tlAvailable = Math.max(2, rows - buf.length - 1);
   const tlLines = renderTimelineLines(state, w - 1, tlAvailable, scrollOffset);
   for (const tl of tlLines) {
     buf.push(`${colors.border}${box.v}${RESET}${padRight(tl, w)}${colors.border}${box.v}${RESET}`);
   }
 
   buf.push(`${colors.border}${box.bl}${hLine(w)}${box.br}${RESET}`);
-  return flushBuf(buf, cols, rows);
+  return flushBuf(buf, cols, rows, footerHint);
 }
 
 function renderAgentCompactLines(state: DashboardState, width: number): string[] {
@@ -477,25 +670,32 @@ function renderAgentCompactLines(state: DashboardState, width: number): string[]
   const isDaemonLikeCompact = state.agentType === 'daemon' ||
     (state.agentType && state.sessions.some(s => s.agentType === state.agentType));
   if (isDaemonLikeCompact) {
-    for (const s of state.sessions) {
+    for (const [index, s] of sortSessions(state.sessions).entries()) {
       const st = s.state || 'idle';
       const col = stateColor(st);
-      const emoji = creatureEmoji(s.agentType as string | undefined);
-      lines.push(` ${emoji} ${truncText(s.projectName || '?', width - 18)} ${col}${stateIcon(st)}${st.toUpperCase().replace(/_/g, ' ').slice(0, 8)}${RESET}`);
+      const emoji = `${creatureBrandColor(s.agentType as string | undefined)}${creatureEmoji(s.agentType as string | undefined)}${RESET}`;
+      const status = `${col}${stateIcon(st)} ${compactStateLabel(st)}${RESET}`;
+      const model = s.modelName ? `${colors.dim} · ${truncText(s.modelName, Math.max(8, width - 24))}${RESET}` : '';
+      const project = truncText(s.projectName || '?', Math.max(8, width - 20));
+      lines.push(` ${colors.dim}[${sessionHotkeyLabel(index)}]${RESET} ${emoji} ${project} ${status}${model}`);
     }
   } else if (state.state) {
     // Self first
     const col = stateColor(state.state);
-    const proj = truncText(state.projectName || '?', width - 20);
-    const model = state.modelName ? ` \u00B7 ${state.modelName}` : '';
-    const emoji = creatureEmoji(state.agentType ?? undefined);
-    lines.push(` ${emoji} ${proj}${colors.dim}${model}${RESET} ${col}${stateIcon(state.state)}${state.state.toUpperCase().replace(/_/g, ' ')}${RESET}`);
+    const proj = truncText(state.projectName || '?', Math.max(8, width - 16));
+    const status = `${col}${stateIcon(state.state)} ${compactStateLabel(state.state)}${RESET}`;
+    const model = state.modelName ? `${colors.dim} · ${truncText(state.modelName, Math.max(8, width - 24))}${RESET}` : '';
+    const emoji = `${creatureBrandColor(state.agentType ?? undefined)}${creatureEmoji(state.agentType ?? undefined)}${RESET}`;
+    lines.push(` ${emoji} ${proj} ${status}${model}`);
     // Siblings
-    for (const s of state.sessions) {
+    for (const [index, s] of sortSessions(state.sessions).entries()) {
       const st = s.state || 'idle';
       const sCol = stateColor(st);
-      const sEmoji = creatureEmoji(s.agentType as string | undefined);
-      lines.push(` ${sEmoji} ${truncText(s.projectName || '?', width - 18)} ${sCol}${stateIcon(st)}${st.toUpperCase().replace(/_/g, ' ').slice(0, 8)}${RESET}`);
+      const sEmoji = `${creatureBrandColor(s.agentType as string | undefined)}${creatureEmoji(s.agentType as string | undefined)}${RESET}`;
+      const sStatus = `${sCol}${stateIcon(st)} ${compactStateLabel(st)}${RESET}`;
+      const sModel = s.modelName ? `${colors.dim} · ${truncText(s.modelName, Math.max(8, width - 24))}${RESET}` : '';
+      const sProject = truncText(s.projectName || '?', Math.max(8, width - 20));
+      lines.push(` ${colors.dim}[${sessionHotkeyLabel(index)}]${RESET} ${sEmoji} ${sProject} ${sStatus}${sModel}`);
     }
   }
   // Virtual OpenClaw entry
@@ -505,7 +705,7 @@ function renderAgentCompactLines(state: DashboardState, width: number): string[]
   if (state.gatewayAvailable && !hasOcCompact) {
     const ocState = state.crayfishRouting ? 'processing' : 'idle';
     const ocCol = stateColor(ocState);
-    const ocEmoji = creatureEmoji('openclaw');
+    const ocEmoji = `${creatureBrandColor('openclaw')}${creatureEmoji('openclaw')}${RESET}`;
     lines.push(` ${ocEmoji} OpenClaw ${ocCol}${stateIcon(ocState)}${ocState.toUpperCase()}${RESET}`);
   }
   // Gateway error warning
@@ -539,13 +739,14 @@ function renderAgentCompactLines(state: DashboardState, width: number): string[]
 function renderNarrowLayout(
   state: DashboardState, cols: number, rows: number,
   frame: number, scrollOffset: number,
-  connIcon: string, staleTag: string, spinnerStr: string,
+  connIcon: string, staleTag: string, spinnerStr: string, footerHint: string,
 ): string {
   const w = cols - 2;
   const buf: string[] = [];
+  const summary = currentSessionSummary(state, Math.max(12, w - 18));
 
   buf.push(borderFill(
-    `${colors.border}${box.tl}${box.h} AgentDeck ${RESET}${connIcon}${RESET}${spinnerStr}${staleTag} `,
+    `${colors.border}${box.tl}${box.h} ${summary} ${RESET}${connIcon}${RESET}${spinnerStr}${staleTag} `,
     `${colors.border}${box.tr}${RESET}`, cols));
 
   for (const al of renderAgentCompactLines(state, w - 1)) {
@@ -558,14 +759,14 @@ function renderNarrowLayout(
     buf.push(`${colors.border}${box.v}${RESET}${padRight(sl, w)}${colors.border}${box.v}${RESET}`);
   }
 
+  const tlAvailable = Math.max(2, rows - buf.length - 2);
   buf.push(`${colors.border}${box.lTee}${hLine(w)}${box.rTee}${RESET}`);
-
-  const tlAvailable = Math.max(2, rows - buf.length - 1);
+  buf.push(`${colors.border}${box.v}${RESET}${padRight(timelineHeader(state, w, tlAvailable, scrollOffset), w)}${colors.border}${box.v}${RESET}`);
   const tlLines = renderTimelineLines(state, w - 1, tlAvailable, scrollOffset);
   for (const tl of tlLines) {
     buf.push(`${colors.border}${box.v}${RESET}${padRight(tl, w)}${colors.border}${box.v}${RESET}`);
   }
 
   buf.push(`${colors.border}${box.bl}${hLine(w)}${box.br}${RESET}`);
-  return flushBuf(buf, cols, rows);
+  return flushBuf(buf, cols, rows, footerHint);
 }

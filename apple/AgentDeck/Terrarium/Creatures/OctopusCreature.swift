@@ -58,7 +58,7 @@ final class OctopusCreature: Creature {
         self.homeY = homeY
         self.scale = scale
         self.currentX = homeX
-        self.currentY = TerrariumLayout.standingY
+        self.currentY = homeY
         self.targetX = homeX
         self.targetY = homeY
         self.phaseOffset = Float.random(in: 0...Float.pi * 2)
@@ -350,10 +350,17 @@ final class OctopusCreature: Creature {
         let pixelW = bodyRadius * 2 / CGFloat(Self.gridCols)
         let gridH = CGFloat(Self.gridRows) * pixelW * CGFloat(Self.pixelAspect)
         let hatY = cy - gridH / 2 - bodyRadius * 0.15
-        let hatWidth = bodyRadius * 1.8
-        let hatHeight = bodyRadius * 0.5
-
         let fontSize = bodyRadius * 0.3
+        let padding: CGFloat = bodyRadius * 0.2
+
+        // Measure text width to size background dynamically
+        let text = Text(name)
+            .font(.system(size: fontSize, weight: .medium, design: .default))
+            .foregroundColor(TerrariumColors.hudText.opacity(0.86))
+        let resolved = context.resolve(text)
+        let textSize = resolved.measure(in: CGSize(width: 500, height: 100))
+        let hatWidth = max(bodyRadius * 1.8, textSize.width + padding * 2)
+        let hatHeight = max(bodyRadius * 0.5, textSize.height + padding * 0.6)
 
         // Background pill
         let bgRect = CGRect(x: cx - hatWidth / 2, y: hatY - hatHeight,
@@ -362,10 +369,7 @@ final class OctopusCreature: Creature {
                      with: .color(TerrariumColors.claudeNameBg))
 
         // Name text
-        let text = Text(name)
-            .font(.system(size: fontSize, weight: .medium, design: .default))
-            .foregroundColor(TerrariumColors.hudText.opacity(0.86))
-        context.draw(text, at: CGPoint(x: cx, y: hatY - hatHeight / 2))
+        context.draw(resolved, at: CGPoint(x: cx, y: hatY - hatHeight / 2))
     }
 }
 

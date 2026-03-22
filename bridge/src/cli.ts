@@ -96,8 +96,6 @@ program
   .option('--local', 'Disable all device modules (WS only)')
   // --no-mdns removed: session bridges never advertise mDNS (daemon only)
   .option('--no-adb', 'Disable ADB reverse setup')
-  .option('--no-serial', 'Disable ESP32 serial')
-  .option('--no-pixoo', 'Disable Pixoo LED matrix')
   .option('--no-postit', 'Disable terminal tab title updates')
   .option('--wake-word', 'Enable wake word voice assistant ("오픈클로")')
   .action(async (opts) => {
@@ -111,10 +109,10 @@ program
       postit: opts.postit !== false,
       wakeWord: !!opts.wakeWord,
       modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false } : {
-        mdns: false, // mDNS handled by daemon only — session bridges never advertise
+        mdns: false,   // daemon-only — session bridges never advertise mDNS
         adb: opts.adb !== false ? 'auto' : false,
-        serial: opts.serial !== false ? 'auto' : false,
-        pixoo: opts.pixoo !== false ? 'auto' : false,
+        serial: false, // daemon-only — session bridges never talk to ESP32
+        pixoo: false,  // daemon-only — session bridges never talk to Pixoo
       },
     });
   });
@@ -127,8 +125,6 @@ program
   .option('-d, --debug', 'Enable debug logging')
   .option('--local', 'Disable all device modules (WS only)')
   .option('--no-adb', 'Disable ADB reverse setup')
-  .option('--no-serial', 'Disable ESP32 serial')
-  .option('--no-pixoo', 'Disable Pixoo LED matrix')
   .option('--no-postit', 'Disable terminal tab title updates')
   .action(async (opts) => {
     const { startSession } = await import('./index.js');
@@ -139,10 +135,10 @@ program
       debug: opts.debug,
       postit: opts.postit !== false,
       modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false } : {
-        mdns: false,
+        mdns: false,   // daemon-only
         adb: opts.adb !== false ? 'auto' : false,
-        serial: opts.serial !== false ? 'auto' : false,
-        pixoo: opts.pixoo !== false ? 'auto' : false,
+        serial: false, // daemon-only
+        pixoo: false,  // daemon-only
       },
     });
   });

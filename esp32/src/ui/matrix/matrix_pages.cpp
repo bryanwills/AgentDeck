@@ -4,11 +4,14 @@
 #include "config.h"
 #include "state/agent_state.h"
 #include "../../../boards/board_config.h"
+#include "net/wifi_manager.h"
+#include <WiFi.h>
 #include <cmath>
 
 extern DashboardState g_state;
 
-// Serpentine XY → LED index
+// ===== Helpers =====
+
 static inline int xyToIdx(int x, int y) {
     if (x < 0 || x >= MATRIX_W || y < 0 || y >= MATRIX_H) return -1;
     return (y % 2 == 0) ? (y * MATRIX_W + x) : (y * MATRIX_W + (MATRIX_W - 1 - x));
@@ -19,239 +22,330 @@ static inline void setPixel(CRGB* leds, int x, int y, CRGB color) {
     if (idx >= 0) leds[idx] = color;
 }
 
-// Map timeline entry type string to color
-static CRGB typeColor(const char* type) {
-    if (strstr(type, "chat_start"))    return CRGB(0, 60, 0);    // green
-    if (strstr(type, "tool"))          return CRGB(0, 0, 60);    // blue
-    if (strstr(type, "chat_end"))      return CRGB(60, 40, 0);   // amber
-    if (strstr(type, "error"))         return CRGB(60, 0, 0);    // red
-    if (strstr(type, "model"))         return CRGB(0, 40, 40);   // cyan
-    if (strstr(type, "memory"))        return CRGB(40, 0, 40);   // purple
-    return CRGB(20, 20, 20);
+// Battery-style gauge (no label, wider)
+static void drawBatteryGauge(CRGB* leds, int x0, int y0, int w, int h, float percent) {
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    float remaining = 100.0f - percent;
+
+    CRGB border = CRGB(60, 60, 60);
+    // Outline
+    for (int x = x0; x < x0 + w; x++) {
+        setPixel(leds, x, y0, border);
+        setPixel(leds, x, y0 + h - 1, border);
+    }
+    for (int y = y0; y < y0 + h; y++) {
+        setPixel(leds, x0, y, border);
+        setPixel(leds, x0 + w - 1, y, border);
+    }
+    // Battery nub
+    for (int y = y0 + 1; y < y0 + h - 1; y++) {
+        setPixel(leds, x0 + w, y, CRGB(40, 40, 40));
+    }
+
+    // Fill (remaining = filled, used = empty)
+    int innerW = w - 2;
+    int fillPx = (int)(remaining / 100.0f * innerW);
+
+    CRGB fillColor;
+    if (remaining > 40)      fillColor = CRGB(0, 180, 0);
+    else if (remaining > 20) fillColor = CRGB(180, 150, 0);
+    else                     fillColor = CRGB(200, 0, 0);
+
+    for (int x = 0; x < innerW; x++) {
+        CRGB c = (x < fillPx) ? fillColor : CRGB(12, 12, 12);
+        for (int y = y0 + 1; y < y0 + h - 1; y++) {
+            setPixel(leds, x0 + 1 + x, y, c);
+        }
+    }
 }
 
-// ===== PAGE: STATE =====
-void MatrixPages::renderState(CRGB* leds, float animTime) {
-    lockState();
-    AgentState st = g_state.state;
-    bool connected = g_state.wsConnected;
-    unlockState();
+// Parse reset time string into total minutes
+// "1h 23m" → 83, "2d 4h" → 3120, "45m" → 45
+static int parseResetMinutes(const char* reset) {
+    int total = 0;
+    int num = 0;
+    for (int i = 0; reset[i]; i++) {
+        char c = reset[i];
+        if (c >= '0' && c <= '9') {
+            num = num * 10 + (c - '0');
+        } else if (c == 'd' || c == 'D') {
+            total += num * 24 * 60;
+            num = 0;
+        } else if (c == 'h' || c == 'H') {
+            total += num * 60;
+            num = 0;
+        } else if (c == 'm' || c == 'M') {
+            total += num;
+            num = 0;
+        }
+    }
+    return total + num;  // trailing number without unit = minutes
+}
 
-    CRGB bg;
-    const char* label;
+// Draw sprite
+static void drawSprite(CRGB* leds, int x0, int y0, const uint8_t* sprite,
+                       int w, int h, CRGB color) {
+    for (int row = 0; row < h; row++) {
+        for (int col = 0; col < w; col++) {
+            if (sprite[row] & (1 << (w - 1 - col))) {
+                setPixel(leds, x0 + col, y0 + row, color);
+            }
+        }
+    }
+}
 
-    if (!connected) {
-        bg = CRGB(20, 0, 0);
-        label = "DIS";
-    } else {
-        switch (st) {
-            case AgentState::IDLE:
-                bg = CRGB(0, 0, 30);
-                label = "IDL";
-                break;
-            case AgentState::PROCESSING: {
-                uint8_t pulse = 20 + (uint8_t)(20.0f * (0.5f + 0.5f * sinf(animTime * 4.0f)));
-                bg = CRGB(0, pulse, 0);
-                label = "RUN";
-                break;
-            }
-            case AgentState::AWAITING_PERMISSION:
-            case AgentState::AWAITING_OPTION:
-            case AgentState::AWAITING_DIFF: {
-                bool blink = fmodf(animTime, 1.0f) < 0.5f;
-                bg = blink ? CRGB(40, 25, 0) : CRGB(10, 6, 0);
-                label = "ASK";
-                break;
-            }
-            default:
-                bg = CRGB(10, 10, 10);
-                label = "---";
-                break;
+// ===== Sprites (5x6) =====
+static const uint8_t SPR_OCTOPUS[6] = {
+    0b01110, 0b11111, 0b10101, 0b11111, 0b01010, 0b10101
+};
+static const uint8_t SPR_CRAYFISH[6] = {
+    0b10001, 0b01110, 0b11111, 0b01110, 0b00100, 0b01010
+};
+
+// Draw full-screen gauge: gradient bar (rows 0-5) + label + number (rows 6-7)
+static void drawFullScreenGauge(CRGB* leds, float percent, const char* label,
+                                 const char* resetStr, bool is7d, int slideX) {
+    float remaining = 100.0f - percent;
+    if (remaining < 0) remaining = 0;
+    if (remaining > 100) remaining = 100;
+
+    int filled = (int)(remaining / 100.0f * MATRIX_W);
+
+    // Color based on remaining
+    CRGB fillColor;
+    if (remaining > 40)      fillColor = CRGB(0, 180, 0);
+    else if (remaining > 20) fillColor = CRGB(180, 150, 0);
+    else                     fillColor = CRGB(200, 0, 0);
+
+    // Gradient bar: rows 0-5 (6 rows tall!)
+    for (int x = 0; x < MATRIX_W; x++) {
+        int sx = x + slideX;
+        if (sx < 0 || sx >= MATRIX_W) continue;
+        CRGB c = (x < filled) ? fillColor : CRGB(15, 15, 15);
+        for (int y = 0; y <= 5; y++) {
+            setPixel(leds, sx, y, c);
         }
     }
 
-    // Fill background
-    for (int i = 0; i < MATRIX_LEDS; i++) leds[i] = bg;
+    // Label (rows 6-7, left): "5H" or "7D"
+    for (int i = 0; label[i]; i++) {
+        int sx = i * 4 + slideX;
+        MatrixFont::drawChar(leds, sx, 6, label[i], CRGB(120, 120, 120), MATRIX_W, MATRIX_H);
+    }
 
-    // Draw 3-char label centered (y=2)
-    int labelX = (MATRIX_W - 3 * 4 + 1) / 2;
-    MatrixFont::drawScrollText(leds, label, labelX, 2, CRGB(255, 255, 255), MATRIX_W, MATRIX_H);
+    // Reset number (rows 6-7, right-aligned)
+    int mins = parseResetMinutes(resetStr);
+    char numBuf[6];
+    if (is7d) {
+        int hours = (mins + 30) / 60;
+        snprintf(numBuf, sizeof(numBuf), "%d", hours);
+    } else {
+        snprintf(numBuf, sizeof(numBuf), "%d", mins);
+    }
+    int tw = MatrixFont::textWidth(numBuf);
+    int numX = MATRIX_W - tw + slideX;
+    MatrixFont::drawScrollText(leds, numBuf, numX, 6, CRGB(200, 200, 200), MATRIX_W, MATRIX_H);
 }
 
-// ===== PAGE: TEXT (scrolling project + model) =====
-void MatrixPages::renderText(CRGB* leds, float animTime) {
-    for (int i = 0; i < MATRIX_LEDS; i++) leds[i] = CRGB::Black;
-
-    lockState();
-    char project[40];
-    char model[32];
-    strncpy(project, g_state.projectName[0] ? g_state.projectName : "NO PROJECT", sizeof(project) - 1);
-    project[sizeof(project) - 1] = '\0';
-    strncpy(model, g_state.modelName[0] ? g_state.modelName : "---", sizeof(model) - 1);
-    model[sizeof(model) - 1] = '\0';
-    unlockState();
-
-    // Convert to uppercase for font
-    for (char* p = project; *p; p++) *p = toupper(*p);
-    for (char* p = model; *p; p++) *p = toupper(*p);
-
-    // Scroll positions (wrap around)
-    int projW = MatrixFont::textWidth(project);
-    int modelW = MatrixFont::textWidth(model);
-    int scrollMs = (int)(animTime * 1000.0f);
-
-    int projCycle  = projW + MATRIX_W + 8;
-    int modelCycle = modelW + MATRIX_W + 8;
-    int projOffset  = MATRIX_W - ((scrollMs / (int)SCROLL_SPEED_MS) % (projCycle > 0 ? projCycle : 1));
-    int modelOffset = MATRIX_W - (((scrollMs / (int)SCROLL_SPEED_MS) + MATRIX_W / 2) % (modelCycle > 0 ? modelCycle : 1));
-
-    // Top: project name in cyan (rows 0-4)
-    MatrixFont::drawScrollText(leds, project, projOffset, 0, CRGB(0, 180, 255), MATRIX_W, MATRIX_H);
-
-    // Bottom: model name in green (rows 3-7)
-    MatrixFont::drawScrollText(leds, model, modelOffset, 3, CRGB(0, 200, 80), MATRIX_W, MATRIX_H);
-}
-
-// ===== PAGE: GAUGE (rate limit bars) =====
-void MatrixPages::renderGauge(CRGB* leds, float animTime) {
-    for (int i = 0; i < MATRIX_LEDS; i++) leds[i] = CRGB::Black;
-
+// ================================================================
+// PAGE 1: USAGE — Full-screen 5H/7D with slide transition
+// ================================================================
+void MatrixPages::renderUsage(CRGB* leds, float animTime) {
     lockState();
     float pct5h = g_state.fiveHourPercent;
     float pct7d = g_state.sevenDayPercent;
+    char reset5h[20], reset7d[20];
+    strncpy(reset5h, g_state.fiveHourReset, sizeof(reset5h) - 1);
+    reset5h[sizeof(reset5h) - 1] = '\0';
+    strncpy(reset7d, g_state.sevenDayReset, sizeof(reset7d) - 1);
+    reset7d[sizeof(reset7d) - 1] = '\0';
     unlockState();
 
-    // No data sentinel
-    if (pct5h < 0) pct5h = 0;
-    if (pct7d < 0) pct7d = 0;
-    if (pct5h > 100.0f) pct5h = 100.0f;
-    if (pct7d > 100.0f) pct7d = 100.0f;
+    bool noData = (pct5h < 0);
+    if (noData) {
+        // No data: dim "---" centered
+        MatrixFont::drawScrollText(leds, "---", 10, 2, CRGB(40, 40, 40), MATRIX_W, MATRIX_H);
+        return;
+    }
 
-    auto barColor = [](float pct) -> CRGB {
-        if (pct < 60) return CRGB(0, 40, 0);
-        if (pct < 85) return CRGB(40, 30, 0);
-        return CRGB(40, 0, 0);
+    // Cycle: 4s show 5H → 0.5s slide → 4s show 7D → 0.5s slide back
+    float cycle = 9.0f;  // total cycle
+    float phase = fmodf(animTime, cycle);
+
+    if (phase < 4.0f) {
+        // Show 5H (static)
+        drawFullScreenGauge(leds, pct5h, "5H", reset5h, false, 0);
+    } else if (phase < 4.5f) {
+        // Slide 5H out left, 7D in from right
+        float t = (phase - 4.0f) / 0.5f;  // 0→1
+        int offset = (int)(t * MATRIX_W);
+        drawFullScreenGauge(leds, pct5h, "5H", reset5h, false, -offset);
+        drawFullScreenGauge(leds, pct7d, "7D", reset7d, true, MATRIX_W - offset);
+    } else if (phase < 8.5f) {
+        // Show 7D (static)
+        drawFullScreenGauge(leds, pct7d, "7D", reset7d, true, 0);
+    } else {
+        // Slide 7D out left, 5H in from right
+        float t = (phase - 8.5f) / 0.5f;
+        int offset = (int)(t * MATRIX_W);
+        drawFullScreenGauge(leds, pct7d, "7D", reset7d, true, -offset);
+        drawFullScreenGauge(leds, pct5h, "5H", reset5h, false, MATRIX_W - offset);
+    }
+}
+
+// ================================================================
+// PAGE 2: AGENTS — Crayfish fixed right + octopus scroll
+// ================================================================
+void MatrixPages::renderAgents(CRGB* leds, float animTime) {
+    lockState();
+    uint8_t sessionCount = g_state.sessionCount;
+    bool gatewayAvail = g_state.gatewayAvailable;
+    bool gatewayError = g_state.gatewayHasError;
+    CrayfishState cfState = g_state.crayfishState;
+
+    // Collect octopus sessions
+    struct OctoInfo { char state[20]; };
+    OctoInfo octos[6];
+    int octoCount = 0;
+
+    for (int i = 0; i < sessionCount && octoCount < 6; i++) {
+        if (!g_state.sessions[i].alive) continue;
+        if (strcmp(g_state.sessions[i].agentType, "openclaw") == 0) continue;
+        if (strcmp(g_state.sessions[i].agentType, "daemon") == 0) continue;
+        strncpy(octos[octoCount].state, g_state.sessions[i].state, 19);
+        octos[octoCount].state[19] = '\0';
+        octoCount++;
+    }
+    unlockState();
+
+    // === Crayfish: fixed at right (x=27, y=1) ===
+    if (gatewayAvail) {
+        CRGB cfColor;
+        if (gatewayError) {
+            cfColor = CRGB(40, 40, 40);  // SICK: gray
+        } else if (cfState == CrayfishState::ROUTING) {
+            cfColor = CRGB(200, 30, 30);  // Bright red
+        } else if (cfState == CrayfishState::SITTING) {
+            // Dark red pulse
+            uint8_t r = 50 + (uint8_t)(30.0f * (0.5f + 0.5f * sinf(animTime * 1.5f)));
+            cfColor = CRGB(r, 5, 5);
+        } else {
+            cfColor = CRGB(25, 5, 5);  // DORMANT: very dim red
+        }
+        drawSprite(leds, 27, 1, SPR_CRAYFISH, 5, 6, cfColor);
+    }
+
+    // === Octopuses: left area (x 0 to cfX-2) ===
+    int cfX = gatewayAvail ? 27 : 32;  // crayfish position (or off-screen)
+    int octoMaxX = cfX - 7;            // rightmost octopus start (5px sprite + 2px gap)
+
+    if (octoCount == 0) {
+        int bobY = 1 + (int)(0.3f * sinf(animTime * 1.0f));
+        drawSprite(leds, 8, bobY, SPR_OCTOPUS, 5, 6, CRGB(30, 18, 14));
+        return;
+    }
+
+    auto octoColor = [&](const char* state) -> CRGB {
+        if (strcmp(state, "idle") == 0)
+            return CRGB(0, 0, 120);
+        if (strcmp(state, "processing") == 0) {
+            bool on = fmodf(animTime, 0.5f) < 0.25f;
+            return on ? CRGB(0, 180, 0) : CRGB(0, 40, 0);
+        }
+        if (strstr(state, "awaiting")) {
+            bool on = fmodf(animTime, 1.0f) < 0.5f;
+            return on ? CRGB(200, 120, 0) : CRGB(40, 24, 0);
+        }
+        return CRGB(30, 30, 30);
     };
 
-    // 5H bar: rows 0-2
-    int fill5h = (int)(pct5h / 100.0f * (MATRIX_W - 6));  // Leave room for label
-    CRGB c5 = barColor(pct5h);
-    for (int x = 6; x < MATRIX_W; x++) {
-        CRGB c = (x - 6 < fill5h) ? c5 : CRGB(5, 5, 5);
-        setPixel(leds, x, 0, c);
-        setPixel(leds, x, 1, c);
-    }
-    MatrixFont::drawScrollText(leds, "5H", 0, 0, CRGB(80, 80, 80), MATRIX_W, MATRIX_H);
+    int visibleSlots = 3;
+    int spacing = 7;  // 5px sprite + 2px gap
 
-    // Separator row 3
-    for (int x = 0; x < MATRIX_W; x += 4) setPixel(leds, x, 3, CRGB(12, 12, 12));
+    if (octoCount <= visibleSlots) {
+        // 1-3: fixed positions starting from x=1
+        for (int i = 0; i < octoCount; i++) {
+            int x = 1 + i * spacing;
+            int bobY = 1 + (int)(0.3f * sinf(animTime * 2.0f + i * 1.5f));
+            drawSprite(leds, x, bobY, SPR_OCTOPUS, 5, 6, octoColor(octos[i].state));
+        }
+    } else {
+        // 4+: show 3, pause 2s, scroll left to reveal more
+        float scrollDur = (octoCount - visibleSlots) * 2.0f;
+        float cycleTime = 2.0f + scrollDur + 2.0f;  // pause + scroll + pause
+        float phase = fmodf(animTime, cycleTime);
 
-    // 7D bar: rows 4-6
-    int fill7d = (int)(pct7d / 100.0f * (MATRIX_W - 6));
-    CRGB c7 = barColor(pct7d);
-    for (int x = 6; x < MATRIX_W; x++) {
-        CRGB c = (x - 6 < fill7d) ? c7 : CRGB(5, 5, 5);
-        setPixel(leds, x, 5, c);
-        setPixel(leds, x, 6, c);
-    }
-    MatrixFont::drawScrollText(leds, "7D", 0, 4, CRGB(80, 80, 80), MATRIX_W, MATRIX_H);
+        int scrollOffset = 0;
+        if (phase > 2.0f && phase < 2.0f + scrollDur) {
+            float t = (phase - 2.0f) / scrollDur;
+            int maxScroll = (octoCount - visibleSlots) * spacing;
+            scrollOffset = (int)(t * maxScroll);
+        } else if (phase >= 2.0f + scrollDur) {
+            scrollOffset = (octoCount - visibleSlots) * spacing;
+        }
 
-    // Percentage at right edge (row 7)
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%d%%", (int)pct5h);
-    int tw = MatrixFont::textWidth(buf);
-    MatrixFont::drawScrollText(leds, buf, MATRIX_W - tw, 2, CRGB(150, 150, 150), MATRIX_W, MATRIX_H);
-}
-
-// ===== PAGE: TIMELINE (activity dots) =====
-void MatrixPages::renderTimeline(CRGB* leds, float animTime) {
-    for (int i = 0; i < MATRIX_LEDS; i++) leds[i] = CRGB::Black;
-
-    lockState();
-    uint8_t count = g_state.timelineCount;
-    uint8_t head = g_state.timelineHead;
-
-    for (int i = 0; i < count && i < MATRIX_W; i++) {
-        // Most recent entry at rightmost column
-        int entryIdx = (head + count - 1 - i) % TIMELINE_MAX_ENTRIES;
-        int col = MATRIX_W - 1 - i;
-
-        CRGB c = typeColor(g_state.timeline[entryIdx].type);
-
-        // Height: newest = full, older = shorter
-        int height = (i < 4) ? MATRIX_H : (i < 12) ? 4 : 2;
-
-        for (int row = MATRIX_H - height; row < MATRIX_H; row++) {
-            setPixel(leds, col, row, c);
+        for (int i = 0; i < octoCount; i++) {
+            int x = 1 + i * spacing - scrollOffset;
+            if (x > octoMaxX || x < -5) continue;
+            int bobY = 1 + (int)(0.3f * sinf(animTime * 2.0f + i * 1.2f));
+            drawSprite(leds, x, bobY, SPR_OCTOPUS, 5, 6, octoColor(octos[i].state));
         }
     }
-    unlockState();
 }
 
-// ===== PAGE: CREATURE (mini octopus) =====
-void MatrixPages::renderCreature(CRGB* leds, float animTime) {
-    for (int i = 0; i < MATRIX_LEDS; i++) leds[i] = CRGB::Black;
-
+// ================================================================
+// PAGE 3: INFO — Project + Model single-line scroll
+// ================================================================
+void MatrixPages::renderInfo(CRGB* leds, float animTime) {
     lockState();
-    CreatureState cState = g_state.creatureState;
-    bool gatewayAvail = g_state.gatewayAvailable;
+    char model[32], project[40];
+    strncpy(model, g_state.modelName[0] ? g_state.modelName : "---", sizeof(model) - 1);
+    model[sizeof(model) - 1] = '\0';
+    strncpy(project, g_state.projectName[0] ? g_state.projectName : "---", sizeof(project) - 1);
+    project[sizeof(project) - 1] = '\0';
     unlockState();
 
-    // Terracotta body (#C07058)
-    CRGB body = CRGB(192, 112, 88);
-    CRGB eye  = CRGB(30, 30, 30);
+    for (char* p = model; *p; p++) *p = toupper(*p);
+    for (char* p = project; *p; p++) *p = toupper(*p);
 
-    bool sleeping = (cState == CreatureState::SLEEPING);
-    bool working  = (cState == CreatureState::WORKING);
-    bool asking   = (cState == CreatureState::ASKING);
+    // Build combined string: "PROJECT . MODEL"
+    // We render each part in its own color, so we need to draw them separately
+    // but calculate positions as if they're one continuous string
 
-    if (sleeping) body = CRGB(60, 35, 28);
+    int projLen = strlen(project);
+    int modelLen = strlen(model);
+    // Total width: project + " . " (3 chars = 12px) + model
+    int sepW = 12;  // " . " = 3 chars × 4px
+    int totalW = projLen * 4 + sepW + modelLen * 4;
+    if (totalW > 0) totalW -= 1;  // no trailing gap
 
-    // Gentle Y bob
-    int bobY = 1 + (int)(0.5f + 0.5f * sinf(animTime * 2.0f));
-    int ox = (MATRIX_W - 5) / 2;
-    int oy = bobY;
+    int y = 2;  // vertically centered (rows 2-6)
 
-    // Head (3x2)
-    for (int dx = 1; dx <= 3; dx++) {
-        setPixel(leds, ox + dx, oy, body);
-        setPixel(leds, ox + dx, oy + 1, body);
-    }
-    // Eyes
-    setPixel(leds, ox + 1, oy + 1, eye);
-    setPixel(leds, ox + 3, oy + 1, eye);
+    if (totalW <= MATRIX_W) {
+        // Fits on screen — center it
+        int startX = (MATRIX_W - totalW) / 2;
+        MatrixFont::drawScrollText(leds, project, startX, y, CRGB(0, 220, 100), MATRIX_W, MATRIX_H);
+        // Separator dot
+        int sepX = startX + projLen * 4 + 4;
+        MatrixFont::drawChar(leds, sepX, y, '.', CRGB(80, 80, 80), MATRIX_W, MATRIX_H);
+        // Model
+        int modelX = startX + projLen * 4 + sepW;
+        MatrixFont::drawScrollText(leds, model, modelX, y, CRGB(0, 220, 255), MATRIX_W, MATRIX_H);
+    } else {
+        // Scroll
+        int cycle = totalW + MATRIX_W + 16;  // gap before repeat
+        int scrollPx = ((int)(animTime * 1000) / (int)SCROLL_SPEED_MS) % cycle;
+        int baseX = MATRIX_W - scrollPx;
 
-    // Tentacles
-    setPixel(leds, ox + 1, oy + 2, body);
-    setPixel(leds, ox + 2, oy + 2, body);
-    setPixel(leds, ox + 3, oy + 2, body);
-
-    // Wiggling tips
-    int wiggle = (int)(sinf(animTime * 3.0f));
-    setPixel(leds, ox + 0 + wiggle, oy + 3, body);
-    setPixel(leds, ox + 2, oy + 3, body);
-    setPixel(leds, ox + 4 - wiggle, oy + 3, body);
-
-    // Working: starburst flashes
-    if (working) {
-        uint8_t flash = (uint8_t)(80.0f * (0.5f + 0.5f * sinf(animTime * 8.0f)));
-        CRGB star = CRGB(flash, flash, 0);
-        setPixel(leds, ox - 1, oy - 1, star);
-        setPixel(leds, ox + 5, oy - 1, star);
-        setPixel(leds, ox - 1, oy + 3, star);
-        setPixel(leds, ox + 5, oy + 3, star);
-    }
-
-    // Asking: blinking "?"
-    if (asking) {
-        if (fmodf(animTime, 0.8f) < 0.5f) {
-            MatrixFont::drawChar(leds, ox + 6, oy, '?', CRGB(255, 200, 0), MATRIX_W, MATRIX_H);
-        }
-    }
-
-    // Gateway indicator: red dot at top-right
-    if (gatewayAvail) {
-        setPixel(leds, MATRIX_W - 1, 0, CRGB(40, 0, 0));
+        // Project (green)
+        MatrixFont::drawScrollText(leds, project, baseX, y, CRGB(0, 220, 100), MATRIX_W, MATRIX_H);
+        // Separator
+        int sepX = baseX + projLen * 4 + 4;
+        MatrixFont::drawChar(leds, sepX, y, '.', CRGB(80, 80, 80), MATRIX_W, MATRIX_H);
+        // Model (cyan)
+        int modelX = baseX + projLen * 4 + sepW;
+        MatrixFont::drawScrollText(leds, model, modelX, y, CRGB(0, 220, 255), MATRIX_W, MATRIX_H);
     }
 }
 #endif // BOARD_ULANZI_TC001

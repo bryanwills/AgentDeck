@@ -48,9 +48,19 @@ final class BridgeDiscovery: @unchecked Sendable {
                 switch state {
                 case .ready:
                     self?.isSearching = true
+                case .waiting:
+                    // .waiting typically means local network permission was just granted
+                    // or network conditions changed. Restart the browser to pick up changes.
+                    print("[Discovery] browser waiting — restarting to apply permission change")
+                    self?.isSearching = false
+                    self?.restartBrowser()
                 case .failed(let error):
                     print("[Discovery] browser failed: \(error)")
                     self?.isSearching = false
+                    // Auto-restart after failure (e.g., network change)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                        self?.restartBrowser()
+                    }
                 case .cancelled:
                     self?.isSearching = false
                 default:
@@ -68,6 +78,16 @@ final class BridgeDiscovery: @unchecked Sendable {
         }
 
         browser.start(queue: queue)
+    }
+
+    /// Restart the browser (e.g., after local network permission granted or network change)
+    private func restartBrowser() {
+        browser?.cancel()
+        browser = nil
+        // Brief delay to let the system settle after permission/network change
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.startSearching()
+        }
     }
 
     func stopSearching() {

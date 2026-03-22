@@ -8,14 +8,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,6 +27,7 @@ import dev.agentdeck.ui.component.stateColor
 import dev.agentdeck.ui.eink.agentIcon
 import dev.agentdeck.ui.eink.compactStateMarker
 import dev.agentdeck.ui.eink.mapSessionState
+import dev.agentdeck.ui.eink.stateRank
 
 /**
  * Left HUD panel — AgentDeck logo + unified session list (primary + siblings).
@@ -76,19 +74,20 @@ fun SessionListPanel(
         )
     }
 
-    // Siblings (skip self and daemon)
-    siblingSessions.forEach { session ->
-        if (session.id == sessionId) return@forEach
-        if (session.agentType == "daemon") return@forEach
-        entries += SessionEntry(
-            projectName = session.projectName ?: "Agent",
-            agentType = session.agentType,
-            modelName = null,
-            effortLevel = null,
-            agentState = mapSessionState(session),
-            isPrimary = false,
-        )
-    }
+    // Siblings (skip self and daemon), sorted by state priority + project name
+    siblingSessions
+        .filter { it.id != sessionId && it.agentType != "daemon" }
+        .sortedWith(compareBy<SessionInfo> { stateRank(mapSessionState(it)) }.thenBy { it.projectName ?: "" })
+        .forEach { session ->
+            entries += SessionEntry(
+                projectName = session.projectName ?: "Agent",
+                agentType = session.agentType,
+                modelName = null,
+                effortLevel = null,
+                agentState = mapSessionState(session),
+                isPrimary = false,
+            )
+        }
 
     // Count occurrences per (projectName, agentType) for #N suffix —
     // different agent types (🦞 vs 🐙) with the same project name don't need numbering
@@ -149,40 +148,25 @@ fun SessionListPanel(
                 ""
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                // State color dot
-                Spacer(
-                    modifier = Modifier
-                        .padding(top = 4.dp)
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(stateColor(entry.agentState)),
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Agent icon + session name
+                Text(
+                    text = "$icon ${entry.projectName}$suffix",
+                    color = TerrariumColors.HUDText,
+                    fontSize = 12.sp,
+                    fontWeight = if (entry.isPrimary) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
-
-                Column(modifier = Modifier.weight(1f)) {
-                    // Agent icon + session name
-                    Text(
-                        text = "$icon ${entry.projectName}$suffix",
-                        color = TerrariumColors.HUDText,
-                        fontSize = 12.sp,
-                        fontWeight = if (entry.isPrimary) FontWeight.Bold else FontWeight.Normal,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    // Model · state
-                    Text(
-                        text = subLine,
-                        color = TerrariumColors.HUDSubtext,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                // Model · state (state colored)
+                Text(
+                    text = subLine,
+                    color = stateColor(entry.agentState),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
 
