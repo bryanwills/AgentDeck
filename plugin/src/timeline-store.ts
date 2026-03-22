@@ -1,6 +1,6 @@
 /**
  * Timeline event store for OpenClaw mode.
- * Singleton — gateway-client produces events, E2/E3 dials consume for rendering.
+ * Singleton — bridge produces events, E2/E3 dials consume for rendering.
  *
  * Scroll operates on grouped display (consecutive duplicates collapsed).
  * Past events (max 20 displayed) + scheduled/future events (max 10).

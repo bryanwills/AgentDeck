@@ -176,7 +176,7 @@ initItermDial(connMgr);
 
 // Refresh other dials when voice text takeover exits
 setVoiceTextExitCallback(() => {
-  const agentType = proxiedAgentType ?? connMgr.getActiveAgentType();
+  const agentType = proxiedAgentType;
   const vtCaps = proxiedAgentType === 'openclaw' ? OPENCLAW_CAPABILITIES : connMgr.getCapabilities();
   updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, vtCaps);
   updateUtilityDialState(currentState);
@@ -406,15 +406,8 @@ connMgr.on('display_state', (ev: { type: 'display_state'; displayOn: boolean }) 
   }
 });
 
-connMgr.on('active_agent_changed', (agentType: string) => {
-  dinfo('Plugin', `active_agent_changed: ${agentType}`);
-  const caps = proxiedAgentType === 'openclaw' ? OPENCLAW_CAPABILITIES : connMgr.getCapabilities();
-  setUsageCapabilities(caps);
-  broadcastStateUpdate();
-});
-
 connMgr.on('connected', () => {
-  dinfo('Plugin', `connected (activeAgent=${connMgr.getActiveAgentType()} prevState=${currentState})`);
+  dinfo('Plugin', `connected (agentType=${proxiedAgentType} prevState=${currentState})`);
   setUsageBridgeConnected(true);
   const connCaps = proxiedAgentType === 'openclaw' ? OPENCLAW_CAPABILITIES : connMgr.getCapabilities();
   setUsageCapabilities(connCaps);
@@ -423,7 +416,7 @@ connMgr.on('connected', () => {
 });
 
 connMgr.on('disconnected', () => {
-  dinfo('Plugin', `disconnected (activeAgent=${connMgr.getActiveAgentType()} prevState=${currentState})`);
+  dinfo('Plugin', `disconnected (agentType=${proxiedAgentType} prevState=${currentState})`);
   setUsageBridgeConnected(false);
   setUsageCapabilities(null);
   proxiedAgentType = null;
@@ -458,7 +451,7 @@ function broadcastStateUpdate(): void {
 
   dlog('Plugin', `broadcast: state=${currentState} mode=${currentMode} opts=${currentOptions.length} expanded=${expandedMode} takeover=${isEncoderTakeoverActive()}`);
 
-  const agentType = proxiedAgentType ?? connMgr.getActiveAgentType();
+  const agentType = proxiedAgentType;
   const caps = proxiedAgentType === 'openclaw'
     ? OPENCLAW_CAPABILITIES
     : connMgr.getCapabilities();

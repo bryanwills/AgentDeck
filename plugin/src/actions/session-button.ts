@@ -59,9 +59,9 @@ let showingCcNoSession = false;
 let currentVoiceAssistantState: string | undefined;
 let currentGatewayHasError = false;
 
-/** Bridge can proxy OpenClaw (daemon) so agentType may be 'openclaw' while active link remains bridge. */
-function isProxiedOpenClaw(): boolean {
-  return currentAgentType === 'openclaw' && bridge.getActiveAgentType() !== 'openclaw';
+/** OpenClaw is always proxied through daemon — agentType comes from state_update. */
+function isOpenClaw(): boolean {
+  return currentAgentType === 'openclaw';
 }
 
 /** Enter or exit NO SESSION mode, propagating to all affected components. */
@@ -76,10 +76,9 @@ function setNoSessionMode(active: boolean): void {
   } else {
     // Restore gateway capabilities
     const caps = bridge.getCapabilities();
-    const agentType = bridge.getActiveAgentType();
     setUsageCapabilities(caps);
-    updateOptionDialState(currentState, [], undefined, undefined, undefined, undefined, undefined, undefined, agentType, null, caps);
-    fireUpdateItermState(currentState, agentType, null, caps);
+    updateOptionDialState(currentState, [], undefined, undefined, undefined, undefined, undefined, undefined, currentAgentType, null, caps);
+    fireUpdateItermState(currentState, currentAgentType, null, caps);
   }
 }
 
@@ -812,9 +811,6 @@ function cycleSession(): void {
   } else if (currentAgentType === 'openclaw') {
     currentPos = cycleList.findIndex(e => e.type === 'oc');
     if (currentPos === -1) currentPos = cycleList.length - 1;
-  } else if (bridge.getUserSelection() === 'gateway') {
-    currentPos = cycleList.findIndex(e => e.type === 'oc');
-    if (currentPos === -1) currentPos = cycleList.length - 1;
   } else {
     // Port-based lookup: find current bridge port in cycle list
     const currentPort = bridge.getBridgePort();
@@ -837,8 +833,8 @@ function cycleSession(): void {
     dlog('SesBut', `cycle: → OpenClaw`);
     const wasNoSession = showingCcNoSession;
     setNoSessionMode(false);
-    if (!wasNoSession && !isProxiedOpenClaw()) {
-      bridge.activateGateway();
+    if (!wasNoSession && !isOpenClaw()) {
+      bridge.switchToOpenClaw();
     }
     // wasNoSession: already on gateway, just clear the virtual state
   } else {
@@ -853,7 +849,7 @@ function cycleSession(): void {
     currentEffortLevel = undefined;
     dlog('SesBut', `cycle: ${currentSessionIndex + 1}/${sessions.length} → ${getDisplayName(session, sessions)}:${session.port}`);
     fireSuppressAutoSwitch();
-    bridge.activateBridge();
+    bridge.switchToClaude();
     bridge.reconnectBridgeTo(session.port);
   }
   refreshAll();

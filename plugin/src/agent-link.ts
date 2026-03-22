@@ -2,7 +2,7 @@ import type { EventEmitter } from 'events';
 import type { PluginCommand, AgentCapabilities } from '@agentdeck/shared';
 
 /**
- * Common interface for BridgeClient and GatewayClient.
+ * Common interface for bridge connections.
  *
  * Actions only need send() and isConnected() — they never interact
  * with connection lifecycle or protocol-specific details.

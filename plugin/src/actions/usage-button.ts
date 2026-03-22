@@ -462,7 +462,7 @@ export function initUsageButton(b: AgentLink): void {
 
 export function setUsageCapabilities(capabilities: AgentCapabilities | null): void {
   currentCapabilities = capabilities;
-  // OpenClaw with model catalog: keep catalog poll as fallback (GatewayClient may fail)
+  // OpenClaw with model catalog: keep catalog poll as fallback
   if (capabilities?.hasModelCatalog) {
     startCatalogPoll();
     startOcUsagePoll();

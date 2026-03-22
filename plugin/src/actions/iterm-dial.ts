@@ -168,7 +168,7 @@ async function syncFromSystem(): Promise<void> {
     // Only when iTerm is frontmost — prevents overriding explicit session switches
     // while user is in a non-terminal app (e.g. VS Code)
     // Skip auto-switch when user explicitly selected OpenClaw
-    if (activeTty && bridgeRef && itermFront && bridgeRef.getActiveAgentType() !== 'openclaw') {
+    if (activeTty && bridgeRef && itermFront && currentAgentType !== 'openclaw') {
       const currentPort = bridgeRef.getBridgePort();
 
       // 1. parentTty match (non-tmux: agentdeck's stdin tty === iTerm tty)
