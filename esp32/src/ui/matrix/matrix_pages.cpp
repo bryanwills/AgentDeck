@@ -103,49 +103,71 @@ static const uint8_t SPR_CRAYFISH[6] = {
     0b10001, 0b01110, 0b11111, 0b01110, 0b00100, 0b01010
 };
 
-// Draw full-screen gauge: gradient bar (rows 0-5) + label + number (rows 6-7)
+// Format reset time like Pixoo: "1h 23m" → "1H23", "2d 4h" → "2D4"
+static int formatResetCompact(const char* reset, char* out, int maxLen) {
+    int ri = 0;
+    for (int i = 0; reset[i] && ri < maxLen - 1; i++) {
+        char c = reset[i];
+        if (c >= '0' && c <= '9') out[ri++] = c;
+        else if (c == 'h' || c == 'H') out[ri++] = 'H';
+        else if (c == 'd' || c == 'D') out[ri++] = 'D';
+        else if (c == 'm' && (reset[i+1] == 0 || reset[i+1] == ' ')) out[ri++] = 'M';
+        // skip spaces
+    }
+    out[ri] = '\0';
+    return ri;
+}
+
+// Full-screen usage gauge: background fill + overlaid text
+// Layout: entire 32x8 screen
+//   Rows 0-7: usage color fill from left (proportional to percent used)
+//   Row 1: "72%" left-aligned (dark on bright fill, bright on dark empty)
+//   Row 1: "1H23" right-aligned (dimmed time color)
+//   Row 6: "5H" label left (dim)
 static void drawFullScreenGauge(CRGB* leds, float percent, const char* label,
-                                 const char* resetStr, bool is7d, int slideX) {
-    float remaining = 100.0f - percent;
-    if (remaining < 0) remaining = 0;
-    if (remaining > 100) remaining = 100;
+                                 const char* resetStr, int slideX) {
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
 
-    int filled = (int)(remaining / 100.0f * MATRIX_W);
-
-    // Color based on remaining
+    // Usage fill color (based on how much used — NOT remaining)
     CRGB fillColor;
-    if (remaining > 40)      fillColor = CRGB(0, 180, 0);
-    else if (remaining > 20) fillColor = CRGB(180, 150, 0);
-    else                     fillColor = CRGB(200, 0, 0);
+    if (percent < 50)       fillColor = CRGB(0, 0, 100);     // Blue: safe
+    else if (percent < 70)  fillColor = CRGB(0, 140, 130);   // Teal
+    else if (percent < 90)  fillColor = CRGB(160, 120, 0);   // Amber: caution
+    else                    fillColor = CRGB(180, 0, 0);      // Red: critical
 
-    // Gradient bar: rows 0-5 (6 rows tall!)
+    CRGB emptyColor = CRGB(12, 12, 12);
+    int fillW = (int)(percent / 100.0f * MATRIX_W);
+
+    // Fill entire screen
     for (int x = 0; x < MATRIX_W; x++) {
         int sx = x + slideX;
         if (sx < 0 || sx >= MATRIX_W) continue;
-        CRGB c = (x < filled) ? fillColor : CRGB(15, 15, 15);
-        for (int y = 0; y <= 5; y++) {
+        CRGB c = (x < fillW) ? fillColor : emptyColor;
+        for (int y = 0; y < MATRIX_H; y++) {
             setPixel(leds, sx, y, c);
         }
     }
 
-    // Label (rows 6-7, left): "5H" or "7D"
-    for (int i = 0; label[i]; i++) {
-        int sx = i * 4 + slideX;
-        MatrixFont::drawChar(leds, sx, 6, label[i], CRGB(120, 120, 120), MATRIX_W, MATRIX_H);
+    // Percentage text (row 1, left)
+    char pctBuf[5];
+    snprintf(pctBuf, sizeof(pctBuf), "%d%%", (int)percent);
+    // Dark text on bright fill, bright text on dark empty
+    CRGB pctColor = (fillW > 12) ? CRGB(0, 0, 0) : CRGB(200, 200, 200);
+    MatrixFont::drawScrollText(leds, pctBuf, 1 + slideX, 1, pctColor, MATRIX_W, MATRIX_H);
+
+    // Reset time (row 1, right-aligned, dimmed)
+    char timeBuf[8];
+    if (formatResetCompact(resetStr, timeBuf, sizeof(timeBuf)) > 0) {
+        int tw = MatrixFont::textWidth(timeBuf);
+        CRGB timeColor = CRGB(100, 120, 140);  // dimmed blue-gray
+        MatrixFont::drawScrollText(leds, timeBuf, MATRIX_W - tw - 1 + slideX, 1, timeColor, MATRIX_W, MATRIX_H);
     }
 
-    // Reset number (rows 6-7, right-aligned)
-    int mins = parseResetMinutes(resetStr);
-    char numBuf[6];
-    if (is7d) {
-        int hours = (mins + 30) / 60;
-        snprintf(numBuf, sizeof(numBuf), "%d", hours);
-    } else {
-        snprintf(numBuf, sizeof(numBuf), "%d", mins);
+    // Label (row 6, left, dim)
+    for (int i = 0; label[i]; i++) {
+        MatrixFont::drawChar(leds, i * 4 + 1 + slideX, 6, label[i], CRGB(80, 80, 80), MATRIX_W, MATRIX_H);
     }
-    int tw = MatrixFont::textWidth(numBuf);
-    int numX = MATRIX_W - tw + slideX;
-    MatrixFont::drawScrollText(leds, numBuf, numX, 6, CRGB(200, 200, 200), MATRIX_W, MATRIX_H);
 }
 
 // ================================================================
@@ -174,23 +196,19 @@ void MatrixPages::renderUsage(CRGB* leds, float animTime) {
     float phase = fmodf(animTime, cycle);
 
     if (phase < 4.0f) {
-        // Show 5H (static)
-        drawFullScreenGauge(leds, pct5h, "5H", reset5h, false, 0);
+        drawFullScreenGauge(leds, pct5h, "5H", reset5h, 0);
     } else if (phase < 4.5f) {
-        // Slide 5H out left, 7D in from right
-        float t = (phase - 4.0f) / 0.5f;  // 0→1
+        float t = (phase - 4.0f) / 0.5f;
         int offset = (int)(t * MATRIX_W);
-        drawFullScreenGauge(leds, pct5h, "5H", reset5h, false, -offset);
-        drawFullScreenGauge(leds, pct7d, "7D", reset7d, true, MATRIX_W - offset);
+        drawFullScreenGauge(leds, pct5h, "5H", reset5h, -offset);
+        drawFullScreenGauge(leds, pct7d, "7D", reset7d, MATRIX_W - offset);
     } else if (phase < 8.5f) {
-        // Show 7D (static)
-        drawFullScreenGauge(leds, pct7d, "7D", reset7d, true, 0);
+        drawFullScreenGauge(leds, pct7d, "7D", reset7d, 0);
     } else {
-        // Slide 7D out left, 5H in from right
         float t = (phase - 8.5f) / 0.5f;
         int offset = (int)(t * MATRIX_W);
-        drawFullScreenGauge(leds, pct7d, "7D", reset7d, true, -offset);
-        drawFullScreenGauge(leds, pct5h, "5H", reset5h, false, MATRIX_W - offset);
+        drawFullScreenGauge(leds, pct7d, "7D", reset7d, -offset);
+        drawFullScreenGauge(leds, pct5h, "5H", reset5h, MATRIX_W - offset);
     }
 }
 
