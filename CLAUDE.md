@@ -136,6 +136,14 @@ cd plugin && streamdeck link   # link plugin to Stream Deck app
 
 Coverage thresholds (regression guard): lines ≥18%, functions ≥16%, branches ≥14%, statements ≥18%. CI runs `coverage check` step after tests.
 
+### Test Report (GitHub Pages)
+
+- **URL**: `https://puritysb.github.io/AgentDeck/` (landing) / `/reports/` (test report)
+- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + Robot Framework (no-hw) → HTML report → GitHub Pages deploy
+- **Report generator**: `scripts/generate-html-report.py` — self-contained HTML dashboard with scenario coverage matrix, test category tags, history trend sparklines
+- **Scenario matrix**: `scripts/scenario-matrix.json` — 10 user scenarios mapped to test files with gap analysis
+- **Landing page**: `scripts/pages-index.html` — product intro at Pages root
+
 ## CLI
 
 The CLI command is `agentdeck` (`bridge/src/cli.ts`).
