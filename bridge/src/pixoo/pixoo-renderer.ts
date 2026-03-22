@@ -566,24 +566,37 @@ function drawUsageHUD(
     }
   }
 
-  /** Render a zone: dark background + thin usage bar + text. */
-  function renderZone(text: string, pct: number, leftX: number, rightX: number): void {
+  const timeColor: RGB = [0x60, 0x70, 0x80];
+
+  /** Render a zone: usage background fill + two-color text (pct + time). */
+  function renderZone(
+    pctText: string, timeText: string, pct: number, leftX: number, rightX: number,
+  ): void {
     const color = gaugeColor(pct, animFrame);
     const zoneW = rightX - leftX + 1;
     const fillW = Math.round(zoneW * Math.max(0, Math.min(100, pct)) / 100);
-    for (let x = leftX; x < leftX + fillW; x++) {
-      blendPixel(buf, x, bgBot, color, 0.75);
+    // Background fill proportional to usage
+    for (let y = bgTop; y <= bgBot; y++) {
+      for (let x = leftX; x < leftX + fillW; x++) {
+        blendPixel(buf, x, y, color, 0.35);
+      }
     }
-    drawText(buf, text, rightX, textY, color);
+    // Two-color text: time (dimmed) right-aligned, then pct (gauge color) to its left
+    if (timeText) {
+      drawText(buf, timeText, rightX, textY, timeColor);
+      const timeW = timeText.length * 4; // 3px glyph + 1px gap per char
+      drawText(buf, pctText, rightX - timeW, textY, color);
+    } else {
+      drawText(buf, pctText, rightX, textY, color);
+    }
   }
 
   const pct5 = usageEvent.fiveHourPercent;
 
   if (usageEvent.sevenDayPercent == null) {
     // Single full-width zone
-    const reset5 = usageEvent.fiveHourResetsAt
-      ? ` ${formatResetDetailed(usageEvent.fiveHourResetsAt)}` : '';
-    renderZone(`${Math.round(pct5)}%${reset5}`, pct5, 0, 63);
+    const r5 = formatResetDetailed(usageEvent.fiveHourResetsAt);
+    renderZone(`${Math.round(pct5)}%`, r5, pct5, 0, 63);
     return;
   }
 
@@ -591,8 +604,8 @@ function drawUsageHUD(
   const pct7 = usageEvent.sevenDayPercent;
   const r5 = formatResetDetailed(usageEvent.fiveHourResetsAt);
   const r7 = formatResetDetailed(usageEvent.sevenDayResetsAt);
-  renderZone(`${Math.round(pct5)}%${r5}`, pct5, 0, 30);
-  renderZone(`${Math.round(pct7)}%${r7}`, pct7, 32, 63);
+  renderZone(`${Math.round(pct5)}%`, r5, pct5, 0, 30);
+  renderZone(`${Math.round(pct7)}%`, r7, pct7, 32, 63);
 }
 
 /**

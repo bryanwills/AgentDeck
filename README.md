@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="https://www.npmjs.com/package/@agentdeck/setup"><img src="https://img.shields.io/npm/v/@agentdeck/setup.svg" alt="npm version"></a>
   <a href="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml"><img src="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/tests-728%20passed-brightgreen.svg" alt="728 tests passed">
+  <img src="https://img.shields.io/badge/tests-vitest%20%2B%20platform%20suites-brightgreen.svg" alt="Vitest plus platform test suites">
 </p>
 
 <p align="center">
@@ -626,25 +626,25 @@ pnpm -r typecheck         # Type check without building
 ### Testing
 
 ```bash
-pnpm test                        # Run all tests (vitest)
+pnpm test                        # Run root Vitest suite (bridge, plugin, shared, hooks)
 pnpm test -- --watch             # Watch mode
 pnpm vitest run --coverage       # Coverage report (v8) + threshold check
-pnpm test:report                 # Unified report (vitest + Android + Apple + Robot)
-pnpm test:android                # Android unit tests only
+pnpm test:report                 # Unified report script (Vitest + Android + Apple + Robot)
+pnpm test:android                # Android suite via unified report script
 ```
 
-**24 test files, 728 test cases** across 4 frameworks:
+The repository currently uses 4 test frameworks. The default `pnpm test` path only runs the root Vitest suite; Android, Apple, and ESP32 suites are executed through `scripts/test-report.sh`.
 
-| Framework | Scope | Tests | Coverage |
-|-----------|-------|-------|----------|
-| **Vitest** | bridge, plugin, shared, hooks | 646 | lines ~26% (bridge), ~53% (shared), ~23% (plugin) |
-| **JUnit + Robolectric** | Android (Protocol, Timeline, Metrics, Utils) | 82 | — |
-| **XCTest** | Apple (Protocol, Timeline) | 2 files | — |
-| **Robot Framework** | ESP32 (build, flash, serial protocol) | 3 suites | hardware-dependent |
+| Framework | Scope | Current inventory | Notes |
+|-----------|-------|-------------------|-------|
+| **Vitest** | `bridge`, `plugin`, `shared`, `hooks` | 26 `.test.ts` files | Root `pnpm test` and CI path |
+| **JUnit + Robolectric** | Android unit tests | 4 Kotlin test files | Run via `./gradlew testDebugUnitTest` or `pnpm test:report` |
+| **XCTest** | Apple app tests | 2 Swift test files | Run via `xcodebuild test` or `pnpm test:report` |
+| **Robot Framework** | ESP32 validation | 3 Robot suites | Hardware-oriented, run via report script |
 
-Coverage thresholds are enforced in CI (lines ≥18%, functions ≥16%, branches ≥14%). See `vitest.config.ts` for details.
+Coverage thresholds currently enforced by `vitest.config.ts` are lines ≥17%, functions ≥15%, branches ≥14%, statements ≥16%.
 
-CI runs automatically on every push/PR to `master` (`build → typecheck → test → coverage check`).
+The current GitHub Actions CI workflow runs on every push/PR to `master` and executes `build → typecheck → vitest → vitest coverage` on `ubuntu-latest` with Node 20. Android, Apple, and ESP32 suites are not part of the default CI job.
 
 See **[Testing Guide](docs/testing.md)** for full details on coverage, writing tests, and running the unified report.
 

@@ -14,7 +14,7 @@ import {
   truncText, padRight, visLen, terminalCaps, centerText,
   fg,
 } from './ansi.js';
-import { blockGauge, resetTimeStr, formatUptime, formatTokens } from './gauge.js';
+import { blockGauge, resetTimeStr, formatTokens } from './gauge.js';
 import type { DashboardState, LayoutMode } from './dashboard.js';
 import type { ModelCatalogEntry, OllamaStatus, TimelineEntry, TimelineEntryType } from '@agentdeck/shared';
 
@@ -140,7 +140,7 @@ function creatureEmoji(agentType?: string): string {
   }
   if ((agentType as string) === 'daemon') return '\u2699\uFE0F';      // ⚙️
   if ((agentType as string) === 'openclaw') return '\uD83E\uDD9E';    // 🦞
-  if ((agentType as string) === 'codex-cli') return '\u276F';          // ❯ (terminal prompt)
+  if ((agentType as string) === 'codex-cli') return '\u2601';          // ☁ (cloud — matches creature)
   return '\u273B';  // ✻ (teardrop-spoked asterisk — Claude sparkle)
 }
 
@@ -220,14 +220,30 @@ function renderAgentLines(state: DashboardState, maxWidth: number, useLogo: bool
   const renderSession = (
     proj: string, model: string | undefined, sessState: string, agentType: string | undefined, hotkeyIndex: number | null,
   ) => {
-    const icon = stateIcon(sessState);
     const col = stateColor(sessState);
     const hotkey = `${colors.dim}[${sessionHotkeyLabel(hotkeyIndex)}]${RESET}`;
     const name = truncText(proj, maxWidth - 16);
     const emoji = `${creatureBrandColor(agentType)}${creatureEmoji(agentType)}${RESET}`;
+    const secondary = model
+      ? `${model} - ${compactStateLabel(sessState)}`
+      : compactStateLabel(sessState);
     lines.push(` ${hotkey} ${emoji} ${col}${name}${RESET}`);
-    if (model) lines.push(`${colors.dim}    ${model}${RESET}`);
-    lines.push(`    ${col}${icon} ${sessState.toUpperCase().replace(/_/g, ' ')}${RESET}`);
+    lines.push(`${colors.dim}    ${truncText(secondary, maxWidth - 4)}${RESET}`);
+  };
+
+  // #N suffix for duplicate sessions of the same agent type (same logic as Android SessionListPanel)
+  const sessionDisplayName = (
+    sessions: Array<{ projectName?: string; agentType?: string }>,
+    sess: { projectName?: string; agentType?: string },
+    nameCounts: Map<string, number>,
+    nameSeq: Map<string, number>,
+  ): string => {
+    const proj = sess.projectName || 'unknown';
+    const key = `${proj}:${sess.agentType || ''}`;
+    const seq = (nameSeq.get(key) || 0) + 1;
+    nameSeq.set(key, seq);
+    const suffix = (nameCounts.get(key) || 1) > 1 ? ` #${seq}` : '';
+    return `${proj}${suffix}`;
   };
 
   // Daemon mode: sessions list already contains all agents (including virtual OpenClaw).
@@ -236,17 +252,43 @@ function renderAgentLines(state: DashboardState, maxWidth: number, useLogo: bool
   const isDaemonLike = state.agentType === 'daemon' ||
     (state.agentType && state.sessions.some(s => s.agentType === state.agentType));
   if (isDaemonLike) {
-    for (const [index, sess] of sortSessions(state.sessions).entries()) {
-      renderSession(sess.projectName || 'unknown', sess.modelName,
+    const sorted = sortSessions(state.sessions);
+    // Count name+agentType occurrences for #N suffix
+    const nameCounts = new Map<string, number>();
+    for (const s of sorted) {
+      const key = `${s.projectName || 'unknown'}:${s.agentType || ''}`;
+      nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+    }
+    const nameSeq = new Map<string, number>();
+    for (const [index, sess] of sorted.entries()) {
+      const name = sessionDisplayName(sorted, sess, nameCounts, nameSeq);
+      renderSession(name, sess.modelName,
         sess.state || 'idle', sess.agentType as string | undefined, index);
     }
   } else if (state.state) {
     // Self (primary session)
     renderSession(state.projectName || 'unknown', state.modelName ?? undefined,
       state.state, state.agentType ?? undefined, null);
-    // Siblings (other sessions)
-    for (const [index, sess] of sortSessions(state.sessions).entries()) {
-      renderSession(sess.projectName || 'unknown', undefined,
+    // Siblings (other sessions) — apply #N suffix
+    const sorted = sortSessions(state.sessions);
+    const nameCounts = new Map<string, number>();
+    // Include self in name counting for correct numbering
+    const selfKey = `${state.projectName || 'unknown'}:${state.agentType || ''}`;
+    if (sorted.some(s => `${s.projectName || 'unknown'}:${s.agentType || ''}` === selfKey)) {
+      nameCounts.set(selfKey, 1); // self counts as one
+    }
+    for (const s of sorted) {
+      const key = `${s.projectName || 'unknown'}:${s.agentType || ''}`;
+      nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+    }
+    const nameSeq = new Map<string, number>();
+    // Self consumed seq 1 if it shares a name with siblings
+    if ((nameCounts.get(selfKey) || 1) > 1) {
+      nameSeq.set(selfKey, 1);
+    }
+    for (const [index, sess] of sorted.entries()) {
+      const name = sessionDisplayName(sorted, sess, nameCounts, nameSeq);
+      renderSession(name, sess.modelName,
         sess.state || 'idle', sess.agentType as string | undefined, index);
     }
   }
@@ -286,9 +328,6 @@ function renderAgentLines(state: DashboardState, maxWidth: number, useLogo: bool
     }
     if (u.estimatedCostUsd) {
       lines.push(`${colors.dim} Cost: $${u.estimatedCostUsd.toFixed(2)}${RESET}`);
-    }
-    if (u.sessionDurationSec) {
-      lines.push(`${colors.dim} Up: ${formatUptime(u.sessionDurationSec)}${RESET}`);
     }
   }
 
@@ -728,7 +767,6 @@ function renderAgentCompactLines(state: DashboardState, width: number): string[]
     const parts: string[] = [];
     if (u.inputTokens || u.outputTokens) parts.push(`${formatTokens(u.inputTokens)}/${formatTokens(u.outputTokens)}`);
     if (u.estimatedCostUsd) parts.push(`$${u.estimatedCostUsd.toFixed(2)}`);
-    if (u.sessionDurationSec) parts.push(formatUptime(u.sessionDurationSec));
     if (parts.length > 0) lines.push(`${colors.dim} ${parts.join('  ')}${RESET}`);
   }
   return lines;

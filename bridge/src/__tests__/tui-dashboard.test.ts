@@ -127,6 +127,51 @@ describe('TUI dashboard models', () => {
     expect(output).toContain('q quit  ↑↓/j k scroll  1-9 switch session');
   });
 
+  it('renders agent list secondary line as model dash compact state', () => {
+    const output = stripAnsi(renderDashboard(
+      makeState({
+        projectName: 'my-project',
+        modelName: 'sonnet-4',
+        state: 'processing',
+      }),
+      120,
+      28,
+      [],
+      0,
+      0,
+    ));
+
+    expect(output).toContain('sonnet-4 - PROC');
+  });
+
+  it('renders sibling models in session bridge mode and omits uptime label', () => {
+    const output = stripAnsi(renderDashboard(
+      makeState({
+        projectName: 'primary',
+        modelName: 'opus-4',
+        state: 'idle',
+        sessions: [
+          { id: 's1', port: 9121, projectName: 'other', alive: true, state: 'processing', modelName: 'codex-mini' },
+        ],
+        usage: {
+          type: 'usage_update',
+          sessionDurationSec: 90,
+          inputTokens: 1200,
+          outputTokens: 3400,
+          toolCalls: 2,
+        },
+      }),
+      120,
+      28,
+      [],
+      0,
+      0,
+    ));
+
+    expect(output).toContain('codex-mini - PROC');
+    expect(output).not.toContain('Up:');
+  });
+
   it('renders help overlay when helpVisible is on', () => {
     const output = stripAnsi(renderDashboard(
       makeState({

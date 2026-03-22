@@ -1,15 +1,22 @@
 # Testing Guide
 
-AgentDeck uses 4 test frameworks across its monorepo. All TypeScript packages use [Vitest](https://vitest.dev/); Android uses JUnit + Robolectric; Apple uses XCTest; ESP32 uses Robot Framework.
+AgentDeck currently uses 4 test frameworks across the monorepo:
+
+- TypeScript packages (`bridge`, `plugin`, `shared`, `hooks`) use [Vitest](https://vitest.dev/)
+- Android uses JUnit + Robolectric
+- Apple uses XCTest
+- ESP32 validation uses Robot Framework
+
+The root `pnpm test` command runs only the Vitest suite configured in the repository root. Platform-specific suites are executed separately or through `scripts/test-report.sh`.
 
 ## Quick Start
 
 ```bash
-pnpm test                        # Run vitest (646 tests)
+pnpm test                        # Run root Vitest suite
 pnpm test -- --watch             # Watch mode
 pnpm vitest run --coverage       # Coverage report + threshold check
-pnpm test:report                 # Unified report across all frameworks
-pnpm test:android                # Android JUnit tests only
+pnpm test:report                 # Unified report across all configured frameworks
+pnpm test:android                # Android suite via unified report script
 bash scripts/test-report.sh --report   # Report from existing results (no execution)
 ```
 
@@ -21,22 +28,28 @@ bash scripts/test-report.sh --report   # Report from existing results (no execut
 bridge/src/__tests__/
   adapter.test.ts              # Adapter factory, MonitorAdapter, ClaudeCode lifecycle, OpenClaw protocol
   bridge-core.test.ts          # BridgeCore orchestration, state building, usage broadcast
+  codex-output-parser.test.ts  # Codex CLI parser coverage
   cursor-sync.test.ts          # OutputParser + StateMachine cursor tracking
   daemon-lifecycle.test.ts     # Daemon singleton guard, session registry, PID validation
   esp32-serial-node.test.ts    # Serial bridge protocol, event filtering, JSON messages
   output-parser.test.ts        # ANSI parsing, mode detection, spinner, markdown (~95KB)
+  pixoo-sprites.test.ts        # Pixoo sprite generation invariants
   server-integration.test.ts   # HookServer + WsServer + StateMachine integration
   session-registry.test.ts     # daemon.json paths, process alive checks
+  session-timeline-relay.test.ts # Daemon relay for sibling session timeline events
   state-machine.test.ts        # State transitions, timeouts, billing, permission modes
   tier3-integration.test.ts    # mDNS crash recovery, display sync, voice transcription
   timeline-integration.test.ts # Timeline store dedup, enrichment pipeline
+  tui-dashboard.test.ts        # TUI dashboard layout/render behavior
+  tui-renderer-snapshots.test.ts # TUI renderer snapshots
+  tui-terrarium-snapshots.test.ts # Braille terrarium snapshots
   usage-relay.test.ts          # 3-tier usage relay (HTTP/WS/direct)
 
 plugin/src/__tests__/
   connection-integration.test.ts  # Real WS servers, Bridge/Gateway priority
   connection-manager.test.ts      # ConnectionManager with mocked BridgeClient
-  gateway-client.test.ts          # OpenClaw Gateway WS, Ed25519 auth
   option-scenario.test.ts         # 6-option SELECT, button layout
+  renderer-snapshots.test.ts      # Stream Deck renderer snapshot coverage
   text-utils-and-labels.test.ts   # CJK width, text wrapping, label abbreviation
 
 shared/src/__tests__/
@@ -90,21 +103,27 @@ Coverage thresholds are configured in `vitest.config.ts` and enforced in CI:
 
 | Metric | Threshold |
 |--------|-----------|
-| Lines | ≥ 18% |
-| Functions | ≥ 16% |
+| Lines | ≥ 17% |
+| Functions | ≥ 15% |
 | Branches | ≥ 14% |
-| Statements | ≥ 18% |
+| Statements | ≥ 16% |
 
 These are regression guards set below current levels. Raise them as coverage improves.
 
-### Current Coverage by Package
+### Coverage Scope
 
-| Package | Lines | Statements | Status |
-|---------|-------|-----------|--------|
-| **shared/src** | ~53% | ~53% | Core timeline + protocol well-covered |
-| **bridge/src** | ~26% | ~26% | Core logic covered, device/TUI/voice gaps |
-| **plugin/src** | ~23% | ~22% | Connection/text covered, actions/renderers gaps |
-| **hooks/src** | indirect | indirect | Tested via install.test.ts |
+Coverage is generated only for the Vitest-managed TypeScript packages:
+
+- `bridge/src/**/*.ts`
+- `shared/src/**/*.ts`
+- `plugin/src/**/*.ts`
+- `hooks/src/**/*.ts`
+
+Excluded from the Vitest coverage job:
+
+- `**/__tests__/**`
+- `**/node_modules/**`
+- `**/dist/**`
 
 Generate a report:
 
@@ -139,7 +158,7 @@ pnpm vitest run --coverage       # Terminal summary + lcov + json-summary
 
 ## Unified Test Report
 
-`scripts/test-report.sh` collects results from all 4 frameworks into a single summary:
+`scripts/test-report.sh` collects results from all 4 frameworks into a single summary. It runs the suites that are available in the current environment and skips suites whose toolchains are missing.
 
 ```bash
 bash scripts/test-report.sh              # Run all + report
@@ -158,18 +177,25 @@ Output includes:
 
 ## CI Pipeline
 
-GitHub Actions runs on every push and PR to `master`:
+GitHub Actions currently runs on every push and PR to `master`:
 
 ```yaml
 # .github/workflows/ci.yml
 - pnpm install --frozen-lockfile
 - pnpm build
 - pnpm typecheck
-- pnpm test                    # vitest (646 tests)
+- pnpm test                    # root Vitest suite
 - npx vitest run --coverage    # coverage threshold check
 ```
 
-Android and Apple tests are not yet in CI (require JDK/Xcode runners). Robot Framework requires physical hardware.
+Current CI details:
+
+- Runner: `ubuntu-latest`
+- Node version: 20
+- Included: build, typecheck, Vitest, Vitest coverage
+- Not included: Android JUnit, Apple XCTest, ESP32 Robot Framework
+
+Android and Apple tests are not yet in CI. Robot Framework also depends on local tooling and, for full coverage, physical hardware.
 
 Release workflows (Android, Apple) are tag-triggered and do not run tests.
 

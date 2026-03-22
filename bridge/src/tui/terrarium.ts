@@ -198,19 +198,19 @@ function renderCrayfish(state: CrayfishState, frame: number, scale: SpriteScale)
 }
 
 // ===== Jellyfish Sprite =====
-// Codex CLI creature — 6-lobe cloud + trailing tentacles (matches Codex icon)
+// Codex CLI creature — 6-lobe cloud (matches Android CloudCreature / Apple JellyfishCreature)
 // Small: 10×8 pixel → 5×2 braille, Large: 20×16 → 10×4 braille
 
-// Cell types: 0=empty, 1=cloud body, 2=marking(>_), 3=cloud edge(breathe), 4=tentacle_left, 5=tentacle_right, 6=tentacle_center
+// Cell types: 0=empty, 1=cloud body, 2=marking(>_), 3=cloud edge(breathe)
 const JELLYFISH_GRID_SMALL: number[][] = [
-  [0,0,1,1,0,0,1,1,0,0], // top lobes
-  [0,1,1,1,1,1,1,1,1,0], // wide body
-  [3,1,2,2,1,1,2,1,1,3], // body with >_ + side lobes
-  [0,1,1,1,1,1,1,1,1,0], // lower body
-  [0,0,3,1,1,1,1,3,0,0], // bottom edge
-  [0,0,4,0,6,0,6,0,5,0], // tentacles upper
-  [0,4,0,0,0,6,0,0,0,5], // tentacles mid
-  [4,0,0,0,0,0,0,0,0,5], // tentacles lower
+  [0,0,1,1,0,0,1,1,0,0], // top-left + top-right lobes
+  [0,1,1,1,1,1,1,1,1,0], // upper body merge
+  [1,1,1,1,1,1,1,1,1,1], // widest — side lobes
+  [3,1,2,2,1,1,2,1,1,3], // center with >_ + breathe edges
+  [3,1,1,1,1,1,1,1,1,3], // center body + breathe edges
+  [1,1,1,1,1,1,1,1,1,1], // widest — side lobes
+  [0,1,1,1,1,1,1,1,1,0], // lower body taper
+  [0,0,1,1,0,0,1,1,0,0], // bottom-left + bottom-right lobes
 ];
 
 const JELLYFISH_GRID_LARGE = scaleGridN(JELLYFISH_GRID_SMALL, 2);
@@ -244,8 +244,6 @@ function renderJellyfish(inst: JellyfishInstance, frame: number, scale: SpriteSc
     grid[y] = [];
     for (let x = 0; x < gw; x++) {
       const cell = srcGrid[y][x];
-      const origY = Math.floor(y / sf);
-      const origX = Math.floor(x / sf);
 
       if (cell === 0) {
         grid[y][x] = false;
@@ -253,19 +251,10 @@ function renderJellyfish(inst: JellyfishInstance, frame: number, scale: SpriteSc
         // >_ marking — blinks subtly
         grid[y][x] = (f % 60) > 5;
       } else if (cell === 3) {
-        // Bell edge — contracts during pulse
+        // Cloud edge — contracts during pulse
         grid[y][x] = !contracting;
-      } else if (cell === 4 || cell === 5) {
-        // Outer tentacles — wave motion
-        const tentPhase = cell === 4 ? 0 : Math.PI;
-        const wave = Math.sin(f * 0.12 + tentPhase + origY * 0.5);
-        grid[y][x] = wave > -0.4;
-      } else if (cell === 6) {
-        // Center tentacles — different phase
-        const wave = Math.sin(f * 0.1 + origX * 0.3);
-        grid[y][x] = wave > -0.3;
       } else {
-        grid[y][x] = true; // bell body
+        grid[y][x] = true; // cloud body
       }
     }
   }
