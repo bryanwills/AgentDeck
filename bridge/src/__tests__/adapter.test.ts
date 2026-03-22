@@ -244,9 +244,9 @@ describe('OpenClawAdapter', () => {
       expect(adapter.handleCommand(cmd)).toBe(true);
     });
 
-    it('handles send_prompt → returns true (RPC)', () => {
+    it('handles send_prompt → returns false without session key', () => {
       const cmd: PluginCommand = { type: 'send_prompt', text: 'hello' };
-      expect(adapter.handleCommand(cmd)).toBe(true);
+      expect(adapter.handleCommand(cmd)).toBe(false);
     });
 
     it('handles interrupt → returns true (RPC)', () => {

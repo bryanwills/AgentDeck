@@ -286,8 +286,16 @@ function onVtUp(): void {
         smartPaste(lastTranscription);
       }
     } else {
-      dlog('VoiceDial', `vtPaste: "${lastTranscription.slice(0, 60)}"`);
-      smartPaste(lastTranscription);
+      // Bridge disconnected: OpenClaw has no terminal, so smartPaste is useless → show error
+      const lastCaps = bridge.getCapabilities();
+      if (lastCaps && !lastCaps.hasTerminal) {
+        dlog('VoiceDial', 'vtSendOC: bridge disconnected, cannot deliver');
+        errorMessage = 'Bridge disconnected';
+        voiceState = 'error';
+      } else {
+        dlog('VoiceDial', `vtPaste: "${lastTranscription.slice(0, 60)}"`);
+        smartPaste(lastTranscription);
+      }
     }
   }
   lastTranscription = undefined;

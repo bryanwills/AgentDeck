@@ -287,9 +287,23 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
             idempotencyKey: randomUUID(),
           }).catch((err) => {
             debug('adapter:openclaw', `chat.send failed: ${err}`);
+            this.emitTimelineEntry({
+              ts: Date.now(), type: 'error', raw: `Send failed: ${err instanceof Error ? err.message : String(err)}`,
+            });
+            this.chatStarted = false;
+            this.lastPrompt = null;
+            this.accumulatedResponse = '';
+            this.currentRunId = null;
+            this.emitAdapterEvent({ source: 'parser', event: 'idle' });
           });
         } else {
           debug('adapter:openclaw', 'send_prompt: no active session');
+          this.emitTimelineEntry({
+            ts: Date.now(), type: 'error', raw: 'No active session',
+          });
+          this.chatStarted = false;
+          this.emitAdapterEvent({ source: 'parser', event: 'idle' });
+          return false;
         }
         return true;
       }
