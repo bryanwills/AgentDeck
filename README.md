@@ -74,8 +74,10 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 ### Documentation
 
 - [Voice Setup](docs/voice-setup.md) — sox, whisper.cpp install, model selection
+- [Wake Word Detection](docs/wake-word.md) — Porcupine (Mac) + microWakeWord (ESP32) setup
 - [Stream Deck+ Layout Reference](docs/streamdeck-layout.md) — per-state layouts, encoder details, button colors
 - [Android Reference](docs/android.md) — device support, build/signing, creature behavior
+- [Device Reference](docs/devices.md) — 7 dashboard device types, transport protocols, broadcast architecture
 - [Protocol & Architecture](docs/protocol.md) — state machine, WebSocket messages, project structure
 - [Testing Guide](docs/testing.md) — test structure, coverage, CI pipeline, writing tests
 
@@ -120,7 +122,7 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 | 4 | **iPhone** | SwiftUI app — mobile agent monitoring |
 | 5 | **iPad** | SwiftUI app — terrarium second screen |
 | 6 | **macOS** | SwiftUI app — desktop monitoring window |
-| 7 | **ESP32 Round AMOLED** | 1.8" circular 466×466 — compact WiFi display |
+| 7 | **ESP32 Round AMOLED** | 1.8" circular 360×360 — compact WiFi display |
 | 8 | **ESP32 IPS LCD** | 3.5" rectangular 480×320 |
 | 9 | **ESP32 B86 Box** | 4" wall-mount touch panel 480×480 |
 | 10 | **Ulanzi TC001** | 8×32 RGB LED matrix — compact HUD pages and creature sprites |
