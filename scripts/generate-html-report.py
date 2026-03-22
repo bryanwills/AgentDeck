@@ -2,8 +2,13 @@
 """
 AgentDeck Test Report — HTML Generator
 
-Reads vitest JSON, Android JUnit XML, coverage-summary.json,
-and produces a single self-contained HTML dashboard.
+Reads vitest JSON, Android JUnit XML, coverage-summary.json, scenario-matrix.json,
+and produces a single self-contained HTML dashboard with:
+  - Summary cards + history trend sparklines
+  - Suite progress bars (Vitest, Android, Apple, Robot)
+  - Scenario coverage matrix (user scenarios → test mapping)
+  - Expandable test file tables with category tags
+  - Coverage per-package gauges + file-level coverage table
 
 Usage:
     python3 scripts/generate-html-report.py
@@ -22,6 +27,8 @@ REPORT_DIR = ROOT / "coverage" / "test-report"
 VITEST_JSON = REPORT_DIR / "vitest.json"
 COVERAGE_JSON = ROOT / "coverage" / "coverage-summary.json"
 ANDROID_XML_DIR = ROOT / "android" / "app" / "build" / "test-results" / "testDebugUnitTest"
+SCENARIO_JSON = ROOT / "scripts" / "scenario-matrix.json"
+HISTORY_JSON = REPORT_DIR / "history.json"
 OUTPUT_HTML = REPORT_DIR / "index.html"
 
 # ===== Data collection =====
@@ -68,13 +75,43 @@ def load_android_xml():
         suites.append(suite)
     return suites
 
+def load_scenarios():
+    if not SCENARIO_JSON.exists():
+        return []
+    with open(SCENARIO_JSON) as f:
+        data = json.load(f)
+    return data.get("scenarios", [])
+
+def load_history():
+    if not HISTORY_JSON.exists():
+        return []
+    try:
+        with open(HISTORY_JSON) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+def update_history(history, total_passed, total_failed, total_all, lines_pct):
+    commit_sha = os.environ.get("GITHUB_SHA", "local")[:7]
+    history.append({
+        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
+        "commit": commit_sha,
+        "total": total_all,
+        "passed": total_passed,
+        "failed": total_failed,
+        "coverage": round(lines_pct, 1),
+    })
+    # Keep last 50 entries
+    history = history[-50:]
+    HISTORY_JSON.write_text(json.dumps(history, indent=2), encoding="utf-8")
+    return history
+
 def extract_package_coverage(cov_data):
     """Group per-file coverage into packages."""
     packages = {}
     for filepath, metrics in cov_data.items():
         if filepath == "total":
             continue
-        # Determine package from path
         rel = filepath.replace(str(ROOT) + "/", "")
         parts = rel.split("/")
         if len(parts) >= 2 and parts[0] in ("bridge", "plugin", "shared", "hooks"):
@@ -100,7 +137,6 @@ def extract_package_coverage(cov_data):
             "branch_pct": metrics.get("branches", {}).get("pct", 0),
         })
 
-    # Compute percentages
     for pkg, data in packages.items():
         for metric in ("lines", "statements", "functions", "branches"):
             t = data[metric]["total"]
@@ -108,6 +144,95 @@ def extract_package_coverage(cov_data):
             data[metric]["pct"] = round(c / t * 100, 1) if t > 0 else 0
 
     return packages
+
+
+# ===== Test categorization =====
+
+def classify_test_file(filepath):
+    """Classify test file as unit/integration/snapshot by name pattern."""
+    name = filepath.lower()
+    if "snapshot" in name:
+        return "snapshot"
+    if "integration" in name or "lifecycle" in name:
+        return "integration"
+    return "unit"
+
+def category_badge_html(category):
+    colors = {
+        "unit": ("#38bdf8", "#38bdf822"),
+        "integration": ("#a78bfa", "#a78bfa22"),
+        "snapshot": ("#f472b6", "#f472b622"),
+    }
+    fg, bg = colors.get(category, ("#64748b", "#64748b22"))
+    return f'<span style="font-size:0.65rem;font-weight:600;padding:1px 6px;border-radius:3px;background:{bg};color:{fg};margin-left:0.5rem">{category}</span>'
+
+
+# ===== Scenario matrix =====
+
+def build_scenario_results(scenarios, vitest, android_suites):
+    """Cross-reference scenario test mappings against actual test results."""
+    # Build lookup: relative file path -> {status, passed, failed, total}
+    vt_lookup = {}
+    if vitest:
+        for result in vitest.get("testResults", []):
+            rel = result["name"].replace(str(ROOT) + "/", "")
+            assertions = result.get("assertionResults", [])
+            p = sum(1 for a in assertions if a["status"] == "passed")
+            f = sum(1 for a in assertions if a["status"] == "failed")
+            vt_lookup[rel] = {"status": result["status"], "passed": p, "failed": f, "total": p + f}
+
+    and_lookup = {}
+    for suite in android_suites:
+        # Android test files use classname like dev.agentdeck.net.ProtocolTest
+        and_lookup[suite["name"]] = {"status": "passed" if suite["failures"] == 0 else "failed",
+                                     "passed": suite["passed"], "failed": suite["failures"], "total": suite["tests"]}
+
+    results = []
+    for sc in scenarios:
+        sc_result = {"id": sc["id"], "name": sc["name"], "description": sc["description"],
+                     "priority": sc.get("priority", "medium"), "gaps": sc.get("gaps", []),
+                     "categories": {}}
+
+        for cat in ("unit", "integration", "platform", "e2e"):
+            test_entries = sc.get("tests", {}).get(cat, [])
+            cat_result = {"tests": [], "passed": 0, "failed": 0, "missing": 0, "total": len(test_entries)}
+
+            for entry in test_entries:
+                fpath = entry["file"]
+                # Try vitest lookup first
+                found = vt_lookup.get(fpath)
+                if not found:
+                    # Try android lookup by matching classname suffix
+                    for aname, adata in and_lookup.items():
+                        # Match partial: ProtocolTest.kt -> dev.agentdeck.net.ProtocolTest
+                        fname = Path(fpath).stem.replace("Test", "")
+                        if fname.lower() in aname.lower():
+                            found = adata
+                            break
+                if not found:
+                    # Try by filename match in vitest results
+                    basename = Path(fpath).name
+                    for vpath, vdata in vt_lookup.items():
+                        if vpath.endswith(basename):
+                            found = vdata
+                            break
+
+                if found:
+                    status = "pass" if found["failed"] == 0 else "fail"
+                    cat_result["tests"].append({"file": fpath, "status": status,
+                                                "passed": found["passed"], "failed": found["failed"]})
+                    if found["failed"] > 0:
+                        cat_result["failed"] += 1
+                    else:
+                        cat_result["passed"] += 1
+                else:
+                    cat_result["tests"].append({"file": fpath, "status": "missing", "passed": 0, "failed": 0})
+                    cat_result["missing"] += 1
+
+            sc_result["categories"][cat] = cat_result
+
+        results.append(sc_result)
+    return results
 
 
 # ===== HTML generation =====
@@ -147,7 +272,69 @@ def duration_fmt(ms):
     m = int(s // 60)
     return f"{m}m {s % 60:.0f}s"
 
-def generate_html(vitest, android_suites, cov_data):
+def scenario_cell_html(cat_data):
+    """Generate a colored cell for a scenario category."""
+    t = cat_data["total"]
+    if t == 0:
+        return '<td class="sc-cell sc-none" title="No tests">—</td>'
+    p = cat_data["passed"]
+    f = cat_data["failed"]
+    m = cat_data["missing"]
+    if f > 0:
+        cls = "sc-fail"
+        label = f"{p}/{t}"
+    elif m > 0:
+        cls = "sc-warn"
+        label = f"{p}/{t}"
+    else:
+        cls = "sc-pass"
+        label = f"{p}/{t}"
+    title_parts = []
+    if p: title_parts.append(f"{p} passed")
+    if f: title_parts.append(f"{f} failed")
+    if m: title_parts.append(f"{m} not found in CI")
+    return f'<td class="sc-cell {cls}" title="{", ".join(title_parts)}">{label}</td>'
+
+def sparkline_svg(history, key, color, label, w=200, h=40):
+    """Generate an SVG sparkline for a history metric."""
+    values = [entry.get(key, 0) for entry in history]
+    if not values or len(values) < 2:
+        return ""
+    max_v = max(values) if max(values) > 0 else 1
+    min_v = min(values)
+    range_v = max_v - min_v if max_v != min_v else 1
+    n = len(values)
+    points = []
+    for i, v in enumerate(values):
+        x = (i / (n - 1)) * (w - 8) + 4
+        y = h - 6 - ((v - min_v) / range_v) * (h - 12)
+        points.append(f"{x:.1f},{y:.1f}")
+    polyline = " ".join(points)
+    last_v = values[-1]
+    # Format display value
+    if key == "coverage":
+        display = f"{last_v:.1f}%"
+    elif key == "total":
+        display = str(last_v)
+    else:
+        display = f"{last_v / values[-1] * 100 if values[-1] else 0:.0f}%" if key == "passed" else str(last_v)
+    # For pass rate, compute percentage
+    if key == "passed":
+        totals = [entry.get("total", 1) for entry in history]
+        rate = last_v / totals[-1] * 100 if totals[-1] else 0
+        display = f"{rate:.1f}%"
+
+    return f'''<div class="sparkline-card">
+      <div class="sparkline-label">{label}</div>
+      <svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">
+        <polyline points="{polyline}" fill="none" stroke="{color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="{points[-1].split(',')[0]}" cy="{points[-1].split(',')[1]}" r="3" fill="{color}"/>
+      </svg>
+      <div class="sparkline-value" style="color:{color}">{display}</div>
+    </div>'''
+
+
+def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results, history):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # --- Aggregate stats ---
@@ -176,11 +363,10 @@ def generate_html(vitest, android_suites, cov_data):
 
     pkg_cov = extract_package_coverage(cov_data) if cov_data else {}
 
-    # Pre-extract coverage numbers (avoid dict literals inside f-strings)
     lines_covered = cov_total.get("lines", {}).get("covered", 0) if cov_total else 0
     lines_total_n = cov_total.get("lines", {}).get("total", 0) if cov_total else 0
 
-    # --- Build vitest file rows ---
+    # --- Build vitest file rows (with category tags) ---
     vt_file_rows = ""
     if vitest:
         for result in vitest["testResults"]:
@@ -192,8 +378,9 @@ def generate_html(vitest, android_suites, cov_data):
             dur = result["endTime"] - result["startTime"]
             color = "#22c55e" if st == "passed" else "#ef4444"
             icon = "✓" if st == "passed" else "✗"
+            cat = classify_test_file(name)
+            cat_badge = category_badge_html(cat)
 
-            # Individual test rows (collapsed)
             test_rows = ""
             for a in assertions:
                 a_icon = "✓" if a["status"] == "passed" else "✗"
@@ -211,9 +398,9 @@ def generate_html(vitest, android_suites, cov_data):
                     <td style="color:#64748b;font-size:0.75rem">{a_dur}</td>
                 </tr>'''
 
-            vt_file_rows += f'''<tr class="file-row" onclick="toggleTests(this)" style="cursor:pointer">
+            vt_file_rows += f'''<tr class="file-row" onclick="toggleTests(this)" style="cursor:pointer" data-category="{cat}">
                 <td style="color:{color};font-weight:600">{icon}</td>
-                <td class="file-path">{name}</td>
+                <td class="file-path">{name}{cat_badge}</td>
                 <td style="text-align:right"><span style="color:#22c55e">{passed}</span></td>
                 <td style="text-align:right"><span style="color:{"#ef4444" if failed else "#64748b"}">{failed}</span></td>
                 <td style="color:#64748b">{duration_fmt(dur)}</td>
@@ -253,7 +440,6 @@ def generate_html(vitest, android_suites, cov_data):
     cov_file_rows = ""
     for pkg_name in sorted(pkg_cov.keys()):
         pkg = pkg_cov[pkg_name]
-        # Sort files: lowest coverage first
         for f in sorted(pkg["files"], key=lambda x: x["lines_pct"]):
             bar_w = min(f["lines_pct"], 100)
             bar_color = pct_color(f["lines_pct"])
@@ -283,9 +469,94 @@ def generate_html(vitest, android_suites, cov_data):
             <div class="cov-card-detail">{pkg["lines"]["covered"]}/{pkg["lines"]["total"]} lines covered</div>
         </div>'''
 
+    # --- Scenario matrix rows ---
+    scenario_rows = ""
+    scenario_detail_rows = ""
+    for sc in scenario_results:
+        priority_colors = {"critical": "#ef4444", "high": "#f97316", "medium": "#eab308", "low": "#64748b"}
+        p_color = priority_colors.get(sc["priority"], "#64748b")
+        unit_cell = scenario_cell_html(sc["categories"]["unit"])
+        integ_cell = scenario_cell_html(sc["categories"]["integration"])
+        plat_cell = scenario_cell_html(sc["categories"]["platform"])
+        e2e_cell = scenario_cell_html(sc["categories"]["e2e"])
+
+        # Overall score: all categories
+        all_passed = sum(sc["categories"][c]["passed"] for c in ("unit", "integration", "platform", "e2e"))
+        all_total = sum(sc["categories"][c]["total"] for c in ("unit", "integration", "platform", "e2e"))
+        all_failed = sum(sc["categories"][c]["failed"] for c in ("unit", "integration", "platform", "e2e"))
+        all_missing = sum(sc["categories"][c]["missing"] for c in ("unit", "integration", "platform", "e2e"))
+
+        if all_total == 0:
+            score_cls = "sc-none"
+        elif all_failed > 0:
+            score_cls = "sc-fail"
+        elif all_missing > 0:
+            score_cls = "sc-warn"
+        else:
+            score_cls = "sc-pass"
+
+        # Gaps list
+        gaps_html = ""
+        if sc["gaps"]:
+            gaps_items = "".join(f"<li>{g}</li>" for g in sc["gaps"])
+            gaps_html = f'<ul class="sc-gaps">{gaps_items}</ul>'
+
+        # Detail rows (collapsed)
+        detail_html = ""
+        for cat in ("unit", "integration", "platform", "e2e"):
+            for t in sc["categories"][cat]["tests"]:
+                t_icon = "✓" if t["status"] == "pass" else ("✗" if t["status"] == "fail" else "?")
+                t_color = "#22c55e" if t["status"] == "pass" else ("#ef4444" if t["status"] == "fail" else "#64748b")
+                detail_html += f'''<tr class="sc-detail-row" data-scenario="{sc["id"]}" style="display:none">
+                    <td style="padding-left:2rem;color:{t_color}">{t_icon}</td>
+                    <td class="file-path" style="font-size:0.75rem">{t["file"]}</td>
+                    <td>{category_badge_html(cat)}</td>
+                    <td style="text-align:right;color:#22c55e;font-size:0.8rem">{t["passed"]}</td>
+                    <td style="text-align:right;color:{"#ef4444" if t["failed"] else "#64748b"};font-size:0.8rem">{t["failed"]}</td>
+                    <td></td>
+                </tr>'''
+
+        scenario_rows += f'''<tr class="sc-row" onclick="toggleScenario('{sc["id"]}')" style="cursor:pointer">
+            <td class="{score_cls}" style="font-weight:600;text-align:center">{all_passed}/{all_total}</td>
+            <td>
+                <div style="font-weight:500">{sc["name"]}</div>
+                <div style="font-size:0.75rem;color:var(--dim)">{sc["description"]}</div>
+                {gaps_html}
+            </td>
+            <td style="text-align:center"><span style="color:{p_color};font-size:0.75rem;font-weight:600;text-transform:uppercase">{sc["priority"]}</span></td>
+            {unit_cell}{integ_cell}{plat_cell}{e2e_cell}
+        </tr>{detail_html}'''
+
+    # --- Scenario summary stats ---
+    sc_total = len(scenario_results)
+    sc_full = sum(1 for s in scenario_results
+                  if all(s["categories"][c]["total"] == 0 or (s["categories"][c]["failed"] == 0 and s["categories"][c]["missing"] == 0)
+                         for c in ("unit", "integration", "platform", "e2e"))
+                  and any(s["categories"][c]["total"] > 0 for c in ("unit", "integration", "platform", "e2e")))
+    sc_gaps = sum(1 for s in scenario_results if s["gaps"])
+
+    # --- History sparklines ---
+    sparklines_html = ""
+    if len(history) >= 2:
+        sparklines_html = f'''<div class="sparkline-row">
+            {sparkline_svg(history, "total", "#38bdf8", "Total Tests")}
+            {sparkline_svg(history, "passed", "#22c55e", "Pass Rate")}
+            {sparkline_svg(history, "coverage", "#a78bfa", "Line Coverage")}
+        </div>'''
+
     # --- Overall status ---
     overall_status = "PASS" if total_failed == 0 else "FAIL"
     overall_color = "#22c55e" if total_failed == 0 else "#ef4444"
+
+    # --- Vitest category filter ---
+    vt_categories = set()
+    if vitest:
+        for result in vitest["testResults"]:
+            name = result["name"].replace(str(ROOT) + "/", "")
+            vt_categories.add(classify_test_file(name))
+    cat_filter_buttons = '<button class="active" onclick="filterVitestCat(\'all\',this)">All</button>'
+    for c in sorted(vt_categories):
+        cat_filter_buttons += f'<button onclick="filterVitestCat(\'{c}\',this)">{c}</button>'
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -302,11 +573,17 @@ h1 {{ font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }}
 .subtitle {{ color: var(--dim); font-size: 0.85rem; margin-bottom: 2rem; }}
 
 /* Summary cards */
-.summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }}
+.summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }}
 .card {{ background: var(--surface); border-radius: 12px; padding: 1.25rem; }}
 .card-label {{ color: var(--dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }}
 .card-value {{ font-size: 2rem; font-weight: 700; }}
 .card-sub {{ color: var(--dim); font-size: 0.8rem; margin-top: 0.25rem; }}
+
+/* Sparkline row */
+.sparkline-row {{ display: flex; gap: 1.5rem; margin-bottom: 2rem; padding: 0.75rem 1rem; background: var(--surface); border-radius: 12px; }}
+.sparkline-card {{ flex: 1; text-align: center; }}
+.sparkline-label {{ font-size: 0.7rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }}
+.sparkline-value {{ font-size: 0.85rem; font-weight: 600; margin-top: 0.25rem; }}
 
 /* Suite bars */
 .suite-bars {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 2rem; }}
@@ -349,7 +626,10 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
 .cov-bar {{ height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }}
 .cov-fill {{ height: 100%; border-radius: 3px; }}
 
-/* Coverage table filter */
+/* Filter buttons (shared) */
+.filter-bar {{ margin-bottom: 1rem; display: flex; gap: 0.5rem; }}
+.filter-bar button {{ background: var(--surface); color: var(--text); border: 1px solid var(--surface2); padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }}
+.filter-bar button.active {{ background: var(--accent); color: var(--bg); border-color: var(--accent); }}
 .cov-filter {{ margin-bottom: 1rem; display: flex; gap: 0.5rem; }}
 .cov-filter button {{ background: var(--surface); color: var(--text); border: 1px solid var(--surface2); padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }}
 .cov-filter button.active {{ background: var(--accent); color: var(--bg); border-color: var(--accent); }}
@@ -362,16 +642,32 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
 .threshold {{ display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; background: var(--surface); padding: 4px 12px; border-radius: 6px; margin-right: 0.5rem; margin-bottom: 0.5rem; }}
 .threshold .dot {{ width: 8px; height: 8px; border-radius: 50%; }}
 
+/* Scenario matrix */
+.sc-row:hover {{ background: var(--surface); }}
+.sc-cell {{ text-align: center; font-size: 0.85rem; font-weight: 600; border-radius: 4px; }}
+.sc-pass {{ color: #22c55e; }}
+.sc-fail {{ color: #ef4444; }}
+.sc-warn {{ color: #eab308; }}
+.sc-none {{ color: var(--dim); }}
+.sc-gaps {{ list-style: none; margin-top: 0.25rem; }}
+.sc-gaps li {{ font-size: 0.7rem; color: #f97316; padding-left: 0.75rem; position: relative; }}
+.sc-gaps li::before {{ content: "!"; position: absolute; left: 0; font-weight: 700; }}
+.sc-detail-row {{ background: #0c1222; }}
+.sc-detail-row td {{ border-bottom: 1px solid #1a2332; }}
+.sc-summary-bar {{ display: flex; gap: 1.5rem; margin-bottom: 1rem; }}
+.sc-summary-item {{ font-size: 0.85rem; }}
+
 /* Responsive */
 @media (max-width: 640px) {{
   body {{ padding: 1rem; }}
   .summary {{ grid-template-columns: repeat(2, 1fr); }}
+  .sparkline-row {{ flex-direction: column; }}
 }}
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>🐙 AgentDeck Test Report</h1>
+  <h1>AgentDeck Test Report</h1>
   <p class="subtitle">Generated {now} &middot; {total_all} tests across {vt_suites + len(android_suites)} suites</p>
 
   <!-- Summary Cards -->
@@ -403,6 +699,8 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
     </div>
   </div>
 
+  {sparklines_html}
+
   <!-- Suite Bars -->
   <div class="suite-bars">
     <div class="suite-bar">
@@ -414,8 +712,8 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
         <div class="progress-fill" style="width:{vt_passed/vt_total*100 if vt_total else 0:.1f}%;background:#22c55e"></div>
       </div>
       <div class="suite-stats">
-        <span>✓ {vt_passed}</span>
-        <span>✗ {vt_failed}</span>
+        <span>Pass {vt_passed}</span>
+        <span>Fail {vt_failed}</span>
         <span>{vt_suites} files</span>
         <span>{duration_fmt(vt_duration)}</span>
       </div>
@@ -429,8 +727,8 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
         <div class="progress-fill" style="width:{and_passed/and_total*100 if and_total else 0:.1f}%;background:#22c55e"></div>
       </div>
       <div class="suite-stats">
-        <span>✓ {and_passed}</span>
-        <span>✗ {and_failed}</span>
+        <span>Pass {and_passed}</span>
+        <span>Fail {and_failed}</span>
         <span>{len(android_suites)} files</span>
         <span>{duration_fmt(and_duration)}</span>
       </div>
@@ -441,7 +739,7 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
         {status_badge("skip")}
       </div>
       <div class="progress-bar"><div class="progress-fill" style="width:0"></div></div>
-      <div class="suite-stats"><span style="color:var(--dim)">Xcode scheme not configured for test action</span></div>
+      <div class="suite-stats"><span style="color:var(--dim)">Requires macOS runner</span></div>
     </div>
     <div class="suite-bar">
       <div class="suite-bar-header">
@@ -453,10 +751,37 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
     </div>
   </div>
 
+  <!-- Scenario Coverage Matrix -->
+  {"" if not scenario_results else f"""<div class="section">
+    <div class="section-title">Scenario Coverage <span>{sc_total} scenarios &middot; {sc_full} fully covered &middot; {sc_gaps} with gaps</span></div>
+
+    <div class="sc-summary-bar">
+      <span class="sc-summary-item"><span style="color:#22c55e;font-weight:600">{sc_full}</span> covered</span>
+      <span class="sc-summary-item"><span style="color:#eab308;font-weight:600">{sc_total - sc_full}</span> partial/missing</span>
+      <span class="sc-summary-item"><span style="color:#f97316;font-weight:600">{sc_gaps}</span> with identified gaps</span>
+    </div>
+
+    <table id="scenario-table">
+      <thead><tr>
+        <th style="width:60px;text-align:center">Score</th>
+        <th>Scenario</th>
+        <th style="width:70px;text-align:center">Priority</th>
+        <th style="width:70px;text-align:center">Unit</th>
+        <th style="width:70px;text-align:center">Integ.</th>
+        <th style="width:70px;text-align:center">Platform</th>
+        <th style="width:70px;text-align:center">E2E</th>
+      </tr></thead>
+      <tbody>{scenario_rows}</tbody>
+    </table>
+  </div>"""}
+
   <!-- Vitest Detail -->
   <div class="section">
     <div class="section-title">Vitest <span>bridge / plugin / shared / hooks &middot; {vt_suites} files &middot; {vt_total} tests</span>
       <span class="expand-hint" onclick="toggleAllTests('vitest-table')">[expand all]</span>
+    </div>
+    <div class="filter-bar" id="vitest-filter">
+      {cat_filter_buttons}
     </div>
     <table id="vitest-table">
       <thead><tr>
@@ -471,7 +796,7 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
   </div>
 
   <!-- Android Detail -->
-  {"" if not android_suites else f'''<div class="section">
+  {"" if not android_suites else f"""<div class="section">
     <div class="section-title">Android <span>JUnit + Robolectric &middot; {len(android_suites)} files &middot; {and_total} tests</span>
       <span class="expand-hint" onclick="toggleAllTests('android-table')">[expand all]</span>
     </div>
@@ -485,17 +810,17 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
       </tr></thead>
       <tbody>{and_file_rows}</tbody>
     </table>
-  </div>'''}
+  </div>"""}
 
   <!-- Coverage Overview -->
-  {"" if not cov_data else f'''<div class="section">
+  {"" if not cov_data else f"""<div class="section">
     <div class="section-title">Coverage <span>v8 provider &middot; {lines_total_n:,} lines tracked</span></div>
 
     <div style="margin-bottom:1rem">
-      <div class="threshold"><div class="dot" style="background:{"#22c55e" if lines_pct >= 18 else "#ef4444"}"></div>Lines ≥18%: {lines_pct:.1f}%</div>
-      <div class="threshold"><div class="dot" style="background:{"#22c55e" if funcs_pct >= 16 else "#ef4444"}"></div>Functions ≥16%: {funcs_pct:.1f}%</div>
-      <div class="threshold"><div class="dot" style="background:{"#22c55e" if branch_pct >= 14 else "#ef4444"}"></div>Branches ≥14%: {branch_pct:.1f}%</div>
-      <div class="threshold"><div class="dot" style="background:{"#22c55e" if stmts_pct >= 18 else "#ef4444"}"></div>Statements ≥18%: {stmts_pct:.1f}%</div>
+      <div class="threshold"><div class="dot" style="background:{"#22c55e" if lines_pct >= 18 else "#ef4444"}"></div>Lines &ge;18%: {lines_pct:.1f}%</div>
+      <div class="threshold"><div class="dot" style="background:{"#22c55e" if funcs_pct >= 16 else "#ef4444"}"></div>Functions &ge;16%: {funcs_pct:.1f}%</div>
+      <div class="threshold"><div class="dot" style="background:{"#22c55e" if branch_pct >= 14 else "#ef4444"}"></div>Branches &ge;14%: {branch_pct:.1f}%</div>
+      <div class="threshold"><div class="dot" style="background:{"#22c55e" if stmts_pct >= 18 else "#ef4444"}"></div>Statements &ge;18%: {stmts_pct:.1f}%</div>
     </div>
 
     <div class="cov-cards">{pkg_cards}</div>
@@ -519,7 +844,7 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
       </tr></thead>
       <tbody>{cov_file_rows}</tbody>
     </table>
-  </div>'''}
+  </div>"""}
 
 </div>
 
@@ -551,6 +876,28 @@ function filterCov(pkg, btn) {{
     else {{ r.style.display = path.startsWith(pkg + '/') ? '' : 'none'; }}
   }});
 }}
+
+function filterVitestCat(cat, btn) {{
+  document.querySelectorAll('#vitest-filter button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const rows = document.querySelectorAll('#vitest-table tbody tr.file-row');
+  rows.forEach(r => {{
+    const show = cat === 'all' || r.dataset.category === cat;
+    r.style.display = show ? '' : 'none';
+    // Also hide associated test-rows when filtering
+    let next = r.nextElementSibling;
+    while (next && next.classList.contains('test-row')) {{
+      next.style.display = 'none';
+      next = next.nextElementSibling;
+    }}
+  }});
+}}
+
+function toggleScenario(id) {{
+  const rows = document.querySelectorAll('.sc-detail-row[data-scenario="' + id + '"]');
+  const anyHidden = Array.from(rows).some(r => r.style.display === 'none');
+  rows.forEach(r => r.style.display = anyHidden ? '' : 'none');
+}}
 </script>
 </body>
 </html>'''
@@ -563,12 +910,33 @@ def main():
     vitest = load_vitest()
     android = load_android_xml()
     cov = load_coverage()
+    scenarios = load_scenarios()
+    history = load_history()
 
     if not vitest and not android:
         print("No test results found. Run 'pnpm test:report' first.")
         sys.exit(1)
 
-    html = generate_html(vitest, android, cov)
+    # Build scenario cross-reference
+    scenario_results = build_scenario_results(scenarios, vitest, android) if scenarios else []
+
+    # Compute stats for history
+    vt_passed = vitest["numPassedTests"] if vitest else 0
+    vt_failed = vitest["numFailedTests"] if vitest else 0
+    vt_total = vitest["numTotalTests"] if vitest else 0
+    and_passed = sum(s["passed"] for s in android)
+    and_failed = sum(s["failures"] + s["errors"] for s in android)
+    and_total = sum(s["tests"] for s in android)
+    total_passed = vt_passed + and_passed
+    total_failed = vt_failed + and_failed
+    total_all = vt_total + and_total
+    cov_total = cov.get("total", {}) if cov else {}
+    lines_pct = cov_total.get("lines", {}).get("pct", 0)
+
+    # Update history
+    history = update_history(history, total_passed, total_failed, total_all, lines_pct)
+
+    html = generate_html(vitest, android, cov, scenarios, scenario_results, history)
     OUTPUT_HTML.write_text(html, encoding="utf-8")
     print(f"HTML report: {OUTPUT_HTML}")
 

@@ -1,0 +1,193 @@
+{
+  "scenarios": [
+    {
+      "id": "session-lifecycle",
+      "name": "Session Lifecycle",
+      "description": "Start session -> processing -> idle -> stop. Core state machine transitions that drive all UI.",
+      "priority": "critical",
+      "tests": {
+        "unit": [
+          {"file": "bridge/src/__tests__/state-machine.test.ts", "patterns": ["basic transitions", "SessionStart", "SessionEnd", "DISCONNECTED", "IDLE", "PROCESSING"]},
+          {"file": "bridge/src/__tests__/output-parser.test.ts", "patterns": ["*"]},
+          {"file": "bridge/src/__tests__/codex-output-parser.test.ts", "patterns": ["*"]}
+        ],
+        "integration": [
+          {"file": "bridge/src/__tests__/server-integration.test.ts", "patterns": ["hook event", "state transition", "WS broadcast"]},
+          {"file": "bridge/src/__tests__/bridge-core.test.ts", "patterns": ["state event", "initialization"]}
+        ],
+        "platform": [
+          {"file": "android/app/src/test/kotlin/dev/agentdeck/net/ProtocolTest.kt", "patterns": ["state_update"]},
+          {"file": "apple/AgentDeckTests/ProtocolTests.swift", "patterns": ["*"]}
+        ],
+        "e2e": []
+      },
+      "gaps": ["No end-to-end test with real Claude PTY process", "No Android UI test for state transitions"]
+    },
+    {
+      "id": "permission-flow",
+      "name": "Permission Flow",
+      "description": "Agent requests permission -> user sees options -> approves/denies -> state transitions back.",
+      "priority": "critical",
+      "tests": {
+        "unit": [
+          {"file": "bridge/src/__tests__/state-machine.test.ts", "patterns": ["permission", "AWAITING_PERMISSION", "AWAITING_OPTION"]},
+          {"file": "plugin/src/__tests__/option-scenario.test.ts", "patterns": ["*"]}
+        ],
+        "integration": [
+          {"file": "bridge/src/__tests__/server-integration.test.ts", "patterns": ["permission"]},
+          {"file": "bridge/src/__tests__/tier3-integration.test.ts", "patterns": ["option", "permission", "selection"]}
+        ],
+        "platform": [
+          {"file": "android/app/src/test/kotlin/dev/agentdeck/net/ProtocolTest.kt", "patterns": ["permission", "option"]}
+        ],
+        "e2e": []
+      },
+      "gaps": ["No multi-option navigation end-to-end test", "No encoder dial interaction test for option scrolling"]
+    },
+    {
+      "id": "multi-agent-monitoring",
+      "name": "Multi-agent Monitoring",
+      "description": "Daemon hub orchestrates multiple session bridges, unified dashboard for all agents.",
+      "priority": "high",
+      "tests": {
+        "unit": [
+          {"file": "bridge/src/__tests__/adapter.test.ts", "patterns": ["*"]},
+          {"file": "bridge/src/__tests__/session-registry.test.ts", "patterns": ["session", "register", "deregister"]}
+        ],
+        "integration": [
+          {"file": "bridge/src/__tests__/daemon-lifecycle.test.ts", "patterns": ["*"]},
+          {"file": "bridge/src/__tests__/bridge-core.test.ts", "patterns": ["sessions_list", "client"]}
+        ],
+        "platform": [],
+        "e2e": []
+      },
+      "gaps": ["No daemon + session bridge coordinated test", "No multi-agent state aggregation test"]
+    },
+    {
+      "id": "device-connection",
+      "name": "Device Connection",
+      "description": "mDNS discovery -> auth token validation -> WebSocket/serial state sync with dashboard clients.",
+      "priority": "high",
+      "tests": {
+        "unit": [
+          {"file": "bridge/src/__tests__/esp32-serial-node.test.ts", "patterns": ["*"]},
+          {"file": "shared/src/__tests__/protocol-contract.test.ts", "patterns": ["*"]}
+        ],
+        "integration": [
+          {"file": "plugin/src/__tests__/connection-integration.test.ts", "patterns": ["*"]},
+          {"file": "bridge/src/__tests__/tier3-integration.test.ts", "patterns": ["*"]}
+        ],
+        "platform": [
+          {"file": "android/app/src/test/kotlin/dev/agentdeck/net/ProtocolTest.kt", "patterns": ["*"]}
+        ],
+        "e2e": []
+      },
+      "gaps": ["No real mDNS discovery test", "No ADB reverse tunnel test", "No auth token rejection test"]
+    },
+    {
+      "id": "timeline-aggregation",
+      "name": "Timeline Aggregation",
+      "description": "Events from multiple sessions -> daemon relay -> dedup -> unified timeline for all clients.",
+      "priority": "high",
+      "tests": {
+        "unit": [
+          {"file": "shared/src/__tests__/timeline.test.ts", "patterns": ["*"]},
+          {"file": "bridge/src/__tests__/session-timeline-relay.test.ts", "patterns": ["*"]}
+        ],
+        "integration": [
+          {"file": "bridge/src/__tests__/timeline-integration.test.ts", "patterns": ["*"]}
+        ],
+        "platform": [
+          {"file": "android/app/src/test/kotlin/dev/agentdeck/state/TimelineStoreTest.kt", "patterns": ["*"]},
+          {"file": "apple/AgentDeckTests/TimelineTests.swift", "patterns": ["*"]}
+        ],
+        "e2e": []
+      },
+      "gaps": ["No daemon-to-client relay end-to-end test", "No LLM summary enrichment test"]
+    },
+    {
+      "id": "voice-recording",
+      "name": "Voice Recording & Transcription",
+      "description": "Audio capture -> whisper transcription -> text delivery to Claude PTY or clipboard.",
+      "priority": "medium",
+      "tests": {
+        "unit": [],
+        "integration": [
+          {"file": "bridge/src/__tests__/tier3-integration.test.ts", "patterns": ["voice", "transcri"]}
+        ],
+        "platform": [],
+        "e2e": []
+      },
+      "gaps": ["No audio recording unit test", "No recording -> transcription -> paste end-to-end", "No Android voice recording test", "No silence detection unit test"]
+    },
+    {
+      "id": "encoder-button-interaction",
+      "name": "Encoder & Button Interaction",
+      "description": "Dial rotate -> option scroll -> push select. Button press -> action trigger. Label rendering.",
+      "priority": "medium",
+      "tests": {
+        "unit": [
+          {"file": "plugin/src/__tests__/option-scenario.test.ts", "patterns": ["layout", "button", "slot"]},
+          {"file": "plugin/src/__tests__/text-utils-and-labels.test.ts", "patterns": ["*"]}
+        ],
+        "integration": [],
+        "platform": [],
+        "e2e": []
+      },
+      "gaps": ["No encoder rotate/push integration test", "No wide canvas takeover test", "No Android Deck gesture test"]
+    },
+    {
+      "id": "usage-tracking",
+      "name": "Usage Tracking & Rate Limits",
+      "description": "API usage fetch -> rate limit gauge -> sibling relay (429 prevention) -> dashboard display.",
+      "priority": "medium",
+      "tests": {
+        "unit": [
+          {"file": "bridge/src/__tests__/session-registry.test.ts", "patterns": ["usage", "metric"]}
+        ],
+        "integration": [
+          {"file": "bridge/src/__tests__/usage-relay.test.ts", "patterns": ["*"]},
+          {"file": "bridge/src/__tests__/bridge-core.test.ts", "patterns": ["usage"]}
+        ],
+        "platform": [
+          {"file": "android/app/src/test/kotlin/dev/agentdeck/state/SessionMetricsTest.kt", "patterns": ["*"]},
+          {"file": "android/app/src/test/kotlin/dev/agentdeck/util/TimeFormatUtilsTest.kt", "patterns": ["*"]}
+        ],
+        "e2e": []
+      },
+      "gaps": ["No real API rate limit response test", "No usage_update WS relay end-to-end"]
+    },
+    {
+      "id": "daemon-singleton",
+      "name": "Daemon Singleton Guard",
+      "description": "PID check -> port probe -> prevent double daemon. Auto-fallback on port conflict.",
+      "priority": "medium",
+      "tests": {
+        "unit": [
+          {"file": "bridge/src/__tests__/session-registry.test.ts", "patterns": ["daemon", "PID", "readDaemonInfo", "writeDaemonInfo", "findDaemonPort"]}
+        ],
+        "integration": [
+          {"file": "bridge/src/__tests__/daemon-lifecycle.test.ts", "patterns": ["*"]}
+        ],
+        "platform": [],
+        "e2e": []
+      },
+      "gaps": ["No port conflict auto-fallback test", "No LaunchAgent KeepAlive loop prevention test"]
+    },
+    {
+      "id": "hook-installation",
+      "name": "Hook Installation & Migration",
+      "description": "Install Claude Code hooks -> migrate v2.0 flat format to v2.1 matcher groups -> port injection.",
+      "priority": "medium",
+      "tests": {
+        "unit": [
+          {"file": "hooks/src/__tests__/install.test.ts", "patterns": ["*"]}
+        ],
+        "integration": [],
+        "platform": [],
+        "e2e": []
+      },
+      "gaps": ["No real settings.local.json file test", "No hook execution verification test"]
+    }
+  ]
+}
