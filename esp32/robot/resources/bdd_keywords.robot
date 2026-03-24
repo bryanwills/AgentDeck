@@ -57,9 +57,16 @@ the ESP32 device "${board}" is booted
     Set Suite Variable    ${BOOT_LINE}    ${line}
 
 the ESP32 device "${board}" is connected and booted
-    [Documentation]    Connect + wait for boot (combined Given step).
+    [Documentation]    Connect + wait for boot, or detect already-running firmware.
     the ESP32 device "${board}" is connected
-    the ESP32 device "${board}" is booted
+    ${booted}=    Run Keyword And Return Status
+    ...    the ESP32 device "${board}" is booted
+    IF    not ${booted}
+        # Device may already be running — try device_info probe
+        Log    Boot marker not found, probing for running firmware...    level=WARN
+        ${info}=    Get Device Info    timeout=5
+        Log    Already running: board=${info}[board], version=${info}[version]
+    END
 
 the PlatformIO configuration is valid
     [Documentation]    Verify platformio.ini can be parsed without errors.
@@ -243,18 +250,80 @@ key source files should exist
     File Should Exist    ${PROJECT_DIR}/platformio.ini
 
 # ═══════════════════════════════════════════════════════════════════
+# Then — Performance Assertions
+# ═══════════════════════════════════════════════════════════════════
+
+the boot time should be under "${max_ms}" ms
+    [Documentation]    Assert boot time is within threshold. Skips if device was already running.
+    ${ok}=    Run Keyword And Return Status    Get Boot Time
+    IF    ${ok}
+        ${ms}=    Get Boot Time
+        Log    [PERF] boot_time_ms=${ms}    level=INFO
+        Set Test Variable    ${BOOT_TIME_MS}    ${ms}
+        Should Be True    ${ms} < ${max_ms}
+        ...    msg=Boot time ${ms}ms exceeds ${max_ms}ms threshold
+    ELSE
+        Log    Device was already running — boot time not measurable (skip)    level=WARN
+        Set Test Variable    ${BOOT_TIME_MS}    ${-1}
+    END
+
+the serial response latency should be under "${max_ms}" ms
+    [Documentation]    Measure device_info round-trip latency.
+    ${ms}=    Measure Response Latency
+    Log    [PERF] response_latency_ms=${ms}    level=INFO
+    Set Test Variable    ${RESPONSE_LATENCY_MS}    ${ms}
+    Should Be True    ${ms} < ${max_ms}
+    ...    msg=Response latency ${ms}ms exceeds ${max_ms}ms threshold
+
+the burst throughput of "${count}" messages should exceed "${min_mps}" msg/s
+    [Documentation]    Measure burst throughput and assert minimum rate.
+    ${result}=    Measure Burst Throughput    ${count}
+    Log    [PERF] burst_throughput=${result}    level=INFO
+    Set Test Variable    ${BURST_THROUGHPUT}    ${result}
+    Should Be True    ${result}[msgs_per_sec] > ${min_mps}
+    ...    msg=Throughput ${result}[msgs_per_sec] msg/s below ${min_mps} threshold
+
+the firmware size for "${board}" should be recorded
+    [Documentation]    Record firmware binary size as a test variable.
+    ${size}=    Get File Size    ${BUILD_DIR}/${board}/firmware.bin
+    Log    [PERF] firmware_size_bytes=${size}    level=INFO
+    Set Test Variable    ${FIRMWARE_SIZE_BYTES}    ${size}
+
+the heap at boot should be recorded
+    [Documentation]    Record free heap at boot as a test variable.
+    ${info}=    Collect Boot Info
+    ${heap}=    Set Variable    ${info}[heap]
+    IF    ${heap} == 0
+        # No boot lines available (already-running device) — skip
+        Log    Heap not available (device was already running)    level=WARN
+    ELSE
+        Log    [PERF] boot_heap_bytes=${heap}    level=INFO
+    END
+    Set Test Variable    ${BOOT_HEAP_BYTES}    ${heap}
+
+# ═══════════════════════════════════════════════════════════════════
 # Helpers (not BDD steps, used internally)
 # ═══════════════════════════════════════════════════════════════════
 
 Get Board Port
-    [Documentation]    Resolve serial port for a board from inventory or auto-detect.
+    [Documentation]    Resolve serial port for a board: inventory → auto-detect.
     [Arguments]    ${board}
-    # First try auto-detection (handles port changes between sessions)
+    # Try inventory-mapped port for this specific board
+    ${inv_port}=    Get Inventory Port    ${board}
+    IF    '${inv_port}' != 'None'
+        ${exists}=    Run Keyword And Return Status
+        ...    File Should Exist    ${inv_port}
+        IF    ${exists}
+            Log    Using inventory port for ${board}: ${inv_port}
+            RETURN    ${inv_port}
+        END
+        Log    Inventory port ${inv_port} not available for ${board}    level=WARN
+    END
+    # Fallback: first available port (single-device setup)
     ${detected}=    Detect ESP32 Port
     IF    '${detected}' != 'None'
         RETURN    ${detected}
     END
-    # Fallback: return None to trigger skip
     RETURN    None
 
 Disconnect Device

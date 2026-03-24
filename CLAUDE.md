@@ -132,7 +132,7 @@ cd plugin && streamdeck link   # link plugin to Stream Deck app
 | **Vitest** | bridge/plugin/shared/hooks | `vitest.config.ts` — coverage thresholds enforced |
 | **JUnit + Robolectric** | Android (`android/app/src/test/`) | `build.gradle.kts` — `testDebugUnitTest` |
 | **XCTest** | Apple (`apple/AgentDeckTests/`) | Xcode scheme |
-| **Robot Framework** | ESP32 (`esp32/robot/`) | `run.sh` — requires hardware |
+| **Robot Framework** | ESP32 (`esp32/robot/`) | `run.sh {build\|hw\|protocol\|perf\|all}` — `perf` requires hardware |
 
 Coverage thresholds (regression guard): lines ≥17%, functions ≥15%, branches ≥14%, statements ≥16%. CI runs `coverage check` step after tests.
 
@@ -140,7 +140,7 @@ Coverage thresholds (regression guard): lines ≥17%, functions ≥15%, branches
 
 - **URL**: `https://puritysb.github.io/AgentDeck/` (landing) / `/reports/` (test report)
 - **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + Robot Framework (no-hw) → HTML report → GitHub Pages deploy
-- **Report generator**: `scripts/generate-html-report.py` — tab-based SPA dashboard. Sidebar nav: Overview + 10 test layers + Android + Robot + Scenarios + Coverage. Each layer tab shows purpose question, describe-block grouping, all test cases visible by default. Robot XML `</robot>` truncation defense built-in
+- **Report generator**: `scripts/generate-html-report.py` — tab-based SPA dashboard. Sidebar nav: Overview + 10 test layers + Android + Robot + Scenarios + Coverage. Each layer tab shows purpose question, describe-block grouping, all test cases visible by default. Robot XML `</robot>` truncation defense built-in. Robot tab: suite→scenario→BDD steps (Given/When/Then color-coded)→board matrix (✓/✗ per board)→per-test elapsed time→performance table (board × metric: build time, FW size, latency, throughput). `[PERF]` log messages auto-extracted from output.xml. Metadata auto-reconciliation: stale `executed: false` overridden when actual data exists
 - **Scenario matrix**: `scripts/scenario-matrix.json` — 10 user scenarios mapped to test files + assertion/case patterns with gap analysis
 - **Landing page**: `scripts/pages-index.html` — product intro at Pages root
 

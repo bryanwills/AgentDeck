@@ -34,9 +34,15 @@ BOARDS = {
         'min_firmware_bytes': 1_000_000,
         'max_firmware_bytes': 3_500_000,
     },
+    'ulanzi_tc001': {
+        'name': 'Ulanzi TC001 8x32 LED Matrix',
+        'env': 'ulanzi_tc001',
+        'min_firmware_bytes': 500_000,      # ~500KB minimum (no LVGL, FastLED only)
+        'max_firmware_bytes': 2_000_000,    # ~2MB maximum (ESP32 classic, 8MB flash)
+    },
 }
 
-ALL_BOARD_ENVS = ['box_86', 'ips_35', 'round_amoled']
+ALL_BOARD_ENVS = ['box_86', 'ips_35', 'round_amoled', 'ulanzi_tc001']
 
 # --- Serial settings ---
 SERIAL_BAUDRATE = 115200

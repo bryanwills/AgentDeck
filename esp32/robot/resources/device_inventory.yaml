@@ -17,7 +17,7 @@ devices:
 
   ips_35:
     env: ips_35
-    port: /dev/cu.usbmodem2111101
+    port: /dev/cu.usbserial-211140
     board_id: ips_35
     screen: "480x320"
     has_psram: true

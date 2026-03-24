@@ -62,12 +62,16 @@ case "${1:-all}" in
         echo "Running flash and boot tests..."
         python3 -m robot --include flash --outputdir "$RESULTS_DIR" $BOARD_VAR tests/
         ;;
+    perf)
+        echo "Running performance benchmark tests..."
+        python3 -m robot --include perf --outputdir "$RESULTS_DIR" $BOARD_VAR tests/
+        ;;
     all)
         echo "Running all tests..."
         python3 -m robot --outputdir "$RESULTS_DIR" $BOARD_VAR tests/
         ;;
     *)
-        echo "Usage: $0 {build|hw|smoke|protocol|flash|all} [board]"
+        echo "Usage: $0 {build|hw|smoke|protocol|flash|perf|all} [board]"
         echo ""
         echo "Boards: box_86, ips_35, round_amoled, ulanzi_tc001"
         echo ""

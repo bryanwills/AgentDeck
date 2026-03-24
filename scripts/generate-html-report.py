@@ -17,6 +17,7 @@ Usage:
 
 import json
 import os
+import re
 import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -78,8 +79,54 @@ def load_android_xml():
         suites.append(suite)
     return suites
 
+BOARD_PREFIXES = [
+    ("Box 86 ", "box_86"),
+    ("IPS 3.5 ", "ips_35"),
+    ("Round AMOLED ", "round_amoled"),
+    ("Ulanzi TC001 ", "ulanzi_tc001"),
+]
+
+BOARD_LABELS = {
+    "box_86": "86Box",
+    "ips_35": "IPS 3.5\"",
+    "round_amoled": "Round",
+    "ulanzi_tc001": "TC001",
+}
+
+
+_BDD_PREFIXES = ('Given ', 'When ', 'Then ', 'And ', 'But ')
+
+
+def _extract_bdd_steps(kw_el):
+    """Recursively extract BDD step names from a keyword element.
+    Only returns Given/When/Then/And/But steps — skips raw Robot library keywords."""
+    steps = []
+    for child_kw in kw_el.findall('kw'):
+        kw_type = child_kw.get('type', '')
+        if kw_type in ('setup', 'teardown', 'for', 'foritem'):
+            continue
+        name = child_kw.get('name', '')
+        if not name:
+            continue
+        is_bdd = any(name.startswith(prefix) for prefix in _BDD_PREFIXES)
+        if is_bdd:
+            steps.append(name)
+        elif len(child_kw.findall('kw')) > 0:
+            # Intermediate keyword (e.g. Template scenario keyword) — recurse
+            steps.extend(_extract_bdd_steps(child_kw))
+    return steps
+
+
+def _extract_board(test_name):
+    """Extract board ID from test name prefix. Returns (board_id, scenario_name) or (None, test_name)."""
+    for prefix, board_id in BOARD_PREFIXES:
+        if test_name.startswith(prefix):
+            return board_id, test_name[len(prefix):]
+    return None, test_name
+
+
 def load_robot_xml():
-    """Parse Robot Framework output.xml into suite/test structure."""
+    """Parse Robot Framework output.xml into structured suite/scenario/test hierarchy."""
     if not ROBOT_XML.exists():
         return None
     try:
@@ -108,28 +155,163 @@ def load_robot_xml():
     failed = int(stats_el.get('fail', 0)) if stats_el is not None else 0
     skipped = int(stats_el.get('skip', 0)) if stats_el is not None else 0
 
-    # Parse individual test cases from <suite> elements
-    cases = []
-    for test_el in root.iter('test'):
-        status_el = test_el.find('status')
-        status = status_el.get('status', 'PASS').upper() if status_el is not None else 'PASS'
-        # Robot status: PASS/FAIL/SKIP
-        case_status = "passed" if status == "PASS" else ("skipped" if status == "SKIP" else "failed")
-        msg = ""
-        if status_el is not None and status_el.text:
-            msg = status_el.text[:300]
-        cases.append({
-            "name": test_el.get("name", ""),
-            "status": case_status,
-            "message": msg,
+    # Parse individual test cases with suite hierarchy
+    flat_cases = []  # backward-compat flat list
+    suites_map = {}  # source -> suite data
+
+    # Find leaf suites (suites that directly contain tests, not just sub-suites)
+    for suite_el in root.iter('suite'):
+        tests = suite_el.findall('test')
+        if not tests:
+            continue
+
+        source = suite_el.get('source', '')
+        suite_name = suite_el.get('name', source)
+        # Extract force tags from suite metadata
+        suite_tags = set()
+
+        for test_el in tests:
+            status_el = test_el.find('status')
+            status = status_el.get('status', 'PASS').upper() if status_el is not None else 'PASS'
+            case_status = "passed" if status == "PASS" else ("skipped" if status == "SKIP" else "failed")
+            msg = ""
+            if status_el is not None and status_el.text:
+                msg = status_el.text[:300]
+
+            test_name = test_el.get("name", "")
+            tags = [t.text for t in test_el.findall('tag') if t.text]
+            suite_tags.update(tags)
+
+            # Extract BDD steps from keyword tree
+            steps = _extract_bdd_steps(test_el)
+
+            # Extract board from test name
+            board_id, scenario_name = _extract_board(test_name)
+
+            # Extract elapsed time
+            elapsed_s = float(status_el.get('elapsed', '0')) if status_el is not None else 0
+
+            # Extract [PERF] metrics from log messages
+            perf = {}
+            if 'perf' in tags:
+                for msg_el in test_el.iter('msg'):
+                    if msg_el.text and '[PERF]' in msg_el.text:
+                        # Parse "[PERF] key=value" patterns
+                        for m in re.finditer(r'\[PERF\]\s+(\w+)=([\d.]+)', msg_el.text):
+                            perf[m.group(1)] = float(m.group(2))
+
+            case = {
+                "name": test_name,
+                "status": case_status,
+                "message": msg,
+                "tags": tags,
+                "steps": steps,
+                "board": board_id,
+                "scenario": scenario_name,
+                "elapsed_s": elapsed_s,
+                "perf": perf,
+            }
+            flat_cases.append(case)
+
+            # Group into suites
+            if source not in suites_map:
+                suites_map[source] = {
+                    "name": suite_name,
+                    "source": os.path.basename(source) if source else suite_name,
+                    "tags": set(),
+                    "cases": [],
+                }
+            suites_map[source]["cases"].append(case)
+
+        if source in suites_map:
+            suites_map[source]["tags"].update(suite_tags)
+
+    # Build structured suites with scenario grouping
+    suites = []
+    all_boards = set()
+    total_scenarios = 0
+    for _source, suite_data in sorted(suites_map.items()):
+        s_passed = sum(1 for c in suite_data["cases"] if c["status"] == "passed")
+        s_failed = sum(1 for c in suite_data["cases"] if c["status"] == "failed")
+        s_skipped = sum(1 for c in suite_data["cases"] if c["status"] == "skipped")
+
+        # Group cases by scenario name
+        scenario_map = {}
+        standalone = []
+        for case in suite_data["cases"]:
+            if case["board"]:
+                all_boards.add(case["board"])
+                sn = case["scenario"]
+                if sn not in scenario_map:
+                    scenario_map[sn] = {"name": sn, "cases": [], "boards": [], "steps": []}
+                scenario_map[sn]["cases"].append(case)
+                if case["board"] not in scenario_map[sn]["boards"]:
+                    scenario_map[sn]["boards"].append(case["board"])
+                # Use first case's steps as representative BDD steps for scenario
+                if not scenario_map[sn]["steps"] and case["steps"]:
+                    scenario_map[sn]["steps"] = case["steps"]
+            else:
+                standalone.append(case)
+
+        # Build ordered scenarios list (maintain insertion order)
+        scenarios = []
+        seen = set()
+        for case in suite_data["cases"]:
+            if case["board"] and case["scenario"] not in seen:
+                seen.add(case["scenario"])
+                scenarios.append(scenario_map[case["scenario"]])
+        # Append standalone tests as single-case scenarios
+        for case in standalone:
+            scenarios.append({
+                "name": case["name"],
+                "cases": [case],
+                "boards": [],
+                "steps": case["steps"],
+                "standalone": True,
+            })
+
+        total_scenarios += len(scenarios)
+
+        suites.append({
+            "name": suite_data["name"],
+            "source": suite_data["source"],
+            "tags": sorted(suite_data["tags"]),
+            "passed": s_passed,
+            "failed": s_failed,
+            "skipped": s_skipped,
+            "total": len(suite_data["cases"]),
+            "scenarios": scenarios,
         })
+
+    # Build performance summary: board → metrics
+    perf_summary = {}
+    for case in flat_cases:
+        bid = case.get("board")
+        if not bid:
+            continue
+        if bid not in perf_summary:
+            perf_summary[bid] = {}
+        # Use test elapsed as build/flash/boot time based on scenario name
+        scenario = case.get("scenario", "")
+        elapsed = case.get("elapsed_s", 0)
+        if "Build And Verify" in scenario and elapsed > 0:
+            perf_summary[bid]["build_s"] = elapsed
+        elif "Flash And Boot" in scenario and elapsed > 0:
+            perf_summary[bid]["flash_boot_s"] = elapsed
+        # Merge [PERF] metrics from perf-tagged tests
+        for key, val in case.get("perf", {}).items():
+            perf_summary[bid][key] = val
 
     return {
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
         "total": passed + failed + skipped,
-        "cases": cases,
+        "cases": flat_cases,
+        "suites": suites,
+        "boards": sorted(all_boards),
+        "scenario_count": total_scenarios,
+        "perf_summary": perf_summary,
     }
 
 def load_scenarios():
@@ -647,6 +829,68 @@ def sparkline_svg(history, key, color, label, w=200, h=40):
     </div>'''
 
 
+def _fmt_perf(val, unit="", decimals=1):
+    """Format a perf value for table display."""
+    if val is None:
+        return '<span style="color:var(--dim)">—</span>'
+    if unit == "ms":
+        return f"{val:,.{decimals}f} ms"
+    if unit == "s":
+        return f"{val:,.{decimals}f}s"
+    if unit == "KB":
+        return f"{val / 1024:,.0f} KB"
+    if unit == "msg/s":
+        return f"{val:,.0f} msg/s"
+    return f"{val:,.{decimals}f}{unit}"
+
+
+def _build_robot_perf_table(robot):
+    """Build a board × metric performance comparison table."""
+    perf = robot.get("perf_summary", {})
+    if not perf:
+        return ""
+    boards = robot.get("boards", sorted(perf.keys()))
+    if not boards:
+        return ""
+
+    # Define metrics to display
+    metrics = [
+        ("build_s", "Build", "s"),
+        ("flash_boot_s", "Flash+Boot", "s"),
+        ("boot_time_ms", "Boot Time", "ms"),
+        ("firmware_size_bytes", "FW Size", "KB"),
+        ("boot_heap_bytes", "Boot Heap", "KB"),
+        ("response_latency_ms", "Latency", "ms"),
+    ]
+
+    # Check if any metric has data
+    has_data = any(perf.get(b, {}).get(m[0]) for b in boards for m in metrics)
+    if not has_data:
+        return ""
+
+    header = "<tr><th>Board</th>"
+    for _, label, _ in metrics:
+        header += f"<th>{label}</th>"
+    header += "</tr>"
+
+    rows = ""
+    for bid in boards:
+        bdata = perf.get(bid, {})
+        label = BOARD_LABELS.get(bid, bid)
+        rows += f"<tr><td style=\"font-weight:600\">{label}</td>"
+        for key, _, unit in metrics:
+            val = bdata.get(key)
+            rows += f"<td>{_fmt_perf(val, unit)}</td>"
+        rows += "</tr>"
+
+    return f'''<div class="perf-table-wrap">
+      <table class="perf-table">
+        <thead>{header}</thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>'''
+
+
 def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results, history, metadata, robot=None):
     """Generate tab-based SPA test report."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -863,7 +1107,146 @@ def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results,
 
     # --- Build robot tab content ---
     robot_tab_html = ""
-    if robot:
+    if robot and robot.get("suites"):
+        for suite in robot["suites"]:
+            s_color = "#22c55e" if suite["failed"] == 0 else "#ef4444"
+            s_icon = "&#10003;" if suite["failed"] == 0 else "&#10007;"
+            tags_html = "".join(
+                f'<span class="robot-tag">{t}</span>' for t in suite["tags"]
+            )
+
+            scenarios_html = ""
+            for scenario in suite["scenarios"]:
+                is_standalone = scenario.get("standalone", False)
+                sc_cases = scenario["cases"]
+                sc_passed = sum(1 for c in sc_cases if c["status"] == "passed")
+                sc_failed = sum(1 for c in sc_cases if c["status"] == "failed")
+                sc_skipped = sum(1 for c in sc_cases if c["status"] == "skipped")
+                sc_color = "#22c55e" if sc_failed == 0 else "#ef4444"
+                sc_icon = "&#10003;" if sc_failed == 0 else ("&#9675;" if sc_passed == 0 and sc_skipped > 0 else "&#10007;")
+
+                if is_standalone:
+                    # Render as simple test case
+                    c = sc_cases[0]
+                    c_icon = "&#10003;" if c["status"] == "passed" else ("&#9675;" if c["status"] == "skipped" else "&#10007;")
+                    c_color = "#22c55e" if c["status"] == "passed" else ("#64748b" if c["status"] == "skipped" else "#ef4444")
+                    fail_msg = ""
+                    if c.get("message") and c["status"] == "failed":
+                        escaped = c["message"][:300].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        fail_msg = f'<div class="fail-msg">{escaped}</div>'
+                    sc_elapsed = duration_fmt(c.get("elapsed_s", 0) * 1000) if c.get("elapsed_s", 0) >= 0.1 else ""
+                    scenarios_html += f'''<div class="test-case">
+                      <span class="test-icon" style="color:{c_color}">{c_icon}</span>
+                      <div class="test-body">
+                        <div class="test-title">{c["name"]}</div>
+                        {fail_msg}
+                      </div>
+                      <span class="test-dur">{sc_elapsed}</span>
+                    </div>'''
+                    continue
+
+                # Multi-board scenario
+                boards = scenario.get("boards", [])
+                board_count = len(boards)
+
+                # BDD steps
+                steps_html = ""
+                if scenario.get("steps"):
+                    step_lines = ""
+                    for step in scenario["steps"]:
+                        # Color-code BDD keywords
+                        if step.startswith("Given "):
+                            kw, rest = "Given", step[6:]
+                            kw_color = "#60a5fa"
+                        elif step.startswith("When "):
+                            kw, rest = "When", step[5:]
+                            kw_color = "#fbbf24"
+                        elif step.startswith("Then "):
+                            kw, rest = "Then", step[5:]
+                            kw_color = "#34d399"
+                        elif step.startswith("And "):
+                            kw, rest = "And", step[4:]
+                            kw_color = "#94a3b8"
+                        elif step.startswith("But "):
+                            kw, rest = "But", step[4:]
+                            kw_color = "#f87171"
+                        else:
+                            kw, rest = "", step
+                            kw_color = "#94a3b8"
+                        escaped_rest = rest.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        if kw:
+                            step_lines += f'<div class="bdd-step"><span class="bdd-kw" style="color:{kw_color}">{kw}</span> <span class="bdd-text">{escaped_rest}</span></div>'
+                        else:
+                            step_lines += f'<div class="bdd-step"><span class="bdd-text">{escaped_rest}</span></div>'
+                    steps_html = f'<div class="bdd-steps">{step_lines}</div>'
+
+                # Board matrix
+                board_chips = ""
+                for board_id in ["box_86", "ips_35", "round_amoled", "ulanzi_tc001"]:
+                    label = BOARD_LABELS.get(board_id, board_id)
+                    case_for_board = next((c for c in sc_cases if c.get("board") == board_id), None)
+                    if case_for_board:
+                        if case_for_board["status"] == "passed":
+                            chip_style = "background:rgba(34,197,94,0.15);color:#22c55e;border-color:rgba(34,197,94,0.3)"
+                            chip_icon = "&#10003;"
+                        elif case_for_board["status"] == "skipped":
+                            chip_style = "background:rgba(100,116,139,0.15);color:#64748b;border-color:rgba(100,116,139,0.3)"
+                            chip_icon = "&#9675;"
+                        else:
+                            chip_style = "background:rgba(239,68,68,0.15);color:#ef4444;border-color:rgba(239,68,68,0.3)"
+                            chip_icon = "&#10007;"
+                        board_chips += f'<span class="board-chip" style="{chip_style}">{chip_icon} {label}</span>'
+                    else:
+                        board_chips += f'<span class="board-chip board-chip-na">— {label}</span>'
+                board_matrix_html = f'<div class="board-matrix">{board_chips}</div>'
+
+                # Individual test cases per board
+                board_cases_html = ""
+                for case in sc_cases:
+                    c_icon = "&#10003;" if case["status"] == "passed" else ("&#9675;" if case["status"] == "skipped" else "&#10007;")
+                    c_color = "#22c55e" if case["status"] == "passed" else ("#64748b" if case["status"] == "skipped" else "#ef4444")
+                    fail_msg = ""
+                    if case.get("message") and case["status"] == "failed":
+                        escaped = case["message"][:500].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        fail_msg = f'<div class="fail-msg">{escaped}</div>'
+                    c_elapsed = duration_fmt(case.get("elapsed_s", 0) * 1000) if case.get("elapsed_s", 0) >= 0.1 else ""
+                    board_cases_html += f'''<div class="test-case">
+                      <span class="test-icon" style="color:{c_color}">{c_icon}</span>
+                      <div class="test-body">
+                        <div class="test-title">{case["name"]}</div>
+                        {fail_msg}
+                      </div>
+                      <span class="test-dur">{c_elapsed}</span>
+                    </div>'''
+
+                # Scenario block
+                scenarios_html += f'''<div class="describe-group">
+                  <div class="describe-header">
+                    <span class="describe-icon" style="color:{sc_color}">{sc_icon}</span>
+                    <span class="describe-name">{scenario["name"]}</span>
+                    <span class="robot-board-badge">{board_count} board{"s" if board_count != 1 else ""}</span>
+                    <span class="describe-stats"><span style="color:#22c55e">{sc_passed}</span> / <span style="color:{"#ef4444" if sc_failed else "var(--dim)"}">{len(sc_cases)}</span></span>
+                  </div>
+                  {steps_html}
+                  {board_matrix_html}
+                  <div class="describe-cases">{board_cases_html}</div>
+                </div>'''
+
+            robot_tab_html += f'''<div class="file-block">
+              <div class="file-header">
+                <span class="file-icon" style="color:{s_color}">{s_icon}</span>
+                <span class="file-name">{suite["source"]}</span>
+                <span class="robot-tags">{tags_html}</span>
+                <div class="file-stats">
+                  <span style="color:#22c55e">{suite["passed"]}</span>
+                  <span class="file-sep">/</span>
+                  <span style="color:{"#ef4444" if suite["failed"] else "var(--dim)"}">{suite["total"]}</span>
+                </div>
+              </div>
+              {scenarios_html}
+            </div>'''
+    elif robot:
+        # Fallback: flat list (no suite structure available)
         for c in robot["cases"]:
             c_icon = "&#10003;" if c["status"] == "passed" else ("&#9675;" if c["status"] == "skipped" else "&#10007;")
             c_color = "#22c55e" if c["status"] == "passed" else ("#64748b" if c["status"] == "skipped" else "#ef4444")
@@ -871,13 +1254,14 @@ def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results,
             if c.get("message") and c["status"] == "failed":
                 escaped = c["message"][:300].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 fail_msg = f'<div class="fail-msg">{escaped}</div>'
+            fb_elapsed = duration_fmt(c.get("elapsed_s", 0) * 1000) if c.get("elapsed_s", 0) >= 0.1 else ""
             robot_tab_html += f'''<div class="test-case">
               <span class="test-icon" style="color:{c_color}">{c_icon}</span>
               <div class="test-body">
                 <div class="test-title">{c["name"]}</div>
                 {fail_msg}
               </div>
-              <span class="test-dur">{status_badge(c["status"])}</span>
+              <span class="test-dur">{fb_elapsed}</span>
             </div>'''
 
     # --- Build scenario tab content ---
@@ -1267,8 +1651,9 @@ def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results,
           <span style="font-size:1.1rem;font-weight:600">Robot Framework</span>
           <span class="layer-tab-badge">{status_badge(robot_meta["status"])}</span>
         </div>
-        <div class="layer-tab-question">ESP32 build verification &middot; {rob_total} tests (no-hw)</div>
+        <div class="layer-tab-question">ESP32 Hardware Tests &middot; {len(robot.get("suites", [])) if robot else 0} suites &middot; {robot.get("scenario_count", 0) if robot else 0} scenarios &middot; {rob_total} tests &middot; {len(robot.get("boards", [])) if robot else 0} boards</div>
       </div>
+      {_build_robot_perf_table(robot) if robot and robot.get("perf_summary") else ""}
       {robot_tab_html if robot else '<div class="empty-state">No Robot Framework test results available.</div>'}
     </div>'''
 
@@ -1358,6 +1743,23 @@ body {{ background: var(--bg); color: var(--text); font-family: -apple-system, B
 .describe-name {{ font-size: 0.8rem; font-weight: 600; flex: 1; }}
 .describe-stats {{ font-size: 0.75rem; color: var(--dim); }}
 .describe-cases {{ padding: 0 0 0.25rem; }}
+
+/* Robot BDD & Board matrix */
+.robot-tags {{ display: flex; gap: 0.25rem; margin-left: 0.5rem; }}
+.robot-tag {{ font-size: 0.65rem; padding: 1px 6px; border-radius: 3px; background: rgba(251,146,60,0.15); color: #fb923c; border: 1px solid rgba(251,146,60,0.25); }}
+.robot-board-badge {{ font-size: 0.7rem; padding: 1px 6px; border-radius: 3px; background: rgba(96,165,250,0.12); color: #60a5fa; }}
+.bdd-steps {{ padding: 0.4rem 1rem 0.25rem 2.5rem; }}
+.bdd-step {{ font-size: 0.78rem; line-height: 1.6; font-family: 'SF Mono', 'Fira Code', monospace; }}
+.bdd-kw {{ font-weight: 700; display: inline-block; min-width: 3.5em; }}
+.bdd-text {{ color: #cbd5e1; }}
+.board-matrix {{ display: flex; gap: 0.35rem; padding: 0.35rem 1rem 0.5rem 2.5rem; flex-wrap: wrap; }}
+.board-chip {{ font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; border: 1px solid; white-space: nowrap; }}
+.board-chip-na {{ background: rgba(51,65,85,0.3); color: #475569; border-color: rgba(51,65,85,0.4); }}
+.perf-table-wrap {{ margin: 0 0 1rem; }}
+.perf-table {{ width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 10px; overflow: hidden; }}
+.perf-table th {{ text-align: left; padding: 0.6rem 0.75rem; color: var(--dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid #1a2332; }}
+.perf-table td {{ padding: 0.5rem 0.75rem; font-size: 0.8rem; font-family: 'SF Mono', 'Fira Code', monospace; border-bottom: 1px solid #0f1923; }}
+.perf-table tr:last-child td {{ border-bottom: none; }}
 
 /* Test cases */
 .test-case {{ display: flex; align-items: flex-start; padding: 0.3rem 1rem 0.3rem 2rem; gap: 0.5rem; }}
@@ -1528,6 +1930,16 @@ def main():
     if not metadata:
         metadata = build_default_metadata(vitest, android, robot)
         METADATA_JSON.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    else:
+        # Reconcile metadata with actual data presence — override stale not-run flags
+        suites = metadata.setdefault("suites", {})
+        if vitest and not suites.get("vitest", {}).get("executed"):
+            suites["vitest"] = {"status": "pass" if vitest.get("numFailedTests", 0) == 0 else "fail", "executed": True, "note": ""}
+        if android and not suites.get("android", {}).get("executed"):
+            af = sum(s["failures"] + s["errors"] for s in android)
+            suites["android"] = {"status": "pass" if af == 0 else "fail", "executed": True, "note": ""}
+        if robot and not suites.get("robot", {}).get("executed"):
+            suites["robot"] = {"status": "pass" if robot["failed"] == 0 else "fail", "executed": True, "note": ""}
 
     if not vitest and not android and not robot:
         print("No test results found. Run 'pnpm test:report' first.")
