@@ -128,15 +128,24 @@ private fun gaugeColor(percent: Double): Color {
 @Composable
 private fun GaugeText(label: String, percent: Double, resetTime: String, stale: String) {
     val gauge = blockGauge(percent)
-    val resetSuffix = if (resetTime.isNotEmpty()) " $resetTime" else ""
     Text(
-        text = "$label $gauge ${percent.toInt()}%$resetSuffix$stale",
+        text = "$label $gauge ${percent.toInt()}%$stale",
         fontSize = 11.sp,
         lineHeight = 14.sp,
         fontFamily = FontFamily.Monospace,
         color = gaugeColor(percent),
         maxLines = 1,
     )
+    if (resetTime.isNotEmpty()) {
+        Text(
+            text = "   \u27F2 $resetTime",
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            fontFamily = FontFamily.Monospace,
+            color = Color.DarkGray,
+            maxLines = 1,
+        )
+    }
 }
 
 // -- MODELS column --
