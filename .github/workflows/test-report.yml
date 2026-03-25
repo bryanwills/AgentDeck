@@ -76,10 +76,11 @@ jobs:
         env:
           PIO_TIMEOUT: 600
         run: |
-          pip install robotframework platformio pyserial pyyaml
-          # Pre-install PIO platforms to avoid download failures during tests
-          pio pkg install --global --platform "https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip" || true
-          pio pkg install --global --platform "espressif32@^6.9.0" || true
+          pip install robotframework platformio pyserial pyyaml intelhex
+          # Pre-build one env per platform to cache toolchains + frameworks
+          cd esp32 && pio run -e ips_35 --target checkprogsize || true
+          pio run -e ulanzi_tc001 --target checkprogsize || true
+          cd ..
           mkdir -p coverage/test-report/robot
           cd esp32/robot && python3 -m robot --include no-hw --exclude hw \
             --outputdir ../../coverage/test-report/robot \
