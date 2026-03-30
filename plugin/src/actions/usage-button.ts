@@ -307,7 +307,7 @@ export function fetchStandaloneModelCatalog(): void {
           }
         }
       }
-      return { name: m.name, role, available: m.available !== false };
+      return { key: m.key, name: m.name, role, available: m.available !== false };
     });
 
     dlog('UsaBut', `standalone model catalog: ${modelCatalog.length} models`);

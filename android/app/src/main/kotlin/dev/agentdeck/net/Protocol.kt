@@ -45,6 +45,7 @@ data class AgentCapabilities(
 
 @Serializable
 data class ModelCatalogEntry(
+    val key: String = "",
     val name: String,
     val role: String? = null,
     val available: Boolean = true,

@@ -47,6 +47,7 @@ function parseRole(tags: string[]): ModelCatalogEntry['role'] {
  */
 function toEntries(models: OpenClawModel[]): ModelCatalogEntry[] {
   return models.map((m) => ({
+    key: m.key,
     name: m.name,
     role: parseRole(m.tags ?? []),
     available: m.available !== false,
@@ -112,7 +113,7 @@ export async function getDefaultModelName(): Promise<string | null> {
   const catalog = await fetchModelCatalog();
   if (!catalog) return null;
   const defaultEntry = catalog.entries.find((e) => e.role === 'default');
-  return defaultEntry?.name ?? null;
+  return defaultEntry?.key ?? null;
 }
 
 /**

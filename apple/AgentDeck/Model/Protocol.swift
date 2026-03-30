@@ -25,9 +25,18 @@ enum BillingType: String, Codable, Sendable {
 // MARK: - Model / Session
 
 struct ModelCatalogEntry: Codable, Sendable {
+    let key: String
     let name: String
     let role: String  // "default" | "fallback-{n}" | "configured"
     let available: Bool
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decodeIfPresent(String.self, forKey: .key) ?? ""
+        name = try container.decode(String.self, forKey: .name)
+        role = try container.decode(String.self, forKey: .role)
+        available = try container.decode(Bool.self, forKey: .available)
+    }
 }
 
 struct OcSessionStatus: Codable, Sendable {

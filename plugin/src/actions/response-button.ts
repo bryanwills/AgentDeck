@@ -224,6 +224,13 @@ const GATEWAY_ICON_SVG = [
   `</g>`,
 ].join('');
 
+function getDefaultModelKey(): string {
+  const catalog = getModelCatalog();
+  if (!catalog) return '';
+  const def = catalog.find(m => m.role === 'default');
+  return def?.key ?? '';
+}
+
 function getDefaultModelName(): string {
   const catalog = getModelCatalog();
   if (!catalog) return '';
@@ -677,10 +684,10 @@ function resolveActionLabel(actionStr: string): string | null {
   if (actionStr === 'command:summarize') return '\u25B7 SUMMARIZE \u2014 Request progress summary';
   if (actionStr === 'open:gateway_web') return '\u25B7 GATEWAY \u2014 Open web UI';
   if (actionStr === 'action:model_switch') {
-    const cur = getDefaultModelName() || '?';
+    const cur = getDefaultModelKey() || '?';
     const catalog = getModelCatalog();
-    const next = catalog ? getNextModelName(catalog, cur) : '?';
-    return `\u25B7 MODEL \u2014 Switch model: ${cur} \u2192 ${next}`;
+    const next = catalog ? getNextModelKey(catalog, cur) : '?';
+    return `\u25B7 MODEL \u2014 Switch model: ${stripProviderPrefix(cur)} \u2192 ${stripProviderPrefix(next)}`;
   }
   if (actionStr.startsWith('respond:')) {
     const val = actionStr.split(':')[1];
@@ -690,14 +697,14 @@ function resolveActionLabel(actionStr: string): string | null {
   return null;
 }
 
-/** Get next available model name in circular order (skips unavailable) */
-function getNextModelName(catalog: import('@agentdeck/shared').ModelCatalogEntry[], current: string): string {
+/** Get next available model key in circular order (skips unavailable) */
+function getNextModelKey(catalog: import('@agentdeck/shared').ModelCatalogEntry[], current: string): string {
   if (catalog.length === 0) return '';
-  const idx = catalog.findIndex(m => m.name === current);
+  const idx = catalog.findIndex(m => m.key === current);
   const start = idx >= 0 ? idx : 0;
   for (let i = 1; i <= catalog.length; i++) {
     const candidate = catalog[(start + i) % catalog.length];
-    if (candidate.available && candidate.name !== current) return candidate.name;
+    if (candidate.available && candidate.key !== current) return candidate.key;
   }
   return '';
 }
@@ -709,8 +716,8 @@ async function handleModelSwitch(): Promise<void> {
     dlog('RspBut', 'model_switch: no catalog or <2 available models');
     return;
   }
-  const current = getDefaultModelName();
-  const next = getNextModelName(catalog, current);
+  const current = getDefaultModelKey();
+  const next = getNextModelKey(catalog, current);
   if (!next || next === current) return;
 
   modelSwitching = true;
