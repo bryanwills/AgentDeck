@@ -84,13 +84,13 @@ describe('ConnectionManager', () => {
     expect(cm.getCapabilities()).toBeNull();
   });
 
-  it('start() begins bridge connection', () => {
+  it('start() begins bridge connection to daemon', () => {
     const bridge = getBridge(cm);
     const bridgeConnect = vi.spyOn(bridge, 'connect');
 
-    cm.start(9125);
+    cm.start();
 
-    expect(bridgeConnect).toHaveBeenCalledWith(9125);
+    expect(bridgeConnect).toHaveBeenCalled();
   });
 
   it('emits connected when bridge connects', () => {
@@ -146,20 +146,8 @@ describe('ConnectionManager', () => {
     expect(getBridge(cm).send).not.toHaveBeenCalled();
   });
 
-  it('reconnectBridgeTo delegates to bridge', () => {
-    const reconnectSpy = vi.spyOn(getBridge(cm), 'reconnectTo');
-    cm.reconnectBridgeTo(9125);
-    expect(reconnectSpy).toHaveBeenCalledWith(9125);
-  });
-
   it('getBridgePort returns bridge port', () => {
     expect(cm.getBridgePort()).toBe(9120);
-  });
-
-  it('scanLatestPort setter delegates to bridge', () => {
-    const fn = () => 9130;
-    cm.scanLatestPort = fn;
-    expect(getBridge(cm).scanLatestPort).toBe(fn);
   });
 
   // ===== Agent Switching =====

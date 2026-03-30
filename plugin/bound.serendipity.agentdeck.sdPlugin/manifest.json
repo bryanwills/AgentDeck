@@ -1,6 +1,21 @@
 {
   "Actions": [
     {
+      "Icon": "static/imgs/session",
+      "Name": "Session Slot",
+      "States": [
+        {
+          "Image": "static/imgs/session",
+          "Name": "Session Slot",
+          "TitleAlignment": "middle",
+          "ShowTitle": false
+        }
+      ],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": true,
+      "UUID": "bound.serendipity.agentdeck.session-slot"
+    },
+    {
       "Icon": "static/imgs/response",
       "Name": "Quick Action",
       "States": [
@@ -175,5 +190,14 @@
     "Version": "20",
     "Debug": "enabled"
   },
-  "Version": "0.3.0.0"
+  "Profiles": [
+    {
+      "Name": "agentdeck-v4",
+      "DeviceType": 7,
+      "AutoInstall": true,
+      "DontAutoSwitchWhenInstalled": false,
+      "Readonly": false
+    }
+  ],
+  "Version": "0.4.0.0"
 }

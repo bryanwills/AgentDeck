@@ -9,6 +9,7 @@ export type BillingType = 'subscription' | 'api' | 'unknown';
 // ===== Model Catalog (OpenClaw) =====
 
 export interface ModelCatalogEntry {
+  key: string;
   name: string;
   role: 'default' | `fallback-${number}` | 'configured';
   available: boolean;
@@ -373,6 +374,11 @@ export interface SwitchAgentCommand {
   agent: 'openclaw' | 'claude-code';
 }
 
+export interface FocusSessionCommand {
+  type: 'focus_session';
+  sessionId: string;
+}
+
 export type PluginCommand =
   | ResponseCommand
   | SelectOptionCommand
@@ -385,7 +391,8 @@ export type PluginCommand =
   | QueryUsageCommand
   | DiagCommand
   | UtilityCommand
-  | SwitchAgentCommand;
+  | SwitchAgentCommand
+  | FocusSessionCommand;
 
 // ===== Hook Event Types =====
 

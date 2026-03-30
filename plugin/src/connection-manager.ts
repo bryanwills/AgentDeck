@@ -1,11 +1,9 @@
 /**
- * ConnectionManager — bridge-only connection to daemon/session bridges.
+ * ConnectionManager — daemon-only connection.
  *
- * All OpenClaw Gateway interaction goes through the daemon (single WS connection).
- * Agent switching sends a `switch_agent` command to the daemon, which broadcasts
- * the appropriate state_update to all clients.
- *
- * Implements AgentLink so plugin.ts can use it as a drop-in replacement for BridgeClient.
+ * The plugin connects exclusively to the daemon (port from daemon.json).
+ * All session/agent interaction goes through daemon commands.
+ * If daemon is not running, plugin shows disconnected state.
  */
 import { EventEmitter } from 'events';
 import { readFileSync } from 'fs';
@@ -34,6 +32,7 @@ const FORWARDED_EVENTS = [
   'timeline_history',
   'display_state',
   'voice_assistant_state',
+  'sessions_list',
 ] as const;
 
 export class ConnectionManager extends EventEmitter implements AgentLink {
@@ -72,50 +71,41 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
 
   // ===== Public API =====
 
-  /** Start bridge connection to the given port (or scan for one). */
-  start(port?: number): void {
+  /** Start daemon-only connection. Reads port from daemon.json. */
+  start(): void {
     if (this.started) return;
     this.started = true;
-    dinfo(TAG, `start(port=${port ?? 'auto'})`);
-    this.bridge.connect(port);
+    const port = this.findDaemonPort();
+    dinfo(TAG, `start(daemon port=${port ?? 'not found'})`);
+    this.bridge.connect(port ?? undefined);
   }
 
-  /** Expose bridge's scanLatestPort setter for plugin.ts */
-  set scanLatestPort(fn: (() => number | undefined) | null) {
-    this.bridge.scanLatestPort = fn;
-  }
-
-  /** Reconnect bridge to a different session port (for session switching). */
-  reconnectBridgeTo(port: number): void {
-    dlog(TAG, `reconnectBridgeTo(${port})`);
-    this.bridge.reconnectTo(port);
-  }
-
-  /** Get current bridge port (for session/iterm dial). */
+  /** Get current bridge port. */
   getBridgePort(): number {
     return this.bridge.getPort();
   }
 
-  // ===== Agent Selection API =====
+  // ===== Agent/Session Commands (all via daemon) =====
 
   /**
-   * Switch to OpenClaw via daemon. Reconnects to daemon port and sends switch_agent command.
-   * The daemon responds with state_update containing agentType: 'openclaw'.
+   * Focus a specific session via daemon command.
+   * Daemon will relay state_update for the focused session.
+   */
+  focusSession(sessionId: string): void {
+    dinfo(TAG, `focusSession(${sessionId})`);
+    this.bridge.send({ type: 'focus_session', sessionId } as any);
+  }
+
+  /**
+   * Switch to OpenClaw via daemon.
    */
   switchToOpenClaw(): void {
     dinfo(TAG, 'switchToOpenClaw()');
-    const daemonPort = this.findDaemonPort();
-    if (daemonPort && this.bridge.getPort() !== daemonPort) {
-      // Reconnect to daemon (we may be connected to a session bridge)
-      this.bridge.reconnectTo(daemonPort);
-    }
-    // Send switch_agent command — daemon will broadcast openclaw state
     this.bridge.send({ type: 'switch_agent', agent: 'openclaw' });
   }
 
   /**
-   * Switch to Claude Code. Just sends switch_agent to daemon; caller typically also
-   * calls reconnectBridgeTo(sessionPort) to connect to the specific session bridge.
+   * Switch to Claude Code via daemon.
    */
   switchToClaude(): void {
     dinfo(TAG, 'switchToClaude()');
@@ -123,8 +113,7 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
   }
 
   /**
-   * Whether OpenClaw Gateway is available (reported by daemon via state_update.gatewayAvailable).
-   * Used to determine if OpenClaw should appear in the session cycle list.
+   * Whether OpenClaw Gateway is available (reported by daemon).
    */
   setBridgeGatewayAvailable(available: boolean): void {
     this.gatewayAvailable = available;
@@ -136,7 +125,7 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
 
   // ===== Private =====
 
-  /** Read daemon.json to find the daemon's port for OpenClaw reconnection. */
+  /** Read daemon.json to find the daemon's port. */
   private findDaemonPort(): number | null {
     try {
       const daemonFile = join(homedir(), '.agentdeck', 'daemon.json');
@@ -159,12 +148,12 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
     }
 
     this.bridge.on('connected', () => {
-      dinfo(TAG, 'Bridge connected');
+      dinfo(TAG, 'Daemon connected');
       this.emit('connected');
     });
 
     this.bridge.on('disconnected', () => {
-      dinfo(TAG, 'Bridge disconnected');
+      dinfo(TAG, 'Daemon disconnected');
       this.emit('disconnected');
     });
   }

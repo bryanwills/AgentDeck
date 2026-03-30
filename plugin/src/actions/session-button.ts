@@ -121,7 +121,7 @@ function startFileWatch(): void {
           currentSessionIndex = sessions.indexOf(newest);
           currentProjectName = newest.projectName;
           dlog('SesBut', `New session detected (disconnected) — auto-switching to ${getDisplayName(newest, sessions)}:${newest.port}`);
-          bridge.reconnectBridgeTo(newest.port);
+          // v4: daemon-only — no direct session bridge connection
         }
       } else {
         dlog('SesBut', `New session detected — staying on current (state=${currentState}), count ${prevCount}→${sessions.length}`);
@@ -227,7 +227,7 @@ function autoReconnect(): void {
   if (other) {
     currentSessionIndex = sessions.indexOf(other);
     currentProjectName = other.projectName;
-    bridge.reconnectBridgeTo(other.port);
+    // v4: daemon-only — no direct session bridge connection
   }
 }
 
@@ -245,7 +245,7 @@ export function switchToPort(port: number): void {
   currentModel = undefined;
   currentEffortLevel = undefined;
   dlog('SesBut', `switchToPort: → ${getDisplayName(sessions[idx], sessions)}:${port}`);
-  bridge.reconnectBridgeTo(port);
+  // v4: daemon-only — no direct session bridge connection
   refreshAll();
   onSessionSwitched?.();
 }
@@ -849,7 +849,7 @@ function cycleSession(): void {
     dlog('SesBut', `cycle: ${currentSessionIndex + 1}/${sessions.length} → ${getDisplayName(session, sessions)}:${session.port}`);
     fireSuppressAutoSwitch();
     bridge.switchToClaude();
-    bridge.reconnectBridgeTo(session.port);
+    // v4: daemon-only — session switching via daemon command
   }
   refreshAll();
   // Trigger full UI flush (encoders, response buttons, etc.) with reset state

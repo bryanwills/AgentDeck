@@ -18,11 +18,14 @@ import {
   type DeckSlotMapEvent,
   type VoiceAssistantStateEvent,
   type VoiceAssistantState,
+  type SessionInfo,
 } from '@agentdeck/shared';
 
 import { ConnectionManager } from './connection-manager.js';
 import { LayoutManager } from './layout-manager.js';
 import { setExpandCallback } from './expanded-actions.js';
+import { updateUsageModeData, setUsageRefreshCallback } from './utility-modes/usage.js';
+import { updatePermissionModeData, setPermissionModeSwitchCallback } from './utility-modes/permission-mode.js';
 import {
   isEncoderTakeoverActive,
   enterEncoderTakeover,
@@ -102,6 +105,18 @@ import {
   initItermDial,
   updateItermDialState,
 } from './actions/iterm-dial.js';
+import {
+  SessionSlotButtonAction,
+  initSessionSlots,
+  updateSessionSlotSessions,
+  setActiveSession,
+  updateDetailViewState,
+  exitDetailView,
+  isInDetailView,
+  getSessionSlotManager,
+  getFocusedSession,
+  setDaemonConnected,
+} from './actions/session-slot-button.js';
 import { timelineStore } from './timeline-store.js';
 
 // ---- Setup detection ----
@@ -185,6 +200,57 @@ initVoiceDial(connMgr);
 initUtilityDial();
 initItermDial(connMgr);
 
+// ---- Initialize v4 utility mode callbacks ----
+setUsageRefreshCallback(() => {
+  connMgr.send({ type: 'query_usage' });
+});
+setPermissionModeSwitchCallback(() => {
+  connMgr.send({ type: 'switch_mode' });
+});
+
+// ---- Initialize v4 session slot buttons ----
+initSessionSlots((result) => {
+  dlog('Plugin', `sessionSlot action: ${result.action} session=${result.sessionId ?? '-'} port=${result.sessionPort ?? '-'}`);
+
+  switch (result.action) {
+    case 'enter-detail': {
+      if (!result.sessionId) break;
+      const mgr = getSessionSlotManager();
+      mgr.enterDetailView(result.sessionId);
+
+      // Tell daemon to focus this session (daemon relays its state)
+      const session = mgr.getFocusedSession();
+      if (session?.agentType === 'openclaw') {
+        connMgr.switchToOpenClaw();
+      } else {
+        connMgr.focusSession(result.sessionId);
+      }
+
+      // Update detail view with current state (will be refreshed on state_update)
+      updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string);
+      break;
+    }
+
+    case 'exit-detail':
+      exitDetailView();
+      break;
+
+    case 'select-option':
+      if (result.optionIndex != null) {
+        connMgr.send({ type: 'select_option', index: result.optionIndex });
+      }
+      break;
+
+    case 'stop':
+      connMgr.send({ type: 'interrupt' });
+      break;
+
+    case 'esc':
+      connMgr.send({ type: 'escape' });
+      break;
+  }
+});
+
 // Refresh other dials when voice text takeover exits
 setVoiceTextExitCallback(() => {
   const agentType = proxiedAgentType;
@@ -206,6 +272,7 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
 
   currentState = ev.state;
   currentMode = ev.permissionMode;
+  updatePermissionModeData(ev.permissionMode); // v4: feed to E1 utility mode
   currentTool = ev.currentTool;
   currentToolInput = ev.toolInput;
   if (ev.projectName) currentProjectName = ev.projectName;
@@ -296,6 +363,11 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
     currentToolInput = undefined;
   }
 
+  // v4: Update detail view state if in detail mode
+  if (isInDetailView()) {
+    updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string);
+  }
+
   broadcastStateUpdate();
 });
 
@@ -322,6 +394,20 @@ connMgr.on('usage_update', (ev: UsageEvent) => {
     extraUsageUsedCredits: ev.extraUsageUsedCredits,
     extraUsageUtilization: ev.extraUsageUtilization,
   }, currentBillingType, ev.usageStale);
+
+  // v4: Feed usage data to E1 utility mode
+  updateUsageModeData({
+    fiveHourPercent: ev.fiveHourPercent,
+    fiveHourResetsAt: ev.fiveHourResetsAt,
+    sevenDayPercent: ev.sevenDayPercent,
+    sevenDayResetsAt: ev.sevenDayResetsAt,
+    inputTokens: ev.inputTokens,
+    outputTokens: ev.outputTokens,
+    estimatedCostUsd: ev.estimatedCostUsd,
+    sessionDurationSec: ev.sessionDurationSec,
+    extraUsageEnabled: ev.extraUsageEnabled,
+    extraUsageUtilization: ev.extraUsageUtilization,
+  });
 });
 
 connMgr.on('connection', (ev: ConnectionEvent) => {
@@ -338,6 +424,12 @@ connMgr.on('connection', (ev: ConnectionEvent) => {
   }
   // 'connected' case: state_update (sent before connection event) already
   // set the correct state — don't clobber it to IDLE here.
+});
+
+// ---- v4 Session Slot: sessions_list → slot assignment ----
+connMgr.on('sessions_list', (ev: { type: 'sessions_list'; sessions: SessionInfo[] }) => {
+  dlog('Plugin', `sessions_list: ${ev.sessions.length} sessions`);
+  updateSessionSlotSessions(ev.sessions, connMgr.isGatewayAvailable());
 });
 
 connMgr.on('user_prompt', (ev: UserPromptEvent) => {
@@ -423,6 +515,7 @@ connMgr.on('display_state', (ev: { type: 'display_state'; displayOn: boolean }) 
 
 connMgr.on('connected', () => {
   dinfo('Plugin', `connected (agentType=${proxiedAgentType} prevState=${currentState})`);
+  setDaemonConnected(true);
   setUsageBridgeConnected(true);
   const connCaps = capsForProxiedAgent();
   setUsageCapabilities(connCaps);
@@ -432,6 +525,7 @@ connMgr.on('connected', () => {
 
 connMgr.on('disconnected', () => {
   dinfo('Plugin', `disconnected (agentType=${proxiedAgentType} prevState=${currentState})`);
+  setDaemonConnected(false);
   setUsageBridgeConnected(false);
   setUsageCapabilities(null);
   proxiedAgentType = null;
@@ -551,11 +645,13 @@ streamDeck.actions.registerAction(new ResponseDialAction());
 streamDeck.actions.registerAction(new VoiceDialAction());
 streamDeck.actions.registerAction(new UtilityDialAction());
 streamDeck.actions.registerAction(new ItermDialAction());
+streamDeck.actions.registerAction(new SessionSlotButtonAction());
 
 // ---- Slot Map Reporting (Phase A7) ----
 
 // UUID suffix → actionType mapping
 const UUID_TO_ACTION_TYPE: Record<string, string> = {
+  'session-slot': 'session-slot',
   'response-button': 'response-button',
   'stop-button': 'stop-button',
   'mode-button': 'mode-button',
@@ -631,36 +727,22 @@ function sendSlotMap(): void {
 
 // ---- Connect ----
 
-/** Find the most recently started interactive session's port, or undefined for default */
-function findLatestSessionPort(): number | undefined {
-  try {
-    const data = readFileSync(`${homedir()}/.agentdeck/sessions.json`, 'utf-8');
-    const sessions = JSON.parse(data) as Array<{
-      port: number; pid: number; startedAt: string; agentType?: string;
-    }>;
-    // Filter alive sessions
-    const alive = sessions.filter((s) => {
-      try { process.kill(s.pid, 0); return true; } catch { return false; }
-    });
-    // Filter out daemon sessions — daemon is infrastructure, not an interactive agent
-    const interactive = alive.filter((s) => s.agentType !== 'daemon');
-    if (interactive.length === 0) return undefined;
-    interactive.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-    dinfo('Plugin', `Latest session port: ${interactive[0].port} (${interactive.length} interactive, ${alive.length} total)`);
-    return interactive[0].port;
-  } catch {
-    return undefined;
-  }
-}
-
 streamDeck.connect().then(() => {
-  dinfo('Plugin', 'Stream Deck connected, starting connection manager');
+  dinfo('Plugin', 'Stream Deck connected, starting daemon-only connection');
   detectSetupState();
   if (setupRequired) {
     propagateSetupRequired(true);
     broadcastStateUpdate();
   }
-  connMgr.scanLatestPort = () => findLatestSessionPort();
-  const port = findLatestSessionPort();
-  connMgr.start(port);
+  connMgr.start();
+
+  // Auto-switch to v4 profile on SD+ devices
+  for (const device of streamDeck.devices) {
+    if ((device as any).type === 7) { // DeviceType 7 = Stream Deck+
+      dinfo('Plugin', `SD+ device found: ${device.id}, switching to v4 profile`);
+      void streamDeck.profiles.switchToProfile(device.id, 'agentdeck-v4').catch((e: Error) => {
+        dlog('Plugin', `v4 profile switch failed (may already be active): ${e.message}`);
+      });
+    }
+  }
 });
