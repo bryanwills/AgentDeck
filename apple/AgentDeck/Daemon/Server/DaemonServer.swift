@@ -68,12 +68,30 @@ final class DaemonServer {
         // Singleton guard — only when using default port
         if port == nil {
             if let existing = registry.readDaemonInfo() {
-                DaemonLogger.shared.info("Daemon already running on port \(existing.port) (PID \(existing.pid))")
-                throw DaemonError.alreadyRunning
+                if let health = await registry.probeDaemonHealth(port: existing.port),
+                   health["mode"] as? String == "daemon" {
+                    DaemonLogger.shared.info("Daemon already running on port \(existing.port) (PID \(existing.pid))")
+                    throw DaemonError.alreadyRunning
+                }
+                if !(await registry.isPortBindable(existing.port)) {
+                    DaemonLogger.shared.info("Daemon registry exists on port \(existing.port) but health probe is not ready yet; treating as startup race")
+                    throw DaemonError.alreadyRunning
+                }
+                DaemonLogger.shared.debug("Daemon", "Stale daemon.json found for PID \(existing.pid) on port \(existing.port); removing")
+                registry.removeDaemonInfo()
             }
             if let existing = registry.findExistingDaemon() {
-                DaemonLogger.shared.info("Daemon already running on port \(existing.port)")
-                throw DaemonError.alreadyRunning
+                if let health = await registry.probeDaemonHealth(port: existing.port),
+                   health["mode"] as? String == "daemon" {
+                    DaemonLogger.shared.info("Daemon already running on port \(existing.port)")
+                    throw DaemonError.alreadyRunning
+                }
+                if !(await registry.isPortBindable(existing.port)) {
+                    DaemonLogger.shared.info("Daemon session entry exists on port \(existing.port) but health probe is not ready yet; treating as startup race")
+                    throw DaemonError.alreadyRunning
+                }
+                DaemonLogger.shared.debug("Daemon", "Stale daemon session entry found for \(existing.id) on port \(existing.port); deregistering")
+                registry.deregister(existing.id)
             }
             if let health = await registry.probeDaemonHealth(port: requestedPort) {
                 if health["mode"] as? String == "daemon" {
@@ -84,6 +102,9 @@ final class DaemonServer {
                 } else {
                     throw DaemonError.noPortAvailable
                 }
+            } else if !(await registry.isPortBindable(requestedPort)) {
+                DaemonLogger.shared.info("Port \(requestedPort) is occupied but health probe is not ready yet; treating as startup race")
+                throw DaemonError.alreadyRunning
             }
         }
 
@@ -279,8 +300,27 @@ final class DaemonServer {
         let serialRef = serial
         let pixooRef = pixoo
         let d200hRef = d200h
-        await wsServer.onBroadcast { data in
+        await wsServer.onBroadcast { [weak self] data in
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            
+            // Mirror creature agent state in local state machine for metadata persistence
+            if let type = json["type"] as? String, type == "state_update" {
+                let jsonBox = SendableDict(json)
+                Task { @MainActor in
+                    guard let self else { return }
+                    let json = jsonBox.value
+                    if let model = json["model"] as? String ?? json["modelName"] as? String {
+                        self.stateMachine.modelName = model
+                    }
+                    if let project = json["projectName"] as? String {
+                        self.stateMachine.projectName = project
+                    }
+                    if let effort = json["effortLevel"] as? String {
+                        self.stateMachine.effortLevel = effort
+                    }
+                }
+            }
+
             adb.handleBroadcast(json)
             serialRef.wireBroadcast(json)
             pixooRef.handleEvent(json)
@@ -316,20 +356,43 @@ final class DaemonServer {
         let daemonPort = self.port
 
         await httpServer.get("/health") { [weak self] _ in
-            let state = await MainActor.run { self?.stateMachine.state.rawValue ?? "disconnected" }
+            let health = await self?.buildModuleHealth().value ?? ["state": "disconnected"]
+            let state = health["state"] as? String ?? "disconnected"
             return .json([
                 "status": "ok", "mode": "daemon", "port": daemonPort,
                 "pid": ProcessInfo.processInfo.processIdentifier,
                 "uptime": ProcessInfo.processInfo.systemUptime,
                 "state": state,
                 "pairingToken": AuthManager.shared.token,
+                "modules": health["modules"] as Any,
             ] as [String: Any])
         }
 
-        await httpServer.get("/status") { _ in
+        await httpServer.get("/status") { [weak self] _ in
             let sessions = SessionRegistry.shared.listActive()
             let list = sessions.map { ["id": $0.id, "port": $0.port, "projectName": $0.projectName, "agentType": $0.agentType as Any] as [String: Any] }
-            return .json(["sessions": list, "daemon": ["port": daemonPort]] as [String: Any])
+            let health = await self?.buildModuleHealth().value ?? [:]
+            return .json(["sessions": list, "daemon": ["port": daemonPort], "modules": health["modules"] as Any] as [String: Any])
+        }
+
+        await httpServer.get("/usage") { [weak self] _ in
+            let usage = await self?.buildUsageEndpointPayload().value
+            return .json([
+                "status": "ok",
+                "usage": usage?["usage"] as Any,
+                "fetchedAt": usage?["fetchedAt"] as? Int ?? 0,
+            ] as [String: Any])
+        }
+
+        await httpServer.get("/devices") { [weak self] _ in
+            let devices = await self?.buildDevicesPayload().value ?? ["devices": []]
+            return .json(devices)
+        }
+
+        await httpServer.get("/diag") { [weak self] request in
+            let tail = Int(request.queryParams["tail"] ?? "") ?? 200
+            let diag = await self?.buildDiagPayload(tail: max(1, min(tail, 1000))).value ?? ["error": "daemon unavailable"]
+            return .json(diag)
         }
 
         await httpServer.post("/shutdown") { [weak self] _ in
@@ -351,27 +414,297 @@ final class DaemonServer {
         }
 
         // Pixoo endpoints
-        await httpServer.get("/pixoo/frame") { _ in
-            // Return last rendered frame as BMP (stub — returns empty)
-            .text("No frame available", status: 204)
+        await httpServer.get("/pixoo/frame") { [weak self] _ in
+            guard let self else { return .text("No frame available", status: 204) }
+            return await self.pixooFrameResponse()
         }
 
-        await httpServer.get("/pixoo/stream") { _ in
-            // SSE frame stream (stub — requires full renderer)
-            .text("event: frame\ndata: \n\n")
+        await httpServer.stream("/pixoo/stream") { [weak self] _, conn in
+            guard let self else {
+                let raw = Data((HTTPServer.formatHTTPHeaders(status: 503, headers: ["Content-Type": "text/plain"]) + "Connection: close\r\n\r\nPreview unavailable").utf8)
+                conn.send(raw) { _ in conn.cancel() }
+                return
+            }
+            await self.streamPixooFrames(on: conn)
         }
 
-        await httpServer.get("/pixoo") { _ in
-            let html = """
-            <html><body style="background:#000;display:flex;justify-content:center;align-items:center;height:100vh">
-            <div><h2 style="color:#fff">Pixoo Preview</h2>
-            <img id="f" width="256" height="256" style="image-rendering:pixelated">
-            <script>const es=new EventSource('/pixoo/stream');
-            es.addEventListener('frame',e=>{document.getElementById('f').src='data:image/bmp;base64,'+e.data});</script>
-            </div></body></html>
-            """
-            return HTTPServer.HTTPResponse(status: 200, headers: ["Content-Type": "text/html"], body: Data(html.utf8))
+        await httpServer.get("/pixoo") { [weak self] _ in
+            guard let self else { return .text("Preview unavailable", status: 503) }
+            return await self.pixooPreviewResponse()
         }
+    }
+
+    private func pixooFrameResponse() -> HTTPServer.HTTPResponse {
+        guard let rgb = pixooModule?.currentFrame(),
+              let bmp = Self.rgbToBmp(rgb, width: 64, height: 64) else {
+            return .text("No frame available", status: 204)
+        }
+        return HTTPServer.HTTPResponse(
+            status: 200,
+            headers: [
+                "Content-Type": "image/bmp",
+                "Cache-Control": "no-store",
+            ],
+            body: bmp
+        )
+    }
+
+    private func pixooPreviewResponse() -> HTTPServer.HTTPResponse {
+        let html = Self.pixooPreviewHtml()
+        return HTTPServer.HTTPResponse(
+            status: 200,
+            headers: ["Content-Type": "text/html; charset=utf-8"],
+            body: Data(html.utf8)
+        )
+    }
+
+    private func streamPixooFrames(on conn: HTTPServer.StreamConnection) async {
+        let header = HTTPServer.formatHTTPHeaders(status: 200, headers: [
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        ]) + "\r\n"
+
+        let sentHeader = await Self.send(conn, data: Data(header.utf8))
+        guard sentHeader else {
+            conn.cancel()
+            return
+        }
+
+        var lastFrameHash: Int?
+        while true {
+            let frame = await MainActor.run { pixooModule?.currentFrame() }
+            if let frame, let bmp = Self.rgbToBmp(frame, width: 64, height: 64) {
+                let frameHash = bmp.hashValue
+                if frameHash != lastFrameHash {
+                    lastFrameHash = frameHash
+                    let payload = "event: frame\ndata: \(bmp.base64EncodedString())\n\n"
+                    let ok = await Self.send(conn, data: Data(payload.utf8))
+                    if !ok { break }
+                }
+            } else {
+                let ok = await Self.send(conn, data: Data(":heartbeat\n\n".utf8))
+                if !ok { break }
+            }
+
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+
+        conn.cancel()
+    }
+
+    nonisolated private static func send(_ conn: HTTPServer.StreamConnection, data: Data) async -> Bool {
+        await withCheckedContinuation { continuation in
+            conn.send(data) { ok in continuation.resume(returning: ok) }
+        }
+    }
+
+    nonisolated private static func rgbToBmp(_ rgb: Data, width: Int, height: Int) -> Data? {
+        let expectedLength = width * height * 3
+        guard rgb.count == expectedLength else { return nil }
+
+        let rowBytes = width * 3
+        let rowPadding = (4 - (rowBytes % 4)) % 4
+        let paddedRowBytes = rowBytes + rowPadding
+        let imageSize = paddedRowBytes * height
+        let fileSize = 54 + imageSize
+
+        var buffer = Data(count: fileSize)
+
+        buffer.withUnsafeMutableBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+
+            base[0] = 0x42
+            base[1] = 0x4D
+            writeLE32(UInt32(fileSize), to: base, offset: 2)
+            writeLE32(54, to: base, offset: 10)
+            writeLE32(40, to: base, offset: 14)
+            writeLE32(UInt32(width), to: base, offset: 18)
+            writeLE32(UInt32(height), to: base, offset: 22)
+            writeLE16(1, to: base, offset: 26)
+            writeLE16(24, to: base, offset: 28)
+            writeLE32(UInt32(imageSize), to: base, offset: 34)
+
+            rgb.withUnsafeBytes { sourceBuffer in
+                guard let src = sourceBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                for y in 0..<height {
+                    let srcRow = (height - 1 - y) * rowBytes
+                    let dstRow = 54 + (y * paddedRowBytes)
+                    for x in 0..<width {
+                        let srcIndex = srcRow + (x * 3)
+                        let dstIndex = dstRow + (x * 3)
+                        base[dstIndex] = src[srcIndex + 2]
+                        base[dstIndex + 1] = src[srcIndex + 1]
+                        base[dstIndex + 2] = src[srcIndex]
+                    }
+                }
+            }
+        }
+
+        return buffer
+    }
+
+    nonisolated private static func writeLE16(_ value: UInt16, to base: UnsafeMutablePointer<UInt8>, offset: Int) {
+        base[offset] = UInt8(value & 0x00ff)
+        base[offset + 1] = UInt8((value >> 8) & 0x00ff)
+    }
+
+    nonisolated private static func writeLE32(_ value: UInt32, to base: UnsafeMutablePointer<UInt8>, offset: Int) {
+        base[offset] = UInt8(value & 0x000000ff)
+        base[offset + 1] = UInt8((value >> 8) & 0x000000ff)
+        base[offset + 2] = UInt8((value >> 16) & 0x000000ff)
+        base[offset + 3] = UInt8((value >> 24) & 0x000000ff)
+    }
+
+    nonisolated private static func pixooPreviewHtml() -> String {
+        """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>Pixoo Preview</title>
+        <style>
+        *{box-sizing:border-box}
+        body{margin:0;min-height:100vh;background:#09090b;color:#e4e4e7;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}
+        .wrap{display:flex;flex-direction:column;gap:14px;align-items:center;padding:24px}
+        h1{margin:0;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;color:#a1a1aa}
+        .frame{width:320px;height:320px;border-radius:18px;border:1px solid #27272a;background:#000;box-shadow:0 20px 60px rgba(0,0,0,0.45);image-rendering:pixelated}
+        .meta{font-size:12px;color:#a1a1aa}
+        </style>
+        </head>
+        <body>
+        <div class="wrap">
+        <h1>Pixoo 64x64 Preview</h1>
+        <img id="frame" class="frame" alt="Pixoo frame" width="320" height="320">
+        <div class="meta" id="meta">Waiting for first frame...</div>
+        </div>
+        <script>
+        const img = document.getElementById('frame');
+        const meta = document.getElementById('meta');
+        let frameNumber = 0;
+        let fallbackTimer = null;
+        async function refresh() {
+          const url = '/pixoo/frame?ts=' + Date.now();
+          const res = await fetch(url, { cache: 'no-store' });
+          if (res.status === 204) {
+            meta.textContent = 'No frame available yet';
+            return;
+          }
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const blob = await res.blob();
+          img.src = URL.createObjectURL(blob);
+          frameNumber += 1;
+          meta.textContent = 'Frames loaded: ' + frameNumber;
+        }
+        function startPolling(reason) {
+          if (fallbackTimer) return;
+          meta.textContent = reason;
+          refresh().catch(err => {
+            meta.textContent = 'Preview error: ' + (err && err.message ? err.message : err);
+          });
+          fallbackTimer = setInterval(() => {
+            refresh().catch(err => {
+              meta.textContent = 'Preview error: ' + (err && err.message ? err.message : err);
+            });
+          }, 250);
+        }
+        if (window.EventSource) {
+          const es = new EventSource('/pixoo/stream');
+          es.addEventListener('frame', e => {
+            img.src = 'data:image/bmp;base64,' + e.data;
+            frameNumber += 1;
+            meta.textContent = 'Frames loaded: ' + frameNumber + ' (SSE)';
+          });
+          es.onerror = () => {
+            es.close();
+            startPolling('SSE unavailable, using polling preview');
+          };
+        } else {
+          startPolling('EventSource unavailable, using polling preview');
+        }
+        </script>
+        </body>
+        </html>
+        """
+    }
+
+    @MainActor
+    private func buildUsageEndpointPayload() -> SendableDict {
+        SendableDict([
+            "usage": buildUsageEvent().map { event in
+                var payload = event
+                payload.removeValue(forKey: "type")
+                return payload
+            } as Any,
+            "fetchedAt": cachedApiUsage == nil ? 0 : Int(lastApiFetchTime.timeIntervalSince1970 * 1000),
+        ])
+    }
+
+    @MainActor
+    private func buildDevicesPayload() async -> SendableDict {
+        var devices: [[String: Any]] = []
+
+        if let serialModule {
+            let serial = await serialModule.statusSnapshot()
+            devices.append([
+                "type": "esp32_serial",
+                "detectedPorts": serial["detectedPorts"] as Any,
+                "connections": serial["connections"] as Any,
+                "lastOpenError": serial["lastOpenError"] as Any,
+                "lastReadError": serial["lastReadError"] as Any,
+                "lastWriteError": serial["lastWriteError"] as Any,
+            ])
+        }
+
+        if let adbModule {
+            let adb = adbModule.statusSnapshot()
+            devices.append([
+                "type": "adb",
+                "devices": adb["devices"] as Any,
+                "reverseReadyCount": adb["reverseReadyCount"] as Any,
+                "lastError": adb["lastError"] as Any,
+            ])
+        }
+
+        if let pixooModule {
+            let pixoo = pixooModule.statusSnapshot()
+            devices.append([
+                "type": "pixoo",
+                "deviceIps": pixoo["deviceIps"] as Any,
+                "configuredDeviceCount": pixoo["configuredDeviceCount"] as Any,
+                "hasFrame": pixoo["hasFrame"] as Any,
+                "lastPushError": pixoo["lastPushError"] as Any,
+            ])
+        }
+
+        if let d200hModule {
+            let d200h = d200hModule.statusSnapshot()
+            devices.append([
+                "type": "d200h",
+                "connected": d200h["connected"] as Any,
+                "hasConsumerDevice": d200h["hasConsumerDevice"] as Any,
+                "hasKeyboardDevice": d200h["hasKeyboardDevice"] as Any,
+            ])
+        }
+
+        return SendableDict(["devices": devices])
+    }
+
+    @MainActor
+    private func buildDiagPayload(tail: Int) async -> SendableDict {
+        let modules = await buildModuleHealth().value["modules"] as? [String: Any] ?? [:]
+        let recentLog = DaemonLogger.shared.recentLines(limit: tail)
+        return SendableDict([
+            "status": "ok",
+            "state": stateMachine.state.rawValue,
+            "sessionId": sessionId,
+            "gatewayConnected": gatewayAdapter != nil,
+            "gatewayAvailable": cachedGatewayAvailable,
+            "logStreamRunning": await logStream.isRunning,
+            "modules": modules,
+            "recentLog": recentLog,
+        ])
     }
 
     // MARK: - WebSocket Handlers
@@ -592,7 +925,8 @@ final class DaemonServer {
                     } else {
                         DaemonLogger.shared.info("OpenClaw Gateway disconnected")
                         await self?.logStream.stop()
-                        self?.broadcastSessionsList()
+                        _ = self?.stateMachine.transition(trigger: "session_end", source: .hook)
+                        self?.handleStateChanged()
                     }
                 }
             }
@@ -617,7 +951,14 @@ final class DaemonServer {
         guard let type = event["type"] as? String else { return }
         switch type {
         case "gateway_chat":
-            _ = stateMachine.transition(trigger: "spinner_start", source: .pty)
+            let chatPayload = event["payload"] as? [String: Any] ?? [:]
+            let chatState = chatPayload["state"] as? String
+            switch chatState {
+            case "final", "aborted", "error":
+                _ = stateMachine.transition(trigger: "idle_detected", source: .pty)
+            default:
+                _ = stateMachine.transition(trigger: "spinner_start", source: .pty)
+            }
             broadcastStateUpdate()
         case "gateway_approval":
             _ = stateMachine.transition(trigger: "permission_prompt", source: .pty)
@@ -625,13 +966,27 @@ final class DaemonServer {
                 stateMachine.question = payload["message"] as? String
             }
             broadcastStateUpdate()
+        case "gateway_approval_resolved":
+            _ = stateMachine.transition(trigger: "spinner_start", source: .pty)
+            broadcastStateUpdate()
         case "gateway_presence":
             break // Heartbeat
+        case "gateway_health":
+            let payload = event["payload"] as? [String: Any]
+            let hasError = !((payload?["ok"] as? Bool) ?? false)
+            let changed = hasError != cachedGatewayHasError
+            cachedGatewayHasError = hasError
+            if changed {
+                handleStateChanged()
+            }
         case "model_catalog":
             // Gateway sends full model catalog — replace entirely (same as Node.js)
             if let models = event["models"] as? [[String: Any]] {
                 cachedModelCatalog = models
                 DaemonLogger.shared.debug("Daemon", "Model catalog from Gateway: \(models.count) models")
+                if stateMachine.modelName == nil, let defaultModel = event["defaultModel"] as? String {
+                    stateMachine.modelName = defaultModel
+                }
                 broadcastStateUpdate()
             }
         default:
@@ -676,12 +1031,24 @@ final class DaemonServer {
     // MARK: - Polling
 
     private func startAllPolling() {
-        // Sessions — 10s
+        // Sessions — 10s (also self-heals daemon.json if deleted)
         sessionPollTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(10))
                 guard let self else { break }
                 await self.refreshSessions()
+                // Self-heal: re-write daemon.json if it was deleted externally
+                // (bridge instances may remove it due to PID-check race conditions)
+                if self.registry.readDaemonInfo() == nil {
+                    let info = DaemonInfo(
+                        port: Int(self.port),
+                        pid: Int(ProcessInfo.processInfo.processIdentifier),
+                        startedAt: ISO8601DateFormatter().string(from: Date()),
+                        httpPort: nil
+                    )
+                    self.registry.writeDaemonInfo(info)
+                    DaemonLogger.shared.debug("Daemon", "Self-healed daemon.json (was deleted externally)")
+                }
             }
         }
 
@@ -862,6 +1229,39 @@ final class DaemonServer {
         if let data = event.jsonData {
             Task { await wsServer.broadcastRaw(data) }
         }
+    }
+
+    @MainActor
+    private func buildModuleHealth() async -> SendableDict {
+        let gwConnected: Bool
+        if let gw = gatewayAdapter {
+            gwConnected = await gw.isConnectedSnapshot
+        } else {
+            gwConnected = false
+        }
+        var modules: [String: Any] = [
+            "gateway": [
+                "available": cachedGatewayAvailable,
+                "connected": gwConnected,
+                "hasError": cachedGatewayHasError,
+            ]
+        ]
+        if let adbModule {
+            modules["adb"] = adbModule.statusSnapshot()
+        }
+        if let d200hModule {
+            modules["d200h"] = d200hModule.statusSnapshot()
+        }
+        if let pixooModule {
+            modules["pixoo"] = pixooModule.statusSnapshot()
+        }
+        if let serialModule {
+            modules["serial"] = await serialModule.statusSnapshot()
+        }
+        return SendableDict([
+            "state": stateMachine.state.rawValue,
+            "modules": modules,
+        ])
     }
 
     // MARK: - Event Builders
