@@ -121,7 +121,7 @@ function startFileWatch(): void {
           currentSessionIndex = sessions.indexOf(newest);
           currentProjectName = newest.projectName;
           dlog('SesBut', `New session detected (disconnected) — auto-switching to ${getDisplayName(newest, sessions)}:${newest.port}`);
-          // v4: daemon-only — no direct session bridge connection
+          bridge.focusSession(newest.id);
         }
       } else {
         dlog('SesBut', `New session detected — staying on current (state=${currentState}), count ${prevCount}→${sessions.length}`);
@@ -227,7 +227,7 @@ function autoReconnect(): void {
   if (other) {
     currentSessionIndex = sessions.indexOf(other);
     currentProjectName = other.projectName;
-    // v4: daemon-only — no direct session bridge connection
+    bridge.focusSession(other.id);
   }
 }
 
@@ -245,7 +245,7 @@ export function switchToPort(port: number): void {
   currentModel = undefined;
   currentEffortLevel = undefined;
   dlog('SesBut', `switchToPort: → ${getDisplayName(sessions[idx], sessions)}:${port}`);
-  // v4: daemon-only — no direct session bridge connection
+  bridge.focusSession(sessions[idx].id);
   refreshAll();
   onSessionSwitched?.();
 }
@@ -475,7 +475,7 @@ function renderSessionSvg(): string {
   switch (isActive ? 'active' : currentState) {
     case State.DISCONNECTED:
       if (setupRequired) return setupRequiredSvg();
-      return simpleSvg('NO', 'SESSION', '#666666', '#1a1a1a');
+      return simpleSvg('DAEMON', 'OFFLINE', '#ef4444', '#1a0a0a');
 
     case State.IDLE: {
       const currentSession = getCurrentSession();
@@ -849,7 +849,7 @@ function cycleSession(): void {
     dlog('SesBut', `cycle: ${currentSessionIndex + 1}/${sessions.length} → ${getDisplayName(session, sessions)}:${session.port}`);
     fireSuppressAutoSwitch();
     bridge.switchToClaude();
-    // v4: daemon-only — session switching via daemon command
+    bridge.focusSession(session.id);
   }
   refreshAll();
   // Trigger full UI flush (encoders, response buttons, etc.) with reset state
