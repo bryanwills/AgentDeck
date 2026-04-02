@@ -16,6 +16,15 @@ struct ApiUsageData: Sendable {
     var inferredBillingType: String?  // "subscription" | "api" | nil
 }
 
+struct CodexAuthStatus: Sendable {
+    var authMode: String?
+    var webAuthConnected: Bool = false
+    var planType: String?
+    var accountId: String?
+    var subscriptionActiveUntil: String?
+    var lastRefreshAt: String?
+}
+
 enum TokenStatus: String, Sendable {
     case valid, expired, missing, unknown
 }
@@ -32,8 +41,10 @@ final class UsageAPIClient: Sendable {
 
     nonisolated(unsafe) private var consecutiveFailures = 0
     nonisolated(unsafe) private var lastTokenStatus: TokenStatus = .unknown
+    nonisolated(unsafe) private var lastBackoffStart: Date = .distantPast
 
     var tokenStatus: TokenStatus { lastTokenStatus }
+    var codexAuthStatus: CodexAuthStatus? { readCodexAuthStatus() }
 
     // MARK: - Fetch
 
@@ -42,19 +53,25 @@ final class UsageAPIClient: Sendable {
         if let cached = readFileCache() {
             let age = Date().timeIntervalSince1970 - cached.fetchedAt
             if age < Self.fileCacheTTL {
+                DaemonLogger.shared.debug("UsageAPI", "File cache hit (age \(Int(age))s)")
                 return cached.data
             }
+            DaemonLogger.shared.debug("UsageAPI", "File cache stale (age \(Int(age))s)")
         }
 
         // Check backoff
         if consecutiveFailures > 0 {
             let backoff = getBackoffSeconds()
-            if backoff > 0 { return nil } // Still in backoff
+            if backoff > 0 {
+                DaemonLogger.shared.debug("UsageAPI", "Backoff active (\(consecutiveFailures) failures, \(Int(backoff))s remaining)")
+                return nil
+            }
         }
 
         // Get OAuth token from Keychain
         guard let token = getOAuthToken() else {
             lastTokenStatus = .missing
+            DaemonLogger.shared.debug("UsageAPI", "OAuth token missing (keychain lookup failed)")
             return nil
         }
 
@@ -62,13 +79,17 @@ final class UsageAPIClient: Sendable {
         if let creds = getOAuthCredentials(), let expiresAt = creds.expiresAt {
             if Date().timeIntervalSince1970 > (Double(expiresAt) / 1000.0 - Self.tokenExpiryMargin) {
                 lastTokenStatus = .expired
+                DaemonLogger.shared.debug("UsageAPI", "OAuth token expired")
                 return nil
             }
         }
 
         // Fetch from API
-        var request = URLRequest(url: URL(string: Self.usageAPIURL)!)
+        guard let apiURL = URL(string: Self.usageAPIURL) else { return nil }
+        var request = URLRequest(url: apiURL)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 10
 
         do {
@@ -82,14 +103,47 @@ final class UsageAPIClient: Sendable {
 
                 let usage = parseUsageResponse(json)
                 writeFileCache(usage)
+                DaemonLogger.shared.debug("UsageAPI", "API fetch OK: 5h=\(usage.fiveHourPercent ?? -1)% 7d=\(usage.sevenDayPercent ?? -1)%")
                 return usage
+            } else if http.statusCode == 429 {
+                // Rate limited — respect Retry-After header
+                consecutiveFailures += 1
+                lastBackoffStart = Date()
+                if let retryAfter = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After"),
+                   let retrySec = Int(retryAfter), retrySec > 0 {
+                    // Push file cache fetchedAt forward so TTL covers Retry-After
+                    if let cached = readFileCache() {
+                        let syntheticCache = CacheFile(
+                            data: CacheFile.CodableUsage(
+                                fiveHourPercent: cached.data.fiveHourPercent,
+                                fiveHourResetsAt: cached.data.fiveHourResetsAt,
+                                sevenDayPercent: cached.data.sevenDayPercent,
+                                sevenDayResetsAt: cached.data.sevenDayResetsAt,
+                                extraUsageEnabled: cached.data.extraUsageEnabled,
+                                extraUsageMonthlyLimit: cached.data.extraUsageMonthlyLimit,
+                                extraUsageUsedCredits: cached.data.extraUsageUsedCredits,
+                                extraUsageUtilization: cached.data.extraUsageUtilization
+                            ),
+                            fetchedAt: Date().timeIntervalSince1970 + Double(retrySec) - Self.fileCacheTTL
+                        )
+                        if let cacheData = try? JSONEncoder().encode(syntheticCache) {
+                            try? cacheData.write(to: Self.cacheFile)
+                        }
+                    }
+                    DaemonLogger.shared.debug("UsageAPI", "Rate limited (429), Retry-After: \(retrySec)s")
+                }
+                return nil
             } else {
                 consecutiveFailures += 1
-                if http.statusCode == 401 { lastTokenStatus = .expired }
+                lastBackoffStart = Date()
+                if http.statusCode == 401 || http.statusCode == 403 { lastTokenStatus = .expired }
+                DaemonLogger.shared.debug("UsageAPI", "API fetch failed: HTTP \(http.statusCode)")
                 return nil
             }
         } catch {
             consecutiveFailures += 1
+            lastBackoffStart = Date()
+            DaemonLogger.shared.debug("UsageAPI", "API fetch error: \(error.localizedDescription)")
             return nil
         }
     }
@@ -131,6 +185,78 @@ final class UsageAPIClient: Sendable {
         getOAuthCredentials()?.accessToken
     }
 
+    // MARK: - Codex Web Auth
+
+    private func readCodexAuthStatus() -> CodexAuthStatus? {
+        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
+        let authFile = URL(fileURLWithPath: realHome).appendingPathComponent(".codex/auth.json")
+        guard let data = try? Data(contentsOf: authFile),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        let tokens = json["tokens"] as? [String: Any]
+        let accessPayload = decodeJWT(string(tokens, key: "access_token"))
+        let idPayload = decodeJWT(string(tokens, key: "id_token"))
+        let authMode = string(json, key: "auth_mode")
+
+        return CodexAuthStatus(
+            authMode: authMode,
+            webAuthConnected: authMode == "chatgpt" && string(tokens, key: "access_token") != nil,
+            planType: firstString([
+                string(json, key: "chatgpt_plan_type"),
+                string(accessPayload, key: "chatgpt_plan_type"),
+                string(idPayload, key: "chatgpt_plan_type"),
+                string(accessPayload, key: "plan_type"),
+                string(idPayload, key: "plan_type"),
+            ]),
+            accountId: firstString([
+                string(json, key: "chatgpt_account_id"),
+                string(accessPayload, key: "chatgpt_account_id"),
+                string(idPayload, key: "chatgpt_account_id"),
+                string(accessPayload, key: "account_id"),
+                string(idPayload, key: "account_id"),
+                string(json, key: "account_id"),
+            ]),
+            subscriptionActiveUntil: firstString([
+                string(json, key: "chatgpt_subscription_active_until"),
+                string(accessPayload, key: "chatgpt_subscription_active_until"),
+                string(idPayload, key: "chatgpt_subscription_active_until"),
+                string(accessPayload, key: "subscription_active_until"),
+                string(idPayload, key: "subscription_active_until"),
+            ]),
+            lastRefreshAt: string(json, key: "last_refresh")
+        )
+    }
+
+    private func decodeJWT(_ token: String?) -> [String: Any]? {
+        guard let token else { return nil }
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var payload = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = payload.count % 4
+        if remainder > 0 {
+            payload += String(repeating: "=", count: 4 - remainder)
+        }
+        guard let data = Data(base64Encoded: payload),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json
+    }
+
+    private func string(_ dict: [String: Any]?, key: String) -> String? {
+        guard let raw = dict?[key] as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func firstString(_ values: [String?]) -> String? {
+        values.first(where: { $0?.isEmpty == false }) ?? nil
+    }
+
     // MARK: - File Cache
 
     private struct CacheFile: Codable {
@@ -152,6 +278,8 @@ final class UsageAPIClient: Sendable {
     private func readFileCache() -> (data: ApiUsageData, fetchedAt: Double)? {
         guard let data = try? Data(contentsOf: Self.cacheFile),
               let cache = try? JSONDecoder().decode(CacheFile.self, from: data) else { return nil }
+        // Auto-detect ms vs s: Node.js bridge writes Date.now() (ms), Swift writes timeIntervalSince1970 (s)
+        let fetchedAt = cache.fetchedAt > 1e12 ? cache.fetchedAt / 1000.0 : cache.fetchedAt
         let usage = ApiUsageData(
             fiveHourPercent: cache.data.fiveHourPercent,
             fiveHourResetsAt: cache.data.fiveHourResetsAt,
@@ -162,7 +290,7 @@ final class UsageAPIClient: Sendable {
             extraUsageUsedCredits: cache.data.extraUsageUsedCredits,
             extraUsageUtilization: cache.data.extraUsageUtilization
         )
-        return (usage, cache.fetchedAt)
+        return (usage, fetchedAt)
     }
 
     private func writeFileCache(_ usage: ApiUsageData) {
@@ -188,22 +316,43 @@ final class UsageAPIClient: Sendable {
 
     private func parseUsageResponse(_ json: [String: Any]) -> ApiUsageData {
         var usage = ApiUsageData()
-        if let limits = json["rateLimits"] as? [String: Any] {
-            if let fiveHour = limits["fiveHour"] as? [String: Any] {
-                usage.fiveHourPercent = fiveHour["percentUsed"] as? Double
-                usage.fiveHourResetsAt = fiveHour["resetsAt"] as? String
-            }
-            if let sevenDay = limits["sevenDay"] as? [String: Any] {
-                usage.sevenDayPercent = sevenDay["percentUsed"] as? Double
-                usage.sevenDayResetsAt = sevenDay["resetsAt"] as? String
-            }
+
+        func getDouble(_ val: Any?) -> Double? {
+            if let d = val as? Double { return d }
+            if let i = val as? Int { return Double(i) }
+            return nil
         }
-        if let extra = json["extraUsage"] as? [String: Any] {
-            usage.extraUsageEnabled = extra["enabled"] as? Bool ?? false
-            usage.extraUsageMonthlyLimit = extra["monthlyLimit"] as? Double
-            usage.extraUsageUsedCredits = extra["usedCredits"] as? Double
-            usage.extraUsageUtilization = extra["utilization"] as? Double
+
+        func getUtilization(_ obj: Any?) -> Double? {
+            if let val = getDouble(obj) { return val }
+            guard let dict = obj as? [String: Any] else { return nil }
+            return getDouble(dict["utilization"]) ?? getDouble(dict["percentUsed"]) ?? getDouble(dict["percentage"]) ?? getDouble(dict["percent"]) ?? getDouble(dict["usage"])
         }
+
+        func getResetsAt(_ obj: Any?) -> String? {
+            guard let dict = obj as? [String: Any] else { return nil }
+            return (dict["resets_at"] as? String) ?? (dict["resetsAt"] as? String) ?? (dict["reset_at"] as? String) ?? (dict["expires_at"] as? String)
+        }
+
+        // 1. Five Hour
+        let fiveHour = json["five_hour"] ?? json["fiveHour"] ?? (json["rateLimits"] as? [String: Any])?["fiveHour"]
+        usage.fiveHourPercent = getUtilization(fiveHour)
+        usage.fiveHourResetsAt = getResetsAt(fiveHour)
+
+        // 2. Seven Day
+        let sevenDay = json["seven_day"] ?? json["sevenDay"] ?? (json["rateLimits"] as? [String: Any])?["sevenDay"]
+        usage.sevenDayPercent = getUtilization(sevenDay)
+        usage.sevenDayResetsAt = getResetsAt(sevenDay)
+
+        // 3. Extra Usage
+        let extra = json["extra_usage"] ?? json["extraUsage"]
+        if let extraDict = extra as? [String: Any] {
+            usage.extraUsageEnabled = (extraDict["is_enabled"] as? Bool) ?? (extraDict["enabled"] as? Bool) ?? false
+            usage.extraUsageMonthlyLimit = getDouble(extraDict["monthly_limit"]) ?? getDouble(extraDict["monthlyLimit"])
+            usage.extraUsageUsedCredits = getDouble(extraDict["used_credits"]) ?? getDouble(extraDict["usedCredits"])
+            usage.extraUsageUtilization = getUtilization(extra)
+        }
+
         usage.inferredBillingType = usage.fiveHourPercent != nil ? "subscription" : "api"
         return usage
     }
@@ -213,7 +362,9 @@ final class UsageAPIClient: Sendable {
     private func getBackoffSeconds() -> TimeInterval {
         guard consecutiveFailures > 0 else { return 0 }
         let intervals: [TimeInterval] = [45, 90, 180, 300]
-        return intervals[min(consecutiveFailures - 1, intervals.count - 1)]
+        let backoff = intervals[min(consecutiveFailures - 1, intervals.count - 1)]
+        let elapsed = Date().timeIntervalSince(lastBackoffStart)
+        return max(0, backoff - elapsed)
     }
 }
 #endif

@@ -44,8 +44,14 @@ final class DaemonServer {
     private var lastStateEvent: [String: Any]?
     private var cachedApiUsage: ApiUsageData?
     private var lastApiFetchTime: Date = .distantPast
+    private static let usageStaleTTL: TimeInterval = 600  // 10 minutes
     private var apiUsageStale = false
     private var oauthConnected = false
+
+    // Voice assistant state cache for piggybacking on state_update
+    private var cachedVoiceAssistantState: String = "disabled"
+    private var cachedVoiceAssistantText: String?
+    private var cachedVoiceAssistantResponseText: String?
 
     // Polling tasks
     private var sessionPollTask: Task<Void, Never>?
@@ -71,11 +77,11 @@ final class DaemonServer {
                 if let health = await registry.probeDaemonHealth(port: existing.port),
                    health["mode"] as? String == "daemon" {
                     DaemonLogger.shared.info("Daemon already running on port \(existing.port) (PID \(existing.pid))")
-                    throw DaemonError.alreadyRunning
+                    throw DaemonError.alreadyRunning(port: existing.port)
                 }
                 if !(await registry.isPortBindable(existing.port)) {
                     DaemonLogger.shared.info("Daemon registry exists on port \(existing.port) but health probe is not ready yet; treating as startup race")
-                    throw DaemonError.alreadyRunning
+                    throw DaemonError.alreadyRunning(port: existing.port)
                 }
                 DaemonLogger.shared.debug("Daemon", "Stale daemon.json found for PID \(existing.pid) on port \(existing.port); removing")
                 registry.removeDaemonInfo()
@@ -84,18 +90,18 @@ final class DaemonServer {
                 if let health = await registry.probeDaemonHealth(port: existing.port),
                    health["mode"] as? String == "daemon" {
                     DaemonLogger.shared.info("Daemon already running on port \(existing.port)")
-                    throw DaemonError.alreadyRunning
+                    throw DaemonError.alreadyRunning(port: existing.port)
                 }
                 if !(await registry.isPortBindable(existing.port)) {
                     DaemonLogger.shared.info("Daemon session entry exists on port \(existing.port) but health probe is not ready yet; treating as startup race")
-                    throw DaemonError.alreadyRunning
+                    throw DaemonError.alreadyRunning(port: existing.port)
                 }
                 DaemonLogger.shared.debug("Daemon", "Stale daemon session entry found for \(existing.id) on port \(existing.port); deregistering")
                 registry.deregister(existing.id)
             }
             if let health = await registry.probeDaemonHealth(port: requestedPort) {
                 if health["mode"] as? String == "daemon" {
-                    throw DaemonError.alreadyRunning
+                    throw DaemonError.alreadyRunning(port: requestedPort)
                 }
                 if let alt = await registry.findAvailablePort() {
                     resolvedPort = UInt16(alt)
@@ -104,7 +110,7 @@ final class DaemonServer {
                 }
             } else if !(await registry.isPortBindable(requestedPort)) {
                 DaemonLogger.shared.info("Port \(requestedPort) is occupied but health probe is not ready yet; treating as startup race")
-                throw DaemonError.alreadyRunning
+                throw DaemonError.alreadyRunning(port: requestedPort)
             }
         }
 
@@ -232,6 +238,10 @@ final class DaemonServer {
         }
         voiceAssistant.onStateChanged = { [weak self] state, text, responseText in
             guard let self else { return }
+            // Cache voice state for piggybacking on state_update
+            self.cachedVoiceAssistantState = state.rawValue
+            self.cachedVoiceAssistantText = text
+            self.cachedVoiceAssistantResponseText = responseText
             self.broadcastRaw([
                 "type": "voice_assistant_state",
                 "state": state.rawValue,
@@ -239,6 +249,8 @@ final class DaemonServer {
                 "text": text as Any,
                 "responseText": responseText as Any,
             ])
+            // Also trigger state_update so all clients get voice state
+            self.broadcastStateUpdate()
         }
         _ = voiceAssistant.start()
 
@@ -814,7 +826,10 @@ final class DaemonServer {
             }
             return
         case "query_usage":
-            Task { await fetchUsageRelayed() }
+            Task {
+                await fetchUsageRelayed()
+                await MainActor.run { self.broadcastUsage() }
+            }
         case "switch_agent":
             Task { await focusRelay.unfocus() }
             handleSwitchAgent(cmd["agent"] as? String ?? "")
@@ -1101,11 +1116,19 @@ final class DaemonServer {
             }
         }
 
-        // Usage tick — 5s (for session duration display)
+        // Usage tick — 5s (for session duration display + stale TTL)
         usageTickTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
                 guard let self, await self.wsServer.hasClients() else { continue }
+                // TTL: clear stale cache after 10 minutes
+                if self.cachedApiUsage != nil,
+                   self.lastApiFetchTime != .distantPast,
+                   Date().timeIntervalSince(self.lastApiFetchTime) > Self.usageStaleTTL {
+                    DaemonLogger.shared.debug("Daemon", "API usage cache expired, clearing")
+                    self.cachedApiUsage = nil
+                    self.apiUsageStale = false
+                }
                 self.broadcastUsage()
             }
         }
@@ -1127,6 +1150,8 @@ final class DaemonServer {
                     var s = session
                     if let health = await SessionRegistry.shared.probeDaemonHealth(port: session.port) {
                         s.agentType = health["agentType"] as? String ?? s.agentType
+                        s.state = health["state"] as? String
+                        s.modelName = health["modelName"] as? String
                     }
                     return s
                 }
@@ -1163,33 +1188,54 @@ final class DaemonServer {
     @MainActor
     private func fetchUsageRelayed() async {
         let sessions = registry.listActive().filter { $0.agentType != "daemon" && $0.id != sessionId }
+        DaemonLogger.shared.debug("Daemon", "fetchUsageRelayed: \(sessions.count) siblings")
 
         // Tier 1: HTTP relay from sibling
         for sibling in sessions {
+            DaemonLogger.shared.debug("Daemon", "Usage Tier 1: HTTP relay from port \(sibling.port)")
             if let usage = await fetchUsageViaHTTP(port: sibling.port) {
-                cachedApiUsage = nil // raw dict cached separately
-                broadcastRaw(usage)
+                // Parse relayed dict back into ApiUsageData for caching
+                cachedApiUsage = parseRelayedUsage(usage)
                 lastApiFetchTime = Date()
                 apiUsageStale = false
+                oauthConnected = true
+                // Infer billing type
+                if let inferred = cachedApiUsage?.inferredBillingType {
+                    stateMachine.billingType = inferred
+                }
+                DaemonLogger.shared.debug("Daemon", "Usage Tier 1 OK: 5h=\(cachedApiUsage?.fiveHourPercent ?? -1)%")
+                broadcastUsage()
                 return
             }
         }
 
-        // Tier 2: WS relay from sibling
-        // (simplified — uses HTTP since WS relay adds complexity)
+        // Siblings exist but relay failed — do NOT call direct API (429 prevention)
+        // But still broadcast cached data so clients aren't left empty
+        if !sessions.isEmpty {
+            DaemonLogger.shared.debug("Daemon", "Usage Tier 1 failed for all \(sessions.count) siblings")
+            oauthConnected = usageAPI.hasOAuthToken()
+            if cachedApiUsage != nil { apiUsageStale = true }
+            broadcastUsage()
+            return
+        }
 
         // Tier 3: Direct API (only if no siblings)
-        if sessions.isEmpty {
-            if let usage = await usageAPI.fetchUsage() {
-                cachedApiUsage = usage
-                lastApiFetchTime = Date()
-                apiUsageStale = false
-                oauthConnected = true
-                broadcastUsage()
-            } else {
-                oauthConnected = usageAPI.hasOAuthToken()
-                if cachedApiUsage != nil { apiUsageStale = true }
+        DaemonLogger.shared.debug("Daemon", "Usage Tier 3: direct API")
+        if let usage = await usageAPI.fetchUsage() {
+            cachedApiUsage = usage
+            lastApiFetchTime = Date()
+            apiUsageStale = false
+            oauthConnected = true
+            if let inferred = usage.inferredBillingType {
+                stateMachine.billingType = inferred
             }
+            DaemonLogger.shared.debug("Daemon", "Usage Tier 3 OK: 5h=\(usage.fiveHourPercent ?? -1)%")
+            broadcastUsage()
+        } else {
+            DaemonLogger.shared.debug("Daemon", "Usage Tier 3 failed (token: \(usageAPI.tokenStatus.rawValue))")
+            oauthConnected = usageAPI.hasOAuthToken()
+            if cachedApiUsage != nil { apiUsageStale = true }
+            broadcastUsage()
         }
     }
 
@@ -1202,9 +1248,29 @@ final class DaemonServer {
             guard let http = response as? HTTPURLResponse, http.statusCode == 200,
                   let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   var usage = json["usage"] as? [String: Any] else { return nil }
+            // Validate fetchedAt — skip stale data (>5 min)
+            if let fetchedAt = json["fetchedAt"] as? Int, fetchedAt > 0 {
+                let ageMs = Int(Date().timeIntervalSince1970 * 1000) - fetchedAt
+                if ageMs > 5 * 60 * 1000 { return nil }
+            }
             usage["type"] = "usage_update"
             return usage
         } catch { return nil }
+    }
+
+    /// Parse a relayed usage dict back into ApiUsageData for local caching
+    private func parseRelayedUsage(_ dict: [String: Any]) -> ApiUsageData {
+        ApiUsageData(
+            fiveHourPercent: dict["fiveHourPercent"] as? Double,
+            fiveHourResetsAt: dict["fiveHourResetsAt"] as? String,
+            sevenDayPercent: dict["sevenDayPercent"] as? Double,
+            sevenDayResetsAt: dict["sevenDayResetsAt"] as? String,
+            extraUsageEnabled: dict["extraUsageEnabled"] as? Bool ?? false,
+            extraUsageMonthlyLimit: dict["extraUsageMonthlyLimit"] as? Double,
+            extraUsageUsedCredits: dict["extraUsageUsedCredits"] as? Double,
+            extraUsageUtilization: dict["extraUsageUtilization"] as? Double,
+            inferredBillingType: dict["fiveHourPercent"] != nil ? "subscription" : "api"
+        )
     }
 
     // MARK: - Broadcasting
@@ -1294,30 +1360,121 @@ final class DaemonServer {
         if let url = cachedPairingUrl { e["pairingUrl"] = url }
         if let r = stateMachine.remoteUrl { e["remoteUrl"] = r }
         if oauthConnected { e["oauthConnected"] = true }
+        // Voice assistant state (piggyback on state_update for all clients)
+        if cachedVoiceAssistantState != "disabled" {
+            e["voiceAssistantState"] = cachedVoiceAssistantState
+            e["voiceAssistantText"] = cachedVoiceAssistantText as Any
+            e["voiceAssistantResponseText"] = cachedVoiceAssistantResponseText as Any
+        }
         return e
     }
 
     private func buildUsageEvent() -> [String: Any]? {
-        guard let u = cachedApiUsage else { return nil }
         var e: [String: Any] = ["type": "usage_update"]
-        if let v = u.fiveHourPercent { e["fiveHourPercent"] = v }
-        if let v = u.fiveHourResetsAt { e["fiveHourResetsAt"] = v }
-        if let v = u.sevenDayPercent { e["sevenDayPercent"] = v }
-        if let v = u.sevenDayResetsAt { e["sevenDayResetsAt"] = v }
-        e["extraUsageEnabled"] = u.extraUsageEnabled
-        if let v = u.extraUsageMonthlyLimit { e["extraUsageMonthlyLimit"] = v }
-        if let v = u.extraUsageUsedCredits { e["extraUsageUsedCredits"] = v }
-        if let v = u.extraUsageUtilization { e["extraUsageUtilization"] = v }
+
+        // Session fields from StateMachine
+        e["sessionDurationSec"] = stateMachine.sessionDurationSec
+        e["inputTokens"] = stateMachine.inputTokens
+        e["outputTokens"] = stateMachine.outputTokens
+        e["toolCalls"] = stateMachine.toolCalls
+        if let v = stateMachine.estimatedCostUsd { e["estimatedCostUsd"] = v }
+        if let v = stateMachine.sessionPercent { e["sessionPercent"] = v }
+        if let v = stateMachine.costSpent { e["costSpent"] = v }
+        if let v = stateMachine.costLimit { e["costLimit"] = v }
+        if let v = stateMachine.resetTime { e["resetTime"] = v }
+        if let v = stateMachine.resetDate { e["resetDate"] = v }
+
+        // API usage data with adjustUsagePercent applied
+        if let u = cachedApiUsage {
+            e["fiveHourPercent"] = adjustUsagePercent(u.fiveHourPercent, resetsAt: u.fiveHourResetsAt) as Any
+            if let v = u.fiveHourResetsAt { e["fiveHourResetsAt"] = v }
+            e["sevenDayPercent"] = adjustUsagePercent(u.sevenDayPercent, resetsAt: u.sevenDayResetsAt) as Any
+            if let v = u.sevenDayResetsAt { e["sevenDayResetsAt"] = v }
+            e["extraUsageEnabled"] = u.extraUsageEnabled
+            if let v = u.extraUsageMonthlyLimit { e["extraUsageMonthlyLimit"] = v }
+            if let v = u.extraUsageUsedCredits { e["extraUsageUsedCredits"] = v }
+            if let v = u.extraUsageUtilization { e["extraUsageUtilization"] = v }
+        }
+
         if oauthConnected { e["oauthConnected"] = true }
         if apiUsageStale { e["usageStale"] = true }
+        if let o = cachedOllamaStatus { e["ollamaStatus"] = o }
+        let ts = usageAPI.tokenStatus
+        if ts != .unknown { e["tokenStatus"] = ts.rawValue }
+        if let codex = usageAPI.codexAuthStatus {
+            if let mode = codex.authMode { e["codexAuthMode"] = mode }
+            if codex.webAuthConnected { e["codexWebAuthConnected"] = true }
+            if let plan = codex.planType { e["codexPlanType"] = plan }
+            if let accountId = codex.accountId { e["codexAccountId"] = accountId }
+            if let until = codex.subscriptionActiveUntil { e["codexSubscriptionActiveUntil"] = until }
+            if let refresh = codex.lastRefreshAt { e["codexLastRefreshAt"] = refresh }
+        }
+
         return e
+    }
+
+    /// Returns 0 if the usage window has already reset.
+    /// Added 'sticky' 5-min buffer for high usage to avoid premature '0% (now)'.
+    private func adjustUsagePercent(_ percent: Double?, resetsAt: String?) -> Double? {
+        guard let percent else { return nil }
+        guard let resetsAt else { return percent }
+
+        // Robust parsing
+        let resetDate: Date?
+        if let d = ISO8601DateFormatter().date(from: resetsAt) {
+            resetDate = d
+        } else {
+            let pattern = #"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})"#
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: resetsAt, range: NSRange(resetsAt.startIndex..., in: resetsAt)),
+               let dateRange = Range(match.range(at: 1), in: resetsAt) {
+                let baseDate = String(resetsAt[dateRange])
+                let tz: String
+                if match.range(at: 3).location != NSNotFound,
+                   let tzRange = Range(match.range(at: 3), in: resetsAt) {
+                    tz = String(resetsAt[tzRange])
+                } else {
+                    tz = "Z"
+                }
+                resetDate = ISO8601DateFormatter().date(from: baseDate + tz)
+            } else {
+                resetDate = nil
+            }
+        }
+
+        guard let resetDate else {
+            DaemonLogger.shared.debug("Daemon", "Failed to parse resetsAt: \(resetsAt)")
+            return percent
+        }
+
+        let now = Date()
+        let elapsed = now.timeIntervalSince(resetDate)
+
+        // If time hasn't passed yet, show current percent
+        if elapsed < 0 { return percent }
+
+        // If usage is very high (>90%), keep it 'sticky' for 5 minutes after reset
+        // to account for server propagation delay/clock skew.
+        if percent > 0.90 {
+            if elapsed < 300 { // 5 minutes
+                return percent
+            }
+        } else {
+            // For lower usage, a 60s buffer is enough
+            if elapsed < 60 {
+                return percent
+            }
+        }
+
+        // Only reset to 0 after safe buffer
+        return 0
     }
 
     // MARK: - Ollama
 
     @MainActor
     private func probeOllama() async {
-        let url = URL(string: "http://127.0.0.1:11434/api/tags")!
+        guard let url = URL(string: "http://127.0.0.1:11434/api/tags") else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 2
         do {
@@ -1381,6 +1538,8 @@ final class DaemonServer {
     private func sessionToDict(_ s: DaemonSessionEntry) -> [String: Any] {
         var d: [String: Any] = ["id": s.id, "port": s.port, "alive": true, "projectName": s.projectName]
         if let a = s.agentType { d["agentType"] = a }
+        if let st = s.state { d["state"] = st }
+        if let mn = s.modelName { d["modelName"] = mn }
         return d
     }
 }
@@ -1388,7 +1547,7 @@ final class DaemonServer {
 // MARK: - Errors
 
 enum DaemonError: Error {
-    case alreadyRunning
+    case alreadyRunning(port: Int)
     case noPortAvailable
 }
 
