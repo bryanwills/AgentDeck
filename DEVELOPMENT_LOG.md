@@ -2,6 +2,22 @@
 
 ---
 
+## 2026-04-03 — Usage Dial Text Overlap Fix + D200H Usage Monitor
+
+### 문제
+(1) SD+ Usage Dial (E3) overview 페이지에서 사용량 %와 리셋 시간 텍스트가 겹침 — 같은 Y좌표에 배치 (2) Detail 페이지에서 20px 한 줄에 "100% · 23h 59m" 합쳐서 200px 초과 (3) Extra Usage 페이지에 크레딧 정보 미표시 (4) D200H에 사용량 모니터링 없음
+
+### 해결
+**Plugin Usage Dial**: overview에서 % text-anchor="end" 우측 정렬 + 리셋 시간 별도 줄 분리 (y+11). Detail에서 % 단독 라인 + "resets in Xh" 별도 줄. Extra Usage에 $used/$limit 표시. 리셋 시간 폰트 11px→13px, 색상 밝게.
+
+**D200H**: 세션 리스트 모드에서 slot 12(우측 하단)를 usage monitor로 할당. 12 sessions/page + 1 usage. "5H XX% Xh\n7D YY% Xh" 텍스트 + color-coded solid border (green/yellow/red).
+
+### 핵심 설계 결정
+- **D200H에서 커스텀 PNG 렌더링 금지**: Core Graphics로 게이지 바를 직접 그린 PNG는 ZIP 크기/바이트 경계 변화로 D200H 펌웨어가 거부 (울란지 기본 시계 복귀). 표준 renderButtonPng만 사용하고 시각 정보는 디바이스 네이티브 텍스트 + border color로 전달
+- **Extra Usage 데이터 파이프라인**: protocol의 extraUsageMonthlyLimit/extraUsageUsedCredits를 UsageModeData로 전달, 렌더러에서 "$X.XX / $Y.YY" 표시
+
+---
+
 ## 2026-04-03 — D200H Multi-Session Agent Controller + Heartbeat Resilience
 
 ### 문제
@@ -4376,3 +4392,92 @@ macOS Dashboard의 `OpenClaw / OLLAMA / MLX / Subscriptions` 섹션이 의도한
 - 결과: 통과
 - `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataDashboardSync build CODE_SIGNING_ALLOWED=NO`
 - 결과: `BUILD SUCCEEDED`
+
+## 2026-04-03 — OpenClaw Display Compaction + MLX nanoLLaVA Filter
+
+### 문제
+- OpenClaw 모델 목록이 raw 카탈로그 이름을 거의 그대로 보여줘서 `DeepSeek: DeepSeek V3.2` 같은 중복 접두사가 그대로 보였다.
+- 모델 family를 묶더라도 `GLM:` 같은 그룹 라벨을 별도로 붙이는 방식은 오히려 UI를 지저분하게 만들 수 있었다.
+- MLX probe는 현재 서버가 노출하는 모든 모델을 그대로 보여줘 `nanoLLaVA` 같은 보조 비전 모델까지 Dashboard에 올라왔다.
+
+### 해결
+- `TankStatusPanel.swift` / Android `EnginePanel.kt`
+  - OpenClaw 모델명을 family 기준으로 compact display 하도록 조정
+  - 별도 그룹 라벨은 붙이지 않고 `GLM-5.1, 5 Turbo, 5, 4.7`처럼 접두사를 한 번만 보이게 압축
+  - `DeepSeek: DeepSeek ...` 같은 중복 접두사는 정규화
+  - OpenClaw 첫 줄(대표 모델이 우선 정렬되는 줄)은 약간 다른 색상으로 강조
+- `DaemonServer.swift` / `bridge/src/mlx-probe.ts`
+  - MLX model probe 결과에서 `nanoLLaVA`는 기본 Dashboard 목록에서 제외
+
+### 검증
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataOpenClawGrouping build CODE_SIGNING_ALLOWED=NO`
+- 결과: `BUILD SUCCEEDED`
+
+## 2026-04-03 — Pixoo Log Noise Reduction
+
+### 문제
+- Pixoo render loop가 약 3 FPS로 돌아가면서 성공 push 로그를 매 tick마다 남겨, 실제 장애나 상태 전이 로그가 묻혔다.
+- `Push OK -> ... picId=...`가 계속 반복되어 디버깅 가독성이 떨어졌다.
+
+### 해결
+- `PixooModule.swift`
+  - 성공 push는 매번 찍지 않고 첫 성공, 복구 직후, 그리고 일정 주기 요약만 남기도록 조정
+  - 실패는 첫 실패 / 5회 / 20회 단위와 실패 사유 변경 시만 에러 로그로 남기도록 압축
+  - push loop 내부 HTTP 실패 로그는 중복 출력되지 않도록 억제
+  - 복구 시 `Pixoo recovered on ... after N failed push(es)` 형태로 상태 전이를 명확히 기록
+
+### 검증
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataPixooLogs build CODE_SIGNING_ALLOWED=NO`
+- 결과: `BUILD SUCCEEDED`
+
+## 2026-04-03 — Common Log Suppression for Steady-State Noise
+
+### 문제
+- Pixoo뿐 아니라 ESP32 serial, usage relay 같은 steady-state 경로도 반복 debug 로그가 많아 실제 장애 로그가 묻혔다.
+- 정상 상태를 매번 출력하는 대신, 상태 변화와 반복 실패 요약이 더 중요했다.
+
+### 해결
+- `DaemonLogger.swift`
+  - `throttledDebug(category:key:message:minInterval:)` 추가
+  - `sampledDebug(category:key:every:message:)` 추가
+- `ESP32Serial.swift`
+  - 반복되는 open 실패 / read exit / incoming message type 로그를 suppression 정책으로 전환
+  - serial open 성공은 debug가 아니라 명확한 상태 전이로 `info`로 남김
+- `DaemonServer.swift`
+  - usage relay 시작 / per-port relay / tier1 failure / tier3 fallback 로그를 샘플링 또는 throttling 적용
+
+### 검증
+- `pnpm --filter @agentdeck/bridge typecheck`
+- 결과: 통과
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataLogPolicy build CODE_SIGNING_ALLOWED=NO`
+- 결과: `BUILD SUCCEEDED`
+
+## 2026-04-03 — Creature Layout and Swim Lane Stabilization
+
+### 문제
+- 다중 세션일 때 크리처가 바닥 위에서 자연스럽게 줄지어 서지 못하고, 격자형 슬롯 때문에 서로 겹치거나 HUD 패널과 과도하게 충돌했다.
+- WORKING 상태의 waypoint가 전역 swim bounds만 기준으로 잡혀 여러 크리처가 한쪽으로 몰리거나, 수면/지면 경계 가까이 과하게 움직였다.
+- Pixoo 렌더러는 별도 golden-ratio X 배치를 써서 일반 terrarium과 다른 밀집 패턴을 보였다.
+
+### 해결
+- `CreatureLayout.swift`, `CreatureLayout.kt`
+  - octopus / cloud / opencode 공통 `layoutBand` 슬롯 생성기로 교체
+  - 한 줄 또는 2~3줄 staggered band로 배치해 자연스럽게 나란히 서도록 조정
+  - 왼쪽 세션 패널과 오른쪽 상태 패널을 덜 침범하도록 X 범위를 더 보수적으로 조정
+- `OctopusCreature.swift`, `OctopusCreature.kt`
+  - WORKING 상태 waypoint를 전역이 아니라 creature별 local swim lane 안에서만 선택하도록 변경
+  - current position clamp도 local lane 기준으로 조정
+- `JellyfishCreature.swift`, `OpenCodeCreature.swift`
+  - idle / waiting / pulsing 높이를 home slot 기준으로 따라가게 조정
+  - 과도한 좌우 drift를 줄이고 home 주변의 좁은 범위로 제한
+- `CloudCreature.kt`, `OpenCodeCreature.kt`
+  - Android 쪽도 동일하게 local swim lane 개념 반영
+- `PixooRenderer.swift`
+  - golden-ratio 임의 X 배치를 제거하고 creature type별 공통 슬롯 레이아웃 사용
+  - state별 Y만 별도 보정하되 slot 기반 분산을 유지
+
+### 검증
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataCreatureLayout build CODE_SIGNING_ALLOWED=NO`
+- 결과: `BUILD SUCCEEDED`
+- `./gradlew :app:compileDebugKotlin`
+- 결과: 이번 변경분 에러는 해소됨. 현재 남은 실패는 기존 `EinkRenderer.kt`의 `PathParser`/delegate 관련 선행 오류뿐
