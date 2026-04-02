@@ -23,7 +23,7 @@ export function createDefaultModules(agentType: AgentType): DeviceModule[] {
     new AdbModule(),
     new SerialModule(),
     new PixooModule(),
-    new D200hModule(),
+    // D200H: controlled by Swift daemon only (macOS app) — not activated in Node.js bridge
   ];
 }
 

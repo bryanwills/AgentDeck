@@ -11,7 +11,14 @@ final class DaemonLogger: Sendable {
 
     private let osLog = os.Logger(subsystem: "dev.agentdeck.daemon", category: "daemon")
     private let logFile: URL = {
-        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agentdeck")
+        // Use getpwuid to bypass App Sandbox container redirect
+        let homeDir: String
+        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
+            homeDir = String(cString: dir)
+        } else {
+            homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+        }
+        let dir = URL(fileURLWithPath: homeDir).appendingPathComponent(".agentdeck")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("swift-daemon.log")
     }()
@@ -46,6 +53,13 @@ final class DaemonLogger: Sendable {
         let line = "ERROR \(message)"
         writeToFile(line)
         osLog.error("\(message)")
+    }
+
+    func recentLines(limit: Int = 200) -> [String] {
+        guard let text = try? String(contentsOf: logFile, encoding: .utf8) else { return [] }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        guard lines.count > limit else { return lines }
+        return Array(lines.suffix(limit))
     }
 }
 #endif

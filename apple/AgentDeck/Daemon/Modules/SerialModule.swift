@@ -33,5 +33,9 @@ final class SerialModule: DeviceModule, @unchecked Sendable {
     func getConnectionCount() async -> Int {
         await serial.connectionCount
     }
+
+    func statusSnapshot() async -> sending [String: Any] {
+        await serial.statusSnapshot()
+    }
 }
 #endif

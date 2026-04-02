@@ -23,11 +23,18 @@ actor SessionFocusRelay {
     private(set) var focusedSessionId: String?
     private var focusedPort: Int?
     private var broadcast: ((@Sendable (SendableDict) -> Void))?
+    private var onUsageRelayed: ((@Sendable (SendableDict) -> Void))?
 
     init() {}
 
     func setBroadcast(_ handler: @escaping @Sendable (SendableDict) -> Void) {
         self.broadcast = handler
+    }
+
+    /// Called when a usage_update is received from the focused session,
+    /// BEFORE it is broadcast to clients. Allows daemon to sync its cache.
+    func setOnUsageRelayed(_ handler: @escaping @Sendable (SendableDict) -> Void) {
+        self.onUsageRelayed = handler
     }
 
     /// Focus a session by ID. Disconnects from previous session.
@@ -94,7 +101,7 @@ actor SessionFocusRelay {
     private func connect() {
         guard let port = focusedPort else { return }
 
-        let url = URL(string: "ws://127.0.0.1:\(port)")!
+        guard let url = URL(string: "ws://127.0.0.1:\(port)") else { return }
         let task = URLSession.shared.webSocketTask(with: url)
         wsTask = task
         task.resume()
@@ -121,6 +128,10 @@ actor SessionFocusRelay {
                            let type = json["type"] as? String,
                            relayedEvents.contains(type) {
                             DaemonLogger.shared.debug("FocusRelay", "Relay \(type)")
+                            // Sync daemon cache before broadcasting to avoid oscillation
+                            if type == "usage_update" {
+                                await self.onUsageRelayed?(SendableDict(json))
+                            }
                             await self.broadcast?(SendableDict(json))
                         }
                     default:
@@ -149,6 +160,7 @@ actor SessionFocusRelay {
     init() {}
 
     func setBroadcast(_ handler: @escaping @Sendable (SendableDict) -> Void) {}
+    func setOnUsageRelayed(_ handler: @escaping @Sendable (SendableDict) -> Void) {}
 
     func focus(sessionId: String) {
         focusedSessionId = sessionId

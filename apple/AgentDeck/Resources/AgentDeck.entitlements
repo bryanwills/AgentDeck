@@ -10,9 +10,26 @@
 	<true/>
 	<key>com.apple.security.network.server</key>
 	<true/>
+	<key>com.apple.security.device.usb</key>
+	<true/>
+	<key>com.apple.security.device.serial</key>
+	<true/>
+	<key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
+	<array>
+		<string>/dev/cu.usbserial-</string>
+		<string>/dev/cu.usbmodem</string>
+		<string>/dev/cu.wchusbserial</string>
+		<string>/opt/homebrew/bin/</string>
+	</array>
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
 	<array>
 		<string>/.agentdeck/</string>
+		<string>/.openclaw/</string>
+		<string>/.local/bin/</string>
+		<string>/bin/</string>
+		<string>/Library/Android/</string>
+		<string>/Library/Developer/Android/</string>
+		<string>/Android/</string>
 	</array>
 </dict>
 </plist>

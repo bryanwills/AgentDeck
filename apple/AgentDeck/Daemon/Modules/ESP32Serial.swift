@@ -71,8 +71,9 @@ actor ESP32Serial {
         pendingReads.removeAll()
         pendingReadsLock.unlock()
         for r in reads {
-            if r.data == "<<EOF>>" {
-                markReadFailure(port: r.port, message: "EOF on \(r.port)")
+            if r.data.hasPrefix("<<READ_ERR:") {
+                let details = String(r.data.dropFirst("<<READ_ERR:".count).dropLast(2))
+                markReadFailure(port: r.port, message: "read failed on \(r.port): \(details)")
             } else {
                 handleReadData(port: r.port, data: r.data)
             }
@@ -277,6 +278,7 @@ actor ESP32Serial {
         tcgetattr(descriptor, &options)
         cfmakeraw(&options)
         options.c_cflag |= UInt(CLOCAL | CREAD)
+        options.c_cflag &= ~UInt(HUPCL)  // Match Node serial bridge: don't drop DTR on close/reopen.
         cfsetispeed(&options, speed_t(B115200))
         cfsetospeed(&options, speed_t(B115200))
         withUnsafeMutablePointer(to: &options.c_cc) { ptr in
@@ -332,7 +334,8 @@ actor ESP32Serial {
         let fd = handle.fileDescriptor
         // Read on a dispatch queue — poll fd with O_NONBLOCK
         let readQueue = DispatchQueue(label: "esp32.read.\(port)", qos: .default)
-        readQueue.async { [weak self] in
+        readQueue.async { [weak self, handle] in
+            _ = handle  // Retain the FileHandle for the entire reader lifetime.
             let bufSize = 1024
             let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
             defer { buf.deallocate() }
@@ -350,7 +353,8 @@ actor ESP32Serial {
                         continue
                     }
                     DaemonLogger.shared.debug("ESP32", "Read exit \(port): errno=\(errNo)")
-                    self?.enqueuePendingRead(port: port, data: "<<EOF>>")
+                    let errText = String(cString: strerror(errNo))
+                    self?.enqueuePendingRead(port: port, data: "<<READ_ERR:errno=\(errNo) \(errText)>>")
                     break
                 } else {
                     Thread.sleep(forTimeInterval: 0.05)

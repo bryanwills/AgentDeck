@@ -99,6 +99,19 @@ const OC_PRESET_DEFS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string; 
   { label: 'GATEWAY', iconSvg: GATEWAY_ICON_SVG, color: '#1a0f2e', textColor: '#c084fc', localAction: 'open_gateway' },
 ];
 
+// Claude Code quick actions (IDLE detail view)
+const GO_ON_ICON_SVG = `<polygon points="60,20 100,44 60,68" fill="#22c55e" opacity="0.8"/>`;
+const REVIEW_ICON_SVG = `<rect x="42" y="18" width="60" height="48" rx="4" fill="none" stroke="#93c5fd" stroke-width="2"/><path d="M52,34 h40 M52,46 h32 M52,58 h24" stroke="#93c5fd" stroke-width="1.5" opacity="0.6"/>`;
+const COMMIT_ICON_SVG = `<circle cx="72" cy="40" r="20" fill="none" stroke="#22c55e" stroke-width="2"/><polyline points="62,40 70,48 84,32" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"/>`;
+const CLEAR_ICON_SVG = `<line x1="52" y1="24" x2="92" y2="64" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/><line x1="92" y1="24" x2="52" y2="64" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>`;
+
+const CC_PRESET_DEFS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string; dynamicIcon?: 'model' }> = [
+  { label: 'GO ON', iconSvg: GO_ON_ICON_SVG, color: '#1e3a2f', textColor: '#22c55e', prompt: 'go on' },
+  { label: 'REVIEW', iconSvg: REVIEW_ICON_SVG, color: '#1e293b', textColor: '#93c5fd', prompt: '/review' },
+  { label: 'COMMIT', iconSvg: COMMIT_ICON_SVG, color: '#1e293b', textColor: '#22c55e', prompt: '/commit' },
+  { label: 'CLEAR', iconSvg: CLEAR_ICON_SVG, color: '#1e293b', textColor: '#94a3b8', prompt: '/clear' },
+];
+
 const SLOTS_PER_PAGE = 7; // When paginating: 7 sessions + 1 nav
 const MAX_SESSIONS = 20;
 const MAX_SLOTS = 8;
@@ -465,12 +478,17 @@ export class SessionSlotManager {
           };
         }
 
-        // IDLE: first content slot shows model/mode (coding agents only)
-        if (!isOpenClaw && this._detailState === State.IDLE && contentIdx === 0) {
-          const parts = [this._detailModelName, this._detailMode].filter(Boolean);
-          if (parts.length > 0) {
-            return { type: 'info', label: parts.join(' / '), session };
-          }
+        // Claude Code IDLE: show quick action presets (GO ON, REVIEW, COMMIT, CLEAR)
+        if (!isOpenClaw && this._detailState === State.IDLE && contentIdx < CC_PRESET_DEFS.length) {
+          const def = CC_PRESET_DEFS[contentIdx];
+          const preset: PresetAction = {
+            label: def.label,
+            iconSvg: def.iconSvg ?? '',
+            color: def.color,
+            textColor: def.textColor,
+            prompt: def.prompt,
+          };
+          return { type: 'preset', preset };
         }
 
         return { type: 'empty' };

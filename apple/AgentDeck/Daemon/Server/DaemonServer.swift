@@ -3,7 +3,11 @@
 // Ported from bridge/src/daemon-server.ts — FULL wiring of all modules
 
 import Foundation
+import IOKit
+import IOKit.ps
 import Network
+
+private let kIOMessageSystemHasPoweredOn: UInt32 = 0xe0000300
 
 @MainActor
 final class DaemonServer {
@@ -39,6 +43,7 @@ final class DaemonServer {
     private var cachedSessions: [DaemonSessionEntry] = []
     private var cachedModelCatalog: [[String: Any]] = []
     private var cachedOllamaStatus: [String: Any]?
+    private var cachedMlxModels: [String] = []
     private var cachedGatewayAvailable = false
     private var cachedPairingUrl: String?
     private var lastStateEvent: [String: Any]?
@@ -46,6 +51,8 @@ final class DaemonServer {
     private var lastApiFetchTime: Date = .distantPast
     private static let usageStaleTTL: TimeInterval = 600  // 10 minutes
     private var apiUsageStale = false
+    /// True when cachedApiUsage was synced from relay's already-adjusted values
+    private var apiUsagePreAdjusted = false
     private var oauthConnected = false
 
     // Voice assistant state cache for piggybacking on state_update
@@ -57,6 +64,7 @@ final class DaemonServer {
     private var sessionPollTask: Task<Void, Never>?
     private var usagePollTask: Task<Void, Never>?
     private var ollamaPollTask: Task<Void, Never>?
+    private var mlxPollTask: Task<Void, Never>?
     private var gatewayPollTask: Task<Void, Never>?
     private var gatewayHealthTask: Task<Void, Never>?
     private var usageTickTask: Task<Void, Never>?
@@ -212,6 +220,26 @@ final class DaemonServer {
             }
         }
 
+        // 8c. Sync daemon usage cache when relay receives usage_update (prevents oscillation)
+        await focusRelay.setOnUsageRelayed { [weak self] (box: SendableDict) in
+            Task { @MainActor in
+                guard let self else { return }
+                let usage = box.value
+                // Sync rate-limit values (already adjusted by bridge's adjustUsagePercent)
+                if self.cachedApiUsage != nil {
+                    if let fh = usage["fiveHourPercent"] as? Double {
+                        self.cachedApiUsage?.fiveHourPercent = fh
+                    }
+                    if let sd = usage["sevenDayPercent"] as? Double {
+                        self.cachedApiUsage?.sevenDayPercent = sd
+                    }
+                    self.cachedApiUsage?.fiveHourResetsAt = usage["fiveHourResetsAt"] as? String
+                    self.cachedApiUsage?.sevenDayResetsAt = usage["sevenDayResetsAt"] as? String
+                    self.apiUsagePreAdjusted = true
+                }
+            }
+        }
+
         // 9. Start polling
         startAllPolling()
 
@@ -253,6 +281,27 @@ final class DaemonServer {
             self.broadcastStateUpdate()
         }
         _ = voiceAssistant.start()
+
+        // 13. System sleep/wake handling — immediate cleanup on wake
+        // Use Darwin notification (IOKit power assertion) — works without AppKit
+        let wakePort = IONotificationPortCreate(kIOMainPortDefault)
+        if let wakePort {
+            IONotificationPortSetDispatchQueue(wakePort, DispatchQueue.main)
+            var notifier: io_object_t = 0
+            let rootDomain = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+            IOServiceAddInterestNotification(wakePort, rootDomain, kIOGeneralInterest, { (refcon, _, messageType, _) in
+                guard messageType == UInt32(kIOMessageSystemHasPoweredOn) else { return }
+                guard let refcon else { return }
+                let server = Unmanaged<DaemonServer>.fromOpaque(refcon).takeUnretainedValue()
+                DaemonLogger.shared.info("System wake — pruning stale sessions")
+                // Force prune dead sessions (bridges killed during sleep)
+                _ = server.registry.listActive()
+                // Trigger immediate session list refresh for clients
+                server.broadcastSessionsList()
+                // Re-sync timeline relay (drops dead subscriptions)
+                Task { await server.timelineRelay.sync() }
+            }, Unmanaged.passUnretained(self).toOpaque(), &notifier)
+        }
 
         DaemonLogger.shared.info("Daemon running on port \(port) — all modules wired")
     }
@@ -959,6 +1008,8 @@ final class DaemonServer {
         cachedModelCatalog = []
         _ = stateMachine.transition(trigger: "session_end", source: .hook)
         broadcastSessionsList()
+        broadcastStateUpdate()
+        broadcastUsage()
     }
 
     @MainActor
@@ -1003,6 +1054,7 @@ final class DaemonServer {
                     stateMachine.modelName = defaultModel
                 }
                 broadcastStateUpdate()
+                broadcastUsage()
             }
         default:
             break
@@ -1040,6 +1092,8 @@ final class DaemonServer {
         if merged.count != cachedModelCatalog.count {
             cachedModelCatalog = merged
             DaemonLogger.shared.debug("Daemon", "Model catalog merged: \(merged.count) models total")
+            broadcastStateUpdate()
+            broadcastUsage()
         }
     }
 
@@ -1085,6 +1139,15 @@ final class DaemonServer {
             }
         }
 
+        // MLX — 5s
+        mlxPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self, await self.wsServer.hasClients() else { continue }
+                await self.probeMLX()
+            }
+        }
+
         // Gateway probe — 5s
         gatewayPollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -1121,13 +1184,15 @@ final class DaemonServer {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
                 guard let self, await self.wsServer.hasClients() else { continue }
-                // TTL: clear stale cache after 10 minutes
+                // TTL: keep last good cache, but mark it stale after 10 minutes.
+                // Clearing to nil makes the HUD look like usage disappeared entirely.
                 if self.cachedApiUsage != nil,
                    self.lastApiFetchTime != .distantPast,
                    Date().timeIntervalSince(self.lastApiFetchTime) > Self.usageStaleTTL {
-                    DaemonLogger.shared.debug("Daemon", "API usage cache expired, clearing")
-                    self.cachedApiUsage = nil
-                    self.apiUsageStale = false
+                    if !self.apiUsageStale {
+                        DaemonLogger.shared.debug("Daemon", "API usage cache expired, keeping last good values as stale")
+                        self.apiUsageStale = true
+                    }
                 }
                 self.broadcastUsage()
             }
@@ -1198,6 +1263,7 @@ final class DaemonServer {
                 cachedApiUsage = parseRelayedUsage(usage)
                 lastApiFetchTime = Date()
                 apiUsageStale = false
+                apiUsagePreAdjusted = false  // raw data from HTTP, needs adjustment
                 oauthConnected = true
                 // Infer billing type
                 if let inferred = cachedApiUsage?.inferredBillingType {
@@ -1225,6 +1291,7 @@ final class DaemonServer {
             cachedApiUsage = usage
             lastApiFetchTime = Date()
             apiUsageStale = false
+            apiUsagePreAdjusted = false  // raw data from API, needs adjustment
             oauthConnected = true
             if let inferred = usage.inferredBillingType {
                 stateMachine.billingType = inferred
@@ -1353,8 +1420,7 @@ final class DaemonServer {
         if stateMachine.navigable { e["navigable"] = true }
         e["cursorIndex"] = stateMachine.cursorIndex
         if let sp = stateMachine.suggestedPrompt { e["suggestedPrompt"] = sp }
-        if !cachedModelCatalog.isEmpty { e["modelCatalog"] = cachedModelCatalog }
-        if let o = cachedOllamaStatus { e["ollamaStatus"] = o }
+        mergeEngineSnapshot(into: &e)
         if cachedGatewayAvailable { e["gatewayAvailable"] = true }
         if cachedGatewayHasError { e["gatewayHasError"] = true }
         if let url = cachedPairingUrl { e["pairingUrl"] = url }
@@ -1384,11 +1450,16 @@ final class DaemonServer {
         if let v = stateMachine.resetTime { e["resetTime"] = v }
         if let v = stateMachine.resetDate { e["resetDate"] = v }
 
-        // API usage data with adjustUsagePercent applied
+        // API usage data — skip adjustUsagePercent when values were synced from relay
         if let u = cachedApiUsage {
-            e["fiveHourPercent"] = adjustUsagePercent(u.fiveHourPercent, resetsAt: u.fiveHourResetsAt) as Any
+            if apiUsagePreAdjusted {
+                e["fiveHourPercent"] = u.fiveHourPercent as Any
+                e["sevenDayPercent"] = u.sevenDayPercent as Any
+            } else {
+                e["fiveHourPercent"] = adjustUsagePercent(u.fiveHourPercent, resetsAt: u.fiveHourResetsAt) as Any
+                e["sevenDayPercent"] = adjustUsagePercent(u.sevenDayPercent, resetsAt: u.sevenDayResetsAt) as Any
+            }
             if let v = u.fiveHourResetsAt { e["fiveHourResetsAt"] = v }
-            e["sevenDayPercent"] = adjustUsagePercent(u.sevenDayPercent, resetsAt: u.sevenDayResetsAt) as Any
             if let v = u.sevenDayResetsAt { e["sevenDayResetsAt"] = v }
             e["extraUsageEnabled"] = u.extraUsageEnabled
             if let v = u.extraUsageMonthlyLimit { e["extraUsageMonthlyLimit"] = v }
@@ -1398,7 +1469,7 @@ final class DaemonServer {
 
         if oauthConnected { e["oauthConnected"] = true }
         if apiUsageStale { e["usageStale"] = true }
-        if let o = cachedOllamaStatus { e["ollamaStatus"] = o }
+        mergeEngineSnapshot(into: &e)
         let ts = usageAPI.tokenStatus
         if ts != .unknown { e["tokenStatus"] = ts.rawValue }
         if let codex = usageAPI.codexAuthStatus {
@@ -1409,12 +1480,66 @@ final class DaemonServer {
             if let until = codex.subscriptionActiveUntil { e["codexSubscriptionActiveUntil"] = until }
             if let refresh = codex.lastRefreshAt { e["codexLastRefreshAt"] = refresh }
         }
-
+        if let antigravity = usageAPI.antigravityStatus {
+            e["antigravityStatus"] = antigravityPayload(antigravity)
+        }
+        let subscriptions = buildSubscriptions()
+        if !subscriptions.isEmpty { e["subscriptions"] = subscriptions }
         return e
+    }
+
+    @MainActor
+    private func mergeEngineSnapshot(into event: inout [String: Any]) {
+        if !cachedModelCatalog.isEmpty { event["modelCatalog"] = cachedModelCatalog }
+        if let ollama = cachedOllamaStatus { event["ollamaStatus"] = ollama }
+        if !cachedMlxModels.isEmpty { event["mlxModels"] = cachedMlxModels }
+        let subscriptions = buildSubscriptions()
+        if !subscriptions.isEmpty { event["subscriptions"] = subscriptions }
+        if let antigravity = usageAPI.antigravityStatus {
+            event["antigravityStatus"] = antigravityPayload(antigravity)
+        }
+    }
+
+    @MainActor
+    private func buildSubscriptions() -> [[String: Any]] {
+        var subscriptions: [[String: Any]] = []
+        if let codex = usageAPI.codexAuthStatus {
+            // keep usage metadata fields in usage_update only
+            if let plan = codex.planType {
+                subscriptions.append([
+                    "name": Self.chatGptPlanDisplay(plan),
+                    "until": codex.subscriptionActiveUntil as Any,
+                ])
+            }
+        }
+        if cachedApiUsage?.inferredBillingType == "subscription" || stateMachine.billingType == "subscription" {
+            subscriptions.append(["name": "Claude"])
+        }
+        return subscriptions
     }
 
     /// Returns 0 if the usage window has already reset.
     /// Added 'sticky' 5-min buffer for high usage to avoid premature '0% (now)'.
+    private static func chatGptPlanDisplay(_ raw: String) -> String {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "plus": return "ChatGPT Plus"
+        case "pro": return "ChatGPT Pro"
+        case "team": return "ChatGPT Team"
+        case "enterprise": return "ChatGPT Enterprise"
+        default: return "ChatGPT \(raw)"
+        }
+    }
+
+    private func antigravityPayload(_ status: AntigravityStatus) -> [String: Any] {
+        var payload: [String: Any] = [:]
+        if let planName = status.planName { payload["planName"] = planName }
+        if let availableCredits = status.availableCredits { payload["availableCredits"] = availableCredits }
+        if let minimumCreditAmountForUsage = status.minimumCreditAmountForUsage {
+            payload["minimumCreditAmountForUsage"] = minimumCreditAmountForUsage
+        }
+        return payload
+    }
+
     private func adjustUsagePercent(_ percent: Double?, resetsAt: String?) -> Double? {
         guard let percent else { return nil }
         guard let resetsAt else { return percent }
@@ -1474,20 +1599,67 @@ final class DaemonServer {
 
     @MainActor
     private func probeOllama() async {
-        guard let url = URL(string: "http://127.0.0.1:11434/api/tags") else { return }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 2
+        let previous = cachedOllamaStatus as NSDictionary?
         do {
+            guard let psUrl = URL(string: "http://127.0.0.1:11434/api/ps") else { return }
+            var request = URLRequest(url: psUrl)
+            request.timeoutInterval = 2
             let (data, _) = try await URLSession.shared.data(for: request)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let models = json["models"] as? [[String: Any]] {
                 cachedOllamaStatus = [
                     "available": true,
-                    "models": models.map { ["name": $0["name"] ?? "", "size": $0["size"] ?? 0, "sizeVram": 0] }
+                    "models": models.map { [
+                        "name": $0["name"] ?? "",
+                        "size": $0["size"] ?? 0,
+                        "sizeVram": $0["size_vram"] ?? $0["sizeVram"] ?? 0,
+                    ] }
                 ]
             }
         } catch {
             cachedOllamaStatus = ["available": false, "models": [] as [Any]]
+        }
+        if previous == nil || !(previous?.isEqual(to: cachedOllamaStatus ?? [:]) ?? false) {
+            broadcastStateUpdate()
+            broadcastUsage()
+        }
+    }
+
+    @MainActor
+    private func probeMLX() async {
+        let previous = cachedMlxModels
+        let candidates = [
+            "http://127.0.0.1:8800/v1/models",
+            "http://127.0.0.1:8800/models",
+        ]
+        var resolved: [String] = []
+
+        for endpoint in candidates {
+            guard let url = URL(string: endpoint) else { continue }
+            do {
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 2
+                let (data, response) = try await URLSession.shared.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard status == 200,
+                      let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let rows = json["data"] as? [[String: Any]] else {
+                    continue
+                }
+                resolved = Array(Set(rows.compactMap { row in
+                    if let id = row["id"] as? String, !id.isEmpty { return id }
+                    if let name = row["name"] as? String, !name.isEmpty { return name }
+                    return nil
+                })).sorted()
+                if !resolved.isEmpty { break }
+            } catch {
+                continue
+            }
+        }
+        cachedMlxModels = resolved
+        if previous != cachedMlxModels {
+            broadcastStateUpdate()
+            broadcastUsage()
         }
     }
 
@@ -1511,7 +1683,7 @@ final class DaemonServer {
     func shutdown() async {
         DaemonLogger.shared.info("Daemon shutting down...")
         sessionPollTask?.cancel(); usagePollTask?.cancel()
-        ollamaPollTask?.cancel(); gatewayPollTask?.cancel()
+        ollamaPollTask?.cancel(); mlxPollTask?.cancel(); gatewayPollTask?.cancel()
         gatewayHealthTask?.cancel(); usageTickTask?.cancel()
         initialUsageTask?.cancel()
 
