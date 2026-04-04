@@ -47,9 +47,9 @@
 - **Creature layout + focus relay 상호작용**: Focus relay가 primary 상태를 바꿀 때 siblings 리스트에서 ID 중복 제거는 UI가 책임진다 (프로토콜 레벨에서 제거하지 않음 — 여러 클라이언트가 다른 관점에서 해석 가능해야 함)
 - **Terminal 실행**: AppleScript는 Automation 권한 프롬프트 필요 → 실패 가능. `.command` 파일 + `NSWorkspace.open`은 sandbox-safe + 사용자 기본 터미널 존중
 
-### 후속 이슈 (미해결)
-- **Settings 진입점 중복**: `MonitorScreen` gear 버튼이 `SettingsScreen`을 `.sheet`으로 띄우는데, `Settings` scene에도 같은 뷰 사용 → 두 곳에서 동시에 열 수 있음. 통일 필요
-- **`openDashboard` window 검색**: `title.contains("AgentDeck Dashboard")` 문자열 매칭 — i18n 시 불안정
+### 후속 이슈 (해결 — 35b1f45)
+- **Settings 진입점 중복** ✅: `MonitorScreen` gear 버튼을 macOS에서 `showSettingsWindow:` selector 경유로 통일 (`openSettings()` 헬퍼 + `#if os(macOS/iOS)` 분기). iOS는 `.sheet` 유지
+- **`openDashboard` window 검색** ✅: `title.contains()` 제거. SwiftUI `openWindow(id:)` 이미 존재 window를 front로 가져오므로 fallback 자체가 불필요 — `openWindow(id:)` + `NSApp.activate` 2줄로 축소, `openLaunchSession`도 동일 처리. i18n-safe
 
 ---
 
