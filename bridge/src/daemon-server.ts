@@ -33,6 +33,8 @@ import {
 import { fetchUsageFromApi, hasOAuthToken, type ApiUsageData } from './usage-api.js';
 import { isLocalConnection, validateToken } from './auth.js';
 import { getLastFrame, renderPreviewFrame, onFrameRendered, offFrameRendered } from './pixoo/pixoo-bridge.js';
+import { handlePixooWake } from './pixoo/pixoo-client.js';
+import { triggerMdnsRecovery } from './mdns.js';
 import { rgbToBmp, pixooLiveHtml } from './hook-server.js';
 import { enableDebugLog, debug } from './logger.js';
 import {
@@ -41,7 +43,7 @@ import {
   createDefaultModules,
 } from './modules/index.js';
 import { SerialModule } from './modules/serial-module.js';
-import { esp32ConnectionCount, onESP32Message, sendWifiProvisionToAll } from './esp32-serial.js';
+import { esp32ConnectionCount, onESP32Message, sendWifiProvisionToAll, handleESP32Wake } from './esp32-serial.js';
 import { loadWifiConfig } from './wifi-config.js';
 import { getLanIp } from '@agentdeck/shared';
 import { readFileSync } from 'fs';
@@ -336,6 +338,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   core.wireTimeline(bridgeLogStream);
   core.wireDisplayMonitor();
 
+  // System wake recovery — re-publish mDNS, reconnect devices
+  core.onSystemWake(() => {
+    log('[daemon] System wake detected — recovering devices');
+    triggerMdnsRecovery();
+    handleESP32Wake();
+    handlePixooWake();
+  });
+
   // Subscribe to sibling session bridges' timelines + modelCatalog relay
   const timelineRelay = new SessionTimelineRelay(port, core.bridgeTimeline);
   timelineRelay.setOnModelCatalog((models) => {
@@ -470,6 +480,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       agentType: 'openclaw' as const,
       alive: true,
       state: adapterAlive ? snap.state : 'idle',
+      modelName: adapterAlive ? (snap.modelName ?? undefined) : undefined,
     }];
   });
 
@@ -709,6 +720,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       const sessionId = (cmd as any).sessionId as string;
       if (!sessionId) return;
       focusRelay.focus(sessionId);
+      return;
+    }
+    // Session-scoped command: forward inner command to a specific session's bridge
+    if (cmd.type === 'session_command') {
+      const { sessionId, command } = cmd as any;
+      if (!sessionId || !command) return;
+      const sessions = listActiveSessions();
+      const target = sessions.find(s => s.id === sessionId);
+      if (!target) {
+        debug('daemon', `session_command: session ${sessionId} not found`);
+        return;
+      }
+      // Focus the session first, then route the command
+      focusRelay.focus(sessionId);
+      // Small delay to let focus take effect, then route
+      setTimeout(() => focusRelay.routeCommand(command), 100);
       return;
     }
     // Route interactive commands to focused session (if any)

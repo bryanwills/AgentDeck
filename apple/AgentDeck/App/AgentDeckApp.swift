@@ -38,46 +38,18 @@ struct AgentDeckApp: App {
                 .environmentObject(stateHolder)
                 .environmentObject(preferences)
         }
-        MenuBarExtra("AgentDeck", systemImage: menuBarSystemImage) {
-            Button(isDashboardVisible ? "Hide Dashboard" : "Show Dashboard") {
-                toggleDashboardVisibility()
-            }.keyboardShortcut("d")
-
-            if daemonService.isRunning {
-                Text(verbatim: "Daemon on port \(daemonService.port)")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else if daemonService.isUsingExternalDaemon {
-                Text(verbatim: "Using external daemon on port \(daemonService.port)")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else if let error = daemonService.errorMessage {
-                Text(error).font(.caption).foregroundStyle(.red)
-            } else {
-                Text("Connecting...").font(.caption).foregroundStyle(.secondary)
-            }
-
-            Divider()
-
-            Toggle("Start at Login", isOn: Binding(
-                get: { daemonService.isLoginItemEnabled },
-                set: { enabled in
-                    if enabled { daemonService.registerLoginItem() }
-                    else { daemonService.unregisterLoginItem() }
-                }
-            ))
-
-            Button("Launch Claude Session") {
-                SessionLauncher.launchSession(daemonPort: daemonService.port)
-            }
-
-            Divider()
-
-            Button("Quit AgentDeck") {
-                Task {
-                    await daemonService.stop()
-                    NSApplication.shared.terminate(nil)
-                }
-            }.keyboardShortcut("q")
+        MenuBarExtra {
+            ControlTowerPanel()
+                .environmentObject(stateHolder)
+                .environmentObject(daemonService)
+                .environmentObject(preferences)
+        } label: {
+            AgentStatusIcon(
+                sessions: stateHolder.state.siblingSessions,
+                bridgeConnected: stateHolder.state.bridgeConnected
+            )
         }
+        .menuBarExtraStyle(.window)
         #endif
     }
 
@@ -88,7 +60,7 @@ struct AgentDeckApp: App {
 
         daemonService.onReady = { [stateHolder] wsUrl in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                stateHolder.connectTo(url: wsUrl)
+                stateHolder.setPreferredLocalBridge(url: wsUrl)
             }
         }
 
@@ -99,38 +71,7 @@ struct AgentDeckApp: App {
         }
     }
 
-    private var isDashboardVisible: Bool {
-        NSApplication.shared.windows.contains {
-            $0.isVisible && $0.title.contains("AgentDeck Dashboard")
-        }
-    }
-
-    private var menuBarSystemImage: String {
-        switch preferences.menuBarIconStyle {
-        case .status:
-            return daemonService.isRunning
-                ? "antenna.radiowaves.left.and.right"
-                : "antenna.radiowaves.left.and.right.slash"
-        case .app:
-            return "dial.medium"
-        case .minimal:
-            return "circle.grid.2x2.fill"
-        }
-    }
-
-    private func toggleDashboardVisibility() {
-        if let window = NSApplication.shared.windows.first(where: { $0.title.contains("AgentDeck Dashboard") }) {
-            if window.isVisible {
-                window.orderOut(nil)
-            } else {
-                window.makeKeyAndOrderFront(nil)
-                NSApplication.shared.activate(ignoringOtherApps: true)
-            }
-            return
-        }
-        openWindow(id: "dashboard")
-        NSApplication.shared.activate(ignoringOtherApps: true)
-    }
+    // Dashboard visibility / toggle helpers moved to ControlTowerPanel
     #endif
 }
 
@@ -141,14 +82,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var daemonService: DaemonService?
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Synchronous shutdown — block briefly to release port and clean up daemon.json
         let semaphore = DispatchSemaphore(value: 0)
         Task {
             await daemonService?.stop()
             semaphore.signal()
         }
-        // Wait up to 3 seconds for shutdown to complete
-        _ = semaphore.wait(timeout: .now() + 3)
+        let result = semaphore.wait(timeout: .now() + 5)
+        if result == .timedOut {
+            // Fallback: force remove daemon.json to prevent stale guard on next launch
+            SessionRegistry.shared.removeDaemonInfo()
+        }
     }
 }
 #endif

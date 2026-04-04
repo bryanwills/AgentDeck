@@ -4,10 +4,13 @@
 import Foundation
 import os.log
 
-final class DaemonLogger: Sendable {
+final class DaemonLogger: @unchecked Sendable {
     static let shared = DaemonLogger()
 
     nonisolated(unsafe) var isDebugEnabled = true
+    private let stateLock = NSLock()
+    private var throttledKeys: [String: Date] = [:]
+    private var sampledCounters: [String: Int] = [:]
 
     private let osLog = os.Logger(subsystem: "dev.agentdeck.daemon", category: "daemon")
     private let logFile: URL = {
@@ -41,6 +44,35 @@ final class DaemonLogger: Sendable {
         writeToFile(line)
         guard isDebugEnabled else { return }
         osLog.debug("[\(category)] \(message)")
+    }
+
+    func throttledDebug(_ category: String, key: String, _ message: String, minInterval: TimeInterval) {
+        let now = Date()
+        stateLock.lock()
+        let last = throttledKeys[key]
+        if let last, now.timeIntervalSince(last) < minInterval {
+            stateLock.unlock()
+            return
+        }
+        throttledKeys[key] = now
+        stateLock.unlock()
+        debug(category, message)
+    }
+
+    func sampledDebug(_ category: String, key: String, every: Int, _ message: String) {
+        guard every > 1 else {
+            debug(category, message)
+            return
+        }
+
+        stateLock.lock()
+        let nextCount = (sampledCounters[key] ?? 0) + 1
+        sampledCounters[key] = nextCount
+        stateLock.unlock()
+
+        guard nextCount == 1 || nextCount % every == 0 else { return }
+        let suffix = nextCount == 1 ? "" : " [count=\(nextCount)]"
+        debug(category, message + suffix)
     }
 
     func info(_ message: String) {

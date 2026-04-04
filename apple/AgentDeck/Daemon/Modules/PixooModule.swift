@@ -11,6 +11,13 @@ struct PixooDevice: Codable {
 }
 
 final class PixooModule: DeviceModule, @unchecked Sendable {
+    private struct DeviceLogState: Sendable {
+        var successCount = 0
+        var consecutiveFailures = 0
+        var lastSuccessLogAt: Date?
+        var lastFailureMessage: String?
+    }
+
     let name = "pixoo"
     private var devices: [PixooDevice] = []
     private var renderTask: Task<Void, Never>?
@@ -18,11 +25,14 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
     private var lastPushError: String?
     private var lastPushAt: Date?
     private var devicePicIds: [String: Int] = [:]
+    private var deviceLogStates: [String: DeviceLogState] = [:]
     private let renderer = PixooRenderer()
     private let frameWidth = 64
     private let frameHeight = 64
     private let requestTimeout: TimeInterval = 2
     private let picIdResyncThreshold = 250
+    private let successLogInterval = 30
+    private let successLogMinInterval: TimeInterval = 30
     private static let gammaLUT: [UInt8] = (0..<256).map {
         UInt8(max(0, min(255, Int(round(pow(Double($0) / 255.0, 0.7) * 255.0)))))
     }
@@ -50,6 +60,17 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
 
     func stop() async {
         renderTask?.cancel()
+    }
+
+    func handleWake() async {
+        DaemonLogger.shared.info("Pixoo wake recovery — clearing PicID cache for \(devices.count) device(s)")
+        devicePicIds.removeAll()
+        deviceLogStates.removeAll()
+        lastPushError = nil
+        // Re-sync PicID from each device (may have rebooted during sleep)
+        for device in devices {
+            await prepareDevice(device)
+        }
     }
 
     func statusSnapshot() -> [String: Any] {
@@ -141,6 +162,7 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
 
     private func pushToDevice(_ device: PixooDevice, frame: Data) async {
         guard let picId = await nextPicId(for: device.ip) else {
+            recordPushFailure(ip: device.ip, reason: "failed to acquire PicID")
             lastPushError = "failed to acquire PicID for \(device.ip)"
             return
         }
@@ -156,13 +178,13 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
             "PicData": boosted.base64EncodedString(),
         ]
 
-        if let response = await postCommand(device.ip, payload: payload) {
+        if let response = await postCommand(device.ip, payload: payload, logFailures: false) {
             lastPushError = nil
             lastPushAt = Date()
-            DaemonLogger.shared.debug("Pixoo", "Push OK → \(device.ip) picId=\(picId) response=\(response)")
+            recordPushSuccess(ip: device.ip, picId: picId, response: response)
         } else {
             lastPushError = "push failed for \(device.ip)"
-            DaemonLogger.shared.debug("Pixoo", "Push failed → \(device.ip) picId=\(picId)")
+            recordPushFailure(ip: device.ip, reason: "push failed (picId=\(picId))")
         }
     }
 
@@ -276,7 +298,7 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
         return 0
     }
 
-    private func postCommand(_ ip: String, payload: [String: Any]) async -> [String: Any]? {
+    private func postCommand(_ ip: String, payload: [String: Any], logFailures: Bool = true) async -> [String: Any]? {
         guard let url = URL(string: "http://\(ip):80/post") else { return nil }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -297,12 +319,16 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
-                DaemonLogger.shared.debug("Pixoo", "No HTTP response from \(ip)")
+                if logFailures {
+                    DaemonLogger.shared.debug("Pixoo", "No HTTP response from \(ip)")
+                }
                 return nil
             }
             guard (200..<300).contains(http.statusCode) else {
                 let body = String(data: data, encoding: .utf8) ?? ""
-                DaemonLogger.shared.debug("Pixoo", "HTTP \(http.statusCode) from \(ip): \(body)")
+                if logFailures {
+                    DaemonLogger.shared.debug("Pixoo", "HTTP \(http.statusCode) from \(ip): \(body)")
+                }
                 return nil
             }
             if data.isEmpty { return [:] }
@@ -311,9 +337,59 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
             }
             return [:]
         } catch {
-            DaemonLogger.shared.debug("Pixoo", "Request failed to \(ip): \(error.localizedDescription)")
+            if logFailures {
+                DaemonLogger.shared.debug("Pixoo", "Request failed to \(ip): \(error.localizedDescription)")
+            }
             return nil
         }
+    }
+
+    private func recordPushSuccess(ip: String, picId: Int, response: [String: Any]) {
+        var state = deviceLogStates[ip] ?? DeviceLogState()
+        let now = Date()
+        let recoveredFromFailures = state.consecutiveFailures > 0
+        let failedCount = state.consecutiveFailures
+        state.consecutiveFailures = 0
+        state.lastFailureMessage = nil
+        state.successCount += 1
+
+        let shouldLogPeriodicSuccess: Bool
+        if state.successCount == 1 {
+            shouldLogPeriodicSuccess = true
+        } else if state.successCount % successLogInterval == 0 {
+            let enoughTimePassed = state.lastSuccessLogAt.map { now.timeIntervalSince($0) >= successLogMinInterval } ?? true
+            shouldLogPeriodicSuccess = enoughTimePassed
+        } else {
+            shouldLogPeriodicSuccess = false
+        }
+
+        if recoveredFromFailures {
+            DaemonLogger.shared.info("Pixoo recovered on \(ip) after \(failedCount) failed push(es); picId=\(picId)")
+            state.lastSuccessLogAt = now
+        } else if shouldLogPeriodicSuccess {
+            let errorCode = (response["error_code"] as? Int) ?? (response["errorCode"] as? Int)
+            if let errorCode {
+                DaemonLogger.shared.debug("Pixoo", "Healthy → \(ip) pushes=\(state.successCount) picId=\(picId) error_code=\(errorCode)")
+            } else {
+                DaemonLogger.shared.debug("Pixoo", "Healthy → \(ip) pushes=\(state.successCount) picId=\(picId)")
+            }
+            state.lastSuccessLogAt = now
+        }
+
+        deviceLogStates[ip] = state
+    }
+
+    private func recordPushFailure(ip: String, reason: String) {
+        var state = deviceLogStates[ip] ?? DeviceLogState()
+        state.consecutiveFailures += 1
+        let changedReason = state.lastFailureMessage != reason
+        state.lastFailureMessage = reason
+
+        if state.consecutiveFailures == 1 || state.consecutiveFailures == 5 || state.consecutiveFailures % 20 == 0 || changedReason {
+            DaemonLogger.shared.error("Pixoo failure on \(ip): \(reason) [count=\(state.consecutiveFailures)]")
+        }
+
+        deviceLogStates[ip] = state
     }
 
     private static func makeSessionInfo(from raw: [String: Any]) -> SessionInfo? {

@@ -17,6 +17,7 @@ import {
 import { blockGauge, resetTimeStr, formatTokens } from './gauge.js';
 import type { DashboardState, LayoutMode } from './dashboard.js';
 import type { ModelCatalogEntry, OllamaStatus, TimelineEntry, TimelineEntryType } from '@agentdeck/shared';
+import { stateRank, sortSessions, assignDisplayNames } from '@agentdeck/shared';
 
 // ===== Layout Breakpoints =====
 
@@ -179,25 +180,7 @@ function currentSessionSummary(state: DashboardState, width: number): string {
   return truncText(parts.join(' · '), width);
 }
 
-function stateRank(state: string | undefined): number {
-  switch (state) {
-    case 'processing': return 0;
-    case 'awaiting_permission':
-    case 'awaiting_option':
-    case 'awaiting_diff': return 1;
-    case 'idle': return 2;
-    case 'disconnected': return 3;
-    default: return 4;
-  }
-}
-
-function sortSessions<T extends { state?: string; projectName?: string }>(sessions: T[]): T[] {
-  return [...sessions].sort((a, b) => {
-    const rank = stateRank(a.state) - stateRank(b.state);
-    if (rank !== 0) return rank;
-    return (a.projectName || '').localeCompare(b.projectName || '');
-  });
-}
+// stateRank, sortSessions imported from @agentdeck/shared
 
 function sessionHotkeyLabel(index: number | null): string {
   if (index === null || index > 8) return '·';
@@ -234,20 +217,7 @@ function renderAgentLines(state: DashboardState, maxWidth: number, useLogo: bool
     lines.push(`${colors.dim}    ${truncText(secondary, maxWidth - 4)}${RESET}`);
   };
 
-  // #N suffix for duplicate sessions of the same agent type (same logic as Android SessionListPanel)
-  const sessionDisplayName = (
-    sessions: Array<{ projectName?: string; agentType?: string }>,
-    sess: { projectName?: string; agentType?: string },
-    nameCounts: Map<string, number>,
-    nameSeq: Map<string, number>,
-  ): string => {
-    const proj = sess.projectName || 'unknown';
-    const key = `${proj}:${sess.agentType || ''}`;
-    const seq = (nameSeq.get(key) || 0) + 1;
-    nameSeq.set(key, seq);
-    const suffix = (nameCounts.get(key) || 1) > 1 ? ` #${seq}` : '';
-    return `${proj}${suffix}`;
-  };
+  // #N suffix via shared assignDisplayNames
 
   // Daemon mode: sessions list already contains all agents (including virtual OpenClaw).
   // Also applies when daemon relays OpenClaw (agentType='openclaw' but sessions has the entry).
@@ -256,43 +226,34 @@ function renderAgentLines(state: DashboardState, maxWidth: number, useLogo: bool
     (state.agentType && state.sessions.some(s => s.agentType === state.agentType));
   if (isDaemonLike) {
     const sorted = sortSessions(state.sessions);
-    // Count name+agentType occurrences for #N suffix
-    const nameCounts = new Map<string, number>();
-    for (const s of sorted) {
-      const key = `${s.projectName || 'unknown'}:${s.agentType || ''}`;
-      nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
-    }
-    const nameSeq = new Map<string, number>();
-    for (const [index, sess] of sorted.entries()) {
-      const name = sessionDisplayName(sorted, sess, nameCounts, nameSeq);
-      renderSession(name, sess.modelName,
-        sess.state || 'idle', sess.agentType as string | undefined, index);
+    const displayed = assignDisplayNames(sorted.map(s => ({
+      id: s.id, projectName: s.projectName || 'unknown', agentType: s.agentType, state: s.state,
+      modelName: s.modelName,
+    })));
+    for (const [index, d] of displayed.entries()) {
+      renderSession(d.displayName, d.session.modelName as string | undefined,
+        d.session.state || 'idle', d.session.agentType as string | undefined, index);
     }
   } else if (state.state) {
     // Self (primary session)
     renderSession(state.projectName || 'unknown', state.modelName ?? undefined,
       state.state, state.agentType ?? undefined, null);
-    // Siblings (other sessions) — apply #N suffix
+    // Siblings — include self as virtual entry for correct #N numbering
     const sorted = sortSessions(state.sessions);
-    const nameCounts = new Map<string, number>();
-    // Include self in name counting for correct numbering
-    const selfKey = `${state.projectName || 'unknown'}:${state.agentType || ''}`;
-    if (sorted.some(s => `${s.projectName || 'unknown'}:${s.agentType || ''}` === selfKey)) {
-      nameCounts.set(selfKey, 1); // self counts as one
-    }
-    for (const s of sorted) {
-      const key = `${s.projectName || 'unknown'}:${s.agentType || ''}`;
-      nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
-    }
-    const nameSeq = new Map<string, number>();
-    // Self consumed seq 1 if it shares a name with siblings
-    if ((nameCounts.get(selfKey) || 1) > 1) {
-      nameSeq.set(selfKey, 1);
-    }
-    for (const [index, sess] of sorted.entries()) {
-      const name = sessionDisplayName(sorted, sess, nameCounts, nameSeq);
-      renderSession(name, sess.modelName,
-        sess.state || 'idle', sess.agentType as string | undefined, index);
+    const selfEntry = {
+      id: '__self__', projectName: state.projectName || 'unknown',
+      agentType: state.agentType ?? undefined, state: state.state,
+    };
+    const allForNumbering = [selfEntry, ...sorted.map(s => ({
+      id: s.id, projectName: s.projectName || 'unknown', agentType: s.agentType, state: s.state,
+      modelName: s.modelName,
+    }))];
+    const displayed = assignDisplayNames(allForNumbering);
+    // Skip the self entry (index 0), render siblings with hotkey indices
+    for (let i = 1; i < displayed.length; i++) {
+      const d = displayed[i]!;
+      renderSession(d.displayName, (d.session as any).modelName,
+        d.session.state || 'idle', d.session.agentType as string | undefined, i - 1);
     }
   }
 

@@ -18,6 +18,9 @@ enum TerrariumHUD {
 struct SessionListPanel: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
 
+    /// Maximum visible sessions before showing overflow summary
+    private let maxVisibleSessions = 10
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // Brand logo (matches AgentDeckLogo TabletLogo)
@@ -53,7 +56,11 @@ struct SessionListPanel: View {
                 .mapValues(\.count)
             var counters: [String: Int] = [:]
 
-            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+            let visibleEntries = entries.count > maxVisibleSessions
+                ? Array(entries.prefix(maxVisibleSessions))
+                : entries
+
+            ForEach(Array(visibleEntries.enumerated()), id: \.offset) { _, entry in
                 let key = "\(entry.projectName)|\(entry.agentType ?? "")"
                 let needsSuffix = (nameCounts[key] ?? 1) > 1
                 let suffix: String = {
@@ -68,6 +75,13 @@ struct SessionListPanel: View {
                 sessionRow(entry: entry, suffix: suffix)
             }
 
+            // Overflow indicator
+            if entries.count > maxVisibleSessions {
+                Text("and \(entries.count - maxVisibleSessions) more...")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext)
+            }
+
             // Worker count
             if let count = stateHolder.state.workerSessionCount, count > 0 {
                 Text("Workers: \(count)")
@@ -77,6 +91,7 @@ struct SessionListPanel: View {
         }
         .padding(8)
         .background(TerrariumHUD.bg, in: RoundedRectangle(cornerRadius: 8))
+        .opacity(stateHolder.state.bridgeConnected ? 1.0 : 0.6)
     }
 
     // MARK: - Entry Builder

@@ -981,11 +981,11 @@ private fun drawEinkOpenCode(
     }
     val cy = h * centerYFraction + bobY
 
-    val bodyWidth = w * 0.065f * scaleFactor
+    val bodyWidth = w * 0.052f * scaleFactor
     val outerSize = bodyWidth * 1.6f
     val outerHalf = outerSize / 2f
     val cornerR = outerSize * 0.06f
-    val innerSize = outerSize * 0.50f
+    val innerSize = outerSize * 0.60f
     val innerHalf = innerSize / 2f
     val innerCornerR = innerSize * 0.04f
 

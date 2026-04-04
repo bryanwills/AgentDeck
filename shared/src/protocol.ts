@@ -408,6 +408,19 @@ export interface FocusSessionCommand {
   sessionId: string;
 }
 
+/**
+ * Session-scoped command — daemon forwards the inner command to the specified session's bridge.
+ * Enables direct control of a specific session from any client (MenuBarExtra, Dashboard, etc.)
+ */
+export interface SessionCommand {
+  type: 'session_command';
+  sessionId: string;
+  command: {
+    type: string;
+    [key: string]: unknown;
+  };
+}
+
 export type PluginCommand =
   | ResponseCommand
   | SelectOptionCommand
@@ -421,7 +434,8 @@ export type PluginCommand =
   | DiagCommand
   | UtilityCommand
   | SwitchAgentCommand
-  | FocusSessionCommand;
+  | FocusSessionCommand
+  | SessionCommand;
 
 // ===== Hook Event Types =====
 

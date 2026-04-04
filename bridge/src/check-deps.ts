@@ -51,11 +51,16 @@ export function checkDependencies(agentType?: AgentType): { ok: boolean; warning
   let ok = true;
   let agentVersion: string | undefined;
 
+  // Use login shell so profile-added PATHs (pnpm, nvm, etc.) are available
+  const loginShell = process.env.SHELL || '/bin/zsh';
+  const shellExec = (cmd: string, opts?: Parameters<typeof execSync>[1]) =>
+    execSync(`${loginShell} -l -c '${cmd}'`, opts);
+
   // Check agent-specific binary
   const agentDep = agentType ? AGENT_DEPS[agentType] : AGENT_DEPS['claude-code'];
   if (agentDep) {
     try {
-      const output = execSync(agentDep.command, { encoding: 'utf-8', timeout: 5000 }).trim();
+      const output = shellExec(agentDep.command, { encoding: 'utf-8', timeout: 5000 }).toString().trim();
       agentVersion = output.match(/^([\d.]+)/)?.[1] ?? undefined;
     } catch {
       process.stderr.write(`[agentdeck] ERROR: ${agentDep.name} not found. Install: ${agentDep.installHint}\n`);
@@ -66,7 +71,7 @@ export function checkDependencies(agentType?: AgentType): { ok: boolean; warning
   // Check shared optional deps
   for (const dep of SHARED_DEPS) {
     try {
-      execSync(dep.command, { stdio: 'ignore' });
+      shellExec(dep.command, { stdio: 'ignore' });
     } catch {
       warnings.push(`${dep.name} not found — ${dep.installHint}`);
     }

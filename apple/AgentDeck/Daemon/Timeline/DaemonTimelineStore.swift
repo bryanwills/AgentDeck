@@ -59,6 +59,11 @@ actor DaemonTimelineStore {
         Array(entries.suffix(count))
     }
 
+    /// Returns the last timeline entry matching the given type, or nil if none found.
+    func getLastEntry(type: String) -> DaemonTimelineEntry? {
+        entries.last(where: { $0.type == type })
+    }
+
     func flush() {
         guard dirty else { return }
         if let data = try? JSONEncoder().encode(entries) {

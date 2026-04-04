@@ -312,6 +312,58 @@ final class TerrariumRenderer {
         }
     }
 
+    // MARK: - Hit Testing
+
+    /// Returns the session ID of the creature nearest to the given normalized point (0..1),
+    /// or nil if no creature is within the hit radius.
+    func creatureAtPoint(nx: Float, ny: Float, hitRadius: Float = 0.08) -> String? {
+        var bestId: String?
+        var bestDist: Float = hitRadius
+
+        for (id, oct) in octopuses {
+            let dx = oct.currentX - nx
+            let dy = oct.currentY - ny
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                bestId = id
+            }
+        }
+
+        for (id, jf) in jellyfish {
+            let dx = jf.currentX - nx
+            let dy = jf.currentY - ny
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                bestId = id
+            }
+        }
+
+        for (id, oc) in opencodeCreatures {
+            let dx = oc.currentX - nx
+            let dy = oc.currentY - ny
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                bestId = id
+            }
+        }
+
+        if crayfish.visible {
+            let pos = crayfish.currentPosition()
+            let dx = pos.x - nx
+            let dy = pos.y - ny
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                bestId = "crayfish"  // sentinel — crayfish is gateway, not a session
+            }
+        }
+
+        return bestId
+    }
+
     private func syncOctopuses(state: TerrariumState) {
         let currentIds = Set(state.creatures.map(\.id))
         let existingIds = Set(octopuses.keys)

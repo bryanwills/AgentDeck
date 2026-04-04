@@ -143,11 +143,40 @@ export class BridgeClient extends EventEmitter implements AgentLink {
     }
   }
 
+  private _lastWatchdogTick = Date.now();
+
   private startWatchdog(gen: number): void {
     this.stopWatchdog();
+    this._lastWatchdogTick = Date.now();
     this._watchdogTimer = setInterval(() => {
-      if (gen !== this._connectGeneration || !this._connected) return;
-      const elapsed = Date.now() - this._lastActivityAt;
+      if (gen !== this._connectGeneration) return;
+
+      const now = Date.now();
+      const tickGap = now - this._lastWatchdogTick;
+      this._lastWatchdogTick = now;
+
+      // Detect system wake via time discontinuity (tick should be ~10s, >20s = likely sleep)
+      if (tickGap > 20_000) {
+        dlog('Bridge', `Wake detected (tick gap ${tickGap}ms)`);
+        if (this._connected) {
+          // Immediately check if connection is still alive
+          try { this.ws?.ping(); } catch { /* ignore */ }
+          setTimeout(() => {
+            if (gen !== this._connectGeneration) return;
+            if (this._connected && Date.now() - this._lastActivityAt > 5_000) {
+              dwarn('Bridge', 'No pong after wake — terminating');
+              this.ws?.terminate();
+            }
+          }, 3000);
+        } else {
+          // Not connected — try immediate reconnect instead of waiting 3s
+          this.attemptConnect(gen);
+        }
+        return;
+      }
+
+      if (!this._connected) return;
+      const elapsed = now - this._lastActivityAt;
       if (elapsed > WS_ACTIVITY_TIMEOUT_MS) {
         dwarn('Bridge', `No activity for ${elapsed}ms — terminating connection`);
         this.ws?.terminate();

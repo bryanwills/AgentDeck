@@ -1,5 +1,6 @@
 import { listActive as listActiveSessions, type SessionEntry } from './session-registry.js';
 import type { AgentType } from './types.js';
+import { sortSessions } from '@agentdeck/shared';
 
 export interface EnrichedSession {
   id: string;
@@ -47,5 +48,6 @@ export async function buildEnrichedSessionsList(
   ownState: string,
 ): Promise<EnrichedSession[]> {
   const siblings = listActiveSessions().filter(s => s.agentType !== 'daemon' && s.id !== ownSessionId);
-  return enrichSessionsWithState(siblings, ownSessionId, ownState);
+  const enriched = await enrichSessionsWithState(siblings, ownSessionId, ownState);
+  return sortSessions(enriched);
 }

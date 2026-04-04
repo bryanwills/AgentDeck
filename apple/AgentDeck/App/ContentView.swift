@@ -10,7 +10,9 @@ struct ContentView: View {
     var body: some View {
         MonitorScreen()
             .onAppear {
+                #if os(iOS)
                 stateHolder.startConnectionWaterfall()
+                #endif
             }
             .onChange(of: scenePhase) { _, newPhase in
                 switch newPhase {

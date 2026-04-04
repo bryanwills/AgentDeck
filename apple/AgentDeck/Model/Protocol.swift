@@ -288,6 +288,7 @@ enum PluginCommand: Encodable, Sendable {
     case queryUsage
     case diag(action: String)
     case utility(action: String, value: Int?)
+    case focusSession(sessionId: String)
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: DynamicCodingKey.self)
@@ -323,6 +324,9 @@ enum PluginCommand: Encodable, Sendable {
             try container.encode("utility", forKey: .init("type"))
             try container.encode(action, forKey: .init("action"))
             if let value { try container.encode(value, forKey: .init("value")) }
+        case .focusSession(let sessionId):
+            try container.encode("focus_session", forKey: .init("type"))
+            try container.encode(sessionId, forKey: .init("sessionId"))
         }
     }
 }

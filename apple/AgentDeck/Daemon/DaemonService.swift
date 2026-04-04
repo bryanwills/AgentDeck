@@ -30,10 +30,12 @@ final class DaemonService: ObservableObject {
     private var healthMonitorTask: Task<Void, Never>?
     private var externalFailureCount = 0
     private var localFailureCount = 0
+    private var signalSource: DispatchSourceSignal?
 
     init() {
         startHealthMonitor()
         start()
+        setupSignalHandler()
     }
 
     /// Start daemon in-process
@@ -148,7 +150,7 @@ final class DaemonService: ObservableObject {
         healthMonitorTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: .seconds(5))
                 await self.checkDaemonHealth()
             }
         }
@@ -201,6 +203,38 @@ final class DaemonService: ObservableObject {
         readyUrl = nil
         errorMessage = nil
         start()
+    }
+
+    // MARK: - Signal Handling
+
+    private func setupSignalHandler() {
+        // Ignore default SIGTERM behavior so DispatchSource handles it
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { [weak self] in
+            DaemonLogger.shared.info("SIGTERM received — initiating clean shutdown")
+            // Log crash info
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let crashLog = home.appendingPathComponent(".agentdeck/daemon-crash.log")
+            let entry = "[\(ISO8601DateFormatter().string(from: Date()))] SIGTERM — clean shutdown initiated\n"
+            if let data = entry.data(using: .utf8) {
+                if FileManager.default.fileExists(atPath: crashLog.path) {
+                    if let handle = try? FileHandle(forWritingTo: crashLog) {
+                        handle.seekToEndOfFile()
+                        handle.write(data)
+                        handle.closeFile()
+                    }
+                } else {
+                    try? data.write(to: crashLog)
+                }
+            }
+            Task { @MainActor in
+                await self?.stop()
+                exit(0)
+            }
+        }
+        source.resume()
+        self.signalSource = source
     }
 
     // MARK: - Login Item (auto-start at login)

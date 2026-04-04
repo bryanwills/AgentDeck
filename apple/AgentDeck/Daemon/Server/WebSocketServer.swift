@@ -59,6 +59,39 @@ actor WebSocketServer {
         self.bonjourService = service
     }
 
+    /// Re-advertise Bonjour service after system wake (mDNSResponder may have stale state)
+    func republishBonjour() {
+        guard let listener, let service = bonjourService else { return }
+        DaemonLogger.shared.info("Re-publishing Bonjour service after wake")
+        listener.service = nil
+        // Brief delay then re-set with retry logic
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            self.listener?.service = service
+
+            // Verify and retry with exponential backoff (1s, 2s, 4s)
+            let retryDelays: [UInt64] = [1, 2, 4]
+            for (attempt, delaySec) in retryDelays.enumerated() {
+                try? await Task.sleep(for: .seconds(1))
+                if self.listener?.service != nil {
+                    DaemonLogger.shared.debug("mDNS", "Bonjour service re-registered")
+                    return
+                }
+                DaemonLogger.shared.debug("mDNS", "Bonjour re-publish retry \(attempt + 1)/\(retryDelays.count)")
+                try? await Task.sleep(for: .seconds(delaySec))
+                self.listener?.service = service
+            }
+
+            // Final check
+            try? await Task.sleep(for: .seconds(1))
+            if self.listener?.service != nil {
+                DaemonLogger.shared.debug("mDNS", "Bonjour service re-registered after retry")
+            } else {
+                DaemonLogger.shared.error("Bonjour service re-publish failed after \(retryDelays.count) retries")
+            }
+        }
+    }
+
     // MARK: - Lifecycle
 
     func start(port: UInt16) throws {

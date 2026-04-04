@@ -5,6 +5,9 @@ import SwiftUI
 struct TerrariumView: View {
     let terrariumState: TerrariumState
 
+    /// Optional tap handler: receives the session ID of the tapped creature (macOS only)
+    var onCreatureTapped: ((String) -> Void)?
+
     @State private var renderer = TerrariumRenderer()
 
     var body: some View {
@@ -18,6 +21,31 @@ struct TerrariumView: View {
                 renderer.update(dt: dt, state: terrariumState)
                 renderer.draw(context: &context, size: size)
             }
+            #if os(macOS)
+            .onTapGesture { location in
+                guard let handler = onCreatureTapped else { return }
+                // Canvas is sized to the full view — get size from GeometryReader parent
+                // Since Canvas fills its proposed size, we use the timeline's canvas size
+                // We need GeometryReader to know the actual size for normalization
+            }
+            #endif
         }
+        #if os(macOS)
+        .overlay {
+            if onCreatureTapped != nil {
+                GeometryReader { geo in
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { location in
+                            let nx = Float(location.x / geo.size.width)
+                            let ny = Float(location.y / geo.size.height)
+                            if let sessionId = renderer.creatureAtPoint(nx: nx, ny: ny) {
+                                onCreatureTapped?(sessionId)
+                            }
+                        }
+                }
+            }
+        }
+        #endif
     }
 }

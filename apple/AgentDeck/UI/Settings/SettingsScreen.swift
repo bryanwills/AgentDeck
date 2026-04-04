@@ -7,6 +7,7 @@ struct SettingsScreen: View {
     @EnvironmentObject private var preferences: AppPreferences
     @Environment(\.dismiss) private var dismiss
     @State private var manualUrl = ""
+    @State private var showRemoveAntigravityConfirm = false
 
     var body: some View {
         #if os(macOS)
@@ -367,6 +368,10 @@ struct SettingsScreen: View {
                 .font(.system(size: 11))
                 .foregroundStyle(TerrariumHUD.subtext)
 
+            Text("App Sandbox requires explicit file access. Select the state.vscdb file to enable.")
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
+
             if let path = preferences.antigravitySelectedPath, preferences.antigravityAccessEnabled {
                 Text(path)
                     .font(.system(size: 11, design: .monospaced))
@@ -387,9 +392,21 @@ struct SettingsScreen: View {
 
                 if preferences.antigravityAccessEnabled {
                     Button("Remove Access") {
-                        preferences.clearAntigravityAccess()
+                        showRemoveAntigravityConfirm = true
                     }
                     .buttonStyle(.bordered)
+                    .confirmationDialog(
+                        "Remove Antigravity access?",
+                        isPresented: $showRemoveAntigravityConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Remove", role: .destructive) {
+                            preferences.clearAntigravityAccess()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This will revoke file access to the Antigravity database. You can re-enable it later.")
+                    }
                 }
             }
             #else

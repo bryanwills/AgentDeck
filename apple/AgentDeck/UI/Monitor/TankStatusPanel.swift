@@ -35,7 +35,11 @@ struct TankStatusPanel: View {
                 }
             }
 
-            EngineSection(title: "OpenClaw", lines: preferences.showOpenClawSection ? openClawLines : [])
+            EngineSection(
+                title: "OpenClaw",
+                lines: preferences.showOpenClawSection ? openClawLines : [],
+                highlightedLine: preferences.showOpenClawSection ? openClawPrimaryLine : nil
+            )
             EngineSection(title: "MLX", lines: preferences.showMLXSection ? mlxLines : [])
             EngineSection(title: "OLLAMA", lines: preferences.showOllamaSection ? ollamaLines : [])
             EngineSection(title: "Antigravity", lines: preferences.showAntigravitySection ? antigravityLines : [])
@@ -43,6 +47,7 @@ struct TankStatusPanel: View {
         }
         .padding(10)
         .background(TerrariumHUD.bg, in: RoundedRectangle(cornerRadius: 8))
+        .opacity(stateHolder.state.bridgeConnected ? 1.0 : 0.6)
     }
 
     private var openClawLines: [String] {
@@ -56,20 +61,25 @@ struct TankStatusPanel: View {
             return normalizeOpenClawName($0.name) < normalizeOpenClawName($1.name)
         }
 
+        let primary = normalizeOpenClawName(ordered[0].name)
+        let remainder = ordered.dropFirst().map { normalizeOpenClawName($0.name) }
+        guard !remainder.isEmpty else { return [primary] }
+
         var groups: [String: [String]] = [:]
         var familyOrder: [String] = []
 
-        for entry in ordered {
-            let normalized = normalizeOpenClawName(entry.name)
+        for normalized in remainder {
             let family = openClawFamilyKey(normalized)
             if groups[family] == nil { familyOrder.append(family) }
             groups[family, default: []].append(normalized)
         }
 
-        return familyOrder.compactMap { family in
+        let compactedRemainder: [String] = familyOrder.compactMap { family -> String? in
             guard let names = groups[family] else { return nil }
             return compactOpenClawFamily(names)
         }
+
+        return [primary] + compactedRemainder
     }
 
     private var ollamaLines: [String] {
@@ -101,6 +111,10 @@ struct TankStatusPanel: View {
         guard let status = stateHolder.state.antigravityStatus else { return [] }
         guard let planName = status.planName, !planName.isEmpty else { return [] }
         return [planName]
+    }
+
+    private var openClawPrimaryLine: String? {
+        openClawLines.first
     }
 }
 
@@ -156,6 +170,7 @@ private func familyDisplayPrefix(_ name: String) -> String {
 private struct EngineSection: View {
     let title: String
     let lines: [String]
+    var highlightedLine: String? = nil
 
     var body: some View {
         if !lines.isEmpty {
@@ -167,7 +182,7 @@ private struct EngineSection: View {
                 ForEach(lines, id: \.self) { line in
                     Text(line)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(TerrariumHUD.text)
+                        .foregroundStyle(line == highlightedLine ? TerrariumHUD.ledAmber : TerrariumHUD.text)
                         .lineLimit(2)
                         .truncationMode(.tail)
                 }

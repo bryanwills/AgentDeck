@@ -31,10 +31,29 @@ struct MonitorHUD: View {
                                 .padding(.top, 12)
                         }
                     }
+
+                    // Stale data banner when disconnected
+                    if !stateHolder.state.bridgeConnected, let lastReceived = stateHolder.lastDataReceivedAt {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Spacer()
+                                StaleDataBanner(lastReceived: lastReceived)
+                                Spacer()
+                            }
+                            .padding(.bottom, 12)
+                        }
+                    }
                 }
             } else {
                 // iPhone portrait: vertical stack
                 VStack(spacing: 0) {
+                    // Stale data banner when disconnected
+                    if !stateHolder.state.bridgeConnected, let lastReceived = stateHolder.lastDataReceivedAt {
+                        StaleDataBanner(lastReceived: lastReceived)
+                            .padding(.top, 8)
+                    }
+
                     HStack(alignment: .top, spacing: 8) {
                         if preferences.showSessionList {
                             SessionListPanel()
@@ -52,5 +71,35 @@ struct MonitorHUD: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Stale Data Banner
+
+private struct StaleDataBanner: View {
+    let lastReceived: Date
+    @State private var now = Date()
+
+    private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
+
+    private var timeAgoText: String {
+        let elapsed = now.timeIntervalSince(lastReceived)
+        if elapsed < 60 {
+            return "\(Int(elapsed))s"
+        } else if elapsed < 3600 {
+            return "\(Int(elapsed / 60))m"
+        } else {
+            return "\(Int(elapsed / 3600))h"
+        }
+    }
+
+    var body: some View {
+        Text("Data from \(timeAgoText) ago")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.ultraThinMaterial, in: Capsule())
+            .onReceive(timer) { self.now = $0 }
     }
 }

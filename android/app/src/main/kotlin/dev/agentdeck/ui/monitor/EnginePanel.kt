@@ -51,6 +51,7 @@ fun TankStatusPanel(
     val staleSuffix = if (usage.usageStale == true) " !" else ""
     val ollamaStatus = state.ollamaStatus
     val modelCatalog = state.modelCatalog ?: emptyList()
+    val openClawLines = openClawDisplayLines(modelCatalog)
     Column(
         modifier = modifier
             .background(TerrariumColors.HUDBg, RoundedCornerShape(8.dp))
@@ -101,7 +102,8 @@ fun TankStatusPanel(
 
         EngineSection(
             title = "OpenClaw",
-            lines = openClawDisplayLines(modelCatalog),
+            lines = openClawLines,
+            highlightedLine = openClawLines.firstOrNull(),
         )
 
         EngineSection(
@@ -276,6 +278,7 @@ private fun ApiCostSection(
 private fun EngineSection(
     title: String,
     lines: List<String>,
+    highlightedLine: String? = null,
 ) {
     if (lines.isEmpty()) return
 
@@ -293,7 +296,7 @@ private fun EngineSection(
         lines.forEach { line ->
             Text(
                 text = line,
-                color = TerrariumColors.HUDText,
+                color = if (line == highlightedLine) TerrariumColors.LEDAmber else TerrariumColors.HUDText,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
                 style = TextStyle(platformStyle = tightStyle),
@@ -327,14 +330,17 @@ private fun openClawDisplayLines(modelCatalog: List<ModelCatalogEntry>): List<St
             .thenBy { normalizeOpenClawName(it.name) }
     )
 
+    val primary = normalizeOpenClawName(ordered.first().name)
+    val remainder = ordered.drop(1).map { normalizeOpenClawName(it.name) }
+    if (remainder.isEmpty()) return listOf(primary)
+
     val grouped = linkedMapOf<String, MutableList<String>>()
-    ordered.forEach { entry ->
-        val normalized = normalizeOpenClawName(entry.name)
+    remainder.forEach { normalized ->
         val family = openClawFamilyKey(normalized)
         grouped.getOrPut(family) { mutableListOf() }.add(normalized)
     }
 
-    return grouped.values.map { compactOpenClawFamily(it) }.filter { it.isNotBlank() }
+    return listOf(primary) + grouped.values.map { compactOpenClawFamily(it) }.filter { it.isNotBlank() }
 }
 
 private fun normalizeOpenClawName(name: String): String =

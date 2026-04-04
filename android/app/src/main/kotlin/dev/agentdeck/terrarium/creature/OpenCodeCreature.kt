@@ -215,7 +215,7 @@ class OpenCodeCreature(
         alpha: Float,
     ) {
         val outerHalf = size / 2f
-        val gap = size * 0.15f  // gap between outer and inner
+        val gap = size * 0.10f  // gap between outer and inner (thinner frame)
         val innerHalf = outerHalf - gap
 
         // Outer frame color
@@ -424,7 +424,7 @@ class OpenCodeCreature(
 
     companion object {
         // Body size as fraction of canvas width
-        private const val BODY_SIZE_FRACTION = 0.08f
+        private const val BODY_SIZE_FRACTION = 0.064f
 
         // Positions
         private const val STANDING_Y = 0.61f

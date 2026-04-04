@@ -45,13 +45,44 @@ static const char* typeIcon(const char* type) {
     return ".";
 }
 
+static lv_point_t tlTouchStart;
+static bool tlTracking = false;
+static constexpr int TL_SWIPE_THRESHOLD = 40;
+
 static void gestureEvent(lv_event_t* e) {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
     if (dir == LV_DIR_BOTTOM) {
-        // Swipe down → back to aquarium
         lockState();
         g_state.timelineView = false;
         unlockState();
+    }
+}
+
+static void tlTouchEvent(lv_event_t* e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_PRESSED) {
+        lv_indev_t* indev = lv_indev_active();
+        if (indev) {
+            lv_indev_get_point(indev, &tlTouchStart);
+            tlTracking = true;
+        }
+    } else if (code == LV_EVENT_RELEASED && tlTracking) {
+        tlTracking = false;
+        lv_point_t touchEnd;
+        lv_indev_t* indev = lv_indev_active();
+        if (indev) {
+            lv_indev_get_point(indev, &touchEnd);
+            int dy = touchEnd.y - tlTouchStart.y;
+            int absDy = (dy < 0) ? -dy : dy;
+            int absDx = (touchEnd.x - tlTouchStart.x);
+            if (absDx < 0) absDx = -absDx;
+            if (absDy > TL_SWIPE_THRESHOLD && absDy > absDx && dy > 0) {
+                // Swipe down → back to aquarium
+                lockState();
+                g_state.timelineView = false;
+                unlockState();
+            }
+        }
     }
 }
 
@@ -128,8 +159,10 @@ lv_obj_t* timelineCreate() {
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -4);
     lv_label_set_text(hint, "Swipe down to aquarium");
 
-    // Gesture
+    // Gesture + manual swipe fallback
     lv_obj_add_event_cb(screen, gestureEvent, LV_EVENT_GESTURE, NULL);
+    lv_obj_add_event_cb(screen, tlTouchEvent, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(screen, tlTouchEvent, LV_EVENT_RELEASED, NULL);
 
     return screen;
 }

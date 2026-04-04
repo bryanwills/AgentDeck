@@ -114,7 +114,7 @@ final class OpenCodeCreature: Creature {
 
         let w = Float(size.width)
         let h = Float(size.height)
-        let bodyWidth = w * 0.055 * scale
+        let bodyWidth = w * 0.044 * scale
 
         let cx = CGFloat(currentX * w)
         let bobOffset = visualState == .pulsing ? CGFloat(sin(time * 2.0) * h * 0.006) : 0
@@ -165,7 +165,7 @@ final class OpenCodeCreature: Creature {
                      with: .color(Self.outerColor.opacity(outerAlpha * 0.92)))
 
         // Inner rectangle (dark square) — 50% of outer, centered
-        let innerSize = outerSize * 0.50
+        let innerSize = outerSize * 0.60
         let innerHalf = innerSize / 2
         let innerRect = CGRect(x: cx - innerHalf, y: cy - innerHalf,
                                width: innerSize, height: innerSize)

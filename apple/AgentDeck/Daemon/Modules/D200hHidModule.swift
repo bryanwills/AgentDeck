@@ -434,7 +434,6 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
 
     private func debugLog(_ msg: String) {
         DaemonLogger.shared.debug("D200H", msg)
-        NSLog("[D200H] %@", msg)
     }
 
     private func updateDisplay(animationOnly: Bool = false) {
@@ -474,8 +473,8 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
                 // Session disappeared — stay in option view with last known state
                 // User must press BACK to return to session list
                 slots = [ButtonSlot](repeating: .dim, count: 14)
-                slots[0] = ButtonSlot(title: "← BACK", subtitle: "", bg: D200hRenderer.cDark, enabled: true, borderStyle: .none)
-                slots[10] = ButtonSlot(title: "✖ ESC", subtitle: "", bg: D200hRenderer.cEscActive, enabled: true, borderStyle: .none)
+                slots[0] = ButtonSlot(title: "← BACK", subtitle: "", bg: D200hRenderer.cDark, enabled: true, borderStyle: .none, icon: .back, iconColor: rgb(226, 232, 240))
+                slots[10] = ButtonSlot(title: "✖ ESC", subtitle: "", bg: D200hRenderer.cEscActive, enabled: true, borderStyle: .none, icon: .back, iconColor: rgb(226, 232, 240))
             }
         }
 
@@ -641,8 +640,8 @@ private func buildLabelStylePacket() -> Data {
         "Color": 0xFFFFFF,
         "FontName": "Roboto",
         "ShowTitle": 1,
-        "Size": 16,
-        "Weight": 80,
+        "Size": 14,
+        "Weight": 72,
     ]
     guard let json = try? JSONSerialization.data(withJSONObject: style) else { return Data() }
     return buildPacket(command: CMD_SET_LABEL_STYLE, payload: json)
@@ -664,6 +663,7 @@ private struct D200hSessionInfo {
     let currentTool: String
     let options: [[String: Any]]
     let navigable: Bool
+    let modelName: String
 
     var isIdle: Bool { state == "idle" }
     var isProcessing: Bool { state == "processing" }
@@ -678,7 +678,8 @@ private struct D200hSessionInfo {
             port: dict["port"] as? Int ?? 0,
             currentTool: dict["currentTool"] as? String ?? "",
             options: dict["options"] as? [[String: Any]] ?? [],
-            navigable: dict["navigable"] as? Bool ?? false
+            navigable: dict["navigable"] as? Bool ?? false,
+            modelName: dict["modelName"] as? String ?? ""
         )
     }
 }
@@ -691,6 +692,21 @@ private struct ButtonSlot {
     let bg: CGColor
     let enabled: Bool
     let borderStyle: BorderStyle
+    let icon: IconGlyph
+    let iconColor: CGColor?
+    // Rich text fields for bitmap font rendering (PNG-embedded text)
+    let agentLabel: String    // "CLAUDE CODE", "OPENCLAW" etc.
+    let modelName: String     // "opus-4", "gpt-4o" etc.
+    let stateLabel: String    // "WORKING", "IDLE" etc.
+
+    init(title: String, subtitle: String, bg: CGColor, enabled: Bool, borderStyle: BorderStyle,
+         icon: IconGlyph, iconColor: CGColor?,
+         agentLabel: String = "", modelName: String = "", stateLabel: String = "") {
+        self.title = title; self.subtitle = subtitle; self.bg = bg
+        self.enabled = enabled; self.borderStyle = borderStyle
+        self.icon = icon; self.iconColor = iconColor
+        self.agentLabel = agentLabel; self.modelName = modelName; self.stateLabel = stateLabel
+    }
 
     enum BorderStyle {
         case none
@@ -699,7 +715,24 @@ private struct ButtonSlot {
         case solid(color: CGColor)                        // static border
     }
 
-    static let dim = ButtonSlot(title: "", subtitle: "", bg: rgb(17, 17, 17), enabled: false, borderStyle: .none)
+    enum IconGlyph {
+        case none
+        case claudeCode
+        case codexCli
+        case openCode
+        case openClaw
+        case usage
+        case back
+        case stop
+        case more
+        case goOn
+        case review
+        case commit
+        case clear
+        case tool
+    }
+
+    static let dim = ButtonSlot(title: "", subtitle: "", bg: rgb(17, 17, 17), enabled: false, borderStyle: .none, icon: .none, iconColor: nil)
 }
 
 // MARK: - Agent Controller Renderer (SD+ Style)
@@ -808,9 +841,7 @@ private enum D200hRenderer {
 
             let bg = sessionBg(session.state)
             let sColor = stateColor(session.state, agent: session.agentType)
-            let typeLabel = session.agentType == "openclaw" ? "OC" : "CC"
-            let projName = session.projectName.isEmpty ? session.agentType : String(session.projectName.prefix(10))
-            let name = "[\(typeLabel)] \(projName)"
+            let projName = session.projectName.isEmpty ? session.agentType : String(session.projectName.prefix(14))
 
             let border: ButtonSlot.BorderStyle
             if session.isAwaiting {
@@ -823,20 +854,33 @@ private enum D200hRenderer {
                 border = .none
             }
 
-            let stateLabel: String
+            let agentLbl: String
+            switch session.agentType {
+            case "openclaw": agentLbl = "OPENCLAW"
+            case "codex-cli": agentLbl = "CODEX CLI"
+            case "opencode": agentLbl = "OPENCODE"
+            default: agentLbl = "CLAUDE CODE"
+            }
+
+            let stateLbl: String
             switch session.state {
             case "processing":
-                stateLabel = session.agentType == "openclaw" ? "● ROUTING" : "● WORKING"
+                stateLbl = session.agentType == "openclaw" ? "ROUTING" : "WORKING"
             case "awaiting_permission", "awaiting_option", "awaiting_diff":
-                stateLabel = "● AWAITING"
+                stateLbl = "AWAITING"
             case "idle":
-                stateLabel = session.agentType == "openclaw" ? "● STANDBY" : "● IDLE"
-            default: stateLabel = ""
+                stateLbl = session.agentType == "openclaw" ? "STANDBY" : "IDLE"
+            default: stateLbl = ""
             }
 
             slots[i] = ButtonSlot(
-                title: name, subtitle: stateLabel,
-                bg: bg, enabled: true, borderStyle: border
+                title: projName, subtitle: "",
+                bg: bg, enabled: true, borderStyle: border,
+                icon: sessionGlyph(for: session.agentType),
+                iconColor: sColor,
+                agentLabel: agentLbl,
+                modelName: String(session.modelName.prefix(14)),
+                stateLabel: stateLbl
             )
         }
 
@@ -851,7 +895,9 @@ private enum D200hRenderer {
         let usageBorderColor = maxPct > 80 ? rgb(239, 68, 68) : maxPct > 50 ? rgb(234, 179, 8) : rgb(34, 197, 94)
         slots[13] = ButtonSlot(
             title: usageTitle, subtitle: usageSub,
-            bg: cDetailBg, enabled: true, borderStyle: .solid(color: usageBorderColor)
+            bg: cDetailBg, enabled: true, borderStyle: .solid(color: usageBorderColor),
+            icon: .usage,
+            iconColor: usageBorderColor
         )
 
         return (slots, needsAnim)
@@ -885,7 +931,7 @@ private enum D200hRenderer {
         var slots = [ButtonSlot](repeating: .dim, count: 14)
 
         // Slot 0: ← BACK
-        slots[0] = ButtonSlot(title: "← BACK", subtitle: "", bg: cDark, enabled: true, borderStyle: .none)
+        slots[0] = ButtonSlot(title: "← BACK", subtitle: "", bg: cDark, enabled: true, borderStyle: .none, icon: .back, iconColor: rgb(226, 232, 240))
 
         // Slot 1: Session info
         let name = session.projectName.isEmpty ? session.agentType : String(session.projectName.prefix(12))
@@ -893,7 +939,9 @@ private enum D200hRenderer {
         let tool = session.currentTool.isEmpty ? "" : "▶ \(session.currentTool)"
         slots[1] = ButtonSlot(title: name, subtitle: tool,
                               bg: cDetailBg, enabled: false,
-                              borderStyle: .solid(color: sColor))
+                              borderStyle: .solid(color: sColor),
+                              icon: sessionGlyph(for: session.agentType),
+                              iconColor: sColor)
 
         // Slots 2-9: Options or Quick Actions
         let options = session.options
@@ -905,13 +953,22 @@ private enum D200hRenderer {
                 ("COMMIT",  cSessionAct),
                 ("CLEAR",   cSessionAct),
             ]
+            let quickActionGlyphs: [ButtonSlot.IconGlyph] = [.goOn, .review, .commit, .clear]
             for (i, qa) in quickActions.enumerated() {
-                slots[2 + i] = ButtonSlot(title: qa.title, subtitle: "", bg: qa.bg, enabled: true, borderStyle: .none)
+                slots[2 + i] = ButtonSlot(
+                    title: qa.title,
+                    subtitle: "",
+                    bg: qa.bg,
+                    enabled: true,
+                    borderStyle: .none,
+                    icon: quickActionGlyphs[i],
+                    iconColor: rgb(241, 245, 249)
+                )
             }
         } else if options.isEmpty && session.isProcessing {
             // PROCESSING: show current tool info, no actions
             if !session.currentTool.isEmpty {
-                slots[2] = ButtonSlot(title: "▶ \(session.currentTool)", subtitle: "", bg: cSessionAct, enabled: false, borderStyle: .none)
+                slots[2] = ButtonSlot(title: "▶ \(session.currentTool)", subtitle: "", bg: cSessionAct, enabled: false, borderStyle: .none, icon: .tool, iconColor: rgb(191, 219, 254))
             }
         } else {
             // AWAITING: show actual options
@@ -929,27 +986,38 @@ private enum D200hRenderer {
 
                 slots[2 + i] = ButtonSlot(
                     title: "\(badge)\(displayLabel)", subtitle: "",
-                    bg: bg, enabled: true, borderStyle: .none
+                    bg: bg, enabled: true, borderStyle: .none,
+                    icon: .review,
+                    iconColor: recommended ? rgb(250, 204, 21) : rgb(226, 232, 240)
                 )
             }
         }
 
         // Slot 10: STOP/ESC combined (bottom-left)
         if session.isProcessing {
-            slots[10] = ButtonSlot(title: "■ STOP", subtitle: "", bg: cStopActive, enabled: true, borderStyle: .none)
+            slots[10] = ButtonSlot(title: "■ STOP", subtitle: "", bg: cStopActive, enabled: true, borderStyle: .none, icon: .stop, iconColor: rgb(254, 226, 226))
         } else {
-            slots[10] = ButtonSlot(title: "✖ ESC", subtitle: "", bg: cEscActive, enabled: true, borderStyle: .none)
+            slots[10] = ButtonSlot(title: "✖ ESC", subtitle: "", bg: cEscActive, enabled: true, borderStyle: .none, icon: .back, iconColor: rgb(226, 232, 240))
         }
 
         // Slot 11: MORE (if overflow)
         if options.count > (page + 1) * 8 {
-            slots[11] = ButtonSlot(title: "▶ MORE", subtitle: "", bg: cSessionDef, enabled: true, borderStyle: .none)
+            slots[11] = ButtonSlot(title: "▶ MORE", subtitle: "", bg: cSessionDef, enabled: true, borderStyle: .none, icon: .more, iconColor: rgb(226, 232, 240))
         }
 
         // Slot 13: ← BACK (big merged button)
-        slots[13] = ButtonSlot(title: "← BACK", subtitle: "", bg: cDark, enabled: true, borderStyle: .none)
+        slots[13] = ButtonSlot(title: "← BACK", subtitle: "", bg: cDark, enabled: true, borderStyle: .none, icon: .back, iconColor: rgb(226, 232, 240))
 
         return slots
+    }
+
+    private static func sessionGlyph(for agentType: String) -> ButtonSlot.IconGlyph {
+        switch agentType {
+        case "codex-cli": return .codexCli
+        case "opencode": return .openCode
+        case "openclaw": return .openClaw
+        default: return .claudeCode
+        }
     }
 
     // MARK: - Render ZIP
@@ -967,16 +1035,20 @@ private enum D200hRenderer {
             let iconPath = "icons/btn\(key.id).png"
             let colRow = "\(key.col)_\(key.row)"
             let png = renderButtonPng(slot)
-            let label = slot.subtitle.isEmpty ? slot.title
-                : (slot.title.isEmpty ? slot.subtitle : "\(slot.title)\n\(slot.subtitle)")
+            // Text rendered inside PNG via bitmap font — device native text disabled
             manifest[colRow] = [
                 "State": 0,
-                "ViewParam": [["Text": label, "Icon": iconPath]],
+                "ViewParam": [["Text": "", "Icon": iconPath]],
             ] as [String: Any]
             files.append((iconPath, png))
         }
 
-        // Slot 13 (big merged button at 3_2) is now rendered as a regular button via keyDefs
+        // Slot 13 (big merged button) spans col3+col4 at row2.
+        // Explicitly clear 4_2 to override the default Ulanzi clock widget.
+        manifest["4_2"] = [
+            "State": 0,
+            "ViewParam": [["Text": "", "Icon": ""]],
+        ] as [String: Any]
 
         if let manifestData = try? JSONSerialization.data(withJSONObject: manifest) {
             files.append(("manifest.json", manifestData))
@@ -996,11 +1068,9 @@ private enum D200hRenderer {
             let iconPath = "icons/btn\(key.id).png"
             let colRow = "\(key.col)_\(key.row)"
             let png = renderButtonPng(slot)
-            let label = slot.subtitle.isEmpty ? slot.title
-                : (slot.title.isEmpty ? slot.subtitle : "\(slot.title)\n\(slot.subtitle)")
             manifest[colRow] = [
                 "State": 0,
-                "ViewParam": [["Text": label, "Icon": iconPath]],
+                "ViewParam": [["Text": "", "Icon": iconPath]],
             ] as [String: Any]
             files.append((iconPath, png))
         }
@@ -1031,6 +1101,39 @@ private func rgb(_ r: Int, _ g: Int, _ b: Int) -> CGColor {
     CGColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: 1.0)
 }
 
+// MARK: - CoreText Helper (SD+ quality text rendering)
+
+private func ctFont(_ size: CGFloat, bold: Bool = false) -> CTFont {
+    let name = bold ? "HelveticaNeue-Bold" as CFString : "HelveticaNeue" as CFString
+    return CTFontCreateWithName(name, size, nil)
+}
+
+/// Draw CoreText string centered horizontally within [leftBound, rightBound], at given y (top-down, auto-flipped)
+private func drawText(
+    _ text: String, ctx: CGContext, y: CGFloat, color: CGColor,
+    font: CTFont, leftBound: CGFloat = 14, rightBound: CGFloat = 182, alpha: CGFloat = 1.0
+) {
+    let s = CGFloat(ICON_SIZE)
+    var attrs: [NSAttributedString.Key: Any] = [
+        .font: font,
+        .foregroundColor: color,
+    ]
+    let attrStr = NSAttributedString(string: text, attributes: attrs)
+    let line = CTLineCreateWithAttributedString(attrStr)
+    let bounds = CTLineGetBoundsWithOptions(line, [])
+    let maxW = rightBound - leftBound
+    let textW = min(bounds.width, maxW)
+    let tx = leftBound + (maxW - textW) / 2
+    let flippedY = s - y - bounds.height
+    ctx.saveGState()
+    if alpha < 1.0 { ctx.setAlpha(alpha) }
+    // Clip to available width to avoid overflow
+    ctx.clip(to: CGRect(x: leftBound, y: 0, width: maxW, height: s))
+    ctx.textPosition = CGPoint(x: tx, y: flippedY)
+    CTLineDraw(line, ctx)
+    ctx.restoreGState()
+}
+
 // MARK: - SD+ Style Rich Button PNG Rendering
 
 private func renderButtonPng(_ slot: ButtonSlot) -> Data {
@@ -1048,12 +1151,14 @@ private func renderButtonPng(_ slot: ButtonSlot) -> Data {
     let cornerR: CGFloat = 16
     let innerRect = CGRect(x: pad, y: pad, width: s - pad * 2, height: s - pad * 2)
     let innerPath = CGPath(roundedRect: innerRect, cornerWidth: cornerR, cornerHeight: cornerR, transform: nil)
+    let contentLeft: CGFloat = 16
+    let contentRight: CGFloat = s - 10
 
     // 1. Dark canvas background
     ctx.setFillColor(red: 0.05, green: 0.05, blue: 0.07, alpha: 1)
     ctx.fill(CGRect(x: 0, y: 0, width: size, height: size))
 
-    // 2. Rounded rect button background (solid fill, no gradient — keeps PNG small)
+    // 2. Rounded rect button background
     ctx.saveGState()
     ctx.addPath(innerPath)
     ctx.clip()
@@ -1096,11 +1201,11 @@ private func renderButtonPng(_ slot: ButtonSlot) -> Data {
         break
     }
 
-    // 4. Active indicator bar (SD+ left blue bar)
+    // 4. Active indicator bar (left blue bar)
     if slot.enabled {
         switch slot.borderStyle {
         case .awaitingPulse, .processingDash, .solid:
-            ctx.setFillColor(rgb(59, 130, 246))  // #3b82f6
+            ctx.setFillColor(rgb(59, 130, 246))
             ctx.setAlpha(0.8)
             ctx.fill(CGRect(x: pad + 1, y: pad + 24, width: 5, height: s - pad * 2 - 48))
             ctx.setAlpha(1.0)
@@ -1108,10 +1213,92 @@ private func renderButtonPng(_ slot: ButtonSlot) -> Data {
         }
     }
 
-    // Text via device native renderer (manifest Text field) — CoreText PNGs too large for D200H
+    // 5. Rich text layout (CoreText — SD+ quality)
+    let hasRichText = !slot.agentLabel.isEmpty || !slot.stateLabel.isEmpty
+    if hasRichText {
+        let stateColor = slot.iconColor ?? rgb(148, 163, 184)
 
-    // 6. Status dot indicator (top-left corner for session buttons)
-    if slot.enabled {
+        // Agent type label (top)
+        if !slot.agentLabel.isEmpty {
+            drawText(slot.agentLabel, ctx: ctx, y: 12, color: stateColor,
+                     font: ctFont(11), leftBound: contentLeft, rightBound: contentRight, alpha: 0.7)
+        }
+
+        // Project name (prominent, bold, white) — auto-size to fit
+        if !slot.title.isEmpty {
+            let titleFont: CTFont
+            if slot.title.count <= 8 {
+                titleFont = ctFont(22, bold: true)
+            } else if slot.title.count <= 12 {
+                titleFont = ctFont(18, bold: true)
+            } else {
+                titleFont = ctFont(14, bold: true)
+            }
+            drawText(slot.title, ctx: ctx, y: 30, color: rgb(241, 245, 249),
+                     font: titleFont, leftBound: contentLeft, rightBound: contentRight)
+        }
+
+        // Model name (secondary, slate)
+        if !slot.modelName.isEmpty {
+            drawText(slot.modelName, ctx: ctx, y: 60, color: rgb(148, 163, 184),
+                     font: ctFont(12), leftBound: contentLeft, rightBound: contentRight)
+        }
+
+        // Icon glyph (centered between text blocks)
+        if slot.icon != .none {
+            drawButtonIcon(ctx, glyph: slot.icon, color: slot.iconColor ?? rgb(241, 245, 249),
+                           rect: CGRect(x: pad + 28, y: 80, width: s - (pad + 28) * 2, height: 44))
+        }
+
+        // State indicator (bottom) — dot + label
+        if !slot.stateLabel.isEmpty {
+            let dotSize: CGFloat = 7
+            let stateFont = ctFont(13, bold: true)
+            // Measure state text to center dot+text together
+            let attrStr = NSAttributedString(string: slot.stateLabel, attributes: [.font: stateFont])
+            let line = CTLineCreateWithAttributedString(attrStr)
+            let textBounds = CTLineGetBoundsWithOptions(line, [])
+            let totalW = dotSize + 5 + textBounds.width
+            let startX = contentLeft + ((contentRight - contentLeft) - totalW) / 2
+            let dotY = s - 30  // CGContext coords (bottom-up)
+            ctx.setFillColor(stateColor)
+            ctx.fillEllipse(in: CGRect(x: startX, y: dotY - 1, width: dotSize, height: dotSize))
+            ctx.saveGState()
+            ctx.textPosition = CGPoint(x: startX + dotSize + 5, y: dotY - 1)
+            let stateAttrs: [NSAttributedString.Key: Any] = [.font: stateFont, .foregroundColor: stateColor]
+            let stateAttrStr = NSAttributedString(string: slot.stateLabel, attributes: stateAttrs)
+            let stateLine = CTLineCreateWithAttributedString(stateAttrStr)
+            CTLineDraw(stateLine, ctx)
+            ctx.restoreGState()
+        }
+    } else if !slot.title.isEmpty {
+        // Action buttons (GO ON, STOP, BACK, etc.) — icon + large centered label
+        if slot.icon != .none {
+            drawButtonIcon(ctx, glyph: slot.icon, color: slot.iconColor ?? rgb(241, 245, 249),
+                           rect: CGRect(x: pad + 28, y: s - 82, width: s - (pad + 28) * 2, height: 44))
+        }
+
+        // Title — size based on length
+        let titleFont: CTFont
+        if slot.title.count <= 6 {
+            titleFont = ctFont(24, bold: true)
+        } else if slot.title.count <= 10 {
+            titleFont = ctFont(18, bold: true)
+        } else {
+            titleFont = ctFont(14, bold: true)
+        }
+        let titleY: CGFloat = slot.icon != .none ? 145 : 85
+        drawText(slot.title, ctx: ctx, y: titleY, color: rgb(241, 245, 249),
+                 font: titleFont, leftBound: contentLeft, rightBound: contentRight)
+
+        if !slot.subtitle.isEmpty {
+            drawText(slot.subtitle, ctx: ctx, y: titleY + 22, color: rgb(148, 163, 184),
+                     font: ctFont(11), leftBound: contentLeft, rightBound: contentRight)
+        }
+    }
+
+    // 6. Status dot (top-left for non-rich animated states)
+    if slot.enabled && !hasRichText {
         let dotR: CGFloat = 5
         let dotX: CGFloat = pad + 12
         let dotY: CGFloat = s - pad - 16
@@ -1130,16 +1317,124 @@ private func renderButtonPng(_ slot: ButtonSlot) -> Data {
     CGImageDestinationAddImage(dest, image, nil)
     CGImageDestinationFinalize(dest)
 
-    // Debug: save first non-empty button PNG to /tmp for inspection
+    let pngData = data as Data
+
+    // Debug: save first few button PNGs to /tmp for inspection
     if !slot.title.isEmpty {
-        struct DebugOnce { nonisolated(unsafe) static var saved = false }
-        if !DebugOnce.saved {
-            DebugOnce.saved = true
-            try? (data as Data).write(to: URL(fileURLWithPath: "/tmp/d200h_app_button.png"))
+        struct DebugState { nonisolated(unsafe) static var count = 0 }
+        if DebugState.count < 3 {
+            try? pngData.write(to: URL(fileURLWithPath: "/tmp/d200h_btn_\(DebugState.count).png"))
+            DaemonLogger.shared.debug("D200H", "PNG[\(DebugState.count)] '\(slot.title)' = \(pngData.count) bytes")
+            DebugState.count += 1
         }
     }
 
-    return data as Data
+    return pngData
+}
+
+private func drawButtonIcon(_ ctx: CGContext, glyph: ButtonSlot.IconGlyph, color: CGColor, rect: CGRect) {
+    ctx.saveGState()
+    ctx.setStrokeColor(color)
+    ctx.setFillColor(color)
+    ctx.setLineWidth(4)
+    ctx.setLineCap(.round)
+    ctx.setLineJoin(.round)
+
+    let midX = rect.midX
+    let midY = rect.midY
+    let w = rect.width
+    let h = rect.height
+
+    switch glyph {
+    case .none:
+        break
+    case .claudeCode:
+        ctx.fillEllipse(in: CGRect(x: midX - 16, y: midY - 10, width: 32, height: 24))
+        for dx in [-18, -6, 6, 18] {
+            ctx.move(to: CGPoint(x: midX + CGFloat(dx), y: midY - 10))
+            ctx.addLine(to: CGPoint(x: midX + CGFloat(dx) * 0.9, y: midY - 22))
+        }
+        ctx.strokePath()
+    case .codexCli:
+        for offset in [-18, 0, 18] {
+            ctx.strokeEllipse(in: CGRect(x: midX + CGFloat(offset) - 13, y: midY - 6, width: 26, height: 18))
+        }
+    case .openCode:
+        ctx.stroke(CGRect(x: midX - 18, y: midY - 18, width: 36, height: 36))
+        ctx.stroke(CGRect(x: midX - 10, y: midY - 10, width: 20, height: 20))
+    case .openClaw:
+        ctx.fillEllipse(in: CGRect(x: midX - 12, y: midY - 8, width: 24, height: 16))
+        ctx.move(to: CGPoint(x: midX - 12, y: midY + 4))
+        ctx.addLine(to: CGPoint(x: midX - 24, y: midY + 14))
+        ctx.addLine(to: CGPoint(x: midX - 16, y: midY + 2))
+        ctx.move(to: CGPoint(x: midX + 12, y: midY + 4))
+        ctx.addLine(to: CGPoint(x: midX + 24, y: midY + 14))
+        ctx.addLine(to: CGPoint(x: midX + 16, y: midY + 2))
+        for dx in [-10, -3, 4, 11] {
+            ctx.move(to: CGPoint(x: midX + CGFloat(dx), y: midY - 8))
+            ctx.addLine(to: CGPoint(x: midX + CGFloat(dx), y: midY - 18))
+        }
+        ctx.strokePath()
+    case .usage:
+        let barW: CGFloat = 10
+        let spacing: CGFloat = 8
+        let startX = midX - (barW * 1.5 + spacing)
+        let heights: [CGFloat] = [12, 22, 32]
+        for (index, barH) in heights.enumerated() {
+            let x = startX + CGFloat(index) * (barW + spacing)
+            ctx.fill(CGRect(x: x, y: midY - 16, width: barW, height: barH))
+        }
+    case .back:
+        ctx.move(to: CGPoint(x: midX - 18, y: midY))
+        ctx.addLine(to: CGPoint(x: midX + 18, y: midY))
+        ctx.move(to: CGPoint(x: midX - 18, y: midY))
+        ctx.addLine(to: CGPoint(x: midX - 4, y: midY + 14))
+        ctx.move(to: CGPoint(x: midX - 18, y: midY))
+        ctx.addLine(to: CGPoint(x: midX - 4, y: midY - 14))
+        ctx.strokePath()
+    case .stop:
+        ctx.fill(CGRect(x: midX - 15, y: midY - 15, width: 30, height: 30))
+    case .more:
+        ctx.move(to: CGPoint(x: midX - 16, y: midY + 12))
+        ctx.addLine(to: CGPoint(x: midX, y: midY))
+        ctx.addLine(to: CGPoint(x: midX - 16, y: midY - 12))
+        ctx.move(to: CGPoint(x: midX, y: midY + 12))
+        ctx.addLine(to: CGPoint(x: midX + 16, y: midY))
+        ctx.addLine(to: CGPoint(x: midX, y: midY - 12))
+        ctx.strokePath()
+    case .goOn:
+        ctx.move(to: CGPoint(x: midX - 12, y: midY - 16))
+        ctx.addLine(to: CGPoint(x: midX + 16, y: midY))
+        ctx.addLine(to: CGPoint(x: midX - 12, y: midY + 16))
+        ctx.closePath()
+        ctx.fillPath()
+    case .review:
+        ctx.stroke(CGRect(x: midX - 16, y: midY - 18, width: 28, height: 36))
+        ctx.move(to: CGPoint(x: midX - 6, y: midY - 2))
+        ctx.addLine(to: CGPoint(x: midX - 1, y: midY - 10))
+        ctx.addLine(to: CGPoint(x: midX + 10, y: midY + 8))
+        ctx.strokePath()
+    case .commit:
+        ctx.move(to: CGPoint(x: midX - 18, y: midY))
+        ctx.addLine(to: CGPoint(x: midX - 4, y: midY - 14))
+        ctx.addLine(to: CGPoint(x: midX + 18, y: midY + 14))
+        ctx.strokePath()
+    case .clear:
+        ctx.move(to: CGPoint(x: midX - 14, y: midY + 10))
+        ctx.addLine(to: CGPoint(x: midX + 2, y: midY - 8))
+        ctx.move(to: CGPoint(x: midX - 4, y: midY + 14))
+        ctx.addLine(to: CGPoint(x: midX + 14, y: midY - 6))
+        ctx.strokePath()
+        ctx.fill(CGRect(x: midX + 4, y: midY - 16, width: 12, height: 6))
+    case .tool:
+        ctx.move(to: CGPoint(x: midX - 18, y: midY - 10))
+        ctx.addLine(to: CGPoint(x: midX - 2, y: midY + 6))
+        ctx.strokePath()
+        ctx.strokeEllipse(in: CGRect(x: midX - 26, y: midY - 18, width: 16, height: 16))
+        ctx.fillEllipse(in: CGRect(x: midX + 6, y: midY + 2, width: 14, height: 14))
+    }
+
+    ctx.restoreGState()
 }
 
 // MARK: - ZIP Creation (in-memory, Store compression)

@@ -112,7 +112,7 @@ enum TerrariumLayout {
     static let rockHeightFraction: Float = 0.25
 
     // Octopus
-    static let octopusBodyRadius: Float = 0.055
+    static let octopusBodyRadius: Float = 0.050
     static let pixelAspect: Float = 2.0
     static let pixelGap: Float = 0.5
 

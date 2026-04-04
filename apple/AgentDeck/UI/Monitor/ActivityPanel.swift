@@ -30,6 +30,8 @@ struct ActivityPanel: View {
                     Text("  (\(progress))")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
+                        .lineLimit(2)
+                        .truncationMode(.tail)
                 }
 
             case .idle:

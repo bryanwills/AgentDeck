@@ -55,10 +55,18 @@ final class DaemonServer {
     private var apiUsagePreAdjusted = false
     private var oauthConnected = false
 
+    // Voice TTS flow: track previous state for PROCESSING→IDLE detection
+    private var previousDaemonState: AgentState?
+
     // Voice assistant state cache for piggybacking on state_update
     private var cachedVoiceAssistantState: String = "disabled"
     private var cachedVoiceAssistantText: String?
     private var cachedVoiceAssistantResponseText: String?
+
+    // Network monitoring
+    private var networkMonitor: NWPathMonitor?
+    private var lastKnownIP: String?
+    private var networkDebounceTask: Task<Void, Never>?
 
     // Polling tasks
     private var sessionPollTask: Task<Void, Never>?
@@ -69,6 +77,10 @@ final class DaemonServer {
     private var gatewayHealthTask: Task<Void, Never>?
     private var usageTickTask: Task<Void, Never>?
     private var initialUsageTask: Task<Void, Never>?
+    private var antigravityPollTask: Task<Void, Never>?
+
+    // Antigravity cache
+    private var cachedAntigravityStatus: AntigravityStatus?
 
     // MARK: - Init
 
@@ -280,6 +292,13 @@ final class DaemonServer {
             // Also trigger state_update so all clients get voice state
             self.broadcastStateUpdate()
         }
+        voiceAssistant.onWakeWordDetected = { [weak self] deviceId, timestamp in
+            self?.broadcastRaw([
+                "type": "wake_word_detected",
+                "deviceId": deviceId,
+                "timestamp": timestamp,
+            ])
+        }
         _ = voiceAssistant.start()
 
         // 13. System sleep/wake handling — immediate cleanup on wake
@@ -293,15 +312,58 @@ final class DaemonServer {
                 guard messageType == UInt32(kIOMessageSystemHasPoweredOn) else { return }
                 guard let refcon else { return }
                 let server = Unmanaged<DaemonServer>.fromOpaque(refcon).takeUnretainedValue()
-                DaemonLogger.shared.info("System wake — pruning stale sessions")
+                DaemonLogger.shared.info("System wake — recovering sessions and devices")
                 // Force prune dead sessions (bridges killed during sleep)
                 _ = server.registry.listActive()
                 // Trigger immediate session list refresh for clients
                 server.broadcastSessionsList()
                 // Re-sync timeline relay (drops dead subscriptions)
                 Task { await server.timelineRelay.sync() }
+                // Re-advertise Bonjour (mDNSResponder may have stale state)
+                Task { await server.wsServer.republishBonjour() }
+                // Wake all device modules (D200H re-scan, ESP32 reconnect, Pixoo re-sync)
+                Task { await server.moduleManager.wakeAll() }
+                // Broadcast full state so reconnected devices get fresh data
+                Task { @MainActor in server.broadcastStateUpdate() }
             }, Unmanaged.passUnretained(self).toOpaque(), &notifier)
         }
+
+        // 14. Network change detection — WiFi/VPN/IP changes trigger Bonjour re-publish + module recovery
+        lastKnownIP = AuthManager.getLanIP()
+        let monitor = NWPathMonitor()
+        self.networkMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.networkDebounceTask?.cancel()
+                self.networkDebounceTask = Task {
+                    try? await Task.sleep(for: .seconds(2))  // 2s debounce
+                    guard !Task.isCancelled else { return }
+
+                    if path.status == .satisfied {
+                        let newIP = AuthManager.getLanIP()
+                        let ipChanged = newIP != self.lastKnownIP
+                        if ipChanged {
+                            DaemonLogger.shared.info("Network changed — IP: \(self.lastKnownIP ?? "none") → \(newIP ?? "none")")
+                            self.lastKnownIP = newIP
+                        } else {
+                            DaemonLogger.shared.info("Network path update (IP unchanged: \(newIP ?? "none"))")
+                        }
+                        // Re-advertise Bonjour with current IP
+                        await self.wsServer.republishBonjour()
+                        // Wake device modules (reconnect ESP32, Pixoo, etc.)
+                        await self.moduleManager.wakeAll()
+                        // Re-sync timeline relay (drop dead subscriptions)
+                        await self.timelineRelay.sync()
+                        // Broadcast fresh state to all reconnected clients
+                        self.broadcastStateUpdate()
+                    } else {
+                        DaemonLogger.shared.info("Network unsatisfied — waiting for recovery")
+                    }
+                }
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "dev.agentdeck.networkmonitor"))
 
         DaemonLogger.shared.info("Daemon running on port \(port) — all modules wired")
     }
@@ -855,6 +917,21 @@ final class DaemonServer {
                 Task { await focusRelay.focus(sessionId: sessionId) }
             }
             return
+        case "session_command":
+            guard let sessionId = cmd["sessionId"] as? String,
+                  let innerCommand = cmd["command"] as? [String: Any] else { return }
+            let sessions = cachedSessions
+            guard sessions.contains(where: { $0.id == sessionId }) else {
+                DaemonLogger.shared.debug("Daemon", "session_command: session \(sessionId) not found")
+                return
+            }
+            let cmdBox = SendableDict(innerCommand)
+            Task {
+                await self.focusRelay.focus(sessionId: sessionId)
+                try? await Task.sleep(for: .milliseconds(100))
+                _ = await self.focusRelay.routeCommand(cmdBox.value)
+            }
+            return
         case "respond", "interrupt", "escape", "select_option", "send_prompt", "navigate_option", "switch_mode":
             // Route to focused session if available, otherwise legacy forwarding
             let cmdBox = SendableDict(cmd)
@@ -961,12 +1038,29 @@ final class DaemonServer {
 
     @MainActor
     private func handleStateChanged() {
+        let currentState = stateMachine.state
         let gwAlive = gatewayAdapter != nil
         let event = buildFullStateEvent(agentType: gwAlive ? "openclaw" : "daemon")
         lastStateEvent = event
         broadcastRaw(event)
         broadcastSessionsList()
         broadcastUsage()
+
+        // Voice assistant: reset timeout on any activity during processing
+        if currentState == .processing && voiceAssistant.state == .processing {
+            voiceAssistant.resetResponseTimeout()
+        }
+
+        // Voice assistant: PROCESSING→IDLE triggers TTS response
+        let wasProcessing = previousDaemonState == .processing
+        previousDaemonState = currentState
+        if wasProcessing && currentState == .idle && voiceAssistant.state == .processing {
+            Task {
+                let lastEntry = await timelineStore.getLastEntry(type: "chat_end")
+                let responseText = (lastEntry?.detail ?? lastEntry?.raw) ?? ""
+                voiceAssistant.handleResponse(responseText.isEmpty ? "완료했습니다." : responseText)
+            }
+        }
     }
 
     // MARK: - Gateway Lifecycle
@@ -1181,6 +1275,26 @@ final class DaemonServer {
                     self.cachedGatewayHasError = hasError
                     self.broadcastStateUpdate()
                 }
+            }
+        }
+
+        // Antigravity — 15s (local SQLite read for plan/credit status)
+        cachedAntigravityStatus = usageAPI.antigravityStatus
+        antigravityPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard let self else { break }
+                let next = self.usageAPI.antigravityStatus
+                let changed: Bool
+                if let prev = self.cachedAntigravityStatus, let next {
+                    changed = prev.planName != next.planName
+                        || prev.availableCredits != next.availableCredits
+                        || prev.minimumCreditAmountForUsage != next.minimumCreditAmountForUsage
+                } else {
+                    changed = (self.cachedAntigravityStatus == nil) != (next == nil)
+                }
+                self.cachedAntigravityStatus = next
+                if changed { self.broadcastStateUpdate() }
             }
         }
 
@@ -1485,7 +1599,7 @@ final class DaemonServer {
             if let until = codex.subscriptionActiveUntil { e["codexSubscriptionActiveUntil"] = until }
             if let refresh = codex.lastRefreshAt { e["codexLastRefreshAt"] = refresh }
         }
-        if let antigravity = usageAPI.antigravityStatus {
+        if let antigravity = cachedAntigravityStatus {
             e["antigravityStatus"] = antigravityPayload(antigravity)
         }
         let subscriptions = buildSubscriptions()
@@ -1500,7 +1614,7 @@ final class DaemonServer {
         if !cachedMlxModels.isEmpty { event["mlxModels"] = cachedMlxModels }
         let subscriptions = buildSubscriptions()
         if !subscriptions.isEmpty { event["subscriptions"] = subscriptions }
-        if let antigravity = usageAPI.antigravityStatus {
+        if let antigravity = cachedAntigravityStatus {
             event["antigravityStatus"] = antigravityPayload(antigravity)
         }
     }
@@ -1687,9 +1801,13 @@ final class DaemonServer {
 
     func shutdown() async {
         DaemonLogger.shared.info("Daemon shutting down...")
+        networkMonitor?.cancel()
+        networkMonitor = nil
+        networkDebounceTask?.cancel()
         sessionPollTask?.cancel(); usagePollTask?.cancel()
         ollamaPollTask?.cancel(); mlxPollTask?.cancel(); gatewayPollTask?.cancel()
         gatewayHealthTask?.cancel(); usageTickTask?.cancel()
+        antigravityPollTask?.cancel()
         initialUsageTask?.cancel()
 
         voiceAssistant.stop()

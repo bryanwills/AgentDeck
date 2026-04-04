@@ -72,7 +72,7 @@ struct ConnectionOverlay: View {
                         .buttonStyle(.plain)
                     }
 
-                    // Error message
+                    // Error message + recovery guidance
                     if let error = stateHolder.connection.lastError,
                        stateHolder.connection.status == .disconnected {
                         Text(error)
@@ -80,6 +80,31 @@ struct ConnectionOverlay: View {
                             .monospaced()
                             .foregroundStyle(.red)
                             .multilineTextAlignment(.center)
+
+                        // Recovery guidance after reconnect failure
+                        if !isReconnecting {
+                            VStack(spacing: 8) {
+                                Text("Check that AgentDeck daemon is running")
+                                    .font(.caption)
+                                    .foregroundStyle(slateText.opacity(0.7))
+
+                                Button {
+                                    stateHolder.startConnectionWaterfall()
+                                } label: {
+                                    Text("Retry Discovery")
+                                        .font(.subheadline.bold())
+                                        .foregroundStyle(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 8)
+                                        .background(.cyan.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(.cyan.opacity(0.5), lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                     }
 
                     // Connection options (disconnected or reconnecting with WiFi alternatives)

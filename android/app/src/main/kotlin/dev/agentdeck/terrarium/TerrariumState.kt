@@ -281,14 +281,17 @@ fun DashboardState.toTerrariumState(): TerrariumState {
     }
 
     // Number duplicate display names: "AgentDeck", "AgentDeck" → "AgentDeck #1", "AgentDeck #2"
-    val nameCounts = agents.groupingBy { it.displayName }.eachCount()
-    val nameCounters = mutableMapOf<String?, Int>()
+    // Group by (displayName, agentType) so different creature types sharing a project name
+    // don't get numbered together (matches SessionListPanel + shared session-utils.ts)
+    data class NameTypeKey(val name: String?, val type: String?)
+    val nameCounts = agents.groupingBy { NameTypeKey(it.displayName, it.agentType) }.eachCount()
+    val nameCounters = mutableMapOf<NameTypeKey, Int>()
     for (i in agents.indices) {
-        val name = agents[i].displayName
-        if (name != null && (nameCounts[name] ?: 0) >= 2) {
-            val seq = (nameCounters[name] ?: 0) + 1
-            nameCounters[name] = seq
-            agents[i] = agents[i].copy(displayName = "$name #$seq")
+        val key = NameTypeKey(agents[i].displayName, agents[i].agentType)
+        if (key.name != null && (nameCounts[key] ?: 0) >= 2) {
+            val seq = (nameCounters[key] ?: 0) + 1
+            nameCounters[key] = seq
+            agents[i] = agents[i].copy(displayName = "${key.name} #$seq")
         }
     }
 

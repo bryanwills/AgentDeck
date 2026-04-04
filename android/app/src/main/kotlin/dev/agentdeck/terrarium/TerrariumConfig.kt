@@ -76,7 +76,7 @@ object TerrariumLayout {
     const val ROCK_HEIGHT_FRACTION = 0.25f
 
     // Octopus sizing (fraction of canvas width)
-    const val OCTOPUS_BODY_RADIUS_FRACTION = 0.055f
+    const val OCTOPUS_BODY_RADIUS_FRACTION = 0.050f
     const val OCTOPUS_CENTER_X_FRACTION = 0.4f
     const val OCTOPUS_CENTER_Y_FRACTION = 0.45f
     // (TENTACLE_LENGTH_FRACTION removed — pixel mascot has no tentacles)

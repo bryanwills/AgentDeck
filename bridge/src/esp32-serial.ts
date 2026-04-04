@@ -461,6 +461,23 @@ export function getESP32DeviceInfo(): Array<{ port: string; board?: string; vers
 }
 
 /**
+ * Wake recovery — close stale file descriptors, force immediate re-poll.
+ */
+export function handleESP32Wake(): void {
+  debug('ESP32', `Wake recovery — closing ${connections.length} stale connection(s)`);
+  for (const conn of connections) {
+    conn.connected = false;
+    try { conn.stream.end(); } catch { /* ignore */ }
+    try { conn.reader?.destroy(); } catch { /* ignore */ }
+  }
+  connections = [];
+  // Immediate re-poll (don't wait for next 10s cycle)
+  pollForDevices().catch(err => {
+    debug('ESP32', `Wake poll failed: ${err.message}`);
+  });
+}
+
+/**
  * Stop ESP32 serial bridge and close all connections.
  */
 export function stopESP32Serial(): void {

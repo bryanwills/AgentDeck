@@ -127,6 +127,22 @@ export function stopProbeTimer(): void {
   }
 }
 
+/**
+ * Wake recovery — clear all PicID caches and circuit breaker state.
+ * Devices may have rebooted during sleep, so all cached state is stale.
+ */
+export function handlePixooWake(): void {
+  debug(TAG, `Wake recovery — clearing ${devicePicId.size} PicID(s) and ${deviceBackoff.size} backoff(s)`);
+  for (const ip of devicePicId.keys()) {
+    clearStaticPicId(ip);
+  }
+  deviceBackoff.clear();
+  if (probeTimer) {
+    clearInterval(probeTimer);
+    probeTimer = null;
+  }
+}
+
 /** Get circuit breaker status for a device. */
 export function getDeviceBackoffStatus(ip: string): { failures: number; backedOff: boolean; nextProbeMs: number } {
   const entry = deviceBackoff.get(ip);

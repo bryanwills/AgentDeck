@@ -10,7 +10,8 @@ export async function fetchMlxModels(): Promise<string[] | null> {
         .map((m) => (typeof m.id === 'string' && m.id.trim().length > 0 ? m.id.trim()
           : typeof m.name === 'string' && m.name.trim().length > 0 ? m.name.trim()
           : null))
-        .filter((m): m is string => m != null);
+        .filter((m): m is string => m != null)
+        .filter((m) => !m.toLowerCase().includes('nanollava'));
       return Array.from(new Set(models));
     } catch {
       // try next endpoint

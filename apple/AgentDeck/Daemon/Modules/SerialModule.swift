@@ -24,6 +24,10 @@ final class SerialModule: DeviceModule, @unchecked Sendable {
         await serial.stop()
     }
 
+    func handleWake() async {
+        await serial.handleWake()
+    }
+
     /// Wire broadcast hook — relay events to ESP32 devices
     func wireBroadcast(_ event: [String: Any]) {
         let box = SendableDict(event)

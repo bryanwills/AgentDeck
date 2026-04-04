@@ -107,9 +107,21 @@ final class SessionRegistry: Sendable {
               let info = try? JSONDecoder().decode(DaemonInfo.self, from: data) else {
             return nil
         }
-        if isProcessAlive(info.pid) { return info }
-        removeDaemonInfo()
-        return nil
+        guard isProcessAlive(info.pid) else {
+            removeDaemonInfo()
+            return nil
+        }
+        // PID reuse guard: if startedAt is more than 24h ago, the PID likely
+        // belongs to a different process that reused the same number.
+        if let startedDate = ISO8601DateFormatter().date(from: info.startedAt) {
+            let age = Date().timeIntervalSince(startedDate)
+            if age > 24 * 60 * 60 {
+                DaemonLogger.shared.debug("SessionRegistry", "Stale daemon.json (startedAt \(info.startedAt), age \(Int(age))s) — removing")
+                removeDaemonInfo()
+                return nil
+            }
+        }
+        return info
     }
 
     func findDaemonPort() -> Int? {

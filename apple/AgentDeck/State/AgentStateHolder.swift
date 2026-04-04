@@ -8,6 +8,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     // MARK: - State
 
     @Published private(set) var state = DashboardState()
+    @Published private(set) var lastDataReceivedAt: Date?
     private var lastKnownState: DashboardState?
 
     // MARK: - Dependencies
@@ -44,6 +45,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
 
     @Published private(set) var isAutoConnecting = false
     private var waterfallStage: WaterfallStage = .idle
+    private var preferredLocalBridgeUrl: String?
 
     /// Bridges that failed to connect — skip them until browseResults refresh
     private var failedBridgeIds: Set<String> = []
@@ -86,8 +88,13 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
             if self.state.bridgeConnected {
                 self.resetToDisconnected()
             }
-            // Start mDNS discovery during reconnect so we can find new bridges
-            self.discovery.startSearching()
+            // macOS local daemon mode should reconnect directly instead of discovering itself via mDNS
+            if let preferredLocalBridgeUrl = self.preferredLocalBridgeUrl {
+                self.connectTo(url: preferredLocalBridgeUrl)
+            } else {
+                // Start mDNS discovery during reconnect so we can find new bridges
+                self.discovery.startSearching()
+            }
         }
         connection.onReconnectExhausted = { [weak self] in
             guard let self else { return }
@@ -186,6 +193,14 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     // MARK: - Connection Waterfall
 
     func startConnectionWaterfall() {
+        if let preferredLocalBridgeUrl {
+            isAutoConnecting = false
+            waterfallStage = .idle
+            if connection.url != preferredLocalBridgeUrl || connection.status == .disconnected {
+                connectTo(url: preferredLocalBridgeUrl)
+            }
+            return
+        }
         guard waterfallStage == .idle else {
             print("[Waterfall] already in stage \(waterfallStage), skipping")
             return
@@ -356,6 +371,14 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
             timelineVersion += 1
         }
 
+        // Track last data received time for stale indicator
+        switch event {
+        case .stateUpdate, .usageUpdate, .sessionsList, .timelineEvent, .timelineHistory:
+            lastDataReceivedAt = Date()
+        default:
+            break
+        }
+
         // Cache state for offline display
         if case .stateUpdate = event { lastKnownState = state }
         if case .usageUpdate = event { lastKnownState = state }
@@ -513,10 +536,26 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         connection.connect(to: url)
     }
 
+    func setPreferredLocalBridge(url: String?) {
+        preferredLocalBridgeUrl = url
+        if let url {
+            autoConnectTimer?.invalidate()
+            autoConnectTimer = nil
+            isAutoConnecting = false
+            waterfallStage = .idle
+            discovery.stopSearching()
+            failedBridgeIds.removeAll()
+            if connection.url != url || connection.status == .disconnected {
+                connectTo(url: url)
+            }
+        }
+    }
+
     func disconnectBridge() {
         connection.disconnect()
         resetToDisconnected()
         savedUrl = nil  // Clear saved URL on explicit disconnect
+        preferredLocalBridgeUrl = nil  // Prevent auto-reconnect from onDisconnect handler
         waterfallStage = .idle
     }
 }

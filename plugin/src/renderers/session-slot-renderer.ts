@@ -84,6 +84,7 @@ export function renderSessionSlot(
   session: SessionInfo,
   isActive: boolean,
   animFrame: number,
+  displayName?: string,
 ): string {
   const isAwaiting = session.state?.startsWith('awaiting') ?? false;
   const agent = (session.agentType as AgentType) || 'claude-code';
@@ -92,10 +93,11 @@ export function renderSessionSlot(
 
   // Agent type label — skip if same as project name (e.g. OpenClaw/OpenClaw)
   const agentText = agentLabel(agent);
-  const showAgentLabel = agentText.toLowerCase() !== session.projectName.toLowerCase();
+  const nameForDisplay = displayName ?? session.projectName;
+  const showAgentLabel = agentText.toLowerCase() !== nameForDisplay.toLowerCase();
 
   // Project name (main text, bold)
-  const projectName = truncate(session.projectName, 16);
+  const projectName = truncate(nameForDisplay, 16);
   const projFontSize = projectName.length > 10 ? 16 : 20;
 
   // Model name
@@ -206,7 +208,7 @@ export function renderStopButton(active = true): string {
 
 // ---- Detail View: Session Info ----
 
-export function renderDetailInfo(session: SessionInfo | undefined, state: State, tool?: string, modelName?: string, mode?: string): string {
+export function renderDetailInfo(session: SessionInfo | undefined, state: State, tool?: string, modelName?: string, mode?: string, displayName?: string): string {
   if (!session) return renderEmptySlot();
 
   const agent = (session.agentType as AgentType) || 'claude-code';
@@ -214,7 +216,8 @@ export function renderDetailInfo(session: SessionInfo | undefined, state: State,
   const agentText = agentLabel(agent);
   const stateLbl = stateLabel(session.state, agent);
   const isOpenClaw = agent === 'openclaw';
-  const showAgentLabel = agentText.toLowerCase() !== session.projectName.toLowerCase();
+  const nameForDisplay = displayName ?? session.projectName;
+  const showAgentLabel = agentText.toLowerCase() !== nameForDisplay.toLowerCase();
 
   // Detail info layout (144px canvas):
   //   agent label: y=28 (if shown)
@@ -229,7 +232,7 @@ export function renderDetailInfo(session: SessionInfo | undefined, state: State,
     // Agent type
     showAgentLabel ? `<text x="72" y="28" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="${sColor}" opacity="0.8">${escXml(agentText)}</text>` : '',
     // Project name (bold, large)
-    `<text x="72" y="${detailProjY}" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#ffffff">${escXml(truncate(session.projectName, 12))}</text>`,
+    `<text x="72" y="${detailProjY}" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#ffffff">${escXml(truncate(nameForDisplay, 12))}</text>`,
     // Model (skip for OpenClaw)
     modelName && !isOpenClaw ? `<text x="72" y="76" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">${escXml(truncate(modelName, 16))}</text>` : '',
     // Mode (skip for OpenClaw)

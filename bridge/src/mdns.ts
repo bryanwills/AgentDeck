@@ -35,6 +35,17 @@ export function invalidateMdnsInstance(): void {
   }
 }
 
+/** Trigger function, set by advertiseBridge() for immediate wake recovery. */
+let _triggerRecovery: (() => void) | null = null;
+
+/**
+ * Force immediate mDNS re-publish (wake recovery).
+ * Bypasses the 30s recovery timer interval.
+ */
+export function triggerMdnsRecovery(): void {
+  _triggerRecovery?.();
+}
+
 /**
  * Advertise this bridge session via mDNS/Bonjour so Android/LAN clients
  * can discover it automatically.
@@ -123,6 +134,16 @@ export function advertiseBridge(
   // Initial publish
   publishAndTrackIp();
 
+  // Wire immediate recovery for wake handler
+  _triggerRecovery = () => {
+    if (stopped) return;
+    const lanIp = getLanIp();
+    if (!lanIp) return;
+    log('[mDNS] Wake recovery — immediate re-publish');
+    invalidateMdnsInstance();
+    publishAndTrackIp();
+  };
+
   // Periodic recovery: re-publish if instance lost OR IP changed
   recoveryTimer = setInterval(() => {
     if (stopped) return;
@@ -142,6 +163,7 @@ export function advertiseBridge(
 
   return () => {
     stopped = true;
+    _triggerRecovery = null;
     if (recoveryTimer) {
       clearInterval(recoveryTimer);
       recoveryTimer = null;

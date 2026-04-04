@@ -148,10 +148,15 @@ extension DashboardState {
         }
 
         // Number duplicate display names: "AgentDeck", "AgentDeck" → "AgentDeck #1", "AgentDeck #2"
-        let nameCounts = Dictionary(grouping: creatures, by: { $0.projectName }).mapValues { $0.count }
+        // Group by (projectName, agentType) so different creature types sharing a project name
+        // don't get numbered together (matches SessionListPanel + shared session-utils.ts)
+        struct NameTypeKey: Hashable { let name: String?; let type: String }
+        let creatureType = "claude-code"  // all entries in `creatures` are octopuses
+        let nameCounts = Dictionary(grouping: creatures, by: { NameTypeKey(name: $0.projectName, type: creatureType) }).mapValues { $0.count }
         var nameCounters: [String: Int] = [:]
         for i in creatures.indices {
-            if let name = creatures[i].projectName, (nameCounts[name] ?? 0) >= 2 {
+            let key = NameTypeKey(name: creatures[i].projectName, type: creatureType)
+            if let name = creatures[i].projectName, (nameCounts[key] ?? 0) >= 2 {
                 let seq = (nameCounters[name] ?? 0) + 1
                 nameCounters[name] = seq
                 creatures[i] = AgentCreatureState(

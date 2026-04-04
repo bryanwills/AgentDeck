@@ -21,24 +21,50 @@ static lv_obj_t* btnRotate = nullptr;
 static lv_obj_t* lblRotate = nullptr;
 #endif
 
-// Gesture state for swipe detection
+// Manual swipe detection — LVGL gesture events unreliable on some touch drivers (GT911)
 static lv_point_t touchStart;
 static bool tracking = false;
+static constexpr int SWIPE_THRESHOLD = 40;  // minimum pixels for swipe
 
 static void gestureEvent(lv_event_t* e) {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
     if (dir == LV_DIR_TOP) {
-        // Swipe up → switch to timeline
         lockState();
         g_state.timelineView = true;
         unlockState();
     }
 }
 
-static void touchEvent(lv_event_t* e) {
+static void screenTouchEvent(lv_event_t* e) {
     lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_SHORT_CLICKED) {
-        // Tap → toggle HUD visibility
+
+    if (code == LV_EVENT_PRESSED) {
+        lv_indev_t* indev = lv_indev_active();
+        if (indev) {
+            lv_indev_get_point(indev, &touchStart);
+            tracking = true;
+        }
+    } else if (code == LV_EVENT_RELEASED && tracking) {
+        tracking = false;
+        lv_point_t touchEnd;
+        lv_indev_t* indev = lv_indev_active();
+        if (indev) {
+            lv_indev_get_point(indev, &touchEnd);
+            int dy = touchEnd.y - touchStart.y;
+            int dx = touchEnd.x - touchStart.x;
+            int absDy = (dy < 0) ? -dy : dy;
+            int absDx = (dx < 0) ? -dx : dx;
+            if (absDy > SWIPE_THRESHOLD && absDy > absDx) {
+                if (dy < 0) {
+                    // Swipe up → timeline
+                    lockState();
+                    g_state.timelineView = true;
+                    unlockState();
+                }
+            }
+        }
+    } else if (code == LV_EVENT_SHORT_CLICKED) {
+        // Tap → toggle HUD visibility (only if no swipe detected)
         HUD::setVisible(!HUD::isVisible());
     }
 }
@@ -115,9 +141,11 @@ lv_obj_t* aquariumCreate() {
     lv_obj_set_style_text_font(connStatusLabel, &lv_font_montserrat_12, 0);
     lv_label_set_text(connStatusLabel, "");
 
-    // Gesture detection for swipe up → timeline
+    // Swipe + tap detection: manual tracking as fallback for LVGL gesture
     lv_obj_add_event_cb(screen, gestureEvent, LV_EVENT_GESTURE, NULL);
-    lv_obj_add_event_cb(screen, touchEvent, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(screen, screenTouchEvent, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(screen, screenTouchEvent, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(screen, screenTouchEvent, LV_EVENT_SHORT_CLICKED, NULL);
 
 #if defined(BOARD_IPS_35)
     // Rotation button — bottom-right corner, small and unobtrusive

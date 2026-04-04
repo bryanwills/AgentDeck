@@ -6,7 +6,7 @@
  * - Detail View: button 1=BACK, button 2=session info, buttons 3-7=options, button 8=ESC/STOP
  */
 import type { SessionInfo } from '@agentdeck/shared';
-import { State } from '@agentdeck/shared';
+import { State, sortSessions, assignDisplayNames } from '@agentdeck/shared';
 import type { PromptOption, AgentType } from '@agentdeck/shared';
 import { dlog } from './log.js';
 
@@ -124,6 +124,7 @@ export class SessionSlotManager {
   private _currentPage = 0;
   private _detailPage = 0;
   private _sessions: SessionInfo[] = [];
+  private _displayNames = new Map<string, string>();
   private _focusedSessionId: string | null = null;
   private _activeSessionId: string | null = null;
   private _activeSessionPort: number | null = null;
@@ -145,6 +146,11 @@ export class SessionSlotManager {
   get currentPage(): number { return this._currentPage; }
   get focusedSessionId(): string | null { return this._focusedSessionId; }
   get sessions(): SessionInfo[] { return this._sessions; }
+
+  /** Get display name for a session (with #N suffix if needed). Never mutates the original. */
+  displayNameFor(session: SessionInfo): string {
+    return this._displayNames.get(session.id) ?? session.projectName;
+  }
   get detailState(): State { return this._detailState; }
   get detailOptions(): PromptOption[] { return this._detailOptions; }
   get detailModelName(): string | undefined { return this._detailModelName; }
@@ -202,27 +208,19 @@ export class SessionSlotManager {
       });
     }
 
-    // CC sessions (exclude daemon, openclaw)
+    // CC sessions (exclude daemon, openclaw), sorted by state rank then name
     const ccSessions = sessions
-      .filter(s => s.agentType !== 'openclaw' && (s.agentType as string) !== 'daemon' && s.alive)
-      .sort((a, b) => a.port - b.port); // port order ≈ startedAt order
-    ordered.push(...ccSessions);
+      .filter(s => s.agentType !== 'openclaw' && (s.agentType as string) !== 'daemon' && s.alive);
+    ordered.push(...sortSessions(ccSessions));
 
     // Cap at MAX_SESSIONS
     this._sessions = ordered.slice(0, MAX_SESSIONS);
 
-    // Two-pass name dedup: number duplicate project names (#1, #2, ...)
-    const nameCounts = new Map<string, number>();
-    for (const s of this._sessions) {
-      nameCounts.set(s.projectName, (nameCounts.get(s.projectName) || 0) + 1);
-    }
-    const nameSeq = new Map<string, number>();
-    for (const s of this._sessions) {
-      const seq = (nameSeq.get(s.projectName) || 0) + 1;
-      nameSeq.set(s.projectName, seq);
-      if ((nameCounts.get(s.projectName) || 0) > 1) {
-        s.projectName = `${s.projectName} #${seq}`;
-      }
+    // Assign #N display names for duplicate (projectName, agentType) pairs — no mutation
+    this._displayNames = new Map();
+    const displayed = assignDisplayNames(this._sessions);
+    for (const d of displayed) {
+      this._displayNames.set(d.session.id, d.displayName);
     }
 
     // Clamp page
@@ -443,7 +441,7 @@ export class SessionSlotManager {
         return { type: 'esc', label: 'dim' };
 
       case 1:
-        return { type: 'info', session, label: session?.projectName ?? 'Session' };
+        return { type: 'info', session, label: session ? this.displayNameFor(session) : 'Session' };
 
       case 7:
         if (isAwaiting && detailOptionPages > 1) {

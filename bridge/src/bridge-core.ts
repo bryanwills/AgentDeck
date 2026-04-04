@@ -21,7 +21,7 @@ import {
 } from './session-registry.js';
 import { getOrCreateToken, getWsUrl } from './auth.js';
 import { log, logError, debug } from './logger.js';
-import { invalidateMdnsInstance } from './mdns.js';
+import { invalidateMdnsInstance, triggerMdnsRecovery } from './mdns.js';
 import {
   State,
   type BridgeEvent,
@@ -156,12 +156,36 @@ export class BridgeCore {
 
   // ===== Display monitor =====
 
+  private _previousDisplayOn = true;
+  private _wakeHandler: (() => void) | null = null;
+
   wireDisplayMonitor(): void {
     this.displayMonitor.start();
     this.displayMonitor.on('display_state_changed', (displayOn: boolean) => {
+      // Detect wake transition (asleep → awake)
+      if (displayOn && !this._previousDisplayOn) {
+        this._wakeHandler?.();
+      }
+      this._previousDisplayOn = displayOn;
       const evt: BridgeEvent = { type: 'display_state', displayOn };
       this.broadcast(evt);
     });
+
+    // Time-discontinuity safety net (python3 process may die during deep sleep)
+    let lastTick = Date.now();
+    setInterval(() => {
+      const now = Date.now();
+      if (now - lastTick > 15_000) {
+        debug('core', `Time discontinuity (${now - lastTick}ms) — likely system wake`);
+        this._wakeHandler?.();
+      }
+      lastTick = now;
+    }, 5000);
+  }
+
+  /** Register a callback for system wake recovery. */
+  onSystemWake(handler: () => void): void {
+    this._wakeHandler = handler;
   }
 
   // ===== State event building =====

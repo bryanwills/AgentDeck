@@ -24,6 +24,7 @@ final class DaemonVoiceAssistant {
     var onStateChanged: ((State, String?, String?) -> Void)?  // (state, text, responseText)
     var onTranscription: ((String) -> Void)?
     var sendPrompt: ((String) -> Void)?
+    var onWakeWordDetected: ((String, TimeInterval) -> Void)?  // (deviceId, timestamp)
 
     // Config
     private let maxRecordingDuration: TimeInterval = 15
@@ -300,6 +301,14 @@ final class DaemonVoiceAssistant {
             state = .idle
             onStateChanged?(.idle, nil, nil)
         }
+    }
+
+    /// Reset response timeout — called when agent activity detected during voice processing
+    /// to prevent premature timeout while the agent is still working.
+    func resetResponseTimeout() {
+        // Currently a no-op stub; response timeout tracking will be added
+        // when the full voice pipeline is wired end-to-end.
+        DaemonLogger.shared.debug("Voice", "Response timeout reset (agent still processing)")
     }
 
     /// Handle agent response — TTS if voice assistant initiated the prompt
