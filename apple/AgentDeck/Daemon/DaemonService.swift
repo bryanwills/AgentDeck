@@ -31,9 +31,11 @@ final class DaemonService: ObservableObject {
     private var externalFailureCount = 0
     private var localFailureCount = 0
     private var signalSource: DispatchSourceSignal?
+    private var sigintSource: DispatchSourceSignal?
+    private var listenerFailureRetries = 0
+    private static let maxListenerFailureRetries = 3
 
     init() {
-        startHealthMonitor()
         start()
         setupSignalHandler()
     }
@@ -56,12 +58,23 @@ final class DaemonService: ObservableObject {
                 self.externalFailureCount = 0
                 self.errorMessage = nil
 
+                // Wire listener-failed callback BEFORE starting — catches bind errors
+                // (e.g. stale socket holding port 9120) immediately instead of waiting
+                // 10s for the health monitor to detect the broken daemon.
+                await daemon.setListenerFailedHandler { [weak self] error in
+                    Task { @MainActor [weak self] in
+                        await self?.handleListenerFailure(error: error)
+                    }
+                }
+
                 // Run daemon (sets up routes, handlers, polling — does NOT block)
                 await daemon.startServices()
+                self.startHealthMonitor()
 
                 // Notify dashboard to connect to local daemon
                 let wsUrl = "ws://127.0.0.1:\(daemon.port)"
                 self.readyUrl = wsUrl
+                self.listenerFailureRetries = 0  // reset backoff on success
                 DaemonLogger.shared.info("Daemon ready — dashboard can connect to \(wsUrl)")
                 self.onReady?(wsUrl)
             } catch DaemonError.alreadyRunning(let port) {
@@ -141,8 +154,37 @@ final class DaemonService: ObservableObject {
         self.externalFailureCount = 0
         self.errorMessage = nil
         self.readyUrl = wsUrl
+        self.startHealthMonitor()
         DaemonLogger.shared.info("External daemon detected on port \(resolvedPort) — connecting as client")
         self.onReady?(wsUrl)
+    }
+
+    /// Called when NWListener enters `.failed` state (e.g. EADDRINUSE).
+    /// Tears down the broken daemon and retries with exponential backoff
+    /// so stale sockets have time to release.
+    private func handleListenerFailure(error: Error) async {
+        guard isRunning else { return }
+        DaemonLogger.shared.error("Listener failure detected — tearing down and retrying: \(error)")
+        await server?.shutdown()
+        server = nil
+        isRunning = false
+        isUsingExternalDaemon = false
+        port = 0
+        readyUrl = nil
+
+        listenerFailureRetries += 1
+        guard listenerFailureRetries <= Self.maxListenerFailureRetries else {
+            errorMessage = "Daemon failed to bind after \(Self.maxListenerFailureRetries) retries: \(error.localizedDescription)"
+            DaemonLogger.shared.error(errorMessage!)
+            listenerFailureRetries = 0
+            return
+        }
+
+        // Exponential backoff: 1s, 2s, 4s — lets kernel release stale TCP sockets
+        let backoffSec = UInt64(1 << (listenerFailureRetries - 1))
+        DaemonLogger.shared.info("Retrying daemon start in \(backoffSec)s (attempt \(listenerFailureRetries)/\(Self.maxListenerFailureRetries))")
+        try? await Task.sleep(for: .seconds(backoffSec))
+        start()
     }
 
     private func startHealthMonitor() {
@@ -208,33 +250,53 @@ final class DaemonService: ObservableObject {
     // MARK: - Signal Handling
 
     private func setupSignalHandler() {
-        // Ignore default SIGTERM behavior so DispatchSource handles it
+        // Ignore default SIGTERM/SIGINT behavior so DispatchSource handles them
         signal(SIGTERM, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        source.setEventHandler { [weak self] in
-            DaemonLogger.shared.info("SIGTERM received — initiating clean shutdown")
-            // Log crash info
-            let home = FileManager.default.homeDirectoryForCurrentUser
-            let crashLog = home.appendingPathComponent(".agentdeck/daemon-crash.log")
-            let entry = "[\(ISO8601DateFormatter().string(from: Date()))] SIGTERM — clean shutdown initiated\n"
-            if let data = entry.data(using: .utf8) {
-                if FileManager.default.fileExists(atPath: crashLog.path) {
-                    if let handle = try? FileHandle(forWritingTo: crashLog) {
-                        handle.seekToEndOfFile()
-                        handle.write(data)
-                        handle.closeFile()
-                    }
-                } else {
-                    try? data.write(to: crashLog)
+        signal(SIGINT, SIG_IGN)
+
+        let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        termSource.setEventHandler { [weak self] in
+            Self.handleTerminationSignal(name: "SIGTERM", service: self)
+        }
+        termSource.resume()
+        self.signalSource = termSource
+
+        let intSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+        intSource.setEventHandler { [weak self] in
+            Self.handleTerminationSignal(name: "SIGINT", service: self)
+        }
+        intSource.resume()
+        self.sigintSource = intSource
+    }
+
+    private static func handleTerminationSignal(name: String, service: DaemonService?) {
+        DaemonLogger.shared.info("\(name) received — initiating clean shutdown")
+        // Remove daemon.json immediately so next launch isn't blocked by stale guard
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let daemonFile = home.appendingPathComponent(".agentdeck/daemon.json")
+        try? FileManager.default.removeItem(at: daemonFile)
+        let crashLog = home.appendingPathComponent(".agentdeck/daemon-crash.log")
+        let entry = "[\(ISO8601DateFormatter().string(from: Date()))] \(name) — clean shutdown initiated\n"
+        if let data = entry.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: crashLog.path) {
+                if let handle = try? FileHandle(forWritingTo: crashLog) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
                 }
-            }
-            Task { @MainActor in
-                await self?.stop()
-                exit(0)
+            } else {
+                try? data.write(to: crashLog)
             }
         }
-        source.resume()
-        self.signalSource = source
+        // Bounded shutdown: exit after 5s even if cleanup hangs
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+            NSLog("[AgentDeck] Signal shutdown timeout — forcing exit")
+            Darwin.exit(0)
+        }
+        Task { @MainActor in
+            await service?.stop()
+            Darwin.exit(0)
+        }
     }
 
     // MARK: - Login Item (auto-start at login)

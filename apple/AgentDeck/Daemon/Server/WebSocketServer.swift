@@ -16,6 +16,7 @@ actor WebSocketServer {
     var onCommand: (@Sendable ([String: Any]) -> Void)?
     var onClientConnect: (@Sendable (WebSocketConnection) -> Void)?
     var onClientDisconnect: (@Sendable () -> Void)?
+    var onListenerFailed: (@Sendable (Error) -> Void)?
 
     var clientCount: Int { connections.count }
     private var externalClientCountProvider: (@Sendable () async -> Int)?
@@ -47,6 +48,9 @@ actor WebSocketServer {
     }
     func setDisconnectHandler(_ handler: @escaping @Sendable () -> Void) {
         onClientDisconnect = handler
+    }
+    func setListenerFailedHandler(_ handler: @escaping @Sendable (Error) -> Void) {
+        onListenerFailed = handler
     }
 
     /// Set the HTTP server to delegate plain HTTP requests to
@@ -96,6 +100,7 @@ actor WebSocketServer {
 
     func start(port: UInt16) throws {
         let params = NWParameters.tcp  // Raw TCP — no WebSocket protocol layer
+        params.allowLocalEndpointReuse = true  // SO_REUSEADDR — allows rebind after TIME_WAIT/crash
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             throw NSError(domain: "WebSocketServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid port \(port)"])
         }
@@ -107,12 +112,14 @@ actor WebSocketServer {
             listener.service = service
         }
 
-        listener.stateUpdateHandler = { [weak self] state in
+        let failedHandler = onListenerFailed
+        listener.stateUpdateHandler = { state in
             switch state {
             case .ready:
                 DaemonLogger.shared.info("Server listening on port \(port) (HTTP + WebSocket + mDNS)")
             case .failed(let error):
                 DaemonLogger.shared.error("Server listener failed: \(error)")
+                failedHandler?(error)
             default:
                 break
             }

@@ -142,6 +142,12 @@ final class DaemonServer {
 
     // MARK: - Start (non-blocking)
 
+    /// Register a handler for fatal listener failures (e.g. EADDRINUSE after bind).
+    /// Should be called before `startServices()`.
+    func setListenerFailedHandler(_ handler: @escaping @Sendable (Error) -> Void) async {
+        await wsServer.setListenerFailedHandler(handler)
+    }
+
     func startServices() async {
         // 1. Setup HTTP routes + Bonjour, then start unified server
         await setupHTTPRoutes()
@@ -229,6 +235,13 @@ final class DaemonServer {
                     event["gatewayAvailable"] = self.cachedGatewayAvailable
                     if event["ollamaStatus"] == nil, let cached = self.cachedOllamaStatus {
                         event["ollamaStatus"] = cached
+                    }
+                    // Always override mlxModels with daemon's filtered cache — sibling bridges may
+                    // run older/unfiltered code that leaks nanoLLaVA into the list, causing flicker.
+                    if !self.cachedMlxModels.isEmpty {
+                        event["mlxModels"] = self.cachedMlxModels
+                    } else {
+                        event.removeValue(forKey: "mlxModels")
                     }
                 }
                 self.broadcastRaw(event)
@@ -355,17 +368,18 @@ final class DaemonServer {
                         if ipChanged {
                             DaemonLogger.shared.info("Network changed — IP: \(self.lastKnownIP ?? "none") → \(newIP ?? "none")")
                             self.lastKnownIP = newIP
+                            // Full wake: re-advertise Bonjour, reconnect modules, re-sync timelines
+                            await self.wsServer.republishBonjour()
+                            await self.moduleManager.wakeAll()
+                            await self.timelineRelay.sync()
+                            self.broadcastStateUpdate()
                         } else {
-                            DaemonLogger.shared.info("Network path update (IP unchanged: \(newIP ?? "none"))")
+                            // IP unchanged — likely WiFi flicker during display sleep or
+                            // transient route change. Skip module churn; just refresh timeline
+                            // relay (lightweight, drops dead sibling subscriptions).
+                            DaemonLogger.shared.debug("Network", "Path update (IP unchanged, skipping wake)")
+                            await self.timelineRelay.sync()
                         }
-                        // Re-advertise Bonjour with current IP
-                        await self.wsServer.republishBonjour()
-                        // Wake device modules (reconnect ESP32, Pixoo, etc.)
-                        await self.moduleManager.wakeAll()
-                        // Re-sync timeline relay (drop dead subscriptions)
-                        await self.timelineRelay.sync()
-                        // Broadcast fresh state to all reconnected clients
-                        self.broadcastStateUpdate()
                     } else {
                         DaemonLogger.shared.info("Network unsatisfied — waiting for recovery")
                     }

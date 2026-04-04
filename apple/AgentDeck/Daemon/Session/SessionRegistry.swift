@@ -173,21 +173,29 @@ final class SessionRegistry: Sendable {
     }
 
     private func isPortFree(_ port: Int) async -> Bool {
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        // Test IPv6 wildcard (::) in dual-stack mode — matches what NWListener actually binds.
+        // NWListener binds to "::.<port>" by default, so an IPv4-only 127.0.0.1 test can
+        // succeed while the actual NWListener bind fails with EADDRINUSE.
+        let fd = socket(AF_INET6, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
         defer { close(fd) }
 
-        var addr = sockaddr_in()
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = in_port_t(port).bigEndian
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
-
+        // SO_REUSEADDR to match NWParameters.allowLocalEndpointReuse
         var reuseAddr: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseAddr, socklen_t(MemoryLayout<Int32>.size))
 
+        // Dual-stack — accept both IPv4 and IPv6 on same socket
+        var v6only: Int32 = 0
+        setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, socklen_t(MemoryLayout<Int32>.size))
+
+        var addr = sockaddr_in6()
+        addr.sin6_family = sa_family_t(AF_INET6)
+        addr.sin6_port = in_port_t(port).bigEndian
+        addr.sin6_addr = in6addr_any  // :: wildcard
+
         let result = withUnsafePointer(to: &addr) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size))
             }
         }
         return result == 0
