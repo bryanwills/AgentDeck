@@ -69,6 +69,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     private var optionPage: Int = 0
     private var buttonPressCount: Int = 0
     private var lastButtonIndex: Int = -1
+    private var lastButtonPressUptimeNs: UInt64 = 0
     private var hidReportCount: Int = 0
     private var writeSuccessCount: Int = 0
     private var writeFailCount: Int = 0
@@ -258,16 +259,14 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     private func initializeDevice() {
         writePacket(buildBrightnessPacket(100))
         writePacket(buildLabelStylePacket())
-        if let cd = consumerDevice {
-            registerInputCallback(cd)
-        }
 
         // Force full render (clear hash so updateDisplay always sends)
         lastStateHash = ""
         updateDisplay()
 
-        // Start heartbeat — periodic re-render + small window keep-alive
-        // Prevents D200H firmware timeout (reverts to default after ~30s)
+        // Start heartbeat — periodic full re-render to prevent D200H firmware timeout (~30s)
+        // NOTE: Do NOT send smallWindowPacket here — it overlays a clock widget on the
+        // merged usage button area (slot 13 = col3+col4 row2). Full SET_BUTTONS is sufficient.
         heartbeatTask?.cancel()
         heartbeatTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -275,7 +274,6 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
                 guard let self, self.connected, self.managerOpened else { continue }
                 self.lastStateHash = ""  // force re-render
                 self.updateDisplay()
-                self.sendKeepAlive()
             }
         }
     }
@@ -329,8 +327,15 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             let pressed = data[11] == 0x01
 
             if pressed {
+                let now = DispatchTime.now().uptimeNanoseconds
+                let duplicatePress = buttonIndex == lastButtonIndex && (now - lastButtonPressUptimeNs) < 120_000_000
+                if duplicatePress {
+                    DaemonLogger.shared.debug("D200H", "Button \(buttonIndex) duplicate press ignored")
+                    return
+                }
                 buttonPressCount += 1
                 lastButtonIndex = buttonIndex
+                lastButtonPressUptimeNs = now
                 if let cmd = resolveButtonCommand(buttonIndex) {
                     DaemonLogger.shared.debug("D200H", "Button \(buttonIndex) pressed -> \(cmd["type"] ?? "")")
                     commandHandler?(cmd)
@@ -886,20 +891,9 @@ private enum D200hRenderer {
         }
 
         // Slot 13: Usage monitor (big merged button at col3+col4, row2)
-        let pct5 = usageEvent?["fiveHourPercent"] as? Double ?? stateEvent?["fiveHourPercent"] as? Double ?? 0
-        let pct7 = usageEvent?["sevenDayPercent"] as? Double ?? stateEvent?["sevenDayPercent"] as? Double ?? 0
-        let reset5 = formatResetTime(usageEvent?["fiveHourResetsAt"] as? String ?? stateEvent?["fiveHourResetsAt"] as? String)
-        let reset7 = formatResetTime(usageEvent?["sevenDayResetsAt"] as? String ?? stateEvent?["sevenDayResetsAt"] as? String)
-        let usageTitle = "5H \(Int(pct5))%\(reset5.isEmpty ? "" : " \(reset5)")"
-        let usageSub = "7D \(Int(pct7))%\(reset7.isEmpty ? "" : " \(reset7)")"
-        let maxPct = max(pct5, pct7)
-        let usageBorderColor = maxPct > 80 ? rgb(239, 68, 68) : maxPct > 50 ? rgb(234, 179, 8) : rgb(34, 197, 94)
-        slots[13] = ButtonSlot(
-            title: usageTitle, subtitle: usageSub,
-            bg: cDetailBg, enabled: true, borderStyle: .solid(color: usageBorderColor),
-            icon: .usage,
-            iconColor: usageBorderColor
-        )
+        // Rendered separately as two-cell-wide PNG in renderFullZip/renderPartialZip.
+        // Keep slot data for reference but it won't go through renderButtonPng.
+        slots[13] = .dim
 
         return (slots, needsAnim)
     }
@@ -1032,11 +1026,11 @@ private enum D200hRenderer {
         var files: [(name: String, data: Data)] = []
 
         for (i, key) in keyDefs.enumerated() {
+            if i == 13 { continue } // Slot 13 handled below as merged button
             let slot = slots[i]
             let iconPath = "icons/btn\(key.id).png"
             let colRow = "\(key.col)_\(key.row)"
             let png = renderButtonPng(slot)
-            // Text rendered inside PNG via bitmap font — device native text disabled
             manifest[colRow] = [
                 "State": 0,
                 "ViewParam": [["Text": "", "Icon": iconPath]],
@@ -1044,12 +1038,18 @@ private enum D200hRenderer {
             files.append((iconPath, png))
         }
 
-        // Slot 13 (big merged button) spans col3+col4 at row2.
-        // Explicitly clear 4_2 to override the default Ulanzi clock widget.
-        manifest["4_2"] = [
-            "State": 0,
-            "ViewParam": [["Text": "", "Icon": ""]],
-        ] as [String: Any]
+        // Slot 13: big merged button spans col3+col4 at row2.
+        // Render as two halves (left=3_2, right=4_2) from one wide canvas.
+        let usagePct5 = usageEvent?["fiveHourPercent"] as? Double ?? stateEvent?["fiveHourPercent"] as? Double ?? 0
+        let usagePct7 = usageEvent?["sevenDayPercent"] as? Double ?? stateEvent?["sevenDayPercent"] as? Double ?? 0
+        let usageReset5 = formatResetTime(usageEvent?["fiveHourResetsAt"] as? String ?? stateEvent?["fiveHourResetsAt"] as? String)
+        let usageReset7 = formatResetTime(usageEvent?["sevenDayResetsAt"] as? String ?? stateEvent?["sevenDayResetsAt"] as? String)
+        let (leftPng, rightPng) = renderUsageMergedButton(pct5: usagePct5, pct7: usagePct7, reset5: usageReset5, reset7: usageReset7)
+        // Explicitly clear Action to override any cached clock widget from D200H firmware
+        manifest["3_2"] = ["State": 0, "Action": "", "ViewParam": [["Icon": "icons/btn13L.png"]]] as [String: Any]
+        manifest["4_2"] = ["State": 0, "Action": "", "ViewParam": [["Icon": "icons/btn13R.png"]]] as [String: Any]
+        files.append(("icons/btn13L.png", leftPng))
+        files.append(("icons/btn13R.png", rightPng))
 
         if let manifestData = try? JSONSerialization.data(withJSONObject: manifest) {
             files.append(("manifest.json", manifestData))
@@ -1063,6 +1063,7 @@ private enum D200hRenderer {
         var files: [(name: String, data: Data)] = []
 
         for btnId in buttonIds {
+            if btnId == 13 { continue } // Slot 13 is merged usage button, updated via full ZIP only
             guard btnId < keyDefs.count, btnId < slots.count else { continue }
             let key = keyDefs[btnId]
             let slot = slots[btnId]
@@ -1080,6 +1081,177 @@ private enum D200hRenderer {
             files.append(("manifest.json", manifestData))
         }
         return buildValidatedZip(files)
+    }
+
+    // MARK: - Usage Merged Button (slot 13, 2 columns wide)
+
+    /// Render usage gauge as two cell-sized PNGs (left + right halves)
+    private static func renderUsageMergedButton(
+        pct5: Double, pct7: Double, reset5: String, reset7: String
+    ) -> (left: Data, right: Data) {
+        let cellW = ICON_SIZE  // 196
+        let wideW = cellW * 2
+        let h = cellW
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: wideW, height: h,
+            bitsPerComponent: 8, bytesPerRow: wideW * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return (Data(), Data()) }
+
+        let s = CGFloat(h)
+        let w = CGFloat(wideW)
+        let pad: CGFloat = 4
+        let cornerR: CGFloat = 16
+        let innerRect = CGRect(x: pad, y: pad, width: w - pad * 2, height: s - pad * 2)
+        let innerPath = CGPath(roundedRect: innerRect, cornerWidth: cornerR, cornerHeight: cornerR, transform: nil)
+
+        // Background
+        ctx.setFillColor(red: 0.05, green: 0.05, blue: 0.07, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: wideW, height: h))
+        ctx.saveGState()
+        ctx.addPath(innerPath)
+        ctx.clip()
+        ctx.setFillColor(cDetailBg)
+        ctx.fill(innerRect)
+        ctx.restoreGState()
+
+        // Border color based on max usage
+        let maxPct = max(pct5, pct7)
+        let borderColor = maxPct > 80 ? rgb(239, 68, 68) : maxPct > 50 ? rgb(245, 158, 11) : rgb(34, 197, 94)
+        ctx.setStrokeColor(borderColor)
+        ctx.setAlpha(0.6)
+        ctx.setLineWidth(2)
+        ctx.addPath(innerPath)
+        ctx.strokePath()
+        ctx.setAlpha(1.0)
+
+        // "USAGE" header
+        drawTextWide("USAGE", ctx: ctx, y: 18, color: rgb(148, 163, 184),
+                     font: ctFont(14, bold: true), canvasWidth: w)
+
+        // 5H gauge row
+        let gaugeLeft: CGFloat = 30
+        let gaugeRight: CGFloat = w - 30
+        let gaugeW = gaugeRight - gaugeLeft
+        let barH: CGFloat = 14
+
+        // 5H label + bar + percent
+        drawTextLeft("5H", ctx: ctx, x: gaugeLeft, y: 50, color: rgb(148, 163, 184), font: ctFont(13))
+        let bar5X = gaugeLeft + 36
+        let bar5W = gaugeW - 100
+        drawGaugeBar(ctx: ctx, x: bar5X, y: s - 50 - barH, width: bar5W, height: barH,
+                     percent: pct5, color: borderColor)
+        let pct5Str = "\(Int(pct5))%"
+        drawTextRight(pct5Str, ctx: ctx, x: gaugeRight, y: 50, color: rgb(241, 245, 249),
+                      font: ctFont(15, bold: true))
+        if !reset5.isEmpty {
+            drawTextRight(reset5, ctx: ctx, x: gaugeRight, y: 68, color: rgb(148, 163, 184),
+                          font: ctFont(11))
+        }
+
+        // 7D gauge row
+        drawTextLeft("7D", ctx: ctx, x: gaugeLeft, y: 96, color: rgb(148, 163, 184), font: ctFont(13))
+        drawGaugeBar(ctx: ctx, x: bar5X, y: s - 96 - barH, width: bar5W, height: barH,
+                     percent: pct7, color: borderColor)
+        let pct7Str = "\(Int(pct7))%"
+        drawTextRight(pct7Str, ctx: ctx, x: gaugeRight, y: 96, color: rgb(241, 245, 249),
+                      font: ctFont(15, bold: true))
+        if !reset7.isEmpty {
+            drawTextRight(reset7, ctx: ctx, x: gaugeRight, y: 114, color: rgb(148, 163, 184),
+                          font: ctFont(11))
+        }
+
+        // Bottom accent bar
+        let accentY: CGFloat = pad + 6
+        let accentH: CGFloat = 3
+        ctx.setFillColor(rgb(30, 41, 59)) // #1e293b bg
+        ctx.fill(CGRect(x: 20, y: accentY, width: w - 40, height: accentH))
+        let fillW = (w - 40) * CGFloat(maxPct / 100)
+        ctx.setFillColor(borderColor)
+        ctx.setAlpha(0.5)
+        ctx.fill(CGRect(x: 20, y: accentY, width: max(2, fillW), height: accentH))
+        ctx.setAlpha(1.0)
+
+        // Split into left and right cell PNGs
+        guard let wideImage = ctx.makeImage() else { return (Data(), Data()) }
+
+        let leftImage = wideImage.cropping(to: CGRect(x: 0, y: 0, width: cellW, height: h))
+        let rightImage = wideImage.cropping(to: CGRect(x: cellW, y: 0, width: cellW, height: h))
+
+        return (pngData(from: leftImage), pngData(from: rightImage))
+    }
+
+    private static func pngData(from image: CGImage?) -> Data {
+        guard let image else { return Data() }
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data as CFMutableData, UTType.png.identifier as CFString, 1, nil) else { return Data() }
+        CGImageDestinationAddImage(dest, image, nil)
+        CGImageDestinationFinalize(dest)
+        return data as Data
+    }
+
+    private static func drawGaugeBar(ctx: CGContext, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat,
+                                      percent: Double, color: CGColor) {
+        // Background
+        ctx.setFillColor(rgb(30, 41, 59)) // #1e293b
+        let bgRect = CGRect(x: x, y: y, width: width, height: height)
+        let bgPath = CGPath(roundedRect: bgRect, cornerWidth: height / 2, cornerHeight: height / 2, transform: nil)
+        ctx.addPath(bgPath)
+        ctx.fillPath()
+        // Fill
+        let fillW = max(height, width * CGFloat(percent / 100))
+        ctx.setFillColor(color)
+        ctx.setAlpha(0.7)
+        let fillRect = CGRect(x: x, y: y, width: fillW, height: height)
+        let fillPath = CGPath(roundedRect: fillRect, cornerWidth: height / 2, cornerHeight: height / 2, transform: nil)
+        ctx.addPath(fillPath)
+        ctx.fillPath()
+        ctx.setAlpha(1.0)
+    }
+
+    /// Draw text centered in wide canvas
+    private static func drawTextWide(_ text: String, ctx: CGContext, y: CGFloat, color: CGColor,
+                                      font: CTFont, canvasWidth: CGFloat) {
+        let s = CGFloat(ICON_SIZE)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        let attrStr = NSAttributedString(string: text, attributes: attrs)
+        let line = CTLineCreateWithAttributedString(attrStr)
+        let bounds = CTLineGetBoundsWithOptions(line, [])
+        let tx = (canvasWidth - bounds.width) / 2
+        ctx.saveGState()
+        ctx.textPosition = CGPoint(x: tx, y: s - y - bounds.height)
+        CTLineDraw(line, ctx)
+        ctx.restoreGState()
+    }
+
+    /// Draw text left-aligned at x
+    private static func drawTextLeft(_ text: String, ctx: CGContext, x: CGFloat, y: CGFloat,
+                                      color: CGColor, font: CTFont) {
+        let s = CGFloat(ICON_SIZE)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        let attrStr = NSAttributedString(string: text, attributes: attrs)
+        let line = CTLineCreateWithAttributedString(attrStr)
+        let bounds = CTLineGetBoundsWithOptions(line, [])
+        ctx.saveGState()
+        ctx.textPosition = CGPoint(x: x, y: s - y - bounds.height)
+        CTLineDraw(line, ctx)
+        ctx.restoreGState()
+    }
+
+    /// Draw text right-aligned at x
+    private static func drawTextRight(_ text: String, ctx: CGContext, x: CGFloat, y: CGFloat,
+                                       color: CGColor, font: CTFont) {
+        let s = CGFloat(ICON_SIZE)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        let attrStr = NSAttributedString(string: text, attributes: attrs)
+        let line = CTLineCreateWithAttributedString(attrStr)
+        let bounds = CTLineGetBoundsWithOptions(line, [])
+        ctx.saveGState()
+        ctx.textPosition = CGPoint(x: x - bounds.width, y: s - y - bounds.height)
+        CTLineDraw(line, ctx)
+        ctx.restoreGState()
     }
 
     private static func buildValidatedZip(_ files: [(name: String, data: Data)]) -> Data {
@@ -1343,38 +1515,70 @@ private func drawButtonIcon(_ ctx: CGContext, glyph: ButtonSlot.IconGlyph, color
 
     let midX = rect.midX
     let midY = rect.midY
-    let w = rect.width
-    let h = rect.height
 
     switch glyph {
     case .none:
         break
     case .claudeCode:
-        ctx.fillEllipse(in: CGRect(x: midX - 16, y: midY - 10, width: 32, height: 24))
-        for dx in [-18, -6, 6, 18] {
-            ctx.move(to: CGPoint(x: midX + CGFloat(dx), y: midY - 10))
-            ctx.addLine(to: CGPoint(x: midX + CGFloat(dx) * 0.9, y: midY - 22))
+        // Antigravity robot — rectangular body with eye cutouts and antenna legs
+        let bodyW: CGFloat = 36, bodyH: CGFloat = 22
+        let bodyRect = CGRect(x: midX - bodyW/2, y: midY - bodyH/2 + 2, width: bodyW, height: bodyH)
+        ctx.fill(bodyRect)
+        // Eye cutouts (dark)
+        ctx.saveGState()
+        ctx.setFillColor(rgb(15, 23, 42)) // dark bg
+        ctx.fillEllipse(in: CGRect(x: midX - 12, y: midY - 2, width: 8, height: 8))
+        ctx.fillEllipse(in: CGRect(x: midX + 4, y: midY - 2, width: 8, height: 8))
+        ctx.restoreGState()
+        ctx.setFillColor(color)
+        // Top bar (head extension)
+        ctx.fill(CGRect(x: midX - bodyW/2 + 2, y: midY - bodyH/2 - 4, width: bodyW - 4, height: 6))
+        // Bottom legs (4 short bars)
+        for dx: CGFloat in [-12, -4, 4, 12] {
+            ctx.fill(CGRect(x: midX + dx - 2, y: midY + bodyH/2 + 2, width: 4, height: 8))
         }
-        ctx.strokePath()
     case .codexCli:
-        for offset in [-18, 0, 18] {
-            ctx.strokeEllipse(in: CGRect(x: midX + CGFloat(offset) - 13, y: midY - 6, width: 26, height: 18))
-        }
+        // Knot/clover — three overlapping circles
+        let r: CGFloat = 12
+        ctx.setLineWidth(3)
+        ctx.strokeEllipse(in: CGRect(x: midX - r, y: midY - r - 6, width: r * 2, height: r * 2))
+        ctx.strokeEllipse(in: CGRect(x: midX - r - 10, y: midY + 2, width: r * 2, height: r * 2))
+        ctx.strokeEllipse(in: CGRect(x: midX - r + 10, y: midY + 2, width: r * 2, height: r * 2))
     case .openCode:
-        ctx.stroke(CGRect(x: midX - 18, y: midY - 18, width: 36, height: 36))
-        ctx.stroke(CGRect(x: midX - 10, y: midY - 10, width: 20, height: 20))
+        // Concentric squares (smaller, cleaner)
+        let outerS: CGFloat = 28
+        ctx.setLineWidth(3)
+        ctx.stroke(CGRect(x: midX - outerS/2, y: midY - outerS/2, width: outerS, height: outerS))
+        let innerS: CGFloat = 14
+        ctx.fill(CGRect(x: midX - innerS/2, y: midY - innerS/2, width: innerS, height: innerS))
     case .openClaw:
-        ctx.fillEllipse(in: CGRect(x: midX - 12, y: midY - 8, width: 24, height: 16))
-        ctx.move(to: CGPoint(x: midX - 12, y: midY + 4))
-        ctx.addLine(to: CGPoint(x: midX - 24, y: midY + 14))
-        ctx.addLine(to: CGPoint(x: midX - 16, y: midY + 2))
-        ctx.move(to: CGPoint(x: midX + 12, y: midY + 4))
-        ctx.addLine(to: CGPoint(x: midX + 24, y: midY + 14))
-        ctx.addLine(to: CGPoint(x: midX + 16, y: midY + 2))
-        for dx in [-10, -3, 4, 11] {
-            ctx.move(to: CGPoint(x: midX + CGFloat(dx), y: midY - 8))
-            ctx.addLine(to: CGPoint(x: midX + CGFloat(dx), y: midY - 18))
-        }
+        // Crayfish — body + prominent claws + antennae + eyes
+        let bodyW: CGFloat = 24, bodyH: CGFloat = 18
+        ctx.fillEllipse(in: CGRect(x: midX - bodyW/2, y: midY - bodyH/2 + 2, width: bodyW, height: bodyH))
+        // Claws (V shapes)
+        ctx.setLineWidth(3.5)
+        ctx.move(to: CGPoint(x: midX - bodyW/2, y: midY + 2))
+        ctx.addLine(to: CGPoint(x: midX - bodyW/2 - 14, y: midY - 10))
+        ctx.move(to: CGPoint(x: midX - bodyW/2, y: midY + 2))
+        ctx.addLine(to: CGPoint(x: midX - bodyW/2 - 10, y: midY + 10))
+        ctx.move(to: CGPoint(x: midX + bodyW/2, y: midY + 2))
+        ctx.addLine(to: CGPoint(x: midX + bodyW/2 + 14, y: midY - 10))
+        ctx.move(to: CGPoint(x: midX + bodyW/2, y: midY + 2))
+        ctx.addLine(to: CGPoint(x: midX + bodyW/2 + 10, y: midY + 10))
+        ctx.strokePath()
+        // Eyes
+        ctx.saveGState()
+        ctx.setFillColor(rgb(0, 229, 204)) // teal
+        ctx.fillEllipse(in: CGRect(x: midX - 6, y: midY - 2, width: 5, height: 5))
+        ctx.fillEllipse(in: CGRect(x: midX + 1, y: midY - 2, width: 5, height: 5))
+        ctx.restoreGState()
+        ctx.setFillColor(color)
+        // Antennae
+        ctx.setLineWidth(2)
+        ctx.move(to: CGPoint(x: midX - 6, y: midY - bodyH/2 + 2))
+        ctx.addLine(to: CGPoint(x: midX - 14, y: midY - bodyH/2 - 12))
+        ctx.move(to: CGPoint(x: midX + 6, y: midY - bodyH/2 + 2))
+        ctx.addLine(to: CGPoint(x: midX + 14, y: midY - bodyH/2 - 12))
         ctx.strokePath()
     case .usage:
         let barW: CGFloat = 10

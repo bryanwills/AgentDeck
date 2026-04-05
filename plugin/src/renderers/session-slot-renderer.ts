@@ -10,7 +10,7 @@
 import type { SessionInfo, PromptOption, AgentType } from '@agentdeck/shared';
 import { State, stateColor } from '@agentdeck/shared';
 import type { SessionSlotConfig } from '../session-slot-manager.js';
-import { agentLogoIcon, agentLogoWatermark } from './agent-logos.js';
+import { agentLogoIcon } from './agent-logos.js';
 import { wrapTextByWidth, measureTextWidth } from './text-utils.js';
 
 const SIZE = 144;
@@ -180,29 +180,29 @@ export function renderDetailInfo(session: SessionInfo | undefined, state: State,
   const nameForDisplay = displayName ?? session.projectName;
 
   // Detail info layout (144px canvas):
-  //   watermark: brand-colored background mark
-  //   y=46:     project name (bold, white)
-  //   y=70:     model (slate, skip for OpenClaw)
-  //   y=88:     mode (purple, skip for OpenClaw)
-  //   y=104:    tool (yellow)
-  //   y=130:    state dot + label (state-colored)
+  //   y=top:    Agent creature icon (small, brand-colored)
+  //   y=50:     project name (bold, white)
+  //   y=72:     model (slate, skip for OpenClaw)
+  //   y=90:     mode (purple, skip for OpenClaw)
+  //   y=106:    tool (yellow)
+  //   y=132:    state dot + label (state-colored)
+  const detailIcon = agentLogoIcon(agent, 36, 0.5);
+
   const elements = [
+    detailIcon,
     // Project name (bold, large)
-    `<text x="72" y="46" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#ffffff">${escXml(truncate(nameForDisplay, 12))}</text>`,
+    `<text x="72" y="50" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#ffffff">${escXml(truncate(nameForDisplay, 12))}</text>`,
     // Model (skip for OpenClaw)
-    modelName && !isOpenClaw ? `<text x="72" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">${escXml(truncate(modelName, 16))}</text>` : '',
+    modelName && !isOpenClaw ? `<text x="72" y="72" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">${escXml(truncate(modelName, 16))}</text>` : '',
     // Mode (skip for OpenClaw)
-    mode && mode !== 'default' && !isOpenClaw ? `<text x="72" y="88" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#a78bfa">${escXml(mode.toUpperCase())}</text>` : '',
+    mode && mode !== 'default' && !isOpenClaw ? `<text x="72" y="90" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#a78bfa">${escXml(mode.toUpperCase())}</text>` : '',
     // Tool (if processing)
-    tool ? `<text x="72" y="104" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#fbbf24">\u25B6 ${escXml(truncate(tool, 16))}</text>` : '',
+    tool ? `<text x="72" y="106" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#fbbf24">\u25B6 ${escXml(truncate(tool, 16))}</text>` : '',
     // State (centered, bottom)
-    `<text x="72" y="130" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="600" fill="${sColor}">\u25CF ${escXml(stateLbl)}</text>`,
+    `<text x="72" y="132" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="600" fill="${sColor}">\u25CF ${escXml(stateLbl)}</text>`,
   ].join('');
 
-  // Agent watermark in detail info panel (brand-colored)
-  const detailWatermark = agentLogoWatermark(agent, undefined, 0.12);
-
-  return svgFrame('#0f172a', detailWatermark + elements);
+  return svgFrame('#0f172a', elements);
 }
 
 // ---- Detail View: Option Button ----

@@ -50,35 +50,36 @@ export function agentLogoIcon(
   opacity = 0.7,
 ): string {
   const brandColor = agentBrandColor(agent);
+  // Center icon slightly below top — can overlap with text for compact layout
+  const cy = size / 2 + 12;
 
   if (agent === 'claude-code') {
-    // 24x24 viewBox → scale to target size
     const s = size / 24;
-    return `<g transform="translate(72,${size / 2 + 4}) scale(${s.toFixed(2)}) translate(-12,-12)" opacity="${opacity}"><path d="${CLAUDE_LOGO_PATH}" fill="${brandColor}" fill-rule="evenodd"/></g>`;
+    return `<g transform="translate(72,${cy}) scale(${s.toFixed(2)}) translate(-12,-12)" opacity="${opacity}"><path d="${CLAUDE_LOGO_PATH}" fill="${brandColor}" fill-rule="evenodd"/></g>`;
   }
   if (agent === 'codex-cli') {
     const s = size / 24;
     return [
       `<defs><linearGradient id="cx-i" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#B1A7FF"/><stop offset="48%" stop-color="#7A9DFF"/><stop offset="100%" stop-color="${brandColor}"/></linearGradient></defs>`,
-      `<g transform="translate(72,${size / 2 + 4}) scale(${s.toFixed(2)}) translate(-12,-12)" opacity="${opacity}"><path d="${CODEX_LOGO_PATH}" fill="url(#cx-i)"/></g>`,
+      `<g transform="translate(72,${cy}) scale(${s.toFixed(2)}) translate(-12,-12)" opacity="${opacity}"><path d="${CODEX_LOGO_PATH}" fill="url(#cx-i)"/></g>`,
     ].join('');
   }
   if (agent === 'opencode') {
-    const half = size / 2;
-    const ring = size * 0.18;
-    const inner = size * 0.5;
-    const cy = size / 2 + 4;
+    // Smaller icon for OpenCode (geometric squares are visually heavier)
+    const ocSize = Math.round(size * 0.75);
+    const half = ocSize / 2;
+    const ring = ocSize * 0.18;
+    const inner = ocSize * 0.5;
     return [
       `<g opacity="${opacity}">`,
-      `<rect x="${72 - half}" y="${cy - half}" width="${size}" height="${size}" rx="4" fill="${dimColor(brandColor, 0.3)}"/>`,
-      `<rect x="${72 - half + ring}" y="${cy - half + ring}" width="${size - ring * 2}" height="${size - ring * 2}" rx="2" fill="${dimColor('#4B4646', 0.2)}"/>`,
+      `<rect x="${72 - half}" y="${cy - half}" width="${ocSize}" height="${ocSize}" rx="4" fill="${dimColor(brandColor, 0.3)}"/>`,
+      `<rect x="${72 - half + ring}" y="${cy - half + ring}" width="${ocSize - ring * 2}" height="${ocSize - ring * 2}" rx="2" fill="${dimColor('#4B4646', 0.2)}"/>`,
       `<rect x="${72 - inner / 2}" y="${cy - inner / 2}" width="${inner}" height="${inner}" rx="2" fill="${dimColor('#4B4646', 0.2)}"/>`,
       `</g>`,
     ].join('');
   }
   // OpenClaw lobster
   const ocScale = size / 120;
-  const cy = size / 2 + 4;
   return [
     `<defs><linearGradient id="oc-i" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${brandColor}"/><stop offset="100%" stop-color="#991b1b"/></linearGradient></defs>`,
     `<g transform="translate(${72 - 60 * ocScale},${cy - 60 * ocScale}) scale(${ocScale.toFixed(3)})" opacity="${opacity}">`,

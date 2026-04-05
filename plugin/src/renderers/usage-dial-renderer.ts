@@ -137,13 +137,15 @@ export function renderUsageExtra(data: UsageModeData): string {
   `);
 }
 
-/** Disconnected / no data yet */
-export function renderUsageDisconnected(): string {
+/** Disconnected / no data yet. `connected=false` → daemon offline; otherwise → waiting for first payload. */
+export function renderUsageDisconnected(connected = true): string {
+  const icon = connected ? '\uD83D\uDCCA' : '\u26A1';
+  const label = connected ? 'Waiting...' : 'Offline';
   return svgWrap(`
     <rect width="${W}" height="${H}" fill="#0f172a"/>
     <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#475569">USAGE</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#475569" opacity="0.5">\uD83D\uDCCA</text>
-    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#475569">Waiting...</text>
+    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#475569" opacity="0.5">${icon}</text>
+    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#475569">${label}</text>
     <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
   `);
 }

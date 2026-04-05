@@ -23,20 +23,12 @@ static bool isDimMode() { return smoothBrightness < 40; }
 // Forward declarations (definitions follow below)
 static inline int xyToIdx(int x, int y);
 
-// Format an age (ms) compactly: "3s" / "45s" / "5m" / "2h" / "3d"
-static void formatAgeCompact(uint32_t ageMs, char* out, size_t outSize) {
-    uint32_t s = ageMs / 1000;
-    if (s < 60)        snprintf(out, outSize, "%lus", (unsigned long)s);
-    else if (s < 3600) snprintf(out, outSize, "%lum", (unsigned long)(s / 60));
-    else if (s < 86400)snprintf(out, outSize, "%luh", (unsigned long)(s / 3600));
-    else               snprintf(out, outSize, "%lud", (unsigned long)(s / 86400));
-}
-
 // Build a disconnect status line. Returns color for rendering.
 // Called with state lock NOT held; reads g_state internally.
+// Disconnect is a benign idle state, not an error — keep labels short and
+// render in a cool neutral grey so the display doesn't demand attention.
 static CRGB buildDisconnectMsg(char* out, size_t outSize) {
     bool wifiNow = Net::wifiConnected();
-    bool serialNow = Net::serialConnected();  // USB JSON within timeout
     bool wsNow = Net::wsConnected();
 
     lockState();
@@ -44,57 +36,49 @@ static CRGB buildDisconnectMsg(char* out, size_t outSize) {
     unlockState();
 
     bool everGotData = (lastMs != 0);
-    uint32_t now = millis();
-    uint32_t ageMs = everGotData ? (now - lastMs) : 0;
+    const CRGB grey = CRGB(40, 40, 45);  // cool neutral grey
 
-    // Critical: never connected at all
+    // Never connected at all
     if (!everGotData) {
         if (!wifiNow) {
-            snprintf(out, outSize, "CONNECT WIFI");
-            return CRGB(80, 20, 10);  // red-orange
+            snprintf(out, outSize, "NO WIFI");
+        } else {
+            snprintf(out, outSize, "FINDING");
         }
-        snprintf(out, outSize, "FINDING BRIDGE");
-        return CRGB(40, 25, 5);  // warm amber (original SEARCHING color)
+        return grey;
     }
 
-    // Had data before — lost connection. Describe what's blocking recovery.
-    char age[12];
-    formatAgeCompact(ageMs, age, sizeof(age));
-
-    if (!wifiNow && !serialNow) {
-        // No WiFi and USB/daemon dead — worst case
-        snprintf(out, outSize, "NO WIFI %s", age);
-        return CRGB(80, 10, 10);  // red
+    // Had data before — lost connection.
+    if (!wifiNow) {
+        snprintf(out, outSize, "NO WIFI");
+    } else {
+        // WiFi up but WS can't reach daemon (most common) or fallback.
+        (void)wsNow;
+        snprintf(out, outSize, "OFFLINE");
     }
-    if (wifiNow && !wsNow) {
-        // WiFi up but WS can't reach daemon — most common case
-        snprintf(out, outSize, "DAEMON DOWN %s", age);
-        return CRGB(80, 20, 10);  // red-orange
-    }
-    // Fallback (shouldn't happen if caller gates on !connected)
-    snprintf(out, outSize, "OFFLINE %s", age);
-    return CRGB(60, 20, 10);
+    return grey;
 }
 
-// Render a scrolling disconnect status message across the whole matrix.
+// Render a static, centered disconnect label with a gentle breathing pulse.
+// Disconnect is a benign idle state — the text stays put in a cool grey and
+// simply brightens/dims on a slow 4s sine so the display stays unobtrusive.
 static void renderDisconnectStatus(CRGB* leds, float animTime) {
-    char msg[48];
+    char msg[16];
     CRGB color = buildDisconnectMsg(msg, sizeof(msg));
     if (isDimMode()) {
         color = CRGB(color.r / 2, color.g / 2, color.b / 2);
     }
-    int textW = MatrixFont::textWidth(msg);
-    int scrollPx = textW + MATRIX_W + 8;
-    int scrollX = MATRIX_W - ((int)(animTime * 1000) / (int)SCROLL_SPEED_MS) % scrollPx;
-    MatrixFont::drawScrollText(leds, msg, scrollX, 1, color, MATRIX_W, MATRIX_H);
 
-    // Top-right corner pixel: blinking red dot to make disconnect obvious
-    // even when the scrolling text is off-screen between cycles.
-    bool blink = ((uint32_t)(animTime * 2.0f) & 1) == 0;
-    if (blink) {
-        int idx = xyToIdx(MATRIX_W - 1, 0);
-        if (idx >= 0) leds[idx] = CRGB(60, 0, 0);
-    }
+    // Breathe: 4s period (π/2 rad/s), 70%–100% amplitude.
+    float breathe = 0.85f + 0.15f * sinf(animTime * 1.5708f);
+    CRGB pulseColor = CRGB(
+        (uint8_t)(color.r * breathe),
+        (uint8_t)(color.g * breathe),
+        (uint8_t)(color.b * breathe));
+
+    int textW = MatrixFont::textWidth(msg);
+    int x = (MATRIX_W - textW) / 2;
+    MatrixFont::drawScrollText(leds, msg, x, 1, pulseColor, MATRIX_W, MATRIX_H);
 }
 
 static inline int xyToIdx(int x, int y) {

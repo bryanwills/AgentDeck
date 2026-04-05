@@ -72,6 +72,8 @@ export function updateUsageDialData(data: UsageModeData): void {
 
 export function updateUsageDialState(state: State, agentType?: AgentType | null, sessionStatus?: OcSessionStatus | null, capabilities?: AgentCapabilities | null): void {
   currentState = state;
+  // Drop cached usage on daemon disconnect so the dial stops showing stale numbers.
+  if (state === State.DISCONNECTED) hasReceivedData = false;
   if (agentType !== undefined) currentAgentType = agentType;
   if (capabilities !== undefined) currentCapabilities = capabilities ?? null;
   if (sessionStatus !== undefined) currentSessionStatus = sessionStatus ?? null;
@@ -128,7 +130,7 @@ function refreshUsageDials(): void {
   let svg: string;
 
   if (!hasReceivedData) {
-    svg = renderUsageDisconnected();
+    svg = renderUsageDisconnected(currentState !== State.DISCONNECTED);
   } else {
     const page = USAGE_PAGES[pageIdx];
     switch (page) {

@@ -86,9 +86,23 @@ export class BridgeClient extends EventEmitter implements AgentLink {
     if (gen !== this._connectGeneration) return;
 
     if (this.ws) {
-      this.ws.removeAllListeners();
-      this.ws.close();
+      if (this.ws.readyState === WebSocket.CONNECTING) {
+        dlog('Bridge', 'attemptConnect skipped: socket still connecting')
+        return;
+      }
+      const staleWs = this.ws;
       this.ws = null;
+      staleWs.removeAllListeners();
+      try {
+        if (
+          staleWs.readyState === WebSocket.OPEN ||
+          staleWs.readyState === WebSocket.CLOSING
+        ) {
+          staleWs.close();
+        }
+      } catch (err) {
+        dlog('Bridge', `stale socket cleanup ignored: ${err}`);
+      }
     }
 
     try {
