@@ -2,17 +2,19 @@
 
 Stream Deck+ controller for Claude Code CLI — a bidirectional local control system.
 
-## Architecture
+## Monorepo
 
-- **bridge/** — Node.js server: Daemon (sole hub for all clients, mDNS, device modules) + Session Bridge (PTY, hook HTTP, state machine). BridgeCore (shared infra), PtyAdapter hierarchy, output parser, WebSocket server, voice (whisper.cpp), usage API client, auth token, SSE broadcast, TUI dashboard (`tui/`)
-- **plugin/** — Stream Deck SDK v2 plugin: actions for buttons/encoders, bridge WebSocket client
-- **shared/** — TypeScript types and utilities shared between bridge and plugin (protocol, states, timeline, adapter interfaces, `format-utils` time/count/bytes formatters, `timeline-summarizer` extractTopicHint/cleanLLMOutput, `deduplicateEntry` pipeline, `session-utils` stateRank/sortSessions/assignDisplayNames — 세션 정렬/번호 공통 유틸리티, 6곳에서 import)
+- **bridge/** — Node.js server: Daemon hub + Session Bridge (PTY, hook HTTP, state machine)
+- **plugin/** — Stream Deck SDK v2 plugin
+- **shared/** — TypeScript types/utils shared between bridge & plugin (protocol, states, timeline, adapter interfaces, session-utils)
 - **hooks/** — Claude Code hook installer for `~/.claude/settings.local.json`
 - **config/** — Default settings and prompt templates
-- **setup/** — npm setup package: `npx @agentdeck/setup` one-command installer
-- **android/** — Jetpack Compose launcher app: e-ink monitoring + interactive Deck control (CremaS, Onyx, Kobo, tablets)
-- **apple/** — SwiftUI Multiplatform app: iPhone/iPad/macOS dashboard + Deck control (App Store distribution). macOS includes **in-process Swift daemon** (`AgentDeck/Daemon/`, 30 files ~5500 LOC) — WS/HTTP server, mDNS, ESP32 serial, ADB reverse, D200H HID (IOKit), Pixoo, Gateway, voice assistant, hooks auto-installer. No Node.js dependency for daemon. `DaemonService` starts daemon on app launch (SIGTERM handler for clean shutdown, `NWPathMonitor` for WiFi/VPN/IP change recovery). `MenuBarExtra` **AI Control Tower** (`.menuBarExtraStyle(.window)`, 340×450 panel): Attention/Active/Idle 3-tier session list with creature SF Symbol icons per agent type (water.waves/ladybug/cloud/terminal/server.rack), model name + relative time in subtitles, rate limit trend arrows (↑↓) with emphasized reset time when >70%, click-to-focus session rows, Models & Services (Claude OAuth + Gateway + Ollama + MLX + subscriptions + rate limits), device status. Dynamic `AgentStatusIcon` (SF Symbol only — MenuBarExtra label은 단순 Image만 지원). **Launch Session dialog** via independent `Window("launch-session")` scene (avoids MenuBarExtra+sheet click/focus bugs per feedback-assistant#331) with folder picker, agent type (Claude/Codex/OpenCode/Plain), terminal app picker (Terminal/iTerm2/Alacritty/WezTerm/Ghostty/Warp — auto-detect via NSWorkspace bundle ID). `.command` file + `NSWorkspace.open` for most terminals, AppleScript for iTerm2. `session_command` protocol for session-scoped control from any client. Dashboard keyboard shortcuts (`⌘Y/N/⏎/.`), creature tap → session focus, toast notifications on state change
-- **esp32/** — PlatformIO Arduino firmware: LVGL touch displays (ESP32-S3: 86Box 480×480, IPS 3.5" 480×320 landscape / 320×480 portrait, Round AMOLED 360×360) + WS2812B LED matrix (ESP32 classic: Ulanzi TC001 8×32). Board-specific `#ifdef`, per-board partition tables, FastLED matrix renderer bypasses LVGL entirely. IPS 3.5" supports runtime portrait↔landscape switching via `set_orientation` protocol command or Settings toggle (NVS persistent, `g_screenW`/`g_screenH` runtime globals)
+- **setup/** — npm setup package (`npx @agentdeck/setup`)
+- **android/** — Jetpack Compose launcher app (CremaS, Onyx, Kobo, tablets)
+- **apple/** — SwiftUI Multiplatform app (iOS/iPadOS/macOS). macOS includes **in-process Swift daemon** (30 files ~5500 LOC, no Node.js dependency)
+- **esp32/** — PlatformIO Arduino firmware (LVGL touch displays + WS2812B matrix)
+
+See [docs/architecture.md](docs/architecture.md) for full architecture details (BridgeCore, PtyAdapter hierarchy, device modules, AgentAdapter abstraction, Gateway protocol, plugin connection model).
 
 ## Build
 
@@ -22,19 +24,6 @@ pnpm build                  # shared must build before bridge/plugin
 pnpm generate-icons         # SVG → PNG icons (first build or after icon changes)
 pnpm generate-protocol      # protocol.ts → JSON Schema → Swift/Kotlin types (generated/protocol/)
 ```
-
-## ESP32 Flash Safety
-
-- **절대 `usbmodem` 포트 번호만 보고 IPS 3.5"와 Round AMOLED를 구분하지 말 것.** Native USB JTAG 보드는 허브 위치, 재연결 순서, 복구 모드에 따라 `/dev/cu.usbmodem*` 번호가 계속 바뀐다.
-- **정상 부팅 중인 보드는 반드시 `device_info_request`로 보드 식별 후 플래시한다.** 기대값은 `ips_35`, `round_amoled`, `box_86`, `ulanzi_tc001`.
-- **`esp32/scripts/flash.sh auto`는 `device_info_request` 성공 시에만 자동 선택한다.** 응답이 없으면 추정하지 말고 중단해야 한다.
-- **Native USB 보드가 벽돌 상태일 때는 BOOT/RST로 먼저 ROM 다운로드 모드에 진입시킨 뒤, 그 다음에만 수동 업로드한다.** 복구 모드에서는 `device_info_request`가 동작하지 않으므로 환경(`ips_35` 또는 `round_amoled`)을 사람이 명시해야 한다.
-- **한 번이라도 잘못된 디스플레이 펌웨어를 Native USB 보드에 올리면 USB가 잠깐만 살아 있다가 끊길 수 있다.** 이 상태는 하드웨어 사망이 아니라 잘못된 앱이 USB PHY를 끊는 케이스일 수 있다.
-- **복구 업로드는 bootloader + partitions + firmware 전체를 다시 쓰는 full flash를 기본으로 본다.**
-- **복구 직후 화면이 안 켜져도 먼저 부트 상태를 확인한다.** 계속 `esptool`이 즉시 붙으면 GPIO0/BOOT가 눌린 상태로 남아 ROM 다운로드 모드에 머물러 있을 가능성이 높다.
-- **플래시 전에 반드시 `lsof /dev/cu.*` 로 daemon 시리얼 점유를 확인한다.** Swift daemon(`AgentDeck`)이 시리얼 포트를 점유하면 esptool이 "chip stopped responding" 오류를 낸다. Daemon 중지 후 플래시.
-- **`config.h`의 `MAX_*` 상수는 `constexpr uint8_t`이므로 `#if MAX_OPENCODE > 0` 전처리기 가드를 쓰면 안 된다.** 전처리기는 constexpr을 인식 못해 항상 0으로 평가. 런타임 `if (MAX_OPENCODE > 0)` 또는 가드 없이 for 루프 조건으로 처리.
-- **IPS 3.5" full flash 시 `--flash_size 16MB` (또는 `--flash-size 16MB`)를 명시한다.** esptool이 부트루프 중 flash size를 8MB로 오감지하여 파티션 테이블 검증 실패 유발.
 
 ## Android Build
 
@@ -47,62 +36,6 @@ bash scripts/build-android-release.sh   # local → dist/agentdeck-v{VERSION}.ap
 **Signing**: `android/signing.properties` (gitignored) with `storeFile`, `keyAlias`, `keyPassword`, `storePassword`. CI uses env vars from GitHub Secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `ANDROID_STORE_PASSWORD`).
 
 **Release**: `git tag android-v{VERSION} && git push origin android-v{VERSION}` → GitHub Actions builds + creates Release with APK.
-
-## Android UI/UX Vision
-
-두 디바이스에서 동일한 에이전트 정보를 시각화. 정보 구성은 일관, 표현 방식만 다름.
-
-### 표시 정보 (공통)
-- **Agent Identity**: 에이전트 타입, 세션명, 현재 모델, 상태 (IDLE/PROCESSING/AWAITING 등)
-- **Event Log**: 에이전트 활동 이벤트 요약 (tool call, model call, state change)
-- **Account/Connection**: OAuth 연동 상태 (connected/disconnected), billingType, bridge connection status
-- **Usage Gauges**: 5h/7d rate limit % + 리셋까지 남은 시간, tokens, cost, uptime
-- **Ollama Status**: ollama 프로세스 상태 (running/stopped) + 실행 중 모델 목록
-- **Creature Animation**: 도트/픽셀 아트 형태의 에이전트 캐릭터 애니메이션
-
-### E-ink (Crema) 레이아웃 — 좌측 에이전트 + 우측 아쿠아리움 중심
-
-Row(fillMaxSize): 좌측 에이전트 패널 | 우측 아쿠아리움+정보
-
-```
-[AgentDeck 로고]          🐙        🦞
-[claude-code]          (octopus)  (crayfish)
-[  opus-4]           ∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿
-[  ● PROCESSING]
-[openclaw]           RATE LIMITS              MODELS
-[  gpt-4o]           5h [████░░] 72% 1h      OAuth: opus-4, sonnet-4
-[  ● ROUTING]        7d [██░░░░] 63% 2d      Ollama: qwen2.5:7b 4.5G
-[Workers: 2]         10:32 [T] Read file_path.ts
-⚙ Settings           10:33 [M] Model call opus-4
-                     10:33 [S] IDLE → PROCESSING
-```
-
-- 좌측(22%): AgentDeck 로고 + 에이전트 목록 (primary + siblings + gateway-detected)
-- 우측(78%): 아쿠아리움 수조(상단 40-50%) + context/status(중간, PROCESSING시만) + 타임라인(하단 35-38%)
-- IDLE시 context 숨김 → 수조 50% + 상태바 13% + 타임라인 37%. PROCESSING시 context 없으면(OpenClaw 등) IDLE과 동일 레이아웃
-- **Status 2-column**: LIMITS(30%, Unicode 블록 게이지 `█░`) | MODELS(70%, OAuth catalog + Ollama). 세로 구분선, `Arrangement.Center` 수직 가운데 정렬
-- 수조: Compose `clip(RoundedCornerShape)` 둥근 모서리 (내부 테두리 없음), 수면 파도, 해초, 자갈, 거품 — 수족관 느낌
-- **Multi-agent visibility**: Bridge `/health`에서 sibling state 조회, Gateway TCP probe로 OpenClaw 감지. Daemon primary는 agent list에서 제외 (coding agent 아님). OpenClaw primary는 목록에 🦞로 표시하되 terrarium octopus에서는 제외 (crayfish가 담당)
-- **Crayfish 독립 상태**: sibling OpenClaw session의 state에서 ROUTING/SITTING 결정 (primary agentType 의존 제거)
-- **Refresh zones**: 좌측 A2(200ms), 수조 `EinkAnimatedRefreshZone`(callback 기반), context+status A2(200ms), timeline A2(300ms), IDLE status DU(2000ms). `LAYER_TYPE_SOFTWARE` on wrapper FrameLayout for EPD grayscale. 수조 애니메이션: `EinkTerrariumView.onFrameRendered` 콜백 → animation frame=GC16 partial(플래시 없음), state transition=FULL GC16(고스팅 클리어)
-- **EPD vendor API**: Rockchip RK3566 (Crema S) — `android.os.EinkManager` system service, `setMode("2"=GC16/"12"=A2/"14"=DU)` + `sendOneFullFrame()`. Onyx — `BaseDevice.setViewDefaultUpdateMode()`. KOReader `RK35xxEPDController` 참고
-- **E-ink grayscale**: 네이티브 16-level 그레이, `DitherEngine.snapToNearestGray()` (에러 디퓨전 없음). 수조 내부 테두리 없음 — Compose `clip(RoundedCornerShape)` 만 사용. 크리처 부위별 그레이: body(0x44), limb/claw(0x33), starburst(0x99), sleeping=dimmed. 환경: sand(0xCC), fish body(0x55)+stripe(0xBB), rock outline(0x22), seaweed 2px. 멀티세션 Y stagger: `standingOffset = (centerXFraction - 0.38) * 0.10`
-- **Color e-ink (Kaleido 3)**: MOAAN Pantone 6 등 컬러 e-ink 지원. `EinkDetector.isColorEink()` + `einkPick(gray, color)`. **테라리움은 정적 렌더** (애니메이션 비활성화) — Kaleido CFA가 매 프레임 색상 재계산하여 깜빡임 유발. 상태 변경 시만 컬러 프레임 1회 렌더. UI 텍스트(게이지/타임라인/라벨)는 컬러 적용 (갱신 빈도 낮음). 컬러 팔레트: octopus terracotta `#C07058`, crayfish red `#CC3333`, tetra blue `#3366AA`+cyan `#55CCEE`, seaweed green `#336633`, sand `#D4B896`, water `#C8DDE8`. `snapToNearestGray` 컬러 모드에서 스킵 (RGB 보존). `manufacturer="rockchip"` (not "moaan"), `model="Pantone6"`
-
-### Tablet (Lenovo) Monitor 레이아웃 — 수족관 + HUD 오버레이
-- 전체 화면: 컬러 수족관 배경 (60fps 애니메이션)
-- 반투명 HUD 패널로 동일 정보 오버레이
-- 상단: 프로젝트명, 상태, 모델
-- 좌측: Activity(현재 작업) + Multi-Agent(세션 목록)
-- 우측: Engine — rate limits + **reset times**, **OAuth**, **ollama**, tokens/cost
-- 하단: Timeline strip (이벤트 로그)
-
-### Creature Design — 도트 아트 통일
-- **OctopusCreature** (Claude Code): SVG path (claudecode.svg Antigravity, viewBox 24×24), terracotta, EvenOdd fill rule (눈은 투명 cutout). Android: Compose `PathParser` + `drawPath`. Apple: `CGPath` + `FillStyle(eoFill: true)`. **E-ink: `drawRect` 12×8 픽셀 그리드** (`canvas.drawPath()` e-ink Canvas 미지원 — silent fail). ESP32/TUI: 12×8/14×5 픽셀 그리드 유지. **E-ink 렌더링 제약**: `canvas.drawPath()`, `Path.op()` 등 복잡 Path 연산은 e-ink Canvas에서 silent fail → `drawRect`/`drawCircle`/`drawOval`/`drawLine` 기본 프리미티브만 사용. E-ink Cloud(Codex)는 단일 `drawOval` pill 실루엣 (이전 6-lobe clover는 각 원 개별 stroke로 seam 노출 → 단일 타원으로 대체), Crayfish도 `drawOval`+`drawLine` 조합. E-ink Cloud/OpenCode Y는 state 기반: WORKING만 layout swim slot 사용, FLOATING/SLEEPING은 지면 근처(Cloud ~0.56, OpenCode ~0.60)로 안착 — idle 세션이 상층에 떠있지 않도록. Standing 상태: per-instance `standingJitter` + X-correlated depth offset로 자연스러운 멀티세션 배치. **크리처 타입별 배치 분리**: Octopus homeX `0.20-0.50` (좌측), Cloud `0.30-0.55` (중앙), OpenCode `0.45-0.68` (우측), Crayfish `0.75-0.78` (최우측). Idle Y 지면 근접: Oct 0.62, Cloud 0.60, OC 0.61, Crayfish 0.64 (sand 0.65 바로 위). Swim Y 분리: Cloud 상층(0.05-0.25), OpenCode 중상층(0.25-0.50), Octopus 중층 `0.18~0.55 X`, `0.15~0.55 Y`. Pixoo: sand px54 기준 배치, HUD(px57)와 3px gap
-- **CrayfishCreature** (OpenClaw): SVG Path 기반 front-facing 렌더링, red/teal gradient, `PathParser` + `withTransform` pivot rotation. SITTING: heartbeat glow (4초 주기 더블펄스), ROUTING: full animation (claw clap, signal waves, eye flash, glow pulse), SICK: 탈색+기울기+늘어진 집게+흐린 눈 (gateway 에러 시). `currentPosition()` + `isRouting()` — DataParticleSystem에 위치/상태 제공
-- **Neon Tetra**: 14마리 2개 무리(schoolId 0/1, 7마리씩), Lissajous 경로 school centers로 만남/흩어짐 반복. Boids: cohesion/alignment=같은 무리만, separation=전체. `SCHOOL_ATTRACTOR_WEIGHT=0.4` (먹이 있으면 무효). `TETRA_SWIM` 경계 `0.03~0.92 X`, `0.08~0.68 Y`. E-ink: 12마리 2무리(6+6), size `0.013f`, `einkPrevFishX` heading 추적, STREAMING시 에이전트 인력 30% + 데이터 파티클 4개. **가재 반응**: ROUTING 가재도 food crumb 산란 + school center 30% 인력 → 옥토퍼스 없을 때(OpenClaw primary) 가재가 물고기 유도
-- 독립 애니메이션 가능한 부위별 셀 타입 분리 (눈, 팔/집게, 다리 등)
-- 상태 애니메이션: 셀 좌표 오프셋, 색상 lerp, pivot 기반 회전 (SVG transform 아님)
 
 ## Setup & Distribution
 
@@ -153,9 +86,11 @@ Coverage thresholds (regression guard): lines ≥17%, functions ≥15%, branches
 
 - **URL**: `https://puritysb.github.io/AgentDeck/` (landing) / `/reports/` (test report)
 - **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + Robot Framework (no-hw) → HTML report → GitHub Pages deploy
-- **Report generator**: `scripts/generate-html-report.py` — tab-based SPA dashboard. Sidebar nav: Overview + 10 test layers + Android + Robot + Scenarios + Coverage. Each layer tab shows purpose question, describe-block grouping, all test cases visible by default. Robot XML `</robot>` truncation defense built-in. Robot tab: suite→scenario→BDD steps (Given/When/Then color-coded)→board matrix (✓/✗ per board)→per-test elapsed time→performance table (board × metric: build time, FW size, latency, throughput). `[PERF]` log messages auto-extracted from output.xml. Metadata auto-reconciliation: stale `executed: false` overridden when actual data exists
-- **Scenario matrix**: `scripts/scenario-matrix.json` — 10 user scenarios mapped to test files + assertion/case patterns with gap analysis
-- **Landing page**: `scripts/pages-index.html` — product intro at Pages root
+- **Report generator**: `scripts/generate-html-report.py` — tab-based SPA dashboard. Robot tab: suite→scenario→BDD steps→board matrix→per-test elapsed time→performance table. `[PERF]` log messages auto-extracted from output.xml
+- **Scenario matrix**: `scripts/scenario-matrix.json` — 10 user scenarios mapped to test files + gap analysis
+- **Landing page**: `scripts/pages-index.html`
+
+See [docs/testing.md](docs/testing.md) for full testing reference.
 
 ## CLI
 
@@ -193,95 +128,37 @@ agentdeck wifi-setup         # ESP32 WiFi provisioning (--ssid, --password)
 
 **Module flags**: `--local` (all off), `--no-mdns`, `--no-adb`, `--no-serial`, `--no-pixoo`
 
-### ESP32 WiFi 독립 운용
+ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/esp32.md).
 
-ESP32 디스플레이는 **USB 시리얼** (기본) + **WiFi WebSocket** (독립 운용) 이중 경로 지원.
+## Key Conventions
 
-```bash
-agentdeck wifi-setup --ssid "MyNetwork" --password "secret"
-# → ~/.agentdeck/wifi-config.json 저장 (autoProvision: true)
-# → daemon 재시작 시 ESP32에 자동 프로비저닝
-```
-
-**USB 연결 시**: daemon이 시리얼로 `wifi_provision` 전송 → ESP32 WiFi 자동 연결. **USB 분리 후**: ESP32가 저장된 자격증명으로 WiFi 재연결 → mDNS로 daemon 발견 → WebSocket 접속. WiFi 인터페이스 자동 감지 (`networksetup -listallhardwareports`), macOS Keychain 비밀번호 조회 지원. Daemon (`daemon-server.ts`)과 Session bridge (`index.ts`) 양쪽에서 auto-provisioning 동작
-
-**Disconnect 복구 (ESP32 firmware)**: 시리얼 10초 timeout + WebSocket 지수 backoff (1→8s). `main.cpp`는 `bridgeFound` 플래그 없이 **mDNS를 항상 폴링** → daemon IP 변경(DHCP 갱신, 호스트 이동) 즉시 감지 후 `wsDisconnect()`+새 IP로 `wsConnect()` 재바인딩. WS backoff가 15초 이상 saturated이면 `mdnsRefresh()`로 캐시 강제 무효화 (좀비 dns-sd 광고 상황 방어). `ws_client.cpp`의 `setReconnectInterval()`은 backoff 증가할 때마다 라이브러리 내부 타이머에 재동기화 (기존에는 `wsConnect()` 시점 값에 고정). `DashboardState.lastMessageMs`가 serial/WS TEXT 수신 시 갱신되어 UI에서 disconnect age 계산. **TC001 matrix disconnect UI**: stale 스프라이트 대신 상태 메시지 (`CONNECT WIFI` / `FINDING BRIDGE` / `DAEMON DOWN Xm` / `NO WIFI Xm`) + 우상단 깜빡이는 빨간 점
-
-## Key Design Decisions
-
-- **TUI Dashboard** (`bridge/src/tui/`): `agentdeck dashboard` — zero-dependency TUI monitoring via raw ANSI escape codes. WS client connects to running Daemon via `findDaemonPort()` (`daemon.json` → `sessions.json` fallback). Files: `ansi.ts` (ANSI helpers), `gauge.ts` (Unicode block gauge), `screen.ts` (alternate buffer, raw stdin), `terrarium.ts` (braille aquarium animation), `renderer.ts` (adaptive layout), `dashboard.ts` (WS client + state + render loop). Three responsive layouts: wide (120+), standard (80-119), narrow (60-79). Terrarium: 3-tier sprite scaling (small=1×/large=2×/xlarge=3× via `scaleGridN()`; thresholds: large 100×20, xlarge 160×35). Braille octopus (small 14×5→7×2, large 28×10→14×3, xlarge 42×15→21×4), crayfish (small 16×8→8×2, large 32×16→16×4, xlarge 48×24→24×6), neon tetra (small 3ch, large 5ch, xlarge 7ch). Crayfish ROUTING: signal wave rings (3 concentric `◦·∙` semicircles) + orbiting cyan `✦` dots. Octopus name tag + crayfish name tag directly above sprite (`oy-1`). Multi-session octopi matched by session `id` (not `name`) — same-project sessions numbered `#1 #2`. Jellyfish/Codex CLI (small 10×8→5×2, large 20×16→10×4, xlarge 30×24→15×6; 6-lobe cloud shape matching Codex icon, indigo #6366F1, glow #A5B4FC). Tetra attract: processing octopus > processing jellyfish > routing crayfish > none. Session list from daemon `sessions_list`; virtual OpenClaw entry when `gatewayAvailable`. Half-block pixel font logo (4×6→4×3). Status split: LIMITS|MODELS (E-ink style). Local timeline generation from `state_update` events (`receivingBridgeTimeline` flag for bridge event dedup). 10fps terrarium, 4fps panels
-- **pnpm workspaces** for monorepo management
-- **ES modules** throughout (type: "module")
-- **Node16 module resolution** in TypeScript
-- **BridgeCore** (`bridge/src/bridge-core.ts`): Shared infrastructure class used by both `startSession()` (index.ts) and `startDaemon()` (daemon-server.ts). Contains StateMachine, WsServer, UsageTracker, DisplayMonitor, OllamaProbe, state caches, and common event wiring. Eliminates ~600 lines of duplication
-- **PtyAdapter hierarchy** (`bridge/src/adapters/pty-adapter.ts`): Abstract base class for PTY-based agents. Subclasses implement `getDefaultCommand()`, `wireOutputParser()`, `feedParser()`, `handleAgentCommand()`. `ClaudeCodeAdapter` extends PtyAdapter with OutputParser + Shift+Tab mode switching. `CodexCliAdapter` extends PtyAdapter with CodexOutputParser (Ink TUI `›` prompt, `Working(Ns •` spinner, no HTTP hooks). `OpenCodeAdapter` extends PtyAdapter + SSE overlay (spawns `opencode --port XXXX` TUI, connects to embedded HTTP server for structured events — no TUI parsing needed). `MonitorAdapter` is hook-only (no PTY)
-- **Device module system** (`bridge/src/modules/`): Pluggable `DeviceModule` interface with auto-detect. Modules: mdns/serial/pixoo (daemon-only), adb (`'auto'` — detect at startup). D200H removed from Node.js bridge — **Swift daemon is sole D200H controller**. Session bridges never activate serial/pixoo — all dashboard devices connect via daemon only. CLI flags: `--local` (all off), `--no-{module}` (daemon)
-- **D200H HID module**: Ulanzi D200H communicates via **stock HID protocol** (VID `0x2207`/PID `0x0019`, same as D200). No ADB, no firmware modification, no on-device agent. 1024-byte fixed packets (header `0x7C7C` + cmd + len + payload), ZIP chunking for `SET_BUTTONS`. Device boots into HID mode after 4s. D200H returns `DeviceType:"D200"` — protocol-compatible with D200 community libraries (`strmdck`). **Swift daemon only** (`D200hHidModule.swift`): IOKit `IOHIDManager`, non-seize keyboard open (D200H custom protocol doesn't need seize), Core Graphics PNG + device native text, heartbeat re-render (15s) prevents firmware timeout. **Multi-session agent controller**: session list view (13 sessions per page, slots 0-12 + slot 13 big merged button = usage monitor with color-coded border) + detail/option view with quick actions (GO ON/REVIEW/COMMIT/CLEAR) + STOP/ESC. Node.js `bridge/src/d200h/` code retained as reference but disabled in `modules/index.ts`. Legacy on-device C agent archived to `zkswe/agent-archive/`
-- **node-pty optional**: `optionalDependencies` + dynamic `await import('node-pty')` in PtyManager. Daemon/monitor modes never load the native module. Setup forces source build (`npm_config_build_from_source=true`) to avoid prebuilt ABI mismatch across Node versions. PtyManager catches `posix_spawnp` errors with rebuild guidance
-- **Daemon hub architecture**: Daemon owns port **9120** (default, fallback to 9121+ if occupied by non-daemon). All dashboard clients (Android, Apple, ESP32, TUI, Plugin) connect exclusively to daemon — session bridges never serve external devices. Session bridges use ports 9121–9139 for internal hook HTTP only (`AGENTDECK_PORT` env var injected into Claude process). `~/.agentdeck/daemon.json` stores `{ port, pid, startedAt, httpPort? }` for local client discovery (written on daemon bind, removed on shutdown). Remote clients discover via mDNS (daemon only advertises `_agentdeck._tcp`). **Node.js daemon**: single `http.createServer()` handles HTTP + WS upgrade on one port. **Swift daemon**: single raw TCP `NWListener` — detects HTTP vs WebSocket upgrade per connection, manual WebSocket frame parsing (RFC 6455 GUID `258EAFA5-E914-47DA-95CA-C5AB0DC85B11`), Bonjour `NWListener.Service` attached to same listener for mDNS. `getpwuid(getuid())` for real home directory (bypasses App Sandbox container path redirect). `httpPort` in `DaemonInfo` for mixed setups where HTTP ≠ WS port (nil when unified). **Daemon singleton guard**: `daemon.json` PID check → `sessions.json` fallback → `/health` HTTP probe. Port occupied by non-daemon → auto-fallback to next available port. **Shutdown timeout**: `httpServer.close()` + 5s `setTimeout(() => process.exit(0))` — CLOSE_WAIT connections from disconnected clients can block `close()` callback indefinitely, causing zombie daemons (session bridge has 3s failsafe in `index.ts`). **Whisper-server** uses fixed singleton port **9100** (`~/.agentdeck/whisper-server.json` info file for discovery, last session exit kills server). **Session timeline relay**: `SessionTimelineRelay` (`session-timeline-relay.ts`) — daemon subscribes to sibling session bridges' WS to relay `timeline_event`/`timeline_history` events + `state_update.modelCatalog` (Claude Code OAuth catalog → daemon `cachedModelCatalog`, merged with Gateway catalog by name dedup). 10s sync interval detects new/removed sessions. Eliminates client-side `StateTimelineGenerator` duplication (Android/Apple) — daemon provides unified timeline stream for all agent types
-- **mDNS crash recovery + IP change detection**: `bonjour-service` multicast errors (`EADDRNOTAVAIL` on sleep/wake, WiFi reconnect, VPN toggle) are caught in `bridge-core.ts` `uncaughtException` handler. `invalidateMdnsInstance()` nulls the Bonjour instance, then `mdns.ts` recovery timer (30s interval) detects null + LAN IP available → re-publishes `_agentdeck._tcp` service automatically. Recovery timer also detects IP changes (DHCP renewal) and re-publishes with the new IP. Session bridges never advertise mDNS (`cli.ts` hardcodes `mdns: false`). **Apple discovery**: `BridgeDiscovery.swift` ignores TXT `ip` field (can be stale from Bonjour cache) and always uses `NWConnection` endpoint resolution for live IP. iOS waterfall: mDNS first → savedUrl fallback after 4s (same as macOS)
-- **Shift+Tab** (`\x1b[Z`) for Claude Code mode switching (100ms debounce)
-- **sox/rec** for audio capture, **whisper-server** for transcription (싱글톤 포트 9100, 세션 간 공유, `detached` 프로세스). 미설치 시 **whisper-cli** 폴백. GPU 메모리 ~1.8GB (세션 수 무관, 1 인스턴스)
-- **Voice local recording**: 브리지 연결 상태와 무관하게 항상 로컬 녹음. iTerm2 `create window with default profile command`로 `rec` 실행 (iTerm2 마이크 권한 상속). `pkill -INT`로 녹음 중지. RMS 무음 감지 (threshold 0.001). 전사 결과 전달: iTerm2 최전면 → `write text`, 기타 앱 → 클립보드 복사 + 알림
-- **Voice binary/model paths**: `shared/src/voice-paths.ts`에 `REC_CANDIDATES`, `WHISPER_CANDIDATES`, `MODEL_SEARCH_DIRS` 등 공유 상수 정의 — bridge/plugin 양쪽에서 import
-- Hook scripts use `|| true` to avoid blocking Claude when bridge is down
-- **Hook format**: Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "command", command: "..." }] }`. Old flat format `{ type, command }` silently fails. `hooks/src/install.ts` exports pure logic (`applyHooks`, `removeHooks`, `migrateHooks`) + filesystem wrappers (`installHooks`, `uninstallHooks`, `migrateHooksIfNeeded`). Bridge imports `migrateHooksIfNeeded` from `@agentdeck/hooks` (no duplication)
-- **Action ID pattern**: All SD actions store string IDs and use `getActionById()` — never store action object references
-- **Plugin UUID**: `bound.serendipity.agentdeck` (확정 — 배포 후 변경 불가)
+- **Hook format (CRITICAL)**: Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "command", command: "..." }] }`. Old flat format silently fails. Bridge auto-migrates via `migrateHooksIfNeeded()` from `@agentdeck/hooks`. Scripts use `|| true` to avoid blocking when bridge is down
+- **Plugin UUID**: `bound.serendipity.agentdeck` (immutable post-distribution)
 - **Package scope**: `@agentdeck/*` (shared, bridge, plugin, hooks, setup)
-- **User data dir**: `~/.agentdeck/` — `daemon.json` (daemon port discovery), `sessions.json` (session registry), `auth-token`, `settings.json`, `timeline.json`
-- **QR code display**: Usage 버튼 `qr` 페이지 — `qrcode` 라이브러리 → SVG path 렌더링 (144×144, Version 3 QR 29 modules × 4px = 116px). URL 우선순위: (1) `--remote` URL (PTY 자동감지) (2) OC Gateway `http://LAN:18789`. Bridge OutputParser가 raw ANSI에서 cursor-forward 시퀀스 제거 후 URL 추출. Push → 클립보드 복사 (`pbcopy`)
-- **BillingType detection**: PTY `model_info` parser event의 `plan` 필드로 subscription/api/unknown 판별. API 사용자는 OAuth fetch 스킵 + session 페이지만 표시
-- **Effort level detection**: PTY `/model` UI에서 `(high|medium|low) effort` 패턴 파싱. Levels: high/medium(default)/low. `"medium"`은 기본값이므로 UI 표시에서 제외 (high/low만 모델명 옆에 표시). Parser→SM→WS→Plugin/Android 전체 파이프라인
-- **Encoder LCD design**: 모든 인코더 LCD는 SVG pixmap 렌더링 (`voice-layout.json` 공용). 배경 `#0f172a`, 14px 가운데 정렬 헤더, icon+value 가운데 그룹, 2px accent bar 패턴 통일. Renderer는 `plugin/src/renderers/{name}-renderer.ts` 순수 함수로 분리. Utility 모드는 clean 영문 title + emoji icon + value 구조 통일
-- **Encoder takeover wide canvas**: Option/permission/diff 선택 시 E1=context 패널, E2-E4=600px wide canvas 옵션 목록 (voice text와 동일한 `translate(-i*200,0)` 슬라이싱). `renderWideOptionList()` 함수, `autoScrollToIndex()`로 선택 항목 자동 스크롤
-- **OC Timeline panel**: OpenClaw 세션 상세 뷰(detail view) 진입 시 E2+E3 합체 400px 와이드 캔버스로 이벤트 타임라인 표시. 리스트 뷰에서는 일반 option/usage dial 유지. 배경 `#000000` (LCD 네이티브 블랙 — 투명 효과). Fisheye 렌더링 (font size 15→10px, opacity 1.0→0.3 보간), grouped entries (연속 중복 60s 윈도우 내 병합), detail mode (push 토글). `timeline-store.ts` 싱글톤, `timeline-renderer.ts` SVG 렌더러. 이벤트 `~/.agentdeck/timeline.json` 디스크 영속, 재연결 시 `events.history` RPC로 오프라인 이벤트 복구. OC Response 버튼: GATEWAY (웹 UI) + GO ON (continue) 프리셋. **시각 3계층**: (1) `typeColor()` 이벤트 타입별 컬러 코딩 (green/blue/amber/red/cyan/purple), 하단 2px 활동 밀도 바 (2) `bridge/src/log-stream.ts` — daemon에서 `openclaw logs --follow --json` 파싱으로 model_call/model_response/memory_recall/tool_exec 이벤트 추가, WS tool_request와 dedup (3) Usage 버튼 `oc-usage` 페이지 (`openclaw status --usage --json` 60s 폴링). **Bridge→Android relay**: `shared/src/timeline.ts`에 `TimelineEntry` 타입 + `parseLogLine()` 공유. Bridge OpenClaw 모드에서 `BridgeTimelineStore` + `BridgeLogStream` → `timeline_event`/`timeline_history` BridgeEvent로 WS broadcast. Adapter가 chat tracking (prompt/duration/tools) → rich `chat_start`/`chat_end`/`tool_request`/`chat_response` 이벤트 생성. Android `StateTimelineGenerator`는 bridge timeline 수신 시 로컬 생성 억제 (`receivingBridgeTimeline` 플래그). **Timeline enrichment pipeline**: (1) Gateway `chat` delta에서 `message.content[].text` 추출 (`extractMessageText()`) → `accumulatedResponse` 축적 (2) 20~200자 축적 시 `extractTopicHint()` → `chat_start` 업데이트 (프롬프트 없는 cron/웹 작업용) (3) Final에서 `chat_response` (응답 전문) + `chat_end` (도구/시간 요약) 생성 (4) async `summarizeResponse()` → MLX qwen (port 8800, `/no_think`) → Ollama fallback → 한국어 1줄 요약으로 `chat_end` enrichment. Bridge(daemon)에서만 요약 수행 — plugin은 daemon 경유 단일 경로. LLM 실패 시 60s TTL 후 재시도 (영구 disable 방지). ConnectionManager `FORWARDED_EVENTS`에 `timeline_event`/`timeline_history` 포함. **Claude Code LLM 요약**: OpenClaw과 동일하게 `Stop` hook에서 `summarizeResponse()` → `upsertEntry()`로 chat_end async enrichment. `extractTopicHint()` 개선 — code fence 내부 스킵, markdown decorator 제거. **Detail 클리닝**: `shared/src/timeline.ts`의 `cleanDetailText()` — markdown artifact(bold/heading/fence/link), JSON blob(connectionId 등 시스템 JSON 필터, error 추출), blank line 축소. OpenClaw adapter + Claude Code bridge에서 detail 저장 전 적용. **parseLogLine 필터 개선**: broad 키워드 필터(`/whatsapp/i`, `/WebSocket error/i`, `/network_error/i`) → subsystem/module 기반 필터(`isChannelInfra` 플래그)로 전환. 사용자가 WhatsApp API 작업 시 tool/error 로그가 필터되는 false-positive 방지. **Store-level repetitive dedup**: `isRepetitiveEntry()` (shared) — `extractSemanticCore()` (chat_end: 첫 ` · ` 이전) + `extractKeywords()` keyword bag 유사도 (60% overlap threshold). 일반 엔트리 1시간 윈도우, `automated: true` 엔트리 8시간 윈도우 (content 비교 없이 automated끼리 즉시 중복 판정). 반복 시 `repeatCount` 증가 + paired chat_start도 repetitive 검증 후 제거. `deduplicateEntry()` (shared) — 텍스트 정제 → exact dedup(5s) → semantic dedup 순서, Bridge + Plugin store 공용. **Automated tagging**: `TimelineEntry.automated?: boolean` — adapter에서 `!lastPrompt` (cron/web/channel 발 채팅)일 때 `true` 태깅. chat_start/chat_end/aborted/upsert 모두 전파. Gateway 프로토콜에 `trigger` 필드 없어 `lastPrompt` null 여부가 유일한 신호. **텍스트 정제**: `cleanRawText()` (inline **bold**/heading/link/backtick strip), `cleanNopMarkers()` (NOP/NOOP 제거). Store 입구에서 raw/detail 양쪽 일괄 적용. **폴백 라벨 개선**: cron/web 시작 `'Prompt sent'` → `'자동 작업'`, LLM 실패 시 `'Completed'` → `extractTopicHint(response)` 폴백 (응답 첫줄 topic 사용). **mergeHistory dedup**: plugin `mergeHistory()` (bridge 재연결 시 `timeline_history` 수신)에 `deduplicateEntry()` 적용 — 기존 exact `ts:type:raw` 매칭만으로는 semantic dedup 우회됨. **parseLogLine cron 요약**: cron list 테이블 행 (UUID 패턴)을 감지, error 상태만 `"Cron error: {name}"` 한 줄로 요약 표시 (ok/skipped는 스킵). `{"event":...}` JSON blob, 5자 미만 fragment도 필터
-- **Encoder takeover race guard**: `takeoverGeneration` counter in `plugin.ts` — exit/enter `.then()` 콜백이 실행 시점에 이미 새 전환이 발생했으면 스킵. PROCESSING→PERMISSION 빠른 전환 시 exit 콜백이 enter 이후 layout을 덮어쓰는 레이스 방지
-- **Button label intelligence**: 3-tier 라벨 축약 시스템 — (1) CJK-aware 픽셀 기반 줄바꿈 (`text-utils.ts`) (2) 로컬 휴리스틱 약어 (`abbreviateLabel`) (3) `claude -p --model haiku` CLI 폴백 (`label-summarizer.ts`). 1-2단계 즉시(0ms), 3단계 1-3초(캐시 200개). 약어된 버튼 우하단 `~` 표시. CJK 문자 1em, Latin 0.55em 폭 계산. Wide canvas는 충분한 가로폭이라 변경 불필요
-- **Version compatibility check**: `agentdeck claude` 시작 시 Claude Code 버전 → npm registry (3s) → GitHub raw JSON fallback (3s) 순으로 호환성 조회. `bridge/package.json`의 `compatibleClaudeCode` semver range로 판정. 비호환 시 자동 `npm install -g @agentdeck/bridge@latest` + 재시작 안내. `~/.agentdeck/compatibility.json` 상태 캐시 (1시간 throttle). `--no-update-check`로 비활성화. **절대 startup을 block하지 않음** — 모든 실패 케이스는 경고 후 진행
-- **npm packages**: `@agentdeck/shared`, `@agentdeck/bridge`, `@agentdeck/setup` — public npm packages (MIT license)
-- **Gateway health check**: `checkGatewayHealth()` in `gateway-probe.ts` — `openclaw doctor --json` 30초 간격 폴링. warn/error 감지 시 `gatewayHasError: true`를 `state_update`에 포함. Android 가재가 SICK 상태로 전환 (탈색, 기울기, 늘어진 집게). Gateway 미접속 시 폴링 스킵. OpenClaw adapter도 Gateway WS `health` 이벤트를 `gateway_health` metadata로 emit → daemon이 실시간 반영 (폴링 대체)
-- **Daemon Gateway connection 격리**: daemon이 Gateway adapter의 `connection` 이벤트를 WS 클라이언트에 포워딩하지 않음 — 클라이언트가 자신의 bridge 연결 끊김으로 오인하는 버그 방지. Gateway 상태는 `state_update.gatewayAvailable`과 `sessions_list`로 전달. `disconnectGatewayAdapter()`도 `connection:disconnected` 미전송
-- **MenuBarExtra secondary windows**: `.menuBarExtraStyle(.window)` 위에 `.sheet` 띄우면 focus/click 불안정 (feedback-assistant#331). 해결책: 독립 `Window(id:)` scene 선언 + `openWindow(id:)` + `NSApp.activate(ignoringOtherApps:)` (menu bar 앱은 `.accessory` activation policy라 activate 필수). Launch Session dialog가 이 패턴 사용
-- **Terrarium creature focus relay 중복 방지**: Focus relay가 sibling state_update를 broadcast하면 client `state.sessionId`가 sibling id로 바뀌고 `agentType`도 변경됨 → primary 크리처 추가되는데 siblings 리스트에 동일 id가 남아있어 이중 렌더. `TerrariumState.toTerrariumState()`에서 `primaryIsOctopus && $0.id == sessionId` 필터 적용 (octopus/jellyfish/opencode 모두)
-- **MLX mlxModels focus relay override**: focus relay broadcast 핸들러가 modelCatalog/ollamaStatus는 daemon 캐시로 덮어쓰지만 mlxModels는 pass-through → 오래된 sibling bridge(필터 없음)가 nanoLLaVA 리스트 전송 시 깜빡임. Focus relay의 `setBroadcast`에서 `state_update`의 `mlxModels`를 항상 daemon's `cachedMlxModels`로 덮어쓰기
-- **isDaemonLike 패턴**: 모든 클라이언트(TUI/Android/Apple)에서 세션 목록 렌더링 시 `agentType == 'daemon' || sessions.any { it.agentType == agentType }` 체크. daemon이 Gateway 연결 시 `agentType='openclaw'`로 브로드캐스트하므로 sessions_list에 동일 타입이 있으면 daemon 모드로 처리 (primary 스킵, sessions만 렌더). 이 없으면 session bridge 모드 (primary + siblings 렌더)
-- **Daemon singleton guard**: 3단계 — (1) `readDaemonInfo()` from `~/.agentdeck/daemon.json` (PID alive 검증) (2) `findExistingDaemon()` from `sessions.json` fallback (3) `probeDaemonHealth()` HTTP `/health` probe (port에 응답하는 daemon 감지). `daemon-server.ts` + `cli.ts` + `daemon.ts`(legacy) 세 곳에서 체크. 기존 daemon 있으면 `process.exit(0)` (LaunchAgent KeepAlive 재시작 루프 방지). 이중 daemon으로 인한 Gateway 이벤트 중복 relay, mDNS 충돌, timeline 중복 방지
-- **Daemon usage relay**: Daemon `fetchUsageRelayed()` — (1) sibling bridge `GET /usage` HTTP 중계 (2) WS 연결로 `usage_update` 이벤트 수신 (3) sibling 없을 때만 직접 API. Sibling 있으면 직접 API 호출 안 함 (429 방지). Bridge `hook-server.ts` `GET /usage` 엔드포인트 (no auth, local only)
-- **Multi-surface monitoring**: Daemon is the **sole hub** for all dashboard clients — session bridges never advertise mDNS or serve external WS/SSE. mDNS (`_agentdeck._tcp`, daemon only), auth token (`~/.agentdeck/auth-token`), SSE (`/sse`), remote WS token validation. `0.0.0.0` binding for LAN access. `isLocalConnection()` recognizes localhost + machine's own IPs via `os.networkInterfaces()` — same-machine clients (macOS app, localhost) bypass token auth. **Client discovery**: Local clients (TUI, CLI, session bridge) read `~/.agentdeck/daemon.json` for port. Remote clients (Android, Apple) use mDNS — only daemon advertises, so no preference logic needed. **macOS App Sandbox**: `LocalSessionDiscovery` (sessions.json 직접 읽기) 불가 — sandbox가 `~/.agentdeck/` 접근 차단. macOS는 mDNS로 daemon 발견 (daemon만 광고하므로 단순). **Client count for polling**: `BridgeCore.hasClients()` = WS clients + external serial connections (`setExternalClientCountProvider`). All polling guards (sessions_list, usage, API) use `hasClients()` so ESP32 serial-only connections keep data flowing. **ESP32 daemon state**: `isDaemon = agentType == "daemon" || "openclaw"` — daemon sends "openclaw" when gateway alive, renderer maps per-session octopus states from `sessions_list`. Multi-octopus particles (round-robin spawn from octStates[]), bubbles (exhale from all), session name dedup (`#1`/`#2`)
-- **Android launcher**: `android/` — Jetpack Compose, minSdk 29, CATEGORY_HOME, NSD mDNS discovery, QR pairing (CameraX + ML Kit), e-ink detection (Crema/Onyx/Kobo). **3-tab nav**: Dashboard (terrarium bg + HUD overlay panels, connection overlay when disconnected) / Deck (encoder strip + 2×4 button grid + context area) / Settings. MonitorService: CPU wake lock + system stay-on + screen wake on state change (e-ink). **Deck encoder strip**: 4-panel LCD mirroring (Utility/Action/Session/Voice), touch gestures (swipe=rotate, tap=push, long-press=record). **Deck button grid**: Bridge `button_state` 프로토콜 우선, 로컬 fallback. CompactStatusBar(36dp) 상단 + 직사각형 버튼(80dp) + 넓은 ContextArea. 터치 피드백(scale 0.95+alpha 0.85), AWAITING시 전체 옵션 리스트 항상 표시, PROCESSING시 LinearProgressIndicator, IDLE시 suggestedPrompt AssistChip. **Voice**: Android AudioRecord → WAV → HTTP POST `/voice/transcribe` → whisper. **Utility proxy**: `bridge/src/utility-proxy.ts` — osascript macOS volume/brightness/media control via Android remote. **Slot map**: Plugin reports SD+ profile layout → Bridge caches → Android mirrors dynamically
-- **Display sleep/wake sync**: `DisplayMonitor` (python3 `CGDisplayIsAsleep()` 2s poll) → `display_state` BridgeEvent → all devices dim/restore. `DISPLAY_FORWARDED_EVENTS` includes `display_state` (auto-propagates to `SERIAL_FORWARDED_EVENTS`). **Pixoo**: `setBrightness(0)` + stream pause (saves HTTP), wake restores `dev.brightness`. **SD+ Plugin**: `displayDimmed` flag → black SVG on all buttons/LCDs, wake → `broadcastStateUpdate()` re-render, `broadcastStateUpdate()` guard skips while dimmed. **Apple iOS**: `DisplaySyncService` — `UIScreen.main.brightness` save/0/restore, background queuing, disconnect safety restore, Settings toggle. **Android**: `BrightnessController.dim()/restore()` — LCD: `WRITE_SETTINGS` 특수 권한 필수 (manifest 선언만으로 부족, `adb shell appops set dev.agentdeck WRITE_SETTINGS allow` 또는 Settings UI에서 "Modify system settings" 허용 필요, 앱 재설치 시 초기화됨), brightness→0 + SCREEN_OFF_TIMEOUT→2s. E-ink: sysfs `/sys/class/backlight/{device}/brightness` 동적 탐색 (`KNOWN_BACKLIGHT_DEVICES` probe) — Crema S(warm/white) 동작, **Pantone 6 sysfs는 SELinux 차단으로 dim 스킵** (proc `/proc/aw99703/led_*`도 앱 context에서 읽기/쓰기 불가, root 필요). **ESP32**: event delivered via serial, firmware handler TBD
-- **Setup-required UI**: Plugin detects `agentdeck` not installed → INSTALL button → `npx @agentdeck/setup` via iTerm
+- **User data dir**: `~/.agentdeck/` — `daemon.json`, `sessions.json`, `auth-token`, `settings.json`, `timeline.json`, `wifi-config.json`, `compatibility.json`
+- **Daemon hub**: Port 9120, sole entry point for all dashboard clients. Session bridges serve internal hook HTTP only (9121-9139). See [docs/daemon.md](docs/daemon.md)
+- **Action ID pattern**: SD actions store string IDs + `getActionById()` — never action object references
+- **Shift+Tab** (`\x1b[Z`) for Claude Code mode switching (100ms debounce)
+- **Version compatibility**: `agentdeck claude` checks Claude Code version via npm + GitHub on startup; never blocks startup
 
-## v4 Layout (0.4.0) — Session-Per-Button
+## Documentation Index
 
-**Manifest actions** (5 total): `session-slot` (Keypad ×8) + 4 encoders (`option-dial`, `voice-dial`, `utility-dial`, `usage-dial`). v3 keypad actions (mode/session/usage/response/stop) removed. Usage dial UUID kept as `iterm-dial` for profile backward compat.
-
-**Keypad (8 slots, all `session-slot`):**
-
-List view: each button = one session (OpenClaw first, then coding agents by port). Detail view (press to enter):
-
-| Slot | List View | Detail View |
-|------|-----------|-------------|
-| 0 | Session 1 | BACK |
-| 1 | Session 2 | Session Info (project+model+state+watermark) |
-| 2-3 | Session 3-4 | Content (options/presets) |
-| 4 | Session 5 | ESC/STOP (always visible, state-aware dimming) |
-| 5-6 | Session 6-7 | Content (options/presets) |
-| 7 | NEXT (paginate) | NEXT (5+ options) or empty |
-
-No daemon: slot 0 = **▶ START** (launches AgentDeck Dashboard app), rest dark.
-
-**OpenClaw presets** (detail view, IDLE/PROCESSING): STATUS, MODEL (dynamic model name + switch), GATEWAY (browser).
-
-**Encoders (4 slots):**
-
-| E# | Action | Rotate | Push | Touch |
-|----|--------|--------|------|-------|
-| E1 | Utility | Adjust value | Toggle/Action | Switch mode |
-| E2 | Action | Scroll options / cycle prompts | Send prompt / Confirm | Same as push |
-| E3 | Usage | Cycle pages (overview/5h/7d/session/extra) | Refresh usage data | Next page |
-| E4 | Voice | Scroll text | Hold=record, tap(<500ms)=cancel, VT push=send/paste | — |
+| Doc | Topic |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Monorepo layout, BridgeCore, PtyAdapter, AgentAdapter, Gateway protocol, plugin connection |
+| [docs/daemon.md](docs/daemon.md) | Daemon hub, singleton guard, mDNS recovery, usage relay, Gateway isolation, multi-surface monitoring |
+| [docs/plugin-conventions.md](docs/plugin-conventions.md) | Encoder LCD, wide canvas, button label, OC Timeline pipeline, D200H HID, display sleep/wake |
+| [docs/v4-layout.md](docs/v4-layout.md) | v4 Session-Per-Button keypad + encoder mapping, v3→v4 changes |
+| [docs/tui-dashboard.md](docs/tui-dashboard.md) | `agentdeck dashboard` — terrarium, sprites, adaptive layouts |
+| [docs/esp32.md](docs/esp32.md) | Firmware boards, flash safety, WiFi provisioning, disconnect recovery |
+| [docs/android.md](docs/android.md) | Android device support matrix, creature rendering |
+| [docs/android-ui.md](docs/android-ui.md) | Android UI/UX Vision — e-ink + tablet layouts, creatures, refresh zones |
+| [docs/voice-setup.md](docs/voice-setup.md) | sox/whisper install + bridge voice runtime |
+| [docs/devices.md](docs/devices.md) | Device-specific details |
+| [docs/protocol.md](docs/protocol.md) | Bridge ↔ plugin WebSocket protocol |
+| [docs/testing.md](docs/testing.md) | Test infrastructure reference |
+| [docs/wake-word.md](docs/wake-word.md) | Porcupine / microWakeWord |
+| [docs/streamdeck-layout.md](docs/streamdeck-layout.md) | Stream Deck layout reference |
 
 ## References
 
@@ -290,14 +167,3 @@ No daemon: slot 0 = **▶ START** (launches AgentDeck Dashboard app), rest dark.
   - [Manifest schema](https://docs.elgato.com/streamdeck/sdk/references/manifest) · [Touch Strip Layout](https://docs.elgato.com/streamdeck/sdk/references/touch-strip-layout) · [WebSocket API](https://docs.elgato.com/streamdeck/sdk/references/websocket-api)
 - **Plugin Samples**: https://github.com/elgatosf/streamdeck-plugin-samples (layouts, cat-keys, hello-world, data-sources, lights-out)
 - **Local SDK reference** (manifest schema, layout items, API methods): `memory/streamdeck-sdk.md`
-
-## v4 Changes from v3
-
-- **Session-per-button**: All 8 keypad slots use `session-slot` action (v3 individual actions removed)
-- **v3 actions removed**: mode-button, session-button, usage-button, response-button, stop-button, expanded-actions
-- **Detail view**: Press session → BACK + INFO + options/presets + ESC/STOP layout
-- **OpenClaw presets**: STATUS, MODEL (dynamic name + switch animation), GATEWAY (browser launch)
-- **Agent watermark**: `dimColor()` approach — high opacity + muted tones for visible but non-intrusive marks
-- **State-aware ESC/STOP**: Active=bright, idle=dimmed, always accessible
-- **No-daemon START**: ▶ START button launches macOS app (replaces "agentdeck daemon start" text)
-- **Plugin icon**: Monochrome terrarium+octopus SVG (transparent bg, white — SD convention)
