@@ -94,10 +94,6 @@ private fun LimitsColumn(state: DashboardState) {
             val reset = usage.sevenDayResetsAt?.let { formatResetTime(it) } ?: ""
             GaugeText("7d", pct, reset, stale)
         }
-        val extraPct = usage.extraUsageUtilization
-        if (extraPct != null && usage.extraUsageEnabled == true) {
-            GaugeText("Ex", extraPct, "", stale)
-        }
     } else if (state.billingType == "api") {
         val cost = usage.costSpent
         val limit = usage.costLimit
@@ -164,7 +160,7 @@ private fun ModelsColumn(state: DashboardState) {
         primary?.let { abbreviateModelName(it.name) }
     }
     if (openClawPrimary != null) {
-        InlineModelLine("Claw", openClawPrimary, labelColor = labelColor)
+        InlineModelLine("OpenClaw", openClawPrimary, labelColor = labelColor)
     }
 
     // Ollama

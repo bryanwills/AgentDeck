@@ -69,7 +69,7 @@ fun EinkStatusPanel(
             primary?.let { abbreviateModelName(it.name) }
         }
         if (openClawPrimary != null) {
-            Text(text = "Claw: $openClawPrimary", style = monoStyle, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+            Text(text = "OpenClaw: $openClawPrimary", style = monoStyle, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
             HorizontalDivider(thickness = 1.dp, color = Color.Black)
         }
 
