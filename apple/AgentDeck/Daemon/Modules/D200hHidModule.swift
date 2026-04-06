@@ -114,8 +114,9 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         // Schedule on main run loop — fires matching callback for already-present devices
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
 
-        // Don't call IOHIDManagerOpen — it fails with kIOReturnNotPermitted when
-        // Keyboard interface is matched (requires Input Monitoring).
+        // Don't call IOHIDManagerOpen here. In a sandboxed app, HID access also
+        // requires the USB entitlement, and opening the manager up front doesn't
+        // buy us anything over opening the matched interfaces individually.
         // Instead, open each device individually in handleDeviceAttached.
         managerOpened = true
 
@@ -224,20 +225,21 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             // Open consumer device individually — needed for IOHIDDeviceSetReport (display writes)
             let openResult = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
             if openResult != kIOReturnSuccess {
-                DaemonLogger.shared.debug("D200H", "Consumer device open failed: \(openResult)")
+                DaemonLogger.shared.debug("D200H", "Consumer device open failed: \(openResult) — skipping (check App Sandbox USB entitlement)")
+                return
             }
             consumerDevice = device
             DaemonLogger.shared.info("D200H Consumer Control interface attached")
         } else if usagePage == KEYBOARD_USAGE_PAGE {
-            keyboardDevice = device
-            DaemonLogger.shared.info("D200H Keyboard interface attached (button events)")
-
             // Open keyboard device — seize not required for D200H custom HID protocol
             // (D200H button reports use 0x7C7C framing, not standard keyboard usage, so hidd doesn't intercept)
             let openResult = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
             if openResult != kIOReturnSuccess {
-                DaemonLogger.shared.debug("D200H", "Keyboard open failed: \(openResult)")
+                DaemonLogger.shared.debug("D200H", "Keyboard open failed: \(openResult) — skipping (check Input Monitoring + App Sandbox USB entitlement)")
+                return
             }
+            keyboardDevice = device
+            DaemonLogger.shared.info("D200H Keyboard interface attached (button events)")
 
             // Register input report callback for button events
             registerInputCallback(device)
