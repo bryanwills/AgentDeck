@@ -9,6 +9,10 @@ set -euo pipefail
 #   2. App Store Connect API key at ~/private_keys/AuthKey_<KEY_ID>.p8
 #      Set env: ASC_API_KEY_ID, ASC_ISSUER_ID
 
+# Ensure system rsync is used (Homebrew rsync lacks -E/--extended-attributes
+# which Xcode's exportArchive requires)
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 APPLE_DIR="$PROJECT_DIR/apple"
