@@ -18,6 +18,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.PathParser
+import dev.agentdeck.terrarium.CreatureNameTagStyle
+import dev.agentdeck.terrarium.creatureNameTagMetric
+import dev.agentdeck.terrarium.resolveCreatureNameTagLayout
 import dev.agentdeck.terrarium.OctopusVisualState
 import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.terrarium.TerrariumLayout
@@ -114,7 +117,7 @@ class OctopusCreature(
             }
             OctopusVisualState.FLOATING -> {
                 // IDLE: stand near bottom with per-instance depth variation + gentle breath bob
-                val myStandingY = STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f
+                val myStandingY = (STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
                 val breathBob = sin(time * 0.8f) * 0.002f
                 val idleSway = sin(time * 0.3f) * 0.005f
                 currentX += (homeX + idleSway - currentX) * dt * 4f
@@ -122,7 +125,7 @@ class OctopusCreature(
             }
             OctopusVisualState.ASKING -> {
                 // Awaiting input: near bottom with per-instance depth variation
-                val myStandingY = STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f
+                val myStandingY = (STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
                 val fidgetX = sin(time * 1.2f) * 0.008f
                 currentX += (homeX + fidgetX - currentX) * dt * 4f
                 currentY += (myStandingY - currentY) * dt * 4f
@@ -231,9 +234,6 @@ class OctopusCreature(
         // The SVG viewBox is 24×24. The robot occupies roughly 24×15 (y: 5→20).
         // Scale so the robot width = bodyRadius * 2
         val svgScale = (bodyRadius * 2f) / SVG_VIEWBOX
-        // Center the path: the SVG center is (12, 12.5) approx
-        val offsetX = cx - SVG_VIEWBOX / 2f * svgScale
-        val offsetY = cy - SVG_VIEWBOX / 2f * svgScale
 
         // Subtle breath scale when not sleeping
         val breathScale = when (visualState) {
@@ -242,10 +242,17 @@ class OctopusCreature(
             else -> 1f + sin(time * 0.6f) * 0.008f
         }
 
+        // Effective scale including breath animation
+        val effScale = svgScale * breathScale
+
+        // Center the SVG at (cx, cy):
+        // 1. Shift SVG so its center (12,12) goes to origin
+        // 2. Scale around origin
+        // 3. Translate to screen (cx, cy)
         scope.withTransform({
-            translate(left = offsetX, top = offsetY)
-            scale(scaleX = svgScale * breathScale, scaleY = svgScale * breathScale,
-                pivot = Offset(SVG_VIEWBOX / 2f, SVG_VIEWBOX / 2f))
+            translate(left = cx, top = cy)
+            scale(scaleX = effScale, scaleY = effScale, pivot = Offset.Zero)
+            translate(left = -SVG_VIEWBOX / 2f, top = -SVG_VIEWBOX / 2f)
         }) {
             drawPath(robotPath, color = bodyColor, alpha = alpha)
 
@@ -351,57 +358,56 @@ class OctopusCreature(
         )
     }
 
-    // Cached name tag layout to avoid per-frame measureText calls
+    // Cached name tag TEXT layout (lines, font size, dimensions) — avoids per-frame measureText.
+    // Position (tagBottomY) is NOT cached — it depends on creature's live Y position.
     private var cachedNameLayout: CachedNameLayout? = null
     private data class CachedNameLayout(
-        val name: String, val fontSize: Float, val bodyRadius: Float,
-        val lines: List<String>, val lineHeight: Float, val hatHeight: Float,
+        val name: String, val bodyMetric: Float,
+        val lines: List<String>, val lineHeight: Float,
+        val tagWidth: Float, val tagHeight: Float, val fontSize: Float,
     )
 
     /** Name tag hat above the robot — only shown in multi-session mode. */
     private fun drawNameTag(scope: DrawScope, cx: Float, cy: Float, bodyRadius: Float, name: String) {
-        val hatY = cy - bodyRadius - bodyRadius * 0.15f
+        val bodyMetric = creatureNameTagMetric(scope.size.width, scaleFactor)
+        val bodyTopY = cy - bodyRadius
+        // Position: always computed from live creature Y
+        val tagBottomY = bodyTopY - bodyMetric * CreatureNameTagStyle.GAP_RATIO
 
-        val hatWidth = bodyRadius * 1.8f
-        val baseFontSize = bodyRadius * 0.5f
-
-        // Use cached layout if name and bodyRadius haven't changed
         val cached = cachedNameLayout
+        val tagWidth: Float
+        val tagHeight: Float
         val chosenSize: Float
         val lines: List<String>
         val lineHeight: Float
-        val hatHeight: Float
 
-        if (cached != null && cached.name == name && cached.bodyRadius == bodyRadius) {
+        if (cached != null && cached.name == name && cached.bodyMetric == bodyMetric) {
+            tagWidth = cached.tagWidth
+            tagHeight = cached.tagHeight
             chosenSize = cached.fontSize
             lines = cached.lines
             lineHeight = cached.lineHeight
-            hatHeight = cached.hatHeight
         } else {
-            // 3-tier adaptive font: 60% → 45% → 35%
-            val tiers = floatArrayOf(0.60f, 0.45f, 0.35f)
-            val maxTextWidth = hatWidth * 0.9f
-            var cs = baseFontSize * tiers[0]
-            var ls = listOf(name)
-
-            for (tier in tiers) {
-                cs = baseFontSize * tier
-                nameTagPaint.textSize = cs
-                val textWidth = nameTagPaint.measureText(name)
-                if (textWidth <= maxTextWidth) {
-                    ls = listOf(name)
-                    break
-                }
-                if (tier == tiers.last()) {
-                    ls = wrapToTwoLines(name, nameTagPaint, maxTextWidth)
-                }
-            }
-
-            chosenSize = cs
-            lines = ls
-            lineHeight = cs * 1.3f
-            hatHeight = if (ls.size == 1) bodyRadius * 0.5f else lineHeight * ls.size + cs * 0.3f
-            cachedNameLayout = CachedNameLayout(name, cs, bodyRadius, ls, lineHeight, hatHeight)
+            val layout = resolveCreatureNameTagLayout(
+                name = name,
+                bodyTopY = bodyTopY,
+                bodyMetric = bodyMetric,
+                paint = nameTagPaint,
+            )
+            tagWidth = layout.tagWidth
+            tagHeight = layout.tagHeight
+            chosenSize = layout.fontSize
+            lines = layout.lines
+            lineHeight = layout.lineHeight
+            cachedNameLayout = CachedNameLayout(
+                name = name,
+                bodyMetric = bodyMetric,
+                lines = lines,
+                lineHeight = lineHeight,
+                tagWidth = tagWidth,
+                tagHeight = tagHeight,
+                fontSize = chosenSize,
+            )
         }
 
         val canvas = scope.drawContext.canvas.nativeCanvas
@@ -410,8 +416,8 @@ class OctopusCreature(
         scope.drawRoundRect(
             color = TerrariumColors.ClaudeBody,
             alpha = 0.6f,
-            topLeft = Offset(cx - hatWidth / 2, hatY - hatHeight),
-            size = Size(hatWidth, hatHeight),
+            topLeft = Offset(cx - tagWidth / 2, tagBottomY - tagHeight),
+            size = Size(tagWidth, tagHeight),
             cornerRadius = CornerRadius(4f, 4f),
         )
 
@@ -419,11 +425,11 @@ class OctopusCreature(
         nameTagPaint.textSize = chosenSize
         if (lines.size == 1) {
             canvas.drawText(
-                lines[0], cx, hatY - hatHeight * 0.25f,
+                lines[0], cx, tagBottomY - tagHeight * 0.25f,
                 nameTagPaint,
             )
         } else {
-            val topY = hatY - hatHeight + chosenSize * 0.3f + chosenSize
+            val topY = tagBottomY - tagHeight + chosenSize * 0.3f + chosenSize
             for (i in lines.indices) {
                 canvas.drawText(
                     lines[i], cx, topY + i * lineHeight,
@@ -431,31 +437,6 @@ class OctopusCreature(
                 )
             }
         }
-    }
-
-    /** Split text into 2 lines at the space closest to the middle, minimizing max line width. */
-    private fun wrapToTwoLines(text: String, paint: Paint, maxWidth: Float): List<String> {
-        val spaces = text.indices.filter { text[it] == ' ' }
-        if (spaces.isEmpty()) return listOf(text) // no space to split
-
-        val mid = text.length / 2
-        // Find split that minimizes max line width
-        var bestSplit = spaces.minByOrNull { kotlin.math.abs(it - mid) } ?: return listOf(text)
-        var bestMax = Float.MAX_VALUE
-
-        for (sp in spaces) {
-            val line1 = text.substring(0, sp)
-            val line2 = text.substring(sp + 1)
-            val w1 = paint.measureText(line1)
-            val w2 = paint.measureText(line2)
-            val maxW = maxOf(w1, w2)
-            if (maxW < bestMax) {
-                bestMax = maxW
-                bestSplit = sp
-            }
-        }
-
-        return listOf(text.substring(0, bestSplit), text.substring(bestSplit + 1))
     }
 
     private fun lerpColor(a: Color, b: Color, t: Float): Color {
@@ -483,7 +464,7 @@ class OctopusCreature(
 
     companion object {
         /** Standing position Y — just above the sand line (0.65). */
-        private const val STANDING_Y = 0.62f
+        private const val STANDING_Y = 0.635f
         /** Deep sleeping position Y — lower, partially hidden. */
         private const val STANDING_Y_DEEP = 0.75f
 

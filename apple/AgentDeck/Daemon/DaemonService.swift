@@ -61,6 +61,15 @@ final class DaemonService: ObservableObject {
         sessionOverridePort ?? AppPreferences.shared.daemonPort
     }
 
+    nonisolated static func promotionTargetPort(currentPort: UInt16, effectivePort: Int) -> Int {
+        let activePort = Int(currentPort)
+        return activePort > 0 ? activePort : effectivePort
+    }
+
+    nonisolated static func resolvedSessionOverridePort(configuredPort: Int, actualPort: Int) -> Int? {
+        actualPort == configuredPort ? nil : actualPort
+    }
+
     init() {
         start()
         setupSignalHandler()
@@ -122,12 +131,7 @@ final class DaemonService: ObservableObject {
                 self.readyUrl = wsUrl
                 self.listenerFailureRetries = 0  // reset backoff on success
                 self.squatterCleanupAttempted = false
-                self.isOnFallbackPort = (self.sessionOverridePort != nil)
-                if self.isOnFallbackPort {
-                    self.bindFailureReason = "Daemon moved to fallback port \(daemon.port) because \(AppPreferences.defaultDaemonPort) was held by another process. Clients will rediscover via mDNS."
-                } else {
-                    self.bindFailureReason = nil
-                }
+                self.syncResolvedPortState(actualPort: Int(daemon.port))
                 DaemonLogger.shared.info("Daemon ready — dashboard can connect to \(wsUrl)")
                 self.onReady?(wsUrl)
             } catch DaemonError.alreadyRunning(let port) {
@@ -181,7 +185,7 @@ final class DaemonService: ObservableObject {
         errorMessage = nil
         bindFailureReason = nil
 
-        let targetPort = effectivePort
+        let targetPort = Self.promotionTargetPort(currentPort: port, effectivePort: effectivePort)
         let registry = SessionRegistry.shared
 
         if let health = await registry.probeDaemonHealth(port: targetPort),
@@ -194,10 +198,7 @@ final class DaemonService: ObservableObject {
                 await connectToExternalDaemon(port: targetPort)
                 return
             }
-            // Self-detection — local daemon IS us. Don't kill the whole
-            // daemon just because one module (D200H) lacks USB entitlement.
-            DaemonLogger.shared.info("D200H promotion: skipping self-detected daemon on port \(targetPort)")
-            return
+            DaemonLogger.shared.info("D200H promotion: replacing local daemon on port \(targetPort) with bundled helper")
         }
 
         await stop()
@@ -305,9 +306,24 @@ final class DaemonService: ObservableObject {
         self.externalFailureCount = 0
         self.errorMessage = nil
         self.readyUrl = wsUrl
+        self.syncResolvedPortState(actualPort: resolvedPort)
         self.startHealthMonitor()
         DaemonLogger.shared.info("External daemon detected on port \(resolvedPort) — connecting as client")
         self.onReady?(wsUrl)
+    }
+
+    private func syncResolvedPortState(actualPort: Int) {
+        let configuredPort = AppPreferences.shared.daemonPort
+        sessionOverridePort = Self.resolvedSessionOverridePort(
+            configuredPort: configuredPort,
+            actualPort: actualPort
+        )
+        isOnFallbackPort = (sessionOverridePort != nil)
+        if isOnFallbackPort {
+            bindFailureReason = "Daemon moved to fallback port \(actualPort) because \(configuredPort) was held by another process. Clients will rediscover via mDNS."
+        } else {
+            bindFailureReason = nil
+        }
     }
 
     private func stopOwnedExternalDaemonIfNeeded() async {

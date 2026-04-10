@@ -16,6 +16,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import dev.agentdeck.terrarium.CreatureNameTagStyle
+import dev.agentdeck.terrarium.creatureNameTagMetric
+import dev.agentdeck.terrarium.resolveCreatureNameTagLayout
 import dev.agentdeck.terrarium.OctopusVisualState
 import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.terrarium.TerrariumLayout
@@ -122,14 +125,14 @@ class CloudCreature(
                 currentY += (myDeepY - currentY) * dt * 4f
             }
             OctopusVisualState.FLOATING -> {
-                val myStandingY = STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f
+                val myStandingY = (STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
                 val breathBob = sin(time * 0.6f) * 0.003f
                 val idleSway = sin(time * 0.25f) * 0.004f
                 currentX += (homeX + idleSway - currentX) * dt * 4f
                 currentY += (myStandingY + breathBob - currentY) * dt * 4f
             }
             OctopusVisualState.ASKING -> {
-                val myStandingY = ASKING_Y + standingJitter + (homeX - 0.4f) * 0.15f
+                val myStandingY = (ASKING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
                 val fidgetX = sin(time * 1.0f) * 0.006f
                 currentX += (homeX + fidgetX - currentX) * dt * 4f
                 currentY += (myStandingY - currentY) * dt * 4f
@@ -407,54 +410,55 @@ class CloudCreature(
         )
     }
 
-    // Cached name tag layout
+    // Cached name tag TEXT layout — avoids per-frame measureText.
+    // Position (tagBottomY) NOT cached — depends on creature's live Y.
     private var cachedNameLayout: CachedNameLayout? = null
     private data class CachedNameLayout(
-        val name: String, val fontSize: Float, val bodyRadius: Float,
-        val lines: List<String>, val lineHeight: Float, val hatHeight: Float,
+        val name: String, val bodyMetric: Float,
+        val lines: List<String>, val lineHeight: Float,
+        val tagWidth: Float, val tagHeight: Float, val fontSize: Float,
     )
 
     /** Name tag above the cloud — only shown in multi-session mode. */
     private fun drawNameTag(scope: DrawScope, cx: Float, cy: Float, bodyRadius: Float, name: String) {
-        val hatY = cy - bodyRadius * 0.9f // above the top lobes
-        val hatWidth = bodyRadius * 1.8f
-        val baseFontSize = bodyRadius * 0.5f
+        val bodyMetric = creatureNameTagMetric(scope.size.width, scaleFactor)
+        val bodyTopY = cy - bodyRadius * 0.60f
+        val tagBottomY = bodyTopY - bodyMetric * CreatureNameTagStyle.GAP_RATIO
 
         val cached = cachedNameLayout
+        val tagWidth: Float
+        val tagHeight: Float
         val chosenSize: Float
         val lines: List<String>
         val lineHeight: Float
-        val hatHeight: Float
 
-        if (cached != null && cached.name == name && cached.bodyRadius == bodyRadius) {
+        if (cached != null && cached.name == name && cached.bodyMetric == bodyMetric) {
+            tagWidth = cached.tagWidth
+            tagHeight = cached.tagHeight
             chosenSize = cached.fontSize
             lines = cached.lines
             lineHeight = cached.lineHeight
-            hatHeight = cached.hatHeight
         } else {
-            val tiers = floatArrayOf(0.60f, 0.45f, 0.35f)
-            val maxTextWidth = hatWidth * 0.9f
-            var cs = baseFontSize * tiers[0]
-            var ls = listOf(name)
-
-            for (tier in tiers) {
-                cs = baseFontSize * tier
-                nameTagPaint.textSize = cs
-                val textWidth = nameTagPaint.measureText(name)
-                if (textWidth <= maxTextWidth) {
-                    ls = listOf(name)
-                    break
-                }
-                if (tier == tiers.last()) {
-                    ls = wrapToTwoLines(name, nameTagPaint, maxTextWidth)
-                }
-            }
-
-            chosenSize = cs
-            lines = ls
-            lineHeight = cs * 1.3f
-            hatHeight = if (ls.size == 1) bodyRadius * 0.5f else lineHeight * ls.size + cs * 0.3f
-            cachedNameLayout = CachedNameLayout(name, cs, bodyRadius, ls, lineHeight, hatHeight)
+            val layout = resolveCreatureNameTagLayout(
+                name = name,
+                bodyTopY = bodyTopY,
+                bodyMetric = bodyMetric,
+                paint = nameTagPaint,
+            )
+            tagWidth = layout.tagWidth
+            tagHeight = layout.tagHeight
+            chosenSize = layout.fontSize
+            lines = layout.lines
+            lineHeight = layout.lineHeight
+            cachedNameLayout = CachedNameLayout(
+                name = name,
+                bodyMetric = bodyMetric,
+                lines = lines,
+                lineHeight = lineHeight,
+                tagWidth = tagWidth,
+                tagHeight = tagHeight,
+                fontSize = chosenSize,
+            )
         }
 
         val canvas = scope.drawContext.canvas.nativeCanvas
@@ -463,19 +467,19 @@ class CloudCreature(
         scope.drawRoundRect(
             color = DEEP_BLUE_BOTTOM,
             alpha = 0.6f,
-            topLeft = Offset(cx - hatWidth / 2, hatY - hatHeight),
-            size = Size(hatWidth, hatHeight),
+            topLeft = Offset(cx - tagWidth / 2, tagBottomY - tagHeight),
+            size = Size(tagWidth, tagHeight),
             cornerRadius = CornerRadius(4f, 4f),
         )
 
         nameTagPaint.textSize = chosenSize
         if (lines.size == 1) {
             canvas.drawText(
-                lines[0], cx, hatY - hatHeight * 0.25f,
+                lines[0], cx, tagBottomY - tagHeight * 0.25f,
                 nameTagPaint,
             )
         } else {
-            val topY = hatY - hatHeight + chosenSize * 0.3f + chosenSize
+            val topY = tagBottomY - tagHeight + chosenSize * 0.3f + chosenSize
             for (i in lines.indices) {
                 canvas.drawText(
                     lines[i], cx, topY + i * lineHeight,
@@ -483,28 +487,6 @@ class CloudCreature(
                 )
             }
         }
-    }
-
-    private fun wrapToTwoLines(text: String, paint: Paint, maxWidth: Float): List<String> {
-        val spaces = text.indices.filter { text[it] == ' ' }
-        if (spaces.isEmpty()) return listOf(text)
-
-        var bestSplit = spaces.minByOrNull { kotlin.math.abs(it - text.length / 2) } ?: return listOf(text)
-        var bestMax = Float.MAX_VALUE
-
-        for (sp in spaces) {
-            val line1 = text.substring(0, sp)
-            val line2 = text.substring(sp + 1)
-            val w1 = paint.measureText(line1)
-            val w2 = paint.measureText(line2)
-            val maxW = maxOf(w1, w2)
-            if (maxW < bestMax) {
-                bestMax = maxW
-                bestSplit = sp
-            }
-        }
-
-        return listOf(text.substring(0, bestSplit), text.substring(bestSplit + 1))
     }
 
     private fun lerpColor(a: Color, b: Color, t: Float): Color {
@@ -540,7 +522,7 @@ class CloudCreature(
     companion object {
         // Positions
         /** FLOATING (idle): rests on floor. */
-        private const val STANDING_Y = 0.60f
+        private const val STANDING_Y = 0.635f
         /** SLEEPING: dim, near bottom. */
         private const val STANDING_Y_DEEP = 0.75f
         /** ASKING: mid-water. */

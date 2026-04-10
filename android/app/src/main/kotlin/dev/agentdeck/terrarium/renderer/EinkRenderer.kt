@@ -25,6 +25,9 @@ import dev.agentdeck.terrarium.CrayfishVisualState
 import dev.agentdeck.terrarium.OctopusVisualState
 import dev.agentdeck.terrarium.TetraVisualState
 import dev.agentdeck.terrarium.TerrariumState
+import dev.agentdeck.terrarium.CreatureNameTagStyle
+import dev.agentdeck.terrarium.creatureNameTagMetric
+import dev.agentdeck.terrarium.resolveCreatureNameTagLayout
 import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -58,6 +61,12 @@ private val EINK_OPENCODE_GRID = arrayOf(
     intArrayOf(8,0,0,0,0,0,0,0,0,8),
     intArrayOf(8,8,8,8,8,8,8,8,8,8),
 )
+
+// --- E-ink Codex CLI knot/clover SVG path (from codex.svg, viewBox 0 0 24 24) ---
+
+private const val EINK_CODEX_VIEWBOX = 24f
+
+// Codex logo not needed as separate path — rendered as 6-lobe clover (matching tablet CloudCreature)
 
 // --- E-ink crayfish SVG paths (cached, android.graphics.Path) ---
 
@@ -636,8 +645,8 @@ private fun drawEinkOctopus(
     val standingOffset = (centerXFraction - 0.38f) * 0.25f
     val cy = when (state) {
         OctopusVisualState.SLEEPING -> h * (0.78f + standingOffset * 0.5f)
-        OctopusVisualState.FLOATING -> h * (0.74f + standingOffset)
-        OctopusVisualState.ASKING -> h * (0.74f + standingOffset)
+        OctopusVisualState.FLOATING -> h * (0.76f + standingOffset).coerceAtMost(0.80f)
+        OctopusVisualState.ASKING -> h * (0.76f + standingOffset).coerceAtMost(0.80f)
         OctopusVisualState.WORKING -> h * (centerYFraction +
             0.02f * kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat())
     }
@@ -684,9 +693,8 @@ private fun drawEinkOctopus(
     }
 
     // Name tag FIRST (behind bubble) — multi-session only
-    val nameTagY = cy - bodyWidth / 2f
     if (displayName != null) {
-        drawEinkNameTag(canvas, paint, cx, nameTagY, scaleFactor, displayName, w)
+        drawEinkNameTag(canvas, paint, cx, startY, scaleFactor, displayName, w)
     }
 
     // ASKING: speech bubble with "?" — beside body center
@@ -715,46 +723,24 @@ private fun drawEinkOctopus(
 /** E-ink name tag above octopus — adaptive font with 2-line wrapping, text-fit width. */
 private fun drawEinkNameTag(
     canvas: android.graphics.Canvas, paint: Paint,
-    cx: Float, startY: Float, scaleFactor: Float,
+    cx: Float, bodyTopY: Float, scaleFactor: Float,
     name: String, w: Int,
 ) {
-    val baseFontSize = w * 0.024f * scaleFactor
-    val maxTagWidth = w * 0.16f * scaleFactor * 1.8f
-    val maxTextWidth = maxTagWidth * 0.9f
-    val hPad = baseFontSize * 0.6f  // horizontal padding each side
-    val gap = baseFontSize * 0.4f
-
-    // 3-tier adaptive font: 100% → 75% → 60%
-    val tiers = floatArrayOf(1.0f, 0.75f, 0.60f)
-    var chosenSize = baseFontSize
-    var lines = listOf(name)
+    val bodyMetric = creatureNameTagMetric(w.toFloat(), scaleFactor)
 
     paint.textAlign = Paint.Align.CENTER
-    for (tier in tiers) {
-        chosenSize = baseFontSize * tier
-        paint.textSize = chosenSize
-        val textWidth = paint.measureText(name)
-        if (textWidth <= maxTextWidth) {
-            lines = listOf(name)
-            break
-        }
-        if (tier == tiers.last()) {
-            lines = einkWrapToTwoLines(name, paint, maxTextWidth)
-        }
-    }
-
-    // Dynamic width: measure actual text + minimal padding
-    val measuredMaxLine = lines.maxOf { paint.measureText(it) }
-    val tagWidth = (measuredMaxLine + hPad * 2).coerceAtMost(maxTagWidth)
-
-    val lineHeight = chosenSize * 1.3f
-    val tagHeight = if (lines.size == 1) chosenSize * 1.6f else lineHeight * lines.size + chosenSize * 0.4f
-    val tagTop = (startY - tagHeight - gap).coerceAtLeast(2f)
+    val layout = resolveCreatureNameTagLayout(
+        name = name,
+        bodyTopY = bodyTopY,
+        bodyMetric = bodyMetric,
+        paint = paint,
+    )
+    val tagTop = (layout.tagBottomY - layout.tagHeight).coerceAtLeast(2f)
 
     // Background rounded rect for readability
     paint.color = einkPick(GRAY_WATER_BG, COLOR_WATER_BG)
     paint.style = Paint.Style.FILL
-    val rect = RectF(cx - tagWidth / 2, tagTop, cx + tagWidth / 2, tagTop + tagHeight)
+    val rect = RectF(cx - layout.tagWidth / 2, tagTop, cx + layout.tagWidth / 2, tagTop + layout.tagHeight)
     canvas.drawRoundRect(rect, 3f, 3f, paint)
     // Border for separation from background
     paint.color = einkPick(GRAY_OCTO_LIMB, COLOR_OCTO_LIMB)
@@ -765,39 +751,18 @@ private fun drawEinkNameTag(
     // Text in dark gray for contrast
     paint.color = GRAY_CREATURE
     paint.style = Paint.Style.FILL
-    paint.textSize = chosenSize
+    paint.textSize = layout.fontSize
 
-    if (lines.size == 1) {
-        canvas.drawText(lines[0], cx, tagTop + tagHeight * 0.65f, paint)
+    if (layout.lines.size == 1) {
+        canvas.drawText(layout.lines[0], cx, layout.tagBottomY - layout.tagHeight * 0.25f, paint)
     } else {
-        val topTextY = tagTop + chosenSize * 0.3f + chosenSize
-        for (i in lines.indices) {
-            canvas.drawText(lines[i], cx, topTextY + i * lineHeight, paint)
+        val topTextY = tagTop + layout.fontSize * CreatureNameTagStyle.MULTILINE_EXTRA_RATIO + layout.fontSize
+        for (i in layout.lines.indices) {
+            canvas.drawText(layout.lines[i], cx, topTextY + i * layout.lineHeight, paint)
         }
     }
 
     paint.textAlign = Paint.Align.LEFT
-}
-
-/** Split text into 2 lines at the space that minimizes max line width. */
-private fun einkWrapToTwoLines(text: String, paint: Paint, maxWidth: Float): List<String> {
-    val spaces = text.indices.filter { text[it] == ' ' }
-    if (spaces.isEmpty()) return listOf(text)
-
-    var bestSplit = spaces.minByOrNull { kotlin.math.abs(it - text.length / 2) } ?: return listOf(text)
-    var bestMax = Float.MAX_VALUE
-
-    for (sp in spaces) {
-        val w1 = paint.measureText(text, 0, sp)
-        val w2 = paint.measureText(text, sp + 1, text.length)
-        val maxW = maxOf(w1, w2)
-        if (maxW < bestMax) {
-            bestMax = maxW
-            bestSplit = sp
-        }
-    }
-
-    return listOf(text.substring(0, bestSplit), text.substring(bestSplit + 1))
 }
 
 /**
@@ -830,7 +795,7 @@ private fun drawEinkCloud(
     // State-based Y: WORKING uses layout swim slot (top),
     // IDLE/SLEEPING rests near ground so idle sessions don't hover up top.
     // X-correlated depth offset mimics the octopus "standingOffset" pattern.
-    val restY = 0.56f + (centerXFraction - 0.40f) * 0.08f
+    val restY = (0.64f + (centerXFraction - 0.40f) * 0.08f).coerceAtMost(0.76f)
     val baseYFraction = when (state) {
         OctopusVisualState.WORKING -> centerYFraction
         OctopusVisualState.ASKING -> (centerYFraction + restY) * 0.5f
@@ -849,9 +814,6 @@ private fun drawEinkCloud(
     }
     val cy = h * baseYFraction + bobY
 
-    // Cloud body radius — similar sizing to octopus bodyWidth
-    val bodyRadius = w * 0.055f * scaleFactor
-
     // Breath animation — subtle scale pulse for active states
     val breathScale = when (state) {
         OctopusVisualState.WORKING -> 1f + 0.04f *
@@ -869,55 +831,62 @@ private fun drawEinkCloud(
         einkPick(GRAY_CLOUD_BODY, COLOR_CLOUD_BODY)
     }
 
-    // Body: single pill-shaped oval matching Codex blob silhouette (wider than tall)
-    val bodyWidth = bodyRadius * 1.50f * breathScale
-    val bodyHeight = bodyRadius * 1.15f * breathScale
+    // Body: 6-lobe clover matching tablet CloudCreature — same LOBE_OFFSETS/RADII.
+    // bodyRadius=0.055f gives lobes large enough to overlap (offset ≈ radius → solid clover).
+    val bodyRadius = w * 0.055f * scaleFactor
+    val br = bodyRadius * breathScale
     paint.style = Paint.Style.FILL
     paint.color = bodyColor
-    canvas.drawOval(
-        cx - bodyWidth, cy - bodyHeight,
-        cx + bodyWidth, cy + bodyHeight,
-        paint,
-    )
 
-    // Single clean outline — no internal seams
+    // Tablet CloudCreature LOBE_OFFSETS (dx, dy as fraction of bodyRadius)
+    val lobeDx = floatArrayOf(-0.14f, 0.16f, 0.32f, 0.14f, -0.16f, -0.32f)
+    val lobeDy = floatArrayOf(-0.30f, -0.26f, -0.02f, 0.26f, 0.26f, -0.02f)
+    val lobeR  = floatArrayOf( 0.30f,  0.29f,  0.28f,  0.29f,  0.30f,  0.28f)
+
+    for (i in 0 until 6) {
+        canvas.drawCircle(cx + br * lobeDx[i], cy + br * lobeDy[i], br * lobeR[i], paint)
+    }
+    // Central fill to seal inter-lobe gaps
+    canvas.drawCircle(cx, cy, br * 0.18f, paint)
+
+    // Effective body extents for positioning
+    val bodyHeight = br * 0.60f  // top lobe at dy=-0.30 + radius 0.30
+    val bodyExtentX = br * 0.60f // right lobe at dx=0.32 + radius 0.28
+
+    // Outline for e-ink edge definition
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 1.5f * scaleFactor
     paint.color = einkPick(GRAY_CLOUD_PROMPT, COLOR_CLOUD_PROMPT)
-    canvas.drawOval(
-        cx - bodyWidth, cy - bodyHeight,
-        cx + bodyWidth, cy + bodyHeight,
-        paint,
-    )
+    for (i in 0 until 6) {
+        canvas.drawCircle(cx + br * lobeDx[i], cy + br * lobeDy[i], br * lobeR[i], paint)
+    }
 
-    // ">_" terminal prompt text inside cloud body
+    // ">_" terminal prompt inside the clover body
     if (state != OctopusVisualState.SLEEPING) {
         paint.style = Paint.Style.FILL
-        paint.color = einkPick(GRAY_CLOUD_PROMPT, COLOR_CLOUD_PROMPT)
+        paint.color = einkPick(GRAY_AIR, COLOR_AIR)
         paint.textAlign = Paint.Align.CENTER
-        paint.textSize = bodyRadius * 0.75f * scaleFactor
+        paint.textSize = br * 0.28f
         paint.typeface = android.graphics.Typeface.MONOSPACE
-        // Cursor blink for ASKING state (2-frame on, 2-frame off)
         val promptText = when {
             state == OctopusVisualState.ASKING && animFrame % 4 >= 2 -> ">_"
             state == OctopusVisualState.ASKING -> "> "
             else -> ">_"
         }
-        canvas.drawText(promptText, cx, cy + bodyRadius * 0.20f, paint)
+        canvas.drawText(promptText, cx, cy + paint.textSize * 0.3f, paint)
         paint.textAlign = Paint.Align.LEFT
         paint.typeface = android.graphics.Typeface.DEFAULT
     }
 
     // Name tag above cloud (reuse the shared name tag renderer)
     if (displayName != null) {
-        val topY = cy - bodyHeight - bodyRadius * 0.15f
-        drawEinkNameTag(canvas, paint, cx, topY, scaleFactor, displayName, w)
+        drawEinkNameTag(canvas, paint, cx, cy - bodyHeight, scaleFactor, displayName, w)
     }
 
     // ASKING: speech bubble with "?" beside body (same pattern as octopus)
     if (state == OctopusVisualState.ASKING) {
-        val bubbleR = bodyRadius * 0.25f * scaleFactor
-        val bubbleX = cx + bodyWidth + bubbleR * 0.8f
+        val bubbleR = bodyExtentX * 0.35f
+        val bubbleX = cx + bodyExtentX + bubbleR * 0.8f
         val bubbleY = cy
 
         paint.color = einkPick(GRAY_AIR, COLOR_AIR)
@@ -961,7 +930,7 @@ private fun drawEinkOpenCode(
     val cx = w * (centerXFraction + wanderX)
     // State-based Y: WORKING uses layout swim slot (mid-upper),
     // IDLE/SLEEPING rests near ground so idle sessions don't hover in the water.
-    val restY = 0.60f + (centerXFraction - 0.55f) * 0.06f
+    val restY = (0.64f + (centerXFraction - 0.55f) * 0.06f).coerceAtMost(0.76f)
     val baseYFraction = when (state) {
         OctopusVisualState.WORKING -> centerYFraction
         OctopusVisualState.ASKING -> (centerYFraction + restY) * 0.5f
@@ -1007,7 +976,17 @@ private fun drawEinkOpenCode(
         cornerR, cornerR, paint,
     )
 
+    // Outer frame outline for e-ink edge definition
+    paint.style = Paint.Style.STROKE
+    paint.color = einkPick(GRAY_OPENCODE_INNER, COLOR_OPENCODE_INNER)
+    paint.strokeWidth = 1.5f * scaleFactor
+    canvas.drawRoundRect(
+        cx - outerHalf, cy - outerHalf, cx + outerHalf, cy + outerHalf,
+        cornerR, cornerR, paint,
+    )
+
     // Inner square (rounded rect)
+    paint.style = Paint.Style.FILL
     paint.color = innerColor
     canvas.drawRoundRect(
         cx - innerHalf, cy - innerHalf, cx + innerHalf, cy + innerHalf,
@@ -1727,9 +1706,9 @@ private const val GRAY_CRAY_SICK  = 0xFF666666.toInt()  // level 6 — washed ou
 private const val GRAY_CLOUD_BODY = 0xFF555555.toInt()  // level 5 — cloud body (slightly lighter than octopus 0x44)
 private const val GRAY_CLOUD_PROMPT = 0xFF222222.toInt()  // level 2 — >_ terminal prompt text
 private const val GRAY_CLOUD_SLEEP = 0xFF888888.toInt()  // level 8 — dormant/sleeping cloud (faded)
-private const val GRAY_OPENCODE_OUTER = 0xFFBBBBBB.toInt() // level 11 — outer frame (bright, light gray)
+private const val GRAY_OPENCODE_OUTER = 0xFF888888.toInt() // level 8 — outer frame (visible contrast vs water BG level 13)
 private const val GRAY_OPENCODE_INNER = 0xFF444444.toInt() // level 4 — inner square (dark gray)
-private const val GRAY_OPENCODE_SLEEP = 0xFF888888.toInt() // level 8 — sleeping/dormant (faded)
+private const val GRAY_OPENCODE_SLEEP = 0xFFAAAAAA.toInt() // level 10 — sleeping/dormant (faded, distinct from active outer)
 private const val GRAY_STARBURST  = 0xFF999999.toInt()  // level 9 — WORKING starburst glow
 private const val GRAY_DECORATION = 0xFF444444.toInt()  // level 4 — keyboard, review docs
 private const val GRAY_SEAWEED    = 0xFF666666.toInt()  // level 6 — seaweed stems
