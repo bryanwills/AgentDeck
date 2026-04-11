@@ -1676,10 +1676,10 @@ private func ctFont(_ size: CGFloat, bold: Bool = false) -> CTFont {
     return CTFontCreateWithName(name, size, nil)
 }
 
-/// Draw CoreText string centered horizontally within [leftBound, rightBound], at given y (top-down, auto-flipped)
+/// Draw CoreText string horizontally within [leftBound, rightBound], at given y (top-down, auto-flipped)
 private func drawText(
     _ text: String, ctx: CGContext, y: CGFloat, color: CGColor,
-    font: CTFont, leftBound: CGFloat = 14, rightBound: CGFloat = 182, alpha: CGFloat = 1.0
+    font: CTFont, leftBound: CGFloat = 14, rightBound: CGFloat = 182, alpha: CGFloat = 1.0, alignLeft: Bool = false
 ) {
     let s = CGFloat(ICON_SIZE)
     let attrs: [NSAttributedString.Key: Any] = [
@@ -1691,7 +1691,7 @@ private func drawText(
     let bounds = CTLineGetBoundsWithOptions(line, [])
     let maxW = rightBound - leftBound
     let textW = min(bounds.width, maxW)
-    let tx = leftBound + (maxW - textW) / 2
+    let tx = alignLeft ? leftBound : leftBound + (maxW - textW) / 2
     let flippedY = s - y - bounds.height
     ctx.saveGState()
     if alpha < 1.0 { ctx.setAlpha(alpha) }
@@ -1800,9 +1800,7 @@ private func renderButtonPng(_ slot: ButtonSlot) -> Data {
         let iconColor = slot.iconColor ?? rgb(241, 245, 249)
         let iconRect: CGRect
         if isBrandTile {
-            let badgeRect = CGRect(x: 44, y: 14, width: s - 88, height: 74)
-            drawSessionBadge(ctx, rect: badgeRect, brandColor: iconColor, backgroundColor: slot.bg)
-            iconRect = badgeRect.insetBy(dx: 18, dy: 10)
+            iconRect = CGRect(x: 18, y: 18, width: 64, height: 64)
         } else if slot.textOverlay == .usageStat {
             iconRect = CGRect(x: 58, y: 18, width: s - 116, height: 52)
         } else {
@@ -1825,17 +1823,15 @@ private func renderButtonPng(_ slot: ButtonSlot) -> Data {
         break
     }
 
-    // 6. Status dot for animated states
-    if slot.enabled && isBrandTile && slot.textOverlay != .sessionTile {
-        let dotR: CGFloat = 5
-        let dotX: CGFloat = pad + 12
-        let dotY: CGFloat = s - pad - 16
-        switch slot.borderStyle {
-        case .awaitingPulse(let color, _), .processingDash(let color, _):
-            ctx.setFillColor(color)
-            ctx.fillEllipse(in: CGRect(x: dotX - dotR, y: dotY - dotR, width: dotR * 2, height: dotR * 2))
-        case .solid, .none: break
-        }
+    // 6. Status dot at Top Right
+    if slot.enabled && isBrandTile {
+        let dotR: CGFloat = 8
+        let dotX: CGFloat = s - pad - 20
+        let dotY: CGFloat = pad + 20
+        let dotColor = slot.statusColor ?? rgb(148, 163, 184)
+        
+        ctx.setFillColor(dotColor)
+        ctx.fillEllipse(in: CGRect(x: dotX - dotR, y: dotY - dotR, width: dotR * 2, height: dotR * 2))
     }
 
     guard let image = ctx.makeImage() else { return Data() }
@@ -1864,15 +1860,19 @@ private func drawSessionTextOverlay(_ ctx: CGContext, slot: ButtonSlot) {
     let projectName = String(slot.title.prefix(16))
     let model = String(slot.modelName.prefix(16))
     let state = String(slot.stateLabel.prefix(18))
-    let projectFont = ctFont(projectName.count > 10 ? 18 : 22, bold: true)
+    let projectFont = ctFont(projectName.count > 10 ? 20 : 24, bold: true)
 
-    drawText(projectName, ctx: ctx, y: 96, color: rgb(255, 255, 255), font: projectFont, leftBound: 18, rightBound: 178)
+    let leftEdge: CGFloat = 18
+
+    drawText(projectName, ctx: ctx, y: 130, color: rgb(255, 255, 255), font: projectFont, leftBound: leftEdge, rightBound: 182, alignLeft: true)
+    
     if !model.isEmpty {
-        drawText(model, ctx: ctx, y: 118, color: rgb(148, 163, 184), font: ctFont(13), leftBound: 18, rightBound: 178, alpha: 0.96)
+        drawText(model, ctx: ctx, y: 152, color: rgb(148, 163, 184), font: ctFont(16, bold: true), leftBound: leftEdge, rightBound: 182, alpha: 0.96, alignLeft: true)
     }
+    
     if !state.isEmpty {
         let stateColor = slot.statusColor ?? rgb(148, 163, 184)
-        drawText("● \(state)", ctx: ctx, y: 146, color: stateColor, font: ctFont(15, bold: true), leftBound: 18, rightBound: 178)
+        drawText(state, ctx: ctx, y: 176, color: stateColor, font: ctFont(15, bold: true), leftBound: leftEdge, rightBound: 182, alignLeft: true)
     }
 }
 
