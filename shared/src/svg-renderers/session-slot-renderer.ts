@@ -58,62 +58,84 @@ export function renderSessionSlot(
   animFrame: number,
   displayName?: string,
 ): string {
-  const isAwaiting = session.state?.startsWith('awaiting') ?? false;
+  const isWorking = session.state === 'processing';
+  const isAsking = session.state?.startsWith('awaiting') ?? false;
+  const isIdle = !isWorking && !isAsking;
+  
   const agent = (session.agentType as AgentType) || 'claude-code';
-  const sColor = stateColor(session.state);
-  const bgColor = isActive ? '#1e3a5f' : (isAwaiting ? '#2d1810' : '#1a1a2e');
-
   const nameForDisplay = displayName ?? session.projectName;
+  const modelText = session.modelName ? truncate(session.modelName, 12) : '';
 
-  // Project name (main text, bold)
-  const projectName = truncate(nameForDisplay, 16);
-  const projFontSize = projectName.length > 10 ? 16 : 20;
+  // Custom palette mimicking the premium demo
+  const p1 = agent === 'claude-code' ? '#D97757' : agent === 'codex-cli' ? '#8BA4FF' : agent === 'openclaw' ? '#FF6B6B' : '#F1ECEC';
+  const p2 = agent === 'claude-code' ? '#BE6D52' : agent === 'codex-cli' ? '#5981FF' : agent === 'openclaw' ? '#CC3333' : '#AFAFAF';
 
-  // Model name
-  const modelText = session.modelName ? truncate(session.modelName, 16) : '';
+  const sColor = stateColor(session.state);
+  const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
 
-  // State indicator
-  const stateLbl = stateLabel(session.state, agent);
+  const stateLbl = isWorking ? 'RUNNING' : isAsking ? 'PERMIT?' : 'IDLE';
+  const colorText = isWorking ? '#FDE68A' : isAsking ? '#FECACA' : p1;
 
-  // Premium widget layout fonts
-  const fontFam = '-apple-system, system-ui, Helvetica Neue, sans-serif';
+  const gradId = `sd-bg-${agent}-${session.state || 'idle'}`;
+  
+  let defs = `
+    <linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1C1C1E"/>
+      <stop offset="100%" stop-color="#0C0C0E"/>
+    </linearGradient>
+  `;
 
-  // Agent creature icon — top-left
-  const icon = agentLogoIcon(agent, 36, 0.9, 28, 28);
-
-  // AWAITING pulse glow border
   let glowBorder = '';
-  if (isAwaiting) {
+  let askDot = '';
+  if (isAsking) {
     const pulseOpacity = 0.4 + 0.5 * Math.abs(Math.sin(animFrame * 0.15));
-    glowBorder = [
-      `<defs><filter id="pg" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur in="SourceGraphic" stdDeviation="2"/></filter></defs>`,
-      `<rect x="2" y="2" width="140" height="140" rx="11" fill="none" stroke="${sColor}" stroke-width="2.5" opacity="${pulseOpacity.toFixed(2)}" filter="url(#pg)"/>`,
-      `<rect x="2" y="2" width="140" height="140" rx="11" fill="none" stroke="${sColor}" stroke-width="1.5" opacity="${(pulseOpacity * 0.8).toFixed(2)}"/>`,
-    ].join('');
+    defs += `
+      <filter id="pg-${animFrame}" x="-10%" y="-10%" width="120%" height="120%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="2"/>
+      </filter>
+    `;
+    glowBorder = `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${sColor}" stroke-width="2.5" opacity="${pulseOpacity.toFixed(2)}" filter="url(#pg-${animFrame})"/>`;
+    askDot = `
+      <circle cx="114" cy="24" r="5" fill="#F5B942" filter="url(#pg-${animFrame})"/>
+      <circle cx="114" cy="24" r="3" fill="#ffffff" />
+    `;
   }
 
-  // Active indicator (thin left border)
-  const activeBorder = isActive
-    ? `<rect x="0" y="16" width="3" height="112" rx="1.5" fill="#3b82f6" opacity="0.8"/>`
-    : '';
+  // Simplified Agent watermark at bottom-right
+  // agentLogoIcon renders at x,y with given width/height
+  const watermark = `<g transform="translate(90, 86)" opacity="${isIdle ? '0.2' : '0.12'}">
+    ${agentLogoIcon(agent, 40, 1, 0, 0)}
+  </g>`;
+  
+  // Left Edge Color Strip
+  const leftStrip = `<rect x="8" y="8" width="4" height="128" rx="2" fill="${isWorking ? '#F5B942' : isAsking ? '#F87171' : p1}"/>`;
 
-  // State dot (Top Right)
-  const stateDot = `<circle cx="124" cy="20" r="5" fill="${sColor}"/>`;
+  const sparkAngle = (animFrame * 3) % 360;
+  const spinner = isWorking ? `<g transform="translate(114, 34) rotate(${sparkAngle}) translate(-8,-8)"><path d="M8,0 L10,5 L16,8 L10,11 L8,16 L6,11 L0,8 L6,5 Z" fill="${colorText}" /></g>` : '';
+
+  const badgeObj = !isAsking ? `
+    <rect x="100" y="14" width="28" height="16" rx="8" fill="#ffffff" opacity="0.1" />
+    <text x="114" y="25" font-size="10" font-weight="700" text-anchor="middle" fill="#A1A1AA" font-family="${fontFam}">ACT</text>
+  ` : '';
+
+  const toolStr = isWorking ? 'Running task' : modelText;
 
   const elements = [
-    icon,
+    `<defs>${defs}</defs>`,
+    `<rect width="${SIZE}" height="${SIZE}" rx="16" fill="url(#${gradId})"/>`,
+    `<rect x="8" y="8" width="128" height="128" rx="12" fill="#2C2C2E" opacity="0.8"/>`,
     glowBorder,
-    activeBorder,
-    stateDot,
-    // Project name (left-aligned)
-    `<text x="14" y="94" text-anchor="start" font-family="${fontFam}" font-size="18" font-weight="700" fill="#ffffff" letter-spacing="-0.3">${escXml(projectName)}</text>`,
-    // Model name (left-aligned)
-    modelText ? `<text x="14" y="112" text-anchor="start" font-family="${fontFam}" font-size="12" fill="#94a3b8" font-weight="500">${escXml(modelText)}</text>` : '',
-    // State label (left-aligned)
-    `<text x="14" y="130" text-anchor="start" font-family="${fontFam}" font-size="11" font-weight="700" fill="${sColor}" letter-spacing="0.5">${escXml(stateLbl)}</text>`,
+    leftStrip,
+    watermark,
+    spinner,
+    askDot,
+    badgeObj,
+    `<text x="20" y="32" font-size="17" font-weight="800" text-anchor="start" fill="${colorText}" font-family="${fontFam}">${escXml(stateLbl)}</text>`,
+    `<text x="20" y="52" font-size="13" font-weight="600" text-anchor="start" fill="#E2E8F0" font-family="${fontFam}">${escXml(truncate(nameForDisplay, 13))}</text>`,
+    `<text x="20" y="120" font-size="${isWorking ? '13' : '14'}" font-weight="500" text-anchor="start" fill="${colorText}" opacity="0.8" font-family="${fontFam}">${escXml(toolStr)}</text>`
   ].join('');
 
-  return svgFrame(bgColor, elements);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">${elements}</svg>`;
 }
 
 // ---- Empty Slot ----
@@ -178,32 +200,50 @@ export function renderDetailInfo(session: SessionInfo | undefined, state: State,
   if (!session) return renderEmptySlot();
 
   const agent = (session.agentType as AgentType) || 'claude-code';
+  const nameForDisplay = displayName ?? session.projectName;
+  
+  const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
   const sColor = stateColor(session.state);
   const stateLbl = stateLabel(session.state, agent);
-  const isOpenClaw = agent === 'openclaw';
-  const nameForDisplay = displayName ?? session.projectName;
+  
+  const gradId = `sd-bg-detail-${agent}`;
+  const defs = `
+    <linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#151720"/>
+      <stop offset="100%" stop-color="#0A0B10"/>
+    </linearGradient>
+  `;
 
-  const fontFam = '-apple-system, system-ui, Helvetica Neue, sans-serif';
-  const detailIcon = agentLogoIcon(agent, 36, 0.9, 28, 28);
+  const watermark = `<g transform="translate(90, 86)" opacity="0.15">
+    ${agentLogoIcon(agent, 40, 1, 0, 0)}
+  </g>`;
 
-  const stateDot = `<circle cx="124" cy="20" r="5" fill="${sColor}"/>`;
+  const leftStrip = `<rect x="8" y="8" width="4" height="128" rx="2" fill="${sColor}"/>`;
+
+  const badgeObj = `
+    <rect x="100" y="14" width="28" height="16" rx="8" fill="#ffffff" opacity="0.1" />
+    <text x="114" y="25" font-size="10" font-weight="700" text-anchor="middle" fill="#A1A1AA" font-family="${fontFam}">INFO</text>
+  `;
+
+  const toolDisplay = tool ? `\u25B6 ${truncate(tool, 18)}` : stateLbl;
 
   const elements = [
-    detailIcon,
-    stateDot,
-    // Project name (left-aligned)
-    `<text x="14" y="66" text-anchor="start" font-family="${fontFam}" font-size="20" font-weight="700" fill="#ffffff" letter-spacing="-0.3">${escXml(truncate(nameForDisplay, 12))}</text>`,
-    // Model (skip for OpenClaw)
-    modelName && !isOpenClaw ? `<text x="14" y="86" text-anchor="start" font-family="${fontFam}" font-size="12" fill="#94a3b8" font-weight="500">${escXml(truncate(modelName, 16))}</text>` : '',
-    // Mode
-    mode && mode !== 'default' && !isOpenClaw ? `<text x="14" y="104" text-anchor="start" font-family="${fontFam}" font-size="11" fill="#a78bfa" font-weight="600">${escXml(mode.toUpperCase())}</text>` : '',
-    // Tool (if processing, replace state label area)
-    tool ? `<text x="14" y="130" text-anchor="start" font-family="${fontFam}" font-size="11" fill="#fbbf24" font-weight="700" letter-spacing="0.5">\u25B6 ${escXml(truncate(tool, 18))}</text>` : 
-    // State
-    `<text x="14" y="130" text-anchor="start" font-family="${fontFam}" font-size="11" font-weight="700" fill="${sColor}" letter-spacing="0.5">${escXml(stateLbl)}</text>`,
+    `<defs>${defs}</defs>`,
+    `<rect width="${SIZE}" height="${SIZE}" rx="16" fill="url(#${gradId})"/>`,
+    `<rect x="8" y="8" width="128" height="128" rx="12" fill="#1C1F2E" opacity="0.8"/>`,
+    leftStrip,
+    watermark,
+    badgeObj,
+    // Title
+    `<text x="20" y="34" font-size="18" font-weight="800" text-anchor="start" fill="#ffffff" font-family="${fontFam}">${escXml(truncate(nameForDisplay, 10))}</text>`,
+    // Model/Mode
+    (modelName && agent !== 'openclaw') ? `<text x="20" y="56" font-size="12" font-weight="600" text-anchor="start" fill="#94a3b8" font-family="${fontFam}">${escXml(truncate(modelName, 16))}</text>` : '',
+    (mode && mode !== 'default' && agent !== 'openclaw') ? `<text x="20" y="74" font-size="11" font-weight="700" text-anchor="start" fill="#a78bfa" font-family="${fontFam}">${escXml(mode.toUpperCase())}</text>` : '',
+    // Tool/State
+    `<text x="20" y="120" font-size="12" font-weight="700" text-anchor="start" fill="${tool ? '#fbbf24' : sColor}" font-family="${fontFam}">${escXml(toolDisplay)}</text>`,
   ].join('');
 
-  return svgFrame('#0f172a', elements);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">${elements}</svg>`;
 }
 
 // ---- Detail View: Option Button ----

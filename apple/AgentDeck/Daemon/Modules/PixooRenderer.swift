@@ -47,7 +47,7 @@ final class PixooRenderer {
 
     private enum CreatureKind {
         case octopus
-        case jellyfish
+        case cloud
         case opencode
     }
 
@@ -100,7 +100,7 @@ final class PixooRenderer {
         let starburst: RGB
     }
 
-    private struct JellyfishPalette {
+    private struct CloudPalette {
         let body: RGB
         let edge: RGB
         let marking: RGB
@@ -142,7 +142,7 @@ final class PixooRenderer {
     private static let phi = (1.0 + sqrt(5.0)) / 2.0
     private static let sessionToneFactors: [Double] = [1.08, 1.0, 0.9, 0.8, 0.72, 0.64]
     private static let codingAgents = Set(["claude-code"])
-    private static let jellyfishAgents = Set(["codex-cli"])
+    private static let cloudAgents = Set(["codex-cli"])
     private static let opencodeAgents = Set(["opencode"])
 
     private static let octopusGrid: [[Int]] = [
@@ -187,7 +187,7 @@ final class PixooRenderer {
         [0,0,1,1,1,1,0,0],
         [0,5,0,1,1,0,6,0],
     ]
-    private static let jellyfishGrid: [[Int]] = [
+    private static let cloudGrid: [[Int]] = [
         [0,0,1,1,0,0,1,1,0,0],
         [0,1,1,1,1,1,1,1,1,0],
         [1,1,1,1,1,1,1,1,1,1],
@@ -197,7 +197,7 @@ final class PixooRenderer {
         [0,1,1,1,1,1,1,1,1,0],
         [0,0,1,1,0,0,1,1,0,0],
     ]
-    private static let jellyfishLOD: [[Int]] = [
+    private static let cloudLOD: [[Int]] = [
         [0,1,1,0,1,1,0],
         [1,1,1,1,1,1,1],
         [1,1,2,1,2,1,1],
@@ -260,12 +260,12 @@ final class PixooRenderer {
         let crayfishAntenna: RGB = (0xDD, 0x55, 0x55)
         let crayfishGlow: RGB = (0x80, 0x20, 0x20)
         let crayfishSick: RGB = (0x88, 0x66, 0x66)
-        let jellyfishBody: RGB = (0x63, 0x66, 0xF1)
-        let jellyfishEdge: RGB = (0x4F, 0x46, 0xE5)
-        let jellyfishMarking: RGB = (0xA5, 0xB4, 0xFC)
-        let jellyfishGlow: RGB = (0x31, 0x33, 0x78)
-        let jellyfishPulse: RGB = (0xA5, 0xB4, 0xFC)
-        let jellyfishSleeping: RGB = (0x3A, 0x3C, 0x90)
+        let cloudBody: RGB = (0x63, 0x66, 0xF1)
+        let cloudEdge: RGB = (0x4F, 0x46, 0xE5)
+        let cloudMarking: RGB = (0xA5, 0xB4, 0xFC)
+        let cloudGlow: RGB = (0x31, 0x33, 0x78)
+        let cloudPulse: RGB = (0xA5, 0xB4, 0xFC)
+        let cloudSleeping: RGB = (0x3A, 0x3C, 0x90)
         let opencodeOuter: RGB = (0xF1, 0xEC, 0xEC)
         let opencodeInner: RGB = (0x4B, 0x46, 0x46)
         let opencodePulse: RGB = (0xCF, 0xCE, 0xCD)
@@ -410,8 +410,8 @@ final class PixooRenderer {
             let sessionToneIndex = creatureOrder.firstIndex(of: creature.sessionId) ?? 0
             let spriteState = creature.state
             switch creature.creatureType {
-            case .jellyfish:
-                drawJellyfish(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: jellyfishPalette(for: sessionToneIndex))
+            case .cloud:
+                drawCloud(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: cloudPalette(for: sessionToneIndex))
             case .opencode:
                 drawOpenCode(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: opencodePalette(for: sessionToneIndex))
             case .octopus:
@@ -438,8 +438,8 @@ final class PixooRenderer {
                 let dotX = 1 + i * 3
                 guard let creature = creatureInstances[creatureOrder[i]] else { continue }
                 let dotColor: RGB = switch creature.creatureType {
-                case .jellyfish:
-                    jellyfishPalette(for: i).body
+                case .cloud:
+                    cloudPalette(for: i).body
                 case .opencode:
                     Self.colors.white
                 case .octopus:
@@ -474,15 +474,15 @@ final class PixooRenderer {
 
         let typeCounts = Dictionary(aliveCoding.map { (creatureType(for: $0.agentType), 1) }, uniquingKeysWith: +)
         let octopusSlots = pixooSlots(for: .octopus, count: typeCounts[.octopus] ?? 0)
-        let jellyfishSlots = pixooSlots(for: .jellyfish, count: typeCounts[.jellyfish] ?? 0)
+        let cloudSlots = pixooSlots(for: .cloud, count: typeCounts[.cloud] ?? 0)
         let opencodeSlots = pixooSlots(for: .opencode, count: typeCounts[.opencode] ?? 0)
-        var typeIndices: [CreatureKind: Int] = [.octopus: 0, .jellyfish: 0, .opencode: 0]
+        var typeIndices: [CreatureKind: Int] = [.octopus: 0, .cloud: 0, .opencode: 0]
 
         for (index, session) in aliveCoding.enumerated() {
             let kind = creatureType(for: session.agentType)
             let slotIndex = typeIndices[kind, default: 0]
             typeIndices[kind, default: 0] = slotIndex + 1
-            let slot = pixooSlot(for: kind, index: slotIndex, octopusSlots: octopusSlots, jellyfishSlots: jellyfishSlots, opencodeSlots: opencodeSlots)
+            let slot = pixooSlot(for: kind, index: slotIndex, octopusSlots: octopusSlots, cloudSlots: cloudSlots, opencodeSlots: opencodeSlots)
             let worldX = Double(slot.x)
             let worldY = stateY(session.state, kind: kind, baseY: Double(slot.y))
 
@@ -523,7 +523,7 @@ final class PixooRenderer {
                 for: primaryKind,
                 index: slotIndex,
                 octopusSlots: octopusSlots,
-                jellyfishSlots: jellyfishSlots,
+                cloudSlots: cloudSlots,
                 opencodeSlots: opencodeSlots
             )
             primary.worldY = stateY(preciseState, kind: primary.creatureType, baseY: Double(baseSlot.y))
@@ -535,7 +535,7 @@ final class PixooRenderer {
         switch kind {
         case .octopus:
             return CreatureLayout.layoutOctopuses(count: count)
-        case .jellyfish:
+        case .cloud:
             return CreatureLayout.layoutCloudCreatures(count: count)
         case .opencode:
             return CreatureLayout.layoutOpenCodeCreatures(count: count)
@@ -546,12 +546,12 @@ final class PixooRenderer {
         for kind: CreatureKind,
         index: Int,
         octopusSlots: [CreatureSlot],
-        jellyfishSlots: [CreatureSlot],
+        cloudSlots: [CreatureSlot],
         opencodeSlots: [CreatureSlot]
     ) -> CreatureSlot {
         let slots: [CreatureSlot] = switch kind {
         case .octopus: octopusSlots
-        case .jellyfish: jellyfishSlots
+        case .cloud: cloudSlots
         case .opencode: opencodeSlots
         }
         guard !slots.isEmpty else { return CreatureSlot(x: 0.38, y: 0.42, scale: 1.0) }
@@ -966,11 +966,11 @@ final class PixooRenderer {
         }
     }
 
-    private func drawJellyfish(_ buf: inout [UInt8], worldX: Double, worldY: Double, state: CreatureState, animFrame: Int, camera: Camera, palette: JellyfishPalette) {
+    private func drawCloud(_ buf: inout [UInt8], worldX: Double, worldY: Double, state: CreatureState, animFrame: Int, camera: Camera, palette: CloudPalette) {
         guard isVisible(worldX, worldY, camera, padding: 0.15) else { return }
         let (scx, scy) = worldToScreen(worldX, worldY, camera)
         let useLOD = camera.zoom < 1.3
-        let grid = useLOD ? Self.jellyfishLOD : Self.jellyfishGrid
+        let grid = useLOD ? Self.cloudLOD : Self.cloudGrid
         let cols = useLOD ? 7 : 10
         let rows = useLOD ? 5 : 8
         let baseX = Int(round(scx - Double(cols) / 2))
@@ -1175,14 +1175,14 @@ final class PixooRenderer {
         )
     }
 
-    private func jellyfishPalette(for sessionIndex: Int) -> JellyfishPalette {
+    private func cloudPalette(for sessionIndex: Int) -> CloudPalette {
         let tone = Self.sessionToneFactors[min(max(sessionIndex, 0), Self.sessionToneFactors.count - 1)]
-        return JellyfishPalette(
-            body: scaleColor(Self.colors.jellyfishBody, tone),
-            edge: scaleColor(Self.colors.jellyfishEdge, tone),
-            marking: scaleColor(Self.colors.jellyfishMarking, tone),
-            sleeping: scaleColor(Self.colors.jellyfishSleeping, tone),
-            pulse: scaleColor(Self.colors.jellyfishPulse, tone)
+        return CloudPalette(
+            body: scaleColor(Self.colors.cloudBody, tone),
+            edge: scaleColor(Self.colors.cloudEdge, tone),
+            marking: scaleColor(Self.colors.cloudMarking, tone),
+            sleeping: scaleColor(Self.colors.cloudSleeping, tone),
+            pulse: scaleColor(Self.colors.cloudPulse, tone)
         )
     }
 
@@ -1217,13 +1217,13 @@ final class PixooRenderer {
     }
 
     private func creatureType(for agentType: String) -> CreatureKind {
-        if Self.jellyfishAgents.contains(agentType) { return .jellyfish }
+        if Self.cloudAgents.contains(agentType) { return .cloud }
         if Self.opencodeAgents.contains(agentType) { return .opencode }
         return .octopus
     }
 
     private func isCreatureAgent(_ agentType: String) -> Bool {
-        Self.codingAgents.contains(agentType) || Self.jellyfishAgents.contains(agentType) || Self.opencodeAgents.contains(agentType)
+        Self.codingAgents.contains(agentType) || Self.cloudAgents.contains(agentType) || Self.opencodeAgents.contains(agentType)
     }
 
     private func simplifiedState(_ state: AgentConnectionState) -> CreatureState {
@@ -1250,7 +1250,7 @@ final class PixooRenderer {
             case .awaiting: return clamp(baseY - 0.04, min: 0.35, max: 0.48)
             case .idle: return 0.80
             }
-        case .jellyfish:
+        case .cloud:
             switch state {
             case .processing: return clamp(baseY, min: 0.16, max: 0.28)
             case .awaiting: return clamp(baseY + 0.26, min: 0.52, max: 0.64)

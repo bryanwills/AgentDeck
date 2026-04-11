@@ -58,10 +58,32 @@ export function agentLogoIcon(
     return `<g transform="translate(${cx},${cy}) scale(${s.toFixed(2)}) translate(-12,-12)" opacity="${opacity}"><path d="${CLAUDE_LOGO_PATH}" fill="${brandColor}" fill-rule="evenodd"/></g>`;
   }
   if (agent === 'codex-cli') {
-    const s = size / 24;
+    const s = size / 100;
+    const cx1 = cx - 14 * s, cy1 = cy - 30 * s, r1 = 30 * s;
+    const cx2 = cx + 16 * s, cy2 = cy - 26 * s, r2 = 28 * s;
+    const cx3 = cx + 32 * s, cy3 = cy - 2 * s,  r3 = 28 * s;
+    const cx4 = cx + 14 * s, cy4 = cy + 26 * s, r4 = 28 * s;
+    const cx5 = cx - 16 * s, cy5 = cy + 26 * s, r5 = 28 * s;
+    const cx6 = cx - 32 * s, cy6 = cy - 2 * s,  r6 = 28 * s;
+    const cRadius = 18 * s;
+    
+    const circles = [
+      `<circle cx="${cx1.toFixed(1)}" cy="${cy1.toFixed(1)}" r="${r1.toFixed(1)}" />`,
+      `<circle cx="${cx2.toFixed(1)}" cy="${cy2.toFixed(1)}" r="${r2.toFixed(1)}" />`,
+      `<circle cx="${cx3.toFixed(1)}" cy="${cy3.toFixed(1)}" r="${r3.toFixed(1)}" />`,
+      `<circle cx="${cx4.toFixed(1)}" cy="${cy4.toFixed(1)}" r="${r4.toFixed(1)}" />`,
+      `<circle cx="${cx5.toFixed(1)}" cy="${cy5.toFixed(1)}" r="${r5.toFixed(1)}" />`,
+      `<circle cx="${cx6.toFixed(1)}" cy="${cy6.toFixed(1)}" r="${r6.toFixed(1)}" />`,
+      `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${cRadius.toFixed(1)}" />`
+    ].join('');
+    
+    const promptSize = 45 * s;
     return [
-      `<defs><linearGradient id="cx-i" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#B1A7FF"/><stop offset="48%" stop-color="#7A9DFF"/><stop offset="100%" stop-color="${brandColor}"/></linearGradient></defs>`,
-      `<g transform="translate(${cx},${cy}) scale(${s.toFixed(2)}) translate(-12,-12)" opacity="${opacity}"><path d="${CODEX_LOGO_PATH}" fill="url(#cx-i)"/></g>`,
+      `<defs><linearGradient id="cx-i" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#B394E5"/><stop offset="100%" stop-color="#3342C7"/></linearGradient></defs>`,
+      `<g opacity="${opacity}">`,
+      `<g fill="url(#cx-i)">${circles}</g>`,
+      `<text x="${(cx - 22 * s).toFixed(1)}" y="${(cy + 15 * s).toFixed(1)}" font-size="${promptSize.toFixed(1)}" font-weight="900" fill="white" font-family="'Courier New', monospace">&gt;_</text>`,
+      `</g>`,
     ].join('');
   }
   if (agent === 'opencode') {
@@ -115,9 +137,33 @@ export function agentLogoWatermark(
     return `<g transform="translate(72,72) scale(3) translate(-12,-12)" opacity="${markOpacity}"><path d="${CLAUDE_LOGO_PATH}" fill="${fill}" fill-rule="evenodd"/></g>`;
   }
   if (agent === 'codex-cli') {
+    const cx = 72;
+    const cy = 72;
+    const size = 120; // fill background
+    const s = size / 100;
+    const cx1 = cx - 14 * s, cy1 = cy - 30 * s, r1 = 30 * s;
+    const cx2 = cx + 16 * s, cy2 = cy - 26 * s, r2 = 28 * s;
+    const cx3 = cx + 32 * s, cy3 = cy - 2 * s,  r3 = 28 * s;
+    const cx4 = cx + 14 * s, cy4 = cy + 26 * s, r4 = 28 * s;
+    const cx5 = cx - 16 * s, cy5 = cy + 26 * s, r5 = 28 * s;
+    const cx6 = cx - 32 * s, cy6 = cy - 2 * s,  r6 = 28 * s;
+    const cRadius = 18 * s;
+    
+    const circles = [
+      `<circle cx="${cx1.toFixed(1)}" cy="${cy1.toFixed(1)}" r="${r1.toFixed(1)}" />`,
+      `<circle cx="${cx2.toFixed(1)}" cy="${cy2.toFixed(1)}" r="${r2.toFixed(1)}" />`,
+      `<circle cx="${cx3.toFixed(1)}" cy="${cy3.toFixed(1)}" r="${r3.toFixed(1)}" />`,
+      `<circle cx="${cx4.toFixed(1)}" cy="${cy4.toFixed(1)}" r="${r4.toFixed(1)}" />`,
+      `<circle cx="${cx5.toFixed(1)}" cy="${cy5.toFixed(1)}" r="${r5.toFixed(1)}" />`,
+      `<circle cx="${cx6.toFixed(1)}" cy="${cy6.toFixed(1)}" r="${r6.toFixed(1)}" />`,
+      `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${cRadius.toFixed(1)}" />`
+    ].join('');
+
     return [
-      `<defs><linearGradient id="cx-g" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="${dimColor('#B1A7FF', 0.5)}"/><stop offset="48%" stop-color="${dimColor('#7A9DFF', 0.5)}"/><stop offset="100%" stop-color="${dimColor('#3941FF', 0.5)}"/></linearGradient></defs>`,
-      `<g transform="translate(72,72) scale(3) translate(-12,-12)" opacity="${markOpacity}"><path d="${CODEX_LOGO_PATH}" fill="url(#cx-g)"/></g>`,
+      `<defs><linearGradient id="cx-g" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="${dimColor('#B394E5', 0.5)}"/><stop offset="100%" stop-color="${dimColor('#3342C7', 0.5)}"/></linearGradient></defs>`,
+      `<g opacity="${markOpacity}">`,
+      `<g fill="url(#cx-g)">${circles}</g>`,
+      `</g>`,
     ].join('');
   }
   if (agent === 'opencode') {
