@@ -467,6 +467,8 @@ export const SERIAL_FORWARDED_EVENTS = new Set([
 export const BRIDGE_WS_PORT = 9120;
 export const BRIDGE_HTTP_PORT = 9120; // Same port, different path
 export const RECONNECT_INTERVAL_MS = 3000;
+/** Plugin reconnect backoff ladder. Advances on each failed attempt, resets on `connected`. */
+export const RECONNECT_BACKOFF_MS: readonly number[] = [1000, 2000, 4000, 8000];
 export const STUCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 export const WS_PING_INTERVAL_MS = 15_000;
 export const WS_ACTIVITY_TIMEOUT_MS = 30_000;

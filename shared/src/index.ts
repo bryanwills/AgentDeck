@@ -1,5 +1,6 @@
 export * from './states.js';
 export * from './protocol.js';
+export * from './command-builders.js';
 export * from './adapter.js';
 export * from './voice-paths.js';
 export * from './net-utils.js';

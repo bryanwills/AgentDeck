@@ -85,6 +85,9 @@ npx quicktype \
 echo "   → BridgeEvent.kt"
 echo "   → PluginCommand.kt"
 
+echo "=== Step 4: Generate typed command builders ==="
+node "$PROJECT_DIR/scripts/generate-command-builders.mjs"
+
 echo ""
 echo "=== Done ==="
 echo "Generated files in $OUT_DIR/"
