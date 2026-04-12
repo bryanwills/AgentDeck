@@ -16,6 +16,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import type { ApmeModule } from './index.js';
 import { loadApmeConfig } from './settings.js';
+import { apmeDashboardHtml } from './dashboard-html.js';
 
 export async function handleApmeRequest(
   req: IncomingMessage,
@@ -34,6 +35,13 @@ export async function handleApmeRequest(
   const path = url.pathname;
 
   try {
+    // ── Dashboard HTML ─────────────────────────────────────────────────────
+    if (method === 'GET' && (path === '/apme' || path === '/apme/')) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(apmeDashboardHtml());
+      return true;
+    }
+
     // ── Runs ────────────────────────────────────────────────────────────────
     if (method === 'GET' && path === '/apme/runs') {
       const limit = clampInt(url.searchParams.get('limit'), 1, 500, 50);
@@ -65,11 +73,13 @@ export async function handleApmeRequest(
       }
       const evals = apme.store.listEvalsForRun(id);
       const steps = apme.store.listSteps(id);
+      const turns = apme.store.listTurns(id);
       const vibe = apme.store.latestVibeForRun(id);
       sendJson(res, 200, {
         run,
         evals,
         steps,
+        turns,
         vibe,
         overallScore: aggregateOverall(evals),
       });
@@ -79,6 +89,11 @@ export async function handleApmeRequest(
     // ── Scorecard ───────────────────────────────────────────────────────────
     if (method === 'GET' && path === '/apme/scorecard') {
       sendJson(res, 200, { scorecards: apme.store.scorecard() });
+      return true;
+    }
+
+    if (method === 'GET' && path === '/apme/categories') {
+      sendJson(res, 200, { categories: apme.store.categoryScorecard() });
       return true;
     }
 
