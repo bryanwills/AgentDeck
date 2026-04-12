@@ -206,6 +206,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // ===== APME (lazy — may be null if better-sqlite3 isn't installed) =====
   let apme: ApmeModule | null = null;
 
+  // Declare early — HTTP /health handler references this in its closure.
+  // Must be declared before the HTTP server so it's initialized (not in TDZ)
+  // when the first /health request arrives.
+  let gatewayAdapter: OpenClawAdapter | null = null;
+  let gatewayConnecting = false;
+
   // ===== HTTP server =====
   const httpServer = createServer((req, res) => {
     // APME routes: auth-gated (task prompts, project paths, hook payloads are sensitive).
@@ -562,8 +568,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   core.registerSession('daemon' as any);
 
   // ===== Gateway adapter lifecycle =====
-  let gatewayAdapter: OpenClawAdapter | null = null;
-  let gatewayConnecting = false;
+  // (gatewayAdapter + gatewayConnecting declared earlier, before HTTP server)
 
   // Inject OpenClaw virtual session into sessions_list when Gateway is reachable.
   // Uses adapter WS connection when available, falls back to TCP probe so that
