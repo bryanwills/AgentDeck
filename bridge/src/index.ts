@@ -1107,7 +1107,13 @@ function wireClaudeCodeTimeline(
         ccChatStart = now;
         core.usageTracker.resetToolCounts();
         ccPendingChatStart = true;
-        const hookText = (evt.data?.prompt as string) || (evt.data?.text as string) || (evt.data?.message as string) || '';
+        // Claude Code v2.1+ sends { message: { content: "..." } }, not { prompt: "..." }
+        const msg = evt.data?.message;
+        const hookText = (evt.data?.prompt as string)
+          || (evt.data?.text as string)
+          || (typeof msg === 'object' && msg !== null ? (msg as Record<string, unknown>).content as string : undefined)
+          || (typeof msg === 'string' ? msg : '')
+          || '';
         ccPendingChatStartTimer = setTimeout(() => {
           if (ccPendingChatStart) emitChatStart(hookText);
         }, 500);

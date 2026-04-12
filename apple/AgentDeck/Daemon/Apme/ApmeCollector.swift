@@ -108,7 +108,9 @@ final class ApmeCollector {
 
             // ── Turn management ──
             if event.lowercased() == "user_prompt_submit" || event == "UserPromptSubmit" {
+                // Claude Code sends { message: { content: "..." } }, legacy sends { prompt: "..." }
                 let prompt = data["prompt"] as? String
+                    ?? (data["message"] as? [String: Any])?["content"] as? String
                 // Close previous turn
                 closeTurn(runId: runId)
                 // Open new turn

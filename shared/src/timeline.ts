@@ -79,6 +79,7 @@ function extractReadableMessage(message: string): string {
  */
 export function cleanDetailText(text: string): string {
   if (!text) return text;
+  if (typeof text !== 'string') return '';
 
   // If entire text is a JSON object, extract readable message
   const trimmed = text.trim();
@@ -130,6 +131,7 @@ export function cleanDetailText(text: string): string {
  */
 export function cleanRawText(text: string): string {
   if (!text) return text;
+  if (typeof text !== 'string') return '';
   return text
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/^#{1,6}\s+/gm, '')

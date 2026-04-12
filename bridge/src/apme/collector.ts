@@ -90,7 +90,12 @@ export class ApmeCollector {
 
     // ── Turn management ──
     if (event === 'UserPromptSubmit') {
-      const prompt = typeof data.prompt === 'string' ? (data.prompt as string).slice(0, 8_000) : null;
+      // Claude Code sends { message: { content: "..." } }, legacy sends { prompt: "..." }
+      const rawPrompt = typeof data.prompt === 'string' ? data.prompt
+        : (typeof (data as Record<string, unknown>).message === 'object'
+          ? ((data as Record<string, unknown>).message as Record<string, unknown>)?.content as string | undefined
+          : undefined);
+      const prompt = typeof rawPrompt === 'string' ? rawPrompt.slice(0, 8_000) : null;
       // Close previous turn if open
       this.closeTurn(sessionId);
       // Open new turn
