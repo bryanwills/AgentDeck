@@ -37,6 +37,8 @@ import { handlePixooWake } from './pixoo/pixoo-client.js';
 import { triggerMdnsRecovery } from './mdns.js';
 import { rgbToBmp, pixooLiveHtml } from './hook-server.js';
 import { enableDebugLog, debug } from './logger.js';
+import { initApme, type ApmeModule } from './apme/index.js';
+import { handleApmeRequest } from './apme/http.js';
 import {
   initModules,
   stopModules,
@@ -201,8 +203,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
 
   log(`[agentdeck] Starting daemon on port ${port}...`);
 
+  // ===== APME (lazy — may be null if better-sqlite3 isn't installed) =====
+  let apme: ApmeModule | null = null;
+
   // ===== HTTP server =====
   const httpServer = createServer((req, res) => {
+    // APME routes: auth-gated (task prompts, project paths, hook payloads are sensitive).
+    if ((req.url ?? '').startsWith('/apme')) {
+      const ip = req.socket.remoteAddress ?? '';
+      if (!isLocalConnection(ip)) {
+        const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+        const token = url.searchParams.get('token') ?? '';
+        if (!validateToken(token)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized — token required for APME routes' }));
+          return;
+        }
+      }
+      void handleApmeRequest(req, res, apme).catch((err) => {
+        try {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: String(err) }));
+        } catch { /* ignore */ }
+      });
+      return;
+    }
     const pathname = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`).pathname;
 
     // Health check is public (no auth) — used by iOS/Android for pairing token discovery
@@ -469,6 +494,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
 
   log(`[agentdeck] WebSocket server ready on port ${port}`);
   log(`[agentdeck] Pairing URL: ${core.wsUrl}`);
+
+  // Initialize APME store + collector so the daemon can serve /apme/* HTTP
+  // routes. `setApme` on core is gated against the `daemon` meta-session so
+  // register/deregister won't open a bogus run. Session bridges opening their
+  // own connection to the same sqlite file is safe under WAL mode.
+  apme = await initApme();
+  if (apme) {
+    core.setApme(apme);
+    log('[agentdeck] APME enabled — /apme/* routes active');
+  }
 
   // Register session
   core.registerSession('daemon' as any);
@@ -796,6 +831,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   core.startUsageTick();
   core.startApiUsagePolling(60_000, () => fetchUsageRelayed(port));
   core.startSessionsListPolling();
+
+  // APME: periodically pick up runs that session bridges closed but couldn't
+  // eval (session exits within 2s of shutdown). Daemon is long-lived, so it
+  // can run the full deterministic + judge pipeline without time pressure.
+  if (apme) {
+    const apmeEvalTimer = setInterval(() => {
+      const pending = apme!.store.listUnevaluatedRuns(5);
+      for (const run of pending) {
+        apme!.runner.enqueue({ runId: run.id, projectPath: run.projectPath ?? undefined });
+      }
+    }, 30_000); // every 30s
+    core.addInterval(apmeEvalTimer);
+  }
 
   // Initial usage fetch (delayed 10s)
   core.addTimeout(setTimeout(() => {

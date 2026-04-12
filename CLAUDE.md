@@ -4,7 +4,7 @@ Stream Deck+ controller for Claude Code CLI — a bidirectional local control sy
 
 ## Monorepo
 
-- **bridge/** — Node.js server: Daemon hub + Session Bridge (PTY, hook HTTP, state machine)
+- **bridge/** — Node.js server: Daemon hub + Session Bridge (PTY, hook HTTP, state machine). `src/apme/` — APME eval module (SQLite store, collector, deterministic+LLM judge runner, rubric auto-tuner, recommender, daemon HTTP API). See [docs/apme.md](docs/apme.md)
 - **plugin/** — Stream Deck SDK v2 plugin
 - **shared/** — TypeScript types/utils shared between bridge & plugin (protocol, states, timeline, adapter interfaces, session-utils)
 - **hooks/** — Claude Code hook installer for `~/.claude/settings.local.json`
@@ -135,7 +135,7 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 - **Hook format (CRITICAL)**: Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "command", command: "..." }] }`. Old flat format silently fails. Bridge auto-migrates via `migrateHooksIfNeeded()` from `@agentdeck/hooks`. Scripts use `|| true` to avoid blocking when bridge is down
 - **Plugin UUID**: `bound.serendipity.agentdeck` (immutable post-distribution)
 - **Package scope**: `@agentdeck/*` (shared, bridge, plugin, hooks, setup)
-- **User data dir**: `~/.agentdeck/` — `daemon.json`, `sessions.json`, `auth-token`, `settings.json`, `timeline.json`, `wifi-config.json`, `compatibility.json`
+- **User data dir**: `~/.agentdeck/` — `daemon.json`, `sessions.json`, `auth-token`, `settings.json`, `timeline.json`, `wifi-config.json`, `compatibility.json`, `apme.sqlite`
 - **Daemon hub**: Port 9120, sole entry point for all dashboard clients. Session bridges serve internal hook HTTP only (9121-9139). See [docs/daemon.md](docs/daemon.md)
 - **Action ID pattern**: SD actions store string IDs + `getActionById()` — never action object references
 - **Shift+Tab** (`\x1b[Z`) for Claude Code mode switching (100ms debounce)
@@ -145,6 +145,7 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 
 | Doc | Topic |
 |---|---|
+| [docs/apme.md](docs/apme.md) | APME eval module — schema, collector, deterministic+LLM judge, rubric tuner, daemon API, settings |
 | [docs/architecture.md](docs/architecture.md) | Monorepo layout, BridgeCore, PtyAdapter, AgentAdapter, Gateway protocol, plugin connection |
 | [docs/daemon.md](docs/daemon.md) | Daemon hub, singleton guard, mDNS recovery, usage relay, Gateway isolation, multi-surface monitoring |
 | [docs/plugin-conventions.md](docs/plugin-conventions.md) | Encoder LCD, wide canvas, button label, OC Timeline pipeline, D200H HID, display sleep/wake |

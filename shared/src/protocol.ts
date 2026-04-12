@@ -285,6 +285,74 @@ export interface TimelineHistoryMsg {
   entries: TimelineEntry[];
 }
 
+// ===== APME (Agent Performance Monitoring & Evaluation) =====
+
+/** A single evaluation score on a completed run. */
+export interface ApmeEvalRow {
+  layer: 'deterministic' | 'llm_judge' | 'vibe';
+  metric: string;           // e.g. 'build_ok', 'tests_pass', 'intent', 'overall'
+  score: number;            // 0.0 - 1.0
+  rubricVer?: number;
+  judgeModel?: string;
+  createdAt: number;
+}
+
+/** A run that has finished evaluation. */
+export interface ApmeRunSummary {
+  runId: string;
+  sessionId: string;
+  agentType: AgentType;
+  modelId?: string;
+  projectName?: string;
+  taskPrompt?: string;
+  startedAt: number;
+  endedAt?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+  exitCode?: number;
+  overallScore?: number;    // cached aggregate of evals.overall
+  evals: ApmeEvalRow[];
+}
+
+/** Bridge → clients — fires when a run completes evaluation (layer 1 or 2). */
+export interface ApmeEvalEvent {
+  type: 'apme_eval';
+  run: ApmeRunSummary;
+}
+
+export interface ApmeModelScorecard {
+  agentType: AgentType;
+  modelId: string;
+  runs: number;
+  avgOverall?: number;
+  avgTestsPass?: number;
+  totalCost?: number;
+  costPerQuality?: number;
+}
+
+/** Bridge → clients — scorecard refresh (broadcast after eval completes or on demand). */
+export interface ApmeScorecardEvent {
+  type: 'apme_scorecard';
+  scorecards: ApmeModelScorecard[];
+}
+
+export interface ApmeRecommendation {
+  modelId: string;
+  agentType: AgentType;
+  expectedScore: number;    // 0-1
+  expectedCostUsd: number;
+  confidence: number;       // 0-1
+  rationale: string;
+}
+
+/** Bridge → clients — model recommendation for the next task (on-demand / context-aware). */
+export interface ApmeRecommendationEvent {
+  type: 'apme_recommendation';
+  taskKind?: string;
+  candidates: ApmeRecommendation[];
+}
+
 // ===== WiFi Provisioning (Bridge → ESP32 Serial) =====
 
 export interface WifiProvisionMessage {
@@ -341,7 +409,10 @@ export type BridgeEvent =
   | DeckSlotMapEvent
   | ButtonStateEvent
   | TimelineEventMsg
-  | TimelineHistoryMsg;
+  | TimelineHistoryMsg
+  | ApmeEvalEvent
+  | ApmeScorecardEvent
+  | ApmeRecommendationEvent;
 
 // ===== Plugin → Bridge (Commands) =====
 
@@ -409,6 +480,23 @@ export interface FocusSessionCommand {
   sessionId: string;
 }
 
+/** APME vibe check — user approves or rejects a completed run's output quality. */
+export interface ApmeVibeFeedbackCommand {
+  type: 'apme_vibe';
+  runId: string;
+  verdict: 'approve' | 'reject' | 'neutral';
+  note?: string;
+}
+
+/** Ask bridge/daemon for model recommendation given a task context. */
+export interface ApmeRecommendCommand {
+  type: 'apme_recommend';
+  taskKind?: string;
+  budgetUsd?: number;
+  latencyBudgetMs?: number;
+  preferLocal?: boolean;
+}
+
 /**
  * Session-scoped command — daemon forwards the inner command to the specified session's bridge.
  * Enables direct control of a specific session from any client (MenuBarExtra, Dashboard, etc.)
@@ -436,7 +524,9 @@ export type PluginCommand =
   | UtilityCommand
   | SwitchAgentCommand
   | FocusSessionCommand
-  | SessionCommand;
+  | SessionCommand
+  | ApmeVibeFeedbackCommand
+  | ApmeRecommendCommand;
 
 // ===== Hook Event Types =====
 

@@ -37,6 +37,7 @@
     "@picovoice/porcupine-node": "^4.0.0",
     "@picovoice/pvrecorder-node": "^1.2.0",
     "@resvg/resvg-js": "^2.6.2",
+    "better-sqlite3": "^11.3.0",
     "node-hid": "^3.1.0",
     "node-pty": "^1.0.0"
   },

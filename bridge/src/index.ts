@@ -6,6 +6,7 @@
  */
 
 import { BridgeCore } from './bridge-core.js';
+import { initApme } from './apme/index.js';
 import { VoiceManager } from './voice.js';
 import { checkDependencies } from './check-deps.js';
 import { enableDebugLog, log, logError, debug, setPtyMode } from './logger.js';
@@ -216,6 +217,14 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     projectName: adapter.getProjectName() || projectName,
     httpServer: adapter.getHttpServer(),
   });
+
+  // ===== APME (Agent Performance Monitoring & Evaluation) =====
+  // Optional: degrades to no-op if better-sqlite3 isn't installed.
+  const apme = await initApme();
+  if (apme) {
+    core.setApme(apme, process.cwd());
+    log('APME enabled — runs will be logged to ~/.agentdeck/apme.sqlite');
+  }
 
   // ===== Session-specific components =====
   const voiceManager = new VoiceManager();
@@ -433,6 +442,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     switch (evt.source) {
       case 'hook':
         journal.write('hook', 'hook', { event: evt.event, data: evt.data });
+        apme?.collector.ingestHook(core.sessionId, evt.event, evt.data);
         if (evt.event === 'shutdown') {
           shutdown();
           return;
@@ -453,6 +463,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
           case 'usage_info':
             core.usageTracker.setUsageInfo(evt.data);
             core.broadcastUsage();
+            apme?.collector.updateUsage(core.sessionId, core.usageTracker.getSnapshot());
             break;
           case 'user_prompt': {
             const text = evt.data?.text as string | undefined;
@@ -550,6 +561,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     }
 
     hookServer?.setMeta({ state: snapshot.state, modelName: snapshot.modelName ?? undefined });
+    apme?.collector.updateModel(core.sessionId, snapshot.modelName ?? null);
     journal.write('state_change', 'internal', { state: snapshot.state, permissionMode: snapshot.permissionMode, suggestedPrompt: snapshot.suggestedPrompt });
 
     const stateEvent = core.buildStateEvent({

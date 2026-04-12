@@ -1,0 +1,337 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { execSync } from 'child_process';
+import { ApmeStore } from '../apme/store.js';
+import { ApmeCollector } from '../apme/collector.js';
+import { ApmeRunner, detectLanguage, parseJudgeJson, buildJudgePrompt, runDeterministic } from '../apme/runner.js';
+import { DEFAULT_APME_CONFIG, shouldJudge } from '../apme/settings.js';
+import type { ApmeConfig } from '../apme/settings.js';
+import type { ApmeRunRow } from '../apme/types.js';
+
+function tmpProject(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'apme-proj-'));
+  for (const [rel, content] of Object.entries(files)) {
+    const full = join(dir, rel);
+    mkdirSync(full.replace(/\/[^/]+$/, ''), { recursive: true });
+    writeFileSync(full, content);
+  }
+  return dir;
+}
+
+function initGit(dir: string): void {
+  execSync('git init -q', { cwd: dir });
+  execSync('git config user.email test@example.com && git config user.name test', { cwd: dir });
+  execSync('git add -A && git -c commit.gpgsign=false commit -q -m init', { cwd: dir });
+}
+
+async function makeStore(): Promise<ApmeStore | null> {
+  const dir = mkdtempSync(join(tmpdir(), 'apme-runner-'));
+  const store = new ApmeStore(join(dir, 'apme.sqlite'));
+  if (!(await store.init())) { rmSync(dir, { recursive: true, force: true }); return null; }
+  (store as unknown as { _tmp: string })._tmp = dir;
+  return store;
+}
+
+function closeStore(s: ApmeStore) {
+  if (!s) return;
+  s.close();
+  const dir = (s as unknown as { _tmp?: string })._tmp;
+  if (dir) rmSync(dir, { recursive: true, force: true });
+}
+
+// ─── Pure helpers ──────────────────────────────────────────────────────────────
+
+describe('detectLanguage', () => {
+  it('recognizes TypeScript from package.json', () => {
+    const dir = tmpProject({ 'package.json': '{"name":"x"}' });
+    try { expect(detectLanguage(dir)).toBe('typescript'); }
+    finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('recognizes Swift from .xcodeproj', () => {
+    const dir = tmpProject({ 'App.xcodeproj/project.pbxproj': '// fake' });
+    try { expect(detectLanguage(dir)).toBe('swift'); }
+    finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('recognizes Kotlin from build.gradle.kts', () => {
+    const dir = tmpProject({ 'build.gradle.kts': 'plugins {}' });
+    try { expect(detectLanguage(dir)).toBe('kotlin'); }
+    finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('returns null for unknown paths', () => {
+    expect(detectLanguage('/nonexistent/xyz')).toBeNull();
+  });
+});
+
+describe('parseJudgeJson', () => {
+  it('extracts scores and reasoning from a clean JSON blob', () => {
+    const txt = `{"intent":0.9,"correctness":0.8,"style":0.7,"convention":0.85,"overall":0.82,"reasoning":"Good but loose naming."}`;
+    const p = parseJudgeJson(txt);
+    expect(p).not.toBeNull();
+    expect(p?.scores.overall).toBeCloseTo(0.82);
+    expect(p?.scores.intent).toBeCloseTo(0.9);
+    expect(p?.reasoning).toContain('naming');
+  });
+
+  it('rescales 0-10 axis to 0-1', () => {
+    const txt = `{"overall": 8}`;
+    const p = parseJudgeJson(txt);
+    expect(p?.scores.overall).toBeCloseTo(0.8);
+  });
+
+  it('tolerates prose wrapping and code fences', () => {
+    const txt = 'Sure thing:\n```json\n{"overall": 0.55}\n```\nThat is my take.';
+    const p = parseJudgeJson(txt);
+    expect(p?.scores.overall).toBeCloseTo(0.55);
+  });
+
+  it('returns null when there is no JSON at all', () => {
+    expect(parseJudgeJson('no json here')).toBeNull();
+  });
+
+  it('returns null when overall is missing', () => {
+    expect(parseJudgeJson('{"intent": 0.9}')).toBeNull();
+  });
+});
+
+describe('shouldJudge gating', () => {
+  it('never runs when sampleRate is 0', () => {
+    const cfg = { ...DEFAULT_APME_CONFIG.judge, sampleRate: 0 };
+    expect(shouldJudge(cfg, null)).toBe(false);
+    expect(shouldJudge(cfg, false)).toBe(false);
+  });
+
+  it('skips clear passes when onlyWhenDisagreement is true', () => {
+    const cfg = { ...DEFAULT_APME_CONFIG.judge, sampleRate: 1, onlyWhenDisagreement: true };
+    expect(shouldJudge(cfg, true)).toBe(false);
+  });
+
+  it('runs on failures when onlyWhenDisagreement is true', () => {
+    const cfg = { ...DEFAULT_APME_CONFIG.judge, sampleRate: 1, onlyWhenDisagreement: true };
+    expect(shouldJudge(cfg, false)).toBe(true);
+  });
+
+  it('runs for clear passes when onlyWhenDisagreement is false', () => {
+    const cfg = { ...DEFAULT_APME_CONFIG.judge, sampleRate: 1, onlyWhenDisagreement: false };
+    expect(shouldJudge(cfg, true)).toBe(true);
+  });
+});
+
+// ─── End-to-end runner (mocked det + judge) ───────────────────────────────────
+
+describe('ApmeRunner.runOne', () => {
+  let store: ApmeStore = null;
+  beforeEach(async () => { store = await makeStore(); });
+  afterEach(() => { closeStore(store); store = null; });
+
+  function baseCfg(overrides: Partial<ApmeConfig['judge']> = {}): ApmeConfig {
+    return {
+      ...DEFAULT_APME_CONFIG,
+      judge: { ...DEFAULT_APME_CONFIG.judge, sampleRate: 1, onlyWhenDisagreement: false, ...overrides },
+    };
+  }
+
+  it('records deterministic failures and invokes judge with rubric prompt', async () => {
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({
+      sessionId: 's-1',
+      agentType: 'claude-code',
+      projectName: 'proj',
+      projectPath: '/tmp/doesnotmatter',
+      taskPrompt: 'Fix the null pointer bug in auth',
+    });
+    collector.closeRun('s-1', 0, '/tmp/doesnotmatter');
+
+    const runner = new ApmeRunner(store);
+    runner._setConfig(baseCfg());
+
+    // Inject deterministic results — one pass, one fail.
+    runner._setDeterministicFn(async () => [
+      { metric: 'lint_clean', score: 1, exitCode: 0, durationMs: 5, outputTail: '', command: 'lint' },
+      { metric: 'tests_pass', score: 0, exitCode: 1, durationMs: 12, outputTail: 'FAIL', command: 'test' },
+    ]);
+
+    let capturedPrompt = '';
+    runner._setJudgeFn(async (prompt) => {
+      capturedPrompt = prompt;
+      return `{"intent":0.6,"correctness":0.4,"style":0.8,"convention":0.7,"overall":0.55,"reasoning":"tests regressed"}`;
+    });
+
+    runner.enqueue({ runId });
+    await runner.drain();
+
+    // Evals persisted
+    const evals = store.listEvalsForRun(runId);
+    const detMetrics = evals.filter((e) => e.layer === 'deterministic').map((e) => e.metric).sort();
+    expect(detMetrics).toEqual(['lint_clean', 'tests_pass']);
+    const judgeMetrics = evals.filter((e) => e.layer === 'llm_judge').map((e) => e.metric);
+    expect(judgeMetrics).toContain('overall');
+    expect(judgeMetrics).toContain('correctness');
+    const overall = evals.find((e) => e.layer === 'llm_judge' && e.metric === 'overall');
+    expect(overall?.score).toBeCloseTo(0.55);
+    expect(overall?.judgeModel).toBe('mlx:qwen3-30b');
+    expect(overall?.rubricVer).toBe(1);
+
+    // Judge received the run context + task prompt
+    expect(capturedPrompt).toContain('Fix the null pointer bug in auth');
+    expect(capturedPrompt).toContain('agent_type: claude-code');
+    expect(capturedPrompt).toContain('deterministic_checks: failed');
+  });
+
+  it('skips layer 2 on a clean pass when onlyWhenDisagreement is true', async () => {
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({
+      sessionId: 's-ok', agentType: 'claude-code', projectName: 'proj',
+      projectPath: '/tmp/x', taskPrompt: 'tidy',
+    });
+    collector.closeRun('s-ok', 0, '/tmp/x');
+
+    const runner = new ApmeRunner(store);
+    runner._setConfig(baseCfg({ onlyWhenDisagreement: true }));
+    runner._setDeterministicFn(async () => [
+      { metric: 'lint_clean', score: 1, exitCode: 0, durationMs: 1, outputTail: '', command: 'lint' },
+      { metric: 'build_ok',   score: 1, exitCode: 0, durationMs: 1, outputTail: '', command: 'build' },
+      { metric: 'tests_pass', score: 1, exitCode: 0, durationMs: 1, outputTail: '', command: 'test' },
+    ]);
+    let judgeCalled = false;
+    runner._setJudgeFn(async () => { judgeCalled = true; return '{"overall":0.9}'; });
+
+    runner.enqueue({ runId });
+    await runner.drain();
+
+    expect(judgeCalled).toBe(false);
+    const evals = store.listEvalsForRun(runId);
+    expect(evals.filter((e) => e.layer === 'llm_judge').length).toBe(0);
+    expect(evals.filter((e) => e.layer === 'deterministic').length).toBe(3);
+  });
+
+  it('swallows judge errors without inserting partial rows', async () => {
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({
+      sessionId: 's-err', agentType: 'claude-code', projectName: 'proj',
+      projectPath: '/tmp/x', taskPrompt: 'crash',
+    });
+    collector.closeRun('s-err', 1, '/tmp/x');
+
+    const runner = new ApmeRunner(store);
+    runner._setConfig(baseCfg());
+    runner._setDeterministicFn(async () => [
+      { metric: 'tests_pass', score: 0, exitCode: 1, durationMs: 10, outputTail: 'FAIL', command: 'test' },
+    ]);
+    runner._setJudgeFn(async () => { throw new Error('MLX server down'); });
+
+    runner.enqueue({ runId });
+    await runner.drain();
+
+    const evals = store.listEvalsForRun(runId);
+    expect(evals.filter((e) => e.layer === 'llm_judge').length).toBe(0);
+    expect(evals.filter((e) => e.layer === 'deterministic').length).toBe(1);
+  });
+});
+
+// ─── Deterministic runner against a real temp project ────────────────────────
+
+describe('runDeterministic (end-to-end spawn)', () => {
+  let store: ApmeStore = null;
+  let project: string | null = null;
+
+  beforeEach(async () => {
+    store = await makeStore();
+    project = tmpProject({
+      'package.json': JSON.stringify({
+        name: 'apme-fixture',
+        scripts: { lint: 'true', build: 'true', test: 'true' },
+      }),
+      'README.md': 'fixture',
+    });
+    initGit(project);
+  });
+
+  afterEach(() => {
+    closeStore(store);
+    if (project) rmSync(project, { recursive: true, force: true });
+    store = null; project = null;
+  });
+
+  it('runs sh-based commands against the project path and reports pass', async () => {
+    // Dirty the worktree so hasChanges() returns true.
+    writeFileSync(join(project, 'README.md'), 'dirty');
+
+    const run: ApmeRunRow = {
+      id: 'r1', sessionId: 's', agentType: 'claude-code',
+      modelId: null, projectName: 'apme-fixture', projectPath: project,
+      taskPrompt: null, startedAt: Date.now(),
+    };
+    // Override commands to avoid depending on pnpm/npm.
+    const cfg: ApmeConfig = {
+      ...DEFAULT_APME_CONFIG,
+      deterministic: {
+        enabled: true, timeoutSec: 30,
+        commands: { typescript: { lint: 'true', build: 'true', test: 'true' } },
+      },
+    };
+
+    const results = await runDeterministic(run, cfg);
+    expect(results.length).toBe(3);
+    expect(results.every((r) => r.score === 1)).toBe(true);
+    expect(results.map((r) => r.metric).sort()).toEqual(['build_ok', 'lint_clean', 'tests_pass']);
+  });
+
+  it('captures exit code 1 as tests_pass=0', async () => {
+    writeFileSync(join(project, 'README.md'), 'dirty');
+    const run: ApmeRunRow = {
+      id: 'r2', sessionId: 's', agentType: 'claude-code',
+      modelId: null, projectName: 'fx', projectPath: project,
+      taskPrompt: null, startedAt: Date.now(),
+    };
+    const cfg: ApmeConfig = {
+      ...DEFAULT_APME_CONFIG,
+      deterministic: {
+        enabled: true, timeoutSec: 30,
+        commands: { typescript: { lint: 'true', build: 'true', test: 'exit 1' } },
+      },
+    };
+    const results = await runDeterministic(run, cfg);
+    const tests = results.find((r) => r.metric === 'tests_pass');
+    expect(tests?.score).toBe(0);
+    expect(tests?.exitCode).toBe(1);
+  });
+
+  it('skips entirely when the worktree has no changes', async () => {
+    const run: ApmeRunRow = {
+      id: 'r3', sessionId: 's', agentType: 'claude-code',
+      modelId: null, projectName: 'fx', projectPath: project,
+      taskPrompt: null, startedAt: Date.now(),
+      gitBefore: 'same', gitAfter: 'same',
+    };
+    const cfg: ApmeConfig = {
+      ...DEFAULT_APME_CONFIG,
+      deterministic: {
+        enabled: true, timeoutSec: 30,
+        commands: { typescript: { lint: 'true', build: 'true', test: 'true' } },
+      },
+    };
+    const results = await runDeterministic(run, cfg);
+    expect(results.length).toBe(0);
+  });
+});
+
+// ─── buildJudgePrompt sanity ─────────────────────────────────────────────────
+
+describe('buildJudgePrompt', () => {
+  it('includes rubric prompt + task + context fields', () => {
+    const run: ApmeRunRow = {
+      id: 'r', sessionId: 's', agentType: 'openclaw',
+      modelId: 'claude-sonnet-4-6', projectName: 'proj', projectPath: null,
+      taskPrompt: 'Add dark mode toggle', startedAt: Date.now(), exitCode: 0,
+    };
+    const out = buildJudgePrompt(run, 'You are a judge. Score 0-1.', true);
+    expect(out).toContain('You are a judge');
+    expect(out).toContain('Add dark mode toggle');
+    expect(out).toContain('agent_type: openclaw');
+    expect(out).toContain('model: claude-sonnet-4-6');
+    expect(out).toContain('deterministic_checks: passed');
+    expect(out).toContain('Respond with strict JSON only.');
+  });
+});

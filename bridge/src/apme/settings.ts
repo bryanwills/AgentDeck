@@ -1,0 +1,134 @@
+/**
+ * APME settings loader.
+ *
+ * Reads `~/.agentdeck/settings.json` and returns a fully resolved APME config
+ * merged with cost-sensitive defaults. The contract is intentionally strict:
+ *
+ *   - Default judge backend = local MLX (zero marginal cost).
+ *   - Anthropic API is opt-in — users must explicitly set `backend: "api"`
+ *     AND have credentials available, otherwise the runner skips layer 2.
+ *   - `sampleRate` + `onlyWhenDisagreement` gate how often layer 2 runs at all.
+ */
+
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+import { debug } from '../logger.js';
+
+export type ApmeJudgeBackend = 'mlx' | 'api' | 'openclaw';
+
+export interface ApmeJudgeConfig {
+  backend: ApmeJudgeBackend;
+  /** Model id at the chosen backend (e.g. "qwen3-30b", "claude-opus-4-6"). */
+  model: string;
+  /** Fraction of closed runs that trigger a layer-2 judge call (0..1). */
+  sampleRate: number;
+  /** Only judge runs where layer-1 signal is ambiguous (tests flaky / mixed). */
+  onlyWhenDisagreement: boolean;
+  /** Optional custom endpoint (MLX server URL, OpenClaw gateway, etc). */
+  endpoint?: string;
+}
+
+export interface ApmeDeterministicConfig {
+  enabled: boolean;
+  /** Hard ceiling per command step (seconds). */
+  timeoutSec: number;
+  /** Language-specific command overrides. Unset keys fall back to defaults. */
+  commands: Partial<Record<'typescript' | 'swift' | 'kotlin', {
+    lint?: string;
+    build?: string;
+    test?: string;
+  }>>;
+}
+
+export interface ApmeConfig {
+  enabled: boolean;
+  /** Auto-tune the judge rubric based on disagreement + vibe feedback. */
+  autoTune: boolean;
+  deterministic: ApmeDeterministicConfig;
+  judge: ApmeJudgeConfig;
+  /** Models the user actually has access to — fed into the recommender. */
+  availableModels: string[];
+}
+
+/** Cost-sensitive defaults: local MLX, sparse sampling, no API calls. */
+export const DEFAULT_APME_CONFIG: ApmeConfig = {
+  enabled: true,
+  autoTune: true,
+  deterministic: {
+    enabled: true,
+    timeoutSec: 180,
+    commands: {},
+  },
+  judge: {
+    backend: 'mlx',
+    model: 'qwen3-30b',
+    sampleRate: 0.2,
+    onlyWhenDisagreement: true,
+  },
+  availableModels: [],
+};
+
+function getSettingsPath(): string {
+  const dir = process.env.AGENTDECK_DATA_DIR || join(homedir(), '.agentdeck');
+  return join(dir, 'settings.json');
+}
+
+/**
+ * Load APME config from `~/.agentdeck/settings.json`, merging any `apme` block
+ * on top of the cost-sensitive defaults. Missing or malformed settings fall
+ * back silently — the bridge must keep booting.
+ */
+export function loadApmeConfig(): ApmeConfig {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(getSettingsPath(), 'utf-8'));
+  } catch {
+    return { ...DEFAULT_APME_CONFIG };
+  }
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_APME_CONFIG };
+  const apme = (raw as { apme?: unknown }).apme;
+  if (!apme || typeof apme !== 'object') return { ...DEFAULT_APME_CONFIG };
+
+  const a = apme as Partial<ApmeConfig> & { judge?: Partial<ApmeJudgeConfig> };
+  const judge: ApmeJudgeConfig = {
+    ...DEFAULT_APME_CONFIG.judge,
+    ...(a.judge ?? {}),
+  };
+  // Clamp pathological values.
+  judge.sampleRate = Math.max(0, Math.min(1, Number(judge.sampleRate) || 0));
+  if (!['mlx', 'api', 'openclaw'].includes(judge.backend)) {
+    debug('APME', `unknown judge.backend=${judge.backend}, falling back to mlx`);
+    judge.backend = 'mlx';
+  }
+
+  const det: ApmeDeterministicConfig = {
+    ...DEFAULT_APME_CONFIG.deterministic,
+    ...((a as { deterministic?: Partial<ApmeDeterministicConfig> }).deterministic ?? {}),
+  };
+  det.timeoutSec = Math.max(5, Math.min(1800, Number(det.timeoutSec) || DEFAULT_APME_CONFIG.deterministic.timeoutSec));
+  det.commands = det.commands ?? {};
+
+  const merged: ApmeConfig = {
+    enabled: a.enabled ?? DEFAULT_APME_CONFIG.enabled,
+    autoTune: a.autoTune ?? DEFAULT_APME_CONFIG.autoTune,
+    deterministic: det,
+    judge,
+    availableModels: Array.isArray(a.availableModels) ? a.availableModels : [],
+  };
+  return merged;
+}
+
+/**
+ * Decide whether layer-2 (LLM judge) should run for this run, based on the
+ * sampleRate + disagreement gates. `deterministicPassed` reflects layer-1 outcome.
+ */
+export function shouldJudge(cfg: ApmeJudgeConfig, deterministicPassed: boolean | null): boolean {
+  if (cfg.sampleRate <= 0) return false;
+  if (cfg.onlyWhenDisagreement) {
+    // Judge when layer-1 signal is missing or already flagged as failure.
+    // Clear passes are skipped — they're the least informative samples.
+    if (deterministicPassed === true) return false;
+  }
+  return Math.random() < cfg.sampleRate;
+}

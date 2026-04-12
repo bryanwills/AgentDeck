@@ -19,6 +19,7 @@ import {
   register as registerSession,
   deregister as deregisterSession,
 } from './session-registry.js';
+import type { ApmeModule } from './apme/index.js';
 import { getOrCreateToken, getWsUrl } from './auth.js';
 import { log, logError, debug } from './logger.js';
 import { invalidateMdnsInstance, triggerMdnsRecovery } from './mdns.js';
@@ -105,6 +106,11 @@ export class BridgeCore {
 
   /** External client count provider (e.g., ESP32 serial connections) */
   private externalClientCount: () => number = () => 0;
+
+  /** Optional APME subsystem — set via setApme() after initApme() resolves. */
+  private apme: ApmeModule | null = null;
+  private apmeAgentType: AgentType | null = null;
+  private apmeCwd: string | undefined;
 
   private static readonly USAGE_STALE_TTL = 10 * 60 * 1000; // 10 minutes
 
@@ -562,10 +568,50 @@ export class BridgeCore {
       startedAt: new Date().toISOString(),
       ...extra,
     });
+    // APME: open a run for real agent sessions (not the daemon meta-session).
+    this.apmeAgentType = agentType;
+    if (this.apme && agentType !== ('daemon' as AgentType)) {
+      try {
+        this.apme.collector.openRun({
+          sessionId: this.sessionId,
+          agentType,
+          projectName: this.projectName,
+          projectPath: this.apmeCwd ?? process.cwd(),
+          modelId: this.stateMachine.getSnapshot().modelName ?? undefined,
+        });
+      } catch (err) {
+        debug('APME', `openRun from registerSession failed: ${String(err)}`);
+      }
+    }
   }
 
   deregisterSession(): void {
+    // APME: finalize the run data. Evaluation is NOT enqueued here because
+    // this session process exits shortly after (2s shutdown budget). The
+    // long-lived daemon process picks up unevaluated runs instead.
+    if (this.apme && this.apmeAgentType && this.apmeAgentType !== ('daemon' as AgentType)) {
+      try {
+        this.apme.collector.closeRun(
+          this.sessionId,
+          undefined,
+          this.apmeCwd ?? process.cwd(),
+        );
+      } catch (err) {
+        debug('APME', `closeRun from deregisterSession failed: ${String(err)}`);
+      }
+    }
     deregisterSession(this.sessionId);
+  }
+
+  /** Attach the APME subsystem. Optional — bridges boot fine without it. */
+  setApme(apme: ApmeModule | null, cwd?: string): void {
+    this.apme = apme;
+    this.apmeCwd = cwd;
+  }
+
+  /** Expose APME for callers that need to ingest hooks / update usage. */
+  getApme(): ApmeModule | null {
+    return this.apme;
   }
 
   // ===== Lifecycle =====
