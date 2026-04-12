@@ -2,6 +2,47 @@
 
 ---
 
+## 2026-04-12 — Focus relay sessionId 전파 + Android derivedStateOf 수정
+
+### 문제
+1. **macOS Dashboard 크리처 중복**: Focus relay가 sibling의 `state_update`를 broadcast하면 client `state.agentType`이 변경되지만 `state.sessionId`는 daemon의 ID로 남아 있음. TerrariumState dedup 필터 `!(primaryIsX && $0.id == sessionId)`가 sessionId 불일치로 실패 → 같은 세션이 primary + sibling 이중 렌더
+2. **Android 크리처 미표시**: `MonitorScreen.kt`의 `derivedStateOf { dashState.toTerrariumState() }`가 초기 `dashState` 캡처 후 siblingSessions 변경을 반영하지 않음 (commit 2315206b에서 EinkMonitorScreen만 수정, MonitorScreen 누락)
+
+### 해결
+- `StateUpdateEvent`에 `sessionId` 필드 추가 (shared protocol + Swift Protocol.swift)
+- Swift daemon `DaemonServer.swift` focus relay broadcast 콜백에서 `focusRelay.focusedSessionId` 주입
+- Node.js daemon `daemon-server.ts` focus relay handler에서 동일하게 주입
+- Swift `AgentStateHolder.handleStateUpdate()`에서 `state.sessionId` 업데이트
+- Android `MonitorScreen.kt`: `remember { derivedStateOf { ... } }` → `remember(dashState) { ... }`
+
+### 핵심 설계 결정
+- **sessionId는 state_update에 포함**: focus relay가 promote하는 세션의 ID를 client에 전달. Connection event는 relay하지 않으므로 state_update에 piggyback
+- **Unfocus 시 별도 처리 불필요**: daemon이 자체 state broadcast → agentType="daemon" → primaryIsX=false → dedup 미적용 → stale sessionId 무해
+- **Android `keepAggregateIdentity` 보호**: Android AgentState.kt의 기존 로직이 focus relay 시 agentType 변경을 이미 차단하므로, Android에서는 duplicate creature 미발생 → Android Protocol.kt에 sessionId 전파 불필요
+
+---
+
+## 2026-04-12 — D200H usage panorama density + billing label
+
+### 변경
+- D200H stock HID 사용량 영역을 `stock-safe-v6`로 갱신.
+- 5H/7D 리셋 시간을 11pt 보조 텍스트에서 17pt 주요 텍스트로 키우고, 24시간 이상은 `5d`, `1d4h` 같은 날짜 기반 compact 표기로 환산.
+- 사용량 리셋 텍스트의 `LEFT` suffix를 제거하고, 진행 바를 아래로 내려 병합 2칸의 세로 공간을 더 사용.
+- `subscriptions[].until` 또는 `codexSubscriptionActiveUntil` 값이 있으면 하단에 `ChatGPT Plus Apr 19`처럼 서비스명과 다음 구독 날짜만 표시. `RENEW` prefix는 사용하지 않음.
+- D200H OpenClaw 타일은 별도 Swift path renderer를 타므로 icon rect를 키우고 renderer rev를 올려 실제 PNG와 파일명이 함께 바뀌도록 조정.
+- D200H의 virtual OpenClaw gateway 세션은 버튼 제목을 `Gateway`가 아니라 `OpenClaw`로 표시하고, 모델명이 없을 때 상태 텍스트가 실제 버튼 하단 마스크에 붙지 않도록 텍스트 stack을 위로 이동.
+- `tools/creature-simulator/index.html`의 D200H merged usage preview도 동일한 리셋/구독일 샘플과 OpenClaw 텍스트 위치 조정을 반영.
+
+### 검증
+- `swiftc -parse apple/AgentDeck/Daemon/Modules/D200hHidModule.swift` 성공.
+- `node --check scripts/render-creature-simulator.mjs` 성공.
+- `git diff --check -- apple/AgentDeck/Daemon/Modules/D200hHidModule.swift tools/creature-simulator/index.html` 성공.
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataD200HUsagePanoramaV5 build` 성공.
+- Runtime `/status`: `d200h.rendererRev=stock-safe-v5`, `connected=true`, `writeFail=0`.
+- 최신 D200H dump `20260412-131707-505-set_buttons-L-52926b-GATEWAY___.zip`: `manifest["3_2"]`가 `smallwindow.window` 단일 entry로 `icons/btn13-wide-stock-safe-v5-41fbdb83.png` 참조, PNG 크기 392x196. 실제 PNG는 `LEFT`/`RENEW` 없이 `2h43m`, `4d20h`, `ChatGPT Plus Apr 19`로 렌더링.
+
+---
+
 ## 2026-04-12 — Sibling session state cache (OpenClaw flicker fix)
 
 ### 문제
@@ -5615,3 +5656,34 @@ errorMessage는 `"... Reverted to local daemon."` 으로 명시해 사용자가 
 ### 핵심 설계 결정
 - **stop() 후 spawn 실패 = local daemon 복구 의무**: helper promotion은 "최선의 노력" 경로이지 fail-stop이 아님. fall-through fallback이 항상 local daemon이어야 함.
 - **무한 promotion 방지**: 기존 `d200hHelperPromotionAttempted` 플래그 유지로 충분. `restart()` 시점에만 false로 리셋되므로 사용자 의도가 명시적으로 표현될 때까지 1회만 시도.
+
+## 2026-04-12 — D200H Stock-HID Safe Layout
+
+### 문제
+D200H를 Stream Deck처럼 per-key 동적 화면으로 다루면 아이콘 캐시, partial update, 펌웨어 manifest 해석 차이 때문에 실제 기기에서 2번 셀에 엉뚱한 아이콘이 남거나 13L/13R 병합 영역이 왜곡되어 보였다. 특히 병합 영역을 두 개의 일반 버튼처럼 제어하면 stock firmware의 `smallwindow` 처리와 충돌해 한 버튼 크기 이미지가 가로로 늘어난 형태가 발생할 수 있었다.
+
+### 해결
+- D200H는 stock HID 안정 경로로 고정: partial update, press flash, animation을 비활성화하고 전체 `set_buttons` 패킷만 사용
+- 아이콘 파일명에 content hash를 포함해 기기/펌웨어 쪽 stale bitmap cache 충돌을 회피
+- 13L/13R 병합 영역은 `3_2`의 `com.ulanzi.ulanzideck.smallwindow.window` manifest entry 하나만 사용하고, `4_2` entry는 만들지 않음
+- 병합 영역 이미지는 버튼 한 개 PNG를 늘리지 않고 `392x196` wide PNG로 직접 렌더링
+- 실제 버튼 가장자리/마스크에서 텍스트가 잘리지 않도록 D200H 렌더러의 safe inset을 키우고 텍스트/상태 표시를 안쪽으로 이동
+- `tools/creature-simulator/index.html`의 D200H 미리보기도 Stream Deck 복제가 아니라 동일 UX 의미를 유지하는 D200H-native stock-HID-safe 디자인으로 분리
+- `stock-safe-v2` renderer revision을 D200H state hash에 포함해 렌더러만 바뀐 경우에도 다음 빌드/refresh에서 새 payload가 확실히 전송되도록 함
+- Stream Deck session/detail button의 agent watermark opacity를 올리고 simulator의 Stream Deck/D200H 미리보기를 같은 방향으로 조정
+
+### 핵심 설계 결정
+- **UX 의미는 Stream Deck과 맞추되, 시각 디자인은 D200H 전용으로 둔다.** D200H는 Stream Deck SDK/화면 모델이 아니라 stock firmware manifest와 HID zip 패킷의 제약을 받으므로 pixel-perfect Stream Deck 복제보다 기기 안정성이 우선이다.
+- **병합 영역은 펌웨어가 기대하는 한 개 smallwindow로 취급한다.** 두 셀을 개별 아이콘처럼 관리하면 실제 표시 좌표/스케일이 불안정해진다.
+- **D200H 아이콘은 물리 버튼 테두리를 신뢰하지 않는다.** 실제 표시 영역 가장자리가 살짝 묻히므로 텍스트와 상태 표시는 충분한 내부 여백 안에 배치한다.
+
+### 검증
+- `swiftc -parse apple/AgentDeck/Daemon/Modules/D200hHidModule.swift` - 성공
+- `node --check scripts/render-creature-simulator.mjs` - 성공
+- `git diff --check -- apple/AgentDeck/Daemon/Modules/D200hHidModule.swift tools/creature-simulator/index.html` - 성공
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' build` - signed debug build 성공
+- Runtime `/status`: `stableStockHid=true`, `partialUpdatesEnabled=false`, `usbEntitlementPresent=true`, `managerOpened=true`, `connected=true`, `writeFail=0`
+- Runtime `/d200h/refresh`: `writeOK` 114 → 156, `writeFail=0`
+- 최신 D200H dump manifest: `3_2` smallwindow entry만 존재하고 `4_2` 없음. wide icon은 `392x196`
+- `stock-safe-v2` signed debug relaunch 후 Runtime `/status`: `rendererRev=stock-safe-v2`, `stableStockHid=true`, `usbEntitlementPresent=true`, `managerOpened=true`, `writeFail=0`
+- 같은 relaunch에서 port 9120을 별도 `agentdeck claude` session이 점유해 macOS daemon이 9121로 fallback. 이 상태에서는 D200H module은 정상 write하지만 `sessionsCount=0`이라 세션 타일 대신 usage/empty 슬롯 payload가 전송됨
