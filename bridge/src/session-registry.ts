@@ -90,6 +90,8 @@ export function deregister(id: string): void {
   const sessions = readSessions();
   const filtered = sessions.filter((s) => s.id !== id);
   writeSessions(filtered);
+  // Clear cached sibling state so stale data doesn't linger
+  import('./session-aggregator.js').then(m => m.clearSiblingStateCache(id)).catch(() => {});
   debug('SessionRegistry', `Deregistered session ${id}`);
 }
 

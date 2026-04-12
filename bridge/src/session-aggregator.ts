@@ -13,9 +13,19 @@ export interface EnrichedSession {
   startedAt?: string;
 }
 
+/** Cache last-known sibling state to avoid propagating undefined on transient fetch failures */
+const siblingStateCache = new Map<string, { state: string; modelName?: string }>();
+
+/** Clear cache entry when a session is removed (call from session-registry cleanup) */
+export function clearSiblingStateCache(sessionId: string): void {
+  siblingStateCache.delete(sessionId);
+}
+
 /**
  * Enrich sibling sessions with state from their /health endpoint.
  * For the own session (matched by ownSessionId), uses ownState directly.
+ * On fetch failure, falls back to last-known cached state to prevent
+ * transient undefined propagation to all clients.
  */
 export async function enrichSessionsWithState(
   sessions: SessionEntry[],
@@ -35,8 +45,13 @@ export async function enrichSessionsWithState(
     try {
       const res = await fetch(`http://127.0.0.1:${s.port}/health`, { signal: AbortSignal.timeout(2000) });
       const data = await res.json() as { state?: string; modelName?: string };
+      if (data.state) {
+        siblingStateCache.set(s.id, { state: data.state, modelName: data.modelName });
+      }
       return { ...base, state: data.state, modelName: data.modelName };
     } catch {
+      const cached = siblingStateCache.get(s.id);
+      if (cached) return { ...base, state: cached.state, modelName: cached.modelName };
       return base;
     }
   }));

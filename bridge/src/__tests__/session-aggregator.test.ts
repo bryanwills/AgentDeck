@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { enrichSessionsWithState, buildEnrichedSessionsList } from '../session-aggregator.js';
+import { enrichSessionsWithState, buildEnrichedSessionsList, clearSiblingStateCache } from '../session-aggregator.js';
 import type { SessionEntry } from '../session-registry.js';
 
 vi.mock('../session-registry.js', () => ({
@@ -82,7 +82,8 @@ describe('session-aggregator', () => {
     ]);
   });
 
-  it('falls back to base session info when sibling /health fails', async () => {
+  it('falls back to base session info when sibling /health fails (no cache)', async () => {
+    clearSiblingStateCache('sibling');
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connect failed'));
 
     const sessions = await enrichSessionsWithState(
@@ -100,6 +101,61 @@ describe('session-aggregator', () => {
         agentType: 'codex-cli',
       }),
     ]);
+    expect(sessions[0].state).toBeUndefined();
+  });
+
+  it('returns cached state when sibling /health fails after a previous success', async () => {
+    clearSiblingStateCache('sibling');
+    // First call succeeds — populates cache
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      json: async () => ({ state: 'processing', modelName: 'gpt-5.4' }),
+    } as Response);
+
+    await enrichSessionsWithState(
+      [makeSession({ id: 'sibling', port: 9131 })],
+      'own-session',
+      'idle',
+    );
+
+    // Second call fails — should use cached state
+    vi.mocked(globalThis.fetch).mockRejectedValueOnce(new Error('timeout'));
+
+    const sessions = await enrichSessionsWithState(
+      [makeSession({ id: 'sibling', port: 9131 })],
+      'own-session',
+      'idle',
+    );
+
+    expect(sessions[0]).toEqual(expect.objectContaining({
+      id: 'sibling',
+      state: 'processing',
+      modelName: 'gpt-5.4',
+    }));
+  });
+
+  it('clearSiblingStateCache removes cached entry', async () => {
+    // Populate cache
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      json: async () => ({ state: 'idle', modelName: 'opus-4' }),
+    } as Response);
+
+    await enrichSessionsWithState(
+      [makeSession({ id: 'sibling', port: 9131 })],
+      'own-session',
+      'idle',
+    );
+
+    // Clear cache then fail — should get undefined state
+    clearSiblingStateCache('sibling');
+    vi.mocked(globalThis.fetch).mockRejectedValueOnce(new Error('timeout'));
+
+    const sessions = await enrichSessionsWithState(
+      [makeSession({ id: 'sibling', port: 9131 })],
+      'own-session',
+      'idle',
+    );
+
+    expect(sessions[0].state).toBeUndefined();
   });
 
   it('buildEnrichedSessionsList excludes daemon and own session before enrichment', async () => {
