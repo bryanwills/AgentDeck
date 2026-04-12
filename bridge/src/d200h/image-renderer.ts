@@ -170,41 +170,35 @@ function renderUsageButton(label: string, percent: number, color: string): strin
   return svgFrame('#0f172a', elements);
 }
 
-/** Wide merged slot (3_2) — 288×144 SVG (viewBox) → 392×196 PNG. StreamDeck overview style: 5H | 7D side-by-side. */
+/** Wide merged slot (3_2) — 288×144 SVG. Two columns: 5H | 7D with gauges and %. */
 function renderUsageWideSlot(fiveHourPct: number, sevenDayPct: number): string {
   const c5 = gaugeColor(fiveHourPct);
   const c7 = gaugeColor(sevenDayPct);
-  const g5 = gaugeBar(fiveHourPct, 10);
-  const g7 = gaugeBar(sevenDayPct, 10);
+  const pct5 = Math.round(fiveHourPct);
+  const pct7 = Math.round(sevenDayPct);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="288" height="144" viewBox="0 0 288 144">
-    <defs>
-      <linearGradient id="usage-wide-bg" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="0%" style="stop-color:#0f172a"/>
-        <stop offset="100%" style="stop-color:#06091a"/>
-      </linearGradient>
-    </defs>
-    <!-- Background -->
-    <rect width="288" height="144" rx="12" fill="url(#usage-wide-bg)"/>
-    <!-- Inner panel -->
-    <rect x="8" y="8" width="272" height="128" rx="8" fill="#1e293b" opacity="0.4"/>
-    <!-- Header: USAGE centered -->
-    <text x="144" y="26" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">USAGE</text>
-    <!-- Vertical divider at x=144 -->
-    <line x1="144" y1="35" x2="144" y2="120" stroke="#334155" stroke-width="1" opacity="0.5"/>
-    <!-- Left half: 5H -->
-    <text x="50" y="50" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">5H</text>
-    <text x="80" y="62" font-family="monospace" font-size="13" fill="${c5}">${escXml(g5)}</text>
-    <text x="80" y="90" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="#ffffff">${Math.round(fiveHourPct)}%</text>
-    <!-- Right half: 7D -->
-    <text x="208" y="50" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">7D</text>
-    <text x="208" y="62" font-family="monospace" font-size="13" fill="${c7}">${escXml(g7)}</text>
-    <text x="208" y="90" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="#ffffff">${Math.round(sevenDayPct)}%</text>
-    <!-- Bottom accent bar (split): 5H on left, 7D on right -->
-    <rect x="12" y="128" width="280" height="2" rx="1" fill="#1e293b"/>
-    <rect x="12" y="128" width="${Math.round(140 * Math.min(fiveHourPct, 100) / 100)}" height="2" rx="1" fill="${c5}"/>
-    <rect x="152" y="128" width="${Math.round(140 * Math.min(sevenDayPct, 100) / 100)}" height="2" rx="1" fill="${c7}"/>
-  </svg>`;
+  // Build SVG with simple structure (safer for resvg)
+  const elements = [
+    // Background: split left/right
+    `<rect x="0" y="0" width="144" height="144" fill="#0f172a"/>`,
+    `<rect x="144" y="0" width="144" height="144" fill="#0f172a"/>`,
+    // Panel backgrounds
+    `<rect x="8" y="8" width="128" height="128" rx="8" fill="#1e293b" opacity="0.3"/>`,
+    `<rect x="152" y="8" width="128" height="128" rx="8" fill="#1e293b" opacity="0.3"/>`,
+    // Header
+    `<text x="72" y="26" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#94a3b8">5H</text>`,
+    `<text x="216" y="26" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#94a3b8">7D</text>`,
+    // Percentage (large)
+    `<text x="72" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="32" font-weight="bold" fill="#ffffff">${pct5}%</text>`,
+    `<text x="216" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="32" font-weight="bold" fill="#ffffff">${pct7}%</text>`,
+    // Accent bars at bottom
+    `<rect x="12" y="132" width="120" height="2" rx="1" fill="#1e293b"/>`,
+    `<rect x="156" y="132" width="120" height="2" rx="1" fill="#1e293b"/>`,
+    `<rect x="12" y="132" width="${Math.round(120 * Math.min(fiveHourPct, 100) / 100)}" height="2" rx="1" fill="${c5}"/>`,
+    `<rect x="156" y="132" width="${Math.round(120 * Math.min(sevenDayPct, 100) / 100)}" height="2" rx="1" fill="${c7}"/>`,
+  ].join('');
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="288" height="144" viewBox="0 0 288 144">${elements}</svg>`;
 }
 
 function renderInfoButton(title: string, value: string, titleColor = '#94a3b8', valueColor = '#ffffff'): string {
