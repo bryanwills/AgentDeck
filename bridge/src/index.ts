@@ -453,6 +453,16 @@ export async function startSession(opts: SessionOptions): Promise<void> {
       case 'parser':
         journal.write('parser_emit', 'pty', { event: evt.event, ...evt.data });
         core.stateMachine.handleParserEvent(evt.event, evt.data);
+        // APME: also record parser events as steps (fallback when Claude Code
+        // hooks don't fire — PTY parser still detects tool use and state changes).
+        if (apme && evt.event) {
+          const parserToHook: Record<string, string> = {
+            tool_start: 'PreToolUse', tool_end: 'PostToolUse',
+            spinner_start: 'processing', idle: 'idle',
+          };
+          const mapped = parserToHook[evt.event] ?? evt.event;
+          apme.collector.ingestHook(core.sessionId, mapped, evt.data ?? {});
+        }
         break;
 
       case 'metadata':
@@ -468,6 +478,11 @@ export async function startSession(opts: SessionOptions): Promise<void> {
           case 'user_prompt': {
             const text = evt.data?.text as string | undefined;
             if (text) core.broadcast({ type: 'user_prompt', text } as BridgeEvent);
+            // APME: user_prompt is the PTY-detected prompt — use it to open a turn
+            // and capture the prompt text (fallback for when hooks don't fire).
+            if (apme && text) {
+              apme.collector.ingestHook(core.sessionId, 'UserPromptSubmit', { message: { content: text } });
+            }
             break;
           }
           case 'model_catalog': {
