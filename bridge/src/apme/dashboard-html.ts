@@ -214,40 +214,52 @@ async function selectRun(id){
   el.innerHTML='<div class="detail-empty">Loading...</div>';
   try{
     let r=await fetch(B+'/apme/run/'+id);if(!r.ok)r=await fetch(B+'/apme/run?id='+id);
-    const d=await r.json();const run=d.run;const evals=d.evals||[];const turns=d.turns||[];const vibe=d.vibe;
+    const d=await r.json();const run=d.run||{};const evals=d.evals||[];const turns=d.turns||[];const vibe=d.vibe;
 
-    const dur=run.ended_at&&run.started_at?run.ended_at-run.started_at:null;
-    const tm=run.started_at?new Date(run.started_at).toLocaleString():'—';
+    // Normalize field names — Node.js uses snake_case, Swift may use camelCase in some paths.
+    const startedAt=run.started_at??run.startedAt;
+    const endedAt=run.ended_at??run.endedAt;
+    const agentType=run.agent_type??run.agentType??'';
+    const modelId=run.model_id??run.modelId??'—';
+    const projectName=run.project_name??run.projectName??'—';
+    const taskPrompt=run.task_prompt??run.taskPrompt;
+    const taskCategory=run.task_category??run.taskCategory;
+    const outcome=run.outcome;
+    const outcomeConf=run.outcome_confidence??run.outcomeConfidence??'';
+    const effJson=run.efficiency_json??run.efficiencyJson;
+    const compScore=run.composite_score??run.compositeScore;
+
+    const dur=endedAt&&startedAt?endedAt-startedAt:null;
+    const tm=startedAt?new Date(startedAt).toLocaleString():'—';
 
     let h='<div class="detail-header">';
-    h+='<h2>'+(run.agent_type||'')+' / '+(run.model_id||'—')+' / '+(run.project_name||'—')+'</h2>';
+    h+='<h2>'+agentType+' / '+modelId+' / '+projectName+'</h2>';
     h+='<div class="meta-row">';
     h+='<span>🕐 '+tm+(dur?' · '+fd(dur):'')+'</span>';
-    if(run.task_category)h+='<span><span class="badge-cat">'+run.task_category+'</span></span>';
+    if(taskCategory)h+='<span><span class="badge-cat">'+taskCategory+'</span></span>';
     h+='<span style="font-family:monospace;font-size:11px;color:var(--dim)">'+run.id.slice(0,12)+'</span>';
     h+='</div></div>';
 
     // Task prompt
-    if(run.task_prompt){
+    if(taskPrompt){
       h+='<div class="section"><div class="section-head">Task</div>';
-      h+='<div style="line-height:1.6;color:var(--text)">'+esc(run.task_prompt.slice(0,600))+'</div></div>';
+      h+='<div style="line-height:1.6;color:var(--text)">'+esc(taskPrompt.slice(0,600))+'</div></div>';
     }
 
     // Composite score bar
-    const compScore=run.composite_score;
     if(compScore!=null){
       const pct=Math.round(compScore*100);
       h+='<div class="section"><div class="section-head"><span>Composite Score</span><span class="section-score" style="color:'+barColor(pct)+'">'+pct+'%</span></div>';
       h+='<div class="composite-bar"><div class="composite-fill" style="width:'+pct+'%;background:'+barColor(pct)+'"></div></div>';
       const je=evals.find(e=>e.metric==='overall'&&e.layer==='llm_judge');
-      h+='<div class="weight-line">outcome('+(run.outcome||'—')+')×0.4 + judge('+(je?Math.round(je.score*100)+'%':'—')+')×0.3 + efficiency×0.2 + vibe('+(vibe?.verdict||'—')+')×0.1</div>';
+      h+='<div class="weight-line">outcome('+(outcome||'—')+')×0.4 + judge('+(je?Math.round(je.score*100)+'%':'—')+')×0.3 + efficiency×0.2 + vibe('+(vibe?.verdict||'—')+')×0.1</div>';
       h+='</div>';
     }
 
     // Outcome
-    if(run.outcome){
-      h+='<div class="section"><div class="section-head"><span>Outcome</span><span style="font-size:11px;color:var(--dim)">'+(run.outcome_confidence||'').toUpperCase()+'</span></div>';
-      h+=fo(run.outcome)+'</div>';
+    if(outcome){
+      h+='<div class="section"><div class="section-head"><span>Outcome</span><span style="font-size:11px;color:var(--dim)">'+outcomeConf.toUpperCase()+'</span></div>';
+      h+=fo(outcome)+'</div>';
     }
 
     // Judge
@@ -271,8 +283,8 @@ async function selectRun(id){
     }
 
     // Efficiency
-    if(run.efficiency_json){try{
-      const eff=JSON.parse(run.efficiency_json);
+    if(effJson){try{
+      const eff=JSON.parse(effJson);
       h+='<div class="section"><div class="section-head">Efficiency</div><div class="metric-grid">';
       if(eff.diffLines!=null)h+='<div class="metric-card"><div class="val">'+eff.diffLines+'</div><div class="lbl">Lines Changed</div></div>';
       if(eff.tokensPerChange!=null)h+='<div class="metric-card"><div class="val">'+eff.tokensPerChange+'</div><div class="lbl">Tokens/Line</div></div>';
