@@ -12,13 +12,14 @@ export const HOOK_EVENTS = [
   'UserPromptSubmit',
 ] as const;
 
-// Build hook config for each event — uses $AGENTDECK_PORT env var so each
-// bridge session's Claude process POSTs to the correct port.
+// Build hook config for each event — reads port from $AGENTDECK_PORT (set by
+// bridge session), then daemon.json, then falls back to 9120. This ensures hooks
+// reach the daemon even when it's on a fallback port and $AGENTDECK_PORT is unset.
 // Claude Code v2.1+ requires 3-level nesting: event → matcher group → hook handler.
 export function buildHookEntry(eventName: string) {
   const handler: any = {
     type: 'command',
-    command: `curl -sf -X POST http://localhost:\${AGENTDECK_PORT:-9120}/hooks/${eventName} -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
+    command: `PORT=\${AGENTDECK_PORT:-\$(python3 -c "import json;print(json.load(open('$HOME/.agentdeck/daemon.json'))['port'])" 2>/dev/null || echo 9120)}; curl -sf -X POST http://localhost:\$PORT/hooks/${eventName} -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
   };
   // Tool-specific hooks (PreToolUse, PostToolUse) need a glob matcher to fire.
   // Empty string "" means "match nothing" for tool events — use "" for non-tool
@@ -171,7 +172,14 @@ export function migrateHooksIfNeeded(): void {
     if (!raw.includes('AGENTDECK_PORT') && !raw.includes('localhost:9120')) return;
 
     const settings = JSON.parse(raw);
-    const { migrated } = migrateHooks(settings);
+    let { migrated } = migrateHooks(settings);
+
+    // Migration 4: upgrade hooks using simple :-9120 fallback to daemon.json-reading format.
+    // This handles existing users from before daemon.json runtime lookup was added.
+    if (raw.includes('AGENTDECK_PORT') && !raw.includes('daemon.json')) {
+      applyHooks(settings);
+      migrated = true;
+    }
 
     if (migrated) {
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');

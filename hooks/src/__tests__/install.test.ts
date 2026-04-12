@@ -18,9 +18,21 @@ describe('Hook Installer', () => {
       expect(entry.hooks[0].command).toContain('/hooks/SessionStart');
     });
 
-    it('includes fallback port 9120 in command', () => {
+    it('includes daemon.json port resolution with fallback to 9120', () => {
       const entry = buildHookEntry('Stop');
-      expect(entry.hooks[0].command).toContain('${AGENTDECK_PORT:-9120}');
+      expect(entry.hooks[0].command).toContain('daemon.json');
+      expect(entry.hooks[0].command).toContain('echo 9120');
+      expect(entry.hooks[0].command).toContain('$PORT');
+    });
+
+    it('reads PORT from AGENTDECK_PORT env var first, then daemon.json, then 9120', () => {
+      const entry = buildHookEntry('SessionStart');
+      const cmd = entry.hooks[0].command;
+      // Should have the priority chain: AGENTDECK_PORT → daemon.json → 9120
+      expect(cmd).toContain('PORT=${AGENTDECK_PORT:-$(python3');
+      expect(cmd).toContain('daemon.json');
+      expect(cmd).toContain('|| echo 9120');
+      expect(cmd).toContain('curl -sf -X POST http://localhost:$PORT/hooks/SessionStart');
     });
   });
 
@@ -230,6 +242,31 @@ describe('Hook Installer', () => {
       expect(didMigrate).toBe(true);
       expect(settings.hooks.Stop[0].hooks[0].command).toContain('AGENTDECK_PORT');
       expect(settings.hooks.Stop[0].hooks[0].command).not.toContain('localhost:9120');
+    });
+  });
+
+  describe('migrateHooksIfNeeded (file-based)', () => {
+    it('upgrades old :-9120 fallback hooks to daemon.json-reading format', () => {
+      // Simulate old-format hooks in settings file
+      const oldSettings = {
+        hooks: {
+          SessionStart: [
+            {
+              matcher: '',
+              hooks: [{
+                type: 'command',
+                command: "curl -sf -X POST http://localhost:${AGENTDECK_PORT:-9120}/hooks/SessionStart ...",
+              }],
+            },
+          ],
+        },
+      };
+
+      // The new format should contain daemon.json instead of the old :-9120 fallback
+      const newSettings = applyHooks({});
+      expect(newSettings.hooks.SessionStart[0].hooks[0].command).toContain('daemon.json');
+      expect(newSettings.hooks.SessionStart[0].hooks[0].command).not.toContain('${AGENTDECK_PORT:-9120}');
+      expect(newSettings.hooks.SessionStart[0].hooks[0].command).toContain('$PORT');
     });
   });
 });
