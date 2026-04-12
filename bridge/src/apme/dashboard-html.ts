@@ -202,7 +202,7 @@ function renderRuns(runs){
 }
 async function loadRuns(){
   try{
-    const r=await fetch(B+'/apme/runs?limit=50');const d=await r.json();allRuns=d.runs||[];
+    const r=await fetch(B+'/apme/runs?limit=50');const d=await r.json();allRuns=(d.runs||[]).filter(r=>r.taskCategory!=='_empty');
     populateFilters(allRuns);renderRuns(allRuns);
     document.getElementById('status').textContent=allRuns.length+' runs · '+new Date().toLocaleTimeString();
   }catch(e){document.getElementById('status').textContent='Error: '+e.message}

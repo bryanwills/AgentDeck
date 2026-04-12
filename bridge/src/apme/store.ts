@@ -357,6 +357,18 @@ export class ApmeStore {
     this.db.prepare(`UPDATE runs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
   }
 
+  /** Delete a run and all its related data (steps, turns, evals, artifacts, vibe). */
+  deleteRun(id: string): void {
+    if (!this.db) return;
+    // CASCADE should handle children, but be explicit for safety.
+    this.db.prepare('DELETE FROM steps WHERE run_id = ?').run(id);
+    this.db.prepare('DELETE FROM turns WHERE run_id = ?').run(id);
+    this.db.prepare('DELETE FROM evals WHERE run_id = ?').run(id);
+    this.db.prepare('DELETE FROM artifacts WHERE run_id = ?').run(id);
+    this.db.prepare('DELETE FROM vibe_feedback WHERE run_id = ?').run(id);
+    this.db.prepare('DELETE FROM runs WHERE id = ?').run(id);
+  }
+
   getRun(id: string): ApmeRunRow | null {
     if (!this.db) return null;
     const row = this.db.prepare('SELECT * FROM runs WHERE id = ?').get(id) as Record<string, unknown> | undefined;

@@ -217,7 +217,9 @@ export class ApmeCollector {
     try { this.store.updateRun(runId, { modelId }); } catch { /* ignore */ }
   }
 
-  /** Finalize a run. Returns the runId so callers can enqueue evaluation. */
+  /** Finalize a run. Returns the runId so callers can enqueue evaluation.
+   *  Empty runs (no prompts, no steps, no turns) are deleted — they're just
+   *  connection noise and clutter the dashboard. */
   closeRun(sessionId: string, exitCode?: number, projectPath?: string): string | null {
     if (!this.store.enabled) return null;
     const runId = this.sessionToRun.get(sessionId);
@@ -225,13 +227,28 @@ export class ApmeCollector {
     // Close the last open turn before finalizing the run.
     this.closeTurn(sessionId);
     this.sessionToRun.delete(sessionId);
+
+    // Mark empty runs so the dashboard can filter them out.
+    // Don't delete — FK constraints and concurrent access make deletion risky.
+    const run = this.store.getRun(runId);
+    const steps = this.store.listSteps(runId);
+    const meaningfulSteps = steps.filter(s =>
+      s.kind !== 'SessionEnd' && s.kind !== 'session_end' && s.kind !== 'session_start' && s.kind !== 'SessionStart'
+    );
+    const isEmpty = !run?.taskPrompt && meaningfulSteps.length === 0;
     const gitAfter = readGitHead(projectPath);
     try {
       this.store.updateRun(runId, {
         endedAt: Date.now(),
         exitCode: exitCode ?? null,
         gitAfter,
+        // Tag empty runs so dashboard can filter them
+        ...(isEmpty ? { taskCategory: '_empty' } : {}),
       });
+      if (isEmpty) {
+        debug('APME', `closeRun ${runId} — empty (no prompt, no steps)`);
+        return runId;
+      }
       debug('APME', `closeRun ${runId} exit=${exitCode ?? '-'} gitAfter=${gitAfter ?? '-'}`);
     } catch (err) {
       debug('APME', `closeRun failed: ${String(err)}`);
