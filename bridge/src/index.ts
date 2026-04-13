@@ -534,40 +534,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
               if (turnId) {
                 apme.collector.setTurnResponse(sid, response);
                 pendingPtyResponse = null;
-                // Mid-session classify + turn eval. The run hasn't closed yet,
-                // so run.taskCategory is normally null (classifier runs on closeRun).
-                // Fall back to sync rule-based classification so non-code categories
-                // can trigger turn eval inline without waiting for the daemon loop.
-                const run = apme.store.getRun(apme.collector.getRunId(sid) ?? '');
-                if (run) {
-                  let category = run.taskCategory ?? null;
-                  if (!category) {
-                    try {
-                      const { classifyRun } = await import('./apme/classifier.js');
-                      const { category: c, signals } = classifyRun(apme.store, run.id);
-                      if (c && c !== 'unknown') {
-                        category = c;
-                        apme.store.updateRun(run.id, {
-                          taskCategory: c,
-                          taskSignals: JSON.stringify(signals),
-                          taskCategorySource: 'rule',
-                        });
-                      }
-                    } catch (err) {
-                      debug('APME', `mid-session classify failed: ${String(err)}`);
-                    }
-                  }
-                  // Stamp the turn with its category (same as run for now — per-turn
-                  // mixing is rare; run-level category is a good default).
-                  if (category) {
-                    try { apme.store.updateTurn(turnId, { taskCategory: category }); }
-                    catch { /* ignore */ }
-                  }
-                  const NON_CODE = new Set(['conversation', 'planning', 'research', 'review']);
-                  if (category && NON_CODE.has(category)) {
-                    apme.runner.enqueueTurn({ runId: run.id, turnId, category });
-                  }
-                }
+                await classifyAndEnqueueTurn(apme, sid);
               } else {
                 pendingPtyResponse = response;
               }
@@ -1189,6 +1156,46 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
 }
 
+// Mid-session classify + turn-level eval enqueue.
+// Shared between Claude spinner_stop, OpenClaw/OpenCode chat_response, and Codex spinner_stop
+// so all agents get the same turns.task_category stamping and non-code turn_judge evals.
+async function classifyAndEnqueueTurn(
+  apme: import('./apme/index.js').ApmeModule,
+  sid: string,
+): Promise<void> {
+  const turnId = apme.collector.getActiveTurnId(sid);
+  const runId = apme.collector.getRunId(sid);
+  if (!turnId || !runId) return;
+  const run = apme.store.getRun(runId);
+  if (!run) return;
+
+  let category = run.taskCategory ?? null;
+  if (!category) {
+    try {
+      const { classifyRun } = await import('./apme/classifier.js');
+      const { category: c, signals } = classifyRun(apme.store, run.id);
+      if (c && c !== 'unknown') {
+        category = c;
+        apme.store.updateRun(run.id, {
+          taskCategory: c,
+          taskSignals: JSON.stringify(signals),
+          taskCategorySource: 'rule',
+        });
+      }
+    } catch (err) {
+      debug('APME', `mid-session classify failed: ${String(err)}`);
+    }
+  }
+  if (category) {
+    try { apme.store.updateTurn(turnId, { taskCategory: category }); }
+    catch { /* ignore */ }
+  }
+  const NON_CODE = new Set(['conversation', 'planning', 'research', 'review']);
+  if (category && NON_CODE.has(category)) {
+    apme.runner.enqueueTurn({ runId: run.id, turnId, category });
+  }
+}
+
 // ===== Non-Claude agent APME wiring =====
 // For OpenCode, Codex, OpenClaw: intercepts adapter timeline events to create
 // APME turns with prompts and responses. Claude Code uses hooks instead.
@@ -1217,7 +1224,10 @@ function wireAgentApme(
       if (entry.type === 'chat_response') {
         // Response captured — save to current turn
         const response = entry.detail || entry.raw || '';
-        if (response.length > 2) apme.collector.setTurnResponse(sid, response);
+        if (response.length > 2) {
+          apme.collector.setTurnResponse(sid, response);
+          void classifyAndEnqueueTurn(apme, sid);
+        }
       }
       if (entry.type === 'chat_end' && !apme.collector.getActiveTurnId(sid)) {
         // No turn was created (chat_start might have been missed) — skip
@@ -1255,7 +1265,10 @@ function wireAgentApme(
             !/\?\s*for\s*shortcuts/.test(l),
           );
           const response = clean.slice(-5).join('\n');
-          if (response.length > 2) apme.collector.setTurnResponse(sid, response);
+          if (response.length > 2) {
+            apme.collector.setTurnResponse(sid, response);
+            void classifyAndEnqueueTurn(apme, sid);
+          }
         }, 500);
       }
     }
