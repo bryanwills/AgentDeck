@@ -907,7 +907,32 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         const turnEvals = apme!.store.listEvalsForTurn(turnId);
         const overall = turnEvals.find(e => e.metric === 'overall');
         if (!overall) return;
+        // Persist turn-level outcome + composite so downstream analytics
+        // (category scorecard, recommender) can aggregate per-turn scores.
+        try {
+          apme!.store.updateTurn(turnId, {
+            outcome: 'committed',
+            compositeScore: overall.score,
+          });
+        } catch { /* ignore */ }
         const pct = Math.round(overall.score * 100);
+        // WS broadcast — reuse apme_eval event for turn eval so dashboards pick it up
+        const turnEvalEvent: import('@agentdeck/shared').ApmeEvalEvent = {
+          type: 'apme_eval',
+          run: {
+            runId: run.id, sessionId: run.sessionId, agentType: run.agentType, startedAt: run.startedAt,
+            modelId: run.modelId ?? undefined, projectName: run.projectName ?? undefined,
+            taskPrompt: run.taskPrompt ?? undefined, taskCategory: run.taskCategory ?? undefined,
+            outcome: 'committed',
+            compositeScore: overall.score,
+            overallScore: overall.score,
+            evals: turnEvals.map(e => ({
+              layer: e.layer, metric: e.metric, score: e.score,
+              judgeModel: e.judgeModel ?? undefined, createdAt: e.createdAt,
+            })),
+          },
+        };
+        core.broadcast(turnEvalEvent);
         core.bridgeTimeline.addEntry({
           ts: Date.now(), type: 'eval_result',
           raw: `★ turn ${pct}% [${run.taskCategory ?? '?'}]`,
@@ -977,6 +1002,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             taskCategorySource: source,
           });
         }).catch(() => {});
+      }
+      // 3b. Backfill turn outcome/composite for turns with captured response.
+      //     Turn-level judge (turn_judge) only fires for non-code categories,
+      //     so code-category turns never get outcome/composite otherwise.
+      //     Heuristic: response captured = 'committed', composite from overall
+      //     turn_judge score if present, otherwise null (not inflated).
+      const needOutcome = apme!.store.listTurnsNeedingOutcome(20);
+      for (const t of needOutcome) {
+        const evs = apme!.store.listEvalsForTurn(t.id);
+        const overall = evs.find(e => e.layer === 'turn_judge' && e.metric === 'overall');
+        try {
+          apme!.store.updateTurn(t.id, {
+            outcome: 'committed',
+            ...(overall ? { compositeScore: overall.score } : {}),
+          });
+        } catch { /* ignore */ }
       }
       // 4. Clean up orphaned runs — session bridges that crashed without graceful
       //    shutdown leave runs with no ended_at, no turns, no prompt. Tag as _empty

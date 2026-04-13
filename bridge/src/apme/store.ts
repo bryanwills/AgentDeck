@@ -728,6 +728,19 @@ export class ApmeStore {
     return rows.map((r) => ({ id: r.id, projectPath: r.project_path }));
   }
 
+  /** Turns with response captured but no outcome yet — backfill candidates. */
+  listTurnsNeedingOutcome(limit: number = 20): Array<{ id: string; runId: string }> {
+    if (!this.db) return [];
+    const rows = this.db.prepare(
+      `SELECT id, run_id FROM turns
+       WHERE response IS NOT NULL AND response != ''
+         AND outcome IS NULL
+       ORDER BY started_at DESC
+       LIMIT ?`,
+    ).all(limit) as Array<{ id: string; run_id: string }>;
+    return rows.map((r) => ({ id: r.id, runId: r.run_id }));
+  }
+
   /** Orphaned runs: started long ago, never closed, no turns.
    *  Typically from session bridges that crashed without cleanup. */
   listOrphanedRuns(staleSec: number = 1800): string[] {

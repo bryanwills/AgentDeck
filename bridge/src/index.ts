@@ -504,7 +504,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
         // Delay 500ms to let response render in PTY, then extract text after ⏺ marker.
         if (apme && evt.event === 'spinner_stop') {
           const sid = core.sessionId;
-          setTimeout(() => {
+          setTimeout(async () => {
             if (!apme) return;
             const tail = ptyRingBuffer.getTail(5000);
             // Claude's response starts with ⏺ — extract content after last ⏺ marker.
@@ -534,12 +534,39 @@ export async function startSession(opts: SessionOptions): Promise<void> {
               if (turnId) {
                 apme.collector.setTurnResponse(sid, response);
                 pendingPtyResponse = null;
-                // Mid-session turn eval — judge immediately for non-code categories
+                // Mid-session classify + turn eval. The run hasn't closed yet,
+                // so run.taskCategory is normally null (classifier runs on closeRun).
+                // Fall back to sync rule-based classification so non-code categories
+                // can trigger turn eval inline without waiting for the daemon loop.
                 const run = apme.store.getRun(apme.collector.getRunId(sid) ?? '');
-                const category = run?.taskCategory ?? undefined;
-                const NON_CODE = new Set(['conversation', 'planning', 'research', 'review']);
-                if (category && NON_CODE.has(category)) {
-                  apme.runner.enqueueTurn({ runId: run!.id, turnId, category });
+                if (run) {
+                  let category = run.taskCategory ?? null;
+                  if (!category) {
+                    try {
+                      const { classifyRun } = await import('./apme/classifier.js');
+                      const { category: c, signals } = classifyRun(apme.store, run.id);
+                      if (c && c !== 'unknown') {
+                        category = c;
+                        apme.store.updateRun(run.id, {
+                          taskCategory: c,
+                          taskSignals: JSON.stringify(signals),
+                          taskCategorySource: 'rule',
+                        });
+                      }
+                    } catch (err) {
+                      debug('APME', `mid-session classify failed: ${String(err)}`);
+                    }
+                  }
+                  // Stamp the turn with its category (same as run for now — per-turn
+                  // mixing is rare; run-level category is a good default).
+                  if (category) {
+                    try { apme.store.updateTurn(turnId, { taskCategory: category }); }
+                    catch { /* ignore */ }
+                  }
+                  const NON_CODE = new Set(['conversation', 'planning', 'research', 'review']);
+                  if (category && NON_CODE.has(category)) {
+                    apme.runner.enqueueTurn({ runId: run.id, turnId, category });
+                  }
                 }
               } else {
                 pendingPtyResponse = response;

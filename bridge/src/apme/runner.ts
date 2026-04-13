@@ -583,11 +583,14 @@ export function parseJudgeJson(text: string): ParsedJudge | null {
   try { obj = JSON.parse(match[0]); }
   catch { return null; }
 
-  // Support both v1 (intent/correctness/style/convention) and v2 (task_completion/code_quality/efficiency) axes.
-  const want = ['intent', 'correctness', 'style', 'convention', 'task_completion', 'code_quality', 'efficiency', 'overall'] as const;
+  // Accept any numeric axis — category-specific rubrics define their own
+  // (conversation: accuracy/helpfulness/conciseness; research: thoroughness/…;
+  // planning: completeness/feasibility/clarity; etc.) A hardcoded whitelist
+  // silently drops those, leaving only `overall` on turn_judge rows.
   const scores: Record<string, number> = {};
-  for (const axis of want) {
-    const v = obj[axis];
+  const RESERVED = new Set(['reasoning', 'done', 'missed', 'notes']);
+  for (const [axis, v] of Object.entries(obj)) {
+    if (RESERVED.has(axis)) continue;
     if (typeof v === 'number' && isFinite(v)) {
       scores[axis] = clamp01(v);
     }
