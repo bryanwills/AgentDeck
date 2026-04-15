@@ -54,6 +54,24 @@ git push origin android-v{VERSION}
 
 ---
 
+## E-ink Device Setup (CremaS etc.)
+
+CremaS and some other locked-down e-ink readers reset USB debugging on every reboot. AgentDeck's `BootReceiver` re-enables it automatically, but needs a one-time adb grant:
+
+```bash
+adb shell pm grant dev.agentdeck android.permission.WRITE_SECURE_SETTINGS
+```
+
+After this, on every boot `BootReceiver` writes `global adb_enabled=1` + `development_settings_enabled=1`, so USB debugging comes back without any manual toggling. Verify with:
+
+```bash
+adb logcat -s AgentDeckBootReceiver
+```
+
+The same grant also powers `stay_on_while_plugged_in` from `MonitorService`. Note: AppOps grants can be lost on app reinstall — re-run the `pm grant` command after reinstalling the APK.
+
+---
+
 ## Terrarium Creature Behavior
 
 The aquarium creatures respond to agent state in real-time:
