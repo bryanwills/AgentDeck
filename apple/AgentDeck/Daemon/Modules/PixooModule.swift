@@ -16,11 +16,19 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
         var consecutiveFailures = 0
         var lastSuccessLogAt: Date?
         var lastFailureMessage: String?
+        var backoffUntil: Date?
     }
 
     let name = "pixoo"
     private var devices: [PixooDevice] = []
     private var renderTask: Task<Void, Never>?
+    private var probeTask: Task<Void, Never>?
+
+    // Circuit breaker — matches Node.js bridge (pixoo-client.ts)
+    private let backoffThreshold = 6
+    private let backoffInitialSec: TimeInterval = 5
+    private let backoffMaxSec: TimeInterval = 60
+    private let probeIntervalSec: TimeInterval = 10
     private var lastFrame: Data?
     private var lastPushError: String?
     private var lastPushAt: Date?
@@ -56,6 +64,14 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
                 await self?.pushFrame()
             }
         }
+
+        // Probe loop — check backed-off devices periodically for recovery
+        probeTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(self?.probeIntervalSec ?? 10))
+                await self?.probeBackedOffDevices()
+            }
+        }
     }
 
     func stop() async {
@@ -64,6 +80,9 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
         // immediately while pushFrame() is still blocked on a 2s HTTP timeout to
         // an unreachable Pixoo — the orphaned URL requests stretch shutdown past
         // the 10s semaphore and leave the process in `?E` state at exit.
+        probeTask?.cancel()
+        await probeTask?.value
+        probeTask = nil
         renderTask?.cancel()
         await renderTask?.value
         renderTask = nil
@@ -88,6 +107,16 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
             "displayDimmed": displayDimmed,
             "lastPushAtMs": lastPushAt.map { Int($0.timeIntervalSince1970 * 1000) } as Any,
             "lastPushError": lastPushError as Any,
+            "devices": devices.map { d -> [String: Any] in
+                let logState = deviceLogStates[d.ip]
+                return [
+                    "ip": d.ip,
+                    "name": d.name ?? "",
+                    "online": !(logState.map { $0.consecutiveFailures >= backoffThreshold } ?? false),
+                    "failures": logState?.consecutiveFailures ?? 0,
+                    "backedOff": isBackedOff(d.ip),
+                ]
+            },
         ]
     }
 
@@ -155,6 +184,31 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
         }
     }
 
+    // MARK: - Circuit Breaker
+
+    private func isBackedOff(_ ip: String) -> Bool {
+        guard let state = deviceLogStates[ip],
+              let until = state.backoffUntil else { return false }
+        return state.consecutiveFailures >= backoffThreshold && Date() < until
+    }
+
+    private func probeBackedOffDevices() async {
+        for device in devices {
+            guard isBackedOff(device.ip) else { continue }
+            let payload: [String: Any] = ["Command": "Channel/GetAllConf"]
+            if await postCommand(device.ip, payload: payload) != nil {
+                DaemonLogger.shared.info("[Pixoo] \(device.ip) recovered — resuming push")
+                var state = deviceLogStates[device.ip] ?? DeviceLogState()
+                state.consecutiveFailures = 0
+                state.backoffUntil = nil
+                state.lastFailureMessage = nil
+                deviceLogStates[device.ip] = state
+                devicePicIds.removeValue(forKey: device.ip)
+                await prepareDevice(device)
+            }
+        }
+    }
+
     /// Push current frame to all Pixoo devices via HTTP
     private func pushFrame() async {
         guard !devices.isEmpty, !displayDimmed else { return }
@@ -162,7 +216,7 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
         let frame = renderer.render(dashboardState: currentDashboardState())
         lastFrame = frame
 
-        for device in devices {
+        for device in devices where !isBackedOff(device.ip) {
             await pushToDevice(device, frame: frame)
         }
     }
@@ -358,6 +412,7 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
         let failedCount = state.consecutiveFailures
         state.consecutiveFailures = 0
         state.lastFailureMessage = nil
+        state.backoffUntil = nil
         state.successCount += 1
 
         let shouldLogPeriodicSuccess: Bool
@@ -391,6 +446,17 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
         state.consecutiveFailures += 1
         let changedReason = state.lastFailureMessage != reason
         state.lastFailureMessage = reason
+
+        // Circuit breaker: exponential backoff after threshold
+        if state.consecutiveFailures >= backoffThreshold {
+            let power = state.consecutiveFailures - backoffThreshold
+            let delay = min(backoffInitialSec * pow(2.0, Double(power)), backoffMaxSec)
+            state.backoffUntil = Date().addingTimeInterval(delay)
+
+            if state.consecutiveFailures == backoffThreshold {
+                DaemonLogger.shared.error("[Pixoo] \(ip) offline — \(backoffThreshold) consecutive failures. Backing off (probe every \(Int(probeIntervalSec))s). Power-cycle the device if it doesn't recover.")
+            }
+        }
 
         if state.consecutiveFailures == 1 || state.consecutiveFailures == 5 || state.consecutiveFailures % 20 == 0 || changedReason {
             DaemonLogger.shared.error("Pixoo failure on \(ip): \(reason) [count=\(state.consecutiveFailures)]")
