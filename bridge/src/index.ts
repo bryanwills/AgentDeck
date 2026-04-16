@@ -223,6 +223,28 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   if (apme) {
     core.setApme(apme, process.cwd());
     log('APME enabled — runs will be logged to ~/.agentdeck/apme.sqlite');
+
+    // Wire APME eval results → timeline entries (session bridge mode).
+    // Daemon has its own richer wiring; this covers standalone session bridges.
+    apme.runner.onResult(({ runId, turnId }) => {
+      if (turnId) {
+        // Turn-level eval completed
+        const run = apme.store.getRun(runId);
+        if (!run) return;
+        const turnEvals = apme.store.listEvalsForTurn(turnId);
+        const overall = turnEvals.find(e => e.metric === 'overall');
+        if (!overall) return;
+        const pct = Math.round(overall.score * 100);
+        const axes = turnEvals.filter(e => e.metric !== 'overall');
+        const axisStr = axes.map(e => `${e.metric}=${Math.round(e.score * 100)}%`).join(' ');
+        core.bridgeTimeline.addEntry({
+          ts: Date.now(), type: 'eval_result',
+          raw: `★ turn ${pct}% [${run.taskCategory ?? '?'}]`,
+          detail: axisStr || `Turn eval · ${run.taskPrompt?.slice(0, 80) ?? ''}`,
+          agentType: run.agentType,
+        });
+      }
+    });
   }
 
   // ===== Session-specific components =====
