@@ -18,7 +18,7 @@ import { MonitorAdapter } from './adapters/monitor.js';
 import { UtilityProxy } from './utility-proxy.js';
 import { BridgeLogStream } from './log-stream.js';
 import { extractTopicHint, summarizeResponse } from './timeline-summarizer.js';
-import { cleanDetailText } from '@agentdeck/shared';
+import { cleanDetailText, cleanRawText } from '@agentdeck/shared';
 import { VoiceAssistantManager } from './voice-assistant.js';
 import { TerminalStatus } from './terminal-status.js';
 import { readFileSync, existsSync } from 'fs';
@@ -433,7 +433,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
   // Claude Code hook events → timeline entries
   if (agentType === 'claude-code') {
-    wireClaudeCodeTimeline(adapter, core, journal);
+    wireClaudeCodeTimeline(adapter, core, journal, ptyRingBuffer);
   }
   // APME wiring for non-Claude-Code agents (OpenCode, Codex, OpenClaw)
   if (apme && agentType !== 'claude-code' && agentType !== 'monitor') {
@@ -1281,12 +1281,15 @@ function wireClaudeCodeTimeline(
   adapter: import('./types.js').AgentAdapter,
   core: BridgeCore,
   journal: EventJournal,
+  ptyRingBuffer: PtyRingBuffer,
 ): void {
-  let ccLastState: string | null = null;
   let ccChatStart: number | null = null;
   let ccPendingChatStart = false;
   let ccPendingChatStartTimer: ReturnType<typeof setTimeout> | null = null;
   let ccLastPromptText: string | null = null;
+  let ccLastHookToolTs = 0;          // Change 1: track last hook-based tool_request
+  let ccPendingCompletion = false;   // Change 2: track pending chat_end for PTY fallback
+  let ccPendingCompletionTimer: ReturnType<typeof setTimeout> | null = null;
 
   const emitChatStart = (text: string) => {
     if (ccPendingChatStartTimer) {
@@ -1297,17 +1300,148 @@ function wireClaudeCodeTimeline(
     ccLastPromptText = text || null;
     const snippet = text.length > 500 ? text.slice(0, 497) + '...' : text;
     const detail = text.length > 100 ? (text.length > 1000 ? text.slice(0, 1000) + '...' : text) : undefined;
+    // Change 4: better fallback text — include project name
+    const fallbackRaw = (() => {
+      const proj = core.stateMachine.getSnapshot().projectName;
+      return proj ? `Prompt \u00B7 ${proj}` : 'Prompt sent';
+    })();
     core.bridgeTimeline.addEntry({
       ts: ccChatStart ?? Date.now(), type: 'chat_start',
-      raw: snippet || 'Prompt sent',
+      raw: snippet || fallbackRaw,
       ...(detail ? { detail } : {}),
       agentType: 'claude-code',
     });
   };
 
+  /** Extract response text from PTY ringbuffer after ⏺ marker (same pattern as APME) */
+  const extractPtyResponse = (): string => {
+    const tail = ptyRingBuffer.getTail(5000);
+    const marker = tail.lastIndexOf('⏺');
+    if (marker < 0) return '';
+    const afterMarker = tail.slice(marker + 1).trim();
+    const lines = afterMarker.split('\n');
+    const clean: string[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (/^[✢✳✶✻✽⏸⏵❯─>]/.test(trimmed)) break;
+      if (/planmode|plan\s*mode|shift\+tab|accept\s*edits/i.test(trimmed)) break;
+      if (/^\S+…(\s|$)/.test(trimmed) && /tokens|shortcuts|\d+[ms]\s/i.test(trimmed)) break;
+      if (/\?\s*for\s*shortcuts/.test(trimmed)) break;
+      clean.push(trimmed);
+    }
+    return clean.join('\n').trim();
+  };
+
+  /** Emit chat_response + chat_end from response text (shared by Stop hook and PTY fallback) */
+  const emitCompletion = (responseText: string, duration: number | null, toolSummary: string) => {
+    const now = Date.now();
+
+    // Change 5: emit chat_response if meaningful response text exists
+    if (responseText.length > 20) {
+      const respRaw = responseText.length > 200 ? responseText.slice(0, 197) + '...' : responseText;
+      core.bridgeTimeline.addEntry({
+        ts: now - 1, type: 'chat_response',
+        raw: cleanRawText(respRaw),
+        detail: cleanDetailText(responseText.slice(0, 3000)) || undefined,
+        agentType: 'claude-code',
+      });
+    }
+
+    const topicHint = responseText ? extractTopicHint(responseText) : null;
+    const promptTopic = ccLastPromptText ? extractTopicHint(ccLastPromptText) : null;
+    const completedLabel = topicHint || promptTopic || 'Completed';
+    let summary = duration != null ? `${completedLabel} \u00B7 ${duration}s` : completedLabel;
+    if (toolSummary) summary += ` \u00B7 ${toolSummary}`;
+    const chatEndDetail = responseText
+      ? (() => { const c = cleanDetailText(responseText); return c ? (c.length > 1000 ? c.slice(0, 1000) + '...' : c) : undefined; })()
+      : ccLastPromptText
+        ? `Prompt: ${ccLastPromptText.length > 200 ? ccLastPromptText.slice(0, 200) + '...' : ccLastPromptText}`
+        : undefined;
+    const chatEndTs = now;
+    ccChatStart = null;
+    ccLastPromptText = null;
+    core.bridgeTimeline.addEntry({
+      ts: chatEndTs, type: 'chat_end', raw: summary,
+      ...(chatEndDetail ? { detail: chatEndDetail } : {}),
+      agentType: 'claude-code',
+    });
+
+    // Async LLM summarization — fire-and-forget, upsert chat_end when ready
+    if (responseText && responseText.length > 30) {
+      const savedDuration = duration;
+      const savedToolSummary = toolSummary;
+      const savedDetail = chatEndDetail;
+      summarizeResponse(responseText).then((llmSummary) => {
+        if (llmSummary) {
+          const enrichedParts = [llmSummary];
+          if (savedDuration != null) enrichedParts.push(`${savedDuration}s`);
+          if (savedToolSummary) enrichedParts.push(savedToolSummary);
+          debug('timeline', `CC LLM summary: ${llmSummary}`);
+          core.bridgeTimeline.upsertEntry({
+            ts: chatEndTs, type: 'chat_end',
+            raw: enrichedParts.join(' \u00B7 '),
+            ...(savedDetail ? { detail: savedDetail } : {}),
+            agentType: 'claude-code',
+          });
+        }
+      }).catch(() => { /* summarization failed — keep heuristic */ });
+    }
+  };
+
+  // Change 4: late upsert — user_prompt metadata arriving after 500ms timer
   adapter.on('event', (evt: AdapterEvent) => {
-    if (evt.source === 'metadata' && evt.event === 'user_prompt' && ccPendingChatStart) {
-      emitChatStart((evt.data?.text as string) || '');
+    if (evt.source === 'metadata' && evt.event === 'user_prompt') {
+      const text = (evt.data?.text as string) || '';
+      if (ccPendingChatStart) {
+        emitChatStart(text);
+      } else if (ccChatStart && Date.now() - ccChatStart < 5000 && text) {
+        // Late arrival — upsert chat_start with actual prompt text
+        const snippet = text.length > 500 ? text.slice(0, 497) + '...' : text;
+        core.bridgeTimeline.upsertEntry({
+          ts: ccChatStart, type: 'chat_start',
+          raw: snippet, agentType: 'claude-code',
+        });
+        ccLastPromptText = text;
+      }
+    }
+  });
+
+  // Change 1: PTY tool_action → tool_exec timeline entry (fills gap when hooks don't fire)
+  adapter.on('event', (evt: AdapterEvent) => {
+    if (evt.source !== 'parser' || evt.event !== 'tool_action') return;
+    const now = Date.now();
+    // Skip if hook already emitted tool_request within 2s (avoid duplicates)
+    if (now - ccLastHookToolTs < 2000) return;
+    const toolName = (evt.data?.toolName as string) || 'tool';
+    const toolArgs = (evt.data?.toolArgs as string) || '';
+    const raw = toolArgs ? `${toolName} ${toolArgs}` : toolName;
+    core.bridgeTimeline.addEntry({
+      ts: now, type: 'tool_exec',
+      raw: raw.length > 500 ? raw.slice(0, 497) + '...' : raw,
+      agentType: 'claude-code',
+    });
+  });
+
+  // Change 2: PTY fallback chat_end from spinner_stop/idle (when Stop hook doesn't fire)
+  adapter.on('event', (evt: AdapterEvent) => {
+    if (evt.source !== 'parser') return;
+    if ((evt.event === 'spinner_stop' || evt.event === 'idle') && ccPendingCompletion) {
+      // Wait 1.5s — Stop hook may still arrive
+      if (ccPendingCompletionTimer) clearTimeout(ccPendingCompletionTimer);
+      ccPendingCompletionTimer = setTimeout(() => {
+        ccPendingCompletionTimer = null;
+        if (!ccPendingCompletion) return; // Stop hook already handled it
+        ccPendingCompletion = false;
+        if (ccPendingChatStart) emitChatStart('');
+        const now = Date.now();
+        const duration = ccChatStart ? Math.round((now - ccChatStart) / 1000) : null;
+        const toolSummary = core.usageTracker.getToolSummary();
+        // Extract response from PTY ringbuffer
+        const responseText = extractPtyResponse();
+        debug('timeline', `CC PTY fallback chat_end: respLen=${responseText.length} duration=${duration}`);
+        emitCompletion(responseText, duration, toolSummary);
+      }, 1500);
     }
   });
 
@@ -1319,6 +1453,7 @@ function wireClaudeCodeTimeline(
         ccChatStart = now;
         core.usageTracker.resetToolCounts();
         ccPendingChatStart = true;
+        ccPendingCompletion = true;  // Change 2: arm PTY fallback
         // Claude Code v2.1+ sends { message: { content: "..." } }, not { prompt: "..." }
         const msg = evt.data?.message;
         const hookText = (evt.data?.prompt as string)
@@ -1332,6 +1467,7 @@ function wireClaudeCodeTimeline(
         break;
       }
       case 'PreToolUse': {
+        ccLastHookToolTs = now;  // Change 1: mark hook tool time for dedup
         const toolName = (evt.data?.tool_name as string) || 'tool';
         const formatted = formatToolInputForTimeline(toolName, evt.data?.tool_input as Record<string, unknown> | undefined);
         core.bridgeTimeline.addEntry({
@@ -1341,34 +1477,22 @@ function wireClaudeCodeTimeline(
         });
         break;
       }
-      case 'PostToolUse':
-        core.bridgeTimeline.addEntry({ ts: now, type: 'tool_resolved', raw: 'Approved', agentType: 'claude-code' });
+      case 'PostToolUse': {
+        // Change 3: include tool name instead of generic "Approved"
+        const resolvedTool = (evt.data?.tool_name as string) || 'tool';
+        core.bridgeTimeline.addEntry({ ts: now, type: 'tool_resolved', raw: `${resolvedTool} approved`, agentType: 'claude-code' });
         break;
+      }
       case 'Stop': {
+        ccPendingCompletion = false;  // Change 2: disarm PTY fallback — hook handled it
+        if (ccPendingCompletionTimer) {
+          clearTimeout(ccPendingCompletionTimer);
+          ccPendingCompletionTimer = null;
+        }
         if (ccPendingChatStart) emitChatStart('');
         const duration = ccChatStart ? Math.round((now - ccChatStart) / 1000) : null;
         const toolSummary = core.usageTracker.getToolSummary();
         const lastAssistantMsg = (evt.data?.last_assistant_message as string) || '';
-        const responseTopic = lastAssistantMsg ? extractTopicHint(lastAssistantMsg) : null;
-        const promptTopic = ccLastPromptText ? extractTopicHint(ccLastPromptText) : null;
-        const completedLabel = responseTopic || promptTopic || 'Completed';
-        let summary = duration != null ? `${completedLabel} \u00B7 ${duration}s` : completedLabel;
-        if (toolSummary) summary += ` \u00B7 ${toolSummary}`;
-        let chatEndDetail: string | undefined;
-        if (lastAssistantMsg) {
-          const cleaned = cleanDetailText(lastAssistantMsg);
-          chatEndDetail = cleaned ? (cleaned.length > 1000 ? cleaned.slice(0, 1000) + '...' : cleaned) : undefined;
-        } else if (ccLastPromptText) {
-          chatEndDetail = `Prompt: ${ccLastPromptText.length > 200 ? ccLastPromptText.slice(0, 200) + '...' : ccLastPromptText}`;
-        }
-        const chatEndTs = now;
-        ccChatStart = null;
-        ccLastPromptText = null;
-        core.bridgeTimeline.addEntry({
-          ts: chatEndTs, type: 'chat_end', raw: summary,
-          ...(chatEndDetail ? { detail: chatEndDetail } : {}),
-          agentType: 'claude-code',
-        });
 
         // APME: store Claude's response on the current turn
         const apmeRef = core.getApme();
@@ -1376,26 +1500,7 @@ function wireClaudeCodeTimeline(
           apmeRef.collector.setTurnResponse(core.sessionId, lastAssistantMsg);
         }
 
-        // Async LLM summarization — fire-and-forget, upsert chat_end when ready
-        if (lastAssistantMsg && lastAssistantMsg.length > 30) {
-          const savedDuration = duration;
-          const savedToolSummary = toolSummary;
-          const savedDetail = chatEndDetail;
-          summarizeResponse(lastAssistantMsg).then((llmSummary) => {
-            if (llmSummary) {
-              const enrichedParts = [llmSummary];
-              if (savedDuration != null) enrichedParts.push(`${savedDuration}s`);
-              if (savedToolSummary) enrichedParts.push(savedToolSummary);
-              debug('timeline', `CC LLM summary: ${llmSummary}`);
-              core.bridgeTimeline.upsertEntry({
-                ts: chatEndTs, type: 'chat_end',
-                raw: enrichedParts.join(' \u00B7 '),
-                ...(savedDetail ? { detail: savedDetail } : {}),
-                agentType: 'claude-code',
-              });
-            }
-          }).catch(() => { /* summarization failed — keep heuristic */ });
-        }
+        emitCompletion(lastAssistantMsg, duration, toolSummary);
         break;
       }
     }

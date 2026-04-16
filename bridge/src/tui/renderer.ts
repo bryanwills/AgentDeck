@@ -95,6 +95,7 @@ function typeIcon(type: TimelineEntryType): string {
       case 'memory_recall': return 'r';
       case 'scheduled': return 's';
       case 'user_action': return 'u';
+      case 'eval_result': return '#';
       default: return '*';
     }
   }
@@ -108,6 +109,7 @@ function typeIcon(type: TimelineEntryType): string {
     case 'model_call': case 'model_response': return '\u25C8';
     case 'memory_recall': return '\u25CC';
     case 'scheduled': return '\u25D1';
+    case 'eval_result': return '\u2605';  // ★
     default: return '\u25C6';
   }
 }
@@ -120,6 +122,7 @@ function typeColor(type: TimelineEntryType): string {
     case 'error': return colors.errorTl;
     case 'model_call': case 'model_response': return sgr(35);
     case 'memory_recall': return sgr(33);
+    case 'eval_result': return sgr(33);  // yellow/amber
     default: return colors.dim;
   }
 }

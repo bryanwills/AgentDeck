@@ -933,10 +933,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           },
         };
         core.broadcast(turnEvalEvent);
+        // Change 8: include axis scores + judge reasoning in turn eval detail
+        const turnAxes = turnEvals.filter(e => e.metric !== 'overall');
+        const turnAxisStr = turnAxes.map(e => `${e.metric}=${Math.round(e.score * 100)}%`).join(' ');
+        let turnDetail = turnAxisStr
+          ? `${turnAxisStr}\n${run.taskPrompt?.slice(0, 80) ?? ''}`
+          : `Turn eval · ${run.taskPrompt?.slice(0, 80) ?? ''}`;
+        if (overall.raw) {
+          try {
+            const parsed = JSON.parse(overall.raw as string);
+            const done = (parsed.done as string[] | undefined)?.slice(0, 2).join(', ') || '';
+            const missed = (parsed.missed as string[] | undefined)?.slice(0, 2).join(', ') || '';
+            if (done) turnDetail += `\n✓ ${done}`;
+            if (missed) turnDetail += `\n✗ ${missed}`;
+          } catch { /* ignore */ }
+        }
         core.bridgeTimeline.addEntry({
           ts: Date.now(), type: 'eval_result',
           raw: `★ turn ${pct}% [${run.taskCategory ?? '?'}]`,
-          detail: `Turn eval · ${run.taskPrompt?.slice(0, 80) ?? ''}`,
+          detail: turnDetail,
           agentType: run.agentType,
         });
         return;
@@ -962,13 +977,34 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         },
       };
       core.broadcast(evalEvent);
-      // Timeline entry so all devices (Stream Deck, Apple, Android, ESP32) see it
+
+      // Change 9: separate deterministic layer timeline entry (lint/build/test)
+      const detEvals = evals.filter(e => e.layer === 'deterministic');
+      if (detEvals.length > 0) {
+        const detResults = detEvals.map(e => `${e.metric}=${e.score ? '✓' : '✗'}`).join(' ');
+        core.bridgeTimeline.addEntry({
+          ts: Date.now(), type: 'eval_result',
+          raw: `⚡ ${detResults}`,
+          detail: `Deterministic eval · ${run.projectName ?? ''}`,
+          agentType: run.agentType,
+        });
+      }
+
+      // Change 7: enriched run-level eval_result with axis scores + deterministic summary
       const pct = Math.round((overallScore ?? run.compositeScore ?? 0) * 100);
+      const judgeEvals = evals.filter(e => e.layer === 'llm_judge' && e.metric !== 'overall');
+      const axisStr = judgeEvals.map(e => `${e.metric}=${Math.round(e.score * 100)}%`).join(' ');
+      const detStr = detEvals.length > 0
+        ? detEvals.map(e => `${e.metric}=${e.score ? '✓' : '✗'}`).join(' ') + ' · '
+        : '';
+      const enrichedDetail = axisStr
+        ? `${detStr}${axisStr}\n${run.projectName ?? ''} · ${run.taskPrompt?.slice(0, 100) ?? ''}`
+        : `${run.projectName ?? ''} · ${run.taskPrompt?.slice(0, 100) ?? ''}`;
       core.bridgeTimeline.addEntry({
         ts: Date.now(),
         type: 'eval_result',
         raw: `★ [${run.taskCategory ?? '?'}] ${pct}% · ${run.outcome ?? 'pending'}`,
-        detail: `${run.projectName ?? ''} · ${run.taskPrompt?.slice(0, 100) ?? ''}`,
+        detail: enrichedDetail,
         agentType: run.agentType,
       });
     });
