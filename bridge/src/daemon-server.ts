@@ -18,6 +18,7 @@ import { OpenClawAdapter } from './adapters/openclaw.js';
 import { BridgeLogStream } from './log-stream.js';
 import { SessionTimelineRelay } from './session-timeline-relay.js';
 import { SessionFocusRelay } from './session-focus-relay.js';
+import { updatePushState } from './session-aggregator.js';
 import { VoiceManager } from './voice.js';
 import { VoiceAssistantManager } from './voice-assistant.js';
 import {
@@ -784,6 +785,27 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   });
 
   // ===== Commands from WS clients =====
+  // ===== Internal WS: session push channel =====
+  core.wsServer.onRawMessage((msg, sender) => {
+    if (msg.type === 'session_push_register') {
+      const { sessionId, port: sessionPort, agentType: at, projectName: pn } = msg as any;
+      debug('daemon', `session_push_register: ${sessionId} port=${sessionPort} agent=${at}`);
+      // Acknowledge registration
+      try { sender.send(JSON.stringify({ type: 'session_push_ack', sessionId })); } catch { /* client disconnecting */ }
+      return true; // consumed
+    }
+    if (msg.type === 'session_push_state') {
+      const { sessionId, state, modelName } = msg as any;
+      if (sessionId && state) {
+        updatePushState(sessionId, state, modelName);
+        // Trigger sessions list broadcast so clients get fresh state
+        core.maybeBroadcastSessionsList();
+      }
+      return true; // consumed
+    }
+    return false; // not consumed — pass to command handler
+  });
+
   core.wsServer.onCommand((cmd) => {
     debug('daemon', `cmd: ${cmd.type}`);
     if (gatewayAdapter?.isAlive() && gatewayAdapter.handleCommand(cmd)) {

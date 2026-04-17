@@ -29,7 +29,9 @@ import {
   listActive as listActiveSessions,
   findAvailablePort,
   detectTmuxSession,
+  findDaemonPort,
 } from './session-registry.js';
+import { DaemonWsClient } from './daemon-ws-client.js';
 import { fetchUsageFromApi, hasOAuthToken } from './usage-api.js';
 import { buildUsageEvent } from './usage-event.js';
 import { getLanIp } from '@agentdeck/shared';
@@ -706,6 +708,9 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
     core.broadcastUsage();
 
+    // Push state to daemon via internal WS
+    daemonWsClient?.pushState(snapshot.state, snapshot.modelName ?? undefined);
+
     // Encoder + button state
     const encEvt = computeEncoderState();
     core.broadcast(encEvt);
@@ -820,6 +825,20 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     parentTty,
     tty: adapter.getTtyPath(),
   });
+
+  // ===== Internal WS: push state to daemon =====
+  let daemonWsClient: DaemonWsClient | null = null;
+  const daemonPort = findDaemonPort();
+  if (daemonPort && daemonPort !== core.port) {
+    daemonWsClient = new DaemonWsClient(
+      core.sessionId,
+      core.port,
+      agentType,
+      core.projectName,
+    );
+    daemonWsClient.connect(daemonPort);
+    core.onShutdown(() => { daemonWsClient?.close(); });
+  }
 
   // ===== Client connect =====
   core.wsServer.onClientConnect((ws) => {

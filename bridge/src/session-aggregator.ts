@@ -16,9 +16,28 @@ export interface EnrichedSession {
 /** Cache last-known sibling state to avoid propagating undefined on transient fetch failures */
 const siblingStateCache = new Map<string, { state: string; modelName?: string }>();
 
+/** Push-channel state cache — populated by DaemonWsClient session_push_state messages */
+const pushStateCache = new Map<string, { state: string; modelName?: string; updatedAt: number }>();
+
+/** Update push-channel cache (called from daemon-server when session_push_state arrives) */
+export function updatePushState(sessionId: string, state: string, modelName?: string): void {
+  pushStateCache.set(sessionId, { state, modelName, updatedAt: Date.now() });
+  // Also update sibling cache so it stays consistent
+  siblingStateCache.set(sessionId, { state, modelName });
+}
+
+/** Check if push-channel has fresh state (< 30s old) */
+export function getPushState(sessionId: string): { state: string; modelName?: string } | undefined {
+  const entry = pushStateCache.get(sessionId);
+  if (!entry) return undefined;
+  if (Date.now() - entry.updatedAt > 30_000) return undefined; // stale
+  return { state: entry.state, modelName: entry.modelName };
+}
+
 /** Clear cache entry when a session is removed (call from session-registry cleanup) */
 export function clearSiblingStateCache(sessionId: string): void {
   siblingStateCache.delete(sessionId);
+  pushStateCache.delete(sessionId);
 }
 
 /**
@@ -43,6 +62,10 @@ export async function enrichSessionsWithState(
       startedAt: s.startedAt,
     };
     if (s.id === ownSessionId) return { ...base, state: ownState, modelName: ownModelName };
+    // 1. Use fresh push-channel state if available (< 30s old)
+    const pushed = getPushState(s.id);
+    if (pushed) return { ...base, state: pushed.state, modelName: pushed.modelName };
+    // 2. Fall back to HTTP polling
     try {
       const res = await fetch(`http://127.0.0.1:${s.port}/health`, { signal: AbortSignal.timeout(2000) });
       const data = await res.json() as { state?: string; modelName?: string };
