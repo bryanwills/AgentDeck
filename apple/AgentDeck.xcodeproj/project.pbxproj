@@ -79,6 +79,8 @@
 		4AA7D220242CD3041FB589D8 /* SessionFocusRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */; };
 		4B34D6CBC040FE9BE5E51856 /* OctopusCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776467350B975D0CA1A18E84 /* OctopusCreature.swift */; };
 		4B88BF545E6DD2320A7FDE60 /* TankStatusPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4F61CE4842A567D1BC861E /* TankStatusPanel.swift */; };
+		F404CC5B8C7246B08C90AF6E /* DeviceDiagnosticPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E5077EE8C04AD6B281FC6C /* DeviceDiagnosticPanel.swift */; };
+		6CF7DBD165FA4A7AB7DEEDF0 /* DeviceDiagnosticPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E5077EE8C04AD6B281FC6C /* DeviceDiagnosticPanel.swift */; };
 		4D0E6511F2638CDF14C798AD /* MdnsModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D130EAC9287841A5BC8770DC /* MdnsModule.swift */; };
 		4D4A0A6C0120C440966AEFB3 /* DisplaySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89F9A134A1BC3EDEE8309695 /* DisplaySyncService.swift */; };
 		4D7595686B60FDBDE4A5210D /* AdbModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83589BA4C41B89C8EF1A46FD /* AdbModule.swift */; };
@@ -326,6 +328,7 @@
 		CBBE1258602AB5ABC83560EE /* ApmeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeSettings.swift; sourceTree = "<group>"; };
 		CCEE70EEDDCA2199E894D275 /* GaugeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GaugeBar.swift; sourceTree = "<group>"; };
 		CF4F61CE4842A567D1BC861E /* TankStatusPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TankStatusPanel.swift; sourceTree = "<group>"; };
+		E8E5077EE8C04AD6B281FC6C /* DeviceDiagnosticPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiagnosticPanel.swift; sourceTree = "<group>"; };
 		CF788F02F06C01E401DC8EA6 /* SessionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRegistry.swift; sourceTree = "<group>"; };
 		D130EAC9287841A5BC8770DC /* MdnsModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MdnsModule.swift; sourceTree = "<group>"; };
 		D1DDCB822B1DC56875875388 /* ModuleManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleManager.swift; sourceTree = "<group>"; };
@@ -632,6 +635,7 @@
 			children = (
 				6186E147F760B85461F02022 /* ActivityPanel.swift */,
 				8A5A10C1FD79BB64BD2BB8D5 /* ConnectionOverlay.swift */,
+				E8E5077EE8C04AD6B281FC6C /* DeviceDiagnosticPanel.swift */,
 				19949AA33CE27D478B358976 /* MonitorHUD.swift */,
 				F7B4E454713DFE2DECC4D154 /* MonitorScreen.swift */,
 				40755F64E4C39A49B99D88CA /* SessionListPanel.swift */,
@@ -988,6 +992,7 @@
 				A8293F557BD8D3FB91BF4CF4 /* StateTimelineGenerator.swift in Sources */,
 				DF804392C56333041A3C2784 /* StatusBadge.swift in Sources */,
 				4B88BF545E6DD2320A7FDE60 /* TankStatusPanel.swift in Sources */,
+				F404CC5B8C7246B08C90AF6E /* DeviceDiagnosticPanel.swift in Sources */,
 				F20373DB53552C2F36204EDF /* TerrariumConfig.swift in Sources */,
 				20BC342C63610F58CFF51A74 /* TerrariumRenderer.swift in Sources */,
 				811D1351A028B31CC72F4784 /* TerrariumState.swift in Sources */,
@@ -1093,6 +1098,7 @@
 				942DEF7F0BE77DF0FA264AF8 /* StateTimelineGenerator.swift in Sources */,
 				67FA80518E8F347B39576FCC /* StatusBadge.swift in Sources */,
 				FB05C5FF001D9A5382E3FB66 /* TankStatusPanel.swift in Sources */,
+				6CF7DBD165FA4A7AB7DEEDF0 /* DeviceDiagnosticPanel.swift in Sources */,
 				076E08E5217ECF4528B4AC9A /* TerrariumConfig.swift in Sources */,
 				BC74AE57E83DCC133989A7C9 /* TerrariumRenderer.swift in Sources */,
 				BC49C2373BC5C90CE4076E5E /* TerrariumState.swift in Sources */,

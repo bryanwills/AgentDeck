@@ -79,13 +79,13 @@ struct DeviceDiagnosticPanel: View {
 
 // MARK: - Device Row
 
-private enum DeviceStatus {
+private enum DeviceRowStatus {
     case online, warning, offline
 }
 
 private struct DeviceRow: View {
     let name: String
-    let status: DeviceStatus
+    let status: DeviceRowStatus
     let detail: String
 
     private var dotColor: Color {
