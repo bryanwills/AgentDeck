@@ -10,7 +10,7 @@ struct LaunchSessionDialog: View {
     @AppStorage("launch.lastAgent") private var agentRaw: String = LaunchAgentType.claudeCode.rawValue
     @AppStorage("launch.lastTerminal") private var terminalRaw: String = TerminalApp.system.rawValue
 
-    @State private var installedTerminals: [TerminalApp] = [.system]
+    @State private var installedTerminals: [TerminalApp] = TerminalApp.installed()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
