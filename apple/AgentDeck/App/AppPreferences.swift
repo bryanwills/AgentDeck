@@ -134,6 +134,23 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         didSet { defaults.set(hasSeenDevicePreview, forKey: Keys.hasSeenDevicePreview) }
     }
 
+    /// First-launch tracking for the Monitor empty-state onboarding card.
+    /// Flips to `true` the first time the user dismisses the overlay so
+    /// returning users aren't re-nudged once they know how to launch a
+    /// session or preview devices. Pure local flag.
+    @Published var hasSeenMonitorEmptyGuide: Bool {
+        didSet { defaults.set(hasSeenMonitorEmptyGuide, forKey: Keys.hasSeenMonitorEmptyGuide) }
+    }
+
+    /// One-shot guard for the first-launch notification permission prompt.
+    /// Flips to `true` as soon as we either show the system authorization
+    /// dialog or record a "Not Now" decline, so the explanatory NSAlert
+    /// never fires twice. Settings exposes a "Request Again" affordance
+    /// that clears it for users who want to revisit the choice.
+    @Published var hasRequestedNotifications: Bool {
+        didSet { defaults.set(hasRequestedNotifications, forKey: Keys.hasRequestedNotifications) }
+    }
+
     private let defaults: UserDefaults
 
     private init(defaults: UserDefaults = .standard) {
@@ -161,6 +178,8 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         self.hookInstallConsent = HookInstallConsent(rawValue: defaults.string(forKey: Keys.hookInstallConsent) ?? "") ?? .unknown
         self.hooksInstalled = defaults.object(forKey: Keys.hooksInstalled) as? Bool ?? false
         self.hasSeenDevicePreview = defaults.object(forKey: Keys.hasSeenDevicePreview) as? Bool ?? false
+        self.hasSeenMonitorEmptyGuide = defaults.object(forKey: Keys.hasSeenMonitorEmptyGuide) as? Bool ?? false
+        self.hasRequestedNotifications = defaults.object(forKey: Keys.hasRequestedNotifications) as? Bool ?? false
     }
 
     /// Merge the new backend choice into settings.json without clobbering
@@ -366,5 +385,7 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         static let claudeSettingsBookmark = "prefs.claudeSettingsBookmark"
         static let claudeSettingsPath = "prefs.claudeSettingsPath"
         static let hasSeenDevicePreview = "prefs.hasSeenDevicePreview"
+        static let hasSeenMonitorEmptyGuide = "prefs.hasSeenMonitorEmptyGuide"
+        static let hasRequestedNotifications = "prefs.hasRequestedNotifications"
     }
 }

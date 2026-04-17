@@ -126,3 +126,29 @@ enum AgentDeckPaths {
         return copied
     }
 }
+
+/// Runtime feature gates that depend on the process's execution environment.
+///
+/// Single source of truth for "am I running inside App Sandbox?" so
+/// sandbox-gated features (subprocess spawn, arbitrary file I/O outside the
+/// container, etc.) all agree. macOS sets `APP_SANDBOX_CONTAINER_ID` in the
+/// environment of any sandboxed process — this is the standard detection
+/// mechanism.
+///
+/// Fallback: on non-macOS platforms we always return `false`. On macOS unit
+/// tests the variable is unset (xctest runs outside the sandbox even for
+/// sandboxed targets), which matches the behavior we want — tests can
+/// exercise the deterministic path without a special override.
+enum AgentDeckRuntime {
+    /// True when the current process is running inside macOS App Sandbox.
+    /// Phase 0 (App Store MVP) uses this to graceful-disable APME Layer 1
+    /// deterministic checks, which need subprocess spawn (git/pnpm/xcodebuild)
+    /// that the sandbox denies.
+    static var isSandboxed: Bool {
+        #if os(macOS)
+        return ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+        #else
+        return false
+        #endif
+    }
+}

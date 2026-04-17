@@ -1,9 +1,17 @@
 #if os(macOS)
 // ApmeRunner.swift — Swift port of bridge/src/apme/runner.ts.
 //
-// Phase 1 scope (App Store MVP):
+// Phase 0 scope (App Store MVP):
 //   - Layer 2 (LLM judge) only. Layer 1 (deterministic pnpm/xcodebuild/git)
-//     cannot run in the sandbox so `runOne` always sets layer1Ran=false.
+//     is graceful-disabled under App Sandbox because it requires subprocess
+//     spawn (`Process`/`posix_spawn`) which the sandbox denies.
+//     `isLayer1Available` below is the single source of truth for that gate.
+//     When Layer 1 is skipped, the HTTP/WS response payload carries
+//     `layer1SkippedReason` so the dashboard + Swift Settings UI can surface
+//     "LLM-only evaluation" instead of silently omitting scores.
+//   - A future phase will port the Layer 1 signals (files touched, tests
+//     passed/failed, lines changed) into pure Swift using LibGit2 + the
+//     Xcode results bundle reader. Until then Layer 1 runs nowhere.
 //   - Turn-level eval via `enqueueTurn(runId:turnId:category:)` — this is the
 //     path the category-aware rubric pipeline flows through. When the user
 //     asks a conversation/research/planning/review question and the Swift
@@ -33,6 +41,16 @@ struct ApmeEvalJobResult {
     let layer1Ran: Bool
     let layer2Ran: Bool
     let overall: Double?
+    /// Machine-readable reason Layer 1 was skipped for this result, or `nil`
+    /// when Layer 1 either ran or wasn't expected to.
+    ///
+    /// Current known values:
+    ///   - "sandbox" — subprocess spawn blocked by App Sandbox (App Store build).
+    ///   - "not_implemented" — Swift Layer 1 port not yet written.
+    ///
+    /// Shipped in the `apme_eval` WS event + HTTP payloads so the dashboard
+    /// can render an "LLM-only" badge when present.
+    var layer1SkippedReason: String? = nil
 }
 
 /// Parsed judge output.
@@ -54,6 +72,39 @@ actor ApmeRunner {
     /// one to broadcast `apmeEval` WebSocket events and append `eval_result`
     /// timeline entries.
     private var listeners: [@Sendable (ApmeEvalJobResult) -> Void] = []
+
+    // MARK: - Layer 1 availability gate
+
+    /// Single source of truth: can Layer 1 (deterministic pnpm/xcodebuild/git)
+    /// run in the current process?
+    ///
+    /// Currently returns `false` everywhere because (a) inside App Sandbox
+    /// subprocess spawn is denied, and (b) the Swift port of the TS Layer 1
+    /// signal extractors in `bridge/src/apme/runner.ts` hasn't been written
+    /// yet. Phase 2+ will flip this to a runtime-computed value once the
+    /// LibGit2 + results-bundle port lands.
+    ///
+    /// Gating on this lets callers produce a stable `layer1SkippedReason` so
+    /// the dashboard + Settings UI can render "LLM-only evaluation" instead
+    /// of looking broken when Layer 1 rows never appear.
+    static var isLayer1Available: Bool {
+        // TODO(phase2): replace with `!AgentDeckRuntime.isSandboxed && swiftLayer1Implemented`
+        //               once the Swift Layer 1 port lands.
+        return false
+    }
+
+    /// Machine-readable reason Layer 1 was skipped for this process.
+    /// Returns `nil` when Layer 1 is available. Used to tag eval results
+    /// shipped over WS/HTTP so the UI can surface the gap.
+    static var layer1SkippedReason: String? {
+        if isLayer1Available { return nil }
+        if AgentDeckRuntime.isSandboxed { return "sandbox" }
+        // Outside sandbox we're still skipping Layer 1 until the Swift port
+        // lands. Label it distinct from "sandbox" so future dashboards can
+        // tell a user-facing "App Store build" story apart from an internal
+        // "not yet implemented" one.
+        return "not_implemented"
+    }
 
     init(store: ApmeStore, config: ApmeConfig = ApmeSettings.load()) {
         self.store = store
@@ -151,7 +202,11 @@ actor ApmeRunner {
             turnId: turnId,
             layer1Ran: false,
             layer2Ran: true,
-            overall: overall
+            overall: overall,
+            // Turn-level evals never ran Layer 1 in any build, but label the
+            // reason anyway so downstream consumers don't have to branch on
+            // "turn vs run" to decide if Layer 1 was applicable.
+            layer1SkippedReason: Self.layer1SkippedReason
         )
         for listener in listeners { listener(result) }
     }
@@ -171,8 +226,12 @@ actor ApmeRunner {
         guard config.enabled else { return }
         guard let run = store.getRun(id: runId) else { return }
 
-        // Phase 1: no layer 1. Gate layer 2 on the sampling config but bypass
-        // onlyWhenDisagreement since there's no deterministic signal.
+        // Phase 0: Layer 1 graceful-disabled (see `isLayer1Available` above —
+        // subprocess spawn blocked by App Sandbox). Gate Layer 2 on the
+        // sampling config but bypass `onlyWhenDisagreement` since there's no
+        // deterministic signal to disagree with. The result payload carries
+        // `layer1SkippedReason` so the dashboard can render an "LLM-only
+        // evaluation" badge instead of looking broken.
         if !ApmeSettings.shouldJudge(config.judge, deterministicPassed: nil) {
             return
         }

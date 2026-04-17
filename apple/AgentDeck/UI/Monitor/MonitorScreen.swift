@@ -5,6 +5,9 @@ import SwiftUI
 struct MonitorScreen: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
     @EnvironmentObject private var preferences: AppPreferences
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     @State private var terrariumState = TerrariumState()
     #if os(iOS)
@@ -63,8 +66,28 @@ struct MonitorScreen: View {
                 settingsLayer
 
                 toastLayer(geo: geo)
+
+                #if os(macOS)
+                if shouldShowEmptyGuide {
+                    MonitorEmptyGuideOverlay(
+                        onLaunchSession: { openWindow(id: "launch-session") },
+                        onPreviewDevices: { openWindow(id: "device-preview") },
+                        onDismiss: { preferences.hasSeenMonitorEmptyGuide = true }
+                    )
+                    .transition(.opacity)
+                }
+                #endif
             }
         }
+    }
+
+    /// Show the first-run Monitor guide only when the bridge is connected
+    /// (so we don't stack on top of `ConnectionOverlay`), the user has
+    /// no live sessions yet, and they haven't dismissed the card before.
+    private var shouldShowEmptyGuide: Bool {
+        stateHolder.state.bridgeConnected
+            && stateHolder.state.siblingSessions.isEmpty
+            && !preferences.hasSeenMonitorEmptyGuide
     }
 
     // MARK: - Sub-views
@@ -257,6 +280,91 @@ private struct KeyboardShortcutsModifier: ViewModifier {
         default:
             return .ignored
         }
+    }
+}
+#endif
+
+// MARK: - Monitor Empty-State Onboarding Overlay (macOS)
+
+#if os(macOS)
+/// First-run guidance card that surfaces when the Monitor has no live
+/// sessions. Routes the user into the menubar's "Launch Session" window or
+/// the "Device Preview" gallery so the terrarium never reads as broken on
+/// day one. Dismiss flips `AppPreferences.hasSeenMonitorEmptyGuide` so
+/// returning users aren't re-nudged.
+private struct MonitorEmptyGuideOverlay: View {
+    let onLaunchSession: () -> Void
+    let onPreviewDevices: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 18) {
+            VStack(spacing: 8) {
+                Text("Start your first session.")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(TerrariumHUD.text)
+                    .multilineTextAlignment(.center)
+
+                bodyText
+                    .font(.system(size: 13))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    onLaunchSession()
+                } label: {
+                    Label("Launch Session", systemImage: "play.fill")
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+
+                Button {
+                    onPreviewDevices()
+                } label: {
+                    Label("Preview Devices", systemImage: "rectangle.on.rectangle")
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+            }
+
+            Button {
+                onDismiss()
+            } label: {
+                Text("Got it")
+                    .font(.system(size: 12))
+                    .foregroundStyle(TerrariumHUD.subtext)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 22)
+        .frame(maxWidth: 420)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(TerrariumHUD.bg)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(TerrariumHUD.tetraNeon.opacity(0.35), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.4), radius: 18, y: 6)
+    }
+
+    /// Built as Text concatenation so we keep the same color/size while
+    /// bolding the two action names the user is meant to find in the UI.
+    private var bodyText: Text {
+        Text("Click ")
+            + Text("Launch Session").bold()
+            + Text(" in the menubar to start Claude Code here with full monitoring. Or click ")
+            + Text("Preview Devices").bold()
+            + Text(" to see what AgentDeck renders on hardware before you hook anything up.")
     }
 }
 #endif

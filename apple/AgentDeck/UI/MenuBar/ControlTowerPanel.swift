@@ -605,13 +605,13 @@ struct ControlTowerPanel: View {
             Button {
                 openApmeDashboard()
             } label: {
-                Label("APME", systemImage: "chart.bar.fill")
+                Label("Reports", systemImage: "chart.bar.fill")
                     .font(.system(size: 11))
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(daemonService.port == 0)
-            .help("Open the APME evaluation dashboard in your browser")
+            .help("Open the APME evaluation dashboard — per-session quality reports")
 
             Button {
                 openDevicePreview()

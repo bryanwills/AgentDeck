@@ -536,11 +536,25 @@ struct SettingsScreen: View {
     // MARK: - About Content
 
     private var aboutContent: some View {
-        VStack(spacing: 4) {
-            infoRow("App", "AgentDeck")
-            infoRow("Version", "1.0.0")
-            infoRow("Bundle", "bound.serendipity.agentdeck.dashboard")
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Stop Chatting. Start Steering.")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            Text("AgentDeck gives you real-time monitoring and evaluation for Claude Code, Codex, OpenCode, and OpenClaw sessions. See what your agents are doing across every device — Stream Deck+, Apple Watch, E-ink readers, ESP32 boards, matrix displays, and more. Stop context-switching between chat windows. Start steering.")
+                .font(.system(size: 12))
+                .foregroundStyle(TerrariumHUD.subtext)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            VStack(spacing: 4) {
+                infoRow("App", "AgentDeck")
+                infoRow("Version", "1.0.0")
+                infoRow("Bundle", "bound.serendipity.agentdeck.dashboard")
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var dashboardContent: some View {
@@ -681,8 +695,120 @@ struct SettingsScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // MARK: - Codex auth status row
+
+    /// Codex CLI web-auth status. When the daemon runs inside App Sandbox it
+    /// cannot read `~/.codex/auth.json` (outside container) so `codexAuthMode`
+    /// stays nil and users see a blank field — surface a footnote directing
+    /// them to run `codex login` from the real CLI.
+    private var codexAuthRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.badge.key")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                Text("Codex CLI")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                if let mode = stateHolder.state.codexAuthMode, !mode.isEmpty {
+                    Text(mode)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.green)
+                } else {
+                    Text("Not detected")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if stateHolder.state.codexAuthMode == nil && AgentDeckRuntime.isSandboxed {
+                Text("Codex web auth status unavailable in App Store build. Use `codex login` from CLI.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: - OpenClaw integration status row
+
+    /// OpenClaw gateway registration needs `~/.openclaw/identity/device.json`
+    /// which App Sandbox forbids reading. Flag the unavailability inline so
+    /// users understand why the gateway never comes online in the App Store
+    /// build. Non-sandbox dev builds see "configured via CLI" wording.
+    private var openClawIntegrationRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "network")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                Text("OpenClaw Gateway")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                if AgentDeckRuntime.isSandboxed {
+                    Text("Unavailable")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if AgentDeckRuntime.isSandboxed {
+                Text("OpenClaw gateway unavailable in App Store build. Install via CLI: `npm i -g @openclaw/cli`.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Reads `~/.openclaw/identity/device.json`. Run `openclaw pair` in the CLI to create it.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: - ADB / Android integration status row
+
+    /// Android device bridging shells out to the `adb` binary, which App
+    /// Sandbox blocks (no external-binary spawn). Flag that inline so users
+    /// on the App Store build don't think AgentDeck forgot their phone.
+    private var adbIntegrationRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "iphone.and.arrow.forward")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                Text("Android / ADB")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                if AgentDeckRuntime.isSandboxed {
+                    Text("Unavailable")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if AgentDeckRuntime.isSandboxed {
+                Text("Android/ADB device integration requires a separately installed `adb` binary; unavailable in App Store build.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Runs `adb` from PATH. Install with `brew install android-platform-tools` if it's missing.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private var servicesContent: some View {
         VStack(alignment: .leading, spacing: 10) {
+            codexAuthRow
+            Divider()
+
+            adbIntegrationRow
+            Divider()
+
+            openClawIntegrationRow
+            Divider()
+
             Text("Antigravity")
                 .font(.system(size: 13, weight: .semibold))
 

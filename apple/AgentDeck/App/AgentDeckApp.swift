@@ -112,6 +112,15 @@ struct AgentDeckApp: App {
                 openWindow(id: "dashboard")
             }
         }
+
+        // First-launch notification permission prompt. Delayed 1.5s so the
+        // dashboard has drawn before our explanatory NSAlert appears —
+        // otherwise the alert stacks on a black/empty window and looks
+        // like a blocker. The helper is idempotent.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            await NotificationPermission.requestIfNeeded()
+        }
     }
 
     // Dashboard visibility / toggle helpers moved to ControlTowerPanel
