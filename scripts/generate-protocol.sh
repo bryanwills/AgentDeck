@@ -70,18 +70,29 @@ npx quicktype \
   --out "$OUT_DIR/PluginCommand.swift" \
   2>/dev/null || echo "   (Swift PluginCommand generation had warnings)"
 
+#
+# GatewayFrame.swift intentionally omits `--protocol equatable`:
+# ADGatewayError.details and ADChatToolInvocation.input/output are typed as
+# `JSONAny?`, which cannot synthesize Equatable, and quicktype's default
+# templates still mark surrounding types as Equatable — Swift 6 strict mode
+# rejects the whole compilation. Dropping the protocol sidesteps the issue
+# while keeping Codable, which is all the adapter needs.
 npx quicktype \
   --src "$OUT_DIR/gateway-frame-schema.json" \
   --src-lang schema \
   --lang swift \
   --density normal \
   --type-prefix AD \
-  --protocol equatable \
   --struct-or-class struct \
   --mutable-properties \
   --acronym-style camel \
   --out "$OUT_DIR/GatewayFrame.swift" \
   2>/dev/null || echo "   (Swift GatewayFrame generation had warnings)"
+
+# Swift 6 strict concurrency rejects non-final Sendable classes. Quicktype's
+# boilerplate JSON helpers don't mark `JSONCodingKey` as final; patch it so
+# the generated file compiles under `-swift-version 6`.
+sed -i '' -e 's/^class JSONCodingKey:/final class JSONCodingKey:/' "$OUT_DIR/GatewayFrame.swift"
 
 echo "   → BridgeEvent.swift"
 echo "   → PluginCommand.swift"

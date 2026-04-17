@@ -3,12 +3,6 @@
 //
 //   let aDGatewayFrame = try ADGatewayFrame(json)
 
-//
-// Hashable or Equatable:
-// The compiler will not be able to synthesize the implementation of Hashable or Equatable
-// for types that require the use of JSONAny, nor will the implementation of Hashable be
-// synthesized for types that have collections (such as arrays or dictionaries).
-
 import Foundation
 
 /// Client → Gateway: RPC request.
@@ -17,7 +11,7 @@ import Foundation
 ///
 /// Gateway → Client: unsolicited event.
 // MARK: - ADGatewayFrame
-struct ADGatewayFrame: Codable, Equatable {
+struct ADGatewayFrame: Codable {
     var id: String?
     var method: ADGatewayMethodName?
     var params: ADGatewayMethodParams?
@@ -98,14 +92,8 @@ extension ADGatewayFrame {
     }
 }
 
-//
-// Hashable or Equatable:
-// The compiler will not be able to synthesize the implementation of Hashable or Equatable
-// for types that require the use of JSONAny, nor will the implementation of Hashable be
-// synthesized for types that have collections (such as arrays or dictionaries).
-
 // MARK: - ADGatewayError
-struct ADGatewayError: Codable, Equatable {
+struct ADGatewayError: Codable {
     var code: String
     var details: JSONAny?
     var message: String
@@ -156,7 +144,7 @@ extension ADGatewayError {
     }
 }
 
-enum ADGatewayEventName: String, Codable, Equatable {
+enum ADGatewayEventName: String, Codable {
     case chat = "chat"
     case connectChallenge = "connect.challenge"
     case execApprovalRequested = "exec.approval.requested"
@@ -166,7 +154,7 @@ enum ADGatewayEventName: String, Codable, Equatable {
     case tick = "tick"
 }
 
-enum ADGatewayMethodName: String, Codable, Equatable {
+enum ADGatewayMethodName: String, Codable {
     case chatAbort = "chat.abort"
     case chatSend = "chat.send"
     case connect = "connect"
@@ -174,14 +162,8 @@ enum ADGatewayMethodName: String, Codable, Equatable {
     case sessionsList = "sessions.list"
 }
 
-//
-// Hashable or Equatable:
-// The compiler will not be able to synthesize the implementation of Hashable or Equatable
-// for types that require the use of JSONAny, nor will the implementation of Hashable be
-// synthesized for types that have collections (such as arrays or dictionaries).
-
 // MARK: - ADGatewayMethodParams
-struct ADGatewayMethodParams: Codable, Equatable {
+struct ADGatewayMethodParams: Codable {
     var auth: ADDeviceAuth?
     var clientInfo: ADClientInfo?
     var requestScopes: [String]?
@@ -260,14 +242,8 @@ extension ADGatewayMethodParams {
     }
 }
 
-//
-// Hashable or Equatable:
-// The compiler will not be able to synthesize the implementation of Hashable or Equatable
-// for types that require the use of JSONAny, nor will the implementation of Hashable be
-// synthesized for types that have collections (such as arrays or dictionaries).
-
 // MARK: - ADDeviceAuth
-struct ADDeviceAuth: Codable, Equatable {
+struct ADDeviceAuth: Codable {
     var id: String
     var nonce: String
     var publicKey: String
@@ -326,14 +302,8 @@ extension ADDeviceAuth {
     }
 }
 
-//
-// Hashable or Equatable:
-// The compiler will not be able to synthesize the implementation of Hashable or Equatable
-// for types that require the use of JSONAny, nor will the implementation of Hashable be
-// synthesized for types that have collections (such as arrays or dictionaries).
-
 // MARK: - ADClientInfo
-struct ADClientInfo: Codable, Equatable {
+struct ADClientInfo: Codable {
     var clientId: String
     var clientMode: ADClientMode
     var version: String?
@@ -384,24 +354,18 @@ extension ADClientInfo {
     }
 }
 
-enum ADClientMode: String, Codable, Equatable {
+enum ADClientMode: String, Codable {
     case backend = "backend"
     case frontend = "frontend"
 }
 
-enum ADGatewayMethodParamsDecision: String, Codable, Equatable {
+enum ADGatewayMethodParamsDecision: String, Codable {
     case allow = "allow"
     case deny = "deny"
 }
 
-//
-// Hashable or Equatable:
-// The compiler will not be able to synthesize the implementation of Hashable or Equatable
-// for types that require the use of JSONAny, nor will the implementation of Hashable be
-// synthesized for types that have collections (such as arrays or dictionaries).
-
 // MARK: - ADGateway
-struct ADGateway: Codable, Equatable {
+struct ADGateway: Codable {
     var accepted: Bool?
     var expiresAt: Double?
     var sessionToken: String?
@@ -569,20 +533,14 @@ extension ADGateway {
     }
 }
 
-enum ADPayloadDecision: String, Codable, Equatable {
+enum ADPayloadDecision: String, Codable {
     case allow = "allow"
     case deny = "deny"
     case timeout = "timeout"
 }
 
-//
-// Hashable or Equatable:
-// The compiler will not be able to synthesize the implementation of Hashable or Equatable
-// for types that require the use of JSONAny, nor will the implementation of Hashable be
-// synthesized for types that have collections (such as arrays or dictionaries).
-
 // MARK: - ADOption
-struct ADOption: Codable, Equatable {
+struct ADOption: Codable {
     var key: String
     var label: String
 
@@ -629,14 +587,8 @@ extension ADOption {
     }
 }
 
-//
-// Hashable or Equatable:
-// The compiler will not be able to synthesize the implementation of Hashable or Equatable
-// for types that require the use of JSONAny, nor will the implementation of Hashable be
-// synthesized for types that have collections (such as arrays or dictionaries).
-
 // MARK: - ADGatewaySession
-struct ADGatewaySession: Codable, Equatable {
+struct ADGatewaySession: Codable {
     var displayName: String?
     var key: String
     var kind: String?
@@ -699,21 +651,15 @@ extension ADGatewaySession {
     }
 }
 
-enum ADState: String, Codable, Equatable {
+enum ADState: String, Codable {
     case aborted = "aborted"
     case delta = "delta"
     case error = "error"
     case stateFinal = "final"
 }
 
-//
-// Hashable or Equatable:
-// The compiler will not be able to synthesize the implementation of Hashable or Equatable
-// for types that require the use of JSONAny, nor will the implementation of Hashable be
-// synthesized for types that have collections (such as arrays or dictionaries).
-
 // MARK: - ADChatToolInvocation
-struct ADChatToolInvocation: Codable, Equatable {
+struct ADChatToolInvocation: Codable {
     var input: JSONAny?
     var name: String
     var output: JSONAny?
@@ -768,13 +714,13 @@ extension ADChatToolInvocation {
     }
 }
 
-enum ADStatus: String, Codable, Equatable {
+enum ADStatus: String, Codable {
     case error = "error"
     case pending = "pending"
     case success = "success"
 }
 
-enum ADType: String, Codable, Equatable {
+enum ADType: String, Codable {
     case event = "event"
     case req = "req"
     case res = "res"
@@ -825,7 +771,7 @@ class JSONNull: Codable, Hashable {
     }
 }
 
-class JSONCodingKey: CodingKey {
+final class JSONCodingKey: CodingKey {
     let key: String
 
     required init?(intValue: Int) {

@@ -12,6 +12,7 @@ actor OpenClawAdapter {
         let key: String
         let name: String
         let available: Bool?
+        let missing: Bool?
         let tags: [String]?
     }
 
@@ -124,30 +125,36 @@ actor OpenClawAdapter {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
-        let frameType = json["type"] as? String
+        // Envelope parse via generated ADGatewayFrame — this anchors the Swift
+        // adapter to shared/src/gateway-protocol.ts. Field extraction still
+        // reads the raw dict because quicktype flattens the payload union,
+        // but `.type` / `.event` come from the generated enums so any rename
+        // in the single source fails compilation here.
+        let frame = try? JSONDecoder().decode(ADGatewayFrame.self, from: data)
 
-        switch frameType {
-        case "event":
-            if let eventName = json["event"] as? String {
-                handleGatewayEvent(eventName, payload: json["payload"] as? [String: Any] ?? [:])
+        switch frame?.type {
+        case .event:
+            if let eventName = frame?.event {
+                handleGatewayEvent(eventName, rawEvent: json["event"] as? String,
+                                   payload: json["payload"] as? [String: Any] ?? [:])
             }
-        case "res":
+        case .res:
             handleResponse(json)
-        default:
+        case .req, .none:
             break
         }
     }
 
-    private func handleGatewayEvent(_ event: String, payload: [String: Any]) {
+    private func handleGatewayEvent(_ event: ADGatewayEventName, rawEvent: String?, payload: [String: Any]) {
         switch event {
-        case "connect.challenge":
+        case .connectChallenge:
             guard let nonce = payload["nonce"] as? String, !nonce.isEmpty else {
                 DaemonLogger.shared.debug("OpenClaw", "connect.challenge missing nonce")
                 return
             }
             DaemonLogger.shared.debug("OpenClaw", "Challenge nonce: \(String(nonce.prefix(8)))...")
             sendConnectRequest(nonce: nonce)
-        case "chat":
+        case .chat:
             if let runId = payload["runId"] as? String, !runId.isEmpty {
                 currentRunId = runId
             }
@@ -155,23 +162,19 @@ actor OpenClawAdapter {
                 currentSessionKey = sessionKey
             }
             // Chat events (delta, final, aborted, error)
-            self._onEvent?(["type": "gateway_chat", "event": event, "payload": payload])
-        case "exec.approval.requested":
+            self._onEvent?(["type": "gateway_chat", "event": rawEvent ?? event.rawValue, "payload": payload])
+        case .execApprovalRequested:
             pendingApprovalId = payload["id"] as? String
             self._onEvent?(["type": "gateway_approval", "payload": payload])
-        case "exec.approval.resolved":
+        case .execApprovalResolved:
             pendingApprovalId = nil
             self._onEvent?(["type": "gateway_approval_resolved", "payload": payload])
-        case "presence":
+        case .presence:
             self._onEvent?(["type": "gateway_presence", "payload": payload])
-        case "health":
-            self._onEvent?(["type": "gateway_health", "payload": payload])
-        case "tick":
+        case .tick:
             break // Heartbeat, ignore
-        case "shutdown":
+        case .shutdown:
             handleDisconnect()
-        default:
-            self._onEvent?(["type": "gateway_event", "event": event, "payload": payload])
         }
     }
 
@@ -288,7 +291,14 @@ actor OpenClawAdapter {
         } catch {
             deviceIdentity = nil
             deviceAuthToken = nil
-            DaemonLogger.shared.debug("OpenClaw", "device.json read failed at \(deviceFile.path): \(error)")
+            let nsError = error as NSError
+            if AgentDeckRuntime.isSandboxed {
+                DaemonLogger.shared.info("[OpenClaw] Gateway disabled — App Sandbox blocks access to \(deviceFile.path). Install the CLI build for OpenClaw integration: `npm i -g @agentdeck/cli`.")
+            } else if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoSuchFileError {
+                DaemonLogger.shared.info("[OpenClaw] Not paired — run `openclaw pair` to create \(deviceFile.path), then restart the daemon.")
+            } else {
+                DaemonLogger.shared.debug("OpenClaw", "device.json read failed at \(deviceFile.path): \(error)")
+            }
             return
         }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -560,10 +570,11 @@ actor OpenClawAdapter {
                     "key": model.key,
                     "name": model.name,
                     "role": Self.parseModelRole(tags: model.tags ?? []),
-                    "available": model.available ?? true,
+                    "available": (model.available ?? true) && !(model.missing ?? false),
                 ] as [String: Any]
             }
-            let defaultModel = entries.first(where: { ($0["role"] as? String) == "default" })?["key"] as? String
+            let defaultModel = entries.first(where: { ($0["role"] as? String) == "default" })?["name"] as? String
+                ?? entries.first(where: { ($0["available"] as? Bool) != false })?["name"] as? String
             return (entries, defaultModel)
         } catch {
             DaemonLogger.shared.debug("OpenClaw", "Model catalog parse failed: \(error)")

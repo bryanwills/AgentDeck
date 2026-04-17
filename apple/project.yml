@@ -43,6 +43,8 @@ targets:
       - AgentDeck
       - path: ../generated/protocol/AgentCommand.swift
         group: AgentDeck/Generated
+      - path: ../generated/protocol/GatewayFrame.swift
+        group: AgentDeck/Generated
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: bound.serendipity.agentdeck.dashboard

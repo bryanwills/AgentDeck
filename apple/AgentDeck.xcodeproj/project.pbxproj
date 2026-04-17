@@ -108,6 +108,7 @@
 		59639A63610FCE07B0AFA654 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB8FA0272112623E20C79FDC /* VoiceRecorder.swift */; };
 		5A90801088DFF80C8E0EDED6 /* CrayfishCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FD30721AD4CBA74DD049A1F /* CrayfishCreature.swift */; };
 		5B1640167CAEBC66B8D0BE35 /* LocalSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FD383032B3C47C9B547426 /* LocalSessionDiscovery.swift */; };
+		5E39A0DA9E8B9E175292E84D /* GatewayParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234CFF4B2832E6B1CA98AF10 /* GatewayParityTests.swift */; };
 		5FBCFE8F4EBDCB7937FECA50 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2D2F35C5E4DF5DAE1C93F54B /* Assets.xcassets */; };
 		62F20845F1953514EFB1C11B /* SingletonGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5C866AF54937CD8E433F49 /* SingletonGuard.swift */; };
 		634EEC168E46C62A2DBD1ACA /* FormatUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2994478DEFAA4A1CC8EC54D /* FormatUtils.swift */; };
@@ -202,6 +203,7 @@
 		D14972CEAF0D69E6918C86BA /* AgentDeckPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 056D70153C3F720A6D935C9F /* AgentDeckPaths.swift */; };
 		D169DFD5EA54C323E1128E7B /* AgentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F55435772A15B8F0E92C1 /* AgentState.swift */; };
 		D2DDF34B3F564ED80D1F51E4 /* D200hHidModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F15B92A652880A05BEE9213 /* D200hHidModule.swift */; };
+		D369DAE31A2E86FD08922453 /* GatewayParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234CFF4B2832E6B1CA98AF10 /* GatewayParityTests.swift */; };
 		D38FF377AB2134058D342B5C /* ApmeJudgeFoundationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9413D054382510FF4664C89 /* ApmeJudgeFoundationModels.swift */; };
 		D4EA545B7FD41B8A5032F515 /* ESP32Serial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C62F7ABA6BDEE39F39DBDFA /* ESP32Serial.swift */; };
 		D51013A46CB37005EC249749 /* WearableTabletPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 573B908900BFBC530F17EAB6 /* WearableTabletPreviews.swift */; };
@@ -229,6 +231,7 @@
 		E940E2714946D07856C8FB37 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5200B4548DFE9F98AEE8D504 /* ContentView.swift */; };
 		EA32929C78C6088451DDF476 /* TimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95824B0CF6571507DBAF27C5 /* TimelineStore.swift */; };
 		EB83962F2BDBC13AB130DD6B /* SessionListPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40755F64E4C39A49B99D88CA /* SessionListPanel.swift */; };
+		EC6CEEBE6309A8CEAE7195F2 /* GatewayFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E7E35423FAC15B8DB49BBB2 /* GatewayFrame.swift */; };
 		F0C03AF0FCFD56AC72DE9FD3 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 908DB05568DE4E828CD7FCE6 /* Logger.swift */; };
 		F1AA123E5D16742D2C7B003C /* apme-dashboard.html in Resources */ = {isa = PBXBuildFile; fileRef = 766909A21820E709DA63C7C2 /* apme-dashboard.html */; };
 		F20373DB53552C2F36204EDF /* TerrariumConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 403CDDF7DDFCF5D8702491EA /* TerrariumConfig.swift */; };
@@ -279,6 +282,7 @@
 		19949AA33CE27D478B358976 /* MonitorHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorHUD.swift; sourceTree = "<group>"; };
 		1C62F7ABA6BDEE39F39DBDFA /* ESP32Serial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ESP32Serial.swift; sourceTree = "<group>"; };
 		1F9ACDDF739DF572C9280B38 /* BridgeLogStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeLogStream.swift; sourceTree = "<group>"; };
+		234CFF4B2832E6B1CA98AF10 /* GatewayParityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayParityTests.swift; sourceTree = "<group>"; };
 		28DFE82D8F7AC7C7566940F3 /* Timeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Timeline.swift; sourceTree = "<group>"; };
 		2B5C866AF54937CD8E433F49 /* SingletonGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingletonGuard.swift; sourceTree = "<group>"; };
 		2D2F35C5E4DF5DAE1C93F54B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -332,6 +336,7 @@
 		788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionFocusRelay.swift; sourceTree = "<group>"; };
 		7AC67585E8BFBBB8B0250FF2 /* WebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServer.swift; sourceTree = "<group>"; };
 		7BCC68BE56702DFD637FFE02 /* GatewayProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayProbe.swift; sourceTree = "<group>"; };
+		7E7E35423FAC15B8DB49BBB2 /* GatewayFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GatewayFrame.swift; path = ../../generated/protocol/GatewayFrame.swift; sourceTree = "<group>"; };
 		7FF390BEA92326B1152B55A9 /* HTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPServer.swift; sourceTree = "<group>"; };
 		80BD296835DE366BFDBB15B9 /* DaemonService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonService.swift; sourceTree = "<group>"; };
 		83589BA4C41B89C8EF1A46FD /* AdbModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdbModule.swift; sourceTree = "<group>"; };
@@ -450,6 +455,7 @@
 			children = (
 				0F083DDE39507B6693AED227 /* ApmeCategoryE2ETests.swift */,
 				2DB04CEEDD6C769AD9056561 /* ApmeParseJudgeTests.swift */,
+				234CFF4B2832E6B1CA98AF10 /* GatewayParityTests.swift */,
 				5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */,
 				41CF82AE8E20EDCAE99DCEDD /* SessionLauncherTests.swift */,
 				7847FA7381FB8075331B0F12 /* TimelineTests.swift */,
@@ -668,6 +674,7 @@
 			isa = PBXGroup;
 			children = (
 				2E37B7FE721FDD18B11DAC32 /* AgentCommand.swift */,
+				7E7E35423FAC15B8DB49BBB2 /* GatewayFrame.swift */,
 			);
 			name = Generated;
 			sourceTree = "<group>";
@@ -971,6 +978,7 @@
 			files = (
 				BDEDD6038EA83D66CC78F12C /* ApmeCategoryE2ETests.swift in Sources */,
 				3AB4FFE7850E2A1AB615E162 /* ApmeParseJudgeTests.swift in Sources */,
+				D369DAE31A2E86FD08922453 /* GatewayParityTests.swift in Sources */,
 				27F0FAF7D849BC85134C3333 /* ProtocolTests.swift in Sources */,
 				6D2EA7E15F98B8510CF048E9 /* SessionLauncherTests.swift in Sources */,
 				DBE7242898F7F03CB3463B6D /* TimelineTests.swift in Sources */,
@@ -983,6 +991,7 @@
 			files = (
 				38B8B9D479D582EE034C05DB /* ApmeCategoryE2ETests.swift in Sources */,
 				8DE4D71A8BA18D7373FA3147 /* ApmeParseJudgeTests.swift in Sources */,
+				5E39A0DA9E8B9E175292E84D /* GatewayParityTests.swift in Sources */,
 				3173BC2B844664891B8F3934 /* ProtocolTests.swift in Sources */,
 				9B1DF1D553619B6728566E86 /* SessionLauncherTests.swift in Sources */,
 				4F6DEDF8FD3A71AFD059278D /* TimelineTests.swift in Sources */,
@@ -1164,6 +1173,7 @@
 				C71587998379ED779ADFF54F /* ESP32Serial.swift in Sources */,
 				E46B6EAACB14A6B0B5BC2C12 /* EinkEsp32Previews.swift in Sources */,
 				634EEC168E46C62A2DBD1ACA /* FormatUtils.swift in Sources */,
+				EC6CEEBE6309A8CEAE7195F2 /* GatewayFrame.swift in Sources */,
 				7BDDF6B91F9378908A89E1F5 /* GatewayProbe.swift in Sources */,
 				1A25F581608D3C282D70FAF5 /* GaugeBar.swift in Sources */,
 				32577E0D7F449489455D0C9D /* HTTPServer.swift in Sources */,
