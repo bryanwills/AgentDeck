@@ -1,0 +1,1347 @@
+{
+  "$ref": "#/definitions/BridgeEvent",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "hasApiUsage": {
+          "description": "OAuth-based API usage tracking",
+          "type": "boolean"
+        },
+        "hasDiffReview": {
+          "description": "Diff review UI (view/apply/deny)",
+          "type": "boolean"
+        },
+        "hasModeSwitching": {
+          "description": "Plan/AcceptEdits/Default mode switching",
+          "type": "boolean"
+        },
+        "hasModelCatalog": {
+          "description": "CLI-based model catalog (openclaw models list)",
+          "type": "boolean"
+        },
+        "hasNavigablePrompts": {
+          "description": "Arrow-key navigable prompts",
+          "type": "boolean"
+        },
+        "hasOptionLists": {
+          "description": "Numbered option lists with arrow navigation",
+          "type": "boolean"
+        },
+        "hasSuggestedPrompts": {
+          "description": "Ghost text suggested prompts",
+          "type": "boolean"
+        },
+        "hasTerminal": {
+          "description": "PTY terminal attachment (stdin/stdout proxy)",
+          "type": "boolean"
+        },
+        "type": {
+          "$ref": "#/definitions/AgentType"
+        }
+      },
+      "required": [
+        "type",
+        "displayName",
+        "hasTerminal",
+        "hasModeSwitching",
+        "hasDiffReview",
+        "hasOptionLists",
+        "hasNavigablePrompts",
+        "hasSuggestedPrompts",
+        "hasApiUsage",
+        "hasModelCatalog"
+      ],
+      "type": "object"
+    },
+    "AgentType": {
+      "enum": [
+        "claude-code",
+        "openclaw",
+        "codex-cli",
+        "opencode",
+        "monitor"
+      ],
+      "type": "string"
+    },
+    "AntigravityStatusInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "availableCredits": {
+          "type": "number"
+        },
+        "minimumCreditAmountForUsage": {
+          "type": "number"
+        },
+        "planName": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ApmeEvalEvent": {
+      "additionalProperties": false,
+      "description": "Bridge → clients — fires when a run completes evaluation (layer 1 or 2).",
+      "properties": {
+        "run": {
+          "$ref": "#/definitions/ApmeRunSummary"
+        },
+        "type": {
+          "const": "apme_eval",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "run"
+      ],
+      "type": "object"
+    },
+    "ApmeEvalRow": {
+      "additionalProperties": false,
+      "description": "A single evaluation score on a completed run.",
+      "properties": {
+        "createdAt": {
+          "type": "number"
+        },
+        "judgeModel": {
+          "type": "string"
+        },
+        "layer": {
+          "enum": [
+            "deterministic",
+            "llm_judge",
+            "vibe",
+            "turn_judge"
+          ],
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "rubricVer": {
+          "type": "number"
+        },
+        "score": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "layer",
+        "metric",
+        "score",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ApmeModelScorecard": {
+      "additionalProperties": false,
+      "properties": {
+        "agentType": {
+          "$ref": "#/definitions/AgentType"
+        },
+        "avgOverall": {
+          "type": "number"
+        },
+        "avgTestsPass": {
+          "type": "number"
+        },
+        "costPerQuality": {
+          "type": "number"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "runs": {
+          "type": "number"
+        },
+        "totalCost": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "agentType",
+        "modelId",
+        "runs"
+      ],
+      "type": "object"
+    },
+    "ApmeRecommendation": {
+      "additionalProperties": false,
+      "properties": {
+        "agentType": {
+          "$ref": "#/definitions/AgentType"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "expectedCostUsd": {
+          "type": "number"
+        },
+        "expectedScore": {
+          "type": "number"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "modelId",
+        "agentType",
+        "expectedScore",
+        "expectedCostUsd",
+        "confidence",
+        "rationale"
+      ],
+      "type": "object"
+    },
+    "ApmeRecommendationEvent": {
+      "additionalProperties": false,
+      "description": "Bridge → clients — model recommendation for the next task (on-demand / context-aware).",
+      "properties": {
+        "candidates": {
+          "items": {
+            "$ref": "#/definitions/ApmeRecommendation"
+          },
+          "type": "array"
+        },
+        "taskKind": {
+          "type": "string"
+        },
+        "type": {
+          "const": "apme_recommendation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "candidates"
+      ],
+      "type": "object"
+    },
+    "ApmeRunSummary": {
+      "additionalProperties": false,
+      "description": "A run that has finished evaluation.",
+      "properties": {
+        "agentType": {
+          "$ref": "#/definitions/AgentType"
+        },
+        "compositeScore": {
+          "type": "number"
+        },
+        "costUsd": {
+          "type": "number"
+        },
+        "endedAt": {
+          "type": "number"
+        },
+        "evals": {
+          "items": {
+            "$ref": "#/definitions/ApmeEvalRow"
+          },
+          "type": "array"
+        },
+        "exitCode": {
+          "type": "number"
+        },
+        "inputTokens": {
+          "type": "number"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "committed",
+            "abandoned",
+            "iterated",
+            "ab_winner",
+            "ab_loser",
+            "interrupted",
+            "exploratory",
+            "pending"
+          ],
+          "type": "string"
+        },
+        "outputTokens": {
+          "type": "number"
+        },
+        "overallScore": {
+          "type": "number"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "number"
+        },
+        "taskCategory": {
+          "type": "string"
+        },
+        "taskPrompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId",
+        "sessionId",
+        "agentType",
+        "startedAt",
+        "evals"
+      ],
+      "type": "object"
+    },
+    "ApmeScorecardEvent": {
+      "additionalProperties": false,
+      "description": "Bridge → clients — scorecard refresh (broadcast after eval completes or on demand).",
+      "properties": {
+        "scorecards": {
+          "items": {
+            "$ref": "#/definitions/ApmeModelScorecard"
+          },
+          "type": "array"
+        },
+        "type": {
+          "const": "apme_scorecard",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "scorecards"
+      ],
+      "type": "object"
+    },
+    "BillingType": {
+      "enum": [
+        "subscription",
+        "api",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "BridgeEvent": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StateUpdateEvent"
+        },
+        {
+          "$ref": "#/definitions/PromptOptionsEvent"
+        },
+        {
+          "$ref": "#/definitions/UsageEvent"
+        },
+        {
+          "$ref": "#/definitions/ConnectionEvent"
+        },
+        {
+          "$ref": "#/definitions/UserPromptEvent"
+        },
+        {
+          "$ref": "#/definitions/VoiceStateEvent"
+        },
+        {
+          "$ref": "#/definitions/VoiceAssistantStateEvent"
+        },
+        {
+          "$ref": "#/definitions/WakeWordDetectedEvent"
+        },
+        {
+          "$ref": "#/definitions/DisplayStateEvent"
+        },
+        {
+          "$ref": "#/definitions/SessionsListEvent"
+        },
+        {
+          "$ref": "#/definitions/EncoderStateEvent"
+        },
+        {
+          "$ref": "#/definitions/DeckSlotMapEvent"
+        },
+        {
+          "$ref": "#/definitions/ButtonStateEvent"
+        },
+        {
+          "$ref": "#/definitions/TimelineEventMsg"
+        },
+        {
+          "$ref": "#/definitions/TimelineHistoryMsg"
+        },
+        {
+          "$ref": "#/definitions/ApmeEvalEvent"
+        },
+        {
+          "$ref": "#/definitions/ApmeScorecardEvent"
+        },
+        {
+          "$ref": "#/definitions/ApmeRecommendationEvent"
+        }
+      ]
+    },
+    "ButtonSlotState": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "badge": {
+          "type": "string"
+        },
+        "bgColor": {
+          "type": "string"
+        },
+        "dim": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "slot": {
+          "type": "number"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "textColor": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot",
+        "title",
+        "bgColor",
+        "textColor",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "ButtonStateEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "buttons": {
+          "items": {
+            "$ref": "#/definitions/ButtonSlotState"
+          },
+          "type": "array"
+        },
+        "type": {
+          "const": "button_state",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "buttons"
+      ],
+      "type": "object"
+    },
+    "ConnectionEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "connected",
+            "reconnecting",
+            "disconnected"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "const": "connection",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "status"
+      ],
+      "type": "object"
+    },
+    "DeckSlotConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "actionType": {
+          "type": "string"
+        },
+        "settings": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "slot": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "slot",
+        "actionType"
+      ],
+      "type": "object"
+    },
+    "DeckSlotMapEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "buttons": {
+          "items": {
+            "$ref": "#/definitions/DeckSlotConfig"
+          },
+          "type": "array"
+        },
+        "encoders": {
+          "items": {
+            "$ref": "#/definitions/DeckSlotConfig"
+          },
+          "type": "array"
+        },
+        "type": {
+          "const": "deck_slot_map",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "buttons",
+        "encoders"
+      ],
+      "type": "object"
+    },
+    "DisplayStateEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "displayOn": {
+          "type": "boolean"
+        },
+        "type": {
+          "const": "display_state",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "displayOn"
+      ],
+      "type": "object"
+    },
+    "EncoderSlotState": {
+      "additionalProperties": false,
+      "properties": {
+        "accentColor": {
+          "type": "string"
+        },
+        "counter": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "encoderType": {
+          "enum": [
+            "utility",
+            "action",
+            "usage",
+            "voice"
+          ],
+          "type": "string"
+        },
+        "header": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "recordingMs": {
+          "type": "number"
+        },
+        "slot": {
+          "type": "number"
+        },
+        "transcription": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "voiceState": {
+          "enum": [
+            "idle",
+            "recording",
+            "transcribing",
+            "error",
+            "review"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot",
+        "encoderType",
+        "header",
+        "accentColor"
+      ],
+      "type": "object"
+    },
+    "EncoderStateEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "encoders": {
+          "items": {
+            "$ref": "#/definitions/EncoderSlotState"
+          },
+          "type": "array"
+        },
+        "takeoverActive": {
+          "type": "boolean"
+        },
+        "type": {
+          "const": "encoder_state",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "encoders",
+        "takeoverActive"
+      ],
+      "type": "object"
+    },
+    "ModelCatalogEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "name",
+        "role",
+        "available"
+      ],
+      "type": "object"
+    },
+    "OcSessionStatus": {
+      "additionalProperties": {},
+      "properties": {
+        "contextTokens": {
+          "type": "number"
+        },
+        "messageCount": {
+          "type": "number"
+        },
+        "model": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "uptime": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "OllamaModel": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "type": "number"
+        },
+        "sizeVram": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "size",
+        "sizeVram"
+      ],
+      "type": "object"
+    },
+    "OllamaStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/definitions/OllamaModel"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "available",
+        "models"
+      ],
+      "type": "object"
+    },
+    "PermissionMode": {
+      "enum": [
+        "default",
+        "plan",
+        "acceptEdits",
+        "dontAsk",
+        "bypassPermissions"
+      ],
+      "type": "string"
+    },
+    "PromptOption": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        },
+        "recommended": {
+          "type": "boolean"
+        },
+        "selected": {
+          "type": "boolean"
+        },
+        "shortcut": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "label"
+      ],
+      "type": "object"
+    },
+    "PromptOptionsEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "options": {
+          "items": {
+            "$ref": "#/definitions/PromptOption"
+          },
+          "type": "array"
+        },
+        "promptType": {
+          "enum": [
+            "yes_no",
+            "yes_no_always",
+            "multi_select",
+            "diff_review"
+          ],
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "type": {
+          "const": "prompt_options",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "promptType",
+        "options"
+      ],
+      "type": "object"
+    },
+    "SessionInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "agentType": {
+          "$ref": "#/definitions/AgentType"
+        },
+        "alive": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "modelName": {
+          "type": "string"
+        },
+        "port": {
+          "type": "number"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "port",
+        "projectName",
+        "alive"
+      ],
+      "type": "object"
+    },
+    "SessionsListEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "sessions": {
+          "items": {
+            "$ref": "#/definitions/SessionInfo"
+          },
+          "type": "array"
+        },
+        "type": {
+          "const": "sessions_list",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "sessions"
+      ],
+      "type": "object"
+    },
+    "State": {
+      "enum": [
+        "disconnected",
+        "idle",
+        "processing",
+        "awaiting_permission",
+        "awaiting_option",
+        "awaiting_diff"
+      ],
+      "type": "string"
+    },
+    "StateUpdateEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "agentCapabilities": {
+          "$ref": "#/definitions/AgentCapabilities"
+        },
+        "agentType": {
+          "$ref": "#/definitions/AgentType"
+        },
+        "antigravityStatus": {
+          "$ref": "#/definitions/AntigravityStatusInfo",
+          "description": "Local Antigravity IDE quota summary, when available"
+        },
+        "billingType": {
+          "$ref": "#/definitions/BillingType"
+        },
+        "currentTool": {
+          "type": "string"
+        },
+        "cursorIndex": {
+          "type": "number"
+        },
+        "effortLevel": {
+          "type": "string"
+        },
+        "gatewayAvailable": {
+          "description": "OpenClaw Gateway reachability (port 18789)",
+          "type": "boolean"
+        },
+        "gatewayConnected": {
+          "description": "OpenClaw Gateway authenticated adapter connection",
+          "type": "boolean"
+        },
+        "gatewayHasError": {
+          "description": "OpenClaw Gateway has doctor warnings/errors",
+          "type": "boolean"
+        },
+        "mlxModels": {
+          "description": "MLX local server model list",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "modelCatalog": {
+          "items": {
+            "$ref": "#/definitions/ModelCatalogEntry"
+          },
+          "type": "array"
+        },
+        "modelName": {
+          "type": "string"
+        },
+        "navigable": {
+          "type": "boolean"
+        },
+        "ollamaStatus": {
+          "$ref": "#/definitions/OllamaStatus",
+          "description": "Ollama process status + running models"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/definitions/PromptOption"
+          },
+          "type": "array"
+        },
+        "pairingUrl": {
+          "description": "Authenticated WS URL for remote pairing (ws://ip:port?token=hex)",
+          "type": "string"
+        },
+        "permissionMode": {
+          "$ref": "#/definitions/PermissionMode"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "promptType": {
+          "enum": [
+            "yes_no",
+            "yes_no_always",
+            "multi_select",
+            "diff_review"
+          ],
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "remoteUrl": {
+          "type": "string"
+        },
+        "sessionId": {
+          "description": "Session ID of the focused session (injected by daemon focus relay)",
+          "type": "string"
+        },
+        "sessionStatus": {
+          "$ref": "#/definitions/OcSessionStatus"
+        },
+        "state": {
+          "$ref": "#/definitions/State"
+        },
+        "subscriptions": {
+          "description": "Subscription-backed authenticated services",
+          "items": {
+            "$ref": "#/definitions/SubscriptionInfo"
+          },
+          "type": "array"
+        },
+        "suggestedPrompt": {
+          "type": "string"
+        },
+        "toolInput": {
+          "type": "string"
+        },
+        "toolProgress": {
+          "type": "string"
+        },
+        "type": {
+          "const": "state_update",
+          "type": "string"
+        },
+        "voiceAssistantResponseText": {
+          "description": "LLM response text (speaking)",
+          "type": "string"
+        },
+        "voiceAssistantState": {
+          "$ref": "#/definitions/VoiceAssistantState",
+          "description": "Voice assistant pipeline state (wake word → STT → LLM → TTS)"
+        },
+        "voiceAssistantText": {
+          "description": "Transcribed user speech (processing/speaking)",
+          "type": "string"
+        },
+        "workerSessionCount": {
+          "description": "Number of OpenClaw backend worker sessions (multi-agent)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "state",
+        "permissionMode"
+      ],
+      "type": "object"
+    },
+    "SubscriptionInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "until": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "TimelineEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "agentType": {
+          "type": "string"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "automated": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "raw": {
+          "type": "string"
+        },
+        "repeatCount": {
+          "type": "number"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "approved",
+            "denied"
+          ],
+          "type": "string"
+        },
+        "ts": {
+          "type": "number"
+        },
+        "type": {
+          "$ref": "#/definitions/TimelineEntryType"
+        }
+      },
+      "required": [
+        "ts",
+        "type",
+        "raw"
+      ],
+      "type": "object"
+    },
+    "TimelineEntryType": {
+      "description": "Shared timeline types and log parser for OpenClaw mode. Used by both bridge (BridgeLogStream) and plugin (LogStream).",
+      "enum": [
+        "tool_request",
+        "tool_resolved",
+        "chat_start",
+        "chat_end",
+        "chat_response",
+        "error",
+        "scheduled",
+        "user_action",
+        "model_call",
+        "model_response",
+        "memory_recall",
+        "tool_exec",
+        "eval_result"
+      ],
+      "type": "string"
+    },
+    "TimelineEventMsg": {
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "$ref": "#/definitions/TimelineEntry"
+        },
+        "type": {
+          "const": "timeline_event",
+          "type": "string"
+        },
+        "upsert": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "entry"
+      ],
+      "type": "object"
+    },
+    "TimelineHistoryMsg": {
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/definitions/TimelineEntry"
+          },
+          "type": "array"
+        },
+        "type": {
+          "const": "timeline_history",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "entries"
+      ],
+      "type": "object"
+    },
+    "UsageEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "antigravityStatus": {
+          "$ref": "#/definitions/AntigravityStatusInfo"
+        },
+        "codexAccountId": {
+          "type": "string"
+        },
+        "codexAuthMode": {
+          "type": "string"
+        },
+        "codexLastRefreshAt": {
+          "type": "string"
+        },
+        "codexPlanType": {
+          "type": "string"
+        },
+        "codexSubscriptionActiveUntil": {
+          "type": "string"
+        },
+        "codexWebAuthConnected": {
+          "type": "boolean"
+        },
+        "costLimit": {
+          "type": "number"
+        },
+        "costSpent": {
+          "type": "number"
+        },
+        "estimatedCostUsd": {
+          "type": "number"
+        },
+        "extraUsageEnabled": {
+          "type": "boolean"
+        },
+        "extraUsageMonthlyLimit": {
+          "type": "number"
+        },
+        "extraUsageUsedCredits": {
+          "type": "number"
+        },
+        "extraUsageUtilization": {
+          "type": "number"
+        },
+        "fiveHourPercent": {
+          "type": "number"
+        },
+        "fiveHourResetsAt": {
+          "type": "string"
+        },
+        "inputTokens": {
+          "type": "number"
+        },
+        "mlxModels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "modelCatalog": {
+          "items": {
+            "$ref": "#/definitions/ModelCatalogEntry"
+          },
+          "type": "array"
+        },
+        "oauthConnected": {
+          "type": "boolean"
+        },
+        "ollamaStatus": {
+          "$ref": "#/definitions/OllamaStatus"
+        },
+        "outputTokens": {
+          "type": "number"
+        },
+        "resetDate": {
+          "type": "string"
+        },
+        "resetTime": {
+          "type": "string"
+        },
+        "sessionDurationSec": {
+          "type": "number"
+        },
+        "sessionPercent": {
+          "type": "number"
+        },
+        "sevenDayPercent": {
+          "type": "number"
+        },
+        "sevenDayResetsAt": {
+          "type": "string"
+        },
+        "subscriptions": {
+          "items": {
+            "$ref": "#/definitions/SubscriptionInfo"
+          },
+          "type": "array"
+        },
+        "tokenStatus": {
+          "enum": [
+            "valid",
+            "expired",
+            "missing",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "toolCalls": {
+          "type": "number"
+        },
+        "type": {
+          "const": "usage_update",
+          "type": "string"
+        },
+        "usageStale": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "sessionDurationSec",
+        "inputTokens",
+        "outputTokens",
+        "toolCalls"
+      ],
+      "type": "object"
+    },
+    "UserPromptEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "const": "user_prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "type": "object"
+    },
+    "VoiceAssistantState": {
+      "enum": [
+        "idle",
+        "listening",
+        "processing",
+        "speaking",
+        "disabled"
+      ],
+      "type": "string"
+    },
+    "VoiceAssistantStateEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "deviceId": {
+          "type": "string"
+        },
+        "responseText": {
+          "description": "LLM response text",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/VoiceAssistantState"
+        },
+        "text": {
+          "description": "Transcribed user speech",
+          "type": "string"
+        },
+        "type": {
+          "const": "voice_assistant_state",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "state"
+      ],
+      "type": "object"
+    },
+    "VoiceStateEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "idle",
+            "recording",
+            "transcribing",
+            "error"
+          ],
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "const": "voice_state",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "state"
+      ],
+      "type": "object"
+    },
+    "WakeWordDetectedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "deviceId": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "number"
+        },
+        "type": {
+          "const": "wake_word_detected",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "deviceId",
+        "timestamp"
+      ],
+      "type": "object"
+    }
+  }
+}
+

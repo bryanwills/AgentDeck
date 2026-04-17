@@ -1,0 +1,649 @@
+{
+  "$ref": "#/definitions/GatewayFrame",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ChatAbortParams": {
+      "additionalProperties": false,
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "sessionKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionKey"
+      ],
+      "type": "object"
+    },
+    "ChatAbortResult": {
+      "additionalProperties": false,
+      "properties": {
+        "aborted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "aborted"
+      ],
+      "type": "object"
+    },
+    "ChatEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "delta": {
+          "description": "Incremental text chunk (delta state).",
+          "type": "string"
+        },
+        "error": {
+          "description": "Error message (error state).",
+          "type": "string"
+        },
+        "inputTokens": {
+          "description": "Token accounting (final state).",
+          "type": "number"
+        },
+        "modelId": {
+          "description": "Model identifier used for this turn.",
+          "type": "string"
+        },
+        "newSessionId": {
+          "description": "Session identifier when Gateway creates a new session mid-chat.",
+          "type": "string"
+        },
+        "outputTokens": {
+          "type": "number"
+        },
+        "prompt": {
+          "description": "User prompt text, as echoed by Gateway on first delta.",
+          "type": "string"
+        },
+        "response": {
+          "description": "Full assembled response (final state).",
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "sessionKey": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "delta",
+            "final",
+            "aborted",
+            "error"
+          ],
+          "type": "string"
+        },
+        "tools": {
+          "description": "Tool invocations observed in this turn.",
+          "items": {
+            "$ref": "#/definitions/ChatToolInvocation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "ChatSendParams": {
+      "additionalProperties": false,
+      "properties": {
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "sessionKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionKey",
+        "message",
+        "idempotencyKey"
+      ],
+      "type": "object"
+    },
+    "ChatSendResult": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted"
+      ],
+      "type": "object"
+    },
+    "ChatToolInvocation": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {},
+        "name": {
+          "type": "string"
+        },
+        "output": {},
+        "status": {
+          "enum": [
+            "pending",
+            "success",
+            "error"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "ConnectChallengePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expiresAt": {
+          "type": "number"
+        },
+        "nonce": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nonce"
+      ],
+      "type": "object"
+    },
+    "ConnectParams": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "$ref": "#/definitions/DeviceAuth"
+        },
+        "clientInfo": {
+          "additionalProperties": false,
+          "properties": {
+            "clientId": {
+              "type": "string"
+            },
+            "clientMode": {
+              "enum": [
+                "backend",
+                "frontend"
+              ],
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "clientId",
+            "clientMode"
+          ],
+          "type": "object"
+        },
+        "requestScopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "auth",
+        "requestScopes"
+      ],
+      "type": "object"
+    },
+    "ConnectResult": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "expiresAt": {
+          "type": "number"
+        },
+        "sessionToken": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted"
+      ],
+      "type": "object"
+    },
+    "DeviceAuth": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nonce": {
+          "type": "string"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        },
+        "signedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "publicKey",
+        "signature",
+        "signedAt",
+        "nonce"
+      ],
+      "type": "object"
+    },
+    "ExecApprovalRequestedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "options": {
+          "description": "Options surfaced to the user (default: allow/deny).",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "label"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionKey": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tool"
+      ],
+      "type": "object"
+    },
+    "ExecApprovalResolveParams": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "decision"
+      ],
+      "type": "object"
+    },
+    "ExecApprovalResolveResult": {
+      "additionalProperties": false,
+      "properties": {
+        "resolved": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "resolved"
+      ],
+      "type": "object"
+    },
+    "ExecApprovalResolvedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "enum": [
+            "allow",
+            "deny",
+            "timeout"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "sessionKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "decision"
+      ],
+      "type": "object"
+    },
+    "GatewayError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "details": {},
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "GatewayEventFrame": {
+      "additionalProperties": false,
+      "description": "Gateway → Client: unsolicited event.",
+      "properties": {
+        "event": {
+          "$ref": "#/definitions/GatewayEventName"
+        },
+        "payload": {
+          "$ref": "#/definitions/GatewayEventPayload"
+        },
+        "seq": {
+          "description": "Monotonic sequence number (optional, used for ordering on reconnect).",
+          "type": "string"
+        },
+        "stateVersion": {
+          "description": "Server-side state version for dedup on replay.",
+          "type": "string"
+        },
+        "type": {
+          "const": "event",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "event",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "GatewayEventName": {
+      "enum": [
+        "connect.challenge",
+        "chat",
+        "exec.approval.requested",
+        "exec.approval.resolved",
+        "presence",
+        "tick",
+        "shutdown"
+      ],
+      "type": "string"
+    },
+    "GatewayEventPayload": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConnectChallengePayload"
+        },
+        {
+          "$ref": "#/definitions/ChatEventPayload"
+        },
+        {
+          "$ref": "#/definitions/ExecApprovalRequestedPayload"
+        },
+        {
+          "$ref": "#/definitions/ExecApprovalResolvedPayload"
+        },
+        {
+          "$ref": "#/definitions/PresencePayload"
+        },
+        {
+          "$ref": "#/definitions/TickPayload"
+        },
+        {
+          "$ref": "#/definitions/ShutdownPayload"
+        }
+      ]
+    },
+    "GatewayFrame": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestFrame"
+        },
+        {
+          "$ref": "#/definitions/GatewayResponseFrame"
+        },
+        {
+          "$ref": "#/definitions/GatewayEventFrame"
+        }
+      ]
+    },
+    "GatewayMethodName": {
+      "enum": [
+        "connect",
+        "chat.send",
+        "chat.abort",
+        "exec.approval.resolve",
+        "sessions.list"
+      ],
+      "type": "string"
+    },
+    "GatewayMethodParams": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConnectParams"
+        },
+        {
+          "$ref": "#/definitions/ChatSendParams"
+        },
+        {
+          "$ref": "#/definitions/ChatAbortParams"
+        },
+        {
+          "$ref": "#/definitions/ExecApprovalResolveParams"
+        },
+        {
+          "$ref": "#/definitions/SessionsListParams"
+        }
+      ]
+    },
+    "GatewayMethodResult": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConnectResult"
+        },
+        {
+          "$ref": "#/definitions/ChatSendResult"
+        },
+        {
+          "$ref": "#/definitions/ChatAbortResult"
+        },
+        {
+          "$ref": "#/definitions/ExecApprovalResolveResult"
+        },
+        {
+          "$ref": "#/definitions/SessionsListResult"
+        }
+      ]
+    },
+    "GatewayRequestFrame": {
+      "additionalProperties": false,
+      "description": "Client → Gateway: RPC request.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "method": {
+          "$ref": "#/definitions/GatewayMethodName"
+        },
+        "params": {
+          "$ref": "#/definitions/GatewayMethodParams"
+        },
+        "type": {
+          "const": "req",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "GatewayResponseFrame": {
+      "additionalProperties": false,
+      "description": "Gateway → Client: RPC response (ok=true) or error (ok=false).",
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/GatewayError"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "payload": {
+          "$ref": "#/definitions/GatewayMethodResult"
+        },
+        "type": {
+          "const": "res",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "ok"
+      ],
+      "type": "object"
+    },
+    "GatewaySession": {
+      "additionalProperties": false,
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "PresencePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "connected": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connected"
+      ],
+      "type": "object"
+    },
+    "SessionsListParams": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SessionsListResult": {
+      "additionalProperties": false,
+      "properties": {
+        "sessions": {
+          "items": {
+            "$ref": "#/definitions/GatewaySession"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sessions"
+      ],
+      "type": "object"
+    },
+    "ShutdownPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "restartAt": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "TickPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "serverTime": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "serverTime"
+      ],
+      "type": "object"
+    }
+  }
+}
+

@@ -1,0 +1,387 @@
+{
+  "$ref": "#/definitions/PluginCommand",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ApmeRecommendCommand": {
+      "additionalProperties": false,
+      "description": "Ask bridge/daemon for model recommendation given a task context.",
+      "properties": {
+        "budgetUsd": {
+          "type": "number"
+        },
+        "latencyBudgetMs": {
+          "type": "number"
+        },
+        "preferLocal": {
+          "type": "boolean"
+        },
+        "taskKind": {
+          "type": "string"
+        },
+        "type": {
+          "const": "apme_recommend",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "ApmeVibeFeedbackCommand": {
+      "additionalProperties": false,
+      "description": "APME vibe check — user approves or rejects a completed run's output quality.",
+      "properties": {
+        "note": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "type": {
+          "const": "apme_vibe",
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "approve",
+            "reject",
+            "neutral"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "runId",
+        "verdict"
+      ],
+      "type": "object"
+    },
+    "DiagCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "dump",
+            "analyze"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "const": "diag",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "action"
+      ],
+      "type": "object"
+    },
+    "EscapeCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "escape",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "FocusSessionCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "type": {
+          "const": "focus_session",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "InterruptCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "interrupt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "NavigateOptionCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "enum": [
+            "up",
+            "down"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "const": "navigate_option",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "direction"
+      ],
+      "type": "object"
+    },
+    "PluginCommand": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ResponseCommand"
+        },
+        {
+          "$ref": "#/definitions/SelectOptionCommand"
+        },
+        {
+          "$ref": "#/definitions/NavigateOptionCommand"
+        },
+        {
+          "$ref": "#/definitions/SendPromptCommand"
+        },
+        {
+          "$ref": "#/definitions/SwitchModeCommand"
+        },
+        {
+          "$ref": "#/definitions/InterruptCommand"
+        },
+        {
+          "$ref": "#/definitions/EscapeCommand"
+        },
+        {
+          "$ref": "#/definitions/VoiceCommand"
+        },
+        {
+          "$ref": "#/definitions/QueryUsageCommand"
+        },
+        {
+          "$ref": "#/definitions/DiagCommand"
+        },
+        {
+          "$ref": "#/definitions/UtilityCommand"
+        },
+        {
+          "$ref": "#/definitions/SwitchAgentCommand"
+        },
+        {
+          "$ref": "#/definitions/FocusSessionCommand"
+        },
+        {
+          "$ref": "#/definitions/SessionCommand"
+        },
+        {
+          "$ref": "#/definitions/ApmeVibeFeedbackCommand"
+        },
+        {
+          "$ref": "#/definitions/ApmeRecommendCommand"
+        }
+      ]
+    },
+    "QueryUsageCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "query_usage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "ResponseCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "respond",
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object"
+    },
+    "SelectOptionCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "number"
+        },
+        "type": {
+          "const": "select_option",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "index"
+      ],
+      "type": "object"
+    },
+    "SendPromptCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "const": "send_prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "type": "object"
+    },
+    "SessionCommand": {
+      "additionalProperties": false,
+      "description": "Session-scoped command — daemon forwards the inner command to the specified session's bridge. Enables direct control of a specific session from any client (MenuBarExtra, Dashboard, etc.)",
+      "properties": {
+        "command": {
+          "additionalProperties": {},
+          "properties": {
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "type": {
+          "const": "session_command",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "sessionId",
+        "command"
+      ],
+      "type": "object"
+    },
+    "SwitchAgentCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "enum": [
+            "openclaw",
+            "claude-code"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "const": "switch_agent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "agent"
+      ],
+      "type": "object"
+    },
+    "SwitchModeCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "plan",
+            "acceptEdits",
+            "default"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "const": "switch_mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "UtilityCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "adjust_volume",
+            "toggle_mute",
+            "adjust_brightness",
+            "media_play_pause",
+            "media_next",
+            "media_prev"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "const": "utility",
+          "type": "string"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "action"
+      ],
+      "type": "object"
+    },
+    "VoiceCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "start",
+            "stop",
+            "cancel"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "const": "voice",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "action"
+      ],
+      "type": "object"
+    }
+  }
+}
+
