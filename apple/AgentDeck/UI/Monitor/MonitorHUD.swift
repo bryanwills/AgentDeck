@@ -21,21 +21,19 @@ struct MonitorHUD: View {
                             .padding(.top, 12)
                     }
 
-                    // Top-right: Tank status + device diagnostic (max 280dp)
-                    HStack {
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 8) {
-                            if preferences.showTankStatus {
-                                TankStatusPanel()
-                                    .frame(maxWidth: min(geo.size.width * 0.32, 280))
-                            }
-                            if preferences.showDeviceDiagnostic {
-                                DeviceDiagnosticPanel()
-                                    .frame(maxWidth: min(geo.size.width * 0.32, 280))
-                            }
+                    // Top-right: relationship-centric topology rail
+                    // (replaces old TankStatus + DeviceDiagnostic boxes).
+                    // Visible if either of the legacy preferences is on; the
+                    // rail is a single unified view so we don't try to hide
+                    // upstream or downstream independently anymore.
+                    if preferences.showTankStatus || preferences.showDeviceDiagnostic {
+                        HStack {
+                            Spacer()
+                            TopologyRail()
+                                .frame(maxWidth: min(geo.size.width * 0.32, 300))
+                                .padding(.trailing, 12)
+                                .padding(.top, 12)
                         }
-                        .padding(.trailing, 12)
-                        .padding(.top, 12)
                     }
 
                     // Stale data banner when disconnected
@@ -65,15 +63,9 @@ struct MonitorHUD: View {
                             SessionListPanel()
                                 .frame(maxWidth: .infinity)
                         }
-                        VStack(spacing: 8) {
-                            if preferences.showTankStatus {
-                                TankStatusPanel()
-                                    .frame(maxWidth: .infinity)
-                            }
-                            if preferences.showDeviceDiagnostic {
-                                DeviceDiagnosticPanel()
-                                    .frame(maxWidth: .infinity)
-                            }
+                        if preferences.showTankStatus || preferences.showDeviceDiagnostic {
+                            TopologyRail()
+                                .frame(maxWidth: .infinity)
                         }
                     }
                     .padding(.horizontal, 8)

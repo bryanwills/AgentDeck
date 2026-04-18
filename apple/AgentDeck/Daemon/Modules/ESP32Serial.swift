@@ -60,6 +60,7 @@ actor ESP32Serial {
     private var lastReadError: String?
     private var lastWriteError: String?
     private var failedPorts: [String: PortFailure] = [:]
+    private var provisionFingerprintsByPort: [String: String] = [:]
     private static let permanentBlockDuration: TimeInterval = 300  // 5 minutes
     private static let deviceInfoTimeoutSec: TimeInterval = 30  // reconnect if no device_info after 30s
 
@@ -107,6 +108,14 @@ actor ESP32Serial {
             "lastOpenError": lastOpenError as Any,
             "lastReadError": lastReadError as Any,
             "lastWriteError": lastWriteError as Any,
+            "portFailures": failedPorts.mapValues { failure in
+                [
+                    "error": failure.error,
+                    "isPermanent": failure.isPermanent,
+                    "failCount": failure.failCount,
+                    "lastAttempt": Int(failure.lastAttempt.timeIntervalSince1970 * 1000),
+                ] as [String: Any]
+            },
             "connections": connections.map { conn in
                 [
                     "port": conn.port,
@@ -218,11 +227,15 @@ actor ESP32Serial {
         guard let data = try? JSONSerialization.data(withJSONObject: msg),
               let json = String(data: data, encoding: .utf8) else { return 0 }
         var count = 0
+        let fingerprint = Self.provisionFingerprint(for: msg)
         for i in connections.indices {
             guard connections[i].connected, !connections[i].provisionSent else { continue }
             if connections[i].deviceInfo?.wifiConnected == true { continue }
+            if provisionFingerprintsByPort[connections[i].port] == fingerprint { continue }
             sendToConnection(&connections[i], json: json)
+            guard connections[i].connected else { continue }
             connections[i].provisionSent = true
+            provisionFingerprintsByPort[connections[i].port] = fingerprint
             count += 1
         }
         return count
@@ -527,16 +540,55 @@ actor ESP32Serial {
         guard conn.connected, let handle = conn.writeHandle else { return }
         do {
             let payload = Array((json + "\n").utf8)
-            let written = Darwin.write(handle.fileDescriptor, payload, payload.count)
-            guard written == payload.count else {
-                throw NSError(domain: "ESP32", code: -1, userInfo: [NSLocalizedDescriptionKey: "write returned \(written), expected \(payload.count), errno=\(errno)"])
+            var offset = 0
+            var retryCount = 0
+            while offset < payload.count {
+                let written = payload.withUnsafeBufferPointer { buffer in
+                    Darwin.write(
+                        handle.fileDescriptor,
+                        buffer.baseAddress!.advanced(by: offset),
+                        payload.count - offset
+                    )
+                }
+                if written > 0 {
+                    offset += written
+                    retryCount = 0
+                    continue
+                }
+                let errNo = errno
+                if written < 0 && (errNo == EAGAIN || errNo == EWOULDBLOCK) && retryCount < 8 {
+                    retryCount += 1
+                    usleep(20_000)
+                    continue
+                }
+                throw NSError(
+                    domain: "ESP32",
+                    code: -1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "write returned \(written), wrote \(offset) of \(payload.count), errno=\(errNo)"
+                    ]
+                )
             }
             lastWriteError = nil
         } catch {
             conn.readToken.invalidate()
             conn.connected = false
+            failedPorts[conn.port] = PortFailure(
+                error: error.localizedDescription,
+                isPermanent: false,
+                failCount: (failedPorts[conn.port]?.failCount ?? 0) + 1,
+                lastAttempt: Date()
+            )
             lastWriteError = "write failed for \(conn.port): \(error.localizedDescription)"
         }
+    }
+
+    private static func provisionFingerprint(for msg: [String: Any]) -> String {
+        let ssid = msg["ssid"] as? String ?? ""
+        let password = msg["password"] as? String ?? ""
+        let bridgeIp = msg["bridgeIp"] as? String ?? ""
+        let bridgePort = msg["bridgePort"] as? Int ?? 0
+        return "\(ssid)|\(password.hashValue)|\(bridgeIp)|\(bridgePort)"
     }
 
     /// Strip fields ESP32 doesn't need (reduce payload for small RX buffers)

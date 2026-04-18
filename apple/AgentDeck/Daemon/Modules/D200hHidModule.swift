@@ -1608,11 +1608,12 @@ private enum D200hRenderer {
             let usagePct7 = usageEvent?["sevenDayPercent"] as? Double ?? stateEvent?["sevenDayPercent"] as? Double ?? 0
             let reset5 = usageEvent?["fiveHourResetsAt"] as? String ?? stateEvent?["fiveHourResetsAt"] as? String
             let reset7 = usageEvent?["sevenDayResetsAt"] as? String ?? stateEvent?["sevenDayResetsAt"] as? String
+            let usageStale = usageEvent?["usageStale"] as? Bool ?? stateEvent?["usageStale"] as? Bool ?? false
             let renewal = billingSummary(from: usageEvent) ?? billingSummary(from: stateEvent)
-            let png = renderUsageWideButton(pct5: usagePct5, pct7: usagePct7, reset5: reset5, reset7: reset7, renewal: renewal)
+            let png = renderUsageWideButton(pct5: usagePct5, pct7: usagePct7, reset5: reset5, reset7: reset7, renewal: renewal, stale: usageStale)
             let iconPath = iconFilePath(slotId: 13, suffix: "wide", data: png)
             manifest["3_2"] = manifestEntry(
-                text: hidesNativeSessionLabels ? "" : usageText(window: "5H", percent: usagePct5),
+                text: hidesNativeSessionLabels ? "" : (usageStale ? "STALE" : usageText(window: "5H", percent: usagePct5)),
                 iconPath: iconPath,
                 clearAction: true
             )
@@ -1681,7 +1682,8 @@ private enum D200hRenderer {
     private static func renderUsageWideButton(
         pct5: Double, pct7: Double,
         reset5: String? = nil, reset7: String? = nil,
-        renewal: String? = nil
+        renewal: String? = nil,
+        stale: Bool = false
     ) -> Data {
         let width = ICON_SIZE * 2
         let height = ICON_SIZE
@@ -1695,8 +1697,8 @@ private enum D200hRenderer {
 
         let w = CGFloat(width)
         let h = CGFloat(height)
-        let color5 = pctColor(pct5)
-        let color7 = pctColor(pct7)
+        let color5 = stale ? rgb(100, 116, 139) : pctColor(pct5)
+        let color7 = stale ? rgb(100, 116, 139) : pctColor(pct7)
         let reset5Str = formatResetTime(reset5)
         let reset7Str = formatResetTime(reset7)
         let billing = sanitizeNativeText(renewal ?? "")
@@ -1709,7 +1711,7 @@ private enum D200hRenderer {
             drawUsageSegmentGauge(ctx, x: 78, y: 105, pct: pct7, color: color7)
         }
 
-        drawText("USAGE", ctx: ctx, y: 22, color: rgb(148, 163, 184), font: ctFont(22, bold: true), leftBound: 0, rightBound: w, alignLeft: false, canvasHeight: h)
+        drawText(stale ? "USAGE STALE" : "USAGE", ctx: ctx, y: 22, color: stale ? rgb(245, 158, 11) : rgb(148, 163, 184), font: ctFont(22, bold: true), leftBound: 0, rightBound: w, alignLeft: false, canvasHeight: h)
 
         drawText("5H", ctx: ctx, y: 49, color: rgb(148, 163, 184), font: ctFont(22, bold: true), leftBound: 34, rightBound: 68, alignLeft: true, canvasHeight: h)
         drawText("\(Int(pct5.rounded()))%", ctx: ctx, y: 44, color: rgb(255, 255, 255), font: ctFont(26, bold: true), leftBound: 302, rightBound: 366, alignLeft: false, canvasHeight: h)
@@ -1723,7 +1725,9 @@ private enum D200hRenderer {
             drawText(reset7Str, ctx: ctx, y: 126, color: rgb(148, 163, 184), font: ctFont(17, bold: true), leftBound: 288, rightBound: 366, alignLeft: false, canvasHeight: h)
         }
 
-        if !billing.isEmpty {
+        if stale {
+            drawText("cached Claude usage", ctx: ctx, y: 140, color: rgb(245, 158, 11), font: ctFont(16, bold: true), leftBound: 24, rightBound: w - 24, alignLeft: false, canvasHeight: h)
+        } else if !billing.isEmpty {
             drawText(String(billing.prefix(30)), ctx: ctx, y: 140, color: rgb(100, 116, 139), font: ctFont(16, bold: true), leftBound: 24, rightBound: w - 24, alignLeft: false, canvasHeight: h)
         }
 

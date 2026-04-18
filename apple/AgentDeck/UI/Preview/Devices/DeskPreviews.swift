@@ -8,6 +8,47 @@
 
 import SwiftUI
 
+// MARK: - Stream Deck Key
+
+/// Single 72×72 Stream Deck key.
+struct StreamDeckKeyPreview: View {
+    let selection: DevicePreviewSelection
+
+    private var session: SessionInfo {
+        SessionInfo(
+            id: "preview-sd-key",
+            port: 9120,
+            projectName: selection.agent.displayName,
+            agentType: selection.agent.rawValue,
+            alive: true,
+            state: selection.state.sessionStateStringForUI,
+            modelName: modelName,
+            startedAt: nil
+        )
+    }
+
+    private var modelName: String {
+        switch selection.agent {
+        case .claudeCode: return "opus-4-7"
+        case .codex:      return "gpt-5"
+        case .opencode:   return "router"
+        case .openclaw:   return "router"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            SessionSlotView(session: session, animFrame: selection.animationFrame)
+                .scaleEffect(0.5)
+                .frame(width: 72, height: 72)
+                .shadow(color: .black.opacity(0.4), radius: 6, y: 3)
+            Text("Stream Deck • 72×72")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 // MARK: - Stream Deck+
 
 /// Single 144×144 Stream Deck+ key driven by the real SessionSlotView.

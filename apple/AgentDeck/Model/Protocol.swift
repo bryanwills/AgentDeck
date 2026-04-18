@@ -376,6 +376,7 @@ struct StateUpdateEvent: Codable, Sendable {
         case workerSessionCount, ollamaStatus, mlxModels, subscriptions
         case antigravityStatus, gatewayAvailable, gatewayConnected, gatewayHasError
         case gatewayAuthStatus, gatewayAuthRequestId, gatewayAuthMessage
+        case daemonPort, mlxModelCatalog
         case voiceAssistantState, voiceAssistantText, voiceAssistantResponseText
     }
     var permissionMode: String?
@@ -411,6 +412,8 @@ struct StateUpdateEvent: Codable, Sendable {
     var gatewayAuthStatus: String?
     var gatewayAuthRequestId: String?
     var gatewayAuthMessage: String?
+    var daemonPort: Int?
+    var mlxModelCatalog: [String]?
     var voiceAssistantState: String?  // idle | listening | processing | speaking | disabled
     var voiceAssistantText: String?
     var voiceAssistantResponseText: String?
@@ -451,6 +454,7 @@ struct UsageEvent: Codable, Sendable {
     var codexLastRefreshAt: String?
     var modelCatalog: [ModelCatalogEntry]?
     var mlxModels: [String]?
+    var mlxModelCatalog: [String]?
     var subscriptions: [SubscriptionInfo]?
     var antigravityStatus: AntigravityStatusInfo?
 }

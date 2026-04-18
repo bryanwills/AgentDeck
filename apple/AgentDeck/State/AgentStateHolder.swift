@@ -637,9 +637,13 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.gatewayAvailable = e.gatewayAvailable ?? state.gatewayAvailable
         state.gatewayConnected = e.gatewayConnected ?? state.gatewayConnected
         state.gatewayHasError = e.gatewayHasError ?? state.gatewayHasError
-        state.gatewayAuthStatus = e.gatewayAuthStatus ?? state.gatewayAuthStatus
-        state.gatewayAuthRequestId = e.gatewayAuthRequestId ?? state.gatewayAuthRequestId
-        state.gatewayAuthMessage = e.gatewayAuthMessage ?? state.gatewayAuthMessage
+        if let gatewayAuthStatus = e.gatewayAuthStatus {
+            state.gatewayAuthStatus = gatewayAuthStatus
+            state.gatewayAuthRequestId = e.gatewayAuthRequestId
+            state.gatewayAuthMessage = e.gatewayAuthMessage
+        }
+        state.daemonPort = e.daemonPort ?? state.daemonPort
+        state.mlxModelCatalog = e.mlxModelCatalog ?? state.mlxModelCatalog
         state.voiceAssistantState = e.voiceAssistantState ?? state.voiceAssistantState
         state.voiceAssistantText = e.voiceAssistantText  // null when idle, no fallback
         state.voiceAssistantResponseText = e.voiceAssistantResponseText  // null when idle
@@ -687,9 +691,17 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         if e.fiveHourPercent != nil { state.previousFiveHourPercent = state.fiveHourPercent }
         if e.sevenDayPercent != nil { state.previousSevenDayPercent = state.sevenDayPercent }
         state.fiveHourPercent = e.fiveHourPercent ?? state.fiveHourPercent
-        state.fiveHourResetsAt = e.fiveHourResetsAt ?? state.fiveHourResetsAt
+        if e.usageStale == true {
+            state.fiveHourResetsAt = e.fiveHourResetsAt
+        } else {
+            state.fiveHourResetsAt = e.fiveHourResetsAt ?? state.fiveHourResetsAt
+        }
         state.sevenDayPercent = e.sevenDayPercent ?? state.sevenDayPercent
-        state.sevenDayResetsAt = e.sevenDayResetsAt ?? state.sevenDayResetsAt
+        if e.usageStale == true {
+            state.sevenDayResetsAt = e.sevenDayResetsAt
+        } else {
+            state.sevenDayResetsAt = e.sevenDayResetsAt ?? state.sevenDayResetsAt
+        }
         state.extraUsageEnabled = e.extraUsageEnabled ?? state.extraUsageEnabled
         state.extraUsageMonthlyLimit = e.extraUsageMonthlyLimit ?? state.extraUsageMonthlyLimit
         state.extraUsageUsedCredits = e.extraUsageUsedCredits ?? state.extraUsageUsedCredits
@@ -705,6 +717,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.codexLastRefreshAt = e.codexLastRefreshAt ?? state.codexLastRefreshAt
         state.modelCatalog = e.modelCatalog ?? state.modelCatalog
         state.mlxModels = e.mlxModels ?? state.mlxModels
+        state.mlxModelCatalog = e.mlxModelCatalog ?? state.mlxModelCatalog
         state.subscriptions = e.subscriptions ?? state.subscriptions
         state.antigravityStatus = e.antigravityStatus ?? state.antigravityStatus
     }

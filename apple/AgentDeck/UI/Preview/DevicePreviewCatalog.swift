@@ -14,6 +14,7 @@ import SwiftUI
 /// A single previewable device. `rawValue` is the stable UI id; `displayName`
 /// is what appears in the sidebar.
 enum PreviewDevice: String, CaseIterable, Identifiable {
+    case streamDeckKey
     case streamDeckPlus
     case d200hKey
     case d200hDeck
@@ -27,6 +28,7 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
     case esp32_35Portrait
     case esp32Round
     case ulanziMatrix
+    case pixoo64
     case terminalTerrarium
 
     var id: String { rawValue }
@@ -51,19 +53,20 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
 
     var category: Category {
         switch self {
-        case .streamDeckPlus, .d200hKey, .d200hDeck:            return .desk
+        case .streamDeckKey, .streamDeckPlus, .d200hKey, .d200hDeck:            return .desk
         case .appleWatch:                                        return .wearable
         case .iPadLandscape, .androidTablet:                     return .tablet
         case .einkMono, .einkColor:                              return .eink
         case .esp32_86box, .esp32_35Landscape,
              .esp32_35Portrait, .esp32Round:                     return .esp32
-        case .ulanziMatrix:                                      return .matrix
+        case .ulanziMatrix, .pixoo64:                                    return .matrix
         case .terminalTerrarium:                                 return .terminal
         }
     }
 
     var displayName: String {
         switch self {
+        case .streamDeckKey:      return "Stream Deck Key"
         case .streamDeckPlus:     return "Stream Deck+ Session"
         case .d200hKey:           return "Ulanzi D200H Key"
         case .d200hDeck:          return "Ulanzi D200H Deck"
@@ -77,6 +80,7 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
         case .esp32_35Portrait:   return "ESP32 IPS 3.5\" Portrait"
         case .esp32Round:         return "ESP32 Round AMOLED 1.6\""
         case .ulanziMatrix:       return "Ulanzi TC001 Matrix"
+        case .pixoo64:            return "Pixoo 64"
         case .terminalTerrarium:  return "Terminal Terrarium (TUI)"
         }
     }
@@ -84,6 +88,7 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
     /// Short byline for the main-canvas header.
     var byline: String {
         switch self {
+        case .streamDeckKey:      return "72×72 default Stream Deck key."
         case .streamDeckPlus:     return "144×144 session button, driven by the plugin."
         case .d200hKey:           return "One of 14 HID-addressed key tiles, 120×120."
         case .d200hDeck:          return "Full 14-key deck — top strip + 3×4 grid + encoders."
@@ -97,6 +102,7 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
         case .esp32_35Portrait:   return "3.5\" IPS portrait — split HUD + creature."
         case .esp32Round:         return "1.6\" round AMOLED — dial-style HUD."
         case .ulanziMatrix:       return "8×32 WS2812B matrix — ultra-minimal HUD."
+        case .pixoo64:            return "64×64 pixel art canvas, dot-matrix simplified."
         case .terminalTerrarium:  return "agentdeck dashboard TUI — characters-only aquarium."
         }
     }

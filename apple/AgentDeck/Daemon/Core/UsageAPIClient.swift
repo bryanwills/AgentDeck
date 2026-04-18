@@ -17,6 +17,8 @@ struct ApiUsageData: Sendable {
     var extraUsageUsedCredits: Double?
     var extraUsageUtilization: Double?
     var inferredBillingType: String?  // "subscription" | "api" | nil
+    var fetchedAt: Double?
+    var stale: Bool = false
 }
 
 struct CodexAuthStatus: Sendable {
@@ -49,6 +51,37 @@ final class UsageAPIClient: Sendable {
     private static let fileCacheTTL: TimeInterval = 120  // seconds
     private static let tokenExpiryMargin: TimeInterval = 600  // 10 minutes
 
+    /// Real home directory, resolved once at process start via the reentrant
+    /// `getpwuid_r`. The non-reentrant `getpwuid` returns a pointer into a
+    /// thread-shared static buffer, so calling it from multiple threads
+    /// (main + ESP32 heartbeat + usage polling) corrupts the result and
+    /// crashes during ARC cleanup of the returned struct. `getuid()` is
+    /// invariant for the process lifetime, so one-shot resolution is safe.
+    private static let resolvedHomeDir: String = {
+        var pwd = passwd()
+        var result: UnsafeMutablePointer<passwd>?
+        var buffer = [CChar](repeating: 0, count: 16 * 1024)
+        let rc = getpwuid_r(getuid(), &pwd, &buffer, buffer.count, &result)
+        if rc == 0, result != nil {
+            return String(cString: pwd.pw_dir)
+        }
+        return NSHomeDirectory()
+    }()
+
+    /// Serializes the Codex auth read path. `readRawCodexAuthStatus` hits
+    /// the filesystem and decodes JWTs; under concurrent access the ARC
+    /// release of the returned optional race-crashed (`_CFRelease.cold.1`).
+    /// A single serial queue is enough — this is a polling path, not hot.
+    private let codexAuthQueue = DispatchQueue(
+        label: "bound.serendipity.agentdeck.usage.codex-auth"
+    )
+
+    /// Short-lived cache for the fully-stabilized Codex auth status so the
+    /// hot polling path (ESP32 heartbeat at ~1 Hz) doesn't re-read auth.json
+    /// every call.
+    nonisolated(unsafe) private var codexAuthCacheEntry: (timestamp: Date, value: CodexAuthStatus?)?
+    private static let codexAuthCacheTTL: TimeInterval = 5
+
     nonisolated(unsafe) private var consecutiveFailures = 0
     nonisolated(unsafe) private var lastTokenStatus: TokenStatus = .unknown
     nonisolated(unsafe) private var lastBackoffStart: Date = .distantPast
@@ -56,12 +89,19 @@ final class UsageAPIClient: Sendable {
 
     var tokenStatus: TokenStatus { lastTokenStatus }
     var codexAuthStatus: CodexAuthStatus? {
-        let merged = Self.stabilizeCodexAuthStatus(
-            previous: lastStableCodexAuthStatus,
-            current: readRawCodexAuthStatus()
-        )
-        lastStableCodexAuthStatus = merged
-        return merged
+        codexAuthQueue.sync {
+            if let cached = codexAuthCacheEntry,
+               Date().timeIntervalSince(cached.timestamp) < Self.codexAuthCacheTTL {
+                return cached.value
+            }
+            let merged = Self.stabilizeCodexAuthStatus(
+                previous: lastStableCodexAuthStatus,
+                current: readRawCodexAuthStatusLocked()
+            )
+            lastStableCodexAuthStatus = merged
+            codexAuthCacheEntry = (Date(), merged)
+            return merged
+        }
     }
     var antigravityStatus: AntigravityStatus? { readAntigravityStatus() }
 
@@ -74,10 +114,16 @@ final class UsageAPIClient: Sendable {
             let age = Date().timeIntervalSince1970 - cached.fetchedAt
             if age < Self.fileCacheTTL {
                 DaemonLogger.shared.debug("UsageAPI", "File cache hit (age \(Int(age))s)")
-                return cached.data
+                var data = cached.data
+                data.fetchedAt = cached.fetchedAt
+                data.stale = false
+                return data
             }
             DaemonLogger.shared.debug("UsageAPI", "File cache stale (age \(Int(age))s)")
-            staleFallback = cached.data
+            var fallback = cached.data
+            fallback.fetchedAt = cached.fetchedAt
+            fallback.stale = true
+            staleFallback = fallback
         }
 
         // Check backoff
@@ -129,7 +175,9 @@ final class UsageAPIClient: Sendable {
                     DaemonLogger.shared.debug("UsageAPI", "raw: \(raw)")
                 }
 
-                let usage = parseUsageResponse(json)
+                var usage = parseUsageResponse(json)
+                usage.fetchedAt = Date().timeIntervalSince1970
+                usage.stale = false
                 writeFileCache(usage)
                 DaemonLogger.shared.debug("UsageAPI", "API fetch OK: 5h=\(usage.fiveHourPercent ?? -1)% 7d=\(usage.sevenDayPercent ?? -1)%")
                 return usage
@@ -228,9 +276,12 @@ final class UsageAPIClient: Sendable {
 
     // MARK: - Codex Web Auth
 
-    private func readRawCodexAuthStatus() -> CodexAuthStatus? {
-        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
-        let authFile = URL(fileURLWithPath: realHome).appendingPathComponent(".codex/auth.json")
+    /// Must only be invoked inside `codexAuthQueue.sync { ... }`. Split out
+    /// so the serialized `codexAuthStatus` getter has a clearly-locked
+    /// version and so tests can exercise the raw read path directly.
+    private func readRawCodexAuthStatusLocked() -> CodexAuthStatus? {
+        let authFile = URL(fileURLWithPath: Self.resolvedHomeDir)
+            .appendingPathComponent(".codex/auth.json")
         guard let data = try? Data(contentsOf: authFile),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -504,7 +555,9 @@ final class UsageAPIClient: Sendable {
             extraUsageEnabled: cache.data.extraUsageEnabled ?? false,
             extraUsageMonthlyLimit: cache.data.extraUsageMonthlyLimit,
             extraUsageUsedCredits: cache.data.extraUsageUsedCredits,
-            extraUsageUtilization: cache.data.extraUsageUtilization
+            extraUsageUtilization: cache.data.extraUsageUtilization,
+            fetchedAt: fetchedAt,
+            stale: false
         )
         return (usage, fetchedAt)
     }

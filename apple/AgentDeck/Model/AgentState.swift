@@ -113,6 +113,7 @@ struct DashboardState: Sendable {
     var gatewayAuthStatus: String?
     var gatewayAuthRequestId: String?
     var gatewayAuthMessage: String?
+    var daemonPort: Int?
 
     // Usage
     var sessionDurationSec = 0
@@ -145,6 +146,7 @@ struct DashboardState: Sendable {
     var codexSubscriptionActiveUntil: String?
     var codexLastRefreshAt: String?
     var mlxModels: [String] = []
+    var mlxModelCatalog: [String] = []
     var subscriptions: [SubscriptionInfo] = []
     var antigravityStatus: AntigravityStatusInfo?
 

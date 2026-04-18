@@ -11,6 +11,9 @@ struct SettingsScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var manualUrl = ""
     @State private var showRemoveAntigravityConfirm = false
+    @State private var openClawGatewayTokenInput: String = ""
+    @State private var openClawGatewayTokenSaved: Bool = false
+    @State private var openClawGatewayTokenError: String?
     #if os(macOS)
     @State private var portInput: String = ""
     #endif
@@ -374,7 +377,7 @@ struct SettingsScreen: View {
                                         .font(.system(size: 10))
                                         .foregroundStyle(TerrariumHUD.subtext)
                                 }
-                                Text(":\(proc.port)")
+                                Text(verbatim: ":\(portString(proc.port))")
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundStyle(TerrariumHUD.subtext)
                                 Spacer()
@@ -480,12 +483,12 @@ struct SettingsScreen: View {
 
     private var daemonStatusText: String {
         if daemonService.isRunning {
-            return "Local daemon on port \(daemonService.port)"
+            return "Local daemon on port \(portString(daemonService.port))"
         }
         if daemonService.isUsingExternalDaemon {
             return daemonService.ownsExternalDaemon
-                ? "Bundled D200H helper on port \(daemonService.port)"
-                : "External daemon on port \(daemonService.port)"
+                ? "Bundled D200H helper on port \(portString(daemonService.port))"
+                : "External daemon on port \(portString(daemonService.port))"
         }
         if daemonService.bindFailureReason != nil {
             return "Daemon bind failed"
@@ -621,6 +624,19 @@ struct SettingsScreen: View {
                 infoRow("App", "AgentDeck")
                 infoRow("Version", "1.0.0")
                 infoRow("Bundle", "bound.serendipity.agentdeck.dashboard")
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Independent project. Not affiliated with Anthropic, OpenAI, Google, Elgato, DIVOOM, or other third parties referenced. All trademarks are property of their respective owners.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let url = URL(string: "https://github.com/puritysb/AgentDeck/blob/master/ATTRIBUTION.md") {
+                    Link("Third-party attributions & licenses →", destination: url)
+                        .font(.system(size: 11, weight: .semibold))
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -823,12 +839,16 @@ struct SettingsScreen: View {
                     .font(.system(size: 11))
                     .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
+                openClawGatewayTokenSection
             } else {
                 Text("Connects to `ws://127.0.0.1:18789`. Run `openclaw devices approve <requestId>` after first launch to authorize this Mac app.")
                     .font(.system(size: 11))
                     .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        .onAppear {
+            loadOpenClawGatewayTokenState()
         }
     }
 
@@ -840,6 +860,8 @@ struct SettingsScreen: View {
             return "Approval pending"
         case "pairing_required":
             return "Pairing required"
+        case "gateway_token_missing":
+            return "Gateway token required"
         case "token_mismatch", "device_auth_invalid", "auth_failed":
             return "Auth failed"
         case "unsupported_protocol":
@@ -857,7 +879,7 @@ struct SettingsScreen: View {
             return .green
         case "approval_pending", "pairing_required", "gateway_reachable":
             return .orange
-        case "auth_failed", "token_mismatch", "device_auth_invalid", "unsupported_protocol":
+        case "gateway_token_missing", "auth_failed", "token_mismatch", "device_auth_invalid", "unsupported_protocol":
             return .red
         default:
             return .secondary
@@ -870,6 +892,8 @@ struct SettingsScreen: View {
             "Approve this device in OpenClaw: run `openclaw devices approve \($0)` or visit `http://localhost:18789` if the Web UI is enabled."
         } ?? "Approve this device in OpenClaw: run `openclaw devices approve <requestId>` or visit `http://localhost:18789` if the Web UI is enabled."
 
+        let tokenHint = "The token is the shared secret set on the OpenClaw Gateway itself — the value you passed as `OPENCLAW_GATEWAY_TOKEN` (env) or `gateway.auth.token` (config). Paste that same value here. AgentDeck cannot read it from the Gateway's config in the App Store build."
+
         switch stateHolder.state.gatewayAuthStatus {
         case "connected":
             return "Connected through the local OpenClaw Gateway. \(base)"
@@ -877,13 +901,129 @@ struct SettingsScreen: View {
             return "\(base) \(approve)"
         case "unsupported_protocol":
             return "OpenClaw Gateway version not supported. Update OpenClaw to a compatible 2026.4.14+ Gateway."
+        case "gateway_token_missing":
+            return "OpenClaw Gateway requires a shared token before device approval. \(tokenHint)"
         case "auth_failed", "token_mismatch", "device_auth_invalid":
             return stateHolder.state.gatewayAuthMessage ?? "OpenClaw Gateway authentication failed. Revoke this AgentDeck device in OpenClaw and approve it again."
         case "gateway_reachable":
-            return "\(base) Waiting for OpenClaw Gateway approval."
+            return "\(base) Waiting for OpenClaw Gateway approval. If OpenClaw was launched with a shared token, paste it below before approving this device. \(tokenHint)"
         default:
-            return "Start OpenClaw Gateway on `ws://127.0.0.1:18789`. \(base)"
+            return "Start OpenClaw Gateway on `ws://127.0.0.1:18789`. \(base) If the Gateway is launched with a shared token, paste it below. \(tokenHint)"
         }
+    }
+
+    @ViewBuilder
+    private var openClawGatewayTokenSection: some View {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        if shouldShowOpenClawGatewayTokenEditor {
+            openClawGatewayTokenEditor
+        } else {
+            Text("A shared Gateway token is only needed when OpenClaw reports token-required auth. Normal pairing continues through OpenClaw approval.")
+                .font(.system(size: 10))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+
+    /// Show the Gateway token editor eagerly in the App Store build. Users
+    /// land on Settings without knowing OpenClaw needs a shared secret, so
+    /// hiding the input until auth *already* fails was a dead-end — the UI
+    /// gave no entry path. Exception: once the Gateway reports `connected`,
+    /// collapse to the "Saved in Keychain" confirmation so the input field
+    /// doesn't clutter an already-working setup (the user can still use
+    /// "Clear" to drop the stored token and re-open the editor).
+    private var shouldShowOpenClawGatewayTokenEditor: Bool {
+        if stateHolder.state.gatewayAuthStatus == "connected" {
+            return openClawGatewayTokenSaved ? false : !openClawGatewayTokenInput.isEmpty
+        }
+        return true
+    }
+
+    @ViewBuilder
+    private var openClawGatewayTokenEditor: some View {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        VStack(alignment: .leading, spacing: 6) {
+            SecureField(
+                openClawGatewayTokenSaved
+                    ? "Shared Gateway token saved — paste to replace"
+                    : "Shared Gateway token (OPENCLAW_GATEWAY_TOKEN)",
+                text: $openClawGatewayTokenInput
+            )
+            .textFieldStyle(.roundedBorder)
+            HStack(spacing: 8) {
+                Button("Save token") {
+                    saveOpenClawGatewayToken()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(openClawGatewayTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("Clear") {
+                    clearOpenClawGatewayToken()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!openClawGatewayTokenSaved && openClawGatewayTokenInput.isEmpty)
+
+                if openClawGatewayTokenSaved {
+                    Text("Saved in Keychain")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.green)
+                }
+            }
+            if let openClawGatewayTokenError {
+                Text(openClawGatewayTokenError)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Paste the token configured on the OpenClaw Gateway, not an AgentDeck token. Saving stores it in Keychain and restarts the local daemon.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+
+    private func loadOpenClawGatewayTokenState() {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        openClawGatewayTokenSaved = OpenClawGatewayTokenStore.loadToken() != nil
+        openClawGatewayTokenError = nil
+        #endif
+    }
+
+    private func saveOpenClawGatewayToken() {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        do {
+            try OpenClawGatewayTokenStore.saveToken(openClawGatewayTokenInput)
+            openClawGatewayTokenInput = ""
+            openClawGatewayTokenSaved = true
+            openClawGatewayTokenError = nil
+            Task { await daemonService.restart() }
+        } catch {
+            openClawGatewayTokenError = "Could not save token: \(error.localizedDescription)"
+        }
+        #endif
+    }
+
+    private func clearOpenClawGatewayToken() {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        do {
+            try OpenClawGatewayTokenStore.deleteToken()
+            openClawGatewayTokenInput = ""
+            openClawGatewayTokenSaved = false
+            openClawGatewayTokenError = nil
+            Task { await daemonService.restart() }
+        } catch {
+            openClawGatewayTokenError = "Could not clear token: \(error.localizedDescription)"
+        }
+        #endif
     }
 
     // MARK: - ADB / Android integration status row

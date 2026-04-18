@@ -62,14 +62,14 @@ struct DevicePreviewScreen: View {
     // MARK: - Sidebar
 
     private var sidebar: some View {
-        List(selection: Binding(
+        List(selection: Binding<PreviewDevice?>(
             get: { selection.device },
             set: { new in if let new { selection.device = new } }
         )) {
             ForEach(PreviewDevice.Category.allCases) { cat in
                 Section(cat.displayName) {
                     ForEach(PreviewDevice.allCases.filter { $0.category == cat }) { dev in
-                        Text(dev.displayName).tag(Optional(dev))
+                        Text(dev.displayName).tag(dev)
                     }
                 }
             }
@@ -164,6 +164,7 @@ struct DevicePreviewScreen: View {
         )
 
         switch selection.device {
+        case .streamDeckKey:     StreamDeckKeyPreview(selection: live)
         case .streamDeckPlus:    StreamDeckPlusPreview(selection: live)
         case .d200hKey:          D200HKeyPreview(selection: live)
         case .d200hDeck:         D200HDeckPreview(selection: live)
@@ -176,6 +177,7 @@ struct DevicePreviewScreen: View {
         case .esp32_35Landscape: Esp3235LandscapePreview(selection: live)
         case .esp32_35Portrait:  Esp3235PortraitPreview(selection: live)
         case .esp32Round:        Esp32RoundPreview(selection: live)
+        case .pixoo64:           Pixoo64Preview(selection: live)
         case .ulanziMatrix:      UlanziMatrixPreview(selection: live)
         case .terminalTerrarium: TerminalTerrariumPreview(selection: live)
         }

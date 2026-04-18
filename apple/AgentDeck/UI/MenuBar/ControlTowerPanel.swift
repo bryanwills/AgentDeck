@@ -24,40 +24,106 @@ struct ControlTowerPanel: View {
     )
     @State private var streamDeckDetectionLastRun: Date? = nil
 
+    /// Session whose "Jump to…" grid is currently expanded. nil means every
+    /// row is collapsed. Reset when the underlying session list shape
+    /// changes so a stale id can't keep a row permanently-open.
+    @State private var expandedSessionId: String? = nil
+
     var body: some View {
         VStack(spacing: 0) {
-            headerSection
-            Divider().overlay(Color.gray.opacity(0.3))
+            // Header: Attention Theater when any session awaits input,
+            // otherwise a quiet "all calm" strip with the AgentDeck mark.
+            if let awaiting = featuredAwaitingSession {
+                AttentionTheaterView(
+                    session: awaiting,
+                    question: questionFor(awaiting),
+                    respond: { index in respondToAwaiting(index, session: awaiting) }
+                )
+            } else {
+                CalmHeaderView(
+                    sessionCount: sortedSessions.count,
+                    processingCount: activeSessions.count,
+                    daemonPort: daemonService.port,
+                    bridgeConnected: daemonService.isRunning || daemonService.isUsingExternalDaemon
+                )
+            }
 
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 12) {
-                    if !attentionSessions.isEmpty {
-                        attentionSection
-                    }
-                    if !activeSessions.isEmpty {
-                        activeSection
-                    }
-                    if !idleSessions.isEmpty {
-                        idleSection
-                    }
-                    modelsAndServicesSection
-                    devicesSection
+                VStack(alignment: .leading, spacing: 14) {
+                    sessionsListSection
+                    topologySection
+                    utilityLinksRow
+                    rateLimitsSection
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             }
 
-            Divider().overlay(Color.gray.opacity(0.3))
-            actionsBar
-            Divider().overlay(Color.gray.opacity(0.3))
+            VStack(spacing: 0) {
+                if showDaemonOfflineBanner {
+                    daemonOfflineBanner
+                }
+                pillActionsBar
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            }
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.7))
+            .overlay(
+                Rectangle()
+                    .fill(Color.black.opacity(0.08))
+                    .frame(height: 0.5),
+                alignment: .top
+            )
+
             footerSection
         }
-        .frame(width: 340, height: 560)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .frame(width: 380, height: 620)
+        // Cream panel background matches the Option D prototype. Not a
+        // system palette color — the design intent is a warm off-white
+        // that contrasts with the typical macOS menubar popover chrome.
+        .background(Color(red: 0.965, green: 0.953, blue: 0.933))
+        .foregroundColor(Color(red: 0.102, green: 0.102, blue: 0.122))
         .onAppear { refreshStreamDeckDetectionIfStale() }
         .onReceive(
             Timer.publish(every: 5, on: .main, in: .common).autoconnect()
         ) { _ in refreshStreamDeckDetectionIfStale() }
+        .onChange(of: sortedSessions.map(\.id)) { _, _ in
+            // Collapse any stale jump-panel when the session list changes.
+            if let open = expandedSessionId,
+               !sortedSessions.contains(where: { $0.id == open }) {
+                expandedSessionId = nil
+            }
+        }
+    }
+
+    /// The session the attention theater should feature. Prefers the
+    /// currently-focused session if it's awaiting; otherwise picks the
+    /// first awaiting session in sort order.
+    private var featuredAwaitingSession: SessionInfo? {
+        if let focusedId = stateHolder.state.sessionId,
+           let focused = sortedSessions.first(where: { $0.id == focusedId }),
+           sessionState(focused).isAwaiting {
+            return focused
+        }
+        return attentionSessions.first
+    }
+
+    /// Prompt question text tied to a session. We only have the live
+    /// prompt for the focused session (the bridge only streams one at a
+    /// time), so non-focused sessions show a generic "needs input" tag.
+    private func questionFor(_ session: SessionInfo) -> String? {
+        if session.id == stateHolder.state.sessionId {
+            return stateHolder.state.question
+        }
+        return nil
+    }
+
+    private func respondToAwaiting(_ optionIndex: Int, session: SessionInfo) {
+        // Route via the daemon focus relay first, then send the option
+        // selection. `selectOption` is the canonical command path — same
+        // one used by D200H buttons and Cmd+Y/N/A keyboard shortcuts.
+        stateHolder.sendCommand(.focusSession(sessionId: session.id))
+        stateHolder.sendCommand(.selectOption(index: optionIndex))
     }
 
     /// Recompute Stream Deck app/hardware detection if the cached verdict is
@@ -113,183 +179,389 @@ struct ControlTowerPanel: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - Sessions list
 
-    private var headerSection: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("AgentDeck Control Tower")
-                    .font(.system(size: 13, weight: .semibold))
-                let sessionCount = sortedSessions.count
-                let activeCount = activeSessions.count
-                let attentionCount = attentionSessions.count
-                HStack(spacing: 0) {
-                    Text("\(sessionCount) session\(sessionCount == 1 ? "" : "s")")
+    /// Sessions displayed in the main list. When the attention theater is
+    /// showing a featured session at the top, we exclude it here so it
+    /// isn't duplicated — matches `option-d.jsx`'s `remaining` filter.
+    private var remainingSessions: [SessionInfo] {
+        guard let featured = featuredAwaitingSession else { return sortedSessions }
+        return sortedSessions.filter { $0.id != featured.id }
+    }
+
+    private var sessionsListSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("SESSIONS")
+                .font(.system(size: 10, weight: .bold))
+                .kerning(0.5)
+                .foregroundStyle(.secondary)
+
+            if sortedSessions.isEmpty {
+                VStack(spacing: 6) {
+                    Text("No sessions running")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                    if activeCount > 0 {
-                        Text(" · \(activeCount) active")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.cyan)
-                    }
-                    if attentionCount > 0 {
-                        Text(" · \(attentionCount) attention")
+                    Button {
+                        openLaunchSession()
+                    } label: {
+                        Label("Launch session", systemImage: "play.fill")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.orange)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+            } else {
+                VStack(spacing: 4) {
+                    ForEach(remainingSessions) { session in
+                        SessionJumpRow(
+                            session: session,
+                            tool: currentToolFor(session),
+                            expanded: expandedSessionId == session.id,
+                            onToggle: {
+                                expandedSessionId = (expandedSessionId == session.id) ? nil : session.id
+                            },
+                            onJumpDashboard: {
+                                stateHolder.sendCommand(.focusSession(sessionId: session.id))
+                                openDashboard()
+                            },
+                            onJumpExternal: { target in
+                                // TODO(projectPath): daemon payload needs a
+                                // `projectPath` / `cwd` field on SessionInfo.
+                                // Until `shared/src/protocol.ts` + bridge
+                                // expose it, we fall back to launching the
+                                // target app bare instead of opening the
+                                // project directory.
+                                SessionJumpLauncher.launch(target, projectPath: nil)
+                            }
+                        )
                     }
                 }
             }
+        }
+    }
+
+    /// Secondary text-link row below the topology. Preserves access to
+    /// device preview + iPad pairing now that we removed the full devices
+    /// section (the unified graph shows the ring; these actions needed a
+    /// new home).
+    private var utilityLinksRow: some View {
+        HStack(spacing: 12) {
+            Button { openDevicePreview() } label: {
+                Label("Preview devices", systemImage: "rectangle.on.rectangle")
+                    .font(.system(size: 10.5, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+
+            Button { openWindow(id: "pairing-qr") } label: {
+                Label("Pair iPad", systemImage: "qrcode")
+                    .font(.system(size: 10.5, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+            .disabled(daemonService.port == 0)
+            .daemonOfflineAffordance(isOffline: daemonService.port == 0)
+
             Spacer()
-            daemonStatusBadge
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    private var daemonStatusBadge: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(daemonService.isRunning || daemonService.isUsingExternalDaemon
-                      ? Color.green : Color.red)
-                .frame(width: 7, height: 7)
-            if daemonService.isRunning {
-                Text(verbatim: ":\(daemonService.port)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            } else if daemonService.isUsingExternalDaemon {
-                Text(verbatim: daemonService.ownsExternalDaemon ? "d2h :\(daemonService.port)" : "ext :\(daemonService.port)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
+            streamDeckPromptCompact
         }
     }
 
-    // MARK: - Attention Section
-
-    private var attentionSection: some View {
-        SectionContainer(title: "ATTENTION", titleColor: .orange) {
-            ForEach(attentionSessions) { session in
-                sessionRow(session, stateLabel: sessionState(session).displayLabel, stateLabelColor: .orange)
-            }
+    /// Inline Stream Deck nudge — only renders when hardware is detected.
+    /// Replaces the full device-section prompt that used to live here.
+    @ViewBuilder
+    private var streamDeckPromptCompact: some View {
+        if streamDeckDetection.streamDeckPlusConnected {
             Button {
-                openDashboard()
+                if streamDeckDetection.elgatoAppInstalled {
+                    openStreamDeckPluginInstaller()
+                } else {
+                    openStreamDeckDownloadPage()
+                }
             } label: {
-                Text("Open in Dashboard")
-                    .font(.system(size: 11))
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 4) {
+                    Circle().fill(Color.orange).frame(width: 5, height: 5)
+                    Text(streamDeckDetection.elgatoAppInstalled ? "Install SD plugin" : "Stream Deck+ setup")
+                        .font(.system(size: 10, weight: .medium))
+                }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .buttonStyle(.plain)
+            .foregroundStyle(.orange)
         }
     }
 
-    // MARK: - Active Section
+    // MARK: - Topology (Unified Graph)
 
-    private var activeSection: some View {
-        SectionContainer(title: "PROCESSING", titleColor: .cyan) {
-            ForEach(activeSessions) { session in
-                sessionRow(session, extraDetail: currentToolFor(session))
+    private var topologySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("TOPOLOGY")
+                .font(.system(size: 10, weight: .bold))
+                .kerning(0.5)
+                .foregroundStyle(.secondary)
+
+            MenuBarTopologyList()
+        }
+    }
+
+    // MARK: - Compact rate limits
+
+    private var rateLimitsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("RATE LIMITS")
+                    .font(.system(size: 10, weight: .bold))
+                    .kerning(0.5)
+                    .foregroundStyle(.secondary)
+                if stateHolder.state.usageStale == true {
+                    Text("stale")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                }
+                Spacer()
+            }
+            if let pct5h = stateHolder.state.fiveHourPercent {
+                compactGauge(
+                    label: "5h",
+                    percent: pct5h,
+                    resetTime: stateHolder.state.fiveHourResetsAt
+                )
+            }
+            if let pct7d = stateHolder.state.sevenDayPercent {
+                compactGauge(
+                    label: "7d",
+                    percent: pct7d,
+                    resetTime: stateHolder.state.sevenDayResetsAt
+                )
+            }
+            if stateHolder.state.fiveHourPercent == nil && stateHolder.state.sevenDayPercent == nil {
+                rateLimitsEmptyState
+            }
+            if preferences.hooksInstalled == false {
+                hookConsentHint
             }
         }
     }
 
-    // MARK: - Idle Section
-
-    private var idleSection: some View {
-        SectionContainer(title: "IDLE", titleColor: .green) {
-            ForEach(idleSessions) { session in
-                sessionRow(session)
+    /// Replacement for the old silent "No data" string. App Store sandbox
+    /// can't read `~/.claude/.credentials.json` or the Claude keychain
+    /// entry (Apple 2.5.2 blocks `security` subprocess + Anthropic doesn't
+    /// publish a shared Keychain Access Group), so quota polling is
+    /// structurally impossible in that build. Users need to know that —
+    /// and to know the alternative — rather than staring at "No data".
+    @ViewBuilder
+    private var rateLimitsEmptyState: some View {
+        let connected = stateHolder.state.oauthConnected ?? false
+        VStack(alignment: .leading, spacing: 4) {
+            Text(rateLimitsEmptyMessage)
+                .font(.system(size: 10))
+                .foregroundColor(connected ? .secondary : .orange)
+                .fixedSize(horizontal: false, vertical: true)
+            if !connected {
+                if #available(macOS 14.0, *) {
+                    SettingsLink {
+                        Text("Open Settings →")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(Color(red: 0.30, green: 0.43, blue: 0.72))
+                    }
+                    .buttonStyle(.plain)
+                    .simultaneousGesture(TapGesture().onEnded {
+                        NSApp.activate(ignoringOtherApps: true)
+                    })
+                } else {
+                    Button {
+                        NSApp.activate(ignoringOtherApps: true)
+                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                    } label: {
+                        Text("Open Settings →")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(Color(red: 0.30, green: 0.43, blue: 0.72))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }
 
-    // MARK: - Unified Session Row
+    /// Status-aware sentence that replaces "No data". Keeps it to one
+    /// line so the menubar popover doesn't grow.
+    private var rateLimitsEmptyMessage: String {
+        if AgentDeckRuntime.isSandboxed && (stateHolder.state.oauthConnected ?? false) == false {
+            return "Claude quota unavailable — App Store sandbox can't read Claude's OAuth token. Install the AgentDeck CLI (`npx @agentdeck/setup`) to track usage here."
+        }
+        if (stateHolder.state.oauthConnected ?? false) == false {
+            return "Claude Code isn't signed in. Run `claude` once in Terminal, then the quota gauges will populate here."
+        }
+        // OAuth present but no data yet — just fetching, or Anthropic API quiet.
+        return "Waiting for Anthropic to return your quota…"
+    }
+
+    /// Secondary hint row. Hooks are opt-in (Apple 2.5.2 forbids silent
+    /// writes to `~/.claude/settings.local.json`) and without them the
+    /// live per-turn token/input/output counters stay zero — which reads
+    /// as broken to users who don't know the hook consent gate exists.
+    @ViewBuilder
+    private var hookConsentHint: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "bolt.slash")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            Text("Live session tokens need hook consent — enable in Settings.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 2)
+    }
+
+    private func compactGauge(label: String, percent: Double, resetTime: String?) -> some View {
+        let color = gaugeColor(percent)
+        return HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.black.opacity(0.08))
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(color)
+                        .frame(width: max(0, min(1, percent / 100.0)) * geo.size.width)
+                }
+            }
+            .frame(height: 6)
+            Text("\(Int(percent))%")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(color)
+                .frame(width: 36, alignment: .trailing)
+            if let reset = resetTime, let formatted = formatResetTime(reset) {
+                Text(formatted)
+                    .font(.system(size: 10, weight: percent >= 70 ? .semibold : .regular))
+                    .foregroundStyle(percent >= 70 ? .orange : .secondary)
+                    .frame(width: 48, alignment: .trailing)
+            }
+        }
+    }
+
+    // MARK: - Compact services
+
+    // MARK: - Pill-style action bar (from Option D design)
+
+    private var pillActionsBar: some View {
+        HStack(spacing: 6) {
+            pillButton(label: "Launch", primary: true) { openLaunchSession() }
+            pillButton(label: "Dashboard") { openDashboard() }
+            pillButton(label: "Evaluation") { openApmeDashboard() }
+                .disabled(daemonService.port == 0)
+                .daemonOfflineAffordance(isOffline: daemonService.port == 0)
+            Spacer()
+            settingsPillButton
+        }
+    }
+
+    // MARK: - Daemon offline banner
+
+    /// True when the daemon has no bound port AND we aren't in a transient
+    /// "starting up" window. We only surface the banner when the user's
+    /// actions are actually blocked, not during the ~1s window between
+    /// app launch and the in-process daemon completing its bind.
+    private var showDaemonOfflineBanner: Bool {
+        daemonService.port == 0
+            && !daemonService.isRunning
+            && !daemonService.isUsingExternalDaemon
+    }
+
+    private var daemonOfflineBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "bolt.slash.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Daemon offline")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color(red: 0.102, green: 0.102, blue: 0.122))
+                Text("Evaluation · Pair iPad · Preview require the daemon to be running.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            Button {
+                Task { await daemonService.restart() }
+            } label: {
+                Text("Restart")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule().fill(Color.orange)
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Color.orange.opacity(0.10))
+        .overlay(
+            Rectangle()
+                .fill(Color.orange.opacity(0.35))
+                .frame(height: 0.5),
+            alignment: .bottom
+        )
+    }
+
+    private func pillButton(
+        label: String,
+        primary: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(primary ? .white : Color(red: 0.102, green: 0.102, blue: 0.122))
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(primary ? Color(red: 0.102, green: 0.102, blue: 0.122) : Color.black.opacity(0.06))
+                )
+        }
+        .buttonStyle(.plain)
+    }
 
     @ViewBuilder
-    private func sessionRow(
-        _ session: SessionInfo,
-        stateLabel: String? = nil,
-        stateLabelColor: Color? = nil,
-        extraDetail: String? = nil
-    ) -> some View {
-        HStack(spacing: 8) {
-            sessionIcon(session)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(session.projectName ?? "Unknown")
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                // Subtitle: agentType · modelName · Xm ago
-                HStack(spacing: 0) {
-                    if let stateLabel {
-                        Text(stateLabel)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(stateLabelColor ?? .secondary)
-                        Text(" · ")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-                    if let type = session.agentType {
-                        Text(agentTypeLabel(type))
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-                    if let model = session.modelName {
-                        Text(" · ")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                        Text(shortModelName(model))
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                    if let time = relativeTimeString(from: session.startedAt) {
-                        Text(" · \(time)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-                    if let extra = extraDetail {
-                        Text(" · ")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                        Text(extra)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
+    private var settingsPillButton: some View {
+        if #available(macOS 14.0, *) {
+            SettingsLink {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(Color(red: 0.102, green: 0.102, blue: 0.122))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.black.opacity(0.06)))
             }
-            Spacer()
+            .buttonStyle(.plain)
+            .help("Open Settings")
+            .simultaneousGesture(TapGesture().onEnded {
+                NSApp.activate(ignoringOtherApps: true)
+            })
+        } else {
+            Button {
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(Color(red: 0.102, green: 0.102, blue: 0.122))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.black.opacity(0.06)))
+            }
+            .buttonStyle(.plain)
         }
-        .padding(.vertical, 3)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            stateHolder.sendCommand(.focusSession(sessionId: session.id))
-            openDashboard()
-        }
-    }
-
-    // MARK: - Session Icon (Creature asset in brand color + state dot)
-
-    private func sessionIcon(_ session: SessionInfo) -> some View {
-        let state = sessionState(session)
-        return ZStack(alignment: .topTrailing) {
-            SessionCreatureIcon(
-                agentType: session.agentType,
-                tint: SessionBrand.color(for: session.agentType),
-                size: 22
-            )
-            .opacity(state == .disconnected ? 0.35 : 1.0)
-            // Small state dot anchored to the creature so both brand and
-            // state are visible at a glance.
-            Circle()
-                .fill(stateColor(state))
-                .frame(width: 6, height: 6)
-                .overlay(
-                    Circle()
-                        .stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1)
-                )
-                .offset(x: 2, y: -2)
-        }
-        .frame(width: 24, height: 24)
     }
 
     private func stateColor(_ state: AgentConnectionState) -> Color {
@@ -298,172 +570,6 @@ struct ControlTowerPanel: View {
         case .awaitingPermission, .awaitingOption, .awaitingDiff: .orange
         case .idle: .green
         case .disconnected: .gray
-        }
-    }
-
-    // MARK: - Models & Services
-
-    private var modelsAndServicesSection: some View {
-        SectionContainer(title: "MODELS & SERVICES", titleColor: .secondary) {
-            // Claude / OAuth
-            claudeRow
-
-            // OpenClaw / Gateway
-            if stateHolder.state.gatewayAvailable || stateHolder.state.gatewayHasError {
-                gatewayRow
-            }
-
-            // Ollama
-            if let ollama = stateHolder.state.ollamaStatus {
-                ollamaRow(ollama)
-            }
-
-            // MLX
-            if !stateHolder.state.mlxModels.isEmpty {
-                mlxRow
-            }
-
-            // Rate Limits
-            rateLimitsRow
-
-            // Subscriptions
-            if !stateHolder.state.subscriptions.isEmpty {
-                subscriptionsRow
-            }
-        }
-    }
-
-    private var claudeRow: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Image(systemName: "cloud.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                Text("Claude")
-                    .font(.system(size: 11, weight: .medium))
-                Spacer()
-                if stateHolder.state.oauthConnected == true {
-                    Text("OAuth")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.green)
-                } else if stateHolder.state.oauthConnected == false {
-                    Text("Not connected")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.orange)
-                }
-            }
-            let available = DashboardDataRules.sortedModelCatalog(stateHolder.state.modelCatalog)
-                .filter(\.available)
-            if !available.isEmpty {
-                Text(available.map(\.name).joined(separator: ", "))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-    }
-
-    private var gatewayRow: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "network")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-            Text("OpenClaw")
-                .font(.system(size: 11, weight: .medium))
-            Spacer()
-            if stateHolder.state.gatewayHasError {
-                Text("Error")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.red)
-            } else if stateHolder.state.gatewayConnected {
-                Text("Connected")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.green)
-            } else {
-                Text("Reachable")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange)
-            }
-        }
-    }
-
-    private func ollamaRow(_ status: OllamaStatus) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                Text("Ollama")
-                    .font(.system(size: 11, weight: .medium))
-                Spacer()
-                Text(status.available ? "Running" : "Stopped")
-                    .font(.system(size: 10))
-                    .foregroundStyle(status.available ? .green : .secondary)
-            }
-            if !status.models.isEmpty {
-                let modelDescs = status.models.map { m in
-                    let sizeGB = String(format: "%.1fG", Double(m.size) / 1_073_741_824)
-                    let vramGB = String(format: "%.1fG", Double(m.sizeVram) / 1_073_741_824)
-                    return "\(m.name) \(sizeGB)/\(vramGB)"
-                }
-                Text(modelDescs.joined(separator: ", "))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-    }
-
-    private var mlxRow: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "apple.terminal")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-            Text("MLX")
-                .font(.system(size: 11, weight: .medium))
-            Spacer()
-            Text(stateHolder.state.mlxModels.joined(separator: ", "))
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-    }
-
-    private var rateLimitsRow: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                Image(systemName: "gauge.medium")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                Text("Rate Limits")
-                    .font(.system(size: 11, weight: .medium))
-                if stateHolder.state.usageStale == true {
-                    Text("stale")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.orange)
-                }
-            }
-            if let pct5h = stateHolder.state.fiveHourPercent {
-                rateLimitGauge(
-                    label: "5h",
-                    percent: pct5h,
-                    previousPercent: stateHolder.state.previousFiveHourPercent,
-                    resetTime: stateHolder.state.fiveHourResetsAt
-                )
-            }
-            if let pct7d = stateHolder.state.sevenDayPercent {
-                rateLimitGauge(
-                    label: "7d",
-                    percent: pct7d,
-                    previousPercent: stateHolder.state.previousSevenDayPercent,
-                    resetTime: stateHolder.state.sevenDayResetsAt
-                )
-            }
-            if stateHolder.state.fiveHourPercent == nil && stateHolder.state.sevenDayPercent == nil {
-                Text("No data")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -483,151 +589,14 @@ struct ControlTowerPanel: View {
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(arrow == "↑" ? .red : .green)
             }
-            if let reset = resetTime {
-                let formatted = formatResetTime(reset)
-                if !formatted.isEmpty {
-                    Text(formatted)
-                        .font(.system(size: 10, weight: percent >= 70 ? .semibold : .regular))
-                        .foregroundStyle(percent >= 70 ? .orange : .secondary)
-                }
+            if let reset = resetTime, let formatted = formatResetTime(reset) {
+                Text(formatted)
+                    .font(.system(size: 10, weight: percent >= 70 ? .semibold : .regular))
+                    .foregroundStyle(percent >= 70 ? .orange : .secondary)
             }
         }
     }
 
-    private var subscriptionsRow: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Image(systemName: "creditcard")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                Text("Subscriptions")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            ForEach(Array(stateHolder.state.subscriptions.enumerated()), id: \.offset) { _, sub in
-                HStack(spacing: 4) {
-                    Text(sub.name)
-                        .font(.system(size: 10))
-                    if let until = sub.until {
-                        Spacer()
-                        Text(formatSubscriptionDate(until))
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Devices
-
-    private var devicesSection: some View {
-        SectionContainer(title: "DEVICES", titleColor: .secondary) {
-            let entries = daemonService.deviceSummary.allEntries
-            if entries.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                        Text("Devices are optional — your agents work standalone.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer()
-                        if daemonService.connectedClients > 0 {
-                            Text("\(daemonService.connectedClients) client\(daemonService.connectedClients == 1 ? "" : "s")")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Button {
-                        openDevicePreview()
-                    } label: {
-                        Text("View what devices add →")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Color.accentColor)
-                    streamDeckPromptRow
-                }
-            } else {
-                ForEach(entries) { entry in
-                    deviceRow(entry)
-                }
-                streamDeckPromptRow
-                if daemonService.connectedClients > 0 {
-                    HStack {
-                        Spacer()
-                        Text("\(daemonService.connectedClients) dashboard client\(daemonService.connectedClients == 1 ? "" : "s")")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 2)
-                }
-            }
-        }
-    }
-
-    /// Contextual install-prompt row for Stream Deck+ hardware. Three rendered
-    /// states, driven entirely by `streamDeckDetection`:
-    ///   * hardware present + Elgato app missing → "Download"
-    ///   * hardware present + Elgato app present → "Install Plugin"
-    ///   * hardware absent                        → hidden (EmptyView)
-    /// We deliberately never probe whether our plugin is already loaded inside
-    /// the Elgato app — that state is not queryable from outside — so we show
-    /// the plugin-install nudge optimistically once the app is detected.
-    @ViewBuilder
-    private var streamDeckPromptRow: some View {
-        let detection = streamDeckDetection
-        if detection.streamDeckPlusConnected {
-            if !detection.elgatoAppInstalled {
-                streamDeckRow(
-                    title: "Stream Deck+ detected",
-                    subtitle: "Install Stream Deck software to connect",
-                    buttonLabel: "Download",
-                    action: { openStreamDeckDownloadPage() }
-                )
-            } else {
-                streamDeckRow(
-                    title: "Stream Deck+ ready",
-                    subtitle: "Install the AgentDeck plugin to show sessions on keys",
-                    buttonLabel: "Install Plugin",
-                    action: { openStreamDeckPluginInstaller() }
-                )
-            }
-        }
-    }
-
-    private func streamDeckRow(
-        title: String,
-        subtitle: String,
-        buttonLabel: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(Color.orange)
-                .frame(width: 6, height: 6)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 4)
-            Button(action: action) {
-                Text(buttonLabel)
-                    .font(.system(size: 10, weight: .medium))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-        }
-        .padding(.vertical, 2)
-    }
 
     /// Send the user to Elgato's downloads landing page. We intentionally pick
     /// the top-level /downloads URL instead of a versioned .dmg link so the
@@ -654,143 +623,6 @@ struct ControlTowerPanel: View {
         if let url = URL(string: "https://github.com/puritysb/AgentDeck/releases/latest") {
             NSWorkspace.shared.open(url)
         }
-    }
-
-    @ViewBuilder
-    private func deviceRow(_ entry: DeviceEntry) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: entry.kind.symbolName)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .frame(width: 14, height: 14)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(entry.title)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
-                if let subtitle = entry.subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            Spacer(minLength: 4)
-            statusDot(entry.status)
-        }
-        .padding(.vertical, 2)
-    }
-
-    @ViewBuilder
-    private func statusDot(_ status: DeviceStatus) -> some View {
-        let color: Color = switch status {
-        case .connected:    .green
-        case .reconnecting: .orange
-        case .idle:         .gray
-        case .error:        .red
-        }
-        HStack(spacing: 4) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-            if case .error(let msg) = status {
-                Text(msg)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.red)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: 90, alignment: .leading)
-            }
-        }
-    }
-
-    // MARK: - Actions Bar
-
-    private var actionsBar: some View {
-        HStack(spacing: 8) {
-            Button {
-                openLaunchSession()
-            } label: {
-                Label("Launch Session", systemImage: "play.fill")
-                    .font(.system(size: 11))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button {
-                openDashboard()
-            } label: {
-                Label("Dashboard", systemImage: "square.grid.2x2")
-                    .font(.system(size: 11))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button {
-                openApmeDashboard()
-            } label: {
-                Label("Reports", systemImage: "chart.bar.fill")
-                    .font(.system(size: 11))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(daemonService.port == 0)
-            .help("Open the APME evaluation dashboard — per-session quality reports")
-
-            Button {
-                openDevicePreview()
-            } label: {
-                Label("Preview Devices", systemImage: "rectangle.on.rectangle")
-                    .font(.system(size: 11))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("See what AgentDeck looks like on each supported device — no hardware required")
-
-            // MARK: - Pair iPad
-            Button {
-                openWindow(id: "pairing-qr")
-            } label: {
-                Label("Pair iPad", systemImage: "qrcode")
-                    .font(.system(size: 11))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(daemonService.port == 0)
-            .help("Show a QR code to pair your iPad or iPhone with this Mac")
-
-            Spacer()
-
-            // SettingsLink is the only reliable way to open Settings from a
-            // MenuBarExtra window — `NSApp.sendAction(showSettingsWindow:)`
-            // races against the popover auto-dismiss and swallows the action.
-            // Available macOS 14+; accessory apps fall back to activating
-            // the (presumably already open) existing Settings window.
-            if #available(macOS 14.0, *) {
-                SettingsLink {
-                    Image(systemName: "gear")
-                        .font(.system(size: 11))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Open Settings")
-                .simultaneousGesture(TapGesture().onEnded {
-                    NSApp.activate(ignoringOtherApps: true)
-                })
-            } else {
-                Button {
-                    NSApp.activate(ignoringOtherApps: true)
-                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-                } label: {
-                    Image(systemName: "gear")
-                        .font(.system(size: 11))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
     }
 
     // MARK: - Footer
@@ -826,28 +658,11 @@ struct ControlTowerPanel: View {
     // MARK: - Helpers
 
     private func agentTypeLabel(_ type: String) -> String {
-        switch type {
-        case "claude-code": "Claude"
-        case "openclaw": "OpenClaw"
-        case "codex-cli": "Codex"
-        case "opencode": "OpenCode"
-        case "daemon": "Daemon"
-        default: type.replacingOccurrences(of: "-", with: " ").capitalized
-        }
+        displayAgentLabel(type)
     }
 
-    /// Shorten model names for compact display (e.g., "claude-opus-4-6-20261001" → "opus-4")
     private func shortModelName(_ name: String) -> String {
-        // Strip common prefixes
-        var s = name
-        for prefix in ["claude-", "gpt-", "o1-", "o3-"] {
-            if s.hasPrefix(prefix) { s = String(s.dropFirst(prefix.count)) }
-        }
-        // Strip date suffixes (e.g., -20261001)
-        if let range = s.range(of: #"-\d{8}$"#, options: .regularExpression) {
-            s = String(s[s.startIndex..<range.lowerBound])
-        }
-        return s
+        displayShortModelName(name)
     }
 
     /// Get current tool name for a session (only available for primary session)
@@ -858,21 +673,8 @@ struct ControlTowerPanel: View {
         return nil
     }
 
-    /// Convert ISO 8601 startedAt to relative time string (e.g., "2m", "1h", "3d")
     private func relativeTimeString(from isoString: String?) -> String? {
-        guard let isoString, !isoString.isEmpty else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: isoString)
-                ?? ISO8601DateFormatter().date(from: isoString) else { return nil }
-        let seconds = Int(Date().timeIntervalSince(date))
-        if seconds < 60 { return "<1m" }
-        let minutes = seconds / 60
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours)h" }
-        let days = hours / 24
-        return "\(days)d"
+        displayRelativeTime(isoString)
     }
 
     private func openDashboard() {
@@ -944,112 +746,10 @@ struct ControlTowerPanel: View {
         return fmt.string(from: date)
     }
 
-    private func formatResetTime(_ isoString: String?) -> String {
-        guard let isoString, !isoString.isEmpty else { return "" }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: isoString)
-                ?? ISO8601DateFormatter().date(from: isoString) else { return isoString }
-        let interval = date.timeIntervalSinceNow
-        if interval <= 0 { return "now" }
-        let hours = Int(interval) / 3600
-        let minutes = (Int(interval) % 3600) / 60
-        if hours > 0 { return "\(hours)h\(minutes)m" }
-        return "\(minutes)m"
-    }
 }
 
-// MARK: - Session Brand Colors
-
-/// Canonical per-agent brand colors. Mirrors `D200hHidModule.agentBrandColor`
-/// and `SessionListPanel.agentIconView` — keep these three in sync if any
-/// agent brand color shifts. Creature SVG assets are authored as
-/// `currentColor` silhouettes, so the tint applied here is what the user
-/// actually sees.
-enum SessionBrand {
-    static func color(for agentType: String?) -> Color {
-        switch agentType {
-        case "claude-code": return Color(red: 0.753, green: 0.439, blue: 0.345) // #C07058
-        case "codex-cli":   return Color(red: 0.38,  green: 0.40,  blue: 0.88)  // indigo
-        case "openclaw":    return Color(red: 1.0,   green: 0.30,  blue: 0.30)  // #FF4D4D
-        case "opencode":    return Color(red: 0.945, green: 0.925, blue: 0.925) // near-white
-        case "daemon":      return Color(red: 0.55,  green: 0.55,  blue: 0.60)
-        default:            return Color.secondary
-        }
-    }
-}
-
-// MARK: - Session Creature Icon
-
-/// Renders an agent's branded creature from the app's asset catalog in its
-/// brand color. Falls back to a generic SF Symbol when the agent type is
-/// unknown so the layout never collapses on new agents.
-private struct SessionCreatureIcon: View {
-    let agentType: String?
-    let tint: Color
-    let size: CGFloat
-
-    var body: some View {
-        Group {
-            if let asset = Self.assetName(for: agentType) {
-                Image(asset)
-                    .resizable()
-                    .renderingMode(.template)
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-            } else {
-                Image(systemName: "questionmark.circle")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-            }
-        }
-        .frame(width: size, height: size)
-        .foregroundStyle(tint)
-        .accessibilityLabel(Self.accessibilityLabel(for: agentType))
-    }
-
-    private static func assetName(for type: String?) -> String? {
-        switch type {
-        case "claude-code": return "CreatureClaudeCode"
-        case "openclaw":    return "CreatureOpenClaw"
-        case "codex-cli":   return "CreatureCodex"
-        case "opencode":    return "CreatureOpenCode"
-        default:            return nil
-        }
-    }
-
-    private static func accessibilityLabel(for type: String?) -> String {
-        switch type {
-        case "claude-code": return "Claude Code session"
-        case "openclaw":    return "OpenClaw session"
-        case "codex-cli":   return "Codex session"
-        case "opencode":    return "OpenCode session"
-        case "daemon":      return "Daemon"
-        default:            return "Unknown agent session"
-        }
-    }
-}
-
-// MARK: - Section Container
-
-private struct SectionContainer<Content: View>: View {
-    let title: String
-    let titleColor: Color
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(titleColor)
-            content
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-}
+// `SessionBrand` and `SessionCreatureIcon` live in `UI/Common/SessionBrand.swift`
+// so the cross-platform dashboard HUD can reuse them.
 
 /// Lightweight detection struct for Stream Deck companion status.
 ///

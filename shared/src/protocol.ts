@@ -153,7 +153,7 @@ export interface StateUpdateEvent {
   /** OpenClaw Gateway has doctor warnings/errors */
   gatewayHasError?: boolean;
   /** OpenClaw Gateway auth/pairing state */
-  gatewayAuthStatus?: 'gateway_not_found' | 'gateway_reachable' | 'pairing_required' | 'approval_pending' | 'connected' | 'auth_failed' | 'token_mismatch' | 'device_auth_invalid' | 'unsupported_protocol';
+  gatewayAuthStatus?: 'gateway_not_found' | 'gateway_reachable' | 'gateway_token_missing' | 'pairing_required' | 'approval_pending' | 'connected' | 'auth_failed' | 'token_mismatch' | 'device_auth_invalid' | 'unsupported_protocol';
   /** OpenClaw device pairing request id, when Gateway requires approval */
   gatewayAuthRequestId?: string;
   /** Human-readable OpenClaw auth/pairing diagnostic */

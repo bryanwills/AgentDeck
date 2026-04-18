@@ -24,6 +24,11 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
     }
 
     func start() async {
+        #if AGENTDECK_APP_STORE
+        lastError = "ADB disabled in App Store build"
+        DaemonLogger.shared.debug("ADB", "disabled in App Store build")
+        return
+        #else
         guard adbAvailable() else {
             lastError = "adb not found"
             DaemonLogger.shared.debug("ADB", "adb not found in PATH, skipping")
@@ -41,6 +46,7 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
         }
 
         DaemonLogger.shared.info("ADB module started (port \(daemonPort))")
+        #endif
     }
 
     func stop() async {
@@ -53,12 +59,22 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
     }
 
     func statusSnapshot() -> [String: Any] {
+        #if AGENTDECK_APP_STORE
+        return [
+            "available": false,
+            "disabled": true,
+            "devices": [] as [String],
+            "reverseReadyCount": 0,
+            "lastError": lastError ?? "ADB disabled in App Store build",
+        ]
+        #else
         [
             "available": adbAvailable(),
             "devices": lastKnownDevices,
             "reverseReadyCount": reverseReadyCount,
             "lastError": lastError as Any,
         ]
+        #endif
     }
 
     // MARK: - ADB Reverse
@@ -127,6 +143,11 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
     /// Search common locations for adb binary (GUI apps have restricted PATH).
     /// Prioritizes bundled adb in Contents/Helpers/ for App Sandbox compatibility.
     private static func findAdb() -> String? {
+        #if AGENTDECK_APP_STORE
+        // App Store builds do not discover or execute external adb binaries.
+        // Android reverse tunneling is a CLI/Homebrew feature.
+        return nil
+        #else
         // 1. Bundled adb (copied by copy-adb.sh build script) — Sandbox-safe
         let bundledPath = Bundle.main.bundlePath + "/Contents/Helpers/adb"
         if FileManager.default.isExecutableFile(atPath: bundledPath) {
@@ -152,12 +173,6 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
             }
         }
         DaemonLogger.shared.debug("ADB", "adb not found — checked bundled path and \(candidates.count) external paths")
-        #if AGENTDECK_APP_STORE
-        // App Store build: no `/usr/bin/env which adb` fallback (Apple 2.5.2
-        // forbids spawning interpreters). Android integration is already
-        // graceful-disabled by the callers when `adbPath` is nil.
-        return nil
-        #else
         // Fallback: try which via shell (works from terminal, not GUI)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")

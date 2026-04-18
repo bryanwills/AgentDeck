@@ -6,6 +6,60 @@ import Foundation
 import CryptoKit
 import Security
 
+#if AGENTDECK_APP_STORE
+enum OpenClawGatewayTokenStore {
+    private static let service = "bound.serendipity.agentdeck.dashboard.openclaw.gateway-token"
+    private static let account = "default"
+
+    static func loadToken() -> String? {
+        var query = keychainQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess, let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+    }
+
+    static func saveToken(_ token: String) throws {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try deleteToken()
+            return
+        }
+        let data = Data(trimmed.utf8)
+        let query = keychainQuery()
+        SecItemDelete(query as CFDictionary)
+        var attributes = query
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(addStatus), userInfo: nil)
+        }
+    }
+
+    static func deleteToken() throws {
+        let status = SecItemDelete(keychainQuery() as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: nil)
+        }
+    }
+
+    private static func keychainQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+    }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
+}
+#endif
+
 /// Connects to OpenClaw Gateway via WebSocket, handles Ed25519 auth handshake,
 /// and relays events to the daemon.
 actor OpenClawAdapter {
@@ -58,7 +112,7 @@ actor OpenClawAdapter {
     private var pendingMethods: [String: PendingRPC] = [:]
     private var deviceIdentity: DeviceIdentity?
     private var deviceAuthToken: DeviceAuthToken?
-    private let clientId = "agentdeck-dashboard"
+    private let clientId = "gateway-client"
     private let clientDisplayName = "AgentDeck Dashboard"
     private let clientMode = "backend"
     private let clientPlatform = "darwin"
@@ -82,7 +136,6 @@ actor OpenClawAdapter {
         isStopping = false
         pairingRequired = false
         loadDeviceIdentity()
-        Task { await emitModelCatalog() }
         connect()
     }
 
@@ -653,13 +706,22 @@ actor OpenClawAdapter {
 
         if let device = buildDeviceAuth(nonce: nonce, requestScopes: scopes) {
             params["device"] = device
-            if let authToken = deviceAuthToken?.token, !authToken.isEmpty {
-                #if AGENTDECK_APP_STORE
-                params["auth"] = ["deviceToken": authToken]
-                #else
-                params["auth"] = ["token": authToken]
-                #endif
+            #if AGENTDECK_APP_STORE
+            var auth: [String: Any] = [:]
+            if let gatewayToken = OpenClawGatewayTokenStore.loadToken(), !gatewayToken.isEmpty {
+                auth["token"] = gatewayToken
             }
+            if let deviceToken = deviceAuthToken?.token, !deviceToken.isEmpty {
+                auth["deviceToken"] = deviceToken
+            }
+            if !auth.isEmpty {
+                params["auth"] = auth
+            }
+            #else
+            if let authToken = deviceAuthToken?.token, !authToken.isEmpty {
+                params["auth"] = ["token": authToken]
+            }
+            #endif
         }
 
         sendRPC(method: "connect", params: params)
@@ -801,6 +863,9 @@ actor OpenClawAdapter {
         }
         if detailCode.contains("TOKEN_MISMATCH") {
             return ("token_mismatch", requestId, message)
+        }
+        if detailCode.contains("TOKEN_MISSING") || (message ?? "").localizedCaseInsensitiveContains("gateway token missing") {
+            return ("gateway_token_missing", requestId, message)
         }
         if detailCode.contains("DEVICE_AUTH") {
             return ("device_auth_invalid", requestId, message)

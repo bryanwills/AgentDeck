@@ -11,6 +11,57 @@
 
 import SwiftUI
 
+// MARK: - Pixoo 64
+
+struct Pixoo64Preview: View {
+    let selection: DevicePreviewSelection
+
+    var body: some View {
+        VStack(spacing: 12) {
+            DeviceBezel(cornerRadius: 16, bezelWidth: 12, bezelColor: Color(white: 0.12)) {
+                let config = PixooPreviewConfig(
+                    agent: selection.agent,
+                    state: selection.state,
+                    sessionCount: selection.sessionCount,
+                    fiveHourPercent: nil,
+                    gatewayAvailable: false
+                )
+                PixooPreview.previewImage(config)
+                    .resizable()
+                    .interpolation(.none)
+                    .aspectRatio(1, contentMode: .fill)
+                    .frame(width: 320, height: 320)
+                    .cornerRadius(4)
+                    .overlay(
+                        // Faint pixel grid to evoke the LED look
+                        GeometryReader { geo in
+                            Path { p in
+                                let stepXY = geo.size.width / 64
+                                for i in 0...64 {
+                                    let pos = CGFloat(i) * stepXY
+                                    p.move(to: CGPoint(x: pos, y: 0))
+                                    p.addLine(to: CGPoint(x: pos, y: geo.size.height))
+                                    p.move(to: CGPoint(x: 0, y: pos))
+                                    p.addLine(to: CGPoint(x: geo.size.width, y: pos))
+                                }
+                            }
+                            .stroke(Color.black.opacity(0.35), lineWidth: 0.3)
+                        }
+                    )
+            }
+            .frame(width: 380, height: 380)
+            
+            Text("Pixoo 64 • 64×64 LED Matrix")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Text("Renderer uses exact pixel-art coordinate generation.")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+    }
+}
+
 // MARK: - Ulanzi matrix
 
 struct UlanziMatrixPreview: View {

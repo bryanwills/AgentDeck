@@ -63,6 +63,10 @@ struct MonitorScreen: View {
                     hudLayer(geo: geo)
                 }
 
+                attentionTheaterLayer(geo: geo)
+
+                setupNeededLayer(geo: geo)
+
                 settingsLayer
 
                 toastLayer(geo: geo)
@@ -111,6 +115,108 @@ struct MonitorScreen: View {
                     .frame(height: geo.size.height * sandFraction)
             }
         }
+    }
+
+    /// Floating attention theater — mirrors the menubar's Option D hero card
+    /// but in terrarium palette. When any session awaits input we pin it to
+    /// top-center of the canvas (landscape) / top (portrait) so the user can
+    /// answer without opening the menubar or digging through the session
+    /// list. Respects the bridge-disconnected case: if the overlay is
+    /// showing we suppress it (ConnectionOverlay owns the screen).
+    @ViewBuilder
+    private func attentionTheaterLayer(geo: GeometryProxy) -> some View {
+        if stateHolder.state.bridgeConnected,
+           let featured = featuredAwaitingSession {
+            let awaiting = attentionSessions
+            let queued = max(0, awaiting.count - 1)
+            let landscape = geo.size.width > geo.size.height
+            VStack {
+                AttentionTheaterHUD(
+                    session: featured,
+                    question: questionFor(featured),
+                    queuedCount: queued,
+                    respond: { index in respondToAwaiting(index, session: featured) },
+                    onFocus: { stateHolder.sendCommand(.focusSession(sessionId: featured.id)) }
+                )
+                .frame(maxWidth: landscape ? 460 : .infinity)
+                .padding(.horizontal, landscape ? 0 : 12)
+                .padding(.top, landscape ? 14 : 10)
+                Spacer()
+            }
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .animation(.easeInOut(duration: 0.25), value: featured.id)
+            .allowsHitTesting(true)
+        }
+    }
+
+    /// Surface a compact "needs setup" card at the bottom-leading of the
+    /// monitor when one of the optional integrations (Claude quota, OpenClaw
+    /// Gateway auth, hook consent) isn't wired up. The card gives the user
+    /// a single tap into Settings instead of leaving them to infer from
+    /// creature behavior that something is wrong. Suppressed when the
+    /// bridge itself is disconnected (ConnectionOverlay owns the screen)
+    /// and when nothing needs setup (steady state stays clean).
+    @ViewBuilder
+    private func setupNeededLayer(geo: GeometryProxy) -> some View {
+        if stateHolder.state.bridgeConnected {
+            let items = stateHolder.setupNeededItems(preferences: preferences)
+            if !items.isEmpty {
+                VStack {
+                    Spacer()
+                    HStack {
+                        SetupNeededCard(items: items, onOpenSettings: openSettings)
+                            .padding(.leading, 14)
+                            .padding(.bottom, preferences.showTimeline
+                                     ? geo.size.height * sandFraction + 14
+                                     : 18)
+                        Spacer()
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .animation(.easeInOut(duration: 0.25), value: items.count)
+            }
+        }
+    }
+
+    /// Sessions currently waiting for user input, sorted by `sessionRank`.
+    private var attentionSessions: [SessionInfo] {
+        stateHolder.state.siblingSessions
+            .filter { $0.alive }
+            .filter {
+                let s = AgentConnectionState(rawValue: $0.state ?? "idle") ?? .idle
+                return s.isAwaiting
+            }
+            .sorted { ($0.projectName ?? "") < ($1.projectName ?? "") }
+    }
+
+    /// Which awaiting session to feature: prefer the currently-focused one
+    /// (so the user's active context wins), then fall back to sort order.
+    private var featuredAwaitingSession: SessionInfo? {
+        if let focusedId = stateHolder.state.sessionId,
+           let focused = attentionSessions.first(where: { $0.id == focusedId }) {
+            return focused
+        }
+        return attentionSessions.first
+    }
+
+    /// Question text for the featured session. Only the focused session has
+    /// a live prompt (bridge streams one at a time), so for non-focused
+    /// awaiting sessions we return nil and the card just shows the
+    /// "needs attention" label without a specific question.
+    private func questionFor(_ session: SessionInfo) -> String? {
+        if session.id == stateHolder.state.sessionId {
+            return stateHolder.state.question
+        }
+        return nil
+    }
+
+    /// Dispatch a YES/NO/ALWAYS response to the featured session via the
+    /// canonical `select_option` path. `focusSession` first so the daemon
+    /// focus relay routes the response correctly when there are multiple
+    /// awaiting sessions.
+    private func respondToAwaiting(_ index: Int, session: SessionInfo) {
+        stateHolder.sendCommand(.focusSession(sessionId: session.id))
+        stateHolder.sendCommand(.selectOption(index: index))
     }
 
     @ViewBuilder
@@ -221,7 +327,7 @@ private struct StateChangeModifier: ViewModifier {
             .onChange(of: siblingStatesKey) {
                 updateTerrariumState()
             }
-            .onChange(of: stateHolder.state.gatewayAvailable) {
+            .onChange(of: stateHolder.state.gatewayConnected) {
                 updateTerrariumState()
             }
             .onChange(of: stateHolder.state.gatewayHasError) {

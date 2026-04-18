@@ -18,7 +18,8 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 APPLE_DIR="$PROJECT_DIR/apple"
 DIST_DIR="$PROJECT_DIR/dist"
 PROJECT="$APPLE_DIR/AgentDeck.xcodeproj"
-EXPORT_PLIST="$APPLE_DIR/ExportOptions.plist"
+IOS_EXPORT_PLIST="$APPLE_DIR/ExportOptions.plist"
+MACOS_EXPORT_PLIST="$APPLE_DIR/ExportOptions-macOS.plist"
 
 # Parse version from project.yml
 VERSION=$(grep 'MARKETING_VERSION' "$APPLE_DIR/project.yml" | head -1 | sed 's/.*: *"\(.*\)"/\1/')
@@ -50,7 +51,7 @@ build_ios() {
 
     xcodebuild -exportArchive \
         -archivePath "$ARCHIVE_PATH" \
-        -exportOptionsPlist "$EXPORT_PLIST" \
+        -exportOptionsPlist "$IOS_EXPORT_PLIST" \
         -exportPath "$EXPORT_PATH" \
         -allowProvisioningUpdates \
         | tail -5
@@ -88,7 +89,7 @@ build_macos() {
 
     xcodebuild -exportArchive \
         -archivePath "$ARCHIVE_PATH" \
-        -exportOptionsPlist "$EXPORT_PLIST" \
+        -exportOptionsPlist "$MACOS_EXPORT_PLIST" \
         -exportPath "$EXPORT_PATH" \
         -allowProvisioningUpdates \
         | tail -5
