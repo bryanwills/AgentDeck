@@ -646,6 +646,24 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     { label: 'CLEAR', action: '/clear' },
   ];
 
+  // ===== Internal WS: push state to daemon =====
+  // Port-drift resilient: portProvider is re-invoked on every (re)connect,
+  // so the client follows daemon restarts onto fallback ports and the case
+  // where the session bridge starts before the daemon is up.
+  const daemonPortProvider = (): number | null => {
+    const p = findDaemonPort();
+    return p != null && p !== core.port ? p : null;
+  };
+  const daemonWsClient = new DaemonWsClient(
+    core.sessionId,
+    core.port,
+    agentType,
+    core.projectName,
+    daemonPortProvider,
+  );
+  daemonWsClient.connect(daemonPortProvider());
+  core.onShutdown(() => { daemonWsClient.close(); });
+
   // ===== State changed → broadcast =====
   core.stateMachine.on('state_changed', (snapshot: StateSnapshot) => {
     postit?.update(snapshot);
@@ -709,7 +727,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     core.broadcastUsage();
 
     // Push state to daemon via internal WS
-    daemonWsClient?.pushState(snapshot.state, snapshot.modelName ?? undefined);
+    daemonWsClient.pushState(snapshot.state, snapshot.modelName ?? undefined);
 
     // Encoder + button state
     const encEvt = computeEncoderState();
@@ -826,19 +844,6 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     tty: adapter.getTtyPath(),
   });
 
-  // ===== Internal WS: push state to daemon =====
-  let daemonWsClient: DaemonWsClient | null = null;
-  const daemonPort = findDaemonPort();
-  if (daemonPort && daemonPort !== core.port) {
-    daemonWsClient = new DaemonWsClient(
-      core.sessionId,
-      core.port,
-      agentType,
-      core.projectName,
-    );
-    daemonWsClient.connect(daemonPort);
-    core.onShutdown(() => { daemonWsClient?.close(); });
-  }
 
   // ===== Client connect =====
   core.wsServer.onClientConnect((ws) => {

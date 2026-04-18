@@ -48,13 +48,28 @@ export class DaemonWsClient {
     private readonly sessionPort: number,
     private readonly agentType?: string,
     private readonly projectName?: string,
+    /**
+     * Resolves the current daemon port on each (re)connect attempt. Lets the
+     * client follow port drift (daemon restart onto a fallback port) and cover
+     * the case where the daemon is not up yet when the session bridge starts.
+     * Return `null` to defer — the client will keep retrying on backoff.
+     */
+    private readonly portProvider?: () => number | null,
   ) {}
 
-  /** Connect to daemon WS and send registration */
-  connect(daemonPort: number): void {
+  /**
+   * Start the connection loop. If `daemonPort` is null and a `portProvider`
+   * was supplied, the client waits on backoff until the provider yields a
+   * port (daemon catches up on a later launch).
+   */
+  connect(daemonPort: number | null): void {
     if (this.closed) return;
-    this.daemonPort = daemonPort;
-    this.doConnect();
+    if (daemonPort != null) {
+      this.daemonPort = daemonPort;
+      this.doConnect();
+    } else {
+      this.scheduleReconnect();
+    }
   }
 
   /** Push state update to daemon */
@@ -93,7 +108,18 @@ export class DaemonWsClient {
   // ---- Internals ----
 
   private doConnect(): void {
-    if (this.closed || !this.daemonPort) return;
+    if (this.closed) return;
+    if (this.portProvider) {
+      const resolved = this.portProvider();
+      if (resolved != null && resolved !== this.daemonPort) {
+        debug(TAG, `Daemon port resolved ${this.daemonPort ?? 'null'} → ${resolved}`);
+        this.daemonPort = resolved;
+      }
+    }
+    if (!this.daemonPort) {
+      this.scheduleReconnect();
+      return;
+    }
     if (this.ws) {
       this.ws.removeAllListeners();
       this.ws.close();
