@@ -1,7 +1,12 @@
 #if os(macOS)
 // DaemonVoiceAssistant.swift — Voice assistant pipeline
-// Ported from bridge/src/voice-assistant.ts + bridge/src/voice.ts
-// AVAudioEngine recording, whisper transcription, AVSpeechSynthesizer TTS
+//
+// Pipeline: AVAudioEngine capture → SFSpeechRecognizer on-device transcription
+// → agent prompt → AVSpeechSynthesizer TTS response. All first-party Apple
+// frameworks; no bundled whisper runtime, no whisper.cpp server dependency,
+// no subprocess spawn. This keeps the App Store build zero-setup for voice
+// input and removes the cross-build `#if AGENTDECK_APP_STORE` guards the
+// whisper-CLI fallback used to require.
 
 import Foundation
 import AVFoundation
@@ -34,8 +39,21 @@ final class DaemonVoiceAssistant {
     private var silenceTimer: Task<Void, Never>?
     private var lastSoundTime: Date = .now
 
-    // Whisper
-    private let whisperServerPort = 9100
+    // Speech recognition — Apple's on-device engine. We request authorization
+    // once on first launch; if the user denies, transcription returns nil and
+    // the dashboard surfaces the failure so they can re-grant in Settings.
+    private lazy var speechRecognizer: SFSpeechRecognizer? = {
+        let preferredLocales = [
+            Locale.current,
+            Locale(identifier: "en_US"),
+        ]
+        for locale in preferredLocales {
+            if let r = SFSpeechRecognizer(locale: locale), r.isAvailable {
+                return r
+            }
+        }
+        return SFSpeechRecognizer()
+    }()
 
     // MARK: - Lifecycle
 
@@ -51,6 +69,15 @@ final class DaemonVoiceAssistant {
             state = .disabled
             onStateChanged?(.disabled, nil, nil)
             return false
+        }
+
+        // Request speech recognition auth up front. The first call triggers a
+        // system TCC prompt backed by `NSSpeechRecognitionUsageDescription` in
+        // Info.plist; subsequent calls hit the cached decision. We don't block
+        // voice assistant readiness on this — the user can still record, and
+        // `transcribe()` reports a helpful failure if the auth ends up denied.
+        if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+            SFSpeechRecognizer.requestAuthorization { _ in }
         }
 
         state = .idle
@@ -179,13 +206,7 @@ final class DaemonVoiceAssistant {
                 return
             }
 
-            // Try whisper-server first, then whisper CLI
-            let text: String?
-            if let result = await transcribeViaServer(url) {
-                text = result
-            } else {
-                text = await transcribeViaCLI(url)
-            }
+            let text = await transcribe(url)
 
             // Cleanup recording
             try? FileManager.default.removeItem(at: url)
@@ -206,87 +227,60 @@ final class DaemonVoiceAssistant {
         }
     }
 
-    private func transcribeViaServer(_ url: URL) async -> String? {
-        // Check if whisper-server is running
-        let serverURL = URL(string: "http://127.0.0.1:\(whisperServerPort)/inference")!
-        var request = URLRequest(url: serverURL)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 30
+    /// Transcribe a recorded WAV via Apple's `SFSpeechRecognizer`. On-device
+    /// mode is requested so the recording never leaves the machine — matches
+    /// the old whisper-server + whisper-cli privacy guarantee and removes the
+    /// "whisper.cpp setup" user burden.
+    ///
+    /// Failure modes:
+    /// - Permission denied → returns nil. Caller shows "speech recognition
+    ///   not authorized" UI; user re-grants in System Settings.
+    /// - Recognizer unavailable (OS hasn't finished its dictation model
+    ///   download) → returns nil. Retry after a short delay usually works.
+    /// - Empty audio → returns nil (trimmed recording is < silenceThreshold).
+    private func transcribe(_ url: URL) async -> String? {
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
+            DaemonLogger.shared.debug("Voice", "Speech recognition not authorized")
+            return nil
+        }
+        guard let recognizer = speechRecognizer, recognizer.isAvailable else {
+            DaemonLogger.shared.debug("Voice", "Speech recognizer unavailable — on-device model may still be downloading")
+            return nil
+        }
 
-        // Build multipart form data
-        let boundary = UUID().uuidString
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        let request = SFSpeechURLRecognitionRequest(url: url)
+        request.shouldReportPartialResults = false
+        // On-device keeps audio local — critical because the captured WAV
+        // frequently contains project/code names the user wouldn't want
+        // routed to Apple's speech servers. macOS 13+ / iOS 13+ support
+        // `requiresOnDeviceRecognition`; older OS falls back to the default.
+        if #available(macOS 13.0, iOS 13.0, *) {
+            request.requiresOnDeviceRecognition = true
+        }
+        // `dictation` task hint tells the engine we expect natural-language
+        // prose rather than short keyword commands — better fit for prompts
+        // like "run the tests in the auth module".
+        request.taskHint = .dictation
 
-        var body = Data()
-        let fileData = try? Data(contentsOf: url)
-        guard let fileData else { return nil }
-
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
-        body.append(fileData)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        request.httpBody = body
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let text = json["text"] as? String {
-                return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return await withCheckedContinuation { continuation in
+            var resumed = false
+            let safeResume: (String?) -> Void = { text in
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: text)
             }
-            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            return nil
+            _ = recognizer.recognitionTask(with: request) { result, error in
+                if let error {
+                    DaemonLogger.shared.debug("Voice", "SFSpeech error: \(error.localizedDescription)")
+                    safeResume(nil)
+                    return
+                }
+                guard let result, result.isFinal else { return }
+                let text = result.bestTranscription.formattedString
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                safeResume(text.isEmpty ? nil : text)
+            }
         }
-    }
-
-    private func transcribeViaCLI(_ url: URL) async -> String? {
-        #if AGENTDECK_APP_STORE
-        // App Store build: spawning `whisper-cli` (or any external binary)
-        // violates Apple 2.5.2. The built-in `transcribeViaWhisperServer`
-        // HTTP path handles transcription instead when configured.
-        _ = url
-        return nil
-        #else
-        // Find whisper-cli
-        let candidates = ["/usr/local/bin/whisper-cli", "/opt/homebrew/bin/whisper-cli"]
-        guard let whisperPath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            DaemonLogger.shared.debug("Voice", "whisper-cli not found")
-            return nil
-        }
-
-        // Find model
-        let modelDirs = [
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/whisper.cpp").path,
-            "/usr/local/share/whisper.cpp/models",
-        ]
-        var modelPath: String?
-        for dir in modelDirs {
-            let path = "\(dir)/ggml-base.bin"
-            if FileManager.default.fileExists(atPath: path) { modelPath = path; break }
-        }
-        guard let modelPath else {
-            DaemonLogger.shared.debug("Voice", "No whisper model found")
-            return nil
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: whisperPath)
-        process.arguments = ["-m", modelPath, "-f", url.path, "--no-timestamps", "-l", "auto"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            return output.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            return nil
-        }
-        #endif
     }
 
     // MARK: - TTS

@@ -39,6 +39,8 @@
 	<string>AgentDeck discovers and connects to local bridge servers on your network.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>AgentDeck needs microphone access for voice commands to your AI coding agent.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>AgentDeck transcribes your voice commands locally using Apple's on-device speech recognition so your audio never leaves this device.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

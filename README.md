@@ -88,7 +88,7 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 - [ESP32 Reference](docs/esp32.md) — firmware boards, flash safety, WiFi provisioning, disconnect recovery
 - [Device Reference](docs/devices.md) — dashboard device types, transport protocols, broadcast architecture
 - [Protocol](docs/protocol.md) — state machine, WebSocket messages, project structure
-- [Voice Setup](docs/voice-setup.md) — sox, whisper.cpp install, model selection
+- [Voice Setup](docs/voice-setup.md) — microphone + speech-recognition permissions (Apple on-device SFSpeech — no install needed)
 - [Wake Word Detection](docs/wake-word.md) — Porcupine (Mac) + microWakeWord (ESP32) setup
 - [Testing Guide](docs/testing.md) — test structure, coverage, CI pipeline, writing tests
 - [Why APME — 감에서 데이터로](docs/why-apme.md) — motivation, category-aware evaluation strategy, composite score design
@@ -106,8 +106,8 @@ A **control surface** — like an audio mixing console, but for AI coding agents
 - **Interrupt** — STOP button sends Ctrl+C to a runaway agent
 - **Switch modes** — cycle Plan / Accept Edits / Default
 - **Navigate options** — encoder scrolls and selects multi-choice prompts on a wide-canvas LCD
-- **Voice input** — push-to-talk → whisper.cpp → auto-send (offline, <2s on M-series)
-- **Voice assistant** — wake word detection → whisper.cpp STT → LLM → TTS response (fully offline)
+- **Voice input** — push-to-talk → Apple SFSpeech (on-device) → auto-send (offline, zero setup)
+- **Voice assistant** — wake word detection → Apple SFSpeech STT → LLM → AVSpeech TTS response (fully offline)
 - **Display sync** — macOS sleep dims all connected surfaces; wake restores instantly
 - **Terminal postit** — agent state shown in iTerm2 tab titles and badges
 - **Monitor usage** — animated water-gauge dashboard with rate limit countdowns
@@ -175,7 +175,7 @@ Pixoo64 LED        ◄ HTTP ──►└─────────────�
                               ┌── Session Bridge (port 9121+) ──┐
 User's Terminal ◄─ stdio ───►│  PTY Manager → claude CLI         │
 Claude Code Hooks ─ HTTP ───►│  Output Parser → State Machine    │
-                              │  Hook Server + Voice (whisper)    │
+                              │  Hook Server + Voice (SFSpeech)   │
                               └──────────────────────────────────┘
 ```
 
@@ -200,8 +200,7 @@ On macOS, the AgentDeck Dashboard SwiftUI app ships with a full **in-process Swi
 | **Claude Code CLI** | Yes | `npm install -g @anthropic-ai/claude-code` |
 | **JDK 17+** | For Android | `brew install openjdk@17` |
 | **Stream Deck CLI** | Auto | Installed by `pnpm setup` if missing |
-| **sox** (audio capture) | For voice | See [Voice Setup](docs/voice-setup.md) |
-| **whisper.cpp** (transcription) | For voice | See [Voice Setup](docs/voice-setup.md) |
+| **Microphone + Speech Recognition** | For voice | Grant on first use (macOS Settings → Privacy). No sox, whisper, or model download — Apple SFSpeech on-device |
 
 ---
 
@@ -223,7 +222,7 @@ The `pnpm setup` command:
 5. Installs Claude Code hooks
 6. Links the Stream Deck plugin
 7. Links the `agentdeck` CLI globally
-8. Checks optional dependencies (sox, whisper.cpp)
+8. (Voice is built-in via Apple SFSpeech on-device — no extra install)
 
 After setup, **restart the Stream Deck app**, then run:
 
@@ -272,11 +271,11 @@ Creates a symlink in `~/Library/Application Support/com.elgato.StreamDeck/Plugin
 cd bridge && pnpm link --global
 ```
 
-### 4. Voice Setup (Optional)
+### 4. Voice Setup (Zero install)
 
-Voice input requires **sox** (audio capture) and **whisper.cpp** (local transcription). Apple Silicon users must use arm64 Homebrew (`/opt/homebrew/`) for Metal GPU acceleration.
+Voice input uses Apple's on-device `SFSpeechRecognizer` (Speech framework). **No sox, no whisper.cpp, no model downloads** — the OS manages the dictation model via Settings → General → Keyboard → Dictation, which AgentDeck piggybacks on. The only user action is granting Microphone + Speech Recognition permission the first time the voice button is pressed (macOS shows the standard TCC prompts backed by `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription`).
 
-See **[Voice Setup Guide](docs/voice-setup.md)** for full instructions including architecture verification, model selection, and troubleshooting.
+All audio stays on-device (`requiresOnDeviceRecognition = true`), so the captured WAV — which may contain project/code names — never leaves the machine. See [Voice Setup Guide](docs/voice-setup.md) for permission troubleshooting and wake-word details.
 
 ---
 
@@ -798,10 +797,7 @@ Edit `config/prompt-templates.json` to customize the prompts cycled by the **Act
 | State tracking not working | Hook server unreachable | Verify `agentdeck` is running |
 | Stream Deck buttons inactive | Hardware not connected | Reconnect + restart app |
 | Stuck in PROCESSING > 5 min | Agent stalled | STOP button or Ctrl+C in terminal |
-| "Is sox installed?" | sox missing | See [Voice Setup](docs/voice-setup.md) |
-| "Is whisper.cpp installed?" | whisper.cpp missing | See [Voice Setup](docs/voice-setup.md) |
-| Voice transcription very slow / timeout | x86 whisper-cli (no Metal GPU) | Install arm64 Homebrew + whisper-cpp. See [Voice Setup](docs/voice-setup.md) |
-| `whisper-cli: arm64=false, metal=false` | Using x86 binary through Rosetta | Install arm64 Homebrew at `/opt/homebrew/` |
+| Voice transcription returns empty | Speech recognition permission denied, or OS dictation model still downloading | macOS Settings → Privacy & Security → Speech Recognition → enable AgentDeck. First-time recognition may wait ~30s while the OS finishes the on-device model download |
 | Plugin not in Stream Deck app | Plugin not linked | Restart Stream Deck app, then `cd plugin && streamdeck link .sdPlugin` |
 | Hooks not firing | Hooks not installed or stale | `node hooks/dist/install.js` (re-installs all 7 hooks) |
 | Need to remove hooks | Uninstalling AgentDeck | `node hooks/dist/install.js uninstall` |

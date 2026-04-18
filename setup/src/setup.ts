@@ -50,6 +50,20 @@ function checkPrerequisites(): boolean {
     pass = false;
   }
 
+  // Xcode Command Line Tools — required because `npm install -g @agentdeck/bridge`
+  // below sets `npm_config_build_from_source=true` (see installBridge). Without
+  // CLT the node-pty source build fails with a cryptic compiler-missing error
+  // deep inside node-gyp. Catch it here with a clear message so the user
+  // knows the one command to run.
+  if (which('xcode-select') && checkXcodeCliTools()) {
+    ok('Xcode Command Line Tools installed');
+  } else {
+    fail('Xcode Command Line Tools not installed — required to build node-pty from source.');
+    console.log(`       Install with: ${YELLOW}xcode-select --install${NC}`);
+    console.log('       After the installer finishes, re-run `npx @agentdeck/setup`.');
+    pass = false;
+  }
+
   // Claude Code CLI
   if (which('claude')) {
     ok('Claude Code CLI found');
@@ -75,6 +89,23 @@ function checkPrerequisites(): boolean {
   }
 
   return pass;
+}
+
+/// Returns true when `xcode-select -p` reports a valid developer directory.
+/// On macOS without CLT installed the command exits non-zero and prints
+/// a system dialog prompting the user to install; we treat both as "missing".
+function checkXcodeCliTools(): boolean {
+  try {
+    const path = execSync('xcode-select -p', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    // `xcode-select -p` returns the dev dir path even if the user cancelled
+    // the install prompt — verify the path actually exists on disk.
+    return path.length > 0 && existsSync(path);
+  } catch {
+    return false;
+  }
 }
 
 // ─── 3. Stream Deck CLI ──────────────────────────────────────────────
