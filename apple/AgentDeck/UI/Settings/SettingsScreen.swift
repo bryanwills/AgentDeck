@@ -14,6 +14,9 @@ struct SettingsScreen: View {
     @State private var openClawGatewayTokenInput: String = ""
     @State private var openClawGatewayTokenSaved: Bool = false
     @State private var openClawGatewayTokenError: String?
+    @State private var anthropicAdminApiKeyInput: String = ""
+    @State private var anthropicAdminApiKeySaved: Bool = false
+    @State private var anthropicAdminApiKeyError: String?
     #if os(macOS)
     @State private var portInput: String = ""
     #endif
@@ -1026,6 +1029,151 @@ struct SettingsScreen: View {
         #endif
     }
 
+    // MARK: - Anthropic Admin API (org-wide token usage)
+
+    /// Optional: paste a Console Admin API key to surface org-wide token
+    /// consumption (today + last 30 days). This is the only sanctioned
+    /// third-party path for Anthropic usage in App Store builds —
+    /// subscription OAuth tokens were closed off by Anthropic's Feb 2026
+    /// policy update. Users on Pro/Max without an API key see the
+    /// Setup card direction to install the AgentDeck CLI instead.
+    private var anthropicAdminApiRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("Anthropic API Usage")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(anthropicAdminApiStatusLabel)
+                    .font(.system(size: 11))
+                    .foregroundStyle(anthropicAdminApiStatusColor)
+            }
+            Text("Optional. Paste an Admin API key from console.anthropic.com/settings/keys to track org-wide token consumption (today + last 30 days). This is API-usage billing, not Pro/Max subscription quota.")
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+            #if os(macOS) && AGENTDECK_APP_STORE
+            anthropicAdminApiEditor
+            #endif
+            if let usage = latestAdminApiUsageSummary {
+                Text(usage)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear { loadAnthropicAdminApiKeyState() }
+    }
+
+    private var anthropicAdminApiStatusLabel: String {
+        if anthropicAdminApiKeySaved { return "Connected" }
+        return "Not configured"
+    }
+
+    private var anthropicAdminApiStatusColor: Color {
+        anthropicAdminApiKeySaved ? .green : .secondary
+    }
+
+    private var latestAdminApiUsageSummary: String? {
+        guard anthropicAdminApiKeySaved else { return nil }
+        let todayIn = stateHolder.state.adminApiTodayInputTokens ?? 0
+        let todayOut = stateHolder.state.adminApiTodayOutputTokens ?? 0
+        let monthIn = stateHolder.state.adminApiMonthInputTokens ?? 0
+        let monthOut = stateHolder.state.adminApiMonthOutputTokens ?? 0
+        let todayTotal = todayIn + todayOut
+        let monthTotal = monthIn + monthOut
+        if todayTotal == 0 && monthTotal == 0 {
+            return "Awaiting first fetch (~5 min data delay from Anthropic)…"
+        }
+        return "Today: \(formatTokenCount(todayTotal)) · 30d: \(formatTokenCount(monthTotal))"
+    }
+
+    private func formatTokenCount(_ n: Int) -> String {
+        if n >= 1_000_000 {
+            return String(format: "%.1fM", Double(n) / 1_000_000)
+        } else if n >= 1_000 {
+            return String(format: "%.1fK", Double(n) / 1_000)
+        }
+        return "\(n)"
+    }
+
+    @ViewBuilder
+    private var anthropicAdminApiEditor: some View {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        VStack(alignment: .leading, spacing: 6) {
+            SecureField(
+                anthropicAdminApiKeySaved
+                    ? "Admin API key saved — paste to replace"
+                    : "sk-ant-admin01-… (Console Admin API key)",
+                text: $anthropicAdminApiKeyInput
+            )
+            .textFieldStyle(.roundedBorder)
+            HStack(spacing: 8) {
+                Button("Save key") {
+                    saveAnthropicAdminApiKey()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(anthropicAdminApiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("Clear") {
+                    clearAnthropicAdminApiKey()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!anthropicAdminApiKeySaved && anthropicAdminApiKeyInput.isEmpty)
+
+                if anthropicAdminApiKeySaved {
+                    Text("Saved in Keychain")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.green)
+                }
+            }
+            if let anthropicAdminApiKeyError {
+                Text(anthropicAdminApiKeyError)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+
+    private func loadAnthropicAdminApiKeyState() {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        anthropicAdminApiKeySaved = AnthropicAdminApiKeyStore.loadKey() != nil
+        anthropicAdminApiKeyError = nil
+        #endif
+    }
+
+    private func saveAnthropicAdminApiKey() {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        do {
+            try AnthropicAdminApiKeyStore.saveKey(anthropicAdminApiKeyInput)
+            anthropicAdminApiKeyInput = ""
+            anthropicAdminApiKeySaved = true
+            anthropicAdminApiKeyError = nil
+            Task { await daemonService.restart() }
+        } catch {
+            anthropicAdminApiKeyError = "Could not save key: \(error.localizedDescription)"
+        }
+        #endif
+    }
+
+    private func clearAnthropicAdminApiKey() {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        do {
+            try AnthropicAdminApiKeyStore.deleteKey()
+            anthropicAdminApiKeyInput = ""
+            anthropicAdminApiKeySaved = false
+            anthropicAdminApiKeyError = nil
+            Task { await daemonService.restart() }
+        } catch {
+            anthropicAdminApiKeyError = "Could not clear key: \(error.localizedDescription)"
+        }
+        #endif
+    }
+
     // MARK: - ADB / Android integration status row
 
     /// Android device bridging shells out to the `adb` binary, which App
@@ -1138,6 +1286,9 @@ struct SettingsScreen: View {
             Divider()
 
             openClawIntegrationRow
+            Divider()
+
+            anthropicAdminApiRow
             Divider()
 
             Text("Antigravity")

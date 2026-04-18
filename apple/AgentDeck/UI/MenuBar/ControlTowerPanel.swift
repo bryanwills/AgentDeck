@@ -54,6 +54,7 @@ struct ControlTowerPanel: View {
                     topologySection
                     utilityLinksRow
                     rateLimitsSection
+                    anthropicApiUsageSection
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -413,6 +414,99 @@ struct ControlTowerPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.top, 2)
+    }
+
+    // MARK: - Anthropic API usage (org-wide, via Admin API key)
+
+    /// Compact org-wide API usage section. Only rendered when the user
+    /// has pasted an Anthropic Console Admin API key in Settings —
+    /// subscription users see nothing here (their RATE LIMITS section
+    /// above handles their quota or redirects them to install the CLI).
+    /// Fetches are daemon-driven at 10 min cadence so this view just
+    /// reflects whatever is currently cached.
+    @ViewBuilder
+    private var anthropicApiUsageSection: some View {
+        if stateHolder.state.adminApiKeyPresent == true {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text("ANTHROPIC API")
+                        .font(.system(size: 10, weight: .bold))
+                        .kerning(0.5)
+                        .foregroundStyle(.secondary)
+                    if stateHolder.state.adminApiStale == true {
+                        Text("stale")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.orange)
+                    }
+                    Spacer()
+                }
+                let todayIn = stateHolder.state.adminApiTodayInputTokens ?? 0
+                let todayOut = stateHolder.state.adminApiTodayOutputTokens ?? 0
+                let todayCache = (stateHolder.state.adminApiTodayCacheReadTokens ?? 0)
+                    + (stateHolder.state.adminApiTodayCacheCreationTokens ?? 0)
+                let monthIn = stateHolder.state.adminApiMonthInputTokens ?? 0
+                let monthOut = stateHolder.state.adminApiMonthOutputTokens ?? 0
+                let monthCache = (stateHolder.state.adminApiMonthCacheReadTokens ?? 0)
+                    + (stateHolder.state.adminApiMonthCacheCreationTokens ?? 0)
+                if todayIn + todayOut + todayCache + monthIn + monthOut + monthCache == 0 {
+                    Text("Awaiting first fetch (~5 min Anthropic data delay)…")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                } else {
+                    apiUsageRow(label: "Today", input: todayIn, output: todayOut, cache: todayCache)
+                    apiUsageRow(label: "30d", input: monthIn, output: monthOut, cache: monthCache)
+                }
+                let topModels = stateHolder.state.adminApiTopModels.prefix(2)
+                if !topModels.isEmpty {
+                    Text("Top: " + topModels.map { shortModelLabel($0.model) }.joined(separator: " · "))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary.opacity(0.8))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+        }
+    }
+
+    private func apiUsageRow(label: String, input: Int, output: Int, cache: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .leading)
+            Text("in \(formatApiTokenCount(input))")
+                .font(.system(size: 10, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("out \(formatApiTokenCount(output))")
+                .font(.system(size: 10, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if cache > 0 {
+                Text("cache \(formatApiTokenCount(cache))")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func formatApiTokenCount(_ n: Int) -> String {
+        if n >= 1_000_000 {
+            return String(format: "%.1fM", Double(n) / 1_000_000)
+        } else if n >= 1_000 {
+            return String(format: "%.1fK", Double(n) / 1_000)
+        }
+        return "\(n)"
+    }
+
+    private func shortModelLabel(_ model: String) -> String {
+        var s = model
+        for prefix in ["claude-", "claude_"] {
+            if s.hasPrefix(prefix) { s = String(s.dropFirst(prefix.count)) }
+        }
+        if let range = s.range(of: #"-\d{8}$"#, options: .regularExpression) {
+            s = String(s[s.startIndex..<range.lowerBound])
+        }
+        return s
     }
 
     private func compactGauge(label: String, percent: Double, resetTime: String?) -> some View {

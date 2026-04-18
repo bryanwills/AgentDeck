@@ -150,6 +150,23 @@ struct DashboardState: Sendable {
     var subscriptions: [SubscriptionInfo] = []
     var antigravityStatus: AntigravityStatusInfo?
 
+    // Anthropic Admin API (optional — org-wide token usage when user
+    // pastes a Console Admin API key in Settings). Separate from
+    // `fiveHourPercent` / `sevenDayPercent` above (Pro/Max subscription
+    // quota) because API usage billing is a different metric tier.
+    var adminApiKeyPresent: Bool = false
+    var adminApiTodayInputTokens: Int?
+    var adminApiTodayOutputTokens: Int?
+    var adminApiTodayCacheReadTokens: Int?
+    var adminApiTodayCacheCreationTokens: Int?
+    var adminApiMonthInputTokens: Int?
+    var adminApiMonthOutputTokens: Int?
+    var adminApiMonthCacheReadTokens: Int?
+    var adminApiMonthCacheCreationTokens: Int?
+    var adminApiTopModels: [AdminApiModelUsage] = []
+    var adminApiFetchedAt: Double?
+    var adminApiStale: Bool?
+
     // Voice
     var voiceState: String?  // idle | recording | transcribing | error
     var voiceText: String?
@@ -169,6 +186,13 @@ struct DashboardState: Sendable {
     // Device module health (from daemon statusSnapshot aggregation)
     var moduleHealth: ModuleHealthState?
 
+}
+
+// MARK: - Anthropic Admin API
+
+struct AdminApiModelUsage: Sendable, Codable, Equatable {
+    let model: String
+    let totalTokens: Int
 }
 
 // MARK: - Module Health

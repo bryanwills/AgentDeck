@@ -720,6 +720,19 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.mlxModelCatalog = e.mlxModelCatalog ?? state.mlxModelCatalog
         state.subscriptions = e.subscriptions ?? state.subscriptions
         state.antigravityStatus = e.antigravityStatus ?? state.antigravityStatus
+
+        state.adminApiKeyPresent = e.adminApiKeyPresent ?? state.adminApiKeyPresent
+        state.adminApiTodayInputTokens = e.adminApiTodayInputTokens ?? state.adminApiTodayInputTokens
+        state.adminApiTodayOutputTokens = e.adminApiTodayOutputTokens ?? state.adminApiTodayOutputTokens
+        state.adminApiTodayCacheReadTokens = e.adminApiTodayCacheReadTokens ?? state.adminApiTodayCacheReadTokens
+        state.adminApiTodayCacheCreationTokens = e.adminApiTodayCacheCreationTokens ?? state.adminApiTodayCacheCreationTokens
+        state.adminApiMonthInputTokens = e.adminApiMonthInputTokens ?? state.adminApiMonthInputTokens
+        state.adminApiMonthOutputTokens = e.adminApiMonthOutputTokens ?? state.adminApiMonthOutputTokens
+        state.adminApiMonthCacheReadTokens = e.adminApiMonthCacheReadTokens ?? state.adminApiMonthCacheReadTokens
+        state.adminApiMonthCacheCreationTokens = e.adminApiMonthCacheCreationTokens ?? state.adminApiMonthCacheCreationTokens
+        state.adminApiTopModels = e.adminApiTopModels ?? state.adminApiTopModels
+        state.adminApiFetchedAt = e.adminApiFetchedAt ?? state.adminApiFetchedAt
+        state.adminApiStale = e.adminApiStale ?? state.adminApiStale
     }
 
     // MARK: - Connection

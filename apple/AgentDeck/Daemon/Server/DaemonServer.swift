@@ -113,6 +113,15 @@ final class DaemonServer {
     private var lastApiFetchTime: Date = .distantPast
     private static let usageStaleTTL: TimeInterval = 600  // 10 minutes
     private var apiUsageStale = false
+
+    // Anthropic Admin API (Console) usage — independent from subscription
+    // OAuth path above. User pastes an admin API key in Settings and the
+    // daemon polls `/v1/organizations/usage_report/messages` for today +
+    // last 30 days. Cache 10 min TTL, identical stale semantics.
+    private var cachedAdminApiUsage: AnthropicAdminUsage?
+    private var lastAdminApiFetchTime: Date = .distantPast
+    private var adminApiPollTask: Task<Void, Never>?
+    private static let adminApiPollInterval: TimeInterval = 600  // 10 minutes
     /// True when cachedApiUsage was synced from relay's already-adjusted values
     private var apiUsagePreAdjusted = false
     private var oauthConnected = false
@@ -1699,6 +1708,24 @@ final class DaemonServer {
             }
         }
 
+        // Anthropic Admin API — 10 min. Independent from the subscription
+        // usage poll above. Skipped entirely when the user hasn't pasted
+        // an admin API key (common case for subscription users).
+        adminApiPollTask = Task { [weak self] in
+            // Initial kick right after startup so Settings preview shows
+            // something without waiting the full interval.
+            if AnthropicAdminApiClient.shared.hasKey() {
+                await self?.refreshAdminApiUsage()
+            }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Self.adminApiPollInterval))
+                guard let self else { break }
+                guard AnthropicAdminApiClient.shared.hasKey() else { continue }
+                guard await self.wsServer.hasClients() else { continue }
+                await self.refreshAdminApiUsage()
+            }
+        }
+
         // Ollama — dynamic interval (5s base, exponential backoff up to 5m
         // when the service is absent). See probeOllama() for the backoff
         // state machine.
@@ -2160,6 +2187,22 @@ final class DaemonServer {
         return e
     }
 
+    /// Refresh cached Anthropic Console Admin API usage. No-op when
+    /// no key is configured. On failure the previous cached value is
+    /// flagged stale so the UI can show "last known" values.
+    @MainActor
+    private func refreshAdminApiUsage() async {
+        guard AnthropicAdminApiClient.shared.hasKey() else { return }
+        if let fresh = await AnthropicAdminApiClient.shared.fetchUsage() {
+            cachedAdminApiUsage = fresh
+            lastAdminApiFetchTime = Date()
+        } else if var stale = cachedAdminApiUsage {
+            stale.stale = true
+            cachedAdminApiUsage = stale
+        }
+        broadcastUsage()
+    }
+
     private func buildModuleHealthSync() -> [String: Any] {
         var modules: [String: Any] = [:]
         if let adb = adbModule { modules["adb"] = adb.statusSnapshot() }
@@ -2225,6 +2268,24 @@ final class DaemonServer {
         }
         let subscriptions = buildSubscriptions()
         if !subscriptions.isEmpty { e["subscriptions"] = subscriptions }
+
+        e["adminApiKeyPresent"] = AnthropicAdminApiClient.shared.hasKey()
+        if let admin = cachedAdminApiUsage {
+            e["adminApiTodayInputTokens"] = admin.today.input
+            e["adminApiTodayOutputTokens"] = admin.today.output
+            e["adminApiTodayCacheReadTokens"] = admin.today.cacheRead
+            e["adminApiTodayCacheCreationTokens"] = admin.today.cacheCreation
+            e["adminApiMonthInputTokens"] = admin.month.input
+            e["adminApiMonthOutputTokens"] = admin.month.output
+            e["adminApiMonthCacheReadTokens"] = admin.month.cacheRead
+            e["adminApiMonthCacheCreationTokens"] = admin.month.cacheCreation
+            e["adminApiTopModels"] = admin.topModels.map {
+                ["model": $0.model, "totalTokens": $0.totalTokens]
+            }
+            e["adminApiFetchedAt"] = admin.fetchedAt
+            e["adminApiStale"] = admin.stale
+        }
+
         return e
     }
 
@@ -2497,7 +2558,7 @@ final class DaemonServer {
         networkMonitor?.cancel()
         networkMonitor = nil
         networkDebounceTask?.cancel()
-        sessionPollTask?.cancel(); usagePollTask?.cancel()
+        sessionPollTask?.cancel(); usagePollTask?.cancel(); adminApiPollTask?.cancel()
         ollamaPollTask?.cancel(); mlxPollTask?.cancel(); gatewayPollTask?.cancel()
         gatewayHealthTask?.cancel(); usageTickTask?.cancel()
         antigravityPollTask?.cancel()

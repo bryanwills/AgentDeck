@@ -457,6 +457,22 @@ struct UsageEvent: Codable, Sendable {
     var mlxModelCatalog: [String]?
     var subscriptions: [SubscriptionInfo]?
     var antigravityStatus: AntigravityStatusInfo?
+
+    // Anthropic Admin API usage (when user has pasted a Console Admin
+    // API key in Settings). Independent from Pro/Max subscription
+    // quota above — these fields are for API spend tracking.
+    var adminApiKeyPresent: Bool?
+    var adminApiTodayInputTokens: Int?
+    var adminApiTodayOutputTokens: Int?
+    var adminApiTodayCacheReadTokens: Int?
+    var adminApiTodayCacheCreationTokens: Int?
+    var adminApiMonthInputTokens: Int?
+    var adminApiMonthOutputTokens: Int?
+    var adminApiMonthCacheReadTokens: Int?
+    var adminApiMonthCacheCreationTokens: Int?
+    var adminApiTopModels: [AdminApiModelUsage]?
+    var adminApiFetchedAt: Double?
+    var adminApiStale: Bool?
 }
 
 struct ConnectionEvent: Codable, Sendable {
