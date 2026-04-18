@@ -2,6 +2,34 @@
 
 The daemon is the **sole hub** for all dashboard clients. Session bridges never advertise mDNS or serve external WS/SSE — all external devices connect via daemon only.
 
+## Role split — CLI vs Swift in-process daemon
+
+AgentDeck runs two daemon implementations that are **not competitors but collaborators**. Ports coordinate via singleton guard (first-to-bind wins 9120) and the Swift app transparently falls back to WS-client mode when the CLI is already up.
+
+| 책임 | 담당 | 근거 |
+|---|---|---|
+| Claude/Codex/OpenCode PTY 스폰 | **CLI** | sandbox 가 사용자 binary 실행 제한 (Apple 2.5.2) |
+| OpenClaw Gateway 인증 (Keychain 토큰) | **Swift app** | Shared Keychain Access Group 설계 상 in-process 필요 |
+| D200H HID 통신 | **Swift app** | `com.apple.security.device.usb` entitlement 은 sandbox 안에서 열림 |
+| Pixoo HTTP 스트리밍 | Swift app **또는** CLI | 둘 다 가능. 현재 Swift 에서. |
+| ESP32 serial | Swift app **또는** CLI | 둘 다 가능 |
+| iPad/Web WS 허브 | 먼저 바인드한 쪽 | CLI 우선 (PTY 가 있으니 세션 있음), 없으면 Swift |
+| mDNS 광고 | 먼저 바인드한 쪽 | 동일 |
+| 세션 집계 + 상태 브로드캐스트 | **CLI 있을 때**, 없으면 Swift | singleton guard |
+
+**CLI 없이 Swift 앱만 실행한 경우**: port 9120 은 Swift daemon 이 잡고, 세션 0 개 상태로 pairing/device I/O 만 서비스. iPad 가 붙어서 "Device Preview + Setup card" 를 보고, D200H/Pixoo/ESP32 는 idle 상태로 대기한다. 이게 사용자가 "CLI 설치 유도" 만 보이는 상태의 의미.
+
+**CLI 실행 시**: `DaemonService.alreadyRunning` → `connectToExternalDaemon`. Swift 앱은 죽지 않고 CLI daemon 의 WS 클라이언트가 되며 (`isUsingExternalDaemon = true`), Pixoo/D200H/ESP32 모듈은 계속 Swift 앱 안에서 돌지만 CLI 의 WS 브로드캐스트를 들으며 렌더한다.
+
+## Gateway 플래그 의미
+
+`state_update` 이벤트의 3개 gateway 관련 플래그는 각자 역할이 다르다:
+
+- **`gatewayAvailable`** — OpenClaw 프로세스가 `localhost:18789` 에 listen 중. 토폴로지 row 표시용 (Mac `ControlTowerPanel`, `TopologyRail`, Android `TopologyRail`)
+- **`gatewayConnected`** — OpenClaw Gateway 에 **인증 성공**. 가재 크리처 렌더링 gate. Mac 터레리움, Android 터레리움, ESP32 firmware (`renderer.cpp`), Pixoo64 (`PixooRenderer.swift`), 모든 HUD 바가 이 플래그로 가재 표시 여부를 결정
+- **`gatewayHasError`** — 인증 실패/프로토콜 에러. SICK 가재 + ERROR row 로 surfaces
+
+
 ## Port ownership
 
 Daemon owns port **9120** (default, fallback to 9121+ if occupied by non-daemon). All dashboard clients (Android, Apple, ESP32, TUI, Plugin) connect exclusively to daemon. Session bridges use ports 9121–9139 for internal hook HTTP only (`AGENTDECK_PORT` env var injected into Claude process).

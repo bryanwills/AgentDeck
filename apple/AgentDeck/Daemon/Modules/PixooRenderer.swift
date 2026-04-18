@@ -332,7 +332,11 @@ final class PixooRenderer {
         let animFrame = Self.getAnimFrame()
         let state = dashboardState.state
         let usagePct = dashboardState.fiveHourPercent ?? 0
-        let hasGateway = dashboardState.gatewayAvailable || dashboardState.siblingSessions.contains { $0.agentType == "openclaw" }
+        // Crayfish is drawn only when the OpenClaw Gateway is authenticated.
+        // Reachability alone (`gatewayAvailable`) was misleading — an OpenClaw
+        // process on localhost with no shared token would still light up the
+        // Pixoo creature even though nothing would route through it.
+        let hasGateway = dashboardState.gatewayConnected || dashboardState.siblingSessions.contains { $0.agentType == "openclaw" }
 
         syncCreatures(dashboardState: dashboardState)
 

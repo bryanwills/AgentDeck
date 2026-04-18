@@ -1,6 +1,31 @@
 #if os(macOS)
 // DaemonService.swift — In-process daemon lifecycle manager
-// Wraps DaemonServer for use within the macOS SwiftUI app
+//
+// AgentDeck runs in a hybrid architecture:
+//
+//  - The **CLI** (`npx @agentdeck/setup` / Homebrew) owns agent runtime:
+//    spawning `claude`/`codex`/`opencode` as PTY children, session registry,
+//    file-system integrations (ADB, serial). It cannot be sandboxed, because
+//    Apple 2.5.2 forbids that subprocess path for App Store builds.
+//
+//  - The **Swift app** owns device I/O + message brokering inside the
+//    sandbox: D200H USB HID (needs `com.apple.security.device.usb`
+//    entitlement), Pixoo HTTP streaming, ESP32 serial, iPad/Web pairing WS
+//    server, mDNS advertisement, local daemon state cache.
+//
+// Port 9120 coordination: both processes can listen on 9120. When the CLI
+// gets there first, this `DaemonService` catches `alreadyRunning` below and
+// switches into `isUsingExternalDaemon = true` — the Swift app becomes a WS
+// client of the CLI daemon while keeping its in-process device modules
+// running. When the CLI isn't running, the Swift app binds 9120 itself and
+// serves pairing/device I/O with session-count zero (which is the right
+// answer: no PTY means no sessions).
+//
+// That's why the app is useful without the CLI: it's still a valid pairing
+// target for iPads and a device controller for hardware. It just can't
+// monitor live Claude Code sessions until the user installs the CLI.
+//
+// See `docs/daemon.md` for the full role-split table.
 import Foundation
 import ServiceManagement
 import Combine

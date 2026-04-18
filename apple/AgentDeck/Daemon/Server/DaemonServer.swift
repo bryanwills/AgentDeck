@@ -1,6 +1,27 @@
 #if os(macOS)
 // DaemonServer.swift — Main daemon orchestrator
 // Ported from bridge/src/daemon-server.ts — FULL wiring of all modules
+//
+// Runs in two modes:
+//   1. In-process (no CLI present) — owns port 9120, serves pairing/device
+//      I/O to iPads, Pixoo, ESP32, D200H. Session count is effectively zero
+//      because the Swift daemon does not spawn PTYs (see DaemonService.swift
+//      header for the role split).
+//   2. External-proxy (CLI is running) — the CLI binds 9120 first; this
+//      DaemonServer never starts. DaemonService instead transitions to
+//      `isUsingExternalDaemon = true` and the Swift app becomes a WS client
+//      of the CLI daemon, while Pixoo/D200H/ESP32 modules continue to run
+//      in-process and listen to the same WS feed.
+//
+// Gateway flags (`gatewayAvailable`, `gatewayConnected`, `gatewayHasError`)
+// on broadcast events mean:
+//   - gatewayAvailable: OpenClaw process reachable on localhost:18789.
+//                       Drives topology row visibility.
+//   - gatewayConnected: OpenClaw Gateway authenticated (shared token
+//                       accepted). Drives crayfish creature rendering
+//                       across Mac UI, Android, ESP32 firmware, Pixoo64.
+//   - gatewayHasError:  Auth attempt failed or protocol error — surfaces
+//                       SICK crayfish + error row in topology.
 
 import Foundation
 import IOKit
@@ -51,9 +72,25 @@ final class DaemonServer {
 
     // State caches
     private var cachedSessions: [DaemonSessionEntry] = []
+
+    /// Sessions advertised over WS via `session_push_register` from CLI
+    /// session bridges. Kept separate from `cachedSessions` so that
+    /// `refreshSessions()` — which sources entries from the filesystem
+    /// registry — can merge both without clobbering push-based registrations.
+    ///
+    /// Why this exists: the App Store Swift daemon and the Node CLI use
+    /// different data dirs (group container vs `~/.agentdeck`) and the
+    /// sandbox blocks Swift from reading `~/.agentdeck/sessions.json`. CLI
+    /// session bridges therefore can't be discovered via filesystem — they
+    /// register themselves over the daemon WS. Without this map the Swift
+    /// daemon stays at 0 sessions even when `agentdeck claude` is running,
+    /// which shows up as empty `sessions_list` broadcasts and blank
+    /// terrariums on every surface.
+    private var pushedSessionsById: [String: DaemonSessionEntry] = [:]
     private var cachedModelCatalog: [[String: Any]] = []
     private var cachedOllamaStatus: [String: Any]?
     private var cachedMlxModels: [String] = []
+    private var cachedMlxModelCatalog: [String] = []
     private var preferredMlxModelsEndpoint: String?
 
     // Backoff state for local LLM discovery. Probe functions read/update these;
@@ -335,8 +372,10 @@ final class DaemonServer {
                     // run older/unfiltered code that leaks nanoLLaVA into the list, causing flicker.
                     if !self.cachedMlxModels.isEmpty {
                         event["mlxModels"] = self.cachedMlxModels
+                        event["mlxModelCatalog"] = self.cachedMlxModelCatalog
                     } else {
                         event.removeValue(forKey: "mlxModels")
+                        event.removeValue(forKey: "mlxModelCatalog")
                     }
                 }
                 self.broadcastRaw(event)
@@ -605,8 +644,12 @@ final class DaemonServer {
                 guard let self else { return }
                 if let type = msg["type"] as? String {
                     if type == "device_info", msg["wifiConnected"] as? Bool != true {
-                        Task { _ = await self.serialModule?.serial.sendWifiProvisionToAll(provisionMsg.value) }
-                        DaemonLogger.shared.info("WiFi provision sent to ESP32 on \(portPath)")
+                        Task {
+                            let sent = await self.serialModule?.serial.sendWifiProvisionToAll(provisionMsg.value) ?? 0
+                            if sent > 0 {
+                                DaemonLogger.shared.info("WiFi provision sent to \(sent) ESP32 connection(s); trigger port \(portPath)")
+                            }
+                        }
                     }
                 }
             }
@@ -1154,12 +1197,117 @@ final class DaemonServer {
 
     @MainActor private func handleClientDisconnect() {}
 
+    // MARK: - Session push (from CLI session bridges via WS)
+
+    /// Register a CLI session bridge's advertised identity. The session
+    /// bridge lives outside the sandbox (Node process, `~/.agentdeck` world)
+    /// and the sandbox blocks the Swift daemon from reading its sessions.json;
+    /// this WS-pushed registration is the sole discovery path. Duplicate
+    /// registrations for the same `sessionId` just update the existing entry
+    /// (idempotent — session bridges re-register on WS reconnect).
+    @MainActor
+    private func handleSessionPushRegister(_ cmd: [String: Any]) {
+        guard let sessionId = cmd["sessionId"] as? String,
+              let port = cmd["port"] as? Int else {
+            DaemonLogger.shared.debug("Daemon", "session_push_register missing sessionId or port: \(cmd)")
+            return
+        }
+        let agentType = cmd["agentType"] as? String
+        let projectName = cmd["projectName"] as? String ?? ""
+        var entry = pushedSessionsById[sessionId] ?? DaemonSessionEntry(
+            id: sessionId,
+            port: port,
+            pid: 0, // CLI does not send pid; liveness is inferred from /health probes
+            projectName: projectName,
+            agentType: agentType,
+            tmuxSession: nil,
+            tty: nil,
+            parentTty: nil,
+            startedAt: nil
+        )
+        // Update mutable fields on re-register (port drift, agent type change).
+        if entry.port != port || entry.agentType != agentType || entry.projectName != projectName {
+            entry = DaemonSessionEntry(
+                id: sessionId,
+                port: port,
+                pid: 0,
+                projectName: projectName,
+                agentType: agentType,
+                tmuxSession: entry.tmuxSession,
+                tty: entry.tty,
+                parentTty: entry.parentTty,
+                startedAt: entry.startedAt
+            )
+        }
+        pushedSessionsById[sessionId] = entry
+        DaemonLogger.shared.debug("Daemon", "session_push_register: \(sessionId) port=\(port) agent=\(agentType ?? "?")")
+
+        // Merge into cachedSessions immediately so the next sessions_list
+        // broadcast reflects the new session without waiting for a probe tick.
+        upsertIntoCachedSessions(entry)
+        broadcastSessionsList()
+    }
+
+    /// Update state/modelName for a previously-registered push session.
+    /// Silently ignored when the sessionId isn't known — session bridges
+    /// race the initial register vs first state event and push_state may
+    /// arrive before the first register.
+    @MainActor
+    private func handleSessionPushState(_ cmd: [String: Any]) {
+        guard let sessionId = cmd["sessionId"] as? String else { return }
+        guard var entry = pushedSessionsById[sessionId] else {
+            DaemonLogger.shared.debug("Daemon", "session_push_state: unknown sessionId \(sessionId)")
+            return
+        }
+        if let state = cmd["state"] as? String { entry.state = state }
+        if let modelName = cmd["modelName"] as? String { entry.modelName = modelName }
+        if let projectName = cmd["projectName"] as? String, !projectName.isEmpty {
+            entry = DaemonSessionEntry(
+                id: entry.id,
+                port: entry.port,
+                pid: entry.pid,
+                projectName: projectName,
+                agentType: entry.agentType,
+                tmuxSession: entry.tmuxSession,
+                tty: entry.tty,
+                parentTty: entry.parentTty,
+                startedAt: entry.startedAt
+            )
+        }
+        pushedSessionsById[sessionId] = entry
+
+        upsertIntoCachedSessions(entry)
+        broadcastSessionsList()
+    }
+
+    /// Insert-or-update a session entry in `cachedSessions`, preserving sort
+    /// order. Used by both `handleSessionPushRegister` and `handleSessionPushState`.
+    @MainActor
+    private func upsertIntoCachedSessions(_ entry: DaemonSessionEntry) {
+        cachedSessions.removeAll { $0.id == entry.id }
+        cachedSessions.append(entry)
+        cachedSessions = DashboardDataRules.sortSessions(cachedSessions)
+    }
+
     // MARK: - Commands
 
     @MainActor
     private func handleCommand(_ cmd: [String: Any]) {
         guard let type = cmd["type"] as? String else { return }
         DaemonLogger.shared.debug("Daemon", "cmd: \(type)")
+
+        // Session bridge self-registration — must run BEFORE the gateway
+        // adapter dispatch so that a gateway-driven mode doesn't swallow
+        // the push. Mirrors the `onRawMessage` interception used by the
+        // Node daemon in `bridge/src/daemon-server.ts`.
+        if type == "session_push_register" {
+            handleSessionPushRegister(cmd)
+            return
+        }
+        if type == "session_push_state" {
+            handleSessionPushState(cmd)
+            return
+        }
 
         // Gateway adapter handles command if alive
         if let gw = gatewayAdapter {
@@ -1677,8 +1825,39 @@ final class DaemonServer {
 
     @MainActor
     private func refreshSessions() async {
-        let sessions = await registry.listActiveAndReachable().filter { $0.id != sessionId }
-        cachedSessions = DashboardDataRules.sortSessions(await enrichSessionsWithState(sessions))
+        // Pull filesystem-registered sessions (our own group container) first.
+        let registryEntries = await registry.listActiveAndReachable().filter { $0.id != sessionId }
+
+        // Merge with push-registered sessions (CLI bridges over WS). Pushed
+        // sessions are authoritative for App Store builds because Swift
+        // can't read `~/.agentdeck/sessions.json`.
+        var merged = registryEntries
+        let knownIds = Set(merged.map { $0.id })
+        for (_, pushed) in pushedSessionsById where !knownIds.contains(pushed.id) {
+            merged.append(pushed)
+        }
+
+        let enriched = await enrichSessionsWithState(merged)
+
+        // Prune pushed sessions whose /health probe failed repeatedly — the
+        // bridge is gone. `enrichSessionsWithState` leaves `state = nil` when
+        // the probe errors; we catch those and drop the local push entry.
+        let livePushedIds = Set(enriched.filter { $0.state != nil }.map { $0.id })
+        let stalePushed = pushedSessionsById.keys.filter { id in
+            registryEntries.contains(where: { $0.id == id }) == false
+                && livePushedIds.contains(id) == false
+        }
+        for id in stalePushed {
+            DaemonLogger.shared.debug("Daemon", "Pruning stale pushed session \(id)")
+            pushedSessionsById.removeValue(forKey: id)
+        }
+
+        cachedSessions = DashboardDataRules.sortSessions(enriched.filter { entry in
+            // Keep filesystem entries unconditionally; drop pushed entries
+            // whose probe failed (already pruned above, double-gate for safety).
+            if registryEntries.contains(where: { $0.id == entry.id }) { return true }
+            return livePushedIds.contains(entry.id)
+        })
         broadcastSessionsList()
     }
 
@@ -1719,18 +1898,14 @@ final class DaemonServer {
     private func buildSessionsListEvent() -> [String: Any] {
         var sessions = cachedSessions.map { sessionToDict($0) }
         // Inject virtual OpenClaw session when Gateway is reachable
-        if cachedGatewayAvailable || gatewayAdapter != nil {
+        if cachedGatewayConnected {
             if !sessions.contains(where: { ($0["id"] as? String) == "openclaw-gateway" || ($0["agentType"] as? String) == "openclaw" }) {
-                // Normalize state: when the gateway adapter is alive but the
-                // shared stateMachine has not yet transitioned out of
-                // .disconnected (the connect-time session_start hook only fires
-                // from .disconnected, and may have raced with the broadcast),
-                // emit "idle" rather than "disconnected" so downstream clients
-                // never paint OC as an abnormal/OFF card. The earliest possible
-                // sort tiebreaker (1970-01-01) keeps OC pinned to slot 0 even
-                // if a real openclaw session were ever added later.
+                // Only authenticated Gateway connections should materialize as
+                // a virtual OpenClaw session. Reachability/auth failures stay
+                // in the topology/status rows so the terrarium does not render
+                // a crayfish that looks like an active integration.
                 let smState = stateMachine.state.rawValue
-                let normalizedState = (cachedGatewayConnected && smState != "disconnected") ? smState : "idle"
+                let normalizedState = smState != "disconnected" ? smState : "idle"
                 var gatewaySession: [String: Any] = [
                     "id": "openclaw-gateway", "port": 18789,
                     "projectName": "OpenClaw", "agentType": "openclaw",
@@ -1761,10 +1936,14 @@ final class DaemonServer {
             if let usage = await fetchUsageViaHTTP(port: sibling.port) {
                 // Parse relayed dict back into ApiUsageData for caching
                 cachedApiUsage = parseRelayedUsage(usage)
-                lastApiFetchTime = Date()
-                apiUsageStale = false
+                if let fetchedAt = cachedApiUsage?.fetchedAt {
+                    lastApiFetchTime = Date(timeIntervalSince1970: fetchedAt)
+                } else {
+                    lastApiFetchTime = Date()
+                }
+                apiUsageStale = cachedApiUsage?.stale ?? false
                 apiUsagePreAdjusted = false  // raw data from HTTP, needs adjustment
-                oauthConnected = true
+                oauthConnected = usage["oauthConnected"] as? Bool ?? true
                 // Infer billing type
                 if let inferred = cachedApiUsage?.inferredBillingType {
                     stateMachine.billingType = inferred
@@ -1790,10 +1969,14 @@ final class DaemonServer {
         DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier3-start", "Usage Tier 3: direct API", minInterval: 30)
         if let usage = await usageAPI.fetchUsage() {
             cachedApiUsage = usage
-            lastApiFetchTime = Date()
-            apiUsageStale = false
+            if let fetchedAt = usage.fetchedAt {
+                lastApiFetchTime = Date(timeIntervalSince1970: fetchedAt)
+            } else {
+                lastApiFetchTime = Date()
+            }
+            apiUsageStale = usage.stale
             apiUsagePreAdjusted = false  // raw data from API, needs adjustment
-            oauthConnected = true
+            oauthConnected = usageAPI.tokenStatus == .valid
             if let inferred = usage.inferredBillingType {
                 stateMachine.billingType = inferred
             }
@@ -1821,6 +2004,7 @@ final class DaemonServer {
             if let fetchedAt = json["fetchedAt"] as? Int, fetchedAt > 0 {
                 let ageMs = Int(Date().timeIntervalSince1970 * 1000) - fetchedAt
                 if ageMs > 5 * 60 * 1000 { return nil }
+                usage["fetchedAt"] = Double(fetchedAt) / 1000.0
             }
             usage["type"] = "usage_update"
             return usage
@@ -1838,7 +2022,9 @@ final class DaemonServer {
             extraUsageMonthlyLimit: dict["extraUsageMonthlyLimit"] as? Double,
             extraUsageUsedCredits: dict["extraUsageUsedCredits"] as? Double,
             extraUsageUtilization: dict["extraUsageUtilization"] as? Double,
-            inferredBillingType: dict["fiveHourPercent"] != nil ? "subscription" : "api"
+            inferredBillingType: dict["fiveHourPercent"] != nil ? "subscription" : "api",
+            fetchedAt: dict["fetchedAt"] as? Double,
+            stale: dict["usageStale"] as? Bool ?? false
         )
     }
 
@@ -1900,12 +2086,16 @@ final class DaemonServer {
 
     @MainActor
     private func buildModuleHealth() async -> SendableDict {
+        var gateway: [String: Any] = [
+            "available": cachedGatewayAvailable,
+            "connected": cachedGatewayConnected,
+            "hasError": cachedGatewayHasError,
+            "authStatus": cachedGatewayAuthStatus,
+        ]
+        if let requestId = cachedGatewayAuthRequestId { gateway["authRequestId"] = requestId }
+        if let message = cachedGatewayAuthMessage { gateway["authMessage"] = message }
         var modules: [String: Any] = [
-            "gateway": [
-                "available": cachedGatewayAvailable,
-                "connected": cachedGatewayConnected,
-                "hasError": cachedGatewayHasError,
-            ]
+            "gateway": gateway
         ]
         if let adbModule {
             modules["adb"] = adbModule.statusSnapshot()
@@ -1953,11 +2143,12 @@ final class DaemonServer {
         e["gatewayConnected"] = cachedGatewayConnected
         e["gatewayHasError"] = cachedGatewayHasError
         e["gatewayAuthStatus"] = cachedGatewayAuthStatus
+        e["daemonPort"] = Int(port)
         if let requestId = cachedGatewayAuthRequestId { e["gatewayAuthRequestId"] = requestId }
         if let message = cachedGatewayAuthMessage { e["gatewayAuthMessage"] = message }
         if let url = cachedPairingUrl { e["pairingUrl"] = url }
         if let r = stateMachine.remoteUrl { e["remoteUrl"] = r }
-        if oauthConnected { e["oauthConnected"] = true }
+        e["oauthConnected"] = oauthConnected
         // Voice assistant state (piggyback on state_update for all clients)
         if cachedVoiceAssistantState != "disabled" {
             e["voiceAssistantState"] = cachedVoiceAssistantState
@@ -1998,6 +2189,7 @@ final class DaemonServer {
 
         // API usage data — skip adjustUsagePercent when values were synced from relay
         if let u = cachedApiUsage {
+            let usageIsStale = apiUsageStale || u.stale
             if apiUsagePreAdjusted {
                 e["fiveHourPercent"] = u.fiveHourPercent as Any
                 e["sevenDayPercent"] = u.sevenDayPercent as Any
@@ -2005,16 +2197,18 @@ final class DaemonServer {
                 e["fiveHourPercent"] = adjustUsagePercent(u.fiveHourPercent, resetsAt: u.fiveHourResetsAt) as Any
                 e["sevenDayPercent"] = adjustUsagePercent(u.sevenDayPercent, resetsAt: u.sevenDayResetsAt) as Any
             }
-            if let v = u.fiveHourResetsAt { e["fiveHourResetsAt"] = v }
-            if let v = u.sevenDayResetsAt { e["sevenDayResetsAt"] = v }
+            if !usageIsStale {
+                if let v = u.fiveHourResetsAt { e["fiveHourResetsAt"] = v }
+                if let v = u.sevenDayResetsAt { e["sevenDayResetsAt"] = v }
+            }
             e["extraUsageEnabled"] = u.extraUsageEnabled
             if let v = u.extraUsageMonthlyLimit { e["extraUsageMonthlyLimit"] = v }
             if let v = u.extraUsageUsedCredits { e["extraUsageUsedCredits"] = v }
             if let v = u.extraUsageUtilization { e["extraUsageUtilization"] = v }
         }
 
-        if oauthConnected { e["oauthConnected"] = true }
-        if apiUsageStale { e["usageStale"] = true }
+        e["oauthConnected"] = oauthConnected
+        e["usageStale"] = apiUsageStale || cachedApiUsage?.stale == true
         mergeEngineSnapshot(into: &e)
         let ts = usageAPI.tokenStatus
         if ts != .unknown { e["tokenStatus"] = ts.rawValue }
@@ -2039,6 +2233,7 @@ final class DaemonServer {
         if !cachedModelCatalog.isEmpty { event["modelCatalog"] = cachedModelCatalog }
         if let ollama = cachedOllamaStatus { event["ollamaStatus"] = ollama }
         if !cachedMlxModels.isEmpty { event["mlxModels"] = cachedMlxModels }
+        if !cachedMlxModelCatalog.isEmpty { event["mlxModelCatalog"] = cachedMlxModelCatalog }
         let subscriptions = buildSubscriptions()
         if !subscriptions.isEmpty { event["subscriptions"] = subscriptions }
         if let antigravity = cachedAntigravityStatus {
@@ -2198,6 +2393,7 @@ final class DaemonServer {
     @MainActor
     private func probeMLX() async {
         let previous = cachedMlxModels
+        let previousCatalog = cachedMlxModelCatalog
         let fallbackCandidates = [
             "http://127.0.0.1:8800/v1/models",
             "http://127.0.0.1:8800/models",
@@ -2245,20 +2441,9 @@ final class DaemonServer {
         if success {
             mlxFailureCount = 0
             mlxNextInterval = Self.probeBaseInterval
-            // Pin filter: when the user has selected a specific MLX model via
-            // `llm.mlx.model` in settings.json and it's present in the catalog,
-            // broadcast only that one. Otherwise, when the catalog advertises
-            // multiple models, auto-pick the first — matches the APME judge's
-            // "first non-nanollava" auto-detect and prevents dashboard from
-            // exposing every downloaded model on disk as if they were all live.
             let pin = ApmeSettings.loadMlxConfig().model
-            if let pin = pin, resolved.contains(pin) {
-                cachedMlxModels = [pin]
-            } else if resolved.count > 1, let first = resolved.first {
-                cachedMlxModels = [first]
-            } else {
-                cachedMlxModels = resolved
-            }
+            cachedMlxModelCatalog = resolved
+            cachedMlxModels = Self.pickMlxModels(catalog: resolved, pin: pin)
         } else {
             mlxFailureCount += 1
             mlxNextInterval = min(mlxNextInterval * 2, Self.probeMaxInterval)
@@ -2266,13 +2451,28 @@ final class DaemonServer {
             // failures; then clear so the UI reflects unavailability.
             if mlxFailureCount >= Self.probeStaleThreshold {
                 cachedMlxModels = []
+                cachedMlxModelCatalog = []
             }
         }
 
-        if previous != cachedMlxModels {
+        if previous != cachedMlxModels || previousCatalog != cachedMlxModelCatalog {
             broadcastStateUpdate()
             broadcastUsage()
         }
+    }
+
+    private static func pickMlxModels(catalog: [String], pin: String?) -> [String] {
+        if let pin, catalog.contains(pin) {
+            return [pin]
+        }
+        let fallback = "mlx-community/Qwen3.6-35B-A3B-4bit"
+        if catalog.contains(fallback) {
+            return [fallback]
+        }
+        if let first = catalog.first {
+            return [first]
+        }
+        return []
     }
 
     // MARK: - Command Forwarding

@@ -164,6 +164,7 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
     nonisolated(unsafe) private var cached5hResetsAt: String?
     nonisolated(unsafe) private var cached7dResetsAt: String?
     nonisolated(unsafe) private var cachedGatewayAvailable = false
+    nonisolated(unsafe) private var cachedGatewayConnected = false
     nonisolated(unsafe) private var cachedGatewayHasError = false
 
     nonisolated(unsafe) private var displayDimmed = false
@@ -190,6 +191,7 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
             }
             // Gateway fields are always updated regardless of agent type
             cachedGatewayAvailable = event["gatewayAvailable"] as? Bool ?? cachedGatewayAvailable
+            cachedGatewayConnected = event["gatewayConnected"] as? Bool ?? cachedGatewayConnected
             cachedGatewayHasError = event["gatewayHasError"] as? Bool ?? cachedGatewayHasError
         case "usage_update":
             cached5h = event["fiveHourPercent"] as? Double
@@ -327,9 +329,14 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
         state.sevenDayPercent = cached7d
         state.fiveHourResetsAt = cached5hResetsAt
         state.sevenDayResetsAt = cached7dResetsAt
-        state.gatewayAvailable = cachedGatewayAvailable || cachedSessions.contains {
-            ($0["agentType"] as? String) == "openclaw"
-        }
+        // Gateway flags come straight from the daemon broadcast — no OR
+        // fallback on "siblingSessions contains openclaw". DaemonServer only
+        // injects the virtual openclaw session when `cachedGatewayConnected`
+        // is already true, so the old OR was redundant and made the code
+        // read as "any openclaw session implies authenticated" which is the
+        // opposite of the intended gate for crayfish rendering.
+        state.gatewayAvailable = cachedGatewayAvailable
+        state.gatewayConnected = cachedGatewayConnected
         state.gatewayHasError = cachedGatewayHasError
         state.siblingSessions = cachedSessions.compactMap(Self.makeSessionInfo)
         return state
