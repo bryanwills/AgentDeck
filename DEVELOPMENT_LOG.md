@@ -137,6 +137,21 @@ AgentDeck_macOS build` 성공. 런타임 활성화는 `~/.agentdeck/settings.jso
 
 플랜: `~/.claude/plans/mlx-atomic-minsky.md`. 커밋: `fbe1cdb9`.
 
+### 후속 (`2b7b38b3`) — auto-pick default
+`fbe1cdb9` 직후 사용자 확인: dashboard 에 여전히 두 개 표시. 원인 두 가지 —
+(a) AgentDeck.app 이 세션 내내 구버전 바이너리로 돌고 있어 새 probe 필터가
+반영되지 않음, (b) `settings.json` 에 `llm.mlx` pin 이 없는 상태였고 내 기본
+동작이 "pin 없으면 전체 broadcast" 였음. (a) 는 사용자가 재기동으로 해결,
+(b) 를 고치기 위해 **pin 이 없고 카탈로그가 >1 이면 첫 번째를 자동 선택**
+하도록 기본값 변경 (TS `mlx-probe.ts` + Swift `probeMLX`). APME judge 의
+기존 "first non-nanollava" auto-detect 와 동일 규칙이라 summarizer/judge
+동작이 자동으로 수렴. 명시 pin 은 여전히 override. 카탈로그가 1 개뿐이면
+그대로 — 회귀 없음.
+
+**교훈**: "pin 없을 때 회귀 없음" 을 과하게 보수적으로 설계했음. 실제로는
+기본값이 sensible auto-pick 이어야 사용자 입장에서 "고쳐진 느낌" 이 남.
+새 기능의 default 는 항상 "비어 있는 설정으로도 합리적인 결과" 를 내야 함.
+
 ---
 
 ## 2026-04-18 — Terrarium NaN Crash Guard + Presence-Aware display_state + D200H Suppression
