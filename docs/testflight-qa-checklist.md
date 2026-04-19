@@ -49,8 +49,8 @@ Before starting, note your macOS version, device model, and any non-default acce
 
 > Goal: Confirm the core value proposition — monitoring a live session — actually works.
 
-- [ ] **C1**. Menu bar → **Launch Session**. If `claude` CLI isn't installed, a dialog with "Open Installation Guide" + "Check Again" + "Cancel" appears. Guide button opens the correct URL.
-- [ ] **C2**. If installed, a Terminal window opens with the `claude` command. (macOS: System Default Terminal — no iTerm AppleScript.)
+- [ ] **C1**. Menu bar → **Launch Session**. App Store build shows guidance that AgentDeck does not launch Terminal scripts and that Claude Code should be started by the user in Terminal.
+- [ ] **C2**. Confirm no Terminal window, `.command` file, AppleScript prompt, or child process is created by AgentDeck.
 - [ ] **C3**. Open Settings → Claude Code Hooks. Click **Enable Claude Code Hooks…**
 - [ ] **C4**. An NSAlert explains what will be written. Click Continue.
 - [ ] **C5**. An NSOpenPanel opens at `~/.claude/`. Select `settings.local.json`. AgentDeck writes hooks and Settings shows a green "Hooks installed" status.
@@ -67,7 +67,7 @@ Skip if you don't have OpenClaw 2026.4.14+ installed.
 - [ ] **D1**. Start OpenClaw Gateway: `openclaw start` (or your regular launch command). It should listen on `ws://127.0.0.1:18789`.
 - [ ] **D2**. Open Settings → Services. The OpenClaw Gateway row shows **Pairing required** state with instructions.
 - [ ] **D3**. Run `openclaw devices list` in a terminal. A new device with id matching `sha256(pubkey)` hex (shown in AgentDeck logs) appears as "pending".
-- [ ] **D4**. Run `openclaw devices approve <requestId>` (or approve via OpenClaw Web UI).
+- [ ] **D4**. Approve the pending AgentDeck device in OpenClaw Web UI.
 - [ ] **D5**. Within 10 seconds, Settings flips to **Connected**. Model catalog populates in the tank panel.
 - [ ] **D6**. Force-quit AgentDeck, relaunch. AgentDeck reconnects using the stored `deviceToken` — no re-approval needed. Settings shows **Connected** within 5 seconds of launch.
 
@@ -135,7 +135,7 @@ Skip if you don't have OpenClaw 2026.4.14+ installed.
 > Goal: Prove we haven't regressed the 2.5.2 compliance work.
 
 - [ ] **I1**. Open Activity Monitor → find the AgentDeck process. Under the **Open Files and Ports** tab, confirm no subprocess children are spawned during normal use (no `bash`, `node`, `adb`, `whisper-cli`, `openclaw`).
-- [ ] **I2**. Try the menu bar's "Launch Session" — the ONLY process invocation that should appear is `Terminal.app` (or your default terminal) opening a `.command` file. No AppleScript dialog, no Node process.
+- [ ] **I2**. Try the menu bar's "Launch Session" — no process invocation should appear. It should only show the App Store-safe guidance dialog.
 - [ ] **I3**. Verify data is in the Group Container:
   ```bash
   ls ~/Library/Group\ Containers/group.bound.serendipity.agentdeck.dashboard/

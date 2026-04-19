@@ -79,9 +79,9 @@ Apple on-device 음성 인식(SFSpeechRecognizer)으로 음성 → 텍스트 →
 • 로컬 WebSocket(포트 9120)은 기기/같은 Wi-Fi의 iPad 컴패니언 연결 전용. 외부 접근 없음.
 • Claude Code 훅 설치는 사용자 명시적 동의 + security-scoped bookmark 기반.
 
-═══ 추가 기능 (CLI 필요) ═══
+═══ 개발자 전용 확장 (선택) ═══
 
-Android ADB 브리징, Codex 웹 인증 상태 표시, APME Layer 1 deterministic 평가 같은 고급 기능은 별도 CLI (`npx @agentdeck/setup`)가 설치된 경우에만 작동합니다. 대시보드 앱 단독으로는 App Store 정책 상 외부 바이너리 실행이 금지되어 있습니다.
+개발 워크플로우에서 Android ADB 브리징, Codex/OpenCode PTY 세션 실행, APME Layer 1 결정적 평가 같은 고급 자동화가 필요한 사용자는 별도의 개발자 도구 영역에서 이 기능들을 사용합니다. AgentDeck 앱 자체는 이런 외부 도구의 설치나 실행을 요구하거나 유도하지 않으며, 앱 내 모든 기능은 설치 직후 바로 사용 가능합니다.
 
 ═══ 시스템 요구사항 ═══
 
@@ -191,9 +191,9 @@ None of the hardware is required. The dashboard is fully functional on a stock M
 • The local WebSocket (port 9120) accepts connections only from this Mac and your paired iOS companion on the same Wi-Fi. No external exposure.
 • Claude Code hook installation requires explicit NSOpenPanel consent + a security-scoped bookmark.
 
-═══ Advanced features (require separate CLI) ═══
+═══ Optional developer extensions ═══
 
-Android ADB bridging, Codex web-auth status, and APME Layer 1 deterministic scoring are CLI-only features. Install `npx @agentdeck/setup` from your terminal if you need them — App Store policy forbids bundled interpreters.
+Developer workflows involving Android ADB bridging, Codex/OpenCode PTY session launch, or APME Layer 1 deterministic scoring rely on a separate developer toolchain. AgentDeck itself never requires or prompts for those tools; every feature in the app works out of the box after install.
 
 ═══ System requirements ═══
 
@@ -294,7 +294,7 @@ Use the contents of `apple/APP_REVIEW_NOTES.md` verbatim in the App Store Connec
 4. Claude Code hooks are opt-in via NSOpenPanel.
 5. Voice uses Apple on-device SFSpeech (no network, no whisper).
 
-No demo account required — the app doesn't have user accounts. Reviewer can press "Launch Session" to start a Claude Code session (requires `claude` CLI pre-installed, app shows install prompt otherwise) or simply open "Preview Devices" to see the UI without any real session.
+No demo account required — the app doesn't have user accounts. Reviewer can press "Launch Session" to see the App Store-safe guidance that AgentDeck does not launch Terminal scripts, or simply open "Preview Devices" to see the UI without any real session.
 
 ---
 

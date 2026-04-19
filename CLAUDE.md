@@ -141,6 +141,17 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 - **Shift+Tab** (`\x1b[Z`) for Claude Code mode switching (100ms debounce)
 - **Version compatibility**: `agentdeck claude` checks Claude Code version via npm + GitHub on startup; never blocks startup
 
+## App Store build invariants
+
+The macOS app ships through the App Store and must stay **self-contained** under App Review Guidelines 2.5.2 (no bundled interpreters) and 4.2.3 (no routing users to outside installs). The guardrails below are enforced in code, CI, and docs — preserve them on every change.
+
+- **`AGENTDECK_APP_STORE` compile flag** is set on the macOS target in `apple/project.yml`. Every path that spawns a subprocess (`Process()`, `/bin/sh`, `osascript`, `.command` script write, `security`/`sqlite3`/`adb`/`openclaw`/`whisper-cli` probe) lives behind `#if !AGENTDECK_APP_STORE`. Adding new subprocess paths is only allowed outside that guard.
+- **No companion-install prompts.** App-Store-reachable UI (Setup card, Settings, menubar, alerts) must not tell the user to install, register, or launch a companion binary. Setup card copy is identical regardless of whether an `agentdeck` CLI exists on disk — differentiating based on external state is an App Review 4.2.3 red flag. See [apple/AgentDeck/UI/Monitor/SetupNeededCard.swift](apple/AgentDeck/UI/Monitor/SetupNeededCard.swift) for the canonical copy.
+- **`Launch Session`** in the menubar never writes Terminal scripts in the App Store build. The App Store branch ends in an NSAlert that directs the user to start Claude Code themselves; Claude Code hooks + the in-process daemon pick up the session automatically. See [apple/AgentDeck/Daemon/Core/SessionLauncher.swift](apple/AgentDeck/Daemon/Core/SessionLauncher.swift) `showAppStoreLaunchInfo`.
+- **CI verifier**: `apple/scripts/verify-appstore-archive.sh` runs after the macOS archive step and fails the build if the shipped `.app` Mach-O contains any forbidden subprocess path string or any bundled executable besides the signed AgentDeck binary itself. Run it locally before releasing: `bash apple/scripts/verify-appstore-archive.sh $PATH_TO_APP`.
+- **Feature matrix is canonical**: [docs/appstore-feature-matrix.md](docs/appstore-feature-matrix.md) is the one place that records which features are in the App Store build vs. only the terminal-managed daemon. New features land in the table before any implementation touches the App Store target.
+- **Review notes**: [apple/APP_REVIEW_NOTES.md](apple/APP_REVIEW_NOTES.md) is the text that ships to the reviewer — its claims ("does not spawn any subprocess", "no home-relative-path entitlement", "local WebSocket only accepts same-machine + paired iOS companion") must stay factually correct. Update both the code and this doc when touching anything in that surface area.
+
 ## Documentation Index
 
 | Doc | Topic |
@@ -158,6 +169,7 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 | [docs/android-ui.md](docs/android-ui.md) | Android UI/UX Vision — e-ink + tablet layouts, creatures, refresh zones |
 | [docs/voice-setup.md](docs/voice-setup.md) | Apple SFSpeech permissions + dictation model download troubleshooting |
 | [docs/asc-cert-setup.md](docs/asc-cert-setup.md) | Mac Installer Distribution cert + macOS provisioning profile + GitHub Secrets step-by-step |
+| [docs/appstore-feature-matrix.md](docs/appstore-feature-matrix.md) | App Store 앱 vs CLI 설치 기능 매트릭스 — downstream 디바이스 분류(ESP32/Pixoo/D200H/ADB/TC001/Android) + session 실행/usage 범위 |
 | [docs/appstore-metadata-draft.md](docs/appstore-metadata-draft.md) | App Store Connect metadata draft (ko + en) — title/subtitle/description/keywords/what's-new |
 | [docs/testflight-qa-checklist.md](docs/testflight-qa-checklist.md) | Internal tester pre-submission checklist covering onboarding, pairing, voice, sandbox invariants |
 | [docs/devices.md](docs/devices.md) | Device-specific details |

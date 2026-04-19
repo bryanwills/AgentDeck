@@ -19,7 +19,7 @@ AgentDeck runs two daemon implementations that are **not competitors but collabo
 
 **CLI 없이 Swift 앱만 실행한 경우**: port 9120 은 Swift daemon 이 잡고, 세션 0 개 상태로 pairing/device I/O 만 서비스. iPad 가 붙어서 "Device Preview + Setup card" 를 보고, D200H/Pixoo/ESP32 는 idle 상태로 대기한다. 이게 사용자가 "CLI 설치 유도" 만 보이는 상태의 의미.
 
-**CLI 실행 시**: `DaemonService.alreadyRunning` → `connectToExternalDaemon`. Swift 앱은 죽지 않고 CLI daemon 의 WS 클라이언트가 되며 (`isUsingExternalDaemon = true`), Pixoo/D200H/ESP32 모듈은 계속 Swift 앱 안에서 돌지만 CLI 의 WS 브로드캐스트를 들으며 렌더한다.
+**외부 CLI daemon 이 이미 실행 중인 경우**: `DaemonService.alreadyRunning` → `connectToExternalDaemon`. Swift 앱은 죽지 않고 CLI daemon 의 WS 클라이언트가 된다 (`isUsingExternalDaemon = true`). 이 모드는 사용자가 터미널에서 별도 daemon 을 이미 운영하는 고급 경로이며, App Store 앱 자체는 외부 실행 파일 설치/기동을 요구하지 않는다. 하드웨어 상태는 CLI daemon 이 `state_update.moduleHealth` 로 브로드캐스트한 범위만 UI 에 표시한다.
 
 ## Gateway 플래그 의미
 

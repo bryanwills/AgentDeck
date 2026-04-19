@@ -6,11 +6,11 @@ _Paste the relevant sections into App Store Connect's "Notes" field when submitt
 
 AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding agents (Claude Code, Codex CLI, OpenCode). It shows live session status, tool activity, and quality scores on the Mac, and — via the free iOS companion app — on an iPad or iPhone used as a secondary display.
 
-**Works standalone on Mac.** All core features (monitoring, APME evaluation reports, Device Preview, Claude Code hook integration) work without any additional hardware or external CLI tools beyond the AI agent itself.
+**Works standalone on Mac.** All core features (dashboard, APME evaluation reports, Device Preview, Claude Code hook integration, and iOS pairing) work without any additional hardware or AgentDeck companion executable. Users run their AI agent in their own terminal; AgentDeck receives opt-in hook events.
 
 **Optional hardware extensions** let power users drive the same state on Stream Deck+ keys, Ulanzi D200H Deck Docks (USB HID), ESP32 status displays (Wi-Fi), and Divoom Pixoo matrix displays (Wi-Fi). Each integration is configurable from an in-app sheet — the user is never forced to open Terminal.
 
-**Advanced CLI integrations** — OpenClaw gateway pairing, Android device bridging via ADB, and APME deterministic (git/pnpm introspection) scoring — require a separately-installed CLI (`npx @agentdeck/setup`). The App Store build surfaces clear "Unavailable in App Store build" messaging for each so users understand the boundary.
+**Advanced terminal-only integrations** — Android device bridging via ADB, PTY-level launch for Codex/OpenCode, and APME deterministic (git/pnpm introspection) scoring — are not part of the App Store app. The App Store build surfaces clear "Unavailable in App Store build" messaging for each so reviewers and users understand the boundary. The app does not download, install, or launch any companion executable to add those features.
 
 The app is sandboxed. All non-trivial entitlements below are used for local-network monitoring of agents the user is running themselves — no remote services, no third-party data collection.
 
@@ -53,9 +53,7 @@ Used to communicate with the optional Ulanzi D200H Deck Dock (USB HID class, VID
 
 ## Subprocess execution
 
-**The App Store build of AgentDeck does not spawn any subprocess.** The binary is gated behind an `AGENTDECK_APP_STORE` Swift compile condition that compiles-out every `Process()` path — bundled Node runtime, bundled `bridge/cli.js`, bundled `adb`, bundled D200H helper shell script, AppleScript for iTerm launch, AppleScript fallback for Terminal launch, `/usr/bin/security`, `/usr/bin/sqlite3`, `/bin/sh`, `/usr/bin/env`, and every external-CLI probe (`openclaw`, `whisper-cli`, `networksetup`). A CI script (`apple/scripts/verify-appstore-archive.sh`) runs after archive and fails the pipeline if the shipped `.app` contains any of those subprocess path strings in its main Mach-O, or any bundled executable besides the signed AgentDeck binary itself.
-
-The only "launch a program" code path in the shipped app is `NSWorkspace.shared.open(URL)` on a `.command` shell script that the user explicitly initiated (by clicking "Launch Session" in the menu bar). That is a standard user-selected file open and matches the pattern used by Terminal.app's own "Run Script" behavior — AgentDeck does not invoke the command, macOS does.
+**The App Store build of AgentDeck does not spawn any subprocess or create shell scripts for Terminal.** The binary is gated behind an `AGENTDECK_APP_STORE` Swift compile condition that compiles-out every `Process()` path and every Terminal-launch path — bundled Node runtime, bundled `bridge/cli.js`, bundled `adb`, bundled D200H helper shell script, AppleScript for iTerm launch, AppleScript fallback for Terminal launch, `.command` launch scripts, `/usr/bin/security`, `/usr/bin/sqlite3`, `/bin/sh`, `/usr/bin/env`, and every external-CLI probe (`openclaw`, `whisper-cli`, `networksetup`). A CI script (`apple/scripts/verify-appstore-archive.sh`) runs after archive and fails the pipeline if the shipped `.app` contains any of those subprocess path strings in its main Mach-O, or any bundled executable besides the signed AgentDeck binary itself.
 
 ### What about the Claude Code hook commands?
 
@@ -63,7 +61,7 @@ Claude Code hooks run `python3` / `curl` at the user's shell prompt, in their ow
 
 ### Bundled helpers
 
-The App Store archive contains no `Contents/Helpers/`, no `Contents/Resources/node`, no `Contents/Resources/agentdeck-runtime`, and no `Contents/Resources/bridge/cli.js`. The sole binary is `Contents/MacOS/AgentDeck`. Android ADB bridging, APME Layer 1 deterministic git/pnpm scoring, and PTY-level agent parsing are offered exclusively through a separately-installed companion CLI (`npx @agentdeck/setup`) and are documented as such in the app UI.
+The App Store archive contains no `Contents/Helpers/`, no `Contents/Resources/node`, no `Contents/Resources/agentdeck-runtime`, and no `Contents/Resources/bridge/cli.js`. The sole binary is `Contents/MacOS/AgentDeck`. Android ADB bridging, APME Layer 1 deterministic git/pnpm scoring, and PTY-level agent parsing are outside the reviewed app and are not required for the App Store experience.
 
 ### OpenClaw Gateway integration
 
@@ -71,12 +69,12 @@ Unlike the other advanced integrations, OpenClaw **is** first-class in the App S
 
 - AgentDeck connects to the user's local OpenClaw Gateway over WebSocket (`ws://127.0.0.1:18789`). No `~/.openclaw/` directory read, no `openclaw` CLI spawn.
 - On first launch AgentDeck generates its own Ed25519 keypair (stored in the macOS Keychain, accessible-after-first-unlock / this-device-only). The public key's SHA-256 hex becomes the `deviceId` sent to the Gateway during the v3 pairing handshake. A short-lived `deviceToken` issued by the Gateway is used for subsequent reconnects.
-- The user must approve the new device in OpenClaw (via `openclaw devices approve <requestId>` or OpenClaw's Web UI) — AgentDeck only displays the pairing state; it never writes to OpenClaw's own config.
+- The user must approve the new device in OpenClaw's Web UI — AgentDeck only displays the pairing state; it never writes to OpenClaw's own config.
 - Reviewers without OpenClaw installed will see the "Gateway not found" state and can skip this integration entirely.
 
 ### Codex / OpenCode launch
 
-Codex and OpenCode do not ship Claude-Code-compatible hook systems today, so the App Store build's "Launch Session" shortcut for those two agents requires the companion CLI (`agentdeck` on PATH) to be installed. Without it, the app displays an install-prompt dialog with a link to the agent's official installation guide and a "Check Again" button. Claude Code is monitored entirely through the hook pipeline described above — no companion CLI required.
+Codex and OpenCode do not ship Claude-Code-compatible hook systems today, so the App Store build does not provide built-in PTY launch for those two agents. Claude Code is monitored entirely through the hook pipeline described above; users start Claude Code in Terminal themselves.
 
 ## APME evaluation module
 
@@ -99,7 +97,7 @@ No account required. To see the app's features:
 
 1. Launch the app. A first-run onboarding sheet walks the user through the value prop, available AI agents, and iPad pairing. Dismissing it opens the empty dashboard with a prompt to "Launch Session" or "Preview Devices".
 2. Click "Preview Devices" from the menu bar to see how AgentDeck renders sessions on 14 different hardware targets — no real hardware required.
-3. Click "Launch Session" to start a Claude Code session. If `claude` CLI is not installed, the dashboard shows an install-prompt dialog with an "Open Installation Guide" button (directs to docs.claude.com) and a "Check Again" button so the user can install in another window and continue without reopening AgentDeck.
+3. Click "Launch Session" to see the App Store-safe guidance: AgentDeck does not launch Terminal scripts. Start Claude Code in Terminal after enabling hooks; the session appears automatically in the dashboard.
 4. Click "Pair iPad" to show a QR code the iOS companion app can scan.
 5. Open Settings → Hardware Setup to see the in-app flows for ESP32 and Pixoo provisioning (no subprocess calls; writes serial config directly).
 
