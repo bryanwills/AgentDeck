@@ -170,7 +170,7 @@ function buildHookCommand(eventName: string): string {
     `fi`,
     `PORT="\${PORT:-9120}"`,
     `curl -sf -X POST "http://127.0.0.1:$PORT/hooks/${eventName}" -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
-  ].join('; ');
+  ].join('\n');
 }
 
 function buildHookEntry(eventName: string) {

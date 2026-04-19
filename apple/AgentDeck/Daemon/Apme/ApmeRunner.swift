@@ -395,7 +395,7 @@ actor ApmeRunner {
             // the rubric knows there's no artifact to review.
             sections.append("")
             sections.append("--- DIFF (truncated) ---")
-            sections.append("(diff collection disabled in Phase 1 — App Store sandbox)")
+            sections.append("(diff not provided)")
         }
 
         sections.append("")

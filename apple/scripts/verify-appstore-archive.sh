@@ -19,6 +19,12 @@
 #        temporary exception.
 #     4. No embedded subprocess path string (`/usr/bin/env`, `/bin/sh`,
 #        `/usr/bin/security`, `/usr/bin/sqlite3`) in the main binary.
+#     5. No companion-install prompt strings (`npm i @agentdeck/...`,
+#        `npx @agentdeck/...`, `brew install agentdeck`) in the main
+#        binary — CLAUDE.md invariant "App-Store-reachable UI ... must
+#        not tell the user to install, register, or launch a companion
+#        binary" applies to embedded log/alert strings too, since `strings`
+#        on the Mach-O reveals them during review.
 #   macOS ONLY:
 #     5. `Contents/Info.plist` must not contain `LSRequiresIPhoneOS`
 #        (iOS-only key must be auto-stripped by Xcode).
@@ -127,6 +133,22 @@ if [ -f "$MAIN_EXEC" ]; then
     LEAK=$(strings "$MAIN_EXEC" 2>/dev/null | grep -E '^/usr/bin/env$|^/bin/sh$|^/usr/bin/security$|^/usr/bin/sqlite3$' || true)
     if [ -n "$LEAK" ]; then
         fail "main binary references subprocess paths: $LEAK"
+    fi
+fi
+
+# (6) Companion-install prompt scan — the App Store UI invariant
+# prohibits copy telling the user to install a separate Node.js / npm /
+# Homebrew binary. Log strings embedded in the Mach-O are reachable via
+# `strings` during review, so they count. This regex is deliberately
+# narrow: it targets our actual package namespace and concrete install
+# commands, not generic words like "install" which appear legitimately
+# (e.g. the hook-installer UI that writes to ~/.claude/settings.local.json).
+if [ -f "$MAIN_EXEC" ]; then
+    PROMPT_LEAK=$(strings "$MAIN_EXEC" 2>/dev/null \
+        | grep -iE 'npm[[:space:]]+(i|install)[[:space:]]+(-g[[:space:]]+)?@agentdeck|npx[[:space:]]+@agentdeck|brew[[:space:]]+install[[:space:]]+agentdeck' \
+        || true)
+    if [ -n "$PROMPT_LEAK" ]; then
+        fail "main binary embeds companion-install prompt string(s): $PROMPT_LEAK"
     fi
 fi
 

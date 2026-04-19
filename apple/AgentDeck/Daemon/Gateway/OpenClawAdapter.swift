@@ -396,7 +396,7 @@ actor OpenClawAdapter {
             deviceAuthToken = nil
             let nsError = error as NSError
             if AgentDeckRuntime.isSandboxed {
-                DaemonLogger.shared.info("[OpenClaw] Gateway disabled — App Sandbox blocks access to \(deviceFile.path). Install the CLI build for OpenClaw integration: `npm i -g @agentdeck/cli`.")
+                DaemonLogger.shared.info("[OpenClaw] Gateway disabled — App Sandbox cannot read \(deviceFile.path).")
             } else if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoSuchFileError {
                 DaemonLogger.shared.info("[OpenClaw] Not paired — run `openclaw pair` to create \(deviceFile.path), then restart the daemon.")
             } else {

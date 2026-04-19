@@ -404,7 +404,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             let openResult = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
             if openResult != kIOReturnSuccess {
                 logOpenFailure("Consumer Control", result: openResult,
-                               extraHint: "Check App Sandbox USB entitlement support or use the non-sandboxed Node.js daemon fallback.")
+                               extraHint: "Verify USB entitlement is honored for this device.")
                 return
             }
             consumerDevice = device
@@ -416,7 +416,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             let openResult = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
             if openResult != kIOReturnSuccess {
                 logOpenFailure("Keyboard", result: openResult,
-                               extraHint: "Check Input Monitoring and App Sandbox USB entitlement support, or use the non-sandboxed Node.js daemon fallback.")
+                               extraHint: "Verify Input Monitoring permission and USB entitlement.")
                 return
             }
             keyboardDevice = device

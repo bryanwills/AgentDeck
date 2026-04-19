@@ -43,7 +43,7 @@ export function buildHookCommand(eventName: string): string {
     `fi`,
     `PORT="\${PORT:-9120}"`,
     `curl -sf -X POST "http://127.0.0.1:$PORT/hooks/${eventName}" -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
-  ].join('; ');
+  ].join('\n');
 }
 
 // Claude Code v2.1+ requires 3-level nesting: event → matcher group → hook handler.

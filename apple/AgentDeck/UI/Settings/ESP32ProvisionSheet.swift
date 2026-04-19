@@ -131,7 +131,7 @@ struct ESP32ProvisionSheet: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            Text("AgentDeck cannot auto-fill these in the App Store build. Type the network name and password you normally use for this Mac.")
+            Text("Type the network name and password you normally use for this Mac.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

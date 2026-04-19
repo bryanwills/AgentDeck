@@ -1040,40 +1040,6 @@ struct SettingsScreen: View {
         #endif
     }
 
-    // MARK: - ADB / Android integration status row
-
-    /// Android device bridging shells out to the `adb` binary, which App
-    /// Sandbox blocks (no external-binary spawn). Flag that inline so users
-    /// on the App Store build don't think AgentDeck forgot their phone.
-    private var adbIntegrationRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "iphone.and.arrow.forward")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TerrariumHUD.subtext)
-                Text("Android / ADB")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                if AgentDeckRuntime.isSandboxed {
-                    Text("Unavailable")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if AgentDeckRuntime.isSandboxed {
-                Text("Android/ADB bridging requires subprocess access and is disabled in the App Store build.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text("Runs `adb` from PATH. Install with `brew install android-platform-tools` if it's missing.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
     #if os(macOS)
     @State private var showESP32Sheet: Bool = false
     @State private var showPixooSheet: Bool = false
@@ -1161,10 +1127,6 @@ struct SettingsScreen: View {
                 loadOpenClawGatewayTokenState()
                 loadAnthropicAdminApiKeyState()
             }
-
-            #if os(macOS)
-            adbIntegrationRow
-            #endif
         }
     }
 

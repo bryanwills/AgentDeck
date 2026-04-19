@@ -21,18 +21,29 @@ describe('Hook Installer', () => {
     it('includes daemon.json port resolution with fallback to 9120', () => {
       const entry = buildHookEntry('Stop');
       expect(entry.hooks[0].command).toContain('daemon.json');
-      expect(entry.hooks[0].command).toContain('echo 9120');
+      expect(entry.hooks[0].command).toContain('${PORT:-9120}');
       expect(entry.hooks[0].command).toContain('$PORT');
     });
 
     it('reads PORT from AGENTDECK_PORT env var first, then daemon.json, then 9120', () => {
       const entry = buildHookEntry('SessionStart');
       const cmd = entry.hooks[0].command;
-      // Should have the priority chain: AGENTDECK_PORT → daemon.json → 9120
-      expect(cmd).toContain('PORT=${AGENTDECK_PORT:-$(python3');
-      expect(cmd).toContain('daemon.json');
-      expect(cmd).toContain('|| echo 9120');
-      expect(cmd).toContain('curl -sf -X POST http://localhost:$PORT/hooks/SessionStart');
+      // Priority chain: AGENTDECK_PORT → ~/.agentdeck/daemon.json → group container daemon.json → 9120
+      expect(cmd).toContain('PORT="${AGENTDECK_PORT:-}"');
+      expect(cmd).toContain('.agentdeck/daemon.json');
+      expect(cmd).toContain('group.bound.serendipity.agentdeck.dashboard/daemon.json');
+      expect(cmd).toContain('${PORT:-9120}');
+      expect(cmd).toContain('curl -sf -X POST "http://127.0.0.1:$PORT/hooks/SessionStart"');
+    });
+
+    it('emits newline-separated shell so if/then/for/do keywords are not mis-terminated by `;`', () => {
+      const cmd = buildHookEntry('SessionStart').hooks[0].command;
+      // Regression guard: `; then;` / `; do;` is a zsh-only oddity that fails under
+      // sh/bash — Claude Code runs hooks via /bin/sh so the joined output must
+      // use newlines between statements.
+      expect(cmd).not.toMatch(/;\s*then\s*;/);
+      expect(cmd).not.toMatch(/;\s*do\s*;/);
+      expect(cmd).toContain('\n');
     });
   });
 

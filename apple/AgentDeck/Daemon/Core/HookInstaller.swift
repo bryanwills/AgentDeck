@@ -255,7 +255,7 @@ enum HookInstaller {
             #"PORT="${PORT:-9120}""#,
             "curl -sf -X POST \"http://127.0.0.1:$PORT/hooks/\(event)\" -H 'Content-Type: application/json' -d @- 2>/dev/null || true",
         ]
-        return lines.joined(separator: "; ")
+        return lines.joined(separator: "\n")
     }
 
     private static func buildHookEntry(_ event: String) -> [String: Any] {

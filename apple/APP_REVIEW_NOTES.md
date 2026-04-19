@@ -10,7 +10,7 @@ AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding a
 
 **Optional hardware extensions** let power users drive the same state on Stream Deck+ keys, Ulanzi D200H Deck Docks (USB HID), ESP32 status displays (Wi-Fi), and Divoom Pixoo matrix displays (Wi-Fi). Each integration is configurable from an in-app sheet — the user is never forced to open Terminal.
 
-**Advanced terminal-only integrations** — Android device bridging via ADB, PTY-level launch for Codex/OpenCode, and APME deterministic (git/pnpm introspection) scoring — are not part of the App Store app. Their UI surfaces are simply hidden when the standalone app runs alone, so the catalog reflects only what this binary can drive. If the user happens to run an unrelated AgentDeck Node.js daemon on the same machine (downloaded separately from npm), AgentDeck connects to it as a WebSocket client on port 9120 and surfaces whatever data that daemon broadcasts — but the app never installs, downloads, or launches any companion executable itself.
+**Advanced developer integrations** — Android device bridging via ADB, PTY-level launch for Codex/OpenCode, and APME Layer 1 deterministic scoring (git/pnpm introspection) — are not bundled in AgentDeck, and the App Store app never installs, downloads, runs, or prompts the user to obtain them. The UI panels that visualize these integrations are **conditional, read-only views** of data broadcast by a separately-distributed Node.js CLI daemon that a developer may independently install via npm. AgentDeck detects that daemon by attempting to bind `127.0.0.1:9120` at launch: if the port is free, AgentDeck itself becomes the server and those panels never appear; if the port is already held by the user-run daemon, AgentDeck connects as a WebSocket client and renders additional panels purely from the data received. No installer flow, App Store-visible link, or copy in AgentDeck asks the user to obtain the external daemon. `docs/appstore-feature-matrix.md` in the public repository is the source of truth for what ships in this binary vs. what is only reachable via the optional developer toolchain.
 
 The app is sandboxed. All non-trivial entitlements below are used for local-network monitoring of agents the user is running themselves — no remote services, no third-party data collection.
 
@@ -100,6 +100,18 @@ No account required. To see the app's features:
 3. Click "Launch Session" to see the App Store-safe guidance: AgentDeck does not launch Terminal scripts or command-line tools. After hooks are enabled, Claude Code sessions the user starts independently appear automatically in the dashboard.
 4. Click "Pair iPad" to show a QR code the iOS companion app can scan.
 5. Open Settings → Hardware Setup to see the in-app flows for ESP32 and Pixoo provisioning (no subprocess calls; writes serial config directly).
+
+## Reviewing the conditional UI (optional)
+
+The "Advanced developer integrations" panels described above do **not** appear during a normal review. Reviewers testing on a clean macOS install see only the standalone product — Device Preview shows Stream Deck+, D200H, ESP32, and Pixoo tiles; the menu bar shows no Claude-subscription quota gauge. This is the intended out-of-the-box experience and is fully functional.
+
+If a reviewer wishes to independently verify that those conditional panels are purely read-only WebSocket visualizations and not subprocess/file-I/O paths hiding in the shipped app, the optional reproduction path is:
+
+1. Clone the public AgentDeck repository (link in the App Store description).
+2. Follow the README's developer-install instructions to run `agentdeck daemon start` in a separate Terminal. This step is entirely outside the App Store app — it is the reviewer's own shell spawning a Node.js process.
+3. Launch the App Store build of AgentDeck Dashboard. The Device Preview screen now lists additional rows (e.g. "Android e-ink", "Ulanzi TC001"); the menu bar surfaces the Claude subscription quota gauge.
+
+At no point does AgentDeck itself install, download, or launch anything. The reviewer starts the external daemon in their own shell and observes the App Store app render the data that daemon broadcasts over `ws://127.0.0.1:9120`. The CI script `apple/scripts/verify-appstore-archive.sh` fails the build if the shipped Mach-O ever reintroduces a subprocess spawn path, a bundled Node.js/adb binary, a Contents/Helpers directory, or a home-relative-path entitlement.
 
 ## Contact
 
