@@ -141,90 +141,55 @@ struct SetupItem: Identifiable {
 
 extension AgentStateHolder {
     /// Collect the integration gaps the dashboard Setup card should surface.
-    /// Kept as a plain function so both Monitor and Menubar can call into
-    /// the same decision tree if we ever want the menubar to mirror the
-    /// card — right now only MonitorScreen consumes it.
+    /// Derives items from `IntegrationCatalog` so the wording stays in sync
+    /// with Settings → Integrations and the Onboarding pane. Hooks consent
+    /// is the one item not in the catalog (it's a sub-affordance of Claude
+    /// rather than a standalone integration), so it's checked separately.
     ///
     /// Platform split:
-    /// - macOS accepts `DaemonService` so the Claude-quota branch can
-    ///   distinguish "CLI not installed" / "CLI installed but this Mac
-    ///   app is still the daemon" / "external CLI daemon but quota still
-    ///   missing" — each needs different instructions.
-    /// - iOS has no `DaemonService` (daemon concept is macOS-only). The
-    ///   iOS variant falls back to a simpler message pointing users at
-    ///   their Mac, since iPad/iPhone can't install or manage the CLI.
+    /// - macOS includes Claude / OpenClaw / Antigravity, plus the hooks
+    ///   consent step.
+    /// - iOS surfaces only the integrations the Mac side controls — pairing
+    ///   and credential paste live on macOS, so iPad/iPhone just nudge the
+    ///   user to fix things on their Mac.
     #if os(macOS)
-    /// `@MainActor` because `DaemonService` is itself `@MainActor` —
-    /// reaching its `isSelfDaemon` property from a nonisolated context
-    /// fails the Swift 6 actor-isolation check. The caller (MonitorScreen
-    /// body) is already on MainActor, so this annotation is a no-op at
-    /// call sites.
+    /// `@MainActor` because callers reach `DaemonService.isSelfDaemon`
+    /// before invoking; we keep the annotation for symmetry with the
+    /// previous signature even though we no longer take `daemonService`.
     @MainActor
     func setupNeededItems(
         preferences: AppPreferences,
         daemonService: DaemonService
     ) -> [SetupItem] {
-        var items: [SetupItem] = []
+        _ = daemonService  // Kept in signature to avoid call-site churn.
 
-        // 1) Claude quota. App Store builds must remain useful without
-        // requiring another executable install (App Review 2.5.2 / 4.2.3),
-        // so sandbox copy does not tell users to install or register a CLI
-        // daemon. If an external terminal-managed daemon is already running,
-        // we can still surface its relay failures accurately.
-        if (state.oauthConnected ?? false) == false {
-            let hint: String
-            if !AgentDeckRuntime.isSandboxed {
-                hint = "Sign in with `claude` in Terminal to populate 5h / 7d quota gauges."
-            } else if daemonService.isSelfDaemon {
-                hint = "Subscription quota is unavailable inside the App Store sandbox. AgentDeck still monitors sessions through approved hooks; API usage can be shown with an Anthropic Admin API key in Settings."
-            } else {
-                hint = "The external terminal daemon is connected, but Claude quota is still unavailable. Sign in with Claude Code in Terminal so that daemon can relay quota."
-            }
-            items.append(SetupItem(
-                id: "claude",
-                icon: "bolt.badge.clock",
-                tint: .orange,
-                title: "Claude quota unavailable",
-                hint: hint
-            ))
+        let anthropicSaved = anthropicAdminKeySavedValue()
+        let descriptors: [IntegrationDescriptor] = [
+            IntegrationCatalog.claudeCode,
+            IntegrationCatalog.openClaw,
+            IntegrationCatalog.antigravity,
+        ]
+        var items: [SetupItem] = descriptors.compactMap { descriptor in
+            let status = IntegrationStatusEvaluator.status(
+                for: descriptor,
+                state: state,
+                preferences: preferences,
+                anthropicKeySaved: anthropicSaved
+            )
+            guard status.needsAttention else { return nil }
+            return SetupItem(
+                id: descriptor.id,
+                icon: descriptor.iconSystemName,
+                tint: status.tint,
+                title: descriptor.displayName,
+                hint: status.detail ?? descriptor.connectInstructions ?? status.label
+            )
         }
 
-        // 2) OpenClaw — the Gateway process is reachable but the shared
-        //    token hasn't been authorized. Without the card, the only hint
-        //    was the crayfish appearing in the terrarium anyway (now fixed
-        //    in TerrariumState to hide until authenticated).
-        if state.gatewayAvailable && !state.gatewayConnected {
-            let authStatus = state.gatewayAuthStatus ?? ""
-            let title: String
-            let hint: String
-            switch authStatus {
-            case "gateway_token_missing":
-                title = "OpenClaw needs a shared token"
-                hint = "Paste the OPENCLAW_GATEWAY_TOKEN value in Settings → Services → OpenClaw."
-            case "approval_pending", "pairing_required":
-                title = "OpenClaw awaiting approval"
-                hint = "Approve this Mac in OpenClaw's Web UI to finish pairing."
-            case "auth_failed", "token_mismatch", "device_auth_invalid":
-                title = "OpenClaw authentication failed"
-                hint = state.gatewayAuthMessage ?? "Revoke this device in OpenClaw and re-approve it."
-            default:
-                title = "OpenClaw not authenticated"
-                hint = "Paste the Gateway's shared token (OPENCLAW_GATEWAY_TOKEN) in Settings."
-            }
-            items.append(SetupItem(
-                id: "openclaw",
-                icon: "lock.shield",
-                tint: .red,
-                title: title,
-                hint: hint
-            ))
-        }
-
-        // 3) Hook consent — live session tokens, currentTool, and timeline
-        //    depend on `~/.claude/settings.local.json` being wired up.
-        //    Respect `.declined` so users who actively opted out aren't
-        //    nagged; only surface for `.unknown` or previously-accepted
-        //    installs that have been wiped.
+        // Hooks consent — live session tokens / timeline depend on
+        // `~/.claude/settings.local.json`. Respect `.declined` so users
+        // who actively opted out aren't nagged; only surface for `.unknown`
+        // or previously-accepted installs that have been wiped.
         if !preferences.hooksInstalled && preferences.hookInstallConsent != .declined {
             items.append(SetupItem(
                 id: "hooks",
@@ -238,36 +203,43 @@ extension AgentStateHolder {
         return items
     }
     #else
-    /// iOS variant — configuration lives on the Mac side, so the iPad
-    /// surface stays purely informational. Avoids the word "daemon"
-    /// (could be read by App Review as "requires external executable")
-    /// and points users at the Mac Integrations pane instead.
     func setupNeededItems(preferences: AppPreferences) -> [SetupItem] {
-        var items: [SetupItem] = []
-
-        if (state.oauthConnected ?? false) == false {
-            items.append(SetupItem(
-                id: "claude",
-                icon: "bolt.badge.clock",
-                tint: .orange,
-                title: "Claude quota unavailable",
-                hint: "Enable Claude Code hooks in AgentDeck on your Mac — live sessions then appear here automatically."
-            ))
+        let anthropicSaved = anthropicAdminKeySavedValue()
+        let descriptors: [IntegrationDescriptor] = [
+            IntegrationCatalog.claudeCode,
+            IntegrationCatalog.openClaw,
+        ]
+        return descriptors.compactMap { descriptor in
+            let status = IntegrationStatusEvaluator.status(
+                for: descriptor,
+                state: state,
+                preferences: preferences,
+                anthropicKeySaved: anthropicSaved
+            )
+            guard status.needsAttention else { return nil }
+            // iOS users can't fix any of this here — point them at the Mac.
+            let macHint = "Open AgentDeck on your Mac to configure. Changes flow here automatically."
+            return SetupItem(
+                id: descriptor.id,
+                icon: descriptor.iconSystemName,
+                tint: status.tint,
+                title: descriptor.displayName,
+                hint: macHint
+            )
         }
-
-        if state.gatewayAvailable && !state.gatewayConnected {
-            items.append(SetupItem(
-                id: "openclaw",
-                icon: "lock.shield",
-                tint: .red,
-                title: "OpenClaw not authenticated",
-                hint: "Paste the OpenClaw Gateway shared token in AgentDeck on your Mac. Changes flow here automatically."
-            ))
-        }
-
-        return items
     }
     #endif
+
+    /// Anthropic Admin key presence — Keychain on App Store, env on CLI.
+    /// Checked once per `setupNeededItems` call so the catalog evaluator
+    /// can render a meaningful "Connected" detail when applicable.
+    private func anthropicAdminKeySavedValue() -> Bool {
+        #if os(macOS)
+        return AnthropicAdminApiClient.shared.hasKey()
+        #else
+        return false
+        #endif
+    }
 }
 
 // MARK: - Preview helpers

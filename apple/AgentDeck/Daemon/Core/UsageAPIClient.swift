@@ -398,10 +398,13 @@ final class UsageAPIClient: Sendable {
             let authStatusText = sqliteValue(forKey: "antigravityAuthStatus", dbURL: dbURL)
             guard let planName = parseAntigravityPlanName(authStatusText) else { return nil }
 
+            let creditsText = sqliteValue(forKey: "antigravityUnifiedStateSync.modelCredits", dbURL: dbURL)
+            let credits = parseAntigravityModelCredits(creditsText)
+
             return AntigravityStatus(
                 planName: planName,
-                availableCredits: nil,
-                minimumCreditAmountForUsage: nil
+                availableCredits: credits.available,
+                minimumCreditAmountForUsage: credits.minimum
             )
         }
     }
@@ -497,6 +500,96 @@ final class UsageAPIClient: Sendable {
             return match
         }
         return ascii.first(where: { $0.hasPrefix("Google AI ") })
+    }
+
+    private struct ProtoField {
+        let field: Int
+        let wire: Int
+        let varint: UInt64?
+        let bytes: Data?
+    }
+
+    private func readVarint(_ buf: Data, at offset: Int) -> (value: UInt64, next: Int)? {
+        var result: UInt64 = 0
+        var shift: UInt64 = 0
+        var index = offset
+        while index < buf.count {
+            let byte = buf[index]
+            index += 1
+            result |= UInt64(byte & 0x7f) << shift
+            if (byte & 0x80) == 0 { return (result, index) }
+            shift += 7
+            if shift > 63 { return nil }
+        }
+        return nil
+    }
+
+    private func parseProto(_ buf: Data) -> [ProtoField] {
+        var out: [ProtoField] = []
+        var index = 0
+        while index < buf.count {
+            guard let key = readVarint(buf, at: index) else { break }
+            index = key.next
+            let field = Int(key.value >> 3)
+            let wire = Int(key.value & 0x07)
+            if wire == 0 {
+                guard let value = readVarint(buf, at: index) else { break }
+                out.append(ProtoField(field: field, wire: wire, varint: value.value, bytes: nil))
+                index = value.next
+            } else if wire == 2 {
+                guard let length = readVarint(buf, at: index) else { break }
+                index = length.next
+                let end = index + Int(length.value)
+                guard end <= buf.count else { break }
+                out.append(ProtoField(field: field, wire: wire, varint: nil, bytes: buf.subdata(in: index..<end)))
+                index = end
+            } else {
+                break
+            }
+        }
+        return out
+    }
+
+    private func protoFirstString(_ fields: [ProtoField], field: Int) -> String? {
+        guard let hit = fields.first(where: { $0.field == field && $0.wire == 2 }),
+              let bytes = hit.bytes else { return nil }
+        return String(data: bytes, encoding: .utf8)
+    }
+
+    private func protoFirstBytes(_ fields: [ProtoField], field: Int) -> Data? {
+        fields.first(where: { $0.field == field && $0.wire == 2 })?.bytes
+    }
+
+    private func protoFirstVarint(_ fields: [ProtoField], field: Int) -> UInt64? {
+        fields.first(where: { $0.field == field && $0.wire == 0 })?.varint
+    }
+
+    /// Mirrors `bridge/src/antigravity-local.ts:parseModelCredits`. The DB
+    /// value at `antigravityUnifiedStateSync.modelCredits` is a base64-wrapped
+    /// protobuf map; each entry's value is itself a base64 protobuf wrapping
+    /// the actual integer in field 1 (with field 2 as a fallback).
+    private func parseAntigravityModelCredits(_ text: String?) -> (available: Int?, minimum: Int?) {
+        guard let text,
+              let outer = Data(base64Encoded: text) else {
+            return (nil, nil)
+        }
+        var available: Int?
+        var minimum: Int?
+        for entry in parseProto(outer) where entry.field == 1 && entry.wire == 2 {
+            guard let entryBytes = entry.bytes else { continue }
+            let pair = parseProto(entryBytes)
+            guard let key = protoFirstString(pair, field: 1),
+                  let wrapped = protoFirstBytes(pair, field: 2) else { continue }
+            guard let wrappedB64 = protoFirstString(parseProto(wrapped), field: 1),
+                  let inner = Data(base64Encoded: wrappedB64) else { continue }
+            let innerFields = parseProto(inner)
+            guard let raw = protoFirstVarint(innerFields, field: 1)
+                ?? protoFirstVarint(innerFields, field: 2) else { continue }
+            let value = Int(raw)
+            if key == "availableCreditsSentinelKey" { available = value }
+            if key == "minimumCreditAmountForUsageKey" { minimum = value }
+        }
+        return (available, minimum)
     }
 
     private func extractASCIIStrings(from data: Data, minimumLength: Int = 6) -> [String] {

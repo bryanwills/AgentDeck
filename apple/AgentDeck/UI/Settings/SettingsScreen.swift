@@ -909,166 +909,7 @@ struct SettingsScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - Codex auth status row
-
-    /// Codex CLI web-auth status. When the daemon runs inside App Sandbox it
-    /// cannot read `~/.codex/auth.json` (outside container), and the reviewed
-    /// app does not launch PTY-backed Codex sessions.
-    private var codexAuthRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "person.badge.key")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TerrariumHUD.subtext)
-                Text("Codex CLI")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                if let mode = stateHolder.state.codexAuthMode, !mode.isEmpty {
-                    Text(mode)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.green)
-                } else {
-                    Text("Not detected")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if stateHolder.state.codexAuthMode == nil && AgentDeckRuntime.isSandboxed {
-                Text("Codex PTY launch is unavailable in the App Store build. Claude Code monitoring still works through hooks.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    // MARK: - OpenClaw integration status row
-
-    /// App Store builds use a separate AgentDeck Dashboard device identity and
-    /// pair through the OpenClaw Gateway. Non-sandbox builds keep the legacy
-    /// CLI identity file path.
-    private var openClawIntegrationRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "network")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TerrariumHUD.subtext)
-                Text("OpenClaw Gateway")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                if AgentDeckRuntime.isSandboxed {
-                    Text(openClawGatewayStatusLabel)
-                        .font(.system(size: 11))
-                        .foregroundStyle(openClawGatewayStatusColor)
-                }
-            }
-            if AgentDeckRuntime.isSandboxed {
-                Text(openClawGatewayHelpText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-                openClawGatewayTokenSection
-            } else {
-                Text("Connects to `ws://127.0.0.1:18789`. Run `openclaw devices approve <requestId>` after first launch to authorize this Mac app.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .onAppear {
-            loadOpenClawGatewayTokenState()
-        }
-    }
-
-    private var openClawGatewayStatusLabel: String {
-        switch stateHolder.state.gatewayAuthStatus {
-        case "connected":
-            return "Connected"
-        case "approval_pending":
-            return "Approval pending"
-        case "pairing_required":
-            return "Pairing required"
-        case "gateway_token_missing":
-            return "Gateway token required"
-        case "token_mismatch", "device_auth_invalid", "auth_failed":
-            return "Auth failed"
-        case "unsupported_protocol":
-            return "Unsupported"
-        case "gateway_reachable":
-            return "Gateway reachable"
-        default:
-            return stateHolder.state.gatewayAvailable ? "Gateway reachable" : "Gateway not found"
-        }
-    }
-
-    private var openClawGatewayStatusColor: Color {
-        switch stateHolder.state.gatewayAuthStatus {
-        case "connected":
-            return .green
-        case "approval_pending", "pairing_required", "gateway_reachable":
-            return .orange
-        case "gateway_token_missing", "auth_failed", "token_mismatch", "device_auth_invalid", "unsupported_protocol":
-            return .red
-        default:
-            return .secondary
-        }
-    }
-
-    private var openClawGatewayHelpText: String {
-        let base = "AgentDeck registers as a separate device with the local OpenClaw Gateway. Approve this Mac in OpenClaw's Web UI."
-        let approve = stateHolder.state.gatewayAuthRequestId.map {
-            "Approval request: \($0). Open `http://localhost:18789` in your browser and approve this AgentDeck device."
-        } ?? "Open `http://localhost:18789` in your browser and approve this AgentDeck device."
-
-        let tokenHint = "The token is the shared secret set on the OpenClaw Gateway itself — the value you passed as `OPENCLAW_GATEWAY_TOKEN` (env) or `gateway.auth.token` (config). Paste that same value here. AgentDeck cannot read it from the Gateway's config in the App Store build."
-
-        switch stateHolder.state.gatewayAuthStatus {
-        case "connected":
-            return "Connected through the local OpenClaw Gateway. \(base)"
-        case "approval_pending", "pairing_required":
-            return "\(base) \(approve)"
-        case "unsupported_protocol":
-            return "OpenClaw Gateway version not supported. Update OpenClaw to a compatible 2026.4.14+ Gateway."
-        case "gateway_token_missing":
-            return "OpenClaw Gateway requires a shared token before device approval. \(tokenHint)"
-        case "auth_failed", "token_mismatch", "device_auth_invalid":
-            return stateHolder.state.gatewayAuthMessage ?? "OpenClaw Gateway authentication failed. Revoke this AgentDeck device in OpenClaw and approve it again."
-        case "gateway_reachable":
-            return "\(base) Waiting for OpenClaw Gateway approval. If OpenClaw was launched with a shared token, paste it below before approving this device. \(tokenHint)"
-        default:
-            return "Start OpenClaw Gateway on `ws://127.0.0.1:18789`. \(base) If the Gateway is launched with a shared token, paste it below. \(tokenHint)"
-        }
-    }
-
-    @ViewBuilder
-    private var openClawGatewayTokenSection: some View {
-        #if os(macOS) && AGENTDECK_APP_STORE
-        if shouldShowOpenClawGatewayTokenEditor {
-            openClawGatewayTokenEditor
-        } else {
-            Text("A shared Gateway token is only needed when OpenClaw reports token-required auth. Normal pairing continues through OpenClaw approval.")
-                .font(.system(size: 10))
-                .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        #else
-        EmptyView()
-        #endif
-    }
-
-    /// Show the Gateway token editor eagerly in the App Store build. Users
-    /// land on Settings without knowing OpenClaw needs a shared secret, so
-    /// hiding the input until auth *already* fails was a dead-end — the UI
-    /// gave no entry path. Exception: once the Gateway reports `connected`,
-    /// collapse to the "Saved in Keychain" confirmation so the input field
-    /// doesn't clutter an already-working setup (the user can still use
-    /// "Clear" to drop the stored token and re-open the editor).
-    private var shouldShowOpenClawGatewayTokenEditor: Bool {
-        if stateHolder.state.gatewayAuthStatus == "connected" {
-            return openClawGatewayTokenSaved ? false : !openClawGatewayTokenInput.isEmpty
-        }
-        return true
-    }
+    // MARK: - OpenClaw shared-token editor (Advanced disclosure)
 
     @ViewBuilder
     private var openClawGatewayTokenEditor: some View {
@@ -1154,71 +995,7 @@ struct SettingsScreen: View {
         #endif
     }
 
-    // MARK: - Anthropic Admin API (org-wide token usage)
-
-    /// Optional: paste a Console Admin API key to surface org-wide token
-    /// consumption (today + last 30 days). This is the only sanctioned
-    /// third-party path for Anthropic usage in App Store builds —
-    /// subscription OAuth tokens were closed off by Anthropic's Feb 2026
-    /// policy update. Users on Pro/Max without an API key still get live
-    /// session monitoring through the hook pipeline.
-    private var anthropicAdminApiRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text("Anthropic API Usage")
-                    .font(.system(size: 13, weight: .semibold))
-                Text(anthropicAdminApiStatusLabel)
-                    .font(.system(size: 11))
-                    .foregroundStyle(anthropicAdminApiStatusColor)
-            }
-            Text("Optional. Paste an Admin API key from console.anthropic.com/settings/keys to track org-wide token consumption (today + last 30 days). This is API-usage billing, not Pro/Max subscription quota.")
-                .font(.system(size: 11))
-                .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
-                .fixedSize(horizontal: false, vertical: true)
-            #if os(macOS) && AGENTDECK_APP_STORE
-            anthropicAdminApiEditor
-            #endif
-            if let usage = latestAdminApiUsageSummary {
-                Text(usage)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .onAppear { loadAnthropicAdminApiKeyState() }
-    }
-
-    private var anthropicAdminApiStatusLabel: String {
-        if anthropicAdminApiKeySaved { return "Connected" }
-        return "Not configured"
-    }
-
-    private var anthropicAdminApiStatusColor: Color {
-        anthropicAdminApiKeySaved ? .green : .secondary
-    }
-
-    private var latestAdminApiUsageSummary: String? {
-        guard anthropicAdminApiKeySaved else { return nil }
-        let todayIn = stateHolder.state.adminApiTodayInputTokens ?? 0
-        let todayOut = stateHolder.state.adminApiTodayOutputTokens ?? 0
-        let monthIn = stateHolder.state.adminApiMonthInputTokens ?? 0
-        let monthOut = stateHolder.state.adminApiMonthOutputTokens ?? 0
-        let todayTotal = todayIn + todayOut
-        let monthTotal = monthIn + monthOut
-        if todayTotal == 0 && monthTotal == 0 {
-            return "Awaiting first fetch (~5 min data delay from Anthropic)…"
-        }
-        return "Today: \(formatTokenCount(todayTotal)) · 30d: \(formatTokenCount(monthTotal))"
-    }
-
-    private func formatTokenCount(_ n: Int) -> String {
-        if n >= 1_000_000 {
-            return String(format: "%.1fM", Double(n) / 1_000_000)
-        } else if n >= 1_000 {
-            return String(format: "%.1fK", Double(n) / 1_000)
-        }
-        return "\(n)"
-    }
+    // MARK: - Anthropic Admin API key editor (Optional API keys group slot)
 
     @ViewBuilder
     private var anthropicAdminApiEditor: some View {
@@ -1402,54 +1179,95 @@ struct SettingsScreen: View {
     }
     #endif
 
+    /// Two-group integrations panel. Per-row inline editors live in the
+    /// builder slots below so this code path doesn't grow new state-driven
+    /// branches every time we add an integration.
     private var servicesContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            codexAuthRow
-            Divider()
-
-            adbIntegrationRow
-            Divider()
-
-            openClawIntegrationRow
-            Divider()
-
-            anthropicAdminApiRow
-            Divider()
-
-            Text("Antigravity")
-                .font(.system(size: 13, weight: .semibold))
-
-            Text("Off by default for App Store compatibility. Grant access only if you want AgentDeck to read Antigravity's local plan state.")
-                .font(.system(size: 11))
-                .foregroundStyle(TerrariumHUD.subtext)
-
-            Text("App Sandbox requires explicit file access. Select the state.vscdb file to enable.")
-                .font(.system(size: 11))
-                .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
-
-            if let path = preferences.antigravitySelectedPath, preferences.antigravityAccessEnabled {
-                Text(path)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            } else {
-                Text("No Antigravity database selected")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TerrariumHUD.subtext)
+        VStack(alignment: .leading, spacing: 14) {
+            IntegrationsView(
+                anthropicKeySaved: anthropicAdminApiKeySaved,
+                accountSlot: { descriptor in
+                    accountIntegrationSlot(descriptor)
+                },
+                apiKeySlot: { descriptor in
+                    apiKeyIntegrationSlot(descriptor)
+                }
+            )
+            .onAppear {
+                loadOpenClawGatewayTokenState()
+                loadAnthropicAdminApiKeyState()
             }
 
             #if os(macOS)
-            HStack {
-                Button("Choose state.vscdb") {
+            adbIntegrationRow
+            #endif
+        }
+    }
+
+    /// Per-row footer for account-linked integrations: OpenClaw advanced
+    /// token disclosure (App Store only), Antigravity database picker.
+    @ViewBuilder
+    private func accountIntegrationSlot(_ descriptor: IntegrationDescriptor) -> some View {
+        switch descriptor.id {
+        case "openclaw":
+            #if os(macOS) && AGENTDECK_APP_STORE
+            DisclosureGroup("Advanced — shared Gateway token") {
+                openClawGatewayTokenEditor
+                    .padding(.top, 6)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(TerrariumHUD.subtext)
+            #else
+            EmptyView()
+            #endif
+        case "antigravity":
+            antigravityDatabaseSlot
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func apiKeyIntegrationSlot(_ descriptor: IntegrationDescriptor) -> some View {
+        switch descriptor.id {
+        case "anthropic-admin":
+            #if os(macOS) && AGENTDECK_APP_STORE
+            anthropicAdminApiEditor
+            #else
+            Text("Configure on macOS to add an Admin API key.")
+                .font(.system(size: 10))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
+            #endif
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var antigravityDatabaseSlot: some View {
+        #if os(macOS)
+        VStack(alignment: .leading, spacing: 6) {
+            if let path = preferences.antigravitySelectedPath, preferences.antigravityAccessEnabled {
+                Text(path)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            HStack(spacing: 8) {
+                Button(preferences.antigravityAccessEnabled ? "Re-pick database" : "Choose state.vscdb") {
                     _ = preferences.chooseAntigravityDatabase()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
                 if preferences.antigravityAccessEnabled {
-                    Button("Remove Access") {
+                    Button("Remove access") {
                         showRemoveAntigravityConfirm = true
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .confirmationDialog(
                         "Remove Antigravity access?",
                         isPresented: $showRemoveAntigravityConfirm,
@@ -1464,12 +1282,10 @@ struct SettingsScreen: View {
                     }
                 }
             }
-            #else
-            Text("This integration can only be configured on macOS.")
-                .font(.system(size: 11))
-                .foregroundStyle(TerrariumHUD.subtext)
-            #endif
         }
+        #else
+        EmptyView()
+        #endif
     }
 
     // MARK: - Claude Code Hooks (macOS)

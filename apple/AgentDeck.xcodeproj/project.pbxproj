@@ -284,6 +284,8 @@
 		FD86AF81DA987540254BA326 /* OpenClawAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 427B912EBD043285F0A0008D /* OpenClawAdapter.swift */; };
 		FDCD49FC590D9C5D0E1A70CD /* BridgeLogStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9ACDDF739DF572C9280B38 /* BridgeLogStream.swift */; };
 		FEA477EB09C6A7DE0EA46F22 /* AttentionTheaterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1853443C348441BF748662A /* AttentionTheaterView.swift */; };
+		3CA5E9C379369B8331314E6E /* IntegrationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7F2D92255CEF8A72FD5E7AB /* IntegrationsView.swift */; };
+		A384FF911027E6ECDDDBBD9D /* IntegrationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7F2D92255CEF8A72FD5E7AB /* IntegrationsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -450,6 +452,7 @@
 		F8E176199605E14D2EAF35A1 /* ApmeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeStore.swift; sourceTree = "<group>"; };
 		F9413D054382510FF4664C89 /* ApmeJudgeFoundationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeJudgeFoundationModels.swift; sourceTree = "<group>"; };
 		FB4C24732A9A2DB27CC5F7C0 /* AnthropicAdminApiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnthropicAdminApiClient.swift; sourceTree = "<group>"; };
+		D7F2D92255CEF8A72FD5E7AB /* IntegrationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -609,6 +612,7 @@
 				C6229A084E6CE2AB75D86F83 /* ESP32ProvisionSheet.swift */,
 				47FFD673C1AD8EAF690B9E82 /* PixooSheet.swift */,
 				DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */,
+				D7F2D92255CEF8A72FD5E7AB /* IntegrationsView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -1205,6 +1209,7 @@
 				34444319598506828DE09006 /* SessionRegistry.swift in Sources */,
 				757405E03E9BF8DACBE91848 /* SessionSlotRenderer.swift in Sources */,
 				D53BC123AAE467EB342A5041 /* SettingsScreen.swift in Sources */,
+				3CA5E9C379369B8331314E6E /* IntegrationsView.swift in Sources */,
 				7FBCD51766F94FE9BD969378 /* SetupNeededCard.swift in Sources */,
 				62F20845F1953514EFB1C11B /* SingletonGuard.swift in Sources */,
 				37EFA4D2AFEB4DDBBABD4F93 /* SquatterCleaner.swift in Sources */,
@@ -1341,6 +1346,7 @@
 				151F41C1C4B7DF78558D546D /* SessionRegistry.swift in Sources */,
 				B6600F223195F4A4B3B17315 /* SessionSlotRenderer.swift in Sources */,
 				38E9C043A76BB267FCACB4B7 /* SettingsScreen.swift in Sources */,
+				A384FF911027E6ECDDDBBD9D /* IntegrationsView.swift in Sources */,
 				EE91D7CCEFEA94B80A2A4FCD /* SetupNeededCard.swift in Sources */,
 				D036600F5679C1A191132F87 /* SingletonGuard.swift in Sources */,
 				E22E6C703C183F1E8C36E7D9 /* SquatterCleaner.swift in Sources */,

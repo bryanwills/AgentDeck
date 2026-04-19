@@ -282,72 +282,57 @@ private struct AgentPickerPane: View {
 
 // MARK: - Pane 3: Optional integrations
 
-/// Informational pane introducing the three Settings integrations that
-/// unlock extra features. Each row is a "what + where" line — no paste
-/// fields here, because token entry in a wizard is brittle (users lose
-/// context, tokens get truncated by IME, etc.). Keeps the wizard short;
-/// the Setup card on the dashboard will nag users who actually need
-/// these to follow through.
+/// Informational pane introducing the integrations grouped exactly the
+/// same way Settings groups them — accounts you sign in to vs. paste-
+/// in API keys. Reuses `IntegrationCatalog` so the copy is identical
+/// across Onboarding, Settings, and the dashboard SetupCard.
 private struct IntegrationsPane: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Optional integrations")
-                    .font(.system(size: 22, weight: .semibold))
-                Text("These unlock extra features. Skip any you don't need — every one of them can be enabled later from Settings → Integrations.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Optional integrations")
+                        .font(.system(size: 22, weight: .semibold))
+                    Text("Skip any you don't need — every one of them can be enabled later from Settings → Integrations.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-            VStack(spacing: 10) {
-                integrationCard(
-                    icon: "bolt.fill",
-                    title: "Claude Code hooks",
-                    detail: "Live per-turn token counts, tool calls, and timeline events. Requires your consent to edit `~/.claude/settings.local.json`."
+                integrationGroup(
+                    title: "Sign in once — no tokens here",
+                    rows: IntegrationCatalog.all.filter { $0.kind == .accountLinked }
                 )
-                integrationCard(
-                    icon: "network",
-                    title: "OpenClaw Gateway",
-                    detail: "Route agent traffic through a local OpenClaw Gateway. Paste the shared `OPENCLAW_GATEWAY_TOKEN` value in Settings."
+
+                integrationGroup(
+                    title: "Optional API keys",
+                    rows: IntegrationCatalog.all.filter { $0.kind == .apiKey }
                 )
-                integrationCard(
-                    icon: "chart.line.uptrend.xyaxis",
-                    title: "Anthropic API usage (optional)",
-                    detail: "Org-wide token consumption for users with an Anthropic Console Admin API key. Separate from Pro/Max subscription quota."
-                )
-            }
 
-            Text("Most people only need hooks. OpenClaw and Admin API usage are for power users.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-
-            Spacer()
-        }
-        .padding(24)
-    }
-
-    private func integrationCard(icon: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                Text(detail)
+                Text("Most people only need to sign in to Claude. Everything else is opt-in.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
+            .padding(24)
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.secondary.opacity(0.08))
-        )
+    }
+
+    private func integrationGroup(title: String, rows: [IntegrationDescriptor]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 12, weight: .bold))
+                .kerning(0.6)
+                .foregroundStyle(.secondary)
+            VStack(spacing: 10) {
+                ForEach(rows) { descriptor in
+                    IntegrationRow(
+                        descriptor: descriptor,
+                        status: .notConfigured(detail: nil),
+                        mode: .onboarding
+                    )
+                }
+            }
+        }
     }
 }
 
