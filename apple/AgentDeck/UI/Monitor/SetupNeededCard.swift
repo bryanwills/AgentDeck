@@ -22,9 +22,54 @@ import AppKit
 
 struct SetupNeededCard: View {
     let items: [SetupItem]
+    /// iOS fallback — on macOS we use `SettingsLink` to open the Settings
+    /// scene directly, so the callback is never invoked there. iOS has no
+    /// Settings scene and still needs a sheet-driven approach.
     let onOpenSettings: () -> Void
 
     @State private var pulse = false
+
+    /// Open-Settings call-to-action. Uses `SettingsLink` on macOS 14+ so the
+    /// Settings scene is opened via SwiftUI's first-party path — the older
+    /// `NSApp.sendAction(showSettingsWindow:)` route was flaky when the
+    /// Monitor window had keyboard focus and silently failed under the
+    /// MenuBarExtra responder chain. `SettingsLink` wraps the same label
+    /// so styling matches the rest of the card.
+    @ViewBuilder
+    private var openSettingsButton: some View {
+        #if os(macOS)
+        SettingsLink {
+            settingsButtonLabel
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture().onEnded {
+            NSApp.activate(ignoringOtherApps: true)
+        })
+        #else
+        Button {
+            onOpenSettings()
+        } label: {
+            settingsButtonLabel
+        }
+        .buttonStyle(.plain)
+        #endif
+    }
+
+    private var settingsButtonLabel: some View {
+        HStack(spacing: 4) {
+            Text("Open Settings")
+            Image(systemName: "arrow.right")
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundColor(Color.black.opacity(0.85))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(TerrariumHUD.ledAmber)
+                .shadow(color: TerrariumHUD.ledAmber.opacity(0.4), radius: 4, x: 0, y: 1)
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -61,24 +106,7 @@ struct SetupNeededCard: View {
                 }
             }
 
-            Button {
-                onOpenSettings()
-            } label: {
-                HStack(spacing: 4) {
-                    Text("Open Settings")
-                    Image(systemName: "arrow.right")
-                }
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(Color.black.opacity(0.85))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(TerrariumHUD.ledAmber)
-                        .shadow(color: TerrariumHUD.ledAmber.opacity(0.4), radius: 4, x: 0, y: 1)
-                )
-            }
-            .buttonStyle(.plain)
+            openSettingsButton
         }
         .padding(10)
         .background(

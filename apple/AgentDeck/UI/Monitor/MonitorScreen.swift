@@ -229,19 +229,42 @@ struct MonitorScreen: View {
                     #if os(iOS)
                     rotationButton
                     #endif
-                    Button {
-                        openSettings()
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.title2)
-                            .foregroundStyle(.white.opacity(0.6))
-                            .padding(.vertical, 16)
-                            .padding(.trailing, 24)
-                    }
-                    .buttonStyle(.plain)
+                    settingsGearButton
                 }
             }
         }
+    }
+
+    /// Gear icon that opens Settings. On macOS we wrap `SettingsLink`
+    /// rather than invoking `NSApp.sendAction(showSettingsWindow:)` —
+    /// the responder-chain route silently dropped taps when the
+    /// Monitor window lacked keyboard focus. iOS keeps the sheet path.
+    @ViewBuilder
+    private var settingsGearButton: some View {
+        #if os(macOS)
+        SettingsLink {
+            gearLabel
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture().onEnded {
+            NSApp.activate(ignoringOtherApps: true)
+        })
+        #else
+        Button {
+            openSettings()
+        } label: {
+            gearLabel
+        }
+        .buttonStyle(.plain)
+        #endif
+    }
+
+    private var gearLabel: some View {
+        Image(systemName: "gearshape")
+            .font(.title2)
+            .foregroundStyle(.white.opacity(0.6))
+            .padding(.vertical, 16)
+            .padding(.trailing, 24)
     }
 
     #if os(iOS)
