@@ -33,6 +33,7 @@ struct AgentDeckApp: App {
             ContentView()
                 .environmentObject(stateHolder)
                 .environmentObject(preferences)
+                .environmentObject(daemonService)
                 .task { configureDaemonConnection() }
                 // First-launch onboarding sheet. Shown once per install; the
                 // xctest guard in AppPreferences ensures tests never block
