@@ -1,128 +1,22 @@
 #if os(macOS)
-// BridgeLogStream.swift — OpenClaw log stream parser
-// Ported from bridge/src/log-stream.ts
+// BridgeLogStream.swift — OpenClaw log line parser.
+//
+// The original CLI build spawned `openclaw logs --follow --json` to tail
+// timeline events. The App Store build sources the same events through
+// OpenClawAdapter's Gateway RPC subscription, so this file only retains the
+// pure parsing helper used by that path. The actor lifecycle methods are
+// kept as no-ops so DaemonServer's existing wiring stays intact.
 
 import Foundation
 
-/// Spawns `openclaw logs --follow --json` and emits timeline entries.
 actor BridgeLogStream {
-    private var process: Process?
-    private var running = false
-    private var recentToolRequests: [String: Date] = [:]
-    private var cleanupTask: Task<Void, Never>?
-
     var onEntry: ((DaemonTimelineEntry) -> Void)?
 
-    func start() {
-        guard !running else { return }
+    var isRunning: Bool { false }
 
-        #if AGENTDECK_APP_STORE
-        // App Store build: spawning the OpenClaw CLI log tailer violates
-        // Apple 2.5.2. OpenClawAdapter supplies timeline entries through
-        // Gateway `logs.tail` and session event subscriptions instead.
-        DaemonLogger.shared.debug("LogStream", "openclaw CLI log stream skipped (App Store build)")
-        return
-        #else
-        let binPath = Self.resolveOpenClawBin()
-        guard let binPath else {
-            DaemonLogger.shared.debug("LogStream", "openclaw binary not found")
-            return
-        }
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: binPath)
-        proc.arguments = ["logs", "--follow", "--json"]
-        proc.environment = ProcessInfo.processInfo.environment
-
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
-
-        do {
-            try proc.run()
-            self.process = proc
-            self.running = true
-            DaemonLogger.shared.debug("LogStream", "Started: \(binPath) logs --follow --json")
-
-            // Read lines
-            pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-                let data = handle.availableData
-                guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-                Task { await self?.handleLines(text) }
-            }
-
-            proc.terminationHandler = { [weak self] _ in
-                Task { await self?.handleExit() }
-            }
-
-            // Periodic cleanup
-            cleanupTask = Task { [weak self] in
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(10))
-                    await self?.cleanupRecentRequests()
-                }
-            }
-        } catch {
-            DaemonLogger.shared.debug("LogStream", "Failed to spawn: \(error)")
-        }
-        #endif
-    }
-
-    func stop() {
-        process?.terminate()
-        process = nil
-        running = false
-        cleanupTask?.cancel()
-        recentToolRequests.removeAll()
-    }
-
-    var isRunning: Bool { running }
-
-    func trackToolRequest(_ raw: String) {
-        recentToolRequests[raw] = Date()
-    }
-
-    // MARK: - Line Parsing
-
-    private var lineBuffer = ""
-
-    private func handleLines(_ text: String) {
-        lineBuffer += text
-        while let idx = lineBuffer.firstIndex(of: "\n") {
-            let line = String(lineBuffer[..<idx]).trimmingCharacters(in: .whitespaces)
-            lineBuffer = String(lineBuffer[lineBuffer.index(after: idx)...])
-
-            guard !line.isEmpty else { continue }
-            guard let data = line.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) else { continue }
-
-            if let entry = Self.parseLogLine(json) {
-                // Dedup: skip tool_exec if matching tool_request seen recently
-                if entry.type == "tool_exec", isDuplicateToolExec(entry.raw) { continue }
-                onEntry?(entry)
-            }
-        }
-    }
-
-    private func isDuplicateToolExec(_ raw: String) -> Bool {
-        guard let ts = recentToolRequests[raw] else { return false }
-        if Date().timeIntervalSince(ts) < 5 { return true }
-        recentToolRequests.removeValue(forKey: raw)
-        return false
-    }
-
-    private func cleanupRecentRequests() {
-        let cutoff = Date().addingTimeInterval(-10)
-        recentToolRequests = recentToolRequests.filter { $0.value > cutoff }
-    }
-
-    private func handleExit() {
-        DaemonLogger.shared.debug("LogStream", "Process exited")
-        running = false
-        process = nil
-    }
-
-    // MARK: - Log Line Parser
+    func start() {}
+    func stop() {}
+    func trackToolRequest(_ raw: String) { _ = raw }
 
     static func parseLogLine(_ json: Any) -> DaemonTimelineEntry? {
         guard let obj = json as? [String: Any] else { return nil }
@@ -133,7 +27,6 @@ actor BridgeLogStream {
 
         guard !message.isEmpty, message.count >= 5 else { return nil }
 
-        // Filter infrastructure noise
         let subsystem = obj["subsystem"] as? String ?? ""
         let module = obj["module"] as? String ?? ""
         if ["gateway", "websocket", "connection", "heartbeat"].contains(where: { subsystem.localizedCaseInsensitiveContains($0) || module.localizedCaseInsensitiveContains($0) }) {
@@ -152,42 +45,6 @@ actor BridgeLogStream {
             type: entryType,
             raw: String(message.prefix(200))
         )
-    }
-
-    // MARK: - Binary Resolution
-
-    private static func resolveOpenClawBin() -> String? {
-        #if AGENTDECK_APP_STORE
-        return nil
-        #else
-        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
-        let candidates = [
-            "\(realHome)/Library/pnpm/openclaw",
-            "\(realHome)/.local/bin/openclaw",
-            "\(realHome)/bin/openclaw",
-            "/usr/local/bin/openclaw",
-            "/opt/homebrew/bin/openclaw",
-        ]
-        for path in candidates {
-            if FileManager.default.isExecutableFile(atPath: path) { return path }
-        }
-        // Try PATH
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["which", "openclaw"]
-        var env = ProcessInfo.processInfo.environment
-        env["HOME"] = realHome
-        let pathParts = candidates.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path } + ["/usr/bin", "/bin"]
-        env["PATH"] = pathParts.joined(separator: ":")
-        process.environment = env
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
-        process.waitUntilExit()
-        let result = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return result?.isEmpty == false ? result : nil
-        #endif
     }
 }
 #endif

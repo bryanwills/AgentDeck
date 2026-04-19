@@ -42,13 +42,18 @@ struct IntegrationDescriptor: Identifiable, Hashable {
 }
 
 enum IntegrationCatalog {
+    private static let claudeOneLineHelp = "Live session telemetry through opt-in Claude Code hooks."
+    private static let claudeConnectInstructions = "Enable Claude Code Hooks below. Sessions appear here after hook events arrive."
+    private static let codexOneLineHelp = "Codex runs in your own terminal; AgentDeck monitors the session through hooks."
+    private static let codexConnectInstructions = "The standalone dashboard still works without launching Codex from here."
+
     static let claudeCode = IntegrationDescriptor(
         id: "claude",
         displayName: "Claude Code",
         kind: .accountLinked,
         iconSystemName: "bolt.fill",
-        oneLineHelp: "Pro/Max subscription quota and live session telemetry through hooks.",
-        connectInstructions: "Sign in with `claude` in Terminal, then enable Claude Code Hooks below."
+        oneLineHelp: claudeOneLineHelp,
+        connectInstructions: claudeConnectInstructions
     )
 
     static let codex = IntegrationDescriptor(
@@ -56,8 +61,8 @@ enum IntegrationCatalog {
         displayName: "Codex (ChatGPT)",
         kind: .accountLinked,
         iconSystemName: "person.badge.key",
-        oneLineHelp: "ChatGPT Plus subscription state, read from the Codex CLI.",
-        connectInstructions: "Run `codex` once to sign in. AgentDeck picks up the session automatically."
+        oneLineHelp: codexOneLineHelp,
+        connectInstructions: codexConnectInstructions
     )
 
     static let openClaw = IntegrationDescriptor(
@@ -171,20 +176,14 @@ enum IntegrationStatusEvaluator {
             let detail = preferences.hooksInstalled ? "Pro/Max · hooks on" : "Pro/Max · hooks off"
             return .connected(detail: detail)
         }
-        if AgentDeckRuntime.isSandboxed {
-            return .awaiting(detail: "Subscription quota unavailable inside the sandbox. Hooks still relay live sessions.")
-        }
-        return .awaiting(detail: "Sign in with `claude` in Terminal.")
+        return .awaiting(detail: "Enable Claude Code Hooks below to relay live sessions.")
     }
 
     private static func codexStatus(state: DashboardState) -> IntegrationStatus {
         if let mode = state.codexAuthMode, !mode.isEmpty {
             return .connected(detail: mode)
         }
-        if AgentDeckRuntime.isSandboxed {
-            return .unsupported(detail: "Codex auth file lives outside the App Store sandbox.")
-        }
-        return .notConfigured(detail: "Run `codex` once to sign in.")
+        return .unsupported(detail: "Codex runs in your own terminal; sessions appear here once started.")
     }
 
     private static func openClawStatus(state: DashboardState) -> IntegrationStatus {

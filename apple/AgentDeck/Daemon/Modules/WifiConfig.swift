@@ -1,6 +1,11 @@
 #if os(macOS)
-// WifiConfig.swift — WiFi credential management for ESP32 auto-provisioning
-// Ported from bridge/src/wifi-config.ts
+// WifiConfig.swift — WiFi credential management for ESP32 auto-provisioning.
+//
+// Persists user-supplied SSID/password for ESP32 firmware to consume during
+// the first-boot handshake. Auto-detection of the current SSID and Keychain
+// password lookup both required `networksetup` / `security` subprocesses,
+// which are not allowed under Apple Review Guideline 2.5.2 — the
+// ESP32ProvisionSheet asks the user to type both fields directly.
 
 import Foundation
 
@@ -27,62 +32,15 @@ enum WifiConfigManager {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configFile.path)
     }
 
-    /// Detect current macOS WiFi SSID
-    static func detectCurrentSSID() -> String? {
-        #if AGENTDECK_APP_STORE
-        // App Store build: `networksetup` is a subprocess and not allowed
-        // (Apple 2.5.2). CoreWLAN is the sanctioned API but requires
-        // Location Services permission on macOS 13+ — not worth the prompt
-        // for a nice-to-have auto-fill. The ESP32ProvisionSheet asks the
-        // user to type the SSID directly instead.
-        return nil
-        #else
-        guard let output = try? shellSync("networksetup -listallhardwareports") else { return nil }
-        let ifaceMatch = output.range(of: #"Hardware Port: Wi-Fi\nDevice: (en\d+)"#, options: .regularExpression)
-        let iface: String
-        if let match = ifaceMatch {
-            let deviceLine = output[match].components(separatedBy: "\n").last ?? "en0"
-            iface = deviceLine.trimmingCharacters(in: .whitespaces).components(separatedBy: " ").last ?? "en0"
-        } else {
-            iface = "en0"
-        }
+    /// SSID auto-detection is unavailable in the App Store build; the
+    /// provisioning sheet prompts the user for the SSID.
+    static func detectCurrentSSID() -> String? { nil }
 
-        guard let ssidOutput = try? shellSync("networksetup -getairportnetwork \(iface)") else { return nil }
-        if let range = ssidOutput.range(of: "Current Wi-Fi Network: ") {
-            return String(ssidOutput[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return nil
-        #endif
-    }
-
-    /// Retrieve WiFi password from macOS Keychain
+    /// Keychain password lookup is unavailable in the App Store build; the
+    /// provisioning sheet prompts the user for the password.
     static func getKeychainPassword(ssid: String) -> String? {
-        #if AGENTDECK_APP_STORE
-        // App Store build: `/usr/bin/security find-generic-password` is a
-        // subprocess and 2.5.2-sensitive. The ESP32ProvisionSheet asks the
-        // user to type the password directly into a SecureField instead.
         _ = ssid
         return nil
-        #else
-        let escaped = ssid.replacingOccurrences(of: "\"", with: "\\\"")
-        guard let output = try? shellSync("security find-generic-password -ga \"\(escaped)\" -w 2>/dev/null") else { return nil }
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-        #endif
     }
-
-    #if !AGENTDECK_APP_STORE
-    private static func shellSync(_ command: String) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", command]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    }
-    #endif
 }
 #endif

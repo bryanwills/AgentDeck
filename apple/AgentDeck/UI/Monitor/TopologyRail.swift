@@ -442,10 +442,9 @@ struct TopologyRail: View {
     /// Android section — split into e-ink readers (Crema / Pantone /
     /// Kobo, which need slow low-contrast rendering) and tablets
     /// (Lenovo + generic, which get normal Android UI). TC001 is
-    /// excluded here — it renders under Pixel displays instead. Only
-    /// present when the module was loaded (CLI build or unsigned dev);
-    /// App Store build has `.adb` == nil so this whole section
-    /// vanishes, which is correct.
+    /// excluded here — it renders under Pixel displays instead. The
+    /// in-process AdbModule is a stub, so this section only renders
+    /// when an external desktop bridge pushes ADB device data.
     @ViewBuilder
     private func androidSection(health: ModuleHealthState) -> some View {
         if let adb = health.adb {
@@ -517,26 +516,18 @@ struct TopologyRail: View {
             .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
     }
 
-    /// App-Store-aware empty state. Lists the kinds of devices the current
-    /// build CAN surface, so the user knows what to plug in vs. what
-    /// requires a different install.
+    /// Lists the device families this app surfaces directly. Android and
+    /// Ulanzi TC001 are not mentioned because they ride a separate desktop
+    /// bridge — they appear automatically once that bridge connects, so
+    /// listing them here would imply they're missing rather than optional.
     private var emptyDownstreamPlaceholder: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("no devices connected")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(TerrariumHUD.subtext.opacity(0.8))
-            #if AGENTDECK_APP_STORE
-            Text("App Store build · D200H (USB) · Pixoo (Wi-Fi) · ESP32 (USB serial)")
+            Text("D200H (USB) · Pixoo (Wi-Fi) · ESP32 (USB serial)")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(TerrariumHUD.subtext.opacity(0.55))
-            Text("Android / Ulanzi TC001 are unavailable in the App Store build")
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(TerrariumHUD.subtext.opacity(0.55))
-            #else
-            Text("D200H · Pixoo · ESP32 serial · ADB (Android / TC001)")
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(TerrariumHUD.subtext.opacity(0.55))
-            #endif
         }
         .padding(.vertical, 4)
     }

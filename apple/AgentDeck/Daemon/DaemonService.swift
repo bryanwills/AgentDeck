@@ -52,7 +52,6 @@ final class DaemonService: ObservableObject {
     /// varies based on whether a companion executable is installed —
     /// App Store copy stays identical regardless of external state.
     var isSelfDaemon: Bool { isRunning && !isUsingExternalDaemon }
-    @Published private(set) var ownsExternalDaemon = false
     @Published private(set) var port: UInt16 = 0
     @Published private(set) var connectedClients = 0
     @Published private(set) var errorMessage: String?
@@ -75,11 +74,9 @@ final class DaemonService: ObservableObject {
     private var localFailureCount = 0
     private var signalSource: DispatchSourceSignal?
     private var sigintSource: DispatchSourceSignal?
-    private var externalDaemonProcess: Process?
     private var listenerFailureRetries = 0
     private var squatterCleanupAttempted = false
     private var fallbackAttempted = false
-    private var d200hHelperPromotionAttempted = false
     private var sessionOverridePort: Int?
     /// Ports that NWListener has observed to fail `.failed(EADDRINUSE)` this
     /// launch. These may still look bindable via raw BSD sockets (NECP is a
@@ -141,7 +138,6 @@ final class DaemonService: ObservableObject {
                 self.port = daemon.port
                 self.isRunning = true
                 self.isUsingExternalDaemon = false
-                self.ownsExternalDaemon = false
                 self.localFailureCount = 0
                 self.externalFailureCount = 0
                 self.errorMessage = nil
@@ -201,7 +197,6 @@ final class DaemonService: ObservableObject {
         listenerFailureRetries = 0
         squatterCleanupAttempted = false
         fallbackAttempted = false
-        d200hHelperPromotionAttempted = false
         sessionOverridePort = nil
         failedBindPorts.removeAll()
         isOnFallbackPort = false
@@ -215,103 +210,11 @@ final class DaemonService: ObservableObject {
         healthMonitorTask?.cancel()
         healthMonitorTask = nil
         await server?.shutdown()
-        await stopOwnedExternalDaemonIfNeeded()
         server = nil
         isRunning = false
         isUsingExternalDaemon = false
-        ownsExternalDaemon = false
-        d200hHelperPromotionAttempted = false
         port = 0
         readyUrl = nil
-    }
-
-    func startBundledD200HHelper() async {
-        #if AGENTDECK_APP_STORE
-        // App Store build: bundled Node helper is intentionally absent (see
-        // copy-adb.sh + Apple 2.5.2). Any "promote to bundled helper"
-        // trigger from Settings is a no-op here — the direct IOKit HID path
-        // handles the device without a subprocess. This path should not be
-        // surfaced by App Store UI, but keep it harmless if stale preferences
-        // from a development build invoke it.
-        errorMessage = "D200H USB control uses the App Store app's direct HID path."
-        return
-        #else
-        errorMessage = nil
-        bindFailureReason = nil; blockingProcesses = []
-
-        let targetPort = Self.promotionTargetPort(currentPort: port, effectivePort: effectivePort)
-        let registry = SessionRegistry.shared
-
-        if let health = await registry.probeDaemonHealth(port: targetPort),
-           health["mode"] as? String == "daemon" {
-            let remotePid = health["pid"] as? Int
-            let myPid = Int(ProcessInfo.processInfo.processIdentifier)
-            if remotePid != myPid {
-                // Genuine external helper already running — connect as client
-                externalDaemonProcess = nil
-                await connectToExternalDaemon(port: targetPort)
-                return
-            }
-            DaemonLogger.shared.info("D200H promotion: replacing local daemon on port \(targetPort) with bundled helper")
-        }
-
-        await stop()
-
-        let process = Process()
-        if let bundledHelper = Self.resolveBundledD200HHelper() {
-            process.executableURL = URL(fileURLWithPath: bundledHelper)
-            process.arguments = ["-p", String(targetPort)]
-        } else if let launch = Self.resolveRepoNodeDaemonLaunch() {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["node", launch.cliPath, "start", "-p", String(targetPort)]
-            process.currentDirectoryURL = URL(fileURLWithPath: launch.repoRoot, isDirectory: true)
-            process.environment = Self.helperEnvironment()
-        } else {
-            errorMessage = "Bundled D200H helper unavailable: no bundled helper or local bridge build found."
-            return
-        }
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        do {
-            try process.run()
-            externalDaemonProcess = process
-            DaemonLogger.shared.info("Spawned managed D200H helper on port \(targetPort)")
-        } catch {
-            externalDaemonProcess = nil
-            errorMessage = "Failed to start bundled D200H helper: \(error.localizedDescription)"
-            return
-        }
-
-        for _ in 0..<20 {
-            if let health = await registry.probeDaemonHealth(port: targetPort),
-               health["mode"] as? String == "daemon" {
-                await connectToExternalDaemon(port: targetPort)
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(300))
-        }
-
-        let stderrData = stderrPipe.fileHandleForReading.availableData
-        let stderrText = String(data: stderrData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let detail = stderrText?.isEmpty == false
-            ? "Bundled D200H helper failed: \(stderrText!)"
-            : "Bundled D200H helper did not become healthy on port \(targetPort)."
-        await stopOwnedExternalDaemonIfNeeded()
-
-        // Helper spawn failed after stop() — without explicit recovery the app
-        // sits in a "daemon down" state until the user toggles settings. Revive
-        // the in-process daemon so dashboard/CLI/D200H paths keep working on
-        // the local code path. d200hHelperPromotionAttempted stays true so the
-        // health monitor doesn't immediately re-promote into the same failure.
-        DaemonLogger.shared.error("\(detail) — reverting to local in-process daemon")
-        errorMessage = "\(detail) Reverted to local daemon."
-        start()
-        #endif
     }
 
     private func connectToExternalDaemon(port knownPort: Int? = nil) async {
@@ -325,7 +228,6 @@ final class DaemonService: ObservableObject {
             self.server = nil
             self.isRunning = false
             self.isUsingExternalDaemon = false
-            self.ownsExternalDaemon = false
             self.port = 0
             self.readyUrl = nil
             self.errorMessage = "External daemon detected, but port lookup failed"
@@ -365,7 +267,6 @@ final class DaemonService: ObservableObject {
         self.port = UInt16(resolvedPort)
         self.isRunning = false
         self.isUsingExternalDaemon = true
-        self.ownsExternalDaemon = (externalDaemonProcess?.isRunning == true)
         self.localFailureCount = 0
         self.externalFailureCount = 0
         self.errorMessage = nil
@@ -391,58 +292,6 @@ final class DaemonService: ObservableObject {
         } else {
             bindFailureReason = nil; blockingProcesses = []
         }
-    }
-
-    private func stopOwnedExternalDaemonIfNeeded() async {
-        guard let process = externalDaemonProcess else { return }
-        let currentPort = Int(port)
-        if process.isRunning, currentPort > 0 {
-            let url = URL(string: "http://127.0.0.1:\(currentPort)/shutdown")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 1
-            _ = try? await URLSession.shared.data(for: request)
-            try? await Task.sleep(for: .milliseconds(300))
-        }
-        if process.isRunning {
-            process.terminate()
-        }
-        externalDaemonProcess = nil
-    }
-
-    private static func helperEnvironment() -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let prefixes = [
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-            "\(home)/.local/bin",
-            "\(home)/Library/pnpm",
-            "\(home)/.npm-global/bin",
-        ]
-        let existing = env["PATH"] ?? ""
-        env["PATH"] = (prefixes + [existing]).joined(separator: ":")
-        return env
-    }
-
-    private static func resolveBundledD200HHelper() -> String? {
-        let helperPath = Bundle.main.bundlePath + "/Contents/Helpers/agentdeck-d200h-helper"
-        guard FileManager.default.isExecutableFile(atPath: helperPath) else { return nil }
-        return helperPath
-    }
-
-    private static func resolveRepoNodeDaemonLaunch() -> (repoRoot: String, cliPath: String)? {
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .path
-        let cliPath = "\(repoRoot)/bridge/dist/cli.js"
-        guard FileManager.default.fileExists(atPath: cliPath) else { return nil }
-        return (repoRoot, cliPath)
     }
 
     /// Called when a running daemon's NWListener enters `.failed` state post-bind
@@ -641,78 +490,9 @@ final class DaemonService: ObservableObject {
         // slow Pixoo pushes — a transient 2-second self-probe timeout was killing
         // a perfectly healthy server. If we hold a live `server` reference and
         // `isRunning`, the listener is up; no probe is needed for liveness.
-        guard isRunning, let server else { return }
+        guard isRunning, server != nil else { return }
         localFailureCount = 0
-
-        // D200H helper auto-promotion check. Historical context: a previous fix
-        // (bug_daemon_self_http_probe.md, 373774b0) removed the self-probe from
-        // the liveness check but left this promotion-decision branch still
-        // HTTP-probing `http://127.0.0.1:\(port)/health` every 5s via
-        // `URLSession.shared`. Because the "attempted" flag only flipped when
-        // promotion actually fired, the common steady-state (D200H working
-        // normally — promotion criteria never true) meant the self-probe ran
-        // forever. Over hours it poisoned URLSession.shared and eventually
-        // deadlocked the main thread in CATransaction dealloc (2026-04-13 hang).
-        //
-        // Fix: reach into the in-process D200H module directly via
-        // `DaemonServer.d200hStatusSnapshot()`. Same @MainActor, zero network,
-        // zero URLSession contention. And make it a TRUE one-shot — the module
-        // state fields we care about (sandboxEnabled, usbEntitlementPresent,
-        // lastOpenError, managerOpened) are launch-session invariants, so a
-        // single successful snapshot is all we ever need. Flag resets only on
-        // full stop/restart.
-        #if !AGENTDECK_APP_STORE
-        if !d200hHelperPromotionAttempted, !isStarting,
-           AppPreferences.shared.autoUseBundledD200HHelper {
-            if let snapshot = server.d200hStatusSnapshot() {
-                d200hHelperPromotionAttempted = true
-                if preferencesSuggestBundledD200HHelperPromotion(from: snapshot) {
-                    let reason = d200hHelperPromotionReason(from: snapshot)
-                    DaemonLogger.shared.info("Promoting D200H to bundled helper: \(reason)")
-                    errorMessage = reason
-                    await startBundledD200HHelper()
-                }
-            }
-        }
-        #endif
     }
-
-    #if !AGENTDECK_APP_STORE
-    /// Decide whether the D200H helper should be promoted based on the D200H
-    /// module's own status snapshot (the same dict that `/health` →
-    /// `modules.d200h` exposes). Takes the inner d200h dict directly so the
-    /// in-process caller can fetch it via `DaemonServer.d200hStatusSnapshot()`
-    /// without going through HTTP (see `bug_daemon_self_http_probe.md`).
-    private func preferencesSuggestBundledD200HHelperPromotion(from d200h: [String: Any]?) -> Bool {
-        guard AppPreferences.shared.autoUseBundledD200HHelper else { return false }
-        guard let d200h else { return false }
-        guard (d200h["connected"] as? Bool) != true else { return false }
-
-        let sandboxEnabled = d200h["sandboxEnabled"] as? Bool ?? false
-        let usbEntitlementPresent = d200h["usbEntitlementPresent"] as? Bool ?? true
-        let lastOpenError = d200h["lastOpenError"] as? Int32 ?? 0
-        let managerOpened = d200h["managerOpened"] as? Bool ?? false
-
-        return (sandboxEnabled && !usbEntitlementPresent) ||
-            (managerOpened && lastOpenError == kIOReturnNotPermitted)
-    }
-
-    private func d200hHelperPromotionReason(from d200h: [String: Any]?) -> String {
-        guard let d200h else { return "D200H helper promotion requested." }
-
-        let sandboxEnabled = d200h["sandboxEnabled"] as? Bool ?? false
-        let usbEntitlementPresent = d200h["usbEntitlementPresent"] as? Bool ?? true
-        let lastOpenError = d200h["lastOpenError"] as? Int32 ?? 0
-
-        if sandboxEnabled && !usbEntitlementPresent {
-            return "Swift daemon build lacks usable D200H USB entitlement. AgentDeck will switch D200H to the bundled helper."
-        }
-        if lastOpenError == kIOReturnNotPermitted {
-            return "Swift daemon was denied D200H HID access (kIOReturnNotPermitted). AgentDeck will switch D200H to the bundled helper."
-        }
-        return "Swift daemon cannot open D200H HID. AgentDeck will switch D200H to the bundled helper."
-    }
-    #endif
 
     // MARK: - Signal Handling
 

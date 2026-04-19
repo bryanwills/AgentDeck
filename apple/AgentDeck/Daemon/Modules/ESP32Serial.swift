@@ -633,25 +633,6 @@ actor ESP32Serial {
         return e
     }
 
-    #if !AGENTDECK_APP_STORE
-    /// Legacy shell helper — retained only for the CLI/Homebrew build where
-    /// it was convenient for one-off `/bin/sh` invocations. The App Store
-    /// build must not spawn an interpreter (Apple 2.5.2), so this helper
-    /// is compile-out and the one remaining caller (`detectPorts`) was
-    /// rewritten to use `FileManager.contentsOfDirectory` directly.
-    private func shellSync(_ command: String) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", command]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    }
-    #endif
-
     // MARK: - Constants
 
     static let serialForwardedEvents: Set<String> = [

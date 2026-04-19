@@ -1,4 +1,4 @@
-// LaunchSessionDialog.swift — Folder/agent/terminal picker for Launch Session
+// LaunchSessionDialog.swift — Folder + agent picker for the Launch Session info alert.
 #if os(macOS)
 import SwiftUI
 import AppKit
@@ -8,16 +8,12 @@ struct LaunchSessionDialog: View {
 
     @AppStorage("launch.lastFolder") private var folderPath: String = ""
     @AppStorage("launch.lastAgent") private var agentRaw: String = LaunchAgentType.claudeCode.rawValue
-    @AppStorage("launch.lastTerminal") private var terminalRaw: String = TerminalApp.system.rawValue
-
-    @State private var installedTerminals: [TerminalApp] = TerminalApp.installed()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Launch Session")
                 .font(.headline)
 
-            // Folder row
             VStack(alignment: .leading, spacing: 4) {
                 Text("Project Folder")
                     .font(.system(size: 11, weight: .medium))
@@ -34,7 +30,6 @@ struct LaunchSessionDialog: View {
                 }
             }
 
-            // Agent picker
             VStack(alignment: .leading, spacing: 4) {
                 Text("Agent")
                     .font(.system(size: 11, weight: .medium))
@@ -48,38 +43,16 @@ struct LaunchSessionDialog: View {
                 .labelsHidden()
             }
 
-            // Terminal picker
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Terminal")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Picker("", selection: $terminalRaw) {
-                    ForEach(installedTerminals, id: \.rawValue) { term in
-                        Text(term.displayName).tag(term.rawValue)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-            }
-
             HStack {
                 Spacer()
                 Button("Cancel") { closeWindow() }
                     .keyboardShortcut(.cancelAction)
-                Button("Launch") { launch() }
+                Button("Continue") { launch() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(folderPath.isEmpty)
             }
         }
         .padding(20)
         .frame(width: 420)
-        .onAppear {
-            installedTerminals = TerminalApp.installed()
-            // If saved terminal is no longer installed, fall back to system
-            if !installedTerminals.contains(where: { $0.rawValue == terminalRaw }) {
-                terminalRaw = TerminalApp.system.rawValue
-            }
-        }
     }
 
     private var displayFolder: String {
@@ -103,18 +76,14 @@ struct LaunchSessionDialog: View {
 
     private func launch() {
         let agent = LaunchAgentType(rawValue: agentRaw) ?? .claudeCode
-        let terminal = TerminalApp(rawValue: terminalRaw) ?? .system
         SessionLauncher.launchSession(
             project: folderPath.isEmpty ? nil : folderPath,
-            agent: agent,
-            terminalApp: terminal,
-            daemonPort: daemonPort
+            agent: agent
         )
         closeWindow()
     }
 
     private func closeWindow() {
-        // Find the window hosting this view and close it
         if let window = NSApp.windows.first(where: { $0.title == "Launch Session" }) {
             window.close()
         }

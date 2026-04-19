@@ -54,9 +54,6 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     @Published var openDashboardOnLaunch: Bool {
         didSet { defaults.set(openDashboardOnLaunch, forKey: Keys.openDashboardOnLaunch) }
     }
-    @Published var autoUseBundledD200HHelper: Bool {
-        didSet { defaults.set(autoUseBundledD200HHelper, forKey: Keys.autoUseBundledD200HHelper) }
-    }
     @Published var d200hBakeSessionText: Bool {
         didSet { defaults.set(d200hBakeSessionText, forKey: Keys.d200hBakeSessionText) }
     }
@@ -168,7 +165,6 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         let storedPort = defaults.object(forKey: Keys.daemonPort) as? Int
         self.daemonPort = Self.clampPort(storedPort ?? Self.defaultDaemonPort)
         self.openDashboardOnLaunch = defaults.object(forKey: Keys.openDashboardOnLaunch) as? Bool ?? true
-        self.autoUseBundledD200HHelper = defaults.object(forKey: Keys.autoUseBundledD200HHelper) as? Bool ?? true
         self.d200hBakeSessionText = defaults.object(forKey: Keys.d200hBakeSessionText) as? Bool ?? true
         self.d200hHideNativeSessionLabels = defaults.object(forKey: Keys.d200hHideNativeSessionLabels) as? Bool ?? true
         self.menuBarIconStyle = MenuBarIconStyle(rawValue: defaults.string(forKey: Keys.menuBarIconStyle) ?? "") ?? .status
@@ -374,7 +370,6 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     private enum Keys {
         static let daemonPort = "prefs.daemonPort"
         static let openDashboardOnLaunch = "prefs.openDashboardOnLaunch"
-        static let autoUseBundledD200HHelper = "prefs.autoUseBundledD200HHelper"
         static let d200hBakeSessionText = "prefs.d200hBakeSessionText"
         static let d200hHideNativeSessionLabels = "prefs.d200hHideNativeSessionLabels"
         static let menuBarIconStyle = "prefs.menuBarIconStyle"

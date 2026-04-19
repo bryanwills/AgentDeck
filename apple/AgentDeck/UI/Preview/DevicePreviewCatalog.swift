@@ -85,6 +85,17 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
         }
     }
 
+    /// True when the device only reaches AgentDeck through an external
+    /// desktop bridge (ADB-tunneled). The standalone app hides these
+    /// from the picker so the catalog matches what it can actually drive
+    /// — they reappear automatically once the bridge is connected.
+    var requiresDesktopBridge: Bool {
+        switch self {
+        case .androidTablet, .einkMono, .einkColor, .ulanziMatrix: return true
+        default: return false
+        }
+    }
+
     /// Short byline for the main-canvas header.
     var byline: String {
         switch self {

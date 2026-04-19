@@ -320,40 +320,54 @@ struct ControlTowerPanel: View {
 
     // MARK: - Compact rate limits
 
+    /// Subscription rate limits depend on Claude Code's OAuth token, which
+    /// is structurally unreachable from the App Store sandbox. We surface
+    /// this section only when an external CLI daemon is relaying gauge
+    /// values, or when actual gauge data has already arrived through any
+    /// other path. Otherwise the section is hidden so the standalone app
+    /// reads as feature-complete instead of broken.
+    @ViewBuilder
     private var rateLimitsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text("RATE LIMITS")
-                    .font(.system(size: 10, weight: .bold))
-                    .kerning(0.5)
-                    .foregroundColor(TerrariumHUD.subtext)
-                if stateHolder.state.usageStale == true {
-                    Text("stale")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.orange)
+        let hasGauges = stateHolder.state.fiveHourPercent != nil
+            || stateHolder.state.sevenDayPercent != nil
+        let externalDaemonActive = daemonService.isUsingExternalDaemon
+        if hasGauges || externalDaemonActive {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text("RATE LIMITS")
+                        .font(.system(size: 10, weight: .bold))
+                        .kerning(0.5)
+                        .foregroundColor(TerrariumHUD.subtext)
+                    if stateHolder.state.usageStale == true {
+                        Text("stale")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.orange)
+                    }
+                    Spacer()
                 }
-                Spacer()
+                if let pct5h = stateHolder.state.fiveHourPercent {
+                    compactGauge(
+                        label: "5h",
+                        percent: pct5h,
+                        resetTime: stateHolder.state.fiveHourResetsAt
+                    )
+                }
+                if let pct7d = stateHolder.state.sevenDayPercent {
+                    compactGauge(
+                        label: "7d",
+                        percent: pct7d,
+                        resetTime: stateHolder.state.sevenDayResetsAt
+                    )
+                }
+                if !hasGauges {
+                    rateLimitsEmptyState
+                }
+                if preferences.hooksInstalled == false {
+                    hookConsentHint
+                }
             }
-            if let pct5h = stateHolder.state.fiveHourPercent {
-                compactGauge(
-                    label: "5h",
-                    percent: pct5h,
-                    resetTime: stateHolder.state.fiveHourResetsAt
-                )
-            }
-            if let pct7d = stateHolder.state.sevenDayPercent {
-                compactGauge(
-                    label: "7d",
-                    percent: pct7d,
-                    resetTime: stateHolder.state.sevenDayResetsAt
-                )
-            }
-            if stateHolder.state.fiveHourPercent == nil && stateHolder.state.sevenDayPercent == nil {
-                rateLimitsEmptyState
-            }
-            if preferences.hooksInstalled == false {
-                hookConsentHint
-            }
+        } else if preferences.hooksInstalled == false {
+            hookConsentHint
         }
     }
 
@@ -397,16 +411,12 @@ struct ControlTowerPanel: View {
         }
     }
 
-    /// Status-aware sentence that replaces "No data". Keeps it to one
-    /// line so the menubar popover doesn't grow.
+    /// Empty-state copy only renders when an external daemon is feeding
+    /// the section — otherwise `rateLimitsSection` collapses entirely.
     private var rateLimitsEmptyMessage: String {
-        if AgentDeckRuntime.isSandboxed && (stateHolder.state.oauthConnected ?? false) == false {
-            return "Claude quota unavailable — App Store sandbox can't read Claude's OAuth token. Session monitoring still works through approved hooks; API usage can be shown with an Anthropic Admin API key in Settings."
-        }
         if (stateHolder.state.oauthConnected ?? false) == false {
-            return "Claude Code isn't signed in. Run `claude` once in Terminal, then the quota gauges will populate here."
+            return "External daemon connected — waiting for Claude Code to sign in."
         }
-        // OAuth present but no data yet — just fetching, or Anthropic API quiet.
         return "Waiting for Anthropic to return your quota…"
     }
 

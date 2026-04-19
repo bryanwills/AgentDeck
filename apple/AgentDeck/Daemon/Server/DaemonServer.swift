@@ -1530,9 +1530,6 @@ final class DaemonServer {
                         self?.cachedGatewayAuthRequestId = nil
                         self?.cachedGatewayAuthMessage = nil
                         DaemonLogger.shared.info("OpenClaw Gateway connected")
-                        #if !AGENTDECK_APP_STORE
-                        await self?.logStream.start()
-                        #endif
                         if self?.stateMachine.state == .disconnected {
                             _ = self?.stateMachine.transition(trigger: "session_start", source: .hook)
                         }
@@ -1778,7 +1775,6 @@ final class DaemonServer {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
                 guard let self else { break }
-                #if AGENTDECK_APP_STORE
                 let adapterHealth = await self.gatewayAdapter?.fetchHealthHasError()
                 let hasError: Bool
                 if let adapterHealth {
@@ -1786,9 +1782,6 @@ final class DaemonServer {
                 } else {
                     hasError = await self.gatewayProbe.hasErrorSnapshot()
                 }
-                #else
-                let hasError = await self.gatewayProbe.hasErrorSnapshot()
-                #endif
                 if hasError != self.cachedGatewayHasError {
                     self.cachedGatewayHasError = hasError
                     self.broadcastStateUpdate()

@@ -7,8 +7,10 @@
 // affordance to proceed. This sheet bridges that gap with three screens:
 //
 //   1. Welcome — brand + value prop ("Stop Chatting. Start Steering.")
-//   2. Pick an agent — Claude Code / Codex / OpenCode install links
-//   3. Pair your iPad — Bonjour pitch + iOS companion download link
+//   2. Pick an agent — supported agent overview. App Store builds never
+//      show install commands or route users to companion executables.
+//   3. Optional integrations — services that can be enabled later
+//   4. Pair your iPad — Bonjour pitch + iOS companion download link
 //
 // Gated by `AppPreferences.hasSeenOnboarding` so returning users skip it.
 // xctest environments bypass the gate so test runs don't deadlock on a
@@ -131,124 +133,57 @@ private struct WelcomePane: View {
 
 // MARK: - Pane 2: Agent picker
 
-/// Two-branch pane. First asks whether the user already has an agent set
-/// up — that's the majority case for developers buying AgentDeck — and
-/// only shows the install guide cards if they say no. A previous version
-/// used a tiny "I already have one" checkbox that had no UI effect; users
-/// reasonably asked "what does this change?". The answer is now visible:
-/// saying yes hides the install step entirely, saying no (or not yet)
-/// reveals it.
+/// Orientation pane: the app is self-contained and does not present CLI
+/// install commands as an in-app next step.
 private struct AgentPickerPane: View {
     @Binding var userHasAgent: Bool
 
     private struct AgentOption {
         let name: String
         let tagline: String
-        let installCommand: String
-        let docsURL: URL
     }
 
-    private let options: [AgentOption] = [
-        AgentOption(
-            name: "Claude Code",
-            tagline: "Anthropic's CLI agent with hooks + permissions.",
-            installCommand: "npm install -g @anthropic-ai/claude-code",
-            docsURL: URL(string: "https://docs.claude.com/en/docs/claude-code/quickstart")!
-        ),
-        AgentOption(
-            name: "Codex",
-            tagline: "OpenAI's coding agent CLI.",
-            installCommand: "npm install -g @openai/codex",
-            docsURL: URL(string: "https://github.com/openai/codex")!
-        ),
-        AgentOption(
-            name: "OpenCode",
-            tagline: "Open-source multi-model coding agent.",
-            installCommand: "npm install -g opencode",
-            docsURL: URL(string: "https://opencode.ai/docs")!
-        ),
-    ]
+    private var options: [AgentOption] {
+        [
+            AgentOption(
+                name: "Claude Code",
+                tagline: "Live session telemetry arrives through opt-in hooks."
+            ),
+            AgentOption(
+                name: "Codex",
+                tagline: "Runs in your own terminal; sessions appear here once started."
+            ),
+            AgentOption(
+                name: "OpenCode",
+                tagline: "Runs in your own terminal; sessions appear here once started."
+            ),
+        ]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Are you already using an AI coding agent?")
+                Text("Choose the agent you already use")
                     .font(.system(size: 22, weight: .semibold))
-                Text(userHasAgent
-                     ? "Great — AgentDeck will start monitoring the moment you launch a session from the menu bar."
-                     : "AgentDeck works with any of these. If you already have one installed, just say so and we'll skip this step.")
+                Text("AgentDeck works as a standalone dashboard. Enable hooks in Settings when you want live Claude Code sessions to appear here.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Primary two-button choice — equivalent weight. The user's
-            // answer persists via `userHasAgent`; when yes, we hide the
-            // install cards so the pane stops nagging.
-            HStack(spacing: 10) {
-                choiceButton(
-                    title: "Yes, I have one",
-                    systemImage: "checkmark.circle.fill",
-                    selected: userHasAgent
-                ) { userHasAgent = true }
-
-                choiceButton(
-                    title: "Help me install one",
-                    systemImage: "arrow.down.circle",
-                    selected: !userHasAgent
-                ) { userHasAgent = false }
-            }
-
-            if !userHasAgent {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Install one of these on your Mac")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    VStack(spacing: 10) {
-                        ForEach(options, id: \.name) { option in
-                            agentCard(option)
-                        }
-                    }
+            VStack(spacing: 10) {
+                ForEach(options, id: \.name) { option in
+                    agentCard(option)
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
+            Text("No companion executable is required for Device Preview, iPad pairing, voice input, APME reports, or hardware status output.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
         }
         .padding(24)
-        .animation(.easeInOut(duration: 0.18), value: userHasAgent)
-    }
-
-    /// Big segmented-style button. Selected state uses accent color fill so
-    /// the current answer is unambiguous — addresses the previous UX gap
-    /// where a checkbox gave no feedback.
-    private func choiceButton(
-        title: String,
-        systemImage: String,
-        selected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 14))
-                Text(title)
-                    .font(.system(size: 13, weight: .medium))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(selected ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 1.5)
-            )
-            .foregroundStyle(selected ? Color.accentColor : Color.primary)
-        }
-        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -260,17 +195,8 @@ private struct AgentPickerPane: View {
                 Text(option.tagline)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                Text(option.installCommand)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
             }
             Spacer()
-            Button("Open Guide") {
-                NSWorkspace.shared.open(option.docsURL)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
         .padding(12)
         .background(

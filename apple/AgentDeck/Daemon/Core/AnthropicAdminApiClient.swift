@@ -15,13 +15,10 @@
 // hook pipeline, but not subscription quota gauges in the sandboxed app.
 //
 // Admin API keys are stored in Keychain with the same pattern as the
-// OpenClaw Gateway shared token. Non-App-Store CLI builds can still
-// poll via the `ANTHROPIC_ADMIN_API_KEY` environment variable as a
-// fallback.
+// OpenClaw Gateway shared token.
 
 import Foundation
 
-#if AGENTDECK_APP_STORE
 enum AnthropicAdminApiKeyStore {
     private static let service = "bound.serendipity.agentdeck.dashboard.anthropic.admin-api-key"
     private static let account = "default"
@@ -75,7 +72,6 @@ enum AnthropicAdminApiKeyStore {
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
-#endif
 
 /// Token counts for a single reporting window.
 struct AnthropicTokenCounts: Sendable, Codable {
@@ -116,18 +112,10 @@ final class AnthropicAdminApiClient: Sendable {
         "https://api.anthropic.com/v1/organizations/usage_report/messages"
     private static let apiVersion = "2023-06-01"
 
-    /// Returns the configured Admin API key, or nil when no key is set.
-    /// Prefers Keychain in App Store builds, falls back to
-    /// `ANTHROPIC_ADMIN_API_KEY` env for CLI/dev builds.
+    /// Returns the configured Admin API key from Keychain, or nil when no
+    /// key is set.
     func currentKey() -> String? {
-        #if AGENTDECK_APP_STORE
-        if let key = AnthropicAdminApiKeyStore.loadKey() { return key }
-        #endif
-        if let env = ProcessInfo.processInfo.environment["ANTHROPIC_ADMIN_API_KEY"],
-           !env.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return env
-        }
-        return nil
+        AnthropicAdminApiKeyStore.loadKey()
     }
 
     func hasKey() -> Bool { currentKey() != nil }

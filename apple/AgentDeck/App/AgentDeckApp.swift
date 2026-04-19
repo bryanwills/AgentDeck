@@ -82,6 +82,7 @@ struct AgentDeckApp: App {
         Window("Device Preview", id: "device-preview") {
             DevicePreviewScreen()
                 .environmentObject(preferences)
+                .environmentObject(daemonService)
         }
         .defaultPosition(.center)
         .defaultSize(width: 1100, height: 760)

@@ -236,38 +236,12 @@ final class UsageAPIClient: Sendable {
     }
 
     private func getOAuthCredentials() -> OAuthCredentials? {
-        #if AGENTDECK_APP_STORE
-        // App Store build does not invoke `/usr/bin/security` as a subprocess
-        // (Apple 2.5.2). Claude Code OAuth credentials live in the user's
-        // own keychain — accessible to Claude Code itself via its own
-        // process, and to the Swift daemon via SecItemCopyMatching if the
-        // kSecAttrService item is readable by our signing identity. The
-        // latter requires a Keychain Access Group shared with Claude Code
-        // (which Anthropic does not publish), so in the App Store build
-        // this lookup is simply skipped — usage polling falls back to the
-        // network probe path that doesn't require OAuth state.
+        // Claude Code OAuth credentials live in the user's own keychain and
+        // would require a shared Keychain Access Group (which Anthropic does
+        // not publish) for SecItemCopyMatching to read them from this app.
+        // Usage polling falls back to the network probe path that doesn't
+        // need OAuth state.
         return nil
-        #else
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", Self.keychainService, "-w"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard let data = raw.data(using: .utf8),
-                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let oauth = json["claudeAiOauth"] as? [String: Any],
-                  let token = oauth["accessToken"] as? String else { return nil }
-            return OAuthCredentials(accessToken: token, expiresAt: oauth["expiresAt"] as? Int)
-        } catch {
-            return nil
-        }
-        #endif
     }
 
     private func getOAuthToken() -> String? {
@@ -442,41 +416,11 @@ final class UsageAPIClient: Sendable {
     }
 
     private func sqliteValueViaShell(forKey key: String, dbURL: URL) -> String? {
-        #if AGENTDECK_APP_STORE
-        // Shelling out to `/usr/bin/sqlite3` is 2.5.2-sensitive and the
-        // sqlite3 C API path above already handles 99% of queries. In the
-        // rare case binding fails (text encoding edge cases), return nil
-        // rather than spawning sqlite3 as a subprocess.
+        // The sqlite3 C API path above handles 99% of queries. Spawning
+        // `/usr/bin/sqlite3` is not allowed under Apple Review Guideline
+        // 2.5.2, so the rare bind-failure case returns nil instead.
         _ = key; _ = dbURL
         return nil
-        #else
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
-        let escapedKey = key.replacingOccurrences(of: "'", with: "''")
-        process.arguments = [dbURL.path, "select hex(value) from ItemTable where key = '\(escapedKey)' limit 1;"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let hex = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !hex.isEmpty else { return nil }
-            var data = Data()
-            var index = hex.startIndex
-            while index < hex.endIndex {
-                let next = hex.index(index, offsetBy: 2, limitedBy: hex.endIndex) ?? hex.endIndex
-                guard let byte = UInt8(hex[index..<next], radix: 16) else { return nil }
-                data.append(byte)
-                index = next
-            }
-            return String(data: data, encoding: .utf8)
-        } catch {
-            return nil
-        }
-        #endif
     }
 
     private func parseAntigravityPlanName(_ authStatusText: String?) -> String? {

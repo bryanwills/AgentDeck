@@ -542,30 +542,6 @@ struct SettingsScreen: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 6) {
-                #if !AGENTDECK_APP_STORE
-                Text("D200H Helper")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white)
-                Text("AgentDeck.app can keep D200H under app control by launching its bundled helper when the sandboxed Swift daemon is denied HID access.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(TerrariumHUD.subtext)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Toggle(isOn: $preferences.autoUseBundledD200HHelper) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Auto-switch D200H to bundled helper")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white)
-                        Text("Recommended when Swift HID open fails with missing USB entitlement or kIOReturnNotPermitted.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(TerrariumHUD.subtext)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                Divider()
-                #endif
-
                 Toggle(isOn: $preferences.d200hBakeSessionText) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Bake Stream Deck-style session text")
@@ -591,12 +567,6 @@ struct SettingsScreen: View {
                 }
                 .disabled(!preferences.d200hBakeSessionText)
 
-                #if !AGENTDECK_APP_STORE
-                Button("Switch D200H to Bundled Helper Now") {
-                    Task { await daemonService.startBundledD200HHelper() }
-                }
-                .buttonStyle(.bordered)
-                #endif
             }
         }
         .onAppear {
@@ -611,13 +581,7 @@ struct SettingsScreen: View {
             return "Local daemon on port \(portString(daemonService.port))"
         }
         if daemonService.isUsingExternalDaemon {
-            #if AGENTDECK_APP_STORE
             return "External daemon on port \(portString(daemonService.port))"
-            #else
-            return daemonService.ownsExternalDaemon
-                ? "Bundled D200H helper on port \(portString(daemonService.port))"
-                : "External daemon on port \(portString(daemonService.port))"
-            #endif
         }
         if daemonService.bindFailureReason != nil {
             return "Daemon bind failed"

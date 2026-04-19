@@ -1,142 +1,20 @@
 #!/bin/bash
-# copy-adb.sh — Bundle ADB + OpenClaw Node bridge helper into the CLI /
-# Homebrew macOS app. Everything this script stages is intentionally OUT
-# of the App Store build (Apple Review Guideline 2.5.2 — self-contained
-# binaries only). Layout:
+# copy-adb.sh — Build-step no-op for the App Store build.
 #
-#   Contents/Helpers/adb                     (adb binary from Android SDK)
-#   Contents/Helpers/node                    (user's host Node.js, copied)
-#   Contents/Helpers/agentdeck-d200h-helper  (shell wrapper → node + cli.js)
-#   Contents/Resources/agentdeck-runtime/bridge/dist/cli.js   (bridge CLI)
+# Earlier revisions of this script bundled `adb`, a host `node`, and the
+# Node.js bridge runtime into `Contents/Helpers/` and `Contents/Resources/`
+# so the legacy CLI/Homebrew macOS GUI build could spawn helpers from
+# inside the .app. That distribution is no longer maintained — the macOS
+# target ships exclusively through the App Store, and Apple Review
+# Guideline 2.5.2 forbids bundling executables we'd then spawn.
 #
-# Each file is ad-hoc re-signed after copy so App Sandbox — even on the
-# CLI build — still allows local execution.
+# Android tunnelling, OpenClaw CLI logs, and the bundled D200H helper now
+# live in the Node.js bridge that users install separately from npm. The
+# postCompileScript in `apple/project.yml` still invokes this file so the
+# Xcode build graph stays valid; the body is intentionally empty.
 #
-# Gate: App Store builds set `SWIFT_ACTIVE_COMPILATION_CONDITIONS` to
-# include `AGENTDECK_APP_STORE`, and this script early-returns on that
-# signal (see next block). The resulting archive contains none of the
-# paths above; `verify-appstore-archive.sh` asserts their absence in CI.
+# `verify-appstore-archive.sh` continues to assert that none of the old
+# helper paths reappear in the shipped archive.
 
 set -euo pipefail
-
-if [[ "${SWIFT_ACTIVE_COMPILATION_CONDITIONS:-}" == *AGENTDECK_APP_STORE* ]]; then
-    echo "note: AGENTDECK_APP_STORE build — skipping bundled adb/node/helper (Apple 2.5.2)"
-    exit 0
-fi
-
-if [ -z "${BUILT_PRODUCTS_DIR:-}" ] || [ -z "${CONTENTS_FOLDER_PATH:-}" ]; then
-    echo "note: skipping adb bundle outside Xcode build environment"
-    exit 0
-fi
-
-HELPERS_DIR="${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Helpers"
-RESOURCES_DIR="${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources"
-DEST="${HELPERS_DIR}/adb"
-REPO_ROOT="${PROJECT_DIR}/.."
-
-copy_adb() {
-    local dest="$1"
-
-    # Skip if already present (incremental builds)
-    if [ -f "$dest" ]; then
-        echo "note: adb already bundled at $dest"
-        return 0
-    fi
-
-    # Search for adb in standard locations
-    REAL_HOME="${HOME:-}"
-    if [ -z "$REAL_HOME" ] && command -v dscl >/dev/null 2>&1; then
-        REAL_HOME=$(dscl . -read "/Users/$(whoami)" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
-    fi
-    if [ -z "$REAL_HOME" ]; then
-        REAL_HOME="/Users/$(whoami)"
-    fi
-
-    CANDIDATES=(
-        "${REAL_HOME}/Library/Android/sdk/platform-tools/adb"
-        "${REAL_HOME}/Android/sdk/platform-tools/adb"
-        "${REAL_HOME}/Library/Developer/Android/sdk/platform-tools/adb"
-        "/opt/homebrew/bin/adb"
-        "/usr/local/bin/adb"
-    )
-
-    ADB_SRC=""
-    for candidate in "${CANDIDATES[@]}"; do
-        if [ -x "$candidate" ]; then
-            ADB_SRC="$candidate"
-            break
-        fi
-    done
-
-    if [ -z "$ADB_SRC" ]; then
-        echo "warning: adb not found — Android device support will be unavailable"
-        return 0
-    fi
-
-    mkdir -p "$HELPERS_DIR"
-    cp "$ADB_SRC" "$dest"
-    chmod 755 "$dest"
-
-    if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ]; then
-        SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
-        codesign --force --sign "$SIGN_IDENTITY" --timestamp=none --generate-entitlement-der "$dest" 2>/dev/null || \
-        codesign --force --sign - "$dest" 2>/dev/null || true
-        echo "note: Bundled adb from $ADB_SRC → $dest (signed with: $SIGN_IDENTITY)"
-    else
-        echo "note: Bundled adb from $ADB_SRC → $dest (codesign skipped)"
-    fi
-}
-
-bundle_d200h_helper() {
-    local node_src launcher_src runtime_dir
-    node_src="$(command -v node || true)"
-    launcher_src="${PROJECT_DIR}/scripts/agentdeck-d200h-helper.sh"
-    runtime_dir="${RESOURCES_DIR}/agentdeck-runtime"
-
-    if [ -z "$node_src" ] || [ ! -x "$node_src" ]; then
-        echo "warning: node not found — bundled D200H helper will be unavailable"
-        return 0
-    fi
-    if [ ! -f "$launcher_src" ]; then
-        echo "warning: helper launcher script missing at $launcher_src"
-        return 0
-    fi
-    if [ ! -f "${REPO_ROOT}/bridge/dist/cli.js" ]; then
-        echo "warning: bridge/dist/cli.js missing — bundled D200H helper will be unavailable"
-        return 0
-    fi
-    if [ ! -d "${REPO_ROOT}/node_modules" ]; then
-        echo "warning: node_modules missing — bundled D200H helper will be unavailable"
-        return 0
-    fi
-
-    mkdir -p "$HELPERS_DIR" "$RESOURCES_DIR"
-    cp "$node_src" "${HELPERS_DIR}/node"
-    cp "$launcher_src" "${HELPERS_DIR}/agentdeck-d200h-helper"
-    chmod 755 "${HELPERS_DIR}/node" "${HELPERS_DIR}/agentdeck-d200h-helper"
-
-    rm -rf "${HELPERS_DIR}/agentdeck-runtime" "$runtime_dir"
-    mkdir -p "${runtime_dir}/bridge"
-    cp -R "${REPO_ROOT}/bridge/dist" "${runtime_dir}/bridge/dist"
-    # pnpm can leave behind .ignored_* staging directories with broken links.
-    # They are not needed in the bundled runtime, and following them makes the
-    # helper bundle step fail after the app has already compiled successfully.
-    rsync -aL --delete \
-        --exclude '.ignored_*/' \
-        --exclude '*/.ignored_*/' \
-        "${REPO_ROOT}/node_modules/" "${runtime_dir}/node_modules/"
-
-    if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ]; then
-        SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
-        codesign --force --sign "$SIGN_IDENTITY" --timestamp=none --generate-entitlement-der "${HELPERS_DIR}/node" 2>/dev/null || \
-        codesign --force --sign - "${HELPERS_DIR}/node" 2>/dev/null || true
-        codesign --force --sign "$SIGN_IDENTITY" --timestamp=none --generate-entitlement-der "${HELPERS_DIR}/agentdeck-d200h-helper" 2>/dev/null || \
-        codesign --force --sign - "${HELPERS_DIR}/agentdeck-d200h-helper" 2>/dev/null || true
-        echo "note: Bundled D200H helper runtime using node from $node_src"
-    else
-        echo "note: Bundled D200H helper runtime using node from $node_src (codesign skipped)"
-    fi
-}
-
-copy_adb "$DEST"
-bundle_d200h_helper
+exit 0

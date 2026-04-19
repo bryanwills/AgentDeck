@@ -89,7 +89,7 @@ Apple on-device 음성 인식(SFSpeechRecognizer)으로 음성 → 텍스트 →
 • iOS 17 / iPadOS 17 이상
 • Apple Silicon 또는 Intel Mac
 
-AI 코딩 에이전트가 처음이라면 [docs.claude.com/claude-code](https://docs.claude.com/en/docs/claude-code/quickstart)에서 Claude Code CLI부터 설치하세요. AgentDeck은 설치 후 바로 세션을 모니터링합니다.
+AgentDeck은 설치 직후 Device Preview, iPad 페어링, 음성 입력, APME 리포트, 선택 하드웨어 상태 출력을 바로 사용할 수 있습니다. Claude Code 훅을 켜면 사용자가 이미 실행 중인 세션 이벤트가 대시보드에 자동으로 표시됩니다.
 
 ═══ 비관계 고지 & 상표 ═══
 
@@ -201,7 +201,7 @@ Developer workflows involving Android ADB bridging, Codex/OpenCode PTY session l
 • iOS 17 / iPadOS 17 or later
 • Apple Silicon or Intel Mac
 
-New to AI coding agents? Install Claude Code first: https://docs.claude.com/en/docs/claude-code/quickstart. AgentDeck picks up sessions the moment you run one.
+AgentDeck works immediately after install with Device Preview, iPad pairing, voice input, APME reports, and optional hardware status output. Turn on Claude Code hooks when you want sessions you already run to appear in the dashboard.
 
 ═══ Independence and trademarks ═══
 

@@ -33,11 +33,10 @@ actor GatewayProbe {
         isAvailable = available
 
         if available {
-            // Non-App-Store builds use `openclaw doctor`; App Store health is
-            // refreshed through OpenClawAdapter's Gateway RPC after auth.
-            let health = await checkHealth()
-            let errorChanged = health != hasError
-            hasError = health
+            // Authenticated health is sourced through OpenClawAdapter's
+            // Gateway RPC after auth; this probe only tracks reachability.
+            let errorChanged = false != hasError
+            hasError = false
             if changed || errorChanged {
                 onStateChanged?(available, hasError)
             }
@@ -84,34 +83,5 @@ actor GatewayProbe {
         return error == 0
     }
 
-    private func checkHealth() async -> Bool {
-        #if AGENTDECK_APP_STORE
-        // App Store build: `openclaw doctor` is an external-CLI invocation
-        // that violates Apple 2.5.2. Authenticated health is sourced through
-        // OpenClawAdapter's `health` RPC; this probe only tracks reachability.
-        return false
-        #else
-        // Try `openclaw doctor --json`
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["openclaw", "doctor", "--json"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let checks = json["checks"] as? [[String: Any]] {
-                return checks.contains { ($0["status"] as? String) == "error" || ($0["status"] as? String) == "warn" }
-            }
-        } catch {
-            // openclaw not installed — not an error
-        }
-        return false
-        #endif
-    }
 }
 #endif

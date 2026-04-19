@@ -10,7 +10,7 @@ AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding a
 
 **Optional hardware extensions** let power users drive the same state on Stream Deck+ keys, Ulanzi D200H Deck Docks (USB HID), ESP32 status displays (Wi-Fi), and Divoom Pixoo matrix displays (Wi-Fi). Each integration is configurable from an in-app sheet — the user is never forced to open Terminal.
 
-**Advanced terminal-only integrations** — Android device bridging via ADB, PTY-level launch for Codex/OpenCode, and APME deterministic (git/pnpm introspection) scoring — are not part of the App Store app. The App Store build surfaces clear "Unavailable in App Store build" messaging for each so reviewers and users understand the boundary. The app does not download, install, or launch any companion executable to add those features.
+**Advanced terminal-only integrations** — Android device bridging via ADB, PTY-level launch for Codex/OpenCode, and APME deterministic (git/pnpm introspection) scoring — are not part of the App Store app. Their UI surfaces are simply hidden when the standalone app runs alone, so the catalog reflects only what this binary can drive. If the user happens to run an unrelated AgentDeck Node.js daemon on the same machine (downloaded separately from npm), AgentDeck connects to it as a WebSocket client on port 9120 and surfaces whatever data that daemon broadcasts — but the app never installs, downloads, or launches any companion executable itself.
 
 The app is sandboxed. All non-trivial entitlements below are used for local-network monitoring of agents the user is running themselves — no remote services, no third-party data collection.
 
@@ -53,7 +53,7 @@ Used to communicate with the optional Ulanzi D200H Deck Dock (USB HID class, VID
 
 ## Subprocess execution
 
-**The App Store build of AgentDeck does not spawn any subprocess or create shell scripts for Terminal.** The binary is gated behind an `AGENTDECK_APP_STORE` Swift compile condition that compiles-out every `Process()` path and every Terminal-launch path — bundled Node runtime, bundled `bridge/cli.js`, bundled `adb`, bundled D200H helper shell script, AppleScript for iTerm launch, AppleScript fallback for Terminal launch, `.command` launch scripts, `/usr/bin/security`, `/usr/bin/sqlite3`, `/bin/sh`, `/usr/bin/env`, and every external-CLI probe (`openclaw`, `whisper-cli`, `networksetup`). A CI script (`apple/scripts/verify-appstore-archive.sh`) runs after archive and fails the pipeline if the shipped `.app` contains any of those subprocess path strings in its main Mach-O, or any bundled executable besides the signed AgentDeck binary itself.
+**The App Store build of AgentDeck does not spawn any subprocess or create shell scripts for Terminal.** The macOS source tree contains no `Process()` invocation, no `.command` script writer, no AppleScript paths, and no probes for external binaries (`security`, `sqlite3`, `bin/sh`, `/usr/bin/env`, `openclaw`, `whisper-cli`, `networksetup`, `node`, `adb`). The `AGENTDECK_APP_STORE` Swift compile condition is retained as a defense-in-depth gate, and a CI script (`apple/scripts/verify-appstore-archive.sh`) runs after archive to fail the pipeline if any forbidden path string ever reappears in the shipped `.app`'s main Mach-O, or if any bundled executable besides the signed AgentDeck binary is present.
 
 ### What about the Claude Code hook commands?
 
@@ -85,7 +85,7 @@ AgentDeck can evaluate finished agent turns against configurable rubrics. In the
 
 ## Stream Deck+ dependency
 
-AgentDeck's Stream Deck+ integration renders session state on Stream Deck+ keys via Elgato's Stream Deck plugin SDK. This requires Elgato's Stream Deck software to be installed separately (free, Mac App Store & Elgato direct download). If a user plugs in a Stream Deck+ without Elgato's software, AgentDeck detects the hardware and shows an inline "Install Stream Deck software to connect" prompt with a direct download link. No silent failure. Reviewers testing without Elgato hardware can skip this integration entirely — the rest of the app does not depend on it.
+AgentDeck's Stream Deck+ integration renders session state on Stream Deck+ keys via Elgato's Stream Deck plugin SDK. This optional hardware path requires Elgato's Stream Deck software. If a user plugs in a Stream Deck+ without Elgato's software, AgentDeck shows that the integration is unavailable and links to Elgato's setup information. Reviewers testing without Elgato hardware can skip this integration entirely — the rest of the app does not depend on it.
 
 ## iOS companion
 
@@ -97,7 +97,7 @@ No account required. To see the app's features:
 
 1. Launch the app. A first-run onboarding sheet walks the user through the value prop, available AI agents, and iPad pairing. Dismissing it opens the empty dashboard with a prompt to "Launch Session" or "Preview Devices".
 2. Click "Preview Devices" from the menu bar to see how AgentDeck renders sessions on 14 different hardware targets — no real hardware required.
-3. Click "Launch Session" to see the App Store-safe guidance: AgentDeck does not launch Terminal scripts. Start Claude Code in Terminal after enabling hooks; the session appears automatically in the dashboard.
+3. Click "Launch Session" to see the App Store-safe guidance: AgentDeck does not launch Terminal scripts or command-line tools. After hooks are enabled, Claude Code sessions the user starts independently appear automatically in the dashboard.
 4. Click "Pair iPad" to show a QR code the iOS companion app can scan.
 5. Open Settings → Hardware Setup to see the in-app flows for ESP32 and Pixoo provisioning (no subprocess calls; writes serial config directly).
 

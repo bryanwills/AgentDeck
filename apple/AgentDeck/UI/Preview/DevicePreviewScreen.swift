@@ -31,7 +31,19 @@ struct DevicePreviewScreen: View {
     /// this flag — don't leak the side-effect into subviews.
     @EnvironmentObject private var preferences: AppPreferences
 
+    /// External CLI daemon presence gates the desktop-bridge-only device
+    /// previews. When absent, the picker hides Android / e-ink / TC001
+    /// rows so the catalog reflects only what this app can drive itself.
+    @EnvironmentObject private var daemonService: DaemonService
+
     private let sessionCountOptions: [Int] = [0, 1, 2, 4]
+
+    private var visibleDevices: [PreviewDevice] {
+        if daemonService.isUsingExternalDaemon {
+            return PreviewDevice.allCases
+        }
+        return PreviewDevice.allCases.filter { !$0.requiresDesktopBridge }
+    }
 
     var body: some View {
         #if os(macOS)
@@ -45,6 +57,10 @@ struct DevicePreviewScreen: View {
         .onAppear {
             if !preferences.hasSeenDevicePreview {
                 preferences.hasSeenDevicePreview = true
+            }
+            let pool = visibleDevices
+            if !pool.contains(selection.device), let first = pool.first {
+                selection.device = first
             }
         }
         #else
@@ -62,19 +78,28 @@ struct DevicePreviewScreen: View {
     // MARK: - Sidebar
 
     private var sidebar: some View {
-        List(selection: Binding<PreviewDevice?>(
+        let pool = visibleDevices
+        return List(selection: Binding<PreviewDevice?>(
             get: { selection.device },
             set: { new in if let new { selection.device = new } }
         )) {
             ForEach(PreviewDevice.Category.allCases) { cat in
-                Section(cat.displayName) {
-                    ForEach(PreviewDevice.allCases.filter { $0.category == cat }) { dev in
-                        Text(dev.displayName).tag(dev)
+                let entries = pool.filter { $0.category == cat }
+                if !entries.isEmpty {
+                    Section(cat.displayName) {
+                        ForEach(entries) { dev in
+                            Text(dev.displayName).tag(dev)
+                        }
                     }
                 }
             }
         }
         .listStyle(.sidebar)
+        .onChange(of: daemonService.isUsingExternalDaemon) { _ in
+            if !pool.contains(selection.device), let first = pool.first {
+                selection.device = first
+            }
+        }
     }
 
     // MARK: - Detail
