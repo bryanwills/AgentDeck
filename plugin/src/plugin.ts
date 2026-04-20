@@ -645,12 +645,16 @@ streamDeck.connect().then(() => {
   }
   connMgr.start();
 
-  // Auto-switch to v4 profile on SD+ devices
+  // Auto-switch to bundled SD+ profile on first load. Renamed from
+  // `agentdeck-v4` → `agentdeck-sdplus` on 2026-04-20 because Elgato cached
+  // the former as "dropped embedded profile" after an earlier bad package
+  // install and refused to auto-install it thereafter. New name is treated
+  // as fresh so AutoInstall fires cleanly.
   for (const device of streamDeck.devices) {
     if ((device as any).type === 7) { // DeviceType 7 = Stream Deck+
-      dinfo('Plugin', `SD+ device found: ${device.id}, switching to v4 profile`);
-      void streamDeck.profiles.switchToProfile(device.id, 'agentdeck-v4').catch((e: Error) => {
-        dlog('Plugin', `v4 profile switch failed (may already be active): ${e.message}`);
+      dinfo('Plugin', `SD+ device found: ${device.id}, switching to bundled profile`);
+      void streamDeck.profiles.switchToProfile(device.id, 'agentdeck-sdplus').catch((e: Error) => {
+        dlog('Plugin', `profile switch failed (may already be active): ${e.message}`);
       });
     }
   }

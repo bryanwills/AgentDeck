@@ -121,7 +121,7 @@
   },
   "Profiles": [
     {
-      "Name": "agentdeck-v4",
+      "Name": "agentdeck-sdplus",
       "DeviceType": 7,
       "AutoInstall": true,
       "DontAutoSwitchWhenInstalled": false,
