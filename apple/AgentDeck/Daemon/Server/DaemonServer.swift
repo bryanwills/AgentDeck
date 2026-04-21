@@ -66,6 +66,11 @@ final class DaemonServer {
     private var gatewayConnecting = false
     private var cachedGatewayHasError = false
     private var cachedGatewayConnected = false
+    /// Consecutive probe failures before committing to "unavailable".
+    /// Requires 2 consecutive misses (≈10s) before triggering disconnect
+    /// so transient glitches don't flash "Not configured" in the UI.
+    private var gatewayProbeFailCount = 0
+    private static let gatewayProbeDisconnectThreshold = 2
     private var cachedGatewayAuthStatus: String = "gateway_not_found"
     private var cachedGatewayAuthRequestId: String?
     private var cachedGatewayAuthMessage: String?
@@ -121,6 +126,28 @@ final class DaemonServer {
     private var currentHookSessionId: String?
     private var cachedModelCatalog: [[String: Any]] = []
     private var cachedOllamaStatus: [String: Any]?
+    /// Cached serial module snapshot — `buildModuleHealthSync` can't
+    /// `await` SerialModule.statusSnapshot() (the module is async because
+    /// ESP32Serial is an actor), so we pre-fetch into this cache via a
+    /// 5s poll. Without this, every state_update arrived with
+    /// `serial: {available: true}` and no `connections` array, hiding
+    /// every ESP32 board from the Dashboard USB serial section even
+    /// though `/health` HTTP showed them correctly via the async path.
+    private var cachedSerialStatus: [String: Any]?
+
+    /// Stream Deck plugin self-registration. The Elgato plugin sends a
+    /// `client_register` WS command right after connect with the physical
+    /// devices it sees — we cache that here so the Dashboard's Downstream
+    /// rail can render a Stream Deck row without having to duplicate
+    /// Elgato's device enumeration. Stamped with `updatedAt` so a TTL
+    /// sweep (`evictStaleHookSessions`) can expire the cache when the
+    /// plugin quits without a clean disconnect.
+    private struct StreamDeckRegistration {
+        var devices: [[String: Any]]
+        var updatedAt: Date
+    }
+    private var cachedStreamDeck: StreamDeckRegistration?
+    private static let streamDeckStaleTTL: TimeInterval = 120
     private var cachedMlxModels: [String] = []
     private var cachedMlxModelCatalog: [String] = []
     private var preferredMlxModelsEndpoint: String?
@@ -1355,6 +1382,10 @@ final class DaemonServer {
             handleSessionPushState(cmd)
             return
         }
+        if type == "client_register" {
+            handleClientRegister(cmd)
+            return
+        }
 
         // Gateway adapter handles command if alive
         if let gw = gatewayAdapter {
@@ -1612,6 +1643,40 @@ final class DaemonServer {
         broadcastStateUpdate()
     }
 
+    /// Handle a `client_register` announcement from a rich UI surface
+    /// (currently: Elgato Stream Deck plugin). Updates `cachedStreamDeck`
+    /// with the device roster the plugin claims to drive so the Dashboard
+    /// Downstream rail can render a Stream Deck row. Only `streamdeck-plugin`
+    /// is recognized for now; future client types slot in here.
+    @MainActor
+    private func handleClientRegister(_ cmd: [String: Any]) {
+        guard let clientType = cmd["clientType"] as? String else { return }
+        switch clientType {
+        case "streamdeck-plugin":
+            let devices = (cmd["devices"] as? [[String: Any]]) ?? []
+            cachedStreamDeck = StreamDeckRegistration(devices: devices, updatedAt: Date())
+            DaemonLogger.shared.debug("Daemon", "client_register streamdeck-plugin devices=\(devices.count)")
+            broadcastStateUpdate()
+        default:
+            DaemonLogger.shared.debug("Daemon", "client_register ignored clientType=\(clientType)")
+        }
+    }
+
+    /// Expire the Stream Deck cache when the plugin has gone silent for
+    /// `streamDeckStaleTTL`. The plugin's connection-manager reconnect
+    /// loop keeps sending `client_register` every connect, so a live
+    /// plugin naturally keeps the timestamp fresh; a killed/uninstalled
+    /// plugin stops refreshing and the row disappears on its own.
+    @MainActor
+    private func evictStaleClientRegistrations() async {
+        let cutoff = Date().addingTimeInterval(-Self.streamDeckStaleTTL)
+        if let sd = cachedStreamDeck, sd.updatedAt < cutoff {
+            DaemonLogger.shared.debug("Daemon", "Evicted stale streamdeck client registration")
+            cachedStreamDeck = nil
+            broadcastStateUpdate()
+        }
+    }
+
     /// Derive a project label from a Claude Code hook payload. Prefers an
     /// explicit `project_name` field, falls back to the last path component
     /// of `cwd`. Used by both the `session_start` synthesis path and the
@@ -1740,7 +1805,11 @@ final class DaemonServer {
                     } else {
                         self?.cachedGatewayConnected = false
                         if self?.cachedGatewayAvailable == true, self?.cachedGatewayAuthStatus == "connected" {
-                            self?.cachedGatewayAuthStatus = "gateway_reachable"
+                            // WebSocket dropped but Gateway TCP port is still open —
+                            // adapter will reconnect internally with backoff. Show
+                            // "reconnecting" instead of "Approve in Web UI" or
+                            // "Not configured" so the user doesn't act on a false state.
+                            self?.cachedGatewayAuthStatus = "reconnecting"
                         }
                         DaemonLogger.shared.info("OpenClaw Gateway disconnected")
                         await self?.logStream.stop()
@@ -1915,12 +1984,31 @@ final class DaemonServer {
 
     private func startAllPolling() {
         // Stale hook-session eviction — 30s. See `lastHookAtByPushedSession`
-        // and `pushedSessionStaleTTL` for rationale.
+        // and `pushedSessionStaleTTL` for rationale. Also doubles as the
+        // cadence for expiring stale client_register cache entries
+        // (Stream Deck plugin TTL) since both care about minute-scale
+        // cleanup rather than immediate reaction.
         Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
                 guard let self else { break }
                 await self.evictStaleHookSessions()
+                await self.evictStaleClientRegistrations()
+            }
+        }
+
+        // Serial status refresh — 5s. Pre-fetches the ESP32/Serial module's
+        // async snapshot into `cachedSerialStatus` so the sync broadcast
+        // path (`buildModuleHealthSync`) can emit full `connections`
+        // payloads. Without this the Dashboard USB serial section stays
+        // empty even with boards physically connected.
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self else { break }
+                if let snap = await self.serialStatusSnapshot() {
+                    await MainActor.run { self.cachedSerialStatus = snap }
+                }
             }
         }
 
@@ -1994,27 +2082,41 @@ final class DaemonServer {
             }
         }
 
-        // Gateway probe — 5s
+        // Gateway probe — 5s with hysteresis
+        // A single TCP miss does NOT trigger disconnect — transient network
+        // glitches (< 10s) are invisible to the user. Only 2+ consecutive
+        // failures (≈10s of confirmed unavailability) cause a state change.
         gatewayPollTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
                 guard let self else { break }
                 let available = await self.gatewayProbe.isAvailable
-                let changed = available != self.cachedGatewayAvailable
-                self.cachedGatewayAvailable = available
-                if !available {
-                    self.cachedGatewayAuthStatus = "gateway_not_found"
-                    self.cachedGatewayAuthRequestId = nil
-                    self.cachedGatewayAuthMessage = nil
-                } else if self.cachedGatewayAuthStatus == "gateway_not_found" {
-                    self.cachedGatewayAuthStatus = "gateway_reachable"
+
+                if available {
+                    self.gatewayProbeFailCount = 0
+                    let wasUnavailable = !self.cachedGatewayAvailable
+                    self.cachedGatewayAvailable = true
+                    if self.cachedGatewayAuthStatus == "gateway_not_found" {
+                        self.cachedGatewayAuthStatus = "gateway_reachable"
+                    }
+                    if self.gatewayAdapter == nil {
+                        self.connectGatewayAdapter()
+                    }
+                    if wasUnavailable { self.broadcastStateUpdate() }
+                } else {
+                    self.gatewayProbeFailCount += 1
+                    if self.gatewayProbeFailCount >= Self.gatewayProbeDisconnectThreshold {
+                        // Confirmed unavailable: flip state and disconnect
+                        let wasAvailable = self.cachedGatewayAvailable
+                        self.cachedGatewayAvailable = false
+                        self.cachedGatewayAuthStatus = "gateway_not_found"
+                        self.cachedGatewayAuthRequestId = nil
+                        self.cachedGatewayAuthMessage = nil
+                        if self.gatewayAdapter != nil { self.disconnectGatewayAdapter() }
+                        if wasAvailable { self.broadcastStateUpdate() }
+                    }
+                    // First miss: silently wait. Adapter handles WebSocket reconnect internally.
                 }
-                if available && self.gatewayAdapter == nil {
-                    self.connectGatewayAdapter()
-                } else if !available && self.gatewayAdapter != nil {
-                    self.disconnectGatewayAdapter()
-                }
-                if changed { self.broadcastStateUpdate() }
             }
         }
         Task { await gatewayProbe.start() }
@@ -2395,6 +2497,12 @@ final class DaemonServer {
         if let serialModule {
             modules["serial"] = await serialModule.statusSnapshot()
         }
+        if let sd = cachedStreamDeck {
+            modules["streamDeck"] = [
+                "available": true,
+                "devices": sd.devices,
+            ] as [String: Any]
+        }
         return SendableDict([
             "state": stateMachine.state.rawValue,
             "modules": modules,
@@ -2472,9 +2580,19 @@ final class DaemonServer {
         if let adb = adbModule { modules["adb"] = adb.statusSnapshot() }
         if let d200h = d200hModule { modules["d200h"] = d200h.statusSnapshot() }
         if let pixoo = pixooModule { modules["pixoo"] = pixoo.statusSnapshot() }
-        // SerialModule.statusSnapshot() is async — signal presence only
-        if serialModule != nil {
-            modules["serial"] = ["available": true] as [String: Any]
+        // SerialModule.statusSnapshot() is async — read the 5s-polled
+        // cache so Dashboard USB serial section sees connected boards
+        // without us having to awaitly-pre-fetch on every broadcast.
+        if let cachedSerial = cachedSerialStatus {
+            modules["serial"] = cachedSerial
+        } else if serialModule != nil {
+            modules["serial"] = ["available": true, "connections": [] as [Any]] as [String: Any]
+        }
+        if let sd = cachedStreamDeck {
+            modules["streamDeck"] = [
+                "available": true,
+                "devices": sd.devices,
+            ] as [String: Any]
         }
         return modules
     }

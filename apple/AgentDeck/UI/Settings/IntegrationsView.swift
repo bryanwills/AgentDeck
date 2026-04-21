@@ -213,6 +213,11 @@ enum IntegrationStatusEvaluator {
         switch state.gatewayAuthStatus {
         case "connected":
             return .connected(detail: "Paired through Gateway")
+        case "reconnecting":
+            // WebSocket dropped but Gateway TCP is still up — adapter reconnects
+            // automatically. Show amber "Awaiting" instead of "Not configured" so
+            // the user knows this is transient and no action is required.
+            return .awaiting(detail: "Reconnecting to Gateway\(deviceIdHint)…")
         case "approval_pending", "pairing_required", "gateway_reachable":
             return .awaiting(detail: "Approve this Mac in OpenClaw's Web UI (http://localhost:18789)\(deviceIdHint).")
         case "gateway_token_missing":
