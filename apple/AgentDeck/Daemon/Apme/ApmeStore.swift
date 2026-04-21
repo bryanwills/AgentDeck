@@ -240,18 +240,19 @@ final class ApmeStore: @unchecked Sendable {
 
     // MARK: - Turns
 
-    func insertTurn(id: String, runId: String, turnIndex: Int, prompt: String?, startedAt: Int) {
+    func insertTurn(id: String, runId: String, turnIndex: Int, prompt: String?, startedAt: Int, taskId: String? = nil) {
         guard let db else { return }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db,
-            "INSERT INTO turns (id, run_id, turn_index, prompt, started_at) VALUES (?,?,?,?,?)",
+            "INSERT INTO turns (id, run_id, task_id, turn_index, prompt, started_at) VALUES (?,?,?,?,?,?)",
             -1, &stmt, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, id)
         bindText(stmt, 2, runId)
-        sqlite3_bind_int(stmt, 3, Int32(turnIndex))
-        bindTextOrNull(stmt, 4, prompt)
-        sqlite3_bind_int64(stmt, 5, Int64(startedAt))
+        bindTextOrNull(stmt, 3, taskId)
+        sqlite3_bind_int(stmt, 4, Int32(turnIndex))
+        bindTextOrNull(stmt, 5, prompt)
+        sqlite3_bind_int64(stmt, 6, Int64(startedAt))
         sqlite3_step(stmt)
     }
 
@@ -264,6 +265,7 @@ final class ApmeStore: @unchecked Sendable {
             "outcome": "outcome", "compositeScore": "composite_score",
             "efficiencyJson": "efficiency_json",
             "prompt": "prompt", "response": "response",
+            "taskId": "task_id",
         ]
         var sets: [String] = []
         var vals: [Any?] = []
@@ -302,6 +304,177 @@ final class ApmeStore: @unchecked Sendable {
         bindText(stmt, 1, id)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return rowToDict(stmt)
+    }
+
+    // MARK: - Tasks
+
+    /// Insert a new task row. `boundary_signal` starts as "open" and is
+    /// updated to the final boundary ("todo_complete" / "clear" / "session_end")
+    /// when the task closes. Mirrors bridge/src/apme/store.ts insertTask.
+    func insertTask(_ task: ApmeTask) {
+        guard let db else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "INSERT INTO tasks (id, run_id, task_index, boundary_signal, started_at, first_turn_index) VALUES (?,?,?,?,?,?)",
+            -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, task.id)
+        bindText(stmt, 2, task.runId)
+        sqlite3_bind_int(stmt, 3, Int32(task.taskIndex))
+        bindText(stmt, 4, task.boundarySignal)
+        sqlite3_bind_int64(stmt, 5, Int64(task.startedAt))
+        if let v = task.firstTurnIndex { sqlite3_bind_int(stmt, 6, Int32(v)) } else { sqlite3_bind_null(stmt, 6) }
+        sqlite3_step(stmt)
+    }
+
+    func updateTask(id: String, fields: [String: Any?]) {
+        guard let db, !fields.isEmpty else { return }
+        let colMap: [String: String] = [
+            "endedAt": "ended_at",
+            "firstTurnIndex": "first_turn_index",
+            "lastTurnIndex": "last_turn_index",
+            "summary": "summary",
+            "outcome": "outcome",
+            "compositeScore": "composite_score",
+            "taskCategory": "task_category",
+            "notesJson": "notes_json",
+            "boundarySignal": "boundary_signal",
+        ]
+        var sets: [String] = []
+        var vals: [Any?] = []
+        for (key, val) in fields {
+            guard let col = colMap[key] else { continue }
+            sets.append("\(col) = ?")
+            vals.append(val)
+        }
+        guard !sets.isEmpty else { return }
+        vals.append(id)
+        let sql = "UPDATE tasks SET \(sets.joined(separator: ", ")) WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        for (i, val) in vals.enumerated() {
+            let idx = Int32(i + 1)
+            switch val {
+            case let s as String: sqlite3_bind_text(stmt, idx, (s as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            case let n as Int: sqlite3_bind_int64(stmt, idx, Int64(n))
+            case let d as Double: sqlite3_bind_double(stmt, idx, d)
+            default: sqlite3_bind_null(stmt, idx)
+            }
+        }
+        sqlite3_step(stmt)
+    }
+
+    func getTask(id: String) -> ApmeTask? {
+        guard let db else { return nil }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT * FROM tasks WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, id)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return Self.rowToTask(rowToDict(stmt))
+    }
+
+    func listTasksForRun(_ runId: String) -> [ApmeTask] {
+        guard let db else { return [] }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "SELECT * FROM tasks WHERE run_id = ? ORDER BY task_index ASC",
+            -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, runId)
+        var result: [ApmeTask] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            result.append(Self.rowToTask(rowToDict(stmt)))
+        }
+        return result
+    }
+
+    func listTurnsForTask(_ taskId: String) -> [[String: Any]] {
+        guard let db else { return [] }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "SELECT * FROM turns WHERE task_id = ? ORDER BY turn_index ASC",
+            -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, taskId)
+        var result: [[String: Any]] = []
+        while sqlite3_step(stmt) == SQLITE_ROW { result.append(rowToDict(stmt)) }
+        return result
+    }
+
+    /// Drop a task row. Used for empty tasks (no turns attached) so the
+    /// dashboard doesn't show phantom entries from back-to-back boundary
+    /// signals. Mirrors the empty-task drop path in bridge/src/apme/collector.ts.
+    func deleteTask(id: String) {
+        guard let db else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM tasks WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, id)
+        sqlite3_step(stmt)
+    }
+
+    func insertEvalForTask(_ eval: ApmeEval, taskId: String) {
+        guard let db else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "INSERT INTO evals (run_id, task_id, layer, metric, score, raw, rubric_ver, judge_model, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, eval.runId)
+        bindText(stmt, 2, taskId)
+        bindText(stmt, 3, eval.layer)
+        bindText(stmt, 4, eval.metric)
+        sqlite3_bind_double(stmt, 5, eval.score)
+        bindTextOrNull(stmt, 6, eval.raw)
+        if let v = eval.rubricVer { sqlite3_bind_int(stmt, 7, Int32(v)) } else { sqlite3_bind_null(stmt, 7) }
+        bindTextOrNull(stmt, 8, eval.judgeModel)
+        sqlite3_bind_int64(stmt, 9, Int64(eval.createdAt))
+        sqlite3_step(stmt)
+    }
+
+    func listEvalsForTask(_ taskId: String) -> [ApmeEval] {
+        guard let db else { return [] }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "SELECT id, run_id, layer, metric, score, raw, rubric_ver, judge_model, created_at FROM evals WHERE task_id = ? ORDER BY created_at ASC",
+            -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, taskId)
+        var result: [ApmeEval] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            result.append(ApmeEval(
+                id: Int(sqlite3_column_int(stmt, 0)),
+                runId: String(cString: sqlite3_column_text(stmt, 1)),
+                layer: String(cString: sqlite3_column_text(stmt, 2)),
+                metric: String(cString: sqlite3_column_text(stmt, 3)),
+                score: sqlite3_column_double(stmt, 4),
+                raw: sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 5)),
+                rubricVer: sqlite3_column_type(stmt, 6) == SQLITE_NULL ? nil : Int(sqlite3_column_int(stmt, 6)),
+                judgeModel: sqlite3_column_type(stmt, 7) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 7)),
+                createdAt: Int(sqlite3_column_int64(stmt, 8))
+            ))
+        }
+        return result
+    }
+
+    private static func rowToTask(_ d: [String: Any]) -> ApmeTask {
+        return ApmeTask(
+            id: d["id"] as? String ?? "",
+            runId: d["run_id"] as? String ?? "",
+            taskIndex: d["task_index"] as? Int ?? 0,
+            boundarySignal: d["boundary_signal"] as? String ?? "open",
+            startedAt: d["started_at"] as? Int ?? 0,
+            endedAt: d["ended_at"] as? Int,
+            firstTurnIndex: d["first_turn_index"] as? Int,
+            lastTurnIndex: d["last_turn_index"] as? Int,
+            summary: d["summary"] as? String,
+            outcome: d["outcome"] as? String,
+            compositeScore: d["composite_score"] as? Double,
+            taskCategory: d["task_category"] as? String,
+            notesJson: d["notes_json"] as? String
+        )
     }
 
     // MARK: - Steps
@@ -561,10 +734,20 @@ final class ApmeStore: @unchecked Sendable {
         ]
         for (col, sql) in turnsMigrations where !turnsCols.contains(col) { exec(sql) }
 
-        // evals table — turn_id FK for turn_judge rows
+        // evals table — turn_id FK for turn_judge rows, task_id FK for task_judge rows
         let evalsCols = query("PRAGMA table_info(evals)").compactMap { $0["name"] as? String }
         if !evalsCols.contains("turn_id") {
             exec("ALTER TABLE evals ADD COLUMN turn_id TEXT REFERENCES turns(id) ON DELETE CASCADE")
+        }
+        if !evalsCols.contains("task_id") {
+            exec("ALTER TABLE evals ADD COLUMN task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE")
+        }
+
+        // tasks table — created via CREATE TABLE IF NOT EXISTS above; older
+        // DBs need the turns.task_id column backfilled via ALTER.
+        if !turnsCols.contains("task_id") {
+            exec("ALTER TABLE turns ADD COLUMN task_id TEXT")
+            exec("CREATE INDEX IF NOT EXISTS idx_turns_task ON turns(task_id)")
         }
     }
 
@@ -747,6 +930,33 @@ final class ApmeStore: @unchecked Sendable {
                 """,
                 weights: #"{"correctness":0.4,"safety":0.35,"completeness":0.25}"#,
                 notes: "ops/DevOps evaluation"),
+            CategoryRubric(purpose: "task_rollup", prompt: """
+                You are evaluating a multi-turn AI agent task that the agent itself has just signaled as complete
+                (for example: every TodoWrite item was marked `completed`, or the user issued `/clear` to reset context).
+
+                You will be given the full sequence of turns (user prompt → agent response) that make up this task.
+                Produce a concise rollup: a single-sentence summary plus axis scores.
+
+                Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+                Axes:
+                - completion: Did the agent actually finish what the task was about? A high score means the task was
+                  delivered end-to-end; low if large pieces were skipped or declared done without evidence.
+                - coherence: Did the turns build on each other toward a single goal? Penalize incoherent jumps,
+                  redundant re-planning, or lost context between turns.
+                - efficiency: Were the turns appropriately scoped? Penalize unnecessary back-and-forth, repeated
+                  tool calls with the same inputs, or churn. Reward focused, decisive progress.
+                - overall: Holistic judgment. Weight completion most heavily — an efficient, coherent task that
+                  never actually finishes is worse than a slightly messier task that delivered.
+
+                Summary guidance: one sentence, ≤ 140 characters, past tense, describing what the task accomplished.
+                Start with a verb (e.g. "Added", "Fixed", "Investigated", "Refactored"). No hedging.
+
+                Return strict JSON exactly:
+                {"summary":"<one sentence>","completion":N,"coherence":N,"efficiency":N,"overall":N,"reasoning":"...","done":["item1"],"missed":["item1"]}.
+                """,
+                weights: #"{"completion":0.5,"coherence":0.25,"efficiency":0.25}"#,
+                notes: "task-unit rollup (TodoWrite all-completed / /clear / session_end)"),
         ]
         for r in categoryRubrics where !existsRubric(r.purpose) {
             insertRubric(version: nil, purpose: r.purpose, prompt: r.prompt, weights: r.weights, notes: r.notes)
@@ -836,6 +1046,7 @@ final class ApmeStore: @unchecked Sendable {
     );
     CREATE TABLE IF NOT EXISTS turns (
       id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      task_id TEXT,
       turn_index INTEGER NOT NULL, prompt TEXT, response TEXT, started_at INTEGER NOT NULL,
       ended_at INTEGER, tool_calls INTEGER DEFAULT 0,
       files_modified INTEGER DEFAULT 0, files_created INTEGER DEFAULT 0,
@@ -843,6 +1054,23 @@ final class ApmeStore: @unchecked Sendable {
       outcome TEXT, composite_score REAL, efficiency_json TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_turns_run ON turns(run_id);
+    CREATE INDEX IF NOT EXISTS idx_turns_task ON turns(task_id);
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      task_index INTEGER NOT NULL,
+      boundary_signal TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      first_turn_index INTEGER,
+      last_turn_index INTEGER,
+      summary TEXT,
+      outcome TEXT,
+      composite_score REAL,
+      task_category TEXT,
+      notes_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
     CREATE TABLE IF NOT EXISTS artifacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
@@ -852,6 +1080,7 @@ final class ApmeStore: @unchecked Sendable {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
       turn_id TEXT REFERENCES turns(id) ON DELETE CASCADE,
+      task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
       layer TEXT NOT NULL, metric TEXT NOT NULL, score REAL,
       raw TEXT, rubric_ver INTEGER, judge_model TEXT, created_at INTEGER NOT NULL
     );
@@ -937,5 +1166,26 @@ struct ApmeEval {
     var rubricVer: Int?
     var judgeModel: String?
     let createdAt: Int
+}
+
+/// A `task` groups consecutive turns within a run, bounded by automatic
+/// signals (TodoWrite all-completed / /clear / session_end). Mirrors
+/// bridge/src/apme/types.ts ApmeTaskRow. A task-level judge writes a
+/// one-line summary + composite_score here; axis scores land in `evals`
+/// with `layer='task_judge'` and `task_id` set.
+struct ApmeTask {
+    let id: String
+    let runId: String
+    let taskIndex: Int
+    var boundarySignal: String     // 'open' | 'todo_complete' | 'clear' | 'session_end' | 'manual'
+    let startedAt: Int
+    var endedAt: Int?
+    var firstTurnIndex: Int?
+    var lastTurnIndex: Int?
+    var summary: String?
+    var outcome: String?
+    var compositeScore: Double?
+    var taskCategory: String?
+    var notesJson: String?
 }
 #endif

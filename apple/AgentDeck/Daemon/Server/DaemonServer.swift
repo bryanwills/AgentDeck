@@ -3133,6 +3133,38 @@ final class DaemonServer {
     private func handleApmeResult(_ result: ApmeEvalJobResult) {
         guard let store = apmeStore else { return }
 
+        // Task-level branch (task_rollup eval — TodoWrite all-completed /
+        // /clear / session_end boundary). Writes composite on the tasks row
+        // (already done in runTaskEval) and emits a timeline/WS surface so
+        // dashboards show the completed-task summary.
+        if let taskId = result.taskId {
+            guard let run = store.getRun(id: result.runId),
+                  let task = store.getTask(id: taskId)
+            else { return }
+            let taskEvals = store.listEvalsForTask(taskId)
+            let overall = taskEvals.first(where: { $0.metric == "overall" })?.score
+                ?? result.overall ?? 0
+
+            let pct = Int((overall * 100).rounded())
+            let category = task.taskCategory ?? run.taskCategory ?? "?"
+            let summary = task.summary ?? "(no summary)"
+
+            broadcastApmeEval(
+                run: run,
+                evals: taskEvals,
+                overallScore: overall,
+                outcome: "committed",
+                compositeScore: overall
+            )
+
+            appendEvalResultTimeline(
+                raw: "★ task \(pct)% [\(category)]",
+                detail: "Task eval · \(summary.prefix(140))",
+                agentType: run.agentType
+            )
+            return
+        }
+
         // Turn-level branch
         if let turnId = result.turnId {
             guard let run = store.getRun(id: result.runId) else { return }

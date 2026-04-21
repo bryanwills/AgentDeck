@@ -49,6 +49,21 @@ final class ApmeCollector {
     private var lastClosedTurnByRun: [String: String] = [:]
     private var turnCounter = 0
 
+    /// Active task tracking. Tasks group consecutive turns between boundary
+    /// signals (TodoWrite all-completed / /clear / session_end). Mirrors
+    /// bridge/src/apme/collector.ts ActiveTask.
+    private struct ActiveTask {
+        let id: String
+        let runId: String
+        let index: Int
+        let startedAt: Int
+        var firstTurnIndex: Int?
+        var lastTurnIndex: Int?
+    }
+    private var activeTask: ActiveTask?
+    /// runId → next task_index. Lives across task close/open within a run.
+    private var runTaskCount: [String: Int] = [:]
+
     init(store: ApmeStore) {
         self.store = store
     }
@@ -90,6 +105,10 @@ final class ApmeCollector {
                   let runId = sessionToRun.removeValue(forKey: hookSession) else { return }
             activeHookSession = nil
             closeTurn(runId: runId) // close last turn
+            // Close the active task with session_end boundary. Fires the
+            // task_judge listener wired by the runner.
+            closeTask(boundarySignal: "session_end")
+            runTaskCount.removeValue(forKey: runId)
 
             store.updateRun(id: runId, fields: ["endedAt": nowMs()])
 
@@ -126,9 +145,19 @@ final class ApmeCollector {
                 closeTurn(runId: runId)
                 // Open new turn
                 turnCounter += 1
+                let turnIndex = turnCounter - 1
                 let turnId = UUID().uuidString
-                activeTurn = ActiveTurn(id: turnId, runId: runId, index: turnCounter - 1, startedAt: nowMs())
-                store.insertTurn(id: turnId, runId: runId, turnIndex: turnCounter - 1, prompt: prompt, startedAt: nowMs())
+                activeTurn = ActiveTurn(id: turnId, runId: runId, index: turnIndex, startedAt: nowMs())
+                // Ensure an active task exists so the new turn can attach to it.
+                // openTaskIfNone is idempotent — back-to-back turns within a task
+                // all share the same task_id until a boundary signal closes it.
+                let task = openTaskIfNone(runId: runId)
+                if var t = activeTask {
+                    if t.firstTurnIndex == nil { t.firstTurnIndex = turnIndex }
+                    t.lastTurnIndex = turnIndex
+                    activeTask = t
+                }
+                store.insertTurn(id: turnId, runId: runId, turnIndex: turnIndex, prompt: prompt, startedAt: nowMs(), taskId: task?.id)
 
                 // Set run's task_prompt from first prompt
                 let run = store.getRun(id: runId)
@@ -144,6 +173,17 @@ final class ApmeCollector {
                 if toolName == "Edit" { turn.filesModified += 1 }
                 if toolName == "Write" { turn.filesCreated += 1 }
                 activeTurn = turn
+            }
+
+            // ── Task boundary: TodoWrite all-completed ──
+            // PostToolUse payload carries tool_input.todos. When every todo
+            // status is "completed", treat it as the agent declaring the task
+            // finished and close the current task. Next UserPromptSubmit opens
+            // a fresh task.
+            if (event.lowercased() == "tool_end" || event == "PostToolUse"),
+               (data["tool_name"] as? String) == "TodoWrite",
+               Self.allTodosCompleted(data: data) {
+                closeTask(boundarySignal: "todo_complete")
             }
         }
     }
@@ -218,6 +258,89 @@ final class ApmeCollector {
             "filesCreated": turn.filesCreated,
         ])
     }
+
+    // MARK: - Task lifecycle
+
+    /// Open a new task if none is active for the current run. Idempotent —
+    /// repeat calls while a task is already active return the existing one.
+    /// Mirrors bridge/src/apme/collector.ts openTaskIfNone.
+    @discardableResult
+    private func openTaskIfNone(runId: String) -> ActiveTask? {
+        if let existing = activeTask, existing.runId == runId { return existing }
+        let nextIndex = runTaskCount[runId] ?? 0
+        runTaskCount[runId] = nextIndex + 1
+        let task = ActiveTask(
+            id: UUID().uuidString,
+            runId: runId,
+            index: nextIndex,
+            startedAt: nowMs(),
+            firstTurnIndex: nil,
+            lastTurnIndex: nil
+        )
+        activeTask = task
+        store.insertTask(ApmeTask(
+            id: task.id,
+            runId: runId,
+            taskIndex: task.index,
+            boundarySignal: "open",
+            startedAt: task.startedAt
+        ))
+        return task
+    }
+
+    /// Close the active task with the given boundary signal, persisting
+    /// metadata and firing `onTaskClosed`. Tasks that never saw a turn
+    /// (firstTurnIndex == nil) are dropped rather than left as phantoms.
+    private func closeTask(boundarySignal: String) {
+        guard let task = activeTask else { return }
+        activeTask = nil
+
+        // Empty task: no turns ever attached. Drop the row.
+        guard task.firstTurnIndex != nil else {
+            store.deleteTask(id: task.id)
+            DaemonLogger.shared.debug("APME", "closeTask \(task.id.prefix(8)) — empty, dropped")
+            return
+        }
+
+        // Inherit category from the run (best-effort).
+        let taskCategory = store.getRun(id: task.runId)?.taskCategory
+
+        store.updateTask(id: task.id, fields: [
+            "endedAt": nowMs(),
+            "lastTurnIndex": task.lastTurnIndex ?? task.firstTurnIndex ?? 0,
+            "boundarySignal": boundarySignal,
+            "taskCategory": taskCategory as Any?,
+        ])
+        DaemonLogger.shared.debug("APME", "closeTask \(task.id.prefix(8)) signal=\(boundarySignal)")
+
+        // Wire to runner (App Store default backend = foundationModels).
+        runner?.enqueueTask(
+            runId: task.runId,
+            taskId: task.id,
+            category: taskCategory,
+            boundarySignal: boundarySignal
+        )
+    }
+
+    /// Extract todos from a PostToolUse TodoWrite payload and check if every
+    /// item's status is "completed". Accepts both `tool_input.todos` (hook
+    /// standard) and flat `todos`. Matches bridge/src/apme/collector.ts
+    /// extractTodos semantics.
+    static func allTodosCompleted(data: [String: Any]) -> Bool {
+        let raw = (data["tool_input"] as? [String: Any])?["todos"]
+            ?? data["todos"]
+        guard let todos = raw as? [[String: Any]], !todos.isEmpty else { return false }
+        for t in todos {
+            let status = t["status"] as? String ?? ""
+            if status != "completed" { return false }
+        }
+        return true
+    }
+
+    // MARK: - Test accessors
+
+    /// Current active task id (nil when no task open). Exposed for tests.
+    var activeTaskId: String? { activeTask?.id }
 
     // MARK: - Turn response capture (mid-session eval entry point)
 

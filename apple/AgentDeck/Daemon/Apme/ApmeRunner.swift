@@ -38,6 +38,8 @@ struct ApmeEvalJobResult {
     let runId: String
     /// Set when this result came from a turn-level eval.
     let turnId: String?
+    /// Set when this result came from a task-level (rollup) eval.
+    var taskId: String? = nil
     let layer1Ran: Bool
     let layer2Ran: Bool
     let overall: Double?
@@ -61,6 +63,9 @@ struct ApmeParsedJudge {
     let reasoning: String
     let done: [String]?
     let missed: [String]?
+    /// One-line task summary emitted by the `task_rollup` rubric. Nil for
+    /// non-rollup judgements (turn/run level) which don't request it.
+    var summary: String? = nil
 }
 
 // MARK: - Runner
@@ -220,6 +225,125 @@ actor ApmeRunner {
         for listener in listeners { listener(result) }
     }
 
+    // MARK: - Task-level eval (rollup across multiple turns)
+
+    /// Judge a closed task (group of turns between boundary signals —
+    /// TodoWrite all-completed / /clear / session_end). Fires-and-forgets on
+    /// a detached Task. Writes a one-line summary + axis scores into the
+    /// `tasks` row and per-axis `evals` rows with `layer='task_judge'`.
+    /// Mirrors bridge/src/apme/runner.ts enqueueTask.
+    nonisolated func enqueueTask(runId: String, taskId: String, category: String? = nil, boundarySignal: String? = nil) {
+        Task.detached { [weak self] in
+            await self?.runTaskEval(runId: runId, taskId: taskId, category: category, boundarySignal: boundarySignal)
+        }
+    }
+
+    private func runTaskEval(runId: String, taskId: String, category: String?, boundarySignal: String?) async {
+        guard config.enabled else { return }
+        guard let task = store.getTask(id: taskId) else { return }
+        let turns = store.listTurnsForTask(taskId)
+        if turns.isEmpty { return }
+
+        // Skip tasks whose turns carry no meaningful text — all tool_only /
+        // empty. Judging silence produces noise scores. Parity with TS runner.
+        let anyText = turns.contains { t in
+            let kind = Self.readResponseKind(turn: t)
+            if kind == "text" { return true }
+            let prompt = (t["prompt"] as? String) ?? ""
+            return !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if !anyText {
+            DaemonLogger.shared.debug("APME", "runTaskEval skip task=\(taskId.prefix(8)) — no text")
+            return
+        }
+
+        // Select rubric: task_rollup preferred, fall back to category, then general.
+        let rubric = store.getCurrentRubric(purpose: "task_rollup")
+            ?? (category.flatMap { store.getCurrentRubric(purpose: $0) })
+            ?? store.getCurrentRubric(purpose: "general")
+        guard let rubric = rubric,
+              let rubricPrompt = rubric["prompt"] as? String
+        else { return }
+
+        let judgePrompt = Self.buildTaskJudgePrompt(
+            rubricPrompt: rubricPrompt,
+            category: category ?? task.taskCategory ?? "unknown",
+            boundarySignal: boundarySignal ?? task.boundarySignal,
+            turns: turns
+        )
+
+        guard let judgeText = await callJudge(prompt: judgePrompt) else {
+            DaemonLogger.shared.debug("APME", "task judge returned nil task=\(taskId.prefix(8))")
+            return
+        }
+        guard let parsed = Self.parseJudgeJson(judgeText) else {
+            DaemonLogger.shared.debug("APME", "task judge unparseable task=\(taskId.prefix(8))")
+            return
+        }
+
+        let now = Int(Date().timeIntervalSince1970 * 1000)
+        let rubricVer = rubric["version"] as? Int
+        let judgeModel = self.judgeModelLabel
+
+        for (axis, score) in parsed.scores {
+            var raw: String? = nil
+            if axis == "overall" {
+                let meta: [String: Any] = [
+                    "summary": parsed.summary ?? NSNull(),
+                    "reasoning": parsed.reasoning,
+                    "done": parsed.done ?? [],
+                    "missed": parsed.missed ?? [],
+                ]
+                if let data = try? JSONSerialization.data(withJSONObject: meta),
+                   let s = String(data: data, encoding: .utf8) {
+                    raw = s
+                }
+            }
+            let eval = ApmeEval(
+                id: 0,
+                runId: runId,
+                layer: "task_judge",
+                metric: axis,
+                score: score,
+                raw: raw,
+                rubricVer: rubricVer,
+                judgeModel: judgeModel,
+                createdAt: now
+            )
+            store.insertEvalForTask(eval, taskId: taskId)
+        }
+
+        // Persist the summary + composite score on the task row itself so
+        // listTasksForRun returns it without a join.
+        var taskFields: [String: Any?] = [:]
+        taskFields["summary"] = parsed.summary as Any?
+        taskFields["compositeScore"] = parsed.scores["overall"] as Any?
+        let notes: [String: Any] = [
+            "reasoning": parsed.reasoning,
+            "done": parsed.done ?? [],
+            "missed": parsed.missed ?? [],
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: notes),
+           let s = String(data: data, encoding: .utf8) {
+            taskFields["notesJson"] = s
+        }
+        store.updateTask(id: taskId, fields: taskFields)
+
+        let overall = parsed.scores["overall"]
+        DaemonLogger.shared.debug("APME", "task eval \(taskId.prefix(8)): overall=\(overall ?? -1) summary=\(parsed.summary?.prefix(40) ?? "-")")
+
+        var result = ApmeEvalJobResult(
+            runId: runId,
+            turnId: nil,
+            layer1Ran: false,
+            layer2Ran: true,
+            overall: overall,
+            layer1SkippedReason: Self.layer1SkippedReason
+        )
+        result.taskId = taskId
+        for listener in listeners { listener(result) }
+    }
+
     // MARK: - Run-level eval (layer 2 only in Phase 1)
 
     /// Enqueue a run-level eval. Phase 1 calls the judge against the run's
@@ -365,6 +489,46 @@ actor ApmeRunner {
 
     // MARK: - Prompt builders
 
+    /// Build the judge prompt for a task-unit rollup. Includes up to 10 turns
+    /// (user prompt + agent response each) and the boundary signal so the
+    /// rubric can weigh completion signals. Mirrors bridge/src/apme/runner.ts
+    /// runTaskEval prompt composition.
+    static func buildTaskJudgePrompt(
+        rubricPrompt: String,
+        category: String,
+        boundarySignal: String,
+        turns: [[String: Any]]
+    ) -> String {
+        let cap = 10
+        let clipped = Array(turns.prefix(cap))
+        var lines: [String] = []
+        for t in clipped {
+            let idx = t["turn_index"] as? Int ?? 0
+            let prompt = String(((t["prompt"] as? String) ?? "").prefix(1500))
+            let response = String(((t["response"] as? String) ?? "").prefix(2500))
+            lines.append("[Turn \(idx)] User: \(prompt.isEmpty ? "(empty)" : prompt)")
+            if !response.isEmpty { lines.append("Agent: \(response)") }
+        }
+        if turns.count > cap {
+            lines.append("… (\(turns.count - cap) more turns omitted)")
+        }
+
+        var sections: [String] = [
+            rubricPrompt,
+            "",
+            "--- TASK CONTEXT ---",
+            "task_category: \(category)",
+            "turn_count: \(turns.count)",
+            "boundary_signal: \(boundarySignal)",
+            "",
+            "--- TURNS ---",
+        ]
+        sections.append(contentsOf: lines)
+        sections.append("")
+        sections.append("Respond with strict JSON only.")
+        return sections.joined(separator: "\n")
+    }
+
     static func buildTurnJudgePrompt(
         rubricPrompt: String,
         category: String,
@@ -438,8 +602,9 @@ actor ApmeRunner {
     // MARK: - parseJudgeJson (parity with runner.ts post-e76325f7)
 
     /// Reserved JSON fields that are NOT numeric axes.
-    /// Must match the TS `RESERVED` set in runner.ts exactly.
-    private static let reservedFields: Set<String> = ["reasoning", "done", "missed", "notes"]
+    /// Must match the TS `RESERVED` set in runner.ts exactly. `summary` is
+    /// the one-line rollup emitted by the `task_rollup` rubric.
+    private static let reservedFields: Set<String> = ["reasoning", "done", "missed", "notes", "summary"]
 
     /// Parse the judge's JSON response into scores + metadata.
     ///
@@ -474,12 +639,17 @@ actor ApmeRunner {
         let reasoning = (obj["reasoning"] as? String) ?? ""
         let done = (obj["done"] as? [Any])?.compactMap { $0 as? String }
         let missed = (obj["missed"] as? [Any])?.compactMap { $0 as? String }
+        // `summary` is produced by the task_rollup rubric — clip defensively
+        // so a runaway model can't blow up the tasks.summary column.
+        let summaryRaw = (obj["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let summary: String? = summaryRaw.isEmpty ? nil : String(summaryRaw.prefix(280))
 
         return ApmeParsedJudge(
             scores: scores,
             reasoning: reasoning,
             done: done,
-            missed: missed
+            missed: missed,
+            summary: summary
         )
     }
 
