@@ -21,6 +21,9 @@ struct DaemonTimelineEntry: Codable, Sendable {
     /// to nil via Codable's default optional-missing-key behaviour.
     var projectName: String?
     var sessionId: String?
+    /// OpenClaw Gateway runId — groups entries belonging to the same
+    /// generation cycle so clients can cluster them into a single turn row.
+    var runId: String?
 }
 
 actor DaemonTimelineStore {

@@ -228,8 +228,12 @@ actor OpenClawAdapter {
             if let sessionKey = payload["sessionKey"] as? String, !sessionKey.isEmpty {
                 currentSessionKey = sessionKey
             }
-            // Chat events (delta, final, aborted, error)
-            self._onEvent?(["type": "gateway_chat", "event": eventName, "payload": payload])
+            // Chat events (delta, final, aborted, error).
+            // runId is promoted to the top level so DaemonServer can route it
+            // to the APME collector without unwrapping the nested payload.
+            var chatEvent: [String: Any] = ["type": "gateway_chat", "event": eventName, "payload": payload]
+            if let runId = currentRunId { chatEvent["runId"] = runId }
+            self._onEvent?(chatEvent)
         case ADGatewayEventName.execApprovalRequested.rawValue:
             pendingApprovalId = payload["id"] as? String
             self._onEvent?(["type": "gateway_approval", "payload": payload])
@@ -860,7 +864,8 @@ actor OpenClawAdapter {
             status: nil,
             agentType: "openclaw",
             repeatCount: nil,
-            automated: nil
+            automated: nil,
+            runId: currentRunId
         )
         emitTimelineEntry(entry)
     }
@@ -868,16 +873,25 @@ actor OpenClawAdapter {
     private func emitTimelineEntry(fromSessionTool payload: [String: Any]) {
         let toolName = payload["name"] as? String ?? payload["tool"] as? String ?? "tool"
         let status = payload["status"] as? String
+        // Include tool input summary in detail so the timeline row shows what
+        // the tool was actually called with, not just its name.
+        let inputSummary: String? = {
+            guard let input = payload["input"] else { return nil }
+            let s = String(describing: input)
+            return s.isEmpty ? nil : String(s.prefix(300))
+        }()
+        let detail: String? = [status, inputSummary].compactMap { $0 }.joined(separator: " | ").nonEmpty
         let entry = DaemonTimelineEntry(
             ts: Self.payloadTimestamp(payload),
             type: "tool_exec",
             raw: String(toolName.prefix(200)),
-            detail: status,
+            detail: detail,
             approvalId: nil,
             status: status,
             agentType: "openclaw",
             repeatCount: nil,
-            automated: nil
+            automated: nil,
+            runId: currentRunId
         )
         emitTimelineEntry(entry)
     }
@@ -894,6 +908,7 @@ actor OpenClawAdapter {
         if let agentType = entry.agentType { entryDict["agentType"] = agentType }
         if let repeatCount = entry.repeatCount { entryDict["repeatCount"] = repeatCount }
         if let automated = entry.automated { entryDict["automated"] = automated }
+        if let runId = entry.runId { entryDict["runId"] = runId }
         _onEvent?([
             "type": "gateway_timeline_entry",
             "entry": entryDict,

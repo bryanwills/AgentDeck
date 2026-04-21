@@ -57,7 +57,8 @@ final class DaemonServer {
 
     // APME
     private var apmeStore: ApmeStore?
-    private var apmeCollector: ApmeCollector?
+    private var apmeCollector: ApmeCollector?        // Claude Code hooks
+    private var apmeCollectorGateway: ApmeCollector? // OpenClaw gateway (separate to avoid activeHookSession collision)
     private var apmeRunner: ApmeRunner?
     private var apmeEvalTimerTask: Task<Void, Never>?
 
@@ -307,6 +308,8 @@ final class DaemonServer {
             apmeStore = store
             let collector = ApmeCollector(store: store)
             apmeCollector = collector
+            let gatewayCollector = ApmeCollector(store: store)
+            apmeCollectorGateway = gatewayCollector
             // Runner wraps the judge pipeline. In Phase 1 the only backend
             // is Apple Foundation Models (on-device, zero-config). If it's
             // unavailable (Intel Mac, Apple Intelligence off), turn_judge
@@ -314,6 +317,7 @@ final class DaemonServer {
             let runner = ApmeRunner(store: store)
             apmeRunner = runner
             collector.runner = runner
+            gatewayCollector.runner = runner
 
             // Register the eval-result broadcaster. Mirrors the TS daemon's
             // `apme.runner.onResult` handler in bridge/src/daemon-server.ts
@@ -1801,6 +1805,12 @@ final class DaemonServer {
                         if self?.stateMachine.state == .disconnected {
                             _ = self?.stateMachine.transition(trigger: "session_start", source: .hook)
                         }
+                        // APME: open a run for this Gateway connection
+                        self?.apmeCollectorGateway?.handleHook(event: "session_start", data: [
+                            "session_id": "openclaw-gateway",
+                            "project_name": "OpenClaw",
+                            "agent_type": "openclaw",
+                        ])
                         self?.handleStateChanged()
                     } else {
                         self?.cachedGatewayConnected = false
@@ -1816,6 +1826,10 @@ final class DaemonServer {
                         _ = self?.stateMachine.transition(trigger: "session_end", source: .hook)
                         self?.gatewaySessionState = "idle"
                         self?.gatewayCurrentTool = nil
+                        // APME: close the gateway run on disconnect
+                        self?.apmeCollectorGateway?.handleHook(event: "session_end", data: [
+                            "session_id": "openclaw-gateway",
+                        ])
                         self?.handleStateChanged()
                     }
                 }
@@ -1848,6 +1862,9 @@ final class DaemonServer {
         // Note: gatewayModelName is intentionally preserved across brief disconnects
         // so the model row doesn't flash empty on reconnect.
         _ = stateMachine.transition(trigger: "session_end", source: .hook)
+        apmeCollectorGateway?.handleHook(event: "session_end", data: [
+            "session_id": "openclaw-gateway",
+        ])
         broadcastSessionsList()
         broadcastStateUpdate()
         broadcastUsage()
@@ -1861,7 +1878,15 @@ final class DaemonServer {
             let chatPayload = event["payload"] as? [String: Any] ?? [:]
             let chatState = chatPayload["state"] as? String
             switch chatState {
-            case "final", "aborted", "error":
+            case "final", "aborted":
+                gatewaySessionState = "idle"
+                gatewayCurrentTool = nil
+                // APME: record response text → triggers inline classification + eval
+                let response = chatPayload["response"] as? String ?? ""
+                if !response.isEmpty {
+                    apmeCollectorGateway?.setTurnResponse(response)
+                }
+            case "error":
                 gatewaySessionState = "idle"
                 gatewayCurrentTool = nil
             default:
@@ -1895,19 +1920,37 @@ final class DaemonServer {
         case "gateway_timeline_entry":
             if let entry = event["entry"] as? [String: Any] {
                 appendGatewayTimelineEntry(entry)
-                // session.tool entries arrive via sessions.messages.subscribe.
-                // Use them to keep gatewayCurrentTool in sync so the creature
-                // shows which tool is executing even when no chat event is in flight.
-                if entry["type"] as? String == "tool_exec" {
+                let entryType = entry["type"] as? String
+
+                if entryType == "model_call" {
+                    // session.message role=user → turn start: record prompt for APME
+                    let prompt = (entry["detail"] as? String) ?? (entry["raw"] as? String) ?? ""
+                    if !prompt.isEmpty {
+                        apmeCollectorGateway?.handleHook(event: "user_prompt_submit", data: [
+                            "session_id": "openclaw-gateway",
+                            "prompt": prompt,
+                        ])
+                    }
+                } else if entryType == "tool_exec" {
+                    // session.tool entries arrive via sessions.messages.subscribe.
+                    // Keep gatewayCurrentTool in sync AND wire tool events to APME.
                     let toolName = entry["raw"] as? String
                     let status = entry["status"] as? String
                     let hasOutput = entry["detail"] != nil
                     if status == "complete" || status == "error" || hasOutput {
                         if gatewayCurrentTool == toolName { gatewayCurrentTool = nil }
+                        apmeCollectorGateway?.handleHook(event: "tool_end", data: [
+                            "session_id": "openclaw-gateway",
+                            "tool_name": toolName as Any,
+                        ])
                     } else {
                         // pending / no status yet — tool is starting
                         gatewayCurrentTool = toolName
                         if gatewaySessionState == "idle" { gatewaySessionState = "processing" }
+                        apmeCollectorGateway?.handleHook(event: "tool_start", data: [
+                            "session_id": "openclaw-gateway",
+                            "tool_name": toolName as Any,
+                        ])
                     }
                     broadcastStateUpdate()
                 }
@@ -3195,7 +3238,7 @@ final class DaemonServer {
 
     @MainActor
     private func appendGatewayTimelineEntry(_ rawEntry: [String: Any]) {
-        let entry = DaemonTimelineEntry(
+        var entry = DaemonTimelineEntry(
             ts: (rawEntry["ts"] as? NSNumber)?.doubleValue ?? rawEntry["ts"] as? Double ?? Date().timeIntervalSince1970 * 1000,
             type: rawEntry["type"] as? String ?? "event",
             raw: rawEntry["raw"] as? String ?? "",
@@ -3206,6 +3249,7 @@ final class DaemonServer {
             repeatCount: rawEntry["repeatCount"] as? Int,
             automated: rawEntry["automated"] as? Bool
         )
+        entry.runId = rawEntry["runId"] as? String
         Task { await timelineStore.add(entry) }
         broadcastRaw(["type": "timeline_event", "entry": rawEntry] as [String: Any])
     }
