@@ -137,10 +137,38 @@ export function renderUsageExtra(data: UsageModeData): string {
   `);
 }
 
-/** Disconnected / no data yet. `connected=false` → daemon offline; otherwise → waiting for first payload. */
-export function renderUsageDisconnected(connected = true): string {
-  const icon = connected ? '\uD83D\uDCCA' : '\u26A1';
-  const label = connected ? 'Waiting...' : 'Offline';
+/**
+ * Placeholder when live usage can't be shown. Three distinct reasons:
+ *  - 'offline'     — daemon/session disconnected
+ *  - 'waiting'     — connected, first usage payload hasn't arrived yet
+ *  - 'unavailable' — connected, but daemon reported stale usage OR never had
+ *                    subscription data to report (API-key account, App Store
+ *                    sandbox with no CLI relay). Data is not coming.
+ */
+export type UsageUnavailableReason = 'offline' | 'waiting' | 'unavailable';
+
+export function renderUsageDisconnected(
+  connected = true,
+  reason: UsageUnavailableReason = connected ? 'waiting' : 'offline',
+): string {
+  const effective: UsageUnavailableReason = connected ? reason : 'offline';
+  let icon: string;
+  let label: string;
+  switch (effective) {
+    case 'offline':
+      icon = '\u26A1';
+      label = 'Offline';
+      break;
+    case 'unavailable':
+      icon = '\uD83D\uDCCA';
+      label = 'No usage data';
+      break;
+    case 'waiting':
+    default:
+      icon = '\uD83D\uDCCA';
+      label = 'Waiting...';
+      break;
+  }
   return svgWrap(`
     <rect width="${W}" height="${H}" fill="#0f172a"/>
     <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#475569">USAGE</text>

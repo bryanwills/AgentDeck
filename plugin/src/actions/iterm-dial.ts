@@ -130,13 +130,17 @@ function refreshUsageDials(): void {
   let svg: string;
 
   // Collapse the dial to the disconnected placeholder when upstream has no
-  // live usage to show: either no data yet, flagged stale, or the percentages
-  // were suppressed by the daemon (in-process sandbox with no relay). Every
-  // other surface (macOS dashboard, Pixoo, D200H, Android) hides its usage
-  // region on the same criteria — keep the plugin consistent.
+  // live usage to show. Three distinct reasons, rendered with distinct labels
+  // so "Waiting..." is reserved for the genuine first-payload-not-yet case —
+  // stale / missing-subscription is honestly labeled "No usage data".
+  const connected = currentState !== State.DISCONNECTED;
   const usageUnavailable = data.usageStale === true || data.fiveHourPercent == null;
-  if (!hasReceivedData || usageUnavailable) {
-    svg = renderUsageDisconnected(currentState !== State.DISCONNECTED);
+  if (!connected) {
+    svg = renderUsageDisconnected(false, 'offline');
+  } else if (!hasReceivedData) {
+    svg = renderUsageDisconnected(true, 'waiting');
+  } else if (usageUnavailable) {
+    svg = renderUsageDisconnected(true, 'unavailable');
   } else {
     const page = USAGE_PAGES[pageIdx];
     switch (page) {
