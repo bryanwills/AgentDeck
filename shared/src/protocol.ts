@@ -513,6 +513,31 @@ export interface ApmeRecommendCommand {
 }
 
 /**
+ * Self-announcement from a rich UI client (Elgato Stream Deck plugin, a
+ * future Android companion app, etc.) so the daemon can surface the
+ * hardware under its rightful Downstream row instead of treating every
+ * WS connection as an anonymous dashboard viewer. Sent once per connect,
+ * immediately after the WebSocket opens. Daemon wipes the cached entry
+ * when the WS connection closes.
+ */
+export interface ClientRegisterCommand {
+  type: 'client_register';
+  /** Short stable id — "streamdeck-plugin", "android-companion", etc. */
+  clientType: string;
+  /** Human-readable label for the surface (appears verbatim in diagnostics). */
+  clientLabel?: string;
+  /** Physical device roster this client is driving, if any. */
+  devices?: Array<{
+    id: string;
+    name: string;
+    /** "streamdeck" | "streamdeckplus" | "streamdeckmini" | ... — free-form. */
+    family?: string;
+    columns?: number;
+    rows?: number;
+  }>;
+}
+
+/**
  * Session-scoped command — daemon forwards the inner command to the specified session's bridge.
  * Enables direct control of a specific session from any client (MenuBarExtra, Dashboard, etc.)
  */
@@ -540,6 +565,7 @@ export type PluginCommand =
   | SwitchAgentCommand
   | FocusSessionCommand
   | SessionCommand
+  | ClientRegisterCommand
   | ApmeVibeFeedbackCommand
   | ApmeRecommendCommand;
 

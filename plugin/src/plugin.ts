@@ -475,6 +475,35 @@ connMgr.on('display_state', (ev: { type: 'display_state'; displayOn: boolean }) 
 connMgr.on('connected', () => {
   dinfo('Plugin', `connected (agentType=${proxiedAgentType} prevState=${currentState})`);
   setDaemonConnected(true);
+  // Announce ourselves so the daemon's Dashboard → Downstream rail can
+  // surface a "Stream Deck" row with the physical devices this plugin
+  // sees. Without this the daemon treats the WS as an anonymous viewer.
+  // DeviceType 7 = Stream Deck+, 0 = Stream Deck, 1 = Stream Deck Mini,
+  // 2 = Stream Deck XL, 6 = Stream Deck Pedal. Family string is
+  // best-effort; unknown types fall through as "streamdeck-unknown".
+  const familyFor = (type: number | undefined): string => {
+    switch (type) {
+      case 0: return 'streamdeck';
+      case 1: return 'streamdeckmini';
+      case 2: return 'streamdeckxl';
+      case 6: return 'streamdeckpedal';
+      case 7: return 'streamdeckplus';
+      default: return 'streamdeck-unknown';
+    }
+  };
+  const devices = Array.from(streamDeck.devices).map((d: any) => ({
+    id: String(d.id ?? ''),
+    name: String(d.name ?? ''),
+    family: familyFor(d.type as number | undefined),
+    columns: d.size?.columns as number | undefined,
+    rows: d.size?.rows as number | undefined,
+  }));
+  connMgr.send({
+    type: 'client_register',
+    clientType: 'streamdeck-plugin',
+    clientLabel: 'Stream Deck',
+    devices,
+  });
   // Request fresh usage data immediately on connect (covers sleep/wake recovery)
   connMgr.send({ type: 'query_usage' });
 });
