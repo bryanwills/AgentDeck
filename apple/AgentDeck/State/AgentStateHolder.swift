@@ -650,6 +650,14 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.voiceAssistantResponseText = e.voiceAssistantResponseText  // null when idle
         if let mh = e.moduleHealth { state.moduleHealth = mh }
 
+        // OpenClaw Gateway provides its own rich timeline entries via timeline_event.
+        // Suppress the StateTimelineGenerator fallback ("Prompt sent" etc.) as soon
+        // as the gateway is confirmed connected so the generator doesn't race ahead
+        // of the first timeline_event from the adapter.
+        if state.gatewayConnected == true {
+            timelineGenerator.receivingBridgeTimeline = true
+        }
+
         // Local timeline generation (when bridge doesn't provide rich timeline)
         timelineGenerator.onStateUpdate(
             newState: state.state,
