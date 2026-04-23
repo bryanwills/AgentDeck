@@ -66,19 +66,20 @@ import dev.agentdeck.util.formatResetTime
 fun TopologyRail(
     state: DashboardState,
     modifier: Modifier = Modifier,
+    scale: MonitorLayoutScale = MonitorLayoutScale.phone,
 ) {
     Column(
         modifier = modifier
             .background(TerrariumColors.HUDBg, RoundedCornerShape(8.dp))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .padding(scale.panelPadding),
+        verticalArrangement = Arrangement.spacedBy(scale.topologyRowSpacing),
     ) {
-        SectionHeader("UPSTREAM")
+        SectionHeader("UPSTREAM", scale)
         UpstreamRows(state = state)
         FlowArrow()
         HubNode()
         FlowArrow()
-        SectionHeader("DOWNSTREAM")
+        SectionHeader("DOWNSTREAM", scale)
         DownstreamRows(state = state)
     }
 }
@@ -86,7 +87,7 @@ fun TopologyRail(
 // MARK: - Section chrome
 
 @Composable
-private fun SectionHeader(title: String) {
+private fun SectionHeader(title: String, scale: MonitorLayoutScale = MonitorLayoutScale.phone) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -95,7 +96,7 @@ private fun SectionHeader(title: String) {
         Text(
             text = title,
             color = TerrariumColors.HUDSubtext,
-            fontSize = 11.sp,
+            fontSize = scale.fontHeader,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
             letterSpacing = 1.4.sp,

@@ -683,6 +683,7 @@ private fun MonitorHUD(
     dashState: DashboardState,
 ) {
     val systemBarsPadding = WindowInsets.systemBars.asPaddingValues()
+    val scale = rememberMonitorLayoutScale()
     Box(modifier = Modifier.fillMaxSize().padding(top = systemBarsPadding.calculateTopPadding())) {
         // Top-left: Agent list (logo + sessions + mode)
         SessionListPanel(
@@ -695,10 +696,11 @@ private fun MonitorHUD(
             siblingSessions = dashState.siblingSessions,
             workerSessionCount = dashState.workerSessionCount,
             permissionMode = dashState.permissionMode,
+            scale = scale,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(start = 12.dp, top = 12.dp)
-                .widthIn(max = 220.dp),
+                .padding(start = scale.panelEdgeInset, top = scale.panelEdgeInset)
+                .widthIn(max = scale.sessionPanelMaxWidth),
         )
 
         // Top-right: Relationship-centric topology rail replaces the former
@@ -707,10 +709,11 @@ private fun MonitorHUD(
         // list boxes.
         TopologyRail(
             state = dashState,
+            scale = scale,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(end = 12.dp, top = 12.dp)
-                .widthIn(max = 300.dp),
+                .padding(end = scale.panelEdgeInset, top = scale.panelEdgeInset)
+                .widthIn(max = scale.topologyPanelMaxWidth),
         )
 
         // Floating attention theater — renders whatever PromptOption[] the

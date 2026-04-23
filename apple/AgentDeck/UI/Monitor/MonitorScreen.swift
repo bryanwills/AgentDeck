@@ -72,16 +72,14 @@ struct MonitorScreen: View {
 
                 toastLayer(geo: geo)
 
-                #if os(macOS)
                 if shouldShowEmptyGuide {
                     MonitorEmptyGuideOverlay(
-                        onLaunchSession: { openWindow(id: "launch-session") },
-                        onPreviewDevices: { openWindow(id: "device-preview") },
+                        onLaunchSession: emptyGuideLaunchAction,
+                        onPreviewDevices: emptyGuidePreviewAction,
                         onDismiss: { preferences.hasSeenMonitorEmptyGuide = true }
                     )
                     .transition(.opacity)
                 }
-                #endif
             }
         }
     }
@@ -321,6 +319,22 @@ struct MonitorScreen: View {
         stateHolder.sendCommand(.focusSession(sessionId: sessionId))
     }
 
+    private var emptyGuideLaunchAction: (() -> Void)? {
+        #if os(macOS)
+        return { openWindow(id: "launch-session") }
+        #else
+        return nil
+        #endif
+    }
+
+    private var emptyGuidePreviewAction: (() -> Void)? {
+        #if os(macOS)
+        return { openWindow(id: "device-preview") }
+        #else
+        return nil
+        #endif
+    }
+
     private func updateTerrariumState() {
         terrariumState = stateHolder.state.toTerrariumState(previous: terrariumState)
     }
@@ -441,17 +455,20 @@ private struct KeyboardShortcutsModifier: ViewModifier {
 }
 #endif
 
-// MARK: - Monitor Empty-State Onboarding Overlay (macOS)
+// MARK: - Monitor Empty-State Onboarding Overlay
 
-#if os(macOS)
 /// First-run guidance card that surfaces when the Monitor has no live
-/// sessions. Routes the user into the menubar's "Launch Session" window or
-/// the "Device Preview" gallery so the terrarium never reads as broken on
-/// day one. Dismiss flips `AppPreferences.hasSeenMonitorEmptyGuide` so
-/// returning users aren't re-nudged.
+/// sessions. On macOS it routes the user into the menubar's "Launch
+/// Session" window or the "Device Preview" gallery so the terrarium
+/// never reads as broken on day one. On iOS/iPadOS the corresponding
+/// entry points don't exist (can't spawn local Claude sessions, no
+/// device-preview window), so the card collapses to a single explanatory
+/// line + Got-it dismiss. Dismiss flips
+/// `AppPreferences.hasSeenMonitorEmptyGuide` so returning users aren't
+/// re-nudged.
 private struct MonitorEmptyGuideOverlay: View {
-    let onLaunchSession: () -> Void
-    let onPreviewDevices: () -> Void
+    var onLaunchSession: (() -> Void)?
+    var onPreviewDevices: (() -> Void)?
     let onDismiss: () -> Void
 
     var body: some View {
@@ -469,26 +486,32 @@ private struct MonitorEmptyGuideOverlay: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 10) {
-                Button {
-                    onLaunchSession()
-                } label: {
-                    Label("Launch Session", systemImage: "play.fill")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
+            if onLaunchSession != nil || onPreviewDevices != nil {
+                HStack(spacing: 10) {
+                    if let onLaunchSession {
+                        Button {
+                            onLaunchSession()
+                        } label: {
+                            Label("Launch Session", systemImage: "play.fill")
+                                .font(.system(size: 12, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                    }
 
-                Button {
-                    onPreviewDevices()
-                } label: {
-                    Label("Preview Devices", systemImage: "rectangle.on.rectangle")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(maxWidth: .infinity)
+                    if let onPreviewDevices {
+                        Button {
+                            onPreviewDevices()
+                        } label: {
+                            Label("Preview Devices", systemImage: "rectangle.on.rectangle")
+                                .font(.system(size: 12, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
             }
 
             Button {
@@ -514,14 +537,15 @@ private struct MonitorEmptyGuideOverlay: View {
         .shadow(color: .black.opacity(0.4), radius: 18, y: 6)
     }
 
-    /// Built as Text concatenation so we keep the same color/size while
-    /// bolding the two action names the user is meant to find in the UI.
     private var bodyText: Text {
-        Text("Click ")
-            + Text("Launch Session").bold()
-            + Text(" in the menubar to start Claude Code here with full monitoring. Or click ")
-            + Text("Preview Devices").bold()
-            + Text(" to see what AgentDeck renders on hardware before you hook anything up.")
+        if onLaunchSession != nil {
+            return Text("Click ")
+                + Text("Launch Session").bold()
+                + Text(" in the menubar to start Claude Code here with full monitoring. Or click ")
+                + Text("Preview Devices").bold()
+                + Text(" to see what AgentDeck renders on hardware before you hook anything up.")
+        } else {
+            return Text("Start Claude Code on your Mac. This dashboard picks up every session automatically — you'll see creatures appear as soon as the bridge connects.")
+        }
     }
 }
-#endif

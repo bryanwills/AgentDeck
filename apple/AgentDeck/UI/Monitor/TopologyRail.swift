@@ -563,6 +563,10 @@ struct TopologyRail: View {
     /// Ulanzi TC001 are not mentioned because they ride a separate desktop
     /// bridge — they appear automatically once that bridge connects, so
     /// listing them here would imply they're missing rather than optional.
+    /// On iOS/iPadOS we add a second line that explains *why* the row is
+    /// empty (iOS can't host the in-process modules so devices only appear
+    /// when a paired Mac daemon is pushing `moduleHealth`) — otherwise the
+    /// empty row reads as "broken" on a standalone iPad install.
     private var emptyDownstreamPlaceholder: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("no devices connected")
@@ -571,6 +575,12 @@ struct TopologyRail: View {
             Text("D200H (USB) · Pixoo (Wi-Fi) · ESP32 (USB serial)")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(TerrariumHUD.subtext.opacity(0.55))
+            #if os(iOS)
+            Text("Devices appear when a paired Mac daemon is running.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.55))
+                .padding(.top, 2)
+            #endif
         }
         .padding(.vertical, 4)
     }

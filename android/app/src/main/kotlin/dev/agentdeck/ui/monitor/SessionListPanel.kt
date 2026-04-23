@@ -45,6 +45,7 @@ fun SessionListPanel(
     siblingSessions: List<SessionInfo>,
     workerSessionCount: Int?,
     permissionMode: PermissionMode = PermissionMode.DEFAULT,
+    scale: MonitorLayoutScale = MonitorLayoutScale.phone,
     modifier: Modifier = Modifier,
 ) {
     // Build unified entry list: primary + siblings (excluding self)
@@ -107,8 +108,8 @@ fun SessionListPanel(
     Column(
         modifier = modifier
             .background(TerrariumColors.HUDBg, RoundedCornerShape(8.dp))
-            .padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(scale.panelPadding),
+        verticalArrangement = Arrangement.spacedBy(scale.sessionRowSpacing),
     ) {
         // Brand logo
         AgentDeckLogo(isEink = false, modifier = Modifier.fillMaxWidth())
@@ -119,7 +120,7 @@ fun SessionListPanel(
             Text(
                 text = "mode:${permissionMode.name.lowercase()}",
                 color = TerrariumColors.HUDSubtext,
-                fontSize = 10.sp,
+                fontSize = scale.fontSub,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier
                     .background(TerrariumColors.HUDBg, RoundedCornerShape(4.dp))
@@ -166,7 +167,7 @@ fun SessionListPanel(
                     Text(
                         text = "${entry.projectName}$suffix",
                         color = TerrariumColors.HUDText,
-                        fontSize = 12.sp,
+                        fontSize = scale.fontBody,
                         fontWeight = if (entry.isPrimary) FontWeight.Bold else FontWeight.Normal,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -176,7 +177,7 @@ fun SessionListPanel(
                 Text(
                     text = subLine,
                     color = stateColor(entry.agentState),
-                    fontSize = 10.sp,
+                    fontSize = scale.fontSub,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -189,7 +190,7 @@ fun SessionListPanel(
             Text(
                 text = "Workers: $workerSessionCount",
                 color = TerrariumColors.HUDText,
-                fontSize = 10.sp,
+                fontSize = scale.fontSub,
                 fontFamily = FontFamily.Monospace,
             )
         }
