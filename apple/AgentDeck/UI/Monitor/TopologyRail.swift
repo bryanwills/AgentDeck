@@ -38,9 +38,7 @@ struct TopologyRail: View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("UPSTREAM")
             upstreamRows
-            flowArrow
-            hubNode
-            flowArrow
+            hubZone
             sectionHeader("DOWNSTREAM")
             downstreamRows
         }
@@ -50,7 +48,7 @@ struct TopologyRail: View {
         .opacity(stateHolder.state.bridgeConnected ? 1.0 : 0.6)
     }
 
-    // MARK: - Header / arrows / hub
+    // MARK: - Header / hub
 
     private func sectionHeader(_ title: String) -> some View {
         HStack(spacing: 4) {
@@ -65,37 +63,38 @@ struct TopologyRail: View {
         .padding(.bottom, 4)
     }
 
-    private var flowArrow: some View {
-        Text("▼")
-            .font(.system(size: 9, design: .monospaced))
-            .foregroundStyle(TerrariumHUD.tetraNeon.opacity(0.55))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 3)
+    /// Hub zone: continuous neon spine threading through a section-header-style
+    /// hub row. Replaces the old `▼` glyphs + boxed hub card. The 1pt spine
+    /// spans the zone height; the row's opaque background masks it where they
+    /// intersect, so visually the wire enters the row from above and exits
+    /// below.
+    private var hubZone: some View {
+        ZStack {
+            Rectangle()
+                .fill(TerrariumHUD.tetraNeon.opacity(0.35))
+                .frame(width: 1)
+
+            hubRow
+        }
+        .padding(.vertical, 6)
     }
 
-    private var hubNode: some View {
+    private var hubRow: some View {
         HStack(spacing: 6) {
-            AgentDeckLogo(size: 18, color: TerrariumHUD.tetraNeon)
-            VStack(alignment: .leading, spacing: 0) {
-                Text("AgentDeck")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundStyle(TerrariumHUD.text)
-                Text(":\(daemonPortText)")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(TerrariumHUD.subtext)
-            }
-            Spacer(minLength: 0)
+            AgentDeckLogo(size: 16, color: TerrariumHUD.tetraNeon)
+            Text("AgentDeck")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(TerrariumHUD.text)
+            Text(":\(daemonPortText)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(TerrariumHUD.subtext)
+            Rectangle()
+                .fill(TerrariumHUD.tetraNeon.opacity(0.25))
+                .frame(height: 0.5)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.black.opacity(0.45))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(TerrariumHUD.tetraNeon.opacity(0.55), lineWidth: 1)
-                )
-        )
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(TerrariumHUD.bg)
     }
 
     /// Hub port surfaces in descending order of trust: explicit daemonService
