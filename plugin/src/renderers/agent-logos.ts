@@ -8,6 +8,7 @@ export {
   OC_CLAW_L,
   OC_CLAW_R,
   CODEX_LOGO_PATH,
+  OPENCLAW_LOGO_PATHS,
   agentLogoIcon,
   agentLogoWatermark,
 } from '@agentdeck/shared';

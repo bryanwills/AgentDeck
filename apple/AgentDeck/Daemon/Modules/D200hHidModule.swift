@@ -26,7 +26,7 @@ private let ICON_SIZE = 196
 
 private let POLL_INTERVAL: UInt64 = 500_000_000   // 500ms device detection
 private let KEEPALIVE_INTERVAL: TimeInterval = 15  // 15s keep-alive (D200H reverts to default after ~30s)
-private let D200H_RENDERER_REV = "stock-safe-v20"
+private let D200H_RENDERER_REV = "creature-session-icons-v23"
 
 // HID Commands
 private let CMD_SET_BUTTONS: UInt16    = 0x0001
@@ -51,6 +51,32 @@ private func d200hStableStockHidEnabled() -> Bool {
     true
 }
 
+private final class D200HEnumerationTimeoutBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+
+    func tryComplete() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !completed else { return false }
+        completed = true
+        return true
+    }
+}
+
+private final class D200HHIDManagerBox: @unchecked Sendable {
+    let manager: IOHIDManager
+
+    init(_ manager: IOHIDManager) {
+        self.manager = manager
+    }
+}
+
+private let d200hEnumerationQueue = DispatchQueue(
+    label: "dev.agentdeck.d200h.enumeration",
+    qos: .utility
+)
+
 /// Dedicated background thread running an NSRunLoop. Used as the target for
 /// `IOHIDManagerScheduleWithRunLoop` so device match/removal/input-report callbacks
 /// (and the synchronous `IOHIDManagerOpen` / `IOHIDDeviceOpen` work that fires from
@@ -66,10 +92,14 @@ private final class HIDRunLoopThread: @unchecked Sendable {
     let runLoop: CFRunLoop
 
     private init() {
+        final class RunLoopBox: @unchecked Sendable {
+            var value: CFRunLoop?
+        }
+
         let ready = DispatchSemaphore(value: 0)
-        var captured: CFRunLoop?
+        let box = RunLoopBox()
         let thread = Thread {
-            captured = CFRunLoopGetCurrent()
+            box.value = CFRunLoopGetCurrent()
             ready.signal()
             // Keep the runloop alive indefinitely. NSMachPort is a permanent source
             // that prevents the runloop from returning from `run()`.
@@ -83,7 +113,7 @@ private final class HIDRunLoopThread: @unchecked Sendable {
         thread.qualityOfService = .userInitiated
         thread.start()
         ready.wait()
-        self.runLoop = captured!
+        self.runLoop = box.value!
     }
 }
 
@@ -112,7 +142,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     nonisolated(unsafe) private var cachedSessionsList: [[String: Any]] = []
 
     // Display mode
-    private enum DisplayMode { case sessionList, optionSelect }
+    private enum DisplayMode: Sendable { case sessionList, optionSelect }
     private var currentMode: DisplayMode = .sessionList
     private var focusedSessionId: String?
     private var animFrame: Int = 0
@@ -127,6 +157,9 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     private var writeFailCount: Int = 0
     private var lastWriteError: Int32 = 0
     private var lastOpenError: Int32 = 0
+    private let dumpWriteQueue = DispatchQueue(label: "dev.agentdeck.d200h.dumps", qos: .utility)
+    private let dumpWriteLock = NSLock()
+    private var dumpWriteInFlight = false
     private var lastDumpedSetButtonsZip = Data()
     private var lastDumpedPartialZip = Data()
     private var lastPartialDumpAt = Date.distantPast
@@ -209,26 +242,11 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             }
         }
 
-        // Enumeration diagnostic: list every HID device IOKit currently sees,
-        // then filter to D200H VID/PID. This distinguishes "no D200H plugged
-        // in" from "IOKit sees it but matching callback never fired".
-        if let devicesSet = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> {
-            var allCount = 0
-            var d200hCount = 0
-            for device in devicesSet {
-                allCount += 1
-                let vid = hidDeviceProperty(device, kIOHIDVendorIDKey) ?? 0
-                let pid = hidDeviceProperty(device, kIOHIDProductIDKey) ?? 0
-                if vid == D200H_VID && pid == D200H_PID {
-                    d200hCount += 1
-                    let usagePage = hidDeviceProperty(device, kIOHIDPrimaryUsagePageKey) ?? 0
-                    DaemonLogger.shared.info("D200H IOKit device found: VID=0x\(String(vid, radix: 16)) PID=0x\(String(pid, radix: 16)) usagePage=\(usagePage)")
-                }
-            }
-            DaemonLogger.shared.info("D200H IOKit enumeration: matched=\(allCount) (D200H=\(d200hCount)). If D200H=0 but device is physically plugged in, the sandbox is blocking enumeration or USB enumeration itself failed.")
-        } else {
-            DaemonLogger.shared.info("D200H IOKit enumeration returned no devices (IOHIDManagerCopyDevices=nil) — nothing matches VID=0x\(String(D200H_VID, radix: 16))/PID=0x\(String(D200H_PID, radix: 16))")
-        }
+        // Enumeration diagnostic is intentionally off the startup path.
+        // IOHIDManagerCopyDevices can hang on some macOS/HID states even after
+        // matching callbacks have fired, and daemon readiness must not depend
+        // on a best-effort debug inventory.
+        logEnumerationDiagnosticAsync(manager: manager)
 
         // If device was already attached during scheduling, run deferred initialization now
         if connected {
@@ -372,6 +390,47 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     // MARK: - Device Attach/Remove (IOKit callbacks, run loop thread)
 
     private func hidDeviceProperty(_ device: IOHIDDevice, _ key: String) -> Int32? {
+        if let val = IOHIDDeviceGetProperty(device, key as CFString) {
+            if let num = val as? NSNumber { return num.int32Value }
+        }
+        return nil
+    }
+
+    private func logEnumerationDiagnosticAsync(manager: IOHIDManager) {
+        let timeout = D200HEnumerationTimeoutBox()
+        let managerBox = D200HHIDManagerBox(manager)
+
+        d200hEnumerationQueue.asyncAfter(deadline: .now() + 1.0) {
+            guard timeout.tryComplete() else { return }
+            DaemonLogger.shared.info("D200H IOKit enumeration timed out; continuing without startup diagnostic")
+        }
+
+        d200hEnumerationQueue.async {
+            let devicesSet = IOHIDManagerCopyDevices(managerBox.manager) as? Set<IOHIDDevice>
+            guard timeout.tryComplete() else { return }
+
+            guard let devicesSet else {
+                DaemonLogger.shared.info("D200H IOKit enumeration returned no devices (IOHIDManagerCopyDevices=nil) — nothing matches VID=0x\(String(D200H_VID, radix: 16))/PID=0x\(String(D200H_PID, radix: 16))")
+                return
+            }
+
+            var allCount = 0
+            var d200hCount = 0
+            for device in devicesSet {
+                allCount += 1
+                let vid = Self.hidDeviceProperty(device, kIOHIDVendorIDKey) ?? 0
+                let pid = Self.hidDeviceProperty(device, kIOHIDProductIDKey) ?? 0
+                if vid == D200H_VID && pid == D200H_PID {
+                    d200hCount += 1
+                    let usagePage = Self.hidDeviceProperty(device, kIOHIDPrimaryUsagePageKey) ?? 0
+                    DaemonLogger.shared.info("D200H IOKit device found: VID=0x\(String(vid, radix: 16)) PID=0x\(String(pid, radix: 16)) usagePage=\(usagePage)")
+                }
+            }
+            DaemonLogger.shared.info("D200H IOKit enumeration: matched=\(allCount) (D200H=\(d200hCount)). If D200H=0 but device is physically plugged in, the sandbox is blocking enumeration or USB enumeration itself failed.")
+        }
+    }
+
+    private static func hidDeviceProperty(_ device: IOHIDDevice, _ key: String) -> Int32? {
         if let val = IOHIDDeviceGetProperty(device, key as CFString) {
             if let num = val as? NSNumber { return num.int32Value }
         }
@@ -997,9 +1056,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             lastPartialDumpAt = now
         }
 
-        let fm = FileManager.default
         let dumpDir = AuthManager.agentDeckDir.appendingPathComponent("d200h-dumps", isDirectory: true)
-        try? fm.createDirectory(at: dumpDir, withIntermediateDirectories: true)
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -1015,8 +1072,6 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         let baseName = "\(stamp)-\(command)-\(modeKey)-\(zip.count)b-\(slotPreview)"
         let zipURL = dumpDir.appendingPathComponent("\(baseName).zip")
         let metaURL = dumpDir.appendingPathComponent("\(baseName).json")
-
-        try? zip.write(to: zipURL, options: .atomic)
 
         let boundaryInfo: [[String: Any]] = stride(from: 1016, to: zip.count, by: PACKET_SIZE).map { offset in
             [
@@ -1035,12 +1090,33 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             "boundaryBytes": boundaryInfo,
             "createdAt": ISO8601DateFormatter().string(from: now),
         ]
-        if let data = try? JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]) {
-            try? data.write(to: metaURL, options: .atomic)
-        }
+        let metadataData = try? JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys])
 
-        pruneDumpFiles(in: dumpDir, keepingMostRecentSetButtons: 12, keepingMostRecentPartial: 24)
-        DaemonLogger.shared.debug("D200H", "Dumped \(command) ZIP for analysis: \(zipURL.path)")
+        dumpWriteLock.lock()
+        guard !dumpWriteInFlight else {
+            dumpWriteLock.unlock()
+            return
+        }
+        dumpWriteInFlight = true
+        dumpWriteLock.unlock()
+
+        dumpWriteQueue.async { [weak self, zip, zipURL, metaURL, dumpDir, metadataData, command] in
+            guard let self else { return }
+            defer {
+                self.dumpWriteLock.lock()
+                self.dumpWriteInFlight = false
+                self.dumpWriteLock.unlock()
+            }
+
+            try? FileManager.default.createDirectory(at: dumpDir, withIntermediateDirectories: true)
+            try? zip.write(to: zipURL, options: .atomic)
+            if let metadataData {
+                try? metadataData.write(to: metaURL, options: .atomic)
+            }
+
+            self.pruneDumpFiles(in: dumpDir, keepingMostRecentSetButtons: 12, keepingMostRecentPartial: 24)
+            DaemonLogger.shared.debug("D200H", "Dumped \(command) ZIP for analysis: \(zipURL.path)")
+        }
     }
 
     private func sanitizeDumpName(_ value: String) -> String {
@@ -1277,7 +1353,7 @@ private struct ButtonSlot {
     enum BorderStyle {
         case none
         case awaitingPulse(color: CGColor, frame: Int)    // glow pulse
-        case processingDash(color: CGColor, frame: Int)   // flowing dash
+        case processingDash(color: CGColor, frame: Int)   // legacy; rendered as solid on D200H
         case processingSolid(color: CGColor)              // static "working" (animation disabled)
         case solid(color: CGColor)                        // static hint border
     }
@@ -1460,6 +1536,7 @@ private enum D200hRenderer {
 
             let bg = sessionBg(session.state)
             let sColor = stateColor(session.state, agent: session.agentType)
+            let indicatorColor = session.isProcessing ? rgb(245, 185, 66) : sColor
             let brandColor = agentBrandColor(session.agentType)
             let projName = session.displayName.isEmpty ? session.agentType : String(session.displayName.prefix(14))
 
@@ -1474,12 +1551,10 @@ private enum D200hRenderer {
             // active.
             let pulseFrame = isStable ? 5 : animFrame  // sin(5*0.3) ≈ 0.997
             if session.isAwaiting {
-                border = .awaitingPulse(color: sColor, frame: pulseFrame)
+                border = .awaitingPulse(color: indicatorColor, frame: pulseFrame)
                 needsAnim = needsAnim || !isStable
             } else if session.isProcessing {
-                border = isStable
-                    ? .processingSolid(color: sColor)
-                    : .processingDash(color: sColor, frame: animFrame)
+                border = .processingSolid(color: indicatorColor)
                 needsAnim = needsAnim || !isStable
             } else {
                 border = .none
@@ -1509,7 +1584,7 @@ private enum D200hRenderer {
                 bg: bg, enabled: true, borderStyle: border,
                 icon: sessionGlyph(for: session.agentType),
                 iconColor: brandColor,
-                statusColor: sColor,
+                statusColor: indicatorColor,
                 textOverlay: sessionTextOverlayEnabled ? .sessionTile : .none,
                 agentLabel: agentLbl,
                 modelName: String(session.modelName.prefix(14)),
@@ -1564,6 +1639,7 @@ private enum D200hRenderer {
         // Slot 1: Session info (full tile with creature icon + model + state, matching SD+ renderDetailInfo)
         let name = session.displayName.isEmpty ? session.agentType : String(session.displayName.prefix(12))
         let sColor = stateColor(session.state, agent: session.agentType)
+        let indicatorColor = session.isProcessing ? rgb(245, 185, 66) : sColor
         let brandColor = agentBrandColor(session.agentType)
         let tool = session.currentTool.isEmpty ? "" : "▶ \(session.currentTool)"
         let detailStateLbl: String
@@ -1575,10 +1651,10 @@ private enum D200hRenderer {
         }
         slots[1] = ButtonSlot(title: name, subtitle: tool,
                               bg: cDetailBg, enabled: false,
-                              borderStyle: .solid(color: sColor),
+                              borderStyle: .solid(color: indicatorColor),
                               icon: sessionGlyph(for: session.agentType),
                               iconColor: brandColor,
-                              statusColor: sColor,
+                              statusColor: indicatorColor,
                               textOverlay: .sessionTile,
                               modelName: String(session.modelName.prefix(14)),
                               stateLabel: detailStateLbl)
@@ -2270,32 +2346,27 @@ private func renderButtonPng(_ slot: ButtonSlot) -> Data {
         ctx.setShadow(offset: .zero, blur: 0, color: nil)
         ctx.setAlpha(1.0)
 
-    case .processingDash(let color, let frame):
-        let perim = 2 * (s - pad * 2) + 2 * (s - pad * 2)
-        let offset = CGFloat((frame * 25) % Int(perim))
-        // Outer soft glow pass — gives the "flowing light" impression even
-        // when animation is frozen (stable-stock mode).
+    case .processingDash(let color, _):
+        // Legacy enum case retained for cache compatibility; render it as a
+        // solid working ring because frozen dashed borders read as broken
+        // stitching on D200H's still-image pipeline.
         ctx.setShadow(offset: .zero, blur: 8, color: color.copy(alpha: 0.55))
         ctx.setStrokeColor(color)
-        ctx.setAlpha(0.85)
-        ctx.setLineWidth(5)
-        ctx.setLineDash(phase: offset, lengths: [50, 70])
+        ctx.setAlpha(0.90)
+        ctx.setLineWidth(5.5)
         ctx.addPath(innerPath)
         ctx.strokePath()
-        // Crisp inner highlight pass
         ctx.setShadow(offset: .zero, blur: 0, color: nil)
         ctx.setAlpha(0.95)
         ctx.setLineWidth(2)
         ctx.addPath(innerPath)
         ctx.strokePath()
         ctx.setAlpha(1.0)
-        ctx.setLineDash(phase: 0, lengths: [])
 
     case .processingSolid(let color):
         // Static "WORKING" variant for when the animation loop is disabled
         // (stable-stock mode). Solid glowing ring reads as "active" via color
-        // alone — the frozen dashes in `.processingDash` looked awkward when
-        // the tick wasn't advancing.
+        // alone.
         ctx.setShadow(offset: .zero, blur: 8, color: color.copy(alpha: 0.60))
         ctx.setStrokeColor(color)
         ctx.setAlpha(0.95)
@@ -2333,7 +2404,7 @@ private func renderButtonPng(_ slot: ButtonSlot) -> Data {
         drawInTopDownCoordinates(ctx) {
             ctx.setFillColor(stripColor)
             ctx.setAlpha(0.78)
-            ctx.fill(CGRect(x: pad + 3, y: pad + 34, width: 5, height: s - pad * 2 - 68))
+            ctx.fill(CGRect(x: pad + 10, y: pad + 42, width: 5, height: s - pad * 2 - 84))
             ctx.setAlpha(1.0)
         }
     }
@@ -2578,112 +2649,145 @@ private func drawBrandGlyph(_ ctx: CGContext, glyph: ButtonSlot.IconGlyph, color
     case .claudeCode:
         fillSvgPath(
             ctx,
-            path: D200hBrandAssets.claudePath,
+            path: D200hBrandAssets.robotCreaturePath,
             viewBox: CGRect(x: 0, y: 0, width: 24, height: 24),
             rect: rect,
             fillColor: color,
             eoFill: true
         )
     case .codexCli:
-        fillSvgPathGradient(
-            ctx,
-            path: D200hBrandAssets.codexPath,
-            viewBox: CGRect(x: 0, y: 0, width: 24, height: 24),
-            rect: rect,
-            colors: [rgb(177, 167, 255), rgb(122, 157, 255), color],
-            locations: [0.0, 0.48, 1.0],
-            start: CGPoint(x: 12, y: 0),
-            end: CGPoint(x: 12, y: 24)
-        )
+        drawCodexCloudCreature(ctx, rect: rect)
     case .openCode:
-        fillSvgPath(
+        drawOpenCodeCreature(ctx, rect: rect)
+    case .openClaw:
+        let viewBox = CGRect(x: 0, y: 0, width: 24, height: 24)
+        let fitRect = rect.insetBy(dx: rect.width * 0.04, dy: rect.height * 0.04)
+        let gradientColors = [rgb(255, 77, 77), rgb(153, 27, 27)]
+        fillSvgPathsGradient(
             ctx,
-            path: D200hBrandAssets.openCodePath,
-            viewBox: CGRect(x: 0, y: 0, width: 24, height: 24),
-            rect: rect,
-            fillColor: color,
+            paths: D200hBrandAssets.openClawBodyPaths,
+            viewBox: viewBox,
+            rect: fitRect,
+            colors: gradientColors,
+            locations: [0.0, 1.0],
+            start: CGPoint(x: 0, y: 0),
+            end: CGPoint(x: 24, y: 24),
             eoFill: true
         )
-    case .openClaw:
-        let viewBox = CGRect(x: 0, y: 0, width: 120, height: 120)
-        let gradientColors = [rgb(255, 77, 77), rgb(153, 27, 27)]
-        fillSvgPathGradient(
-            ctx,
-            path: D200hBrandAssets.openClawBody,
-            viewBox: viewBox,
-            rect: rect,
-            colors: gradientColors,
-            locations: [0.0, 1.0],
-            start: CGPoint(x: 0, y: 0),
-            end: CGPoint(x: 120, y: 120)
-        )
-        fillSvgPathGradient(
-            ctx,
-            path: D200hBrandAssets.openClawClawL,
-            viewBox: viewBox,
-            rect: rect,
-            colors: gradientColors,
-            locations: [0.0, 1.0],
-            start: CGPoint(x: 0, y: 0),
-            end: CGPoint(x: 120, y: 120)
-        )
-        fillSvgPathGradient(
-            ctx,
-            path: D200hBrandAssets.openClawClawR,
-            viewBox: viewBox,
-            rect: rect,
-            colors: gradientColors,
-            locations: [0.0, 1.0],
-            start: CGPoint(x: 0, y: 0),
-            end: CGPoint(x: 120, y: 120)
-        )
-        strokeSvgPath(
-            ctx,
-            path: D200hBrandAssets.openClawAntennaL,
-            viewBox: viewBox,
-            rect: rect,
-            color: color,
-            lineWidth: 3
-        )
-        strokeSvgPath(
-            ctx,
-            path: D200hBrandAssets.openClawAntennaR,
-            viewBox: viewBox,
-            rect: rect,
-            color: color,
-            lineWidth: 3
-        )
-        fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 45, y: 35), radius: 6, color: rgb(10, 10, 20))
-        fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 75, y: 35), radius: 6, color: rgb(10, 10, 20))
-        fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 46, y: 34), radius: 2.5, color: rgb(0, 229, 204))
-        fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 76, y: 34), radius: 2.5, color: rgb(0, 229, 204))
+        drawOpenClawCreatureEyes(ctx, rect: fitRect)
     default:
         break
     }
 }
 
+private func drawCodexCloudCreature(_ ctx: CGContext, rect: CGRect) {
+    let bodyW = min(rect.width, rect.height) * 0.78
+    let cx = rect.midX
+    let cy = rect.midY
+    let lobes: [(dx: CGFloat, dy: CGFloat, r: CGFloat)] = [
+        (-0.14, -0.30, 0.30),
+        ( 0.16, -0.26, 0.28),
+        ( 0.32, -0.02, 0.28),
+        ( 0.14,  0.26, 0.28),
+        (-0.16,  0.26, 0.28),
+        (-0.32, -0.02, 0.28),
+    ]
+
+    ctx.saveGState()
+    ctx.setFillColor(rgb(191, 219, 254).copy(alpha: 0.20) ?? rgb(191, 219, 254))
+    for lobe in lobes {
+        let r = lobe.r * bodyW * 1.08
+        ctx.fillEllipse(in: CGRect(
+            x: cx + lobe.dx * bodyW - r,
+            y: cy + lobe.dy * bodyW - r,
+            width: r * 2,
+            height: r * 2
+        ))
+    }
+    ctx.restoreGState()
+
+    guard let gradient = CGGradient(
+        colorsSpace: CGColorSpaceCreateDeviceRGB(),
+        colors: [rgb(217, 211, 255), rgb(139, 164, 255), rgb(57, 65, 255)] as CFArray,
+        locations: [0.0, 0.48, 1.0]
+    ) else { return }
+
+    ctx.saveGState()
+    for lobe in lobes {
+        let r = lobe.r * bodyW
+        ctx.addEllipse(in: CGRect(
+            x: cx + lobe.dx * bodyW - r,
+            y: cy + lobe.dy * bodyW - r,
+            width: r * 2,
+            height: r * 2
+        ))
+    }
+    ctx.clip()
+    ctx.drawLinearGradient(
+        gradient,
+        start: CGPoint(x: rect.midX, y: rect.minY),
+        end: CGPoint(x: rect.midX, y: rect.maxY),
+        options: []
+    )
+    ctx.restoreGState()
+
+    ctx.saveGState()
+    ctx.setStrokeColor(rgb(255, 255, 255))
+    ctx.setLineWidth(max(2.5, bodyW * 0.075))
+    ctx.setLineCap(.round)
+    ctx.setLineJoin(.round)
+    ctx.move(to: CGPoint(x: cx - bodyW * 0.18, y: cy - bodyW * 0.12))
+    ctx.addLine(to: CGPoint(x: cx + bodyW * 0.05, y: cy))
+    ctx.addLine(to: CGPoint(x: cx - bodyW * 0.18, y: cy + bodyW * 0.12))
+    ctx.strokePath()
+    ctx.move(to: CGPoint(x: cx + bodyW * 0.16, y: cy + bodyW * 0.12))
+    ctx.addLine(to: CGPoint(x: cx + bodyW * 0.34, y: cy + bodyW * 0.12))
+    ctx.strokePath()
+    ctx.restoreGState()
+}
+
+private func drawOpenClawCreatureEyes(_ ctx: CGContext, rect: CGRect) {
+    let viewBox = CGRect(x: 0, y: 0, width: 24, height: 24)
+    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 9.05, y: 7.63), radius: 0.82, color: rgb(5, 8, 16))
+    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 15.38, y: 7.63), radius: 0.82, color: rgb(5, 8, 16))
+    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 8.82, y: 7.34), radius: 0.20, color: rgb(191, 252, 244))
+    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 15.15, y: 7.34), radius: 0.20, color: rgb(191, 252, 244))
+}
+
+private func drawOpenCodeCreature(_ ctx: CGContext, rect: CGRect) {
+    let side = min(rect.width, rect.height) * 0.78
+    let cx = rect.midX
+    let cy = rect.midY
+    let outer = CGRect(x: cx - side / 2, y: cy - side / 2, width: side, height: side)
+    let ring = side * 0.18
+    let middle = outer.insetBy(dx: ring, dy: ring)
+    let innerSide = side * 0.48
+    let inner = CGRect(x: cx - innerSide / 2, y: cy - innerSide / 2, width: innerSide, height: innerSide)
+
+    ctx.saveGState()
+    ctx.setFillColor(rgb(241, 236, 236))
+    ctx.addPath(CGPath(roundedRect: outer, cornerWidth: side * 0.08, cornerHeight: side * 0.08, transform: nil))
+    ctx.fillPath()
+    ctx.setFillColor(rgb(75, 70, 70))
+    ctx.addPath(CGPath(roundedRect: middle, cornerWidth: side * 0.05, cornerHeight: side * 0.05, transform: nil))
+    ctx.fillPath()
+    ctx.setAlpha(0.92)
+    ctx.addPath(CGPath(roundedRect: inner, cornerWidth: side * 0.04, cornerHeight: side * 0.04, transform: nil))
+    ctx.fillPath()
+    ctx.setAlpha(1.0)
+    ctx.restoreGState()
+}
+
 private enum D200hBrandAssets {
-    // Mirrors plugin/src/renderers/agent-logos.ts so D200H can follow the same brand language.
-    nonisolated(unsafe) static let claudePath = parseSvgPathToCGPath(
-        "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"
+    // AgentDeck terrarium creature marks, reduced for D200H session tiles.
+    nonisolated(unsafe) static let robotCreaturePath = parseSvgPathToCGPath(
+        "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0v-3.1h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"
     )
-    nonisolated(unsafe) static let codexPath = parseSvgPathToCGPath(
-        "M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388z"
-    )
-    nonisolated(unsafe) static let openCodePath = parseSvgPathToCGPath(
-        "M18 19.2H6V9.6H18V19.2ZM18 4.8H6V19.2H18V4.8ZM24 24H0V0H24V24Z"
-    )
-    nonisolated(unsafe) static let openClawBody = parseSvgPathToCGPath(
-        "M60 10 C30 10 15 35 15 55 C15 75 30 95 45 100 L45 110 L55 110 L55 100 C55 100 60 102 65 100 L65 110 L75 110 L75 100 C90 95 105 75 105 55 C105 35 90 10 60 10Z"
-    )
-    nonisolated(unsafe) static let openClawClawL = parseSvgPathToCGPath(
-        "M20 45 C5 40 0 50 5 60 C10 70 20 65 25 55 C28 48 25 45 20 45Z"
-    )
-    nonisolated(unsafe) static let openClawClawR = parseSvgPathToCGPath(
-        "M100 45 C115 40 120 50 115 60 C110 70 100 65 95 55 C92 48 95 45 100 45Z"
-    )
-    nonisolated(unsafe) static let openClawAntennaL = parseSvgPathToCGPath("M45 15 Q35 5 30 8")
-    nonisolated(unsafe) static let openClawAntennaR = parseSvgPathToCGPath("M75 15 Q85 5 90 8")
+    nonisolated(unsafe) static let openClawBodyPaths = [
+        parseSvgPathToCGPath("M16.877 1.912c.58-.27 1.14-.323 1.616-.037a.317.317 0 01-.326.542c-.227-.136-.547-.153-1.022.068-.352.165-.765.45-1.234.866 2.683 1.17 4.4 3.5 5.148 5.921a6.421 6.421 0 00-.704.184c-.578.016-1.174.204-1.502.735-.338.55-.268 1.276.072 2.069l.005.012.007.014c.523 1.045 1.318 1.91 2.2 2.284-.912 3.274-3.44 6.144-5.972 6.988v2.109h-2.11v-2.11c-1.043.417-2.086.01-2.11 0v2.11h-2.11v-2.11c-2.531-.843-5.061-3.713-5.973-6.987.882-.373 1.678-1.238 2.2-2.284l.007-.014.006-.012c.34-.793.41-1.518.071-2.069-.327-.531-.923-.719-1.503-.735a6.409 6.409 0 00-.704-.183c.749-2.421 2.466-4.751 5.149-5.922-.47-.416-.88-.701-1.234-.866-.474-.221-.794-.204-1.021-.068a.318.318 0 01-.435-.109.317.317 0 01.109-.433c.476-.286 1.036-.233 1.615.037.49.229 1.031.628 1.621 1.182A9.924 9.924 0 0112 2.568c1.199 0 2.284.19 3.256.526.59-.554 1.13-.953 1.62-1.182zM8.835 6.577a1.266 1.266 0 100 2.532 1.266 1.266 0 000-2.532zm6.33 0a1.267 1.267 0 100 2.533 1.267 1.267 0 000-2.533z"),
+        parseSvgPathToCGPath("M.395 13.118c-.966-1.932-.163-3.863 2.41-3.365v-.001l.05.01c.084.018.17.038.26.06.033.009.067.017.1.027.084.022.168.048.255.076l.09.027c.528 0 .95.158 1.16.501.212.343.212.87-.105 1.61-.085.17-.178.333-.276.489l-.01.017a4.967 4.967 0 01-.62.791l-.019.02c-1.092 1.117-2.496 1.336-3.295-.262z"),
+        parseSvgPathToCGPath("M21.193 9.753c2.574-.5 3.378 1.433 2.411 3.365-.58 1.159-1.476 1.361-2.342.96l-.011-.005a2.419 2.419 0 01-.114-.056l-.019-.01a2.751 2.751 0 01-.115-.067l-.023-.014c-.035-.022-.071-.044-.106-.068l-.05-.035c-.55-.388-1.062-1.007-1.44-1.76-.276-.647-.311-1.132-.174-1.472.176-.439.636-.639 1.23-.639.032-.011.066-.02.099-.03.08-.026.16-.05.238-.072l.117-.03a5.502 5.502 0 01.3-.067z"),
+    ]
 }
 
 private func fillSvgPath(
@@ -2720,6 +2824,37 @@ private func fillSvgPathGradient(
     ctx.saveGState()
     ctx.concatenate(makeAspectFitTransform(viewBox: viewBox, in: rect))
     ctx.addPath(path)
+    if eoFill {
+        ctx.clip(using: .evenOdd)
+    } else {
+        ctx.clip()
+    }
+    ctx.drawLinearGradient(gradient, start: start, end: end, options: [])
+    ctx.restoreGState()
+}
+
+private func fillSvgPathsGradient(
+    _ ctx: CGContext,
+    paths: [CGPath],
+    viewBox: CGRect,
+    rect: CGRect,
+    colors: [CGColor],
+    locations: [CGFloat],
+    start: CGPoint,
+    end: CGPoint,
+    eoFill: Bool = false
+) {
+    guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: locations) else {
+        for path in paths {
+            fillSvgPath(ctx, path: path, viewBox: viewBox, rect: rect, fillColor: colors.last ?? rgb(255, 255, 255), eoFill: eoFill)
+        }
+        return
+    }
+    ctx.saveGState()
+    ctx.concatenate(makeAspectFitTransform(viewBox: viewBox, in: rect))
+    for path in paths {
+        ctx.addPath(path)
+    }
     if eoFill {
         ctx.clip(using: .evenOdd)
     } else {

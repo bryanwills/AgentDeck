@@ -144,30 +144,6 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     int cy = (int)(renderY * h + breathBob);
     uint8_t alpha = (uint8_t)(255 * bodyAlpha);
 
-    // Simulator SSOT: 12×10 filled pill glyph from codex-color.svg
-    static const uint8_t CODEX_GLYPH[10][12] = {
-        {0,0,0,1,1,1,1,1,1,0,0,0},
-        {0,0,1,1,1,1,1,1,1,1,0,0},
-        {0,1,1,1,1,1,1,1,1,1,1,0},
-        {1,1,1,1,1,1,1,1,1,1,1,1},
-        {1,1,1,1,1,1,1,1,1,1,1,1},
-        {1,1,1,1,1,1,1,1,1,1,1,1},
-        {1,1,1,1,1,1,1,1,1,1,1,1},
-        {1,1,1,1,1,1,1,1,1,1,1,1},
-        {0,0,1,1,1,1,1,1,1,1,0,0},
-        {0,0,0,1,1,1,1,1,1,0,0,0},
-    };
-    constexpr int GLYPH_COLS = 12;
-    constexpr int GLYPH_ROWS = 10;
-
-    float glyphW = baseRadius * 2.2f;
-    int cellW = max(1, (int)(glyphW / GLYPH_COLS));
-    int cellH = cellW;
-    int glyphPxW = GLYPH_COLS * cellW;
-    int glyphPxH = GLYPH_ROWS * cellH;
-    int startX = cx - glyphPxW / 2;
-    int startY = cy - glyphPxH / 2;
-
     // Working glow behind body
     if (state == CreatureState::WORKING) {
         float glow = fastSin(t * 2.0f) * 0.5f + 0.5f;
@@ -175,29 +151,29 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         Draw::circle(cx, cy, glowR, Theme::CloudBody, (uint8_t)(glow * 25));
     }
 
-    // Render 12×10 pill glyph
-    for (int row = 0; row < GLYPH_ROWS; row++) {
-        for (int col = 0; col < GLYPH_COLS; col++) {
-            if (CODEX_GLYPH[row][col] == 0) continue;
-            // Top rows lighter (gradient effect)
-            uint32_t cellColor = (row < 3)
-                ? lerpColor(bodyColor, Theme::CloudBodyLight, 0.3f)
-                : bodyColor;
-            int px = startX + col * cellW;
-            int py = startY + row * cellH;
-            for (int dy = 0; dy < cellH; dy++) {
-                for (int dx = 0; dx < cellW; dx++) {
-                    Draw::pixelA(px + dx, py + dy, cellColor, alpha);
-                }
-            }
-        }
+    // Render the same 6-lobe cloud silhouette used by Stream Deck, D200H,
+    // Android, and Apple terrarium. The old TC001/ESP32 glyph was a pill
+    // approximation, which made Codex read as a different character family.
+    static const float LOBE_DX[6] = {-0.14f, 0.16f, 0.32f, 0.14f, -0.16f, -0.32f};
+    static const float LOBE_DY[6] = {-0.30f, -0.26f, -0.02f, 0.26f, 0.26f, -0.02f};
+    static const float LOBE_R[6]  = { 0.30f,  0.28f,  0.28f, 0.28f, 0.28f,  0.28f};
+    float bodyW = baseRadius * 1.8f;
+    for (int i = 0; i < 6; i++) {
+        int lx = cx + (int)(LOBE_DX[i] * bodyW);
+        int ly = cy + (int)(LOBE_DY[i] * bodyW);
+        int lr = max(2, (int)(LOBE_R[i] * bodyW));
+        uint32_t lobeColor = (LOBE_DY[i] < -0.1f)
+            ? lerpColor(bodyColor, Theme::CloudBodyLight, 0.35f)
+            : bodyColor;
+        Draw::circle(lx, ly, lr, lobeColor, alpha);
     }
+    Draw::circle(cx, cy, max(2, (int)(bodyW * 0.18f)), bodyColor, alpha);
 
     // >_ prompt overlay (larger, centered in body)
     if (state != CreatureState::SLEEPING) {
         uint32_t promptColor = Theme::CloudPrompt;
         uint8_t promptAlpha = (uint8_t)(alpha * 0.9f);
-        int ps = max(1, (int)(baseRadius * 0.08f));
+        int ps = max(1, (int)(bodyW * 0.045f));
         int step = ps * 3;
         int pox = cx - step * 2;
         int poy = cy - step / 2;

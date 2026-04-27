@@ -188,21 +188,26 @@ final class PixooRenderer {
         [0,5,0,1,1,0,6,0],
     ]
     private static let cloudGrid: [[Int]] = [
-        [0,0,1,1,0,0,1,1,0,0],
-        [0,1,1,1,1,1,1,1,1,0],
-        [1,1,1,1,1,1,1,1,1,1],
-        [3,1,2,2,1,1,2,1,1,3],
-        [3,1,1,1,1,1,1,1,1,3],
-        [1,1,1,1,1,1,1,1,1,1],
-        [0,1,1,1,1,1,1,1,1,0],
-        [0,0,1,1,0,0,1,1,0,0],
+        [0,0,0,1,1,0,0,1,1,0,0,0,0],
+        [0,0,1,1,1,1,0,1,1,1,1,0,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [3,1,1,2,1,1,1,1,1,1,1,1,3],
+        [3,1,1,1,2,1,1,1,2,2,2,1,3],
+        [3,1,1,2,1,1,1,1,1,1,1,1,3],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,0,1,1,1,1,0,1,1,1,1,0,0],
+        [0,0,0,1,1,0,0,1,1,0,0,0,0],
     ]
     private static let cloudLOD: [[Int]] = [
-        [0,1,1,0,1,1,0],
-        [1,1,1,1,1,1,1],
-        [1,1,2,1,2,1,1],
-        [1,1,1,1,1,1,1],
-        [0,1,1,0,1,1,0],
+        [0,1,1,0,1,1,0,1,0],
+        [1,1,1,1,1,1,1,1,1],
+        [1,1,2,1,1,1,1,1,1],
+        [1,1,1,2,1,2,2,2,1],
+        [1,1,2,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1],
+        [0,1,1,0,1,1,0,1,0],
     ]
     private static let opencodeGrid: [[Int]] = [
         [8,8,8,8,8,8,8,8,8,8],
@@ -270,7 +275,7 @@ final class PixooRenderer {
         let crayfishSick: RGB = (0x88, 0x66, 0x66)
         let cloudBody: RGB = (0x63, 0x66, 0xF1)
         let cloudEdge: RGB = (0x4F, 0x46, 0xE5)
-        let cloudMarking: RGB = (0xA5, 0xB4, 0xFC)
+        let cloudMarking: RGB = (0xF5, 0xF7, 0xFF)
         let cloudGlow: RGB = (0x31, 0x33, 0x78)
         let cloudPulse: RGB = (0xA5, 0xB4, 0xFC)
         let cloudSleeping: RGB = (0x3A, 0x3C, 0x90)
@@ -998,15 +1003,16 @@ final class PixooRenderer {
         let (scx, scy) = worldToScreen(worldX, worldY, camera)
         let useLOD = camera.zoom < 1.3
         let grid = useLOD ? Self.cloudLOD : Self.cloudGrid
-        let cols = useLOD ? 7 : 10
-        let rows = useLOD ? 5 : 8
+        let cols = useLOD ? 9 : 13
+        let rows = useLOD ? 7 : 11
         let baseX = Int(round(scx - Double(cols) / 2))
         let baseY = Int(round(scy - Double(rows) / 2))
         let pulseSpeed = state == .processing ? 0.25 : 0.06
         let pulsePhase = sin(Double(animFrame) * pulseSpeed)
         let contracting = pulsePhase < 0
         let breathPx = state == .processing ? Int(round(sin(Double(animFrame) * 0.3) * 1.5)) : 0
-        let bodyColor = state == .processing ? lerpColor(palette.body, palette.pulse, (sin(Double(animFrame) * 0.2) + 1) * 0.5) : (state == .idle ? palette.body : palette.body)
+        let pulseMix = 0.18 + ((sin(Double(animFrame) * 0.2) + 1) * 0.18)
+        let bodyColor = state == .processing ? lerpColor(palette.body, palette.pulse, pulseMix) : (state == .idle ? palette.body : palette.body)
         let markingVisible = animFrame % 60 > 5
         for row in 0..<rows {
             for col in 0..<cols {

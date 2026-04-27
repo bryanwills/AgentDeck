@@ -99,6 +99,7 @@ export function renderSessionSlot(
   const p2 = agent === 'claude-code' ? '#BE6D52' : agent === 'codex-cli' ? '#5981FF' : agent === 'openclaw' ? '#CC3333' : '#AFAFAF';
 
   const sColor = stateColor(session.state);
+  const signalColor = isWorking ? '#F5B942' : sColor;
   const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
 
   const stateLbl = isWorking ? 'RUNNING' : isAsking ? 'PERMIT?' : 'IDLE';
@@ -114,6 +115,7 @@ export function renderSessionSlot(
   `;
 
   let glowBorder = '';
+  let activeRing = '';
   let askDot = '';
   let runBadge = '';
   const filterId = `pg-${animFrame}`;
@@ -139,39 +141,30 @@ export function renderSessionSlot(
       <circle cx="114" cy="24" r="3" fill="#ffffff" />
     `;
   } else if (isWorking) {
-    if (animated) {
-      // Flowing-light dashed border — SD/SD+ 150ms tick advances animFrame
-      // → dashoffset drifts → chasing light.
-      const perimeter = 128 * 4;
-      const dashOffset = ((animFrame * 4) % perimeter).toFixed(0);
-      defs += blurDef;
-      glowBorder =
-        `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${sColor}" stroke-width="4.5" stroke-dasharray="22 14" stroke-dashoffset="-${dashOffset}" opacity="0.85" filter="url(#${filterId})"/>` +
-        `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${sColor}" stroke-width="1.5" stroke-dasharray="22 14" stroke-dashoffset="-${dashOffset}" opacity="0.95"/>`;
-    } else {
-      // Non-animated callers (D200H still-image pipeline): render a solid
-      // glowing border + a play-chevron badge so WORKING is obvious without
-      // motion. The amber border is still the primary signal; the ▶ badge
-      // distinguishes this from the red awaiting state at a glance.
-      defs += blurDef;
-      glowBorder =
-        `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${sColor}" stroke-width="4.5" opacity="0.9" filter="url(#${filterId})"/>` +
-        `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${sColor}" stroke-width="1.5" opacity="0.95"/>`;
-      runBadge = `
-        <rect x="100" y="14" width="28" height="16" rx="8" fill="${sColor}" opacity="0.9" />
-        <text x="114" y="26" font-size="11" font-weight="800" text-anchor="middle" fill="#0C0C0E" font-family="${fontFam}">▶ RUN</text>
-      `;
-    }
+    const pulseOpacity = animated
+      ? 0.72 + 0.20 * Math.abs(Math.sin(animFrame * 0.12))
+      : 0.9;
+    defs += blurDef;
+    glowBorder =
+      `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${signalColor}" stroke-width="4.5" opacity="${pulseOpacity.toFixed(2)}" filter="url(#${filterId})"/>` +
+      `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${signalColor}" stroke-width="1.5" opacity="${Math.min(0.98, pulseOpacity + 0.06).toFixed(2)}"/>`;
+    runBadge = `
+      <rect x="99" y="14" width="30" height="16" rx="8" fill="${signalColor}" opacity="${(animated ? 0.78 + 0.16 * Math.abs(Math.sin(animFrame * 0.12)) : 0.9).toFixed(2)}" />
+      <text x="114" y="25" font-size="9" font-weight="800" text-anchor="middle" fill="#0C0C0E" font-family="${fontFam}">RUN</text>
+    `;
   }
 
-  // Simplified Agent watermark at bottom-right
-  // agentLogoIcon renders at x,y with given width/height
-  const watermark = `<g transform="translate(90, 86)" opacity="${isIdle ? '0.46' : '0.34'}">
-    ${agentLogoIcon(agent, 40, 1, 0, 0)}
+  if (isActive) {
+    activeRing = `<rect x="10.5" y="10.5" width="123" height="123" rx="10.5" fill="none" stroke="#60A5FA" stroke-width="1.5" opacity="${isIdle ? '0.72' : '0.36'}"/>`;
+  }
+
+  // Agent creature watermark at bottom-right.
+  const watermark = `<g transform="translate(92, 80)" opacity="${isIdle ? '0.54' : '0.42'}">
+    ${agentLogoIcon(agent, 48, 1, 0, 0)}
   </g>`;
   
-  // Left Edge Color Strip
-  const leftStrip = `<rect x="8" y="8" width="4" height="128" rx="2" fill="${isWorking ? '#F5B942' : isAsking ? '#F87171' : p1}"/>`;
+  // Left state strip is inset so it never collides with the active/working ring.
+  const leftStrip = `<rect x="14" y="18" width="4" height="108" rx="2" fill="${isWorking ? '#F5B942' : isAsking ? '#F87171' : p1}"/>`;
 
   // Border is now the primary working/awaiting signal — no tiny spinner glyph.
   const spinner = '';
@@ -189,6 +182,7 @@ export function renderSessionSlot(
     `<rect width="${SIZE}" height="${SIZE}" rx="16" fill="url(#${gradId})"/>`,
     `<rect x="8" y="8" width="128" height="128" rx="12" fill="#2C2C2E" opacity="0.8"/>`,
     glowBorder,
+    activeRing,
     leftStrip,
     watermark,
     spinner,
@@ -279,11 +273,11 @@ export function renderDetailInfo(session: SessionInfo | undefined, state: State,
     </linearGradient>
   `;
 
-  const watermark = `<g transform="translate(90, 86)" opacity="0.36">
-    ${agentLogoIcon(agent, 40, 1, 0, 0)}
+  const watermark = `<g transform="translate(92, 80)" opacity="0.42">
+    ${agentLogoIcon(agent, 48, 1, 0, 0)}
   </g>`;
 
-  const leftStrip = `<rect x="8" y="8" width="4" height="128" rx="2" fill="${sColor}"/>`;
+  const leftStrip = `<rect x="14" y="18" width="4" height="108" rx="2" fill="${sColor}"/>`;
 
   const badgeObj = `
     <rect x="100" y="14" width="28" height="16" rx="8" fill="#ffffff" opacity="0.1" />

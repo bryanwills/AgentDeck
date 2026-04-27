@@ -128,7 +128,8 @@ struct SessionSlotView: View {
                 Spacer()
             }
 
-            // Agent watermark (bottom-right, 40pt). Placeholder until AgentLogoIcon port lands.
+            // Agent watermark (bottom-right, 40pt), using the same official
+            // Creature* asset catalog images as the monitor and preview UI.
             agentWatermark
                 .frame(width: 40, height: 40)
                 .opacity(mode == .idle ? 0.46 : 0.34)
@@ -176,14 +177,11 @@ struct SessionSlotView: View {
     // MARK: - Sub-views
 
     private var agentWatermark: some View {
-        // Placeholder: colored circle with agent initial. Full agentLogoIcon port is TODO.
-        ZStack {
-            Circle()
-                .fill(palette.primary)
-            Text(agent.prefix(1).uppercased())
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(Color.white.opacity(0.85))
-        }
+        SessionCreatureIcon(
+            agentType: agent,
+            tint: SessionBrand.color(for: agent),
+            size: 40
+        )
     }
 
     private var workingSpinner: some View {

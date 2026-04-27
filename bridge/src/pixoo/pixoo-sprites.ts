@@ -108,36 +108,41 @@ const CRAYFISH_LOD: number[][] = [
 const CF_LOD_COLS = 8;
 const CF_LOD_ROWS = 6;
 
-// ===== Jellyfish 10×8 — 6-lobe cloud (matches TUI/Android CloudCreature) =====
+// ===== Jellyfish 13×11 — 6-lobe cloud (matches TUI/Android CloudCreature) =====
 //
 // Codex CLI creature: clover-shaped cloud with >_ terminal prompt marking.
 // Cell types: 0=empty, 1=body, 2=marking(>_), 3=edge(breathe/contract)
 //
 export const JELLYFISH_GRID: number[][] = [
-  [0,0,1,1,0,0,1,1,0,0],  // top lobes
-  [0,1,1,1,1,1,1,1,1,0],  // upper merge
-  [1,1,1,1,1,1,1,1,1,1],  // widest — side lobes
-  [3,1,2,2,1,1,2,1,1,3],  // >_ marking + breathe edges
-  [3,1,1,1,1,1,1,1,1,3],  // center + breathe edges
-  [1,1,1,1,1,1,1,1,1,1],  // widest
-  [0,1,1,1,1,1,1,1,1,0],  // taper
-  [0,0,1,1,0,0,1,1,0,0],  // bottom lobes
+  [0,0,0,1,1,0,0,1,1,0,0,0,0],  // upper lobe caps
+  [0,0,1,1,1,1,0,1,1,1,1,0,0],  // three top lobes
+  [0,1,1,1,1,1,1,1,1,1,1,1,0],  // upper merge
+  [1,1,1,1,1,1,1,1,1,1,1,1,1],  // widest — side lobes
+  [3,1,1,2,1,1,1,1,1,1,1,1,3],  // > upper stroke + breathe edges
+  [3,1,1,1,2,1,1,1,2,2,2,1,3],  // > point + _ stroke
+  [3,1,1,2,1,1,1,1,1,1,1,1,3],  // > lower stroke
+  [1,1,1,1,1,1,1,1,1,1,1,1,1],  // lower body
+  [0,1,1,1,1,1,1,1,1,1,1,1,0],  // taper
+  [0,0,1,1,1,1,0,1,1,1,1,0,0],  // bottom lobes
+  [0,0,0,1,1,0,0,1,1,0,0,0,0],  // lower lobe caps
 ];
-const JF_COLS = 10;
-const JF_ROWS = 8;
+const JF_COLS = 13;
+const JF_ROWS = 11;
 /** World width of jellyfish in normalized coords. */
-export const JF_WORLD_W = 10 / 64;
+export const JF_WORLD_W = 13 / 64;
 
-// ===== Jellyfish LOD 7×5 — compact for zoom < 1.3 =====
+// ===== Jellyfish LOD 9×7 — compact for zoom < 1.3 =====
 const JELLYFISH_LOD: number[][] = [
-  [0,1,1,0,1,1,0],  // top lobes
-  [1,1,1,1,1,1,1],  // widest
-  [1,1,2,1,2,1,1],  // marking
-  [1,1,1,1,1,1,1],  // widest
-  [0,1,1,0,1,1,0],  // bottom lobes
+  [0,1,1,0,1,1,0,1,0],  // lobe caps
+  [1,1,1,1,1,1,1,1,1],
+  [1,1,2,1,1,1,1,1,1],  // > upper
+  [1,1,1,2,1,2,2,2,1],  // > point + _
+  [1,1,2,1,1,1,1,1,1],  // > lower
+  [1,1,1,1,1,1,1,1,1],
+  [0,1,1,0,1,1,0,1,0],  // lobe caps
 ];
-const JF_LOD_COLS = 7;
-const JF_LOD_ROWS = 5;
+const JF_LOD_COLS = 9;
+const JF_LOD_ROWS = 7;
 
 // Cell type constants for jellyfish
 const MARKING = 2;
@@ -206,7 +211,7 @@ export const COLORS = {
   // Jellyfish / Codex CLI (indigo — TUI/Android match)
   jellyfishBody:    [0x63, 0x66, 0xF1] as const,  // indigo #6366F1
   jellyfishEdge:    [0x4F, 0x46, 0xE5] as const,  // darker edge (breathe cells)
-  jellyfishMarking: [0xA5, 0xB4, 0xFC] as const,  // glow #A5B4FC (>_ prompt)
+  jellyfishMarking: [0xF5, 0xF7, 0xFF] as const,  // near-white (>_ prompt)
   jellyfishGlow:    [0x31, 0x33, 0x78] as const,   // dim indigo glow halo
   jellyfishPulse:   [0xA5, 0xB4, 0xFC] as const,   // bioluminescent pulse
   jellyfishSleeping:[0x3A, 0x3C, 0x90] as const,   // dimmed indigo
@@ -731,7 +736,7 @@ export function drawJellyfish(
 
   // Bioluminescent body color pulse when working
   const bodyColor = state === 'working'
-    ? lerpColor(palette.body, palette.pulse, (Math.sin(animFrame * 0.2) + 1) * 0.5)
+    ? lerpColor(palette.body, palette.pulse, 0.18 + ((Math.sin(animFrame * 0.2) + 1) * 0.18))
     : state === 'sleeping' ? palette.sleeping
       : palette.body;
 
