@@ -109,18 +109,91 @@ actor HTTPServer {
 
     private func handleConnection(_ conn: NWConnection) {
         conn.start(queue: .main)
-        conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, error in
-            guard let data, error == nil else {
+        Self.receiveFullRequest(on: conn) { [weak self] data in
+            guard let data, let self else {
                 conn.cancel()
                 return
             }
             Task {
-                guard let self else { return }
                 let request = Self.parseHTTPRequest(data, remoteIP: conn.endpoint.debugDescription)
                 let handled = await self.handle(request, on: conn)
                 if !handled {
                     conn.cancel()
                 }
+            }
+        }
+    }
+
+    /// Read one full HTTP request (headers + body) by walking `receive`
+    /// until the parsed Content-Length is satisfied. Necessary because
+    /// `receive(maximumLength: 65536)` returns only one chunk per call —
+    /// Codex's OTLP/HTTP exporter routinely batches ~65 KB of spans, and
+    /// a single-chunk read truncated the body so JSON parse failed for
+    /// every batch. 4 MB cap is a defensive ceiling against runaway
+    /// requests (no legitimate dashboard payload is larger).
+    private static func receiveFullRequest(
+        on conn: NWConnection,
+        accumulated: Data = Data(),
+        completion: @escaping @Sendable (Data?) -> Void
+    ) {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { chunk, _, isComplete, error in
+            if error != nil {
+                completion(nil)
+                return
+            }
+            var data = accumulated
+            if let chunk { data.append(chunk) }
+
+            if data.isEmpty {
+                if isComplete {
+                    completion(nil)
+                } else {
+                    receiveFullRequest(on: conn, accumulated: data, completion: completion)
+                }
+                return
+            }
+
+            // Cap at 4 MB to bound the listener's per-connection memory.
+            if data.count >= 4 * 1024 * 1024 {
+                completion(data)
+                return
+            }
+
+            // Find end of headers; if not seen yet, keep reading.
+            guard let headerRange = data.range(of: Data("\r\n\r\n".utf8)) else {
+                if isComplete {
+                    completion(data)
+                } else {
+                    receiveFullRequest(on: conn, accumulated: data, completion: completion)
+                }
+                return
+            }
+
+            // Parse Content-Length from the headers slice.
+            let headerText = String(data: data.subdata(in: 0..<headerRange.lowerBound), encoding: .utf8) ?? ""
+            var expectedBody = 0
+            for line in headerText.components(separatedBy: "\r\n") {
+                if line.lowercased().hasPrefix("content-length:") {
+                    let parts = line.split(separator: ":", maxSplits: 1)
+                    if parts.count == 2,
+                       let n = Int(parts[1].trimmingCharacters(in: .whitespaces)) {
+                        expectedBody = n
+                    }
+                    break
+                }
+            }
+
+            let bodyBytesSoFar = data.count - headerRange.upperBound
+            if bodyBytesSoFar >= expectedBody {
+                completion(data)
+            } else if isComplete {
+                DaemonLogger.shared.debug(
+                    "HTTP",
+                    "Incomplete request body: expected=\(expectedBody) received=\(bodyBytesSoFar)"
+                )
+                completion(nil)
+            } else {
+                receiveFullRequest(on: conn, accumulated: data, completion: completion)
             }
         }
     }
@@ -191,10 +264,8 @@ actor HTTPServer {
 
         // Parse headers
         var headers: [String: String] = [:]
-        var bodyStart = 0
-        for (i, line) in lines.dropFirst().enumerated() {
+        for line in lines.dropFirst() {
             if line.isEmpty {
-                bodyStart = i + 2
                 break
             }
             let hParts = line.split(separator: ":", maxSplits: 1)
@@ -203,10 +274,21 @@ actor HTTPServer {
             }
         }
 
-        // Body
+        // Body — slice from the raw Data buffer (NOT the string-joined
+        // lines) so we preserve byte-fidelity even when the body is large
+        // enough that String round-trip would corrupt it. Codex's OTLP
+        // exporter sends ~65 KB JSON batches that previously failed
+        // `JSONSerialization.jsonObject(with:)` because the join step
+        // mangled trailing bytes. Header parsing above can stay string-
+        // based (text-only, well below pathological sizes).
         let body: Data?
-        if bodyStart > 0 && bodyStart < lines.count {
-            body = lines[bodyStart...].joined(separator: separator).data(using: .utf8)
+        if let headerTerminator = data.range(of: Data("\r\n\r\n".utf8)) {
+            let bodyOffset = headerTerminator.upperBound
+            if bodyOffset < data.count {
+                body = data.subdata(in: bodyOffset..<data.count)
+            } else {
+                body = nil
+            }
         } else {
             body = nil
         }

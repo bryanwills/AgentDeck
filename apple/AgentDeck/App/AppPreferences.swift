@@ -1,12 +1,13 @@
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 #if os(macOS)
 import AppKit
 #endif
 
 final class AppPreferences: ObservableObject, @unchecked Sendable {
-    nonisolated(unsafe) static let shared = AppPreferences()
+    static let shared = AppPreferences()
 
     /// Tri-state consent for Claude Code hook auto-install. App Store review
     /// guideline 2.5.2 forbids silently modifying user files outside the
@@ -123,6 +124,20 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         didSet { defaults.set(hooksInstalled, forKey: Keys.hooksInstalled) }
     }
 
+    /// Tri-state consent for editing `~/.codex/config.toml`. Mirrors the
+    /// Claude `hookInstallConsent` pattern — `.unknown` on fresh install →
+    /// `CodexConfigInstaller` no-ops until the user opts in via Settings.
+    @Published var codexConfigConsent: HookInstallConsent {
+        didSet { defaults.set(codexConfigConsent.rawValue, forKey: Keys.codexConfigConsent) }
+    }
+
+    /// Whether AgentDeck's fenced block has actually been written into
+    /// `~/.codex/config.toml`. Distinct from `codexConfigConsent` so the
+    /// app can remember install state even after revocation.
+    @Published var codexConfigInstalled: Bool {
+        didSet { defaults.set(codexConfigInstalled, forKey: Keys.codexConfigInstalled) }
+    }
+
     /// First-launch tracking for the Device Preview window. Flips to `true`
     /// the first time the user opens the window so the empty-state banner
     /// can stop nudging them. Pure local flag — not mirrored to
@@ -183,6 +198,8 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         self.apmeJudgeBackend = defaults.string(forKey: Keys.apmeJudgeBackend) ?? "foundationModels"
         self.hookInstallConsent = HookInstallConsent(rawValue: defaults.string(forKey: Keys.hookInstallConsent) ?? "") ?? .unknown
         self.hooksInstalled = defaults.object(forKey: Keys.hooksInstalled) as? Bool ?? false
+        self.codexConfigConsent = HookInstallConsent(rawValue: defaults.string(forKey: Keys.codexConfigConsent) ?? "") ?? .unknown
+        self.codexConfigInstalled = defaults.object(forKey: Keys.codexConfigInstalled) as? Bool ?? false
         self.hasSeenDevicePreview = defaults.object(forKey: Keys.hasSeenDevicePreview) as? Bool ?? false
         self.hasSeenMonitorEmptyGuide = defaults.object(forKey: Keys.hasSeenMonitorEmptyGuide) as? Bool ?? false
         self.hasRequestedNotifications = defaults.object(forKey: Keys.hasRequestedNotifications) as? Bool ?? false
@@ -229,6 +246,15 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     }
 
     #if os(macOS)
+    private static func antigravityDatabaseContentTypes() -> [UTType] {
+        let types = ["vscdb", "db", "sqlite", "sqlite3"]
+            .flatMap { UTType.types(tag: $0, tagClass: .filenameExtension, conformingTo: nil) }
+        if types.isEmpty {
+            return [.data]
+        }
+        return Array(Set(types)).sorted { $0.identifier < $1.identifier }
+    }
+
     private static func defaultAntigravityDirectoryURL() -> URL? {
         guard let pw = getpwuid(getuid()), let ptr = pw.pointee.pw_dir else { return nil }
         let home = URL(fileURLWithPath: String(cString: ptr))
@@ -247,11 +273,12 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     }
 
     @discardableResult
+    @MainActor
     func chooseAntigravityDatabase() -> Bool {
         let panel = NSOpenPanel()
         panel.title = "Select Antigravity state.vscdb"
         panel.message = "Choose Antigravity's local state database to enable optional plan display."
-        panel.allowedFileTypes = ["vscdb", "db", "sqlite", "sqlite3"]
+        panel.allowedContentTypes = Self.antigravityDatabaseContentTypes()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
@@ -382,6 +409,60 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         defaults.removeObject(forKey: Keys.claudeSettingsPath)
     }
 
+    // MARK: - Codex config.toml security-scoped bookmark
+
+    /// Persist a security-scoped bookmark to `~/.codex/config.toml`.
+    /// Mirrors `storeClaudeSettingsBookmark` — only the storage keys differ.
+    @discardableResult
+    func storeCodexConfigBookmark(for url: URL) -> Bool {
+        do {
+            #if os(macOS)
+            let options: URL.BookmarkCreationOptions = [.withSecurityScope]
+            #else
+            let options: URL.BookmarkCreationOptions = []
+            #endif
+            let bookmark = try url.bookmarkData(
+                options: options,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            defaults.set(bookmark, forKey: Keys.codexConfigBookmark)
+            defaults.set(url.path, forKey: Keys.codexConfigPath)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Resolve the stored Codex bookmark back into a URL.
+    func resolveCodexConfigURL() -> (url: URL, stale: Bool)? {
+        guard let bookmark = defaults.data(forKey: Keys.codexConfigBookmark) else { return nil }
+        var stale = false
+        do {
+            #if os(macOS)
+            let resolveOptions: URL.BookmarkResolutionOptions = [.withSecurityScope]
+            #else
+            let resolveOptions: URL.BookmarkResolutionOptions = []
+            #endif
+            let url = try URL(
+                resolvingBookmarkData: bookmark,
+                options: resolveOptions,
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            )
+            return (url, stale)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Revoke stored Codex config bookmark + path. Leaves consent /
+    /// installed flags to the caller (`CodexConfigInstaller.uninstallAndRevoke`).
+    func clearCodexConfigAccess() {
+        defaults.removeObject(forKey: Keys.codexConfigBookmark)
+        defaults.removeObject(forKey: Keys.codexConfigPath)
+    }
+
     /// Clamp user-supplied port to the safe range (avoid privileged <1024 and
      /// out-of-range values that would crash NWEndpoint.Port).
     static func clampPort(_ value: Int) -> Int {
@@ -411,6 +492,10 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         static let hooksInstalled = "prefs.hooksInstalled"
         static let claudeSettingsBookmark = "prefs.claudeSettingsBookmark"
         static let claudeSettingsPath = "prefs.claudeSettingsPath"
+        static let codexConfigConsent = "prefs.codexConfigConsent"
+        static let codexConfigInstalled = "prefs.codexConfigInstalled"
+        static let codexConfigBookmark = "prefs.codexConfigBookmark"
+        static let codexConfigPath = "prefs.codexConfigPath"
         static let hasSeenDevicePreview = "prefs.hasSeenDevicePreview"
         static let hasSeenMonitorEmptyGuide = "prefs.hasSeenMonitorEmptyGuide"
         static let hasRequestedNotifications = "prefs.hasRequestedNotifications"

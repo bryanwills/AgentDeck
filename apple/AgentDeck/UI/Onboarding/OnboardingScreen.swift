@@ -120,10 +120,32 @@ private struct AgentInfoPaneiOS: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // Brand/creature marks come from the same Assets.xcassets entries
+            // that `IntegrationsView.integrationIcon` uses. Tints are chosen
+            // to read on both light and dark `systemBackground` here —
+            // catalog brand tints (#EBEBEF / #F1ECEC) are dashboard-only
+            // values that wash out on the iOS onboarding's white surface
+            // in light mode. `Color.primary` flips with the system; Claude
+            // Code's terracotta has enough chroma to stay visible on both.
             VStack(spacing: 10) {
-                agentRow("Claude Code", detail: "Anthropic's CLI agent with hooks and permissions.")
-                agentRow("Codex", detail: "OpenAI's coding agent CLI.")
-                agentRow("OpenCode", detail: "Open-source multi-model coding agent.")
+                agentRow(
+                    asset: "CreatureClaudeCode",
+                    tint: TerrariumColors.claudeBody,
+                    name: "Claude Code",
+                    detail: "Anthropic's CLI agent with hooks and permissions."
+                )
+                agentRow(
+                    asset: "BrandOpenAI",
+                    tint: .primary,
+                    name: "Codex",
+                    detail: "OpenAI's coding agent CLI."
+                )
+                agentRow(
+                    asset: "CreatureOpenCode",
+                    tint: .primary,
+                    name: "OpenCode",
+                    detail: "Open-source multi-model coding agent."
+                )
             }
 
             Text("On your Mac, install AgentDeck from the App Store and follow its onboarding to finish the setup.")
@@ -136,13 +158,23 @@ private struct AgentInfoPaneiOS: View {
         .padding(24)
     }
 
-    private func agentRow(_ name: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(name)
-                .font(.system(size: 15, weight: .semibold))
-            Text(detail)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+    private func agentRow(asset: String, tint: Color, name: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(asset)
+                .renderingMode(.template)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 28, height: 28)
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)

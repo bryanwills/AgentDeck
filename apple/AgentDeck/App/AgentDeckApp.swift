@@ -148,7 +148,8 @@ struct AgentDeckApp: App {
         } label: {
             AgentStatusIcon(
                 sessions: stateHolder.state.siblingSessions,
-                bridgeConnected: stateHolder.state.bridgeConnected
+                bridgeConnected: stateHolder.state.bridgeConnected,
+                style: preferences.menuBarIconStyle
             )
         }
         .menuBarExtraStyle(.window)
@@ -200,35 +201,53 @@ struct AgentDeckApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var daemonService: DaemonService?
 
-    func applicationWillTerminate(_ notification: Notification) {
-        // Remove daemon.json FIRST — it's a fast file op and prevents stale-guard
-        // deadlocks on the next app launch even if the async shutdown below hangs.
+    /// Intercept termination to run daemon cleanup without blocking the main
+    /// thread. The previous `applicationWillTerminate` implementation pumped
+    /// `RunLoop.main.run(before:)` in 50ms slices for up to 3 s while waiting
+    /// on a MainActor `Task`; that kept the Dashboard window on screen and
+    /// the Dock icon bouncing for the whole cleanup. Using `.terminateLater`
+    /// lets us orderOut the windows immediately, run the async shutdown
+    /// naturally on its MainActor continuation, and reply back to AppKit
+    /// when it's done. The 3 s fallback is preserved as a force-exit
+    /// safety net for pathological cases (e.g. USB endpoint hang).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Visually dismiss the app right now — user sees Cmd+Q → instant close.
+        for window in sender.windows {
+            window.orderOut(nil)
+        }
+
+        // Remove daemon.json FIRST — fast, idempotent, and prevents stale-guard
+        // deadlocks on the next launch even if the async shutdown below hangs.
         SingletonGuard.removeDaemonInfoFile()
 
-        // `DaemonService.stop()` is `@MainActor`-isolated, so it needs the
-        // main thread to execute. Using `DispatchSemaphore.wait()` here
-        // would block the main thread forever — the Task below can't run
-        // until main yields, but main is stuck waiting on the semaphore.
-        // That deadlock is what produced the old "Shutdown exceeded 10s —
-        // forcing exit" log and the SX-state zombies Xcode debug sessions
-        // would leave behind.
-        //
-        // Instead, pump the main runloop in short windows so the MainActor
-        // task actually gets a chance to execute. In practice stop()
-        // completes in well under 100ms for client-mode builds, so the
-        // 3-second deadline is a failsafe rather than a regular wait.
-        var done = false
+        // Kick off cleanup on MainActor and reply when finished. DaemonServer
+        // shutdown includes farewell frames to D200H / Pixoo / ESP32 so we
+        // don't want to drop it, but we also don't want to hold the UI
+        // hostage while it runs.
+        var replied = false
+        let reply: (_: Bool) -> Void = { success in
+            if !replied {
+                replied = true
+                sender.reply(toApplicationShouldTerminate: success)
+            }
+        }
+
         Task { @MainActor [weak daemonService] in
             await daemonService?.stop()
-            done = true
+            reply(true)
         }
-        let deadline = Date().addingTimeInterval(3)
-        while !done && Date() < deadline {
-            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+
+        // Hard fallback — if cleanup stalls beyond 3s (e.g. HID endpoint
+        // not responding), reply anyway so the process exits instead of
+        // leaving the user stuck with no window and no Dock icon.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            if !replied {
+                NSLog("[AgentDeck] Shutdown exceeded 3s — forcing exit")
+                reply(true)
+            }
         }
-        if !done {
-            NSLog("[AgentDeck] Shutdown exceeded 3s — forcing exit")
-        }
+
+        return .terminateLater
     }
 
     /// Ensure clean exit when the last window closes if the app was launched

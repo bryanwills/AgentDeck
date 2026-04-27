@@ -202,7 +202,7 @@ enum IntegrationStatusEvaluator {
         case "claude":
             return claudeStatus(state: state, preferences: preferences)
         case "codex":
-            return codexStatus(state: state)
+            return codexStatus(state: state, preferences: preferences)
         case "openclaw":
             return openClawStatus(state: state)
         case "antigravity":
@@ -240,11 +240,29 @@ enum IntegrationStatusEvaluator {
         return .awaiting(detail: "Enable Claude Code Hooks below to relay live sessions.")
     }
 
-    private static func codexStatus(state: DashboardState) -> IntegrationStatus {
-        if let mode = state.codexAuthMode, !mode.isEmpty {
+    private static func codexStatus(state: DashboardState, preferences: AppPreferences) -> IntegrationStatus {
+        // Three independent signals can each render Codex as "Connected":
+        //   • codexAuthMode  — daemon sees the user's ChatGPT login (CLI relay).
+        //   • codexConfigInstalled — AgentDeck-managed notify/OTel block is
+        //                  in ~/.codex/config.toml; live session telemetry
+        //                  flows even without the CLI relay.
+        //   • Both — show both summaries.
+        let observation = preferences.codexConfigInstalled
+        let auth = state.codexAuthMode.flatMap { $0.isEmpty ? nil : $0 }
+        switch (observation, auth) {
+        case (true, .some(let mode)):
+            return .connected(detail: "\(mode) · observation on")
+        case (true, .none):
+            return .connected(detail: "Observation on")
+        case (false, .some(let mode)):
             return .connected(detail: mode)
+        case (false, .none):
+            // Settings shows this row regardless, but we surface
+            // `notConfigured` (vs `.awaiting`) so the Dashboard SetupCard
+            // doesn't nag every fresh-install user about a CLI they may
+            // not own. The card has a separate gate on `codexAuthMode`.
+            return .notConfigured(detail: "Codex runs in your own terminal; sessions appear here once started, or enable Observation to relay live state.")
         }
-        return .unsupported(detail: "Codex runs in your own terminal; sessions appear here once started.")
     }
 
     private static func openClawStatus(state: DashboardState) -> IntegrationStatus {
@@ -375,6 +393,13 @@ struct IntegrationRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        // iOS surfaces these rows as read-only mirrors of Mac state — no
+        // editor in this view tree responds to taps on iOS. Soft opacity
+        // signals "informational, not interactive" without losing the
+        // status badge color which is the primary information channel.
+        #if os(iOS)
+        .opacity(0.92)
+        #endif
     }
 
     private var onboardingBody: some View {

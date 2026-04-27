@@ -110,15 +110,44 @@ final class DaemonServer {
     /// without delivering a `session_end` hook — Claude Code's Stop/End
     /// hooks are ~18% reliable, so without a TTL sweep the sessions list
     /// accumulates ghost entries whose creatures keep swimming (or
-    /// "floating") indefinitely. A fresh hook from the same sessionId
-    /// resurrects the entry; see `handleHookEvent` and `evictStaleHookSessions`.
+    /// "floating") indefinitely. A fresh start-like hook from the same
+    /// sessionId resurrects the entry; see `handleHookEvent` and
+    /// `evictStaleHookSessions`.
     private var lastHookAtByPushedSession: [String: Date] = [:]
+
+    /// Codex lifecycle hooks can miss the final Stop/turnEnd signal, especially
+    /// when the event source is a short-lived companion task. Track the last
+    /// processing progress separately so a no-tool Codex row can fall back to
+    /// idle without waiting for the much longer session eviction TTL.
+    private var codexProcessingTouchedAtBySession: [String: Date] = [:]
+
+    /// Wall-clock timestamp of the last Claude Code `UserPromptSubmit` per
+    /// session, used by `appendClaudeCodeChatEnd` to compute the turn
+    /// duration shown on the dimmed chat_end row. Mirrors the Node bridge's
+    /// `ccChatStart` accounting; without it, chat_end fell back to the same
+    /// response prefix as chat_response and the dashboard rendered the turn
+    /// as two near-identical lines (one bright ◇, one dimmed ■).
+    private var claudeChatStartTsBySession: [String: Double] = [:]
+
+    /// Bounded topic prefix (≤80 chars) extracted from the last Claude Code
+    /// prompt per session. Mirrors the Node bridge's `ccLastPromptText` use
+    /// in `emitCompletion` but stores only the already-extracted topic — not
+    /// the full prompt — so we never retain unbounded sensitive user input
+    /// in memory. Cleared on chat_end, session_end, and stale eviction so a
+    /// later Stop without a fresh UserPromptSubmit cannot reuse a stale
+    /// label from a different turn.
+    private var claudeLastPromptTopicBySession: [String: String] = [:]
 
     /// TTL for hook-driven pushed sessions. 3 minutes balances tolerating
     /// long "user is thinking" pauses against clearing ghost entries within
     /// the same coffee break. When a hook arrives after this window, the
     /// `session_start` synthesis path will recreate the entry.
     private static let pushedSessionStaleTTL: TimeInterval = 180
+
+    /// A Codex session that is still marked processing but has no active tool
+    /// after this window is probably missing its Stop/turnEnd signal. Keep this
+    /// short so menubar/D200H status does not show stale WORKING rows.
+    private static let codexNoToolProcessingIdleTTL: TimeInterval = 30
 
     /// Session id of the most recent hook event that carried one. Used to
     /// stamp state_update broadcasts so dashboard clients can attribute
@@ -260,31 +289,30 @@ final class DaemonServer {
                     throw DaemonError.noPortAvailable
                 }
             } else if !(await registry.isPortBindable(requestedPort)) {
-                // No health response + port not bindable → likely TIME_WAIT from dead process.
-                // Retry several times before falling back to a different port.
-                DaemonLogger.shared.info("Port \(requestedPort) not bindable, no health response — waiting for TIME_WAIT clearance")
-                var reclaimed = false
-                for attempt in 1...3 {
-                    try? await Task.sleep(for: .seconds(5))
-                    if await registry.isPortBindable(requestedPort) {
-                        DaemonLogger.shared.info("Port \(requestedPort) reclaimed after \(attempt * 5)s")
-                        reclaimed = true
-                        break
-                    }
-                    // Check if a real daemon appeared while we waited
-                    if let health = await registry.probeDaemonHealth(port: requestedPort),
-                       health["mode"] as? String == "daemon" {
-                        throw DaemonError.alreadyRunning(port: requestedPort)
-                    }
+                // No health response + pre-check says not bindable. NWListener
+                // sets `allowLocalEndpointReuse` (SO_REUSEADDR), so the bind is
+                // usually fine despite TIME_WAIT — but the bind+listen probe
+                // can still report false right after an abrupt shutdown. Give
+                // the kernel a brief moment to reap the previous socket, then
+                // commit: either use the requested port (letting NWListener
+                // make the final call) or fall back to an alt port. The prior
+                // implementation slept up to 15 s here, which turned a fast
+                // relaunch-after-kill flow into a perceived freeze on the
+                // Dashboard.
+                DaemonLogger.shared.info("Port \(requestedPort) not immediately bindable — brief recheck")
+                try? await Task.sleep(for: .milliseconds(400))
+                // A real daemon may have finished starting during the pause.
+                if let health = await registry.probeDaemonHealth(port: requestedPort),
+                   health["mode"] as? String == "daemon" {
+                    throw DaemonError.alreadyRunning(port: requestedPort)
                 }
-                if !reclaimed {
-                    // Port still stuck after 15s — use fallback port
-                    if let alt = await registry.findAvailablePort() {
-                        DaemonLogger.shared.info("Port \(requestedPort) still blocked after 15s, using fallback port \(alt)")
-                        resolvedPort = UInt16(alt)
-                    } else {
-                        throw DaemonError.noPortAvailable
-                    }
+                if await registry.isPortBindable(requestedPort) {
+                    DaemonLogger.shared.info("Port \(requestedPort) reclaimed after 400ms")
+                } else if let alt = await registry.findAvailablePort() {
+                    DaemonLogger.shared.info("Port \(requestedPort) still held, falling back to \(alt)")
+                    resolvedPort = UInt16(alt)
+                } else {
+                    throw DaemonError.noPortAvailable
                 }
             }
         }
@@ -304,7 +332,7 @@ final class DaemonServer {
     func startServices() async throws {
         // 0. Initialize APME store + collector + runner
         let store = ApmeStore()
-        if store.open() {
+        if await store.openWithTimeout() {
             apmeStore = store
             let collector = ApmeCollector(store: store)
             apmeCollector = collector
@@ -496,6 +524,21 @@ final class DaemonServer {
             DaemonLogger.shared.info("startServices: step11 HookInstaller skipped (no consent)")
         } else {
             DaemonLogger.shared.info("startServices: step11 HookInstaller done")
+        }
+
+        // 11b. Codex observation — same consent model as the Claude
+        // hook installer above. We call this on every daemon startup
+        // so the OTel `endpoint` baked into ~/.codex/config.toml stays
+        // in sync with whichever httpPort the daemon actually bound to
+        // (the preferred port can be taken by another process and
+        // `DaemonServer` falls back within 9120-9139). Without this,
+        // a Codex turn started after a fallback-startup would push
+        // OTel spans to a stale port and the dashboard would go dark.
+        CodexConfigInstaller.installIfNeeded()
+        if AppPreferences.shared.codexConfigConsent != .accepted {
+            DaemonLogger.shared.info("startServices: step11b CodexConfigInstaller skipped (no consent)")
+        } else {
+            DaemonLogger.shared.info("startServices: step11b CodexConfigInstaller done")
         }
 
         // 12. Voice assistant
@@ -762,10 +805,9 @@ final class DaemonServer {
         }
 
         await httpServer.get("/status") { [weak self] _ in
-            let sessions = SessionRegistry.shared.listActive()
-            let list = sessions.map { ["id": $0.id, "port": $0.port, "projectName": $0.projectName, "agentType": $0.agentType as Any] as [String: Any] }
-            let health = await self?.buildModuleHealth().value ?? [:]
-            return .json(["sessions": list, "daemon": ["port": daemonPort], "modules": health["modules"] as Any] as [String: Any])
+            let payload = await self?.buildStatusPayload().value
+                ?? ["status": "error", "error": "daemon unavailable"]
+            return .json(payload)
         }
 
         await httpServer.get("/usage") { [weak self] _ in
@@ -867,6 +909,17 @@ final class DaemonServer {
         // APME routes
         if let store = apmeStore {
             await ApmeHttpRoutes.register(on: httpServer, store: store)
+        }
+
+        // Codex OTel HTTP exporter target. Codex (when registered via
+        // CodexConfigInstaller) POSTs OTLP/HTTP JSON spans here, which we
+        // translate into per-session state transitions on the same
+        // pushedSessionsById table the /hooks/* path uses. Body crosses
+        // as Sendable `Data`; deserialization happens inside the
+        // MainActor hop so `[String: Any]` never crosses an isolation
+        // boundary as a closure parameter.
+        await CodexOtelRoutes.register(on: httpServer) { [weak self] body in
+            Task { @MainActor in await self?.handleCodexTrace(body) }
         }
     }
 
@@ -1155,6 +1208,27 @@ final class DaemonServer {
                 return payload
             } as Any,
             "fetchedAt": cachedApiUsage == nil ? 0 : Int(lastApiFetchTime.timeIntervalSince1970 * 1000),
+        ])
+    }
+
+    @MainActor
+    private func buildStatusPayload() async -> SendableDict {
+        let sessionPayloads = buildSessionsListEvent()["sessions"] as? [[String: Any]] ?? []
+        let registrySessions = SessionRegistry.shared.listActive().map {
+            [
+                "id": $0.id,
+                "port": $0.port,
+                "projectName": $0.projectName,
+                "agentType": $0.agentType as Any,
+            ] as [String: Any]
+        }
+        let health = await buildModuleHealth().value
+        return SendableDict([
+            "status": "ok",
+            "sessions": sessionPayloads,
+            "registrySessions": registrySessions,
+            "daemon": ["port": Int(port)],
+            "modules": health["modules"] as Any,
         ])
     }
 
@@ -1531,7 +1605,19 @@ final class DaemonServer {
         // without this a Stop in one session drags the other session's
         // creature to idle too, because the terrarium falls back to global
         // state when session.state is nil.
-        let sessionId = (json["session_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        //
+        // Codex lifecycle hooks expose `session_id` as the thread id. Keep
+        // Codex entries namespaced as `codex:<id>` so they cannot collide
+        // with Claude Code session ids and so OTel / notify / hooks all
+        // converge on one session row.
+        let isCodexEvent = event.hasPrefix("codex_")
+        let sessionId: String? = {
+            if isCodexEvent {
+                return Self.codexSessionKey(from: json)
+            }
+            return (json["session_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? Self.codexThreadIdSessionKey(from: json)
+        }()
 
         // Resurrection: Claude Code only fires `session_start` once per
         // claude process lifetime. If the AgentDeck daemon restarts mid-
@@ -1542,13 +1628,21 @@ final class DaemonServer {
         // and restarted every claude. Synthesize a minimal entry on any
         // non-end event when the sessionId is unknown; the subsequent
         // per-event `updateSessionHookState` then sets the right state.
-        if let sessionId, event != "session_end", event != "session_start", pushedSessionsById[sessionId] == nil {
+        if let sessionId,
+           Self.shouldSynthesizeUnknownHookSession(event: event, isCodexEvent: isCodexEvent),
+           pushedSessionsById[sessionId] == nil {
+            // Codex hooks use the `codex_*` event prefix and synthesize
+            // sessionIds as `codex:<thread-id>`; tag those entries with
+            // the matching agentType so creature renderers downstream
+            // (Pixoo, D200H, Terrarium, SessionListPanel) pick the Codex
+            // brand instead of mis-painting them as Claude Code.
+            let resurrectedAgentType = isCodexEvent ? "codex-cli" : "claude-code"
             var entry = DaemonSessionEntry(
                 id: sessionId,
                 port: Int(port),
                 pid: 0,
                 projectName: ProjectNameResolver.projectName(fromHookPayload: json),
-                agentType: "claude-code",
+                agentType: resurrectedAgentType,
                 tmuxSession: nil,
                 tty: nil,
                 parentTty: nil,
@@ -1563,6 +1657,45 @@ final class DaemonServer {
         }
 
         switch event {
+        case "codex_session_start":
+            _ = stateMachine.transition(trigger: "session_start", source: .hook)
+            let projectName = ProjectNameResolver.projectName(fromHookPayload: json)
+            if !projectName.isEmpty { stateMachine.projectName = projectName }
+            if let sessionId {
+                var entry: DaemonSessionEntry
+                if let existing = pushedSessionsById[sessionId] {
+                    entry = existing.projectName.isEmpty && !projectName.isEmpty
+                        ? DaemonSessionEntry(
+                            id: existing.id,
+                            port: existing.port,
+                            pid: existing.pid,
+                            projectName: projectName,
+                            agentType: "codex-cli",
+                            tmuxSession: existing.tmuxSession,
+                            tty: existing.tty,
+                            parentTty: existing.parentTty,
+                            startedAt: existing.startedAt
+                        )
+                        : existing
+                } else {
+                    entry = DaemonSessionEntry(
+                        id: sessionId,
+                        port: Int(port),
+                        pid: 0,
+                        projectName: projectName,
+                        agentType: "codex-cli",
+                        tmuxSession: nil,
+                        tty: nil,
+                        parentTty: nil,
+                        startedAt: ISO8601DateFormatter().string(from: Date())
+                    )
+                }
+                entry.agentType = "codex-cli"
+                entry.state = "idle"
+                pushedSessionsById[sessionId] = entry
+                upsertIntoCachedSessions(entry)
+                broadcastSessionsList()
+            }
         case "session_start":
             _ = stateMachine.transition(trigger: "session_start", source: .hook)
             let projectName = ProjectNameResolver.projectName(fromHookPayload: json)
@@ -1615,6 +1748,9 @@ final class DaemonServer {
             if let sessionId {
                 pushedSessionsById.removeValue(forKey: sessionId)
                 cachedSessions.removeAll { $0.id == sessionId }
+                codexProcessingTouchedAtBySession.removeValue(forKey: sessionId)
+                claudeChatStartTsBySession.removeValue(forKey: sessionId)
+                claudeLastPromptTopicBySession.removeValue(forKey: sessionId)
                 broadcastSessionsList()
             }
         case "tool_start":
@@ -1631,13 +1767,62 @@ final class DaemonServer {
             // Stay "processing" between tool boundaries — `stop` drops the
             // session back to idle when the turn finishes.
             updateSessionHookState(sessionId: sessionId, state: "processing", clearTool: true)
+        case "codex_user_prompt_submit":
+            _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
+            updateSessionHookState(sessionId: sessionId, state: "processing")
+        case "codex_tool_start":
+            stateMachine.currentTool = json["tool_name"] as? String
+            stateMachine.toolInput = json["tool_input"] as? String
+            updateSessionHookState(
+                sessionId: sessionId,
+                state: "processing",
+                currentTool: json["tool_name"] as? String
+            )
+        case "codex_tool_end":
+            stateMachine.currentTool = nil
+            stateMachine.toolInput = nil
+            stateMachine.toolCalls += 1
+            updateSessionHookState(sessionId: sessionId, state: "processing", clearTool: true)
+        case "codex_stop":
+            _ = stateMachine.transition(trigger: "stop", source: .hook)
+            updateSessionHookState(sessionId: sessionId, state: "idle", clearTool: true)
+        case "codex_turn_complete":
+            // Codex notify currently emits exactly one event per turn:
+            // `agent-turn-complete`. There's no matching `turn_start` on
+            // the notify channel — OTel covers progress in-flight; notify
+            // just confirms the close. Treat it like Claude's `stop`:
+            // global processing → idle, per-session idle, count the turn.
+            //
+            // The resurrection path above already populated agentType +
+            // projectName when this is the first time we've seen the
+            // thread; here we only need to make sure agentType is right
+            // (notify can race ahead of the OTel turn_start span when
+            // both signals are configured).
+            if let sessionId, var entry = pushedSessionsById[sessionId] {
+                entry.agentType = "codex-cli"
+                pushedSessionsById[sessionId] = entry
+                upsertIntoCachedSessions(entry)
+            }
+            _ = stateMachine.transition(trigger: "stop", source: .hook)
+            stateMachine.toolCalls += 1
+            updateSessionHookState(sessionId: sessionId, state: "idle", clearTool: true)
         default: break
         }
 
-        // APME: route every hook event through the collector.
+        // APME: route every Claude Code hook event through the collector.
         // The collector manages its own session lifecycle (session_start opens
         // a run, session_end closes it, everything in between is a step).
-        apmeCollector?.handleHook(event: event, data: json)
+        //
+        // Codex events (codex_turn_complete, plus future codex_* signals)
+        // are deliberately excluded: ApmeCollector keys steps off
+        // `activeHookSession`, which is set by Claude's `session_start` —
+        // routing Codex events through it would mis-attribute a Codex turn
+        // to whichever Claude session happened to be active. APME for
+        // Codex needs a distinct collector path (out of scope for this
+        // observation pass).
+        if !event.hasPrefix("codex_") {
+            apmeCollector?.handleHook(event: event, data: json)
+        }
 
         // Attribute the next state_update + timeline entries to the session
         // that fired this hook: remember the sessionId, and mirror the
@@ -1655,6 +1840,7 @@ final class DaemonServer {
         }
         if event == "session_end", let sessionId {
             lastHookAtByPushedSession.removeValue(forKey: sessionId)
+            codexProcessingTouchedAtBySession.removeValue(forKey: sessionId)
             if currentHookSessionId == sessionId { currentHookSessionId = nil }
         }
 
@@ -1699,8 +1885,8 @@ final class DaemonServer {
     /// `pushedSessionStaleTTL`. Claude Code's `session_end` hook is
     /// unreliable, so without this a `claude` process that crashed or was
     /// Ctrl-C'd leaves a ghost entry whose creature keeps swimming or
-    /// floating forever. A fresh hook for the same sessionId re-creates
-    /// the entry through the `session_start` synthesis path.
+    /// floating forever. A fresh start-like hook for the same sessionId
+    /// re-creates the entry through the synthesis path.
     @MainActor
     private func evictStaleHookSessions() async {
         let cutoff = Date().addingTimeInterval(-Self.pushedSessionStaleTTL)
@@ -1712,10 +1898,153 @@ final class DaemonServer {
             pushedSessionsById.removeValue(forKey: sid)
             cachedSessions.removeAll { $0.id == sid }
             lastHookAtByPushedSession.removeValue(forKey: sid)
+            codexProcessingTouchedAtBySession.removeValue(forKey: sid)
+            claudeChatStartTsBySession.removeValue(forKey: sid)
+            claudeLastPromptTopicBySession.removeValue(forKey: sid)
             if currentHookSessionId == sid { currentHookSessionId = nil }
             DaemonLogger.shared.debug("Hook", "Evicted stale session \(sid) (no hook in \(Int(Self.pushedSessionStaleTTL))s)")
         }
         broadcastSessionsList()
+    }
+
+    /// Translate a batch of Codex OTLP/HTTP spans into per-session state
+    /// transitions. Shares `pushedSessionsById` and `lastHookAtByPushedSession`
+    /// with the /hooks/* path so notify and OTel converge on a single
+    /// session entry per Codex thread; either signal alone is sufficient
+    /// to drive the dashboard, both together is idempotent.
+    @MainActor
+    private func handleCodexTrace(_ body: Data) async {
+        let parsed: Any
+        do {
+            parsed = try JSONSerialization.jsonObject(with: body)
+        } catch {
+            // Diagnostic: capture both ends of the body so we can tell
+            // whether the JSON is truncated mid-stream vs Transfer-Encoding
+            // chunked wrapping vs simply malformed.
+            let pHex = body.prefix(80).map { String(format: "%02x", $0) }.joined()
+            let sHex = body.suffix(80).map { String(format: "%02x", $0) }.joined()
+            DaemonLogger.shared.debug(
+                "CodexOTel",
+                "JSONSerialization failed: \(error.localizedDescription); len=\(body.count) prefix=\(pHex) suffix=\(sHex)"
+            )
+            return
+        }
+        guard let json = parsed as? [String: Any] else {
+            let prefix = body.prefix(80).map { String(format: "%02x", $0) }.joined()
+            DaemonLogger.shared.debug(
+                "CodexOTel",
+                "Parsed but root is \(type(of: parsed)), not [String:Any]; len=\(body.count) prefix=\(prefix)"
+            )
+            return
+        }
+        let events = CodexTelemetryModule.parse(json)
+        guard !events.isEmpty else {
+            let topKeys = Array(json.keys).joined(separator: ",")
+            let spanNames = CodexTelemetryModule.spanNameSummary(json)
+            DaemonLogger.shared.debug(
+                "CodexOTel",
+                "JSON parsed but no recognized spans; len=\(body.count) topKeys=\(topKeys) spanNames=\(spanNames)"
+            )
+            return
+        }
+
+        var didCreate = false
+        for event in events {
+            switch event {
+            case .turnStart(let threadId, _, let cwd):
+                let sid = "codex:\(threadId)"
+                if pushedSessionsById[sid] == nil {
+                    let projectName = cwd.map(ProjectNameResolver.resolve(cwd:)) ?? ""
+                    var entry = DaemonSessionEntry(
+                        id: sid,
+                        port: Int(port),
+                        pid: 0,
+                        projectName: projectName,
+                        agentType: "codex-cli",
+                        tmuxSession: nil,
+                        tty: nil,
+                        parentTty: nil,
+                        startedAt: ISO8601DateFormatter().string(from: Date())
+                    )
+                    entry.state = "processing"
+                    pushedSessionsById[sid] = entry
+                    upsertIntoCachedSessions(entry)
+                    trackCodexProcessingState(sessionId: sid, entry: entry)
+                    didCreate = true
+                    DaemonLogger.shared.debug("CodexOTel", "Opened \(sid) project=\(projectName.isEmpty ? "(none)" : projectName)")
+                } else {
+                    updateSessionHookState(sessionId: sid, state: "processing")
+                }
+                _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
+                lastHookAtByPushedSession[sid] = Date()
+
+            case .toolCall(let threadId, _, let tool):
+                let sid = "codex:\(threadId)"
+                updateSessionHookState(sessionId: sid, state: "processing", currentTool: tool)
+                lastHookAtByPushedSession[sid] = Date()
+
+            case .toolResult(let threadId, _):
+                let sid = "codex:\(threadId)"
+                updateSessionHookState(sessionId: sid, state: "processing", clearTool: true)
+                lastHookAtByPushedSession[sid] = Date()
+
+            case .turnEnd(let threadId, _):
+                let sid = "codex:\(threadId)"
+                updateSessionHookState(sessionId: sid, state: "idle", clearTool: true)
+                _ = stateMachine.transition(trigger: "stop", source: .hook)
+                stateMachine.toolCalls += 1
+                lastHookAtByPushedSession[sid] = Date()
+            }
+        }
+
+        if didCreate {
+            // Newly-synthesized session needs a sessions-list broadcast;
+            // updateSessionHookState already pushes the list when it touches
+            // an existing entry, but the create path above bypassed that.
+            broadcastSessionsList()
+        }
+        broadcastStateUpdate()
+    }
+
+    /// Synthesize a `codex:<thread-id>` session key from a Codex notify
+    /// payload (or an OTel span attribute dictionary that's been promoted
+    /// to a hook-shaped JSON). Codex spelt the field `thread-id` in the
+    /// shipped notify schema; OTel resource/span attributes more often use
+    /// `thread_id` or `codex.thread_id`. Trying every spelling avoids a
+    /// schema-rev breaking the integration silently.
+    private static func codexThreadIdSessionKey(from json: [String: Any]) -> String? {
+        for key in ["thread-id", "thread_id", "threadId", "codex.thread_id"] {
+            if let value = json[key] as? String, !value.isEmpty {
+                return "codex:\(value)"
+            }
+        }
+        return nil
+    }
+
+    private static func codexSessionKey(from json: [String: Any]) -> String? {
+        if let existing = codexThreadIdSessionKey(from: json) {
+            return existing
+        }
+        guard let raw = (json["session_id"] as? String).flatMap({ $0.isEmpty ? nil : $0 }) else {
+            return nil
+        }
+        if raw.hasPrefix("codex:") { return raw }
+        return "codex:\(raw)"
+    }
+
+    private static func shouldSynthesizeUnknownHookSession(event: String, isCodexEvent: Bool) -> Bool {
+        if isCodexEvent {
+            // Late completion events should not recreate a TTL-evicted Codex
+            // row. They prove a turn is ending, not that a live session should
+            // be shown as active again. Start-like events still reopen rows
+            // after daemon restart or a long idle pause.
+            return event == "codex_user_prompt_submit" || event == "codex_tool_start"
+        }
+        return event != "session_end" && event != "session_start"
+    }
+
+    private static func isCodexSession(sessionId: String, entry: DaemonSessionEntry) -> Bool {
+        sessionId.hasPrefix("codex:") || entry.agentType == "codex-cli"
     }
 
     /// Apply a per-session state/tool update coming from a hook event and
@@ -1737,7 +2066,61 @@ final class DaemonServer {
         }
         pushedSessionsById[sessionId] = entry
         upsertIntoCachedSessions(entry)
+        trackCodexProcessingState(sessionId: sessionId, entry: entry)
         broadcastSessionsList()
+    }
+
+    @MainActor
+    private func trackCodexProcessingState(sessionId: String, entry: DaemonSessionEntry, now: Date = Date()) {
+        guard Self.isCodexSession(sessionId: sessionId, entry: entry) else { return }
+        if entry.state == "processing" {
+            codexProcessingTouchedAtBySession[sessionId] = now
+        } else {
+            codexProcessingTouchedAtBySession.removeValue(forKey: sessionId)
+        }
+    }
+
+    @discardableResult
+    @MainActor
+    private func settleStaleCodexProcessingSessions(now: Date = Date(), broadcast: Bool = true) -> Bool {
+        let cutoff = now.addingTimeInterval(-Self.codexNoToolProcessingIdleTTL)
+        var changed = false
+
+        for (sid, touchedAt) in Array(codexProcessingTouchedAtBySession) {
+            guard touchedAt < cutoff else { continue }
+            guard var entry = pushedSessionsById[sid] else {
+                codexProcessingTouchedAtBySession.removeValue(forKey: sid)
+                continue
+            }
+            guard Self.isCodexSession(sessionId: sid, entry: entry) else {
+                codexProcessingTouchedAtBySession.removeValue(forKey: sid)
+                continue
+            }
+            guard entry.state == "processing" else {
+                codexProcessingTouchedAtBySession.removeValue(forKey: sid)
+                continue
+            }
+            if let tool = entry.currentTool, !tool.isEmpty {
+                continue
+            }
+
+            entry.state = "idle"
+            entry.currentTool = nil
+            pushedSessionsById[sid] = entry
+            upsertIntoCachedSessions(entry)
+            codexProcessingTouchedAtBySession.removeValue(forKey: sid)
+            changed = true
+            DaemonLogger.shared.debug(
+                "Hook",
+                "Settled stale Codex processing session \(sid) to idle (no tool/progress in \(Int(Self.codexNoToolProcessingIdleTTL))s)"
+            )
+        }
+
+        if changed && broadcast {
+            broadcastSessionsList()
+            broadcastStateUpdate()
+        }
+        return changed
     }
 
     // MARK: - State Changed (cascade)
@@ -2037,6 +2420,7 @@ final class DaemonServer {
                 try? await Task.sleep(for: .seconds(30))
                 guard let self else { break }
                 await self.evictStaleHookSessions()
+                self.settleStaleCodexProcessingSessions()
                 await self.evictStaleClientRegistrations()
             }
         }
@@ -2240,6 +2624,8 @@ final class DaemonServer {
 
     @MainActor
     private func refreshSessions() async {
+        settleStaleCodexProcessingSessions(broadcast: false)
+
         // Pull filesystem-registered sessions (our own group container) first.
         let registryEntries = await registry.listActiveAndReachable().filter { $0.id != sessionId }
 
@@ -2265,6 +2651,7 @@ final class DaemonServer {
         for id in stalePushed {
             DaemonLogger.shared.debug("Daemon", "Pruning stale pushed session \(id)")
             pushedSessionsById.removeValue(forKey: id)
+            codexProcessingTouchedAtBySession.removeValue(forKey: id)
         }
 
         cachedSessions = DashboardDataRules.sortSessions(enriched.filter { entry in
@@ -3276,6 +3663,17 @@ final class DaemonServer {
     /// dashboard timeline while OpenClaw/OpenCode sessions showed full turns.
     @MainActor
     private func appendClaudeCodeChatStart(json: [String: Any], sessionId: String?) {
+        // Invalidate any residual per-turn state up front. A previous turn
+        // that ended abnormally (Stop hook never fired, daemon restarted
+        // mid-turn) would otherwise leave its topic + start timestamp in the
+        // session-keyed caches; an unparseable new prompt (empty or yielding
+        // no topic) then falls through this function's `guard`/topic-extract
+        // branches without overwriting them, leaking the prior turn's label
+        // into this turn's chat_end row.
+        if let sid = sessionId {
+            claudeChatStartTsBySession.removeValue(forKey: sid)
+            claudeLastPromptTopicBySession.removeValue(forKey: sid)
+        }
         let prompt = claudeCodePromptText(from: json)
         guard !prompt.isEmpty else { return }
         let snippet = String(prompt.prefix(200))
@@ -3296,6 +3694,16 @@ final class DaemonServer {
         )
         entry.sessionId = sessionId
         entry.projectName = pushedSessionsById[sessionId ?? ""]?.projectName
+        if let sid = sessionId {
+            claudeChatStartTsBySession[sid] = ts
+            // Store only the extracted topic so we never retain an unbounded
+            // amount of sensitive prompt text. The cache was already wiped
+            // for this session at the top of this function, so a nil topic
+            // simply leaves the entry absent — never stale.
+            if let topic = Self.extractTopicHint(from: prompt) {
+                claudeLastPromptTopicBySession[sid] = topic
+            }
+        }
         Task { await timelineStore.add(entry) }
         broadcastRaw([
             "type": "timeline_event",
@@ -3334,10 +3742,41 @@ final class DaemonServer {
                 "entry": claudeCodeEntryDict(respEntry),
             ] as [String: Any])
         }
+        // chat_end is a metadata row beneath chat_response. The Node bridge's
+        // emitCompletion uses "${completedLabel} · ${duration}s · ${tools}";
+        // the Apple daemon mirrors the duration suffix so the dashboard does
+        // not render two near-identical lines (the dimmed chat_end row used
+        // to repeat chat_response's response-text prefix verbatim, which read
+        // as a duplicate at row-level opacity 0.4–0.6).
+        let startTs = sessionId.flatMap { claudeChatStartTsBySession[$0] }
+        let durationSec: Int? = startTs.map { Int(((now - $0) / 1000).rounded()) }
+        // High-entropy label so DaemonTimelineStore's 8 s exact-dedup window
+        // does not collapse two legitimate quick turns that happen to share
+        // the same rounded duration (e.g. two `Completed · 2s` rows). Mirrors
+        // bridge/src/index.ts:1440 emitCompletion which prefers a topic hint
+        // from the response text, then the prompt, before falling back to
+        // `Completed`.
+        let topicFromResponse = assistantText.isEmpty
+            ? nil
+            : Self.extractTopicHint(from: assistantText)
+        let topicFromPrompt = sessionId.flatMap { claudeLastPromptTopicBySession[$0] }
+        // Always prepend "Completed" so the dimmed chat_end row is visually
+        // distinct from the bright chat_response row above it. Topic-only
+        // labels matched the chat_response's first line verbatim, which read
+        // as a duplicate; the "Completed · " prefix gives the dashboard a
+        // clear "metadata" cue while duration + topic suffix still provide
+        // the entropy needed to keep DaemonTimelineStore's 8 s exact-dedup
+        // from collapsing two legitimate quick turns.
+        var endRawParts: [String] = ["Completed"]
+        if let d = durationSec { endRawParts.append("\(d)s") }
+        if let topic = topicFromResponse ?? topicFromPrompt {
+            endRawParts.append(topic)
+        }
+        let endRaw = endRawParts.joined(separator: " · ")
         var endEntry = DaemonTimelineEntry(
             ts: now,
             type: "chat_end",
-            raw: assistantText.isEmpty ? "Completed" : String(assistantText.prefix(200)),
+            raw: endRaw,
             detail: nil,
             approvalId: nil,
             status: nil,
@@ -3352,6 +3791,10 @@ final class DaemonServer {
             "type": "timeline_event",
             "entry": claudeCodeEntryDict(endEntry),
         ] as [String: Any])
+        if let sid = sessionId {
+            claudeChatStartTsBySession.removeValue(forKey: sid)
+            claudeLastPromptTopicBySession.removeValue(forKey: sid)
+        }
     }
 
     /// Pull the user's prompt from either Claude Code's legacy `prompt` field
@@ -3363,6 +3806,75 @@ final class DaemonServer {
             return content
         }
         return ""
+    }
+
+    /// Extract a short, high-entropy topic label from a response or prompt.
+    /// Swift port of `extractTopicHint` in
+    /// `shared/src/timeline-summarizer.ts:18`. Used by
+    /// `appendClaudeCodeChatEnd` to keep `chat_end` rows distinct in the
+    /// dashboard timeline so quick turns with the same rounded duration are
+    /// not collapsed by the timeline store's exact-raw dedup.
+    private static func extractTopicHint(from text: String) -> String? {
+        guard text.count >= 5 else { return nil }
+        var inCodeFence = false
+        var candidate: String? = nil
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            if line.hasPrefix("```") {
+                inCodeFence.toggle()
+                continue
+            }
+            if inCodeFence { continue }
+
+            // Heading-only (e.g. "##" with no text)
+            if line.range(of: #"^#{1,6}\s*$"#, options: .regularExpression) != nil { continue }
+
+            // Strip leading markdown decorators
+            var stripped = line
+            // Remove leading list bullets / blockquote markers
+            stripped = stripped.replacingOccurrences(
+                of: #"^[\-\*]\s+"#, with: "", options: .regularExpression
+            )
+            stripped = stripped.replacingOccurrences(
+                of: #"^>\s+"#, with: "", options: .regularExpression
+            )
+            // Strip leading heading hashes
+            stripped = stripped.replacingOccurrences(
+                of: #"^#{1,6}\s+"#, with: "", options: .regularExpression
+            )
+            // Strip surrounding bold/italic markers
+            stripped = stripped.replacingOccurrences(
+                of: #"\*\*([^*]+)\*\*"#,
+                with: "$1",
+                options: .regularExpression
+            )
+            stripped = stripped.replacingOccurrences(
+                of: #"`([^`]+)`"#,
+                with: "$1",
+                options: .regularExpression
+            )
+            stripped = stripped.trimmingCharacters(in: .whitespaces)
+            if stripped.count >= 3 {
+                candidate = stripped
+                break
+            }
+        }
+        guard var snippet = candidate else { return nil }
+        if snippet.count > 80 {
+            snippet = String(snippet.prefix(77)) + "..."
+        }
+        // Drop common Korean filler prefixes so the label carries information.
+        snippet = snippet.replacingOccurrences(
+            of: #"^네[,.]?\s*"#, with: "", options: .regularExpression
+        )
+        snippet = snippet.replacingOccurrences(
+            of: #"^(완료했습니다\.\s*|알겠습니다\.\s*|확인했습니다\.\s*)"#,
+            with: "",
+            options: .regularExpression
+        )
+        snippet = snippet.trimmingCharacters(in: .whitespaces)
+        return snippet.isEmpty ? nil : snippet
     }
 
     /// Encode a DaemonTimelineEntry into the dict shape broadcastRaw expects —

@@ -10,6 +10,7 @@
 
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 enum HookInstaller {
     private static let hookEvents = [
@@ -180,7 +181,7 @@ enum HookInstaller {
         panel.prompt = "Authorize"
         panel.directoryURL = claudeDir
         panel.nameFieldStringValue = claudeSettingsFilename
-        panel.allowedFileTypes = ["json"]
+        panel.allowedContentTypes = [.json]
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.canCreateDirectories = true

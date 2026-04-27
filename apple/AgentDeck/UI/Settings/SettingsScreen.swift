@@ -63,18 +63,36 @@ struct SettingsScreen: View {
                         .frame(maxWidth: .infinity, alignment: .center)
 
                     // ─────── Essentials ───────
-                    // Integrations first — this is where a first-run user
-                    // wires up Claude / OpenClaw / Anthropic API.
-                    settingsCard(title: "Integrations") {
-                        servicesContent
-                    }
-
-                    settingsCard(title: "Dashboard") {
-                        dashboardContent
-                    }
-
-                    settingsCard(title: "Connection") {
+                    // Card order is tuned for the iOS client mental model:
+                    // pairing/connection comes first because nothing else
+                    // works until this device finds the Mac. Mac-side
+                    // integrations and display panels follow.
+                    settingsCard(
+                        title: "Connection",
+                        subtitle: "How this device pairs with your Mac. mDNS auto-discovery + manual URL + QR scan."
+                    ) {
                         connectionContent
+                    }
+
+                    // Mac-side integrations are read-only on iOS — surface
+                    // them so the user sees what's wired up on their Mac,
+                    // but the in-card banner makes it clear that changes
+                    // need to happen in AgentDeck on the Mac.
+                    settingsCard(
+                        title: "Mac integrations",
+                        subtitle: "Status only. Set these up in AgentDeck on your Mac."
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            macIntegrationsReadOnlyBanner
+                            servicesContent
+                        }
+                    }
+
+                    settingsCard(
+                        title: "Display panels",
+                        subtitle: "Choose which sections of the dashboard appear."
+                    ) {
+                        dashboardContent
                     }
 
                     settingsCard(title: "About") {
@@ -82,15 +100,15 @@ struct SettingsScreen: View {
                     }
 
                     // ─────── Advanced (collapsed by default) ───────
-                    // mDNS pairing + display/sleep behaviour are rarely
-                    // touched after first setup. Hide behind a disclosure
-                    // group so the main list stays short.
+                    // Display sleep sync is the only knob users rarely
+                    // touch after first setup. Pairing/discovery moved
+                    // into Connection above.
                     DisclosureGroup("Advanced") {
                         VStack(alignment: .leading, spacing: 16) {
-                            settingsCard(title: "iPad / iPhone pairing") {
-                                discoveryContent
-                            }
-                            settingsCard(title: "Display & sleep") {
+                            settingsCard(
+                                title: "Display & sleep",
+                                subtitle: "Sync this device's brightness with the host Mac display."
+                            ) {
                                 displayContent
                             }
                         }
@@ -125,6 +143,27 @@ struct SettingsScreen: View {
             .padding(.vertical, 40)
         }
         .presentationBackground(.clear)
+    }
+
+    // MARK: - Mac integrations banner (iOS read-only framing)
+
+    /// Header for the "Mac integrations" card on iOS. The card surfaces
+    /// `servicesContent` (claude/codex/openclaw/antigravity status rows),
+    /// but every editor inside that view is gated `#if os(macOS) && AGENTDECK_APP_STORE`.
+    /// This banner sets reader expectations up front so the rows are
+    /// understood as a status mirror, not as something tappable.
+    private var macIntegrationsReadOnlyBanner: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext)
+                .padding(.top, 1)
+            Text("These integrations are configured in AgentDeck on your Mac. The list below mirrors what your Mac reports.")
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.bottom, 4)
     }
 
     // MARK: - macOS
@@ -277,6 +316,8 @@ struct SettingsScreen: View {
             VStack(alignment: .leading, spacing: 14) {
                 claudeHooksContent
                 Divider()
+                codexObservationContent
+                Divider()
                 servicesContent
             }
         case .dashboard:
@@ -301,11 +342,23 @@ struct SettingsScreen: View {
 
     // MARK: - Settings Card (Android Card style)
 
-    private func settingsCard(title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func settingsCard(
+        title: String,
+        subtitle: String? = nil,
+        @ViewBuilder content: () -> some View
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(TerrariumHUD.subtext)
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 4)
+            }
 
             VStack(alignment: .leading, spacing: 10) {
                 content()
@@ -405,6 +458,14 @@ struct SettingsScreen: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.orange)
                 }
+
+                // mDNS auto-discovery is the primary pairing path on iOS —
+                // promote it inline under Connection rather than burying it
+                // in an Advanced section. Only shown while disconnected so
+                // the card stays clean once paired.
+                Divider()
+                    .padding(.vertical, 4)
+                discoveryContent
                 #endif
             }
         }
@@ -745,6 +806,11 @@ struct SettingsScreen: View {
 
     private var dashboardContent: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // App-launch + menu-bar prefs are macOS-only — iOS has no
+            // separate dashboard window to auto-open and no menu bar.
+            // `openDashboardOnLaunch` is read in AgentDeckApp.swift's macOS
+            // scene; `menuBarIconStyle` is read by the macOS MenuBarExtra.
+            #if os(macOS)
             Toggle("Open dashboard on launch", isOn: $preferences.openDashboardOnLaunch)
 
             Picker("Menu bar icon", selection: $preferences.menuBarIconStyle) {
@@ -754,6 +820,7 @@ struct SettingsScreen: View {
             }
 
             Divider()
+            #endif
 
             Text("Visible Panels")
                 .font(.system(size: 12, weight: .semibold))
@@ -765,6 +832,11 @@ struct SettingsScreen: View {
             Toggle("Timeline strip", isOn: $preferences.showTimeline)
             Toggle("Settings button", isOn: $preferences.showSettingsButton)
 
+            // Tank Status Sections subgroup is macOS-only for now: nothing
+            // currently reads these preferences (separate cleanup pending),
+            // so hiding on iOS prevents dead toggles from polluting the
+            // client-only Settings sheet.
+            #if os(macOS)
             Divider()
 
             Text("Tank Status Sections")
@@ -783,6 +855,7 @@ struct SettingsScreen: View {
                     .font(.system(size: 11))
                     .foregroundStyle(TerrariumHUD.subtext)
             }
+            #endif
         }
     }
 
@@ -1071,7 +1144,7 @@ struct SettingsScreen: View {
             hardwareRow(
                 icon: "square.grid.3x3.fill",
                 title: "Pixoo matrix displays",
-                subtitle: "Add Divoom Pixoo devices by IP. Restart the daemon after adding for changes to take effect.",
+                subtitle: "Add Divoom Pixoo devices by IP. AgentDeck picks up changes automatically.",
                 buttonLabel: "Manage…",
                 action: { showPixooSheet = true }
             )
@@ -1131,9 +1204,29 @@ struct SettingsScreen: View {
                     apiKeyIntegrationSlot(descriptor)
                 }
             )
-            .onAppear {
-                loadOpenClawGatewayTokenState()
-                loadAnthropicAdminApiKeyState()
+            // Keychain reads (`OpenClawGatewayTokenStore.loadToken`,
+            // `AnthropicAdminApiKeyStore.loadKey`) block on `mach_msg2_trap`
+            // when the system has to prompt for ACL approval — and SwiftUI
+            // evaluates `onAppear` synchronously on the main actor, so the
+            // whole UI (and the daemon's `startServices` step that runs
+            // after the first scene flush) hangs until the user dismisses
+            // the prompt. Move the reads off the main thread; await the
+            // result and assign back on the main actor. The prompt still
+            // appears, but it doesn't gate the rest of launch.
+            .task {
+                #if os(macOS) && AGENTDECK_APP_STORE
+                async let openClawSaved = Task.detached(priority: .userInitiated) {
+                    OpenClawGatewayTokenStore.loadToken() != nil
+                }.value
+                async let anthropicSaved = Task.detached(priority: .userInitiated) {
+                    AnthropicAdminApiKeyStore.loadKey() != nil
+                }.value
+                let (oc, an) = await (openClawSaved, anthropicSaved)
+                openClawGatewayTokenSaved = oc
+                openClawGatewayTokenError = nil
+                anthropicAdminApiKeySaved = an
+                anthropicAdminApiKeyError = nil
+                #endif
             }
         }
     }
@@ -1277,6 +1370,64 @@ struct SettingsScreen: View {
             return "Hooks installed"
         }
         switch preferences.hookInstallConsent {
+        case .unknown: return "Not configured"
+        case .declined: return "Declined — click Enable to revisit"
+        case .accepted: return "Consent granted, not yet written"
+        }
+    }
+
+    /// Codex equivalent of `claudeHooksContent`. Drives the
+    /// `~/.codex/config.toml` notify + OTel block via NSAlert + NSOpenPanel.
+    /// Only writes inside AgentDeck's fenced TOML block — user keys
+    /// (model, profiles, MCP servers) are left untouched.
+    private var codexObservationContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(preferences.codexConfigInstalled
+                          ? TerrariumHUD.ledGreen
+                          : TerrariumHUD.ledRed.opacity(0.6))
+                    .frame(width: 8, height: 8)
+                Text(codexObservationStatusText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+
+            Text("AgentDeck can register a notify hook and OTel exporter in ~/.codex/config.toml so Codex turns and tool calls report state to the dashboard. Skip this if you don't use Codex — your model, profiles, and MCP server keys are preserved.")
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let path = UserDefaults.standard.string(forKey: "prefs.codexConfigPath") {
+                Text(path)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            HStack(spacing: 8) {
+                Button("Enable Codex Observation…") {
+                    _ = CodexConfigInstaller.promptAndInstall()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(preferences.codexConfigConsent == .accepted && preferences.codexConfigInstalled)
+
+                Button("Remove") {
+                    CodexConfigInstaller.uninstallAndRevoke()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!preferences.codexConfigInstalled)
+            }
+        }
+    }
+
+    private var codexObservationStatusText: String {
+        if preferences.codexConfigInstalled {
+            return "Observation installed"
+        }
+        switch preferences.codexConfigConsent {
         case .unknown: return "Not configured"
         case .declined: return "Declined — click Enable to revisit"
         case .accepted: return "Consent granted, not yet written"

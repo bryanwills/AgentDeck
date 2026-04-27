@@ -72,9 +72,22 @@ Unlike the other advanced integrations, OpenClaw **is** first-class in the App S
 - The user must approve the new device in OpenClaw's Web UI — AgentDeck only displays the pairing state; it never writes to OpenClaw's own config.
 - Reviewers without OpenClaw installed will see the "Gateway not found" state and can skip this integration entirely.
 
-### Codex / OpenCode launch
+### Codex observation path
 
-Codex and OpenCode do not ship Claude-Code-compatible hook systems today, so the App Store build does not provide built-in PTY launch for those two agents. Claude Code is monitored entirely through the hook pipeline described above; users start Claude Code in Terminal themselves.
+OpenCode does not ship a Claude-Code-compatible hook system, so the App Store build does not provide built-in PTY launch or observation for OpenCode.
+
+Codex (OpenAI's CLI) is observed through a fully opt-in path that mirrors the Claude Code hook flow:
+
+1. The user enables it from Settings → Integrations → "Enable Codex Observation…".
+2. An `NSAlert` explains that AgentDeck will write Codex lifecycle hook entries into `~/.codex/config.toml`, with optional `notify` and `[otel]` fallback entries when the user has not already configured those channels.
+3. On acceptance, an `NSOpenPanel` requires the user to explicitly pick `~/.codex/config.toml`. Only then do we acquire a security-scoped bookmark and write the entries.
+4. AgentDeck only edits inside its own fenced TOML block (`# >>> AgentDeck managed (do not edit) <<<` / `# <<<` markers) — user keys (`model`, profiles, MCP servers) are preserved verbatim. If the user already wrote `[features]` or `[hooks]`, AgentDeck aborts instead of unsafe-merging lifecycle hooks. If the user already wrote a top-level `notify` or `[otel]`, AgentDeck still installs lifecycle hooks but omits that optional fallback/exporter to avoid duplicate keys.
+5. The values written enable `[features] codex_hooks = true` and inline `[[hooks.*]]` command hooks. Those commands resolve AgentDeck's local-only HTTP port and POST Codex hook JSON to `http://127.0.0.1:$PORT/hooks/codex_session_start`, `/hooks/codex_user_prompt_submit`, `/hooks/codex_tool_start`, `/hooks/codex_tool_end`, and `/hooks/codex_stop`. Optional fallback entries POST notify JSON to `/hooks/codex_turn_complete` and OTel JSON traces to `/otel/v1/traces` (`protocol = "json"`). All endpoints listen on `127.0.0.1` only. The OTel `endpoint` is rewritten on every daemon startup so it always reflects the actual port the daemon is bound to.
+6. At runtime, Codex (the user's separately-installed CLI) is what eventually executes that snippet under its own process tree — not AgentDeck. AgentDeck itself only receives HTTP POSTs.
+
+The Settings panel offers a "Remove" button that strips AgentDeck's fenced block and revokes the bookmark; it leaves all user-authored TOML keys untouched. Reviewers without Codex installed see "Not configured"; the panel remains inert.
+
+Codex and OpenCode session execution from inside AgentDeck (PTY launch) is out of scope for the App Store build — users start their CLI themselves.
 
 ## APME evaluation module
 
