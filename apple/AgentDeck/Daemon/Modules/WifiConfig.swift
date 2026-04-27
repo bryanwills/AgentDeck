@@ -15,11 +15,41 @@ struct WifiConfig: Codable {
     var autoProvision: Bool = true
 }
 
+private final class WifiConfigDataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data: Data?
+
+    func set(_ data: Data?) {
+        lock.lock()
+        self.data = data
+        lock.unlock()
+    }
+
+    func get() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+}
+
 enum WifiConfigManager {
     private static let configFile = AuthManager.agentDeckDir.appendingPathComponent("wifi-config.json")
+    private static let readQueue = DispatchQueue(label: "dev.agentdeck.wifi-config.read", qos: .utility)
+    private static let readTimeout: DispatchTimeInterval = .milliseconds(700)
 
     static func load() -> WifiConfig? {
-        guard let data = try? Data(contentsOf: configFile),
+        let box = WifiConfigDataBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        readQueue.async {
+            box.set(try? Data(contentsOf: configFile))
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + readTimeout) == .success else {
+            DaemonLogger.shared.debug("WifiConfig", "Read timed out; treating as unconfigured")
+            return nil
+        }
+
+        guard let data = box.get(),
               let config = try? JSONDecoder().decode(WifiConfig.self, from: data),
               !config.ssid.isEmpty, !config.password.isEmpty else { return nil }
         return config

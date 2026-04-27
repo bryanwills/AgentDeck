@@ -69,7 +69,7 @@ actor ESP32Serial {
         let port: String
         let data: String
     }
-    nonisolated(unsafe) private let pendingReadsLock = NSLock()
+    private let pendingReadsLock = NSLock()
     nonisolated(unsafe) private var pendingReads: [PendingRead] = []
 
     private nonisolated func enqueuePendingRead(port: String, data: String) {

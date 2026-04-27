@@ -15,6 +15,11 @@ final class AuthManager: Sendable {
     static var tokenFile: URL { AgentDeckPaths.authToken }
     private static let tokenLength = 32 // 32 hex chars = 16 bytes
 
+    private static func hostnameString(from hostname: [CChar]) -> String {
+        let bytes = hostname.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
     private let cachedToken: String
 
     private init() {
@@ -26,11 +31,33 @@ final class AuthManager: Sendable {
     // MARK: - Token Management
 
     private static func loadOrCreateToken() -> String {
-        // Try reading existing token
-        if let data = try? Data(contentsOf: tokenFile),
-           let existing = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           existing.count >= tokenLength {
-            return existing
+        // macOS 26 sandbox + Group Container can silently block the very
+        // first `Data(contentsOf:)` on auth-token at `__open` syscall —
+        // sample shows main thread stuck in `_fcntl_overlay_open` →
+        // `__open`, no sandboxd deny in system log. That stalls the entire
+        // daemon startup (`DaemonServer.init` → `AuthManager.shared` is
+        // called sync from main actor) and makes the GUI look frozen.
+        //
+        // Run the read on a background queue with a short timeout. If the
+        // syscall never returns we treat it as "no existing token" and
+        // generate a fresh one — the dashboard's auth token is dashboard-
+        // only state, regenerating it doesn't break any external integration.
+        // The write also runs on a background queue, so a hung write
+        // doesn't block startup either.
+        let semaphore = DispatchSemaphore(value: 0)
+        let loaded = AuthTokenReadBox()
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { semaphore.signal() }
+            guard let data = try? Data(contentsOf: tokenFile),
+                  let existing = String(data: data, encoding: .utf8)?
+                      .trimmingCharacters(in: .whitespacesAndNewlines),
+                  existing.count >= tokenLength else { return }
+            loaded.set(existing)
+        }
+        if semaphore.wait(timeout: .now() + 2) == .timedOut {
+            DaemonLogger.shared.error("AuthManager: token-file read timed out (sandbox first-launch?), generating fresh token")
+        } else if let token = loaded.get() {
+            return token
         }
 
         // Generate new token
@@ -38,18 +65,21 @@ final class AuthManager: Sendable {
         _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         let token = bytes.map { String(format: "%02x", $0) }.joined()
 
-        // Write to file
-        do {
-            try FileManager.default.createDirectory(at: agentDeckDir, withIntermediateDirectories: true)
-            try (token + "\n").write(to: tokenFile, atomically: true, encoding: .utf8)
-            // Set file permissions to 0600
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: tokenFile.path
-            )
-            DaemonLogger.shared.debug("auth", "Generated new auth token")
-        } catch {
-            DaemonLogger.shared.error("Failed to write token file: \(error)")
+        // Write fire-and-forget on a background queue; if it hangs the
+        // next launch will hit the timeout path again and stay
+        // functional rather than freezing the daemon.
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try FileManager.default.createDirectory(at: agentDeckDir, withIntermediateDirectories: true)
+                try (token + "\n").write(to: tokenFile, atomically: true, encoding: .utf8)
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: tokenFile.path
+                )
+                DaemonLogger.shared.debug("auth", "Generated new auth token")
+            } catch {
+                DaemonLogger.shared.error("Failed to write token file: \(error)")
+            }
         }
 
         return token
@@ -94,7 +124,7 @@ final class AuthManager: Sendable {
             var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             if getnameinfo(ptr.pointee.ifa_addr, socklen_t(addr.sa_len),
                            &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
-                let ip = String(cString: hostname)
+                let ip = Self.hostnameString(from: hostname)
                 if !ip.hasPrefix("169.254.") { return ip } // Skip link-local
             }
         }
@@ -113,7 +143,7 @@ final class AuthManager: Sendable {
             var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             if getnameinfo(ptr.pointee.ifa_addr, socklen_t(addr.sa_len),
                            &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
-                result.insert(String(cString: hostname))
+                result.insert(Self.hostnameString(from: hostname))
             }
         }
         return result
@@ -122,6 +152,23 @@ final class AuthManager: Sendable {
     func getWsUrl(port: Int) -> String {
         let ip = Self.getLanIP() ?? "127.0.0.1"
         return "ws://\(ip):\(port)?token=\(cachedToken)"
+    }
+}
+
+private final class AuthTokenReadBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+
+    func set(_ value: String) {
+        lock.lock()
+        self.value = value
+        lock.unlock()
+    }
+
+    func get() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
     }
 }
 #endif

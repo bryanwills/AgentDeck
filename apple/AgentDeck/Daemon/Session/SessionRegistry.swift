@@ -40,6 +40,23 @@ actor SessionProbeFailureTracker {
     }
 }
 
+private final class RegistryIOBox<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: T?
+
+    func set(_ value: T?) {
+        lock.lock()
+        self.value = value
+        lock.unlock()
+    }
+
+    func get() -> T? {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
 struct DaemonInfo: Codable, Sendable {
     let port: Int
     let pid: Int
@@ -71,6 +88,8 @@ final class SessionRegistry: Sendable {
     static let defaultPort = 9120
     static let basePort = 9120
     static let maxPort = 9139
+    private static let ioQueue = DispatchQueue(label: "dev.agentdeck.registry.io", qos: .utility)
+    private static let readTimeout: DispatchTimeInterval = .milliseconds(700)
 
     /// Per-port consecutive health-probe failure counter. Shared across the
     /// SessionRegistry singleton so repeated calls to `listActiveAndReachable()`
@@ -91,7 +110,7 @@ final class SessionRegistry: Sendable {
     // MARK: - Sessions
 
     func readSessions() -> [DaemonSessionEntry] {
-        guard let data = try? Data(contentsOf: sessionsFile),
+        guard let data = readDataBounded(from: sessionsFile),
               let sessions = try? JSONDecoder().decode([DaemonSessionEntry].self, from: data) else {
             return []
         }
@@ -99,12 +118,8 @@ final class SessionRegistry: Sendable {
     }
 
     private func writeSessions(_ sessions: [DaemonSessionEntry]) {
-        try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
-        let tmpFile = dataDir.appendingPathComponent(".sessions.\(UUID().uuidString).tmp")
-        if let data = try? JSONEncoder.pretty.encode(sessions) {
-            try? data.write(to: tmpFile)
-            replaceFile(at: sessionsFile, with: tmpFile)
-        }
+        guard let data = try? JSONEncoder.pretty.encode(sessions) else { return }
+        writeDataBestEffort(data, to: sessionsFile, tmpPrefix: ".sessions")
     }
 
     func register(_ entry: DaemonSessionEntry) {
@@ -211,21 +226,20 @@ final class SessionRegistry: Sendable {
     // MARK: - Daemon Info
 
     func writeDaemonInfo(_ info: DaemonInfo) {
-        try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
-        let tmpFile = dataDir.appendingPathComponent(".daemon.\(UUID().uuidString).tmp")
-        if let data = try? JSONEncoder.pretty.encode(info) {
-            try? data.write(to: tmpFile)
-            replaceFile(at: daemonFile, with: tmpFile)
-        }
+        guard let data = try? JSONEncoder.pretty.encode(info) else { return }
+        writeDataBestEffort(data, to: daemonFile, tmpPrefix: ".daemon")
         DaemonLogger.shared.debug("SessionRegistry", "Wrote daemon.json: port=\(info.port)")
     }
 
     func removeDaemonInfo() {
-        try? FileManager.default.removeItem(at: daemonFile)
+        let daemonFile = daemonFile
+        Self.ioQueue.async {
+            try? FileManager.default.removeItem(at: daemonFile)
+        }
     }
 
     func readDaemonInfo() -> DaemonInfo? {
-        guard let data = try? Data(contentsOf: daemonFile),
+        guard let data = readDataBounded(from: daemonFile),
               let info = try? JSONDecoder().decode(DaemonInfo.self, from: data) else {
             return nil
         }
@@ -338,6 +352,30 @@ final class SessionRegistry: Sendable {
         // another REUSEADDR socket already owns the listen slot, then NWListener
         // loses the race and fails with EADDRINUSE.
         return listen(fd, 1) == 0
+    }
+
+    private func readDataBounded(from url: URL) -> Data? {
+        let box = RegistryIOBox<Data>()
+        let semaphore = DispatchSemaphore(value: 0)
+        Self.ioQueue.async {
+            box.set(try? Data(contentsOf: url))
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + Self.readTimeout) == .success else {
+            DaemonLogger.shared.debug("SessionRegistry", "Timed out reading \(url.lastPathComponent); treating as absent")
+            return nil
+        }
+        return box.get()
+    }
+
+    private func writeDataBestEffort(_ data: Data, to destination: URL, tmpPrefix: String) {
+        let dataDir = dataDir
+        Self.ioQueue.async {
+            try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+            let tmpFile = dataDir.appendingPathComponent("\(tmpPrefix).\(UUID().uuidString).tmp")
+            try? data.write(to: tmpFile)
+            self.replaceFile(at: destination, with: tmpFile)
+        }
     }
 
     private func replaceFile(at destination: URL, with source: URL) {

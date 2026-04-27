@@ -18,11 +18,14 @@
 //     home; outside sandbox it's the real home) — both work for unsigned runs.
 //
 // Migration: Users who were on a pre-Group-Container build have data in
-// `~/.agentdeck/`. On first launch after upgrading, `migrateLegacyDataIfNeeded()`
-// copies those files into the Group Container *while the legacy entitlement
-// exception is still present*. A future App Store release removes that
-// exception entirely and the migration stops finding the source directory —
-// by then the copy is already done.
+// `~/.agentdeck/`. `migrateLegacyDataIfNeeded()` was intended to copy those
+// files into the Group Container *while the legacy entitlement exception was
+// still present*. That exception was removed on 2026-04-17, so the shipped
+// App Store binary can no longer read the legacy directory — `stat(2)` still
+// reports it as existing across the sandbox, but `contentsOfDirectory` throws
+// NSCocoaErrorDomain 257. The migration therefore short-circuits under
+// `AgentDeckRuntime.isSandboxed` and remains functional only for unsandboxed
+// dev builds / xctest.
 
 import Foundation
 
@@ -93,6 +96,13 @@ enum AgentDeckPaths {
     /// entitlement so the source is unreadable), returns immediately.
     @discardableResult
     static func migrateLegacyDataIfNeeded() -> Int {
+        // Sandboxed App Store builds cannot read `~/.agentdeck/` — the
+        // home-relative-path entitlement was removed on 2026-04-17, so
+        // `contentsOfDirectory` will always throw NSCocoaErrorDomain 257 here.
+        // `fileExists` returns true via cross-container stat(2), so we can't
+        // rely on it to early-exit. Skip explicitly to avoid logging a
+        // recurring failure on every launch.
+        guard !AgentDeckRuntime.isSandboxed else { return 0 }
         guard let legacy = legacyRealHomeDirectory else { return 0 }
         let fm = FileManager.default
         guard fm.fileExists(atPath: legacy.path) else { return 0 }

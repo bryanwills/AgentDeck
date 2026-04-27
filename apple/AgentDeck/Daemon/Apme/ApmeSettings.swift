@@ -85,6 +85,23 @@ private func stripChatSuffix(_ url: String) -> String {
     return s
 }
 
+private final class ApmeSettingsDataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data: Data?
+
+    func set(_ data: Data?) {
+        lock.lock()
+        self.data = data
+        lock.unlock()
+    }
+
+    func get() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+}
+
 // MARK: - Loader
 
 enum ApmeSettings {
@@ -98,10 +115,13 @@ enum ApmeSettings {
         return AgentDeckPaths.settingsJson.path
     }
 
+    private static let settingsReadQueue = DispatchQueue(label: "dev.agentdeck.apme-settings.read", qos: .utility)
+    private static let settingsReadTimeout: DispatchTimeInterval = .milliseconds(700)
+
     /// Load APME config from ~/.agentdeck/settings.json.
     /// Returns defaults on any failure — the daemon must keep booting.
     static func load() -> ApmeConfig {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: settingsPath)),
+        guard let data = readSettingsDataBounded(),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             return ApmeConfig()
@@ -149,7 +169,7 @@ enum ApmeSettings {
             return c.value
         }
         var cfg = LlmMlxConfig()
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: settingsPath)),
+        if let data = readSettingsDataBounded(),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
 
             if let llmMlx = (json["llm"] as? [String: Any])?["mlx"] as? [String: Any] {
@@ -181,6 +201,20 @@ enum ApmeSettings {
     /// Clear the 30s mlx config cache — used by tests or after a settings write.
     static func clearMlxCache() {
         mlxCache = nil
+    }
+
+    private static func readSettingsDataBounded() -> Data? {
+        let box = ApmeSettingsDataBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        let url = URL(fileURLWithPath: settingsPath)
+        settingsReadQueue.async {
+            box.set(try? Data(contentsOf: url))
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + settingsReadTimeout) == .success else {
+            return nil
+        }
+        return box.get()
     }
 
     /// Decide whether layer-2 (LLM judge) should run for this run.

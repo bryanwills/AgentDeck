@@ -31,6 +31,7 @@ actor DaemonTimelineStore {
     private let maxEntries = 200
     private let persistFile = AuthManager.agentDeckDir.appendingPathComponent("timeline.json")
     private var dirty = false
+    private static let ioQueue = DispatchQueue(label: "dev.agentdeck.timeline.io", qos: .utility)
 
     init() {
         // loadFromDisk is called after actor init via start()
@@ -41,8 +42,12 @@ actor DaemonTimelineStore {
     }
 
     func add(_ entry: DaemonTimelineEntry) {
-        // Exact dedup: same ts + type + raw within 5s
-        let recentWindow = entry.ts - 5000
+        // Exact dedup: same ts + type + raw within 8s.
+        // Window matches shared/src/timeline.ts deduplicateEntry — covers the
+        // PTY-fallback / Stop-hook race that can leak two identical chat_response
+        // entries when Claude Code's transcript flush lags spinner_stop by a few
+        // seconds.
+        let recentWindow = entry.ts - 8000
         if entries.last(where: { $0.ts > recentWindow && $0.type == entry.type && $0.raw == entry.raw }) != nil {
             return
         }
@@ -77,15 +82,43 @@ actor DaemonTimelineStore {
     func flush() {
         guard dirty else { return }
         if let data = try? JSONEncoder().encode(entries) {
-            try? data.write(to: persistFile)
+            let persistFile = persistFile
+            Self.ioQueue.async {
+                try? data.write(to: persistFile)
+            }
         }
         dirty = false
     }
 
     private func loadFromDisk() {
-        guard let data = try? Data(contentsOf: persistFile),
+        let box = TimelineDataBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        let persistFile = persistFile
+        Self.ioQueue.async {
+            box.set(try? Data(contentsOf: persistFile))
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + .milliseconds(700)) == .success,
+              let data = box.get(),
               let loaded = try? JSONDecoder().decode([DaemonTimelineEntry].self, from: data) else { return }
         entries = Array(loaded.suffix(maxEntries))
+    }
+}
+
+private final class TimelineDataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Data?
+
+    func set(_ value: Data?) {
+        lock.lock()
+        self.value = value
+        lock.unlock()
+    }
+
+    func get() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
     }
 }
 #endif

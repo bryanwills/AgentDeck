@@ -7,6 +7,23 @@ import SQLite3
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
+private final class UsageCacheDataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data: Data?
+
+    func set(_ data: Data?) {
+        lock.lock()
+        self.data = data
+        lock.unlock()
+    }
+
+    func get() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+}
+
 struct ApiUsageData: Sendable {
     var fiveHourPercent: Double?
     var fiveHourResetsAt: String?
@@ -50,6 +67,8 @@ final class UsageAPIClient: Sendable {
     private static let cacheFile = AuthManager.agentDeckDir.appendingPathComponent("usage-cache.json")
     private static let fileCacheTTL: TimeInterval = 120  // seconds
     private static let tokenExpiryMargin: TimeInterval = 600  // 10 minutes
+    private static let cacheIOQueue = DispatchQueue(label: "dev.agentdeck.usage.cache-io", qos: .utility)
+    private static let cacheReadTimeout: DispatchTimeInterval = .milliseconds(700)
 
     /// Real home directory, resolved once at process start via the reentrant
     /// `getpwuid_r`. The non-reentrant `getpwuid` returns a pointer into a
@@ -580,7 +599,7 @@ final class UsageAPIClient: Sendable {
     }
 
     private func readFileCache() -> (data: ApiUsageData, fetchedAt: Double)? {
-        guard let data = try? Data(contentsOf: Self.cacheFile),
+        guard let data = readCacheDataBounded(),
               let cache = try? JSONDecoder().decode(CacheFile.self, from: data) else { return nil }
         // Auto-detect ms vs s: Node.js bridge writes Date.now() (ms), Swift writes timeIntervalSince1970 (s)
         let fetchedAt = cache.fetchedAt > 1e12 ? cache.fetchedAt / 1000.0 : cache.fetchedAt
@@ -599,6 +618,20 @@ final class UsageAPIClient: Sendable {
         return (usage, fetchedAt)
     }
 
+    private func readCacheDataBounded() -> Data? {
+        let box = UsageCacheDataBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        Self.cacheIOQueue.async {
+            box.set(try? Data(contentsOf: Self.cacheFile))
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + Self.cacheReadTimeout) == .success else {
+            DaemonLogger.shared.debug("UsageAPI", "File cache read timed out; skipping cache")
+            return nil
+        }
+        return box.get()
+    }
+
     private func writeFileCache(_ usage: ApiUsageData) {
         let cache = CacheFile(
             data: CacheFile.CodableUsage(
@@ -614,7 +647,9 @@ final class UsageAPIClient: Sendable {
             fetchedAt: Date().timeIntervalSince1970
         )
         if let data = try? JSONEncoder().encode(cache) {
-            try? data.write(to: Self.cacheFile)
+            Self.cacheIOQueue.async {
+                try? data.write(to: Self.cacheFile)
+            }
         }
     }
 

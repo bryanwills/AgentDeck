@@ -11,13 +11,33 @@ final class DaemonLogger: @unchecked Sendable {
     private let stateLock = NSLock()
     private var throttledKeys: [String: Date] = [:]
     private var sampledCounters: [String: Int] = [:]
+    private let fileWriteQueue = DispatchQueue(label: "dev.agentdeck.daemon.file-log", qos: .utility)
+    private let fileWriteLock = NSLock()
+    private var fileWriteInFlight = false
+    private let fileReadQueue = DispatchQueue(label: "dev.agentdeck.daemon.file-log-read", qos: .utility)
 
     private let osLog = os.Logger(subsystem: "dev.agentdeck.daemon", category: "daemon")
     private let logFile: URL = AgentDeckPaths.swiftDaemonLog
 
     private func writeToFile(_ line: String) {
         let entry = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n"
-        if let data = entry.data(using: .utf8) {
+        guard let data = entry.data(using: .utf8) else { return }
+
+        fileWriteLock.lock()
+        guard !fileWriteInFlight else {
+            fileWriteLock.unlock()
+            return
+        }
+        fileWriteInFlight = true
+        fileWriteLock.unlock()
+
+        fileWriteQueue.async { [data, logFile] in
+            defer {
+                self.fileWriteLock.lock()
+                self.fileWriteInFlight = false
+                self.fileWriteLock.unlock()
+            }
+
             if let fh = try? FileHandle(forWritingTo: logFile) {
                 fh.seekToEndOfFile()
                 fh.write(data)
@@ -77,10 +97,34 @@ final class DaemonLogger: @unchecked Sendable {
     }
 
     func recentLines(limit: Int = 200) -> [String] {
-        guard let text = try? String(contentsOf: logFile, encoding: .utf8) else { return [] }
+        let box = DaemonLogReadBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        fileReadQueue.async { [logFile] in
+            box.set(try? String(contentsOf: logFile, encoding: .utf8))
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + .milliseconds(500)) == .success,
+              let text = box.get() else { return [] }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
         guard lines.count > limit else { return lines }
         return Array(lines.suffix(limit))
+    }
+}
+
+private final class DaemonLogReadBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+
+    func set(_ value: String?) {
+        lock.lock()
+        self.value = value
+        lock.unlock()
+    }
+
+    func get() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
     }
 }
 #endif

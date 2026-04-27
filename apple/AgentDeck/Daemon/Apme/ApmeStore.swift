@@ -13,13 +13,33 @@ final class ApmeStore: @unchecked Sendable {
     private var db: OpaquePointer?
     let dbPath: String
     private(set) var isOpen = false
+    private static let openQueue = DispatchQueue(label: "dev.agentdeck.apme.open", qos: .utility)
 
     init() {
         dbPath = AuthManager.agentDeckDir
             .appendingPathComponent("apme.sqlite").path
     }
 
+    deinit {
+        close()
+    }
+
     // MARK: - Open / Close
+
+    func openWithTimeout(seconds: TimeInterval = 2) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let gate = ApmeOpenContinuationGate()
+            Self.openQueue.async {
+                gate.resume(continuation, self.open())
+            }
+            let dbPath = self.dbPath
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + seconds) {
+                if gate.resume(continuation, false) {
+                    DaemonLogger.shared.error("APME store open timed out: \(dbPath)")
+                }
+            }
+        }
+    }
 
     func open() -> Bool {
         guard db == nil else { return true }
@@ -1187,5 +1207,23 @@ struct ApmeTask {
     var compositeScore: Double?
     var taskCategory: String?
     var notesJson: String?
+}
+
+private final class ApmeOpenContinuationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    @discardableResult
+    func resume(_ continuation: CheckedContinuation<Bool, Never>, _ value: Bool) -> Bool {
+        lock.lock()
+        guard !didResume else {
+            lock.unlock()
+            return false
+        }
+        didResume = true
+        lock.unlock()
+        continuation.resume(returning: value)
+        return true
+    }
 }
 #endif

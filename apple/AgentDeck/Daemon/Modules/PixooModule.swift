@@ -4,10 +4,27 @@
 
 import Foundation
 
-struct PixooDevice: Codable {
+struct PixooDevice: Codable, Equatable {
     let ip: String
     var name: String?
     var brightness: Int?
+}
+
+private final class PixooSettingsDataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data: Data?
+
+    func set(_ data: Data?) {
+        lock.lock()
+        self.data = data
+        lock.unlock()
+    }
+
+    func get() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
 }
 
 actor PixooModule: DeviceModule {
@@ -63,12 +80,14 @@ actor PixooModule: DeviceModule {
     private var devices: [PixooDevice] = []
     private var renderTask: Task<Void, Never>?
     private var probeTask: Task<Void, Never>?
+    private var settingsReloadTask: Task<Void, Never>?
 
     // Circuit breaker — matches Node.js bridge (pixoo-client.ts)
     private let backoffThreshold = 6
     private let backoffInitialSec: TimeInterval = 5
     private let backoffMaxSec: TimeInterval = 60
     private let probeIntervalSec: TimeInterval = 10
+    private let settingsReloadIntervalSec: TimeInterval = 5
     private var lastPushError: String?
     private var lastPushAt: Date?
     private var devicePicIds: [String: Int] = [:]
@@ -85,22 +104,15 @@ actor PixooModule: DeviceModule {
     }
 
     func start() async {
-        devices = Self.loadDevices()
-        guard !devices.isEmpty else {
-            DaemonLogger.shared.debug("Pixoo", "No devices configured, skipping")
-            return
-        }
+        await reloadDevicesFromSettings(reason: "startup", force: true)
 
-        DaemonLogger.shared.info("Pixoo module started with \(devices.count) device(s)")
-        for device in devices {
-            await prepareDevice(device)
-        }
-
-        // Capture immutable interval into the probe Task so the unstructured
-        // closure doesn't need to hop back onto the actor just to read a let.
+        // Capture immutable intervals into Tasks so the unstructured closures
+        // don't need to hop back onto the actor just to read a let.
         let probeInterval = probeIntervalSec
+        let settingsReloadInterval = settingsReloadIntervalSec
 
-        // Start render loop — push frames at ~3 FPS
+        // Start render loop — render continuously so `/pixoo/frame` has a
+        // current preview as soon as settings hot-reload adds a device.
         renderTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(333))
@@ -116,6 +128,17 @@ actor PixooModule: DeviceModule {
             }
         }
 
+        // Settings can be edited from the dashboard while the daemon is
+        // already running. Keep Pixoo alive even when startup had zero
+        // configured devices, otherwise the UI reports a ghost offline device
+        // until a manual restart.
+        settingsReloadTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(settingsReloadInterval))
+                await self?.reloadDevicesFromSettings(reason: "settings reload")
+            }
+        }
+
         refreshShadow()
     }
 
@@ -128,6 +151,9 @@ actor PixooModule: DeviceModule {
         probeTask?.cancel()
         await probeTask?.value
         probeTask = nil
+        settingsReloadTask?.cancel()
+        await settingsReloadTask?.value
+        settingsReloadTask = nil
         renderTask?.cancel()
         await renderTask?.value
         renderTask = nil
@@ -163,6 +189,7 @@ actor PixooModule: DeviceModule {
     }
 
     func handleWake() async {
+        await reloadDevicesFromSettings(reason: "wake")
         DaemonLogger.shared.info("Pixoo wake recovery — clearing PicID cache for \(devices.count) device(s)")
         devicePicIds.removeAll()
         deviceLogStates.removeAll()
@@ -412,14 +439,63 @@ actor PixooModule: DeviceModule {
     // MARK: - Settings
 
     private static let settingsFile = AuthManager.agentDeckDir.appendingPathComponent("settings.json")
+    private static let settingsReadQueue = DispatchQueue(label: "dev.agentdeck.pixoo.settings-read", qos: .utility)
+    private static let settingsReadTimeout: DispatchTimeInterval = .milliseconds(700)
+
+    private func reloadDevicesFromSettings(reason: String, force: Bool = false) async {
+        let latest = Self.loadDevices()
+        guard force || latest != devices else { return }
+
+        var previousByIP: [String: PixooDevice] = [:]
+        for device in devices {
+            previousByIP[device.ip] = device
+        }
+        let previousIPs = Set(devices.map(\.ip))
+        let latestIPs = Set(latest.map(\.ip))
+
+        devices = latest
+        lastPushError = nil
+
+        for removedIP in previousIPs.subtracting(latestIPs) {
+            devicePicIds.removeValue(forKey: removedIP)
+            deviceLogStates.removeValue(forKey: removedIP)
+        }
+
+        if devices.isEmpty {
+            shadow.writeFrame(nil)
+            DaemonLogger.shared.debug("Pixoo", "No devices configured; watching settings.json for changes")
+            refreshShadow()
+            return
+        }
+
+        let ipList = devices.map(\.ip).joined(separator: ", ")
+        DaemonLogger.shared.info("Pixoo \(reason): \(devices.count) configured device(s) [\(ipList)]")
+        for device in devices where force || previousByIP[device.ip] != device {
+            await prepareDevice(device)
+        }
+        refreshShadow()
+    }
 
     static func loadDevices() -> [PixooDevice] {
-        guard let data = try? Data(contentsOf: settingsFile),
+        let box = PixooSettingsDataBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        settingsReadQueue.async {
+            box.set(try? Data(contentsOf: settingsFile))
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + settingsReadTimeout) == .success else {
+            DaemonLogger.shared.debug("Pixoo", "Settings read timed out; treating as no configured devices")
+            return []
+        }
+
+        guard let data = box.get(),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let pixooArray = json["pixooDevices"] as? [[String: Any]] else { return [] }
 
         return pixooArray.compactMap { d in
-            guard let ip = d["ip"] as? String else { return nil }
+            guard let rawIP = d["ip"] as? String else { return nil }
+            let ip = rawIP.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !ip.isEmpty else { return nil }
             return PixooDevice(ip: ip, name: d["name"] as? String, brightness: d["brightness"] as? Int)
         }
     }
