@@ -35,7 +35,11 @@ import serial
 import sys
 import time
 
-patterns = ['/dev/cu.usbserial-*', '/dev/cu.usbmodem*'] if platform.system() == 'Darwin' else ['/dev/ttyUSB*', '/dev/ttyACM*']
+patterns = [
+    '/dev/cu.usbserial-*',
+    '/dev/cu.wchusbserial*',
+    '/dev/cu.usbmodem*',
+] if platform.system() == 'Darwin' else ['/dev/ttyUSB*', '/dev/ttyACM*']
 exclude = re.compile(r'Bluetooth|WLAN|debug', re.IGNORECASE)
 found = []
 for pattern in patterns:
@@ -118,7 +122,8 @@ ENV="${1:-auto}"
 PORT="${2:-}"
 
 if [ "$ENV" = "auto" ]; then
-    read -r ENV PORT <<< "$(pick_auto_board)"
+    AUTO_MATCH="$(pick_auto_board)"
+    read -r ENV PORT <<< "$AUTO_MATCH"
     echo "Detected running board via device_info_request: env=$ENV port=$PORT"
 else
     validate_env "$ENV"
