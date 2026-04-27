@@ -134,7 +134,7 @@ describe('BridgeTimelineStore', () => {
 // ─── Deduplication pipeline ─────────────────────────────────────────
 
 describe('deduplicateEntry pipeline', () => {
-  it('exact duplicate within 5s → skip', () => {
+  it('exact duplicate within 8s → skip', () => {
     const now = Date.now() / 1000;
     const entries = [makeEntry({ ts: now, type: 'tool_request', raw: 'Read /foo.ts' })];
 
@@ -168,6 +168,81 @@ describe('deduplicateEntry pipeline', () => {
     );
 
     expect(result.action).toBe('add');
+  });
+
+  it('chat_response identical raw 6s apart → skip (PTY/Stop race)', () => {
+    // Regression: Stop hook arriving >5s after PTY fallback used to slip past
+    // the old 5s exact-dedup window, producing two identical chat_response
+    // lines on the dashboard. Window was widened to 8s.
+    const now = Date.now();
+    const entries = [
+      makeEntry({ ts: now, type: 'chat_response', raw: 'GUI freeze 해소 - AuthManager fix 작동' }),
+    ];
+
+    const result = deduplicateEntry(
+      makeEntry({ ts: now + 6000, type: 'chat_response', raw: 'GUI freeze 해소 - AuthManager fix 작동' }),
+      entries,
+    );
+
+    expect(result.action).toBe('skip');
+  });
+
+  it('chat_response near-duplicate beyond 8s → repetitive merge', () => {
+    // When PTY ringbuffer text and transcript JSONL produce SLIGHTLY different
+    // raws (markdown markers / whitespace) and arrive >8s apart, exact dedup
+    // misses but repetitive dedup (1h window, 60% keyword overlap) catches it.
+    const now = Date.now();
+    const entries = [
+      makeEntry({ ts: now, type: 'chat_response', raw: 'Refactored auth flow and added unit tests for login.' }),
+    ];
+
+    const result = deduplicateEntry(
+      makeEntry({
+        ts: now + 12_000,
+        type: 'chat_response',
+        raw: 'Refactored auth flow and added unit tests for login.',
+      }),
+      entries,
+    );
+
+    // Same content beyond exact window → repetitive dedup merges
+    expect(result.action).toBe('merge');
+  });
+});
+
+// ─── Stop hook + PTY fallback race regression ──────────────────────
+
+describe('Stop hook + PTY fallback double-emit (regression)', () => {
+  it('identical chat_response from two emit paths is collapsed by store', () => {
+    const store = new BridgeTimelineStore();
+    const t0 = Date.now();
+
+    // turn boundary
+    store.addEntry(makeEntry({ ts: t0, type: 'chat_start', raw: 'Prompt' }));
+
+    // PTY fallback emits at t0+1500ms
+    store.addEntry(makeEntry({
+      ts: t0 + 1500,
+      type: 'chat_response',
+      raw: '커밋 완료. 남은 미커밋 변경은 모두 세션 시작 전부터 존재하던 것',
+    }));
+    store.addEntry(makeEntry({ ts: t0 + 1501, type: 'chat_end', raw: 'Refactor · 3s' }));
+
+    // Stop hook arrives 6s late with identical response text
+    store.addEntry(makeEntry({
+      ts: t0 + 7500,
+      type: 'chat_response',
+      raw: '커밋 완료. 남은 미커밋 변경은 모두 세션 시작 전부터 존재하던 것',
+    }));
+    // chat_end with different duration tag — repetitive dedup must merge it
+    store.addEntry(makeEntry({ ts: t0 + 7501, type: 'chat_end', raw: 'Refactor · 9s' }));
+
+    const all = store.getHistory();
+    const responses = all.filter((e) => e.type === 'chat_response');
+    const ends = all.filter((e) => e.type === 'chat_end');
+
+    expect(responses).toHaveLength(1);
+    expect(ends).toHaveLength(1);
   });
 });
 

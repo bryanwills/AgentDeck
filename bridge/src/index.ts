@@ -44,6 +44,7 @@ import { fetchUsageFromApi, hasOAuthToken } from './usage-api.js';
 import { buildUsageEvent } from './usage-event.js';
 import { getLanIp } from '@agentdeck/shared';
 import { buildEnrichedSessionsList } from './session-aggregator.js';
+import { migrateHooksIfNeeded } from './hook-migration.js';
 import {
   initModules,
   stopModules,
@@ -1573,10 +1574,19 @@ function wireClaudeCodeTimeline(
         break;
       }
       case 'Stop': {
+        // Race guard: if ccPendingCompletion is already false, the PTY fallback
+        // timer fired first (Stop hook arrived >1.5s after spinner_stop) and
+        // already emitted chat_response/chat_end. Skipping here prevents the
+        // duplicate-line bug visible on the dashboard timeline.
+        const wasPending = ccPendingCompletion;
         ccPendingCompletion = false;  // Change 2: disarm PTY fallback — hook handled it
         if (ccPendingCompletionTimer) {
           clearTimeout(ccPendingCompletionTimer);
           ccPendingCompletionTimer = null;
+        }
+        if (!wasPending) {
+          debug('timeline', 'CC Stop hook arrived after PTY fallback emit — skipping duplicate');
+          break;
         }
         if (ccPendingChatStart) emitChatStart('');
         const duration = ccChatStart ? Math.round((now - ccChatStart) / 1000) : null;
@@ -1644,7 +1654,3 @@ function handleVoiceCommand(
       break;
   }
 }
-
-// ===== Hook migration =====
-
-import { migrateHooksIfNeeded } from '@agentdeck/hooks';

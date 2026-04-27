@@ -7,9 +7,22 @@ struct TimelineStripView: View {
 
     @State private var focusedIndex: Int = -1
 
-    /// Read grouped entries — triggers re-render via timelineVersion observation
+    /// Read grouped entries — triggers re-render via timelineVersion observation.
+    ///
+    /// The Claude Code daemon path emits chat_response (the assistant's
+    /// reply text) AND chat_end (a "Completed · Ns · topic" metadata
+    /// marker) for every turn so that downstream surfaces — Pixoo, D200H,
+    /// Stream Deck plugin, APME — can detect the turn boundary. On the
+    /// dashboard's compact timeline panel that second row reads as "한 줄
+    /// 더" beneath the assistant's conclusion, since the row immediately
+    /// above it already conveys the same turn's completion. Hide the
+    /// chat_end here so each turn occupies one row in this view; the
+    /// daemon still persists/broadcasts the entry, so the focusedGroup
+    /// detail pane and other surfaces are unaffected.
     private var grouped: [GroupedEntry] {
-        stateHolder.timelineStore.grouped
+        stateHolder.timelineStore.grouped.filter { g in
+            !(g.entry.type == .chatEnd && g.entry.agentType == "claude-code")
+        }
     }
 
     /// Accessed in body to register SwiftUI observation on timeline changes
@@ -26,8 +39,12 @@ struct TimelineStripView: View {
     var body: some View {
         GeometryReader { geo in
             VStack(spacing: 0) {
-                // Main content: two-pane row (65/35 split)
-                HStack(spacing: 0) {
+                // Main content: two-pane row (65/35 split). Use top
+                // alignment so an empty timeline column (just "TIMELINE"
+                // header + "No events yet") does not get vertically
+                // centered against the taller detail pane on the right —
+                // that produced a "title floats in the middle" look.
+                HStack(alignment: .top, spacing: 0) {
                     // Left pane: compact log scroll (65%)
                     VStack(spacing: 0) {
                         // Header — timelineVersion read forces @Observable re-evaluation

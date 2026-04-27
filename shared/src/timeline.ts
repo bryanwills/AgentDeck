@@ -232,7 +232,14 @@ export function isRepetitiveEntry(
   recentEntries: readonly TimelineEntry[],
   windowMs = 3_600_000,
 ): number {
-  if (entry.type !== 'chat_end' && entry.type !== 'chat_start' && entry.type !== 'error') return -1;
+  if (
+    entry.type !== 'chat_end' &&
+    entry.type !== 'chat_start' &&
+    entry.type !== 'error' &&
+    entry.type !== 'chat_response'
+  ) {
+    return -1;
+  }
 
   // Automated entries (cron/channel-initiated): 8h window, any automated pair is a dupe
   const effectiveWindowMs = entry.automated ? 8 * 3_600_000 : windowMs;
@@ -256,8 +263,12 @@ export function isRepetitiveEntry(
 
 /**
  * Shared dedup pipeline for timeline stores.
- * Cleans text, checks exact dedup (5s), and repetitive dedup (1h).
+ * Cleans text, checks exact dedup (8s), and repetitive dedup (1h).
  * Returns: 'skip' (duplicate), 'merge' + index (repetitive), or 'add' (new).
+ *
+ * Window rationale: PTY fallback fires 1.5s after spinner_stop; Stop hook can
+ * arrive several seconds later if Claude Code's transcript_path JSONL flush is
+ * slow. 8s covers worst-case race without merging genuinely separate turns.
  */
 export type DeduplicateResult =
   | { action: 'skip' }
@@ -272,10 +283,10 @@ export function deduplicateEntry(
   if (entry.raw) entry = { ...entry, raw: cleanNopMarkers(cleanRawText(entry.raw)) };
   if (entry.detail) entry = { ...entry, detail: cleanNopMarkers(entry.detail) };
 
-  // 2. Exact dedup: skip if same type + raw within 5 seconds
+  // 2. Exact dedup: skip if same type + raw within 8 seconds
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
-    if (entry.ts - e.ts > 5_000) break;
+    if (entry.ts - e.ts > 8_000) break;
     if (e.type === entry.type && e.raw === entry.raw) return { action: 'skip' };
   }
 
