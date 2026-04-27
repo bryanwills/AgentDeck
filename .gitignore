@@ -14,6 +14,10 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Xcode user-specific state (window/editor state, breakpoints, schemes)
+**/xcuserdata/
+*.xcuserstate
+
 # Logs
 *.log
 
