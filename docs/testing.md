@@ -136,7 +136,7 @@ pnpm vitest run --coverage       # Terminal summary + lcov + json-summary
 - **State Machine** — transitions, timeouts, permission/option/diff flows, billing detection
 - **Output Parser** — ANSI parsing, mode detection, spinner events, cursor sync
 - **Adapter Hierarchy** — factory, ClaudeCode/OpenClaw/Monitor capabilities, Gateway protocol, lifecycle events
-- **Timeline** — `parseLogLine()`, `cleanDetailText()`, semantic dedup, keyword similarity, groupConsecutive
+- **Timeline** — `parseLogLine()` (structured patterns only — heuristic word-match retired in `8c3a4278`), `cleanDetailText()`, semantic dedup, keyword similarity, groupConsecutive
 - **Connection Manager** — Bridge/Gateway priority, failover, event forwarding
 - **Hook Installation** — v2.1+ matcher-group format, migration, idempotency
 - **Android Protocol** — all BridgeEvent types parsed, PluginCommands JSON generation

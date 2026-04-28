@@ -55,12 +55,12 @@ OpenClaw 세션 상세 뷰(detail view) 진입 시 E2+E3 합체 400px 와이드 
 ### 시각 3계층
 
 1. `typeColor()` 이벤트 타입별 컬러 코딩 (green/blue/amber/red/cyan/purple), 하단 2px 활동 밀도 바
-2. `bridge/src/log-stream.ts` — daemon에서 `openclaw logs --follow --json` 파싱으로 model_call/model_response/memory_recall/tool_exec 이벤트 추가, WS tool_request와 dedup
+2. **Gateway 어댑터가 단일 source** — `bridge/src/adapters/openclaw.ts`가 RPC 이벤트(`chat`/`tool.*`/`error`)를 직접 timeline entry로 변환. 과거 `log-stream.ts`의 `openclaw logs --follow --json` 휴리스틱 파싱 경로는 중복/오분류(`memory|recall|search` / `tool|exec|execute|command` 광범위 regex가 무관 로그를 fake event로 합성)를 일으켜 retire (커밋 `8c3a4278`). `BridgeLogStream`은 호환을 위해 no-op stub만 남음
 3. Usage 버튼 `oc-usage` 페이지 (`openclaw status --usage --json` 60s 폴링)
 
 ### Bridge→Android relay
 
-`shared/src/timeline.ts`에 `TimelineEntry` 타입 + `parseLogLine()` 공유. Bridge OpenClaw 모드에서 `BridgeTimelineStore` + `BridgeLogStream` → `timeline_event`/`timeline_history` BridgeEvent로 WS broadcast. Adapter가 chat tracking (prompt/duration/tools) → rich `chat_start`/`chat_end`/`tool_request`/`chat_response` 이벤트 생성. Android `StateTimelineGenerator`는 bridge timeline 수신 시 로컬 생성 억제 (`receivingBridgeTimeline` 플래그).
+`shared/src/timeline.ts`에 `TimelineEntry` 타입 + `parseLogLine()`(이제 `chat_message` / `error` / cron 요약 같은 **구조화된** 패턴만 인식; 휴리스틱 word-match는 제거됨) 공유. Bridge OpenClaw 모드에서 `BridgeTimelineStore` + Gateway 어댑터 → `timeline_event`/`timeline_history` BridgeEvent로 WS broadcast. Adapter가 chat tracking (prompt/duration/tools) → rich `chat_start`/`chat_end`/`tool_request`/`chat_response` 이벤트 생성. Android `StateTimelineGenerator`는 bridge timeline 수신 시 로컬 생성 억제 (`receivingBridgeTimeline` 플래그).
 
 ### Timeline enrichment pipeline
 
@@ -75,7 +75,7 @@ Bridge(daemon)에서만 요약 수행 — plugin은 daemon 경유 단일 경로.
 
 **Detail 클리닝**: `shared/src/timeline.ts`의 `cleanDetailText()` — markdown artifact(bold/heading/fence/link), JSON blob(connectionId 등 시스템 JSON 필터, error 추출), blank line 축소. OpenClaw adapter + Claude Code bridge에서 detail 저장 전 적용.
 
-**parseLogLine 필터 개선**: broad 키워드 필터(`/whatsapp/i`, `/WebSocket error/i`, `/network_error/i`) → subsystem/module 기반 필터(`isChannelInfra` 플래그)로 전환. 사용자가 WhatsApp API 작업 시 tool/error 로그가 필터되는 false-positive 방지.
+**parseLogLine 필터 개선** (역사적): broad 키워드 필터(`/whatsapp/i`, `/WebSocket error/i`, `/network_error/i`) → subsystem/module 기반 필터(`isChannelInfra` 플래그)로 전환. WhatsApp API 작업 시 tool/error 로그가 필터되는 false-positive 방지. `isChannelInfra` 분기는 `parseLogLine`에 남아 있지만, 휴리스틱 word-match로 fake `tool_exec`/`memory_recall`을 합성하던 코드는 `8c3a4278`에서 제거됐다.
 
 **Store-level repetitive dedup**: `isRepetitiveEntry()` (shared) — `extractSemanticCore()` (chat_end: 첫 ` · ` 이전) + `extractKeywords()` keyword bag 유사도 (60% overlap threshold). 일반 엔트리 1시간 윈도우, `automated: true` 엔트리 8시간 윈도우 (content 비교 없이 automated끼리 즉시 중복 판정). 반복 시 `repeatCount` 증가 + paired chat_start도 repetitive 검증 후 제거. `deduplicateEntry()` (shared) — 텍스트 정제 → exact dedup(5s) → semantic dedup 순서, Bridge + Plugin store 공용.
 

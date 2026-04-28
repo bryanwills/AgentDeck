@@ -214,7 +214,6 @@ AgentDeck/
 │   │   ├── gateway-client.ts     # Direct Gateway connection, Ed25519 auth
 │   │   ├── agent-link.ts         # AgentLink interface (send/isConnected/getCapabilities)
 │   │   ├── timeline-store.ts     # OC event store, grouping, disk persist, NOW marker
-│   │   ├── log-stream.ts         # openclaw logs --follow --json → timeline events
 │   │   ├── layout-manager.ts     # State-driven button/encoder layout
 │   │   ├── encoder-takeover.ts   # Encoder wide-canvas takeover (option/permission)
 │   │   ├── encoder-registry.ts   # String ID → action lookup (no stale references)
