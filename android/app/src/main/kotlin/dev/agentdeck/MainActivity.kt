@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.lifecycleScope
 import dev.agentdeck.data.DisplayPreferences
+import dev.agentdeck.data.DashboardOrientation
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.net.BridgeConstants
 import dev.agentdeck.net.ConnectionStatus
@@ -23,7 +24,6 @@ import dev.agentdeck.ui.screen.EinkMonitorScreen
 import dev.agentdeck.ui.theme.AgentDeckTheme
 import dev.agentdeck.util.EinkDetector
 import android.content.Intent
-import android.content.pm.ActivityInfo
 import android.provider.Settings
 import android.util.Log
 import android.view.Surface
@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
         // Pantone 6 (RK3566) ignores late requestedOrientation changes,
         // so this must happen before the first frame renders.
         if (isEinkDevice) {
-            applyOrientationPreference(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+            applyOrientationPreference(DashboardOrientation.defaultFor(isEink = true))
 
             @Suppress("DEPRECATION")
             window.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN)
@@ -120,14 +120,14 @@ class MainActivity : ComponentActivity() {
      * Auto-requests WRITE_SETTINGS permission if not granted (lost on APK reinstall).
      */
     private fun applyOrientationPreference(orientation: Int) {
-        requestedOrientation = orientation
+        requestedOrientation = DashboardOrientation.requestedActivityOrientation(orientation)
 
         if (!isEinkDevice) return
 
-        when (orientation) {
-            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE -> applySystemFixedRotation(Surface.ROTATION_90)
-            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT -> applySystemFixedRotation(Surface.ROTATION_0)
-            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED -> applySystemAutoRotation()
+        when {
+            orientation == DashboardOrientation.Landscape -> applySystemFixedRotation(Surface.ROTATION_90)
+            orientation == DashboardOrientation.Portrait -> applySystemFixedRotation(Surface.ROTATION_0)
+            DashboardOrientation.isAuto(orientation) -> applySystemAutoRotation()
             else -> Log.w(TAG, "Unsupported orientation preference: $orientation")
         }
     }

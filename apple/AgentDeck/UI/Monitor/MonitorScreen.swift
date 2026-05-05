@@ -273,18 +273,28 @@ struct MonitorScreen: View {
 
     @ViewBuilder
     private var settingsLayer: some View {
+        #if os(iOS)
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                rotationButton
+                if preferences.showSettingsButton {
+                    settingsGearButton
+                }
+            }
+        }
+        #else
         if preferences.showSettingsButton {
             VStack {
                 Spacer()
                 HStack {
                     Spacer()
-                    #if os(iOS)
-                    rotationButton
-                    #endif
                     settingsGearButton
                 }
             }
         }
+        #endif
     }
 
     /// Gear icon that opens Settings. Routes through `openWindow(id:)`

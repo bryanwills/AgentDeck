@@ -1,6 +1,5 @@
 package dev.agentdeck.ui.eink
 
-import android.content.pm.ActivityInfo
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import dev.agentdeck.data.DashboardOrientation
 import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.net.BridgeConstants
@@ -54,7 +54,7 @@ fun EinkSettingsOverlay(
     val currentUrl by connection.url.collectAsState()
     val lastError by connection.lastError.collectAsState()
     val currentOrientation by displayPrefs.orientationFlow.collectAsState(
-        initial = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        initial = DashboardOrientation.defaultFor(isEink = true)
     )
     val keepAwake by displayPrefs.keepAwakeFlow.collectAsState(initial = true)
     val displaySyncEnabled by displayPrefs.displaySyncEnabledFlow.collectAsState(initial = true)
@@ -223,25 +223,25 @@ fun EinkSettingsOverlay(
                 ) {
                     SegmentOption(
                         label = "Portrait",
-                        selected = currentOrientation == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                        selected = currentOrientation == DashboardOrientation.Portrait,
                         onClick = {
-                            scope.launch { displayPrefs.setOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) }
+                            scope.launch { displayPrefs.setOrientation(DashboardOrientation.Portrait) }
                         },
                         modifier = Modifier.weight(1f),
                     )
                     SegmentOption(
                         label = "Landscape",
-                        selected = currentOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+                        selected = currentOrientation == DashboardOrientation.Landscape,
                         onClick = {
-                            scope.launch { displayPrefs.setOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) }
+                            scope.launch { displayPrefs.setOrientation(DashboardOrientation.Landscape) }
                         },
                         modifier = Modifier.weight(1f),
                     )
                     SegmentOption(
                         label = "Auto",
-                        selected = currentOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,
+                        selected = DashboardOrientation.isAuto(currentOrientation),
                         onClick = {
-                            scope.launch { displayPrefs.setOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) }
+                            scope.launch { displayPrefs.setOrientation(DashboardOrientation.Auto) }
                         },
                         modifier = Modifier.weight(1f),
                     )

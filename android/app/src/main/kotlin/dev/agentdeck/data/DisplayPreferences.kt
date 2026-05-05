@@ -1,7 +1,6 @@
 package dev.agentdeck.data
 
 import android.content.Context
-import android.content.pm.ActivityInfo
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -31,9 +30,7 @@ class DisplayPreferences(
     }
 
     val orientationFlow: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[ORIENTATION_KEY]
-            ?: if (isEink) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-               else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        prefs[ORIENTATION_KEY] ?: DashboardOrientation.defaultFor(isEink)
     }
 
     val keepAwakeFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->

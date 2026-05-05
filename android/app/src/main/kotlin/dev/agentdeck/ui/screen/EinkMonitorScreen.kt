@@ -75,7 +75,7 @@ import dev.agentdeck.terrarium.toTerrariumState
 import dev.agentdeck.ui.eink.EinkAnimatedRefreshZone
 import dev.agentdeck.ui.eink.EinkRefreshZone
 import dev.agentdeck.ui.eink.RefreshMode
-import android.content.pm.ActivityInfo
+import dev.agentdeck.data.DashboardOrientation
 import android.util.Log
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
@@ -867,7 +867,7 @@ private fun EinkPortraitHeader(
 ) {
     val scope = rememberCoroutineScope()
     val currentOrientation by displayPrefs.orientationFlow.collectAsState(
-        initial = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        initial = DashboardOrientation.defaultFor(isEink = true)
     )
     // Build agent list — same logic as EinkAgentPanel
     data class AgentEntry(
@@ -948,10 +948,10 @@ private fun EinkPortraitHeader(
                     .size(16.dp)
                     .clickable {
                         scope.launch {
-                            val newOrientation = if (currentOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
-                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            else
-                                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                            val newOrientation = DashboardOrientation.nextManualOrientation(
+                                currentOrientation,
+                                currentOrientation == DashboardOrientation.Landscape,
+                            )
                             displayPrefs.setOrientation(newOrientation)
                         }
                     },

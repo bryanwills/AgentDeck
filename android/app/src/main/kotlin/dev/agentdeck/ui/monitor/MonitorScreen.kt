@@ -1,5 +1,6 @@
 package dev.agentdeck.ui.monitor
 
+import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -43,11 +46,13 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +63,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import dev.agentdeck.R
+import dev.agentdeck.data.DashboardOrientation
 import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.BridgeConnection
@@ -94,6 +100,7 @@ import dev.agentdeck.terrarium.layoutWorkerCrayfish
 import dev.agentdeck.terrarium.renderer.ColorTerrariumCanvas
 import dev.agentdeck.terrarium.toTerrariumState
 import dev.agentdeck.ui.theme.AgentDeckColors
+import kotlinx.coroutines.launch
 
 private const val TABLET_CRAYFISH_CENTER_X_FRACTION = 0.70f
 private const val TABLET_CRAYFISH_CENTER_Y_FRACTION = 0.575f
@@ -122,6 +129,12 @@ fun MonitorScreen(
     val showDeviceDiagnostic by displayPrefs.showDeviceDiagnosticFlow.collectAsState(initial = true)
     val showTimeline by displayPrefs.showTimelineFlow.collectAsState(initial = true)
     val showSettingsButton by displayPrefs.showSettingsButtonFlow.collectAsState(initial = true)
+    val currentOrientation by displayPrefs.orientationFlow.collectAsState(
+        initial = DashboardOrientation.defaultFor(isEink = false)
+    )
+    val configuration = LocalConfiguration.current
+    val isCurrentlyLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val coroutineScope = rememberCoroutineScope()
 
     // mDNS discovery — active while not connected (including reconnect)
     val context = LocalContext.current
@@ -259,19 +272,44 @@ fun MonitorScreen(
             )
         }
 
-        // Layer 5: Gear icon — follows the same dashboard visibility preference as iOS.
-        if (showSettingsButton) {
+        // Layer 5: Rotation + settings controls. Rotation stays available
+        // even when the optional Settings button is hidden; this keeps
+        // portrait/landscape reachable on tablets with system rotation locked.
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             IconButton(
-                onClick = { showSettingsDialog = true },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp),
+                onClick = {
+                    coroutineScope.launch {
+                        displayPrefs.setOrientation(
+                            DashboardOrientation.nextManualOrientation(
+                                currentOrientation,
+                                isCurrentlyLandscape,
+                            )
+                        )
+                    }
+                },
             ) {
                 Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings",
-                    tint = Color.White.copy(alpha = 0.6f),
+                    imageVector = Icons.Default.ScreenRotation,
+                    contentDescription = "Rotate screen",
+                    tint = Color.White.copy(alpha = 0.45f),
                 )
+            }
+            if (showSettingsButton) {
+                IconButton(
+                    onClick = { showSettingsDialog = true },
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Settings",
+                        tint = Color.White.copy(alpha = 0.6f),
+                    )
+                }
             }
         }
     }

@@ -10,6 +10,7 @@
 |---|:---:|:---:|---|
 | macOS Dashboard (`AgentDeck Dashboard.app`) | ✅ | ✅ | 단독 실행 가능 |
 | iOS / iPadOS 컴패니언 | ✅ | ✅ | Bonjour + WS, same-LAN |
+| Dashboard adaptive orientation + panel parity | ✅* | ✅ | *iOS/iPadOS App Store companion 포함. Android tablet/e-ink viewer 는 아래 Android CLI/ADB tier 분류를 따른다. 회전/패널 의미는 동일하게 유지 |
 | Stream Deck+ 플러그인 연동 | ✅* | ✅ | *Elgato Stream Deck 앱 별도 설치 |
 | Claude Code hook 설치 | ✅ | ✅ | NSOpenPanel 명시적 동의 |
 | 음성 입력 (on-device SFSpeech) | ✅ | ✅ | 오디오 외부 송신 없음 |

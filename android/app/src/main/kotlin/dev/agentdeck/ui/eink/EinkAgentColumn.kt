@@ -1,6 +1,6 @@
 package dev.agentdeck.ui.eink
 
-import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,11 +21,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.agentdeck.data.DashboardOrientation
 import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.state.DashboardState
@@ -49,9 +51,11 @@ fun EinkAgentPanel(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val isCurrentlyLandscape =
+        LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val currentOrientation = displayPrefs?.orientationFlow?.collectAsState(
-        initial = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-    )?.value ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        initial = DashboardOrientation.defaultFor(isEink = true)
+    )?.value ?: DashboardOrientation.defaultFor(isEink = true)
     // Build display list: primary + siblings (excluding self)
     data class AgentEntry(
         val projectName: String,
@@ -183,10 +187,10 @@ fun EinkAgentPanel(
                             .size(18.dp)
                             .clickable {
                                 scope.launch {
-                                    val newOrientation = if (currentOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
-                                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                    else
-                                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                    val newOrientation = DashboardOrientation.nextManualOrientation(
+                                        currentOrientation,
+                                        isCurrentlyLandscape,
+                                    )
                                     displayPrefs.setOrientation(newOrientation)
                                 }
                             },

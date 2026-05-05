@@ -44,7 +44,7 @@ Row(fillMaxSize): 좌측 에이전트 패널 | 우측 아쿠아리움+정보
 - **Status 2-column**: LIMITS(30%, Unicode 블록 게이지 `█░`) | MODELS/DEVICES(70%, OAuth catalog + Ollama + downstream device summary). `Display panels` 의 `Tank status` 와 `Device diagnostic` 토글은 이 압축 패널 안에서도 분리되어 반영된다.
 - **Settings parity**: tablet/iOS 와 같은 Connection / Mac integrations(read-only) / Display panels / Display & sleep / About 의미를 유지하되, e-ink 는 흑백 Surface/segment/switch 로 렌더링한다. 세션 focus 와 option 응답은 tablet 과 동일하게 bridge 명령을 보낸다.
 - **Attention parity**: 어떤 세션이든 `awaiting_*` 상태가 되면 e-ink context band 에 `ATTENTION` 패널을 띄운다. focused session 이면 실제 question/options/cursor 를 표시하고, 다른 session 이면 iOS/tablet 과 동일하게 focus 후 `select_option` 을 보내며 parser 가 옵션을 못 준 경우 `Yes/No/Always` fallback 을 제공한다.
-- **Orientation**: portrait/landscape 둘 다 지원한다. rotate control 은 `Settings button` 표시 여부와 독립적으로 남겨 화면 전환을 잃지 않게 하고, Pantone/RK3566 처럼 `requestedOrientation` 을 무시하는 기기는 `USER_ROTATION` fallback 을 함께 적용한다. `Auto` 는 `ACCELEROMETER_ROTATION` 을 다시 켜 system rotation 을 복원한다.
+- **Orientation**: portrait/landscape 둘 다 지원한다. rotate control 은 `Settings button` 표시 여부와 독립적으로 남겨 화면 전환을 잃지 않게 하고, Pantone/RK3566 처럼 `requestedOrientation` 을 무시하는 기기는 `USER_ROTATION` fallback 을 함께 적용한다. `Auto` 는 `ACCELEROMETER_ROTATION` 을 다시 켜 system rotation 을 복원한다. 기본값은 e-ink landscape 고정, 일반 tablet 은 Auto 다.
 - 수조: Compose `clip(RoundedCornerShape)` 둥근 모서리 (내부 테두리 없음), 수면 파도, 해초, 자갈, 거품 — 수족관 느낌
 - **Multi-agent visibility**: Bridge `/health`에서 sibling state 조회, Gateway TCP probe로 OpenClaw 감지. Daemon primary는 agent list에서 제외 (coding agent 아님). OpenClaw primary는 목록에 🦞로 표시하되 terrarium octopus에서는 제외 (crayfish가 담당)
 - **Crayfish 독립 상태**: sibling OpenClaw session의 state에서 ROUTING/SITTING 결정 (primary agentType 의존 제거)
@@ -62,6 +62,7 @@ Row(fillMaxSize): 좌측 에이전트 패널 | 우측 아쿠아리움+정보
 - 상단 중앙: awaiting session Attention theater. 응답 전에 해당 session 을 focus 하고 `select_option` 을 보낸다.
 - 하단: Timeline strip (이벤트 로그)
 - Settings: iOS 와 같은 Connection / Mac integrations(read-only) / Display panels / About / Display & sleep 구조. Display panels 는 session list, topology rail, timeline, settings button 표시를 제어한다.
+- Orientation: 일반 tablet 은 Auto 를 기본으로 하되 portrait/landscape pinning 을 Settings 에서 제공하고, 수조 화면의 rotate control 은 Settings button 표시 여부와 독립적으로 남긴다. 시스템 회전 잠금이 켜져 있어도 AgentDeck 내부에서 방향을 전환할 수 있어야 한다.
 
 ## Creature Design — 도트 아트 통일
 

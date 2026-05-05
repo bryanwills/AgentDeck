@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -31,9 +32,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import dev.agentdeck.data.DashboardOrientation
 import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.net.BridgeConstants
@@ -64,6 +67,9 @@ fun TabletSettingsDialog(
     val showDeviceDiagnostic by displayPrefs.showDeviceDiagnosticFlow.collectAsState(initial = true)
     val showTimeline by displayPrefs.showTimelineFlow.collectAsState(initial = true)
     val showSettingsButton by displayPrefs.showSettingsButtonFlow.collectAsState(initial = true)
+    val currentOrientation by displayPrefs.orientationFlow.collectAsState(
+        initial = DashboardOrientation.defaultFor(isEink = false)
+    )
     val dashState by AgentStateHolder.instance.state.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
@@ -155,6 +161,12 @@ fun TabletSettingsDialog(
                     displayPrefs = displayPrefs,
                 )
 
+                DashboardOrientationCard(
+                    currentOrientation = currentOrientation,
+                    displayPrefs = displayPrefs,
+                    coroutineScope = coroutineScope,
+                )
+
                 // About
                 AboutFooter()
 
@@ -169,6 +181,91 @@ fun TabletSettingsDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DashboardOrientationCard(
+    currentOrientation: Int,
+    displayPrefs: DisplayPreferences,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF334155)),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Orientation",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color(0xFF94A3B8),
+            )
+            Text(
+                text = "Use Auto for normal tablet rotation, or pin the dashboard when the device rotation lock is on.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF94A3B8).copy(alpha = 0.75f),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                DashboardOrientationOption(
+                    label = "Auto",
+                    selected = DashboardOrientation.isAuto(currentOrientation),
+                    onClick = {
+                        coroutineScope.launch { displayPrefs.setOrientation(DashboardOrientation.Auto) }
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                DashboardOrientationOption(
+                    label = "Portrait",
+                    selected = currentOrientation == DashboardOrientation.Portrait,
+                    onClick = {
+                        coroutineScope.launch { displayPrefs.setOrientation(DashboardOrientation.Portrait) }
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                DashboardOrientationOption(
+                    label = "Landscape",
+                    selected = currentOrientation == DashboardOrientation.Landscape,
+                    onClick = {
+                        coroutineScope.launch { displayPrefs.setOrientation(DashboardOrientation.Landscape) }
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DashboardOrientationOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(8.dp),
+        color = if (selected) Color(0xFF64748B) else Color(0xFF1E293B),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (selected) Color(0xFFCBD5E1) else Color(0xFF475569),
+        ),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
     }
 }
 
