@@ -74,6 +74,60 @@ enum CodexHookIdentity {
     }
 }
 
+/// ESP32 heartbeat callbacks run from the `ESP32Serial` actor, not from the
+/// daemon's `@MainActor` context. Store serial-facing event snapshots here so
+/// heartbeat code never reaches back into `DaemonServer` actor state.
+private final class SerialEventSnapshot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stateEvent: [String: Any]?
+    private var usageEvent: [String: Any]?
+    private var displayOn = true
+
+    func setStateEvent(_ event: [String: Any]?) {
+        lock.lock()
+        stateEvent = event
+        lock.unlock()
+    }
+
+    func setUsageEvent(_ event: [String: Any]?) {
+        lock.lock()
+        usageEvent = event
+        lock.unlock()
+    }
+
+    func setDisplayOn(_ value: Bool) {
+        lock.lock()
+        displayOn = value
+        lock.unlock()
+    }
+
+    func currentStateEvent() -> [String: Any]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return stateEvent
+    }
+
+    func currentUsageEvent() -> [String: Any]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return usageEvent
+    }
+
+    func initialEvents() -> [[String: Any]] {
+        lock.lock()
+        let state = stateEvent
+        let usage = usageEvent
+        let display = displayOn
+        lock.unlock()
+
+        var events: [[String: Any]] = []
+        if let state { events.append(state) }
+        if let usage { events.append(usage) }
+        events.append(["type": "display_state", "displayOn": display])
+        return events
+    }
+}
+
 @MainActor
 final class DaemonServer {
     let port: UInt16
@@ -133,6 +187,7 @@ final class DaemonServer {
 
     // State caches
     private var cachedSessions: [DaemonSessionEntry] = []
+    private let serialEventSnapshot = SerialEventSnapshot()
 
     /// Sessions advertised over WS via `session_push_register` from CLI
     /// session bridges. Kept separate from `cachedSessions` so that
@@ -503,6 +558,7 @@ final class DaemonServer {
             Task { @MainActor in
                 guard let self else { return }
                 self.cachedDisplayOn = displayOn
+                self.serialEventSnapshot.setDisplayOn(displayOn)
                 self.broadcastRaw(["type": "display_state", "displayOn": displayOn] as [String: Any])
                 if displayOn {
                     DaemonLogger.shared.info("Display wake — recovering modules and state")
@@ -766,17 +822,10 @@ final class DaemonServer {
         moduleManager.register(serial)
 
         // ESP32 state providers — initial state on connect + heartbeat
-        // nonisolated(unsafe) storage in ESP32Serial allows direct setting from @MainActor context
-        serial.serial.setStateProviderFn { [weak self] in self?.lastStateEvent }
-        serial.serial.setUsageProviderFn { [weak self] in self?.buildUsageEvent() }
-        serial.serial.setInitialStateProviderFn { [weak self] in
-            guard let self else { return [] }
-            var events: [[String: Any]] = []
-            if let state = self.lastStateEvent { events.append(state) }
-            if let usage = self.buildUsageEvent() { events.append(usage) }
-            events.append(["type": "display_state", "displayOn": self.cachedDisplayOn])
-            return events
-        }
+        let serialEventSnapshot = serialEventSnapshot
+        serial.serial.setStateProviderFn { serialEventSnapshot.currentStateEvent() }
+        serial.serial.setUsageProviderFn { serialEventSnapshot.currentUsageEvent() }
+        serial.serial.setInitialStateProviderFn { serialEventSnapshot.initialEvents() }
 
         // Wire external client count (ESP32 serial connections count as clients for polling guards)
         await wsServer.setExternalClientCountProvider { await serial.serial.connectionCount }
@@ -3132,13 +3181,17 @@ final class DaemonServer {
         let gwAlive = cachedGatewayConnected
         let event = buildFullStateEvent(agentType: gwAlive ? "openclaw" : "daemon")
         lastStateEvent = event
+        serialEventSnapshot.setStateEvent(event)
         broadcastRaw(event)
     }
 
     @MainActor
     private func broadcastUsage() {
         if let event = buildUsageEvent() {
+            serialEventSnapshot.setUsageEvent(event)
             broadcastRaw(event)
+        } else {
+            serialEventSnapshot.setUsageEvent(nil)
         }
     }
 

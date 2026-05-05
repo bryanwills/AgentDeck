@@ -385,23 +385,132 @@ struct TimelineStripView: View {
 private struct TimelineMarkdownPreview: View {
     let text: String
 
-    private var attributed: AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .full
-        )
-        if let parsed = try? AttributedString(markdown: text, options: options) {
-            return parsed
-        }
-        return AttributedString(text)
+    private var lines: [TimelineMarkdownLine] {
+        TimelineMarkdownLine.parse(text)
     }
 
     var body: some View {
-        Text(attributed)
-            .font(.system(size: 10, design: .default))
-            .lineSpacing(2)
-            .foregroundStyle(TerrariumHUD.subtext.opacity(0.86))
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                lineView(line)
+            }
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func lineView(_ line: TimelineMarkdownLine) -> some View {
+        switch line {
+        case .blank:
+            Spacer().frame(height: 4)
+        case let .heading(level, content):
+            Text(content)
+                .font(.system(size: level == 1 ? 11 : 10, weight: .bold, design: .default))
+                .foregroundStyle(TerrariumHUD.text.opacity(0.95))
+                .padding(.top, level == 1 ? 2 : 1)
+        case let .bullet(content):
+            HStack(alignment: .top, spacing: 5) {
+                Text("•")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.78))
+                Text(content)
+                    .font(.system(size: 10, design: .default))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.86))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case let .numbered(marker, content):
+            HStack(alignment: .top, spacing: 5) {
+                Text(marker)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.78))
+                    .frame(width: 22, alignment: .trailing)
+                Text(content)
+                    .font(.system(size: 10, design: .default))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.86))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case let .quote(content):
+            Text("│ \(content)")
+                .font(.system(size: 10, design: .default))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.72))
+                .fixedSize(horizontal: false, vertical: true)
+        case let .code(content):
+            Text(content.isEmpty ? " " : content)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(TerrariumHUD.ledGreen.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
+        case let .text(content):
+            Text(content)
+                .font(.system(size: 10, design: .default))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.86))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private enum TimelineMarkdownLine {
+    case blank
+    case heading(level: Int, content: String)
+    case bullet(String)
+    case numbered(marker: String, content: String)
+    case quote(String)
+    case code(String)
+    case text(String)
+
+    static func parse(_ text: String) -> [TimelineMarkdownLine] {
+        var parsed: [TimelineMarkdownLine] = []
+        var inCodeFence = false
+
+        for rawLine in text.components(separatedBy: .newlines) {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
+                inCodeFence.toggle()
+                continue
+            }
+            if inCodeFence {
+                parsed.append(.code(rawLine))
+            } else if trimmed.isEmpty {
+                parsed.append(.blank)
+            } else if let heading = parseHeading(trimmed) {
+                parsed.append(.heading(level: heading.level, content: heading.content))
+            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                parsed.append(.bullet(String(trimmed.dropFirst(2))))
+            } else if let numbered = parseNumbered(trimmed) {
+                parsed.append(.numbered(marker: numbered.marker, content: numbered.content))
+            } else if trimmed.hasPrefix("> ") {
+                parsed.append(.quote(String(trimmed.dropFirst(2))))
+            } else {
+                parsed.append(.text(rawLine))
+            }
+        }
+
+        return parsed.isEmpty ? [.text(text)] : parsed
+    }
+
+    private static func parseHeading(_ trimmed: String) -> (level: Int, content: String)? {
+        var level = 0
+        for char in trimmed {
+            if char == "#" {
+                level += 1
+            } else {
+                break
+            }
+        }
+        guard (1...3).contains(level) else { return nil }
+        guard trimmed.dropFirst(level).first == " " else { return nil }
+        let content = trimmed.dropFirst(level + 1)
+        return (level, String(content))
+    }
+
+    private static func parseNumbered(_ trimmed: String) -> (marker: String, content: String)? {
+        guard let markerEnd = trimmed.firstIndex(where: { $0 == "." || $0 == ")" }) else { return nil }
+        let number = trimmed[..<markerEnd]
+        guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
+        let contentStart = trimmed.index(after: markerEnd)
+        guard contentStart < trimmed.endIndex, trimmed[contentStart].isWhitespace else { return nil }
+        let content = trimmed[contentStart...].trimmingCharacters(in: .whitespaces)
+        return ("\(number)\(trimmed[markerEnd])", content)
     }
 }
 

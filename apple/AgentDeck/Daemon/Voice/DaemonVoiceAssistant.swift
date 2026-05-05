@@ -39,22 +39,6 @@ final class DaemonVoiceAssistant {
     private var silenceTimer: Task<Void, Never>?
     private var lastSoundTime: Date = .now
 
-    // Speech recognition — Apple's on-device engine. We request authorization
-    // once on first launch; if the user denies, transcription returns nil and
-    // the dashboard surfaces the failure so they can re-grant in Settings.
-    private lazy var speechRecognizer: SFSpeechRecognizer? = {
-        let preferredLocales = [
-            Locale.current,
-            Locale(identifier: "en_US"),
-        ]
-        for locale in preferredLocales {
-            if let r = SFSpeechRecognizer(locale: locale), r.isAvailable {
-                return r
-            }
-        }
-        return SFSpeechRecognizer()
-    }()
-
     // MARK: - Lifecycle
 
     func start() -> Bool {
@@ -63,7 +47,7 @@ final class DaemonVoiceAssistant {
         case .authorized:
             break
         case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .audio) { _ in }
+            VoicePermissionRequester.requestMicrophoneAccess()
             return false
         default:
             state = .disabled
@@ -77,7 +61,7 @@ final class DaemonVoiceAssistant {
         // voice assistant readiness on this — the user can still record, and
         // `transcribe()` reports a helpful failure if the auth ends up denied.
         if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
-            SFSpeechRecognizer.requestAuthorization { _ in }
+            VoicePermissionRequester.requestSpeechRecognitionAuthorization()
         }
 
         state = .idle
@@ -243,44 +227,10 @@ final class DaemonVoiceAssistant {
             DaemonLogger.shared.debug("Voice", "Speech recognition not authorized")
             return nil
         }
-        guard let recognizer = speechRecognizer, recognizer.isAvailable else {
-            DaemonLogger.shared.debug("Voice", "Speech recognizer unavailable — on-device model may still be downloading")
-            return nil
-        }
-
-        let request = SFSpeechURLRecognitionRequest(url: url)
-        request.shouldReportPartialResults = false
-        // On-device keeps audio local — critical because the captured WAV
-        // frequently contains project/code names the user wouldn't want
-        // routed to Apple's speech servers. macOS 13+ / iOS 13+ support
-        // `requiresOnDeviceRecognition`; older OS falls back to the default.
-        if #available(macOS 13.0, iOS 13.0, *) {
-            request.requiresOnDeviceRecognition = true
-        }
-        // `dictation` task hint tells the engine we expect natural-language
-        // prose rather than short keyword commands — better fit for prompts
-        // like "run the tests in the auth module".
-        request.taskHint = .dictation
-
-        return await withCheckedContinuation { continuation in
-            var resumed = false
-            let safeResume: (String?) -> Void = { text in
-                guard !resumed else { return }
-                resumed = true
-                continuation.resume(returning: text)
-            }
-            _ = recognizer.recognitionTask(with: request) { result, error in
-                if let error {
-                    DaemonLogger.shared.debug("Voice", "SFSpeech error: \(error.localizedDescription)")
-                    safeResume(nil)
-                    return
-                }
-                guard let result, result.isFinal else { return }
-                let text = result.bestTranscription.formattedString
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                safeResume(text.isEmpty ? nil : text)
-            }
-        }
+        return await VoiceSpeechTranscriber.transcribe(
+            url: url,
+            preferredLocales: [Locale.current, Locale(identifier: "en_US")]
+        )
     }
 
     // MARK: - TTS
@@ -317,6 +267,89 @@ final class DaemonVoiceAssistant {
     func handleResponse(_ text: String) {
         guard state == .processing else { return }
         speak(text.isEmpty ? "완료했습니다." : String(text.prefix(200)))
+    }
+}
+
+/// TCC and Speech callbacks are invoked by Apple frameworks on arbitrary
+/// dispatch queues. Keep the callback literals outside the `@MainActor`
+/// `DaemonVoiceAssistant` type; otherwise Swift 6's executor check can trap
+/// when a framework calls an actor-isolated closure on a background queue.
+private enum VoicePermissionRequester {
+    static func requestMicrophoneAccess() {
+        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+    }
+
+    static func requestSpeechRecognitionAuthorization() {
+        SFSpeechRecognizer.requestAuthorization { status in
+            DaemonLogger.shared.debug("Voice", "Speech authorization status=\(status.rawValue)")
+        }
+    }
+}
+
+private enum VoiceSpeechTranscriber {
+    static func transcribe(url: URL, preferredLocales: [Locale]) async -> String? {
+        guard let recognizer = makeSpeechRecognizer(preferredLocales: preferredLocales),
+              recognizer.isAvailable else {
+            DaemonLogger.shared.debug("Voice", "Speech recognizer unavailable — on-device model may still be downloading")
+            return nil
+        }
+
+        let request = SFSpeechURLRecognitionRequest(url: url)
+        request.shouldReportPartialResults = false
+        // On-device keeps audio local — critical because the captured WAV
+        // frequently contains project/code names the user wouldn't want
+        // routed to Apple's speech servers. macOS 13+ / iOS 13+ support
+        // `requiresOnDeviceRecognition`; older OS falls back to the default.
+        if #available(macOS 13.0, iOS 13.0, *) {
+            request.requiresOnDeviceRecognition = true
+        }
+        // `dictation` task hint tells the engine we expect natural-language
+        // prose rather than short keyword commands — better fit for prompts
+        // like "run the tests in the auth module".
+        request.taskHint = .dictation
+
+        return await withCheckedContinuation { continuation in
+            let resumeBox = VoiceSpeechContinuation(continuation)
+
+            _ = recognizer.recognitionTask(with: request) { result, error in
+                if let error {
+                    DaemonLogger.shared.debug("Voice", "SFSpeech error: \(error.localizedDescription)")
+                    resumeBox.resume(nil)
+                    return
+                }
+                guard let result, result.isFinal else { return }
+                let text = result.bestTranscription.formattedString
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                resumeBox.resume(text.isEmpty ? nil : text)
+            }
+        }
+    }
+
+    private static func makeSpeechRecognizer(preferredLocales: [Locale]) -> SFSpeechRecognizer? {
+        for locale in preferredLocales {
+            if let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable {
+                return recognizer
+            }
+        }
+        return SFSpeechRecognizer()
+    }
+}
+
+private final class VoiceSpeechContinuation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+    private let continuation: CheckedContinuation<String?, Never>
+
+    init(_ continuation: CheckedContinuation<String?, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(_ text: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didResume else { return }
+        didResume = true
+        continuation.resume(returning: text)
     }
 }
 #endif

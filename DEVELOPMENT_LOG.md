@@ -2,6 +2,60 @@
 
 ---
 
+## 2026-05-06 — TIMELINE detail click crash hardening
+
+### 문제
+
+macOS Dashboard 에서 TIMELINE event 를 클릭해 detail pane 이 뜨기 직전에 `EXC_BREAKPOINT` 가 발생하는
+재현 신호가 있었다. 직전 변경에서 detail text 를 `AttributedString(markdown:)` 기반 rich preview 로
+바꿨는데, TIMELINE detail 은 agent 응답, tool JSON, table-like markdown, emoji, 로그 조각 같은 임의
+문자열을 그대로 받는다. `try?` 는 parse error 만 fallback 할 뿐 Markdown parser 내부 assertion/trap 은
+막지 못하므로 UI click path 에 시스템 Markdown parser 를 두는 것은 안전하지 않다.
+
+### 해결
+
+- `TimelineMarkdownPreview` 에서 `AttributedString(markdown:)` 호출을 제거했다.
+- headings/list/numbered list/quote/fenced code 정도만 직접 분류하는 line-based safe renderer 로 교체했다.
+- 별도로 Xcode 가 지목한 `DaemonServer.effectiveOauthConnected()` 경로는 ESP32 serial heartbeat callback 이
+  `@MainActor` 서버 상태를 background actor 에서 읽을 수 있던 문제라서, serial-facing state/usage/display
+  event 를 lock-protected snapshot 으로 전달하도록 분리했다.
+
+### 검증
+
+- `xcodebuild build -quiet -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/AgentDeckDerivedDataTimelineMarkdownCrash CODE_SIGNING_ALLOWED=NO` 성공.
+- 실행 중인 Dashboard 에서 TIMELINE row 를 여러 번 클릭해 detail pane 전환이 계속 동작하는 것을 확인했다.
+- `git diff --check` 성공.
+
+---
+
+## 2026-05-06 — Voice assistant TCC callback crash fix
+
+### 문제
+
+macOS AgentDeck 이 daemon startup 이후 `CodexOTel`/D200H 로그를 마지막으로 조용히 종료되는 사례가
+반복됐다. 진단 번들의 `.ips` crash report 는 `EXC_BREAKPOINT` / `_swift_task_checkIsolatedSwift` 를
+가리켰고, faulting stack 은 `DaemonVoiceAssistant.start()` 에서 만든 speech authorization callback 이
+TCC 백그라운드 큐에서 호출되는 경로였다. `DaemonVoiceAssistant` 가 `@MainActor` 이므로 Swift 6 런타임이
+actor-isolated closure 를 잘못된 executor 에서 실행한다고 판단해 trap 한 것이다.
+
+### 해결
+
+- 마이크/음성 인식 권한 요청 callback literal 을 `@MainActor` 타입 밖의 `VoicePermissionRequester` 로
+  이동했다.
+- `SFSpeechRecognizer.recognitionTask` callback 도 non-actor `VoiceSpeechTranscriber` 로 분리했다.
+- speech result continuation 은 `@unchecked Sendable` lock box 로 감싸 다중 callback resume 과 Swift 6
+  concurrent-capture 오류를 함께 막았다.
+
+### 검증
+
+- `bash scripts/capture-apple-diagnostics.sh --tail 1500 --last 30m` 로 crash report 를 수집했다.
+- `xcodebuild build -quiet -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/AgentDeckDerivedDataVoiceCrash CODE_SIGNING_ALLOWED=NO` 성공.
+- 수정 빌드 실행 후 `http://127.0.0.1:9120/health` 응답을 확인했고, startup 이후 OTel/D200H/hook 이벤트를
+  지나 daemon 이 계속 살아있는 것을 확인했다.
+- `git diff --check` 성공.
+
+---
+
 ## 2026-05-06 — Dashboard TIMELINE detail markdown preview
 
 ### 문제
@@ -63,6 +117,17 @@ Codex 는 APME/session state 로는 들어오지만 timeline entry 를 만들지
 ---
 
 ## 2026-05-05 — E-ink Attention parity 응답 패널
+
+### 2026-05-06 추가 — 실기기 설치 검증
+
+- `bash scripts/build-android-release.sh` 성공 → `dist/agentdeck-v0.4.1.apk`.
+- ADB 설치 완료: Pantone6 (`AA007422R24C1300039`, `lastUpdateTime=2026-05-06 03:51:37`),
+  CremaS (`CREMAA21W09235`, `lastUpdateTime=2026-05-06 03:52:40`),
+  Lenovo TB-J606F (`HVA095B4`, `lastUpdateTime=2026-05-06 03:51:41`). 모두
+  `versionCode=5`, `versionName=0.4.1`.
+- Pantone6/CremaS 는 재설치 후 `android.permission.WRITE_SECURE_SETTINGS` grant 를 다시 적용했다.
+- 세 기기 모두 `dev.agentdeck/.MainActivity` foreground 확인. 최근 logcat 에서 `AndroidRuntime` fatal/crash
+  로그 없음.
 
 ### 문제
 
