@@ -92,6 +92,18 @@ Coverage thresholds (regression guard): lines ≥17%, functions ≥15%, branches
 
 See [docs/testing.md](docs/testing.md) for full testing reference.
 
+### Apple/Xcode Debug Diagnostics
+
+When debugging a macOS/iOS issue that was reproduced from Xcode, do **not** ask the user to paste Xcode console output first. Capture the repository-side diagnostic bundle:
+
+```bash
+bash scripts/capture-apple-diagnostics.sh --tail 1000 --last 15m
+```
+
+Then inspect `diagnostics/apple-xcode/latest/README.md`, `diag.json`, `status.json`, `oslog-AgentDeck.log`, and `log-files/*swift-daemon.log` before editing code. Use `.agents/workflows/apple-xcode-debug.md` as the canonical workflow for Xcode-run app debugging, startup hangs, Swift daemon issues, OpenClaw pairing, WebSocket state, and hardware module state.
+
+This diagnostic path is developer tooling only: it lives in `scripts/` and `.agents/workflows/`, writes local gitignored artifacts under `diagnostics/`, and must not add subprocesses, shell commands, terminal instructions, or external-tool prompts to the App Store app UI.
+
 ## CLI
 
 The CLI command is `agentdeck` (`bridge/src/cli.ts`).
@@ -140,6 +152,7 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 - **Action ID pattern**: SD actions store string IDs + `getActionById()` — never action object references
 - **Shift+Tab** (`\x1b[Z`) for Claude Code mode switching (100ms debounce)
 - **Version compatibility**: `agentdeck claude` checks Claude Code version via npm + GitHub on startup; never blocks startup
+- **External peer async I/O**: 모든 RPC/WS/HTTP `await` 에 timeout 강제 — peer silence (silent drop, dead socket, network glitch) 를 first-class signal 로 처리해야 함 (synthetic error code emit + UI status emit + retry/fallback escalation). race condition 가드는 secondary; timeout 이 먼저. Reference 구현: `apple/AgentDeck/Daemon/Gateway/OpenClawAdapter.swift` 의 `connectRPCResponseTimeoutNanoseconds` + `completeRPCTimeout` + `handleConnectTimeout` 패턴
 
 ## App Store build invariants
 
