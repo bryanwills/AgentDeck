@@ -287,6 +287,40 @@ describe('ApmeCollector.ingestSpan dispatch', () => {
     expect(turn?.tool_calls).toBe(2);
   });
 
+  it('Codex timeline path opens turn and counts tools (timelineEntryToSpans)', () => {
+    // Mirrors what wireAgentApme's addCodexEntryAndIngest helper does:
+    // each Codex timeline entry is fed through timelineEntryToSpans and
+    // ingested. This test guards against the regression where Codex
+    // tool_request entries reached only the timeline store, never APME.
+    collector.openRun({
+      sessionId: 'CDX', agentType: 'codex-cli',
+      modelId: 'gpt-5.4', projectName: 'demo',
+    });
+    const cdx = ctx({ agentType: 'codex-cli' });
+    for (const s of timelineEntryToSpans(cdx, {
+      ts: 1, type: 'chat_start', raw: 'fix the build', detail: 'fix the build',
+      agentType: 'codex-cli',
+    })) collector.ingestSpan('CDX', s);
+    const turnId = collector.getActiveTurnId('CDX');
+    expect(turnId).not.toBeNull();
+    expect(store.getTurn(turnId!)?.prompt).toBe('fix the build');
+
+    for (const s of timelineEntryToSpans(cdx, {
+      ts: 2, type: 'tool_request', raw: 'shell ls -la', agentType: 'codex-cli',
+    })) collector.ingestSpan('CDX', s);
+    for (const s of timelineEntryToSpans(cdx, {
+      ts: 3, type: 'tool_request', raw: 'shell grep foo', agentType: 'codex-cli',
+    })) collector.ingestSpan('CDX', s);
+
+    // Force the turn closed so tool_calls flushes to the store row.
+    for (const s of timelineEntryToSpans(cdx, {
+      ts: 4, type: 'chat_start', raw: 'next prompt', detail: 'next prompt',
+      agentType: 'codex-cli',
+    })) collector.ingestSpan('CDX', s);
+
+    expect(store.getTurn(turnId!)?.tool_calls).toBe(2);
+  });
+
   it('task_boundary span with signal=clear splits the run', () => {
     const beforeRunId = collector.getRunId('S');
     expect(beforeRunId).toBeTruthy();

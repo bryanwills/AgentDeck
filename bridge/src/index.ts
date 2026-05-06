@@ -1336,6 +1336,22 @@ function wireAgentApme(
   // turn N's tail at the right boundary.
   let codexPendingTailSnapshot: string | null = null;
 
+  // Add a Codex timeline entry AND feed it through the APME ingestion
+  // pipeline. core.bridgeTimeline.addEntry alone only writes to the local
+  // timeline store; it does NOT trigger the timeline -> ingestSpan path
+  // (that path only runs for adapter-emitted timeline events from
+  // OpenClaw/OpenCode). Without this helper, Codex turns and tool calls
+  // never reach APME — turns table stays empty, tool_calls = 0.
+  const addCodexEntryAndIngest = (
+    entry: import('@agentdeck/shared').TimelineEntry,
+  ): void => {
+    core.bridgeTimeline.addEntry(entry);
+    const ctx = makeApmeAdapterCtx(apme, sid, agentType);
+    for (const span of timelineEntryToSpans(ctx, entry)) {
+      apme.collector.ingestSpan(sid, span);
+    }
+  };
+
   const ensureCodexChatStart = (text?: string): number => {
     if (codexChatStart) {
       if (text && !codexLastPromptText) {
@@ -1344,6 +1360,9 @@ function wireAgentApme(
         const detail = text.length > 100
           ? (text.length > 1000 ? text.slice(0, 997) + '...' : text)
           : undefined;
+        // upsert path: chat_start already exists, just enrich it. We do
+        // NOT re-ingest the span here — the turn was already opened in
+        // APME on the original chat_start.
         core.bridgeTimeline.upsertEntry({
           ts: codexChatStart,
           type: 'chat_start',
@@ -1364,7 +1383,7 @@ function wireAgentApme(
     const detail = text && text.length > 100
       ? (text.length > 1000 ? text.slice(0, 997) + '...' : text)
       : undefined;
-    core.bridgeTimeline.addEntry({
+    addCodexEntryAndIngest({
       ts: now,
       type: 'chat_start',
       raw,
@@ -1387,7 +1406,6 @@ function wireAgentApme(
     const endedAt = Date.now();
     codexChatStart = null;
     codexLastPromptText = null;
-    const ctx = makeApmeAdapterCtx(apme, sid, agentType);
     const tail = tailSnapshot ?? ptyRingBuffer.getTail(5000);
     const lines = tail.split('\n').map(l => l.trim()).filter(Boolean);
     // Filter out spinner/UI artifacts from tail (Codex PTY output)
@@ -1398,11 +1416,12 @@ function wireAgentApme(
     );
     const response = clean.slice(-5).join('\n');
     if (response.length > 2) {
-      const span = claudePtyResponseToSpan(ctx, response);
-      if (span) apme.collector.ingestSpan(sid, span);
-      void classifyAndEnqueueTurn(apme, sid);
       const respRaw = response.length > 200 ? response.slice(0, 197) + '...' : response;
-      core.bridgeTimeline.addEntry({
+      // chat_response routes through addCodexEntryAndIngest, which feeds
+      // a turn_response span into APME (setTurnResponse). Replaces the
+      // previous direct claudePtyResponseToSpan call so the timeline
+      // entry and the APME span share a single source of truth.
+      addCodexEntryAndIngest({
         ts: endedAt - 1,
         type: 'chat_response',
         raw: cleanRawText(respRaw),
@@ -1411,11 +1430,12 @@ function wireAgentApme(
         startedAt,
         endedAt,
       });
+      void classifyAndEnqueueTurn(apme, sid);
     }
     const duration = Math.round((endedAt - startedAt) / 1000);
     const topicHint = response ? extractTopicHint(response) : null;
     const label = topicHint || 'Codex turn completed';
-    core.bridgeTimeline.addEntry({
+    addCodexEntryAndIngest({
       ts: endedAt,
       type: 'chat_end',
       raw: `${label} · ${duration}s`,
@@ -1499,7 +1519,11 @@ function wireAgentApme(
         const raw = args ? `${tool} ${args}` : tool;
         ensureCodexChatStart();
         codexToolActiveSinceLastSpinner = true;
-        core.bridgeTimeline.addEntry({
+        // addCodexEntryAndIngest fires both the timeline entry and the
+        // APME tool_call span (via timelineEntryToSpans -> ingestSpan ->
+        // ingestHook PreToolUse), incrementing turns.tool_calls. Direct
+        // bridgeTimeline.addEntry alone never reaches APME.
+        addCodexEntryAndIngest({
           ts: now,
           type: 'tool_request',
           raw: raw.length > 500 ? raw.slice(0, 497) + '...' : raw,
