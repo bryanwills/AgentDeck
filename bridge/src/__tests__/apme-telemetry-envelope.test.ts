@@ -191,6 +191,56 @@ describe('timelineEntryToSpans', () => {
     expect(spans[0].attributes['gen_ai.tool.name']).toBe('Bash');
   });
 
+  it('codex_user_prompt_submit → turn_start span', async () => {
+    const { codexHookToSpans } = await import('../apme/adapters/codex-hook.js');
+    const spans = codexHookToSpans(ctx({ agentType: 'codex-cli' }), 'codex_user_prompt_submit', {
+      message: { content: 'fix this' },
+    });
+    expect(spans).toHaveLength(1);
+    expect(spans[0].kind).toBe('turn_start');
+    expect(spans[0].attributes['agentdeck.prompt_text']).toBe('fix this');
+  });
+
+  it('codex_user_prompt_submit with /clear → task_boundary span', async () => {
+    const { codexHookToSpans } = await import('../apme/adapters/codex-hook.js');
+    const spans = codexHookToSpans(ctx({ agentType: 'codex-cli' }), 'codex_user_prompt_submit', {
+      message: { content: '/clear' },
+    });
+    expect(spans).toHaveLength(1);
+    expect(spans[0].kind).toBe('task_boundary');
+    expect(spans[0].attributes['agentdeck.boundary_signal']).toBe('clear');
+  });
+
+  it('codex_tool_start → tool_call span with tool name', async () => {
+    const { codexHookToSpans } = await import('../apme/adapters/codex-hook.js');
+    const spans = codexHookToSpans(ctx({ agentType: 'codex-cli' }), 'codex_tool_start', {
+      tool_name: 'shell',
+      tool_input: { command: 'ls' },
+    });
+    expect(spans).toHaveLength(1);
+    expect(spans[0].kind).toBe('tool_call');
+    expect(spans[0].attributes['gen_ai.tool.name']).toBe('shell');
+  });
+
+  it('codex_tool_end → tool_result span', async () => {
+    const { codexHookToSpans } = await import('../apme/adapters/codex-hook.js');
+    const spans = codexHookToSpans(ctx({ agentType: 'codex-cli' }), 'codex_tool_end', {
+      tool_name: 'shell',
+    });
+    expect(spans).toHaveLength(1);
+    expect(spans[0].kind).toBe('tool_result');
+  });
+
+  it('codex_stop / codex_session_start / codex_turn_complete → raw_step', async () => {
+    const { codexHookToSpans } = await import('../apme/adapters/codex-hook.js');
+    for (const ev of ['codex_stop', 'codex_session_start', 'codex_turn_complete']) {
+      const spans = codexHookToSpans(ctx({ agentType: 'codex-cli' }), ev, {});
+      expect(spans).toHaveLength(1);
+      expect(spans[0].kind).toBe('raw_step');
+      expect(spans[0].attributes['agentdeck.raw_event']).toBe(ev);
+    }
+  });
+
   it('translates tool_exec the same as tool_request (legacy + Codex paths)', () => {
     const spans = timelineEntryToSpans(ctx({ agentType: 'codex-cli' }), {
       ts: 6, type: 'tool_exec', raw: 'shell ls -la', agentType: 'codex-cli',

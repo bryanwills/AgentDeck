@@ -137,6 +137,62 @@ export class StateMachine extends EventEmitter {
         break;
       }
 
+      // ── Codex CLI lifecycle hooks ──
+      // Installed by hooks/src/codex-install.ts into ~/.codex/config.toml.
+      // Mirrors Claude semantics so the same downstream display/eval logic
+      // reacts to either. Schema source: Codex CLI hook payload (stdin JSON).
+      case 'codex_session_start':
+        // Reuse Claude trigger labels: the state-transition contract
+        // (DISCONNECTED|IDLE → IDLE for session_start, IDLE → PROCESSING
+        // for user_prompt_submit) is identical, so the transitions table
+        // in shared/src/states.ts doesn't need codex_*-prefixed entries.
+        this.usageTracker.start();
+        this.transition(State.IDLE, 'session_start', 'hook');
+        break;
+
+      case 'codex_user_prompt_submit':
+        this.suggestedPrompt = null;
+        this.lastValidSuggestedPrompt = null;
+        this.transition(State.PROCESSING, 'user_prompt_submit', 'hook');
+        break;
+
+      case 'codex_tool_start': {
+        const toolName = (data.tool_name as string) || null;
+        const toolInputData = data.tool_input as Record<string, unknown> | undefined;
+        this.currentTool = toolName;
+        this.toolInput = formatToolInput(toolName, toolInputData);
+        this.toolProgress = toolName ? `Using ${toolName}` : null;
+        this.emitSnapshot();
+        break;
+      }
+
+      case 'codex_tool_end': {
+        this.usageTracker.addToolCall(data);
+        this.currentTool = null;
+        this.toolInput = null;
+        this.toolProgress = null;
+        this.emitSnapshot();
+        break;
+      }
+
+      case 'codex_stop':
+        this.currentTool = null;
+        this.toolInput = null;
+        this.toolProgress = null;
+        this.options = [];
+        this.question = null;
+        this.navigable = false;
+        this.cursorIndex = 0;
+        this.transition(State.IDLE, 'stop', 'hook');
+        break;
+
+      case 'codex_turn_complete':
+        // Notify-fallback turn-completion ping. State already at IDLE via
+        // codex_stop in the normal path; this is a best-effort signal for
+        // metric counters when stop hook doesn't fire (rare).
+        this.emitSnapshot();
+        break;
+
       default:
         break;
     }

@@ -553,4 +553,81 @@ describe('StateMachine', () => {
       expect(snapshots).toHaveLength(0);
     });
   });
+
+  // === Codex CLI lifecycle hooks ===
+  // Mirror the Claude transitions so the same downstream display/eval
+  // logic reacts to either hook family. Schema source: Codex stdin JSON
+  // forwarded by ~/.codex/config.toml command hooks.
+
+  describe('codex_* hook events', () => {
+    function bootCodexToIdle() {
+      const sm = createSM();
+      sm.handleHookEvent('codex_session_start', {});
+      expect(sm.getState()).toBe(State.IDLE);
+      return sm;
+    }
+
+    it('codex_session_start → IDLE', () => {
+      const sm = createSM();
+      sm.handleHookEvent('codex_session_start', {});
+      expect(sm.getState()).toBe(State.IDLE);
+    });
+
+    it('codex_user_prompt_submit → PROCESSING', () => {
+      const sm = bootCodexToIdle();
+      sm.handleHookEvent('codex_user_prompt_submit', { prompt: 'fix this' });
+      expect(sm.getState()).toBe(State.PROCESSING);
+    });
+
+    it('codex_tool_start sets currentTool from tool_name', () => {
+      const sm = bootCodexToIdle();
+      sm.handleHookEvent('codex_user_prompt_submit', {});
+      sm.handleHookEvent('codex_tool_start', {
+        tool_name: 'shell',
+        tool_input: { command: 'ls' },
+      });
+      const snap = sm.getSnapshot();
+      expect(snap.currentTool).toBe('shell');
+    });
+
+    it('codex_tool_end clears currentTool', () => {
+      const sm = bootCodexToIdle();
+      sm.handleHookEvent('codex_user_prompt_submit', {});
+      sm.handleHookEvent('codex_tool_start', { tool_name: 'shell' });
+      sm.handleHookEvent('codex_tool_end', { tool_name: 'shell' });
+      const snap = sm.getSnapshot();
+      expect(snap.currentTool).toBeNull();
+    });
+
+    it('codex_stop → IDLE from PROCESSING', () => {
+      const sm = bootCodexToIdle();
+      sm.handleHookEvent('codex_user_prompt_submit', {});
+      expect(sm.getState()).toBe(State.PROCESSING);
+      sm.handleHookEvent('codex_stop', {});
+      expect(sm.getState()).toBe(State.IDLE);
+    });
+
+    it('codex_turn_complete is a snapshot-emit no-op for state', () => {
+      const sm = bootCodexToIdle();
+      sm.handleHookEvent('codex_user_prompt_submit', {});
+      sm.handleHookEvent('codex_stop', {});
+      // codex_turn_complete after stop should not bounce state.
+      sm.handleHookEvent('codex_turn_complete', {});
+      expect(sm.getState()).toBe(State.IDLE);
+    });
+
+    it('full codex lifecycle preserves state transitions', () => {
+      const sm = createSM();
+      sm.handleHookEvent('codex_session_start', {});
+      expect(sm.getState()).toBe(State.IDLE);
+      sm.handleHookEvent('codex_user_prompt_submit', { prompt: 'q' });
+      expect(sm.getState()).toBe(State.PROCESSING);
+      sm.handleHookEvent('codex_tool_start', { tool_name: 'shell' });
+      expect(sm.getState()).toBe(State.PROCESSING);
+      sm.handleHookEvent('codex_tool_end', { tool_name: 'shell' });
+      expect(sm.getState()).toBe(State.PROCESSING);
+      sm.handleHookEvent('codex_stop', {});
+      expect(sm.getState()).toBe(State.IDLE);
+    });
+  });
 });

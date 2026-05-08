@@ -9,6 +9,7 @@ import { BridgeCore } from './bridge-core.js';
 import { initApme } from './apme/index.js';
 import { readLastTurn as readClaudeTranscriptLastTurn } from './apme/claude-transcript-reader.js';
 import { claudeHookToSpans } from './apme/adapters/claude-hook.js';
+import { codexHookToSpans } from './apme/adapters/codex-hook.js';
 import { claudePtyParserEventToSpans, claudePtyResponseToSpan } from './apme/adapters/claude-pty.js';
 import { timelineEntryToSpans } from './apme/adapters/timeline.js';
 import type { AdapterContext as ApmeAdapterContext } from '@agentdeck/shared';
@@ -483,14 +484,17 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     switch (evt.source) {
       case 'hook':
         journal.write('hook', 'hook', { event: evt.event, data: evt.data });
-        // APME ingestion via the shared TelemetrySpan envelope. The Claude
-        // hook adapter handles `/clear` (emits a `task_boundary` span) so
-        // there's no separate splitRun branch here. Path B/C below preserve
-        // the existing PTY-vs-hook race coordination — that's about timing,
-        // not ingestion semantics, so it stays in this file.
+        // APME ingestion via the shared TelemetrySpan envelope. Codex
+        // CLI sessions go through codexHookToSpans (codex_* event prefix);
+        // Claude Code goes through claudeHookToSpans. Both adapters detect
+        // `/clear` and emit a `task_boundary` span so there's no separate
+        // splitRun branch here.
         if (apme) {
           const ctx = makeApmeAdapterCtx(apme, core.sessionId, agentType);
-          for (const span of claudeHookToSpans(ctx, evt.event, evt.data ?? {})) {
+          const spans = agentType === 'codex-cli'
+            ? codexHookToSpans(ctx, evt.event, evt.data ?? {})
+            : claudeHookToSpans(ctx, evt.event, evt.data ?? {});
+          for (const span of spans) {
             apme.collector.ingestSpan(core.sessionId, span);
           }
         }
