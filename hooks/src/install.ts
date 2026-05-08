@@ -2,6 +2,17 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
+// Re-export the Codex installer surface so callers reach it via the
+// canonical `@agentdeck/hooks` entry point alongside the Claude installer.
+export {
+  installCodexHooksIfNeeded,
+  uninstallCodexHooks,
+  migrateCodexHooks,
+  managedBlockBody as codexManagedBlockBody,
+  DEFAULT_CODEX_CONFIG_PATH,
+} from './codex-install.js';
+export type { InstallOptions as CodexInstallOptions, InstallResult as CodexInstallResult } from './codex-install.js';
+
 export const HOOK_EVENTS = [
   'SessionStart',
   'SessionEnd',

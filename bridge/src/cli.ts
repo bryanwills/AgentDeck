@@ -132,7 +132,20 @@ program
   .option('--local', 'Disable all device modules (WS only)')
   .option('--no-adb', 'Disable ADB reverse setup')
   .option('--no-postit', 'Disable terminal tab title updates')
+  .option('--no-codex-hooks', 'Skip ~/.codex/config.toml hook install')
   .action(async (opts) => {
+    // Install Codex lifecycle hooks before starting the session so the
+    // first prompt's UserPromptSubmit / Stop events reach the daemon.
+    // Idempotent: re-running with the same daemon port is a no-op.
+    if (opts.codexHooks !== false) {
+      try {
+        const { installCodexHooksIfNeeded } = await import('@agentdeck/hooks');
+        installCodexHooksIfNeeded();
+      } catch {
+        // hooks package missing or install failed — start session anyway
+        // (PTY parser fallback still works without lifecycle hooks)
+      }
+    }
     const { startSession } = await import('./index.js');
     await startSession({
       agentType: 'codex-cli',
@@ -307,7 +320,7 @@ daemon
 daemon
   .command('install')
   .description('Install macOS LaunchAgent for auto-start')
-  .action(() => {
+  .action(async () => {
     if (process.platform !== 'darwin') {
       log('LaunchAgent is macOS-only');
       process.exit(1);
@@ -318,6 +331,17 @@ daemon
     try { execSync(`launchctl unload "${PLIST_PATH}" 2>/dev/null`); } catch {}
     execSync(`launchctl load "${PLIST_PATH}"`);
     log('LaunchAgent loaded. Daemon will auto-start on login.');
+    // Install Codex lifecycle hooks parallel to the LaunchAgent install
+    // so the daemon hub gets codex_* events as soon as Codex CLI runs.
+    try {
+      const { installCodexHooksIfNeeded } = await import('@agentdeck/hooks');
+      const result = installCodexHooksIfNeeded();
+      if (result.installed) {
+        log('Codex lifecycle hooks installed in ~/.codex/config.toml');
+      } else if (result.reason) {
+        log(`Codex hooks skipped: ${result.reason}`);
+      }
+    } catch { /* hooks package not built yet — daemon install still succeeds */ }
   });
 
 daemon
