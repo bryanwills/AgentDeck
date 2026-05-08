@@ -126,8 +126,19 @@ export class ApmeCollector {
           ? ((data as Record<string, unknown>).message as Record<string, unknown>)?.content as string | undefined
           : undefined);
       const prompt = typeof rawPrompt === 'string' ? rawPrompt.slice(0, 8_000) : null;
-      // Close previous turn if open — read index BEFORE delete
-      const prevIndex = this.sessionToTurn.get(sessionId)?.index ?? -1;
+      // Close previous turn if open. Resolve prevIndex carefully: the active
+      // turn may already have been closed by an explicit closeTurnForSession
+      // (Codex `codex_stop` hook), in which case sessionToTurn is empty. Fall
+      // back to the last closed turn's row in the store so subsequent turns
+      // keep monotonically increasing turn_index instead of resetting to 0.
+      let prevIndex = this.sessionToTurn.get(sessionId)?.index ?? -1;
+      if (prevIndex === -1) {
+        const lastTurnId = this.sessionToLastTurnId.get(sessionId);
+        if (lastTurnId) {
+          const lastIdx = this.store.getTurn(lastTurnId)?.turn_index;
+          if (typeof lastIdx === 'number') prevIndex = lastIdx;
+        }
+      }
       this.closeTurn(sessionId);
       // Open new turn
       const turnIndex = prevIndex + 1;

@@ -105,6 +105,40 @@ describe('CodexTurnManager (hook-primary path)', () => {
     expect(types).toContain('chat_end');
   });
 
+  it('codex_stop does not reset subsequent turn_index numbering', () => {
+    const { mgr, collector, store, setTail } = harness;
+    setTail('first');
+
+    // Turn 0
+    collector.ingestHook('cdx-test', 'UserPromptSubmit', { message: { content: 'q1' } });
+    const turn0 = collector.getActiveTurnId('cdx-test')!;
+    mgr.onHookEvent(hookEvt('codex_user_prompt_submit', { message: { content: 'q1' } }));
+    mgr.onHookEvent(hookEvt('codex_stop', {}));
+
+    // closeTurnForSession ran, so sessionToTurn is empty here. The next
+    // UserPromptSubmit must still produce turn_index = 1, not 0.
+    setTail('second');
+    collector.ingestHook('cdx-test', 'UserPromptSubmit', { message: { content: 'q2' } });
+    const turn1 = collector.getActiveTurnId('cdx-test')!;
+    mgr.onHookEvent(hookEvt('codex_user_prompt_submit', { message: { content: 'q2' } }));
+    mgr.onHookEvent(hookEvt('codex_stop', {}));
+
+    setTail('third');
+    collector.ingestHook('cdx-test', 'UserPromptSubmit', { message: { content: 'q3' } });
+    const turn2 = collector.getActiveTurnId('cdx-test')!;
+
+    const r0 = store.getTurn(turn0) as Record<string, unknown>;
+    const r1 = store.getTurn(turn1) as Record<string, unknown>;
+    const r2 = store.getTurn(turn2) as Record<string, unknown>;
+    expect(r0.turn_index).toBe(0);
+    expect(r1.turn_index).toBe(1);
+    expect(r2.turn_index).toBe(2);
+    // turn ids unique (regression check on the bug — collisions on index 0
+    // would not produce duplicate ids but the test pins both invariants).
+    expect(turn0).not.toBe(turn1);
+    expect(turn1).not.toBe(turn2);
+  });
+
   it('codex_stop finalizes APME turn (endedAt set, tool_calls flushed)', () => {
     const { mgr, collector, store, setTail } = harness;
     setTail('answer');
