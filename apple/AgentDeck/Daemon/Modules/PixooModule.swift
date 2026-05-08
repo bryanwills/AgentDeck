@@ -457,6 +457,12 @@ actor PixooModule: DeviceModule {
     private static let settingsReadQueue = DispatchQueue(label: "dev.agentdeck.pixoo.settings-read", qos: .userInteractive)
     private static let settingsReadTimeout: DispatchTimeInterval = .milliseconds(700)
 
+    /// UI-triggered reload that bypasses the 5s polling cadence. `force` skips
+    /// the equality guard for non-IP field changes (e.g. brightness).
+    func reloadFromSettingsExternal() async {
+        await reloadDevicesFromSettings(reason: "ui-trigger", force: true)
+    }
+
     private func reloadDevicesFromSettings(reason: String, force: Bool = false) async {
         let latest = Self.loadDevices()
         guard force || latest != devices else { return }

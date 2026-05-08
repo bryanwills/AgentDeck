@@ -238,6 +238,7 @@ struct PixooSheet: View {
             devices.removeLast()
             return
         }
+        NotificationCenter.default.post(name: .pixooSettingsChanged, object: nil)
         ipInput = ""
         nameInput = ""
         testResult = nil
@@ -248,7 +249,9 @@ struct PixooSheet: View {
         devices.removeAll { $0.id == device.id }
         if !saveDevices() {
             devices = before
+            return
         }
+        NotificationCenter.default.post(name: .pixooSettingsChanged, object: nil)
     }
 
     /// Persist `devices` into the shared settings.json under `pixooDevices`.

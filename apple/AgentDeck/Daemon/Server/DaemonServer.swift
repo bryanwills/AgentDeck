@@ -30,6 +30,10 @@ import Network
 
 private let kIOMessageSystemHasPoweredOn: UInt32 = 0xe0000300
 
+extension Notification.Name {
+    static let pixooSettingsChanged = Notification.Name("dev.agentdeck.pixooSettingsChanged")
+}
+
 enum CodexHookIdentity {
     /// Codex hook payloads are documented to expose `session_id` and a
     /// thread id under one of several keys (`thread-id`, `thread_id`,
@@ -150,6 +154,7 @@ final class DaemonServer {
     private let usageAPI = UsageAPIClient.shared
     private var serialModule: SerialModule?
     private var pixooModule: PixooModule?
+    private var pixooSettingsObserver: NSObjectProtocol?
     private var adbModule: AdbModule?
     private var d200hModule: D200hHidModule?
 
@@ -834,6 +839,11 @@ final class DaemonServer {
         let pixoo = PixooModule()
         self.pixooModule = pixoo
         moduleManager.register(pixoo)
+        pixooSettingsObserver = NotificationCenter.default.addObserver(
+            forName: .pixooSettingsChanged, object: nil, queue: .main
+        ) { _ in
+            Task { await pixoo.reloadFromSettingsExternal() }
+        }
 
         // Start all
         await moduleManager.startAll()
@@ -3808,6 +3818,10 @@ final class DaemonServer {
         await logStream.stop()
         await gatewayProbe.stop()
         await displayMonitor.stop()
+        if let observer = pixooSettingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+            pixooSettingsObserver = nil
+        }
         await moduleManager.stopAll()
         if let gw = gatewayAdapter { await gw.stop() }
 
