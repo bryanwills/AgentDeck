@@ -144,16 +144,33 @@ device list 갱신 시점에 이미 결정 — `devices` 할당 + `refreshShadow
 2차 broadcast 로 분리 (commit `344f6123`). configuredDeviceCount /
 deviceIps 는 즉시, online / failures 는 RTT 후.
 
+### 후속 4 — circuit breaker 전환 broadcast 누락 (Codex stop-time review 4회차)
+
+후속 3 까지도 `onStateChanged?()` 는 `reloadDevicesFromSettings` 콜패스
+안에서만 발사. `recordPushFailure` 가 `consecutiveFailures` 를 누적해
+threshold 6회를 넘기며 `online=false` 로 flip 시킬 때, `recordPushSuccess`
+의 recovered 분기, `probeBackedOffDevices` 재진입 등은 `refreshShadow()`
+만 호출하고 broadcast 안 됨 → unreachable Pixoo 가 HUD 에서는 영원히
+online 으로 보임. trigger 를 `refreshShadow()` 자체로 이동, user-visible
+필드 (configuredDeviceCount / per-device online / failures / backedOff /
+displayDimmed) digest 비교로 변경 시에만 발사. `lastPushAtMs` 와
+`hasFrame` 은 333ms 렌더 tick 마다 flicker 라 digest 에서 제외 (broadcast
+spam 방지). `reloadDevicesFromSettings` 의 explicit `onStateChanged?()`
+호출은 redundant 라 제거 — refreshShadow 가 알아서 diff 검사
+(commit `f748a042`).
+
 ### 검증
 
 - `xcodebuild -scheme AgentDeck_macOS -destination 'platform=macOS' build`
-  BUILD SUCCEEDED (네 번 모두).
+  BUILD SUCCEEDED (다섯 번 모두).
 - 런타임 검증은 사용자가 새 빌드 재실행 후 ① Settings UI 에서 IP
   추가/제거 → swift-daemon.log `Pixoo ui-trigger: N configured device(s)`
   + 우측 HUD <1 초 내 변화 (네트워크 도달성과 무관), ② terminal 에서
   settings.json 수동 편집 → `Pixoo settings reload: ...` 로그 + WS
   구독자도 ≤ 5 초 내 반영, ③ unreachable IP 추가 시 HUD tile 즉시
-  표시 → 1 라운드 probe 후 online=false 갱신.
+  표시 → 6 회 push 실패 후 `[Pixoo] X.X.X.X offline` 로그와 함께 HUD
+  에서 online=false 로 전환, ④ 디바이스 power-cycle 후 자동 recovery
+  도 즉시 broadcast.
 
 ---
 
