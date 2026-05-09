@@ -81,9 +81,11 @@ actor PixooModule: DeviceModule {
     private var renderTask: Task<Void, Never>?
     private var probeTask: Task<Void, Never>?
     private var settingsReloadTask: Task<Void, Never>?
-    /// Fires after the device set changes (UI trigger or polling tick).
-    /// DaemonServer wires this to broadcastStateUpdate().
+    /// Fires when refreshShadow detects a user-visible field change
+    /// (configuredDeviceCount, per-device online/failures/backedOff,
+    /// displayDimmed). DaemonServer wires this to broadcastStateUpdate().
     private var onStateChanged: (@Sendable () -> Void)?
+    private var lastBroadcastDigest: String?
 
     func setOnStateChanged(_ handler: @escaping @Sendable () -> Void) {
         self.onStateChanged = handler
@@ -216,12 +218,33 @@ actor PixooModule: DeviceModule {
         shadow.readFrame()
     }
 
-    /// Rebuild the lock-protected shadow from current actor state. Call
-    /// at the end of every actor-isolated mutation that touches a field
-    /// in the snapshot dict (`devices`, `lastPushAt`, `lastPushError`,
-    /// `deviceLogStates`, `displayDimmed`).
+    /// Rebuilds the shadow snapshot. Fires `onStateChanged` when
+    /// user-visible fields differ from the last broadcast (lastPushAtMs /
+    /// hasFrame flicker every render tick and are excluded from the diff).
     private func refreshShadow() {
-        shadow.writeSnapshot(buildSnapshot())
+        let snapshot = buildSnapshot()
+        shadow.writeSnapshot(snapshot)
+        let digest = broadcastDigest(snapshot: snapshot)
+        if digest != lastBroadcastDigest {
+            lastBroadcastDigest = digest
+            onStateChanged?()
+        }
+    }
+
+    private func broadcastDigest(snapshot: [String: Any]) -> String {
+        var parts: [String] = []
+        parts.append("count=\(snapshot["configuredDeviceCount"] as? Int ?? 0)")
+        parts.append("dimmed=\((snapshot["displayDimmed"] as? Bool) ?? false)")
+        if let devs = snapshot["devices"] as? [[String: Any]] {
+            for d in devs {
+                let ip = d["ip"] as? String ?? ""
+                let online = (d["online"] as? Bool) ?? false
+                let failures = (d["failures"] as? Int) ?? 0
+                let backedOff = (d["backedOff"] as? Bool) ?? false
+                parts.append("\(ip):o=\(online),f=\(failures),b=\(backedOff)")
+            }
+        }
+        return parts.joined(separator: "|")
     }
 
     private func buildSnapshot() -> [String: Any] {
@@ -493,20 +516,17 @@ actor PixooModule: DeviceModule {
             shadow.writeFrame(nil)
             DaemonLogger.shared.debug("Pixoo", "No devices configured; watching settings.json for changes")
             refreshShadow()
-            onStateChanged?()
             return
         }
 
         let ipList = devices.map(\.ip).joined(separator: ", ")
         DaemonLogger.shared.info("Pixoo \(reason): \(devices.count) configured device(s) [\(ipList)]")
         refreshShadow()
-        onStateChanged?()
 
         for device in devices where force || previousByIP[device.ip] != device {
             await prepareDevice(device)
         }
         refreshShadow()
-        onStateChanged?()
     }
 
     static func loadDevices() -> [PixooDevice] {
