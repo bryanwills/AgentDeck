@@ -50,6 +50,8 @@ actor DaemonTimelineStore {
     }
 
     func add(_ entry: DaemonTimelineEntry) {
+        guard !Self.shouldDropLowSignalEntry(entry) else { return }
+
         // Exact dedup: same ts + type + raw within 8s.
         // Window matches shared/src/timeline.ts deduplicateEntry — covers the
         // PTY-fallback / Stop-hook race that can leak two identical chat_response
@@ -109,7 +111,17 @@ actor DaemonTimelineStore {
         guard semaphore.wait(timeout: .now() + .milliseconds(700)) == .success,
               let data = box.get(),
               let loaded = try? JSONDecoder().decode([DaemonTimelineEntry].self, from: data) else { return }
-        entries = Array(loaded.suffix(maxEntries))
+        entries = Array(loaded.filter { !Self.shouldDropLowSignalEntry($0) }.suffix(maxEntries))
+    }
+
+    private static func shouldDropLowSignalEntry(_ entry: DaemonTimelineEntry) -> Bool {
+        guard entry.agentType == "codex-cli",
+              entry.sessionId == "codex:otel-active",
+              entry.type == "tool_exec" || entry.type == "tool_request" || entry.type == "tool_resolved" else {
+            return false
+        }
+        let raw = entry.raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["tool", "tool completed", "unknown", "unknown completed", "exec", "exec completed"].contains(raw)
     }
 }
 

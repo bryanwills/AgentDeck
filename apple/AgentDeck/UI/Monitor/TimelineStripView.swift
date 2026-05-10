@@ -281,14 +281,18 @@ struct TimelineStripView: View {
                 .font(.system(size: fontScale.sub, design: .monospaced))
                 .foregroundStyle(TerrariumHUD.subtext.opacity(isChatEnd ? 0.4 : 0.5))
 
-            Image(systemName: sfSymbol(for: iconKey))
-                .font(.system(size: fontScale.sub, weight: .bold))
-                .foregroundStyle(iconColor.opacity(isChatEnd ? 0.6 : 1))
-                .frame(width: 12, height: 12)
-                .accessibilityLabel(iconKey.rawValue)
-                // Animate the running spinner. SF Symbols .rotate effect is
-                // GPU-driven and respects system Reduce Motion automatically.
-                .symbolEffect(.rotate, options: .repeating, isActive: iconKey == .running)
+            // Animate the leading icon when the row is in flight (running
+            // state). `.symbolEffect(.rotate)` would be cleaner but requires
+            // iOS 18 / macOS 15; the project's iOS deploy target is 17.0,
+            // so use a TimelineView-driven rotationEffect that works on iOS 17+.
+            RotatingTimelineIcon(
+                symbolName: sfSymbol(for: iconKey),
+                font: .system(size: fontScale.sub, weight: .bold),
+                color: iconColor.opacity(isChatEnd ? 0.6 : 1),
+                size: 12,
+                isRotating: iconKey == .running
+            )
+            .accessibilityLabel(iconKey.rawValue)
 
             AgentBrandIcon(
                 agentType: group.entry.agentType,
@@ -482,10 +486,13 @@ struct TimelineStripView: View {
                 // Header: type badge chip + timestamp
                 HStack(spacing: 6) {
                     HStack(spacing: 3) {
-                        Image(systemName: sfSymbol(for: iconKey))
-                            .font(.system(size: fontScale.label, weight: .bold))
-                            .foregroundStyle(.white)
-                            .symbolEffect(.rotate, options: .repeating, isActive: iconKey == .running)
+                        RotatingTimelineIcon(
+                            symbolName: sfSymbol(for: iconKey),
+                            font: .system(size: fontScale.label, weight: .bold),
+                            color: .white,
+                            size: nil,
+                            isRotating: iconKey == .running
+                        )
                         Text(formatType(group.entry.type))
                             .font(.system(size: fontScale.label, weight: .bold, design: .monospaced))
                             .foregroundStyle(.white)
@@ -660,76 +667,23 @@ struct TimelineStripView: View {
     // MARK: - Helpers
 
     private func timelineDisplayGroups(_ groups: [GroupedEntry]) -> [GroupedEntry] {
-        groups.filter { group in
-            let entry = group.entry
-            // Task hierarchy markers are never elided — they're the user's
-            // primary navigation handle on the timeline (the evaluation unit).
-            if entry.type == .taskStart || entry.type == .taskEnd { return true }
-            if entry.type == .chatStart {
-                return !hasLaterCompletion(for: entry, in: groups)
-            }
-            if entry.type == .chatEnd {
-                return !hasPairedChatResponse(for: entry, in: groups)
-            }
-            return true
-        }
+        timelineDisplayGroupsForDashboard(groups)
     }
 
     private func hasLaterCompletion(for start: TimelineEntry, in groups: [GroupedEntry]) -> Bool {
-        groups.contains { other in
-            guard isCompletionEntry(other.entry) else { return false }
-            guard other.entry.ts >= start.ts else { return false }
-            return sameTimelineContext(start, other.entry)
-        }
+        timelineHasLaterCompletion(for: start, in: groups)
     }
 
     private func hasPairedChatResponse(for end: TimelineEntry, in groups: [GroupedEntry]) -> Bool {
-        groups.contains { other in
-            guard other.entry.type == .chatResponse else { return false }
-            guard sameTimelineContext(end, other.entry) else { return false }
-            if let endStartedAt = end.startedAt,
-               let responseStartedAt = other.entry.startedAt,
-               abs(endStartedAt - responseStartedAt) < 1000 {
-                return true
-            }
-            return abs(end.ts - other.entry.ts) <= 10_000
-        }
+        timelineHasPairedChatResponse(for: end, in: groups)
     }
 
     private func isCompletionEntry(_ entry: TimelineEntry) -> Bool {
-        entry.type == .chatResponse || entry.type == .chatEnd || entry.type == .modelResponse
+        timelineIsCompletionEntry(entry)
     }
 
     private func sameTimelineContext(_ a: TimelineEntry, _ b: TimelineEntry) -> Bool {
-        // 1) taskId — strongest grouping key; if both carry one, only same task groups.
-        if let at = a.taskId, !at.isEmpty, let bt = b.taskId, !bt.isEmpty {
-            return at == bt
-        }
-        // 2) runId — adapter-emitted generation id (OpenClaw Gateway).
-        let ar = a.runId?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let br = b.runId?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let ar, !ar.isEmpty, let br, !br.isEmpty { return ar == br }
-
-        // 3) sessionId — once either side has a sessionId, that's authoritative.
-        // Earlier code fell through to (projectName, agentType) when only one
-        // side had a sessionId, which collapsed two real sessions in the same
-        // project into a single timeline row. Tighten: if either side carries
-        // a sessionId, we require both to match.
-        let asid = a.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let bsid = b.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let aHasSid = asid?.isEmpty == false
-        let bHasSid = bsid?.isEmpty == false
-        if aHasSid || bHasSid {
-            return aHasSid && bHasSid && asid == bsid
-        }
-
-        // 4) Both sessionless — last-resort grouping by (projectName, agentType).
-        // Only legal for legacy entries predating the multi-session attribution work.
-        if let ap = a.projectName, let bp = b.projectName, !ap.isEmpty, ap == bp,
-           a.agentType == b.agentType {
-            return true
-        }
-        return a.projectName == nil && b.projectName == nil && a.agentType == b.agentType
+        timelineSameContext(a, b)
     }
 
     private func lifecycleDetailRows(for entry: TimelineEntry) -> [(label: String, value: String)] {
@@ -818,6 +772,152 @@ struct TimelineStripView: View {
         case .taskStart: return "TASK"
         case .taskEnd: return "TASK ✓"
         case .unknown(let raw): return raw.uppercased()
+        }
+    }
+}
+
+func timelineDisplayGroupsForDashboard(_ groups: [GroupedEntry]) -> [GroupedEntry] {
+    groups.filter { group in
+        let entry = group.entry
+        // Task hierarchy markers are never elided — they're the user's
+        // primary navigation handle on the timeline (the evaluation unit).
+        if entry.type == .taskStart || entry.type == .taskEnd { return true }
+        if timelineIsLowSignalEntry(entry) { return false }
+        if entry.type == .chatStart {
+            if !timelineHasLaterCompletion(for: entry, in: groups) { return true }
+            return timelineIsMeaningfulChatStart(entry)
+        }
+        if entry.type == .chatEnd {
+            return !timelineHasPairedChatResponse(for: entry, in: groups)
+        }
+        return true
+    }
+}
+
+func timelineHasLaterCompletion(for start: TimelineEntry, in groups: [GroupedEntry]) -> Bool {
+    groups.contains { other in
+        guard timelineIsCompletionEntry(other.entry) else { return false }
+        guard other.entry.ts >= start.ts else { return false }
+        return timelineSameContext(start, other.entry)
+    }
+}
+
+func timelineHasPairedChatResponse(for end: TimelineEntry, in groups: [GroupedEntry]) -> Bool {
+    groups.contains { other in
+        guard other.entry.type == .chatResponse else { return false }
+        guard timelineSameContext(end, other.entry) else { return false }
+        if let endStartedAt = end.startedAt,
+           let responseStartedAt = other.entry.startedAt,
+           abs(endStartedAt - responseStartedAt) < 1000 {
+            return true
+        }
+        return abs(end.ts - other.entry.ts) <= 10_000
+    }
+}
+
+func timelineIsCompletionEntry(_ entry: TimelineEntry) -> Bool {
+    entry.type == .chatResponse || entry.type == .chatEnd || entry.type == .modelResponse
+}
+
+func timelineSameContext(_ a: TimelineEntry, _ b: TimelineEntry) -> Bool {
+    // 1) taskId — strongest grouping key; if both carry one, only same task groups.
+    if let at = a.taskId, !at.isEmpty, let bt = b.taskId, !bt.isEmpty {
+        return at == bt
+    }
+    // 2) runId — adapter-emitted generation id (OpenClaw Gateway).
+    let ar = a.runId?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let br = b.runId?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let ar, !ar.isEmpty, let br, !br.isEmpty { return ar == br }
+
+    // 3) sessionId — once either side has a sessionId, that's authoritative.
+    let asid = a.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let bsid = b.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let aHasSid = asid?.isEmpty == false
+    let bHasSid = bsid?.isEmpty == false
+    if aHasSid || bHasSid {
+        return aHasSid && bHasSid && asid == bsid
+    }
+
+    // 4) Both sessionless — last-resort grouping by (projectName, agentType).
+    // Only legal for legacy entries predating the multi-session attribution work.
+    if let ap = a.projectName, let bp = b.projectName, !ap.isEmpty, ap == bp,
+       a.agentType == b.agentType {
+        return true
+    }
+    return a.projectName == nil && b.projectName == nil && a.agentType == b.agentType
+}
+
+func timelineIsMeaningfulChatStart(_ entry: TimelineEntry) -> Bool {
+    let raw = entry.raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !raw.isEmpty else { return false }
+    let normalized = raw.lowercased()
+    let syntheticStarts: Set<String> = [
+        "prompt sent",
+        "codex turn started",
+        "starting chat",
+        "connected",
+        "resumed",
+    ]
+    return !syntheticStarts.contains(normalized)
+}
+
+func timelineIsLowSignalEntry(_ entry: TimelineEntry) -> Bool {
+    guard entry.agentType == "codex-cli",
+          entry.sessionId == "codex:otel-active",
+          entry.type == .toolExec || entry.type == .toolRequest || entry.type == .toolResolved else {
+        return false
+    }
+    let raw = entry.raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return ["tool", "tool completed", "unknown", "unknown completed", "exec", "exec completed"].contains(raw)
+}
+
+/// SF Symbol icon that rotates continuously when `isRotating == true`.
+/// Drives the rotation off `TimelineView(.animation)`'s context date so we
+/// don't need iOS 18's `.symbolEffect(.rotate)` (project iOS deploy target
+/// is 17.0). When `isRotating == false` it short-circuits to a plain Image
+/// so non-running rows pay zero animation cost.
+private struct RotatingTimelineIcon: View {
+    let symbolName: String
+    let font: Font
+    let color: Color
+    /// Optional explicit frame width/height. When nil, the icon sizes to its
+    /// font (used inside the detail-pane chip where the layout already pads).
+    let size: CGFloat?
+    let isRotating: Bool
+
+    private static let rotationPeriod: Double = 1.8 // seconds per full revolution
+
+    var body: some View {
+        Group {
+            if isRotating {
+                TimelineView(.animation) { context in
+                    let elapsed = context.date.timeIntervalSince1970
+                    let phase = elapsed.truncatingRemainder(dividingBy: Self.rotationPeriod)
+                    let degrees = (phase / Self.rotationPeriod) * 360.0
+                    iconImage
+                        .rotationEffect(.degrees(degrees))
+                }
+            } else {
+                iconImage
+            }
+        }
+        .modifier(SizedFrame(size: size))
+    }
+
+    private var iconImage: some View {
+        Image(systemName: symbolName)
+            .font(font)
+            .foregroundStyle(color)
+    }
+}
+
+private struct SizedFrame: ViewModifier {
+    let size: CGFloat?
+    func body(content: Content) -> some View {
+        if let size {
+            content.frame(width: size, height: size)
+        } else {
+            content
         }
     }
 }

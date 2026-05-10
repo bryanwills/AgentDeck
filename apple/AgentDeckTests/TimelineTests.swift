@@ -233,6 +233,134 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(store.entries[0].ts, 50)
     }
 
+    func testDashboardDisplayKeepsMeaningfulPromptAfterCompletion() {
+        let entries = [
+            TimelineEntry(
+                ts: 1000,
+                type: .chatStart,
+                raw: "hello",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                sessionId: "s1",
+                startedAt: 1000
+            ),
+            TimelineEntry(
+                ts: 2000,
+                type: .chatResponse,
+                raw: "Hello. What do you want to work on?",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                sessionId: "s1",
+                startedAt: 1000,
+                endedAt: 2000
+            ),
+            TimelineEntry(
+                ts: 2001,
+                type: .chatEnd,
+                raw: "Completed · 1s",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                sessionId: "s1",
+                startedAt: 1000,
+                endedAt: 2001
+            ),
+        ]
+
+        let displayed = timelineDisplayGroupsForDashboard(groupConsecutive(entries))
+        XCTAssertEqual(displayed.map(\.entry.type), [.chatStart, .chatResponse])
+        XCTAssertEqual(displayed.first?.entry.raw, "hello")
+    }
+
+    func testDashboardDisplayStillHidesSyntheticCompletedStart() {
+        let entries = [
+            TimelineEntry(
+                ts: 1000,
+                type: .chatStart,
+                raw: "Prompt sent",
+                agentType: "claude-code",
+                sessionId: "s1",
+                startedAt: 1000
+            ),
+            TimelineEntry(
+                ts: 2000,
+                type: .chatEnd,
+                raw: "Completed · 1s",
+                agentType: "claude-code",
+                sessionId: "s1",
+                startedAt: 1000,
+                endedAt: 2000
+            ),
+        ]
+
+        let displayed = timelineDisplayGroupsForDashboard(groupConsecutive(entries))
+        XCTAssertEqual(displayed.map(\.entry.type), [.chatEnd])
+    }
+
+    func testDashboardDisplayDropsAnonymousCodexToolNoise() {
+        let entries = [
+            TimelineEntry(
+                ts: 1000,
+                type: .toolExec,
+                raw: "tool completed",
+                agentType: "codex-cli",
+                sessionId: "codex:otel-active"
+            ),
+            TimelineEntry(
+                ts: 2000,
+                type: .chatStart,
+                raw: "Fix timeline grouping",
+                agentType: "codex-cli",
+                sessionId: "codex:thread-123456"
+            ),
+        ]
+
+        let displayed = timelineDisplayGroupsForDashboard(groupConsecutive(entries))
+        XCTAssertEqual(displayed.count, 1)
+        XCTAssertEqual(displayed[0].entry.raw, "Fix timeline grouping")
+    }
+
+    #if os(macOS)
+    func testDaemonTimelineStoreDropsAnonymousCodexToolNoise() async {
+        let store = DaemonTimelineStore()
+        await store.add(DaemonTimelineEntry(
+            ts: 1000,
+            type: "tool_exec",
+            raw: "exec completed",
+            detail: nil,
+            approvalId: nil,
+            status: nil,
+            agentType: "codex-cli",
+            repeatCount: nil,
+            automated: nil,
+            projectName: nil,
+            sessionId: "codex:otel-active",
+            startedAt: nil,
+            endedAt: nil,
+            runId: nil
+        ))
+        await store.add(DaemonTimelineEntry(
+            ts: 2000,
+            type: "chat_start",
+            raw: "Fix timeline grouping",
+            detail: nil,
+            approvalId: nil,
+            status: nil,
+            agentType: "codex-cli",
+            repeatCount: nil,
+            automated: nil,
+            projectName: "AgentDeck",
+            sessionId: "codex:thread-123456",
+            startedAt: 2000,
+            endedAt: nil,
+            runId: nil
+        ))
+
+        let entries = await store.getAll()
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].raw, "Fix timeline grouping")
+    }
+    #endif
+
     // MARK: - Type Icons (semantic key + ASCII fallback)
 
     func testTimelineIconKeys() {
