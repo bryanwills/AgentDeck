@@ -46,8 +46,7 @@
 | Codex 세션 모니터링 (lifecycle hooks + fallback) | ✅ | ✅ | NSOpenPanel 명시 동의 후 `~/.codex/config.toml` 에 fenced TOML 블록만 편집. Codex lifecycle hooks → `/hooks/codex_*`, optional notify → `/hooks/codex_turn_complete`, optional OTel → `/otel/v1/traces` |
 | 외부에서 이미 실행 중인 Claude/Codex 세션 passive discovery | ❌ | ✅ | `ps`/`lsof`/`/proc` + `~/.claude`/`~/.codex` transcript/rollout JSONL read 가 필요하므로 Node CLI daemon 전용. App Store 단독 앱은 hook/lifecycle 로 opt-in 된 세션만 표시하며 결함 안내 없이 완결 UI 유지 |
 | OpenCode 세션 모니터링 | ❌ | ✅ | OpenCode 의 random-port 서버에 lock-file 이 없어 다중 인스턴스 discovery 불가. CLI/Node bridge 경로만 |
-| Claude Code 세션 실행 (`Launch Session`) | ❌ | ✅ | App Store 는 Terminal 실행을 만들지 않고 hook 모니터링 안내만 표시 |
-| Codex / OpenCode 세션 실행 | ❌ | ✅ | `agentdeck` CLI 가 PATH 에 있어야 함 |
+| Claude / Codex / OpenCode 세션 실행 | ❌ | ✅ | App Store 는 세션 실행 진입점 없음 — `Launch Session` UI 는 2026-05-10 일괄 제거. App Store 빌드는 사용자가 자기 워크스페이스에서 실행한 agent 세션을 hook/lifecycle 로 passive monitor 만 함 |
 | OpenClaw Gateway pairing (WS 모드) | ✅ | ✅ | `ws://127.0.0.1:18789` 클라이언트 — RPC error + ws close 1008 reason 기반 auto-fallback (device 서명 거부 시 token-only retry) 포함 |
 | OpenClaw shared-token Keychain 저장 (paste) | ✅ | — | Settings → OpenClaw → Advanced 의 SecureField → `OpenClawGatewayTokenStore` (Keychain service `…openclaw.gateway-token`) |
 | OpenClaw shared-token import from JSON config | ✅ | — | Settings → OpenClaw troubleshoot row 의 NSOpenPanel — 사용자가 명시 선택한 JSON 파일에서 `auth.token` 한 필드만 추출 → Keychain. `com.apple.security.files.user-selected.read-write` 외 entitlement 추가 없음; `startAccessingSecurityScopedResource()` + `defer stop` 페어링; `directoryURL` 은 `getpwuid(getuid()).pw_dir` 의 real home (Powerbox navigation hint, sandbox app 의 file-system access 아님) |
@@ -60,6 +59,8 @@
 
 | Component | App Store | CLI |
 |---|:---:|:---:|
+| Minimum OS (macOS) | macOS 15 Sequoia | macOS 15 Sequoia (Node ≥22; see README) |
+| Minimum OS (iOS/iPadOS) | iOS 17 | — |
 | In-process Swift daemon (macOS) | ✅ | — |
 | Node.js bridge process | — | ✅ |
 | Data directory | `~/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck/` | `~/.agentdeck/` |

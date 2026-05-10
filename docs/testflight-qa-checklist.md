@@ -9,7 +9,7 @@ Hand this checklist to internal testers (you + 2-3 trusted reviewers) before sub
 ## Tester setup
 
 - Clean Apple ID or a test account (optional but ideal — a first-time install reveals onboarding gaps).
-- macOS 14+ on Apple Silicon or Intel; or iOS 17+ on iPhone/iPad.
+- macOS 15+ on Apple Silicon or Intel; or iOS 17+ on iPhone/iPad.
 - Claude Code CLI installed: `npm install -g @anthropic-ai/claude-code`.
 - Internet connection (for initial Claude Code install + any remote agents).
 - Microphone (any built-in Mac mic or iPad mic works).
@@ -30,7 +30,7 @@ Before starting, note your macOS version, device model, and any non-default acce
 - [ ] **A3**. Pane 3 mentions iOS companion + the word "Preview Devices". Clicking "Get Started" closes the sheet; `hasSeenOnboarding` flips to true.
 - [ ] **A4**. Onboarding **does not reappear** on subsequent launches.
 - [ ] **A5**. After onboarding closes, the **notification permission NSAlert** fires within ~1 second (not during onboarding). Message: "Enable AgentDeck notifications?" Grant or decline — either way, dialog does not reappear.
-- [ ] **A6**. Dashboard renders with an empty terrarium. An overlay card says "Start your first session." with "Launch Session" and "Preview Devices" buttons.
+- [ ] **A6**. Dashboard renders with an empty terrarium. An overlay card says "Start your first session." with a "Preview Devices" button and a "Got it" dismiss. The body text reads "Sessions appear automatically once the bridge picks one up — each one shows up here as a creature in the terrarium." (no Launch button, no terminal-launch prompt).
 - [ ] **A7**. Clicking "Preview Devices" opens a 1100×760 window with 14 device categories in the sidebar. Changing agent/state/session-count picker updates all device previews live. No hardware required.
 
 ---
@@ -49,8 +49,8 @@ Before starting, note your macOS version, device model, and any non-default acce
 
 > Goal: Confirm the core value proposition — monitoring a live session — actually works.
 
-- [ ] **C1**. Menu bar → **Launch Session**. App Store build shows guidance that AgentDeck does not launch Terminal scripts and that Claude Code should be started by the user in Terminal.
-- [ ] **C2**. Confirm no Terminal window, `.command` file, AppleScript prompt, or child process is created by AgentDeck.
+- [ ] **C1**. Menu bar pill bar contains **Dashboard** and **Evaluation** only — no "Launch Session" entry. The Dashboard pill toggles the dashboard window's visibility (filled when open, outlined when closed).
+- [ ] **C2**. Confirm no Terminal window, `.command` file, AppleScript prompt, or child process is created by AgentDeck during normal use.
 - [ ] **C3**. Open Settings → Claude Code Hooks. Click **Enable Claude Code Hooks…**
 - [ ] **C4**. An NSAlert explains what will be written. Click Continue.
 - [ ] **C5**. An NSOpenPanel opens at `~/.claude/`. Select `settings.local.json`. AgentDeck writes hooks and Settings shows a green "Hooks installed" status.
@@ -135,7 +135,7 @@ Skip if you don't have OpenClaw 2026.4.14+ installed.
 > Goal: Prove we haven't regressed the 2.5.2 compliance work.
 
 - [ ] **I1**. Open Activity Monitor → find the AgentDeck process. Under the **Open Files and Ports** tab, confirm no subprocess children are spawned during normal use (no `bash`, `node`, `adb`, `whisper-cli`, `openclaw`).
-- [ ] **I2**. Try the menu bar's "Launch Session" — no process invocation should appear. It should only show the App Store-safe guidance dialog.
+- [ ] **I2**. Confirm the menu bar contains no "Launch Session" affordance and no other UI text directs the user to install or launch a companion CLI in Terminal.
 - [ ] **I3**. Verify data is in the App Sandbox data container:
   ```bash
   ls ~/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application\ Support/AgentDeck/

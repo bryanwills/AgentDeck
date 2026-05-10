@@ -81,20 +81,18 @@ struct MenuBarTopologyList: View {
     }
 
     private var hubNode: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             AgentDeckLogo(size: 16, color: Pal.hubAccent)
-            VStack(alignment: .leading, spacing: 0) {
-                Text("AgentDeck")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundColor(TerrariumHUD.text)
-                Text(verbatim: ":\(hubPortText)")
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundColor(TerrariumHUD.subtext)
-            }
+            Text("AgentDeck")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(TerrariumHUD.text)
+            Text(verbatim: ":\(hubPortText)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(TerrariumHUD.subtext)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 6).fill(Pal.hubFill)
         )

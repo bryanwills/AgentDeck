@@ -10,7 +10,7 @@ window.AGENTDECK_I18N = {
       developers: "개발자용",
     },
     hero: {
-      kicker: "App Store 심사 대기 중 · macOS 14+ / iPadOS 17+",
+      kicker: "App Store 심사 대기 중 · macOS 15+ / iPadOS 17+",
       title: "Stop Chatting.\nStart Steering.",
       subtitle:
         "AI 코딩 에이전트의 세션 상태 · 도구 호출 · 사용량 · 평가를 한 화면에서 확인하는 실시간 대시보드.",
@@ -170,7 +170,7 @@ window.AGENTDECK_I18N = {
       developers: "For developers",
     },
     hero: {
-      kicker: "App Store review pending · macOS 14+ / iPadOS 17+",
+      kicker: "App Store review pending · macOS 15+ / iPadOS 17+",
       title: "Stop Chatting.\nStart Steering.",
       subtitle:
         "A real-time dashboard for your AI coding agents — session state, tool calls, usage, and quality scores at a glance.",
@@ -330,7 +330,7 @@ window.AGENTDECK_I18N = {
       developers: "開発者向け",
     },
     hero: {
-      kicker: "App Store審査中 · macOS 14+ / iPadOS 17+",
+      kicker: "App Store審査中 · macOS 15+ / iPadOS 17+",
       title: "Stop Chatting.\nStart Steering.",
       subtitle:
         "AIコーディングエージェントのセッション状態・ツール呼び出し・使用量・評価を1画面で確認するリアルタイムダッシュボード。",

@@ -116,7 +116,7 @@
   "OS": [
     {
       "Platform": "mac",
-      "MinimumVersion": "14.0"
+      "MinimumVersion": "15.0"
     }
   ],
   "Nodejs": {

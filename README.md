@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/host-macOS%2014%2B-lightgrey.svg" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/host-macOS%2015%2B-lightgrey.svg" alt="macOS 15+">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green.svg" alt="Node.js >= 22">
   <img src="https://img.shields.io/badge/Stream%20Deck%2B-8%20keys%20%2B%204%20encoders-black.svg?logo=elgato" alt="Stream Deck+">
   <img src="https://img.shields.io/badge/Android-10%2B%20(tablet%20%2B%20e--ink)-3DDC84.svg?logo=android&logoColor=white" alt="Android 10+">
@@ -44,11 +44,11 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 
 | | Requirement |
 |---|---|
-| **Platform** | macOS 14+ (Sonoma) — Windows/Linux not supported |
+| **Platform** | macOS 15+ (Sequoia) — Windows/Linux not supported |
 | **Hardware** | Elgato Stream Deck+ (8 keys, 4 encoders, LCD touch strip) |
 | **Terminal** | iTerm2 (required for session management and voice paste) |
 | **Android** | *(Optional)* Android 10+ tablet or e-ink reader for remote dashboard |
-| **Apple** | *(Optional)* iOS 17+ / iPadOS 17+ / macOS 14+ for SwiftUI dashboard |
+| **Apple** | *(Optional)* iOS 17+ / iPadOS 17+ / macOS 15+ for SwiftUI dashboard |
 | **TUI** | *(Optional)* Any terminal with truecolor support for `agentdeck dashboard` |
 
 ---
@@ -191,7 +191,7 @@ On macOS, the AgentDeck Dashboard SwiftUI app ships with a full **in-process Swi
 
 | Item | Required | Install |
 |------|----------|---------|
-| **macOS 14+** (Sonoma) | Yes | Windows/Linux not supported |
+| **macOS 15+** (Sequoia) | Yes | Windows/Linux not supported |
 | **Xcode Command Line Tools** | Yes | `xcode-select --install` (node-pty native build) |
 | **Node.js** >= 22 | Yes | `brew install node` |
 | **pnpm** >= 9 | Yes | `npm install -g pnpm` |

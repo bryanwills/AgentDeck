@@ -4,8 +4,8 @@
 // so SwiftUI's default light system surfaces never peek through around
 // window edges or behind NavigationSplitView chrome.
 //
-// Scope: popup windows (Launch Session, Pair iPad, Device Preview,
-// ESP32 provisioning, Pixoo setup). Settings (native macOS preferences)
+// Scope: popup windows (Pair iPad, Device Preview, ESP32 provisioning,
+// Pixoo setup). Settings (native macOS preferences)
 // and the APME dashboard (WKWebView) are intentionally exempt — the
 // former reads better as a standard prefs window, the latter is styled
 // from bridge/src/apme/dashboard-html.ts.
@@ -30,7 +30,7 @@ let aquariumGradient = LinearGradient(
 ///      window including the titlebar band. Without this the titlebar
 ///      falls back to default vibrancy over a light desktop → the jarring
 ///      "light titlebar / dark content" mismatch users complained about.
-///      macOS 14+ only — matches our deployment target.
+///      Available on our minimum target (macOS 15+).
 ///   2. `.background(aquariumGradient.ignoresSafeArea())` fills the
 ///      content area. Redundant with #1 for the main canvas, but lets
 ///      NavigationSplitView detail panels keep their fill when the
@@ -48,19 +48,14 @@ struct AquariumSurfaceModifier: ViewModifier {
     }
 }
 
-/// Optional macOS-only helper: extends the aquarium gradient into the
-/// window titlebar band so the system vibrancy can't leak a light band
-/// above dark content. `.containerBackground(for: .window)` is
-/// macOS 15+, so on 14.x this is a no-op and the user sees the standard
-/// titlebar vibrancy (still readable thanks to `preferredColorScheme(.dark)`).
+/// macOS-only helper: extends the aquarium gradient into the window
+/// titlebar band so the system vibrancy can't leak a light band above
+/// dark content. `.containerBackground(for: .window)` requires macOS 15,
+/// which matches our deployment target.
 private struct WindowTitlebarBackground: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)
-        if #available(macOS 15.0, *) {
-            content.containerBackground(aquariumGradient, for: .window)
-        } else {
-            content
-        }
+        content.containerBackground(aquariumGradient, for: .window)
         #else
         content
         #endif

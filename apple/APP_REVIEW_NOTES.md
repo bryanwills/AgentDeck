@@ -111,9 +111,9 @@ The iOS app (same bundle family `bound.serendipity.agentdeck.dashboard`) is a re
 
 No account required. To see the app's features:
 
-1. Launch the app. A first-run onboarding sheet walks the user through the value prop, available AI agents, and iPad pairing. Dismissing it opens the empty dashboard with a prompt to "Launch Session" or "Preview Devices".
+1. Launch the app. A first-run onboarding sheet walks the user through the value prop, available AI agents, and iPad pairing. Dismissing it opens the empty dashboard with a prompt to "Preview Devices".
 2. Click "Preview Devices" from the menu bar to see how AgentDeck renders sessions on 14 different hardware targets — no real hardware required.
-3. Click "Launch Session" to see the App Store-safe guidance: AgentDeck does not launch Terminal scripts or command-line tools. After hooks are enabled, Claude Code sessions the user starts independently appear automatically in the dashboard.
+3. After hooks are enabled, sessions the user starts independently appear automatically in the dashboard. AgentDeck never launches Terminal scripts or command-line tools itself.
 4. Click "Pair iPad" to show a QR code the iOS companion app can scan.
 5. Open Settings → Hardware Setup to see the in-app flows for ESP32 and Pixoo provisioning (no subprocess calls; writes serial config directly).
 

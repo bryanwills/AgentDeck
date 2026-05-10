@@ -56,15 +56,6 @@ struct AgentDeckApp: App {
         .defaultPosition(.center)
         .defaultSize(width: 1280, height: 840)
 
-        Window("Launch Session", id: "launch-session") {
-            LaunchSessionDialog(daemonPort: daemonService.port)
-                .environmentObject(daemonService)
-                .environmentObject(preferences)
-        }
-        .defaultPosition(.center)
-        .defaultSize(width: 420, height: 340)
-        .windowResizability(.contentSize)
-
         // APME evaluation dashboard — embedded WKWebView pointing at the
         // in-process daemon's /apme HTTP endpoint. Opens from the menu bar
         // without launching an external browser.
@@ -74,6 +65,10 @@ struct AgentDeckApp: App {
         }
         .defaultPosition(.center)
         .defaultSize(width: 1100, height: 760)
+        // Never auto-open at app launch, even if macOS state-restoration
+        // remembers a prior open instance. The Evaluation window is opt-in
+        // from the menu bar.
+        .defaultLaunchBehavior(.suppressed)
 
         // Device Preview window — sidebar-driven gallery of every device type
         // AgentDeck can drive. Users without hardware can see what sessions
@@ -118,7 +113,7 @@ struct AgentDeckApp: App {
         #if os(macOS)
         // Preferences live in a regular `Window` scene instead of the
         // system `Settings` scene so the chrome matches Device Preview +
-        // Launch Session: NavigationSplitView's auto sidebar-toggle
+        // Pair iPad: NavigationSplitView's auto sidebar-toggle
         // lands in the titlebar toolbar instead of drifting into the
         // sidebar header. The trade-off is that we wire up the
         // `App → Settings…` menu item and ⌘, shortcut ourselves via
@@ -131,6 +126,10 @@ struct AgentDeckApp: App {
         }
         .defaultPosition(.center)
         .defaultSize(width: 820, height: 580)
+        // Never auto-open at app launch. Settings is opened deliberately
+        // via ⌘, or the menu bar gear button; macOS shouldn't restore it
+        // for a returning user.
+        .defaultLaunchBehavior(.suppressed)
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
