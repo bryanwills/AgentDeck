@@ -179,15 +179,18 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
    */
   private findDaemonPort(): number | null {
     this.lastProbeAt = Date.now();
+    const dataDirOverride = process.env.AGENTDECK_DATA_DIR;
     const home = homedir();
-    const candidates = [
-      join(home, '.agentdeck', 'daemon.json'),
-      join(home, 'Library', 'Containers',
-           'bound.serendipity.agentdeck.dashboard', 'Data',
-           'Library', 'Application Support', 'AgentDeck', 'daemon.json'),
-      join(home, 'Library', 'Group Containers',
-           'group.bound.serendipity.agentdeck.dashboard', 'daemon.json'),
-    ];
+    const candidates = dataDirOverride
+      ? [join(dataDirOverride, 'daemon.json')]
+      : [
+          join(home, '.agentdeck', 'daemon.json'),
+          join(home, 'Library', 'Containers',
+               'bound.serendipity.agentdeck.dashboard', 'Data',
+               'Library', 'Application Support', 'AgentDeck', 'daemon.json'),
+          join(home, 'Library', 'Group Containers',
+               'group.bound.serendipity.agentdeck.dashboard', 'daemon.json'),
+        ];
     for (const daemonFile of candidates) {
       try {
         const data = readFileSync(daemonFile, 'utf-8');

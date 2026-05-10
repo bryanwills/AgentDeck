@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { probeJudgeBackend, sanitizeForMlx, callJudgeWithMeta } from '../apme/runner.js';
 import { DEFAULT_APME_CONFIG, type ApmeJudgeConfig } from '../apme/settings.js';
 
@@ -12,6 +15,8 @@ import { DEFAULT_APME_CONFIG, type ApmeJudgeConfig } from '../apme/settings.js';
 
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_API_KEY = process.env.ANTHROPIC_API_KEY;
+const ORIGINAL_DATA_DIR = process.env.AGENTDECK_DATA_DIR;
+let dataDir: string;
 
 function makeFetchMock(routes: Record<string, { ok: boolean; status?: number; body?: unknown } | (() => Response)>): typeof fetch {
   return vi.fn(async (url: string | URL | Request) => {
@@ -31,11 +36,16 @@ function makeFetchMock(routes: Record<string, { ok: boolean; status?: number; bo
 }
 
 beforeEach(() => {
+  dataDir = mkdtempSync(join(tmpdir(), 'apme-judge-probe-'));
+  process.env.AGENTDECK_DATA_DIR = dataDir;
   delete process.env.ANTHROPIC_API_KEY;
 });
 
 afterEach(() => {
   globalThis.fetch = ORIGINAL_FETCH;
+  rmSync(dataDir, { recursive: true, force: true });
+  if (ORIGINAL_DATA_DIR === undefined) delete process.env.AGENTDECK_DATA_DIR;
+  else process.env.AGENTDECK_DATA_DIR = ORIGINAL_DATA_DIR;
   if (ORIGINAL_API_KEY === undefined) delete process.env.ANTHROPIC_API_KEY;
   else process.env.ANTHROPIC_API_KEY = ORIGINAL_API_KEY;
   vi.restoreAllMocks();

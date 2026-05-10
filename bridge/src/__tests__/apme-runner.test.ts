@@ -149,7 +149,22 @@ describe('effectiveJudgeModelTag', () => {
 describe('callJudge foundationModels routing', () => {
   // Each test stubs global.fetch; restore between runs.
   const origFetch = globalThis.fetch;
-  afterEach(() => { globalThis.fetch = origFetch; });
+  const origDataDir = process.env.AGENTDECK_DATA_DIR;
+  let settingsDir: string;
+
+  beforeEach(() => {
+    settingsDir = mkdtempSync(join(tmpdir(), 'apme-fm-routing-'));
+    process.env.AGENTDECK_DATA_DIR = settingsDir;
+    clearMlxSettingsCache();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+    rmSync(settingsDir, { recursive: true, force: true });
+    if (origDataDir === undefined) delete process.env.AGENTDECK_DATA_DIR;
+    else process.env.AGENTDECK_DATA_DIR = origDataDir;
+    clearMlxSettingsCache();
+  });
 
   async function invokeCallJudge(backend: ApmeConfig['judge']['backend'], opts: Partial<ApmeConfig['judge']> = {}) {
     const mod = await import('../apme/runner.js');

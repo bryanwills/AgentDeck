@@ -5,15 +5,16 @@
  *
  * Math.random is mocked for deterministic bubble/school initialization.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import {
-  initTerrarium,
-  setOctopi,
-  setCrayfish,
-  setJellyfish,
-  updateTerrarium,
-  renderTerrariumFrame,
-} from '../tui/terrarium.js';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
+
+type TerrariumModule = typeof import('../tui/terrarium.js');
+
+let initTerrarium: TerrariumModule['initTerrarium'];
+let setOctopi: TerrariumModule['setOctopi'];
+let setCrayfish: TerrariumModule['setCrayfish'];
+let setJellyfish: TerrariumModule['setJellyfish'];
+let updateTerrarium: TerrariumModule['updateTerrarium'];
+let renderTerrariumFrame: TerrariumModule['renderTerrariumFrame'];
 
 let randomIndex = 0;
 const RANDOM_SEQ = [
@@ -26,6 +27,29 @@ const RANDOM_SEQ = [
 ];
 
 let randomSpy: ReturnType<typeof vi.spyOn>;
+const originalColorTerm = process.env.COLORTERM;
+const originalTerm = process.env.TERM;
+const originalLang = process.env.LANG;
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+beforeAll(async () => {
+  process.env.COLORTERM = 'truecolor';
+  process.env.TERM = 'xterm-direct';
+  process.env.LANG = process.env.LANG || 'en_US.UTF-8';
+  vi.resetModules();
+
+  const terrarium = await import('../tui/terrarium.js');
+  initTerrarium = terrarium.initTerrarium;
+  setOctopi = terrarium.setOctopi;
+  setCrayfish = terrarium.setCrayfish;
+  setJellyfish = terrarium.setJellyfish;
+  updateTerrarium = terrarium.updateTerrarium;
+  renderTerrariumFrame = terrarium.renderTerrariumFrame;
+});
 
 beforeEach(() => {
   randomIndex = 0;
@@ -38,6 +62,12 @@ beforeEach(() => {
 
 afterEach(() => {
   randomSpy.mockRestore();
+});
+
+afterAll(() => {
+  restoreEnv('COLORTERM', originalColorTerm);
+  restoreEnv('TERM', originalTerm);
+  restoreEnv('LANG', originalLang);
 });
 
 describe('TUI terrarium snapshots', () => {
