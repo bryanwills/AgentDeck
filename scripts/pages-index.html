@@ -22,6 +22,11 @@ h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem; letter-spacing: -
 .link-card .icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
 .platforms { display: flex; gap: 2rem; justify-content: center; color: var(--dim); font-size: 0.8rem; margin-bottom: 2rem; flex-wrap: wrap; }
 .platforms span { display: flex; align-items: center; gap: 0.4rem; }
+.policy { max-width: 720px; margin: 2rem auto 0; padding: 1.5rem; background: var(--surface); border-radius: 12px; color: var(--dim); font-size: 0.88rem; }
+.policy h2 { color: var(--text); font-size: 1.1rem; margin-bottom: 0.75rem; letter-spacing: 0; }
+.policy h3 { color: var(--text); font-size: 0.92rem; margin: 1rem 0 0.25rem; }
+.policy p { margin-bottom: 0.65rem; }
+.policy a { color: var(--accent); text-decoration: none; }
 .footer { color: var(--dim); font-size: 0.75rem; margin-top: auto; padding-top: 3rem; }
 .footer a { color: var(--accent); text-decoration: none; }
 </style>
@@ -63,8 +68,41 @@ h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem; letter-spacing: -
   </div>
 </div>
 
+<section id="privacy" class="policy" aria-labelledby="privacy-title">
+  <h2 id="privacy-title">Privacy Policy</h2>
+  <p><strong>Effective date:</strong> May 24, 2026</p>
+  <p>
+    AgentDeck Dashboard is a local monitoring and evaluation app for AI coding agent sessions. It does not require an account,
+    does not show ads, does not sell personal data, and does not operate a remote analytics service.
+  </p>
+
+  <h3>Data Stored On Device</h3>
+  <p>
+    AgentDeck stores app settings, local pairing state, session timeline data, cached evaluation results, and optional hardware
+    configuration in the app sandbox on the user's device.
+  </p>
+
+  <h3>Optional Integrations</h3>
+  <p>
+    Users may opt in to local integrations such as Claude Code hooks, Codex lifecycle hooks, OpenClaw Gateway pairing,
+    iPhone/iPad dashboard pairing, voice input, ESP32, Pixoo, or D200H hardware support. User-selected hook configuration files
+    are accessed only after explicit file picker consent.
+  </p>
+
+  <h3>Network, Voice, and Credentials</h3>
+  <p>
+    Local network connections are used for same-device hooks and paired iPhone/iPad dashboard display. Optional local services
+    are contacted only when configured by the user. Voice input uses Apple's speech APIs for the requested command flow. Optional
+    credentials, such as an Anthropic Admin API key or OpenClaw shared token, are stored in the macOS Keychain and used only for
+    the configured feature.
+  </p>
+
+  <h3>Contact</h3>
+  <p>Questions: <a href="mailto:puritysb@gmail.com">puritysb@gmail.com</a></p>
+</section>
+
 <div class="footer">
-  Built by <a href="https://github.com/puritysb">puritysb</a>
+  Built by <a href="https://github.com/puritysb">puritysb</a> · <a href="#privacy">Privacy Policy</a>
 </div>
 </body>
 </html>

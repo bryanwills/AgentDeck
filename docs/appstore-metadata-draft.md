@@ -305,7 +305,7 @@ No demo account required — the app doesn't have user accounts. Reviewer can op
 | Copyright | `© 2026 Serendipity Bound` (or your legal entity) |
 | Support URL | `https://github.com/puritysb/AgentDeck/issues` |
 | Marketing URL | `https://github.com/puritysb/AgentDeck` |
-| Privacy Policy URL | Required by Apple — add a short privacy statement page or repurpose the repo README's privacy section. GitHub Gist works. |
+| Privacy Policy URL | `https://puritysb.github.io/AgentDeck/#privacy` |
 
 If you don't have a privacy policy page yet, the minimum Apple-acceptable content:
 - State: "AgentDeck Dashboard does not collect, store, or transmit any personal data."
