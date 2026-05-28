@@ -147,6 +147,12 @@ final class ApmeCollector {
                   let runId = sessionToRun.removeValue(forKey: hookSession) else { return }
             activeHookSession = nil
             closeTurn(runId: runId) // close last turn
+            // Ensure task_start is emitted before closing, so task_end is also emitted.
+            // Without this, a session that never triggered emitDeferredTaskStartIfNeeded
+            // (e.g., single-turn session with no TodoWrite) would have task_start
+            // omitted, leaving closeTask's timelineEmitted=false → no task_end emitted
+            // → Timeline UI showing "in progress" forever.
+            emitDeferredTaskStartIfNeeded()
             // Close the active task with session_end boundary. Fires the
             // task_judge listener wired by the runner.
             closeTask(boundarySignal: "session_end")
