@@ -40,8 +40,28 @@ final class ModuleManager {
     func wakeAll() async {
         await withTaskGroup(of: Void.self) { group in
             for module in modules {
+                let name = module.name
                 group.addTask {
-                    DaemonLogger.shared.debug("Modules", "Wake recovery: \(module.name)")
+                    let delaySec: Double
+                    switch name {
+                    case "d200h":
+                        delaySec = 0.0
+                    case "serial":
+                        delaySec = 1.0
+                    case "pixoo":
+                        delaySec = 2.0
+                    case "adb":
+                        delaySec = 3.0
+                    default:
+                        delaySec = 0.0
+                    }
+                    
+                    if delaySec > 0.0 {
+                        DaemonLogger.shared.debug("Modules", "Staggering wake recovery for \(name) by \(delaySec)s")
+                        try? await Task.sleep(for: .seconds(delaySec))
+                    }
+                    
+                    DaemonLogger.shared.debug("Modules", "Wake recovery: \(name)")
                     await module.handleWake()
                 }
             }

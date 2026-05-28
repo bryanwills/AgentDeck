@@ -503,7 +503,7 @@ actor OpenClawAdapter {
                 if authStatus.status == "device_auth_invalid"
                     && !disableDeviceAuthForNextConnect {
                     disableDeviceAuthForNextConnect = true
-                    DaemonLogger.shared.error("OpenClaw: DEVICE_AUTH_INVALID — retrying without device auth")
+                    DaemonLogger.shared.info("OpenClaw: DEVICE_AUTH_INVALID — retrying without device auth")
                     // Keep amber "Connecting…" while we retry; don't surface
                     // device_auth_invalid red on a state we'll auto-recover from.
                     emitAuthStatus("gateway_reachable", requestId: nil, message: nil)
@@ -564,6 +564,7 @@ actor OpenClawAdapter {
                 return
             }
             persistHelloAuth(payload)
+            disableDeviceAuthForNextConnect = false // Reset fallback flag on successful connect!
             markConnectedIfNeeded()
             emitAuthStatus("connected", requestId: nil, message: nil)
             requestBaselineState()
@@ -676,7 +677,7 @@ actor OpenClawAdapter {
                 // required, unauthorized) that the UI can act on.
                 disableDeviceAuthForNextConnect = true
                 emitAuthStatus("gateway_reachable", requestId: nil, message: nil)
-                DaemonLogger.shared.error("OpenClaw: signature rejected — retrying without device auth")
+                DaemonLogger.shared.info("OpenClaw: signature rejected — retrying without device auth")
                 reconnectDelay = 1
             } else if lc.contains("device identity required") {
                 emitAuthStatus("pairing_required", requestId: nil, message: reason)
@@ -965,7 +966,7 @@ actor OpenClawAdapter {
         } else {
             disableDeviceAuthForNextConnect = true
             reconnectDelay = 1
-            DaemonLogger.shared.error("OpenClaw connect timed out — retrying without device auth")
+            DaemonLogger.shared.info("OpenClaw connect timed out — retrying without device auth")
             emitAuthStatus(
                 "gateway_reachable",
                 requestId: nil,

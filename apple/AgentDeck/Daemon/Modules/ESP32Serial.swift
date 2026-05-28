@@ -521,13 +521,6 @@ actor ESP32Serial {
                         minInterval: 30
                     )
                     sendDeviceInfoRequest(to: &connections[i])
-                } else if connections[i].lastReadAt == nil,
-                          now.timeIntervalSince(connections[i].openedAt) > Self.deviceInfoReconnectSec {
-                    DaemonLogger.shared.info("ESP32 \(port): no serial data after \(Int(Self.deviceInfoReconnectSec))s — reconnecting")
-                    connections[i].readToken.invalidate()
-                    connections[i].connected = false
-                    try? connections[i].writeHandle?.close()
-                    // Will be pruned + reopened on next pollForDevices() cycle
                 }
             }
         }
@@ -646,17 +639,22 @@ actor ESP32Serial {
     private func writePayload(_ payload: [UInt8], to fd: Int32) -> SerialWriteResult {
         var offset = 0
         var retryCount = 0
+        let chunkSize = 128
         while offset < payload.count {
+            let bytesToWrite = min(payload.count - offset, chunkSize)
             let written = payload.withUnsafeBufferPointer { buffer in
                 Darwin.write(
                     fd,
                     buffer.baseAddress!.advanced(by: offset),
-                    payload.count - offset
+                    bytesToWrite
                 )
             }
             if written > 0 {
                 offset += written
                 retryCount = 0
+                if offset < payload.count {
+                    usleep(10_000) // 10ms delay between chunks to let ESP32 RX buffer drain
+                }
                 continue
             }
 
@@ -710,19 +708,32 @@ actor ESP32Serial {
             e.removeValue(forKey: "agentCapabilities")
             e.removeValue(forKey: "billingType")
             e.removeValue(forKey: "remoteUrl")
+            e.removeValue(forKey: "moduleHealth")
+            e.removeValue(forKey: "subscriptions")
+            e.removeValue(forKey: "options")
+            e.removeValue(forKey: "suggestedPrompt")
+            e.removeValue(forKey: "question")
+            e.removeValue(forKey: "pairingUrl")
+            e.removeValue(forKey: "gatewayDeviceId")
+            e.removeValue(forKey: "gatewayAuthRequestId")
+            e.removeValue(forKey: "gatewayAuthMessage")
+            e.removeValue(forKey: "voiceAssistantText")
+            e.removeValue(forKey: "voiceAssistantResponseText")
             // Keep gatewayAvailable and gatewayHasError — ESP32 needs them for crayfish rendering
         } else if type == "sessions_list" {
-            // Keep only essential session info to avoid hitting serial limits
+            // Keep only essential session info and exclude dead sessions to avoid hitting serial limits
             if let sessions = e["sessions"] as? [[String: Any]] {
-                e["sessions"] = sessions.map { s in
-                    [
-                        "id": s["id"] ?? "",
-                        "projectName": s["projectName"] ?? "",
-                        "agentType": s["agentType"] ?? "",
-                        "state": s["state"] ?? "",
-                        "alive": s["alive"] ?? true
-                    ]
-                }
+                e["sessions"] = sessions
+                    .filter { s in (s["alive"] as? Bool) ?? true }
+                    .map { s in
+                        [
+                            "id": s["id"] ?? "",
+                            "projectName": s["projectName"] ?? "",
+                            "agentType": s["agentType"] ?? "",
+                            "state": s["state"] ?? "",
+                            "alive": s["alive"] ?? true
+                        ]
+                    }
             }
         }
         if Self.needsLegacyCodexAppAlias(connection.deviceInfo) {

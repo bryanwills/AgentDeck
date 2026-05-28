@@ -374,14 +374,21 @@ actor PixooModule: DeviceModule {
             guard isProbeDue(device.ip) else { continue }
             let payload: [String: Any] = ["Command": "Channel/GetAllConf"]
             if await postCommand(device.ip, payload: payload, logFailures: false) != nil {
-                DaemonLogger.shared.info("[Pixoo] \(device.ip) recovered — resuming push")
-                var state = deviceLogStates[device.ip] ?? DeviceLogState()
-                state.consecutiveFailures = 0
-                state.backoffUntil = nil
-                state.lastFailureMessage = nil
-                deviceLogStates[device.ip] = state
+                DaemonLogger.shared.info("[Pixoo] \(device.ip) recovered — waiting for 2s stabilization grace period before resuming pushes")
                 devicePicIds.removeValue(forKey: device.ip)
                 await prepareDevice(device)
+                
+                // Keep device in backed-off state for 2 seconds to let its HTTP stack stabilize
+                try? await Task.sleep(for: .seconds(2))
+                
+                if devices.contains(where: { $0.ip == device.ip }) {
+                    var state = deviceLogStates[device.ip] ?? DeviceLogState()
+                    state.consecutiveFailures = 0
+                    state.backoffUntil = nil
+                    state.lastFailureMessage = nil
+                    deviceLogStates[device.ip] = state
+                    DaemonLogger.shared.info("[Pixoo] \(device.ip) stabilization grace period complete — resuming frame pushes")
+                }
             } else {
                 lastPushError = "probe failed for \(device.ip)"
                 recordPushFailure(ip: device.ip, reason: "probe failed")
