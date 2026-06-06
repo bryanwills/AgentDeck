@@ -7,6 +7,10 @@
 #include "../../state/agent_state.h"
 #include "config.h"
 
+#if defined(BOARD_TTGO_T_DISPLAY)
+#include "ttgo_overlay.h"
+#endif
+
 static lv_obj_t* screen = nullptr;
 static lv_obj_t* connScrim = nullptr;
 static lv_obj_t* connCard = nullptr;
@@ -79,8 +83,13 @@ lv_obj_t* aquariumCreate() {
     // Create terrarium canvas (full screen)
     Terrarium::init(screen);
 
+#if defined(BOARD_TTGO_T_DISPLAY)
+    // TTGO: Use simplified overlay (state + activity switching)
+    TTGO::Overlay::init(screen);
+#else
     // Create HUD overlay
     HUD::init(screen);
+#endif
 
     // Connection overlay — full-screen scrim + centered card (Android/Apple style)
     connScrim = lv_obj_create(screen);
@@ -98,7 +107,9 @@ lv_obj_t* aquariumCreate() {
 
     // Card container (centered in scrim)
     connCard = lv_obj_create(connScrim);
-#if IS_ROUND
+#if defined(BOARD_TTGO_T_DISPLAY)
+    lv_obj_set_width(connCard, 200);
+#elif IS_ROUND
     lv_obj_set_width(connCard, 220);
 #else
     lv_obj_set_width(connCard, 260);
@@ -193,8 +204,13 @@ void aquariumUpdate(float dt) {
     // Render terrarium frame
     Terrarium::render(dt);
 
+#if defined(BOARD_TTGO_T_DISPLAY)
+    // TTGO: Update simplified overlay
+    TTGO::Overlay::update();
+#else
     // Update HUD data
     HUD::update();
+#endif
 }
 
 void aquariumSetConnectionStatus(ConnOverlayStatus status) {
