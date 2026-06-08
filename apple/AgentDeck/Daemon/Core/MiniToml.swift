@@ -32,9 +32,17 @@ enum MiniToml {
         let fenceRange = locateFence(in: lines)
 
         let bodyLines = body.isEmpty ? [] : splitLines(body)
-        let replacement = [openFence] + bodyLines + [closeFence]
+        var replacement = [openFence] + bodyLines + [closeFence]
 
         if let range = fenceRange {
+            let innerStart = range.lowerBound + 1
+            let innerEnd = max(innerStart, range.upperBound - 1)
+            let innerLines = innerStart < innerEnd ? Array(lines[innerStart..<innerEnd]) : []
+            let preservedHookState = extractCodexHookState(from: innerLines)
+            if !preservedHookState.isEmpty {
+                replacement.append("")
+                replacement.append(contentsOf: preservedHookState)
+            }
             lines.replaceSubrange(range, with: replacement)
         } else {
             // Pad with a blank line for readability when appending to a
@@ -109,6 +117,7 @@ enum MiniToml {
             if line == openFence { insideFence = true; continue }
             if line == closeFence { insideFence = false; continue }
             if insideFence { continue }
+            if table == "hooks", isCodexHookStateHeader(line) { continue }
             let ns = line as NSString
             if regex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) != nil {
                 return true
@@ -157,6 +166,45 @@ enum MiniToml {
         // from the open fence to the end as managed.
         let end = lines[start...].firstIndex(of: closeFence) ?? (lines.count - 1)
         return start..<(end + 1)
+    }
+
+    private static func extractCodexHookState(from lines: [String]) -> [String] {
+        var out: [String] = []
+        var capturing = false
+        for line in lines {
+            let tableHeader = isTableHeader(line)
+            if isCodexHookStateHeader(line) {
+                capturing = true
+                out.append(line)
+                continue
+            }
+            if capturing, tableHeader {
+                break
+            }
+            if capturing {
+                out.append(line)
+            }
+        }
+        while let last = out.last, isTrailingNonDataLine(last) {
+            out.removeLast()
+        }
+        return out
+    }
+
+    private static func isCodexHookStateHeader(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed == "[hooks.state]"
+            || (trimmed.hasPrefix("[hooks.state.") && trimmed.hasSuffix("]"))
+    }
+
+    private static func isTableHeader(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.hasPrefix("[") && trimmed.hasSuffix("]")
+    }
+
+    private static func isTrailingNonDataLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty || trimmed.hasPrefix("#")
     }
 }
 #endif

@@ -26,5 +26,56 @@ final class SessionLauncherTests: XCTestCase {
             DaemonService.resolvedSessionOverridePort(configuredPort: 9124, actualPort: 9124)
         )
     }
+
+    func testDeviceSummaryMirrorsExternalDaemonModuleHealth() {
+        let summary = DeviceSummary.make(fromModuleHealth: [
+            "adb": [
+                "available": true,
+                "devices": ["android-1", "android-2"],
+                "reverseReadyCount": 1,
+                "lastError": NSNull(),
+            ],
+            "d200h": [
+                "connected": true,
+                "managerOpened": true,
+                "buttonPressCount": 2,
+            ],
+            "pixoo": [
+                "configuredDeviceCount": 1,
+                "deviceIps": ["192.168.68.110"],
+                "hasFrame": true,
+                "devices": [
+                    [
+                        "ip": "192.168.68.110",
+                        "online": true,
+                        "failures": 0,
+                        "backedOff": false,
+                    ],
+                ],
+            ],
+            "serial": [
+                "connections": [
+                    [
+                        "port": "/dev/cu.usbmodem1",
+                        "connected": true,
+                        "deviceInfo": [
+                            "board": "ips_35",
+                            "version": "1.0.0",
+                            "wifiConnected": true,
+                        ],
+                    ],
+                ],
+            ],
+        ])
+
+        XCTAssertEqual(summary.d200h?.status, .connected)
+        XCTAssertEqual(summary.pixoo.count, 1)
+        XCTAssertEqual(summary.pixoo.first?.status, .connected)
+        XCTAssertEqual(summary.serial.count, 1)
+        XCTAssertEqual(summary.serial.first?.status, .connected)
+        XCTAssertEqual(summary.adb.count, 2)
+        XCTAssertEqual(summary.adb.first?.status, .connected)
+        XCTAssertEqual(summary.adb.last?.status, .reconnecting)
+    }
 }
 #endif

@@ -92,6 +92,7 @@ class LightRaySystem : Creature {
     override fun draw(scope: DrawScope) {
         val w = scope.size.width
         val h = scope.size.height
+        val baseWidth = minOf(w, h * 2f)
 
         if (envState == EnvironmentVisualState.DARK) return
 
@@ -102,8 +103,8 @@ class LightRaySystem : Creature {
             if (ray.alpha < 0.001f) continue
 
             val cx = ray.x * w
-            val topHalf = ray.topWidth * w * 0.5f
-            val botHalf = ray.bottomWidth * w * 0.5f
+            val topHalf = ray.topWidth * baseWidth * 0.5f
+            val botHalf = ray.bottomWidth * baseWidth * 0.5f
             val botY = ray.length * h
 
             val path = rayPaths[i]

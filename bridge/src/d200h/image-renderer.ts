@@ -53,6 +53,10 @@ export async function initRenderer(): Promise<void> {
   await loadResvg();
 }
 
+export function isResvgLoaded(): boolean {
+  return Resvg !== null;
+}
+
 // --- SVG → 196×196 PNG rasterization ---
 
 function svgToPng(svg144: string): Buffer {
@@ -221,12 +225,13 @@ function renderModeButton(mode: string): string {
 /** Renders a uniform "dimmed" offline placeholder for a single key slot. */
 function renderOfflineSlot(hero = false): string {
   if (hero) {
-    // Central hero card: large OFFLINE + DAEMON STOPPED
+    // Central hero card: large OFFLINE + Open AgentDeck (action tone, matches Stream Deck)
+    const colors = { bg: '#07170f', panel: '#12331f', icon: '#bbf7d0', accent: '#22c55e', text: '#dcfce7', sub: '#86efac' };
     const elements = [
-      `<text x="72" y="54" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="#4b5563">OFFLINE</text>`,
-      `<text x="72" y="82" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#374151">DAEMON STOPPED</text>`,
+      `<text x="72" y="54" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="${colors.text}">OFFLINE</text>`,
+      `<text x="72" y="82" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="${colors.sub}">Open AgentDeck</text>`,
     ].join('');
-    return svgFrame('#0f0f0f', elements);
+    return svgFrame(colors.bg, elements);
   }
   // Regular key: uniform dark dim
   return svgFrame('#0a0a0a', `<text x="72" y="80" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#1f2937">--</text>`);

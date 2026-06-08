@@ -13,8 +13,11 @@
 
 import type { DeviceModule, BridgeContext } from './types.js';
 import { buildZipPackets, buildBrightnessPacket, buildSmallWindowPacket, parseIncoming, CMD } from '../d200h/hid-protocol.js';
-import { renderDashboardZip, stateHash, initRenderer } from '../d200h/image-renderer.js';
+import { renderDashboardZip, stateHash, initRenderer, isResvgLoaded } from '../d200h/image-renderer.js';
 import { debug } from '../logger.js';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
 const TAG = 'd200h';
 
@@ -89,11 +92,29 @@ export class D200hModule implements DeviceModule {
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   private commandHandler: ((cmd: any) => void) | null = null;
   private lastStateHash = '';
-  private lastState: any = null;
+  private lastState: any = {
+    state: 'IDLE',
+    projectName: '',
+    modelName: '',
+    mode: 'default',
+    agentType: 'daemon',
+    fiveHourPercent: 0,
+    sevenDayPercent: 0,
+    totalTokens: 0,
+    totalCost: 0,
+    options: [],
+    currentTool: '',
+  };
   private lastSessions: any[] = [];
   private connected = false;
   private isUpdating = false;
   private pendingUpdate: any = null;
+  private writeOK = 0;
+  private writeFail = 0;
+  private buttonPressCount = 0;
+  private hidReportCount = 0;
+  private lastWriteError: string | null = null;
+  private lastOpenError: string | null = null;
 
   async shouldActivate(config: 'auto' | boolean): Promise<boolean> {
     if (config === false) return false;
@@ -163,12 +184,13 @@ export class D200hModule implements DeviceModule {
     return {
       connected: this.connected,
       managerOpened: this.hidModule !== null,
-      writeOK: 0,
-      writeFail: 0,
-      buttonPressCount: 0,
-      hidReportCount: 0,
-      lastWriteError: null,
-      lastOpenError: null,
+      resvgLoaded: isResvgLoaded(),
+      writeOK: this.writeOK,
+      writeFail: this.writeFail,
+      buttonPressCount: this.buttonPressCount,
+      hidReportCount: this.hidReportCount,
+      lastWriteError: this.lastWriteError,
+      lastOpenError: this.lastOpenError,
     };
   }
 
@@ -218,6 +240,7 @@ export class D200hModule implements DeviceModule {
     try {
       // Open consumer control interface (display updates + some events)
       this.consumerDevice = new this.hidModule.HID(info.consumerPath);
+      this.lastOpenError = null;
       debug(TAG, `Connected to D200H (serial: ${info.serial}) via Consumer Control`);
 
       // Try to open keyboard interface (button events) — may fail on macOS
@@ -225,14 +248,27 @@ export class D200hModule implements DeviceModule {
         try {
           this.keyboardDevice = new this.hidModule.HID(info.keyboardPath);
           debug(TAG, 'Opened keyboard interface for button events');
-        } catch {
-          debug(TAG, 'Keyboard interface not available (macOS restriction) — buttons via Consumer interface only');
+        } catch (err: any) {
+          const errMsg = err?.message ?? String(err);
+          this.lastOpenError = `macOS Input Monitoring Permission Required: Please enable Input Monitoring for your terminal (e.g., iTerm, Terminal) in System Settings -> Privacy & Security -> Input Monitoring. (Error: ${errMsg})`;
+          debug(TAG, `Keyboard interface not available: ${this.lastOpenError}`);
+
+          // Trigger system preferences open once to guide the user
+          if (process.platform === 'darwin') {
+            import('child_process').then(({ exec }) => {
+              exec('open "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"', (e) => {
+                if (e) debug(TAG, `Failed to open System Settings: ${e.message}`);
+              });
+            }).catch(() => {});
+          }
         }
       }
 
       this.connected = true;
 
       // Start reading events
+      // If keyboard interface failed to open, buttons won't register, but
+      // readFrom still safely monitors events that might come via consumer control.
       this.startReading();
 
       // Start keep-alive
@@ -241,11 +277,12 @@ export class D200hModule implements DeviceModule {
       // Set initial brightness
       this.writeToDevice(buildBrightnessPacket(100));
 
-      // Send current state if available
-      if (this.lastState) {
-        this.updateDisplay(this.lastState);
-      }
+      // Send initial display update (render offline/idle layout immediately)
+      this.updateDisplay(this.lastState).catch((err) => {
+        debug(TAG, `Initial display update failed: ${err}`);
+      });
     } catch (err) {
+      this.lastOpenError = String(err);
       debug(TAG, `Failed to connect: ${err}`);
       this.disconnect();
     }
@@ -282,8 +319,10 @@ export class D200hModule implements DeviceModule {
       const buf = Buffer.from(data as any);
       const event = parseIncoming(buf);
       if (!event) return;
+      this.hidReportCount++;
 
       if (event.type === 'button' && event.data.pressed) {
+        this.buttonPressCount++;
         const isMultiSession = this.lastSessions.length > 1;
         const commands = isMultiSession ? MULTI_SESSION_COMMANDS : SINGLE_SESSION_COMMANDS;
         let cmd = commands[event.data.index];
@@ -331,11 +370,31 @@ export class D200hModule implements DeviceModule {
 
     try {
       const zip = renderDashboardZip(stateEvt);
+
+      // Save ZIP to ~/.agentdeck/d200h-dumps/ for preview
+      try {
+        const dumpDir = join(homedir(), '.agentdeck', 'd200h-dumps');
+        if (!existsSync(dumpDir)) {
+          mkdirSync(dumpDir, { recursive: true });
+        }
+        const stamp = new Date().toISOString().replace(/[-T:]/g, '').split('.')[0];
+        const modeKey = (stateEvt?.mode || 'default').toLowerCase();
+        const sanitizedState = (stateEvt?.state || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+        const sanitizedProject = (stateEvt?.projectName || '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+        const sanitized = [sanitizedState, sanitizedProject].filter(Boolean).join('-');
+        const filename = `${stamp}-set_buttons-${modeKey}-${zip.length}b-${sanitized}.zip`;
+        writeFileSync(join(dumpDir, filename), zip);
+      } catch (dumpErr) {
+        debug(TAG, `Failed to dump ZIP to ~/.agentdeck/d200h-dumps/: ${dumpErr}`);
+      }
+
       const packets = buildZipPackets(zip);
 
       for (const pkt of packets) {
         if (!this.connected) break;
-        this.writeToDevice(pkt);
+        if (!this.writeToDevice(pkt)) {
+          throw new Error(this.lastWriteError ?? 'D200H write failed');
+        }
         await new Promise(r => setTimeout(r, 8)); // Prevent hardware buffer overflow
       }
 
@@ -366,10 +425,17 @@ export class D200hModule implements DeviceModule {
     if (!this.consumerDevice) return false;
 
     try {
-      // node-hid v3 expects number[] for write
-      this.consumerDevice.write(Array.from(packet));
+      // node-hid on macOS requires the first byte to be the Report ID.
+      // If the device does not use Report IDs (like D200H), the first byte must be 0x00.
+      // node-hid will strip this 0x00 before sending the remaining 1024 bytes to the device.
+      const dataToWrite = [0x00, ...Array.from(packet)];
+      this.consumerDevice.write(dataToWrite);
+      this.writeOK++;
+      this.lastWriteError = null;
       return true;
     } catch (err: any) {
+      this.writeFail++;
+      this.lastWriteError = err?.message ?? String(err);
       if (err?.message?.includes('could not write') || err?.message?.includes('could not send')) {
         debug(TAG, 'Write failed — device disconnected');
         this.disconnect();

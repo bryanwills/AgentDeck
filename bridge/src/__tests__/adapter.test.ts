@@ -369,7 +369,7 @@ describe('OpenClawAdapter gateway protocol', () => {
       id: 'init-1',
       ok: true,
       payload: {
-        protocol: 3,
+        protocol: 4,
         server: { version: '0.1.0', connId: 'test' },
         features: { methods: ['chat.send', 'sessions.list'], events: ['chat'] },
       },
@@ -388,11 +388,12 @@ describe('OpenClawAdapter gateway protocol', () => {
     expect(sent.type).toBe('req');
     expect(sent.method).toBe('connect');
     expect(sent.id).toBe('init-1');
-    expect(sent.params.minProtocol).toBe(3);
-    expect(sent.params.maxProtocol).toBe(3);
+    expect(sent.params.minProtocol).toBe(4);
+    expect(sent.params.maxProtocol).toBe(4);
     expect(sent.params.client.id).toBe('gateway-client');
     expect(sent.params.client.mode).toBe('backend');
     expect(sent.params.client.displayName).toBe('AgentDeck');
+    expect(sent.params.client.deviceFamily).toBe('mac');
     expect(sent.params.role).toBe('operator');
     expect(sent.params.caps).toContain('tool-events');
   });

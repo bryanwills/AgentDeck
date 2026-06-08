@@ -418,6 +418,10 @@ export class ApmeRunner {
       const job = this.queue.shift()!;
       try {
         const result = await this.runOne(job);
+        if (!result.layer1Ran && !result.layer2Ran && result.overall === undefined) {
+          debug('APME', `runner no-op runId=${job.runId} (no eval rows produced)`);
+          continue;
+        }
         for (const fn of this.listeners) {
           try { fn(result); } catch { /* ignore */ }
         }

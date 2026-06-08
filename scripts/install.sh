@@ -47,11 +47,26 @@ else
   MISSING_REQUIRED=1
 fi
 
-# Claude Code CLI
+# Supported coding-agent CLIs
+HAS_CLAUDE=0
+HAS_CODEX=0
 if command -v claude &>/dev/null; then
   ok "Claude Code CLI found"
+  HAS_CLAUDE=1
 else
-  fail "Claude Code CLI not found — install with: npm install -g @anthropic-ai/claude-code"
+  warn "Claude Code CLI not found — Claude sessions will be unavailable"
+  echo "     Install with: npm install -g @anthropic-ai/claude-code"
+fi
+
+if command -v codex &>/dev/null; then
+  ok "Codex CLI found"
+  HAS_CODEX=1
+else
+  warn "Codex CLI not found — Codex sessions will be unavailable"
+fi
+
+if [ "$HAS_CLAUDE" -eq 0 ] && [ "$HAS_CODEX" -eq 0 ]; then
+  fail "No supported coding-agent CLI found — install Claude Code or Codex before running AgentDeck."
   MISSING_REQUIRED=1
 fi
 
@@ -110,9 +125,20 @@ fi
 echo ""
 
 # --- Install hooks ---
-info "Installing Claude Code hooks..."
-node "$PROJECT_DIR/hooks/dist/install.js"
-ok "Hooks installed"
+if [ "$HAS_CLAUDE" -eq 1 ]; then
+  info "Installing Claude Code hooks..."
+  node "$PROJECT_DIR/hooks/dist/install.js"
+  ok "Claude Code hooks installed"
+else
+  warn "Skipping Claude Code hooks because claude is not installed"
+fi
+
+if [ "$HAS_CODEX" -eq 1 ]; then
+  info "Installing Codex observation hooks..."
+  node -e "import('$PROJECT_DIR/hooks/dist/install.js').then(m => { const r = m.installCodexHooksIfNeeded(); if (r.installed) console.log('Codex lifecycle hooks installed in ~/.codex/config.toml'); else console.log('Codex hooks skipped: ' + (r.reason || 'unknown reason')); })"
+else
+  warn "Skipping Codex hooks because codex is not installed"
+fi
 
 echo ""
 
@@ -163,11 +189,12 @@ echo "========================================="
 echo ""
 echo "  Next steps:"
 echo "  1. Restart Stream Deck app"
-echo "  2. Add 'Claude Code' actions to your Stream Deck profile"
-echo "  3. Run 'agentdeck claude' in terminal to start the bridge"
+echo "  2. Add AgentDeck actions to your Stream Deck profile"
+echo "  3. Run 'agentdeck claude' or 'agentdeck codex' in terminal to start the bridge"
 echo ""
 echo "  Usage:"
 echo "    agentdeck claude   Start bridge + Claude"
+echo "    agentdeck codex    Start bridge + Codex"
 echo "    agentdeck status   Check status"
 echo "    agentdeck stop     Stop bridge"
 echo ""

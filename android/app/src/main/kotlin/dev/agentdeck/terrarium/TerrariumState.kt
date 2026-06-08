@@ -198,6 +198,8 @@ fun DashboardState.toTerrariumState(): TerrariumState {
     // Build multi-agent creature list from sibling sessions
     val agents = mutableListOf<AgentCreatureState>()
 
+    android.util.Log.d("TerrariumState", "toTerrariumState: agentType=$agentType, agentState=$agentState, siblingSessions.size=${siblingSessions.size}, sibling types: ${siblingSessions.map { "${it.agentType}:${it.state}" }}")
+
     fun isCodexAgent(type: String?): Boolean = type == "codex-cli" || type == "codex-app"
 
     // Primary agent — skip if disconnected (no session), daemon-like, openclaw proxy, codex, or opencode
@@ -217,10 +219,18 @@ fun DashboardState.toTerrariumState(): TerrariumState {
 
     // Sibling sessions (coding agents only — not the current session)
     var slot = agents.size
+    android.util.Log.d("TerrariumState", "Processing siblingSessions: primary.sessionId=$sessionId")
     for (sibling in siblingSessions) {
-        if (sessionId != null && sibling.id == sessionId) continue // skip self (null guard)
+        if (sessionId != null && sibling.id == sessionId) {
+            android.util.Log.d("TerrariumState", "Skipping sibling ${sibling.id} (matches primary sessionId)")
+            continue // skip self (null guard)
+        }
         val siblingType = sibling.agentType
-        if (siblingType == "openclaw" || siblingType == "daemon" || isCodexAgent(siblingType) || siblingType == "opencode") continue // not octopus
+        android.util.Log.d("TerrariumState", "Evaluating sibling ${sibling.id}: type=$siblingType, state=${sibling.state}")
+        if (siblingType == "openclaw" || siblingType == "daemon" || isCodexAgent(siblingType) || siblingType == "opencode") {
+            android.util.Log.d("TerrariumState", "Skipping sibling ${sibling.id} (type $siblingType is not an octopus)")
+            continue // not octopus
+        }
         agents.add(
             AgentCreatureState(
                 sessionId = sibling.id,
@@ -314,6 +324,8 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             agents[i] = agents[i].copy(displayName = "${key.name} #$seq")
         }
     }
+
+    android.util.Log.d("TerrariumState", "toTerrariumState result: agents.size=${agents.size}, cloudCreatures.size=${cloudCreatures.size}, openCodeCreatures.size=${openCodeCreatures.size}, agents=${agents.map { "${it.agentType}:${it.visualState}" }}")
 
     return TerrariumState(
         octopus = octopus,

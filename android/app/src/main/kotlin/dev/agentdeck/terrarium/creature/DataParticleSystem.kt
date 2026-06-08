@@ -419,10 +419,11 @@ class DataParticleSystem : Creature {
     }
 
     private fun drawFoodCrumbs(scope: DrawScope, w: Float, h: Float) {
+        val baseWidth = minOf(w, h * 2f)
         for (f in foodCrumbs) {
             if (!f.alive || f.alpha < 0.01f) continue
             val pulse = sin(f.pulsePhase) * 0.15f + 0.85f
-            val radius = w * 0.009f * pulse
+            val radius = baseWidth * 0.009f * pulse
             val cx = f.x * w
             val cy = f.y * h
             // Wide outer glow
@@ -459,7 +460,8 @@ class DataParticleSystem : Creature {
     }
 
     private fun drawFishByLayer(scope: DrawScope, w: Float, h: Float, zLayer: Int) {
-        val fishSize = w * TerrariumLayout.TETRA_SIZE_FRACTION
+        val baseWidth = minOf(w, h * 2f)
+        val fishSize = baseWidth * TerrariumLayout.TETRA_SIZE_FRACTION
         for (fish in school) {
             if (!fish.alive || fish.alpha < 0.01f || fish.zLayer != zLayer) continue
             drawNeonTetra(scope, fish, w, h, fishSize)

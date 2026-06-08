@@ -161,11 +161,11 @@ export function getDeviceBackoffStatus(ip: string): { failures: number; backedOf
  * Pixoo's embedded HTTP server can't handle keep-alive connections —
  * Node 19+ fetch uses keepAlive:true by default, causing timeouts after 2-3 requests.
  */
-async function postCommand(ip: string, command: Record<string, unknown>): Promise<boolean> {
+async function postCommand(ip: string, command: Record<string, unknown>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<boolean> {
   if (isBackedOff(ip)) return false;
 
   try {
-    const result = await httpPost(ip, command);
+    const result = await httpPost(ip, command, timeoutMs);
     if (!result) {
       recordFailure(ip);
       return false;
@@ -180,7 +180,7 @@ async function postCommand(ip: string, command: Record<string, unknown>): Promis
 }
 
 /** Low-level HTTP POST with keepAlive:false agent. */
-function httpPost(ip: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+function httpPost(ip: string, body: Record<string, unknown>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Record<string, unknown> | null> {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
     const req = http.request({
@@ -193,7 +193,7 @@ function httpPost(ip: string, body: Record<string, unknown>): Promise<Record<str
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(data),
       },
-      timeout: REQUEST_TIMEOUT_MS,
+      timeout: timeoutMs,
     }, res => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
@@ -221,17 +221,30 @@ function httpPost(ip: string, body: Record<string, unknown>): Promise<Record<str
  * PicID increments per frame so the device renders each new image.
  * @param buffer - 12,288 bytes (64 * 64 * 3) raw RGB
  */
-export async function pushFrame(ip: string, buffer: Uint8Array): Promise<boolean> {
-  if (buffer.length !== 64 * 64 * 3) {
-    debug(TAG, `Invalid frame size: ${buffer.length} (expected 12288)`);
-    return false;
+/**
+ * Push an animation sequence of 64x64 RGB frames to the device.
+ * @param buffers - Array of raw RGB buffers, each 12,288 bytes (64 * 64 * 3)
+ * @param speed - Playback speed in ms per frame (default 100ms)
+ */
+export async function pushFrames(ip: string, buffers: Uint8Array[], speed = 100): Promise<boolean> {
+  if (buffers.length === 0) return false;
+  for (const buffer of buffers) {
+    if (buffer.length !== 64 * 64 * 3) {
+      debug(TAG, `Invalid frame size: ${buffer.length} (expected 12288)`);
+      return false;
+    }
   }
 
   // Get or initialize PicID for this device
   let picId = devicePicId.get(ip);
   if (picId === undefined) {
     // First push — sync with device's current counter + 1 to ensure freshness
-    picId = await getHttpGifId(ip);
+    const synced = await getHttpGifId(ip);
+    if (synced === null) {
+      debug(TAG, `Failed to sync PicID for ${ip} — will retry next time`);
+      return false;
+    }
+    picId = synced;
     debug(TAG, `Synced PicID for ${ip}: ${picId}`);
   }
 
@@ -240,29 +253,44 @@ export async function pushFrame(ip: string, buffer: Uint8Array): Promise<boolean
 
   // Prevent counter overflow (~300 causes device lockup) — reset gracefully
   if (picId >= PIC_ID_RESYNC_THRESHOLD) {
-    debug(TAG, `PicID ${picId} near overflow for ${ip}, resetting`);
+    debug(TAG, `PicID ${picId} near overflow for ${ip}, resetting and sleeping 2s for stabilization`);
     await resetPicId(ip);
+    await new Promise(resolve => setTimeout(resolve, 2000));
     picId = 1;
   }
 
   devicePicId.set(ip, picId);
 
-  // Apply gamma boost for LED display
-  const boosted = new Uint8Array(buffer.length);
-  for (let i = 0; i < buffer.length; i++) {
-    boosted[i] = gammaLUT[buffer[i]];
+  // Apply gamma boost for LED display and concatenate all frames
+  const totalLength = buffers.length * 64 * 64 * 3;
+  const boostedCombined = new Uint8Array(totalLength);
+  let offset = 0;
+
+  for (const buffer of buffers) {
+    for (let i = 0; i < buffer.length; i++) {
+      boostedCombined[offset + i] = gammaLUT[buffer[i]];
+    }
+    offset += buffer.length;
   }
 
-  const base64 = Buffer.from(boosted).toString('base64');
+  const base64 = Buffer.from(boostedCombined).toString('base64');
   return postCommand(ip, {
     Command: 'Draw/SendHttpGif',
-    PicNum: 1,      // Always 1 (single image, bypasses loading screen)
+    PicNum: buffers.length,
     PicWidth: 64,
     PicOffset: 0,
-    PicID: picId,   // INCREMENTS each push so device renders every frame
-    PicSpeed: 1000,
+    PicID: picId,
+    PicSpeed: speed,
     PicData: base64,
-  });
+  }, 5000);
+}
+
+/**
+ * Push a single 64×64 RGB frame to the device.
+ * @param buffer - 12,288 bytes (64 * 64 * 3) raw RGB
+ */
+export async function pushFrame(ip: string, buffer: Uint8Array): Promise<boolean> {
+  return pushFrames(ip, [buffer], 1000);
 }
 
 /**
@@ -307,13 +335,14 @@ export async function setBrightness(ip: string, value: number): Promise<boolean>
   });
 }
 
-/** Query the device's current PicID counter. Returns 0 on failure. */
-export async function getHttpGifId(ip: string): Promise<number> {
+/** Query the device's current PicID counter. Returns null on failure. */
+export async function getHttpGifId(ip: string): Promise<number | null> {
   try {
     const data = await httpPost(ip, { Command: 'Draw/GetHttpGifId' });
+    if (!data) return null;
     return (data as any)?.PicId ?? 0;
   } catch {
-    return 0;
+    return null;
   }
 }
 

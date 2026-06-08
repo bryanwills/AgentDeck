@@ -73,10 +73,26 @@ async function stopDaemon(port: number): Promise<void> {
   const info = readDaemonInfo();
   const targetPort = info?.httpPort ?? info?.port ?? findDaemonPort() ?? port;
   try {
-    await fetch(`http://127.0.0.1:${targetPort}/shutdown`, { method: 'POST' });
+    await fetch(`http://127.0.0.1:${targetPort}/shutdown`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(2000),
+    });
     log('Shutdown signal sent');
   } catch {
     log('Daemon is not running');
+  }
+}
+
+async function isDaemonPort(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/health`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    if (!res.ok) return false;
+    const data = await res.json() as Record<string, unknown>;
+    return data.mode === 'daemon' || data.agentType === 'daemon';
+  } catch {
+    return false;
   }
 }
 
@@ -140,11 +156,18 @@ program
     if (opts.codexHooks !== false) {
       try {
         const { installCodexHooksIfNeeded } = await import('@agentdeck/hooks');
-        installCodexHooksIfNeeded();
-      } catch {
-        // hooks package missing or install failed — start session anyway
-        // (PTY parser fallback still works without lifecycle hooks)
+        const result = installCodexHooksIfNeeded();
+        if (result.installed) {
+          log('Codex lifecycle hooks ready in ~/.codex/config.toml');
+        } else if (result.reason) {
+          log(`Codex hooks skipped: ${result.reason}`);
+        }
+      } catch (err) {
+        log(`Codex hooks unavailable: ${String(err)}`);
+        // PTY parser fallback still works without lifecycle hooks.
       }
+    } else {
+      log('Codex hooks skipped: --no-codex-hooks');
     }
     const { startSession } = await import('./index.js');
     await startSession({
@@ -221,16 +244,27 @@ daemon
   .option('-f, --foreground', 'Run in foreground (default: background fork)')
   .option('--wake-word', 'Enable wake word voice assistant ("오픈클로")')
   .action(async (opts) => {
-    const { findExistingDaemon, readDaemonInfo } = await import('./session-registry.js');
+    const { findExistingDaemon, probeDaemonHealth, readDaemonInfo, removeDaemonInfo, removeDaemonSession } = await import('./session-registry.js');
     const daemonInfo = readDaemonInfo();
     if (daemonInfo) {
-      log(`Daemon already running on port ${daemonInfo.port} (PID ${daemonInfo.pid}). Use 'agentdeck daemon stop' first.`);
-      process.exit(0);
+      const probePort = daemonInfo.httpPort ?? daemonInfo.port;
+      const health = await probeDaemonHealth(probePort);
+      if (health?.mode === 'daemon') {
+        log(`Daemon already running on port ${daemonInfo.port} (PID ${daemonInfo.pid}). Use 'agentdeck daemon stop' first.`);
+        process.exit(0);
+      }
+      log(`Ignoring stale daemon entry on port ${daemonInfo.port} (PID ${daemonInfo.pid}; /health did not respond).`);
+      removeDaemonInfo();
     }
     const existing = findExistingDaemon();
     if (existing) {
-      log(`Daemon already running on port ${existing.port} (PID ${existing.pid}). Use 'agentdeck daemon stop' first.`);
-      process.exit(0);
+      const health = await probeDaemonHealth(existing.port);
+      if (health?.mode === 'daemon') {
+        log(`Daemon already running on port ${existing.port} (PID ${existing.pid}). Use 'agentdeck daemon stop' first.`);
+        process.exit(0);
+      }
+      log(`Ignoring stale daemon session on port ${existing.port} (PID ${existing.pid}; /health did not respond).`);
+      removeDaemonSession(existing);
     }
 
     // Background fork unless --foreground
@@ -302,7 +336,7 @@ daemon
   .option('-p, --port <port>', 'Server port', String(BRIDGE_WS_PORT))
   .action(async (opts) => {
     const port = parseInt(opts.port, 10);
-    const { listActive, readDaemonInfo } = await import('./session-registry.js');
+    const { listActive, readDaemonInfo, removeDaemonInfo, removeDaemonSession } = await import('./session-registry.js');
     const info = readDaemonInfo();
     const sessions = listActive();
     const d = sessions.find(s => s.agentType === 'daemon');
@@ -312,6 +346,8 @@ daemon
       const data = await res.json() as Record<string, unknown>;
       log(`Daemon status (port ${targetPort}): ${JSON.stringify(data, null, 2)}`);
     } catch {
+      if (info) removeDaemonInfo();
+      if (d) removeDaemonSession(d);
       log('Daemon is not running');
       process.exit(1);
     }
@@ -400,8 +436,15 @@ program
       }
     } else {
       try {
-        await fetch(`http://127.0.0.1:${port}/hooks/shutdown`, { method: 'POST' });
-        log('Shutdown signal sent');
+        const daemonPort = await isDaemonPort(port);
+        const url = daemonPort
+          ? `http://127.0.0.1:${port}/shutdown`
+          : `http://127.0.0.1:${port}/hooks/shutdown`;
+        await fetch(url, {
+          method: 'POST',
+          signal: AbortSignal.timeout(2000),
+        });
+        log(daemonPort ? 'Daemon shutdown signal sent' : 'Shutdown signal sent');
       } catch {
         log('Session is not running');
       }
@@ -413,9 +456,13 @@ program
 program
   .command('devices')
   .description('Show connected devices (WebSocket, ESP32, Pixoo, ADB)')
-  .option('-p, --port <port>', 'Bridge server port', String(BRIDGE_WS_PORT))
+  .option('-p, --port <port>', 'Bridge server port')
   .action(async (opts) => {
-    const port = parseInt(opts.port, 10);
+    const { readDaemonInfo, findDaemonPort } = await import('./session-registry.js');
+    const info = readDaemonInfo();
+    const port = opts.port != null
+      ? parseInt(opts.port, 10)
+      : (info?.httpPort ?? info?.port ?? findDaemonPort() ?? BRIDGE_WS_PORT);
     try {
       const res = await fetch(`http://127.0.0.1:${port}/devices`, {
         signal: AbortSignal.timeout(2000),
@@ -534,7 +581,9 @@ program
   .option('-a, --analyze', 'Run AI analysis on the dump')
   .option('-t, --tail <lines>', 'Number of journal entries', '200')
   .action(async (opts) => {
-    const port = parseInt(opts.port, 10);
+    const { readDaemonInfo, findDaemonPort } = await import('./session-registry.js');
+    const info = readDaemonInfo();
+    const port = info?.httpPort ?? info?.port ?? findDaemonPort() ?? parseInt(opts.port, 10);
     const tail = parseInt(opts.tail, 10);
     try {
       const res = await fetch(`http://127.0.0.1:${port}/diag?tail=${tail}`);

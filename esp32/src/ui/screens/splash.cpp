@@ -20,19 +20,31 @@ lv_obj_t* splashCreate() {
     // Brand icon — AD shield logo
     imgLogo = lv_image_create(screen);
     lv_image_set_src(imgLogo, &img_logo_48);
+#if defined(BOARD_TTGO)
+    lv_obj_align(imgLogo, LV_ALIGN_CENTER, 0, -40);
+#else
     lv_obj_align(imgLogo, LV_ALIGN_CENTER, 0, -55);
+#endif
 
     // Title
     lblTitle = lv_label_create(screen);
     lv_obj_set_style_text_color(lblTitle, lv_color_hex(Theme::HUDText), 0);
     lv_obj_set_style_text_font(lblTitle, &lv_font_montserrat_20, 0);
     lv_label_set_text(lblTitle, "AgentDeck");
+#if defined(BOARD_TTGO)
+    lv_obj_align(lblTitle, LV_ALIGN_CENTER, 0, -18);
+#else
     lv_obj_align(lblTitle, LV_ALIGN_CENTER, 0, -25);
+#endif
 
     // Spinner
     spinner = lv_spinner_create(screen);
     lv_obj_set_size(spinner, 40, 40);
+#if defined(BOARD_TTGO)
+    lv_obj_align(spinner, LV_ALIGN_CENTER, 0, 10);
+#else
     lv_obj_align(spinner, LV_ALIGN_CENTER, 0, 15);
+#endif
     lv_spinner_set_anim_params(spinner, 1000, 200);
 
     // Status text
@@ -40,14 +52,22 @@ lv_obj_t* splashCreate() {
     lv_obj_set_style_text_color(lblStatus, lv_color_hex(Theme::HUDDim), 0);
     lv_obj_set_style_text_font(lblStatus, &lv_font_montserrat_12, 0);
     lv_label_set_text(lblStatus, "Searching for bridges...");
+#if defined(BOARD_TTGO)
+    lv_obj_align(lblStatus, LV_ALIGN_CENTER, 0, 38);
+#else
     lv_obj_align(lblStatus, LV_ALIGN_CENTER, 0, 55);
+#endif
 
     // WiFi provisioning sub-status (below main status)
     lblWifiStatus = lv_label_create(screen);
     lv_obj_set_style_text_color(lblWifiStatus, lv_color_hex(Theme::HUDDim), 0);
     lv_obj_set_style_text_font(lblWifiStatus, &lv_font_montserrat_10, 0);
     lv_label_set_text(lblWifiStatus, "");
+#if defined(BOARD_TTGO)
+    lv_obj_align(lblWifiStatus, LV_ALIGN_CENTER, 0, 52);
+#else
     lv_obj_align(lblWifiStatus, LV_ALIGN_CENTER, 0, 73);
+#endif
 
     return screen;
 }

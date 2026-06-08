@@ -154,7 +154,12 @@ final class ApmeStore: @unchecked Sendable {
             default: sqlite3_bind_null(stmt, idx)
             }
         }
-        sqlite3_step(stmt)
+        let result = sqlite3_step(stmt)
+        if result != SQLITE_OK && result != SQLITE_DONE {
+            DaemonLogger.shared.error("[APME] updateRun failed: \(result) for id=\(id)")
+            return
+        }
+        DaemonLogger.shared.debug("APME", "updateRun: \(setClauses.count) fields for id=\(id.prefix(8))")
     }
 
     func getRun(id: String) -> ApmeRun? {
@@ -187,6 +192,7 @@ final class ApmeStore: @unchecked Sendable {
         let sql = """
         SELECT r.id, r.project_path FROM runs r
         WHERE r.ended_at IS NOT NULL
+          AND (r.task_category IS NULL OR r.task_category != '_empty')
           AND NOT EXISTS (SELECT 1 FROM evals e WHERE e.run_id = r.id)
         ORDER BY r.ended_at DESC LIMIT ?
         """
@@ -323,7 +329,12 @@ final class ApmeStore: @unchecked Sendable {
             default: sqlite3_bind_null(stmt, idx)
             }
         }
-        sqlite3_step(stmt)
+        let result = sqlite3_step(stmt)
+        if result != SQLITE_OK && result != SQLITE_DONE {
+            DaemonLogger.shared.error("[APME] updateTurn failed: \(result) for id=\(id)")
+            return
+        }
+        DaemonLogger.shared.debug("APME", "updateTurn: \(sets.count) fields for id=\(id.prefix(8))")
     }
 
     func listTurns(runId: String) -> [[String: Any]] {
@@ -396,7 +407,12 @@ final class ApmeStore: @unchecked Sendable {
             default: sqlite3_bind_null(stmt, idx)
             }
         }
-        sqlite3_step(stmt)
+        let result = sqlite3_step(stmt)
+        if result != SQLITE_OK && result != SQLITE_DONE {
+            DaemonLogger.shared.error("[APME] updateTask failed: \(result) for id=\(id)")
+            return
+        }
+        DaemonLogger.shared.debug("APME", "updateTask: \(sets.count) fields for id=\(id.prefix(8))")
     }
 
     func getTask(id: String) -> ApmeTask? {

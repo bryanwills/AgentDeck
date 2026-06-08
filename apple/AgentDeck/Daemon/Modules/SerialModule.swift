@@ -39,7 +39,7 @@ final class SerialModule: DeviceModule, @unchecked Sendable {
     }
 
     func statusSnapshot() async -> sending [String: Any] {
-        await serial.statusSnapshot()
+        serial.cachedStatusSnapshot()
     }
 }
 #endif

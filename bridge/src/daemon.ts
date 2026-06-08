@@ -11,7 +11,7 @@
 import { Command } from 'commander';
 import { BRIDGE_WS_PORT } from './types.js';
 import { startDaemon } from './daemon-server.js';
-import { readDaemonInfo, findExistingDaemon, findDaemonPort } from './session-registry.js';
+import { readDaemonInfo, findExistingDaemon, findDaemonPort, probeDaemonHealth } from './session-registry.js';
 
 function log(msg: string): void {
   process.stderr.write(msg + '\n');
@@ -32,13 +32,22 @@ program
   .action(async (opts) => {
     const daemonInfo = readDaemonInfo();
     if (daemonInfo) {
-      log(`Daemon already running on port ${daemonInfo.port} (PID ${daemonInfo.pid}).`);
-      process.exit(0);
+      const probePort = daemonInfo.httpPort ?? daemonInfo.port;
+      const health = await probeDaemonHealth(probePort);
+      if (health?.mode === 'daemon') {
+        log(`Daemon already running on port ${daemonInfo.port} (PID ${daemonInfo.pid}).`);
+        process.exit(0);
+      }
+      log(`Ignoring stale daemon entry on port ${daemonInfo.port} (PID ${daemonInfo.pid}; /health did not respond).`);
     }
     const existing = findExistingDaemon();
     if (existing) {
-      log(`Daemon already running on port ${existing.port} (PID ${existing.pid}).`);
-      process.exit(0);
+      const health = await probeDaemonHealth(existing.port);
+      if (health?.mode === 'daemon') {
+        log(`Daemon already running on port ${existing.port} (PID ${existing.pid}).`);
+        process.exit(0);
+      }
+      log(`Ignoring stale daemon session on port ${existing.port} (PID ${existing.pid}; /health did not respond).`);
     }
     await startDaemon({ port: parseInt(opts.port, 10), debug: opts.debug });
   });

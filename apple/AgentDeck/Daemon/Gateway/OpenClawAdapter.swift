@@ -132,7 +132,7 @@ actor OpenClawAdapter {
     private var sessionsSubscribed = false
     private var reconnectDelay: TimeInterval = 1
     private let maxReconnectDelay: TimeInterval = 30
-    private let protocolVersion = 3
+    private let protocolVersion = 4
     private let connectRPCResponseTimeoutNanoseconds: UInt64 = 10_000_000_000
     private let standardRPCResponseTimeoutNanoseconds: UInt64 = 20_000_000_000
 

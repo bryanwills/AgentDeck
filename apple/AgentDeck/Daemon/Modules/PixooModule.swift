@@ -93,16 +93,20 @@ actor PixooModule: DeviceModule {
     }
 
     // Circuit breaker — matches Node.js bridge (pixoo-client.ts)
-    private let backoffThreshold = 6
-    private let backoffInitialSec: TimeInterval = 5
-    private let backoffMaxSec: TimeInterval = 60
-    private let probeIntervalSec: TimeInterval = 10
+    private let backoffThreshold = 1
+    private let backoffInitialSec: TimeInterval = 30
+    private let backoffMaxSec: TimeInterval = 300
+    private let probeIntervalSec: TimeInterval = 15
     private let settingsReloadIntervalSec: TimeInterval = 5
     // Mirrors Node bridge's CHANNEL_REASSERT_MS — re-issues Channel/SetIndex
     // periodically so a Pixoo that drifted out of "Custom" channel mode
     // (brownout, firmware glitch) recovers without waiting for the 80s PicID
     // overflow cycle.
-    private let channelReassertIntervalSec: TimeInterval = 30
+    private let channelReassertIntervalSec: TimeInterval = 300
+    private let minimumPushIntervalSec: TimeInterval = 12
+    private let forceRefreshIntervalSec: TimeInterval = 60
+    private let pushTimeout: TimeInterval = 3
+    private let activeAnimationFrameCount = 2
     // Probe failures past this point indicate the daemon's outbound HTTP path
     // (URLSession + macOS NW stack) is stuck in a way local mitigation can't
     // unblock — escalate with one ERROR log so the user knows to restart.
@@ -111,7 +115,22 @@ actor PixooModule: DeviceModule {
     private var lastPushAt: Date?
     private var devicePicIds: [String: Int] = [:]
     private var deviceLogStates: [String: DeviceLogState] = [:]
+    private var lastPushedFrames: [String: Data] = [:]
+    private var deviceLastPushTime: [String: Date] = [:]
+    private var animatedSequenceDisabledIPs: Set<String> = []
+    private var lastStateDigest: String?
+    private var lastSequencePushTime: Date?
+    private var isPushing = false
     private let renderer = PixooRenderer()
+    private let urlSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 3
+        config.timeoutIntervalForResource = 3
+        config.httpMaximumConnectionsPerHost = 1
+        config.waitsForConnectivity = false
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
     private let frameWidth = 64
     private let frameHeight = 64
     private let requestTimeout: TimeInterval = 2
@@ -131,12 +150,11 @@ actor PixooModule: DeviceModule {
         let settingsReloadInterval = settingsReloadIntervalSec
         let reassertInterval = channelReassertIntervalSec
 
-        // Start render loop — render continuously so `/pixoo/frame` has a
-        // current preview as soon as settings hot-reload adds a device.
+        // Start render loop — check for state changes and push sequences
         renderTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(333))
-                await self?.pushFrame()
+                try? await Task.sleep(for: .milliseconds(500))
+                await self?.checkAndPush()
             }
         }
 
@@ -208,7 +226,7 @@ actor PixooModule: DeviceModule {
             guard let self else { return }
             await withTaskGroup(of: Void.self) { group in
                 for device in targets {
-                    group.addTask { await self.pushToDevice(device, frame: frame) }
+                    group.addTask { await self.pushSequenceToDevice(device, frames: [frame]) }
                 }
             }
         }
@@ -226,6 +244,9 @@ actor PixooModule: DeviceModule {
         DaemonLogger.shared.info("Pixoo wake recovery — clearing PicID cache for \(devices.count) device(s)")
         devicePicIds.removeAll()
         deviceLogStates.removeAll()
+        lastPushedFrames.removeAll()
+        deviceLastPushTime.removeAll()
+        animatedSequenceDisabledIPs.removeAll()
         lastPushError = nil
         // Re-sync PicID from each device (may have rebooted during sleep)
         for device in devices {
@@ -374,20 +395,26 @@ actor PixooModule: DeviceModule {
             guard isProbeDue(device.ip) else { continue }
             let payload: [String: Any] = ["Command": "Channel/GetAllConf"]
             if await postCommand(device.ip, payload: payload, logFailures: false) != nil {
-                DaemonLogger.shared.info("[Pixoo] \(device.ip) recovered — waiting for 2s stabilization grace period before resuming pushes")
+                DaemonLogger.shared.info("[Pixoo] \(device.ip) recovered — waiting for 2s stabilization grace period before re-seeding custom frame")
                 devicePicIds.removeValue(forKey: device.ip)
-                await prepareDevice(device)
-                
-                // Keep device in backed-off state for 2 seconds to let its HTTP stack stabilize
+                lastPushedFrames.removeValue(forKey: device.ip)
+                deviceLastPushTime.removeValue(forKey: device.ip)
+
+                // Keep the device untouched during the grace period. Sending
+                // Channel/SetIndex too early can expose the Pixoo firmware's
+                // built-in Custom/default screen until the next SendHttpGif.
                 try? await Task.sleep(for: .seconds(2))
-                
+
                 if devices.contains(where: { $0.ip == device.ip }) {
+                    await prepareDevice(device)
+                    await seedCurrentFrame(device, reason: "recovery")
+
                     var state = deviceLogStates[device.ip] ?? DeviceLogState()
                     state.consecutiveFailures = 0
                     state.backoffUntil = nil
                     state.lastFailureMessage = nil
                     deviceLogStates[device.ip] = state
-                    DaemonLogger.shared.info("[Pixoo] \(device.ip) stabilization grace period complete — resuming frame pushes")
+                    DaemonLogger.shared.info("[Pixoo] \(device.ip) stabilization grace period complete — custom frame re-seeded, resuming frame pushes")
                 }
             } else {
                 lastPushError = "probe failed for \(device.ip)"
@@ -419,61 +446,190 @@ actor PixooModule: DeviceModule {
     /// would un-dim the matrix on a sleeping desk every 30 seconds.
     private func reassertChannels() async {
         guard !displayDimmed else { return }
+        guard !isPushing else { return }
+        isPushing = true
+        defer { isPushing = false }
+
         for device in devices where !isBackedOff(device.ip) {
             _ = await postCommand(device.ip, payload: [
                 "Command": "Channel/SetIndex",
                 "SelectIndex": 3,
             ], logFailures: false)
+            await seedCurrentFrame(device, reason: "channel reassert")
         }
     }
 
-    /// Push current frame to all Pixoo devices via HTTP
-    private func pushFrame() async {
-        guard !devices.isEmpty, !displayDimmed else { return }
+    private func buildStateDigest(state: DashboardState) -> String {
+        let stateStr = state.state.rawValue
+        let gatewayConnected = state.gatewayConnected
+        let gatewayHasError = state.gatewayHasError
 
-        // No creature agent has reported yet and no sessions are alive — render
-        // the neutral OFFLINE placeholder instead of an empty tank so the user
-        // can tell at a glance that nothing is driving the display.
-        let frame: Data
-        if cachedState == "disconnected" && cachedAgentType == nil && cachedSessions.isEmpty {
-            frame = renderer.renderDisconnectedFrame()
+        let r5 = renderer.formatResetDetailed(state.fiveHourResetsAt)
+        let r7 = renderer.formatResetDetailed(state.sevenDayResetsAt)
+        let u5 = state.fiveHourPercent != nil ? Int(floor(state.fiveHourPercent!)) : -1
+        let u7 = state.sevenDayPercent != nil ? Int(floor(state.sevenDayPercent!)) : -1
+
+        let sessionInfo = state.siblingSessions.map { "\($0.id):\($0.agentType ?? ""):\($0.state ?? "")" }.joined(separator: ",")
+
+        return "\(stateStr)|\(gatewayConnected)|\(gatewayHasError)|\(r5)|\(r7)|\(u5)|\(u7)|\(sessionInfo)|\(displayDimmed)"
+    }
+
+    private func checkAndPush() async {
+        guard !devices.isEmpty, !displayDimmed else { return }
+        guard !isPushing else { return }
+        isPushing = true
+        defer { isPushing = false }
+
+        let state = currentDashboardState()
+        let isDisconnectedPlaceholder = state.state == .disconnected && cachedAgentType == nil && cachedSessions.isEmpty
+
+        let currentDigest: String
+        if isDisconnectedPlaceholder {
+            currentDigest = "offline|\(displayDimmed)"
         } else {
-            frame = renderer.render(dashboardState: currentDashboardState())
+            currentDigest = buildStateDigest(state: state)
         }
-        shadow.writeFrame(frame)
+
+        let timeSinceLastPush = lastSequencePushTime.map { Date().timeIntervalSince($0) } ?? 99999.0
+        let stateChanged = currentDigest != lastStateDigest
+
+        if stateChanged && timeSinceLastPush < minimumPushIntervalSec {
+            return
+        }
+        if !stateChanged && timeSinceLastPush < forceRefreshIntervalSec {
+            return
+        }
+
+        lastStateDigest = currentDigest
+        lastSequencePushTime = Date()
+
+        let frames: [Data]
+        if isDisconnectedPlaceholder {
+            frames = [renderer.renderDisconnectedFrame()]
+        } else {
+            frames = renderer.renderSequence(
+                dashboardState: state,
+                frameCount: frameCountForNextPush(state: state, stateChanged: stateChanged)
+            )
+        }
+
+        if let firstFrame = frames.first {
+            shadow.writeFrame(firstFrame)
+        }
 
         for device in devices where !isBackedOff(device.ip) {
-            await pushToDevice(device, frame: frame)
+            await pushSequenceToDevice(device, frames: frames)
         }
         refreshShadow()
     }
 
-    private func pushToDevice(_ device: PixooDevice, frame: Data) async {
+    private func frameCountForNextPush(state: DashboardState, stateChanged: Bool) -> Int {
+        guard stateChanged else { return 1 }
+        guard activeAnimationFrameCount > 1 else { return 1 }
+        switch state.state {
+        case .processing, .awaitingPermission, .awaitingOption, .awaitingDiff:
+            return activeAnimationFrameCount
+        default:
+            let hasActiveSession = state.siblingSessions.contains {
+                guard $0.alive else { return false }
+                return $0.state == "processing" || ($0.state?.hasPrefix("awaiting") ?? false)
+            }
+            return hasActiveSession ? activeAnimationFrameCount : 1
+        }
+    }
+
+    private func seedCurrentFrame(_ device: PixooDevice, reason: String) async {
+        let state = currentDashboardState()
+        let frames: [Data]
+        if state.state == .disconnected && cachedAgentType == nil && cachedSessions.isEmpty {
+            frames = [renderer.renderDisconnectedFrame()]
+        } else {
+            frames = renderer.renderSequence(dashboardState: state, frameCount: 1)
+        }
+
+        if let firstFrame = frames.first {
+            shadow.writeFrame(firstFrame)
+        }
+
+        await pushSequenceToDevice(device, frames: frames, force: true, reason: reason)
+    }
+
+    private func pushSequenceToDevice(
+        _ device: PixooDevice,
+        frames: [Data],
+        force: Bool = false,
+        reason: String = "scheduled"
+    ) async {
+        let ip = device.ip
+        let now = Date()
+        let effectiveFrames: [Data]
+        if frames.count > 1, animatedSequenceDisabledIPs.contains(ip), let first = frames.first {
+            effectiveFrames = [first]
+        } else {
+            effectiveFrames = frames
+        }
+
+        if !force,
+           effectiveFrames.count == 1,
+           let lastFrame = lastPushedFrames[ip],
+           lastFrame == effectiveFrames[0],
+           let lastPush = deviceLastPushTime[ip],
+           now.timeIntervalSince(lastPush) < minimumPushIntervalSec {
+            return
+        }
+
         guard let picId = await nextPicId(for: device.ip) else {
             recordPushFailure(ip: device.ip, reason: "failed to acquire PicID")
             lastPushError = "failed to acquire PicID for \(device.ip)"
             return
         }
 
-        let boosted = Data(frame.enumerated().map { Self.gammaLUT[Int($0.element)] })
+        var combinedData = Data()
+        for frame in effectiveFrames {
+            let boosted = Data(frame.enumerated().map { Self.gammaLUT[Int($0.element)] })
+            combinedData.append(boosted)
+        }
+
         let payload: [String: Any] = [
             "Command": "Draw/SendHttpGif",
-            "PicNum": 1,
+            "PicNum": effectiveFrames.count,
             "PicWidth": frameWidth,
             "PicOffset": 0,
             "PicID": picId,
-            "PicSpeed": 1000,
-            "PicData": boosted.base64EncodedString(),
+            "PicSpeed": effectiveFrames.count > 1 ? 180 : 1000,
+            "PicData": combinedData.base64EncodedString(),
         ]
 
-        if let response = await postCommand(device.ip, payload: payload, logFailures: false) {
+        if let response = await postCommand(device.ip, payload: payload, timeout: pushTimeout, logFailures: false),
+           Self.isPixooSuccess(response) {
             lastPushError = nil
             lastPushAt = Date()
             recordPushSuccess(ip: device.ip, picId: picId, response: response)
+            if effectiveFrames.count == 1 {
+                lastPushedFrames[ip] = effectiveFrames[0]
+            } else {
+                lastPushedFrames.removeValue(forKey: ip)
+            }
+            deviceLastPushTime[ip] = now
         } else {
             lastPushError = "push failed for \(device.ip)"
-            recordPushFailure(ip: device.ip, reason: "push failed (picId=\(picId))")
+            if effectiveFrames.count > 1 {
+                animatedSequenceDisabledIPs.insert(ip)
+                DaemonLogger.shared.info("[Pixoo] \(ip) animated sequence push failed — falling back to single-frame mode for this run")
+            }
+            devicePicIds.removeValue(forKey: device.ip)
+            lastPushedFrames.removeValue(forKey: device.ip)
+            deviceLastPushTime.removeValue(forKey: device.ip)
+            recordPushFailure(ip: device.ip, reason: "push failed (picId=\(picId), count=\(effectiveFrames.count), reason=\(reason))")
         }
+    }
+
+    private static func isPixooSuccess(_ response: [String: Any]) -> Bool {
+        if let code = response["error_code"] as? Int { return code == 0 }
+        if let code = response["errorCode"] as? Int { return code == 0 }
+        if let code = response["error_code"] as? NSNumber { return code.intValue == 0 }
+        if let code = response["errorCode"] as? NSNumber { return code.intValue == 0 }
+        return true
     }
 
     /// Set brightness for all devices
@@ -571,6 +727,9 @@ actor PixooModule: DeviceModule {
         for removedIP in previousIPs.subtracting(latestIPs) {
             devicePicIds.removeValue(forKey: removedIP)
             deviceLogStates.removeValue(forKey: removedIP)
+            lastPushedFrames.removeValue(forKey: removedIP)
+            deviceLastPushTime.removeValue(forKey: removedIP)
+            animatedSequenceDisabledIPs.remove(removedIP)
         }
 
         if devices.isEmpty {
@@ -632,12 +791,17 @@ actor PixooModule: DeviceModule {
     private func nextPicId(for ip: String) async -> Int? {
         var picId = devicePicIds[ip]
         if picId == nil {
-            picId = await getHttpGifId(ip) ?? 0
+            guard let synced = await getHttpGifId(ip) else {
+                return nil
+            }
+            picId = synced
         }
         guard var next = picId else { return nil }
         next += 1
         if next >= picIdResyncThreshold {
+            DaemonLogger.shared.info("[Pixoo] PicID \(next) near threshold for \(ip), resetting GIF ID and sleeping 2s for stabilization")
             _ = await postCommand(ip, payload: ["Command": "Draw/ResetHttpGifId"])
+            try? await Task.sleep(for: .seconds(2))
             next = 1
         }
         devicePicIds[ip] = next
@@ -655,26 +819,18 @@ actor PixooModule: DeviceModule {
         return 0
     }
 
-    private func postCommand(_ ip: String, payload: [String: Any], logFailures: Bool = true) async -> [String: Any]? {
+    private func postCommand(_ ip: String, payload: [String: Any], timeout: TimeInterval? = nil, logFailures: Bool = true) async -> [String: Any]? {
         guard let url = URL(string: "http://\(ip):80/post") else { return nil }
+        let currentTimeout = timeout ?? requestTimeout
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("close", forHTTPHeaderField: "Connection")
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-        request.timeoutInterval = requestTimeout
-
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = requestTimeout
-        config.timeoutIntervalForResource = requestTimeout
-        config.httpShouldUsePipelining = false
-        config.httpMaximumConnectionsPerHost = 1
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        let session = URLSession(configuration: config)
-        defer { session.invalidateAndCancel() }
+        request.timeoutInterval = currentTimeout
 
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await urlSession.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 if logFailures {
                     DaemonLogger.shared.debug("Pixoo", "No HTTP response from \(ip)")

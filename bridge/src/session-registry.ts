@@ -36,15 +36,14 @@ export function getCandidateDataDirs(): string[] {
   if (process.env.AGENTDECK_DATA_DIR) return [process.env.AGENTDECK_DATA_DIR];
   const dirs = [join(homedir(), '.agentdeck')];
   if (process.platform === 'darwin') {
-    const appSandboxContainer = join(
-      homedir(),
-      'Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck',
-    );
+    // Avoid reading the App Store sandbox container directly from non-sandboxed
+    // Node CLI/daemon, as macOS TCC will block the process and cause it to hang
+    // waiting for a permissions dialog that never shows.
+    // Instead, rely on port scan/health checks for cross-talk.
     const groupContainer = join(
       homedir(),
       'Library/Group Containers/group.bound.serendipity.agentdeck.dashboard',
     );
-    if (!dirs.includes(appSandboxContainer)) dirs.push(appSandboxContainer);
     if (!dirs.includes(groupContainer)) dirs.push(groupContainer);
   }
   return dirs;
@@ -156,6 +155,17 @@ export function deregister(id: string): void {
   debug('SessionRegistry', `Deregistered session ${id}`);
 }
 
+export function removeDaemonSession(entry: Pick<SessionEntry, 'pid' | 'port'>): void {
+  const sessions = readSessions();
+  const filtered = sessions.filter((s) =>
+    !(s.agentType === 'daemon' && s.pid === entry.pid && s.port === entry.port)
+  );
+  if (filtered.length !== sessions.length) {
+    writeSessions(filtered);
+    debug('SessionRegistry', `Removed stale daemon session on port ${entry.port} pid=${entry.pid}`);
+  }
+}
+
 export function listActive(): SessionEntry[] {
   const sessions = readSessions();
   const alive = pruneDeadSessions(sessions);
@@ -172,7 +182,14 @@ export function findExistingDaemon(): SessionEntry | null {
   return sessions.find((s) => s.agentType === 'daemon') ?? null;
 }
 
-/** Try to bind a TCP server to a port to verify it's actually free */
+/**
+ * Try to bind a TCP server to a port to verify it's actually free.
+ * Binds on 0.0.0.0 (all interfaces) — the same address the WebSocket server uses —
+ * so a port held by another process on any interface is correctly detected as busy.
+ * The original 127.0.0.1 bind missed ports already occupied on 0.0.0.0 (e.g. zombie
+ * session bridges), causing findAvailablePort to hand out ports that immediately
+ * caused EADDRINUSE on the real server start.
+ */
 function isPortFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer();
@@ -180,7 +197,7 @@ function isPortFree(port: number): Promise<boolean> {
     server.once('listening', () => {
       server.close(() => resolve(true));
     });
-    server.listen(port, '127.0.0.1');
+    server.listen(port, '0.0.0.0');
   });
 }
 

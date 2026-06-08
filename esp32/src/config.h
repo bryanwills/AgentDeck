@@ -31,14 +31,14 @@ constexpr uint32_t WS_PING_INTERVAL_MS  = 15000;
 constexpr uint32_t WS_PONG_TIMEOUT_MS   = 30000;
 
 // ===== LVGL =====
-#ifndef BOARD_ULANZI_TC001
+#ifndef BOARD_LED8X32
 constexpr uint32_t LVGL_TICK_MS        = 5;
 constexpr uint32_t LVGL_TIMER_MS       = 5;
 #endif
 constexpr uint32_t RENDER_INTERVAL_MS  = 33;  // ~30fps
 
 // ===== Terrarium =====
-#if defined(BOARD_ULANZI_TC001)
+#if defined(BOARD_LED8X32)
 constexpr uint8_t  MAX_OCTOPUS         = 1;
 constexpr uint8_t  MAX_CLOUD           = 0;
 constexpr uint8_t  MAX_OPENCODE        = 0;
@@ -47,6 +47,24 @@ constexpr uint8_t  MAX_BUBBLES         = 0;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 0;
 constexpr uint8_t  KELP_COUNT          = 0;
 constexpr uint8_t  WAVE_SEGMENTS       = 0;
+#elif defined(BOARD_TTGO)
+constexpr uint8_t  MAX_OCTOPUS         = 2;
+constexpr uint8_t  MAX_CLOUD           = 1;
+constexpr uint8_t  MAX_OPENCODE        = 1;
+constexpr uint8_t  MAX_TETRA           = 2;
+constexpr uint8_t  MAX_BUBBLES         = 6;
+constexpr uint8_t  MAX_FOOD_CRUMBS     = 4;
+constexpr uint8_t  KELP_COUNT          = 1;
+constexpr uint8_t  WAVE_SEGMENTS       = 10;
+#elif defined(BOARD_IPS10)
+constexpr uint8_t  MAX_OCTOPUS         = 8;
+constexpr uint8_t  MAX_CLOUD           = 6;
+constexpr uint8_t  MAX_OPENCODE        = 6;
+constexpr uint8_t  MAX_TETRA           = 8;
+constexpr uint8_t  MAX_BUBBLES         = 30;
+constexpr uint8_t  MAX_FOOD_CRUMBS     = 15;
+constexpr uint8_t  KELP_COUNT          = 4;
+constexpr uint8_t  WAVE_SEGMENTS       = 24;
 #elif IS_ROUND
 constexpr uint8_t  MAX_OCTOPUS         = 4;
 constexpr uint8_t  MAX_CLOUD           = 2;
@@ -68,7 +86,7 @@ constexpr uint8_t  WAVE_SEGMENTS       = 20;
 #endif
 
 // ===== Timeline =====
-#if defined(BOARD_ULANZI_TC001)
+#if defined(BOARD_LED8X32) || defined(BOARD_TTGO)
 constexpr uint8_t  TIMELINE_MAX_ENTRIES = 32;
 #else
 constexpr uint8_t  TIMELINE_MAX_ENTRIES = 64;
@@ -81,19 +99,23 @@ constexpr uint16_t SIN_TABLE_SIZE      = 256;
 constexpr uint8_t  CORE_NETWORK        = 0;
 constexpr uint8_t  CORE_UI             = 1;
 constexpr uint32_t STACK_NETWORK       = 8192;
-#if defined(BOARD_ULANZI_TC001)
+#if defined(BOARD_LED8X32)
 constexpr uint32_t STACK_UI            = 4096;
+#elif defined(BOARD_TTGO)
+constexpr uint32_t STACK_UI            = 8192;
+#elif defined(BOARD_IPS10)
+constexpr uint32_t STACK_UI            = 32768;
 #else
 constexpr uint32_t STACK_UI            = 16384;
 #endif
 
 // ===== HUD =====
-#ifndef BOARD_ULANZI_TC001
+#ifndef BOARD_LED8X32
 constexpr uint8_t  HUD_BAR_HEIGHT      = 24;
 #endif
 
 // ===== Matrix (TC001) =====
-#if defined(BOARD_ULANZI_TC001)
+#if defined(BOARD_LED8X32)
 constexpr uint8_t  MATRIX_BRIGHTNESS_MIN = 3;
 constexpr uint8_t  MATRIX_BRIGHTNESS_MAX = 120;   // WS2812B max 255, capped for power stability
 constexpr uint8_t  MATRIX_BRIGHTNESS_DEF = 60;

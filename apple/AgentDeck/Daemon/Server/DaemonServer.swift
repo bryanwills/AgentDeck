@@ -132,6 +132,17 @@ private final class SerialEventSnapshot: @unchecked Sendable {
     }
 }
 
+/// Sendable snapshot of judge backend status for /health endpoint.
+/// Matches CLI daemon's `JudgeBackendStatus` interface.
+struct JudgeBackendStatus: Sendable {
+    let backend: String
+    let status: String
+    let model: String?
+    let endpoint: String?
+    let checkedAt: Int
+    let reason: String?
+}
+
 @MainActor
 final class DaemonServer {
     let port: UInt16
@@ -360,9 +371,11 @@ final class DaemonServer {
         var updatedAt: Date
     }
     private var cachedStreamDeck: StreamDeckRegistration?
+    private var activeWSConnectionIds = Set<UUID>()
     private static let streamDeckStaleTTL: TimeInterval = 120
     private var cachedMlxModels: [String] = []
     private var cachedMlxModelCatalog: [String] = []
+    private var cachedJudgeBackendStatus: JudgeBackendStatus?
     private var preferredMlxModelsEndpoint: String?
 
     // Backoff state for local LLM discovery. Probe functions read/update these;
@@ -422,6 +435,7 @@ final class DaemonServer {
     private var usagePollTask: Task<Void, Never>?
     private var ollamaPollTask: Task<Void, Never>?
     private var mlxPollTask: Task<Void, Never>?
+    private var judgeBackendPollTask: Task<Void, Never>?
     private var gatewayPollTask: Task<Void, Never>?
     private var gatewayHealthTask: Task<Void, Never>?
     private var usageTickTask: Task<Void, Never>?
@@ -1008,7 +1022,7 @@ final class DaemonServer {
         let d200hRef = d200h
         await wsServer.onBroadcast { [weak self] data in
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-            
+
             // Mirror creature agent state in local state machine for metadata persistence
             if let type = json["type"] as? String, type == "state_update" {
                 let jsonBox = SendableDict(json)
@@ -1081,6 +1095,8 @@ final class DaemonServer {
             let focus: (model: String?, effort: String?) = await MainActor.run { [weak self] in
                 (self?.stateMachine.modelName, self?.stateMachine.effortLevel)
             }
+            // Get judge backend status as Sendable value
+            let judgeBackend = await MainActor.run { [weak self] in self?.cachedJudgeBackendStatus }
             var payload: [String: Any] = [
                 "status": "ok", "mode": "daemon", "port": daemonPort,
                 "pid": ProcessInfo.processInfo.processIdentifier,
@@ -1091,6 +1107,21 @@ final class DaemonServer {
             ]
             if let m = focus.model { payload["modelName"] = m }
             if let e = focus.effort { payload["effortLevel"] = e }
+            // Add APME/MLX backend status for parity with CLI daemon
+            if let jb = judgeBackend {
+                var judgeStatus: [String: Any] = [
+                    "backend": jb.backend,
+                    "status": jb.status,
+                    "checkedAt": jb.checkedAt
+                ]
+                if let model = jb.model { judgeStatus["model"] = model }
+                if let endpoint = jb.endpoint { judgeStatus["endpoint"] = endpoint }
+                if let reason = jb.reason { judgeStatus["reason"] = reason }
+                payload["apme"] = [
+                    "enabled": true,
+                    "judgeBackend": judgeStatus
+                ]
+            }
             return .json(payload)
         }
 
@@ -1674,29 +1705,43 @@ final class DaemonServer {
 
     @MainActor
     private func handleClientConnect(_ conn: WebSocketConnection) {
-        let connectionEvent: [String: Any] = [
-            "type": "connection",
-            "status": "connected",
-            "sessionId": sessionId,
-        ]
-        if let data = connectionEvent.jsonData { conn.send(data) }
+        activeWSConnectionIds.insert(conn.id)
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
 
-        let gwAlive = cachedGatewayConnected
-        let stateEvent = buildFullStateEvent(agentType: gwAlive ? "openclaw" : "daemon")
-        lastStateEvent = stateEvent
-        if let data = stateEvent.jsonData { conn.send(data) }
+            let connectionEvent: [String: Any] = [
+                "type": "connection",
+                "status": "connected",
+                "sessionId": self.sessionId,
+            ]
+            if let data = connectionEvent.jsonData { conn.send(data) }
 
-        // Sessions list
-        let sessionsEvent = buildSessionsListEvent()
-        if let data = sessionsEvent.jsonData { conn.send(data) }
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !conn.isDisconnected else { return }
 
-        // Usage
-        let usageEvent = buildUsageEvent()
-        if let data = usageEvent?.jsonData { conn.send(data) }
+            let gwAlive = self.cachedGatewayConnected
+            let stateEvent = self.buildFullStateEvent(agentType: gwAlive ? "openclaw" : "daemon")
+            self.lastStateEvent = stateEvent
+            if let data = stateEvent.jsonData { conn.send(data) }
 
-        // Fetch usage if stale
-        if cachedApiUsage == nil || Date().timeIntervalSince(lastApiFetchTime) > 300 {
-            Task { await fetchUsageRelayed() }
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !conn.isDisconnected else { return }
+
+            // Sessions list
+            let sessionsEvent = self.buildSessionsListEvent()
+            if let data = sessionsEvent.jsonData { conn.send(data) }
+
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !conn.isDisconnected else { return }
+
+            // Usage
+            let usageEvent = self.buildUsageEvent()
+            if let data = usageEvent?.jsonData { conn.send(data) }
+
+            // Fetch usage if stale
+            if self.cachedApiUsage == nil || Date().timeIntervalSince(self.lastApiFetchTime) > 300 {
+                await self.fetchUsageRelayed()
+            }
         }
     }
 
@@ -1708,6 +1753,7 @@ final class DaemonServer {
     /// close frame never arrives.
     @MainActor
     private func handleClientDisconnect(_ conn: WebSocketConnection) {
+        activeWSConnectionIds.remove(conn.id)
         if let sd = cachedStreamDeck, sd.connectionId == conn.id {
             cachedStreamDeck = nil
             DaemonLogger.shared.debug("Daemon", "Evicted streamdeck registration: WS closed")
@@ -2214,6 +2260,18 @@ final class DaemonServer {
         case "session_end":
             _ = stateMachine.transition(trigger: "session_end", source: .hook)
             if let sessionId {
+                let expiredEntry = pushedSessionsById[sessionId]
+                let isCodex = expiredEntry.map { Self.isCodexSession(sessionId: sessionId, entry: $0) } ?? false
+                if isCodex {
+                    if codexChatStartQueue.depth(sid: sessionId) > 0 {
+                        appendCodexChatEnd(json: [:], sessionId: sessionId)
+                    }
+                } else {
+                    if claudeChatStartQueue.depth(sid: sessionId) > 0 {
+                        appendClaudeCodeChatEnd(json: [:], sessionId: sessionId)
+                    }
+                }
+
                 pushedSessionsById.removeValue(forKey: sessionId)
                 cachedSessions.removeAll { $0.id == sessionId }
                 codexProcessingTouchedAtBySession.removeValue(forKey: sessionId)
@@ -2380,7 +2438,7 @@ final class DaemonServer {
     @MainActor
     private func evictStaleClientRegistrations() async {
         let cutoff = Date().addingTimeInterval(-Self.streamDeckStaleTTL)
-        if let sd = cachedStreamDeck, sd.updatedAt < cutoff {
+        if let sd = cachedStreamDeck, !activeWSConnectionIds.contains(sd.connectionId), sd.updatedAt < cutoff {
             DaemonLogger.shared.debug("Daemon", "Evicted stale streamdeck client registration")
             cachedStreamDeck = nil
             broadcastStateUpdate()
@@ -2425,6 +2483,20 @@ final class DaemonServer {
             let expiredEntry = pushedSessionsById[sid]
             let isPostTerminal = lastTerminalCodexEventBySession[sid]
                 .map { $0 < codexTerminalCutoff } ?? false
+
+            // Auto-emit fallbacks for any active/uncompleted turns in the queues
+            // before clearing their backing queue structures.
+            let isCodex = expiredEntry.map { Self.isCodexSession(sessionId: sid, entry: $0) } ?? false
+            if isCodex {
+                if codexChatStartQueue.depth(sid: sid) > 0 {
+                    appendCodexChatEnd(json: [:], sessionId: sid)
+                }
+            } else {
+                if claudeChatStartQueue.depth(sid: sid) > 0 {
+                    appendClaudeCodeChatEnd(json: [:], sessionId: sid)
+                }
+            }
+
             pushedSessionsById.removeValue(forKey: sid)
             cachedSessions.removeAll { $0.id == sid }
             lastHookAtByPushedSession.removeValue(forKey: sid)
@@ -2729,6 +2801,8 @@ final class DaemonServer {
         clearTool: Bool = false
     ) {
         guard let sessionId, var entry = pushedSessionsById[sessionId] else { return }
+        let oldState = entry.state
+        let oldTool = entry.currentTool
         entry.state = newState
         if clearTool {
             entry.currentTool = nil
@@ -2738,7 +2812,9 @@ final class DaemonServer {
         pushedSessionsById[sessionId] = entry
         upsertIntoCachedSessions(entry)
         trackCodexProcessingState(sessionId: sessionId, entry: entry)
-        broadcastSessionsList()
+        if oldState != entry.state || oldTool != entry.currentTool {
+            broadcastSessionsList()
+        }
     }
 
     @MainActor
@@ -3202,6 +3278,31 @@ final class DaemonServer {
             }
         }
 
+        // Judge backend probe — 30s periodic
+        judgeBackendPollTask = Task { [weak self] in
+            // Initial probe on startup
+            if let initial = await self?.probeJudgeBackend() {
+                await MainActor.run { self?.cachedJudgeBackendStatus = initial }
+            }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard let self else { break }
+                let fresh = await self.probeJudgeBackend()
+                await MainActor.run {
+                    let previous = self.cachedJudgeBackendStatus
+                    self.cachedJudgeBackendStatus = fresh
+                    // Compare key fields for change detection
+                    let previousStatus = previous?.status
+                    let previousModel = previous?.model
+                    let freshStatus = fresh.status
+                    let freshModel = fresh.model
+                    if previousStatus != freshStatus || previousModel != freshModel {
+                        self.broadcastStateUpdate()
+                    }
+                }
+            }
+        }
+
         // Gateway probe — 5s with hysteresis
         // A single TCP miss does NOT trigger disconnect — transient network
         // glitches (< 10s) are invisible to the user. Only 2+ consecutive
@@ -3394,6 +3495,7 @@ final class DaemonServer {
             for session in sessions {
                 group.addTask {
                     var s = session
+                    guard session.port > 0 else { return s }
                     guard session.port != selfPort else { return s }
                     if let health = await SessionRegistry.shared.probeDaemonHealth(port: session.port) {
                         s.agentType = health["agentType"] as? String ?? s.agentType
@@ -4269,6 +4371,80 @@ final class DaemonServer {
             return [first]
         }
         return []
+    }
+
+    /// Probe the APME judge backend status. Returns a Sendable snapshot
+    /// compatible with the CLI daemon's `JudgeBackendStatus` interface.
+    @MainActor
+    private func probeJudgeBackend() async -> JudgeBackendStatus {
+        let config = ApmeSettings.load()
+        let backend = config.judge.backend
+        let checkedAt = Int(Date().timeIntervalSince1970 * 1000)
+
+        if backend == .mlx {
+            let mlxConfig = ApmeSettings.loadMlxConfig()
+            let endpoint = mlxConfig.endpoint
+
+            // Reuse cached MLX models if available
+            if !cachedMlxModels.isEmpty {
+                return JudgeBackendStatus(
+                    backend: backend.rawValue,
+                    status: "ready",
+                    model: cachedMlxModels.first ?? "unknown",
+                    endpoint: endpoint,
+                    checkedAt: checkedAt,
+                    reason: nil
+                )
+            } else if await ApmeJudgeMlx.isReachable() {
+                // Probe will have populated cachedMlxModels
+                let model = cachedMlxModels.first ?? "unknown"
+                return JudgeBackendStatus(
+                    backend: backend.rawValue,
+                    status: "ready",
+                    model: model,
+                    endpoint: endpoint,
+                    checkedAt: checkedAt,
+                    reason: nil
+                )
+            } else {
+                return JudgeBackendStatus(
+                    backend: backend.rawValue,
+                    status: "unavailable",
+                    model: nil,
+                    endpoint: endpoint,
+                    checkedAt: checkedAt,
+                    reason: "MLX server unreachable. Start with `mlx_lm.server` or configure endpoint."
+                )
+            }
+        } else if backend == .foundationModels {
+            return JudgeBackendStatus(
+                backend: backend.rawValue,
+                status: "ready",
+                model: "foundation-models",
+                endpoint: nil,
+                checkedAt: checkedAt,
+                reason: nil
+            )
+        } else if backend == .api {
+            // API backend requires key check
+            return JudgeBackendStatus(
+                backend: backend.rawValue,
+                status: "unavailable",
+                model: nil,
+                endpoint: nil,
+                checkedAt: checkedAt,
+                reason: "API backend requires Anthropic key configuration"
+            )
+        }
+
+        return JudgeBackendStatus(
+            backend: backend.rawValue,
+            status: "unknown",
+            model: nil,
+            endpoint: nil,
+            checkedAt: checkedAt,
+            reason: nil
+        )
     }
 
     // MARK: - Command Forwarding
@@ -5408,7 +5584,9 @@ final class DaemonServer {
         for r in closedRuns {
             guard let ended = r.endedAt, r.outcome == nil else { continue }
             if now - ended > 10_000 {
-                ApmeOutcomeEngine.evaluateOutcome(store: store, runId: r.id)
+                if let eval = ApmeOutcomeEngine.evaluateOutcome(store: store, runId: r.id) {
+                    await propagateOutcomeToTimeline(run: r, eval: eval)
+                }
             }
         }
 
@@ -5465,6 +5643,38 @@ final class DaemonServer {
             )
         }
     }
+
+    /// Propagates APME outcome evaluation results directly to the task_end timeline row.
+    /// Ensures real-time UI badge ("...") update synchronization right after SQLite commits.
+    @MainActor
+    private func propagateOutcomeToTimeline(
+        run: ApmeRun,
+        eval: (
+            outcome: ApmeOutcomeResult,
+            efficiency: ApmeEfficiencyMetrics,
+            composite: ApmeCompositeBreakdown
+        )
+    ) async {
+        let snapshot = await timelineStore.getAll()
+        // Seek the matching task_end row by taskId, runId or session-ended match
+        if let existingIndex = snapshot.firstIndex(where: { e in
+            e.type == "task_end" && (e.taskId == run.id || e.runId == run.id || (e.sessionId == run.sessionId && abs(e.ts - Double(run.endedAt ?? 0)) < 5000))
+        }) {
+            var updated = snapshot[existingIndex]
+            updated.taskScore = eval.composite.composite
+            updated.taskOutcome = eval.outcome.outcome.rawValue
+            updated.taskCategory = run.taskCategory
+            updated.taskSummary = eval.outcome.reason
+
+            await timelineStore.upsert(updated)
+            broadcastRaw([
+                "type": "timeline_event",
+                "entry": claudeCodeEntryDict(updated),
+                "upsert": true
+            ] as [String: Any])
+            DaemonLogger.shared.debug("APME", "Propagated outcome to timeline row for run \(run.id.prefix(8)): score=\(eval.composite.composite)")
+        }
+    }
 }
 
 // MARK: - chat_start ts FIFO queue (per-session)
@@ -5476,40 +5686,56 @@ final class DaemonServer {
 // regression test prohibitively heavy.
 
 struct ChatStartTsQueue: Equatable, Sendable {
-    private var queues: [String: [Double]] = [:]
+    private struct QueueEntry: Equatable, Sendable {
+        let ts: Double
+        let wallClock: Double
+    }
+
+    private var queues: [String: [QueueEntry]] = [:]
 
     mutating func enqueue(sid: String, ts: Double) {
-        queues[sid, default: []].append(ts)
+        let entry = QueueEntry(ts: ts, wallClock: Date().timeIntervalSince1970 * 1000)
+        queues[sid, default: []].append(entry)
     }
 
     /// Pop the *oldest* pending ts for `sid`. nil if the queue is empty.
+    /// Safely filters out stale/orphaned entries based on real-world elapsed time (10 minutes).
     mutating func dequeue(sid: String) -> Double? {
         guard var queue = queues[sid], !queue.isEmpty else { return nil }
-        let ts = queue.removeFirst()
-        if queue.isEmpty {
-            queues.removeValue(forKey: sid)
-        } else {
-            queues[sid] = queue
+        let now = Date().timeIntervalSince1970 * 1000
+        let ttlMs: Double = 600_000 // 10 minutes
+
+        while !queue.isEmpty {
+            let entry = queue.removeFirst()
+            if now - entry.wallClock < ttlMs {
+                if queue.isEmpty {
+                    queues.removeValue(forKey: sid)
+                } else {
+                    queues[sid] = queue
+                }
+                return entry.ts
+            }
         }
-        return ts
+        queues.removeValue(forKey: sid)
+        return nil
     }
 
-    /// Look at the head (oldest pending) without consuming. Use for
-    /// FIFO-shape inspections — e.g. "which Stop hook is up next".
+    /// Look at the head (oldest pending) without consuming.
+    /// Enforces the same 10-minute safety TTL.
     func peek(sid: String) -> Double? {
-        queues[sid]?.first
+        guard let entry = queues[sid]?.first else { return nil }
+        let now = Date().timeIntervalSince1970 * 1000
+        let ttlMs: Double = 600_000
+        return (now - entry.wallClock < ttlMs) ? entry.ts : nil
     }
 
     /// Look at the tail (most-recently enqueued) without consuming.
-    /// Used by mid-turn handlers (tool_exec, etc.) that need to anchor
-    /// to the *currently active* turn — under our serial-turn model
-    /// the latest enqueue is the one Codex is generating against right
-    /// now, even if older turns are still queued waiting for their
-    /// Stop hook (Codex stop-time review #10, 2026-05-17). Without
-    /// `peekTail`, a Q2 tool_exec would stamp Q1's ts and attach to
-    /// the previous turn's row.
+    /// Enforces the same 10-minute safety TTL.
     func peekTail(sid: String) -> Double? {
-        queues[sid]?.last
+        guard let entry = queues[sid]?.last else { return nil }
+        let now = Date().timeIntervalSince1970 * 1000
+        let ttlMs: Double = 600_000
+        return (now - entry.wallClock < ttlMs) ? entry.ts : nil
     }
 
     mutating func clear(sid: String) {

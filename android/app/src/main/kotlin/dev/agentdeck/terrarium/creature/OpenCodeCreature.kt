@@ -167,8 +167,9 @@ class OpenCodeCreature(
     override fun draw(scope: DrawScope) {
         val w = scope.size.width
         val h = scope.size.height
+        val baseWidth = minOf(w, h * 2f)
 
-        val bodySize = w * BODY_SIZE_FRACTION * scaleFactor
+        val bodySize = baseWidth * BODY_SIZE_FRACTION * scaleFactor
 
         val centerX = w * currentX
 

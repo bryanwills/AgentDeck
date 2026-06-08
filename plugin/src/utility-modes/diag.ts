@@ -24,7 +24,7 @@ export function createDiagMode(refresh: RefreshCallback): UtilityMode {
       }
     } catch {
       status = 'offline';
-      lastError = 'No bridge';
+      lastError = 'AgentDeck Offline';
     }
     refresh();
   }
@@ -45,7 +45,7 @@ export function createDiagMode(refresh: RefreshCallback): UtilityMode {
       }
     } catch (err) {
       status = 'offline';
-      lastError = 'No bridge';
+      lastError = 'AgentDeck Offline';
       dwarn(TAG, `Dump error: ${err}`);
     }
     refresh();

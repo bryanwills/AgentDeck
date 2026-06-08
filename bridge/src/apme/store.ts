@@ -914,6 +914,7 @@ export class ApmeStore {
     const rows = this.db.prepare(
       `SELECT r.id, r.project_path FROM runs r
        WHERE r.ended_at IS NOT NULL
+         AND (r.task_category IS NULL OR r.task_category != '_empty')
          AND NOT EXISTS (SELECT 1 FROM evals e WHERE e.run_id = r.id)
        ORDER BY r.ended_at DESC
        LIMIT ?`,

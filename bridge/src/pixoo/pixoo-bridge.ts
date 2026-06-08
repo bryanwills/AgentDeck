@@ -12,8 +12,8 @@ import { State } from '../types.js';
 import type { BridgeEvent, StateUpdateEvent, UsageEvent } from '../types.js';
 import type { SessionInfo, SessionsListEvent } from '@agentdeck/shared/protocol';
 import { DISPLAY_FORWARDED_EVENTS } from '@agentdeck/shared/protocol';
-import { pushFrame, setBrightness, clearText, getDeviceBackoffStatus, switchToCustomChannel, onDeviceStatusChange, stopProbeTimer } from './pixoo-client.js';
-import { renderFrame, renderDisconnectedFrame } from './pixoo-renderer.js';
+import { pushFrame, pushFrames, setBrightness, clearText, getDeviceBackoffStatus, switchToCustomChannel, onDeviceStatusChange, stopProbeTimer } from './pixoo-client.js';
+import { renderFrame, renderDisconnectedFrame, formatResetDetailed } from './pixoo-renderer.js';
 import { debug } from '../logger.js';
 
 const TAG = 'Pixoo';
@@ -32,6 +32,8 @@ let devices: PixooDevice[] = [];
 let streamTimer: ReturnType<typeof setInterval> | null = null;
 let lastPushTime = 0;
 let pushing = false; // guard against overlapping pushes
+let lastStateHash = '';
+let lastSequencePushTime = 0;
 
 // Cached latest events
 let lastStateEvent: StateUpdateEvent | null = null;
@@ -47,6 +49,8 @@ let previewTimer: ReturnType<typeof setInterval> | null = null;
 let previewFps = 10; // Adjustable 1–10 FPS for /pixoo live preview
 
 const HTTP_STREAM_INTERVAL_MS = 250;     // 4 FPS hardware push (near hardware limit of Pixoo64)
+const STATE_CHECK_INTERVAL_MS = 500;     // check state changes every 500ms
+const FORCE_REFRESH_INTERVAL_MS = 1500;  // force single frame push every 1.5s as a heartbeat (0.67 FPS background rate)
 const CHANNEL_REASSERT_MS = 30_000;     // Re-assert custom channel every 30s (fast recovery after reboots)
 const DEFAULT_BRIGHTNESS = 100;
 
@@ -97,9 +101,9 @@ export function startPixooBridge(pixooDevices?: PixooDevice[]): void {
     debug(TAG, online ? `${name} (${ip}) back online` : `${name} (${ip}) went offline`);
   });
 
-  // Start continuous 3 FPS stream — no repeated channel switches
+  // Start state checking timer
   if (streamTimer) clearInterval(streamTimer);
-  streamTimer = setInterval(doStreamPush, HTTP_STREAM_INTERVAL_MS);
+  streamTimer = setInterval(doStateCheckAndPush, STATE_CHECK_INTERVAL_MS);
 
   debug(TAG, 'Bridge started (Continuous 3 FPS stream)');
 }
@@ -146,8 +150,9 @@ export function broadcastPixoo(event: BridgeEvent): void {
         // Resume stream after brief delay (let brightness restore first)
         setTimeout(() => {
           if (!displayDimmed && !streamTimer && devices.length > 0) {
-            streamTimer = setInterval(doStreamPush, HTTP_STREAM_INTERVAL_MS);
-            doStreamPush(); // Immediate first frame
+            streamTimer = setInterval(doStateCheckAndPush, STATE_CHECK_INTERVAL_MS);
+            lastStateHash = ''; // Force refresh
+            doStateCheckAndPush(); // Immediate first sequence
           }
         }, 100);
         debug(TAG, 'Display wake — brightness restored, stream resumed');
@@ -158,7 +163,10 @@ export function broadcastPixoo(event: BridgeEvent): void {
 
   // Immediate push on major disconnections to feel snappy
   if (event.type === 'connection' && devices.length > 0) {
-    if (!pushing) doStreamPush();
+    if (!pushing) {
+      lastStateHash = ''; // Force refresh
+      doStateCheckAndPush();
+    }
   }
 }
 
@@ -251,26 +259,60 @@ export function getPixooDeviceDetails(): Array<{
 // ===== Internal =====
 
 /**
- * Main Continuous Stream tick: 3 FPS push to all hardware devices (333ms interval).
+ * Compute a hash string representing the variables influencing the visual state of the aquarium.
  */
-function doStreamPush(): void {
+function calculateStateHash(): string {
+  const stateStr = lastStateEvent?.state ?? 'disconnected';
+  const gatewayConnected = lastStateEvent?.gatewayConnected ?? false;
+  const gatewayHasError = lastStateEvent?.gatewayHasError ?? false;
+
+  const r5 = lastUsageEvent ? formatResetDetailed(lastUsageEvent.fiveHourResetsAt) : '';
+  const r7 = lastUsageEvent ? formatResetDetailed(lastUsageEvent.sevenDayResetsAt) : '';
+  const u5 = lastUsageEvent?.fiveHourPercent != null ? Math.floor(lastUsageEvent.fiveHourPercent) : -1;
+  const u7 = lastUsageEvent?.sevenDayPercent != null ? Math.floor(lastUsageEvent.sevenDayPercent) : -1;
+  const uStale = lastUsageEvent?.usageStale ?? false;
+
+  const sessionInfo = lastSessions
+    ? lastSessions.map(s => `${s.id}:${s.agentType}:${s.state}`).join(',')
+    : '';
+
+  return `${stateStr}|${gatewayConnected}|${gatewayHasError}|${r5}|${r7}|${u5}|${u7}|${uStale}|${sessionInfo}|${displayDimmed}`;
+}
+
+/**
+ * State Check and Push tick: Checks for state changes, and pushes
+ * a single frame update to all hardware devices.
+ */
+function doStateCheckAndPush(): void {
   if (devices.length === 0) return;
   if (pushing) return;
   if (displayDimmed) return;
 
-  const elapsed = Date.now() - lastPushTime;
-  if (elapsed < HTTP_STREAM_INTERVAL_MS * 0.8) return;
+  const currentHash = calculateStateHash();
+  const timeSinceLastPush = Date.now() - lastSequencePushTime;
+  const stateChanged = currentHash !== lastStateHash;
+
+  if (!stateChanged && timeSinceLastPush < FORCE_REFRESH_INTERVAL_MS) {
+    return; // No change and no force refresh due
+  }
 
   pushing = true;
-  lastPushTime = Date.now();
+  lastSequencePushTime = Date.now();
+  lastStateHash = currentHash;
 
   try {
-    const frame = renderFrame(lastStateEvent, lastUsageEvent, lastSessions);
+    const now = Date.now();
+    const framesCount = 1;
+    const frames: Uint8Array[] = [];
+
+    // Render single frame
+    frames.push(renderFrame(lastStateEvent, lastUsageEvent, lastSessions, now));
+
     const ts = new Date().toISOString().slice(11, 19);
-    debug('Pixoo', `${ts} pushing to ${devices.length} dev(s)`);
+    debug('Pixoo', `${ts} pushing frame to ${devices.length} dev(s) (changed=${stateChanged})`);
 
     const promises = devices.map(dev =>
-      pushFrame(dev.ip, frame).then(ok => {
+      pushFrames(dev.ip, frames, 1000).then(ok => {
         debug('Pixoo', `${ts}   → ${dev.ip}: ${ok ? 'OK' : 'FAIL'}`);
       }).catch((err: any) => {
         debug('Pixoo', `${ts}   → ${dev.ip}: ERROR ${err?.message}`);

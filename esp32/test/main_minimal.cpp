@@ -9,11 +9,11 @@ void setup() {
     delay(500);
     Serial.println("\n\n=== AgentDeck Minimal Boot Test ===");
     Serial.printf("Board: %s\n",
-#if defined(BOARD_BOX_86)
+#if defined(BOARD_RGB48)
         "86 Box 4\""
-#elif defined(BOARD_IPS_35)
+#elif defined(BOARD_IPS35)
         "IPS 3.5\""
-#elif defined(BOARD_ROUND_AMOLED)
+#elif defined(BOARD_AMOLED)
         "AMOLED Round"
 #else
         "Unknown"

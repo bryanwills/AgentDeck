@@ -5,7 +5,7 @@
 #include <ArduinoJson.h>
 #include <Arduino.h>
 #include <WiFi.h>
-#if defined(BOARD_IPS_35) || defined(BOARD_ROUND_AMOLED)
+#if defined(BOARD_IPS35) || defined(BOARD_AMOLED)
 #include <Wire.h>
 #include "../boards/board_config.h"
 #endif
@@ -477,12 +477,16 @@ static void sendDeviceInfo() {
     JsonDocument resp;
     resp["type"] = "device_info";
 
-    #if defined(BOARD_ULANZI_TC001)
+    #if defined(BOARD_LED8X32)
     resp["board"] = "ulanzi_tc001";
+    #elif defined(BOARD_TTGO)
+    resp["board"] = "ttgo_t_display";
     #elif IS_ROUND
     resp["board"] = "round_amoled";
-    #elif defined(BOARD_BOX_86)
+    #elif defined(BOARD_RGB48)
     resp["board"] = "86box";
+    #elif defined(BOARD_IPS10)
+    resp["board"] = "ips_10";
     #else
     resp["board"] = "ips_35";
     #endif
@@ -541,7 +545,7 @@ void parseMessage(const char* json, size_t length) {
     } else if (strcmp(type, "connection") == 0) {
         // Connection status is handled by WS event callbacks
     } else if (strcmp(type, "touch_diag") == 0) {
-#if defined(BOARD_IPS_35)
+#if defined(BOARD_IPS35)
         Serial.println("[TouchDiag] === I2C scan ===");
         for (uint8_t addr = 1; addr < 127; addr++) {
             Wire.beginTransmission(addr);
@@ -577,7 +581,7 @@ void parseMessage(const char* json, size_t length) {
         }
         Serial.println();
         Serial.printf("[TouchDiag] INT pin (GPIO %d) = %d\n", BOARD_PIN_TOUCH_INT, digitalRead(BOARD_PIN_TOUCH_INT));
-#elif defined(BOARD_ROUND_AMOLED)
+#elif defined(BOARD_AMOLED)
         Serial.println("[TouchDiag] Round AMOLED — CST816S scan");
         for (uint8_t addr = 1; addr < 127; addr++) {
             Wire.beginTransmission(addr);

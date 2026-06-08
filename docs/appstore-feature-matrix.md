@@ -33,7 +33,7 @@
 |---|:---:|:---:|---|---|
 | **Ulanzi D200H Deck Dock** | ✅ | ✅ | Built-in USB | IOKit HID, `com.apple.security.device.usb` |
 | **Divoom Pixoo64** | ✅ | ✅ | Network LED | HTTP, entitlement 불필요 |
-| **ESP32 상태 디스플레이 (모니터링)** | ✅ | ✅ | ESP32 Display | `com.apple.security.device.serial`. 보드: `86box` / `round_amoled` / `ips_35` |
+| **ESP32 상태 디스플레이 (모니터링)** | ✅ | ✅ | ESP32 Display | `com.apple.security.device.serial`. 보드: `rgb48` / `amoled` / `ips35` |
 | **ESP32 Wi-Fi 프로비저닝** | ✅ | ✅ | ESP32 Display | 직접 serial write, subprocess 없음 |
 | **ESP32 firmware flash** | ❌ | ✅ | ESP32 Display | `esptool.py` 필요 |
 | **Ulanzi TC001** (8×32 LED wall clock) | ❌ | ✅ | USB-bridged LED | ADB reverse tunnel 필요 |

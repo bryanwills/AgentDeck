@@ -139,6 +139,7 @@ describe('BridgeCore Orchestration', () => {
       await client.connect(`ws://127.0.0.1:${port}`);
 
       try {
+        core.stateMachine.handleParserEvent('model_info', { model: 'claude-3-5-sonnet' });
         const usage = sampleApiUsage();
         core.updateApiUsage(usage);
 
@@ -156,6 +157,7 @@ describe('BridgeCore Orchestration', () => {
     });
 
     it('buildUsage includes API usage data', () => {
+      core.stateMachine.handleParserEvent('model_info', { model: 'claude-3-5-sonnet' });
       core.updateApiUsage(sampleApiUsage({ fiveHourPercent: 55 }));
 
       const evt = core.buildUsage() as UsageEvent;

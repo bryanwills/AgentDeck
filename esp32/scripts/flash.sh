@@ -16,7 +16,7 @@ Usage:
   $0 <environment> [port]
 
 Environments:
-  ips_35 | round_amoled | box_86 | ulanzi_tc001
+  ips_35 | round_amoled | box_86 | ulanzi_tc001 | ttgo_t_display
 
 Rules:
   - auto mode only selects boards that answer device_info_request
@@ -75,7 +75,7 @@ PY
 
 validate_env() {
     case "$1" in
-        ips_35|round_amoled|box_86|ulanzi_tc001) ;;
+        ips_35|round_amoled|box_86|ulanzi_tc001|ttgo_t_display) ;;
         *)
             echo "Unknown environment: $1" >&2
             usage >&2

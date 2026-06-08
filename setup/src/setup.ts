@@ -64,11 +64,25 @@ function checkPrerequisites(): boolean {
     pass = false;
   }
 
-  // Claude Code CLI
-  if (which('claude')) {
+  const hasClaude = Boolean(which('claude'));
+  const hasCodex = Boolean(which('codex'));
+
+  // At least one supported coding-agent CLI is needed for a useful local setup.
+  if (hasClaude) {
     ok('Claude Code CLI found');
   } else {
-    fail('Claude Code CLI not found — install with: npm install -g @anthropic-ai/claude-code');
+    warn('Claude Code CLI not found — Claude sessions will be unavailable');
+    console.log('     Install with: npm install -g @anthropic-ai/claude-code');
+  }
+
+  if (hasCodex) {
+    ok('Codex CLI found');
+  } else {
+    warn('Codex CLI not found — Codex sessions will be unavailable');
+  }
+
+  if (!hasClaude && !hasCodex) {
+    fail('No supported coding-agent CLI found — install Claude Code or Codex before running AgentDeck.');
     pass = false;
   }
 
@@ -187,6 +201,11 @@ function buildHookEntry(eventName: string) {
 }
 
 function installHooks() {
+  if (!which('claude')) {
+    warn('Skipping Claude Code hooks because `claude` is not installed');
+    return;
+  }
+
   info('Installing Claude Code hooks...');
 
   const claudeDir = join(homedir(), '.claude');
@@ -312,10 +331,12 @@ function success() {
   console.log('  Next steps:');
   console.log('  1. Restart Stream Deck app');
   console.log('  2. Add AgentDeck actions to your Stream Deck profile');
-  console.log("  3. Run 'agentdeck claude' in terminal to start the bridge");
+  console.log("  3. Run 'agentdeck claude' or 'agentdeck codex' in terminal to start the bridge");
+  console.log("     Codex observation hooks are installed automatically by 'agentdeck codex'");
   console.log('');
   console.log('  Usage:');
   console.log('    agentdeck claude   Start bridge + Claude');
+  console.log('    agentdeck codex    Start bridge + Codex');
   console.log('    agentdeck status   Check status');
   console.log('    agentdeck stop     Stop bridge');
   console.log('');

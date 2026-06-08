@@ -1,8 +1,9 @@
 #include "serial_client.h"
 #include "protocol.h"
 #include "wifi_manager.h"
+#include "ws_client.h"
 #include "../state/agent_state.h"
-#ifndef BOARD_ULANZI_TC001
+#ifndef BOARD_LED8X32
 #include "../ui/screens/splash.h"
 #endif
 #include <Arduino.h>
@@ -15,7 +16,7 @@ static char serialBuf[SERIAL_BUF_SIZE];
 static int serialBufPos = 0;
 
 // Connection tracking: consider "connected" if we got JSON within timeout
-static constexpr uint32_t SERIAL_TIMEOUT_MS = 10000;  // 10s
+static constexpr uint32_t SERIAL_TIMEOUT_MS = 30000;  // USB host updates can be bursty during daemon startup
 static uint32_t lastSerialJsonMs = 0;
 static bool hasReceivedJson = false;
 
@@ -31,14 +32,16 @@ static void sendDeviceInfoSerial() {
     JsonDocument resp;
     resp["type"] = "device_info";
 
-    #if defined(BOARD_ULANZI_TC001)
+    #if defined(BOARD_LED8X32)
     resp["board"] = "ulanzi_tc001";
-    #elif defined(BOARD_TTGO_T_DISPLAY)
+    #elif defined(BOARD_TTGO)
     resp["board"] = "ttgo_t_display";
     #elif IS_ROUND
     resp["board"] = "round_amoled";
-    #elif defined(BOARD_BOX_86)
+    #elif defined(BOARD_RGB48)
     resp["board"] = "86box";
+    #elif defined(BOARD_IPS10)
+    resp["board"] = "ips_10";
     #else
     resp["board"] = "ips_35";
     #endif
@@ -120,9 +123,8 @@ void serialLoop() {
         Serial.println("[Serial] Bridge timeout — no JSON received");
 
         lockState();
-        if (!Net::serialConnected()) {
-            // Only mark disconnected if WiFi WS is also not connected
-            // (handled by caller in networkTask)
+        if (!Net::wsConnected()) {
+            g_state.markBridgeDisconnected();
         }
         unlockState();
     }

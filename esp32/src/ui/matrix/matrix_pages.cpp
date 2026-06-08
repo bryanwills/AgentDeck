@@ -1,4 +1,4 @@
-#ifdef BOARD_ULANZI_TC001
+#ifdef BOARD_LED8X32
 #include "matrix_pages.h"
 #include "matrix_font.h"
 #include "config.h"
@@ -675,4 +675,4 @@ void MatrixPages::renderInfo(CRGB* leds, float animTime) {
     }
 }
 #endif // renderInfo disabled
-#endif // BOARD_ULANZI_TC001
+#endif // BOARD_LED8X32

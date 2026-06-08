@@ -338,6 +338,32 @@ describe('ApmeRunner.runOne', () => {
     expect(evals.filter((e) => e.layer === 'deterministic').length).toBe(3);
   });
 
+  it('does not notify onResult for no-op run evals', async () => {
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({
+      sessionId: 's-noop',
+      agentType: 'openclaw',
+      projectName: 'openclaw',
+      taskPrompt: 'placeholder',
+    });
+    collector.closeRun('s-noop');
+
+    const runner = new ApmeRunner(store);
+    runner._setConfig({
+      ...baseCfg({ sampleRate: 0 }),
+      deterministic: { enabled: false, timeoutSec: 30, commands: {} },
+    });
+
+    let notified = 0;
+    runner.onResult(() => { notified++; });
+
+    runner.enqueue({ runId });
+    await runner.drain();
+
+    expect(store.listEvalsForRun(runId)).toHaveLength(0);
+    expect(notified).toBe(0);
+  });
+
   it('enqueueTurn skips judge for tool_only and empty turns', async () => {
     const collector = new ApmeCollector(store);
     const runId = collector.openRun({

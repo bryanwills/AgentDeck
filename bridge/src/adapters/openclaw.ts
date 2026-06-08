@@ -40,6 +40,37 @@ import {
   OPENCLAW_IDLE_GAP_MS,
 } from '../apme/adapters/openclaw-hook.js';
 
+function extractGatewayTokenFromJson(json: unknown): string | null {
+  if (!json || typeof json !== 'object') return null;
+
+  const readPath = (root: unknown, path: string[]): string | null => {
+    let current: unknown = root;
+    for (const [index, key] of path.entries()) {
+      if (!current || typeof current !== 'object' || Array.isArray(current)) return null;
+      const next = (current as Record<string, unknown>)[key];
+      if (next == null) return null;
+      if (index === path.length - 1) {
+        if (typeof next !== 'string') return null;
+        const trimmed = next.trim();
+        return trimmed || null;
+      }
+      current = next;
+    }
+    return null;
+  };
+
+  for (const path of [
+    ['gateway', 'auth', 'token'],
+    ['auth', 'token'],
+    ['gateway', 'token'],
+  ]) {
+    const token = readPath(json, path);
+    if (token) return token;
+  }
+
+  return null;
+}
+
 /**
  * Inbound message envelopes — responses to our requests, or server-initiated events.
  * Frame definitions live in `@agentdeck/shared/gateway-protocol.ts` (single source
@@ -103,6 +134,8 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
   // Device identity (loaded once on start)
   private deviceIdentity: DeviceIdentity | null = null;
   private deviceAuthToken: DeviceAuthToken | null = null;
+  private sharedGatewayToken: string | null = null;
+  private disableDeviceAuthForNextConnect = false;
 
   // APME bridge — set by `setApmeSession`. OpenClaw has no hook layer; the
   // Gateway WS stream is the only event source. Without this APME wiring,
@@ -490,9 +523,22 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
         };
       }
 
+      this.sharedGatewayToken = this.loadSharedGatewayToken();
       debug('adapter:openclaw', `Device identity loaded: ${this.deviceIdentity.deviceId.slice(0, 16)}...`);
     } catch (err) {
       debug('adapter:openclaw', `Device identity not available: ${err}`);
+      this.sharedGatewayToken = this.loadSharedGatewayToken();
+    }
+  }
+
+  private loadSharedGatewayToken(): string | null {
+    try {
+      const json = JSON.parse(
+        readFileSync(join(homedir(), '.openclaw', 'openclaw.json'), 'utf-8'),
+      ) as unknown;
+      return extractGatewayTokenFromJson(json);
+    } catch {
+      return null;
     }
   }
 
@@ -520,9 +566,9 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
     const signedAt = Date.now();
     const scopes = requestScopes.join(',');
 
-    // v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce
+    // v3|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce|platform|deviceFamily
     const payload = [
-      'v2',
+      'v3',
       this.deviceIdentity.deviceId,
       'gateway-client',
       'backend',
@@ -531,6 +577,8 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
       String(signedAt),
       authToken,
       nonce,
+      'darwin',
+      'mac',
     ].join('|');
 
     const privateKey = createPrivateKey(this.deviceIdentity.privateKeyPem);
@@ -1059,7 +1107,8 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
     // reconstructs the payload from request params for signature verification.
     const scopes = this.deviceAuthToken?.scopes
       ?? ['operator.admin', 'operator.approvals', 'operator.read'];
-    const authToken = this.deviceAuthToken?.token ?? '';
+    const sharedToken = this.sharedGatewayToken ?? '';
+    const deviceToken = this.deviceAuthToken?.token ?? '';
 
     const params: Record<string, unknown> = {
       minProtocol: GATEWAY_PROTOCOL_VERSION,
@@ -1069,6 +1118,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
         displayName: 'AgentDeck',
         version: '0.3.0',
         platform: process.platform,
+        deviceFamily: 'mac',
         mode: 'backend',
       },
       role: 'operator',
@@ -1076,15 +1126,33 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
       caps: ['tool-events'],
     };
 
-    // Add device auth if identity is available
-    if (this.deviceIdentity && this.deviceAuthToken) {
+    // Add device auth if identity is available. Fallback mode suppresses all
+    // device-derived credentials so the retry is token-only.
+    if (this.deviceIdentity && this.deviceAuthToken && !this.disableDeviceAuthForNextConnect) {
       try {
-        params.device = this.buildDeviceAuth(nonce, scopes, authToken);
-        params.auth = { token: authToken };
+        params.device = this.buildDeviceAuth(nonce, scopes, sharedToken);
       } catch (err) {
         debug('adapter:openclaw', `Device auth signing failed: ${err}`);
       }
     }
+
+    const auth: Record<string, string> = {};
+    if (sharedToken) auth.token = sharedToken;
+    if (deviceToken && !this.disableDeviceAuthForNextConnect) {
+      auth.deviceToken = deviceToken;
+    }
+    if (Object.keys(auth).length > 0) {
+      params.auth = auth;
+    }
+
+    debug(
+      'adapter:openclaw',
+      `connect.RPC: fallback=${this.disableDeviceAuthForNextConnect}` +
+        ` hasDevice=${params.device != null}` +
+        ` hasSharedToken=${!!auth.token}` +
+        ` hasDeviceToken=${!!auth.deviceToken}` +
+        ` scopes=${scopes.length}`,
+    );
 
     const id = 'init-1';
     const message = { type: 'req' as const, id, method: 'connect', params };

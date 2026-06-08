@@ -100,11 +100,12 @@ class RockFormation {
             )
         }
 
+        val baseWidth = minOf(w, h * 2f)
         // 10 pebbles (small ovals scattered on sand)
         for (i in 0 until PEBBLE_COUNT) {
             val px = w * PEBBLE_X[i]
             val py = sandTop + (h - sandTop) * PEBBLE_Y[i]
-            val pw = w * PEBBLE_W[i]
+            val pw = baseWidth * PEBBLE_W[i]
             val ph = pw * 0.6f
 
             scope.drawOval(
@@ -117,19 +118,20 @@ class RockFormation {
 
     private fun drawRocks(scope: DrawScope, w: Float, h: Float) {
         val bottomY = h * (1f - TerrariumLayout.SAND_HEIGHT_FRACTION)
+        val baseWidth = minOf(w, h * 2f)
         rockPathIdx = 0
 
         // Large rock cluster (right side, where crayfish sits)
-        drawRock(scope, w * 0.7f, bottomY, w * 0.15f, w * 0.08f, TerrariumColors.RockMid)
-        drawRock(scope, w * 0.8f, bottomY - w * 0.02f, w * 0.12f, w * 0.10f, TerrariumColors.RockDark)
-        drawRock(scope, w * 0.75f, bottomY - w * 0.01f, w * 0.08f, w * 0.06f, TerrariumColors.RockLight)
+        drawRock(scope, w * 0.7f, bottomY, baseWidth * 0.15f, baseWidth * 0.08f, TerrariumColors.RockMid)
+        drawRock(scope, w * 0.8f, bottomY - baseWidth * 0.02f, baseWidth * 0.12f, baseWidth * 0.10f, TerrariumColors.RockDark)
+        drawRock(scope, w * 0.75f, bottomY - baseWidth * 0.01f, baseWidth * 0.08f, baseWidth * 0.06f, TerrariumColors.RockLight)
 
         // Small rocks (left side)
-        drawRock(scope, w * 0.05f, bottomY, w * 0.08f, w * 0.05f, TerrariumColors.RockDark)
-        drawRock(scope, w * 0.12f, bottomY + w * 0.01f, w * 0.06f, w * 0.04f, TerrariumColors.RockMid)
+        drawRock(scope, w * 0.05f, bottomY, baseWidth * 0.08f, baseWidth * 0.05f, TerrariumColors.RockDark)
+        drawRock(scope, w * 0.12f, bottomY + baseWidth * 0.01f, baseWidth * 0.06f, baseWidth * 0.04f, TerrariumColors.RockMid)
 
         // Center small rock
-        drawRock(scope, w * 0.45f, bottomY + w * 0.01f, w * 0.05f, w * 0.03f, TerrariumColors.RockLight)
+        drawRock(scope, w * 0.45f, bottomY + baseWidth * 0.01f, baseWidth * 0.05f, baseWidth * 0.03f, TerrariumColors.RockLight)
     }
 
     private fun drawRock(scope: DrawScope, cx: Float, baseY: Float, rw: Float, rh: Float, color: Color) {
@@ -154,6 +156,7 @@ class RockFormation {
 
     private fun drawLEDCables(scope: DrawScope, w: Float, h: Float) {
         val bottomY = h * (1f - TerrariumLayout.SAND_HEIGHT_FRACTION)
+        val baseWidth = minOf(w, h * 2f)
 
         // Pulse effect — uses pre-computed ledBaseColor/ledBaseAlpha (no Color.copy per frame)
         val pulse = sin(time * TerrariumTiming.LED_PULSE_SPEED) * 0.3f + 0.7f
@@ -161,9 +164,9 @@ class RockFormation {
 
         // Cable from left rocks to right rocks
         val cablePath = Path().apply {
-            moveTo(w * 0.1f, bottomY - w * 0.02f)
-            quadraticBezierTo(w * 0.3f, bottomY + w * 0.02f, w * 0.5f, bottomY - w * 0.01f)
-            quadraticBezierTo(w * 0.65f, bottomY + w * 0.01f, w * 0.75f, bottomY - w * 0.04f)
+            moveTo(w * 0.1f, bottomY - baseWidth * 0.02f)
+            quadraticBezierTo(w * 0.3f, bottomY + baseWidth * 0.02f, w * 0.5f, bottomY - baseWidth * 0.01f)
+            quadraticBezierTo(w * 0.65f, bottomY + baseWidth * 0.01f, w * 0.75f, bottomY - baseWidth * 0.04f)
         }
 
         scope.drawPath(
@@ -182,14 +185,14 @@ class RockFormation {
         for (i in 0 until dotCount) {
             val t = i.toFloat() / (dotCount - 1)
             val dotX = w * (0.1f + t * 0.65f)
-            val dotY = bottomY - w * 0.01f +
-                sin(t * PI.toFloat() * 2f) * w * 0.015f
+            val dotY = bottomY - baseWidth * 0.01f +
+                sin(t * PI.toFloat() * 2f) * baseWidth * 0.015f
 
             val dotPulse = sin(time * TerrariumTiming.LED_PULSE_SPEED + i * 0.5f) * 0.4f + 0.6f
             scope.drawCircle(
                 color = ledBaseColor,
                 alpha = dotPulse * 0.8f * effectiveAlpha,
-                radius = w * 0.003f,
+                radius = baseWidth * 0.003f,
                 center = Offset(dotX, dotY),
             )
         }

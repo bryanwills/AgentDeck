@@ -7,7 +7,7 @@
 #include "../../state/agent_state.h"
 #include "config.h"
 
-#if defined(BOARD_TTGO_T_DISPLAY)
+#if defined(BOARD_TTGO)
 #include "ttgo_overlay.h"
 #endif
 
@@ -20,7 +20,7 @@ static lv_obj_t* connSpinner = nullptr;
 static lv_obj_t* connStatusLabel = nullptr;
 static bool lastHostDisplayOn = true;
 
-#if defined(BOARD_IPS_35)
+#if defined(BOARD_IPS35)
 static lv_obj_t* btnRotate = nullptr;
 static lv_obj_t* lblRotate = nullptr;
 #endif
@@ -83,7 +83,7 @@ lv_obj_t* aquariumCreate() {
     // Create terrarium canvas (full screen)
     Terrarium::init(screen);
 
-#if defined(BOARD_TTGO_T_DISPLAY)
+#if defined(BOARD_TTGO)
     // TTGO: Use simplified overlay (state + activity switching)
     TTGO::Overlay::init(screen);
 #else
@@ -107,7 +107,7 @@ lv_obj_t* aquariumCreate() {
 
     // Card container (centered in scrim)
     connCard = lv_obj_create(connScrim);
-#if defined(BOARD_TTGO_T_DISPLAY)
+#if defined(BOARD_TTGO)
     lv_obj_set_width(connCard, 200);
 #elif IS_ROUND
     lv_obj_set_width(connCard, 220);
@@ -137,14 +137,15 @@ lv_obj_t* aquariumCreate() {
     lv_obj_set_style_text_font(connTitleLabel, &lv_font_montserrat_20, 0);
     lv_label_set_text(connTitleLabel, "AgentDeck");
 
-    // Spinner (36×36)
+    // Spinner (36×36) — smoother animation with shorter period
     connSpinner = lv_spinner_create(connCard);
     lv_obj_set_size(connSpinner, 36, 36);
-    lv_spinner_set_anim_params(connSpinner, 1000, 270);
-    lv_obj_set_style_arc_color(connSpinner, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_arc_color(connSpinner, lv_color_hex(Theme::HUDText), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(connSpinner, 4, 0);
-    lv_obj_set_style_arc_width(connSpinner, 4, LV_PART_INDICATOR);
+    lv_spinner_set_anim_params(connSpinner, 800, 360);
+    lv_obj_set_style_arc_color(connSpinner, lv_color_hex(0x1E293B), 0);
+    lv_obj_set_style_arc_color(connSpinner, lv_color_hex(0x60A5FA), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(connSpinner, 3, 0);
+    lv_obj_set_style_arc_width(connSpinner, 3, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(connSpinner, true, 0);
 
     // Status text
     connStatusLabel = lv_label_create(connCard);
@@ -158,7 +159,7 @@ lv_obj_t* aquariumCreate() {
     lv_obj_add_event_cb(screen, screenTouchEvent, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(screen, screenTouchEvent, LV_EVENT_SHORT_CLICKED, NULL);
 
-#if defined(BOARD_IPS_35)
+#if defined(BOARD_IPS35)
     // Rotation button — bottom-right corner, small and unobtrusive
     btnRotate = lv_btn_create(screen);
     lv_obj_set_size(btnRotate, 36, 36);
@@ -204,7 +205,7 @@ void aquariumUpdate(float dt) {
     // Render terrarium frame
     Terrarium::render(dt);
 
-#if defined(BOARD_TTGO_T_DISPLAY)
+#if defined(BOARD_TTGO)
     // TTGO: Update simplified overlay
     TTGO::Overlay::update();
 #else
@@ -217,9 +218,16 @@ void aquariumSetConnectionStatus(ConnOverlayStatus status) {
     if (!connScrim || !connStatusLabel || !connSpinner) return;
 
     if (status == ConnOverlayStatus::HIDDEN) {
+#if defined(BOARD_TTGO)
+        TTGO::Overlay::setVisible(true);
+#endif
         lv_obj_add_flag(connScrim, LV_OBJ_FLAG_HIDDEN);
         return;
     }
+
+#if defined(BOARD_TTGO)
+    TTGO::Overlay::setVisible(false);
+#endif
 
     // Show scrim
     lv_obj_clear_flag(connScrim, LV_OBJ_FLAG_HIDDEN);

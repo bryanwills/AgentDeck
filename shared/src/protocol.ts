@@ -395,7 +395,7 @@ export interface WifiProvisionMessage {
 
 export interface DeviceInfoMessage {
   type: 'device_info';
-  board: string;         // "86box" | "round_amoled" | "ips_35"
+  board: string;         // "86box" | "round_amoled" | "ips_35" | "ips_10"
   version: string;       // firmware version
   wifiConfigured: boolean;
   wifiConnected: boolean;

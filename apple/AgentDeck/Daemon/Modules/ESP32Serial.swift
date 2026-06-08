@@ -14,6 +14,27 @@ final class ReadToken: @unchecked Sendable {
     func invalidate() { lock.withLock { _active = false } }
 }
 
+/// Thread-safe cancellation marker for blocking serial open/config attempts.
+final class OpenAttemptToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _active = true
+    var isActive: Bool { lock.withLock { _active } }
+    func invalidate() { lock.withLock { _active = false } }
+}
+
+final class SerialStatusShadow: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: [String: Any] = ["available": true, "connections": [] as [Any]]
+
+    func update(_ next: [String: Any]) {
+        lock.withLock { value = next }
+    }
+
+    func snapshot() -> [String: Any] {
+        lock.withLock { value }
+    }
+}
+
 /// Manages USB serial connections to ESP32 devices (CH340/CP210x/native USB).
 /// Newline-delimited JSON protocol, heartbeat, WiFi provisioning.
 actor ESP32Serial {
@@ -67,8 +88,11 @@ actor ESP32Serial {
     private var lastReadError: String?
     private var lastWriteError: String?
     private var failedPorts: [String: PortFailure] = [:]
+    private var openingPorts: [String: OpenAttemptToken] = [:]
     private var provisionFingerprintsByPort: [String: String] = [:]
+    private let statusShadow = SerialStatusShadow()
     private static let permanentBlockDuration: TimeInterval = 300  // 5 minutes
+    private static let serialOpenTimeoutSec: TimeInterval = 3
     private static let deviceInfoTimeoutSec: TimeInterval = 30  // retry device_info if absent
     private static let deviceInfoReconnectSec: TimeInterval = 120
     private static let writeBackpressureRetryLimit = 100
@@ -112,11 +136,27 @@ actor ESP32Serial {
 
     var connectionCount: Int { connections.filter(\.connected).count }
 
+    nonisolated func cachedStatusSnapshot() -> [String: Any] {
+        statusShadow.snapshot()
+    }
+
     func statusSnapshot() -> sending [String: Any] {
+        let snapshot = makeStatusSnapshot()
+        statusShadow.update(snapshot)
+        return statusShadow.snapshot()
+    }
+
+    private func publishStatusShadow() {
+        statusShadow.update(makeStatusSnapshot())
+    }
+
+    private func makeStatusSnapshot() -> [String: Any] {
         let connectedPorts = Set(connections.filter(\.connected).map(\.port))
         return [
+            "available": true,
             "connectionCount": connections.filter(\.connected).count,
             "detectedPorts": lastDetectedPorts,
+            "openingPorts": Array(openingPorts.keys).sorted(),
             "lastOpenError": lastOpenError as Any,
             "lastReadError": lastReadError as Any,
             "lastWriteError": lastWriteError as Any,
@@ -183,6 +223,7 @@ actor ESP32Serial {
         }
 
         DaemonLogger.shared.debug("ESP32", "Serial bridge started")
+        publishStatusShadow()
     }
 
     func stop() async {
@@ -221,6 +262,7 @@ actor ESP32Serial {
         lastOpenError = nil
         lastReadError = nil
         lastWriteError = nil
+        publishStatusShadow()
     }
 
     // MARK: - Broadcast
@@ -234,6 +276,7 @@ actor ESP32Serial {
         for i in connections.indices where connections[i].connected {
             sendEvent(event, to: &connections[i])
         }
+        publishStatusShadow()
     }
 
     func sendWifiProvisionToAll(_ msg: [String: Any]) -> Int {
@@ -251,7 +294,21 @@ actor ESP32Serial {
             provisionFingerprintsByPort[connections[i].port] = fingerprint
             count += 1
         }
+        publishStatusShadow()
         return count
+    }
+
+    /// Send display state (on/off) to all connected ESP32 devices.
+    /// Called by IOKit display sleep/wake handlers.
+    func sendDisplayState(displayOn: Bool) {
+        let event: [String: Any] = ["type": "display_state", "displayOn": displayOn]
+        guard let data = try? JSONSerialization.data(withJSONObject: event),
+              let json = String(data: data, encoding: .utf8) else { return }
+        for i in connections.indices where connections[i].connected {
+            sendToConnection(&connections[i], json: json)
+        }
+        publishStatusShadow()
+        DaemonLogger.shared.debug("ESP32", "Display state: \(displayOn ? "ON" : "OFF")")
     }
 
     // MARK: - Port Detection
@@ -274,6 +331,17 @@ actor ESP32Serial {
                 let range = NSRange(port.startIndex..., in: port)
                 return Self.portPatterns.contains { $0.firstMatch(in: port, range: range) != nil }
             }
+            .sorted { a, b in
+                let ap = Self.portPriority(a)
+                let bp = Self.portPriority(b)
+                return ap == bp ? a < b : ap < bp
+            }
+    }
+
+    private static func portPriority(_ port: String) -> Int {
+        if port.contains("wchusbserial") || port.contains("usbserial") { return 0 }
+        if port.contains("usbmodem") { return 1 }
+        return 2
     }
 
     private func pollForDevices() {
@@ -283,10 +351,12 @@ actor ESP32Serial {
         let ports = detectPorts()
         lastDetectedPorts = ports
         let now = Date()
+        publishStatusShadow()
 
         for port in ports {
             // Skip if already connected
             if connections.contains(where: { $0.port == port }) { continue }
+            if openingPorts[port] != nil { continue }
 
             // Check failure blocklist
             if let failure = failedPorts[port] {
@@ -300,13 +370,19 @@ actor ESP32Serial {
                 }
             }
 
-            openAndRegisterPort(port)
+            beginOpenPort(port)
         }
     }
 
     // MARK: - Port Open
 
-    private func openAndRegisterPort(_ port: String) {
+    private enum SerialOpenResult: Sendable {
+        case opened(Int32)
+        case failed(Int32, String)
+        case cancelled
+    }
+
+    private func beginOpenPort(_ port: String) {
         // Close any existing connection to the same port first (prevents FD leak on restart/wake race)
         if let existingIdx = connections.firstIndex(where: { $0.port == port }) {
             let old = connections.remove(at: existingIdx)
@@ -315,12 +391,71 @@ actor ESP32Serial {
             DaemonLogger.shared.debug("ESP32", "Closed stale connection to \(port) before reopening")
         }
 
-        guard let conn = openPort(port) else { return }
-        // If connection was already marked disconnected during openPort (due to initialization write stalls)
-        guard conn.connected else {
-            DaemonLogger.shared.error("ESP32: Port \(port) was closed during initialization (e.g. write stall)")
+        let token = OpenAttemptToken()
+        openingPorts[port] = token
+
+        Task.detached(priority: .utility) { [weak self, token] in
+            let result = Self.openSerialDescriptor(port, token: token)
+            await self?.finishOpenPort(port: port, token: token, result: result)
+        }
+
+        Task { [weak self, token] in
+            try? await Task.sleep(for: .seconds(Self.serialOpenTimeoutSec))
+            await self?.markOpenTimedOut(port: port, token: token)
+        }
+    }
+
+    private func finishOpenPort(port: String, token: OpenAttemptToken, result: SerialOpenResult) {
+        guard openingPorts[port] === token else {
+            if case .opened(let fd) = result {
+                Darwin.close(fd)
+            }
+            publishStatusShadow()
             return
         }
+        openingPorts.removeValue(forKey: port)
+
+        switch result {
+        case .opened(let descriptor):
+            failedPorts.removeValue(forKey: port)
+            registerOpenedDescriptor(port: port, descriptor: descriptor)
+        case .failed(let errNo, let message):
+            recordOpenFailure(port: port, errNo: errNo, message: message)
+        case .cancelled:
+            break
+        }
+        publishStatusShadow()
+    }
+
+    private func markOpenTimedOut(port: String, token: OpenAttemptToken) {
+        guard openingPorts[port] === token else { return }
+        token.invalidate()
+        openingPorts.removeValue(forKey: port)
+
+        let message = "serial open timed out after \(Self.serialOpenTimeoutSec)s"
+        let existing = failedPorts[port]
+        let count = (existing?.failCount ?? 0) + 1
+        failedPorts[port] = PortFailure(error: message, isPermanent: false, failCount: count, lastAttempt: Date())
+        lastOpenError = "failed to open serial handle for \(port): \(message)"
+        DaemonLogger.shared.throttledDebug(
+            "ESP32",
+            key: "open-timeout:\(port)",
+            "Timed out opening serial: \(port) [attempt \(count)]",
+            minInterval: 30
+        )
+        publishStatusShadow()
+    }
+
+    private func registerOpenedDescriptor(port: String, descriptor: Int32) {
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        let writeHandle = handle
+        let readHandle = handle
+
+        let conn = SerialConnection(port: port, fd: descriptor, writeHandle: writeHandle, readHandle: readHandle)
+
+        DaemonLogger.shared.info("ESP32 opened: \(port) [\(port.contains("usbmodem") ? "CDC" : "UART")]")
+
+        lastOpenError = nil
         lastReadError = nil
         // IMPORTANT: append to connections array BEFORE starting read thread,
         // otherwise handleReadData won't find the connection by port name
@@ -330,40 +465,60 @@ actor ESP32Serial {
             return
         }
         startReading(port: port, handle: readHandle, fd: conn.fd, token: conn.readToken)
+
+        // Send the initial burst only after the read loop is active so CDC
+        // ports can drain the response path before larger payloads arrive.
+        if let idx = connections.firstIndex(where: { $0.port == port }) {
+            sendDeviceInfoRequest(to: &connections[idx])
+            sendInitialState(to: &connections[idx])
+        }
+        publishStatusShadow()
     }
 
-    private func openPort(_ port: String) -> SerialConnection? {
+    private func recordOpenFailure(port: String, errNo: Int32, message: String) {
+        let isPermanent = (errNo == EACCES)
+        let existing = failedPorts[port]
+        let count = (existing?.failCount ?? 0) + 1
+        failedPorts[port] = PortFailure(error: message, isPermanent: isPermanent, failCount: count, lastAttempt: Date())
+
+        if isPermanent {
+            if count == 1 {
+                DaemonLogger.shared.error("ESP32: Permission denied opening \(port) - serial entitlement missing or App Sandbox. Suppressing for 5 min.")
+            }
+        } else {
+            DaemonLogger.shared.throttledDebug(
+                "ESP32",
+                key: "open-fail:\(port):\(message)",
+                "Failed to open serial: \(port) (\(message)) [attempt \(count)]",
+                minInterval: 30
+            )
+        }
+
+        lastOpenError = "failed to open serial handle for \(port): \(message)"
+        publishStatusShadow()
+    }
+
+    private nonisolated static func openSerialDescriptor(_ port: String, token: OpenAttemptToken) -> SerialOpenResult {
         // O_NONBLOCK needed to avoid blocking on DCD during open; cleared after termios config
         let descriptor = open(port, O_RDWR | O_NOCTTY | O_NONBLOCK)
         guard descriptor >= 0 else {
             let errNo = errno
             let message = String(cString: strerror(errNo))
-            let isPermanent = (errNo == EACCES)
-            let existing = failedPorts[port]
-            let count = (existing?.failCount ?? 0) + 1
-            failedPorts[port] = PortFailure(error: message, isPermanent: isPermanent, failCount: count, lastAttempt: Date())
-
-            if isPermanent {
-                if count == 1 {
-                    DaemonLogger.shared.error("ESP32: Permission denied opening \(port) — serial entitlement missing or App Sandbox. Suppressing for 5 min.")
-                }
-            } else {
-                DaemonLogger.shared.throttledDebug(
-                    "ESP32",
-                    key: "open-fail:\(port):\(message)",
-                    "Failed to open serial: \(port) (\(message)) [attempt \(count)]",
-                    minInterval: 30
-                )
-            }
-
-            lastOpenError = "failed to open serial handle for \(port): \(message)"
-            return nil
+            return .failed(errNo, message)
         }
-        failedPorts.removeValue(forKey: port)
+
+        guard token.isActive else {
+            Darwin.close(descriptor)
+            return .cancelled
+        }
 
         // Configure termios: raw mode, blocking read
         var options = termios()
         tcgetattr(descriptor, &options)
+        guard token.isActive else {
+            Darwin.close(descriptor)
+            return .cancelled
+        }
         cfmakeraw(&options)
         options.c_cflag |= UInt(CLOCAL | CREAD)
         options.c_cflag &= ~UInt(HUPCL)  // Match Node serial bridge: don't drop DTR on close/reopen.
@@ -375,38 +530,18 @@ actor ESP32Serial {
             cc[Int(VTIME)] = 0
         }
         tcsetattr(descriptor, TCSANOW, &options)
+        guard token.isActive else {
+            Darwin.close(descriptor)
+            return .cancelled
+        }
         tcflush(descriptor, TCIOFLUSH)
         // Keep O_NONBLOCK set — matches pyserial behavior (read returns EAGAIN when no data)
 
-        // Use single fd for both read and write (no dup — simpler, avoids fd management issues)
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-        let writeHandle = handle
-        let readHandle = handle
-
-        lastOpenError = nil
-
-        var conn = SerialConnection(port: port, fd: descriptor, writeHandle: writeHandle, readHandle: readHandle)
-
-        DaemonLogger.shared.info("ESP32 opened: \(port) [\(port.contains("usbmodem") ? "CDC" : "UART")]")
-
-        // Request device info
-        sendDeviceInfoRequest(to: &conn)
-
-        // Brief delay to let ESP32 process and respond, then read initial data
-        Thread.sleep(forTimeInterval: 0.5)
-        var initBuf = [UInt8](repeating: 0, count: 2048)
-        let initN = Darwin.read(descriptor, &initBuf, initBuf.count)
-        if initN > 0, let initStr = String(bytes: initBuf[0..<initN], encoding: .utf8) {
-            enqueuePendingRead(port: port, data: initStr)
-            if let info = Self.parseDeviceInfo(from: initStr) {
-                conn.deviceInfo = info
-            }
+        guard token.isActive else {
+            Darwin.close(descriptor)
+            return .cancelled
         }
-
-        // Send initial state
-        sendInitialState(to: &conn)
-
-        return conn
+        return .opened(descriptor)
     }
 
     private func startReading(port: String, handle: FileHandle, fd: Int32, token: ReadToken) {
@@ -449,6 +584,7 @@ actor ESP32Serial {
             connections[idx].readToken.invalidate()
             connections[idx].connected = false
         }
+        publishStatusShadow()
     }
 
     private func handleReadData(port: String, data: String) {
@@ -487,6 +623,7 @@ actor ESP32Serial {
                 if !hadDeviceInfo {
                     sendInitialState(to: &connections[idx])
                 }
+                publishStatusShadow()
             }
 
             onMessage?(port, msg)
@@ -552,6 +689,7 @@ actor ESP32Serial {
                 sendToConnection(&connections[i], json: keepalive)
             }
         }
+        publishStatusShadow()
     }
 
     // MARK: - Serial Helpers
@@ -570,6 +708,9 @@ actor ESP32Serial {
     private func sendInitialState(to conn: inout SerialConnection) {
         guard let events = initialStateProvider?() else { return }
         for event in events {
+            if conn.deviceInfo == nil, (event["type"] as? String) == "usage_update" {
+                continue
+            }
             sendEvent(event, to: &conn)
         }
     }
@@ -735,6 +876,22 @@ actor ESP32Serial {
                         ]
                     }
             }
+        }
+
+        // Before the ESP32 has identified itself, keep the first burst lean.
+        // CDC devices are the ones that have been stalling on the initial
+        // payload, so strip the high-volume fields until device_info lands.
+        if connection.deviceInfo == nil, type == "state_update" {
+            e.removeValue(forKey: "moduleHealth")
+            e.removeValue(forKey: "subscriptions")
+            e.removeValue(forKey: "voiceAssistantState")
+            e.removeValue(forKey: "voiceAssistantText")
+            e.removeValue(forKey: "voiceAssistantResponseText")
+            e.removeValue(forKey: "pairingUrl")
+            e.removeValue(forKey: "gatewayDeviceId")
+            e.removeValue(forKey: "gatewayAuthRequestId")
+            e.removeValue(forKey: "gatewayAuthMessage")
+            e.removeValue(forKey: "remoteUrl")
         }
         if Self.needsLegacyCodexAppAlias(connection.deviceInfo) {
             e = Self.aliasCodexAppAgentTypes(e) as? [String: Any] ?? e

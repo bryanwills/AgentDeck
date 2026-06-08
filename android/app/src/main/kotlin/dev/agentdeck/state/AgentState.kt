@@ -99,11 +99,13 @@ class AgentStateHolder private constructor() {
             is BridgeEvent.State -> {
                 Log.d(TAG, "StateEvent: state=${event.data.state}, agentType=${event.data.agentType}, tool=${event.data.currentTool}")
                 _state.update { current ->
+                    // Keep aggregate identity when current is daemon/openclaw and incoming event is from a coding agent.
+                    // No need to wait for siblingSessions to be populated — the first state_update may arrive
+                    // before sessions_list, and we must preserve the aggregate sessionId from the start.
                     val keepAggregateIdentity =
                         current.agentType in AGGREGATE_AGENT_TYPES &&
                             event.data.agentType != null &&
-                            event.data.agentType !in AGGREGATE_AGENT_TYPES &&
-                            current.siblingSessions.isNotEmpty()
+                            event.data.agentType !in AGGREGATE_AGENT_TYPES
                     val resolvedAgentType = when {
                         keepAggregateIdentity -> current.agentType
                         else -> event.data.agentType ?: current.agentType
@@ -126,6 +128,12 @@ class AgentStateHolder private constructor() {
                     // animates as if Claude's PROCESSING were its own.
                     val resolvedAgentState =
                         if (keepAggregateIdentity) current.agentState else event.data.state
+                    // sessionId on state_update tracks the latest hook-active session.
+                    // In aggregate mode (daemon/openclaw), keep the original bridge-core UUID
+                    // as sessionId, not a sibling session's ID. This prevents the sibling from
+                    // being skipped as "self" when processing siblingSessions for creature rendering.
+                    // Also skip sessionId update when the event itself is from an aggregate primary.
+                    val isAggregateEvent = event.data.agentType in AGGREGATE_AGENT_TYPES
                     current.copy(
                         agentState = resolvedAgentState,
                         permissionMode = event.data.permissionMode,
@@ -167,13 +175,16 @@ class AgentStateHolder private constructor() {
                         voiceAssistantState = event.data.voiceAssistantState ?: current.voiceAssistantState,
                         voiceAssistantText = event.data.voiceAssistantText,
                         voiceAssistantResponseText = event.data.voiceAssistantResponseText,
-                        // sessionId on state_update tracks the latest
-                        // hook-active session ("may move with hook activity"
-                        // per shared/src/protocol.ts). Mirrors Apple
-                        // `if let sid = e.sessionId { state.sessionId = sid }`.
-                        // Absent → keep current (set originally by
-                        // BridgeEvent.Connected).
-                        sessionId = event.data.sessionId ?: current.sessionId,
+                        // sessionId on state_update tracks the latest hook-active session ("may move with hook activity"
+                        // per shared/src/protocol.ts). Mirrors Apple `if let sid = e.sessionId { state.sessionId = sid }`.
+                        // Absent → keep current (set originally by BridgeEvent.Connected).
+                        // In aggregate mode (daemon/openclaw), keep the original bridge-core UUID as sessionId,
+                        // not a sibling session's ID. This prevents the sibling from being skipped as "self"
+                        // when processing siblingSessions for creature rendering.
+                        sessionId = when {
+                            isAggregateEvent || keepAggregateIdentity -> current.sessionId
+                            else -> event.data.sessionId ?: current.sessionId
+                        },
                         // focusedSessionId carries explicit user-focus state.
                         // Mirror Apple AgentStateHolder.handleStateUpdate:
                         //   absent → keep current (session-bridge updates
@@ -186,7 +197,9 @@ class AgentStateHolder private constructor() {
                         } else {
                             current.focusedSessionId
                         },
-                    )
+                    ).also {
+                        Log.d(TAG, "State updated: sessionId=${it.sessionId}, agentType=${it.agentType}, agentState=${it.agentState}, siblingSessions.size=${it.siblingSessions.size}")
+                    }
                 }
                 lastKnownState = _state.value
                 StateTimelineGenerator.instance.onStateUpdate(event.data)
@@ -258,6 +271,10 @@ class AgentStateHolder private constructor() {
             }
 
             is BridgeEvent.SessionsList -> {
+                Log.d(TAG, "SessionsList: ${event.sessions.size} sessions")
+                for (s in event.sessions) {
+                    Log.d(TAG, "  Session: id=${s.id}, agentType=${s.agentType}, state=${s.state}, projectName=${s.projectName}")
+                }
                 _state.update { it.copy(siblingSessions = event.sessions) }
             }
 

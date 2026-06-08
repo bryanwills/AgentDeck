@@ -32,12 +32,16 @@ static lv_obj_t* gauge7dReset = nullptr;
 static lv_obj_t* lblStale = nullptr;
 
 static bool visible = true;
+static bool lastShowTankStatus = true;
+static bool firstUpdate = true;
 
 // Panel Y offset: just below water surface
 static constexpr int PANEL_TOP_Y = 28;
 
 // Gauge dimensions
-#if IS_ROUND
+#if defined(BOARD_TTGO)
+static constexpr int GAUGE_SIZE = 40;
+#elif IS_ROUND
 static constexpr int GAUGE_SIZE = 44;
 #else
 static constexpr int GAUGE_SIZE = 58;
@@ -208,6 +212,10 @@ void init(lv_obj_t* parent) {
     // === Left panel: AgentDeck logo + sessions ===
     const bool portrait = !UI::isLandscape();
     panelLeft = lv_obj_create(parent);
+#if defined(BOARD_TTGO)
+    lv_obj_set_size(panelLeft, 110, LV_SIZE_CONTENT);
+    lv_obj_set_pos(panelLeft, 6, 6);
+#else
     if (portrait) {
         // Portrait: full-width panel at top
         lv_obj_set_size(panelLeft, g_screenW - 16, LV_SIZE_CONTENT);
@@ -216,6 +224,7 @@ void init(lv_obj_t* parent) {
         lv_obj_set_size(panelLeft, 170, LV_SIZE_CONTENT);
         lv_obj_set_pos(panelLeft, 8, PANEL_TOP_Y);
     }
+#endif
     lv_obj_set_style_bg_color(panelLeft, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(panelLeft, LV_OPA_50, 0);
     lv_obj_set_style_border_width(panelLeft, 0, 0);
@@ -232,12 +241,20 @@ void init(lv_obj_t* parent) {
     // Logo text — large, centered (like Android tablet/e-reader)
     lblLogo = lv_label_create(panelLeft);
     lv_obj_set_style_text_color(lblLogo, lv_color_hex(Theme::HUDText), 0);
+#if defined(BOARD_TTGO)
+    lv_obj_set_style_text_font(lblLogo, &lv_font_montserrat_14, 0);
+#else
     lv_obj_set_style_text_font(lblLogo, &lv_font_montserrat_20, 0);
+#endif
     lv_label_set_text(lblLogo, "AgentDeck");
 
     // Accent underline below logo
     logoLine = lv_obj_create(panelLeft);
+#if defined(BOARD_TTGO)
+    lv_obj_set_size(logoLine, 80, 2);
+#else
     lv_obj_set_size(logoLine, 130, 2);
+#endif
     lv_obj_set_style_bg_color(logoLine, lv_color_hex(Theme::StatusBlue), 0);
     lv_obj_set_style_bg_opa(logoLine, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(logoLine, 0, 0);
@@ -251,18 +268,26 @@ void init(lv_obj_t* parent) {
     lv_obj_set_style_text_font(lblSessions, &font_kr_12, 0);
     lv_label_set_recolor(lblSessions, true);
     lv_label_set_text(lblSessions, "");
+#if defined(BOARD_TTGO)
+    lv_obj_set_width(lblSessions, 98);
+#else
     lv_obj_set_width(lblSessions, 150);
+#endif
 
     // === Right panel: Tank Status with water-fill gauges ===
     panelRight = lv_obj_create(parent);
     int panelW = GAUGE_SIZE * 2 + GAUGE_GAP + 16;
     lv_obj_set_size(panelRight, panelW, LV_SIZE_CONTENT);
+#if defined(BOARD_TTGO)
+    lv_obj_set_pos(panelRight, g_screenW - panelW - 6, 6);
+#else
     if (portrait) {
         // Portrait: below left panel, aligned to bottom-right
         lv_obj_align(panelRight, LV_ALIGN_BOTTOM_RIGHT, -8, -8);
     } else {
         lv_obj_set_pos(panelRight, g_screenW - panelW - 8, PANEL_TOP_Y);
     }
+#endif
     lv_obj_set_style_bg_color(panelRight, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(panelRight, LV_OPA_50, 0);
     lv_obj_set_style_border_width(panelRight, 0, 0);
@@ -479,6 +504,40 @@ void update() {
         lv_label_set_text(lblStale, "");
         lv_obj_add_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
     }
+
+    bool showTankStatus = (p5h >= 0.0f || p7d >= 0.0f);
+    if (firstUpdate || showTankStatus != lastShowTankStatus) {
+        firstUpdate = false;
+        lastShowTankStatus = showTankStatus;
+
+        if (showTankStatus) {
+            if (panelRight && visible) {
+                lv_obj_clear_flag(panelRight, LV_OBJ_FLAG_HIDDEN);
+            }
+#if !IS_ROUND
+            if (UI::isLandscape()) {
+#if defined(BOARD_TTGO)
+                lv_obj_align(panelLeft, LV_ALIGN_TOP_LEFT, 6, 6);
+#else
+                lv_obj_align(panelLeft, LV_ALIGN_TOP_LEFT, 8, PANEL_TOP_Y);
+#endif
+            }
+#endif
+        } else {
+            if (panelRight) {
+                lv_obj_add_flag(panelRight, LV_OBJ_FLAG_HIDDEN);
+            }
+#if !IS_ROUND
+            if (UI::isLandscape()) {
+#if defined(BOARD_TTGO)
+                lv_obj_align(panelLeft, LV_ALIGN_TOP_MID, 0, 6);
+#else
+                lv_obj_align(panelLeft, LV_ALIGN_TOP_MID, 0, PANEL_TOP_Y);
+#endif
+            }
+#endif
+        }
+    }
 }
 
 void setVisible(bool v) {
@@ -486,10 +545,14 @@ void setVisible(bool v) {
     if (panelLeft) {
         if (v) {
             lv_obj_clear_flag(panelLeft, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_clear_flag(panelRight, LV_OBJ_FLAG_HIDDEN);
+            if (lastShowTankStatus && panelRight) {
+                lv_obj_clear_flag(panelRight, LV_OBJ_FLAG_HIDDEN);
+            }
         } else {
             lv_obj_add_flag(panelLeft, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(panelRight, LV_OBJ_FLAG_HIDDEN);
+            if (panelRight) {
+                lv_obj_add_flag(panelRight, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     }
 }

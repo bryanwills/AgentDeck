@@ -1,6 +1,11 @@
 package dev.agentdeck.ui.eink
 
 import android.content.res.Configuration
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import dev.agentdeck.net.UsageUpdate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -239,6 +244,7 @@ fun EinkAgentPanel(
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }
+
 
         Spacer(modifier = Modifier.weight(1f))
 

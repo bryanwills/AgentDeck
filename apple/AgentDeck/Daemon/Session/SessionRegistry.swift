@@ -215,6 +215,7 @@ final class SessionRegistry: Sendable {
     }
 
     private func isSessionReachable(port: Int) async -> Bool {
+        guard port > 0 else { return false }
         guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return false }
         var request = URLRequest(url: url)
         request.timeoutInterval = 2
@@ -294,6 +295,7 @@ final class SessionRegistry: Sendable {
     // MARK: - Health Probe
 
     func probeDaemonHealth(port: Int) async -> [String: Any]? {
+        guard port > 0 else { return nil }
         guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 2

@@ -1,13 +1,13 @@
 # AgentDeck
 
-Stream Deck+ controller for Claude Code CLI — a bidirectional local control system.
+Stream Deck+ controller for AI coding agents — a bidirectional local control system.
 
 ## Monorepo
 
 - **bridge/** — Node.js server: Daemon hub + Session Bridge (PTY, hook HTTP, state machine). `src/apme/` — APME eval module (SQLite store, collector, deterministic+LLM judge runner, category-aware rubrics, turn-level mid-session eval, rubric auto-tuner, recommender, daemon HTTP API). See [docs/apme.md](docs/apme.md)
 - **plugin/** — Stream Deck SDK v2 plugin
 - **shared/** — TypeScript types/utils shared between bridge & plugin (protocol, states, timeline, adapter interfaces, session-utils)
-- **hooks/** — Claude Code hook installer for `~/.claude/settings.json` (user-global, watched by CC 2.1+)
+- **hooks/** — Claude Code hook installer for `~/.claude/settings.json` and Codex lifecycle hook installer for `~/.codex/config.toml`
 - **config/** — Default settings and prompt templates
 - **setup/** — npm setup package (`npx @agentdeck/setup`)
 - **android/** — Jetpack Compose launcher app (CremaS, Onyx, Kobo, tablets)
@@ -40,7 +40,7 @@ bash scripts/build-android-release.sh   # local → dist/agentdeck-v{VERSION}.ap
 ## Setup & Distribution
 
 ```bash
-npx @agentdeck/setup        # npm one-command install (published packages)
+npx @agentdeck/setup        # npm one-command install (published packages; Claude or Codex CLI supported)
 pnpm setup                  # dev install from source (deps, build, icons, hooks, link)
 pnpm package                # create dist/bound.serendipity.agentdeck.streamDeckPlugin
 bash scripts/uninstall.sh   # remove hooks, unlink CLI and plugin
@@ -70,6 +70,14 @@ pnpm test:report         # unified report (vitest + Android + Apple + Robot)
 pnpm test:android        # Android JUnit tests only (82 tests)
 cd plugin && streamdeck link   # link plugin to Stream Deck app
 ```
+
+### Codex Development Surface
+
+- **Repo instructions**: `AGENTS.md` is the Codex-discovered project instruction file. It requires `CLAUDE.md` first, then targeted `DEVELOPMENT_LOG.md` lookup instead of loading the full log.
+- **Repo skills**: `.agents/skills/` contains Codex-discoverable AgentDeck skills. Use these before hand-rolling workflow commands.
+- **Workflow originals**: `.agents/workflows/` remains the canonical human-readable procedure directory; skills may route into these files.
+- **Session handoff**: use the `session-end` repo skill before `/clear`, `/new`, or handing work to another session. It summarizes current state and updates durable docs only when the change is project-significant.
+- **Codex observation**: `agentdeck codex` installs AgentDeck-managed Codex lifecycle hooks in `~/.codex/config.toml` before launching the PTY bridge. `agentdeck daemon install` also installs/migrates those hooks for daemon-first setups.
 
 ### Test Infrastructure
 
@@ -144,7 +152,7 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 
 ## Key Conventions
 
-- **Hook format (CRITICAL)**: Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "command", command: "..." }] }`. Old flat format silently fails. Bridge auto-migrates via `migrateHooksIfNeeded()` from `@agentdeck/hooks`. Scripts use `|| true` to avoid blocking when bridge is down
+- **Hook format (CRITICAL)**: Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "command", command: "..." }] }`. Old flat format silently fails. Bridge auto-migrates via `migrateHooksIfNeeded()` from `@agentdeck/hooks`. Codex uses lifecycle hooks in `~/.codex/config.toml` (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) installed by `installCodexHooksIfNeeded()`. Scripts use bounded `curl` and `|| true` to avoid blocking when bridge is down
 - **Plugin UUID**: `bound.serendipity.agentdeck` (immutable post-distribution)
 - **Package scope**: `@agentdeck/*` (shared, bridge, plugin, hooks, setup)
 - **User data dir**: `daemon.json`, `sessions.json`, `auth-token`, `settings.json`, `timeline.json`, `wifi-config.json`, `compatibility.json`, `apme.sqlite`. Path depends on distribution: **Node.js CLI + unsigned dev builds** → `~/.agentdeck/`. **App Store macOS** → `~/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck/` (Apple 2.5.2 — no home-relative-path entitlement, no optional App Groups capability). Swift code routes every access through `apple/AgentDeck/App/AgentDeckPaths.swift`; never hand-write either path

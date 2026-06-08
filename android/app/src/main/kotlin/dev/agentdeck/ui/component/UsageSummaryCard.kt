@@ -55,10 +55,14 @@ fun UsageSummaryCard(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     if (usage.fiveHourPercent != null) {
+                        val isApi = usage.costLimit != null && usage.costLimit > 0
                         CompactGauge(
-                            label = "5h",
+                            label = if (isApi) "API" else "5h",
                             percent = usage.fiveHourPercent,
-                            resetAt = usage.fiveHourResetsAt,
+                            resetAt = if (isApi) null else usage.fiveHourResetsAt,
+                            suffix = if (isApi && usage.costSpent != null) {
+                                "$${String.format("%.2f", usage.costSpent)}/$${String.format("%.0f", usage.costLimit)}"
+                            } else null,
                             modifier = Modifier.weight(1f),
                         )
                     }

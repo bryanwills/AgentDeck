@@ -54,7 +54,7 @@ static inline uint16_t swap16(uint16_t v) {
 
 static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
     uint16_t c = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-#if defined(BOARD_BOX_86)
+#if defined(BOARD_RGB48)
     // LovyanGFX flush uses swap565_t* — canvas data must be pre-swapped
     return swap16(c);
 #else
@@ -71,7 +71,7 @@ static bool isCodexAgentType(const char* agentType) {
 
 // Decode a pixel back to R/G/B (handles swap)
 static inline void decodePixel(uint16_t px, uint8_t& r, uint8_t& g, uint8_t& b) {
-#if defined(BOARD_BOX_86)
+#if defined(BOARD_RGB48)
     px = swap16(px);  // Canvas stores swapped — un-swap for decode
 #endif
     r = ((px >> 11) & 0x1F) << 3;
@@ -144,16 +144,20 @@ static void drawLine(int x0, int y0, int x1, int y1, uint32_t color24, uint8_t a
 namespace Terrarium {
 
 void init(lv_obj_t* parent) {
-    // Allocate canvas buffer in PSRAM (reuse if already allocated — same total pixel count)
+    // Allocate canvas buffer in PSRAM or fallback to standard SRAM
     if (!canvas_buf) {
         canvas_buf = (uint16_t*)ps_malloc(g_screenW * g_screenH * sizeof(uint16_t));
         if (!canvas_buf) {
-            Serial.println("[Terrarium] PSRAM alloc failed!");
+            Serial.println("[Terrarium] PSRAM alloc failed, trying SRAM...");
+            canvas_buf = (uint16_t*)malloc(g_screenW * g_screenH * sizeof(uint16_t));
+        }
+        if (!canvas_buf) {
+            Serial.println("[Terrarium] Heap allocation for canvas failed!");
             return;
         }
     }
 
-#if defined(BOARD_BOX_86)
+#if defined(BOARD_RGB48)
     // LovyanGFX: canvas must match display format (swapped) — no LVGL conversion
     lv_color_format_t canvasFmt = LV_COLOR_FORMAT_RGB565_SWAPPED;
 #else

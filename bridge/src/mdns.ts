@@ -1,23 +1,9 @@
-import { Bonjour } from 'bonjour-service';
-import { networkInterfaces } from 'os';
+import Bonjour from 'bonjour-service';
 import type { AgentType } from './types.js';
 import { debug, log } from './logger.js';
+import { getLanIp } from '@agentdeck/shared';
 
 let instance: Bonjour | null = null;
-
-/** Find the first routable (non-link-local, non-loopback) IPv4 address. */
-function getLanIp(): string | undefined {
-  const nets = networkInterfaces();
-  for (const addrs of Object.values(nets)) {
-    if (!addrs) continue;
-    for (const a of addrs) {
-      if (a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.')) {
-        return a.address;
-      }
-    }
-  }
-  return undefined;
-}
 
 const MDNS_RECOVERY_INTERVAL = 5_000; // 5s — tightens WiFi-change discovery gap (was 30s)
 

@@ -17,9 +17,10 @@ import {
   setVoiceTextTakeover,
 } from '../encoder-registry.js';
 import { dlog } from '../log.js';
-import { pasteText, osascript } from '../utility-modes/macos.js';
+import { pasteText, osascript, openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 import { startLocalRecording, stopLocalRecording, cancelLocalRecording } from '../voice-local.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
+import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 import {
   renderVoiceReady,
   renderVoiceRecording,
@@ -335,6 +336,10 @@ function refreshVoiceDials(): void {
 function getVoiceFeedback(): Record<string, unknown> {
   let svg: string;
 
+  if (currentState === State.DISCONNECTED) {
+    return { canvas: svgToDataUrl(renderOfflineTouchStrip(3)) };
+  }
+
   // Always show active UI — voice is independent like utility dial
   switch (voiceState) {
     case 'recording':
@@ -382,6 +387,10 @@ export class VoiceDialAction extends SingletonAction {
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
+    if (currentState === State.DISCONNECTED) {
+      void openAgentDeckAppOrGitHub().catch(() => {});
+      return;
+    }
     if (isPickerActive()) { void selectProject(); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
     if (vtActive) { onVtDown(); return; }
@@ -455,6 +464,7 @@ export class VoiceDialAction extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    if (currentState === State.DISCONNECTED) return;
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (vtActive) { onVtRotate(ev.payload.ticks); return; }

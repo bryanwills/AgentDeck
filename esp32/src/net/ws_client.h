@@ -33,6 +33,11 @@ void wsLoop();
 bool wsConnected();
 
 /**
+ * Check if WebSocket is currently connecting.
+ */
+bool wsConnecting();
+
+/**
  * Send a JSON command to the bridge.
  * @param json Null-terminated JSON string
  */

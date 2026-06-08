@@ -40,6 +40,18 @@ import {
 // - logError(): always shown (critical errors requiring user action)
 // - debug(): file-only (when --debug enabled)
 
+function exitProcessNow(code = 0): void {
+  if (code === 0) {
+    try {
+      process.kill(process.pid, 'SIGKILL');
+      return;
+    } catch {
+      // fall through
+    }
+  }
+  process.exit(code);
+}
+
 // ===== Options =====
 
 export interface BridgeCoreOptions {
@@ -87,6 +99,7 @@ export class BridgeCore {
   cachedAntigravityStatus = readAntigravityLocalStatus() ?? null;
   cachedGatewayAvailable = false;
   cachedGatewayConnected = false;
+  cachedGatewayAuthStatus: 'gateway_not_found' | 'gateway_reachable' | 'gateway_token_missing' | 'pairing_required' | 'approval_pending' | 'connected' | 'auth_failed' | 'token_mismatch' | 'device_auth_invalid' | 'unsupported_protocol' = 'gateway_not_found';
   cachedGatewayHasError = false;
   cachedModelCatalog: ModelCatalogEntry[] | null = null;
 
@@ -283,6 +296,7 @@ export class BridgeCore {
       antigravityStatus: this.cachedAntigravityStatus ?? undefined,
       gatewayAvailable: this.cachedGatewayAvailable,
       gatewayConnected: this.cachedGatewayConnected,
+      gatewayAuthStatus: this.cachedGatewayAuthStatus,
       gatewayHasError: this.cachedGatewayHasError,
       moduleHealth: this.moduleHealthProvider?.(),
       voiceAssistantState: this.cachedVoiceAssistantState !== 'disabled' ? this.cachedVoiceAssistantState : undefined,
@@ -447,6 +461,7 @@ export class BridgeCore {
         onAppeared?.();
       } else if (!status.available && wasAvailable) {
         this.cachedGatewayConnected = false;
+        this.cachedGatewayAuthStatus = 'gateway_not_found';
         this.cachedGatewayHasError = false;
         onDisappeared?.();
       }
@@ -777,10 +792,17 @@ export class BridgeCore {
 
   /** Graceful shutdown */
   async shutdown(): Promise<void> {
-    if (this.shutdownInProgress) return;
+    if (this.shutdownInProgress) {
+      exitProcessNow(0);
+      return;
+    }
     this.shutdownInProgress = true;
 
     log('Shutting down...');
+    const hardExitTimer = setTimeout(() => {
+      logError('Shutdown timeout — forcing exit.');
+      exitProcessNow(0);
+    }, 5000);
 
     // Clear all timers
     for (const iv of this.intervals) clearInterval(iv);
@@ -804,6 +826,7 @@ export class BridgeCore {
     this.wsServer.close();
 
     // Exit immediately — all cleanup is done or timed out
-    process.exit(0);
+    clearTimeout(hardExitTimer);
+    exitProcessNow(0);
   }
 }

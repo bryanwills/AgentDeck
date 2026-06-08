@@ -26,7 +26,8 @@ fun EinkUsagePanel(
     ) {
         // Rate limit bars
         if (usage.fiveHourPercent != null) {
-            EinkTextGauge(label = "5h", percent = usage.fiveHourPercent)
+            val isApi = usage.costLimit != null && usage.costLimit > 0
+            EinkTextGauge(label = if (isApi) "API" else "5h", percent = usage.fiveHourPercent)
         }
         if (usage.sevenDayPercent != null) {
             EinkTextGauge(label = "7d", percent = usage.sevenDayPercent)
@@ -92,8 +93,9 @@ fun EinkUsageCompact(
             val filled = (pct / 10).coerceAtMost(10)
             val empty = 10 - filled
             val bar = "\u2588".repeat(filled) + "\u2591".repeat(empty)
+            val isApi = usage.costLimit != null && usage.costLimit > 0
             Text(
-                text = "5h: [$bar] $pct%",
+                text = "${if (isApi) "API" else "5h"}: [$bar] $pct%",
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurface,
             )

@@ -189,12 +189,19 @@ function layoutForEvent(ev: WillAppearEvent | KeyDownEvent): DeckLayout {
 }
 
 function getDisconnectedSlotConfig(slot: number, layout: DeckLayout): DisconnectedSlotConfig {
-  const role = computeCenterCluster(layout).quadrantFor(slot);
-  if (role == null) return { kind: 'empty' };
-  if (role === 'full') {
-    return { kind: 'open-app', label: 'OFFLINE', subtitle: 'Open AgentDeck' };
-  }
-  return { kind: 'open-app', label: 'OFFLINE', subtitle: 'Open AgentDeck', quadrant: role };
+  const cols = layout.columns;
+  const rows = layout.rows;
+  const col = slot % cols;
+  const row = Math.floor(slot / cols);
+  return {
+    kind: 'open-app',
+    label: 'OFFLINE',
+    subtitle: 'Open AgentDeck',
+    col,
+    row,
+    cols,
+    rows,
+  };
 }
 
 function refreshAll(): void {
@@ -335,10 +342,8 @@ export class SessionSlotButtonAction extends SingletonAction {
     const { slot, layout } = entry;
 
     if (!daemonConnected) {
-      if (computeCenterCluster(layout).quadrantFor(slot) != null) {
-        dlog('SesSlot', 'keyDown: launching AgentDeck app or GitHub');
-        void openAgentDeckAppOrGitHub().catch(() => {});
-      }
+      dlog('SesSlot', 'keyDown: launching AgentDeck app or GitHub');
+      void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
 

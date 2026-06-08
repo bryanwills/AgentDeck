@@ -138,6 +138,26 @@ describe('ApmeCollector', () => {
     expect(evals.find((e) => e.metric === 'overall')?.score).toBeCloseTo(0.82);
   });
 
+  it('excludes _empty runs from the unevaluated run queue', async () => {
+    const collector = new ApmeCollector(store);
+
+    const emptyRunId = collector.openRun({ sessionId: 'empty', agentType: 'openclaw', projectName: 'openclaw' });
+    collector.closeRun('empty');
+
+    const realRunId = collector.openRun({
+      sessionId: 'real',
+      agentType: 'claude-code',
+      projectName: 'p',
+      taskPrompt: 'fix the dashboard',
+    });
+    collector.closeRun('real');
+
+    expect(store.getRun(emptyRunId)?.taskCategory).toBe('_empty');
+    const pendingIds = store.listUnevaluatedRuns(10).map((r) => r.id);
+    expect(pendingIds).toContain(realRunId);
+    expect(pendingIds).not.toContain(emptyRunId);
+  });
+
   it('scorecard view aggregates runs per model', async () => {
     const collector = new ApmeCollector(store);
     const runA = collector.openRun({ sessionId: 's1', agentType: 'claude-code', projectName: 'p' });

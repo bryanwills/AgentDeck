@@ -223,6 +223,16 @@ static void uiTask(void* param) {
 
         if (connected) everConnected = true;
 
+        if (!connected && everConnected &&
+            currentView != VIEW_AQUARIUM && currentView != VIEW_SPLASH) {
+            lockState();
+            g_state.timelineView = false;
+            unlockState();
+            lv_screen_load_anim(scrAquarium, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
+            currentView = VIEW_AQUARIUM;
+            wasTimelineView = false;
+        }
+
         // Screen transitions
         if (currentView == VIEW_SPLASH) {
             if (connected) {

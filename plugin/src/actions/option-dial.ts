@@ -29,6 +29,8 @@ import { isInDetailView, getFocusedSession } from './session-slot-button.js';
 import { timelineStore } from '../timeline-store.js';
 import { renderTimeline } from '../renderers/timeline-renderer.js';
 import { dlog } from '../log.js';
+import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
+import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 
 import type { JsonValue } from '@elgato/utils';
 
@@ -242,7 +244,7 @@ function refreshOptionDials(): void {
   } else if (currentState === State.PROCESSING) {
     svg = renderResponseProcessing();
   } else if (currentState === State.DISCONNECTED) {
-    svg = setupRequired ? renderSetupPrompt() : renderResponseDisconnected();
+    svg = renderOfflineTouchStrip(1);
   } else {
     svg = renderResponseDisabled();
   }
@@ -361,6 +363,7 @@ export class ResponseDialAction extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    if (currentState === State.DISCONNECTED) return;
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
 
@@ -414,6 +417,10 @@ export class ResponseDialAction extends SingletonAction {
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
+    if (currentState === State.DISCONNECTED) {
+      void openAgentDeckAppOrGitHub().catch(() => {});
+      return;
+    }
     if (isPickerActive()) { void selectProject(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
     // OC detail view non-interactive: toggle detail view
@@ -453,6 +460,10 @@ export class ResponseDialAction extends SingletonAction {
   }
 
   override async onTouchTap(_ev: TouchTapEvent): Promise<void> {
+    if (currentState === State.DISCONNECTED) {
+      void openAgentDeckAppOrGitHub().catch(() => {});
+      return;
+    }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
   }
 

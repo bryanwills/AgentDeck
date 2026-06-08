@@ -57,10 +57,11 @@ bool mdnsPoll(BridgeInfo& out) {
     if (selected < 0) return false;
 
     {
-#if defined(BOARD_ROUND_AMOLED) || defined(BOARD_IPS_35) || defined(BOARD_BOX_86)
-        IPAddress ip = MDNS.address(selected);  // ESP-IDF 5.x (pioarduino)
+#include <esp_idf_version.h>
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+        IPAddress ip = MDNS.address(selected);  // ESP-IDF 5.x (pioarduino / Arduino v3)
 #else
-        IPAddress ip = MDNS.IP(selected);       // ESP-IDF 4.4
+        IPAddress ip = MDNS.IP(selected);       // ESP-IDF 4.4 (Arduino v2)
 #endif
         snprintf(discovered.ip, sizeof(discovered.ip),
                  "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);

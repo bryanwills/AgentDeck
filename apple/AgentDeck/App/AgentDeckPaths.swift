@@ -28,7 +28,16 @@ enum AgentDeckPaths {
     /// Root directory for all AgentDeck persistent state. Sandboxed App Store
     /// runs use the app container's Application Support directory; unsandboxed
     /// dev builds and xctest use the legacy `~/.agentdeck/` layout.
-    static let baseDirectory: URL = {
+    static var baseDirectory: URL {
+        if let envPath = ProcessInfo.processInfo.environment["AGENTDECK_DATA_DIR"] {
+            let container = URL(fileURLWithPath: envPath)
+            try? FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+            return container
+        }
+        return cachedBaseDirectory
+    }
+
+    private static let cachedBaseDirectory: URL = {
         let fm = FileManager.default
         if AgentDeckRuntime.isSandboxed,
            let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {

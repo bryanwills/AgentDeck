@@ -107,6 +107,7 @@ class PlanktonSystem : Creature {
     private fun drawLayer(scope: DrawScope, zLayer: Int) {
         val w = scope.size.width
         val h = scope.size.height
+        val baseWidth = minOf(w, h * 2f)
 
         val tintColor = when (envState) {
             EnvironmentVisualState.ACTIVE -> CYAN_TINT
@@ -119,7 +120,7 @@ class PlanktonSystem : Creature {
             scope.drawCircle(
                 color = tintColor,
                 alpha = p.alpha,
-                radius = p.size * w,
+                radius = p.size * baseWidth,
                 center = Offset(p.x * w, p.y * h),
             )
         }

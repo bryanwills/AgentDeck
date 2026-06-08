@@ -48,17 +48,20 @@ class BridgeDiscovery(context: Context) {
 
                         override fun onServiceResolved(si: NsdServiceInfo) {
                             val resolvedHost = si.host?.hostAddress
-                            // Parse TXT records
+                            // Parse TXT records for token and agentType only.
+                            // ip TXT field is intentionally ignored: Bonjour caches can serve
+                            // a stale IP after DHCP renewal, causing connect failures.
+                            // Use NSD-resolved host directly (same policy as Swift BridgeDiscovery).
                             val token = try {
                                 si.attributes["token"]?.let { String(it, Charsets.UTF_8) }
-                            } catch (_: Exception) { null }
-                            // Prefer explicit LAN IP from TXT over resolved address
-                            val txtIp = try {
-                                si.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
                             } catch (_: Exception) { null }
                             val agentType = try {
                                 si.attributes["agent"]?.let { String(it, Charsets.UTF_8) }
                             } catch (_: Exception) { null }
+                            val txtIp = try {
+                                si.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
+                            } catch (_: Exception) { null }
+
                             val host = txtIp ?: resolvedHost ?: return
                             // Skip link-local addresses (169.254.x.x) — unreachable from WiFi
                             if (host.startsWith("169.254.")) return

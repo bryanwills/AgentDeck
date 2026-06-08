@@ -191,18 +191,27 @@ void update() {
 
     // Update usage gauges
     char buf[16];
-    if (p5h >= 0.0f) {
-        snprintf(buf, sizeof(buf), "5h: %d%%", (int)p5h);
-        lv_label_set_text(lblUsage5h, buf);
-    } else {
-        lv_label_set_text(lblUsage5h, "5h: --");
-    }
+    bool showTankStatus = (p5h >= 0.0f || p7d >= 0.0f);
+    if (showTankStatus) {
+        lv_obj_clear_flag(lblUsage5h, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lblUsage7d, LV_OBJ_FLAG_HIDDEN);
 
-    if (p7d >= 0.0f) {
-        snprintf(buf, sizeof(buf), "7d: %d%%", (int)p7d);
-        lv_label_set_text(lblUsage7d, buf);
+        if (p5h >= 0.0f) {
+            snprintf(buf, sizeof(buf), "5h: %d%%", (int)p5h);
+            lv_label_set_text(lblUsage5h, buf);
+        } else {
+            lv_label_set_text(lblUsage5h, "5h: --");
+        }
+
+        if (p7d >= 0.0f) {
+            snprintf(buf, sizeof(buf), "7d: %d%%", (int)p7d);
+            lv_label_set_text(lblUsage7d, buf);
+        } else {
+            lv_label_set_text(lblUsage7d, "7d: --");
+        }
     } else {
-        lv_label_set_text(lblUsage7d, "7d: --");
+        lv_obj_add_flag(lblUsage5h, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(lblUsage7d, LV_OBJ_FLAG_HIDDEN);
     }
 }
 

@@ -593,6 +593,15 @@ final class DaemonService: ObservableObject {
     /// Zero network — snapshots come straight from the module actors.
     func refreshDeviceSummary() async {
         guard let server else {
+            if isUsingExternalDaemon, port > 0,
+               let health = await SessionRegistry.shared.probeDaemonHealth(port: Int(port)),
+               let modules = health["modules"] as? [String: Any] {
+                let summary = DeviceSummary.make(fromModuleHealth: modules)
+                if summary != deviceSummary {
+                    deviceSummary = summary
+                }
+                return
+            }
             if !deviceSummary.isEmpty { deviceSummary = DeviceSummary() }
             return
         }
@@ -643,6 +652,23 @@ struct DeviceSummary: Equatable {
         out.append(contentsOf: serial)
         out.append(contentsOf: adb)
         return out
+    }
+
+    static func make(fromModuleHealth modules: [String: Any]) -> DeviceSummary {
+        var summary = DeviceSummary()
+        if let d200h = modules["d200h"] as? [String: Any] {
+            summary.d200h = makeD200hEntry(from: d200h)
+        }
+        if let pixoo = modules["pixoo"] as? [String: Any] {
+            summary.pixoo = makePixooEntries(from: pixoo)
+        }
+        if let serial = modules["serial"] as? [String: Any] {
+            summary.serial = makeSerialEntries(from: serial)
+        }
+        if let adb = modules["adb"] as? [String: Any] {
+            summary.adb = makeAdbEntries(from: adb)
+        }
+        return summary
     }
 
     // MARK: Builders (each converts the `[String: Any]` module snapshot
@@ -723,7 +749,7 @@ struct DeviceSummary: Equatable {
 
     static func makeSerialEntries(from d: [String: Any]) -> [DeviceEntry] {
         let conns = d["connections"] as? [[String: Any]] ?? []
-        let globalOpenErr = d["lastOpenError"] as? String
+        let globalOpenErr = (d["lastOpenError"] as? String) ?? (d["lastError"] as? String)
         return conns.compactMap { conn in
             let port = conn["port"] as? String ?? "?"
             let connected = conn["connected"] as? Bool ?? false

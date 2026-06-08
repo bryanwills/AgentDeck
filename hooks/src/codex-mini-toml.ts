@@ -29,9 +29,15 @@ export function applyManagedBlock(text: string, body: string): string {
   const fenceRange = locateFence(lines);
 
   const bodyLines = body.length === 0 ? [] : splitLines(body);
-  const replacement = [OPEN_FENCE, ...bodyLines, CLOSE_FENCE];
+  let replacement = [OPEN_FENCE, ...bodyLines, CLOSE_FENCE];
 
   if (fenceRange) {
+    const preservedHookState = extractCodexHookState(
+      lines.slice(fenceRange.start + 1, fenceRange.end - 1)
+    );
+    if (preservedHookState.length > 0) {
+      replacement = [...replacement, '', ...preservedHookState];
+    }
     lines.splice(fenceRange.start, fenceRange.end - fenceRange.start, ...replacement);
   } else {
     // Pad with a blank line for readability when appending to a non-empty
@@ -98,6 +104,7 @@ export function hasTableOutsideFence(text: string, table: string): boolean {
     if (line === OPEN_FENCE) { insideFence = true; continue; }
     if (line === CLOSE_FENCE) { insideFence = false; continue; }
     if (insideFence) continue;
+    if (table === 'hooks' && isCodexHookStateHeader(line)) continue;
     if (regex.test(line)) return true;
   }
   return false;
@@ -147,4 +154,42 @@ function locateFence(lines: string[]): FenceRange | null {
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractCodexHookState(lines: string[]): string[] {
+  const out: string[] = [];
+  let capturing = false;
+  for (const line of lines) {
+    const tableHeader = isTableHeader(line);
+    if (isCodexHookStateHeader(line)) {
+      capturing = true;
+      out.push(line);
+      continue;
+    }
+    if (capturing && tableHeader) {
+      break;
+    }
+    if (capturing) {
+      out.push(line);
+    }
+  }
+  while (out.length > 0 && isTrailingNonDataLine(out[out.length - 1])) {
+    out.pop();
+  }
+  return out;
+}
+
+function isCodexHookStateHeader(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed === '[hooks.state]' || (trimmed.startsWith('[hooks.state.') && trimmed.endsWith(']'));
+}
+
+function isTableHeader(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith('[') && trimmed.endsWith(']');
+}
+
+function isTrailingNonDataLine(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.length === 0 || trimmed.startsWith('#');
 }

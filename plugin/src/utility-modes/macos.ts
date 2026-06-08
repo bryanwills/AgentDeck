@@ -490,7 +490,7 @@ export async function openAgentDeckAppOrGitHub(): Promise<void> {
     });
   });
   if (appOpened) return;
-  await openOrFocusBrowserTab('https://github.com/puritysb/AgentDeck');
+  await openOrFocusBrowserTab('https://puritysb.github.io/AgentDeck/');
 }
 
 // ---- Notification ----

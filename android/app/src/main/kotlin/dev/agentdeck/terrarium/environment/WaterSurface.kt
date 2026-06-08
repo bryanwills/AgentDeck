@@ -42,16 +42,17 @@ class WaterSurface : Creature {
     override fun draw(scope: DrawScope) {
         val w = scope.size.width
         val h = scope.size.height
+        val baseWidth = minOf(w, h * 2f)
         val surfaceY = h * SURFACE_Y_FRACTION
 
         val amplitude1 = when (envState) {
-            EnvironmentVisualState.DARK -> h * 0.002f
-            EnvironmentVisualState.CALM -> h * 0.005f
-            EnvironmentVisualState.ACTIVE -> h * 0.008f
-            EnvironmentVisualState.ALERT -> h * 0.007f
+            EnvironmentVisualState.DARK -> baseWidth * 0.001f
+            EnvironmentVisualState.CALM -> baseWidth * 0.0025f
+            EnvironmentVisualState.ACTIVE -> baseWidth * 0.004f
+            EnvironmentVisualState.ALERT -> baseWidth * 0.0035f
         }
         val amplitude2 = amplitude1 * 0.4f
-        val amplitude3 = if (envState == EnvironmentVisualState.ALERT) h * 0.003f else 0f
+        val amplitude3 = if (envState == EnvironmentVisualState.ALERT) baseWidth * 0.0015f else 0f
 
         val lineAlpha = when (envState) {
             EnvironmentVisualState.DARK -> 0.08f
@@ -124,8 +125,8 @@ class WaterSurface : Creature {
             if (sparkleAlpha > 0.02f) {
                 scope.drawOval(
                     color = Color.White.copy(alpha = sparkleAlpha),
-                    topLeft = Offset(x - w * 0.006f, waveY - h * 0.002f),
-                    size = Size(w * 0.012f, h * 0.003f),
+                    topLeft = Offset(x - baseWidth * 0.006f, waveY - baseWidth * 0.001f),
+                    size = Size(baseWidth * 0.012f, baseWidth * 0.0015f),
                 )
             }
         }

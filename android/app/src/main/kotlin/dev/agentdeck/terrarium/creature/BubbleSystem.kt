@@ -109,13 +109,14 @@ class BubbleSystem : Creature {
     override fun draw(scope: DrawScope) {
         val w = scope.size.width
         val h = scope.size.height
+        val baseWidth = minOf(w, h * 2f)
 
         for (bubble in bubbles) {
             if (!bubble.alive) continue
 
             val screenX = bubble.x * w
             val screenY = bubble.y * h
-            val screenRadius = bubble.radius * w
+            val screenRadius = bubble.radius * baseWidth
 
             // Bubble body
             scope.drawCircle(

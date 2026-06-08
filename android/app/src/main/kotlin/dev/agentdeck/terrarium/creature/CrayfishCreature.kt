@@ -78,10 +78,11 @@ class CrayfishCreature(
     override fun draw(scope: DrawScope) {
         val w = scope.size.width
         val h = scope.size.height
+        val baseWidth = minOf(w, h * 2f)
 
         val cx = w * centerXFraction
         val cy = h * centerYFraction
-        val bodyWidth = w * TerrariumLayout.CRAYFISH_WIDTH_FRACTION * scaleFactor
+        val bodyWidth = baseWidth * TerrariumLayout.CRAYFISH_WIDTH_FRACTION * scaleFactor
 
         val alpha = when (visualState) {
             CrayfishVisualState.DORMANT -> 0.4f
@@ -121,7 +122,7 @@ class CrayfishCreature(
 
         // ROUTING: draw signal waves BEHIND creature
         if (visualState == CrayfishVisualState.ROUTING) {
-            drawSignalWaves(scope, effectiveCX, effectiveCY, bodyWidth, w)
+            drawSignalWaves(scope, effectiveCX, effectiveCY, bodyWidth, baseWidth)
         }
 
         // ROUTING: shell glow pulse underneath

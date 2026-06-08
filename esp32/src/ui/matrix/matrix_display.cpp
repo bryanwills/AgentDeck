@@ -1,4 +1,4 @@
-#ifdef BOARD_ULANZI_TC001
+#ifdef BOARD_LED8X32
 #include "matrix_display.h"
 #include "matrix_pages.h"
 #include "matrix_buttons.h"
@@ -148,4 +148,4 @@ void render() {
 }
 
 } // namespace Matrix
-#endif // BOARD_ULANZI_TC001
+#endif // BOARD_LED8X32

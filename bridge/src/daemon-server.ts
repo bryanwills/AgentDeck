@@ -32,6 +32,7 @@ import {
   writeDaemonInfo,
   removeDaemonInfo,
   readDaemonInfo,
+  removeDaemonSession,
 } from './session-registry.js';
 import { fetchUsageFromApi, hasOAuthToken, resetConsecutiveFailures, type ApiUsageData } from './usage-api.js';
 import { isLocalConnection, validateToken } from './auth.js';
@@ -49,9 +50,9 @@ import {
   type DeviceModule,
 } from './modules/index.js';
 import { SerialModule } from './modules/serial-module.js';
-import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendWifiProvisionToAll, handleESP32Wake } from './esp32-serial.js';
+import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendWifiProvisionToAll, handleESP32Wake, getESP32Ports, getSerialConnectionStatus, getSerialLastError } from './esp32-serial.js';
 import { loadWifiConfig } from './wifi-config.js';
-import { getConnectedAdbDevices, hasAdb } from './adb-reverse.js';
+import { getConnectedAdbDevices, hasAdb, getAdbDeviceCount } from './adb-reverse.js';
 import { getPixooDeviceDetails, pixooDeviceCount } from './pixoo/pixoo-bridge.js';
 import { getLanIp } from '@agentdeck/shared';
 import { readFileSync } from 'fs';
@@ -65,6 +66,18 @@ import {
   type AdapterEvent,
   type ModelCatalogEntry,
 } from './types.js';
+
+function exitProcessNow(code = 0): void {
+  if (code === 0) {
+    try {
+      process.kill(process.pid, 'SIGKILL');
+      return;
+    } catch {
+      // fall through
+    }
+  }
+  process.exit(code);
+}
 
 function loadDaemonSettings(): Record<string, unknown> {
   try {
@@ -273,20 +286,28 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
   }
 
   if (started.has('serial')) {
-    const connections = getESP32DeviceInfo().map((info) => ({
-      port: info.port,
-      connected: true,
-      deviceInfo: {
-        board: info.board,
-        version: info.version,
-        wifiConfigured: info.wifiConfigured,
-        wifiConnected: info.wifiConnected,
-      },
+    const connectionStatus = getSerialConnectionStatus();
+    const connections = connectionStatus.map((status) => ({
+      port: status.port,
+      connected: status.connected,
+      transportOpen: status.transportOpen,
+      deviceInfo: status.board ? {
+        board: status.board,
+        version: status.version,
+        wifiConfigured: status.wifiConfigured,
+        wifiConnected: status.wifiConnected,
+      } : null,
+      lastReadAt: status.lastReadAt,
+      lastWriteAt: status.lastWriteAt,
+      lastReadSecondsAgo: status.lastReadSecondsAgo,
+      lastWriteSecondsAgo: status.lastWriteSecondsAgo,
+      stale: status.stale,
     }));
     modules.serial = {
-      connectedPorts: connections.map((c) => c.port),
+      connectedPorts: connections.filter((c) => c.connected).map((c) => c.port),
       connections,
-      lastError: null,
+      lastError: getSerialLastError(),
+      connectionCount: connections.filter((c) => c.connected).length,
     };
   }
 
@@ -309,13 +330,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // 1. Check daemon.json and sessions.json for existing daemon
   const existingInfo = readDaemonInfo();
   if (existingInfo) {
-    log(`[agentdeck] Daemon already running on port ${existingInfo.port} (PID ${existingInfo.pid}).`);
-    process.exit(0);
+    const probePort = existingInfo.httpPort ?? existingInfo.port;
+    const health = await probeDaemonHealth(probePort);
+    if (health?.mode === 'daemon') {
+      log(`[agentdeck] Daemon already running on port ${existingInfo.port} (PID ${existingInfo.pid}).`);
+      process.exit(0);
+    }
+    log(`[agentdeck] Ignoring stale daemon entry on port ${existingInfo.port} (PID ${existingInfo.pid}; /health did not respond).`);
+    removeDaemonInfo();
   }
   const existingSession = findExistingDaemon();
   if (existingSession) {
-    log(`[agentdeck] Daemon already running on port ${existingSession.port} (PID ${existingSession.pid}).`);
-    process.exit(0);
+    const health = await probeDaemonHealth(existingSession.port);
+    if (health?.mode === 'daemon') {
+      log(`[agentdeck] Daemon already running on port ${existingSession.port} (PID ${existingSession.pid}).`);
+      process.exit(0);
+    }
+    log(`[agentdeck] Ignoring stale daemon session on port ${existingSession.port} (PID ${existingSession.pid}; /health did not respond).`);
+    removeDaemonSession(existingSession);
   }
 
   // 2. Determine port — try default first, fallback if occupied by non-daemon
@@ -412,7 +444,44 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }
     if (req.method === 'GET' && pathname === '/devices') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ devices: [], modules: moduleHealthProvider() }));
+      const d200hModule = typeof startedModules !== 'undefined' ? startedModules.find((m) => m.name === 'd200h') as any : undefined;
+      const d200hStatus = d200hModule?.statusSnapshot ? d200hModule.statusSnapshot() : { connected: false };
+      res.end(JSON.stringify({
+        devices: [
+          { type: 'websocket', count: core.wsServer.getClientCount() },
+          { type: 'esp32', count: esp32ConnectionCount(), ports: getESP32Ports() },
+          { type: 'pixoo', details: getPixooDeviceDetails() },
+          { type: 'adb', count: getAdbDeviceCount() },
+          {
+            type: 'd200h',
+            connected: d200hStatus.connected,
+            writeOK: d200hStatus.writeOK,
+            writeFail: d200hStatus.writeFail,
+          },
+        ],
+        modules: moduleHealthProvider(),
+      }));
+      return;
+    }
+    if (req.method === 'GET' && pathname === '/diag') {
+      const snap = core.stateMachine.getSnapshot();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        sessionInfo: {
+          state: snap.state,
+          permissionMode: snap.permissionMode,
+          suggestedPrompt: snap.suggestedPrompt,
+          lastValidSuggestedPrompt: core.stateMachine.getLastValidSuggestedPrompt(),
+          projectName: snap.projectName,
+          modelName: snap.modelName,
+          billingType: snap.billingType,
+        },
+        wsClients: core.wsServer.getClientCount(),
+        recentJournal: [],
+        ptyTail: '',
+        journalDir: join(homedir(), '.agentdeck'),
+      }));
       return;
     }
     if (req.method === 'GET' && pathname === '/pixoo/stream') {
@@ -524,6 +593,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     if (req.method === 'POST' && pathname === '/shutdown') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'shutting_down' }));
+      const hardExitTimer = setTimeout(() => {
+        log('[agentdeck] Shutdown route timeout — forcing exit.');
+        exitProcessNow(0);
+      }, 5000);
       core.shutdown();
       return;
     }
@@ -710,6 +783,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         modelCatalog: (evt as any).modelCatalog ?? core.cachedModelCatalog,
         gatewayAvailable: core.cachedGatewayAvailable,
         gatewayConnected: core.cachedGatewayConnected,
+        gatewayAuthStatus: core.cachedGatewayAuthStatus,
         ollamaStatus: core.cachedOllamaStatus,
         gatewayHasError: (evt as any).gatewayHasError ?? core.cachedGatewayHasError,
         moduleHealth: moduleHealthProvider(),
@@ -768,7 +842,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       const lanIp = getLanIp();
       onESP32Message((portPath, msg) => {
         if (msg.type === 'device_info' && !msg.wifiConnected) {
-          sendWifiProvisionToAll({
+          const sent = sendWifiProvisionToAll({
             type: 'wifi_provision' as const,
             ssid: wifiConfig.ssid,
             password: wifiConfig.password,
@@ -776,7 +850,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             bridgePort: port,
             authToken: core.authToken,
           });
-          log(`[agentdeck] WiFi provision sent to ESP32 on ${portPath}`);
+          if (sent > 0) log(`[agentdeck] WiFi provision sent to ${sent} ESP32 device(s) after ${portPath}`);
         } else if (msg.type === 'wifi_provision_ack') {
           log(msg.success ? `[agentdeck] ESP32 WiFi connected: ${msg.ip} ✓` : `[agentdeck] ESP32 WiFi failed: ${msg.error || 'unknown'}`);
         }
@@ -929,6 +1003,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           if (evt.status === 'connected') {
             core.cachedGatewayAvailable = true;
             core.cachedGatewayConnected = true;
+            core.cachedGatewayAuthStatus = 'connected';
             bridgeLogStream.start();
             log('[agentdeck] OpenClaw Gateway connected');
             if (core.stateMachine.getSnapshot().state === 'disconnected') {
@@ -947,6 +1022,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             core.broadcastSessionsList().catch(() => {});
           } else {
             core.cachedGatewayConnected = false;
+            core.cachedGatewayAuthStatus = 'gateway_not_found';
             bridgeLogStream.stop();
             log('[agentdeck] OpenClaw Gateway disconnected');
             core.stateMachine.emit('state_changed', core.stateMachine.getSnapshot());
@@ -966,6 +1042,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       log(`[agentdeck] Failed to connect to Gateway: ${err}`);
       gatewayConnecting = false;
       core.cachedGatewayConnected = false;
+      core.cachedGatewayAuthStatus = 'gateway_not_found';
       core.stateMachine.emit('state_changed', core.stateMachine.getSnapshot());
     });
   }
@@ -985,6 +1062,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       openclawApmeSessionId = null;
     }
     core.cachedGatewayConnected = false;
+    core.cachedGatewayAuthStatus = 'gateway_not_found';
     core.cachedModelCatalog = null;
     if (wasAlive) core.stateMachine.handleHookEvent('SessionEnd', {});
     else core.stateMachine.emit('state_changed', core.stateMachine.getSnapshot());
@@ -1240,7 +1318,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     const { aggregateOverall } = await import('./apme/http.js');
 
     // Broadcast eval results to all WS clients + timeline when runner completes
-    apme.runner.onResult(({ runId, turnId, taskId }) => {
+    apme.runner.onResult(({ runId, turnId, taskId, layer1Ran, layer2Ran, overall }) => {
       // Task-level eval: a group of turns between boundary signals
       // (TodoWrite all-completed / /clear / session_end). Distinct timeline
       // entry so users see "★ task 85%" rather than another run-level pulse.
@@ -1364,6 +1442,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       if (!run) return;
       const evals = apme!.store.listEvalsForRun(runId);
       const overallScore = aggregateOverall(evals);
+      if (!layer1Ran && !layer2Ran && overall === undefined && evals.length === 0) {
+        debug('APME', `skip run eval timeline for ${runId.slice(0, 8)} — no eval rows produced`);
+        return;
+      }
       // WS broadcast: apme_eval event (type already in protocol.ts)
       const evalEvent: import('@agentdeck/shared').ApmeEvalEvent = {
         type: 'apme_eval',
@@ -1512,12 +1594,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       stopModules(startedModules)
     ]);
     gatewayAdapter = null;
-    httpServer.close(() => process.exit(0));
+    httpServer.close(() => exitProcessNow(0));
     // Force exit if httpServer.close() hangs on CLOSE_WAIT connections
-    setTimeout(() => process.exit(0), 5000).unref();
+    setTimeout(() => exitProcessNow(0), 5000).unref();
   });
 
   core.registerProcessHandlers('agentdeck');
+
+  // Trigger initial state broadcast so display hardware modules (D200H, Pixoo, Serial) get populated
+  broadcastFocusedState();
+  core.broadcastUsage();
 
   log(`[agentdeck] Daemon running. Gateway probe active.`);
 }

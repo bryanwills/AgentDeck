@@ -17,6 +17,7 @@ import { State, PermissionMode } from '@agentdeck/shared';
 import {
   prepareForSerial,
   handleSerialLine,
+  isRetryableSerialIoError,
   ESP32_PORT_PATTERNS,
   EXCLUDE_PATTERNS,
   type SerialConnection,
@@ -95,12 +96,20 @@ describe('handleSerialLine (source)', () => {
     const captured: Array<{ port: string; msg: unknown }> = [];
     return {
       port: '/dev/cu.usbserial-test',
-      stream: null as any,
+      fd: null,
+      stream: { destroyed: false, writable: true, write: () => true } as any,
       reader: null,
       readBuf: '',
       connected: true,
       deviceInfo: null,
       provisionSent: false,
+      connectedAt: Date.now(),
+      lastReadAt: Date.now(),
+      lastWriteAt: Date.now(),
+      lastDeviceInfoRequestAt: 0,
+      deviceInfoRequestsSent: 0,
+      writeQueue: [],
+      writeTimer: null,
       captured,
     };
   }
@@ -143,6 +152,26 @@ describe('handleSerialLine (source)', () => {
     handleSerialLine(conn, '{"foo":"bar"}');
 
     expect(conn.deviceInfo).toBeNull();
+  });
+
+  it('does not mark deviceInfo present for non-identifying messages', () => {
+    const conn = mockConn();
+    handleSerialLine(conn, '{"type":"heartbeat_ack"}');
+    handleSerialLine(conn, '{"type":"wifi_provision_ack","success":true,"ip":"192.168.68.70"}');
+
+    expect(conn.deviceInfo).toBeNull();
+  });
+});
+
+describe('serial I/O error classification', () => {
+  it('treats nonblocking backpressure as retryable', () => {
+    expect(isRetryableSerialIoError(Object.assign(new Error('again'), { code: 'EAGAIN' }))).toBe(true);
+    expect(isRetryableSerialIoError(Object.assign(new Error('would block'), { code: 'EWOULDBLOCK' }))).toBe(true);
+  });
+
+  it('does not retry terminal serial errors', () => {
+    expect(isRetryableSerialIoError(Object.assign(new Error('gone'), { code: 'ENXIO' }))).toBe(false);
+    expect(isRetryableSerialIoError(new Error('plain'))).toBe(false);
   });
 });
 
@@ -210,6 +239,62 @@ describe('prepareForSerial (source)', () => {
     expect(prepared.modelName).toBe('opus-4');
     expect((prepared.options as unknown[])).toHaveLength(1);
     expect(prepared.gatewayAvailable).toBe(true);
+  });
+
+  it('strips bulky state_update fields before device_info arrives', () => {
+    const event = {
+      type: 'state_update',
+      state: State.IDLE,
+      permissionMode: PermissionMode.DEFAULT,
+      moduleHealth: { serial: { available: true } },
+      subscriptions: [{ name: 'Claude' }],
+      voiceAssistantState: 'listening',
+      voiceAssistantText: 'hello',
+      voiceAssistantResponseText: 'world',
+      pairingUrl: 'https://example.com/pair',
+      gatewayDeviceId: 'abc',
+      gatewayAuthRequestId: 'req',
+      gatewayAuthMessage: 'msg',
+      remoteUrl: 'wss://example.com',
+      modelCatalog: [{ name: 'GLM-5.1', available: true }],
+      sessionStatus: { contextTokens: 12345 },
+    } as any as StateUpdateEvent;
+
+    const prepared = prepareForSerial(event, { deviceInfo: null }) as unknown as Record<string, unknown>;
+    expect(prepared.moduleHealth).toBeUndefined();
+    expect(prepared.subscriptions).toBeUndefined();
+    expect(prepared.voiceAssistantState).toBeUndefined();
+    expect(prepared.voiceAssistantText).toBeUndefined();
+    expect(prepared.voiceAssistantResponseText).toBeUndefined();
+    expect(prepared.pairingUrl).toBeUndefined();
+    expect(prepared.gatewayDeviceId).toBeUndefined();
+    expect(prepared.gatewayAuthRequestId).toBeUndefined();
+    expect(prepared.gatewayAuthMessage).toBeUndefined();
+    expect(prepared.remoteUrl).toBeUndefined();
+    expect(prepared.modelCatalog).toBeUndefined();
+    expect(prepared.sessionStatus).toBeUndefined();
+  });
+
+  it('trims sessions_list to firmware fields and string sizes', () => {
+    const prepared = prepareForSerial({
+      type: 'sessions_list',
+      sessions: [{
+        id: 's'.repeat(80),
+        projectName: 'p'.repeat(80),
+        modelName: 'm'.repeat(80),
+        agentType: 'claude-code',
+        state: 'processing',
+        port: 9122,
+        alive: true,
+        extra: 'not-for-firmware',
+      }],
+    } as any) as any;
+
+    expect(prepared.sessions).toHaveLength(1);
+    expect(prepared.sessions[0].id).toHaveLength(31);
+    expect(prepared.sessions[0].projectName).toHaveLength(39);
+    expect(prepared.sessions[0].modelName).toHaveLength(31);
+    expect(prepared.sessions[0].extra).toBeUndefined();
   });
 
   it('strips legacy usage fields from usage_update', () => {

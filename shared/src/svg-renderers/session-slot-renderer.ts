@@ -30,6 +30,10 @@ export interface DisconnectedSlotConfig {
    * on the geometric center 2×2 of the keypad instead of one off-center key.
    */
   quadrant?: ClusterQuadrant;
+  col?: number;
+  row?: number;
+  cols?: number;
+  rows?: number;
 }
 
 export type StatusIconKind =
@@ -366,6 +370,21 @@ export function renderStatusCard(config: StatusCardConfig): string {
 
 export function renderDisconnectedSlot(config: DisconnectedSlotConfig): string {
   if (config.kind === 'empty') return renderQuietSlot();
+  if (
+    config.col !== undefined &&
+    config.row !== undefined &&
+    config.cols !== undefined &&
+    config.rows !== undefined
+  ) {
+    return renderOpenAppGrid(
+      config.col,
+      config.row,
+      config.cols,
+      config.rows,
+      config.label ?? 'OFFLINE',
+      config.subtitle ?? 'Open AgentDeck'
+    );
+  }
   if (config.quadrant) {
     return renderOpenAppQuadrant(config.quadrant, config.label ?? 'OFFLINE', config.subtitle ?? 'Open AgentDeck');
   }
@@ -500,5 +519,90 @@ export function svgFrame(bgColor: string, innerElements: string): string {
     `<rect x="8" y="8" width="128" height="128" rx="12" fill="#2C2C2E" opacity="0.6"/>`,
     innerElements,
     `</svg>`,
+  ].join('');
+}
+
+export function renderOpenAppGrid(
+  col: number,
+  row: number,
+  cols: number,
+  rows: number,
+  label = 'OFFLINE',
+  subtitle = 'Open AgentDeck',
+): string {
+  const colors = toneColors('action');
+  const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
+  const offsetX = -col * SIZE;
+  const offsetY = -row * SIZE;
+  const gradId = `frame-bg-grid-${col}-${row}`;
+
+  const minDim = Math.min(cols, rows);
+  const baseScale = Math.max(1.0, minDim * 0.8);
+
+  const totalW = cols * SIZE;
+  const totalH = rows * SIZE;
+
+  const padX = Math.max(8, 16 * cols / 4);
+  const padY = Math.max(8, 16 * rows / 2);
+  const rectW = totalW - padX * 2;
+  const rectH = totalH - padY * 2;
+  const rx = Math.max(12, 28 * minDim / 2);
+
+  const glyphX = totalW / 2;
+  const glyphY = totalH / 2 - (24 * baseScale);
+
+  const labelY = totalH / 2 + (20 * baseScale);
+  const subY = labelY + (28 * baseScale);
+
+  const fontSizeLabel = Math.max(16, Math.round(36 * (minDim / 2)));
+  const fontSizeSub = Math.max(11, Math.round(20 * (minDim / 2)));
+
+  const cluster = [
+    `<rect x="${padX}" y="${padY}" width="${rectW}" height="${rectH}" rx="${rx}" fill="${colors.panel}" opacity="0.68" stroke="${colors.accent}" stroke-width="${(2.4 * baseScale).toFixed(1)}" stroke-opacity="0.28"/>`,
+    renderGlyphIcon('open-app', colors.icon, colors.accent, glyphX, glyphY, baseScale),
+    `<text x="${totalW / 2}" y="${labelY}" text-anchor="middle" font-family="${fontFam}" font-size="${fontSizeLabel}" font-weight="800" fill="${colors.text}">${escXml(truncate(label, 16))}</text>`,
+    `<text x="${totalW / 2}" y="${subY}" text-anchor="middle" font-family="${fontFam}" font-size="${fontSizeSub}" font-weight="650" fill="${colors.sub}" opacity="0.86">${escXml(truncate(subtitle, 24))}</text>`,
+  ].join('');
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">`,
+    `<defs><linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="${colors.bg}"/><stop offset="100%" stop-color="#0A0A0E"/></linearGradient></defs>`,
+    `<rect width="${SIZE}" height="${SIZE}" rx="16" fill="url(#${gradId})"/>`,
+    `<g transform="translate(${offsetX} ${offsetY})">${cluster}</g>`,
+    `</svg>`,
+  ].join('');
+}
+
+export function renderOfflineTouchStrip(index: number): string {
+  const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
+  const colors = toneColors('action');
+  const W_total = 800;
+  const H_total = 100;
+
+  const offsetX = -index * 200;
+  const gradId = `touchstrip-offline-bg-${index}`;
+
+  // Entire 800x100 content
+  const content = [
+    // Background card panel
+    `<rect x="15" y="10" width="770" height="80" rx="16" fill="${colors.panel}" opacity="0.68" stroke="${colors.accent}" stroke-width="2" stroke-opacity="0.28"/>`,
+
+    // Left side: open-app glyph icon (x=120, y=50)
+    renderGlyphIcon('open-app', colors.icon, colors.accent, 120, 50, 1.2),
+
+    // Center: Offline text and helper instruction
+    `<text x="400" y="44" text-anchor="middle" font-family="${fontFam}" font-size="22" font-weight="800" fill="${colors.text}">AGENTDECK OFFLINE</text>`,
+    `<text x="400" y="70" text-anchor="middle" font-family="${fontFam}" font-size="12" font-weight="650" fill="${colors.sub}" opacity="0.86">Press any button or dial to launch AgentDeck application</text>`,
+
+    // Right side: offline icon (x=680, y=50)
+    renderGlyphIcon('offline', colors.icon, colors.accent, 680, 50, 1.2),
+  ].join('');
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">`,
+    `<defs><linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="${colors.bg}"/><stop offset="100%" stop-color="#0A0A0E"/></linearGradient></defs>`,
+    `<rect width="200" height="100" fill="url(#${gradId})"/>`,
+    `<g transform="translate(${offsetX} 0)">${content}</g>`,
+    `</svg>`
   ].join('');
 }

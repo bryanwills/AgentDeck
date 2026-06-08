@@ -61,6 +61,7 @@ final class CodexConfigInstallerTests: XCTestCase {
         XCTAssertTrue(withFence.contains("/hooks/codex_tool_start"))
         XCTAssertTrue(withFence.contains("/hooks/codex_tool_end"))
         XCTAssertTrue(withFence.contains("/hooks/codex_stop"))
+        XCTAssertTrue(withFence.contains("--connect-timeout 0.2 --max-time 0.8"))
         XCTAssertTrue(withFence.contains("notify ="))
         XCTAssertTrue(withFence.contains("[otel.trace_exporter.otlp-http]"))
         XCTAssertTrue(withFence.contains("/otel/v1/traces"))
@@ -69,6 +70,42 @@ final class CodexConfigInstallerTests: XCTestCase {
         // when Codex appends it. Lose this and every notify POST gets
         // an empty body.
         XCTAssertTrue(withFence.contains("\"agentdeck-notify\""))
+    }
+
+    func testCodexHookTrustStateMovesOutsideManagedFence() {
+        let original = [
+            "model = \"gpt-5\"",
+            "",
+            MiniToml.openFence,
+            "[features]",
+            "hooks = true",
+            "",
+            "[[hooks.Stop]]",
+            "[[hooks.Stop.hooks]]",
+            "type = \"command\"",
+            "command = \"old\"",
+            "",
+            "[hooks.state]",
+            "",
+            "[hooks.state.\"/Users/me/.codex/config.toml:stop:0:0\"]",
+            "trusted_hash = \"sha256:abc\"",
+            "",
+            "# OTel trace exporter",
+            "[otel.trace_exporter.otlp-http]",
+            "endpoint = \"http://127.0.0.1:9120/otel/v1/traces\"",
+            MiniToml.closeFence,
+        ].joined(separator: "\n")
+
+        let updated = MiniToml.applyManagedBlock(in: original, body: "[features]\nhooks = true")
+        let managed = updated.components(separatedBy: MiniToml.openFence)[1]
+            .components(separatedBy: MiniToml.closeFence)[0]
+        let outside = updated.components(separatedBy: MiniToml.closeFence)[1]
+
+        XCTAssertFalse(managed.contains("[hooks.state]"))
+        XCTAssertTrue(outside.contains("[hooks.state]"))
+        XCTAssertTrue(outside.contains("trusted_hash = \"sha256:abc\""))
+        XCTAssertFalse(outside.contains("# OTel trace exporter"))
+        XCTAssertEqual(MiniToml.applyManagedBlock(in: updated, body: "[features]\nhooks = true"), updated)
     }
 
     func testManagedFenceCanOmitConflictingOptionalChannels() {
@@ -107,6 +144,10 @@ final class CodexConfigInstallerTests: XCTestCase {
         XCTAssertTrue(MiniToml.hasTableOutsideFence(in: "[features]\nhooks = true", table: "features"))
         XCTAssertTrue(MiniToml.hasTableOutsideFence(in: "[hooks]\nmanaged_dir = \"/tmp/hooks\"", table: "hooks"))
         XCTAssertTrue(MiniToml.hasTableOutsideFence(in: "[[hooks.Stop]]\nmatcher = \"\"", table: "hooks"))
+        XCTAssertFalse(MiniToml.hasTableOutsideFence(
+            in: "[hooks.state]\n\n[hooks.state.\"/Users/me/.codex/config.toml:stop:0:0\"]\ntrusted_hash = \"sha256:abc\"",
+            table: "hooks"
+        ))
     }
 }
 #endif

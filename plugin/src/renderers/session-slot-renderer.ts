@@ -17,6 +17,8 @@ export {
   renderStatusCard,
   renderQuietSlot,
   svgFrame,
+  renderOpenAppGrid,
+  renderOfflineTouchStrip,
 } from '@agentdeck/shared';
 export type {
   ClusterQuadrant,

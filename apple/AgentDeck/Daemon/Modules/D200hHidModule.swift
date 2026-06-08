@@ -7,6 +7,7 @@
 import Foundation
 
 #if os(macOS)
+import AppKit
 import IOKit
 import IOKit.hid
 import CoreGraphics
@@ -145,6 +146,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     nonisolated(unsafe) private var cachedStateEvent: [String: Any]?
     nonisolated(unsafe) private var cachedUsageEvent: [String: Any]?
     nonisolated(unsafe) private var cachedSessionsList: [[String: Any]] = []
+    private var lastSessionsListDigest = ""
 
     // Display mode
     private enum DisplayMode: Sendable { case sessionList, optionSelect }
@@ -327,6 +329,9 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             updateDisplay()
         case "sessions_list":
             let sessions = event["sessions"] as? [[String: Any]] ?? []
+            let digest = sessionsListDigest(sessions)
+            guard digest != lastSessionsListDigest else { return }
+            lastSessionsListDigest = digest
             debugLog("BROADCAST sessions_list: \(sessions.count) sessions")
             cachedSessionsList = sessions
             updateDisplay()
@@ -664,6 +669,9 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
 
     private func resolveButtonCommand(_ index: Int) -> ButtonResolution {
         let sessions = buildSessionList()
+        if sessions.isEmpty {
+            return .handled(note: "offline_launch")
+        }
 
         switch currentMode {
         case .sessionList:
@@ -869,6 +877,9 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
                 self.commandHandler?(cmd)
             case .handled(let note):
                 DaemonLogger.shared.debug("D200H", "Button \(buttonIndex) handled locally -> \(note)")
+                if note == "offline_launch" {
+                    self.openAgentDeckAppOrGitHub()
+                }
             case .unmapped:
                 DaemonLogger.shared.debug("D200H", "Button \(buttonIndex) pressed (unmapped)")
             }
@@ -932,6 +943,21 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         } else {
             // Skip if content unchanged (prevents flooding device with repeated ZIPs)
             let modeKey = currentMode == .sessionList ? "L" : "O"
+            if allSessions.isEmpty && currentMode == .sessionList {
+                let contentKey = "OFFLINE_GRID_ZIP"
+                if contentKey == lastStateHash { return }
+                lastStateHash = contentKey
+                let zip = D200hRenderer.renderOfflineZip()
+                if zip.isEmpty {
+                    lastStateHash = ""
+                    return
+                }
+                let packets = buildZipPackets(zip)
+                for packet in packets { writePacket(packet) }
+                lastFullSlots = []
+                debugLog("SENT offline grid zip")
+                return
+            }
             let contentKey = "\(modeKey)|rev=\(D200H_RENDERER_REV)|labels=\(shouldShowNativeLabels(for: currentMode) ? 1 : 0)|baked=\(d200hBakeSessionTextEnabled() ? 1 : 0)|\(slots.map(\.cacheKey).joined(separator: ","))"
             if contentKey == lastStateHash { return }
             lastStateHash = contentKey
@@ -984,6 +1010,28 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             }
         }
         return parsed
+    }
+
+    private func sessionsListDigest(_ sessions: [[String: Any]]) -> String {
+        sessions.map { session in
+            let options = (session["options"] as? [[String: Any]]) ?? []
+            let optionsDigest = options.map { option in
+                option.keys.sorted().map { key in
+                    "\(key)=\(String(describing: option[key] ?? ""))"
+                }.joined(separator: "&")
+            }.joined(separator: ";")
+            return [
+                session["id"] as? String ?? "",
+                session["projectName"] as? String ?? "",
+                session["agentType"] as? String ?? "",
+                session["state"] as? String ?? "",
+                String(session["port"] as? Int ?? 0),
+                session["currentTool"] as? String ?? "",
+                session["modelName"] as? String ?? "",
+                String(session["navigable"] as? Bool ?? false),
+                optionsDigest,
+            ].joined(separator: "|")
+        }.joined(separator: "\n")
     }
 
     // MARK: - Animation Timer
@@ -1060,35 +1108,25 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         }
     }
 
+    private func openAgentDeckAppOrGitHub() {
+        DispatchQueue.main.async {
+            if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "bound.serendipity.agentdeck.dashboard") {
+                let config = NSWorkspace.OpenConfiguration()
+                NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: nil)
+            } else if let url = URL(string: "https://puritysb.github.io/AgentDeck/") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
     /// Last graceful frame on app teardown — leaves the device showing
     /// "OFFLINE / Open AgentDeck" instead of frozen on the last live session.
     /// SIGKILL/crash bypasses stop(); that scenario stays out of scope.
     private func sendOfflineFrame() {
         guard connected, managerOpened, !displaySuppressed else { return }
-
-        var slots = [ButtonSlot](repeating: .dim, count: 14)
-        slots[7] = ButtonSlot(
-            title: "OFFLINE",
-            subtitle: "Open AgentDeck",
-            bg: rgb(7, 23, 15),
-            enabled: false,
-            borderStyle: .none,
-            icon: .agentDeck,
-            iconColor: rgb(187, 247, 208),
-            textOverlay: .infoTile
-        )
-
-        let zip = D200hRenderer.renderFullZip(
-            slots: slots,
-            sessions: [],
-            stateEvent: nil,
-            usageEvent: nil,
-            optionMode: false,
-            sessionPage: 0,
-            focusedSessionId: nil
-        )
+        let zip = D200hRenderer.renderOfflineZip()
         guard !zip.isEmpty else {
-            debugLog("OFFLINE frame: renderFullZip returned empty — skipping")
+            debugLog("OFFLINE frame: renderOfflineZip returned empty — skipping")
             return
         }
         let packets = buildZipPackets(zip)
@@ -2399,6 +2437,88 @@ private enum D200hRenderer {
         DaemonLogger.shared.info("D200H ZIP boundary validation failed after 256 padding iterations — dropping this frame to avoid sending a malformed payload to the device")
         return Data()
     }
+
+    static func renderOfflineZip() -> Data {
+        let W_total = 980
+        let H_total = 588
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: W_total, height: H_total,
+            bitsPerComponent: 8, bytesPerRow: W_total * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return Data() }
+
+        let w = CGFloat(W_total)
+        let h = CGFloat(H_total)
+
+        // 1. Background
+        ctx.setFillColor(rgb(15, 23, 42))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+
+        // 2. Large Card Body
+        let padX: CGFloat = 20
+        let padY: CGFloat = 20
+        let rectW = w - padX * 2
+        let rectH = h - padY * 2
+        let rx: CGFloat = 32
+        let cardPath = CGPath(roundedRect: CGRect(x: padX, y: padY, width: rectW, height: rectH), cornerWidth: rx, cornerHeight: rx, transform: nil)
+
+        ctx.saveGState()
+        ctx.setFillColor(rgb(7, 23, 15))
+        ctx.addPath(cardPath)
+        ctx.fillPath()
+        ctx.setStrokeColor(rgb(34, 197, 94))
+        ctx.setLineWidth(4)
+        ctx.addPath(cardPath)
+        ctx.strokePath()
+        ctx.restoreGState()
+
+        // 3. Draw Large AgentDeck Icon
+        let iconW: CGFloat = 160
+        let iconH: CGFloat = 120
+        let iconRect = CGRect(x: w / 2 - iconW / 2, y: h / 2 - iconH / 2 - 40, width: iconW, height: iconH)
+        drawButtonIcon(ctx, glyph: .agentDeck, color: rgb(187, 247, 208), rect: iconRect)
+
+        // 4. Draw Texts
+        drawText("OFFLINE", ctx: ctx, y: 340, color: rgb(254, 226, 226), font: ctFont(36, bold: true), leftBound: 0, rightBound: w, canvasHeight: h)
+        drawText("Open AgentDeck", ctx: ctx, y: 395, color: rgb(252, 202, 202), font: ctFont(22, bold: true), leftBound: 0, rightBound: w, canvasHeight: h)
+        drawText("Press any button to launch AgentDeck application", ctx: ctx, y: 450, color: rgb(148, 163, 184), font: ctFont(16), leftBound: 0, rightBound: w, canvasHeight: h)
+
+        // 5. Crop 14 images
+        guard let fullImage = ctx.makeImage() else { return Data() }
+        var files: [(name: String, data: Data)] = []
+        var manifest: [String: Any] = [:]
+
+        for key in keyDefs {
+            let colRow = "\(key.col)_\(key.row)"
+            let isWide = key.id == 13
+            let cellW = isWide ? 392 : 196
+            let cellH = 196
+
+            let cropY = (2 - key.row) * 196
+            let cropRect = CGRect(x: key.col * 196, y: cropY, width: cellW, height: cellH)
+
+            guard let croppedImage = fullImage.cropping(to: cropRect) else { continue }
+
+            let data = NSMutableData()
+            guard let dest = CGImageDestinationCreateWithData(data as CFMutableData, UTType.png.identifier as CFString, 1, nil) else { continue }
+            CGImageDestinationAddImage(dest, croppedImage, nil)
+            CGImageDestinationFinalize(dest)
+            let pngData = data as Data
+
+            let iconPath = iconFilePath(slotId: key.id, suffix: isWide ? "wide" : nil, data: pngData)
+            files.append((iconPath, pngData))
+
+            manifest[isWide ? "3_2" : colRow] = manifestEntry(text: "", iconPath: iconPath, clearAction: true)
+        }
+
+        if let manifestData = try? JSONSerialization.data(withJSONObject: manifest) {
+            files.append(("manifest.json", manifestData))
+        }
+
+        return buildValidatedZip(files)
+    }
 }
 
 // MARK: - Color Helper
@@ -2629,11 +2749,11 @@ private func drawSessionTextOverlay(_ ctx: CGContext, slot: ButtonSlot) {
     let rightEdge: CGFloat = 174
 
     drawText(projectName, ctx: ctx, y: hasModel ? 104 : 112, color: rgb(255, 255, 255), font: projectFont, leftBound: leftEdge, rightBound: rightEdge, alignLeft: true)
-    
+
     if hasModel {
         drawText(model, ctx: ctx, y: 126, color: rgb(148, 163, 184), font: ctFont(15, bold: true), leftBound: leftEdge, rightBound: rightEdge, alpha: 0.96, alignLeft: true)
     }
-    
+
     if !state.isEmpty {
         let stateColor = slot.statusColor ?? rgb(148, 163, 184)
         drawText(state, ctx: ctx, y: hasModel ? 148 : 140, color: stateColor, font: ctFont(14, bold: true), leftBound: leftEdge, rightBound: rightEdge, alignLeft: true)

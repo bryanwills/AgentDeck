@@ -366,12 +366,13 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
 
         #if os(macOS)
         if !state.bridgeConnected {
-            if let preferredLocalBridgeUrl,
-               connection.url != preferredLocalBridgeUrl || connection.status == .disconnected {
-                print("[Lifecycle] macOS reconnecting directly to preferred local bridge")
+            if let preferredLocalBridgeUrl {
+                print("[Lifecycle] macOS forcing reconnect directly to preferred local bridge")
+                connection.forceDisconnectAndRestart()
                 connectTo(url: preferredLocalBridgeUrl)
             } else {
-                print("[Lifecycle] macOS skipping mDNS waterfall while waiting for daemon ready")
+                print("[Lifecycle] macOS restarting waterfall on foreground return")
+                restartWaterfall()
             }
             return
         }

@@ -452,12 +452,35 @@ struct TimelineStripView: View {
         // Bold: **text** → text
         out = out.replacingOccurrences(of: #"\*\*([^*]+)\*\*"#, with: "$1", options: .regularExpression)
         // Heading: leading 1-6 hashes + space → ""
-        out = out.replacingOccurrences(of: #"^#{1,6}\s+"#, with: "", options: [.regularExpression, .anchored])
+        out = out.replacingOccurrences(of: #"(?m)^#{1,6}\s+"#, with: "", options: .regularExpression)
         // Markdown link: [text](url) → text
         out = out.replacingOccurrences(of: #"\[([^\]]+)\]\([^)]+\)"#, with: "$1", options: .regularExpression)
         // Inline code: `code` → code
         out = out.replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
-        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Table pipes and separators: | text | or ---|---|---
+        out = out.replacingOccurrences(of: #"^[|:\-\s]+$"#, with: "", options: [.regularExpression, .anchored])
+        out = out.replacingOccurrences(of: #"\|"#, with: " ", options: .regularExpression)
+        // HTML tags: <img ... /> or <div>
+        out = out.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+
+        let cleaned = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return smartTruncate(cleaned, limit: 120)
+    }
+
+    /// Truncates string at word/Korean-character boundaries rather than cutting in the middle of a token.
+    private func smartTruncate(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let index = text.index(text.startIndex, offsetBy: limit - 3)
+        let substring = text[..<index]
+
+        // Try to find the last space to truncate at a word boundary
+        if let lastSpaceRange = substring.range(of: " ", options: .backwards) {
+            let spaceIndex = lastSpaceRange.lowerBound
+            if text.distance(from: spaceIndex, to: index) < 15 { // only back off up to 15 characters
+                return String(text[..<spaceIndex]) + "..."
+            }
+        }
+        return String(substring) + "..."
     }
 
     /// Inline detail block used in compact mode (iPhone portrait) below the
@@ -837,6 +860,9 @@ struct TimelineStripView: View {
                                        with: "$1", options: .regularExpression)
         out = out.replacingOccurrences(of: "`([^`]+)`",
                                        with: "$1", options: .regularExpression)
+        // Additional strips for pre-flight polish
+        out = out.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        out = out.replacingOccurrences(of: "\\|", with: " ", options: .regularExpression)
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -958,7 +984,8 @@ func timelineDisplayGroupsForDashboard(_ groups: [GroupedEntry]) -> [GroupedEntr
         let entry = group.entry
         // Task hierarchy markers are never elided — they're the user's
         // primary navigation handle on the timeline (the evaluation unit).
-        if entry.type == .taskStart || entry.type == .taskEnd { return true }
+        // Exception: empty runs (taskCategory="_empty") are filtered out as noise.
+        if entry.type == .taskStart || entry.type == .taskEnd { return entry.taskCategory != "_empty" }
         if timelineIsLowSignalEntry(entry) { return false }
         if entry.type == .chatStart {
             if !timelineHasLaterCompletion(for: entry, in: groups) { return true }

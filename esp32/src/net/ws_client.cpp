@@ -11,6 +11,7 @@
 
 static WebSocketsClient ws;
 static bool connected = false;
+static bool connecting = false;
 static uint32_t reconnectMs = WS_RECONNECT_MIN_MS;
 static uint32_t lastReconnectAttempt = 0;
 static char savedIp[16] = {0};
@@ -22,13 +23,12 @@ static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
         case WStype_DISCONNECTED:
             Serial.println("[WS] Disconnected");
             connected = false;
+            connecting = false;
             lockState();
             // Only mark disconnected if serial is also not connected
             // (serial data is authoritative — don't override it)
             if (!Net::serialConnected()) {
-                g_state.wsConnected = false;
-                g_state.state = AgentState::DISCONNECTED;
-                g_state.updateCreatureStates();
+                g_state.markBridgeDisconnected();
             }
             unlockState();
             break;
@@ -36,6 +36,7 @@ static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
         case WStype_CONNECTED:
             Serial.printf("[WS] Connected to %s:%d\n", savedIp, savedPort);
             connected = true;
+            connecting = false;
             reconnectMs = WS_RECONNECT_MIN_MS;
             ws.setReconnectInterval(reconnectMs);
             lockState();
@@ -76,6 +77,15 @@ void wsInit() {
 }
 
 void wsConnect(const char* ip, uint16_t port, const char* token) {
+    if (connected || connecting) {
+        return;
+    }
+    connecting = true;
+
+    // Disconnect any existing attempt before beginning a new one
+    ws.disconnect();
+    delay(10);
+
     strncpy(savedIp, ip, sizeof(savedIp) - 1);
     savedPort = port;
     strncpy(savedToken, token, sizeof(savedToken) - 1);
@@ -99,6 +109,7 @@ void wsConnect(const char* ip, uint16_t port, const char* token) {
 void wsDisconnect() {
     ws.disconnect();
     connected = false;
+    connecting = false;
 }
 
 void wsLoop() {
@@ -130,6 +141,10 @@ uint32_t wsBackoffMs() {
 
 bool wsConnected() {
     return connected;
+}
+
+bool wsConnecting() {
+    return connecting;
 }
 
 void wsSend(const char* json) {

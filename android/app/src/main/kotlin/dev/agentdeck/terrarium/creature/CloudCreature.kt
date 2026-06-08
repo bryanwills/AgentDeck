@@ -191,8 +191,9 @@ class CloudCreature(
     override fun draw(scope: DrawScope) {
         val w = scope.size.width
         val h = scope.size.height
+        val baseWidth = minOf(w, h * 2f)
 
-        val bodyRadius = w * TerrariumLayout.OCTOPUS_BODY_RADIUS_FRACTION * scaleFactor
+        val bodyRadius = baseWidth * TerrariumLayout.OCTOPUS_BODY_RADIUS_FRACTION * scaleFactor
         val centerX = w * currentX
 
         // Bob animation

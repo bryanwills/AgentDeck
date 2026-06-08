@@ -50,6 +50,15 @@ export function buildSubscriptions(
   return items.length > 0 ? items : undefined;
 }
 
+function isClaudeSubscriptionModel(modelName?: string | null): boolean {
+  const raw = modelName?.trim().toLowerCase();
+  if (!raw) return false;
+  return raw.includes('claude')
+    || raw.includes('opus')
+    || raw.includes('sonnet')
+    || raw.includes('haiku');
+}
+
 /**
  * Build a usage_update BridgeEvent from current state.
  * Single source of truth — used by both index.ts and daemon-server.ts.
@@ -67,6 +76,29 @@ export function buildUsageEvent(
   antigravityStatus?: AntigravityStatusInfo | null,
   preAdjusted?: boolean,
 ): UsageEvent {
+  const subscriptionQuotaApplies = (
+    apiUsage?.inferredBillingType === 'subscription'
+      || billingType === 'subscription'
+  ) && isClaudeSubscriptionModel(snapshot.modelName);
+
+  let fiveHourPercent: number | undefined;
+  let fiveHourResetsAt: string | undefined;
+  let sevenDayPercent: number | undefined;
+  let sevenDayResetsAt: string | undefined;
+
+  if (subscriptionQuotaApplies) {
+    fiveHourPercent = preAdjusted ? (apiUsage?.fiveHourPercent ?? undefined) : adjustUsagePercent(apiUsage?.fiveHourPercent, apiUsage?.fiveHourResetsAt);
+    fiveHourResetsAt = apiUsage?.fiveHourResetsAt ?? undefined;
+    sevenDayPercent = preAdjusted ? (apiUsage?.sevenDayPercent ?? undefined) : adjustUsagePercent(apiUsage?.sevenDayPercent, apiUsage?.sevenDayResetsAt);
+    sevenDayResetsAt = apiUsage?.sevenDayResetsAt ?? undefined;
+  } else if (billingType === 'api' && snapshot.costLimit && snapshot.costLimit > 0) {
+    const spent = snapshot.costSpent ?? 0;
+    fiveHourPercent = Math.min(100, Math.max(0, (spent / snapshot.costLimit) * 100));
+    fiveHourResetsAt = snapshot.resetTime
+      ? `${snapshot.resetDate || ''} ${snapshot.resetTime}`.trim()
+      : undefined;
+  }
+
   const event: UsageEvent = {
     type: 'usage_update',
     sessionDurationSec: snapshot.sessionDurationSec,
@@ -79,14 +111,14 @@ export function buildUsageEvent(
     costLimit: snapshot.costLimit ?? undefined,
     resetTime: snapshot.resetTime ?? undefined,
     resetDate: snapshot.resetDate ?? undefined,
-    fiveHourPercent: preAdjusted ? (apiUsage?.fiveHourPercent ?? undefined) : adjustUsagePercent(apiUsage?.fiveHourPercent, apiUsage?.fiveHourResetsAt),
-    fiveHourResetsAt: apiUsage?.fiveHourResetsAt ?? undefined,
-    sevenDayPercent: preAdjusted ? (apiUsage?.sevenDayPercent ?? undefined) : adjustUsagePercent(apiUsage?.sevenDayPercent, apiUsage?.sevenDayResetsAt),
-    sevenDayResetsAt: apiUsage?.sevenDayResetsAt ?? undefined,
-    extraUsageEnabled: apiUsage?.extraUsageEnabled ?? undefined,
-    extraUsageMonthlyLimit: apiUsage?.extraUsageMonthlyLimit ?? undefined,
-    extraUsageUsedCredits: apiUsage?.extraUsageUsedCredits ?? undefined,
-    extraUsageUtilization: apiUsage?.extraUsageUtilization ?? undefined,
+    fiveHourPercent,
+    fiveHourResetsAt,
+    sevenDayPercent,
+    sevenDayResetsAt,
+    extraUsageEnabled: subscriptionQuotaApplies ? (apiUsage?.extraUsageEnabled ?? undefined) : undefined,
+    extraUsageMonthlyLimit: subscriptionQuotaApplies ? (apiUsage?.extraUsageMonthlyLimit ?? undefined) : undefined,
+    extraUsageUsedCredits: subscriptionQuotaApplies ? (apiUsage?.extraUsageUsedCredits ?? undefined) : undefined,
+    extraUsageUtilization: subscriptionQuotaApplies ? (apiUsage?.extraUsageUtilization ?? undefined) : undefined,
     oauthConnected: oauthStatus,
     ollamaStatus: ollamaStatus ?? undefined,
     usageStale: stale || undefined,

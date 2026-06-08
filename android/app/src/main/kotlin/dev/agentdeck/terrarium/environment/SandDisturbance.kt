@@ -91,13 +91,14 @@ class SandDisturbance : Creature {
     override fun draw(scope: DrawScope) {
         val w = scope.size.width
         val h = scope.size.height
+        val baseWidth = minOf(w, h * 2f)
 
         for (p in particles) {
             if (!p.alive) continue
 
             scope.drawCircle(
                 color = TerrariumColors.SandLight.copy(alpha = p.alpha),
-                radius = p.size * w,
+                radius = p.size * baseWidth,
                 center = Offset(p.x * w, p.y * h),
             )
         }

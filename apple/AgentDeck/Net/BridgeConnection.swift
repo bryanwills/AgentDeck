@@ -25,6 +25,7 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
     private static let maxReconnectAttempts = 20
     private static let pingIntervalSec: TimeInterval = 15
     private static let healthCheckTimeoutSec: TimeInterval = 3
+    private static let connectionTimeoutSec: TimeInterval = 5
 
     // MARK: - Observable State
 
@@ -56,6 +57,7 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
     private var shouldReconnect = false
     private var pingSource: DispatchSourceTimer?
     private var reconnectWork: DispatchWorkItem?
+    private var connectTimeoutWork: DispatchWorkItem?
     private let queue = DispatchQueue(label: "dev.agentdeck.bridge", qos: .userInitiated)
     private var hasReceivedMessage = false
     /// Incremented on disconnect(reconnect: false) to invalidate pending reconnect work
@@ -95,6 +97,8 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
         webSocket = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil
+        connectTimeoutWork?.cancel()
+        connectTimeoutWork = nil
 
         guard let wsUrl = URL(string: urlString) else {
             DispatchQueue.main.async { self.lastError = "Invalid URL: \(urlString)" }
@@ -152,6 +156,20 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
         // Don't set .connected here — wait for first message in receiveLoop
         startPingTimerOnQueue()  // Already on queue
         receiveLoop()
+
+        // Start connection timeout timer
+        let connectionGen = self.connectionGeneration
+        let timeoutWork = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.queue.async {
+                guard self.connectionGeneration == connectionGen,
+                      self.status == .connecting else { return }
+                print("[BridgeConnection] connection attempt timed out (\(Self.connectionTimeoutSec)s)")
+                self.handleDisconnect(error: URLError(.timedOut))
+            }
+        }
+        self.connectTimeoutWork = timeoutWork
+        self.queue.asyncAfter(deadline: .now() + Self.connectionTimeoutSec, execute: timeoutWork)
     }
 
     // MARK: - Disconnect
@@ -161,6 +179,8 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
         shouldReconnect = reconnect
         reconnectWork?.cancel()
         reconnectWork = nil
+        connectTimeoutWork?.cancel()
+        connectTimeoutWork = nil
         isHandlingDisconnect = false  // Reset so future handleDisconnect can fire
         stopPingTimer()
 
@@ -191,6 +211,8 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
             self.connectionGeneration += 1
             self.reconnectWork?.cancel()
             self.reconnectWork = nil
+            self.connectTimeoutWork?.cancel()
+            self.connectTimeoutWork = nil
             self.isHandlingDisconnect = false
             self.hasReceivedMessage = false
 
@@ -251,6 +273,8 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
             if !hasReceivedMessage {
                 hasReceivedMessage = true
                 print("[BridgeConnection] first message received — connected!")
+                self.connectTimeoutWork?.cancel()
+                self.connectTimeoutWork = nil
                 DispatchQueue.main.async {
                     self.status = .connected
                     self.backoffMs = Self.initialBackoffMs
@@ -371,6 +395,8 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
             self.pingSource = nil
             self.webSocket?.cancel(with: .goingAway, reason: nil)
             self.webSocket = nil
+            self.connectTimeoutWork?.cancel()
+            self.connectTimeoutWork = nil
 
             let wasConnected = self.hasReceivedMessage
             self.hasReceivedMessage = false
@@ -401,9 +427,8 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
                 return
             }
 
-            // Give up after max attempts (fewer for localhost since local discovery will re-find it)
-            let isLocalhost = urlString.contains("127.0.0.1") || urlString.contains("localhost")
-            let maxAttempts = isLocalhost ? 5 : Self.maxReconnectAttempts
+            // Give up after max attempts (5 attempts for all URLs)
+            let maxAttempts = 5
             if self.reconnectAttempt >= maxAttempts {
                 self.isHandlingDisconnect = false  // No reconnect will follow
                 DispatchQueue.main.async {

@@ -546,7 +546,7 @@ function gaugeColor(pct: number, animFrame: number): RGB {
 }
 
 /** Pixoo HUD reset time: "1h23", "4d6", "59m". */
-function formatResetDetailed(resetsAt: string | undefined): string {
+export function formatResetDetailed(resetsAt: string | undefined): string {
   if (!resetsAt) return '';
   const ms = new Date(resetsAt).getTime() - Date.now();
   if (ms <= 0) return '0m';

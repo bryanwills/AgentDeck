@@ -162,6 +162,39 @@ struct DashboardState {
         estimatedCostUsd = -1.0f;
     }
 
+    // Called while g_stateMutex is held. Keep long-lived connection memory
+    // such as lastMessageMs, but clear volatile bridge data so every surface
+    // renders a reconnect/disconnected state instead of stale session data.
+    void markBridgeDisconnected() {
+        wsConnected = false;
+        state = AgentState::DISCONNECTED;
+        projectName[0] = '\0';
+        modelName[0] = '\0';
+        agentType[0] = '\0';
+        effortLevel[0] = '\0';
+        currentTool[0] = '\0';
+        toolInput[0] = '\0';
+        question[0] = '\0';
+        promptType[0] = '\0';
+        optionCount = 0;
+        sessionCount = 0;
+        octopusCount = 0;
+        cloudCount = 0;
+        opencodeCount = 0;
+        crayfishCount = 0;
+        gatewayAvailable = false;
+        gatewayConnected = false;
+        gatewayHasError = false;
+        dataReceived = false;
+        fiveHourPercent = -1.0f;
+        sevenDayPercent = -1.0f;
+        fiveHourReset[0] = '\0';
+        sevenDayReset[0] = '\0';
+        usageStale = true;
+        timelineView = false;
+        updateCreatureStates();
+    }
+
     // Derive creature states from agent state
     void updateCreatureStates() {
         switch (state) {

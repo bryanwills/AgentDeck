@@ -1,4 +1,4 @@
-#ifdef BOARD_ULANZI_TC001
+#ifdef BOARD_LED8X32
 #include "matrix_buttons.h"
 #include <Arduino.h>
 #include "../../../boards/board_config.h"
@@ -79,4 +79,4 @@ void beep(uint16_t durationMs) {
 }
 
 } // namespace MatrixButtons
-#endif // BOARD_ULANZI_TC001
+#endif // BOARD_LED8X32

@@ -311,7 +311,7 @@ enum CodexConfigInstaller {
             #"  done"#,
             #"fi"#,
             #"PORT="${PORT:-9120}""#,
-            "curl -sf -X POST \"http://127.0.0.1:$PORT/hooks/\(event)\" -H 'Content-Type: application/json' --data-raw \"$1\" 2>/dev/null || true",
+            "curl -sf --connect-timeout 0.2 --max-time 0.8 -X POST \"http://127.0.0.1:$PORT/hooks/\(event)\" -H 'Content-Type: application/json' --data-raw \"$1\" 2>/dev/null || true",
         ]
         return lines.joined(separator: "\n")
     }
@@ -358,7 +358,7 @@ enum CodexConfigInstaller {
             #"  done"#,
             #"fi"#,
             #"PORT="${PORT:-9120}""#,
-            "curl -sf -X POST \"http://127.0.0.1:$PORT/hooks/\(event)\" -H 'Content-Type: application/json' -d @- >/dev/null 2>&1 || true",
+            "curl -sf --connect-timeout 0.2 --max-time 0.8 -X POST \"http://127.0.0.1:$PORT/hooks/\(event)\" -H 'Content-Type: application/json' -d @- >/dev/null 2>&1 || true",
         ]
         return lines.joined(separator: "\n")
     }

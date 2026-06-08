@@ -58,6 +58,41 @@ describe('codex-mini-toml: applyManagedBlock', () => {
     const twice = applyManagedBlock(once, 'key = 1');
     expect(once).toBe(twice);
   });
+
+  it('moves Codex hook trust state out of the managed fence', () => {
+    const original = [
+      'model = "gpt-5"',
+      '',
+      OPEN_FENCE,
+      '[features]',
+      'hooks = true',
+      '',
+      '[[hooks.Stop]]',
+      '[[hooks.Stop.hooks]]',
+      'type = "command"',
+      'command = "old"',
+      '',
+      '[hooks.state]',
+      '',
+      '[hooks.state."/Users/me/.codex/config.toml:stop:0:0"]',
+      'trusted_hash = "sha256:abc"',
+      '',
+      '# OTel trace exporter',
+      '[otel.trace_exporter.otlp-http]',
+      'endpoint = "http://127.0.0.1:9120/otel/v1/traces"',
+      CLOSE_FENCE,
+    ].join('\n');
+
+    const updated = applyManagedBlock(original, '[features]\nhooks = true');
+    const managed = updated.split(OPEN_FENCE)[1].split(CLOSE_FENCE)[0];
+    const outside = updated.split(CLOSE_FENCE)[1];
+
+    expect(managed).not.toContain('[hooks.state]');
+    expect(outside).toContain('[hooks.state]');
+    expect(outside).toContain('trusted_hash = "sha256:abc"');
+    expect(outside).not.toContain('# OTel trace exporter');
+    expect(applyManagedBlock(updated, '[features]\nhooks = true')).toBe(updated);
+  });
 });
 
 describe('codex-mini-toml: removeManagedBlock', () => {
@@ -111,6 +146,16 @@ describe('codex-mini-toml: hasTableOutsideFence', () => {
   it('detects array-of-table header [[hooks.Stop]]', () => {
     const withUser = `[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = "command"`;
     expect(hasTableOutsideFence(withUser, 'hooks')).toBe(true);
+  });
+
+  it('ignores Codex hook trust state outside fence', () => {
+    const withState = [
+      '[hooks.state]',
+      '',
+      '[hooks.state."/Users/me/.codex/config.toml:stop:0:0"]',
+      'trusted_hash = "sha256:abc"',
+    ].join('\n');
+    expect(hasTableOutsideFence(withState, 'hooks')).toBe(false);
   });
 
   it('ignores [otel] inside fence', () => {
@@ -187,6 +232,7 @@ describe('codex-install: managedBlockBody', () => {
     expect(withFence).toContain('/hooks/codex_tool_start');
     expect(withFence).toContain('/hooks/codex_tool_end');
     expect(withFence).toContain('/hooks/codex_stop');
+    expect(withFence).toContain('--connect-timeout 0.2 --max-time 0.8');
     expect(withFence).toContain('notify =');
     expect(withFence).toContain('[otel.trace_exporter.otlp-http]');
     expect(withFence).toContain('/otel/v1/traces');
@@ -313,5 +359,33 @@ describe('codex-install: install / uninstall (file I/O)', () => {
     installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
     const secondStat = readFileSync(configPath, 'utf-8');
     expect(secondStat).toBe(firstStat);
+  });
+
+  it('preserves Codex hook trust state across reinstall', () => {
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    const withStateInsideFence = readFileSync(configPath, 'utf-8').replace(
+      CLOSE_FENCE,
+      [
+        '[hooks.state]',
+        '',
+        '[hooks.state."/Users/me/.codex/config.toml:stop:0:0"]',
+        'trusted_hash = "sha256:abc"',
+        '',
+        CLOSE_FENCE,
+      ].join('\n')
+    );
+    writeFileSync(configPath, withStateInsideFence, 'utf-8');
+
+    const result = installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    expect(result.installed).toBe(true);
+
+    const text = readFileSync(configPath, 'utf-8');
+    const managed = text.split(OPEN_FENCE)[1].split(CLOSE_FENCE)[0];
+    const outside = text.split(CLOSE_FENCE)[1];
+    expect(managed).not.toContain('[hooks.state]');
+    expect(outside).toContain('trusted_hash = "sha256:abc"');
+
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    expect(readFileSync(configPath, 'utf-8')).toBe(text);
   });
 });

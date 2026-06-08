@@ -31,9 +31,8 @@ class BridgeConnection private constructor() {
         val instance: BridgeConnection by lazy { BridgeConnection() }
         private const val INITIAL_BACKOFF_MS = 1000L
         private const val MAX_BACKOFF_MS = 8_000L
-        /** After a short burst, keep retrying localhost at a slower cadence instead of giving up. */
+        /** Max localhost retries before giving up and clearing URL for mDNS fallback. */
         private const val MAX_LOCALHOST_ATTEMPTS = 5
-        private const val LOCALHOST_STEADY_RETRY_MS = 30_000L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -197,25 +196,30 @@ class BridgeConnection private constructor() {
         _reconnectAttempt.value++
 
         val isLocalhost = isLocalhostUrl(currentUrl)
-        val delayMs = if (isLocalhost && _reconnectAttempt.value > MAX_LOCALHOST_ATTEMPTS) {
+
+        // Fast-fail: after a short burst of retries (5), give up and clear the URL
+        // so the caller's LaunchedEffect can trigger mDNS discovery.
+        // Continuing to hammer a stale/dead URL would block the discovery path indefinitely.
+        if (_reconnectAttempt.value > MAX_LOCALHOST_ATTEMPTS) {
             Log.w(
                 TAG,
-                "localhost reconnect still failing after ${_reconnectAttempt.value} attempts — switching to steady ${LOCALHOST_STEADY_RETRY_MS}ms retries"
+                "Connection to $currentUrl still failing after ${_reconnectAttempt.value} attempts — giving up, clearing URL for mDNS fallback"
             )
-            _lastError.value = "Waiting for USB bridge"
-            LOCALHOST_STEADY_RETRY_MS
-        } else {
-            backoffMs
+            shouldReconnect = false
+            _isReconnecting.value = false
+            _reconnectAttempt.value = 0
+            _url.value = null
+            _lastError.value = if (isLocalhost) "USB bridge not found — try WiFi" else "Bridge not found — re-discovering"
+            _status.value = ConnectionStatus.DISCONNECTED
+            onEvent?.invoke(BridgeEvent.Disconnected)
+            return
         }
 
+        val delayMs = backoffMs
         Log.d(TAG, "scheduleReconnect — attempt=${_reconnectAttempt.value} backoff=${delayMs}ms url=$currentUrl")
         scope.launch {
             delay(delayMs)
-            backoffMs = if (isLocalhost && _reconnectAttempt.value >= MAX_LOCALHOST_ATTEMPTS) {
-                MAX_BACKOFF_MS
-            } else {
-                min(backoffMs * 2, MAX_BACKOFF_MS)
-            }
+            backoffMs = min(backoffMs * 2, MAX_BACKOFF_MS)
             if (shouldReconnect && _status.value == ConnectionStatus.DISCONNECTED) {
                 doConnect(currentUrl)
             }

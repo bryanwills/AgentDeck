@@ -156,95 +156,101 @@ fun EinkTerrariumView(
     modifier: Modifier = Modifier,
     onFrameRendered: ((isAnimationFrame: Boolean) -> Unit)? = null,
 ) {
-    // neverEqualPolicy: bitmap is reused (same reference), so every assignment
-    // must trigger recomposition even though the reference doesn't change.
-    var renderedBitmap by remember { mutableStateOf<Bitmap?>(null, neverEqualPolicy()) }
-    // Capture hosting Android View — postInvalidate() flushes the LAYER_TYPE_SOFTWARE
-    // cache in the parent EinkRefreshZone FrameLayout, ensuring animation frames reach the EPD.
-    val hostView = LocalView.current
-    // Reusable render target — NOT displayed directly, only used as renderEinkFrame target
-    var reusableBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var animFrame by remember { mutableFloatStateOf(0f) }
-    val currentState by rememberUpdatedState(state)
-    // Persistent boids fish school — survives recomposition, state lives across frames
-    val fishSchool = remember { EinkFishSchool() }
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val widthPx = with(density) { maxWidth.toPx().toInt() }.coerceAtLeast(100)
+        val heightPx = with(density) { maxHeight.toPx().toInt() }.coerceAtLeast(100)
 
-    val isAnimating = state.octopus != OctopusVisualState.SLEEPING ||
-        state.crayfish != CrayfishVisualState.DORMANT ||
-        state.cloudCreatures.any { it.visualState != OctopusVisualState.SLEEPING } ||
-        state.openCodeCreatures.any { it.visualState != OctopusVisualState.SLEEPING }
+        // neverEqualPolicy: bitmap is reused (same reference), so every assignment
+        // must trigger recomposition even though the reference doesn't change.
+        var renderedBitmap by remember { mutableStateOf<Bitmap?>(null, neverEqualPolicy()) }
+        // Capture hosting Android View — postInvalidate() flushes the LAYER_TYPE_SOFTWARE
+        // cache in the parent EinkRefreshZone FrameLayout, ensuring animation frames reach the EPD.
+        val hostView = LocalView.current
+        // Reusable render target — NOT displayed directly, only used as renderEinkFrame target
+        var reusableBitmap by remember { mutableStateOf<Bitmap?>(null) }
+        var animFrame by remember { mutableFloatStateOf(0f) }
+        val currentState by rememberUpdatedState(state)
+        // Persistent boids fish school — survives recomposition, state lives across frames
+        val fishSchool = remember { EinkFishSchool() }
 
-    // Animation loop — platform-specific:
-    // B&W e-ink: 2.5fps GC16 partial animation (400ms).
-    // Color Kaleido/Gallery: 10fps fast partial animation, but the logical
-    // motion clock stays at 400ms so browser-video-capable panels get smoother
-    // interpolation without making fish and creatures sprint.
-    LaunchedEffect(isAnimating) {
-        if (!isAnimating) {
-            // Static state: render once
-            val bmp = reusableBitmap ?: Bitmap.createBitmap(EINK_WIDTH, EINK_HEIGHT, Bitmap.Config.ARGB_8888)
-                .also { reusableBitmap = it }
-            renderedBitmap = renderEinkFrame(currentState, EINK_WIDTH, EINK_HEIGHT, 0f, bmp, fishSchool = fishSchool)
-            hostView.postInvalidate()
-            onFrameRendered?.invoke(false)
-            return@LaunchedEffect
-        }
-        val frameInterval = einkAnimationFrameIntervalMs(einkColorEnabled)
-        var lastFrameAt = android.os.SystemClock.uptimeMillis()
-        while (isActive) {
-            try {
-                val bmp = reusableBitmap ?: Bitmap.createBitmap(EINK_WIDTH, EINK_HEIGHT, Bitmap.Config.ARGB_8888)
-                    .also { reusableBitmap = it }
-                val now = android.os.SystemClock.uptimeMillis()
-                val frameAdvance = einkAnimationFrameAdvance(now - lastFrameAt)
-                lastFrameAt = now
-                animFrame = (animFrame + frameAdvance) % EINK_ANIM_CYCLE.toFloat()
-                val s = currentState
-                val streaming = s.tetra == TetraVisualState.STREAMING
-                val agentSlots = dev.agentdeck.terrarium.layoutOctopuses(s.agents.size.coerceAtLeast(1))
-                fishSchool.update(streaming, agentSlots, s.crayfish == CrayfishVisualState.ROUTING, frameAdvance)
-                renderedBitmap = renderEinkFrame(currentState, EINK_WIDTH, EINK_HEIGHT, animFrame, bmp,
-                    skipDither = einkColorEnabled, fishSchool = fishSchool)
+        val isAnimating = state.octopus != OctopusVisualState.SLEEPING ||
+            state.crayfish != CrayfishVisualState.DORMANT ||
+            state.cloudCreatures.any { it.visualState != OctopusVisualState.SLEEPING } ||
+            state.openCodeCreatures.any { it.visualState != OctopusVisualState.SLEEPING }
+
+        // Animation loop — platform-specific:
+        // B&W e-ink: 2.5fps GC16 partial animation (400ms).
+        // Color Kaleido/Gallery: 10fps fast partial animation, but the logical
+        // motion clock stays at 400ms so browser-video-capable panels get smoother
+        // interpolation without making fish and creatures sprint.
+        LaunchedEffect(isAnimating, widthPx, heightPx) {
+            if (!isAnimating) {
+                // Static state: render once
+                val bmp = reusableBitmap?.takeIf { it.width == widthPx && it.height == heightPx }
+                    ?: Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { reusableBitmap = it }
+                renderedBitmap = renderEinkFrame(currentState, widthPx, heightPx, 0f, bmp, fishSchool = fishSchool)
                 hostView.postInvalidate()
-                onFrameRendered?.invoke(true)
-            } catch (e: Exception) {
-                android.util.Log.e("EinkAnim", "Animation loop crash", e)
+                onFrameRendered?.invoke(false)
+                return@LaunchedEffect
             }
-            delay(frameInterval)
+            val frameInterval = einkAnimationFrameIntervalMs(einkColorEnabled)
+            var lastFrameAt = android.os.SystemClock.uptimeMillis()
+            while (isActive) {
+                try {
+                    val bmp = reusableBitmap?.takeIf { it.width == widthPx && it.height == heightPx }
+                        ?: Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { reusableBitmap = it }
+                    val now = android.os.SystemClock.uptimeMillis()
+                    val frameAdvance = einkAnimationFrameAdvance(now - lastFrameAt)
+                    lastFrameAt = now
+                    animFrame = (animFrame + frameAdvance) % EINK_ANIM_CYCLE.toFloat()
+                    val s = currentState
+                    val streaming = s.tetra == TetraVisualState.STREAMING
+                    val agentSlots = dev.agentdeck.terrarium.layoutOctopuses(s.agents.size.coerceAtLeast(1))
+                    fishSchool.update(streaming, agentSlots, s.crayfish == CrayfishVisualState.ROUTING, frameAdvance)
+                    renderedBitmap = renderEinkFrame(currentState, widthPx, heightPx, animFrame, bmp,
+                        skipDither = einkColorEnabled, fishSchool = fishSchool)
+                    hostView.postInvalidate()
+                    onFrameRendered?.invoke(true)
+                } catch (e: Exception) {
+                    android.util.Log.e("EinkAnim", "Animation loop crash", e)
+                }
+                delay(frameInterval)
+            }
         }
-    }
 
-    // Force immediate re-render on state change (e.g. FLOATING→WORKING).
-    // The animation loop picks up currentState automatically, but we also render
-    // one frame immediately so the transition isn't delayed by up to 600ms.
-    val agentsKey = state.agents.map { it.visualState }
-    val cloudsKey = state.cloudCreatures.map { it.visualState }
-    val openCodeKey = state.openCodeCreatures.map { it.visualState }
-    LaunchedEffect(state.octopus, state.crayfish, state.tetra, state.environment, agentsKey, cloudsKey, openCodeKey) {
-        val bmp = reusableBitmap ?: Bitmap.createBitmap(EINK_WIDTH, EINK_HEIGHT, Bitmap.Config.ARGB_8888)
-            .also { reusableBitmap = it }
-        renderedBitmap = renderEinkFrame(currentState, EINK_WIDTH, EINK_HEIGHT, animFrame, bmp, fishSchool = fishSchool)
-        hostView.postInvalidate()
-        onFrameRendered?.invoke(false)
-    }
-
-    // Initial render
-    LaunchedEffect(Unit) {
-        if (renderedBitmap == null) {
-            val bmp = Bitmap.createBitmap(EINK_WIDTH, EINK_HEIGHT, Bitmap.Config.ARGB_8888)
-                .also { reusableBitmap = it }
-            renderedBitmap = renderEinkFrame(state, EINK_WIDTH, EINK_HEIGHT, 0f, bmp, fishSchool = fishSchool)
+        // Force immediate re-render on state change (e.g. FLOATING→WORKING).
+        // The animation loop picks up currentState automatically, but we also render
+        // one frame immediately so the transition isn't delayed by up to 600ms.
+        val agentsKey = state.agents.map { it.visualState }
+        val cloudsKey = state.cloudCreatures.map { it.visualState }
+        val openCodeKey = state.openCodeCreatures.map { it.visualState }
+        LaunchedEffect(state.octopus, state.crayfish, state.tetra, state.environment, agentsKey, cloudsKey, openCodeKey, widthPx, heightPx) {
+            val bmp = reusableBitmap?.takeIf { it.width == widthPx && it.height == heightPx }
+                ?: Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { reusableBitmap = it }
+            renderedBitmap = renderEinkFrame(currentState, widthPx, heightPx, animFrame, bmp, fishSchool = fishSchool)
             hostView.postInvalidate()
             onFrameRendered?.invoke(false)
         }
-    }
 
-    Canvas(modifier = modifier.fillMaxSize()) {
-        val bmp = renderedBitmap ?: return@Canvas
-        drawImage(
-            image = bmp.asImageBitmap(),
-            dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-        )
+        // Initial render
+        LaunchedEffect(widthPx, heightPx) {
+            if (renderedBitmap == null || renderedBitmap?.width != widthPx || renderedBitmap?.height != heightPx) {
+                val bmp = reusableBitmap?.takeIf { it.width == widthPx && it.height == heightPx }
+                    ?: Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { reusableBitmap = it }
+                renderedBitmap = renderEinkFrame(state, widthPx, heightPx, 0f, bmp, fishSchool = fishSchool)
+                hostView.postInvalidate()
+                onFrameRendered?.invoke(false)
+            }
+        }
+
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val bmp = renderedBitmap ?: return@Canvas
+            drawImage(
+                image = bmp.asImageBitmap(),
+                dstSize = IntSize(size.width.toInt(), size.height.toInt()),
+            )
+        }
     }
 }
 

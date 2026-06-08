@@ -43,19 +43,8 @@ struct ConnectionOverlay: View {
                         .font(.subheadline)
                         .foregroundStyle(slateText)
 
-                    // Reconnecting details (URL, attempt, stop button)
+                    // Reconnecting details (stop button only)
                     if isReconnecting {
-                        if let url = stateHolder.connection.url {
-                            Text(url)
-                                .font(.caption)
-                                .monospaced()
-                                .foregroundStyle(slateText)
-                        }
-
-                        Text("Attempt \(stateHolder.connection.reconnectAttempt)")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-
                         Button {
                             stateHolder.connection.disconnect()
                         } label: {

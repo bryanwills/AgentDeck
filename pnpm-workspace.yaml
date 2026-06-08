@@ -5,7 +5,16 @@ packages:
   - hooks
   - setup
 
+allowBuilds:
+  better-sqlite3: true
+  node-hid: true
+  node-pty: true
+  sharp: true
+
 ignoredBuiltDependencies:
   - esbuild
+
+minimumReleaseAgeExclude:
+  - '@types/node@25.9.2'
 
 onlyBuiltDependencies: '[\"node-hid\"]'

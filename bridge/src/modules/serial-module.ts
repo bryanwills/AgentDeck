@@ -16,15 +16,11 @@ export class SerialModule implements DeviceModule {
 
   async shouldActivate(config: 'auto' | boolean): Promise<boolean> {
     if (config === false) return false;
-    if (config === true) return true;
-    // auto: check if any USB serial device is connected
-    try {
-      const { readdirSync } = await import('fs');
-      const devFiles = readdirSync('/dev');
-      return devFiles.some((f) => f.startsWith('tty.usbserial') || f.startsWith('tty.wchusbserial') || f.startsWith('tty.usbmodem'));
-    } catch {
-      return false;
-    }
+    // Always activate for 'auto' or true: startESP32Serial() polls /dev every 10s
+    // internally, so the module is harmless when no device is attached at daemon start.
+    // Checking /dev at startup caused a bug where plugging in ESP32 *after* the daemon
+    // started would never be detected (pollForDevices never ran).
+    return true;
   }
 
   /** Set a function that provides the latest state event for ESP32 heartbeat.

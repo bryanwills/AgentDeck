@@ -13,7 +13,8 @@ fun timelineDisplayGroups(groups: List<GroupedEntry>): List<GroupedEntry> =
         val entry = group.entry
         when {
             // Task hierarchy markers are never elided — primary navigation handle.
-            entry.type == "task_start" || entry.type == "task_end" -> true
+            // Exception: empty runs (taskCategory="_empty") are filtered out as noise.
+            entry.type == "task_start" || entry.type == "task_end" -> entry.taskCategory != "_empty"
             // Suppress codex:otel-active no-op tool noise (matches Apple).
             isLowSignalEntry(entry) -> false
             entry.type == "chat_start" ->

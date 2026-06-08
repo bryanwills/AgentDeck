@@ -326,6 +326,7 @@ struct MenuBarTopologyList: View {
     private func esp32Name(for board: String?) -> String {
         switch board {
         case "ips_35": return "ESP32 · IPS 3.5\""
+        case "ips_10": return "ESP32 · IPS 10\""
         case "round_amoled": return "ESP32 · AMOLED"
         case "86box": return "ESP32 · 86box"
         // Ulanzi TC001 is an ESP32 under the hood but sold as a finished

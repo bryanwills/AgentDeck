@@ -429,6 +429,7 @@ struct ControlTowerPanel: View {
     private var rateLimitsSection: some View {
         let hasGauges = stateHolder.state.fiveHourPercent != nil
             || stateHolder.state.sevenDayPercent != nil
+            || (stateHolder.state.costLimit != nil && stateHolder.state.costLimit! > 0)
         let externalDaemonActive = daemonService.isUsingExternalDaemon
         if hasGauges || externalDaemonActive {
             VStack(alignment: .leading, spacing: 6) {
@@ -444,14 +445,19 @@ struct ControlTowerPanel: View {
                     }
                     Spacer()
                 }
+                let isApi = stateHolder.state.costLimit != nil && stateHolder.state.costLimit! > 0
                 if let pct5h = stateHolder.state.fiveHourPercent {
+                    let costSpent = stateHolder.state.costSpent ?? 0
+                    let costLimit = stateHolder.state.costLimit ?? 0
+                    let customSuffix = isApi ? String(format: "$%.2f/$%.0f", costSpent, costLimit) : nil
                     compactGauge(
-                        label: "5h",
+                        label: isApi ? "API" : "5h",
                         percent: pct5h,
-                        resetTime: stateHolder.state.fiveHourResetsAt
+                        resetTime: isApi ? nil : stateHolder.state.fiveHourResetsAt,
+                        customSuffix: customSuffix
                     )
                 }
-                if let pct7d = stateHolder.state.sevenDayPercent {
+                if !isApi, let pct7d = stateHolder.state.sevenDayPercent {
                     compactGauge(
                         label: "7d",
                         percent: pct7d,
@@ -618,7 +624,7 @@ struct ControlTowerPanel: View {
         return s
     }
 
-    private func compactGauge(label: String, percent: Double, resetTime: String?) -> some View {
+    private func compactGauge(label: String, percent: Double, resetTime: String?, customSuffix: String? = nil) -> some View {
         let color = gaugeColor(percent)
         return HStack(spacing: 8) {
             Text(label)
@@ -635,11 +641,11 @@ struct ControlTowerPanel: View {
                 }
             }
             .frame(height: 6)
-            Text("\(Int(percent))%")
+            Text(customSuffix ?? "\(Int(percent))%")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(color)
-                .frame(width: 36, alignment: .trailing)
-            if let reset = resetTime, let formatted = formatResetTime(reset) {
+                .frame(width: customSuffix != nil ? 75 : 36, alignment: .trailing)
+            if customSuffix == nil, let reset = resetTime, let formatted = formatResetTime(reset) {
                 Text(formatted)
                     .font(.system(size: 10, weight: percent >= 70 ? .semibold : .regular))
                     .foregroundColor(percent >= 70 ? .orange : TerrariumHUD.subtext)

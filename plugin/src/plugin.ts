@@ -574,6 +574,7 @@ streamDeck.devices.onDeviceDidDisconnect(() => sendClientRegister('deviceDidDisc
 connMgr.on('connected', () => {
   dinfo('Plugin', `connected (agentType=${proxiedAgentType} prevState=${currentState})`);
   setDaemonConnected(true);
+  currentState = State.IDLE;
   // Re-send slot map so bridge knows our layout when the WS comes up after
   // the plugin has already loaded (onWillAppear's first send may have been
   // dropped because the bridge was not yet connected).
@@ -581,6 +582,7 @@ connMgr.on('connected', () => {
   sendClientRegister('connected');
   // Request fresh usage data immediately on connect (covers sleep/wake recovery)
   connMgr.send({ type: 'query_usage' });
+  broadcastStateUpdate();
 });
 
 connMgr.on('disconnected', () => {
@@ -709,6 +711,9 @@ streamDeck.actions.onWillAppear((ev) => {
   // Debounce: wait for all actions to appear before sending
   if (slotMapTimer) clearTimeout(slotMapTimer);
   slotMapTimer = setTimeout(sendSlotMap, 500);
+
+  // Sync state to newly appeared dial/button immediately
+  broadcastStateUpdate();
 });
 
 function sendSlotMap(): void {

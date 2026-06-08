@@ -78,24 +78,25 @@ class KelpField {
     fun draw(scope: DrawScope) {
         val w = scope.size.width
         val h = scope.size.height
+        val baseWidth = minOf(w, h * 2f)
 
         // Draw grass blades first (below kelp)
         for (i in grassBlades.indices) {
-            drawGrassBlade(scope, grassBlades[i], w, h, grassPaths[i])
+            drawGrassBlade(scope, grassBlades[i], w, h, baseWidth, grassPaths[i])
         }
 
         for (i in strands.indices) {
-            drawStrand(scope, strands[i], w, h, strandPaths[i])
+            drawStrand(scope, strands[i], w, h, baseWidth, strandPaths[i])
         }
     }
 
-    private fun drawGrassBlade(scope: DrawScope, blade: GrassBlade, w: Float, h: Float, path: Path) {
+    private fun drawGrassBlade(scope: DrawScope, blade: GrassBlade, w: Float, h: Float, baseWidth: Float, path: Path) {
         val baseX = blade.baseX * w
         val baseY = h * (1f - TerrariumLayout.SAND_HEIGHT_FRACTION)
         val tipY = baseY - blade.height * h
 
         // Faster sway than kelp
-        val sway = sin(time * 1.5f + blade.phase) * w * 0.008f
+        val sway = sin(time * 1.5f + blade.phase) * baseWidth * 0.008f
 
         path.reset()
         path.moveTo(baseX, baseY)
@@ -104,11 +105,11 @@ class KelpField {
         scope.drawPath(
             path = path,
             color = TerrariumColors.KelpDark.copy(alpha = 0.6f),
-            style = Stroke(width = w * 0.002f * blade.width, cap = StrokeCap.Round),
+            style = Stroke(width = baseWidth * 0.002f * blade.width, cap = StrokeCap.Round),
         )
     }
 
-    private fun drawStrand(scope: DrawScope, strand: KelpStrand, w: Float, h: Float, path: Path) {
+    private fun drawStrand(scope: DrawScope, strand: KelpStrand, w: Float, h: Float, baseWidth: Float, path: Path) {
         val baseX = strand.baseX * w
         val baseY = h * (1f - TerrariumLayout.SAND_HEIGHT_FRACTION) // sand top line (rock height)
         val topY = baseY - strand.height * h
@@ -117,7 +118,7 @@ class KelpField {
         path.reset()
         path.moveTo(baseX, baseY)
         for (i in 0 until strand.segments) {
-            val sway = sin(time + strand.phase + i * 0.8f) * w * 0.015f * (i + 1)
+            val sway = sin(time + strand.phase + i * 0.8f) * baseWidth * 0.015f * (i + 1)
             val y1 = baseY - (i + 0.5f) * segHeight
             val y2 = baseY - (i + 1f) * segHeight
             val cpX = baseX + sway
@@ -128,26 +129,26 @@ class KelpField {
         scope.drawPath(
             path = path,
             color = TerrariumColors.KelpDark,
-            style = Stroke(width = w * 0.004f, cap = StrokeCap.Round),
+            style = Stroke(width = baseWidth * 0.004f, cap = StrokeCap.Round),
         )
 
         // Lighter inner stroke
         scope.drawPath(
             path = path,
             color = TerrariumColors.KelpGreen.copy(alpha = 0.5f),
-            style = Stroke(width = w * 0.002f, cap = StrokeCap.Round),
+            style = Stroke(width = baseWidth * 0.002f, cap = StrokeCap.Round),
         )
 
         // Leaf blobs at segment joints
         for (i in 1..strand.segments) {
-            val sway = sin(time + strand.phase + i * 0.8f) * w * 0.015f * i
+            val sway = sin(time + strand.phase + i * 0.8f) * baseWidth * 0.015f * i
             val leafY = baseY - i * segHeight
             val leafX = baseX + sway * 0.6f
 
             scope.drawOval(
                 color = TerrariumColors.KelpGreen.copy(alpha = 0.4f),
-                topLeft = Offset(leafX - w * 0.006f, leafY - w * 0.003f),
-                size = androidx.compose.ui.geometry.Size(w * 0.012f, w * 0.006f),
+                topLeft = Offset(leafX - baseWidth * 0.006f, leafY - baseWidth * 0.003f),
+                size = androidx.compose.ui.geometry.Size(baseWidth * 0.012f, baseWidth * 0.006f),
             )
         }
     }

@@ -440,7 +440,13 @@ final class WebSocketConnection: Hashable, Sendable {
         // end-of-stream (FIN). Setting it per-frame half-closes the send side
         // after the first outbound WS message, which races with the client's
         // ping/receive timers and manifests as a ~15s reconnect loop.
-        connection.send(content: frame, isComplete: false, completion: .contentProcessed({ _ in }))
+        connection.send(content: frame, isComplete: false, completion: .contentProcessed({ [weak self] error in
+            if let error = error {
+                DaemonLogger.shared.debug("WS", "Send error: \(error)")
+                self?.markDisconnected()
+                self?.onClose?()
+            }
+        }))
     }
 
     func close() {

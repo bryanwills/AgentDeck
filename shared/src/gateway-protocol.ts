@@ -13,7 +13,7 @@
 // ===== Protocol version =====
 
 /** Protocol major version. Bridge rejects mismatched Gateway versions. */
-export const GATEWAY_PROTOCOL_VERSION = 3;
+export const GATEWAY_PROTOCOL_VERSION = 4;
 
 /** Default Gateway port (OpenClaw backend). */
 export const GATEWAY_DEFAULT_PORT = 18789;

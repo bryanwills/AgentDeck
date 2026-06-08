@@ -62,12 +62,13 @@ class WaterEffect {
         scope: DrawScope, w: Float, h: Float, alpha: Float, phase: Float,
         familyOffset: Int,
     ) {
+        val baseWidth = minOf(w, h * 2f)
         val twoPi = 2f * PI.toFloat()
         val spacing = w / LINE_COUNT
-        val waveLen1 = w * 0.4f
-        val waveLen2 = w * 0.32f
-        val amp = spacing * 0.35f
-        val strokeW = w * 0.008f
+        val waveLen1 = baseWidth * 0.4f
+        val waveLen2 = baseWidth * 0.32f
+        val amp = (baseWidth / LINE_COUNT) * 0.35f
+        val strokeW = baseWidth * 0.008f
         val color = TerrariumColors.CausticsLight
         val stroke = Stroke(width = strokeW, cap = StrokeCap.Round)
         // BlendMode.Plus (additive) avoids GPU framebuffer read-back needed by Overlay

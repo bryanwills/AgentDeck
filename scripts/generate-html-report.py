@@ -80,17 +80,17 @@ def load_android_xml():
     return suites
 
 BOARD_PREFIXES = [
-    ("Box 86 ", "box_86"),
-    ("IPS 3.5 ", "ips_35"),
-    ("Round AMOLED ", "round_amoled"),
-    ("Ulanzi TC001 ", "ulanzi_tc001"),
+    ("Box 86 ", "rgb48"),
+    ("IPS 3.5 ", "ips35"),
+    ("Round AMOLED ", "amoled"),
+    ("Ulanzi TC001 ", "led8x32"),
 ]
 
 BOARD_LABELS = {
-    "box_86": "86Box",
-    "ips_35": "IPS 3.5\"",
-    "round_amoled": "Round",
-    "ulanzi_tc001": "TC001",
+    "rgb48": "86Box",
+    "ips35": "IPS 3.5\"",
+    "amoled": "Round",
+    "led8x32": "TC001",
 }
 
 
@@ -1182,7 +1182,7 @@ def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results,
 
                 # Board matrix
                 board_chips = ""
-                for board_id in ["box_86", "ips_35", "round_amoled", "ulanzi_tc001"]:
+                for board_id in ["rgb48", "ips35", "amoled", "led8x32"]:
                     label = BOARD_LABELS.get(board_id, board_id)
                     case_for_board = next((c for c in sc_cases if c.get("board") == board_id), None)
                     if case_for_board:

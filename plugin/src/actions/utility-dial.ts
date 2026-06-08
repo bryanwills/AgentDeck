@@ -18,6 +18,8 @@ import { createModes, modeDots, type UtilityMode } from '../utility-modes/index.
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderUtilityGeneric, renderUtilityMedia, renderSetupUtility, type UtilityRenderData } from '../renderers/utility-renderer.js';
 import { dlog, dinfo, dwarn } from '../log.js';
+import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
+import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 
 import type { JsonValue } from '@elgato/utils';
 
@@ -97,10 +99,9 @@ export function refreshUtilityDials(): void {
   if (isEncoderTakeoverActive()) return;
   if (isVoiceTextTakeoverActive()) return;
 
-  // Setup mode: show setup prompt on E1
-  if (setupRequired && currentState === State.DISCONNECTED) {
+  if (currentState === State.DISCONNECTED) {
     ensurePixmapLayout();
-    const svg = renderSetupUtility();
+    const svg = renderOfflineTouchStrip(0);
     const canvasFeedback = { canvas: svgToDataUrl(svg) };
     for (const id of encoderRegistry.utilityIds) {
       const dial = streamDeck.actions.getActionById(id) as any;
@@ -183,6 +184,10 @@ export class UtilityDialAction extends SingletonAction {
 
   override async onTouchTap(ev: TouchTapEvent): Promise<void> {
     dlog('UtilDial', `onTouchTap: takeover=${isEncoderTakeoverActive()} modes=${modes.length} hold=${ev.payload.hold}`);
+    if (currentState === State.DISCONNECTED) {
+      void openAgentDeckAppOrGitHub().catch(() => {});
+      return;
+    }
     if (isEncoderTakeoverActive()) return;
     if (modes.length <= 1) return;
 
@@ -207,6 +212,7 @@ export class UtilityDialAction extends SingletonAction {
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     dlog('UtilDial', `onDialRotate: takeover=${isEncoderTakeoverActive()} modes=${modes.length} ticks=${ev.payload.ticks}`);
+    if (currentState === State.DISCONNECTED) return;
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
@@ -219,6 +225,10 @@ export class UtilityDialAction extends SingletonAction {
 
   override async onDialDown(ev: DialDownEvent): Promise<void> {
     dlog('UtilDial', `onDialDown: takeover=${isEncoderTakeoverActive()} modes=${modes.length}`);
+    if (currentState === State.DISCONNECTED) {
+      void openAgentDeckAppOrGitHub().catch(() => {});
+      return;
+    }
     if (isPickerActive()) { void selectProject(); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }

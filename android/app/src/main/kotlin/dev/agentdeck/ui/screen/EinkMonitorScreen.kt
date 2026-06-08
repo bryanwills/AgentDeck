@@ -6,6 +6,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -146,7 +147,7 @@ fun EinkMonitorScreen(
         if (connection.status.value != ConnectionStatus.CONNECTED) {
             Log.i(TAG, "Saved URL failed, trying mDNS discovery...")
             var bestBridges = emptyList<DiscoveredBridge>()
-            val foundDaemon = withTimeoutOrNull(4000) {
+            withTimeoutOrNull(6000) {
                 discovery.discover().collect { bridges ->
                     bestBridges = bridges
                     if (bridges.isNotEmpty() && connection.status.value != ConnectionStatus.CONNECTED) {
@@ -160,11 +161,37 @@ fun EinkMonitorScreen(
                 }
             }
             // No non-daemon fallback — session bridges don't serve external clients.
-            if (false && foundDaemon == null && bestBridges.isNotEmpty() &&
+            if (false && bestBridges.isNotEmpty() &&
                 connection.status.value != ConnectionStatus.CONNECTED) {
                 val bridge = bestBridges.first()
                 Log.i(TAG, "mDNS daemon not found, fallback: ${bridge.name} (agent=${bridge.agentType}) at ${bridge.wsUrl()}")
                 connection.connect(bridge.wsUrl())
+            }
+        }
+    }
+
+    // Recovery after BridgeConnection gives up on localhost and clears URL.
+    // Keep cycling so devices reconnect when the daemon starts after the app.
+    LaunchedEffect(connectionStatus, currentUrl) {
+        if (connectionStatus == ConnectionStatus.DISCONNECTED && currentUrl == null) {
+            delay(500) // brief pause before re-discovery
+            Log.i(TAG, "Disconnected with no URL — re-discovering via mDNS")
+            withTimeoutOrNull(6000) {
+                discovery.discover().collect { bridges ->
+                    val daemon = bridges.firstOrNull { it.agentType == "daemon" }
+                    if (daemon != null && connection.status.value != ConnectionStatus.CONNECTED) {
+                        Log.i(TAG, "mDNS re-discover (daemon): ${daemon.name} at ${daemon.wsUrl()}")
+                        connection.connect(daemon.wsUrl())
+                        return@collect
+                    }
+                }
+            }
+            if (connection.status.value != ConnectionStatus.CONNECTED && connection.url.value == null) {
+                delay(10_000)
+                if (connection.status.value != ConnectionStatus.CONNECTED && connection.url.value == null) {
+                    Log.i(TAG, "mDNS recovery timed out — retrying localhost:${BridgeConstants.WS_PORT} (USB)")
+                    connection.connect(BridgeConstants.LOCALHOST_WS_URL)
+                }
             }
         }
     }
@@ -313,9 +340,10 @@ fun EinkMonitorScreen(
                             if (hasEinkLimitData(state.usage)) {
                                 EinkLimitsCornerCard(
                                     usage = state.usage,
+                                    compact = true,
                                     modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .padding(10.dp),
+                                        .align(Alignment.BottomStart)
+                                        .padding(start = 12.dp, bottom = 12.dp),
                                 )
                             }
                         }
@@ -357,6 +385,80 @@ fun EinkMonitorScreen(
             )
         }
     }
+}
+
+private fun hasEinkLimitData(usage: dev.agentdeck.net.UsageUpdate): Boolean {
+    return usage.usageStale != true &&
+        (usage.fiveHourPercent != null || usage.sevenDayPercent != null)
+}
+
+@Composable
+private fun EinkLimitsCornerCard(
+    usage: dev.agentdeck.net.UsageUpdate,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    val width = if (compact) 148.dp else 176.dp
+    Surface(
+        modifier = modifier
+            .width(width)
+            .height(if (compact) 68.dp else 78.dp),
+        shape = RoundedCornerShape(3.dp),
+        border = BorderStroke(1.dp, Color.Black),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "LIMITS",
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "node",
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            usage.fiveHourPercent?.let { pct ->
+                EinkLimitRow(label = "5h", percent = pct)
+            }
+            usage.sevenDayPercent?.let { pct ->
+                EinkLimitRow(label = "7d", percent = pct)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EinkLimitRow(label: String, percent: Double) {
+    val pct = percent.coerceIn(0.0, 100.0).toInt()
+    Text(
+        text = "$label ${einkBlockGauge(pct)} $pct%",
+        fontSize = 11.sp,
+        lineHeight = 13.sp,
+        fontFamily = FontFamily.Monospace,
+        color = MaterialTheme.colorScheme.onSurface,
+        maxLines = 1,
+    )
+}
+
+private fun einkBlockGauge(percent: Int): String {
+    val cells = 8
+    val filled = ((percent.coerceIn(0, 100) / 100.0) * cells).toInt()
+    return "\u2588".repeat(filled) + "\u2591".repeat(cells - filled)
 }
 
 @Composable
@@ -481,79 +583,6 @@ private fun einkSessionCount(state: dev.agentdeck.state.DashboardState): Int {
     return primaryCount + state.siblingSessions.count { it.agentType != "daemon" }
 }
 
-private fun hasEinkLimitData(usage: UsageUpdate): Boolean {
-    return usage.usageStale != true &&
-        (usage.fiveHourPercent != null || usage.sevenDayPercent != null)
-}
-
-@Composable
-private fun EinkLimitsCornerCard(
-    usage: UsageUpdate,
-    modifier: Modifier = Modifier,
-    compact: Boolean = false,
-) {
-    val width = if (compact) 148.dp else 176.dp
-    Surface(
-        modifier = modifier
-            .width(width)
-            .height(if (compact) 68.dp else 78.dp),
-        shape = RoundedCornerShape(4.dp),
-        border = BorderStroke(2.dp, Color.Black),
-        color = MaterialTheme.colorScheme.background,
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "LIMITS",
-                    fontSize = 10.sp,
-                    lineHeight = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = "node",
-                    fontSize = 9.sp,
-                    lineHeight = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            usage.fiveHourPercent?.let { pct ->
-                EinkLimitRow(label = "5h", percent = pct)
-            }
-            usage.sevenDayPercent?.let { pct ->
-                EinkLimitRow(label = "7d", percent = pct)
-            }
-        }
-    }
-}
-
-@Composable
-private fun EinkLimitRow(label: String, percent: Double) {
-    val pct = percent.coerceIn(0.0, 100.0).toInt()
-    Text(
-        text = "$label ${einkBlockGauge(pct)} $pct%",
-        fontSize = 11.sp,
-        lineHeight = 13.sp,
-        fontFamily = FontFamily.Monospace,
-        color = MaterialTheme.colorScheme.onSurface,
-        maxLines = 1,
-    )
-}
-
-private fun einkBlockGauge(percent: Int): String {
-    val cells = 8
-    val filled = ((percent.coerceIn(0, 100) / 100.0) * cells).toInt()
-    return "\u2588".repeat(filled) + "\u2591".repeat(cells - filled)
-}
 
 @Composable
 private fun EinkNotConnectedScreen(
@@ -948,8 +977,8 @@ private fun EinkPortraitLayout(
                     usage = state.usage,
                     compact = true,
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp),
+                        .align(Alignment.BottomStart)
+                        .padding(start = 10.dp, bottom = 10.dp),
                 )
             }
         }

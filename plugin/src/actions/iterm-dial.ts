@@ -30,6 +30,8 @@ import { timelineStore } from '../timeline-store.js';
 import { renderTimeline } from '../renderers/timeline-renderer.js';
 import type { ConnectionManager } from '../connection-manager.js';
 import { dlog, dinfo } from '../log.js';
+import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
+import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 
 // Register cross-module callbacks (breaks circular deps via encoder-registry)
 setTakeoverExitCallback(() => resetUsageLayout());
@@ -136,7 +138,7 @@ function refreshUsageDials(): void {
   const connected = currentState !== State.DISCONNECTED;
   const usageUnavailable = data.usageStale === true || data.fiveHourPercent == null;
   if (!connected) {
-    svg = renderUsageDisconnected(false, 'offline');
+    svg = renderOfflineTouchStrip(2);
   } else if (!hasReceivedData) {
     svg = renderUsageDisconnected(true, 'waiting');
   } else if (usageUnavailable) {
@@ -183,6 +185,10 @@ export class UsageDialAction extends SingletonAction {
   }
 
   override async onTouchTap(_ev: TouchTapEvent): Promise<void> {
+    if (currentState === State.DISCONNECTED) {
+      void openAgentDeckAppOrGitHub().catch(() => {});
+      return;
+    }
     if (isEncoderTakeoverActive()) return;
     if (isVoiceTextTakeoverActive()) return;
     if (isOcDetailView()) {
@@ -195,6 +201,7 @@ export class UsageDialAction extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    if (currentState === State.DISCONNECTED) return;
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
@@ -208,6 +215,10 @@ export class UsageDialAction extends SingletonAction {
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
+    if (currentState === State.DISCONNECTED) {
+      void openAgentDeckAppOrGitHub().catch(() => {});
+      return;
+    }
     if (isPickerActive()) { void selectProject(); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }

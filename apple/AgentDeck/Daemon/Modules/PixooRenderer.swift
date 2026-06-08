@@ -334,7 +334,10 @@ final class PixooRenderer {
     private var tetras: [TetraState]?
 
     func render(dashboardState: DashboardState) -> Data {
-        let animFrame = Self.getAnimFrame()
+        return renderSequence(dashboardState: dashboardState, frameCount: 1).first!
+    }
+
+    func renderSequence(dashboardState: DashboardState, frameCount: Int, intervalMs: Int = 100) -> [Data] {
         let state = dashboardState.state
         let usagePct = dashboardState.fiveHourPercent ?? 0
         // Crayfish is drawn only when the OpenClaw Gateway is authenticated.
@@ -377,100 +380,108 @@ final class PixooRenderer {
             schoolPos: schoolPos
         )
 
-        var world = [UInt8](repeating: 0, count: Self.width * Self.height * 3)
-        var output = [UInt8](repeating: 0, count: Self.width * Self.height * 3)
+        var frames: [Data] = []
+        let baseAnimFrame = Self.getAnimFrame(atTimeMs: nowMs)
 
-        let palette = zoneBlue()
-        for y in 0..<Self.sandTop {
-            let color = waterColorAt(palette: palette, surfaceY: Self.surfaceY, y: y)
-            for x in 0..<Self.width {
-                setPixel(&world, x, y, color)
-            }
-        }
+        for i in 0..<frameCount {
+            let animFrame = baseAnimFrame + i
+            var world = [UInt8](repeating: 0, count: Self.width * Self.height * 3)
+            var output = [UInt8](repeating: 0, count: Self.width * Self.height * 3)
 
-        drawTerrain(&world)
-        drawLightRays(&world, animFrame: animFrame, surfaceY: Self.surfaceY)
-        drawCaustics(&world, animFrame: animFrame, surfaceY: Self.surfaceY)
-        drawSeaweed(&world, animFrame: animFrame, surfaceY: Self.surfaceY)
-
-        let anyCreatureProcessing = creatureInstances.values.contains { $0.state == .processing }
-        let anyCreatureAwaiting = creatureInstances.values.contains { $0.state == .awaiting }
-        let effectiveState: AgentConnectionState = anyCreatureProcessing ? .processing : (anyCreatureAwaiting ? .awaitingOption : state)
-
-        let bubbleDensity = effectiveState == .processing ? 10 : (effectiveState == .idle ? 3 : 5)
-        updateBubbles(animFrame: animFrame, surfaceY: Self.surfaceY, density: bubbleDensity)
-        for bubble in bubbles {
-            blendPixel(&world, Int(round(bubble.x)), Int(round(bubble.y)), bubble.bright ? Self.colors.bubbleBright : Self.colors.bubble, 0.6)
-        }
-
-        updateDataParticles(animFrame: animFrame, surfaceY: Self.surfaceY, active: anyCreatureProcessing)
-        for particle in dataParticles {
-            let fadeAlpha = min(1, particle.life / 10)
-            let color = particle.green ? Self.colors.dataParticleGreen : Self.colors.dataParticle
-            glowPixel(&world, Int(round(particle.x)), Int(round(particle.y)), color, 0.5 * fadeAlpha)
-        }
-
-        let tetraMaxY = Self.sandTop - 3
-        updateTetras(animFrame: animFrame, surfaceY: Self.surfaceY, maxY: tetraMaxY)
-        drawSurface(&world, animFrame: animFrame, surfaceY: Self.surfaceY, palette: palette, state: effectiveState)
-
-        blitWithCamera(world: world, output: &output, camera: camera)
-
-        if let tetras {
-            for tetra in tetras {
-                drawTetra(&output, worldX: tetra.x / Double(Self.width), worldY: tetra.y / Double(Self.width), heading: tetra.heading, camera: camera)
-            }
-        }
-
-        for sessionId in creatureOrder {
-            guard let creature = creatureInstances[sessionId] else { continue }
-            let sessionToneIndex = creatureOrder.firstIndex(of: creature.sessionId) ?? 0
-            let spriteState = creature.state
-            switch creature.creatureType {
-            case .cloud:
-                drawCloud(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: cloudPalette(for: sessionToneIndex))
-            case .opencode:
-                drawOpenCode(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: opencodePalette(for: sessionToneIndex))
-            case .octopus:
-                drawOctopus(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: octopusPalette(for: sessionToneIndex))
-            }
-        }
-
-        if hasGateway {
-            drawCrayfish(&output, worldX: Self.cfDefaultX, worldY: Self.cfDefaultY, routing: crayfishRouting, animFrame: animFrame, camera: camera, sick: dashboardState.gatewayHasError)
-        }
-
-        if usagePct >= 90 {
-            let flashIntensity = (sin(Double(animFrame) * 0.2) + 1) * 0.08
-            for y in 0..<Self.height {
+            let palette = zoneBlue()
+            for y in 0..<Self.sandTop {
+                let color = waterColorAt(palette: palette, surfaceY: Self.surfaceY, y: y)
                 for x in 0..<Self.width {
-                    glowPixel(&output, x, y, Self.colors.stateError, flashIntensity)
+                    setPixel(&world, x, y, color)
                 }
             }
-        }
 
-        let sessionCount = creatureInstances.count
-        if sessionCount >= 2 {
-            for i in 0..<min(sessionCount, min(6, creatureOrder.count)) {
-                let dotX = 1 + i * 3
-                guard let creature = creatureInstances[creatureOrder[i]] else { continue }
-                let dotColor: RGB = switch creature.creatureType {
+            drawTerrain(&world)
+            drawLightRays(&world, animFrame: animFrame, surfaceY: Self.surfaceY)
+            drawCaustics(&world, animFrame: animFrame, surfaceY: Self.surfaceY)
+            drawSeaweed(&world, animFrame: animFrame, surfaceY: Self.surfaceY)
+
+            let anyCreatureProcessing = creatureInstances.values.contains { $0.state == .processing }
+            let anyCreatureAwaiting = creatureInstances.values.contains { $0.state == .awaiting }
+            let effectiveState: AgentConnectionState = anyCreatureProcessing ? .processing : (anyCreatureAwaiting ? .awaitingOption : state)
+
+            let bubbleDensity = effectiveState == .processing ? 10 : (effectiveState == .idle ? 3 : 5)
+            updateBubbles(animFrame: animFrame, surfaceY: Self.surfaceY, density: bubbleDensity)
+            for bubble in bubbles {
+                blendPixel(&world, Int(round(bubble.x)), Int(round(bubble.y)), bubble.bright ? Self.colors.bubbleBright : Self.colors.bubble, 0.6)
+            }
+
+            updateDataParticles(animFrame: animFrame, surfaceY: Self.surfaceY, active: anyCreatureProcessing)
+            for particle in dataParticles {
+                let fadeAlpha = min(1, particle.life / 10)
+                let color = particle.green ? Self.colors.dataParticleGreen : Self.colors.dataParticle
+                glowPixel(&world, Int(round(particle.x)), Int(round(particle.y)), color, 0.5 * fadeAlpha)
+            }
+
+            let tetraMaxY = Self.sandTop - 3
+            updateTetras(animFrame: animFrame, surfaceY: Self.surfaceY, maxY: tetraMaxY)
+            drawSurface(&world, animFrame: animFrame, surfaceY: Self.surfaceY, palette: palette, state: effectiveState)
+
+            blitWithCamera(world: world, output: &output, camera: camera)
+
+            if let tetras {
+                for tetra in tetras {
+                    drawTetra(&output, worldX: tetra.x / Double(Self.width), worldY: tetra.y / Double(Self.width), heading: tetra.heading, camera: camera)
+                }
+            }
+
+            for sessionId in creatureOrder {
+                guard let creature = creatureInstances[sessionId] else { continue }
+                let sessionToneIndex = creatureOrder.firstIndex(of: creature.sessionId) ?? 0
+                let spriteState = creature.state
+                switch creature.creatureType {
                 case .cloud:
-                    cloudPalette(for: i).body
+                    drawCloud(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: cloudPalette(for: sessionToneIndex))
                 case .opencode:
-                    Self.colors.white
+                    drawOpenCode(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: opencodePalette(for: sessionToneIndex))
                 case .octopus:
-                    octopusPalette(for: i).body
+                    drawOctopus(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: octopusPalette(for: sessionToneIndex))
                 }
-                setPixel(&output, dotX, 1, dotColor)
-                setPixel(&output, dotX + 1, 1, dotColor)
-                setPixel(&output, dotX, 2, dotColor)
-                setPixel(&output, dotX + 1, 2, dotColor)
             }
+
+            if hasGateway {
+                drawCrayfish(&output, worldX: Self.cfDefaultX, worldY: Self.cfDefaultY, routing: crayfishRouting, animFrame: animFrame, camera: camera, sick: dashboardState.gatewayHasError)
+            }
+
+            if usagePct >= 90 {
+                let flashIntensity = (sin(Double(animFrame) * 0.2) + 1) * 0.08
+                for y in 0..<Self.height {
+                    for x in 0..<Self.width {
+                        glowPixel(&output, x, y, Self.colors.stateError, flashIntensity)
+                    }
+                }
+            }
+
+            let sessionCount = creatureInstances.count
+            if sessionCount >= 2 {
+                for i in 0..<min(sessionCount, min(6, creatureOrder.count)) {
+                    let dotX = 1 + i * 3
+                    guard let creature = creatureInstances[creatureOrder[i]] else { continue }
+                    let dotColor: RGB = switch creature.creatureType {
+                    case .cloud:
+                        cloudPalette(for: i).body
+                    case .opencode:
+                        Self.colors.white
+                    case .octopus:
+                        octopusPalette(for: i).body
+                    }
+                    setPixel(&output, dotX, 1, dotColor)
+                    setPixel(&output, dotX + 1, 1, dotColor)
+                    setPixel(&output, dotX, 2, dotColor)
+                    setPixel(&output, dotX + 1, 2, dotColor)
+                }
+            }
+
+            drawUsageHUD(&output, dashboardState: dashboardState, animFrame: animFrame)
+            frames.append(Data(output))
         }
 
-        drawUsageHUD(&output, dashboardState: dashboardState, animFrame: animFrame)
-        return Data(output)
+        return frames
     }
 
     /// Static black frame with a centered grey "OFFLINE" label. Mirrors
@@ -1236,8 +1247,9 @@ final class PixooRenderer {
         setPixel(&buf, centerX, centerY + max(1, Int(round(Double(r) * 0.35))), Self.colors.stateAwaiting)
     }
 
-    private static func getAnimFrame() -> Int {
-        Int(floor(Date().timeIntervalSince1970 * 10))
+    private static func getAnimFrame(atTimeMs timeMs: Double? = nil) -> Int {
+        let ms = timeMs ?? (Date().timeIntervalSince1970 * 1000)
+        return Int(floor(ms / 100.0))
     }
 
     private func octopusPalette(for sessionIndex: Int) -> OctopusPalette {
@@ -1355,7 +1367,7 @@ final class PixooRenderer {
         return Self.colors.stateProcessing
     }
 
-    private func formatResetDetailed(_ resetsAt: String?) -> String {
+    func formatResetDetailed(_ resetsAt: String?) -> String {
         guard let resetsAt else { return "" }
         guard let date = parseISO8601Date(resetsAt) else { return "" }
         let ms = date.timeIntervalSinceNow * 1000

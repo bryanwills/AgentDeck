@@ -431,7 +431,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     const lanIp = getLanIp();
     onESP32Message((portPath, msg) => {
       if (msg.type === 'device_info' && !msg.wifiConnected) {
-        sendWifiProvisionToAll({
+        const sent = sendWifiProvisionToAll({
           type: 'wifi_provision' as const,
           ssid: wifiConfig.ssid,
           password: wifiConfig.password,
@@ -439,7 +439,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
           bridgePort: port,
           authToken: core.authToken,
         });
-        log(`WiFi provision sent to ESP32 on ${portPath}`);
+        if (sent > 0) log(`WiFi provision sent to ${sent} ESP32 device(s) after ${portPath}`);
       } else if (msg.type === 'wifi_provision_ack') {
         log(msg.success ? `ESP32 WiFi connected: ${msg.ip} \u2713` : `ESP32 WiFi failed: ${msg.error || 'unknown'}`);
       }

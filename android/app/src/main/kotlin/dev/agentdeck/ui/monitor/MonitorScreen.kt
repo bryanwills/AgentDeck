@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
@@ -384,19 +385,7 @@ private fun ConnectionOverlay(
                 textAlign = TextAlign.Center,
             )
 
-            if (isReconnecting && reconnectUrl != null) {
-                Text(
-                    text = reconnectUrl,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = AgentDeckColors.SlateText,
-                    textAlign = TextAlign.Center,
-                )
-                Text(
-                    text = "Attempt $reconnectAttempt",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AgentDeckColors.Amber,
-                )
-
+            if (isReconnecting) {
                 // Stop reconnecting button
                 OutlinedButton(
                     onClick = onStopReconnecting,
