@@ -13,7 +13,7 @@ import { State, PromptOption } from '@agentdeck/shared';
 import type { AgentType, AgentCapabilities, OcSessionStatus } from '@agentdeck/shared';
 import type { AgentLink } from '../agent-link.js';
 import { isEncoderTakeoverActive } from '../encoder-takeover.js';
-import { encoderRegistry, encoderLayout, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, fireRefreshTakeover } from '../encoder-registry.js';
+import { encoderRegistry, encoderLayout, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, fireRefreshTakeover, isDaemonConnected } from '../encoder-registry.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import {
   renderResponseIdle,
@@ -199,6 +199,14 @@ function setCanvasFeedback(svg: string): void {
 }
 
 function refreshOptionDials(): void {
+  // Offline banner is highest priority and all-or-nothing across the 4 encoders.
+  // Gate on real daemon-down, NOT session-level currentState === DISCONNECTED
+  // (which flips transiently during multi-session switching while the daemon is up).
+  if (!isDaemonConnected()) {
+    ensurePixmapLayout();
+    setCanvasFeedback(renderOfflineTouchStrip(1));
+    return;
+  }
   // Voice text takeover: skip option dial refresh (voice-dial handles all panels)
   if (isVoiceTextTakeoverActive()) return;
   // When takeover is active, delegate to encoder-takeover for all encoders
@@ -252,9 +260,9 @@ function refreshOptionDials(): void {
     }
   } else if (currentState === State.PROCESSING) {
     svg = renderResponseProcessing();
-  } else if (currentState === State.DISCONNECTED) {
-    svg = renderOfflineTouchStrip(1);
   } else {
+    // Includes session-level DISCONNECTED while the daemon is up — neutral panel,
+    // never the launch-app offline banner (that is daemon-down only, handled above).
     svg = renderResponseDisabled();
   }
 
@@ -378,7 +386,7 @@ export class ResponseDialAction extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
-    if (currentState === State.DISCONNECTED) return;
+    if (!isDaemonConnected()) return;
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
 
@@ -432,7 +440,7 @@ export class ResponseDialAction extends SingletonAction {
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
-    if (currentState === State.DISCONNECTED) {
+    if (!isDaemonConnected()) {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
@@ -484,7 +492,7 @@ export class ResponseDialAction extends SingletonAction {
   }
 
   override async onTouchTap(_ev: TouchTapEvent): Promise<void> {
-    if (currentState === State.DISCONNECTED) {
+    if (!isDaemonConnected()) {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }

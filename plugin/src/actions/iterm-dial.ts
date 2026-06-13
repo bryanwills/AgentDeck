@@ -21,7 +21,7 @@ import type { AgentType, AgentCapabilities, OcSessionStatus } from '@agentdeck/s
 import { isEncoderTakeoverActive } from '../encoder-takeover.js';
 import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
 import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
-import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, setTakeoverExitCallback, setUpdateUsageDialStateCallback } from '../encoder-registry.js';
+import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, setTakeoverExitCallback, setUpdateUsageDialStateCallback, isDaemonConnected } from '../encoder-registry.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderUsageOverview, renderUsageDetail, renderUsageSession, renderUsageExtra, renderUsageDisconnected, USAGE_PAGES, type UsagePage } from '../renderers/usage-dial-renderer.js';
 import { type UsageModeData, updateUsageModeData, getUsageModeData, fireUsageRefresh } from '../utility-modes/usage.js';
@@ -45,7 +45,6 @@ function isOcDetailView(): boolean {
   return session?.agentType === 'openclaw';
 }
 
-let currentState = State.DISCONNECTED;
 let currentLayout = PIXMAP_LAYOUT;
 let bridgeRef: ConnectionManager | null = null;
 let currentAgentType: AgentType | null = null;
@@ -72,10 +71,11 @@ export function updateUsageDialData(data: UsageModeData): void {
   refreshUsageDials();
 }
 
-export function updateUsageDialState(state: State, agentType?: AgentType | null, sessionStatus?: OcSessionStatus | null, capabilities?: AgentCapabilities | null): void {
-  currentState = state;
-  // Drop cached usage on daemon disconnect so the dial stops showing stale numbers.
-  if (state === State.DISCONNECTED) hasReceivedData = false;
+export function updateUsageDialState(_state: State, agentType?: AgentType | null, sessionStatus?: OcSessionStatus | null, capabilities?: AgentCapabilities | null): void {
+  // Drop cached usage on real daemon disconnect so the dial stops showing stale
+  // numbers. Usage is daemon-global, so a session-level DISCONNECTED (transient
+  // during multi-session switching, daemon still up) must NOT clear it.
+  if (!isDaemonConnected()) hasReceivedData = false;
   if (agentType !== undefined) currentAgentType = agentType;
   if (capabilities !== undefined) currentCapabilities = capabilities ?? null;
   if (sessionStatus !== undefined) currentSessionStatus = sessionStatus ?? null;
@@ -117,9 +117,21 @@ function renderTimelineRightPanel(): void {
 }
 
 function refreshUsageDials(): void {
+  if (encoderRegistry.usageIds.length === 0) return;
+  // Offline banner is highest priority and all-or-nothing across the 4 encoders.
+  // Gate on real daemon-down, NOT session-level currentState === DISCONNECTED
+  // (which flips transiently during multi-session switching while the daemon is up).
+  if (!isDaemonConnected()) {
+    ensurePixmapLayout();
+    const feedback = { canvas: svgToDataUrl(renderOfflineTouchStrip(2)) };
+    for (const id of encoderRegistry.usageIds) {
+      const dial = streamDeck.actions.getActionById(id) as any;
+      if (dial) void dial.setFeedback(feedback).catch(() => {});
+    }
+    return;
+  }
   if (isEncoderTakeoverActive()) return;
   if (isVoiceTextTakeoverActive()) return;
-  if (encoderRegistry.usageIds.length === 0) return;
   // OC detail view: redirect to timeline rendering
   if (isOcDetailView()) {
     renderTimelineRightPanel();
@@ -131,15 +143,10 @@ function refreshUsageDials(): void {
   const data = getUsageModeData();
   let svg: string;
 
-  // Collapse the dial to the disconnected placeholder when upstream has no
-  // live usage to show. Three distinct reasons, rendered with distinct labels
-  // so "Waiting..." is reserved for the genuine first-payload-not-yet case —
-  // stale / missing-subscription is honestly labeled "No usage data".
-  const connected = currentState !== State.DISCONNECTED;
+  // No live usage to show — distinct placeholder labels: "Waiting..." for the
+  // genuine first-payload-not-yet case; "No usage data" for stale / missing-subscription.
   const usageUnavailable = data.usageStale === true || data.fiveHourPercent == null;
-  if (!connected) {
-    svg = renderOfflineTouchStrip(2);
-  } else if (!hasReceivedData) {
+  if (!hasReceivedData) {
     svg = renderUsageDisconnected(true, 'waiting');
   } else if (usageUnavailable) {
     svg = renderUsageDisconnected(true, 'unavailable');
@@ -185,7 +192,7 @@ export class UsageDialAction extends SingletonAction {
   }
 
   override async onTouchTap(_ev: TouchTapEvent): Promise<void> {
-    if (currentState === State.DISCONNECTED) {
+    if (!isDaemonConnected()) {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
@@ -201,7 +208,7 @@ export class UsageDialAction extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
-    if (currentState === State.DISCONNECTED) return;
+    if (!isDaemonConnected()) return;
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
@@ -215,7 +222,7 @@ export class UsageDialAction extends SingletonAction {
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
-    if (currentState === State.DISCONNECTED) {
+    if (!isDaemonConnected()) {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }

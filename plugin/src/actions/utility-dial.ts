@@ -13,7 +13,7 @@ import { State } from '@agentdeck/shared';
 import { isEncoderTakeoverActive } from '../encoder-takeover.js';
 import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
 import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
-import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
+import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, isDaemonConnected } from '../encoder-registry.js';
 import { createModes, modeDots, type UtilityMode } from '../utility-modes/index.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderUtilityGeneric, renderUtilityMedia, renderSetupUtility, type UtilityRenderData } from '../renderers/utility-renderer.js';
@@ -42,7 +42,6 @@ const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
 const LONG_PRESS_MS = 500;
 
 let setupRequired = false;
-let currentState = State.DISCONNECTED;
 let modes: UtilityMode[] = [];
 let activeIndex = 0;
 let settings: UtilityDialSettings = {};
@@ -79,9 +78,10 @@ export function initUtilityDial(): void {
   rebuildModes();
 }
 
-export function updateUtilityDialState(state: State): void {
-  currentState = state;
-  // After encoder takeover exit, layout was changed — force re-apply on next refresh
+export function updateUtilityDialState(_state: State): void {
+  // Utility modes (volume/media/etc.) are session-independent; the offline banner
+  // and input gating now key off isDaemonConnected(), so session state is unused.
+  // After encoder takeover exit, layout was changed — force re-apply on next refresh.
   currentLayout = '';
   refreshUtilityDials();
 }
@@ -96,10 +96,10 @@ function ensurePixmapLayout(): void {
 }
 
 export function refreshUtilityDials(): void {
-  if (isEncoderTakeoverActive()) return;
-  if (isVoiceTextTakeoverActive()) return;
-
-  if (currentState === State.DISCONNECTED) {
+  // Offline banner is highest priority and all-or-nothing across the 4 encoders.
+  // Gate on real daemon-down, NOT session-level currentState === DISCONNECTED
+  // (which flips transiently during multi-session switching while the daemon is up).
+  if (!isDaemonConnected()) {
     ensurePixmapLayout();
     const svg = renderOfflineTouchStrip(0);
     const canvasFeedback = { canvas: svgToDataUrl(svg) };
@@ -109,6 +109,9 @@ export function refreshUtilityDials(): void {
     }
     return;
   }
+
+  if (isEncoderTakeoverActive()) return;
+  if (isVoiceTextTakeoverActive()) return;
 
   if (modes.length === 0) return;
 
@@ -184,7 +187,7 @@ export class UtilityDialAction extends SingletonAction {
 
   override async onTouchTap(ev: TouchTapEvent): Promise<void> {
     dlog('UtilDial', `onTouchTap: takeover=${isEncoderTakeoverActive()} modes=${modes.length} hold=${ev.payload.hold}`);
-    if (currentState === State.DISCONNECTED) {
+    if (!isDaemonConnected()) {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
@@ -212,7 +215,7 @@ export class UtilityDialAction extends SingletonAction {
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     dlog('UtilDial', `onDialRotate: takeover=${isEncoderTakeoverActive()} modes=${modes.length} ticks=${ev.payload.ticks}`);
-    if (currentState === State.DISCONNECTED) return;
+    if (!isDaemonConnected()) return;
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
@@ -225,7 +228,7 @@ export class UtilityDialAction extends SingletonAction {
 
   override async onDialDown(ev: DialDownEvent): Promise<void> {
     dlog('UtilDial', `onDialDown: takeover=${isEncoderTakeoverActive()} modes=${modes.length}`);
-    if (currentState === State.DISCONNECTED) {
+    if (!isDaemonConnected()) {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }

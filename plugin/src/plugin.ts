@@ -33,7 +33,7 @@ import {
   enterEncoderTakeover,
   exitEncoderTakeover,
 } from './encoder-takeover.js';
-import { setVoiceTextExitCallback } from './encoder-registry.js';
+import { setVoiceTextExitCallback, setEncoderDaemonConnected } from './encoder-registry.js';
 import { dlog, dinfo } from './log.js';
 import { existsSync } from 'fs';
 import { execSync } from 'child_process';
@@ -582,6 +582,7 @@ streamDeck.devices.onDeviceDidDisconnect(() => sendClientRegister('deviceDidDisc
 connMgr.on('connected', () => {
   dinfo('Plugin', `connected (agentType=${proxiedAgentType} prevState=${currentState})`);
   setDaemonConnected(true);
+  setEncoderDaemonConnected(true);
   currentState = State.IDLE;
   // Re-send slot map so bridge knows our layout when the WS comes up after
   // the plugin has already loaded (onWillAppear's first send may have been
@@ -601,6 +602,7 @@ connMgr.on('stale-changed', (stale: boolean) => {
 connMgr.on('disconnected', () => {
   dinfo('Plugin', `disconnected (agentType=${proxiedAgentType} prevState=${currentState})`);
   setDaemonConnected(false);
+  setEncoderDaemonConnected(false);
   proxiedAgentType = null;
   currentVoiceAssistantState = 'disabled';
   updateVoiceAssistantIndicator('disabled');

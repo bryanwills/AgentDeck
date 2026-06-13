@@ -14,7 +14,7 @@ import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from
 import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
 import {
   encoderRegistry, resetEncoderLayouts,
-  setVoiceTextTakeover,
+  setVoiceTextTakeover, isDaemonConnected,
 } from '../encoder-registry.js';
 import { dlog } from '../log.js';
 import { pasteText, osascript, openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
@@ -95,10 +95,12 @@ export function initVoiceDial(b: AgentLink): void {
 
 export function updateVoiceDialState(state: State): void {
   currentState = state;
-  // Exit VT if encoder takeover active or interactive state incoming (takeover imminent)
+  // Exit VT if encoder takeover active, interactive state incoming (takeover
+  // imminent), or the daemon went down (clear stale transcription so the offline
+  // banner can render coherently across all encoders).
   const interactiveIncoming = state === State.AWAITING_PERMISSION
     || state === State.AWAITING_OPTION || state === State.AWAITING_DIFF;
-  if (vtActive && (isEncoderTakeoverActive() || interactiveIncoming)) {
+  if (vtActive && (isEncoderTakeoverActive() || interactiveIncoming || !isDaemonConnected())) {
     exitVoiceTextTakeover();
   }
   refreshVoiceDials();
@@ -316,6 +318,18 @@ function smartPaste(text: string): void {
 // --- Rendering ---
 
 function refreshVoiceDials(): void {
+  // Offline banner is highest priority and all-or-nothing across the 4 encoders;
+  // it must pre-empt voice-text-takeover so a stale transcription canvas can't
+  // mask the banner. Gated on real daemon-down (see getVoiceFeedback).
+  if (!isDaemonConnected()) {
+    const feedback = getVoiceFeedback();
+    for (const id of encoderRegistry.voiceIds) {
+      const dial = streamDeck.actions.getActionById(id) as any;
+      if (dial) void dial.setFeedback(feedback).catch(() => {});
+    }
+    return;
+  }
+
   if (isEncoderTakeoverActive()) return;
 
   // Voice text takeover: render to all panels
@@ -336,7 +350,9 @@ function refreshVoiceDials(): void {
 function getVoiceFeedback(): Record<string, unknown> {
   let svg: string;
 
-  if (currentState === State.DISCONNECTED) {
+  // Launch-app offline banner only when the daemon WS is truly down — never on
+  // session-level DISCONNECTED (transient during multi-session switching).
+  if (!isDaemonConnected()) {
     return { canvas: svgToDataUrl(renderOfflineTouchStrip(3)) };
   }
 
@@ -387,7 +403,7 @@ export class VoiceDialAction extends SingletonAction {
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
-    if (currentState === State.DISCONNECTED) {
+    if (!isDaemonConnected()) {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
@@ -464,7 +480,7 @@ export class VoiceDialAction extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
-    if (currentState === State.DISCONNECTED) return;
+    if (!isDaemonConnected()) return;
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (vtActive) { onVtRotate(ev.payload.ticks); return; }

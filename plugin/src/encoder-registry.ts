@@ -30,6 +30,19 @@ export function resetEncoderLayouts(): void {
   encoderLayout.option = '';
 }
 
+// ─── Daemon connection state (shared with all four encoder dials) ────────
+// The encoder OFFLINE banner (renderOfflineTouchStrip) is an all-or-nothing
+// 800px design across 4 encoders, and its messaging ("launch the app") is only
+// meaningful when the daemon WS is truly down. Dials must gate the banner on
+// THIS flag — set only on real connect/disconnect — never on session-level
+// `currentState === DISCONNECTED`, which flips transiently during multi-session
+// switching while the daemon stays connected (mirrors the keypad's policy in
+// session-slot-button.ts). Kept separate from that module's daemonConnected,
+// which has keypad-only side effects (clears sessions, exits detail view).
+let _daemonConnected = false;
+export function setEncoderDaemonConnected(v: boolean): void { _daemonConnected = v; }
+export function isDaemonConnected(): boolean { return _daemonConnected; }
+
 /**
  * Voice text takeover state.
  * When long transcription text needs all encoder LCDs for word-wrapped display.
