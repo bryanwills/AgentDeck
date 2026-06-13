@@ -83,7 +83,11 @@ static void networkTask(void* param) {
         // Only perform mDNS polling if we are NOT connected. 
         // Constant mDNS querying while connected consumes CPU, Wi-Fi bandwidth,
         // and induces severe packet jitter/latency spikes on ESP32, leading to disconnects.
-        if (Net::wifiConnected() && !Net::wsConnected() && Net::mdnsPoll(bridge)) {
+        // Skip the WS/mDNS dance entirely while the USB serial bridge is healthy:
+        // wsConnect/mDNS block this task for seconds (TCP connect select timeout),
+        // starving serialLoop() → RX overflow → JSON parse errors → connection
+        // flapping → black reconnect scrim. Serial IS the transport when USB-attached.
+        if (Net::wifiConnected() && !Net::wsConnected() && !Net::serialConnected() && Net::mdnsPoll(bridge)) {
             bool ipChanged = (strcmp(currentBridgeIp, bridge.ip) != 0) || (currentBridgePort != bridge.port);
             if (ipChanged || !Net::wsConnected()) {
                 if (ipChanged) {
@@ -131,6 +135,34 @@ static void networkTask(void* param) {
         lockState();
         g_state.wsConnected = conn;
         unlockState();
+
+#if defined(BOARD_TTGO)
+        // Classic ESP32: WiFi RF activity couples noise into the SPI display,
+        // glitching the panel. When USB serial is the live transport WiFi is
+        // unneeded — park the radio after it's been stable for a few seconds to
+        // keep the panel clean. Restore it the moment serial drops.
+        {
+            static bool radioParked = false;
+            static uint32_t serialStableSince = 0;
+            uint32_t nowMs = millis();
+            bool serialUp = Net::serialConnected();
+            if (serialUp) {
+                if (serialStableSince == 0) serialStableSince = nowMs;
+                if (!radioParked && (nowMs - serialStableSince) > 4000) {
+                    Net::wifiSetRadioParked(true);
+                    radioParked = true;
+                    Serial.println("[WiFi] radio parked — USB serial transport (display-noise mitigation)");
+                }
+            } else {
+                serialStableSince = 0;
+                if (radioParked) {
+                    Net::wifiSetRadioParked(false);
+                    radioParked = false;
+                    Serial.println("[WiFi] radio restored — serial dropped");
+                }
+            }
+        }
+#endif
 
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -185,12 +217,21 @@ static void uiTask(void* param) {
     bool everConnected = false;
     bool prevConnStatus = false;   // Track connection changes for status overlay
     bool prevWifiStatus = false;
+    uint32_t lastConnectedMs = 0;  // For reconnect-scrim grace period
 
-#if defined(BOARD_ESP32_C6_147)
-    // BOOT button (GPIO9) toggles orientation — this board has no touch
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+    // Physical button cycles rotation 90° per press (small panels, no touch UI).
+    // TTGO: BTN1 = GPIO35 (input-only, external pull-up). C6: BOOT = GPIO9.
+#if defined(BOARD_TTGO)
+    pinMode(BOARD_PIN_BTN1, INPUT);
+#else
     pinMode(BOARD_PIN_BTN1, INPUT_PULLUP);
+#endif
     bool btnPrev = true;           // idle = HIGH (pulled up)
     uint32_t btnLastMs = 0;
+#endif
+#if defined(BOARD_TTGO)
+    uint32_t lastReassertMs = 0;   // 10s panel/backlight self-heal timer
 #endif
 
     while (true) {
@@ -200,17 +241,18 @@ static void uiTask(void* param) {
         lastFrameMs = now;
         if (dt > 0.1f) dt = 0.1f;
 
-#if defined(BOARD_ESP32_C6_147)
-        // Poll BOOT button: falling edge (with debounce) flips orientation
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+        // Poll button: falling edge (with debounce) rotates the screen 90°
         {
             bool btnNow = digitalRead(BOARD_PIN_BTN1);  // LOW = pressed
             if (btnPrev && !btnNow && (now - btnLastMs) > 250) {
                 btnLastMs = now;
+                uint8_t nextRot = (UI::getRotationIndex() + 1) & 3;
                 lockState();
-                g_state.pendingLandscape = !UI::isLandscape();
+                g_state.pendingRotation = (int8_t)nextRot;
                 g_state.orientationChanged = true;
                 unlockState();
-                Serial.println("[Button] BOOT pressed — toggling orientation");
+                Serial.printf("[Button] Rotate 90° → index %d\n", nextRot);
             }
             btnPrev = btnNow;
         }
@@ -219,14 +261,22 @@ static void uiTask(void* param) {
         // LVGL tick
         if (dt_ms > 0) lv_tick_inc(dt_ms);
 
-        // Check orientation change request (from protocol or settings)
+        // Check orientation change request (from protocol, settings, or button)
         lockState();
         bool orientChange = g_state.orientationChanged;
         bool newLandscape = g_state.pendingLandscape;
-        if (orientChange) g_state.orientationChanged = false;
+        int8_t newRotation = g_state.pendingRotation;
+        if (orientChange) {
+            g_state.orientationChanged = false;
+            g_state.pendingRotation = -1;
+        }
         unlockState();
         if (orientChange) {
-            UI::setOrientation(newLandscape);
+            if (newRotation >= 0) {
+                UI::setRotationIndex((uint8_t)newRotation);  // 90° step (button)
+            } else {
+                UI::setOrientation(newLandscape);            // legacy bool (network)
+            }
             // Recreate all screens with new dimensions
             scrSplash = Screens::splashCreate();
             scrAquarium = Screens::aquariumCreate();
@@ -254,7 +304,15 @@ static void uiTask(void* param) {
         bool wantTimeline = g_state.timelineView;
         unlockState();
 
-        if (connected) everConnected = true;
+        if (connected) {
+            everConnected = true;
+            lastConnectedMs = now;
+        }
+
+        // Grace period: brief transport blips (WS reconnect, serial hiccup) must not
+        // flash the near-black reconnect scrim. Treat as still-connected for 5s.
+        bool showConnected = connected ||
+                             (everConnected && (now - lastConnectedMs) < 5000);
 
         if (!connected && everConnected &&
             currentView != VIEW_AQUARIUM && currentView != VIEW_SPLASH) {
@@ -296,11 +354,11 @@ static void uiTask(void* param) {
         // connected = serial OR websocket — either path is valid
         bool wifiNow = Net::wifiConnected();
         bool serialNow = Net::serialConnected();
-        if (connected != prevConnStatus || wifiNow != prevWifiStatus) {
-            prevConnStatus = connected;
+        if (showConnected != prevConnStatus || wifiNow != prevWifiStatus) {
+            prevConnStatus = showConnected;
             prevWifiStatus = wifiNow;
             if (currentView == VIEW_AQUARIUM || currentView == VIEW_TIMELINE) {
-                if (connected) {
+                if (showConnected) {
                     Screens::aquariumSetConnectionStatus(ConnOverlayStatus::HIDDEN);
                 } else if (everConnected) {
                     // Was connected before — daemon went away (regardless of WiFi state)
@@ -330,6 +388,14 @@ static void uiTask(void* param) {
 
         // LVGL timer handler
         lv_timer_handler();
+
+#if defined(BOARD_TTGO)
+        // Panel/backlight self-heal every 10s (DISPON + backlight duty re-assert)
+        if (now - lastReassertMs > 10000) {
+            lastReassertMs = now;
+            UI::reassertPanel();
+        }
+#endif
 
 #if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
         // Small SPI panels: frame-pace to a stable ~30fps. The terrarium fully

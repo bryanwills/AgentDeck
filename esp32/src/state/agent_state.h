@@ -146,9 +146,10 @@ struct DashboardState {
     bool hudVisible;
     bool timelineView;  // true = timeline screen, false = aquarium
 
-    // Orientation change request (set by protocol, consumed by UI task)
+    // Orientation change request (set by protocol/buttons, consumed by UI task)
     bool orientationChanged;
     bool pendingLandscape;
+    int8_t pendingRotation;  // -1 = use pendingLandscape; 0-3 = explicit 90° rotation index
 
     void reset() {
         memset(this, 0, sizeof(DashboardState));
@@ -165,6 +166,7 @@ struct DashboardState {
         timelineView = false;
         orientationChanged = false;
         pendingLandscape = true;
+        pendingRotation = -1;
         // Sentinel -1.0f = "no data" (0 is a valid usage value)
         fiveHourPercent = -1.0f;
         sevenDayPercent = -1.0f;

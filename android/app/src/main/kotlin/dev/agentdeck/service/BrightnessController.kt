@@ -12,9 +12,10 @@ import android.util.Log
  * LCD tablets: brightness→0, SCREEN_OFF_TIMEOUT→2s → screen turns off.
  * On wake: restores timeout, wakes screen, restores brightness + mode.
  *
- * E-ink devices: sysfs /sys/class/backlight/{device}/brightness → 0.
- * Works on Crema S (warm/white). Pantone 6 sysfs is SELinux-protected — dim skipped.
- * Saved frontlight values are persisted to disk for crash recovery.
+ * E-ink devices: keep the EPD awake, dim only the frontlight/backlight.
+ * Primary path is sysfs/procfs frontlight control; fallback is Android's
+ * Settings.System brightness for readers whose vendor frontlight node is
+ * SELinux-protected. Saved values are persisted for crash recovery.
  */
 class BrightnessController(
     private val context: Context,
@@ -28,7 +29,11 @@ class BrightnessController(
         private const val PREFS_NAME = "brightness_controller"
         private const val PREF_DIMMED = "is_dimmed"
         private const val PREF_FRONTLIGHT_PREFIX = "frontlight_"
+        private const val PREF_SYSTEM_BRIGHTNESS = "system_brightness"
+        private const val PREF_SYSTEM_BRIGHTNESS_MODE = "system_brightness_mode"
+        private const val PREF_SCREEN_OFF_TIMEOUT = "screen_off_timeout"
         private const val BACKLIGHT_BASE = "/sys/class/backlight"
+        private const val RESTORE_FALLBACK_BRIGHTNESS = 128
 
         /** Known sysfs frontlight device names across e-ink vendors. */
         private val KNOWN_BACKLIGHT_DEVICES = listOf(
@@ -36,6 +41,12 @@ class BrightnessController(
             "aw99703", "aw99703_sec",              // MOAAN Pantone 6 sysfs (not app-writable)
             "rk_backlight",                        // Generic Rockchip
             "backlight", "lcd-backlight",           // Common Android
+        )
+
+        private val KNOWN_FRONTLIGHT_FILES = listOf(
+            "/proc/aw99703/led_white",              // MOAAN/Pantone frontlight procfs
+            "/proc/aw99703/led_warm",
+            "/proc/aw99703/brightness",
         )
 
         /** Derive a stable SharedPreferences key from path (parent dir name). */
@@ -55,7 +66,9 @@ class BrightnessController(
     private var savedFrontlight: Map<String, Int>? = null
 
     init {
-        // Recover from crash/restart while dimmed — restore frontlight from disk
+        // Recover from crash/restart while dimmed. E-ink should not stay dark
+        // if the service died before a wake event; LCD values are kept so a
+        // later wake can restore even if the process was recreated.
         if (isEink && prefs.getBoolean(PREF_DIMMED, false)) {
             val saved = mutableMapOf<String, Int>()
             for (path in frontlightPaths) {
@@ -70,7 +83,13 @@ class BrightnessController(
                     catch (e: Exception) { Log.w(TAG, "Cannot recover $path: ${e.message}") }
                 }
             }
-            prefs.edit().putBoolean(PREF_DIMMED, false).apply()
+            restoreSystemBrightnessIfSaved()
+            clearSystemBrightnessPrefs()
+        } else if (!isEink && prefs.getBoolean(PREF_DIMMED, false)) {
+            isDimmed = true
+            savedBrightness = prefs.getInt(PREF_SYSTEM_BRIGHTNESS, -1).takeIf { it >= 0 }
+            savedBrightnessMode = prefs.getInt(PREF_SYSTEM_BRIGHTNESS_MODE, -1).takeIf { it >= 0 }
+            savedScreenOffTimeout = prefs.getInt(PREF_SCREEN_OFF_TIMEOUT, -1).takeIf { it >= 0 }
         }
     }
 
@@ -123,16 +142,7 @@ class BrightnessController(
             // Capture the user's brightness/mode/timeout only on the first dim,
             // so a live level change doesn't save the already-dimmed value.
             if (firstDim) {
-                savedBrightnessMode = Settings.System.getInt(
-                    contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE,
-                    Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
-                )
-                savedBrightness = Settings.System.getInt(
-                    contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128
-                )
-                savedScreenOffTimeout = Settings.System.getInt(
-                    contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, 60_000
-                )
+                captureSystemBrightness()
             }
             Settings.System.putInt(
                 contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE,
@@ -158,19 +168,24 @@ class BrightnessController(
             }
         } catch (e: SecurityException) {
             Log.w(TAG, "Cannot dim LCD (no WRITE_SETTINGS): ${e.message}")
-            savedBrightness = null
-            savedBrightnessMode = null
-            savedScreenOffTimeout = null
+            clearSystemBrightnessMemory()
         }
     }
 
     private fun restoreLcd() {
         try {
+            loadSystemBrightnessFromPrefsIfNeeded()
             savedScreenOffTimeout?.let { timeout ->
                 Settings.System.putInt(contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, timeout)
             }
             wakeScreen()
-            val brightness = savedBrightness ?: 128
+            Settings.System.putInt(
+                contentResolver,
+                Settings.System.SCREEN_BRIGHTNESS_MODE,
+                Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+            )
+            val brightness = (savedBrightness ?: RESTORE_FALLBACK_BRIGHTNESS)
+                .takeIf { it > 0 } ?: RESTORE_FALLBACK_BRIGHTNESS
             Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, brightness)
             savedBrightnessMode?.let { mode ->
                 Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, mode)
@@ -179,9 +194,8 @@ class BrightnessController(
         } catch (e: SecurityException) {
             Log.w(TAG, "Cannot restore LCD: ${e.message}")
         }
-        savedBrightness = null
-        savedBrightnessMode = null
-        savedScreenOffTimeout = null
+        clearSystemBrightnessMemory()
+        clearSystemBrightnessPrefs()
     }
 
     // ── E-ink ───────────────────────────────────────────────────────────
@@ -226,8 +240,15 @@ class BrightnessController(
         if (sysfsWorked) {
             Log.i(TAG, "E-ink dim($mode): sysfs OK, ${savedFrontlight?.size ?: 0} paths")
         } else {
-            // Pantone 6: frontlight not app-controllable without root
-            Log.w(TAG, "E-ink dim: sysfs not writable — skipping (no app-level frontlight control)")
+            // Pantone 6 and some MOAAN firmwares protect aw99703 nodes from
+            // third-party app contexts. Try the Android brightness provider;
+            // on several readers this is wired to the frontlight instead of
+            // the electrophoretic panel itself.
+            if (dimEinkViaSystemBrightness(mode, level, firstDim)) {
+                Log.i(TAG, "E-ink dim($mode): system brightness fallback OK")
+            } else {
+                Log.w(TAG, "E-ink dim: no writable sysfs/procfs or system brightness path")
+            }
         }
     }
 
@@ -245,6 +266,7 @@ class BrightnessController(
             try { java.io.File(path).writeText(value.toString()) }
             catch (e: Exception) { Log.w(TAG, "Cannot restore $path: ${e.message}") }
         }
+        restoreSystemBrightnessIfSaved()
         // Clear disk state
         prefs.edit().apply {
             putBoolean(PREF_DIMMED, false)
@@ -252,6 +274,7 @@ class BrightnessController(
                 remove(PREF_FRONTLIGHT_PREFIX + prefKeyForPath(path))
             }
         }.apply()
+        clearSystemBrightnessPrefs()
         Log.i(TAG, "E-ink restored: ${toRestore?.entries?.joinToString { "${prefKeyForPath(it.key)}=${it.value}" } ?: "nothing"}")
         savedFrontlight = null
     }
@@ -260,11 +283,107 @@ class BrightnessController(
 
     /** Probe known sysfs backlight device paths. */
     private fun discoverFrontlightPaths(): List<String> {
-        val found = KNOWN_BACKLIGHT_DEVICES
+        val sysfs = KNOWN_BACKLIGHT_DEVICES
             .map { "$BACKLIGHT_BASE/$it/brightness" }
             .filter { path -> try { java.io.File(path).exists() } catch (_: Exception) { false } }
+        val procfs = KNOWN_FRONTLIGHT_FILES
+            .filter { path -> try { java.io.File(path).exists() } catch (_: Exception) { false } }
+        val found = (sysfs + procfs).distinct()
         Log.i(TAG, "Discovered frontlight paths: $found")
         return found
+    }
+
+    private fun captureSystemBrightness() {
+        savedBrightnessMode = Settings.System.getInt(
+            contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE,
+            Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+        )
+        val currentBrightness = Settings.System.getInt(
+            contentResolver, Settings.System.SCREEN_BRIGHTNESS, RESTORE_FALLBACK_BRIGHTNESS
+        )
+        savedBrightness = currentBrightness.takeIf { it > 0 }
+            ?: prefs.getInt(PREF_SYSTEM_BRIGHTNESS, RESTORE_FALLBACK_BRIGHTNESS)
+                .takeIf { it > 0 }
+            ?: RESTORE_FALLBACK_BRIGHTNESS
+        savedScreenOffTimeout = Settings.System.getInt(
+            contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, 60_000
+        )
+        prefs.edit()
+            .putBoolean(PREF_DIMMED, true)
+            .putInt(PREF_SYSTEM_BRIGHTNESS, savedBrightness ?: RESTORE_FALLBACK_BRIGHTNESS)
+            .putInt(PREF_SYSTEM_BRIGHTNESS_MODE, savedBrightnessMode ?: Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+            .putInt(PREF_SCREEN_OFF_TIMEOUT, savedScreenOffTimeout ?: 60_000)
+            .apply()
+    }
+
+    private fun loadSystemBrightnessFromPrefsIfNeeded() {
+        if (savedBrightness == null) {
+            savedBrightness = prefs.getInt(PREF_SYSTEM_BRIGHTNESS, -1).takeIf { it >= 0 }
+        }
+        if (savedBrightnessMode == null) {
+            savedBrightnessMode = prefs.getInt(PREF_SYSTEM_BRIGHTNESS_MODE, -1).takeIf { it >= 0 }
+        }
+        if (savedScreenOffTimeout == null) {
+            savedScreenOffTimeout = prefs.getInt(PREF_SCREEN_OFF_TIMEOUT, -1).takeIf { it >= 0 }
+        }
+    }
+
+    private fun dimEinkViaSystemBrightness(mode: String, level: Int, firstDim: Boolean): Boolean {
+        if (!Settings.System.canWrite(context)) return false
+        return try {
+            if (firstDim || savedBrightness == null) captureSystemBrightness()
+            Settings.System.putInt(
+                contentResolver,
+                Settings.System.SCREEN_BRIGHTNESS_MODE,
+                Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+            )
+            val base = savedBrightness ?: RESTORE_FALLBACK_BRIGHTNESS
+            val target = if (mode == "min") {
+                (base * level / 100).coerceAtLeast(1)
+            } else {
+                0
+            }
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, target)
+            true
+        } catch (e: SecurityException) {
+            Log.w(TAG, "E-ink system brightness fallback denied: ${e.message}")
+            false
+        }
+    }
+
+    private fun restoreSystemBrightnessIfSaved() {
+        if (!Settings.System.canWrite(context)) return
+        loadSystemBrightnessFromPrefsIfNeeded()
+        val brightness = savedBrightness ?: return
+        try {
+            Settings.System.putInt(
+                contentResolver,
+                Settings.System.SCREEN_BRIGHTNESS_MODE,
+                Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+            )
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, brightness)
+            savedBrightnessMode?.let { mode ->
+                Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, mode)
+            }
+            Log.i(TAG, "System brightness restored: brightness=$brightness, mode=${savedBrightnessMode}")
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Cannot restore system brightness: ${e.message}")
+        }
+    }
+
+    private fun clearSystemBrightnessMemory() {
+        savedBrightness = null
+        savedBrightnessMode = null
+        savedScreenOffTimeout = null
+    }
+
+    private fun clearSystemBrightnessPrefs() {
+        prefs.edit()
+            .remove(PREF_SYSTEM_BRIGHTNESS)
+            .remove(PREF_SYSTEM_BRIGHTNESS_MODE)
+            .remove(PREF_SCREEN_OFF_TIMEOUT)
+            .putBoolean(PREF_DIMMED, false)
+            .apply()
     }
 
     private fun wakeScreen() {

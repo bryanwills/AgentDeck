@@ -12,8 +12,9 @@
  */
 
 import type { DeviceModule, BridgeContext } from './types.js';
-import { buildZipPackets, buildBrightnessPacket, buildSmallWindowPacket, parseIncoming, CMD } from '../d200h/hid-protocol.js';
-import { renderDashboardZip, stateHash, initRenderer, isResvgLoaded } from '../d200h/image-renderer.js';
+import { buildZipPackets, buildBrightnessPacket, buildSmallWindowPacket, parseIncoming } from '../d200h/hid-protocol.js';
+import { renderDashboardZip, stateHash, initRenderer, isResvgLoaded, buildButtonCommandMap } from '../d200h/image-renderer.js';
+import type { ButtonCommand } from '../d200h/image-renderer.js';
 import { debug } from '../logger.js';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -30,38 +31,9 @@ const POLL_INTERVAL = 500;     // Device detection polling (ms)
 const READ_INTERVAL = 20;      // HID read polling (ms)
 const KEEPALIVE_INTERVAL = 30_000; // Keep-alive interval (ms)
 
-// Single-session deep dive layout (matches computeLayout else branch)
-const SINGLE_SESSION_COMMANDS: Record<number, any> = {
-  0: { type: 'mode_toggle' },
-  1: { type: 'focus_session_index', index: 0 },
-  2: null, // DetailInfo (no action)
-  3: { type: 'select_option', index: 0 },
-  4: { type: 'select_option', index: 1 },
-  5: { type: 'select_option', index: 2 },
-  6: { type: 'select_option', index: 3 },
-  7: null, // Model Info
-  8: { type: 'usage_toggle' },
-  9: { type: 'usage_toggle' },
-  10: { type: 'interrupt' },
-};
-
-// Multi-session overview layout (matches computeLayout if branch)
-const MULTI_SESSION_COMMANDS: Record<number, any> = {
-  0: { type: 'mode_toggle' },
-  // Row 0 (sessions 0-3)
-  1: { type: 'focus_session_index', index: 0 },
-  2: { type: 'focus_session_index', index: 1 },
-  3: { type: 'focus_session_index', index: 2 },
-  4: { type: 'focus_session_index', index: 3 },
-  // Row 1 (options 0-3)
-  5: { type: 'select_option', index: 0 },
-  6: { type: 'select_option', index: 1 },
-  7: { type: 'select_option', index: 2 },
-  8: { type: 'select_option', index: 3 },
-  9: null, // Model Info
-  // Row 2
-  10: { type: 'interrupt' },
-};
+// Button → command mapping is derived per-frame from the render layout
+// (`buildButtonCommandMap`), so a key always does exactly what its rendered
+// tile shows. See `currentCommandMap` below.
 
 function isControllableSession(session: any): boolean {
   return !!session?.port && session.controlMode !== 'observed';
@@ -106,6 +78,9 @@ export class D200hModule implements DeviceModule {
     currentTool: '',
   };
   private lastSessions: any[] = [];
+  // Physical-key index → command for the currently displayed frame. Rebuilt
+  // from the render layout on every updateDisplay so input matches the pixels.
+  private currentCommandMap: Map<number, ButtonCommand> = new Map();
   private connected = false;
   private isUpdating = false;
   private pendingUpdate: any = null;
@@ -327,24 +302,16 @@ export class D200hModule implements DeviceModule {
         // Clear any stale lastOpenError left by a failed keyboard-interface open
         // (buttons arrive via the consumer-control interface regardless).
         if (this.lastOpenError) this.lastOpenError = null;
-        const isMultiSession = this.lastSessions.length > 1;
-        const commands = isMultiSession ? MULTI_SESSION_COMMANDS : SINGLE_SESSION_COMMANDS;
-        let cmd = commands[event.data.index];
 
+        // The command is whatever the currently-displayed tile at this physical
+        // key does — derived from the same layout that was rendered, so the key
+        // can never act on stale or mismatched session ordering.
+        const cmd = this.currentCommandMap.get(event.data.index);
         if (cmd) {
-          // Flatten dynamic session indices
-          if (cmd.type === 'focus_session_index') {
-            const tgt = this.lastSessions[cmd.index];
-            if (tgt) {
-              cmd = { type: 'focus_session', sessionId: tgt.id };
-            } else {
-              return; // Ignore empty sessions
-            }
-          }
           debug(TAG, `Button ${event.data.index} pressed → ${cmd.type}`);
           this.commandHandler?.(cmd);
         } else {
-          debug(TAG, `Button ${event.data.index} pressed (unmapped)`);
+          debug(TAG, `Button ${event.data.index} pressed (inert tile)`);
         }
       } else if (event.type === 'device_info') {
         debug(TAG, `Device: ${event.data.deviceType} fw=${event.data.firmwareVersion} hw=${event.data.hardwareVersion}`);
@@ -374,6 +341,9 @@ export class D200hModule implements DeviceModule {
 
     try {
       const zip = renderDashboardZip(stateEvt);
+      // Rebuild the input map from the SAME state we just rendered, so a press
+      // always maps to what is currently on screen.
+      this.currentCommandMap = buildButtonCommandMap(stateEvt);
 
       // Save ZIP to ~/.agentdeck/d200h-dumps/ for preview
       try {

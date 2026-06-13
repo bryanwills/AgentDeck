@@ -18,6 +18,7 @@ import dev.agentdeck.terrarium.renderer.EinkTerrariumView
 fun EinkAquariumFrame(
     state: TerrariumState,
     modifier: Modifier = Modifier,
+    snapshotMode: Boolean = false,
     onFrameRendered: ((isAnimationFrame: Boolean) -> Unit)? = null,
 ) {
     Box(
@@ -28,6 +29,7 @@ fun EinkAquariumFrame(
         EinkTerrariumView(
             state = state,
             modifier = Modifier.fillMaxSize(),
+            snapshotMode = snapshotMode,
             onFrameRendered = onFrameRendered,
         )
     }
@@ -40,7 +42,13 @@ fun EinkAquariumFrame(
 fun EinkPictureFrame(
     state: TerrariumState,
     modifier: Modifier = Modifier,
+    snapshotMode: Boolean = false,
     onFrameRendered: ((isAnimationFrame: Boolean) -> Unit)? = null,
 ) {
-    EinkAquariumFrame(state = state, modifier = modifier, onFrameRendered = onFrameRendered)
+    EinkAquariumFrame(
+        state = state,
+        modifier = modifier,
+        snapshotMode = snapshotMode,
+        onFrameRendered = onFrameRendered,
+    )
 }

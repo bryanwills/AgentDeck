@@ -205,7 +205,9 @@ fun EinkMonitorScreen(
     val showSessionList by displayPrefs.showSessionListFlow.collectAsState(initial = true)
     val showTimeline by displayPrefs.showTimelineFlow.collectAsState(initial = true)
     val showSettingsButton by displayPrefs.showSettingsButtonFlow.collectAsState(initial = true)
+    val displaySyncEnabled by displayPrefs.displaySyncEnabledFlow.collectAsState(initial = true)
     val featuredAttention = remember(state) { buildEinkAttentionFeatured(state) }
+    val sleepSnapshotMode = displaySyncEnabled && !state.hostDisplayOn && state.hostDim?.enabled != false
 
     // Show not-connected screen only when truly disconnected (not reconnecting)
     val showNotConnected = connectionStatus != ConnectionStatus.CONNECTED &&
@@ -264,6 +266,7 @@ fun EinkMonitorScreen(
                     mode = Zone.CHROME.mode,
                     debounceMs = Zone.CHROME.debounceMs,
                     triggerKey = Triple(state.agentState, sessionsKey, state.workerSessionCount),
+                    sleepSnapshotMode = sleepSnapshotMode,
                     modifier = Modifier.height(44.dp).fillMaxWidth(),
                 ) {
                     EinkDashboardChromeBar(
@@ -310,6 +313,7 @@ fun EinkMonitorScreen(
                                 mode = Zone.CHROME.mode,
                                 debounceMs = Zone.CHROME.debounceMs,
                                 triggerKey = Triple(state.agentState, sessionsKey, state.workerSessionCount),
+                                sleepSnapshotMode = sleepSnapshotMode,
                                 modifier = Modifier.weight(0.36f).fillMaxHeight(),
                             ) {
                                 EinkAgentPanel(
@@ -329,11 +333,18 @@ fun EinkMonitorScreen(
 
                         Box(modifier = Modifier.weight(if (showSessionList) 0.64f else 1f).fillMaxHeight()) {
                             EinkAnimatedRefreshZone(
-                                stateKey = Pair(state.agentState, sessionsKey),
+                                stateKey = listOf(
+                                    state.agentState,
+                                    sessionsKey,
+                                    state.usage.fiveHourPercent,
+                                    state.usage.sevenDayPercent,
+                                ),
+                                sleepSnapshotMode = sleepSnapshotMode,
                                 modifier = Modifier.fillMaxSize(),
                             ) { onFrameRendered ->
                                 EinkAquariumFrame(
                                     state = terrariumState,
+                                    snapshotMode = sleepSnapshotMode,
                                     onFrameRendered = onFrameRendered,
                                 )
                             }
@@ -355,6 +366,7 @@ fun EinkMonitorScreen(
                             mode = Zone.TIMELINE.mode,
                             debounceMs = Zone.TIMELINE.debounceMs,
                             triggerKey = timelineEntries.size,
+                            sleepSnapshotMode = sleepSnapshotMode,
                             modifier = Modifier.weight(0.36f).fillMaxWidth(),
                         ) {
                             EinkTimelinePanel(entries = timelineEntries, modifier = Modifier.fillMaxSize())
@@ -368,6 +380,7 @@ fun EinkMonitorScreen(
                 timelineEntries = timelineEntries,
                 connection = connection,
                 displayPrefs = displayPrefs,
+                sleepSnapshotMode = sleepSnapshotMode,
                 showSessionList = showSessionList,
                 showTimeline = showTimeline,
                 showSettingsButton = showSettingsButton,
@@ -893,6 +906,7 @@ private fun EinkPortraitLayout(
     timelineEntries: List<dev.agentdeck.state.TimelineEntry>,
     connection: BridgeConnection,
     displayPrefs: DisplayPreferences,
+    sleepSnapshotMode: Boolean,
     showSessionList: Boolean,
     showTimeline: Boolean,
     showSettingsButton: Boolean,
@@ -907,6 +921,7 @@ private fun EinkPortraitLayout(
             mode = Zone.CHROME.mode,
             debounceMs = Zone.CHROME.debounceMs,
             triggerKey = Triple(state.agentState, sessionsKey, state.workerSessionCount),
+            sleepSnapshotMode = sleepSnapshotMode,
             modifier = Modifier.height(44.dp).fillMaxWidth(),
         ) {
             EinkDashboardChromeBar(
@@ -946,6 +961,7 @@ private fun EinkPortraitLayout(
                 mode = Zone.CHROME.mode,
                 debounceMs = Zone.CHROME.debounceMs,
                 triggerKey = Triple(state.agentState, sessionsKey, state.workerSessionCount),
+                sleepSnapshotMode = sleepSnapshotMode,
                 modifier = Modifier.weight(if (showTimeline) 0.26f else 0.34f).fillMaxWidth(),
             ) {
                 EinkAgentPanel(
@@ -964,11 +980,18 @@ private fun EinkPortraitLayout(
 
         Box(modifier = Modifier.weight(if (showTimeline) 0.32f else 0.66f).fillMaxWidth()) {
             EinkAnimatedRefreshZone(
-                stateKey = Pair(state.agentState, sessionsKey),
+                stateKey = listOf(
+                    state.agentState,
+                    sessionsKey,
+                    state.usage.fiveHourPercent,
+                    state.usage.sevenDayPercent,
+                ),
+                sleepSnapshotMode = sleepSnapshotMode,
                 modifier = Modifier.fillMaxSize(),
             ) { onFrameRendered ->
                 EinkAquariumFrame(
                     state = terrariumState,
+                    snapshotMode = sleepSnapshotMode,
                     onFrameRendered = onFrameRendered,
                 )
             }
@@ -989,6 +1012,7 @@ private fun EinkPortraitLayout(
                 mode = Zone.TIMELINE.mode,
                 debounceMs = Zone.TIMELINE.debounceMs,
                 triggerKey = timelineEntries.size,
+                sleepSnapshotMode = sleepSnapshotMode,
                 modifier = Modifier.weight(0.42f).fillMaxWidth(),
             ) {
                 EinkTimelinePanel(entries = timelineEntries, modifier = Modifier.fillMaxSize())

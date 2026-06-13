@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.vector.PathParser
 import dev.agentdeck.terrarium.CrayfishVisualState
+import dev.agentdeck.terrarium.CreatureGeometry
 import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.terrarium.TerrariumLayout
 import dev.agentdeck.terrarium.TerrariumTiming
@@ -363,16 +364,12 @@ class CrayfishCreature(
     }
 
     companion object {
-        private const val SVG_VIEWBOX = 120f
-
-        // SVG path data from openclaw.svg (viewBox 0 0 120 120)
-        private const val BODY_PATH_DATA =
-            "M60 10c-30 0-45 25-45 45s15 40 30 45v10h10v-10s5 2 10 0v10h10v-10c15-5 30-25 30-45S90 10 60 10"
-        private const val LEFT_CLAW_PATH_DATA =
-            "M20 45C5 40 0 50 5 60s15 5 20-5c3-7 0-10-5-10"
-        private const val RIGHT_CLAW_PATH_DATA =
-            "M100 45c15-5 20 5 15 15s-15 5-20-5c-3-7 0-10 5-10"
-        private const val LEFT_ANTENNA_PATH_DATA = "M45 15Q35 5 30 8"
-        private const val RIGHT_ANTENNA_PATH_DATA = "M75 15Q85 5 90 8"
+        // Canonical 120×120 OpenClaw crayfish geometry (see CreatureGeometry).
+        private const val SVG_VIEWBOX = CreatureGeometry.CRAYFISH_VIEWBOX
+        private const val BODY_PATH_DATA = CreatureGeometry.CRAYFISH_BODY_PATH_DATA
+        private const val LEFT_CLAW_PATH_DATA = CreatureGeometry.CRAYFISH_LEFT_CLAW_PATH_DATA
+        private const val RIGHT_CLAW_PATH_DATA = CreatureGeometry.CRAYFISH_RIGHT_CLAW_PATH_DATA
+        private const val LEFT_ANTENNA_PATH_DATA = CreatureGeometry.CRAYFISH_LEFT_ANTENNA_PATH_DATA
+        private const val RIGHT_ANTENNA_PATH_DATA = CreatureGeometry.CRAYFISH_RIGHT_ANTENNA_PATH_DATA
     }
 }

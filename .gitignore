@@ -78,6 +78,11 @@ esp32/robot/results/
 # Experimental scratch files
 scratch-*.ts
 scratch-*.js
+scratch/
+scratch_usb.txt
+
+# Vendored TC002 emulator working copy (has its own .git, 83MB build artifacts)
+tools/tc002-emulator/
 
 # zkswe hardware recon — cross-compiled ARM/Mach-O binaries rebuilt via build.sh
 zkswe/agent-archive/*

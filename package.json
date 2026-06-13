@@ -11,6 +11,7 @@
     "clean": "pnpm -r clean",
     "typecheck": "pnpm -r typecheck",
     "generate-icons": "node scripts/generate-icons.mjs",
+    "generate-creature-glyphs": "node scripts/generate-creature-glyphs.mjs",
     "generate-protocol": "bash scripts/generate-protocol.sh",
     "package": "bash scripts/package-plugin.sh",
     "setup": "bash scripts/install.sh",

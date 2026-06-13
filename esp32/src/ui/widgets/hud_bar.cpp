@@ -1,6 +1,7 @@
 #include "hud_bar.h"
 #include "../theme.h"
 #include "../display.h"
+#include "../assets/logo.h"
 #include "../../state/agent_state.h"
 #include "config.h"
 #include "net/serial_client.h"
@@ -10,6 +11,24 @@ static lv_obj_t* panelLeft = nullptr;
 static lv_obj_t* lblLogo = nullptr;
 static lv_obj_t* logoLine = nullptr;   // accent underline
 static lv_obj_t* lblSessions = nullptr;
+
+#if defined(BOARD_IPS10)
+// === IPS10 (800×1280) tablet sidebar: logo header + sessions + usage + always-on timeline ===
+static lv_obj_t* lblLogoImg = nullptr;
+static lv_obj_t* lblTimelineHeader = nullptr;
+static lv_obj_t* lblTimeline = nullptr;   // recolor list, newest first
+static constexpr int IPS10_SIDEBAR_W = 300;
+static constexpr int IPS10_TIMELINE_ROWS = 16;
+
+// Local timeline formatters (mirror timeline_scr.cpp; kept local to avoid cross-file coupling).
+static uint32_t ips10TimelineColor(const char* type) {
+    if (strstr(type, "error") != nullptr) return Theme::StatusRed;
+    if (strstr(type, "tool") != nullptr) return Theme::StatusBlue;
+    if (strstr(type, "permission") != nullptr || strstr(type, "await") != nullptr) return Theme::StatusAmber;
+    if (strstr(type, "chat") != nullptr) return Theme::StatusGreen;
+    return Theme::HUDText;
+}
+#endif
 
 // === Right panel: Tank Status (water-fill gauges) ===
 static lv_obj_t* panelRight = nullptr;
@@ -139,7 +158,83 @@ static void createGauge(lv_obj_t* parent,
 }
 
 void init(lv_obj_t* parent) {
-#if IS_ROUND
+#if defined(BOARD_IPS10)
+    // === IPS10 tablet layout: full-height right sidebar (logo + sessions + usage + timeline) ===
+    // The terrarium renders full-screen behind; creatures are biased left (theme.h Layout)
+    // so they clear the sidebar. Mirrors the Android/iOS tablet "terrarium + timeline" split.
+    panelLeft = lv_obj_create(parent);
+    lv_obj_set_size(panelLeft, IPS10_SIDEBAR_W, g_screenH - 16);
+    lv_obj_align(panelLeft, LV_ALIGN_TOP_RIGHT, -8, 8);
+    lv_obj_set_style_bg_color(panelLeft, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(panelLeft, LV_OPA_60, 0);
+    lv_obj_set_style_border_width(panelLeft, 0, 0);
+    lv_obj_set_style_radius(panelLeft, 14, 0);
+    lv_obj_set_style_pad_top(panelLeft, 16, 0);
+    lv_obj_set_style_pad_bottom(panelLeft, 12, 0);
+    lv_obj_set_style_pad_left(panelLeft, 14, 0);
+    lv_obj_set_style_pad_right(panelLeft, 14, 0);
+    lv_obj_set_style_pad_row(panelLeft, 8, 0);
+    lv_obj_clear_flag(panelLeft, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(panelLeft, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(panelLeft, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    // Logo image + wordmark
+    lblLogoImg = lv_image_create(panelLeft);
+    lv_image_set_src(lblLogoImg, &img_logo_64);
+
+    lblLogo = lv_label_create(panelLeft);
+    lv_obj_set_style_text_color(lblLogo, lv_color_hex(Theme::HUDText), 0);
+    lv_obj_set_style_text_font(lblLogo, &lv_font_montserrat_20, 0);
+    lv_label_set_text(lblLogo, "AgentDeck");
+
+    logoLine = lv_obj_create(panelLeft);
+    lv_obj_set_size(logoLine, IPS10_SIDEBAR_W - 60, 2);
+    lv_obj_set_style_bg_color(logoLine, lv_color_hex(Theme::StatusBlue), 0);
+    lv_obj_set_style_bg_opa(logoLine, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(logoLine, 0, 0);
+    lv_obj_set_style_radius(logoLine, 1, 0);
+    lv_obj_set_style_pad_all(logoLine, 0, 0);
+    lv_obj_clear_flag(logoLine, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Sessions
+    lblSessions = lv_label_create(panelLeft);
+    lv_obj_set_style_text_color(lblSessions, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_text_font(lblSessions, &font_kr_12, 0);
+    lv_label_set_recolor(lblSessions, true);
+    lv_label_set_text(lblSessions, "");
+    lv_obj_set_width(lblSessions, IPS10_SIDEBAR_W - 28);
+
+    // Usage gauges container (gauge row appended by shared code below)
+    panelRight = lv_obj_create(panelLeft);
+    lv_obj_set_size(panelRight, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(panelRight, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(panelRight, 0, 0);
+    lv_obj_set_style_pad_all(panelRight, 0, 0);
+    lv_obj_set_style_pad_row(panelRight, 2, 0);
+    lv_obj_clear_flag(panelRight, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(panelRight, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(panelRight, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+    lblTankHeader = lv_label_create(panelRight);
+    lv_obj_set_style_text_color(lblTankHeader, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_text_font(lblTankHeader, &lv_font_montserrat_10, 0);
+    lv_label_set_text(lblTankHeader, "CLAUDE USAGE");
+
+    // Timeline header + list (always on for the tablet board)
+    lblTimelineHeader = lv_label_create(panelLeft);
+    lv_obj_set_style_text_color(lblTimelineHeader, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_text_font(lblTimelineHeader, &lv_font_montserrat_10, 0);
+    lv_label_set_text(lblTimelineHeader, "TIMELINE");
+
+    lblTimeline = lv_label_create(panelLeft);
+    lv_obj_set_style_text_color(lblTimeline, lv_color_hex(Theme::HUDText), 0);
+    lv_obj_set_style_text_font(lblTimeline, &font_kr_12, 0);
+    lv_label_set_recolor(lblTimeline, true);
+    lv_label_set_long_mode(lblTimeline, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(lblTimeline, IPS10_SIDEBAR_W - 28);
+    lv_label_set_text(lblTimeline, "");
+
+#elif IS_ROUND
     // === Round AMOLED layout: top status bar + bottom gauges ===
 
     // Top status bar — centered, narrow
@@ -505,6 +600,34 @@ void update() {
         lv_label_set_text(lblStale, "");
         lv_obj_add_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
     }
+
+#if defined(BOARD_IPS10)
+    // === Timeline list (tablet board only) — newest first, from the firmware ring buffer ===
+    if (lblTimeline) {
+        char tbuf[900];
+        int tpos = 0;
+        lockState();
+        int tlVisible = (int)g_state.timelineCount;
+        if (tlVisible > IPS10_TIMELINE_ROWS) tlVisible = IPS10_TIMELINE_ROWS;
+        for (int i = 0; i < tlVisible; i++) {
+            int idx = (g_state.timelineHead + g_state.timelineCount - 1 - i) % TIMELINE_MAX_ENTRIES;
+            TimelineEntry& e = g_state.timeline[idx];
+            int hh = (e.ts / 3600) % 24;
+            int mm = (e.ts / 60) % 60;
+            char raw[40];
+            strncpy(raw, e.raw, sizeof(raw) - 1);
+            raw[sizeof(raw) - 1] = '\0';
+            for (char* c = raw; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';  // protect recolor
+            tpos += snprintf(tbuf + tpos, sizeof(tbuf) - tpos, "#%06lX %02d:%02d %s#\n",
+                             (unsigned long)ips10TimelineColor(e.type), hh, mm, raw);
+            if (tpos >= (int)sizeof(tbuf) - 80) break;
+        }
+        unlockState();
+        if (tpos == 0) snprintf(tbuf, sizeof(tbuf), "#808080 (no activity yet)#");
+        else if (tbuf[tpos - 1] == '\n') tbuf[tpos - 1] = '\0';
+        lv_label_set_text(lblTimeline, tbuf);
+    }
+#endif
 
     bool connected = hasData && (g_state.wsConnected || Net::serialConnected());
     bool showTankStatus = connected && (p5h >= 0.0f || p7d >= 0.0f);

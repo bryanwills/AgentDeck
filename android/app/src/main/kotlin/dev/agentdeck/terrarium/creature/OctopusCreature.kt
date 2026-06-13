@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.PathParser
+import dev.agentdeck.terrarium.CreatureGeometry
 import dev.agentdeck.terrarium.CreatureNameTagStyle
 import dev.agentdeck.terrarium.creatureNameTagMetric
 import dev.agentdeck.terrarium.resolveCreatureNameTagLayout
@@ -469,18 +470,11 @@ class OctopusCreature(
         /** Deep sleeping position Y — lower, partially hidden. */
         private const val STANDING_Y_DEEP = 0.75f
 
-        /** SVG viewBox dimension (24×24). */
-        private const val SVG_VIEWBOX = 24f
-
-        /**
-         * Antigravity robot path from claudecode.svg.
-         * fill-rule: evenodd — the two inner rects are transparent eye cutouts.
-         */
-        private const val CLAUDE_PATH_DATA =
-            "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"
+        /** SVG viewBox dimension (24×24) — canonical robot geometry (see CreatureGeometry). */
+        private const val SVG_VIEWBOX = CreatureGeometry.OCTOPUS_VIEWBOX
 
         private val robotPath: Path by lazy {
-            PathParser().parsePathString(CLAUDE_PATH_DATA).toPath().apply {
+            PathParser().parsePathString(CreatureGeometry.OCTOPUS_PATH_DATA).toPath().apply {
                 fillType = PathFillType.EvenOdd
             }
         }

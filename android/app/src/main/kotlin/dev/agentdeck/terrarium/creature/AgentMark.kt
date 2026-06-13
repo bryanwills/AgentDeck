@@ -3,6 +3,7 @@ package dev.agentdeck.terrarium.creature
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asComposePath
 import androidx.core.graphics.PathParser
+import dev.agentdeck.terrarium.CreatureGeometry
 
 /**
  * Agent brand marks rendered as watermarks on octopus body.
@@ -47,9 +48,8 @@ sealed class AgentMark(
     }
 }
 
-// OpenClaw lobster body — viewBox 0 0 120 120
-private const val OC_BODY_PATH =
-    "M60 10c-30 0-45 25-45 45s15 40 30 45v10h10v-10s5 2 10 0v10h10v-10c15-5 30-25 30-45S90 10 60 10"
+// OpenClaw lobster body — viewBox 0 0 120 120 (canonical, shared via CreatureGeometry)
+private const val OC_BODY_PATH = CreatureGeometry.CRAYFISH_BODY_PATH_DATA
 
 // Claude AI sparkle/starburst — viewBox 0 0 16 16
 private const val CLAUDE_LOGO_PATH =

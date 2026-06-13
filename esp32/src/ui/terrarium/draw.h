@@ -33,6 +33,15 @@ void circle(int cx, int cy, int r, uint32_t color24, uint8_t alpha);
 /** Line (Bresenham) with alpha blend. */
 void line(int x0, int y0, int x1, int y1, uint32_t color24, uint8_t alpha);
 
+/** Draw an 8-bit alpha coverage mask scaled into a dst box, tinted + alpha-modulated.
+ *  Bilinear sampling. Used for rasterized creature silhouettes (creature_glyphs_generated.h). */
+void alphaMask(const uint8_t* mask, int maskW, int maskH, int x0, int y0,
+               int dstW, int dstH, uint32_t color24, uint8_t alpha);
+
+/** alphaMask with a vertical color gradient (colorTop → colorBottom across dst height). */
+void alphaMaskGradient(const uint8_t* mask, int maskW, int maskH, int x0, int y0,
+                       int dstW, int dstH, uint32_t colorTop, uint32_t colorBottom, uint8_t alpha);
+
 }  // namespace Draw
 
 // Color conversion helpers

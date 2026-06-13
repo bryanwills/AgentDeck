@@ -66,6 +66,8 @@ fun EinkRefreshZone(
     modifier: Modifier = Modifier,
     softTriggerKey: Any? = null,
     softDebounceMs: Long = 120L,
+    sleepSnapshotMode: Boolean = false,
+    sleepThrottleMs: Long = 60_000L,
     content: @Composable () -> Unit,
 ) {
     // Keep a snapshot-backed reference to the latest content lambda so
@@ -94,6 +96,7 @@ fun EinkRefreshZone(
     //                            when primary completed.
     var primaryActiveCount by remember { mutableIntStateOf(0) }
     var lastPrimaryFireMs by remember { mutableLongStateOf(0L) }
+    var lastSleepFireMs by remember { mutableLongStateOf(0L) }
 
     // Debounced refresh on trigger change.
     //
@@ -104,7 +107,7 @@ fun EinkRefreshZone(
     // (different sessionId or question) does. Adding a zone-lifetime gate
     // here would suppress the flash for the next queued prompt when the
     // composable instance is reused across the dismiss-less transition.
-    LaunchedEffect(triggerKey) {
+    LaunchedEffect(triggerKey, sleepSnapshotMode) {
         // Increment ON ENTRY so a relaunched effect's count contribution is
         // visible BEFORE the previous (cancelled) effect's finally decrements.
         // Net count stays >= 1 while ANY primary is in flight.
@@ -118,11 +121,21 @@ fun EinkRefreshZone(
             if (lastTrigger == now) {
                 val view = viewRef
                 if (view != null) {
-                    when (mode) {
-                        RefreshMode.FULL -> EinkRefreshHelper.requestFullRefresh(view)
-                        RefreshMode.FULL_ONCE -> EinkRefreshHelper.requestFullRefresh(view)
-                        RefreshMode.DU -> EinkRefreshHelper.requestDURefresh(view)
-                        RefreshMode.A2 -> EinkRefreshHelper.requestA2Refresh(view)
+                    if (sleepSnapshotMode && mode != RefreshMode.FULL_ONCE) {
+                        val fireNow = System.currentTimeMillis()
+                        val elapsed = fireNow - lastSleepFireMs
+                        if (lastSleepFireMs == 0L || elapsed >= sleepThrottleMs) {
+                            EinkRefreshHelper.requestDURefresh(view)
+                            lastSleepFireMs = fireNow
+                        }
+                    } else {
+                        when (mode) {
+                            RefreshMode.FULL -> EinkRefreshHelper.requestFullRefresh(view)
+                            RefreshMode.FULL_ONCE -> EinkRefreshHelper.requestFullRefresh(view)
+                            RefreshMode.DU -> EinkRefreshHelper.requestDURefresh(view)
+                            RefreshMode.A2 -> EinkRefreshHelper.requestA2Refresh(view)
+                        }
+                        if (!sleepSnapshotMode) lastSleepFireMs = 0L
                     }
                     lastPrimaryFireMs = System.currentTimeMillis()
                 }
@@ -146,6 +159,7 @@ fun EinkRefreshZone(
     // freshly cleaned panel.
     LaunchedEffect(softTriggerKey) {
         if (softTriggerKey == null) return@LaunchedEffect
+        if (sleepSnapshotMode) return@LaunchedEffect
         delay(softDebounceMs)
         if (primaryActiveCount > 0) return@LaunchedEffect
         val sincePrimary = System.currentTimeMillis() - lastPrimaryFireMs
@@ -190,15 +204,29 @@ fun EinkRefreshZone(
 fun EinkAnimatedRefreshZone(
     stateKey: Any,
     modifier: Modifier = Modifier,
+    sleepSnapshotMode: Boolean = false,
+    sleepThrottleMs: Long = 60_000L,
     content: @Composable (onFrameRendered: (isAnimationFrame: Boolean) -> Unit) -> Unit,
 ) {
     val currentContent by rememberUpdatedState(content)
     var viewRef by remember { mutableStateOf<View?>(null) }
+    var lastSleepFireMs by remember { mutableLongStateOf(0L) }
 
     // State transition → full GC16 refresh (debounced to avoid rapid flashes)
-    LaunchedEffect(stateKey) {
+    LaunchedEffect(stateKey, sleepSnapshotMode) {
         delay(500)
-        viewRef?.let { EinkRefreshHelper.requestFullRefresh(it) }
+        viewRef?.let { view ->
+            if (sleepSnapshotMode) {
+                val now = System.currentTimeMillis()
+                if (lastSleepFireMs == 0L || now - lastSleepFireMs >= sleepThrottleMs) {
+                    EinkRefreshHelper.requestDURefresh(view)
+                    lastSleepFireMs = now
+                }
+            } else {
+                EinkRefreshHelper.requestFullRefresh(view)
+                lastSleepFireMs = 0L
+            }
+        }
     }
 
     AndroidView(
@@ -217,7 +245,15 @@ fun EinkAnimatedRefreshZone(
                     setContent {
                         currentContent { isAnimationFrame ->
                             val view = viewRef ?: return@currentContent
-                            if (isAnimationFrame) {
+                            if (sleepSnapshotMode) {
+                                if (!isAnimationFrame) {
+                                    val now = System.currentTimeMillis()
+                                    if (lastSleepFireMs == 0L || now - lastSleepFireMs >= sleepThrottleMs) {
+                                        EinkRefreshHelper.requestDURefresh(view)
+                                        lastSleepFireMs = now
+                                    }
+                                }
+                            } else if (isAnimationFrame) {
                                 EinkRefreshHelper.requestAnimationRefresh(view)
                             } else {
                                 EinkRefreshHelper.requestFullRefresh(view)

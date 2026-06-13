@@ -553,6 +553,8 @@ void parseMessage(const char* json, size_t length) {
         g_state.hostDimMode = dimMode8;
         g_state.hostDimLevel = (uint8_t)scaled;
         unlockState();
+        Serial.printf("[Host] display %s (dim=%d mode=%d level=%d)\n",
+                      displayOn ? "on" : "off", dimEnabled, dimMode8, scaled);
     } else if (strcmp(type, "set_orientation") == 0) {
         bool landscape = obj["landscape"] | true;
         lockState();

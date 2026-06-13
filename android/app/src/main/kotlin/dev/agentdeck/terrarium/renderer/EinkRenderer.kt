@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntSize
 import dev.agentdeck.terrarium.CrayfishVisualState
+import dev.agentdeck.terrarium.CreatureGeometry
 import dev.agentdeck.terrarium.OctopusVisualState
 import dev.agentdeck.terrarium.TetraVisualState
 import dev.agentdeck.terrarium.TerrariumState
@@ -46,91 +47,14 @@ private const val COLOR_EINK_ANIM_FRAME_MS = 100L
 /** Total animation cycle frames — fish patrol uses the full range, creatures use % 4. */
 private const val EINK_ANIM_CYCLE = 32
 
-// --- E-ink Claude Code robot SVG path (from claudecode.svg, viewBox 0 0 24 24) ---
+// Octopus (Claude robot) and crayfish (OpenClaw) silhouettes are rendered from the
+// canonical SVG paths in CreatureGeometry via canvas.drawPath — drawPath works on
+// CremaS/RK3566 e-ink (the old "no drawPath" comments were based on an unverified claim).
 
-private const val EINK_CLAUDE_VIEWBOX = 24f
-private const val EINK_OPENCODE_PIXEL_ASPECT = 1.2f  // OpenCode: near-square (10×9 grid)
-private const val EINK_PIXEL_GAP = 0.5f
+// Codex cloud (6-lobe clover) and OpenCode (nested rounded squares) are procedural — no SVG path.
 
-// Claude Code robot rendered via drawRect in drawEinkOctopus (no SVG Path — e-ink Canvas compat)
-
-// OpenCode nested-square grid (simulator SSOT) — 10x9
-// Cell values: 8=outer frame (#F1ECEC), 9=inner square (#4B4646), 0=gap
-private const val EINK_OPENCODE_COLS = 10
-private const val EINK_OPENCODE_ROWS = 9
-private val EINK_OPENCODE_GRID = arrayOf(
-    intArrayOf(8,8,8,8,8,8,8,8,8,8),
-    intArrayOf(8,0,0,0,0,0,0,0,0,8),
-    intArrayOf(8,0,9,9,9,9,9,9,0,8),
-    intArrayOf(8,0,9,0,0,0,0,9,0,8),
-    intArrayOf(8,0,9,0,0,0,0,9,0,8),
-    intArrayOf(8,0,9,0,0,0,0,9,0,8),
-    intArrayOf(8,0,9,9,9,9,9,9,0,8),
-    intArrayOf(8,0,0,0,0,0,0,0,0,8),
-    intArrayOf(8,8,8,8,8,8,8,8,8,8),
-)
-
-// --- E-ink Codex CLI knot/clover SVG path (from codex.svg, viewBox 0 0 24 24) ---
-
-private const val EINK_CODEX_VIEWBOX = 24f
-
-// Codex logo not needed as separate path — rendered as 6-lobe clover (matching tablet CloudCreature)
-
-// --- E-ink crayfish SVG paths (cached, android.graphics.Path) ---
-
+// E-ink crayfish viewBox (matches CreatureGeometry.CRAYFISH_VIEWBOX).
 private const val EINK_SVG_VIEWBOX = 120f
-
-private val einkCrayfishBodyPath: android.graphics.Path by lazy {
-    android.graphics.Path().apply {
-        moveTo(60f, 10f)
-        cubicTo(30f, 10f, 15f, 35f, 15f, 55f)
-        cubicTo(15f, 75f, 30f, 95f, 45f, 100f)
-        lineTo(45f, 110f)
-        lineTo(55f, 110f)
-        lineTo(55f, 100f)
-        cubicTo(55f, 100f, 60f, 102f, 65f, 100f)
-        lineTo(65f, 110f)
-        lineTo(75f, 110f)
-        lineTo(75f, 100f)
-        cubicTo(90f, 95f, 105f, 75f, 105f, 55f)
-        cubicTo(105f, 35f, 90f, 10f, 60f, 10f)
-        close()
-    }
-}
-
-private val einkCrayfishLeftClawPath: android.graphics.Path by lazy {
-    android.graphics.Path().apply {
-        moveTo(20f, 45f)
-        cubicTo(5f, 40f, 0f, 50f, 5f, 60f)
-        cubicTo(10f, 70f, 20f, 65f, 25f, 55f)
-        cubicTo(28f, 48f, 25f, 45f, 20f, 45f)
-        close()
-    }
-}
-
-private val einkCrayfishRightClawPath: android.graphics.Path by lazy {
-    android.graphics.Path().apply {
-        moveTo(100f, 45f)
-        cubicTo(115f, 40f, 120f, 50f, 115f, 60f)
-        cubicTo(110f, 70f, 100f, 65f, 95f, 55f)
-        cubicTo(92f, 48f, 95f, 45f, 100f, 45f)
-        close()
-    }
-}
-
-private val einkCrayfishLeftAntennaPath: android.graphics.Path by lazy {
-    android.graphics.Path().apply {
-        moveTo(45f, 15f)
-        quadTo(35f, 5f, 30f, 8f)
-    }
-}
-
-private val einkCrayfishRightAntennaPath: android.graphics.Path by lazy {
-    android.graphics.Path().apply {
-        moveTo(75f, 15f)
-        quadTo(85f, 5f, 90f, 8f)
-    }
-}
 
 internal fun einkAnimationFrameIntervalMs(colorEink: Boolean): Long =
     if (colorEink) COLOR_EINK_ANIM_FRAME_MS else EINK_ANIM_FRAME_MS
@@ -154,6 +78,7 @@ private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % mod
 fun EinkTerrariumView(
     state: TerrariumState,
     modifier: Modifier = Modifier,
+    snapshotMode: Boolean = false,
     onFrameRendered: ((isAnimationFrame: Boolean) -> Unit)? = null,
 ) {
     androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
@@ -174,19 +99,21 @@ fun EinkTerrariumView(
         // Persistent boids fish school — survives recomposition, state lives across frames
         val fishSchool = remember { EinkFishSchool() }
 
-        val isAnimating = state.octopus != OctopusVisualState.SLEEPING ||
+        val hasActiveCreatures = state.octopus != OctopusVisualState.SLEEPING ||
             state.crayfish != CrayfishVisualState.DORMANT ||
             state.cloudCreatures.any { it.visualState != OctopusVisualState.SLEEPING } ||
             state.openCodeCreatures.any { it.visualState != OctopusVisualState.SLEEPING }
+        val isAnimating = hasActiveCreatures && !snapshotMode
 
         // Animation loop — platform-specific:
         // B&W e-ink: 2.5fps GC16 partial animation (400ms).
         // Color Kaleido/Gallery: 10fps fast partial animation, but the logical
         // motion clock stays at 400ms so browser-video-capable panels get smoother
         // interpolation without making fish and creatures sprint.
-        LaunchedEffect(isAnimating, widthPx, heightPx) {
+        LaunchedEffect(isAnimating, snapshotMode, widthPx, heightPx) {
             if (!isAnimating) {
-                // Static state: render once
+                // Static or host-asleep snapshot state: render once and let the
+                // caller decide whether that frame warrants an EPD refresh.
                 val bmp = reusableBitmap?.takeIf { it.width == widthPx && it.height == heightPx }
                     ?: Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { reusableBitmap = it }
                 renderedBitmap = renderEinkFrame(currentState, widthPx, heightPx, 0f, bmp, fishSchool = fishSchool)
@@ -225,10 +152,11 @@ fun EinkTerrariumView(
         val agentsKey = state.agents.map { it.visualState }
         val cloudsKey = state.cloudCreatures.map { it.visualState }
         val openCodeKey = state.openCodeCreatures.map { it.visualState }
-        LaunchedEffect(state.octopus, state.crayfish, state.tetra, state.environment, agentsKey, cloudsKey, openCodeKey, widthPx, heightPx) {
+        LaunchedEffect(snapshotMode, state.octopus, state.crayfish, state.tetra, state.environment, agentsKey, cloudsKey, openCodeKey, widthPx, heightPx) {
             val bmp = reusableBitmap?.takeIf { it.width == widthPx && it.height == heightPx }
                 ?: Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { reusableBitmap = it }
-            renderedBitmap = renderEinkFrame(currentState, widthPx, heightPx, animFrame, bmp, fishSchool = fishSchool)
+            val frame = if (snapshotMode) 0f else animFrame
+            renderedBitmap = renderEinkFrame(currentState, widthPx, heightPx, frame, bmp, fishSchool = fishSchool)
             hostView.postInvalidate()
             onFrameRendered?.invoke(false)
         }
@@ -684,10 +612,9 @@ private fun drawEinkOctopus(
             0.02f * kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat())
     }
 
-    // 12×8 pixel grid Claude Code robot — matches ESP32 octopus.cpp SSOT
+    // Canonical 24×24 Claude Code robot SVG path (EvenOdd eye cutouts) — shared
+    // with the tablet renderer via CreatureGeometry, replacing the old 12×8 block grid.
     val bodyWidth = w * 0.10f * scaleFactor
-    val cellW = bodyWidth / 12f
-    val cellH = cellW  // square cells
 
     // SLEEPING: dimmer body
     val bodyColor = if (state == OctopusVisualState.SLEEPING) {
@@ -699,31 +626,16 @@ private fun drawEinkOctopus(
     paint.style = Paint.Style.FILL
     paint.color = bodyColor
 
-    val startX = cx - 6f * cellW
-    val startY = cy - 4f * cellH
-
-    // ESP32 SSOT grid: 0=transparent, 1=body
-    val grid = arrayOf(
-        intArrayOf(0,0,1,1,1,1,1,1,1,1,0,0),
-        intArrayOf(0,0,1,1,0,1,1,0,1,1,0,0),  // eye cutouts
-        intArrayOf(1,1,1,1,0,1,1,0,1,1,1,1),
-        intArrayOf(1,1,1,1,1,1,1,1,1,1,1,1),
-        intArrayOf(1,1,1,1,1,1,1,1,1,1,1,1),
-        intArrayOf(0,1,1,1,1,1,1,1,1,1,1,0),
-        intArrayOf(0,0,1,0,1,0,0,1,0,1,0,0),  // pegs
-        intArrayOf(0,0,1,0,1,0,0,1,0,1,0,0),
-    )
-
-    for (row in grid.indices) {
-        for (col in grid[row].indices) {
-            if (grid[row][col] == 0) continue
-            canvas.drawRect(
-                startX + col * cellW, startY + row * cellH,
-                startX + (col + 1) * cellW, startY + (row + 1) * cellH,
-                paint,
-            )
-        }
-    }
+    // Map the 24×24 viewBox so the robot width == bodyWidth, centered on (cx, cy).
+    val svgScale = bodyWidth / CreatureGeometry.OCTOPUS_VIEWBOX
+    // Name tag anchors to the robot's true top (path min-y ≈ viewBox y=5 of 24), not the box edge.
+    val startY = cy - bodyWidth / 2f + svgScale * 5f
+    canvas.save()
+    canvas.translate(cx, cy)
+    canvas.scale(svgScale, svgScale)
+    canvas.translate(-CreatureGeometry.OCTOPUS_VIEWBOX / 2f, -CreatureGeometry.OCTOPUS_VIEWBOX / 2f)
+    canvas.drawPath(CreatureGeometry.octopusNativePath, paint)
+    canvas.restore()
 
     // Name tag FIRST (behind bubble) — multi-session only
     if (displayName != null) {
@@ -1145,35 +1057,31 @@ private fun drawEinkCrayfish(
         canvas.rotate(-10f, EINK_SVG_VIEWBOX / 2f, EINK_SVG_VIEWBOX / 2f)
     }
 
-    // 1. Body — oval (no drawPath — e-ink Canvas compat)
+    // 1. Body — canonical 120×120 OpenClaw crayfish path (shared via CreatureGeometry,
+    //    leg/tail nubs are part of the path). drawPath works on e-ink Canvas.
     paint.style = Paint.Style.FILL
     paint.color = if (state == CrayfishVisualState.SICK) {
         einkPick(GRAY_CRAY_SICK, COLOR_CRAY_SICK)
     } else {
         einkPick(GRAY_CRAY_BODY, COLOR_CRAY_BODY)
     }
-    canvas.drawOval(RectF(20f, 15f, 100f, 100f), paint)
-    // Legs (3 pairs)
-    for (lx in listOf(45f, 55f, 65f)) {
-        canvas.drawRect(lx - 3f, 95f, lx + 3f, 110f, paint)
-        canvas.drawRect(lx + 15f - 3f, 95f, lx + 15f + 3f, 110f, paint)
-    }
+    canvas.drawPath(CreatureGeometry.crayfishBodyNativePath, paint)
 
-    // 2. Left claw — oval with rotation
+    // 2. Left claw — canonical path, rotated about its body pivot
     paint.color = if (state == CrayfishVisualState.SICK) {
         einkPick(GRAY_CRAY_BODY, COLOR_CRAY_SICK)
     } else {
         einkPick(GRAY_CRAY_CLAW, COLOR_CRAY_CLAW)
     }
     canvas.save()
-    canvas.rotate(-clawAngle, 20f, 45f)
-    canvas.drawOval(RectF(2f, 38f, 30f, 65f), paint)
+    canvas.rotate(-clawAngle, CreatureGeometry.CRAYFISH_LEFT_CLAW_PIVOT_X, CreatureGeometry.CRAYFISH_LEFT_CLAW_PIVOT_Y)
+    canvas.drawPath(CreatureGeometry.crayfishLeftClawNativePath, paint)
     canvas.restore()
 
-    // 3. Right claw — oval with rotation
+    // 3. Right claw — canonical path, rotated about its body pivot
     canvas.save()
-    canvas.rotate(clawAngle, 100f, 45f)
-    canvas.drawOval(RectF(90f, 38f, 118f, 65f), paint)
+    canvas.rotate(clawAngle, CreatureGeometry.CRAYFISH_RIGHT_CLAW_PIVOT_X, CreatureGeometry.CRAYFISH_RIGHT_CLAW_PIVOT_Y)
+    canvas.drawPath(CreatureGeometry.crayfishRightClawNativePath, paint)
     canvas.restore()
 
     // 4. Antennae — lines

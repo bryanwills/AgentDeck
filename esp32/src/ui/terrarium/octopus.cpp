@@ -1,6 +1,7 @@
 #include "octopus.h"
 #include "draw.h"
 #include "renderer.h"
+#include "creature_glyphs_generated.h"
 #include "../theme.h"
 #include "../display.h"
 #include "config.h"
@@ -10,21 +11,10 @@
 #include <cstring>
 #include <cmath>
 
-// Simulator SSOT: 12×8 Claude Code block glyph from claudecode-color.svg
-// Flat terracotta glyph: rectangular body, eye cutouts, lower pegs.
-// 0=empty, 1=body (all cells are body — no separate eye/arm/leg types for glyph)
-static const uint8_t GRID[8][12] = {
-    {0,0,1,1,1,1,1,1,1,1,0,0},
-    {0,0,1,1,0,1,1,0,1,1,0,0},  // eye cutouts
-    {1,1,1,1,0,1,1,0,1,1,1,1},
-    {1,1,1,1,1,1,1,1,1,1,1,1},
-    {1,1,1,1,1,1,1,1,1,1,1,1},
-    {0,1,1,1,1,1,1,1,1,1,1,0},
-    {0,0,1,0,1,0,0,1,0,1,0,0},  // lower pegs
-    {0,0,1,0,1,0,0,1,0,1,0,0},
-};
-constexpr int GRID_COLS = 12;
-constexpr int GRID_ROWS = 8;
+// Claude Code robot silhouette rendered from the canonical 24×24 SVG path,
+// rasterized at build time into CreatureGlyphs::OCTOPUS_A8 (alpha mask, EvenOdd eye
+// cutouts) by scripts/generate-creature-glyphs.mjs. Replaces the old 12×8 block grid
+// so ESP32 matches the Apple/Android/StreamDeck robot.
 
 // Per-instance jitter (seeded by index)
 static float jitterX[MAX_OCTOPUS];
@@ -71,9 +61,9 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     // Dynamic scale: shrink creatures when many sessions
     float scaleFactor = (total >= 5) ? 0.60f : (total >= 4) ? 0.70f : (total >= 3) ? 0.85f : 1.0f;
     float bodyRadius = w * Layout::OctBodyRadiusFrac * scaleFactor;
+    // The robot occupies the full 24×24 viewBox; map it into a square box so the
+    // on-screen footprint matches the old block glyph (~bodyRadius*2.2 wide).
     float glyphW = bodyRadius * 2.2f;
-    float cellW = glyphW / GRID_COLS;
-    float cellH = cellW;  // square cells for block glyph
 
     // Calculate home position — wider spread for more creatures
     float homeX;
@@ -158,10 +148,8 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     int cy = (int)(renderY * h + breathBob);
     uint8_t alpha = (uint8_t)(255 * bodyAlpha);
 
-    int cW = max(1, (int)cellW);
-    int cH = max(1, (int)cellH);
-    int glyphPxW = GRID_COLS * cW;
-    int glyphPxH = GRID_ROWS * cH;
+    int glyphPxW = max(1, (int)glyphW);
+    int glyphPxH = glyphPxW;  // square box mapping the 24×24 viewBox
     int startX = cx - glyphPxW / 2;
     int startY = cy - glyphPxH / 2;
 
@@ -175,19 +163,9 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         }
     }
 
-    // Render 12×8 block glyph
-    for (int row = 0; row < GRID_ROWS; row++) {
-        for (int col = 0; col < GRID_COLS; col++) {
-            if (GRID[row][col] == 0) continue;
-            int px = startX + col * cW;
-            int py = startY + row * cH;
-            for (int dy = 0; dy < cH; dy++) {
-                for (int dx = 0; dx < cW; dx++) {
-                    Draw::pixelA(px + dx, py + dy, bodyColor, alpha);
-                }
-            }
-        }
-    }
+    // Render canonical robot silhouette from the rasterized alpha mask
+    Draw::alphaMask(CreatureGlyphs::OCTOPUS_A8, CreatureGlyphs::OCTOPUS_W, CreatureGlyphs::OCTOPUS_H,
+                    startX, startY, glyphPxW, glyphPxH, bodyColor, alpha);
 
     // Speech bubble for ASKING state — positioned beside body (not above, to avoid name tag overlap)
     if (state == CreatureState::ASKING) {

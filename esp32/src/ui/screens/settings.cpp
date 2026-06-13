@@ -127,8 +127,24 @@ lv_obj_t* settingsCreate() {
     lv_obj_center(lblReboot);
     lv_label_set_text(lblReboot, "Reboot");
 
-    // Orientation toggle (IPS 3.5" / TTGO T-Display / ESP32-C6 1.47")
-#if defined(BOARD_IPS35) || defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+    // Orientation control
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+    // Small panels: 90° step rotation (same behavior as the physical button)
+    lv_obj_t* btnOrient = lv_btn_create(screen);
+    lv_obj_set_size(btnOrient, g_screenW - 40, 38);
+    lv_obj_set_style_bg_color(btnOrient, lv_color_hex(0x1E3A5F), 0);
+    lv_obj_set_style_radius(btnOrient, 6, 0);
+    lv_obj_add_event_cb(btnOrient, [](lv_event_t* e) {
+        lockState();
+        g_state.pendingRotation = (int8_t)((UI::getRotationIndex() + 1) & 3);
+        g_state.orientationChanged = true;
+        unlockState();
+    }, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* lblOrient = lv_label_create(btnOrient);
+    lv_obj_set_style_text_color(lblOrient, lv_color_hex(Theme::HUDText), 0);
+    lv_obj_center(lblOrient);
+    lv_label_set_text(lblOrient, "Rotate 90");
+#elif defined(BOARD_IPS35)
     lv_obj_t* btnOrient = lv_btn_create(screen);
     lv_obj_set_size(btnOrient, g_screenW - 40, 38);
     lv_obj_set_style_bg_color(btnOrient, lv_color_hex(0x1E3A5F), 0);

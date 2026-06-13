@@ -90,6 +90,13 @@ static uint16_t ttgo_canvas_buf[canvasW * canvasH];
 static uint16_t c6_canvas_buf[SCREEN_W * SCREEN_H];
 #define canvasW g_screenW
 #define canvasH g_screenH
+#elif defined(BOARD_IPS10)
+// Tablet layout: terrarium occupies the LEFT region; the HUD sidebar (logo/sessions/
+// usage/timeline) overlays the right. Shrinking the canvas width keeps creatures —
+// positioned by fraction of canvas width — clear of the sidebar automatically.
+static constexpr int IPS10_TERRARIUM_W = 480;  // 800 − ~300px sidebar − margins
+#define canvasW IPS10_TERRARIUM_W
+#define canvasH g_screenH
 #else
 #define canvasW g_screenW
 #define canvasH g_screenH
@@ -139,6 +146,73 @@ static void fillCircle(int cx, int cy, int r, uint32_t color24, uint8_t alpha) {
             if (dx * dx + dy * dy <= r2) {
                 setPixelAlpha(cx + dx, cy + dy, color24, alpha);
             }
+        }
+    }
+}
+
+// Draw an 8-bit alpha coverage mask (e.g. a rasterized creature silhouette) scaled
+// into a destination box, tinted with color24 and modulated by a global alpha.
+// Bilinear sampling so the single high-res master downsizes/upsizes smoothly.
+static void fillAlphaMask(const uint8_t* mask, int maskW, int maskH,
+                          int x0, int y0, int dstW, int dstH,
+                          uint32_t color24, uint8_t alpha) {
+    if (!mask || dstW <= 0 || dstH <= 0 || alpha == 0) return;
+    const float fx = (float)maskW / dstW;
+    const float fy = (float)maskH / dstH;
+    for (int py = 0; py < dstH; py++) {
+        // Map dst pixel center back into mask space, then clamp for bilinear taps.
+        float sy = (py + 0.5f) * fy - 0.5f;
+        int y1 = (int)floorf(sy);
+        float wy = sy - y1;
+        int ya = y1 < 0 ? 0 : (y1 >= maskH ? maskH - 1 : y1);
+        int yb = (y1 + 1) < 0 ? 0 : ((y1 + 1) >= maskH ? maskH - 1 : y1 + 1);
+        for (int px = 0; px < dstW; px++) {
+            float sx = (px + 0.5f) * fx - 0.5f;
+            int x1 = (int)floorf(sx);
+            float wx = sx - x1;
+            int xa = x1 < 0 ? 0 : (x1 >= maskW ? maskW - 1 : x1);
+            int xb = (x1 + 1) < 0 ? 0 : ((x1 + 1) >= maskW ? maskW - 1 : x1 + 1);
+            float a00 = mask[ya * maskW + xa], a10 = mask[ya * maskW + xb];
+            float a01 = mask[yb * maskW + xa], a11 = mask[yb * maskW + xb];
+            float top = a00 + (a10 - a00) * wx;
+            float bot = a01 + (a11 - a01) * wx;
+            int cov = (int)(top + (bot - top) * wy + 0.5f);
+            if (cov <= 0) continue;
+            uint8_t a = (uint8_t)((cov * alpha) / 255);
+            if (a) setPixelAlpha(x0 + px, y0 + py, color24, a);
+        }
+    }
+}
+
+// Alpha-mask draw with a vertical color gradient (top → bottom), e.g. the crayfish
+// shell shading. Same bilinear coverage sampling as fillAlphaMask.
+static void fillAlphaMaskGradient(const uint8_t* mask, int maskW, int maskH,
+                                  int x0, int y0, int dstW, int dstH,
+                                  uint32_t colorTop, uint32_t colorBottom, uint8_t alpha) {
+    if (!mask || dstW <= 0 || dstH <= 0 || alpha == 0) return;
+    const float fx = (float)maskW / dstW;
+    const float fy = (float)maskH / dstH;
+    for (int py = 0; py < dstH; py++) {
+        uint32_t rowColor = lerpColor(colorTop, colorBottom, (py + 0.5f) / dstH);
+        float sy = (py + 0.5f) * fy - 0.5f;
+        int y1 = (int)floorf(sy);
+        float wy = sy - y1;
+        int ya = y1 < 0 ? 0 : (y1 >= maskH ? maskH - 1 : y1);
+        int yb = (y1 + 1) < 0 ? 0 : ((y1 + 1) >= maskH ? maskH - 1 : y1 + 1);
+        for (int px = 0; px < dstW; px++) {
+            float sx = (px + 0.5f) * fx - 0.5f;
+            int x1 = (int)floorf(sx);
+            float wx = sx - x1;
+            int xa = x1 < 0 ? 0 : (x1 >= maskW ? maskW - 1 : x1);
+            int xb = (x1 + 1) < 0 ? 0 : ((x1 + 1) >= maskW ? maskW - 1 : x1 + 1);
+            float a00 = mask[ya * maskW + xa], a10 = mask[ya * maskW + xb];
+            float a01 = mask[yb * maskW + xa], a11 = mask[yb * maskW + xb];
+            float top = a00 + (a10 - a00) * wx;
+            float bot = a01 + (a11 - a01) * wx;
+            int cov = (int)(top + (bot - top) * wy + 0.5f);
+            if (cov <= 0) continue;
+            uint8_t a = (uint8_t)((cov * alpha) / 255);
+            if (a) setPixelAlpha(x0 + px, y0 + py, rowColor, a);
         }
     }
 }
@@ -421,4 +495,12 @@ namespace Draw {
     void rect(int x, int y, int w, int h, uint16_t color) { fillRect(x, y, w, h, color); }
     void circle(int cx, int cy, int r, uint32_t color24, uint8_t alpha) { fillCircle(cx, cy, r, color24, alpha); }
     void line(int x0, int y0, int x1, int y1, uint32_t color24, uint8_t alpha) { drawLine(x0, y0, x1, y1, color24, alpha); }
+    void alphaMask(const uint8_t* mask, int maskW, int maskH, int x0, int y0,
+                   int dstW, int dstH, uint32_t color24, uint8_t alpha) {
+        fillAlphaMask(mask, maskW, maskH, x0, y0, dstW, dstH, color24, alpha);
+    }
+    void alphaMaskGradient(const uint8_t* mask, int maskW, int maskH, int x0, int y0,
+                           int dstW, int dstH, uint32_t colorTop, uint32_t colorBottom, uint8_t alpha) {
+        fillAlphaMaskGradient(mask, maskW, maskH, x0, y0, dstW, dstH, colorTop, colorBottom, alpha);
+    }
 }

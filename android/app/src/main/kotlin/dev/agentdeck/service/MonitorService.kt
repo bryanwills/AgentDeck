@@ -52,6 +52,7 @@ class MonitorService : Service() {
     private lateinit var brightnessController: BrightnessController
     private lateinit var displayPrefs: DisplayPreferences
     private var idleTimeoutJob: Job? = null
+    private var lastBridgeDisplayOn = true
 
     private val keepaliveRunnable = object : Runnable {
         override fun run() {
@@ -107,6 +108,7 @@ class MonitorService : Service() {
             }
 
             if (bridgeConnected) {
+                lastBridgeDisplayOn = hostDisplayOn
                 // Bridge connected — use host display state directly
                 idleTimeoutJob?.cancel()
                 idleTimeoutJob = null
@@ -122,10 +124,18 @@ class MonitorService : Service() {
                 }
             } else {
                 // Bridge not connected — use idle timeout fallback
-                // If dimmed from previous bridge-connected sync, restore immediately
+                // LCD tablets should not remain black after a network drop.
+                // E-ink devices, however, intentionally keep the last image
+                // with frontlight off if the last bridge signal was "host
+                // display off"; reconnect/wake will restore explicitly.
                 if (brightnessController.isDimmed()) {
-                    Log.d(TAG, "Bridge disconnected while dimmed — restoring brightness")
-                    brightnessController.restore()
+                    if (isEink && !lastBridgeDisplayOn) {
+                        Log.d(TAG, "Bridge disconnected while host was asleep — preserving e-ink snapshot")
+                        return@launch
+                    } else {
+                        Log.d(TAG, "Bridge disconnected while dimmed — restoring brightness")
+                        brightnessController.restore()
+                    }
                 }
                 val isIdle = agentState == AgentState.DISCONNECTED || agentState == AgentState.IDLE
                 if (isIdle) {

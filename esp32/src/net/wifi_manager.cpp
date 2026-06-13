@@ -12,6 +12,9 @@ namespace Net {
 
 void wifiInit() {
     WiFi.mode(WIFI_STA);
+    // Disable modem power-save: with PS on, classic ESP32 WiFi stalls periodically
+    // (TCP connect timeouts, resets, WS drops within seconds of connecting).
+    WiFi.setSleep(false);
 
     // Non-blocking portal mode: if no saved credentials, starts AP
     // but returns immediately so serial can still work
@@ -56,6 +59,16 @@ void wifiLoop() {
 
 bool wifiConnected() {
     return WiFi.isConnected();
+}
+
+void wifiSetRadioParked(bool parked) {
+    if (parked) {
+        WiFi.mode(WIFI_OFF);
+    } else {
+        WiFi.mode(WIFI_STA);
+        WiFi.setSleep(false);
+        WiFi.reconnect();
+    }
 }
 
 bool wifiConnectWith(const char* ssid, const char* password) {

@@ -10,7 +10,8 @@
   },
   "files": [
     "dist",
-    "!dist/__tests__"
+    "!dist/__tests__",
+    "assets/fonts"
   ],
   "main": "./dist/index.js",
   "bin": {

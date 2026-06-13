@@ -22,6 +22,7 @@ See [docs/architecture.md](docs/architecture.md) for full architecture details (
 pnpm install
 pnpm build                  # shared must build before bridge/plugin
 pnpm generate-icons         # SVG → PNG icons (first build or after icon changes)
+pnpm generate-creature-glyphs  # canonical creature SVG → ESP32 alpha-mask C header (esp32/.../creature_glyphs_generated.h)
 pnpm generate-protocol      # protocol.ts → JSON Schema → Swift/Kotlin types (generated/protocol/)
 ```
 

@@ -1,4 +1,5 @@
 #include "aquarium.h"
+#include <Arduino.h>
 #include "../terrarium/renderer.h"
 #include "../widgets/hud_bar.h"
 #include "../display.h"
@@ -257,6 +258,10 @@ void aquariumUpdate(float dt) {
 
 void aquariumSetConnectionStatus(ConnOverlayStatus status) {
     if (!connScrim || !connStatusLabel) return;
+
+    // Diagnostic: scrim transitions are the prime suspect for "black screen"
+    // reports on small panels (scrim bg 0x070B13 reads as black)
+    Serial.printf("[Conn] overlay status=%d\n", (int)status);
 
     if (status == ConnOverlayStatus::HIDDEN) {
 #if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)

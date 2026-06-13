@@ -1,11 +1,13 @@
 #include "crayfish.h"
 #include "draw.h"
+#include "creature_glyphs_generated.h"
 #include "../theme.h"
 #include "config.h"
 #include <cmath>
 
 /**
- * Front-facing crayfish — approximation of Android SVG (viewBox 0 0 120 120).
+ * Front-facing crayfish — canonical OpenClaw body (viewBox 0 0 120 120) rendered from
+ * a build-time alpha mask; claws/antennae/eyes stay procedural so their animation works.
  *
  * DORMANT:  completely still, dropped down, dimmed (alpha 0.4)
  * SITTING:  nearly still on rocks, subtle heartbeat glow only
@@ -165,11 +167,11 @@ void render(uint16_t* buf, int w, int h, float time, CrayfishState state) {
 
     int cy = baseY + (int)vertBob;
 
-    // === Draw body (SVG-like rounded blob) ===
-    // Main body: ellipse roughly mapping SVG body shape
-    // SVG body: 90 wide × 90 tall centered at (60, 55) in 120×120
-    int bodyRX = (int)(45 * scale);  // half-width
-    int bodyRY = (int)(42 * scale);  // half-height (slightly shorter than wide)
+    // === Draw body — canonical 120×120 OpenClaw crayfish silhouette ===
+    // Rendered from the build-time alpha mask (CreatureGlyphs::CRAYFISH_BODY_A8), which
+    // includes the leg/tail nubs. The firmware center convention maps viewBox (60,55)
+    // → (cx,cy) (shared with the claw/eye/antenna math below).
+    int bodyRX = (int)(45 * scale);  // retained for downstream layout references
 
     // Sick tilt: offset the body
     int tiltOffX = 0;
@@ -177,36 +179,14 @@ void render(uint16_t* buf, int w, int h, float time, CrayfishState state) {
         tiltOffX = (int)(bodyRX * 0.08f);
     }
 
-    // Body fill with gradient (top lighter, bottom darker)
-    for (int dy = -bodyRY; dy <= bodyRY; dy++) {
-        float fy = (float)(dy + bodyRY) / (2 * bodyRY);  // 0=top, 1=bottom
-        float t = fy;  // gradient factor
-        uint32_t rowColor = lerpColor(shellColor, shellDark, t);
-        float et = (float)dy / (bodyRY + 1);
-        int hw = (int)(bodyRX * sqrtf(1.0f - et * et));
-        // Taper top and bottom more for rounded-square blob look
-        float taper = 1.0f;
-        if (fy < 0.2f) taper = 0.7f + fy * 1.5f;
-        else if (fy > 0.85f) taper = 0.7f + (1.0f - fy) * 2.0f;
-        hw = (int)(hw * taper);
-        for (int dx = -hw; dx <= hw; dx++) {
-            Draw::pixelA(cx + dx + tiltOffX, cy + dy, rowColor, alpha);
-        }
-    }
-
-    // Small leg bumps at bottom (like SVG v10/h10 segments)
-    int legY = cy + bodyRY;
-    int legW = (int)(5 * scale);
-    int legH = (int)(8 * scale);
-    int legSpacing = (int)(10 * scale);
-    for (int i = 0; i < 2; i++) {
-        int lx = cx - legSpacing + i * legSpacing * 2 + tiltOffX;
-        for (int dy = 0; dy < legH; dy++) {
-            for (int dx = -legW / 2; dx <= legW / 2; dx++) {
-                Draw::pixelA(lx + dx, legY + dy, shellDark, alpha);
-            }
-        }
-    }
+    // Map the full 120-unit viewBox into a square box, centered on (60,55) → (cx,cy),
+    // with the canonical top-light/bottom-dark shell gradient.
+    int bodyBox = max(1, (int)(120 * scale));
+    int bodyX0 = cx - (int)(60 * scale) + tiltOffX;
+    int bodyY0 = cy - (int)(55 * scale);
+    Draw::alphaMaskGradient(CreatureGlyphs::CRAYFISH_BODY_A8,
+                            CreatureGlyphs::CRAYFISH_BODY_W, CreatureGlyphs::CRAYFISH_BODY_H,
+                            bodyX0, bodyY0, bodyBox, bodyBox, shellColor, shellDark, alpha);
 
     // === Claws (SVG: pivot at (20,45) and (100,45) in 120×120 viewbox) ===
     // Left claw pivot: SVG (20,45) → offset from center (60,55) = (-40, -10)

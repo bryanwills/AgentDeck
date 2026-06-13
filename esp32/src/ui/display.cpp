@@ -199,6 +199,9 @@ public:
 
 #elif defined(BOARD_TTGO)
 // ===== TTGO T-Display: ST7789 1.14" 135x240 SPI =====
+// Backlight: LovyanGFX Light_PWM is the SINGLE owner of GPIO4. setBrightness()
+// and reassertPanel() both go through tft.setBrightness() — never raw Arduino
+// ledc (mixing the two left the backlight dark).
 class LGFX : public lgfx::LGFX_Device {
 public:
     lgfx::Bus_SPI        _bus_instance;
@@ -241,7 +244,7 @@ public:
             _panel_instance.config(cfg);
         }
 
-        // Backlight configuration
+        // Backlight configuration (LovyanGFX Light_PWM — single owner of GPIO4)
         {
             auto cfg = _light_instance.config();
             cfg.pin_bl = BOARD_PIN_BL;
@@ -527,6 +530,22 @@ static bool touch_read_gsl3680(uint16_t* x, uint16_t* y) {
 
 #if !defined(BOARD_AMOLED) && !defined(BOARD_IPS35) && !defined(BOARD_IPS10)
 static LGFX tft;
+
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+// Rotation index 0-3 in 90° steps: 0 = upright portrait, 1 = landscape,
+// 2 = flipped portrait, 3 = flipped landscape.
+// C6 panel is mounted 180° from the ST7789 default scan direction → hw offset +2.
+static uint8_t g_rotIndex = 0;
+#if defined(BOARD_ESP32_C6_147)
+static inline uint8_t hwRotation(uint8_t idx) { return (idx + 2) & 3; }
+#else
+static inline uint8_t hwRotation(uint8_t idx) { return idx & 3; }
+#endif
+#endif
+#if defined(BOARD_TTGO)
+// Last brightness applied — re-asserted periodically to self-heal stuck backlight
+static int s_lastBrightness = 255;
+#endif
 #endif
 static lv_display_t* disp = nullptr;
 
@@ -882,43 +901,26 @@ void displayInit() {
     tft.fillScreen(0x0000);
     Serial.println("[Display] ===== PANEL TEST END =====");
 #endif
-#if defined(BOARD_TTGO)
-    // Read saved orientation from NVS (default: portrait)
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+    // Read saved rotation index from NVS (0-3, 90° steps).
+    // Defaults: TTGO upright portrait (0), C6 landscape (1).
     {
         Preferences prefs;
         prefs.begin("agentdeck", true);
-        bool landscape = prefs.getBool("landscape", false);  // TTGO defaults to portrait
+#if defined(BOARD_ESP32_C6_147)
+        uint8_t defRot = 1;
+#else
+        // Legacy migration: older firmware stored a bool "landscape"
+        uint8_t defRot = prefs.getBool("landscape", false) ? 1 : 0;
+#endif
+        uint8_t rot = prefs.getUChar("rot", defRot) & 3;
         prefs.end();
-        if (landscape) {
-            tft.setRotation(1);  // TTGO landscape (LovyanGFX rotation 1)
-            g_screenW = SCREEN_H;  // 240: landscape width
-            g_screenH = SCREEN_W;  // 135: landscape height
-        } else {
-            tft.setRotation(0);  // TTGO portrait (LovyanGFX rotation 0)
-            g_screenW = SCREEN_W;  // 135: portrait width
-            g_screenH = SCREEN_H;  // 240: portrait height
-        }
-        Serial.printf("[Display] TTGO orientation: %s (%dx%d)\n",
-                      landscape ? "landscape" : "portrait", g_screenW, g_screenH);
-    }
-#elif defined(BOARD_ESP32_C6_147)
-    // C6 1.47": orientation from NVS, defaults to LANDSCAPE
-    {
-        Preferences prefs;
-        prefs.begin("agentdeck", true);
-        bool landscape = prefs.getBool("landscape", true);  // C6 defaults to landscape
-        prefs.end();
-        if (landscape) {
-            tft.setRotation(3);    // C6 panel mounted 180° from default — flipped landscape
-            g_screenW = SCREEN_H;  // 320: landscape width
-            g_screenH = SCREEN_W;  // 172: landscape height
-        } else {
-            tft.setRotation(2);    // flipped portrait
-            g_screenW = SCREEN_W;  // 172: portrait width
-            g_screenH = SCREEN_H;  // 320: portrait height
-        }
-        Serial.printf("[Display] C6 orientation: %s (%dx%d)\n",
-                      landscape ? "landscape" : "portrait", g_screenW, g_screenH);
+        g_rotIndex = rot;
+        bool landscape = rot & 1;
+        g_screenW = landscape ? SCREEN_H : SCREEN_W;
+        g_screenH = landscape ? SCREEN_W : SCREEN_H;
+        tft.setRotation(hwRotation(rot));
+        Serial.printf("[Display] Rotation index %d (%dx%d)\n", rot, g_screenW, g_screenH);
     }
 #else
     tft.setRotation(BOARD_ROTATION);
@@ -1040,17 +1042,11 @@ void setBrightness(int level) {
     pinMode(BOARD_PIN_BL, OUTPUT);
     digitalWrite(BOARD_PIN_BL, level > 0 ? HIGH : LOW);
 #elif defined(BOARD_TTGO)
-    // TTGO T-Display: PWM backlight with explicit re-init to prevent stuck PWM after sleep
-    if (level <= 0) {
-        // Force complete off when brightness is 0
-        digitalWrite(BOARD_PIN_BL, LOW);
-    } else {
-        // Re-attach PWM channel on each setBrightness call to recover from sleep
-        // This prevents the PWM channel from getting stuck in off state
-        ledcDetach(BOARD_PIN_BL);
-        ledcAttach(BOARD_PIN_BL, 12000, 8);  // 12kHz PWM, 8-bit resolution
-        ledcWrite(BOARD_PIN_BL, level);
-    }
+    // TTGO: LovyanGFX Light_PWM owns GPIO4 (single owner). s_lastBrightness lets
+    // reassertPanel() re-apply duty to self-heal a stuck backlight after sleep.
+    s_lastBrightness = level;
+    Serial.printf("[BL] %d\n", level);
+    tft.setBrightness(level);
 #else
     tft.setBrightness(level);
 #endif
@@ -1072,26 +1068,46 @@ bool isLandscape() {
 #endif
 }
 
+void setRotationIndex(uint8_t idx) {
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+    idx &= 3;
+    if (idx == g_rotIndex) return;
+    g_rotIndex = idx;
+
+    bool landscape = idx & 1;
+    g_screenW = landscape ? SCREEN_H : SCREEN_W;
+    g_screenH = landscape ? SCREEN_W : SCREEN_H;
+    tft.setRotation(hwRotation(idx));
+    lv_display_set_resolution(disp, g_screenW, g_screenH);
+
+    Serial.printf("[Display] Rotation: %d (%dx%d)\n", idx, g_screenW, g_screenH);
+
+    Preferences prefs;
+    prefs.begin("agentdeck", false);
+    prefs.putUChar("rot", g_rotIndex);
+    prefs.end();
+#else
+    (void)idx;
+#endif
+}
+
+uint8_t getRotationIndex() {
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+    return g_rotIndex;
+#else
+    return 0;
+#endif
+}
+
 void setOrientation(bool landscape) {
-#if defined(BOARD_IPS35) || defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+#if defined(BOARD_IPS35)
     bool currentLandscape = g_screenW > g_screenH;
     if (landscape == currentLandscape) return;
 
-#if defined(BOARD_IPS35)
     // IPS35: SCREEN_W is the landscape (wide) dimension
     g_screenW = landscape ? SCREEN_W : SCREEN_H;
     g_screenH = landscape ? SCREEN_H : SCREEN_W;
     gfx->setRotation(landscape ? 1 : 0);
-#else
-    // TTGO / C6: SCREEN_W is the portrait (narrow) dimension
-    g_screenW = landscape ? SCREEN_H : SCREEN_W;
-    g_screenH = landscape ? SCREEN_W : SCREEN_H;
-#if defined(BOARD_ESP32_C6_147)
-    tft.setRotation(landscape ? 3 : 2);  // C6 panel mounted 180° from default
-#else
-    tft.setRotation(landscape ? 1 : 0);
-#endif
-#endif
     lv_display_set_resolution(disp, g_screenW, g_screenH);
 
     Serial.printf("[Display] Orientation: %s (%dx%d)\n",
@@ -1101,8 +1117,24 @@ void setOrientation(bool landscape) {
     prefs.begin("agentdeck", false);
     prefs.putBool("landscape", landscape);
     prefs.end();
+#elif defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+    // Legacy bool API (network set_orientation) → rotation index
+    setRotationIndex(landscape ? 1 : 0);
 #else
     (void)landscape;
+#endif
+}
+
+void reassertPanel() {
+#if defined(BOARD_TTGO)
+    // Self-heal for intermittent black screen: re-issue DISPON (no-op when the
+    // panel is already on; recovers a panel glitched into display-off) and
+    // re-apply backlight duty (recovers a stale ledc channel). Called from the
+    // UI task every ~10s — same task as LVGL flushes, so no SPI contention.
+    tft.startWrite();
+    tft.writeCommand(0x29);  // DISPON
+    tft.endWrite();
+    tft.setBrightness(s_lastBrightness);  // re-apply duty (self-heal stuck backlight)
 #endif
 }
 

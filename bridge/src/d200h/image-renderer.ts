@@ -8,6 +8,9 @@
  */
 
 import { deflateSync } from 'zlib';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import {
   renderSessionSlot,
   renderEmptySlot,
@@ -27,6 +30,38 @@ import { validateZipBoundaries } from './hid-protocol.js';
 const TAG = 'd200h-render';
 
 const ICON_SIZE = 196;
+
+// --- Font supply for resvg ---
+// resvg drops every <text> element unless it has a font to shape glyphs with.
+// We load a small set of bundled OFL fonts explicitly via `fontFiles` (NOT
+// `loadSystemFonts`, which re-scans the whole OS font tree on every `new Resvg()`
+// — i.e. 14× per frame — and is the reason the original code set it to `false`).
+// `defaultFontFamily` makes unresolved families in the shared SVG renderers
+// (e.g. `Inter`, `Arial`, `monospace`) fall back to a design-system face
+// instead of rendering nothing. Computed once at module load.
+const FONT_OPTS: { fontFiles?: string[]; loadSystemFonts: boolean; defaultFontFamily: string } = (() => {
+  try {
+    // bridge/{src,dist}/d200h/image-renderer.{ts,js} → bridge/assets/fonts
+    const here = dirname(fileURLToPath(import.meta.url));
+    const fontsDir = join(here, '..', '..', 'assets', 'fonts');
+    const files = [
+      'IBMPlexSans-Regular.ttf',
+      'IBMPlexSans-Bold.ttf',
+      'JetBrainsMono-Regular.ttf',
+      'JetBrainsMono-Bold.ttf',
+    ]
+      .map((n) => join(fontsDir, n))
+      .filter((p) => existsSync(p));
+    if (files.length > 0) {
+      return { fontFiles: files, loadSystemFonts: false, defaultFontFamily: 'IBM Plex Sans' };
+    }
+    debug(TAG, `bundled fonts not found under ${fontsDir} — falling back to system fonts`);
+  } catch (err) {
+    debug(TAG, `font path resolution failed (${err}) — falling back to system fonts`);
+  }
+  // Defense-in-depth: if bundled fonts are missing, still render text via the OS.
+  return { loadSystemFonts: true, defaultFontFamily: 'Helvetica Neue' };
+})();
 
 // --- resvg-js loader (optional dependency) ---
 
@@ -69,7 +104,7 @@ function svgToPng(svg144: string): Buffer {
   try {
     const resvg = new Resvg(wrapped, {
       fitTo: { mode: 'width' as const, value: ICON_SIZE },
-      font: { loadSystemFonts: false },
+      font: FONT_OPTS,
     });
     return Buffer.from(resvg.render().asPng());
   } catch (err) {
@@ -85,7 +120,7 @@ function svgToPngWide(svg: string, width: number, height: number): Buffer {
   try {
     const resvg = new Resvg(svg, {
       fitTo: { mode: 'width' as const, value: width },
-      font: { loadSystemFonts: false },
+      font: FONT_OPTS,
     });
     return Buffer.from(resvg.render().asPng());
   } catch (err) {
@@ -99,12 +134,22 @@ function svgToPngWide(svg: string, width: number, height: number): Buffer {
 // The D200H has 14 physical keys (5×3 grid, slot 13 is 2-col merged at col3+col4, row2)
 // In single-session bridge mode, we show one session with its details/options.
 
+/** Command dispatched when a key is pressed. `null` = inert tile (info/empty). */
+export type ButtonCommand = { type: string; [k: string]: unknown };
+
 interface KeySlot {
   col: number;
   row: number;
   svg: string;
   label: string;
+  /** What pressing this physical key does. Single source of truth for input. */
+  command?: ButtonCommand | null;
 }
+
+// D200H physical key index == row * GRID_COLS + col (row-major). The firmware
+// reports presses with this index in byte 9 of the IN_BUTTON report, and the
+// manifest keys are `${col}_${row}` — both agree on this mapping.
+const GRID_COLS = 5;
 
 // --- State parsing ---
 
@@ -164,7 +209,7 @@ function renderUsageButton(label: string, percent: number, color: string): strin
     // Header label
     `<text x="72" y="36" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#94a3b8">${escXml(label)}</text>`,
     // Unicode gauge bar
-    `<text x="72" y="60" text-anchor="middle" font-family="monospace" font-size="14" fill="${color}">${escXml(gBar)}</text>`,
+    `<text x="72" y="60" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" fill="${color}">${escXml(gBar)}</text>`,
     // Percentage (larger, 28px bold)
     `<text x="72" y="90" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="#ffffff">${Math.round(percent)}%</text>`,
     // Bottom accent bar (2px)
@@ -281,15 +326,15 @@ function computeLayout(state: DashState): KeySlot[] {
     // ============================
 
     // Row 0: Mode, Session 1..4
-    slots.push({ col: 0, row: 0, svg: renderModeButton(state.mode), label: '' });
+    slots.push({ col: 0, row: 0, svg: renderModeButton(state.mode), label: '', command: { type: 'mode_toggle' } });
     for (let i = 0; i < 4; i++) {
       const col = i + 1;
       const sess = sessionsToDisplay[i];
       if (sess) {
         const isActive = sess.projectName === activeSession.projectName && sess.agentType === activeSession.agentType;
-        slots.push({ col, row: 0, svg: renderSessionSlot(sess, isActive, 0, undefined, { animated: false }), label: '' });
+        slots.push({ col, row: 0, svg: renderSessionSlot(sess, isActive, 0, undefined, { animated: false }), label: '', command: { type: 'focus_session', sessionId: sess.id } });
       } else {
-        slots.push({ col, row: 0, svg: renderEmptySlot(), label: '' });
+        slots.push({ col, row: 0, svg: renderEmptySlot(), label: '', command: null });
       }
     }
 
@@ -298,21 +343,24 @@ function computeLayout(state: DashState): KeySlot[] {
       const col = i;
       const opt = state.options[i];
       if (opt && isAwaiting) {
-        slots.push({ col, row: 1, svg: renderOptionButton(opt, i), label: '' });
+        slots.push({ col, row: 1, svg: renderOptionButton(opt, i), label: '', command: { type: 'select_option', index: i } });
       } else {
-        slots.push({ col, row: 1, svg: renderEmptySlot(), label: '' });
+        slots.push({ col, row: 1, svg: renderEmptySlot(), label: '', command: null });
       }
     }
-    slots.push({ col: 4, row: 1, svg: renderInfoButton('MODEL', state.modelName.slice(0, 12) || 'N/A'), label: '' });
+    slots.push({ col: 4, row: 1, svg: renderInfoButton('MODEL', state.modelName.slice(0, 12) || 'N/A'), label: '', command: null });
   } else {
     // ============================
     // SINGLE-SESSION DETAIL LAYOUT
     // ============================
 
     // Row 0: Mode, Hero Session, Extended Detail
-    slots.push({ col: 0, row: 0, svg: renderModeButton(state.mode), label: '' });
-    slots.push({ col: 1, row: 0, svg: renderSessionSlot(sessionsToDisplay[0], true, 0, undefined, { animated: false }), label: '' });
-    slots.push({ col: 2, row: 0, svg: renderDetailInfo(sessionsToDisplay[0], state.state.toLowerCase() as State, state.currentTool, state.modelName, state.mode), label: '' });
+    // Focus is only actionable when a real (controllable) session backs the hero
+    // tile; with no sessions the hero is a synthetic placeholder → inert.
+    const heroSession = state.allSessions.length > 0 ? sessionsToDisplay[0] : null;
+    slots.push({ col: 0, row: 0, svg: renderModeButton(state.mode), label: '', command: { type: 'mode_toggle' } });
+    slots.push({ col: 1, row: 0, svg: renderSessionSlot(sessionsToDisplay[0], true, 0, undefined, { animated: false }), label: '', command: heroSession ? { type: 'focus_session', sessionId: heroSession.id } : null });
+    slots.push({ col: 2, row: 0, svg: renderDetailInfo(sessionsToDisplay[0], state.state.toLowerCase() as State, state.currentTool, state.modelName, state.mode), label: '', command: null });
 
     // Options mapping identically to old 13-slot original design
     // Slots 3_0, 4_0, 0_1, 1_1
@@ -321,37 +369,37 @@ function computeLayout(state: DashState): KeySlot[] {
       const row = Math.floor((i + 3) / 5);
       const opt = state.options[i];
       if (opt && isAwaiting) {
-        slots.push({ col, row, svg: renderOptionButton(opt, i), label: '' });
+        slots.push({ col, row, svg: renderOptionButton(opt, i), label: '', command: { type: 'select_option', index: i } });
       } else {
-        slots.push({ col, row, svg: renderEmptySlot(), label: '' });
+        slots.push({ col, row, svg: renderEmptySlot(), label: '', command: null });
       }
     }
 
     // Row 1 remaining stats: 2_1, 3_1, 4_1
-    slots.push({ col: 2, row: 1, svg: renderInfoButton('MODEL', state.modelName.slice(0, 12) || 'N/A'), label: '' });
-    slots.push({ col: 3, row: 1, svg: renderUsageButton('5H', state.fiveHourPercent, '#28a0b4'), label: '' });
-    slots.push({ col: 4, row: 1, svg: renderUsageButton('7D', state.sevenDayPercent, '#2850a0'), label: '' });
+    slots.push({ col: 2, row: 1, svg: renderInfoButton('MODEL', state.modelName.slice(0, 12) || 'N/A'), label: '', command: null });
+    slots.push({ col: 3, row: 1, svg: renderUsageButton('5H', state.fiveHourPercent, '#28a0b4'), label: '', command: { type: 'usage_toggle' } });
+    slots.push({ col: 4, row: 1, svg: renderUsageButton('7D', state.sevenDayPercent, '#2850a0'), label: '', command: { type: 'usage_toggle' } });
   }
 
   // ============================
   // ROW 2: SHARED ACTIONS (STOP, TOKENS, COST)
   // ============================
 
-  // Slot 0_2: STOP/ESC
+  // Slot 0_2: STOP/ESC → interrupt (cancel the current turn / dismiss prompt)
   if (isProcessing) {
-    slots.push({ col: 0, row: 2, svg: renderStopButton(true), label: '' });
+    slots.push({ col: 0, row: 2, svg: renderStopButton(true), label: '', command: { type: 'interrupt' } });
   } else if (isAwaiting) {
-    slots.push({ col: 0, row: 2, svg: renderEscButton(true), label: '' });
+    slots.push({ col: 0, row: 2, svg: renderEscButton(true), label: '', command: { type: 'interrupt' } });
   } else {
-    slots.push({ col: 0, row: 2, svg: renderStopButton(false), label: '' });
+    slots.push({ col: 0, row: 2, svg: renderStopButton(false), label: '', command: { type: 'interrupt' } });
   }
 
-  // Slot 1_2: Tokens
+  // Slot 1_2: Tokens (info tile, inert)
   const tk = state.totalTokens > 1000 ? `${(state.totalTokens / 1000).toFixed(0)}K` : `${state.totalTokens}`;
-  slots.push({ col: 1, row: 2, svg: renderInfoButton('TOKENS', tk), label: '' });
+  slots.push({ col: 1, row: 2, svg: renderInfoButton('TOKENS', tk), label: '', command: null });
 
-  // Slot 2_2: Cost
-  slots.push({ col: 2, row: 2, svg: renderInfoButton('COST', `$${state.totalCost.toFixed(2)}`), label: '' });
+  // Slot 2_2: Cost (info tile, inert)
+  slots.push({ col: 2, row: 2, svg: renderInfoButton('COST', `$${state.totalCost.toFixed(2)}`), label: '', command: null });
 
   return slots;
 }
@@ -579,6 +627,26 @@ export function renderDashboardZip(stateEvt: any): Buffer {
   const fallback = createZipInMemory(new Map(orderedEntries), extraLengths).zip;
   debug(TAG, `WARNING: ZIP boundary validation failed after search; stillValid=${validateZipBoundaries(fallback)}`);
   return fallback;
+}
+
+/**
+ * Build the physical-key → command map for the current state, derived from the
+ * SAME layout used to render the tiles. This is the single source of truth for
+ * button input: a key at (col,row) does exactly what its rendered tile implies,
+ * so the two can never drift. Inert tiles (info/empty) are simply absent.
+ *
+ * Key index == row * GRID_COLS + col (matches the device IN_BUTTON report).
+ */
+export function buildButtonCommandMap(stateEvt: any): Map<number, ButtonCommand> {
+  const state = parseState(stateEvt);
+  const layout = computeLayout(state);
+  const map = new Map<number, ButtonCommand>();
+  for (const slot of layout) {
+    if (slot.command) {
+      map.set(slot.row * GRID_COLS + slot.col, slot.command);
+    }
+  }
+  return map;
 }
 
 /**

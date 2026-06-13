@@ -48,6 +48,20 @@ void lvglLoop();
 void setOrientation(bool landscape);
 
 /**
+ * 90° rotation steps for small SPI panels (TTGO / C6): index 0-3.
+ * 0 = upright portrait, 1 = landscape, 2 = flipped portrait, 3 = flipped landscape.
+ * Persists to NVS. Caller must recreate LVGL screens after calling this.
+ */
+void setRotationIndex(uint8_t idx);
+uint8_t getRotationIndex();
+
+/**
+ * Periodic panel self-heal (TTGO): re-assert DISPON + backlight duty.
+ * No-op on other boards.
+ */
+void reassertPanel();
+
+/**
  * Returns true if display is in landscape mode.
  */
 bool isLandscape();
