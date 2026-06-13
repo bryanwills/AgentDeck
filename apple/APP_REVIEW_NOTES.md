@@ -8,7 +8,7 @@ AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding a
 
 **Works standalone on Mac.** All core features (dashboard, APME evaluation reports, Device Preview, Claude Code hook integration, and iOS pairing) work without any additional hardware or AgentDeck companion executable. Users run their AI agent in their own terminal; AgentDeck receives opt-in hook events.
 
-**Optional hardware extensions** let power users drive the same state on Stream Deck+ keys, Ulanzi D200H Deck Docks (USB HID), ESP32 status displays (Wi-Fi), and Divoom Pixoo matrix displays (Wi-Fi). Each integration is configurable from an in-app sheet — the user is never forced to open Terminal.
+**Optional hardware extensions** let power users drive the same state on Stream Deck+ keys, Ulanzi D200H Deck Docks (USB HID), ESP32 status displays (Wi-Fi), Divoom Pixoo matrix displays (Wi-Fi), and iDotMatrix LED displays (Bluetooth LE). Each integration is configurable from an in-app sheet — the user is never forced to open Terminal.
 
 **Advanced developer integrations** — Android device bridging via ADB, PTY-level launch for Codex/OpenCode, and APME Layer 1 deterministic scoring (git/pnpm introspection) — are not bundled in AgentDeck, and the App Store app never installs, downloads, runs, or prompts the user to obtain them. The UI panels that visualize these integrations are **conditional, read-only views** of data broadcast by a separately-distributed Node.js CLI daemon that a developer may independently install via npm. AgentDeck detects that daemon by attempting to bind `127.0.0.1:9120` at launch: if the port is free, AgentDeck itself becomes the server and those panels never appear; if the port is already held by the user-run daemon, AgentDeck connects as a WebSocket client and renders additional panels purely from the data received. No installer flow, App Store-visible link, or copy in AgentDeck asks the user to obtain the external daemon. `docs/appstore-feature-matrix.md` in the public repository is the source of truth for what ships in this binary vs. what is only reachable via the optional developer toolchain.
 
@@ -45,6 +45,10 @@ The UI also offers a "Remove" button that deletes our hook entries and revokes t
 ## USB HID entitlement (`com.apple.security.device.usb`)
 
 Used to communicate with the optional Ulanzi D200H Deck Dock (USB HID class, VID `0x2207` / PID `0x0019`). The user opts in by plugging in their own hardware. If the device is absent, the feature is inert.
+
+## Bluetooth entitlement (`com.apple.security.device.bluetooth`)
+
+Used to communicate with the optional iDotMatrix LED pixel display over Bluetooth Low Energy, using Apple's first-party CoreBluetooth framework (no subprocess, no bundled interpreter). AgentDeck acts only as a BLE *central*: it scans for the user's own iDotMatrix (advertised name prefix `IDM-`), connects, and writes display frames + brightness over a GATT characteristic. The user opts in by pairing their own hardware from an in-app Settings sheet; the `NSBluetoothAlwaysUsageDescription` string explains the purpose at the system prompt. If no iDotMatrix is present (or the user never pairs one), the feature is inert.
 
 ## Audio input + serial entitlements
 

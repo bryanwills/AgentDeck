@@ -32,6 +32,9 @@ private let kIOMessageSystemHasPoweredOn: UInt32 = 0xe0000300
 
 extension Notification.Name {
     static let pixooSettingsChanged = Notification.Name("dev.agentdeck.pixooSettingsChanged")
+    /// Posted by IDotMatrixSheet after the user adds/removes/edits an iDotMatrix
+    /// device so the BLE module hot-reloads without waiting for the 5s poll.
+    static let idotmatrixSettingsChanged = Notification.Name("dev.agentdeck.idotmatrixSettingsChanged")
     /// Posted by AppPreferences after the user changes the display-sleep dim
     /// setting. DaemonServer refreshes `cachedDimConfig` and, if the display
     /// is already asleep, re-broadcasts so devices re-dim to the new level live.
@@ -170,6 +173,8 @@ final class DaemonServer {
     private var serialModule: SerialModule?
     private var pixooModule: PixooModule?
     private var pixooSettingsObserver: NSObjectProtocol?
+    private var idotMatrixModule: IDotMatrixModule?
+    private var idotmatrixSettingsObserver: NSObjectProtocol?
     private var displaySettingsObserver: NSObjectProtocol?
     private var adbModule: AdbModule?
     private var d200hModule: D200hHidModule?
@@ -1035,6 +1040,21 @@ final class DaemonServer {
         ) { _ in
             Task { await pixoo.reloadFromSettingsExternal() }
         }
+
+        // iDotMatrix (Bluetooth LE — native CoreBluetooth, App Store legal)
+        let idotmatrix = IDotMatrixModule()
+        self.idotMatrixModule = idotmatrix
+        moduleManager.register(idotmatrix)
+        await idotmatrix.setOnStateChanged { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.broadcastStateUpdate()
+            }
+        }
+        idotmatrixSettingsObserver = NotificationCenter.default.addObserver(
+            forName: .idotmatrixSettingsChanged, object: nil, queue: .main
+        ) { _ in
+            Task { await idotmatrix.reloadFromSettingsExternal() }
+        }
         // Display-sleep dim setting changed: refresh cache and, if the display
         // is already asleep, re-broadcast the current state so devices re-dim
         // to the new level/mode without waiting for a wake/sleep cycle.
@@ -1067,6 +1087,7 @@ final class DaemonServer {
         // Wire serial broadcast hook
         let serialRef = serial
         let pixooRef = pixoo
+        let idotmatrixRef = idotmatrix
         let d200hRef = d200h
         await wsServer.onBroadcast { [weak self] data in
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -1098,6 +1119,9 @@ final class DaemonServer {
             // incoming calls.
             let pixooEventBox = SendableDict(json)
             Task { await pixooRef.handleEvent(pixooEventBox.value) }
+            // iDotMatrix module is also an actor — same SendableDict boxing.
+            let idmEventBox = SendableDict(json)
+            Task { await idotmatrixRef.handleEvent(idmEventBox.value) }
             d200hRef.handleBroadcast(json)
         }
         DaemonLogger.shared.info("startDeviceModules: wsServer.onBroadcast done")
@@ -4644,6 +4668,10 @@ final class DaemonServer {
         if let observer = pixooSettingsObserver {
             NotificationCenter.default.removeObserver(observer)
             pixooSettingsObserver = nil
+        }
+        if let observer = idotmatrixSettingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+            idotmatrixSettingsObserver = nil
         }
         if let observer = displaySettingsObserver {
             NotificationCenter.default.removeObserver(observer)

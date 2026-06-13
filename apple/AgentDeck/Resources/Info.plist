@@ -29,6 +29,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>AgentDeck connects to iDotMatrix LED displays over Bluetooth to show live session status.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_agentdeck._tcp</string>

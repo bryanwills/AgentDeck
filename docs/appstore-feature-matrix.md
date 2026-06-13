@@ -33,6 +33,7 @@
 |---|:---:|:---:|---|---|
 | **Ulanzi D200H Deck Dock** | ✅ | ✅ | Built-in USB | IOKit HID, `com.apple.security.device.usb` |
 | **Divoom Pixoo64** | ✅ | ✅ | Network LED | HTTP, entitlement 불필요 |
+| **iDotMatrix LED 디스플레이** | ✅ | ✅ | Bluetooth LE | App Store: 네이티브 CoreBluetooth (`com.apple.security.device.bluetooth`). CLI: Python `idotmatrix`(bleak). BLE 단일 연결 — 외부 Node 데몬 감지 시 Swift 모듈이 BLE 소유 양보 |
 | **ESP32 상태 디스플레이 (모니터링)** | ✅ | ✅ | ESP32 Display | `com.apple.security.device.serial`. 보드: `rgb48` / `amoled` / `ips35` |
 | **ESP32 Wi-Fi 프로비저닝** | ✅ | ✅ | ESP32 Display | 직접 serial write, subprocess 없음 |
 | **ESP32 firmware flash** | ❌ | ✅ | ESP32 Display | `esptool.py` 필요 |

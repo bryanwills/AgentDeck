@@ -1530,6 +1530,7 @@ struct SettingsScreen: View {
     #if os(macOS)
     @State private var showESP32Sheet: Bool = false
     @State private var showPixooSheet: Bool = false
+    @State private var showIDotMatrixSheet: Bool = false
     #endif
 
     /// Hardware integrations that ship with in-app setup UI. D200H is plug
@@ -1555,6 +1556,14 @@ struct SettingsScreen: View {
                 action: { showPixooSheet = true }
             )
             Divider()
+            hardwareRow(
+                icon: "dot.radiowaves.left.and.right",
+                title: "iDotMatrix LED display",
+                subtitle: "Pair a 32×32 iDotMatrix over Bluetooth. AgentDeck renders session state on it.",
+                buttonLabel: "Pair…",
+                action: { showIDotMatrixSheet = true }
+            )
+            Divider()
             Text("Ulanzi D200H Deck Dock connects over USB automatically — no setup required. Plug it in and it appears in the session list.")
                 .font(.system(size: 11))
                 .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
@@ -1565,6 +1574,9 @@ struct SettingsScreen: View {
         }
         .sheet(isPresented: $showPixooSheet) {
             PixooSheet()
+        }
+        .sheet(isPresented: $showIDotMatrixSheet) {
+            IDotMatrixSheet()
         }
     }
 
