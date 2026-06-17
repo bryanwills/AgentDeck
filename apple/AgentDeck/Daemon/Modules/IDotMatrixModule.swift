@@ -7,12 +7,18 @@
 // is IDotMatrixBLE (GATT) instead of HTTP. Frames come from the same in-process
 // PixooRenderer (64×64 RGB), box-downscaled to 32×32 and PNG-encoded for the device.
 //
-// Coexistence: the in-process Swift daemon only runs when no external CLI daemon owns
-// port 9120 (see DaemonServer header) — so the Node *daemon* and this module are never
-// both live. The remaining overlap is a standalone `agentdeck idotmatrix sync` running
-// alongside the Swift daemon: BLE allows a single central connection, so whichever
-// process holds it drives the display and the other's connect simply fails. The circuit
-// breaker below backs off on that failure instead of thrashing.
+// Coexistence: unlike Pixoo/D200H/ESP32 (which the Node CLI daemon drives natively, so
+// the Swift app must not double-drive them), no external daemon can drive iDotMatrix's
+// BLE transport natively — the Node path needs a separate `agentdeck idotmatrix sync`
+// Python client. So this module runs in BOTH hub mode (owned by DaemonServer, fed by
+// wsServer.onBroadcast) AND client mode (an external daemon owns port 9120; owned by
+// DaemonService.clientModeIDotMatrix, fed by BridgeConnection.onRawMessage →
+// ingestExternalBroadcast). The two owners are mutually exclusive — hub mode has a live
+// DaemonServer, client mode has none — so only one instance is ever live.
+// The remaining overlap is a standalone `agentdeck idotmatrix sync` running alongside the
+// Swift app: BLE allows a single central connection, so whichever process holds it drives
+// the display and the other's connect simply fails. The circuit breaker below backs off on
+// that failure instead of thrashing — run only one of the two.
 //
 // Only the first configured device is driven (matching the Node sync client, which uses
 // devices[0]); additional entries are persisted but logged as not-yet-driven.
@@ -44,6 +50,8 @@ actor IDotMatrixModule: DeviceModule {
             "deviceName": NSNull(),
             "lastError": NSNull(),
             "displayDimmed": false,
+            "hasFrame": false,
+            "lastPushAtMs": NSNull(),
         ]
         func write(_ s: [String: Any]) { lock.lock(); snapshot = s; lock.unlock() }
         func read() -> [String: Any] { lock.lock(); defer { lock.unlock() }; return snapshot }
@@ -65,22 +73,41 @@ actor IDotMatrixModule: DeviceModule {
 
     private var renderTask: Task<Void, Never>?
     private var settingsReloadTask: Task<Void, Never>?
-    private let renderIntervalSec: TimeInterval = 1.0
+    // Fast tick for smooth animation. Frames are deduped on pixels, so identical
+    // frames cost nothing (no BLE write) — polling this fast just lets us track
+    // the daemon's animation as closely as the BLE link allows. Effective frame
+    // rate is therefore BLE-bound, not interval-bound, which is the real ceiling
+    // for these panels (same limit the user sees on Pixoo).
+    private let renderIntervalSec: TimeInterval = 0.5
     private let settingsReloadIntervalSec: TimeInterval = 5
     private var isPushing = false
+
+    /// When set (client mode), the module pulls the daemon's purpose-built 32×32
+    /// frame from this URL instead of locally rendering the 64×64 scene and
+    /// box-downscaling it. The daemon's `/pixoo/frame?size=32` renders the
+    /// creature sized for the panel (what the reference Python sync client shows);
+    /// the local 64→32 path squashes a full terrarium and reads small/mushy. nil
+    /// in hub mode (no sibling daemon to pull from) → local render fallback.
+    private var frameFetchURL: URL?
 
     private var onStateChanged: (@Sendable () -> Void)?
     private var lastBroadcastDigest: String?
 
     private let renderer = PixooRenderer()
     private var lastPushedRGB: [UInt8]?
-    private var lastStateDigest: String?
+    private var lastPushAtMs: Int64?
 
     private var displayDimmed = false
     private var lastDimSignature = ""
 
     func setOnStateChanged(_ handler: @escaping @Sendable () -> Void) {
         self.onStateChanged = handler
+    }
+
+    /// Point the module at the daemon's 32px frame endpoint (client mode). Pass
+    /// nil to use the local renderer (hub mode).
+    func setFrameFetchURL(_ url: URL?) {
+        self.frameFetchURL = url
     }
 
     // MARK: - Lifecycle
@@ -125,7 +152,6 @@ actor IDotMatrixModule: DeviceModule {
         consecutiveFailures = 0
         backoffUntil = nil
         lastPushedRGB = nil
-        lastStateDigest = nil
         refreshShadow()
     }
 
@@ -161,7 +187,6 @@ actor IDotMatrixModule: DeviceModule {
             consecutiveFailures = 0
             backoffUntil = nil
             lastPushedRGB = nil
-            lastStateDigest = nil
             if newActive == nil {
                 DaemonLogger.shared.debug("iDotMatrix", "No devices configured; watching settings.json")
             } else {
@@ -210,21 +235,36 @@ actor IDotMatrixModule: DeviceModule {
             guard await ensureConnected(device) else { return }
         }
 
-        let state = currentDashboardState()
-        let isDisconnectedPlaceholder = state.state == .disconnected && cachedAgentType == nil && cachedSessions.isEmpty
-        let digest = isDisconnectedPlaceholder ? "offline" : buildStateDigest(state: state)
-        guard digest != lastStateDigest || lastPushedRGB == nil else { return }
-
-        let rgb64 = isDisconnectedPlaceholder ? renderer.renderDisconnectedFrame() : renderer.render(dashboardState: state)
-        let rgb32 = Self.downscale64to32([UInt8](rgb64))
-        if rgb32 == lastPushedRGB { lastStateDigest = digest; return }
+        // Obtain a 32×32 RGB frame. Prefer the daemon's purpose-built 32px frame
+        // (client mode) for a panel-sized creature and smooth animation; else
+        // render the 64×64 scene locally and box-downscale (hub mode).
+        var rgb32: [UInt8]
+        if let url = frameFetchURL {
+            // Pull the daemon's 32px frame. On any fetch/decode miss, skip this
+            // tick (keep the last frame) rather than flip to the local layout.
+            guard let data = await Self.fetchFrame(url), let decoded = Self.decodeToRGB32(data) else { return }
+            rgb32 = decoded
+        } else {
+            let state = currentDashboardState()
+            let isDisconnectedPlaceholder = state.state == .disconnected && cachedAgentType == nil && cachedSessions.isEmpty
+            // Render EVERY tick. PixooRenderer's creature animation is wall-clock
+            // driven (Date()), so re-rendering each tick advances the animation;
+            // we dedup on pixels below so static frames cost no BLE write.
+            let rgb64 = isDisconnectedPlaceholder ? renderer.renderDisconnectedFrame() : renderer.render(dashboardState: state)
+            rgb32 = Self.downscale64to32([UInt8](rgb64))
+        }
+        // Match the reference idotmatrix sync client's software brightness/contrast
+        // boost (sync.py: ImageEnhance.Brightness → Contrast); without it the panel
+        // reads dim/washed-out next to the Python path.
+        rgb32 = Self.boostBrightnessContrast(rgb32, brightness: 1.3, contrast: 1.2)
+        if rgb32 == lastPushedRGB { return }
         guard let png = Self.rgb32ToPNG(rgb32) else { return }
 
         guard let ble else { return }
         do {
             try await ble.uploadImage(pngData: png)
             lastPushedRGB = rgb32
-            lastStateDigest = digest
+            lastPushAtMs = Int64(Date().timeIntervalSince1970 * 1000)
             recordSuccess()
         } catch {
             recordFailure("upload: \(error)")
@@ -238,8 +278,17 @@ actor IDotMatrixModule: DeviceModule {
         guard let ble else { return false }
         do {
             try await ble.connect(uuidString: device.address)
-            try await ble.setMode(1)                                  // DIY drawing mode
+            // The panel needs a beat after the GATT link comes up before it will
+            // accept control commands. The reference Python client gets this for
+            // free (BleakClient.connect latency + an HTTP frame fetch between
+            // setMode and the first image); without it our first writes land too
+            // early, the device silently drops them (write-without-response — no
+            // ACK), and the panel stays on its built-in clock. Match the proven
+            // client's order too: brightness FIRST, then enter DIY mode.
+            try? await Task.sleep(for: .milliseconds(300))
             try await ble.setBrightness(device.brightness ?? 100)
+            try await ble.setMode(1)                                  // enter DIY drawing mode
+            try? await Task.sleep(for: .milliseconds(50))             // settle before first image
             connected = true
             lastError = nil
             consecutiveFailures = 0
@@ -257,7 +306,6 @@ actor IDotMatrixModule: DeviceModule {
     private func dropConnection() async {
         connected = false
         lastPushedRGB = nil
-        lastStateDigest = nil
         await ble?.disconnect()
         refreshShadow()
     }
@@ -383,15 +431,6 @@ actor IDotMatrixModule: DeviceModule {
         sessions.first { ($0["alive"] as? Bool) ?? true }
     }
 
-    private func buildStateDigest(state: DashboardState) -> String {
-        let r5 = renderer.formatResetDetailed(state.fiveHourResetsAt)
-        let r7 = renderer.formatResetDetailed(state.sevenDayResetsAt)
-        let u5 = state.fiveHourPercent != nil ? Int(floor(state.fiveHourPercent!)) : -1
-        let u7 = state.sevenDayPercent != nil ? Int(floor(state.sevenDayPercent!)) : -1
-        let sess = state.siblingSessions.map { "\($0.id):\($0.agentType ?? ""):\($0.state ?? "")" }.joined(separator: ",")
-        return "\(state.state.rawValue)|\(state.gatewayConnected)|\(state.gatewayHasError)|\(r5)|\(r7)|\(u5)|\(u7)|\(sess)"
-    }
-
     private static func makeSessionInfo(from raw: [String: Any]) -> SessionInfo? {
         guard let id = raw["id"] as? String else { return nil }
         let port: Int
@@ -416,6 +455,8 @@ actor IDotMatrixModule: DeviceModule {
             "deviceName": devices.first?.name ?? devices.first?.address ?? NSNull(),
             "lastError": lastError as Any,
             "displayDimmed": displayDimmed,
+            "hasFrame": lastPushedRGB != nil,
+            "lastPushAtMs": lastPushAtMs as Any,
         ]
         shadow.write(snapshot)
         let digest = "count=\(devices.count)|conn=\(connected)|dim=\(displayDimmed)|err=\(lastError ?? "")"
@@ -427,25 +468,105 @@ actor IDotMatrixModule: DeviceModule {
 
     // MARK: - Frame conversion (64×64 RGB → 32×32 PNG)
 
-    /// 2×2 box-average downscale of a 64×64×3 RGB buffer to 32×32×3.
+    /// Downscale a 64×64×3 RGB buffer to 32×32×3 by picking, per 2×2 block, the
+    /// single pixel with the highest luminance (its RGB is copied verbatim).
+    ///
+    /// The creatures are pixel art drawn on a dark background; a 2×2 box-AVERAGE
+    /// blends each bright feature pixel with up to three dark neighbours, which
+    /// quarters its brightness and smears edges — the panel then reads soft and
+    /// dim ("뭉개짐"). Max-luminance selection keeps the salient foreground pixel
+    /// crisp and at full intensity, matching the sharpness of the reference 32px
+    /// frames. No channel blending, so colours stay coherent.
     static func downscale64to32(_ src: [UInt8]) -> [UInt8] {
         guard src.count >= 64 * 64 * 3 else { return [UInt8](repeating: 0, count: 32 * 32 * 3) }
         var out = [UInt8](repeating: 0, count: 32 * 32 * 3)
         for y in 0..<32 {
             for x in 0..<32 {
-                for c in 0..<3 {
-                    var sum = 0
-                    for dy in 0..<2 {
-                        for dx in 0..<2 {
-                            let sx = x * 2 + dx, sy = y * 2 + dy
-                            sum += Int(src[(sy * 64 + sx) * 3 + c])
-                        }
+                var bestLuma = -1.0
+                var br: UInt8 = 0, bg: UInt8 = 0, bb: UInt8 = 0
+                for dy in 0..<2 {
+                    for dx in 0..<2 {
+                        let sx = x * 2 + dx, sy = y * 2 + dy
+                        let i = (sy * 64 + sx) * 3
+                        let r = src[i], g = src[i + 1], b = src[i + 2]
+                        let luma = 0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b)
+                        if luma > bestLuma { bestLuma = luma; br = r; bg = g; bb = b }
                     }
-                    out[(y * 32 + x) * 3 + c] = UInt8(sum / 4)
                 }
+                let o = (y * 32 + x) * 3
+                out[o] = br; out[o + 1] = bg; out[o + 2] = bb
             }
         }
         return out
+    }
+
+    /// Software brightness + contrast boost, replicating the reference iDotMatrix
+    /// sync client (sync.py → PIL `ImageEnhance.Brightness` then `Contrast`). The
+    /// panel's hardware brightness alone reads dim/washed-out at 32×32, so the
+    /// Python path boosts in software before upload; we mirror it for parity.
+    /// Order matters: brightness first, then contrast about the image's luminance
+    /// mean (PIL's Contrast degenerate is the mean grayscale level).
+    static func boostBrightnessContrast(_ rgb: [UInt8], brightness: Double, contrast: Double) -> [UInt8] {
+        guard rgb.count % 3 == 0 else { return rgb }
+        func clamp(_ v: Double) -> UInt8 { UInt8(max(0, min(255, v.rounded()))) }
+
+        // 1) Brightness: scale each channel.
+        var out = rgb.map { clamp(Double($0) * brightness) }
+
+        // 2) Contrast about the luminance mean (matches PIL ImageEnhance.Contrast).
+        let pixelCount = out.count / 3
+        guard pixelCount > 0 else { return out }
+        var sumL = 0.0
+        for p in 0..<pixelCount {
+            let r = Double(out[3 * p]), g = Double(out[3 * p + 1]), b = Double(out[3 * p + 2])
+            sumL += 0.299 * r + 0.587 * g + 0.114 * b
+        }
+        let meanL = (sumL / Double(pixelCount)).rounded()
+        for i in 0..<out.count {
+            out[i] = clamp((Double(out[i]) - meanL) * contrast + meanL)
+        }
+        return out
+    }
+
+    /// Fetch the daemon's current frame (localhost HTTP, bounded timeout). The
+    /// daemon serves `/pixoo/frame?size=32` as a 32×32 BMP. Returns nil on any
+    /// non-200 / timeout / transport error so the caller can simply skip the tick.
+    static func fetchFrame(_ url: URL) async -> Data? {
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 2.0
+        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200, !data.isEmpty else { return nil }
+            return data
+        } catch {
+            return nil
+        }
+    }
+
+    /// Decode arbitrary image bytes (the daemon's BMP) into a 32×32×3 RGB buffer
+    /// in top-to-bottom row order (matching `rgb32ToPNG`/`downscale64to32`).
+    /// `cgImage` is already top-down and `CGContext.draw` into a fresh context
+    /// lands row 0 at the image top here — do NOT y-flip (that renders the panel
+    /// upside down, confirmed on device).
+    static func decodeToRGB32(_ data: Data) -> [UInt8]? {
+        guard let rep = NSBitmapImageRep(data: data), let cg = rep.cgImage else { return nil }
+        let w = 32, h = 32
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(
+            data: &rgba, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        ctx.interpolationQuality = .none
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        var rgb = [UInt8](repeating: 0, count: w * h * 3)
+        for i in 0..<(w * h) {
+            rgb[i * 3] = rgba[i * 4]
+            rgb[i * 3 + 1] = rgba[i * 4 + 1]
+            rgb[i * 3 + 2] = rgba[i * 4 + 2]
+        }
+        return rgb
     }
 
     /// Encode a 32×32×3 RGB buffer as PNG.

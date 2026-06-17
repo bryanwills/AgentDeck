@@ -8,7 +8,7 @@
 //
 // Protocol (extracted from idotmatrix lib):
 //   • Scan filter: advertised local name prefix "IDM-"
-//   • Service 0000fa00-…, Write characteristic 0000fa02-… (write WITHOUT response)
+//   • Service 000000fa-…, Write characteristic 0000fa02-… (write WITHOUT response)
 //   • setMode(1)  → [0x05,0x00,0x04,0x01,0x01]  (enter DIY drawing mode)
 //   • setBrightness(n 5–100) → [0x05,0x00,0x04,0x80,n]
 //   • image: 32×32 → PNG → per 4096B PNG chunk:
@@ -50,9 +50,9 @@ struct IDotMatrixDiscovered: Sendable, Equatable {
 /// touched only on `queue`, so the type is `@unchecked Sendable`; the IDotMatrixModule
 /// actor calls the async API and the continuations resume from delegate callbacks.
 final class IDotMatrixBLE: NSObject, @unchecked Sendable {
-    // 16-bit assigned UUIDs (expand to the full 128-bit base form).
-    static let serviceUUID = CBUUID(string: "FA00")
-    static let writeCharUUID = CBUUID(string: "FA02")
+    // iDotMatrix advertises service 000000fa-..., not 0000fa00-....
+    static let serviceUUID = CBUUID(string: "000000fa-0000-1000-8000-00805f9b34fb")
+    static let writeCharUUID = CBUUID(string: "0000fa02-0000-1000-8000-00805f9b34fb")
     static let namePrefix = "IDM-"
 
     private let queue = DispatchQueue(label: "dev.agentdeck.idotmatrix.ble")
@@ -272,6 +272,12 @@ final class IDotMatrixBLE: NSObject, @unchecked Sendable {
                 try await self.writeChunk(slice, to: p, characteristic: ch)
                 offset = end
             }
+            // Mirror the reference idotmatrix client's per-command settle
+            // (connectionManager.send → time.sleep(0.01)). The panel needs a
+            // beat to consume one command before the next arrives; back-to-back
+            // write-without-response bursts (setMode→brightness→image in a few ms)
+            // otherwise get dropped and the device ignores the DIY-mode switch.
+            try? await Task.sleep(for: .milliseconds(10))
         }
     }
 

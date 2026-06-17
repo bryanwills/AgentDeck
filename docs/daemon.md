@@ -12,6 +12,7 @@ AgentDeck runs two daemon implementations that are **not competitors but collabo
 | OpenClaw Gateway 인증 (Keychain 토큰) | **Swift app** | Shared Keychain Access Group 설계 상 in-process 필요 |
 | D200H HID 통신 | **Swift app** | `com.apple.security.device.usb` entitlement 은 sandbox 안에서 열림 |
 | Pixoo HTTP 스트리밍 | Swift app **또는** CLI | 둘 다 가능. 현재 Swift 에서. |
+| iDotMatrix BLE | **Swift app (항상)** | Node 데몬은 BLE 네이티브 미지원(별도 `idotmatrix sync` Python 필요). hub·client 모드 모두 Swift 가 CoreBluetooth 로 구동 |
 | ESP32 serial | Swift app **또는** CLI | 둘 다 가능 |
 | iPad/Web WS 허브 | 먼저 바인드한 쪽 | CLI 우선 (PTY 가 있으니 세션 있음), 없으면 Swift |
 | mDNS 광고 | 먼저 바인드한 쪽 | 동일 |
@@ -20,6 +21,8 @@ AgentDeck runs two daemon implementations that are **not competitors but collabo
 **CLI 없이 Swift 앱만 실행한 경우**: port 9120 은 Swift daemon 이 잡고, 세션 0 개 상태로 pairing/device I/O 만 서비스. iPad 가 붙어서 "Device Preview + Setup card" 를 보고, D200H/Pixoo/ESP32 는 idle 상태로 대기한다. 이게 사용자가 "CLI 설치 유도" 만 보이는 상태의 의미.
 
 **외부 CLI daemon 이 이미 실행 중인 경우**: `DaemonService.alreadyRunning` → `connectToExternalDaemon`. Swift 앱은 죽지 않고 CLI daemon 의 WS 클라이언트가 된다 (`isUsingExternalDaemon = true`). 이 모드는 사용자가 터미널에서 별도 daemon 을 이미 운영하는 고급 경로이며, App Store 앱 자체는 외부 실행 파일 설치/기동을 요구하지 않는다. 하드웨어 상태는 CLI daemon 이 `state_update.moduleHealth` 로 브로드캐스트한 범위만 UI 에 표시한다.
+
+이 client 모드에서도 **iDotMatrix BLE 만은 Swift 앱이 직접 구동**한다 — Node 데몬이 iDotMatrix 를 네이티브로 그릴 수 없기 때문이다(그래서 둘 다 안 그리는 공백이 생겼었다). `DaemonService.isUsingExternalDaemon` 의 `didSet` 이 `clientModeIDotMatrix` 모듈을 생성/해제하고, `BridgeConnection.onRawMessage` → `DaemonService.ingestExternalBroadcast` 가 외부 데몬의 broadcast(state/usage/sessions/display) 를 그 모듈에 그대로 먹인다. Pixoo/D200H/ESP32 는 CLI 가 소유하므로 client 모드에서 Swift 가 중복 구동하지 않는다(이중 I/O 충돌 방지). hub↔client 전환 시 두 iDotMatrix 모듈은 상호배타적으로 단 하나만 산다.
 
 ## Gateway 플래그 의미
 

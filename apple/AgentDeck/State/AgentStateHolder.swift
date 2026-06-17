@@ -23,6 +23,12 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
 
     let connection = BridgeConnection()
     let discovery = BridgeDiscovery()
+    #if os(macOS)
+    /// Set by the app after construction. In client mode (an external daemon
+    /// owns port 9120) raw broadcast frames are forwarded here so the
+    /// DaemonService-owned local iDotMatrix module can render them over BLE.
+    weak var daemonService: DaemonService?
+    #endif
     let timelineStore = TimelineStore()
     let displaySync = DisplaySyncService()
     private(set) var timelineGenerator: StateTimelineGenerator!
@@ -135,6 +141,20 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
             guard let self, !self.isTerminating else { return }
             self.handleEvent(event)
         }
+        #if os(macOS)
+        // Fan raw broadcast frames out to the client-mode iDotMatrix module
+        // (no-op in hub mode / when no external daemon is present). Fired on
+        // the main queue by BridgeConnection, so MainActor isolation holds.
+        connection.onRawMessage = { [weak self] raw in
+            guard let self, !self.isTerminating else { return }
+            // Box into a Sendable wrapper before crossing into the MainActor
+            // region (strict-concurrency: a bare [String: Any] can't be sent).
+            let box = SendableDict(raw)
+            MainActor.assumeIsolated {
+                self.daemonService?.ingestExternalBroadcast(box)
+            }
+        }
+        #endif
         connection.onDisconnect = { [weak self] in
             guard let self else { return }
             guard !self.isTerminating else { return }

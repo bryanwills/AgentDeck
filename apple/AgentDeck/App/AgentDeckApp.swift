@@ -161,6 +161,11 @@ struct AgentDeckApp: App {
         appDelegate.daemonService = daemonService
         appDelegate.stateHolder = stateHolder
 
+        // Let the state holder forward raw broadcast frames to the daemon's
+        // client-mode device modules (iDotMatrix BLE) when an external daemon
+        // owns port 9120.
+        stateHolder.daemonService = daemonService
+
         daemonService.onReady = { [stateHolder] wsUrl in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 stateHolder.setPreferredLocalBridge(url: wsUrl)
