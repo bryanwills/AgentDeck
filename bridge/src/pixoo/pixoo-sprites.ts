@@ -348,9 +348,15 @@ function selectGrid(
  */
 const SPRITE_W_FRAC = 0.1875;
 
-/** Resolution-aware square cell size for a creature sprite. */
+/** Resolution-aware square cell size for a creature sprite.
+ *
+ * Rounded to a whole pixel so every grid cell is a uniform integer block. A
+ * fractional cell size makes adjacent cells round to alternating 1/2px widths,
+ * and on the 2×2 eye holes that intermittently opens a 1px body-coloured seam
+ * between the two eye rows while the creature moves — the eyes appear to "break"
+ * into dots. Integer cells render the eye as a solid block every frame. */
 function creatureCellSize(zoom: number, canvasW: number, cols: number): number {
-  return (SPRITE_W_FRAC * zoom * canvasW) / cols;
+  return Math.max(1, Math.round((SPRITE_W_FRAC * zoom * canvasW) / cols));
 }
 
 // ===== Colors — Android-matching darker palette =====
@@ -807,8 +813,15 @@ export function drawOctopus(
   const spriteW = cols * cellSz;
   const spriteH = rows * cellSz;
 
-  const baseX = scx - spriteW / 2;
-  const baseY = scy - spriteH / 2;
+  // Snap the sprite origin to whole pixels. The cells tile from this origin via
+  // round(base + col*cellSz); if `base` is fractional, a swimming creature's
+  // sub-pixel screen drift shifts the rounding phase every frame, so each cell
+  // oscillates ±1px (shimmer). On the small high-contrast eye holes that reads
+  // as the eyes "breaking up" while the octopus moves. Rounding the origin makes
+  // the cell pattern frame-stable (only an integer translation changes), so the
+  // creature moves in clean 1px steps with rock-steady eyes.
+  const baseX = Math.round(scx - spriteW / 2);
+  const baseY = Math.round(scy - spriteH / 2);
 
   // Working: gentle vertical bob (scaled by cellSz)
   const breathPx = state === 'working'
