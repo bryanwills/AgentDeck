@@ -139,19 +139,27 @@ static void hudSendSelectOption(const char* sid, int index) {
         snprintf(buf, sizeof(buf), "{\"type\":\"select_option\",\"index\":%d}", index);
     hudSendJson(buf);
 }
-// Approve/Deny that works against both daemons: a Node observed gate carries a
-// requestId (resolve the held PreToolUse), while a managed PTY session (Node or
-// the App-Store Swift daemon, which has no requestId gate) takes a session-scoped
-// respond y/n.
+static void hudSendSessionEscape(const char* sid) {
+    if (!sid || !sid[0]) return;
+    char buf[160];
+    snprintf(buf, sizeof(buf),
+             "{\"type\":\"session_command\",\"sessionId\":\"%s\",\"command\":{\"type\":\"escape\"}}", sid);
+    hudSendJson(buf);
+}
+// Approve/Deny that works against both daemons AND both prompt shapes:
+//  • Observed gate (Node OR Swift daemon held PreToolUse) carries a requestId →
+//    resolve it with permission_decision allow/deny.
+//  • Managed PTY session (no requestId) → drive the live prompt. A raw
+//    respond 'y'/'n' is ignored by Claude's navigable (❯) selector, so approve
+//    uses select_option(0) (the daemon converts to arrows+Enter / number+Enter,
+//    selecting the affirmative) and deny sends Esc, which Claude maps to its
+//    "No, and tell Claude what to do differently (esc)" option.
 static void hudSendApprove(const char* requestId, const char* sid, bool approve) {
     if (requestId && requestId[0]) {
         hudSendPermissionDecision(requestId, approve ? "allow" : "deny");
     } else if (sid && sid[0]) {
-        char buf[160];
-        snprintf(buf, sizeof(buf),
-                 "{\"type\":\"session_command\",\"sessionId\":\"%s\",\"command\":{\"type\":\"respond\",\"value\":\"%s\"}}",
-                 sid, approve ? "y" : "n");
-        hudSendJson(buf);
+        if (approve) hudSendSelectOption(sid, 0);
+        else         hudSendSessionEscape(sid);
     }
 }
 
