@@ -1,6 +1,6 @@
 import { listActive as listActiveSessions, type SessionEntry } from './session-registry.js';
 import type { AgentType } from './types.js';
-import { sortSessions } from '@agentdeck/shared';
+import { sortSessions, type PromptOption } from '@agentdeck/shared';
 
 export interface EnrichedSession {
   id: string;
@@ -16,10 +16,15 @@ export interface EnrichedSession {
   controlMode?: 'managed' | 'observed';
   cwd?: string;
   currentTask?: string;
+  currentTool?: string;
   contextPercent?: number;
   totalTokens?: number;
   question?: string;
   requestId?: string;
+  promptType?: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review';
+  options?: PromptOption[];
+  /** Seconds since startedAt — derived at broadcast time so NTP-less devices (ESP32) render elapsed per session. */
+  elapsedSec?: number;
 }
 
 /** Cache last-known sibling state to avoid propagating undefined on transient fetch failures */
