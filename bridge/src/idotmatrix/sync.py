@@ -2,6 +2,7 @@ import asyncio
 import os
 import signal
 import sys
+import time
 import hashlib
 import tempfile
 import urllib.request
@@ -96,6 +97,7 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
     
     last_hash = ""
     connected = False
+    last_brightness_assert = 0.0
 
     # Graceful shutdown: when the daemon (or a user) stops us, we must leave the
     # panel in a clean state — a stateful BLE display otherwise freezes on the
@@ -118,18 +120,47 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
                 print(f"Connecting to iDotMatrix ({address})...")
                 await manager.connectByAddress(address)
                 print("Connected to Bluetooth device!")
-                
+
+                # Settle: the panel drops commands sent too soon after the GATT
+                # link comes up. Without this the first setBrightness is lost on a
+                # reconnect — the device shows frames (setMode lands later) but
+                # stays dark. A short beat before/between control commands fixes it.
+                await _interruptible_sleep(stop_event, 0.4)
+
                 # Set initial hardware brightness
                 if brightness:
                     print(f"Setting hardware brightness to {brightness}%...")
                     await idm_common.setBrightness(brightness)
-                
+                    await _interruptible_sleep(stop_event, 0.1)
+
                 # Enter DIY drawing mode (mode 1)
                 print("Entering DIY drawing mode...")
                 await idm_image.setMode(1)
+                await _interruptible_sleep(stop_event, 0.1)
                 connected = True
                 last_hash = "" # Force immediate push of first frame after reconnect
-            
+                last_brightness_assert = time.monotonic()
+
+            # 1b. Detect a dropped BLE link. We write WITHOUT response, so a
+            # silent disconnect (device sleep, brownout reboot, RF glitch) never
+            # raises on write — without this check sync.py "pushes" into the void
+            # forever and the panel freezes on the last frame it actually got.
+            # bleak's is_connected reflects the real OS-level link state.
+            if manager.client is None or not manager.client.is_connected:
+                print("BLE link lost — reconnecting...")
+                connected = False
+                last_hash = ""
+                await _interruptible_sleep(stop_event, 1.0)
+                continue
+
+            # 1c. Periodically re-assert hardware brightness. The panel can dim
+            # itself (idle auto-dim, brownout reboot mid-session) while the BLE
+            # link stays up, so a one-shot setBrightness on connect isn't enough —
+            # re-send it so the display doesn't silently go dark.
+            if brightness and time.monotonic() - last_brightness_assert > 60:
+                await idm_common.setBrightness(brightness)
+                last_brightness_assert = time.monotonic()
+
             # 2. Fetch frame from AgentDeck Bridge
             try:
                 frame_data = await fetch_frame(url)
