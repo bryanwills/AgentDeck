@@ -354,9 +354,17 @@ const SPRITE_W_FRAC = 0.1875;
  * fractional cell size makes adjacent cells round to alternating 1/2px widths,
  * and on the 2×2 eye holes that intermittently opens a 1px body-coloured seam
  * between the two eye rows while the creature moves — the eyes appear to "break"
- * into dots. Integer cells render the eye as a solid block every frame. */
-function creatureCellSize(zoom: number, canvasW: number, cols: number): number {
-  return Math.max(1, Math.round((SPRITE_W_FRAC * zoom * canvasW) / cols));
+ * into dots. Integer cells render the eye as a solid block every frame.
+ *
+ * The sizing zoom is itself quantized to a coarse 0.25 step first. The raw zoom
+ * lerps continuously during camera transitions, so a cell size sitting right on
+ * a rounding threshold (e.g. zoom where `…/cols` ≈ x.5) flickers 1↔2px frame to
+ * frame — and since the eye sits at a fixed column, a cellSz change jumps it by
+ * `eyeCol` pixels. Snapping the zoom to discrete steps holds cellSz stable
+ * through a transition so the eye only ever moves by whole-creature translation. */
+export function creatureCellSize(zoom: number, canvasW: number, cols: number): number {
+  const zq = Math.round(zoom * 4) / 4; // 0.25 steps — kills threshold-straddle flicker
+  return Math.max(1, Math.round((SPRITE_W_FRAC * zq * canvasW) / cols));
 }
 
 // ===== Colors — Android-matching darker palette =====

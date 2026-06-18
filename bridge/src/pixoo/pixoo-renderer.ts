@@ -30,7 +30,7 @@ import {
   OCTO_WORLD_W, JF_WORLD_W, CF_WORLD_W,
 } from './pixoo-sprites.js';
 import {
-  type Camera, type ActiveCreature, CAMERA_WIDE, blitWithCamera,
+  type Camera, type ActiveCreature, CAMERA_WIDE, blitWithCamera, quantizeCameraPixels,
   updateDirector, setZone, setOverride, resetDirector,
   worldToScreen, isVisible,
   WORLD_SIZE, ACTIVE_SIZE,
@@ -712,7 +712,7 @@ export function renderFrame(
   const dt = lastRenderTime > 0 ? Math.min(5, (now - lastRenderTime) / 1000) : 1.0;
   lastRenderTime = now;
   const schoolPos = getSchoolCenter();
-  const camera = updateDirector(
+  let camera = updateDirector(
     dt, activeCreatures, crayfishRouting,
     hasGateway ? { x: cfX, y: cfY } : null,
     schoolPos,
@@ -725,6 +725,13 @@ export function renderFrame(
   }
   
   camera.width = size; // Set camera target resolution width
+
+  // Snap the camera center to whole device pixels so a fixed sprite cell (a
+  // creature eye) doesn't sub-step as the camera lerps. Applied to the single
+  // camera shared by the background blit and every creature draw → they stay
+  // pixel-aligned. Must run after the adaptive-zoom tweak above so the final
+  // zoom is what we quantize against.
+  camera = quantizeCameraPixels(camera);
 
   // ========================================
   // Phase 1: Render environment → world buffer

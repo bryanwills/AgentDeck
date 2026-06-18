@@ -91,6 +91,30 @@ export function clampCamera(cam: Camera): Camera {
   };
 }
 
+/**
+ * Snap the camera center to whole output pixels.
+ *
+ * worldToScreen maps a fixed world point to `(wx - cx) * w * zoom + w/2`. When
+ * `cx`/`cy` drift continuously (camera lerp) the sub-pixel remainder of that
+ * expression crosses .5 at arbitrary moments, so `Math.round`-based sampling
+ * (background blit) and the integer-snapped sprite origin shift their rounding
+ * *phase* frame-to-frame — a fixed sprite cell (a creature eye) appears to
+ * shimmer 1px even though the creature isn't really moving. Quantizing the
+ * center to the device-pixel grid (`cx * w * zoom` ∈ ℤ) freezes that phase, so
+ * the only motion left is the creature's own whole-pixel translation. At the
+ * ~1fps Pixoo/iDotMatrix push rate this is invisible for pan smoothness.
+ */
+export function quantizeCameraPixels(cam: Camera): Camera {
+  const w = cam.width ?? 64;
+  const s = w * cam.zoom; // output pixels per world unit
+  if (!(s > 0)) return cam;
+  return {
+    ...cam,
+    cx: Math.round(cam.cx * s) / s,
+    cy: Math.round(cam.cy * s) / s,
+  };
+}
+
 /** Linearly interpolate between two cameras. */
 export function lerpCamera(a: Camera, b: Camera, t: number): Camera {
   const s = Math.max(0, Math.min(1, t));
