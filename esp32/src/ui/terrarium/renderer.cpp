@@ -24,6 +24,13 @@ using std::max;
 static lv_obj_t* canvas = nullptr;
 static lv_draw_buf_t draw_buf;
 static uint16_t* canvas_buf = nullptr;
+#if defined(BOARD_IPS10)
+// Cached static base = water-gradient background + sand/rocks terrain. These two passes are
+// static (no animation) yet the most expensive per frame (~456K px combined). Render once →
+// memcpy every frame instead of recomputing. See render() for the reorder rationale.
+static uint16_t* baseCache = nullptr;
+static bool baseCacheDirty = true;
+#endif
 static float totalTime = 0;
 
 // Sin lookup table for fast sin/cos
@@ -264,6 +271,15 @@ void init(lv_obj_t* parent) {
     }
 #endif
 
+#if defined(BOARD_IPS10)
+    // Static-base cache (bg + terrain). Same geometry as the live canvas.
+    if (!baseCache) {
+        baseCache = (uint16_t*)ps_malloc((size_t)canvasW * canvasH * sizeof(uint16_t));
+        if (!baseCache) Serial.println("[Terrarium] baseCache alloc failed — per-frame bg+terrain");
+    }
+    baseCacheDirty = true;   // (re)build on next render (orientation change re-inits)
+#endif
+
 #if defined(BOARD_RGB48)
     // LovyanGFX: canvas must match display format (swapped) — no LVGL conversion
     lv_color_format_t canvasFmt = LV_COLOR_FORMAT_RGB565_SWAPPED;
@@ -410,21 +426,63 @@ void render(float dt) {
     unlockState();
 
     // Render layers bottom-to-top (direct buffer writes)
+#if defined(IPS10_PERF_PROFILE)
+    static uint32_t pBg=0,pRay=0,pTer=0,pCau=0,pKelp=0,pN=0,pLast=0; uint32_t _t;
+#define PROF(acc) do{ acc += micros()-_t; _t=micros(); }while(0)
+    _t = micros();
+#else
+#define PROF(acc) do{}while(0)
+#endif
 
-    // 1. Water gradient background (fills entire buffer)
-    Water::renderBackground(canvas_buf, canvasW, canvasH);
+#if defined(BOARD_IPS10)
+    if (baseCache) {
+        // Static base = bg + terrain, rendered ONCE then memcpy'd each frame. Light rays
+        // (water band) and caustics (sand-top band) are reordered AFTER terrain here, but
+        // their y-ranges are disjoint so the composite is pixel-identical to the original
+        // bg→ray→terrain→caustic order — at a fraction of the per-frame cost.
+        if (baseCacheDirty) {
+            Water::renderBackground(baseCache, canvasW, canvasH);
+            Terrain::render(baseCache, canvasW, canvasH);
+            baseCacheDirty = false;
+        }
+        memcpy(canvas_buf, baseCache, (size_t)canvasW * canvasH * sizeof(uint16_t));
+        PROF(pBg);
+        Water::renderLightRays(canvas_buf, canvasW, canvasH, totalTime);
+        PROF(pRay);
+        Water::renderCaustics(canvas_buf, canvasW, canvasH, totalTime);
+        PROF(pCau);
+    } else
+#endif
+    {
+        // 1. Water gradient background (fills entire buffer)
+        Water::renderBackground(canvas_buf, canvasW, canvasH);
+        PROF(pBg);
 
-    // 2. Light rays from surface (subtle volumetric shafts)
-    Water::renderLightRays(canvas_buf, canvasW, canvasH, totalTime);
+        // 2. Light rays from surface (subtle volumetric shafts)
+        Water::renderLightRays(canvas_buf, canvasW, canvasH, totalTime);
+        PROF(pRay);
 
-    // 3. Sand + rocks (terrain)
-    Terrain::render(canvas_buf, canvasW, canvasH);
+        // 3. Sand + rocks (terrain)
+        Terrain::render(canvas_buf, canvasW, canvasH);
+        PROF(pTer);
 
-    // 4. Caustic light patterns on sand
-    Water::renderCaustics(canvas_buf, canvasW, canvasH, totalTime);
+        // 4. Caustic light patterns on sand
+        Water::renderCaustics(canvas_buf, canvasW, canvasH, totalTime);
+        PROF(pCau);
+    }
 
     // 5. Kelp (animated sway)
     Kelp::render(canvas_buf, canvasW, canvasH, totalTime);
+    PROF(pKelp);
+#if defined(IPS10_PERF_PROFILE)
+    pN++;
+    if (millis() - pLast >= 2000 && pN > 0) {
+        Serial.printf("[PROF] bg %lu | ray %lu | terrain %lu | caustics %lu | kelp %lu us/frame (n=%lu)\n",
+            (unsigned long)(pBg/pN),(unsigned long)(pRay/pN),(unsigned long)(pTer/pN),
+            (unsigned long)(pCau/pN),(unsigned long)(pKelp/pN),(unsigned long)pN);
+        pBg=pRay=pTer=pCau=pKelp=pN=0; pLast=millis();
+    }
+#endif
 
     // 6. Crayfish (if visible)
     if (showCrayfish) {

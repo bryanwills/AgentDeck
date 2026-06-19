@@ -8,6 +8,12 @@
 #include "net/ws_client.h"
 #include <Arduino.h>
 
+#if defined(IPS10_PERF_HUD)
+// Defined in main.cpp (global scope) — perf overlay worst-frame stats.
+extern volatile uint32_t g_perfWorstUs, g_perfWorstView, g_perfWorstFlush, g_perfWorstInner;
+extern volatile uint32_t g_bufInternal;   // 1 = LVGL draw buffer internal SRAM, 0 = PSRAM
+#endif
+
 // === Left panel: AgentDeck logo + session list ===
 static lv_obj_t* panelLeft = nullptr;
 static lv_obj_t* lblLogo = nullptr;
@@ -20,6 +26,18 @@ static lv_obj_t* lblSessions = nullptr;
 // and shrinks when idle, and shows inline what that agent is doing. Replaces the static
 // session list + separate timeline with a single dynamic surface.
 static lv_obj_t* lblLogoImg = nullptr;
+static lv_obj_t* lblStatus  = nullptr;   // header status line: "● N sessions · serial/ws"
+static lv_obj_t* terrCount  = nullptr;   // "N LIVE" caption over the terrarium
+// D1 full-width top bar (brand · daemon status · 5h/7d usage gauges).
+static constexpr int IPS10_TOPBAR_H = 56;
+static lv_obj_t* tbDaemon  = nullptr;    // "● daemon :9120 · N agents"
+#if defined(IPS10_PERF_HUD)
+static lv_obj_t* tbPerf    = nullptr;    // worst-frame perf overlay (debug)
+#endif
+static lv_obj_t* tb5hFill  = nullptr;    // 5h usage bar fill
+static lv_obj_t* tb7dFill  = nullptr;    // 7d usage bar fill
+static lv_obj_t* tb5hPct   = nullptr;    // "62%"
+static lv_obj_t* tb7dPct   = nullptr;
 #include "../terrarium/creature_glyphs_generated.h"  // OCTOPUS_A8 / CRAYFISH_BODY_A8 / OPENCODE_A8 masks
 static constexpr int IPS10_SIDEBAR_W_MIN = 372;     // portrait / fallback minimum
 static constexpr int IPS10_TERRARIUM_W = 408;       // keep in sync with terrarium/renderer.cpp
@@ -74,7 +92,9 @@ static void ips10InitGlyphs() {
     if (glyphsReady) return;
     using namespace CreatureGlyphs;
     ips10BuildGlyph(glyphOctopus,  OCTOPUS_A8,       OCTOPUS_W,       OCTOPUS_H);
-    ips10BuildGlyph(glyphCrayfish, CRAYFISH_BODY_A8, CRAYFISH_BODY_W, CRAYFISH_BODY_H);
+    // Cards use the FULL OpenClaw mark (eyes + both claws), not the body-only CRAYFISH_BODY
+    // the terrarium pairs with procedural claws — the body alone reads as a shapeless blob.
+    ips10BuildGlyph(glyphCrayfish, OPENCLAW_MARK_A8, OPENCLAW_MARK_W, OPENCLAW_MARK_H);
     ips10BuildGlyph(glyphOpencode, OPENCODE_A8,      OPENCODE_W,      OPENCODE_H);
     glyphsReady = true;
 }
@@ -187,11 +207,18 @@ static uint32_t ips10AgentColor(const char* agentType) {
     if (strstr(agentType, "claude") != nullptr) return Theme::ClaudeBody;
     return Theme::HUDDim;
 }
+// D1 "Tide Bento" semantic state tokens (docs/design/tenin/screen.css :root):
+//   --ok #52D988 (working) · --attn #FFA93D (awaiting) · --error #FF6B6B · --faint #5D7470 (idle)
+// Product-UI bright STATE palette — data.js SSOT (tenin/data.js STATE.*.color).
+static constexpr uint32_t D1_OK    = 0x3ED6E8;  // processing (cyan)
+static constexpr uint32_t D1_ATTN  = 0xFFA93D;  // awaiting
+static constexpr uint32_t D1_ERROR = 0xFF6B6B;  // error
+static constexpr uint32_t D1_IDLE  = 0x7A8A9C;  // idle
 static uint32_t ips10StateColor(const char* state) {
-    if (strcmp(state, "idle") == 0) return Theme::StatusGreen;
-    if (strcmp(state, "processing") == 0) return Theme::StatusBlue;
-    if (strstr(state, "awaiting") != nullptr) return Theme::StatusAmber;
-    return Theme::HUDDim;
+    if (strstr(state, "awaiting") != nullptr) return D1_ATTN;
+    if (strcmp(state, "processing") == 0)     return D1_OK;
+    if (strstr(state, "error") != nullptr || strstr(state, "fail") != nullptr) return D1_ERROR;
+    return D1_IDLE;   // idle / unknown → faint slate (matches D1 idle cells)
 }
 // Compact elapsed for the cell footer: "45s" / "18m" / "2h" / "3d" (NTP-less device,
 // value arrives pre-derived as seconds from the daemon's startedAt).
@@ -356,7 +383,14 @@ static void detailClose() {
     if (detailBack) lv_obj_add_flag(detailBack, LV_OBJ_FLAG_HIDDEN);
 }
 static void detailBackCb(lv_event_t* e) {
-    if (lv_event_get_target(e) == detailBack) detailClose();  // tap outside the panel
+    // Close when the tap lands on the scrim itself (outside the panel). Accept both the
+    // original target and the current target so a slightly-bubbled event still closes.
+    if (lv_event_get_target(e) == detailBack || lv_event_get_current_target(e) == detailBack)
+        detailClose();
+}
+static void detailCloseCb(lv_event_t* e) {   // explicit ✕ / Cancel → always a way out
+    (void)e;
+    detailClose();
 }
 static void detailBtnACb(lv_event_t* e) {
     (void)e;
@@ -383,7 +417,16 @@ static void detailBtnBCb(lv_event_t* e) {
 static void detailEnsure() {
     if (detailBack) return;
     detailBack = lv_obj_create(lv_layer_top());
+#if defined(BOARD_IPS10)
+    // PERF: cover only the CARDS region (right of the office, below the top bar), not the whole
+    // screen. The office is a 408-wide software-transposed canvas — the single most expensive
+    // thing to re-flush. Scoping the modal to the cards area means closing it only re-renders +
+    // re-flushes the right side, never the office, so the modal feels instant to open/close.
+    lv_obj_set_size(detailBack, g_screenW - (IPS10_TERRARIUM_W + 8), g_screenH - IPS10_TOPBAR_H);
+    lv_obj_set_pos(detailBack, IPS10_TERRARIUM_W + 8, IPS10_TOPBAR_H);
+#else
     lv_obj_set_size(detailBack, LV_PCT(100), LV_PCT(100));
+#endif
     lv_obj_set_style_bg_color(detailBack, lv_color_hex(0x05140F), 0);
     // Lighter scrim (~47%) so the terrarium + cards stay visibly dimmed behind the
     // modal instead of being blacked out — reads as a floating layer, not a takeover.
@@ -414,6 +457,25 @@ static void detailEnsure() {
     lv_obj_set_style_pad_row(detailPanel, 10, 0);
     lv_obj_clear_flag(detailPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(detailPanel, LV_FLEX_FLOW_COLUMN);
+
+    // Explicit close (✕) — top-right overlay, OUTSIDE the flex flow. Always available so the
+    // user can back out of an Approve/Deny prompt WITHOUT choosing either. (Scrim-tap also
+    // closes, but a visible affordance makes the exit obvious.)
+    lv_obj_t* closeBtn = lv_button_create(detailPanel);
+    lv_obj_add_flag(closeBtn, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_size(closeBtn, 44, 44);
+    lv_obj_align(closeBtn, LV_ALIGN_TOP_RIGHT, 4, -4);
+    lv_obj_set_style_radius(closeBtn, 22, 0);
+    lv_obj_set_style_bg_color(closeBtn, lv_color_hex(0x16413C), 0);
+    lv_obj_set_style_bg_opa(closeBtn, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(closeBtn, 1, 0);
+    lv_obj_set_style_border_color(closeBtn, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_shadow_width(closeBtn, 0, 0);
+    lv_obj_add_event_cb(closeBtn, detailCloseCb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* closeLbl = lv_label_create(closeBtn);
+    lv_label_set_text(closeLbl, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_text_color(closeLbl, lv_color_hex(Theme::HUDText), 0);
+    lv_obj_center(closeLbl);
 
     detailTitle = lv_label_create(detailPanel);
     lv_obj_set_style_text_color(detailTitle, lv_color_hex(Theme::HUDText), 0);
@@ -470,11 +532,14 @@ static void detailEnsure() {
 }
 static void detailRefresh() {
     if (detailCellIdx < 0 || !detailBack) return;
+#if defined(IPS10_PERF_PROFILE)
+    uint32_t _drt0 = micros();
+#endif
     CellMeta& m = cellMetaData[detailCellIdx];
     lv_label_set_text(detailTitle, m.name[0] ? m.name : "Session");
 
     char sub[96];
-    snprintf(sub, sizeof(sub), "#%06lX %s# \xC2\xB7 %s", (unsigned long)m.accent,
+    snprintf(sub, sizeof(sub), "#%06lX %s# " LV_SYMBOL_BULLET " %s", (unsigned long)m.accent,
              m.agent[0] ? m.agent : "agent", m.model[0] ? m.model : "");
     lv_label_set_text(detailSub, sub);
 
@@ -528,6 +593,9 @@ static void detailRefresh() {
         lv_obj_set_style_text_color(detailBtnALabel, lv_color_hex(Theme::HUDText), 0);
         lv_obj_add_flag(detailBtnB, LV_OBJ_FLAG_HIDDEN);
     }
+#if defined(IPS10_PERF_PROFILE)
+    Serial.printf("[PROF] detailRefresh %lu us\n", (unsigned long)(micros() - _drt0));
+#endif
 }
 static void detailOpen(int idx) {
     if (idx < 0 || idx >= MOSAIC_MAX) return;
@@ -564,14 +632,102 @@ void init(lv_obj_t* parent) {
     const int cardsX = IPS10_TERRARIUM_W + 8;
     ips10SidebarW = (g_screenW > 0 ? g_screenW : 800) - cardsX - 8;
     if (ips10SidebarW < IPS10_SIDEBAR_W_MIN) ips10SidebarW = IPS10_SIDEBAR_W_MIN;
+    // === Full-width top bar (D1 topbar): brand · daemon status · 5h/7d usage gauges. ===
+    {
+        lv_obj_t* tb = lv_obj_create(parent);
+        lv_obj_set_size(tb, g_screenW, IPS10_TOPBAR_H);
+        lv_obj_set_pos(tb, 0, 0);
+        lv_obj_set_style_bg_color(tb, lv_color_hex(0x07140F), 0);
+        lv_obj_set_style_bg_opa(tb, (lv_opa_t)190, 0);
+        lv_obj_set_style_border_side(tb, LV_BORDER_SIDE_BOTTOM, 0);
+        lv_obj_set_style_border_width(tb, 1, 0);
+        lv_obj_set_style_border_color(tb, lv_color_hex(0x1B3F39), 0);
+        lv_obj_set_style_radius(tb, 0, 0);
+        lv_obj_set_style_pad_left(tb, 18, 0); lv_obj_set_style_pad_right(tb, 18, 0);
+        lv_obj_set_style_pad_top(tb, 0, 0); lv_obj_set_style_pad_bottom(tb, 0, 0);
+        lv_obj_set_style_pad_column(tb, 16, 0);
+        lv_obj_clear_flag(tb, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(tb, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_flex_flow(tb, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(tb, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+        lv_obj_t* mk = lv_image_create(tb);
+        lv_image_set_src(mk, &img_logo_64);
+        lv_image_set_scale(mk, 256 * 30 / 64);   // 64→30px
+        lblLogo = lv_label_create(tb);
+        lv_obj_set_style_text_font(lblLogo, &lv_font_montserrat_16, 0);
+        lv_label_set_recolor(lblLogo, true);
+        lv_label_set_text(lblLogo, "#E7EFE8 Agent##3ED6E8 Deck#");   // Deck in cyan
+
+        tbDaemon = lv_label_create(tb);
+        lv_obj_set_style_text_font(tbDaemon, &font_kr_12, 0);
+        lv_label_set_recolor(tbDaemon, true);
+        lv_obj_set_style_text_color(tbDaemon, lv_color_hex(0x8FA6A2), 0);
+        lv_label_set_text(tbDaemon, "");
+
+#if defined(IPS10_PERF_HUD)
+        tbPerf = lv_label_create(tb);
+        lv_obj_set_style_text_font(tbPerf, &font_kr_12, 0);
+        lv_obj_set_style_text_color(tbPerf, lv_color_hex(0xFFA93D), 0);
+        lv_label_set_text(tbPerf, "perf");
+#endif
+
+        lv_obj_t* sp = lv_obj_create(tb);   // flex spacer → pushes gauges right
+        lv_obj_set_style_bg_opa(sp, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(sp, 0, 0);
+        lv_obj_set_height(sp, 1);
+        lv_obj_set_flex_grow(sp, 1);
+        lv_obj_clear_flag(sp, LV_OBJ_FLAG_SCROLLABLE);
+
+        struct { const char* lab; lv_obj_t** fill; lv_obj_t** pct; } G[2] = {
+            {"5H", &tb5hFill, &tb5hPct}, {"7D", &tb7dFill, &tb7dPct} };
+        for (int gi = 0; gi < 2; gi++) {
+            lv_obj_t* g = lv_obj_create(tb);
+            lv_obj_set_size(g, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_style_bg_opa(g, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(g, 0, 0);
+            lv_obj_set_style_pad_all(g, 0, 0);
+            lv_obj_set_style_pad_column(g, 8, 0);
+            lv_obj_clear_flag(g, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_flex_flow(g, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(g, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_t* lab = lv_label_create(g);
+            lv_obj_set_style_text_font(lab, &font_kr_12, 0);
+            lv_obj_set_style_text_color(lab, lv_color_hex(0x5D7470), 0);
+            lv_label_set_text(lab, G[gi].lab);
+            lv_obj_t* track = lv_obj_create(g);
+            lv_obj_set_size(track, 92, 6);
+            lv_obj_set_style_radius(track, 3, 0);
+            lv_obj_set_style_bg_color(track, lv_color_hex(0xFFFFFF), 0);
+            lv_obj_set_style_bg_opa(track, (lv_opa_t)45, 0);
+            lv_obj_set_style_border_width(track, 0, 0);
+            lv_obj_set_style_pad_all(track, 0, 0);
+            lv_obj_clear_flag(track, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_t* fill = lv_obj_create(track);
+            lv_obj_set_size(fill, 0, 6);
+            lv_obj_set_pos(fill, 0, 0);
+            lv_obj_set_style_radius(fill, 3, 0);
+            lv_obj_set_style_bg_color(fill, lv_color_hex(0x3ED6E8), 0);
+            lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(fill, 0, 0);
+            lv_obj_clear_flag(fill, LV_OBJ_FLAG_SCROLLABLE);
+            *G[gi].fill = fill;
+            lv_obj_t* pct = lv_label_create(g);
+            lv_obj_set_style_text_font(pct, &font_kr_12, 0);
+            lv_obj_set_style_text_color(pct, lv_color_hex(0xE7EFE8), 0);
+            lv_label_set_text(pct, "-");   // em dash placeholder
+            *G[gi].pct = pct;
+        }
+    }
+
+    // Cards panel — sits BELOW the top bar (no in-panel header anymore; brand moved to the bar).
     panelLeft = lv_obj_create(parent);
-    lv_obj_set_size(panelLeft, ips10SidebarW, g_screenH - 16);
-    lv_obj_align(panelLeft, LV_ALIGN_TOP_LEFT, cardsX, 8);   // explicit top-left anchor (set_pos can inherit a non-TL align)
-    // Transparent container (D1): cards float on the dark ground, no gray box over the terrarium.
+    lv_obj_set_size(panelLeft, ips10SidebarW, g_screenH - IPS10_TOPBAR_H - 12);
+    lv_obj_align(panelLeft, LV_ALIGN_TOP_LEFT, cardsX, IPS10_TOPBAR_H + 6);
     lv_obj_set_style_bg_opa(panelLeft, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(panelLeft, 0, 0);
     lv_obj_set_style_radius(panelLeft, 14, 0);
-    lv_obj_set_style_pad_top(panelLeft, 16, 0);
+    lv_obj_set_style_pad_top(panelLeft, 8, 0);
     lv_obj_set_style_pad_bottom(panelLeft, 12, 0);
     lv_obj_set_style_pad_left(panelLeft, 14, 0);
     lv_obj_set_style_pad_right(panelLeft, 14, 0);
@@ -580,23 +736,57 @@ void init(lv_obj_t* parent) {
     lv_obj_set_flex_flow(panelLeft, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(panelLeft, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
-    // Logo image + wordmark
-    lblLogoImg = lv_image_create(panelLeft);
-    lv_image_set_src(lblLogoImg, &img_logo_64);
+    // === Office caption (top-left) + state legend (bottom-left) — HUD overlays on the screen
+    //     above the office canvas (office.js: caption top, legend bottom). Each sits in a dark
+    //     translucent chip so the text reads cleanly over the busy pixel scene. ===
+    {
+        // (No "THE BULLPEN / N LIVE" caption — the top bar already shows the agent count, and
+        //  the team-room rugs + clustered workers carry the spatial identity. terrCount stays
+        //  null so the shared update() path skips it.)
+        terrCount = nullptr;
 
-    lblLogo = lv_label_create(panelLeft);
-    lv_obj_set_style_text_color(lblLogo, lv_color_hex(Theme::HUDText), 0);
-    lv_obj_set_style_text_font(lblLogo, &lv_font_montserrat_20, 0);
-    lv_label_set_text(lblLogo, "AgentDeck");
-
-    logoLine = lv_obj_create(panelLeft);
-    lv_obj_set_size(logoLine, ips10SidebarW - 60, 2);
-    lv_obj_set_style_bg_color(logoLine, lv_color_hex(Theme::StatusBlue), 0);
-    lv_obj_set_style_bg_opa(logoLine, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(logoLine, 0, 0);
-    lv_obj_set_style_radius(logoLine, 1, 0);
-    lv_obj_set_style_pad_all(logoLine, 0, 0);
-    lv_obj_clear_flag(logoLine, LV_OBJ_FLAG_SCROLLABLE);
+        // legend chip: round colour swatches (state colours), bottom-left per office.js.
+        lv_obj_t* terrLegend = lv_obj_create(parent);
+        lv_obj_add_flag(terrLegend, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_set_size(terrLegend, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_align(terrLegend, LV_ALIGN_BOTTOM_LEFT, 12, -10);
+        lv_obj_set_style_bg_color(terrLegend, lv_color_hex(0x07140F), 0);
+        lv_obj_set_style_bg_opa(terrLegend, (lv_opa_t)160, 0);
+        lv_obj_set_style_radius(terrLegend, 7, 0);
+        lv_obj_set_style_pad_left(terrLegend, 9, 0); lv_obj_set_style_pad_right(terrLegend, 9, 0);
+        lv_obj_set_style_pad_top(terrLegend, 5, 0); lv_obj_set_style_pad_bottom(terrLegend, 5, 0);
+        lv_obj_set_style_pad_column(terrLegend, 12, 0);
+        lv_obj_set_style_border_width(terrLegend, 0, 0);
+        lv_obj_clear_flag(terrLegend, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(terrLegend, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_flex_flow(terrLegend, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(terrLegend, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        const uint32_t legC[3] = { D1_ATTN, D1_OK, D1_IDLE };
+        const char*    legT[3] = { "Awaiting", "Working", "Idle" };
+        for (int li = 0; li < 3; li++) {
+            lv_obj_t* item = lv_obj_create(terrLegend);
+            lv_obj_set_size(item, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_style_bg_opa(item, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(item, 0, 0);
+            lv_obj_set_style_pad_all(item, 0, 0);
+            lv_obj_set_style_pad_column(item, 6, 0);
+            lv_obj_clear_flag(item, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_clear_flag(item, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_flex_flow(item, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(item, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_t* sw = lv_obj_create(item);
+            lv_obj_set_size(sw, 11, 11);
+            lv_obj_set_style_radius(sw, 6, 0);
+            lv_obj_set_style_bg_color(sw, lv_color_hex(legC[li]), 0);
+            lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(sw, 0, 0);
+            lv_obj_clear_flag(sw, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_t* lt = lv_label_create(item);
+            lv_obj_set_style_text_color(lt, lv_color_hex(0x8FA6A2), 0);  // D1 --dim
+            lv_obj_set_style_text_font(lt, &font_kr_12, 0);
+            lv_label_set_text(lt, legT[li]);
+        }
+    }
 
     // Not used on IPS10 (the mosaic replaces the flat session list); keep null so
     // the shared update() path guards them out.
@@ -612,7 +802,7 @@ void init(lv_obj_t* parent) {
     // the screen's pure-black root (0x000000), reading as "the right side flickers to
     // black". A solid deep ink-green deck makes the inter-cell gutters and transition
     // gaps an intentional surface instead of black, and reads as cards-on-a-deck (D1).
-    lv_obj_set_style_bg_color(cellsBox, lv_color_hex(0x0B1A17), 0);
+    lv_obj_set_style_bg_color(cellsBox, lv_color_hex(0x0B1D1A), 0);   // D1 --ink-1 deck
     lv_obj_set_style_bg_opa(cellsBox, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(cellsBox, 12, 0);
     lv_obj_set_style_border_width(cellsBox, 0, 0);
@@ -626,9 +816,12 @@ void init(lv_obj_t* parent) {
         cell[i] = lv_obj_create(cellsBox);
         lv_obj_set_size(cell[i], 80, 60);
         lv_obj_set_pos(cell[i], 0, 0);
-        // D1 card: dark teal fill, rounded, agent-color accent rail on the left edge.
-        lv_obj_set_style_bg_color(cell[i], lv_color_hex(0x123430), 0);
-        lv_obj_set_style_bg_opa(cell[i], (lv_opa_t)205, 0);
+        // D1 card: raised-surface vertical gradient (#16413c → #102a27), rounded, agent-color
+        // accent rail on the left edge. Matches docs/design/tenin/screen.css .cell background.
+        lv_obj_set_style_bg_color(cell[i], lv_color_hex(0x16413C), 0);
+        lv_obj_set_style_bg_grad_color(cell[i], lv_color_hex(0x102A27), 0);
+        lv_obj_set_style_bg_grad_dir(cell[i], LV_GRAD_DIR_VER, 0);
+        lv_obj_set_style_bg_opa(cell[i], LV_OPA_COVER, 0);   // opaque (no per-pixel blend)
         lv_obj_set_style_radius(cell[i], 12, 0);
         lv_obj_set_style_border_side(cell[i], LV_BORDER_SIDE_LEFT, 0);
         lv_obj_set_style_border_width(cell[i], 3, 0);
@@ -641,9 +834,13 @@ void init(lv_obj_t* parent) {
         lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_flex_flow(cell[i], LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell[i], LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-        // Tap a cell → detail overlay (D1 "tap a cell for the log").
-        lv_obj_add_flag(cell[i], LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(cell[i], cellTapCb, LV_EVENT_SHORT_CLICKED, (void*)(intptr_t)i);
+        // Cells are PASSIVE status tiles: everything the user needs is shown inline as text
+        // (name · state · tool · activity · meta) and awaiting cells expose explicit Approve/Deny
+        // buttons. No tap-to-open detail overlay — it popped spuriously on stray/phantom touches
+        // and a separate modal isn't needed when the card already carries the text. Non-clickable
+        // so a phantom press on the cell body does nothing. (cellTapCb kept but never bound/fired.)
+        lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_CLICKABLE);
+        (void)cellTapCb;  // retained for reference; intentionally not wired to a tap
 
         // Creature mark — top-right overlay, OUTSIDE the flex flow (IGNORE_LAYOUT) so it
         // never perturbs the text column's layout (nested layout churn is what black-
@@ -757,6 +954,7 @@ void init(lv_obj_t* parent) {
     lv_obj_clear_flag(panelRight, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(panelRight, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(panelRight, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_add_flag(panelRight, LV_OBJ_FLAG_HIDDEN);   // usage now lives in the full-width top bar
 
     lblTankHeader = lv_label_create(panelRight);
     lv_obj_set_style_text_color(lblTankHeader, lv_color_hex(Theme::HUDDim), 0);
@@ -1196,6 +1394,47 @@ void update() {
         }
         for (char* c = latestAction; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
 
+        // Top-bar daemon status + office caption track the live agent count.
+        bool linkUp = g_state.wsConnected || Net::serialConnected();
+        if (tbDaemon) {
+            char sb[64];
+            snprintf(sb, sizeof(sb), "#%06lX " LV_SYMBOL_BULLET "# daemon " LV_SYMBOL_BULLET " %d agent%s " LV_SYMBOL_BULLET " %s",
+                     (unsigned long)(linkUp ? D1_OK : D1_IDLE), n, n == 1 ? "" : "s",
+                     g_state.wsConnected ? "ws" : (Net::serialConnected() ? "serial" : "offline"));
+            lv_label_set_text(tbDaemon, sb);
+        }
+#if defined(IPS10_PERF_HUD)
+        if (tbPerf) {
+            char pb[80];
+            snprintf(pb, sizeof(pb), "WORST %lums v%lu f%lu ppa%lu buf:%s",
+                     (unsigned long)(g_perfWorstUs / 1000),
+                     (unsigned long)(g_perfWorstView / 1000),
+                     (unsigned long)(g_perfWorstFlush / 1000),
+                     (unsigned long)(g_perfWorstInner / 1000),
+                     g_bufInternal ? "INT" : "PSRAM");
+            lv_label_set_text(tbPerf, pb);
+        }
+#endif
+        // Top-bar 5h / 7d usage gauges (bar fill width + pct). p5h/p7d are 0..1 (negative = no data).
+        if (tb5hFill) {
+            int w5 = p5h >= 0.0f ? (int)(p5h * 92.0f + 0.5f) : 0; if (w5 > 92) w5 = 92;
+            lv_obj_set_width(tb5hFill, w5);
+            lv_obj_set_style_bg_color(tb5hFill, lv_color_hex(p5h >= 0.85f ? D1_ATTN : D1_OK), 0);
+            char pb[8]; if (p5h >= 0.0f) snprintf(pb, sizeof(pb), "%d%%", (int)(p5h * 100.0f + 0.5f)); else snprintf(pb, sizeof(pb), "-");
+            if (tb5hPct) lv_label_set_text(tb5hPct, pb);
+        }
+        if (tb7dFill) {
+            int w7 = p7d >= 0.0f ? (int)(p7d * 92.0f + 0.5f) : 0; if (w7 > 92) w7 = 92;
+            lv_obj_set_width(tb7dFill, w7);
+            lv_obj_set_style_bg_color(tb7dFill, lv_color_hex(p7d >= 0.85f ? D1_ATTN : D1_OK), 0);
+            char pb[8]; if (p7d >= 0.0f) snprintf(pb, sizeof(pb), "%d%%", (int)(p7d * 100.0f + 0.5f)); else snprintf(pb, sizeof(pb), "-");
+            if (tb7dPct) lv_label_set_text(tb7dPct, pb);
+        }
+        if (terrCount) {
+            char tc[40]; snprintf(tc, sizeof(tc), "THE BULLPEN " LV_SYMBOL_BULLET " %d LIVE", n);
+            lv_label_set_text(terrCount, tc);
+        }
+
         // Use the KNOWN panel geometry, not lv_obj_get_content_width/height — those
         // return stale/partial values depending on layout timing, which made the
         // treemap fill only a small top-left corner of the (correctly-sized) region.
@@ -1267,21 +1506,12 @@ void update() {
                 if (!lv_obj_has_flag(cell[i], LV_OBJ_FLAG_HIDDEN)) lv_obj_add_flag(cell[i], LV_OBJ_FLAG_HIDDEN);
                 cellInit[i] = false; cellSig[i] = 0; continue;
             }
-            // Snap on first appearance; lerp toward target; settle (stop sub-pixel drift
-            // so a static grid stops re-positioning → no invalidation).
-            if (!cellInit[i]) {
-                cellCurX[i] = tgtX[i]; cellCurY[i] = tgtY[i]; cellCurW[i] = tgtW[i]; cellCurH[i] = tgtH[i];
-                cellInit[i] = true;
-            } else {
-                float dx = tgtX[i] - cellCurX[i], dy = tgtY[i] - cellCurY[i];
-                float dw = tgtW[i] - cellCurW[i], dh = tgtH[i] - cellCurH[i];
-                if (fabsf(dx) < 0.6f && fabsf(dy) < 0.6f && fabsf(dw) < 0.6f && fabsf(dh) < 0.6f) {
-                    cellCurX[i] = tgtX[i]; cellCurY[i] = tgtY[i]; cellCurW[i] = tgtW[i]; cellCurH[i] = tgtH[i];
-                } else {
-                    cellCurX[i] += dx * 0.22f; cellCurY[i] += dy * 0.22f;
-                    cellCurW[i] += dw * 0.22f; cellCurH[i] += dh * 0.22f;
-                }
-            }
+            // SNAP to the treemap target (no per-frame lerp). A full cards-region re-render is
+            // ~250 ms on this panel (LVGL re-traverses the whole widget tree per flush slice), so
+            // a multi-frame lerp meant ~25 such re-renders per layout change → seconds of drag.
+            // Snapping makes a layout change a single re-render: instant, not sluggish.
+            cellCurX[i] = tgtX[i]; cellCurY[i] = tgtY[i]; cellCurW[i] = tgtW[i]; cellCurH[i] = tgtH[i];
+            cellInit[i] = true;
             int px = (int)(cellCurX[i] + 0.5f), py = (int)(cellCurY[i] + 0.5f);
             int pw = (int)(cellCurW[i] - GAP + 0.5f); if (pw < 10) pw = 10;
             int ph = (int)(cellCurH[i] - GAP + 0.5f); if (ph < 10) ph = 10;
@@ -1318,9 +1548,11 @@ void update() {
             if (sig == cellSig[i]) continue;     // settled + unchanged → no LVGL work
             cellSig[i] = sig;
 
-            // accent rail + focus link
+            // accent rail = STATE colour (data.js: the cell's --accent is the state, so awaiting
+            // reads amber, working cyan, etc. at a glance); the agent identity is the glyph.
+            // Focus just thickens the same rail.
             lv_obj_set_style_border_width(cell[i], linked ? 4 : 3, 0);
-            lv_obj_set_style_border_color(cell[i], lv_color_hex(linked ? mc[i].stateCol : mc[i].accent), 0);
+            lv_obj_set_style_border_color(cell[i], lv_color_hex(mc[i].stateCol), 0);
 
             int innerW = pw - 24; if (innerW < 24) innerW = 24;
 
@@ -1409,7 +1641,7 @@ void update() {
             char el[12]; ips10FormatElapsed(mc[i].elapsed, el, sizeof(el));
             if (!showButtons && ph >= 64 && (mc[i].model[0] || el[0])) {
                 char fb[56];
-                if (mc[i].model[0] && el[0]) snprintf(fb, sizeof(fb), "%s \xC2\xB7 %s", mc[i].model, el);
+                if (mc[i].model[0] && el[0]) snprintf(fb, sizeof(fb), "%s " LV_SYMBOL_BULLET " %s", mc[i].model, el);
                 else if (mc[i].model[0])     snprintf(fb, sizeof(fb), "%s", mc[i].model);
                 else                         snprintf(fb, sizeof(fb), "%s", el);
                 lv_label_set_text(cellMeta[i], fb);
@@ -1418,9 +1650,17 @@ void update() {
                 lv_obj_add_flag(cellMeta[i], LV_OBJ_FLAG_HIDDEN);
             }
         }
-        // Keep an open detail overlay in sync with live state (it may have been
-        // approved elsewhere, or the session may have changed state).
-        if (detailCellIdx >= 0) detailRefresh();
+        // Keep an open detail overlay in sync with live state — but THROTTLED, not per frame.
+        // detailRefresh() rebuilds the whole panel (title/sub/action + a 640-char timeline log
+        // + footer buttons) and re-lays-out its labels; doing that every frame pegged the main
+        // loop while the modal was open, which made closing it feel laggy. ~400ms is plenty for
+        // a status panel and frees the loop for snappy input/close. (detailOpen still refreshes
+        // immediately, so opening is instant.)
+        if (detailCellIdx >= 0) {
+            static uint32_t lastDetailRefreshMs = 0;
+            uint32_t nowMs = (uint32_t)millis();
+            if (nowMs - lastDetailRefreshMs >= 400) { lastDetailRefreshMs = nowMs; detailRefresh(); }
+        }
     }
 #endif
 
