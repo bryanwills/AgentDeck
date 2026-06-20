@@ -23,7 +23,7 @@ export class HookServer extends EventEmitter {
   private voiceManager: VoiceManager | null = null;
   private apiUsageGetter: (() => { usage: unknown; fetchedAt: number }) | null = null;
   private deviceInfoGetter: (() => unknown) | null = null;
-  private pixooFrameGetter: ((size?: 32 | 64) => Uint8Array) | null = null;
+  private pixooFrameGetter: ((size?: 11 | 32 | 64, layout?: 'standard' | 'micro') => Uint8Array) | null = null;
   private pixooStreamListener: ((frame: Uint8Array) => void) | null = null;
 
   // SSE
@@ -72,7 +72,7 @@ export class HookServer extends EventEmitter {
   }
 
   /** Register a getter that returns the current Pixoo RGB frame. */
-  setPixooFrameGetter(getter: (size?: 32 | 64) => Uint8Array): void {
+  setPixooFrameGetter(getter: (size?: 11 | 32 | 64, layout?: 'standard' | 'micro') => Uint8Array): void {
     this.pixooFrameGetter = getter;
   }
 
@@ -320,8 +320,9 @@ export class HookServer extends EventEmitter {
         return;
       }
       const sizeParam = req.query?.size;
-      const size: 32 | 64 = sizeParam === '32' ? 32 : 64;
-      const rgb = this.pixooFrameGetter(size);
+      const size: 11 | 32 | 64 = sizeParam === '11' ? 11 : sizeParam === '32' ? 32 : 64;
+      const layout = req.query?.layout === 'micro' ? 'micro' : 'standard';
+      const rgb = this.pixooFrameGetter(size, layout);
       const bmp = rgbToBmp(rgb, size, size);
       res.set({
         'Content-Type': 'image/bmp',

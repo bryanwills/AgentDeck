@@ -3,6 +3,7 @@ import { MdnsModule } from './mdns-module.js';
 import { AdbModule } from './adb-module.js';
 import { SerialModule } from './serial-module.js';
 import { PixooModule } from './pixoo-module.js';
+import { TimeboxModule } from './timebox-module.js';
 import { D200hModule } from './d200h-module.js';
 import type { AgentType } from '../types.js';
 import { debug } from '../logger.js';
@@ -12,6 +13,7 @@ export { MdnsModule } from './mdns-module.js';
 export { AdbModule } from './adb-module.js';
 export { SerialModule } from './serial-module.js';
 export { PixooModule } from './pixoo-module.js';
+export { TimeboxModule } from './timebox-module.js';
 export { D200hModule } from './d200h-module.js';
 
 /**
@@ -23,6 +25,7 @@ export function createDefaultModules(agentType: AgentType): DeviceModule[] {
     new AdbModule(),
     new SerialModule(),
     new PixooModule(),
+    new TimeboxModule(),
     new D200hModule(),
   ];
 }

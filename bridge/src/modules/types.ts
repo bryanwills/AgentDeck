@@ -14,7 +14,7 @@ export interface BridgeContext {
 
 /**
  * Pluggable device module interface.
- * Modules wrap optional device integrations (mDNS, ADB, ESP32 serial, Pixoo).
+ * Modules wrap optional device integrations (mDNS, ADB, ESP32 serial, Pixoo, Timebox).
  */
 export interface DeviceModule {
   readonly name: string;
@@ -40,5 +40,6 @@ export interface ModuleConfigs {
   adb?: 'auto' | boolean;
   serial?: 'auto' | boolean;
   pixoo?: 'auto' | boolean;
+  timebox?: 'auto' | boolean;
   d200h?: 'auto' | boolean;
 }

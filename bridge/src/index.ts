@@ -403,6 +403,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     adb: 'auto',
     serial: false, // daemon-only — session bridges never talk to ESP32
     pixoo: false,  // daemon-only — session bridges never talk to Pixoo
+    timebox: false, // daemon-only — session bridges never talk to Timebox
   };
   const deviceModules = createDefaultModules(agentType);
 
@@ -467,7 +468,12 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   }));
 
   // Pixoo live preview frame getter for GET /pixoo/frame
-  hookServer?.setPixooFrameGetter((size?: 32 | 64) => getLastFrame(size) ?? renderPreviewFrame(size));
+  hookServer?.setPixooFrameGetter((size?: 11 | 32 | 64, layout?: 'standard' | 'micro') =>
+    // The frame cache holds the standard terrarium, so render micro fresh.
+    layout === 'micro'
+      ? renderPreviewFrame(size, 'micro')
+      : (getLastFrame(size) ?? renderPreviewFrame(size)),
+  );
 
   // ===== Diagnostics =====
   adapter.onDiag((tail) => createDiagDump(core.stateMachine, core.wsServer, journal, ptyRingBuffer, tail));

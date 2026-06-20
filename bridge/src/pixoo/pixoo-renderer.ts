@@ -35,6 +35,10 @@ import {
   worldToScreen, isVisible,
   WORLD_SIZE, ACTIVE_SIZE,
 } from './pixoo-camera.js';
+import {
+  MICRO_SIZE, microStatusBg, paintMicroGlyph,
+  type MicroCreature, type MicroState,
+} from './micro-glyphs.js';
 
 const W = WORLD_SIZE;
 const ACTIVE_OFFSET = (WORLD_SIZE - ACTIVE_SIZE) / 2; // 16
@@ -660,19 +664,99 @@ function drawUsageHUD(
 }
 
 /**
+ * Render the micro layout natively at 11×11 using hand-authored creature glyphs,
+ * then nearest-scale into the `size`×`size` output. The Timebox Mini has 121 LEDs;
+ * downscaling the 32×32 terrarium bottoms out at a fuzzy silhouette, so micro draws
+ * a bold per-pixel glyph (octopus/jellyfish/opencode/crayfish) on a dark
+ * status-color field. The device fetches `size=11` for a pixel-perfect 1:1 frame.
+ */
+function renderMicroFrame(
+  outputBuf: Uint8Array,
+  size: number,
+  animFrame: number,
+  stateEvent: StateUpdateEvent | null,
+  sessions: SessionInfo[] | null,
+  usagePct: number,
+): void {
+  const hasGateway = (stateEvent?.gatewayConnected ?? false)
+    || (stateEvent?.gatewayHasError ?? false)
+    || (sessions?.some((s) => s.agentType === 'openclaw') ?? false);
+  const gatewayHasError = stateEvent?.gatewayHasError ?? false;
+
+  // Pick the dominant creature: awaiting (most urgent) → processing → idle.
+  const byPriority = (c: CreatureInstance) =>
+    c.state === 'awaiting' ? 0 : c.state === 'processing' ? 1 : 2;
+  const dominant = [...creatureInstances.values()].sort((a, b) => byPriority(a) - byPriority(b))[0];
+
+  // When the only creature is the gateway crayfish, its routing state still
+  // drives the background (no dominant creature instance exists for OpenClaw).
+  const routing = sessions?.some((s) => s.agentType === 'openclaw' && s.state === 'processing') ?? false;
+
+  const aggregate: 'idle' | 'processing' | 'awaiting' | 'error' =
+    gatewayHasError || usagePct >= 90 ? 'error'
+      : dominant?.state === 'awaiting' ? 'awaiting'
+        : (dominant?.state === 'processing' || (!dominant && routing)) ? 'processing'
+          : 'idle';
+
+  // Build the native 11×11 frame: dark status field + bold creature glyph.
+  const base = new Uint8Array(MICRO_SIZE * MICRO_SIZE * 3);
+  const bg = microStatusBg(aggregate, animFrame);
+  for (let i = 0; i < MICRO_SIZE * MICRO_SIZE; i++) {
+    base[i * 3] = bg[0]; base[i * 3 + 1] = bg[1]; base[i * 3 + 2] = bg[2];
+  }
+
+  const glyphState: MicroState =
+    dominant?.state === 'processing' ? 'working'
+      : dominant?.state === 'awaiting' ? 'asking'
+        : 'idle';
+  if (dominant) {
+    const creature: MicroCreature =
+      dominant.creatureType === 'jellyfish' ? 'jellyfish'
+        : dominant.creatureType === 'opencode' ? 'opencode'
+          : 'octopus';
+    paintMicroGlyph(base, creature, glyphState, animFrame);
+  } else if (hasGateway) {
+    paintMicroGlyph(base, 'crayfish', routing ? 'working' : 'idle', animFrame);
+  }
+  // else: no creatures at all → the solid status field is the whole signal.
+
+  // Scale the 11×11 base into the size×size output (1:1 when size === 11).
+  for (let y = 0; y < size; y++) {
+    const sy = Math.min(MICRO_SIZE - 1, Math.floor((y * MICRO_SIZE) / size));
+    for (let x = 0; x < size; x++) {
+      const sx = Math.min(MICRO_SIZE - 1, Math.floor((x * MICRO_SIZE) / size));
+      const s = (sy * MICRO_SIZE + sx) * 3;
+      const d = (y * size + x) * 3;
+      outputBuf[d] = base[s]; outputBuf[d + 1] = base[s + 1]; outputBuf[d + 2] = base[s + 2];
+    }
+  }
+}
+
+/**
  * Render a complete frame with camera system.
  * Returns RGB buffer.
+ *
+ * `layout='micro'` renders a single dominant creature on a status field for
+ * tiny screens (Timebox Mini 11×11); `'standard'` is the full terrarium.
  */
 export function renderFrame(
   stateEvent: StateUpdateEvent | null,
   usageEvent: UsageEvent | null,
   sessions: SessionInfo[] | null,
   timeOverrideMs?: number,
-  size: 32 | 64 = 64,
+  size: 11 | 32 | 64 = 64,
+  layout: 'standard' | 'micro' = 'standard',
 ): Uint8Array {
   const worldBuf = new Uint8Array(W * W * 3);
   const outputBuf = new Uint8Array(size * size * 3);
   const animFrame = getAnimFrame(timeOverrideMs);
+
+  if (layout === 'micro') {
+    // Still sync creature instances so dominant-creature selection reflects live state.
+    syncCreatures(sessions, stateEvent);
+    renderMicroFrame(outputBuf, size, animFrame, stateEvent, sessions, usageEvent?.fiveHourPercent ?? 0);
+    return outputBuf;
+  }
 
   const state = stateEvent?.state ?? State.IDLE;
   const usagePct = usageEvent?.fiveHourPercent ?? 0;

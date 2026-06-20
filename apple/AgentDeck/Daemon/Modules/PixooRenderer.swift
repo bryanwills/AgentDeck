@@ -484,6 +484,62 @@ final class PixooRenderer {
         return frames
     }
 
+    /// Render the micro layout natively at 11×11 using hand-authored creature
+    /// glyphs, returning an 11×11 RGB Data. Mirrors `renderFrame(..., layout:'micro')`
+    /// + `micro-glyphs.ts` in the bridge: the Timebox Mini has 121 LEDs, so instead
+    /// of downscaling the 32×32 terrarium (which bottoms out at a fuzzy silhouette)
+    /// each creature is drawn per-pixel as a bold glyph on a dark status field.
+    /// The 4 glyph tables and brand colors are kept byte-identical to micro-glyphs.ts.
+    func renderMicro(dashboardState: DashboardState) -> Data {
+        let usagePct = dashboardState.fiveHourPercent ?? 0
+        let hasGateway = dashboardState.gatewayConnected || dashboardState.siblingSessions.contains { $0.agentType == "openclaw" }
+        let gatewayHasError = dashboardState.gatewayHasError
+
+        syncCreatures(dashboardState: dashboardState)
+
+        func priority(_ c: CreatureInstance) -> Int {
+            switch c.state { case .awaiting: return 0; case .processing: return 1; case .idle: return 2 }
+        }
+        let dominant = creatureOrder.compactMap { creatureInstances[$0] }.min { priority($0) < priority($1) }
+
+        // When the only creature is the gateway crayfish, its routing state still
+        // drives the background (no dominant creature instance exists for OpenClaw).
+        let routing = dashboardState.siblingSessions.contains { $0.agentType == "openclaw" && $0.state == "processing" }
+
+        let aggregate: MicroAggregate
+        if gatewayHasError || usagePct >= 90 {
+            aggregate = .error
+        } else if dominant?.state == .awaiting {
+            aggregate = .awaiting
+        } else if dominant?.state == .processing || (dominant == nil && routing) {
+            aggregate = .processing
+        } else {
+            aggregate = .idle
+        }
+
+        let animFrame = Self.getAnimFrame(atTimeMs: Date().timeIntervalSince1970 * 1000)
+
+        // Dark status field so the bright creature pops (11×11 native buffer).
+        let n = MicroGlyphs.size
+        var out = [UInt8](repeating: 0, count: n * n * 3)
+        let bg = MicroGlyphs.statusBg(aggregate, animFrame: animFrame)
+        for i in 0..<(n * n) { out[i * 3] = bg.0; out[i * 3 + 1] = bg.1; out[i * 3 + 2] = bg.2 }
+
+        let glyphState: MicroGlyphState =
+            dominant?.state == .processing ? .working : (dominant?.state == .awaiting ? .asking : .idle)
+        if let dominant {
+            let creature: MicroCreature =
+                dominant.creatureType == .cloud ? .codex
+                    : (dominant.creatureType == .opencode ? .opencode : .octopus)
+            MicroGlyphs.paint(&out, creature: creature, state: glyphState, animFrame: animFrame)
+        } else if hasGateway {
+            MicroGlyphs.paint(&out, creature: .crayfish, state: routing ? .working : .idle, animFrame: animFrame)
+        }
+        // else: no creatures → the solid status field is the whole signal.
+
+        return Data(out)
+    }
+
     /// Static black frame with a centered grey "OFFLINE" label. Mirrors
     /// `renderDisconnectedFrame()` in bridge/src/pixoo/pixoo-renderer.ts so
     /// Pixoo stops displaying stale creature frames the moment the Swift

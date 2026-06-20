@@ -59,6 +59,7 @@ import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendWifiProvi
 import { loadWifiConfig } from './wifi-config.js';
 import { getConnectedAdbDevices, hasAdb, getAdbDeviceCount } from './adb-reverse.js';
 import { getPixooDeviceDetails, pixooDeviceCount } from './pixoo/pixoo-bridge.js';
+import { loadTimeboxDevices } from './timebox/timebox-settings.js';
 import { getLanIp } from '@agentdeck/shared';
 import { readFileSync, statSync } from 'fs';
 import { join } from 'path';
@@ -373,6 +374,23 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
     };
   }
 
+  const timebox = startedModules.find((m) => m.name === 'timebox') as DeviceModule & {
+    statusSnapshot?: () => Record<string, unknown>;
+  };
+  const configuredTimebox = loadTimeboxDevices();
+  if (timebox?.statusSnapshot) {
+    modules.timebox = timebox.statusSnapshot();
+  } else if (configuredTimebox.length > 0) {
+    modules.timebox = {
+      configuredDeviceCount: configuredTimebox.length,
+      devices: configuredTimebox.map((d) => ({
+        port: d.port,
+        name: d.name ?? 'Timebox Mini',
+        brightness: d.brightness ?? 100,
+      })),
+    };
+  }
+
   if (started.has('serial')) {
     const connectionStatus = getSerialConnectionStatus();
     const connections = connectionStatus.map((status) => ({
@@ -540,6 +558,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           { type: 'websocket', count: core.wsServer.getClientCount() },
           { type: 'esp32', count: esp32ConnectionCount(), ports: getESP32Ports() },
           { type: 'pixoo', details: getPixooDeviceDetails() },
+          { type: 'timebox', devices: loadTimeboxDevices() },
           { type: 'adb', count: getAdbDeviceCount() },
           {
             type: 'd200h',
@@ -606,8 +625,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }
     if (req.method === 'GET' && pathname === '/pixoo/frame') {
       const sizeParam = parsedUrl.searchParams.get('size');
-      const size: 32 | 64 = sizeParam === '32' ? 32 : 64;
-      const rgb = getLastFrame(size) ?? renderPreviewFrame(size);
+      const size: 11 | 32 | 64 = sizeParam === '11' ? 11 : sizeParam === '32' ? 32 : 64;
+      const layout = parsedUrl.searchParams.get('layout') === 'micro' ? 'micro' : 'standard';
+      // The frame cache holds the standard terrarium, so render micro fresh.
+      const rgb = layout === 'micro'
+        ? renderPreviewFrame(size, 'micro')
+        : (getLastFrame(size) ?? renderPreviewFrame(size));
       const bmp = rgbToBmp(rgb, size, size);
       res.writeHead(200, {
         'Content-Type': 'image/bmp',
@@ -997,7 +1020,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   const deviceModules = createDefaultModules('daemon' as any);
   const startedModules = await initModules(
     deviceModules,
-    { mdns: true, adb: 'auto', serial: 'auto', pixoo: 'auto', d200h: 'auto' },
+    { mdns: true, adb: 'auto', serial: 'auto', pixoo: 'auto', timebox: 'auto', d200h: 'auto' },
     { port, authToken: core.authToken, projectName: 'AgentDeck', wsServer: core.wsServer },
   );
 

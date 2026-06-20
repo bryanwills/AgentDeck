@@ -33,11 +33,13 @@
 |---|:---:|:---:|---|---|
 | **Ulanzi D200H Deck Dock** | ✅ | ✅ | Built-in USB | **주경로: Ulanzi Studio 플러그인**(`plugin-ulanzi`, 공식 SDK, Studio 안에서 WS — AgentDeck.app 에 미번들이라 불변식 무관). **폴백: direct-HID**(IOKit, `com.apple.security.device.usb`). `ulanzi-plugin` 등록 시 데몬이 direct-HID stand-down(Node+Swift) → 동시 구동 충돌 없음 |
 | **Divoom Pixoo64** | ✅ | ✅ | Network LED | HTTP, entitlement 불필요 |
+| **Divoom Timebox Mini (SPP)** | ❌ | ✅ | Bluetooth SPP LED | 11×11 RGB. `TimeBox-Light` Bluetooth Classic/RFCOMM SPP serial path(`/dev/cu.*`)에 Timebox protocol frame 전송. CLI(Node) 데몬이 Python `bridge/src/timebox/sync.py`를 자동 spawn. App Store sandbox 는 serial 접근 불가 → SPP 변종은 CLI 전용 |
+| **Divoom Timebox Mini (BLE)** | ✅ | ✅ | Bluetooth LE | 11×11 RGB. `TimeBox-mini-light` BLE GATT(ISSC transparent-UART `49535343-…`). App Store 단독 Swift 앱: 네이티브 CoreBluetooth (`com.apple.security.device.bluetooth`) — `Timebox{BLE,Module,DivoomPacket}.swift`, micro 레이아웃 11×11 렌더, 서브프로세스 없음. CLI(Node) 데몬: Python `sync_ble.py`(bleak) 자동 spawn. iDotMatrix 와 동일하게 둘 다 뜨면 BLE 단일연결 → 하나만 구동 |
 | **iDotMatrix LED 디스플레이** | ✅ | ✅ | Bluetooth LE | App Store 단독 Swift 앱: 네이티브 CoreBluetooth (`com.apple.security.device.bluetooth`, hub 모듈). CLI(Node) 데몬: BLE 네이티브 불가 → 데몬이 Python `idotmatrix`(bleak) `sync.py`를 **자동 spawn**(`startIDotMatrixSync`)해 구동 → CLI 데몬만으로 동작. 둘 다 뜨면 CLI 데몬 소유, Swift client-mode stand down(BLE 단일연결) |
 | **ESP32 상태 디스플레이 (모니터링)** | ✅ | ✅ | ESP32 Display | `com.apple.security.device.serial`. 보드: `rgb48` / `amoled` / `ips35` |
 | **ESP32 Wi-Fi 프로비저닝** | ✅ | ✅ | ESP32 Display | 직접 serial write, subprocess 없음 |
 | **ESP32 firmware flash** | ❌ | ✅ | ESP32 Display | `esptool.py` 필요 |
-| **Ulanzi TC001** (8×32 LED wall clock) | ❌ | ✅ | USB-bridged LED | ADB reverse tunnel 필요 |
+| **Ulanzi TC001** (8×32 LED matrix) | ⚠️ | ✅ | ESP32 LED (serial/WiFi) | **ADB 아님.** `led8x32` 펌웨어가 다른 ESP32 보드처럼 USB serial / WiFi WS 로 붙어 state-JSON 을 자기 렌더 (`com.apple.security.device.serial` 커버, tui-dashboard 테스트가 serial board 로 보고). App Store ⚠️ 는 Swift 데몬의 led8x32 경로 미검증인 **구현 갭**이지 sandbox 제약 아님 — HW 검증 후 ✅ 승격 가능. 과거 ADB-classified 경로(`AdbDeviceClass.ulanziTc001` + `TopologyRail.pixelDisplaySection`)는 **producer 없는 dead code** |
 | **Android e-ink** (CremaS / Pantone / Kobo) | ❌ | ✅ | Android | ADB 필요 |
 | **Android 태블릿** (Lenovo 등) | ❌ | ✅ | Android | ADB 필요 |
 
@@ -74,7 +76,7 @@
 ## 요약
 
 - **App Store 만 써도** 가능: Claude Code hook 모니터링, **Codex lifecycle hooks + notify/OTel fallback 모니터링**, Anthropic Admin API 사용량 조회, iPad 페어링, **D200H / Pixoo / ESP32** 하드웨어, 음성 입력, APME LLM 평가, **timeline LLM 요약 (Apple Intelligence / MLX / heuristic)**.
-- **App Store 밖 companion 경로**: **Android 기기 전부** (e-ink + 태블릿 + TC001), ESP32 firmware flash, **OpenCode 모니터링**, Codex / OpenCode PTY 세션 실행, OpenClaw CLI 페어링, APME Layer 1 결정적 평가, Claude 구독 사용량 (5h/7d) gauge.
+- **App Store 밖 companion 경로**: **Android 기기 전부** (e-ink + 태블릿), Timebox Mini **SPP** 변종(Bluetooth Classic; BLE 변종은 App Store 네이티브 지원), ESP32 firmware flash, **OpenCode 모니터링**, Codex / OpenCode PTY 세션 실행, OpenClaw CLI 페어링, APME Layer 1 결정적 평가, Claude 구독 사용량 (5h/7d) gauge.
 
 App Store 앱은 companion executable 설치/기동을 요구하지 않는다. 이미 사용자가 터미널에서 별도 daemon을 운영하는 경우에만 같은 포트/WS 프로토콜로 선택적으로 연결되며, 그 신호(`DaemonService.isUsingExternalDaemon`)가 true 일 때만 ADB-tier 디바이스 카드와 RATE LIMITS 섹션이 노출된다(progressive enhancement). 미감지 상태에서는 해당 섹션을 숨겨 단독 앱이 결함 없이 완결성있게 보이도록 한다.
 
