@@ -93,7 +93,7 @@ function OptionC({ scenario }) {
           {SERVICES.map(svc => <ServiceCardC key={svc.key} svc={svc}/>)}
         </div>
 
-        <LabelC>Devices · 13 surfaces</LabelC>
+        <LabelC>Devices · 14 surfaces</LabelC>
         <DeviceConstellation/>
       </div>
 

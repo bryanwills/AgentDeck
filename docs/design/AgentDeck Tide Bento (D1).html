@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AgentDeck · Tide Bento (D1)</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../design/tokens.css" />
+<style>
+  :root { --ink-0:#07140f; --line:rgba(111,182,168,0.16); --cyan:#3ED6E8; --dim:#8fa6a2; --faint:#5d7470; --text:#e7efe8; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font-sans); color: var(--text); overflow: hidden;
+    background:
+      radial-gradient(80% 60% at 50% -10%, #10312c, transparent 70%),
+      linear-gradient(#060f0c, #03100c 100%), #050d0a;
+    display: flex; flex-direction: column;
+  }
+  /* control bar — lives OUTSIDE the scaled device */
+  .bar {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 20px;
+    padding: 14px 24px; border-bottom: 1px solid var(--line);
+    background: rgba(6,15,12,0.7);
+  }
+  .bar .title { display: flex; align-items: center; gap: 11px; }
+  .bar .title .logo { width: 28px; height: 28px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5)); }
+  .bar .title b { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .bar .title b i { color: var(--cyan); font-style: normal; }
+  .bar .title .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); }
+  .bar .spacer { flex: 1; }
+  .ctl { display: flex; align-items: center; gap: 8px; }
+  .ctl .lab { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
+  .seg { display: inline-flex; padding: 3px; gap: 3px; background: rgba(255,255,255,0.05); border: 1px solid var(--line); border-radius: 10px; }
+  .seg button {
+    appearance: none; border: 0; cursor: pointer; padding: 7px 14px; border-radius: 7px;
+    font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em;
+    background: transparent; color: var(--dim); transition: background .15s, color .15s;
+  }
+  .seg button.on { background: var(--cyan); color: #062; }
+  .seg.alt button.on { background: rgba(62,214,232,0.16); color: var(--cyan); }
+  .pushbtn {
+    appearance: none; cursor: pointer; border: 1px solid var(--line); border-radius: 9px;
+    background: rgba(255,255,255,0.04); color: var(--text); padding: 8px 14px;
+    font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em;
+    transition: background .15s, border-color .15s;
+  }
+  .pushbtn:hover { background: rgba(255,255,255,0.09); border-color: rgba(111,182,168,0.3); }
+
+  /* stage — letterboxes the fixed-size device */
+  .stage { flex: 1; min-height: 0; position: relative; display: grid; place-items: center; padding: 30px; }
+  .device { position: relative; border-radius: 22px; background: #0a0f0d;
+    padding: 14px; border: 1px solid rgba(111,182,168,0.18);
+    box-shadow: 0 40px 120px -30px rgba(0,0,0,0.8), inset 0 0 0 1px rgba(255,255,255,0.02);
+    transform-origin: center; }
+  .device::after { /* subtle bezel sheen */
+    content: ''; position: absolute; inset: 0; border-radius: 22px; pointer-events: none;
+    background: linear-gradient(150deg, rgba(255,255,255,0.05), transparent 30%);
+  }
+  .screen-wrap { position: relative; border-radius: 10px; overflow: hidden; background: #07140f; }
+  .screen-wrap iframe { display: block; border: 0; background: #07140f; }
+  .hint { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--faint); white-space: nowrap; }
+  .hint b { color: var(--dim); font-weight: 500; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <div class="title"><img class="logo" src="../../design/brand/agentdeck-icon.png" alt="" /><b>Agent<i>Deck</i></b><span class="k">D1 · Tide Bento — ESP32-P4 10″</span></div>
+    <div class="spacer"></div>
+    <div class="ctl"><span class="lab">Orientation</span>
+      <div class="seg" id="orient">
+        <button data-o="landscape" class="on">Landscape</button>
+        <button data-o="portrait">Portrait</button>
+      </div>
+    </div>
+    <div class="ctl"><span class="lab">Motion</span>
+      <div class="seg alt" id="motion">
+        <button data-m="1" class="on">Live</button>
+        <button data-m="0">Still</button>
+      </div>
+    </div>
+    <button class="pushbtn" id="prompt">Inject prompt</button>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="device" id="device">
+      <div class="screen-wrap" id="wrap">
+        <iframe id="frame" title="AgentDeck D1"></iframe>
+      </div>
+      <div class="hint">hover a creature ↔ its cell · <b>tap a cell</b> for the log · approve / deny live</div>
+    </div>
+  </div>
+
+<script>
+  const DIMS = { landscape: { w: 1280, h: 800 }, portrait: { w: 800, h: 1280 } };
+  const KEY = 'agentdeck-d1-view';
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } })();
+  let orient = saved.orient || 'landscape';
+  let motion = saved.motion != null ? saved.motion : 1;
+
+  const frame = document.getElementById('frame');
+  const device = document.getElementById('device');
+  const wrap = document.getElementById('wrap');
+  const stage = document.getElementById('stage');
+
+  function persist() { try { localStorage.setItem(KEY, JSON.stringify({ orient, motion })); } catch (e) {} }
+
+  function loadFrame() {
+    const d = DIMS[orient];
+    wrap.style.width = d.w + 'px'; wrap.style.height = d.h + 'px';
+    frame.style.width = d.w + 'px'; frame.style.height = d.h + 'px';
+    frame.src = 'tenin/screen.html?v=bento&o=' + orient + '&live=' + motion;
+    fit();
+  }
+  function fit() {
+    const d = DIMS[orient];
+    const pad = 28; // device padding ×2
+    const availW = stage.clientWidth - 60;
+    const availH = stage.clientHeight - 60;
+    const s = Math.min((availW - pad) / d.w, (availH - pad) / d.h, 1.1);
+    device.style.transform = 'scale(' + s + ')';
+  }
+  function syncSeg(id, attr, val) {
+    document.querySelectorAll('#' + id + ' button').forEach((b) => b.classList.toggle('on', b.dataset[attr] === String(val)));
+  }
+
+  document.getElementById('orient').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    orient = b.dataset.o; syncSeg('orient', 'o', orient); persist(); loadFrame();
+  });
+  document.getElementById('motion').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    motion = +b.dataset.m; syncSeg('motion', 'm', motion); persist(); loadFrame();
+  });
+  // "Inject prompt" — flips a working session to awaiting inside the live screen
+  document.getElementById('prompt').addEventListener('click', () => {
+    const w = frame.contentWindow; if (!w || !w.__d1inject) return; w.__d1inject();
+  });
+
+  window.addEventListener('resize', fit);
+  syncSeg('orient', 'o', orient); syncSeg('motion', 'm', motion);
+  loadFrame();
+</script>
+</body>
+</html>
