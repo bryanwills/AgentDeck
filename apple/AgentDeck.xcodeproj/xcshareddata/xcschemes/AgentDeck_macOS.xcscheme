@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
    LastUpgradeVersion = "2640"
-   version = "1.3">
+   version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
-      buildImplicitDependencies = "YES">
+      buildImplicitDependencies = "YES"
+      runPostActionsOnFailure = "NO">
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
@@ -29,7 +30,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "E4D80DB9ABDABC379778AF7C"
-               BuildableName = "AgentDeck.app"
+               BuildableName = "AgentDeck_macOS.app"
                BlueprintName = "AgentDeck_macOS"
                ReferencedContainer = "container:AgentDeck.xcodeproj">
             </BuildableReference>
@@ -41,12 +42,13 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
-      codeCoverageEnabled = "YES">
+      codeCoverageEnabled = "YES"
+      onlyGenerateCoverageForSpecifiedTargets = "NO">
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E4D80DB9ABDABC379778AF7C"
-            BuildableName = "AgentDeck.app"
+            BuildableName = "AgentDeck_macOS.app"
             BlueprintName = "AgentDeck_macOS"
             ReferencedContainer = "container:AgentDeck.xcodeproj">
          </BuildableReference>
@@ -64,6 +66,8 @@
             </BuildableReference>
          </TestableReference>
       </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -80,11 +84,13 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E4D80DB9ABDABC379778AF7C"
-            BuildableName = "AgentDeck.app"
+            BuildableName = "AgentDeck_macOS.app"
             BlueprintName = "AgentDeck_macOS"
             ReferencedContainer = "container:AgentDeck.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -97,11 +103,13 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E4D80DB9ABDABC379778AF7C"
-            BuildableName = "AgentDeck.app"
+            BuildableName = "AgentDeck_macOS.app"
             BlueprintName = "AgentDeck_macOS"
             ReferencedContainer = "container:AgentDeck.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

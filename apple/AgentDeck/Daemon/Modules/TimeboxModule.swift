@@ -12,10 +12,10 @@
 // was removed — poor macOS compatibility and no App Store path.)
 //
 // Frames come from the same in-process PixooRenderer as Pixoo/iDotMatrix, but via the
-// dedicated `renderMicro` layout (one dominant creature on a status field) so the 11×11
-// panel stays legible. The 64×64 micro frame is box-downscaled to 11×11 and software
-// gamma/saturation/brightness/contrast boosted (mirrors sync_ble.py encode_image_bright)
-// before nibble encoding.
+// dedicated `renderMicro` layout — bold hand-authored native 11×11 creature glyphs
+// (MicroGlyphs) on a status field, so the 11×11 panel stays legible. The glyph colors
+// are device-tuned (WYSIWYG); prepareFrame applies only the software brightness dim
+// before TimeboxDivoomPacket nibble-encodes the frame.
 
 import Foundation
 import AppKit

@@ -3,10 +3,16 @@
 // packet construction. If these drift, the display silently shows garbage or nothing.
 
 #if os(macOS)
+@preconcurrency import CoreBluetooth
 import XCTest
 @testable import AgentDeck
 
 final class IDotMatrixProtocolTests: XCTestCase {
+
+    func testGattUUIDsMatchIDotMatrixLibrary() {
+        XCTAssertEqual(IDotMatrixBLE.serviceUUID, CBUUID(string: "000000fa-0000-1000-8000-00805f9b34fb"))
+        XCTAssertEqual(IDotMatrixBLE.writeCharUUID, CBUUID(string: "0000fa02-0000-1000-8000-00805f9b34fb"))
+    }
 
     // MARK: - Command packets
 
