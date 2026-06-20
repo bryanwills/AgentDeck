@@ -51,6 +51,11 @@ static enum {
 } currentView = VIEW_SPLASH;
 #endif
 
+#if defined(IPS10_PERF_HUD)
+// Perf overlay shared state (worst frame over the last window + current frame), read by the topbar.
+volatile uint32_t g_perfWorstUs = 0, g_perfWorstView = 0, g_perfWorstFlush = 0, g_perfWorstInner = 0;
+#endif
+
 // ===== Network task (Core 0) =====
 static void networkTask(void* param) {
     Serial.printf("[Net] Task started on core %d\n", xPortGetCoreID());
@@ -175,6 +180,11 @@ static void networkTask(void* param) {
 #ifndef BOARD_LED8X32
 // ===== Settings long-press handler =====
 static void onLongPress(lv_event_t* e) {
+#if defined(BOARD_IPS10)
+    // IPS10 is a dedicated cards + office surface — no full-screen Settings/Timeline overlays
+    // (they covered the whole panel and fired on stray long-press/swipe). Leave the main view up.
+    return;
+#endif
     if (currentView == VIEW_AQUARIUM) {
         lv_screen_load_anim(scrSettings, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
         currentView = VIEW_SETTINGS;
@@ -412,6 +422,7 @@ static void uiTask(void* param) {
         }
 
         // Update current view
+        uint32_t tView0 = micros();
         switch (currentView) {
             case VIEW_AQUARIUM:
                 Screens::aquariumUpdate(dt);
@@ -425,9 +436,58 @@ static void uiTask(void* param) {
             case VIEW_SPLASH:
                 break;
         }
+        uint32_t tView1 = micros();
 
+#if defined(IPS10_PERF_HUD)
+        { extern volatile uint32_t g_flushInnerUs; g_flushInnerUs = 0; }  // reset before frame
+#endif
         // LVGL timer handler
         lv_timer_handler();
+
+#if defined(IPS10_PERF_HUD)
+        // On-screen perf overlay source: track the WORST single frame over a rolling ~1.5s window.
+        // Splits app-render(view) / LVGL-render+flush(flush) / and the PPA+push portion(inner) so
+        // we know if the flush cost is LVGL widget rendering or the rotation/push path.
+        {
+            uint32_t tF = micros();
+            extern volatile uint32_t g_flushInnerUs;
+            uint32_t vUs = tView1 - tView0, fUs = tF - tView1, iUs = g_flushInnerUs;
+            extern volatile uint32_t g_perfWorstUs, g_perfWorstView, g_perfWorstFlush, g_perfWorstInner;
+            static uint32_t winStart = 0, wU = 0, wV = 0, wF = 0, wI = 0;
+            if (vUs + fUs > wU) { wU = vUs + fUs; wV = vUs; wF = fUs; wI = iUs; }
+            if (now - winStart >= 1500) {
+                g_perfWorstUs = wU; g_perfWorstView = wV; g_perfWorstFlush = wF; g_perfWorstInner = wI;
+                wU = wV = wF = wI = 0; winStart = now;
+            }
+        }
+#endif
+
+#if defined(IPS10_PERF_PROFILE)
+        // [PERF] frame profiler — avg FPS + render(view) vs flush(LVGL) split, every 2s.
+        {
+            uint32_t tFlush1 = micros();
+            static uint32_t accView = 0, accFlush = 0, frames = 0, lastReport = 0;
+            uint32_t vUs = tView1 - tView0, fUs = tFlush1 - tView1;
+            // Immediately flag any single frame that stalls the loop (>25ms) — catches the
+            // modal-close hitch. Splits app-render(view) vs LVGL-render+flush(flush) so we
+            // know which side the bottleneck is on.
+            if (vUs + fUs > 25000) {
+                Serial.printf("[PROF] SLOW frame %lu us (view %lu | flush %lu)\n",
+                              (unsigned long)(vUs + fUs), (unsigned long)vUs, (unsigned long)fUs);
+            }
+            accView += (tView1 - tView0);
+            accFlush += (tFlush1 - tView1);
+            frames++;
+            if (now - lastReport >= 2000 && frames > 0) {
+                float fps = frames * 1000.0f / (float)(now - lastReport);
+                Serial.printf("[PERF] %.1f fps | view %lu us | flush %lu us | frame %lu us\n",
+                              fps, (unsigned long)(accView / frames),
+                              (unsigned long)(accFlush / frames),
+                              (unsigned long)((accView + accFlush) / frames));
+                accView = accFlush = frames = 0; lastReport = now;
+            }
+        }
+#endif
 
 #if defined(BOARD_TTGO)
         // Panel/backlight self-heal every 10s (DISPON + backlight duty re-assert)

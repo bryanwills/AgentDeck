@@ -73,11 +73,13 @@ pnpm test:android        # Android JUnit tests only (82 tests)
 cd plugin && streamdeck link   # link plugin to Stream Deck app
 ```
 
-### Codex Development Surface
+### Multi-Agent Development Surface
 
-- **Repo instructions**: `AGENTS.md` is the Codex-discovered project instruction file. It requires `CLAUDE.md` first, then targeted `DEVELOPMENT_LOG.md` lookup instead of loading the full log.
-- **Repo skills**: `.agents/skills/` contains Codex-discoverable AgentDeck skills. Use these before hand-rolling workflow commands.
-- **Workflow originals**: `.agents/workflows/` remains the canonical human-readable procedure directory; skills may route into these files.
+This repo is built by switching between Claude Code, Codex, OpenCode, and Antigravity. **[docs/agent-harness.md](docs/agent-harness.md)** is the canonical map of how each agent enters the repo, what it reads, and what it auto-discovers — read it when onboarding a new agent or wondering why a skill/workflow isn't picked up.
+
+- **Repo instructions**: `AGENTS.md` is the entry file Codex/OpenCode/Antigravity discover by convention. It requires `CLAUDE.md` first, then targeted `DEVELOPMENT_LOG.md` lookup instead of loading the full log.
+- **Repo skills (SSOT)**: canonical skills live in `.agents/skills/<name>/SKILL.md` (discovered by Codex; Claude reaches them via the pointers in `.claude/skills/`). Use them before hand-rolling commands. **`.claude/skills/*.md` are thin pointers — never put procedure content there; edit the `.agents/skills/` copy so the two agents can't drift.**
+- **Workflow originals**: `.agents/workflows/` remains the canonical human-readable procedure directory; skills may route into these files. OpenCode has no skill auto-discovery — point it at these workflow files explicitly.
 - **Session handoff**: use the `session-end` repo skill before `/clear`, `/new`, or handing work to another session. It summarizes current state and updates durable docs only when the change is project-significant.
 - **Codex observation**: `agentdeck codex` installs AgentDeck-managed Codex lifecycle hooks in `~/.codex/config.toml` before launching the PTY bridge. `agentdeck daemon install` also installs/migrates those hooks for daemon-first setups.
 
@@ -206,6 +208,7 @@ The macOS app ships through the App Store and must stay **self-contained** under
 | [docs/why-apme.md](docs/why-apme.md) | **WHY** APME — 감 기반 라우팅 문제, 카테고리별 평가 전략, composite score, vibe labeling 우선 원칙 |
 | [docs/apme.md](docs/apme.md) | APME eval module — schema, collector, deterministic+LLM judge, rubric tuner, daemon API, settings |
 | [docs/apme-pipeline.md](docs/apme-pipeline.md) | APME 8-layer pipeline — ingestion (hook/timeline/PTY), collector→store, classifier, runner, tuner, HTTP/WS, device rendering |
+| [docs/agent-harness.md](docs/agent-harness.md) | Cross-agent developer harness — how Claude Code / Codex / OpenCode / Antigravity each enter the repo, read instructions, and discover skills/workflows; skill SSOT rules |
 | [docs/architecture.md](docs/architecture.md) | Monorepo layout, BridgeCore, PtyAdapter, AgentAdapter, Gateway protocol, plugin connection |
 | [docs/daemon.md](docs/daemon.md) | Daemon hub, singleton guard, mDNS recovery, usage relay, Gateway isolation, multi-surface monitoring |
 | [docs/plugin-conventions.md](docs/plugin-conventions.md) | Encoder LCD, wide canvas, button label, OC Timeline pipeline, D200H HID, display sleep/wake |

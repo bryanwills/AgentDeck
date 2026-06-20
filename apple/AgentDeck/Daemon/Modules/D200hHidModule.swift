@@ -789,13 +789,29 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             case 1:  // Info display, no action
                 return .handled(note: "info")
 
-            case 2...9:  // Option buttons or Quick Actions
+            case 2...9:  // Option buttons / Quick Actions / observed Allow-Deny
                 if session.options.isEmpty && session.isIdle {
                     // Quick actions: GO ON, REVIEW, COMMIT, CLEAR
                     let actions = ["go on", "/review", "/commit", "/clear"]
                     let qaIdx = index - 2
                     guard qaIdx < actions.count else { return .unmapped }
                     return .command(AgentCommand.sendPrompt(text: actions[qaIdx]).dictionary)
+                }
+
+                // Observed gated PreToolUse (no PTY options): slot 2 = Allow,
+                // slot 3 = Deny → permission_decision. The hook only supports
+                // allow/deny, so there's no "Always".
+                if session.isGatedApproval {
+                    let decision: String
+                    switch index {
+                    case 2: decision = "allow"
+                    case 3: decision = "deny"
+                    default: return .unmapped
+                    }
+                    currentMode = .sessionList
+                    lastStateHash = ""
+                    updateDisplay()
+                    return .command(AgentCommand.permissionDecision(requestId: session.requestId, decision: decision).dictionary)
                 }
 
                 let optIdx = optionPage * 8 + (index - 2)
@@ -1103,6 +1119,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
                 session["currentTool"] as? String ?? "",
                 session["modelName"] as? String ?? "",
                 String(session["navigable"] as? Bool ?? false),
+                session["requestId"] as? String ?? "",
                 optionsDigest,
             ].joined(separator: "|")
         }.joined(separator: "\n")
@@ -1458,16 +1475,22 @@ private struct D200hSessionInfo {
     let navigable: Bool
     let modelName: String
     let isVirtualGateway: Bool
+    /// Gated PreToolUse request id (observed/no-PTY session). When set with no
+    /// options, the detail view shows Allow/Deny → permission_decision.
+    let requestId: String
 
     var isIdle: Bool { state == "idle" }
     var isProcessing: Bool { state == "processing" }
     var isAwaiting: Bool { state.hasPrefix("awaiting") }
+    /// Observed gate: awaiting with a requestId but no PTY option list.
+    var isGatedApproval: Bool { isAwaiting && options.isEmpty && !requestId.isEmpty }
 
     func withDisplayName(_ name: String) -> D200hSessionInfo {
         D200hSessionInfo(
             id: id, projectName: projectName, displayName: name, agentType: agentType,
             state: state, port: port, currentTool: currentTool, options: options,
-            navigable: navigable, modelName: modelName, isVirtualGateway: isVirtualGateway
+            navigable: navigable, modelName: modelName, isVirtualGateway: isVirtualGateway,
+            requestId: requestId
         )
     }
 
@@ -1497,7 +1520,8 @@ private struct D200hSessionInfo {
             options: dict["options"] as? [[String: Any]] ?? [],
             navigable: dict["navigable"] as? Bool ?? false,
             modelName: dict["modelName"] as? String ?? "",
-            isVirtualGateway: isVirtualGateway
+            isVirtualGateway: isVirtualGateway,
+            requestId: dict["requestId"] as? String ?? ""
         )
     }
 }
@@ -1927,6 +1951,16 @@ private enum D200hRenderer {
             slots[4] = ButtonSlot(title: "STOP", subtitle: "BOTTOM LEFT",
                                   bg: cStopInact, enabled: false, borderStyle: .none,
                                   icon: .stop, iconColor: rgb(248, 113, 113),
+                                  textOverlay: .infoTile)
+        } else if session.isGatedApproval {
+            // Observed gated PreToolUse (no PTY options): Allow / Deny only.
+            slots[2] = ButtonSlot(title: "ALLOW", subtitle: "approve",
+                                  bg: rgb(22, 101, 52), enabled: true, borderStyle: .solid(color: rgb(34, 197, 94)),
+                                  icon: .goOn, iconColor: rgb(187, 247, 208),
+                                  textOverlay: .infoTile)
+            slots[3] = ButtonSlot(title: "DENY", subtitle: "reject",
+                                  bg: rgb(127, 29, 29), enabled: true, borderStyle: .solid(color: rgb(248, 113, 113)),
+                                  icon: .esc, iconColor: rgb(254, 202, 202),
                                   textOverlay: .infoTile)
         } else {
             // AWAITING: show actual options

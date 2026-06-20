@@ -1,6 +1,7 @@
 #include "aquarium.h"
 #include <Arduino.h>
 #include "../terrarium/renderer.h"
+#include "../terrarium/office.h"
 #include "../widgets/hud_bar.h"
 #include "../display.h"
 #include "../theme.h"
@@ -34,12 +35,17 @@ static bool tracking = false;
 static constexpr int SWIPE_THRESHOLD = 40;  // minimum pixels for swipe
 
 static void gestureEvent(lv_event_t* e) {
+#if !defined(BOARD_IPS10)
+    // Swipe-up → full-screen Timeline view. Disabled on IPS10: the tablet shows cards + office
+    // side-by-side and the per-session activity already lives in the cards, so a full-screen
+    // Timeline overlay is redundant and fires accidentally on stray swipes.
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
     if (dir == LV_DIR_TOP) {
         lockState();
         g_state.timelineView = true;
         unlockState();
     }
+#endif
 }
 
 static void screenTouchEvent(lv_event_t* e) {
@@ -61,14 +67,16 @@ static void screenTouchEvent(lv_event_t* e) {
             int dx = touchEnd.x - touchStart.x;
             int absDy = (dy < 0) ? -dy : dy;
             int absDx = (dx < 0) ? -dx : dx;
+#if !defined(BOARD_IPS10)
             if (absDy > SWIPE_THRESHOLD && absDy > absDx) {
                 if (dy < 0) {
-                    // Swipe up → timeline
+                    // Swipe up → timeline (disabled on IPS10 — redundant full-screen overlay)
                     lockState();
                     g_state.timelineView = true;
                     unlockState();
                 }
             }
+#endif
         }
     } else if (code == LV_EVENT_SHORT_CLICKED) {
 #if !defined(BOARD_IPS10)
@@ -98,8 +106,13 @@ lv_obj_t* aquariumCreate() {
 #endif
     lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Create terrarium canvas (full screen)
+    // Create the living scene. IPS10 uses the sprite/dirty-rect "office" (cheap on the big
+    // panel — only moving agents flush); other boards keep the per-pixel aquarium terrarium.
+#if defined(BOARD_IPS10)
+    Office::init(screen);
+#else
     Terrarium::init(screen);
+#endif
 
 #if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
     // Compact panels: simplified overlay (state + activity switching)
@@ -249,8 +262,15 @@ void aquariumUpdate(float dt) {
         scrimHidden = lv_obj_has_flag(connScrim, LV_OBJ_FLAG_HIDDEN);
     }
 
+#if defined(IPS10_PERF_FORCE_RENDER)
+    scrimHidden = true;  // TEMP: force render while disconnected so [PERF] can be read on serial
+#endif
     if (scrimHidden) {
+#if defined(BOARD_IPS10)
+        Office::update(dt);
+#else
         Terrarium::render(dt);
+#endif
     }
 
 #if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)

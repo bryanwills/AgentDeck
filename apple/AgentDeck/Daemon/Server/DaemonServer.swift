@@ -4355,6 +4355,20 @@ final class DaemonServer {
         if stateMachine.navigable { e["navigable"] = true }
         e["cursorIndex"] = stateMachine.cursorIndex
         if let sp = stateMachine.suggestedPrompt { e["suggestedPrompt"] = sp }
+        // Per-session awaiting overlay. The aggregate state machine can't
+        // attribute a gated PreToolUse (observed, no PTY) to a specific session,
+        // so when the FOCUSED session carries an awaiting gate in
+        // pushedSessionsById, surface its state/requestId/question here. Without
+        // this the Stream Deck encoder (which reads requestId off state_update)
+        // never enters interactive mode and can't approve an observed session.
+        if let fid = userFocusedSessionId, let entry = pushedSessionsById[fid],
+           let st = entry.state, st.hasPrefix("awaiting") {
+            e["state"] = st
+            if let rid = entry.requestId { e["requestId"] = rid }
+            if let q = entry.question { e["question"] = q }
+            if let pt = entry.promptType { e["promptType"] = pt }
+            e["navigable"] = entry.navigable ?? false
+        }
         mergeEngineSnapshot(into: &e)
         e["gatewayAvailable"] = cachedGatewayAvailable
         e["gatewayConnected"] = cachedGatewayConnected

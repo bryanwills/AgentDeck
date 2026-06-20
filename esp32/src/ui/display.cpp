@@ -506,11 +506,20 @@ static bool touch_read_cst816s(uint16_t* x, uint16_t* y) {
 #include "touch/esp_lcd_touch.h"
 #include "touch/esp_lcd_gsl3680.h"
 #include <driver/i2c_master.h>
+#include "driver/ppa.h"            // ESP32-P4 2D Pixel-Processing Accelerator (HW rotate)
+#include "esp_heap_caps.h"
+#include "esp_memory_utils.h"      // esp_ptr_internal() — verify LVGL buffer is internal SRAM
 
 static jd9365_lcd* jc_tft = nullptr;
 static esp_lcd_touch_handle_t tp_handle = nullptr;
 static i2c_master_bus_handle_t i2c_handle = nullptr;
 static uint16_t* rotated_buf = nullptr;
+static ppa_client_handle_t ppaClient = nullptr;   // null → fall back to CPU transpose
+static size_t rotBufSizeG = 0;
+#if defined(IPS10_PERF_HUD)
+volatile uint32_t g_flushInnerUs = 0;   // accumulated PPA+push time within the current frame
+volatile uint32_t g_bufInternal = 0;    // 1 = LVGL draw buffer is in internal SRAM, 0 = PSRAM
+#endif
 
 static bool touch_read_gsl3680(uint16_t* x, uint16_t* y) {
     if (!tp_handle) return false;
@@ -624,14 +633,48 @@ static void disp_flush(lv_display_t* display, const lv_area_t* area, uint8_t* px
 #elif defined(BOARD_IPS10)
     // JD9365 MIPI-DSI. We manually transpose the 1280x800 logical landscape map
     // into the physical 800x1280 portrait panel (rotation 270).
-    if (rotated_buf) {
+#if defined(IPS10_PERF_HUD)
+    uint32_t _fs = micros();
+#endif
+    if (rotated_buf && ppaClient) {
+        // HARDWARE rotation: PPA does the 90° CCW transpose of the w×h flush block into
+        // rotated_buf via 2D-DMA — no per-pixel CPU work. Mapping verified equal to the CPU
+        // transpose: dst(i,j)=src(j,w-1-i), which is exactly a 90° CCW rotation. Pixels are
+        // moved intact (RGB565→RGB565, no swap) so the byte-swapped LVGL data is preserved.
+        ppa_srm_oper_config_t op = {};
+        op.in.buffer = px_map;
+        op.in.pic_w = stride_pixels;
+        op.in.pic_h = h;
+        op.in.block_w = w;
+        op.in.block_h = h;
+        op.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+        op.out.buffer = rotated_buf;
+        op.out.buffer_size = rotBufSizeG;
+        op.out.pic_w = h;        // rotated width  = source height
+        op.out.pic_h = w;        // rotated height = source width
+        op.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+        op.rotation_angle = PPA_SRM_ROTATION_ANGLE_90;   // 90° CCW
+        op.scale_x = 1.0f; op.scale_y = 1.0f;
+        op.mode = PPA_TRANS_MODE_BLOCKING;
+        if (ppa_do_scale_rotate_mirror(ppaClient, &op) == ESP_OK) {
+            uint32_t x_native = area->y1;
+            uint32_t y_native = BOARD_NATIVE_H - area->x2 - 1;
+            jc_tft->draw16bitbergbbitmap(x_native, y_native, h, w, rotated_buf);
+        }
+    } else if (rotated_buf) {
         uint16_t* src = (uint16_t*)px_map;
-        for (uint32_t r = 0; r < h; r++) {
-            for (uint32_t c = 0; c < w; c++) {
-                rotated_buf[(w - 1 - c) * h + r] = src[r * stride_pixels + c];
+        // CPU tiled transpose fallback (when PPA is unavailable).
+        const uint32_t T = 32;
+        for (uint32_t rb = 0; rb < h; rb += T) {
+            uint32_t rEnd = rb + T < h ? rb + T : h;
+            for (uint32_t cb = 0; cb < w; cb += T) {
+                uint32_t cEnd = cb + T < w ? cb + T : w;
+                for (uint32_t r = rb; r < rEnd; r++) {
+                    const uint16_t* srow = src + r * stride_pixels;
+                    for (uint32_t c = cb; c < cEnd; c++) rotated_buf[(w - 1 - c) * h + r] = srow[c];
+                }
             }
         }
-        // Map logical coordinate area (1280x800) to physical display (800x1280)
         uint32_t x_native = area->y1;
         uint32_t y_native = BOARD_NATIVE_H - area->x2 - 1;
         jc_tft->draw16bitbergbbitmap(x_native, y_native, h, w, rotated_buf);
@@ -645,6 +688,9 @@ static void disp_flush(lv_display_t* display, const lv_area_t* area, uint8_t* px
             }
         }
     }
+#if defined(IPS10_PERF_HUD)
+    g_flushInnerUs += (micros() - _fs);
+#endif
 #else
     tft.startWrite();
     if (stride_pixels == w) {
@@ -666,34 +712,6 @@ static void disp_flush(lv_display_t* display, const lv_area_t* area, uint8_t* px
 }
 
 // LVGL touch read callback
-#if defined(BOARD_IPS10)
-// TEMP touch-calibration overlay: a crosshair + "x,y" that jumps to wherever LVGL thinks
-// the finger landed. Lets us see, blind, whether the touch→screen transform is aligned.
-// Remove once the mapping is confirmed.
-static lv_obj_t* g_touchDot = nullptr;
-static lv_obj_t* g_touchLbl = nullptr;
-static void touchDebugEnsure() {
-    if (g_touchDot) return;
-    g_touchDot = lv_obj_create(lv_layer_top());
-    lv_obj_remove_style_all(g_touchDot);
-    lv_obj_set_size(g_touchDot, 28, 28);
-    lv_obj_set_style_radius(g_touchDot, 14, 0);
-    lv_obj_set_style_bg_color(g_touchDot, lv_color_hex(0xFF3B6E), 0);
-    lv_obj_set_style_bg_opa(g_touchDot, (lv_opa_t)200, 0);
-    lv_obj_set_style_border_width(g_touchDot, 2, 0);
-    lv_obj_set_style_border_color(g_touchDot, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_add_flag(g_touchDot, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    lv_obj_clear_flag(g_touchDot, LV_OBJ_FLAG_CLICKABLE);
-    g_touchLbl = lv_label_create(lv_layer_top());
-    lv_obj_set_style_text_color(g_touchLbl, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_bg_color(g_touchLbl, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(g_touchLbl, (lv_opa_t)180, 0);
-    lv_obj_set_style_pad_all(g_touchLbl, 4, 0);
-    lv_obj_align(g_touchLbl, LV_ALIGN_TOP_MID, 0, 4);
-    lv_obj_clear_flag(g_touchLbl, LV_OBJ_FLAG_CLICKABLE);
-}
-#endif
-
 static void touch_read(lv_indev_t* indev, lv_indev_data_t* data) {
     uint16_t x, y;
 #if defined(BOARD_AMOLED)
@@ -708,16 +726,6 @@ static void touch_read(lv_indev_t* indev, lv_indev_data_t* data) {
         uint16_t temp_y = y;
         x = BOARD_NATIVE_H - 1 - temp_y;
         y = temp_x;
-        // TEMP calibration overlay — show raw phys + mapped logical so we can see the offset.
-        touchDebugEnsure();
-        if (g_touchDot) {
-            lv_obj_set_pos(g_touchDot, (int)x - 14, (int)y - 14);
-            lv_obj_clear_flag(g_touchDot, LV_OBJ_FLAG_HIDDEN);
-            char tb[48];
-            snprintf(tb, sizeof(tb), "phys %u,%u  ->  log %u,%u", temp_x, temp_y, x, y);
-            if (g_touchLbl) { lv_label_set_text(g_touchLbl, tb); lv_obj_move_foreground(g_touchLbl); }
-            lv_obj_move_foreground(g_touchDot);
-        }
 #else
     if (tft.getTouch(&x, &y)) {
 #endif
@@ -845,14 +853,33 @@ void displayInit() {
     // Size = 1280 * 40 * sizeof(uint16_t) = 102400 bytes.
     {
         size_t rotBufSize = BOARD_NATIVE_H * 40 * sizeof(uint16_t);
-        rotated_buf = (uint16_t*)heap_caps_malloc(rotBufSize, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        rotBufSizeG = rotBufSize;
+        // 64-byte (L1 cache line) aligned — required when the PPA writes into this buffer.
+        rotated_buf = (uint16_t*)heap_caps_aligned_alloc(64, rotBufSize, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
         if (!rotated_buf) {
-            rotated_buf = (uint16_t*)ps_malloc(rotBufSize);
+            rotated_buf = (uint16_t*)heap_caps_aligned_alloc(64, rotBufSize, MALLOC_CAP_SPIRAM);
         }
         if (!rotated_buf) {
             Serial.println("[Display] Failed to allocate rotated_buf!");
         } else {
             Serial.println("[Display] Allocated rotated_buf successfully");
+        }
+    }
+
+    // Register a PPA SRM client to do the 90° flush rotation in hardware (2D-DMA) instead of a
+    // per-pixel CPU transpose. This frees the CPU during every flush → the main loop stays
+    // responsive (snappy touch) and rich animation can run at full framerate. If registration
+    // fails, ppaClient stays null and disp_flush() falls back to the CPU transpose.
+    {
+        ppa_client_config_t pc = {};
+        pc.oper_type = PPA_OPERATION_SRM;
+        pc.max_pending_trans_num = 1;
+        pc.data_burst_length = PPA_DATA_BURST_LENGTH_128;
+        if (ppa_register_client(&pc, &ppaClient) != ESP_OK) {
+            ppaClient = nullptr;
+            Serial.println("[Display] PPA register failed — using CPU transpose");
+        } else {
+            Serial.println("[Display] PPA SRM client ready (HW flush rotation)");
         }
     }
 
@@ -868,7 +895,7 @@ void displayInit() {
     if (i2c_new_master_bus(&i2c_bus_conf, &i2c_handle) == ESP_OK) {
         esp_lcd_panel_io_handle_t tp_io_handle = NULL;
         esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GSL3680_CONFIG();
-        tp_io_config.scl_speed_hz = 100000;
+        tp_io_config.scl_speed_hz = 100000;   // 100 kHz — 400 kHz risked I2C noise → phantom touches
         if (esp_lcd_new_panel_io_i2c(i2c_handle, &tp_io_config, &tp_io_handle) == ESP_OK) {
             esp_lcd_touch_config_t tp_cfg;
             memset(&tp_cfg, 0, sizeof(tp_cfg));
@@ -1032,6 +1059,12 @@ void displayInit() {
     // draw buffers smaller than the larger SPI/QSPI panels.
 #if defined(BOARD_TTGO)
     static constexpr size_t BUF_LINES = 20;
+#elif defined(BOARD_IPS10)
+    // IPS10 draw buffers live in INTERNAL SRAM (fast per-pixel render). Keep them small so the
+    // two buffers (1280×N×2) + rotated_buf (102KB internal) + runtime all fit without OOM —
+    // 40 lines (204KB) crashed; 24 lines ≈ 122KB fits internal and keeps the flush-slice count
+    // (and per-slice widget-tree traversal) lower than 16 lines did. PPA rotates each slice cheaply.
+    static constexpr size_t BUF_LINES = 24;
 #else
     static constexpr size_t BUF_LINES = 40;
 #endif
@@ -1045,9 +1078,17 @@ void displayInit() {
     size_t bufSize = strideBytes * BUF_LINES;
     Serial.printf("[Display] Buffer alloc: %zu logical pixels, %zu bytes (%d lines, stride=%zu)\n",
                   bufPixels, bufSize, BUF_LINES, strideBytes);
-    // DMA-capable aligned buffers (Arduino_GFX pattern)
-    uint16_t* buf1 = (uint16_t*)heap_caps_aligned_alloc(16, bufSize, MALLOC_CAP_DMA);
-    uint16_t* buf2 = (uint16_t*)heap_caps_aligned_alloc(16, bufSize, MALLOC_CAP_DMA);
+    // DMA-capable aligned buffers (Arduino_GFX pattern).
+    // IPS10: force INTERNAL SRAM. On the P4, MALLOC_CAP_DMA alone is satisfied by PSRAM, and a
+    // PSRAM LVGL draw buffer makes every per-pixel widget render a slow PSRAM write (~30× internal)
+    // — that was the cards-render bottleneck (f-bucket 180–360ms). Internal keeps render fast;
+    // PPA still rotates it in HW (~13ms). Falls back to PSRAM only if internal can't satisfy.
+    uint32_t bufCaps = MALLOC_CAP_DMA;
+#if defined(BOARD_IPS10)
+    bufCaps |= MALLOC_CAP_INTERNAL;
+#endif
+    uint16_t* buf1 = (uint16_t*)heap_caps_aligned_alloc(16, bufSize, bufCaps);
+    uint16_t* buf2 = (uint16_t*)heap_caps_aligned_alloc(16, bufSize, bufCaps);
     if (!buf1 || !buf2) {
         // Fallback to PSRAM
         if (buf1) free(buf1);
@@ -1060,6 +1101,9 @@ void displayInit() {
         Serial.println("[Display] Buffer alloc failed!");
         return;
     }
+#if defined(IPS10_PERF_HUD)
+    g_bufInternal = esp_ptr_internal(buf1) ? 1 : 0;
+#endif
     lv_display_set_buffers(disp, buf1, buf2, bufSize,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 #if defined(BOARD_IPS10)
@@ -1074,6 +1118,21 @@ void displayInit() {
     lv_indev_t* indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, touch_read);
+#if defined(BOARD_IPS10)
+    // The GSL3680 reports jittery coordinates (it also logs intermittent i2c tx failures),
+    // so a finger that physically stays put still wanders several px between press and
+    // release. With LVGL's default ~10px scroll limit that wander is read as a drag → the
+    // tap is consumed as a (no-op) scroll and CLICKED/SHORT_CLICKED never fires, so cards
+    // and the modal-close scrim "don't react" even though the touch point tracks fine.
+    // Widen the limit so small jitter is still treated as a click. 8012px-wide panel → 40px
+    // is well within a single card/target.
+    lv_indev_set_scroll_limit(indev, 40);
+    // Poll the GSL3680 every ~24 ms (between LVGL's 33 ms default and the 12 ms that over-sampled
+    // touch-down transients into phantom presses). Rendering is now cheap (internal-SRAM buffers +
+    // PPA), so the loop stays responsive without aggressive polling.
+    lv_timer_t* readTimer = lv_indev_get_read_timer(indev);
+    if (readTimer) lv_timer_set_period(readTimer, 24);
+#endif
 }
 
 lv_display_t* getDisplay() {
