@@ -18,6 +18,7 @@ data class TimelineEntry(
     val startedAt: Long? = null,
     val endedAt: Long? = null,
     val status: String? = null,
+    val automated: Boolean? = null,
     /** APME task id. Set on task_start/task_end and on every turn entry inside the task scope. */
     val taskId: String? = null,
     /** Only on task_end. todo_complete | clear | session_end | manual | idle_gap. */
@@ -103,20 +104,20 @@ class TimelineStore private constructor() {
     val entries: StateFlow<List<TimelineEntry>> = _entries.asStateFlow()
 
     fun addEntry(entry: TimelineEntry) {
+        val normalized = normalizeTimelineEntryForStorage(entry) ?: return
         // Drop codex:otel-active noise at the **storage** layer so it never
         // reaches consumers that bypass `timelineDisplayGroups` (raw
         // `entries` flow readers, persistence in future, etc.) and so the
         // MAX_ENTRIES buffer doesn't age out useful rows behind it.
         // Mirrors Apple `DaemonTimelineStore` add-path filter.
-        if (isLowSignalEntry(entry)) return
         val list = _entries.value
         // 5s dedup — skip if same type+summary within window
         for (i in list.indices.reversed()) {
             val e = list[i]
-            if (entry.timestamp - e.timestamp > 5000) break
-            if (e.type == entry.type && e.summary == entry.summary) return
+            if (normalized.timestamp - e.timestamp > 5000) break
+            if (e.type == normalized.type && e.summary == normalized.summary) return
         }
-        _entries.value = (list + entry).takeLast(MAX_ENTRIES)
+        _entries.value = (list + normalized).takeLast(MAX_ENTRIES)
     }
 
     /** Update the most recent entry matching [type] using [transform]. */
@@ -137,44 +138,45 @@ class TimelineStore private constructor() {
      *  pre-LLM kind and (for 'none' rows) the detail pane stays suppressed
      *  even after the LLM rescues it. */
     fun upsertEntry(entry: TimelineEntry) {
+        val normalized = normalizeTimelineEntryForStorage(entry) ?: return
         // Storage-layer guard mirrors addEntry — never let an OTel low-
         // signal row enter, even via the upsert path used for progressive
         // summaryKind enrichment.
-        if (isLowSignalEntry(entry)) return
         val list = _entries.value.toMutableList()
         // Task-judge follow-up emits land 5–30 s after the initial boundary,
         // so the 1 s timestamp window won't match. For task_end rows, prefer
         // matching by (type, taskId) — that pair is stable across both emits
         // and lets the score-bearing update merge in place. Mirrors Apple
         // `DaemonTimelineStore::upsert`.
-        val taskMatchIdx = if (entry.type == "task_end" && !entry.taskId.isNullOrEmpty()) {
-            list.indexOfLast { it.type == "task_end" && it.taskId == entry.taskId }
+        val taskMatchIdx = if (normalized.type == "task_end" && !normalized.taskId.isNullOrEmpty()) {
+            list.indexOfLast { it.type == "task_end" && it.taskId == normalized.taskId }
         } else -1
         val idx = if (taskMatchIdx >= 0) taskMatchIdx else {
-            list.indexOfLast { it.type == entry.type && kotlin.math.abs(it.timestamp - entry.timestamp) < 1000L }
+            list.indexOfLast { it.type == normalized.type && kotlin.math.abs(it.timestamp - normalized.timestamp) < 1000L }
         }
         if (idx >= 0) {
             list[idx] = list[idx].copy(
-                summary = entry.summary,
-                detail = entry.detail ?: list[idx].detail,
-                agentType = entry.agentType ?: list[idx].agentType,
-                projectName = entry.projectName ?: list[idx].projectName,
-                sessionId = entry.sessionId ?: list[idx].sessionId,
-                runId = entry.runId ?: list[idx].runId,
-                startedAt = entry.startedAt ?: list[idx].startedAt,
-                endedAt = entry.endedAt ?: list[idx].endedAt,
-                status = entry.status ?: list[idx].status,
-                taskId = entry.taskId ?: list[idx].taskId,
-                boundarySignal = entry.boundarySignal ?: list[idx].boundarySignal,
-                summaryKind = entry.summaryKind ?: list[idx].summaryKind,
-                taskScore = entry.taskScore ?: list[idx].taskScore,
-                taskOutcome = entry.taskOutcome ?: list[idx].taskOutcome,
-                taskCategory = entry.taskCategory ?: list[idx].taskCategory,
-                taskSummary = entry.taskSummary ?: list[idx].taskSummary,
+                summary = normalized.summary,
+                detail = normalized.detail ?: list[idx].detail,
+                agentType = normalized.agentType ?: list[idx].agentType,
+                projectName = normalized.projectName ?: list[idx].projectName,
+                sessionId = normalized.sessionId ?: list[idx].sessionId,
+                runId = normalized.runId ?: list[idx].runId,
+                startedAt = normalized.startedAt ?: list[idx].startedAt,
+                endedAt = normalized.endedAt ?: list[idx].endedAt,
+                status = normalized.status ?: list[idx].status,
+                automated = normalized.automated ?: list[idx].automated,
+                taskId = normalized.taskId ?: list[idx].taskId,
+                boundarySignal = normalized.boundarySignal ?: list[idx].boundarySignal,
+                summaryKind = normalized.summaryKind ?: list[idx].summaryKind,
+                taskScore = normalized.taskScore ?: list[idx].taskScore,
+                taskOutcome = normalized.taskOutcome ?: list[idx].taskOutcome,
+                taskCategory = normalized.taskCategory ?: list[idx].taskCategory,
+                taskSummary = normalized.taskSummary ?: list[idx].taskSummary,
             )
             _entries.value = list
         } else {
-            addEntry(entry)
+            addEntry(normalized)
         }
     }
 
@@ -182,7 +184,7 @@ class TimelineStore private constructor() {
         // Same storage-layer guard as addEntry — bulk replay paths
         // (sessions_list snapshots, daemon resync) must not bypass the
         // OTel filter.
-        val filtered = newEntries.filterNot { isLowSignalEntry(it) }
+        val filtered = newEntries.mapNotNull { normalizeTimelineEntryForStorage(it) }
         _entries.value = (_entries.value + filtered)
             .distinctBy { "${it.timestamp}-${it.type}-${it.summary}" }
             .sortedBy { it.timestamp }

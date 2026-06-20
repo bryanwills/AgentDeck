@@ -5,7 +5,10 @@ import {
   cleanNopMarkers,
   extractSemanticCore,
   isRepetitiveEntry,
+  normalizeTimelineEntryForStorage,
   parseLogLine,
+  shouldDropLowSignalTimelineEntry,
+  summarizeOpenClawCronPrompt,
   type TimelineEntry,
 } from '../timeline.js';
 
@@ -94,6 +97,54 @@ describe('cleanNopMarkers', () => {
 
   it('returns empty/falsy unchanged', () => {
     expect(cleanNopMarkers('')).toBe('');
+  });
+});
+
+// ============================================================
+// storage normalization / low-signal filtering
+// ============================================================
+describe('normalizeTimelineEntryForStorage', () => {
+  it('summarizes OpenClaw cron model_call prompts instead of storing shell-like instructions', () => {
+    const entry = normalizeTimelineEntryForStorage({
+      ts: 100,
+      type: 'model_call',
+      raw: '[cron:abc self-improvement-daily-review-2350] 입력 수집:\n1. ls -lt 사용\n2. tail -50 사용',
+      detail: '[cron:abc self-improvement-daily-review-2350] 입력 수집:\n1. ls -lt 사용\n2. tail -50 사용',
+      agentType: 'openclaw',
+      automated: true,
+    });
+
+    expect(entry).toMatchObject({
+      raw: '자동 작업 · self improvement daily review 2350',
+      detail: undefined,
+      automated: true,
+      summaryKind: 'heuristic',
+    });
+  });
+
+  it('drops low-signal OpenClaw placeholder tool rows', () => {
+    expect(shouldDropLowSignalTimelineEntry({
+      ts: 100,
+      type: 'tool_exec',
+      raw: 'tool · failed',
+      detail: 'status: failed',
+      agentType: 'openclaw',
+    })).toBe(true);
+  });
+
+  it('keeps OpenClaw placeholder tool rows when detail carries input or output', () => {
+    expect(shouldDropLowSignalTimelineEntry({
+      ts: 100,
+      type: 'tool_exec',
+      raw: 'tool · running',
+      detail: 'status: running\ninput: {"command":"ls -la"}',
+      agentType: 'openclaw',
+    })).toBe(false);
+  });
+
+  it('extracts readable labels from cron headers', () => {
+    expect(summarizeOpenClawCronPrompt('[cron:id ai-eval-kindergarten-daily] body'))
+      .toBe('자동 작업 · ai eval kindergarten daily');
   });
 });
 

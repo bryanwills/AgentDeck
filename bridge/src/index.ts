@@ -1330,6 +1330,10 @@ function makeApmeAdapterCtx(
   };
 }
 
+function isClaudeTaskNotificationPrompt(text: string): boolean {
+  return text.trim().toLowerCase().startsWith('<task-notification>');
+}
+
 // ===== Claude Code timeline wiring =====
 
 function wireClaudeCodeTimeline(
@@ -1352,6 +1356,10 @@ function wireClaudeCodeTimeline(
       ccPendingChatStartTimer = null;
     }
     ccPendingChatStart = false;
+    if (isClaudeTaskNotificationPrompt(text)) {
+      ccLastPromptText = null;
+      return;
+    }
     ccLastPromptText = text || null;
     const snippet = text.length > 500 ? text.slice(0, 497) + '...' : text;
     const detail = text.length > 100 ? (text.length > 1000 ? text.slice(0, 1000) + '...' : text) : undefined;

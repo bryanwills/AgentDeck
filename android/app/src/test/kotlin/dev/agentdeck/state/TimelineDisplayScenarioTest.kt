@@ -100,6 +100,36 @@ class TimelineDisplayScenarioTest {
     }
 
     @Test
+    fun `task notification chat_start is suppressed`() {
+        val entries = listOf(
+            TimelineEntry(
+                timestamp = 1_000,
+                type = "chat_start",
+                summary = "<task-notification>\n<summary>Background command completed</summary>",
+                detail = "<task-notification>\n<summary>Background command completed</summary>",
+                sessionId = "claude-a",
+                agentType = "claude-code",
+                projectName = "AgentDeck",
+                startedAt = 1_000,
+            ),
+            event(
+                2_000,
+                "chat_response",
+                "Flash completed successfully",
+                "claude-a",
+                "claude-code",
+                "AgentDeck",
+                startedAt = 1_000,
+                endedAt = 2_000,
+            ),
+        )
+
+        val display = timelineDisplayGroups(groupConsecutive(entries))
+        assertEquals(listOf("chat_response"), display.map { it.entry.type })
+        assertEquals("Flash completed successfully", display[0].entry.summary)
+    }
+
+    @Test
     fun `chat_end with summaryKind survives even when chat_response paired`() {
         // When the bridge tags chat_end with a real summary backend ("llm" or
         // "heuristic"), the row carries info distinct from chat_response and

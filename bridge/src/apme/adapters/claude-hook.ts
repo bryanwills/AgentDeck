@@ -44,6 +44,7 @@ export function claudeHookToSpans(
 
   if (event === 'UserPromptSubmit') {
     const prompt = extractPrompt(data);
+    if (isTaskNotificationPrompt(prompt)) return [];
     if (/^\s*\/clear\s*$/i.test(prompt)) {
       return [make('task_boundary', { 'agentdeck.boundary_signal': 'clear' })];
     }
@@ -99,4 +100,8 @@ function extractPrompt(data: Record<string, unknown>): string {
   })();
   if (fromMessage) return fromMessage;
   return typeof data.prompt === 'string' ? data.prompt : '';
+}
+
+function isTaskNotificationPrompt(prompt: string): boolean {
+  return prompt.trim().toLowerCase().startsWith('<task-notification>');
 }

@@ -47,6 +47,41 @@ describe('BridgeTimelineStore', () => {
     expect(since[0].ts).toBe(200);
   });
 
+  it('normalizes OpenClaw cron prompt dumps before storing history', () => {
+    store.addEntry(makeEntry({
+      ts: 100,
+      type: 'model_call',
+      raw: '[cron:abc self-improvement-daily-review-2350] 입력 수집:\n1. ls -lt 사용\n2. tail -50 사용',
+      detail: '[cron:abc self-improvement-daily-review-2350] 입력 수집:\n1. ls -lt 사용\n2. tail -50 사용',
+      agentType: 'openclaw',
+      automated: true,
+    }));
+
+    const history = store.getHistory();
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      raw: '자동 작업 · self improvement daily review 2350',
+      detail: undefined,
+      automated: true,
+      summaryKind: 'heuristic',
+    });
+  });
+
+  it('drops low-signal OpenClaw placeholder tool rows before broadcast/history', () => {
+    const received: TimelineEntry[] = [];
+    store.onEntry((entry) => received.push(entry));
+    store.addEntry(makeEntry({
+      ts: 100,
+      type: 'tool_exec',
+      raw: 'tool · failed',
+      detail: 'status: failed',
+      agentType: 'openclaw',
+    }));
+
+    expect(store.getHistory()).toHaveLength(0);
+    expect(received).toHaveLength(0);
+  });
+
   it('calls listeners on new entries', () => {
     const received: Array<{ entry: TimelineEntry; upsert?: boolean }> = [];
     store.onEntry((entry, upsert) => received.push({ entry, upsert }));

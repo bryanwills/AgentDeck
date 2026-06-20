@@ -125,6 +125,24 @@ final class OpenClawToolNoiseTests: XCTestCase {
         XCTAssertTrue(DaemonTimelineStore.shouldDropLowSignalEntry(entry))
     }
 
+    func testStoreNormalizesOpenClawCronPromptDump() {
+        let prompt = "[cron:abc self-improvement-daily-review-2350] 입력 수집:\n1. ls -lt 사용\n2. tail -50 사용"
+        let entry = DaemonTimelineEntry(
+            ts: Date().timeIntervalSince1970 * 1000,
+            type: "model_call",
+            raw: prompt,
+            detail: prompt,
+            agentType: "openclaw",
+            automated: true
+        )
+
+        let normalized = DaemonTimelineStore.normalizeForStorage(entry)
+        XCTAssertEqual(normalized?.raw, "자동 작업 · self improvement daily review 2350")
+        XCTAssertNil(normalized?.detail)
+        XCTAssertEqual(normalized?.automated, true)
+        XCTAssertEqual(normalized?.summaryKind, "heuristic")
+    }
+
     /// Producer guard keeps unnamed-tool rows when input/output is present
     /// — `toolName` falls back to `"tool"` placeholder, but the JSON
     /// gets compacted into `detail`. The filter must NOT drop these

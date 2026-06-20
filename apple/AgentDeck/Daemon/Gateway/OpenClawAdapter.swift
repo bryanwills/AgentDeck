@@ -398,14 +398,17 @@ actor OpenClawAdapter {
                 // can dim/collapse them instead of surfacing the raw prompt.
                 let isCron = prompt.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[cron:")
                 if isCron { automatedRunId = currentRunId }
+                let promptRaw = isCron ? DaemonTimelineStore.summarizeOpenClawCronPrompt(prompt) : String(prompt.prefix(200))
+                let promptDetail = isCron ? nil : String(prompt.prefix(1000))
                 let entry = DaemonTimelineEntry(
                     ts: Self.payloadTimestamp(payload),
                     type: "model_call",
-                    raw: String(prompt.prefix(200)),
-                    detail: String(prompt.prefix(1000)),
+                    raw: promptRaw,
+                    detail: promptDetail,
                     approvalId: nil, status: nil,
                     agentType: "openclaw", repeatCount: nil, automated: isCron ? true : nil,
-                    runId: currentRunId
+                    runId: currentRunId,
+                    summaryKind: isCron ? "heuristic" : nil
                 )
                 emitTimelineEntry(entry)
             }
@@ -1337,17 +1340,20 @@ actor OpenClawAdapter {
         // so the dashboard can dim/collapse the raw prompt instead of surfacing it.
         let isCron = role != "assistant"
             && text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[cron:")
+        let raw = isCron ? DaemonTimelineStore.summarizeOpenClawCronPrompt(text) : String(text.prefix(200))
+        let detail = isCron ? nil : String(text.prefix(1000))
         let entry = DaemonTimelineEntry(
             ts: Self.payloadTimestamp(payload),
             type: role == "assistant" ? "model_response" : "model_call",
-            raw: String(text.prefix(200)),
-            detail: String(text.prefix(1000)),
+            raw: raw,
+            detail: detail,
             approvalId: nil,
             status: nil,
             agentType: "openclaw",
             repeatCount: nil,
             automated: isCron ? true : nil,
-            runId: currentRunId
+            runId: currentRunId,
+            summaryKind: isCron ? "heuristic" : nil
         )
         emitTimelineEntry(entry)
     }

@@ -415,6 +415,45 @@ class TimelineStoreTest {
     }
 
     @Test
+    fun `timelineDisplayGroups hides model_call after model_response in same run`() {
+        val groups = groupConsecutive(listOf(
+            entry(1000, "model_call", "자동 작업 · daily review").copy(
+                agentType = "openclaw",
+                runId = "run-a",
+                automated = true,
+            ),
+            entry(5000, "model_response", "일일 리뷰 완료").copy(
+                agentType = "openclaw",
+                runId = "run-a",
+            ),
+        ))
+
+        val result = timelineDisplayGroups(groups)
+
+        assertEquals(1, result.size)
+        assertEquals("model_response", result[0].entry.type)
+    }
+
+    @Test
+    fun `addEntry normalizes openclaw cron model_call prompt dump`() {
+        store.addEntry(
+            TimelineEntry(
+                timestamp = 1_000,
+                type = "model_call",
+                summary = "[cron:abc self-improvement-daily-review-2350] 입력 수집:\n1. ls -lt 사용\n2. tail -50 사용",
+                detail = "[cron:abc self-improvement-daily-review-2350] 입력 수집:\n1. ls -lt 사용\n2. tail -50 사용",
+                agentType = "openclaw",
+                automated = true,
+            )
+        )
+
+        assertEquals(1, store.entries.value.size)
+        assertEquals("자동 작업 · self improvement daily review 2350", store.entries.value[0].summary)
+        assertEquals(null, store.entries.value[0].detail)
+        assertEquals(true, store.entries.value[0].automated)
+    }
+
+    @Test
     fun `timelineLifecycleBounds pairs response with prior start`() {
         val entries = listOf(
             entry(1000, "chat_start", "Prompt").copy(sessionId = "s1"),

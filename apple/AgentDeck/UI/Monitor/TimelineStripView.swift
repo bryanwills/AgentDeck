@@ -987,9 +987,13 @@ func timelineDisplayGroupsForDashboard(_ groups: [GroupedEntry]) -> [GroupedEntr
         // Exception: empty runs (taskCategory="_empty") are filtered out as noise.
         if entry.type == .taskStart || entry.type == .taskEnd { return entry.taskCategory != "_empty" }
         if timelineIsLowSignalEntry(entry) { return false }
+        if timelineIsTaskNotificationChatStart(entry) { return false }
         if entry.type == .chatStart {
             if !timelineHasLaterCompletion(for: entry, in: groups) { return true }
             return timelineIsMeaningfulChatStart(entry)
+        }
+        if entry.type == .modelCall {
+            return !timelineHasLaterCompletion(for: entry, in: groups)
         }
         if entry.type == .chatEnd {
             // chat_end with a real summary tag carries info distinct from

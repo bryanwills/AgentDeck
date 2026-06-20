@@ -571,6 +571,71 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(displayed[0].entry.raw, "Fix timeline grouping")
     }
 
+    func testDashboardDisplayDropsClaudeTaskNotificationChatStart() {
+        let entries = [
+            TimelineEntry(
+                ts: 1000,
+                type: .chatStart,
+                raw: "<task-notification>\n<summary>Background command completed</summary>",
+                detail: "<task-notification>\n<summary>Background command completed</summary>",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                sessionId: "s1",
+                startedAt: 1000
+            ),
+            TimelineEntry(
+                ts: 2000,
+                type: .chatResponse,
+                raw: "Flash completed successfully",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                sessionId: "s1",
+                startedAt: 1000,
+                endedAt: 2000
+            ),
+        ]
+
+        let displayed = timelineDisplayGroupsForDashboard(groupConsecutive(entries))
+        XCTAssertEqual(displayed.count, 1)
+        XCTAssertEqual(displayed[0].entry.type, .chatResponse)
+        XCTAssertEqual(displayed[0].entry.raw, "Flash completed successfully")
+    }
+
+    func testDashboardDisplayHidesModelCallAfterModelResponse() {
+        let entries = [
+            TimelineEntry(
+                ts: 1000,
+                type: .modelCall,
+                raw: "자동 작업 · self improvement daily review 2350",
+                agentType: "openclaw",
+                automated: true,
+                runId: "run-a"
+            ),
+            TimelineEntry(
+                ts: 5000,
+                type: .modelResponse,
+                raw: "일일 리뷰 완료",
+                agentType: "openclaw",
+                runId: "run-a"
+            ),
+        ]
+
+        let displayed = timelineDisplayGroupsForDashboard(groupConsecutive(entries))
+        XCTAssertEqual(displayed.map(\.entry.type), [.modelResponse])
+    }
+
+    func testEvalResultsGroupByLastTimestampWithinTenMinutes() {
+        let entries = [
+            TimelineEntry(ts: 1000, type: .evalResult, raw: "★ run 60% [unknown] abandoned Added a new function", agentType: "openclaw", sessionId: "s1"),
+            TimelineEntry(ts: 61_000, type: .evalResult, raw: "★ run 60% [unknown] abandoned Added a new function", agentType: "openclaw", sessionId: "s1"),
+            TimelineEntry(ts: 121_000, type: .evalResult, raw: "★ run 60% [unknown] abandoned Added a new function", agentType: "openclaw", sessionId: "s1"),
+        ]
+
+        let grouped = groupConsecutive(entries)
+        XCTAssertEqual(grouped.count, 1)
+        XCTAssertEqual(grouped[0].count, 3)
+    }
+
     #if os(macOS)
     func testDaemonTimelineStoreDropsAnonymousCodexToolNoise() async {
         let store = DaemonTimelineStore()

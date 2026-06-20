@@ -5,7 +5,7 @@
  */
 
 import type { TimelineEntry } from './types.js';
-import { deduplicateEntry } from '@agentdeck/shared';
+import { deduplicateEntry, normalizeTimelineEntryForStorage } from '@agentdeck/shared';
 
 type EntryListener = (entry: TimelineEntry, upsert?: boolean) => void;
 /** Attribute an entry with session-scoped metadata (sessionId, projectName,
@@ -53,7 +53,9 @@ export class BridgeTimelineStore {
       return;
     }
     const enriched = this.attributor ? this.attributor(entry) : entry;
-    const result = deduplicateEntry(enriched, this.entries);
+    const normalized = normalizeTimelineEntryForStorage(enriched);
+    if (!normalized) return;
+    const result = deduplicateEntry(normalized, this.entries);
 
     if (result.action === 'skip') return;
 
@@ -66,14 +68,18 @@ export class BridgeTimelineStore {
       // caller-set fields still win, and otherwise keep `existing.*`.
       const existing = this.entries[result.index];
       existing.repeatCount = (existing.repeatCount || 1) + 1;
-      existing.ts = entry.ts;
-      existing.agentType = entry.agentType ?? existing.agentType;
-      existing.projectName = entry.projectName ?? existing.projectName;
-      existing.sessionId = entry.sessionId ?? existing.sessionId;
-      existing.runId = entry.runId ?? existing.runId;
-      existing.taskId = entry.taskId ?? existing.taskId;
-      existing.startedAt = entry.startedAt ?? existing.startedAt;
-      existing.endedAt = entry.endedAt ?? existing.endedAt;
+      existing.ts = normalized.ts;
+      existing.raw = normalized.raw;
+      existing.detail = normalized.detail ?? existing.detail;
+      existing.agentType = normalized.agentType ?? existing.agentType;
+      existing.projectName = normalized.projectName ?? existing.projectName;
+      existing.sessionId = normalized.sessionId ?? existing.sessionId;
+      existing.runId = normalized.runId ?? existing.runId;
+      existing.taskId = normalized.taskId ?? existing.taskId;
+      existing.startedAt = normalized.startedAt ?? existing.startedAt;
+      existing.endedAt = normalized.endedAt ?? existing.endedAt;
+      existing.automated = normalized.automated ?? existing.automated;
+      existing.summaryKind = normalized.summaryKind ?? existing.summaryKind;
       if (result.removeChatStartIndex != null) {
         this.entries.splice(result.removeChatStartIndex, 1);
       }
@@ -121,32 +127,35 @@ export class BridgeTimelineStore {
   upsertEntry(entry: TimelineEntry, opts?: { bypassSuppression?: boolean }): void {
     // An upsert that finds no match falls through to addEntry; honor the same
     // suppression bypass on that insert path (relayed task_end upserts, etc.).
+    const normalized = normalizeTimelineEntryForStorage(entry);
+    if (!normalized) return;
     const tolerance = 1000;
     for (let i = this.entries.length - 1; i >= 0; i--) {
       const e = this.entries[i];
-      if (e.type === entry.type && Math.abs(e.ts - entry.ts) < tolerance) {
+      if (e.type === normalized.type && Math.abs(e.ts - normalized.ts) < tolerance) {
         this.entries[i] = {
           ...e,
-          raw: entry.raw,
-          ...(entry.detail ? { detail: entry.detail } : {}),
-          ...(entry.agentType ? { agentType: entry.agentType } : {}),
-          ...(entry.projectName ? { projectName: entry.projectName } : {}),
-          ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
-          ...(entry.runId ? { runId: entry.runId } : {}),
-          ...(entry.taskId ? { taskId: entry.taskId } : {}),
-          ...(entry.startedAt ? { startedAt: entry.startedAt } : {}),
-          ...(entry.endedAt ? { endedAt: entry.endedAt } : {}),
+          raw: normalized.raw,
+          ...(normalized.detail ? { detail: normalized.detail } : {}),
+          ...(normalized.agentType ? { agentType: normalized.agentType } : {}),
+          ...(normalized.projectName ? { projectName: normalized.projectName } : {}),
+          ...(normalized.sessionId ? { sessionId: normalized.sessionId } : {}),
+          ...(normalized.runId ? { runId: normalized.runId } : {}),
+          ...(normalized.taskId ? { taskId: normalized.taskId } : {}),
+          ...(normalized.startedAt ? { startedAt: normalized.startedAt } : {}),
+          ...(normalized.endedAt ? { endedAt: normalized.endedAt } : {}),
+          ...(normalized.automated ? { automated: normalized.automated } : {}),
           // summaryKind progresses heuristic/none → llm when the async LLM
           // summary lands. Without this propagation, the dashboard never
           // sees the kind upgrade and (for `summaryKind: 'none'` rows) the
           // detail pane stays suppressed even after the LLM rescues it.
-          ...(entry.summaryKind ? { summaryKind: entry.summaryKind } : {}),
+          ...(normalized.summaryKind ? { summaryKind: normalized.summaryKind } : {}),
         };
         for (const cb of this.listeners) cb(this.entries[i], true);
         return;
       }
     }
-    this.addEntry(entry, opts);
+    this.addEntry(normalized, opts);
   }
 
   /** Get the most recent entry of a given type */

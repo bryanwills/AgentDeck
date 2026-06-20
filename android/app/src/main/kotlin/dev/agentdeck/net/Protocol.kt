@@ -357,6 +357,7 @@ data class BridgeTimelineEntry(
     val endedAt: Long? = null,
     val taskId: String? = null,
     val boundarySignal: String? = null,
+    val automated: Boolean? = null,
     val summaryKind: String? = null,
     // Task-judge rollup attached on the second task_end emit. Daemon mirrors
     // these in DaemonServer::claudeCodeEntryDict; missing one here would
@@ -380,6 +381,7 @@ fun BridgeTimelineEntry.toTimelineEntry() = dev.agentdeck.state.TimelineEntry(
     startedAt = startedAt,
     endedAt = endedAt,
     status = status,
+    automated = automated,
     taskId = taskId,
     boundarySignal = boundarySignal,
     summaryKind = summaryKind,

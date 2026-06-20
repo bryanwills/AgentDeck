@@ -100,6 +100,9 @@ struct TimelineEntry: Codable, Sendable, Identifiable {
     var approvalId: String?
     var status: String?  // pending | approved | denied
     var agentType: String?
+    /// Cron/channel/web initiated rows. Used to collapse noisy prompt dumps
+    /// and distinguish background activity from user-submitted prompts.
+    var automated: Bool?
     /// Project folder name of the session that produced this entry. Used as
     /// the row prefix so multi-session dashboards can tell "ViewTrans" apart
     /// from "AgentDeck" even when both are the same `agentType`. Nil for
@@ -148,7 +151,7 @@ struct TimelineEntry: Codable, Sendable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case ts, type, raw, detail, approvalId, status, agentType, projectName
+        case ts, type, raw, detail, approvalId, status, agentType, automated, projectName
         case sessionId, runId, startedAt, endedAt, taskId, boundarySignal, summaryKind
         case taskScore, taskOutcome, taskCategory, taskSummary
     }
@@ -161,6 +164,7 @@ struct TimelineEntry: Codable, Sendable, Identifiable {
         approvalId: String? = nil,
         status: String? = nil,
         agentType: String? = nil,
+        automated: Bool? = nil,
         projectName: String? = nil,
         sessionId: String? = nil,
         runId: String? = nil,
@@ -181,6 +185,7 @@ struct TimelineEntry: Codable, Sendable, Identifiable {
         self.approvalId = approvalId
         self.status = status
         self.agentType = agentType
+        self.automated = automated
         self.projectName = projectName
         self.sessionId = sessionId
         self.runId = runId
@@ -204,6 +209,7 @@ struct TimelineEntry: Codable, Sendable, Identifiable {
         self.approvalId = try c.decodeIfPresent(String.self, forKey: .approvalId)
         self.status = try c.decodeIfPresent(String.self, forKey: .status)
         self.agentType = try c.decodeIfPresent(String.self, forKey: .agentType)
+        self.automated = try c.decodeIfPresent(Bool.self, forKey: .automated)
         self.projectName = try c.decodeIfPresent(String.self, forKey: .projectName)
         self.sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
         self.runId = try c.decodeIfPresent(String.self, forKey: .runId)
@@ -240,6 +246,7 @@ struct TimelineEntry: Codable, Sendable, Identifiable {
 struct GroupedEntry: Identifiable, Sendable {
     let entry: TimelineEntry
     var count: Int = 1
+    var lastTs: Double
     /// Assistant response body (chat_response) merged into this group. The
     /// daemon emits chat_start / chat_response / chat_end as three separate
     /// timeline entries; the UI presents them as one turn row so users see
@@ -275,17 +282,17 @@ func groupConsecutive(_ entries: [TimelineEntry], windowSeconds: Double = 60) ->
     guard !entries.isEmpty else { return [] }
 
     var result: [GroupedEntry] = []
-    var current = GroupedEntry(entry: entries[0])
+    var current = GroupedEntry(entry: entries[0], lastTs: entries[0].ts)
 
     for i in 1..<entries.count {
         let entry = entries[i]
-        let timeDiff = abs(entry.ts - current.entry.ts)
+        let timeDiff = abs(entry.ts - current.lastTs)
 
         // Task hierarchy entries never group — they're unique markers.
         if entry.type == .taskStart || entry.type == .taskEnd ||
            current.entry.type == .taskStart || current.entry.type == .taskEnd {
             result.append(current)
-            current = GroupedEntry(entry: entry)
+            current = GroupedEntry(entry: entry, lastTs: entry.ts)
             continue
         }
 
@@ -325,15 +332,28 @@ func groupConsecutive(_ entries: [TimelineEntry], windowSeconds: Double = 60) ->
 
         if entry.type == current.entry.type &&
            entry.raw == current.entry.raw &&
-           timeDiff <= windowSeconds * 1000 {
+           sameSession(current.entry, entry) &&
+           timeDiff <= timelineGroupingWindowMs(for: entry.type, defaultWindowSeconds: windowSeconds) {
             current.count += 1
+            current.lastTs = entry.ts
         } else {
             result.append(current)
-            current = GroupedEntry(entry: entry)
+            current = GroupedEntry(entry: entry, lastTs: entry.ts)
         }
     }
     result.append(current)
     return result
+}
+
+private func timelineGroupingWindowMs(for type: TimelineEntryType, defaultWindowSeconds: Double) -> Double {
+    switch type {
+    case .toolRequest:
+        return 10_000
+    case .evalResult:
+        return max(defaultWindowSeconds * 1000, 10 * 60 * 1000)
+    default:
+        return defaultWindowSeconds * 1000
+    }
 }
 
 /// Same-session test for the turn merge. Treats two entries as the same
@@ -370,6 +390,7 @@ private func sameTurnAnchor(start: TimelineEntry, child: TimelineEntry) -> Bool 
 func timelineIsMeaningfulChatStart(_ entry: TimelineEntry) -> Bool {
     let raw = entry.raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !raw.isEmpty else { return false }
+    if timelineIsTaskNotificationChatStart(entry) { return false }
     let normalized = raw.lowercased()
     let syntheticStarts: Set<String> = [
         "prompt sent",
@@ -379,6 +400,13 @@ func timelineIsMeaningfulChatStart(_ entry: TimelineEntry) -> Bool {
         "resumed",
     ]
     return !syntheticStarts.contains(normalized)
+}
+
+func timelineIsTaskNotificationChatStart(_ entry: TimelineEntry) -> Bool {
+    guard entry.type == .chatStart else { return false }
+    let raw = entry.raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let detail = entry.detail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    return raw.hasPrefix("<task-notification>") || detail.hasPrefix("<task-notification>")
 }
 
 // Type display functions moved to TimelineStripView.swift (timelineTypeIcon, timelineTypeColor)

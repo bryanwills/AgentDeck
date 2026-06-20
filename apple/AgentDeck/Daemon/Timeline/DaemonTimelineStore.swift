@@ -7,7 +7,7 @@ import Foundation
 struct DaemonTimelineEntry: Codable, Sendable {
     let ts: Double  // milliseconds
     let type: String
-    let raw: String
+    var raw: String
     var detail: String?
     var approvalId: String?
     var status: String?
@@ -98,7 +98,7 @@ actor DaemonTimelineStore {
         if suppressLocalChatTool, !bypassSuppression, Self.projectedTypes.contains(entry.type) {
             return
         }
-        guard !Self.shouldDropLowSignalEntry(entry) else { return }
+        guard let entry = Self.normalizeForStorage(entry) else { return }
 
         // Exact dedup: same ts + type + raw within 8s.
         // Window matches shared/src/timeline.ts deduplicateEntry — covers the
@@ -118,6 +118,7 @@ actor DaemonTimelineStore {
     }
 
     func upsert(_ entry: DaemonTimelineEntry) {
+        guard let entry = Self.normalizeForStorage(entry) else { return }
         // task_end follow-up emits land 5–30 s later than the initial boundary
         // emit, so the original (ts, type) key won't match. Prefer matching by
         // (type=="task_end", taskId) — the taskId is stable across both emits.
@@ -168,7 +169,7 @@ actor DaemonTimelineStore {
         guard semaphore.wait(timeout: .now() + .milliseconds(700)) == .success,
               let data = box.get(),
               let loaded = try? JSONDecoder().decode([DaemonTimelineEntry].self, from: data) else { return }
-        entries = Array(loaded.filter { !Self.shouldDropLowSignalEntry($0) }.suffix(maxEntries))
+        entries = Array(loaded.compactMap { Self.normalizeForStorage($0) }.suffix(maxEntries))
     }
 
     // Exposed (default internal) so test targets can drive the predicate
@@ -217,6 +218,44 @@ actor DaemonTimelineStore {
             return Self.isOpenClawPlaceholderRaw(raw)
         }
         return false
+    }
+
+    static func normalizeForStorage(_ entry: DaemonTimelineEntry) -> DaemonTimelineEntry? {
+        guard !Self.shouldDropLowSignalEntry(entry) else { return nil }
+        guard entry.agentType == "openclaw",
+              entry.type == "model_call",
+              (entry.automated == true || Self.isOpenClawCronPrompt(entry.raw) || Self.isOpenClawCronPrompt(entry.detail)),
+              (Self.isOpenClawCronPrompt(entry.raw) || Self.isOpenClawCronPrompt(entry.detail)) else {
+            return entry
+        }
+        var normalized = entry
+        let source = Self.isOpenClawCronPrompt(entry.raw) ? entry.raw : entry.detail
+        normalized.raw = Self.summarizeOpenClawCronPrompt(source)
+        normalized.detail = nil
+        normalized.automated = true
+        normalized.summaryKind = normalized.summaryKind ?? "heuristic"
+        return normalized
+    }
+
+    static func isOpenClawCronPrompt(_ text: String?) -> Bool {
+        guard let text else { return false }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[cron:")
+    }
+
+    static func summarizeOpenClawCronPrompt(_ text: String?) -> String {
+        guard let text else { return "자동 작업" }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let end = trimmed.firstIndex(of: "]") else { return "자동 작업" }
+        let header = String(trimmed[..<end])
+        let parts = header.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard parts.count == 2 else { return "자동 작업" }
+        let job = String(parts[1])
+            .replacingOccurrences(of: "[-_]+", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !job.isEmpty else { return "자동 작업" }
+        let capped = job.count > 64 ? String(job.prefix(61)) + "..." : job
+        return "자동 작업 · \(capped)"
     }
 
     /// True when `raw` (already lowercased + trimmed) is an OpenClaw

@@ -236,6 +236,76 @@ export function cleanNopMarkers(text: string): string {
     .trim();
 }
 
+export function detailHasRealSignal(detail?: string): boolean {
+  if (!detail) return false;
+  for (const line of detail.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (!trimmed.toLowerCase().startsWith('status:')) return true;
+  }
+  return false;
+}
+
+export function isOpenClawPlaceholderRaw(raw: string): boolean {
+  const normalized = raw.trim().toLowerCase();
+  return normalized === 'tool' || normalized.startsWith('tool \u00b7 ');
+}
+
+export function isOpenClawCronPrompt(text?: string): boolean {
+  return !!text && text.trimStart().startsWith('[cron:');
+}
+
+export function summarizeOpenClawCronPrompt(text?: string): string {
+  if (!text) return '자동 작업';
+  const trimmed = text.trimStart();
+  const m = trimmed.match(/^\[cron:[^\s\]]+\s+([^\]]+)\]/);
+  if (!m) return '자동 작업';
+  const job = m[1]
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!job) return '자동 작업';
+  const capped = job.length > 64 ? `${job.slice(0, 61)}...` : job;
+  return `자동 작업 \u00b7 ${capped}`;
+}
+
+export function shouldDropLowSignalTimelineEntry(entry: TimelineEntry): boolean {
+  const lowSignalTypes = new Set<TimelineEntryType>(['tool_exec', 'tool_request', 'tool_resolved']);
+  if (!lowSignalTypes.has(entry.type)) return false;
+  if (detailHasRealSignal(entry.detail)) return false;
+
+  const raw = entry.raw.trim().toLowerCase();
+  if ((entry.agentType === 'codex-cli' || entry.agentType === 'codex-app') && entry.sessionId === 'codex:otel-active') {
+    return new Set(['tool', 'tool completed', 'unknown', 'unknown completed', 'exec', 'exec completed']).has(raw);
+  }
+  if (entry.agentType === 'openclaw') {
+    return isOpenClawPlaceholderRaw(raw);
+  }
+  return false;
+}
+
+export function normalizeTimelineEntryForStorage(entry: TimelineEntry): TimelineEntry | null {
+  if (shouldDropLowSignalTimelineEntry(entry)) return null;
+
+  if (
+    entry.agentType === 'openclaw' &&
+    entry.type === 'model_call' &&
+    (entry.automated || isOpenClawCronPrompt(entry.raw) || isOpenClawCronPrompt(entry.detail)) &&
+    (isOpenClawCronPrompt(entry.raw) || isOpenClawCronPrompt(entry.detail))
+  ) {
+    const source = isOpenClawCronPrompt(entry.raw) ? entry.raw : entry.detail;
+    return {
+      ...entry,
+      raw: summarizeOpenClawCronPrompt(source),
+      detail: undefined,
+      automated: true,
+      summaryKind: entry.summaryKind ?? 'heuristic',
+    };
+  }
+
+  return entry;
+}
+
 /**
  * Extract the semantic core of a timeline entry for dedup comparison.
  * For chat_end: strip duration/tool suffix (everything after first ' · ').

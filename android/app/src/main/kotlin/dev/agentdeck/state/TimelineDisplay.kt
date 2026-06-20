@@ -17,9 +17,12 @@ fun timelineDisplayGroups(groups: List<GroupedEntry>): List<GroupedEntry> =
             entry.type == "task_start" || entry.type == "task_end" -> entry.taskCategory != "_empty"
             // Suppress codex:otel-active no-op tool noise (matches Apple).
             isLowSignalEntry(entry) -> false
+            isTaskNotificationChatStart(entry) -> false
             entry.type == "chat_start" ->
                 if (!hasLaterCompletion(entry, groups)) true
                 else isMeaningfulChatStart(entry)
+            entry.type == "model_call" ->
+                !hasLaterCompletion(entry, groups)
             // chat_end carries useful info distinct from chat_response when it
             // has a real summary tag (LLM/heuristic). "none" sentinel and
             // null fall back to the legacy dedup-with-chat_response rule.
@@ -41,8 +44,16 @@ fun timelineDisplayGroups(groups: List<GroupedEntry>): List<GroupedEntry> =
 private fun isMeaningfulChatStart(entry: TimelineEntry): Boolean {
     val raw = entry.summary.trim()
     if (raw.isEmpty()) return false
+    if (isTaskNotificationChatStart(entry)) return false
     val normalized = raw.lowercase()
     return normalized !in syntheticChatStarts
+}
+
+internal fun isTaskNotificationChatStart(entry: TimelineEntry): Boolean {
+    if (entry.type != "chat_start") return false
+    val raw = entry.summary.trim().lowercase()
+    val detail = entry.detail?.trim()?.lowercase().orEmpty()
+    return raw.startsWith("<task-notification>") || detail.startsWith("<task-notification>")
 }
 
 private val syntheticChatStarts = setOf(
@@ -93,6 +104,40 @@ internal fun isLowSignalEntry(entry: TimelineEntry): Boolean {
         return raw == "tool" || raw.startsWith("tool · ")
     }
     return false
+}
+
+internal fun normalizeTimelineEntryForStorage(entry: TimelineEntry): TimelineEntry? {
+    if (isLowSignalEntry(entry)) return null
+    if (entry.agentType == "openclaw" &&
+        entry.type == "model_call" &&
+        (entry.automated == true || isOpenClawCronPrompt(entry.summary) || isOpenClawCronPrompt(entry.detail)) &&
+        (isOpenClawCronPrompt(entry.summary) || isOpenClawCronPrompt(entry.detail))
+    ) {
+        val source = if (isOpenClawCronPrompt(entry.summary)) entry.summary else entry.detail
+        return entry.copy(
+            summary = summarizeOpenClawCronPrompt(source),
+            detail = null,
+            automated = true,
+            summaryKind = entry.summaryKind ?: "heuristic",
+        )
+    }
+    return entry
+}
+
+private fun isOpenClawCronPrompt(text: String?): Boolean =
+    text?.trimStart()?.startsWith("[cron:") == true
+
+private fun summarizeOpenClawCronPrompt(text: String?): String {
+    if (text == null) return "자동 작업"
+    val match = Regex("""^\[cron:[^\s\]]+\s+([^\]]+)\]""").find(text.trimStart())
+    val job = match?.groupValues?.getOrNull(1)
+        ?.replace(Regex("""[-_]+"""), " ")
+        ?.replace(Regex("""\s+"""), " ")
+        ?.trim()
+        .orEmpty()
+    if (job.isEmpty()) return "자동 작업"
+    val capped = if (job.length > 64) job.take(61) + "..." else job
+    return "자동 작업 · $capped"
 }
 
 /**
