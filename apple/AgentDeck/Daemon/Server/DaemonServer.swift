@@ -1056,13 +1056,18 @@ final class DaemonServer {
         self.adbModule = adb
         moduleManager.register(adb)
 
-        // D200H Deck Dock (HID protocol — IOKit)
-        let d200h = D200hHidModule()
-        d200h.commandHandler = { [weak self] cmd in
-            Task { @MainActor in self?.handleCommand(cmd) }
+        // D200H Deck Dock — direct-HID fallback retired; the device is driven
+        // exclusively by the Ulanzi Studio plugin (`ulanzi-plugin`). The daemon
+        // never opens it over IOKit HID. Flip to re-enable if ever needed.
+        let enableD200hDirectHID = false
+        if enableD200hDirectHID {
+            let d200h = D200hHidModule()
+            d200h.commandHandler = { [weak self] cmd in
+                Task { @MainActor in self?.handleCommand(cmd) }
+            }
+            self.d200hModule = d200h
+            moduleManager.register(d200h)
         }
-        self.d200hModule = d200h
-        moduleManager.register(d200h)
 
         // Serial (ESP32)
         let serial = SerialModule()

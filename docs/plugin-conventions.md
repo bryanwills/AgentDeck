@@ -103,10 +103,14 @@ Ulanzi D200H communicates via **stock HID protocol** (VID `0x2207`/PID `0x0019`,
 
 **Session icon invariant**: Session controls show AgentDeck's terrarium creatures, not provider/company logos. Stream Deck/Stream Deck+ SVG slots and D200H Swift PNG tiles render the same reduced creature language: Claude robot, Codex cloud prompt, OpenClaw crayfish, OpenCode nested square. Provider logos stay in brand/settings contexts only.
 
-**Two implementations** (daemon-only, session bridges never talk to D200H):
+**Primary path: Ulanzi Studio plugin.** The D200H needs the Mac **Ulanzi Studio** app to render reliably, so the official Ulanzi Studio plugin (`plugin-ulanzi/`, registers over WS as `ulanzi-plugin`) is the **only** supported way to drive the device. It shares the `@agentdeck/shared` `buildSessionDeck` layout engine and shows an OFFLINE + press-to-launch screen when the daemon is down.
 
-- **Swift daemon** (`D200hHidModule.swift`, macOS app): IOKit `IOHIDManager`, non-seize keyboard open (D200H custom protocol doesn't need seize), Core Graphics PNG + device native text, heartbeat re-render (15s) prevents firmware timeout. **Multi-session agent controller**: session list view (13 sessions per page, slots 0-12 + slot 13 big merged button = usage monitor with color-coded border) + detail/option view with quick actions (GO ON/REVIEW/COMMIT/CLEAR) + STOP/ESC
-- **Node.js CLI daemon** (`bridge/src/modules/d200h-module.ts` + `bridge/src/d200h/`): `node-hid` optional dep, auto-detect via VID/PID enumeration, renders 14-key 3×5 dashboard (`renderDashboardZip`) with v3-era button layout (mode/session/usage/QA 1-4/model/5h/7d/stop). 30s keep-alive, state-hash-based dedup. Activated automatically in daemon (`modules/index.ts` `createDefaultModules`), explicitly disabled in all session commands (`d200h: false`)
+**Direct-HID fallback — retired (2026-06-21).** The daemons no longer open the D200H over HID. The two driver modules below are kept dormant (code intact, easily re-enabled) but are **not activated**:
+
+- **Node.js CLI daemon** (`bridge/src/modules/d200h-module.ts` + `bridge/src/d200h/`): activation gated off at the daemon — `daemon-server.ts` passes `d200h: false` (was `'auto'`), so `D200hModule.shouldActivate(false)` returns `false` and the module never touches `node-hid`. Session bridges already passed `d200h: false`.
+- **Swift daemon** (`D200hHidModule.swift`, macOS app): `DaemonServer.swift` gates instantiation behind `let enableD200hDirectHID = false`, so the IOKit `IOHIDManager` is never created and `d200hModule` stays `nil`.
+
+The `ulanzi-plugin` stand-down arbitration (`onUlanziPluginPresence` / `setExternalOwner`) remains in place as inert dormant code — it only mattered when direct-HID was active. To re-enable direct-HID, flip the Node config back to `'auto'` and the Swift `enableD200hDirectHID` to `true`.
 
 Legacy on-device C agent archived to `zkswe/agent-archive/`.
 
