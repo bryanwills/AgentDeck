@@ -60,6 +60,12 @@ export interface BridgeCoreOptions {
   sessionId?: string;
   projectName: string;
   httpServer: Server;
+  /**
+   * True for the daemon hub. The hub aggregates many agents and has no single
+   * session model, so it must always expose the account-level Claude subscription
+   * quota in usage events rather than gating it on the (arbitrary) active model.
+   */
+  isDaemon?: boolean;
 }
 
 // ===== BridgeCore =====
@@ -133,10 +139,14 @@ export class BridgeCore {
 
   private static readonly USAGE_STALE_TTL = 10 * 60 * 1000; // 10 minutes
 
+  /** True when this core backs the daemon hub (see BridgeCoreOptions.isDaemon). */
+  readonly isDaemon: boolean;
+
   constructor(opts: BridgeCoreOptions) {
     this.port = opts.port;
     this.sessionId = opts.sessionId ?? randomUUID();
     this.projectName = opts.projectName;
+    this.isDaemon = opts.isDaemon ?? false;
 
     // Core components
     this.usageTracker = new UsageTracker();
@@ -334,6 +344,7 @@ export class BridgeCore {
       this.cachedModelCatalog,
       this.cachedAntigravityStatus,
       this.apiUsagePreAdjusted,
+      this.isDaemon,
     );
   }
 

@@ -77,6 +77,32 @@ describe('buildUsageEvent subscription quota scoping', () => {
     expect(evt.oauthConnected).toBe(true);
   });
 
+  it('keeps Anthropic 5h/7d quota on the daemon hub even with a non-Claude aggregate model', () => {
+    // Regression: the daemon aggregates many agents and its `modelName` is whatever
+    // agent is primary (e.g. OpenClaw "GLM-5.2"). The account-level Claude quota must
+    // still broadcast so the Dashboard shows subscription usage. `aggregateSubscriptionQuota`
+    // is the 12th positional arg; preAdjusted (11th) = true keeps the raw percent.
+    const evt = buildUsageEvent(
+      snapshot({ modelName: 'GLM-5.2 (1M)', billingType: 'subscription' }),
+      usage(),
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+    ) as UsageEvent;
+
+    expect(evt.fiveHourPercent).toBe(55);
+    expect(evt.sevenDayPercent).toBe(44);
+    expect(evt.extraUsageEnabled).toBe(true);
+    expect(evt.oauthConnected).toBe(true);
+  });
+
   it('keeps Anthropic 5h/7d quota for Claude model aliases', () => {
     const evt = buildUsageEvent(
       snapshot({ modelName: 'opus-4.6', billingType: 'subscription' }),

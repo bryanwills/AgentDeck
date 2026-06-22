@@ -915,6 +915,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     port,
     projectName: 'AgentDeck',
     httpServer,
+    isDaemon: true,
   });
 
   // Timeline

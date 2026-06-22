@@ -62,6 +62,13 @@ function isClaudeSubscriptionModel(modelName?: string | null): boolean {
 /**
  * Build a usage_update BridgeEvent from current state.
  * Single source of truth — used by both index.ts and daemon-server.ts.
+ *
+ * `aggregateSubscriptionQuota` — set by the daemon hub. The daemon has no single
+ * session model (its aggregate `modelName` is whatever agent is currently primary,
+ * e.g. OpenClaw/Codex), so gating the account-level Claude 5h/7d quota on the active
+ * model wrongly hides it on the Dashboard. The hub always exposes the quota when the
+ * Claude subscription data exists; per-session bridges keep the model gate so a
+ * standalone Codex session doesn't claim Claude quota.
  */
 export function buildUsageEvent(
   snapshot: StateSnapshot,
@@ -75,11 +82,12 @@ export function buildUsageEvent(
   modelCatalog?: ModelCatalogEntry[] | null,
   antigravityStatus?: AntigravityStatusInfo | null,
   preAdjusted?: boolean,
+  aggregateSubscriptionQuota?: boolean,
 ): UsageEvent {
   const subscriptionQuotaApplies = (
     apiUsage?.inferredBillingType === 'subscription'
       || billingType === 'subscription'
-  ) && isClaudeSubscriptionModel(snapshot.modelName);
+  ) && (aggregateSubscriptionQuota || isClaudeSubscriptionModel(snapshot.modelName));
 
   let fiveHourPercent: number | undefined;
   let fiveHourResetsAt: string | undefined;
