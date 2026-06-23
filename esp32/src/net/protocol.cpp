@@ -530,6 +530,14 @@ static void sendDeviceInfo() {
 namespace Protocol {
 
 void parseMessage(const char* json, size_t length) {
+    // Reject oversized frames before feeding the elastic JsonDocument — an
+    // unbounded sessions_list/timeline_history would otherwise grow the doc
+    // until it fragments/exhausts the heap on no-PSRAM boards.
+    if (length > PROTOCOL_MAX_MSG_BYTES) {
+        Serial.printf("[Protocol] frame too large: %u bytes (max %u) — dropped\n",
+                      (unsigned)length, (unsigned)PROTOCOL_MAX_MSG_BYTES);
+        return;
+    }
     doc.clear();
     DeserializationError err = deserializeJson(doc, json, length);
     if (err) {

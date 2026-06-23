@@ -15,6 +15,7 @@
 #include <freertos/semphr.h>
 #include "config.h"
 #include "../boards/board_config.h"
+#include "util/memory.h"
 #include "state/agent_state.h"
 #include "net/serial_client.h"
 #include "net/wifi_manager.h"
@@ -259,6 +260,18 @@ static void uiTask(void* param) {
         if (dt > 0.1f) dt = 0.1f;
 
 #if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+        // No-PSRAM boards: surface largest-free-block periodically so a slow
+        // fragmentation creep over a long session is visible on serial.
+        {
+            static uint32_t lastHeapLogMs = 0;
+            if (now - lastHeapLogMs >= 30000) {
+                lastHeapLogMs = now;
+                logHeap("tick");
+            }
+        }
+#endif
+
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
         // Poll button: falling edge (with debounce) rotates the screen 90°
         {
             bool btnNow = digitalRead(BOARD_PIN_BTN1);  // LOW = pressed
@@ -484,10 +497,14 @@ static void uiTask(void* param) {
             frames++;
             if (now - lastReport >= 2000 && frames > 0) {
                 float fps = frames * 1000.0f / (float)(now - lastReport);
-                Serial.printf("[PERF] %.1f fps | view %lu us | flush %lu us | frame %lu us\n",
+                // Largest internal free block alongside fps — a shrinking freeblk
+                // while fps holds steady is the fragmentation tell.
+                size_t freeblk = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+                Serial.printf("[PERF] %.1f fps | view %lu us | flush %lu us | frame %lu us | freeblk %uKB\n",
                               fps, (unsigned long)(accView / frames),
                               (unsigned long)(accFlush / frames),
-                              (unsigned long)((accView + accFlush) / frames));
+                              (unsigned long)((accView + accFlush) / frames),
+                              (unsigned)(freeblk / 1024));
                 accView = accFlush = frames = 0; lastReport = now;
             }
         }

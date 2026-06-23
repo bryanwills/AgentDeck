@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 // ===== Screen dimensions (set by build flags) =====
@@ -29,6 +30,17 @@ constexpr uint32_t WS_RECONNECT_MIN_MS  = 1000;
 constexpr uint32_t WS_RECONNECT_MAX_MS  = 8000;
 constexpr uint32_t WS_PING_INTERVAL_MS  = 15000;
 constexpr uint32_t WS_PONG_TIMEOUT_MS   = 30000;
+
+// Upper bound on an inbound bridge frame fed to the elastic ArduinoJson
+// JsonDocument. A frame past this is dropped before parsing so a malformed or
+// oversized sessions_list/timeline_history can't grow the doc until it
+// fragments/exhausts the heap. No-PSRAM boards (TTGO/C6/TC001) get a tight cap
+// matched to their small entry limits; PSRAM boards get headroom.
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147) || defined(BOARD_LED8X32)
+constexpr size_t PROTOCOL_MAX_MSG_BYTES = 8192;
+#else
+constexpr size_t PROTOCOL_MAX_MSG_BYTES = 65536;
+#endif
 
 // ===== LVGL =====
 #ifndef BOARD_LED8X32

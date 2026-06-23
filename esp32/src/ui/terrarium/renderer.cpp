@@ -11,6 +11,7 @@
 #include "particles.h"
 #include "bubbles.h"
 #include "../../state/agent_state.h"
+#include "../../util/memory.h"
 #include "../theme.h"
 #include "config.h"
 
@@ -312,6 +313,7 @@ void init(lv_obj_t* parent) {
 
     Serial.printf("[Terrarium] Canvas %dx%d allocated (%d KB PSRAM)\n",
                   canvasW, canvasH, canvasW * canvasH * 2 / 1024);
+    logHeap("post-terrarium");
 }
 
 void render(float dt) {

@@ -136,12 +136,15 @@ void jd9365_lcd::fillScreen(uint16_t color)
 
 void jd9365_lcd::te_on()
 {
-    esp_lcd_panel_io_tx_param(io_handle, 0x35,new (uint8_t[]){0x00}, 1);
+    // Stack-local param (was `new (uint8_t[]){0x00}` — a one-time heap leak).
+    const uint8_t param = 0x00;
+    esp_lcd_panel_io_tx_param(io_handle, 0x35, &param, 1);
 }
 
 void jd9365_lcd::te_off()
 {
-    esp_lcd_panel_io_tx_param(io_handle, 0x34,new (uint8_t[]){0x00}, 0);
+    const uint8_t param = 0x00;
+    esp_lcd_panel_io_tx_param(io_handle, 0x34, &param, 0);
 }
 
 uint16_t jd9365_lcd::width()

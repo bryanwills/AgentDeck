@@ -762,6 +762,11 @@ void displayInit() {
         360, 360, 0, 0, 0, 0,
         st77916_jc3636w518_init, sizeof(st77916_jc3636w518_init));
 
+    if (!gfx_bus || !gfx) {
+        Serial.println("[Display] OOM allocating ST77916 driver — aborting init");
+        return;
+    }
+
     if (!gfx->begin(40000000)) {  // 40MHz QSPI clock
         Serial.println("[Display] gfx->begin() FAILED!");
     } else {
@@ -802,6 +807,11 @@ void displayInit() {
         sizeof(axs15231b_320480_type1_init_operations));
     gfx_canvas = new Arduino_Canvas(320, 480, gfx_raw);
     gfx = gfx_canvas;  // All drawing goes through Canvas
+
+    if (!gfx_bus || !gfx_raw || !gfx_canvas) {
+        Serial.println("[Display] OOM allocating AXS15231B driver/canvas — aborting init");
+        return;
+    }
 
     if (!gfx->begin()) {  // Default 32MHz QSPI
         Serial.println("[Display] gfx->begin() FAILED!");
@@ -845,6 +855,10 @@ void displayInit() {
 
     // Initialize display
     jc_tft = new jd9365_lcd(BOARD_PIN_RST);
+    if (!jc_tft) {
+        Serial.println("[Display] OOM allocating JD9365 driver — aborting init");
+        return;
+    }
     jc_tft->begin();
 
     // Allocate software transposition buffer.
