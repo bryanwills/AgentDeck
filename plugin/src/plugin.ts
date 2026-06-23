@@ -80,6 +80,7 @@ import {
   getFocusedSession,
   setDaemonConnected,
   setDaemonStale,
+  updateSlotUsage,
 } from './actions/session-slot-button.js';
 import { timelineStore } from './timeline-store.js';
 
@@ -271,6 +272,10 @@ initSessionSlots((result) => {
     case 'esc':
       sendFocusedSessionCommand({ type: 'escape' });
       break;
+
+    case 'refresh-usage':
+      connMgr.send({ type: 'query_usage' });
+      break;
   }
 });
 
@@ -406,6 +411,8 @@ connMgr.on('usage_update', (ev: UsageEvent) => {
   };
   updateUsageModeData(usageData);
   updateUsageDialData(usageData);
+  // v4: feed the pinned list-view usage tiles (classic SD / no encoder).
+  updateSlotUsage(usageData);
 });
 
 connMgr.on('connection', (ev: ConnectionEvent) => {

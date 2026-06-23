@@ -125,7 +125,12 @@ export class DaemonClient extends EventEmitter {
     }
 
     try {
-      this.ws = new WebSocket(`ws://localhost:${this.port}`);
+      // Connect via 127.0.0.1, NOT localhost: the daemon binds IPv4-only
+      // (`httpServer.listen(port, '0.0.0.0')`), but macOS resolves `localhost`
+      // to IPv6 `::1` first. Ulanzi Studio's bundled Node lacks the Happy-Eyeballs
+      // IPv4 fallback that the Stream Deck runtime has, so `localhost` lands on
+      // `::1`, gets ECONNREFUSED, and the deck shows OFFLINE despite a live daemon.
+      this.ws = new WebSocket(`ws://127.0.0.1:${this.port}`);
       this.ws.on('open', () => {
         if (gen !== this.gen) return;
         this.connected = true;

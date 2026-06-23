@@ -12,7 +12,7 @@ import streamDeck, {
   WillAppearEvent,
   WillDisappearEvent,
 } from '@elgato/streamdeck';
-import { State } from '@agentdeck/shared';
+import { State, renderUsageButton } from '@agentdeck/shared';
 import type { SessionInfo, PromptOption } from '@agentdeck/shared';
 import { SessionSlotManager, type DeckLayout, type SessionSlotConfig } from '../session-slot-manager.js';
 import { computeCenterCluster } from '../center-slot.js';
@@ -85,6 +85,12 @@ export function updateSessionSlotSessions(sessions: SessionInfo[], gatewayAvaila
 
 export function setActiveSession(sessionId: string | null, port: number | null): void {
   manager.setActiveSession(sessionId, port);
+  if (manager.view === 'list') refreshAll();
+}
+
+/** Feed latest 5H/7D quota; re-render only the list view (where usage tiles live). */
+export function updateSlotUsage(usage: { fiveHourPercent?: number; sevenDayPercent?: number; usageStale?: boolean }): void {
+  manager.updateUsage(usage);
   if (manager.view === 'list') refreshAll();
 }
 
@@ -315,6 +321,9 @@ function renderSlotSvg(config: SessionSlotConfig, _slot: number): string {
     case 'next-page':
       return renderNextPageButton(config.label ?? '');
 
+    case 'usage':
+      return renderUsageButton(config.usageLabel ?? '', config.usagePercent ?? 0, config.usageColor ?? '#28a0b4', config.usageKnown !== false);
+
     case 'empty':
     default:
       return renderEmptySlot();
@@ -368,6 +377,9 @@ export class SessionSlotButtonAction extends SingletonAction {
       refreshAll();
       return;
     }
+
+    // 'refresh-usage' has no local view change — fall through to the bridge
+    // callback, which sends query_usage to pull fresh quota.
 
     if (result.action === 'exit-detail') {
       manager.exitDetailView();

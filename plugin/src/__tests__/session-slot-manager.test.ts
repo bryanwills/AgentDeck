@@ -9,6 +9,14 @@ const SD_PLUS_LAYOUT: DeckLayout = {
   family: 'streamdeckplus',
 };
 
+// Classic Stream Deck (15 keys, no encoder) — carries usage on the last 2 keys.
+const SD_CLASSIC_LAYOUT: DeckLayout = {
+  columns: 5,
+  rows: 3,
+  keyCount: 15,
+  family: 'streamdeck',
+};
+
 function makeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
   return {
     id: 'session-1',
@@ -256,5 +264,78 @@ describe('SessionSlotManager detail layout', () => {
     expect(manager.getSlotConfig(5, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 3 });
     expect(manager.getSlotConfig(6, SD_PLUS_LAYOUT)).toMatchObject({ type: 'next-page', label: '1/2' });
     expect(manager.getSlotConfig(7, SD_PLUS_LAYOUT)).toMatchObject({ type: 'esc', label: 'active' });
+  });
+});
+
+describe('SessionSlotManager list-view usage tiles', () => {
+  const fewSessions = (n: number) =>
+    Array.from({ length: n }, (_, i) => makeSession({ id: `s${i}`, port: 9121 + i, projectName: `p${i}` }));
+
+  it('pins 5H/7D to the last two keys of a classic Stream Deck', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17 });
+    manager.updateSessions(fewSessions(3), false);
+
+    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '7D', usagePercent: 17, usageKnown: true });
+    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '5H', usagePercent: 42, usageKnown: true });
+    // Sessions fill the front keys.
+    expect(manager.getSlotConfig(0, SD_CLASSIC_LAYOUT).type).toBe('session');
+  });
+
+  it('does NOT reserve usage on Stream Deck+ (encoder carries usage)', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17 });
+    manager.updateSessions(fewSessions(3), false);
+
+    for (let slot = 0; slot < 8; slot++) {
+      expect(manager.getSlotConfig(slot, SD_PLUS_LAYOUT).type).not.toBe('usage');
+    }
+  });
+
+  it('marks usage unknown when no quota was fed (draws "—" downstream)', () => {
+    const manager = new SessionSlotManager();
+    manager.updateSessions(fewSessions(1), false);
+    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageKnown: false });
+  });
+
+  it('fits 13 sessions on a classic deck without paging (15 keys − 2 usage)', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({ fiveHourPercent: 1, sevenDayPercent: 2 });
+    manager.updateSessions(fewSessions(13), false);
+
+    const types = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type);
+    expect(types.filter((t) => t === 'session')).toHaveLength(13);
+    expect(types.filter((t) => t === 'next-page')).toHaveLength(0);
+    expect(types.filter((t) => t === 'usage')).toHaveLength(2);
+  });
+
+  it('paginates over capacity: NEXT→ at slot 12, usage at 13/14', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({ fiveHourPercent: 1, sevenDayPercent: 2 });
+    manager.updateSessions(fewSessions(15), false); // > 13 cap → 12/page + NEXT
+
+    expect(manager.getSlotConfig(12, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'next-page', label: '1/2' });
+    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT).type).toBe('usage');
+    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT).type).toBe('usage');
+    const sessionCount = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type)
+      .filter((t) => t === 'session').length;
+    expect(sessionCount).toBe(12);
+  });
+
+  it('pressing a usage tile resolves to refresh-usage', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({ fiveHourPercent: 5, sevenDayPercent: 6 });
+    manager.updateSessions(fewSessions(2), false);
+    expect(manager.handleSlotPress(14, SD_CLASSIC_LAYOUT)).toEqual({ action: 'refresh-usage' });
+  });
+
+  it('shows usage tiles even with zero sessions', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({ fiveHourPercent: 5, sevenDayPercent: 6 });
+    manager.updateSessions([], false);
+    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT).type).toBe('usage');
+    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT).type).toBe('usage');
+    // Status cards still render on the front keys.
+    expect(manager.getSlotConfig(0, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'status', label: 'HUB READY' });
   });
 });

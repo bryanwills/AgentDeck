@@ -362,6 +362,13 @@ export interface DeckView {
   page?: number;
   animFrame?: number;
   animated?: boolean;
+  /**
+   * Opt-in: pin the last two list-view positions to 5H/7D subscription-usage
+   * tiles (the global quota gauges). Used by surfaces with no encoder LCD to
+   * carry usage (Ulanzi D200H, classic Stream Deck). Off by default so other
+   * consumers keep the full grid for sessions.
+   */
+  showUsage?: boolean;
 }
 
 const AGENT_RANK: Record<string, number> = { openclaw: 0, 'claude-code': 1, 'codex-cli': 2, 'codex-app': 2, codex: 2, opencode: 3 };
@@ -430,21 +437,46 @@ function buildList(
   out: Map<string, SessionDeckCell>,
 ): Map<string, SessionDeckCell> {
   const sessions = sortSessions(state.allSessions);
+
+  // Pin the bottom-right two keys to 5H/7D global usage gauges (opt-in). On the
+  // D200H these land just left of the native clock widget; on classic Stream
+  // Deck they replace the encoder LCD this surface lacks. `usageHere` maps a
+  // reserved position → its tile, so paging math below treats those keys as
+  // unavailable for sessions and pins them on EVERY page (usage is global).
+  const usageHere = new Map<string, SessionDeckCell>();
+  if (view.showUsage && slots.length >= 6) {
+    const known = state.usageKnown !== false;
+    const last = slots[slots.length - 1];
+    const prev = slots[slots.length - 2];
+    usageHere.set(prev, {
+      svg: renderUsageButton('5H', state.fiveHourPercent, '#28a0b4', known),
+      action: { kind: 'command', command: { type: 'query_usage' } },
+    });
+    usageHere.set(last, {
+      svg: renderUsageButton('7D', state.sevenDayPercent, '#2850a0', known),
+      action: { kind: 'command', command: { type: 'query_usage' } },
+    });
+  }
+  // Positions left for sessions / NEXT after carving out usage.
+  const freeSlots = slots.filter((pos) => !usageHere.has(pos));
+
   if (sessions.length === 0) {
-    slots.forEach((pos, i) => out.set(pos, {
+    freeSlots.forEach((pos, i) => out.set(pos, {
       svg: i === 0 ? renderInfoSlot('NO SESSION', 'waiting', 'activity', 'info') : renderEmptySlot(),
       action: null,
     }));
+    for (const [pos, cell] of usageHere) out.set(pos, cell);
     return out;
   }
-  const overflow = sessions.length > slots.length;
-  const sessionSlots = overflow ? slots.length - 1 : slots.length;
-  const pages = Math.max(1, Math.ceil(sessions.length / sessionSlots));
+
+  const overflow = sessions.length > freeSlots.length;
+  const sessionSlots = overflow ? freeSlots.length - 1 : freeSlots.length;
+  const pages = Math.max(1, Math.ceil(sessions.length / Math.max(1, sessionSlots)));
   const page = ((view.page ?? 0) % pages + pages) % pages;
   const pageSessions = sessions.slice(page * sessionSlots, page * sessionSlots + sessionSlots);
 
-  slots.forEach((pos, i) => {
-    if (overflow && i === slots.length - 1) {
+  freeSlots.forEach((pos, i) => {
+    if (overflow && i === freeSlots.length - 1) {
       out.set(pos, { svg: renderNextPageButton(`${page + 1}/${pages}`), action: { kind: 'page', delta: 1 } });
       return;
     }
@@ -458,6 +490,7 @@ function buildList(
       out.set(pos, { svg: renderEmptySlot(), action: null });
     }
   });
+  for (const [pos, cell] of usageHere) out.set(pos, cell);
   return out;
 }
 

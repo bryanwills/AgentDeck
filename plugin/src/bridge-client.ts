@@ -162,8 +162,12 @@ export class BridgeClient extends EventEmitter implements AgentLink {
     }
 
     try {
-      dlog('Bridge', `attemptConnect ws://localhost:${this._port} (gen=${gen})`);
-      this.ws = new WebSocket(`ws://localhost:${this._port}`);
+      // 127.0.0.1, NOT localhost: the daemon binds IPv4-only (0.0.0.0), but
+      // macOS resolves `localhost` to IPv6 `::1` first. `127.0.0.1` is the only
+      // address guaranteed to match the daemon's bind regardless of the host
+      // runtime's IPv6-fallback behavior.
+      dlog('Bridge', `attemptConnect ws://127.0.0.1:${this._port} (gen=${gen})`);
+      this.ws = new WebSocket(`ws://127.0.0.1:${this._port}`);
 
       this.ws.on('open', () => {
         if (gen !== this._connectGeneration) return;

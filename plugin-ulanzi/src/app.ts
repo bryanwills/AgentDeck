@@ -89,7 +89,9 @@ function ensureDrainer(): void {
 }
 
 function deckFor(animFrame: number, animated: boolean) {
-  return buildSessionDeck(store.toLayoutInput(), { ...view, animFrame, animated }, positions());
+  // showUsage pins the bottom-right two AgentDeck keys to 5H/7D gauges (just
+  // left of the D200H clock widget) — this surface has no encoder LCD for usage.
+  return buildSessionDeck(store.toLayoutInput(), { ...view, animFrame, animated, showUsage: true }, positions());
 }
 
 // Compact signature of everything the deck renders from — lets us skip the
@@ -99,8 +101,12 @@ function deckSignature(ev: Record<string, unknown>): string {
   const sessions = ((ev.allSessions as Array<Record<string, unknown>>) ?? [])
     .map((s) => `${s.id}:${s.state ?? ''}:${s.currentTool ?? ''}:${s.modelName ?? ''}`).join(',');
   const opts = ((ev.options as Array<{ label?: string }>) ?? []).map((o) => o.label ?? '').join('/');
+  // 5H/7D quota rides usage_update, not state_update — without it here a
+  // usage-only change would compare equal and the pinned gauges would never
+  // refresh (scheduleRender fires but renderAll early-returns on equal sig).
+  const usage = `${ev.fiveHourPercent ?? ''}:${ev.sevenDayPercent ?? ''}:${ev.usageKnown ?? ''}`;
   return [ev.state, ev.mode, ev.focusedSessionId ?? ev.sessionId ?? '', ev.requestId ?? '',
-    ev.promptType ?? '', ev.currentTool ?? '', opts, sessions].join('|');
+    ev.promptType ?? '', ev.currentTool ?? '', opts, usage, sessions].join('|');
 }
 let lastDeckSig = '';
 
@@ -217,7 +223,14 @@ $UD.onKeyUp((m: UlanziMessage) => flog('RAW', 'keyUp(ignored)', m.key));
 
 // ---- AgentDeck daemon side ----
 daemon.on('event', (ev) => { if (store.apply(ev)) scheduleRender(); });
-daemon.on('connected', () => { dinfo(TAG, 'daemon connected'); store.setConnected(true); scheduleRender(); });
+daemon.on('connected', () => {
+  dinfo(TAG, 'daemon connected');
+  store.setConnected(true);
+  // Pull fresh quota immediately so the pinned 5H/7D gauges aren't blank until
+  // the next session IDLE transition triggers a usage fetch on the daemon.
+  daemon.send({ type: 'query_usage' });
+  scheduleRender();
+});
 daemon.on('disconnected', () => { dlog(TAG, 'daemon disconnected'); store.setConnected(false); view = { mode: 'list', page: 0 }; scheduleRender(); });
 daemon.start();
 

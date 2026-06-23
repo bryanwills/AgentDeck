@@ -24,7 +24,7 @@ export interface PresetAction {
 }
 
 export interface SessionSlotConfig {
-  type: 'session' | 'back' | 'info' | 'status' | 'option' | 'esc' | 'stop' | 'next-page' | 'preset' | 'empty';
+  type: 'session' | 'back' | 'info' | 'status' | 'option' | 'esc' | 'stop' | 'next-page' | 'preset' | 'usage' | 'empty';
   session?: SessionInfo;
   option?: PromptOption;
   optionIndex?: number;
@@ -36,6 +36,11 @@ export interface SessionSlotConfig {
   preset?: PresetAction;
   /** For list view: is this the currently "active" (connected) session? */
   isActive?: boolean;
+  /** For type 'usage': 5H/7D quota gauge tile. */
+  usageLabel?: string;
+  usagePercent?: number;
+  usageColor?: string;
+  usageKnown?: boolean;
 }
 
 export interface DeckLayout {
@@ -120,8 +125,20 @@ function normalizeLayout(layout?: Partial<DeckLayout>): DeckLayout {
   return { columns, rows, keyCount, family: layout?.family ?? DEFAULT_LAYOUT.family };
 }
 
+/**
+ * How many bottom keys the list view pins to 5H/7D usage gauges. Classic Stream
+ * Deck (15 keys) and XL (32) carry usage here because they have no encoder LCD;
+ * Stream Deck+ (8 keys, family streamdeckplus) shows usage on its dial instead,
+ * and the Mini (4 keys) is too small to spare two keys.
+ */
+function usageReserveCount(layout: DeckLayout): number {
+  return layout.family !== 'streamdeckplus' && layout.keyCount >= 6 ? 2 : 0;
+}
+
+/** Session-fillable keys per page = grid minus pinned usage tiles, minus NEXT→ when paginating. */
 function listSessionsPerPage(layout: DeckLayout, totalSessions: number): number {
-  return totalSessions > layout.keyCount ? Math.max(1, layout.keyCount - 1) : layout.keyCount;
+  const cap = Math.max(1, layout.keyCount - usageReserveCount(layout));
+  return totalSessions > cap ? Math.max(1, cap - 1) : cap;
 }
 
 export class SessionSlotManager {
@@ -136,6 +153,12 @@ export class SessionSlotManager {
   private _activeSessionId: string | null = null;
   private _activeSessionPort: number | null = null;
   private _gatewayAvailable = false;
+
+  // Global subscription quota (rides usage_update), pinned to the list view's
+  // last two keys on decks without an encoder LCD. Defaults read as "unknown".
+  private _fiveHourPercent = 0;
+  private _sevenDayPercent = 0;
+  private _usageKnown = false;
 
   // Detail view state (from the focused session's bridge)
   private _detailState = State.DISCONNECTED;
@@ -243,6 +266,16 @@ export class SessionSlotManager {
     this._gatewayAvailable = available;
   }
 
+  /** Feed the latest 5H/7D subscription quota for the pinned list-view usage tiles. */
+  updateUsage(usage: { fiveHourPercent?: number; sevenDayPercent?: number; usageStale?: boolean }): void {
+    this._fiveHourPercent = usage.fiveHourPercent ?? 0;
+    this._sevenDayPercent = usage.sevenDayPercent ?? 0;
+    // Distinguish "0% used" from "no data" so the tile draws "—" instead of a
+    // confident empty gauge when the hub has no OAuth source or went stale.
+    this._usageKnown = usage.usageStale !== true
+      && (usage.fiveHourPercent != null || usage.sevenDayPercent != null);
+  }
+
   // ---- Detail view state updates ----
 
   updateDetailState(state: State, options: PromptOption[], tool?: string, toolInput?: string, question?: string, modelName?: string, mode?: string, effortLevel?: string): void {
@@ -310,7 +343,7 @@ export class SessionSlotManager {
 
   /** Handle button press. Returns action to take. */
   handleSlotPress(slot: number, layout?: DeckLayout): {
-    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'none';
+    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'refresh-usage' | 'none';
     sessionId?: string;
     sessionPort?: number;
     optionIndex?: number;
@@ -365,6 +398,9 @@ export class SessionSlotManager {
       case 'next-page':
         return { action: 'next-page' };
 
+      case 'usage':
+        return { action: 'refresh-usage' };
+
       default:
         return { action: 'none' };
     }
@@ -407,12 +443,13 @@ export class SessionSlotManager {
 
   private totalPages(layout: DeckLayout = DEFAULT_LAYOUT): number {
     const count = this._sessions.length;
-    if (count <= layout.keyCount) return 1;
+    const cap = Math.max(1, layout.keyCount - usageReserveCount(layout));
+    if (count <= cap) return 1;
     return Math.ceil(count / listSessionsPerPage(layout, count));
   }
 
   private needsPagination(layout: DeckLayout): boolean {
-    return this._sessions.length > layout.keyCount;
+    return this._sessions.length > Math.max(1, layout.keyCount - usageReserveCount(layout));
   }
 
   private isAwaitingDetailState(): boolean {
@@ -428,6 +465,18 @@ export class SessionSlotManager {
   }
 
   private getListSlotConfig(slot: number, layout: DeckLayout): SessionSlotConfig {
+    const usageReserve = usageReserveCount(layout);
+
+    // Pin 5H/7D quota gauges to the last two keys (every page; usage is global).
+    if (usageReserve === 2) {
+      if (slot === layout.keyCount - 1) {
+        return { type: 'usage', usageLabel: '7D', usagePercent: this._sevenDayPercent, usageColor: '#2850a0', usageKnown: this._usageKnown };
+      }
+      if (slot === layout.keyCount - 2) {
+        return { type: 'usage', usageLabel: '5H', usagePercent: this._fiveHourPercent, usageColor: '#28a0b4', usageKnown: this._usageKnown };
+      }
+    }
+
     if (this._sessions.length === 0) {
       if (slot === 0) {
         return {
@@ -462,15 +511,17 @@ export class SessionSlotManager {
     const needsPage = this.needsPagination(layout);
     const sessionsOnPage = listSessionsPerPage(layout, this._sessions.length);
 
-    // Last slot on page = NEXT→ when paginating
-    if (needsPage && slot === layout.keyCount - 1) {
+    // NEXT→ sits just before the pinned usage tiles (or the last key when no
+    // usage is reserved). Sessions fill slots 0..sessionsOnPage-1.
+    const nextSlot = layout.keyCount - 1 - usageReserve;
+    if (needsPage && slot === nextSlot) {
       return { type: 'next-page', label: `${this._currentPage + 1}/${this.totalPages(layout)}` };
     }
 
     const startIdx = this._currentPage * sessionsOnPage;
     const sessionIdx = startIdx + slot;
 
-    if (sessionIdx < this._sessions.length) {
+    if (slot < sessionsOnPage && sessionIdx < this._sessions.length) {
       const session = this._sessions[sessionIdx];
       return {
         type: 'session',
