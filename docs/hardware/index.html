@@ -158,7 +158,7 @@
     </table>
   </div>
   <p class="section-note">
-    <sup>1</sup> <strong>GAP</strong> = TC001 ⚠는 <em>샌드박스 제약이 아니라 구현 갭</em>. 다른 ESP32 보드와 동일한 serial/WiFi state-JSON으로 자기 UI를 렌더하며 serial entitlement로 이미 커버됨(테스트가 serial board로 보고). Swift 데몬에 <code>led8x32</code> 경로 미검증이라 CLI-tier. <strong>"ADB" 표기는 전부 legacy/dead code</strong> — <code>AdbDeviceClass.ulanziTc001</code> 와이어 클래스 producer가 없어 ADB 분기는 죽어 있고 라이브 경로는 serial. 관련 표기는 정정됨(dead-code 제거는 후속). HW 검증 후 ✅ 승격 가능.
+    <sup>1</sup> <strong>GAP</strong> = TC001 ⚠는 <em>샌드박스 제약이 아니라 구현 갭</em>. 다른 ESP32 보드와 동일한 serial/WiFi state-JSON으로 자기 UI를 렌더하며 serial entitlement로 이미 커버됨(테스트가 serial board로 보고). Swift 데몬에 <code>led8x32</code> 경로 미검증이라 CLI-tier. <strong>과거 "ADB" 표기는 legacy/dead code 였고 2026-06-25 제거됨</strong> — <code>AdbDeviceClass.ulanziTc001</code> 와이어 클래스 producer가 없어 ADB 분기는 죽어 있었고 라이브 경로는 serial. <code>AdbModule.classifyDevice</code> 분기·enum 케이스·UI 룩업 모두 삭제(라이브 row는 USB-serial 섹션). 남은 ⚠는 Swift <code>led8x32</code> 경로 HW 검증만 후속 — 검증 후 ✅ 승격 가능.
     <sup>2</sup> Android 앱은 mDNS LAN(iOS와 동일) + ADB localhost 양쪽 지원. USB-테더 <strong>e-ink</strong>는 Mac 앱이 <code>adb reverse</code>를 못 띄워 CLI 전용(진짜 제약). 같은 LAN의 <strong>태블릿</strong>은 mDNS로 App Store Mac 데몬에 직접 접속 가능(<strong>LAN</strong>).
     <sup>3</sup> Elgato Stream Deck 앱 별도 설치(플러그인 호스트). 표준 15키(<code>agentdeck-sd</code>, DeviceType 0)·SD+(<code>agentdeck-sdplus</code>, DeviceType 7)는 동일 플러그인의 두 프로파일이며 mini(1)·XL(2)도 <code>familyForDeviceType()</code>로 그리드 자동 산출. · <strong>포트는 가변</strong> — ESP32는 <code>device_info_request</code>로 식별.
     <br><strong>*</strong> SSE 풀 스트리밍은 <strong>Node 브리지</strong>(<code>bridge/src/hook-server.ts</code>, <code>broadcastSse</code>) 한정. App Store macOS <strong>Swift 데몬</strong>(<code>DaemonServer.swift</code>)의 <code>/sse</code>는 <code>event: connected</code> 1회 후 끊는 <strong>스텁</strong>이라 스트리밍 안 함 — App Store 빌드의 라이브 SSE 대시보드는 외부(Node) 데몬 필요. 실 소비자는 리포 내 <code>/status</code>·<code>/pixoo</code> HTML 대시보드(인라인 EventSource).
@@ -319,7 +319,7 @@
     <table>
       <thead><tr><th>항목</th><th>표기</th><th class="wrap-cell">실제 사유</th><th class="wrap-cell">최선 여부 / 개선안</th></tr></thead>
       <tbody>
-        <tr><td class="device-name">TC001</td><td><span class="badge b-warn">GAP</span></td><td class="wrap-cell">구현 갭. serial entitlement로 커버되는 self-rendering ESP32(테스트가 serial board로 보고). "ADB" 표기는 producer 없는 <strong>dead code</strong>(<code>AdbDeviceClass.ulanziTc001</code>)</td><td class="wrap-cell">표기 정정 <strong>완료</strong>(matrix·Swift 주석). 후속: dead-code 제거 + HW 검증 후 ✅ 승격</td></tr>
+        <tr><td class="device-name">TC001</td><td><span class="badge b-warn">GAP</span></td><td class="wrap-cell">구현 갭. serial entitlement로 커버되는 self-rendering ESP32(테스트가 serial board로 보고). 과거 "ADB" 표기는 producer 없는 dead code(<code>AdbDeviceClass.ulanziTc001</code>) 였음</td><td class="wrap-cell">표기 정정 + <strong>dead-code 제거 완료</strong>(2026-06-25, matrix·Swift 5곳). 후속: HW 검증 후 ✅ 승격</td></tr>
         <tr><td class="device-name">Android 태블릿</td><td><span class="badge b-warn">LAN</span></td><td class="wrap-cell">과분류. mDNS로 App Store Mac 데몬 직접 접속이 코드상 가능</td><td class="wrap-cell"><strong>개선 권장</strong>: e-ink(USB/adb)와 태블릿(LAN/mDNS) tier 분리</td></tr>
         <tr><td class="device-name">Android e-ink</td><td><span class="badge b-no">CLI</span></td><td class="wrap-cell"><strong>진짜 제약</strong>. USB-테더 + <code>adb reverse</code> 서브프로세스 필요 → sandbox 불가</td><td class="wrap-cell">현 구조 합리적(e-ink WiFi 불안정·USB 전제). 변경 불요</td></tr>
         <tr><td class="device-name">Timebox / iDotMatrix</td><td><span class="badge b-yes">YES</span></td><td class="wrap-cell">CoreBluetooth 네이티브</td><td class="wrap-cell">최선. 단 <strong>데몬당 BLE 단일 연결</strong> — 동시 1대만. (구 Timebox-SPP serial 변종은 제거됨)</td></tr>
@@ -328,7 +328,7 @@
       </tbody>
     </table>
   </div>
-  <p class="section-note">요약: 진짜 sandbox 제약은 <strong>e-ink(adb)</strong> 경로뿐이며 CLI 대체 경로가 정당하다. <strong>TC001·Android 태블릿의 ❌ 는 구현/분류 갭</strong>이라 ⚠로 정정했고, <strong>SSE ✅* 는 Swift 데몬 SSE 미구현이라는 구현 갭</strong>(샌드박스 제약 아님)이라 별도 표기 — upstream <code>appstore-feature-matrix.md</code>·<code>AdbModule.swift</code>·<code>AgentState.swift</code>·<code>TopologyRail.swift</code> 주석의 ADB 오기도 함께 정정함(legacy dead-code 제거는 후속).</p>
+  <p class="section-note">요약: 진짜 sandbox 제약은 <strong>e-ink(adb)</strong> 경로뿐이며 CLI 대체 경로가 정당하다. <strong>TC001·Android 태블릿의 ❌ 는 구현/분류 갭</strong>이라 ⚠로 정정했고, <strong>SSE ✅* 는 Swift 데몬 SSE 미구현이라는 구현 갭</strong>(샌드박스 제약 아님)이라 별도 표기 — upstream <code>appstore-feature-matrix.md</code>·<code>AdbModule.swift</code>·<code>AgentState.swift</code>·<code>TopologyRail.swift</code> 의 ADB 오기를 정정하고 <strong>legacy dead-code 는 2026-06-25 제거 완료</strong>(TC001 의 ✅ 승격만 HW 검증 후속).</p>
 
   <footer>
     <ul>

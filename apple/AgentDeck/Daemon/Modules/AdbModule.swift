@@ -9,10 +9,9 @@
 //
 // NOTE: Ulanzi TC001 is NOT an ADB device — it is an ESP32 board (env
 // `led8x32`) that connects over USB serial / WiFi WS like the other ESP32
-// displays and surfaces through the serial pipeline. The `AdbDeviceClass
-// .ulanziTc001` case + `TopologyRail.pixelDisplaySection` ADB path are legacy
-// dead code (no producer emits the `ulanzi.tc001` wire class). Remove on a
-// future cleanup; do not reintroduce TC001 into the ADB tier.
+// displays and surfaces through the serial pipeline (`esp32DisplayName`). The
+// legacy `AdbDeviceClass.ulanziTc001` case + `TopologyRail` ADB lookups were
+// removed on 2026-06-25; do not reintroduce TC001 into the ADB tier.
 
 import Foundation
 
@@ -60,8 +59,6 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
         model: String?
     ) -> AdbDeviceClass {
         let m = (manufacturer ?? "").lowercased()
-        let p = (model ?? "").lowercased()
-        if m.contains("ulanzi") || p.contains("tc001") { return .ulanziTc001 }
         if m.contains("ridi") { return .eInkCrema }
         if m.contains("onyx") { return .eInkPantone }
         if m.contains("rakuten") || m.contains("kobo") { return .eInkKobo }

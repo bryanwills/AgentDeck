@@ -39,7 +39,7 @@
 | **ESP32 Wi-Fi 프로비저닝** | ✅ | ✅ | ESP32 Display | 직접 serial write, subprocess 없음 |
 | **ESP32 firmware flash** | ❌ | ✅ | ESP32 Display | `esptool.py` 필요 |
 | **TRMNL e-ink (BYOS)** | ✅ | ✅ | WiFi HTTP (pull) | entitlement 불필요(`com.apple.security.network.server` 로 커버, Pixoo 와 동일 LAN HTTP 선례). 패널이 `/api/setup`·`/api/display` 를 폴링하면 **MAC 무관 auto-enroll** 후 device-reported Width/Height 로 렌더한 **1-bit PNG** 를 풀. Swift 경로: `Trmnl{Module,ImageRenderer,Settings}.swift` — 전송은 기존 `HTTPServer`(NWListener), 렌더는 **CoreGraphics + CoreText**(resvg/Node 불필요), PNG 인코딩은 Foundation zlib. **서브프로세스 0**, verify-appstore-archive 통과. enrollment/telemetry 는 in-memory(설정파일 write 없음) |
-| **Ulanzi TC001** (8×32 LED matrix) | ⚠️ | ✅ | ESP32 LED (serial/WiFi) | **ADB 아님.** `led8x32` 펌웨어가 다른 ESP32 보드처럼 USB serial / WiFi WS 로 붙어 state-JSON 을 자기 렌더 (`com.apple.security.device.serial` 커버, tui-dashboard 테스트가 serial board 로 보고). App Store ⚠️ 는 Swift 데몬의 led8x32 경로 미검증인 **구현 갭**이지 sandbox 제약 아님 — HW 검증 후 ✅ 승격 가능. 과거 ADB-classified 경로(`AdbDeviceClass.ulanziTc001` + `TopologyRail.pixelDisplaySection`)는 **producer 없는 dead code** |
+| **Ulanzi TC001** (8×32 LED matrix) | ⚠️ | ✅ | ESP32 LED (serial/WiFi) | **ADB 아님.** `led8x32` 펌웨어가 다른 ESP32 보드처럼 USB serial / WiFi WS 로 붙어 state-JSON 을 자기 렌더 (`com.apple.security.device.serial` 커버, tui-dashboard 테스트가 serial board 로 보고). App Store ⚠️ 는 Swift 데몬의 led8x32 경로 미검증인 **구현 갭**이지 sandbox 제약 아님 — HW 검증 후 ✅ 승격 가능. 과거 ADB-classified 경로(`AdbDeviceClass.ulanziTc001` + `TopologyRail.pixelDisplaySection`)는 producer 없는 dead code 였고 **2026-06-25 제거됨** |
 | **Android e-ink** (CremaS / Pantone / Kobo) | ❌ | ✅ | Android | ADB 필요 |
 | **Android 태블릿** (Lenovo 등) | ❌ | ✅ | Android | ADB 필요 |
 

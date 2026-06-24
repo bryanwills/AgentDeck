@@ -559,38 +559,21 @@ struct TopologyRail: View {
         }
     }
 
-    /// LED matrix / pixel displays — Pixoo (Wi-Fi HTTP) and Ulanzi TC001.
-    /// Grouped together because they're both "pixel art" outputs, not
-    /// general-purpose displays.
+    /// LED matrix / pixel displays — Pixoo (Wi-Fi HTTP).
     ///
-    /// NOTE: TC001 is an ESP32 board (USB serial / WiFi WS), NOT ADB. The
-    /// `health.adb` / `AdbDeviceClass.ulanziTc001` lookup below is legacy dead
-    /// code — no producer emits that wire class, so this branch never renders;
-    /// the live TC001 row comes through the USB-serial section instead. Kept
-    /// pending removal; do not treat TC001 as an ADB device.
+    /// NOTE: the Ulanzi TC001 is NOT here — it is an ESP32 board (USB serial /
+    /// WiFi WS) and renders in the USB-serial section via `esp32DisplayName`.
+    /// The legacy `AdbDeviceClass.ulanziTc001` lookup was removed on 2026-06-25.
     @ViewBuilder
     private func pixelDisplaySection(health: ModuleHealthState) -> some View {
-        let pixooActive = (health.pixoo?.configuredDeviceCount ?? 0) > 0
-        let tc001Devices = health.adb?.classifiedDevices.filter {
-            $0.deviceClass == AdbDeviceClass.ulanziTc001.rawValue
-        } ?? []
-        if pixooActive || !tc001Devices.isEmpty {
+        if let pixoo = health.pixoo, pixoo.configuredDeviceCount > 0 {
             VStack(alignment: .leading, spacing: 3) {
                 downstreamSubheader("Pixel displays")
-                if let pixoo = health.pixoo, pixoo.configuredDeviceCount > 0 {
-                    ForEach(pixoo.devices, id: \.ip) { dev in
-                        DeviceRailRow(
-                            name: "Pixoo",
-                            status: pixooStatus(for: dev, hasFrame: pixoo.hasFrame),
-                            detail: pixooDetail(for: dev, hasFrame: pixoo.hasFrame)
-                        )
-                    }
-                }
-                ForEach(tc001Devices, id: \.serial) { dev in
+                ForEach(pixoo.devices, id: \.ip) { dev in
                     DeviceRailRow(
-                        name: "TC001",
-                        status: .ok,
-                        detail: dev.model.map { "\($0) · \(dev.serial)" } ?? dev.serial
+                        name: "Pixoo",
+                        status: pixooStatus(for: dev, hasFrame: pixoo.hasFrame),
+                        detail: pixooDetail(for: dev, hasFrame: pixoo.hasFrame)
                     )
                 }
             }

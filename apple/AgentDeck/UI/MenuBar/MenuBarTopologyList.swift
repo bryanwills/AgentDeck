@@ -198,24 +198,15 @@ struct MenuBarTopologyList: View {
                                 ?? (d.usbEntitlementPresent ? "Disconnected" : "No USB entitlement"))
                     )
                 }
-                // Pixel displays — Pixoo + Ulanzi TC001 (same family).
+                // Pixel displays — Pixoo (Wi-Fi HTTP). The Ulanzi TC001 renders
+                // in the USB-serial section below, not here — it is an ESP32
+                // board, not an ADB device (legacy lookup removed 2026-06-25).
                 if let pixoo = health.pixoo, pixoo.configuredDeviceCount > 0 {
                     ForEach(pixoo.devices, id: \.ip) { dev in
                         RailRow(
                             status: pixooStatus(for: dev, hasFrame: pixoo.hasFrame),
                             name: "Pixoo",
                             subtitle: pixooDetail(for: dev, hasFrame: pixoo.hasFrame)
-                        )
-                    }
-                }
-                if let adb = health.adb {
-                    ForEach(adb.classifiedDevices.filter {
-                        $0.deviceClass == AdbDeviceClass.ulanziTc001.rawValue
-                    }, id: \.serial) { dev in
-                        RailRow(
-                            status: .ok,
-                            name: "TC001",
-                            subtitle: dev.model ?? dev.serial
                         )
                     }
                 }

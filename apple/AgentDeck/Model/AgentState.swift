@@ -256,13 +256,13 @@ struct ClassifiedDevice: Sendable, Hashable {
 /// - `.eInkCrema` / `.eInkPantone` / `.eInkKobo`: e-ink devices that need
 ///   slow, low-contrast UI and avoid animation. Wrong refresh strategy =
 ///   ghosting + flicker.
-/// - `.ulanziTc001`: LEGACY/DEAD — the Ulanzi TC001 8×32 LED matrix is an
-///   ESP32 board (env `led8x32`) driven over USB serial / WiFi WS, NOT an ADB
-///   device. No producer emits the `"ulanzi.tc001"` wire class anymore; the
-///   board now surfaces through the serial pipeline (`esp32DisplayName`).
-///   Kept only so old wire data round-trips; safe to remove on cleanup.
 /// - `.androidTablet`: everything else (Lenovo, dev phones, generic).
 ///   Full-colour UI, normal refresh.
+///
+/// The Ulanzi TC001 8×32 LED matrix is intentionally absent: it is an ESP32
+/// board (env `led8x32`) driven over USB serial / WiFi WS and surfaces through
+/// the serial pipeline (`esp32DisplayName`), never the ADB tier. The legacy
+/// `.ulanziTc001` case was removed on 2026-06-25.
 ///
 /// Not gated by `#if os(macOS)` because the iOS companion's topology view
 /// consumes the same wire format.
@@ -270,7 +270,6 @@ enum AdbDeviceClass: String, Sendable {
     case eInkCrema = "e-ink.crema"
     case eInkPantone = "e-ink.pantone"
     case eInkKobo = "e-ink.kobo"
-    case ulanziTc001 = "ulanzi.tc001"
     case androidTablet = "android.tablet"
 }
 
