@@ -9,20 +9,23 @@ import urllib.request
 import urllib.error
 import io
 import argparse
-import json
 from PIL import Image as PilImage, ImageEnhance
 from idotmatrix import ConnectionManager
 from idotmatrix.modules.image import Image as IdmImage
 from idotmatrix.modules.common import Common as IdmCommon
 
-# Default settings
-DEFAULT_URL = "http://127.0.0.1:9120"
-POLL_INTERVAL = 1.5  # 1.5 seconds interval (balanced for BLE bandwidth)
+# Shared HTTP/dim plumbing with the Timebox client. We run from bridge/src/idotmatrix/,
+# so add the sibling pysync/ dir before importing the common module.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pysync"))
+from matrix_sync_common import (  # noqa: E402
+    DEFAULT_URL,
+    POLL_INTERVAL,
+    BRIDGE_GONE_EXIT_SEC,
+    fetch_display_state as _fetch_display_state_sync,
+    resolve_display_brightness as _resolve_display_brightness_common,
+)
+
 OFFLINE_HASH = "offline"
-# If the bridge stays unreachable this long, the daemon that spawned us is gone
-# (crash / SIGKILL / sleep-kill / launchd) — exit cleanly after painting OFFLINE
-# instead of looping forever as an orphan that holds the BLE link hostage.
-BRIDGE_GONE_EXIT_SEC = 30.0
 
 async def fetch_frame(url: str) -> bytes:
     """Fetch the current 32x32 BMP frame from the AgentDeck bridge."""
@@ -37,38 +40,16 @@ async def fetch_frame(url: str) -> bytes:
     return await loop.run_in_executor(None, _fetch)
 
 async def fetch_display_state(url: str):
-    """Fetch host display dim state from the AgentDeck daemon, if available."""
-    endpoint = f"{url.rstrip('/')}/display-state"
-
+    """Fetch host display dim state from the daemon without blocking the loop."""
     loop = asyncio.get_running_loop()
-    def _fetch():
-        with urllib.request.urlopen(endpoint, timeout=1.0) as response:
-            return json.loads(response.read().decode("utf-8"))
-
-    return await loop.run_in_executor(None, _fetch)
+    return await loop.run_in_executor(None, _fetch_display_state_sync, url)
 
 def resolve_display_brightness(display_state, normal_brightness: int) -> tuple[int, bool, str]:
-    """Return (hardware brightness, dimmed, signature) for the current host state."""
-    if not isinstance(display_state, dict):
-        return normal_brightness, False, f"on|true|off|10|{normal_brightness}"
-
-    display_on = bool(display_state.get("displayOn", True))
-    dim = display_state.get("dim") if isinstance(display_state.get("dim"), dict) else {}
-    dim_enabled = dim.get("enabled", True)
-    if not isinstance(dim_enabled, bool):
-        dim_enabled = True
-    dim_mode = "min" if dim.get("mode") == "min" else "off"
-    try:
-        dim_level = int(dim.get("level", 10))
-    except (TypeError, ValueError):
-        dim_level = 10
-    dim_level = max(5, min(100, dim_level))
-    signature = f"{display_on}|{dim_enabled}|{dim_mode}|{dim_level}|{normal_brightness}"
-
-    if display_on or not dim_enabled:
-        return normal_brightness, False, signature
-    # iDotMatrix firmware accepts 5-100 only; use 5% as the practical off floor.
-    return (dim_level if dim_mode == "min" else 5), True, signature
+    """Return (hardware brightness, dimmed, signature) for the current host state.
+    iDotMatrix firmware accepts 5-100 only; 5% is the practical off floor."""
+    return _resolve_display_brightness_common(
+        display_state, normal_brightness, off_floor=5, level_floor=5
+    )
 
 def make_offline_image() -> PilImage.Image:
     """Create a small local OFFLINE placeholder for bridge outages."""
@@ -119,7 +100,9 @@ async def _interruptible_sleep(stop_event: asyncio.Event, secs: float) -> None:
     except asyncio.TimeoutError:
         pass
 
-async def run_sync(address: str, url: str, brightness: int = 100, boost: float = 1.5):
+# iDotMatrix software brightness boost canonical = 1.6 — keep in sync:
+# idotmatrix-daemon-sync.ts (--boost), sync.py (this default), IDotMatrixModule.swift.
+async def run_sync(address: str, url: str, brightness: int = 100, boost: float = 1.6):
     print(f"Initializing iDotMatrix Synchronization...")
     print(f"Target Device BLE Address: {address}")
     print(f"AgentDeck Bridge API URL: {url}")

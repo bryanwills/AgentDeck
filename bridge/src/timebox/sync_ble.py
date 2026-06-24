@@ -15,7 +15,6 @@ import argparse
 import asyncio
 import hashlib
 import io
-import json
 import os
 import signal
 import sys
@@ -25,13 +24,18 @@ from typing import Iterable
 
 from PIL import Image as PilImage, ImageEnhance
 
-DEFAULT_URL = "http://127.0.0.1:9120"
-POLL_INTERVAL = 1.5
+# Shared HTTP/dim plumbing with the iDotMatrix client. We run from bridge/src/timebox/,
+# so add the sibling pysync/ dir before importing the common module.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pysync"))
+from matrix_sync_common import (  # noqa: E402
+    DEFAULT_URL,
+    POLL_INTERVAL,
+    BRIDGE_GONE_EXIT_SEC,
+    fetch_display_state,
+    resolve_display_brightness as _resolve_display_brightness_common,
+)
+
 RECONNECT_DELAY = 3.0
-# If the bridge stays unreachable this long, the daemon that spawned us is gone
-# (crash / SIGKILL / sleep-kill / launchd) — exit cleanly after blanking the
-# panel instead of looping forever as an orphan holding the BLE link hostage.
-BRIDGE_GONE_EXIT_SEC = 30.0
 
 TIMEBOX_W = 11
 TIMEBOX_H = 11
@@ -121,42 +125,16 @@ def encode_image_bright(img: PilImage.Image, brightness: int, gamma: float, sat:
     return bytes(out)
 
 
-def fetch_display_state(url: str):
-    """Fetch host display dim state from the AgentDeck daemon, if available."""
-    endpoint = f"{url.rstrip('/')}/display-state"
-    with urllib.request.urlopen(endpoint, timeout=1.0) as response:
-        return json.loads(response.read().decode("utf-8"))
-
-
 def resolve_display_brightness(display_state, normal_brightness: int):
     """Return (effective software brightness, dimmed, signature) for the host state.
 
-    The Timebox Mini has no hardware brightness command — brightness is baked into
-    the encoded frame by `encode_image_bright` (0 yields a blank frame). So when the
-    host display sleeps with dim 'off' we drop to 0 (a truly blank sleep frame); with
-    dim 'min' we drop to the configured dim level. The signature lets the caller
-    detect host-state transitions and force a re-encode/re-push at the new brightness.
+    The Timebox Mini has no hardware brightness command — brightness is baked into the
+    encoded frame by `encode_image_bright` (0 yields a blank frame). So the off floor is
+    0 (a truly blank sleep frame) and the dim 'level' clamps down to 0 as well.
     """
-    if not isinstance(display_state, dict):
-        return normal_brightness, False, f"on|true|off|10|{normal_brightness}"
-
-    display_on = bool(display_state.get("displayOn", True))
-    dim = display_state.get("dim") if isinstance(display_state.get("dim"), dict) else {}
-    dim_enabled = dim.get("enabled", True)
-    if not isinstance(dim_enabled, bool):
-        dim_enabled = True
-    dim_mode = "min" if dim.get("mode") == "min" else "off"
-    try:
-        dim_level = int(dim.get("level", 10))
-    except (TypeError, ValueError):
-        dim_level = 10
-    dim_level = max(0, min(100, dim_level))
-    signature = f"{display_on}|{dim_enabled}|{dim_mode}|{dim_level}|{normal_brightness}"
-
-    if display_on or not dim_enabled:
-        return normal_brightness, False, signature
-    # Display off + dim enabled: 'off' => fully blank (0); 'min' => dim level.
-    return (dim_level if dim_mode == "min" else 0), True, signature
+    return _resolve_display_brightness_common(
+        display_state, normal_brightness, off_floor=0, level_floor=0
+    )
 
 
 async def write_packet(client, packet: bytes) -> None:

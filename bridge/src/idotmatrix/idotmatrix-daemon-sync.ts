@@ -85,6 +85,8 @@ function spawnSync(venvPython: string, syncScript: string, httpPort: number): vo
   startedAt = Date.now();
   const proc = spawn(
     venvPython,
+    // iDotMatrix software brightness boost canonical = 1.6 — keep in sync:
+    // sync.py (run_sync boost default), IDotMatrixModule.swift (boostBrightnessContrast).
     [syncScript, '-a', addr, '-u', url, '-b', String(brightness), '--boost', '1.6'],
     { stdio: 'ignore' }, // long-lived daemon; don't let sync.py's debug flood daemon stdout
   );

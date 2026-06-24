@@ -233,7 +233,9 @@ actor IDotMatrixModule: DeviceModule {
         var rgb32 = Self.downscale64to32([UInt8](rgb64))
         // Software brightness/contrast boost (mirrors the reference sync client's
         // ImageEnhance.Brightness → Contrast); without it the panel reads dim.
-        rgb32 = Self.boostBrightnessContrast(rgb32, brightness: 1.3, contrast: 1.2)
+        // Canonical brightness = 1.6 — keep in sync: idotmatrix-daemon-sync.ts
+        // (--boost), sync.py (run_sync boost default), IDotMatrixModule.swift.
+        rgb32 = Self.boostBrightnessContrast(rgb32, brightness: 1.6, contrast: 1.2)
         if rgb32 == lastPushedRGB { return }
         guard let png = Self.rgb32ToPNG(rgb32) else { return }
 
