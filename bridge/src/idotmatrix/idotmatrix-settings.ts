@@ -56,3 +56,12 @@ export function removeIDotMatrixDevice(address: string): boolean {
   saveIDotMatrixDevices(filtered);
   return true;
 }
+
+/**
+ * Whether the daemon may BLE-scan for an iDotMatrix panel when none is
+ * configured. Defaults to true (zero-config plug-and-play); set
+ * `idotmatrixAutoDiscover: false` in settings.json to opt out.
+ */
+export function isIDotMatrixAutoDiscoverEnabled(): boolean {
+  return readSettings().idotmatrixAutoDiscover !== false;
+}

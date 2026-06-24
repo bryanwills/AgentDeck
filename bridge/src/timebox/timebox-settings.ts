@@ -81,3 +81,12 @@ export function removeTimeboxDevice(id: string): boolean {
   saveTimeboxDevices(filtered);
   return true;
 }
+
+/**
+ * Whether the daemon may BLE-scan for a Timebox Mini when none is configured.
+ * Defaults to true (zero-config plug-and-play); set `timeboxAutoDiscover: false`
+ * in settings.json to opt out.
+ */
+export function isTimeboxAutoDiscoverEnabled(): boolean {
+  return readSettings().timeboxAutoDiscover !== false;
+}

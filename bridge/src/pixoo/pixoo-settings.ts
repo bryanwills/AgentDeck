@@ -50,3 +50,13 @@ export function removeDevice(ip: string): boolean {
   savePixooDevices(filtered);
   return true;
 }
+
+/**
+ * Whether the daemon may auto-discover Pixoo devices on the LAN when none are
+ * configured. Defaults to true (zero-config plug-and-play); set
+ * `pixooAutoDiscover: false` in settings.json to opt out.
+ */
+export function isPixooAutoDiscoverEnabled(): boolean {
+  const settings = readSettings();
+  return settings.pixooAutoDiscover !== false;
+}

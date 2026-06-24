@@ -423,7 +423,9 @@ export interface WifiProvisionMessage {
 
 export interface DeviceInfoMessage {
   type: 'device_info';
-  board: string;         // "86box" | "round_amoled" | "ips_35" | "ips_10"
+  // "86box" | "round_amoled" | "ips_35" | "ips_10" | "ttgo_t_display"
+  // | "esp32_c6_147" | "ulanzi_tc001" (wire strings — see esp32/src/net/protocol.cpp)
+  board: string;
   version: string;       // firmware version
   wifiConfigured: boolean;
   wifiConnected: boolean;

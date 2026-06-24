@@ -42,6 +42,7 @@ import { fetchUsageFromApi, hasOAuthToken, resetConsecutiveFailures, type ApiUsa
 import { isLocalConnection, validateToken } from './auth.js';
 import { getLastFrame, renderPreviewFrame, onFrameRendered, offFrameRendered } from './pixoo/pixoo-bridge.js';
 import { startIDotMatrixSync, stopIDotMatrixSync } from './idotmatrix/idotmatrix-daemon-sync.js';
+import { autoDiscoverIDotMatrix } from './idotmatrix/idotmatrix-discover.js';
 import { handlePixooWake } from './pixoo/pixoo-client.js';
 import { triggerMdnsRecovery } from './mdns.js';
 import { rgbToBmp, pixooLiveHtml } from './hook-server.js';
@@ -1014,6 +1015,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // panel run with only the CLI daemon up (no Swift app, no manual `idotmatrix
   // sync`). No-op when nothing is configured or the Python venv is absent.
   startIDotMatrixSync(port);
+
+  // Zero-config: when nothing is configured, run a background BLE scan and, if
+  // a panel is found, add it + (re)start sync. Non-blocking so the ~5s scan
+  // doesn't delay daemon startup; skipped entirely once a device is configured.
+  void autoDiscoverIDotMatrix().then((added) => {
+    if (added > 0) startIDotMatrixSync(port);
+  });
 
   // Serial module state provider (heartbeat needs cached state)
   const serialModule = startedModules.find(m => m.name === 'serial') as SerialModule | undefined;

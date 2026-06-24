@@ -187,6 +187,13 @@ actor PixooModule: DeviceModule {
             }
         }
 
+        // Zero-config: Pixoo doesn't advertise over mDNS, so when nothing is
+        // configured run a one-shot bounded LAN subnet sweep in the background
+        // (no permission prompt — plain local HTTP, App-Store-safe). Found
+        // devices are persisted and picked up by the settings reload. Skipped
+        // once any device is configured.
+        Task { [weak self] in await self?.autoDiscoverIfNeeded() }
+
         refreshShadow()
     }
 
@@ -795,6 +802,140 @@ actor PixooModule: DeviceModule {
             guard !ip.isEmpty else { return nil }
             return PixooDevice(ip: ip, name: d["name"] as? String, brightness: d["brightness"] as? Int)
         }
+    }
+
+    // MARK: - Auto-discovery (LAN subnet sweep)
+    //
+    // Mirrors the Node bridge's pixoo-discover.ts. Pixoo has no mDNS, so we probe
+    // each host on the local /24 with `Channel/GetAllConf` and treat a reply that
+    // carries `Brightness` as a Pixoo. Only local HTTP (no external service, no
+    // subprocess, no permission prompt), so this is App-Store-safe.
+
+    /// `pixooAutoDiscover` gate — defaults to true; set false in settings to opt out.
+    private static func isAutoDiscoverEnabled() -> Bool {
+        let box = PixooSettingsDataBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        settingsReadQueue.async {
+            box.set(try? Data(contentsOf: settingsFile))
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + settingsReadTimeout) == .success,
+              let data = box.get(),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return true }
+        return (json["pixooAutoDiscover"] as? Bool) != false
+    }
+
+    /// Local non-internal IPv4 /24 subnets, with this host's address to skip.
+    private static func localIPv4Subnets() -> [(base: String, selfIP: String)] {
+        var subnets: [(String, String)] = []
+        var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddrPtr) == 0 else { return [] }
+        defer { freeifaddrs(ifaddrPtr) }
+        var cursor = ifaddrPtr
+        while let p = cursor {
+            defer { cursor = p.pointee.ifa_next }
+            let flags = Int32(p.pointee.ifa_flags)
+            guard (flags & IFF_UP) == IFF_UP, (flags & IFF_LOOPBACK) == 0,
+                  let addr = p.pointee.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            guard getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count),
+                              nil, 0, NI_NUMERICHOST) == 0 else { continue }
+            let ip = String(cString: host)
+            let parts = ip.split(separator: ".")
+            guard parts.count == 4 else { continue }
+            let base = parts[0...2].joined(separator: ".")
+            if !subnets.contains(where: { $0.0 == base }) { subnets.append((base, ip)) }
+        }
+        return subnets
+    }
+
+    /// Probe one host: POST GetAllConf, accept if the reply carries `Brightness`.
+    /// `nonisolated` + a fresh ephemeral session so the sweep runs concurrently
+    /// instead of serializing on the actor (a 254-host serial sweep would take
+    /// minutes).
+    nonisolated private static func probeIsPixoo(ip: String, timeoutSec: TimeInterval) async -> Bool {
+        guard let url = URL(string: "http://\(ip):80/post") else { return false }
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = timeoutSec
+        config.timeoutIntervalForResource = timeoutSec
+        config.waitsForConnectivity = false
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("close", forHTTPHeaderField: "Connection")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["Command": "Channel/GetAllConf"])
+        request.timeoutInterval = timeoutSec
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+            return json["Brightness"] != nil
+        } catch {
+            return false
+        }
+    }
+
+    /// Sweep a /24, `concurrency` probes in flight at a time.
+    nonisolated private static func sweepSubnet(base: String, selfIP: String,
+                                                concurrency: Int, timeoutSec: TimeInterval) async -> [String] {
+        var hosts: [String] = []
+        for i in 1...254 {
+            let ip = "\(base).\(i)"
+            if ip != selfIP { hosts.append(ip) }
+        }
+        var found: [String] = []
+        var index = 0
+        await withTaskGroup(of: (String, Bool).self) { group in
+            func addNext() {
+                guard index < hosts.count else { return }
+                let ip = hosts[index]; index += 1
+                group.addTask { (ip, await probeIsPixoo(ip: ip, timeoutSec: timeoutSec)) }
+            }
+            for _ in 0..<min(concurrency, hosts.count) { addNext() }
+            while let (ip, ok) = await group.next() {
+                if ok { found.append(ip) }
+                addNext()
+            }
+        }
+        return found
+    }
+
+    /// Persist newly-discovered IPs into settings.json under `pixooDevices`,
+    /// skipping any already present.
+    private static func persistDiscovered(ips: [String]) {
+        let semaphore = DispatchSemaphore(value: 0)
+        settingsReadQueue.async {
+            var root: [String: Any] = [:]
+            if let data = try? Data(contentsOf: settingsFile),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                root = json
+            }
+            var arr = (root["pixooDevices"] as? [[String: Any]]) ?? []
+            let existing = Set(arr.compactMap { $0["ip"] as? String })
+            for ip in ips where !existing.contains(ip) {
+                arr.append(["ip": ip, "name": "Pixoo64"])
+            }
+            root["pixooDevices"] = arr
+            if let out = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted]) {
+                try? out.write(to: settingsFile)
+            }
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + .milliseconds(1500))
+    }
+
+    private func autoDiscoverIfNeeded() async {
+        guard devices.isEmpty, Self.isAutoDiscoverEnabled() else { return }
+        var discovered: [String] = []
+        for (base, selfIP) in Self.localIPv4Subnets() {
+            discovered += await Self.sweepSubnet(base: base, selfIP: selfIP, concurrency: 32, timeoutSec: 0.6)
+        }
+        guard !discovered.isEmpty else { return }
+        Self.persistDiscovered(ips: discovered)
+        DaemonLogger.shared.info("Pixoo auto-discovered \(discovered.count) device(s): \(discovered.joined(separator: ", "))")
+        await reloadDevicesFromSettings(reason: "auto-discover", force: true)
     }
 
     private func prepareDevice(_ device: PixooDevice) async {

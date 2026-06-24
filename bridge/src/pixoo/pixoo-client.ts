@@ -361,9 +361,9 @@ export async function switchToCustomChannel(ip: string): Promise<boolean> {
  * Get device configuration (also serves as a connectivity test).
  * Returns null on failure.
  */
-export async function getDeviceConfig(ip: string): Promise<Record<string, unknown> | null> {
+export async function getDeviceConfig(ip: string, timeoutMs?: number): Promise<Record<string, unknown> | null> {
   try {
-    return await httpPost(ip, { Command: 'Channel/GetAllConf' });
+    return await httpPost(ip, { Command: 'Channel/GetAllConf' }, timeoutMs);
   } catch {
     return null;
   }
