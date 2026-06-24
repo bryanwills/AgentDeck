@@ -272,7 +272,8 @@ struct MonitorScreen: View {
 
     /// Options to render in the attention HUD. Gated PreToolUse (observed)
     /// sessions carry a requestId but no PTY options, so present a fixed
-    /// Allow/Deny pair; otherwise mirror the focused session's live options.
+    /// Allow/Deny pair; otherwise mirror the focused session's live options
+    /// ONLY when they genuinely belong to it.
     private func attentionOptions(for session: SessionInfo, isFocused: Bool) -> [PromptOption] {
         if session.requestId != nil {
             return [
@@ -280,7 +281,18 @@ struct MonitorScreen: View {
                 PromptOption(index: 1, label: "Deny", shortcut: "n", recommended: nil, selected: nil),
             ]
         }
-        return isFocused ? stateHolder.state.options : []
+        // Borrow the aggregate live options only when the latest awaiting
+        // state_update is attributed to THIS session (a managed PTY session).
+        // Observed/Notification sessions have no PTY to drive, so showing
+        // leftover options from another session would render dead, mismatched
+        // buttons — return [] and let the HUD show "respond in terminal".
+        guard isFocused,
+              stateHolder.state.sessionId == session.id,
+              stateHolder.state.state.isAwaiting,
+              !stateHolder.state.options.isEmpty else {
+            return []
+        }
+        return stateHolder.state.options
     }
 
     /// Dispatch a YES/NO/ALWAYS response to the featured session via the

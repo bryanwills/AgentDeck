@@ -22,7 +22,7 @@ import { PassiveSessionObserver } from './passive-observer.js';
 import { SessionTimelineRelay } from './session-timeline-relay.js';
 import { SessionFocusRelay } from './session-focus-relay.js';
 import { updatePushState } from './session-aggregator.js';
-import { setAwaitingOverlay, getAwaitingOverlay, clearAwaitingOverlay, looksLikePermissionMessage, applyAwaitingOverlayToObserved } from './awaiting-overlay.js';
+import { setAwaitingOverlay, getAwaitingOverlay, clearAwaitingOverlay, isPermissionNotification, shouldGatePreToolUse, applyAwaitingOverlayToObserved } from './awaiting-overlay.js';
 import { registerPending, resolvePending, abandonPending, sweepStalePending, drainAllPending } from './permission-resolver.js';
 import { VoiceManager } from './voice.js';
 import { VoiceAssistantManager } from './voice-assistant.js';
@@ -663,7 +663,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         if (claudeSid) {
           if (mapped === 'notification') {
             const message = typeof json.message === 'string' ? json.message : '';
-            if (looksLikePermissionMessage(message)) {
+            const notificationType = typeof json.notification_type === 'string' ? json.notification_type : undefined;
+            if (isPermissionNotification(notificationType, message)) {
               setAwaitingOverlay(claudeSid, message);
               // Broadcast immediately rather than waiting for the 2s debounce
               // or the 5s observer tick, so the prompt surfaces within one frame.
@@ -709,7 +710,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         if (eventName === 'PreToolUse') {
           const cfg = getDeviceApprovalsConfig();
           const toolName = typeof json.tool_name === 'string' ? json.tool_name : '';
-          if (cfg.enabled && claudeSid && isToolGated(toolName, cfg.gatedTools)) {
+          // PreToolUse fires for every tool call regardless of permission mode;
+          // only hold when Claude itself could prompt, else we nag for a
+          // decision the agent never asked for. See shouldGatePreToolUse.
+          const permissionMode = typeof json.permission_mode === 'string' ? json.permission_mode : undefined;
+          if (cfg.enabled && claudeSid && isToolGated(toolName, cfg.gatedTools) && shouldGatePreToolUse(permissionMode, toolName)) {
             const requestId = randomUUID();
             heldRequestId = requestId;
             // Overlay carries the requestId → devices render Allow/Deny and reply

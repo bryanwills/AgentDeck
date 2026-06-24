@@ -87,12 +87,13 @@ export function applyAwaitingOverlayToObserved<
 }
 
 /**
- * Heuristic: does a Notification `message` look like an actual permission
- * prompt rather than an idle-timeout reminder? Claude's Notification hook
- * fires for BOTH "Claude needs your permission to use Bash" (a real decision)
- * and "Claude is waiting for your input" (a 60s idle ping). Only the former is
- * an awaiting state — the latter must NOT flip a session to attention, or every
- * idle session falsely shows a permission popup with no answerable choice.
+ * FALLBACK heuristic (see `isPermissionNotification` for the primary path):
+ * does a Notification `message` look like an actual permission prompt rather
+ * than an idle-timeout reminder? Claude's Notification hook fires for BOTH
+ * "Claude needs your permission to use Bash" (a real decision) and "Claude is
+ * waiting for your input" (a 60s idle ping). Only the former is an awaiting
+ * state — the latter must NOT flip a session to attention, or every idle
+ * session falsely shows a permission popup with no answerable choice.
  *
  * So this matches genuine permission phrasing ONLY. Earlier alternatives like
  * `waiting for your` / `wants to` / `confirm` / `to proceed` were too broad and
@@ -102,8 +103,67 @@ export function applyAwaitingOverlayToObserved<
  * still sees the prompt in their terminal), whereas a false positive nags with a
  * dead popup. Gated tools (Bash/Write/Edit/…) are unaffected — they take the
  * held PreToolUse path with a real requestId, independent of this filter.
+ *
+ * Used only when Claude omits the structured `notification_type` (older
+ * versions); current Claude is classified by `isPermissionNotification`.
  */
 export function looksLikePermissionMessage(message: string): boolean {
   if (!message) return false;
   return /needs? your permission|permission to use|requesting permission/i.test(message);
+}
+
+/**
+ * Is a Notification hook an actual permission prompt (awaiting decision)?
+ *
+ * Current Claude Code carries an authoritative `notification_type`
+ * (`permission_prompt` | `idle_prompt` | `auth_success` | `elicitation_*`).
+ * Prefer it — only `permission_prompt` is an awaiting state; everything else
+ * (idle pings, auth toasts, elicitation) must never flip a session to
+ * attention. Fall back to the brittle free-text `message` regex only when the
+ * field is absent (older Claude). Mirrors the Swift
+ * `DaemonServer.isPermissionNotification`.
+ */
+export function isPermissionNotification(
+  notificationType: string | undefined,
+  message: string,
+): boolean {
+  if (typeof notificationType === 'string' && notificationType.length > 0) {
+    return notificationType === 'permission_prompt';
+  }
+  return looksLikePermissionMessage(message);
+}
+
+/** Edit-family tools that Claude auto-approves in `acceptEdits` mode. */
+const EDIT_FAMILY_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+
+/**
+ * Should the daemon HOLD a gated PreToolUse for device approval, given the
+ * session's `permission_mode`?
+ *
+ * Claude's PreToolUse hook fires for EVERY tool call regardless of mode or
+ * allowlist — even when Claude will auto-approve and never prompt the user.
+ * `permission_mode` is the session's global decision posture, so gate only in
+ * modes where Claude could still surface its own prompt; otherwise the device
+ * nags for a decision the agent never asked for (the reported false-attention
+ * bug). Mirrors the Swift `DaemonServer.shouldGate(permissionMode:tool:)`.
+ *
+ *  - `bypassPermissions` / `dontAsk` → never prompts            → don't gate
+ *  - `plan`                          → tools don't execute       → don't gate
+ *  - `acceptEdits`                   → edits auto-approved, Bash still prompts
+ *  - `default` / `auto` / unknown    → Claude may prompt         → gate
+ *
+ * Unknown/absent mode is treated as `default` (gate) to preserve behavior on
+ * older Claude versions that don't send the field.
+ */
+export function shouldGatePreToolUse(permissionMode: string | undefined, tool: string): boolean {
+  switch ((permissionMode || 'default').trim()) {
+    case 'bypassPermissions':
+    case 'dontAsk':
+    case 'plan':
+      return false;
+    case 'acceptEdits':
+      return !EDIT_FAMILY_TOOLS.has(tool);
+    default:
+      return true;
+  }
 }

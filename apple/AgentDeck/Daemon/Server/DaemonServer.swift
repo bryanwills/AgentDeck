@@ -2625,7 +2625,8 @@ final class DaemonServer {
             // attention tier and shows the question. Cleared naturally by the
             // next tool/stop/prompt hook via updateSessionHookState.
             let message = json["message"] as? String ?? ""
-            if Self.looksLikePermissionMessage(message), let sessionId,
+            let notificationType = json["notification_type"] as? String
+            if Self.isPermissionNotification(notificationType: notificationType, message: message), let sessionId,
                var entry = pushedSessionsById[sessionId] {
                 let q = String(message.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
                 if entry.state != "awaiting_permission" || entry.question != q {
@@ -3130,6 +3131,46 @@ final class DaemonServer {
         return message.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
+    /// Is a Notification hook an actual permission prompt (awaiting decision)?
+    /// Current Claude Code carries an authoritative `notification_type`
+    /// (`permission_prompt` | `idle_prompt` | `auth_success` | `elicitation_*`);
+    /// only `permission_prompt` is an awaiting state — idle pings, auth toasts,
+    /// and elicitation must never flip a session to attention. Falls back to the
+    /// brittle free-text `message` regex only when the field is absent (older
+    /// Claude). Mirrors the Node `isPermissionNotification`.
+    nonisolated static func isPermissionNotification(notificationType: String?, message: String) -> Bool {
+        if let t = notificationType, !t.isEmpty {
+            return t == "permission_prompt"
+        }
+        return looksLikePermissionMessage(message)
+    }
+
+    /// Edit-family tools that Claude auto-approves in `acceptEdits` mode.
+    nonisolated static let editFamilyTools: Set<String> = ["Write", "Edit", "MultiEdit", "NotebookEdit"]
+
+    /// Should the daemon HOLD a gated PreToolUse for device approval, given the
+    /// session's `permission_mode`? Claude's PreToolUse hook fires for EVERY tool
+    /// call regardless of mode or allowlist — even when Claude will auto-approve
+    /// and never prompt the user. Gate only in modes where Claude could still
+    /// surface its own prompt; otherwise the device nags for a decision the agent
+    /// never asked for (the reported false-attention bug). Mirrors the Node
+    /// `shouldGatePreToolUse`.
+    ///
+    ///  - `bypassPermissions` / `dontAsk` → never prompts            → don't gate
+    ///  - `plan`                          → tools don't execute       → don't gate
+    ///  - `acceptEdits`                   → edits auto-approved, Bash still prompts
+    ///  - `default` / `auto` / unknown    → Claude may prompt         → gate
+    nonisolated static func shouldGate(permissionMode: String?, tool: String) -> Bool {
+        switch (permissionMode ?? "default").trimmingCharacters(in: .whitespaces) {
+        case "bypassPermissions", "dontAsk", "plan":
+            return false
+        case "acceptEdits":
+            return !editFamilyTools.contains(tool)
+        default:
+            return true
+        }
+    }
+
     @MainActor
     private func shouldIgnorePostTerminalCodexProgress(sessionId: String?, event: String) -> Bool {
         guard let sessionId,
@@ -3217,9 +3258,14 @@ final class DaemonServer {
         let cfg = deviceApprovalsConfig()
         let toolName = json["tool_name"] as? String ?? ""
         let sessionId = (json["session_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        // PreToolUse fires for every tool call regardless of permission mode; only
+        // hold when Claude itself could prompt, else we nag for a decision the
+        // agent never asked for. See shouldGate(permissionMode:tool:).
+        let permissionMode = json["permission_mode"] as? String
         guard cfg.enabled, let sessionId, cfg.gatedTools.contains(toolName),
+              Self.shouldGate(permissionMode: permissionMode, tool: toolName),
               pushedSessionsById[sessionId] != nil else {
-            return "" // not gated / unknown session → Claude's normal flow, zero added latency
+            return "" // not gated / auto-approved mode / unknown session → Claude's normal flow, zero added latency
         }
         let requestId = UUID().uuidString
         setApprovalGate(sessionId: sessionId, requestId: requestId, tool: toolName, toolInput: json["tool_input"])

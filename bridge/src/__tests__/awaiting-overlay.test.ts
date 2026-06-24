@@ -4,6 +4,8 @@ import {
   getAwaitingOverlay,
   clearAwaitingOverlay,
   looksLikePermissionMessage,
+  isPermissionNotification,
+  shouldGatePreToolUse,
   applyAwaitingOverlayToObserved,
   _resetAwaitingOverlay,
 } from '../awaiting-overlay.js';
@@ -72,6 +74,45 @@ describe('awaiting-overlay', () => {
       expect(looksLikePermissionMessage('Claude is waiting for your input')).toBe(false);
       expect(looksLikePermissionMessage('Claude has been idle for 60 seconds')).toBe(false);
       expect(looksLikePermissionMessage('Claude wants to run npm test')).toBe(false);
+    });
+  });
+
+  describe('isPermissionNotification', () => {
+    it('uses notification_type when present — only permission_prompt awaits', () => {
+      expect(isPermissionNotification('permission_prompt', 'anything')).toBe(true);
+      // Other structured types must NOT flip to attention, even if the message
+      // happens to contain permission-ish words.
+      expect(isPermissionNotification('idle_prompt', 'Claude needs your permission')).toBe(false);
+      expect(isPermissionNotification('auth_success', 'permission to use')).toBe(false);
+      expect(isPermissionNotification('elicitation_dialog', 'requesting permission')).toBe(false);
+    });
+    it('falls back to the message regex only when notification_type is absent', () => {
+      expect(isPermissionNotification(undefined, 'Claude needs your permission to use Bash')).toBe(true);
+      expect(isPermissionNotification(undefined, 'Claude is waiting for your input')).toBe(false);
+      expect(isPermissionNotification('', 'requesting permission')).toBe(true);
+    });
+  });
+
+  describe('shouldGatePreToolUse', () => {
+    it('gates in default / auto / unknown modes (Claude may prompt)', () => {
+      expect(shouldGatePreToolUse('default', 'Bash')).toBe(true);
+      expect(shouldGatePreToolUse('auto', 'Edit')).toBe(true);
+      expect(shouldGatePreToolUse(undefined, 'Bash')).toBe(true);
+      expect(shouldGatePreToolUse('something-new', 'Write')).toBe(true);
+    });
+    it('never gates when Claude will not prompt or execute', () => {
+      for (const tool of ['Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
+        expect(shouldGatePreToolUse('bypassPermissions', tool)).toBe(false);
+        expect(shouldGatePreToolUse('dontAsk', tool)).toBe(false);
+        expect(shouldGatePreToolUse('plan', tool)).toBe(false);
+      }
+    });
+    it('acceptEdits auto-approves edits but still gates Bash', () => {
+      expect(shouldGatePreToolUse('acceptEdits', 'Edit')).toBe(false);
+      expect(shouldGatePreToolUse('acceptEdits', 'Write')).toBe(false);
+      expect(shouldGatePreToolUse('acceptEdits', 'MultiEdit')).toBe(false);
+      expect(shouldGatePreToolUse('acceptEdits', 'NotebookEdit')).toBe(false);
+      expect(shouldGatePreToolUse('acceptEdits', 'Bash')).toBe(true);
     });
   });
 
