@@ -445,21 +445,23 @@ enum TrmnlImageRenderer {
 
     // MARK: - 1-bit grayscale PNG encoding
 
-    /// Threshold the 8-bit gray buffer (CG bottom-up) to a top-down 1-bit packed
-    /// bitmap (1 = white, 0 = black) and encode as a grayscale PNG, bit depth 1.
+    /// Threshold the 8-bit gray buffer to a 1-bit packed bitmap (1 = white,
+    /// 0 = black) and encode as a grayscale PNG, bit depth 1. The drawing helpers
+    /// already apply the CG bottom-left-origin compensation (`H - y`), so the
+    /// buffer is laid out top-down (row 0 = top) — read it in natural order; do
+    /// NOT reverse-Y here or the whole frame renders upside-down.
     private static func encode1BitPng(fromGray gray: [UInt8], width: Int, height: Int, grayRowBytes: Int, ss: Int = 1) -> Data {
         let rowBytes = (width + 7) / 8
         var packed = [UInt8](repeating: 0xFF, count: rowBytes * height)
-        let srcH = height * ss
         let norm = 1.0 / Double(ss * ss)
         gray.withUnsafeBufferPointer { src in
             for y in 0..<height {
                 for x in 0..<width {
-                    // Box-average the ss×ss block (CG buffer is bottom-up) before
-                    // thresholding so glyph edges land on majority coverage → crisp.
+                    // Box-average the ss×ss block (buffer is top-down as drawn)
+                    // before thresholding so glyph edges land on majority coverage → crisp.
                     var sum = 0
                     for dy in 0..<ss {
-                        let cgRow = (srcH - 1 - (y * ss + dy)) * grayRowBytes
+                        let cgRow = (y * ss + dy) * grayRowBytes
                         for dx in 0..<ss { sum += Int(src[cgRow + x * ss + dx]) }
                     }
                     if Double(sum) * norm < 128 {
