@@ -401,6 +401,9 @@ final class DaemonServer {
     /// every ESP32 board from the Dashboard USB serial section even
     /// though `/health` HTTP showed them correctly via the async path.
     private var cachedSerialStatus: [String: Any]?
+    /// TRMNL BYOS polls mutate actor-isolated enrollment/telemetry. Cache a
+    /// snapshot so synchronous state_update.moduleHealth can still expose it.
+    private var cachedTrmnlStatus: [String: Any]?
 
     /// Stream Deck plugin self-registration. The Elgato plugin sends a
     /// `client_register` WS command right after connect with the physical
@@ -1523,6 +1526,7 @@ final class DaemonServer {
     private func trmnlSetupResponse(_ req: HTTPServer.HTTPRequest) async -> HTTPServer.HTTPResponse {
         guard let trmnl = trmnlModule else { return .notFound }
         let r = await trmnl.setup(headers: req.headers, base: trmnlBase(req))
+        cachedTrmnlStatus = await trmnl.statusSnapshot().value
         return HTTPServer.HTTPResponse(
             status: r.status,
             headers: ["Content-Type": "application/json", "Cache-Control": "no-store"],
@@ -1533,6 +1537,7 @@ final class DaemonServer {
     private func trmnlDisplayResponse(_ req: HTTPServer.HTTPRequest) async -> HTTPServer.HTTPResponse {
         guard let trmnl = trmnlModule else { return .notFound }
         let r = await trmnl.display(headers: req.headers, base: trmnlBase(req))
+        cachedTrmnlStatus = await trmnl.statusSnapshot().value
         // A successful poll is the heartbeat — if the panel shows "not responding"
         // yet this line never appears, the request never reached the daemon (App Nap
         // / network), not a render fault. Cheap and only at debug level.
@@ -1907,6 +1912,17 @@ final class DaemonServer {
                 "connected": d200h["connected"] as Any,
                 "hasConsumerDevice": d200h["hasConsumerDevice"] as Any,
                 "hasKeyboardDevice": d200h["hasKeyboardDevice"] as Any,
+            ])
+        }
+
+        if let trmnlModule {
+            let trmnl = await trmnlModule.statusSnapshot().value
+            devices.append([
+                "type": "trmnl",
+                "deviceCount": trmnl["deviceCount"] as? Int ?? 0,
+                "staleDeviceCount": trmnl["staleDeviceCount"] as? Int ?? 0,
+                "currentRefreshRate": trmnl["currentRefreshRate"] as? Int ?? 180,
+                "telemetry": trmnl["telemetry"] as? [[String: Any]] ?? [],
             ])
         }
 
@@ -3789,6 +3805,9 @@ final class DaemonServer {
                 if let snap = await self.serialStatusSnapshot() {
                     await MainActor.run { self.cachedSerialStatus = snap }
                 }
+                if let snap = await self.trmnlStatusSnapshot() {
+                    await MainActor.run { self.cachedTrmnlStatus = snap }
+                }
             }
         }
 
@@ -4473,6 +4492,12 @@ final class DaemonServer {
     }
 
     @MainActor
+    func trmnlStatusSnapshot() async -> [String: Any]? {
+        guard let trmnlModule else { return nil }
+        return await trmnlModule.statusSnapshot().value
+    }
+
+    @MainActor
     private func buildModuleHealth() async -> SendableDict {
         var gateway: [String: Any] = [
             "available": cachedGatewayAvailable,
@@ -4499,6 +4524,11 @@ final class DaemonServer {
         }
         if let timeboxModule {
             modules["timebox"] = timeboxModule.statusSnapshot()
+        }
+        if let trmnlModule {
+            let snap = await trmnlModule.statusSnapshot().value
+            cachedTrmnlStatus = snap
+            modules["trmnl"] = snap
         }
         if serialModule != nil {
             // HTTP /health is used by tiny hook scripts and must answer even
@@ -4627,6 +4657,16 @@ final class DaemonServer {
         if let pixoo = pixooModule { modules["pixoo"] = pixoo.statusSnapshot() }
         if let idotMatrix = idotMatrixModule { modules["idotmatrix"] = idotMatrix.statusSnapshot() }
         if let timebox = timeboxModule { modules["timebox"] = timebox.statusSnapshot() }
+        if let trmnl = cachedTrmnlStatus {
+            modules["trmnl"] = trmnl
+        } else if trmnlModule != nil {
+            modules["trmnl"] = [
+                "enabled": true,
+                "autoRegister": true,
+                "deviceCount": 0,
+                "telemetry": [] as [Any],
+            ] as [String: Any]
+        }
         // SerialModule.statusSnapshot() is async — read the 5s-polled
         // cache so Dashboard USB serial section sees connected boards
         // without us having to awaitly-pre-fetch on every broadcast.

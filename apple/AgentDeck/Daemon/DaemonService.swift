@@ -618,6 +618,11 @@ final class DaemonService: ObservableObject {
             summary.pixoo = DeviceSummary.makePixooEntries(from: pixoo)
         }
 
+        // TRMNL (BYOS pull e-ink panels)
+        if let trmnl = await server.trmnlStatusSnapshot() {
+            summary.trmnl = DeviceSummary.makeTrmnlEntries(from: trmnl)
+        }
+
         // ESP32 serial boards
         if let serial = await server.serialStatusSnapshot() {
             summary.serial = DeviceSummary.makeSerialEntries(from: serial)
@@ -639,17 +644,19 @@ final class DaemonService: ObservableObject {
 struct DeviceSummary: Equatable {
     var d200h: DeviceEntry?
     var pixoo: [DeviceEntry] = []
+    var trmnl: [DeviceEntry] = []
     var serial: [DeviceEntry] = []
     var adb: [DeviceEntry] = []
 
     var isEmpty: Bool {
-        d200h == nil && pixoo.isEmpty && serial.isEmpty && adb.isEmpty
+        d200h == nil && pixoo.isEmpty && trmnl.isEmpty && serial.isEmpty && adb.isEmpty
     }
 
     var allEntries: [DeviceEntry] {
         var out: [DeviceEntry] = []
         if let d200h { out.append(d200h) }
         out.append(contentsOf: pixoo)
+        out.append(contentsOf: trmnl)
         out.append(contentsOf: serial)
         out.append(contentsOf: adb)
         return out
@@ -662,6 +669,9 @@ struct DeviceSummary: Equatable {
         }
         if let pixoo = modules["pixoo"] as? [String: Any] {
             summary.pixoo = makePixooEntries(from: pixoo)
+        }
+        if let trmnl = modules["trmnl"] as? [String: Any] {
+            summary.trmnl = makeTrmnlEntries(from: trmnl)
         }
         if let serial = modules["serial"] as? [String: Any] {
             summary.serial = makeSerialEntries(from: serial)
@@ -748,6 +758,48 @@ struct DeviceSummary: Equatable {
         }
     }
 
+    static func makeTrmnlEntries(from d: [String: Any]) -> [DeviceEntry] {
+        let telemetry = d["telemetry"] as? [[String: Any]] ?? []
+        let enrolled = d["devices"] as? [[String: Any]] ?? []
+        let rows = telemetry.isEmpty ? enrolled : telemetry
+        let deviceCount = d["deviceCount"] as? Int ?? rows.count
+        guard deviceCount > 0 || !rows.isEmpty else { return [] }
+
+        if rows.isEmpty {
+            return [DeviceEntry(
+                id: "trmnl-waiting",
+                kind: .trmnl,
+                title: "TRMNL e-ink",
+                subtitle: "waiting for first poll",
+                status: .reconnecting
+            )]
+        }
+
+        return rows.enumerated().map { idx, row in
+            let mac = row["mac"] as? String ?? "panel-\(idx + 1)"
+            let stale = row["stale"] as? Bool ?? telemetry.isEmpty
+            let width = row["width"] as? Int
+            let height = row["height"] as? Int
+            let rssi = (row["rssi"] as? Double) ?? (row["rssi"] as? Int).map(Double.init)
+            let age = row["secondsSinceSeen"] as? Int
+            let size = width.flatMap { w in height.map { h in "\(w)x\(h)" } }
+
+            var bits: [String] = []
+            if let size { bits.append(size) }
+            if let rssi { bits.append("\(Int(rssi))dBm") }
+            if let age { bits.append("\(age)s ago") }
+            if bits.isEmpty { bits.append(telemetry.isEmpty ? "enrolled" : "polling") }
+
+            return DeviceEntry(
+                id: "trmnl-\(mac)",
+                kind: .trmnl,
+                title: idx == 0 ? "TRMNL e-ink" : "TRMNL e-ink \(idx + 1)",
+                subtitle: bits.joined(separator: " · "),
+                status: stale ? .reconnecting : .connected
+            )
+        }
+    }
+
     static func makeSerialEntries(from d: [String: Any]) -> [DeviceEntry] {
         let conns = d["connections"] as? [[String: Any]] ?? []
         let globalOpenErr = (d["lastOpenError"] as? String) ?? (d["lastError"] as? String)
@@ -821,6 +873,7 @@ struct DeviceEntry: Identifiable, Equatable {
 enum DeviceKind: Equatable {
     case d200h
     case pixoo
+    case trmnl
     case serial
     case adb
 
@@ -828,6 +881,7 @@ enum DeviceKind: Equatable {
         switch self {
         case .d200h:  return "keyboard"
         case .pixoo:  return "square.grid.3x3.fill"
+        case .trmnl:  return "rectangle.on.rectangle"
         case .serial: return "cpu"
         case .adb:    return "iphone"
         }

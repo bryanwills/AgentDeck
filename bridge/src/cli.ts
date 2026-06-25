@@ -629,9 +629,11 @@ program
     log('On the panel, set the custom server / BYOS URL to ONE stable address:');
     log(`\n  http://${lanIp}:${port}\n`);
     log('The panel auto-enrolls on its first poll (no MAC entry needed).');
-    log('Run exactly one daemon as the hub on this address. The Node daemon is the');
-    log('usage-capable hub; the macOS app should run as a client (it shows "external');
-    log('daemon"). Two hubs racing for the port is what makes a panel flip to');
+    log('Run exactly one hub on this address: either the App Store macOS app or');
+    log('the Node CLI daemon. The App Store app is a complete TRMNL BYOS hub; the');
+    log('CLI daemon adds developer-session and OAuth quota relay when you need it.');
+    log('Two hubs racing for the port, or a panel pinned to a dead fallback port, makes');
+    log('a panel flip to');
     log('"TRMNL not responding".\n');
 
     // Live health from the running daemon, if reachable.
@@ -657,7 +659,7 @@ program
           }
         }
       } else {
-        log('Daemon is up but the TRMNL module is not active (no panel enrolled and trmnl.enabled is false).');
+        log('Daemon is up but it did not expose TRMNL health. Upgrade the hub or verify it owns /api/display.');
       }
     } catch {
       const cfg = loadTrmnlConfig();

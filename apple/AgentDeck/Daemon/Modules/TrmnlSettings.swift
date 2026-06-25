@@ -3,9 +3,8 @@
 //
 // Mirrors bridge/src/trmnl/trmnl-settings.ts. The App Store daemon reads the
 // `trmnl` block from settings.json for the enable gate / cadence / auto-register
-// policy; device enrollment + telemetry are held in-memory by TrmnlModule (no
-// settings.json writes from the daemon — a panel that survives a daemon restart
-// simply re-enrolls on its next poll, which is safe because auth is soft).
+// policy and enrolled devices. Telemetry is runtime-only; device enrollment is
+// persisted so the App Store app can be a complete standalone BYOS hub.
 
 import Foundation
 
@@ -21,6 +20,7 @@ struct TrmnlConfig: Sendable {
     /// out, not a server error. Mirrors TRMNL_DEFAULT_IMAGE_TIMEOUT.
     var imageUrlTimeout: Int = 50
     var autoRegister: Bool = true
+    var devices: [TrmnlDeviceConfig] = []
 
     /// Too-frequent polls drain the panel battery + full-flash the e-ink.
     static let minRefresh = 30
@@ -49,6 +49,13 @@ struct TrmnlConfig: Sendable {
         }
         return min(TrmnlConfig.maxImageTimeout, max(5, t))
     }
+}
+
+struct TrmnlDeviceConfig: Sendable, Equatable {
+    var mac: String
+    var apiKey: String
+    var friendlyId: String
+    var name: String?
 }
 
 /// One live session row, parsed from a `sessions_list` broadcast.
@@ -127,7 +134,58 @@ enum TrmnlSettings {
         if let v = t["imageUrlTimeout"] as? Int, v > 0 { cfg.imageUrlTimeout = min(TrmnlConfig.maxImageTimeout, v) }
         else if let v = t["imageUrlTimeout"] as? Double, v > 0 { cfg.imageUrlTimeout = min(TrmnlConfig.maxImageTimeout, Int(v)) }
         if let a = t["autoRegister"] as? Bool { cfg.autoRegister = a }
+        if let arr = t["devices"] as? [[String: Any]] {
+            cfg.devices = arr.compactMap { raw in
+                guard let mac = raw["mac"] as? String, !mac.isEmpty else { return nil }
+                let norm = normalizeMac(mac)
+                let apiKey = (raw["apiKey"] as? String) ?? (raw["api_key"] as? String) ?? ""
+                let friendlyId = (raw["friendlyId"] as? String) ?? (raw["friendly_id"] as? String) ?? ""
+                guard !norm.isEmpty, !apiKey.isEmpty, !friendlyId.isEmpty else { return nil }
+                return TrmnlDeviceConfig(
+                    mac: norm,
+                    apiKey: apiKey,
+                    friendlyId: friendlyId,
+                    name: raw["name"] as? String
+                )
+            }
+        }
         return cfg
+    }
+
+    /// Persist only the enrolled device list inside `settings.json`, preserving
+    /// unrelated settings and the user's TRMNL cadence flags. Telemetry is not
+    /// written here; polls would otherwise churn the file every few minutes.
+    static func saveDevices(_ devices: [TrmnlDeviceConfig]) {
+        let url = URL(fileURLWithPath: settingsPath)
+        var root: [String: Any] = [:]
+        if let data = try? Data(contentsOf: url),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            root = json
+        }
+        var trmnl = (root["trmnl"] as? [String: Any]) ?? [:]
+        trmnl["devices"] = devices.map { d in
+            var row: [String: Any] = [
+                "mac": d.mac,
+                "apiKey": d.apiKey,
+                "friendlyId": d.friendlyId,
+            ]
+            if let name = d.name, !name.isEmpty { row["name"] = name }
+            return row
+        }
+        root["trmnl"] = trmnl
+
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+            var out = data
+            out.append(0x0A)
+            try out.write(to: url, options: [.atomic])
+        } catch {
+            DaemonLogger.shared.debug("TRMNL", "Failed to persist enrolled devices: \(error.localizedDescription)")
+        }
     }
 
     /// Canonical MAC identity (mirrors trmnl-settings.ts normalizeMac): 12-hex →

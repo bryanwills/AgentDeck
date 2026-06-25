@@ -78,22 +78,6 @@ function gauge(x: number, y: number, w: number, h: number, pct: number): string 
   ].join('');
 }
 
-/** "No data" gauge — outlined box with a diagonal hatch (usage truly unknown). */
-function gaugeUnknown(x: number, y: number, w: number, h: number): string {
-  const clipId = `nh${Math.round(x)}_${Math.round(y)}`;
-  const lines: string[] = [
-    `<clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></clipPath>`,
-    `<g clip-path="url(#${clipId})">`,
-  ];
-  // Sparse diagonal hatch so it reads as "unavailable", not "0% filled".
-  for (let hx = x - h; hx < x + w; hx += 8) {
-    lines.push(`<line x1="${hx}" y1="${y + h}" x2="${hx + h}" y2="${y}" stroke="${INK}" stroke-width="1"/>`);
-  }
-  lines.push(`</g>`);
-  lines.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${INK}" stroke-width="1.5"/>`);
-  return lines.join('');
-}
-
 /** Shorten a model id for the description line: "claude-opus-4-8" → "opus-4-8". */
 function shortModel(model: string): string {
   return model
@@ -310,8 +294,11 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
   const summary = `${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${workingCount} working · ${awaitingCount} awaiting`;
 
   const headerH = 56;
-  // Single-line footer (5H + 7D side by side) — frees a whole row of body space.
-  const footerTop = H - 52;
+  // Single-line footer. When quota is unknown (App Store-only / OAuth-blind hub),
+  // collapse it to a compact status strip instead of spending e-ink space on two
+  // unavailable gauges.
+  const usageKnown = state.usageKnown === true;
+  const footerTop = H - (usageKnown ? 52 : 30);
   // An AWAITING agent is the single most valuable glance signal on a slow panel,
   // so it gets a full-width inverted banner above the rows.
   const awaitingSessions = sessions.filter((s) => statusLabel(s.state) === 'AWAITING');
@@ -406,12 +393,19 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
     }
   }
 
-  // --- Footer: Claude brand mark + 5H/7D quota on one line ---
-  // The mark on the far left labels the block as Claude subscription usage. Each
-  // half: label, gauge, %, then the reset countdown tucked right after the % (no
-  // "resets" filler word, no wasted gap). Unknown quota draws a hatched "—".
+  // --- Footer ---
   els.push(`<rect x="${pad}" y="${footerTop}" width="${W - 2 * pad}" height="2" fill="${INK}"/>`);
-  const usageKnown = state.usageKnown !== false;
+  if (!usageKnown) {
+    els.push(
+      `<text x="${pad}" y="${footerTop + 22}" font-family="${SANS}" font-size="16" font-weight="700" fill="${INK}">Hub online</text>`,
+      `<text x="${W - pad}" y="${footerTop + 22}" text-anchor="end" font-family="${SANS}" font-size="15" font-weight="600" fill="${INK}">${escXml(summary)}</text>`,
+    );
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${els.join('')}</svg>`;
+  }
+
+  // Claude brand mark + 5H/7D quota on one line. The mark on the far left labels
+  // the block as Claude subscription usage. Each half: label, gauge, %, then the
+  // reset countdown tucked right after the % (no filler phrase, no wasted gap).
   const fy = footerTop + 33;
   const gh = 18;
   // Claude mark (canonical brand glyph), vertically centered in the footer band.
@@ -426,10 +420,10 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
     const px = gx + gaugeW + 8;
     els.push(
       `<text x="${x}" y="${fy}" font-family="${SANS}" font-size="18" font-weight="700" fill="${INK}">${label}</text>`,
-      usageKnown ? gauge(gx, fy - 14, gaugeW, gh, pct) : gaugeUnknown(gx, fy - 14, gaugeW, gh),
-      `<text x="${px}" y="${fy}" font-family="${MONO}" font-size="18" fill="${INK}">${usageKnown ? `${Math.round(pct)}%` : '—'}</text>`,
+      gauge(gx, fy - 14, gaugeW, gh, pct),
+      `<text x="${px}" y="${fy}" font-family="${MONO}" font-size="18" fill="${INK}">${Math.round(pct)}%</text>`,
     );
-    const remaining = usageKnown ? fmtRemaining(resetsAt, now) : '';
+    const remaining = fmtRemaining(resetsAt, now);
     if (remaining) {
       // Tucked right after the % (≈ width of "100%") instead of flushed to the column edge.
       els.push(

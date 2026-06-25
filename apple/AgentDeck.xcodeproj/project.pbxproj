@@ -26,6 +26,7 @@
 		0AC3F569F362D121D985EA52 /* KelpField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0815111538C63CAF8766B367 /* KelpField.swift */; };
 		0B04CA71C040BE9955B8C032 /* AdbModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83589BA4C41B89C8EF1A46FD /* AdbModule.swift */; };
 		0B12EC87653840EF7BA4555C /* SessionAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */; };
+		0C182947D9422ADA4A3208FB /* TrmnlModuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9C315037A50AFC08C4CCFB /* TrmnlModuleTests.swift */; };
 		0E60D3FBC7626624FF7B5A2E /* TopologyRailHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D05CE505E1EC5729C69752E /* TopologyRailHelpersTests.swift */; };
 		0ED91B65645B05541D82E446 /* NotificationPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC62763B9E0E57235CFDACED /* NotificationPermission.swift */; };
 		1055170019B2376B38A0B8FE /* SessionAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */; };
@@ -242,6 +243,7 @@
 		B1B90826D46626CD1211ED7A /* TerrariumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69BCA057209786EF62993762 /* TerrariumView.swift */; };
 		B26650019DB2ED1B70E0B349 /* ApmeJudgeMlx.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64EB18086FC44B69D1CBE171 /* ApmeJudgeMlx.swift */; };
 		B3A9C1B59F3239A9C482540F /* ApmeTaskBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54B6A5B14E7FEFC4CD93EF2 /* ApmeTaskBoundaryTests.swift */; };
+		B471C9177005BCA87E8A0694 /* TrmnlModuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9C315037A50AFC08C4CCFB /* TrmnlModuleTests.swift */; };
 		B5479F2C2CBAE673EB1C3D93 /* AgentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F55435772A15B8F0E92C1 /* AgentState.swift */; };
 		B5F1B816437285A73378C234 /* ESP32ProvisionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6229A084E6CE2AB75D86F83 /* ESP32ProvisionSheet.swift */; };
 		B6600F223195F4A4B3B17315 /* SessionSlotRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 599AA0232E126B4B238A4C50 /* SessionSlotRenderer.swift */; };
@@ -379,6 +381,7 @@
 		0815111538C63CAF8766B367 /* KelpField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KelpField.swift; sourceTree = "<group>"; };
 		0DD3A6826EADF11BB4C4F139 /* BubbleSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleSystem.swift; sourceTree = "<group>"; };
 		0F083DDE39507B6693AED227 /* ApmeCategoryE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeCategoryE2ETests.swift; sourceTree = "<group>"; };
+		0F9C315037A50AFC08C4CCFB /* TrmnlModuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrmnlModuleTests.swift; sourceTree = "<group>"; };
 		118F64508CC1FE2827516440 /* LocalCodexAppObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCodexAppObserver.swift; sourceTree = "<group>"; };
 		125A43BCFF7E55A34B4C5FC1 /* AgentDeckLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDeckLogo.swift; sourceTree = "<group>"; };
 		15083D65B8571C662DD6E2CE /* PortDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortDiagnostics.swift; sourceTree = "<group>"; };
@@ -628,6 +631,7 @@
 				27A351E073AB448BEE1DA392 /* TimeboxProtocolTests.swift */,
 				7847FA7381FB8075331B0F12 /* TimelineTests.swift */,
 				7D05CE505E1EC5729C69752E /* TopologyRailHelpersTests.swift */,
+				0F9C315037A50AFC08C4CCFB /* TrmnlModuleTests.swift */,
 				B9841FBF8AFC5D5C65809F8B /* UsageAPIClientThreadingTests.swift */,
 			);
 			path = AgentDeckTests;
@@ -1207,6 +1211,7 @@
 				008D05FDF30426FE1B0DC37F /* TimeboxProtocolTests.swift in Sources */,
 				DBE7242898F7F03CB3463B6D /* TimelineTests.swift in Sources */,
 				AFF81F64527A02F26615AB61 /* TopologyRailHelpersTests.swift in Sources */,
+				0C182947D9422ADA4A3208FB /* TrmnlModuleTests.swift in Sources */,
 				CB4DB4586BC5196412C3429C /* UsageAPIClientThreadingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1234,6 +1239,7 @@
 				D2335AB9E3A5DEE25405617F /* TimeboxProtocolTests.swift in Sources */,
 				4F6DEDF8FD3A71AFD059278D /* TimelineTests.swift in Sources */,
 				0E60D3FBC7626624FF7B5A2E /* TopologyRailHelpersTests.swift in Sources */,
+				B471C9177005BCA87E8A0694 /* TrmnlModuleTests.swift in Sources */,
 				DD57AEBB6F916C984C85F48F /* UsageAPIClientThreadingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

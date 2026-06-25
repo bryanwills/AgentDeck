@@ -850,11 +850,11 @@ Unlike the ESP32 displays (which AgentDeck pushes over serial/WiFi), TRMNL is **
 agentdeck trmnl     # prints http://<LAN-IP>:9120 + enrolled panels + health
 ```
 
-Set that one URL as the panel's custom/BYOS server URL. **Run a single daemon as the hub on a stable `LAN-IP:9120`** — the Node CLI daemon is the usage-capable hub (it reads Claude OAuth quota); the macOS app should run as a client.
+Set that one URL as the panel's custom/BYOS server URL. **Run exactly one hub on a stable `LAN-IP:9120`** — either the App Store macOS app's in-process Swift daemon or the Node CLI daemon. The App Store app is a complete TRMNL BYOS hub; the CLI daemon adds developer-session and OAuth quota relay when you need it.
 
 - **Adaptive cadence** — refreshes faster (default 60s) only while a session is **AWAITING** the user; otherwise slower (default 180s, floor 30s). A deep-sleep panel can't be pushed and each wake flashes the screen + costs battery, so "working" does not speed it up.
-- **Information-dense layout** — canonical brand-creature icons per agent, session goal/description (extracted from the first user prompt), subscription + reset time in the header, adaptive row heights packing 6–9 sessions, with CJK font fallback.
-- **Two implementations of the same contract** — Node `bridge/src/trmnl/{byos-server,frame-cache,trmnl-settings,trmnl-telemetry}.ts`; App Store Swift daemon `apple/.../Daemon/Modules/Trmnl{Module,ImageRenderer,Settings}.swift` (CoreGraphics + CoreText → 1-bit PNG, no subprocess).
+- **Information-dense layout** — canonical brand-creature icons per agent, session goal/description (extracted from the first user prompt), subscription + reset time in the header, adaptive row heights packing 6–9 sessions, with CJK font fallback. If quota is unavailable, the footer collapses to hub status instead of reserving space for empty usage gauges.
+- **Two implementations of the same contract** — Node `bridge/src/trmnl/{byos-server,frame-cache,trmnl-settings,trmnl-telemetry}.ts`; App Store Swift daemon `apple/.../Daemon/Modules/Trmnl{Module,ImageRenderer,Settings}.swift` (CoreGraphics + CoreText → 1-bit PNG, persisted enrollment, health telemetry, no subprocess).
 
 Reference hardware: the Seeed Studio × TRMNL 7.5" (OG) BYOS kit (XIAO ESP32-S3 + 800×480 monochrome ePaper). See **[Device Reference](docs/devices.md#trmnl-e-ink-byos)** for the full BYOS flow and the firmware-aligned behavior contract.
 

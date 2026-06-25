@@ -8,9 +8,9 @@
 // no bundled binaries — rendering is CoreGraphics (TrmnlImageRenderer), transport
 // is the existing in-process HTTPServer.
 //
-// Enrollment + telemetry are in-memory only (no settings.json writes from the
-// daemon); on restart a panel simply re-enrolls on its next poll, which is safe
-// because auth is soft (MAC is the identity, api_key is advisory).
+// Enrollment persists to settings.json while telemetry stays in-memory. That
+// keeps the App Store app useful as a complete standalone BYOS hub without
+// writing the settings file on every poll.
 
 import Foundation
 import CryptoKit
@@ -21,24 +21,14 @@ struct TrmnlByosResponse: Sendable {
     let body: Data
 }
 
-/// Status snapshot surfaced via the daemon /status route.
-struct TrmnlStatus: Sendable {
-    let enabled: Bool
-    let autoRegister: Bool
-    let refreshRate: Int
-    /// Cadence currently being served given live session activity.
-    let currentRefreshRate: Int
-    let deviceCount: Int
-    /// Panels that haven't polled within 2× the current cadence (stuck/offline).
-    let staleDeviceCount: Int
-    let activeResolutions: [String]
-    let frameCount: Int
-}
-
 actor TrmnlModule: DeviceModule {
     nonisolated let name = "trmnl"
 
-    private struct Device { let apiKey: String; let friendlyId: String }
+    private struct Device {
+        var apiKey: String
+        var friendlyId: String
+        var name: String?
+    }
     private struct Telemetry {
         var fwVersion: String
         var battery: Double?
@@ -64,11 +54,17 @@ actor TrmnlModule: DeviceModule {
 
     // MARK: - DeviceModule lifecycle
 
-    func start() async { cfg = TrmnlSettings.load() }
+    func start() async {
+        cfg = TrmnlSettings.load()
+        loadPersistedDevices()
+    }
     func stop() async {}
 
     /// Re-read the enable gate / cadence / auto-register policy from settings.
-    func reload() { cfg = TrmnlSettings.load() }
+    func reload() {
+        cfg = TrmnlSettings.load()
+        loadPersistedDevices()
+    }
 
     // MARK: - Broadcast ingestion (called from DaemonServer.onBroadcast)
 
@@ -227,15 +223,59 @@ actor TrmnlModule: DeviceModule {
         return render(key: "\(w)x\(h)").png
     }
 
-    func snapshot() -> TrmnlStatus {
+    func statusSnapshot() -> SendableDict {
         let act = activity()
         let current = cfg.effectiveRefresh(awaiting: act.awaiting, working: act.working)
         let staleAfter = Double(max(30, current) * 2)
         let now = Date()
-        let stale = telemetry.values.filter { now.timeIntervalSince($0.lastSeen) > staleAfter }.count
-        return TrmnlStatus(enabled: cfg.enabled, autoRegister: cfg.autoRegister, refreshRate: cfg.refreshRate,
-                           currentRefreshRate: current, deviceCount: devices.count, staleDeviceCount: stale,
-                           activeResolutions: frameOrder, frameCount: frameOrder.count)
+        let telemetryRows = telemetry
+            .sorted { $0.value.lastSeen > $1.value.lastSeen }
+            .map { mac, t -> [String: Any] in
+                let age = max(0, Int(now.timeIntervalSince(t.lastSeen).rounded()))
+                let stale = now.timeIntervalSince(t.lastSeen) > staleAfter
+                var row: [String: Any] = [
+                    "mac": mac,
+                    "fwVersion": t.fwVersion,
+                    "userAgent": t.userAgent,
+                    "lastSeen": Int(t.lastSeen.timeIntervalSince1970 * 1000),
+                    "secondsSinceSeen": age,
+                    "stale": stale,
+                ]
+                if let v = t.battery { row["batteryVoltage"] = v }
+                if let v = t.rssi { row["rssi"] = v }
+                if let v = t.width { row["width"] = v }
+                if let v = t.height { row["height"] = v }
+                if let v = t.refreshRate { row["refreshRate"] = v }
+                return row
+            }
+        let stale = telemetryRows.filter { $0["stale"] as? Bool == true }.count
+        let deviceRows = devices
+            .sorted { $0.key < $1.key }
+            .map { mac, d -> [String: Any] in
+                var row: [String: Any] = [
+                    "mac": mac,
+                    "friendlyId": d.friendlyId,
+                    "apiKeyPresent": !d.apiKey.isEmpty,
+                ]
+                if let name = d.name, !name.isEmpty { row["name"] = name }
+                return row
+            }
+        return SendableDict([
+            "resvgLoaded": true,
+            "gateActive": true,
+            "enabled": cfg.enabled,
+            "autoRegister": cfg.autoRegister,
+            "deviceCount": devices.count,
+            "refreshRate": cfg.refreshRate,
+            "refreshActive": cfg.refreshActive,
+            "imageUrlTimeout": cfg.imageUrlTimeout,
+            "currentRefreshRate": current,
+            "activeResolutions": frameOrder,
+            "frameCount": frameOrder.count,
+            "staleDeviceCount": stale,
+            "devices": deviceRows,
+            "telemetry": telemetryRows,
+        ])
     }
 
     // MARK: - Frame cache
@@ -285,9 +325,35 @@ actor TrmnlModule: DeviceModule {
     private func enroll(_ mac: String) -> Device {
         let key = TrmnlSettings.normalizeMac(mac)
         if let d = devices[key] { return d }
-        let d = Device(apiKey: randomHex(16), friendlyId: friendlyId())
+        let d = Device(apiKey: randomHex(16), friendlyId: friendlyId(), name: nil)
         devices[key] = d
+        persistDevices()
         return d
+    }
+
+    private func loadPersistedDevices() {
+        var next: [String: Device] = [:]
+        for d in cfg.devices {
+            let key = TrmnlSettings.normalizeMac(d.mac)
+            guard !key.isEmpty else { continue }
+            next[key] = Device(apiKey: d.apiKey, friendlyId: d.friendlyId, name: d.name)
+        }
+        // Keep any devices auto-enrolled earlier in this process if settings was
+        // edited concurrently and failed to include them.
+        for (mac, device) in devices where next[mac] == nil {
+            next[mac] = device
+        }
+        devices = next
+    }
+
+    private func persistDevices() {
+        let rows = devices
+            .sorted { $0.key < $1.key }
+            .map { mac, d in
+                TrmnlDeviceConfig(mac: mac, apiKey: d.apiKey, friendlyId: d.friendlyId, name: d.name)
+            }
+        cfg.devices = rows
+        TrmnlSettings.saveDevices(rows)
     }
 
     private func record(_ h: TrmnlHeaders) {

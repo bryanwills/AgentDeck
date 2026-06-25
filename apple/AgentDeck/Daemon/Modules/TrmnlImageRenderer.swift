@@ -117,7 +117,6 @@ enum TrmnlImageRenderer {
 
         let pad: CGFloat = 24
         let headerH: CGFloat = 56
-        let footerTop = H - 52         // single-line footer
 
         let n = state.sessions.count
         let working = state.sessions.filter { statusLabel($0.state) == "WORKING" }.count
@@ -125,11 +124,15 @@ enum TrmnlImageRenderer {
         let awaiting = awaitingSessions.count
         let summary = "\(n) session\(n == 1 ? "" : "s") · \(working) working · \(awaiting) awaiting"
         let subSummary = Self.subscriptionSummary(state.subscriptions)
+        let usageKnown = state.usageKnown
 
         let bannerH: CGFloat = awaiting > 0 ? 44 : 0
+        let footerTop = H - (usageKnown ? CGFloat(52) : CGFloat(30))
         let bodyTop = headerH + 12 + bannerH
         // Adaptive row height: tall when few sessions, shrinking toward a floor as
-        // the count grows so 6–9 sessions pack in before an overflow summary.
+        // the count grows. When subscription quota is unknown, the footer collapses
+        // to a compact hub-status strip so App Store-only panels can fit another
+        // row instead of spending space on unavailable gauges.
         let availH = footerTop - bodyTop
         let maxRowH: CGFloat = 58, minRowH: CGFloat = 42
         let capacityAtMin = max(1, Int((availH / minRowH).rounded(.down)))
@@ -241,11 +244,19 @@ enum TrmnlImageRenderer {
             }
         }
 
-        // Footer: Claude brand mark + 5H/7D quota on one line. The mark labels the
+        // Footer: quota when known; compact hub status when the App Store-only
+        // daemon has no OAuth quota relay. That keeps the session list dense
+        // instead of drawing two permanently-unavailable gauges.
+        fill(pad, footerTop, W - 2 * pad, 2, black)
+        if !usageKnown {
+            text("Hub online", x: pad, top: footerTop + 8, size: 16, bold: true, align: .left)
+            text(summary, x: W - pad, top: footerTop + 9, size: 15, bold: true, align: .right)
+            return
+        }
+
+        // Claude brand mark + 5H/7D quota on one line. The mark labels the
         // block as Claude usage; the reset countdown tucks right after the % (no
         // "resets" filler word), not flushed to the column edge.
-        fill(pad, footerTop, W - 2 * pad, 2, black)
-        let usageKnown = state.usageKnown
         let fTop = footerTop + 18
         let gh: CGFloat = 18
         let markSize: CGFloat = 30
@@ -259,28 +270,13 @@ enum TrmnlImageRenderer {
             let fw = (gaugeW * CGFloat(clampD(pct, 0, 100) / 100)).rounded()
             if fw > 0 { fill(gx, gy, fw, gh, black) }
         }
-        func gaugeUnknown(_ gx: CGFloat, _ gy: CGFloat) {
-            stroke(gx, gy, gaugeW, gh, 1.5)
-            ctx.saveGState()
-            ctx.clip(to: CGRect(x: gx, y: H - gy - gh, width: gaugeW, height: gh))
-            ctx.setStrokeColor(black); ctx.setLineWidth(1)
-            var hx = gx - gh
-            while hx < gx + gaugeW {
-                ctx.beginPath()
-                ctx.move(to: CGPoint(x: hx, y: H - (gy + gh)))
-                ctx.addLine(to: CGPoint(x: hx + gh, y: H - gy))
-                ctx.strokePath()
-                hx += 8
-            }
-            ctx.restoreGState()
-        }
         func quotaInline(_ x0: CGFloat, _ label: String, _ pct: Double, _ resetsAt: String?) {
             let gx = x0 + 30
             let px = gx + gaugeW + 8
             text(label, x: x0, top: fTop, size: 18, bold: true)
-            if usageKnown { gauge(gx, fTop, pct) } else { gaugeUnknown(gx, fTop) }
-            text(usageKnown ? "\(Int(pct.rounded()))%" : "—", x: px, top: fTop, size: 18, mono: true)
-            if usageKnown, let r = Self.fmtRemaining(resetsAt), !r.isEmpty {
+            gauge(gx, fTop, pct)
+            text("\(Int(pct.rounded()))%", x: px, top: fTop, size: 18, mono: true)
+            if let r = Self.fmtRemaining(resetsAt), !r.isEmpty {
                 // Tucked right after the % (≈ width of "100%"), not flushed right.
                 text(r, x: px + 50, top: fTop, size: 15, bold: true, align: .left)
             }

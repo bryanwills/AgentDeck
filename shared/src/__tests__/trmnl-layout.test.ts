@@ -149,14 +149,28 @@ describe('renderTrmnlDashboard', () => {
     expect(svg).toContain('Jun 30');
   });
 
-  it('shows an em dash (not 0%) when usage is structurally unknown', () => {
+  it('uses a compact hub footer when usage is structurally unknown', () => {
     const svg = renderTrmnlDashboard(
       { state: 'IDLE', allSessions: [], usageKnown: false },
       { now: NOW },
     );
-    // Must never claim a confident 0% when the hub has no quota data.
-    expect(svg).toContain('—');
+    // Must never claim a confident 0% or waste the footer on unavailable gauges.
+    expect(svg).toContain('Hub online');
+    expect(svg).not.toContain('5H');
+    expect(svg).not.toContain('7D');
     expect(svg).not.toContain('0%');
+  });
+
+  it('uses the compact unknown-quota footer to fit a ninth session on 800x480', () => {
+    const nine = Array.from({ length: 9 }, (_, i) => session(`s${i}`, 'claude-code', 'idle'));
+    const unknown = renderTrmnlDashboard({ state: 'IDLE', allSessions: nine, usageKnown: false }, { now: NOW });
+    const known = renderTrmnlDashboard(
+      { state: 'IDLE', allSessions: nine, usageKnown: true, fiveHourPercent: 42, sevenDayPercent: 18 },
+      { now: NOW },
+    );
+    expect(unknown).toContain('proj-s8');
+    expect(unknown).not.toMatch(/\d+ more/);
+    expect(known).toMatch(/\d+ more/);
   });
 
   it('renders a prominent AWAITING banner when an agent needs the user', () => {
