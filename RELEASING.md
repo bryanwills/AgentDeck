@@ -2,7 +2,7 @@
 
 AgentDeck is a monorepo of independently-shipped artifacts. Each ships on its **own version track** with a prefixed git tag. There is **no single repo-wide version** — Apple, Android, npm, and ESP32 advance separately.
 
-> **Clean slate (2026-06-26):** all prior tags/releases were deleted and every track restarted at `0.1.x`. The Apple app moved to a **new bundle ID** (`bound.serendipity.agent.deck`) so App Store Connect starts fresh at `0.1.0 / build 1` — the old `bound.serendipity.agentdeck.dashboard` record carried an immovable build floor (build 8 / 1.0.6) that cannot be renumbered downward.
+> **Clean slate (2026-06-26):** all prior tags/releases were deleted and Apple/Android/ESP32 restarted at `0.1.x`. The Apple app moved to a **new bundle ID** (`bound.serendipity.agent.deck`) so App Store Connect starts fresh at `0.1.0 / build 1` — the old `bound.serendipity.agentdeck.dashboard` record carried an immovable build floor (build 8 / 1.0.6) that cannot be renumbered downward. **npm could not restart** — `0.1.0` already exists on the registry (immutable); its source version is cosmetic only (see the npm note below).
 
 ## Tracks
 
@@ -10,7 +10,7 @@ AgentDeck is a monorepo of independently-shipped artifacts. Each ships on its **
 |---|---|---|---|---|
 | **Apple** (iOS+macOS) | `apple/project.yml` → `MARKETING_VERSION` + `CURRENT_PROJECT_VERSION` | `apple-v*` | `.github/workflows/apple-release.yml` → TestFlight | 0.1.0 / build 1 |
 | **Android** | `android/app/build.gradle.kts` → `versionName` + `versionCode` | `android-v*` | `.github/workflows/android-release.yml` → APK Release | 0.1.0 / code 1 |
-| **npm** (`@agentdeck/*`) | each `package.json` `version` (kept in lockstep) | `npm-v*` | manual `pnpm -r publish` | 0.1.0 |
+| **npm** (`@agentdeck/*`) | each `package.json` `version` (kept in lockstep) | `npm-v*` | manual `pnpm -r publish` | 0.1.0 source (registry latest 0.2.x — see note) |
 | **ESP32** firmware | `esp32/src/config.h` → `FIRMWARE_VERSION` | `esp32-v*` | `.github/workflows/esp32-release.yml` | 0.1.1 |
 
 ## Hard constraints (why we can't just renumber)
@@ -37,8 +37,13 @@ Bump versions forward; never reuse or lower a number that has already shipped.
 3. Local build: `bash scripts/build-android-release.sh` → `dist/agentdeck-v<VERSION>.apk`.
 
 ### npm (`@agentdeck/*`)
-1. Bump `version` in every workspace `package.json` in lockstep (internal deps use `workspace:*`, so no cross-pin edits needed).
-2. `pnpm build` then `pnpm -r publish --access public`.
+> **npm did NOT restart at 0.1.0.** `@agentdeck/shared`, `bridge`, and `setup` were *originally* published at 0.1.0, so those versions already exist and are immutable — registry `latest` is 0.2.x. The 2026-06-26 reset set the **source** `version` fields to 0.1.0 for cosmetic cross-track uniformity, but **nothing is published at 0.1.0 from the current code** and `pnpm publish` will skip/refuse it. Only these three packages are public (`private:false`); `plugin`, `plugin-ulanzi`, `hooks`, and the root are private.
+>
+> The next time you actually want to ship current code to npm, you **must bump forward past the highest published version** (≥ `0.2.3`) — npm can only go up. Publishing also requires a **2FA-enabled granular access token** (web login alone returns 403).
+
+To publish a real release (forward version):
+1. Bump `version` in every public workspace `package.json` to the next free version (≥ 0.2.3), in lockstep (internal deps use `workspace:*`, so no cross-pin edits needed).
+2. `pnpm build` then `pnpm -r publish --access public` (needs a 2FA granular token in npm auth).
 3. `git tag npm-v<VERSION> && git push origin npm-v<VERSION>`.
 
 ### ESP32 firmware
