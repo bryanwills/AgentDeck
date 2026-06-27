@@ -17,6 +17,10 @@ if (process.platform !== 'darwin') {
 
 mkdirSync(dirname(out), { recursive: true });
 const swiftc = execFileSync('/usr/bin/xcrun', ['--find', 'swiftc'], { encoding: 'utf8' }).trim();
-execFileSync(swiftc, ['-parse-as-library', '-target', target, source, '-o', out], { stdio: 'inherit' });
+// swiftc is run directly (not via `xcrun swiftc`), so SDKROOT isn't set and the
+// stdlib can't be found ("unable to load standard library for target ..."). Pass
+// the SDK path explicitly so the build is reproducible from the npm lifecycle.
+const sdk = execFileSync('/usr/bin/xcrun', ['--sdk', 'macosx', '--show-sdk-path'], { encoding: 'utf8' }).trim();
+execFileSync(swiftc, ['-parse-as-library', '-sdk', sdk, '-target', target, source, '-o', out], { stdio: 'inherit' });
 chmodSync(out, 0o755);
 console.log(`[fm-helper] built ${out}`);
