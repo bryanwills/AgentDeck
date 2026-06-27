@@ -9,15 +9,13 @@ import streamDeck, {
 } from '@elgato/streamdeck';
 import { State } from '@agentdeck/shared';
 import type { AgentLink } from '../agent-link.js';
-import { isEncoderTakeoverActive } from '../encoder-takeover.js';
-import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
 import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
 import {
   encoderRegistry, resetEncoderLayouts,
   setVoiceTextTakeover, isDaemonConnected,
 } from '../encoder-registry.js';
 import { dlog } from '../log.js';
-import { pasteText, osascript, openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
+import { pasteText, openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 import { startLocalRecording, stopLocalRecording, cancelLocalRecording } from '../voice-local.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
@@ -56,7 +54,6 @@ let vaAnimFrame = 0;
 
 /** Update voice assistant indicator on the voice dial LCD. */
 export function updateVoiceAssistantIndicator(vaState: VoiceAssistantState, text?: string): void {
-  const wasActive = currentVaState !== 'idle' && currentVaState !== 'disabled';
   currentVaState = vaState;
   currentVaText = text;
 
@@ -68,7 +65,7 @@ export function updateVoiceAssistantIndicator(vaState: VoiceAssistantState, text
     vaAnimTimer = setInterval(() => {
       vaAnimFrame++;
       // Only refresh if VA is still active and not overridden by push-to-talk
-      if (voiceState === 'idle' && !vtActive && !isEncoderTakeoverActive()) {
+      if (voiceState === 'idle' && !vtActive) {
         refreshVoiceDials();
       }
     }, 80); // ~12fps for smooth pulsing
@@ -95,12 +92,12 @@ export function initVoiceDial(b: AgentLink): void {
 
 export function updateVoiceDialState(state: State): void {
   currentState = state;
-  // Exit VT if encoder takeover active, interactive state incoming (takeover
-  // imminent), or the daemon went down (clear stale transcription so the offline
-  // banner can render coherently across all encoders).
+  // Exit VT if an interactive state is incoming (the keypad detail view takes
+  // over option/permission selection) or the daemon went down (clear stale
+  // transcription so the offline banner renders coherently across encoders).
   const interactiveIncoming = state === State.AWAITING_PERMISSION
     || state === State.AWAITING_OPTION || state === State.AWAITING_DIFF;
-  if (vtActive && (isEncoderTakeoverActive() || interactiveIncoming || !isDaemonConnected())) {
+  if (vtActive && (interactiveIncoming || !isDaemonConnected())) {
     exitVoiceTextTakeover();
   }
   refreshVoiceDials();
@@ -168,7 +165,7 @@ function getVtPanelIds(): string[][] {
 }
 
 function enterVoiceTextTakeover(): void {
-  if (isEncoderTakeoverActive() || vtActive) return;
+  if (vtActive) return;
   vtActive = true;
   vtScrollY = 0;
 
@@ -330,8 +327,6 @@ function refreshVoiceDials(): void {
     return;
   }
 
-  if (isEncoderTakeoverActive()) return;
-
   // Voice text takeover: render to all panels
   if (vtActive && lastTranscription) {
     refreshVoiceTextTakeover();
@@ -394,11 +389,6 @@ export class VoiceDialAction extends SingletonAction {
     if (!encoderRegistry.voiceIds.includes(ev.action.id)) {
       encoderRegistry.voiceIds.push(ev.action.id);
     }
-    // If encoder takeover is active, join the takeover rendering instead of voice feedback
-    if (isEncoderTakeoverActive()) {
-      requestTakeoverRefresh();
-      return;
-    }
     await (ev.action as any).setFeedback(getVoiceFeedback());
   }
 
@@ -408,7 +398,6 @@ export class VoiceDialAction extends SingletonAction {
       return;
     }
     if (isPickerActive()) { void selectProject(); return; }
-    if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
     if (vtActive) { onVtDown(); return; }
 
     if (voiceState === 'error') {
@@ -437,7 +426,6 @@ export class VoiceDialAction extends SingletonAction {
   }
 
   override async onDialUp(_ev: DialUpEvent): Promise<void> {
-    if (isEncoderTakeoverActive()) return;
     if (vtActive) { onVtUp(); return; }
     if (voiceState !== 'recording') return;
 
@@ -482,7 +470,6 @@ export class VoiceDialAction extends SingletonAction {
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     if (!isDaemonConnected()) return;
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
-    if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (vtActive) { onVtRotate(ev.payload.ticks); return; }
   }
 

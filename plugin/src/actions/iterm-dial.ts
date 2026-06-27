@@ -1,10 +1,12 @@
 /**
- * Usage Dial (E3) — dedicated rate limit / token gauge display.
- * UUID kept as iterm-dial for backward profile compatibility.
+ * E3 — Codex usage water-tank dial (Stream Deck+).
  *
- * Pages: overview (5h+7d) → 5h detail → 7d detail → session → extra
- * Rotate: cycle pages. Push: refresh usage. Touch: cycle pages.
- * OC fallback: shows timeline when in OpenClaw session detail view.
+ * Phase 2 redesign: this encoder permanently shows the Codex subscription quota
+ * (5h + 7d water tanks, from `codexRateLimits`) on its 200×100 LCD. When Codex
+ * reports no rate limits the dial falls back to a muted "No Codex usage" note.
+ * The UUID (`iterm-dial`) is kept for backward profile compatibility.
+ *
+ * Rotate / touch: no-op (usage is permanent). Push: request a usage refresh.
  */
 import streamDeck, {
   action,
@@ -16,79 +18,35 @@ import streamDeck, {
   WillDisappearEvent,
   TouchTapEvent,
 } from '@elgato/streamdeck';
-import { State } from '@agentdeck/shared';
-import type { AgentType, AgentCapabilities, OcSessionStatus } from '@agentdeck/shared';
-import { isEncoderTakeoverActive } from '../encoder-takeover.js';
-import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
-import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
-import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, setTakeoverExitCallback, setUpdateUsageDialStateCallback, isDaemonConnected } from '../encoder-registry.js';
+import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, isDaemonConnected } from '../encoder-registry.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
-import { renderUsageOverview, renderUsageDetail, renderUsageSession, renderUsageExtra, renderUsageDisconnected, USAGE_PAGES, type UsagePage } from '../renderers/usage-dial-renderer.js';
-import { type UsageModeData, updateUsageModeData, getUsageModeData, fireUsageRefresh } from '../utility-modes/usage.js';
-import { isInDetailView, getFocusedSession } from './session-slot-button.js';
-import { timelineStore } from '../timeline-store.js';
-import { renderTimeline } from '../renderers/timeline-renderer.js';
+import { renderUsageEncoderDual } from '../renderers/water-tank-gauge.js';
+import { type UsageModeData, updateUsageModeData, getUsageModeData, fireUsageRefresh, buildCodexUsageEncoder } from '../utility-modes/usage.js';
 import type { ConnectionManager } from '../connection-manager.js';
+import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 import { dlog, dinfo } from '../log.js';
 import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
-import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
-
-// Register cross-module callbacks (breaks circular deps via encoder-registry)
-setTakeoverExitCallback(() => resetUsageLayout());
-setUpdateUsageDialStateCallback((state, agentType, sessionStatus, caps) => updateUsageDialState(state, agentType, sessionStatus, caps));
 
 const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
 
-function isOcDetailView(): boolean {
-  if (!isInDetailView()) return false;
-  const session = getFocusedSession();
-  return session?.agentType === 'openclaw';
-}
-
-let currentLayout = PIXMAP_LAYOUT;
-let bridgeRef: ConnectionManager | null = null;
-let currentAgentType: AgentType | null = null;
-let currentCapabilities: AgentCapabilities | null = null;
-let currentSessionStatus: OcSessionStatus | null = null;
-let pageIdx = 0;
+let currentLayout = '';
 let hasReceivedData = false;
 
-export function initUsageDial(bridge: ConnectionManager): void {
-  bridgeRef = bridge;
-  dinfo('UsageDial', 'initUsageDial called');
-  // Timeline store change → re-render when in OC detail view
-  timelineStore.onChange(() => {
-    if (isOcDetailView() && !isEncoderTakeoverActive() && !isVoiceTextTakeoverActive()) {
-      renderTimelineRightPanel();
-    }
-  });
+export function initUsageDial(_bridge: ConnectionManager): void {
+  dinfo('CodexUsageDial', 'initUsageDial called');
 }
 
-/** Called from plugin.ts when usage_update arrives */
+/** Called from plugin.ts when usage_update arrives. */
 export function updateUsageDialData(data: UsageModeData): void {
   updateUsageModeData(data);
   hasReceivedData = true;
   refreshUsageDials();
 }
 
-export function updateUsageDialState(_state: State, agentType?: AgentType | null, sessionStatus?: OcSessionStatus | null, capabilities?: AgentCapabilities | null): void {
-  // Drop cached usage on real daemon disconnect so the dial stops showing stale
-  // numbers. Usage is daemon-global, so a session-level DISCONNECTED (transient
-  // during multi-session switching, daemon still up) must NOT clear it.
+/** Called from plugin.ts on daemon connect/disconnect to redraw (offline banner). */
+export function updateUsageDialState(): void {
   if (!isDaemonConnected()) hasReceivedData = false;
-  if (agentType !== undefined) currentAgentType = agentType;
-  if (capabilities !== undefined) currentCapabilities = capabilities ?? null;
-  if (sessionStatus !== undefined) currentSessionStatus = sessionStatus ?? null;
-
-  if (isOcDetailView()) {
-    renderTimelineRightPanel();
-    return;
-  }
   refreshUsageDials();
-}
-
-export function resetUsageLayout(): void {
-  currentLayout = '';
 }
 
 function ensurePixmapLayout(): void {
@@ -100,16 +58,8 @@ function ensurePixmapLayout(): void {
   }
 }
 
-function renderTimelineRightPanel(): void {
-  if (encoderRegistry.usageIds.length === 0) return;
-  ensurePixmapLayout();
-  const { panels } = renderTimeline(
-    timelineStore.getGroupedDisplay(),
-    timelineStore.getScrollIndex(),
-    timelineStore.isDetailMode(),
-    currentSessionStatus,
-  );
-  const feedback = { canvas: svgToDataUrl(panels[1]) };
+function setCanvasFeedback(svg: string): void {
+  const feedback = { canvas: svgToDataUrl(svg) };
   for (const id of encoderRegistry.usageIds) {
     const dial = streamDeck.actions.getActionById(id) as any;
     if (dial) void dial.setFeedback(feedback).catch(() => {});
@@ -118,55 +68,16 @@ function renderTimelineRightPanel(): void {
 
 function refreshUsageDials(): void {
   if (encoderRegistry.usageIds.length === 0) return;
-  // Offline banner is highest priority and all-or-nothing across the 4 encoders.
-  // Gate on real daemon-down, NOT session-level currentState === DISCONNECTED
-  // (which flips transiently during multi-session switching while the daemon is up).
-  if (!isDaemonConnected()) {
-    ensurePixmapLayout();
-    const feedback = { canvas: svgToDataUrl(renderOfflineTouchStrip(2)) };
-    for (const id of encoderRegistry.usageIds) {
-      const dial = streamDeck.actions.getActionById(id) as any;
-      if (dial) void dial.setFeedback(feedback).catch(() => {});
-    }
-    return;
-  }
-  if (isEncoderTakeoverActive()) return;
-  if (isVoiceTextTakeoverActive()) return;
-  // OC detail view: redirect to timeline rendering
-  if (isOcDetailView()) {
-    renderTimelineRightPanel();
-    return;
-  }
-
   ensurePixmapLayout();
 
-  const data = getUsageModeData();
-  let svg: string;
-
-  // No live usage to show — distinct placeholder labels: "Waiting..." for the
-  // genuine first-payload-not-yet case; "No usage data" for stale / missing-subscription.
-  const usageUnavailable = data.usageStale === true || data.fiveHourPercent == null;
-  if (!hasReceivedData) {
-    svg = renderUsageDisconnected(true, 'waiting');
-  } else if (usageUnavailable) {
-    svg = renderUsageDisconnected(true, 'unavailable');
-  } else {
-    const page = USAGE_PAGES[pageIdx];
-    switch (page) {
-      case 'overview': svg = renderUsageOverview(data); break;
-      case '5h': svg = renderUsageDetail(data, '5h'); break;
-      case '7d': svg = renderUsageDetail(data, '7d'); break;
-      case 'session': svg = renderUsageSession(data); break;
-      case 'extra': svg = renderUsageExtra(data); break;
-      default: svg = renderUsageOverview(data);
-    }
+  // Offline banner is highest priority and all-or-nothing across the 4 encoders.
+  if (!isDaemonConnected()) {
+    setCanvasFeedback(renderOfflineTouchStrip(2));
+    return;
   }
+  if (isVoiceTextTakeoverActive()) return;
 
-  const feedback = { canvas: svgToDataUrl(svg) };
-  for (const id of encoderRegistry.usageIds) {
-    const dial = streamDeck.actions.getActionById(id) as any;
-    if (dial) void dial.setFeedback(feedback).catch(() => {});
-  }
+  setCanvasFeedback(renderUsageEncoderDual(buildCodexUsageEncoder(getUsageModeData(), hasReceivedData)));
 }
 
 @action({ UUID: 'bound.serendipity.agentdeck.iterm-dial' })
@@ -174,19 +85,11 @@ export class UsageDialAction extends SingletonAction {
   static get actionIds(): string[] { return encoderRegistry.usageIds; }
 
   override async onWillAppear(ev: WillAppearEvent): Promise<void> {
-    dinfo('UsageDial', `onWillAppear: id=${ev.action.id}`);
+    dinfo('CodexUsageDial', `onWillAppear: id=${ev.action.id}`);
     if (!encoderRegistry.usageIds.includes(ev.action.id)) {
       encoderRegistry.usageIds.push(ev.action.id);
     }
-    if (isEncoderTakeoverActive()) {
-      requestTakeoverRefresh();
-      return;
-    }
-    if (isOcDetailView()) {
-      renderTimelineRightPanel();
-      return;
-    }
-    // Request fresh usage data on appear
+    currentLayout = PIXMAP_LAYOUT;
     fireUsageRefresh();
     refreshUsageDials();
   }
@@ -196,29 +99,13 @@ export class UsageDialAction extends SingletonAction {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
-    if (isEncoderTakeoverActive()) return;
-    if (isVoiceTextTakeoverActive()) return;
-    if (isOcDetailView()) {
-      timelineStore.toggleDetail();
-      return;
-    }
-    // Touch: cycle pages
-    pageIdx = (pageIdx + 1) % USAGE_PAGES.length;
-    refreshUsageDials();
+    if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     if (!isDaemonConnected()) return;
-    if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
-    if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
-    if (isOcDetailView()) {
-      timelineStore.scroll(ev.payload.ticks);
-      return;
-    }
-    // Rotate: cycle pages
-    pageIdx = (pageIdx + ev.payload.ticks + USAGE_PAGES.length) % USAGE_PAGES.length;
-    refreshUsageDials();
+    // Usage is permanent — rotation is a no-op.
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
@@ -226,25 +113,18 @@ export class UsageDialAction extends SingletonAction {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
-    if (isPickerActive()) { void selectProject(); return; }
-    if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
-    if (isOcDetailView()) {
-      timelineStore.toggleDetail();
-      return;
-    }
-    // Push: refresh usage data
+    // Push: pull fresh usage.
     fireUsageRefresh();
-    dlog('UsageDial', 'push: requesting usage refresh');
+    dlog('CodexUsageDial', 'push: requesting usage refresh');
   }
 
   override async onDialUp(_ev: DialUpEvent): Promise<void> {
-    if (isEncoderTakeoverActive()) return;
     if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
   }
 
   override onWillDisappear(ev: WillDisappearEvent): void {
-    dinfo('UsageDial', `onWillDisappear: id=${ev.action.id}`);
+    dinfo('CodexUsageDial', `onWillDisappear: id=${ev.action.id}`);
     const idx = encoderRegistry.usageIds.indexOf(ev.action.id);
     if (idx !== -1) {
       encoderRegistry.usageIds.splice(idx, 1);

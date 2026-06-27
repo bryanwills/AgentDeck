@@ -8,12 +8,6 @@ import {
   VoiceStateEvent,
   State,
   PermissionMode,
-  OPENCLAW_CAPABILITIES,
-  OPENCODE_CAPABILITIES,
-  CODEX_CLI_CAPABILITIES,
-  CODEX_APP_CAPABILITIES,
-  CLAUDE_CODE_CAPABILITIES,
-  ANTIGRAVITY_CAPABILITIES,
   OPENCLAW_GATEWAY_PORT,
   type AgentType,
   type BillingType,
@@ -29,11 +23,6 @@ import { updateUsageModeData, setUsageRefreshCallback } from './utility-modes/us
 import { updatePermissionModeData, setPermissionModeSwitchCallback } from './utility-modes/permission-mode.js';
 import { pushApmeEval, type ApmeEvalEntry } from './utility-modes/apme.js';
 import { updateTowerSessions } from './utility-modes/tower.js';
-import {
-  isEncoderTakeoverActive,
-  enterEncoderTakeover,
-  exitEncoderTakeover,
-} from './encoder-takeover.js';
 import { setVoiceTextExitCallback, setEncoderDaemonConnected } from './encoder-registry.js';
 import { dlog, dinfo } from './log.js';
 import { existsSync } from 'fs';
@@ -44,7 +33,8 @@ import { homedir } from 'os';
 import {
   ResponseDialAction,
   initOptionDial,
-  updateOptionDialState,
+  updateClaudeUsageDial,
+  refreshClaudeUsageDial,
   setOptionSetupRequired,
 } from './actions/option-dial.js';
 import {
@@ -119,20 +109,9 @@ let currentNavigable = false;
 let currentCursorIndex = 0;
 let currentSuggestedPrompt: string | undefined;
 let currentSessionStatus: Record<string, unknown> | null = null;
-let takeoverGeneration = 0;
 let proxiedAgentType: AgentType | null = null;
 let currentVoiceAssistantState: VoiceAssistantState = 'disabled';
 let currentGatewayHasError = false;
-
-/** Resolve capabilities for the current proxied agent type */
-function capsForProxiedAgent(): import('@agentdeck/shared').AgentCapabilities {
-  if (proxiedAgentType === 'openclaw') return OPENCLAW_CAPABILITIES;
-  if (proxiedAgentType === 'opencode') return OPENCODE_CAPABILITIES;
-  if (proxiedAgentType === 'codex-cli') return CODEX_CLI_CAPABILITIES;
-  if (proxiedAgentType === 'codex-app') return CODEX_APP_CAPABILITIES;
-  if (proxiedAgentType === 'antigravity') return ANTIGRAVITY_CAPABILITIES;
-  return connMgr.getCapabilities() ?? CLAUDE_CODE_CAPABILITIES;
-}
 
 function stateFromSession(session?: SessionInfo): State {
   const state = session?.state;
@@ -159,6 +138,7 @@ function primeDetailViewFromSession(session?: SessionInfo): void {
     session?.modelName,
     undefined,
     session?.effortLevel,
+    currentSuggestedPrompt,
   );
 }
 
@@ -279,13 +259,12 @@ initSessionSlots((result) => {
   }
 });
 
-// Refresh other dials when voice text takeover exits
+// Refresh the encoder LCDs (E1 utility, E2 Claude usage, E3 Codex usage) when
+// voice-text takeover exits and releases the borrowed panels.
 setVoiceTextExitCallback(() => {
-  const agentType = proxiedAgentType;
-  const vtCaps = capsForProxiedAgent();
-  updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, vtCaps);
   updateUtilityDialState(currentState);
-  updateUsageDialState(currentState, agentType, currentSessionStatus, vtCaps);
+  refreshClaudeUsageDial();
+  updateUsageDialState();
 });
 
 // ---- Bridge event handlers ----
@@ -368,7 +347,7 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
 
   // v4: Update detail view state if in detail mode
   if (isInDetailView() && stateEventTargetsFocusedDetail(ev)) {
-    updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string, currentEffortLevel);
+    updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string, currentEffortLevel, currentSuggestedPrompt);
   }
 
   broadcastStateUpdate();
@@ -379,7 +358,7 @@ connMgr.on('prompt_options', (ev: PromptOptionsEvent) => {
   currentOptions = ev.options;
   if (ev.question) currentQuestion = ev.question;
   if (isInDetailView()) {
-    updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string, currentEffortLevel);
+    updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string, currentEffortLevel, currentSuggestedPrompt);
   }
   broadcastStateUpdate();
 });
@@ -404,12 +383,16 @@ connMgr.on('usage_update', (ev: UsageEvent) => {
     subscriptions: ev.subscriptions,
     usageStale: ev.usageStale,
   };
-  updateUsageModeData(usageData);
-  updateUsageDialData(usageData);
+  // Codex rate limits (primary≈5h, secondary≈7d) ride alongside the Claude
+  // 5h/7d quota so every usage surface can draw both agents.
+  const merged = { ...usageData, codexRateLimits: ev.codexRateLimits };
+  updateUsageModeData(merged);
+  // SD+ encoders: E2 = Claude usage water-tank, E3 = Codex usage water-tank.
+  updateClaudeUsageDial(merged);
+  updateUsageDialData(merged);
   // v4: feed the pinned list-view water-tank usage tiles (classic SD / XL — no
-  // encoder). Codex rate limits (primary≈5h, secondary≈7d) ride alongside the
-  // Claude 5h/7d quota so the bottom row can draw both agents.
-  updateSlotUsage({ ...usageData, codexRateLimits: ev.codexRateLimits });
+  // encoder, so usage lives on the bottom keypad row).
+  updateSlotUsage(merged);
 });
 
 connMgr.on('connection', (ev: ConnectionEvent) => {
@@ -620,63 +603,23 @@ connMgr.on('disconnected', () => {
   broadcastStateUpdate();
 });
 
-function isInteractiveState(state: State): boolean {
-  return (
-    state === State.AWAITING_PERMISSION ||
-    state === State.AWAITING_OPTION ||
-    state === State.AWAITING_DIFF
-  );
-}
-
 function broadcastStateUpdate(): void {
   // Skip rendering while display is dimmed (Mac display asleep)
   if (displayDimmed) return;
 
-  dlog('Plugin', `broadcast: state=${currentState} mode=${currentMode} opts=${currentOptions.length} takeover=${isEncoderTakeoverActive()}`);
+  dlog('Plugin', `broadcast: state=${currentState} mode=${currentMode} opts=${currentOptions.length}`);
 
-  const agentType = proxiedAgentType;
-  const caps = capsForProxiedAgent();
-
-  // Encoder actions — manage takeover lifecycle
-  const shouldTakeover = isInteractiveState(currentState) && currentOptions.length > 0;
-
-  if (shouldTakeover && !isEncoderTakeoverActive()) {
-    // Exit VT before encoder takeover (clears all panels atomically)
-    updateVoiceDialState(currentState);
-    // Enter takeover, then update option dial with full context
-    const enterGen = ++takeoverGeneration;
-    void enterEncoderTakeover().then(() => {
-      if (enterGen !== takeoverGeneration) return; // superseded by newer transition
-      updateOptionDialState(
-        currentState, currentOptions, currentQuestion, currentTool,
-        currentNavigable, currentCursorIndex, currentToolInput,
-        currentSuggestedPrompt, agentType, currentSessionStatus, caps,
-      );
-    });
-  } else if (!shouldTakeover && isEncoderTakeoverActive()) {
-    // Exit takeover, then restore all dials
-    const exitGen = ++takeoverGeneration;
-    void exitEncoderTakeover().then(() => {
-      if (exitGen !== takeoverGeneration) return; // superseded by newer transition
-      updateVoiceDialState(currentState);
-      updateUtilityDialState(currentState);
-      updateUsageDialState(currentState, agentType, currentSessionStatus, caps);
-    });
-    updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, caps);
-  } else if (shouldTakeover) {
-    // Already in takeover — just refresh
-    updateOptionDialState(
-      currentState, currentOptions, currentQuestion, currentTool,
-      currentNavigable, currentCursorIndex, currentToolInput,
-      currentSuggestedPrompt, agentType, currentSessionStatus, caps,
-    );
-  } else {
-    // Not in takeover, not entering — normal updates
-    updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, caps);
-    updateVoiceDialState(currentState);
-    updateUtilityDialState(currentState);
-    updateUsageDialState(currentState, agentType, currentSessionStatus, caps);
-  }
+  // Phase 2 SD+ encoder roles are fixed: E1 utility, E2 Claude usage, E3 Codex
+  // usage, E4 voice. None get commandeered for AWAITING anymore — option /
+  // permission selection lives on the keypad detail view (session-slot), which
+  // is driven by updateDetailViewState. The usage encoders are permanent; we
+  // still repaint them here so display-wake / voice-text-takeover-exit restore
+  // them. (Each refresh is a no-op SVG redraw and self-gates on voice-text
+  // takeover + daemon-down.)
+  updateVoiceDialState(currentState);
+  updateUtilityDialState(currentState);
+  refreshClaudeUsageDial();
+  updateUsageDialState();
 }
 
 // ---- Register actions ----

@@ -1,31 +1,30 @@
 /**
- * Registry for encoder action IDs.
- * Breaks circular dependency between encoder-takeover.ts and action modules.
- * Each action module registers its IDs here; encoder-takeover reads from here.
+ * Registry for encoder action IDs (Stream Deck+ E1–E4).
+ * Each action module registers its IDs here so cross-cutting features (voice-text
+ * takeover, offline banner, project picker) can address every encoder LCD.
  *
- * Takeover dynamically assigns panels based on active encoder count:
- *   4 groups: Context → Focus → List → Detail
- *   3 groups: Context → Focus → List
- *   2 groups: Focus → List
- *   1 group:  Focus
+ * Phase 2 SD+ roles:
+ *   E1 = utility (volume/mic/etc.)   — utilityIds
+ *   E2 = Claude usage water-tank     — optionIds (UUID kept as `option-dial`)
+ *   E3 = Codex usage water-tank      — usageIds  (UUID kept as `iterm-dial`)
+ *   E4 = voice                       — voiceIds
  */
 export const encoderRegistry = {
-  utilityIds: [] as string[],  // Utility Dial    — takeover: Context view (4-encoder mode)
-  optionIds: [] as string[],   // Response Dial   — takeover: Focus view
-  voiceIds: [] as string[],    // Voice Input     — takeover: List view
-  usageIds: [] as string[],    // Usage Dial      — rate limit / token gauges
+  utilityIds: [] as string[],  // Utility Dial (E1)
+  optionIds: [] as string[],   // Claude usage dial (E2)
+  voiceIds: [] as string[],    // Voice dial (E4)
+  usageIds: [] as string[],    // Codex usage dial (E3)
 };
 
 /**
- * Layout state tracking for each encoder type.
- * Shared here to avoid circular deps between encoder-takeover and action modules.
- * Each action module reads/writes its own entry; encoder-takeover resets all on exit.
+ * Layout state tracking shared with action modules (and the project picker).
+ * The voice-text takeover resets this when it releases the borrowed encoder LCDs.
  */
 export const encoderLayout = {
   option: '',
 };
 
-/** Reset all layout tracking (called by encoder-takeover on exit). */
+/** Reset layout tracking (called when voice-text takeover exits). */
 export function resetEncoderLayouts(): void {
   encoderLayout.option = '';
 }
@@ -88,24 +87,9 @@ export function handleVtUp(): void {
   _vtUpHandler?.();
 }
 
-// ─── Cross-module callbacks (break circular deps) ────────────────
-
-// Cycle 1: encoder-takeover → usage-dial.resetUsageLayout
-let _onTakeoverExitCb: (() => void) | null = null;
-export function setTakeoverExitCallback(cb: () => void): void { _onTakeoverExitCb = cb; }
-export function fireTakeoverExit(): void { _onTakeoverExitCb?.(); }
-
-// Cycle 2: option-dial → encoder-takeover.refreshEncoderTakeover
-let _refreshTakeoverCb: ((...args: any[]) => void) | null = null;
-export function setRefreshTakeoverCallback(cb: (...args: any[]) => void): void { _refreshTakeoverCb = cb; }
-export function fireRefreshTakeover(...args: any[]): void { _refreshTakeoverCb?.(...args); }
-
-// Cycle 3: usage-dial ↔ session-slot (switchToPort only)
-let _switchToPortCb: ((port: number) => void) | null = null;
-export function setSwitchToPortCallback(cb: (port: number) => void): void { _switchToPortCb = cb; }
-export function fireSwitchToPort(port: number): void { _switchToPortCb?.(port); }
-
-// Cycle 4: plugin.ts → usage-dial.updateUsageDialState
-let _updateUsageDialStateCb: ((...args: any[]) => void) | null = null;
-export function setUpdateUsageDialStateCallback(cb: (...args: any[]) => void): void { _updateUsageDialStateCb = cb; }
-export function fireUpdateUsageDialState(...args: any[]): void { _updateUsageDialStateCb?.(...args); }
+// The encoder option-TAKEOVER (E1–E4 commandeered for AWAITING option/permission
+// selection) was retired in the Phase 2 SD+ redesign: E2/E3 now permanently show
+// Claude/Codex usage, and option/permission selection lives on the keypad detail
+// view (session-slot). The takeover cross-module callback cycles were removed
+// along with encoder-takeover.ts; only the voice-text-takeover wiring above
+// remains (it still borrows the encoder LCDs for transcription review).

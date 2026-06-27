@@ -128,6 +128,27 @@ const REVIEW_ICON_SVG = `<rect x="42" y="18" width="60" height="48" rx="4" fill=
 const COMMIT_ICON_SVG = `<circle cx="72" cy="40" r="20" fill="none" stroke="#22c55e" stroke-width="2"/><polyline points="62,40 70,48 84,32" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"/>`;
 const CLEAR_ICON_SVG = `<line x1="52" y1="24" x2="92" y2="64" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/><line x1="92" y1="24" x2="52" y2="64" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>`;
 
+// Suggested-prompt quick-send (relocated from the SD+ E2 idle encoder rotate/press
+// to a keypad button). A spark/lightbulb glyph; amber to read as a hint, not a
+// command. The full suggestion rides `prompt`; the subtitle previews it.
+const SUGGEST_ICON_SVG = [
+  `<path d="M72 18a24 24 0 0 0-14 43c3 2 4 5 4 8v3h20v-3c0-3 1-6 4-8a24 24 0 0 0-14-43z" fill="#f59e0b" opacity="0.18" stroke="#fbbf24" stroke-width="2.5"/>`,
+  `<line x1="63" y1="78" x2="81" y2="78" stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round"/>`,
+  `<line x1="66" y1="86" x2="78" y2="86" stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round"/>`,
+].join('');
+
+/** Build the suggested-prompt quick-send keypad preset (SD+ idle detail view). */
+function buildSuggestPreset(prompt: string): PresetAction {
+  return {
+    label: 'SUGGESTED',
+    iconSvg: SUGGEST_ICON_SVG,
+    color: '#3a2a0f',
+    textColor: '#fbbf24',
+    subtitle: truncateStr(prompt, 18),
+    prompt,
+  };
+}
+
 const CC_PRESET_DEFS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string; dynamicIcon?: 'model' }> = [
   { label: 'GO ON', iconSvg: GO_ON_ICON_SVG, color: '#1e3a2f', textColor: '#22c55e', prompt: 'go on' },
   { label: 'REVIEW', iconSvg: REVIEW_ICON_SVG, color: '#1e293b', textColor: '#93c5fd', prompt: '/review' },
@@ -183,6 +204,7 @@ export class SessionSlotManager {
   private _detailModelName: string | undefined;
   private _detailEffortLevel: string | undefined;
   private _detailMode: string | undefined;
+  private _detailSuggestedPrompt: string | undefined;
   private _modelSwitching = false;
   private _prevModelName: string | undefined;
   private _modelSwitchStartedAt = 0;
@@ -365,7 +387,7 @@ export class SessionSlotManager {
 
   // ---- Detail view state updates ----
 
-  updateDetailState(state: State, options: PromptOption[], tool?: string, toolInput?: string, question?: string, modelName?: string, mode?: string, effortLevel?: string): void {
+  updateDetailState(state: State, options: PromptOption[], tool?: string, toolInput?: string, question?: string, modelName?: string, mode?: string, effortLevel?: string, suggestedPrompt?: string): void {
     this._detailState = state;
     this._detailOptions = options;
     this._detailTool = tool;
@@ -374,6 +396,9 @@ export class SessionSlotManager {
     this._detailModelName = modelName;
     this._detailEffortLevel = effortLevel;
     this._detailMode = mode;
+    // Suggested prompt only applies in IDLE; clear it otherwise so a stale
+    // suggestion can't leak a quick-send button into a busy/awaiting view.
+    this._detailSuggestedPrompt = state === State.IDLE ? (suggestedPrompt || undefined) : undefined;
     if (!this.isAwaitingDetailState()) {
       this._detailPage = 0;
     } else {
@@ -740,8 +765,23 @@ export class SessionSlotManager {
       return { type: 'next-page', label: `${this._detailPage + 1}/${detailOptionPages}` };
     }
 
-    const contentIdx = contentSlots.indexOf(slot);
+    let contentIdx = contentSlots.indexOf(slot);
     if (contentIdx < 0) return { type: 'empty' };
+
+    // SD+ only: the suggested-prompt quick-send leads the IDLE content slots
+    // (relocated from the retired E2 encoder rotate/press). Gated on the
+    // streamdeckplus family so classic-deck detail layouts are unchanged.
+    const suggestEnabled = layout.family === 'streamdeckplus'
+      && this._detailState === State.IDLE
+      && !!this._detailSuggestedPrompt;
+    if (suggestEnabled) {
+      if (contentIdx === 0) {
+        return { type: 'preset', preset: buildSuggestPreset(this._detailSuggestedPrompt!) };
+      }
+      // Shift the remaining IDLE content down by one so the existing layout
+      // (presets → status cards) follows the suggested button.
+      contentIdx -= 1;
+    }
 
     const optionIndex = detailOptionStart + contentIdx;
     if (isAwaiting) {

@@ -44,7 +44,7 @@ import {
 } from '../renderers/usage-dial-renderer.js';
 
 // ===== water-tank-gauge =====
-import { renderWaterTankGauge } from '../renderers/water-tank-gauge.js';
+import { renderWaterTankGauge, renderUsageEncoderDual } from '../renderers/water-tank-gauge.js';
 
 // ===== response-renderer =====
 import {
@@ -349,6 +349,83 @@ describe('water-tank-gauge snapshots', () => {
   it('renderWaterTankGauge unknown draws an empty tank + dash', () => {
     const svg = renderWaterTankGauge({ agent: 'codex', window: '5h', label: 'CX 5H', usedPercent: 0, known: false });
     expect(svg).toContain('>—<');
+    expect(svg).toMatchSnapshot();
+  });
+});
+
+// ===================================================================
+// Usage Encoder (SD+ 200×100 dual-tank LCD — Phase 2)
+// ===================================================================
+
+describe('usage-encoder dual-tank (SD+ 200x100) snapshots', () => {
+  const reset5h = '2023-11-15T00:27:20Z';
+  const reset7d = '2023-11-20T22:14:20Z';
+
+  it('Claude encoder shows both windows with the terracotta brand hue', () => {
+    const svg = renderUsageEncoderDual({
+      agent: 'claude',
+      title: 'CLAUDE',
+      fiveHour: { label: '5H', usedPercent: 30, resetsAt: reset5h, known: true },
+      sevenDay: { label: '7D', usedPercent: 12, resetsAt: reset7d, known: true },
+    });
+    expect(svg).toContain('width="200" height="100"');
+    expect(svg).toContain('#C07058');     // Claude brand water
+    expect(svg).toContain('>CLAUDE<');
+    expect(svg).toContain('>5H<');
+    expect(svg).toContain('>7D<');
+    expect(svg).toContain('>70%<');        // 5h remaining = 100−30
+    expect(svg).toContain('>88%<');        // 7d remaining = 100−12
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('Codex encoder uses the blue brand hue', () => {
+    const svg = renderUsageEncoderDual({
+      agent: 'codex',
+      title: 'CODEX',
+      fiveHour: { label: '5H', usedPercent: 55, resetsAt: reset5h, known: true },
+      sevenDay: { label: '7D', usedPercent: 88, resetsAt: reset7d, known: true },
+    });
+    expect(svg).toContain('#6166E0');     // Codex brand water
+    expect(svg).toContain('>CODEX<');
+    expect(svg).toContain('>45%<');        // 5h remaining
+    expect(svg).toContain('>12%<');        // 7d remaining
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('Codex encoder renders a muted note when no rate limits are present', () => {
+    const svg = renderUsageEncoderDual({
+      agent: 'codex',
+      title: 'CODEX',
+      fiveHour: { label: '5H', usedPercent: 0, known: false },
+      sevenDay: { label: '7D', usedPercent: 0, known: false },
+      note: 'No Codex usage',
+    });
+    expect(svg).toContain('No Codex usage');
+    expect(svg).not.toContain('%');        // tanks suppressed in note mode
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('Waiting note before the first usage payload', () => {
+    const svg = renderUsageEncoderDual({
+      agent: 'claude',
+      title: 'CLAUDE',
+      fiveHour: { label: '5H', usedPercent: 0, known: false },
+      sevenDay: { label: '7D', usedPercent: 0, known: false },
+      note: 'Waiting…',
+    });
+    expect(svg).toContain('Waiting…');
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('a single unknown window draws a dash tank, the other a real tank', () => {
+    const svg = renderUsageEncoderDual({
+      agent: 'codex',
+      title: 'CODEX',
+      fiveHour: { label: '5H', usedPercent: 40, resetsAt: reset5h, known: true },
+      sevenDay: { label: '7D', usedPercent: 0, known: false },
+    });
+    expect(svg).toContain('>60%<');        // 5h known
+    expect(svg).toContain('>—<');          // 7d unknown
     expect(svg).toMatchSnapshot();
   });
 });

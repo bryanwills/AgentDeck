@@ -267,6 +267,75 @@ describe('SessionSlotManager detail layout', () => {
   });
 });
 
+// Phase 2: SD+ relocates AWAITING option/permission selection AND the suggested-
+// prompt quick-send onto the keypad (encoders now show usage permanently).
+describe('SD+ keypad relocation (Phase 2)', () => {
+  it('AWAITING permission renders selectable option buttons + ESC on the SD+ keypad', () => {
+    const manager = new SessionSlotManager();
+    manager.updateSessions([makeSession({ state: State.AWAITING_PERMISSION })], false);
+    manager.enterDetailView('session-1');
+    manager.updateDetailState(State.AWAITING_PERMISSION, [
+      { index: 0, label: 'Yes', shortcut: 'y' },
+      { index: 1, label: "Yes, and don't ask again", shortcut: 'a' },
+      { index: 2, label: 'No', shortcut: 'n' },
+    ]);
+
+    // Options are pressable keypad buttons that dispatch select-option.
+    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
+    expect(manager.handleSlotPress(2, SD_PLUS_LAYOUT)).toMatchObject({ action: 'select-option', optionIndex: 0 });
+    expect(manager.handleSlotPress(4, SD_PLUS_LAYOUT)).toMatchObject({ action: 'select-option', optionIndex: 2 });
+    // ESC remains on the last key to cancel.
+    expect(manager.getSlotConfig(7, SD_PLUS_LAYOUT)).toMatchObject({ type: 'esc', label: 'active' });
+    expect(manager.handleSlotPress(7, SD_PLUS_LAYOUT)).toMatchObject({ action: 'esc' });
+  });
+
+  it('shows a SUGGESTED quick-send button leading the IDLE detail content on SD+', () => {
+    const manager = new SessionSlotManager();
+    manager.updateSessions([makeSession({ state: State.IDLE })], false);
+    manager.enterDetailView('session-1');
+    manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'claude-opus-4-8', undefined, undefined, 'run the test suite');
+
+    // Leading content slot (slot 2 on SD+) = the suggested-prompt preset.
+    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({
+      type: 'preset',
+      preset: { label: 'SUGGESTED', prompt: 'run the test suite' },
+    });
+    // Pressing it sends the suggestion as a prompt.
+    expect(manager.handleSlotPress(2, SD_PLUS_LAYOUT)).toMatchObject({ action: 'send-prompt', promptText: 'run the test suite' });
+    // The CC quick-action presets follow (shifted by one).
+    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'GO ON' } });
+  });
+
+  it('does NOT add a SUGGESTED button on classic Stream Deck (behavior unchanged)', () => {
+    const manager = new SessionSlotManager();
+    manager.updateSessions([makeSession({ state: State.IDLE })], false);
+    manager.enterDetailView('session-1');
+    manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'claude-opus-4-8', undefined, undefined, 'run the test suite');
+
+    const suggested = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT))
+      .filter(c => c.type === 'preset' && c.preset?.label === 'SUGGESTED');
+    expect(suggested).toHaveLength(0);
+    // Classic IDLE detail still leads with the CC quick-action presets.
+    const firstContent = manager.getSlotConfig(2, SD_CLASSIC_LAYOUT);
+    expect(firstContent).toMatchObject({ type: 'preset', preset: { label: 'GO ON' } });
+  });
+
+  it('drops the SUGGESTED button when the session leaves IDLE', () => {
+    const manager = new SessionSlotManager();
+    manager.updateSessions([makeSession({ state: State.IDLE })], false);
+    manager.enterDetailView('session-1');
+    manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'm', undefined, undefined, 'do the thing');
+    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ preset: { label: 'SUGGESTED' } });
+
+    // A PROCESSING update with a stale suggestion must not surface the button.
+    manager.updateDetailState(State.PROCESSING, [], 'Edit', 'x.ts', undefined, 'm', undefined, undefined, 'do the thing');
+    const suggested = [0, 1, 2, 3, 4, 5, 6, 7]
+      .map(i => manager.getSlotConfig(i, SD_PLUS_LAYOUT))
+      .filter(c => c.type === 'preset' && c.preset?.label === 'SUGGESTED');
+    expect(suggested).toHaveLength(0);
+  });
+});
+
 describe('SessionSlotManager list-view usage tiles', () => {
   const fewSessions = (n: number) =>
     Array.from({ length: n }, (_, i) => makeSession({ id: `s${i}`, port: 9121 + i, projectName: `p${i}` }));

@@ -109,8 +109,9 @@ export function updateDetailViewState(
   modelName?: string,
   mode?: string,
   effortLevel?: string,
+  suggestedPrompt?: string,
 ): void {
-  manager.updateDetailState(state, options, tool, toolInput, question, modelName, mode, effortLevel);
+  manager.updateDetailState(state, options, tool, toolInput, question, modelName, mode, effortLevel, suggestedPrompt);
   if (manager.view === 'detail') refreshAll();
 }
 

@@ -10,13 +10,11 @@ import streamDeck, {
   TouchTapEvent,
 } from '@elgato/streamdeck';
 import { State } from '@agentdeck/shared';
-import { isEncoderTakeoverActive } from '../encoder-takeover.js';
-import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
 import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
 import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, isDaemonConnected } from '../encoder-registry.js';
 import { createModes, modeDots, type UtilityMode } from '../utility-modes/index.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
-import { renderUtilityGeneric, renderUtilityMedia, renderSetupUtility, type UtilityRenderData } from '../renderers/utility-renderer.js';
+import { renderUtilityGeneric, renderUtilityMedia, type UtilityRenderData } from '../renderers/utility-renderer.js';
 import { dlog, dinfo, dwarn } from '../log.js';
 import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
@@ -81,7 +79,7 @@ export function initUtilityDial(): void {
 export function updateUtilityDialState(_state: State): void {
   // Utility modes (volume/media/etc.) are session-independent; the offline banner
   // and input gating now key off isDaemonConnected(), so session state is unused.
-  // After encoder takeover exit, layout was changed — force re-apply on next refresh.
+  // Force layout re-apply on next refresh (covers voice-text-takeover exit).
   currentLayout = '';
   refreshUtilityDials();
 }
@@ -110,7 +108,6 @@ export function refreshUtilityDials(): void {
     return;
   }
 
-  if (isEncoderTakeoverActive()) return;
   if (isVoiceTextTakeoverActive()) return;
 
   if (modes.length === 0) return;
@@ -170,11 +167,6 @@ export class UtilityDialAction extends SingletonAction {
       void ev.action.setSettings(settings as Record<string, JsonValue>).catch(() => {});
     }
     rebuildModes();
-    // If encoder takeover is active, join the takeover rendering instead of utility feedback
-    if (isEncoderTakeoverActive()) {
-      requestTakeoverRefresh();
-      return;
-    }
     refreshUtilityDials();
   }
 
@@ -186,12 +178,11 @@ export class UtilityDialAction extends SingletonAction {
   }
 
   override async onTouchTap(ev: TouchTapEvent): Promise<void> {
-    dlog('UtilDial', `onTouchTap: takeover=${isEncoderTakeoverActive()} modes=${modes.length} hold=${ev.payload.hold}`);
+    dlog('UtilDial', `onTouchTap: modes=${modes.length} hold=${ev.payload.hold}`);
     if (!isDaemonConnected()) {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
-    if (isEncoderTakeoverActive()) return;
     if (modes.length <= 1) return;
 
     // Pause current mode (stops polling etc. but preserves state)
@@ -214,10 +205,9 @@ export class UtilityDialAction extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
-    dlog('UtilDial', `onDialRotate: takeover=${isEncoderTakeoverActive()} modes=${modes.length} ticks=${ev.payload.ticks}`);
+    dlog('UtilDial', `onDialRotate: modes=${modes.length} ticks=${ev.payload.ticks}`);
     if (!isDaemonConnected()) return;
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
-    if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
     if (modes.length === 0) return;
 
@@ -227,19 +217,17 @@ export class UtilityDialAction extends SingletonAction {
   }
 
   override async onDialDown(ev: DialDownEvent): Promise<void> {
-    dlog('UtilDial', `onDialDown: takeover=${isEncoderTakeoverActive()} modes=${modes.length}`);
+    dlog('UtilDial', `onDialDown: modes=${modes.length}`);
     if (!isDaemonConnected()) {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
     if (isPickerActive()) { void selectProject(); return; }
-    if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
     dialDownTime = Date.now();
   }
 
   override async onDialUp(_ev: DialUpEvent): Promise<void> {
-    if (isEncoderTakeoverActive()) return;
     if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
     if (modes.length === 0) return;
 
