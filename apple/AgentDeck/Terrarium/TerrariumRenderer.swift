@@ -9,6 +9,7 @@ final class TerrariumRenderer {
     private var octopuses: [String: OctopusCreature] = [:]
     private var clouds: [String: CloudCreature] = [:]
     private var opencodeCreatures: [String: OpenCodeCreature] = [:]
+    private var antigravityCreatures: [String: AntigravityCreature] = [:]
     private let crayfish = CrayfishCreature()
     private let tetra = DataParticleSystem()
     private let bubbles = BubbleSystem()
@@ -35,6 +36,7 @@ final class TerrariumRenderer {
     private var octoBubbleTimer: Float = 0
     private var crayfishBubbleTimer: Float = 0
     private var opencodeBubbleTimer: Float = 0
+    private var antigravityBubbleTimer: Float = 0
 
     // Focus halo
     private var focusedSessionId: String?
@@ -74,6 +76,7 @@ final class TerrariumRenderer {
         syncOctopuses(state: state)
         syncClouds(state: state)
         syncOpenCode(state: state)
+        syncAntigravity(state: state)
 
         // Focus halo state
         focusedSessionId = state.focusedSessionId
@@ -83,6 +86,7 @@ final class TerrariumRenderer {
             return octopuses[id] != nil ||
                 clouds[id] != nil ||
                 opencodeCreatures[id] != nil ||
+                antigravityCreatures[id] != nil ||
                 (isCrayfishFocusId(id) && crayfish.visible)
         }()
         let presenceTarget: Float = hasVisibleFocus ? 1.0 : 0.0
@@ -105,6 +109,9 @@ final class TerrariumRenderer {
         sand.creaturePositions = octPositions
         for oc in opencodeCreatures.values where oc.visualState != .dormant {
             sand.creaturePositions.append(oc.currentPosition())
+        }
+        for ag in antigravityCreatures.values {
+            sand.creaturePositions.append(ag.currentPosition())
         }
         if crayfish.visible {
             sand.creaturePositions.append(crayfish.currentPosition())
@@ -141,6 +148,14 @@ final class TerrariumRenderer {
                 bubbles.emitCreatureBubbles(x: pos.x, y: pos.y - 0.02, count: 1)
             }
         }
+        antigravityBubbleTimer += dt
+        if antigravityBubbleTimer >= TerrariumTiming.octoBubbleInterval {
+            antigravityBubbleTimer = 0
+            for ag in antigravityCreatures.values where ag.visualState != .sleeping {
+                let pos = ag.currentPosition()
+                bubbles.emitCreatureBubbles(x: pos.x, y: pos.y - 0.02, count: 1)
+            }
+        }
 
         // Tetra coupling — working octopi + pulsing jellyfish attract fish
         var workingPositions = state.creatures
@@ -151,6 +166,9 @@ final class TerrariumRenderer {
             .map { ($0.homeX, $0.homeY) }
         workingPositions += state.opencodeCreatures
             .filter { $0.state == .pulsing }
+            .map { ($0.homeX, $0.homeY) }
+        workingPositions += state.antigravityCreatures
+            .filter { $0.state == .working }
             .map { ($0.homeX, $0.homeY) }
         tetra.octopusPositions = workingPositions
         tetra.crayfishPosition = crayfish.visible ? crayfish.currentPosition() : nil
@@ -166,6 +184,9 @@ final class TerrariumRenderer {
         }
         for oc in opencodeCreatures.values {
             oc.update(dt: dt, state: state)
+        }
+        for ag in antigravityCreatures.values {
+            ag.update(dt: dt, state: state)
         }
         crayfish.update(dt: dt, state: state)
 
@@ -226,6 +247,11 @@ final class TerrariumRenderer {
             oc.draw(context: &context, size: size)
         }
 
+        // Layer 9.4: Antigravity creatures
+        for ag in antigravityCreatures.values {
+            ag.draw(context: &context, size: size)
+        }
+
         // Layer 9.5: Front-layer fish
         tetra.drawFrontLayer(context: &context, size: size)
 
@@ -263,6 +289,8 @@ final class TerrariumRenderer {
             pos = (cl.currentX, cl.currentY, cl.scale)
         } else if let oc = opencodeCreatures[id] {
             pos = (oc.currentX, oc.currentY, oc.scale)
+        } else if let ag = antigravityCreatures[id] {
+            pos = (ag.currentX, ag.currentY, ag.scale)
         } else if isCrayfishFocusId(id), crayfish.visible {
             let cp = crayfish.currentPosition()
             pos = (cp.x, cp.y, 1.1)
@@ -408,6 +436,39 @@ final class TerrariumRenderer {
         }
     }
 
+    private func syncAntigravity(state: TerrariumState) {
+        let currentIds = Set(state.antigravityCreatures.map(\.id))
+        let existingIds = Set(antigravityCreatures.keys)
+
+        // Remove departed
+        for id in existingIds.subtracting(currentIds) {
+            antigravityCreatures.removeValue(forKey: id)
+        }
+
+        // Add new or update existing
+        for creature in state.antigravityCreatures {
+            if antigravityCreatures[creature.id] == nil {
+                let ag = AntigravityCreature(
+                    sessionId: creature.id,
+                    homeX: creature.homeX,
+                    homeY: creature.homeY,
+                    scale: creature.scale
+                )
+                ag.displayName = creature.projectName
+                ag.onAskingExit = { [weak self] in
+                    self?.bubbles.emitPopBurst(x: creature.homeX, y: creature.homeY)
+                }
+                antigravityCreatures[creature.id] = ag
+            } else {
+                let ag = antigravityCreatures[creature.id]!
+                ag.homeX = creature.homeX
+                ag.homeY = creature.homeY
+                ag.scale = creature.scale
+                ag.displayName = creature.projectName
+            }
+        }
+    }
+
     // MARK: - Hit Testing
 
     /// Returns the session ID of the creature nearest to the given normalized point (0..1),
@@ -439,6 +500,16 @@ final class TerrariumRenderer {
         for (id, oc) in opencodeCreatures {
             let dx = oc.currentX - nx
             let dy = oc.currentY - ny
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                bestId = id
+            }
+        }
+
+        for (id, ag) in antigravityCreatures {
+            let dx = ag.currentX - nx
+            let dy = ag.currentY - ny
             let dist = sqrt(dx * dx + dy * dy)
             if dist < bestDist {
                 bestDist = dist

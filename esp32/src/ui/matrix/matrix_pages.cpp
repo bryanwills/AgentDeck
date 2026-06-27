@@ -266,6 +266,24 @@ static const uint8_t SPR_OPENCODE_ACC[6] = {  // dim inner shadow fill (drawn in
     0b01110,
     0b00000,
 };
+// Antigravity is the canonical peak/arc mark — a rising triangular peak (matches
+// antigravity.svg). The body is the bright peak; the apex gets a lit accent.
+static const uint8_t SPR_ANTIGRAVITY[6] = {
+    0b00100,
+    0b00100,
+    0b01110,
+    0b01110,
+    0b11011,
+    0b10001,
+};
+static const uint8_t SPR_ANTIGRAVITY_ACC[6] = {  // lit apex highlight
+    0b00100,
+    0b00000,
+    0b00000,
+    0b00000,
+    0b00000,
+    0b00000,
+};
 static const uint8_t SPR_CRAYFISH[6] = {
     0b10001, 0b01110, 0b11111, 0b01110, 0b00100, 0b01010
 };
@@ -419,7 +437,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
     CrayfishState cfState = g_state.crayfishState;
 
     // Collect non-openclaw sessions with agent type
-    enum AgentKind { AGENT_CLAUDE, AGENT_CODEX, AGENT_OPENCODE };
+    enum AgentKind { AGENT_CLAUDE, AGENT_CODEX, AGENT_OPENCODE, AGENT_ANTIGRAVITY };
     struct AgentInfo {
         char state[20];
         AgentKind kind;
@@ -427,7 +445,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
     };
     AgentInfo agents[6];
     int agentCount = 0;
-    int claudeSeen = 0, codexSeen = 0, opencodeSeen = 0;
+    int claudeSeen = 0, codexSeen = 0, opencodeSeen = 0, antigravitySeen = 0;
     bool openclawAlive = false;
 
     for (int i = 0; i < sessionCount && agentCount < 6; i++) {
@@ -445,6 +463,9 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         } else if (strcmp(g_state.sessions[i].agentType, "opencode") == 0) {
             agents[agentCount].kind = AGENT_OPENCODE;
             agents[agentCount].instanceIdx = opencodeSeen++;
+        } else if (strcmp(g_state.sessions[i].agentType, "antigravity") == 0) {
+            agents[agentCount].kind = AGENT_ANTIGRAVITY;
+            agents[agentCount].instanceIdx = antigravitySeen++;
         } else if (strcmp(g_state.sessions[i].agentType, "claude-code") == 0) {
             agents[agentCount].kind = AGENT_CLAUDE;
             agents[agentCount].instanceIdx = claudeSeen++;
@@ -532,6 +553,10 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
                     // Warm light gray pulsing toward bright (matches the #F1ECEC mark), not cyan.
                     baseColor = CRGB(70 + (uint8_t)(140 * pulse), 66 + (uint8_t)(132 * pulse), 66 + (uint8_t)(132 * pulse));
                     break;
+                case AGENT_ANTIGRAVITY:
+                    // Cool light gray pulsing toward bright (matches the #D2D6DC mark).
+                    baseColor = CRGB(70 + (uint8_t)(140 * pulse), 72 + (uint8_t)(142 * pulse), 76 + (uint8_t)(144 * pulse));
+                    break;
                 default: // AGENT_CLAUDE
                     baseColor = CRGB(50 + (uint8_t)(150 * pulse), 30 + (uint8_t)(90 * pulse), 22 + (uint8_t)(68 * pulse));
                     break;
@@ -545,6 +570,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             switch (kind) {
                 case AGENT_CODEX:    baseColor = CRGB(30, 30, 80);  break;  // dim indigo
                 case AGENT_OPENCODE: baseColor = CRGB(72, 67, 67);  break;  // dim warm gray (brand #F1ECEC)
+                case AGENT_ANTIGRAVITY: baseColor = CRGB(68, 70, 73); break;  // dim cool gray (brand #D2D6DC)
                 default:             baseColor = CRGB(80, 45, 35);  break;  // dim terracotta
             }
         }
@@ -564,6 +590,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         switch (kind) {
             case AGENT_CODEX:    return SPR_JELLYFISH;
             case AGENT_OPENCODE: return SPR_OPENCODE;
+            case AGENT_ANTIGRAVITY: return SPR_ANTIGRAVITY;
             default:             return SPR_OCTOPUS;
         }
     };
@@ -571,6 +598,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         switch (kind) {
             case AGENT_CODEX:    return SPR_JELLYFISH_ACC;
             case AGENT_OPENCODE: return SPR_OPENCODE_ACC;  // dim inner shadow
+            case AGENT_ANTIGRAVITY: return SPR_ANTIGRAVITY_ACC;  // lit apex
             default:             return SPR_OCTOPUS_ACC;
         }
     };
@@ -580,6 +608,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         switch (kind) {
             case AGENT_CODEX:    return accentScaled(CRGB(220, 225, 255), body, 1.4f); // ">_" marking
             case AGENT_OPENCODE: return CRGB(body.r * 2 / 5, body.g * 2 / 5, body.b * 2 / 5); // inner shadow
+            case AGENT_ANTIGRAVITY: return accentScaled(CRGB(235, 238, 245), body, 1.5f); // lit apex
             default:             return accentScaled(CRGB(235, 150, 110), body, 1.5f); // octopus head
         }
     };

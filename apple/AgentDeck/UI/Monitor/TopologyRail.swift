@@ -184,6 +184,7 @@ struct TopologyRail: View {
     private var upstreamRows: some View {
         VStack(alignment: .leading, spacing: 5) {
             claudeRow
+            codexRow
             openClawRow
             mlxRow
             ollamaRow
@@ -340,19 +341,51 @@ struct TopologyRail: View {
         )
     }
 
+    /// Codex (ChatGPT) usage limits — Codex CLI writes a `rate_limits` snapshot
+    /// (5h primary / weekly secondary) into its own local rollout files, so the
+    /// daemon surfaces them here much like the Claude 5h/7d gauges. Reading the
+    /// user's own local files, not the OpenAI API. Subscription expiry continues
+    /// to live in the SUBSCRIPTIONS footer; this row is about live usage.
+    /// Hidden when neither a plan nor any rate-limit data is present.
+    private var codexRow: some View {
+        let plan = stateHolder.state.codexPlanType
+        let hasLimits = stateHolder.state.codexRateLimits != nil
+        guard hasLimits || (plan?.isEmpty == false) else {
+            return AnyView(EmptyView())
+        }
+        return AnyView(
+            ProviderRow(
+                name: "Codex",
+                status: .ok,
+                subtitle: Self.chatGptPlanLabel(plan),
+                rateLimits: codexRateLimitChips,
+                consumers: consumerCreatures(for: .codex)
+            )
+        )
+    }
+
     /// Antigravity is a Google-hosted model product — when the bridge
     /// surfaces an active plan, it belongs in the upstream rail alongside
     /// Claude/OpenClaw/MLX/Ollama. Hidden when `planName` is nil or blank.
+    /// Remaining model credits (when present) ride in the subtitle — this is
+    /// the same local value the Antigravity IDE shows the user, read from the
+    /// local state DB (no Antigravity/Google API call), so it stays within ToS.
     private var antigravityRow: some View {
         guard let status = stateHolder.state.antigravityStatus,
               let plan = status.planName, !plan.isEmpty else {
             return AnyView(EmptyView())
         }
+        let subtitle: String = {
+            if let credits = status.availableCredits {
+                return "\(plan) · \(credits) cr"
+            }
+            return plan
+        }()
         return AnyView(
             ProviderRow(
                 name: "Antigravity",
                 status: .ok,
-                subtitle: plan,
+                subtitle: subtitle,
                 rateLimits: [],
                 consumers: consumerCreatures(for: .antigravity)
             )
@@ -840,6 +873,54 @@ struct TopologyRail: View {
         return chips
     }
 
+    /// Codex usage chips, mirroring the Claude 5h/7d layout. Labels are derived
+    /// from each window's length (300 min → "5h", 10080 min → "7d") so a plan
+    /// with different windows still reads correctly.
+    private var codexRateLimitChips: [RateChip] {
+        guard let limits = stateHolder.state.codexRateLimits else { return [] }
+        var chips: [RateChip] = []
+        if let p = limits.primary, let pct = p.usedPercent {
+            chips.append(.init(
+                label: Self.windowLabel(p.windowMinutes),
+                percent: pct,
+                reset: formatResetTime(p.resetsAt),
+                stale: false
+            ))
+        }
+        if let s = limits.secondary, let pct = s.usedPercent {
+            chips.append(.init(
+                label: Self.windowLabel(s.windowMinutes),
+                percent: pct,
+                reset: formatResetTime(s.resetsAt),
+                stale: false
+            ))
+        }
+        return chips
+    }
+
+    /// Compact window label from a duration in minutes: whole days → "Nd",
+    /// whole hours → "Nh", else "Nm". Days checked first so 10080 → "7d".
+    static func windowLabel(_ minutes: Int?) -> String {
+        guard let m = minutes, m > 0 else { return "·" }
+        if m % 1440 == 0 { return "\(m / 1440)d" }
+        if m % 60 == 0 { return "\(m / 60)h" }
+        return "\(m)m"
+    }
+
+    /// Friendly ChatGPT plan label from a raw `chatgpt_plan_type`.
+    static func chatGptPlanLabel(_ raw: String?) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        switch raw.lowercased() {
+        case "plus": return "ChatGPT Plus"
+        case "pro": return "ChatGPT Pro"
+        case "team": return "ChatGPT Team"
+        case "enterprise": return "ChatGPT Enterprise"
+        default: return "ChatGPT \(raw)"
+        }
+    }
+
     // MARK: - Consumer creatures (session ↔ provider mapping)
 
     /// Return the agent brand color of every alive session whose model maps
@@ -872,7 +953,7 @@ struct TopologyRail: View {
     // MARK: - Provider inference
 
     enum ProviderKey: Equatable {
-        case claude, openclaw, mlx, ollama, antigravity, unknown
+        case claude, openclaw, codex, mlx, ollama, antigravity, unknown
     }
 
     /// Best-effort mapping from a session's `modelName` to a provider row.
@@ -885,6 +966,7 @@ struct TopologyRail: View {
         ollama: OllamaStatus?
     ) -> ProviderKey {
         if agentType == "antigravity" { return .antigravity }
+        if agentType == "codex-cli" || agentType == "codex-app" { return .codex }
         guard let raw = modelName?.lowercased(), !raw.isEmpty else { return .unknown }
         if raw.hasPrefix("claude-") || raw.hasPrefix("opus") || raw.hasPrefix("sonnet") || raw.hasPrefix("haiku") {
             return .claude

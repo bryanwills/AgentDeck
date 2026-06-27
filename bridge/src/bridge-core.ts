@@ -11,6 +11,7 @@ import type { BridgeLogStream } from './log-stream.js';
 import { readAntigravityLocalStatus } from './antigravity-local.js';
 import { buildSubscriptions, buildUsageEvent } from './usage-event.js';
 import { readCodexAuthStatus } from './codex-auth.js';
+import { readCodexRateLimits } from './codex-rate-limits.js';
 import { fetchMlxModels } from './mlx-probe.js';
 import { buildDisplayStateEvent } from './display-dim.js';
 import { loadMlxSettings } from '@agentdeck/shared';
@@ -345,6 +346,7 @@ export class BridgeCore {
       this.cachedAntigravityStatus,
       this.apiUsagePreAdjusted,
       this.isDaemon,
+      readCodexRateLimits(),
     );
   }
 

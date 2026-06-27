@@ -77,6 +77,7 @@ static lv_obj_t* cellPill[MOSAIC_MAX]  = {nullptr};   // state pill chip (conten
 static lv_image_dsc_t glyphOctopus;    // Claude
 static lv_image_dsc_t glyphCrayfish;   // OpenClaw
 static lv_image_dsc_t glyphOpencode;   // OpenCode
+static lv_image_dsc_t glyphAntigravity; // Antigravity
 static bool glyphsReady = false;
 static void ips10BuildGlyph(lv_image_dsc_t& g, const uint8_t* data, int w, int h) {
     g.header.magic  = LV_IMAGE_HEADER_MAGIC;
@@ -96,6 +97,7 @@ static void ips10InitGlyphs() {
     // the terrarium pairs with procedural claws — the body alone reads as a shapeless blob.
     ips10BuildGlyph(glyphCrayfish, OPENCLAW_MARK_A8, OPENCLAW_MARK_W, OPENCLAW_MARK_H);
     ips10BuildGlyph(glyphOpencode, OPENCODE_A8,      OPENCODE_W,      OPENCODE_H);
+    ips10BuildGlyph(glyphAntigravity, ANTIGRAVITY_A8, ANTIGRAVITY_W,  ANTIGRAVITY_H);
     glyphsReady = true;
 }
 // Map an agent type to its glyph descriptor (null → no glyph, e.g. Codex).
@@ -103,6 +105,7 @@ static const lv_image_dsc_t* ips10AgentGlyph(const char* agentType) {
     if (!agentType) return nullptr;
     if (strstr(agentType, "openclaw"))  return &glyphCrayfish;
     if (strstr(agentType, "opencode"))  return &glyphOpencode;
+    if (strstr(agentType, "antigravity")) return &glyphAntigravity;
     if (strstr(agentType, "claude"))    return &glyphOctopus;
     return nullptr;   // codex / unknown → dot fallback in the name line
 }
@@ -204,6 +207,7 @@ static uint32_t ips10AgentColor(const char* agentType) {
     if (strstr(agentType, "openclaw") != nullptr) return Theme::CrayfishShell;
     if (strstr(agentType, "codex") != nullptr) return Theme::CloudBody;
     if (strstr(agentType, "opencode") != nullptr) return Theme::OpenCodeOuter;
+    if (strstr(agentType, "antigravity") != nullptr) return Theme::AntigravityMark;
     if (strstr(agentType, "claude") != nullptr) return Theme::ClaudeBody;
     return Theme::HUDDim;
 }
@@ -234,6 +238,7 @@ static const char* ips10AgentLabel(const char* agentType) {
     if (strstr(agentType, "openclaw") != nullptr) return "OpenClaw";
     if (strstr(agentType, "codex") != nullptr)    return "Codex";
     if (strstr(agentType, "opencode") != nullptr) return "OpenCode";
+    if (strstr(agentType, "antigravity") != nullptr) return "Antigravity";
     if (strstr(agentType, "claude") != nullptr)   return "Claude";
     return "Agent";
 }
@@ -304,6 +309,9 @@ static uint32_t agentDotColor(const char* agentType) {
     }
     if (agentType && strstr(agentType, "opencode") != nullptr) {
         return Theme::OpenCodeOuter;
+    }
+    if (agentType && strstr(agentType, "antigravity") != nullptr) {
+        return Theme::AntigravityMark;
     }
     if (agentType && strstr(agentType, "claude-code") != nullptr) {
         return Theme::ClaudeBody;

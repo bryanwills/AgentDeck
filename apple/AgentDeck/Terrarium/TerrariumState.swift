@@ -78,12 +78,25 @@ struct OpenCodeCreatureState: Identifiable {
     let scale: Float
 }
 
+// MARK: - Antigravity Creature State
+
+struct AntigravityCreatureState: Identifiable {
+    let id: String
+    let projectName: String?
+    let modelName: String?
+    let state: AntigravityVisualState
+    let homeX: Float
+    let homeY: Float
+    let scale: Float
+}
+
 // MARK: - Terrarium State (aggregate)
 
 struct TerrariumState {
     var creatures: [AgentCreatureState] = []
     var cloudCreatures: [CloudCreatureState] = []
     var opencodeCreatures: [OpenCodeCreatureState] = []
+    var antigravityCreatures: [AntigravityCreatureState] = []
     var crayfishState: CrayfishVisualState = .dormant
     var crayfishVisible: Bool = false
     var tetraState: TetraVisualState = .circling
@@ -106,19 +119,20 @@ extension DashboardState {
     func toTerrariumState(previous: TerrariumState? = nil) -> TerrariumState {
         var result = TerrariumState()
 
-        // Primary session creature (skip daemon/openclaw/codex-cli/opencode — they're not octopuses)
+        // Primary session creature (skip daemon/openclaw/codex-cli/opencode/antigravity — they're not octopuses)
         let primaryIsOctopus = state != .disconnected
             && agentType != "daemon"
             && agentType != "openclaw"
             && agentType != "codex-cli"
             && agentType != "codex-app"
             && agentType != "opencode"
+            && agentType != "antigravity"
 
-        // Octopus siblings (exclude daemon/openclaw/codex-cli/opencode), sorted by ID for stable positioning.
+        // Octopus siblings (exclude daemon/openclaw/codex-cli/opencode/antigravity), sorted by ID for stable positioning.
         // Also exclude the currently-focused session's id to prevent double-rendering when focus relay
         // promotes a sibling to primary (agentType → claude-code, sessionId → sibling.id).
         let siblings = siblingSessions
-            .filter { $0.agentType != "daemon" && $0.agentType != "openclaw" && $0.agentType != "codex-cli" && $0.agentType != "codex-app" && $0.agentType != "opencode" }
+            .filter { $0.agentType != "daemon" && $0.agentType != "openclaw" && $0.agentType != "codex-cli" && $0.agentType != "codex-app" && $0.agentType != "opencode" && $0.agentType != "antigravity" }
             .filter { !(primaryIsOctopus && $0.id == sessionId) }
             .sorted { $0.id < $1.id }
 
@@ -347,6 +361,42 @@ extension DashboardState {
         }
         result.opencodeCreatures = openCodeCreatures
 
+        // Antigravity creatures
+        let primaryIsAntigravity = state != .disconnected && agentType == "antigravity"
+        let antigravitySiblings = siblingSessions
+            .filter { $0.agentType == "antigravity" }
+            .filter { !(primaryIsAntigravity && $0.id == sessionId) }
+            .sorted { $0.id < $1.id }
+        let antigravityCount = (primaryIsAntigravity ? 1 : 0) + antigravitySiblings.count
+        let antigravitySlots = CreatureLayout.layoutAntigravityCreatures(count: antigravityCount)
+
+        var antigravityCreatures: [AntigravityCreatureState] = []
+        var antigravitySlotIdx = 0
+        if primaryIsAntigravity {
+            let s = antigravitySlots.first ?? CreatureSlot(x: 0.70, y: 0.28, scale: 1.0)
+            antigravityCreatures.append(AntigravityCreatureState(
+                id: sessionId ?? "ag-primary",
+                projectName: projectName,
+                modelName: modelName,
+                state: mapToAntigravityState(state),
+                homeX: s.x, homeY: s.y, scale: s.scale
+            ))
+            antigravitySlotIdx = 1
+        }
+        for (i, sibling) in antigravitySiblings.enumerated() {
+            guard !antigravitySlots.isEmpty else { break }
+            let idx = min(antigravitySlotIdx + i, antigravitySlots.count - 1)
+            let s = antigravitySlots[idx]
+            antigravityCreatures.append(AntigravityCreatureState(
+                id: sibling.id,
+                projectName: sibling.projectName,
+                modelName: sibling.modelName,
+                state: mapSiblingToAntigravityState(sibling.state),
+                homeX: s.x, homeY: s.y, scale: s.scale
+            ))
+        }
+        result.antigravityCreatures = antigravityCreatures
+
         // Environment state — in daemon mode, derive from most active sibling
         let isDaemonLike = agentType == "daemon" ||
             (agentType != nil && siblingSessions.contains(where: { $0.agentType == agentType }))
@@ -447,6 +497,24 @@ extension DashboardState {
         case "awaiting_permission", "awaiting_option", "awaiting_diff": .waiting
         case "idle": .drifting
         default: .dormant
+        }
+    }
+
+    private func mapToAntigravityState(_ connState: AgentConnectionState) -> AntigravityVisualState {
+        switch connState {
+        case .disconnected: .sleeping
+        case .idle: .floating
+        case .processing: .working
+        case .awaitingPermission, .awaitingOption, .awaitingDiff: .asking
+        }
+    }
+
+    private func mapSiblingToAntigravityState(_ stateStr: String?) -> AntigravityVisualState {
+        switch stateStr {
+        case "processing": .working
+        case "awaiting_permission", "awaiting_option", "awaiting_diff": .asking
+        case "idle": .floating
+        default: .sleeping
         }
     }
 

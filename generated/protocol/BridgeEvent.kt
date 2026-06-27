@@ -183,6 +183,7 @@ data class BridgeEvent (
     val codexAuthMode: String? = null,
     val codexLastRefreshAt: String? = null,
     val codexPlanType: String? = null,
+    val codexRateLimits: CodexRateLimits? = null,
     val codexSubscriptionActiveUntil: String? = null,
     val codexWebAuthConnected: Boolean? = null,
     val costLimit: Double? = null,
@@ -372,6 +373,39 @@ data class ApmeRecommendation (
     val modelID: String,
 
     val rationale: String
+)
+
+/**
+ * Codex usage limits parsed from local rollout files. `primary` is the short (5h-style)
+ * window, `secondary` the long (weekly) window — same idea as the Claude 5h/7d gauges.
+ */
+data class CodexRateLimits (
+    /**
+     * Plan tier reported alongside the limits (e.g. "plus", "pro").
+     */
+    val planType: String? = null,
+
+    val primary: CodexRateLimitWindow? = null,
+    val secondary: CodexRateLimitWindow? = null
+)
+
+/**
+ * One Codex (ChatGPT) rate-limit window, mirroring the Claude 5h/7d shape. Sourced from the
+ * user's own local Codex session rollout files — Codex CLI writes these snapshots itself,
+ * so this is local-file data, not an API call.
+ */
+data class CodexRateLimitWindow (
+    /**
+     * ISO-8601 reset instant (converted from the rollout's unix `resets_at`).
+     */
+    val resetsAt: String? = null,
+
+    val usedPercent: Double,
+
+    /**
+     * Rolling window length in minutes (primary ≈ 300 = 5h, secondary ≈ 10080 = 7d).
+     */
+    val windowMinutes: Double
 )
 
 /**

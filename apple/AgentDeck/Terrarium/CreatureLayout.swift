@@ -50,6 +50,21 @@ enum CreatureLayout {
         )
     }
 
+    /// Antigravity peak/arc creatures — upper-right band, distinct from
+    /// octopus/cloud/opencode zones.
+    static func layoutAntigravityCreatures(count: Int) -> [CreatureSlot] {
+        layoutBand(
+            count: count,
+            xMin: 0.58,
+            xMax: 0.82,
+            frontY: 0.22,
+            backY: 0.34,
+            singleRowLimit: 3,
+            baseScale: 0.96,
+            minScale: 0.56
+        )
+    }
+
     private static func layoutBand(
         count: Int,
         xMin: Float,

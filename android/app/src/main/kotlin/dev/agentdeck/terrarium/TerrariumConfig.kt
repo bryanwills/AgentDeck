@@ -26,6 +26,11 @@ object TerrariumColors {
     val OpenCodeOuter = Color(0xFFF1ECEC)    // light warm gray outer frame
     val OpenCodeInner = Color(0xFF4B4646)    // dark brown-gray inner square
 
+    // Antigravity (peak/arc mark — brand gray #5F6368)
+    val AntigravityBody = Color(0xFF5F6368)      // Google gray primary
+    val AntigravityLight = Color(0xFF80868B)     // WORKING pulse bright
+    val AntigravityDim = Color(0xFF3C4043)       // sleeping shadow
+
     // Crayfish (OpenClaw brand: #FF4D4D→#991B1B gradient, #00E5CC teal eyes)
     val CrayfishShell = Color(0xFFFF4D4D)
     val CrayfishDark = Color(0xFF991B1B)

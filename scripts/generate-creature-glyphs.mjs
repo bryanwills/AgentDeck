@@ -37,6 +37,12 @@ const CRAYFISH_BODY_PATH =
 const OPENCODE_VIEWBOX = 24;
 const OPENCODE_PATH = 'M16 6H8v12h8V6zm4 16H4V2h16v20z';
 
+// Antigravity peak/arc mark — viewBox 0 0 24 24, fill-rule evenodd (canonical brand path,
+// byte-identical with shared/src/svg-renderers/agent-logos.ts ANTIGRAVITY_PATH).
+const ANTIGRAVITY_VIEWBOX = 24;
+const ANTIGRAVITY_PATH =
+  'M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z';
+
 // Codex cloud/swirl mark — viewBox 0 0 24 24, fill-rule evenodd (canonical brand path).
 const CODEX_VIEWBOX = 24;
 const CODEX_PATH =
@@ -64,6 +70,7 @@ const glyphs = [
   { name: 'OPENCLAW_MARK', svgMarkup: OPENCLAW_MARK_SVG },
   { name: 'OPENCODE', viewBox: OPENCODE_VIEWBOX, path: OPENCODE_PATH, evenodd: true },
   { name: 'CODEX', viewBox: CODEX_VIEWBOX, path: CODEX_PATH, evenodd: true },
+  { name: 'ANTIGRAVITY', viewBox: ANTIGRAVITY_VIEWBOX, path: ANTIGRAVITY_PATH, evenodd: true },
 ];
 
 async function rasterizeAlpha({ viewBox, path, evenodd, svgMarkup }) {

@@ -4610,6 +4610,9 @@ final class DaemonServer {
         if let codex = codexAuthStatusSnapshot() {
             Self.writeCodexAuthStatus(codex, into: &e)
         }
+        if let rateLimits = usageAPI.codexRateLimits {
+            e["codexRateLimits"] = Self.codexRateLimitsPayload(rateLimits)
+        }
         if let antigravity = cachedAntigravityStatus {
             e["antigravityStatus"] = antigravityPayload(antigravity)
         }
@@ -4667,6 +4670,20 @@ final class DaemonServer {
         if let accountId = codex.accountId { event["codexAccountId"] = accountId }
         if let until = codex.subscriptionActiveUntil { event["codexSubscriptionActiveUntil"] = until }
         if let refresh = codex.lastRefreshAt { event["codexLastRefreshAt"] = refresh }
+    }
+
+    private static func codexRateLimitsPayload(_ limits: CodexRateLimitsLocal) -> [String: Any] {
+        func window(_ w: CodexRateLimitWindowLocal?) -> [String: Any]? {
+            guard let w else { return nil }
+            var d: [String: Any] = ["usedPercent": w.usedPercent, "windowMinutes": w.windowMinutes]
+            if let resetsAt = w.resetsAt { d["resetsAt"] = resetsAt }
+            return d
+        }
+        var payload: [String: Any] = [:]
+        if let p = window(limits.primary) { payload["primary"] = p }
+        if let s = window(limits.secondary) { payload["secondary"] = s }
+        if let plan = limits.planType { payload["planType"] = plan }
+        return payload
     }
 
     private static func chatGptSubscriptionName(_ codex: CodexAuthStatus) -> String? {

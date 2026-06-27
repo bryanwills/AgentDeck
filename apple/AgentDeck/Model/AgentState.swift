@@ -157,6 +157,7 @@ struct DashboardState: Sendable {
     var codexAccountId: String?
     var codexSubscriptionActiveUntil: String?
     var codexLastRefreshAt: String?
+    var codexRateLimits: CodexRateLimits?
     var mlxModels: [String] = []
     var mlxModelCatalog: [String] = []
     var subscriptions: [SubscriptionInfo] = []

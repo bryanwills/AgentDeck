@@ -54,6 +54,7 @@ static uint32_t agentColor(const char* t) {
     if (strstr(t, "openclaw")) return 0xFF6B5B;
     if (strstr(t, "codex"))    return 0x6166E0;
     if (strstr(t, "opencode")) return 0x9aa0a8;
+    if (strstr(t, "antigravity")) return 0xD2D6DC;
     if (strstr(t, "claude"))   return 0xC07058;
     return 0x9aa0a8;
 }
@@ -62,6 +63,7 @@ static const char* agentShort(const char* t) {
     if (strstr(t, "openclaw")) return "OpenClaw";
     if (strstr(t, "codex"))    return "Codex";
     if (strstr(t, "opencode")) return "OpenCode";
+    if (strstr(t, "antigravity")) return "Antigravity";
     if (strstr(t, "claude"))   return "Claude";
     return "Agent";
 }
@@ -78,6 +80,7 @@ static const uint8_t* agentGlyphA8(const char* t) {
     if (strstr(t, "openclaw")) return OPENCLAW_MARK_A8;
     if (strstr(t, "opencode")) return OPENCODE_A8;
     if (strstr(t, "codex"))    return CODEX_A8;
+    if (strstr(t, "antigravity")) return ANTIGRAVITY_A8;
     if (strstr(t, "claude"))   return OCTOPUS_A8;
     return nullptr;
 }

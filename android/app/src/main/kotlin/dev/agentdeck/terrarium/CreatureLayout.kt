@@ -81,6 +81,23 @@ fun layoutOpenCodeCreatures(count: Int): List<CreatureSlot> {
     )
 }
 
+/**
+ * Compute layout positions for Antigravity peak/arc creatures.
+ * Positioned in the upper-right band, distinct from octopus/cloud/opencode zones.
+ */
+fun layoutAntigravityCreatures(count: Int): List<CreatureSlot> {
+    return layoutBand(
+        count = count,
+        xMin = 0.58f,
+        xMax = 0.82f,
+        frontY = 0.22f,
+        backY = 0.34f,
+        singleRowLimit = 3,
+        baseScale = 0.96f,
+        minScale = 0.56f,
+    )
+}
+
 private fun layoutBand(
     count: Int,
     xMin: Float,

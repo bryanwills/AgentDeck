@@ -11,6 +11,7 @@ struct SettingsScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var manualUrl = ""
     @State private var showRemoveAntigravityConfirm = false
+    @State private var showRemoveCodexUsageConfirm = false
     @State private var openClawGatewayTokenInput: String = ""
     @State private var openClawGatewayTokenSaved: Bool = false
     @State private var openClawGatewayTokenError: String?
@@ -1676,6 +1677,8 @@ struct SettingsScreen: View {
             #endif
         case "antigravity":
             antigravityDatabaseSlot
+        case "codex":
+            codexUsageDirectorySlot
         default:
             EmptyView()
         }
@@ -1733,6 +1736,55 @@ struct SettingsScreen: View {
                         Button("Cancel", role: .cancel) {}
                     } message: {
                         Text("This will revoke file access to the Antigravity database. You can re-enable it later.")
+                    }
+                }
+            }
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+
+    @ViewBuilder
+    private var codexUsageDirectorySlot: some View {
+        #if os(macOS)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Show Codex plan + 5h/7d usage limits, read from your local ~/.codex folder. Codex writes these itself — no OpenAI sign-in.")
+                .font(.system(size: 10))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+            if let path = preferences.codexUsageSelectedPath, preferences.codexUsageAccessEnabled {
+                Text(path)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            HStack(spacing: 8) {
+                Button(preferences.codexUsageAccessEnabled ? "Re-pick folder" : "Choose .codex folder") {
+                    _ = preferences.chooseCodexDirectory()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                if preferences.codexUsageAccessEnabled {
+                    Button("Remove access") {
+                        showRemoveCodexUsageConfirm = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .confirmationDialog(
+                        "Remove Codex usage access?",
+                        isPresented: $showRemoveCodexUsageConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Remove", role: .destructive) {
+                            preferences.clearCodexUsageAccess()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This will revoke file access to your ~/.codex folder. You can re-enable it later.")
                     }
                 }
             }

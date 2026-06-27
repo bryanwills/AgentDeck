@@ -83,6 +83,7 @@ struct ADBridgeEvent: Codable, Equatable {
     var codexAuthMode: String?
     var codexLastRefreshAt: String?
     var codexPlanType: String?
+    var codexRateLimits: ADCodexRateLimits?
     var codexSubscriptionActiveUntil: String?
     var codexWebAuthConnected: Bool?
     var costLimit: Double?
@@ -174,6 +175,7 @@ struct ADBridgeEvent: Codable, Equatable {
         case codexAuthMode = "codexAuthMode"
         case codexLastRefreshAt = "codexLastRefreshAt"
         case codexPlanType = "codexPlanType"
+        case codexRateLimits = "codexRateLimits"
         case codexSubscriptionActiveUntil = "codexSubscriptionActiveUntil"
         case codexWebAuthConnected = "codexWebAuthConnected"
         case costLimit = "costLimit"
@@ -282,6 +284,7 @@ extension ADBridgeEvent {
         codexAuthMode: String?? = nil,
         codexLastRefreshAt: String?? = nil,
         codexPlanType: String?? = nil,
+        codexRateLimits: ADCodexRateLimits?? = nil,
         codexSubscriptionActiveUntil: String?? = nil,
         codexWebAuthConnected: Bool?? = nil,
         costLimit: Double?? = nil,
@@ -370,6 +373,7 @@ extension ADBridgeEvent {
             codexAuthMode: codexAuthMode ?? self.codexAuthMode,
             codexLastRefreshAt: codexLastRefreshAt ?? self.codexLastRefreshAt,
             codexPlanType: codexPlanType ?? self.codexPlanType,
+            codexRateLimits: codexRateLimits ?? self.codexRateLimits,
             codexSubscriptionActiveUntil: codexSubscriptionActiveUntil ?? self.codexSubscriptionActiveUntil,
             codexWebAuthConnected: codexWebAuthConnected ?? self.codexWebAuthConnected,
             costLimit: costLimit ?? self.costLimit,
@@ -745,6 +749,130 @@ extension ADApmeRecommendation {
             expectedScore: expectedScore ?? self.expectedScore,
             modelId: modelId ?? self.modelId,
             rationale: rationale ?? self.rationale
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+//
+// Hashable or Equatable:
+// The compiler will not be able to synthesize the implementation of Hashable or Equatable
+// for types that require the use of JSONAny, nor will the implementation of Hashable be
+// synthesized for types that have collections (such as arrays or dictionaries).
+
+/// Codex usage limits parsed from local rollout files. `primary` is the short (5h-style)
+/// window, `secondary` the long (weekly) window — same idea as the Claude 5h/7d gauges.
+// MARK: - ADCodexRateLimits
+struct ADCodexRateLimits: Codable, Equatable {
+    /// Plan tier reported alongside the limits (e.g. "plus", "pro").
+    var planType: String?
+    var primary: ADCodexRateLimitWindow?
+    var secondary: ADCodexRateLimitWindow?
+
+    enum CodingKeys: String, CodingKey {
+        case planType = "planType"
+        case primary = "primary"
+        case secondary = "secondary"
+    }
+}
+
+// MARK: ADCodexRateLimits convenience initializers and mutators
+
+extension ADCodexRateLimits {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ADCodexRateLimits.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        planType: String?? = nil,
+        primary: ADCodexRateLimitWindow?? = nil,
+        secondary: ADCodexRateLimitWindow?? = nil
+    ) -> ADCodexRateLimits {
+        return ADCodexRateLimits(
+            planType: planType ?? self.planType,
+            primary: primary ?? self.primary,
+            secondary: secondary ?? self.secondary
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+//
+// Hashable or Equatable:
+// The compiler will not be able to synthesize the implementation of Hashable or Equatable
+// for types that require the use of JSONAny, nor will the implementation of Hashable be
+// synthesized for types that have collections (such as arrays or dictionaries).
+
+/// One Codex (ChatGPT) rate-limit window, mirroring the Claude 5h/7d shape. Sourced from the
+/// user's own local Codex session rollout files — Codex CLI writes these snapshots itself,
+/// so this is local-file data, not an API call.
+// MARK: - ADCodexRateLimitWindow
+struct ADCodexRateLimitWindow: Codable, Equatable {
+    /// ISO-8601 reset instant (converted from the rollout's unix `resets_at`).
+    var resetsAt: String?
+    var usedPercent: Double
+    /// Rolling window length in minutes (primary ≈ 300 = 5h, secondary ≈ 10080 = 7d).
+    var windowMinutes: Double
+
+    enum CodingKeys: String, CodingKey {
+        case resetsAt = "resetsAt"
+        case usedPercent = "usedPercent"
+        case windowMinutes = "windowMinutes"
+    }
+}
+
+// MARK: ADCodexRateLimitWindow convenience initializers and mutators
+
+extension ADCodexRateLimitWindow {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ADCodexRateLimitWindow.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        resetsAt: String?? = nil,
+        usedPercent: Double? = nil,
+        windowMinutes: Double? = nil
+    ) -> ADCodexRateLimitWindow {
+        return ADCodexRateLimitWindow(
+            resetsAt: resetsAt ?? self.resetsAt,
+            usedPercent: usedPercent ?? self.usedPercent,
+            windowMinutes: windowMinutes ?? self.windowMinutes
         )
     }
 

@@ -46,6 +46,12 @@ enum TerrariumColors {
     static let cloudGlow = Color(red: 0.560, green: 0.580, blue: 0.950)      // #8F94F2 periwinkle
     static let cloudNameBg = Color(red: 0.333, green: 0.380, blue: 0.878).opacity(0.6)
 
+    // Antigravity (peak/arc mark — brand gray #5F6368)
+    static let antigravityBody = Color(red: 0.373, green: 0.388, blue: 0.408)   // #5F6368 Google gray primary
+    static let antigravityLight = Color(red: 0.502, green: 0.525, blue: 0.545)  // #80868B WORKING pulse bright
+    static let antigravityDim = Color(red: 0.235, green: 0.251, blue: 0.263)    // #3C4043 sleeping shadow
+    static let antigravityNameBg = Color(red: 0.373, green: 0.388, blue: 0.408).opacity(0.6)
+
     // Environment
     static let bubbleWhite = Color.white.opacity(0.25)      // 0x40FFFFFF
     static let bubbleHighlight = Color.white.opacity(0.5)    // 0x80FFFFFF

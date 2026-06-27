@@ -72,6 +72,8 @@ data class TerrariumState(
     val cloudCreatures: List<AgentCreatureState> = emptyList(),
     /** OpenCode nested-square creatures. */
     val openCodeCreatures: List<AgentCreatureState> = emptyList(),
+    /** Antigravity peak/arc creatures. */
+    val antigravityCreatures: List<AgentCreatureState> = emptyList(),
     /** OpenClaw backend worker count. */
     val workerCrayfishCount: Int = 0,
     /** Pop burst positions (normalized) — set for 1 frame when ASKING exits. */
@@ -195,8 +197,8 @@ fun DashboardState.toTerrariumState(): TerrariumState {
 
     fun isCodexAgent(type: String?): Boolean = type == "codex-cli" || type == "codex-app"
 
-    // Primary agent — skip if disconnected (no session), daemon-like, openclaw proxy, codex, or opencode
-    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType != "openclaw" && !isCodexAgent(agentType) && agentType != "opencode") {
+    // Primary agent — skip if disconnected (no session), daemon-like, openclaw proxy, codex, opencode, or antigravity
+    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType != "openclaw" && !isCodexAgent(agentType) && agentType != "opencode" && agentType != "antigravity") {
         agents.add(
             AgentCreatureState(
                 sessionId = sessionId ?: "primary",
@@ -220,7 +222,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
         }
         val siblingType = sibling.agentType
         android.util.Log.d("TerrariumState", "Evaluating sibling ${sibling.id}: type=$siblingType, state=${sibling.state}")
-        if (siblingType == "openclaw" || siblingType == "daemon" || isCodexAgent(siblingType) || siblingType == "opencode") {
+        if (siblingType == "openclaw" || siblingType == "daemon" || isCodexAgent(siblingType) || siblingType == "opencode" || siblingType == "antigravity") {
             android.util.Log.d("TerrariumState", "Skipping sibling ${sibling.id} (type $siblingType is not an octopus)")
             continue // not octopus
         }
@@ -303,6 +305,38 @@ fun DashboardState.toTerrariumState(): TerrariumState {
         )
     }
 
+    // Build Antigravity creatures list from antigravity sessions
+    val antigravityCreatures = mutableListOf<AgentCreatureState>()
+    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType == "antigravity") {
+        antigravityCreatures.add(
+            AgentCreatureState(
+                sessionId = sessionId ?: "primary-antigravity",
+                agentType = agentType,
+                mark = AgentMark.fromAgentType(agentType),
+                visualState = octopus,
+                isPrimary = true,
+                layoutSlot = 0,
+                displayName = projectName,
+            )
+        )
+    }
+    var antigravitySlot = antigravityCreatures.size
+    for (sibling in siblingSessions) {
+        if (sessionId != null && sibling.id == sessionId) continue
+        if (sibling.agentType != "antigravity") continue
+        antigravityCreatures.add(
+            AgentCreatureState(
+                sessionId = sibling.id,
+                agentType = sibling.agentType,
+                mark = AgentMark.fromAgentType(sibling.agentType),
+                visualState = mapSessionOctopusState(sibling.state),
+                isPrimary = false,
+                layoutSlot = antigravitySlot++,
+                displayName = sibling.projectName,
+            )
+        )
+    }
+
     // Number duplicate display names: "AgentDeck", "AgentDeck" → "AgentDeck #1", "AgentDeck #2"
     // Group by (displayName, agentType) so different creature types sharing a project name
     // don't get numbered together (matches SessionListPanel + shared session-utils.ts)
@@ -334,6 +368,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
         agents = agents,
         cloudCreatures = cloudCreatures,
         openCodeCreatures = openCodeCreatures,
+        antigravityCreatures = antigravityCreatures,
         // Presence-driven: worker crayfish only when an OpenClaw session exists.
         workerCrayfishCount = if (ocSibling != null) workerSessionCount ?: 0 else 0,
     )

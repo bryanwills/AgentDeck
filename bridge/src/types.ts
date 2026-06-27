@@ -33,6 +33,8 @@ export {
 export {
   type ModelCatalogEntry,
   type AntigravityStatusInfo,
+  type CodexRateLimits,
+  type CodexRateLimitWindow,
   type SubscriptionInfo,
   type EncoderSlotState,
   type EncoderStateEvent,

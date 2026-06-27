@@ -389,6 +389,22 @@ struct AntigravityStatusInfo: Codable, Sendable {
     var minimumCreditAmountForUsage: Int?
 }
 
+/// One Codex (ChatGPT) rate-limit window, mirroring the Claude 5h/7d shape.
+/// Sourced from the user's own local Codex session rollout files.
+struct CodexRateLimitWindow: Codable, Sendable {
+    var usedPercent: Double?
+    var windowMinutes: Int?
+    var resetsAt: String?
+}
+
+/// Codex usage limits parsed from local rollout files. `primary` ≈ 5h window,
+/// `secondary` ≈ weekly window — same idea as the Claude 5h/7d gauges.
+struct CodexRateLimits: Codable, Sendable {
+    var primary: CodexRateLimitWindow?
+    var secondary: CodexRateLimitWindow?
+    var planType: String?
+}
+
 // MARK: - Button / Encoder State (Bridge → Client)
 
 struct ButtonSlotState: Codable, Sendable {
@@ -551,6 +567,7 @@ struct UsageEvent: Codable, Sendable {
     var codexAccountId: String?
     var codexSubscriptionActiveUntil: String?
     var codexLastRefreshAt: String?
+    var codexRateLimits: CodexRateLimits?
     var modelCatalog: [ModelCatalogEntry]?
     var mlxModels: [String]?
     var mlxModelCatalog: [String]?

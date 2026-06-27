@@ -166,6 +166,7 @@
 		776EB14F789C4BA480732350 /* MicroGlyphs.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1603E1F58E35F85044D7913A /* MicroGlyphs.generated.swift */; };
 		7A25A9E50E02E563FC8752D0 /* AgentDeckPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 056D70153C3F720A6D935C9F /* AgentDeckPaths.swift */; };
 		7A3F1644ABE4AE5BDDD0BB85 /* TopologyRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8FF164B1E859BEE08BBF646 /* TopologyRail.swift */; };
+		7AA10F90E922138D683C318D /* OpenClawTokenImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43838A747888CB84DF5A6762 /* OpenClawTokenImporter.swift */; };
 		7B0F7E18D01881EF81E3F08E /* OpenClawTokenExtractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAF69E65D3118C105A193227 /* OpenClawTokenExtractTests.swift */; };
 		7B25A56536275C7DF023DFEB /* LightRaySystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53F4A08898B95CB592E133A /* LightRaySystem.swift */; };
 		7BDDF6B91F9378908A89E1F5 /* GatewayProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BCC68BE56702DFD637FFE02 /* GatewayProbe.swift */; };
@@ -179,6 +180,7 @@
 		7FBCD51766F94FE9BD969378 /* SetupNeededCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAC179B8F91EF42F5EBDE911 /* SetupNeededCard.swift */; };
 		7FE91079BB8AE03AB4F092CD /* WaterEffect.swift in Sources */ = {isa = PBXBuildFile; fileRef = E47A555A3917875178A5B7E5 /* WaterEffect.swift */; };
 		805AC8BBF1600EA9BFB044F5 /* TerrariumCrayfishPresenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E75D955A31F999F568B7BED /* TerrariumCrayfishPresenceTests.swift */; };
+		80865FE823C2E1E5D1179377 /* AntigravityCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCB382D6E482410C30E597EC /* AntigravityCreature.swift */; };
 		809CC98B24E5F976E5E84AF9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2D2F35C5E4DF5DAE1C93F54B /* Assets.xcassets */; };
 		811D1351A028B31CC72F4784 /* TerrariumState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 593C80232028E1DBC0227E17 /* TerrariumState.swift */; };
 		812F3BFFE7AA293804D39234 /* SessionLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31609846ED73DC70F674FCF0 /* SessionLauncher.swift */; };
@@ -235,6 +237,7 @@
 		A8293F557BD8D3FB91BF4CF4 /* StateTimelineGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C2485BC8700CBDD9EDE70E /* StateTimelineGenerator.swift */; };
 		A869C24476DAE485D0B950EC /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B05AD3CC720BD76A681F9 /* QRScannerView.swift */; };
 		ABE80C830C69CB0A2D03A767 /* LightRaySystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53F4A08898B95CB592E133A /* LightRaySystem.swift */; };
+		ABEE4D6EFD64ECCBDBCD843B /* AntigravityCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCB382D6E482410C30E597EC /* AntigravityCreature.swift */; };
 		AC658605D32EEDED79556598 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B05AD3CC720BD76A681F9 /* QRScannerView.swift */; };
 		AC7E59A42A23408F8FEC3AC5 /* WaterEffect.swift in Sources */ = {isa = PBXBuildFile; fileRef = E47A555A3917875178A5B7E5 /* WaterEffect.swift */; };
 		ADD8AE7242AA662A3ACBB98B /* AgentDeckLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 125A43BCFF7E55A34B4C5FC1 /* AgentDeckLogo.swift */; };
@@ -293,6 +296,7 @@
 		D4EA545B7FD41B8A5032F515 /* ESP32Serial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C62F7ABA6BDEE39F39DBDFA /* ESP32Serial.swift */; };
 		D51013A46CB37005EC249749 /* WearableTabletPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 573B908900BFBC530F17EAB6 /* WearableTabletPreviews.swift */; };
 		D53BC123AAE467EB342A5041 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */; };
+		D53FC33DD05A32D719809874 /* OpenClawTokenImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43838A747888CB84DF5A6762 /* OpenClawTokenImporter.swift */; };
 		D80DDBEF3EDB811EFF6B834A /* DaemonService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BD296835DE366BFDBB15B9 /* DaemonService.swift */; };
 		D863C121DC06035A0007914B /* WaterSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F134F38758589B5D47652C8 /* WaterSurface.swift */; };
 		D8EC7333D6CEB08ED84E4BC2 /* ProviderRailEvaluatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BBA59C83638DB2F6B90C44A /* ProviderRailEvaluatorTests.swift */; };
@@ -417,6 +421,7 @@
 		40755F64E4C39A49B99D88CA /* SessionListPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListPanel.swift; sourceTree = "<group>"; };
 		41CF82AE8E20EDCAE99DCEDD /* SessionLauncherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLauncherTests.swift; sourceTree = "<group>"; };
 		427B912EBD043285F0A0008D /* OpenClawAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawAdapter.swift; sourceTree = "<group>"; };
+		43838A747888CB84DF5A6762 /* OpenClawTokenImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawTokenImporter.swift; sourceTree = "<group>"; };
 		46988130529D53105344C47F /* ApmeJudgeApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeJudgeApi.swift; sourceTree = "<group>"; };
 		46AB7A0263C3AFB217C9DF13 /* DevicePreviewShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicePreviewShared.swift; sourceTree = "<group>"; };
 		478F84014DFA2BC1E6E82110 /* TimelineSummarizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSummarizer.swift; sourceTree = "<group>"; };
@@ -536,6 +541,7 @@
 		DBBD731AC01994F5C7C1A78A /* UsageAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageAPIClient.swift; sourceTree = "<group>"; };
 		DC62763B9E0E57235CFDACED /* NotificationPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPermission.swift; sourceTree = "<group>"; };
 		DCA36B13CDF6548B698F4C55 /* ApmeDashboardWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeDashboardWindow.swift; sourceTree = "<group>"; };
+		DCB382D6E482410C30E597EC /* AntigravityCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityCreature.swift; sourceTree = "<group>"; };
 		DDCFF40AB9C71F147D7576C5 /* AgentDeck-Debug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "AgentDeck-Debug.entitlements"; sourceTree = "<group>"; };
 		DDF6D4E03A73AA83A363FA94 /* ProjectNameResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectNameResolverTests.swift; sourceTree = "<group>"; };
 		E0C496748B5F5315E3551E69 /* IDotMatrixSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IDotMatrixSheet.swift; sourceTree = "<group>"; };
@@ -601,6 +607,7 @@
 		27575881BC9A9C056429E9E3 /* Creatures */ = {
 			isa = PBXGroup;
 			children = (
+				DCB382D6E482410C30E597EC /* AntigravityCreature.swift */,
 				0DD3A6826EADF11BB4C4F139 /* BubbleSystem.swift */,
 				E2A135216D37932FE68501F4 /* CloudCreature.swift */,
 				3FD30721AD4CBA74DD049A1F /* CrayfishCreature.swift */,
@@ -930,6 +937,7 @@
 				8A5A10C1FD79BB64BD2BB8D5 /* ConnectionOverlay.swift */,
 				19949AA33CE27D478B358976 /* MonitorHUD.swift */,
 				F7B4E454713DFE2DECC4D154 /* MonitorScreen.swift */,
+				43838A747888CB84DF5A6762 /* OpenClawTokenImporter.swift */,
 				40755F64E4C39A49B99D88CA /* SessionListPanel.swift */,
 				BAC179B8F91EF42F5EBDE911 /* SetupNeededCard.swift */,
 				48F37E295246F5931D533E31 /* TimelineStripView.swift */,
@@ -1117,10 +1125,10 @@
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					1B95C9515EBB97FD5022C08C = {
-						DevelopmentTeam = QF36NDHYHD;
+						DevelopmentTeam = R22679GY5Z;
 					};
 					E4D80DB9ABDABC379778AF7C = {
-						DevelopmentTeam = QF36NDHYHD;
+						DevelopmentTeam = R22679GY5Z;
 					};
 				};
 			};
@@ -1265,6 +1273,7 @@
 				70568489EF1BE34061D43FEA /* AgentStateHolder.swift in Sources */,
 				20B7F193A4B33732519FB7F8 /* AgentStatusIcon.swift in Sources */,
 				F71B10ECA4191DF94517A653 /* AnthropicAdminApiClient.swift in Sources */,
+				ABEE4D6EFD64ECCBDBCD843B /* AntigravityCreature.swift in Sources */,
 				015E006D6E9D932E1DDEED68 /* ApmeClassifier.swift in Sources */,
 				830C151322C62CF4B3ADA406 /* ApmeCollector.swift in Sources */,
 				2B8F7E0477776522FD3417A9 /* ApmeDashboardWindow.swift in Sources */,
@@ -1344,6 +1353,7 @@
 				F1C357A840E59D7A188C808B /* OnboardingScreen.swift in Sources */,
 				E98F3FC6D7134E8E65163D93 /* OnboardingSheet.swift in Sources */,
 				FD86AF81DA987540254BA326 /* OpenClawAdapter.swift in Sources */,
+				7AA10F90E922138D683C318D /* OpenClawTokenImporter.swift in Sources */,
 				46086D1358BD25389E304052 /* OpenCodeCreature.swift in Sources */,
 				3053AF2926E3B907DAB9250F /* PixooModule.swift in Sources */,
 				378C03BA7C86CFABDD41FA06 /* PixooPreview.swift in Sources */,
@@ -1420,6 +1430,7 @@
 				E5B1774D921E5B4C508D73A0 /* AgentStateHolder.swift in Sources */,
 				4063C8A5D6C17B415AA11D2A /* AgentStatusIcon.swift in Sources */,
 				8E47C081C0CF3F45715D6E45 /* AnthropicAdminApiClient.swift in Sources */,
+				80865FE823C2E1E5D1179377 /* AntigravityCreature.swift in Sources */,
 				C811739586EAB613B7881490 /* ApmeClassifier.swift in Sources */,
 				FBB919EF89AE0DBEE2DC0082 /* ApmeCollector.swift in Sources */,
 				0702C9FEAA7C1E2A2E6CAA36 /* ApmeDashboardWindow.swift in Sources */,
@@ -1500,6 +1511,7 @@
 				BF6E216F74A8205677B8B82B /* OnboardingScreen.swift in Sources */,
 				F608DAD197953CC405F306A5 /* OnboardingSheet.swift in Sources */,
 				58591ABC081F2367FEE6B563 /* OpenClawAdapter.swift in Sources */,
+				D53FC33DD05A32D719809874 /* OpenClawTokenImporter.swift in Sources */,
 				996C92E310F9A7E69C40C803 /* OpenCodeCreature.swift in Sources */,
 				43CA9C8F949377526F62C044 /* PixooModule.swift in Sources */,
 				83FE9645B23326BD78B52126 /* PixooPreview.swift in Sources */,
@@ -1667,7 +1679,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = QF36NDHYHD;
+				DEVELOPMENT_TEAM = R22679GY5Z;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = AgentDeck/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1748,7 +1760,7 @@
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = QF36NDHYHD;
+				DEVELOPMENT_TEAM = R22679GY5Z;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = "AgentDeck/Resources/Info-macOS.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1821,7 +1833,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				DEVELOPMENT_TEAM = QF36NDHYHD;
+				DEVELOPMENT_TEAM = R22679GY5Z;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = AgentDeck/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1843,7 +1855,7 @@
 				CODE_SIGN_ENTITLEMENTS = AgentDeck/Resources/AgentDeck.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = QF36NDHYHD;
+				DEVELOPMENT_TEAM = R22679GY5Z;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = "AgentDeck/Resources/Info-macOS.plist";
 				LD_RUNPATH_SEARCH_PATHS = (

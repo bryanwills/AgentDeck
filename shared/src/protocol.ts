@@ -108,6 +108,27 @@ export interface AntigravityStatusInfo {
   minimumCreditAmountForUsage?: number;
 }
 
+/** One Codex (ChatGPT) rate-limit window, mirroring the Claude 5h/7d shape.
+ *  Sourced from the user's own local Codex session rollout files — Codex CLI
+ *  writes these snapshots itself, so this is local-file data, not an API call. */
+export interface CodexRateLimitWindow {
+  usedPercent: number;
+  /** Rolling window length in minutes (primary ≈ 300 = 5h, secondary ≈ 10080 = 7d). */
+  windowMinutes: number;
+  /** ISO-8601 reset instant (converted from the rollout's unix `resets_at`). */
+  resetsAt?: string;
+}
+
+/** Codex usage limits parsed from local rollout files. `primary` is the short
+ *  (5h-style) window, `secondary` the long (weekly) window — same idea as the
+ *  Claude 5h/7d gauges. */
+export interface CodexRateLimits {
+  primary?: CodexRateLimitWindow;
+  secondary?: CodexRateLimitWindow;
+  /** Plan tier reported alongside the limits (e.g. "plus", "pro"). */
+  planType?: string;
+}
+
 // ===== Bridge → Plugin (State Updates) =====
 
 export interface StateUpdateEvent {
@@ -219,6 +240,8 @@ export interface UsageEvent {
   codexAccountId?: string;
   codexSubscriptionActiveUntil?: string;
   codexLastRefreshAt?: string;
+  // Codex usage limits (5h/7d-style) parsed from local rollout files
+  codexRateLimits?: CodexRateLimits;
   // Local model/runtime summaries
   modelCatalog?: ModelCatalogEntry[];
   mlxModels?: string[];

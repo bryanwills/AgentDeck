@@ -84,6 +84,7 @@ import dev.agentdeck.terrarium.creature.CrayfishCreature
 import dev.agentdeck.terrarium.creature.DataParticleSystem
 import dev.agentdeck.terrarium.creature.CloudCreature
 import dev.agentdeck.terrarium.creature.OpenCodeCreature
+import dev.agentdeck.terrarium.creature.AntigravityCreature
 import dev.agentdeck.terrarium.creature.OctopusCreature
 import dev.agentdeck.terrarium.environment.KelpField
 import dev.agentdeck.terrarium.environment.LightRaySystem
@@ -97,6 +98,7 @@ import dev.agentdeck.terrarium.layoutOctopuses
 import dev.agentdeck.terrarium.layoutOctopusesByProject
 import dev.agentdeck.terrarium.layoutCloudCreatures
 import dev.agentdeck.terrarium.layoutOpenCodeCreatures
+import dev.agentdeck.terrarium.layoutAntigravityCreatures
 import dev.agentdeck.terrarium.layoutWorkerCrayfish
 import dev.agentdeck.terrarium.renderer.ColorTerrariumCanvas
 import dev.agentdeck.terrarium.toTerrariumState
@@ -631,6 +633,41 @@ private fun ColorTerrariumBackground(
         }
     }
 
+    // Antigravity creatures (peak/arc logo agents)
+    val antigravitySlots = layoutAntigravityCreatures(state.antigravityCreatures.size)
+    val antigravityCreatures = remember { mutableStateListOf<AntigravityCreature>() }
+
+    LaunchedEffect(state.antigravityCreatures) {
+        val targetCount = state.antigravityCreatures.size
+        while (antigravityCreatures.size < targetCount) {
+            val idx = antigravityCreatures.size
+            val slot = antigravitySlots.getOrElse(idx) { antigravitySlots.last() }
+            val agent = state.antigravityCreatures.getOrNull(idx)
+            antigravityCreatures.add(AntigravityCreature(
+                slot.centerXFraction, slot.centerYFraction, slot.scaleFactor,
+                phaseOffset = idx * 1.7f,
+                displayName = agent?.displayName,
+            ).also {
+                if (agent != null) it.setState(agent.visualState)
+                it.onAskingExit = { nx, ny -> bubbleSystem.emitPopBurst(nx, ny) }
+            })
+        }
+        while (antigravityCreatures.size > targetCount) {
+            antigravityCreatures.removeAt(antigravityCreatures.lastIndex)
+        }
+        for (i in antigravityCreatures.indices) {
+            val slot = antigravitySlots.getOrElse(i) { antigravitySlots.last() }
+            antigravityCreatures[i].setHomePosition(slot.centerXFraction, slot.centerYFraction, slot.scaleFactor)
+            if (i < state.antigravityCreatures.size) {
+                antigravityCreatures[i].setState(state.antigravityCreatures[i].visualState)
+                antigravityCreatures[i].setDisplayName(
+                    state.antigravityCreatures[i].displayName,
+                    show = true,
+                )
+            }
+        }
+    }
+
     // Worker crayfish for multi-agent OpenClaw
     val workerSlots = layoutWorkerCrayfish(
         count = state.workerCrayfishCount,
@@ -676,6 +713,7 @@ private fun ColorTerrariumBackground(
     var crayfishBubbleTimer by remember { mutableFloatStateOf(0f) }
     var cloudBubbleTimer by remember { mutableFloatStateOf(0f) }
     var openCodeBubbleTimer by remember { mutableFloatStateOf(0f) }
+    var antigravityBubbleTimer by remember { mutableFloatStateOf(0f) }
 
     // 60fps animation loop
     var lastFrameTime by remember { mutableLongStateOf(0L) }
@@ -699,6 +737,7 @@ private fun ColorTerrariumBackground(
                 for (oct in octopuses) oct.update(clampedDt)
                 for (cloud in cloudCreatures) cloud.update(clampedDt)
                 for (oc in openCodeCreatures) oc.update(clampedDt)
+                for (ag in antigravityCreatures) ag.update(clampedDt)
                 // Pass live positions + working positions to tetra school (reuse lists)
                 livePositions.clear()
                 workingPositions.clear()
@@ -721,6 +760,12 @@ private fun ColorTerrariumBackground(
                     if (oc.isWorking()) workingPositions.add(pos)
                     allCreaturePositions.add(pos)
                 }
+                for (ag in antigravityCreatures) {
+                    val pos = ag.currentPosition()
+                    livePositions.add(pos)
+                    if (ag.isWorking()) workingPositions.add(pos)
+                    allCreaturePositions.add(pos)
+                }
                 // Add crayfish position for sand disturbance
                 val crayfishPos = mainCrayfish.currentPosition()
                 allCreaturePositions.add(crayfishPos)
@@ -739,6 +784,7 @@ private fun ColorTerrariumBackground(
                 crayfishBubbleTimer += clampedDt
                 cloudBubbleTimer += clampedDt
                 openCodeBubbleTimer += clampedDt
+                antigravityBubbleTimer += clampedDt
                 // WORKING octopuses: 2 bubbles every 2.5s
                 if (octoBubbleTimer >= 2.5f) {
                     octoBubbleTimer -= 2.5f
@@ -776,6 +822,16 @@ private fun ColorTerrariumBackground(
                         }
                     }
                 }
+                // WORKING Antigravity: 1 bubble every 3.5s
+                if (antigravityBubbleTimer >= 3.5f) {
+                    antigravityBubbleTimer -= 3.5f
+                    for (ag in antigravityCreatures) {
+                        if (ag.isWorking()) {
+                            val pos = ag.currentPosition()
+                            bubbleSystem.emitCreatureBubbles(pos.first, pos.second, 1)
+                        }
+                    }
+                }
             }
         }
     }
@@ -791,6 +847,7 @@ private fun ColorTerrariumBackground(
         octopuses = octopuses,
         cloudCreatures = cloudCreatures,
         openCodeCreatures = openCodeCreatures,
+        antigravityCreatures = antigravityCreatures,
         bubbleSystem = bubbleSystem,
         lightRaySystem = lightRaySystem,
         planktonSystem = planktonSystem,

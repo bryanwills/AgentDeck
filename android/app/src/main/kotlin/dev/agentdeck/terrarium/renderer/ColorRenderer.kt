@@ -14,6 +14,7 @@ import dev.agentdeck.terrarium.creature.BubbleSystem
 import dev.agentdeck.terrarium.creature.CrayfishCreature
 import dev.agentdeck.terrarium.creature.CloudCreature
 import dev.agentdeck.terrarium.creature.OpenCodeCreature
+import dev.agentdeck.terrarium.creature.AntigravityCreature
 import dev.agentdeck.terrarium.creature.OctopusCreature
 import dev.agentdeck.terrarium.creature.DataParticleSystem
 import dev.agentdeck.terrarium.environment.KelpField
@@ -41,6 +42,7 @@ fun ColorTerrariumCanvas(
     octopuses: List<OctopusCreature>,
     cloudCreatures: List<CloudCreature> = emptyList(),
     openCodeCreatures: List<OpenCodeCreature> = emptyList(),
+    antigravityCreatures: List<AntigravityCreature> = emptyList(),
     bubbleSystem: BubbleSystem,
     lightRaySystem: LightRaySystem,
     planktonSystem: PlanktonSystem,
@@ -96,6 +98,9 @@ fun ColorTerrariumCanvas(
 
         // Layer 9.3: OpenCode creatures (geometric nested-square logo)
         for (oc in openCodeCreatures) oc.draw(this)
+
+        // Layer 9.4: Antigravity creatures (peak/arc logo)
+        for (ag in antigravityCreatures) ag.draw(this)
 
         // Layer 9.5: Front-layer fish (in front of creatures for 3D depth)
         dataParticles.drawFrontLayer(this)

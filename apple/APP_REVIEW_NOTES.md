@@ -100,6 +100,8 @@ Codex (OpenAI's CLI) is observed through a fully opt-in path that mirrors the Cl
 
 The Settings panel offers a "Remove" button that strips AgentDeck's fenced block and revokes the bookmark; it leaves all user-authored TOML keys untouched. Reviewers without Codex installed see "Not configured"; the panel remains inert.
 
+Separately, the Codex Integrations row offers an optional **usage display** that mirrors the Antigravity `state.vscdb` pattern exactly: the user explicitly picks their `~/.codex` folder through an `NSOpenPanel` (`canChooseDirectories`, starting at `~/.codex` resolved via `getpwuid(getuid()).pw_dir`, no preselection, no enumeration before selection), AgentDeck stores an app-scoped security-scoped bookmark to that one folder, and reads are performed inside a `startAccessingSecurityScopedResource()` / `defer stop` pair under the existing `com.apple.security.files.user-selected.read-write` entitlement. From that folder AgentDeck reads only `auth.json` (ChatGPT plan + subscription expiry) and the trailing bytes of the newest `sessions/.../rollout-*.jsonl` file (the `rate_limits` snapshot Codex itself writes — a 5h/7d-style usage gauge). No OpenAI/ChatGPT network endpoint is contacted for this; it is the user's own local files, parsed with `JSONSerialization`. There is no home-relative-path entitlement and no subprocess; when the user has not granted the folder the row simply shows the plan/usage region collapsed. A "Remove access" button revokes the bookmark.
+
 Codex and OpenCode session execution from inside AgentDeck (PTY launch) is out of scope for the App Store build — users start their CLI themselves.
 
 ## APME evaluation module

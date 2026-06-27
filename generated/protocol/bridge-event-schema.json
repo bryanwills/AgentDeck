@@ -458,6 +458,45 @@
       ],
       "type": "object"
     },
+    "CodexRateLimitWindow": {
+      "additionalProperties": false,
+      "description": "One Codex (ChatGPT) rate-limit window, mirroring the Claude 5h/7d shape. Sourced from the user's own local Codex session rollout files — Codex CLI writes these snapshots itself, so this is local-file data, not an API call.",
+      "properties": {
+        "resetsAt": {
+          "description": "ISO-8601 reset instant (converted from the rollout's unix `resets_at`).",
+          "type": "string"
+        },
+        "usedPercent": {
+          "type": "number"
+        },
+        "windowMinutes": {
+          "description": "Rolling window length in minutes (primary ≈ 300 = 5h, secondary ≈ 10080 = 7d).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "usedPercent",
+        "windowMinutes"
+      ],
+      "type": "object"
+    },
+    "CodexRateLimits": {
+      "additionalProperties": false,
+      "description": "Codex usage limits parsed from local rollout files. `primary` is the short (5h-style) window, `secondary` the long (weekly) window — same idea as the Claude 5h/7d gauges.",
+      "properties": {
+        "planType": {
+          "description": "Plan tier reported alongside the limits (e.g. \"plus\", \"pro\").",
+          "type": "string"
+        },
+        "primary": {
+          "$ref": "#/definitions/CodexRateLimitWindow"
+        },
+        "secondary": {
+          "$ref": "#/definitions/CodexRateLimitWindow"
+        }
+      },
+      "type": "object"
+    },
     "ConnectionEvent": {
       "additionalProperties": false,
       "properties": {
@@ -1322,6 +1361,9 @@
         },
         "codexPlanType": {
           "type": "string"
+        },
+        "codexRateLimits": {
+          "$ref": "#/definitions/CodexRateLimits"
         },
         "codexSubscriptionActiveUntil": {
           "type": "string"

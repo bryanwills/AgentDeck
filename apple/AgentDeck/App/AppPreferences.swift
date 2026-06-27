@@ -153,6 +153,14 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     @Published private(set) var antigravityAccessEnabled: Bool
     @Published private(set) var antigravitySelectedPath: String?
 
+    /// `~/.codex` directory access, granted by the user via NSOpenPanel so the
+    /// sandboxed App Store build can read Codex's own local usage data
+    /// (`auth.json` subscription expiry + `sessions/.../rollout-*.jsonl`
+    /// rate-limit snapshots). Same posture as the Antigravity DB picker — a
+    /// user-selected security-scoped bookmark, no `~`-relative entitlement.
+    @Published private(set) var codexUsageAccessEnabled: Bool
+    @Published private(set) var codexUsageSelectedPath: String?
+
     /// User's current consent state for writing to `~/.claude/settings.local.json`.
     /// `.unknown` on fresh install → HookInstaller no-ops until user opts in.
     @Published var hookInstallConsent: HookInstallConsent {
@@ -237,6 +245,8 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         self.showSubscriptionsSection = defaults.object(forKey: Keys.showSubscriptionsSection) as? Bool ?? true
         self.antigravitySelectedPath = defaults.string(forKey: Keys.antigravitySelectedPath)
         self.antigravityAccessEnabled = defaults.data(forKey: Keys.antigravityBookmark) != nil
+        self.codexUsageSelectedPath = defaults.string(forKey: Keys.codexUsagePath)
+        self.codexUsageAccessEnabled = defaults.data(forKey: Keys.codexUsageBookmark) != nil
         self.apmeJudgeBackend = defaults.string(forKey: Keys.apmeJudgeBackend) ?? "foundationModels"
         self.timelineSummaryProvider = defaults.string(forKey: Keys.timelineSummaryProvider) ?? "auto"
         self.displaySleepDimEnabled = defaults.object(forKey: Keys.displaySleepDimEnabled) as? Bool ?? true
@@ -438,6 +448,105 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         guard url.startAccessingSecurityScopedResource() else { return nil }
         defer { url.stopAccessingSecurityScopedResource() }
         return try body(url)
+    }
+
+    // MARK: - Codex ~/.codex directory security-scoped bookmark (usage display)
+
+    /// Best-effort default location for the NSOpenPanel — `~/.codex` if it
+    /// exists, else the home directory.
+    private static func defaultCodexDirectoryURL() -> URL? {
+        guard let pw = getpwuid(getuid()), let ptr = pw.pointee.pw_dir else { return nil }
+        let home = URL(fileURLWithPath: String(cString: ptr))
+        let codex = home.appendingPathComponent(".codex", isDirectory: true)
+        return FileManager.default.fileExists(atPath: codex.path) ? codex : home
+    }
+
+    /// `true` when a usable `~/.codex` bookmark is stored. Read off the main
+    /// actor by the daemon usage path, so it touches `defaults` directly
+    /// (thread-safe) rather than the `@Published` mirror.
+    var hasCodexUsageBookmark: Bool {
+        defaults.data(forKey: Keys.codexUsageBookmark) != nil
+    }
+
+    #if os(macOS)
+    @discardableResult
+    @MainActor
+    func chooseCodexDirectory() -> Bool {
+        let panel = NSOpenPanel()
+        panel.title = "Select your .codex folder"
+        panel.message = "Choose Codex's local ~/.codex folder so the sandboxed app can read your Codex plan and usage limits."
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.showsHiddenFiles = true
+        if let defaultDir = Self.defaultCodexDirectoryURL() {
+            panel.directoryURL = defaultDir
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+        return storeCodexUsageBookmark(for: url)
+    }
+    #endif
+
+    @discardableResult
+    func storeCodexUsageBookmark(for url: URL) -> Bool {
+        do {
+            #if os(macOS)
+            let options: URL.BookmarkCreationOptions = [.withSecurityScope]
+            #else
+            let options: URL.BookmarkCreationOptions = []
+            #endif
+            let bookmark = try url.bookmarkData(
+                options: options,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            defaults.set(bookmark, forKey: Keys.codexUsageBookmark)
+            defaults.set(url.path, forKey: Keys.codexUsagePath)
+            codexUsageSelectedPath = url.path
+            codexUsageAccessEnabled = true
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Run `body` with the bookmarked `~/.codex` directory URL under an active
+    /// security scope. Returns nil when no bookmark is stored or it can't be
+    /// resolved. Mirrors `withAntigravityDatabaseAccess`.
+    func withCodexDirectoryAccess<T>(_ body: (URL) throws -> T?) rethrows -> T? {
+        guard let bookmark = defaults.data(forKey: Keys.codexUsageBookmark) else { return nil }
+        var stale = false
+        let url: URL
+        do {
+            #if os(macOS)
+            let resolveOptions: URL.BookmarkResolutionOptions = [.withSecurityScope]
+            #else
+            let resolveOptions: URL.BookmarkResolutionOptions = []
+            #endif
+            url = try URL(
+                resolvingBookmarkData: bookmark,
+                options: resolveOptions,
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            )
+        } catch {
+            return nil
+        }
+
+        if stale {
+            _ = storeCodexUsageBookmark(for: url)
+        }
+
+        guard url.startAccessingSecurityScopedResource() else { return nil }
+        defer { url.stopAccessingSecurityScopedResource() }
+        return try body(url)
+    }
+
+    func clearCodexUsageAccess() {
+        defaults.removeObject(forKey: Keys.codexUsageBookmark)
+        defaults.removeObject(forKey: Keys.codexUsagePath)
+        codexUsageSelectedPath = nil
+        codexUsageAccessEnabled = false
     }
 
     // MARK: - Claude settings.local.json security-scoped bookmark
@@ -664,6 +773,8 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         static let codexConfigInstalled = "prefs.codexConfigInstalled"
         static let codexConfigBookmark = "prefs.codexConfigBookmark"
         static let codexConfigPath = "prefs.codexConfigPath"
+        static let codexUsageBookmark = "prefs.codexUsageBookmark"
+        static let codexUsagePath = "prefs.codexUsagePath"
         static let openclawConfigBookmark = "prefs.openclawConfigBookmark"
         static let openclawConfigSelectedPath = "prefs.openclawConfigSelectedPath"
         static let hasSeenDevicePreview = "prefs.hasSeenDevicePreview"

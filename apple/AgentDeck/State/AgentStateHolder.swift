@@ -802,6 +802,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.codexAccountId = e.codexAccountId ?? state.codexAccountId
         state.codexSubscriptionActiveUntil = e.codexSubscriptionActiveUntil ?? state.codexSubscriptionActiveUntil
         state.codexLastRefreshAt = e.codexLastRefreshAt ?? state.codexLastRefreshAt
+        state.codexRateLimits = e.codexRateLimits ?? state.codexRateLimits
         state.modelCatalog = e.modelCatalog ?? state.modelCatalog
         state.mlxModels = e.mlxModels ?? state.mlxModels
         state.mlxModelCatalog = e.mlxModelCatalog ?? state.mlxModelCatalog

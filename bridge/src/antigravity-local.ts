@@ -150,7 +150,14 @@ export function readAntigravityLocalStatus(): AntigravityStatusInfo | undefined 
   const planName = parsePlanName(sqliteValue('antigravityAuthStatus'));
   if (!planName) return undefined;
 
+  // Remaining model credits live under a separate vscdb key. This is the same
+  // local value the Antigravity IDE shows to the user — reading their own local
+  // state DB, no Google/Antigravity API call (within ToS).
+  const credits = parseModelCredits(sqliteValue('antigravityUnifiedStateSync.modelCredits'));
+
   return {
     planName,
+    availableCredits: credits.availableCredits,
+    minimumCreditAmountForUsage: credits.minimumCreditAmountForUsage,
   };
 }

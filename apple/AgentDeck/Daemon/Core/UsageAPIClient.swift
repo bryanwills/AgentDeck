@@ -54,6 +54,23 @@ struct AntigravityStatus: Sendable {
     var minimumCreditAmountForUsage: Int?
 }
 
+/// One Codex (ChatGPT) rate-limit window read from local rollout files.
+struct CodexRateLimitWindowLocal: Sendable {
+    var usedPercent: Double
+    var windowMinutes: Int
+    var resetsAt: String?
+}
+
+/// Codex usage limits parsed from the user's own local Codex session rollout
+/// files (`~/.codex/sessions/.../rollout-*.jsonl`). Same posture as
+/// `readRawCodexAuthStatus` reading `~/.codex/auth.json` — local files only,
+/// no Codex/OpenAI API is contacted.
+struct CodexRateLimitsLocal: Sendable {
+    var primary: CodexRateLimitWindowLocal?
+    var secondary: CodexRateLimitWindowLocal?
+    var planType: String?
+}
+
 enum TokenStatus: String, Sendable {
     case valid, expired, missing, unknown
 }
@@ -108,6 +125,13 @@ final class UsageAPIClient: Sendable {
     nonisolated(unsafe) private var codexAuthCacheEntry: (timestamp: Date, value: CodexAuthStatus?)?
     private static let codexAuthCacheTTL: TimeInterval = 5
 
+    /// Serializes the Codex rate-limit read path (file tail + JSON parse).
+    private let codexRateLimitsQueue = DispatchQueue(
+        label: "bound.serendipity.agentdeck.usage.codex-ratelimits"
+    )
+    /// Cache keyed on "<rolloutPath>:<mtime>" so unchanged files are free.
+    nonisolated(unsafe) private var codexRateLimitsCache: (key: String, value: CodexRateLimitsLocal?)?
+
     nonisolated(unsafe) private var consecutiveFailures = 0
     nonisolated(unsafe) private var lastTokenStatus: TokenStatus = .unknown
     nonisolated(unsafe) private var lastBackoffStart: Date = .distantPast
@@ -131,6 +155,12 @@ final class UsageAPIClient: Sendable {
         }
     }
     var antigravityStatus: AntigravityStatus? { readAntigravityStatus() }
+
+    /// Latest Codex usage limits from local rollout files. Cached by active
+    /// rollout path + mtime so repeated polls don't re-read an unchanged file.
+    var codexRateLimits: CodexRateLimitsLocal? {
+        codexRateLimitsQueue.sync { readCodexRateLimitsLocked() }
+    }
 
     // MARK: - Fetch
 
@@ -289,17 +319,35 @@ final class UsageAPIClient: Sendable {
 
     // MARK: - Codex Web Auth
 
+    /// Run `body` with the Codex base directory (`~/.codex`). Prefers a
+    /// user-granted security-scoped bookmark so the sandboxed App Store build
+    /// can read Codex's own local files (App Review-safe: user-selected file
+    /// access, no `~`-relative entitlement, no subprocess). Falls back to a
+    /// direct path for the Node CLI / unsigned dev build with full FS access.
+    private func withCodexBase<T>(_ body: (URL) -> T?) -> T? {
+        if AppPreferences.shared.hasCodexUsageBookmark {
+            return AppPreferences.shared.withCodexDirectoryAccess { dir in body(dir) }
+        }
+        let direct = URL(fileURLWithPath: Self.resolvedHomeDir).appendingPathComponent(".codex")
+        guard FileManager.default.fileExists(atPath: direct.path) else { return nil }
+        return body(direct)
+    }
+
     /// Must only be invoked inside `codexAuthQueue.sync { ... }`. Split out
     /// so the serialized `codexAuthStatus` getter has a clearly-locked
     /// version and so tests can exercise the raw read path directly.
     private func readRawCodexAuthStatusLocked() -> CodexAuthStatus? {
-        let authFile = URL(fileURLWithPath: Self.resolvedHomeDir)
-            .appendingPathComponent(".codex/auth.json")
-        guard let data = try? Data(contentsOf: authFile),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
+        withCodexBase { base in
+            let authFile = base.appendingPathComponent("auth.json")
+            guard let data = try? Data(contentsOf: authFile),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return nil
+            }
+            return self.parseCodexAuthJSON(json)
         }
+    }
 
+    private func parseCodexAuthJSON(_ json: [String: Any]) -> CodexAuthStatus {
         let tokens = json["tokens"] as? [String: Any]
         let accessTokenPresent = string(tokens, key: "access_token") != nil
         let accessPayload = decodeJWT(string(tokens, key: "access_token"))
@@ -400,6 +448,95 @@ final class UsageAPIClient: Sendable {
 
     private func firstString(_ values: [String?]) -> String? {
         values.first(where: { $0?.isEmpty == false }) ?? nil
+    }
+
+    // MARK: - Codex Rate Limits (local rollout files)
+
+    /// Must only be invoked inside `codexRateLimitsQueue.sync { ... }`. The
+    /// whole find-newest-file + tail-read runs inside `withCodexBase` so the
+    /// security scope (App Store sandbox) stays active during the file read.
+    private func readCodexRateLimitsLocked() -> CodexRateLimitsLocal? {
+        withCodexBase { base in
+            guard let file = self.newestCodexRolloutFile(sessionsDir: base.appendingPathComponent("sessions")) else { return nil }
+            let attrs = try? FileManager.default.attributesOfItem(atPath: file.path)
+            let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            let key = "\(file.path):\(mtime)"
+            if let cached = self.codexRateLimitsCache, cached.key == key { return cached.value }
+
+            let parsed = self.readCodexRolloutTail(file).flatMap(Self.parseCodexRateLimits)
+            self.codexRateLimitsCache = (key, parsed)
+            return parsed
+        }
+    }
+
+    /// Descend <sessionsDir> year → month → day (newest dir at each level),
+    /// then return the most-recently-modified rollout file.
+    private func newestCodexRolloutFile(sessionsDir: URL) -> URL? {
+        let fm = FileManager.default
+        var dir = sessionsDir
+        guard fm.fileExists(atPath: dir.path) else { return nil }
+        for _ in 0..<3 {
+            guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey]) else { return nil }
+            let subdirs = entries
+                .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+                .sorted { $0.lastPathComponent.compare($1.lastPathComponent, options: .numeric) == .orderedDescending }
+            guard let newest = subdirs.first else { return nil }
+            dir = newest
+        }
+        guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
+        let rollouts = files.filter { $0.lastPathComponent.hasPrefix("rollout-") && $0.pathExtension == "jsonl" }
+        return rollouts.max { a, b in
+            let am = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let bm = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return am < bm
+        }
+    }
+
+    /// Read the trailing bytes of a rollout (these grow to many MB; the newest
+    /// rate_limits line is near the end).
+    private func readCodexRolloutTail(_ file: URL, maxBytes: Int = 262144) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let start = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
+        try? handle.seek(toOffset: start)
+        guard let data = try? handle.readToEnd() else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// Parse the newest token_count `rate_limits` snapshot out of rollout text.
+    static func parseCodexRateLimits(_ text: String) -> CodexRateLimitsLocal? {
+        for line in text.split(separator: "\n").reversed() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.contains("rate_limits"), let data = trimmed.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let payload = obj["payload"] as? [String: Any],
+                  let rl = payload["rate_limits"] as? [String: Any] else { continue }
+            let primary = parseCodexWindow(rl["primary"] as? [String: Any])
+            let secondary = parseCodexWindow(rl["secondary"] as? [String: Any])
+            if primary == nil && secondary == nil { continue }
+            return CodexRateLimitsLocal(
+                primary: primary,
+                secondary: secondary,
+                planType: rl["plan_type"] as? String
+            )
+        }
+        return nil
+    }
+
+    private static func parseCodexWindow(_ raw: [String: Any]?) -> CodexRateLimitWindowLocal? {
+        guard let raw,
+              let used = (raw["used_percent"] as? NSNumber)?.doubleValue,
+              let window = (raw["window_minutes"] as? NSNumber)?.intValue else { return nil }
+        var resetsAt: String?
+        if let epoch = (raw["resets_at"] as? NSNumber)?.doubleValue, epoch > 0 {
+            resetsAt = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: epoch))
+        }
+        return CodexRateLimitWindowLocal(
+            usedPercent: min(100, max(0, used)),
+            windowMinutes: window,
+            resetsAt: resetsAt
+        )
     }
 
     // MARK: - Antigravity Local Status

@@ -102,7 +102,8 @@ fun EinkTerrariumView(
         val hasActiveCreatures = state.octopus != OctopusVisualState.SLEEPING ||
             state.crayfish != CrayfishVisualState.DORMANT ||
             state.cloudCreatures.any { it.visualState != OctopusVisualState.SLEEPING } ||
-            state.openCodeCreatures.any { it.visualState != OctopusVisualState.SLEEPING }
+            state.openCodeCreatures.any { it.visualState != OctopusVisualState.SLEEPING } ||
+            state.antigravityCreatures.any { it.visualState != OctopusVisualState.SLEEPING }
         val isAnimating = hasActiveCreatures && !snapshotMode
 
         // Animation loop — platform-specific:
@@ -152,7 +153,8 @@ fun EinkTerrariumView(
         val agentsKey = state.agents.map { it.visualState }
         val cloudsKey = state.cloudCreatures.map { it.visualState }
         val openCodeKey = state.openCodeCreatures.map { it.visualState }
-        LaunchedEffect(snapshotMode, state.octopus, state.crayfish, state.tetra, state.environment, agentsKey, cloudsKey, openCodeKey, widthPx, heightPx) {
+        val antigravityKey = state.antigravityCreatures.map { it.visualState }
+        LaunchedEffect(snapshotMode, state.octopus, state.crayfish, state.tetra, state.environment, agentsKey, cloudsKey, openCodeKey, antigravityKey, widthPx, heightPx) {
             val bmp = reusableBitmap?.takeIf { it.width == widthPx && it.height == heightPx }
                 ?: Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { reusableBitmap = it }
             val frame = if (snapshotMode) 0f else animFrame
@@ -367,6 +369,22 @@ private fun renderEinkFrame(
                 animFrame = animFrame,
                 swimFrame = animFrame,
                 displayName = state.openCodeCreatures[i].displayName)
+        }
+    }
+
+    // Antigravity creatures (peak/arc logo agents)
+    if (state.antigravityCreatures.isNotEmpty()) {
+        val antigravitySlots = dev.agentdeck.terrarium.layoutAntigravityCreatures(state.antigravityCreatures.size)
+        for (i in state.antigravityCreatures.indices) {
+            val slot = antigravitySlots.getOrElse(i) { antigravitySlots.last() }
+            drawEinkAntigravity(canvas, paint, width, height,
+                state.antigravityCreatures[i].visualState,
+                centerXFraction = slot.centerXFraction,
+                centerYFraction = slot.centerYFraction,
+                scaleFactor = slot.scaleFactor,
+                animFrame = animFrame,
+                swimFrame = animFrame,
+                displayName = state.antigravityCreatures[i].displayName)
         }
     }
 
@@ -948,6 +966,90 @@ private fun drawEinkOpenCode(
         paint.style = Paint.Style.FILL
         canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
         paint.color = einkPick(GRAY_OPENCODE_INNER, COLOR_OPENCODE_INNER)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.5f * scaleFactor
+        canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
+
+        paint.color = android.graphics.Color.BLACK
+        paint.style = Paint.Style.FILL
+        paint.textSize = bubbleR * 1.4f
+        paint.textAlign = Paint.Align.CENTER
+        canvas.drawText("?", bubbleX, bubbleY + bubbleR * 0.45f, paint)
+        paint.textAlign = Paint.Align.LEFT
+    }
+}
+
+private fun drawEinkAntigravity(
+    canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int,
+    state: OctopusVisualState,
+    centerXFraction: Float = 0.6f,
+    centerYFraction: Float = 0.28f,
+    scaleFactor: Float = 1f,
+    animFrame: Float = 0f,
+    swimFrame: Float = 0f,
+    displayName: String? = null,
+) {
+    val wanderX = if (state == OctopusVisualState.WORKING) {
+        val phase = swimFrame + ((centerXFraction * 100).toInt() * 7)
+        0.06f * kotlin.math.sin(phase * kotlin.math.PI / 16.0).toFloat()
+    } else 0f
+
+    val cx = w * (centerXFraction + wanderX)
+    val restY = (0.64f + (centerXFraction - 0.6f) * 0.06f).coerceAtMost(0.76f)
+    val baseYFraction = when (state) {
+        OctopusVisualState.WORKING -> centerYFraction
+        OctopusVisualState.ASKING -> (centerYFraction + restY) * 0.5f
+        OctopusVisualState.FLOATING -> restY
+        OctopusVisualState.SLEEPING -> restY + 0.01f
+    }
+    val bobY = when (state) {
+        OctopusVisualState.SLEEPING -> h * 0.006f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 14).toFloat()
+        OctopusVisualState.FLOATING -> h * 0.008f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 10).toFloat()
+        OctopusVisualState.ASKING -> h * 0.005f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 6).toFloat()
+        OctopusVisualState.WORKING -> h * 0.02f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat()
+    }
+    val cy = h * baseYFraction + bobY
+
+    // Peak/arc mark — filled silhouette of the canonical Antigravity path.
+    val markSize = w * 0.052f * scaleFactor * 1.8f
+    val markHalf = markSize / 2f
+    val svgScale = markSize / dev.agentdeck.terrarium.CreatureGeometry.ANTIGRAVITY_VIEWBOX
+
+    val bodyColor = if (state == OctopusVisualState.SLEEPING) {
+        einkPick(GRAY_ANTIGRAVITY_SLEEP, COLOR_ANTIGRAVITY_SLEEP)
+    } else {
+        einkPick(GRAY_ANTIGRAVITY_BODY, COLOR_ANTIGRAVITY_BODY)
+    }
+
+    paint.style = Paint.Style.FILL
+    paint.color = bodyColor
+    canvas.save()
+    canvas.translate(cx, cy)
+    canvas.scale(svgScale, svgScale)
+    canvas.translate(-dev.agentdeck.terrarium.CreatureGeometry.ANTIGRAVITY_VIEWBOX / 2f,
+        -dev.agentdeck.terrarium.CreatureGeometry.ANTIGRAVITY_VIEWBOX / 2f)
+    canvas.drawPath(dev.agentdeck.terrarium.CreatureGeometry.antigravityNativePath, paint)
+    canvas.restore()
+
+    // Name tag
+    if (displayName != null) {
+        drawEinkNameTag(canvas, paint, cx, cy - markHalf, scaleFactor, displayName, w)
+    }
+
+    // ASKING: speech bubble with "?" beside body
+    if (state == OctopusVisualState.ASKING) {
+        val bubbleR = markSize * 0.25f * scaleFactor
+        val bubbleX = cx + markSize * 0.6f
+        val bubbleY = cy
+
+        paint.color = einkPick(GRAY_AIR, COLOR_AIR)
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
+        paint.color = einkPick(GRAY_ANTIGRAVITY_BODY, COLOR_ANTIGRAVITY_BODY)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.5f * scaleFactor
         canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
@@ -1683,6 +1785,8 @@ private const val GRAY_CLOUD_SLEEP = 0xFF888888.toInt()  // level 8 — dormant/
 private const val GRAY_OPENCODE_OUTER = 0xFF888888.toInt() // level 8 — outer frame (visible contrast vs water BG level 13)
 private const val GRAY_OPENCODE_INNER = 0xFF444444.toInt() // level 4 — inner square (dark gray)
 private const val GRAY_OPENCODE_SLEEP = 0xFFAAAAAA.toInt() // level 10 — sleeping/dormant (faded, distinct from active outer)
+private const val GRAY_ANTIGRAVITY_BODY = 0xFF606060.toInt() // level 6 — peak/arc body (brand gray)
+private const val GRAY_ANTIGRAVITY_SLEEP = 0xFF999999.toInt() // level 9 — sleeping/dormant (faded)
 private const val GRAY_STARBURST  = 0xFF999999.toInt()  // level 9 — WORKING starburst glow
 private const val GRAY_DECORATION = 0xFF444444.toInt()  // level 4 — keyboard, review docs
 private const val GRAY_SEAWEED    = 0xFF666666.toInt()  // level 6 — seaweed stems
@@ -1749,6 +1853,10 @@ private val COLOR_CLOUD_SLEEP  = 0xFF8888AA.toInt()  // muted lavender sleep
 private val COLOR_OPENCODE_OUTER = 0xFFF1ECEC.toInt()  // light warm gray outer frame
 private val COLOR_OPENCODE_INNER = 0xFF4B4646.toInt()  // dark brown-gray inner square
 private val COLOR_OPENCODE_SLEEP = 0xFF9A9595.toInt()  // muted sleep
+
+// Antigravity (peak/arc mark — brand gray #5F6368)
+private val COLOR_ANTIGRAVITY_BODY = 0xFF5F6368.toInt()  // Google gray primary
+private val COLOR_ANTIGRAVITY_SLEEP = 0xFF9AA0A6.toInt() // muted gray sleep
 
 // Fish — distinct against light water
 private val COLOR_FISH_BODY    = 0xFF3366AA.toInt()  // royal blue body
