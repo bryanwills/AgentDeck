@@ -67,6 +67,9 @@ struct TrmnlSession: Sendable {
     /// "What is it doing" inputs for the description line.
     var currentTool: String = ""
     var currentTask: String = ""
+    /// Daemon-synthesized activity one-liner (shared with the XTeink X3). Preferred
+    /// over the locally-derived currentTool/goal when present.
+    var activity: String = ""
     /// One-line gist of the session's purpose (first user prompt).
     var goal: String = ""
     var elapsedSec: Int = 0

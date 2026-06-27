@@ -122,7 +122,11 @@ function cleanAction(raw: string): string {
 function sessionDescription(sess: SessionInfo, now: Date): string {
   const parts: string[] = [];
   const goal = (sess.goal || '').trim();
-  const headline = goal || cleanAction((sess.currentTask || sess.currentTool || '').trim());
+  const activity = (sess.activity || '').trim();
+  // Prefer the daemon's shared activity one-liner; else goal, else live tool action.
+  const headline = activity
+    ? cleanAction(activity)
+    : goal || cleanAction((sess.currentTask || sess.currentTool || '').trim());
   if (headline) parts.push(headline);
   if (sess.modelName) parts.push(shortModel(sess.modelName));
   let elapsed = sess.elapsedSec;

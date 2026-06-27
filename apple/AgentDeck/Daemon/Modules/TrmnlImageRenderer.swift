@@ -322,7 +322,12 @@ enum TrmnlImageRenderer {
     private static func sessionDescription(_ s: TrmnlSession) -> String {
         var parts: [String] = []
         let goal = s.goal.trimmingCharacters(in: .whitespaces)
-        let headline = goal.isEmpty ? cleanAction(s.currentTask.isEmpty ? s.currentTool : s.currentTask) : goal
+        let activity = s.activity.trimmingCharacters(in: .whitespaces)
+        // Prefer the daemon's shared activity one-liner; else fall back to goal,
+        // then the live tool action.
+        let headline = !activity.isEmpty
+            ? cleanAction(activity)
+            : (goal.isEmpty ? cleanAction(s.currentTask.isEmpty ? s.currentTool : s.currentTask) : goal)
         if !headline.isEmpty { parts.append(headline) }
         if !s.modelName.isEmpty { parts.append(shortModel(s.modelName)) }
         if s.elapsedSec > 0 { parts.append(fmtElapsed(s.elapsedSec)) }

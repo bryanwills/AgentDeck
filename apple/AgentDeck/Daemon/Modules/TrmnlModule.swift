@@ -86,6 +86,7 @@ actor TrmnlModule: DeviceModule {
                     state: s["state"] as? String ?? "idle",
                     currentTool: s["currentTool"] as? String ?? "",
                     currentTask: s["currentTask"] as? String ?? "",
+                    activity: s["activity"] as? String ?? "",
                     goal: s["goal"] as? String ?? "",
                     elapsedSec: elapsed)
             }

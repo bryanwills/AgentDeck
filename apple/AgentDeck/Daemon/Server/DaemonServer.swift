@@ -5277,7 +5277,24 @@ final class DaemonServer {
         } else if let elapsed = s.elapsedSec {
             d["elapsedSec"] = elapsed
         }
+        if let activity = Self.sessionActivitySummary(s) { d["activity"] = activity }
         return d
+    }
+
+    /// Compact "what is this agent doing right now" one-liner — a single shared
+    /// source so glance surfaces (XTeink X3 rows, TRMNL list) all render the same
+    /// text instead of each synthesizing its own. Awaiting sessions surface the
+    /// pending question; working sessions surface the current tool. Returns nil
+    /// when there's nothing meaningful to show (callers omit the line).
+    private static func sessionActivitySummary(_ s: DaemonSessionEntry) -> String? {
+        let state = s.state ?? ""
+        if state.hasPrefix("awaiting"), let q = s.question, !q.isEmpty {
+            return String(q.prefix(72))
+        }
+        if let tool = s.currentTool, !tool.isEmpty {
+            return tool
+        }
+        return nil
     }
 
     // MARK: - APME eval result handling

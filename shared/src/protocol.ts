@@ -334,6 +334,9 @@ export interface SessionInfo {
   controlMode?: 'managed' | 'observed';
   cwd?: string;
   currentTask?: string;
+  /** Daemon-synthesized "what is this agent doing right now" one-liner — a shared
+   *  source so glance surfaces (XTeink X3 rows, TRMNL list) render the same text. */
+  activity?: string;
   goal?: string;  // one-line gist of the session's purpose (first user prompt) — observed sessions
   contextPercent?: number;
   totalTokens?: number;
