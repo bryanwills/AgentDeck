@@ -1989,6 +1989,21 @@ final class DaemonServer {
             handleClientRegister(cmd, from: conn)
             return
         }
+        // Per-session timeline poll: reply (to this requester only) with the
+        // session's recent entries so a device that connected mid-session can fill
+        // its Detail view without waiting for live events.
+        if cmd["type"] as? String == "query_session_timeline" {
+            guard let sid = cmd["sessionId"] as? String, !sid.isEmpty else { return }
+            let since = cmd["since"] as? Double
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let entries = await self.timelineStore.historyForSession(sid, since: since)
+                let dicts = entries.map { self.claudeCodeEntryDict($0) }
+                let msg: [String: Any] = ["type": "timeline_history", "sessionId": sid, "entries": dicts]
+                if let data = msg.jsonData { conn.send(data) }
+            }
+            return
+        }
         handleCommand(cmd)
     }
 

@@ -113,6 +113,15 @@ export class BridgeTimelineStore {
     return [...this.entries];
   }
 
+  /** Recent entries attributed to one session, for the `query_session_timeline`
+   *  poll — lets a device that connects mid-session fill its Detail view. */
+  getHistoryForSession(sessionId: string, since?: number, limit = 16): TimelineEntry[] {
+    const matched = this.entries.filter(
+      (e) => e.sessionId === sessionId && (since == null || e.ts > since),
+    );
+    return matched.slice(-limit);
+  }
+
   updateEntryStatus(approvalId: string, status: 'approved' | 'denied'): void {
     for (let i = this.entries.length - 1; i >= 0; i--) {
       if (this.entries[i].approvalId === approvalId) {

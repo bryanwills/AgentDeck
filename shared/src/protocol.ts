@@ -361,6 +361,10 @@ export interface TimelineEventMsg {
 export interface TimelineHistoryMsg {
   type: 'timeline_history';
   entries: TimelineEntry[];
+  /** Set when this history is a reply to `query_session_timeline` — scopes the
+   *  entries to one session so reconnecting glance devices (XTeink X3) can fill a
+   *  per-session Detail view on demand instead of waiting for live events. */
+  sessionId?: string;
 }
 
 // ===== APME (Agent Performance Monitoring & Evaluation) =====
@@ -542,6 +546,16 @@ export interface QueryUsageCommand {
   type: 'query_usage';
 }
 
+/** Request a session's recent timeline. The daemon replies (to the requester
+ *  only) with a `timeline_history` carrying that session's entries. Lets a
+ *  device that connects mid-session fill its per-session Detail view. */
+export interface QuerySessionTimelineCommand {
+  type: 'query_session_timeline';
+  sessionId: string;
+  /** Optional epoch-ms lower bound; omit for the full retained history. */
+  since?: number;
+}
+
 export interface DiagCommand {
   type: 'diag';
   action: 'dump' | 'analyze';
@@ -645,6 +659,7 @@ export type PluginCommand =
   | EscapeCommand
   | VoiceCommand
   | QueryUsageCommand
+  | QuerySessionTimelineCommand
   | DiagCommand
   | UtilityCommand
   | SwitchAgentCommand

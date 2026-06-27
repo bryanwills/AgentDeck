@@ -149,6 +149,13 @@ actor DaemonTimelineStore {
         Array(entries.suffix(count))
     }
 
+    /// Recent entries attributed to one session (newest-last), for the
+    /// `query_session_timeline` poll. `since` is an epoch-ms lower bound.
+    func historyForSession(_ sessionId: String, since: Double? = nil, limit: Int = 16) -> [DaemonTimelineEntry] {
+        let matched = entries.filter { $0.sessionId == sessionId && (since == nil || $0.ts > since!) }
+        return Array(matched.suffix(limit))
+    }
+
     /// Returns the last timeline entry matching the given type, or nil if none found.
     func getLastEntry(type: String) -> DaemonTimelineEntry? {
         entries.last(where: { $0.type == type })
