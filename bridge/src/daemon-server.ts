@@ -49,6 +49,7 @@ import { enableDebugLog, debug } from './logger.js';
 import { initApme, isTimelineProjectionEnabled, loadApmeConfig, type ApmeModule } from './apme/index.js';
 import { handleApmeRequest } from './apme/http.js';
 import { readModelFromTranscript } from './apme/claude-transcript-reader.js';
+import { transcriptTimelineForSession } from './session-transcript-timeline.js';
 import {
   handleTrmnlSetup,
   handleTrmnlDisplay,
@@ -1344,10 +1345,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       const sessionId = (msg as { sessionId?: unknown }).sessionId;
       const since = (msg as { since?: unknown }).since;
       if (typeof sessionId === 'string' && sessionId) {
-        const entries = core.bridgeTimeline.getHistoryForSession(
-          sessionId,
-          typeof since === 'number' ? since : undefined,
-        );
+        const sinceMs = typeof since === 'number' ? since : undefined;
+        let entries = core.bridgeTimeline.getHistoryForSession(sessionId, sinceMs);
+        // Passively-observed sessions never push timeline rows (the relay only
+        // covers managed + hook sessions), so the store comes back empty for
+        // them. Reconstruct a recent-activity timeline from their transcript so
+        // the device's Detail view isn't stuck on "No recent activity yet".
+        if (entries.length === 0) {
+          try {
+            entries = transcriptTimelineForSession(sessionId, { since: sinceMs });
+          } catch { /* read-only best effort */ }
+        }
         try {
           sender.send(JSON.stringify({ type: 'timeline_history', sessionId, entries }));
         } catch { /* client disconnecting */ }
