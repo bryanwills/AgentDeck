@@ -416,6 +416,11 @@ final class DaemonServer {
     /// as `cachedStreamDeck`. Keyed by WS connection so several panels on the LAN
     /// each survive independently and are evicted the moment their own WS closes.
     private var cachedEinkDevices: [UUID: StreamDeckRegistration] = [:]
+    /// Foundation Models per-session activity summaries, keyed by session id.
+    /// `sig` invalidates the cache when the session's tool/state/question changes.
+    /// Filled asynchronously; the next sessions_list broadcast surfaces it.
+    private var sessionActivityCache: [String: (sig: String, summary: String)] = [:]
+    private var sessionActivityInflight: Set<String> = []
     /// Connection that registered as the Ulanzi Studio plugin. While present,
     /// the in-process D200H module stands down (Ulanzi Studio drives the device).
     private var ulanziPluginConnectionId: UUID?
@@ -5277,7 +5282,7 @@ final class DaemonServer {
         } else if let elapsed = s.elapsedSec {
             d["elapsedSec"] = elapsed
         }
-        if let activity = Self.sessionActivitySummary(s) { d["activity"] = activity }
+        if let activity = sessionActivitySummary(s) { d["activity"] = activity }
         return d
     }
 
@@ -5286,15 +5291,68 @@ final class DaemonServer {
     /// text instead of each synthesizing its own. Awaiting sessions surface the
     /// pending question; working sessions surface the current tool. Returns nil
     /// when there's nothing meaningful to show (callers omit the line).
-    private static func sessionActivitySummary(_ s: DaemonSessionEntry) -> String? {
+    /// Present-tense verb for a tool name so the heuristic reads naturally.
+    private static func verbForm(_ tool: String) -> String {
+        switch tool {
+        case "Edit", "MultiEdit", "Write", "NotebookEdit": return "Editing"
+        case "Read": return "Reading"
+        case "Bash": return "Running"
+        case "Grep", "WebSearch": return "Searching"
+        case "Glob": return "Finding"
+        case "Task": return "Delegating"
+        case "WebFetch": return "Fetching"
+        case "TodoWrite": return "Planning"
+        default: return tool
+        }
+    }
+
+    /// Synchronous heuristic floor for the activity line.
+    private static func quickActivity(_ s: DaemonSessionEntry) -> String? {
         let state = s.state ?? ""
         if state.hasPrefix("awaiting"), let q = s.question, !q.isEmpty {
             return String(q.prefix(72))
         }
         if let tool = s.currentTool, !tool.isEmpty {
-            return tool
+            return verbForm(tool)
         }
         return nil
+    }
+
+    /// Resolve the per-session activity one-liner: a cached Foundation Models
+    /// summary when current, else the heuristic — kicking off an async FM
+    /// labeling whose result surfaces on a later sessions_list broadcast.
+    @MainActor
+    private func sessionActivitySummary(_ s: DaemonSessionEntry) -> String? {
+        let sig = "\(s.state ?? "")|\(s.currentTool ?? "")|\(s.question ?? "")"
+        if let cached = sessionActivityCache[s.id], cached.sig == sig {
+            return cached.summary
+        }
+        refreshSessionActivity(s, sig: sig)
+        return Self.quickActivity(s)
+    }
+
+    /// Fire-and-forget FM labeling. Caches the result and re-broadcasts so the
+    /// natural-language summary replaces the heuristic on the next paint.
+    @MainActor
+    private func refreshSessionActivity(_ s: DaemonSessionEntry, sig: String) {
+        guard !sessionActivityInflight.contains(s.id) else { return }
+        // Nothing meaningful to label yet → keep the heuristic, don't spin up FM.
+        guard (s.currentTool?.isEmpty == false) || (s.state?.hasPrefix("awaiting") == true) else { return }
+        sessionActivityInflight.insert(s.id)
+        let context = [
+            s.projectName.isEmpty ? nil : "Project: \(s.projectName)",
+            s.agentType.map { "Agent: \($0)" },
+            s.currentTool.map { "Current tool: \($0)" },
+            (s.state?.hasPrefix("awaiting") == true) ? s.question.map { "Awaiting answer to: \($0)" } : nil,
+        ].compactMap { $0 }.joined(separator: "\n")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.sessionActivityInflight.remove(s.id) }
+            let summary = await TimelineSummarizer.labelActivity(context)
+            guard let summary, !summary.isEmpty else { return }
+            self.sessionActivityCache[s.id] = (sig, summary)
+            self.broadcastSessionsList()
+        }
     }
 
     // MARK: - APME eval result handling

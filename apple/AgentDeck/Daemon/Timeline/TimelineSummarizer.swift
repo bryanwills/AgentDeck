@@ -190,6 +190,35 @@ enum TimelineSummarizer {
         return nil
     }
 
+    /// Label a coding agent's *current work* as one short natural-language phrase
+    /// for a glance display (XTeink X3 rows). Distinct from `summarize`, which
+    /// condenses a finished response — here the input is session context (tool,
+    /// goal, project) and the instruction asks for a "what is it doing" label.
+    /// FoundationModels-first (the App Store default on macOS 26+); returns nil
+    /// when unavailable so the caller keeps its heuristic.
+    static func labelActivity(_ context: String) async -> String? {
+        let instructions =
+            "You label a coding agent's current work for a tiny status display. Reply with ONE short " +
+            "present-tense phrase (max 8 words, no period, no quotes) describing what the agent is doing, " +
+            "e.g. \"Editing the auth module\" or \"Running the test suite\". English only."
+#if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            guard case .available = SystemLanguageModel.default.availability else { return nil }
+            do {
+                let session = LanguageModelSession(instructions: instructions)
+                let response = try await session.respond(
+                    to: String(context.prefix(1000)),
+                    options: GenerationOptions(temperature: 0)
+                )
+                return cleanLLMOutput(response.content)
+            } catch {
+                return nil
+            }
+        }
+#endif
+        return nil
+    }
+
     // MARK: - MLX (port 8800)
 
     private static func queryMLX(_ text: String) async -> SummaryResult? {
