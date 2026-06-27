@@ -27,6 +27,9 @@ export interface EnrichedSession {
   options?: PromptOption[];
   /** Seconds since startedAt — derived at broadcast time so NTP-less devices (ESP32) render elapsed per session. */
   elapsedSec?: number;
+  /** Daemon-synthesized "what is this agent doing right now" one-liner (heuristic,
+   *  upgraded to a Foundation Models summary when available). Shared by X3 + TRMNL. */
+  activity?: string;
 }
 
 /** Cache last-known sibling state to avoid propagating undefined on transient fetch failures.

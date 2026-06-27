@@ -18,6 +18,7 @@ import { loadMlxSettings } from '@agentdeck/shared';
 import { probeGateway, checkGatewayHealth } from './gateway-probe.js';
 import { fetchUsageFromApi, hasOAuthToken, getTokenStatus, type ApiUsageData } from './usage-api.js';
 import { buildEnrichedSessionsList } from './session-aggregator.js';
+import { activityFor } from './session-activity.js';
 import {
   register as registerSession,
   deregister as deregisterSession,
@@ -579,6 +580,13 @@ export class BridgeCore {
       snapshot.effortLevel ?? undefined,
     );
     if (this.sessionsEnricher) sessions = this.sessionsEnricher(sessions);
+    // Attach the shared per-session activity one-liner to the FINAL list (covers
+    // managed + observed sessions). Heuristic is immediate; a Foundation Models
+    // summary, when available, lands on a later periodic broadcast via the cache.
+    for (const s of sessions) {
+      const a = activityFor(s);
+      if (a) s.activity = a;
+    }
     this.wsServer.broadcast({ type: 'sessions_list', sessions } as BridgeEvent);
   }
 
