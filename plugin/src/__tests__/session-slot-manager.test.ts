@@ -370,8 +370,9 @@ describe('SessionSlotManager list-view usage tiles', () => {
     // Block is the last 4 keys: 11=C5h, 12=C7d, 13=CX5h, 14=CX7d.
     expect(manager.getSlotConfig(11, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '5H', usageAgent: 'claude', usageWindow: '5h', usagePercent: 42 });
     expect(manager.getSlotConfig(12, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '7D', usageAgent: 'claude', usageWindow: '7d', usagePercent: 17 });
-    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: 'CX 5H', usageAgent: 'codex', usageWindow: '5h', usagePercent: 30 });
-    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: 'CX 7D', usageAgent: 'codex', usageWindow: '7d', usagePercent: 12 });
+    // Codex windows use the same short labels — agent rides usageAgent/brand dot.
+    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '5H', usageAgent: 'codex', usageWindow: '5h', usagePercent: 30 });
+    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '7D', usageAgent: 'codex', usageWindow: '7d', usagePercent: 12 });
     // Sessions still fill the front keys (before the reserved block).
     expect(manager.getSlotConfig(0, SD_CLASSIC_LAYOUT).type).toBe('session');
   });
@@ -383,9 +384,9 @@ describe('SessionSlotManager list-view usage tiles', () => {
 
     const types = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type);
     expect(types.filter((t) => t === 'usage')).toHaveLength(2);
-    // No Codex-labelled tiles anywhere.
-    const labels = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).usageLabel);
-    expect(labels.some((l) => l?.startsWith('CX'))).toBe(false);
+    // No Codex tiles anywhere (agent identity rides usageAgent, not a label).
+    const agents = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).usageAgent);
+    expect(agents.some((a) => a === 'codex')).toBe(false);
   });
 
   it('hides Claude tiles when only Codex reports quota (reserve 2 Codex tiles)', () => {
@@ -393,8 +394,8 @@ describe('SessionSlotManager list-view usage tiles', () => {
     manager.updateUsage({ codexRateLimits: CODEX_LIMITS });
     manager.updateSessions(fewSessions(3), false);
 
-    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: 'CX 5H', usageAgent: 'codex' });
-    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: 'CX 7D', usageAgent: 'codex' });
+    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '5H', usageAgent: 'codex' });
+    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '7D', usageAgent: 'codex' });
     const types = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type);
     expect(types.filter((t) => t === 'usage')).toHaveLength(2);
   });

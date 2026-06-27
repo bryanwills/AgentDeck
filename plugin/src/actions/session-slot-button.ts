@@ -29,7 +29,7 @@ import {
   type DisconnectedSlotConfig,
 } from '../renderers/session-slot-renderer.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
-import { renderWaterTankGauge } from '../renderers/water-tank-gauge.js';
+import { renderUsageGauge } from '../renderers/usage-gauge.js';
 import { renderStatusReadout, renderSessionReadout } from '../renderers/display-tile.js';
 import { dlog } from '../log.js';
 import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
@@ -336,7 +336,7 @@ function renderSlotSvg(config: SessionSlotConfig, _slot: number): string {
       return renderNextPageButton(config.label ?? '');
 
     case 'usage':
-      return renderWaterTankGauge({
+      return renderUsageGauge({
         agent: config.usageAgent ?? 'claude',
         window: config.usageWindow ?? '5h',
         label: config.usageLabel ?? '',

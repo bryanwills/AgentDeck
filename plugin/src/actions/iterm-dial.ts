@@ -1,12 +1,13 @@
 /**
- * E3 — Codex usage water-tank dial (Stream Deck+).
+ * E3 — Codex usage dial (Stream Deck+).
  *
- * Phase 2 redesign: this encoder permanently shows the Codex subscription quota
- * (5h + 7d water tanks, from `codexRateLimits`) on its 200×100 LCD. When Codex
- * reports no rate limits the dial falls back to a muted "No Codex usage" note.
+ * This encoder shows the Codex subscription quota (from `codexRateLimits`) on
+ * its 200×100 LCD using the full-bleed level-fill gauge. The dial ROTATION
+ * cycles between views ('both' → '5h' → '7d' → 'session'); the dial PRESS
+ * requests a usage refresh. When Codex reports no rate limits the gauge views
+ * fall back to a muted "No Codex usage" note; the session view shows shared
+ * token/cost text (or falls back to the windows when no token data exists).
  * The UUID (`iterm-dial`) is kept for backward profile compatibility.
- *
- * Rotate / touch: no-op (usage is permanent). Push: request a usage refresh.
  */
 import streamDeck, {
   action,
@@ -20,7 +21,8 @@ import streamDeck, {
 } from '@elgato/streamdeck';
 import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, isDaemonConnected } from '../encoder-registry.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
-import { renderUsageEncoderDual } from '../renderers/water-tank-gauge.js';
+import { renderUsageEncoderBoth, renderUsageEncoderSingle } from '../renderers/usage-gauge.js';
+import { renderUsageSession } from '../renderers/usage-dial-renderer.js';
 import { type UsageModeData, updateUsageModeData, getUsageModeData, fireUsageRefresh, buildCodexUsageEncoder } from '../utility-modes/usage.js';
 import type { ConnectionManager } from '../connection-manager.js';
 import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
@@ -29,8 +31,14 @@ import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 
 const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
 
+/** Views the dial rotates through. */
+const USAGE_VIEWS = ['both', '5h', '7d', 'session'] as const;
+type UsageView = typeof USAGE_VIEWS[number];
+
 let currentLayout = '';
 let hasReceivedData = false;
+/** Dial-cycled view index for the Codex usage encoder (E3). */
+let viewIndex = 0;
 
 export function initUsageDial(_bridge: ConnectionManager): void {
   dinfo('CodexUsageDial', 'initUsageDial called');
@@ -77,7 +85,25 @@ function refreshUsageDials(): void {
   }
   if (isVoiceTextTakeoverActive()) return;
 
-  setCanvasFeedback(renderUsageEncoderDual(buildCodexUsageEncoder(getUsageModeData(), hasReceivedData)));
+  setCanvasFeedback(renderCodexUsageView());
+}
+
+/** Render the current dial-cycled view for the Codex usage encoder. */
+function renderCodexUsageView(): string {
+  const data = getUsageModeData();
+  const enc = buildCodexUsageEncoder(data, hasReceivedData);
+  const view: UsageView = USAGE_VIEWS[viewIndex];
+  if (view === 'session') {
+    // Session tokens/cost are shared (not Codex-specific). When none exist, fall
+    // back to the windows rather than an empty text card.
+    const hasSession =
+      (data.inputTokens ?? 0) > 0 || (data.outputTokens ?? 0) > 0 || data.estimatedCostUsd != null;
+    if (hasSession) return renderUsageSession(data);
+    return renderUsageEncoderBoth(enc);
+  }
+  if (view === '5h') return renderUsageEncoderSingle(enc, '5h');
+  if (view === '7d') return renderUsageEncoderSingle(enc, '7d');
+  return renderUsageEncoderBoth(enc);
 }
 
 @action({ UUID: 'bound.serendipity.agentdeck.iterm-dial' })
@@ -105,7 +131,11 @@ export class UsageDialAction extends SingletonAction {
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     if (!isDaemonConnected()) return;
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
-    // Usage is permanent — rotation is a no-op.
+    // Rotation cycles the usage view (both → 5h → 7d → session).
+    const dir = ev.payload.ticks >= 0 ? 1 : -1;
+    viewIndex = (viewIndex + dir + USAGE_VIEWS.length) % USAGE_VIEWS.length;
+    dlog('CodexUsageDial', `rotate → view=${USAGE_VIEWS[viewIndex]}`);
+    refreshUsageDials();
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {

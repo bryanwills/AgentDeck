@@ -84,7 +84,7 @@ export function formatTokens(n?: number): string {
 // ─── SD+ usage-encoder data builders (Phase 2) ──────────────────────────────
 // Map the shared usage snapshot onto the 200×100 dual-tank encoder renderer.
 
-import type { UsageEncoderData } from '../renderers/water-tank-gauge.js';
+import type { UsageEncoderData } from '../renderers/usage-gauge.js';
 
 /**
  * Build the Claude usage encoder (E2) from the shared snapshot.

@@ -351,13 +351,15 @@ export class SessionSlotManager {
       });
     }
     if (this._codexPrimary != null || this._codexSecondary != null) {
+      // Codex windows carry the same short "5H"/"7D" labels as Claude — the
+      // agent is conveyed by the gauge's brand dot, not a "CX " prefix.
       gauges.push({
-        agent: 'codex', window: '5h', label: 'CX 5H',
+        agent: 'codex', window: '5h', label: '5H',
         percent: this._codexPrimary?.percent ?? 0, resetsAt: this._codexPrimary?.resetsAt,
         known: this._codexPrimary != null, color: CODEX_USAGE_COLOR,
       });
       gauges.push({
-        agent: 'codex', window: '7d', label: 'CX 7D',
+        agent: 'codex', window: '7d', label: '7D',
         percent: this._codexSecondary?.percent ?? 0, resetsAt: this._codexSecondary?.resetsAt,
         known: this._codexSecondary != null, color: CODEX_USAGE_COLOR,
       });

@@ -24,6 +24,7 @@ import {
 import { State, type PromptOption } from './states.js';
 import type { SessionInfo, SubscriptionInfo, CodexRateLimits } from './protocol.js';
 import { Brand } from './design-tokens.js';
+import { CLAUDE_LOGO_PATH, CODEX_LOGO_PATH } from './svg-renderers/agent-logos.js';
 
 /** Command dispatched when a key is pressed. `null` = inert tile (info/empty). */
 export type ButtonCommand = { type: string; [k: string]: unknown };
@@ -39,6 +40,11 @@ export interface KeySlot {
 
 /** 5 columns × 3 rows. Physical key index == row * GRID_COLS + col. */
 export const GRID_COLS = 5;
+
+/** D200H usage placement: the 2×2 block directly above the wide bottom-right
+ * button (cols 3–4, rows 0–1), in reading order. Cleaner than the trailing keys
+ * — Claude 5H/7D fill the top row, Codex 5H/7D the row below. */
+const USAGE_PREFERRED_POS = ['3_0', '4_0', '3_1', '4_1'];
 
 export interface DashState {
   state: string;
@@ -173,12 +179,15 @@ export function renderUsageWideSlot(fiveHourPct: number, sevenDayPct: number, kn
   return `<svg xmlns="http://www.w3.org/2000/svg" width="288" height="144" viewBox="0 0 288 144">${elements}</svg>`;
 }
 
-// --- Water-tank usage gauge (canonical D200H/Ulanzi usage tile) ---------------
-// Mirrors the Stream Deck water-tank redesign (plugin/src/renderers/water-tank-
-// gauge.ts) replicated here so shared has no plugin/ dependency. The water LEVEL
-// is the REMAINING quota (100 − usedPercent) so the tank visibly drains as the
-// agent burns its window. The water hue carries the agent brand (Claude
-// terracotta / Codex blue) so a glance tells which agent the tile belongs to.
+// --- Full-bleed level-fill usage gauge (canonical D200H/Ulanzi usage tile) -----
+// Mirrors the Stream Deck redesign (plugin/src/renderers/usage-gauge.ts)
+// replicated here so shared has no plugin/ dependency. The ENTIRE tile is the
+// gauge: a full-width band rises from the bottom by `usedPercent` so the tile
+// fills as the agent burns its window. The fill colour is a vivid SEVERITY ramp
+// (green → amber → red); agent identity rides the provider's BRAND LOGO (Claude
+// terracotta / Codex blue) in the top-right corner, NOT the fill colour. The
+// headline used% + reset countdown sit on a solid dark chip (painted over the
+// fill) so they stay legible at any fill height — no reliance on a halo.
 
 /** Reset countdown ("2h13m" / "6d4h") from an ISO instant; "" when unknown. */
 function formatResetCountdown(iso?: string): string {
@@ -197,73 +206,91 @@ function formatResetCountdown(iso?: string): string {
   return totalH > 0 ? `${totalH}h${m}m` : `${m}m`;
 }
 
-const USAGE_TANK = { x: 42, y: 32, w: 60, h: 82 };
-/** Agent-brand water palette (fill + lighter surface highlight). Brand tokens. */
-const USAGE_PALETTE: Record<'claude' | 'codex', { water: string; surface: string }> = {
-  claude: { water: Brand.claudeCode, surface: '#E0A48F' },
-  codex: { water: Brand.codex, surface: '#9AA0F4' },
+/** Agent brand colours (Brand tokens) used to tint the provider logo. */
+const USAGE_BRAND_COLOR: Record<'claude' | 'codex', string> = {
+  claude: Brand.claudeCode,
+  codex: Brand.codex,
 };
+
+/** Canonical provider brand mark (viewBox 0 0 24 24) per agent. */
+const USAGE_BRAND_LOGO: Record<'claude' | 'codex', string> = {
+  claude: CLAUDE_LOGO_PATH,
+  codex: CODEX_LOGO_PATH,
+};
+
+/**
+ * Provider brand mark for the top-right corner (the agent identity). 24-unit
+ * path scaled to `size`, centred on (cx,cy), filled with the brand colour, over
+ * a subtle dark scrim circle so it survives a ~100% fill. `dim` greys it.
+ */
+function usageBrandLogo(agent: 'claude' | 'codex', cx: number, cy: number, size: number, dim: boolean): string {
+  const s = size / 24;
+  const color = dim ? '#64748b' : USAGE_BRAND_COLOR[agent];
+  return `<circle cx="${cx}" cy="${cy}" r="${(size / 2 + 3).toFixed(1)}" fill="#0b1220" opacity="0.55"/>`
+    + `<g transform="translate(${cx},${cy}) scale(${s.toFixed(3)}) translate(-12,-12)">`
+    + `<path d="${USAGE_BRAND_LOGO[agent]}" fill="${color}" fill-rule="evenodd"/></g>`;
+}
+
+/** Severity ramp by USED percent: <=50 green, 50–80 amber, >80 red. */
+function usageRampColor(used: number): { fill: string; hi: string } {
+  if (used > 80) return { fill: '#ef4444', hi: '#fca5a5' };
+  if (used > 50) return { fill: '#eab308', hi: '#fde047' };
+  return { fill: '#22c55e', hi: '#86efac' };
+}
 
 export interface UsageTankData {
   agent: 'claude' | 'codex';
   /** Rolling window this tile represents (drives the clip id + label fallback). */
   window: '5h' | '7d';
-  /** Tile label, e.g. "5H", "7D", "CX 5H", "CX 7D". */
+  /** Tile label, e.g. "5H", "7D". Agent identity rides the brand dot, not a prefix. */
   label: string;
-  /** Percent of the window already CONSUMED (0–100). Water shows 100−this. */
+  /** Percent of the window already CONSUMED (0–100). Fill rises with this. */
   usedPercent: number;
   /** ISO-8601 reset instant for the countdown. */
   resetsAt?: string;
-  /** False → no live quota: empty tank + "—" instead of a confident gauge. */
+  /** False → no live quota: dark tile + dim label + "—" instead of a gauge. */
   known?: boolean;
 }
 
-export function renderUsageTank(data: UsageTankData): string {
-  const W = 144, H = 144;
-  const T = USAGE_TANK;
+export function renderUsageGauge(data: UsageTankData): string {
+  const W = 144, H = 144, RX = 12;
   const known = data.known !== false;
   const agent = data.agent === 'codex' ? 'codex' : 'claude';
-  const pal = USAGE_PALETTE[agent];
-  const label = data.label || (agent === 'codex' ? `CX ${data.window.toUpperCase()}` : data.window.toUpperCase());
-  const BG = '#0f172a', TANK_EMPTY = '#0b1220', RIM = '#33415a', RIM_CRIT = '#ef4444';
-  const LABEL_DIM = '#64748b', TEXT_DIM = '#475569', COUNTDOWN = '#94a3b8';
-  const tank = `<rect x="${T.x}" y="${T.y}" width="${T.w}" height="${T.h}" rx="9" fill="${TANK_EMPTY}"/>`;
-  const labelEl = `<text x="72" y="20" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="bold" fill="${known ? pal.water : LABEL_DIM}">${escXml(label)}</text>`;
+  const label = data.label || data.window.toUpperCase();
+  const BG = '#0f172a', LABEL_DIM = '#64748b', TEXT_DIM = '#475569';
+  const HEADLINE = '#ffffff', COUNTDOWN = '#ffffff';
+  const clipId = `ugauge-${agent}-${data.window}`;
+  const clip = `<defs><clipPath id="${clipId}"><rect x="0" y="0" width="${W}" height="${H}" rx="${RX}"/></clipPath></defs>`;
+  const bg = `<rect width="${W}" height="${H}" rx="${RX}" fill="${BG}"/>`;
+  const logo = usageBrandLogo(agent, 124, 22, 26, !known);
 
   if (!known) {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
-      + `<rect width="${W}" height="${H}" fill="${BG}"/>` + tank
-      + `<rect x="${T.x}" y="${T.y}" width="${T.w}" height="${T.h}" rx="9" fill="none" stroke="${RIM}" stroke-width="2.5"/>`
-      + labelEl
-      + `<text x="72" y="84" text-anchor="middle" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="${TEXT_DIM}">—</text></svg>`;
+      + clip + bg
+      + `<text x="14" y="36" font-family="JetBrains Mono, monospace" font-size="26" font-weight="bold" fill="${LABEL_DIM}">${escXml(label)}</text>`
+      + logo
+      + `<text x="72" y="94" text-anchor="middle" font-family="Arial,sans-serif" font-size="44" font-weight="bold" fill="${TEXT_DIM}">—</text></svg>`;
   }
 
   const used = Math.max(0, Math.min(100, data.usedPercent));
-  const remaining = Math.max(0, Math.min(100, 100 - used));
-  const waterH = Math.round((T.h * remaining) / 100);
-  const waterY = T.y + T.h - waterH;
-  const critical = remaining <= 15;
-  const headColor = remaining <= 15 ? '#ef4444' : remaining <= 35 ? '#eab308' : '#f1f5f9';
-  const seg = T.w / 2;
-  const amp = remaining > 1 && remaining < 100 ? 3 : 0;
-  const surfacePath = `M ${T.x} ${waterY} q ${seg / 2} ${-amp} ${seg} 0 q ${seg / 2} ${amp} ${seg} 0`;
-  const bodyPath = `${surfacePath} L ${T.x + T.w} ${T.y + T.h} L ${T.x} ${T.y + T.h} Z`;
-  const clipId = `utank-${agent}-${data.window}`;
-  const water = remaining > 0
+  const ramp = usageRampColor(used);
+  const fillH = Math.round((H * used) / 100);
+  const fillY = H - fillH;
+  // Subtle level tint (low opacity) + crisp 3px level line — no dark overlay.
+  const fill = fillH > 0
     ? `<g clip-path="url(#${clipId})">`
-        + `<path d="${bodyPath}" fill="${pal.water}"/>`
-        + `<path d="${surfacePath}" fill="none" stroke="${pal.surface}" stroke-width="2" stroke-linecap="round" opacity="0.85"/>`
+        + `<rect x="0" y="${fillY}" width="${W}" height="${fillH}" fill="${ramp.fill}" opacity="0.38"/>`
+        + `<rect x="0" y="${fillY}" width="${W}" height="3" fill="${ramp.fill}"/>`
       + `</g>`
     : '';
   const reset = formatResetCountdown(data.resetsAt);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
-    + `<defs><clipPath id="${clipId}"><rect x="${T.x}" y="${T.y}" width="${T.w}" height="${T.h}" rx="9"/></clipPath></defs>`
-    + `<rect width="${W}" height="${H}" fill="${BG}"/>` + tank + water
-    + `<rect x="${T.x}" y="${T.y}" width="${T.w}" height="${T.h}" rx="9" fill="none" stroke="${critical ? RIM_CRIT : RIM}" stroke-width="2.5"/>`
-    + labelEl
-    + `<text x="72" y="82" text-anchor="middle" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="${headColor}" stroke="${BG}" stroke-width="3.5" paint-order="stroke" stroke-linejoin="round">${Math.round(remaining)}%</text>`
-    + (reset ? `<text x="72" y="132" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="${COUNTDOWN}">${escXml(reset)}</text>` : '')
+    + clip + bg + fill
+    + `<text x="14" y="36" font-family="JetBrains Mono, monospace" font-size="26" font-weight="bold" fill="${HEADLINE}">${escXml(label)}</text>`
+    + logo
+    + `<text x="72" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="46" font-weight="bold" fill="${HEADLINE}">${Math.round(used)}<tspan font-size="24">%</tspan></text>`
+    + (reset ? `<text x="72" y="122" text-anchor="middle" font-family="Arial,sans-serif" font-size="17" font-weight="bold" fill="${COUNTDOWN}">${escXml(reset)}</text>` : '')
     + `</svg>`;
 }
 
@@ -277,15 +304,17 @@ function buildUsageTiles(state: DashState): SessionDeckCell[] {
   const action: DeckAction = { kind: 'command', command: { type: 'query_usage' } };
   const known = state.usageKnown !== false;
   const tiles: SessionDeckCell[] = [
-    { svg: renderUsageTank({ agent: 'claude', window: '5h', label: '5H', usedPercent: state.fiveHourPercent, resetsAt: state.fiveHourResetsAt, known }), action },
-    { svg: renderUsageTank({ agent: 'claude', window: '7d', label: '7D', usedPercent: state.sevenDayPercent, resetsAt: state.sevenDayResetsAt, known }), action },
+    { svg: renderUsageGauge({ agent: 'claude', window: '5h', label: '5H', usedPercent: state.fiveHourPercent, resetsAt: state.fiveHourResetsAt, known }), action },
+    { svg: renderUsageGauge({ agent: 'claude', window: '7d', label: '7D', usedPercent: state.sevenDayPercent, resetsAt: state.sevenDayResetsAt, known }), action },
   ];
   const cx = state.codexRateLimits;
+  // Codex windows carry the same short "5H"/"7D" labels — the brand dot conveys
+  // the agent, not a "CX " prefix.
   if (cx?.primary) {
-    tiles.push({ svg: renderUsageTank({ agent: 'codex', window: '5h', label: 'CX 5H', usedPercent: cx.primary.usedPercent, resetsAt: cx.primary.resetsAt, known: true }), action });
+    tiles.push({ svg: renderUsageGauge({ agent: 'codex', window: '5h', label: '5H', usedPercent: cx.primary.usedPercent, resetsAt: cx.primary.resetsAt, known: true }), action });
   }
   if (cx?.secondary) {
-    tiles.push({ svg: renderUsageTank({ agent: 'codex', window: '7d', label: 'CX 7D', usedPercent: cx.secondary.usedPercent, resetsAt: cx.secondary.resetsAt, known: true }), action });
+    tiles.push({ svg: renderUsageGauge({ agent: 'codex', window: '7d', label: '7D', usedPercent: cx.secondary.usedPercent, resetsAt: cx.secondary.resetsAt, known: true }), action });
   }
   return tiles;
 }
@@ -583,7 +612,15 @@ function buildList(
     const usageTiles = buildUsageTiles(state);
     const maxReserve = Math.max(0, slots.length - 1);
     const reserveCount = Math.min(usageTiles.length, maxReserve);
-    const reserved = slots.slice(slots.length - reserveCount);
+    // Prefer the 2×2 block directly ABOVE the wide bottom-right button
+    // (cols 3–4, rows 0–1) — cleaner on the D200H than the trailing keys.
+    // Reading order (top→bottom) puts Claude 5H/7D on the top row and any
+    // Codex 5H/7D below. Falls back to trailing positions for tiles whose
+    // preferred slot wasn't placed by the user.
+    const preferred = USAGE_PREFERRED_POS.filter((p) => slots.includes(p));
+    const rest = slots.filter((p) => !preferred.includes(p));
+    const fallback = rest.slice(rest.length - Math.max(0, reserveCount - preferred.length));
+    const reserved = sortPositions([...preferred, ...fallback]).slice(0, reserveCount);
     reserved.forEach((pos, i) => usageHere.set(pos, usageTiles[i]));
   }
   // Positions left for sessions / NEXT after carving out usage.

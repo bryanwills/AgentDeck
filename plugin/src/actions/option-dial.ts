@@ -1,14 +1,12 @@
 /**
- * E2 — Claude usage water-tank dial (Stream Deck+).
+ * E2 — Claude usage dial (Stream Deck+).
  *
- * Phase 2 redesign: this encoder permanently shows the Claude subscription
- * quota (5h + 7d water tanks) on its 200×100 LCD. It never gets commandeered
- * for option/permission selection anymore — that interaction lives on the
- * keypad detail view (session-slot). The suggested-prompt quick-send also moved
- * to a keypad button. The UUID (`option-dial`) is kept for profile/manifest
- * stability even though the role is now "Claude usage".
- *
- * Rotate / touch: no-op (usage is permanent). Push: request a usage refresh.
+ * This encoder shows the Claude subscription quota on its 200×100 LCD using the
+ * full-bleed level-fill gauge. The dial ROTATION cycles between views
+ * ('both' → '5h' → '7d' → 'session'); the dial PRESS requests a usage refresh.
+ * It never gets commandeered for option/permission selection — that interaction
+ * lives on the keypad detail view (session-slot). The UUID (`option-dial`) is
+ * kept for profile/manifest stability even though the role is "Claude usage".
  */
 import streamDeck, {
   action,
@@ -23,7 +21,8 @@ import streamDeck, {
 import type { AgentLink } from '../agent-link.js';
 import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, isDaemonConnected } from '../encoder-registry.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
-import { renderUsageEncoderDual } from '../renderers/water-tank-gauge.js';
+import { renderUsageEncoderBoth, renderUsageEncoderSingle } from '../renderers/usage-gauge.js';
+import { renderUsageSession } from '../renderers/usage-dial-renderer.js';
 import { type UsageModeData, updateUsageModeData, getUsageModeData, fireUsageRefresh, buildClaudeUsageEncoder } from '../utility-modes/usage.js';
 import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 import { dlog } from '../log.js';
@@ -31,8 +30,14 @@ import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 
 const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
 
+/** Views the dial rotates through. */
+const USAGE_VIEWS = ['both', '5h', '7d', 'session'] as const;
+type UsageView = typeof USAGE_VIEWS[number];
+
 let currentLayout = '';
 let hasReceivedData = false;
+/** Dial-cycled view index for the Claude usage encoder (E2). */
+let viewIndex = 0;
 
 /** Retained for plugin.ts compatibility; the usage dial has no setup state. */
 export function setOptionSetupRequired(_value: boolean): void {
@@ -86,7 +91,19 @@ function refreshClaudeUsageDials(): void {
   // Voice text takeover paints all encoders itself — skip.
   if (isVoiceTextTakeoverActive()) return;
 
-  setCanvasFeedback(renderUsageEncoderDual(buildClaudeUsageEncoder(getUsageModeData(), hasReceivedData)));
+  setCanvasFeedback(renderClaudeUsageView());
+}
+
+/** Render the current dial-cycled view for the Claude usage encoder. */
+function renderClaudeUsageView(): string {
+  const data = getUsageModeData();
+  const view: UsageView = USAGE_VIEWS[viewIndex];
+  // Session view is shared token/cost text — show it regardless of quota note.
+  if (view === 'session') return renderUsageSession(data);
+  const enc = buildClaudeUsageEncoder(data, hasReceivedData);
+  if (view === '5h') return renderUsageEncoderSingle(enc, '5h');
+  if (view === '7d') return renderUsageEncoderSingle(enc, '7d');
+  return renderUsageEncoderBoth(enc);
 }
 
 @action({ UUID: 'bound.serendipity.agentdeck.option-dial' })
@@ -105,7 +122,11 @@ export class ResponseDialAction extends SingletonAction {
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     if (!isDaemonConnected()) return;
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
-    // Usage is permanent — rotation is a no-op.
+    // Rotation cycles the usage view (both → 5h → 7d → session).
+    const dir = ev.payload.ticks >= 0 ? 1 : -1;
+    viewIndex = (viewIndex + dir + USAGE_VIEWS.length) % USAGE_VIEWS.length;
+    dlog('ClaudeUsageDial', `rotate → view=${USAGE_VIEWS[viewIndex]}`);
+    refreshClaudeUsageDials();
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {

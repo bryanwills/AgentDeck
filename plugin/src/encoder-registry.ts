@@ -3,10 +3,10 @@
  * Each action module registers its IDs here so cross-cutting features (voice-text
  * takeover, offline banner, project picker) can address every encoder LCD.
  *
- * Phase 2 SD+ roles:
+ * SD+ encoder roles (rotate cycles views: both → 5h → 7d → session; press refreshes):
  *   E1 = utility (volume/mic/etc.)   — utilityIds
- *   E2 = Claude usage water-tank     — optionIds (UUID kept as `option-dial`)
- *   E3 = Codex usage water-tank      — usageIds  (UUID kept as `iterm-dial`)
+ *   E2 = Claude usage gauge          — optionIds (UUID kept as `option-dial`)
+ *   E3 = Codex usage gauge           — usageIds  (UUID kept as `iterm-dial`)
  *   E4 = voice                       — voiceIds
  */
 export const encoderRegistry = {

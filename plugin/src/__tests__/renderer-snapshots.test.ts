@@ -43,8 +43,8 @@ import {
   renderUsageDisconnected,
 } from '../renderers/usage-dial-renderer.js';
 
-// ===== water-tank-gauge =====
-import { renderWaterTankGauge, renderUsageEncoderDual } from '../renderers/water-tank-gauge.js';
+// ===== usage-gauge =====
+import { renderUsageGauge, renderUsageEncoderBoth, renderUsageEncoderSingle } from '../renderers/usage-gauge.js';
 
 // ===== response-renderer =====
 import {
@@ -305,126 +305,173 @@ describe('usage-dial-renderer snapshots', () => {
 });
 
 // ===================================================================
-// Water-Tank Gauge (keypad usage tiles)
+// Usage Gauge (full-bleed level-fill keypad usage tiles)
 // ===================================================================
 
-describe('water-tank-gauge snapshots', () => {
+describe('usage-gauge snapshots', () => {
   // Date.now is mocked to 1700000060000 in beforeEach → deterministic countdowns.
   // These resolve to "2h13m" (5h window) and "6d" (7d window).
   const reset5h = '2023-11-15T00:27:20Z';
   const reset7d = '2023-11-20T22:14:20Z';
 
-  it('renderWaterTankGauge Claude 5h (healthy)', () => {
-    const svg = renderWaterTankGauge({ agent: 'claude', window: '5h', label: '5H', usedPercent: 30, resetsAt: reset5h });
-    // Claude water hue + label present.
+  it('renderUsageGauge Claude 5h (green ramp, low usage)', () => {
+    const svg = renderUsageGauge({ agent: 'claude', window: '5h', label: '5H', usedPercent: 30, resetsAt: reset5h });
+    // Claude provider LOGO (brand-tinted) + short label (agent rides the logo, not a prefix).
     expect(svg).toContain('#C07058');
+    // The provider logo replaces the old dot — assert the Claude brand path is drawn.
+    expect(svg).toContain('M4.709 15.955');
     expect(svg).toContain('>5H<');
-    // Headline = remaining quota (100 − 30 = 70%).
-    expect(svg).toContain('>70%<');
+    // Headline = USED percent (fill rises with usage).
+    expect(svg).toContain('>30<');
+    // 30% used ≤ 50 → green severity ramp; fill is a subtle level tint (no chip).
+    expect(svg).toContain('#22c55e');
+    expect(svg).toContain('fill="#22c55e" opacity="0.38"');
+    // No dark overlay chip — legibility from the toned fill + halo'd text.
+    expect(svg).not.toContain('opacity="0.72"');
     expect(svg).toMatchSnapshot();
   });
 
-  it('renderWaterTankGauge Claude 7d', () => {
-    expect(renderWaterTankGauge({ agent: 'claude', window: '7d', label: '7D', usedPercent: 12, resetsAt: reset7d })).toMatchSnapshot();
+  it('renderUsageGauge Claude 7d', () => {
+    expect(renderUsageGauge({ agent: 'claude', window: '7d', label: '7D', usedPercent: 12, resetsAt: reset7d })).toMatchSnapshot();
   });
 
-  it('renderWaterTankGauge Codex 5h uses the blue brand hue', () => {
-    const svg = renderWaterTankGauge({ agent: 'codex', window: '5h', label: 'CX 5H', usedPercent: 55, resetsAt: reset5h });
-    expect(svg).toContain('#6166E0');
-    expect(svg).toContain('CX 5H');
+  it('renderUsageGauge Codex 5h uses the blue brand logo + amber ramp', () => {
+    const svg = renderUsageGauge({ agent: 'codex', window: '5h', label: '5H', usedPercent: 55, resetsAt: reset5h });
+    expect(svg).toContain('#6166E0');     // Codex brand colour (logo tint)
+    expect(svg).toContain('M8.086.457');  // Codex provider logo path
+    expect(svg).toContain('>5H<');        // short label — no "CX" prefix
+    expect(svg).toContain('>55<');        // used %
+    expect(svg).toContain('#eab308');     // 55% used → amber ramp
+    expect(svg).toContain('fill="#eab308" opacity="0.38"'); // toned amber level tint
+    expect(svg).not.toContain('opacity="0.72"');            // no dark overlay chip
     expect(svg).toMatchSnapshot();
   });
 
-  it('renderWaterTankGauge Codex 7d', () => {
-    expect(renderWaterTankGauge({ agent: 'codex', window: '7d', label: 'CX 7D', usedPercent: 88, resetsAt: reset7d })).toMatchSnapshot();
+  it('renderUsageGauge Codex 7d', () => {
+    expect(renderUsageGauge({ agent: 'codex', window: '7d', label: '7D', usedPercent: 88, resetsAt: reset7d })).toMatchSnapshot();
   });
 
-  it('renderWaterTankGauge critical (low remaining → warning rim + red headline)', () => {
-    const svg = renderWaterTankGauge({ agent: 'claude', window: '5h', label: '5H', usedPercent: 92, resetsAt: reset5h });
-    expect(svg).toContain('#ef4444'); // critical color on rim/headline
-    expect(svg).toContain('>8%<');
+  it('renderUsageGauge critical (>80 used → red ramp)', () => {
+    const svg = renderUsageGauge({ agent: 'claude', window: '5h', label: '5H', usedPercent: 92, resetsAt: reset5h });
+    expect(svg).toContain('#ef4444'); // red severity fill
+    expect(svg).toContain('>92<');    // used %
     expect(svg).toMatchSnapshot();
   });
 
-  it('renderWaterTankGauge unknown draws an empty tank + dash', () => {
-    const svg = renderWaterTankGauge({ agent: 'codex', window: '5h', label: 'CX 5H', usedPercent: 0, known: false });
+  it('renderUsageGauge full-bleed fill (no narrow 60px tank rect)', () => {
+    const svg = renderUsageGauge({ agent: 'claude', window: '5h', label: '5H', usedPercent: 50, resetsAt: reset5h });
+    // Full-width fill spans the whole 144px tile, not a 60px-wide tank.
+    expect(svg).toContain('width="144"');
+    expect(svg).not.toContain('width="60"');
+  });
+
+  it('renderUsageGauge unknown draws a dim tile + dash, no fill', () => {
+    const svg = renderUsageGauge({ agent: 'codex', window: '5h', label: '5H', usedPercent: 0, known: false });
     expect(svg).toContain('>—<');
+    // No severity fill on an unknown tile.
+    expect(svg).not.toContain('#22c55e');
+    expect(svg).not.toContain('#eab308');
+    expect(svg).not.toContain('#ef4444');
     expect(svg).toMatchSnapshot();
   });
 });
 
 // ===================================================================
-// Usage Encoder (SD+ 200×100 dual-tank LCD — Phase 2)
+// Usage Encoder (SD+ 200×100 level-fill LCD views)
 // ===================================================================
 
-describe('usage-encoder dual-tank (SD+ 200x100) snapshots', () => {
+describe('usage-encoder level-fill (SD+ 200x100) snapshots', () => {
   const reset5h = '2023-11-15T00:27:20Z';
   const reset7d = '2023-11-20T22:14:20Z';
 
-  it('Claude encoder shows both windows with the terracotta brand hue', () => {
-    const svg = renderUsageEncoderDual({
-      agent: 'claude',
-      title: 'CLAUDE',
-      fiveHour: { label: '5H', usedPercent: 30, resetsAt: reset5h, known: true },
-      sevenDay: { label: '7D', usedPercent: 12, resetsAt: reset7d, known: true },
-    });
+  const claudeData = {
+    agent: 'claude' as const,
+    title: 'CLAUDE',
+    fiveHour: { label: '5H', usedPercent: 30, resetsAt: reset5h, known: true },
+    sevenDay: { label: '7D', usedPercent: 12, resetsAt: reset7d, known: true },
+  };
+  const codexData = {
+    agent: 'codex' as const,
+    title: 'CODEX',
+    fiveHour: { label: '5H', usedPercent: 55, resetsAt: reset5h, known: true },
+    sevenDay: { label: '7D', usedPercent: 88, resetsAt: reset7d, known: true },
+  };
+
+  it('both-view Claude shows both windows + terracotta brand logo', () => {
+    const svg = renderUsageEncoderBoth(claudeData);
     expect(svg).toContain('width="200" height="100"');
-    expect(svg).toContain('#C07058');     // Claude brand water
-    expect(svg).toContain('>CLAUDE<');
+    expect(svg).toContain('#C07058');     // Claude brand colour (logo tint)
+    expect(svg).toContain('M4.709 15.955'); // Claude provider logo path
+    expect(svg).not.toContain('>CLAUDE<'); // logo-only identity, no agent-name text (matches SD)
     expect(svg).toContain('>5H<');
     expect(svg).toContain('>7D<');
-    expect(svg).toContain('>70%<');        // 5h remaining = 100−30
-    expect(svg).toContain('>88%<');        // 7d remaining = 100−12
+    expect(svg).toContain('>30<');        // 5h used
+    expect(svg).toContain('>12<');        // 7d used
+    expect(svg).toContain('opacity="0.38"');     // toned level tint, no chip
+    expect(svg).not.toContain('opacity="0.72"');
     expect(svg).toMatchSnapshot();
   });
 
-  it('Codex encoder uses the blue brand hue', () => {
-    const svg = renderUsageEncoderDual({
-      agent: 'codex',
-      title: 'CODEX',
-      fiveHour: { label: '5H', usedPercent: 55, resetsAt: reset5h, known: true },
-      sevenDay: { label: '7D', usedPercent: 88, resetsAt: reset7d, known: true },
-    });
-    expect(svg).toContain('#6166E0');     // Codex brand water
-    expect(svg).toContain('>CODEX<');
-    expect(svg).toContain('>45%<');        // 5h remaining
-    expect(svg).toContain('>12%<');        // 7d remaining
+  it('both-view Codex uses the blue brand logo + severity ramp', () => {
+    const svg = renderUsageEncoderBoth(codexData);
+    expect(svg).toContain('#6166E0');     // Codex brand colour (logo tint)
+    expect(svg).toContain('M8.086.457');  // Codex provider logo path
+    expect(svg).not.toContain('>CODEX<'); // logo-only identity, no agent-name text (matches SD)
+    expect(svg).toContain('>55<');        // 5h used (amber)
+    expect(svg).toContain('>88<');        // 7d used (red)
+    expect(svg).toContain('#eab308');
+    expect(svg).toContain('#ef4444');
+    expect(svg).toContain('fill="#eab308" opacity="0.38"'); // toned level tint (no chip)
     expect(svg).toMatchSnapshot();
   });
 
-  it('Codex encoder renders a muted note when no rate limits are present', () => {
-    const svg = renderUsageEncoderDual({
-      agent: 'codex',
-      title: 'CODEX',
+  it('single 5h view enlarges the 5H window across the LCD', () => {
+    const svg = renderUsageEncoderSingle(claudeData, '5h');
+    expect(svg).toContain('>5H<');
+    expect(svg).toContain('>30<');
+    expect(svg).not.toContain('>7D<');     // only the 5H window
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('single 7d view enlarges the 7D window across the LCD', () => {
+    const svg = renderUsageEncoderSingle(claudeData, '7d');
+    expect(svg).toContain('>7D<');
+    expect(svg).toContain('>12<');
+    expect(svg).not.toContain('>5H<');
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('note suppresses the gauges (No Codex usage)', () => {
+    const svg = renderUsageEncoderBoth({
+      ...codexData,
       fiveHour: { label: '5H', usedPercent: 0, known: false },
       sevenDay: { label: '7D', usedPercent: 0, known: false },
       note: 'No Codex usage',
     });
     expect(svg).toContain('No Codex usage');
-    expect(svg).not.toContain('%');        // tanks suppressed in note mode
+    expect(svg).not.toContain('%');        // gauges suppressed in note mode
     expect(svg).toMatchSnapshot();
   });
 
   it('Waiting note before the first usage payload', () => {
-    const svg = renderUsageEncoderDual({
-      agent: 'claude',
-      title: 'CLAUDE',
+    const svg = renderUsageEncoderSingle({
+      ...claudeData,
       fiveHour: { label: '5H', usedPercent: 0, known: false },
       sevenDay: { label: '7D', usedPercent: 0, known: false },
       note: 'Waiting…',
-    });
+    }, '5h');
     expect(svg).toContain('Waiting…');
     expect(svg).toMatchSnapshot();
   });
 
-  it('a single unknown window draws a dash tank, the other a real tank', () => {
-    const svg = renderUsageEncoderDual({
+  it('a single unknown window draws a dash panel, the other a real fill', () => {
+    const svg = renderUsageEncoderBoth({
       agent: 'codex',
       title: 'CODEX',
       fiveHour: { label: '5H', usedPercent: 40, resetsAt: reset5h, known: true },
       sevenDay: { label: '7D', usedPercent: 0, known: false },
     });
-    expect(svg).toContain('>60%<');        // 5h known
+    expect(svg).toContain('>40<');         // 5h known
     expect(svg).toContain('>—<');          // 7d unknown
     expect(svg).toMatchSnapshot();
   });
