@@ -67,6 +67,9 @@ apple/build/
 *.profraw
 .zig-cache/
 .zig-global-cache/
+# fm-helper compiled by bridge/scripts/build-fm-helper.mjs (rebuilt via postinstall/build:fm-helper;
+# npm packaging still includes it via package.json "files")
+bridge/assets/fm-helper/
 
 # Python bytecode
 __pycache__/
