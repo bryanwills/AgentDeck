@@ -6,7 +6,21 @@
 
 ---
 
-## 2026-06-28 — Codex/Antigravity 사용량 표시 + Stream Deck/D200H 게이지 재설계
+## 2026-06-28 — observed 세션 Detail = transcript 재구성 (CLI 데몬)
+
+### 문제
+XTeink X3 가 세션 Detail 을 열면 `query_session_timeline` 으로 히스토리를 요청하는데, **passively-observed 세션**(ps 로 발견되는 claude/codex 세션)은 항상 빈 응답("No recent activity yet")만 받았다. relay 경로(`SessionTimelineRelay`)는 managed + hook 세션만 timeline store 에 push 하고, observed 세션은 timeline 행이 하나도 없기 때문.
+
+### 해결
+신규 self-contained 모듈 `bridge/src/session-transcript-timeline.ts` + `query_session_timeline` 핸들러 fallback. store 가 비면 세션의 Claude Code transcript JSONL(`~/.claude/projects/*/<uuid>.jsonl`)을 replay 해 최근 활동을 `TimelineEntry[]`로 재구성:
+- user 프롬프트 → `chat_start`, assistant 텍스트 → `chat_response`, tool_use → glanceable `tool_request`("Editing config.ts", "Reading foo.cpp", "Running npm test"…)
+- 각 entry 에 조회한 sessionId(observed: prefix 포함)를 다시 찍어 기기 Detail 필터(`rawSid()` 양쪽 비교)와 매칭.
+- transcript 위치는 cwd 없이 session id 만으로 `projects/*/<uuid>.jsonl` 스캔(=`findClaudeTranscript` fallback 미러). read-only, 절대 throw 안 함.
+
+### 핵심 설계 결정
+- **CLI 데몬 전용**: App Store Swift 데몬은 샌드박스가 `~/.claude/settings.json` 만 grant 하고 per-session transcript jsonl 접근 권한이 없다 → observed 세션 transcript-level Detail 은 외부 Node 데몬(`isUsingExternalDaemon`) 기능. 기존 progressive-enhancement 아키텍처와 일치.
+- **firmware 무변경**: Detail 진입 시 이미 `sendQuerySessionTimeline()` 호출 + `handleTimelineHistory()` 가 ring 적재. 빈 응답이 아닌 entry 를 받기만 하면 됨.
+- **동시세션 격리**: `daemon-server.ts` 에 다른 세션의 미커밋 작업(FoundationModels `/generate`, hookCwd, cockpit)이 있어 isolated-commit 으로 내 두 hunk 만 격리 커밋(`f8ae8720`), 나머지는 working tree 에 복원.
 
 ### 문제
 모니터링 대상에 Antigravity가 추가됐지만 (1) 네이티브 테라리움(Swift/Android/ESP32)에 크리처가 없어 octopus/dot로 폴백됐고, (2) 남은 사용량 표시는 Claude 5h/7d만 있었다. Codex 사용 리밋과 Antigravity 사용량도 보여달라 — 단 Antigravity는 ToS 주의.
