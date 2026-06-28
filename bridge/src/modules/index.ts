@@ -1,5 +1,6 @@
 import type { DeviceModule, ModuleConfigs, BridgeContext } from './types.js';
 import { MdnsModule } from './mdns-module.js';
+import { BroadcastModule } from './broadcast-module.js';
 import { AdbModule } from './adb-module.js';
 import { SerialModule } from './serial-module.js';
 import { PixooModule } from './pixoo-module.js';
@@ -12,6 +13,7 @@ import { debug } from '../logger.js';
 
 export type { DeviceModule, ModuleConfigs, BridgeContext } from './types.js';
 export { MdnsModule } from './mdns-module.js';
+export { BroadcastModule } from './broadcast-module.js';
 export { AdbModule } from './adb-module.js';
 export { SerialModule } from './serial-module.js';
 export { PixooModule } from './pixoo-module.js';
@@ -26,6 +28,7 @@ export { TrmnlModule } from './trmnl-module.js';
 export function createDefaultModules(agentType: AgentType): DeviceModule[] {
   return [
     new MdnsModule(agentType),
+    new BroadcastModule(agentType),
     new AdbModule(),
     new SerialModule(),
     new PixooModule(),

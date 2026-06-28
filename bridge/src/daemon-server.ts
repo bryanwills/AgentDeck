@@ -1010,7 +1010,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // device being registered, so it's cheap when no panel is present.
     // d200h: false — direct-HID fallback retired. The D200H is driven exclusively
     // by the Ulanzi Studio plugin (`ulanzi-plugin`); the daemon never opens it over HID.
-    { mdns: true, adb: 'auto', serial: 'auto', pixoo: 'auto', timebox: 'auto', idotmatrix: 'auto', d200h: false, trmnl: true },
+    { mdns: true, broadcast: true, adb: 'auto', serial: 'auto', pixoo: 'auto', timebox: 'auto', idotmatrix: 'auto', d200h: false, trmnl: true },
     { port, authToken: core.authToken, projectName: 'AgentDeck', wsServer: core.wsServer },
   );
 

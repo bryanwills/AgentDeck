@@ -37,6 +37,7 @@ export interface DeviceModule {
  */
 export interface ModuleConfigs {
   mdns?: 'auto' | boolean;
+  broadcast?: 'auto' | boolean;
   adb?: 'auto' | boolean;
   serial?: 'auto' | boolean;
   pixoo?: 'auto' | boolean;
