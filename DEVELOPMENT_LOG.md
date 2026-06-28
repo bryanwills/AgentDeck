@@ -6,6 +6,21 @@
 
 ---
 
+## 2026-06-28 — D200H sleep/wake 후 OFFLINE 고착 = Studio 브리지 재연결 부재
+
+### 문제
+macOS 잠자기 → 깨우면 Ulanzi D200H 가 OFFLINE 으로 남고 수동 개입(액션 토글 / Studio 재시작) 없이는 복구되지 않았다.
+
+### 해결
+원인: plugin-ulanzi 프로세스는 **독립된 WS 2개**를 보유 — (A) 데몬 링크(`daemon-client.ts`, 세션상태/OFFLINE 배너; wake-watchdog+backoff 있음), (B) Ulanzi Studio 브리지(`ulanzi.ts`+vendored `vendor/ulanzi-api`, 키입력+아이콘 push = **실제 렌더링 경로**; **재연결 전무**). vendored SDK 의 `connect()` 는 WS 1회만 열고 `onclose` 에서 `Events.CLOSE` emit 만, `app.ts` 는 로그만 찍었다. sleep → USB detach → Studio 소켓 끊김 → wake 후에도 죽은 채 영원히 방치.
+
+vendored SDK 무수정. `app.ts` 에 신규 `ReconnectSupervisor`(`plugin-ulanzi/src/reconnect-supervisor.ts`) 추가 — `daemon-client.ts` 패턴 미러: `RECONNECT_BACKOFF_MS` backoff + 10s wake-watchdog(gap>20s 강제 재연결, half-open 으로 close 안 떠도 복구) + connect-timeout 인플라이트 가드(vendored connect() 가 옛 소켓 닫을 때 나는 spurious close 무시). 재연결 성공 시 `instances`/`lastDeckSig`/`inst.lastSig` 리셋 → 전 키 강제 재푸시.
+
+### 핵심 설계 결정
+- **두 WS 비대칭이 근본 원인**: 한쪽(데몬)만 wake 복구 → 데몬이 멀쩡해도 렌더링 경로(Studio)가 죽어 디바이스 고착. 새 외부-peer WS 디버깅 시 모든 링크가 timeout/재연결을 갖는지 먼저 확인.
+- **테스트 인프라 신규 진입**: plugin-ulanzi 는 vitest include 에 없었음 → 루트 `vitest.config.ts` 에 등록. coverage include 는 supervisor 파일만(미테스트 렌더러 다수가 전역 임계치 깰까봐). 타이머/클록 주입형 supervisor 로 결정론적 유닛테스트 8개(89% 라인).
+- **검증**: 전체 1554 tests pass, coverage gate exit 0, sim 로그(연결실패→connect timed out→backoff 재시도→connected) 확인. 실기 D200H sleep/wake 는 사용자 확인 대기.
+
 ## 2026-06-28 — observed 세션 Detail = transcript 재구성 (CLI 데몬)
 
 ### 문제

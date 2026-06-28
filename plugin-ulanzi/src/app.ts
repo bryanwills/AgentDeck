@@ -13,9 +13,10 @@
  *   daemon broadcasts → recompute deck → per-key PNG/GIF → Ulanzi
  *   key press → cell action → view change and/or daemon command
  */
-import { buildSessionDeck, type DeckView } from '@agentdeck/shared';
+import { buildSessionDeck, type DeckView, RECONNECT_BACKOFF_MS } from '@agentdeck/shared';
 import { UlanziApiCtor, type UlanziApi, type UlanziMessage } from './ulanzi.js';
 import { DaemonClient } from './daemon-client.js';
+import { ReconnectSupervisor } from './reconnect-supervisor.js';
 import { StateStore } from './state-store.js';
 import { svgToBase64Png, ICON_SIZE } from './raster.js';
 import { framesToGifBase64 } from './gif.js';
@@ -164,10 +165,27 @@ function renderAll(): void {
 }
 
 // ---- Ulanzi Studio side ----
-$UD.connect(PLUGIN_UUID);
-$UD.onConnected(() => dinfo(TAG, 'Ulanzi Studio bridge connected'));
-$UD.onClose(() => dlog(TAG, 'Ulanzi Studio bridge closed'));
-$UD.onError((e) => derr(TAG, `Ulanzi bridge error: ${e}`));
+// The vendored SDK never reconnects its Studio socket; a supervisor mirrors the
+// daemon link's wake-watchdog + backoff so the device recovers after sleep/wake
+// (USB detach drops the Studio socket and it would otherwise stay dead forever).
+// On re-open, force a full re-render: the keys we already know about may not be
+// re-announced via onAdd, so invalidate every cached signature and re-push.
+function resyncStudioBridge(): void {
+  lastDeckSig = '';
+  for (const inst of instances.values()) inst.lastSig = undefined;
+  scheduleRender();
+}
+const studioSupervisor = new ReconnectSupervisor({
+  connect: () => $UD.connect(PLUGIN_UUID),
+  backoffMs: RECONNECT_BACKOFF_MS,
+  onReconnect: resyncStudioBridge,
+  log: (m) => dlog(TAG, m),
+});
+// Register handlers BEFORE the first connect so the initial open isn't missed.
+$UD.onConnected(() => { dinfo(TAG, 'Ulanzi Studio bridge connected'); studioSupervisor.noteOpen(); });
+$UD.onClose(() => { dlog(TAG, 'Ulanzi Studio bridge closed'); studioSupervisor.noteClosed(); });
+$UD.onError((e) => { derr(TAG, `Ulanzi bridge error: ${e}`); studioSupervisor.noteClosed(); });
+studioSupervisor.start();
 
 $UD.onAdd((m: UlanziMessage) => {
   flog('RAW', 'onAdd', m);

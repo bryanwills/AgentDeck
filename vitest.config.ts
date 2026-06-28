@@ -8,6 +8,7 @@ export default defineConfig({
       'hooks/src/__tests__/**/*.test.ts',
       'shared/src/__tests__/**/*.test.ts',
       'plugin/src/__tests__/**/*.test.ts',
+      'plugin-ulanzi/src/__tests__/**/*.test.ts',
     ],
     testTimeout: 10_000,
     coverage: {
@@ -18,6 +19,9 @@ export default defineConfig({
         'shared/src/**/*.ts',
         'plugin/src/**/*.ts',
         'hooks/src/**/*.ts',
+        // Only the unit-tested Ulanzi module — pulling the whole package in would
+        // count its many untested renderer files against the global thresholds.
+        'plugin-ulanzi/src/reconnect-supervisor.ts',
       ],
       exclude: [
         '**/__tests__/**',
