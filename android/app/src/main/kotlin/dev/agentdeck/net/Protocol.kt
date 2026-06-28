@@ -186,14 +186,29 @@ data class CodexRateLimitWindow(
     val resetsAt: String? = null,
 )
 
+/** Codex credit balance — the metering credit-based plans report (e.g.
+ *  `limit_id: "premium"`) when the 5h/7d windows are null. */
+@Serializable
+data class CodexCredits(
+    val hasCredits: Boolean? = null,
+    val unlimited: Boolean? = null,
+    /** Remaining balance — Codex reports this as a string (e.g. "0"). */
+    val balance: String? = null,
+)
+
 /** Codex usage limits. `primary` is the short (5h-style) window, `secondary`
- *  the long (weekly) window — same idea as the Claude 5h/7d gauges. */
+ *  the long (weekly) window — same idea as the Claude 5h/7d gauges. Credit-based
+ *  plans report null windows and convey usage via `credits` + `limitId`. */
 @Serializable
 data class CodexRateLimits(
     val primary: CodexRateLimitWindow? = null,
     val secondary: CodexRateLimitWindow? = null,
     /** Plan tier reported alongside the limits (e.g. "plus", "pro"). */
     val planType: String? = null,
+    /** Limit identifier reported by Codex (e.g. "premium" for credit-based plans). */
+    val limitId: String? = null,
+    /** Credit balance for credit-based plans (present when windows are null). */
+    val credits: CodexCredits? = null,
 )
 
 @Serializable

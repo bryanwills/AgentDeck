@@ -119,14 +119,31 @@ export interface CodexRateLimitWindow {
   resetsAt?: string;
 }
 
+/** Codex credits balance, the metering Codex reports for credit-based plans
+ *  (e.g. `limit_id: "premium"`) where the rolling 5h/7d windows are null.
+ *  Mirrors the rollout's `rate_limits.credits` block. */
+export interface CodexCredits {
+  /** Whether the plan has any credit allowance configured. */
+  hasCredits: boolean;
+  /** Unlimited credits (no balance ceiling). */
+  unlimited: boolean;
+  /** Remaining balance — Codex reports this as a string (e.g. "0"). */
+  balance?: string;
+}
+
 /** Codex usage limits parsed from local rollout files. `primary` is the short
  *  (5h-style) window, `secondary` the long (weekly) window — same idea as the
- *  Claude 5h/7d gauges. */
+ *  Claude 5h/7d gauges. Credit-based plans report `primary`/`secondary` as null
+ *  and convey usage via `credits` + `limitId` instead. */
 export interface CodexRateLimits {
   primary?: CodexRateLimitWindow;
   secondary?: CodexRateLimitWindow;
   /** Plan tier reported alongside the limits (e.g. "plus", "pro"). */
   planType?: string;
+  /** Limit identifier reported by Codex (e.g. "premium" for credit-based plans). */
+  limitId?: string;
+  /** Credit balance for credit-based plans (present when windows are null). */
+  credits?: CodexCredits;
 }
 
 // ===== Bridge → Plugin (State Updates) =====

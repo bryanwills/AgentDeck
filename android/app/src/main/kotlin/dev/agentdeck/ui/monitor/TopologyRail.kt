@@ -324,7 +324,7 @@ private fun UpstreamRows(state: DashboardState, scale: MonitorLayoutScale) {
             ProviderRow(
                 name = "Codex",
                 status = LEDStatus.OK,
-                subtitle = chatGptPlanLabel(codexPlan),
+                subtitle = codexSubtitle(codexPlan, state.codexRateLimits),
                 consumers = consumersFor(ProviderKey.CODEX, state),
                 rateLimits = codexRateLimits,
             )
@@ -848,6 +848,24 @@ private fun chatGptPlanLabel(raw: String?): String? {
         "enterprise" -> "ChatGPT Enterprise"
         else -> "ChatGPT $trimmed"
     }
+}
+
+/**
+ * Codex row subtitle: plan label, plus a credits readout when the plan is
+ * credit-based (null 5h/7d windows, e.g. `limit_id: "premium"`) so the Codex
+ * usage doesn't read as empty. Mirrors iOS `codexSubtitle`.
+ */
+private fun codexSubtitle(plan: String?, limits: CodexRateLimits?): String? {
+    val planLabel = chatGptPlanLabel(plan)
+    if (limits == null || limits.primary != null || limits.secondary != null ||
+        (limits.credits == null && limits.limitId == null)
+    ) {
+        return planLabel
+    }
+    val tier = (limits.limitId ?: "credits").replaceFirstChar { it.uppercase() }
+    val bal = if (limits.credits?.unlimited == true) "∞" else (limits.credits?.balance ?: "—")
+    val creditsText = "$tier · $bal credits"
+    return if (planLabel != null) "$planLabel · $creditsText" else creditsText
 }
 
 // MARK: - Device (downstream) row

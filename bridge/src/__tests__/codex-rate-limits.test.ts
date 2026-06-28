@@ -72,4 +72,47 @@ describe('parseCodexRateLimitsFromText', () => {
     expect(result!.primary).toBeDefined();
     expect(result!.secondary).toBeUndefined();
   });
+
+  // Credit-based plans report null 5h/7d windows and a `credits` block instead.
+  // Verbatim shape from a live rollout after the account moved to "premium".
+  const creditsLine = JSON.stringify({
+    timestamp: '2026-06-28T03:38:23.141Z',
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: null,
+      rate_limits: {
+        limit_id: 'premium',
+        limit_name: null,
+        primary: null,
+        secondary: null,
+        credits: { has_credits: false, unlimited: false, balance: '0' },
+        individual_limit: null,
+        plan_type: null,
+        rate_limit_reached_type: null,
+      },
+    },
+  });
+
+  it('keeps a credit-based snapshot when windows are null', () => {
+    const result = parseCodexRateLimitsFromText(creditsLine);
+    expect(result).not.toBeNull();
+    expect(result!.primary).toBeUndefined();
+    expect(result!.secondary).toBeUndefined();
+    expect(result!.limitId).toBe('premium');
+    expect(result!.credits).toEqual({ hasCredits: false, unlimited: false, balance: '0' });
+  });
+
+  it('prefers a windowed snapshot over an older credits-only one', () => {
+    const text = [creditsLine, tokenCountLine].join('\n');
+    const result = parseCodexRateLimitsFromText(text);
+    expect(result!.primary!.usedPercent).toBe(8.0);
+  });
+
+  it('still returns null when neither windows, credits, nor limitId are present', () => {
+    const bare = JSON.stringify({
+      payload: { type: 'token_count', rate_limits: { primary: null, secondary: null } },
+    });
+    expect(parseCodexRateLimitsFromText(bare)).toBeNull();
+  });
 });

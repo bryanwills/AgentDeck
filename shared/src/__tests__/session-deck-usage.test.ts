@@ -148,6 +148,32 @@ describe('buildSessionDeck list-view usage tiles', () => {
     expect(codexTiles).toHaveLength(1); // only the Codex 5H window
   });
 
+  it('shows a credits tile when Codex reports a credit-based plan (null windows)', () => {
+    const credits = {
+      codexRateLimits: {
+        limitId: 'premium',
+        credits: { hasCredits: false, unlimited: false, balance: '0' },
+      },
+    };
+    const deck = buildSessionDeck(baseState(2, credits), { mode: 'list', showUsage: true }, POS);
+    // No Codex windows → a single credits readout lands at the first free Codex
+    // slot below Claude (3_1), carrying the limit label + balance + Codex logo.
+    const tile = deck.get(CX5H)!.svg;
+    expect(tile).toContain('PREMIUM');
+    expect(tile).toContain('CREDITS');
+    expect(tile).toContain('>0<');           // balance
+    expect(tile).toContain('#6166E0');       // Codex brand mark
+    expect(deck.get(CX5H)!.action).toEqual({ kind: 'command', command: { type: 'query_usage' } });
+  });
+
+  it('renders ∞ for an unlimited-credits Codex plan', () => {
+    const credits = {
+      codexRateLimits: { limitId: 'premium', credits: { hasCredits: true, unlimited: true } },
+    };
+    const deck = buildSessionDeck(baseState(2, credits), { mode: 'list', showUsage: true }, POS);
+    expect(deck.get(CX5H)!.svg).toContain('∞');
+  });
+
   it('falls back to trailing keys on a tiny deck where the block is not placed', () => {
     // Only 3 keys placed (none of 3_0/4_0/3_1/4_1) → preferred block empty, so
     // usage falls back to the trailing keys. Old `slots.length >= 6` gate dropped

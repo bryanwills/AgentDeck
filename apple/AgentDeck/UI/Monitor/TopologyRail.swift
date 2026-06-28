@@ -349,7 +349,8 @@ struct TopologyRail: View {
     /// Hidden when neither a plan nor any rate-limit data is present.
     private var codexRow: some View {
         let plan = stateHolder.state.codexPlanType
-        let hasLimits = stateHolder.state.codexRateLimits != nil
+        let limits = stateHolder.state.codexRateLimits
+        let hasLimits = limits != nil
         guard hasLimits || (plan?.isEmpty == false) else {
             return AnyView(EmptyView())
         }
@@ -357,11 +358,27 @@ struct TopologyRail: View {
             ProviderRow(
                 name: "Codex",
                 status: .ok,
-                subtitle: Self.chatGptPlanLabel(plan),
+                subtitle: Self.codexSubtitle(plan: plan, limits: limits),
                 rateLimits: codexRateLimitChips,
                 consumers: consumerCreatures(for: .codex)
             )
         )
+    }
+
+    /// Subtitle for the Codex row. Plan label, plus a credits readout when the
+    /// plan is credit-based (null 5h/7d windows, e.g. `limit_id: "premium"`) so
+    /// the Codex usage doesn't read as empty.
+    static func codexSubtitle(plan: String?, limits: CodexRateLimits?) -> String? {
+        let planLabel = chatGptPlanLabel(plan)
+        guard let limits, limits.primary == nil, limits.secondary == nil,
+              limits.credits != nil || limits.limitId != nil else {
+            return planLabel
+        }
+        let tier = (limits.limitId ?? "credits").capitalized
+        let bal = (limits.credits?.unlimited == true) ? "∞" : (limits.credits?.balance ?? "—")
+        let creditsText = "\(tier) · \(bal) credits"
+        if let planLabel { return "\(planLabel) · \(creditsText)" }
+        return creditsText
     }
 
     /// Antigravity is a Google-hosted model product — when the bridge

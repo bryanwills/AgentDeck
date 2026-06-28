@@ -295,10 +295,33 @@ export function renderUsageGauge(data: UsageTankData): string {
 }
 
 /**
+ * Codex credit-based plans (e.g. `limit_id: "premium"`) report null 5h/7d
+ * windows and convey usage via a credits balance instead. Render a flat readout
+ * tile — limit label + balance (or ∞ when unlimited) — matching the gauge frame
+ * so it sits alongside the Claude gauges without a false "%" affordance.
+ */
+export function renderCreditsTile(data: { limitId?: string; balance?: string; unlimited?: boolean }): string {
+  const W = 144, H = 144, RX = 12;
+  const BG = '#0f172a', HEADLINE = '#ffffff';
+  const label = (data.limitId || 'CREDITS').toUpperCase();
+  const value = data.unlimited ? '∞' : (data.balance ?? '—');
+  const valueSize = value.length > 5 ? 32 : value.length > 3 ? 40 : 50;
+  const logo = usageBrandLogo('codex', 124, 22, 26, false);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    + `<rect width="${W}" height="${H}" rx="${RX}" fill="${BG}"/>`
+    + `<text x="14" y="36" font-family="JetBrains Mono, monospace" font-size="20" font-weight="bold" fill="${HEADLINE}">${escXml(label)}</text>`
+    + logo
+    + `<text x="72" y="100" text-anchor="middle" font-family="Arial,sans-serif" font-size="${valueSize}" font-weight="bold" fill="${HEADLINE}">${escXml(value)}</text>`
+    + `<text x="72" y="126" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">CREDITS</text>`
+    + `</svg>`;
+}
+
+/**
  * Usage tiles for the session deck, in placement order. Claude 5H/7D are always
  * present (reserved gauges that draw "—" when the quota is unknown); Codex 5H
  * (primary) / 7D (secondary) appear ONLY when that datum exists in
- * `codexRateLimits`. Each tile re-fetches quota on press.
+ * `codexRateLimits`. Credit-based plans (null windows) get a single credits
+ * readout tile instead. Each tile re-fetches quota on press.
  */
 function buildUsageTiles(state: DashState): SessionDeckCell[] {
   const action: DeckAction = { kind: 'command', command: { type: 'query_usage' } };
@@ -315,6 +338,11 @@ function buildUsageTiles(state: DashState): SessionDeckCell[] {
   }
   if (cx?.secondary) {
     tiles.push({ svg: renderUsageGauge({ agent: 'codex', window: '7d', label: '7D', usedPercent: cx.secondary.usedPercent, resetsAt: cx.secondary.resetsAt, known: true }), action });
+  }
+  // Credit-based Codex plan: no windows, show the credits balance instead so the
+  // Codex usage doesn't silently vanish.
+  if (!cx?.primary && !cx?.secondary && (cx?.credits || cx?.limitId)) {
+    tiles.push({ svg: renderCreditsTile({ limitId: cx.limitId, balance: cx.credits?.balance, unlimited: cx.credits?.unlimited }), action });
   }
   return tiles;
 }

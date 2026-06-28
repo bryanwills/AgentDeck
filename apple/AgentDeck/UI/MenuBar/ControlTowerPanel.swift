@@ -484,9 +484,11 @@ struct ControlTowerPanel: View {
                 }
                 // Codex (ChatGPT) usage limits, when the daemon surfaced them
                 // from the local rollout files. Own sub-header so the 5h/7d
-                // labels don't read as Claude's. Hidden when absent.
+                // labels don't read as Claude's. Hidden when absent. Credit-based
+                // plans (null windows, e.g. limit_id "premium") show a balance row.
                 if let codex = stateHolder.state.codexRateLimits,
-                   codex.primary != nil || codex.secondary != nil {
+                   codex.primary != nil || codex.secondary != nil
+                    || codex.credits != nil || codex.limitId != nil {
                     Text("CODEX")
                         .font(.system(size: 9, weight: .bold))
                         .kerning(0.5)
@@ -505,6 +507,20 @@ struct ControlTowerPanel: View {
                             percent: pct,
                             resetTime: s.resetsAt
                         )
+                    }
+                    if codex.primary == nil, codex.secondary == nil,
+                       codex.credits != nil || codex.limitId != nil {
+                        let tier = (codex.limitId ?? "credits").capitalized
+                        let bal = (codex.credits?.unlimited == true) ? "∞" : (codex.credits?.balance ?? "—")
+                        HStack(spacing: 4) {
+                            Text(tier)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(TerrariumHUD.text)
+                            Spacer(minLength: 4)
+                            Text("\(bal) credits")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundColor(TerrariumHUD.subtext)
+                        }
                     }
                 }
                 if !hasGauges {

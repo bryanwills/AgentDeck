@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import type { CodexRateLimits, CodexRateLimitWindow } from '@agentdeck/shared';
+import type { CodexCredits, CodexRateLimits, CodexRateLimitWindow } from '@agentdeck/shared';
 
 /**
  * Read Codex (ChatGPT) usage limits from the user's own local session rollout
@@ -16,6 +16,15 @@ import type { CodexRateLimits, CodexRateLimitWindow } from '@agentdeck/shared';
  * This mirrors the Claude 5h/7d quota the dashboard already shows. Reading the
  * user's own local files (the same posture as `readCodexAuthStatus` reading
  * `~/.codex/auth.json`) — no Codex/OpenAI API is contacted.
+ *
+ * Credit-based plans report a different shape — the 5h/7d windows are null and
+ * a `credits` block + `limit_id` carry the metering instead:
+ *
+ *   { "rate_limits": { "limit_id":"premium", "primary":null, "secondary":null,
+ *       "credits":{"has_credits":false,"unlimited":false,"balance":"0"} } }
+ *
+ * The parser keeps these snapshots so the dashboard can show a credits readout
+ * rather than silently dropping the Codex gauge.
  */
 
 interface RawWindow {
@@ -23,10 +32,17 @@ interface RawWindow {
   window_minutes?: number;
   resets_at?: number;
 }
+interface RawCredits {
+  has_credits?: boolean;
+  unlimited?: boolean;
+  balance?: string | number;
+}
 interface RawRateLimits {
   primary?: RawWindow;
   secondary?: RawWindow;
   plan_type?: string;
+  limit_id?: string;
+  credits?: RawCredits;
 }
 
 const sessionsRoot = (): string => path.join(os.homedir(), '.codex', 'sessions');
@@ -80,6 +96,17 @@ function readTail(file: string, maxBytes = 262144): string | null {
   }
 }
 
+function toCredits(raw?: RawCredits): CodexCredits | undefined {
+  if (!raw || (typeof raw.has_credits !== 'boolean' && typeof raw.unlimited !== 'boolean' && raw.balance == null)) {
+    return undefined;
+  }
+  return {
+    hasCredits: raw.has_credits === true,
+    unlimited: raw.unlimited === true,
+    balance: raw.balance != null ? String(raw.balance) : undefined,
+  };
+}
+
 function toWindow(raw?: RawWindow): CodexRateLimitWindow | undefined {
   if (!raw || typeof raw.used_percent !== 'number' || typeof raw.window_minutes !== 'number') {
     return undefined;
@@ -112,11 +139,17 @@ export function parseCodexRateLimitsFromText(text: string): CodexRateLimits | nu
       if (!rl) continue;
       const primary = toWindow(rl.primary);
       const secondary = toWindow(rl.secondary);
-      if (!primary && !secondary) continue;
+      const credits = toCredits(rl.credits);
+      const limitId = typeof rl.limit_id === 'string' ? rl.limit_id : undefined;
+      // Credit-based plans (e.g. limit_id "premium") report null windows and
+      // convey usage via the credits block instead — keep those snapshots too.
+      if (!primary && !secondary && !credits && !limitId) continue;
       return {
         primary,
         secondary,
         planType: typeof rl.plan_type === 'string' ? rl.plan_type : undefined,
+        limitId,
+        credits,
       };
     } catch {
       // Possibly a truncated first line from the tail window; keep scanning.

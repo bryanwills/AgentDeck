@@ -109,7 +109,8 @@ export function buildClaudeUsageEncoder(data: UsageModeData, hasReceivedData: bo
 /**
  * Build the Codex usage encoder (E3) from the shared snapshot. Codex has no
  * rate limits unless the daemon reports `codexRateLimits` (primary ≈ 5h,
- * secondary ≈ 7d) — fall back to a muted note when absent.
+ * secondary ≈ 7d) — fall back to a muted note when absent. Credit-based plans
+ * (`limit_id`/`credits`, null windows) surface the balance in the note instead.
  * @param hasReceivedData false before the first usage_update → "Waiting…".
  */
 export function buildCodexUsageEncoder(data: UsageModeData, hasReceivedData: boolean): UsageEncoderData {
@@ -119,7 +120,15 @@ export function buildCodexUsageEncoder(data: UsageModeData, hasReceivedData: boo
   const secondary = cx?.secondary;
   let note: string | undefined;
   if (!hasReceivedData) note = 'Waiting…';
-  else if (primary == null && secondary == null) note = 'No Codex usage';
+  else if (primary == null && secondary == null) {
+    if (cx?.credits || cx?.limitId) {
+      const tier = (cx.limitId ?? 'credits').toUpperCase();
+      const bal = cx.credits?.unlimited ? '∞' : (cx.credits?.balance ?? '—');
+      note = `${tier} · ${bal} credits`;
+    } else {
+      note = 'No Codex usage';
+    }
+  }
   return {
     agent: 'codex',
     title: 'CODEX',

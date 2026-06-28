@@ -397,12 +397,23 @@ struct CodexRateLimitWindow: Codable, Sendable {
     var resetsAt: String?
 }
 
+/// Codex credit balance — the metering credit-based plans report (e.g.
+/// `limit_id: "premium"`) when the 5h/7d windows are null.
+struct CodexCredits: Codable, Sendable {
+    var hasCredits: Bool?
+    var unlimited: Bool?
+    var balance: String?
+}
+
 /// Codex usage limits parsed from local rollout files. `primary` ≈ 5h window,
-/// `secondary` ≈ weekly window — same idea as the Claude 5h/7d gauges.
+/// `secondary` ≈ weekly window — same idea as the Claude 5h/7d gauges. Credit-
+/// based plans report null windows and convey usage via `credits` + `limitId`.
 struct CodexRateLimits: Codable, Sendable {
     var primary: CodexRateLimitWindow?
     var secondary: CodexRateLimitWindow?
     var planType: String?
+    var limitId: String?
+    var credits: CodexCredits?
 }
 
 // MARK: - Button / Encoder State (Bridge → Client)
