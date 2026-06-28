@@ -304,6 +304,23 @@ export const OPENCODE_LOD: number[][] = [
 const OC_LOD_COLS = 6;
 const OC_LOD_ROWS = 6;
 
+// ===== Antigravity — rainbow peak/arc mark =====
+const ANTIGRAVITY_GRID: string[] = [
+  '....YOO....',
+  '....YOO....',
+  '...LYOOR...',
+  '...LTORR...',
+  '..LLTVPP...',
+  '..TTKKVPP..',
+  '.TQQK.KVU..',
+  '.QQK...KUU.',
+  'NQK.....KUU',
+  'NN.......UU',
+  '...........',
+];
+const AG_COLS = 11;
+const AG_ROWS = 11;
+
 // ===== Grid Selection Utility =====
 interface GridSelection {
   grid: number[][];
@@ -412,6 +429,18 @@ export const COLORS = {
   opencodeInner:    [0x4B, 0x46, 0x46] as const,  // dark core
   opencodePulse:    [0xCF, 0xCE, 0xCD] as const,  // pulse state
   opencodeSleeping: [0x8A, 0x84, 0x84] as const,  // sleep dim
+
+  // Antigravity (reference rainbow peak/arc)
+  antigravityLime:   [0x5C, 0xD6, 0x4D] as const,
+  antigravityTeal:   [0x1F, 0xC6, 0xB3] as const,
+  antigravityCyan:   [0x3A, 0xC7, 0xEB] as const,
+  antigravityYellow: [0xF5, 0xCB, 0x24] as const,
+  antigravityOrange: [0xFF, 0x84, 0x10] as const,
+  antigravityRed:    [0xFF, 0x52, 0x41] as const,
+  antigravityPink:   [0xB7, 0x5C, 0xB6] as const,
+  antigravityViolet: [0x66, 0x6F, 0xE1] as const,
+  antigravityBlue:   [0x24, 0x7E, 0xFF] as const,
+  antigravitySky:    [0x29, 0xB8, 0xEE] as const,
 
   // Tetra (neon)
   tetraNeon: [0x00, 0xE5, 0xFF] as const,
@@ -547,6 +576,39 @@ export function getOpenCodePaletteForSession(sessionIndex = 0): OpenCodePalette 
     inner: scaleColor(COLORS.opencodeInner, tone),
     sleeping: scaleColor(COLORS.opencodeSleeping, tone),
     pulse: scaleColor(COLORS.opencodePulse, tone),
+  };
+}
+
+export interface AntigravityPalette {
+  lime: RGB;
+  teal: RGB;
+  cyan: RGB;
+  yellow: RGB;
+  orange: RGB;
+  red: RGB;
+  pink: RGB;
+  violet: RGB;
+  blue: RGB;
+  sky: RGB;
+  cutout: RGB;
+}
+
+export function getAntigravityPaletteForSession(sessionIndex = 0): AntigravityPalette {
+  const tone = SESSION_TONE_FACTORS[
+    Math.max(0, Math.min(SESSION_TONE_FACTORS.length - 1, sessionIndex))
+  ];
+  return {
+    lime: scaleColor(COLORS.antigravityLime, tone),
+    teal: scaleColor(COLORS.antigravityTeal, tone),
+    cyan: scaleColor(COLORS.antigravityCyan, tone),
+    yellow: scaleColor(COLORS.antigravityYellow, tone),
+    orange: scaleColor(COLORS.antigravityOrange, tone),
+    red: scaleColor(COLORS.antigravityRed, tone),
+    pink: scaleColor(COLORS.antigravityPink, tone),
+    violet: scaleColor(COLORS.antigravityViolet, tone),
+    blue: scaleColor(COLORS.antigravityBlue, tone),
+    sky: scaleColor(COLORS.antigravitySky, tone),
+    cutout: COLORS.black,
   };
 }
 
@@ -1098,6 +1160,81 @@ export function drawOpenCode(
     for (let i = -1; i <= 1; i++) {
       blendPixel(buf, dotCx + i * 3, dotCy, COLORS.stateAwaiting, 0.75);
       blendPixel(buf, dotCx + i * 3 + 1, dotCy, COLORS.stateAwaiting, 0.45);
+    }
+  }
+}
+
+function antigravityCellColor(ch: string, palette: AntigravityPalette): RGB | null {
+  switch (ch) {
+    case 'L': return palette.lime;
+    case 'T': return palette.teal;
+    case 'Q': return palette.cyan;
+    case 'Y': return palette.yellow;
+    case 'O': return palette.orange;
+    case 'R': return palette.red;
+    case 'P': return palette.pink;
+    case 'V': return palette.violet;
+    case 'U': return palette.blue;
+    case 'N': return palette.sky;
+    case 'K': return palette.cutout;
+    default: return null;
+  }
+}
+
+function drawQuestionMark(buf: Uint8Array, x: number, y: number, color: RGB): void {
+  setPixel(buf, x, y, color);
+  setPixel(buf, x + 1, y, color);
+  setPixel(buf, x + 1, y + 1, color);
+  setPixel(buf, x, y + 2, color);
+  setPixel(buf, x, y + 4, color);
+}
+
+export function drawAntigravity(
+  buf: Uint8Array,
+  worldX: number,
+  worldY: number,
+  state: 'idle' | 'working' | 'sleeping' | 'asking',
+  animFrame: number,
+  camera: Camera,
+  palette: AntigravityPalette,
+): void {
+  if (!isVisible(worldX, worldY, camera, 0.15)) return;
+
+  const [scx, scy] = worldToScreen(worldX, worldY, camera);
+  const w = Math.sqrt(buf.length / 3);
+  const cellSz = creatureCellSize(camera.zoom, w, AG_COLS);
+  const spriteW = AG_COLS * cellSz;
+  const spriteH = AG_ROWS * cellSz;
+  const breathPx = state === 'working'
+    ? Math.round(Math.sin(animFrame * 0.28) * cellSz)
+    : state === 'idle' ? Math.round(Math.sin(animFrame * 0.08) * 0.5) : 0;
+  const cameraNudgeX = state === 'working' && ((animFrame >> 3) & 1) ? cellSz : 0;
+  const cameraNudgeY = state !== 'idle' && ((animFrame >> 2) & 1) ? -cellSz : 0;
+  const baseX = Math.round(scx - spriteW / 2) + cameraNudgeX;
+  const baseY = Math.round(scy - spriteH / 2) + breathPx + cameraNudgeY;
+
+  const trackedPixels = new Set<number>();
+  for (let row = 0; row < AG_ROWS; row++) {
+    const line = ANTIGRAVITY_GRID[row];
+    for (let col = 0; col < AG_COLS; col++) {
+      const color = antigravityCellColor(line[col], palette);
+      if (!color) continue;
+      fillCellTracked(buf, baseX + col * cellSz, baseY + row * cellSz, cellSz, cellSz, color, trackedPixels);
+    }
+  }
+
+  drawCreatureOutline(buf, trackedPixels, palette.violet, 0.45);
+
+  if (state === 'asking') {
+    drawQuestionMark(buf, Math.round(scx + spriteW * 0.48), Math.round(baseY + spriteH * 0.18), COLORS.stateAwaiting);
+  }
+
+  if (state === 'working') {
+    const sparkle = lerpColor(palette.yellow, COLORS.white, 0.35);
+    const dist = Math.max(2, cellSz * 3);
+    for (let i = 0; i < 4; i++) {
+      const t = animFrame * 0.22 + i * Math.PI / 2;
+      setPixel(buf, Math.round(scx + Math.cos(t) * dist), Math.round(baseY - 1 + Math.sin(t) * dist * 0.35), sparkle);
     }
   }
 }

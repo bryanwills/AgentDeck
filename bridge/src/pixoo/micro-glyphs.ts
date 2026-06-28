@@ -19,6 +19,7 @@
  * Each glyph is an 11-row × 11-col string grid. Characters map to colors:
  *   '.' transparent (shows the status-color background)
  *   'B' body   'A' arm/antenna/leg   'C' claw   'D' joint/shadow   'E' eye   'M' prompt mark   'F' logo frame
+ *   Antigravity additionally uses gradient bands: L/T/Q/Y/O/R/P/V/U/N plus K for black cutout.
  * `work` is an optional second frame for a simple processing animation (leg wiggle).
  */
 
@@ -108,20 +109,47 @@ const OPENCODE: Glyph = {
   ],
 };
 
-// Antigravity — lobe-icons peak/arc mark, simplified for an 11×11 matrix.
+// Antigravity — rainbow peak/arc mark, simplified for an 11×11 matrix. The black
+// K cells preserve the central hollow from the reference image even when the
+// status field behind the creature is not fully black.
 const ANTIGRAVITY: Glyph = {
-  colors: { F: [210, 214, 220] },
+  colors: {
+    L: [92, 214, 77],
+    T: [31, 198, 179],
+    Q: [58, 199, 235],
+    Y: [245, 203, 36],
+    O: [255, 132, 16],
+    R: [255, 82, 65],
+    P: [183, 92, 182],
+    V: [102, 111, 225],
+    U: [36, 126, 255],
+    N: [41, 184, 238],
+    K: [0, 0, 0],
+  },
   idle: [
-    '.....F.....',
-    '....FFF....',
-    '....FFF....',
-    '...FFFFF...',
-    '...FF.FF...',
-    '..FFF.FFF..',
-    '..FF...FF..',
-    '.FFF...FFF.',
-    '.FF.....FF.',
-    'FFF.....FFF',
+    '....YOO....',
+    '....YOO....',
+    '...LYOOR...',
+    '...LTORR...',
+    '..LLTVPP...',
+    '..TTKKVPP..',
+    '.TQQK.KVU..',
+    '.QQK...KUU.',
+    'NQK.....KUU',
+    'NN.......UU',
+    '...........',
+  ],
+  work: [
+    '...YYOO....',
+    '...LYOOR...',
+    '..LLYOOR...',
+    '..LTTORR...',
+    '.LTTTVPP...',
+    '.TQQKKVPP..',
+    'TQQK.KVUU..',
+    'QQK...KUUU.',
+    'NQK.....KUU',
+    'N.........U',
     '...........',
   ],
 };
@@ -197,12 +225,17 @@ export function paintMicroGlyph(
 ): void {
   const g = GLYPHS[creature];
   const grid = state === 'working' && g.work && ((animFrame >> 2) & 1) ? g.work : g.idle;
+  const offsetX = creature === 'antigravity' && state === 'working' && ((animFrame >> 3) & 1) ? 1 : 0;
+  const offsetY = creature === 'antigravity' && state !== 'idle' && ((animFrame >> 2) & 1) ? -1 : 0;
   for (let y = 0; y < MICRO_SIZE; y++) {
     const row = grid[y];
     for (let x = 0; x < MICRO_SIZE; x++) {
       const col = g.colors[row[x]];
       if (!col) continue;
-      const i = (y * MICRO_SIZE + x) * 3;
+      const dx = x + offsetX;
+      const dy = y + offsetY;
+      if (dx < 0 || dx >= MICRO_SIZE || dy < 0 || dy >= MICRO_SIZE) continue;
+      const i = (dy * MICRO_SIZE + dx) * 3;
       buf[i] = col[0]; buf[i + 1] = col[1]; buf[i + 2] = col[2];
     }
   }

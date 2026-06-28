@@ -15,6 +15,7 @@
 //
 // Grid characters: '.' transparent (shows status bg), 'B' body, 'A' arm/leg/antenna,
 // 'C' claw, 'D' joint/shadow, 'E' eye, 'M' prompt marking, 'F' logo frame.
+// Antigravity also uses L/T/Q/Y/O/R/P/V/U/N gradient bands and K black cutout.
 
 import Foundation
 
@@ -67,11 +68,16 @@ enum MicroGlyphs {
         } else {
             grid = g.idle
         }
+        let offsetX = creature == .antigravity && state == .working && ((animFrame >> 3) & 1) == 1 ? 1 : 0
+        let offsetY = creature == .antigravity && state != .idle && ((animFrame >> 2) & 1) == 1 ? -1 : 0
         for y in 0..<size {
             let row = Array(grid[y])
             for x in 0..<size {
                 guard let col = g.colors[row[x]] else { continue }
-                let i = (y * size + x) * 3
+                let dx = x + offsetX
+                let dy = y + offsetY
+                guard dx >= 0, dx < size, dy >= 0, dy < size else { continue }
+                let i = (dy * size + dx) * 3
                 buf[i] = col.0; buf[i + 1] = col.1; buf[i + 2] = col.2
             }
         }

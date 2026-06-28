@@ -49,6 +49,7 @@ final class PixooRenderer {
         case octopus
         case cloud
         case opencode
+        case antigravity
     }
 
     private enum CreatureState {
@@ -115,6 +116,20 @@ final class PixooRenderer {
         let pulse: RGB
     }
 
+    private struct AntigravityPalette {
+        let lime: RGB
+        let teal: RGB
+        let cyan: RGB
+        let yellow: RGB
+        let orange: RGB
+        let red: RGB
+        let pink: RGB
+        let violet: RGB
+        let blue: RGB
+        let sky: RGB
+        let cutout: RGB
+    }
+
     private static let width = 64
     private static let height = 64
     private static let sandTop = 54
@@ -141,9 +156,10 @@ final class PixooRenderer {
 
     private static let phi = (1.0 + sqrt(5.0)) / 2.0
     private static let sessionToneFactors: [Double] = [1.08, 1.0, 0.9, 0.8, 0.72, 0.64]
-    private static let codingAgents = Set(["claude-code", "antigravity"])
+    private static let codingAgents = Set(["claude-code"])
     private static let cloudAgents = Set(["codex-cli", "codex-app"])
     private static let opencodeAgents = Set(["opencode"])
+    private static let antigravityAgents = Set(["antigravity"])
 
     private static let octopusGrid: [[Int]] = [
         [0,0,1,1,1,1,1,1,1,1,1,0,0],
@@ -228,6 +244,19 @@ final class PixooRenderer {
         [8,0,0,0,0,8],
         [8,8,8,8,8,8],
     ]
+    private static let antigravityGrid: [String] = [
+        "....YOO....",
+        "....YOO....",
+        "...LYOOR...",
+        "...LTORR...",
+        "..LLTVPP...",
+        "..TTKKVPP..",
+        ".TQQK.KVU..",
+        ".QQK...KUU.",
+        "NQK.....KUU",
+        "NN.......UU",
+        "...........",
+    ]
 
     private static let pixelFont: [Character: [UInt8]] = [
         "0": [0b111, 0b101, 0b101, 0b101, 0b111],
@@ -283,6 +312,16 @@ final class PixooRenderer {
         let opencodeInner: RGB = (0x4B, 0x46, 0x46)
         let opencodePulse: RGB = (0xCF, 0xCE, 0xCD)
         let opencodeSleeping: RGB = (0x8A, 0x84, 0x84)
+        let antigravityLime: RGB = (0x5C, 0xD6, 0x4D)
+        let antigravityTeal: RGB = (0x1F, 0xC6, 0xB3)
+        let antigravityCyan: RGB = (0x3A, 0xC7, 0xEB)
+        let antigravityYellow: RGB = (0xF5, 0xCB, 0x24)
+        let antigravityOrange: RGB = (0xFF, 0x84, 0x10)
+        let antigravityRed: RGB = (0xFF, 0x52, 0x41)
+        let antigravityPink: RGB = (0xB7, 0x5C, 0xB6)
+        let antigravityViolet: RGB = (0x66, 0x6F, 0xE1)
+        let antigravityBlue: RGB = (0x24, 0x7E, 0xFF)
+        let antigravitySky: RGB = (0x29, 0xB8, 0xEE)
         let tetraNeon: RGB = (0x00, 0xE5, 0xFF)
         let tetraBody: RGB = (0x1E, 0x40, 0xAF)
         let tetraFin: RGB = (0xFF, 0x6B, 0x6B)
@@ -439,6 +478,8 @@ final class PixooRenderer {
                     drawCloud(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: cloudPalette(for: sessionToneIndex))
                 case .opencode:
                     drawOpenCode(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: opencodePalette(for: sessionToneIndex))
+                case .antigravity:
+                    drawAntigravity(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: antigravityPalette(for: sessionToneIndex))
                 case .octopus:
                     drawOctopus(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: octopusPalette(for: sessionToneIndex))
                 }
@@ -467,6 +508,8 @@ final class PixooRenderer {
                         cloudPalette(for: i).body
                     case .opencode:
                         Self.colors.white
+                    case .antigravity:
+                        antigravityPalette(for: i).yellow
                     case .octopus:
                         octopusPalette(for: i).body
                     }
@@ -619,13 +662,14 @@ final class PixooRenderer {
         let octopusSlots = pixooSlots(for: .octopus, count: typeCounts[.octopus] ?? 0)
         let cloudSlots = pixooSlots(for: .cloud, count: typeCounts[.cloud] ?? 0)
         let opencodeSlots = pixooSlots(for: .opencode, count: typeCounts[.opencode] ?? 0)
-        var typeIndices: [CreatureKind: Int] = [.octopus: 0, .cloud: 0, .opencode: 0]
+        let antigravitySlots = pixooSlots(for: .antigravity, count: typeCounts[.antigravity] ?? 0)
+        var typeIndices: [CreatureKind: Int] = [.octopus: 0, .cloud: 0, .opencode: 0, .antigravity: 0]
 
         for (index, session) in aliveCoding.enumerated() {
             let kind = creatureType(for: session.agentType)
             let slotIndex = typeIndices[kind, default: 0]
             typeIndices[kind, default: 0] = slotIndex + 1
-            let slot = pixooSlot(for: kind, index: slotIndex, octopusSlots: octopusSlots, cloudSlots: cloudSlots, opencodeSlots: opencodeSlots)
+            let slot = pixooSlot(for: kind, index: slotIndex, octopusSlots: octopusSlots, cloudSlots: cloudSlots, opencodeSlots: opencodeSlots, antigravitySlots: antigravitySlots)
             let worldX = Double(slot.x)
             let worldY = stateY(session.state, kind: kind, baseY: Double(slot.y))
 
@@ -667,7 +711,8 @@ final class PixooRenderer {
                 index: slotIndex,
                 octopusSlots: octopusSlots,
                 cloudSlots: cloudSlots,
-                opencodeSlots: opencodeSlots
+                opencodeSlots: opencodeSlots,
+                antigravitySlots: antigravitySlots
             )
             primary.worldY = stateY(preciseState, kind: primary.creatureType, baseY: Double(baseSlot.y))
             creatureInstances[aliveCoding[primaryIndex].id] = primary
@@ -682,6 +727,8 @@ final class PixooRenderer {
             return CreatureLayout.layoutCloudCreatures(count: count)
         case .opencode:
             return CreatureLayout.layoutOpenCodeCreatures(count: count)
+        case .antigravity:
+            return CreatureLayout.layoutAntigravityCreatures(count: count)
         }
     }
 
@@ -690,12 +737,14 @@ final class PixooRenderer {
         index: Int,
         octopusSlots: [CreatureSlot],
         cloudSlots: [CreatureSlot],
-        opencodeSlots: [CreatureSlot]
+        opencodeSlots: [CreatureSlot],
+        antigravitySlots: [CreatureSlot]
     ) -> CreatureSlot {
         let slots: [CreatureSlot] = switch kind {
         case .octopus: octopusSlots
         case .cloud: cloudSlots
         case .opencode: opencodeSlots
+        case .antigravity: antigravitySlots
         }
         guard !slots.isEmpty else { return CreatureSlot(x: 0.38, y: 0.42, scale: 1.0) }
         return slots[min(index, slots.count - 1)]
@@ -1192,6 +1241,63 @@ final class PixooRenderer {
         }
     }
 
+    private func antigravityCellColor(_ ch: Character, palette: AntigravityPalette) -> RGB? {
+        switch ch {
+        case "L": return palette.lime
+        case "T": return palette.teal
+        case "Q": return palette.cyan
+        case "Y": return palette.yellow
+        case "O": return palette.orange
+        case "R": return palette.red
+        case "P": return palette.pink
+        case "V": return palette.violet
+        case "U": return palette.blue
+        case "N": return palette.sky
+        case "K": return palette.cutout
+        default: return nil
+        }
+    }
+
+    private func drawAntigravity(_ buf: inout [UInt8], worldX: Double, worldY: Double, state: CreatureState, animFrame: Int, camera: Camera, palette: AntigravityPalette) {
+        guard isVisible(worldX, worldY, camera, padding: 0.15) else { return }
+        let (scx, scy) = worldToScreen(worldX, worldY, camera)
+        let cell = max(1, Int(round((0.1875 * (round(camera.zoom * 4) / 4) * Double(Self.width)) / 11.0)))
+        let spriteW = 11 * cell
+        let spriteH = 11 * cell
+        let breathPx = state == .processing
+            ? Int(round(sin(Double(animFrame) * 0.28) * Double(cell)))
+            : (state == .idle ? Int(round(sin(Double(animFrame) * 0.08) * 0.5)) : 0)
+        let nudgeX = state == .processing && ((animFrame >> 3) & 1) == 1 ? cell : 0
+        let nudgeY = state != .idle && ((animFrame >> 2) & 1) == 1 ? -cell : 0
+        let baseX = Int(round(scx - Double(spriteW) / 2)) + nudgeX
+        let baseY = Int(round(scy - Double(spriteH) / 2)) + breathPx + nudgeY
+        var tracked = Set<Int>()
+
+        for row in 0..<11 {
+            let line = Self.antigravityGrid[row]
+            for col in 0..<11 {
+                let idx = line.index(line.startIndex, offsetBy: col)
+                guard let color = antigravityCellColor(line[idx], palette: palette) else { continue }
+                fillCellTracked(&buf, x: Double(baseX + col * cell), y: Double(baseY + row * cell), w: Double(cell), h: Double(cell), color: color, tracked: &tracked)
+            }
+        }
+
+        drawCreatureOutline(&buf, trackedPixels: tracked, bodyColor: palette.violet, alpha: 0.45)
+
+        if state == .awaiting {
+            drawQuestionBubble(&buf, centerX: Int(round(scx + Double(spriteW) * 0.48)), centerY: Int(round(Double(baseY) + Double(spriteH) * 0.18)))
+        }
+
+        if state == .processing {
+            let sparkle = lerpColor(palette.yellow, Self.colors.white, 0.35)
+            let dist = max(2, cell * 3)
+            for i in 0..<4 {
+                let t = Double(animFrame) * 0.22 + Double(i) * Double.pi / 2
+                setPixel(&buf, Int(round(scx + cos(t) * Double(dist))), Int(round(Double(baseY - 1) + sin(t) * Double(dist) * 0.35)), sparkle)
+            }
+        }
+    }
+
     private func drawCrayfish(_ buf: inout [UInt8], worldX: Double, worldY: Double, routing: Bool, animFrame: Int, camera: Camera, sick: Bool) {
         guard isVisible(worldX, worldY, camera, padding: 0.15) else { return }
         let (scx, scy) = worldToScreen(worldX, worldY, camera)
@@ -1341,6 +1447,23 @@ final class PixooRenderer {
         )
     }
 
+    private func antigravityPalette(for sessionIndex: Int) -> AntigravityPalette {
+        let tone = Self.sessionToneFactors[min(max(sessionIndex, 0), Self.sessionToneFactors.count - 1)]
+        return AntigravityPalette(
+            lime: scaleColor(Self.colors.antigravityLime, tone),
+            teal: scaleColor(Self.colors.antigravityTeal, tone),
+            cyan: scaleColor(Self.colors.antigravityCyan, tone),
+            yellow: scaleColor(Self.colors.antigravityYellow, tone),
+            orange: scaleColor(Self.colors.antigravityOrange, tone),
+            red: scaleColor(Self.colors.antigravityRed, tone),
+            pink: scaleColor(Self.colors.antigravityPink, tone),
+            violet: scaleColor(Self.colors.antigravityViolet, tone),
+            blue: scaleColor(Self.colors.antigravityBlue, tone),
+            sky: scaleColor(Self.colors.antigravitySky, tone),
+            cutout: Self.colors.black
+        )
+    }
+
     private struct WaterPalette {
         let surface: RGB
         let light: RGB
@@ -1362,13 +1485,14 @@ final class PixooRenderer {
     }
 
     private func creatureType(for agentType: String) -> CreatureKind {
+        if Self.antigravityAgents.contains(agentType) { return .antigravity }
         if Self.cloudAgents.contains(agentType) { return .cloud }
         if Self.opencodeAgents.contains(agentType) { return .opencode }
         return .octopus
     }
 
     private func isCreatureAgent(_ agentType: String) -> Bool {
-        Self.codingAgents.contains(agentType) || Self.cloudAgents.contains(agentType) || Self.opencodeAgents.contains(agentType)
+        Self.codingAgents.contains(agentType) || Self.cloudAgents.contains(agentType) || Self.opencodeAgents.contains(agentType) || Self.antigravityAgents.contains(agentType)
     }
 
     private func simplifiedState(_ state: AgentConnectionState) -> CreatureState {
@@ -1406,6 +1530,12 @@ final class PixooRenderer {
             case .processing: return clamp(baseY - 0.02, min: 0.20, max: 0.34)
             case .awaiting: return clamp(baseY + 0.22, min: 0.50, max: 0.62)
             case .idle: return clamp(baseY + 0.36, min: 0.79, max: 0.81)
+            }
+        case .antigravity:
+            switch state {
+            case .processing: return clamp(baseY - 0.04, min: 0.16, max: 0.30)
+            case .awaiting: return clamp(baseY + 0.22, min: 0.46, max: 0.54)
+            case .idle: return clamp(baseY + 0.34, min: 0.56, max: 0.64)
             }
         }
     }

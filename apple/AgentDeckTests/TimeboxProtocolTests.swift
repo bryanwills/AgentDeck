@@ -88,6 +88,17 @@ final class TimeboxProtocolTests: XCTestCase {
         XCTAssertEqual(pixel(buf, 0, 4), [120, 126, 236])  // indigo cloud body
     }
 
+    /// Antigravity uses the reference rainbow peak/arc with a black center cutout.
+    func testMicroGlyphAntigravityPeak() {
+        var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
+        MicroGlyphs.paint(&buf, creature: .antigravity, state: .idle, animFrame: 0)
+        XCTAssertEqual(pixel(buf, 4, 0), [245, 203, 36])    // yellow peak
+        XCTAssertEqual(pixel(buf, 5, 0), [255, 132, 16])    // orange peak
+        XCTAssertEqual(pixel(buf, 3, 2), [92, 214, 77])     // green left slope
+        XCTAssertEqual(pixel(buf, 4, 5), [0, 0, 0])         // central hollow
+        XCTAssertEqual(pixel(buf, 9, 8), [36, 126, 255])    // blue right foot
+    }
+
     /// Status-field colors match micro-glyphs.ts microStatusBg.
     func testMicroStatusBg() {
         XCTAssertEqual(tupleBytes(MicroGlyphs.statusBg(.processing, animFrame: 0)), [10, 28, 64])

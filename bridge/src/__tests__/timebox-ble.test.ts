@@ -16,6 +16,8 @@ describe('Timebox device identity', () => {
 describe('micro layout (Timebox 11×11)', () => {
   const claudeSession = (state: string): SessionInfo[] =>
     [{ id: 's1', alive: true, agentType: 'claude-code', state } as unknown as SessionInfo];
+  const antigravitySession = (state: string): SessionInfo[] =>
+    [{ id: 'ag1', alive: true, agentType: 'antigravity', state } as unknown as SessionInfo];
 
   it('returns a size²·3 RGB buffer', () => {
     const buf = renderFrame(null, null, [], 1000, 32, 'micro');
@@ -50,5 +52,21 @@ describe('micro layout (Timebox 11×11)', () => {
     const c = (16 * 32 + 16) * 3;
     expect(buf[c]).toBeGreaterThan(buf[c + 1]); // red channel dominates
     expect(buf[c]).toBeGreaterThan(buf[c + 2]);
+  });
+
+  it('draws the Antigravity rainbow peak with a black center cutout', () => {
+    const buf = renderFrame(
+      { state: State.IDLE, agentType: 'antigravity' } as never,
+      null, antigravitySession('idle'), 1000, 11, 'micro',
+    );
+    const pixel = (x: number, y: number) => {
+      const i = (y * 11 + x) * 3;
+      return [buf[i], buf[i + 1], buf[i + 2]];
+    };
+    expect(pixel(4, 0)).toEqual([245, 203, 36]);  // yellow peak
+    expect(pixel(5, 0)).toEqual([255, 132, 16]);  // orange peak
+    expect(pixel(3, 2)).toEqual([92, 214, 77]);   // green left slope
+    expect(pixel(4, 5)).toEqual([0, 0, 0]);       // central hollow
+    expect(pixel(9, 8)).toEqual([36, 126, 255]);  // blue right foot
   });
 });

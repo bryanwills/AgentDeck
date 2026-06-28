@@ -25,9 +25,10 @@ import { hasOpenClawSession } from '@agentdeck/shared';
 import { drawTextCentered } from './pixoo-font.js';
 import {
   type RGB, COLORS, setPixel, blendPixel, glowPixel, fillRect, lerpColor,
-  drawOctopus, drawJellyfish, drawOpenCode, drawCrayfish, drawTetra,
+  drawOctopus, drawJellyfish, drawOpenCode, drawAntigravity, drawCrayfish, drawTetra,
   drawText,
   getOctopusPaletteForSession, getJellyfishPaletteForSession, getOpenCodePaletteForSession,
+  getAntigravityPaletteForSession,
   OCTO_WORLD_W, JF_WORLD_W, CF_WORLD_W,
 } from './pixoo-sprites.js';
 import {
@@ -76,13 +77,15 @@ const PHI = (1 + Math.sqrt(5)) / 2;
 const creatureInstances = new Map<string, CreatureInstance>();
 
 /** Agent types that represent coding agents (draw as octopus/robot). */
-const CODING_AGENTS = new Set(['claude-code', 'antigravity']);
+const CODING_AGENTS = new Set(['claude-code']);
 /** Agent types drawn as jellyfish (cloud creature). */
 const JELLYFISH_AGENTS = new Set(['codex-cli', 'codex-app']);
 /** Agent types drawn as nested-square opencode. */
 const OPENCODE_AGENTS = new Set(['opencode']);
+/** Agent types drawn as the Antigravity peak/arc mark. */
+const ANTIGRAVITY_AGENTS = new Set(['antigravity']);
 
-type CreatureType = 'octopus' | 'jellyfish' | 'opencode';
+type CreatureType = 'octopus' | 'jellyfish' | 'opencode' | 'antigravity';
 
 // Y positions by state — idle nearly on sand, active higher up
 const IDLE_Y = 0.78;      // just above sand line (sleeping on ground)
@@ -95,12 +98,20 @@ function stateY(state: 'idle' | 'processing' | 'awaiting'): number {
   return IDLE_Y;
 }
 
+function stateYForType(state: 'idle' | 'processing' | 'awaiting', creatureType: CreatureType): number {
+  if (creatureType !== 'antigravity') return stateY(state);
+  if (state === 'processing') return 0.30;
+  if (state === 'awaiting') return 0.48;
+  return 0.62;
+}
+
 /** Check if agent type gets a creature. */
 function isCreatureAgent(agentType: string): boolean {
-  return CODING_AGENTS.has(agentType) || JELLYFISH_AGENTS.has(agentType) || OPENCODE_AGENTS.has(agentType);
+  return CODING_AGENTS.has(agentType) || JELLYFISH_AGENTS.has(agentType) || OPENCODE_AGENTS.has(agentType) || ANTIGRAVITY_AGENTS.has(agentType);
 }
 
 function creatureTypeFor(agentType: string): CreatureType {
+  if (ANTIGRAVITY_AGENTS.has(agentType)) return 'antigravity';
   if (JELLYFISH_AGENTS.has(agentType)) return 'jellyfish';
   if (OPENCODE_AGENTS.has(agentType)) return 'opencode';
   return 'octopus';
@@ -142,26 +153,27 @@ function syncCreatures(
     const s = aliveCoding[i];
     const existing = creatureInstances.get(s.id);
     const sessionState = mapSessionState(s.state);
+    const creatureType = creatureTypeFor(s.agentType);
     
     // Uniformly distribute X positions to maximize spacing and prevent overlap
     const x = aliveCoding.length === 1
-      ? 0.38  // single session: classic center-left
+      ? (creatureType === 'antigravity' ? 0.68 : 0.38)  // single session: type-native band
       : 0.15 + (i / (aliveCoding.length - 1)) * 0.70;
 
     if (existing) {
       existing.state = sessionState;
       existing.agentType = s.agentType;
-      existing.creatureType = creatureTypeFor(s.agentType);
+      existing.creatureType = creatureType;
       existing.worldX = x; // Update X dynamically to maintain even spacing
-      existing.worldY = stateY(sessionState);
+      existing.worldY = stateYForType(sessionState, creatureType);
     } else {
       creatureInstances.set(s.id, {
         sessionId: s.id,
         agentType: s.agentType,
-        creatureType: creatureTypeFor(s.agentType),
+        creatureType,
         state: sessionState,
         worldX: x,
-        worldY: stateY(sessionState),
+        worldY: stateYForType(sessionState, creatureType),
         phaseOffset: i * 5,
       });
     }
@@ -177,7 +189,7 @@ function syncCreatures(
     if (primary) {
       const st = simplifiedState(stateEvent.state ?? State.IDLE) as 'idle' | 'processing' | 'awaiting';
       primary.state = st;
-      primary.worldY = stateY(st);
+      primary.worldY = stateYForType(st, primary.creatureType);
     }
   }
 }
@@ -918,6 +930,16 @@ export function renderFrame(
         camera,
         getOpenCodePaletteForSession(sessionToneIndex),
       );
+    } else if (c.creatureType === 'antigravity') {
+      drawAntigravity(
+        outputBuf,
+        c.worldX,
+        c.worldY,
+        spriteState,
+        animFrame + c.phaseOffset,
+        camera,
+        getAntigravityPaletteForSession(sessionToneIndex),
+      );
     } else {
       drawOctopus(
         outputBuf,
@@ -963,6 +985,8 @@ export function renderFrame(
         ? getJellyfishPaletteForSession(i).body
         : c.creatureType === 'opencode'
           ? getOpenCodePaletteForSession(i).outer
+          : c.creatureType === 'antigravity'
+            ? getAntigravityPaletteForSession(i).yellow
           : getOctopusPaletteForSession(i).body;
       setPixel(outputBuf, dotX, 1, dotColor);
       setPixel(outputBuf, dotX + 1, 1, dotColor);
