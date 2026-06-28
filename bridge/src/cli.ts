@@ -556,12 +556,24 @@ program
           lines.push(`  WebSocket    ${d.count} client${d.count !== 1 ? 's' : ''}`);
           total += d.count;
         } else if ((d.type === 'esp32' || d.type === 'esp32_serial') && (d.count || d.connections)) {
-          // Node daemon: { count, ports }, Swift daemon: { connections: [{ port, connected, deviceInfo }] }
+          // Node daemon: { count, ports, devices }, Swift daemon: { connections: [{ port, connected, deviceInfo }] }
           const count = d.count ?? (d.connections as any[])?.filter((c: any) => c.connected).length ?? 0;
           const ports = d.ports ?? (d.connections as any[])?.map((c: any) => c.port) ?? [];
+          // Per-device build identity, so a stale flash is distinguishable from the latest.
+          const devices: any[] = d.devices ?? (d.connections as any[])?.filter((c: any) => c.connected).map((c: any) => ({ port: c.port, ...c.deviceInfo })) ?? [];
           if (count > 0) {
-            const portInfo = ports.length ? ` (${ports.join(', ')})` : '';
-            lines.push(`  ESP32        ${count} serial${portInfo}`);
+            if (devices.length) {
+              lines.push(`  ESP32        ${count} serial`);
+              for (const dev of devices) {
+                const ver = dev.version ? ` v${dev.version}` : '';
+                const hash = dev.buildHash ? ` (${dev.buildHash})` : '';
+                const board = dev.board ?? 'esp32';
+                lines.push(`                 ${board}${ver}${hash} @ ${dev.port}`);
+              }
+            } else {
+              const portInfo = ports.length ? ` (${ports.join(', ')})` : '';
+              lines.push(`  ESP32        ${count} serial${portInfo}`);
+            }
             total += count;
           }
         } else if (d.type === 'pixoo') {

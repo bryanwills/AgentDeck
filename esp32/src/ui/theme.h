@@ -147,6 +147,17 @@ constexpr float OpenCodeSwimMaxX   = 0.72f;
 constexpr float OpenCodeSwimMinY   = 0.15f;
 constexpr float OpenCodeSwimMaxY   = 0.58f;
 
+// Antigravity (peak/arc mark)
+constexpr float AntigravityRadiusFrac = 0.054f;
+constexpr float AntigravityHomeX      = 0.74f;
+constexpr float AntigravityStandingY  = 0.50f;
+constexpr float AntigravitySleepY     = 0.67f;
+constexpr float AntigravityWorkingY   = 0.26f;
+constexpr float AntigravitySwimMinX   = 0.52f;
+constexpr float AntigravitySwimMaxX   = 0.82f;
+constexpr float AntigravitySwimMinY   = 0.12f;
+constexpr float AntigravitySwimMaxY   = 0.56f;
+
 // Tetra
 constexpr float TetraSize     = 0.018f;
 constexpr float TetraSwimMinX = 0.10f;
@@ -201,6 +212,17 @@ constexpr float OpenCodeSwimMinX   = 0.40f;
 constexpr float OpenCodeSwimMaxX   = 0.70f;
 constexpr float OpenCodeSwimMinY   = 0.10f;
 constexpr float OpenCodeSwimMaxY   = 0.61f;
+
+// Antigravity (peak/arc mark)
+constexpr float AntigravityRadiusFrac = 0.048f;
+constexpr float AntigravityHomeX      = 0.72f;
+constexpr float AntigravityStandingY  = 0.50f;
+constexpr float AntigravitySleepY     = 0.74f;
+constexpr float AntigravityWorkingY   = 0.28f;
+constexpr float AntigravitySwimMinX   = 0.52f;
+constexpr float AntigravitySwimMaxX   = 0.84f;
+constexpr float AntigravitySwimMinY   = 0.10f;
+constexpr float AntigravitySwimMaxY   = 0.61f;
 
 // Tetra
 constexpr float TetraSize     = 0.015f;

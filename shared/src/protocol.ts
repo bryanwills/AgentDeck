@@ -474,7 +474,9 @@ export interface DeviceInfoMessage {
   // "86box" | "round_amoled" | "ips_35" | "ips_10" | "ttgo_t_display"
   // | "esp32_c6_147" | "ulanzi_tc001" (wire strings — see esp32/src/net/protocol.cpp)
   board: string;
-  version: string;       // firmware version
+  version: string;       // firmware version (FIRMWARE_VERSION — bumped rarely)
+  buildHash?: string;    // git short-hash of the flashed source (GIT_SHA); "unknown" on non-git builds. Optional: pre-0.1.2 firmware omits it.
+  buildEpoch?: number;   // unix seconds the firmware was compiled (BUILD_EPOCH)
   wifiConfigured: boolean;
   wifiConnected: boolean;
   ip?: string;

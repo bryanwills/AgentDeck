@@ -1017,7 +1017,7 @@ private fun drawEinkAntigravity(
     val cy = h * baseYFraction + bobY
 
     // Peak/arc mark — filled silhouette of the canonical Antigravity path.
-    val markSize = w * 0.052f * scaleFactor * 1.8f
+    val markSize = w * 0.052f * scaleFactor * if (einkColorEnabled) 2.15f else 1.8f
     val markHalf = markSize / 2f
     val svgScale = markSize / dev.agentdeck.terrarium.CreatureGeometry.ANTIGRAVITY_VIEWBOX
 
@@ -1027,36 +1027,55 @@ private fun drawEinkAntigravity(
         einkPick(GRAY_ANTIGRAVITY_BODY, COLOR_ANTIGRAVITY_BODY)
     }
 
-    paint.style = Paint.Style.FILL
-    paint.color = bodyColor
-    paint.shader = if (einkColorEnabled && state != OctopusVisualState.SLEEPING) {
+    val colorActive = einkColorEnabled && state != OctopusVisualState.SLEEPING
+    val antigravityShader = if (colorActive) {
+        // Gradient endpoints are in viewBox (0..ANTIGRAVITY_VIEWBOX) space — the
+        // shader is sampled under the translate+scale CTM applied below, so device
+        // coords here would collapse the whole mark onto stop 0 (solid lime).
+        // Matches the canonical Compose creature direction: (3,22) -> (22,2).
         LinearGradient(
-            cx - markHalf, cy + markHalf,
-            cx + markHalf, cy - markHalf,
+            3f, 22f,
+            22f, 2f,
             intArrayOf(
-                COLOR_ANTIGRAVITY_SKY,
-                COLOR_ANTIGRAVITY_CYAN,
                 COLOR_ANTIGRAVITY_LIME,
-                COLOR_ANTIGRAVITY_YELLOW,
-                COLOR_ANTIGRAVITY_ORANGE,
-                COLOR_ANTIGRAVITY_RED,
-                COLOR_ANTIGRAVITY_PINK,
+                COLOR_ANTIGRAVITY_CYAN,
                 COLOR_ANTIGRAVITY_BLUE,
+                COLOR_ANTIGRAVITY_PINK,
+                COLOR_ANTIGRAVITY_RED,
+                COLOR_ANTIGRAVITY_ORANGE,
+                COLOR_ANTIGRAVITY_YELLOW,
             ),
-            null,
+            floatArrayOf(0.00f, 0.18f, 0.38f, 0.58f, 0.74f, 0.88f, 1.00f),
             Shader.TileMode.CLAMP,
         )
     } else {
         null
     }
+    paint.style = Paint.Style.FILL
+    paint.color = bodyColor
+    paint.shader = antigravityShader
     canvas.save()
     canvas.translate(cx, cy)
     canvas.scale(svgScale, svgScale)
     canvas.translate(-dev.agentdeck.terrarium.CreatureGeometry.ANTIGRAVITY_VIEWBOX / 2f,
         -dev.agentdeck.terrarium.CreatureGeometry.ANTIGRAVITY_VIEWBOX / 2f)
+    if (colorActive) {
+        paint.shader = null
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.55f
+        paint.strokeJoin = Paint.Join.ROUND
+        paint.color = 0xFF1F2A30.toInt()
+        canvas.drawPath(dev.agentdeck.terrarium.CreatureGeometry.antigravityNativePath, paint)
+        paint.strokeWidth = 0.55f
+        paint.color = 0xFFF6FAFC.toInt()
+        canvas.drawPath(dev.agentdeck.terrarium.CreatureGeometry.antigravityNativePath, paint)
+        paint.style = Paint.Style.FILL
+        paint.shader = antigravityShader
+    }
     canvas.drawPath(dev.agentdeck.terrarium.CreatureGeometry.antigravityNativePath, paint)
     canvas.restore()
     paint.shader = null
+    paint.style = Paint.Style.FILL
 
     // Name tag
     if (displayName != null) {

@@ -520,7 +520,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       res.end(JSON.stringify({
         devices: [
           { type: 'websocket', count: core.wsServer.getClientCount() },
-          { type: 'esp32', count: esp32ConnectionCount(), ports: getESP32Ports() },
+          { type: 'esp32', count: esp32ConnectionCount(), ports: getESP32Ports(), devices: getESP32DeviceInfo() },
           { type: 'pixoo', details: getPixooDeviceDetails() },
           { type: 'timebox', devices: loadTimeboxDevices() },
           { type: 'idotmatrix', devices: loadIDotMatrixDevices() },

@@ -244,6 +244,7 @@ static void handleSessionsList(JsonObject& obj) {
     g_state.octopusCount = 0;
     g_state.cloudCount = 0;
     g_state.opencodeCount = 0;
+    g_state.antigravityCount = 0;
     g_state.crayfishCount = 0;
 
     for (uint8_t i = 0; i < g_state.sessionCount; i++) {
@@ -289,6 +290,8 @@ static void handleSessionsList(JsonObject& obj) {
                 g_state.cloudCount++;
             } else if (strcmp(g_state.sessions[i].agentType, "opencode") == 0) {
                 g_state.opencodeCount++;
+            } else if (strcmp(g_state.sessions[i].agentType, "antigravity") == 0) {
+                g_state.antigravityCount++;
             } else if (strcmp(g_state.sessions[i].agentType, "claude-code") == 0) {
                 g_state.octopusCount++;
             }
@@ -414,6 +417,46 @@ static void handleSessionsList(JsonObject& obj) {
         }
     }
     }  // MAX_OPENCODE > 0
+
+    // Populate antigravityNames for antigravity creature name tags (same dedup logic)
+    if (MAX_ANTIGRAVITY > 0) {
+    char antigravityRawNames[MAX_ANTIGRAVITY > 0 ? MAX_ANTIGRAVITY : 1][24];
+    uint8_t antigravityNameIdx = 0;
+    for (uint8_t i = 0; i < g_state.sessionCount && antigravityNameIdx < MAX_ANTIGRAVITY; i++) {
+        if (g_state.sessions[i].alive &&
+            strcmp(g_state.sessions[i].agentType, "antigravity") == 0) {
+            const char* name = g_state.sessions[i].projectName;
+            if (name[0]) {
+                strncpy(antigravityRawNames[antigravityNameIdx], name, sizeof(antigravityRawNames[antigravityNameIdx]) - 1);
+                antigravityRawNames[antigravityNameIdx][sizeof(antigravityRawNames[antigravityNameIdx]) - 1] = '\0';
+            } else {
+                snprintf(antigravityRawNames[antigravityNameIdx], sizeof(antigravityRawNames[antigravityNameIdx]), "Antigravity %d", antigravityNameIdx + 1);
+            }
+            antigravityNameIdx++;
+        }
+    }
+    for (uint8_t i = 0; i < antigravityNameIdx; i++) {
+        bool hasDup = false;
+        for (uint8_t j = 0; j < antigravityNameIdx; j++) {
+            if (j != i && strcmp(antigravityRawNames[i], antigravityRawNames[j]) == 0) {
+                hasDup = true;
+                break;
+            }
+        }
+        if (hasDup) {
+            uint8_t occurrence = 1;
+            for (uint8_t j = 0; j < i; j++) {
+                if (strcmp(antigravityRawNames[i], antigravityRawNames[j]) == 0) occurrence++;
+            }
+            snprintf(g_state.antigravityNames[i], sizeof(g_state.antigravityNames[i]),
+                     "%s #%d", antigravityRawNames[i], occurrence);
+        } else {
+            strncpy(g_state.antigravityNames[i], antigravityRawNames[i],
+                    sizeof(g_state.antigravityNames[i]) - 1);
+            g_state.antigravityNames[i][sizeof(g_state.antigravityNames[i]) - 1] = '\0';
+        }
+    }
+    }  // MAX_ANTIGRAVITY > 0
 
     // No OpenClaw sessions: gate crayfish on authentication, not reachability.
     if (g_state.crayfishCount == 0) {
@@ -551,6 +594,8 @@ static void sendDeviceInfo() {
     #endif
 
     resp["version"] = FIRMWARE_VERSION;
+    resp["buildHash"] = GIT_SHA;
+    resp["buildEpoch"] = (uint32_t)BUILD_EPOCH;
     resp["protocolRevision"] = PROTOCOL_REVISION;
     resp["wifiConfigured"] = (WiFi.SSID().length() > 0);
     resp["wifiConnected"] = Net::wifiConnected();
@@ -558,7 +603,7 @@ static void sendDeviceInfo() {
         resp["ip"] = Net::wifiLocalIP();
     }
 
-    char buf[256];
+    char buf[320];
     serializeJson(resp, buf, sizeof(buf));
     Serial.println(buf);
 }

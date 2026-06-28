@@ -96,7 +96,7 @@ export interface SerialConnection {
   reader: ReadStream | null;
   readBuf: string;
   connected: boolean;
-  deviceInfo: { board?: string; version?: string; wifiConfigured?: boolean; wifiConnected?: boolean } | null;
+  deviceInfo: { board?: string; version?: string; buildHash?: string; buildEpoch?: number; wifiConfigured?: boolean; wifiConnected?: boolean } | null;
   provisionSent: boolean;
   connectedAt: number;
   lastReadAt: number;  // Timestamp of last successful read from ESP32
@@ -492,6 +492,8 @@ export function handleSerialLine(conn: SerialConnection, line: string): void {
         conn.deviceInfo = {
           board: msg.board,
           version: msg.version,
+          buildHash: msg.buildHash,
+          buildEpoch: msg.buildEpoch,
           wifiConfigured: msg.wifiConfigured,
           wifiConnected: msg.wifiConnected,
         };
@@ -1060,7 +1062,7 @@ export function sendWifiProvisionToAll(msg: WifiProvisionMessage): number {
 /**
  * Get device info for all connected ESP32 devices.
  */
-export function getESP32DeviceInfo(): Array<{ port: string; board?: string; version?: string; wifiConfigured?: boolean; wifiConnected?: boolean }> {
+export function getESP32DeviceInfo(): Array<{ port: string; board?: string; version?: string; buildHash?: string; buildEpoch?: number; wifiConfigured?: boolean; wifiConnected?: boolean }> {
   const now = Date.now();
   return connections
     .filter(c => isResponsive(c, now))
@@ -1134,6 +1136,8 @@ export function getSerialConnectionStatus(): Array<{
   connected: boolean;
   board?: string;
   version?: string;
+  buildHash?: string;
+  buildEpoch?: number;
   wifiConfigured?: boolean;
   wifiConnected?: boolean;
   transportOpen: boolean;
@@ -1150,6 +1154,8 @@ export function getSerialConnectionStatus(): Array<{
     transportOpen: c.connected,
     board: c.deviceInfo?.board,
     version: c.deviceInfo?.version,
+    buildHash: c.deviceInfo?.buildHash,
+    buildEpoch: c.deviceInfo?.buildEpoch,
     wifiConfigured: c.deviceInfo?.wifiConfigured,
     wifiConnected: c.deviceInfo?.wifiConnected,
     lastReadAt: c.lastReadAt,

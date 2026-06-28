@@ -22,8 +22,19 @@ constexpr uint16_t BRIDGE_PORT_MAX     = 9139;
 constexpr const char* MDNS_SERVICE     = "_agentdeck";
 constexpr const char* MDNS_PROTO       = "_tcp";
 constexpr const char* AP_SSID          = "AgentDeck-Setup";
-constexpr const char* FIRMWARE_VERSION = "0.1.1";
+constexpr const char* FIRMWARE_VERSION = "0.1.2";
 constexpr uint8_t PROTOCOL_REVISION    = 2;
+
+// ===== Build identity (injected by scripts/git_rev.py at compile time) =====
+// device_info reports these so the host can verify the *exact* source a device
+// was flashed from — FIRMWARE_VERSION alone is bumped too rarely to tell a
+// stale build apart from the latest. Fallbacks keep non-git/CI builds compiling.
+#ifndef GIT_SHA
+#define GIT_SHA "unknown"
+#endif
+#ifndef BUILD_EPOCH
+#define BUILD_EPOCH 0
+#endif
 
 // ===== WebSocket =====
 constexpr uint32_t WS_RECONNECT_MIN_MS  = 1000;
@@ -54,6 +65,7 @@ constexpr uint32_t RENDER_INTERVAL_MS  = 33;  // ~30fps
 constexpr uint8_t  MAX_OCTOPUS         = 1;
 constexpr uint8_t  MAX_CLOUD           = 0;
 constexpr uint8_t  MAX_OPENCODE        = 0;
+constexpr uint8_t  MAX_ANTIGRAVITY     = 0;
 constexpr uint8_t  MAX_TETRA           = 0;
 constexpr uint8_t  MAX_BUBBLES         = 0;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 0;
@@ -63,6 +75,7 @@ constexpr uint8_t  WAVE_SEGMENTS       = 0;
 constexpr uint8_t  MAX_OCTOPUS         = 2;
 constexpr uint8_t  MAX_CLOUD           = 1;
 constexpr uint8_t  MAX_OPENCODE        = 1;
+constexpr uint8_t  MAX_ANTIGRAVITY     = 1;
 constexpr uint8_t  MAX_TETRA           = 1;   // trimmed for calmer motion on small SPI panels
 constexpr uint8_t  MAX_BUBBLES         = 3;   // trimmed (was 6) — less constant motion
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 3;
@@ -72,6 +85,7 @@ constexpr uint8_t  WAVE_SEGMENTS       = 8;
 constexpr uint8_t  MAX_OCTOPUS         = 8;
 constexpr uint8_t  MAX_CLOUD           = 6;
 constexpr uint8_t  MAX_OPENCODE        = 6;
+constexpr uint8_t  MAX_ANTIGRAVITY     = 6;
 constexpr uint8_t  MAX_TETRA           = 8;
 constexpr uint8_t  MAX_BUBBLES         = 30;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 15;
@@ -81,6 +95,7 @@ constexpr uint8_t  WAVE_SEGMENTS       = 24;
 constexpr uint8_t  MAX_OCTOPUS         = 4;
 constexpr uint8_t  MAX_CLOUD           = 2;
 constexpr uint8_t  MAX_OPENCODE        = 2;
+constexpr uint8_t  MAX_ANTIGRAVITY     = 2;
 constexpr uint8_t  MAX_TETRA           = 4;
 constexpr uint8_t  MAX_BUBBLES         = 12;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 6;
@@ -90,6 +105,7 @@ constexpr uint8_t  WAVE_SEGMENTS       = 14;
 constexpr uint8_t  MAX_OCTOPUS         = 6;
 constexpr uint8_t  MAX_CLOUD           = 4;
 constexpr uint8_t  MAX_OPENCODE        = 4;
+constexpr uint8_t  MAX_ANTIGRAVITY     = 4;
 constexpr uint8_t  MAX_TETRA           = 6;
 constexpr uint8_t  MAX_BUBBLES         = 20;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 10;

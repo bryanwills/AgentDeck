@@ -49,6 +49,8 @@ static void sendDeviceInfoSerial() {
     #endif
 
     resp["version"] = FIRMWARE_VERSION;
+    resp["buildHash"] = GIT_SHA;
+    resp["buildEpoch"] = (uint32_t)BUILD_EPOCH;
     resp["protocolRevision"] = PROTOCOL_REVISION;
     resp["wifiConfigured"] = (WiFi.SSID().length() > 0);
     resp["wifiConnected"] = wifiConnected();
@@ -56,7 +58,7 @@ static void sendDeviceInfoSerial() {
         resp["ip"] = wifiLocalIP();
     }
 
-    char buf[256];
+    char buf[320];
     serializeJson(resp, buf, sizeof(buf));
     Serial.println(buf);
 }

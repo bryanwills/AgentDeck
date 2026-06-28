@@ -249,6 +249,12 @@ class AntigravityCreature(
             if (visualState == OctopusVisualState.SLEEPING) {
                 drawPath(peakPath, color = TerrariumColors.AntigravityDim, alpha = alpha * 0.72f)
             } else {
+                drawPath(
+                    peakPath,
+                    color = TerrariumColors.AntigravityLight,
+                    alpha = alpha * 0.34f,
+                    style = Stroke(width = 0.72f, cap = StrokeCap.Round),
+                )
                 drawAntigravityRainbow(alpha)
             }
         }
@@ -272,10 +278,10 @@ class AntigravityCreature(
         val bodyAlpha = (alpha + pulse).coerceAtMost(1f)
         drawPath(
             peakPath,
-            brush = Brush.verticalGradient(
+            brush = Brush.linearGradient(
                 colors = BASE_RAINBOW_COLORS,
-                startY = 1f,
-                endY = 23f,
+                start = Offset(3f, 22f),
+                end = Offset(22f, 2f),
             ),
             alpha = bodyAlpha,
         )
@@ -481,32 +487,37 @@ class AntigravityCreature(
 
         private val peakPath: Path by lazy {
             PathParser().parsePathString(CreatureGeometry.ANTIGRAVITY_PATH_DATA).toPath().apply {
-                fillType = PathFillType.NonZero
+                fillType = PathFillType.EvenOdd
             }
         }
 
         private val BASE_RAINBOW_COLORS = listOf(
-            TerrariumColors.AntigravityOrange,
-            TerrariumColors.AntigravityRed,
+            TerrariumColors.AntigravityLime,
+            TerrariumColors.AntigravityTeal,
             TerrariumColors.AntigravityCyan,
             TerrariumColors.AntigravityBlue,
+            TerrariumColors.AntigravityViolet,
+            TerrariumColors.AntigravityPink,
+            TerrariumColors.AntigravityRed,
+            TerrariumColors.AntigravityOrange,
+            TerrariumColors.AntigravityYellow,
         )
 
         private val TOP_WARM_OVERLAY = listOf(
-            TerrariumColors.AntigravityYellow,
-            TerrariumColors.AntigravityOrange.copy(alpha = 0.72f),
+            TerrariumColors.AntigravityYellow.copy(alpha = 0.58f),
+            TerrariumColors.AntigravityOrange.copy(alpha = 0.28f),
             Color.Transparent,
         )
 
         private val LEFT_GREEN_OVERLAY = listOf(
-            TerrariumColors.AntigravityLime,
-            TerrariumColors.AntigravityTeal.copy(alpha = 0.62f),
+            TerrariumColors.AntigravityLime.copy(alpha = 0.55f),
+            TerrariumColors.AntigravityTeal.copy(alpha = 0.30f),
             Color.Transparent,
         )
 
         private val RIGHT_PURPLE_OVERLAY = listOf(
-            TerrariumColors.AntigravityPink.copy(alpha = 0.74f),
-            TerrariumColors.AntigravityViolet.copy(alpha = 0.52f),
+            TerrariumColors.AntigravityPink.copy(alpha = 0.42f),
+            TerrariumColors.AntigravityViolet.copy(alpha = 0.34f),
             Color.Transparent,
         )
 
