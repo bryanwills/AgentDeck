@@ -30,8 +30,9 @@ static lv_obj_t* lblStatus  = nullptr;   // header status line: "● N sessions 
 static lv_obj_t* terrCount  = nullptr;   // "N LIVE" caption over the terrarium
 // D1 full-width top bar (brand · daemon status · 5h/7d usage gauges).
 static constexpr int IPS10_TOPBAR_H = 56;
-// Usage bar track width — shortened from 92 to make room for the leading agent icon.
-static constexpr int TB_BAR_W = 74;
+// Usage bar track width — compact 2-row blocks (5H over 7D) keep the bar narrow,
+// so the track shrinks to 48 and two windows still fit on one block.
+static constexpr int TB_BAR_W = 48;
 static lv_obj_t* tbDaemon  = nullptr;    // "● daemon :9120 · N agents"
 #if defined(IPS10_PERF_HUD)
 static lv_obj_t* tbPerf    = nullptr;    // worst-frame perf overlay (debug)
@@ -48,7 +49,7 @@ static lv_obj_t* tbCx5hFill = nullptr;
 static lv_obj_t* tbCx7dFill = nullptr;
 static lv_obj_t* tbCx5hPct  = nullptr;
 static lv_obj_t* tbCx7dPct  = nullptr;
-// Antigravity credits chip ("AG pro · 1234cr") — hidden when no data.
+// Antigravity chip (brand mark + plan name, e.g. "Pro") — hidden when no data.
 static lv_obj_t* tbAgIcon   = nullptr;
 static lv_obj_t* tbAg       = nullptr;
 // Leading agent icons before the gauge pairs (Codex icon hides with its gauges).
@@ -687,6 +688,91 @@ static void cellNoCb(lv_event_t* e) {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     if (idx >= 0 && idx < MOSAIC_MAX) hudSendApprove(cellMetaData[idx].requestId, cellMetaData[idx].sid, false);
 }
+
+// ── top-bar usage gauges (compact 2-row blocks) ──
+// One usage row: "5H ▓▓░ 62% 2h13m" — label · mini track+fill · percent/reset.
+static lv_obj_t* makeUsageRow(lv_obj_t* parent, const char* lab, uint32_t labCol,
+                              uint32_t fillCol, lv_obj_t** fillOut, lv_obj_t** pctOut) {
+    lv_obj_t* row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_style_pad_column(row, 6, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t* l = lv_label_create(row);
+    lv_obj_set_style_text_font(l, &font_kr_12, 0);
+    lv_obj_set_style_text_color(l, lv_color_hex(labCol), 0);
+    lv_label_set_text(l, lab);
+
+    lv_obj_t* track = lv_obj_create(row);
+    lv_obj_set_size(track, TB_BAR_W, 6);
+    lv_obj_set_style_radius(track, 3, 0);
+    lv_obj_set_style_bg_color(track, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_bg_opa(track, (lv_opa_t)45, 0);
+    lv_obj_set_style_border_width(track, 0, 0);
+    lv_obj_set_style_pad_all(track, 0, 0);
+    lv_obj_clear_flag(track, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* fill = lv_obj_create(track);
+    lv_obj_set_size(fill, 0, 6);
+    lv_obj_set_pos(fill, 0, 0);
+    lv_obj_set_style_radius(fill, 3, 0);
+    lv_obj_set_style_bg_color(fill, lv_color_hex(fillCol), 0);
+    lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(fill, 0, 0);
+    lv_obj_clear_flag(fill, LV_OBJ_FLAG_SCROLLABLE);
+    *fillOut = fill;
+
+    lv_obj_t* pct = lv_label_create(row);
+    lv_obj_set_style_text_font(pct, &font_kr_12, 0);
+    lv_obj_set_style_text_color(pct, lv_color_hex(0xE7EFE8), 0);
+    lv_label_set_text(pct, "-");
+    *pctOut = pct;
+    return row;
+}
+
+// One agent usage block: a leading brand icon spanning a 2-row column (5H over
+// 7D). Stacking the two windows vertically halves the horizontal footprint vs.
+// the old single-row layout, so Claude + Codex + the Antigravity chip all fit
+// without the rightmost item clipping past the bar's right padding.
+static lv_obj_t* makeUsageBlock(lv_obj_t* parent, const lv_image_dsc_t* icon, uint32_t iconCol,
+                                uint32_t labCol, uint32_t fillCol, lv_obj_t** icoOut,
+                                lv_obj_t** f5, lv_obj_t** p5, lv_obj_t** f7, lv_obj_t** p7) {
+    lv_obj_t* block = lv_obj_create(parent);
+    lv_obj_set_size(block, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(block, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(block, 0, 0);
+    lv_obj_set_style_pad_all(block, 0, 0);
+    lv_obj_set_style_pad_column(block, 6, 0);
+    lv_obj_clear_flag(block, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(block, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(block, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t* ic = lv_image_create(block);
+    lv_image_set_src(ic, icon);
+    lv_obj_set_style_image_recolor(ic, lv_color_hex(iconCol), 0);
+    lv_image_set_scale(ic, 256 * 26 / 64);   // 64px mask → 26px (spans both rows)
+    lv_obj_set_size(ic, 26, 26);
+    lv_image_set_inner_align(ic, LV_IMAGE_ALIGN_CENTER);
+    if (icoOut) *icoOut = ic;
+
+    lv_obj_t* col = lv_obj_create(block);
+    lv_obj_set_size(col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(col, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(col, 0, 0);
+    lv_obj_set_style_pad_all(col, 0, 0);
+    lv_obj_set_style_pad_row(col, 2, 0);
+    lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+    makeUsageRow(col, "5H", labCol, fillCol, f5, p5);
+    makeUsageRow(col, "7D", labCol, fillCol, f7, p7);
+    return block;
+}
 #endif // BOARD_IPS10
 
 void init(lv_obj_t* parent) {
@@ -712,18 +798,34 @@ void init(lv_obj_t* parent) {
         lv_obj_set_style_border_width(tb, 1, 0);
         lv_obj_set_style_border_color(tb, lv_color_hex(0x1B3F39), 0);
         lv_obj_set_style_radius(tb, 0, 0);
-        lv_obj_set_style_pad_left(tb, 18, 0); lv_obj_set_style_pad_right(tb, 28, 0);
+        lv_obj_set_style_pad_left(tb, 22, 0); lv_obj_set_style_pad_right(tb, 26, 0);
         lv_obj_set_style_pad_top(tb, 0, 0); lv_obj_set_style_pad_bottom(tb, 0, 0);
-        lv_obj_set_style_pad_column(tb, 16, 0);
+        lv_obj_set_style_pad_column(tb, 20, 0);   // generous gaps between brand · daemon · usage
         lv_obj_clear_flag(tb, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_clear_flag(tb, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_flex_flow(tb, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(tb, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-        lv_obj_t* mk = lv_image_create(tb);
+        // Brand: logo mark + wordmark kept tight together in their own container
+        // (small gap), held apart from the daemon/usage groups by the top-level
+        // pad_column. The mark's layout box is pinned to 30px — otherwise the flex
+        // row reserves the full 64px source width, leaving a gap before the wordmark.
+        lv_obj_t* brand = lv_obj_create(tb);
+        lv_obj_set_size(brand, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(brand, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(brand, 0, 0);
+        lv_obj_set_style_pad_all(brand, 0, 0);
+        lv_obj_set_style_pad_column(brand, 9, 0);
+        lv_obj_clear_flag(brand, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_flex_flow(brand, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(brand, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+        lv_obj_t* mk = lv_image_create(brand);
         lv_image_set_src(mk, &img_logo_64);
         lv_image_set_scale(mk, 256 * 30 / 64);   // 64→30px
-        lblLogo = lv_label_create(tb);
+        lv_obj_set_size(mk, 30, 30);
+        lv_image_set_inner_align(mk, LV_IMAGE_ALIGN_CENTER);
+        lblLogo = lv_label_create(brand);
         lv_obj_set_style_text_font(lblLogo, &lv_font_montserrat_16, 0);
         lv_label_set_recolor(lblLogo, true);
         lv_label_set_text(lblLogo, "#E7EFE8 Agent##3ED6E8 Deck#");   // Deck in cyan
@@ -748,72 +850,21 @@ void init(lv_obj_t* parent) {
         lv_obj_set_flex_grow(sp, 1);
         lv_obj_clear_flag(sp, LV_OBJ_FLAG_SCROLLABLE);
 
-        // Claude 5h/7d (cyan) + Codex 5h/7d (blue). A leading agent icon (octopus /
-        // codex mark) labels each pair instead of a "CX" text prefix. The Codex pair
-        // (icon + both gauges) hides when no Codex limits are present — keeps the bar
-        // compact on the common single-agent setup. Glyphs must be built first.
+        // Claude (cyan) + Codex (blue) usage as compact per-agent blocks: a brand
+        // icon beside a 2-row column (5H over 7D). The Codex block hides when no
+        // Codex limits are present. Glyphs must be built first.
         ips10InitGlyphs();
-        struct { const char* lab; lv_obj_t** fill; lv_obj_t** pct; lv_obj_t** grp;
-                 uint32_t labCol; uint32_t fillCol;
-                 const lv_image_dsc_t* icon; uint32_t iconCol; lv_obj_t** iconSlot; } G[4] = {
-            {"5H", &tb5hFill,   &tb5hPct,   nullptr,    0x5D7470, D1_OK,    &glyphOctopus, Theme::ClaudeBody, nullptr},
-            {"7D", &tb7dFill,   &tb7dPct,   nullptr,    0x5D7470, D1_OK,    nullptr,       0,                 nullptr},
-            {"5H", &tbCx5hFill, &tbCx5hPct, &tbCx5hGrp, 0x7A80E8, D1_CODEX, &glyphCodex,   Theme::CloudBody,  &tbCodexIcon},
-            {"7D", &tbCx7dFill, &tbCx7dPct, &tbCx7dGrp, 0x7A80E8, D1_CODEX, nullptr,       0,                 nullptr},
-        };
-        for (int gi = 0; gi < 4; gi++) {
-            // Leading agent icon (once per agent pair). A8 mask tinted to the brand.
-            if (G[gi].icon) {
-                lv_obj_t* ic = lv_image_create(tb);
-                lv_image_set_src(ic, G[gi].icon);
-                lv_obj_set_style_image_recolor(ic, lv_color_hex(G[gi].iconCol), 0);
-                lv_image_set_scale(ic, 256 * 22 / 64);   // 64px mask → 22px
-                // Constrain the layout box to the scaled size — without this the flex
-                // row reserves the full 64px source width, leaving a big gap before 5H.
-                lv_obj_set_size(ic, 22, 22);
-                lv_image_set_inner_align(ic, LV_IMAGE_ALIGN_CENTER);
-                if (G[gi].iconSlot) { *G[gi].iconSlot = ic; lv_obj_add_flag(ic, LV_OBJ_FLAG_HIDDEN); }
-            }
-            lv_obj_t* g = lv_obj_create(tb);
-            lv_obj_set_size(g, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-            lv_obj_set_style_bg_opa(g, LV_OPA_TRANSP, 0);
-            lv_obj_set_style_border_width(g, 0, 0);
-            lv_obj_set_style_pad_all(g, 0, 0);
-            lv_obj_set_style_pad_column(g, 8, 0);
-            lv_obj_clear_flag(g, LV_OBJ_FLAG_SCROLLABLE);
-            lv_obj_set_flex_flow(g, LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(g, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-            if (G[gi].grp) { *G[gi].grp = g; lv_obj_add_flag(g, LV_OBJ_FLAG_HIDDEN); }
-            lv_obj_t* lab = lv_label_create(g);
-            lv_obj_set_style_text_font(lab, &font_kr_12, 0);
-            lv_obj_set_style_text_color(lab, lv_color_hex(G[gi].labCol), 0);
-            lv_label_set_text(lab, G[gi].lab);
-            lv_obj_t* track = lv_obj_create(g);
-            lv_obj_set_size(track, TB_BAR_W, 6);
-            lv_obj_set_style_radius(track, 3, 0);
-            lv_obj_set_style_bg_color(track, lv_color_hex(0xFFFFFF), 0);
-            lv_obj_set_style_bg_opa(track, (lv_opa_t)45, 0);
-            lv_obj_set_style_border_width(track, 0, 0);
-            lv_obj_set_style_pad_all(track, 0, 0);
-            lv_obj_clear_flag(track, LV_OBJ_FLAG_SCROLLABLE);
-            lv_obj_t* fill = lv_obj_create(track);
-            lv_obj_set_size(fill, 0, 6);
-            lv_obj_set_pos(fill, 0, 0);
-            lv_obj_set_style_radius(fill, 3, 0);
-            lv_obj_set_style_bg_color(fill, lv_color_hex(G[gi].fillCol), 0);
-            lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_width(fill, 0, 0);
-            lv_obj_clear_flag(fill, LV_OBJ_FLAG_SCROLLABLE);
-            *G[gi].fill = fill;
-            lv_obj_t* pct = lv_label_create(g);
-            lv_obj_set_style_text_font(pct, &font_kr_12, 0);
-            lv_obj_set_style_text_color(pct, lv_color_hex(0xE7EFE8), 0);
-            lv_label_set_text(pct, "-");   // em dash placeholder
-            *G[gi].pct = pct;
-        }
+        makeUsageBlock(tb, &glyphOctopus, Theme::ClaudeBody, 0x5D7470, D1_OK,
+                       nullptr, &tb5hFill, &tb5hPct, &tb7dFill, &tb7dPct);
+        // The whole Codex block is the hide unit; keep tbCx5hGrp pointing at it so
+        // the existing update() hide logic works. tbCx7dGrp is unused now.
+        tbCx5hGrp = makeUsageBlock(tb, &glyphCodex, Theme::CloudBody, 0x7A80E8, D1_CODEX,
+                                   &tbCodexIcon, &tbCx5hFill, &tbCx5hPct, &tbCx7dFill, &tbCx7dPct);
+        lv_obj_add_flag(tbCx5hGrp, LV_OBJ_FLAG_HIDDEN);
+        tbCx7dGrp = nullptr;
 
-        // Antigravity credits chip — credits are a raw count (no max → not a gauge).
-        // Hidden until usage_update carries an antigravityStatus.
+        // Antigravity chip — brand mark + plan name (no credit count: it's a raw
+        // backend metering number). Hidden until usage_update carries a status.
         tbAgIcon = lv_image_create(tb);
         lv_image_set_src(tbAgIcon, &glyphAntigravityColor);
         lv_image_set_scale(tbAgIcon, 256 * 22 / 64);
@@ -1572,12 +1623,19 @@ void update() {
         }
 
         if (tbAg) {
-            if (agCredits >= 0.0f) {
-                char ab[96];
-                if (agPlan[0]) snprintf(ab, sizeof(ab), "#2FD66D AG# #F3D233 %s# #247CFF %dcr#",
-                                        agPlan, (int)agCredits);
-                else           snprintf(ab, sizeof(ab), "#2FD66D AG# #247CFF %dcr#", (int)agCredits);
-                lv_label_set_text(tbAg, ab);
+            // The raw credit count is backend metering with no user-facing meaning,
+            // so the chip shows just the brand mark + the subscription plan name
+            // (the icon already says "Antigravity" — no "AG" text prefix). Visible
+            // whenever a plan or any antigravity status is present.
+            bool hasAg = (agPlan[0] != '\0') || (agCredits >= 0.0f);
+            if (hasAg) {
+                if (agPlan[0]) {
+                    char ab[40];
+                    snprintf(ab, sizeof(ab), "#F3D233 %s#", agPlan);
+                    lv_label_set_text(tbAg, ab);
+                } else {
+                    lv_label_set_text(tbAg, "");
+                }
                 if (tbAgIcon) lv_obj_clear_flag(tbAgIcon, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_clear_flag(tbAg, LV_OBJ_FLAG_HIDDEN);
             } else {

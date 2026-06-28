@@ -78,6 +78,22 @@ class TimelineTaskHierarchyTest {
     }
 
     @Test
+    fun `idle_gap task boundary is hidden from display projection`() {
+        val entries = listOf(
+            entry("task_start", timestamp = 1_000, summary = "Task 1", taskId = "a"),
+            entry("chat_response", timestamp = 6_000, sessionId = "s", taskId = "a", startedAt = 2_000, endedAt = 6_000),
+            entry("task_end", timestamp = 6_500, taskId = "a", boundarySignal = "idle_gap", summary = "Idle gap · 928s"),
+        )
+
+        val display = timelineDisplayGroups(groupConsecutive(entries))
+        val types = display.map { it.entry.type }
+
+        assertFalse(types.contains("task_start"))
+        assertFalse(types.contains("task_end"))
+        assertEquals(listOf("chat_response"), types)
+    }
+
+    @Test
     fun `iconKey resolves to Task for task entries`() {
         assertEquals(TimelineIconKey.Task, timelineIconKey("task_start"))
         assertEquals(TimelineIconKey.Task, timelineIconKey("task_end"))

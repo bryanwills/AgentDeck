@@ -330,9 +330,26 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${els.join('')}</svg>`;
   }
 
-  // --- Header: wordmark + subscription/plan summary (with expiry) on the right ---
+  // --- Header: dome mark + wordmark + subscription/plan summary (with expiry) on the right ---
+  // The mark is the macOS-dashboard simplified logo (glass dome over a button
+  // deck, ported from apple/.../AgentDeckLogo.swift unit-space 0..24). E-ink is
+  // 1-bit, so we keep stroke-only geometry with bold (~2.4px) strokes and drop
+  // the faint highlight/bubbles that would not survive the threshold.
+  const logoMarkSize = 32;
+  const logoMarkScale = logoMarkSize / 24;
+  const logoMarkY = (headerH - logoMarkSize) / 2; // vertically centre the mark in the header band
   els.push(
-    `<text x="${pad}" y="38" font-family="${SANS}" font-size="28" font-weight="700" fill="${INK}">AgentDeck</text>`
+    `<g transform="translate(${pad},${logoMarkY}) scale(${logoMarkScale})" fill="none" stroke="${INK}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">` +
+      `<path d="M4.7 12.8C5.3 4.9 18.7 4.9 19.3 12.8"/>` +
+      `<path d="M6.1 11.2C8.8 12.5 15.2 12.5 17.9 11.2"/>` +
+      `<rect x="3.4" y="12.2" width="17.2" height="7.8" rx="2.2"/>` +
+      `<g fill="${INK}" stroke="none">` +
+        `<rect x="6.5" y="15.4" width="3.1" height="2" rx="1"/>` +
+        `<rect x="10.4" y="15.4" width="3.1" height="2" rx="1"/>` +
+        `<rect x="14.3" y="15.4" width="3.1" height="2" rx="1"/>` +
+      `</g>` +
+    `</g>`,
+    `<text x="${pad + logoMarkSize + 12}" y="38" font-family="${SANS}" font-size="28" font-weight="700" fill="${INK}">AgentDeck</text>`
   );
 
   const headerItems: string[] = [];

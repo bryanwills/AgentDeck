@@ -64,11 +64,13 @@ private val syntheticChatStarts = setOf(
 internal fun shouldShowTaskMarker(entry: TimelineEntry): Boolean {
     if (entry.type != "task_start" && entry.type != "task_end") return true
     if (entry.taskCategory == "_empty") return false
-    // session_end is an internal sample boundary, not a user activity. Some
-    // sessions use the handoff command and some do not, so showing it as a
-    // standalone TASK END row makes the visible timeline depend on workflow
-    // hygiene rather than actual work.
-    if (entry.type == "task_end" && entry.boundarySignal == "session_end") return false
+    // session_end and idle_gap are internal sample boundaries, not user
+    // activity. Showing them as standalone TASK END rows makes the visible
+    // timeline depend on workflow hygiene or timer expiry rather than actual
+    // work.
+    if (entry.type == "task_end" &&
+        (entry.boundarySignal == "session_end" || entry.boundarySignal == "idle_gap")
+    ) return false
     if (entry.type == "task_end") return true
     if (isMeaningfulTaskTitle(entry.summary)) return true
     return entry.taskScore != null ||

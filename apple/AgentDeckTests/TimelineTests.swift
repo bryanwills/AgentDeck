@@ -1064,6 +1064,42 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(displayed.map { $0.entry.type }, [TimelineEntryType.chatResponse])
     }
 
+    func testDashboardDisplayHidesIdleGapTaskBoundary() {
+        let entries = [
+            TimelineEntry(
+                ts: 1000,
+                type: .taskStart,
+                raw: "Task 1",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                taskId: "task-1"
+            ),
+            TimelineEntry(
+                ts: 2000,
+                type: .chatResponse,
+                raw: "Attention implementation summary",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                sessionId: "s1",
+                startedAt: 1500,
+                endedAt: 2000,
+                taskId: "task-1"
+            ),
+            TimelineEntry(
+                ts: 2500,
+                type: .taskEnd,
+                raw: "Idle gap · 928s",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                taskId: "task-1",
+                boundarySignal: .idleGap
+            ),
+        ]
+
+        let displayed = timelineDisplayGroupsForDashboard(groupConsecutive(entries))
+        XCTAssertEqual(displayed.map { $0.entry.type }, [TimelineEntryType.chatResponse])
+    }
+
     func testDashboardDisplayHidesModelCallAfterModelResponse() {
         let entries = [
             TimelineEntry(

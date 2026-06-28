@@ -1014,11 +1014,14 @@ func timelineShouldShowTaskMarker(_ group: GroupedEntry) -> Bool {
     let entry = group.entry
     guard entry.type == .taskStart || entry.type == .taskEnd else { return true }
     if entry.taskCategory == "_empty" { return false }
-    // session_end is an internal sample boundary, not a user activity. Some
-    // sessions use the handoff command and some do not, so showing it as a
-    // standalone TASK END row makes the visible timeline depend on workflow
-    // hygiene rather than actual work.
-    if entry.type == .taskEnd && entry.boundarySignal == .sessionEnd { return false }
+    // session_end and idle_gap are internal sample boundaries, not user
+    // activity. Showing them as standalone TASK END rows makes the visible
+    // timeline depend on workflow hygiene or timer expiry rather than actual
+    // work.
+    if entry.type == .taskEnd &&
+        (entry.boundarySignal == .sessionEnd || entry.boundarySignal == .idleGap) {
+        return false
+    }
     if entry.type == .taskEnd { return true }
     if timelineIsMeaningfulTaskTitle(entry.raw) { return true }
     return entry.taskScore != nil ||

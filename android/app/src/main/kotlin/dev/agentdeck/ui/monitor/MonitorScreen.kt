@@ -60,10 +60,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import dev.agentdeck.R
+import dev.agentdeck.ui.component.AgentDeckMark
 import dev.agentdeck.data.DashboardOrientation
 import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.AgentState
@@ -126,7 +124,6 @@ fun MonitorScreen(
     val currentUrl by connection.url.collectAsState()
     val lastError by connection.lastError.collectAsState()
     val isReconnecting by connection.isReconnecting.collectAsState()
-    val reconnectAttempt by connection.reconnectAttempt.collectAsState()
     val showSessionList by displayPrefs.showSessionListFlow.collectAsState(initial = true)
     val showTankStatus by displayPrefs.showTankStatusFlow.collectAsState(initial = true)
     val showDeviceDiagnostic by displayPrefs.showDeviceDiagnosticFlow.collectAsState(initial = true)
@@ -229,8 +226,6 @@ fun MonitorScreen(
                 discoveredBridges = discoveredBridges,
                 lastError = lastError,
                 isReconnecting = isReconnecting,
-                reconnectAttempt = reconnectAttempt,
-                reconnectUrl = currentUrl,
                 onConnectToBridge = { bridge ->
                     connection.connect(bridge.wsUrl())
                 },
@@ -335,8 +330,6 @@ private fun ConnectionOverlay(
     discoveredBridges: List<DiscoveredBridge>,
     lastError: String?,
     isReconnecting: Boolean,
-    reconnectAttempt: Int,
-    reconnectUrl: String?,
     onConnectToBridge: (DiscoveredBridge) -> Unit,
     onConnectLocalhost: () -> Unit,
     onStopReconnecting: () -> Unit,
@@ -359,13 +352,9 @@ private fun ConnectionOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Image(
-                painter = painterResource(R.drawable.agentdeck_icon),
-                contentDescription = "AgentDeck",
-                modifier = Modifier
-                    .size(80.dp)
-                    .clip(RoundedCornerShape(16.dp)),
-                contentScale = ContentScale.Fit,
+            AgentDeckMark(
+                size = 80.dp,
+                color = MaterialTheme.colorScheme.onSurface,
             )
 
             Text(

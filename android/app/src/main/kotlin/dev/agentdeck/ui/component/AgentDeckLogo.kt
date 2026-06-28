@@ -21,6 +21,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -48,14 +51,22 @@ private fun EinkLogo(modifier: Modifier) {
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = "AgentDeck",
-            style = MaterialTheme.typography.headlineSmall.copy(
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-        )
+        // Dome mark + wordmark, matching the macOS dashboard logo. Single-colour
+        // (onSurface) so it threshes cleanly to 1-bit on e-ink panels.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            AgentDeckMark(size = 24.dp, color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                text = "AgentDeck",
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
         Spacer(modifier = Modifier.height(3.dp))
         Box(
             modifier = Modifier
@@ -120,11 +131,13 @@ private fun TabletLogo(modifier: Modifier) {
 }
 
 /**
- * Icon-only AgentDeck mark — three offset stacked cards with a single pip
- * on the top card. Metaphor: a deck of agents. Geometry mirrors the Swift
- * `AgentDeckLogo` (which ports from `explore/logos.jsx::LogoDeck`), so all
- * surfaces — menubar popup, iOS/macOS dashboard, Android tablet HUD — show
- * the same brand glyph. Only the tint varies per context.
+ * AgentDeck product mark — the glass dome over a button deck, the same
+ * silhouette as the app icon. Geometry is a direct port of the canonical
+ * Swift `AgentDeckLogo` (unit-space 0..24: dome curve, waterline, highlight,
+ * deck base, three keys, two interior bubbles), so the menubar popup,
+ * iOS/macOS dashboard, Android tablet HUD, and e-ink headers all show the
+ * same mark. Only the tint varies per context. Replaces the older abstract
+ * stacked-card mark, which looked unrelated to the icon.
  *
  * Usage:
  *   AgentDeckMark(size = 18.dp, color = TerrariumColors.TetraNeon)
@@ -133,29 +146,70 @@ private fun TabletLogo(modifier: Modifier) {
 fun AgentDeckMark(size: Dp = 20.dp, color: Color = TerrariumColors.HUDText) {
     Canvas(modifier = Modifier.size(size)) {
         val s = this.size.minDimension / 24f  // unit-space 0..24
-        val stroke = (1.6f * s).coerceAtLeast(1.0f)
-        // Three offset cards, back → front, increasing opacity. Offsets
-        // match the JS prototype's `LogoDeck` rect positions.
-        val cards = listOf(
-            Triple(4f, 8f, 0.35f),
-            Triple(6f, 5f, 0.60f),
-            Triple(8f, 2f, 1.00f),
+
+        // Glass dome.
+        val dome = Path().apply {
+            moveTo(4.7f * s, 12.8f * s)
+            cubicTo(5.3f * s, 4.9f * s, 18.7f * s, 4.9f * s, 19.3f * s, 12.8f * s)
+        }
+        drawPath(
+            dome, color,
+            style = Stroke(
+                width = (1.55f * s).coerceAtLeast(1.0f),
+                cap = StrokeCap.Round, join = StrokeJoin.Round,
+            ),
         )
-        for ((x, y, alpha) in cards) {
+        // Waterline.
+        val water = Path().apply {
+            moveTo(6.1f * s, 11.2f * s)
+            cubicTo(8.8f * s, 12.5f * s, 15.2f * s, 12.5f * s, 17.9f * s, 11.2f * s)
+        }
+        drawPath(
+            water, color.copy(alpha = 0.58f),
+            style = Stroke(
+                width = (1.15f * s).coerceAtLeast(0.75f),
+                cap = StrokeCap.Round, join = StrokeJoin.Round,
+            ),
+        )
+        // Glass highlight.
+        val highlight = Path().apply {
+            moveTo(8.0f * s, 7.7f * s)
+            cubicTo(10.0f * s, 5.7f * s, 13.2f * s, 5.4f * s, 15.8f * s, 6.1f * s)
+        }
+        drawPath(
+            highlight, color.copy(alpha = 0.34f),
+            style = Stroke(
+                width = (0.9f * s).coerceAtLeast(0.6f),
+                cap = StrokeCap.Round, join = StrokeJoin.Round,
+            ),
+        )
+        // Button deck base.
+        drawRoundRect(
+            color = color.copy(alpha = 0.88f),
+            topLeft = Offset(3.4f * s, 12.2f * s),
+            size = Size(17.2f * s, 7.8f * s),
+            cornerRadius = CornerRadius(2.2f * s, 2.2f * s),
+            style = Stroke(
+                width = (1.55f * s).coerceAtLeast(1.0f),
+                cap = StrokeCap.Round, join = StrokeJoin.Round,
+            ),
+        )
+        // Three deck keys, centre brightest.
+        val keys = listOf(
+            Triple(6.5f, 15.4f, 0.70f),
+            Triple(10.4f, 15.4f, 0.92f),
+            Triple(14.3f, 15.4f, 0.70f),
+        )
+        for ((kx, ky, alpha) in keys) {
             drawRoundRect(
                 color = color.copy(alpha = alpha),
-                topLeft = Offset(x * s, y * s),
-                size = Size(12f * s, 14f * s),
+                topLeft = Offset(kx * s, ky * s),
+                size = Size(3.1f * s, 2.0f * s),
                 cornerRadius = CornerRadius(1.5f * s, 1.5f * s),
-                style = Stroke(width = stroke),
             )
         }
-        // Pip on the front card.
-        val pipRadius = 1.6f * s
-        drawCircle(
-            color = color,
-            radius = pipRadius,
-            center = Offset(14f * s, 9f * s),
-        )
+        // Interior bubbles.
+        drawCircle(color = color.copy(alpha = 0.62f), radius = 0.95f * s, center = Offset(9.6f * s, 9.0f * s))
+        drawCircle(color = color.copy(alpha = 0.42f), radius = 0.60f * s, center = Offset(14.8f * s, 8.2f * s))
     }
 }

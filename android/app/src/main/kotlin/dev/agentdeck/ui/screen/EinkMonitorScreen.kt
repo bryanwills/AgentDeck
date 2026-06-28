@@ -38,16 +38,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.ColorMatrix
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.agentdeck.R
@@ -61,6 +57,7 @@ import dev.agentdeck.net.DiscoveredBridge
 import dev.agentdeck.state.AgentStateHolder
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.state.TimelineStore
+import dev.agentdeck.ui.component.AgentDeckMark
 import dev.agentdeck.ui.eink.EinkAgentPanel
 import dev.agentdeck.ui.eink.EinkAttentionPanel
 import dev.agentdeck.ui.eink.EinkAquariumFrame
@@ -578,18 +575,14 @@ private fun EinkDashboardChromeBar(
     val currentOrientation by displayPrefs.orientationFlow.collectAsState(
         initial = DashboardOrientation.defaultFor(isEink = true),
     )
-    val grayscaleFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
     Row(
         modifier = modifier.padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Image(
-            painter = painterResource(R.drawable.agentdeck_icon),
-            contentDescription = "AgentDeck",
-            modifier = Modifier.size(30.dp),
-            contentScale = ContentScale.Fit,
-            colorFilter = if (einkColorEnabled) null else grayscaleFilter,
+        AgentDeckMark(
+            size = 30.dp,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         // Wordmark uses default sans (IBM Plex Sans where bundled, system sans
         // otherwise). DESIGN.md §10-3 reserves Monospace for diagnostic/data
@@ -697,9 +690,6 @@ private fun EinkNotConnectedScreen(
     onSettingsClick: () -> Unit,
     showSettingsButton: Boolean,
 ) {
-    // Grayscale filter for e-ink
-    val grayscaleFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -707,12 +697,9 @@ private fun EinkNotConnectedScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Image(
-            painter = painterResource(R.drawable.agentdeck_icon),
-            contentDescription = "AgentDeck",
-            modifier = Modifier.size(48.dp),
-            contentScale = ContentScale.Fit,
-            colorFilter = grayscaleFilter,
+        AgentDeckMark(
+            size = 48.dp,
+            color = MaterialTheme.colorScheme.onSurface,
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -846,9 +833,6 @@ private fun EinkReconnectingScreen(
     onSettingsClick: () -> Unit,
     showSettingsButton: Boolean,
 ) {
-    // Grayscale filter for e-ink
-    val grayscaleFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -856,12 +840,9 @@ private fun EinkReconnectingScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Image(
-            painter = painterResource(R.drawable.agentdeck_icon),
-            contentDescription = "AgentDeck",
-            modifier = Modifier.size(48.dp),
-            contentScale = ContentScale.Fit,
-            colorFilter = grayscaleFilter,
+        AgentDeckMark(
+            size = 48.dp,
+            color = MaterialTheme.colorScheme.onSurface,
         )
 
         Spacer(modifier = Modifier.height(8.dp))
