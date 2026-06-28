@@ -6,6 +6,7 @@
 #include "octopus.h"
 #include "cloud.h"
 #include "opencode.h"
+#include "antigravity.h"
 #include "crayfish.h"
 #include "tetra.h"
 #include "particles.h"
@@ -306,6 +307,7 @@ void init(lv_obj_t* parent) {
     Octopus::init();
     Cloud::init();
     if (MAX_OPENCODE > 0) OpenCode::init();
+    if (MAX_ANTIGRAVITY > 0) Antigravity::init();
     Crayfish::init();
     Particles::init();
     Tetra::init();
@@ -338,6 +340,8 @@ void render(float dt) {
                         isCodexAgentType(g_state.agentType);
     bool isOpenCodeAgent = hasData &&
                            strcmp(g_state.agentType, "opencode") == 0;
+    bool isAntigravityAgent = hasData &&
+                              strcmp(g_state.agentType, "antigravity") == 0;
     uint8_t octCount = hasData ? g_state.octopusCount : 0;
     // Default to 1 octopus only for claude-code agents (before sessions_list arrives)
     if (octCount == 0 && isOctopusAgent) octCount = 1;
@@ -346,6 +350,8 @@ void render(float dt) {
     if (cloudCount == 0 && isCloudAgent) cloudCount = 1;
     uint8_t opencodeCount = hasData ? g_state.opencodeCount : 0;
     if (opencodeCount == 0 && isOpenCodeAgent) opencodeCount = 1;
+    uint8_t antigravityCount = hasData ? g_state.antigravityCount : 0;
+    if (antigravityCount == 0 && isAntigravityAgent) antigravityCount = 1;
     // Crayfish is drawn only when the OpenClaw Gateway is authenticated
     // (or an error is surfaced). Reachability alone — `gatewayAvailable`
     // — used to draw a cheerful crayfish even when the shared token was
@@ -357,6 +363,7 @@ void render(float dt) {
     CreatureState octStates[MAX_OCTOPUS];
     CreatureState cloudStates[(MAX_CLOUD > 0) ? MAX_CLOUD : 1];
     CreatureState opencodeStates[(MAX_OPENCODE > 0) ? MAX_OPENCODE : 1];
+    CreatureState antigravityStates[(MAX_ANTIGRAVITY > 0) ? MAX_ANTIGRAVITY : 1];
 
     // Helper lambda to map session state string to CreatureState
     auto mapSessionState = [](const char* stateStr) -> CreatureState {
@@ -377,6 +384,7 @@ void render(float dt) {
         uint8_t octIdx = 0;
         uint8_t cloudIdx = 0;
         uint8_t ocIdx = 0;
+        uint8_t agIdx = 0;
         for (uint8_t s = 0; s < g_state.sessionCount; s++) {
             if (!g_state.sessions[s].alive) continue;
 
@@ -389,6 +397,9 @@ void render(float dt) {
             } else if (MAX_OPENCODE > 0 && strcmp(g_state.sessions[s].agentType, "opencode") == 0 && ocIdx < MAX_OPENCODE) {
                 opencodeStates[ocIdx] = mapSessionState(g_state.sessions[s].state);
                 ocIdx++;
+            } else if (MAX_ANTIGRAVITY > 0 && strcmp(g_state.sessions[s].agentType, "antigravity") == 0 && agIdx < MAX_ANTIGRAVITY) {
+                antigravityStates[agIdx] = mapSessionState(g_state.sessions[s].state);
+                agIdx++;
             }
         }
         // Fill remaining with daemon's own state
@@ -401,9 +412,12 @@ void render(float dt) {
         for (; ocIdx < MAX_OPENCODE; ocIdx++) {
             opencodeStates[ocIdx] = cState;
         }
+        for (; agIdx < MAX_ANTIGRAVITY; agIdx++) {
+            antigravityStates[agIdx] = cState;
+        }
         // Also update the "overall" cState for particles/bubbles/tetra
         // Use the most active sibling state (across octopus + cloud)
-        if (octCount > 0 || cloudCount > 0) {
+        if (octCount > 0 || cloudCount > 0 || opencodeCount > 0 || antigravityCount > 0) {
             cState = CreatureState::FLOATING;
             for (uint8_t i = 0; i < octCount && i < MAX_OCTOPUS; i++) {
                 if (octStates[i] == CreatureState::WORKING) { cState = CreatureState::WORKING; break; }
@@ -411,6 +425,16 @@ void render(float dt) {
             if (cState != CreatureState::WORKING) {
                 for (uint8_t i = 0; i < cloudCount && i < MAX_CLOUD; i++) {
                     if (cloudStates[i] == CreatureState::WORKING) { cState = CreatureState::WORKING; break; }
+                }
+            }
+            if (cState != CreatureState::WORKING) {
+                for (uint8_t i = 0; i < opencodeCount && i < MAX_OPENCODE; i++) {
+                    if (opencodeStates[i] == CreatureState::WORKING) { cState = CreatureState::WORKING; break; }
+                }
+            }
+            if (cState != CreatureState::WORKING) {
+                for (uint8_t i = 0; i < antigravityCount && i < MAX_ANTIGRAVITY; i++) {
+                    if (antigravityStates[i] == CreatureState::WORKING) { cState = CreatureState::WORKING; break; }
                 }
             }
         }
@@ -423,6 +447,9 @@ void render(float dt) {
         }
         for (uint8_t i = 0; i < MAX_OPENCODE; i++) {
             opencodeStates[i] = cState;
+        }
+        for (uint8_t i = 0; i < MAX_ANTIGRAVITY; i++) {
+            antigravityStates[i] = cState;
         }
     }
     unlockState();
@@ -504,6 +531,11 @@ void render(float dt) {
     // 7c. OpenCode creatures
     for (uint8_t i = 0; i < opencodeCount && i < MAX_OPENCODE; i++) {
         OpenCode::render(canvas_buf, canvasW, canvasH, totalTime, dt, opencodeStates[i], i, opencodeCount);
+    }
+
+    // 7d. Antigravity creatures
+    for (uint8_t i = 0; i < antigravityCount && i < MAX_ANTIGRAVITY; i++) {
+        Antigravity::render(canvas_buf, canvasW, canvasH, totalTime, dt, antigravityStates[i], i, antigravityCount);
     }
 
     // 8. Data particles (food crumbs from working agents)

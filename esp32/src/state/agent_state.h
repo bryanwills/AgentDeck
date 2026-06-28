@@ -125,12 +125,14 @@ struct DashboardState {
     uint8_t octopusCount;   // derived: claude-code sessions alive
     uint8_t cloudCount;     // derived: Codex CLI/App sessions alive
     uint8_t opencodeCount;  // derived: opencode sessions alive
+    uint8_t antigravityCount; // derived: antigravity sessions alive
     uint8_t crayfishCount;  // derived: openclaw sessions alive
     // Per-type display names (dedup-numbered). Sized to the session cap so they
     // safely cover every board's MAX_OCTOPUS/MAX_CLOUD/MAX_OPENCODE (≤8).
     char sessionNames[10][24]; // display names for octopus instances
     char cloudNames[10][24];   // display names for cloud instances
     char opencodeNames[10][24]; // display names for opencode instances
+    char antigravityNames[10][24]; // display names for antigravity instances
 
     // Crayfish state (derived from sibling)
     CrayfishState crayfishState;
@@ -220,6 +222,7 @@ struct DashboardState {
         octopusCount = 0;
         cloudCount = 0;
         opencodeCount = 0;
+        antigravityCount = 0;
         crayfishCount = 0;
         gatewayAvailable = false;
         gatewayConnected = false;
