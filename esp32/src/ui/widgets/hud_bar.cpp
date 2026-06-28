@@ -49,6 +49,7 @@ static lv_obj_t* tbCx7dFill = nullptr;
 static lv_obj_t* tbCx5hPct  = nullptr;
 static lv_obj_t* tbCx7dPct  = nullptr;
 // Antigravity credits chip ("AG pro · 1234cr") — hidden when no data.
+static lv_obj_t* tbAgIcon   = nullptr;
 static lv_obj_t* tbAg       = nullptr;
 // Leading agent icons before the gauge pairs (Codex icon hides with its gauges).
 static lv_obj_t* tbCodexIcon = nullptr;
@@ -91,8 +92,9 @@ static lv_obj_t* cellPill[MOSAIC_MAX]  = {nullptr};   // state pill chip (conten
 static lv_image_dsc_t glyphOctopus;    // Claude
 static lv_image_dsc_t glyphCrayfish;   // OpenClaw
 static lv_image_dsc_t glyphOpencode;   // OpenCode
-static lv_image_dsc_t glyphAntigravity; // Antigravity
+static lv_image_dsc_t glyphAntigravityColor; // Antigravity full-color mark
 static lv_image_dsc_t glyphCodex;      // Codex (cloud + >_ mark)
+static uint8_t glyphAntigravityColorData[64 * 64 * 3]; // RGB565 plane + A8 plane, IPS10-only static reuse.
 static bool glyphsReady = false;
 static void ips10BuildGlyph(lv_image_dsc_t& g, const uint8_t* data, int w, int h) {
     g.header.magic  = LV_IMAGE_HEADER_MAGIC;
@@ -104,6 +106,45 @@ static void ips10BuildGlyph(lv_image_dsc_t& g, const uint8_t* data, int w, int h
     g.data_size     = (uint32_t)(w * h);
     g.data          = data;
 }
+static uint32_t ips10AntigravityGradientColor(int x, int y, int w, int h) {
+    const int nx = (w > 1) ? (x * 255 / (w - 1)) : 0;
+    const int ny = (h > 1) ? (y * 255 / (h - 1)) : 0;
+    if (ny < 76) {
+        if (nx < 112) return Theme::AntigravityYellow;
+        return (nx > 174) ? Theme::AntigravityRed : Theme::AntigravityOrange;
+    }
+    if (ny > 184) {
+        return (nx < 112) ? Theme::AntigravityCyan : Theme::AntigravityBlue;
+    }
+    if (nx < 82) return Theme::AntigravityGreen;
+    if (nx > 174) return (ny < 148) ? Theme::AntigravityRed : Theme::AntigravityPurple;
+    return Theme::AntigravityCyan;
+}
+static void ips10BuildAntigravityColorGlyph() {
+    using namespace CreatureGlyphs;
+    const int w = ANTIGRAVITY_W;
+    const int h = ANTIGRAVITY_H;
+    uint8_t* rgb = glyphAntigravityColorData;
+    uint8_t* a8 = glyphAntigravityColorData + (w * h * 2);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            const int i = y * w + x;
+            const uint32_t c = ips10AntigravityGradientColor(x, y, w, h);
+            const uint16_t c565 = RGB565((uint8_t)(c >> 16), (uint8_t)(c >> 8), (uint8_t)c);
+            rgb[i * 2 + 0] = (uint8_t)(c565 & 0xff);
+            rgb[i * 2 + 1] = (uint8_t)(c565 >> 8);
+            a8[i] = ANTIGRAVITY_A8[i];
+        }
+    }
+    glyphAntigravityColor.header.magic  = LV_IMAGE_HEADER_MAGIC;
+    glyphAntigravityColor.header.cf     = LV_COLOR_FORMAT_RGB565A8;
+    glyphAntigravityColor.header.flags  = 0;
+    glyphAntigravityColor.header.w      = w;
+    glyphAntigravityColor.header.h      = h;
+    glyphAntigravityColor.header.stride = (uint32_t)(w * 2);
+    glyphAntigravityColor.data_size     = (uint32_t)(w * h * 3);
+    glyphAntigravityColor.data          = glyphAntigravityColorData;
+}
 static void ips10InitGlyphs() {
     if (glyphsReady) return;
     using namespace CreatureGlyphs;
@@ -112,16 +153,19 @@ static void ips10InitGlyphs() {
     // the terrarium pairs with procedural claws — the body alone reads as a shapeless blob.
     ips10BuildGlyph(glyphCrayfish, OPENCLAW_MARK_A8, OPENCLAW_MARK_W, OPENCLAW_MARK_H);
     ips10BuildGlyph(glyphOpencode, OPENCODE_A8,      OPENCODE_W,      OPENCODE_H);
-    ips10BuildGlyph(glyphAntigravity, ANTIGRAVITY_A8, ANTIGRAVITY_W,  ANTIGRAVITY_H);
+    ips10BuildAntigravityColorGlyph();
     ips10BuildGlyph(glyphCodex,    CODEX_A8,         CODEX_W,         CODEX_H);
     glyphsReady = true;
+}
+static bool ips10IsAntigravityAgent(const char* agentType) {
+    return agentType && strstr(agentType, "antigravity") != nullptr;
 }
 // Map an agent type to its glyph descriptor (null → no glyph, e.g. Codex).
 static const lv_image_dsc_t* ips10AgentGlyph(const char* agentType) {
     if (!agentType) return nullptr;
     if (strstr(agentType, "openclaw"))  return &glyphCrayfish;
     if (strstr(agentType, "opencode"))  return &glyphOpencode;
-    if (strstr(agentType, "antigravity")) return &glyphAntigravity;
+    if (strstr(agentType, "antigravity")) return &glyphAntigravityColor;
     if (strstr(agentType, "claude"))    return &glyphOctopus;
     return nullptr;   // codex / unknown → dot fallback in the name line
 }
@@ -223,7 +267,7 @@ static uint32_t ips10AgentColor(const char* agentType) {
     if (strstr(agentType, "openclaw") != nullptr) return Theme::CrayfishShell;
     if (strstr(agentType, "codex") != nullptr) return Theme::CloudBody;
     if (strstr(agentType, "opencode") != nullptr) return Theme::OpenCodeOuter;
-    if (strstr(agentType, "antigravity") != nullptr) return Theme::AntigravityMark;
+    if (strstr(agentType, "antigravity") != nullptr) return Theme::AntigravityCyan;
     if (strstr(agentType, "claude") != nullptr) return Theme::ClaudeBody;
     return Theme::HUDDim;
 }
@@ -328,7 +372,7 @@ static uint32_t agentDotColor(const char* agentType) {
         return Theme::OpenCodeOuter;
     }
     if (agentType && strstr(agentType, "antigravity") != nullptr) {
-        return Theme::AntigravityMark;
+        return Theme::AntigravityCyan;
     }
     if (agentType && strstr(agentType, "claude-code") != nullptr) {
         return Theme::ClaudeBody;
@@ -770,9 +814,17 @@ void init(lv_obj_t* parent) {
 
         // Antigravity credits chip — credits are a raw count (no max → not a gauge).
         // Hidden until usage_update carries an antigravityStatus.
+        tbAgIcon = lv_image_create(tb);
+        lv_image_set_src(tbAgIcon, &glyphAntigravityColor);
+        lv_image_set_scale(tbAgIcon, 256 * 22 / 64);
+        lv_obj_set_size(tbAgIcon, 22, 22);
+        lv_image_set_inner_align(tbAgIcon, LV_IMAGE_ALIGN_CENTER);
+        lv_obj_add_flag(tbAgIcon, LV_OBJ_FLAG_HIDDEN);
+
         tbAg = lv_label_create(tb);
         lv_obj_set_style_text_font(tbAg, &font_kr_12, 0);
-        lv_obj_set_style_text_color(tbAg, lv_color_hex(0xD2D6DC), 0);  // antigravity light grey
+        lv_obj_set_style_text_color(tbAg, lv_color_hex(Theme::AntigravityCyan), 0);
+        lv_label_set_recolor(tbAg, true);
         lv_label_set_text(tbAg, "");
         lv_obj_add_flag(tbAg, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1521,12 +1573,15 @@ void update() {
 
         if (tbAg) {
             if (agCredits >= 0.0f) {
-                char ab[40];
-                if (agPlan[0]) snprintf(ab, sizeof(ab), "AG %s " LV_SYMBOL_BULLET " %dcr", agPlan, (int)agCredits);
-                else           snprintf(ab, sizeof(ab), "AG %dcr", (int)agCredits);
+                char ab[96];
+                if (agPlan[0]) snprintf(ab, sizeof(ab), "#2FD66D AG# #F3D233 %s# #247CFF %dcr#",
+                                        agPlan, (int)agCredits);
+                else           snprintf(ab, sizeof(ab), "#2FD66D AG# #247CFF %dcr#", (int)agCredits);
                 lv_label_set_text(tbAg, ab);
+                if (tbAgIcon) lv_obj_clear_flag(tbAgIcon, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_clear_flag(tbAg, LV_OBJ_FLAG_HIDDEN);
             } else {
+                if (tbAgIcon) lv_obj_add_flag(tbAgIcon, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(tbAg, LV_OBJ_FLAG_HIDDEN);
             }
         }
@@ -1661,11 +1716,17 @@ void update() {
             const lv_image_dsc_t* gdsc = ips10AgentGlyph(mc[i].agent);
             int glyphSz = 0;
             if (gdsc && pw >= 92 && ph >= 52) {
+                const bool agGlyph = ips10IsAntigravityAgent(mc[i].agent);
                 glyphSz = (pw < ph ? pw : ph) * 42 / 100;
                 if (glyphSz < 32) glyphSz = 32;
                 if (glyphSz > 60) glyphSz = 60;
                 lv_image_set_src(cellGlyph[i], gdsc);
-                lv_obj_set_style_image_recolor(cellGlyph[i], lv_color_hex(mc[i].accent), 0);
+                if (agGlyph) {
+                    lv_obj_set_style_image_recolor_opa(cellGlyph[i], LV_OPA_TRANSP, 0);
+                } else {
+                    lv_obj_set_style_image_recolor_opa(cellGlyph[i], LV_OPA_COVER, 0);
+                    lv_obj_set_style_image_recolor(cellGlyph[i], lv_color_hex(mc[i].accent), 0);
+                }
                 lv_image_set_scale(cellGlyph[i], 256 * glyphSz / 64);   // 64px mask → glyphSz px
                 lv_obj_align(cellGlyph[i], LV_ALIGN_TOP_RIGHT, -8, 6);
                 lv_obj_clear_flag(cellGlyph[i], LV_OBJ_FLAG_HIDDEN);

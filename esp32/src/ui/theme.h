@@ -45,6 +45,13 @@ constexpr uint32_t OpenCodePulse = 0xCFCECD;
 
 // --- Antigravity (peak/arc mark) ---
 constexpr uint32_t AntigravityMark = 0xD2D6DC;  // canonical brand gray (agent-logos.ts)
+constexpr uint32_t AntigravityCyan = 0x28BDF3;
+constexpr uint32_t AntigravityGreen = 0x2FD66D;
+constexpr uint32_t AntigravityYellow = 0xF3D233;
+constexpr uint32_t AntigravityOrange = 0xFF8A18;
+constexpr uint32_t AntigravityRed = 0xFF4F47;
+constexpr uint32_t AntigravityPurple = 0xA85CC8;
+constexpr uint32_t AntigravityBlue = 0x247CFF;
 
 // --- Crayfish (OpenClaw) ---
 constexpr uint32_t CrayfishShell     = 0xFF4D4D;

@@ -98,6 +98,7 @@ import {
 
 // ===== agent-logos =====
 import {
+  agentLogoIcon,
   agentLogoWatermark,
   CLAUDE_LOGO_PATH,
 } from '../renderers/agent-logos.js';
@@ -830,6 +831,14 @@ describe('agent-logos snapshots', () => {
 
   it('openclaw watermark', () => {
     expect(agentLogoWatermark('openclaw', '#ffffff', 0.08)).toMatchSnapshot();
+  });
+
+  it('antigravity icon uses the full-color mark', () => {
+    const svg = agentLogoIcon('antigravity', 48, 1);
+    expect(svg).toContain('antigravity_rainbow');
+    expect(svg).toContain('linearGradient');
+    expect(svg).toContain('#FF8A18');
+    expect(svg).toContain('#247CFF');
   });
 
   it('CLAUDE_LOGO_PATH is defined', () => {

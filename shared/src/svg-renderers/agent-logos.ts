@@ -54,6 +54,46 @@ function officialPathIcon(path: string, fill: string, size: number, opacity: num
   return `<g transform="translate(${cx},${cy}) scale(${s.toFixed(3)}) translate(-12,-12)" opacity="${opacity}"><path d="${path}" fill="${fill}" fill-rule="evenodd" clip-rule="evenodd"/></g>`;
 }
 
+function gradientPathIcon(path: string, size: number, opacity: number, cx: number, cy: number): string {
+  const s = size / 24;
+  const idSuffix = `${Math.round(size)}-${Math.round(cx * 10)}-${Math.round(cy * 10)}`.replace(/-/g, '_');
+  const gradId = `antigravity_rainbow_${idSuffix}`;
+  const warmId = `antigravity_warm_${idSuffix}`;
+  const greenId = `antigravity_green_${idSuffix}`;
+  const purpleId = `antigravity_purple_${idSuffix}`;
+  return [
+    `<g transform="translate(${cx},${cy}) scale(${s.toFixed(3)}) translate(-12,-12)" opacity="${opacity}">`,
+    `<defs>`,
+    `<linearGradient id="${gradId}" x1="12" y1="1" x2="12" y2="23" gradientUnits="userSpaceOnUse">`,
+    `<stop offset="0%" stop-color="#FF8A18"/>`,
+    `<stop offset="24%" stop-color="#FF4F47"/>`,
+    `<stop offset="52%" stop-color="#28BDF3"/>`,
+    `<stop offset="100%" stop-color="#247CFF"/>`,
+    `</linearGradient>`,
+    `<radialGradient id="${warmId}" cx="9" cy="2" r="9" gradientUnits="userSpaceOnUse">`,
+    `<stop offset="0%" stop-color="#F3D233"/>`,
+    `<stop offset="58%" stop-color="#FF8A18" stop-opacity="0.74"/>`,
+    `<stop offset="100%" stop-color="#FF8A18" stop-opacity="0"/>`,
+    `</radialGradient>`,
+    `<radialGradient id="${greenId}" cx="4" cy="10" r="8" gradientUnits="userSpaceOnUse">`,
+    `<stop offset="0%" stop-color="#2FD66D"/>`,
+    `<stop offset="72%" stop-color="#2FD66D" stop-opacity="0.58"/>`,
+    `<stop offset="100%" stop-color="#2FD66D" stop-opacity="0"/>`,
+    `</radialGradient>`,
+    `<radialGradient id="${purpleId}" cx="20" cy="9" r="9" gradientUnits="userSpaceOnUse">`,
+    `<stop offset="0%" stop-color="#A85CC8"/>`,
+    `<stop offset="70%" stop-color="#A85CC8" stop-opacity="0.58"/>`,
+    `<stop offset="100%" stop-color="#A85CC8" stop-opacity="0"/>`,
+    `</radialGradient>`,
+    `</defs>`,
+    `<path d="${path}" fill="url(#${gradId})" fill-rule="evenodd" clip-rule="evenodd"/>`,
+    `<path d="${path}" fill="url(#${warmId})" fill-rule="evenodd" clip-rule="evenodd"/>`,
+    `<path d="${path}" fill="url(#${greenId})" fill-rule="evenodd" clip-rule="evenodd"/>`,
+    `<path d="${path}" fill="url(#${purpleId})" fill-rule="evenodd" clip-rule="evenodd"/>`,
+    `</g>`,
+  ].join('');
+}
+
 function robotCreatureIcon(fill: string, size: number, opacity: number, cx: number, cy: number): string {
   return officialPathIcon(ROBOT_CREATURE_PATH, fill, size, opacity, cx, cy);
 }
@@ -141,7 +181,7 @@ function openCodeCreatureIcon(size: number, opacity: number, cx: number, cy: num
 }
 
 function antigravityCreatureIcon(size: number, opacity: number, cx: number, cy: number): string {
-  return officialPathIcon(ANTIGRAVITY_PATH, '#D2D6DC', size * 0.76, opacity, cx, cy);
+  return gradientPathIcon(ANTIGRAVITY_PATH, size * 0.76, opacity, cx, cy);
 }
 
 // ===== 1-bit monochrome glyph (e-ink / TRMNL) =====
