@@ -254,97 +254,12 @@ program
     });
   });
 
-// ===== Worktree compare (`agentdeck wt`) =====
-// Runs several coding agents on the same prompt in isolated git worktrees laid
-// out as a tmux grid, then lets you review and merge the best. tmux/worktree
-// orchestration is a shell domain, so we exec the bundled bash orchestrator
-// rather than reimplement it in TS. The operational verbs (send/pick/fork/...)
-// are hidden — they are the targets of the in-grid tmux keybindings, which call
-// back via COCKPIT_INVOKE='agentdeck wt <verb>'. Requires tmux + workmux.
-
-async function cockpitEnv(): Promise<NodeJS.ProcessEnv> {
-  const env: NodeJS.ProcessEnv = { ...process.env, COCKPIT_INVOKE: 'agentdeck wt' };
-  try {
-    const { loadCockpitAgents } = await import('./cockpit-settings.js');
-    env.COCKPIT_AGENTS = loadCockpitAgents().join(' ');
-  } catch { /* script has its own default */ }
-  try {
-    const { resolveFoundationModelsHelper } = await import('./foundation-models-helper.js');
-    const fm = resolveFoundationModelsHelper();
-    if (fm.available && fm.path) env.COCKPIT_FM_HELPER = fm.path;
-  } catch { /* optional — script falls back to mlx/ascii */ }
-  try {
-    const { readDaemonInfo } = await import('./session-registry.js');
-    const info = readDaemonInfo();
-    const port = info?.httpPort ?? info?.port;
-    if (port) env.COCKPIT_DAEMON_PORT = String(port);
-  } catch { /* optional — script falls back to daemon.json / 9120 */ }
-  return env;
-}
-
-async function spawnCockpit(subcmd: string, args: string[]): Promise<number> {
-  const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'cockpit.sh');
-  const env = await cockpitEnv();
-  const child = spawn('bash', [script, subcmd, ...args], { stdio: 'inherit', env });
-  return new Promise<number>((resolve) => {
-    child.on('exit', (code) => resolve(code ?? 0));
-    child.on('error', (err) => { console.error(`wt: ${String(err)}`); resolve(1); });
-  });
-}
-
-const wt = program
-  .command('wt')
-  .description('Worktree compare: run several coding agents on one prompt in a tmux grid, then review & merge the best (needs tmux + workmux)');
-
-wt
-  .command('start')
-  .description('Start a new round: broadcast a prompt to your agent set in a fresh compare grid')
-  .argument('<prompt>', 'task prompt sent to every agent')
-  .argument('[name]', 'optional worktree/branch base name (auto-named via on-device AI if omitted)')
-  .action(async (prompt: string, name?: string) => {
-    await spawnCockpit('setup', []); // install tmux keybindings (idempotent)
-    process.exit(await spawnCockpit('broadcast', name ? [prompt, name] : [prompt]));
-  });
-
-wt
-  .command('agents')
-  .description('Show or set the agent set used by `wt start` (default: claude codex opencode)')
-  .argument('[agents...]', 'agent names to set; omit to show current')
-  .action(async (agents: string[]) => {
-    const { loadCockpitAgents, saveCockpitAgents } = await import('./cockpit-settings.js');
-    if (!agents || agents.length === 0) {
-      log(loadCockpitAgents().join(' '));
-    } else {
-      saveCockpitAgents(agents);
-      log(`wt agents: ${agents.join(' ')}`);
-    }
-  });
-
-wt
-  .command('abandon')
-  .description('Discard the current grid and its worktrees without merging (review-only round)')
-  .action(async () => { process.exit(await spawnCockpit('abandon', [])); });
-
-wt
-  .command('clean')
-  .alias('clear')
-  .description('Remove ALL compare worktrees and close grid windows')
-  .action(async () => { process.exit(await spawnCockpit('clean', [])); });
-
-wt
-  .command('list')
-  .description('List active compare worktrees')
-  .action(async () => { process.exit(await spawnCockpit('list', [])); });
-
-// Hidden verbs — in-grid keybinding / automation targets, not typed by hand.
-for (const verb of ['send', 'pick', 'fork', 'drop', 'grid', 'score', 'setup', 'setup-agy']) {
-  wt
-    .command(verb, { hidden: true })
-    .allowUnknownOption(true)
-    .allowExcessArguments(true)
-    .argument('[args...]', 'arguments forwarded to the worktree orchestrator')
-    .action(async (args: string[]) => { process.exit(await spawnCockpit(verb, args)); });
-}
+// The worktree-compare feature ("cockpit") was extracted into its own
+// standalone tool, Worktree Cockpit (`wtcp`):
+// https://github.com/puritysb/worktree-cockpit . It no longer ships with
+// AgentDeck. AgentDeck still exposes
+// the on-device Apple Intelligence helper via the daemon `/generate` endpoint,
+// which wtcp can optionally use for branch naming.
 
 // ===== Daemon commands =====
 
@@ -1475,10 +1390,9 @@ program
     await startDashboard(opts);
   });
 
-// Note: the legacy hidden top-level `start` (daemon foreground alias) was
-// removed so `agentdeck start` now starts a cockpit compare round. The daemon
-// is started via `agentdeck daemon start` (what the LaunchAgent/install paths
-// already use — see cli.ts ~368/413).
+// Note: there is no top-level `agentdeck start`. The daemon is started via
+// `agentdeck daemon start` (what the LaunchAgent/install paths already use —
+// see cli.ts ~368/413).
 
 // ===== Default command (no args) =====
 

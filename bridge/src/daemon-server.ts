@@ -678,7 +678,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           if (mapped === 'session_start') {
             // Claude hooks carry `cwd` (the worktree dir), not project_name/path —
             // capture it so APME runs are attributable to a specific worktree
-            // (e.g. cockpit grid panes). Without this, project_path stays NULL and
+            // (e.g. worktree grid panes). Without this, project_path stays NULL and
             // per-worktree scorecards/overlays can't map a run to its branch.
             const hookCwd = (typeof json.cwd === 'string' ? json.cwd
               : (typeof json.project_path === 'string' ? json.project_path : '')) || '';
@@ -787,7 +787,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // On-device Apple Intelligence (FoundationModels) text generation via the
     // daemon-managed *persistent* helper. Keeping it warm in the daemon avoids
     // the ~7s per-process cold start callers would otherwise pay each time
-    // (e.g. cockpit branch naming). localhost only; lazily spawns the helper.
+    // (e.g. wtcp branch naming). localhost only; lazily spawns the helper.
     if (req.method === 'POST' && pathname === '/generate') {
       let body = '';
       req.on('data', (chunk) => { body += chunk; if (body.length > 16384) req.destroy(); });
