@@ -213,9 +213,21 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
         if should_exit():
             stop.set()
             break
+        link_lost = asyncio.Event()
+
+        def on_disconnect(_client):
+            # Fired by bleak when the GATT link drops (e.g. the Timebox is powered
+            # off). A stateful BLE panel driven by write-without-response means our
+            # writes can silently "succeed" over a dead link, so this callback — not
+            # a write error — is the authoritative "reconnect now" signal. Without it
+            # the inner loop would spin forever on a dead link and the outer reconnect
+            # path (below) would never run.
+            print("BLE peripheral disconnected — will reconnect.", file=sys.stderr)
+            loop.call_soon_threadsafe(link_lost.set)
+
         try:
             print(f"Connecting BLE {address}...")
-            async with BleakClient(address, timeout=15.0) as client:
+            async with BleakClient(address, timeout=15.0, disconnected_callback=on_disconnect) as client:
                 print(f"BLE connected (MTU={client.mtu_size})")
 
                 last_key = ""
@@ -234,6 +246,14 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                 while not stop.is_set():
                     if should_exit():
                         stop.set()
+                        break
+                    # 0. The link dropped (peripheral powered off / out of range):
+                    #    leave the `async with` so the outer loop reconnects by
+                    #    address (macOS bleak addresses are stable UUIDs). Checked
+                    #    every iteration because write-without-response never errors
+                    #    on a dead link — only this flag / is_connected reveals it.
+                    if link_lost.is_set() or not client.is_connected:
+                        print("BLE link lost — reconnecting.", file=sys.stderr)
                         break
                     # 1. Apply host display sleep/wake. The daemon exposes the same
                     #    display_state Pixoo/iDotMatrix/ESP32 receive; older session-
@@ -261,6 +281,8 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                                 last_bridge_ok = time.monotonic()
                             except Exception as e:
                                 print(f"Dim-frame send error: {e}", file=sys.stderr)
+                                if link_lost.is_set() or not client.is_connected:
+                                    break
                         if once:
                             return
                         try:
@@ -277,6 +299,12 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                         last_bridge_ok = time.monotonic()
                     except Exception as e:
                         print(f"Frame fetch/send error: {e}", file=sys.stderr)
+                        # A write error after the link dropped must escalate to a
+                        # reconnect; a transient HTTP fetch error (bridge blip) must
+                        # not — keep streaming and let should_exit() handle a truly
+                        # gone bridge.
+                        if link_lost.is_set() or not client.is_connected:
+                            break
                     if once:
                         return
                     try:

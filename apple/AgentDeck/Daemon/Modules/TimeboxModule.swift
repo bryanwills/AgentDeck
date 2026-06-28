@@ -62,7 +62,12 @@ actor TimeboxModule: DeviceModule {
     private var consecutiveFailures = 0
     private var backoffUntil: Date?
     private let backoffInitialSec: TimeInterval = 5
-    private let backoffMaxSec: TimeInterval = 120
+    // Capped low so a power-cycled Timebox is re-acquired within ~tens of seconds.
+    // A successful frame resets consecutiveFailures (recordSuccess), so a clean
+    // disconnect restarts the backoff at backoffInitialSec; the cap only bounds the
+    // case where the device stays off/out-of-range — there's no value in waiting
+    // minutes, since CoreBluetooth gives no async reappear signal during the gap.
+    private let backoffMaxSec: TimeInterval = 15
 
     private var renderTask: Task<Void, Never>?
     private var settingsReloadTask: Task<Void, Never>?
