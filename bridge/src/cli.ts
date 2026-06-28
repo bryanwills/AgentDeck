@@ -254,15 +254,16 @@ program
     });
   });
 
-// ===== Cockpit (parallel-agent compare over workmux + tmux) =====
-// tmux/worktree orchestration is a shell domain, so we exec the bundled bash
-// orchestrator rather than reimplement it in TS. Only `start` and `agents` are
-// user-facing; the operational verbs (send/pick/fork/...) are hidden — they
-// exist for the tmux keybindings, which call back via COCKPIT_INVOKE='agentdeck
-// <verb>'. So users only ever type `agentdeck start`. Requires tmux + workmux.
+// ===== Worktree compare (`agentdeck wt`) =====
+// Runs several coding agents on the same prompt in isolated git worktrees laid
+// out as a tmux grid, then lets you review and merge the best. tmux/worktree
+// orchestration is a shell domain, so we exec the bundled bash orchestrator
+// rather than reimplement it in TS. The operational verbs (send/pick/fork/...)
+// are hidden — they are the targets of the in-grid tmux keybindings, which call
+// back via COCKPIT_INVOKE='agentdeck wt <verb>'. Requires tmux + workmux.
 
 async function cockpitEnv(): Promise<NodeJS.ProcessEnv> {
-  const env: NodeJS.ProcessEnv = { ...process.env, COCKPIT_INVOKE: 'agentdeck' };
+  const env: NodeJS.ProcessEnv = { ...process.env, COCKPIT_INVOKE: 'agentdeck wt' };
   try {
     const { loadCockpitAgents } = await import('./cockpit-settings.js');
     env.COCKPIT_AGENTS = loadCockpitAgents().join(' ');
@@ -287,23 +288,27 @@ async function spawnCockpit(subcmd: string, args: string[]): Promise<number> {
   const child = spawn('bash', [script, subcmd, ...args], { stdio: 'inherit', env });
   return new Promise<number>((resolve) => {
     child.on('exit', (code) => resolve(code ?? 0));
-    child.on('error', (err) => { console.error(`cockpit: ${String(err)}`); resolve(1); });
+    child.on('error', (err) => { console.error(`wt: ${String(err)}`); resolve(1); });
   });
 }
 
-program
+const wt = program
+  .command('wt')
+  .description('Worktree compare: run several coding agents on one prompt in a tmux grid, then review & merge the best (needs tmux + workmux)');
+
+wt
   .command('start')
-  .description('Broadcast a prompt to your agent set in a parallel tmux compare grid (requires tmux + workmux)')
+  .description('Start a new round: broadcast a prompt to your agent set in a fresh compare grid')
   .argument('<prompt>', 'task prompt sent to every agent')
-  .argument('[name]', 'optional worktree/branch base name (auto-named if omitted)')
+  .argument('[name]', 'optional worktree/branch base name (auto-named via on-device AI if omitted)')
   .action(async (prompt: string, name?: string) => {
     await spawnCockpit('setup', []); // install tmux keybindings (idempotent)
     process.exit(await spawnCockpit('broadcast', name ? [prompt, name] : [prompt]));
   });
 
-program
+wt
   .command('agents')
-  .description('Show or set the agent set `agentdeck start` compares (default: claude codex opencode)')
+  .description('Show or set the agent set used by `wt start` (default: claude codex opencode)')
   .argument('[agents...]', 'agent names to set; omit to show current')
   .action(async (agents: string[]) => {
     const { loadCockpitAgents, saveCockpitAgents } = await import('./cockpit-settings.js');
@@ -311,17 +316,33 @@ program
       log(loadCockpitAgents().join(' '));
     } else {
       saveCockpitAgents(agents);
-      log(`cockpit agents: ${agents.join(' ')}`);
+      log(`wt agents: ${agents.join(' ')}`);
     }
   });
 
-// Hidden verbs — keybinding/automation targets, not meant to be typed by hand.
-for (const verb of ['send', 'pick', 'fork', 'drop', 'abandon', 'grid', 'score', 'setup', 'setup-agy', 'clean', 'list']) {
-  program
+wt
+  .command('abandon')
+  .description('Discard the current grid and its worktrees without merging (review-only round)')
+  .action(async () => { process.exit(await spawnCockpit('abandon', [])); });
+
+wt
+  .command('clean')
+  .alias('clear')
+  .description('Remove ALL compare worktrees and close grid windows')
+  .action(async () => { process.exit(await spawnCockpit('clean', [])); });
+
+wt
+  .command('list')
+  .description('List active compare worktrees')
+  .action(async () => { process.exit(await spawnCockpit('list', [])); });
+
+// Hidden verbs — in-grid keybinding / automation targets, not typed by hand.
+for (const verb of ['send', 'pick', 'fork', 'drop', 'grid', 'score', 'setup', 'setup-agy']) {
+  wt
     .command(verb, { hidden: true })
     .allowUnknownOption(true)
     .allowExcessArguments(true)
-    .argument('[args...]', 'arguments forwarded to cockpit')
+    .argument('[args...]', 'arguments forwarded to the worktree orchestrator')
     .action(async (args: string[]) => { process.exit(await spawnCockpit(verb, args)); });
 }
 

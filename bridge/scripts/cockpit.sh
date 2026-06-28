@@ -1,45 +1,49 @@
 #!/usr/bin/env bash
-# cockpit — 병렬 에이전트 비교용 얇은 컨트롤러 (workmux + tmux + git).
-# 실행: `cockpit <cmd>` (PATH 심링크) 또는 `agentdeck cockpit <cmd>`. 별칭은 () 안.
+# agentdeck wt — worktree compare: run several coding agents on one prompt in an
+# isolated tmux grid, then review and merge the best (workmux + tmux + git).
+# Invoke as `agentdeck wt <cmd>`. Short aliases shown in ().
 #
-#   cockpit broadcast|b "<프롬프트>" [task]  N개 에이전트 동시 발사 + 상단 그리드 + 하단 커맨드 바
-#   cockpit send|s "<텍스트>"               그리드 전체에 후속 지시 (tmux send-keys 직접 전송)
-#   cockpit pick|p                          포커스 패널=승자 → (자동커밋) main 머지 + 나머지 정리
-#   cockpit fork|f "<프롬프트>"             포커스 패널의 WIP 기준 새 비교 라운드 분기 (머지 없음)
-#   cockpit drop|x                          포커스 패널 하나만 제거 → 그리드 재정렬(생존 패널 확대)
-#   cockpit abandon|a                       현재 그리드 폐기 (eval 전용: 머지 없이 학습만)
-#   cockpit score|r                         패널 보더에 ★APME점수 오버레이 (diff 리뷰는 workmux dashboard)
-#   cockpit grid|g                          활성 그리드 창으로 점프 (overlay 대용)
-#   cockpit setup                           tmux 키바인딩 설치 (prefix+S/P/F/X/G/R)
-#   cockpit setup-agy                       agy(Antigravity) 를 비교군에 편입
-#   cockpit list|ls | clean                 점검 / 그리드+전체 워크트리 정리
+#   wt start|b "<prompt>" [name]   Broadcast a prompt to every agent: a grid on top + command bar below
+#   wt send|s "<text>"             Send a follow-up instruction to every agent in the grid
+#   wt pick|p                      Focused pane = winner -> (auto-commit) merge to main + clean up the rest
+#   wt fork|f "<prompt>"           Branch a new round from the focused pane's WIP (no merge to main)
+#   wt drop|x                      Remove just the focused pane; the grid re-tiles (survivors grow)
+#   wt abandon|a                   Discard the current grid without merging (review-only round)
+#   wt score|r                     Overlay ★ APME score on each pane border (use workmux dashboard for diffs)
+#   wt grid|g                      Jump to the active grid window
+#   wt agents [names...]           (CLI) Show or set the agent set compared by `wt start`
+#   wt list|ls | clean|clear       List worktrees / remove all compare worktrees + grid windows
 #
-# 비교 대상: export COCKPIT_AGENTS="claude codex opencode"  (기본). agy 는 setup-agy 선행.
+# Agent set: managed via `agentdeck wt agents`; default claude codex opencode.
+# Most operations are in-grid keybindings (prefix + S/P/F/X/G/R), so the only
+# command you usually type is `agentdeck wt start "..."`.
 set -euo pipefail
 
 : "${COCKPIT_AGENTS:=claude codex opencode}"
-: "${COCKPIT_SENDKEYS_AGENTS:=agy}"   # workmux 가 프롬프트 못 넣는 비빌트인 → cockpit send-keys 로 직접
-: "${COCKPIT_SEND_DELAY:=0.4}"        # paste 후 Enter 사이 딜레이 (codex 제출 race 방지)
-WIN_PREFIX="cockpit"
+: "${COCKPIT_SENDKEYS_AGENTS:=agy}"   # non-builtin agents workmux can't prompt-inject -> send via send-keys
+: "${COCKPIT_SEND_DELAY:=0.4}"        # delay between paste and Enter (avoids codex submit race)
+WIN_PREFIX="wt"
 BAR_HEIGHT=6
 APME_DB="$HOME/.agentdeck/apme.sqlite"
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-# 키바인딩이 호출할 실행 경로. `agentdeck cockpit` 로 실행되면 그쪽이 COCKPIT_INVOKE 를 줌.
+# Path the keybindings call back through. When run via `agentdeck wt`, the CLI
+# sets COCKPIT_INVOKE='agentdeck wt'; standalone falls back to this script path.
 INVOKE="${COCKPIT_INVOKE:-$SELF}"
 
-die(){ echo "cockpit: $*" >&2; exit 1; }
-need_tmux(){ [ -n "${TMUX:-}" ] || die "tmux 세션 안에서 실행하세요"; }
-need_repo(){ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "git 저장소 안에서 실행하세요"; }
+die(){ echo "wt: $*" >&2; exit 1; }
+need_tmux(){ [ -n "${TMUX:-}" ] || die "run inside a tmux session"; }
+need_repo(){ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "run inside a git repository"; }
 goto_root(){ local r; r=$(tmux show-options -wqv @cockpit_root 2>/dev/null || true); [ -n "$r" ] && cd "$r" || true; }
 pane_wt(){ tmux show-options -pqv -t "$1" @worktree 2>/dev/null || true; }
-# 패널에 프롬프트 입력 후 제출. codex 는 paste 직후 Enter 가 너무 빠르면 입력창에만 남고
-# 제출이 안 되므로 사이에 딜레이를 둔다 (claude/opencode 도 무해).
+# Type the prompt into a pane and submit it. codex leaves the text in the input
+# box if Enter arrives right after the paste, so we delay between the two
+# (harmless for claude/opencode).
 _send_to_pane(){
   tmux send-keys -t "$1" -l -- "$2"
   sleep "$COCKPIT_SEND_DELAY"
   tmux send-keys -t "$1" Enter
 }
-# 워크트리 절대경로 (workmux path → 실패 시 <repo>__worktrees/<wt> 규칙으로 폴백). APME 점수 매핑용.
+# Absolute worktree path (workmux path -> fallback to <repo>__worktrees/<wt>). Used for APME score mapping.
 _wt_path(){
   local p root; p=$(workmux path "$1" 2>/dev/null || true)
   if [ -z "$p" ] || [ ! -d "$p" ]; then
@@ -48,19 +52,19 @@ _wt_path(){
   fi
   [ -d "$p" ] && printf '%s' "$p"
 }
-# [a-z0-9-] 만 남겨 git-safe kebab 으로 정리 (stdin 또는 $1). 짧게(28자) 자름.
+# Keep only [a-z0-9-] for a git-safe kebab name (stdin or $1). Capped at 28 chars.
 _sanitize_slug(){
   local s="${1-$(cat)}"
   printf '%s' "$s" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-' \
     | sed -E 's/-+/-/g; s/^-+//; s/-+$//' | cut -c1-28 | sed -E 's/-+$//'
 }
-# 프롬프트(한글/영문) → 짧은 영어 kebab 브랜치명.
-#   COCKPIT_NAMER: fm(Apple Intelligence, 기본·온디바이스) | mlx(로컬 Qwen3.6, 빠름) | off.
-#   fm 실패 시 mlx, 그래도 안 되면 프롬프트의 영문만(ASCII).
+# Prompt (any language) -> short english kebab branch name.
+#   COCKPIT_NAMER: fm (Apple Intelligence, default, on-device) | mlx (local Qwen3.6) | off.
+#   fm falls back to mlx, then to the prompt's ASCII letters.
 : "${COCKPIT_NAMER:=fm}"
 : "${COCKPIT_NAMER_URL:=http://localhost:8800/v1/chat/completions}"
-# FM helper 기본 경로: 이 스크립트(심링크면 타깃) 기준 ../assets/fm-helper/...
-# `agentdeck` 로 실행되면 CLI 가 COCKPIT_FM_HELPER 를 직접 주입하므로 이 기본은 standalone 폴백용.
+# FM helper default: relative to this script (resolving symlinks), ../assets/fm-helper/...
+# When run via `agentdeck`, the CLI injects COCKPIT_FM_HELPER, so this is only a standalone fallback.
 _self_dir(){
   local s="$SELF"
   [ -L "$s" ] && s="$(readlink "$s")"
@@ -68,7 +72,7 @@ _self_dir(){
   (cd "$(dirname "$s")" && pwd)
 }
 : "${COCKPIT_FM_HELPER:=$(_self_dir)/../assets/fm-helper/agentdeck-fm-helper}"
-# 데몬 URL: COCKPIT_DAEMON_PORT(주입) → daemon.json httpPort → 9120 순.
+# Daemon URL: COCKPIT_DAEMON_PORT (injected) -> daemon.json httpPort -> 9120.
 : "${COCKPIT_DAEMON_PORT:=}"
 if [ -z "${COCKPIT_DAEMON_URL:-}" ]; then
   _p="${COCKPIT_DAEMON_PORT:-}"
@@ -80,12 +84,12 @@ _NAME_INSTR='Output ONLY a short lowercase kebab-case english git branch name, m
 _FM_SYS='You output only a short kebab-case git branch name and nothing else.'
 _name_fm(){   # Apple Intelligence (FoundationModels)
   local out
-  # 1) warm daemon helper 우선 — 상주 프로세스라 콜드스타트(~7s) 없음
+  # 1) prefer the warm daemon helper — it's resident, so no ~7s cold start
   out=$(curl -s --max-time 12 "$COCKPIT_DAEMON_URL/generate" -H 'Content-Type: application/json' \
         -d "$(jq -nc --arg p "$_NAME_INSTR$1" --arg s "$_FM_SYS" '{prompt:$p,instructions:$s}')" \
         2>/dev/null | jq -r '.text // empty' 2>/dev/null || true)
   [ -n "$out" ] && { printf '%s' "$out"; return 0; }
-  # 2) 폴백: helper 바이너리 직접 (콜드스타트)
+  # 2) fallback: invoke the helper binary directly (cold start)
   [ -x "$COCKPIT_FM_HELPER" ] || return 0
   jq -nc --arg p "$_NAME_INSTR$1" --arg s "$_FM_SYS" '{id:1,prompt:$p,instructions:$s,temperature:0.2}' \
     | "$COCKPIT_FM_HELPER" 2>/dev/null | head -1 | jq -r '.text // empty' 2>/dev/null || true
@@ -102,11 +106,11 @@ slugify(){
     mlx) out=$(_sanitize_slug "$(_name_mlx "$prompt")");;
     *)   out="";;
   esac
-  [ -n "$out" ] || out=$(printf '%s' "$prompt" | _sanitize_slug)   # 폴백: 프롬프트의 영문만
+  [ -n "$out" ] || out=$(printf '%s' "$prompt" | _sanitize_slug)   # fallback: ASCII letters of the prompt
   [ -n "$out" ] && printf '%s' "$out" || printf 'task-%s' "$(date +%H%M%S)"
 }
 
-# 한 라운드 실행: N 에이전트를 base 에서 분기(빈 base=현재 main) + 프롬프트 발사 + 그리드 조립.
+# One round: branch N agents from base (empty base = current main) + broadcast prompt + assemble grid.
 _run_round(){
   local prompt="$1" task="$2" base="${3:-}"
   local root; root=$(git rev-parse --show-toplevel)
@@ -115,19 +119,19 @@ _run_round(){
 
   local before after
   before=$(tmux list-windows -F '#{window_id}' | sort)
-  echo "cockpit: '$task' → [$COCKPIT_AGENTS]${base:+ (base: $base)} 발사…"
+  echo "wt: '$task' -> [$COCKPIT_AGENTS]${base:+ (base: $base)} launching..."
   workmux add "$task" "${addargs[@]}" -p "$prompt" -b >/dev/null
   sleep 1
   after=$(tmux list-windows -F '#{window_id}' | sort)
   local neww; neww=$(comm -13 <(echo "$before") <(echo "$after") || true)
-  [ -n "$neww" ] || die "새 워크트리 창을 못 찾음 (workmux add 실패?)"
+  [ -n "$neww" ] || die "no new worktree windows found (workmux add failed?)"
 
-  # 그리드 창: 각 에이전트 패널을 join-pane 으로 모음 (pane_id 는 이동해도 불변).
+  # Grid window: pull each agent pane in with join-pane (pane_id is stable across the move).
   local cwin ph
   cwin=$(tmux new-window -d -P -F '#{window_id}' -n "${WIN_PREFIX}:${task}")
   ph=$(tmux list-panes -t "$cwin" -F '#{pane_id}' | head -1)
   tmux set-option -w -t "$cwin" @cockpit_root "$root"
-  tmux set-option -w -t "$cwin" @cockpit_prompt "$prompt"   # pick 자동커밋 메시지용
+  tmux set-option -w -t "$cwin" @cockpit_prompt "$prompt"   # used as the pick auto-commit message
   while IFS= read -r w; do
     [ -n "$w" ] || continue
     local wt src
@@ -138,12 +142,12 @@ _run_round(){
   done <<< "$neww"
   tmux kill-pane -t "$ph" 2>/dev/null || true
   tmux select-layout -t "$cwin" tiled
-  # 하단 풀폭 커맨드 바 (그리드는 위로 압축, drop 해도 바는 유지됨)
+  # Full-width bottom command bar (grid compresses above it; it survives drops).
   local bar
   bar=$(tmux split-window -d -f -v -l "$BAR_HEIGHT" -t "$cwin" -P -F '#{pane_id}' \
-        "printf '%s\n' '── cockpit ──  바에서: cockpit send \"...\"  |  패널에 커서두고: P=승자머지  F=여기서분기  X=드롭  D=diff  S=전체전송 (모두 prefix 뒤)'; exec \${SHELL:-/bin/zsh}")
+        "printf '%s\n' '-- agentdeck wt --  in bar: agentdeck wt send \"...\"  |  on a pane (all after prefix): P=pick  F=fork  X=drop  G=grid  S=send-all  R=score'; exec \${SHELL:-/bin/zsh}")
   tmux set-option -p -t "$bar" @cockpit_bar 1
-  # 비빌트인 에이전트(agy 등)는 workmux -p 가 프롬프트를 못 넣음 → send-keys 로 직접 전달
+  # Non-builtin agents (agy, etc.) aren't prompt-injected by workmux -p -> deliver via send-keys.
   local sa p wt
   for sa in $COCKPIT_SENDKEYS_AGENTS; do
     while IFS=' ' read -r p wt; do
@@ -152,34 +156,34 @@ _run_round(){
   done
   tmux select-pane -t "$bar"
   tmux select-window -t "$cwin"
-  echo "cockpit: 그리드 준비됨."
+  echo "wt: grid ready."
 }
 
 cmd_broadcast(){
   need_tmux; need_repo
-  local prompt="${1:-}"; [ -n "$prompt" ] || die 'broadcast "<프롬프트>" [task]'
+  local prompt="${1:-}"; [ -n "$prompt" ] || die 'start "<prompt>" [name]'
   local task="${2:-}"; [ -n "$task" ] || task=$(slugify "$prompt"); [ -n "$task" ] || task="t$(date +%H%M%S)"
   _run_round "$prompt" "$task" ""
 }
 
-# 포커스한 에이전트의 (미머지) WIP 를 기준으로 새 비교 라운드 분기. main 머지 없음.
+# Branch a new round from the focused agent's (unmerged) WIP. No merge to main.
 cmd_fork(){
   need_tmux; need_repo
-  local prompt="${1:-}"; [ -n "$prompt" ] || die 'fork "<프롬프트>" [task]'
+  local prompt="${1:-}"; [ -n "$prompt" ] || die 'fork "<prompt>" [name]'
   local fp wt; fp=$(tmux display -p '#{pane_id}'); wt=$(pane_wt "$fp")
-  [ -n "$wt" ] || die "분기 기준 에이전트 패널에 커서를 두고 실행하세요 (바/빈 패널 불가)"
+  [ -n "$wt" ] || die "put the cursor on the agent pane to fork from (not the bar/empty pane)"
   goto_root
   local wpath; wpath=$(workmux path "$wt" 2>/dev/null || true)
   if [ -n "$wpath" ] && [ -n "$(git -C "$wpath" status --porcelain 2>/dev/null)" ]; then
-    echo "cockpit: [$wt] WIP 커밋(분기 기준 고정)…"
+    echo "wt: committing [$wt] WIP (pinning the fork base)..."
     git -C "$wpath" add -A && git -C "$wpath" commit -q -m "wip: fork base from $wt" || true
   fi
   local task; task=$(slugify "$prompt"); [ -n "$task" ] || task="t$(date +%H%M%S)"
-  echo "cockpit: [$wt] 에서 분기 → 새 라운드"
+  echo "wt: forking from [$wt] -> new round"
   _run_round "$prompt" "$task" "$wt"
 }
 
-# 현재 그리드 폐기 (eval 전용: 머지 없이 학습만 했을 때). 워크트리 제거 + 창 닫기.
+# Discard the current grid (review-only round, no merge). Removes worktrees + closes window.
 cmd_abandon(){
   need_tmux
   local cwin; cwin=$(tmux display -p '#{window_id}')
@@ -189,10 +193,10 @@ cmd_abandon(){
     wt=$(pane_wt "$p"); [ -n "$wt" ] && (workmux remove "$wt" -f || true)
   done < <(tmux list-panes -t "$cwin" -F '#{pane_id}')
   tmux kill-window -t "$cwin" 2>/dev/null || true
-  echo "cockpit: 그리드 폐기됨 (머지 없음)."
+  echo "wt: grid abandoned (nothing merged)."
 }
 
-# 각 그리드 패널 보더에 ★APME점수(있으면) + main대비 diff 통계 오버레이.
+# Overlay ★ APME score (if any) on each grid pane border.
 cmd_score(){
   need_tmux; goto_root
   local cwin; cwin=$(tmux display -p '#{window_id}')
@@ -207,68 +211,68 @@ cmd_score(){
     [ -f "$APME_DB" ] && sc=$(sqlite3 "$APME_DB" "SELECT printf('%.2f',composite_score) FROM runs WHERE (project_name='$wt' OR project_path='$path') AND composite_score IS NOT NULL ORDER BY started_at DESC LIMIT 1" 2>/dev/null || true)
     tmux set-option -p -t "$p" @pane_label "$wt${sc:+   ★ $sc}"
   done < <(tmux list-panes -t "$cwin" -F '#{pane_id}')
-  echo "cockpit: ★APME점수 오버레이 갱신 (diff 리뷰는 workmux dashboard 의 d 사용)"
+  echo "wt: ★ APME score overlay refreshed (use workmux dashboard 'd' for diffs)"
 }
 
-# agy(Antigravity) 를 비교군에 편입: global config 에서 bare interactive 로, 프롬프트는 send-keys.
+# Add agy (Antigravity) to the compare set: bare interactive in the global config; prompt via send-keys.
 cmd_setup_agy(){
   local CFG="$HOME/.config/workmux/config.yaml"
-  [ -f "$CFG" ] || die "global config 없음: $CFG"
+  [ -f "$CFG" ] || die "global config not found: $CFG"
   if grep -qE '^[[:space:]]*agy:' "$CFG"; then
     sed -i '' -E 's/^([[:space:]]*agy:).*/\1 "agy"/' "$CFG"
-    echo "cockpit: global config 의 agy → \"agy\" (bare interactive)"
+    echo "wt: set agy -> \"agy\" (bare interactive) in the global config"
   else
-    echo "  ⚠️ $CFG 의 agents: 맵에 'agy: \"agy\"' 를 직접 추가하세요"
+    echo "  warning: add 'agy: \"agy\"' to the agents: map in $CFG"
   fi
-  echo "  사용: export COCKPIT_AGENTS=\"claude codex opencode agy\" 후 broadcast"
-  echo "  (agy 프롬프트는 cockpit 이 send-keys 로 전달 — COCKPIT_SENDKEYS_AGENTS=agy)"
+  echo "  then: agentdeck wt agents claude codex opencode agy"
+  echo "  (agy is prompted via send-keys — COCKPIT_SENDKEYS_AGENTS=agy)"
 }
 
 cmd_send(){
   need_tmux
-  local text="${1:-}"; [ -n "$text" ] || die 'send "<텍스트>"'
+  local text="${1:-}"; [ -n "$text" ] || die 'send "<text>"'
   local cwin; cwin=$(tmux display -p '#{window_id}')
   local n=0 p wt
   while IFS= read -r p; do
-    wt=$(pane_wt "$p"); [ -n "$wt" ] || continue          # 바/빈 패널 자동 제외
+    wt=$(pane_wt "$p"); [ -n "$wt" ] || continue          # skip the bar/empty pane
     _send_to_pane "$p" "$text"
-    echo "→ $wt"; n=$((n+1))
+    echo "-> $wt"; n=$((n+1))
   done < <(tmux list-panes -t "$cwin" -F '#{pane_id}')
-  echo "cockpit: $n 개 에이전트에 전송"
+  echo "wt: sent to $n agent(s)"
 }
 
 cmd_pick(){
   need_tmux
   local cwin fp winner; cwin=$(tmux display -p '#{window_id}'); fp=$(tmux display -p '#{pane_id}')
-  winner=$(pane_wt "$fp"); [ -n "$winner" ] || die "승자 에이전트 패널에 커서를 두고 실행하세요 (바/빈 패널 불가)"
+  winner=$(pane_wt "$fp"); [ -n "$winner" ] || die "put the cursor on the winning agent pane (not the bar/empty pane)"
   local losers=() p wt
   while IFS= read -r p; do
     [ "$p" = "$fp" ] && continue
     wt=$(pane_wt "$p"); [ -n "$wt" ] && losers+=("$wt")
   done < <(tmux list-panes -t "$cwin" -F '#{pane_id}')
   goto_root
-  # 승자에 미커밋 변경이 있으면 자동 커밋 (workmux merge 는 커밋된 것만 가져감 → 안 하면 작업 유실)
+  # Auto-commit the winner's uncommitted changes (workmux merge only takes commits -> else work is lost).
   local wpath; wpath=$(workmux path "$winner" 2>/dev/null || true)
   if [ -n "$wpath" ] && [ -n "$(git -C "$wpath" status --porcelain 2>/dev/null)" ]; then
-    local msg; msg=$(tmux show-options -wqv @cockpit_prompt 2>/dev/null || true); [ -n "$msg" ] || msg="cockpit pick: $winner"
-    echo "cockpit: 승자 미커밋 변경 자동 커밋…"
+    local msg; msg=$(tmux show-options -wqv @cockpit_prompt 2>/dev/null || true); [ -n "$msg" ] || msg="wt pick: $winner"
+    echo "wt: auto-committing the winner's uncommitted changes..."
     git -C "$wpath" add -A && git -C "$wpath" commit -q -m "$msg" || true
   fi
-  echo "cockpit: 승자 [$winner] → main 머지 / 정리: ${losers[*]:-(없음)}"
-  workmux merge "$winner" || die "머지 실패 (충돌 확인)"
+  echo "wt: winner [$winner] -> merge to main / cleanup: ${losers[*]:-(none)}"
+  workmux merge "$winner" || die "merge failed (resolve conflicts)"
   local l; for l in "${losers[@]:-}"; do [ -n "$l" ] && (workmux remove "$l" -f || true); done
   tmux kill-window -t "$cwin" 2>/dev/null || true
-  echo "cockpit: 완료. main 에 머지됨 — 이어서 작업하거나 다시 broadcast."
+  echo "wt: done. merged to main — keep working or start another round."
 }
 
 cmd_drop(){
   need_tmux
   local fp wt; fp=$(tmux display -p '#{pane_id}'); wt=$(pane_wt "$fp")
-  [ -n "$wt" ] || die "드롭할 에이전트 패널에 커서를 두고 실행하세요 (바/빈 패널 불가)"
+  [ -n "$wt" ] || die "put the cursor on the agent pane to drop (not the bar/empty pane)"
   goto_root
-  echo "cockpit: 드롭 [$wt] (워크트리 제거 + 패널 닫기, 그리드 재정렬)"
+  echo "wt: dropping [$wt] (remove worktree + close pane, grid re-tiles)"
   workmux remove "$wt" -f || true
-  tmux kill-pane -t "$fp" 2>/dev/null || true     # 상단 그리드만 reflow, 하단 바 유지
+  tmux kill-pane -t "$fp" 2>/dev/null || true     # only the top grid re-flows; the bottom bar stays
 }
 
 cmd_setup(){
@@ -279,15 +283,15 @@ cmd_setup(){
   tmux bind-key G run-shell "$INVOKE grid"
   tmux bind-key F command-prompt -p 'fork-from-focused:' "run-shell \"$INVOKE fork '%%'\""
   tmux bind-key R run-shell "$INVOKE score"
-  echo "cockpit: 키바인딩 → prefix+S=전체전송, P=승자머지, F=여기서분기, X=드롭, G=그리드점프, R=★점수"
-  echo "  (diff/patch 리뷰는 workmux dashboard 의 d/a 사용 — cockpit 이 재구현 안 함)"
+  echo "wt: keybindings -> prefix+S=send-all, P=pick, F=fork, X=drop, G=grid, R=score"
+  echo "  (use workmux dashboard 'd'/'a' for diff/patch review — wt does not reimplement it)"
 }
 
-# 활성 cockpit 그리드 창으로 점프 (overlay 대용 "버튼"). 가장 최근 것.
+# Jump to the active grid window (overlay-like "button"). Most recent one.
 cmd_grid(){
   need_tmux
-  local w; w=$(tmux list-windows -F '#{window_id} #{window_name}' | awk '$2 ~ /^cockpit:/{print $1}' | tail -1)
-  [ -n "$w" ] || die "활성 cockpit 그리드 없음 (broadcast 먼저)"
+  local w; w=$(tmux list-windows -F '#{window_id} #{window_name}' | awk -v p="^${WIN_PREFIX}:" '$2 ~ p{print $1}' | tail -1)
+  [ -n "$w" ] || die "no active grid (run 'wt start' first)"
   tmux select-window -t "$w"
 }
 
@@ -295,29 +299,29 @@ cmd_list(){ workmux list; }
 
 cmd_clean(){
   need_repo
-  # 1) cockpit 그리드 창 닫기 (join 된 패널이라 workmux 가 추적 못 함 → 직접 kill)
+  # 1) close grid windows (their panes were joined, so workmux can't track them -> kill directly)
   local w
   while IFS= read -r w; do [ -n "$w" ] && tmux kill-window -t "$w" 2>/dev/null || true; done \
-    < <(tmux list-windows -F '#{window_id} #{window_name}' 2>/dev/null | awk '$2 ~ /^cockpit:/{print $1}')
-  # 2) 모든 워크트리 + 그 창 제거
-  echo "cockpit: 그리드 창 + 모든 워크트리 정리(main 제외)…"
+    < <(tmux list-windows -F '#{window_id} #{window_name}' 2>/dev/null | awk -v p="^${WIN_PREFIX}:" '$2 ~ p{print $1}')
+  # 2) remove all worktrees + their windows
+  echo "wt: closing grid windows + removing all worktrees (except main)..."
   workmux remove --all -f
 }
 
-# 짧은 별칭은 그리드 키바인딩 글자와 일치 (b=broadcast, s/p/f/x/a/g/r).
+# Short aliases match the in-grid keybinding letters (b=start, s/p/f/x/a/g/r).
 case "${1:-}" in
-  broadcast|b) shift; cmd_broadcast "$@";;
-  send|s)      shift; cmd_send "$@";;
-  pick|p)      shift; cmd_pick "$@";;
-  fork|f)      shift; cmd_fork "$@";;
-  drop|x)      shift; cmd_drop "$@";;
-  abandon|a)   shift; cmd_abandon "$@";;
-  grid|g)      shift; cmd_grid "$@";;
-  score|r)     shift; cmd_score "$@";;
-  setup)       shift; cmd_setup "$@";;
-  setup-agy)   shift; cmd_setup_agy "$@";;
-  list|ls)     shift; cmd_list "$@";;
-  clean)       shift; cmd_clean "$@";;
+  start|broadcast|b) shift; cmd_broadcast "$@";;
+  send|s)            shift; cmd_send "$@";;
+  pick|p)            shift; cmd_pick "$@";;
+  fork|f)            shift; cmd_fork "$@";;
+  drop|x)            shift; cmd_drop "$@";;
+  abandon|a)         shift; cmd_abandon "$@";;
+  grid|g)            shift; cmd_grid "$@";;
+  score|r)           shift; cmd_score "$@";;
+  setup)             shift; cmd_setup "$@";;
+  setup-agy)         shift; cmd_setup_agy "$@";;
+  list|ls)           shift; cmd_list "$@";;
+  clean|clear)       shift; cmd_clean "$@";;
   ""|-h|--help|help) awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next} {exit}' "$SELF";;
-  *) die "알 수 없는 명령: $1 (cockpit help)";;
+  *) die "unknown command: $1 (try: agentdeck wt help)";;
 esac
