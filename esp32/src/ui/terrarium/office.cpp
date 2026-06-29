@@ -216,17 +216,67 @@ static void drawBubble(int bx, int by, char g, uint16_t col) {
 }
 
 // ── Minecraft block world ─────────────────────────────────────────────────────
+static bool projectDelim(char c) {
+    return c == '-' || c == '_' || c == ' ' || c == '.';
+}
+static char lowerAscii(char c) {
+    return (c >= 'A' && c <= 'Z') ? (char)(c + ('a' - 'A')) : c;
+}
+static void trimProjectTail(char* s) {
+    int n = (int)strlen(s);
+    while (n > 0 && (projectDelim(s[n - 1]) || s[n - 1] == '#')) n--;
+    s[n] = '\0';
+}
+static int projectDelimCount(const char* s, int len) {
+    int count = 0;
+    for (int i = 0; i < len && s[i]; i++) if (projectDelim(s[i])) count++;
+    return count;
+}
+static void copyProjectPrefix(const char* in, int len, char* out, int outSz) {
+    if (outSz <= 0) return;
+    if (len >= outSz) len = outSz - 1;
+    if (len < 0) len = 0;
+    memcpy(out, in, (size_t)len);
+    out[len] = '\0';
+    trimProjectTail(out);
+}
 // Strip a trailing " #N" suffix so "Foo #1" / "Foo #2" group as the same task.
 static void normProject(const char* in, char* out, int outSz) {
-    int n = (int)strlen(in), e = n;
-    while (e > 0 && in[e-1] >= '0' && in[e-1] <= '9') e--;
-    if (e < n && e > 0 && in[e-1] == '#') {
+    const char* baseName = projectBasename(in);
+    int n = (int)strlen(baseName), e = n;
+    while (e > 0 && baseName[e-1] >= '0' && baseName[e-1] <= '9') e--;
+    if (e < n && e > 0 && baseName[e-1] == '#') {
         int s = e - 1;
-        while (s > 0 && in[s-1] == ' ') s--;
+        while (s > 0 && baseName[s-1] == ' ') s--;
         n = s;
     }
-    if (n <= 0 || n >= outSz) { strncpy(out, in, outSz-1); out[outSz-1] = '\0'; return; }
-    memcpy(out, in, n); out[n] = '\0';
+    if (n <= 0 || n >= outSz) { strncpy(out, baseName, outSz-1); out[outSz-1] = '\0'; return; }
+    memcpy(out, baseName, n); out[n] = '\0';
+    trimProjectTail(out);
+}
+static bool sameProjectGroup(const char* a, const char* b, char* groupKey, int groupKeySz) {
+    if (groupKeySz <= 0) return false;
+    int i = 0, lastDelim = -1;
+    for (; a[i] && b[i] && lowerAscii(a[i]) == lowerAscii(b[i]); i++) {
+        if (projectDelim(a[i])) lastDelim = i;
+    }
+    if (!a[i] && !b[i]) {
+        strncpy(groupKey, a, groupKeySz - 1);
+        groupKey[groupKeySz - 1] = '\0';
+        return true;
+    }
+
+    int stemLen = -1;
+    if (!a[i] && projectDelim(b[i])) stemLen = i;          // "foo-bar" + "foo-bar-1"
+    else if (!b[i] && projectDelim(a[i])) stemLen = i;     // "foo-bar-1" + "foo-bar"
+    else if (lastDelim > 0) stemLen = lastDelim;           // "foo-bar-a" + "foo-bar-b"
+
+    // Keep this conservative: only long, multi-token stems become fuzzy groups.
+    // This catches multi-agent task folders like "claude-agents-md-check-*"
+    // without collapsing short sibling projects like "agentdeck-ios" and "agentdeck-android".
+    if (stemLen < 14 || projectDelimCount(a, stemLen) < 2 || projectDelimCount(b, stemLen) < 2) return false;
+    copyProjectPrefix(a, stemLen, groupKey, groupKeySz);
+    return groupKey[0] != '\0';
 }
 // A shared table the huddle gathers around (beveled blocky rect, static).
 static void drawTable(int x, int y, int w, int h) {
@@ -274,11 +324,18 @@ static void buildLayout() {
     for (int a = 0; a < nWk; a++) {
         if (done[a]) continue;
         char na[40]; normProject(wk[a].project, na, sizeof(na));
+        char groupKey[40]; strncpy(groupKey, na, sizeof(groupKey) - 1); groupKey[sizeof(groupKey) - 1] = '\0';
         int mem[MAXAG], mc = 0;
-        for (int b = a; b < nWk; b++) {
+        mem[mc++] = a; done[a] = true;
+        for (int b = a + 1; b < nWk; b++) {
             if (done[b]) continue;
             char nb[40]; normProject(wk[b].project, nb, sizeof(nb));
-            if (strcmp(na, nb) == 0) { mem[mc++] = b; done[b] = true; }
+            char nextKey[40];
+            if (sameProjectGroup(groupKey, nb, nextKey, sizeof(nextKey)) ||
+                sameProjectGroup(na, nb, nextKey, sizeof(nextKey))) {
+                strncpy(groupKey, nextKey, sizeof(groupKey) - 1); groupKey[sizeof(groupKey) - 1] = '\0';
+                mem[mc++] = b; done[b] = true;
+            }
         }
         int slotCols = mc >= 5 ? 3 : (mc >= 2 ? 2 : 1);
         int slotRows = (mc + slotCols - 1) / slotCols;
@@ -291,7 +348,7 @@ static void buildLayout() {
             if (boxR + boxH - 1 >= loungeR - 1) boxR = 1;
         }
         Pod& pod = pods[podCount];
-        strncpy(pod.project, na, sizeof(pod.project) - 1); pod.project[sizeof(pod.project)-1] = '\0';
+        strncpy(pod.project, groupKey, sizeof(pod.project) - 1); pod.project[sizeof(pod.project)-1] = '\0';
         pod.c = boxC; pod.r = boxR; pod.w = boxW; pod.h = boxH; pod.count = mc;
         int placed = 0;
         for (int rr = 0; rr < slotRows && placed < mc; rr++)
@@ -465,8 +522,10 @@ static void pickLounge(Worker& w, int self) {
 // Centre column of a worker's huddle — agents face inward toward their team.
 static int podCenterCol(const Worker& w) {
     char nw[40]; normProject(w.project, nw, sizeof(nw));
-    for (int i = 0; i < podCount; i++)
-        if (strcmp(pods[i].project, nw) == 0) return pods[i].c + pods[i].w / 2;
+    for (int i = 0; i < podCount; i++) {
+        char key[40];
+        if (sameProjectGroup(pods[i].project, nw, key, sizeof(key))) return pods[i].c + pods[i].w / 2;
+    }
     return w.seatC;
 }
 static void targetFor(Worker& w, int& tc, int& tr) {
