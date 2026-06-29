@@ -232,7 +232,8 @@ function usageBrandLogo(agent: 'claude' | 'codex', cx: number, cy: number, size:
 }
 
 /** Severity ramp by USED percent: <=50 green, 50–80 amber, >80 red. */
-function usageRampColor(used: number): { fill: string; hi: string } {
+function usageRampColor(used: number, stale = false): { fill: string; hi: string } {
+  if (stale) return { fill: '#64748b', hi: '#64748b' };
   if (used > 80) return { fill: '#ef4444', hi: '#fca5a5' };
   if (used > 50) return { fill: '#eab308', hi: '#fde047' };
   return { fill: '#22c55e', hi: '#86efac' };
@@ -250,6 +251,9 @@ export interface UsageTankData {
   resetsAt?: string;
   /** False → no live quota: dark tile + dim label + "—" instead of a gauge. */
   known?: boolean;
+  /** Codex snapshot expired: keep last-known % but desaturate the fill and show
+   *  a "stale" marker instead of a (misleading) "now" countdown. */
+  stale?: boolean;
 }
 
 export function renderUsageGauge(data: UsageTankData): string {
@@ -272,25 +276,32 @@ export function renderUsageGauge(data: UsageTankData): string {
       + `<text x="72" y="94" text-anchor="middle" font-family="Arial,sans-serif" font-size="44" font-weight="bold" fill="${TEXT_DIM}">—</text></svg>`;
   }
 
+  const stale = data.stale === true;
   const used = Math.max(0, Math.min(100, data.usedPercent));
-  const ramp = usageRampColor(used);
+  const ramp = usageRampColor(used, stale);
   const fillH = Math.round((H * used) / 100);
   const fillY = H - fillH;
   // Subtle level tint (low opacity) + crisp 3px level line — no dark overlay.
+  // Stale = extra-faint tint so it reads as "not current".
+  const fillOpacity = stale ? 0.22 : 0.38;
   const fill = fillH > 0
     ? `<g clip-path="url(#${clipId})">`
-        + `<rect x="0" y="${fillY}" width="${W}" height="${fillH}" fill="${ramp.fill}" opacity="0.38"/>`
+        + `<rect x="0" y="${fillY}" width="${W}" height="${fillH}" fill="${ramp.fill}" opacity="${fillOpacity}"/>`
         + `<rect x="0" y="${fillY}" width="${W}" height="3" fill="${ramp.fill}"/>`
       + `</g>`
     : '';
-  const reset = formatResetCountdown(data.resetsAt);
+  // Expired window: muted "stale" marker instead of the (absent) countdown; the
+  // % stays last-known but dims so it doesn't read as live.
+  const reset = stale ? 'stale' : formatResetCountdown(data.resetsAt);
+  const pctColor = stale ? LABEL_DIM : HEADLINE;
+  const resetColor = stale ? LABEL_DIM : COUNTDOWN;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
     + clip + bg + fill
-    + `<text x="14" y="36" font-family="JetBrains Mono, monospace" font-size="26" font-weight="bold" fill="${HEADLINE}">${escXml(label)}</text>`
+    + `<text x="14" y="36" font-family="JetBrains Mono, monospace" font-size="26" font-weight="bold" fill="${stale ? LABEL_DIM : HEADLINE}">${escXml(label)}</text>`
     + logo
-    + `<text x="72" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="46" font-weight="bold" fill="${HEADLINE}">${Math.round(used)}<tspan font-size="24">%</tspan></text>`
-    + (reset ? `<text x="72" y="122" text-anchor="middle" font-family="Arial,sans-serif" font-size="17" font-weight="bold" fill="${COUNTDOWN}">${escXml(reset)}</text>` : '')
+    + `<text x="72" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="46" font-weight="bold" fill="${pctColor}">${Math.round(used)}<tspan font-size="24">%</tspan></text>`
+    + (reset ? `<text x="72" y="122" text-anchor="middle" font-family="Arial,sans-serif" font-size="17" font-weight="bold" fill="${resetColor}">${escXml(reset)}</text>` : '')
     + `</svg>`;
 }
 
@@ -334,10 +345,10 @@ function buildUsageTiles(state: DashState): SessionDeckCell[] {
   // Codex windows carry the same short "5H"/"7D" labels — the brand dot conveys
   // the agent, not a "CX " prefix.
   if (cx?.primary) {
-    tiles.push({ svg: renderUsageGauge({ agent: 'codex', window: '5h', label: '5H', usedPercent: cx.primary.usedPercent, resetsAt: cx.primary.resetsAt, known: true }), action });
+    tiles.push({ svg: renderUsageGauge({ agent: 'codex', window: '5h', label: '5H', usedPercent: cx.primary.usedPercent, resetsAt: cx.primary.resetsAt, known: true, stale: cx.primary.stale === true }), action });
   }
   if (cx?.secondary) {
-    tiles.push({ svg: renderUsageGauge({ agent: 'codex', window: '7d', label: '7D', usedPercent: cx.secondary.usedPercent, resetsAt: cx.secondary.resetsAt, known: true }), action });
+    tiles.push({ svg: renderUsageGauge({ agent: 'codex', window: '7d', label: '7D', usedPercent: cx.secondary.usedPercent, resetsAt: cx.secondary.resetsAt, known: true, stale: cx.secondary.stale === true }), action });
   }
   // Credit-based Codex plan: no windows, show the credits balance instead so the
   // Codex usage doesn't silently vanish.

@@ -178,6 +178,9 @@ export function readCodexRateLimits(): CodexRateLimits | null {
 
   const tail = readTail(file);
   const parsed = tail ? parseCodexRateLimitsFromText(tail) : null;
+  // Stamp the rollout mtime as a secondary freshness anchor (the per-window
+  // `stale` flag set in buildUsageEvent is authoritative).
+  if (parsed) parsed.capturedAt = new Date(mtime).toISOString();
 
   cacheKey = key;
   cacheValue = parsed;

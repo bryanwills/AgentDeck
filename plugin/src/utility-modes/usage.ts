@@ -114,8 +114,11 @@ export function buildClaudeUsageEncoder(data: UsageModeData, hasReceivedData: bo
  * @param hasReceivedData false before the first usage_update → "Waiting…".
  */
 export function buildCodexUsageEncoder(data: UsageModeData, hasReceivedData: boolean): UsageEncoderData {
-  const stale = data.usageStale === true;
-  const cx = stale ? undefined : data.codexRateLimits;
+  // NB: Codex rate limits come from local rollout files, independent of the
+  // Claude-API `usageStale` flag — so we do NOT blank Codex on global staleness
+  // (that wrongly hid Codex whenever no Claude fetch ran). Per-window staleness
+  // (an expired snapshot) rides `window.stale`, set centrally in buildUsageEvent.
+  const cx = data.codexRateLimits;
   const primary = cx?.primary;
   const secondary = cx?.secondary;
   let note: string | undefined;
@@ -132,8 +135,8 @@ export function buildCodexUsageEncoder(data: UsageModeData, hasReceivedData: boo
   return {
     agent: 'codex',
     title: 'CODEX',
-    fiveHour: { label: '5H', usedPercent: primary?.usedPercent ?? 0, resetsAt: primary?.resetsAt, known: primary != null },
-    sevenDay: { label: '7D', usedPercent: secondary?.usedPercent ?? 0, resetsAt: secondary?.resetsAt, known: secondary != null },
+    fiveHour: { label: '5H', usedPercent: primary?.usedPercent ?? 0, resetsAt: primary?.resetsAt, known: primary != null, stale: primary?.stale === true },
+    sevenDay: { label: '7D', usedPercent: secondary?.usedPercent ?? 0, resetsAt: secondary?.resetsAt, known: secondary != null, stale: secondary?.stale === true },
     note,
   };
 }

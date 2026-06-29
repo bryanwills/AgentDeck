@@ -123,3 +123,54 @@ describe('buildUsageEvent subscription quota scoping', () => {
     expect(evt.extraUsageEnabled).toBe(true);
   });
 });
+
+describe('buildUsageEvent Codex window normalization', () => {
+  const codexArgs = (codexRateLimits: unknown) =>
+    [
+      snapshot(),
+      null, // apiUsage
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined,
+      codexRateLimits,
+    ] as Parameters<typeof buildUsageEvent>;
+
+  it('marks an expired window stale and drops its resetsAt (no misleading "now")', () => {
+    const expired = new Date(Date.now() - 30 * 60_000).toISOString();
+    const evt = buildUsageEvent(
+      ...codexArgs({ primary: { usedPercent: 67, windowMinutes: 300, resetsAt: expired } }),
+    ) as UsageEvent;
+
+    const p = evt.codexRateLimits!.primary!;
+    expect(p.usedPercent).toBe(67); // last-known preserved
+    expect(p.stale).toBe(true);
+    expect(p.resetsAt).toBeUndefined(); // no past timestamp → no "now"
+  });
+
+  it('leaves a live window untouched', () => {
+    const future = new Date(Date.now() + 2 * 3600_000).toISOString();
+    const evt = buildUsageEvent(
+      ...codexArgs({ secondary: { usedPercent: 12, windowMinutes: 10080, resetsAt: future } }),
+    ) as UsageEvent;
+
+    const s = evt.codexRateLimits!.secondary!;
+    expect(s.usedPercent).toBe(12);
+    expect(s.stale).toBeUndefined();
+    expect(s.resetsAt).toBe(future);
+  });
+
+  it('treats each window independently (5h expired, 7d live)', () => {
+    const expired = new Date(Date.now() - 30 * 60_000).toISOString();
+    const future = new Date(Date.now() + 2 * 3600_000).toISOString();
+    const evt = buildUsageEvent(
+      ...codexArgs({
+        primary: { usedPercent: 90, windowMinutes: 300, resetsAt: expired },
+        secondary: { usedPercent: 20, windowMinutes: 10080, resetsAt: future },
+      }),
+    ) as UsageEvent;
+
+    expect(evt.codexRateLimits!.primary!.stale).toBe(true);
+    expect(evt.codexRateLimits!.primary!.resetsAt).toBeUndefined();
+    expect(evt.codexRateLimits!.secondary!.stale).toBeUndefined();
+    expect(evt.codexRateLimits!.secondary!.resetsAt).toBe(future);
+  });
+});

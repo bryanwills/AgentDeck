@@ -118,6 +118,13 @@ export interface CodexRateLimitWindow {
   windowMinutes: number;
   /** ISO-8601 reset instant (converted from the rollout's unix `resets_at`). */
   resetsAt?: string;
+  /** True when this window's snapshot has expired (its `resets_at` slid into the
+   *  past with no fresher Codex activity). The passive rollout read is frozen, so
+   *  the percent is last-known-only — renderers should dim the gauge and show a
+   *  "stale" marker instead of a misleading "now" countdown. Set centrally in
+   *  `buildUsageEvent`; `resetsAt` is cleared at the same time so no formatter
+   *  prints "now". */
+  stale?: boolean;
 }
 
 /** Codex credits balance, the metering Codex reports for credit-based plans
@@ -145,6 +152,9 @@ export interface CodexRateLimits {
   limitId?: string;
   /** Credit balance for credit-based plans (present when windows are null). */
   credits?: CodexCredits;
+  /** ISO-8601 mtime of the rollout file this snapshot was read from. A secondary
+   *  freshness anchor — the per-window `stale` flag is the authoritative signal. */
+  capturedAt?: string;
 }
 
 // ===== Bridge → Plugin (State Updates) =====

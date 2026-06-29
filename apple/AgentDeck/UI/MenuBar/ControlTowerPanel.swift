@@ -498,14 +498,16 @@ struct ControlTowerPanel: View {
                         compactGauge(
                             label: TopologyRail.windowLabel(p.windowMinutes),
                             percent: pct,
-                            resetTime: p.resetsAt
+                            resetTime: p.resetsAt,
+                            stale: p.stale == true
                         )
                     }
                     if let s = codex.secondary, let pct = s.usedPercent {
                         compactGauge(
                             label: TopologyRail.windowLabel(s.windowMinutes),
                             percent: pct,
-                            resetTime: s.resetsAt
+                            resetTime: s.resetsAt,
+                            stale: s.stale == true
                         )
                     }
                     if codex.primary == nil, codex.secondary == nil,
@@ -683,8 +685,10 @@ struct ControlTowerPanel: View {
         return s
     }
 
-    private func compactGauge(label: String, percent: Double, resetTime: String?, customSuffix: String? = nil) -> some View {
-        let color = gaugeColor(percent)
+    private func compactGauge(label: String, percent: Double, resetTime: String?, customSuffix: String? = nil, stale: Bool = false) -> some View {
+        // Expired Codex window: desaturate the fill and show a "stale" marker
+        // instead of a (misleading) reset countdown. The % stays last-known.
+        let color = stale ? TerrariumHUD.subtext : gaugeColor(percent)
         return HStack(spacing: 8) {
             Text(label)
                 .font(.system(size: 10, design: .monospaced))
@@ -696,6 +700,7 @@ struct ControlTowerPanel: View {
                         .fill(Color.white.opacity(0.10))
                     RoundedRectangle(cornerRadius: 3)
                         .fill(color)
+                        .opacity(stale ? 0.5 : 1)
                         .frame(width: max(0, min(1, percent / 100.0)) * geo.size.width)
                 }
             }
@@ -704,11 +709,18 @@ struct ControlTowerPanel: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(color)
                 .frame(width: customSuffix != nil ? 75 : 36, alignment: .trailing)
-            if customSuffix == nil, let reset = resetTime, let formatted = formatResetTime(reset) {
-                Text(formatted)
-                    .font(.system(size: 10, weight: percent >= 70 ? .semibold : .regular))
-                    .foregroundColor(percent >= 70 ? .orange : TerrariumHUD.subtext)
-                    .frame(width: 48, alignment: .trailing)
+            if customSuffix == nil {
+                if stale {
+                    Text("stale")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.orange)
+                        .frame(width: 48, alignment: .trailing)
+                } else if let reset = resetTime, let formatted = formatResetTime(reset) {
+                    Text(formatted)
+                        .font(.system(size: 10, weight: percent >= 70 ? .semibold : .regular))
+                        .foregroundColor(percent >= 70 ? .orange : TerrariumHUD.subtext)
+                        .frame(width: 48, alignment: .trailing)
+                }
             }
         }
     }

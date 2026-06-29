@@ -60,6 +60,11 @@ struct CodexRateLimitWindowLocal: Sendable {
     var usedPercent: Double
     var windowMinutes: Int
     var resetsAt: String?
+    /// True when this window's snapshot has expired (its `resetsAt` slid into the
+    /// past with no fresher Codex activity). Mirrors the TS `stale` flag set in
+    /// `buildUsageEvent` — renderers dim the gauge and show a "stale" marker
+    /// instead of a misleading "now" countdown.
+    var stale: Bool = false
 }
 
 /// Codex usage limits parsed from the user's own local Codex session rollout

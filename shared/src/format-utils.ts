@@ -104,6 +104,23 @@ export function adjustUsagePercent(
   return percent;
 }
 
+/**
+ * A Codex rolling-window snapshot is stale once its window has ended: `resetsAt`
+ * is in the past beyond a short grace. Codex usage is read passively from the
+ * newest local rollout file, so once Codex stops being used the snapshot freezes
+ * — `usedPercent` stays at its last value and `resetsAt` slides into the past. At
+ * that point a "now" countdown would mislead (the bar still shows the old percent),
+ * so consumers should dim the gauge and show a "stale" marker instead.
+ *
+ * Grace (default 5m) keeps a genuinely-just-reset window briefly showing "now".
+ */
+export function isCodexWindowStale(resetsAt: string | undefined, graceMs = 5 * 60_000): boolean {
+  if (!resetsAt) return false;
+  const t = new Date(resetsAt).getTime();
+  if (isNaN(t)) return false;
+  return Date.now() - t > graceMs;
+}
+
 /** Plain-text gauge bar: "████░░" (no ANSI colors) */
 export function gaugeBar(percent: number, width = 6): string {
   const clamped = Math.max(0, Math.min(100, percent));

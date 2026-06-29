@@ -899,7 +899,7 @@ struct TopologyRail: View {
                 label: Self.windowLabel(p.windowMinutes),
                 percent: pct,
                 reset: formatResetTime(p.resetsAt),
-                stale: false
+                stale: p.stale == true
             ))
         }
         if let s = limits.secondary, let pct = s.usedPercent {
@@ -907,7 +907,7 @@ struct TopologyRail: View {
                 label: Self.windowLabel(s.windowMinutes),
                 percent: pct,
                 reset: formatResetTime(s.resetsAt),
-                stale: false
+                stale: s.stale == true
             ))
         }
         return chips

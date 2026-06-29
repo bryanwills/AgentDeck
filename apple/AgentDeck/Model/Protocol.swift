@@ -396,6 +396,9 @@ struct CodexRateLimitWindow: Codable, Sendable {
     var usedPercent: Double?
     var windowMinutes: Int?
     var resetsAt: String?
+    /// True when this window's snapshot has expired (set centrally by the daemon).
+    /// Renderers dim the gauge and show a "stale" marker instead of "now".
+    var stale: Bool?
 }
 
 /// Codex credit balance — the metering credit-based plans report (e.g.

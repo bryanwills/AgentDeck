@@ -2,9 +2,9 @@ import type { StateSnapshot, UsageEvent } from './types.js';
 import type { ApiUsageData } from './usage-api.js';
 import { getTokenStatus } from './usage-api.js';
 import type { OllamaStatus } from './ollama-probe.js';
-import { adjustUsagePercent } from '@agentdeck/shared';
+import { adjustUsagePercent, isCodexWindowStale } from '@agentdeck/shared';
 import type { CodexAuthStatus } from './codex-auth.js';
-import type { AntigravityStatusInfo, BillingType, CodexRateLimits, ModelCatalogEntry, SubscriptionInfo } from './types.js';
+import type { AntigravityStatusInfo, BillingType, CodexRateLimits, CodexRateLimitWindow, ModelCatalogEntry, SubscriptionInfo } from './types.js';
 
 function formatChatGptPlan(planType?: string | null): string | undefined {
   const raw = planType?.trim();
@@ -56,6 +56,25 @@ export function buildSubscriptions(
   }
 
   return items.length > 0 ? items : undefined;
+}
+
+/**
+ * Normalize a Codex rate-limit window for display. An expired window (its
+ * `resetsAt` slid into the past beyond the grace) keeps its last-known
+ * `usedPercent` but drops `resetsAt` — so no downstream formatter prints the
+ * misleading "now" — and is flagged `stale` so surfaces dim the gauge and show a
+ * "stale" marker instead. Per-window, so a stale 5h window doesn't drag down a
+ * still-live 7d sibling.
+ */
+function normalizeCodexWindow(w?: CodexRateLimitWindow): CodexRateLimitWindow | undefined {
+  if (!w) return undefined;
+  if (isCodexWindowStale(w.resetsAt)) return { ...w, resetsAt: undefined, stale: true };
+  return w;
+}
+
+function normalizeCodexRateLimits(rl?: CodexRateLimits | null): CodexRateLimits | undefined {
+  if (!rl) return undefined;
+  return { ...rl, primary: normalizeCodexWindow(rl.primary), secondary: normalizeCodexWindow(rl.secondary) };
 }
 
 function isClaudeSubscriptionModel(modelName?: string | null): boolean {
@@ -146,7 +165,7 @@ export function buildUsageEvent(
     codexAccountId: codexAuth?.accountId,
     codexSubscriptionActiveUntil: codexAuth?.subscriptionActiveUntil,
     codexLastRefreshAt: codexAuth?.lastRefreshAt,
-    codexRateLimits: codexRateLimits ?? undefined,
+    codexRateLimits: normalizeCodexRateLimits(codexRateLimits),
     modelCatalog: modelCatalog && modelCatalog.length > 0 ? modelCatalog : undefined,
     mlxModels: mlxModels && mlxModels.length > 0 ? mlxModels : undefined,
     subscriptions: buildSubscriptions(codexAuth, apiUsage, billingType, antigravityStatus),

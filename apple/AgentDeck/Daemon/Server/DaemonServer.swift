@@ -4695,11 +4695,27 @@ final class DaemonServer {
         if let refresh = codex.lastRefreshAt { event["codexLastRefreshAt"] = refresh }
     }
 
+    /// A Codex rolling-window snapshot is stale once its window has ended:
+    /// `resetsAt` is in the past beyond a short grace (5m). Mirrors the TS
+    /// `isCodexWindowStale` — Codex usage is read passively from local rollout
+    /// files, so once Codex stops being used the snapshot freezes and a "now"
+    /// countdown would mislead. Grace keeps a just-reset window briefly showing "now".
+    private static func isCodexWindowStale(_ resetsAt: String?, graceSeconds: Double = 300) -> Bool {
+        guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return false }
+        return -date.timeIntervalSinceNow > graceSeconds
+    }
+
     private static func codexRateLimitsPayload(_ limits: CodexRateLimitsLocal) -> [String: Any] {
         func window(_ w: CodexRateLimitWindowLocal?) -> [String: Any]? {
             guard let w else { return nil }
             var d: [String: Any] = ["usedPercent": w.usedPercent, "windowMinutes": w.windowMinutes]
-            if let resetsAt = w.resetsAt { d["resetsAt"] = resetsAt }
+            // Expired window: keep last-known usedPercent but drop resetsAt (so no
+            // downstream formatter prints "now") and flag stale so surfaces dim it.
+            if isCodexWindowStale(w.resetsAt) {
+                d["stale"] = true
+            } else if let resetsAt = w.resetsAt {
+                d["resetsAt"] = resetsAt
+            }
             return d
         }
         var payload: [String: Any] = [:]

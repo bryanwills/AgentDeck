@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { adjustUsagePercent, formatResetTime } from '../format-utils.js';
+import { adjustUsagePercent, formatResetTime, isCodexWindowStale } from '../format-utils.js';
 
 describe('adjustUsagePercent', () => {
   it('returns undefined when percent is null', () => {
@@ -51,6 +51,38 @@ describe('adjustUsagePercent', () => {
   it('still returns 0 just after the 1h threshold boundary', () => {
     const justInside = new Date(Date.now() - 59 * 60_000).toISOString();
     expect(adjustUsagePercent(42, justInside)).toBe(0);
+  });
+});
+
+describe('isCodexWindowStale', () => {
+  it('returns false when resetsAt is undefined', () => {
+    expect(isCodexWindowStale(undefined)).toBe(false);
+  });
+
+  it('returns false for an invalid date string', () => {
+    expect(isCodexWindowStale('not-a-date')).toBe(false);
+  });
+
+  it('returns false when resetsAt is in the future', () => {
+    const future = new Date(Date.now() + 3600_000).toISOString();
+    expect(isCodexWindowStale(future)).toBe(false);
+  });
+
+  it('returns false when resetsAt is in the past but within the grace window', () => {
+    // Just barely reset — a genuinely-just-rolled-over window should still read "now".
+    const recent = new Date(Date.now() - 60_000).toISOString();
+    expect(isCodexWindowStale(recent)).toBe(false);
+  });
+
+  it('returns true when resetsAt is past beyond the grace window', () => {
+    const old = new Date(Date.now() - 30 * 60_000).toISOString();
+    expect(isCodexWindowStale(old)).toBe(true);
+  });
+
+  it('honors a custom grace', () => {
+    const past = new Date(Date.now() - 2 * 60_000).toISOString();
+    expect(isCodexWindowStale(past, 60_000)).toBe(true);
+    expect(isCodexWindowStale(past, 5 * 60_000)).toBe(false);
   });
 });
 

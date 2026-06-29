@@ -59,8 +59,13 @@ function brandLogo(agent: 'claude' | 'codex', cx: number, cy: number, size: numb
   );
 }
 
-/** Severity ramp by USED percent: <=50 green, 50–80 amber, >80 red. */
-function rampColor(used: number): { fill: string; hi: string } {
+/** Desaturated fill for an expired (stale) window — last-known %, dimmed. */
+const STALE_FILL = '#64748b';
+
+/** Severity ramp by USED percent: <=50 green, 50–80 amber, >80 red. A stale
+ *  window drops to a muted grey so it reads as "not current" at a glance. */
+function rampColor(used: number, stale = false): { fill: string; hi: string } {
+  if (stale) return { fill: STALE_FILL, hi: STALE_FILL };
   if (used > 80) return { fill: '#ef4444', hi: '#fca5a5' };
   if (used > 50) return { fill: '#eab308', hi: '#fde047' };
   return { fill: '#22c55e', hi: '#86efac' };
@@ -78,6 +83,9 @@ export interface UsageGaugeData {
   resetsAt?: string;
   /** False when no live quota exists — dark tile + dim label + "—", no fill. */
   known?: boolean;
+  /** Codex snapshot expired: keep last-known % but desaturate the fill and show
+   *  a "stale" marker instead of a (misleading) "now" countdown. */
+  stale?: boolean;
 }
 
 function esc(s: string): string {
@@ -110,29 +118,35 @@ export function renderUsageGauge(data: UsageGaugeData): string {
     );
   }
 
+  const stale = data.stale === true;
   const used = clampPct(data.usedPercent);
-  const ramp = rampColor(used);
+  const ramp = rampColor(used, stale);
   const fillH = Math.round((H * used) / 100);
   const fillY = H - fillH;
   // Subtle level tint (low opacity) so text reads on top WITHOUT a dark overlay;
-  // a crisp 3px solid line marks the exact level.
+  // a crisp 3px solid line marks the exact level. Stale = extra-faint tint.
+  const fillOpacity = stale ? 0.22 : 0.38;
   const fill = fillH > 0
     ? `<g clip-path="url(#${clipId})">` +
-        `<rect x="0" y="${fillY}" width="${W}" height="${fillH}" fill="${ramp.fill}" opacity="0.38"/>` +
+        `<rect x="0" y="${fillY}" width="${W}" height="${fillH}" fill="${ramp.fill}" opacity="${fillOpacity}"/>` +
         `<rect x="0" y="${fillY}" width="${W}" height="3" fill="${ramp.fill}"/>` +
       `</g>`
     : '';
 
-  const reset = formatResetTime(data.resetsAt);
+  // Expired window: drop the (misleading) countdown for a muted "stale" marker;
+  // the % stays as last-known but dims so it doesn't read as live.
+  const reset = stale ? 'stale' : formatResetTime(data.resetsAt);
+  const pctColor = stale ? LABEL_DIM : HEADLINE;
+  const resetColor = stale ? LABEL_DIM : COUNTDOWN;
 
   return svgWrap(
     // Small text (label/reset) = plain white, NO outline — a stroke muddies
     // small glyphs. Only the big % keeps a thin outline (it can sit over fill).
     clip + bg + fill +
-    `<text x="14" y="36" font-family="JetBrains Mono, monospace" font-size="26" font-weight="bold" fill="${HEADLINE}">${esc(label)}</text>` +
+    `<text x="14" y="36" font-family="JetBrains Mono, monospace" font-size="26" font-weight="bold" fill="${stale ? LABEL_DIM : HEADLINE}">${esc(label)}</text>` +
     logo +
-    `<text x="72" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="46" font-weight="bold" fill="${HEADLINE}">${Math.round(used)}<tspan font-size="24">%</tspan></text>` +
-    (reset ? `<text x="72" y="122" text-anchor="middle" font-family="Arial,sans-serif" font-size="17" font-weight="bold" fill="${COUNTDOWN}">${esc(reset)}</text>` : ''),
+    `<text x="72" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="46" font-weight="bold" fill="${pctColor}">${Math.round(used)}<tspan font-size="24">%</tspan></text>` +
+    (reset ? `<text x="72" y="122" text-anchor="middle" font-family="Arial,sans-serif" font-size="17" font-weight="bold" fill="${resetColor}">${esc(reset)}</text>` : ''),
   );
 }
 
@@ -157,6 +171,9 @@ export interface UsageEncoderTank {
   resetsAt?: string;
   /** False when no live quota exists for this window — dim panel + "—". */
   known: boolean;
+  /** Codex snapshot expired: keep last-known % but desaturate the fill and show
+   *  a "stale" marker instead of a (misleading) "now" countdown. */
+  stale?: boolean;
 }
 
 export interface UsageEncoderData {
@@ -208,24 +225,30 @@ function encPanel(
     );
   }
 
+  const stale = tank.stale === true;
   const used = clampPct(tank.usedPercent);
-  const ramp = rampColor(used);
+  const ramp = rampColor(used, stale);
   const fillH = Math.round((h * used) / 100);
   const fillY = y + h - fillH;
   // Subtle level tint + crisp 3px level line — no dark overlay behind text.
+  // Stale = extra-faint tint so it reads as "not current".
+  const fillOpacity = stale ? 0.22 : 0.38;
   const fill = fillH > 0
     ? `<g clip-path="url(#${clipId})">` +
-        `<rect x="${x}" y="${fillY}" width="${w}" height="${fillH}" fill="${ramp.fill}" opacity="0.38"/>` +
+        `<rect x="${x}" y="${fillY}" width="${w}" height="${fillH}" fill="${ramp.fill}" opacity="${fillOpacity}"/>` +
         `<rect x="${x}" y="${fillY}" width="${w}" height="3" fill="${ramp.fill}"/>` +
       `</g>`
     : '';
-  const reset = formatResetTime(tank.resetsAt);
+  // Expired window: muted "stale" marker instead of the (absent) countdown.
+  const reset = stale ? 'stale' : formatResetTime(tank.resetsAt);
+  const pctColor = stale ? LABEL_DIM : HEADLINE;
+  const resetColor = stale ? LABEL_DIM : COUNTDOWN;
 
   return (
     `<defs>${clip}</defs>` + bg + fill +
     labelEl +
-    `<text x="${cx}" y="${y + h / 2 + (big ? 16 : 12)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${big ? 42 : 26}" font-weight="bold" fill="${HEADLINE}">${Math.round(used)}<tspan font-size="${big ? 20 : 13}">%</tspan></text>` +
-    (reset ? `<text x="${cx}" y="${y + h - 7}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${big ? 15 : 13}" font-weight="bold" fill="${COUNTDOWN}">${esc(reset)}</text>` : '')
+    `<text x="${cx}" y="${y + h / 2 + (big ? 16 : 12)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${big ? 42 : 26}" font-weight="bold" fill="${pctColor}">${Math.round(used)}<tspan font-size="${big ? 20 : 13}">%</tspan></text>` +
+    (reset ? `<text x="${cx}" y="${y + h - 7}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${big ? 15 : 13}" font-weight="bold" fill="${resetColor}">${esc(reset)}</text>` : '')
   );
 }
 

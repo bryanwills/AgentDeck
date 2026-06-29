@@ -810,13 +810,13 @@ private fun buildCodexRateChips(limits: CodexRateLimits?): List<RateChip> {
         limits.primary?.let { p ->
             val pct = p.usedPercent
             if (pct != null) {
-                add(RateChip(label = windowLabel(p.windowMinutes), percent = pct, reset = p.resetsAt?.let { formatResetTime(it) }))
+                add(RateChip(label = windowLabel(p.windowMinutes), percent = pct, reset = p.resetsAt?.let { formatResetTime(it) }, stale = p.stale == true))
             }
         }
         limits.secondary?.let { s ->
             val pct = s.usedPercent
             if (pct != null) {
-                add(RateChip(label = windowLabel(s.windowMinutes), percent = pct, reset = s.resetsAt?.let { formatResetTime(it) }))
+                add(RateChip(label = windowLabel(s.windowMinutes), percent = pct, reset = s.resetsAt?.let { formatResetTime(it) }, stale = s.stale == true))
             }
         }
     }

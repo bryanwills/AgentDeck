@@ -185,6 +185,9 @@ data class CodexRateLimitWindow(
     val windowMinutes: Int? = null,
     /** ISO-8601 reset instant. */
     val resetsAt: String? = null,
+    /** True when this window's snapshot has expired (set centrally by the daemon).
+     *  Renderers dim the gauge and show a "stale" marker instead of "now". */
+    val stale: Boolean? = null,
 )
 
 /** Codex credit balance — the metering credit-based plans report (e.g.
