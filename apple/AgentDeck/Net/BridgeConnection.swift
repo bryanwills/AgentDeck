@@ -22,8 +22,19 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
 
     private static let initialBackoffMs = 1000
     private static let maxBackoffMs = 8000
-    private static let maxReconnectAttempts = 20
-    private static let pingIntervalSec: TimeInterval = 15
+    private static let maxReconnectAttempts = 5
+    // Keepalive cadence. The daemon (ws-server.ts) pings every 15s and evicts any
+    // client that hasn't ponged within one 15s window, so we keep the path warm
+    // well inside that budget: an 8s interval gives ~2x margin, and the first ping
+    // fires shortly after connect (firstPingDelaySec) instead of a full interval
+    // later so a stalled path is detected fast rather than ~15s late.
+    private static let pingIntervalSec: TimeInterval = 8
+    private static let firstPingDelaySec: TimeInterval = 2
+    // A periodic keepalive ping that gets no pong within this window means the TCP
+    // path silently stalled (cross-interface Wi-Fi/Ethernet glitch, sleep/wake) —
+    // treat it as a dead socket and reconnect rather than waiting for the 60s
+    // receive timeout (and long past the daemon's own 15s eviction).
+    private static let pingTimeoutSec: TimeInterval = 5
     private static let healthCheckTimeoutSec: TimeInterval = 3
     private static let connectionTimeoutSec: TimeInterval = 5
 
@@ -129,7 +140,7 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
         // timeoutIntervalForRequest applies per outstanding URLSession receive
         // call for WebSocketTask. When no server push arrives within the window
         // the pending `ws.receive` fails with "Operation timed out" and we tear
-        // the socket down. Must comfortably exceed `pingIntervalSec` (15s) so
+        // the socket down. Must comfortably exceed `pingIntervalSec` (8s) so
         // ping/pong round-trips keep the connection alive between quiet periods.
         config.timeoutIntervalForRequest = 60
         #if os(iOS)
@@ -330,20 +341,45 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
         pingSource?.cancel()
         pingSource = nil
         let source = DispatchSource.makeTimerSource(queue: queue)
-        source.schedule(deadline: .now() + Self.pingIntervalSec, repeating: Self.pingIntervalSec)
+        // First ping fires firstPingDelaySec after connect (not a full interval
+        // later); ±jitter via leeway avoids many clients pinging in lockstep.
+        source.schedule(deadline: .now() + Self.firstPingDelaySec,
+                        repeating: Self.pingIntervalSec,
+                        leeway: .milliseconds(750))
         source.setEventHandler { [weak self] in
             guard let owner = self else { return }
             guard !owner.isTerminating else { return }
-            owner.webSocket?.sendPing { error in
-                guard !owner.isTerminating else { return }
-                if let error {
-                    print("[BridgeConnection] Ping failed: \(error)")
-                    owner.handleDisconnect(error: error)
-                }
-            }
+            owner.sendKeepalivePing()
         }
         source.resume()
         pingSource = source
+    }
+
+    /// One keepalive ping with an explicit timeout. `URLSessionWebSocketTask`'s
+    /// `sendPing` completion only fires on success or a hard error — on a silently
+    /// stalled path the pong may never arrive and the completion can hang well past
+    /// the daemon's 15s eviction window. We bound it ourselves: no pong within
+    /// `pingTimeoutSec` is treated as a dead socket and triggers reconnect.
+    /// Must be called on `queue`.
+    private func sendKeepalivePing() {
+        guard !isTerminating, let ws = webSocket else { return }
+        let box = HealthCheckBox()
+        ws.sendPing { [weak self] error in
+            // tryComplete() first so a received pong cancels the pending timeout
+            // even when there's no error to act on.
+            guard let self, box.tryComplete(), let error else { return }
+            self.queue.async {
+                guard !self.isTerminating, self.webSocket === ws else { return }
+                print("[BridgeConnection] Ping failed: \(error)")
+                self.handleDisconnect(error: error)
+            }
+        }
+        queue.asyncAfter(deadline: .now() + Self.pingTimeoutSec) { [weak self] in
+            guard let self, box.tryComplete() else { return }
+            guard !self.isTerminating, self.webSocket === ws else { return }
+            print("[BridgeConnection] keepalive ping timed out (\(Self.pingTimeoutSec)s) — reconnecting")
+            self.handleDisconnect(error: URLError(.timedOut))
+        }
     }
 
     // MARK: - Health Check & Force Reconnect
@@ -420,7 +456,7 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
                 return
             }
 
-            guard self.shouldReconnect, let urlString = self.url else {
+            guard self.shouldReconnect, self.url != nil else {
                 self.isHandlingDisconnect = false  // No reconnect will follow
                 DispatchQueue.main.async {
                     self.status = .disconnected
@@ -428,8 +464,12 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
                 return
             }
 
-            // Give up after max attempts (5 attempts for all URLs)
-            let maxAttempts = 5
+            // Give up after max attempts. Each reconnect attempt first consults
+            // onReconnectAttempt, which re-resolves mDNS and switches to a freshly
+            // discovered bridge URL if one surfaced — so this cap bounds retries
+            // against a single stale/unreachable cached IP before the waterfall
+            // restarts discovery from scratch.
+            let maxAttempts = Self.maxReconnectAttempts
             if self.reconnectAttempt >= maxAttempts {
                 self.isHandlingDisconnect = false  // No reconnect will follow
                 DispatchQueue.main.async {

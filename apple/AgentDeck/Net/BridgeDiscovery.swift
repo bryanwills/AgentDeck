@@ -37,10 +37,19 @@ struct DiscoveredBridge: Identifiable, Sendable {
 final class BridgeDiscovery: ObservableObject, @unchecked Sendable {
     @Published private(set) var bridges: [DiscoveredBridge] = []
     @Published private(set) var isSearching = false
+    /// True when the NWBrowser reports the iOS Local Network privacy permission is
+    /// denied (PolicyDenied / -65570). Without this the browser silently loops on an
+    /// empty bridge list forever; the UI uses this flag to surface an actionable
+    /// "enable Local Network in Settings" prompt instead of an endless spinner.
+    @Published private(set) var localNetworkDenied = false
 
     private var browser: NWBrowser?
     private let queue = DispatchQueue(label: "dev.agentdeck.discovery")
     private var isTerminating = false
+    /// Debounce for clearing `localNetworkDenied`: a genuine denial flickers
+    /// ready→waiting(PolicyDenied) every restart, so we only treat the browser as
+    /// permitted once it stays `.ready` for a beat without re-entering PolicyDenied.
+    private var clearDeniedWork: DispatchWorkItem?
 
     // MARK: - Start/Stop
 
@@ -61,11 +70,23 @@ final class BridgeDiscovery: ObservableObject, @unchecked Sendable {
                 switch state {
                 case .ready:
                     self.isSearching = true
-                case .waiting:
-                    // .waiting typically means local network permission was just granted
-                    // or network conditions changed. Restart the browser to pick up changes.
-                    print("[Discovery] browser waiting — restarting to apply permission change")
+                    // If the browser settles into .ready without bouncing back to
+                    // PolicyDenied, Local Network is effectively permitted — clear the
+                    // flag (debounced to ignore the brief flicker of a true denial loop).
+                    self.scheduleClearLocalNetworkDenied()
+                case .waiting(let error):
+                    // .waiting means either (a) Local Network permission was just
+                    // granted / the network changed (restart to pick it up), or
+                    // (b) permission is DENIED (PolicyDenied / -65570) and the browser
+                    // will never proceed — surface an in-app prompt instead of spinning.
+                    let denied = Self.isLocalNetworkDenied(error)
+                    print("[Discovery] browser waiting: \(error)\(denied ? " — Local Network DENIED" : "")")
                     self.isSearching = false
+                    if denied {
+                        self.clearDeniedWork?.cancel()
+                        self.clearDeniedWork = nil
+                        self.localNetworkDenied = true
+                    }
                     self.restartBrowser()
                 case .failed(let error):
                     print("[Discovery] browser failed: \(error)")
@@ -85,6 +106,13 @@ final class BridgeDiscovery: ObservableObject, @unchecked Sendable {
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             guard let self, !self.isTerminating else { return }
             print("[Discovery] browseResults changed: \(results.count) results")
+            // A results callback means the browser is functioning — Local Network is
+            // permitted. Clear any stale denied flag immediately.
+            DispatchQueue.main.async {
+                self.clearDeniedWork?.cancel()
+                self.clearDeniedWork = nil
+                self.localNetworkDenied = false
+            }
             for r in results {
                 print("[Discovery]   endpoint=\(r.endpoint) metadata=\(r.metadata)")
             }
@@ -106,9 +134,34 @@ final class BridgeDiscovery: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Detect the Local Network "PolicyDenied" condition from an NWBrowser waiting
+    /// error. Network.framework surfaces it as DNS error -65570
+    /// (`kDNSServiceErr_PolicyDenied`); we match by code with a description fallback
+    /// for resilience across OS versions.
+    private static func isLocalNetworkDenied(_ error: NWError) -> Bool {
+        if case .dns(let code) = error, code == -65570 { return true }
+        return String(describing: error).contains("PolicyDenied")
+    }
+
+    /// Clear `localNetworkDenied` only after the browser has stayed `.ready` for a
+    /// beat — a true denial loop re-enters PolicyDenied within that window and cancels
+    /// this, while a genuinely-permitted browser (even with no daemon present) clears.
+    private func scheduleClearLocalNetworkDenied() {
+        clearDeniedWork?.cancel()
+        guard localNetworkDenied else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isTerminating else { return }
+            self.localNetworkDenied = false
+        }
+        clearDeniedWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+    }
+
     func stopSearching() {
         browser?.cancel()
         browser = nil
+        clearDeniedWork?.cancel()
+        clearDeniedWork = nil
         DispatchQueue.main.async {
             self.isSearching = false
             self.bridges.removeAll()
@@ -117,6 +170,8 @@ final class BridgeDiscovery: ObservableObject, @unchecked Sendable {
 
     func prepareForTermination() {
         isTerminating = true
+        clearDeniedWork?.cancel()
+        clearDeniedWork = nil
         browser?.cancel()
         browser = nil
         DispatchQueue.main.async {

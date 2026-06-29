@@ -39,6 +39,13 @@ struct ConnectionOverlay: View {
                         .font(.subheadline)
                         .foregroundStyle(slateText)
 
+                    // Local Network permission denied — the browser can never find the
+                    // daemon until the user enables it, so guide them there directly
+                    // instead of spinning on "Searching…" forever.
+                    if stateHolder.discovery.localNetworkDenied {
+                        localNetworkDeniedCard
+                    }
+
                     // Reconnecting details (stop button only)
                     if isReconnecting {
                         Button {
@@ -182,6 +189,54 @@ struct ConnectionOverlay: View {
     }
 
     // MARK: - Helpers
+
+    /// Shown when iOS Local Network permission is denied — the #1 reason a fresh
+    /// install "won't connect." Points the user straight at the toggle.
+    private var localNetworkDeniedCard: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.title2)
+                .foregroundStyle(.yellow)
+            Text("Local Network access is off")
+                .font(.subheadline.bold())
+                .foregroundStyle(.white)
+            Text("AgentDeck needs Local Network permission to find the daemon on your Wi-Fi. Turn it on, then come back here.")
+                .font(.caption)
+                .foregroundStyle(slateText)
+                .multilineTextAlignment(.center)
+            #if os(iOS)
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                Text("Open Settings")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(.yellow.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(.yellow.opacity(0.6), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            #else
+            Text("Enable it in System Settings → Privacy & Security → Local Network → AgentDeck.")
+                .font(.caption2)
+                .foregroundStyle(slateText.opacity(0.7))
+                .multilineTextAlignment(.center)
+            #endif
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.yellow.opacity(0.08)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.yellow.opacity(0.3), lineWidth: 1)
+        )
+    }
 
     private var statusText: String {
         if isReconnecting {
