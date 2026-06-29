@@ -29,59 +29,11 @@ static lv_obj_t* btnRotate = nullptr;
 static lv_obj_t* lblRotate = nullptr;
 #endif
 
-// Manual swipe detection — LVGL gesture events unreliable on some touch drivers (GT911)
-static lv_point_t touchStart;
-static bool tracking = false;
-static constexpr int SWIPE_THRESHOLD = 40;  // minimum pixels for swipe
-
-static void gestureEvent(lv_event_t* e) {
-#if !defined(BOARD_IPS10)
-    // Swipe-up → full-screen Timeline view. Disabled on IPS10: the tablet shows cards + office
-    // side-by-side and the per-session activity already lives in the cards, so a full-screen
-    // Timeline overlay is redundant and fires accidentally on stray swipes.
-    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
-    if (dir == LV_DIR_TOP) {
-        lockState();
-        g_state.timelineView = true;
-        unlockState();
-    }
-#endif
-}
-
 static void screenTouchEvent(lv_event_t* e) {
-    lv_event_code_t code = lv_event_get_code(e);
-
-    if (code == LV_EVENT_PRESSED) {
-        lv_indev_t* indev = lv_indev_active();
-        if (indev) {
-            lv_indev_get_point(indev, &touchStart);
-            tracking = true;
-        }
-    } else if (code == LV_EVENT_RELEASED && tracking) {
-        tracking = false;
-        lv_point_t touchEnd;
-        lv_indev_t* indev = lv_indev_active();
-        if (indev) {
-            lv_indev_get_point(indev, &touchEnd);
-            int dy = touchEnd.y - touchStart.y;
-            int dx = touchEnd.x - touchStart.x;
-            int absDy = (dy < 0) ? -dy : dy;
-            int absDx = (dx < 0) ? -dx : dx;
+    if (lv_event_get_code(e) == LV_EVENT_SHORT_CLICKED) {
 #if !defined(BOARD_IPS10)
-            if (absDy > SWIPE_THRESHOLD && absDy > absDx) {
-                if (dy < 0) {
-                    // Swipe up → timeline (disabled on IPS10 — redundant full-screen overlay)
-                    lockState();
-                    g_state.timelineView = true;
-                    unlockState();
-                }
-            }
-#endif
-        }
-    } else if (code == LV_EVENT_SHORT_CLICKED) {
-#if !defined(BOARD_IPS10)
-        // Tap → toggle HUD visibility (only if no swipe detected).
-        // Small round/TTGO panels hide the HUD to reveal the full terrarium.
+        // Tap → toggle HUD visibility. Small round/TTGO panels hide the HUD to reveal
+        // the full terrarium.
         HUD::setVisible(!HUD::isVisible());
 #endif
         // IPS10 tablet layout: the cards pane is a permanent side-by-side surface, not a
@@ -190,10 +142,7 @@ lv_obj_t* aquariumCreate() {
     lv_obj_set_style_text_font(connStatusLabel, &lv_font_montserrat_16, 0);
     lv_label_set_text(connStatusLabel, "");
 
-    // Swipe + tap detection: manual tracking as fallback for LVGL gesture
-    lv_obj_add_event_cb(screen, gestureEvent, LV_EVENT_GESTURE, NULL);
-    lv_obj_add_event_cb(screen, screenTouchEvent, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(screen, screenTouchEvent, LV_EVENT_RELEASED, NULL);
+    // Tap detection: toggle HUD visibility.
     lv_obj_add_event_cb(screen, screenTouchEvent, LV_EVENT_SHORT_CLICKED, NULL);
 
 #if defined(BOARD_IPS35)

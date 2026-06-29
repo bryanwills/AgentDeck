@@ -28,7 +28,6 @@
 #include "ui/display.h"
 #include "ui/screens/splash.h"
 #include "ui/screens/aquarium.h"
-#include "ui/screens/timeline_scr.h"
 #include "ui/screens/settings.h"
 #include "ui/screens/permission.h"
 #endif
@@ -41,13 +40,11 @@ SemaphoreHandle_t g_stateMutex = nullptr;
 // ===== Screen objects (LVGL boards only) =====
 static lv_obj_t* scrSplash = nullptr;
 static lv_obj_t* scrAquarium = nullptr;
-static lv_obj_t* scrTimeline = nullptr;
 static lv_obj_t* scrSettings = nullptr;
 
 static enum {
     VIEW_SPLASH,
     VIEW_AQUARIUM,
-    VIEW_TIMELINE,
     VIEW_SETTINGS
 } currentView = VIEW_SPLASH;
 #endif
@@ -220,7 +217,6 @@ static void uiTask(void* param) {
 
     scrAquarium = Screens::aquariumCreate();
     Screens::permissionCreate(scrAquarium);
-    scrTimeline = Screens::timelineCreate();
     scrSettings = Screens::settingsCreate();
 
     // Long press on aquarium → settings
@@ -233,7 +229,6 @@ static void uiTask(void* param) {
 
     uint32_t lastFrameMs = millis();
     uint32_t splashStartMs = millis();
-    bool wasTimelineView = false;
     bool everConnected = false;
     // Connection overlay is LEVEL-triggered: track the last status actually applied
     // to the scrim, not edges of the inputs. Edge-tracking left the recreated scrim
@@ -320,7 +315,6 @@ static void uiTask(void* param) {
             // (every JSON parse failing with NoMemory) and the device froze.
             lv_obj_t* oldSplash = scrSplash;
             lv_obj_t* oldAquarium = scrAquarium;
-            lv_obj_t* oldTimeline = scrTimeline;
             lv_obj_t* oldSettings = scrSettings;
 
             // Recreate all screens with new dimensions
@@ -328,14 +322,11 @@ static void uiTask(void* param) {
             scrAquarium = Screens::aquariumCreate();
             Screens::permissionCreate(scrAquarium);
             lv_obj_add_event_cb(lv_obj_get_child(scrAquarium, 0), onLongPress, LV_EVENT_LONG_PRESSED, NULL);
-            scrTimeline = Screens::timelineCreate();
             scrSettings = Screens::settingsCreate();
             lv_obj_add_event_cb(scrSettings, settingsGesture, LV_EVENT_GESTURE, NULL);
 
             if (currentView == VIEW_SPLASH) {
                 lv_screen_load(scrSplash);
-            } else if (currentView == VIEW_TIMELINE) {
-                lv_screen_load(scrTimeline);
             } else if (currentView == VIEW_SETTINGS) {
                 lv_screen_load(scrSettings);
             } else {
@@ -351,7 +342,6 @@ static void uiTask(void* param) {
             // buffer (not owned by the object), so the live screen keeps working.
             if (oldSplash) lv_obj_del(oldSplash);
             if (oldAquarium) lv_obj_del(oldAquarium);
-            if (oldTimeline) lv_obj_del(oldTimeline);
             if (oldSettings) lv_obj_del(oldSettings);
 
             // The recreated aquarium has a brand-new connScrim at its hardcoded
@@ -364,7 +354,6 @@ static void uiTask(void* param) {
         // Read view state
         lockState();
         bool connected = g_state.wsConnected || Net::serialConnected();
-        bool wantTimeline = g_state.timelineView;
         unlockState();
 
         if (connected) {
@@ -379,12 +368,8 @@ static void uiTask(void* param) {
 
         if (!connected && everConnected &&
             currentView != VIEW_AQUARIUM && currentView != VIEW_SPLASH) {
-            lockState();
-            g_state.timelineView = false;
-            unlockState();
             lv_screen_load_anim(scrAquarium, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
             currentView = VIEW_AQUARIUM;
-            wasTimelineView = false;
         }
 
         // Screen transitions
@@ -402,16 +387,6 @@ static void uiTask(void* param) {
                 }
             }
         }
-
-        // Aquarium ↔ Timeline swipe
-        if (currentView == VIEW_AQUARIUM && wantTimeline && !wasTimelineView) {
-            lv_screen_load_anim(scrTimeline, LV_SCR_LOAD_ANIM_MOVE_TOP, 200, 0, false);
-            currentView = VIEW_TIMELINE;
-        } else if (currentView == VIEW_TIMELINE && !wantTimeline && wasTimelineView) {
-            lv_screen_load_anim(scrAquarium, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 200, 0, false);
-            currentView = VIEW_AQUARIUM;
-        }
-        wasTimelineView = wantTimeline;
 
         // Update connection status overlay on aquarium (LEVEL-triggered).
         // connected = serial OR websocket — either path is valid. We compute the
@@ -433,7 +408,7 @@ static void uiTask(void* param) {
         } else {
             desiredOverlay = ConnOverlayStatus::SEARCHING;
         }
-        if ((currentView == VIEW_AQUARIUM || currentView == VIEW_TIMELINE) &&
+        if (currentView == VIEW_AQUARIUM &&
             (int)desiredOverlay != lastOverlayStatus) {
             lastOverlayStatus = (int)desiredOverlay;
             Screens::aquariumSetConnectionStatus(desiredOverlay);
@@ -448,9 +423,6 @@ static void uiTask(void* param) {
         switch (currentView) {
             case VIEW_AQUARIUM:
                 Screens::aquariumUpdate(dt);
-                break;
-            case VIEW_TIMELINE:
-                Screens::timelineUpdate();
                 break;
             case VIEW_SETTINGS:
                 Screens::settingsUpdate();

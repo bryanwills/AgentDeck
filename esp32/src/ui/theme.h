@@ -81,16 +81,13 @@ constexpr uint32_t StatusRed    = 0xEF4444;
 constexpr uint32_t StatusCyan   = 0x00E5FF;
 constexpr uint32_t StatusPurple = 0xA855F7;
 
-// --- Timeline type colors ---
+// --- Activity type colors (shared by the TTGO activity widget) ---
 constexpr uint32_t TLChatStart   = 0x22C55E;  // green
 constexpr uint32_t TLToolReq     = 0x3B82F6;  // blue
 constexpr uint32_t TLToolOk      = 0x00E5FF;  // cyan
 constexpr uint32_t TLError       = 0xEF4444;  // red
 constexpr uint32_t TLChatEnd     = 0xFBBF24;  // amber
 constexpr uint32_t TLModelCall   = 0xA855F7;  // purple
-
-// --- Timeline background ---
-constexpr uint32_t TimelineBg    = 0x0A1628;
 
 // --- LED cable (omitted on ESP32 but kept for reference) ---
 constexpr uint32_t LEDGreen  = 0x22C55E;

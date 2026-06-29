@@ -168,7 +168,6 @@ struct DashboardState {
 
     // View state
     bool hudVisible;
-    bool timelineView;  // true = timeline screen, false = aquarium
 
     // Orientation change request (set by protocol/buttons, consumed by UI task)
     bool orientationChanged;
@@ -187,7 +186,6 @@ struct DashboardState {
         hostDimMode = 0;     // off
         hostDimLevel = 25;   // ~10% fallback (only used in min mode)
         hudVisible = true;
-        timelineView = false;
         orientationChanged = false;
         pendingLandscape = true;
         pendingRotation = -1;
@@ -239,7 +237,6 @@ struct DashboardState {
         antigravityCredits = -1.0f;
         antigravityPlan[0] = '\0';
         usageStale = true;
-        timelineView = false;
         updateCreatureStates();
     }
 

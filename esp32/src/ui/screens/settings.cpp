@@ -32,13 +32,6 @@ static void onBrightnessChange(lv_event_t* e) {
     lv_label_set_text(lblBrightVal, buf);
 }
 
-static void onBack(lv_event_t* e) {
-    // Return to previous screen
-    lockState();
-    g_state.timelineView = false;
-    unlockState();
-}
-
 namespace Screens {
 
 lv_obj_t* settingsCreate() {
