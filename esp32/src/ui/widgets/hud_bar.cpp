@@ -7,6 +7,7 @@
 #include "net/serial_client.h"
 #include "net/ws_client.h"
 #include <Arduino.h>
+#include <cstdarg>
 
 #if defined(IPS10_PERF_HUD)
 // Defined in main.cpp (global scope) — perf overlay worst-frame stats.
@@ -19,6 +20,33 @@ static lv_obj_t* panelLeft = nullptr;
 static lv_obj_t* lblLogo = nullptr;
 static lv_obj_t* logoLine = nullptr;   // accent underline
 static lv_obj_t* lblSessions = nullptr;
+
+#if !defined(BOARD_IPS10)
+static void appendBounded(char* buf, size_t len, size_t& pos, const char* fmt, ...) {
+    if (!buf || len == 0) return;
+    if (pos >= len) {
+        buf[len - 1] = '\0';
+        return;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+    int written = vsnprintf(buf + pos, len - pos, fmt, args);
+    va_end(args);
+
+    if (written < 0) {
+        buf[pos] = '\0';
+        return;
+    }
+    const size_t used = (size_t)written;
+    if (used >= len - pos) {
+        pos = len - 1;
+        buf[pos] = '\0';
+    } else {
+        pos += used;
+    }
+}
+#endif
 
 #if defined(BOARD_IPS10)
 // === IPS10 (800×1280) tablet sidebar: a LIVING AGENT MOSAIC ===
@@ -1418,10 +1446,13 @@ void update() {
     agPlan[sizeof(agPlan) - 1] = '\0';
 #endif
 
-    // Copy session list
+#if !defined(BOARD_IPS10)
+    // Copy session list for the compact legacy HUD. IPS10 renders the D1 mosaic
+    // below, so avoid building the legacy text buffer on its UI stack.
     uint8_t sessionCount = hasData ? g_state.sessionCount : (uint8_t)0;
     SessionInfo sessions[10];
     memcpy(sessions, g_state.sessions, sizeof(sessions));
+#endif
 
     // Fallback: if no sessions, use primary state
     AgentState primaryState = g_state.state;
@@ -1434,12 +1465,15 @@ void update() {
     // HUD shows the OpenClaw label only when the Gateway is authenticated,
     // matching the creature gate. Reachability alone (`gatewayAvailable`)
     // used to light up an "OpenClaw" row even with no shared token.
+#if !defined(BOARD_IPS10)
     bool gateway = g_state.gatewayConnected;
+#endif
     unlockState();
 
+#if !defined(BOARD_IPS10)
     // === Left panel: session list ===
     char buf[400];
-    int pos = 0;
+    size_t pos = 0;
 
     if (sessionCount > 0) {
         // Show real session list from bridge
@@ -1453,7 +1487,7 @@ void update() {
             uint32_t sColor = sessionStateColor(sessions[i].state);
 
             // Format: colored-type-dot + project name + state dot
-            pos += snprintf(buf + pos, sizeof(buf) - pos,
+            appendBounded(buf, sizeof(buf), pos,
                 "#%06lX " LV_SYMBOL_BULLET "# %s  #%06lX " LV_SYMBOL_BULLET "#\n",
                 (unsigned long)dotColor,
                 sessions[i].projectName[0] ? sessions[i].projectName : sessions[i].id,
@@ -1464,15 +1498,14 @@ void update() {
         uint32_t dotColor = agentDotColor(primaryAgent);
         uint32_t sColor = stateColor(primaryState);
 
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
+        appendBounded(buf, sizeof(buf), pos,
             "#%06lX " LV_SYMBOL_BULLET "# %s  #%06lX " LV_SYMBOL_BULLET "#\n",
             (unsigned long)dotColor,
             primaryProject[0] ? primaryProject : "Agent",
             (unsigned long)sColor);
     } else {
         // No data yet — show connecting message
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "#808080 Connecting...#\n");
+        appendBounded(buf, sizeof(buf), pos, "#808080 Connecting...#\n");
     }
 
     // Gateway indicator (if available but no openclaw session shown)
@@ -1485,7 +1518,7 @@ void update() {
             }
         }
         if (!hasOC) {
-            pos += snprintf(buf + pos, sizeof(buf) - pos,
+            appendBounded(buf, sizeof(buf), pos,
                 "#%06lX " LV_SYMBOL_BULLET "# OpenClaw\n",
                 (unsigned long)Theme::CrayfishShell);
         }
@@ -1496,6 +1529,7 @@ void update() {
     else buf[pos] = '\0';
 
     if (lblSessions) lv_label_set_text(lblSessions, buf);  // null on IPS10 (mosaic instead)
+#endif
 
     // === Right panel: water-fill gauges ===
     updateGauge(gauge5hFill, gauge5hPct, gauge5hReset, p5h, reset5h, usageStale);

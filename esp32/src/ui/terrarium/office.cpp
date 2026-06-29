@@ -9,11 +9,9 @@
 #include "creature_glyphs_generated.h"
 
 // ── AgentDeck 10" "Pixel Office" (canonical: tenin/office.js) ────────────────────────────
-// Agents are workers at desks on a tile grid. Stepped (snap) movement with a short hop, blocky
-// fill-rect pixels — cheap on the P4. A STATIC base (carpet + grid + wall + windows + team-pod
-// rugs/labels) is rendered once and memcpy'd each frame; only desks + workers + bubbles redraw,
-// and the whole thing is capped at ~15 fps. That keeps the per-frame cost tiny vs. the old
-// per-pixel aquarium (which fully recomputed 408×800 px every frame and stuttered).
+// Agents are workers on a tile grid, clustered by project huddle and gathered in REST when idle.
+// A static base (carpet, huddle tables, props, labels) is rendered once and memcpy'd only when the
+// drawn scene changes; workers and bubbles are cheap blocky sprites on top.
 
 namespace Office {
 
@@ -33,18 +31,9 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 }
 #define HEX565(h) rgb565((uint8_t)((h)>>16), (uint8_t)((h)>>8), (uint8_t)(h))
 static const uint16_t C_carpetA = HEX565(0x173a33), C_carpetB = HEX565(0x143631), C_carpetEdge = HEX565(0x0e2a25);
-// Wall a touch lighter than the mockup (#0c211d) so the band reads on the dim 10" panel,
-// with a modest window glow — not the over-bright teal that was cluttering the caption area.
-static const uint16_t C_wall = HEX565(0x0e241f), C_wallHi = HEX565(0x143731);
-static const uint16_t C_window = HEX565(0x1f5048), C_windowGlow = HEX565(0x3d8576), C_sill = HEX565(0x0a1f1a);
 static const uint16_t C_rug = HEX565(0x1d4a42), C_rug2 = HEX565(0x225751);
-static const uint16_t C_lounge = HEX565(0x2c5a4f);   // break-area floor (warmer than pod rugs)
-static const uint16_t C_roomHdr = HEX565(0x21504a), C_roomWall = HEX565(0x4a7d72);  // project room header + wall
-static const uint16_t C_commons = HEX565(0x1d4a5a), C_commonsWall = HEX565(0x3f8fa0);  // shared/system room (cool)
 static const uint16_t C_deskTop = HEX565(0x34574f), C_deskHi = HEX565(0x3e655c), C_deskEdge = HEX565(0x1d342f);
-static const uint16_t C_monFrame = HEX565(0x0a1916), C_monOff = HEX565(0x1a302b);
 static const uint16_t C_bubble = HEX565(0x0a1714);
-static const uint16_t C_label = HEX565(0xcfe6df), C_labelDim = HEX565(0x6f9a90);
 // Office props (office.js C): plant, water cooler, coffee machine + a filing cabinet.
 static const uint16_t C_plantPot = HEX565(0x7a4a2c), C_plant = HEX565(0x3f8f63), C_plant2 = HEX565(0x4fa873);
 static const uint16_t C_cooler = HEX565(0x2f6f8a), C_coolerTop = HEX565(0x9fe0ee);
@@ -70,7 +59,7 @@ static const char* agentShort(const char* t) {
     if (strstr(t, "claude"))   return "Claude";
     return "Agent";
 }
-// state → desk/bubble color (STATE.*.color)
+// state → bubble/accent color (STATE.*.color)
 static uint32_t stateColor(const char* s) {
     if (strstr(s, "awaiting")) return 0xFFA93D;
     if (strstr(s, "error") || strstr(s, "fail")) return 0xFF6B6B;
@@ -92,12 +81,12 @@ static const uint8_t* agentGlyphA8(const char* t) {
 static lv_obj_t* canvas = nullptr;
 static lv_draw_buf_t drawBuf;
 static uint16_t* buf = nullptr;      // live frame
-static uint16_t* base = nullptr;     // cached static scene (carpet+wall+windows+pods)
+static uint16_t* base = nullptr;     // cached static scene (carpet + huddle tables + props)
 static bool baseDirty = true;
 static int W = 0, H = 0;
 
 // ── grid layout ──
-static int tile = 40, cols = 7, rows = 14, gx = 0, gy = 0, u = 3, wallH = 24;
+static int tile = 40, cols = 7, rows = 14, gx = 0, gy = 0, u = 3;
 static inline void tilePx(int c, int r, int& x, int& y) { x = gx + c * tile; y = gy + r * tile; }
 
 // ── pods + props + workers ──
@@ -113,22 +102,10 @@ static bool propCell(int c, int r) {
     return false;
 }
 
-// ── lounge (break area) ── idle agents drift here and gather around the cooler/
-// coffee for "tea time" instead of loitering at their desks. Bottom-left band.
+// ── REST band ── idle agents drift here and gather around the cooler/coffee.
 static int loungeC = 1, loungeR = 0, loungeW = 0, loungeH = 0;
-static bool loungeCell(int c, int r) {
-    return loungeW > 0 && c >= loungeC && c < loungeC + loungeW && r >= loungeR && r < loungeR + loungeH;
-}
 
-// ── commons (shared / system files) ── a distinct labeled room a working agent
-// steps into when it touches shared resources, then returns to its desk. Bottom-right.
-static int commonsC = 0, commonsR = 0, commonsW = 0, commonsH = 0;
-static bool commonsCell(int c, int r) {
-    return commonsW > 0 && c >= commonsC && c < commonsC + commonsW && r >= commonsR && r < commonsR + commonsH;
-}
-
-// ── room name-plate labels (LVGL overlays over the canvas: project rooms + COMMONS
-// + LOUNGE) — the canvas has no font, so legibility comes from these overlays. ──
+// ── room name-plate labels (LVGL overlays over the canvas) ──
 static lv_obj_t* officeParent = nullptr;
 static lv_obj_t* roomLabels[MAXAG + 2] = {nullptr};
 static const char* projectBasename(const char* p) {
@@ -141,25 +118,17 @@ struct Worker {
     char agent[16], project[40], state[20], id[32];
     char lastState[20];          // detect idle↔working transitions → re-pick target
     uint32_t accent;
-    bool roamer = false;         // OpenClaw = mobile gateway: no desk, roams when active, corners when idle
-    int seatC, seatR;            // desk cell (roamers: their resting corner)
+    int seatC, seatR;            // project-huddle slot
     int col, row, prevCol, prevRow;
     uint32_t stepAtMs;
     int lingerC, lingerR; bool hasLinger;
     int wanderIn;
-    int tmpC, tmpR; bool hasTmp; int tmpBackTick;
     char facing;                 // 'L','R','U','D'
     float bobPhase;
-    uint32_t roamSeed;
 };
 static Worker wk[MAXAG];
 static int nWk = 0;
 
-// A desk cell belongs to a seated (non-roamer) worker.
-static bool deskOccupied(int c, int r) {
-    for (int i = 0; i < nWk; i++) if (wk[i].active && !wk[i].roamer && wk[i].seatC == c && wk[i].seatR == r) return true;
-    return false;
-}
 // A grid cell currently held by another worker (logical position) — used to stop overlap.
 static bool workerCell(int c, int r, int except) {
     for (int i = 0; i < nWk; i++) if (i != except && wk[i].active && wk[i].col == c && wk[i].row == r) return true;
@@ -246,7 +215,30 @@ static void drawBubble(int bx, int by, char g, uint16_t col) {
         if (m[r][c]) blk(bx + (c + 1) * u, by + r * u, u, u, col);
 }
 
-// ── layout: tiles + project pods ──
+// ── Minecraft block world ─────────────────────────────────────────────────────
+// Strip a trailing " #N" suffix so "Foo #1" / "Foo #2" group as the same task.
+static void normProject(const char* in, char* out, int outSz) {
+    int n = (int)strlen(in), e = n;
+    while (e > 0 && in[e-1] >= '0' && in[e-1] <= '9') e--;
+    if (e < n && e > 0 && in[e-1] == '#') {
+        int s = e - 1;
+        while (s > 0 && in[s-1] == ' ') s--;
+        n = s;
+    }
+    if (n <= 0 || n >= outSz) { strncpy(out, in, outSz-1); out[outSz-1] = '\0'; return; }
+    memcpy(out, in, n); out[n] = '\0';
+}
+// A shared table the huddle gathers around (beveled blocky rect, static).
+static void drawTable(int x, int y, int w, int h) {
+    if (w < 8 || h < 8) return;
+    blk(x + 2, y + h, w - 4, 2, HEX565(0x06120f));   // base shadow
+    blk(x, y, w, h, C_deskTop);
+    blk(x, y, w, 2, C_deskHi);
+    blk(x, y + h - 2, w, 2, C_deskEdge);
+}
+static bool blockedCell(int c, int r);   // fwd
+
+// ── layout: dynamic project huddles on the block world ──
 static void buildLayout() {
     int mn = W < H ? W : H;
     tile = mn / 7; if (tile < 26) tile = 26; if (tile > 54) tile = 54;
@@ -255,61 +247,72 @@ static void buildLayout() {
     gx = (W - cols * tile) / 2;
     gy = (H - rows * tile) / 2;
     u = tile / 14; if (u < 2) u = 2;
-    wallH = (int)(tile * 0.62f);
+    // REST waiting room — a wide band across the bottom; many idle agents fill it in
+    // a no-overlap grid so they all stay visible.
+    loungeH = (rows >= 12) ? 3 : 2; loungeW = cols - 2; loungeC = 1;
+    loungeR = rows - loungeH - 1;     if (loungeR < 2) loungeR = 2;
 
-    // Full-width zones stack vertically on the tall portrait strip. Project rooms
-    // fill from the top; the shared COMMONS and the LOUNGE are the two reserved
-    // bottom bands so they're always on screen. Full width → readable name plates.
-    const int deskC0 = 1, deskCols = (cols - 2 > 0) ? cols - 2 : 1;   // desk cols (0 + cols-1 are margins)
-
-    loungeH  = 2; loungeW  = cols; loungeC  = 0; loungeR  = rows - loungeH;
-    commonsH = 2; commonsW = cols; commonsC = 0; commonsR = loungeR - 1 - commonsH;
-    if (commonsR < 3) { commonsR = 0; commonsW = 0; }                 // strip too short → no commons
-    const int projBottom = (commonsW > 0 ? commonsR : loungeR) - 1;   // last project row (corridor above the bands)
-
-    // Each project becomes a full-width horizontal "room" band, stacked top→down,
-    // separated by a one-row corridor. Same project sits together in its band.
-    podCount = 0;
-    int rowCursor = 1;
-    bool done[MAXAG] = {false};
-    for (int a = 0; a < nWk; a++) {
-        if (done[a]) continue;
-        int mem[MAXAG], mc = 0;
-        for (int b = a; b < nWk; b++)
-            if (!done[b] && strcmp(wk[b].project, wk[a].project) == 0) { mem[mc++] = b; done[b] = true; }
-        int deskRows = (mc + deskCols - 1) / deskCols; if (deskRows < 1) deskRows = 1;
-        int hT = 1 + deskRows;                                        // header row + desk row(s)
-        if (rowCursor + hT - 1 > projBottom) {                        // out of vertical room
-            hT = projBottom - rowCursor + 1; if (hT < 2) hT = 2;
-        }
-        Pod& pod = pods[podCount];
-        strncpy(pod.project, wk[a].project, sizeof(pod.project) - 1); pod.project[sizeof(pod.project)-1] = '\0';
-        pod.c = 0; pod.r = rowCursor; pod.w = cols; pod.h = hT; pod.count = mc;
-        for (int k = 0; k < mc; k++) {
-            int sc = deskC0 + (k % deskCols);
-            int sr = rowCursor + 1 + k / deskCols;
-            if (sr > rowCursor + hT - 1) sr = rowCursor + hT - 1;     // keep within the band
-            wk[mem[k]].seatC = sc; wk[mem[k]].seatR = sr;
-        }
-        podCount++;
-        rowCursor += hT + 1;                                          // corridor gap between rooms
-        if (rowCursor > projBottom) break;
-    }
-
-    // props: cooler + coffee in the LOUNGE band, a shelf in COMMONS, a plant in a corner.
+    // props: coffee + cooler at the REST band, plants in the top corners.
     propCount = 0;
-    const Prop cand[4] = {
-        {1, 1, loungeR + loungeH - 1}, {2, 2, loungeR + loungeH - 1},   // cooler + coffee (lounge)
-        {3, cols - 2, commonsR + commonsH - 1},                          // shelf in COMMONS
-        {0, cols - 2, loungeR + loungeH - 1},                            // plant (lounge corner)
+    const Prop pcand[4] = {
+        {2, loungeC, loungeR + loungeH - 1}, {1, loungeC + loungeW - 1, loungeR + loungeH - 1},
+        {0, 1, 1}, {0, cols - 2, 1},
     };
     for (int i = 0; i < 4 && propCount < (int)(sizeof(props)/sizeof(props[0])); i++) {
-        const Prop& p = cand[i];
-        if (p.c < 1 || p.c > cols - 1 || p.r < 1 || p.r > rows - 1) continue;
-        if (deskOccupied(p.c, p.r)) continue;
+        const Prop& p = pcand[i];
+        if (p.c < 1 || p.c >= cols || p.r < 1 || p.r >= rows) continue;
         props[propCount++] = p;
     }
+
+    // Dynamic project huddles: workers whose (normalized) project name matches cluster
+    // into a small box placed across the floor (alternating columns, stacked), each in
+    // a distinct slot so creatures gather but never overlap. Re-formed on any change.
+    podCount = 0;
+    bool done[MAXAG] = {false};
+    int colCursor[2] = {1, 1};
+    int huddleIdx = 0;
+    for (int a = 0; a < nWk; a++) {
+        if (done[a]) continue;
+        char na[40]; normProject(wk[a].project, na, sizeof(na));
+        int mem[MAXAG], mc = 0;
+        for (int b = a; b < nWk; b++) {
+            if (done[b]) continue;
+            char nb[40]; normProject(wk[b].project, nb, sizeof(nb));
+            if (strcmp(na, nb) == 0) { mem[mc++] = b; done[b] = true; }
+        }
+        int slotCols = mc >= 5 ? 3 : (mc >= 2 ? 2 : 1);
+        int slotRows = (mc + slotCols - 1) / slotCols;
+        int boxW = slotCols, boxH = 1 + slotRows;          // nametag row + slot rows
+        int side = huddleIdx & 1;
+        int boxC = side == 0 ? 1 : (cols - 1 - boxW); if (boxC < 1) boxC = 1;
+        int boxR = colCursor[side];
+        if (boxR + boxH - 1 >= loungeR - 1) {              // column full → try the other
+            side ^= 1; boxC = side == 0 ? 1 : (cols - 1 - boxW); if (boxC < 1) boxC = 1; boxR = colCursor[side];
+            if (boxR + boxH - 1 >= loungeR - 1) boxR = 1;
+        }
+        Pod& pod = pods[podCount];
+        strncpy(pod.project, na, sizeof(pod.project) - 1); pod.project[sizeof(pod.project)-1] = '\0';
+        pod.c = boxC; pod.r = boxR; pod.w = boxW; pod.h = boxH; pod.count = mc;
+        int placed = 0;
+        for (int rr = 0; rr < slotRows && placed < mc; rr++)
+            for (int cc = 0; cc < slotCols && placed < mc; cc++) {
+                int sc = boxC + cc, sr = boxR + 1 + rr;
+                if (sc < 1) sc = 1; if (sc > cols - 1) sc = cols - 1;
+                if (sr > rows - 1) sr = rows - 1;
+                while (blockedCell(sc, sr) && sc > 1) sc--;
+                wk[mem[placed]].seatC = sc; wk[mem[placed]].seatR = sr;
+                placed++;
+            }
+        colCursor[side] = boxR + boxH + 1;
+        huddleIdx++;
+        podCount++;
+    }
     baseDirty = true;
+}
+
+static bool blockedCell(int c, int r) {
+    for (int i = 0; i < propCount; i++) if (props[i].c == c && props[i].r == r) return true;
+    return false;
 }
 
 // ── office prop sprite (blocky pixels, like office.js drawProp) ──
@@ -335,18 +338,7 @@ static void drawProp(int kind, int col, int row) {
     }
 }
 
-// thin room wall border around a cell rect — each project reads as a walled room.
-static void drawRoomBorder(int c, int r, int w, int h, uint16_t col, uint8_t a) {
-    int x, y; tilePx(c, r, x, y);
-    int ww = w * tile, hh = h * tile;
-    int th = u >= 3 ? 2 : 1;
-    for (int t = 0; t < th; t++) {
-        for (int xx = x; xx < x + ww; xx++) { blendPx(xx, y + t, col, a); blendPx(xx, y + hh - 1 - t, col, a); }
-        for (int yy = y; yy < y + hh; yy++) { blendPx(x + t, yy, col, a); blendPx(x + ww - 1 - t, yy, col, a); }
-    }
-}
-
-// ── LVGL name-plate overlays (project rooms + COMMONS + LOUNGE) ──
+// ── LVGL name-plate overlays ──
 static void styleRoomLabel(lv_obj_t* lab) {
     lv_obj_set_style_text_font(lab, &font_kr_12, 0);
     lv_obj_set_style_bg_color(lab, lv_color_hex(0x06120F), 0);
@@ -364,11 +356,15 @@ static void placeRoomLabel(int idx, const char* text, int cellC, int cellR, int 
     lv_obj_t* lab = roomLabels[idx];
     lv_obj_clear_flag(lab, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_color(lab, lv_color_hex(txtColor), 0);
-    int w = cellW * tile - 4; if (w < 30) w = 30;
-    lv_obj_set_width(lab, w);
+    lv_obj_set_width(lab, LV_SIZE_CONTENT);           // size to the name — a floating nametag
     lv_label_set_text(lab, text);
+    // left-anchor over the huddle box. (No lv_obj_update_layout / width-measure here:
+    // that forces a full-tree layout pass per label on every rebuild — costly + a
+    // reentrancy risk in the render path.)
     int x, y; tilePx(cellC, cellR, x, y);
-    lv_obj_set_pos(lab, x + 2, OFFICE_TOP + y + 1);
+    int est = (int)strlen(text) * 8 + 12;             // rough chip width to bias toward centre
+    int px = x + (cellW * tile) / 2 - est / 2; if (px < 1) px = 1;
+    lv_obj_set_pos(lab, px, OFFICE_TOP + y + (tile - 16) / 2);
 }
 static void hideAllRoomLabels() {
     for (int k = 0; k < (int)(sizeof(roomLabels) / sizeof(roomLabels[0])); k++)
@@ -378,72 +374,39 @@ static void syncRoomLabels() {
     if (!officeParent) return;
     const int N = (int)(sizeof(roomLabels) / sizeof(roomLabels[0]));
     int idx = 0;
-    for (int i = 0; i < podCount && idx < N; i++) {
-        char lab[48];
-        if (pods[i].count > 1) snprintf(lab, sizeof(lab), "%s  (%d)", projectBasename(pods[i].project), pods[i].count);
-        else                   snprintf(lab, sizeof(lab), "%s", projectBasename(pods[i].project));
-        placeRoomLabel(idx++, lab, pods[i].c, pods[i].r, pods[i].w, 0xCFE6DF);
-    }
-    if (commonsW > 0 && idx < N) placeRoomLabel(idx++, "COMMONS", commonsC, commonsR, commonsW, 0x9FD8E8);
-    if (loungeW > 0 && idx < N)  placeRoomLabel(idx++, "LOUNGE",  loungeC,  loungeR,  loungeW,  0xE0C27A);
+    for (int i = 0; i < podCount && idx < N; i++)   // floating project nametag over each huddle
+        placeRoomLabel(idx++, projectBasename(pods[i].project), pods[i].c, pods[i].r, pods[i].w, 0xF4F4E8);
+    if (loungeW > 0 && idx < N) placeRoomLabel(idx++, "REST", loungeC, loungeR, loungeW, 0xE0C27A);
     for (int k = idx; k < N; k++) if (roomLabels[k]) lv_obj_add_flag(roomLabels[k], LV_OBJ_FLAG_HIDDEN);
 }
 
-// ── static base render (carpet + grid + wall + windows + rooms + props) ──
+// ── static base render: office carpet, huddle tables, REST band ──
 static void renderBaseInto() {
-    uint16_t* saveBuf = buf; buf = base;   // draw helpers target `base`
-    // carpet checkerboard
+    uint16_t* saveBuf = buf; buf = base;   // draw helpers target `base` (static, cached)
+    // calm office carpet — soft checkerboard so the creatures read clearly on top
     blk(0, 0, W, H, C_carpetA);
-    for (int r = 0; r < rows; r++) for (int c = 0; c < cols; c++)
-        if ((c + r) & 1) { int x, y; tilePx(c, r, x, y); blk(x, y, tile, tile, C_carpetB); }
-    // faint grid seams
-    for (int c = 0; c <= cols; c++) { int x = gx + c * tile; for (int y = gy; y < gy + rows * tile; y++) blendPx(x, y, C_carpetEdge, 90); }
-    for (int r = 0; r <= rows; r++) { int y = gy + r * tile; for (int x = gx; x < gx + cols * tile; x++) blendPx(x, y, C_carpetEdge, 90); }
-    // top wall band + highlight
-    blk(0, 0, W, gy + wallH, C_wall);
-    blk(0, gy + wallH - u, W, u, C_wallHi);
-    // windows
-    int winW = (int)(tile * 1.4f), gap = (int)(tile * 0.9f), x = gx + gap;
-    while (x + winW < gx + cols * tile - gap) {
-        blk(x, gy + u * 2, winW, wallH - u * 4, C_window);
-        blk(x + u, gy + u * 2, u, wallH - u * 4, C_windowGlow);
-        blk(x, gy + wallH - u * 2, winW, u, C_sill);
-        x += winW + gap;
-    }
-    // project rooms — full-width horizontal bands: a solid header strip (carries the
-    // name plate) over a desk-floor rug, walled, so each project reads as its own room.
-    for (int i = 0; i < podCount; i++) {
-        int px, py; tilePx(pods[i].c, pods[i].r, px, py);
-        int rw = pods[i].w * tile, rh = pods[i].h * tile;
-        // solid header strip across the top row (name-plate sits on it)
-        blk(px + u, py + u, rw - 2 * u, tile - u, C_roomHdr);
-        blk(px + u, py + tile - u, rw - 2 * u, u, C_roomWall);   // header underline
-        // desk-floor rug for the rest of the band
-        for (int yy = py + tile; yy < py + rh - u; yy++)
-            for (int xx = px + u; xx < px + rw - u; xx++) blendPx(xx, yy, C_rug, 130);
-        drawRoomBorder(pods[i].c, pods[i].r, pods[i].w, pods[i].h, C_roomWall, 205);
-    }
-    // COMMONS band (shared / system files) — header strip + distinct cool floor + shelf.
-    if (commonsW > 0) {
-        int cx, cy; tilePx(commonsC, commonsR, cx, cy);
-        int cw = commonsW * tile, ch = commonsH * tile;
-        blk(cx + u, cy + u, cw - 2 * u, tile - u, C_roomHdr);
-        blk(cx + u, cy + tile - u, cw - 2 * u, u, C_commonsWall);
-        for (int yy = cy + tile; yy < cy + ch - u; yy++)
-            for (int xx = cx + u; xx < cx + cw - u; xx++) blendPx(xx, yy, C_commons, 140);
-        drawRoomBorder(commonsC, commonsR, commonsW, commonsH, C_commonsWall, 205);
-    }
-    // LOUNGE band (break area) — header strip + warm floor the idle agents gather on.
+    for (int r = 0; r < rows; r++)
+        for (int c = 0; c < cols; c++)
+            if ((c + r) & 1) { int x, y; tilePx(c, r, x, y); blk(x, y, tile, tile, C_carpetB); }
+    for (int c = 0; c <= cols; c++) { int x = gx + c * tile; for (int y = gy; y < gy + rows * tile; y++) blendPx(x, y, C_carpetEdge, 60); }
+    for (int r = 0; r <= rows; r++) { int y = gy + r * tile; for (int x = gx; x < gx + cols * tile; x++) blendPx(x, y, C_carpetEdge, 60); }
+    // REST waiting-room rug across the bottom band — solid tint + border (tile-aligned,
+    // so it never fights the carpet's tile scale)
     if (loungeW > 0) {
         int lx, ly; tilePx(loungeC, loungeR, lx, ly);
         int lw = loungeW * tile, lh = loungeH * tile;
-        blk(lx + u, ly + u, lw - 2 * u, tile - u, C_roomHdr);
-        blk(lx + u, ly + tile - u, lw - 2 * u, u, C_roomWall);
-        for (int yy = ly + tile; yy < ly + lh - u; yy++)
-            for (int xx = lx + u; xx < lx + lw - u; xx++) blendPx(xx, yy, C_lounge, 140);
-        drawRoomBorder(loungeC, loungeR, loungeW, loungeH, C_roomWall, 180);
+        for (int yy = ly + u; yy < ly + lh - u; yy++)
+            for (int xx = lx + u; xx < lx + lw - u; xx++) blendPx(xx, yy, C_rug, 150);
+        blk(lx + u, ly + u, lw - 2 * u, 2, C_rug2);              // top edge
+        blk(lx + u, ly + lh - u - 2, lw - 2 * u, 2, C_rug2);     // bottom edge
     }
-    // props (lounge + greenery + cabinet)
+    // a shared table under each project huddle — the team gathers around it
+    for (int i = 0; i < podCount; i++) {
+        int px, py; tilePx(pods[i].c, pods[i].r + 1, px, py);   // below the nametag row
+        int tw = pods[i].w * tile, th = (pods[i].h - 1) * tile;
+        drawTable(px + u, py + th / 5, tw - 2 * u, (th * 3) / 5);
+    }
+    // props — coffee + cooler in the REST band, plants in the top corners
     for (int i = 0; i < propCount; i++) drawProp(props[i].kind, props[i].c, props[i].r);
     buf = saveBuf;
 }
@@ -475,65 +438,44 @@ void setVisible(bool v) {
     else   { lv_obj_add_flag(canvas, LV_OBJ_FLAG_HIDDEN); hideAllRoomLabels(); }
 }
 
-// ── movement (port of office.js step/target) ──
-// Roamer (OpenClaw) free-floor target: a pseudo-random open cell, no desk, not occupied.
-static void pickRoam(Worker& w, int self) {
-    w.roamSeed = w.roamSeed * 1664525u + 1013904223u;   // LCG, no Math.random on firmware
-    for (int tries = 0; tries < 12; tries++) {
-        w.roamSeed = w.roamSeed * 1664525u + 1013904223u;
-        int c = 1 + (int)((w.roamSeed >> 16) % (uint32_t)(cols > 2 ? cols - 2 : 1));
-        int r = 2 + (int)((w.roamSeed >> 8) % (uint32_t)(rows > 4 ? rows - 4 : 1));
-        if (!deskOccupied(c, r) && !workerCell(c, r, self) && !propCell(c, r)) { w.lingerC = c; w.lingerR = r; w.hasLinger = true; return; }
-    }
-    w.lingerC = w.seatC; w.lingerR = w.seatR; w.hasLinger = true;
-}
-// Is another worker already heading for this lounge cell? (so idle agents spread
-// across the break area instead of all piling onto the same spot).
+// ── movement on the block world ──
+// Is another worker already heading for this REST cell? (spreads idlers out).
 static bool loungeTargetTaken(int c, int r, int self) {
     for (int i = 0; i < nWk; i++)
         if (i != self && wk[i].active && wk[i].hasLinger && wk[i].lingerC == c && wk[i].lingerR == r) return true;
     return false;
 }
-// Send an idle worker to the lounge — the free (non-prop/desk/occupied) lounge
-// cell nearest the centre, so the group clusters tightly around the cooler/coffee.
+// Send an idle worker to REST — the free cell nearest the cooler/coffee cluster,
+// so idlers group up without overlapping.
 static void pickLounge(Worker& w, int self) {
     int ccx = loungeC + loungeW / 2, ccy = loungeR + loungeH / 2;
     int bc = -1, br = -1, bestD = 1 << 30;
-    for (int r = loungeR; r < loungeR + loungeH; r++)
-        for (int c = loungeC; c < loungeC + loungeW; c++) {
+    for (int r = loungeR - 1; r <= loungeR + loungeH; r++)
+        for (int c = loungeC - 1; c <= loungeC + loungeW; c++) {
             if (c < 1 || c >= cols || r < 1 || r >= rows) continue;
-            if (propCell(c, r) || deskOccupied(c, r)) continue;
+            if (blockedCell(c, r)) continue;
             if (workerCell(c, r, self) || loungeTargetTaken(c, r, self)) continue;
             int d = (c - ccx) * (c - ccx) + (r - ccy) * (r - ccy);
             if (d < bestD) { bestD = d; bc = c; br = r; }
         }
-    if (bc < 0) {                     // lounge full → linger just outside it / at home corner
-        w.lingerC = w.seatC; w.lingerR = w.seatR;
-    } else { w.lingerC = bc; w.lingerR = br; }
+    if (bc < 0) { w.lingerC = w.seatC; w.lingerR = w.seatR; }
+    else        { w.lingerC = bc; w.lingerR = br; }
     w.hasLinger = true;
 }
-// Column of a worker's project pod centre — used to turn seated agents toward
-// their pod-mates so a team reads as gathered around the same work.
+// Centre column of a worker's huddle — agents face inward toward their team.
 static int podCenterCol(const Worker& w) {
+    char nw[40]; normProject(w.project, nw, sizeof(nw));
     for (int i = 0; i < podCount; i++)
-        if (strcmp(pods[i].project, w.project) == 0) return pods[i].c + pods[i].w / 2;
+        if (strcmp(pods[i].project, nw) == 0) return pods[i].c + pods[i].w / 2;
     return w.seatC;
 }
 static void targetFor(Worker& w, int& tc, int& tr) {
-    if (w.hasTmp) { tc = w.tmpC; tr = w.tmpR; return; }
     int self = (int)(&w - wk);
-    bool idle = strcmp(w.state, "idle") == 0;
-    if (w.roamer && !idle) {
-        // OpenClaw roams the whole floor while active.
-        if (!w.hasLinger) pickRoam(w, self);
-        tc = w.lingerC; tr = w.lingerR; return;
-    }
-    if (idle) {
-        // Everyone idle (desk workers + roamers) drifts to the lounge to gather.
+    if (strcmp(w.state, "idle") == 0) {        // idle → gather in REST
         if (!w.hasLinger) pickLounge(w, self);
         tc = w.lingerC; tr = w.lingerR; return;
     }
-    tc = w.seatC; tr = w.seatR;   // processing / awaiting / error → at the desk
+    tc = w.seatC; tr = w.seatR;                // working → its slot in the project huddle
 }
 static bool stepWorker(Worker& w, uint32_t nowMs) {
     int self = (int)(&w - wk);
@@ -548,11 +490,8 @@ static bool stepWorker(Worker& w, uint32_t nowMs) {
         if (!mx && !my) continue;
         int nc = w.col + mx, nr = w.row + my;
         if (nc < 0 || nc >= cols || nr < 1 || nr >= rows) continue;
-        if (workerCell(nc, nr, self)) continue;            // never step onto another worker's cell
-        if (propCell(nc, nr)) continue;                    // …or onto a prop (cooler/plant/cabinet)
-        bool isDesk = deskOccupied(nc, nr);
-        bool ownSeat = (nc == w.seatC && nr == w.seatR);
-        if (isDesk && !ownSeat && !(tc == nc && tr == nr)) continue;
+        if (workerCell(nc, nr, self)) continue;                          // never overlap another creature
+        if (blockedCell(nc, nr) && !(tc == nc && tr == nr)) continue;    // avoid props
         w.prevCol = w.col; w.prevRow = w.row; w.stepAtMs = nowMs;
         w.col = nc; w.row = nr;
         w.facing = mx > 0 ? 'R' : mx < 0 ? 'L' : my < 0 ? 'U' : 'D';
@@ -562,23 +501,6 @@ static bool stepWorker(Worker& w, uint32_t nowMs) {
 }
 
 // ── per-frame draw ──
-static void drawDesk(int seatC, int seatR, uint16_t screenCol, bool on) {
-    int x, y; tilePx(seatC, seatR, x, y);
-    int par = (seatC + seatR) & 1;
-    // Stagger desks left/right + flip which way the desk faces by cell parity, so clustered
-    // desks read as varied office pods instead of a classroom of identical aligned rows.
-    int o = x + (tile - 14 * u) / 2 + (par ? -2 * u : 2 * u);
-    bool faceUp = par;                                   // monitor on the far side from the worker
-    int dy = faceUp ? (tile - 6 * u) : (1 * u);          // desk slab y within the cell
-    blk(o, y + dy, 14 * u, 4 * u, C_deskTop);
-    blk(o, y + dy, 14 * u, u, C_deskHi);
-    blk(o, y + dy + 4 * u, 14 * u, u, C_deskEdge);
-    int monY = faceUp ? (y + dy + 5 * u) : (y - u / 2);  // monitor below (faceUp) or above
-    int monX = o + (par ? 4 * u : 4 * u);
-    blk(monX, monY, 6 * u, 4 * u, C_monFrame);
-    blk(monX + u, monY + (faceUp ? u : (int)(u * 0.5f)), 4 * u, (int)(2.4f * u), on ? screenCol : C_monOff);
-}
-
 // Drawn parameters for a worker this frame (shared by the painter + the change-detector).
 struct WDraw { int icx, icy, dw, dh, sz; float cx, cyT, jit; char bub; uint16_t bubCol; };
 static WDraw computeWorker(Worker& w, uint32_t now) {
@@ -595,7 +517,8 @@ static WDraw computeWorker(Worker& w, uint32_t now) {
     if (moving) { yoff = -sinf(p * 3.14159f) * tile * 0.26f; squash = sinf(p * 3.14159f) * 0.13f; }
     else if (awaiting) { float s = fabsf(sinf(now / 250.0f + w.bobPhase)); yoff = -s * tile * 0.18f; squash = s * 0.08f; }
     else if (error)    { jit = sinf(now / 55.0f) * tile * 0.05f; }
-    else               { yoff = sinf(now / (idle ? 900.0f : 520.0f) + w.bobPhase) * tile * (idle ? 0.025f : 0.05f); }
+    // settled (idle / processing) → fully STATIC so the scene-skip idles the panel
+    // (no per-frame bob → no needless full-canvas redraws → far lower power draw)
     d.sz  = (int)(tile * 0.62f * (awaiting ? 1.08f : 1.0f));
     float cy = cyT + tile * 0.06f + yoff;
     d.cx = cx; d.cyT = cyT; d.jit = jit;
@@ -604,7 +527,7 @@ static WDraw computeWorker(Worker& w, uint32_t now) {
     d.bub = 0; d.bubCol = 0;
     if (awaiting)      { d.bub = '?'; d.bubCol = HEX565(0xFFA93D); }
     else if (error)    { d.bub = '!'; d.bubCol = HEX565(0xFF6B6B); }
-    else if (idle && !moving && ((now / 520) & 1)) { d.bub = 'z'; d.bubCol = HEX565(0x9fb0ac); }
+    else if (idle && !moving) { d.bub = 'z'; d.bubCol = HEX565(0x9fb0ac); }  // static (no toggle → no redraw)
     return d;
 }
 static uint32_t workerSig(Worker& w, uint32_t now) {   // hash of what's actually drawn
@@ -628,7 +551,7 @@ static void drawWorker(Worker& w, uint32_t now) {
     if (d.bub) drawBubble(d.icx + (int)(d.sz * 0.3f), d.icy - (int)(d.sz * 0.6f) - 5 * u, d.bub, d.bubCol);
 }
 
-static uint32_t lastDrawMs = 0, lastTickMs = 0, tickN = 0, stretchIn = 40;
+static uint32_t lastDrawMs = 0, lastTickMs = 0, tickN = 0;
 static bool forceFullDraw = true;   // force a full redraw on init + any layout/base rebuild
 
 void update(float dt) {
@@ -651,17 +574,16 @@ void update(float dt) {
         strncpy(w.project, pj, sizeof(w.project)-1); w.project[sizeof(w.project)-1]='\0';
         strncpy(w.id, si.id, sizeof(w.id)-1); w.id[sizeof(w.id)-1]='\0';
         w.accent = agentColor(si.agentType);
-        w.roamer = (strstr(si.agentType, "openclaw") != nullptr);  // gateway = mobile roamer
         if (!w.active) {  // first appearance → enter from the "door" (bottom centre)
             w.active = true; w.col = cols/2; w.row = rows-1; w.prevCol = w.col; w.prevRow = w.row;
-            w.stepAtMs = now; w.facing='U'; w.hasLinger=false; w.hasTmp=false;
-            w.wanderIn = 30 + (n*7)%40; w.bobPhase = n * 0.9f; w.roamSeed = (uint32_t)(n * 2654435761u + 12345u);
+            w.stepAtMs = now; w.facing='U'; w.hasLinger=false;
+            w.wanderIn = 30 + (n*7)%40; w.bobPhase = n * 0.9f;
             strncpy(w.lastState, w.state, sizeof(w.lastState)-1); w.lastState[sizeof(w.lastState)-1]='\0';
         }
         // idle↔working transition → drop the stale target so the agent re-routes
-        // (to the lounge when it goes idle, back to its desk when it starts working).
+        // (to REST when it goes idle, back to its project huddle when it starts working).
         if (strcmp(w.lastState, w.state) != 0) {
-            w.hasLinger = false; w.hasTmp = false;
+            w.hasLinger = false;
             strncpy(w.lastState, w.state, sizeof(w.lastState)-1); w.lastState[sizeof(w.lastState)-1]='\0';
         }
         n++;
@@ -676,18 +598,13 @@ void update(float dt) {
         bool found=false; for (int j=0;j<prevN;j++) if (strcmp(k,prevKey[j])==0){found=true;break;} if(!found){changed=true;break;} }
     if (changed) { buildLayout(); renderBaseInto(); syncRoomLabels(); forceFullDraw = true; }
 
-    // ── logic tick @200ms (stepping + idle wander + occasional working "stretch") ──
+    // ── logic tick @200ms (stepping + idle wander) ──
     if (now - lastTickMs >= 200) {
         lastTickMs = now; tickN++;
         for (int i = 0; i < nWk; i++) {
             Worker& w = wk[i];
-            // back to the desk once the COMMONS dwell ends — or give up if the path stays blocked.
-            if (w.hasTmp && (((w.col == w.tmpC && w.row == w.tmpR) && (int)tickN > w.tmpBackTick) || (int)tickN > w.tmpBackTick + 40)) w.hasTmp = false;
             bool atTgt; { int tc,tr; targetFor(w,tc,tr); atTgt = (w.col==tc && w.row==tr); }
-            if (w.roamer && strcmp(w.state, "idle") != 0) {
-                // active OpenClaw keeps patrolling — short dwell, then a new floor target
-                if (atTgt && --w.wanderIn <= 0) { w.hasLinger = false; w.wanderIn = 3 + (int)((i*5 + tickN) % 6); }
-            } else if (strcmp(w.state, "idle") == 0 && atTgt && --w.wanderIn <= 0) {
+            if (strcmp(w.state, "idle") == 0 && atTgt && --w.wanderIn <= 0) {
                 // settled in the lounge — only occasionally shuffle to a new spot, so the
                 // break group looks relaxed (tea time) instead of restless.
                 w.hasLinger = false; w.wanderIn = 80 + (i*17)%80;
@@ -696,21 +613,6 @@ void update(float dt) {
             if (!moved) {   // settled → turn to face the group (lounge mates / pod centre)
                 int fx = (strcmp(w.state,"idle")==0) ? (loungeC + loungeW/2) : podCenterCol(w);
                 if (fx < w.col) w.facing = 'L'; else if (fx > w.col) w.facing = 'R';
-            }
-        }
-        if (--stretchIn <= 0) {     // a working worker occasionally fetches a shared file
-            stretchIn = 120 + (tickN % 60);   // rarely, so a working team reads as focused
-            for (int i = 0; i < nWk; i++) {
-                Worker& w = wk[i];
-                if (strcmp(w.state,"processing")!=0 || w.hasTmp) continue;
-                int tc,tr; targetFor(w,tc,tr); if (w.col!=tc || w.row!=tr) continue;   // only if settled at desk
-                // walk to a free COMMONS cell (shared/system files), dwell, then return
-                int cc = -1, cr = -1;
-                for (int r = commonsR; r < commonsR + commonsH && cc < 0; r++)
-                    for (int c = commonsC; c < commonsC + commonsW; c++)
-                        if (!propCell(c,r) && !deskOccupied(c,r) && !workerCell(c,r,i)) { cc = c; cr = r; break; }
-                if (cc >= 0) { w.tmpC = cc; w.tmpR = cr; w.hasTmp = true; w.tmpBackTick = tickN + 12; }
-                break;
             }
         }
     }
@@ -726,25 +628,12 @@ void update(float dt) {
     static uint32_t lastSceneSig = 0;
     uint32_t sig = 2166136261u;
     for (int i = 0; i < nWk; i++) sig = (sig * 16777619u) ^ workerSig(wk[i], now);
-    for (int i = 0; i < nWk; i++) {
-        Worker& w = wk[i]; if (w.roamer) continue;
-        bool on = (w.col == w.seatC && w.row == w.seatR) && strcmp(w.state, "idle") != 0;
-        sig = (sig * 16777619u) ^ (uint32_t)((w.seatC << 9) ^ (w.seatR << 4) ^ (on ? 1u : 0u) ^ stateColor(w.state));
-    }
     if (!forceFullDraw && sig == lastSceneSig) return;   // nothing visibly changed → skip
     forceFullDraw = false;
     lastSceneSig = sig;
 
     memcpy(buf, base, (size_t)W * H * sizeof(uint16_t));
 
-    // desks (lit only when owner present & active) — roamers have no desk
-    for (int i = 0; i < nWk; i++) {
-        Worker& w = wk[i];
-        if (w.roamer) continue;
-        bool present = (w.col == w.seatC && w.row == w.seatR);
-        bool on = present && strcmp(w.state, "idle") != 0;
-        drawDesk(w.seatC, w.seatR, HEX565((uint32_t)stateColor(w.state)), on);
-    }
     // workers painter's-order by row
     int ord[MAXAG]; for (int i = 0; i < nWk; i++) ord[i] = i;
     for (int a = 0; a < nWk; a++) for (int b = a+1; b < nWk; b++)
