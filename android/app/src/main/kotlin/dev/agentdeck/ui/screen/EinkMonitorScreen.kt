@@ -58,6 +58,8 @@ import dev.agentdeck.state.AgentStateHolder
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.state.TimelineStore
 import dev.agentdeck.ui.component.AgentDeckMark
+import dev.agentdeck.ui.component.BrandIcon
+import dev.agentdeck.util.codexLimitRows
 import dev.agentdeck.ui.eink.EinkAgentPanel
 import dev.agentdeck.ui.eink.EinkAttentionPanel
 import dev.agentdeck.ui.eink.EinkAquariumFrame
@@ -485,7 +487,7 @@ private fun EinkLimitsCornerCard(
             }
             rows.forEach { row ->
                 if (row.percent != null) {
-                    EinkLimitGaugeRow(label = row.label, percent = row.percent)
+                    EinkLimitGaugeRow(label = row.label, percent = row.percent, agentType = row.agentType)
                 } else {
                     EinkLimitTextRow(label = row.label, value = row.value.orEmpty())
                 }
@@ -498,13 +500,21 @@ private data class EinkLimitLine(
     val label: String,
     val percent: Double? = null,
     val value: String? = null,
+    val agentType: String? = null,
 )
 
 private fun buildEinkLimitRows(state: DashboardState): List<EinkLimitLine> {
     val rows = mutableListOf<EinkLimitLine>()
     if (state.usage.usageStale != true) {
-        state.usage.fiveHourPercent?.let { rows.add(EinkLimitLine(label = "5h", percent = it)) }
-        state.usage.sevenDayPercent?.let { rows.add(EinkLimitLine(label = "7d", percent = it)) }
+        state.usage.fiveHourPercent?.let { rows.add(EinkLimitLine(label = "5h", percent = it, agentType = "claude-code")) }
+        state.usage.sevenDayPercent?.let { rows.add(EinkLimitLine(label = "7d", percent = it, agentType = "claude-code")) }
+    }
+    // Codex (ChatGPT) rolling-window usage — independent of Claude's usageStale;
+    // each window carries its own stale flag. Drop stale windows on this minimal
+    // card (no stale marker here), matching how Claude rows hide when stale. The
+    // leading brand mark identifies the provider, so labels stay plain 5h/7d.
+    codexLimitRows(state.codexRateLimits).filter { !it.stale }.forEach {
+        rows.add(EinkLimitLine(label = it.label, percent = it.percent, agentType = it.agentType))
     }
     buildAntigravityLimitValue(state)?.let { rows.add(EinkLimitLine(label = "", value = it)) }
     return rows
@@ -537,16 +547,24 @@ private fun buildAntigravityLimitValue(state: DashboardState): String? {
 }
 
 @Composable
-private fun EinkLimitGaugeRow(label: String, percent: Double) {
+private fun EinkLimitGaugeRow(label: String, percent: Double, agentType: String? = null) {
     val pct = percent.coerceIn(0.0, 100.0).toInt()
-    Text(
-        text = "$label ${einkBlockGauge(pct)} $pct%",
-        fontSize = 11.sp,
-        lineHeight = 13.sp,
-        fontFamily = FontFamily.Monospace,
-        color = MaterialTheme.colorScheme.onSurface,
-        maxLines = 1,
-    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (agentType != null) {
+            BrandIcon(agentType = agentType, isEink = true, size = 11.dp)
+        }
+        Text(
+            text = "$label ${einkBlockGauge(pct)} $pct%",
+            fontSize = 11.sp,
+            lineHeight = 13.sp,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+        )
+    }
 }
 
 @Composable

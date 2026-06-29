@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.agentdeck.net.UsageUpdate
+import dev.agentdeck.util.codexLimitRows
 
 @Composable
 fun EinkUsagePanel(
@@ -24,13 +25,23 @@ fun EinkUsagePanel(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Rate limit bars
+        // Rate limit bars. The brand mark identifies the provider so Claude and
+        // Codex rows read as distinct (labels stay 5h/7d).
         if (usage.fiveHourPercent != null) {
             val isApi = usage.costLimit != null && usage.costLimit > 0
-            EinkTextGauge(label = if (isApi) "API" else "5h", percent = usage.fiveHourPercent)
+            EinkTextGauge(
+                label = if (isApi) "API" else "5h",
+                percent = usage.fiveHourPercent,
+                agentType = if (isApi) null else "claude-code",
+            )
         }
         if (usage.sevenDayPercent != null) {
-            EinkTextGauge(label = "7d", percent = usage.sevenDayPercent)
+            EinkTextGauge(label = "7d", percent = usage.sevenDayPercent, agentType = "claude-code")
+        }
+        // Codex (ChatGPT) rolling-window usage — own per-window stale; drop stale
+        // rows here (no stale marker on this panel).
+        codexLimitRows(usage.codexRateLimits).filter { !it.stale }.forEach { row ->
+            EinkTextGauge(label = row.label, percent = row.percent, agentType = row.agentType)
         }
 
         // Token counters

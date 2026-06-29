@@ -114,6 +114,36 @@ describe('renderTrmnlDashboard', () => {
     expect(svg).toContain('18%');
   });
 
+  it('renders a Codex footer row with its brand mark when codexRateLimits present', () => {
+    const svg = renderTrmnlDashboard(
+      {
+        state: 'IDLE',
+        allSessions: [],
+        usageKnown: true,
+        fiveHourPercent: 42,
+        sevenDayPercent: 18,
+        codexRateLimits: {
+          primary: { usedPercent: 67, windowMinutes: 300 },
+          secondary: { usedPercent: 9, windowMinutes: 10080 },
+        },
+      },
+      { now: NOW },
+    );
+    // Claude row stays; Codex gets its own row tagged with the Codex mono glyph.
+    expect(svg).toContain('agent-mono-glyph-claude-code');
+    expect(svg).toContain('agent-mono-glyph-codex');
+    expect(svg).toContain('67%');
+    expect(svg).toContain('9%');
+  });
+
+  it('omits the Codex footer row (and its glyph) when no codexRateLimits', () => {
+    const svg = renderTrmnlDashboard(
+      { state: 'IDLE', allSessions: [], usageKnown: true, fiveHourPercent: 42, sevenDayPercent: 18 },
+      { now: NOW },
+    );
+    expect(svg).not.toContain('agent-mono-glyph-codex');
+  });
+
   it('shows a compact time-until-reset for each quota window (no token tally or clock)', () => {
     const svg = renderTrmnlDashboard(
       {

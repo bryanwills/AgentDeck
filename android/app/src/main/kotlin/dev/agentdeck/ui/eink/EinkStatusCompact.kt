@@ -13,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
@@ -26,8 +27,11 @@ import androidx.compose.ui.unit.sp
 import dev.agentdeck.net.ModuleHealthState
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.terrarium.renderer.einkColorEnabled
+import dev.agentdeck.ui.component.BrandIcon
 import dev.agentdeck.ui.monitor.rememberCurrentInstant
 import dev.agentdeck.ui.monitor.subscriptionTrailing
+import dev.agentdeck.util.ProviderLimitRow
+import dev.agentdeck.util.codexLimitRows
 import dev.agentdeck.util.formatBytes
 import dev.agentdeck.util.formatResetTime
 import kotlin.math.roundToInt
@@ -103,6 +107,9 @@ private fun LimitsColumn(state: DashboardState) {
     val has7d = usage.sevenDayPercent != null
     val hasLimits = state.billingType != "api" && (has5h || has7d)
     val stale = if (usage.usageStale == true) "!" else ""
+    // Codex (ChatGPT) rolling-window usage — independent of Claude billing/limits
+    // (a user may run only Codex). Each window carries its own stale flag.
+    val codexRows = codexLimitRows(state.codexRateLimits)
 
     SectionLabel("LIMITS")
 
@@ -132,8 +139,45 @@ private fun LimitsColumn(state: DashboardState) {
         if (resetTimeStr != null) {
             DataLine("\u27F2 $resetTimeStr")
         }
-    } else {
+    }
+
+    // Codex rows render after the Claude/API block; the brand mark distinguishes
+    // them (labels stay 5h/7d).
+    codexRows.forEach { CodexGaugeRow(it) }
+
+    // Only collapse to the em-dash placeholder when no provider has anything.
+    if (!hasLimits && state.billingType != "api" && codexRows.isEmpty()) {
         DataLine("—")
+    }
+}
+
+@Composable
+private fun CodexGaugeRow(row: ProviderLimitRow) {
+    val staleMark = if (row.stale) "!" else ""
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BrandIcon(agentType = row.agentType, isEink = true, size = 12.dp)
+        Text(
+            text = "${row.label} ${blockGauge(row.percent)} ${row.percent.toInt()}%$staleMark",
+            fontSize = 13.sp,
+            lineHeight = 17.sp,
+            fontFamily = FontFamily.Monospace,
+            color = gaugeColor(row.percent),
+            maxLines = 1,
+        )
+    }
+    val reset = if (row.stale) "stale" else row.resetIso?.let { formatResetTime(it) } ?: ""
+    if (reset.isNotEmpty()) {
+        Text(
+            text = "   ⟲ $reset",
+            fontSize = 12.sp,
+            lineHeight = 15.sp,
+            fontFamily = FontFamily.Monospace,
+            color = Color.DarkGray,
+            maxLines = 1,
+        )
     }
 }
 

@@ -1,5 +1,7 @@
 package dev.agentdeck.util
 
+import dev.agentdeck.net.CodexRateLimits
+import dev.agentdeck.net.CodexRateLimitWindow
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -130,5 +132,54 @@ class TimeFormatUtilsTest {
     fun `formatUptime zero returns 0 colon 00`() {
         assertEquals("0:00", formatUptime(0))
         assertEquals("0:00", formatUptime(-1))
+    }
+
+    // --- windowLabel ---
+
+    @Test
+    fun `windowLabel maps minutes to compact day-hour-minute labels`() {
+        assertEquals("5h", windowLabel(300))
+        assertEquals("7d", windowLabel(10080)) // days checked first: 10080 -> 7d not 168h
+        assertEquals("1h", windowLabel(60))
+        assertEquals("45m", windowLabel(45))
+        assertEquals("·", windowLabel(null))
+        assertEquals("·", windowLabel(0))
+    }
+
+    // --- codexLimitRows ---
+
+    @Test
+    fun `codexLimitRows returns empty when limits null`() {
+        assertTrue(codexLimitRows(null).isEmpty())
+    }
+
+    @Test
+    fun `codexLimitRows maps primary and secondary windows with agent tag`() {
+        val rows = codexLimitRows(
+            CodexRateLimits(
+                primary = CodexRateLimitWindow(usedPercent = 67.0, windowMinutes = 300, resetsAt = "2026-06-29T15:00:00Z"),
+                secondary = CodexRateLimitWindow(usedPercent = 9.0, windowMinutes = 10080, stale = true),
+            ),
+        )
+        assertEquals(2, rows.size)
+        assertEquals("codex", rows[0].agentType)
+        assertEquals("5h", rows[0].label)
+        assertEquals(67.0, rows[0].percent, 0.0)
+        assertEquals("2026-06-29T15:00:00Z", rows[0].resetIso)
+        assertFalse(rows[0].stale)
+        assertEquals("7d", rows[1].label)
+        assertTrue(rows[1].stale)
+    }
+
+    @Test
+    fun `codexLimitRows skips windows with null usedPercent`() {
+        val rows = codexLimitRows(
+            CodexRateLimits(
+                primary = CodexRateLimitWindow(usedPercent = null, windowMinutes = 300),
+                secondary = CodexRateLimitWindow(usedPercent = 12.0, windowMinutes = 10080),
+            ),
+        )
+        assertEquals(1, rows.size)
+        assertEquals("7d", rows[0].label)
     }
 }

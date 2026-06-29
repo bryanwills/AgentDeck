@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -14,6 +15,7 @@ import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.SessionInfo
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.terrarium.renderer.einkColorEnabled
+import dev.agentdeck.ui.component.BrandIcon
 
 fun formatCount(n: Int): String = when {
     n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0)
@@ -212,6 +214,9 @@ fun EinkTextGauge(
     label: String,
     percent: Double,
     barLength: Int = 20,
+    // When set, a small per-provider brand mark leads the row so Codex rows read
+    // as distinct from Claude's (labels stay 5h/7d — the mark conveys the agent).
+    agentType: String? = null,
 ) {
     val pct = percent.coerceIn(0.0, 100.0).toInt()
     val filled = (pct * barLength / 100).coerceAtMost(barLength)
@@ -221,7 +226,11 @@ fun EinkTextGauge(
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (agentType != null) {
+            BrandIcon(agentType = agentType, isEink = true, size = 12.dp)
+        }
         Text(
             text = "$label:",
             style = MaterialTheme.typography.bodyMedium,

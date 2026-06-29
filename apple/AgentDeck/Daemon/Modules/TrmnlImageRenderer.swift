@@ -127,7 +127,12 @@ enum TrmnlImageRenderer {
         let usageKnown = state.usageKnown
 
         let bannerH: CGFloat = awaiting > 0 ? 44 : 0
-        let footerTop = H - (usageKnown ? CGFloat(52) : CGFloat(30))
+        // Codex (ChatGPT) rolling windows get their own footer row beneath Claude
+        // when present, so the footer band grows to fit two lines. Mirrors
+        // trmnl-layout.ts.
+        let hasCodexFooter = usageKnown
+            && (state.codexPrimaryPercent != nil || state.codexSecondaryPercent != nil)
+        let footerTop = H - (usageKnown ? (hasCodexFooter ? CGFloat(92) : CGFloat(52)) : CGFloat(30))
         let bodyTop = headerH + 12 + bannerH
         // Adaptive row height: tall when few sessions, shrinking toward a floor as
         // the count grows. When subscription quota is unknown, the footer collapses
@@ -254,13 +259,12 @@ enum TrmnlImageRenderer {
             return
         }
 
-        // Claude brand mark + 5H/7D quota on one line. The mark labels the
-        // block as Claude usage; the reset countdown tucks right after the % (no
-        // "resets" filler word), not flushed to the column edge.
-        let fTop = footerTop + 18
+        // Per-provider brand mark + 5H/7D quota on one line. The mark labels the
+        // row's provider (Claude subscription, or Codex rolling windows); the reset
+        // countdown tucks right after the % (no "resets" filler word), not flushed
+        // to the column edge. Codex (when present) gets a second row below.
         let gh: CGFloat = 18
         let markSize: CGFloat = 30
-        agentGlyph("claude-code", pad + markSize / 2, footerTop + 26, markSize)
         let usageX0 = pad + markSize + 18
         let colW = (W - pad - usageX0) / 2
         let gaugeW = clampF((colW * 0.4).rounded(), 110, 220)
@@ -270,7 +274,7 @@ enum TrmnlImageRenderer {
             let fw = (gaugeW * CGFloat(clampD(pct, 0, 100) / 100)).rounded()
             if fw > 0 { fill(gx, gy, fw, gh, black) }
         }
-        func quotaInline(_ x0: CGFloat, _ label: String, _ pct: Double, _ resetsAt: String?) {
+        func quotaInline(_ fTop: CGFloat, _ x0: CGFloat, _ label: String, _ pct: Double, _ resetsAt: String?) {
             let gx = x0 + 30
             let px = gx + gaugeW + 8
             text(label, x: x0, top: fTop, size: 18, bold: true)
@@ -281,8 +285,25 @@ enum TrmnlImageRenderer {
                 text(r, x: px + 50, top: fTop, size: 15, bold: true, align: .left)
             }
         }
-        quotaInline(usageX0, "5H", state.fiveHourPercent, state.fiveHourResetsAt)
-        quotaInline(usageX0 + colW, "7D", state.sevenDayPercent, state.sevenDayResetsAt)
+
+        // Row 1 — Claude subscription 5H/7D.
+        let fTop1 = footerTop + 18
+        agentGlyph("claude-code", pad + markSize / 2, footerTop + 26, markSize)
+        quotaInline(fTop1, usageX0, "5H", state.fiveHourPercent, state.fiveHourResetsAt)
+        quotaInline(fTop1, usageX0 + colW, "7D", state.sevenDayPercent, state.sevenDayResetsAt)
+
+        // Row 2 — Codex (ChatGPT) rolling windows: primary ≈ 5H, secondary ≈ 7D.
+        if hasCodexFooter {
+            let rowGap: CGFloat = 40
+            let fTop2 = fTop1 + rowGap
+            agentGlyph("codex", pad + markSize / 2, footerTop + 26 + rowGap, markSize)
+            if let p = state.codexPrimaryPercent {
+                quotaInline(fTop2, usageX0, "5H", p, state.codexPrimaryResetsAt)
+            }
+            if let s = state.codexSecondaryPercent {
+                quotaInline(fTop2, usageX0 + colW, "7D", s, state.codexSecondaryResetsAt)
+            }
+        }
     }
 
     /// Reset countdown with two-unit detail: "3h 34m", "2d 20h", "45m". Mirrors

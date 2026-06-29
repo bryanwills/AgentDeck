@@ -55,6 +55,7 @@ import dev.agentdeck.state.DashboardState
 import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.ui.component.AgentDeckMark
 import dev.agentdeck.ui.component.brandColorForAgent
+import dev.agentdeck.util.codexLimitRows
 import dev.agentdeck.util.formatResetTime
 import java.time.Instant
 
@@ -804,36 +805,12 @@ private fun consumersFor(provider: ProviderKey, state: DashboardState): List<Col
  * window's length (300 min → "5h", 10080 min → "7d"). Mirrors the iOS
  * `codexRateLimitChips`.
  */
-private fun buildCodexRateChips(limits: CodexRateLimits?): List<RateChip> {
-    if (limits == null) return emptyList()
-    return buildList {
-        limits.primary?.let { p ->
-            val pct = p.usedPercent
-            if (pct != null) {
-                add(RateChip(label = windowLabel(p.windowMinutes), percent = pct, reset = p.resetsAt?.let { formatResetTime(it) }, stale = p.stale == true))
-            }
-        }
-        limits.secondary?.let { s ->
-            val pct = s.usedPercent
-            if (pct != null) {
-                add(RateChip(label = windowLabel(s.windowMinutes), percent = pct, reset = s.resetsAt?.let { formatResetTime(it) }, stale = s.stale == true))
-            }
-        }
+private fun buildCodexRateChips(limits: CodexRateLimits?): List<RateChip> =
+    // Shared mapping lives in util.codexLimitRows so the HUD rail and the e-ink
+    // surfaces can't drift; only the reset-time formatting is rail-local.
+    codexLimitRows(limits).map { row ->
+        RateChip(label = row.label, percent = row.percent, reset = row.resetIso?.let { formatResetTime(it) }, stale = row.stale)
     }
-}
-
-/**
- * Compact window label from a duration in minutes: whole days → "Nd", whole
- * hours → "Nh", else "Nm". Days checked first so 10080 → "7d". Mirrors iOS
- * `windowLabel`.
- */
-private fun windowLabel(minutes: Int?): String {
-    val m = minutes ?: return "·"
-    if (m <= 0) return "·"
-    if (m % 1440 == 0) return "${m / 1440}d"
-    if (m % 60 == 0) return "${m / 60}h"
-    return "${m}m"
-}
 
 /**
  * Friendly ChatGPT plan label from a raw `chatgpt_plan_type`. Returns null

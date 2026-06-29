@@ -103,6 +103,26 @@ actor TrmnlModule: DeviceModule {
         if let v = e["sevenDayPercent"] as? Double { lastState.sevenDayPercent = v; lastState.usageKnown = true }
         if let v = e["fiveHourResetsAt"] as? String { lastState.fiveHourResetsAt = v }
         if let v = e["sevenDayResetsAt"] as? String { lastState.sevenDayResetsAt = v }
+        // Codex (ChatGPT) rolling windows. Like Android/iOS, codexRateLimits only
+        // rides on usage_update — hoist it: update only when the key is present so
+        // a later event without it doesn't wipe the cached gauges. usageKnown is
+        // NOT flipped here; Codex usage can exist without a Claude subscription.
+        if let cx = e["codexRateLimits"] as? [String: Any] {
+            if let p = cx["primary"] as? [String: Any] {
+                lastState.codexPrimaryPercent = p["usedPercent"] as? Double
+                lastState.codexPrimaryResetsAt = p["resetsAt"] as? String
+            } else {
+                lastState.codexPrimaryPercent = nil
+                lastState.codexPrimaryResetsAt = nil
+            }
+            if let s = cx["secondary"] as? [String: Any] {
+                lastState.codexSecondaryPercent = s["usedPercent"] as? Double
+                lastState.codexSecondaryResetsAt = s["resetsAt"] as? String
+            } else {
+                lastState.codexSecondaryPercent = nil
+                lastState.codexSecondaryResetsAt = nil
+            }
+        }
         if let subs = e["subscriptions"] as? [[String: Any]] {
             lastState.subscriptions = subs.compactMap { s in
                 guard let name = s["name"] as? String, !name.isEmpty else { return nil }
@@ -317,8 +337,14 @@ actor TrmnlModule: DeviceModule {
         let usage = lastState.usageKnown
             ? "\(Int(lastState.fiveHourPercent.rounded()))~\(Int(lastState.sevenDayPercent.rounded()))"
             : "na~na"
+        // Codex rolling windows drive a second footer row — fold them in so a
+        // Codex-only change still re-renders (otherwise the Claude-only usage key
+        // above masks it and the panel skips the redraw). Mirrors frame-cache.ts.
+        let cxP = lastState.codexPrimaryPercent.map { "\(Int($0.rounded()))" } ?? "na"
+        let cxS = lastState.codexSecondaryPercent.map { "\(Int($0.rounded()))" } ?? "na"
+        let codex = "\(cxP)~\(cxS)~\(lastState.codexPrimaryResetsAt ?? "")~\(lastState.codexSecondaryResetsAt ?? "")"
         let subs = lastState.subscriptions.map { "\($0.name):\($0.until ?? "")" }.joined(separator: ",")
-        return "\(usage)~\(lastState.fiveHourResetsAt ?? "")~\(lastState.sevenDayResetsAt ?? "")~\(subs)~\(s)"
+        return "\(usage)~\(lastState.fiveHourResetsAt ?? "")~\(lastState.sevenDayResetsAt ?? "")~\(codex)~\(subs)~\(s)"
     }
 
     // MARK: - Enrollment + telemetry

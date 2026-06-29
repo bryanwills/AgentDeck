@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.agentdeck.net.UsageUpdate
+import dev.agentdeck.util.codexLimitRows
 
 /**
  * RIGHT column (30%) — "The Engine"
@@ -60,12 +61,18 @@ fun EinkEngineColumn(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Rate limit gauges (skip if no data)
+        // Rate limit gauges (skip if no data). The brand mark identifies the
+        // provider so Claude and Codex rows read as distinct (labels stay 5h/7d).
         if (usage.fiveHourPercent != null) {
-            EinkTextGauge(label = "5h", percent = usage.fiveHourPercent, barLength = 10)
+            EinkTextGauge(label = "5h", percent = usage.fiveHourPercent, barLength = 10, agentType = "claude-code")
         }
         if (usage.sevenDayPercent != null) {
-            EinkTextGauge(label = "7d", percent = usage.sevenDayPercent, barLength = 10)
+            EinkTextGauge(label = "7d", percent = usage.sevenDayPercent, barLength = 10, agentType = "claude-code")
+        }
+        // Codex (ChatGPT) rolling-window usage — own per-window stale; drop stale
+        // rows on this minimal column (no stale marker here).
+        codexLimitRows(usage.codexRateLimits).filter { !it.stale }.forEach { row ->
+            EinkTextGauge(label = row.label, percent = row.percent, barLength = 10, agentType = row.agentType)
         }
 
         // Message count

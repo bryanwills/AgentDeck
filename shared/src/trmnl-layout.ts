@@ -303,7 +303,14 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
   // collapse it to a compact status strip instead of spending e-ink space on two
   // unavailable gauges.
   const usageKnown = state.usageKnown === true;
-  const footerTop = H - (usageKnown ? 52 : 30);
+  // Codex (ChatGPT) rolling-window usage rides on the same event as Claude's
+  // 5H/7D. When present it gets its own footer row beneath Claude (its brand
+  // mark labels the row), so the footer band grows to fit two lines.
+  const codexFooter = state.codexRateLimits;
+  const hasCodexFooter =
+    usageKnown &&
+    (codexFooter?.primary?.usedPercent != null || codexFooter?.secondary?.usedPercent != null);
+  const footerTop = H - (usageKnown ? (hasCodexFooter ? 92 : 52) : 30);
   // An AWAITING agent is the single most valuable glance signal on a slow panel,
   // so it gets a full-width inverted banner above the rows.
   const awaitingSessions = sessions.filter((s) => statusLabel(s.state) === 'AWAITING');
@@ -489,19 +496,17 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${els.join('')}</svg>`;
   }
 
-  // Claude brand mark + 5H/7D quota on one line. The mark on the far left labels
-  // the block as Claude subscription usage. Each half: label, gauge, %, then the
-  // reset countdown tucked right after the % (no filler phrase, no wasted gap).
-  const fy = footerTop + 33;
+  // Per-provider brand mark + 5H/7D quota on one line. The mark on the far left
+  // labels the row's provider (Claude subscription, or Codex rolling windows).
+  // Each half: label, gauge, %, then the reset countdown tucked right after the
+  // % (no filler phrase, no wasted gap). Codex (when present) gets a second row.
   const gh = 18;
-  // Claude mark (canonical brand glyph), vertically centered in the footer band.
   const markSize = 30;
-  els.push(agentGlyphMono('claude-code', pad + markSize / 2, footerTop + 26, markSize, INK, PAPER));
   const usageX0 = pad + markSize + 18;
   const colW = (W - pad - usageX0) / 2;
   const gaugeW = clamp(Math.round(colW * 0.4), 110, 220);
 
-  const quotaInline = (x: number, label: string, pct: number, resetsAt: string | undefined): void => {
+  const quotaInline = (fy: number, x: number, label: string, pct: number, resetsAt: string | undefined): void => {
     const gx = x + 30;
     const px = gx + gaugeW + 8;
     els.push(
@@ -517,8 +522,24 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
       );
     }
   };
-  quotaInline(usageX0, '5H', state.fiveHourPercent, state.fiveHourResetsAt);
-  quotaInline(usageX0 + colW, '7D', state.sevenDayPercent, state.sevenDayResetsAt);
+
+  // Row 1 — Claude subscription 5H/7D.
+  const fy1 = footerTop + 33;
+  els.push(agentGlyphMono('claude-code', pad + markSize / 2, footerTop + 26, markSize, INK, PAPER));
+  quotaInline(fy1, usageX0, '5H', state.fiveHourPercent, state.fiveHourResetsAt);
+  quotaInline(fy1, usageX0 + colW, '7D', state.sevenDayPercent, state.sevenDayResetsAt);
+
+  // Row 2 — Codex (ChatGPT) rolling windows: primary ≈ 5H, secondary ≈ 7D.
+  // Same column geometry as Claude; the Codex mark identifies the row.
+  if (hasCodexFooter) {
+    const rowGap = 40;
+    const fy2 = fy1 + rowGap;
+    els.push(agentGlyphMono('codex', pad + markSize / 2, footerTop + 26 + rowGap, markSize, INK, PAPER));
+    const p = codexFooter?.primary;
+    const s = codexFooter?.secondary;
+    if (p?.usedPercent != null) quotaInline(fy2, usageX0, '5H', p.usedPercent, p.resetsAt);
+    if (s?.usedPercent != null) quotaInline(fy2, usageX0 + colW, '7D', s.usedPercent, s.resetsAt);
+  }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${els.join('')}</svg>`;
 }

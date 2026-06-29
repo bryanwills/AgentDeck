@@ -94,6 +94,13 @@ struct TrmnlDashState: Sendable {
     /// ISO timestamps when each quota window resets (for a countdown). nil ⇒ hidden.
     var fiveHourResetsAt: String?
     var sevenDayResetsAt: String?
+    /// Codex (ChatGPT) rolling-window usage — primary ≈ 5H, secondary ≈ 7D,
+    /// mirroring the Claude gauges. Rendered as a second footer row tagged with
+    /// the Codex brand mark. nil ⇒ that window has no data (row/half hidden).
+    var codexPrimaryPercent: Double?
+    var codexPrimaryResetsAt: String?
+    var codexSecondaryPercent: Double?
+    var codexSecondaryResetsAt: String?
     /// Active subscriptions (Claude / ChatGPT plan) with optional expiry.
     var subscriptions: [TrmnlSubscription] = []
     /// "HH:MM" stamp baked at render time (the device pulls; this is render-time).

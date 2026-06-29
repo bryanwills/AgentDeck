@@ -2,6 +2,7 @@ package dev.agentdeck.ui.eink
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
@@ -10,14 +11,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.state.SessionMetrics
+import dev.agentdeck.ui.component.BrandIcon
 import dev.agentdeck.ui.monitor.rememberCurrentInstant
 import dev.agentdeck.ui.monitor.subscriptionTrailing
+import dev.agentdeck.util.codexLimitRows
 import dev.agentdeck.util.formatCount
 import dev.agentdeck.util.formatResetTime
 import dev.agentdeck.util.formatUptime
@@ -61,6 +65,25 @@ fun EinkStatusPanel(
             val bar = gaugeBar(pct)
             val reset = usage.sevenDayResetsAt?.let { formatResetTime(it) } ?: ""
             Text(text = "7d $bar ${pct.toInt()}%  $reset", style = monoStyle, color = MaterialTheme.colorScheme.onSurface)
+        }
+
+        // Codex (ChatGPT) rolling-window usage — own per-window stale flag, not
+        // gated by Claude's usageStale. Brand mark identifies the provider so
+        // the 5h/7d labels stay shared with the Claude rows above.
+        codexLimitRows(state.codexRateLimits).forEach { row ->
+            val bar = gaugeBar(row.percent)
+            val reset = if (row.stale) "stale" else row.resetIso?.let { formatResetTime(it) } ?: ""
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BrandIcon(agentType = row.agentType, isEink = true, size = 11.dp)
+                Text(
+                    text = "${row.label} $bar ${row.percent.toInt()}%  $reset",
+                    style = monoStyle,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
 
         HorizontalDivider(thickness = 1.dp, color = Color.Black)

@@ -1,5 +1,6 @@
 package dev.agentdeck.util
 
+import dev.agentdeck.net.CodexRateLimits
 import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -66,6 +67,61 @@ fun formatDurationCompact(ms: Long): String {
         m == 0 -> "${s}s"
         s == 0 -> "${m}m"
         else -> "${m}m ${s}s"
+    }
+}
+
+/**
+ * One provider's usage-limit window, in a render-agnostic shape shared by every
+ * LIMITS surface (HUD rail, e-ink panels, tablet card). The `agentType` lets the
+ * renderer tag the row with a brand mark (the mark conveys the provider — labels
+ * stay plain "5h"/"7d", matching the D200H convention). `resetIso` is the raw
+ * ISO-8601 instant; format it at render time with [formatResetTime] so the
+ * countdown stays current.
+ */
+data class ProviderLimitRow(
+    val agentType: String,
+    val label: String,
+    val percent: Double,
+    val resetIso: String?,
+    val stale: Boolean,
+)
+
+/**
+ * Compact window label from a duration in minutes: whole days → "Nd", whole
+ * hours → "Nh", else "Nm". Days checked first so 10080 → "7d". Single source for
+ * both the HUD rail (TopologyRail) and the e-ink surfaces so the mapping can't
+ * drift between them.
+ */
+fun windowLabel(minutes: Int?): String {
+    val m = minutes ?: return "·"
+    if (m <= 0) return "·"
+    if (m % 1440 == 0) return "${m / 1440}d"
+    if (m % 60 == 0) return "${m / 60}h"
+    return "${m}m"
+}
+
+/**
+ * Codex (ChatGPT) usage rows, mirroring the Claude 5h/7d layout. One row per
+ * present window that carries a `usedPercent` (primary ≈ 5h, secondary ≈ 7d);
+ * labels derive from each window's length. Each window carries its own `stale`
+ * flag — Codex usage is NOT gated by Claude's `usageStale`. Returns an empty
+ * list when no Codex limit data is present, so callers can simply append it.
+ */
+fun codexLimitRows(limits: CodexRateLimits?): List<ProviderLimitRow> {
+    if (limits == null) return emptyList()
+    return buildList {
+        limits.primary?.let { p ->
+            val pct = p.usedPercent
+            if (pct != null) {
+                add(ProviderLimitRow("codex", windowLabel(p.windowMinutes), pct, p.resetsAt, p.stale == true))
+            }
+        }
+        limits.secondary?.let { s ->
+            val pct = s.usedPercent
+            if (pct != null) {
+                add(ProviderLimitRow("codex", windowLabel(s.windowMinutes), pct, s.resetsAt, s.stale == true))
+            }
+        }
     }
 }
 

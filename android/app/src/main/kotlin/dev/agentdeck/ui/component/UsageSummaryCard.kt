@@ -23,6 +23,7 @@ import dev.agentdeck.ui.eink.formatCount
 import dev.agentdeck.ui.eink.formatDuration
 import dev.agentdeck.ui.eink.formatDurationLong
 import dev.agentdeck.ui.theme.AgentDeckColors
+import dev.agentdeck.util.codexLimitRows
 
 /**
  * Compact usage summary card for DashboardScreen.
@@ -63,6 +64,7 @@ fun UsageSummaryCard(
                             suffix = if (isApi && usage.costSpent != null) {
                                 "$${String.format("%.2f", usage.costSpent)}/$${String.format("%.0f", usage.costLimit)}"
                             } else null,
+                            agentType = if (isApi) null else "claude-code",
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -71,6 +73,29 @@ fun UsageSummaryCard(
                             label = "7d",
                             percent = usage.sevenDayPercent,
                             resetAt = usage.sevenDayResetsAt,
+                            agentType = "claude-code",
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+
+            // Codex (ChatGPT) rolling-window usage — independent of Claude's
+            // usageStale (each window carries its own stale flag). Brand mark
+            // identifies the provider so labels stay 5h/7d.
+            val codexRows = codexLimitRows(usage.codexRateLimits)
+            if (codexRows.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    codexRows.forEach { row ->
+                        CompactGauge(
+                            label = row.label,
+                            percent = row.percent,
+                            resetAt = if (row.stale) null else row.resetIso,
+                            suffix = if (row.stale) "stale" else null,
+                            agentType = row.agentType,
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -124,6 +149,9 @@ private fun CompactGauge(
     modifier: Modifier = Modifier,
     resetAt: String? = null,
     suffix: String? = null,
+    // When set, a small per-provider brand mark leads the gauge so Codex rows
+    // read as distinct from Claude's (labels stay 5h/7d — the mark = the agent).
+    agentType: String? = null,
 ) {
     val fraction = (percent / 100.0).coerceIn(0.0, 1.0).toFloat()
     val color = when {
@@ -137,6 +165,9 @@ private fun CompactGauge(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (agentType != null) {
+                BrandIcon(agentType = agentType, size = 12.dp)
+            }
             Text(
                 text = "$label:",
                 style = MaterialTheme.typography.bodySmall,

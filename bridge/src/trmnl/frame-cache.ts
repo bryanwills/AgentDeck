@@ -66,6 +66,17 @@ export function trmnlStateHash(evt: any): string {
     // countdown, but they don't churn minute-to-minute.
     evt?.fiveHourResetsAt ?? '',
     evt?.sevenDayResetsAt ?? '',
+    // Codex (ChatGPT) rolling windows render a second footer row — fold them in
+    // so a Codex-only usage change still re-renders the panel (otherwise the
+    // Claude-only hash above would mask it and the TRMNL would skip the redraw).
+    evt?.codexRateLimits?.primary?.usedPercent != null
+      ? Math.round(evt.codexRateLimits.primary.usedPercent)
+      : 'na',
+    evt?.codexRateLimits?.secondary?.usedPercent != null
+      ? Math.round(evt.codexRateLimits.secondary.usedPercent)
+      : 'na',
+    evt?.codexRateLimits?.primary?.resetsAt ?? '',
+    evt?.codexRateLimits?.secondary?.resetsAt ?? '',
     sessKey,
   ].join('~');
 }
