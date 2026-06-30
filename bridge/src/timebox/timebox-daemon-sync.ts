@@ -85,9 +85,9 @@ function spawnSync(entry: SyncEntry, venvPython: string, syncScript: string, htt
   );
   entry.startedAt = Date.now();
 
-  // stdout muted (debug flood); stderr captured so a Python crash (missing bleak,
-  // stale venv, bad address) lands in the daemon log instead of vanishing.
-  const { proc, stderrTail } = spawnPythonSync(venvPython, args);
+  // stdout/stderr are captured into small rings so clean exits and crashes both
+  // leave enough context without flooding the daemon log while running.
+  const { proc, stderrTail, outputTail } = spawnPythonSync(venvPython, args);
   entry.child = proc;
 
   proc.on('error', (err: Error) => {
@@ -100,8 +100,8 @@ function spawnSync(entry: SyncEntry, venvPython: string, syncScript: string, htt
     if (Date.now() - entry.startedAt > HEALTHY_UPTIME_MS) entry.consecutiveFailures = 0;
     entry.consecutiveFailures += 1;
     const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * entry.consecutiveFailures);
-    const tail = stderrTail();
-    const why = code && tail ? `; stderr: ${tail}` : '';
+    const tail = stderrTail() || outputTail();
+    const why = tail ? `; output: ${tail}` : '';
     log(`sync for ${id} exited (code=${code} signal=${signal})${why}; respawning in ${Math.round(delay / 1000)}s`);
     entry.respawnTimer = setTimeout(() => spawnSync(entry, venvPython, syncScript, httpPort), delay);
     if (entry.respawnTimer.unref) entry.respawnTimer.unref();

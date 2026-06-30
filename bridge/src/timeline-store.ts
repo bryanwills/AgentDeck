@@ -108,10 +108,10 @@ export class BridgeTimelineStore {
   }
 
   getHistory(since?: number): TimelineEntry[] {
-    if (since) {
-      return this.entries.filter((e) => e.ts > since);
-    }
-    return [...this.entries];
+    const entries = since
+      ? this.entries.filter((e) => e.ts > since)
+      : this.entries;
+    return [...entries].sort((a, b) => a.ts - b.ts);
   }
 
   /** Load persisted timeline rows into the bounded replay buffer without
@@ -166,7 +166,9 @@ export class BridgeTimelineStore {
     const matched = this.entries.filter(
       (e) => (e.sessionId === sessionId || e.sessionId === raw) && (since == null || e.ts > since),
     );
-    return matched.slice(-limit);
+    return matched
+      .sort((a, b) => a.ts - b.ts)
+      .slice(-limit);
   }
 
   updateEntryStatus(approvalId: string, status: 'approved' | 'denied'): void {

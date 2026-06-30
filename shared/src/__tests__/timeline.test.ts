@@ -165,6 +165,17 @@ describe('normalizeTimelineEntryForStorage', () => {
     })).toBe(true);
   });
 
+  it('drops Claude task notification chat starts from the user-facing timeline', () => {
+    expect(shouldDropLowSignalTimelineEntry({
+      ts: 100,
+      type: 'chat_start',
+      raw: 'Entry [2] (Pride and Prejudice',
+      detail: '<task-notification>\n<summary>Background command completed</summary>',
+      agentType: 'claude-code',
+      projectName: 'AgentDeck',
+    })).toBe(true);
+  });
+
   it('keeps OpenClaw LINE userId notification failures visible', () => {
     expect(shouldDropLowSignalTimelineEntry({
       ts: 100,

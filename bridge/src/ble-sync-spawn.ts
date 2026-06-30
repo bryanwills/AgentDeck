@@ -7,8 +7,8 @@
  * crash traceback on stderr. A missing `bleak`/`idotmatrix` dependency, a stale
  * venv, or a bad BLE address then looks identical to a clean exit: the panel
  * goes dark and the daemon logs only "respawning in Ns" with no cause. This
- * helper keeps stdout muted but pipes stderr into a small ring buffer so the
- * manager can log *why* the sync died.
+ * helper pipes stdout/stderr into small ring buffers so the manager can log
+ * *why* the sync died without flooding the daemon log while it is running.
  */
 
 import { spawn, type ChildProcess } from 'child_process';
@@ -17,38 +17,60 @@ export interface ManagedSyncChild {
   proc: ChildProcess;
   /** Last captured stderr lines, newest-last, joined with ' | ' (empty if none). */
   stderrTail: () => string;
+  /** Last captured stdout/stderr lines, newest-last, joined with ' | ' (empty if none). */
+  outputTail: () => string;
 }
 
 /**
- * Spawn a Python sync child with stdout muted and stderr captured into a
- * bounded tail buffer.
+ * Spawn a Python sync child with stdout/stderr captured into bounded tail
+ * buffers. Output is not streamed live; callers read it only if the child exits.
  */
 export function spawnPythonSync(
   venvPython: string,
   args: string[],
   maxTailLines = 8,
 ): ManagedSyncChild {
-  // [stdin ignored, stdout ignored (debug flood), stderr piped for diagnostics]
-  const proc = spawn(venvPython, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  // [stdin ignored, stdout/stderr piped into small rings for diagnostics]
+  const proc = spawn(venvPython, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
-  const tail: string[] = [];
-  let partial = '';
-  proc.stderr?.on('data', (chunk: Buffer) => {
+  const stderrTail: string[] = [];
+  const outputTail: string[] = [];
+  let stderrPartial = '';
+  let stdoutPartial = '';
+
+  const capture = (label: 'stdout' | 'stderr', chunk: Buffer): void => {
+    let partial = label === 'stderr' ? stderrPartial : stdoutPartial;
     partial += chunk.toString();
     const lines = partial.split('\n');
     partial = lines.pop() ?? '';
     for (const line of lines) {
       const trimmed = line.trimEnd();
       if (!trimmed) continue;
-      tail.push(trimmed);
-      if (tail.length > maxTailLines) tail.shift();
+      const tagged = `${label}: ${trimmed}`;
+      outputTail.push(tagged);
+      if (outputTail.length > maxTailLines) outputTail.shift();
+      if (label === 'stderr') {
+        stderrTail.push(trimmed);
+        if (stderrTail.length > maxTailLines) stderrTail.shift();
+      }
     }
-  });
+    if (label === 'stderr') stderrPartial = partial;
+    else stdoutPartial = partial;
+  };
+
+  proc.stdout?.on('data', (chunk: Buffer) => capture('stdout', chunk));
+  proc.stderr?.on('data', (chunk: Buffer) => capture('stderr', chunk));
 
   return {
     proc,
     stderrTail: () => {
-      const lines = partial.trim() ? [...tail, partial.trim()] : tail;
+      const lines = stderrPartial.trim() ? [...stderrTail, stderrPartial.trim()] : stderrTail;
+      return lines.slice(-maxTailLines).join(' | ');
+    },
+    outputTail: () => {
+      const lines = [...outputTail];
+      if (stdoutPartial.trim()) lines.push(`stdout: ${stdoutPartial.trim()}`);
+      if (stderrPartial.trim()) lines.push(`stderr: ${stderrPartial.trim()}`);
       return lines.slice(-maxTailLines).join(' | ');
     },
   };

@@ -107,9 +107,9 @@ function spawnSync(venvPython: string, syncScript: string, httpPort: number): vo
   runningKey = deviceKey(device);
   // iDotMatrix software brightness boost canonical = 1.6 — keep in sync:
   // sync.py (run_sync boost default), IDotMatrixModule.swift (boostBrightnessContrast).
-  // stdout muted (debug flood); stderr captured so a Python crash (missing bleak,
-  // stale venv, bad address) is logged instead of vanishing.
-  const { proc, stderrTail } = spawnPythonSync(venvPython, [
+  // stdout/stderr are captured into small rings so clean exits and crashes both
+  // leave enough context without flooding the daemon log while running.
+  const { proc, stderrTail, outputTail } = spawnPythonSync(venvPython, [
     syncScript, '-a', addr, '-u', url, '-b', String(brightness), '--boost', '1.6',
   ]);
   child = proc;
@@ -125,8 +125,8 @@ function spawnSync(venvPython: string, syncScript: string, httpPort: number): vo
     if (Date.now() - startedAt > HEALTHY_UPTIME_MS) consecutiveFailures = 0;
     consecutiveFailures += 1;
     const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * consecutiveFailures);
-    const tail = stderrTail();
-    const why = code && tail ? `; stderr: ${tail}` : '';
+    const tail = stderrTail() || outputTail();
+    const why = tail ? `; output: ${tail}` : '';
     log(`BLE sync exited (code=${code} signal=${signal})${why}; respawning in ${Math.round(delay / 1000)}s`);
     respawnTimer = setTimeout(() => spawnSync(venvPython, syncScript, httpPort), delay);
     if (respawnTimer.unref) respawnTimer.unref();

@@ -50,6 +50,22 @@ describe('BridgeTimelineStore', () => {
     expect(since[0].ts).toBe(200);
   });
 
+  it('returns timeline history sorted by timestamp after late upserts', () => {
+    store.addEntry(makeEntry({ ts: 300, type: 'chat_response', raw: 'late response' }));
+    store.upsertEntry(makeEntry({ ts: 100, type: 'chat_start', raw: 'early prompt' }));
+    store.addEntry(makeEntry({ ts: 200, type: 'chat_end', raw: 'middle completion' }));
+
+    expect(store.getHistory().map((e) => e.ts)).toEqual([100, 200, 300]);
+  });
+
+  it('returns per-session history sorted by timestamp after late upserts', () => {
+    store.addEntry(makeEntry({ ts: 300, type: 'chat_response', raw: 'late response', sessionId: 's1' }));
+    store.upsertEntry(makeEntry({ ts: 100, type: 'chat_start', raw: 'early prompt', sessionId: 's1' }));
+    store.addEntry(makeEntry({ ts: 200, type: 'chat_end', raw: 'middle completion', sessionId: 's1' }));
+
+    expect(store.getHistoryForSession('s1').map((e) => e.ts)).toEqual([100, 200, 300]);
+  });
+
   it('normalizes OpenClaw cron prompt dumps before storing history', () => {
     store.addEntry(makeEntry({
       ts: 100,

@@ -275,6 +275,13 @@ export function isOpenClawPlaceholderRaw(raw: string): boolean {
   return normalized === 'tool' || normalized.startsWith('tool \u00b7 ');
 }
 
+export function isTaskNotificationChatStart(entry: TimelineEntry): boolean {
+  if (entry.type !== 'chat_start') return false;
+  const raw = entry.raw.trim().toLowerCase();
+  const detail = entry.detail?.trim().toLowerCase() ?? '';
+  return raw.startsWith('<task-notification>') || detail.startsWith('<task-notification>');
+}
+
 function hasOpenClawNotificationFailureSignal(text: string): boolean {
   return /\b(line|notification|userid|target id|target issue)\b/i.test(text) &&
     /\b(fail(?:ed|ure)?|missing|unconfigured|notified|needed|pending)\b/i.test(text) ||
@@ -325,6 +332,7 @@ export function summarizeOpenClawCronPrompt(text?: string): string {
 }
 
 export function shouldDropLowSignalTimelineEntry(entry: TimelineEntry): boolean {
+  if (isTaskNotificationChatStart(entry)) return true;
   if (isOpenClawLowSignalResponse(entry)) return true;
 
   const lowSignalTypes = new Set<TimelineEntryType>(['tool_exec', 'tool_request', 'tool_resolved']);
