@@ -52,7 +52,7 @@ class TimelineDisplayScenarioTest {
     }
 
     @Test
-    fun `codex otel low-signal tool entries are suppressed`() {
+    fun `codex tool entries are suppressed from device timeline`() {
         val entries = listOf(
             event(1_000, "chat_start", "Real prompt", "codex-real", "codex-cli", "Compiler"),
             // codex:otel-active sentinel: bridge wires synthetic OTel rows here.
@@ -60,7 +60,8 @@ class TimelineDisplayScenarioTest {
             event(1_100, "tool_exec", "tool", "codex:otel-active", "codex-cli", "Compiler"),
             event(1_200, "tool_request", "exec", "codex:otel-active", "codex-cli", "Compiler"),
             event(1_300, "tool_resolved", "tool completed", "codex:otel-active", "codex-cli", "Compiler"),
-            // Same session_id but raw is meaningful — must NOT be filtered.
+            // Same session_id but raw is meaningful-looking. Device timeline still
+            // drops Codex tool_exec firehose; APME keeps the internal trajectory.
             event(1_400, "tool_exec", "Bash: pnpm vitest", "codex:otel-active", "codex-cli", "Compiler"),
         )
         val display = timelineDisplayGroups(groupConsecutive(entries))
@@ -69,7 +70,7 @@ class TimelineDisplayScenarioTest {
         assertFalse("OTel synthetic 'tool' raw should be hidden", rendered.contains("tool"))
         assertFalse("OTel synthetic 'exec' raw should be hidden", rendered.contains("exec"))
         assertFalse("OTel 'tool completed' raw should be hidden", rendered.contains("tool completed"))
-        assertTrue("Real Bash command must remain visible", rendered.contains("Bash: pnpm vitest"))
+        assertFalse("Codex Bash command firehose must be hidden", rendered.contains("Bash: pnpm vitest"))
         assertTrue("Real prompt remains visible", rendered.contains("Real prompt"))
     }
 

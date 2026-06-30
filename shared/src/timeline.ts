@@ -275,6 +275,37 @@ export function isOpenClawPlaceholderRaw(raw: string): boolean {
   return normalized === 'tool' || normalized.startsWith('tool \u00b7 ');
 }
 
+function hasOpenClawNotificationFailureSignal(text: string): boolean {
+  return /\b(line|notification|userid|target id|target issue)\b/i.test(text) &&
+    /\b(fail(?:ed|ure)?|missing|unconfigured|notified|needed|pending)\b/i.test(text) ||
+    /(LINE|알림|userId|사용자 ID|대상 ID).*(실패|미등록|미설정|구성되지|필요|대기)/i.test(text);
+}
+
+export function isOpenClawLowSignalResponse(entry: TimelineEntry): boolean {
+  if (entry.agentType !== 'openclaw') return false;
+  const isResponse = entry.type === 'chat_response' || entry.type === 'model_response';
+  const isAutomatedStart = entry.type === 'chat_start' && entry.automated === true;
+  if (!isResponse && !isAutomatedStart) return false;
+  const text = `${entry.raw}\n${entry.detail ?? ''}`.trim();
+  if (!text) return false;
+  if (hasOpenClawNotificationFailureSignal(text)) return false;
+
+  const lower = text.toLowerCase();
+  const hasNoReply = /\bno_reply\b/.test(lower);
+  const looksLikePolling =
+    /\bstill translating\b/.test(lower) ||
+    /\btranslation still in progress\b/.test(lower) ||
+    /\bnot all .*?(terminal|published|failed|complete|completed)\b/.test(lower) ||
+    /\b(in progress|still active|no action needed|nothing to notify yet)\b/.test(lower) ||
+    /\bcron job (?:stays|retained|active)\b/.test(lower) ||
+    /\bpipeline still active\b/.test(lower) ||
+    /(아직|여전히|계속).*(번역|진행)\s*중/.test(text) ||
+    /알릴 필요 없음|수행할 작업이 없음|대기합니다/.test(text);
+
+  if (isAutomatedStart) return looksLikePolling;
+  return looksLikePolling && (hasNoReply || /no action needed|nothing to notify yet|알릴 필요 없음/.test(lower));
+}
+
 export function isOpenClawCronPrompt(text?: string): boolean {
   return !!text && text.trimStart().startsWith('[cron:');
 }
@@ -294,6 +325,8 @@ export function summarizeOpenClawCronPrompt(text?: string): string {
 }
 
 export function shouldDropLowSignalTimelineEntry(entry: TimelineEntry): boolean {
+  if (isOpenClawLowSignalResponse(entry)) return true;
+
   const lowSignalTypes = new Set<TimelineEntryType>(['tool_exec', 'tool_request', 'tool_resolved']);
   if (!lowSignalTypes.has(entry.type)) return false;
   // Codex tool hooks are extremely high volume (Bash/MCP start+complete for

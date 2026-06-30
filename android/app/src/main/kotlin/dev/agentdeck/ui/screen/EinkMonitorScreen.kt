@@ -161,7 +161,7 @@ fun EinkMonitorScreen(
                         val daemon = bridges.firstOrNull { it.agentType == "daemon" }
                         if (daemon != null) {
                             einkDebug { "mDNS daemon found: ${daemon.name} at ${daemon.wsUrl()}" }
-                            connection.connect(daemon.wsUrl())
+                            connection.connect(daemon.wsUrl(), daemon.fallbackWsUrl())
                             return@collect
                         }
                     }
@@ -172,7 +172,7 @@ fun EinkMonitorScreen(
                 connection.status.value != ConnectionStatus.CONNECTED) {
                 val bridge = bestBridges.first()
                 einkDebug { "mDNS daemon not found, fallback: ${bridge.name} (agent=${bridge.agentType}) at ${bridge.wsUrl()}" }
-                connection.connect(bridge.wsUrl())
+                connection.connect(bridge.wsUrl(), bridge.fallbackWsUrl())
             }
         }
     }
@@ -188,7 +188,7 @@ fun EinkMonitorScreen(
                     val daemon = bridges.firstOrNull { it.agentType == "daemon" }
                     if (daemon != null && connection.status.value != ConnectionStatus.CONNECTED) {
                         einkDebug { "mDNS re-discover (daemon): ${daemon.name} at ${daemon.wsUrl()}" }
-                        connection.connect(daemon.wsUrl())
+                        connection.connect(daemon.wsUrl(), daemon.fallbackWsUrl())
                         return@collect
                     }
                 }
@@ -232,7 +232,7 @@ fun EinkMonitorScreen(
                 discoveredBridges = discoveredBridges,
                 lastError = lastError,
                 onConnectToBridge = { bridge ->
-                    connection.connect(bridge.wsUrl())
+                    connection.connect(bridge.wsUrl(), bridge.fallbackWsUrl())
                 },
                 onConnectLocalhost = {
                     connection.connect(BridgeConstants.LOCALHOST_WS_URL)
@@ -247,7 +247,7 @@ fun EinkMonitorScreen(
                 lastError = lastError,
                 discoveredBridges = discoveredBridges,
                 onConnectToBridge = { bridge ->
-                    connection.connect(bridge.wsUrl())
+                    connection.connect(bridge.wsUrl(), bridge.fallbackWsUrl())
                 },
                 onStopReconnecting = { connection.disconnect() },
                 onSettingsClick = { showSettings = true },

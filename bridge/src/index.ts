@@ -18,7 +18,7 @@ import { classifyAndEnqueueTurn } from './apme/classify-turn.js';
 import type { AdapterContext as ApmeAdapterContext } from '@agentdeck/shared';
 import { VoiceManager } from './voice.js';
 import { checkDependencies } from './check-deps.js';
-import { enableDebugLog, log, logError, debug, setPtyMode } from './logger.js';
+import { enableDebugLog, log, debug, setPtyMode } from './logger.js';
 import { EventJournal } from './event-journal.js';
 import { PtyRingBuffer } from './pty-ringbuffer.js';
 import { createDiagDump } from './diag-analyzer.js';
@@ -26,7 +26,6 @@ import { createAdapter, ClaudeCodeAdapter, CodexCliAdapter, OpenCodeAdapter } fr
 import { MonitorAdapter } from './adapters/monitor.js';
 import { UtilityProxy } from './utility-proxy.js';
 import { BridgeLogStream } from './log-stream.js';
-import { summarizeResponse } from './timeline-summarizer.js';
 import {
   cleanDetailText, cleanRawText, prepareMarkdownDetail,
   extractTopicHintWithKind, promptSnippetFallback,
@@ -709,10 +708,15 @@ export async function startSession(opts: SessionOptions): Promise<void> {
         core.fetchAndUpdateUsage().catch(() => {});
       }
 
-      // Voice assistant: if processing a wake-word prompt, speak the response
+      // Voice assistant: if processing a wake-word prompt, speak the response.
+      // Prefer chat_response (the turn's primary completion row now that a
+      // paired chat_end is no longer emitted for turns that have response
+      // text); fall back to chat_end for response-less turns. Read detail
+      // (full markdown) first, then the raw snippet.
       if (voiceAssistant?.getState() === 'processing') {
-        const lastEntry = core.bridgeTimeline.getLastEntry('chat_end');
-        const responseText = lastEntry?.detail;
+        const lastEntry = core.bridgeTimeline.getLastEntry('chat_response')
+          ?? core.bridgeTimeline.getLastEntry('chat_end');
+        const responseText = lastEntry?.detail ?? lastEntry?.raw;
         if (responseText) {
           voiceAssistant.handleResponse(responseText).catch((err) => {
             debug('agentdeck', `Voice assistant TTS error: ${err}`);
@@ -1372,7 +1376,13 @@ function wireClaudeCodeTimeline(
     return clean.join('\n').trim();
   };
 
-  /** Emit chat_response + chat_end from response text (shared by Stop hook and PTY fallback) */
+  /**
+   * Emit a single Claude turn-close row (shared by Stop hook and PTY fallback):
+   * a `chat_response` when there is meaningful response text, otherwise a
+   * `chat_end`. The two are mutually exclusive so a turn never produces both —
+   * the paired dimmed `chat_end` used to fragment every turn into three rows on
+   * the flat surfaces (plugin / TUI / timeline.json).
+   */
   const emitCompletion = (responseText: string, duration: number | null, toolSummary: string) => {
     const now = Date.now();
     const startedAt = ccChatStart ?? undefined;
@@ -1427,43 +1437,23 @@ function wireClaudeCodeTimeline(
     const chatEndTs = now;
     ccChatStart = null;
     ccLastPromptText = null;
-    core.bridgeTimeline.addEntry({
-      ts: chatEndTs, type: 'chat_end', raw: summary,
-      ...(chatEndDetail ? { detail: chatEndDetail } : {}),
-      agentType: 'claude-code',
-      ...(startedAt ? { startedAt } : {}),
-      endedAt: chatEndTs,
-      summaryKind,
-    });
 
-    // Async LLM summarization — fire-and-forget, upsert chat_end when ready
-    if (responseText && responseText.length > 30) {
-      const savedDuration = duration;
-      const savedToolSummary = toolSummary;
-      const savedDetail = chatEndDetail;
-      summarizeResponse(responseText).then((llmSummary) => {
-        if (llmSummary) {
-          const enrichedParts = [llmSummary];
-          if (savedDuration != null) enrichedParts.push(`${savedDuration}s`);
-          if (savedToolSummary) enrichedParts.push(savedToolSummary);
-          debug('timeline', `CC LLM summary: ${llmSummary}`);
-          core.bridgeTimeline.upsertEntry({
-            ts: chatEndTs, type: 'chat_end',
-            raw: enrichedParts.join(' \u00B7 '),
-            ...(savedDetail ? { detail: savedDetail } : {}),
-            agentType: 'claude-code',
-            ...(startedAt ? { startedAt } : {}),
-            endedAt: chatEndTs,
-            summaryKind: 'llm',
-          });
-        }
-      }).catch((err) => {
-        // Defensive — `summarizeResponse` swallows MLX/Ollama errors and
-        // returns null, so this rejection path is reached only when the
-        // .then() handler itself throws (e.g. upsertEntry bug). Backend-
-        // offline reporting is surfaced inside summarizeResponse on the
-        // failed-provider transition.
-        logError(`[timeline] post-summary upsert threw: ${String(err)}`);
+    // Only emit a chat_end turn-close row when there is NO chat_response to act
+    // as the turn's completion row (a tool-only turn, or a Stop hook with no
+    // last_assistant_message). When a chat_response exists it already marks the
+    // turn complete; the extra dimmed "Completed · Ns · topic" row is redundant
+    // metadata — the dashboard already drops it on render — and on the flat
+    // surfaces (Stream Deck plugin / TUI / persisted timeline.json) it
+    // fragmented every Claude turn into three rows. Keeping chat_start +
+    // chat_response matches the cleaner OpenClaw turn shape.
+    if (responseText.length <= 20) {
+      core.bridgeTimeline.addEntry({
+        ts: chatEndTs, type: 'chat_end', raw: summary,
+        ...(chatEndDetail ? { detail: chatEndDetail } : {}),
+        agentType: 'claude-code',
+        ...(startedAt ? { startedAt } : {}),
+        endedAt: chatEndTs,
+        summaryKind,
       });
     }
   };

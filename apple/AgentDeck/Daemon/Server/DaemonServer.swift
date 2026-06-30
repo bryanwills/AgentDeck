@@ -5781,34 +5781,27 @@ final class DaemonServer {
                 "entry": claudeCodeEntryDict(respEntry),
             ] as [String: Any])
         }
-        // chat_end is a metadata row beneath chat_response. The Node bridge's
-        // emitCompletion uses "${completedLabel} · ${duration}s · ${tools}";
-        // the Apple daemon mirrors the duration suffix so the dashboard does
-        // not render two near-identical lines (the dimmed chat_end row used
-        // to repeat chat_response's response-text prefix verbatim, which read
-        // as a duplicate at row-level opacity 0.4–0.6).
+        // Only emit a chat_end turn-close row when there is NO chat_response to
+        // act as the turn's completion row (a tool-only turn, or a Stop hook
+        // with no last_assistant_message). When a chat_response was emitted
+        // above it already marks the turn complete; the extra dimmed
+        // "Completed · Ns · topic" row is redundant metadata that the dashboard
+        // drops on render, and on the flat surfaces (Stream Deck plugin / TUI /
+        // persisted timeline.json) it fragmented every Claude turn into three
+        // rows. Keeping chat_start + chat_response matches the cleaner OpenClaw
+        // turn shape and mirrors the Node bridge's emitCompletion.
         let topicFromPrompt = sessionId.flatMap { claudeLastPromptTopicBySession[$0] }
-        let providerRaw = AppPreferences.shared.timelineSummaryProvider
-        let provider = TimelineSummarizer.SummaryProvider(rawValue: providerRaw) ?? .auto
 
-        // chat_end build + broadcast hops into a Task so the LLM call doesn't
-        // block the Stop-hook handler. chat_response (above) was already
-        // broadcast immediately so the user-visible response body never lags.
-        // High-entropy label so DaemonTimelineStore's 8 s exact-dedup window
-        // does not collapse two legitimate quick turns that happen to share
-        // the same rounded duration (e.g. two `Completed · 2s` rows).
+        // chat_end build + broadcast hops into a Task so it doesn't block the
+        // Stop-hook handler. Reached only for response-less turns, so there is
+        // no assistant text to summarize — the label is the prompt topic.
+        if assistantText.isEmpty {
         Task {
-            let summary = assistantText.isEmpty
-                ? nil
-                : await TimelineSummarizer.summarize(assistantText, provider: provider)
-            let topic = summary?.text ?? topicFromPrompt
+            let topic = topicFromPrompt
             let durationSec: Int? = startTs.map { Int(((now - $0) / 1000).rounded()) }
-            // Always prepend "Completed" so the dimmed chat_end row is visually
-            // distinct from the bright chat_response row above it. Topic-only
-            // labels matched the chat_response's first line verbatim, which read
-            // as a duplicate; the "Completed · " prefix gives the dashboard a
-            // clear "metadata" cue while duration + topic suffix still provide
-            // the entropy needed to keep DaemonTimelineStore's 8 s exact-dedup
+            // "Completed · {duration}s · {prompt topic}" is the single
+            // turn-close row for a response-less turn. High-entropy label
+            // (duration + topic) keeps DaemonTimelineStore's 8 s exact-dedup
             // from collapsing two legitimate quick turns.
             var endRawParts: [String] = ["Completed"]
             if let d = durationSec { endRawParts.append("\(d)s") }
@@ -5818,7 +5811,7 @@ final class DaemonServer {
                 ts: now,
                 type: "chat_end",
                 raw: endRaw,
-                detail: assistantText.isEmpty ? topicFromPrompt.map { "Prompt: \($0)" } : nil,
+                detail: topicFromPrompt.map { "Prompt: \($0)" },
                 approvalId: nil,
                 status: nil,
                 agentType: "claude-code",
@@ -5829,13 +5822,14 @@ final class DaemonServer {
             endEntry.projectName = projectName
             endEntry.startedAt = startTs
             endEntry.endedAt = now
-            endEntry.summaryKind = summary?.kind ?? (topic == nil ? nil : "heuristic")
+            endEntry.summaryKind = topic == nil ? nil : "heuristic"
             await timelineStore.add(endEntry)
             broadcastRaw([
                 "type": "timeline_event",
                 "entry": claudeCodeEntryDict(endEntry),
             ] as [String: Any])
         }
+        } // if assistantText.isEmpty
 
         // Cache cleanup runs synchronously so a follow-up turn that fires
         // before the Task above completes still gets a clean session state.

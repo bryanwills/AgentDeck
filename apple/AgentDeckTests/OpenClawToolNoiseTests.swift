@@ -125,6 +125,42 @@ final class OpenClawToolNoiseTests: XCTestCase {
         XCTAssertTrue(DaemonTimelineStore.shouldDropLowSignalEntry(entry))
     }
 
+    func testStoreFilterDropsOpenClawNoReplyPollingResponse() {
+        let entry = DaemonTimelineEntry(
+            ts: Date().timeIntervalSince1970 * 1000,
+            type: "chat_response",
+            raw: "Still translating - 2 entries in progress. No action needed.\n\nNO_REPLY",
+            detail: "Two entries still translating -> pipeline not done yet.\n\nNO_REPLY",
+            agentType: "openclaw",
+            projectName: "OpenClaw"
+        )
+        XCTAssertTrue(DaemonTimelineStore.shouldDropLowSignalEntry(entry))
+    }
+
+    func testStoreFilterDropsOpenClawAutomatedPollingStart() {
+        let entry = DaemonTimelineEntry(
+            ts: Date().timeIntervalSince1970 * 1000,
+            type: "chat_start",
+            raw: "Still translating - 2 entries in progress, 1 failed. Not all terminal yet.",
+            agentType: "openclaw",
+            automated: true,
+            projectName: "OpenClaw"
+        )
+        XCTAssertTrue(DaemonTimelineStore.shouldDropLowSignalEntry(entry))
+    }
+
+    func testStoreFilterKeepsOpenClawLineNotificationFailure() {
+        let entry = DaemonTimelineEntry(
+            ts: Date().timeIntervalSince1970 * 1000,
+            type: "chat_response",
+            raw: "Pride and Prejudice published - LINE notification failed (userId 미등록, 4/21부터 지속)\n\nNO_REPLY",
+            detail: "LINE target ID is still unconfigured. Notification remains pending.",
+            agentType: "openclaw",
+            projectName: "OpenClaw"
+        )
+        XCTAssertFalse(DaemonTimelineStore.shouldDropLowSignalEntry(entry))
+    }
+
     func testStoreNormalizesOpenClawCronPromptDump() {
         let prompt = "[cron:abc self-improvement-daily-review-2350] 입력 수집:\n1. ls -lt 사용\n2. tail -50 사용"
         let entry = DaemonTimelineEntry(

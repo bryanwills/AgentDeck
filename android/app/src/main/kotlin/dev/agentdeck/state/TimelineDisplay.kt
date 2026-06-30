@@ -99,6 +99,8 @@ private fun isMeaningfulTaskTitle(raw: String): Boolean {
  * 500-entry buffer from aging out useful rows behind OTel noise.
  */
 internal fun isLowSignalEntry(entry: TimelineEntry): Boolean {
+    if (isOpenClawLowSignalResponse(entry)) return true
+
     if (entry.type !in lowSignalTypes) return false
     // Codex tool hooks fire for every internal Bash/MCP action and can easily
     // evict the actual turn/task rows from the bounded timeline. APME still
@@ -133,6 +135,42 @@ internal fun isLowSignalEntry(entry: TimelineEntry): Boolean {
         return raw == "tool" || raw.startsWith("tool · ")
     }
     return false
+}
+
+internal fun isOpenClawLowSignalResponse(entry: TimelineEntry): Boolean {
+    if (entry.agentType != "openclaw") return false
+    val isResponse = entry.type == "chat_response" || entry.type == "model_response"
+    val isAutomatedStart = entry.type == "chat_start" && entry.automated == true
+    if (!isResponse && !isAutomatedStart) return false
+
+    val text = listOfNotNull(entry.summary, entry.detail).joinToString("\n").trim()
+    if (text.isEmpty()) return false
+    if (hasOpenClawNotificationFailureSignal(text)) return false
+
+    val lower = text.lowercase()
+    val hasNoReply = Regex("""\bno_reply\b""").containsMatchIn(lower)
+    val looksLikePolling =
+        Regex("""still translating""").containsMatchIn(lower) ||
+        Regex("""translation still in progress""").containsMatchIn(lower) ||
+        Regex("""not all .*?(terminal|published|failed|complete|completed)""").containsMatchIn(lower) ||
+        Regex("""(in progress|still active|no action needed|nothing to notify yet)""").containsMatchIn(lower) ||
+        Regex("""cron job (stays|retained|active)""").containsMatchIn(lower) ||
+        Regex("""pipeline still active""").containsMatchIn(lower) ||
+        Regex("""(아직|여전히|계속).*(번역|진행)\s*중""").containsMatchIn(text) ||
+        Regex("""알릴 필요 없음|수행할 작업이 없음|대기합니다""").containsMatchIn(text)
+
+    if (isAutomatedStart) return looksLikePolling
+    return looksLikePolling &&
+        (hasNoReply || lower.contains("no action needed") || lower.contains("nothing to notify yet") || text.contains("알릴 필요 없음"))
+}
+
+private fun hasOpenClawNotificationFailureSignal(text: String): Boolean {
+    val english =
+        Regex("""\b(line|notification|userid|target id|target issue)\b""", RegexOption.IGNORE_CASE).containsMatchIn(text) &&
+            Regex("""\b(fail(ed|ure)?|missing|unconfigured|notified|needed|pending)\b""", RegexOption.IGNORE_CASE).containsMatchIn(text)
+    val korean =
+        Regex("""(LINE|알림|userId|사용자 ID|대상 ID).*(실패|미등록|미설정|구성되지|필요|대기)""", RegexOption.IGNORE_CASE).containsMatchIn(text)
+    return english || korean
 }
 
 internal fun normalizeTimelineEntryForStorage(entry: TimelineEntry): TimelineEntry? {

@@ -6,6 +6,62 @@
 
 ---
 
+## 2026-06-30 — OpenClaw polling NO_REPLY timeline noise 필터 패리티
+
+### 문제
+OpenClaw cron/polling 흐름이 "Still translating", "No action needed", `NO_REPLY` 같은 상태 확인 응답을 `chat_response`/automated `chat_start`로 남겨 Android/Apple/shared device timeline에 사용자 작업처럼 보일 수 있었다. 반대로 LINE/userId 알림 실패 같은 실제 조치 필요 신호는 숨기면 안 된다.
+
+### 해결
+- shared `timeline.ts`, Swift `DaemonTimelineStore`, Android `TimelineDisplay.kt`에 `isOpenClawLowSignalResponse` 필터를 추가.
+- polling/no-op 응답과 automated polling start는 storage/display low-signal로 제거.
+- LINE notification/userId/target ID 실패·미설정·pending 신호는 예외로 유지.
+- shared, Swift XCTest, Android unit test에 polling drop / notification failure keep 회귀 케이스 추가.
+
+### 검증
+- `pnpm build` 성공.
+- Android `:app:testDebugUnitTest` 성공.
+- macOS `AgentDeck_macOS` build 성공.
+
+---
+
+## 2026-06-30 — Claude timeline turn rows: chat_response와 chat_end 중복 제거
+
+### 문제
+Claude Code turn 하나가 `chat_start` + `chat_response` + dimmed `chat_end` 3행으로 flat timeline 표면(Stream Deck plugin, TUI, persisted `timeline.json`)에 남아 실제 작업 단위가 과도하게 쪼개졌다. Android/macOS dashboard projection은 paired `chat_end`를 렌더 단계에서 대부분 숨기지만, 저장/relay/flat surface에는 중복 metadata row가 계속 흘렀다.
+
+### 해결
+- Node `bridge/src/index.ts`: 응답 텍스트가 있으면 `chat_response`만 turn completion row로 emit하고, 응답이 없는 tool-only/response-less turn에서만 `chat_end`를 emit.
+- Voice assistant는 더 이상 `chat_end.detail`만 보지 않고 `chat_response`를 우선 읽고 `chat_end`를 fallback으로 사용.
+- Swift `DaemonServer.swift`: Node와 같은 계약으로 `assistantText`가 비어 있을 때만 `chat_end`를 생성. 응답 있는 turn의 LLM summary 기반 `chat_end` upsert 경로는 제거.
+- Android stale test 보정과 맞물려 Codex/Claude device timeline은 chat/task lifecycle row 중심으로 유지.
+
+### 검증
+- `pnpm build` 성공(bridge TypeScript compile 포함).
+- Android `:app:testDebugUnitTest` 성공. Claude paired `chat_end` suppression 기대와 Codex tool firehose 제거 기대가 모두 녹색.
+
+---
+
+## 2026-06-30 — Android mDNS/WiFi 접속 fallback 검증 및 반영
+
+### 문제
+Android tablet/e-ink 앱이 USB reverse(`127.0.0.1:9120`) 실패 후 mDNS로 daemon을 찾아도, dual-homed Mac에서 Bonjour TXT `ip`와 Android NSD resolved host가 다를 때 한쪽 경로만 고집하면 WiFi 접속 복구가 막힐 수 있었다.
+
+### 해결
+- `BridgeDiscovery.kt`: TXT `ip`를 primary로 유지하되 link-local/IPv6/raw-invalid host를 제외하고, NSD resolved IPv4가 primary와 다르면 `fallbackHost`로 보존.
+- `BridgeConnection.kt`: primary URL이 연속 실패하면 같은 pairing token을 유지한 fallback URL로 한 번 전환한 뒤 기존 re-discovery 흐름으로 복귀.
+- tablet/e-ink/settings의 모든 mDNS connect 호출이 `bridge.wsUrl()`과 `bridge.fallbackWsUrl()`을 함께 넘기도록 배선.
+- `BridgeDiscoveryTest`로 primary/fallback URL이 동일 pairing token을 유지하는 계약을 고정.
+- stale test 보정: Android 정책상 Codex `tool_exec` firehose는 device timeline에서 제거되므로 `TimelineDisplayScenarioTest` 기대를 `TimelineStoreTest`/현재 devlog 정책과 맞춤.
+
+### 검증
+- `pnpm install --frozen-lockfile`, `pnpm build` 성공.
+- Android `:app:compileDebugKotlin`, `:app:testDebugUnitTest`, `bash scripts/build-android-release.sh` 성공 → `dist/agentdeck-v0.1.0.apk`.
+- Pantone 6(`AA007422R24C1300039`), Crema S(`CREMAA21W09235`), Lenovo Tab(`HVA095B4`)에 APK 설치/실행 성공.
+- USB reverse 제거 후 세 기기 모두 mDNS로 `192.168.68.100:9120?token=...` 연결 `onOpen` 확인. host `lsof`에서도 `192.168.68.68`, `192.168.68.55`, `192.168.68.53` → `192.168.68.100:9120` 직접 ESTABLISHED 확인.
+- 세 기기 `AndroidRuntime` fatal/crash 로그 없음. 검증 후 표준 배포 상태로 `adb reverse tcp:9120 tcp:9120` 복구.
+
+---
+
 ## 2026-06-30 — iOS "won't connect" = Local Network permission denied (surface an in-app prompt)
 
 ### 문제

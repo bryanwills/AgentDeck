@@ -227,7 +227,7 @@ fun MonitorScreen(
                 lastError = lastError,
                 isReconnecting = isReconnecting,
                 onConnectToBridge = { bridge ->
-                    connection.connect(bridge.wsUrl())
+                    connection.connect(bridge.wsUrl(), bridge.fallbackWsUrl())
                 },
                 onConnectLocalhost = {
                     connection.connect(BridgeConstants.LOCALHOST_WS_URL)

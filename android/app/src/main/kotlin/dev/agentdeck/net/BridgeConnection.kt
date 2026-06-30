@@ -40,6 +40,8 @@ class BridgeConnection private constructor() {
         private const val MAX_BACKOFF_MS = 8_000L
         /** Max localhost retries before giving up and clearing URL for mDNS fallback. */
         private const val MAX_LOCALHOST_ATTEMPTS = 5
+        /** Failed attempts on the primary (TXT-ip) URL before switching to the resolved-host fallback. */
+        private const val PRIMARY_ATTEMPTS_BEFORE_FALLBACK = 2
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -60,6 +62,10 @@ class BridgeConnection private constructor() {
     private var webSocket: WebSocket? = null
     private var backoffMs = INITIAL_BACKOFF_MS
     private var shouldReconnect = false
+    /** Secondary URL (NSD-resolved host) to try once the primary keeps failing; null when none. */
+    private var fallbackUrl: String? = null
+    /** Whether we've already switched to [fallbackUrl] this connect cycle. */
+    private var triedFallback = false
 
     private val _status = MutableStateFlow(ConnectionStatus.DISCONNECTED)
     val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
@@ -81,12 +87,22 @@ class BridgeConnection private constructor() {
 
     var onEvent: ((BridgeEvent) -> Unit)? = null
 
-    fun connect(wsUrl: String) {
+    /**
+     * Connect to [wsUrl]. When [fallbackUrl] is provided (the daemon's NSD-resolved
+     * address, distinct from the TXT-ip primary), the reconnect loop fails over to it
+     * once after [PRIMARY_ATTEMPTS_BEFORE_FALLBACK] failed attempts on the primary,
+     * before clearing the URL for re-discovery.
+     */
+    fun connect(wsUrl: String, fallbackUrl: String? = null) {
         bridgeDebug { "connect($wsUrl) — current status=${_status.value}" }
         // Cancel any existing connection/reconnect loop before starting fresh
         shouldReconnect = false
         webSocket?.close(1000, "New connection")
         webSocket = null
+
+        // Only keep a fallback that's actually distinct from the primary.
+        this.fallbackUrl = fallbackUrl?.takeIf { it != wsUrl }
+        triedFallback = false
 
         _url.value = wsUrl
         _status.value = ConnectionStatus.DISCONNECTED
@@ -218,6 +234,32 @@ class BridgeConnection private constructor() {
 
         _isReconnecting.value = true
         _reconnectAttempt.value++
+
+        // Dual-homed fallback: when the primary (TXT-ip) URL keeps failing and the
+        // daemon also advertised a distinct NSD-resolved host, switch to it once
+        // before giving up. Covers a multi-NIC same-subnet daemon whose advertised
+        // interface has a broken return path while the resolved address is reachable.
+        val fb = fallbackUrl
+        if (fb != null && !triedFallback && fb != currentUrl &&
+            _reconnectAttempt.value >= PRIMARY_ATTEMPTS_BEFORE_FALLBACK
+        ) {
+            Log.w(
+                TAG,
+                "Primary $currentUrl failing after ${_reconnectAttempt.value} attempts — switching to resolved-host fallback $fb"
+            )
+            triedFallback = true
+            _reconnectAttempt.value = 0
+            backoffMs = INITIAL_BACKOFF_MS
+            _url.value = fb
+            _lastError.value = null
+            scope.launch {
+                delay(backoffMs)
+                if (shouldReconnect && _status.value == ConnectionStatus.DISCONNECTED) {
+                    doConnect(fb)
+                }
+            }
+            return
+        }
 
         val isLocalhost = isLocalhostUrl(currentUrl)
 

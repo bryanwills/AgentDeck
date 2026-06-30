@@ -132,7 +132,7 @@ fun TabletSettingsDialog(
                             currentUrl = currentUrl,
                             lastError = lastError,
                             discoveredBridges = discoveredBridges,
-                            onConnectToBridge = { bridge -> connection.connect(bridge.wsUrl()) },
+                            onConnectToBridge = { bridge -> connection.connect(bridge.wsUrl(), bridge.fallbackWsUrl()) },
                             onConnectLocalhost = { connection.connect(BridgeConstants.LOCALHOST_WS_URL) },
                             onConnectManualUrl = { url -> connection.connect(url) },
                             onDisconnect = { connection.disconnect() },

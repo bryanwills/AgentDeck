@@ -94,6 +94,60 @@ class TimelineTaskHierarchyTest {
     }
 
     @Test
+    fun `OpenClaw NO_REPLY polling responses are hidden from display projection`() {
+        val entries = listOf(
+            entry(
+                "chat_response",
+                timestamp = 1_000,
+                summary = "Still translating - 2 entries in progress. No action needed.\n\nNO_REPLY",
+                detail = "Two entries still translating -> pipeline not done yet.\n\nNO_REPLY",
+                sessionId = "openclaw-a",
+                projectName = "OpenClaw",
+                agentType = "openclaw",
+            ),
+        )
+
+        val display = timelineDisplayGroups(groupConsecutive(entries))
+        assertTrue(display.isEmpty())
+    }
+
+    @Test
+    fun `OpenClaw automated polling chat starts are hidden from display projection`() {
+        val entries = listOf(
+            entry(
+                "chat_start",
+                timestamp = 1_000,
+                summary = "Still translating - 2 entries in progress, 1 failed. Not all terminal yet.",
+                sessionId = "openclaw-a",
+                projectName = "OpenClaw",
+                agentType = "openclaw",
+                automated = true,
+            ),
+        )
+
+        val display = timelineDisplayGroups(groupConsecutive(entries))
+        assertTrue(display.isEmpty())
+    }
+
+    @Test
+    fun `OpenClaw LINE notification failures stay visible`() {
+        val entries = listOf(
+            entry(
+                "chat_response",
+                timestamp = 1_000,
+                summary = "Pride and Prejudice published - LINE notification failed (userId 미등록, 4/21부터 지속)\n\nNO_REPLY",
+                detail = "LINE target ID is still unconfigured. Notification remains pending.",
+                sessionId = "openclaw-a",
+                projectName = "OpenClaw",
+                agentType = "openclaw",
+            ),
+        )
+
+        val display = timelineDisplayGroups(groupConsecutive(entries))
+        assertEquals(listOf("chat_response"), display.map { it.entry.type })
+    }
+
+    @Test
     fun `iconKey resolves to Task for task entries`() {
         assertEquals(TimelineIconKey.Task, timelineIconKey("task_start"))
         assertEquals(TimelineIconKey.Task, timelineIconKey("task_end"))
@@ -173,10 +227,13 @@ class TimelineTaskHierarchyTest {
         boundarySignal: String? = null,
         startedAt: Long? = null,
         endedAt: Long? = null,
+        detail: String? = null,
+        automated: Boolean? = null,
     ) = TimelineEntry(
         timestamp = timestamp,
         type = type,
         summary = summary,
+        detail = detail,
         sessionId = sessionId,
         projectName = projectName,
         agentType = agentType,
@@ -185,6 +242,7 @@ class TimelineTaskHierarchyTest {
         boundarySignal = boundarySignal,
         startedAt = startedAt,
         endedAt = endedAt,
+        automated = automated,
     )
 
     @Suppress("unused")

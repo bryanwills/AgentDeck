@@ -23,16 +23,41 @@ private inline fun discoveryDebug(message: () -> String) {
     }
 }
 
+private fun isUsableBridgeHost(host: String?): Boolean {
+    if (host.isNullOrBlank()) return false
+    if (host.startsWith("169.254.")) return false
+    // The daemon advertises/listens on IPv4 today, and raw IPv6 strings need
+    // bracketed URL handling. Keep discovery URLs IPv4-only until IPv6 is owned.
+    if (host.contains(":")) return false
+    return true
+}
+
 data class DiscoveredBridge(
     val name: String,
     val host: String,
     val port: Int,
     val token: String? = null,
     val agentType: String? = null,
+    /**
+     * Secondary address from the NSD-resolved hostname, kept only when it differs
+     * from the primary [host] (which prefers the TXT `ip`). On a dual-homed daemon
+     * the advertised TXT ip can sit on an interface whose return path is broken; the
+     * connection layer retries this resolved address before giving up and re-discovering.
+     */
+    val fallbackHost: String? = null,
 ) {
     /** Build WebSocket URL with auth token if available */
-    fun wsUrl(): String {
-        val base = "ws://$host:$port"
+    fun wsUrl(): String = wsUrlFor(host)
+
+    /**
+     * WS URL for the secondary [fallbackHost], or null when there is no distinct
+     * fallback. Pass alongside [wsUrl] to `BridgeConnection.connect` so a failing
+     * primary (TXT-ip) endpoint can fail over to the NSD-resolved one.
+     */
+    fun fallbackWsUrl(): String? = fallbackHost?.let { wsUrlFor(it) }
+
+    private fun wsUrlFor(h: String): String {
+        val base = "ws://$h:$port"
         return if (token != null) "$base?token=$token" else base
     }
 }
@@ -119,15 +144,23 @@ class BridgeDiscovery(context: Context) {
                                     si.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
                                 } catch (_: Exception) { null }
 
-                                val host = txtIp ?: resolvedHost ?: return
-                                // Skip link-local addresses (169.254.x.x) — unreachable from WiFi
-                                if (host.startsWith("169.254.")) return
+                                val host = txtIp
+                                    ?.takeIf(::isUsableBridgeHost)
+                                    ?: resolvedHost?.takeIf(::isUsableBridgeHost)
+                                    ?: return
+                                // Keep the NSD-resolved address as a fallback when it's a distinct,
+                                // non-link-local host. When `host` came from the TXT `ip` but that
+                                // interface's return path is broken (dual-homed daemon), the
+                                // connection layer fails over to this resolved address.
+                                val fallbackHost = resolvedHost
+                                    ?.takeIf { it != host && isUsableBridgeHost(it) }
                                 val bridge = DiscoveredBridge(
                                     name = si.serviceName,
                                     host = host,
                                     port = si.port,
                                     token = token,
                                     agentType = agentType,
+                                    fallbackHost = fallbackHost,
                                 )
                                 discoveryDebug { "Resolved ${si.serviceName} -> ${bridge.host}:${bridge.port} (agent=$agentType)" }
                                 bridges[si.serviceName] = bridge

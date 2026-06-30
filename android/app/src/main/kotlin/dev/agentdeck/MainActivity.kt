@@ -227,7 +227,7 @@ fun TabletDashboard(
                     val daemon = bridges.firstOrNull { it.agentType == "daemon" }
                     if (daemon != null) {
                         mainDebug { "mDNS auto-connect (daemon): ${daemon.name} at ${daemon.wsUrl()}" }
-                        connection.connect(daemon.wsUrl())
+                        connection.connect(daemon.wsUrl(), daemon.fallbackWsUrl())
                         return@collect
                     }
                 }
@@ -256,7 +256,7 @@ fun TabletDashboard(
                     val daemon = bridges.firstOrNull { it.agentType == "daemon" }
                     if (daemon != null) {
                         mainDebug { "Re-discover (daemon): ${daemon.name} at ${daemon.wsUrl()}" }
-                        connection.connect(daemon.wsUrl())
+                        connection.connect(daemon.wsUrl(), daemon.fallbackWsUrl())
                         return@collect
                     }
                 }

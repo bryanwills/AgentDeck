@@ -143,6 +143,39 @@ describe('normalizeTimelineEntryForStorage', () => {
     })).toBe(false);
   });
 
+  it('drops OpenClaw NO_REPLY polling responses from the user-facing timeline', () => {
+    expect(shouldDropLowSignalTimelineEntry({
+      ts: 100,
+      type: 'chat_response',
+      raw: 'Still translating - 2 entries in progress. No action needed.\n\nNO_REPLY',
+      detail: 'Two entries still translating -> pipeline not done yet.\n\nNO_REPLY',
+      agentType: 'openclaw',
+      projectName: 'OpenClaw',
+    })).toBe(true);
+  });
+
+  it('drops OpenClaw automated polling chat starts from the user-facing timeline', () => {
+    expect(shouldDropLowSignalTimelineEntry({
+      ts: 100,
+      type: 'chat_start',
+      raw: 'Still translating - 2 entries in progress, 1 failed. Not all terminal yet.',
+      agentType: 'openclaw',
+      projectName: 'OpenClaw',
+      automated: true,
+    })).toBe(true);
+  });
+
+  it('keeps OpenClaw LINE userId notification failures visible', () => {
+    expect(shouldDropLowSignalTimelineEntry({
+      ts: 100,
+      type: 'chat_response',
+      raw: 'Pride and Prejudice published - LINE notification failed (userId 미등록, 4/21부터 지속)\n\nNO_REPLY',
+      detail: 'LINE target ID is still unconfigured. Notification remains pending.',
+      agentType: 'openclaw',
+      projectName: 'OpenClaw',
+    })).toBe(false);
+  });
+
   it('drops Codex command tool rows even when detail carries input', () => {
     expect(shouldDropLowSignalTimelineEntry({
       ts: 100,

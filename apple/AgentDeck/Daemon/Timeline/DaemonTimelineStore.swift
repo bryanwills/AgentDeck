@@ -207,6 +207,10 @@ actor DaemonTimelineStore {
     // lines (or any non-status line) qualify as real signal. Codex
     // stop-time review 2026-05-18.
     static func shouldDropLowSignalEntry(_ entry: DaemonTimelineEntry) -> Bool {
+        if Self.isOpenClawLowSignalResponse(entry) {
+            return true
+        }
+
         guard entry.type == "tool_exec" || entry.type == "tool_request" || entry.type == "tool_resolved" else {
             return false
         }
@@ -245,6 +249,47 @@ actor DaemonTimelineStore {
             return Self.isOpenClawPlaceholderRaw(raw)
         }
         return false
+    }
+
+    static func isOpenClawLowSignalResponse(_ entry: DaemonTimelineEntry) -> Bool {
+        guard entry.agentType == "openclaw" else { return false }
+        let isResponse = entry.type == "chat_response" || entry.type == "model_response"
+        let isAutomatedStart = entry.type == "chat_start" && entry.automated == true
+        guard isResponse || isAutomatedStart else { return false }
+
+        let text = ([entry.raw, entry.detail].compactMap { $0 }.joined(separator: "\n"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+        if Self.hasOpenClawNotificationFailureSignal(text) { return false }
+
+        let lower = text.lowercased()
+        let hasNoReply = lower.contains("no_reply")
+        let looksLikePolling =
+            Self.matches(lower, #"still translating"#) ||
+            Self.matches(lower, #"translation still in progress"#) ||
+            Self.matches(lower, #"not all .*?(terminal|published|failed|complete|completed)"#) ||
+            Self.matches(lower, #"(in progress|still active|no action needed|nothing to notify yet)"#) ||
+            Self.matches(lower, #"cron job (stays|retained|active)"#) ||
+            Self.matches(lower, #"pipeline still active"#) ||
+            Self.matches(text, #"(아직|여전히|계속).*(번역|진행)\s*중"#) ||
+            Self.matches(text, #"알릴 필요 없음|수행할 작업이 없음|대기합니다"#)
+
+        if isAutomatedStart { return looksLikePolling }
+        return looksLikePolling &&
+            (hasNoReply || lower.contains("no action needed") || lower.contains("nothing to notify yet") || text.contains("알릴 필요 없음"))
+    }
+
+    private static func hasOpenClawNotificationFailureSignal(_ text: String) -> Bool {
+        let english = Self.matches(text, #"\b(line|notification|userid|target id|target issue)\b"#, caseInsensitive: true) &&
+            Self.matches(text, #"\b(fail(ed|ure)?|missing|unconfigured|notified|needed|pending)\b"#, caseInsensitive: true)
+        let korean = Self.matches(text, #"(LINE|알림|userId|사용자 ID|대상 ID).*(실패|미등록|미설정|구성되지|필요|대기)"#, caseInsensitive: true)
+        return english || korean
+    }
+
+    private static func matches(_ text: String, _ pattern: String, caseInsensitive: Bool = false) -> Bool {
+        var options: String.CompareOptions = [.regularExpression]
+        if caseInsensitive { options.insert(.caseInsensitive) }
+        return text.range(of: pattern, options: options) != nil
     }
 
     static func normalizeForStorage(_ entry: DaemonTimelineEntry) -> DaemonTimelineEntry? {
