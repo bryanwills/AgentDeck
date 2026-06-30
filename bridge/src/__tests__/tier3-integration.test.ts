@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createServer } from 'http';
 import { HookServer } from '../hook-server.js';
 import { WsServer } from '../ws-server.js';
-import { DisplayMonitor } from '../display-monitor.js';
+import { DisplayMonitor, parseIoregPresence } from '../display-monitor.js';
 import { WsTestClient } from './helpers/ws-test-client.js';
 import { invalidateMdnsInstance, isNonFatalMdnsError } from '../mdns.js';
 import type { BridgeEvent, DisplayStateEvent } from '../types.js';
@@ -65,6 +65,18 @@ describe('Display sleep/wake broadcast', () => {
     const monitor = new DisplayMonitor();
     expect(monitor.isDisplayOn()).toBe(true);
     monitor.stop(); // Clean up without starting
+  });
+
+  it('parses macOS lock/session presence from ioreg output', () => {
+    expect(parseIoregPresence(`
+      | |   "CGSSessionScreenIsLocked" = Yes
+      | |   "CGSSessionOnConsoleKey" = Yes
+    `)).toEqual({ screenLocked: true, sessionInactive: false });
+
+    expect(parseIoregPresence(`
+      | |   "CGSSessionScreenIsLocked" = No
+      | |   "CGSSessionOnConsoleKey" = No
+    `)).toEqual({ screenLocked: false, sessionInactive: true });
   });
 
   it('display_state event has correct shape', () => {

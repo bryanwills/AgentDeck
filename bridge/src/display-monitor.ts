@@ -34,7 +34,12 @@ while True:
  */
 export class DisplayMonitor extends EventEmitter {
   private proc: ChildProcess | null = null;
-  private displayOn = true;
+  private displayAsleepByCG = false;
+  private displayAsleepByPower = false;
+  private screenLocked = false;
+  private screensaverActive = false;
+  private sessionInactive = false;
+  private lastDisplayOn = true;
   private running = false;
   private restartCount = 0;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
@@ -75,7 +80,39 @@ export class DisplayMonitor extends EventEmitter {
   }
 
   isDisplayOn(): boolean {
-    return this.displayOn;
+    return this.computeDisplayOn();
+  }
+
+  private computeDisplayOn(): boolean {
+    return !this.displayAsleepByCG
+      && !this.displayAsleepByPower
+      && !this.screenLocked
+      && !this.screensaverActive
+      && !this.sessionInactive;
+  }
+
+  private emitIfChanged(reason: string): void {
+    const nowOn = this.computeDisplayOn();
+    if (nowOn !== this.lastDisplayOn) {
+      this.lastDisplayOn = nowOn;
+      debug(
+        'display',
+        `display state changed: ${nowOn ? 'ON' : 'ASLEEP'} (cause=${reason}) `
+        + `[cgAsleep=${this.displayAsleepByCG} powerAsleep=${this.displayAsleepByPower} `
+        + `locked=${this.screenLocked} screensaver=${this.screensaverActive} sessionInactive=${this.sessionInactive}]`,
+      );
+      this.emit('display_state_changed', nowOn);
+    }
+  }
+
+  private setComponent(
+    key: 'displayAsleepByCG' | 'displayAsleepByPower' | 'screenLocked' | 'screensaverActive' | 'sessionInactive',
+    value: boolean,
+    reason: string,
+  ): void {
+    if (this[key] === value) return;
+    this[key] = value;
+    this.emitIfChanged(reason);
   }
 
   private spawnProcess(): void {
@@ -96,12 +133,7 @@ export class DisplayMonitor extends EventEmitter {
       rl.on('line', (line) => {
         const trimmed = line.trim();
         if (trimmed !== '0' && trimmed !== '1') return;
-        const nowOn = trimmed !== '1'; // "0" = awake, "1" = asleep
-        if (nowOn !== this.displayOn) {
-          this.displayOn = nowOn;
-          debug('display', `display state changed: ${nowOn ? 'ON' : 'ASLEEP'}`);
-          this.emit('display_state_changed', nowOn);
-        }
+        this.setComponent('displayAsleepByCG', trimmed === '1', trimmed === '1' ? 'cgDisplaySleep' : 'cgDisplayWake');
       });
     }
 
@@ -132,26 +164,64 @@ export class DisplayMonitor extends EventEmitter {
     }, RESTART_DELAY_MS);
   }
 
-  /** Fallback poll using pmset (works even if python/CGDisplayIsAsleep fails). */
+  /** Fallback poll using public macOS CLIs (works even if python/CGDisplayIsAsleep fails). */
   private startFallbackPoll(): void {
     if (this.fallbackTimer) return;
-    this.fallbackTimer = setInterval(() => {
-      try {
-        const out = execFileSync('pmset', ['-g', 'powerstate', 'IODisplayWrangler'], { encoding: 'utf8' });
-        const match = out.match(/state:\s*(\d+)/);
-        if (match) {
-          const stateNum = parseInt(match[1], 10);
-          // 4 = awake, 1 = asleep (common mapping)
-          const nowOn = stateNum >= 4;
-          if (nowOn !== this.displayOn) {
-            this.displayOn = nowOn;
-            debug('display', `fallback pmset state changed: ${nowOn ? 'ON' : 'ASLEEP'} (state=${stateNum})`);
-            this.emit('display_state_changed', nowOn);
-          }
-        }
-      } catch (err) {
-        debug('display', `pmset poll failed: ${err}`);
+    this.pollFallbackOnce();
+    this.fallbackTimer = setInterval(() => this.pollFallbackOnce(), FALLBACK_POLL_MS);
+  }
+
+  private pollFallbackOnce(): void {
+    try {
+      const out = execFileSync('pmset', ['-g', 'powerstate', 'IODisplayWrangler'], { encoding: 'utf8' });
+      const match = out.match(/state:\s*(\d+)/);
+      if (match) {
+        const stateNum = parseInt(match[1], 10);
+        // 4 = awake, 1 = asleep (common mapping)
+        this.setComponent('displayAsleepByPower', stateNum < 4, `pmset:${stateNum}`);
       }
-    }, FALLBACK_POLL_MS);
+    } catch (err) {
+      debug('display', `pmset poll failed: ${err}`);
+    }
+
+    try {
+      const out = execFileSync('ioreg', ['-n', 'Root', '-d1'], { encoding: 'utf8' });
+      const presence = parseIoregPresence(out);
+      if (presence.screenLocked !== undefined) {
+        this.setComponent('screenLocked', presence.screenLocked, presence.screenLocked ? 'screenLock' : 'screenUnlock');
+      }
+      if (presence.sessionInactive !== undefined) {
+        this.setComponent('sessionInactive', presence.sessionInactive, presence.sessionInactive ? 'sessionResign' : 'sessionResume');
+      }
+    } catch (err) {
+      debug('display', `ioreg presence poll failed: ${err}`);
+    }
+
+    const screensaverActive = isScreensaverProcessActive();
+    this.setComponent('screensaverActive', screensaverActive, screensaverActive ? 'screensaverStart' : 'screensaverStop');
+  }
+}
+
+function parseIoregBool(output: string, key: string): boolean | undefined {
+  const match = output.match(new RegExp(`"${key}"\\s*=\\s*(Yes|No|true|false|1|0)`, 'i'));
+  if (!match) return undefined;
+  return /^(yes|true|1)$/i.test(match[1]);
+}
+
+export function parseIoregPresence(output: string): { screenLocked?: boolean; sessionInactive?: boolean } {
+  const screenLocked = parseIoregBool(output, 'CGSSessionScreenIsLocked');
+  const onConsole = parseIoregBool(output, 'CGSSessionOnConsoleKey');
+  return {
+    ...(screenLocked !== undefined ? { screenLocked } : {}),
+    ...(onConsole !== undefined ? { sessionInactive: !onConsole } : {}),
+  };
+}
+
+function isScreensaverProcessActive(): boolean {
+  try {
+    execFileSync('pgrep', ['-x', 'ScreenSaverEngine'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
   }
 }

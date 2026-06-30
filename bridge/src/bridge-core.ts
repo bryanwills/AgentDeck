@@ -224,7 +224,6 @@ export class BridgeCore {
   private _wakeHandler: (() => void) | null = null;
 
   wireDisplayMonitor(): void {
-    this.displayMonitor.start();
     this.displayMonitor.on('display_state_changed', (displayOn: boolean) => {
       // Detect wake transition (asleep → awake)
       if (displayOn && !this._previousDisplayOn) {
@@ -234,6 +233,7 @@ export class BridgeCore {
       const evt: BridgeEvent = buildDisplayStateEvent(displayOn) as BridgeEvent;
       this.broadcast(evt);
     });
+    this.displayMonitor.start();
 
     // Time-discontinuity safety net (python3 process may die during deep sleep)
     let lastTick = Date.now();

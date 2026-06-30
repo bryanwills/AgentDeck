@@ -116,7 +116,7 @@ Legacy on-device C agent archived to `zkswe/agent-archive/`.
 
 ## Display sleep/wake sync
 
-`DisplayMonitor` (python3 `CGDisplayIsAsleep()` 2s poll) → `display_state` BridgeEvent → all devices dim/restore. `DISPLAY_FORWARDED_EVENTS` includes `display_state` (auto-propagates to `SERIAL_FORWARDED_EVENTS`).
+`DisplayMonitor` → `display_state` BridgeEvent → all devices dim/restore. Node daemon fuses python3 `CGDisplayIsAsleep()` 2s poll with fallback `pmset IODisplayWrangler`, `ioreg` lock/session presence, and `ScreenSaverEngine` polling; Swift daemon mirrors this as a display + lock + screensaver + session-active aggregator. `displayOn=true` means the user is present and the host display is on. `DISPLAY_FORWARDED_EVENTS` includes `display_state` (auto-propagates to `SERIAL_FORWARDED_EVENTS`).
 
 - **Pixoo**: `setBrightness(0)` + stream pause (saves HTTP), wake restores `dev.brightness`
 - **SD+ Plugin**: `displayDimmed` flag → black SVG on all buttons/LCDs, wake → `broadcastStateUpdate()` re-render, `broadcastStateUpdate()` guard skips while dimmed
