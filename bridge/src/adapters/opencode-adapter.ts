@@ -264,19 +264,33 @@ export class OpenCodeAdapter extends PtyAdapter {
     if (sessionID && sessionID !== this.activeSessionID) return;
 
     if (status.type === 'busy') {
-      if (!this.chatStarted) {
-        this.chatStarted = true;
-        this.chatStartTime = Date.now();
-        this.chatToolCount = 0;
-        this.chatToolNames = [];
-        // Emit chat_start so timeline shows when processing began
-        this.emitTimelineEntry({
-          ts: this.chatStartTime, type: 'chat_start',
-          raw: this.ocProjectName ? `Processing · ${this.ocProjectName}` : 'Processing started',
-        });
-      }
-      this.emitAdapterEvent({ source: 'parser', event: 'spinner_start' });
+      this.beginChatIfNeeded();
     }
+  }
+
+  /**
+   * Mark the start of an OpenCode turn (idempotent per turn). OpenCode does not
+   * reliably emit a standalone `session.status:busy` event — current builds
+   * signal work-in-progress via `message.updated` / `message.part.updated` /
+   * `message.part.delta` and signal completion via `session.idle`. Any of those
+   * work-start signals arms the turn here, emitting the `spinner_start` parser
+   * event that flips the shared StateMachine IDLE → PROCESSING. Without this the
+   * session silently stays IDLE for the whole turn (tool_action sets currentTool
+   * but performs no state transition). `finishChat()` (on `session.idle`) clears
+   * the latch so the next turn re-arms.
+   */
+  private beginChatIfNeeded(): void {
+    if (this.chatStarted) return;
+    this.chatStarted = true;
+    this.chatStartTime = Date.now();
+    this.chatToolCount = 0;
+    this.chatToolNames = [];
+    // Emit chat_start so timeline shows when processing began
+    this.emitTimelineEntry({
+      ts: this.chatStartTime, type: 'chat_start',
+      raw: this.ocProjectName ? `Processing · ${this.ocProjectName}` : 'Processing started',
+    });
+    this.emitAdapterEvent({ source: 'parser', event: 'spinner_start' });
   }
 
   private handleSessionIdle(props: Record<string, unknown>): void {
@@ -311,7 +325,21 @@ export class OpenCodeAdapter extends PtyAdapter {
 
   private handlePartUpdated(props: Record<string, unknown>): void {
     const part = props.part as OpenCodeMessagePart | undefined;
-    if (!part || (part.sessionID && part.sessionID !== this.activeSessionID)) return;
+    if (!part) return;
+    if (part.sessionID && this.activeSessionID && part.sessionID !== this.activeSessionID) {
+      log('Dropping message.part.updated for non-active session', part.sessionID, 'active', this.activeSessionID);
+      return;
+    }
+    // Adopt the first session that produces real work if connect-time
+    // listSessions missed a just-created session — otherwise every event is
+    // silently dropped and state never leaves IDLE.
+    if (!this.activeSessionID && part.sessionID) {
+      this.activeSessionID = part.sessionID;
+      log('Auto-tracking session from message part:', part.sessionID);
+    }
+    // A part for the active session means the model is working — arm the turn
+    // so the StateMachine flips IDLE → PROCESSING even without `session.status:busy`.
+    this.beginChatIfNeeded();
 
     switch (part.type) {
       case 'tool': {
@@ -371,12 +399,28 @@ export class OpenCodeAdapter extends PtyAdapter {
 
   private handlePartDelta(props: Record<string, unknown>): void {
     const delta = props.delta as string;
-    if (delta) this.accumulatedResponse += delta;
+    if (delta) {
+      // Streamed token delta = model actively generating → arm the turn.
+      this.beginChatIfNeeded();
+      this.accumulatedResponse += delta;
+    }
   }
 
   private handleMessageUpdated(props: Record<string, unknown>): void {
     const info = props.info as OpenCodeMessageInfo | undefined;
-    if (!info || info.sessionID !== this.activeSessionID) return;
+    if (!info) return;
+    if (this.activeSessionID && info.sessionID !== this.activeSessionID) return;
+    if (!this.activeSessionID && info.sessionID) {
+      this.activeSessionID = info.sessionID;
+      log('Auto-tracking session from message update:', info.sessionID);
+    }
+
+    // An assistant message that hasn't completed yet means the model is
+    // generating — the most precise work-start signal OpenCode emits. Arm the
+    // turn so the dashboard shows PROCESSING the moment the reply begins.
+    if (info.role === 'assistant' && info.time?.completed == null) {
+      this.beginChatIfNeeded();
+    }
 
     if (info.role === 'assistant' && info.modelID) {
       this.emitAdapterEvent({
