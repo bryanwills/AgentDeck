@@ -97,7 +97,11 @@ function spawnSync(entry: SyncEntry, venvPython: string, syncScript: string, htt
   proc.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
     if (entry.child === proc) entry.child = null;
     if (entry.stopping) return;
-    if (Date.now() - entry.startedAt > HEALTHY_UPTIME_MS) entry.consecutiveFailures = 0;
+    // A clean code=0 exit is still abnormal here; normal daemon shutdown is
+    // gated by `entry.stopping` above. Do not reset backoff for repeated
+    // "device not found" / BLE disconnect exits just because they lasted long
+    // enough to cross the healthy-uptime threshold.
+    if (code !== 0 && Date.now() - entry.startedAt > HEALTHY_UPTIME_MS) entry.consecutiveFailures = 0;
     entry.consecutiveFailures += 1;
     const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * entry.consecutiveFailures);
     const tail = stderrTail() || outputTail();

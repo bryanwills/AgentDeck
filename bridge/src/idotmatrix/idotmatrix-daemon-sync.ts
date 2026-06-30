@@ -122,7 +122,10 @@ function spawnSync(venvPython: string, syncScript: string, httpPort: number): vo
     if (child === proc) child = null;
     if (stopping) return;
     // A long healthy run resets the backoff so a one-off crash recovers fast.
-    if (Date.now() - startedAt > HEALTHY_UPTIME_MS) consecutiveFailures = 0;
+    // Clean code=0 exits are abnormal for daemon-managed sync children (normal
+    // shutdown is gated by `stopping` above), so repeated BLE disconnect exits
+    // must still escalate instead of flapping every 5 seconds forever.
+    if (code !== 0 && Date.now() - startedAt > HEALTHY_UPTIME_MS) consecutiveFailures = 0;
     consecutiveFailures += 1;
     const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * consecutiveFailures);
     const tail = stderrTail() || outputTail();

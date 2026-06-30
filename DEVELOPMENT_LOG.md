@@ -15,6 +15,7 @@
 - shared `timeline.ts` 저장 normalization 에 `isTaskNotificationChatStart` 필터를 추가해 `<task-notification>` `chat_start` 를 서버 저장/브로드캐스트 단계에서 제거.
 - `BridgeTimelineStore.getHistory()` / `getHistoryForSession()` 이 항상 timestamp 오름차순 copy 를 반환하도록 변경해 `timeline_history` 와 session detail replay 의 순서를 안정화.
 - BLE Python sync helper 가 stdout/stderr 를 live flood 없이 작은 ring buffer 로 캡처하고, iDotMatrix/Timebox daemon sync exit 로그에 clean exit 원인까지 남기도록 변경.
+- daemon-managed BLE sync 의 `code=0` 반복 종료는 정상 shutdown 이 아니므로 healthy-uptime backoff reset 대상에서 제외. Timebox `device not found` 나 iDotMatrix clean disconnect 가 5초 루프로 계속 로그를 때리는 경로를 줄였다.
 - 로컬 운영 환경에서 daemon Node 22 기준 `better-sqlite3` 를 재빌드해 APME native load 문제를 해소.
 
 ### 검증
