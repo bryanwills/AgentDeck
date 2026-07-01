@@ -25,13 +25,47 @@ import {
   normalizeMac,
   effectiveRefreshRate,
   effectiveImageTimeout,
+  TRMNL_WEAK_RSSI_DBM,
 } from './trmnl-settings.js';
 import { getTrmnlFrame, getTrmnlFrameByKey, forceRenderTrmnlFrame, getTrmnlActivity } from './frame-cache.js';
 import type { TrmnlFrame } from './image-renderer.js';
 import { recordTelemetry } from './trmnl-telemetry.js';
-import { debug } from '../logger.js';
+import { debug, logTagged } from '../logger.js';
 
 const TAG = 'trmnl-byos';
+
+/** MACs currently flagged weak-signal — tracked so we log a transition, not every poll. */
+const weakRssiMacs = new Set<string>();
+
+/**
+ * Log once when a panel's RSSI crosses into/out of the weak-link threshold. A
+ * weak/lossy WiFi link is the dominant real-world cause of the firmware's
+ * "WiFi connected / not responding" (WIFI_FAILED) screen, so this gives an
+ * operator a correlatable record — always visible (not gated behind --debug),
+ * but rate-limited to state transitions instead of spamming every poll.
+ */
+function noteRssiHealth(mac: string, rssi: number | null): void {
+  const key = normalizeMac(mac);
+  if (!key) return;
+  const isWeak = rssi != null && Number.isFinite(rssi) && rssi <= TRMNL_WEAK_RSSI_DBM;
+  const wasWeak = weakRssiMacs.has(key);
+  if (isWeak && !wasWeak) {
+    weakRssiMacs.add(key);
+    logTagged(
+      TAG,
+      `weak WiFi signal on ${key}: rssi=${rssi}dBm (<= ${TRMNL_WEAK_RSSI_DBM}dBm threshold) — ` +
+        `image_url_timeout widened; panel may show "not responding" if this persists`,
+    );
+  } else if (!isWeak && wasWeak) {
+    weakRssiMacs.delete(key);
+    logTagged(TAG, `WiFi signal recovered on ${key}: rssi=${rssi ?? 'n/a'}dBm`);
+  }
+}
+
+/** Test helper — clear weak-RSSI transition tracking. */
+export function _resetWeakRssiTracking(): void {
+  weakRssiMacs.clear();
+}
 
 // Sane device-reported resolution bounds; anything outside falls back to OG size.
 const MIN_DIM = 120;
@@ -121,6 +155,7 @@ export function handleTrmnlSetup(req: IncomingMessage, res: ServerResponse): voi
     return;
   }
   recordTelemetry(mac, h);
+  noteRssiHealth(mac, h.rssi);
   const size = renderSize(h);
   if (created) {
     debug(TAG, `enrolled TRMNL ${device.mac} as ${device.friendlyId} (${size.width}x${size.height})`);
@@ -150,7 +185,10 @@ export function handleTrmnlDisplay(req: IncomingMessage, res: ServerResponse): v
   const mac = h.mac;
   const cfg = loadTrmnlConfig();
   const size = renderSize(h);
-  if (mac) recordTelemetry(mac, h);
+  if (mac) {
+    recordTelemetry(mac, h);
+    noteRssiHealth(mac, h.rssi);
+  }
   let device = mac ? findDeviceByMac(mac) : undefined;
 
   if (!device) {

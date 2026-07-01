@@ -47,6 +47,8 @@ actor TrmnlModule: DeviceModule {
     private var frameOrder: [String] = []              // insertion order = LRU recency
     private var lastHashByKey: [String: String] = [:]
     private var lastState = TrmnlDashState()
+    /// MACs currently flagged weak-signal — tracked so we log a transition, not every poll.
+    private var weakRssiMacs: Set<String> = []
 
     private let maxFrames = 8
     private let minDim = 120
@@ -389,6 +391,29 @@ actor TrmnlModule: DeviceModule {
         telemetry[key] = Telemetry(fwVersion: h.fwVersion, battery: h.batteryVoltage, rssi: h.rssi,
                                    width: h.width, height: h.height, refreshRate: h.refreshRate,
                                    userAgent: h.userAgent, lastSeen: Date())
+        noteRssiHealth(key, h.rssi)
+    }
+
+    /// Log once when a panel's RSSI crosses into/out of the weak-link threshold —
+    /// mirrors byos-server.ts's noteRssiHealth. A weak/lossy WiFi link is the
+    /// dominant real-world cause of the firmware's "not responding" (WIFI_FAILED)
+    /// screen, so this leaves a correlatable record in swift-daemon.log — always
+    /// visible (INFO/ERROR, not gated behind isDebugEnabled), rate-limited to
+    /// state transitions instead of spamming every poll.
+    private func noteRssiHealth(_ key: String, _ rssi: Double?) {
+        let isWeak = rssi.map { $0.isFinite && $0 <= TrmnlConfig.weakRssiDbm } ?? false
+        let wasWeak = weakRssiMacs.contains(key)
+        let rssiStr = rssi.map { String(format: "%.0f", $0) } ?? "n/a"
+        if isWeak && !wasWeak {
+            weakRssiMacs.insert(key)
+            DaemonLogger.shared.error(
+                "[TRMNL] weak WiFi signal on \(key): rssi=\(rssiStr)dBm " +
+                "(<= \(Int(TrmnlConfig.weakRssiDbm))dBm threshold) — image_url_timeout widened; " +
+                "panel may show \"not responding\" if this persists")
+        } else if !isWeak && wasWeak {
+            weakRssiMacs.remove(key)
+            DaemonLogger.shared.info("[TRMNL] WiFi signal recovered on \(key): rssi=\(rssiStr)dBm")
+        }
     }
 
     // MARK: - Helpers

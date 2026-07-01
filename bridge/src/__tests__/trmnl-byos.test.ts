@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -6,6 +6,7 @@ import {
   handleTrmnlSetup,
   handleTrmnlDisplay,
   handleTrmnlImage,
+  _resetWeakRssiTracking,
 } from '../trmnl/byos-server.js';
 import {
   findDeviceByMac,
@@ -288,6 +289,29 @@ describe('TRMNL BYOS handlers', () => {
     handleTrmnlDisplay(fakeReq({ ID: MAC, RSSI: '-85' }), res);
     expect(captured.body.image_url_timeout).toBeGreaterThan(TRMNL_DEFAULT_IMAGE_TIMEOUT);
     expect(captured.body.image_url_timeout).toBeLessThanOrEqual(TRMNL_MAX_IMAGE_TIMEOUT);
+  });
+
+  it('logs a weak-WiFi transition once, and logs recovery when the signal improves', () => {
+    // A correlatable record for "not responding" incidents, without spamming a
+    // line on every ~60-180s poll while the link stays weak.
+    _resetTelemetry();
+    _resetWeakRssiTracking();
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      handleTrmnlDisplay(fakeReq({ ID: MAC, RSSI: '-85' }), fakeRes().res); // weak → logs
+      handleTrmnlDisplay(fakeReq({ ID: MAC, RSSI: '-90' }), fakeRes().res); // still weak → no extra log
+      handleTrmnlDisplay(fakeReq({ ID: MAC, RSSI: '-40' }), fakeRes().res); // recovers → logs
+
+      const lines = spy.mock.calls.map((c) => String(c[0]));
+      const weakLines = lines.filter((l) => l.includes('weak WiFi signal on') && l.includes(MAC));
+      const recoveredLines = lines.filter((l) => l.includes('WiFi signal recovered on') && l.includes(MAC));
+      expect(weakLines).toHaveLength(1);
+      expect(weakLines[0]).toContain('rssi=-85dBm');
+      expect(recoveredLines).toHaveLength(1);
+      expect(recoveredLines[0]).toContain('rssi=-40dBm');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('widens image_url_timeout on the needs-setup (202) branch too', () => {
