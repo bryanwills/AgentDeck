@@ -9,7 +9,6 @@ import { debug, logError } from '../logger.js';
 import { summarizeResponse } from '../timeline-summarizer.js';
 import { extractTopicHint, extractTopicHintWithKind, promptSnippetFallback, prepareMarkdownDetail } from '@agentdeck/shared';
 import {
-  cleanDetailText,
   cleanRawText,
   cleanNopMarkers,
   ED25519_SPKI_PREFIX_LEN,
@@ -212,6 +211,13 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
   setApmeSession(sessionId: string, cwd?: string): void {
     this.apmeSessionId = sessionId;
     this.apmeCwdHint = cwd;
+  }
+
+  /** True when this adapter pipes Gateway events into the APME collector
+   *  itself — the bridge must then NOT also convert its timeline entries to
+   *  spans, or every turn and tool would be counted twice. */
+  hasDirectApmeIngestion(): boolean {
+    return this.apmeSessionId != null && getApme() != null;
   }
 
   private buildApmeCtx(): AdapterContext | null {
@@ -852,29 +858,15 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
             const responseContent = (finalText || undefined)
               || (this.accumulatedResponse || undefined);
 
-            // Emit chat_response for APME turn response capture. Preserve
-            // markdown — dashboard renderer applies heading / table / inline
-            // styles. Use prepareMarkdownDetail (JSON-blob filter + length cap)
-            // instead of cleanDetailText (which would strip the markdown).
-            if (responseContent) {
-              const respRaw = responseContent.length > 500 ? responseContent.slice(0, 497) + '...' : responseContent;
-              this.emitTimelineEntry({
-                ts: Date.now(), type: 'chat_response',
-                raw: cleanRawText(respRaw),
-                detail: prepareMarkdownDetail(responseContent.slice(0, 3000)),
-                startedAt: this.chatStartTime,
-                endedAt: Date.now(),
-              });
-            }
             const cleanedResponse = responseContent ? cleanNopMarkers(prepareMarkdownDetail(responseContent)) : undefined;
             const responseDetail = cleanedResponse
               ? (cleanedResponse.length > 1000 ? cleanedResponse.slice(0, 997) + '...' : cleanedResponse)
               : undefined;
 
-            // Emit chat_end with heuristic summary, then async LLM enrichment.
-            // Same kind-classification rule as wireClaudeCodeTimeline: 'topic'
-            // hint \u2192 heuristic, fallback / "Completed" \u2192 'none' so clients
-            // can suppress the (likely-redundant) detail pane.
+            // Pick the turn-close summary label. Same kind-classification rule
+            // as wireClaudeCodeTimeline: 'topic' hint \u2192 heuristic, fallback /
+            // "Completed" \u2192 'none' so clients can suppress the
+            // (likely-redundant) detail pane.
             const respHint = responseContent ? extractTopicHintWithKind(responseContent) : { hint: null, kind: null };
             const promptHint = this.lastPrompt ? extractTopicHintWithKind(this.lastPrompt) : { hint: null, kind: null };
             let heuristicLabel: string;
@@ -896,20 +888,41 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
             if (duration > 0) parts.push(`${duration}s`);
             if (toolSummary) parts.push(toolSummary);
             const chatEndTs = Date.now();
-            this.emitTimelineEntry({
-              ts: chatEndTs, type: 'chat_end', raw: parts.join(' \u00b7 '),
-              ...(responseDetail ? { detail: responseDetail } : {}),
-              ...(this.chatIsAutomated ? { automated: true } : {}),
-              startedAt: this.chatStartTime,
-              endedAt: chatEndTs,
-              summaryKind,
-            });
 
-            // Async LLM summarization — fire-and-forget, upsert chat_end when ready
-            if (responseContent && responseContent.length > 30) {
+            // Single turn-close row — mirrors wireClaudeCodeTimeline's
+            // emitCompletion: `chat_response` when there is response text,
+            // `chat_end` only for response-less turns. Emitting both used to
+            // put the same response `detail` on two rows milliseconds apart,
+            // so every OpenClaw turn rendered twice on the flat surfaces.
+            if (responseContent) {
+              const respRaw = responseContent.length > 500 ? responseContent.slice(0, 497) + '...' : responseContent;
+              this.emitTimelineEntry({
+                ts: chatEndTs, type: 'chat_response',
+                raw: cleanRawText(respRaw),
+                detail: prepareMarkdownDetail(responseContent.slice(0, 3000)),
+                ...(this.chatIsAutomated ? { automated: true } : {}),
+                startedAt: this.chatStartTime,
+                endedAt: chatEndTs,
+              });
+            } else {
+              this.emitTimelineEntry({
+                ts: chatEndTs, type: 'chat_end', raw: parts.join(' \u00b7 '),
+                ...(this.chatIsAutomated ? { automated: true } : {}),
+                startedAt: this.chatStartTime,
+                endedAt: chatEndTs,
+                summaryKind,
+              });
+            }
+
+            // Async LLM summarization — fire-and-forget, upserts the turn's
+            // chat_response raw with "summary · Ns · tools" (detail keeps the
+            // full response). Skipped for automated turns: their low-signal
+            // polling responses are dropped at storage time, and an upsert
+            // that finds no match falls through to addEntry — the enriched
+            // label would resurrect the dropped noise row.
+            if (responseContent && responseContent.length > 30 && !this.chatIsAutomated) {
               const savedToolSummary = toolSummary;
               const savedDuration = duration;
-              const savedAutomated = this.chatIsAutomated;
               const savedStartedAt = this.chatStartTime;
               summarizeResponse(responseContent).then((summary) => {
                 if (summary) {
@@ -917,12 +930,10 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
                   if (savedDuration > 0) enrichedParts.push(`${savedDuration}s`);
                   if (savedToolSummary) enrichedParts.push(savedToolSummary);
                   debug('adapter:openclaw', `LLM summary: ${summary}`);
-                  // Upsert chat_end with LLM summary replacing "Completed"
                   this.emitTimelineUpsert({
-                    ts: chatEndTs, type: 'chat_end',
+                    ts: chatEndTs, type: 'chat_response',
                     raw: enrichedParts.join(' \u00b7 '),
                     ...(responseDetail ? { detail: responseDetail } : {}),
-                    ...(savedAutomated ? { automated: true } : {}),
                     startedAt: savedStartedAt,
                     endedAt: chatEndTs,
                     summaryKind: 'llm',

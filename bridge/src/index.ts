@@ -1269,11 +1269,26 @@ function wireAgentApme(
     // The timeline adapter normalizes them to AgentDeck telemetry spans.
     if (evt.source === 'timeline' && evt.entry) {
       const entry = evt.entry as import('@agentdeck/shared').TimelineEntry;
-      const ctx = makeApmeAdapterCtx(apme, sid, agentType);
-      for (const span of timelineEntryToSpans(ctx, entry)) {
-        apme.collector.ingestSpan(sid, span);
+      // Upserts refine an already-ingested row (chat_start topic hint, async
+      // LLM summary) — converting them to spans again would open a phantom
+      // turn or overwrite the captured response with a summary label.
+      if (evt.upsert) return;
+      // Adapters bound to APME directly (OpenCode via setApmeSession) ingest
+      // richer spans from their native event stream; converting their
+      // timeline rows as well double-counted every turn and tool (the tool
+      // sample dedupCore is counter-based, so storage-time dedup can't
+      // collapse the second copy). Timeline conversion is the fallback for
+      // sessions without a direct binding.
+      const directApme = (adapter as { hasDirectApmeIngestion?: () => boolean })
+        .hasDirectApmeIngestion?.() === true;
+      if (!directApme) {
+        const ctx = makeApmeAdapterCtx(apme, sid, agentType);
+        for (const span of timelineEntryToSpans(ctx, entry)) {
+          apme.collector.ingestSpan(sid, span);
+        }
       }
-      // Mid-session classification still runs once we've captured a response.
+      // Mid-session classification still runs once we've captured a response
+      // (both ingestion paths write the turn response before this fires).
       if (entry.type === 'chat_response') {
         void classifyAndEnqueueTurn(apme, sid);
       }

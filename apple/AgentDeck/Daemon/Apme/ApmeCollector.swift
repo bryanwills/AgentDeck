@@ -55,8 +55,20 @@ final class ApmeCollector {
         var toolCalls: Int = 0
         var filesModified: Int = 0
         var filesCreated: Int = 0
+        /// Prompt that opened this turn — used by the duplicate-open guard.
+        var prompt: String? = nil
+        /// True once setTurnResponse landed on this turn (a same-prompt
+        /// re-send after a response is a genuine new turn, not an echo).
+        var hasResponse: Bool = false
     }
     private var activeTurn: ActiveTurn?
+
+    /// A user_prompt_submit with the same prompt landing on a fresh,
+    /// still-empty turn within this window is a transport echo — OpenClaw's
+    /// chat `prompt` field and the gateway's `session.message` role=user both
+    /// map to `model_call` → user_prompt_submit for one logical prompt.
+    /// Mirrors bridge/src/apme/collector.ts DUPLICATE_TURN_OPEN_WINDOW_MS.
+    private static let duplicateTurnOpenWindowMs = 15_000
     /// Most recently closed turn (one per hookSession) — survives `closeTurn()`
     /// so late-arriving response text can still land on the right turn.
     /// Maps runId → turnId.
@@ -220,13 +232,22 @@ final class ApmeCollector {
                     return
                 }
 
+                // Duplicate-open guard: closing and reopening on an echoed
+                // prompt would strand an empty phantom turn and shift every
+                // later turn_index. Mirrors bridge/src/apme/collector.ts.
+                if let turn = activeTurn, let p = prompt, !p.isEmpty,
+                   turn.prompt == p, turn.toolCalls == 0, !turn.hasResponse,
+                   nowMs() - turn.startedAt < Self.duplicateTurnOpenWindowMs {
+                    return
+                }
+
                 // Close previous turn
                 closeTurn(runId: runId)
                 // Open new turn
                 turnCounter += 1
                 let turnIndex = turnCounter - 1
                 let turnId = UUID().uuidString
-                activeTurn = ActiveTurn(id: turnId, runId: runId, index: turnIndex, startedAt: nowMs())
+                activeTurn = ActiveTurn(id: turnId, runId: runId, index: turnIndex, startedAt: nowMs(), prompt: prompt)
                 // Ensure an active task exists so the new turn can attach to it.
                 // openTaskIfNone is idempotent — back-to-back turns within a task
                 // all share the same task_id until a boundary signal closes it.
@@ -869,6 +890,7 @@ final class ApmeCollector {
             "response": clamped,
             "efficiencyJson": efficiencyJson,
         ])
+        if attributedToActiveTurn { activeTurn?.hasResponse = true }
         // Sample trajectory: the assistant response closes the turn's event arc.
         if let taskId = existingTurn?["task_id"] as? String {
             let tIdx = (existingTurn?["turn_index"] as? Int) ?? activeTurn?.index ?? 0

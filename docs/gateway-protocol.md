@@ -1,6 +1,6 @@
 # Gateway Protocol (OpenClaw)
 
-AgentDeck의 `openclaw` 어댑터가 OpenClaw Gateway(기본 포트 `18789`)에 연결할 때 사용하는 WebSocket 프로토콜 스펙. Node 어댑터(`bridge/src/adapters/openclaw.ts`)와 Swift 어댑터(`apple/AgentDeck/Daemon/Modules/OpenClawAdapter.swift`)가 **동일한 와이어 포맷**을 주고받는다.
+AgentDeck의 `openclaw` 어댑터가 OpenClaw Gateway(기본 포트 `18789`)에 연결할 때 사용하는 WebSocket 프로토콜 스펙. Node 어댑터(`bridge/src/adapters/openclaw.ts`)와 Swift 어댑터(`apple/AgentDeck/Daemon/Gateway/OpenClawAdapter.swift`)가 **동일한 와이어 포맷**을 주고받는다.
 
 타입 단일 소스: [`shared/src/gateway-protocol.ts`](../shared/src/gateway-protocol.ts). `pnpm generate-protocol`로 Swift/Kotlin 바인딩을 `generated/protocol/GatewayFrame.{swift,kt}`에 생성하며, CI가 drift를 차단한다.
 
@@ -129,7 +129,7 @@ v3|deviceId|clientId|clientMode|role|scopesCSV|signedAtMs|token|nonce|platform|d
 
 | 역할 | Node (TypeScript)                         | Swift                                                           |
 |------|-------------------------------------------|-----------------------------------------------------------------|
-| 어댑터 | `bridge/src/adapters/openclaw.ts`         | `apple/AgentDeck/Daemon/Modules/OpenClawAdapter.swift`          |
+| 어댑터 | `bridge/src/adapters/openclaw.ts`         | `apple/AgentDeck/Daemon/Gateway/OpenClawAdapter.swift`          |
 | 프레임 파싱 | `handleGatewayMessage()` (id 기반 디스패치) | 동일                                                            |
 | Ed25519 | Node `crypto.sign(null, ...)` (raw EdDSA) | `CryptoKit.Curve25519.Signing.PrivateKey.signature(for:)`       |
 | 재연결 | `scheduleReconnect()` with jittered backoff | `DaemonService`가 `NWPathMonitor` wake 시 자체 재연결 트리거    |

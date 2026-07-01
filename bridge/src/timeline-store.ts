@@ -156,6 +156,45 @@ export class BridgeTimelineStore {
       .slice(-MAX_ENTRIES);
   }
 
+  /** Node mirror of the Swift daemon's orphan reaper
+   *  (DaemonServer.computeOrphanTaskEnds): synthesize a `task_end` for every
+   *  `task_start` whose pair was never written. The producer only guarantees
+   *  the pair within a single daemon lifetime (ApmeCollector.closeTask is
+   *  in-memory), so a daemon killed mid-task leaves task_start rows that
+   *  clients render as in-flight — spinning the task marker forever. Called
+   *  once after `loadPersistedFile` at daemon startup. Idempotent: a real
+   *  task_end arriving later merges over the synthetic via
+   *  `tryMergeTaskEndByTaskId`. Returns the number of synthesized rows. */
+  reapOrphanTaskStarts(): number {
+    const closed = new Set<string>();
+    for (const e of this.entries) {
+      if (e.type === 'task_end' && e.taskId) closed.add(e.taskId);
+    }
+    let count = 0;
+    for (const start of [...this.entries]) {
+      if (start.type !== 'task_start' || !start.taskId || closed.has(start.taskId)) continue;
+      const startedAtMs = start.startedAt ?? start.ts;
+      // ts nudged 1ms past the task_start so the synthetic end sorts right
+      // after the orphaned start. endedAt stays unset — the duration is
+      // genuinely unknown, and clients render "Interrupted · –" for that.
+      this.addEntry({
+        ts: startedAtMs + 1,
+        type: 'task_end',
+        raw: 'Interrupted · –',
+        ...(start.agentType ? { agentType: start.agentType } : {}),
+        ...(start.projectName ? { projectName: start.projectName } : {}),
+        ...(start.sessionId ? { sessionId: start.sessionId } : {}),
+        ...(start.runId ? { runId: start.runId } : {}),
+        startedAt: startedAtMs,
+        taskId: start.taskId,
+        boundarySignal: 'interrupted',
+      }, { bypassSuppression: true });
+      closed.add(start.taskId);
+      count++;
+    }
+    return count;
+  }
+
   /** Recent entries attributed to one session, for the `query_session_timeline`
    *  poll — lets a device that connects mid-session fill its Detail view. */
   getHistoryForSession(sessionId: string, since?: number, limit = 16): TimelineEntry[] {

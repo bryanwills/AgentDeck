@@ -46,7 +46,18 @@ interface ActiveTurn {
   filesModified: number;
   filesCreated: number;
   gitBefore: string | null;
+  /** Prompt that opened this turn — used by the duplicate-open guard. */
+  prompt: string | null;
+  /** True once setTurnResponse landed on this turn (a same-prompt re-send
+   *  after a response is a genuine new turn, not an echo). */
+  hasResponse: boolean;
 }
+
+/** A turn_start with the same prompt landing on a fresh, still-empty turn
+ *  within this window is treated as a transport echo (e.g. OpenClaw
+ *  `chat.send` span + the gateway's `session.message` role=user re-delivery
+ *  of the same text), not a new turn. */
+const DUPLICATE_TURN_OPEN_WINDOW_MS = 15_000;
 
 interface ActiveTask {
   id: string;
@@ -166,6 +177,19 @@ export class ApmeCollector {
           ? ((data as Record<string, unknown>).message as Record<string, unknown>)?.content as string | undefined
           : undefined);
       const prompt = typeof rawPrompt === 'string' ? rawPrompt.slice(0, 8_000) : null;
+      // Duplicate-open guard: one user prompt can reach the collector more
+      // than once within moments. Closing and reopening here would strand an
+      // empty phantom turn and shift every later turn_index, so an identical
+      // prompt landing on a fresh, still-empty turn is a no-op.
+      const openTurn = this.sessionToTurn.get(sessionId);
+      if (
+        openTurn && prompt !== null && openTurn.prompt === prompt &&
+        openTurn.toolCalls === 0 && !openTurn.hasResponse &&
+        Date.now() - openTurn.startedAt < DUPLICATE_TURN_OPEN_WINDOW_MS
+      ) {
+        debug('APME', `duplicate turn_start ignored (echo) turn=${openTurn.id.slice(0, 8)}`);
+        return;
+      }
       // Close previous turn if open. Resolve prevIndex carefully: the active
       // turn may already have been closed by an explicit closeTurnForSession
       // (Codex `codex_stop` hook), in which case sessionToTurn is empty. Fall
@@ -190,6 +214,7 @@ export class ApmeCollector {
         startedAt: Date.now(), toolCalls: 0,
         filesModified: 0, filesCreated: 0,
         gitBefore: readGitHead(projectPath),
+        prompt, hasResponse: false,
       };
       this.sessionToTurn.set(sessionId, turn);
       // Ensure an active task exists so this turn can attach to it. Tasks group
@@ -624,6 +649,7 @@ export class ApmeCollector {
         response: response.slice(0, 10_000),
         efficiencyJson,
       });
+      if (turn) turn.hasResponse = true;
     } catch (err) { debug('APME', `setTurnResponse failed: ${String(err)}`); }
     // Sample trajectory: the assistant response closes the turn's event arc.
     const ctx = this.sampleCtxForTurn(sessionId, turnId);

@@ -107,6 +107,13 @@ export class OpenCodeAdapter extends PtyAdapter {
     this.apmeCwdHint = cwd;
   }
 
+  /** True when this adapter pipes its native event stream into the APME
+   *  collector itself — the bridge must then NOT also convert its timeline
+   *  entries to spans, or every turn and tool would be counted twice. */
+  hasDirectApmeIngestion(): boolean {
+    return this.apmeSessionId != null && getApme() != null;
+  }
+
   private buildApmeCtx(): AdapterContext | null {
     if (!this.apmeSessionId || !getApme()) return null;
     return {

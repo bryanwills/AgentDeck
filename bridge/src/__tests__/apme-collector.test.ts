@@ -283,4 +283,37 @@ describe('ApmeCollector', () => {
     expect(() => collector.ingestHook('x', 'PreToolUse', { tool_name: 'Bash' })).not.toThrow();
     expect(collector.closeRun('x')).toBeNull();
   });
+
+  it('ignores an echoed duplicate turn_start (same prompt on a fresh empty turn)', async () => {
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({ sessionId: 's-echo', agentType: 'openclaw', projectName: 'p' });
+
+    // OpenClaw shape: our chat.send span opens the turn, then the gateway
+    // re-delivers the same text as session.message role=user moments later.
+    collector.ingestHook('s-echo', 'UserPromptSubmit', { prompt: '같은 프롬프트' });
+    const firstTurnId = collector.getActiveTurnId('s-echo');
+    collector.ingestHook('s-echo', 'UserPromptSubmit', { prompt: '같은 프롬프트' });
+
+    expect(collector.getActiveTurnId('s-echo')).toBe(firstTurnId);
+    expect(store.listTurns(runId).length).toBe(1);
+
+    // A different prompt is a genuine new turn.
+    collector.ingestHook('s-echo', 'UserPromptSubmit', { prompt: '다른 프롬프트' });
+    expect(store.listTurns(runId).length).toBe(2);
+  });
+
+  it('treats a same-prompt re-send after a response or tool use as a new turn', async () => {
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({ sessionId: 's-resend', agentType: 'claude-code', projectName: 'p' });
+
+    collector.ingestHook('s-resend', 'UserPromptSubmit', { prompt: '반복 질문' });
+    collector.setTurnResponse('s-resend', '첫 번째 답변');
+    collector.ingestHook('s-resend', 'UserPromptSubmit', { prompt: '반복 질문' });
+    expect(store.listTurns(runId).length).toBe(2);
+
+    // Tool activity also releases the guard.
+    collector.ingestHook('s-resend', 'PreToolUse', { tool_name: 'Bash' });
+    collector.ingestHook('s-resend', 'UserPromptSubmit', { prompt: '반복 질문' });
+    expect(store.listTurns(runId).length).toBe(3);
+  });
 });

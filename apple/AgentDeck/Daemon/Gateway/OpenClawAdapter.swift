@@ -198,6 +198,13 @@ actor OpenClawAdapter {
     private var currentRunId: String?
     private var promptCapturedForRunId: String? // guard: emit prompt entry once per runId
     private var automatedRunId: String? // runId whose prompt was a scheduled (cron) turn — flagged automated
+    /// Raw log lines already replayed via `requestInitialLogTail` this
+    /// adapter lifetime. Reconnects re-fetch the same tail, and
+    /// `BridgeLogStream.parseLogLine` stamps entries with the PARSE time
+    /// (not the line's original timestamp) — so a replayed line gets a fresh
+    /// ts, sails past the store's 8s dedup window, and lands as a duplicate
+    /// row on every reconnect. Dedup must therefore key on line content.
+    private var replayedLogLines: Set<Int> = []
     private var pendingApprovalId: String?
     private struct RPCResponse: @unchecked Sendable {
         let ok: Bool
@@ -1381,7 +1388,13 @@ actor OpenClawAdapter {
         guard response.ok,
               let payload = response.payload,
               let lines = payload["lines"] as? [String] else { return }
+        // Backstop against unbounded growth under pathological reconnect
+        // flapping — clearing risks one round of re-dupes, which the store's
+        // 8s window then absorbs for lines replayed back-to-back.
+        if replayedLogLines.count > 4096 { replayedLogLines.removeAll(keepingCapacity: true) }
         for line in lines {
+            if replayedLogLines.contains(line.hashValue) { continue }
+            replayedLogLines.insert(line.hashValue)
             guard let data = line.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data),
                   let entry = BridgeLogStream.parseLogLine(json) else { continue }
