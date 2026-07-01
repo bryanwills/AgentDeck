@@ -19,7 +19,7 @@
  * shared) because the shared renderers are owned elsewhere.
  */
 import type { AgentType, SessionInfo, StatusCardTone, State } from '@agentdeck/shared';
-import { stateColor, formatModelEffort } from '@agentdeck/shared';
+import { stateColor, formatModelEffort, escSvgText } from '@agentdeck/shared';
 
 const SIZE = 144;
 const FONT = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
@@ -57,14 +57,9 @@ function readoutTone(tone: StatusCardTone = 'info'): ReadoutTone {
   }
 }
 
-function escXml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
+// Shared sanitizer: strips ANSI/control chars before entity-escaping (raw
+// control chars in session text break the SVG parse → blank tile).
+const escXml = escSvgText;
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + '…';

@@ -16,6 +16,7 @@ import {
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { EnrichedSession } from './session-aggregator.js';
+import { stripUnsafeText } from '@agentdeck/shared';
 import {
   parseAntigravityTranscript,
   antigravityDefaultModel,
@@ -63,7 +64,7 @@ function claudeUserText(message: Record<string, unknown> | null | undefined): st
  * for non-substantive openers (bare slash commands, empty after cleaning).
  */
 export function cleanGoal(raw: string): string {
-  let s = raw
+  let s = stripUnsafeText(raw)
     .replace(/<[^>]+>/g, ' ') // strip <system-reminder> / <command-*> wrappers, keep inner text
     .replace(/\s+/g, ' ')
     .trim();

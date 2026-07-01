@@ -10,7 +10,7 @@ import type { PromptOption } from '../states.js';
 import { State } from '../states.js';
 import { stateColor } from '../state-colors.js';
 import { agentLogoIcon } from './agent-logos.js';
-import { wrapTextByWidth } from './text-utils.js';
+import { wrapTextByWidth, escSvgText } from './text-utils.js';
 
 const SIZE = 144;
 const BORDER_PERIMETER = 512;
@@ -82,14 +82,9 @@ export interface StatusCardConfig {
   tone?: StatusCardTone;
 }
 
-function escXml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
+// Shared sanitizer: strips ANSI/control chars before entity-escaping (a raw
+// control char in interpolated text makes resvg reject the entire SVG).
+const escXml = escSvgText;
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + '\u2026';

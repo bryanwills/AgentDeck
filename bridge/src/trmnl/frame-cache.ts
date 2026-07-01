@@ -102,7 +102,12 @@ export function setTrmnlState(evt: any): void {
 /** Render (and cache) the current state for one resolution key, with LRU eviction. */
 function renderForKey(key: string): TrmnlFrame {
   const { width, height } = parseKey(key);
-  const frame = renderTrmnlFrame(lastStateEvt, undefined, { width, height });
+  let frame = renderTrmnlFrame(lastStateEvt, undefined, { width, height });
+  // A degraded frame is a blank fallback (render threw). Keep serving the last
+  // good frame for this resolution — a stale dashboard beats an empty panel.
+  // The state hash still advances so we retry on the next real state change.
+  const prev = frames.get(key);
+  if (frame.degraded && prev && !prev.degraded) frame = prev;
   frames.delete(key); // re-insert to mark most-recently-used
   frames.set(key, frame);
   lastHashByKey.set(key, trmnlStateHash(lastStateEvt));

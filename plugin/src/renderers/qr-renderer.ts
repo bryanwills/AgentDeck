@@ -8,10 +8,6 @@ import QRCode from 'qrcode';
 const SIZE = 144;
 const QUIET_ZONE = 4; // px quiet zone around QR
 
-function escXml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 /** Extract host (+ port if non-standard) from URL for display label */
 export function extractUrlLabel(url: string): string {
   try {

@@ -39,10 +39,12 @@ const telemetry = new Map<string, DeviceTelemetry>();
 /**
  * Upsert the last-seen telemetry for a device. `now` is injected at the daemon
  * boundary (defaults to wall clock) so layout/render code stays clock-free.
+ * Returns the previous `lastSeen` (epoch ms) so callers can detect poll gaps.
  */
-export function recordTelemetry(mac: string, t: TelemetryInput, now: number = Date.now()): void {
+export function recordTelemetry(mac: string, t: TelemetryInput, now: number = Date.now()): number | null {
   const key = normalizeMac(mac);
-  if (!key) return;
+  if (!key) return null;
+  const prevLastSeen = telemetry.get(key)?.lastSeen ?? null;
   telemetry.set(key, {
     mac: key,
     fwVersion: t.fwVersion ?? '',
@@ -54,6 +56,7 @@ export function recordTelemetry(mac: string, t: TelemetryInput, now: number = Da
     userAgent: t.userAgent ?? '',
     lastSeen: now,
   });
+  return prevLastSeen;
 }
 
 /** Snapshot of all known device telemetry, most-recently-seen first. */

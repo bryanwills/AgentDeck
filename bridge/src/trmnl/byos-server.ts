@@ -26,6 +26,7 @@ import {
   effectiveRefreshRate,
   effectiveImageTimeout,
   TRMNL_WEAK_RSSI_DBM,
+  type TrmnlConfig,
 } from './trmnl-settings.js';
 import { getTrmnlFrame, getTrmnlFrameByKey, forceRenderTrmnlFrame, getTrmnlActivity } from './frame-cache.js';
 import type { TrmnlFrame } from './image-renderer.js';
@@ -65,6 +66,30 @@ function noteRssiHealth(mac: string, rssi: number | null): void {
 /** Test helper — clear weak-RSSI transition tracking. */
 export function _resetWeakRssiTracking(): void {
   weakRssiMacs.clear();
+}
+
+/**
+ * Record a poll and log when the panel comes back after missing its window.
+ * A battery e-ink panel polls on the cadence we hand it; a gap of more than
+ * 2× the slow cadence (+ grace) means at least one poll round-trip failed at
+ * the network layer — exactly the moment the firmware flashes its "TRMNL not
+ * responding" screen. Logging the gap on recovery (always visible, one line
+ * per incident) gives the operator a correlatable record of every dead window.
+ */
+function notePollGap(mac: string, h: DeviceHeaders, cfg: TrmnlConfig): void {
+  const now = Date.now();
+  const prevLastSeen = recordTelemetry(mac, h, now);
+  if (prevLastSeen == null) return;
+  const gapSec = Math.round((now - prevLastSeen) / 1000);
+  const expected = Math.max(cfg.refreshRate, cfg.refreshActive);
+  if (gapSec > expected * 2 + 30) {
+    logTagged(
+      TAG,
+      `panel ${normalizeMac(mac)} back after ${gapSec}s silence (cadence ${expected}s) — ` +
+        `it missed ≥1 poll window; likely showed "not responding" in between ` +
+        `(rssi=${h.rssi ?? 'n/a'}dBm battery=${h.batteryVoltage ?? 'n/a'}V)`,
+    );
+  }
 }
 
 // Sane device-reported resolution bounds; anything outside falls back to OG size.
@@ -154,7 +179,7 @@ export function handleTrmnlSetup(req: IncomingMessage, res: ServerResponse): voi
     sendJson(res, 404, { status: 404, message: 'Device not enrolled. Add it to settings.trmnl.devices.' });
     return;
   }
-  recordTelemetry(mac, h);
+  notePollGap(mac, h, loadTrmnlConfig());
   noteRssiHealth(mac, h.rssi);
   const size = renderSize(h);
   if (created) {
@@ -186,7 +211,7 @@ export function handleTrmnlDisplay(req: IncomingMessage, res: ServerResponse): v
   const cfg = loadTrmnlConfig();
   const size = renderSize(h);
   if (mac) {
-    recordTelemetry(mac, h);
+    notePollGap(mac, h, cfg);
     noteRssiHealth(mac, h.rssi);
   }
   let device = mac ? findDeviceByMac(mac) : undefined;
@@ -281,7 +306,31 @@ export function handleTrmnlImage(req: IncomingMessage, res: ServerResponse): voi
   res.end(frame.buffer);
 }
 
-/** POST /api/log — accept device logs (debug only). */
+// Device-log throttle: the firmware only POSTs /api/log when something went
+// wrong on its side (failed poll, image timeout, low battery), so these lines
+// ARE the root-cause record for "not responding" incidents. Always log them,
+// but cap the rate per panel so a wedged device can't flood stderr.
+const DEVICE_LOG_INTERVAL_MS = 10_000;
+const lastDeviceLogAt = new Map<string, number>();
+
+/** Compress the firmware's log JSON into one greppable line (best effort). */
+function summarizeDeviceLog(body: string): string {
+  try {
+    const parsed = JSON.parse(body);
+    const arr = parsed?.log?.logs_array ?? parsed?.logs?.logs_array ?? parsed?.logs_array;
+    if (Array.isArray(arr) && arr.length > 0) {
+      return arr
+        .map((e: any) => `[${e?.log_codeline ?? e?.log_sourcefile ?? '?'}] ${e?.log_message ?? JSON.stringify(e)}`)
+        .join(' | ')
+        .slice(0, 600);
+    }
+  } catch {
+    /* not JSON — fall through to raw */
+  }
+  return body.replace(/\s+/g, ' ').slice(0, 600);
+}
+
+/** POST /api/log — the panel's own error report; always logged (rate-limited). */
 export function handleTrmnlLog(req: IncomingMessage, res: ServerResponse): void {
   let body = '';
   req.on('data', (c: Buffer) => {
@@ -290,7 +339,13 @@ export function handleTrmnlLog(req: IncomingMessage, res: ServerResponse): void 
   });
   req.on('end', () => {
     const mac = normalizeMac(header(req, 'ID'));
-    debug(TAG, `log from ${mac}: ${body.slice(0, 500)}`);
+    const now = Date.now();
+    if (now - (lastDeviceLogAt.get(mac) ?? 0) >= DEVICE_LOG_INTERVAL_MS) {
+      lastDeviceLogAt.set(mac, now);
+      logTagged(TAG, `device log from ${mac}: ${summarizeDeviceLog(body)}`);
+    } else {
+      debug(TAG, `device log from ${mac} (throttled): ${body.slice(0, 500)}`);
+    }
     res.writeHead(204, { 'Access-Control-Allow-Origin': '*' });
     res.end();
   });

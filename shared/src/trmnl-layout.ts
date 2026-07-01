@@ -15,7 +15,7 @@
  * CJK-aware truncation.
  */
 import { parseState, type DashState } from './d200h-layout.js';
-import { measureTextWidth, sliceByPx } from './svg-renderers/text-utils.js';
+import { measureTextWidth, sliceByPx, escSvgText } from './svg-renderers/text-utils.js';
 import { agentGlyphMono } from './svg-renderers/agent-logos.js';
 import type { SessionInfo, SubscriptionInfo } from './protocol.js';
 
@@ -27,13 +27,9 @@ const MONO = 'JetBrains Mono, monospace';
 const INK = '#000000';
 const PAPER = '#ffffff';
 
-function escXml(s: string): string {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+// Delegates to the shared sanitizer: strips ANSI/control chars (which make
+// resvg reject the whole SVG → blank e-ink frame) before entity-escaping.
+const escXml = escSvgText;
 
 /** Truncate to fit `maxPx` at `fontSize`, appending an ellipsis when clipped. */
 function truncatePx(s: string, maxPx: number, fontSize: number): string {

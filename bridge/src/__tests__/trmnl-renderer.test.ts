@@ -78,3 +78,45 @@ describe('renderTrmnlFrame', () => {
     expect(frame.buffer.subarray(0, 8).equals(PNG_SIG)).toBe(true);
   });
 });
+
+describe('renderTrmnlFrame — hostile session text', () => {
+  beforeAll(async () => {
+    await initTrmnlRenderer();
+  });
+
+  const withGoal = (goal: string) => ({
+    state: 'PROCESSING',
+    projectName: 'AgentDeck',
+    modelName: 'claude-opus-4-8',
+    usageKnown: true,
+    fiveHourPercent: 8,
+    sevenDayPercent: 78,
+    allSessions: [
+      { id: 's1', agentType: 'claude-code', state: 'processing', projectName: 'AgentDeck', modelName: 'claude-opus-4-8', goal, alive: true },
+    ],
+  });
+
+  it('renders a real (non-blank, non-degraded) frame when the goal carries ANSI escapes', () => {
+    if (!isTrmnlResvgLoaded()) return;
+    // Regression: a raw ESC in a PTY-derived goal made resvg reject the whole
+    // SVG and the panel silently received a blank white frame.
+    const frame = renderTrmnlFrame(withGoal('Fix \x1b[31mred\x1b[0m bug'));
+    expect(frame.degraded).toBeUndefined();
+    // A rendered dashboard deflates far larger than the ~250-byte blank frame.
+    expect(frame.buffer.length).toBeGreaterThan(1500);
+  });
+
+  it('renders a real frame when the goal carries raw control characters', () => {
+    if (!isTrmnlResvgLoaded()) return;
+    const frame = renderTrmnlFrame(withGoal('line1\x08\x00\x0bbad'));
+    expect(frame.degraded).toBeUndefined();
+    expect(frame.buffer.length).toBeGreaterThan(1500);
+  });
+
+  it('renders a real frame when the goal ends in a lone surrogate half', () => {
+    if (!isTrmnlResvgLoaded()) return;
+    const frame = renderTrmnlFrame(withGoal('emoji cut \ud83d'));
+    expect(frame.degraded).toBeUndefined();
+    expect(frame.buffer.length).toBeGreaterThan(1500);
+  });
+});

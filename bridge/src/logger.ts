@@ -22,6 +22,16 @@ export function setPtyMode(enabled: boolean): void {
   ptyMode = enabled;
 }
 
+/**
+ * Wall-clock stamp for stderr lines. Daemon/CLI stderr goes to long-lived log
+ * files (~/.agentdeck/daemon-stderr.log); without a timestamp a restart or a
+ * device incident can't be placed in time, which repeatedly blocked root-cause
+ * work on intermittent device (TRMNL/D200H) outages.
+ */
+function stamp(): string {
+  return new Date().toISOString();
+}
+
 /** Standard logging to stderr (suppressed in PTY mode to avoid terminal noise) */
 export function log(...args: unknown[]): void {
   if (ptyMode) {
@@ -31,7 +41,7 @@ export function log(...args: unknown[]): void {
     }
     return;
   }
-  process.stderr.write(`[agentdeck] ${args.map(String).join(' ')}\n`);
+  process.stderr.write(`${stamp()} [agentdeck] ${args.map(String).join(' ')}\n`);
 }
 
 export function logTagged(tag: string, ...args: unknown[]): void {
@@ -42,12 +52,12 @@ export function logTagged(tag: string, ...args: unknown[]): void {
     }
     return;
   }
-  process.stderr.write(`[${tag}] ${args.map(String).join(' ')}\n`);
+  process.stderr.write(`${stamp()} [${tag}] ${args.map(String).join(' ')}\n`);
 }
 
 /** Critical errors — always shown even in PTY mode (user action required) */
 export function logError(...args: unknown[]): void {
-  const msg = `[agentdeck] ERROR: ${args.map(String).join(' ')}\n`;
+  const msg = `${stamp()} [agentdeck] ERROR: ${args.map(String).join(' ')}\n`;
   process.stderr.write(msg);
   if (debugEnabled && debugStream) {
     const ts = new Date().toISOString().slice(11, 23);

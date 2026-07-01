@@ -81,15 +81,19 @@ actor TrmnlModule: DeviceModule {
             lastState.sessions = sessions.compactMap { s in
                 if let alive = s["alive"] as? Bool, alive == false { return nil }
                 let elapsed = (s["elapsedSec"] as? Int) ?? Int((s["elapsedSec"] as? Double) ?? 0)
+                // PTY-derived text can carry ANSI escape/control bytes — strip them
+                // here (parity with shared stripUnsafeText) so they never garble
+                // the e-ink rows.
+                func txt(_ k: String) -> String { Self.sanitizeText(s[k] as? String ?? "") }
                 return TrmnlSession(
                     agentType: s["agentType"] as? String ?? "",
-                    projectName: s["projectName"] as? String ?? "",
+                    projectName: txt("projectName"),
                     modelName: s["modelName"] as? String ?? "",
                     state: s["state"] as? String ?? "idle",
-                    currentTool: s["currentTool"] as? String ?? "",
-                    currentTask: s["currentTask"] as? String ?? "",
-                    activity: s["activity"] as? String ?? "",
-                    goal: s["goal"] as? String ?? "",
+                    currentTool: txt("currentTool"),
+                    currentTask: txt("currentTask"),
+                    activity: txt("activity"),
+                    goal: txt("goal"),
                     elapsedSec: elapsed)
             }
             refreshAll()
@@ -388,10 +392,28 @@ actor TrmnlModule: DeviceModule {
     private func record(_ h: TrmnlHeaders) {
         let key = TrmnlSettings.normalizeMac(h.mac)
         guard !key.isEmpty else { return }
+        let now = Date()
+        notePollGap(key, previousSeen: telemetry[key]?.lastSeen, now: now, rssi: h.rssi)
         telemetry[key] = Telemetry(fwVersion: h.fwVersion, battery: h.batteryVoltage, rssi: h.rssi,
                                    width: h.width, height: h.height, refreshRate: h.refreshRate,
-                                   userAgent: h.userAgent, lastSeen: Date())
+                                   userAgent: h.userAgent, lastSeen: now)
         noteRssiHealth(key, h.rssi)
+    }
+
+    /// Log when a panel comes back after missing its poll window — mirrors
+    /// byos-server.ts's notePollGap. A gap of more than 2× the slow cadence
+    /// (+ grace) means at least one poll round-trip failed at the network layer,
+    /// which is exactly when the firmware flashes its "not responding" screen.
+    /// One always-visible line per incident, on recovery.
+    private func notePollGap(_ key: String, previousSeen: Date?, now: Date, rssi: Double?) {
+        guard let prev = previousSeen else { return }
+        let gapSec = Int(now.timeIntervalSince(prev).rounded())
+        let expected = max(cfg.refreshRate, cfg.refreshActive)
+        guard gapSec > expected * 2 + 30 else { return }
+        let rssiStr = rssi.map { String(format: "%.0f", $0) } ?? "n/a"
+        DaemonLogger.shared.error(
+            "[TRMNL] panel \(key) back after \(gapSec)s silence (cadence \(expected)s) — " +
+            "it missed ≥1 poll window; likely showed \"not responding\" in between (rssi=\(rssiStr)dBm)")
     }
 
     /// Log once when a panel's RSSI crosses into/out of the weak-link threshold —
@@ -417,6 +439,24 @@ actor TrmnlModule: DeviceModule {
     }
 
     // MARK: - Helpers
+
+    /// ANSI escape sequences (CSI / OSC / two-char `ESC X` forms) — precompiled once.
+    private static let ansiRegex = try? NSRegularExpression(
+        pattern: "\\x{1b}(?:\\[[0-9;:?<=>]*[ -/]*[@-~]|\\][^\\x{07}\\x{1b}]*(?:\\x{07}|\\x{1b}\\\\)?|[@-_])")
+
+    /// Strip ANSI escape sequences and control characters from PTY-derived
+    /// session text — parity with `stripUnsafeText` in shared/src/svg-renderers/
+    /// text-utils.ts so both hubs render the same clean rows.
+    static func sanitizeText(_ s: String) -> String {
+        var out = s
+        if let re = Self.ansiRegex {
+            out = re.stringByReplacingMatches(
+                in: out, range: NSRange(out.startIndex..., in: out), withTemplate: "")
+        }
+        return String(String.UnicodeScalarView(out.unicodeScalars.filter {
+            $0.value >= 0x20 && $0.value != 0x7f
+        }))
+    }
 
     private func parse(_ raw: [String: String]) -> TrmnlHeaders {
         func num(_ k: String) -> Double? {

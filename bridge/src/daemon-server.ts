@@ -143,7 +143,9 @@ function latestTimelinePath(): string | null {
 // real prompt. Observed sessions now report idle/processing only.
 
 function log(msg: string): void {
-  process.stderr.write(msg + '\n');
+  // Timestamped like logger.ts — daemon stderr lands in a long-lived log file,
+  // and un-datable restart/incident lines repeatedly blocked root-cause work.
+  process.stderr.write(`${new Date().toISOString()} ${msg}\n`);
 }
 
 // ===== Usage relay (3-tier) =====
@@ -892,6 +894,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   if (timelinePath) {
     const loaded = core.bridgeTimeline.loadPersistedFile(timelinePath);
     if (loaded > 0) log(`[agentdeck] Loaded ${loaded} persisted timeline entries`);
+    // Close task_start rows orphaned by a previous daemon killed mid-task —
+    // clients would otherwise spin their in-flight marker forever.
+    const reaped = core.bridgeTimeline.reapOrphanTaskStarts();
+    if (reaped > 0) log(`[agentdeck] Closed ${reaped} orphaned task_start rows as interrupted`);
   }
   core.wireDisplayMonitor();
   let lastStateEvent: BridgeEvent | null = null;

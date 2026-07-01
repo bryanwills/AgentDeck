@@ -1458,9 +1458,15 @@ final class DaemonServer {
         await httpServer.get("/api/display") { [weak self] req in
             await self?.trmnlDisplayResponse(req) ?? .notFound
         }
-        await httpServer.post("/api/log") { _ in
-            // Device logs — accept and drop (debug only).
-            HTTPServer.HTTPResponse(status: 204, headers: [:], body: nil)
+        await httpServer.post("/api/log") { req in
+            // The panel only POSTs here when something went wrong on its side
+            // (failed poll, image timeout) — these lines ARE the root-cause
+            // record for "not responding" incidents, so log them (truncated).
+            let mac = req.headers["id"] ?? "?"
+            let body = req.body.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let line = body.replacingOccurrences(of: "\n", with: " ").prefix(600)
+            DaemonLogger.shared.info("[TRMNL] device log from \(mac): \(line)")
+            return HTTPServer.HTTPResponse(status: 204, headers: [:], body: nil)
         }
         await httpServer.get("/trmnl/image/*") { [weak self] req in
             await self?.trmnlImageResponse(req) ?? .notFound

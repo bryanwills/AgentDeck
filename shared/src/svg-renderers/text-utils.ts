@@ -84,3 +84,41 @@ export function wrapTextByWidth(text: string, maxWidthPx: number, fontSize: numb
   if (current) lines.push(current);
   return lines;
 }
+
+// --- SVG text sanitization ---
+
+/** ANSI escape sequences (CSI like `\x1b[31m`, OSC, and 2-char `\x1bX` forms). */
+const ANSI_RE = /\x1b(?:\[[0-9;:?<=>]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-_])/g;
+/**
+ * Characters XML 1.0 forbids even when escaped: C0 controls (minus \t \n \r),
+ * DEL, and the noncharacters U+FFFE/U+FFFF. resvg hard-fails the whole SVG
+ * parse on any of these, so they must be stripped, not entity-escaped.
+ */
+const XML_INVALID_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufffe\uffff]/g;
+/** Lone UTF-16 surrogate halves (e.g. an emoji cut by a byte-length slice). */
+const LONE_SURROGATE_RE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+
+/**
+ * Strip character sequences that must never reach a text surface: ANSI escape
+ * sequences (PTY-derived goals/activity strings carry them), XML-invalid
+ * control characters, and lone surrogates. Safe for non-SVG surfaces too
+ * (serial/e-ink/plain text) — it only removes garbage, never visible text.
+ */
+export function stripUnsafeText(s: string): string {
+  return String(s).replace(ANSI_RE, '').replace(XML_INVALID_RE, '').replace(LONE_SURROGATE_RE, '');
+}
+
+/**
+ * The one escape function every SVG renderer must use for interpolated text.
+ * Escaping alone is NOT enough: a single raw control character (common in
+ * PTY-derived session goal/activity strings) makes resvg reject the entire
+ * SVG, which downstream turns into a blank frame on TRMNL/D200H panels.
+ */
+export function escSvgText(s: string): string {
+  return stripUnsafeText(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}

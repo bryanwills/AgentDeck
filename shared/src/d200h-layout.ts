@@ -20,6 +20,7 @@ import {
   renderNextPageButton,
   renderInfoSlot,
   svgFrame,
+  escSvgText,
 } from './svg-renderers/index.js';
 import { State, type PromptOption } from './states.js';
 import type { SessionInfo, SubscriptionInfo, CodexRateLimits } from './protocol.js';
@@ -115,9 +116,9 @@ export function parseState(evt: any): DashState {
 
 // --- SVG helpers for info / usage / mode / offline tiles ---
 
-function escXml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+// Shared sanitizer: strips ANSI/control chars (resvg rejects the whole SVG on
+// any raw control char → blank tile) before entity-escaping.
+const escXml = escSvgText;
 
 function gaugeBar(pct: number, width = 8): string {
   const filled = Math.round(Math.min(pct, 100) / 100 * width);

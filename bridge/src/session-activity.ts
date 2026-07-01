@@ -13,6 +13,7 @@
 //      unavailable or errors. Cost-free (on-device), see feedback_cost_sensitive_defaults.
 //
 import { callFoundationModelsHelper, probeFoundationModelsHelper } from './foundation-models-helper.js';
+import { stripUnsafeText } from '@agentdeck/shared';
 import { debug } from './logger.js';
 import type { EnrichedSession } from './session-aggregator.js';
 
@@ -47,11 +48,13 @@ function verbForm(tool: string): string {
 /** Synchronous, always-available clean one-liner. */
 export function quickActivity(s: EnrichedSession): string | undefined {
   const state = s.state ?? '';
+  // Strip PTY escape/control bytes first — a raw ESC in these strings used to
+  // break the SVG parse downstream and blank the TRMNL/D200H frame.
   if (state.startsWith('awaiting') && s.question && s.question.trim()) {
-    return s.question.trim().slice(0, 72);
+    return stripUnsafeText(s.question.trim()).slice(0, 72);
   }
   // currentTask, when present, is the full "Verb /path" action — clean the path off.
-  const task = (s.currentTask ?? '').trim();
+  const task = stripUnsafeText((s.currentTask ?? '').trim());
   if (task) {
     const cleaned = cleanAction(task);
     // If it's "Verb basename", prefer the present-continuous verb.
@@ -59,8 +62,8 @@ export function quickActivity(s: EnrichedSession): string | undefined {
     if (sp > 0) return `${verbForm(cleaned.slice(0, sp))} ${cleaned.slice(sp + 1)}`;
     return cleaned;
   }
-  if (s.currentTool && s.currentTool.trim()) return verbForm(s.currentTool.trim());
-  if (s.goal && s.goal.trim()) return cleanAction(s.goal.trim());
+  if (s.currentTool && s.currentTool.trim()) return verbForm(stripUnsafeText(s.currentTool.trim()));
+  if (s.goal && s.goal.trim()) return cleanAction(stripUnsafeText(s.goal.trim()));
   return undefined;
 }
 

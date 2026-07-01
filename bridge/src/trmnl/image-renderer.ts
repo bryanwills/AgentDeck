@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { renderTrmnlDashboard, TRMNL_WIDTH, TRMNL_HEIGHT } from '@agentdeck/shared';
-import { debug } from '../logger.js';
+import { debug, logTagged } from '../logger.js';
 
 const TAG = 'trmnl-render';
 
@@ -198,6 +198,12 @@ export interface TrmnlFrame {
   width: number;
   height: number;
   contentType: 'image/png';
+  /**
+   * True when this frame is a blank fallback (render threw or resvg missing),
+   * NOT a real dashboard. The frame cache uses this to keep serving the last
+   * good frame instead of flashing the panel to an empty white screen.
+   */
+  degraded?: boolean;
 }
 
 function hashBuffer(buf: Buffer): string {
@@ -217,6 +223,7 @@ export function renderTrmnlFrame(
   const width = size?.width && size.width > 0 ? Math.round(size.width) : TRMNL_WIDTH;
   const height = size?.height && size.height > 0 ? Math.round(size.height) : TRMNL_HEIGHT;
   let buffer: Buffer;
+  let degraded = false;
   if (Resvg) {
     try {
       const svg = renderTrmnlDashboard(stateEvt, { ...(now ? { now } : {}), width, height });
@@ -233,11 +240,16 @@ export function renderTrmnlFrame(
       const packed = rgbaToPacked1Bit(rendered.pixels, rendered.width, rendered.height, ss);
       buffer = encode1BitPng(packed.bits, packed.width, packed.height, packed.bytesPerRow);
     } catch (err) {
-      debug(TAG, `render failed (${err}) — emitting blank frame`);
+      // Always visible (not debug-gated): a failed render used to silently ship
+      // a blank white frame to the panel — the classic "dashboard disappeared"
+      // report with zero trace. Rate-limited per error message.
+      noteRenderFailure(String(err));
       buffer = blankPng(width, height);
+      degraded = true;
     }
   } else {
     buffer = blankPng(width, height);
+    degraded = true;
   }
   return {
     buffer,
@@ -245,5 +257,19 @@ export function renderTrmnlFrame(
     width,
     height,
     contentType: 'image/png',
+    ...(degraded ? { degraded: true } : {}),
   };
+}
+
+// Rate-limit render-failure logging so a hot broadcast loop can't spam stderr:
+// each distinct error message logs at most once per minute.
+const RENDER_FAIL_LOG_INTERVAL_MS = 60_000;
+const lastRenderFailLogAt = new Map<string, number>();
+
+function noteRenderFailure(message: string): void {
+  const now = Date.now();
+  const last = lastRenderFailLogAt.get(message) ?? 0;
+  if (now - last < RENDER_FAIL_LOG_INTERVAL_MS) return;
+  lastRenderFailLogAt.set(message, now);
+  logTagged(TAG, `render failed (frame cache keeps the last good frame): ${message}`);
 }
