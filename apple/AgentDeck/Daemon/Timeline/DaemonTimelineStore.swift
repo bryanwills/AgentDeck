@@ -112,14 +112,20 @@ actor DaemonTimelineStore {
         }
         guard let entry = Self.normalizeForStorage(entry) else { return }
 
-        // Exact dedup: same ts + type + raw within 8s.
-        // Window matches shared/src/timeline.ts deduplicateEntry — covers the
-        // PTY-fallback / Stop-hook race that can leak two identical chat_response
-        // entries when Claude Code's transcript flush lags spinner_stop by a few
-        // seconds.
-        let recentWindow = entry.ts - 8000
-        if entries.last(where: { $0.ts > recentWindow && $0.type == entry.type && $0.raw == entry.raw }) != nil {
-            return
+        // Task hierarchy rows bypass exact dedup — they're keyed by taskId, not
+        // content, so two `task_milestone` rows carrying identical raw
+        // ("Todos done") from different tasks within the 8s window must not
+        // collapse. Mirrors the bypass in shared/src/timeline.ts deduplicateEntry.
+        if !Self.isTaskRow(entry) {
+            // Exact dedup: same ts + type + raw within 8s.
+            // Window matches shared/src/timeline.ts deduplicateEntry — covers the
+            // PTY-fallback / Stop-hook race that can leak two identical chat_response
+            // entries when Claude Code's transcript flush lags spinner_stop by a few
+            // seconds.
+            let recentWindow = entry.ts - 8000
+            if entries.last(where: { $0.ts > recentWindow && $0.type == entry.type && $0.raw == entry.raw }) != nil {
+                return
+            }
         }
 
         entries.append(entry)

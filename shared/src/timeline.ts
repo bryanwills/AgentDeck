@@ -512,8 +512,10 @@ export function deduplicateEntry(
   if (entry.detail) entry = { ...entry, detail: cleanNopMarkers(entry.detail) };
 
   // Task hierarchy entries bypass dedup — they're hierarchy markers keyed by
-  // taskId, not content. Two adjacent task_starts are legitimately distinct.
-  if (entry.type === 'task_start' || entry.type === 'task_end') {
+  // taskId, not content. Two adjacent task_starts are legitimately distinct,
+  // and two `task_milestone` rows carrying identical raw ("Todos done") but
+  // different taskIds within the 8s exact-dedup window must not collapse.
+  if (entry.type === 'task_start' || entry.type === 'task_end' || entry.type === 'task_milestone') {
     return { action: 'add', entry };
   }
 
