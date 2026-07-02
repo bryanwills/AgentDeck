@@ -36,6 +36,8 @@ export interface InstallOptions {
   /** Daemon HTTP port to bake into the OTel exporter endpoint. If
    *  omitted, the installer reads `~/.agentdeck/daemon.json`. */
   daemonHttpPort?: number;
+  /** Override platform for tests. Defaults to process.platform. */
+  platform?: NodeJS.Platform;
 }
 
 export interface InstallResult {
@@ -79,6 +81,7 @@ interface ManagedBlockOptions {
   includeOtel?: boolean;
   otelEndpoint?: string;
   daemonHttpPort?: number;
+  platform?: NodeJS.Platform;
 }
 
 /** Assemble the body of the AgentDeck-managed fence. Tests call this
@@ -87,6 +90,7 @@ interface ManagedBlockOptions {
 export function managedBlockBody(opts: ManagedBlockOptions = {}): string {
   const includeNotify = opts.includeNotify ?? true;
   const includeOtel = opts.includeOtel ?? true;
+  const platform = opts.platform ?? process.platform;
 
   const lines: string[] = [
     '# Codex lifecycle hooks. Command hooks receive JSON on stdin;',
@@ -96,14 +100,14 @@ export function managedBlockBody(opts: ManagedBlockOptions = {}): string {
   ];
 
   lines.push('');
-  lines.push(...buildLifecycleHookTables());
+  lines.push(...buildLifecycleHookTables(platform));
 
   if (includeNotify) {
     lines.push('');
     lines.push('# Optional turn-complete notification fallback.');
     lines.push('# Codex appends the JSON payload as the last argv entry,');
     lines.push('# so the 4th array element acts as $0 and payload lands at $1.');
-    lines.push(buildNotifyAssignment('codex_turn_complete'));
+    lines.push(buildNotifyAssignment('codex_turn_complete', platform));
   }
 
   if (includeOtel) {
@@ -126,7 +130,10 @@ export function managedBlockBody(opts: ManagedBlockOptions = {}): string {
  *       Without our 4th element, `sh -c "<snippet>" <json>` would assign
  *       `<json>` to `$0` and leave `$1` empty. With the dummy in place,
  *       `<json>` lands at `$1` as the snippet expects. */
-function buildNotifyAssignment(event: string): string {
+function buildNotifyAssignment(event: string, platform: NodeJS.Platform): string {
+  if (platform === 'win32') {
+    return `notify = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ${quoted(buildWindowsNotifySnippet(event))}, "agentdeck-notify"]`;
+  }
   return `notify = ["sh", "-c", ${quoted(buildNotifySnippet(event))}, "agentdeck-notify"]`;
 }
 
@@ -164,7 +171,7 @@ const LIFECYCLE_HOOKS: LifecycleHook[] = [
   { codexEvent: 'Stop',             agentDeckEvent: 'codex_stop',               matcher: null },
 ];
 
-function buildLifecycleHookTables(): string[] {
+function buildLifecycleHookTables(platform: NodeJS.Platform): string[] {
   const lines: string[] = [];
   for (let idx = 0; idx < LIFECYCLE_HOOKS.length; idx++) {
     const hook = LIFECYCLE_HOOKS[idx];
@@ -175,7 +182,7 @@ function buildLifecycleHookTables(): string[] {
     }
     lines.push(`[[hooks.${hook.codexEvent}.hooks]]`);
     lines.push(`type = "command"`);
-    lines.push(`command = ${quoted(buildLifecycleHookCommand(hook.agentDeckEvent))}`);
+    lines.push(`command = ${quoted(buildLifecycleHookCommand(hook.agentDeckEvent, platform))}`);
     lines.push(`timeout = 5`);
   }
   return lines;
@@ -184,7 +191,10 @@ function buildLifecycleHookTables(): string[] {
 /** Official Codex lifecycle hooks pass their JSON payload on stdin.
  *  Keep stdout quiet so Stop / UserPromptSubmit hooks do not accidentally
  *  feed the daemon's acknowledgement back into Codex as hook output. */
-function buildLifecycleHookCommand(event: string): string {
+function buildLifecycleHookCommand(event: string, platform: NodeJS.Platform): string {
+  if (platform === 'win32') {
+    return buildWindowsLifecycleHookCommand(event);
+  }
   return `sh -c ${shellSingleQuoted(buildStdinPostSnippet(event))}`;
 }
 
@@ -205,6 +215,46 @@ function buildStdinPostSnippet(event: string): string {
 
 function shellSingleQuoted(s: string): string {
   return `'${s.replace(/'/g, "'\"'\"'")}'`;
+}
+
+function buildWindowsLifecycleHookCommand(event: string): string {
+  return `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${windowsEncodedCommand(buildWindowsStdinPostSnippet(event))}`;
+}
+
+function buildWindowsStdinPostSnippet(event: string): string {
+  return buildWindowsPostSnippet(event, '[Console]::In.ReadToEnd()');
+}
+
+function buildWindowsNotifySnippet(event: string): string {
+  return buildWindowsPostSnippet(event, `$(if ($args.Count -gt 0) { $args[$args.Count - 1] } else { '' })`);
+}
+
+function buildWindowsPostSnippet(event: string, bodyExpression: string): string {
+  return [
+    `$ErrorActionPreference = 'SilentlyContinue'`,
+    `$ProgressPreference = 'SilentlyContinue'`,
+    `$port = $env:AGENTDECK_PORT`,
+    `if ([string]::IsNullOrWhiteSpace($port)) {`,
+    `  $daemonFile = Join-Path $env:USERPROFILE '.agentdeck\\daemon.json'`,
+    `  if (Test-Path -LiteralPath $daemonFile) {`,
+    `    try {`,
+    `      $daemon = Get-Content -LiteralPath $daemonFile -Raw | ConvertFrom-Json`,
+    `      $candidate = if ($daemon.httpPort) { $daemon.httpPort } else { $daemon.port }`,
+    `      if ($candidate) {`,
+    `        try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 -Uri ('http://127.0.0.1:' + $candidate + '/health') | Out-Null; $port = [string]$candidate } catch {}`,
+    `      }`,
+    `    } catch {}`,
+    `  }`,
+    `}`,
+    `if ([string]::IsNullOrWhiteSpace($port)) { $port = '9120' }`,
+    `$body = ${bodyExpression}`,
+    `try { Invoke-RestMethod -Method Post -TimeoutSec 1 -Uri ('http://127.0.0.1:' + $port + '/hooks/${event}') -ContentType 'application/json' -Body $body | Out-Null } catch {}`,
+    `exit 0`,
+  ].join('\n');
+}
+
+function windowsEncodedCommand(s: string): string {
+  return Buffer.from(s, 'utf16le').toString('base64');
 }
 
 // ─── File I/O ───────────────────────────────────────────────────────────
@@ -256,8 +306,9 @@ export function installCodexHooksIfNeeded(opts: InstallOptions = {}): InstallRes
     return { installed: false, reason: 'user-authored [hooks] present' };
   }
 
+  const platform = opts.platform ?? process.platform;
   const includeNotify = !hasTopLevelKeyOutsideFence(original, 'notify');
-  const includeOtel = !hasTableOutsideFence(original, 'otel');
+  const includeOtel = platform !== 'win32' && !hasTableOutsideFence(original, 'otel');
 
   const otelEndpoint = includeOtel ? buildOtelEndpoint(opts.daemonHttpPort) : undefined;
   const body = managedBlockBody({
@@ -265,6 +316,7 @@ export function installCodexHooksIfNeeded(opts: InstallOptions = {}): InstallRes
     includeOtel,
     otelEndpoint,
     daemonHttpPort: opts.daemonHttpPort,
+    platform,
   });
   const updated = applyManagedBlock(original, body);
 

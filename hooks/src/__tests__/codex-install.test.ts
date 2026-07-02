@@ -209,6 +209,7 @@ describe('codex-install: managedBlockBody', () => {
       includeNotify: true,
       includeOtel: true,
       otelEndpoint: 'http://127.0.0.1:9120/otel/v1/traces',
+      platform: 'linux',
     });
     const withFence = applyManagedBlock(original, body);
     const stripped = removeManagedBlock(withFence);
@@ -220,6 +221,7 @@ describe('codex-install: managedBlockBody', () => {
       includeNotify: true,
       includeOtel: true,
       otelEndpoint: 'http://127.0.0.1:9120/otel/v1/traces',
+      platform: 'linux',
     });
     const withFence = applyManagedBlock('', body);
     expect(withFence).toContain('[features]');
@@ -239,6 +241,36 @@ describe('codex-install: managedBlockBody', () => {
     expect(withFence).toContain('protocol = "json"');
     // Dummy 4th element so the JSON payload Codex appends lands at $1.
     expect(withFence).toContain('"agentdeck-notify"');
+  });
+
+  it('uses PowerShell command hooks on Windows', () => {
+    const body = managedBlockBody({
+      includeNotify: true,
+      includeOtel: true,
+      otelEndpoint: 'http://127.0.0.1:9120/otel/v1/traces',
+      platform: 'win32',
+    });
+    const withFence = applyManagedBlock('', body);
+    expect(withFence).toContain('command = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ');
+    expect(withFence).toContain('notify = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"');
+
+    const decodedLifecycleCommands = [...withFence.matchAll(/-EncodedCommand ([A-Za-z0-9+/=]+)"/g)]
+      .map((match) => Buffer.from(match[1], 'base64').toString('utf16le'));
+    expect(decodedLifecycleCommands).toHaveLength(5);
+    const decoded = decodedLifecycleCommands.join('\n');
+    expect(decoded).toContain('/hooks/codex_user_prompt_submit');
+    expect(decoded).toContain('/hooks/codex_tool_start');
+    expect(decoded).toContain('/hooks/codex_tool_end');
+    expect(decoded).toContain('/hooks/codex_stop');
+    expect(decoded).toContain("$ProgressPreference = 'SilentlyContinue'");
+    expect(decoded).toContain('exit 0');
+
+    for (const line of withFence.split('\n').filter((value) => value.startsWith('command = '))) {
+      expect(line).not.toContain('$ErrorActionPreference');
+      expect(line).not.toContain('$port');
+    }
+    expect(withFence).not.toContain('command = "sh -c');
+    expect(withFence).not.toContain('notify = ["sh"');
   });
 
   it('omits conflicting optional channels when asked', () => {
@@ -272,7 +304,7 @@ describe('codex-install: install / uninstall (file I/O)', () => {
   });
 
   it('creates config with fence when file is absent', () => {
-    const result = installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    const result = installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, platform: 'linux' });
     expect(result.installed).toBe(true);
     const text = readFileSync(configPath, 'utf-8');
     expect(text).toContain(OPEN_FENCE);
@@ -326,6 +358,15 @@ describe('codex-install: install / uninstall (file I/O)', () => {
     const managed = text.split(OPEN_FENCE)[1].split(CLOSE_FENCE)[0];
     expect(managed).not.toContain('[otel.trace_exporter.otlp-http]');
     expect(managed).toContain('hooks = true');
+  });
+
+  it('omits OTel by default on Windows installs', () => {
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, platform: 'win32' });
+    const text = readFileSync(configPath, 'utf-8');
+    const managed = text.split(OPEN_FENCE)[1].split(CLOSE_FENCE)[0];
+    expect(managed).toContain('hooks = true');
+    expect(managed).toContain('powershell.exe');
+    expect(managed).not.toContain('[otel.trace_exporter.otlp-http]');
   });
 
   it('uninstall strips fence and preserves user content', () => {
