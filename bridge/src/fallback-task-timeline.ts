@@ -75,6 +75,11 @@ export class FallbackTaskTimeline {
   }
 
   private close(sessionId: string, boundarySignal: 'clear' | 'session_end'): void {
+    // `/clear` keeps the per-session counter so the next task numbers as
+    // "Task N+1"; session_end ends the session for good, so drop the counter
+    // too — otherwise `counts` grows unbounded across every session the daemon
+    // ever sees (session ids are unique, so numbering is never reused).
+    if (boundarySignal === 'session_end') this.counts.delete(sessionId);
     const task = this.active.get(sessionId);
     if (!task) return;
     this.active.delete(sessionId);

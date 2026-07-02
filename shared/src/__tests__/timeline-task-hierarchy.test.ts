@@ -48,6 +48,22 @@ describe('deduplicateEntry — task hierarchy', () => {
     expect(result.action).toBe('add');
   });
 
+  it('always adds task_milestone even with identical raw within 8s', () => {
+    // Two tasks can both declare "Todos done" (no count) seconds apart; the
+    // milestone rows are keyed by taskId, not content, so neither may collapse.
+    const existing: TimelineEntry[] = [
+      baseEntry({ type: 'task_milestone', raw: 'Todos done', taskId: 'task-a' }),
+    ];
+    const next = baseEntry({
+      ts: 1_003_000,
+      type: 'task_milestone',
+      raw: 'Todos done',
+      taskId: 'task-b',
+    });
+    const result = deduplicateEntry(next, existing);
+    expect(result.action).toBe('add');
+  });
+
   it('still dedupes ordinary chat_start within 8s', () => {
     const existing: TimelineEntry[] = [
       { ts: 1_000_000, type: 'chat_start', raw: 'hello' },

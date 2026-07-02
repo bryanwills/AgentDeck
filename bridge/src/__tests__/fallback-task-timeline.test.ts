@@ -52,4 +52,24 @@ describe('FallbackTaskTimeline', () => {
     expect(rows.filter((r) => r.type === 'task_end')).toHaveLength(1);
     expect(rows.find((r) => r.type === 'task_end')?.sessionId).toBe('a');
   });
+
+  it('drops the per-session counter on session_end so counts cannot grow unbounded', () => {
+    const rows: TimelineEntry[] = [];
+    const fallback = new FallbackTaskTimeline((e) => rows.push(e));
+    const counts = (fallback as unknown as { counts: Map<string, number> }).counts;
+
+    // /clear keeps the counter → next task numbers up within the session.
+    fallback.ingestHook('s1', 'UserPromptSubmit', { prompt: 'a' });
+    fallback.ingestHook('s1', 'UserPromptSubmit', { prompt: '/clear' });
+    fallback.ingestHook('s1', 'UserPromptSubmit', { prompt: 'b' });
+    expect(counts.get('s1')).toBe(2);
+
+    // session_end evicts the counter entirely.
+    fallback.ingestHook('s1', 'SessionEnd', {});
+    expect(counts.has('s1')).toBe(false);
+
+    // A brand-new session after session_end restarts at Task 1.
+    fallback.ingestHook('s2', 'UserPromptSubmit', { prompt: 'c' });
+    expect(rows.filter((r) => r.type === 'task_start').at(-1)?.raw).toBe('Task 1');
+  });
 });
