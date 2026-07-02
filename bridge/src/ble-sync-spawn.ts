@@ -76,6 +76,106 @@ export function spawnPythonSync(
   };
 }
 
+/** Emit a repeated-cycle summary at most this often while suppressing. */
+const SQUELCH_SUMMARY_INTERVAL_MS = 60 * 60_000;
+/** A run this long means the previous respawn loop ended; the next exit logs fresh. */
+const SQUELCH_RESET_UPTIME_MS = 5 * 60_000;
+
+/**
+ * Collapse variable parts so consecutive exits from the same failure loop
+ * compare equal: timestamps/addresses/hashes are masked, and the ` | `-joined
+ * output tail is reduced to its set of distinct lines — the ring buffer
+ * captures 1 or 2 copies of the same retry error depending on timing, which
+ * must not read as a different cycle.
+ */
+function cycleSignature(code: number | null, signal: NodeJS.Signals | null, tail: string): string {
+  const masked = tail.replace(/[0-9A-Fa-f]{4,}/g, '#').replace(/\d+/g, '#');
+  const segments = [...new Set(masked.split(' | ').map((s) => s.trim()))].sort();
+  return `${code}|${signal}|${segments.join(' | ')}`;
+}
+
+export interface SyncCycleSquelch {
+  /** Log a spawn line, unless we're inside a suppressed repeating cycle. */
+  logStart(line: string): void;
+  /**
+   * Log an exit line, or absorb it into the repeating-cycle summary.
+   * `tail` is the captured child output alone (no prefix/backoff suffix) —
+   * it is what identifies the cycle.
+   */
+  logExit(code: number | null, signal: NodeJS.Signals | null, uptimeMs: number, tail: string, line: string): void;
+}
+
+/**
+ * Log gate for the respawn loop of a managed BLE sync child.
+ *
+ * A powered-off or out-of-range panel makes the sync child exit the same way
+ * every backoff period, all night — thousands of identical start/exit pairs in
+ * the daemon log. The gate logs the first two occurrences of an exit cycle in
+ * full, then suppresses identical repeats (including their respawn start
+ * lines), emitting an hourly count summary instead. Any *different* exit —
+ * new error text, non-zero code, a crash after a long healthy run — flushes
+ * the summary and logs immediately, so novel failures are never hidden.
+ */
+export function createSyncCycleSquelch(log: (msg: string) => void): SyncCycleSquelch {
+  let lastSignature: string | null = null;
+  let repeats = 0; // suppressed repeats of lastSignature (beyond the logged first occurrence)
+  let suppressedSinceSummary = 0;
+  let suppressedSince = 0;
+  let lastSummaryAt = 0;
+  let lastLine = '';
+
+  const flush = (): void => {
+    if (suppressedSinceSummary > 0) {
+      log(
+        `suppressed ${suppressedSinceSummary} repeats of the same sync cycle since ` +
+          `${new Date(suppressedSince).toISOString()}; latest: ${lastLine}`,
+      );
+    }
+    lastSignature = null;
+    repeats = 0;
+    suppressedSinceSummary = 0;
+  };
+
+  return {
+    logStart(line: string): void {
+      if (repeats > 0) return; // inside a suppressed repeating cycle
+      log(line);
+    },
+    logExit(code, signal, uptimeMs, tail, line): void {
+      // A long healthy run means the old loop ended; whatever exits next is a
+      // fresh incident even if the text matches the old one.
+      if (uptimeMs >= SQUELCH_RESET_UPTIME_MS) flush();
+      const signature = cycleSignature(code, signal, tail);
+      if (signature !== lastSignature) {
+        flush();
+        lastSignature = signature;
+        log(line);
+        return;
+      }
+      repeats += 1;
+      suppressedSinceSummary += 1;
+      lastLine = line;
+      const now = Date.now();
+      if (repeats === 1) {
+        // Second identical cycle: log it once more, then go quiet.
+        suppressedSinceSummary = 0;
+        suppressedSince = now;
+        lastSummaryAt = now;
+        log(`${line} — repeating cycle; suppressing identical start/exit logs (hourly summary, a different exit logs immediately)`);
+        return;
+      }
+      if (now - lastSummaryAt >= SQUELCH_SUMMARY_INTERVAL_MS) {
+        log(
+          `suppressed ${suppressedSinceSummary} repeats of the same sync cycle in the last ` +
+            `${Math.round((now - lastSummaryAt) / 60_000)}m; latest: ${lastLine}`,
+        );
+        lastSummaryAt = now;
+        suppressedSinceSummary = 0;
+      }
+    },
+  };
+}
+
 /**
  * SIGTERM a managed sync child and wait (bounded) for it to exit, so the child's
  * OFFLINE / blank farewell frame finishes painting before the daemon process

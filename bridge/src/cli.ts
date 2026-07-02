@@ -298,7 +298,7 @@ daemon
 
     // Background fork unless --foreground
     if (!opts.foreground) {
-      const { openSync } = await import('fs');
+      const { openSync, statSync, renameSync } = await import('fs');
       const logDir = join(homedir(), '.agentdeck');
       const scriptPath = fileURLToPath(import.meta.url);
       const args = [scriptPath, 'daemon', 'start', '--foreground'];
@@ -307,8 +307,20 @@ daemon
       if (opts.wakeWord) args.push('--wake-word');
 
       // Use log files instead of 'ignore' — preserves device access (mic, etc.)
-      const out = openSync(join(logDir, 'daemon-stdout.log'), 'w');
-      const err = openSync(join(logDir, 'daemon-stderr.log'), 'w');
+      // Append (never truncate) so multi-day history survives restarts —
+      // overnight device incidents can only be correlated against logs that
+      // are still there in the morning. Rotate once past 5MB instead.
+      const openDaemonLog = (name: string): number => {
+        const path = join(logDir, name);
+        try {
+          if (statSync(path).size > 5 * 1024 * 1024) renameSync(path, `${path}.1`);
+        } catch {
+          /* first run — no log yet */
+        }
+        return openSync(path, 'a');
+      };
+      const out = openDaemonLog('daemon-stdout.log');
+      const err = openDaemonLog('daemon-stderr.log');
 
       const child = spawn(process.execPath, args, {
         detached: true,
