@@ -234,9 +234,16 @@ actor HTTPServer {
     /// Route a request to matching handler (used by WebSocketServer for HTTP delegation).
     /// Supports both exact match and prefix match (paths ending with "*").
     func route(_ request: HTTPRequest) async -> HTTPResponse {
+        // Trailing-slash insensitive: TRMNL stock firmware requests `/api/setup/`
+        // (bl.cpp getDeviceCredentials builds `{base}/api/setup/`); an exact-only
+        // match 404s enrollment forever and the panel retries setup every wake.
+        var normalizedPath = request.path
+        while normalizedPath.count > 1 && normalizedPath.hasSuffix("/") {
+            normalizedPath.removeLast()
+        }
         // Exact match first
         for route in routes {
-            if route.method == request.method && route.path == request.path {
+            if route.method == request.method && (route.path == request.path || route.path == normalizedPath) {
                 return await route.handler(request)
             }
         }

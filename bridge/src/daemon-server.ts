@@ -622,15 +622,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       return;
     }
     // --- TRMNL BYOS (e-ink panel pulls rendered dashboard over WiFi) ---
-    if (req.method === 'GET' && pathname === '/api/setup') {
+    // Stock firmware requests `/api/setup/` WITH a trailing slash
+    // (bl.cpp getDeviceCredentials builds `{base}/api/setup/`), so match these
+    // routes slash-insensitively — an exact match 404s enrollment forever and
+    // the panel retries setup on every wake.
+    const trmnlPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+    if (req.method === 'GET' && trmnlPath === '/api/setup') {
       handleTrmnlSetup(req, res);
       return;
     }
-    if (req.method === 'GET' && pathname === '/api/display') {
+    if (req.method === 'GET' && trmnlPath === '/api/display') {
       handleTrmnlDisplay(req, res);
       return;
     }
-    if (req.method === 'POST' && pathname === '/api/log') {
+    if (req.method === 'POST' && trmnlPath === '/api/log') {
       handleTrmnlLog(req, res);
       return;
     }
