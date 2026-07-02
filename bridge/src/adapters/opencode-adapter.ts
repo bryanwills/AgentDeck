@@ -20,7 +20,12 @@ import { OPENCODE_CAPABILITIES } from '../types.js';
 import { PtyAdapter } from './pty-adapter.js';
 import { randomUUID } from 'crypto';
 import { getApme } from '../apme/index.js';
-import { opencodePartToSpans, opencodeMessageToSpans } from '../apme/adapters/opencode-hook.js';
+import {
+  opencodePartToSpans,
+  opencodeMessageToSpans,
+  opencodeIdleGapTaskBoundary,
+  OPENCODE_IDLE_GAP_MS,
+} from '../apme/adapters/opencode-hook.js';
 
 const log = (...args: unknown[]) => debug('adapter:opencode', ...args);
 
@@ -55,6 +60,11 @@ export class OpenCodeAdapter extends PtyAdapter {
   /** Last seen user prompt — buffered so the assistant's response can be
    *  attached to the matching turn_start span. */
   private lastUserPrompt: string | undefined;
+  /** Idle-gap timer — fires the `task_boundary` (idle_gap) span when no new
+   *  work follows `session.idle` for OPENCODE_IDLE_GAP_MS. Mirrors the
+   *  OpenClaw adapter; without it OpenCode tasks close only on session_end
+   *  (one task per session, defeating per-task evaluation). */
+  private apmeIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
   protected getDefaultCommand(): string {
     return 'opencode';
@@ -137,6 +147,29 @@ export class OpenCodeAdapter extends PtyAdapter {
     }
   }
 
+  /** Reset (or start) the idle-gap timer after a turn completes. */
+  private armIdleGapTimer(): void {
+    this.clearIdleGapTimer();
+    const ctx = this.buildApmeCtx();
+    if (!ctx) return;
+    this.apmeIdleTimer = setTimeout(() => {
+      this.apmeIdleTimer = null;
+      const apme = getApme();
+      if (!apme || !this.apmeSessionId) return;
+      try { apme.collector.ingestSpan(this.apmeSessionId, opencodeIdleGapTaskBoundary(ctx)); }
+      catch (err) { debug('apme:opencode', `idle_gap ingestSpan failed: ${String(err)}`); }
+    }, OPENCODE_IDLE_GAP_MS);
+    // Don't keep the event loop alive just for this timer.
+    this.apmeIdleTimer.unref?.();
+  }
+
+  private clearIdleGapTimer(): void {
+    if (this.apmeIdleTimer) {
+      clearTimeout(this.apmeIdleTimer);
+      this.apmeIdleTimer = null;
+    }
+  }
+
   protected override handleAgentCommand(cmd: PluginCommand): boolean {
     switch (cmd.type) {
       case 'interrupt': {
@@ -158,6 +191,7 @@ export class OpenCodeAdapter extends PtyAdapter {
   }
 
   override async shutdown(): Promise<void> {
+    this.clearIdleGapTimer();
     this.client?.disconnect();
     this.client = null;
     await super.shutdown();
@@ -287,6 +321,8 @@ export class OpenCodeAdapter extends PtyAdapter {
    * the latch so the next turn re-arms.
    */
   private beginChatIfNeeded(): void {
+    // New work arrived — the session is not idle; don't split the task.
+    this.clearIdleGapTimer();
     if (this.chatStarted) return;
     this.chatStarted = true;
     this.chatStartTime = Date.now();
@@ -306,6 +342,9 @@ export class OpenCodeAdapter extends PtyAdapter {
 
     this.finishChat();
     this.emitAdapterEvent({ source: 'parser', event: 'idle' });
+    // Turn complete — arm the idle-gap task boundary (cancelled by the next
+    // work signal via beginChatIfNeeded).
+    this.armIdleGapTimer();
   }
 
   private handleSessionCreated(props: Record<string, unknown>): void {

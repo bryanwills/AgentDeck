@@ -64,6 +64,15 @@ struct DaemonTimelineEntry: Codable, Sendable {
 actor DaemonTimelineStore {
     private var entries: [DaemonTimelineEntry] = []
     private let maxEntries = 200
+    /// Separate retention cap for task hierarchy rows — mirrors
+    /// `BridgeTimelineStore.MAX_TASK_ENTRIES`. Task rows are exempt from the
+    /// generic FIFO so a long task's `task_start` doesn't scroll away while
+    /// its turns stream in (which would leave the `task_end` unpaired).
+    private let maxTaskEntries = 60
+
+    static func isTaskRow(_ e: DaemonTimelineEntry) -> Bool {
+        e.type == "task_start" || e.type == "task_end" || e.type == "task_milestone"
+    }
     private let persistFile: URL
     private var dirty = false
     private var persistenceStarted = false
@@ -114,11 +123,37 @@ actor DaemonTimelineStore {
         }
 
         entries.append(entry)
-        if entries.count > maxEntries {
-            entries.removeFirst(entries.count - maxEntries)
+        while entries.count > maxEntries {
+            evictOne()
         }
         dirty = true
         flush()
+    }
+
+    /// Evict a single entry to enforce `maxEntries`, protecting task rows —
+    /// mirrors `BridgeTimelineStore.evictOne`. Task rows only leave under
+    /// their own cap, and an in-flight task's `task_start` (no matching
+    /// `task_end` yet) is never evicted.
+    private func evictOne() {
+        let taskRowCount = entries.lazy.filter { Self.isTaskRow($0) }.count
+        if taskRowCount > maxTaskEntries {
+            let closed = Set(entries.compactMap { $0.type == "task_end" ? $0.taskId : nil })
+            if let idx = entries.firstIndex(where: { e in
+                guard Self.isTaskRow(e) else { return false }
+                if e.type == "task_start", let id = e.taskId, !closed.contains(id) { return false }
+                return true
+            }) {
+                entries.remove(at: idx)
+                return
+            }
+        }
+        if let idx = entries.firstIndex(where: { !Self.isTaskRow($0) }) {
+            entries.remove(at: idx)
+            return
+        }
+        // Pathological: buffer is 100% in-flight task rows — plain FIFO so the
+        // buffer stays bounded.
+        entries.removeFirst()
     }
 
     func upsert(_ entry: DaemonTimelineEntry) {
@@ -159,7 +194,12 @@ actor DaemonTimelineStore {
         let matched = entries.filter {
             ($0.sessionId == sessionId || $0.sessionId == raw) && (since == nil || $0.ts > since!)
         }
-        return Array(matched.suffix(limit))
+        // `limit` applies to the chat/tool stream; task hierarchy rows ride
+        // along in full so a task_start older than the last `limit` rows
+        // doesn't vanish and leave the Detail view an unpaired task_end.
+        let taskRows = matched.filter { Self.isTaskRow($0) }
+        let rest = matched.filter { !Self.isTaskRow($0) }.suffix(limit)
+        return (taskRows + rest).sorted { $0.ts < $1.ts }
     }
 
     /// Returns the last timeline entry matching the given type, or nil if none found.
@@ -189,7 +229,12 @@ actor DaemonTimelineStore {
         guard semaphore.wait(timeout: .now() + .milliseconds(700)) == .success,
               let data = box.get(),
               let loaded = try? JSONDecoder().decode([DaemonTimelineEntry].self, from: data) else { return }
-        entries = Array(loaded.compactMap { Self.normalizeForStorage($0) }.suffix(maxEntries))
+        let normalized = loaded.compactMap { Self.normalizeForStorage($0) }
+        // Task-protected trim (mirrors BridgeTimelineStore.loadPersistedEntries):
+        // task rows keep their own deeper retention on reload.
+        let taskRows = normalized.filter { Self.isTaskRow($0) }.suffix(maxTaskEntries)
+        let rest = normalized.filter { !Self.isTaskRow($0) }.suffix(maxEntries - taskRows.count)
+        entries = (taskRows + rest).sorted { $0.ts < $1.ts }
     }
 
     // Exposed (default internal) so test targets can drive the predicate

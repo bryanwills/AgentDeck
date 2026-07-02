@@ -8,6 +8,7 @@
 import { BridgeCore } from './bridge-core.js';
 import { buildDisplayStateEvent } from './display-dim.js';
 import { initApme, isTimelineProjectionEnabled } from './apme/index.js';
+import { FallbackTaskTimeline } from './fallback-task-timeline.js';
 import { readLastTurn as readClaudeTranscriptLastTurn } from './apme/claude-transcript-reader.js';
 import { claudeHookToSpans } from './apme/adapters/claude-hook.js';
 import { codexHookToSpans } from './apme/adapters/codex-hook.js';
@@ -254,6 +255,15 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     // activity log only). Scores are stored in apme.sqlite and surfaced via the
     // scorecard / `apme_eval` WS event, keeping the timeline noise-free.
   }
+  // APME down (better-sqlite3 failed to load): keep the timeline's task
+  // hierarchy alive by minting fallback task_start/task_end rows from the
+  // hook boundary signals. No storage, no eval — structure only.
+  const fallbackTasks = apme
+    ? null
+    : new FallbackTaskTimeline(
+        (entry) => core.bridgeTimeline.addEntry(entry),
+        { agentType },
+      );
 
   // ===== Session-specific components =====
   const voiceManager = new VoiceManager();
@@ -524,6 +534,8 @@ export async function startSession(opts: SessionOptions): Promise<void> {
           }
         }
         if (evt.event === 'Stop') pendingPtyResponse = null; // Stop has cleaner response
+        // APME-off fallback: task rows from boundary hooks alone.
+        if (fallbackTasks) fallbackTasks.ingestHook(core.sessionId, evt.event, evt.data ?? {});
         if (evt.event === 'shutdown') {
           shutdown();
           return;

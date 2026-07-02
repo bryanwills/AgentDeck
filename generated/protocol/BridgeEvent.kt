@@ -388,6 +388,12 @@ data class ApmeRecommendation (
  */
 data class CodexRateLimits (
     /**
+     * ISO-8601 mtime of the rollout file this snapshot was read from. A secondary freshness
+     * anchor — the per-window `stale` flag is the authoritative signal.
+     */
+    val capturedAt: String? = null,
+
+    /**
      * Credit balance for credit-based plans (present when windows are null).
      */
     val credits: CodexCredits? = null,
@@ -441,6 +447,15 @@ data class CodexRateLimitWindow (
      * ISO-8601 reset instant (converted from the rollout's unix `resets_at`).
      */
     val resetsAt: String? = null,
+
+    /**
+     * True when this window's snapshot has expired (its `resets_at` slid into the past with no
+     * fresher Codex activity). The passive rollout read is frozen, so the percent is
+     * last-known-only — renderers should dim the gauge and show a "stale" marker instead of a
+     * misleading "now" countdown. Set centrally in `buildUsageEvent`; `resetsAt` is cleared at
+     * the same time so no formatter prints "now".
+     */
+    val stale: Boolean? = null,
 
     val usedPercent: Double,
 
@@ -672,6 +687,7 @@ enum class TimelineEntryType(val value: String) {
     ModelResponse("model_response"),
     Scheduled("scheduled"),
     TaskEnd("task_end"),
+    TaskMilestone("task_milestone"),
     TaskStart("task_start"),
     ToolExec("tool_exec"),
     ToolRequest("tool_request"),
@@ -690,6 +706,7 @@ enum class TimelineEntryType(val value: String) {
             "model_response" -> ModelResponse
             "scheduled"      -> Scheduled
             "task_end"       -> TaskEnd
+            "task_milestone" -> TaskMilestone
             "task_start"     -> TaskStart
             "tool_exec"      -> ToolExec
             "tool_request"   -> ToolRequest

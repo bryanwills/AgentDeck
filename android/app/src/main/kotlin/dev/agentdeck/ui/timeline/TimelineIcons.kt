@@ -65,6 +65,7 @@ enum class TimelineIconKey {
  */
 fun timelineIconKey(type: String, status: String? = null): TimelineIconKey = when (type) {
     "task_start", "task_end" -> TimelineIconKey.Task
+    "task_milestone" -> TimelineIconKey.Success
     "chat_start" -> TimelineIconKey.Running
     "chat_end", "chat_response", "model_response" -> TimelineIconKey.Success
     "model_call" -> TimelineIconKey.Model
@@ -84,7 +85,8 @@ fun timelineIconKey(type: String, status: String? = null): TimelineIconKey = whe
 }
 
 /** Whether this entry type carries detail-pane body content (not a hierarchy marker). */
-fun entryHasDetailBody(type: String): Boolean = type != "task_start" && type != "task_end"
+fun entryHasDetailBody(type: String): Boolean =
+    type != "task_start" && type != "task_end" && type != "task_milestone"
 
 /**
  * True when [entry] is a `task_start` whose matching `task_end` (same

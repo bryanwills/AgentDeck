@@ -16,6 +16,15 @@ type EntryListener = (entry: TimelineEntry, upsert?: boolean) => void;
 type EntryAttributor = (entry: TimelineEntry) => TimelineEntry;
 
 const MAX_ENTRIES = 200;
+/** Separate retention cap for task hierarchy rows (task_start/task_end/
+ *  task_milestone). Task rows are exempt from the generic FIFO shift —
+ *  a long task's `task_start` must not scroll away while its turns stream
+ *  in, or the eventual `task_end` renders as an unpaired orphan. ~30 pairs. */
+const MAX_TASK_ENTRIES = 60;
+
+function isTaskRow(e: Pick<TimelineEntry, 'type'>): boolean {
+  return e.type === 'task_start' || e.type === 'task_end' || e.type === 'task_milestone';
+}
 
 /** Chat/tool entry types that, in projection mode, come from the SessionSample
  *  projection instead of the adapters' direct emitters. Locally-emitted entries
@@ -102,9 +111,40 @@ export class BridgeTimelineStore {
     // history replay carry attribution from the time of creation.
     this.entries.push(result.entry);
     if (this.entries.length > MAX_ENTRIES) {
-      this.entries.shift();
+      this.evictOne();
     }
     for (const cb of this.listeners) cb(result.entry);
+  }
+
+  /** Evict a single entry to enforce MAX_ENTRIES, protecting task rows.
+   *
+   *  Task rows only leave under their own cap (MAX_TASK_ENTRIES), and an
+   *  in-flight task's `task_start` (no matching `task_end` yet) is never
+   *  evicted — otherwise a long task's start scrolls away mid-task and the
+   *  pair splits. Everything else FIFOs as before. */
+  private evictOne(): void {
+    const taskRowCount = this.entries.reduce((n, e) => n + (isTaskRow(e) ? 1 : 0), 0);
+    if (taskRowCount > MAX_TASK_ENTRIES) {
+      const closed = new Set<string>();
+      for (const e of this.entries) {
+        if (e.type === 'task_end' && e.taskId) closed.add(e.taskId);
+      }
+      const idx = this.entries.findIndex(
+        (e) => isTaskRow(e) && !(e.type === 'task_start' && e.taskId && !closed.has(e.taskId)),
+      );
+      if (idx >= 0) {
+        this.entries.splice(idx, 1);
+        return;
+      }
+    }
+    const idx = this.entries.findIndex((e) => !isTaskRow(e));
+    if (idx >= 0) {
+      this.entries.splice(idx, 1);
+      return;
+    }
+    // Pathological: buffer is 100% task rows — fall back to plain FIFO so the
+    // buffer stays bounded.
+    this.entries.shift();
   }
 
   getHistory(since?: number): TimelineEntry[] {
@@ -151,9 +191,13 @@ export class BridgeTimelineStore {
     for (const entry of [...this.entries, ...normalized].sort((a, b) => a.ts - b.ts)) {
       byKey.set(`${entry.ts}:${entry.type}:${entry.raw}`, entry);
     }
-    this.entries = Array.from(byKey.values())
-      .sort((a, b) => a.ts - b.ts)
-      .slice(-MAX_ENTRIES);
+    const merged = Array.from(byKey.values()).sort((a, b) => a.ts - b.ts);
+    // Trim with the same task-row protection as live eviction: task rows keep
+    // their own (deeper) retention so start/end pairs survive a reload even
+    // when chat/tool rows overflowed the generic cap.
+    const taskRows = merged.filter(isTaskRow).slice(-MAX_TASK_ENTRIES);
+    const rest = merged.filter((e) => !isTaskRow(e)).slice(-(MAX_ENTRIES - taskRows.length));
+    this.entries = [...taskRows, ...rest].sort((a, b) => a.ts - b.ts);
   }
 
   /** Node mirror of the Swift daemon's orphan reaper
@@ -205,9 +249,14 @@ export class BridgeTimelineStore {
     const matched = this.entries.filter(
       (e) => (e.sessionId === sessionId || e.sessionId === raw) && (since == null || e.ts > since),
     );
-    return matched
-      .sort((a, b) => a.ts - b.ts)
-      .slice(-limit);
+    matched.sort((a, b) => a.ts - b.ts);
+    // `limit` applies to the chat/tool stream; task hierarchy rows ride along
+    // in full so a long task's start/end pair never splits at the per-session
+    // window (a task_start older than the last `limit` rows used to vanish,
+    // leaving the Detail view an unpaired task_end).
+    const taskRows = matched.filter(isTaskRow);
+    const rest = matched.filter((e) => !isTaskRow(e)).slice(-limit);
+    return [...taskRows, ...rest].sort((a, b) => a.ts - b.ts);
   }
 
   updateEntryStatus(approvalId: string, status: 'approved' | 'denied'): void {

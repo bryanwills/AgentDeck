@@ -781,6 +781,9 @@ extension ADApmeRecommendation {
 /// `limitId` instead.
 // MARK: - ADCodexRateLimits
 struct ADCodexRateLimits: Codable, Equatable {
+    /// ISO-8601 mtime of the rollout file this snapshot was read from. A secondary freshness
+    /// anchor — the per-window `stale` flag is the authoritative signal.
+    var capturedAt: String?
     /// Credit balance for credit-based plans (present when windows are null).
     var credits: ADCodexCredits?
     /// Limit identifier reported by Codex (e.g. "premium" for credit-based plans).
@@ -791,6 +794,7 @@ struct ADCodexRateLimits: Codable, Equatable {
     var secondary: ADCodexRateLimitWindow?
 
     enum CodingKeys: String, CodingKey {
+        case capturedAt = "capturedAt"
         case credits = "credits"
         case limitId = "limitId"
         case planType = "planType"
@@ -818,6 +822,7 @@ extension ADCodexRateLimits {
     }
 
     func with(
+        capturedAt: String?? = nil,
         credits: ADCodexCredits?? = nil,
         limitId: String?? = nil,
         planType: String?? = nil,
@@ -825,6 +830,7 @@ extension ADCodexRateLimits {
         secondary: ADCodexRateLimitWindow?? = nil
     ) -> ADCodexRateLimits {
         return ADCodexRateLimits(
+            capturedAt: capturedAt ?? self.capturedAt,
             credits: credits ?? self.credits,
             limitId: limitId ?? self.limitId,
             planType: planType ?? self.planType,
@@ -921,12 +927,19 @@ extension ADCodexCredits {
 struct ADCodexRateLimitWindow: Codable, Equatable {
     /// ISO-8601 reset instant (converted from the rollout's unix `resets_at`).
     var resetsAt: String?
+    /// True when this window's snapshot has expired (its `resets_at` slid into the past with no
+    /// fresher Codex activity). The passive rollout read is frozen, so the percent is
+    /// last-known-only — renderers should dim the gauge and show a "stale" marker instead of a
+    /// misleading "now" countdown. Set centrally in `buildUsageEvent`; `resetsAt` is cleared at
+    /// the same time so no formatter prints "now".
+    var stale: Bool?
     var usedPercent: Double
     /// Rolling window length in minutes (primary ≈ 300 = 5h, secondary ≈ 10080 = 7d).
     var windowMinutes: Double
 
     enum CodingKeys: String, CodingKey {
         case resetsAt = "resetsAt"
+        case stale = "stale"
         case usedPercent = "usedPercent"
         case windowMinutes = "windowMinutes"
     }
@@ -952,11 +965,13 @@ extension ADCodexRateLimitWindow {
 
     func with(
         resetsAt: String?? = nil,
+        stale: Bool?? = nil,
         usedPercent: Double? = nil,
         windowMinutes: Double? = nil
     ) -> ADCodexRateLimitWindow {
         return ADCodexRateLimitWindow(
             resetsAt: resetsAt ?? self.resetsAt,
+            stale: stale ?? self.stale,
             usedPercent: usedPercent ?? self.usedPercent,
             windowMinutes: windowMinutes ?? self.windowMinutes
         )
@@ -1344,6 +1359,7 @@ enum ADTimelineEntryType: String, Codable, Equatable {
     case modelResponse = "model_response"
     case scheduled = "scheduled"
     case taskEnd = "task_end"
+    case taskMilestone = "task_milestone"
     case taskStart = "task_start"
     case toolExec = "tool_exec"
     case toolRequest = "tool_request"

@@ -24,6 +24,9 @@ enum TimelineEntryType: Codable, Sendable, Equatable, Hashable {
     case evalResult
     case taskStart
     case taskEnd
+    /// Mid-task completion milestone (TodoWrite-all-completed soft hint) —
+    /// non-segmenting; surfaces WHERE work completed inside a long task.
+    case taskMilestone
     case unknown(String)
 
     var rawValue: String {
@@ -43,6 +46,7 @@ enum TimelineEntryType: Codable, Sendable, Equatable, Hashable {
         case .evalResult: return "eval_result"
         case .taskStart: return "task_start"
         case .taskEnd: return "task_end"
+        case .taskMilestone: return "task_milestone"
         case .unknown(let raw): return raw
         }
     }
@@ -75,6 +79,7 @@ enum TimelineEntryType: Codable, Sendable, Equatable, Hashable {
         case "eval_result": self = .evalResult
         case "task_start": self = .taskStart
         case "task_end": self = .taskEnd
+        case "task_milestone": self = .taskMilestone
         default: self = .unknown(raw)
         }
     }
