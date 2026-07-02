@@ -35,6 +35,8 @@ export function timelineIconKey(entry: Pick<TimelineEntry, 'type' | 'status'>): 
     case 'task_start':
     case 'task_end':
       return 'task';
+    case 'task_milestone':
+      return 'success';
     case 'chat_start':
       return 'running';
     case 'chat_end':
@@ -126,9 +128,9 @@ export const EINK_ICON_GLYPHS: Record<TimelineIconKey, string> = {
 
 /**
  * Whether a timeline entry type carries a content body worth showing in the
- * detail pane. task_start/task_end are hierarchy markers — their `raw` is the
- * task summary, no extra detail expected.
+ * detail pane. task_start/task_end/task_milestone are hierarchy markers —
+ * their `raw` is the summary, no extra detail expected.
  */
 export function entryHasDetailBody(type: TimelineEntryType): boolean {
-  return type !== 'task_start' && type !== 'task_end';
+  return type !== 'task_start' && type !== 'task_end' && type !== 'task_milestone';
 }

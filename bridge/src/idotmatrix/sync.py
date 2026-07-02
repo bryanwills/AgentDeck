@@ -175,6 +175,7 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
 
                 try:
                     display_state = await fetch_display_state(url)
+                    last_bridge_ok = time.monotonic()
                     current_hw_brightness, display_dimmed, last_display_signature = resolve_display_brightness(display_state, brightness)
                 except Exception:
                     current_hw_brightness = brightness
@@ -211,6 +212,12 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
             # same display_state that Pixoo/D200H/ESP32 receive over WS/serial.
             try:
                 display_state = await fetch_display_state(url)
+                # A successful display-state fetch proves the bridge is alive.
+                # Without this the dimmed path below (which skips the frame
+                # fetch) starves the bridge-gone watchdog and the sync exits
+                # cleanly every BRIDGE_GONE_EXIT_SEC while the host display
+                # sleeps — the daemon then respawns it forever at 60s cadence.
+                last_bridge_ok = time.monotonic()
                 target_brightness, target_dimmed, signature = resolve_display_brightness(display_state, brightness)
                 if signature != last_display_signature or target_brightness != current_hw_brightness:
                     print(f"Host display {'off' if target_dimmed else 'on'} — setting hardware brightness to {target_brightness}%")

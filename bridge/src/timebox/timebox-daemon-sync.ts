@@ -11,7 +11,7 @@ import { existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { deviceId, loadTimeboxDevices, type TimeboxDevice } from './timebox-settings.js';
-import { spawnPythonSync, terminateSyncChild } from '../ble-sync-spawn.js';
+import { createSyncCycleSquelch, spawnPythonSync, terminateSyncChild, type SyncCycleSquelch } from '../ble-sync-spawn.js';
 
 interface SyncEntry {
   device: TimeboxDevice;
@@ -20,6 +20,8 @@ interface SyncEntry {
   respawnTimer: ReturnType<typeof setTimeout> | null;
   consecutiveFailures: number;
   startedAt: number;
+  /** Collapses repeated identical respawn cycles into an hourly summary. */
+  squelch: SyncCycleSquelch;
 }
 
 const entries = new Map<string, SyncEntry>();
@@ -66,6 +68,7 @@ export function startTimeboxSync(httpPort: number): void {
       respawnTimer: null,
       consecutiveFailures: 0,
       startedAt: 0,
+      squelch: createSyncCycleSquelch(log),
     };
     entries.set(id, entry);
     spawnSync(entry, venvPython, bleScript, httpPort);
@@ -80,7 +83,7 @@ function spawnSync(entry: SyncEntry, venvPython: string, syncScript: string, htt
   const brightness = Math.max(0, Math.min(100, Math.round(device.brightness ?? 100)));
   const args = [syncScript, '--address', device.address, '--url', url, '--brightness', String(brightness)];
 
-  log(
+  entry.squelch.logStart(
     `Starting BLE sync for ${device.name ?? 'Timebox Mini'} (${id}, bridge ${url}, brightness ${brightness}%)`,
   );
   entry.startedAt = Date.now();
@@ -101,12 +104,19 @@ function spawnSync(entry: SyncEntry, venvPython: string, syncScript: string, htt
     // gated by `entry.stopping` above. Do not reset backoff for repeated
     // "device not found" / BLE disconnect exits just because they lasted long
     // enough to cross the healthy-uptime threshold.
-    if (code !== 0 && Date.now() - entry.startedAt > HEALTHY_UPTIME_MS) entry.consecutiveFailures = 0;
+    const uptimeMs = Date.now() - entry.startedAt;
+    if (code !== 0 && uptimeMs > HEALTHY_UPTIME_MS) entry.consecutiveFailures = 0;
     entry.consecutiveFailures += 1;
     const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * entry.consecutiveFailures);
     const tail = stderrTail() || outputTail();
     const why = tail ? `; output: ${tail}` : '';
-    log(`sync for ${id} exited (code=${code} signal=${signal})${why}; respawning in ${Math.round(delay / 1000)}s`);
+    entry.squelch.logExit(
+      code,
+      signal,
+      uptimeMs,
+      tail,
+      `sync for ${id} exited (code=${code} signal=${signal})${why}; respawning in ${Math.round(delay / 1000)}s`,
+    );
     entry.respawnTimer = setTimeout(() => spawnSync(entry, venvPython, syncScript, httpPort), delay);
     if (entry.respawnTimer.unref) entry.respawnTimer.unref();
   });

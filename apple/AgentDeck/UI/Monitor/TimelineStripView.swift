@@ -570,7 +570,8 @@ struct TimelineStripView: View {
                 TaskEvalBadge(
                     score: entry.taskScore,
                     outcome: entry.taskOutcome,
-                    fontSize: fontScale.label
+                    fontSize: fontScale.label,
+                    closedAt: entry.endedAt.map { Date(timeIntervalSince1970: $0 / 1000) } ?? entry.date
                 )
             }
             Text(formatTime(entry.date))
@@ -712,7 +713,8 @@ struct TimelineStripView: View {
                         TaskEvalBadge(
                             score: group.entry.taskScore,
                             outcome: group.entry.taskOutcome,
-                            fontSize: fontScale.body
+                            fontSize: fontScale.body,
+                            closedAt: group.entry.endedAt.map { Date(timeIntervalSince1970: $0 / 1000) } ?? group.entry.date
                         )
                         if let cat = group.entry.taskCategory, !cat.isEmpty {
                             Text(cat)
@@ -976,6 +978,7 @@ struct TimelineStripView: View {
         case .evalResult: return "EVAL"
         case .taskStart: return "TASK"
         case .taskEnd: return "TASK ✓"
+        case .taskMilestone: return "TODOS ✓"
         case .unknown(let raw): return raw.uppercased()
         }
     }
@@ -1349,6 +1352,15 @@ private struct TaskEvalBadge: View {
     let score: Double?
     let outcome: String?
     let fontSize: CGFloat
+    /// When the task closed (task_end row timestamp). Drives the pending →
+    /// unscored terminal transition: if the judge hasn't resolved within
+    /// `unscoredAfterSec` of the close, it never will (judge disabled, LLM
+    /// backend down, or the enqueue was lost) — showing "…" forever reads as
+    /// "still working". nil = unknown close time; stays on the pending glyph.
+    var closedAt: Date? = nil
+
+    /// Judges resolve in 5–30 s; 5 minutes is decisively past any real queue.
+    private static let unscoredAfterSec: TimeInterval = 300
 
     var body: some View {
         let glyph: String
@@ -1368,7 +1380,11 @@ private struct TaskEvalBadge: View {
             // masquerade as pending nor read as agent failure.
             glyph = "⊘"; color = DesignTokens.UI.error.opacity(0.55)
         default:
-            glyph = "…"; color = TerrariumHUD.subtext.opacity(0.6)
+            if let closedAt, Date().timeIntervalSince(closedAt) > Self.unscoredAfterSec {
+                glyph = "unscored"; color = TerrariumHUD.subtext.opacity(0.5)
+            } else {
+                glyph = "…"; color = TerrariumHUD.subtext.opacity(0.6)
+            }
         }
         return HStack(spacing: 3) {
             if let score {
@@ -1386,7 +1402,10 @@ private struct TaskEvalBadge: View {
             RoundedRectangle(cornerRadius: 3)
                 .fill(color.opacity(score == nil ? 0.08 : 0.16))
         )
-        .accessibilityLabel(score != nil ? "Task score \(String(format: "%.2f", score!)) \(outcome ?? "")" : "Task eval pending")
+        .accessibilityLabel(
+            score != nil ? "Task score \(String(format: "%.2f", score!)) \(outcome ?? "")"
+                : glyph == "unscored" ? "Task eval unscored" : "Task eval pending"
+        )
     }
 }
 
@@ -1965,6 +1984,8 @@ func timelineIconKey(for type: TimelineEntryType, status: String? = nil) -> Time
     switch type {
     case .taskStart, .taskEnd:
         return .task
+    case .taskMilestone:
+        return .success
     case .chatStart:
         return .running
     case .chatEnd, .chatResponse, .modelResponse:

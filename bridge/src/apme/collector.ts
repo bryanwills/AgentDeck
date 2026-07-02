@@ -111,6 +111,22 @@ export type OnTaskOpened = (args: {
   startedAt: number;
 }) => void;
 
+/** Callback fired when the agent declares its todos done mid-task (the
+ *  TodoWrite-all-completed soft hint). Non-segmenting — the task stays open —
+ *  but the timeline emitter surfaces it as a `task_milestone` row so long
+ *  sessions show WHERE work units completed without waiting for `/clear` or
+ *  `session_end`. */
+export type OnTaskMilestone = (args: {
+  taskId: string;
+  runId: string;
+  sessionId: string;
+  agentType: AgentType | null;
+  projectName: string | null;
+  turnIndex: number;
+  todoCount: number | null;
+  at: number;
+}) => void;
+
 export class ApmeCollector {
   private readonly sessionToRun = new Map<string, string>(); // sessionId → runId
   private readonly sessionToTurn = new Map<string, ActiveTurn>(); // sessionId → current turn
@@ -130,6 +146,14 @@ export class ApmeCollector {
   /** Optional listener fired after a typed trajectory event is persisted.
    *  The timeline projection (Phase 3) consumes this. */
   public onSampleEvent: OnSampleEvent | null = null;
+
+  /** Optional listener fired on the TodoWrite-all-completed soft hint.
+   *  The timeline emitter wires this to push a `task_milestone` row. */
+  public onTaskMilestone: OnTaskMilestone | null = null;
+
+  /** Last milestone key (`taskId:turnIndex`) per session — a turn can carry
+   *  several all-completed TodoWrite calls; surface only the first. */
+  private readonly sessionToLastMilestone = new Map<string, string>();
 
   constructor(
     private readonly store: ApmeStore,
@@ -323,6 +347,7 @@ export class ApmeCollector {
             { taskId: task.id, runId, turnIndex },
             { kind: 'state', dedupCore: `todos_complete:${turnIndex}:${todos.length}`, payloadObj: { state: 'todos_completed', count: todos.length } },
           );
+          this.fireTaskMilestone(sessionId, task.id, runId, turnIndex, todos.length);
         }
       }
     }
@@ -378,6 +403,37 @@ export class ApmeCollector {
   /** Get the current active task ID for a session (if any). Exposed for tests. */
   getActiveTaskId(sessionId: string): string | null {
     return this.sessionToTask.get(sessionId)?.id ?? null;
+  }
+
+  /** Fire the `onTaskMilestone` listener for a TodoWrite-all-completed hint,
+   *  at most once per (task, turn) — the agent may rewrite an all-completed
+   *  todo list several times inside one turn. */
+  private fireTaskMilestone(
+    sessionId: string,
+    taskId: string,
+    runId: string,
+    turnIndex: number,
+    todoCount: number | null,
+  ): void {
+    if (!this.onTaskMilestone) return;
+    const key = `${taskId}:${turnIndex}`;
+    if (this.sessionToLastMilestone.get(sessionId) === key) return;
+    this.sessionToLastMilestone.set(sessionId, key);
+    const run = this.store.getRun(runId);
+    try {
+      this.onTaskMilestone({
+        taskId,
+        runId,
+        sessionId,
+        agentType: (run?.agentType ?? null) as AgentType | null,
+        projectName: run?.projectName ?? null,
+        turnIndex,
+        todoCount,
+        at: Date.now(),
+      });
+    } catch (err) {
+      debug('APME', `onTaskMilestone listener threw: ${String(err)}`);
+    }
   }
 
   /** Open a new task if none is active for this session. Returns the active
@@ -459,6 +515,7 @@ export class ApmeCollector {
     const task = this.sessionToTask.get(sessionId);
     if (!task) return;
     this.sessionToTask.delete(sessionId);
+    this.sessionToLastMilestone.delete(sessionId);
 
     // Empty task: no turns ever attached. Drop the row so the dashboard
     // doesn't show phantom entries from back-to-back boundary signals.
@@ -761,6 +818,7 @@ export class ApmeCollector {
               { taskId: task.id, runId: task.runId, turnIndex },
               { kind: 'state', dedupCore: `todos_complete:${turnIndex}`, payloadObj: { state: 'todos_completed' } },
             );
+            this.fireTaskMilestone(sessionId, task.id, task.runId, turnIndex, null);
           }
           return;
         }

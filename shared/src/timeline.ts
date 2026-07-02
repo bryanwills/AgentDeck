@@ -10,7 +10,11 @@ export type TimelineEntryType =
   | 'eval_result'
   // Task hierarchy — emitted by APME collector when a task opens/closes.
   // A task spans one or more turns and represents an evaluable unit of work.
-  | 'task_start' | 'task_end';
+  | 'task_start' | 'task_end'
+  // Mid-task completion milestone — the agent declared its todos all done
+  // (TodoWrite-all-completed soft hint). Non-segmenting: the task stays open;
+  // this row only makes the completion visible inside long tasks.
+  | 'task_milestone';
 
 // TaskBoundarySignal is defined in eval-schema.ts (single source of truth);
 // imported below for use on TimelineEntry.boundarySignal.

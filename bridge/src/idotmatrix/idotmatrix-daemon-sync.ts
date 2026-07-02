@@ -21,7 +21,7 @@ import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadIDotMatrixDevices, type IDotMatrixDevice } from './idotmatrix-settings.js';
-import { spawnPythonSync, terminateSyncChild } from '../ble-sync-spawn.js';
+import { createSyncCycleSquelch, spawnPythonSync, terminateSyncChild } from '../ble-sync-spawn.js';
 
 let child: ChildProcess | null = null;
 let stopping = false;
@@ -45,6 +45,10 @@ function log(msg: string): void {
   // Match the daemon's `[agentdeck]` stderr prefix.
   console.error(`[agentdeck] [idotmatrix] ${msg}`);
 }
+
+// Repeated identical respawn cycles (panel off/out of range) collapse into an
+// hourly summary instead of flooding the daemon log all night.
+const squelch = createSyncCycleSquelch(log);
 
 function resolvePaths(): { venvPython: string; syncScript: string } {
   // This file compiles to bridge/dist/idotmatrix/idotmatrix-daemon-sync.js, so
@@ -102,7 +106,7 @@ function spawnSync(venvPython: string, syncScript: string, httpPort: number): vo
   const brightness = device.brightness ?? 100;
   const url = `http://127.0.0.1:${httpPort}`;
 
-  log(`Starting BLE sync for ${device.name ?? addr} (bridge ${url}, brightness ${brightness}%)`);
+  squelch.logStart(`Starting BLE sync for ${device.name ?? addr} (bridge ${url}, brightness ${brightness}%)`);
   startedAt = Date.now();
   runningKey = deviceKey(device);
   // iDotMatrix software brightness boost canonical = 1.6 — keep in sync:
@@ -125,12 +129,19 @@ function spawnSync(venvPython: string, syncScript: string, httpPort: number): vo
     // Clean code=0 exits are abnormal for daemon-managed sync children (normal
     // shutdown is gated by `stopping` above), so repeated BLE disconnect exits
     // must still escalate instead of flapping every 5 seconds forever.
-    if (code !== 0 && Date.now() - startedAt > HEALTHY_UPTIME_MS) consecutiveFailures = 0;
+    const uptimeMs = Date.now() - startedAt;
+    if (code !== 0 && uptimeMs > HEALTHY_UPTIME_MS) consecutiveFailures = 0;
     consecutiveFailures += 1;
     const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * consecutiveFailures);
     const tail = stderrTail() || outputTail();
     const why = tail ? `; output: ${tail}` : '';
-    log(`BLE sync exited (code=${code} signal=${signal})${why}; respawning in ${Math.round(delay / 1000)}s`);
+    squelch.logExit(
+      code,
+      signal,
+      uptimeMs,
+      tail,
+      `BLE sync exited (code=${code} signal=${signal})${why}; respawning in ${Math.round(delay / 1000)}s`,
+    );
     respawnTimer = setTimeout(() => spawnSync(venvPython, syncScript, httpPort), delay);
     if (respawnTimer.unref) respawnTimer.unref();
   });

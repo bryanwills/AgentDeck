@@ -20,7 +20,12 @@
  *      tool name is "todowrite" and whose `state.output` reports every todo
  *      with `status === 'completed'`. OpenCode's todowrite tool is the
  *      analogue of Claude's TodoWrite + Codex's todo manager.
- *   2. (`/clear` and `manual` are reserved for future direct integrations —
+ *   2. `idle_gap` — the adapter arms a timer on `session.idle` and fires
+ *      `opencodeIdleGapTaskBoundary` after OPENCODE_IDLE_GAP_MS with no new
+ *      work (mirrors the OpenClaw idle-gap segmentation). Without it,
+ *      OpenCode tasks close only on `session_end` — one task per session,
+ *      defeating per-task evaluation.
+ *   3. (`/clear` and `manual` are reserved for future direct integrations —
  *      OpenCode doesn't currently surface either via SSE.)
  *
  * Tool calls and tool results map to `tool_call` / `tool_result` spans for
@@ -132,6 +137,29 @@ export function opencodeMessageToSpans(
     spans.push(make('turn_response', { 'agentdeck.response_text': responseText }));
   }
   return spans;
+}
+
+/** How long a session must sit idle (no new work after `session.idle`)
+ *  before the active task closes with an `idle_gap` boundary. Matches
+ *  OPENCLAW_IDLE_GAP_MS — the two adapters segment on the same rhythm. */
+export const OPENCODE_IDLE_GAP_MS = 90_000;
+
+/** Build the `task_boundary` (idle_gap) span the adapter emits when the
+ *  idle-gap timer fires. Mirrors `openclawIdleGapTaskBoundary`. */
+export function opencodeIdleGapTaskBoundary(ctx: AdapterContext): TelemetrySpan {
+  return {
+    traceId: ctx.traceId,
+    spanId: randomUUID(),
+    parentSpanId: ctx.activeTurnId,
+    name: spanNameForKind('task_boundary'),
+    kind: 'task_boundary',
+    ts: Date.now(),
+    attributes: {
+      'agentdeck.agent_type': ctx.agentType,
+      ...(ctx.cwd ? { 'agentdeck.cwd': ctx.cwd } : {}),
+      'agentdeck.boundary_signal': 'idle_gap',
+    },
+  };
 }
 
 /**

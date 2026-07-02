@@ -93,6 +93,11 @@ final class ApmeCollector {
         var timelineEmitted: Bool = false
     }
     private var activeTask: ActiveTask?
+    /// Last milestone key (`taskId:turnIndex`) — a turn can carry several
+    /// all-completed TodoWrite calls; surface only the first as a
+    /// `task_milestone` row. Mirrors sessionToLastMilestone in
+    /// bridge/src/apme/collector.ts.
+    private var lastMilestoneKey: String?
     /// runId → next task_index. Lives across task close/open within a run.
     private var runTaskCount: [String: Int] = [:]
     /// Last cumulative usage seen for the active session — ModelEvents are
@@ -353,6 +358,7 @@ final class ApmeCollector {
                 _ = appendSampleEvent(taskId: task.id, runId: task.runId, turnIndex: turnIndex,
                                       kind: "state", core: "todos_complete:\(turnIndex)",
                                       payload: ["state": "todos_completed"])
+                emitTaskMilestoneIfNeeded(task: task, turnIndex: turnIndex)
             }
         }
     }
@@ -587,6 +593,30 @@ final class ApmeCollector {
     /// no-ops once the emit happens. Uses the task's original `startedAt`
     /// as the timeline timestamp so the TASK header anchors above the
     /// first turn it groups instead of jumping in mid-conversation.
+    /// Surface the TodoWrite-all-completed soft hint as a `task_milestone`
+    /// timeline row — non-segmenting (the task stays open), at most once per
+    /// (task, turn). Mirrors `onTaskMilestone` wiring in
+    /// bridge/src/apme/index.ts.
+    private func emitTaskMilestoneIfNeeded(task: ActiveTask, turnIndex: Int) {
+        let key = "\(task.id):\(turnIndex)"
+        if lastMilestoneKey == key { return }
+        lastMilestoneKey = key
+        // The milestone implies a task worth showing — promote the deferred
+        // task_start first so the milestone never renders orphaned.
+        emitDeferredTaskStartIfNeeded()
+        let run = store.getRun(id: task.runId)
+        emitTimelineEntry?(DaemonTimelineEntry(
+            ts: Double(Date().timeIntervalSince1970 * 1000),
+            type: "task_milestone",
+            raw: "Todos done",
+            agentType: run?.agentType,
+            projectName: run?.projectName,
+            sessionId: run?.sessionId,
+            runId: task.runId,
+            taskId: task.id
+        ))
+    }
+
     private func emitDeferredTaskStartIfNeeded() {
         guard var task = activeTask, !task.timelineEmitted else { return }
         let run = store.getRun(id: task.runId)
@@ -687,6 +717,7 @@ final class ApmeCollector {
     private func closeTask(boundarySignal: String) {
         guard let task = activeTask else { return }
         activeTask = nil
+        lastMilestoneKey = nil
         // Always cancel any armed idle-gap timer when a task closes, so a
         // late-firing timer can't reopen a closed-task race.
         idleGapTask?.cancel()

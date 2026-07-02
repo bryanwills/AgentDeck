@@ -48,6 +48,7 @@ import { triggerMdnsRecovery } from './mdns.js';
 import { rgbToBmp, pixooLiveHtml } from './hook-server.js';
 import { enableDebugLog, debug } from './logger.js';
 import { initApme, isTimelineProjectionEnabled, loadApmeConfig, type ApmeModule } from './apme/index.js';
+import { FallbackTaskTimeline } from './fallback-task-timeline.js';
 import { handleApmeRequest } from './apme/http.js';
 import { readModelFromTranscript } from './apme/claude-transcript-reader.js';
 import { transcriptTimelineForSession } from './session-transcript-timeline.js';
@@ -445,6 +446,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
 
   // ===== APME (lazy — may be null if better-sqlite3 isn't installed) =====
   let apme: ApmeModule | null = null;
+  // Fallback task-row emitter, created only when initApme() returns null —
+  // keeps task_start/task_end rows on the timeline without the collector.
+  let fallbackTasks: FallbackTaskTimeline | null = null;
 
   // Declare early — HTTP /health handler references this in its closure.
   // Must be declared before the HTTP server so it's initialized (not in TDZ)
@@ -622,15 +626,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       return;
     }
     // --- TRMNL BYOS (e-ink panel pulls rendered dashboard over WiFi) ---
-    if (req.method === 'GET' && pathname === '/api/setup') {
+    // Stock firmware requests `/api/setup/` WITH a trailing slash
+    // (bl.cpp getDeviceCredentials builds `{base}/api/setup/`), so match these
+    // routes slash-insensitively — an exact match 404s enrollment forever and
+    // the panel retries setup on every wake.
+    const trmnlPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+    if (req.method === 'GET' && trmnlPath === '/api/setup') {
       handleTrmnlSetup(req, res);
       return;
     }
-    if (req.method === 'GET' && pathname === '/api/display') {
+    if (req.method === 'GET' && trmnlPath === '/api/display') {
       handleTrmnlDisplay(req, res);
       return;
     }
-    if (req.method === 'POST' && pathname === '/api/log') {
+    if (req.method === 'POST' && trmnlPath === '/api/log') {
       handleTrmnlLog(req, res);
       return;
     }
@@ -707,6 +716,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           if (mapped === 'session_end') {
             apme.collector.closeRun(hookSessionId);
           }
+        } else if (fallbackTasks) {
+          // APME is down — keep the timeline's task hierarchy alive from the
+          // boundary hooks alone. Prefer the hook's real session id so rows
+          // attribute per session (the shared 'daemon-hook' bucket would
+          // interleave concurrent direct-claude sessions).
+          const fallbackSessionId =
+            typeof json.session_id === 'string' && json.session_id ? json.session_id : 'daemon-hook';
+          fallbackTasks.ingestHook(fallbackSessionId, mapped, json);
         }
 
         // ── Response ──
@@ -1106,6 +1123,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // line tells the user where to look + what's lost so the gap doesn't pass
     // for "everything's fine, just no /apme/ routes".
     log('[agentdeck] APME unavailable — no run/turn/task evals will be recorded for sessions on this daemon.');
+    // Keep the timeline's task hierarchy alive without APME: emit fallback
+    // task_start/task_end rows from the hook boundary signals so the device
+    // timeline doesn't degrade to a flat chat/tool stream.
+    fallbackTasks = new FallbackTaskTimeline(
+      (entry) => core.bridgeTimeline.addEntry(entry),
+      { agentType: 'claude-code' },
+    );
   }
 
   // Register session

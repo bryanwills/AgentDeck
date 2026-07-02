@@ -142,6 +142,28 @@ export async function initApme(
     };
   }
 
+  // Wire the mid-task completion milestone. TodoWrite-all-completed is a
+  // non-segmenting soft hint (fires ~18% of the time on Claude Code v2.1), so
+  // it must not split the task — but when it DOES fire it is a strong "the
+  // agent declared this chunk done" signal, and long sessions otherwise show
+  // no completion marks until /clear or session_end.
+  if (emitTimeline) {
+    collector.onTaskMilestone = ({
+      taskId, runId, sessionId, agentType, projectName, todoCount, at,
+    }) => {
+      emitTimeline({
+        ts: at,
+        type: 'task_milestone',
+        raw: todoCount ? `Todos done (${todoCount})` : 'Todos done',
+        agentType: agentType ?? undefined,
+        projectName: projectName ?? undefined,
+        sessionId,
+        runId,
+        taskId,
+      });
+    };
+  }
+
   // Wire task-eval completion → re-emit `task_end` with score + outcome.
   // The original `task_end` (above) fires synchronously on closeTask so the
   // boundary is visible immediately; the judge runs async and may take
