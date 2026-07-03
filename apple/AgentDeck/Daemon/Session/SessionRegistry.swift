@@ -19,6 +19,21 @@ enum LocalProbeSession {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
     }()
+
+    /// Patient variant for daemon-liveness decisions (external-daemon health
+    /// monitor). The Node daemon is single-threaded with synchronous SQLite —
+    /// a heavy hook/eval burst can stall its event loop past 2s while the
+    /// daemon is perfectly alive, and a false "dead" verdict here promotes a
+    /// rival hub. Only the promotion path should pay this longer wait.
+    static let patient: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 5
+        config.timeoutIntervalForResource = 5
+        config.httpMaximumConnectionsPerHost = 2
+        config.waitsForConnectivity = false
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
 }
 
 /// Tracks consecutive health-probe failures per port so that a single
@@ -297,13 +312,16 @@ final class SessionRegistry: Sendable {
 
     // MARK: - Health Probe
 
-    func probeDaemonHealth(port: Int) async -> [String: Any]? {
+    /// `patient: true` widens the probe window to 5s for daemon-liveness
+    /// decisions (promotion/stand-down) — see `LocalProbeSession.patient`.
+    func probeDaemonHealth(port: Int, patient: Bool = false) async -> [String: Any]? {
         guard port > 0 else { return nil }
         guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return nil }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 2
+        request.timeoutInterval = patient ? 5 : 2
         do {
-            let (data, response) = try await LocalProbeSession.shared.data(for: request)
+            let session = patient ? LocalProbeSession.patient : LocalProbeSession.shared
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
             return try JSONSerialization.jsonObject(with: data) as? [String: Any]
         } catch {

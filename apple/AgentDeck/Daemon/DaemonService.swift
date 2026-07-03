@@ -73,6 +73,9 @@ final class DaemonService: ObservableObject {
     private var healthMonitorTask: Task<Void, Never>?
     private var externalFailureCount = 0
     private var localFailureCount = 0
+    /// Re-entrancy guard for reclaimCanonicalPortIfNeeded — a patient probe
+    /// (up to 5s) can outlive one 5s health tick.
+    private var isReclaimingPort = false
     private var signalSource: DispatchSourceSignal?
     private var sigintSource: DispatchSourceSignal?
     private var listenerFailureRetries = 0
@@ -485,7 +488,14 @@ final class DaemonService: ObservableObject {
         let registry = SessionRegistry.shared
 
         if isUsingExternalDaemon {
-            let health = await registry.probeDaemonHealth(port: currentPort)
+            // Patient probe + 3-miss threshold: the Node daemon can stall its
+            // single-threaded event loop past 2s under load (sync SQLite, hook
+            // bursts) and a plain dev restart takes a few seconds — neither
+            // should promote a rival hub. A false promotion is expensive: the
+            // TRMNL panel polls a fixed URL on the canonical port and every
+            // hub flip flaps serial/Pixoo ownership. Worst-case failover for a
+            // genuinely dead daemon is ~30s, fine for a passive fallback.
+            let health = await registry.probeDaemonHealth(port: currentPort, patient: true)
             let daemonAlive = (health?["mode"] as? String) == "daemon"
             if daemonAlive {
                 externalFailureCount = 0
@@ -493,7 +503,7 @@ final class DaemonService: ObservableObject {
             }
 
             externalFailureCount += 1
-            guard externalFailureCount >= 2, !isStarting else { return }
+            guard externalFailureCount >= 3, !isStarting else { return }
             DaemonLogger.shared.error("External daemon on port \(currentPort) disappeared — promoting this app to own the daemon")
             server = nil
             isRunning = false
@@ -513,6 +523,57 @@ final class DaemonService: ObservableObject {
         // `isRunning`, the listener is up; no probe is needed for liveness.
         guard isRunning, server != nil else { return }
         localFailureCount = 0
+        await reclaimCanonicalPortIfNeeded()
+    }
+
+    /// While this hub runs on a fallback port, watch the canonical (configured)
+    /// port every health tick. Pull devices like the TRMNL panel poll ONE fixed
+    /// URL that embeds the canonical port — a hub stranded on 9121 is invisible
+    /// to them, and running there next to a returning sibling daemon flaps
+    /// serial/Pixoo ownership. Two exits:
+    ///   - a healthy daemon owns the canonical port again → stand down to
+    ///     client mode (no rival hub, no eviction round-trip needed)
+    ///   - the canonical port became free → rebind onto it immediately
+    private func reclaimCanonicalPortIfNeeded() async {
+        guard isOnFallbackPort, !isStarting, !isReclaimingPort,
+              isRunning, let current = server else { return }
+        let canonical = AppPreferences.shared.daemonPort
+        guard Int(port) != canonical else { return }
+        isReclaimingPort = true
+        defer { isReclaimingPort = false }
+
+        let registry = SessionRegistry.shared
+        if let health = await registry.probeDaemonHealth(port: canonical, patient: true),
+           (health["mode"] as? String) == "daemon" {
+            DaemonLogger.shared.info("Healthy daemon reappeared on canonical port \(canonical) — standing down fallback-port hub (\(port)) to client mode")
+            await standDownServer(current)
+            await connectToExternalDaemon(port: canonical)
+            return
+        }
+        guard await registry.isPortBindable(canonical) else { return }
+        DaemonLogger.shared.info("Canonical port \(canonical) is free — reclaiming it from fallback port \(port)")
+        await standDownServer(current)
+        start()
+    }
+
+    /// Tear down the in-process server for a deliberate state transition,
+    /// clearing the fallback-port bookkeeping so the next start()/client
+    /// connect targets the canonical port. Suppresses the server's onShutdown
+    /// callback — that path auto-transitions to external-daemon mode, and the
+    /// caller here chooses the next state itself.
+    private func standDownServer(_ current: DaemonServer) async {
+        current.onShutdown = nil
+        server = nil
+        isRunning = false
+        port = 0
+        readyUrl = nil
+        sessionOverridePort = nil
+        fallbackAttempted = false
+        failedBindPorts.removeAll()
+        isOnFallbackPort = false
+        bindFailureReason = nil
+        blockingProcesses = []
+        await current.shutdown()
     }
 
     // MARK: - Signal Handling
