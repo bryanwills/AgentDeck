@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
   resolveProjectName,
+  resolveProjectNameFromCwdCached,
   gitToplevelBasename,
+  gitToplevelBasenameFs,
   nearestPackageJsonName,
 } from '../utils/project-name.js';
 
@@ -119,6 +121,54 @@ describe('gitToplevelBasename', () => {
     mkdirSync(sub, { recursive: true });
     execSync('git init -q', { cwd: repo });
     expect(gitToplevelBasename(sub)).toBe('ReporNamed');
+  });
+});
+
+describe('resolveProjectNameFromCwdCached (passive-observer resolver)', () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = join(tmpdir(), `agentdeck-cwd-cached-${randomUUID()}`);
+    mkdirSync(tmpRoot, { recursive: true });
+  });
+  afterEach(() => { try { rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* ignore */ } });
+
+  it('matches the PTY resolver for a git repo subdir (launch-path parity)', () => {
+    const repo = join(tmpRoot, 'MyRepo');
+    const sub = join(repo, 'bridge', 'src');
+    mkdirSync(sub, { recursive: true });
+    execSync('git init -q', { cwd: repo });
+    expect(resolveProjectNameFromCwdCached(sub)).toBe('MyRepo');
+    expect(resolveProjectNameFromCwdCached(sub)).toBe(resolveProjectName({ cwd: sub }));
+  });
+
+  it('detects a .git FILE (worktree/submodule layout)', () => {
+    const wt = join(tmpRoot, 'MyWorktree');
+    const sub = join(wt, 'deep');
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(wt, '.git'), 'gitdir: /elsewhere/.git/worktrees/MyWorktree\n');
+    expect(gitToplevelBasenameFs(sub)).toBe('MyWorktree');
+    expect(resolveProjectNameFromCwdCached(sub)).toBe('MyWorktree');
+  });
+
+  it('falls back to package.json name, then basename', () => {
+    const pkgDir = join(tmpRoot, 'pkgd');
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: '@scope/thing' }));
+    expect(resolveProjectNameFromCwdCached(pkgDir)).toBe('@scope/thing');
+
+    const bare = join(tmpRoot, 'barename');
+    mkdirSync(bare, { recursive: true });
+    expect(resolveProjectNameFromCwdCached(bare)).toBe('barename');
+  });
+
+  it('memoizes per cwd (stale after dir changes are acceptable)', () => {
+    const dir = join(tmpRoot, 'memo');
+    mkdirSync(dir, { recursive: true });
+    expect(resolveProjectNameFromCwdCached(dir)).toBe('memo');
+    // Turning the dir into a git repo later does not change the cached label.
+    execSync('git init -q', { cwd: dir });
+    expect(resolveProjectNameFromCwdCached(dir)).toBe('memo');
   });
 });
 
