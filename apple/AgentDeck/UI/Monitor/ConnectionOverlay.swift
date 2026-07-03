@@ -2,6 +2,17 @@
 
 import SwiftUI
 
+/// Connection-state lexicon — Swift mirror of shared/src/connection-status.ts.
+/// Self-connecting clients (this app, Android, ESP32) surface the phase they
+/// are actually in; update the TS SSOT and all mirrors together when copy changes.
+enum ConnectionLexicon {
+    static let searching = "Searching for AgentDeck..."
+    static let connecting = "Connecting..."
+    static let reconnecting = "Reconnecting..."
+    static let searchAgain = "Search Again"
+    static let nothingDiscovered = "No AgentDeck found on this network"
+}
+
 struct ConnectionOverlay: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
     @State private var manualUrl = ""
@@ -83,7 +94,7 @@ struct ConnectionOverlay: View {
                                 Button {
                                     stateHolder.startConnectionWaterfall()
                                 } label: {
-                                    Text("Retry Discovery")
+                                    Text(ConnectionLexicon.searchAgain)
                                         .font(.subheadline.bold())
                                         .foregroundStyle(.white)
                                         .frame(maxWidth: .infinity)
@@ -124,7 +135,7 @@ struct ConnectionOverlay: View {
                             // Hint after 10 seconds of no results
                             if searchingElapsed >= 10 {
                                 VStack(spacing: 4) {
-                                    Text("No bridges found on network")
+                                    Text(ConnectionLexicon.nothingDiscovered)
                                         .font(.caption)
                                         .foregroundStyle(slateText)
                                     Text("Enter URL manually or check local network permission.")
@@ -240,11 +251,11 @@ struct ConnectionOverlay: View {
 
     private var statusText: String {
         if isReconnecting {
-            return "Reconnecting..."
+            return ConnectionLexicon.reconnecting
         } else if stateHolder.isAutoConnecting || stateHolder.connection.status == .connecting {
-            return "Connecting..."
+            return ConnectionLexicon.connecting
         } else {
-            return "Searching for bridges..."
+            return ConnectionLexicon.searching
         }
     }
 

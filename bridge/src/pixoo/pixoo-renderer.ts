@@ -19,6 +19,7 @@
  */
 
 import { State } from '../types.js';
+import { PASSIVE_OFFLINE_LABEL } from '@agentdeck/shared';
 import type { StateUpdateEvent, UsageEvent } from '../types.js';
 import type { SessionInfo } from '@agentdeck/shared/protocol';
 import { hasOpenClawSession } from '@agentdeck/shared';
@@ -1006,7 +1007,7 @@ export function renderFrame(
 /** Render a static black frame with centered grey "OFFLINE" text. */
 export function renderDisconnectedFrame(): Uint8Array {
   const buf = new Uint8Array(64 * 64 * 3); // black
-  drawTextCentered(buf, 29, 'OFFLINE', '#555555');
+  drawTextCentered(buf, 29, PASSIVE_OFFLINE_LABEL, '#555555');
   return buf;
 }
 

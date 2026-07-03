@@ -294,6 +294,7 @@ Each panel has its own pixel grid, dynamic range, and refresh rate. Designs MUST
 - **Korean**: 격식체 안 씁니다 — relaxed but precise. `~합니다` only for legal/footer. `~해요` and noun phrases everywhere else.
 - **Japanese**: です/ます 体, but trim particles for kickers.
 - **Numbers**: tabular nums in mono runs; never zero‑pad in display copy ("3 sessions", not "03").
+- **Connection-state lexicon**: daemon-link status copy is fixed per device class — SSOT + full table in [`shared/src/connection-status.ts`](shared/src/connection-status.ts). Self-connecting clients (Apple/Android apps, ESP32, TUI) name the phase they are actually in: `Searching for AgentDeck...` (compact `Searching...`) / `Connecting...` / `Reconnecting...` / `No WiFi`; retry button `Search Again`. Daemon-rendered passive displays (Stream Deck, D200H, Pixoo, Timebox, iDotMatrix, TRMNL) show only the terminal `OFFLINE` (+ `Open AgentDeck` CTA) — they never claim Connecting/Reconnecting they can't perform. Swift/Kotlin mirrors (`ConnectionLexicon`) must be updated with the TS SSOT in the same commit.
 
 ---
 

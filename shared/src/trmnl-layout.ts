@@ -15,6 +15,7 @@
  * CJK-aware truncation.
  */
 import { parseState, type DashState } from './d200h-layout.js';
+import { PASSIVE_OFFLINE_LABEL } from './connection-status.js';
 import { measureTextWidth, sliceByPx, escSvgText } from './svg-renderers/text-utils.js';
 import { agentGlyphMono } from './svg-renderers/agent-logos.js';
 import type { SessionInfo, SubscriptionInfo } from './protocol.js';
@@ -59,7 +60,7 @@ function statusLabel(state?: string): string {
   const s = (state ?? '').toLowerCase();
   if (s.startsWith('awaiting')) return 'AWAITING';
   if (s === 'processing') return 'WORKING';
-  if (s === 'disconnected') return 'OFFLINE';
+  if (s === 'disconnected') return PASSIVE_OFFLINE_LABEL;
   if (s === 'idle') return 'IDLE';
   if (!s) return 'IDLE';
   return s.toUpperCase().slice(0, 9);

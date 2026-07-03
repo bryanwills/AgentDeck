@@ -1,6 +1,7 @@
 package dev.agentdeck.ui.screen
 
 import android.content.res.Configuration
+import dev.agentdeck.ui.common.ConnectionLexicon
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -739,8 +740,8 @@ private fun EinkNotConnectedScreen(
 
         Text(
             text = when (connectionStatus) {
-                ConnectionStatus.DISCONNECTED -> "Searching for bridges..."
-                ConnectionStatus.CONNECTING -> "Connecting..."
+                ConnectionStatus.DISCONNECTED -> ConnectionLexicon.SEARCHING
+                ConnectionStatus.CONNECTING -> ConnectionLexicon.CONNECTING
                 ConnectionStatus.CONNECTED -> "Connected"
             },
             style = MaterialTheme.typography.bodyMedium,
@@ -761,7 +762,7 @@ private fun EinkNotConnectedScreen(
 
         if (connectionStatus == ConnectionStatus.CONNECTING) {
             Text(
-                text = "Connecting...",
+                text = ConnectionLexicon.CONNECTING,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -827,7 +828,7 @@ private fun EinkNotConnectedScreen(
                 }
             } else {
                 Text(
-                    text = "Searching for bridges...",
+                    text = ConnectionLexicon.SEARCHING,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -881,7 +882,7 @@ private fun EinkReconnectingScreen(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = "Reconnecting...",
+            text = ConnectionLexicon.RECONNECTING,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

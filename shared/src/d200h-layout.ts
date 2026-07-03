@@ -25,6 +25,7 @@ import {
 import { State, type PromptOption } from './states.js';
 import type { SessionInfo, SubscriptionInfo, CodexRateLimits } from './protocol.js';
 import { Brand } from './design-tokens.js';
+import { PASSIVE_OFFLINE_LABEL, OPEN_AGENTDECK_LABEL } from './connection-status.js';
 import { CLAUDE_LOGO_PATH, CODEX_LOGO_PATH } from './svg-renderers/agent-logos.js';
 
 /** Command dispatched when a key is pressed. `null` = inert tile (info/empty). */
@@ -389,8 +390,8 @@ function renderOfflineSlot(hero = false): string {
   if (hero) {
     const colors = { bg: '#07170f', text: '#dcfce7', sub: '#86efac' };
     const elements = [
-      `<text x="72" y="54" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="${colors.text}">OFFLINE</text>`,
-      `<text x="72" y="82" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="${colors.sub}">Open AgentDeck</text>`,
+      `<text x="72" y="54" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="${colors.text}">${PASSIVE_OFFLINE_LABEL}</text>`,
+      `<text x="72" y="82" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="${colors.sub}">${OPEN_AGENTDECK_LABEL}</text>`,
     ].join('');
     return svgFrame(colors.bg, elements);
   }
@@ -628,7 +629,7 @@ export function buildSessionDeck(stateEvt: any, view: DeckView, positions: strin
   if ((state.state === 'DISCONNECTED' || state.state === 'disconnected') && state.allSessions.length === 0) {
     const hero = Math.floor(slots.length / 2);
     slots.forEach((pos, i) => out.set(pos, {
-      svg: i === hero ? renderInfoSlot('OFFLINE', 'Open AgentDeck', 'activity', 'info', 'npx @agentdeck/setup') : renderEmptySlot(),
+      svg: i === hero ? renderInfoSlot(PASSIVE_OFFLINE_LABEL, OPEN_AGENTDECK_LABEL, 'activity', 'info', 'npx @agentdeck/setup') : renderEmptySlot(),
       action: { kind: 'launch' },
     }));
     return out;

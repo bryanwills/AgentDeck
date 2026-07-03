@@ -11,9 +11,11 @@ static lv_obj_t* lblStatus = nullptr;
 static lv_obj_t* lblWifiStatus = nullptr;
 
 static const char* compactStatus(const char* text) {
-    if (!text) return "Connecting";
+    if (!text) return "Searching...";
     if (strstr(text, "No WiFi")) return "No WiFi";
-    return "Connecting";
+    // Small panels compact "Searching for AgentDeck..." to the lexicon's
+    // short form (shared/src/connection-status.ts).
+    return "Searching...";
 }
 
 static void set_logo_opa_cb(void* var, int32_t val) {
@@ -63,7 +65,7 @@ lv_obj_t* splashCreate() {
     lblStatus = lv_label_create(screen);
     lv_obj_set_style_text_color(lblStatus, lv_color_hex(Theme::HUDDim), 0);
     lv_obj_set_style_text_font(lblStatus, &lv_font_montserrat_16, 0);
-    lv_label_set_text(lblStatus, "Connecting");
+    lv_label_set_text(lblStatus, "Searching...");
 #if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
     lv_obj_align(lblStatus, LV_ALIGN_CENTER, 0, 18);
 #else

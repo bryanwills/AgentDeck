@@ -9,6 +9,7 @@ import type { SessionInfo } from '../protocol.js';
 import type { PromptOption } from '../states.js';
 import { State } from '../states.js';
 import { stateColor } from '../state-colors.js';
+import { PASSIVE_OFFLINE_LABEL, OPEN_AGENTDECK_LABEL } from '../connection-status.js';
 import { agentLogoIcon } from './agent-logos.js';
 import { wrapTextByWidth, escSvgText } from './text-utils.js';
 
@@ -104,7 +105,7 @@ export function aliasModelName(name: string): string {
 }
 
 function stateLabel(state?: string, agentType?: AgentType): string {
-  if (!state) return 'OFFLINE';
+  if (!state) return PASSIVE_OFFLINE_LABEL;
   if (agentType === 'openclaw') {
     if (state === 'idle') return 'STANDBY';
     if (state === 'processing') return 'ROUTING';
@@ -384,14 +385,14 @@ export function renderDisconnectedSlot(config: DisconnectedSlotConfig): string {
       config.row,
       config.cols,
       config.rows,
-      config.label ?? 'OFFLINE',
-      config.subtitle ?? 'Open AgentDeck'
+      config.label ?? PASSIVE_OFFLINE_LABEL,
+      config.subtitle ?? OPEN_AGENTDECK_LABEL
     );
   }
   if (config.quadrant) {
-    return renderOpenAppQuadrant(config.quadrant, config.label ?? 'OFFLINE', config.subtitle ?? 'Open AgentDeck');
+    return renderOpenAppQuadrant(config.quadrant, config.label ?? PASSIVE_OFFLINE_LABEL, config.subtitle ?? OPEN_AGENTDECK_LABEL);
   }
-  return renderStatusCard({ icon: 'open-app', label: config.label ?? 'OFFLINE', subtitle: config.subtitle ?? 'Open AgentDeck', detail: config.detail, tone: 'action' });
+  return renderStatusCard({ icon: 'open-app', label: config.label ?? PASSIVE_OFFLINE_LABEL, subtitle: config.subtitle ?? OPEN_AGENTDECK_LABEL, detail: config.detail, tone: 'action' });
 }
 
 /**
@@ -401,7 +402,7 @@ export function renderDisconnectedSlot(config: DisconnectedSlotConfig): string {
  * cluster reads as one card visually, with the inner panel + glyph + text
  * spanning all four keys while each key keeps its own outer rounded bezel.
  */
-export function renderOpenAppQuadrant(quadrant: ClusterQuadrant, label = 'OFFLINE', subtitle = 'Open AgentDeck'): string {
+export function renderOpenAppQuadrant(quadrant: ClusterQuadrant, label = PASSIVE_OFFLINE_LABEL, subtitle = OPEN_AGENTDECK_LABEL): string {
   const colors = toneColors('action');
   const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
   const offsetX = (quadrant === 'tr' || quadrant === 'br') ? -SIZE : 0;
@@ -530,8 +531,8 @@ export function renderOpenAppGrid(
   row: number,
   cols: number,
   rows: number,
-  label = 'OFFLINE',
-  subtitle = 'Open AgentDeck',
+  label = PASSIVE_OFFLINE_LABEL,
+  subtitle = OPEN_AGENTDECK_LABEL,
 ): string {
   const colors = toneColors('action');
   const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';

@@ -19,7 +19,7 @@
  * shared) because the shared renderers are owned elsewhere.
  */
 import type { AgentType, SessionInfo, StatusCardTone, State } from '@agentdeck/shared';
-import { stateColor, formatModelEffort, escSvgText } from '@agentdeck/shared';
+import { stateColor, formatModelEffort, escSvgText, PASSIVE_OFFLINE_LABEL } from '@agentdeck/shared';
 
 const SIZE = 144;
 const FONT = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
@@ -165,7 +165,7 @@ export function renderSessionReadout(
 }
 
 function stateLabelFor(state: string | undefined, agent: AgentType): string {
-  if (!state) return 'OFFLINE';
+  if (!state) return PASSIVE_OFFLINE_LABEL;
   if (agent === 'openclaw') {
     if (state === 'idle') return 'STANDBY';
     if (state === 'processing') return 'ROUTING';

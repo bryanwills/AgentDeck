@@ -1,6 +1,7 @@
 package dev.agentdeck.ui.monitor
 
 import android.content.res.Configuration
+import dev.agentdeck.ui.common.ConnectionLexicon
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -366,9 +367,9 @@ private fun ConnectionOverlay(
 
             Text(
                 text = when {
-                    isReconnecting -> "Reconnecting..."
-                    connectionStatus == ConnectionStatus.DISCONNECTED -> "Searching for bridges..."
-                    connectionStatus == ConnectionStatus.CONNECTING -> "Connecting..."
+                    isReconnecting -> ConnectionLexicon.RECONNECTING
+                    connectionStatus == ConnectionStatus.DISCONNECTED -> ConnectionLexicon.SEARCHING
+                    connectionStatus == ConnectionStatus.CONNECTING -> ConnectionLexicon.CONNECTING
                     else -> "Connected"
                 },
                 style = MaterialTheme.typography.bodyMedium,
@@ -402,7 +403,7 @@ private fun ConnectionOverlay(
 
             if (connectionStatus == ConnectionStatus.CONNECTING && !isReconnecting) {
                 Text(
-                    text = "Connecting...",
+                    text = ConnectionLexicon.CONNECTING,
                     style = MaterialTheme.typography.bodyMedium,
                     color = AgentDeckColors.Amber,
                 )
@@ -437,7 +438,7 @@ private fun ConnectionOverlay(
                     }
                 } else if (!isReconnecting) {
                     Text(
-                        text = "Searching for bridges...",
+                        text = ConnectionLexicon.SEARCHING,
                         style = MaterialTheme.typography.bodySmall,
                         color = AgentDeckColors.SlateText,
                     )

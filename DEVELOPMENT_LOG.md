@@ -6,6 +6,27 @@
 
 ---
 
+## 2026-07-03 — 기기 표면 offline UI 일관성: connection-state lexicon SSOT + ESP32 재연결 라벨 수정
+
+### 문제
+데몬 링크가 끊겼을 때 표면마다 표기가 제각각: SD/D200H/Pixoo는 "OFFLINE", 앱은 "Searching for bridges..."/"Connecting..."/"Reconnecting...", Apple만 "Retry Discovery" 버튼, ESP32는 splash가 "Searching for bridges..."인데 aquarium 오버레이는 SEARCHING·RECONNECTING **둘 다 "Connecting"**(같은 기기 안 불일치 + 재연결 단계 구분 소실).
+
+### 설계 — 기기 특성별 2클래스 어휘
+- **자가연결 클라이언트**(Apple/Android 앱, ESP32, TUI): 실제 단계를 표기 — `Searching for AgentDeck...`(소형 패널 압축형 `Searching...`) / `Connecting...` / `Reconnecting...` / `No WiFi`, 재시도 버튼 `Search Again`, 빈 발견 힌트 `No AgentDeck found on this network`. 내부 용어 "bridges"는 사용자 카피에서 제거.
+- **데몬-구동 수동 표면**(SD, D200H, Pixoo, Timebox, iDotMatrix, TRMNL): 스스로 탐색 못 하므로 터미널 상태 `OFFLINE`(+`Open AgentDeck` CTA)만 — 수행할 수 없는 Connecting/Reconnecting을 주장하지 않음.
+
+### 구현
+- **SSOT**: 신규 `shared/src/connection-status.ts` — `DaemonLinkPhase` + `DAEMON_LINK_LABELS(_COMPACT)` + `PASSIVE_OFFLINE_LABEL`/`OPEN_AGENTDECK_LABEL` 등. TS 소비자(session-slot-renderer, display-tile, session-slot-button, d200h-layout, trmnl-layout, pixoo-renderer) 리터럴을 상수로 교체.
+- **ESP32**: aquarium 오버레이 SEARCHING→"Searching...", RECONNECTING→"Reconnecting..."(기존 둘 다 "Connecting"); splash 상태 "Searching for AgentDeck..."(compactStatus가 전 보드에서 "Searching..."으로 압축).
+- **Apple**: `ConnectionOverlay.swift`에 `ConnectionLexicon` 미러 enum; "Retry Discovery"→"Search Again", "No bridges found on network"→lexicon, SettingsScreen 검색 라벨 포함.
+- **Android**: `ConnectionComponents.kt`에 `ConnectionLexicon` object; MonitorScreen/EinkMonitorScreen/StatusBadge 라벨 전부 lexicon 참조.
+- **문서**: DESIGN.md §9 Voice & copy에 lexicon 규칙 추가(mirrors 동시 갱신 규칙 포함).
+
+### 검증
+vitest 92파일/1637 pass, `pnpm build` OK, `xcodebuild AgentDeck_macOS` OK, Android `compileDebugKotlin` OK, ESP32 `pio run -e ips35` OK. 코드 전역에서 "Searching for bridges"/"Retry Discovery" 리터럴 0건 확인.
+
+---
+
 ## 2026-07-02 — 타임라인 완결성 후속: 갭 5건 구현 (마일스톤 행 · OpenCode idle-gap · task 행 FIFO 보호 · APME-off fallback · unscored 종결)
 
 ### 배경

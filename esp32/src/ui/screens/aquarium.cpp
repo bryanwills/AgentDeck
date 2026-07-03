@@ -262,11 +262,14 @@ void aquariumSetConnectionStatus(ConnOverlayStatus status) {
         case ConnOverlayStatus::NO_WIFI:
             lv_label_set_text(connStatusLabel, "No WiFi");
             break;
+        // Labels follow the connection-state lexicon (shared/src/connection-status.ts):
+        // never-connected discovery reads "Searching...", a lost link reads
+        // "Reconnecting..." — the two phases must stay distinguishable.
         case ConnOverlayStatus::SEARCHING:
-            lv_label_set_text(connStatusLabel, "Connecting");
+            lv_label_set_text(connStatusLabel, "Searching...");
             break;
         case ConnOverlayStatus::RECONNECTING:
-            lv_label_set_text(connStatusLabel, "Connecting");
+            lv_label_set_text(connStatusLabel, "Reconnecting...");
             break;
         default:
             break;
