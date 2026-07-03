@@ -88,6 +88,15 @@ export class ClaudeCodeAdapter extends PtyAdapter {
     return false;
   }
 
+  /**
+   * Pre-seed the bridge-resolved (git-aware) project name so the parser's
+   * PROJECT_DIR scrape never fires. The scrape is kept only as a fallback for
+   * the rare case the resolver produced nothing meaningful.
+   */
+  seedProjectName(name: string): void {
+    this.outputParser.seedProjectName(name);
+  }
+
   override getProjectName(): string | null {
     return this.outputParser.getProjectName();
   }

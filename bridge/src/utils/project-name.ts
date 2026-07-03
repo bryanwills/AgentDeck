@@ -14,8 +14,8 @@
  */
 
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 
 const MAX_WALK_DEPTH = 32;
 
@@ -55,6 +55,50 @@ export function gitToplevelBasename(cwd: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Subprocess-free variant for hot paths (the passive observer resolves names
+ * inside a periodic process scan, where spawning `git` per session would
+ * reintroduce the event-loop stalls that scan was made async to avoid).
+ *
+ * Same order as `resolveProjectName` but detects the git root by walking
+ * ancestors for a `.git` entry (dir OR file — submodule/worktree layouts) —
+ * the exact algorithm of the Swift mirror
+ * (apple/AgentDeck/Daemon/Core/ProjectNameResolver.swift), so both daemons
+ * label the same cwd identically. Results are memoized per cwd.
+ */
+const cwdNameCache = new Map<string, string>();
+
+export function resolveProjectNameFromCwdCached(cwd: string): string {
+  const key = resolve(cwd);
+  const hit = cwdNameCache.get(key);
+  if (hit) return hit;
+
+  const name =
+    gitToplevelBasenameFs(key) ??
+    nearestPackageJsonName(key) ??
+    (basename(key) || 'unknown');
+  // Bound the memo — cwds are few in practice, but a long-lived daemon
+  // observing many short-lived sessions shouldn't grow without limit.
+  if (cwdNameCache.size >= 256) cwdNameCache.clear();
+  cwdNameCache.set(key, name);
+  return name;
+}
+
+/** Ancestor walk for a `.git` entry; returns that directory's basename. */
+export function gitToplevelBasenameFs(cwd: string): string | null {
+  let dir = cwd;
+  for (let i = 0; i < MAX_WALK_DEPTH; i++) {
+    if (existsSync(join(dir, '.git'))) {
+      const name = basename(dir);
+      return name || null;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return null;
 }
 
 export function nearestPackageJsonName(cwd: string): string | null {

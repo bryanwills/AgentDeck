@@ -16,6 +16,7 @@ import {
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { EnrichedSession } from './session-aggregator.js';
+import { resolveProjectNameFromCwdCached } from './utils/project-name.js';
 import { stripUnsafeText } from '@agentdeck/shared';
 import {
   parseAntigravityTranscript,
@@ -771,8 +772,13 @@ function encodeClaudeCwd(cwd: string): string {
   return cwd.replace(/[\/_.]/g, '-');
 }
 
+// Shared resolver (git root → package.json name → basename) so a session
+// observed passively gets the SAME label as one launched via `agentdeck
+// <agent>` in the same directory — bare basename made e.g. a Claude app
+// session in <repo>/bridge show "bridge" while its PTY twin showed the repo
+// name, breaking #N dedup and Codex display folding across launch paths.
 function projectNameFromCwd(cwd: string): string {
-  return basename(cwd) || 'unknown';
+  return resolveProjectNameFromCwdCached(cwd);
 }
 
 function safeRegularFile(path: string): boolean {

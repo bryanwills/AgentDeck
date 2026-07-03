@@ -32,7 +32,9 @@ import {
   DAEMON_DEFAULT_PORT,
   probeDaemonHealth,
   requestDaemonShutdown,
+  scanDaemonPortWindow,
   shouldConcedePortToOccupant,
+  waitForDaemonExit,
   writeDaemonInfo,
   removeDaemonInfo,
   readDaemonInfo,
@@ -386,7 +388,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       if (health.isSwift) {
         log(`[agentdeck] Swift daemon detected on port ${probePort}. Requesting shutdown to take over...`);
         await requestDaemonShutdown(probePort);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await waitForDaemonExit(probePort);
         removeDaemonInfo();
       } else {
         log(`[agentdeck] Daemon already running on port ${existingInfo.port} (PID ${existingInfo.pid}).`);
@@ -404,7 +406,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       if (health.isSwift) {
         log(`[agentdeck] Swift daemon detected on port ${existingSession.port}. Requesting shutdown to take over...`);
         await requestDaemonShutdown(existingSession.port);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await waitForDaemonExit(existingSession.port);
         removeDaemonSession(existingSession);
       } else {
         log(`[agentdeck] Daemon already running on port ${existingSession.port} (PID ${existingSession.pid}).`);
@@ -428,7 +430,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         if (health.isSwift) {
           log(`[agentdeck] Swift daemon detected on port ${requestedPort} via /health. Requesting shutdown to take over...`);
           await requestDaemonShutdown(requestedPort);
-          await new Promise((resolve) => setTimeout(resolve, 1500));
+          await waitForDaemonExit(requestedPort);
         } else {
           // Daemon alive but not in our registry — race condition or stale state
           log(`[agentdeck] Daemon already running on port ${requestedPort} (detected via /health).`);
@@ -439,6 +441,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         log(`[agentdeck] Port ${requestedPort} occupied (${health.mode ?? 'unknown'}), finding alternative...`);
         port = await findAvailablePort();
       }
+    }
+  }
+
+  // 3. Cross-implementation sweep of the daemon port window. File discovery
+  // has two blind spots that the checks above never cover: the App Store
+  // Swift daemon writes daemon.json into its private sandbox container (this
+  // process cannot read it), and transient 9120 contention can leave a daemon
+  // sitting on a fallback port (9121+). Missing it here means two live
+  // daemons: double mDNS advertising, duplicate Gateway/timeline relay, and
+  // adb-reverse flapping. Swift occupants are evicted (same policy as above);
+  // a live Node daemon wins and we exit.
+  const strayDaemons = await scanDaemonPortWindow(new Set([requestedPort]));
+  for (const stray of strayDaemons) {
+    if (stray.health.isSwift) {
+      log(`[agentdeck] Swift daemon detected on fallback port ${stray.port}. Requesting shutdown to take over...`);
+      await requestDaemonShutdown(stray.port);
+      await waitForDaemonExit(stray.port);
+    } else if (shouldConcedePortToOccupant(stray.health, process.pid)) {
+      log(`[agentdeck] Daemon already running on port ${stray.port} (detected via port scan).`);
+      process.exit(0);
     }
   }
 

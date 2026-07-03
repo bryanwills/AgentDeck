@@ -859,6 +859,40 @@ describe('OutputParser', () => {
       expect(events[0].name).toBe('my-app');
     });
 
+    it('seedProjectName disables the scrape (resolver wins over basename)', () => {
+      const p = createParser();
+      const events = collectEvents(p, 'project_name');
+
+      p.seedProjectName('MyRepo');
+      p.feed('~/github/MyRepo/bridge\n');
+
+      expect(events).toHaveLength(0);
+      expect(p.getProjectName()).toBe('MyRepo');
+    });
+
+    it('seeded name survives reset(); scrape stays disabled', () => {
+      const p = createParser();
+      const events = collectEvents(p, 'project_name');
+
+      p.seedProjectName('MyRepo');
+      p.reset();
+      p.feed('/Users/dev/other/path\n');
+
+      expect(events).toHaveLength(0);
+      expect(p.getProjectName()).toBe('MyRepo');
+    });
+
+    it("seeding 'unknown' keeps the scrape live as fallback", () => {
+      const p = createParser();
+      const events = collectEvents(p, 'project_name');
+
+      p.seedProjectName('unknown');
+      p.feed('~/github/MyProject\n');
+
+      expect(events).toHaveLength(1);
+      expect(events[0].name).toBe('MyProject');
+    });
+
     it('emits model_info with model and plan', () => {
       const p = createParser();
       const events = collectEvents(p, 'model_info');

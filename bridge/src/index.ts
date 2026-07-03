@@ -212,6 +212,16 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   // ===== Create adapter =====
   const adapter = createAdapter(agentType, opts.gatewayUrl);
 
+  // Seed the resolved (git-aware) name into the Claude output parser so its
+  // legacy PROJECT_DIR scrape doesn't override it: the scrape captures the
+  // bare basename of ANY path-like terminal line (first match sticks) and
+  // flows through the state-machine snapshot, which used to win over the
+  // resolver — a monorepo-subdir session would flip from the repo name to
+  // the subdir (or to an unrelated printed path).
+  if (adapter instanceof ClaudeCodeAdapter) {
+    adapter.seedProjectName(projectName);
+  }
+
   // ===== Start adapter (creates HTTP server, spawns process) =====
   try {
     await adapter.start({ port, command: opts.command, gatewayUrl: opts.gatewayUrl });

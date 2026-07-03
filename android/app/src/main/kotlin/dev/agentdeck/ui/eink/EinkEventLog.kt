@@ -146,6 +146,10 @@ private fun typeIcon(type: String, status: String? = null): String = when (type)
     "user_action" -> "☞"
     "state_change" -> "△"
     "eval_result" -> "★"
+    // Task hierarchy — semantic mapping mirrors timelineIconKey()
+    // (shared/src/timeline-icons.ts): task_start/task_end → task, milestone → success.
+    "task_start", "task_end" -> "▣"
+    "task_milestone" -> "✓"
     else -> "·"
 }
 
