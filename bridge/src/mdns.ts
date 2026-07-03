@@ -118,7 +118,10 @@ export function advertiseBridge(
       const txt: Record<string, string> = {
         project: projectName,
         agent: agentType,
-        v: '1',
+        // TXT schema version — keep in lockstep with the Swift daemon's
+        // advertisement (apple/AgentDeck/Daemon/Modules/MdnsModule.swift) so
+        // clients see one contract regardless of which daemon owns the port.
+        v: '3',
         port: String(port),
       };
       if (token) txt.token = token;

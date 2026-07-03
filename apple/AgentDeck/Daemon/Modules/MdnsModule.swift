@@ -36,6 +36,8 @@ final class MdnsModule: DeviceModule, @unchecked Sendable {
                 "port": "\(port)",
                 "ip": AuthManager.getLanIP() ?? "127.0.0.1",
                 "token": token,
+                // TXT schema version — keep in lockstep with the Node daemon's
+                // advertisement (bridge/src/mdns.ts).
                 "v": "3",
             ])
 
