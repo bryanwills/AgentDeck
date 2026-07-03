@@ -34,6 +34,24 @@ def fetch_display_state(url: str, timeout: float = 1.0):
         return json.loads(response.read().decode("utf-8"))
 
 
+def bridge_reachable(url: str, timeout: float = 1.0) -> bool:
+    """True when *some* daemon is answering on the bridge URL right now.
+
+    Used to detect a SUCCESSOR daemon: when our parent daemon died abruptly and a
+    new one restarted (launchd KeepAlive) and re-bound the port, the orphaned sync
+    client must NOT paint its farewell/OFFLINE frame — doing so would clobber the
+    frame the successor just drew and leave the panel stuck until a power-cycle. An
+    HTTP error status still counts as reachable (a server answered)."""
+    from urllib.error import HTTPError
+    try:
+        with urllib.request.urlopen(f"{url.rstrip('/')}/display-state", timeout=timeout):
+            return True
+    except HTTPError:
+        return True
+    except Exception:
+        return False
+
+
 def resolve_display_brightness(display_state, normal_brightness, *, off_floor, level_floor):
     """Return (effective brightness, dimmed, signature) for the current host state.
 

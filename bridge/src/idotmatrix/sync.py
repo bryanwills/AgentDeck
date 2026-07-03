@@ -22,6 +22,7 @@ from matrix_sync_common import (  # noqa: E402
     POLL_INTERVAL,
     BRIDGE_GONE_EXIT_SEC,
     fetch_display_state as _fetch_display_state_sync,
+    bridge_reachable as _bridge_reachable_sync,
     resolve_display_brightness as _resolve_display_brightness_common,
 )
 
@@ -43,6 +44,12 @@ async def fetch_display_state(url: str):
     """Fetch host display dim state from the daemon without blocking the loop."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _fetch_display_state_sync, url)
+
+async def bridge_reachable(url: str) -> bool:
+    """True when a daemon is answering the bridge URL (off-loop). Used to detect a
+    successor daemon so the orphaned OFFLINE farewell doesn't clobber its frame."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _bridge_reachable_sync, url)
 
 def resolve_display_brightness(display_state, normal_brightness: int) -> tuple[int, bool, str]:
     """Return (hardware brightness, dimmed, signature) for the current host state.
@@ -133,8 +140,13 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
     # to a classic handler that still requests a clean stop (never ignore the
     # signal — that would strand the panel on its last frame).
     stop_event = asyncio.Event()
+    # Why we're stopping — decides the farewell. 'signal' = clean daemon shutdown
+    # (no successor → paint OFFLINE). 'orphan' = parent died (a successor daemon may
+    # have taken over → don't clobber its frame). 'bridge_gone' = nobody home.
+    exit_reason = {"v": None}
     loop = asyncio.get_running_loop()
     def _request_stop() -> None:
+        exit_reason["v"] = "signal"
         stop_event.set()
     for _sig in (signal.SIGTERM, signal.SIGINT):
         try:
@@ -152,12 +164,14 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
         # Break the loop so the teardown below paints OFFLINE, then exit.
         if os.getppid() == 1:
             print("Parent daemon gone (orphaned) — shutting down iDotMatrix sync.")
+            exit_reason["v"] = "orphan"
             stop_event.set()
             break
         # Belt-and-suspenders: if the bridge has been unreachable for a sustained
         # window (parent alive but wedged, or getppid is unreliable), also exit.
         if time.monotonic() - last_bridge_ok > BRIDGE_GONE_EXIT_SEC:
             print(f"Bridge unreachable >{int(BRIDGE_GONE_EXIT_SEC)}s — shutting down iDotMatrix sync.")
+            exit_reason["v"] = "bridge_gone"
             stop_event.set()
             break
         try:
@@ -317,17 +331,28 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
 
     # Loop exited (shutdown requested). Leave the panel showing OFFLINE instead
     # of a frozen dashboard frame, then drop the BLE link.
+    #
+    # EXCEPT when a successor daemon has already taken over: our parent died
+    # abruptly (orphan) but the bridge is answering again, so a new daemon
+    # restarted and is repainting. Painting OFFLINE here would clobber its fresh
+    # frame and the panel would sit on OFFLINE until it next changes / reconnects.
+    # We still disconnect cleanly (freeing the single-central link for the
+    # successor) — only the OFFLINE paint is suppressed.
+    successor_took_over = exit_reason["v"] == "orphan" and await bridge_reachable(url)
     if connected:
-        print("Shutting down — sending OFFLINE frame to iDotMatrix...")
-        try:
-            await upload_offline_frame(idm_image)
-            # Let the final frame transmit before we drop the BLE link below —
-            # otherwise the disconnect races the in-flight write and the panel
-            # freezes on its last dashboard frame instead of showing OFFLINE.
-            await asyncio.sleep(0.5)
-            print("  OFFLINE frame sent.")
-        except Exception as e:
-            print(f"  offline frame push failed: {e}")
+        if successor_took_over:
+            print("Successor daemon detected — skipping OFFLINE farewell (it will repaint).")
+        else:
+            print("Shutting down — sending OFFLINE frame to iDotMatrix...")
+            try:
+                await upload_offline_frame(idm_image)
+                # Let the final frame transmit before we drop the BLE link below —
+                # otherwise the disconnect races the in-flight write and the panel
+                # freezes on its last dashboard frame instead of showing OFFLINE.
+                await asyncio.sleep(0.5)
+                print("  OFFLINE frame sent.")
+            except Exception as e:
+                print(f"  offline frame push failed: {e}")
         try:
             await manager.disconnect()
         except Exception:

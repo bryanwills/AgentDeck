@@ -32,10 +32,17 @@ from matrix_sync_common import (  # noqa: E402
     POLL_INTERVAL,
     BRIDGE_GONE_EXIT_SEC,
     fetch_display_state,
+    bridge_reachable,
     resolve_display_brightness as _resolve_display_brightness_common,
 )
 
 RECONNECT_DELAY = 3.0
+# Force a re-push of the current frame at least this often even when the content
+# is unchanged. A stateful write-without-response panel gives no delivery ACK, so
+# a frame lost to an RF glitch or a brief dual-writer overlap (daemon restart)
+# would otherwise stick until the content changes or the device is power-cycled.
+# The heartbeat makes any such loss self-heal within a few seconds.
+HEARTBEAT_SEC = 8.0
 
 TIMEBOX_W = 11
 TIMEBOX_H = 11
@@ -151,9 +158,9 @@ async def blank_panel(client) -> None:
     await write_packet(client, build_static_image_packet(bytes(182)))
 
 
-async def push_micro_frame(client, url, brightness, gamma, sat, contrast, last_key, force=False) -> str:
+async def push_micro_frame(client, url, brightness, gamma, sat, contrast, last_key, force=False) -> tuple[str, bool]:
     """Fetch the native 11x11 micro frame and push it over BLE when its
-    content+brightness changed (or `force`). Returns the new dedup key.
+    content+brightness changed (or `force`). Returns (new dedup key, sent?).
 
     `size=11&layout=micro` is a NATIVE 11x11 frame — a bold hand-authored creature
     glyph on a status field, drawn pixel-for-pixel at the device resolution (no
@@ -169,14 +176,20 @@ async def push_micro_frame(client, url, brightness, gamma, sat, contrast, last_k
         payload = encode_image_bright(img, brightness, gamma, sat, contrast)
         await write_packet(client, build_static_image_packet(payload))
         print(f"Frame sent ({key[:8]} @ {brightness}%)")
-    return key
+        return key, True
+    return key, False
 
 
 async def run(address: str, url: str, brightness: int, gamma: float, sat: float, contrast: float, once: bool = False) -> None:
     print(f"Starting Timebox Mini BLE sync: {address} <- {url} brightness={brightness}% gamma={gamma}")
     stop = asyncio.Event()
+    # Why we're stopping — decides the farewell. 'signal' = clean daemon shutdown
+    # (no successor → blank the panel). 'orphan' = parent died (a successor daemon
+    # may have taken over → don't clobber its frame). 'bridge_gone' = nobody home.
+    exit_reason = {"v": None}
 
     def handle_stop(*_):
+        exit_reason["v"] = "signal"
         stop.set()
 
     loop = asyncio.get_running_loop()
@@ -203,9 +216,11 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
         forever holding the single-central connection."""
         if os.getppid() == 1:
             print("Parent daemon gone (orphaned) — shutting down Timebox sync.")
+            exit_reason["v"] = "orphan"
             return True
         if time.monotonic() - last_bridge_ok > BRIDGE_GONE_EXIT_SEC:
             print(f"Bridge unreachable >{int(BRIDGE_GONE_EXIT_SEC)}s — shutting down Timebox sync.")
+            exit_reason["v"] = "bridge_gone"
             return True
         return False
 
@@ -231,6 +246,7 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                 print(f"BLE connected (MTU={client.mtu_size})")
 
                 last_key = ""
+                last_sent_at = time.monotonic()
                 current_brightness = brightness
                 display_dimmed = False
                 last_display_signature = ""
@@ -275,9 +291,11 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                     if display_dimmed:
                         if transitioned or once:
                             try:
-                                last_key = await push_micro_frame(
+                                last_key, sent = await push_micro_frame(
                                     client, url, current_brightness, gamma, sat, contrast, last_key, force=True
                                 )
+                                if sent:
+                                    last_sent_at = time.monotonic()
                                 last_bridge_ok = time.monotonic()
                             except Exception as e:
                                 print(f"Dim-frame send error: {e}", file=sys.stderr)
@@ -291,11 +309,17 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                             pass
                         continue
 
-                    # 3. Normal streaming — push only when content or brightness changed.
+                    # 3. Normal streaming — push when content/brightness changed, or
+                    #    force a heartbeat re-push so a frame lost to an RF glitch or a
+                    #    brief dual-writer overlap (daemon restart) self-heals instead
+                    #    of sticking until the content changes or a power-cycle.
+                    force_beat = (time.monotonic() - last_sent_at) >= HEARTBEAT_SEC
                     try:
-                        last_key = await push_micro_frame(
-                            client, url, current_brightness, gamma, sat, contrast, last_key
+                        last_key, sent = await push_micro_frame(
+                            client, url, current_brightness, gamma, sat, contrast, last_key, force=force_beat
                         )
+                        if sent:
+                            last_sent_at = time.monotonic()
                         last_bridge_ok = time.monotonic()
                     except Exception as e:
                         print(f"Frame fetch/send error: {e}", file=sys.stderr)
@@ -317,7 +341,16 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                 # `async with` drops BLE — otherwise the stateful LED panel freezes
                 # on the last dashboard frame forever (parity with iDotMatrix's
                 # OFFLINE farewell and the Swift TimeboxModule's 11x11 black blank).
-                if stop.is_set() and client.is_connected:
+                #
+                # EXCEPT when a successor daemon has already taken over: our parent
+                # died abruptly (orphan) but the bridge is answering again, so a new
+                # daemon restarted and is repainting the panel. Blanking here would
+                # clobber its fresh frame and the panel would sit blank until a
+                # power-cycle — the exact failure this guard prevents.
+                successor_took_over = exit_reason["v"] == "orphan" and bridge_reachable(url)
+                if successor_took_over:
+                    print("Successor daemon detected — skipping farewell blank (it will repaint).")
+                if stop.is_set() and client.is_connected and not successor_took_over:
                     try:
                         await blank_panel(client)
                         # blank_panel writes WITHOUT response — the await returns once
