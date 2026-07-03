@@ -96,6 +96,10 @@ function typeIcon(type: TimelineEntryType): string {
       case 'scheduled': return 's';
       case 'user_action': return 'u';
       case 'eval_result': return '#';
+      // Task hierarchy -- mirrors timelineIconKey() (shared/src/timeline-icons.ts):
+      // task_start/task_end -> task, task_milestone -> success.
+      case 'task_start': case 'task_end': return '=';
+      case 'task_milestone': return '+';
       default: return '*';
     }
   }
@@ -109,6 +113,9 @@ function typeIcon(type: TimelineEntryType): string {
     case 'model_call': case 'model_response': return '\u25C8';
     case 'memory_recall': return '\u25CC';
     case 'scheduled': return '\u25D1';
+    // Task hierarchy -- mirrors timelineIconKey() (shared/src/timeline-icons.ts).
+    case 'task_start': case 'task_end': return '\u25A3';  // white square w/ centre
+    case 'task_milestone': return '\u2713';               // check mark
     case 'eval_result': return '\u2605';  // ★
     default: return '\u25C6';
   }
