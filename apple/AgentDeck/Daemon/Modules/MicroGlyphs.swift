@@ -46,14 +46,18 @@ enum MicroGlyphs {
         }
     }
 
-    /// Dark status-color field so the bright creature pops. Amber awaiting pulses.
+    /// Dark status-color field so the bright creature pops. Idle is steady; both
+    /// active states breathe so the panel visibly "works" (parity with the TS
+    /// `microStatusBg`): processing = slow blue heartbeat, awaiting = faster amber.
     static func statusBg(_ state: MicroAggregate, animFrame: Int) -> RGB {
         switch state {
         case .error: return (64, 18, 18)
         case .awaiting:
             let p = 0.78 + 0.22 * ((sin(Double(animFrame) * 0.25) + 1) / 2)
             return (UInt8(74 * p), UInt8(50 * p), UInt8(10 * p))
-        case .processing: return (10, 28, 64)
+        case .processing:
+            let p = 0.68 + 0.32 * ((sin(Double(animFrame) * 0.18) + 1) / 2)
+            return (UInt8(16 * p), UInt8(40 * p), UInt8(88 * p))
         case .idle: return (16, 56, 28)
         }
     }

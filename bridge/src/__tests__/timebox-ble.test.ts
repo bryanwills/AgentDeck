@@ -88,12 +88,12 @@ describe('micro layout (Timebox 11×11)', () => {
       null, codexSession('idle'), 1000, 11, 'micro',
     );
     expect(pixel(buf, 0, 0)).toEqual([16, 56, 28]); // rounded/lumpy top, not a rectangle
-    expect(pixel(buf, 3, 1)).toEqual([120, 126, 236]);
-    expect(pixel(buf, 2, 4)).toEqual([238, 240, 255]); // ">" prompt
-    expect(pixel(buf, 3, 5)).toEqual([238, 240, 255]);
-    expect(pixel(buf, 5, 7)).toEqual([238, 240, 255]); // "_" prompt
-    expect(pixel(buf, 3, 10)).toEqual([120, 126, 236]); // bottom cloud lobe, not dangling legs
-    expect(pixel(buf, 5, 10)).toEqual([120, 126, 236]);
+    expect(pixel(buf, 3, 1)).toEqual([86, 92, 220]); // deeper indigo body so white pops
+    expect(pixel(buf, 2, 4)).toEqual([255, 255, 255]); // pure-white ">" chevron (bold)
+    expect(pixel(buf, 4, 5)).toEqual([255, 255, 255]);
+    expect(pixel(buf, 5, 8)).toEqual([255, 255, 255]); // full-width "_" cursor
+    expect(pixel(buf, 3, 10)).toEqual([86, 92, 220]); // bottom cloud lobe, not dangling legs
+    expect(pixel(buf, 5, 10)).toEqual([86, 92, 220]);
   });
 
   it('draws OpenCode as one tall hollow ring', () => {

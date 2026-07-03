@@ -42,7 +42,10 @@ interface Glyph {
 // cutout eyes. The eyes occupy two LED rows because the SVG holes are taller
 // than they are wide; the legs stay aligned instead of wiggling.
 const OCTOPUS: Glyph = {
-  colors: { B: [235, 130, 90], D: [150, 84, 64], K: [0, 0, 0] },
+  // `E` is the lit "active" eye used only in the work pose: the rusty robot's
+  // dark cutout eyes (`K`) light up cyan while it is processing, so the panel
+  // reads as "thinking" at a glance instead of a frozen idle robot.
+  colors: { B: [235, 130, 90], D: [150, 84, 64], K: [0, 0, 0], E: [120, 226, 255] },
   idle: [
     '...........',
     '.BBBBBBBBB.',
@@ -56,17 +59,19 @@ const OCTOPUS: Glyph = {
     '..BB...BB..',
     '...........',
   ],
+  // Working: eyes light up + the legs take a stride (left up / right planted),
+  // so the alternation with `idle` gives a visible blink + walk while busy.
   work: [
     '...........',
     '.BBBBBBBBB.',
     '.BBBBBBBBB.',
-    '.BBKBBBKBB.',
-    '.BBKBBBKBB.',
+    '.BBEBBBEBB.',
+    '.BBEBBBEBB.',
     'BBBBBBBBBBB',
     'BBBBBBBBBBB',
     '.BBBBBBBBB.',
     '..BB...BB..',
-    '..BB...BB..',
+    '...B...BB..',
     '...........',
   ],
 };
@@ -75,16 +80,34 @@ const OCTOPUS: Glyph = {
 // puffy cloud outline with no dangling legs, plus an oversized `>_` prompt. The
 // prompt is deliberately brighter than the body so it survives the LED diffuser.
 const JELLYFISH: Glyph = {
-  colors: { B: [120, 126, 236], M: [238, 240, 255] },
+  // `M` is PURE white (not off-white) and the body is a deeper indigo than the
+  // old lavender so the `>_` prompt actually pops on the LED diffuser instead of
+  // washing into the cloud. The mark is a bold 2px chevron + full-width cursor.
+  colors: { B: [86, 92, 220], M: [255, 255, 255] },
   idle: [
     '...........',
     '...BBBBB...',
     '.BBBBBBBBB.',
     'BBBBBBBBBBB',
-    'BBMBBBBBBBB',
+    'BBMMBBBBBBB',
     'BBBMMBBBBBB',
-    'BBMBBBBBBBB',
-    'BBBBBMMMBBB',
+    'BBMMBBBBBBB',
+    'BBBBBBBBBBB',
+    'BBBMMMMMBBB',
+    '.BBBBBBBBB.',
+    '...BBBBB...',
+  ],
+  // Working: the cursor blinks off so the alternation reads as a live terminal
+  // prompt (chevron steady, underscore pulsing) while Codex is processing.
+  work: [
+    '...........',
+    '...BBBBB...',
+    '.BBBBBBBBB.',
+    'BBBBBBBBBBB',
+    'BBMMBBBBBBB',
+    'BBBMMBBBBBB',
+    'BBMMBBBBBBB',
+    'BBBBBBBBBBB',
     'BBBBBBBBBBB',
     '.BBBBBBBBB.',
     '...BBBBB...',
@@ -105,6 +128,21 @@ const OPENCODE: Glyph = {
     '..FF...FF..',
     '..FF...FF..',
     '..FF...FF..',
+    '..FFFFFFF..',
+    '..FFFFFFF..',
+    '...........',
+  ],
+  // Working: the ring thickens inward (hole narrows to 1px), so the alternation
+  // with `idle` reads as a steady pulse while OpenCode is processing.
+  work: [
+    '...........',
+    '..FFFFFFF..',
+    '..FFFFFFF..',
+    '..FFF.FFF..',
+    '..FFF.FFF..',
+    '..FFF.FFF..',
+    '..FFF.FFF..',
+    '..FFF.FFF..',
     '..FFFFFFF..',
     '..FFFFFFF..',
     '...........',
@@ -196,7 +234,17 @@ const GLYPHS: Record<MicroCreature, Glyph> = {
   antigravity: ANTIGRAVITY,
 };
 
-/** Dark status-color field so the bright creature pops. Amber awaiting pulses. */
+/**
+ * Dark status-color field so the bright creature pops.
+ *
+ * Idle is a steady green so a resting session reads as calm/still. Both active
+ * states animate the field so the tiny panel visibly "does something" while the
+ * agent is busy — the device only re-pushes when the frame changes, so a
+ * breathing field is also what keeps working sessions live on screen:
+ *   • processing → a slow blue "breathing" pulse (calm, ~3s cycle)
+ *   • awaiting   → a faster, brighter amber pulse (urgent)
+ * Error is a steady deep red (no motion — a frozen alarm reads as more severe).
+ */
 export function microStatusBg(
   state: 'idle' | 'processing' | 'awaiting' | 'error',
   animFrame: number,
@@ -207,7 +255,12 @@ export function microStatusBg(
       const p = 0.78 + 0.22 * ((Math.sin(animFrame * 0.25) + 1) / 2);
       return [Math.round(74 * p), Math.round(50 * p), Math.round(10 * p)];
     }
-    case 'processing': return [10, 28, 64];
+    case 'processing': {
+      // Breathe between a dim floor and a brighter blue on a ~3s cycle. Sampled
+      // at the device's ~1.5s poll this reads as a steady "working" heartbeat.
+      const p = 0.68 + 0.32 * ((Math.sin(animFrame * 0.18) + 1) / 2);
+      return [Math.round(16 * p), Math.round(40 * p), Math.round(88 * p)];
+    }
     default: return [16, 56, 28];
   }
 }

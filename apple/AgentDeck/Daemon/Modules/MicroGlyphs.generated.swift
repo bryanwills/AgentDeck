@@ -15,7 +15,7 @@ extension MicroGlyphs {
     // (note: Swift .codex == TS "jellyfish").
     static let generatedGlyphs: [String: Glyph] = [
     "octopus": Glyph(
-        colors: ["B": (235, 130, 90), "D": (150, 84, 64), "K": (0, 0, 0)],
+        colors: ["B": (235, 130, 90), "D": (150, 84, 64), "K": (0, 0, 0), "E": (120, 226, 255)],
         idle: [
             "...........",
             ".BBBBBBBBB.",
@@ -33,32 +33,44 @@ extension MicroGlyphs {
             "...........",
             ".BBBBBBBBB.",
             ".BBBBBBBBB.",
-            ".BBKBBBKBB.",
-            ".BBKBBBKBB.",
+            ".BBEBBBEBB.",
+            ".BBEBBBEBB.",
             "BBBBBBBBBBB",
             "BBBBBBBBBBB",
             ".BBBBBBBBB.",
             "..BB...BB..",
-            "..BB...BB..",
+            "...B...BB..",
             "...........",
         ]
     ),
     "jellyfish": Glyph(
-        colors: ["B": (120, 126, 236), "M": (238, 240, 255)],
+        colors: ["B": (86, 92, 220), "M": (255, 255, 255)],
         idle: [
             "...........",
             "...BBBBB...",
             ".BBBBBBBBB.",
             "BBBBBBBBBBB",
-            "BBMBBBBBBBB",
+            "BBMMBBBBBBB",
             "BBBMMBBBBBB",
-            "BBMBBBBBBBB",
-            "BBBBBMMMBBB",
+            "BBMMBBBBBBB",
             "BBBBBBBBBBB",
+            "BBBMMMMMBBB",
             ".BBBBBBBBB.",
             "...BBBBB...",
         ],
-        work: nil
+        work: [
+            "...........",
+            "...BBBBB...",
+            ".BBBBBBBBB.",
+            "BBBBBBBBBBB",
+            "BBMMBBBBBBB",
+            "BBBMMBBBBBB",
+            "BBMMBBBBBBB",
+            "BBBBBBBBBBB",
+            "BBBBBBBBBBB",
+            ".BBBBBBBBB.",
+            "...BBBBB...",
+        ]
     ),
     "opencode": Glyph(
         colors: ["F": (232, 232, 232)],
@@ -75,7 +87,19 @@ extension MicroGlyphs {
             "..FFFFFFF..",
             "...........",
         ],
-        work: nil
+        work: [
+            "...........",
+            "..FFFFFFF..",
+            "..FFFFFFF..",
+            "..FFF.FFF..",
+            "..FFF.FFF..",
+            "..FFF.FFF..",
+            "..FFF.FFF..",
+            "..FFF.FFF..",
+            "..FFFFFFF..",
+            "..FFFFFFF..",
+            "...........",
+        ]
     ),
     "crayfish": Glyph(
         colors: ["B": (255, 92, 92), "C": (210, 52, 52), "A": (225, 180, 170), "E": (0, 229, 204)],

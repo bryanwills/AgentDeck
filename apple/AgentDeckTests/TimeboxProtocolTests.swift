@@ -74,18 +74,28 @@ final class TimeboxProtocolTests: XCTestCase {
         var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
         MicroGlyphs.paint(&buf, creature: .octopus, state: .idle, animFrame: 0)
         XCTAssertEqual(pixel(buf, 5, 3), [235, 130, 90])   // terracotta body
-        XCTAssertEqual(pixel(buf, 3, 2), [255, 176, 64])   // amber eye (row 2 cols 3–4 / 6–7)
-        XCTAssertEqual(pixel(buf, 1, 5), [150, 84, 64])    // left arm joint (rows 5–6 col 1)
+        XCTAssertEqual(pixel(buf, 3, 3), [0, 0, 0])        // dark cutout eye (idle, rows 3–4)
+        XCTAssertEqual(pixel(buf, 7, 4), [0, 0, 0])        // dark cutout eye (idle)
+        XCTAssertEqual(pixel(buf, 0, 5), [235, 130, 90])   // full-width side arm
         XCTAssertEqual(pixel(buf, 0, 0), [0, 0, 0])        // transparent → untouched
     }
 
-    /// Codex glyph carries the white `>`/`_` terminal-prompt marking on the cloud.
+    /// While working, the robot's eyes light up cyan (activity cue). animFrame 4
+    /// selects the `work` frame ((4 >> 2) & 1 == 1).
+    func testMicroGlyphRobotWorkingEyesLit() {
+        var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
+        MicroGlyphs.paint(&buf, creature: .octopus, state: .working, animFrame: 4)
+        XCTAssertEqual(pixel(buf, 3, 3), [120, 226, 255])  // lit cyan eye
+        XCTAssertEqual(pixel(buf, 7, 3), [120, 226, 255])
+    }
+
+    /// Codex glyph carries the pure-white `>`/`_` terminal-prompt marking on the cloud.
     func testMicroGlyphCodexPrompt() {
         var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
         MicroGlyphs.paint(&buf, creature: .codex, state: .idle, animFrame: 0)
-        XCTAssertEqual(pixel(buf, 2, 4), [238, 240, 255])  // `>` chevron top (marking)
-        XCTAssertEqual(pixel(buf, 6, 7), [238, 240, 255])  // `_` underscore (marking)
-        XCTAssertEqual(pixel(buf, 0, 4), [120, 126, 236])  // indigo cloud body
+        XCTAssertEqual(pixel(buf, 2, 4), [255, 255, 255])  // `>` chevron (pure white, bold)
+        XCTAssertEqual(pixel(buf, 5, 8), [255, 255, 255])  // `_` cursor
+        XCTAssertEqual(pixel(buf, 0, 4), [86, 92, 220])    // deeper indigo cloud body
     }
 
     /// Antigravity uses the reference rainbow peak/arc with a black center cutout.
@@ -101,7 +111,9 @@ final class TimeboxProtocolTests: XCTestCase {
 
     /// Status-field colors match micro-glyphs.ts microStatusBg.
     func testMicroStatusBg() {
-        XCTAssertEqual(tupleBytes(MicroGlyphs.statusBg(.processing, animFrame: 0)), [10, 28, 64])
+        // processing now breathes: p = 0.68 + 0.32·((sin(0)+1)/2) = 0.84 →
+        // (UInt8(16·0.84), UInt8(40·0.84), UInt8(88·0.84)) = (13, 33, 73).
+        XCTAssertEqual(tupleBytes(MicroGlyphs.statusBg(.processing, animFrame: 0)), [13, 33, 73])
         XCTAssertEqual(tupleBytes(MicroGlyphs.statusBg(.idle, animFrame: 0)), [16, 56, 28])
         XCTAssertEqual(tupleBytes(MicroGlyphs.statusBg(.error, animFrame: 0)), [64, 18, 18])
     }
