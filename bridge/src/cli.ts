@@ -179,6 +179,7 @@ program
         const result = installCodexHooksIfNeeded();
         if (result.installed) {
           log('Codex lifecycle hooks ready in ~/.codex/config.toml');
+          if (result.warning) log(`Codex hooks degraded: ${result.warning}`);
         } else if (result.reason) {
           log(`Codex hooks skipped: ${result.reason}`);
         }
@@ -424,6 +425,7 @@ daemon
         const result = installCodexHooksIfNeeded();
         if (result.installed) {
           log('Codex lifecycle hooks installed in ~/.codex/config.toml');
+          if (result.warning) log(`Codex hooks degraded: ${result.warning}`);
         } else if (result.reason) {
           log(`Codex hooks skipped: ${result.reason}`);
         }

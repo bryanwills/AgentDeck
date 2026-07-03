@@ -416,6 +416,23 @@ describe('codex-install: install / uninstall (file I/O)', () => {
     expect(readFileSync(configPath, 'utf-8')).not.toContain(OPEN_FENCE);
   });
 
+  it('downgrades to lifecycle-only with a warning when the sidecar write fails', () => {
+    // Parent of the sidecar path is a regular file, so mkdir/write fails.
+    const blocker = join(tmp, 'blocker');
+    writeFileSync(blocker, 'not a directory', 'utf-8');
+    const result = installCodexHooksIfNeeded({
+      configPath,
+      daemonHttpPort: 9120,
+      platform: 'win32',
+      notifyScriptPath: join(blocker, 'codex-notify.ps1'),
+    });
+    expect(result.installed).toBe(true);
+    expect(result.warning).toContain('notify sidecar write failed');
+    const managed = readFileSync(configPath, 'utf-8').split(OPEN_FENCE)[1].split(CLOSE_FENCE)[0];
+    expect(managed).not.toContain('notify =');
+    expect(managed).toContain('hooks = true');
+  });
+
   it('skips notify on Windows when user has top-level notify (no sidecar written)', () => {
     writeFileSync(configPath, `notify = ["python3", "/x.py"]\n`, 'utf-8');
     installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, platform: 'win32', notifyScriptPath });

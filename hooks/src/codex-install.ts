@@ -53,6 +53,9 @@ export interface InstallResult {
   installed: boolean;
   /** Human-readable reason when `installed === false`. */
   reason?: string;
+  /** Non-fatal degradation while `installed === true` (e.g. the Windows
+   *  notify sidecar could not be written, so notify was omitted). */
+  warning?: string;
 }
 
 /** Honour `AGENTDECK_NO_CODEX_HOOKS=1` from the environment. Callers
@@ -348,14 +351,18 @@ export function installCodexHooksIfNeeded(opts: InstallOptions = {}): InstallRes
 
   const platform = opts.platform ?? process.platform;
   let includeNotify = !hasTopLevelKeyOutsideFence(original, 'notify');
+  // OTel exporter stays POSIX-only for now — deliberately omitted on
+  // win32 (unverified there); lifecycle hooks + notify carry the signal.
   const includeOtel = platform !== 'win32' && !hasTableOutsideFence(original, 'otel');
 
+  let warning: string | undefined;
   const notifyScriptPath = opts.notifyScriptPath ?? DEFAULT_WINDOWS_NOTIFY_SCRIPT_PATH;
   if (includeNotify && platform === 'win32') {
     // The Stop lifecycle hook already reports turn-complete, so a failed
     // sidecar write downgrades to lifecycle-only rather than aborting.
     if (!writeScriptIfChanged(windowsNotifyScriptContent(), notifyScriptPath)) {
       includeNotify = false;
+      warning = `notify sidecar write failed (${notifyScriptPath}) — notify fallback omitted`;
     }
   }
 
@@ -371,11 +378,11 @@ export function installCodexHooksIfNeeded(opts: InstallOptions = {}): InstallRes
   const updated = applyManagedBlock(original, body);
 
   if (updated === original) {
-    return { installed: true };
+    return { installed: true, warning };
   }
 
   if (writeTextAtomic(updated, path)) {
-    return { installed: true };
+    return { installed: true, warning };
   }
   return { installed: false, reason: `write failed: ${path}` };
 }
