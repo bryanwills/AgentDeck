@@ -113,7 +113,7 @@ static lv_obj_t* cellNo[MOSAIC_MAX]  = {nullptr};
 // D1 card visual polish: a tinted creature glyph (agent mark) in each card's top-right
 // corner, plus a proper state "pill" chip. The glyph is the canonical creature silhouette
 // (A8 alpha mask) recolored to the agent accent — brings back the creature imagery the flat
-// label cards had lost. Codex has no glyph → its cell hides the image (dot fallback in name).
+// label cards had lost. Unknown agents have no glyph → their cell hides the image (dot fallback in name).
 static lv_obj_t* cellGlyph[MOSAIC_MAX] = {nullptr};   // creature mark overlay (IGNORE_LAYOUT)
 static lv_obj_t* cellPill[MOSAIC_MAX]  = {nullptr};   // state pill chip (content-sized label)
 
@@ -189,14 +189,15 @@ static void ips10InitGlyphs() {
 static bool ips10IsAntigravityAgent(const char* agentType) {
     return agentType && strstr(agentType, "antigravity") != nullptr;
 }
-// Map an agent type to its glyph descriptor (null → no glyph, e.g. Codex).
+// Map an agent type to its glyph descriptor (null → no glyph, i.e. unknown agent).
 static const lv_image_dsc_t* ips10AgentGlyph(const char* agentType) {
     if (!agentType) return nullptr;
     if (strstr(agentType, "openclaw"))  return &glyphCrayfish;
     if (strstr(agentType, "opencode"))  return &glyphOpencode;
     if (strstr(agentType, "antigravity")) return &glyphAntigravityColor;
+    if (strstr(agentType, "codex"))     return &glyphCodex;
     if (strstr(agentType, "claude"))    return &glyphOctopus;
-    return nullptr;   // codex / unknown → dot fallback in the name line
+    return nullptr;   // unknown agent → dot fallback in the name line
 }
 
 // Per-cell snapshot used by the tap handler + detail overlay (no g_state access on tap).
@@ -1804,7 +1805,7 @@ void update() {
             int innerW = pw - 24; if (innerW < 24) innerW = 24;
 
             // Creature mark — top-right overlay, tinted to the agent accent, sized to the
-            // cell (32–60px). Skipped on tiny cells and for agents with no mask (Codex).
+            // cell (32–60px). Skipped on tiny cells and for unknown agents with no mask.
             const lv_image_dsc_t* gdsc = ips10AgentGlyph(mc[i].agent);
             int glyphSz = 0;
             if (gdsc && pw >= 92 && ph >= 52) {
