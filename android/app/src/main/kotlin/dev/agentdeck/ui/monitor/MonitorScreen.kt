@@ -401,14 +401,6 @@ private fun ConnectionOverlay(
                 )
             }
 
-            if (connectionStatus == ConnectionStatus.CONNECTING && !isReconnecting) {
-                Text(
-                    text = ConnectionLexicon.CONNECTING,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = AgentDeckColors.Amber,
-                )
-            }
-
             // Show connection options when not actively connecting (or when reconnecting with alternatives)
             if (connectionStatus == ConnectionStatus.DISCONNECTED || isReconnecting) {
                 Spacer(modifier = Modifier.height(4.dp))

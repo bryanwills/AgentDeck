@@ -25,6 +25,9 @@
 ### 검증
 vitest 92파일/1637 pass, `pnpm build` OK, `xcodebuild AgentDeck_macOS` OK, Android `compileDebugKotlin` OK, ESP32 `pio run -e ips35` OK. 코드 전역에서 "Searching for bridges"/"Retry Discovery" 리터럴 0건 확인.
 
+### 후속(실기 배포 중 발견) — Android "Connecting..." 두 줄 중복 제거
+실기 APK 반영 후 CONNECTING 상태에서 "Connecting..."이 두 줄로 뜨는 게 드러남. MonitorScreen/EinkMonitorScreen 모두 상태 부제(status subtitle)가 이미 CONNECTING→"Connecting..."을 렌더하는데, 그 아래 별도 블록이 같은 문자열을 한 번 더 표시하던 **기존 중복**. lexicon 상수화로 두 줄이 정확히 같아지며 눈에 띔. 별도 CONNECTING 블록 제거(부제 한 줄만 유지). **참고**: 사용자가 함께 본 "daemon-9120 + AgentDeck-9121 두 개 발견"은 코드 버그가 아니라 **같은 머신에 데몬 2개 공존**(macOS 앱 Swift 데몬 project=daemon/v=3/9120 + CLI Node 데몬 project=AgentDeck/v=1/9121 fallback)이 각각 mDNS 광고한 것 — 한쪽 데몬 정지로 해소.
+
 ---
 
 ## 2026-07-02 — 타임라인 완결성 후속: 갭 5건 구현 (마일스톤 행 · OpenCode idle-gap · task 행 FIFO 보호 · APME-off fallback · unscored 종결)

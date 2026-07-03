@@ -760,14 +760,6 @@ private fun EinkNotConnectedScreen(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        if (connectionStatus == ConnectionStatus.CONNECTING) {
-            Text(
-                text = ConnectionLexicon.CONNECTING,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
         if (connectionStatus == ConnectionStatus.DISCONNECTED) {
             // USB (adb reverse) quick connect
             Surface(
