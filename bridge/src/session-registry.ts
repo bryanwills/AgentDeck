@@ -63,6 +63,8 @@ function getDaemonFile(): string { return join(getDataDir(), 'daemon.json'); }
 export const DAEMON_DEFAULT_PORT = 9120;
 const BASE_PORT = 9120;
 const MAX_PORT = 9139;
+/** Documented daemon port window (docs/daemon.md) — scanned for cross-implementation discovery. */
+export const DAEMON_PORT_WINDOW: readonly [number, number] = [BASE_PORT, MAX_PORT];
 
 export interface DaemonInfo {
   port: number;
@@ -341,6 +343,48 @@ export function probeDaemonHealth(port: number): Promise<{ mode?: string; pid?: 
 }
 
 /**
+ * Sweep the daemon port window for live daemons that file-based discovery
+ * cannot see. Two blind spots make this necessary:
+ *  - The App Store Swift daemon writes `daemon.json` into its private sandbox
+ *    container, which `getCandidateDataDirs()` cannot read.
+ *  - Transient 9120 contention can bump a daemon to a fallback port (9121+),
+ *    where the default-port probe never looks.
+ * Probes all window ports concurrently (localhost refusals resolve instantly)
+ * and returns every occupant whose `/health` reports `mode: 'daemon'`.
+ */
+export async function scanDaemonPortWindow(
+  skip: ReadonlySet<number> = new Set(),
+  window: readonly [number, number] = DAEMON_PORT_WINDOW,
+): Promise<Array<{ port: number; health: { mode?: string; pid?: number; isSwift?: boolean } }>> {
+  const ports: number[] = [];
+  for (let p = window[0]; p <= window[1]; p++) {
+    if (!skip.has(p)) ports.push(p);
+  }
+  const probes = await Promise.all(
+    ports.map(async (port) => ({ port, health: await probeDaemonHealth(port) })),
+  );
+  return probes.filter((r): r is { port: number; health: NonNullable<typeof r.health> } =>
+    r.health?.mode === 'daemon');
+}
+
+/**
+ * Poll a port's `/health` until the daemon there stops answering, or the
+ * timeout expires. Used after `requestDaemonShutdown()` instead of a fixed
+ * sleep: the Swift daemon tears down device modules (serial, ADB reverse,
+ * BLE) during shutdown, and taking over before it finishes leaves two owners
+ * briefly contending for the same tty / adb reverse mapping.
+ * Returns true once the daemon is gone.
+ */
+export async function waitForDaemonExit(port: number, timeoutMs = 5000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (!(await probeDaemonHealth(port))) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/**
  * Request another daemon to shutdown (used to clear Swift daemon when CLI starts)
  */
 export function requestDaemonShutdown(port: number): Promise<void> {
@@ -407,7 +451,7 @@ export async function findDaemonPortAsync(): Promise<{ port: number; httpPort?: 
   // 2. Port scan fallback — covers the "App Store daemon is up but its
   //    daemon.json sits in a dir this process can't read" case. Narrow
   //    range (9120-9139) matches the documented daemon port window.
-  for (let p = 9120; p <= 9139; p++) {
+  for (let p = DAEMON_PORT_WINDOW[0]; p <= DAEMON_PORT_WINDOW[1]; p++) {
     const health = await probeDaemonHealth(p);
     if (health?.mode === 'daemon') {
       return { port: p };

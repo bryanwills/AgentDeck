@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { shouldConcedePortToOccupant } from '../session-registry.js';
+import http from 'http';
+import { scanDaemonPortWindow, shouldConcedePortToOccupant, waitForDaemonExit } from '../session-registry.js';
 import { readFileSync, mkdirSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -204,6 +205,71 @@ describe('Session Registry Logic', () => {
 
     it('trusts the mode when no PID is reported (e.g. Swift App Store daemon)', () => {
       expect(shouldConcedePortToOccupant({ mode: 'daemon' }, SELF, dead)).toBe(true);
+    });
+  });
+
+  describe('scanDaemonPortWindow / waitForDaemonExit (split-brain guard)', () => {
+    // Hermetic window well above the real 9120-9139 range so a daemon running
+    // on the dev machine can't leak into the assertions.
+    const WINDOW: readonly [number, number] = [29320, 29324];
+
+    function serveHealth(port: number, body: Record<string, unknown>): Promise<http.Server> {
+      return new Promise((resolve, reject) => {
+        const server = http.createServer((req, res) => {
+          if (req.url === '/health') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(body));
+          } else {
+            res.writeHead(404);
+            res.end();
+          }
+        });
+        server.on('error', reject);
+        server.listen(port, '127.0.0.1', () => resolve(server));
+      });
+    }
+
+    it('finds a Swift daemon sitting on a fallback port inside the window', async () => {
+      const server = await serveHealth(WINDOW[0] + 1, { mode: 'daemon', isSwift: true });
+      try {
+        const found = await scanDaemonPortWindow(new Set(), WINDOW);
+        expect(found).toEqual([
+          { port: WINDOW[0] + 1, health: { mode: 'daemon', isSwift: true } },
+        ]);
+      } finally {
+        server.close();
+      }
+    });
+
+    it('ignores non-daemon occupants (session bridges) and skipped ports', async () => {
+      const bridge = await serveHealth(WINDOW[0], { mode: 'session' });
+      const daemon = await serveHealth(WINDOW[0] + 2, { mode: 'daemon', pid: 1234 });
+      try {
+        const found = await scanDaemonPortWindow(new Set([WINDOW[0] + 2]), WINDOW);
+        expect(found).toEqual([]);
+      } finally {
+        bridge.close();
+        daemon.close();
+      }
+    });
+
+    it('returns empty when the window is quiet', async () => {
+      expect(await scanDaemonPortWindow(new Set(), WINDOW)).toEqual([]);
+    });
+
+    it('waitForDaemonExit resolves true once /health stops answering', async () => {
+      const server = await serveHealth(WINDOW[0] + 3, { mode: 'daemon', isSwift: true });
+      setTimeout(() => server.close(), 300);
+      expect(await waitForDaemonExit(WINDOW[0] + 3, 5000)).toBe(true);
+    });
+
+    it('waitForDaemonExit resolves false when the daemon never leaves', async () => {
+      const server = await serveHealth(WINDOW[0] + 4, { mode: 'daemon', isSwift: true });
+      try {
+        expect(await waitForDaemonExit(WINDOW[0] + 4, 600)).toBe(false);
+      } finally {
+        server.close();
+      }
     });
   });
 });
