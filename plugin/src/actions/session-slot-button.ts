@@ -12,7 +12,7 @@ import streamDeck, {
   WillAppearEvent,
   WillDisappearEvent,
 } from '@elgato/streamdeck';
-import { State } from '@agentdeck/shared';
+import { State, PASSIVE_OFFLINE_LABEL, OPEN_AGENTDECK_LABEL } from '@agentdeck/shared';
 import type { SessionInfo, PromptOption, CodexRateLimits } from '@agentdeck/shared';
 import { SessionSlotManager, type DeckLayout, type SessionSlotConfig } from '../session-slot-manager.js';
 import { computeCenterCluster } from '../center-slot.js';
@@ -220,8 +220,8 @@ function getDisconnectedSlotConfig(slot: number, layout: DeckLayout): Disconnect
   const row = Math.floor(slot / cols);
   return {
     kind: 'open-app',
-    label: 'OFFLINE',
-    subtitle: 'Open AgentDeck',
+    label: PASSIVE_OFFLINE_LABEL,
+    subtitle: OPEN_AGENTDECK_LABEL,
     col,
     row,
     cols,

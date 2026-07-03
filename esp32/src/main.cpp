@@ -213,7 +213,7 @@ static void uiTask(void* param) {
     // Create screens
     scrSplash = Screens::splashCreate();
     lv_screen_load(scrSplash);
-    Screens::splashSetStatus("Searching for bridges...");
+    Screens::splashSetStatus("Searching for AgentDeck...");
 
     scrAquarium = Screens::aquariumCreate();
     Screens::permissionCreate(scrAquarium);
@@ -383,7 +383,7 @@ static void uiTask(void* param) {
                 if (!Net::wifiConnected() && !Net::serialConnected()) {
                     Screens::splashSetStatus("No WiFi");
                 } else {
-                    Screens::splashSetStatus("Searching for bridges...");
+                    Screens::splashSetStatus("Searching for AgentDeck...");
                 }
             }
         }

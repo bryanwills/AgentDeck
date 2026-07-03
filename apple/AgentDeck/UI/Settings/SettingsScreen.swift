@@ -699,7 +699,7 @@ struct SettingsScreen: View {
             }
 
             if stateHolder.discovery.bridges.isEmpty {
-                Text("Searching for bridges...")
+                Text(ConnectionLexicon.searching)
                     .font(.system(size: 11))
                     .foregroundStyle(TerrariumHUD.subtext)
             } else {

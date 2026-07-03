@@ -39,6 +39,17 @@ import dev.agentdeck.net.DiscoveredBridge
 import dev.agentdeck.ui.theme.AgentDeckColors
 import dev.agentdeck.ui.theme.LocalIsEink
 
+// ── Connection-state lexicon ──────────────────────────────────────────
+// Kotlin mirror of shared/src/connection-status.ts. Self-connecting clients
+// (this app, Apple app, ESP32) surface the phase they are actually in;
+// update the TS SSOT and all mirrors together when copy changes.
+object ConnectionLexicon {
+    const val SEARCHING = "Searching for AgentDeck..."
+    const val SEARCHING_COMPACT = "Searching..."
+    const val CONNECTING = "Connecting..."
+    const val RECONNECTING = "Reconnecting..."
+}
+
 // ── Status Badge ──────────────────────────────────────────────────────
 
 @Composable
@@ -52,8 +63,8 @@ fun ConnectionStatusBadge(
         Text(
             text = when (connectionStatus) {
                 ConnectionStatus.CONNECTED -> "\u25CF Connected"
-                ConnectionStatus.CONNECTING -> "\u25CB Connecting..."
-                ConnectionStatus.DISCONNECTED -> "\u25CB Searching..."
+                ConnectionStatus.CONNECTING -> "\u25CB ${ConnectionLexicon.CONNECTING}"
+                ConnectionStatus.DISCONNECTED -> "\u25CB ${ConnectionLexicon.SEARCHING_COMPACT}"
             },
             style = MaterialTheme.typography.bodyMedium,
             color = if (isEink) {
@@ -220,7 +231,7 @@ fun DiscoveredBridgeList(
             }
         } else {
             Text(
-                text = "Searching for bridges...",
+                text = ConnectionLexicon.SEARCHING,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
