@@ -133,6 +133,8 @@ export class OutputParser extends EventEmitter {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private optionTimer: ReturnType<typeof setTimeout> | null = null;
   private projectName: string | null = null;
+  /** Bridge-resolved name; survives reset() so the scrape stays disabled. */
+  private seededProjectName: string | null = null;
   private modelName: string | null = null;
   private effortLevel: string | null = null;
   // Don't trigger spinner until we've seen the first idle prompt
@@ -1208,6 +1210,21 @@ export class OutputParser extends EventEmitter {
     if (this.interactiveCooldown) { clearTimeout(this.interactiveCooldown); this.interactiveCooldown = null; }
   }
 
+  /**
+   * Pre-seed the project name resolved by the bridge (git-aware). With a
+   * meaningful seed in place, parseProjectName() short-circuits and never
+   * emits, so the broad PROJECT_DIR scrape — bare basename of any path-like
+   * terminal line, first match sticks — can't override the resolver via the
+   * state-machine snapshot. The scrape stays live only when the resolver
+   * produced nothing better than 'unknown'.
+   */
+  seedProjectName(name: string): void {
+    if (name && name !== 'unknown') {
+      this.projectName = name;
+      this.seededProjectName = this.projectName;
+    }
+  }
+
   getProjectName(): string | null { return this.projectName; }
   getModelName(): string | null { return this.modelName; }
   getEffortLevel(): string | null { return this.effortLevel; }
@@ -1218,7 +1235,7 @@ export class OutputParser extends EventEmitter {
     this.spinnerActive = false;
     this.seenFirstIdle = false;
     this.pendingModeSwitch = false;
-    this.projectName = null;
+    this.projectName = this.seededProjectName;
     this.modelName = null;
     this.effortLevel = null;
     this.lastSuggestedPrompt = null;

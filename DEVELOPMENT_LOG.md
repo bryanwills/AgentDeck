@@ -16,6 +16,8 @@
 2. **mDNS TXT `v` 통일** — Node `v:'1'` vs Swift `v:'3'` (같은 `_agentdeck._tcp`). 현재 v를 읽는 클라이언트는 없어 Node를 '3'으로 정렬 + 양쪽 lockstep 주석.
 3. **task 행 아이콘 패리티** — task_start/task_end/task_milestone이 TUI(`tui/renderer.ts` typeIcon)와 Android e-ink EventLog(`EinkEventLog.kt` typeIcon)에서 default 아이콘으로 뭉개짐(Apple/Android rich 타임라인만 표시). `timelineIconKey()` 의미(task→task 글리프, milestone→success)로 두 맵 보강.
 4. **관찰 세션 프로젝트명 통일** — PTY는 `resolveProjectName()`(git root→package.json→basename), Swift 데몬은 `ProjectNameResolver.swift` 동일 미러인데 Node passive-observer만 `basename(cwd)` → 같은 프로젝트가 실행 경로 따라 다른 이름("AgentDeck" vs "bridge"), projectName 키 기반 `#N` dedup·Codex folding도 경로 간 분리. 신규 `resolveProjectNameFromCwdCached()`: 동일 순서, git 탐지는 서브프로세스 없는 `.git` ancestor walk(dir/file — Swift 미러와 동일 알고리즘, 스캔 이벤트루프 스톨 방지), cwd별 memoize.
+   - **스크레이프 override 차단** — Claude PTY의 `OutputParser` PROJECT_DIR 정규식(아무 경로형 줄의 basename, first-match-sticks)이 state-machine snapshot을 타고 `bridge-core.ts`의 `snapshot.projectName ?? this.projectName` 우선순위로 git-aware 이름을 덮어씀(모노레포 서브디렉토리 세션이 repo명→서브디렉토리명으로 플립). `seedProjectName()`으로 resolved 이름을 파서에 시드해 스크레이프를 비활성(resolver가 'unknown'일 때만 fallback 유지, reset() 후에도 시드 유지). OpenCode(세션 제목)·OpenClaw(고정 'OpenClaw') 경로는 의도된 override라 그대로.
+   - **OpenCode 어댑터** — `directory.split('/').pop()` basename fallback도 동일 리졸버로 교체(세션 title 우선은 유지).
 5. **X4 포크 펌웨어**(crosspoint-agentdeck, 브랜치 `feature/agentdeck-timeline-consistency`) — Detail 타임라인을 타 표면과 정렬: entry.ts 포워딩+데몬시계 추정 나이 표시, 공유 `EINK_ICON_GLYPHS` 마커, chat_start turn 그룹핑, sessionId 없는 error/scheduled 행 유지, OFFLINE/Disconnected 문구 단일화. 기기 검증 대기.
 
 ### 미수정(확인만; 후속 후보)
@@ -25,7 +27,7 @@
 - Node/Swift 타임라인 스토어는 손 미러링 2벌 — 공유 fixture 기반 projection 패리티 계약 테스트 부재.
 
 ### 검증
-vitest 92파일/1646 pass(신규: scanDaemonPortWindow/waitForDaemonExit 5, resolveProjectNameFromCwdCached 4), Android JUnit 195 pass, X4 `pio run` SUCCESS.
+vitest 92파일/1649 pass(신규: scanDaemonPortWindow/waitForDaemonExit 5, resolveProjectNameFromCwdCached 4, seedProjectName 3), Android JUnit 195 pass, X4 `pio run` SUCCESS.
 
 ---
 

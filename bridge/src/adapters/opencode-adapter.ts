@@ -18,6 +18,7 @@ import type { AgentCapabilities, AdapterStartOptions, AdapterEvent, PluginComman
 import type { AdapterContext } from '@agentdeck/shared';
 import { OPENCODE_CAPABILITIES } from '../types.js';
 import { PtyAdapter } from './pty-adapter.js';
+import { resolveProjectNameFromCwdCached } from '../utils/project-name.js';
 import { randomUUID } from 'crypto';
 import { getApme } from '../apme/index.js';
 import {
@@ -237,7 +238,9 @@ export class OpenCodeAdapter extends PtyAdapter {
       const existing = sessions.find(s => s.directory === directory);
       if (existing) {
         this.activeSessionID = existing.id;
-        this.ocProjectName = existing.title || directory.split('/').pop() || null;
+        // Session title first (user-meaningful), then the shared git-aware
+        // resolver — bare basename diverged from every other launch path.
+        this.ocProjectName = existing.title || resolveProjectNameFromCwdCached(directory);
         log('Tracking session:', existing.id, existing.title);
       }
     } catch (err) {
