@@ -155,14 +155,18 @@ void snapshot(Snap& s) {
     if (!s.agPlan[0] && g_state.antigravityPlan[0]) {
         snprintf(s.agPlan, sizeof(s.agPlan), "AGY %s", g_state.antigravityPlan);
     }
-    // Latest human-readable timeline entry → ticker. Skips raw JSON bodies
-    // (codex tool outputs like {"exclude":[]} land in the timeline as
-    // chat_response rows — machine noise, not a status line). Prefer the
-    // daemon-preformatted local "HH:MM"; raw ts fallback is UTC-derived.
-    for (uint8_t back = 0; back < g_state.timelineCount && back < 8; back++) {
+    // Latest MILESTONE timeline entry → ticker. Only task-level rows qualify
+    // (chat_start/chat_end/task_start/task_end): per-tool rows from managed
+    // PTY sessions ("Bash: cd /Users/…") are command spam at glance distance,
+    // and raw JSON bodies ({"exclude":[]} chat_responses) are machine noise.
+    // Prefer the daemon-preformatted local "HH:MM"; ts fallback is UTC-derived.
+    for (uint8_t back = 0; back < g_state.timelineCount && back < 16; back++) {
         uint8_t idx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - back) % TIMELINE_MAX_ENTRIES);
         const TimelineEntry& t = g_state.timeline[idx];
         if (!t.raw[0] || t.raw[0] == '{' || t.raw[0] == '[') continue;
+        bool milestone = strcmp(t.type, "chat_start") == 0 || strcmp(t.type, "chat_end") == 0 ||
+                         strcmp(t.type, "task_start") == 0 || strcmp(t.type, "task_end") == 0;
+        if (!milestone) continue;
         if (t.hm[0]) {
             strncpy(s.tickerTime, t.hm, sizeof(s.tickerTime) - 1);
         } else {

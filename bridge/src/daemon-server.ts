@@ -697,33 +697,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         // but direct `claude`/`codex` runs only reach the daemon through these
         // hooks — without emitting here the daemon timeline (device ticker,
         // Android/Apple lists) goes silent whenever no managed session runs.
-        // chat_end is intentionally NOT emitted (hooks carry no response text;
-        // a bare "Completed" row per turn is fragmentation, not signal).
-        {
+        //
+        // Granularity is deliberately TASK-level, not command-level: only the
+        // user's prompt (chat_start = what was asked) is emitted. Per-tool rows
+        // ("Bash: cd /Users/…" for every command) drowned the glance surfaces
+        // in noise; task grouping (task_start/task_end) stays APME's job, and
+        // chat_end is skipped too (hooks carry no response text — a bare
+        // "Completed" row per turn is fragmentation, not signal).
+        if (mapped === 'user_prompt_submit' && typeof json.prompt === 'string' && json.prompt.trim()) {
           const tlSessionId = typeof json.session_id === 'string' && json.session_id
             ? json.session_id : 'daemon-hook';
           const tlCwd = (typeof json.cwd === 'string' ? json.cwd : '') || '';
           const tlProject = tlCwd ? tlCwd.split('/').filter(Boolean).pop() : undefined;
-          if (mapped === 'user_prompt_submit' && typeof json.prompt === 'string' && json.prompt.trim()) {
-            core.bridgeTimeline.addEntry({
-              ts: Date.now(), type: 'chat_start',
-              raw: stripUnsafeText(json.prompt.trim()).slice(0, 160),
-              sessionId: tlSessionId,
-              ...(tlProject ? { projectName: tlProject } : {}),
-            } as TimelineEntry);
-          } else if (mapped === 'tool_start' && typeof json.tool_name === 'string' && json.tool_name) {
-            const ti = (json.tool_input && typeof json.tool_input === 'object' ? json.tool_input : {}) as Record<string, unknown>;
-            const inputHint = typeof ti.command === 'string' ? ti.command
-              : typeof ti.file_path === 'string' ? ti.file_path
-              : typeof ti.pattern === 'string' ? ti.pattern
-              : typeof ti.description === 'string' ? ti.description : '';
-            core.bridgeTimeline.addEntry({
-              ts: Date.now(), type: 'tool_exec',
-              raw: stripUnsafeText(`${json.tool_name}${inputHint ? ': ' + inputHint : ''}`).slice(0, 120),
-              sessionId: tlSessionId,
-              ...(tlProject ? { projectName: tlProject } : {}),
-            } as TimelineEntry);
-          }
+          core.bridgeTimeline.addEntry({
+            ts: Date.now(), type: 'chat_start',
+            raw: stripUnsafeText(json.prompt.trim()).slice(0, 160),
+            sessionId: tlSessionId,
+            ...(tlProject ? { projectName: tlProject } : {}),
+          } as TimelineEntry);
         }
         // APME collector
         if (apme) {

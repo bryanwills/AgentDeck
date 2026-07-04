@@ -96,7 +96,7 @@ export interface SerialConnection {
   reader: ReadStream | null;
   readBuf: string;
   connected: boolean;
-  deviceInfo: { board?: string; version?: string; buildHash?: string; buildEpoch?: number; wifiConfigured?: boolean; wifiConnected?: boolean } | null;
+  deviceInfo: { board?: string; version?: string; buildHash?: string; buildEpoch?: number; wifiConfigured?: boolean; wifiConnected?: boolean; timelineCount?: number; sessionCount?: number } | null;
   /** True once a device_info arrived on THIS connection (vs. cache-seeded).
    * Identify retries key off this — a cache-seeded deviceInfo must not stop
    * re-requests, or a reflashed board keeps its stale buildHash in /devices
@@ -541,6 +541,10 @@ export function handleSerialLine(conn: SerialConnection, line: string): void {
           buildEpoch: msg.buildEpoch,
           wifiConfigured: msg.wifiConfigured,
           wifiConnected: msg.wifiConnected,
+          // Board-side reality counters (debug aid — surfaced on /devices so
+          // "device shows nothing" can be diagnosed without stealing the port)
+          timelineCount: (msg as any).timelineCount,
+          sessionCount: (msg as any).sessionCount,
         };
         conn.deviceInfoFresh = true;
         if (conn.deviceInfo.board) {
@@ -798,6 +802,13 @@ function sendHeartbeat(): void {
 
   for (const conn of connections) {
     if (conn.connected) sendSerialKeepalive(conn);
+    // Refresh the identity snapshot about once a minute even after a fresh
+    // device_info landed — its debug counters (sessionCount/timelineCount)
+    // are point-in-time, and a connect-moment snapshot reading "0" on
+    // /devices masquerades as "board parses nothing".
+    if (conn.deviceInfoFresh && Date.now() - conn.lastDeviceInfoRequestAt > 60_000) {
+      sendDeviceInfoRequest(conn);
+    }
   }
 
   // Send state_update (stripped for serial — smaller payload)

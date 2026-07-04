@@ -77,6 +77,7 @@ static void sendDeviceInfoSerial() {
     resp["protocolRevision"] = PROTOCOL_REVISION;
     resp["wifiConfigured"] = (WiFi.SSID().length() > 0);
     resp["timelineCount"] = g_state.timelineCount;  // debug aid, keep in sync with protocol.cpp copy
+    resp["sessionCount"] = g_state.sessionCount;
     resp["wifiConnected"] = wifiConnected();
     if (wifiConnected()) {
         resp["ip"] = wifiLocalIP();
@@ -128,8 +129,14 @@ void serialLoop() {
                         sendDeviceInfoSerial();
                     }
 
-                    // Send heartbeat acknowledgment to bridge
-                    sendHeartbeatAck();
+                    // Ack ONLY keepalives — acking every inbound JSON meant the
+                    // panel was almost always TRANSMITTING while the daemon's
+                    // next line streamed in, and full-duplex TX raises the
+                    // HWCDC inbound-drop odds (long sessions_list lines arrived
+                    // truncated → IncompleteInput → empty session grid).
+                    if (strstr(serialBuf, "\"keepalive\"") != nullptr) {
+                        sendHeartbeatAck();
+                    }
                 }
 
                 serialBufPos = 0;
