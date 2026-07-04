@@ -690,68 +690,6 @@ program
     }
   });
 
-program
-  .command('trmnl')
-  .description('TRMNL e-ink (BYOS) setup URL + enrolled panels + health')
-  .option('-p, --port <port>', 'Daemon HTTP port (defaults to the running daemon / 9120)')
-  .action(async (opts) => {
-    const { readDaemonInfo, findDaemonPort } = await import('./session-registry.js');
-    const { getLanIp } = await import('@agentdeck/shared');
-    const { loadTrmnlConfig } = await import('./trmnl/trmnl-settings.js');
-    const info = readDaemonInfo();
-    const port = opts.port != null
-      ? parseInt(opts.port, 10)
-      : (info?.httpPort ?? info?.port ?? findDaemonPort() ?? 9120);
-    const cfg = loadTrmnlConfig();
-    const lanIp = getLanIp() ?? '<this-machine-LAN-IP>';
-
-    log('\nTRMNL BYOS setup');
-    log('────────────────');
-    log('On the panel, set the custom server / BYOS URL to ONE stable address:');
-    log(`\n  http://${lanIp}:${port}\n`);
-    log('The panel auto-enrolls on its first poll (no MAC entry needed).');
-    log('Run exactly one hub on this address: either the App Store macOS app or');
-    log('the Node CLI daemon. The App Store app is a complete TRMNL BYOS hub; the');
-    log('CLI daemon adds developer-session and OAuth quota relay when you need it.');
-    log('Two hubs racing for the port, or a panel pinned to a dead fallback port, makes');
-    log('a panel flip to');
-    log('"TRMNL not responding".\n');
-
-    // Live health from the running daemon, if reachable.
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/status`, { signal: AbortSignal.timeout(2000) });
-      const data = await res.json() as { modules?: { trmnl?: any } };
-      const t = data.modules?.trmnl;
-      if (t) {
-        log(`Daemon hub: up on ${port} · cadence ${t.currentRefreshRate ?? t.refreshRate}s ` +
-          `(idle ${t.refreshRate}s / active ${t.refreshActive ?? '?'}s)`);
-        const tele: any[] = Array.isArray(t.telemetry) ? t.telemetry : [];
-        if (tele.length === 0) {
-          if (cfg.devices.length === 0) {
-            log('Configured panels: none.');
-          } else {
-            log(`Configured panels: ${cfg.devices.length} · no live poll seen since daemon start.`);
-            for (const d of cfg.devices) log(`  ${d.mac}${d.name ? ` (${d.name})` : ''}`);
-          }
-        } else {
-          log('Enrolled panels:');
-          for (const d of tele) {
-            const size = d.width && d.height ? `${d.width}x${d.height}` : '?';
-            const batt = d.batteryVoltage != null ? ` · ${d.batteryVoltage}V` : '';
-            const rssi = d.rssi != null ? ` · ${d.rssi}dBm` : '';
-            const seen = d.secondsSinceSeen != null ? `${d.secondsSinceSeen}s ago` : 'unknown';
-            const flag = d.stale ? ' ⚠ STALE (not polling)' : ' ✓';
-            log(`  ${d.mac}  ${size}${batt}${rssi} · seen ${seen}${flag}`);
-          }
-        }
-      } else {
-        log('Daemon is up but it did not expose TRMNL health. Upgrade the hub or verify it owns /api/display.');
-      }
-    } catch {
-      log(`Daemon not reachable on ${port}. Configured panels: ${cfg.devices.length}.`);
-      for (const d of cfg.devices) log(`  ${d.mac}${d.name ? ` (${d.name})` : ''}`);
-    }
-  });
 
 program
   .command('diag')

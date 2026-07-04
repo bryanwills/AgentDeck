@@ -7,7 +7,6 @@ import { PixooModule } from './pixoo-module.js';
 import { TimeboxModule } from './timebox-module.js';
 import { IDotMatrixModule } from './idotmatrix-module.js';
 import { D200hModule } from './d200h-module.js';
-import { TrmnlModule } from './trmnl-module.js';
 import type { AgentType } from '../types.js';
 import { debug } from '../logger.js';
 
@@ -20,7 +19,6 @@ export { PixooModule } from './pixoo-module.js';
 export { TimeboxModule } from './timebox-module.js';
 export { IDotMatrixModule } from './idotmatrix-module.js';
 export { D200hModule } from './d200h-module.js';
-export { TrmnlModule } from './trmnl-module.js';
 
 /**
  * Create default module instances for a given agent type.
@@ -35,7 +33,6 @@ export function createDefaultModules(agentType: AgentType): DeviceModule[] {
     new TimeboxModule(),
     new IDotMatrixModule(),
     new D200hModule(),
-    new TrmnlModule(),
   ];
 }
 

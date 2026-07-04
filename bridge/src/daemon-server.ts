@@ -56,13 +56,6 @@ import { readModelFromTranscript } from './apme/claude-transcript-reader.js';
 import { transcriptTimelineForSession } from './session-transcript-timeline.js';
 import { callFoundationModelsHelper } from './foundation-models-helper.js';
 import {
-  handleTrmnlSetup,
-  handleTrmnlDisplay,
-  handleTrmnlImage,
-  handleTrmnlLog,
-  isTrmnlImagePath,
-} from './trmnl/byos-server.js';
-import {
   initModules,
   stopModules,
   createDefaultModules,
@@ -277,13 +270,6 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
   };
   if (d200h?.statusSnapshot) {
     modules.d200h = d200h.statusSnapshot();
-  }
-
-  const trmnl = startedModules.find((m) => m.name === 'trmnl') as DeviceModule & {
-    statusSnapshot?: () => Record<string, unknown>;
-  };
-  if (trmnl?.statusSnapshot) {
-    modules.trmnl = trmnl.statusSnapshot();
   }
 
   if (started.has('pixoo') || pixooDeviceCount() > 0) {
@@ -645,28 +631,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     if (req.method === 'GET' && pathname === '/pixoo') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(pixooLiveHtml({ projectName: 'AgentDeck' }));
-      return;
-    }
-    // --- TRMNL BYOS (e-ink panel pulls rendered dashboard over WiFi) ---
-    // Stock firmware requests `/api/setup/` WITH a trailing slash
-    // (bl.cpp getDeviceCredentials builds `{base}/api/setup/`), so match these
-    // routes slash-insensitively — an exact match 404s enrollment forever and
-    // the panel retries setup on every wake.
-    const trmnlPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
-    if (req.method === 'GET' && trmnlPath === '/api/setup') {
-      handleTrmnlSetup(req, res);
-      return;
-    }
-    if (req.method === 'GET' && trmnlPath === '/api/display') {
-      handleTrmnlDisplay(req, res);
-      return;
-    }
-    if (req.method === 'POST' && trmnlPath === '/api/log') {
-      handleTrmnlLog(req, res);
-      return;
-    }
-    if (req.method === 'GET' && isTrmnlImagePath(pathname)) {
-      handleTrmnlImage(req, res);
       return;
     }
     if (req.method === 'GET' && pathname === '/sse') {
@@ -1050,12 +1014,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   const deviceModules = createDefaultModules('daemon' as any);
   const startedModules = await initModules(
     deviceModules,
-    // TRMNL stays on so its frame cache tracks live state and a freshly-enrolled
-    // panel works without a daemon restart; rendering is internally gated on a
-    // device being registered, so it's cheap when no panel is present.
     // d200h: false — direct-HID fallback retired. The D200H is driven exclusively
     // by the Ulanzi Studio plugin (`ulanzi-plugin`); the daemon never opens it over HID.
-    { mdns: true, broadcast: true, adb: 'auto', serial: 'auto', pixoo: 'auto', timebox: 'auto', idotmatrix: 'auto', d200h: false, trmnl: true },
+    { mdns: true, broadcast: true, adb: 'auto', serial: 'auto', pixoo: 'auto', timebox: 'auto', idotmatrix: 'auto', d200h: false },
     { port, authToken: core.authToken, projectName: 'AgentDeck', wsServer: core.wsServer },
   );
 

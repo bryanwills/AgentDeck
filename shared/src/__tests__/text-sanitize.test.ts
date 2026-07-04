@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { stripUnsafeText, escSvgText } from '../svg-renderers/text-utils.js';
-import { renderTrmnlDashboard } from '../trmnl-layout.js';
 
 describe('stripUnsafeText', () => {
   it('strips ANSI CSI sequences but keeps the visible text', () => {
@@ -26,29 +25,5 @@ describe('stripUnsafeText', () => {
 describe('escSvgText', () => {
   it('entity-escapes after stripping', () => {
     expect(escSvgText('a < b && "q" \x1b[1m')).toBe('a &lt; b &amp;&amp; &quot;q&quot; ');
-  });
-});
-
-describe('renderTrmnlDashboard — hostile session text stays XML-safe', () => {
-  it('emits no raw control characters even when the goal carries ANSI escapes', () => {
-    // Regression: a raw ESC in a PTY-derived goal made resvg reject the whole
-    // SVG downstream, which blanked the physical e-ink panel.
-    const svg = renderTrmnlDashboard({
-      state: 'PROCESSING',
-      allSessions: [
-        {
-          id: 's1',
-          agentType: 'claude-code',
-          state: 'processing',
-          projectName: 'proj\x1b[31m',
-          modelName: 'claude-opus-4-8',
-          goal: 'Fix \x1b[31mred\x1b[0m bug\x00\x08',
-          alive: true,
-        },
-      ],
-    });
-    // eslint-disable-next-line no-control-regex
-    expect(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(svg)).toBe(false);
-    expect(svg).toContain('red');
   });
 });

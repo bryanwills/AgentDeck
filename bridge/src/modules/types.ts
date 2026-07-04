@@ -44,5 +44,4 @@ export interface ModuleConfigs {
   timebox?: 'auto' | boolean;
   idotmatrix?: 'auto' | boolean;
   d200h?: 'auto' | boolean;
-  trmnl?: 'auto' | boolean;
 }
