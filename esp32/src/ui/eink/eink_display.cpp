@@ -82,8 +82,18 @@ struct Snap {
     bool usageStale;
     float codexP, codexS;
     char codexPReset[20], codexSReset[20];
+    // Subscription plan lines per provider ("Max 20x ~7/12"), '' = hide
+    char claudePlan[40];
+    char codexPlan[40];
+    char agPlan[40];
+    float agCredits;
     bool displayOn;
     char ip[16];
+    // Latest timeline event, compressed to one ticker line. EXCLUDED from the
+    // content hash — it updates at most once a minute (piggybacks otherwise)
+    // so tool-event churn can't strobe the e-ink.
+    char tickerTime[8];
+    char tickerText[104];
 };
 
 void snapshot(Snap& s) {
@@ -119,6 +129,37 @@ void snapshot(Snap& s) {
     s.codexS = g_state.codexSecondaryPercent;
     strncpy(s.codexPReset, g_state.codexPrimaryReset, sizeof(s.codexPReset) - 1);
     strncpy(s.codexSReset, g_state.codexSecondaryReset, sizeof(s.codexSReset) - 1);
+    // Map subscriptions[] to provider rows by name; unmatched → Antigravity/etc.
+    s.agCredits = g_state.antigravityCredits;
+    for (uint8_t i = 0; i < g_state.subscriptionCount; i++) {
+        const auto& sub = g_state.subscriptions[i];
+        char line[40];
+        if (sub.until[0]) snprintf(line, sizeof(line), "%s %s", sub.name, sub.until);
+        else { strncpy(line, sub.name, sizeof(line) - 1); line[sizeof(line) - 1] = '\0'; }
+        if (strncmp(sub.name, "Claude", 6) == 0) {
+            // drop the redundant "Claude " prefix under the CLAUDE label
+            const char* tail = line + 6; while (*tail == ' ') tail++;
+            strncpy(s.claudePlan, tail, sizeof(s.claudePlan) - 1);
+        } else if (strncmp(sub.name, "ChatGPT", 7) == 0 || strncmp(sub.name, "Codex", 5) == 0) {
+            const char* tail = line + (sub.name[1] == 'h' ? 7 : 5); while (*tail == ' ') tail++;
+            strncpy(s.codexPlan, tail, sizeof(s.codexPlan) - 1);
+        } else {
+            strncpy(s.agPlan, line, sizeof(s.agPlan) - 1);
+        }
+    }
+    // Latest timeline entry → ticker. Prefer the daemon-preformatted local
+    // "HH:MM"; the raw ts fallback is UTC-derived (panel has no local tz).
+    if (g_state.timelineCount > 0) {
+        uint8_t idx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1) % TIMELINE_MAX_ENTRIES);
+        const TimelineEntry& t = g_state.timeline[idx];
+        if (t.hm[0]) {
+            strncpy(s.tickerTime, t.hm, sizeof(s.tickerTime) - 1);
+        } else {
+            snprintf(s.tickerTime, sizeof(s.tickerTime), "%02lu:%02lu",
+                     (unsigned long)(t.ts / 3600) % 24, (unsigned long)(t.ts / 60) % 60);
+        }
+        strncpy(s.tickerText, t.raw, sizeof(s.tickerText) - 1);
+    }
     unlockState();
     strncpy(s.ip, Net::wifiLocalIP(), sizeof(s.ip) - 1);
 }
@@ -153,8 +194,11 @@ uint32_t contentHash(const Snap& s) {
     h = fnv(h, &cp, sizeof(cp)); h = fnv(h, &cs, sizeof(cs));
     h = fnvStr(h, s.fiveReset); h = fnvStr(h, s.sevenReset);
     h = fnvStr(h, s.codexPReset); h = fnvStr(h, s.codexSReset);
+    h = fnvStr(h, s.claudePlan); h = fnvStr(h, s.codexPlan); h = fnvStr(h, s.agPlan);
+    int ag = (int)s.agCredits; h = fnv(h, &ag, sizeof(ag));
     h = fnv(h, &s.usageStale, 1);
     h = fnvStr(h, s.ip);
+    // NOTE: tickerText intentionally NOT hashed — see Snap.
     return h;
 }
 
@@ -181,15 +225,22 @@ void setInk(bool inverted) {
     display.setTextColor(inkColor);
 }
 
+// Sentinel for the classic built-in 6×8 GFX font (setFont(nullptr) mode) —
+// a distinct pointer so cascade args can still use nullptr for "not given".
+const GFXfont* const CLASSIC_FONT = (const GFXfont*)(uintptr_t)1;
+
+// CLASSIC_FONT draws from its top-left; the baseline `y` is shifted so call
+// sites stay uniform across fonts.
 void textAt(int16_t x, int16_t y, const char* s, const GFXfont* f) {
-    display.setFont(f);
-    display.setCursor(x, y);
+    if (f == CLASSIC_FONT) { display.setFont(nullptr); display.setTextSize(1); display.setCursor(x, y - 7); }
+    else { display.setFont(f); display.setCursor(x, y); }
     display.print(s);
 }
 
 int16_t textWidth(const char* s, const GFXfont* f) {
     int16_t x1, y1; uint16_t w, h;
-    display.setFont(f);
+    if (f == CLASSIC_FONT) { display.setFont(nullptr); display.setTextSize(1); }
+    else display.setFont(f);
     display.getTextBounds(s, 0, 0, &x1, &y1, &w, &h);
     return (int16_t)w;
 }
@@ -211,6 +262,19 @@ void fitText(char* out, size_t outLen, const char* s, int16_t maxW, const GFXfon
         snprintf(probe, sizeof(probe), "%s..", out);
         if (textWidth(probe, f) <= maxW) { strncpy(out, probe, outLen - 1); out[outLen - 1] = '\0'; return; }
     }
+}
+
+// Font cascade: prefer `pref`, drop to `smaller` (then `smallest`) instead of
+// ellipsizing — truncation is the last resort at the smallest size only.
+const GFXfont* fitCascade(char* out, size_t outLen, const char* s, int16_t maxW,
+                          const GFXfont* pref, const GFXfont* smaller,
+                          const GFXfont* smallest = nullptr) {
+    if (textWidth(s, pref) <= maxW) { strncpy(out, s, outLen - 1); out[outLen - 1] = '\0'; return pref; }
+    if (smaller && textWidth(s, smaller) <= maxW) { strncpy(out, s, outLen - 1); out[outLen - 1] = '\0'; return smaller; }
+    if (smallest && textWidth(s, smallest) <= maxW) { strncpy(out, s, outLen - 1); out[outLen - 1] = '\0'; return smallest; }
+    const GFXfont* f = smallest ? smallest : (smaller ? smaller : pref);
+    fitText(out, outLen, s, maxW, f);
+    return f;
 }
 
 // ===== AgentDeck product mark — aquarium dome over a button deck =====
@@ -361,8 +425,8 @@ void drawBrandHeader(const Snap& s) {
 // One gauge block: "5H [▓▓▓░░] 42% · 1h 23m". Bar kept narrow (140px) so the
 // value+reset text breathes before the next block starts.
 void drawGaugeBar(int16_t x, int16_t y, const char* tag, float pct, const char* reset) {
-    constexpr int16_t barW = 140, barH = 18;
-    textAt(x, y + barH - 3, tag, &FreeSansBold9pt7b);
+    constexpr int16_t barW = 140, barH = 16;
+    textAt(x, y + barH - 2, tag, &FreeSansBold9pt7b);
     int16_t bx = x + 30;
     display.drawRect(bx, y, barW, barH, GxEPD_BLACK);
     char val[36];
@@ -375,40 +439,72 @@ void drawGaugeBar(int16_t x, int16_t y, const char* tag, float pct, const char* 
     } else {
         strncpy(val, "--", sizeof(val));
     }
-    textAt(bx + barW + 8, y + barH - 3, val, &FreeSans9pt7b);
+    textAt(bx + barW + 8, y + barH - 2, val, &FreeSans9pt7b);
 }
 
-// Provider row: mini glyph + label + 5H/7D gauges. Returns true if drawn.
+// Provider row (28px): mini glyph + label (+ subscription plan sub-line in the
+// classic font when known) + 5H/7D gauges. Returns true if drawn.
 bool drawProviderUsage(int16_t y, const char* agentType, const char* label,
-                       float p5, const char* r5, float p7, const char* r7, bool stale) {
+                       const char* plan, float p5, const char* r5,
+                       float p7, const char* r7, bool stale) {
     if (p5 < 0.0f && p7 < 0.0f) return false;
-    drawAgentGlyph(agentType, 16, y, 26);
+    drawAgentGlyph(agentType, 14, y + 2, 22);
     char lbl[24];
     snprintf(lbl, sizeof(lbl), "%s%s", label, stale ? "*" : "");
-    textAt(52, y + 20, lbl, &FreeSansBold9pt7b);
-    drawGaugeBar(150, y + 4, "5H", p5, r5);
-    drawGaugeBar(490, y + 4, "7D", p7, r7);
+    textAt(44, y + 13, lbl, &FreeSansBold9pt7b);
+    if (plan[0]) {
+        char pf[24];
+        fitText(pf, sizeof(pf), plan, 100, CLASSIC_FONT);
+        textAt(44, y + 26, pf, CLASSIC_FONT);  // "Max 20x ~7/12" under the label
+    }
+    drawGaugeBar(150, y + 2, "5H", p5, r5);
+    drawGaugeBar(490, y + 2, "7D", p7, r7);
     return true;
 }
 
 void drawUsageFooter(const Snap& s, bool showIdentity) {
-    display.fillRect(0, 378, W, 2, GxEPD_BLACK);
-    int16_t y = 390;
+    display.fillRect(0, 370, W, 2, GxEPD_BLACK);
+    int16_t y = 378;
     bool any = false;
-    if (drawProviderUsage(y, "claude-code", "CLAUDE", s.fiveH, s.fiveReset,
-                          s.sevenD, s.sevenReset, s.usageStale)) { y += 42; any = true; }
-    if (drawProviderUsage(y, "codex-cli", "CODEX", s.codexP, s.codexPReset,
-                          s.codexS, s.codexSReset, false)) { any = true; }
-    if (!any) {
-        textAt(16, 406, "usage: waiting for data", &FreeSans9pt7b);
+    if (drawProviderUsage(y, "claude-code", "CLAUDE", s.claudePlan, s.fiveH, s.fiveReset,
+                          s.sevenD, s.sevenReset, s.usageStale)) { y += 28; any = true; }
+    if (drawProviderUsage(y, "codex-cli", "CODEX", s.codexPlan, s.codexP, s.codexPReset,
+                          s.codexS, s.codexSReset, false)) { y += 28; any = true; }
+    // Antigravity: credits are a raw count (no window %), so a text row —
+    // shown only when the daemon actually resolves the account.
+    if (s.agCredits >= 0.0f || s.agPlan[0]) {
+        drawAgentGlyph("antigravity", 14, y + 2, 22);
+        textAt(44, y + 16, "ANTIGRAVITY", &FreeSansBold9pt7b);
+        char agLine[64] = "";
+        if (s.agCredits >= 0.0f && s.agPlan[0])
+            snprintf(agLine, sizeof(agLine), "%d credits · %s", (int)s.agCredits, s.agPlan);
+        else if (s.agCredits >= 0.0f)
+            snprintf(agLine, sizeof(agLine), "%d credits", (int)s.agCredits);
+        else
+            strncpy(agLine, s.agPlan, sizeof(agLine) - 1);
+        textAt(180, y + 16, agLine, &FreeSans9pt7b);
+        y += 28;
+        any = true;
     }
-    if (s.usageStale) textAt(16, 474, "* usage stale", &FreeSans9pt7b);
+    if (!any) textAt(16, y + 16, "usage: waiting for data", &FreeSans9pt7b);
+
+    // Ticker — latest timeline event as one compressed line ("14:32 ...").
+    // Time comes from the event itself; content updates at most every 60s.
+    if (s.tickerText[0]) {
+        int16_t ty = 476;
+        textAt(16, ty, s.tickerTime, &FreeSansBold9pt7b);
+        char t[104]; ascii(t, sizeof(t), s.tickerText);
+        char tf[108];
+        int16_t maxW = W - 90 - (showIdentity ? 110 : 16);
+        const GFXfont* f = fitCascade(tf, sizeof(tf), t, maxW, &FreeSans9pt7b, CLASSIC_FONT);
+        textAt(74, ty, tf, f);
+    }
     // Build identity only on the searching screen (flash verification aid) —
     // on the live dashboard it was dead weight.
     if (showIdentity) {
         char tag[64];
         snprintf(tag, sizeof(tag), "v%s %.7s", FIRMWARE_VERSION, GIT_SHA);
-        textRight(W - 16, 474, tag, &FreeSans9pt7b);
+        textRight(W - 16, 476, tag, &FreeSans9pt7b);
     }
 }
 
@@ -426,20 +522,23 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
         setInk(false);
     }
 
-    int glyph = tall ? 110 : (h >= 130 ? 72 : 52);
-    int16_t gx = x + 16, gy = y + (h - glyph) / 2;
+    // Narrow (3-col) cards get a smaller glyph so text keeps real width —
+    // shrinking type is preferred over ellipsizing (user feedback).
+    int glyph = tall ? 110 : (w >= 340 ? 72 : 48);
+    int16_t gx = x + (w >= 340 ? 16 : 10), gy = y + (h - glyph) / 2;
     if (tall) gy = y + 28;
     drawAgentGlyph(r.agentType, gx, gy, glyph);
 
-    int16_t tx = gx + glyph + 18;
-    int16_t maxTextW = x + w - tx - 14;
+    int16_t tx = gx + glyph + (w >= 340 ? 18 : 12);
+    int16_t maxTextW = x + w - tx - 12;
 
-    // Project name
+    // Project name — font cascade before any truncation
     char name[40]; ascii(name, sizeof(name), r.name);
     if (!name[0]) strncpy(name, "(unnamed)", sizeof(name) - 1);
     char fitted[48];
-    const GFXfont* nameFont = tall ? &FreeSansBold18pt7b : &FreeSansBold12pt7b;
-    fitText(fitted, sizeof(fitted), name, maxTextW, nameFont);
+    const GFXfont* nameFont = tall
+        ? fitCascade(fitted, sizeof(fitted), name, maxTextW, &FreeSansBold18pt7b, &FreeSansBold12pt7b)
+        : fitCascade(fitted, sizeof(fitted), name, maxTextW, &FreeSansBold12pt7b, &FreeSansBold9pt7b);
     int16_t ny = y + (tall ? 52 : 32);
     textAt(tx, ny, fitted, nameFont);
 
@@ -457,8 +556,9 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
         strncpy(stateLine, label, sizeof(stateLine) - 1); stateLine[sizeof(stateLine) - 1] = '\0';
     }
     char stateFitted[68];
-    fitText(stateFitted, sizeof(stateFitted), stateLine, maxTextW - 20, &FreeSansBold9pt7b);
-    textAt(tx + 20, sy, stateFitted, &FreeSansBold9pt7b);
+    const GFXfont* stateFont = fitCascade(stateFitted, sizeof(stateFitted), stateLine,
+                                          maxTextW - 20, &FreeSansBold9pt7b, CLASSIC_FONT);
+    textAt(tx + 20, sy, stateFitted, stateFont);
 
     // Detail: awaiting question (wrapped) or the activity one-liner —
     // "what did/is this agent actually doing", far more glanceable than a timer.
@@ -501,12 +601,12 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
     } else if (r.activity[0] && dy < y + h - 8) {
         char a[80]; ascii(a, sizeof(a), r.activity);
         char af[84];
-        fitText(af, sizeof(af), a, maxTextW, &FreeSans9pt7b);
-        textAt(tx, dy, af, &FreeSans9pt7b);
+        const GFXfont* af2 = fitCascade(af, sizeof(af), a, maxTextW, &FreeSans9pt7b, CLASSIC_FONT);
+        textAt(tx, dy, af, af2);
     }
 
-    // Model tag bottom-right inside card
-    if (r.model[0] && h >= 130) {
+    // Model tag bottom-right — only on wide cards (crowds narrow ones)
+    if (r.model[0] && h >= 130 && w >= 340) {
         char m[32]; ascii(m, sizeof(m), r.model);
         char mf[36];
         fitText(mf, sizeof(mf), m, w - glyph - 60, &FreeSans9pt7b);
@@ -555,7 +655,7 @@ void drawIdleDock(const Snap& s, const uint8_t* idx, uint8_t count,
 
 void drawSessionGrid(const Snap& s) {
     const int16_t top = 78, left = 12, right = W - 12;
-    int16_t bottom = 372;
+    int16_t bottom = 366;
     if (s.rowCount == 0) {
         // Empty state — connected but no sessions
         drawAgentDeckMark(W / 2 - 36, 140, 72);
@@ -579,8 +679,8 @@ void drawSessionGrid(const Snap& s) {
         nCards = nAttention < MAX_CARDS ? (nAttention > 0 ? nAttention : MAX_CARDS) : MAX_CARDS;
         if (nCards < nOrder || s.totalSessions > s.rowCount) {
             dock = true;
-            bottom = 330;
-            drawIdleDock(s, order + nCards, nOrder - nCards, 334, 372, left, right);
+            bottom = 326;
+            drawIdleDock(s, order + nCards, nOrder - nCards, 330, 366, left, right);
         }
     }
 
@@ -659,6 +759,7 @@ bool firstDraw = true;
 bool forceFull = false;
 bool asleep = false;
 bool wasSearching = true;
+char lastTickerShown[104] = "";
 
 bool key1Prev = true, key2Prev = true;
 uint32_t keyLastMs = 0;
@@ -739,7 +840,13 @@ void render() {
 
     bool searching = !s.bridgeConnected;
     uint32_t h = contentHash(s);
-    if (h == lastHash && !forceFull) return;
+    // Ticker is outside the hash (tool-event churn must not strobe the
+    // panel): it earns its own redraw at most once a minute; otherwise it
+    // piggybacks on whatever refresh the hashed content triggers.
+    bool tickerDue = s.tickerText[0] &&
+                     strcmp(s.tickerText, lastTickerShown) != 0 &&
+                     (now - lastDrawMs) >= 60000;
+    if (h == lastHash && !forceFull && !tickerDue) return;
     if (!forceFull && (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts
 
     bool full = forceFull || firstDraw ||
@@ -753,6 +860,8 @@ void render() {
     firstDraw = false;
     forceFull = false;
     wasSearching = searching;
+    strncpy(lastTickerShown, s.tickerText, sizeof(lastTickerShown) - 1);
+    lastTickerShown[sizeof(lastTickerShown) - 1] = '\0';
 }
 
 }  // namespace Eink

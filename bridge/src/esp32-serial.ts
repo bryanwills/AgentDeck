@@ -244,9 +244,18 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
             : undefined,
         }
       : undefined;
+    // Subscriptions carry an ISO `until`; a serial device has no reliable
+    // clock, so pre-format to a short "~M/D" the panel can render as-is.
+    const subs = Array.isArray(keep.subscriptions)
+      ? keep.subscriptions.map((sub: { name?: string; until?: string }) => ({
+          name: limitString(sub.name, 27),
+          until: formatShortDate(sub.until),
+        })).filter((sub: { name?: string }) => sub.name)
+      : undefined;
     return {
       ...keep,
       ...(cx ? { codexRateLimits: cx } : {}),
+      ...(subs ? { subscriptions: subs } : {}),
       fiveHourResetsAt: formatResetTime(keep.fiveHourResetsAt),
       sevenDayResetsAt: formatResetTime(keep.sevenDayResetsAt),
     };
@@ -270,6 +279,18 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
       gatewayConnected: Boolean(e.gatewayConnected),
       gatewayHasError: Boolean(e.gatewayHasError),
     } as BridgeEvent;
+  }
+
+  if (event.type === 'timeline_event' || event.type === 'timeline_history') {
+    // Panels have no local timezone — attach host-local "HH:MM" so the
+    // InkDeck ticker (and future e-ink timelines) shows wall-clock time.
+    const stamp = (entry: any) => {
+      if (!entry || !Number.isFinite(entry.ts)) return entry;
+      const d = new Date(entry.ts);
+      return { ...entry, localHm: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` };
+    };
+    if (event.type === 'timeline_event') return { ...e, entry: stamp(e.entry) };
+    return { ...e, entries: Array.isArray(e.entries) ? e.entries.map(stamp) : e.entries };
   }
 
   if (event.type === 'sessions_list') {
@@ -304,6 +325,14 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
 function limitString(value: unknown, max: number): string | undefined {
   if (typeof value !== 'string') return undefined;
   return value.length > max ? value.slice(0, max) : value;
+}
+
+/** ISO date → short "~M/D" for clock-less serial panels ('' when absent/invalid). */
+function formatShortDate(iso: unknown): string {
+  if (typeof iso !== 'string' || !iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return `~${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 function sanitizeOptions(options: unknown): Array<Record<string, unknown>> | undefined {

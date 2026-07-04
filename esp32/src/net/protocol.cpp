@@ -232,6 +232,22 @@ static void handleUsageUpdate(JsonObject& obj) {
         }
     }
 
+    // Account subscriptions (plan name + preformatted expiry). Only replace
+    // when the key is present so a payload without it keeps the last known.
+    if (obj["subscriptions"].is<JsonArray>()) {
+        JsonArray subs = obj["subscriptions"].as<JsonArray>();
+        g_state.subscriptionCount = 0;
+        for (JsonObject sub : subs) {
+            if (g_state.subscriptionCount >= 3) break;
+            auto& slot = g_state.subscriptions[g_state.subscriptionCount];
+            strncpy(slot.name, sub["name"] | "", sizeof(slot.name) - 1);
+            slot.name[sizeof(slot.name) - 1] = '\0';
+            strncpy(slot.until, sub["until"] | "", sizeof(slot.until) - 1);
+            slot.until[sizeof(slot.until) - 1] = '\0';
+            if (slot.name[0]) g_state.subscriptionCount++;
+        }
+    }
+
     unlockState();
 }
 
@@ -487,6 +503,7 @@ static void handleTimelineEvent(JsonObject& obj) {
     uint64_t tsMs = e["ts"] | 0ULL;
     // Convert to seconds since midnight (compact for display)
     entry.ts = (uint32_t)((tsMs / 1000) % 86400);
+    strncpy(entry.hm, e["localHm"] | "", sizeof(entry.hm) - 1);
 
     strncpy(entry.type, e["type"] | "", sizeof(entry.type) - 1);
     strncpy(entry.raw, e["raw"] | "", sizeof(entry.raw) - 1);
@@ -528,6 +545,7 @@ static void handleTimelineHistory(JsonObject& obj) {
 
         uint64_t tsMs = e["ts"] | 0ULL;
         entry.ts = (uint32_t)((tsMs / 1000) % 86400);
+        strncpy(entry.hm, e["localHm"] | "", sizeof(entry.hm) - 1);
         strncpy(entry.type, e["type"] | "", sizeof(entry.type) - 1);
         strncpy(entry.raw, e["raw"] | "", sizeof(entry.raw) - 1);
         if (e["detail"].is<const char*>())

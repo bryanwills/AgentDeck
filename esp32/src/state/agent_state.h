@@ -66,7 +66,8 @@ struct SessionInfo {
 
 // ===== Timeline entry =====
 struct TimelineEntry {
-    uint32_t ts;        // seconds since midnight (compact)
+    uint32_t ts;        // seconds since midnight, UTC-derived (compact)
+    char hm[6];         // host-local "HH:MM" (daemon-preformatted; "" on old daemons)
     char type[16];      // "chat_start", "tool_request", etc.
     char raw[120];      // description
     char detail[200];   // extended detail (optional)
@@ -112,6 +113,11 @@ struct DashboardState {
     // so it renders as a text chip, not a gauge. -1.0f = "no data".
     float antigravityCredits;
     char antigravityPlan[24];
+    // Account subscriptions from usage_update `subscriptions[]` — plan name +
+    // (serial-preformatted) expiry like "~7/12". Empty when the daemon can't
+    // resolve them; surfaces hide the line in that case.
+    struct SubscriptionSlot { char name[28]; char until[12]; } subscriptions[3];
+    uint8_t subscriptionCount;
 
     // Permission/Options
     char question[200];
