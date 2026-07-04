@@ -495,39 +495,16 @@ void drawUsageFooter(const Snap& s, bool showIdentity) {
         textRight(W - 16 - agW, 474, tag, &FreeSans9pt7b);
     }
 
-    // Ticker — latest timeline event, up to TWO wrapped lines before any
-    // font drop / ellipsis. Time comes from the event itself.
+    // Ticker — latest timeline event as ONE compressed line (the per-card
+    // activity summary is the surface that gets two lines, not this).
     if (s.tickerText[0]) {
+        const int16_t ty = 470;
+        textAt(16, ty, s.tickerTime, &FreeSansBold9pt7b);
         char t[104]; ascii(t, sizeof(t), s.tickerText);
-        const int16_t l1y = 454, l2y = 474;
-        const int16_t xText = 74;
-        textAt(16, l1y, s.tickerTime, &FreeSansBold9pt7b);
-        int16_t w1 = W - 16 - xText;
-        int16_t w2 = W - 16 - xText - agW - (showIdentity ? 110 : 0);
-        if (textWidth(t, &FreeSans9pt7b) <= w1) {
-            textAt(xText, l1y, t, &FreeSans9pt7b);
-        } else {
-            // Greedy wrap at a space for line 1, remainder on line 2
-            size_t len = strlen(t), take = len;
-            while (take > 1) {
-                char probe[104];
-                strncpy(probe, t, take); probe[take] = '\0';
-                if (textWidth(probe, &FreeSans9pt7b) <= w1 &&
-                    (take == len || t[take] == ' ')) break;
-                take--;
-            }
-            char l1[104];
-            strncpy(l1, t, take); l1[take] = '\0';
-            textAt(xText, l1y, l1, &FreeSans9pt7b);
-            const char* rest = t + take;
-            while (*rest == ' ') rest++;
-            if (*rest) {
-                char l2[104];
-                const GFXfont* f2 = fitCascade(l2, sizeof(l2), rest, w2,
-                                               &FreeSans9pt7b, CLASSIC_FONT);
-                textAt(xText, l2y, l2, f2);
-            }
-        }
+        char tf[108];
+        int16_t maxW = W - 74 - 16 - agW - (showIdentity ? 110 : 0);
+        const GFXfont* f = fitCascade(tf, sizeof(tf), t, maxW, &FreeSans9pt7b, CLASSIC_FONT);
+        textAt(74, ty, tf, f);
     }
 }
 
@@ -622,18 +599,43 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
             }
         }
     } else if (r.activity[0] && dy < y + h - 8) {
+        // Activity summary gets up to TWO wrapped lines before any font drop —
+        // this line is the point of the card, so give it room.
         char a[80]; ascii(a, sizeof(a), r.activity);
-        char af[84];
-        const GFXfont* af2 = fitCascade(af, sizeof(af), a, maxTextW, &FreeSans9pt7b, CLASSIC_FONT);
-        textAt(tx, dy, af, af2);
+        if (textWidth(a, &FreeSans9pt7b) <= maxTextW) {
+            textAt(tx, dy, a, &FreeSans9pt7b);
+        } else {
+            size_t len = strlen(a), take = len;
+            while (take > 1) {
+                char probe[84];
+                strncpy(probe, a, take); probe[take] = '\0';
+                if (textWidth(probe, &FreeSans9pt7b) <= maxTextW &&
+                    (take == len || a[take] == ' ')) break;
+                take--;
+            }
+            char l1[84];
+            strncpy(l1, a, take); l1[take] = '\0';
+            textAt(tx, dy, l1, &FreeSans9pt7b);
+            const char* rest = a + take;
+            while (*rest == ' ') rest++;
+            if (*rest && dy + 20 < y + h - 6) {
+                char l2[84];
+                const GFXfont* f2 = fitCascade(l2, sizeof(l2), rest, maxTextW,
+                                               &FreeSans9pt7b, CLASSIC_FONT);
+                textAt(tx, dy + 20, l2, f2);
+            }
+        }
     }
 
-    // Model tag bottom-right — only on wide cards (crowds narrow ones)
-    if (r.model[0] && h >= 130 && w >= 340) {
+    // Model tag bottom-right on every card — narrow cards drop to the
+    // classic font instead of losing the model entirely.
+    if (r.model[0] && h >= 110) {
         char m[32]; ascii(m, sizeof(m), r.model);
         char mf[36];
-        fitText(mf, sizeof(mf), m, w - glyph - 60, &FreeSans9pt7b);
-        textRight(x + w - 14, y + h - 12, mf, &FreeSans9pt7b);
+        const GFXfont* modelFont = w >= 340
+            ? fitCascade(mf, sizeof(mf), m, w - glyph - 60, &FreeSans9pt7b, CLASSIC_FONT)
+            : fitCascade(mf, sizeof(mf), m, w - 24, CLASSIC_FONT, nullptr);
+        textRight(x + w - 12, y + h - 10, mf, modelFont);
     }
 
     setInk(false);
