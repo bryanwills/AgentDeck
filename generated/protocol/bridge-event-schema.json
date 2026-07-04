@@ -395,6 +395,18 @@
         },
         {
           "$ref": "#/definitions/ApmeRecommendationEvent"
+        },
+        {
+          "$ref": "#/definitions/Esp32OtaBeginEvent"
+        },
+        {
+          "$ref": "#/definitions/Esp32OtaChunkEvent"
+        },
+        {
+          "$ref": "#/definitions/Esp32OtaEndEvent"
+        },
+        {
+          "$ref": "#/definitions/Esp32OtaAbortEvent"
         }
       ]
     },
@@ -742,6 +754,94 @@
         "type",
         "encoders",
         "takeoverActive"
+      ],
+      "type": "object"
+    },
+    "Esp32OtaAbortEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "otaId": {
+          "type": "string"
+        },
+        "type": {
+          "const": "esp32_ota_abort",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "otaId"
+      ],
+      "type": "object"
+    },
+    "Esp32OtaBeginEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "md5": {
+          "type": "string"
+        },
+        "otaId": {
+          "type": "string"
+        },
+        "size": {
+          "type": "number"
+        },
+        "type": {
+          "const": "esp32_ota_begin",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "otaId",
+        "size",
+        "md5"
+      ],
+      "type": "object"
+    },
+    "Esp32OtaChunkEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "number"
+        },
+        "otaId": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "number"
+        },
+        "type": {
+          "const": "esp32_ota_chunk",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "otaId",
+        "seq",
+        "offset",
+        "data"
+      ],
+      "type": "object"
+    },
+    "Esp32OtaEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "otaId": {
+          "type": "string"
+        },
+        "type": {
+          "const": "esp32_ota_end",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "otaId"
       ],
       "type": "object"
     },

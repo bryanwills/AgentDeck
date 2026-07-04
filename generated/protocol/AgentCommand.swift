@@ -28,6 +28,8 @@ public enum AgentCommand: Equatable {
     case apmeVibe(runId: String, verdict: String, note: String?)
     case apmeRecommend(taskKind: String?, budgetUsd: Int?, latencyBudgetMs: Int?, preferLocal: Bool?)
     case permissionDecision(requestId: String, decision: String)
+    case esp32OtaAck(otaId: String, stage: String, seq: Int?, offset: Int?, written: Int?)
+    case esp32OtaError(error: String, otaId: String?, stage: String?)
 
     /// JSON-serializable dictionary representation matching protocol.ts.
     public var dictionary: [String: Any] {
@@ -115,6 +117,20 @@ public enum AgentCommand: Equatable {
             dict["requestId"] = requestId
             dict["decision"] = decision
             return dict
+        case .esp32OtaAck(let otaId, let stage, let seq, let offset, let written):
+            var dict: [String: Any] = ["type": "esp32_ota_ack"]
+            dict["otaId"] = otaId
+            dict["stage"] = stage
+            if let seq = seq { dict["seq"] = seq }
+            if let offset = offset { dict["offset"] = offset }
+            if let written = written { dict["written"] = written }
+            return dict
+        case .esp32OtaError(let error, let otaId, let stage):
+            var dict: [String: Any] = ["type": "esp32_ota_error"]
+            dict["error"] = error
+            if let otaId = otaId { dict["otaId"] = otaId }
+            if let stage = stage { dict["stage"] = stage }
+            return dict
         }
     }
 
@@ -141,6 +157,8 @@ public enum AgentCommand: Equatable {
         case .apmeVibe: return "apme_vibe"
         case .apmeRecommend: return "apme_recommend"
         case .permissionDecision: return "permission_decision"
+        case .esp32OtaAck: return "esp32_ota_ack"
+        case .esp32OtaError: return "esp32_ota_error"
         }
     }
 

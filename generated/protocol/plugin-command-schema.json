@@ -158,6 +158,65 @@
       ],
       "type": "object"
     },
+    "Esp32OtaAckCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "offset": {
+          "type": "number"
+        },
+        "otaId": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "number"
+        },
+        "stage": {
+          "enum": [
+            "begin",
+            "chunk",
+            "end",
+            "abort"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "const": "esp32_ota_ack",
+          "type": "string"
+        },
+        "written": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "otaId",
+        "stage"
+      ],
+      "type": "object"
+    },
+    "Esp32OtaErrorCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "otaId": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        },
+        "type": {
+          "const": "esp32_ota_error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "error"
+      ],
+      "type": "object"
+    },
     "FocusSessionCommand": {
       "additionalProperties": false,
       "properties": {
@@ -296,6 +355,12 @@
         },
         {
           "$ref": "#/definitions/PermissionDecisionCommand"
+        },
+        {
+          "$ref": "#/definitions/Esp32OtaAckCommand"
+        },
+        {
+          "$ref": "#/definitions/Esp32OtaErrorCommand"
         }
       ]
     },

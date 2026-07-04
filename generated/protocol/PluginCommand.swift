@@ -61,6 +61,12 @@ struct ADPluginCommand: Codable, Equatable {
     var taskKind: String?
     var decision: ADDecision?
     var requestId: String?
+    var offset: Double?
+    var otaId: String?
+    var seq: Double?
+    var stage: String?
+    var written: Double?
+    var error: String?
 
     enum CodingKeys: String, CodingKey {
         case type = "type"
@@ -86,6 +92,12 @@ struct ADPluginCommand: Codable, Equatable {
         case taskKind = "taskKind"
         case decision = "decision"
         case requestId = "requestId"
+        case offset = "offset"
+        case otaId = "otaId"
+        case seq = "seq"
+        case stage = "stage"
+        case written = "written"
+        case error = "error"
     }
 }
 
@@ -130,7 +142,13 @@ extension ADPluginCommand {
         preferLocal: Bool?? = nil,
         taskKind: String?? = nil,
         decision: ADDecision?? = nil,
-        requestId: String?? = nil
+        requestId: String?? = nil,
+        offset: Double?? = nil,
+        otaId: String?? = nil,
+        seq: Double?? = nil,
+        stage: String?? = nil,
+        written: Double?? = nil,
+        error: String?? = nil
     ) -> ADPluginCommand {
         return ADPluginCommand(
             type: type ?? self.type,
@@ -155,7 +173,13 @@ extension ADPluginCommand {
             preferLocal: preferLocal ?? self.preferLocal,
             taskKind: taskKind ?? self.taskKind,
             decision: decision ?? self.decision,
-            requestId: requestId ?? self.requestId
+            requestId: requestId ?? self.requestId,
+            offset: offset ?? self.offset,
+            otaId: otaId ?? self.otaId,
+            seq: seq ?? self.seq,
+            stage: stage ?? self.stage,
+            written: written ?? self.written,
+            error: error ?? self.error
         )
     }
 
@@ -327,6 +351,8 @@ enum ADType: String, Codable, Equatable {
     case clientRegister = "client_register"
     case diag = "diag"
     case escape = "escape"
+    case esp32OtaAck = "esp32_ota_ack"
+    case esp32OtaError = "esp32_ota_error"
     case focusSession = "focus_session"
     case interrupt = "interrupt"
     case navigateOption = "navigate_option"

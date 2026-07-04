@@ -240,6 +240,34 @@ sealed class AgentCommand {
         }
     }
 
+    data class Esp32OtaAck(val otaId: String, val stage: String, val seq: Int? = null, val offset: Int? = null, val written: Int? = null) : AgentCommand() {
+        override val typeTag: String = "esp32_ota_ack"
+        override fun toJson(): String {
+            val buf = StringBuilder()
+            buf.append("{\"type\":\"esp32_ota_ack\"")
+            buf.append(",\"otaId\":").append(encode(otaId))
+            buf.append(",\"stage\":").append(encode(stage))
+            if (seq != null) buf.append(",\"seq\":").append(encode(seq))
+            if (offset != null) buf.append(",\"offset\":").append(encode(offset))
+            if (written != null) buf.append(",\"written\":").append(encode(written))
+            buf.append("}")
+            return buf.toString()
+        }
+    }
+
+    data class Esp32OtaError(val error: String, val otaId: String? = null, val stage: String? = null) : AgentCommand() {
+        override val typeTag: String = "esp32_ota_error"
+        override fun toJson(): String {
+            val buf = StringBuilder()
+            buf.append("{\"type\":\"esp32_ota_error\"")
+            buf.append(",\"error\":").append(encode(error))
+            if (otaId != null) buf.append(",\"otaId\":").append(encode(otaId))
+            if (stage != null) buf.append(",\"stage\":").append(encode(stage))
+            buf.append("}")
+            return buf.toString()
+        }
+    }
+
     companion object {
         private val jsonFmt = Json { encodeDefaults = false }
         internal fun encode(v: Any?): String = when (v) {

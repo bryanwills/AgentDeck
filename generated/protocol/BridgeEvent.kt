@@ -249,7 +249,16 @@ data class BridgeEvent (
     val run: ApmeRunSummary? = null,
     val scorecards: List<ApmeModelScorecard>? = null,
     val candidates: List<ApmeRecommendation>? = null,
-    val taskKind: String? = null
+    val taskKind: String? = null,
+    val md5: String? = null,
+
+    @Json(name = "otaId")
+    val otaID: String? = null,
+
+    val size: Double? = null,
+    val data: String? = null,
+    val offset: Double? = null,
+    val seq: Double? = null
 ) {
     public fun toJson() = klaxon.toJsonString(this)
 
@@ -1079,6 +1088,10 @@ enum class Type(val value: String) {
     DeckSlotMap("deck_slot_map"),
     DisplayState("display_state"),
     EncoderState("encoder_state"),
+    Esp32OtaAbort("esp32_ota_abort"),
+    Esp32OtaBegin("esp32_ota_begin"),
+    Esp32OtaChunk("esp32_ota_chunk"),
+    Esp32OtaEnd("esp32_ota_end"),
     PromptOptions("prompt_options"),
     SessionsList("sessions_list"),
     StateUpdate("state_update"),
@@ -1100,6 +1113,10 @@ enum class Type(val value: String) {
             "deck_slot_map"         -> DeckSlotMap
             "display_state"         -> DisplayState
             "encoder_state"         -> EncoderState
+            "esp32_ota_abort"       -> Esp32OtaAbort
+            "esp32_ota_begin"       -> Esp32OtaBegin
+            "esp32_ota_chunk"       -> Esp32OtaChunk
+            "esp32_ota_end"         -> Esp32OtaEnd
             "prompt_options"        -> PromptOptions
             "sessions_list"         -> SessionsList
             "state_update"          -> StateUpdate

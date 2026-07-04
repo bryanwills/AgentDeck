@@ -99,7 +99,17 @@ data class PluginCommand (
     val decision: Decision? = null,
 
     @Json(name = "requestId")
-    val requestID: String? = null
+    val requestID: String? = null,
+
+    val offset: Double? = null,
+
+    @Json(name = "otaId")
+    val otaID: String? = null,
+
+    val seq: Double? = null,
+    val stage: String? = null,
+    val written: Double? = null,
+    val error: String? = null
 ) {
     public fun toJson() = klaxon.toJsonString(this)
 
@@ -217,6 +227,8 @@ enum class Type(val value: String) {
     ClientRegister("client_register"),
     Diag("diag"),
     Escape("escape"),
+    Esp32OtaACK("esp32_ota_ack"),
+    Esp32OtaError("esp32_ota_error"),
     FocusSession("focus_session"),
     Interrupt("interrupt"),
     NavigateOption("navigate_option"),
@@ -240,6 +252,8 @@ enum class Type(val value: String) {
             "client_register"        -> ClientRegister
             "diag"                   -> Diag
             "escape"                 -> Escape
+            "esp32_ota_ack"          -> Esp32OtaACK
+            "esp32_ota_error"        -> Esp32OtaError
             "focus_session"          -> FocusSession
             "interrupt"              -> Interrupt
             "navigate_option"        -> NavigateOption

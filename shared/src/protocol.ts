@@ -549,9 +549,9 @@ export interface Esp32OtaAckCommand {
 
 export interface Esp32OtaErrorCommand {
   type: 'esp32_ota_error';
+  error: string;
   otaId?: string;
   stage?: string;
-  error: string;
 }
 
 export type ESP32ToHostMessage =

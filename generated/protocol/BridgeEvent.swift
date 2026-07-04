@@ -133,6 +133,12 @@ struct ADBridgeEvent: Codable, Equatable {
     var scorecards: [ADApmeModelScorecard]?
     var candidates: [ADApmeRecommendation]?
     var taskKind: String?
+    var md5: String?
+    var otaId: String?
+    var size: Double?
+    var data: String?
+    var offset: Double?
+    var seq: Double?
 
     enum CodingKeys: String, CodingKey {
         case agentCapabilities = "agentCapabilities"
@@ -222,6 +228,12 @@ struct ADBridgeEvent: Codable, Equatable {
         case scorecards = "scorecards"
         case candidates = "candidates"
         case taskKind = "taskKind"
+        case md5 = "md5"
+        case otaId = "otaId"
+        case size = "size"
+        case data = "data"
+        case offset = "offset"
+        case seq = "seq"
     }
 }
 
@@ -330,7 +342,13 @@ extension ADBridgeEvent {
         run: ADApmeRunSummary?? = nil,
         scorecards: [ADApmeModelScorecard]?? = nil,
         candidates: [ADApmeRecommendation]?? = nil,
-        taskKind: String?? = nil
+        taskKind: String?? = nil,
+        md5: String?? = nil,
+        otaId: String?? = nil,
+        size: Double?? = nil,
+        data: String?? = nil,
+        offset: Double?? = nil,
+        seq: Double?? = nil
     ) -> ADBridgeEvent {
         return ADBridgeEvent(
             agentCapabilities: agentCapabilities ?? self.agentCapabilities,
@@ -419,7 +437,13 @@ extension ADBridgeEvent {
             run: run ?? self.run,
             scorecards: scorecards ?? self.scorecards,
             candidates: candidates ?? self.candidates,
-            taskKind: taskKind ?? self.taskKind
+            taskKind: taskKind ?? self.taskKind,
+            md5: md5 ?? self.md5,
+            otaId: otaId ?? self.otaId,
+            size: size ?? self.size,
+            data: data ?? self.data,
+            offset: offset ?? self.offset,
+            seq: seq ?? self.seq
         )
     }
 
@@ -2237,6 +2261,10 @@ enum ADType: String, Codable, Equatable {
     case deckSlotMap = "deck_slot_map"
     case displayState = "display_state"
     case encoderState = "encoder_state"
+    case esp32OtaAbort = "esp32_ota_abort"
+    case esp32OtaBegin = "esp32_ota_begin"
+    case esp32OtaChunk = "esp32_ota_chunk"
+    case esp32OtaEnd = "esp32_ota_end"
     case promptOptions = "prompt_options"
     case sessionsList = "sessions_list"
     case stateUpdate = "state_update"
