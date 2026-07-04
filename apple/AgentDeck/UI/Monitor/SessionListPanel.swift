@@ -113,6 +113,9 @@ struct SessionListPanel: View {
         /// (local) session, which uses `stateHolder.state.sessionId` as
         /// the focus target.
         let sessionId: String?
+        /// Shared activity one-liner (bridge SSOT) — same summary the
+        /// InkDeck cards and Android rows show, so surfaces don't drift.
+        var activity: String?
     }
 
     private func buildEntries() -> [SessionEntry] {
@@ -155,7 +158,8 @@ struct SessionListPanel: View {
                 startedAt: primaryAnchorSibling?.startedAt,
                 isPrimary: true,
                 isFocused: focusedSessionId != nil && stateHolder.state.sessionId == focusedSessionId,
-                sessionId: stateHolder.state.sessionId
+                sessionId: stateHolder.state.sessionId,
+                activity: primaryAnchorSibling?.activity
             ))
         }
 
@@ -192,7 +196,8 @@ struct SessionListPanel: View {
                 startedAt: sibling.startedAt,
                 isPrimary: false,
                 isFocused: sibling.id == focusedSessionId,
-                sessionId: sibling.id
+                sessionId: sibling.id,
+                activity: sibling.activity
             ))
         }
 
@@ -247,6 +252,16 @@ struct SessionListPanel: View {
             }
 
             sessionMetaRow(entry: entry)
+
+            // Shared activity one-liner (bridge SSOT) — same summary the
+            // InkDeck cards and Android rows show, so surfaces don't drift.
+            if let activity = entry.activity, !activity.isEmpty {
+                Text(activity)
+                    .font(.system(size: 10))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
         }
     }
 

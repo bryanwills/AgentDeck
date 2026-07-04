@@ -61,6 +61,7 @@ fun SessionListPanel(
         val startedAt: String?,
         val isPrimary: Boolean,
         val sessionId: String?,
+        val activity: String? = null,
     )
 
     fun compareEntries(left: SessionEntry, right: SessionEntry): Int {
@@ -113,6 +114,7 @@ fun SessionListPanel(
             startedAt = primaryAnchorSibling?.startedAt,
             isPrimary = true,
             sessionId = sessionId,
+            activity = primaryAnchorSibling?.activity,
         )
     }
 
@@ -138,6 +140,7 @@ fun SessionListPanel(
                 startedAt = session.startedAt,
                 isPrimary = false,
                 sessionId = session.id,
+                activity = session.activity,
             )
         }
     val displayEntries = entries.sortedWith(::compareEntries)
@@ -236,6 +239,17 @@ fun SessionListPanel(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // Shared activity one-liner (bridge SSOT) — same summary the
+                // InkDeck e-ink cards show, so surfaces don't drift.
+                if (entry.activity != null) {
+                    Text(
+                        text = entry.activity,
+                        color = TerrariumColors.HUDSubtext,
+                        fontSize = scale.fontSub,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
 

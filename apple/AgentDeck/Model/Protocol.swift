@@ -476,6 +476,11 @@ struct SessionInfo: Codable, Sendable, Identifiable {
     /// Deprecated wire-compat field. The observed device-approval gate was removed
     /// (2026-06-27); nothing sets this anymore. Kept so older clients still decode.
     var requestId: String?
+    /// Shared per-session "what is this agent doing" one-liner, computed by the
+    /// bridge (session-activity.ts heuristic → Foundation Models upgrade).
+    /// SSOT for the session summary line — render this instead of hand-rolling
+    /// model/state strings so all surfaces (InkDeck/Android/Apple) agree.
+    var activity: String?
 }
 
 // MARK: - Bridge Events (Bridge → Client)

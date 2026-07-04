@@ -293,6 +293,11 @@ data class SessionInfo(
     // Present when a gated PreToolUse permission is pending device approval —
     // the HUD renders Allow/Deny and replies with permissionDecision(requestId).
     val requestId: String? = null,
+    // Shared per-session "what is this agent doing" one-liner, computed by the
+    // bridge (session-activity.ts heuristic → Foundation Models upgrade).
+    // SSOT for the session summary line — render this instead of hand-rolling
+    // model/state strings so all surfaces (InkDeck/Android/Apple) agree.
+    val activity: String? = null,
 )
 
 @Serializable

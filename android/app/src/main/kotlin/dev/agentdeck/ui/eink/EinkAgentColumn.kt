@@ -78,6 +78,7 @@ fun EinkAgentPanel(
         val agentState: AgentState,
         val startedAt: String?,
         val sessionId: String?,
+        val activity: String? = null,
     )
 
     fun compareEntries(left: AgentEntry, right: AgentEntry): Int {
@@ -119,6 +120,9 @@ fun EinkAgentPanel(
             agentState = state.agentState,
             startedAt = null,
             sessionId = state.sessionId,
+            activity = state.sessionId?.let { sid ->
+                state.siblingSessions.firstOrNull { it.id == sid }?.activity
+            },
         )
     }
 
@@ -145,6 +149,7 @@ fun EinkAgentPanel(
                 agentState = mapSessionState(session),
                 startedAt = session.startedAt,
                 sessionId = session.id,
+                activity = session.activity,
             )
         }
     val displayEntries = entries.sortedWith(::compareEntries)
@@ -224,6 +229,7 @@ fun EinkAgentPanel(
                 modelName = entry.modelName,
                 effortLevel = entry.effortLevel,
                 agentState = entry.agentState,
+                activity = entry.activity,
                 isFocused = isFocused,
                 isAwaiting = isAwaiting,
                 modifier = if (sessionId != null) {
@@ -306,6 +312,7 @@ internal fun EinkAgentBlock(
     modelName: String?,
     effortLevel: String? = null,
     agentState: AgentState,
+    activity: String? = null,
     isFocused: Boolean = false,
     isAwaiting: Boolean = false,
     modifier: Modifier = Modifier,
@@ -391,6 +398,19 @@ internal fun EinkAgentBlock(
                 fontSize = 11.sp,
                 lineHeight = 14.sp,
                 fontFamily = FontFamily.Monospace,
+                color = subColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 19.dp),
+            )
+        }
+        // Shared activity one-liner (bridge SSOT — same summary InkDeck cards
+        // and the tablet list show, so surfaces don't drift).
+        if (activity != null) {
+            Text(
+                text = activity,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
                 color = subColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
