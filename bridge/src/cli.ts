@@ -163,16 +163,29 @@ function projectRootPath(): string {
   return join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 }
 
+// `target` is dual-purpose: it resolves the local PlatformIO env here for
+// `--build`/firmware-path lookup, AND is sent as-is to the daemon, which
+// matches it against the firmware's self-reported `device_info.board` string
+// (see findWifiOtaTarget in daemon-server.ts). The two only agree for the
+// aliases below marked ← firmware board string; every other alias builds
+// fine locally but the upload step fails with "No online WiFi ESP32 target
+// matches …" because the connected device never reports that string.
 const ESP32_OTA_ENV_BY_TARGET: Record<string, string> = {
   inkdeck: 'inkdeck',
   ulanzi_tc001: 'led8x32',
   led8x32: 'led8x32',
-  ttgo_t_display: 'ttgo',
+  ttgo_t_display: 'ttgo', // ← firmware board string
   ttgo: 'ttgo',
-  round_amoled: 'amoled',
+  round_amoled: 'amoled', // ← firmware board string
   amoled: 'amoled',
-  ips_35: 'ips35',
+  ips_35: 'ips35', // ← firmware board string
   ips35: 'ips35',
+  '86box': 'box_86', // ← firmware board string
+  box_86: 'box_86',
+  box_40: 'box_86',
+  ips_10: 'ips10', // ← firmware board string
+  ips10: 'ips10',
+  ips_101: 'ips10',
 };
 
 function resolveEsp32FirmwarePath(target: string, envOpt?: string, firmwareOpt?: string): string {
