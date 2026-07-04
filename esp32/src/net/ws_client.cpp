@@ -119,7 +119,7 @@ void pumpOutbound() {
         outboxCount--;
         xSemaphoreGive(outboxMutex);
         if (connected) ws.sendTXT(line);
-        else Serial.println(line);  // serial bridge consumes line-delimited JSON
+        else Net::serialWriteJsonLine(line);  // serial bridge consumes line-delimited JSON
     }
 }
 

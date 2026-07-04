@@ -20,4 +20,12 @@ void serialLoop();
  */
 bool serialConnected();
 
+/**
+ * Write one newline-terminated protocol JSON line to Serial, intact.
+ * On native-USB (HWCDC) boards the driver can drop a whole 64-byte hardware
+ * FIFO block mid-write, splicing the line — this paces the write one FIFO
+ * block at a time with a drain in between. UART boards get a plain println.
+ */
+void serialWriteJsonLine(const char* buf);
+
 }  // namespace Net

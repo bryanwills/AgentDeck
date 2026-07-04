@@ -1,6 +1,7 @@
 #include "protocol.h"
 #include "wifi_manager.h"
 #include "ws_client.h"
+#include "serial_client.h"
 #include "../state/agent_state.h"
 #include "config.h"
 #include <ArduinoJson.h>
@@ -278,6 +279,11 @@ static void handleSessionsList(JsonObject& obj) {
         strncpy(g_state.sessions[i].requestId, s["requestId"] | "",
                 sizeof(g_state.sessions[i].requestId) - 1);
         g_state.sessions[i].requestId[sizeof(g_state.sessions[i].requestId) - 1] = '\0';
+        // Shared per-session activity one-liner (heuristic → Foundation Models
+        // summary) — the most meaningful glanceable line for a dashboard row.
+        strncpy(g_state.sessions[i].activity, s["activity"] | "",
+                sizeof(g_state.sessions[i].activity) - 1);
+        g_state.sessions[i].activity[sizeof(g_state.sessions[i].activity) - 1] = '\0';
 
         if (g_state.sessions[i].alive) {
             if (strcmp(g_state.sessions[i].agentType, "openclaw") == 0) {
@@ -571,7 +577,7 @@ static void handleWifiProvision(JsonObject& obj) {
     }
     char buf[256];
     serializeJson(resp, buf, sizeof(buf));
-    Serial.println(buf);
+    Net::serialWriteJsonLine(buf);
 }
 
 static void sendDeviceInfo() {
@@ -610,7 +616,7 @@ static void sendDeviceInfo() {
     serializeJson(resp, buf, sizeof(buf));
     // Both transports: serial for the USB-attached identify flow, WS so a
     // WiFi-only board (InkDeck) is registrable by the daemon without a cable.
-    Serial.println(buf);
+    Net::serialWriteJsonLine(buf);
     if (Net::wsConnected()) Net::wsSend(buf);
 }
 

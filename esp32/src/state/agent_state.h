@@ -61,6 +61,7 @@ struct SessionInfo {
     char question[160];     // awaiting prompt text for this session ("" when not awaiting)
     char promptType[20];    // "yes_no" / "multi_select" / "diff_review" / ...
     char requestId[40];     // gated PreToolUse request id → reply permission_decision
+    char activity[80];      // shared one-liner summary of recent work ("" when none)
 };
 
 // ===== Timeline entry =====

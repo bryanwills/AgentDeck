@@ -290,6 +290,9 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
         promptType: limitString(s.promptType, 19),
         question: limitString(s.question, 159),
         elapsedSec: Number.isFinite(s.elapsedSec) ? Math.round(s.elapsedSec) : undefined,
+        // Shared activity one-liner — the glanceable "what is it doing" line
+        // (InkDeck session cards render it; other boards ignore it).
+        activity: limitString(s.activity, 79),
         options: sanitizeOptions(s.options),
       })),
     } as BridgeEvent;

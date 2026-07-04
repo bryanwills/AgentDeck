@@ -52,7 +52,8 @@ constexpr int16_t W = 800, H = 480;
 
 // ===== Render snapshot (copied out of g_state under the mutex so the slow
 // e-ink refresh never holds the lock) =====
-constexpr uint8_t MAX_CARDS = 6;
+constexpr uint8_t MAX_ROWS = 10;   // matches the sessions_list cap
+constexpr uint8_t MAX_CARDS = 6;   // most sessions rendered as full cards
 
 struct RowSnap {
     char name[40];
@@ -61,7 +62,7 @@ struct RowSnap {
     char tool[40];
     char model[32];
     char question[120];
-    uint32_t elapsedSec;
+    char activity[80];
     bool alive;
 };
 
@@ -71,7 +72,7 @@ struct Snap {
     bool serialUp;
     uint8_t rowCount;
     uint8_t totalSessions;
-    RowSnap rows[MAX_CARDS];
+    RowSnap rows[MAX_ROWS];
     // Focused-session options (global — shown on the first awaiting card)
     uint8_t optionCount;
     char options[3][36];
@@ -93,7 +94,7 @@ void snapshot(Snap& s) {
     s.bridgeConnected = g_state.wsConnected;
     s.displayOn = g_state.hostDisplayOn;
     s.totalSessions = g_state.sessionCount;
-    s.rowCount = g_state.sessionCount < MAX_CARDS ? g_state.sessionCount : MAX_CARDS;
+    s.rowCount = g_state.sessionCount < MAX_ROWS ? g_state.sessionCount : MAX_ROWS;
     for (uint8_t i = 0; i < s.rowCount; i++) {
         const SessionInfo& src = g_state.sessions[i];
         RowSnap& dst = s.rows[i];
@@ -103,7 +104,7 @@ void snapshot(Snap& s) {
         strncpy(dst.tool, src.currentTool, sizeof(dst.tool) - 1);
         strncpy(dst.model, src.modelName, sizeof(dst.model) - 1);
         strncpy(dst.question, src.question, sizeof(dst.question) - 1);
-        dst.elapsedSec = src.elapsedSec;
+        strncpy(dst.activity, src.activity, sizeof(dst.activity) - 1);
         dst.alive = src.alive;
     }
     s.optionCount = g_state.optionCount < 3 ? g_state.optionCount : 3;
@@ -142,7 +143,7 @@ uint32_t contentHash(const Snap& s) {
         const RowSnap& r = s.rows[i];
         h = fnvStr(h, r.name); h = fnvStr(h, r.agentType); h = fnvStr(h, r.state);
         h = fnvStr(h, r.tool); h = fnvStr(h, r.model); h = fnvStr(h, r.question);
-        uint32_t mins = r.elapsedSec / 60; h = fnv(h, &mins, sizeof(mins));
+        h = fnvStr(h, r.activity);
         h = fnv(h, &r.alive, 1);
     }
     h = fnv(h, &s.optionCount, 1);
@@ -357,24 +358,24 @@ void drawBrandHeader(const Snap& s) {
     display.drawFastHLine(0, 66, W, GxEPD_BLACK);
 }
 
-void drawGaugeBar(int16_t x, int16_t y, int16_t barW, int16_t barH,
-                  const char* tag, float pct, const char* reset) {
+// One gauge block: "5H [▓▓▓░░] 42% · 1h 23m". Bar kept narrow (140px) so the
+// value+reset text breathes before the next block starts.
+void drawGaugeBar(int16_t x, int16_t y, const char* tag, float pct, const char* reset) {
+    constexpr int16_t barW = 140, barH = 18;
     textAt(x, y + barH - 3, tag, &FreeSansBold9pt7b);
-    int16_t bx = x + 32;
+    int16_t bx = x + 30;
     display.drawRect(bx, y, barW, barH, GxEPD_BLACK);
-    char val[28];
+    char val[36];
     if (pct >= 0.0f) {
         float p = pct > 100.0f ? 100.0f : pct;
         int fill = (int)((barW - 4) * p / 100.0f);
         display.fillRect(bx + 2, y + 2, fill, barH - 4, GxEPD_BLACK);
-        snprintf(val, sizeof(val), "%d%%", (int)pct);
+        if (reset[0]) snprintf(val, sizeof(val), "%d%% · %s", (int)pct, reset);
+        else snprintf(val, sizeof(val), "%d%%", (int)pct);
     } else {
         strncpy(val, "--", sizeof(val));
     }
-    textAt(bx + barW + 6, y + barH - 3, val, &FreeSansBold9pt7b);
-    if (pct >= 0.0f && reset[0]) {
-        textAt(bx + barW + 56, y + barH - 3, reset, &FreeSans9pt7b);
-    }
+    textAt(bx + barW + 8, y + barH - 3, val, &FreeSans9pt7b);
 }
 
 // Provider row: mini glyph + label + 5H/7D gauges. Returns true if drawn.
@@ -385,14 +386,14 @@ bool drawProviderUsage(int16_t y, const char* agentType, const char* label,
     char lbl[24];
     snprintf(lbl, sizeof(lbl), "%s%s", label, stale ? "*" : "");
     textAt(52, y + 20, lbl, &FreeSansBold9pt7b);
-    drawGaugeBar(160, y + 4, 170, 18, "5H", p5, r5);
-    drawGaugeBar(480, y + 4, 170, 18, "7D", p7, r7);
+    drawGaugeBar(150, y + 4, "5H", p5, r5);
+    drawGaugeBar(490, y + 4, "7D", p7, r7);
     return true;
 }
 
-void drawUsageFooter(const Snap& s) {
+void drawUsageFooter(const Snap& s, bool showIdentity) {
     display.fillRect(0, 378, W, 2, GxEPD_BLACK);
-    int16_t y = 388;
+    int16_t y = 390;
     bool any = false;
     if (drawProviderUsage(y, "claude-code", "CLAUDE", s.fiveH, s.fiveReset,
                           s.sevenD, s.sevenReset, s.usageStale)) { y += 42; any = true; }
@@ -401,15 +402,14 @@ void drawUsageFooter(const Snap& s) {
     if (!any) {
         textAt(16, 406, "usage: waiting for data", &FreeSans9pt7b);
     }
-    // Identity tag, bottom-right
-    char tag[80];
-    snprintf(tag, sizeof(tag), "v%s %.7s · %s%s", FIRMWARE_VERSION, GIT_SHA,
-             s.serialUp ? "usb" : "wifi", s.ip[0] ? "" : "");
-    if (!s.serialUp && s.ip[0]) {
-        snprintf(tag, sizeof(tag), "v%s %.7s · %s", FIRMWARE_VERSION, GIT_SHA, s.ip);
-    }
-    textRight(W - 16, 474, tag, &FreeSans9pt7b);
     if (s.usageStale) textAt(16, 474, "* usage stale", &FreeSans9pt7b);
+    // Build identity only on the searching screen (flash verification aid) —
+    // on the live dashboard it was dead weight.
+    if (showIdentity) {
+        char tag[64];
+        snprintf(tag, sizeof(tag), "v%s %.7s", FIRMWARE_VERSION, GIT_SHA);
+        textRight(W - 16, 474, tag, &FreeSans9pt7b);
+    }
 }
 
 void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
@@ -443,19 +443,25 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
     int16_t ny = y + (tall ? 52 : 32);
     textAt(tx, ny, fitted, nameFont);
 
-    // State line: marker + label + elapsed
+    // State line: marker + label (+ current tool while processing). Session
+    // age was dropped here — elapsedSec is time since session START, and
+    // "IDLE · 54m" read as 54 minutes of idling, which it never meant.
     char label[16]; stateLabel(r.state, label, sizeof(label));
     int16_t sy = ny + (tall ? 36 : 26);
     drawStateMarker(tx, sy - 11, 12, r.state);
-    char stateLine[48];
-    if (r.elapsedSec >= 60) {
-        snprintf(stateLine, sizeof(stateLine), "%s · %lum", label, (unsigned long)(r.elapsedSec / 60));
+    char stateLine[64];
+    if (!awaiting && r.tool[0]) {
+        char t[40]; ascii(t, sizeof(t), r.tool);
+        snprintf(stateLine, sizeof(stateLine), "%s · %s", label, t);
     } else {
         strncpy(stateLine, label, sizeof(stateLine) - 1); stateLine[sizeof(stateLine) - 1] = '\0';
     }
-    textAt(tx + 20, sy, stateLine, &FreeSansBold9pt7b);
+    char stateFitted[68];
+    fitText(stateFitted, sizeof(stateFitted), stateLine, maxTextW - 20, &FreeSansBold9pt7b);
+    textAt(tx + 20, sy, stateFitted, &FreeSansBold9pt7b);
 
-    // Detail: awaiting question (wrapped) or current tool
+    // Detail: awaiting question (wrapped) or the activity one-liner —
+    // "what did/is this agent actually doing", far more glanceable than a timer.
     int16_t dy = sy + 24;
     if (awaiting && r.question[0]) {
         char q[120]; ascii(q, sizeof(q), r.question);
@@ -492,11 +498,11 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
                 dy += 20;
             }
         }
-    } else if (r.tool[0] && dy < y + h - 8) {
-        char t[40]; ascii(t, sizeof(t), r.tool);
-        char tf[44];
-        fitText(tf, sizeof(tf), t, maxTextW, &FreeSans9pt7b);
-        textAt(tx, dy, tf, &FreeSans9pt7b);
+    } else if (r.activity[0] && dy < y + h - 8) {
+        char a[80]; ascii(a, sizeof(a), r.activity);
+        char af[84];
+        fitText(af, sizeof(af), a, maxTextW, &FreeSans9pt7b);
+        textAt(tx, dy, af, &FreeSans9pt7b);
     }
 
     // Model tag bottom-right inside card
@@ -510,8 +516,46 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
     setInk(false);
 }
 
+bool needsAttention(const RowSnap& r) {
+    return isAwaiting(r.state) || strcmp(r.state, "processing") == 0;
+}
+
+// Compact idle dock — one strip row of glyph+name chips for sessions that
+// don't need attention. This is how "many agents" stays natural: cards are
+// reserved for sessions that are doing/asking something; parked ones shrink
+// to their creature + name instead of shrinking every card into unreadability.
+void drawIdleDock(const Snap& s, const uint8_t* idx, uint8_t count,
+                  int16_t top, int16_t bottom, int16_t left, int16_t right) {
+    display.drawFastHLine(left, top, right - left, GxEPD_BLACK);
+    int16_t cy = top + 8;
+    int16_t x = left + 4;
+    textAt(x, cy + 20, "IDLE", &FreeSansBold9pt7b);
+    x += 58;
+    uint8_t shown = 0;
+    for (uint8_t k = 0; k < count; k++) {
+        const RowSnap& r = s.rows[idx[k]];
+        char name[24]; ascii(name, sizeof(name), r.name);
+        if (!name[0]) strncpy(name, "(unnamed)", sizeof(name) - 1);
+        char nf[26];
+        fitText(nf, sizeof(nf), name, 110, &FreeSans9pt7b);
+        int16_t entryW = 26 + 6 + textWidth(nf, &FreeSans9pt7b) + 22;
+        if (x + entryW > right - 60) break;  // leave room for +N
+        drawAgentGlyph(r.agentType, x, cy, 26);
+        textAt(x + 32, cy + 20, nf, &FreeSans9pt7b);
+        x += entryW;
+        shown++;
+    }
+    uint8_t hidden = (count - shown) + (s.totalSessions - s.rowCount);
+    if (hidden > 0) {
+        char more[16];
+        snprintf(more, sizeof(more), "+%d", hidden);
+        textRight(right - 4, cy + 20, more, &FreeSansBold9pt7b);
+    }
+}
+
 void drawSessionGrid(const Snap& s) {
-    const int16_t top = 78, bottom = 372, left = 12, right = W - 12;
+    const int16_t top = 78, left = 12, right = W - 12;
+    int16_t bottom = 372;
     if (s.rowCount == 0) {
         // Empty state — connected but no sessions
         drawAgentDeckMark(W / 2 - 36, 140, 72);
@@ -522,24 +566,42 @@ void drawSessionGrid(const Snap& s) {
         return;
     }
 
-    int cols = s.rowCount <= 2 ? s.rowCount : (s.rowCount <= 4 ? 2 : 3);
-    int rows = s.rowCount <= 2 ? 1 : 2;
+    // Partition: attention (awaiting/processing) ahead of idle, daemon order
+    // preserved within each group. With ≤6 sessions everyone gets a card;
+    // beyond that the idle group collapses into the dock strip.
+    uint8_t order[MAX_ROWS]; uint8_t nAttention = 0, nOrder = 0;
+    for (uint8_t i = 0; i < s.rowCount; i++) if (needsAttention(s.rows[i])) order[nOrder++] = i, nAttention++;
+    for (uint8_t i = 0; i < s.rowCount; i++) if (!needsAttention(s.rows[i])) order[nOrder++] = i;
+
+    uint8_t nCards = s.rowCount;
+    bool dock = false;
+    if (s.rowCount > MAX_CARDS || s.totalSessions > s.rowCount) {
+        nCards = nAttention < MAX_CARDS ? (nAttention > 0 ? nAttention : MAX_CARDS) : MAX_CARDS;
+        if (nCards < nOrder || s.totalSessions > s.rowCount) {
+            dock = true;
+            bottom = 330;
+            drawIdleDock(s, order + nCards, nOrder - nCards, 334, 372, left, right);
+        }
+    }
+
+    int cols = nCards <= 2 ? nCards : (nCards <= 4 ? 2 : 3);
+    int rows = nCards <= 2 ? 1 : 2;
     const int16_t gut = 10;
     int16_t cardW = (right - left - (cols - 1) * gut) / cols;
     int16_t cardH = (bottom - top - (rows - 1) * gut) / rows;
 
     int firstAwaitingIdx = -1;
-    for (uint8_t i = 0; i < s.rowCount; i++) {
-        if (isAwaiting(s.rows[i].state)) { firstAwaitingIdx = i; break; }
+    for (uint8_t k = 0; k < nCards; k++) {
+        if (isAwaiting(s.rows[order[k]].state)) { firstAwaitingIdx = order[k]; break; }
     }
 
-    for (uint8_t i = 0; i < s.rowCount; i++) {
-        int c = i % cols, rw = i / cols;
+    for (uint8_t k = 0; k < nCards; k++) {
+        int c = k % cols, rw = k / cols;
         int16_t cx = left + c * (cardW + gut);
         int16_t cy = top + rw * (cardH + gut);
-        drawSessionCard(s, s.rows[i], (int)i == firstAwaitingIdx, cx, cy, cardW, cardH);
+        drawSessionCard(s, s.rows[order[k]], (int)order[k] == firstAwaitingIdx, cx, cy, cardW, cardH);
     }
-    if (s.totalSessions > s.rowCount) {
+    if (!dock && s.totalSessions > s.rowCount) {
         char more[24];
         snprintf(more, sizeof(more), "+%d more", s.totalSessions - s.rowCount);
         textRight(right - 4, bottom - 6, more, &FreeSans9pt7b);
@@ -559,7 +621,7 @@ void drawSearching(const Snap& s) {
         char line[64]; snprintf(line, sizeof(line), "panel %s · mDNS _agentdeck._tcp", s.ip);
         textAt(W / 2 - textWidth(line, &FreeSans9pt7b) / 2, 298, line, &FreeSans9pt7b);
     }
-    drawUsageFooter(s);
+    drawUsageFooter(s, true);
 }
 
 void drawSleep() {
@@ -579,7 +641,7 @@ void drawDashboard(const Snap& s) {
     setInk(false);
     drawBrandHeader(s);
     drawSessionGrid(s);
-    drawUsageFooter(s);
+    drawUsageFooter(s, false);
     // NOTE: no Serial logging here — this runs on Core 1 while Core 0 emits
     // protocol JSON lines (device_info replies, acks). Cross-core prints
     // interleave mid-line and corrupt the newline-framed JSON the daemon
@@ -625,7 +687,12 @@ void init() {
     pinMode(PIN_KEY1, INPUT_PULLUP);
     pinMode(PIN_KEY2, INPUT_PULLUP);
     SPI.begin(PIN_EPD_SCK, -1, PIN_EPD_MOSI, PIN_EPD_CS);
-    display.init(115200, true, 2, false);
+    // serial_diag_bitrate MUST stay 0: GxEPD2's diagnostics print _PowerOn/
+    // _Update_* timing lines from THIS core (Core 1) on every refresh, which
+    // interleaves with Core 0's protocol JSON on the shared USB CDC and
+    // corrupts newline-framed replies (observed: mangled device_info + inbound
+    // parse failures from the TX congestion).
+    display.init(0, true, 2, false);
     display.setRotation(0);
     Serial.printf("[Eink] GDEY075T7 init %dx%d, partial=%d\n",
                   display.width(), display.height(),

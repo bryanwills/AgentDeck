@@ -28,6 +28,27 @@ namespace Net {
 // Forward declaration
 static void sendHeartbeatAck();
 
+void serialWriteJsonLine(const char* buf) {
+#if defined(BOARD_INKDECK)
+    // HWCDC (USB-Serial/JTAG) on this core loses entire 64-byte FIFO blocks
+    // when a write spans multiple blocks (measured: deterministic 64-byte
+    // holes mid-line, 7/10 corrupt device_info replies). Pace one FIFO block
+    // per drain so the newline-framed JSON the daemon parses arrives intact.
+    constexpr size_t CHUNK = 60;
+    size_t len = strlen(buf);
+    for (size_t off = 0; off < len; off += CHUNK) {
+        size_t n = (len - off) < CHUNK ? (len - off) : CHUNK;
+        Serial.write((const uint8_t*)buf + off, n);
+        Serial.flush();
+        delayMicroseconds(300);
+    }
+    Serial.write((const uint8_t*)"\n", 1);
+    Serial.flush();
+#else
+    Serial.println(buf);
+#endif
+}
+
 static void sendDeviceInfoSerial() {
     JsonDocument resp;
     resp["type"] = "device_info";
@@ -62,7 +83,7 @@ static void sendDeviceInfoSerial() {
 
     char buf[320];
     serializeJson(resp, buf, sizeof(buf));
-    Serial.println(buf);
+    serialWriteJsonLine(buf);
 }
 
 void serialInit() {
@@ -143,7 +164,7 @@ static void sendHeartbeatAck() {
 
     char buf[128];
     serializeJson(resp, buf, sizeof(buf));
-    Serial.println(buf);
+    serialWriteJsonLine(buf);
 }
 
 bool serialConnected() {

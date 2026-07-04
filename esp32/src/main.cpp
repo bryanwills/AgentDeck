@@ -555,7 +555,23 @@ static void uiTask(void* param) {
 
 // ===== Arduino setup =====
 void setup() {
+#if defined(BOARD_INKDECK)
+    // Native USB CDC (HWCDC): both rings default tiny and drop bytes.
+    //   RX 8192 — a 10-session enriched sessions_list is ~2.2-3.5KB; the old
+    //     2048 truncated it mid-line ([Protocol] JSON error: InvalidInput).
+    //   TX 4096 — HWCDC's default 256-byte TX ring drops mid-line chunks when
+    //     boot logs + device_info replies burst faster than the host drains,
+    //     which mangled the newline-framed JSON the daemon parses.
+    Serial.setRxBufferSize(8192);
+    Serial.setTxBufferSize(4096);
+    // HWCDC write() gives up (drops the rest of the line) after this timeout
+    // when the host stalls draining. Default 100ms measurably lost ~60-byte
+    // chunks mid-println 1-in-6; senders also Serial.flush() after each
+    // protocol JSON line.
+    Serial.setTxTimeoutMs(300);
+#else
     Serial.setRxBufferSize(2048);  // Default 256 too small for large JSON messages
+#endif
     Serial.begin(115200);
 #if defined(BOARD_LED8X32)
     // Silence buzzer immediately (GPIO15 floats during boot → beep)
