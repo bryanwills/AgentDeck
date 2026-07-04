@@ -162,7 +162,7 @@ agentdeck esp32-ota <target> [--build|--firmware <path>]   # WiFi OTA push to a 
 
 **Module flags**: `--local` (all off), `--no-mdns`, `--no-adb`, `--no-serial`, `--no-pixoo`
 
-ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/esp32.md). WiFi OTA v1 (device_info capability flags, `esp32_ota_begin/chunk/end/abort` over the board's WiFi WS socket, `POST /esp32/ota`) targets boards with a dual-OTA partition table reachable over WiFi: `inkdeck`, `ulanzi_tc001`, `ttgo`, `ips35`, `round_amoled`. `86box` (NO_OTA) and `ips10` (factory partition) are excluded.
+ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/esp32.md). WiFi OTA v1 (device_info capability flags, `esp32_ota_begin/chunk/end/abort` over the board's WiFi WS socket, `POST /esp32/ota`) targets directly flashed AgentDeck ESP32 boards with WiFi connectivity and dual-OTA partition tables: `inkdeck`, `ulanzi_tc001`, `ttgo`, `ips35`, `round_amoled`, `86box`, `ips10`. `86box` and `ips10` require a one-time USB full flash to migrate existing factory/NO_OTA layouts to their 16MB dual-OTA partition tables before subsequent WiFi OTA works; the current lab units were migrated and daemon-verified on 2026-07-05 (`86box` OTA 7.8MB, `ips_10` OTA 6.0MB). Non-AgentDeck or non-direct-flashed devices are out of OTA scope.
 
 ## Key Conventions
 

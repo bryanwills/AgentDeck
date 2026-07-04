@@ -28,6 +28,47 @@ agentdeck wifi-setup --ssid "MyNetwork" --password "secret"
 
 **USB 연결 시**: daemon이 시리얼로 `wifi_provision` 전송 → ESP32 WiFi 자동 연결. **USB 분리 후**: ESP32가 저장된 자격증명으로 WiFi 재연결 → mDNS로 daemon 발견 → WebSocket 접속. WiFi 인터페이스 자동 감지 (`networksetup -listallhardwareports`), macOS Keychain 비밀번호 조회 지원. Daemon (`daemon-server.ts`)과 Session bridge (`index.ts`) 양쪽에서 auto-provisioning 동작.
 
+## WiFi OTA v1
+
+WiFi OTA는 **우리가 직접 AgentDeck 펌웨어를 플래싱하는 ESP32 계열** 중, WiFi WebSocket으로 daemon에 붙고 dual-OTA 파티션을 가진 보드만 대상이다. 상용 펌웨어/비-ESP32/직접 플래싱하지 않는 장치(Pixoo64, iDotMatrix, Timebox Mini 등)는 검토 대상이 아니다.
+
+운영 흐름:
+
+```bash
+agentdeck devices                         # WiFi ESP32 연결 및 board 이름 확인
+agentdeck esp32-ota inkdeck --build       # 해당 env 빌드 후 OTA 전송
+agentdeck esp32-ota ips10 --firmware esp32/.pio/build/ips10/firmware.bin
+```
+
+Daemon API는 `POST /esp32/ota` 이며 CLI는 이 엔드포인트를 호출한다. OTA 프로토콜은 daemon→firmware `esp32_ota_begin`, `esp32_ota_chunk`, `esp32_ota_end`, `esp32_ota_abort`, firmware→daemon `esp32_ota_ack`, `esp32_ota_error` 로 구성된다. Firmware는 `device_info`에 OTA capability(지원 여부, OTA 슬롯 수, 최소 슬롯 크기, free sketch space, 미지원 사유)를 실어 serial/WebSocket 양쪽에 보고한다. 전송은 WiFi WS socket에서 1KB base64 chunk 단위로 진행하고, `Update` + MD5 검증 성공 후 재부팅한다.
+
+OTA 대상 SSOT:
+
+| Target aliases | PlatformIO env | OTA slot size | 운영 메모 |
+|---|---|---:|---|
+| `inkdeck` | `inkdeck` | ~3.3MB | Seeed XIAO ESP32-S3 Plus BSP와 일치하도록 8MB layout 유지 |
+| `ulanzi_tc001`, `led8x32` | `led8x32` | ~3.0MB | FastLED matrix, LVGL 미사용 |
+| `ttgo`, `ttgo_t_display` | `ttgo` | ~6.0MB | PSRAM 없는 classic ESP32, 작은 렌더 버퍼 유지 |
+| `ips35`, `ips_35` | `ips35` | ~3.5MB | FAT 포함 dual-OTA layout |
+| `round_amoled`, `amoled`, `amoled_18` | `amoled` | ~3.0MB | 8MB flash dual-OTA layout |
+| `86box`, `box_86`, `box_40` | `box_86` (`rgb48` default env도 같은 파티션) | ~7.75MB | 실험실 유닛은 2026-07-05 USB 마이그레이션 완료; 이전 layout 유닛은 최초 1회 USB full flash 필요 |
+| `ips10`, `ips_10`, `ips_101` | `ips10` | ~6.0MB | 실험실 유닛은 2026-07-05 USB 마이그레이션 완료; 이전 layout 유닛은 최초 1회 USB full flash 필요 |
+
+최초 마이그레이션 주의:
+
+- `86box`와 `ips10`은 2026-07-05 이전 펌웨어가 단일/factory 또는 NO_OTA 파티션일 수 있다. 이 상태에서는 WiFi OTA를 받을 다음 OTA 슬롯이 없으므로 `esp32/scripts/flash.sh` 또는 PlatformIO upload로 bootloader + partition table + app을 USB full flash 한 뒤부터 OTA 대상이 된다.
+- USB flash 전에는 `agentdeck stop` 또는 macOS AgentDeck 앱 종료 후 `lsof /dev/cu.*` 로 포트 점유를 확인한다. Daemon이 CH340/CDC 포트를 잡고 있으면 esptool이 chip stopped responding 오류를 낼 수 있다.
+- OTA 실패 시 보드는 기존 실행 슬롯을 유지해야 한다. 반복 실패하면 `agentdeck devices`의 OTA capability 미지원 사유(`no_ota_build`, `no_dual_ota_partition`, `no_next_ota_partition`)와 firmware size 대비 slot size를 먼저 확인한다.
+
+실기 마이그레이션 검증(2026-07-05):
+
+| Board | USB upload result | Daemon detection | 판정 |
+|---|---|---|---|
+| `86box` | `/dev/cu.wchusbserial21110`, dual-OTA firmware upload 100% 완료(1421KB compressed) | `86box v0.1.2 (f82f4616-dirty) OTA 7.8MB @ /dev/cu.wchusbserial21110` | 완료 |
+| `ips_10` | `/dev/cu.wchusbserial201240`, clean build 후 dual-OTA firmware upload 100% 완료(1350KB compressed) | `ips_10 v0.1.2 (f82f4616-dirty) OTA 6.0MB @ /dev/cu.wchusbserial201240` | 완료 |
+
+위 포트는 해당 검증 시점의 USB 스냅샷이다. 운영 판단은 포트명이 아니라 `device_info`/`agentdeck devices`에 표시되는 board 이름과 OTA slot size를 기준으로 한다.
+
 ## Disconnect 복구 (ESP32 firmware)
 
 시리얼 10초 timeout + WebSocket 지수 backoff (1→8s). `main.cpp`는 `bridgeFound` 플래그 없이 **mDNS를 항상 폴링** → daemon IP 변경(DHCP 갱신, 호스트 이동) 즉시 감지 후 `wsDisconnect()`+새 IP로 `wsConnect()` 재바인딩. WS backoff가 15초 이상 saturated이면 `mdnsRefresh()`로 캐시 강제 무효화 (좀비 dns-sd 광고 상황 방어). `ws_client.cpp`의 `setReconnectInterval()`은 backoff 증가할 때마다 라이브러리 내부 타이머에 재동기화 (기존에는 `wsConnect()` 시점 값에 고정). `DashboardState.lastMessageMs`가 serial/WS TEXT 수신 시 갱신되어 UI에서 disconnect age 계산.

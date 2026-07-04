@@ -9,10 +9,10 @@
 | **Stream Deck+** | WebSocket JSON | Daemon (9120) | Token (local bypass) | `daemon.json` / mDNS | Bidirectional | All 13 |
 | **Android** | WebSocket + HTTP | Daemon (9120) | Token (local bypass) | mDNS / ADB / QR | Bidirectional | All 13 |
 | **Apple** | WebSocket + HTTP | Daemon (9120) | Token | mDNS / QR | Bidirectional | All 13 |
-| **ESP32** | USB Serial JSON | CDC/UART 115200 | None | Port scan 10s | Push only | 6 |
+| **ESP32** | USB Serial JSON + WiFi WebSocket | CDC/UART 115200 / Daemon (9120) | None | Port scan 10s / mDNS | Push + OTA control | 6 + OTA ack/error |
 | **Pixoo64** | HTTP REST (Divoom) | LAN:80 | None | Cloud API / manual | Push only | 4 |
 | **Timebox Mini** | BLE GATT (ISSC transparent-UART) | `49535343-…` | Bluetooth pairing | `TimeBox-mini-light` BLE scan | Push only | 4 |
-| **InkDeck e-ink** | WebSocket JSON (WiFi) | Daemon (9120) | None | mDNS / port scan | Push only | dashboard frame |
+| **InkDeck e-ink** | WebSocket JSON (WiFi) | Daemon (9120) | None | mDNS / port scan | Push + OTA control | dashboard frame + OTA ack/error |
 | **SSE** | HTTP SSE | Daemon (9120) | Token | Manual URL | Push only | All 13 |
 | **Gateway** | WebSocket Custom | 18789 | Ed25519 | Hardcoded | Bidirectional | N/A (adapter) |
 
@@ -106,12 +106,22 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 
 ### ESP32 Touch Display
 
-- **Transport**: USB Serial (CH340/CP210x), 115200 baud, newline-delimited JSON
-- **Discovery**: Port scan every 10s (`/dev/cu.usbserial-*` macOS, `/dev/ttyUSB*` Linux)
+- **Transport**: USB Serial (CH340/CP210x/Native CDC), 115200 baud, newline-delimited JSON; WiFi WebSocket to daemon after provisioning
+- **Discovery**: Port scan every 10s (`/dev/cu.usbserial-*` macOS, `/dev/ttyUSB*` Linux) plus mDNS daemon discovery from firmware
 - **Heartbeat**: Full state re-push every 5s via `setESP32StateProvider()`
 - **Events**: 6 types (`SERIAL_FORWARDED_EVENTS`)
-- **Direction**: Push only — no commands from ESP32
-- **Boards**: IPS 3.5" (480×320), 86 Box 4" (480×480), Round AMOLED (240×240)
+- **Direction**: Dashboard state push plus OTA control/ack messages on OTA-capable WiFi boards
+- **Boards**: IPS 3.5" (480×320), 86 Box 4" (480×480), Round AMOLED (360×360), TTGO T-Display, Ulanzi TC001, IPS 10.1", InkDeck, ESP32-C6 1.47"
+
+### ESP32 WiFi OTA
+
+- **Scope**: Only directly flashed AgentDeck ESP32 firmware targets with WiFi connectivity and a dual-OTA partition table. Non-AgentDeck firmware and devices we do not flash directly are excluded.
+- **Targets**: `inkdeck`, `ulanzi_tc001`/`led8x32`, `ttgo`, `ips35`, `round_amoled`/`amoled`, `86box`/`box_86`, `ips10`/`ips_10`.
+- **Not target**: `esp32_c6_147` currently has a 4MB single-app style layout and no OTA target in the supported matrix.
+- **Control path**: CLI `agentdeck esp32-ota <target> [--build|--firmware <path>]` → daemon `POST /esp32/ota` → board WiFi WebSocket.
+- **Protocol**: daemon sends `esp32_ota_begin/chunk/end/abort`; firmware returns `esp32_ota_ack/error`. Firmware reports capability in `device_info` so the daemon can reject unsupported boards before upload.
+- **Migration**: `86box` and `ips10` became OTA-capable after 2026-07-05 16MB dual-OTA partition changes. Existing devices on older NO_OTA/factory layouts need one USB full flash first; future updates can use WiFi OTA.
+- **Verified lab devices**: On 2026-07-05, `86box` was USB-migrated and detected as `OTA 7.8MB`; `ips_10` was USB-migrated and detected as `OTA 6.0MB`. Both are now eligible for `agentdeck esp32-ota <target>` once connected over WiFi.
 
 ### Pixoo64 LED Matrix
 

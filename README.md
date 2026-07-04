@@ -455,6 +455,7 @@ The same pattern passes through any other flag the agent accepts — for instanc
 | `agentdeck timebox test [target]` | Send one frame (BLE) |
 | `agentdeck timebox sync [target]` | Run foreground Timebox frame sync (BLE) |
 | `agentdeck wifi-setup` | ESP32 WiFi provisioning (serial) |
+| `agentdeck esp32-ota <target>` | Push ESP32 firmware over WiFi OTA (`--build` or `--firmware <path>`) |
 
 ---
 
@@ -794,22 +795,22 @@ Compact WiFi-connected displays for always-on agent monitoring.
 
 ### Supported Boards
 
-| Board | SoC | Screen | Resolution |
-|-------|-----|--------|------------|
-| **Round AMOLED 1.8"** | ESP32-S3 | circular AMOLED (ST77916) | 360×360 |
-| **IPS LCD 3.5"** | ESP32-S3 | rectangular IPS | 480×320 |
-| **B86 Box 4"** | ESP32-S3 | wall-mount touch panel | 480×480 |
-| **TTGO T-Display 1.14"** | ESP32 (classic) | LilyGO ST7789 TFT | 135×240 |
-| **ESP32-C6 1.47"** | ESP32-C6 (RISC-V) | Waveshare ST7789 TFT | 172×320 |
-| **IPS 10.1"** | ESP32-P4 + C6 | Guition JD9365 MIPI-DSI | 800×1280 |
-| **Ulanzi TC001** | ESP32 | 8×32 WS2812B RGB LED matrix | 256 pixels |
-| **InkDeck** | XIAO ESP32-S3 Plus | Seeed 7.5" OG e-ink (UC8179) | 800×480 |
+| Board | SoC | Screen | Resolution | WiFi OTA |
+|-------|-----|--------|------------|----------|
+| **Round AMOLED 1.8"** | ESP32-S3 | circular AMOLED (ST77916) | 360×360 | Yes |
+| **IPS LCD 3.5"** | ESP32-S3 | rectangular IPS | 480×320 | Yes |
+| **B86 Box 4"** | ESP32-S3 | wall-mount touch panel | 480×480 | Yes, after one-time USB partition migration |
+| **TTGO T-Display 1.14"** | ESP32 (classic) | LilyGO ST7789 TFT | 135×240 | Yes |
+| **ESP32-C6 1.47"** | ESP32-C6 (RISC-V) | Waveshare ST7789 TFT | 172×320 | No |
+| **IPS 10.1"** | ESP32-P4 + C6 | Guition JD9365 MIPI-DSI | 800×1280 | Yes, after one-time USB partition migration |
+| **Ulanzi TC001** | ESP32 | 8×32 WS2812B RGB LED matrix | 256 pixels | Yes |
+| **InkDeck** | XIAO ESP32-S3 Plus | Seeed 7.5" OG e-ink (UC8179) | 800×480 | Yes |
 
 > **InkDeck** (7.5" e-ink) is a Seeed TRMNL OG DIY Kit running custom AgentDeck firmware — see [InkDeck e-ink](#inkdeck-e-ink) below. Its firmware is still in development.
 
 ### Setup
 
-Run `agentdeck wifi-setup` to provision WiFi over serial (see [CLI Reference](#cli-reference)). Once provisioned, the ESP32 connects to the bridge over WiFi WebSocket and displays a compact terrarium with agent status. PlatformIO firmware in `esp32/`.
+Run `agentdeck wifi-setup` to provision WiFi over serial (see [CLI Reference](#cli-reference)). Once provisioned, the ESP32 connects to the daemon over WiFi WebSocket and displays a compact terrarium with agent status. OTA-capable boards can then be updated with `agentdeck esp32-ota <target> --build`; `86box` and `ips10` must first receive a USB full flash with the new 16MB dual-OTA partition table. PlatformIO firmware in `esp32/`; operational OTA details live in [docs/esp32.md](docs/esp32.md).
 
 ---
 

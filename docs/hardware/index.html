@@ -181,16 +181,17 @@
         <tr><td class="device-name">86 Box 4"</td><td><code>box_40</code></td><td><code>box_86</code><sup>6</sup></td><td>ESP32-S3-4848S040 (Guition)</td><td>ESP32-S3</td><td class="res">480×480</td><td>ST7701 (RGB 16-bit)</td><td>GT911 (I2C)</td><td>16MB</td><td>YES</td><td>CH340</td></tr>
         <tr><td class="device-name">TTGO T-Display 1.14"</td><td><code>tft_114</code></td><td><code>ttgo</code></td><td>LilyGO T-Display</td><td>ESP32-D0WDQ6</td><td class="res">135×240</td><td>ST7789 (SPI)</td><td>없음 (버튼 2)</td><td>16MB</td><td>NO</td><td>CH340<sup>4</sup></td></tr>
         <tr><td class="device-name">ESP32-C6 1.47"</td><td><code>c6_147</code></td><td><code>esp32_c6_147</code></td><td>Waveshare ESP32-C6-LCD-1.47"</td><td>ESP32-C6</td><td class="res">172×320</td><td>ST7789 (SPI)</td><td>없음 (BOOT)</td><td>4MB</td><td>NO</td><td>Native USB CDC</td></tr>
-        <tr><td class="device-name">IPS 10.1"</td><td><code>ips_101</code></td><td><code>ips10</code></td><td>JC8012P4A1C (Guition)</td><td>ESP32-P4NRW32 (400MHz)</td><td class="res">800×1280</td><td>JD9365 (MIPI-DSI)</td><td>GSL3680 (I2C)</td><td>4MB<sup>5</sup></td><td>32MB</td><td>CH340</td></tr>
+        <tr><td class="device-name">IPS 10.1"</td><td><code>ips_101</code></td><td><code>ips10</code></td><td>JC8012P4A1C (Guition)</td><td>ESP32-P4NRW32 (400MHz)</td><td class="res">800×1280</td><td>JD9365 (MIPI-DSI)</td><td>GSL3680 (I2C)</td><td>16MB<sup>5</sup></td><td>32MB</td><td>CH340</td></tr>
         <tr><td class="device-name">XTeink X3<sup>7</sup></td><td>—</td><td>—</td><td>XTeink X3 (XTeink)</td><td>ESP32-C3</td><td class="res">528×792</td><td>e-ink EPD (미확정)</td><td>없음</td><td>4MB</td><td>NO</td><td>pogo USB (데이터 사망)</td></tr>
       </tbody>
     </table>
   </div>
   <p class="section-note">
     <sup>4</sup> TTGO 플래시는 57600 baud + <code>--no-stub</code>(~5분). PSRAM 없는 classic이라 정적 DRAM ~10KB → 테라리움 축소 버퍼.
-    <sup>5</sup> P4NRW32 모듈은 16MB Flash + 32MB PSRAM 통합이나 빌드는 4MB 파티션. WiFi는 co-processor <strong>ESP32-C6-MINI-1U-N4</strong>(esp-hosted), TX 20dBm.
-    <sup>6</sup> <code>box_86</code>의 legacy 중복 env <code>rgb48</code>가 <code>platformio.ini</code>의 <code>default_envs</code>(같은 <code>box_86.csv</code> 파티션, platform source만 다른 near-dup). 친근명 정리 범위에서 pio env는 유지 — <code>pio run</code> 무인자 빌드 시 <code>rgb48</code> 선택됨에 주의.
+    <sup>5</sup> P4NRW32 모듈은 16MB Flash + 32MB PSRAM 통합. AgentDeck <code>ips10</code> 펌웨어는 2026-07-05 이후 <code>jc8012p4a1c_ota.csv</code> 16MB dual-OTA layout(OTA 슬롯 각 6.0MB + SPIFFS). WiFi는 co-processor <strong>ESP32-C6-MINI-1U-N4</strong>(esp-hosted), TX 20dBm.
+    <sup>6</sup> <code>box_86</code>의 legacy 중복 env <code>rgb48</code>가 <code>platformio.ini</code>의 <code>default_envs</code>(같은 <code>box_86_ota.csv</code> 16MB dual-OTA 파티션, platform source만 다른 near-dup). 친근명 정리 범위에서 pio env는 유지 — <code>pio run</code> 무인자 빌드 시 <code>rgb48</code> 선택됨에 주의.
     <sup>7</sup> <strong>XTeink X3 = experimental.</strong> AgentDeck <code>esp32/</code> 펌웨어 아님 — 오픈소스 <strong>CrossPoint Reader 포크</strong>(<code>crosspoint-agentdeck</code>, branch <code>agentdeck-decision-card</code>)로 "Decision Card" 펌웨어 개발 중이라 <code>friendly명</code>/<code>pio env</code> 없음, LVGL 미사용(CrossPoint <code>GfxRenderer</code>). 전송 WiFi WS(계획). 소유 유닛은 USB-data 패드 사망 → SD <code>update.bin</code>만. 종합 매트릭스 각주<sup>7</sup> 참조.
+    <br><strong>OTA 실기 검증:</strong> 2026-07-05 현재 실험실 <code>86box</code>는 USB 마이그레이션 후 daemon에서 <code>OTA 7.8MB</code>, <code>ips_10</code>은 <code>OTA 6.0MB</code>로 감지 완료. 기존 factory/NO_OTA layout 유닛은 최초 1회 USB full flash 필요.
   </p>
 
   <h2>B. LED 매트릭스 디바이스</h2>
