@@ -203,14 +203,25 @@ export class DisplayMonitor extends EventEmitter {
 }
 
 function parseIoregBool(output: string, key: string): boolean | undefined {
-  const match = output.match(new RegExp(`"${key}"\\s*=\\s*(Yes|No|true|false|1|0)`, 'i'));
+  // Real ioreg output prefixes most IOConsoleUsers keys with "k"
+  // ("kCGSSessionOnConsoleKey"=Yes); the lock marker historically appears
+  // both with and without it. Accept either.
+  const match = output.match(new RegExp(`"k?${key}"\\s*=\\s*(Yes|No|true|false|1|0)`, 'i'));
   if (!match) return undefined;
   return /^(yes|true|1)$/i.test(match[1]);
 }
 
 export function parseIoregPresence(output: string): { screenLocked?: boolean; sessionInactive?: boolean } {
-  const screenLocked = parseIoregBool(output, 'CGSSessionScreenIsLocked');
+  let screenLocked = parseIoregBool(output, 'CGSSessionScreenIsLocked');
   const onConsole = parseIoregBool(output, 'CGSSessionOnConsoleKey');
+  // macOS REMOVES the ScreenIsLocked key on unlock rather than flipping it to
+  // No. If we can see the console-users dict at all, an absent lock key means
+  // UNLOCKED — returning undefined here latched screenLocked=true forever
+  // after the first lock, which kept displayOn=false and put every panel to
+  // sleep until the daemon restarted.
+  if (screenLocked === undefined && /IOConsoleUsers/.test(output)) {
+    screenLocked = false;
+  }
   return {
     ...(screenLocked !== undefined ? { screenLocked } : {}),
     ...(onConsole !== undefined ? { sessionInactive: !onConsole } : {}),

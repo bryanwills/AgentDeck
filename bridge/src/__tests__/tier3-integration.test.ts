@@ -79,6 +79,24 @@ describe('Display sleep/wake broadcast', () => {
     `)).toEqual({ screenLocked: false, sessionInactive: true });
   });
 
+  it('treats an absent ScreenIsLocked key as UNLOCKED when IOConsoleUsers is visible', () => {
+    // Real Sequoia+ output: unlock REMOVES the key (it never flips to No),
+    // and every key carries the "k" prefix. The old parser returned
+    // undefined here, latching screenLocked=true forever after one lock.
+    const realUnlocked = `
+      "IOConsoleUsers" = ({"kCGSSessionOnConsoleKey"=Yes,"kCGSSessionIDKey"=257,"kCGSSessionUserNameKey"="user"})
+    `;
+    expect(parseIoregPresence(realUnlocked)).toEqual({ screenLocked: false, sessionInactive: false });
+
+    const realLocked = `
+      "IOConsoleUsers" = ({"kCGSSessionOnConsoleKey"=Yes,"CGSSessionScreenIsLocked"=Yes})
+    `;
+    expect(parseIoregPresence(realLocked)).toEqual({ screenLocked: true, sessionInactive: false });
+
+    // No console-users dict at all (probe failed / different node): stay undecided.
+    expect(parseIoregPresence('unrelated')).toEqual({});
+  });
+
   it('display_state event has correct shape', () => {
     const event: DisplayStateEvent = { type: 'display_state', displayOn: true };
     expect(event.type).toBe('display_state');
