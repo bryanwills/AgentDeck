@@ -6,6 +6,12 @@
 
 ---
 
+## 2026-07-04 — 라운드 8: IDLE 독 2줄 + 티커 빈칸 원인(60s 첫표시 게이트) (커밋 6c384a32)
+
+- IDLE 독을 칩 2줄로 확장(카드영역 78..294, 독 298..366). 칩은 1줄 넘치면 2줄로 랩 후 "+N".
+- **티커 빈칸의 실제 원인 = 60초 rate-limit이 부팅 후 '첫 표시'까지 게이트** — 최대 1분간 빈 줄이 "고장"으로 읽힘. blank→text 전이는 즉시 드로우로 변경. 시드 파싱 자체는 건강함을 실증: timeline_history 주입 → device_info `timelineCount:3` 응답(신규 디버그 필드; "시드 미파싱 vs 렌더 게이팅" 판별용).
+- 시드 엔트리 필드를 펌웨어 버퍼로 바운딩(raw 119/detail 199) — 긴 chat 본문이 소형 RX 버퍼 보드에서 히스토리 라인을 터뜨리지 않게.
+
 ## 2026-07-04 — 라운드 7: 타임라인 인제스트 복구(observed hook→timeline) + InkDeck 랩 버그 (커밋 3bf1f235)
 
 - **"로그가 00:28 이후 안 쌓임" 근본 원인**: 타임라인 chat/tool 행은 **managed 세션 브리지의 릴레이로만** 생성됐음. 00:28 = 마지막 managed codex 세션 종료 시각; 이후 사용자의 모든 작업은 observed(터미널 직접 실행 + hook만)라 행이 0개. 로그 시스템 고장이 아니라 **observed 경로에 방출 지점이 아예 없던 구조적 갭**. fix: 데몬 훅 엔드포인트(`/hooks/:event`)가 UserPromptSubmit→chat_start(프롬프트), PreToolUse→tool_exec(툴+입력 힌트)를 직접 방출(session_id + cwd basename 프로젝트명). chat_end는 의도적 미방출(훅엔 응답 텍스트가 없어 "Completed" 빈 행 = 파편화). **라이브 검증**: 재시작 수 초 뒤 현 세션의 Bash 훅이 타임라인에 등장.
