@@ -1,10 +1,21 @@
 #pragma once
 
 // InkDeck — Seeed TRMNL 7.5" OG DIY Kit
-// XIAO ESP32-S3 Plus (16MB flash / 8MB octal PSRAM) + 7.5" 800×480 1-bit
-// e-ink panel (Good Display GDEY075T7, UC8179 driver) on the kit's EE04
-// driver board. Pin map per the Seeed ESPHome cookbook, cross-checked with
-// usetrmnl/trmnl-firmware include/config.h (VBAT/battery pins agree).
+// XIAO ESP32-S3 (chip is 16MB-flash "Plus" grade per esptool flash_id, 8MB octal
+// PSRAM) + 7.5" 800×480 1-bit e-ink panel (Good Display GDEY075T7, UC8179 driver)
+// on the kit's EE04 driver board. Pin map per the Seeed ESPHome cookbook,
+// cross-checked with usetrmnl/trmnl-firmware include/config.h (VBAT/battery pins agree).
+//
+// Flash layout caveat: the seeed_xiao_esp32s3 BSP is 8MB (default_8MB.csv /
+// upload.flash_size=8MB) and bakes an 8MB flash-size field into the 2nd-stage
+// bootloader. [env:inkdeck] in platformio.ini MUST keep flash_size + partitions
+// at 8MB — a 16MB partition table is rejected ("exceeds flash chip size 0x800000")
+// and boot-loops. The chip being physically 16MB does not help here.
+//
+// No BOOT(GPIO0) button is exposed on this kit (only RST + KEY1=GPIO2 /
+// KEY2=GPIO3 / KEY3=GPIO5). ROM download mode cannot be entered via buttons —
+// flash by catching the USB-Serial/JTAG boot window after an RST (see
+// DEVELOPMENT_LOG 2026-07-04 "InkDeck 최초 실기 플래시").
 
 #define BOARD_NAME "InkDeck 7.5 e-ink"
 
