@@ -155,11 +155,14 @@ void snapshot(Snap& s) {
     if (!s.agPlan[0] && g_state.antigravityPlan[0]) {
         snprintf(s.agPlan, sizeof(s.agPlan), "AGY %s", g_state.antigravityPlan);
     }
-    // Latest timeline entry → ticker. Prefer the daemon-preformatted local
-    // "HH:MM"; the raw ts fallback is UTC-derived (panel has no local tz).
-    if (g_state.timelineCount > 0) {
-        uint8_t idx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1) % TIMELINE_MAX_ENTRIES);
+    // Latest human-readable timeline entry → ticker. Skips raw JSON bodies
+    // (codex tool outputs like {"exclude":[]} land in the timeline as
+    // chat_response rows — machine noise, not a status line). Prefer the
+    // daemon-preformatted local "HH:MM"; raw ts fallback is UTC-derived.
+    for (uint8_t back = 0; back < g_state.timelineCount && back < 8; back++) {
+        uint8_t idx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - back) % TIMELINE_MAX_ENTRIES);
         const TimelineEntry& t = g_state.timeline[idx];
+        if (!t.raw[0] || t.raw[0] == '{' || t.raw[0] == '[') continue;
         if (t.hm[0]) {
             strncpy(s.tickerTime, t.hm, sizeof(s.tickerTime) - 1);
         } else {
@@ -167,6 +170,7 @@ void snapshot(Snap& s) {
                      (unsigned long)(t.ts / 3600) % 24, (unsigned long)(t.ts / 60) % 60);
         }
         strncpy(s.tickerText, t.raw, sizeof(s.tickerText) - 1);
+        break;
     }
     unlockState();
     strncpy(s.ip, Net::wifiLocalIP(), sizeof(s.ip) - 1);
@@ -268,6 +272,39 @@ void fitText(char* out, size_t outLen, const char* s, int16_t maxW, const GFXfon
         char probe[96];
         snprintf(probe, sizeof(probe), "%s..", out);
         if (textWidth(probe, f) <= maxW) { strncpy(out, probe, outLen - 1); out[outLen - 1] = '\0'; return; }
+    }
+}
+
+// Greedy 2-line wrap in a SINGLE font (mixed sizes across the two lines read
+// as a glitch on paper). Line 1 breaks at the last space that fits — falling
+// back to a mid-word hard break only when one word alone exceeds the width
+// (the old space-only backoff shrank "Hello-world-… is" to a one-letter first
+// line). Line 2 ellipsizes as the last resort.
+void drawWrapped2(int16_t x, int16_t y1, int16_t y2, int16_t maxW,
+                  const char* text, const GFXfont* f) {
+    if (textWidth(text, f) <= maxW) { textAt(x, y1, text, f); return; }
+    size_t len = strlen(text);
+    size_t take = len;
+    char probe[112];
+    while (take > 1) {
+        strncpy(probe, text, take); probe[take] = '\0';
+        if (textWidth(probe, f) <= maxW) break;
+        take--;
+    }
+    size_t brk = take;
+    if (take < len) {
+        size_t sp = take;
+        while (sp > 0 && text[sp] != ' ') sp--;
+        if (sp > take / 2) brk = sp;  // word boundary, but never a near-empty line 1
+    }
+    strncpy(probe, text, brk); probe[brk] = '\0';
+    textAt(x, y1, probe, f);
+    const char* rest = text + brk;
+    while (*rest == ' ') rest++;
+    if (*rest) {
+        char l2[112];
+        fitText(l2, sizeof(l2), rest, maxW, f);
+        textAt(x, y2, l2, f);
     }
 }
 
@@ -496,15 +533,16 @@ void drawUsageFooter(const Snap& s, bool showIdentity) {
     }
 
     // Ticker — latest timeline event as ONE compressed line (the per-card
-    // activity summary is the surface that gets two lines, not this).
+    // activity summary is the surface that gets two lines, not this). Single
+    // 9pt font: dropping to the tiny classic font here read as a glitch.
     if (s.tickerText[0]) {
         const int16_t ty = 470;
         textAt(16, ty, s.tickerTime, &FreeSansBold9pt7b);
         char t[104]; ascii(t, sizeof(t), s.tickerText);
         char tf[108];
         int16_t maxW = W - 74 - 16 - agW - (showIdentity ? 110 : 0);
-        const GFXfont* f = fitCascade(tf, sizeof(tf), t, maxW, &FreeSans9pt7b, CLASSIC_FONT);
-        textAt(74, ty, tf, f);
+        fitText(tf, sizeof(tf), t, maxW, &FreeSans9pt7b);
+        textAt(74, ty, tf, &FreeSans9pt7b);
     }
 }
 
@@ -599,32 +637,12 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
             }
         }
     } else if (r.activity[0] && dy < y + h - 8) {
-        // Activity summary gets up to TWO wrapped lines before any font drop —
+        // Activity summary gets up to TWO wrapped lines (same font on both) —
         // this line is the point of the card, so give it room.
         char a[80]; ascii(a, sizeof(a), r.activity);
-        if (textWidth(a, &FreeSans9pt7b) <= maxTextW) {
-            textAt(tx, dy, a, &FreeSans9pt7b);
-        } else {
-            size_t len = strlen(a), take = len;
-            while (take > 1) {
-                char probe[84];
-                strncpy(probe, a, take); probe[take] = '\0';
-                if (textWidth(probe, &FreeSans9pt7b) <= maxTextW &&
-                    (take == len || a[take] == ' ')) break;
-                take--;
-            }
-            char l1[84];
-            strncpy(l1, a, take); l1[take] = '\0';
-            textAt(tx, dy, l1, &FreeSans9pt7b);
-            const char* rest = a + take;
-            while (*rest == ' ') rest++;
-            if (*rest && dy + 20 < y + h - 6) {
-                char l2[84];
-                const GFXfont* f2 = fitCascade(l2, sizeof(l2), rest, maxTextW,
-                                               &FreeSans9pt7b, CLASSIC_FONT);
-                textAt(tx, dy + 20, l2, f2);
-            }
-        }
+        bool roomFor2 = dy + 20 < y + h - 6;
+        if (roomFor2) drawWrapped2(tx, dy, dy + 20, maxTextW, a, &FreeSans9pt7b);
+        else { char af[84]; fitText(af, sizeof(af), a, maxTextW, &FreeSans9pt7b); textAt(tx, dy, af, &FreeSans9pt7b); }
     }
 
     // Model tag bottom-right on every card — narrow cards drop to the
