@@ -157,11 +157,12 @@ agentdeck diag               # Diagnostic dump
 agentdeck pixoo {scan|add|list|remove|test}
 agentdeck timebox {scan|add|list|remove|test|sync}   # Divoom Timebox Mini (BLE)
 agentdeck wifi-setup         # ESP32 WiFi provisioning (--ssid, --password)
+agentdeck esp32-ota <target> [--build|--firmware <path>]   # WiFi OTA push to a provisioned ESP32 board
 ```
 
 **Module flags**: `--local` (all off), `--no-mdns`, `--no-adb`, `--no-serial`, `--no-pixoo`
 
-ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/esp32.md).
+ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/esp32.md). WiFi OTA v1 (device_info capability flags, `esp32_ota_begin/chunk/end/abort` over the board's WiFi WS socket, `POST /esp32/ota`) targets boards with a dual-OTA partition table reachable over WiFi: `inkdeck`, `ulanzi_tc001`, `ttgo`, `ips35`, `round_amoled`. `86box` (NO_OTA) and `ips10` (factory partition) are excluded.
 
 ## Key Conventions
 
