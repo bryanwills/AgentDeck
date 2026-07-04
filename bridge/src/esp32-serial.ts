@@ -96,7 +96,23 @@ export interface SerialConnection {
   reader: ReadStream | null;
   readBuf: string;
   connected: boolean;
-  deviceInfo: { board?: string; version?: string; buildHash?: string; buildEpoch?: number; wifiConfigured?: boolean; wifiConnected?: boolean; timelineCount?: number; sessionCount?: number } | null;
+  deviceInfo: {
+    board?: string;
+    version?: string;
+    buildHash?: string;
+    buildEpoch?: number;
+    wifiConfigured?: boolean;
+    wifiConnected?: boolean;
+    otaSupported?: boolean;
+    otaSlotCount?: number;
+    otaSlotSize?: number;
+    otaFreeSketchSpace?: number;
+    otaReason?: string;
+    timelineCount?: number;
+    sessionCount?: number;
+    usageFiveH?: number;
+    processingCount?: number;
+  } | null;
   /** True once a device_info arrived on THIS connection (vs. cache-seeded).
    * Identify retries key off this — a cache-seeded deviceInfo must not stop
    * re-requests, or a reflashed board keeps its stale buildHash in /devices
@@ -227,38 +243,48 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
   const e = event as any;
 
   if (event.type === 'usage_update') {
-    // Pre-format ISO dates + strip unused fields
-    const { ollamaStatus, tokenStatus, extraUsageEnabled, extraUsageMonthlyLimit,
-            extraUsageUsedCredits, extraUsageUtilization, costSpent, costLimit,
-            sessionPercent, resetTime, resetDate, codexRateLimits, ...keep } = e;
-    // Codex windows carry ISO resetsAt too — pre-format like the Claude ones so a
-    // serial device (no NTP) can render the countdown instead of a blank.
-    const cx = codexRateLimits
+    // WHITELIST of the fields the firmware actually parses (protocol.cpp
+    // handleUsageUpdate). The old blocklist approach silently leaked every
+    // NEW usage field onto the wire — modelCatalog alone (3.2KB) pushed the
+    // line past the firmware's 4096-byte line buffer, so boards discarded
+    // EVERY usage_update and their gauges froze on stale values.
+    const cx = e.codexRateLimits
       ? {
-          ...codexRateLimits,
-          primary: codexRateLimits.primary
-            ? { ...codexRateLimits.primary, resetsAt: formatResetTime(codexRateLimits.primary.resetsAt) }
+          primary: e.codexRateLimits.primary
+            ? { usedPercent: e.codexRateLimits.primary.usedPercent, resetsAt: formatResetTime(e.codexRateLimits.primary.resetsAt) }
             : undefined,
-          secondary: codexRateLimits.secondary
-            ? { ...codexRateLimits.secondary, resetsAt: formatResetTime(codexRateLimits.secondary.resetsAt) }
+          secondary: e.codexRateLimits.secondary
+            ? { usedPercent: e.codexRateLimits.secondary.usedPercent, resetsAt: formatResetTime(e.codexRateLimits.secondary.resetsAt) }
             : undefined,
         }
       : undefined;
     // Subscriptions carry an ISO `until`; a serial device has no reliable
     // clock, so pre-format to a short "~M/D" the panel can render as-is.
-    const subs = Array.isArray(keep.subscriptions)
-      ? keep.subscriptions.map((sub: { name?: string; until?: string }) => ({
+    const subs = Array.isArray(e.subscriptions)
+      ? e.subscriptions.map((sub: { name?: string; until?: string }) => ({
           name: limitString(sub.name, 27),
           until: formatShortDate(sub.until),
         })).filter((sub: { name?: string }) => sub.name)
       : undefined;
+    const ag = e.antigravityStatus
+      ? { planName: limitString(e.antigravityStatus.planName, 23), availableCredits: e.antigravityStatus.availableCredits }
+      : undefined;
     return {
-      ...keep,
+      type: 'usage_update',
+      fiveHourPercent: e.fiveHourPercent,
+      sevenDayPercent: e.sevenDayPercent,
+      fiveHourResetsAt: formatResetTime(e.fiveHourResetsAt),
+      sevenDayResetsAt: formatResetTime(e.sevenDayResetsAt),
+      inputTokens: e.inputTokens,
+      outputTokens: e.outputTokens,
+      toolCalls: e.toolCalls,
+      sessionDurationSec: e.sessionDurationSec,
+      estimatedCostUsd: e.estimatedCostUsd,
+      usageStale: e.usageStale,
       ...(cx ? { codexRateLimits: cx } : {}),
       ...(subs ? { subscriptions: subs } : {}),
-      fiveHourResetsAt: formatResetTime(keep.fiveHourResetsAt),
-      sevenDayResetsAt: formatResetTime(keep.sevenDayResetsAt),
-    };
+      ...(ag ? { antigravityStatus: ag } : {}),
+    } as BridgeEvent;
   }
 
   if (event.type === 'state_update') {
@@ -541,10 +567,17 @@ export function handleSerialLine(conn: SerialConnection, line: string): void {
           buildEpoch: msg.buildEpoch,
           wifiConfigured: msg.wifiConfigured,
           wifiConnected: msg.wifiConnected,
+          otaSupported: msg.otaSupported,
+          otaSlotCount: msg.otaSlotCount,
+          otaSlotSize: msg.otaSlotSize,
+          otaFreeSketchSpace: msg.otaFreeSketchSpace,
+          otaReason: msg.otaReason,
           // Board-side reality counters (debug aid — surfaced on /devices so
           // "device shows nothing" can be diagnosed without stealing the port)
           timelineCount: (msg as any).timelineCount,
           sessionCount: (msg as any).sessionCount,
+          usageFiveH: (msg as any).usageFiveH,
+          processingCount: (msg as any).processingCount,
         };
         conn.deviceInfoFresh = true;
         if (conn.deviceInfo.board) {
@@ -1146,7 +1179,20 @@ export function sendWifiProvisionToAll(msg: WifiProvisionMessage): number {
 /**
  * Get device info for all connected ESP32 devices.
  */
-export function getESP32DeviceInfo(): Array<{ port: string; board?: string; version?: string; buildHash?: string; buildEpoch?: number; wifiConfigured?: boolean; wifiConnected?: boolean }> {
+export function getESP32DeviceInfo(): Array<{
+  port: string;
+  board?: string;
+  version?: string;
+  buildHash?: string;
+  buildEpoch?: number;
+  wifiConfigured?: boolean;
+  wifiConnected?: boolean;
+  otaSupported?: boolean;
+  otaSlotCount?: number;
+  otaSlotSize?: number;
+  otaFreeSketchSpace?: number;
+  otaReason?: string;
+}> {
   const now = Date.now();
   return connections
     .filter(c => isResponsive(c, now))

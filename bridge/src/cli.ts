@@ -4,9 +4,10 @@ import { Command } from 'commander';
 import { writeFileSync, unlinkSync, existsSync, realpathSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
-import { execSync, spawn } from 'child_process';
+import { execFileSync, execSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+import { request } from 'http';
 import { BRIDGE_WS_PORT } from './types.js';
 import {
   TASK_NAME,
@@ -22,6 +23,49 @@ const packageJson = require('../package.json') as { version: string };
 
 function log(msg: string): void {
   process.stderr.write(msg + '\n');
+}
+
+function formatBytes(value: unknown): string {
+  const bytes = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${bytes}B`;
+}
+
+function postJsonWithTimeout<T>(urlString: string, body: unknown, timeoutMs: number): Promise<{ statusCode: number; body: T }> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const url = new URL(urlString);
+    const req = request({
+      hostname: url.hostname,
+      port: url.port,
+      path: `${url.pathname}${url.search}`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer | string) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        try {
+          resolve({ statusCode: res.statusCode ?? 0, body: JSON.parse(text) as T });
+        } catch (err) {
+          reject(new Error(`Invalid JSON response: ${err instanceof Error ? err.message : String(err)}`));
+        }
+      });
+    });
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`));
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
 }
 
 // ===== LaunchAgent plist =====
@@ -113,6 +157,38 @@ function resolveTimeboxSyncPaths(): { python: string; bleScript: string; scanScr
     bleScript: join(timeboxDir, 'sync_ble.py'),
     scanScript: join(timeboxDir, 'scan_ble.py'),
   };
+}
+
+function projectRootPath(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+}
+
+const ESP32_OTA_ENV_BY_TARGET: Record<string, string> = {
+  inkdeck: 'inkdeck',
+  ulanzi_tc001: 'led8x32',
+  led8x32: 'led8x32',
+  ttgo_t_display: 'ttgo',
+  ttgo: 'ttgo',
+  round_amoled: 'amoled',
+  amoled: 'amoled',
+  ips_35: 'ips35',
+  ips35: 'ips35',
+};
+
+function resolveEsp32FirmwarePath(target: string, envOpt?: string, firmwareOpt?: string): string {
+  if (firmwareOpt) return realpathSync(firmwareOpt);
+  const env = envOpt || ESP32_OTA_ENV_BY_TARGET[target] || target;
+  const path = join(projectRootPath(), 'esp32', '.pio', 'build', env, 'firmware.bin');
+  if (!existsSync(path)) {
+    throw new Error(`Firmware not found: ${path}. Build it first with: /opt/homebrew/bin/pio run -e ${env}`);
+  }
+  return path;
+}
+
+function platformioBin(): string {
+  if (process.env.PLATFORMIO) return process.env.PLATFORMIO;
+  if (existsSync('/opt/homebrew/bin/pio')) return '/opt/homebrew/bin/pio';
+  return 'pio';
 }
 
 // ===== Program =====
@@ -580,13 +656,32 @@ program
                 const ver = dev.version ? ` v${dev.version}` : '';
                 const hash = dev.buildHash ? ` (${dev.buildHash})` : '';
                 const board = dev.board ?? 'esp32';
-                lines.push(`                 ${board}${ver}${hash} @ ${dev.port}`);
+                const ota = dev.otaSupported === true
+                  ? ` OTA ${formatBytes(dev.otaSlotSize)}`
+                  : dev.otaReason ? ` OTA no:${dev.otaReason}` : '';
+                lines.push(`                 ${board}${ver}${hash}${ota} @ ${dev.port}`);
               }
             } else {
               const portInfo = ports.length ? ` (${ports.join(', ')})` : '';
               lines.push(`  ESP32        ${count} serial${portInfo}`);
             }
             total += count;
+          }
+        } else if (d.type === 'esp32-wifi') {
+          const devices: any[] = (d.devices ?? []) as any[];
+          if (devices.length) {
+            lines.push(`  ESP32 WiFi   ${devices.length} client${devices.length !== 1 ? 's' : ''}`);
+            for (const dev of devices) {
+              const ver = dev.version ? ` v${dev.version}` : '';
+              const hash = dev.buildHash ? ` (${dev.buildHash})` : '';
+              const board = dev.board ?? 'esp32';
+              const ota = dev.otaSupported === true
+                ? ` OTA ${formatBytes(dev.otaSlotSize)}`
+                : dev.otaReason ? ` OTA no:${dev.otaReason}` : '';
+              const stale = dev.stale ? ' stale' : '';
+              lines.push(`                 ${board}${ver}${hash}${ota}${stale} @ ${dev.ip ?? 'wifi'}`);
+            }
+            total += devices.length;
           }
         } else if (d.type === 'pixoo') {
           // Node daemon: { details: [...] }, Swift daemon: { deviceIps: [...] }
@@ -652,6 +747,43 @@ program
         log('Bridge is not running.');
       }
     }
+  });
+
+program
+  .command('esp32-ota <target>')
+  .description('Upload built ESP32 firmware to a WiFi-connected AgentDeck ESP32')
+  .option('-p, --port <port>', 'Daemon port')
+  .option('-e, --env <env>', 'PlatformIO environment for default firmware path')
+  .option('-f, --firmware <path>', 'Firmware .bin path')
+  .option('--build', 'Build the PlatformIO environment before upload')
+  .action(async (target, opts) => {
+    const { readDaemonInfo, findDaemonPort } = await import('./session-registry.js');
+    const info = readDaemonInfo();
+    const port = opts.port != null
+      ? parseInt(opts.port, 10)
+      : (info?.httpPort ?? info?.port ?? findDaemonPort() ?? BRIDGE_WS_PORT);
+
+    const env = opts.env || ESP32_OTA_ENV_BY_TARGET[target] || target;
+    if (opts.build) {
+      const pio = platformioBin();
+      log(`Building ${env} with ${pio}...`);
+      execFileSync(pio, ['run', '-e', env], {
+        cwd: join(projectRootPath(), 'esp32'),
+        stdio: 'inherit',
+      });
+    }
+
+    const firmwarePath = resolveEsp32FirmwarePath(target, opts.env, opts.firmware);
+    log(`Uploading ${firmwarePath} to ${target} via daemon :${port}...`);
+    const { statusCode, body } = await postJsonWithTimeout<Record<string, any>>(
+      `http://127.0.0.1:${port}/esp32/ota`,
+      { target, firmwarePath },
+      15 * 60_000,
+    );
+    if (statusCode < 200 || statusCode >= 300 || body.ok === false) {
+      throw new Error(String(body.error ?? `HTTP ${statusCode}`));
+    }
+    log(`OTA complete: ${body.board ?? target} ${formatBytes(body.bytes)} in ${body.chunks} chunks`);
   });
 
 program

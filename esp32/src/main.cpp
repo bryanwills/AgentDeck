@@ -88,11 +88,10 @@ static void networkTask(void* param) {
         // Only perform mDNS polling if we are NOT connected. 
         // Constant mDNS querying while connected consumes CPU, Wi-Fi bandwidth,
         // and induces severe packet jitter/latency spikes on ESP32, leading to disconnects.
-        // Skip the WS/mDNS dance entirely while the USB serial bridge is healthy:
-        // wsConnect/mDNS block this task for seconds (TCP connect select timeout),
-        // starving serialLoop() → RX overflow → JSON parse errors → connection
-        // flapping → black reconnect scrim. Serial IS the transport when USB-attached.
-        if (Net::wifiConnected() && !Net::wsConnected() && !Net::serialConnected() && Net::mdnsPoll(bridge)) {
+        // Keep WS available even when USB serial is attached. Serial remains
+        // the primary state transport, but WiFi OTA needs an addressable WS
+        // socket while boards are still on the bench.
+        if (Net::wifiConnected() && !Net::wsConnected() && Net::mdnsPoll(bridge)) {
             bool ipChanged = (strcmp(currentBridgeIp, bridge.ip) != 0) || (currentBridgePort != bridge.port);
             if (ipChanged || !Net::wsConnected()) {
                 if (ipChanged) {
@@ -121,7 +120,7 @@ static void networkTask(void* param) {
         //     stuck at max backoff for >15s. This handles the case where the
         //     cached bridge IP is gone (daemon moved, mDNS advertiser is
         //     stale) and we need a fresh query to find the new endpoint. ===
-        if (!Net::wsConnected() && !Net::serialConnected() && Net::wifiConnected()) {
+        if (!Net::wsConnected() && Net::wifiConnected()) {
             uint32_t now = millis();
             uint32_t sinceLastAttempt = now - Net::wsLastAttemptMs();
             bool saturated = (Net::wsBackoffMs() >= WS_RECONNECT_MAX_MS);
@@ -152,15 +151,15 @@ static void networkTask(void* param) {
         //           the WS2812 bitstream (random bright/garbage pixels). The
         //           classic ESP32 has no RMT DMA and IDF5 dropped FastLED's
         //           anti-flicker builtin driver, so the RMT path is ISR-bound.
-        // When USB serial is the live transport WiFi is unneeded — park the radio
-        // after it's been stable a few seconds. Restore it the moment serial drops
-        // (WiFi-only operation, with no serial, is unaffected — parking never fires).
+        // When USB serial is the only live transport WiFi is unneeded — park the
+        // radio after it's been stable a few seconds. Keep it on while WiFi is
+        // connected because OTA needs the board to reach WS even on the USB bench.
         {
             static bool radioParked = false;
             static uint32_t serialStableSince = 0;
             uint32_t nowMs = millis();
-            bool serialUp = Net::serialConnected();
-            if (serialUp) {
+            bool shouldPark = Net::serialConnected() && !Net::wifiConnected();
+            if (shouldPark) {
                 if (serialStableSince == 0) serialStableSince = nowMs;
                 if (!radioParked && (nowMs - serialStableSince) > 4000) {
                     Net::wifiSetRadioParked(true);

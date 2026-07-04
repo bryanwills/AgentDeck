@@ -10,7 +10,7 @@ export class WsServer {
   private commandCallback: ((cmd: PluginCommand) => void) | null = null;
   private rawMessageCallback: ((msg: Record<string, unknown>, sender: WebSocket) => boolean) | null = null;
   private onConnectCallback: ((ws: WebSocket) => void) | null = null;
-  private onDisconnectCallback: (() => void) | null = null;
+  private onDisconnectCallback: ((ws: WebSocket) => void) | null = null;
   private clientAlive = new Map<WebSocket, boolean>();
   // Clients that registered as the Ulanzi Studio plugin. While any are present,
   // the daemon's direct-HID D200H module stands down so the two don't fight over
@@ -107,7 +107,7 @@ export class WsServer {
           this.ulanziPresenceCallback?.(false);
         }
         if (this.onDisconnectCallback) {
-          this.onDisconnectCallback();
+          this.onDisconnectCallback(ws);
         }
       });
 
@@ -175,7 +175,7 @@ export class WsServer {
     this.onConnectCallback = callback;
   }
 
-  onClientDisconnect(callback: () => void): void {
+  onClientDisconnect(callback: (ws: WebSocket) => void): void {
     this.onDisconnectCallback = callback;
   }
 

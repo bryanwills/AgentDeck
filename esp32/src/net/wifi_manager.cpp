@@ -101,6 +101,9 @@ bool wifiConnectWith(const char* ssid, const char* password) {
     WiFi.disconnect(false);
     delay(100);
 
+    // Daemon provisioning must survive restart/OTA; WiFi.begin only writes
+    // credentials to flash when persistent mode is enabled.
+    WiFi.persistent(true);
     WiFi.begin(ssid, password);
 
     // Wait up to 10 seconds for connection

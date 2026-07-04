@@ -12,7 +12,7 @@
  */
 
 import { createServer, type Server } from 'http';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import { BridgeCore, buildCappedTimelineHistory } from './bridge-core.js';
 import { buildDisplayStateEvent } from './display-dim.js';
@@ -103,18 +103,188 @@ interface WifiEsp32Device {
   buildEpoch?: number;
   ip?: string;
   protocolRevision?: number;
+  otaSupported?: boolean;
+  otaSlotCount?: number;
+  otaSlotSize?: number;
+  otaFreeSketchSpace?: number;
+  otaReason?: string;
   lastSeenMs: number;
 }
 const wifiEsp32Devices = new Map<string, WifiEsp32Device>();
+const wifiEsp32Sockets = new Map<string, WebSocket>();
+
+interface OtaWaiter {
+  stage: string;
+  seq?: number;
+  resolve: (msg: Record<string, unknown>) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const otaWaiters = new Map<string, OtaWaiter>();
 
 function listWifiEsp32Devices(): Array<WifiEsp32Device & { stale: boolean }> {
   const now = Date.now();
   const out: Array<WifiEsp32Device & { stale: boolean }> = [];
   for (const [key, d] of wifiEsp32Devices) {
-    if (now - d.lastSeenMs > 60 * 60 * 1000) { wifiEsp32Devices.delete(key); continue; }
+    if (now - d.lastSeenMs > 60 * 60 * 1000) {
+      wifiEsp32Devices.delete(key);
+      wifiEsp32Sockets.delete(key);
+      continue;
+    }
     out.push({ ...d, stale: now - d.lastSeenMs > 90_000 });
   }
   return out;
+}
+
+function wifiEsp32Key(d: { board?: unknown; ip?: unknown }): string {
+  const board = typeof d.board === 'string' && d.board ? d.board : 'unknown';
+  const ip = typeof d.ip === 'string' && d.ip ? d.ip : 'no-ip';
+  return `${board}:${ip}`;
+}
+
+function registerWifiEsp32(d: Record<string, unknown>, ws: WebSocket): void {
+  const key = wifiEsp32Key(d);
+  wifiEsp32Devices.set(key, {
+    board: typeof d.board === 'string' ? d.board : 'unknown',
+    version: typeof d.version === 'string' ? d.version : undefined,
+    buildHash: typeof d.buildHash === 'string' ? d.buildHash : undefined,
+    buildEpoch: typeof d.buildEpoch === 'number' ? d.buildEpoch : undefined,
+    ip: typeof d.ip === 'string' ? d.ip : undefined,
+    protocolRevision: typeof d.protocolRevision === 'number' ? d.protocolRevision : undefined,
+    otaSupported: typeof d.otaSupported === 'boolean' ? d.otaSupported : undefined,
+    otaSlotCount: typeof d.otaSlotCount === 'number' ? d.otaSlotCount : undefined,
+    otaSlotSize: typeof d.otaSlotSize === 'number' ? d.otaSlotSize : undefined,
+    otaFreeSketchSpace: typeof d.otaFreeSketchSpace === 'number' ? d.otaFreeSketchSpace : undefined,
+    otaReason: typeof d.otaReason === 'string' ? d.otaReason : undefined,
+    lastSeenMs: Date.now(),
+  });
+  wifiEsp32Sockets.set(key, ws);
+  debug('daemon', `WiFi ESP32 registered: ${key} v${String(d.version ?? '')} build=${String(d.buildHash ?? '')}`);
+}
+
+function unregisterWifiEsp32Socket(ws: WebSocket): void {
+  for (const [key, registeredWs] of wifiEsp32Sockets) {
+    if (registeredWs !== ws) continue;
+    wifiEsp32Sockets.delete(key);
+    wifiEsp32Devices.delete(key);
+    debug('daemon', `WiFi ESP32 disconnected: ${key}`);
+  }
+}
+
+function handleEsp32OtaReply(msg: Record<string, unknown>): boolean {
+  if (msg.type !== 'esp32_ota_ack' && msg.type !== 'esp32_ota_error') return false;
+  const otaId = typeof msg.otaId === 'string' ? msg.otaId : '';
+  const waiter = otaId ? otaWaiters.get(otaId) : undefined;
+  if (!waiter) return true;
+
+  if (msg.type === 'esp32_ota_error') {
+    clearTimeout(waiter.timer);
+    otaWaiters.delete(otaId);
+    waiter.reject(new Error(typeof msg.error === 'string' ? msg.error : 'esp32_ota_error'));
+    return true;
+  }
+
+  const stage = typeof msg.stage === 'string' ? msg.stage : '';
+  const seq = typeof msg.seq === 'number' ? msg.seq : undefined;
+  if (stage !== waiter.stage) return true;
+  if (waiter.seq != null && seq !== waiter.seq) return true;
+
+  clearTimeout(waiter.timer);
+  otaWaiters.delete(otaId);
+  waiter.resolve(msg);
+  return true;
+}
+
+function waitForOtaAck(otaId: string, stage: string, seq: number | undefined, timeoutMs: number): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      otaWaiters.delete(otaId);
+      reject(new Error(`OTA ${stage}${seq != null ? ` #${seq}` : ''} timed out`));
+    }, timeoutMs);
+    otaWaiters.set(otaId, { stage, seq, resolve, reject, timer });
+  });
+}
+
+function findWifiOtaTarget(target: string): { key: string; device: WifiEsp32Device; ws: WebSocket } {
+  const matches: Array<{ key: string; device: WifiEsp32Device; ws: WebSocket }> = [];
+  for (const [key, device] of wifiEsp32Devices) {
+    const ws = wifiEsp32Sockets.get(key);
+    if (!ws || ws.readyState !== WebSocket.OPEN) continue;
+    if (key === target || device.board === target || device.ip === target) {
+      matches.push({ key, device, ws });
+    }
+  }
+  if (matches.length === 0) throw new Error(`No online WiFi ESP32 target matches "${target}"`);
+  if (matches.length > 1) throw new Error(`Target "${target}" is ambiguous: ${matches.map(m => m.key).join(', ')}`);
+  return matches[0];
+}
+
+async function readJsonBody(req: import('http').IncomingMessage, maxBytes = 64 * 1024): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > maxBytes) throw new Error('request_body_too_large');
+    chunks.push(buf);
+  }
+  if (chunks.length === 0) return {};
+  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+}
+
+async function performWifiEsp32Ota(core: BridgeCore, target: string, firmwarePath: string): Promise<Record<string, unknown>> {
+  const { key, device, ws } = findWifiOtaTarget(target);
+  if (device.otaSupported !== true) {
+    throw new Error(`Target ${key} does not report OTA support${device.otaReason ? ` (${device.otaReason})` : ''}`);
+  }
+
+  const firmware = readFileSync(firmwarePath);
+  if (device.otaSlotSize && firmware.length > device.otaSlotSize) {
+    throw new Error(`Firmware is ${firmware.length} bytes, OTA slot is ${device.otaSlotSize} bytes`);
+  }
+
+  const otaId = randomUUID();
+  const md5 = createHash('md5').update(firmware).digest('hex');
+  const send = (evt: BridgeEvent) => core.wsServer.sendTo(ws, evt);
+
+  send({ type: 'esp32_ota_begin', otaId, size: firmware.length, md5 } as BridgeEvent);
+  await waitForOtaAck(otaId, 'begin', undefined, 10_000);
+
+  const chunkSize = 1024;
+  let offset = 0;
+  let seq = 0;
+  try {
+    while (offset < firmware.length) {
+      const chunk = firmware.subarray(offset, Math.min(offset + chunkSize, firmware.length));
+      send({
+        type: 'esp32_ota_chunk',
+        otaId,
+        seq,
+        offset,
+        data: chunk.toString('base64'),
+      } as BridgeEvent);
+      await waitForOtaAck(otaId, 'chunk', seq, 7_500);
+      offset += chunk.length;
+      seq++;
+    }
+    send({ type: 'esp32_ota_end', otaId } as BridgeEvent);
+    await waitForOtaAck(otaId, 'end', undefined, 20_000);
+    wifiEsp32Sockets.delete(key);
+    wifiEsp32Devices.delete(key);
+  } catch (err) {
+    try { send({ type: 'esp32_ota_abort', otaId } as BridgeEvent); } catch { /* best effort */ }
+    throw err;
+  }
+
+  return {
+    ok: true,
+    target: key,
+    board: device.board,
+    bytes: firmware.length,
+    chunks: seq,
+    md5,
+  };
 }
 
 function loadDaemonSettings(): Record<string, unknown> {
@@ -573,6 +743,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         ],
         modules: moduleHealthProvider(),
       }));
+      return;
+    }
+    if (req.method === 'POST' && pathname === '/esp32/ota') {
+      (async () => {
+        const body = await readJsonBody(req);
+        const target = typeof body.target === 'string' ? body.target : '';
+        const firmwarePath = typeof body.firmwarePath === 'string' ? body.firmwarePath : '';
+        if (!target || !firmwarePath) {
+          throw new Error('target and firmwarePath are required');
+        }
+        return performWifiEsp32Ota(core, target, firmwarePath);
+      })().then((result) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      }).catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+      });
       return;
     }
     if (req.method === 'GET' && pathname === '/display-state') {
@@ -1486,6 +1674,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // ===== Commands from WS clients =====
   // ===== Internal WS: session push channel =====
   core.wsServer.onRawMessage((msg, sender) => {
+    // WiFi ESP32 boards announce device_info over WS on connect. Capture the
+    // sender here so OTA can address the exact socket instead of broadcasting.
+    if (msg.type === 'device_info') {
+      registerWifiEsp32(msg, sender);
+      return true;
+    }
+    if (handleEsp32OtaReply(msg)) {
+      return true;
+    }
     if (msg.type === 'session_push_register') {
       const { sessionId, port: sessionPort, agentType: at, projectName: pn } = msg as any;
       debug('daemon', `session_push_register: ${sessionId} port=${sessionPort} agent=${at}`);
@@ -1640,24 +1837,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         return;
       }
     }
-    // WiFi ESP32 boards (InkDeck) announce device_info over the plugin WS on
-    // connect — the serial identify flow never sees them, so register here for
-    // /devices and `agentdeck devices`.
-    if ((cmd as any).type === 'device_info') {
-      const d = cmd as any;
-      const key = `${d.board ?? 'unknown'}:${d.ip ?? 'no-ip'}`;
-      wifiEsp32Devices.set(key, {
-        board: d.board ?? 'unknown',
-        version: d.version,
-        buildHash: d.buildHash,
-        buildEpoch: d.buildEpoch,
-        ip: d.ip,
-        protocolRevision: d.protocolRevision,
-        lastSeenMs: Date.now(),
-      });
-      debug('daemon', `WiFi ESP32 registered: ${key} v${d.version} build=${d.buildHash}`);
-      return;
-    }
     // Route interactive commands to focused session (if any)
     if (focusRelay.getFocusedSessionId() && focusRelay.routeCommand(cmd)) {
       return;
@@ -1690,6 +1869,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         }
       });
     }
+  });
+
+  core.wsServer.onClientDisconnect((ws) => {
+    unregisterWifiEsp32Socket(ws);
   });
 
   // ===== Probes & polling =====

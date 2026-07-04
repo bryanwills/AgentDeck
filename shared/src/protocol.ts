@@ -490,6 +490,11 @@ export interface DeviceInfoMessage {
   wifiConfigured: boolean;
   wifiConnected: boolean;
   ip?: string;
+  otaSupported?: boolean;
+  otaSlotCount?: number;
+  otaSlotSize?: number;
+  otaFreeSketchSpace?: number;
+  otaReason?: string;
 }
 
 export interface WifiProvisionAckMessage {
@@ -506,10 +511,55 @@ export interface WifiStatusMessage {
   ip?: string;
 }
 
+// ===== ESP32 WiFi OTA (Daemon → ESP32) =====
+
+export interface Esp32OtaBeginEvent {
+  type: 'esp32_ota_begin';
+  otaId: string;
+  size: number;
+  md5: string;
+}
+
+export interface Esp32OtaChunkEvent {
+  type: 'esp32_ota_chunk';
+  otaId: string;
+  seq: number;
+  offset: number;
+  data: string; // base64-encoded firmware bytes
+}
+
+export interface Esp32OtaEndEvent {
+  type: 'esp32_ota_end';
+  otaId: string;
+}
+
+export interface Esp32OtaAbortEvent {
+  type: 'esp32_ota_abort';
+  otaId: string;
+}
+
+export interface Esp32OtaAckCommand {
+  type: 'esp32_ota_ack';
+  otaId: string;
+  stage: 'begin' | 'chunk' | 'end' | 'abort';
+  seq?: number;
+  offset?: number;
+  written?: number;
+}
+
+export interface Esp32OtaErrorCommand {
+  type: 'esp32_ota_error';
+  otaId?: string;
+  stage?: string;
+  error: string;
+}
+
 export type ESP32ToHostMessage =
   | DeviceInfoMessage
   | WifiProvisionAckMessage
-  | WifiStatusMessage;
+  | WifiStatusMessage
+  | Esp32OtaAckCommand
+  | Esp32OtaErrorCommand;
 
 export type BridgeEvent =
   | StateUpdateEvent
@@ -529,7 +579,11 @@ export type BridgeEvent =
   | TimelineHistoryMsg
   | ApmeEvalEvent
   | ApmeScorecardEvent
-  | ApmeRecommendationEvent;
+  | ApmeRecommendationEvent
+  | Esp32OtaBeginEvent
+  | Esp32OtaChunkEvent
+  | Esp32OtaEndEvent
+  | Esp32OtaAbortEvent;
 
 // ===== Plugin → Bridge (Commands) =====
 
@@ -699,7 +753,9 @@ export type PluginCommand =
   | ClientRegisterCommand
   | ApmeVibeFeedbackCommand
   | ApmeRecommendCommand
-  | PermissionDecisionCommand;
+  | PermissionDecisionCommand
+  | Esp32OtaAckCommand
+  | Esp32OtaErrorCommand;
 
 // ===== Hook Event Types =====
 

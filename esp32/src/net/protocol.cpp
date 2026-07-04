@@ -3,10 +3,13 @@
 #include "ws_client.h"
 #include "serial_client.h"
 #include "../state/agent_state.h"
+#include "../util/ota_capability.h"
 #include "config.h"
 #include <ArduinoJson.h>
 #include <Arduino.h>
 #include <WiFi.h>
+#include <Update.h>
+#include <mbedtls/base64.h>
 #if defined(BOARD_IPS35) || defined(BOARD_AMOLED)
 #include <Wire.h>
 #include "../boards/board_config.h"
@@ -14,6 +17,17 @@
 
 // Reusable JSON document — sized for typical bridge messages
 static JsonDocument doc;
+
+struct OtaRxState {
+    bool active;
+    char otaId[40];
+    uint32_t expectedSize;
+    uint32_t written;
+    uint32_t nextSeq;
+};
+
+static OtaRxState otaRx = {false, {0}, 0, 0, 0};
+static uint8_t otaChunkBuf[1024];
 
 static AgentState parseState(const char* s) {
     if (!s) return AgentState::DISCONNECTED;
@@ -598,6 +612,162 @@ static void handleWifiProvision(JsonObject& obj) {
     Net::serialWriteJsonLine(buf);
 }
 
+static void sendOtaAck(const char* otaId, const char* stage, uint32_t seq, uint32_t offset, uint32_t written) {
+    JsonDocument resp;
+    resp["type"] = "esp32_ota_ack";
+    resp["otaId"] = otaId;
+    resp["stage"] = stage;
+    if (seq != UINT32_MAX) resp["seq"] = seq;
+    resp["offset"] = offset;
+    resp["written"] = written;
+
+    char buf[192];
+    serializeJson(resp, buf, sizeof(buf));
+    Net::serialWriteJsonLine(buf);
+    if (Net::wsConnected()) Net::wsSend(buf);
+}
+
+static void sendOtaError(const char* otaId, const char* stage, const char* error) {
+    JsonDocument resp;
+    resp["type"] = "esp32_ota_error";
+    if (otaId && otaId[0]) resp["otaId"] = otaId;
+    resp["stage"] = stage;
+    resp["error"] = error;
+
+    char buf[192];
+    serializeJson(resp, buf, sizeof(buf));
+    Net::serialWriteJsonLine(buf);
+    if (Net::wsConnected()) Net::wsSend(buf);
+}
+
+static void resetOtaRx() {
+    otaRx.active = false;
+    otaRx.otaId[0] = '\0';
+    otaRx.expectedSize = 0;
+    otaRx.written = 0;
+    otaRx.nextSeq = 0;
+}
+
+static void handleOtaBegin(JsonObject& obj) {
+    const char* otaId = obj["otaId"] | "";
+    const char* md5 = obj["md5"] | "";
+    uint32_t size = obj["size"] | 0U;
+    if (!otaId[0] || size == 0) {
+        sendOtaError(otaId, "begin", "missing_parameters");
+        return;
+    }
+
+    OtaCapability::Info cap = OtaCapability::get();
+    if (!cap.supported) {
+        sendOtaError(otaId, "begin", cap.reason);
+        return;
+    }
+    if (cap.slotSize > 0 && size > cap.slotSize) {
+        sendOtaError(otaId, "begin", "image_too_large");
+        return;
+    }
+    if (otaRx.active) {
+        Update.abort();
+        resetOtaRx();
+    }
+
+    if (strlen(md5) == 32) {
+        Update.setMD5(md5);
+    }
+    if (!Update.begin(size, U_FLASH)) {
+        sendOtaError(otaId, "begin", "update_begin_failed");
+        resetOtaRx();
+        return;
+    }
+
+    otaRx.active = true;
+    strncpy(otaRx.otaId, otaId, sizeof(otaRx.otaId) - 1);
+    otaRx.otaId[sizeof(otaRx.otaId) - 1] = '\0';
+    otaRx.expectedSize = size;
+    otaRx.written = 0;
+    otaRx.nextSeq = 0;
+    sendOtaAck(otaRx.otaId, "begin", UINT32_MAX, 0, 0);
+}
+
+static void handleOtaChunk(JsonObject& obj) {
+    const char* otaId = obj["otaId"] | "";
+    uint32_t seq = obj["seq"] | UINT32_MAX;
+    uint32_t offset = obj["offset"] | 0U;
+    const char* data = obj["data"] | "";
+    if (!otaRx.active || strcmp(otaRx.otaId, otaId) != 0) {
+        sendOtaError(otaId, "chunk", "no_active_update");
+        return;
+    }
+    if (seq != otaRx.nextSeq || offset != otaRx.written) {
+        sendOtaError(otaId, "chunk", "unexpected_offset");
+        return;
+    }
+    if (!data[0]) {
+        sendOtaError(otaId, "chunk", "missing_data");
+        return;
+    }
+
+    size_t decodedLen = 0;
+    int rc = mbedtls_base64_decode(
+        otaChunkBuf,
+        sizeof(otaChunkBuf),
+        &decodedLen,
+        reinterpret_cast<const unsigned char*>(data),
+        strlen(data)
+    );
+    if (rc != 0 || decodedLen == 0) {
+        sendOtaError(otaId, "chunk", "base64_decode_failed");
+        return;
+    }
+    if (otaRx.written + decodedLen > otaRx.expectedSize) {
+        sendOtaError(otaId, "chunk", "image_overflow");
+        return;
+    }
+
+    size_t wrote = Update.write(otaChunkBuf, decodedLen);
+    if (wrote != decodedLen) {
+        sendOtaError(otaId, "chunk", "update_write_failed");
+        return;
+    }
+
+    otaRx.written += decodedLen;
+    otaRx.nextSeq++;
+    sendOtaAck(otaId, "chunk", seq, offset, otaRx.written);
+}
+
+static void handleOtaEnd(JsonObject& obj) {
+    const char* otaId = obj["otaId"] | "";
+    if (!otaRx.active || strcmp(otaRx.otaId, otaId) != 0) {
+        sendOtaError(otaId, "end", "no_active_update");
+        return;
+    }
+    if (otaRx.written != otaRx.expectedSize) {
+        sendOtaError(otaId, "end", "size_mismatch");
+        Update.abort();
+        resetOtaRx();
+        return;
+    }
+    if (!Update.end(true)) {
+        sendOtaError(otaId, "end", "update_end_failed");
+        resetOtaRx();
+        return;
+    }
+
+    sendOtaAck(otaId, "end", UINT32_MAX, otaRx.written, otaRx.written);
+    resetOtaRx();
+    delay(250);
+    ESP.restart();
+}
+
+static void handleOtaAbort(JsonObject& obj) {
+    const char* otaId = obj["otaId"] | "";
+    if (otaRx.active && (!otaId[0] || strcmp(otaRx.otaId, otaId) == 0)) {
+        Update.abort();
+        resetOtaRx();
+    }
+    sendOtaAck(otaId, "abort", UINT32_MAX, 0, 0);
+}
+
 static void sendDeviceInfo() {
     JsonDocument resp;
     resp["type"] = "device_info";
@@ -631,11 +801,24 @@ static void sendDeviceInfo() {
     // without stealing the serial port.
     resp["timelineCount"] = g_state.timelineCount;
     resp["sessionCount"] = g_state.sessionCount;
+    resp["usageFiveH"] = (int)g_state.fiveHourPercent;   // -1 = no usage data held
+    {
+        uint8_t processing = 0;
+        for (uint8_t i = 0; i < g_state.sessionCount; i++)
+            if (strcmp(g_state.sessions[i].state, "processing") == 0) processing++;
+        resp["processingCount"] = processing;
+    }
     if (Net::wifiConnected()) {
         resp["ip"] = Net::wifiLocalIP();
     }
+    OtaCapability::Info ota = OtaCapability::get();
+    resp["otaSupported"] = ota.supported;
+    resp["otaSlotCount"] = ota.slotCount;
+    resp["otaSlotSize"] = ota.slotSize;
+    resp["otaFreeSketchSpace"] = ota.freeSketchSpace;
+    if (!ota.supported) resp["otaReason"] = ota.reason;
 
-    char buf[320];
+    char buf[512];
     serializeJson(resp, buf, sizeof(buf));
     // Both transports: serial for the USB-attached identify flow, WS so a
     // WiFi-only board (InkDeck) is registrable by the daemon without a cable.
@@ -680,6 +863,14 @@ void parseMessage(const char* json, size_t length) {
         handleWifiProvision(obj);
     } else if (strcmp(type, "device_info_request") == 0) {
         sendDeviceInfo();
+    } else if (strcmp(type, "esp32_ota_begin") == 0) {
+        handleOtaBegin(obj);
+    } else if (strcmp(type, "esp32_ota_chunk") == 0) {
+        handleOtaChunk(obj);
+    } else if (strcmp(type, "esp32_ota_end") == 0) {
+        handleOtaEnd(obj);
+    } else if (strcmp(type, "esp32_ota_abort") == 0) {
+        handleOtaAbort(obj);
     } else if (strcmp(type, "display_state") == 0) {
         bool displayOn = obj["displayOn"] | true;
         // Optional `dim` instruction. Absent (un-upgraded host) ⇒ the `| default`

@@ -3,6 +3,7 @@
 #include "wifi_manager.h"
 #include "ws_client.h"
 #include "../state/agent_state.h"
+#include "../util/ota_capability.h"
 #if !defined(BOARD_LED8X32) && !defined(BOARD_INKDECK)
 #include "../ui/screens/splash.h"
 #endif
@@ -10,8 +11,15 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 
-// Line buffer for incoming serial JSON
+// Line buffer for incoming serial JSON. InkDeck gets headroom: a whitelisted
+// usage_update is ~1KB but a 10-session enriched sessions_list plus growth
+// must never hit the silent "Buffer overflow — discard line" path again
+// (an oversized line froze usage gauges on stale values for hours).
+#if defined(BOARD_INKDECK)
+static constexpr int SERIAL_BUF_SIZE = 8192;
+#else
 static constexpr int SERIAL_BUF_SIZE = 4096;
+#endif
 static char serialBuf[SERIAL_BUF_SIZE];
 static int serialBufPos = 0;
 
@@ -78,12 +86,25 @@ static void sendDeviceInfoSerial() {
     resp["wifiConfigured"] = (WiFi.SSID().length() > 0);
     resp["timelineCount"] = g_state.timelineCount;  // debug aid, keep in sync with protocol.cpp copy
     resp["sessionCount"] = g_state.sessionCount;
+    resp["usageFiveH"] = (int)g_state.fiveHourPercent;
+    {
+        uint8_t processing = 0;
+        for (uint8_t i = 0; i < g_state.sessionCount; i++)
+            if (strcmp(g_state.sessions[i].state, "processing") == 0) processing++;
+        resp["processingCount"] = processing;
+    }
     resp["wifiConnected"] = wifiConnected();
     if (wifiConnected()) {
         resp["ip"] = wifiLocalIP();
     }
+    OtaCapability::Info ota = OtaCapability::get();
+    resp["otaSupported"] = ota.supported;
+    resp["otaSlotCount"] = ota.slotCount;
+    resp["otaSlotSize"] = ota.slotSize;
+    resp["otaFreeSketchSpace"] = ota.freeSketchSpace;
+    if (!ota.supported) resp["otaReason"] = ota.reason;
 
-    char buf[320];
+    char buf[512];
     serializeJson(resp, buf, sizeof(buf));
     serialWriteJsonLine(buf);
 }
