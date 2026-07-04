@@ -286,6 +286,27 @@ final class ApmeTaskBoundaryTests: XCTestCase {
     /// As soon as a second user prompt arrives on the same task, the
     /// collector promotes the deferred `task_start` so the dashboard shows
     /// the conversation hierarchy.
+    func testLazyOpenRunCreatesTaskWhenSessionStartMissed() throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let collector = ApmeCollector(store: tmp.store)
+        var emitted: [DaemonTimelineEntry] = []
+        collector.emitTimelineEntry = { emitted.append($0) }
+
+        // NO session_start — simulate a daemon that started mid-session (or a
+        // dropped session_start hook). The first prompt must still open a run
+        // + task, then a follow-up prompt must group under the SAME task and
+        // promote the deferred header.
+        collector.handleHook(event: "UserPromptSubmit", data: ["prompt": "first"])
+        XCTAssertNotNil(collector.activeTaskId, "lazy openRun must create a task without session_start")
+        let firstTaskId = collector.activeTaskId
+
+        collector.handleHook(event: "UserPromptSubmit", data: ["prompt": "second"])
+        XCTAssertEqual(collector.activeTaskId, firstTaskId, "follow-up prompt stays in the same task")
+        let starts = emitted.filter { $0.type == "task_start" }
+        XCTAssertEqual(starts.count, 1, "grouped follow-up promotes exactly one header")
+    }
+
     func testSecondTurnEmitsDeferredTaskStart() throws {
         let tmp = try makeTempStore()
         defer { cleanup(tmp) }

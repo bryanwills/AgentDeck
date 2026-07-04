@@ -184,7 +184,7 @@ describe('ApmeCollector task boundaries', () => {
     expect(seen[0].boundarySignal).toBe('manual');
   });
 
-  it('onTaskOpened fires with sessionId + agentType + projectName + taskIndex', () => {
+  it('onTaskOpened is DEFERRED: fires on the second turn, not the first', () => {
     const collector = new ApmeCollector(store);
     const opens: Array<{
       taskId: string; runId: string; sessionId: string;
@@ -201,14 +201,90 @@ describe('ApmeCollector task boundaries', () => {
       });
     };
     const { runId, sessionId } = openRun(collector);
+    // First prompt: a single-turn Q&A must NOT surface a TASK header — the
+    // task row exists in the store, but the timeline stays quiet.
     collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'first' });
+    expect(opens.length).toBe(0);
 
+    // Second prompt on the same task promotes it to a real multi-turn work
+    // unit → the deferred task_start finally fires (backdated to task start).
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'second' });
     expect(opens.length).toBe(1);
     expect(opens[0].runId).toBe(runId);
     expect(opens[0].sessionId).toBe(sessionId);
     expect(opens[0].agentType).toBe('claude-code');
     expect(opens[0].projectName).toBe('demo');
     expect(opens[0].taskIndex).toBe(0);
+  });
+
+  it('onTaskOpened also promotes on a TodoWrite plan within the first turn', () => {
+    const collector = new ApmeCollector(store);
+    let opens = 0;
+    collector.onTaskOpened = () => { opens++; };
+    let milestones = 0;
+    collector.onTaskMilestone = () => { milestones++; };
+    const { sessionId } = openRun(collector);
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'plan and build' });
+    expect(opens).toBe(0);
+    // A TodoWrite-all-completed hint proves the turn is real work → promote.
+    collector.ingestHook(sessionId, 'PostToolUse', {
+      tool_name: 'TodoWrite',
+      tool_input: { todos: [{ content: 'do it', status: 'completed' }] },
+    });
+    expect(opens).toBe(1);
+    expect(milestones).toBe(1);
+  });
+
+  // Reproduces the daemon/index.ts wiring: follow-up prompts must group under
+  // ONE task_start header (never look like separate top-level tasks), and a
+  // single-turn Q&A must emit neither task_start nor task_end.
+  it('groups follow-up prompts under one header; single-turn stays headerless', () => {
+    const timeline: Array<{ type: string; taskId?: string | null }> = [];
+    const promoted = new Set<string>();
+    const collector = new ApmeCollector(store);
+    // Mirror apme/index.ts: onTaskOpened marks the id promoted + emits header.
+    collector.onTaskOpened = ({ taskId }) => {
+      promoted.add(taskId);
+      timeline.push({ type: 'task_start', taskId });
+    };
+    // Mirror apme/index.ts: task_end emits ONLY when the header was promoted.
+    collector.onTaskClosed = ({ taskId, timelineEmitted }) => {
+      if (timelineEmitted) timeline.push({ type: 'task_end', taskId });
+    };
+    const { sessionId } = openRun(collector);
+
+    // Three prompts in the same session — the collector must keep the SAME
+    // active task across all three (the whole point of grouping).
+    const emitChat = () => {
+      const taskId = collector.getActiveTaskId(sessionId);
+      timeline.push({ type: 'chat_start', taskId });
+    };
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'p1' });
+    emitChat();
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'p2' });
+    emitChat();
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'p3' });
+    emitChat();
+
+    const starts = timeline.filter((e) => e.type === 'task_start');
+    const chats = timeline.filter((e) => e.type === 'chat_start');
+    expect(starts.length).toBe(1);                       // exactly one header
+    const taskId = starts[0].taskId!;
+    // Every chat row carries the SAME enclosing taskId → they nest under the
+    // one header instead of each reading as a new task.
+    expect(new Set(chats.map((c) => c.taskId)).size).toBe(1);
+    expect(chats.every((c) => c.taskId === taskId)).toBe(true);
+
+    collector.closeTaskExternal(sessionId, 'manual');
+    expect(timeline.filter((e) => e.type === 'task_end').length).toBe(1);
+
+    // A fresh single-turn session: header never promotes, close emits nothing.
+    const solo = 'solo-session';
+    collector.openRun({ sessionId: solo, agentType: 'claude-code', projectName: 'demo', projectPath: '/tmp/demo' });
+    const before = timeline.length;
+    collector.ingestHook(solo, 'UserPromptSubmit', { prompt: 'quick question' });
+    collector.closeTaskExternal(solo, 'manual');
+    expect(timeline.slice(before).some((e) => e.type === 'task_start' || e.type === 'task_end')).toBe(false);
   });
 
   it('onTaskClosed payload includes session, agent, project, and timing', () => {

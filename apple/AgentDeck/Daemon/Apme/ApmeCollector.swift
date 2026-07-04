@@ -104,17 +104,27 @@ final class ApmeCollector {
     /// emitted from the delta (snapshots carry session totals). Reset per session.
     private var lastUsage: (inp: Int, out: Int) = (0, 0)
 
-    /// Pending idle-gap timer. After every `closeTurn` we arm a 90 s timer
-    /// (`idleGapSec`); if no new `user_prompt_submit` arrives, the timer
-    /// fires `closeTask(boundarySignal: "idle_gap")` so the open task
-    /// doesn't linger and its TASK header doesn't spin forever. Mirrors
-    /// `bridge/src/apme/adapters/openclaw-hook.ts::OPENCLAW_IDLE_GAP_MS`.
+    /// Pending idle-gap timer. After every `closeTurn` we arm an `idleGapSec`
+    /// timer; if no new `user_prompt_submit` arrives, the timer fires
+    /// `closeTask(boundarySignal: "idle_gap")` so a genuinely-abandoned task
+    /// eventually closes (and gets evaluated) instead of lingering open forever.
     private var idleGapTask: Task<Void, Never>?
 
     /// Idle-gap threshold for auto-closing tasks after the last turn. Exposed
-    /// as a var so tests can compress the wait. Default 90 s mirrors the
-    /// Node bridge OpenClaw adapter (the closest cross-platform reference).
-    var idleGapSec: TimeInterval = 90
+    /// as a var so tests can compress the wait.
+    ///
+    /// Default 30 min: this is a BACKSTOP for abandoned sessions, NOT a task
+    /// boundary. Interactive Claude Code sessions routinely pause far longer
+    /// than a machine-paced OpenClaw turn (reading diffs, thinking, running a
+    /// build) — the old 90 s default closed the task on every such pause, so a
+    /// follow-up prompt started a fresh task and the work fragmented into
+    /// disconnected single-turn units. Cohesive grouping is what the user
+    /// expects: consecutive prompts stay one task until an EXPLICIT boundary
+    /// (`session_end` / `/clear`). The Node daemon has no idle-gap on its
+    /// Claude hook path at all; this generous backstop keeps the two daemons
+    /// behaving the same for every normal session while still bounding the
+    /// truly-idle ones. Tests inject a small value to exercise the timer.
+    var idleGapSec: TimeInterval = 1800
 
     /// Minimum age of `activeTurn` (in seconds) for `setTurnResponse` to be
     /// allowed to arm the idle-gap timer. Defends against the late-arriving
@@ -204,6 +214,35 @@ final class ApmeCollector {
 
         default:
             break
+        }
+
+        // Lazy openRun: the first `user_prompt_submit` arriving with no active
+        // session — a missed or late `session_start` — must still open a run, or
+        // the turn-management block below no-ops and the whole session produces
+        // no tasks (every prompt then reads as a bare top-level chat, the exact
+        // symptom this change fixes). Mirrors the Node daemon's lazy openRun.
+        // Gated to `user_prompt_submit` so a stray post-`session_end` tool/stop
+        // hook can't spawn a phantom run (`session_end` already returned above).
+        if activeHookSession == nil
+            && (event.lowercased() == "user_prompt_submit" || event == "UserPromptSubmit") {
+            hookSessionCounter += 1
+            let hookSessionId = "hook-\(hookSessionCounter)-\(Int(Date().timeIntervalSince1970))"
+            activeHookSession = hookSessionId
+            let runId = UUID().uuidString
+            let run = ApmeRun(
+                id: runId,
+                sessionId: hookSessionId,
+                agentType: data["agent_type"] as? String ?? "claude-code",
+                modelId: data["model_name"] as? String,
+                projectName: data["project_name"] as? String,
+                projectPath: nil,
+                startedAt: nowMs(),
+                gitBefore: nil
+            )
+            store.insertRun(run)
+            sessionToRun[hookSessionId] = runId
+            lastUsage = (0, 0)
+            DaemonLogger.shared.debug("APME", "openRun(lazy) \(runId.prefix(8)) hookSession=\(hookSessionId) event=\(event)")
         }
 
         // Record every event as a step on the active session.

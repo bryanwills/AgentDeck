@@ -68,6 +68,13 @@ interface ActiveTask {
   firstTurnIndex: number | null;
   /** turn_index of the last turn attached; updated on every insertTurn. */
   lastTurnIndex: number | null;
+  /** Whether the `task_start` timeline row has been emitted yet. Deferred:
+   *  a single-turn Q&A never trips this, so it produces no TASK header on the
+   *  dashboard (just its chat rows). Promoted to true by
+   *  `emitDeferredTaskStartIfNeeded` on the second turn / first TodoWrite plan.
+   *  `closeTask` gates the `task_end` emit on this so an unpromoted task never
+   *  leaves an orphan end row. Mirrors ApmeCollector.swift `timelineEmitted`. */
+  timelineEmitted: boolean;
 }
 
 export type TaskBoundarySignal = 'todo_complete' | 'clear' | 'session_end' | 'manual' | 'idle_gap';
@@ -84,6 +91,10 @@ export type OnTaskClosed = (args: {
   endedAt: number;
   boundarySignal: TaskBoundarySignal;
   taskCategory: string | null;
+  /** True when this task's `task_start` row reached the timeline. The timeline
+   *  emitter gates the `task_end` row on this so an unpromoted single-turn task
+   *  never leaves an orphan end row; the eval enqueue runs regardless. */
+  timelineEmitted: boolean;
 }) => void;
 
 /** Fired after a typed trajectory event is appended to a sample. The timeline
@@ -186,11 +197,21 @@ export class ApmeCollector {
     return runId;
   }
 
-  /** Record a hook event as a step + manage turn lifecycle. */
-  ingestHook(sessionId: string, event: string, data: Record<string, unknown>): void {
+  /** Record a hook event as a step + manage turn lifecycle.
+   *
+   *  `event` is normalized up-front so callers may pass EITHER the PascalCase
+   *  hook name (`UserPromptSubmit`, managed session bridge + span ingest) OR
+   *  the snake_case name the daemon's `/hooks/` handler maps to
+   *  (`user_prompt_submit`, `tool_start`, `tool_end`). Before this, snake_case
+   *  silently fell through every branch — the daemon's direct-`claude` hooks
+   *  never opened a turn, so those sessions produced no tasks and the device
+   *  timeline showed every prompt as a bare top-level chat. Making the matcher
+   *  case-tolerant means no caller can quietly no-op the segmentation. */
+  ingestHook(sessionId: string, rawEvent: string, data: Record<string, unknown>): void {
     if (!this.store.enabled) return;
     const runId = this.sessionToRun.get(sessionId);
     if (!runId) return;
+    const event = normalizeHookEventName(rawEvent);
     const toolName = typeof data.tool_name === 'string' ? data.tool_name : null;
 
     // ── Turn management ──
@@ -246,8 +267,14 @@ export class ApmeCollector {
       // /clear, session_end). First turn in a run opens task 0.
       const task = this.openTaskIfNone(sessionId, runId);
       if (task) {
-        if (task.firstTurnIndex === null) task.firstTurnIndex = turnIndex;
+        const wasFirstTurn = task.firstTurnIndex === null;
+        if (wasFirstTurn) task.firstTurnIndex = turnIndex;
         task.lastTurnIndex = turnIndex;
+        // Second (or later) turn on the same task proves it's a real,
+        // multi-turn work unit → promote the deferred TASK header so the
+        // follow-up prompts render grouped under one row instead of as
+        // separate top-level chats. Single-turn Q&A never reaches here.
+        if (!wasFirstTurn) this.emitDeferredTaskStartIfNeeded(sessionId);
       }
       try {
         this.store.insertTurn({
@@ -419,6 +446,10 @@ export class ApmeCollector {
     const key = `${taskId}:${turnIndex}`;
     if (this.sessionToLastMilestone.get(sessionId) === key) return;
     this.sessionToLastMilestone.set(sessionId, key);
+    // A TodoWrite plan implies a task worth showing — promote the deferred
+    // task_start first so the milestone row never renders orphaned above a
+    // task with no header.
+    this.emitDeferredTaskStartIfNeeded(sessionId);
     const run = this.store.getRun(runId);
     try {
       this.onTaskMilestone({
@@ -438,7 +469,15 @@ export class ApmeCollector {
 
   /** Open a new task if none is active for this session. Returns the active
    *  task (new or existing), or null if no run is open. Idempotent: repeat
-   *  calls while a task is already active are no-ops. */
+   *  calls while a task is already active are no-ops.
+   *
+   *  The `task_start` timeline row is NOT emitted here — it is deferred to
+   *  `emitDeferredTaskStartIfNeeded`, fired when a "real task" signal lands
+   *  (a second turn on the same task, or a TodoWrite plan). Short single-turn
+   *  conversations therefore never produce a TASK header on the dashboard,
+   *  keeping the timeline focused on the turn rows worth evaluating. The DB
+   *  `tasks` row is inserted immediately so eval/analytics see every unit.
+   *  Mirrors ApmeCollector.swift `openTaskIfNone` + `emitDeferredTaskStartIfNeeded`. */
   private openTaskIfNone(sessionId: string, runId: string): ActiveTask | null {
     const existing = this.sessionToTask.get(sessionId);
     if (existing) return existing;
@@ -451,6 +490,7 @@ export class ApmeCollector {
       startedAt: Date.now(),
       firstTurnIndex: null,
       lastTurnIndex: null,
+      timelineEmitted: false,
     };
     this.sessionToTask.set(sessionId, task);
     try {
@@ -465,24 +505,34 @@ export class ApmeCollector {
       debug('APME', `insertTask failed: ${String(err)}`);
     }
 
-    if (this.onTaskOpened) {
-      const run = this.store.getRun(runId);
-      try {
-        this.onTaskOpened({
-          taskId: task.id,
-          runId,
-          sessionId,
-          agentType: (run?.agentType ?? null) as AgentType | null,
-          projectName: run?.projectName ?? null,
-          taskIndex: task.index,
-          startedAt: task.startedAt,
-        });
-      } catch (err) {
-        debug('APME', `onTaskOpened listener threw: ${String(err)}`);
-      }
-    }
-
     return task;
+  }
+
+  /** Emit the deferred `task_start` timeline row for the session's active task,
+   *  once. Idempotent — repeat calls after the first are no-ops. Uses the
+   *  task's original `startedAt` as the row ts so the TASK header anchors above
+   *  the first turn it groups instead of jumping in mid-conversation. Called
+   *  when a task proves itself "real" (second turn, or TodoWrite plan).
+   *  Mirrors ApmeCollector.swift `emitDeferredTaskStartIfNeeded`. */
+  private emitDeferredTaskStartIfNeeded(sessionId: string): void {
+    const task = this.sessionToTask.get(sessionId);
+    if (!task || task.timelineEmitted) return;
+    task.timelineEmitted = true;
+    if (!this.onTaskOpened) return;
+    const run = this.store.getRun(task.runId);
+    try {
+      this.onTaskOpened({
+        taskId: task.id,
+        runId: task.runId,
+        sessionId,
+        agentType: (run?.agentType ?? null) as AgentType | null,
+        projectName: run?.projectName ?? null,
+        taskIndex: task.index,
+        startedAt: task.startedAt,
+      });
+    } catch (err) {
+      debug('APME', `onTaskOpened listener threw: ${String(err)}`);
+    }
   }
 
   /** Public wrapper for closeTask. Used by the manual-boundary CLI /
@@ -581,6 +631,7 @@ export class ApmeCollector {
           endedAt: Date.now(),
           boundarySignal,
           taskCategory,
+          timelineEmitted: task.timelineEmitted,
         });
       } catch (err) {
         debug('APME', `onTaskClosed listener threw: ${String(err)}`);
@@ -1056,6 +1107,22 @@ interface TodoItem { status: string; content?: string; activeForm?: string }
 /** Extract the todos array from a TodoWrite PostToolUse payload. Returns null
  *  if the shape doesn't match (payload malformed, older CC versions). Accepts
  *  `tool_input.todos` (hook standard) and `todos` (legacy flat shape). */
+/** Canonicalize a hook event name to the PascalCase form `ingestHook` matches
+ *  on. Accepts the daemon's snake_case (`user_prompt_submit`, `tool_start`,
+ *  `tool_end`, `pre/post_tool_use`) and passes PascalCase / span aliases
+ *  (`tool_result`) through unchanged. Keeps segmentation working regardless of
+ *  which surface (managed bridge, daemon `/hooks/`, OTel span) drives it. */
+function normalizeHookEventName(event: string): string {
+  switch (event) {
+    case 'user_prompt_submit': return 'UserPromptSubmit';
+    case 'tool_start':
+    case 'pre_tool_use': return 'PreToolUse';
+    case 'tool_end':
+    case 'post_tool_use': return 'PostToolUse';
+    default: return event;
+  }
+}
+
 function extractTodos(data: Record<string, unknown>): TodoItem[] | null {
   const fromToolInput = (data.tool_input as Record<string, unknown> | undefined)?.todos;
   const fromFlat = (data as Record<string, unknown>).todos;

@@ -886,67 +886,98 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         // hooks — without emitting here the daemon timeline (device ticker,
         // Android/Apple lists) goes silent whenever no managed session runs.
         //
-        // Granularity is deliberately TASK-level, not command-level: only the
-        // user's prompt (chat_start = what was asked) is emitted. Per-tool rows
-        // ("Bash: cd /Users/…" for every command) drowned the glance surfaces
-        // in noise; task grouping (task_start/task_end) stays APME's job, and
-        // chat_end is skipped too (hooks carry no response text — a bare
-        // "Completed" row per turn is fragmentation, not signal).
-        if (mapped === 'user_prompt_submit' && typeof json.prompt === 'string' && json.prompt.trim()) {
-          const tlSessionId = typeof json.session_id === 'string' && json.session_id
-            ? json.session_id : 'daemon-hook';
-          const tlCwd = (typeof json.cwd === 'string' ? json.cwd : '') || '';
-          const tlProject = tlCwd ? tlCwd.split('/').filter(Boolean).pop() : undefined;
-          core.bridgeTimeline.addEntry({
-            ts: Date.now(), type: 'chat_start',
-            raw: stripUnsafeText(json.prompt.trim()).slice(0, 160),
-            sessionId: tlSessionId,
-            ...(tlProject ? { projectName: tlProject } : {}),
-          } as TimelineEntry);
-        }
-        // APME collector
+        // Task GROUPING is fully hook-driven and TTY-independent: the boundary
+        // state machine keys only off `user_prompt_submit` / `session_end` /
+        // `/clear`, so it never depends on parsing the agent's terminal output
+        // and stays stable across agent CLI UI changes. Per-tool rows are still
+        // suppressed here (they drowned the glance surfaces); the `task_start` /
+        // `task_end` headers + taskId-tagged `chat_start` rows now carry the
+        // work-unit structure.
+        //
+        // Real per-session id shared by the collector, fallback, and the
+        // chat_start row. Concurrent direct `claude`/`codex` runs must NOT
+        // collapse onto one bucket: a shared id interleaves their turns into a
+        // single task and lets one session's `session_end` tear down another's
+        // run mapping. Falls back to a stable id only when a hook omits it.
+        const hookSid = typeof json.session_id === 'string' && json.session_id
+          ? json.session_id : 'daemon-hook';
+        // Claude hooks carry `cwd` (the worktree dir), not project_name/path —
+        // capture it so APME runs are attributable to a specific worktree.
+        const hookCwd = (typeof json.cwd === 'string' ? json.cwd
+          : (typeof json.project_path === 'string' ? json.project_path : '')) || '';
+        const hookProject = (typeof json.project_name === 'string' && json.project_name)
+          ? json.project_name
+          : (hookCwd ? hookCwd.split('/').filter(Boolean).pop() : undefined);
+        const hookMessage = json.message as Record<string, unknown> | undefined;
+        const hookPromptText = typeof json.prompt === 'string' ? json.prompt
+          : (typeof hookMessage?.content === 'string' ? hookMessage.content : '');
+        const isClearBoundary = mapped === 'user_prompt_submit' && /^\s*\/clear\s*$/i.test(hookPromptText);
+
+        // ── APME collector (task/turn segmentation) ──
         if (apme) {
-          // Use a stable "hook session" for the daemon — hooks from direct `claude` runs
-          // don't have AGENTDECK_PORT, so they all come here.
-          const hookSessionId = 'daemon-hook';
-          if (mapped === 'session_start') {
-            // Claude hooks carry `cwd` (the worktree dir), not project_name/path —
-            // capture it so APME runs are attributable to a specific worktree
-            // (e.g. worktree grid panes). Without this, project_path stays NULL and
-            // per-worktree scorecards/overlays can't map a run to its branch.
-            const hookCwd = (typeof json.cwd === 'string' ? json.cwd
-              : (typeof json.project_path === 'string' ? json.project_path : '')) || '';
-            apme.collector.openRun({
-              sessionId: hookSessionId,
-              agentType: 'claude-code',
-              projectName: (json.project_name as string) || (hookCwd ? hookCwd.split('/').filter(Boolean).pop() : undefined),
-              projectPath: hookCwd || undefined,
-            });
+          if (isClearBoundary) {
+            // `/clear` closes the active task + run and opens a fresh run, so
+            // the next prompt starts a new task 0 — the work-unit boundary.
+            apme.collector.splitRun(hookSid, hookCwd || undefined);
+          } else {
+            // Lazy openRun: open a run when a turn-STARTING hook arrives with no
+            // active run — either a normal `session_start`, or (crucially) the
+            // first `user_prompt_submit` when `session_start` was missed/late.
+            // Without this, `ingestHook` no-ops for want of a run, which is
+            // exactly why direct-`claude` timelines showed zero task headers
+            // (every follow-up looked like a new top-level chat). Gating on
+            // start/prompt avoids two hazards: a stray post-`session_end` tool /
+            // stop hook won't spawn a phantom run, and a late `session_start`
+            // arriving after a lazy open won't double-open (the run already
+            // exists → skip).
+            if (!apme.collector.getRunId(hookSid)
+                && (mapped === 'session_start' || mapped === 'user_prompt_submit')) {
+              apme.collector.openRun({
+                sessionId: hookSid,
+                agentType: 'claude-code',
+                projectName: hookProject,
+                projectPath: hookCwd || undefined,
+              });
+            }
+            apme.collector.ingestHook(hookSid, mapped, json);
           }
-          apme.collector.ingestHook(hookSessionId, mapped, json);
           // Direct `claude` runs reach the daemon only via these hooks, which
-          // never carry the model — so every such run persisted model_id=NULL
-          // (the bulk of the APME "unknown" rows). Recover it from the
-          // transcript Claude itself writes (message.model). Must run before
+          // never carry the model — so every such run persisted model_id=NULL.
+          // Recover it from the transcript Claude writes. Must run before
           // closeRun tears down the session→run mapping.
           if (mapped === 'stop' || mapped === 'session_end') {
             const tp = json.transcript_path;
             if (typeof tp === 'string' && tp) {
               const model = readModelFromTranscript(tp);
-              if (model) apme.collector.updateModel(hookSessionId, model);
+              if (model) apme.collector.updateModel(hookSid, model);
             }
           }
           if (mapped === 'session_end') {
-            apme.collector.closeRun(hookSessionId);
+            apme.collector.closeRun(hookSid);
           }
         } else if (fallbackTasks) {
           // APME is down — keep the timeline's task hierarchy alive from the
-          // boundary hooks alone. Prefer the hook's real session id so rows
-          // attribute per session (the shared 'daemon-hook' bucket would
-          // interleave concurrent direct-claude sessions).
-          const fallbackSessionId =
-            typeof json.session_id === 'string' && json.session_id ? json.session_id : 'daemon-hook';
-          fallbackTasks.ingestHook(fallbackSessionId, mapped, json);
+          // same boundary hooks (open on first prompt, close on /clear +
+          // session_end), keyed by the real session id.
+          fallbackTasks.ingestHook(hookSid, mapped, json);
+        }
+
+        // Timeline `chat_start`, emitted AFTER the collector so the active task
+        // id is known — tag the row with it so the prompt nests under the
+        // (possibly deferred) task_start header instead of reading as its own
+        // top-level task. `/clear` is a boundary command, not a turn: no row.
+        if (mapped === 'user_prompt_submit' && !isClearBoundary
+            && typeof json.prompt === 'string' && json.prompt.trim()) {
+          const taskId = (apme
+            ? apme.collector.getActiveTaskId(hookSid)
+            : fallbackTasks?.getActiveTaskId(hookSid)) ?? undefined;
+          core.bridgeTimeline.addEntry({
+            ts: Date.now(), type: 'chat_start',
+            raw: stripUnsafeText(json.prompt.trim()).slice(0, 160),
+            sessionId: hookSid,
+            ...(taskId ? { taskId } : {}),
+            ...(hookProject ? { projectName: hookProject } : {}),
+          } as TimelineEntry);
         }
 
         // ── Response ──

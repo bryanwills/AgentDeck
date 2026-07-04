@@ -74,13 +74,21 @@ export async function initApme(
 
   const emitTimeline = opts.emitTimeline;
 
+  // Task headers are DEFERRED (collector emits `task_start` only once a task
+  // proves itself multi-turn). Track which task ids actually reached the
+  // timeline so the async judge re-emit (`onTaskEvaluated`, below) can skip
+  // unpromoted single-turn tasks — otherwise it would insert an orphan
+  // `task_end` with a score badge under no header. `onTaskOpened` fires at the
+  // deferred promotion moment, so membership here == "header is on the timeline".
+  const promotedTaskIds = new Set<string>();
+
   // Wire task-level judge: whenever the collector closes a task (TodoWrite
   // all-completed / /clear / session_end), enqueue a task_rollup judge call.
   // Kept here — not in the collector constructor — so the collector has no
   // hard dependency on the runner.
   collector.onTaskClosed = ({
     taskId, runId, sessionId, agentType, projectName,
-    startedAt, endedAt, boundarySignal, taskCategory,
+    startedAt, endedAt, boundarySignal, taskCategory, timelineEmitted,
   }) => {
     runner.enqueueTask({
       runId,
@@ -89,7 +97,10 @@ export async function initApme(
       boundarySignal,
     });
 
-    if (emitTimeline) {
+    // Gate the `task_end` row on the header having been emitted — an
+    // unpromoted single-turn task shows only its chat rows, never a bare
+    // "Task end" marker. The eval enqueue above runs regardless.
+    if (emitTimeline && timelineEmitted) {
       const durationSec = Math.max(0, Math.round((endedAt - startedAt) / 1000));
       const signalLabel = boundarySignal === 'todo_complete' ? 'TODO done'
         : boundarySignal === 'clear' ? '/clear'
@@ -128,6 +139,7 @@ export async function initApme(
     collector.onTaskOpened = ({
       taskId, runId, sessionId, agentType, projectName, taskIndex, startedAt,
     }) => {
+      promotedTaskIds.add(taskId);
       emitTimeline({
         ts: startedAt,
         type: 'task_start',
@@ -173,6 +185,11 @@ export async function initApme(
   // headers get the score badge as soon as the judge returns.
   if (emitTimeline) {
     runner.onTaskEvaluated((e) => {
+      // Skip the score re-emit for tasks whose header never reached the
+      // timeline (single-turn Q&A). Without this the merge-or-insert
+      // timeline store would insert a fresh orphan `task_end` here. Consume
+      // the id so the set doesn't grow unbounded across a long-lived daemon.
+      if (!promotedTaskIds.delete(e.taskId)) return;
       const durationSec = Math.max(0, Math.round((e.endedAt - e.startedAt) / 1000));
       const signalLabel = e.boundarySignal === 'todo_complete' ? 'TODO done'
         : e.boundarySignal === 'clear' ? '/clear'

@@ -2440,6 +2440,19 @@ final class DaemonServer {
             return
         }
 
+        // For `user_prompt_submit`, run the APME collector BEFORE the switch's
+        // `appendClaudeCodeChatStart` so the chat row can be tagged with the
+        // task it belongs to — consecutive prompts then nest under one task
+        // header instead of each reading as a separate task. Only this event is
+        // hoisted; every other event keeps the post-switch collector call below
+        // so, e.g., `session_end`'s `task_end` still emits after the turn's
+        // `chat_end` (natural order). `apmeHandledEarly` prevents a double-run.
+        var apmeHandledEarly = false
+        if event == "user_prompt_submit" {
+            apmeCollector?.handleHook(event: event, data: json)
+            apmeHandledEarly = true
+        }
+
         switch event {
         case "codex_session_start":
             _ = stateMachine.transition(trigger: "session_start", source: .hook)
@@ -2519,7 +2532,10 @@ final class DaemonServer {
             // renders Claude Code activity alongside OpenClaw/OpenCode. Before
             // this, only tool_start/tool_end entries appeared (via OpenClaw
             // path) and Claude Code conversations looked empty on the timeline.
-            appendClaudeCodeChatStart(json: json, sessionId: sessionId)
+            // The collector already ran (apmeHandledEarly) so `activeTaskId`
+            // reflects the task THIS prompt belongs to — tag the row with it so
+            // follow-up prompts nest under one task header.
+            appendClaudeCodeChatStart(json: json, sessionId: sessionId, taskId: apmeCollector?.activeTaskId)
         case "stop":
             _ = stateMachine.transition(trigger: "stop", source: .hook)
             updateSessionHookState(sessionId: sessionId, state: "idle", clearTool: true)
@@ -2640,7 +2656,7 @@ final class DaemonServer {
         // to whichever Claude session happened to be active. APME for
         // Codex needs a distinct collector path (out of scope for this
         // observation pass).
-        if !event.hasPrefix("codex_") {
+        if !event.hasPrefix("codex_") && !apmeHandledEarly {
             apmeCollector?.handleHook(event: event, data: json)
         }
 
@@ -5584,7 +5600,7 @@ final class DaemonServer {
     /// hook. Without this, Claude Code conversations appeared empty on the
     /// dashboard timeline while OpenClaw/OpenCode sessions showed full turns.
     @MainActor
-    private func appendClaudeCodeChatStart(json: [String: Any], sessionId: String?) {
+    private func appendClaudeCodeChatStart(json: [String: Any], sessionId: String?, taskId: String? = nil) {
         // Reset the per-session topic cache so a stale label from an
         // abnormally-closed prior turn doesn't leak into this row. We do
         // NOT wipe the chat_start ts queue here — that would discard an
@@ -5615,6 +5631,10 @@ final class DaemonServer {
         entry.sessionId = sessionId
         entry.projectName = pushedSessionsById[sessionId ?? ""]?.projectName
         entry.startedAt = ts
+        // Nest this chat row under its task header (deferred `task_start`).
+        // Consecutive prompts share one taskId, so they group instead of each
+        // rendering as a separate task. Parity with the Node daemon's chat_start.
+        entry.taskId = taskId
         if let sid = sessionId {
             // FIFO append — a delayed Stop hook for a prior turn pops
             // *that* turn's ts off the head, not this fresh one.

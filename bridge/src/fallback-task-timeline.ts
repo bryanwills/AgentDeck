@@ -57,6 +57,13 @@ export class FallbackTaskTimeline {
     }
   }
 
+  /** Current in-flight task id for a session, or null. Lets the timeline tag
+   *  `chat_start` rows with the enclosing taskId so they nest under the
+   *  task_start header (parity with the APME collector's `getActiveTaskId`). */
+  getActiveTaskId(sessionId: string): string | null {
+    return this.active.get(sessionId)?.taskId ?? null;
+  }
+
   private openIfNone(sessionId: string): void {
     if (this.active.has(sessionId)) return;
     const index = this.counts.get(sessionId) ?? 0;

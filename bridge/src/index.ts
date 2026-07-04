@@ -1384,6 +1384,10 @@ function wireClaudeCodeTimeline(
       const proj = core.stateMachine.getSnapshot().projectName;
       return proj ? `Prompt \u00B7 ${proj}` : 'Prompt sent';
     })();
+    // taskId/runId are filled in by BridgeCore's timeline attributor
+    // (wireTimeline → setAttributor) from the active APME task for this
+    // session, so managed-session chat rows nest under their task header
+    // without threading the id through here.
     core.bridgeTimeline.addEntry({
       ts: ccChatStart ?? Date.now(), type: 'chat_start',
       raw: snippet || fallbackRaw,
