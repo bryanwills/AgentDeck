@@ -7,6 +7,7 @@
 #include <GxEPD2_BW.h>
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
+#include <Fonts/FreeSansBold9pt7b.h>
 #include <Fonts/FreeSans9pt7b.h>
 
 #include "config.h"
@@ -16,6 +17,7 @@
 #include "net/serial_client.h"
 #include "net/ws_client.h"
 #include "ui/terrarium/creature_glyphs_generated.h"
+#include "ui/eink/logo_glyph_generated.h"
 
 namespace {
 
@@ -30,19 +32,28 @@ constexpr uint8_t PIN_KEY1    = BOARD_PIN_KEY1;   // force full refresh
 constexpr uint8_t PIN_KEY2    = BOARD_PIN_KEY2;   // force full refresh (paging later)
 
 // ===== Refresh policy =====
-// Partial refresh is ~0.3s on the UC8179 but ghosting accumulates; the vendor
-// recommends a flashing full refresh every ~5-8 partials (stock TRMNL firmware
-// uses 8). Content-hash gating means these intervals only apply on real change.
+// Partial refresh (~0.3s) accumulates ghosting on the UC8179; Good Display
+// recommends a flashing full refresh roughly every 5 partials. Content-hash
+// gating means these only apply on real change.
+//
+// CRITICAL: the panel is kept in powerOff() (high voltage off, controller RAM
+// RETAINED) between refreshes — NEVER hibernate() mid-session. hibernate()
+// deep-sleeps the controller and wipes its previous-frame RAM, so the next
+// partial refresh diffs against garbage → faint/ghosted text (the "blurry
+// text" bug on first hardware bring-up). hibernate() is only used for the
+// host-asleep card, and wake forces a full refresh.
 constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 3000;
-constexpr uint8_t  FULL_EVERY_N_PARTIALS   = 8;
-constexpr uint32_t FULL_MAX_AGE_MS         = 30UL * 60UL * 1000UL;
+constexpr uint8_t  FULL_EVERY_N_PARTIALS   = 5;
+constexpr uint32_t FULL_MAX_AGE_MS         = 10UL * 60UL * 1000UL;
 
 using Panel = GxEPD2_750_GDEY075T7;
 GxEPD2_BW<Panel, Panel::HEIGHT> display(Panel(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
 
+constexpr int16_t W = 800, H = 480;
+
 // ===== Render snapshot (copied out of g_state under the mutex so the slow
 // e-ink refresh never holds the lock) =====
-constexpr uint8_t MAX_ROWS = 6;
+constexpr uint8_t MAX_CARDS = 6;
 
 struct RowSnap {
     char name[40];
@@ -50,7 +61,7 @@ struct RowSnap {
     char state[20];
     char tool[40];
     char model[32];
-    char question[96];
+    char question[120];
     uint32_t elapsedSec;
     bool alive;
 };
@@ -61,7 +72,11 @@ struct Snap {
     bool serialUp;
     uint8_t rowCount;
     uint8_t totalSessions;
-    RowSnap rows[MAX_ROWS];
+    RowSnap rows[MAX_CARDS];
+    // Focused-session options (global — shown on the first awaiting card)
+    uint8_t optionCount;
+    char options[3][36];
+    // Usage
     float fiveH, sevenD;
     char fiveReset[20], sevenReset[20];
     bool usageStale;
@@ -79,7 +94,7 @@ void snapshot(Snap& s) {
     s.bridgeConnected = g_state.wsConnected;
     s.displayOn = g_state.hostDisplayOn;
     s.totalSessions = g_state.sessionCount;
-    s.rowCount = g_state.sessionCount < MAX_ROWS ? g_state.sessionCount : MAX_ROWS;
+    s.rowCount = g_state.sessionCount < MAX_CARDS ? g_state.sessionCount : MAX_CARDS;
     for (uint8_t i = 0; i < s.rowCount; i++) {
         const SessionInfo& src = g_state.sessions[i];
         RowSnap& dst = s.rows[i];
@@ -92,6 +107,9 @@ void snapshot(Snap& s) {
         dst.elapsedSec = src.elapsedSec;
         dst.alive = src.alive;
     }
+    s.optionCount = g_state.optionCount < 3 ? g_state.optionCount : 3;
+    for (uint8_t i = 0; i < s.optionCount; i++)
+        strncpy(s.options[i], g_state.options[i].label, sizeof(s.options[i]) - 1);
     s.fiveH = g_state.fiveHourPercent;
     s.sevenD = g_state.sevenDayPercent;
     strncpy(s.fiveReset, g_state.fiveHourReset, sizeof(s.fiveReset) - 1);
@@ -118,6 +136,7 @@ uint32_t contentHash(const Snap& s) {
     uint32_t h = 2166136261u;
     h = fnv(h, &s.bridgeConnected, 1);
     h = fnv(h, &s.wifiUp, 1);
+    h = fnv(h, &s.serialUp, 1);
     h = fnv(h, &s.rowCount, 1);
     h = fnv(h, &s.totalSessions, 1);
     for (uint8_t i = 0; i < s.rowCount; i++) {
@@ -127,10 +146,13 @@ uint32_t contentHash(const Snap& s) {
         uint32_t mins = r.elapsedSec / 60; h = fnv(h, &mins, sizeof(mins));
         h = fnv(h, &r.alive, 1);
     }
+    h = fnv(h, &s.optionCount, 1);
+    for (uint8_t i = 0; i < s.optionCount; i++) h = fnvStr(h, s.options[i]);
     int fh = (int)s.fiveH, sd = (int)s.sevenD, cp = (int)s.codexP, cs = (int)s.codexS;
     h = fnv(h, &fh, sizeof(fh)); h = fnv(h, &sd, sizeof(sd));
     h = fnv(h, &cp, sizeof(cp)); h = fnv(h, &cs, sizeof(cs));
     h = fnvStr(h, s.fiveReset); h = fnvStr(h, s.sevenReset);
+    h = fnvStr(h, s.codexPReset); h = fnvStr(h, s.codexSReset);
     h = fnv(h, &s.usageStale, 1);
     h = fnvStr(h, s.ip);
     return h;
@@ -139,7 +161,7 @@ uint32_t contentHash(const Snap& s) {
 // ===== Draw helpers =====
 
 // GFX FreeFonts are Latin-1; drop anything outside printable ASCII so multibyte
-// project names degrade to a clean marker instead of tofu garbage.
+// project names degrade to a single marker instead of tofu garbage.
 void ascii(char* out, size_t outLen, const char* in) {
     size_t o = 0;
     bool lastSub = false;
@@ -149,6 +171,14 @@ void ascii(char* out, size_t outLen, const char* in) {
         else if (!lastSub) { out[o++] = '#'; lastSub = true; }  // one '#' per non-ASCII run
     }
     out[o] = '\0';
+}
+
+uint16_t inkColor = GxEPD_BLACK;
+uint16_t paperColor = GxEPD_WHITE;
+void setInk(bool inverted) {
+    inkColor = inverted ? GxEPD_WHITE : GxEPD_BLACK;
+    paperColor = inverted ? GxEPD_BLACK : GxEPD_WHITE;
+    display.setTextColor(inkColor);
 }
 
 void textAt(int16_t x, int16_t y, const char* s, const GFXfont* f) {
@@ -168,177 +198,343 @@ void textRight(int16_t xRight, int16_t y, const char* s, const GFXfont* f) {
     textAt(xRight - textWidth(s, f), y, s, f);
 }
 
-// Threshold-scale a 64×64 A8 creature mask into a black silhouette.
-void drawMask(int16_t x, int16_t y, const uint8_t* a8, int size) {
+// Truncate `s` (already ASCII) to fit `maxW` with the given font, appending
+// ".." when cut. Result in `out`.
+void fitText(char* out, size_t outLen, const char* s, int16_t maxW, const GFXfont* f) {
+    strncpy(out, s, outLen - 1); out[outLen - 1] = '\0';
+    if (textWidth(out, f) <= maxW) return;
+    size_t len = strlen(out);
+    while (len > 1) {
+        out[--len] = '\0';
+        out[len - 1 >= 0 ? len : 0] = '\0';
+        char probe[96];
+        snprintf(probe, sizeof(probe), "%s..", out);
+        if (textWidth(probe, f) <= maxW) { strncpy(out, probe, outLen - 1); out[outLen - 1] = '\0'; return; }
+    }
+}
+
+// Threshold-scale a 64×64 A8 mask into a silhouette in the current ink color.
+void drawMask64(int16_t x, int16_t y, const uint8_t* a8, int size) {
     for (int oy = 0; oy < size; oy++) {
-        int sy = oy * 64 / size;
-        const uint8_t* row = a8 + sy * 64;
+        const uint8_t* row = a8 + (oy * 64 / size) * 64;
         for (int ox = 0; ox < size; ox++) {
-            if (row[ox * 64 / size] >= 128) display.drawPixel(x + ox, y + oy, GxEPD_BLACK);
+            if (row[ox * 64 / size] >= 128) display.drawPixel(x + ox, y + oy, inkColor);
         }
     }
 }
 
-const uint8_t* glyphFor(const char* agentType) {
-    if (strcmp(agentType, "openclaw") == 0)    return CreatureGlyphs::CRAYFISH_BODY_A8;
-    if (strncmp(agentType, "codex", 5) == 0)   return CreatureGlyphs::CODEX_A8;
-    if (strcmp(agentType, "opencode") == 0)    return CreatureGlyphs::OPENCODE_A8;
-    if (strcmp(agentType, "antigravity") == 0) return CreatureGlyphs::ANTIGRAVITY_A8;
-    return CreatureGlyphs::OCTOPUS_A8;  // claude-code + default
+// Agent creature glyph. OpenClaw uses the FULL canonical brand mark (eyes,
+// claws, antennae — same as the card surfaces), with the two eye pupils
+// punched back to paper so the face reads at 1-bit; the body-only
+// CRAYFISH_BODY mask is a terrarium asset that pairs with procedural claws
+// and looks like a shapeless blob on a card.
+void drawAgentGlyph(const char* agentType, int16_t x, int16_t y, int size) {
+    const uint8_t* a8 = CreatureGlyphs::OCTOPUS_A8;  // claude-code + default
+    bool openclaw = false;
+    if (strcmp(agentType, "openclaw") == 0)         { a8 = CreatureGlyphs::OPENCLAW_MARK_A8; openclaw = true; }
+    else if (strncmp(agentType, "codex", 5) == 0)   a8 = CreatureGlyphs::CODEX_A8;
+    else if (strcmp(agentType, "opencode") == 0)    a8 = CreatureGlyphs::OPENCODE_A8;
+    else if (strcmp(agentType, "antigravity") == 0) a8 = CreatureGlyphs::ANTIGRAVITY_A8;
+    drawMask64(x, y, a8, size);
+    if (openclaw) {
+        // Eye pupils at viewBox-24 (8.835, 7.843) / (15.165, 7.843), r≈1.26 —
+        // same geometry as shared agentGlyphMono's paper cutouts.
+        float sc = size / 24.0f;
+        int r = max(1, (int)(1.26f * sc));
+        display.fillCircle(x + (int)(8.835f * sc), y + (int)(7.843f * sc), r, paperColor);
+        display.fillCircle(x + (int)(15.165f * sc), y + (int)(7.843f * sc), r, paperColor);
+    }
 }
 
 bool isAwaiting(const char* state) { return strncmp(state, "awaiting", 8) == 0; }
 
 void stateLabel(const char* state, char* out, size_t outLen) {
     if (strcmp(state, "processing") == 0) strncpy(out, "PROCESSING", outLen - 1);
-    else if (strcmp(state, "awaiting_permission") == 0) strncpy(out, "PERMISSION?", outLen - 1);
-    else if (strcmp(state, "awaiting_option") == 0) strncpy(out, "CHOOSE?", outLen - 1);
-    else if (strcmp(state, "awaiting_diff") == 0) strncpy(out, "REVIEW?", outLen - 1);
+    else if (strcmp(state, "awaiting_permission") == 0) strncpy(out, "PERMISSION", outLen - 1);
+    else if (strcmp(state, "awaiting_option") == 0) strncpy(out, "CHOOSE", outLen - 1);
+    else if (strcmp(state, "awaiting_diff") == 0) strncpy(out, "REVIEW", outLen - 1);
     else if (strcmp(state, "idle") == 0) strncpy(out, "IDLE", outLen - 1);
     else strncpy(out, "OFFLINE", outLen - 1);
     out[outLen - 1] = '\0';
 }
 
-void drawGauge(int16_t x, int16_t y, int16_t w, int16_t h, const char* label,
-               float pct, const char* reset) {
-    textAt(x, y + h - 4, label, &FreeSansBold12pt7b);
-    int16_t barX = x + 44, barW = w - 44;
-    display.drawRect(barX, y, barW, h, GxEPD_BLACK);
-    display.drawRect(barX + 1, y + 1, barW - 2, h - 2, GxEPD_BLACK);
-    char val[24];
-    if (pct >= 0.0f) {
-        int fill = (int)((barW - 6) * (pct > 100.0f ? 100.0f : pct) / 100.0f);
-        display.fillRect(barX + 3, y + 3, fill, h - 6, GxEPD_BLACK);
-        if (reset[0]) snprintf(val, sizeof(val), "%d%%  %s", (int)pct, reset);
-        else snprintf(val, sizeof(val), "%d%%", (int)pct);
-    } else {
-        strncpy(val, "--", sizeof(val));
+// State marker box: awaiting = solid, processing = diagonal hatch, idle = hollow.
+void drawStateMarker(int16_t x, int16_t y, int16_t sz, const char* state) {
+    display.drawRect(x, y, sz, sz, inkColor);
+    if (isAwaiting(state)) {
+        display.fillRect(x, y, sz, sz, inkColor);
+    } else if (strcmp(state, "processing") == 0) {
+        for (int d = 2; d < sz * 2 - 2; d += 3) {
+            int x0 = d < sz ? x + d : x + sz - 1;
+            int y0 = d < sz ? y : y + (d - sz + 1);
+            int x1 = d < sz ? x : x + d - sz + 1;
+            int y1 = d < sz ? y + d : y + sz - 1;
+            display.drawLine(x0, y0, x1, y1, inkColor);
+        }
     }
-    // % label to the right of the bar, black-on-white outside the fill
-    textAt(barX + barW + 8, y + h - 4, val, &FreeSans9pt7b);
 }
 
 // ===== Screens =====
 
+void drawBrandHeader(const Snap& s) {
+    // AD shield line-art + wordmark — same brand lockup the LVGL splash shows.
+    drawMask64(14, 6, LogoGlyph::AD_SHIELD_A8, 52);
+    textAt(78, 44, "AgentDeck", &FreeSansBold18pt7b);
+
+    // Link status chip, right-aligned
+    const char* link = s.bridgeConnected ? (s.serialUp ? "USB LINK" : "WIFI LINK") : "NO LINK";
+    int16_t tw = textWidth(link, &FreeSansBold9pt7b);
+    int16_t chipW = tw + 24, chipX = W - 16 - chipW;
+    if (s.bridgeConnected) {
+        display.fillRoundRect(chipX, 16, chipW, 32, 6, GxEPD_BLACK);
+        display.setTextColor(GxEPD_WHITE);
+        textAt(chipX + 12, 38, link, &FreeSansBold9pt7b);
+        display.setTextColor(inkColor);
+    } else {
+        display.drawRoundRect(chipX, 16, chipW, 32, 6, GxEPD_BLACK);
+        textAt(chipX + 12, 38, link, &FreeSansBold9pt7b);
+    }
+
+    // Session count, left of the chip
+    if (s.totalSessions > 0) {
+        char cnt[24];
+        snprintf(cnt, sizeof(cnt), "%d session%s", s.totalSessions, s.totalSessions == 1 ? "" : "s");
+        textRight(chipX - 14, 38, cnt, &FreeSans9pt7b);
+    }
+
+    // Double rule (print-style)
+    display.fillRect(0, 62, W, 2, GxEPD_BLACK);
+    display.drawFastHLine(0, 66, W, GxEPD_BLACK);
+}
+
+void drawGaugeBar(int16_t x, int16_t y, int16_t barW, int16_t barH,
+                  const char* tag, float pct, const char* reset) {
+    textAt(x, y + barH - 3, tag, &FreeSansBold9pt7b);
+    int16_t bx = x + 32;
+    display.drawRect(bx, y, barW, barH, GxEPD_BLACK);
+    char val[28];
+    if (pct >= 0.0f) {
+        float p = pct > 100.0f ? 100.0f : pct;
+        int fill = (int)((barW - 4) * p / 100.0f);
+        display.fillRect(bx + 2, y + 2, fill, barH - 4, GxEPD_BLACK);
+        snprintf(val, sizeof(val), "%d%%", (int)pct);
+    } else {
+        strncpy(val, "--", sizeof(val));
+    }
+    textAt(bx + barW + 6, y + barH - 3, val, &FreeSansBold9pt7b);
+    if (pct >= 0.0f && reset[0]) {
+        textAt(bx + barW + 56, y + barH - 3, reset, &FreeSans9pt7b);
+    }
+}
+
+// Provider row: mini glyph + label + 5H/7D gauges. Returns true if drawn.
+bool drawProviderUsage(int16_t y, const char* agentType, const char* label,
+                       float p5, const char* r5, float p7, const char* r7, bool stale) {
+    if (p5 < 0.0f && p7 < 0.0f) return false;
+    drawAgentGlyph(agentType, 16, y, 26);
+    char lbl[24];
+    snprintf(lbl, sizeof(lbl), "%s%s", label, stale ? "*" : "");
+    textAt(52, y + 20, lbl, &FreeSansBold9pt7b);
+    drawGaugeBar(160, y + 4, 170, 18, "5H", p5, r5);
+    drawGaugeBar(480, y + 4, 170, 18, "7D", p7, r7);
+    return true;
+}
+
+void drawUsageFooter(const Snap& s) {
+    display.fillRect(0, 378, W, 2, GxEPD_BLACK);
+    int16_t y = 388;
+    bool any = false;
+    if (drawProviderUsage(y, "claude-code", "CLAUDE", s.fiveH, s.fiveReset,
+                          s.sevenD, s.sevenReset, s.usageStale)) { y += 42; any = true; }
+    if (drawProviderUsage(y, "codex-cli", "CODEX", s.codexP, s.codexPReset,
+                          s.codexS, s.codexSReset, false)) { any = true; }
+    if (!any) {
+        textAt(16, 406, "usage: waiting for data", &FreeSans9pt7b);
+    }
+    // Identity tag, bottom-right
+    char tag[80];
+    snprintf(tag, sizeof(tag), "v%s %.7s · %s%s", FIRMWARE_VERSION, GIT_SHA,
+             s.serialUp ? "usb" : "wifi", s.ip[0] ? "" : "");
+    if (!s.serialUp && s.ip[0]) {
+        snprintf(tag, sizeof(tag), "v%s %.7s · %s", FIRMWARE_VERSION, GIT_SHA, s.ip);
+    }
+    textRight(W - 16, 474, tag, &FreeSans9pt7b);
+    if (s.usageStale) textAt(16, 474, "* usage stale", &FreeSans9pt7b);
+}
+
+void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
+                     int16_t x, int16_t y, int16_t w, int16_t h) {
+    bool awaiting = isAwaiting(r.state);
+    bool tall = h > 200;
+
+    if (awaiting) {
+        display.fillRoundRect(x, y, w, h, 10, GxEPD_BLACK);
+        setInk(true);
+    } else {
+        display.drawRoundRect(x, y, w, h, 10, GxEPD_BLACK);
+        display.drawRoundRect(x + 1, y + 1, w - 2, h - 2, 10, GxEPD_BLACK);
+        setInk(false);
+    }
+
+    int glyph = tall ? 110 : (h >= 130 ? 72 : 52);
+    int16_t gx = x + 16, gy = y + (h - glyph) / 2;
+    if (tall) gy = y + 28;
+    drawAgentGlyph(r.agentType, gx, gy, glyph);
+
+    int16_t tx = gx + glyph + 18;
+    int16_t maxTextW = x + w - tx - 14;
+
+    // Project name
+    char name[40]; ascii(name, sizeof(name), r.name);
+    if (!name[0]) strncpy(name, "(unnamed)", sizeof(name) - 1);
+    char fitted[48];
+    const GFXfont* nameFont = tall ? &FreeSansBold18pt7b : &FreeSansBold12pt7b;
+    fitText(fitted, sizeof(fitted), name, maxTextW, nameFont);
+    int16_t ny = y + (tall ? 52 : 32);
+    textAt(tx, ny, fitted, nameFont);
+
+    // State line: marker + label + elapsed
+    char label[16]; stateLabel(r.state, label, sizeof(label));
+    int16_t sy = ny + (tall ? 36 : 26);
+    drawStateMarker(tx, sy - 11, 12, r.state);
+    char stateLine[48];
+    if (r.elapsedSec >= 60) {
+        snprintf(stateLine, sizeof(stateLine), "%s · %lum", label, (unsigned long)(r.elapsedSec / 60));
+    } else {
+        strncpy(stateLine, label, sizeof(stateLine) - 1); stateLine[sizeof(stateLine) - 1] = '\0';
+    }
+    textAt(tx + 20, sy, stateLine, &FreeSansBold9pt7b);
+
+    // Detail: awaiting question (wrapped) or current tool
+    int16_t dy = sy + 24;
+    if (awaiting && r.question[0]) {
+        char q[120]; ascii(q, sizeof(q), r.question);
+        // wrap up to 2 lines (3 on tall cards)
+        int maxLines = tall ? 3 : (h >= 130 ? 2 : 1);
+        const char* p = q;
+        for (int line = 0; line < maxLines && *p && dy < y + h - 8; line++) {
+            char buf[64];
+            size_t n = strlen(p);
+            size_t take = n;
+            while (take > 0) {
+                strncpy(buf, p, take); buf[take] = '\0';
+                if (textWidth(buf, &FreeSans9pt7b) <= maxTextW) break;
+                // back off to previous space if any
+                size_t sp = take - 1;
+                while (sp > 0 && p[sp] != ' ') sp--;
+                take = sp > 0 ? sp : take - 1;
+            }
+            strncpy(buf, p, take); buf[take] = '\0';
+            textAt(tx, dy, buf, &FreeSans9pt7b);
+            p += take;
+            while (*p == ' ') p++;
+            dy += 20;
+        }
+        // Options (focused/global) on the first awaiting card
+        if (firstAwaiting && s.optionCount > 0 && tall) {
+            for (uint8_t i = 0; i < s.optionCount && dy < y + h - 10; i++) {
+                char opt[48], oa[40];
+                ascii(oa, sizeof(oa), s.options[i]);
+                snprintf(opt, sizeof(opt), "%d) %s", i + 1, oa);
+                char of[52];
+                fitText(of, sizeof(of), opt, maxTextW, &FreeSans9pt7b);
+                textAt(tx, dy, of, &FreeSans9pt7b);
+                dy += 20;
+            }
+        }
+    } else if (r.tool[0] && dy < y + h - 8) {
+        char t[40]; ascii(t, sizeof(t), r.tool);
+        char tf[44];
+        fitText(tf, sizeof(tf), t, maxTextW, &FreeSans9pt7b);
+        textAt(tx, dy, tf, &FreeSans9pt7b);
+    }
+
+    // Model tag bottom-right inside card
+    if (r.model[0] && h >= 130) {
+        char m[32]; ascii(m, sizeof(m), r.model);
+        char mf[36];
+        fitText(mf, sizeof(mf), m, w - glyph - 60, &FreeSans9pt7b);
+        textRight(x + w - 14, y + h - 12, mf, &FreeSans9pt7b);
+    }
+
+    setInk(false);
+}
+
+void drawSessionGrid(const Snap& s) {
+    const int16_t top = 78, bottom = 372, left = 12, right = W - 12;
+    if (s.rowCount == 0) {
+        // Empty state — connected but no sessions
+        drawMask64(W / 2 - 32, 150, LogoGlyph::AD_SHIELD_A8, 64);
+        textAt(W / 2 - textWidth("no active sessions", &FreeSansBold12pt7b) / 2, 260,
+               "no active sessions", &FreeSansBold12pt7b);
+        const char* hint = "start claude / codex / opencode in a workspace";
+        textAt(W / 2 - textWidth(hint, &FreeSans9pt7b) / 2, 290, hint, &FreeSans9pt7b);
+        return;
+    }
+
+    int cols = s.rowCount <= 2 ? s.rowCount : (s.rowCount <= 4 ? 2 : 3);
+    int rows = s.rowCount <= 2 ? 1 : 2;
+    const int16_t gut = 10;
+    int16_t cardW = (right - left - (cols - 1) * gut) / cols;
+    int16_t cardH = (bottom - top - (rows - 1) * gut) / rows;
+
+    int firstAwaitingIdx = -1;
+    for (uint8_t i = 0; i < s.rowCount; i++) {
+        if (isAwaiting(s.rows[i].state)) { firstAwaitingIdx = i; break; }
+    }
+
+    for (uint8_t i = 0; i < s.rowCount; i++) {
+        int c = i % cols, rw = i / cols;
+        int16_t cx = left + c * (cardW + gut);
+        int16_t cy = top + rw * (cardH + gut);
+        drawSessionCard(s, s.rows[i], (int)i == firstAwaitingIdx, cx, cy, cardW, cardH);
+    }
+    if (s.totalSessions > s.rowCount) {
+        char more[24];
+        snprintf(more, sizeof(more), "+%d more", s.totalSessions - s.rowCount);
+        textRight(right - 4, bottom - 6, more, &FreeSans9pt7b);
+    }
+}
+
 void drawSearching(const Snap& s) {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
-    textAt(300, 210, "INKDECK", &FreeSansBold18pt7b);
-    const char* msg = s.wifiUp ? "Searching for AgentDeck daemon..." : "WiFi not connected";
-    textAt(240, 260, msg, &FreeSans9pt7b);
+    setInk(false);
+    drawBrandHeader(s);
+    drawMask64(W / 2 - 40, 140, LogoGlyph::AD_SHIELD_A8, 80);
+    const char* msg = s.wifiUp || s.serialUp ? "searching for AgentDeck daemon..."
+                                             : "no WiFi — connect USB or provision WiFi";
+    textAt(W / 2 - textWidth(msg, &FreeSansBold12pt7b) / 2, 268, msg, &FreeSansBold12pt7b);
     if (s.wifiUp && s.ip[0]) {
-        char line[48]; snprintf(line, sizeof(line), "panel %s · mDNS _agentdeck._tcp", s.ip);
-        textAt(240, 290, line, &FreeSans9pt7b);
+        char line[64]; snprintf(line, sizeof(line), "panel %s · mDNS _agentdeck._tcp", s.ip);
+        textAt(W / 2 - textWidth(line, &FreeSans9pt7b) / 2, 298, line, &FreeSans9pt7b);
     }
-    char tag[64];
-    snprintf(tag, sizeof(tag), "AgentDeck v%s %.7s", FIRMWARE_VERSION, GIT_SHA);
-    textAt(16, 468, tag, &FreeSans9pt7b);
+    drawUsageFooter(s);
 }
 
 void drawSleep() {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
-    textAt(330, 240, "asleep", &FreeSansBold12pt7b);
-    display.drawCircle(310, 232, 10, GxEPD_BLACK);
-    display.fillCircle(314, 228, 8, GxEPD_WHITE);  // crescent moon
+    setInk(false);
+    drawMask64(W / 2 - 26, 190, LogoGlyph::AD_SHIELD_A8, 52);
+    textAt(W / 2 - textWidth("asleep", &FreeSansBold12pt7b) / 2, 282, "asleep", &FreeSansBold12pt7b);
+    // crescent moon
+    display.fillCircle(W / 2 - 70, 274, 11, GxEPD_BLACK);
+    display.fillCircle(W / 2 - 65, 270, 10, GxEPD_WHITE);
 }
 
 void drawDashboard(const Snap& s) {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
-
-    // --- Header ---
-    textAt(16, 38, "AGENTDECK", &FreeSansBold18pt7b);
-    char right[64];
-    if (s.fiveH >= 0.0f || s.sevenD >= 0.0f) {
-        snprintf(right, sizeof(right), "5H %d%%   7D %d%%%s",
-                 s.fiveH >= 0 ? (int)s.fiveH : 0, s.sevenD >= 0 ? (int)s.sevenD : 0,
-                 s.usageStale ? " (stale)" : "");
-        textRight(784, 34, right, &FreeSansBold12pt7b);
-    }
-    display.fillRect(0, 52, 800, 3, GxEPD_BLACK);
-
-    // --- Session rows ---
-    if (s.rowCount == 0) {
-        textAt(280, 220, "NO ACTIVE SESSIONS", &FreeSansBold12pt7b);
-        textAt(258, 252, "start claude / codex / opencode in a workspace", &FreeSans9pt7b);
-    }
-    const int16_t rowTop = 64, rowH = 56, glyphSize = 44;
-    for (uint8_t i = 0; i < s.rowCount; i++) {
-        const RowSnap& r = s.rows[i];
-        int16_t y = rowTop + i * rowH;
-        bool awaiting = isAwaiting(r.state);
-
-        // Awaiting rows invert: a black band the eye can't miss across the room.
-        if (awaiting) {
-            display.fillRect(0, y, 800, rowH - 4, GxEPD_BLACK);
-            display.setTextColor(GxEPD_WHITE);
-        }
-
-        // Creature silhouette (white-on-black when inverted via manual invert draw)
-        if (awaiting) {
-            const uint8_t* a8 = glyphFor(r.agentType);
-            for (int oy = 0; oy < glyphSize; oy++) {
-                int sy = oy * 64 / glyphSize;
-                for (int ox = 0; ox < glyphSize; ox++)
-                    if (a8[sy * 64 + ox * 64 / glyphSize] >= 128)
-                        display.drawPixel(16 + ox, y + 5 + oy, GxEPD_WHITE);
-            }
-        } else {
-            drawMask(16, y + 5, glyphFor(r.agentType), glyphSize);
-        }
-
-        char name[40]; ascii(name, sizeof(name), r.name);
-        if (!name[0]) strncpy(name, "(unnamed)", sizeof(name) - 1);
-        textAt(74, y + 26, name, &FreeSansBold12pt7b);
-
-        // Second line: state · tool/question · model
-        char label[16]; stateLabel(r.state, label, sizeof(label));
-        char line[120];
-        if (awaiting && r.question[0]) {
-            char q[72]; ascii(q, sizeof(q), r.question);
-            snprintf(line, sizeof(line), "%s  %s", label, q);
-        } else if (r.tool[0]) {
-            char t[40]; ascii(t, sizeof(t), r.tool);
-            snprintf(line, sizeof(line), "%s · %s", label, t);
-        } else {
-            strncpy(line, label, sizeof(line) - 1); line[sizeof(line) - 1] = '\0';
-        }
-        textAt(74, y + 46, line, &FreeSans9pt7b);
-
-        // Right column: model + elapsed
-        char meta[48]; char model[32]; ascii(model, sizeof(model), r.model);
-        if (r.elapsedSec >= 60) {
-            snprintf(meta, sizeof(meta), "%s · %lum", model, (unsigned long)(r.elapsedSec / 60));
-        } else {
-            snprintf(meta, sizeof(meta), "%s", model);
-        }
-        textRight(784, y + 34, meta, &FreeSans9pt7b);
-
-        display.setTextColor(GxEPD_BLACK);
-        if (!awaiting && i + 1 < s.rowCount)
-            display.drawFastHLine(16, y + rowH - 4, 768, GxEPD_BLACK);
-    }
-    if (s.totalSessions > s.rowCount) {
-        char more[32];
-        snprintf(more, sizeof(more), "+%d more", s.totalSessions - s.rowCount);
-        textRight(784, rowTop + MAX_ROWS * rowH - 12, more, &FreeSans9pt7b);
-    }
-
-    // --- Usage footer ---
-    display.fillRect(0, 402, 800, 2, GxEPD_BLACK);
-    drawGauge(16, 414, 330, 24, "5H", s.fiveH, s.fiveReset);
-    drawGauge(410, 414, 330, 24, "7D", s.sevenD, s.sevenReset);
-    char foot[96];
-    if (s.codexP >= 0.0f || s.codexS >= 0.0f) {
-        snprintf(foot, sizeof(foot), "CODEX 5H %d%% · 7D %d%%",
-                 s.codexP >= 0 ? (int)s.codexP : 0, s.codexS >= 0 ? (int)s.codexS : 0);
-        textAt(16, 468, foot, &FreeSans9pt7b);
-    }
-    snprintf(foot, sizeof(foot), "%s%s · v%s %.7s · %s",
-             s.serialUp ? "USB" : "WiFi", s.bridgeConnected ? " LINK" : " NO LINK",
-             FIRMWARE_VERSION, GIT_SHA, s.ip[0] ? s.ip : "-");
-    textRight(784, 468, foot, &FreeSans9pt7b);
+    setInk(false);
+    drawBrandHeader(s);
+    drawSessionGrid(s);
+    drawUsageFooter(s);
+    // NOTE: no Serial logging here — this runs on Core 1 while Core 0 emits
+    // protocol JSON lines (device_info replies, acks). Cross-core prints
+    // interleave mid-line and corrupt the newline-framed JSON the daemon
+    // parses (observed: device_info replies mangled → daemon kept showing a
+    // stale buildHash). Keep render-path logging out of the firmware.
 }
 
 // ===== Refresh engine =====
@@ -366,7 +562,9 @@ void refresh(void (*draw)(const Snap&), const Snap& s, bool full) {
     }
     display.firstPage();
     do { draw(s); } while (display.nextPage());
-    display.hibernate();  // panel deep-sleeps between refreshes; RST wakes it
+    // powerOff (NOT hibernate): high voltage off, controller previous-frame
+    // RAM retained so the next partial refresh diffs cleanly. See note above.
+    display.powerOff();
 }
 
 }  // namespace
@@ -404,25 +602,27 @@ void render() {
     uint32_t now = millis();
     Snap s; snapshot(s);
 
-    // Host display asleep → one clean sleep card, then stay quiet until wake.
+    // Host display asleep → one clean sleep card, then hibernate the panel
+    // (deep sleep is safe here — wake below forces a full refresh, which
+    // doesn't depend on the controller's wiped previous-frame RAM).
     if (!s.displayOn) {
         if (!asleep) {
             refresh([](const Snap&) { drawSleep(); }, s, true);
+            display.hibernate();
             asleep = true;
             lastHash = 0;
         }
         return;
     }
-    asleep = false;
+    if (asleep) {
+        asleep = false;
+        forceFull = true;  // controller RAM was wiped by hibernate
+        lastHash = 0;
+    }
 
     bool searching = !s.bridgeConnected;
     uint32_t h = contentHash(s);
-    if (h == lastHash && !forceFull) {
-        // Unchanged content: only honor the anti-ghosting full-refresh age when
-        // the panel has been doing partials (a full-refreshed static image can
-        // sit forever without maintenance).
-        return;
-    }
+    if (h == lastHash && !forceFull) return;
     if (!forceFull && (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts
 
     bool full = forceFull || firstDraw ||

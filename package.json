@@ -13,6 +13,7 @@
     "generate-icons": "node scripts/generate-icons.mjs",
     "generate-creature-glyphs": "node scripts/generate-creature-glyphs.mjs",
     "generate-micro-glyphs": "node scripts/generate-micro-glyphs.mjs",
+    "generate-eink-logo": "node scripts/generate-eink-logo.mjs",
     "generate-protocol": "bash scripts/generate-protocol.sh",
     "package": "bash scripts/package-plugin.sh",
     "setup": "bash scripts/install.sh",
