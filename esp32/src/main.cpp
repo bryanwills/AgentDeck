@@ -24,6 +24,8 @@
 
 #ifdef BOARD_LED8X32
 #include "ui/matrix/matrix_display.h"
+#elif defined(BOARD_INKDECK)
+#include "ui/eink/eink_display.h"
 #else
 #include "ui/display.h"
 #include "ui/screens/splash.h"
@@ -36,7 +38,7 @@
 DashboardState g_state;
 SemaphoreHandle_t g_stateMutex = nullptr;
 
-#ifndef BOARD_LED8X32
+#if !defined(BOARD_LED8X32) && !defined(BOARD_INKDECK)
 // ===== Screen objects (LVGL boards only) =====
 static lv_obj_t* scrSplash = nullptr;
 static lv_obj_t* scrAquarium = nullptr;
@@ -180,7 +182,7 @@ static void networkTask(void* param) {
     }
 }
 
-#ifndef BOARD_LED8X32
+#if !defined(BOARD_LED8X32) && !defined(BOARD_INKDECK)
 // ===== Settings long-press handler =====
 static void onLongPress(lv_event_t* e) {
 #if defined(BOARD_IPS10)
@@ -510,7 +512,7 @@ static void uiTask(void* param) {
 #endif
     }
 }
-#else // BOARD_LED8X32
+#elif defined(BOARD_LED8X32)
 // ===== UI task — LED matrix (Core 1) =====
 static void uiTask(void* param) {
     Serial.println("[UI] Matrix task started on core 1");
@@ -529,7 +531,27 @@ static void uiTask(void* param) {
         vTaskDelay(pdMS_TO_TICKS(RENDER_INTERVAL_MS));
     }
 }
-#endif // BOARD_LED8X32
+#else // BOARD_INKDECK
+// ===== UI task — e-ink dashboard (Core 1) =====
+// Slow tick: render() is content-hash gated internally and a panel refresh
+// blocks 0.3-3s, so there is nothing to gain from the 30fps LCD cadence.
+static void uiTask(void* param) {
+    Serial.println("[UI] InkDeck e-ink task started on core 1");
+    Eink::init();
+
+    uint32_t lastFrameMs = millis();
+    while (true) {
+        uint32_t now = millis();
+        float dt = (now - lastFrameMs) / 1000.0f;
+        lastFrameMs = now;
+
+        Eink::update(dt);
+        Eink::render();
+
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+}
+#endif // board UI fork
 
 // ===== Arduino setup =====
 void setup() {
@@ -555,6 +577,11 @@ void setup() {
     // CH340 UART: no CDC wait needed
     delay(200);
     Serial.println("\n=== AgentDeck 86 Box 4\" ===");
+#elif defined(BOARD_INKDECK)
+    // Native USB CDC: wait for host connection (up to 3 seconds)
+    for (int i = 0; i < 30 && !Serial; i++) delay(100);
+    delay(200);
+    Serial.println("\n=== AgentDeck InkDeck 7.5\" e-ink ===");
 #else
     // Native USB CDC: wait for host connection (up to 3 seconds)
     for (int i = 0; i < 30 && !Serial; i++) delay(100);
@@ -569,6 +596,8 @@ void setup() {
         "TTGO T-Display",
 #elif defined(BOARD_ESP32_C6_147)
         "ESP32-C6 1.47\"",
+#elif defined(BOARD_INKDECK)
+        "InkDeck 7.5\" e-ink",
 #elif defined(BOARD_IPS35)
         "IPS 3.5\"",
 #elif defined(BOARD_RGB48)
@@ -578,7 +607,7 @@ void setup() {
 #else
         "Unknown",
 #endif
-#if defined(BOARD_LED8X32)
+#if defined(BOARD_LED8X32) || defined(BOARD_INKDECK)
         SCREEN_W, SCREEN_H);
 #else
         g_screenW, g_screenH);

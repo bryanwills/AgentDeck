@@ -54,8 +54,12 @@ static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
             g_state.wsConnected = true;
             g_state.lastMessageMs = millis();
             unlockState();
-            // Request initial state
+            // Request initial state + identify ourselves (device_info is
+            // request-driven on serial, but nothing requests it over WS — a
+            // WiFi-only board must announce or the daemon never learns its
+            // board/buildHash).
             Net::wsSendCommand("query_usage");
+            Protocol::announceDeviceInfo();
             break;
 
         case WStype_TEXT:

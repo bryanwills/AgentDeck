@@ -3,7 +3,7 @@
 #include "wifi_manager.h"
 #include "ws_client.h"
 #include "../state/agent_state.h"
-#ifndef BOARD_LED8X32
+#if !defined(BOARD_LED8X32) && !defined(BOARD_INKDECK)
 #include "../ui/screens/splash.h"
 #endif
 #include <Arduino.h>
@@ -34,6 +34,8 @@ static void sendDeviceInfoSerial() {
 
     #if defined(BOARD_LED8X32)
     resp["board"] = "ulanzi_tc001";
+    #elif defined(BOARD_INKDECK)
+    resp["board"] = "inkdeck";
     #elif defined(BOARD_TTGO)
     resp["board"] = "ttgo_t_display";
     #elif defined(BOARD_ESP32_C6_147)

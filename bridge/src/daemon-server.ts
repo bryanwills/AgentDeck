@@ -93,6 +93,30 @@ function exitProcessNow(code = 0): void {
   process.exit(code);
 }
 
+// WiFi ESP32 boards (InkDeck) that announced device_info over the plugin WS.
+// Keyed board:ip; entries age out after an hour so a re-IP'd board doesn't
+// leave ghosts in `agentdeck devices`.
+interface WifiEsp32Device {
+  board: string;
+  version?: string;
+  buildHash?: string;
+  buildEpoch?: number;
+  ip?: string;
+  protocolRevision?: number;
+  lastSeenMs: number;
+}
+const wifiEsp32Devices = new Map<string, WifiEsp32Device>();
+
+function listWifiEsp32Devices(): Array<WifiEsp32Device & { stale: boolean }> {
+  const now = Date.now();
+  const out: Array<WifiEsp32Device & { stale: boolean }> = [];
+  for (const [key, d] of wifiEsp32Devices) {
+    if (now - d.lastSeenMs > 60 * 60 * 1000) { wifiEsp32Devices.delete(key); continue; }
+    out.push({ ...d, stale: now - d.lastSeenMs > 90_000 });
+  }
+  return out;
+}
+
 function loadDaemonSettings(): Record<string, unknown> {
   // Newest settings.json across candidate data dirs — mirrors the
   // daemon.json/sessions.json cross-dir discovery (and honors the
@@ -535,6 +559,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         devices: [
           { type: 'websocket', count: core.wsServer.getClientCount() },
           { type: 'esp32', count: esp32ConnectionCount(), ports: getESP32Ports(), devices: getESP32DeviceInfo() },
+          { type: 'esp32-wifi', devices: listWifiEsp32Devices() },
           { type: 'pixoo', details: getPixooDeviceDetails() },
           { type: 'timebox', devices: loadTimeboxDevices() },
           { type: 'idotmatrix', devices: loadIDotMatrixDevices() },
@@ -1050,6 +1075,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     );
     // Include ESP32 serial connections in client count for polling guards
     core.setExternalClientCountProvider(() => esp32ConnectionCount());
+  }
+
+  // WS-path display_state re-sync: the 5s serial heartbeat above only covers
+  // USB-attached boards. WiFi boards (InkDeck) receive display_state edge-
+  // triggered over the plugin WS — a missed wake edge would leave an e-ink
+  // panel showing the sleep card forever. Re-broadcast at a slow cadence so
+  // any board that missed the edge self-heals within 15s.
+  {
+    const displayResync = setInterval(() => {
+      if (core.wsServer.getClientCount() > 0) {
+        core.wsServer.broadcast(buildDisplayStateEvent(core.displayMonitor.isDisplayOn()) as BridgeEvent);
+      }
+    }, 15_000);
+    displayResync.unref?.();
 
     // WiFi auto-provisioning for ESP32 (enables independent WiFi operation)
     const wifiConfig = loadWifiConfig();
@@ -1568,6 +1607,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         setTimeout(() => focusRelay.routeCommand({ type: 'select_option', index: (cmd as any).index }), 100);
         return;
       }
+    }
+    // WiFi ESP32 boards (InkDeck) announce device_info over the plugin WS on
+    // connect — the serial identify flow never sees them, so register here for
+    // /devices and `agentdeck devices`.
+    if ((cmd as any).type === 'device_info') {
+      const d = cmd as any;
+      const key = `${d.board ?? 'unknown'}:${d.ip ?? 'no-ip'}`;
+      wifiEsp32Devices.set(key, {
+        board: d.board ?? 'unknown',
+        version: d.version,
+        buildHash: d.buildHash,
+        buildEpoch: d.buildEpoch,
+        ip: d.ip,
+        protocolRevision: d.protocolRevision,
+        lastSeenMs: Date.now(),
+      });
+      debug('daemon', `WiFi ESP32 registered: ${key} v${d.version} build=${d.buildHash}`);
+      return;
     }
     // Route interactive commands to focused session (if any)
     if (focusRelay.getFocusedSessionId() && focusRelay.routeCommand(cmd)) {

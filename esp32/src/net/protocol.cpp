@@ -1,5 +1,6 @@
 #include "protocol.h"
 #include "wifi_manager.h"
+#include "ws_client.h"
 #include "../state/agent_state.h"
 #include "config.h"
 #include <ArduinoJson.h>
@@ -579,6 +580,8 @@ static void sendDeviceInfo() {
 
     #if defined(BOARD_LED8X32)
     resp["board"] = "ulanzi_tc001";
+    #elif defined(BOARD_INKDECK)
+    resp["board"] = "inkdeck";
     #elif defined(BOARD_TTGO)
     resp["board"] = "ttgo_t_display";
     #elif defined(BOARD_ESP32_C6_147)
@@ -605,10 +608,15 @@ static void sendDeviceInfo() {
 
     char buf[320];
     serializeJson(resp, buf, sizeof(buf));
+    // Both transports: serial for the USB-attached identify flow, WS so a
+    // WiFi-only board (InkDeck) is registrable by the daemon without a cable.
     Serial.println(buf);
+    if (Net::wsConnected()) Net::wsSend(buf);
 }
 
 namespace Protocol {
+
+void announceDeviceInfo() { sendDeviceInfo(); }
 
 void parseMessage(const char* json, size_t length) {
     // Reject oversized frames before feeding the elastic JsonDocument — an
