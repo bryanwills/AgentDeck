@@ -626,6 +626,9 @@ static void sendDeviceInfo() {
     resp["protocolRevision"] = PROTOCOL_REVISION;
     resp["wifiConfigured"] = (WiFi.SSID().length() > 0);
     resp["wifiConnected"] = Net::wifiConnected();
+    // Debug aid: how many timeline entries this board's ring holds — lets a
+    // host-side probe distinguish "seed never parsed" from "render gating".
+    resp["timelineCount"] = g_state.timelineCount;
     if (Net::wifiConnected()) {
         resp["ip"] = Net::wifiLocalIP();
     }

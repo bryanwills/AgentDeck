@@ -663,36 +663,41 @@ bool needsAttention(const RowSnap& r) {
     return isAwaiting(r.state) || strcmp(r.state, "processing") == 0;
 }
 
-// Compact idle dock — one strip row of glyph+name chips for sessions that
-// don't need attention. This is how "many agents" stays natural: cards are
-// reserved for sessions that are doing/asking something; parked ones shrink
-// to their creature + name instead of shrinking every card into unreadability.
+// Compact idle dock — TWO chip rows of glyph+name for sessions that don't
+// need attention. Cards stay reserved for sessions doing/asking something;
+// parked ones shrink to their creature + name instead of shrinking every
+// card into unreadability.
 void drawIdleDock(const Snap& s, const uint8_t* idx, uint8_t count,
                   int16_t top, int16_t bottom, int16_t left, int16_t right) {
     display.drawFastHLine(left, top, right - left, GxEPD_BLACK);
-    int16_t cy = top + 8;
-    int16_t x = left + 4;
-    textAt(x, cy + 20, "IDLE", &FreeSansBold9pt7b);
-    x += 58;
+    textAt(left + 4, top + 26, "IDLE", &FreeSansBold9pt7b);
+    const int16_t x0 = left + 62;
+    int16_t rowTopY[2] = { (int16_t)(top + 6), (int16_t)(top + 38) };
+    int row = 0;
+    int16_t x = x0;
     uint8_t shown = 0;
     for (uint8_t k = 0; k < count; k++) {
         const RowSnap& r = s.rows[idx[k]];
         char name[24]; ascii(name, sizeof(name), r.name);
         if (!name[0]) strncpy(name, "(unnamed)", sizeof(name) - 1);
         char nf[26];
-        fitText(nf, sizeof(nf), name, 110, &FreeSans9pt7b);
+        fitText(nf, sizeof(nf), name, 130, &FreeSans9pt7b);
         int16_t entryW = 26 + 6 + textWidth(nf, &FreeSans9pt7b) + 22;
-        if (x + entryW > right - 60) break;  // leave room for +N
-        drawAgentGlyph(r.agentType, x, cy, 26);
-        textAt(x + 32, cy + 20, nf, &FreeSans9pt7b);
+        if (x + entryW > right - 54) {          // leave room for +N
+            if (row == 0) { row = 1; x = x0; }  // wrap to the second chip row
+            else break;
+            if (x + entryW > right - 54) break; // single chip wider than a row
+        }
+        drawAgentGlyph(r.agentType, x, rowTopY[row], 26);
+        textAt(x + 32, rowTopY[row] + 20, nf, &FreeSans9pt7b);
         x += entryW;
         shown++;
     }
-    uint8_t hidden = (count - shown) + (s.totalSessions - s.rowCount);
+    uint8_t hidden = (uint8_t)((count - shown) + (s.totalSessions - s.rowCount));
     if (hidden > 0) {
         char more[16];
         snprintf(more, sizeof(more), "+%d", hidden);
-        textRight(right - 4, cy + 20, more, &FreeSansBold9pt7b);
+        textRight(right - 4, rowTopY[1] + 20, more, &FreeSansBold9pt7b);
     }
 }
 
@@ -722,8 +727,8 @@ void drawSessionGrid(const Snap& s) {
         nCards = nAttention < MAX_CARDS ? (nAttention > 0 ? nAttention : MAX_CARDS) : MAX_CARDS;
         if (nCards < nOrder || s.totalSessions > s.rowCount) {
             dock = true;
-            bottom = 326;
-            drawIdleDock(s, order + nCards, nOrder - nCards, 330, 366, left, right);
+            bottom = 294;
+            drawIdleDock(s, order + nCards, nOrder - nCards, 298, 366, left, right);
         }
     }
 
@@ -885,10 +890,12 @@ void render() {
     uint32_t h = contentHash(s);
     // Ticker is outside the hash (tool-event churn must not strobe the
     // panel): it earns its own redraw at most once a minute; otherwise it
-    // piggybacks on whatever refresh the hashed content triggers.
+    // piggybacks on whatever refresh the hashed content triggers. The FIRST
+    // ticker (blank → text) draws immediately — an empty bottom line for up
+    // to a minute after boot read as "timeline broken".
     bool tickerDue = s.tickerText[0] &&
                      strcmp(s.tickerText, lastTickerShown) != 0 &&
-                     (now - lastDrawMs) >= 60000;
+                     (lastTickerShown[0] == '\0' || (now - lastDrawMs) >= 60000);
     if (h == lastHash && !forceFull && !tickerDue) return;
     if (!forceFull && (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts
 

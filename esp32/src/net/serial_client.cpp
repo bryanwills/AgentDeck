@@ -76,6 +76,7 @@ static void sendDeviceInfoSerial() {
     resp["buildEpoch"] = (uint32_t)BUILD_EPOCH;
     resp["protocolRevision"] = PROTOCOL_REVISION;
     resp["wifiConfigured"] = (WiFi.SSID().length() > 0);
+    resp["timelineCount"] = g_state.timelineCount;  // debug aid, keep in sync with protocol.cpp copy
     resp["wifiConnected"] = wifiConnected();
     if (wifiConnected()) {
         resp["ip"] = wifiLocalIP();

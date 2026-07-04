@@ -287,7 +287,14 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
     const stamp = (entry: any) => {
       if (!entry || !Number.isFinite(entry.ts)) return entry;
       const d = new Date(entry.ts);
-      return { ...entry, localHm: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` };
+      return {
+        ...entry,
+        // Bound to the firmware's TimelineEntry buffers (raw[120]/detail[200])
+        // so a history seed with long chat bodies can't balloon the line.
+        raw: limitString(entry.raw, 119) ?? '',
+        detail: limitString(entry.detail, 199),
+        localHm: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+      };
     };
     if (event.type === 'timeline_event') return { ...e, entry: stamp(e.entry) };
     return { ...e, entries: Array.isArray(e.entries) ? e.entries.map(stamp) : e.entries };
