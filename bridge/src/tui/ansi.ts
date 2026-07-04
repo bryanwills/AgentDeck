@@ -1,7 +1,8 @@
 /**
  * ANSI escape code helpers for TUI dashboard rendering.
- * Raw terminal control — no external dependencies.
+ * Raw terminal control — no external dependencies beyond the shared palette.
  */
+import { State, STATE_COLORS } from '@agentdeck/shared';
 
 // ===== Cursor & Screen Control =====
 
@@ -75,15 +76,21 @@ export function sgr(code: number): string {
   return `${CSI}${code}m`;
 }
 
+/** Canonical `#rrggbb` → truecolor fg, with a 16-color SGR fallback. */
+function hexFg(hex: string, fallback: number): string {
+  if (!terminalCaps.trueColor) return sgr(fallback);
+  return fg(parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16));
+}
+
 // ===== Named Colors =====
 
 export const colors = {
-  // State colors — aligned with shared/state-colors.ts canonical palette
-  idle: sgr(32),                                                          // green  (#22c55e)
-  processing: terminalCaps.trueColor ? fg(59, 130, 246) : sgr(34),       // blue   (#3b82f6)
-  awaiting: terminalCaps.trueColor ? fg(245, 158, 11) : sgr(33),         // amber  (#f59e0b)
-  disconnected: sgr(90),                                                  // gray   (#6b7280)
-  error: sgr(31),                                                         // red
+  // State colors — derived from shared/state-colors.ts canonical palette
+  idle: hexFg(STATE_COLORS[State.IDLE], 32),                        // green
+  processing: hexFg(STATE_COLORS[State.PROCESSING], 34),            // blue
+  awaiting: hexFg(STATE_COLORS[State.AWAITING_PERMISSION], 33),     // amber
+  disconnected: hexFg(STATE_COLORS[State.DISCONNECTED], 90),        // gray
+  error: sgr(31),                                                    // red — no canonical error state color
 
   // UI colors
   header: `${BOLD}${sgr(36)}`,   // bold cyan

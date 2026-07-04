@@ -23,6 +23,7 @@ import {
   escSvgText,
 } from './svg-renderers/index.js';
 import { State, type PromptOption } from './states.js';
+import { sortSessions, foldCodexSessionsForDisplay } from './session-utils.js';
 import type { SessionInfo, SubscriptionInfo, CodexRateLimits } from './protocol.js';
 import { Brand } from './design-tokens.js';
 import { PASSIVE_OFFLINE_LABEL, OPEN_AGENTDECK_LABEL } from './connection-status.js';
@@ -571,20 +572,6 @@ export interface DeckView {
   showUsage?: boolean;
 }
 
-const AGENT_RANK: Record<string, number> = { openclaw: 0, 'claude-code': 1, 'codex-cli': 2, 'codex-app': 2, codex: 2, opencode: 3, antigravity: 4 };
-
-/** Stable order → a session keeps the same key while the set is unchanged. */
-function sortSessions(sessions: SessionInfo[]): SessionInfo[] {
-  return [...sessions].sort((a, b) => {
-    const ra = AGENT_RANK[a.agentType ?? ''] ?? 9;
-    const rb = AGENT_RANK[b.agentType ?? ''] ?? 9;
-    if (ra !== rb) return ra - rb;
-    const pa = a.projectName ?? '', pb = b.projectName ?? '';
-    if (pa !== pb) return pa < pb ? -1 : 1;
-    return (a.id ?? '') < (b.id ?? '') ? -1 : 1;
-  });
-}
-
 /** Row-major position order ("0_0","1_0",…,"4_2"). */
 function sortPositions(positions: string[]): string[] {
   return [...positions].sort((a, b) => {
@@ -645,7 +632,7 @@ function buildList(
   state: DashState, view: DeckView, slots: string[], animFrame: number, animated: boolean,
   out: Map<string, SessionDeckCell>,
 ): Map<string, SessionDeckCell> {
-  const sessions = sortSessions(state.allSessions);
+  const sessions = sortSessions(foldCodexSessionsForDisplay(state.allSessions));
 
   // Pin the trailing keys to global usage gauges (opt-in, water-tank style). On
   // the D200H these land just left of the native clock widget; on classic Stream

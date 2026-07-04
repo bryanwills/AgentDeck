@@ -9,6 +9,13 @@ import { isLocalConnection, validateToken } from './auth.js';
 import type { BridgeEvent } from './types.js';
 import type { VoiceManager } from './voice.js';
 import { onFrameRendered, offFrameRendered, setPreviewFps, getPreviewFps } from './pixoo/pixoo-bridge.js';
+import { STATE_COLORS } from '@agentdeck/shared';
+
+// Canonical state→color map for the inline status pages, with UPPERCASE
+// aliases since the pages historically key on upper-cased state names.
+const STATE_COLORS_JS = JSON.stringify(Object.fromEntries(
+  Object.entries(STATE_COLORS).flatMap(([k, v]) => [[k, v], [k.toUpperCase(), v]]),
+));
 
 /** Minimal SSE client handle */
 interface SseClient {
@@ -459,7 +466,7 @@ h1{font-size:20px;color:#94a3b8;margin-bottom:16px}
 <script>
 const es=new EventSource("${sseUrl}");
 const $=id=>document.getElementById(id);
-const colors={IDLE:'#22c55e',PROCESSING:'#3b82f6',AWAITING_PERMISSION:'#f59e0b',AWAITING_OPTION:'#f59e0b',AWAITING_DIFF:'#f59e0b',DISCONNECTED:'#ef4444'};
+const colors=${STATE_COLORS_JS};
 es.addEventListener('state_update',e=>{
   const d=JSON.parse(e.data);
   const s=d.state||'DISCONNECTED';
@@ -639,9 +646,7 @@ document.querySelectorAll('.fps-btn').forEach(btn=>{
 });
 
 // State colors
-const stateColors={IDLE:'#22c55e',PROCESSING:'#3b82f6',
-  AWAITING_OPTION:'#f59e0b',AWAITING_PERMISSION:'#f59e0b',AWAITING_DIFF:'#f59e0b',
-  DISCONNECTED:'#ef4444'};
+const stateColors=${STATE_COLORS_JS};
 
 // SSE for state info
 const es=new EventSource('/sse');

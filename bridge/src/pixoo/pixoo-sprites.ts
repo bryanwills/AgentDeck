@@ -25,6 +25,7 @@
 
 import type { Camera } from './pixoo-camera.js';
 import { worldToScreen, isVisible } from './pixoo-camera.js';
+import { State, STATE_COLORS } from '@agentdeck/shared';
 
 // ===== Cell Types (shared with ESP32/Android) =====
 const EMPTY = 0;
@@ -386,6 +387,11 @@ export function creatureCellSize(zoom: number, canvasW: number, cols: number): n
 
 // ===== Colors — Android-matching darker palette =====
 type RGB = readonly [number, number, number];
+
+/** Canonical `#rrggbb` → RGB tuple (LED frame buffers take tuples, not hex). */
+function hexRgb(hex: string): RGB {
+  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+}
 export interface OctopusPalette {
   body: RGB;
   arm: RGB;
@@ -496,11 +502,11 @@ export const COLORS = {
   tankWall:     [0x06, 0x0A, 0x10] as const,
   tankWallEdge: [0x10, 0x14, 0x1C] as const,
 
-  // State shimmer
-  stateIdle:       [0x22, 0xC5, 0x5E] as const,
-  stateProcessing: [0x3B, 0x82, 0xF6] as const,
-  stateAwaiting:   [0xF5, 0x9E, 0x0B] as const,
-  stateError:      [0xEF, 0x44, 0x44] as const,
+  // State shimmer — derived from the canonical shared palette
+  stateIdle:       hexRgb(STATE_COLORS[State.IDLE]),
+  stateProcessing: hexRgb(STATE_COLORS[State.PROCESSING]),
+  stateAwaiting:   hexRgb(STATE_COLORS[State.AWAITING_PERMISSION]),
+  stateError:      [0xEF, 0x44, 0x44] as const, // red — no canonical error state color exists
 
   white: [0xFF, 0xFF, 0xFF] as const,
   black: [0x00, 0x00, 0x00] as const,
