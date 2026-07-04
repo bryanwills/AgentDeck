@@ -97,6 +97,11 @@ export interface SerialConnection {
   readBuf: string;
   connected: boolean;
   deviceInfo: { board?: string; version?: string; buildHash?: string; buildEpoch?: number; wifiConfigured?: boolean; wifiConnected?: boolean } | null;
+  /** True once a device_info arrived on THIS connection (vs. cache-seeded).
+   * Identify retries key off this — a cache-seeded deviceInfo must not stop
+   * re-requests, or a reflashed board keeps its stale buildHash in /devices
+   * until the next reboot-while-attached. */
+  deviceInfoFresh: boolean;
   provisionSent: boolean;
   connectedAt: number;
   lastReadAt: number;  // Timestamp of last successful read from ESP32
@@ -498,13 +503,17 @@ export function handleSerialLine(conn: SerialConnection, line: string): void {
           wifiConfigured: msg.wifiConfigured,
           wifiConnected: msg.wifiConnected,
         };
+        conn.deviceInfoFresh = true;
         if (conn.deviceInfo.board) {
           lastKnownDeviceInfoByPort.set(conn.port, conn.deviceInfo);
           persistDeviceInfoCache();
         }
-      } else if (!conn.deviceInfo &&
+      } else if (!conn.deviceInfoFresh &&
                  conn.deviceInfoRequestsSent < DEVICE_INFO_MAX_REQUESTS &&
                  Date.now() - conn.lastDeviceInfoRequestAt >= DEVICE_INFO_READ_RETRY_MS) {
+        // Retry until a device_info arrives on THIS connection — the cache
+        // seed keeps /devices populated meanwhile but must not silence the
+        // re-identify (a lost reply or reflashed board would stay stale).
         sendDeviceInfoRequest(conn);
       }
 
@@ -580,7 +589,8 @@ async function openPort(port: string): Promise<SerialConnection | null> {
 
     const conn: SerialConnection = {
       port, fd, stream, reader: null, readBuf: '',
-      connected: true, deviceInfo: lastKnownDeviceInfoByPort.get(port) ?? null, provisionSent: false,
+      connected: true, deviceInfo: lastKnownDeviceInfoByPort.get(port) ?? null,
+      deviceInfoFresh: false, provisionSent: false,
       connectedAt: Date.now(),
       lastReadAt: 0,
       lastWriteAt: Date.now(),

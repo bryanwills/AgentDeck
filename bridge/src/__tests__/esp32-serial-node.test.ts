@@ -108,6 +108,7 @@ describe('handleSerialLine (source)', () => {
       readBuf: '',
       connected: true,
       deviceInfo: null,
+      deviceInfoFresh: false,
       provisionSent: false,
       connectedAt: Date.now(),
       lastReadAt: Date.now(),
