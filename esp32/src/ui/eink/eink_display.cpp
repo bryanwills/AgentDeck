@@ -17,7 +17,6 @@
 #include "net/serial_client.h"
 #include "net/ws_client.h"
 #include "ui/terrarium/creature_glyphs_generated.h"
-#include "ui/eink/logo_glyph_generated.h"
 
 namespace {
 
@@ -213,6 +212,56 @@ void fitText(char* out, size_t outLen, const char* s, int16_t maxW, const GFXfon
     }
 }
 
+// ===== AgentDeck product mark — aquarium dome over a button deck =====
+// Geometry mirrors apple/AgentDeck/UI/MenuBar/AgentDeckLogo.swift (unit space
+// 0..24) — the canonical current mark shared by the menubar icon and app
+// icon silhouette. The old AD-shield mark is retired everywhere; do not
+// resurrect it here.
+
+void stampAt(float x, float y, int r) {
+    if (r <= 0) display.drawPixel((int)(x + 0.5f), (int)(y + 0.5f), inkColor);
+    else display.fillCircle((int)(x + 0.5f), (int)(y + 0.5f), r, inkColor);
+}
+
+void strokeBezier(float x0, float y0, float cx1, float cy1,
+                  float cx2, float cy2, float x1, float y1, int r) {
+    const int STEPS = 28;
+    for (int i = 0; i <= STEPS; i++) {
+        float t = (float)i / STEPS, u = 1.0f - t;
+        float bx = u*u*u*x0 + 3*u*u*t*cx1 + 3*u*t*t*cx2 + t*t*t*x1;
+        float by = u*u*u*y0 + 3*u*u*t*cy1 + 3*u*t*t*cy2 + t*t*t*y1;
+        stampAt(bx, by, r);
+    }
+}
+
+void drawAgentDeckMark(int16_t x, int16_t y, int size) {
+    float s = size / 24.0f;
+    int stroke = max(1, (int)(0.8f * s));
+    // Glass dome
+    strokeBezier(x + 4.7f*s, y + 12.8f*s, x + 5.3f*s, y + 4.9f*s,
+                 x + 18.7f*s, y + 4.9f*s, x + 19.3f*s, y + 12.8f*s, stroke);
+    // Waterline (thinner)
+    strokeBezier(x + 6.1f*s, y + 11.2f*s, x + 8.8f*s, y + 12.5f*s,
+                 x + 15.2f*s, y + 12.5f*s, x + 17.9f*s, y + 11.2f*s,
+                 max(1, (int)(0.5f * s)));
+    // Bubbles (position = center in the Swift source)
+    display.fillCircle(x + (int)(9.6f*s), y + (int)(9.0f*s), max(1, (int)(0.95f*s)), inkColor);
+    display.fillCircle(x + (int)(14.8f*s), y + (int)(8.2f*s), max(1, (int)(0.6f*s)), inkColor);
+    // Deck base — rounded-rect stroke (thickness via inset passes)
+    int dx = x + (int)(3.4f*s), dy = y + (int)(12.2f*s);
+    int dw = (int)(17.2f*s), dh = (int)(7.8f*s), rr = max(2, (int)(2.2f*s));
+    int passes = max(1, (int)(1.2f * s + 0.5f) / 2 + 1);
+    for (int t = 0; t < passes; t++)
+        display.drawRoundRect(dx + t, dy + t, dw - 2*t, dh - 2*t, max(1, rr - t), inkColor);
+    // Three deck keys — middle emphasized (filled), outers hollow, echoing
+    // the menubar mark's opacity accents
+    int kw = max(2, (int)(3.1f*s)), kh = max(2, (int)(2.0f*s)), kr = max(1, (int)(1.0f*s));
+    int ky = y + (int)(15.4f*s);
+    display.drawRoundRect(x + (int)(6.5f*s), ky, kw, kh, kr, inkColor);
+    display.fillRoundRect(x + (int)(10.4f*s), ky, kw, kh, kr, inkColor);
+    display.drawRoundRect(x + (int)(14.3f*s), ky, kw, kh, kr, inkColor);
+}
+
 // Threshold-scale a 64×64 A8 mask into a silhouette in the current ink color.
 void drawMask64(int16_t x, int16_t y, const uint8_t* a8, int size) {
     for (int oy = 0; oy < size; oy++) {
@@ -277,8 +326,9 @@ void drawStateMarker(int16_t x, int16_t y, int16_t sz, const char* state) {
 // ===== Screens =====
 
 void drawBrandHeader(const Snap& s) {
-    // AD shield line-art + wordmark — same brand lockup the LVGL splash shows.
-    drawMask64(14, 6, LogoGlyph::AD_SHIELD_A8, 52);
+    // Dome-over-deck product mark + wordmark — the same lockup as the
+    // menubar icon and app icon silhouette.
+    drawAgentDeckMark(12, 4, 56);
     textAt(78, 44, "AgentDeck", &FreeSansBold18pt7b);
 
     // Link status chip, right-aligned
@@ -464,7 +514,7 @@ void drawSessionGrid(const Snap& s) {
     const int16_t top = 78, bottom = 372, left = 12, right = W - 12;
     if (s.rowCount == 0) {
         // Empty state — connected but no sessions
-        drawMask64(W / 2 - 32, 150, LogoGlyph::AD_SHIELD_A8, 64);
+        drawAgentDeckMark(W / 2 - 36, 140, 72);
         textAt(W / 2 - textWidth("no active sessions", &FreeSansBold12pt7b) / 2, 260,
                "no active sessions", &FreeSansBold12pt7b);
         const char* hint = "start claude / codex / opencode in a workspace";
@@ -501,7 +551,7 @@ void drawSearching(const Snap& s) {
     display.setTextColor(GxEPD_BLACK);
     setInk(false);
     drawBrandHeader(s);
-    drawMask64(W / 2 - 40, 140, LogoGlyph::AD_SHIELD_A8, 80);
+    drawAgentDeckMark(W / 2 - 44, 130, 88);
     const char* msg = s.wifiUp || s.serialUp ? "searching for AgentDeck daemon..."
                                              : "no WiFi — connect USB or provision WiFi";
     textAt(W / 2 - textWidth(msg, &FreeSansBold12pt7b) / 2, 268, msg, &FreeSansBold12pt7b);
@@ -516,7 +566,7 @@ void drawSleep() {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     setInk(false);
-    drawMask64(W / 2 - 26, 190, LogoGlyph::AD_SHIELD_A8, 52);
+    drawAgentDeckMark(W / 2 - 28, 180, 56);
     textAt(W / 2 - textWidth("asleep", &FreeSansBold12pt7b) / 2, 282, "asleep", &FreeSansBold12pt7b);
     // crescent moon
     display.fillCircle(W / 2 - 70, 274, 11, GxEPD_BLACK);
