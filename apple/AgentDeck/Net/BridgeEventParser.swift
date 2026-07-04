@@ -130,27 +130,6 @@ enum BridgeEventParser {
             )
         }
 
-        if let trmnl = raw["trmnl"] as? [String: Any] {
-            let rows = trmnl["telemetry"] as? [[String: Any]] ?? []
-            let devices = rows.map { row in
-                TrmnlDeviceHealth(
-                    mac: row["mac"] as? String ?? "",
-                    width: row["width"] as? Int,
-                    height: row["height"] as? Int,
-                    rssi: (row["rssi"] as? Double) ?? (row["rssi"] as? Int).map(Double.init),
-                    batteryVoltage: (row["batteryVoltage"] as? Double) ?? (row["battery_voltage"] as? Double),
-                    secondsSinceSeen: row["secondsSinceSeen"] as? Int ?? row["seconds_since_seen"] as? Int,
-                    stale: row["stale"] as? Bool ?? false
-                )
-            }
-            health.trmnl = TrmnlHealth(
-                deviceCount: trmnl["deviceCount"] as? Int ?? trmnl["device_count"] as? Int ?? devices.count,
-                staleDeviceCount: trmnl["staleDeviceCount"] as? Int ?? trmnl["stale_device_count"] as? Int ?? devices.filter(\.stale).count,
-                currentRefreshRate: trmnl["currentRefreshRate"] as? Int ?? trmnl["current_refresh_rate"] as? Int ?? trmnl["refreshRate"] as? Int ?? 180,
-                telemetry: devices
-            )
-        }
-
         if let sd = raw["streamDeck"] as? [String: Any] ?? raw["stream_deck"] as? [String: Any] {
             var sdDevices: [StreamDeckDeviceInfo] = []
             let arr = sd["devices"] as? [[String: Any]]

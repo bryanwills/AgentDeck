@@ -198,7 +198,6 @@ final class DaemonServer {
     private var displaySettingsObserver: NSObjectProtocol?
     private var adbModule: AdbModule?
     private var d200hModule: D200hHidModule?
-    private var trmnlModule: TrmnlModule?
 
     // APME
     private var apmeStore: ApmeStore?
@@ -400,9 +399,6 @@ final class DaemonServer {
     /// every ESP32 board from the Dashboard USB serial section even
     /// though `/health` HTTP showed them correctly via the async path.
     private var cachedSerialStatus: [String: Any]?
-    /// TRMNL BYOS polls mutate actor-isolated enrollment/telemetry. Cache a
-    /// snapshot so synchronous state_update.moduleHealth can still expose it.
-    private var cachedTrmnlStatus: [String: Any]?
 
     /// Stream Deck plugin self-registration. The Elgato plugin sends a
     /// `client_register` WS command right after connect with the physical
@@ -496,11 +492,11 @@ final class DaemonServer {
 
     // App Nap guard. A backgrounded menubar (LSUIElement) daemon with the display
     // asleep is a prime App Nap target — macOS suspends the process and the
-    // NWListener stops accepting, so a TRMNL panel's periodic poll (or any device
-    // request) times out and the firmware flips to its "WiFi connected / not
-    // responding" screen. Holding a userInitiatedAllowingIdleSystemSleep activity
-    // keeps the listener responsive while the Mac is awake; the trailing
-    // …AllowingIdleSystemSleep still lets the Mac sleep normally (no laptop-drain).
+    // NWListener stops accepting, so a device request (Stream Deck plugin, iOS
+    // companion, serial/Pixoo push) times out and the surface goes stale.
+    // Holding a userInitiatedAllowingIdleSystemSleep activity keeps the listener
+    // responsive while the Mac is awake; the trailing …AllowingIdleSystemSleep
+    // still lets the Mac sleep normally (no laptop-drain).
     private var backgroundActivity: NSObjectProtocol?
 
     // Polling tasks
@@ -1061,11 +1057,11 @@ final class DaemonServer {
         monitor.start(queue: DispatchQueue(label: "dev.agentdeck.networkmonitor"))
 
         // 15. Hold a process activity so App Nap can't suspend the listener while the
-        // app is backgrounded + the display is asleep (pull-only devices like the
-        // TRMNL panel keep polling on their own clock; a napped daemon = WIFI_FAILED).
+        // app is backgrounded + the display is asleep (dashboard clients and device
+        // modules keep talking to the listener; a napped daemon drops them).
         backgroundActivity = ProcessInfo.processInfo.beginActivity(
             options: .userInitiatedAllowingIdleSystemSleep,
-            reason: "Serving local dashboard devices (HTTP/WS, TRMNL e-ink polls)")
+            reason: "Serving local dashboard devices (HTTP/WS)")
 
         DaemonLogger.shared.info("Daemon running on port \(port) — all modules wired")
     }
@@ -1158,12 +1154,6 @@ final class DaemonServer {
             Task { await timebox.reloadFromSettingsExternal() }
         }
 
-        // TRMNL (WiFi e-ink BYOS panel — native HTTP + CoreGraphics, App Store legal).
-        // No hardware probing: a panel pointed at this daemon's HTTP port auto-enrolls
-        // and pulls a server-rendered 1-bit PNG sized to the resolution it reports.
-        let trmnl = TrmnlModule()
-        self.trmnlModule = trmnl
-        moduleManager.register(trmnl)
         // Display-sleep dim setting changed: refresh cache and, if the display
         // is already asleep, re-broadcast the current state so devices re-dim
         // to the new level/mode without waiting for a wake/sleep cycle.
@@ -1202,7 +1192,6 @@ final class DaemonServer {
         // D200H direct-HID is retired (enableD200hDirectHID == false), so this is
         // nil and the broadcast fan-out below no-ops — the Ulanzi plugin drives it.
         let d200hRef = self.d200hModule
-        let trmnlRef = trmnl
         await wsServer.onBroadcast { [weak self] data in
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
@@ -1240,9 +1229,6 @@ final class DaemonServer {
             let timeboxEventBox = SendableDict(json)
             Task { await timeboxRef.handleEvent(timeboxEventBox.value) }
             d200hRef?.handleBroadcast(json)
-            // TRMNL module is an actor — same SendableDict boxing.
-            let trmnlEventBox = SendableDict(json)
-            Task { await trmnlRef.handleEvent(trmnlEventBox.value) }
         }
         DaemonLogger.shared.info("startDeviceModules: wsServer.onBroadcast done")
 
@@ -1458,27 +1444,6 @@ final class DaemonServer {
             return await self.pixooPreviewResponse()
         }
 
-        // TRMNL BYOS endpoints (WiFi e-ink panel pulls a server-rendered dashboard).
-        await httpServer.get("/api/setup") { [weak self] req in
-            await self?.trmnlSetupResponse(req) ?? .notFound
-        }
-        await httpServer.get("/api/display") { [weak self] req in
-            await self?.trmnlDisplayResponse(req) ?? .notFound
-        }
-        await httpServer.post("/api/log") { req in
-            // The panel only POSTs here when something went wrong on its side
-            // (failed poll, image timeout) — these lines ARE the root-cause
-            // record for "not responding" incidents, so log them (truncated).
-            let mac = req.headers["id"] ?? "?"
-            let body = req.body.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-            let line = body.replacingOccurrences(of: "\n", with: " ").prefix(600)
-            DaemonLogger.shared.info("[TRMNL] device log from \(mac): \(line)")
-            return HTTPServer.HTTPResponse(status: 204, headers: [:], body: nil)
-        }
-        await httpServer.get("/trmnl/image/*") { [weak self] req in
-            await self?.trmnlImageResponse(req) ?? .notFound
-        }
-
         // APME routes
         if let store = apmeStore {
             await ApmeHttpRoutes.register(on: httpServer, store: store)
@@ -1533,59 +1498,6 @@ final class DaemonServer {
             headers: ["Content-Type": "text/html; charset=utf-8"],
             body: Data(html.utf8)
         )
-    }
-
-    // MARK: - TRMNL BYOS handlers
-
-    private func trmnlBase(_ req: HTTPServer.HTTPRequest) -> String {
-        "http://\(req.headers["host"] ?? "localhost")"
-    }
-
-    private func trmnlSetupResponse(_ req: HTTPServer.HTTPRequest) async -> HTTPServer.HTTPResponse {
-        guard let trmnl = trmnlModule else { return .notFound }
-        let r = await trmnl.setup(headers: req.headers, base: trmnlBase(req))
-        cachedTrmnlStatus = await trmnl.statusSnapshot().value
-        return HTTPServer.HTTPResponse(
-            status: r.status,
-            headers: ["Content-Type": "application/json", "Cache-Control": "no-store"],
-            body: r.body
-        )
-    }
-
-    private func trmnlDisplayResponse(_ req: HTTPServer.HTTPRequest) async -> HTTPServer.HTTPResponse {
-        guard let trmnl = trmnlModule else { return .notFound }
-        let r = await trmnl.display(headers: req.headers, base: trmnlBase(req))
-        cachedTrmnlStatus = await trmnl.statusSnapshot().value
-        // A successful poll is the heartbeat — if the panel shows "not responding"
-        // yet this line never appears, the request never reached the daemon (App Nap
-        // / network), not a render fault. Cheap and only at debug level.
-        DaemonLogger.shared.debug("TRMNL", "/api/display id=\(req.headers["id"] ?? "?") → http \(r.status)")
-        return HTTPServer.HTTPResponse(
-            status: r.status,
-            headers: ["Content-Type": "application/json", "Cache-Control": "no-store"],
-            body: r.body
-        )
-    }
-
-    private func trmnlImageResponse(_ req: HTTPServer.HTTPRequest) async -> HTTPServer.HTTPResponse {
-        guard let trmnl = trmnlModule else { return .notFound }
-        let key = Self.trmnlImageKey(req.path) ?? "800x480"
-        guard let png = await trmnl.image(key: key) else { return .text("No frame", status: 204) }
-        return HTTPServer.HTTPResponse(
-            status: 200,
-            headers: ["Content-Type": "image/png", "Cache-Control": "no-store"],
-            body: png
-        )
-    }
-
-    /// Extract the "<W>x<H>" key from /trmnl/image/<W>x<H>-<hash>.png (nil for legacy URLs).
-    nonisolated private static func trmnlImageKey(_ path: String) -> String? {
-        guard let last = path.split(separator: "/").last,
-              let dash = last.firstIndex(of: "-") else { return nil }
-        let key = String(last[last.startIndex..<dash])
-        let parts = key.split(separator: "x")
-        guard parts.count == 2, Int(parts[0]) != nil, Int(parts[1]) != nil else { return nil }
-        return key
     }
 
     private func streamPixooFrames(on conn: HTTPServer.StreamConnection) async {
@@ -1932,17 +1844,6 @@ final class DaemonServer {
                 "connected": d200h["connected"] as Any,
                 "hasConsumerDevice": d200h["hasConsumerDevice"] as Any,
                 "hasKeyboardDevice": d200h["hasKeyboardDevice"] as Any,
-            ])
-        }
-
-        if let trmnlModule {
-            let trmnl = await trmnlModule.statusSnapshot().value
-            devices.append([
-                "type": "trmnl",
-                "deviceCount": trmnl["deviceCount"] as? Int ?? 0,
-                "staleDeviceCount": trmnl["staleDeviceCount"] as? Int ?? 0,
-                "currentRefreshRate": trmnl["currentRefreshRate"] as? Int ?? 180,
-                "telemetry": trmnl["telemetry"] as? [[String: Any]] ?? [],
             ])
         }
 
@@ -3702,9 +3603,6 @@ final class DaemonServer {
                 if let snap = await self.serialStatusSnapshot() {
                     await MainActor.run { self.cachedSerialStatus = snap }
                 }
-                if let snap = await self.trmnlStatusSnapshot() {
-                    await MainActor.run { self.cachedTrmnlStatus = snap }
-                }
             }
         }
 
@@ -4393,12 +4291,6 @@ final class DaemonServer {
     }
 
     @MainActor
-    func trmnlStatusSnapshot() async -> [String: Any]? {
-        guard let trmnlModule else { return nil }
-        return await trmnlModule.statusSnapshot().value
-    }
-
-    @MainActor
     private func buildModuleHealth() async -> SendableDict {
         var gateway: [String: Any] = [
             "available": cachedGatewayAvailable,
@@ -4425,11 +4317,6 @@ final class DaemonServer {
         }
         if let timeboxModule {
             modules["timebox"] = timeboxModule.statusSnapshot()
-        }
-        if let trmnlModule {
-            let snap = await trmnlModule.statusSnapshot().value
-            cachedTrmnlStatus = snap
-            modules["trmnl"] = snap
         }
         if serialModule != nil {
             // HTTP /health is used by tiny hook scripts and must answer even
@@ -4563,16 +4450,6 @@ final class DaemonServer {
         if let pixoo = pixooModule { modules["pixoo"] = pixoo.statusSnapshot() }
         if let idotMatrix = idotMatrixModule { modules["idotmatrix"] = idotMatrix.statusSnapshot() }
         if let timebox = timeboxModule { modules["timebox"] = timebox.statusSnapshot() }
-        if let trmnl = cachedTrmnlStatus {
-            modules["trmnl"] = trmnl
-        } else if trmnlModule != nil {
-            modules["trmnl"] = [
-                "enabled": true,
-                "autoRegister": true,
-                "deviceCount": 0,
-                "telemetry": [] as [Any],
-            ] as [String: Any]
-        }
         // SerialModule.statusSnapshot() is async — read the 5s-polled
         // cache so Dashboard USB serial section sees connected boards
         // without us having to awaitly-pre-fetch on every broadcast.
@@ -5338,7 +5215,7 @@ final class DaemonServer {
     }
 
     /// Compact "what is this agent doing right now" one-liner — a single shared
-    /// source so glance surfaces (XTeink X3 rows, TRMNL list) all render the same
+    /// source so glance surfaces (XTeink X3 rows, device lists) all render the same
     /// text instead of each synthesizing its own. Awaiting sessions surface the
     /// pending question; working sessions surface the current tool. Returns nil
     /// when there's nothing meaningful to show (callers omit the line).

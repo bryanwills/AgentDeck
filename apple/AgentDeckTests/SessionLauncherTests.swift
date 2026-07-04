@@ -53,20 +53,6 @@ final class SessionLauncherTests: XCTestCase {
                     ],
                 ],
             ],
-            "trmnl": [
-                "deviceCount": 1,
-                "currentRefreshRate": 180,
-                "telemetry": [
-                    [
-                        "mac": "AA:BB:CC:DD:EE:FF",
-                        "width": 800,
-                        "height": 480,
-                        "rssi": -62,
-                        "secondsSinceSeen": 12,
-                        "stale": false,
-                    ],
-                ],
-            ],
             "serial": [
                 "connections": [
                     [
@@ -85,9 +71,6 @@ final class SessionLauncherTests: XCTestCase {
         XCTAssertEqual(summary.d200h?.status, .connected)
         XCTAssertEqual(summary.pixoo.count, 1)
         XCTAssertEqual(summary.pixoo.first?.status, .connected)
-        XCTAssertEqual(summary.trmnl.count, 1)
-        XCTAssertEqual(summary.trmnl.first?.status, .connected)
-        XCTAssertEqual(summary.trmnl.first?.kind, .trmnl)
         XCTAssertEqual(summary.serial.count, 1)
         XCTAssertEqual(summary.serial.first?.status, .connected)
         XCTAssertEqual(summary.adb.count, 2)

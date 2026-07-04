@@ -24,7 +24,7 @@
 
 **Stop Chatting. Start Steering.**
 
-AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **16 display surfaces simultaneously** — tablets, e-ink readers (Android + TRMNL BYOS panels), phones, ESP32 modules, LED matrices, HID decks, and terminals.
+AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **16 display surfaces simultaneously** — tablets, e-ink readers (Android + the InkDeck ESP32 panel), phones, ESP32 modules, LED matrices, HID decks, and terminals.
 
 > One bridge. 16 surfaces. Steer your AI — without leaving your keyboard flow.
 
@@ -73,7 +73,7 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 - [Ulanzi TC001 LED Matrix](#ulanzi-tc001-led-matrix)
 - [Pixoo64 LED Matrix](#pixoo64-led-matrix)
 - [Divoom Timebox Mini](#divoom-timebox-mini)
-- [TRMNL e-ink (BYOS)](#trmnl-e-ink-byos)
+- [InkDeck e-ink](#inkdeck-e-ink)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
 - [Uninstall](#uninstall)
@@ -155,7 +155,7 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 | 13 | **iDotMatrix 32×32** | 32×32 RGB AMOLED pixel display — BLE |
 | 14 | **Divoom Timebox Mini** | 11×11 RGB LED — BLE (App Store + CLI) |
 | 15 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote |
-| 16 | **TRMNL e-ink (BYOS)** | WiFi e-ink panel (800×480 OG) — pull-only BYOS: panel polls the daemon, downloads a server-rendered 1-bit PNG status frame |
+| 16 | **InkDeck e-ink** | 7.5" 800×480 1-bit e-ink (XIAO ESP32-S3 Plus + UC8179 panel) — custom AgentDeck ESP32 firmware (in development), WiFi/WS to the daemon, partial-refresh dashboard |
 
 > Full hardware/OS spec sheet (SoC, resolution, flash, SDK, deployment targets) for every surface: **[docs/hardware-compatibility.md](docs/hardware-compatibility.md)** (visual view: [docs/hardware/index.html](docs/hardware/index.html)).
 
@@ -192,9 +192,9 @@ Claude Code Hooks ─ HTTP ───►│  Output Parser → State Machine    �
                               └──────────────────────────────────┘
 ```
 
-The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to all 16 surfaces. Local clients are auto-trusted; LAN clients authenticate with a token stored in the AgentDeck data directory (`~/.agentdeck/auth-token` for Node CLI / unsigned dev builds, `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/auth-token` for the Mac App Store build — routed through `AgentDeckPaths.swift`). Interactive surfaces (Stream Deck, D200H, Android, Apple) can control the agent; monitoring surfaces (Pixoo, Timebox, TUI, ESP32, TRMNL e-ink) display state.
+The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to all 16 surfaces. Local clients are auto-trusted; LAN clients authenticate with a token stored in the AgentDeck data directory (`~/.agentdeck/auth-token` for Node CLI / unsigned dev builds, `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/auth-token` for the Mac App Store build — routed through `AgentDeckPaths.swift`). Interactive surfaces (Stream Deck, D200H, Android, Apple) can control the agent; monitoring surfaces (Pixoo, Timebox, TUI, ESP32, InkDeck e-ink) display state.
 
-On macOS, the AgentDeck Dashboard SwiftUI app ships with a full **in-process Swift daemon** (63 files, ~32,000 LOC) that re-implements the Node.js bridge — mDNS, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix/TRMNL e-ink), Gateway proxy, and WebSocket server. Installing the macOS app gives you the full bridge without Node.js. The `agentdeck` CLI remains the canonical path for Claude Code / Codex / OpenCode PTY sessions.
+On macOS, the AgentDeck Dashboard SwiftUI app ships with a full **in-process Swift daemon** (63 files, ~32,000 LOC) that re-implements the Node.js bridge — mDNS, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix), Gateway proxy, and WebSocket server. Installing the macOS app gives you the full bridge without Node.js. The `agentdeck` CLI remains the canonical path for Claude Code / Codex / OpenCode PTY sessions.
 
 ---
 
@@ -454,7 +454,6 @@ The same pattern passes through any other flag the agent accepts — for instanc
 | `agentdeck timebox remove <address>` | Remove a Timebox device |
 | `agentdeck timebox test [target]` | Send one frame (BLE) |
 | `agentdeck timebox sync [target]` | Run foreground Timebox frame sync (BLE) |
-| `agentdeck trmnl` | Print the BYOS server URL + enrolled TRMNL panels + health |
 | `agentdeck wifi-setup` | ESP32 WiFi provisioning (serial) |
 
 ---
@@ -609,7 +608,7 @@ Monitor and control your AI agents from iPhone, iPad, or Mac — a native SwiftU
   <img src="docs/media/ipad-iphone-closeup.jpg" width="720" alt="Apple dashboard — iPad and iPhone showing terrarium with pixel art creatures and HUD overlay">
 </p>
 
-The Apple app is a SwiftUI multiplatform app that connects to the bridge on iOS/iPadOS, and **on macOS ships with a full in-process Swift daemon** (63 files, ~32,000 LOC) — mDNS, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix/TRMNL e-ink), Gateway proxy, and WebSocket server — so the macOS build works standalone without Node.js. You can still use the `agentdeck` CLI alongside it for Claude Code / Codex / OpenCode PTY sessions; the app's daemon auto-detects and defers to a running CLI daemon on the same port.
+The Apple app is a SwiftUI multiplatform app that connects to the bridge on iOS/iPadOS, and **on macOS ships with a full in-process Swift daemon** (63 files, ~32,000 LOC) — mDNS, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix), Gateway proxy, and WebSocket server — so the macOS build works standalone without Node.js. You can still use the `agentdeck` CLI alongside it for Claude Code / Codex / OpenCode PTY sessions; the app's daemon auto-detects and defers to a running CLI daemon on the same port.
 
 ### Three-Tab Navigation
 
@@ -804,8 +803,9 @@ Compact WiFi-connected displays for always-on agent monitoring.
 | **ESP32-C6 1.47"** | ESP32-C6 (RISC-V) | Waveshare ST7789 TFT | 172×320 |
 | **IPS 10.1"** | ESP32-P4 + C6 | Guition JD9365 MIPI-DSI | 800×1280 |
 | **Ulanzi TC001** | ESP32 | 8×32 WS2812B RGB LED matrix | 256 pixels |
+| **InkDeck** | XIAO ESP32-S3 Plus | Seeed 7.5" OG e-ink (UC8179) | 800×480 |
 
-> The TRMNL e-ink panel is **not** an ESP32 firmware target — it's a commercial WiFi e-ink device driven over the HTTP BYOS pull contract. See [TRMNL e-ink](#trmnl-e-ink-byos) below.
+> **InkDeck** (7.5" e-ink) is a Seeed TRMNL OG DIY Kit running custom AgentDeck firmware — see [InkDeck e-ink](#inkdeck-e-ink) below. Its firmware is still in development.
 
 ### Setup
 
@@ -860,23 +860,15 @@ Manage devices with `agentdeck timebox {scan|add|list|remove|test|sync}`. `scan`
 
 ---
 
-## TRMNL e-ink (BYOS)
+## InkDeck e-ink
 
-A battery-powered WiFi **e-ink status panel** that mirrors a compact AgentDeck dashboard — built on TRMNL's official **BYOS** (Bring Your Own Server) contract, so AgentDeck *is* the server.
+A wired (USB-powered) **7.5" e-ink status panel** that mirrors a compact AgentDeck dashboard. The hardware is a **Seeed TRMNL 7.5" OG DIY Kit** — a XIAO ESP32-S3 Plus wired to an 800×480 monochrome ePaper panel (GDEY075T7 / UC8179).
 
-Unlike the ESP32 displays (which AgentDeck pushes over serial/WiFi), TRMNL is **pull-only**: the panel stores one fixed server URL and polls `/api/setup` + `/api/display` on its own deep-sleep schedule, then downloads a server-rendered **1-bit PNG** frame. The daemon auto-enrolls panels on first poll (no MAC entry) and renders at the device-reported resolution.
+InkDeck runs **custom AgentDeck ESP32 firmware** (PlatformIO env `inkdeck`) and, like every other ESP32 board, connects to the daemon over WiFi WebSocket — the daemon pushes 1-bit dashboard frames and the panel does fast partial refreshes (~0.3s) with periodic full refreshes. This replaces the former "TRMNL" commercial BYOS pull integration, which was removed; stock/commercial TRMNL panels are no longer supported.
 
-```bash
-agentdeck trmnl     # prints http://<LAN-IP>:9120 + enrolled panels + health
-```
+> **Status: firmware in development.** The `inkdeck` PlatformIO env and its rendering/refresh behavior are being built under `esp32/`; the panel is not yet driven end-to-end.
 
-Set that one URL as the panel's custom/BYOS server URL. **Run exactly one hub on a stable `LAN-IP:9120`** — either the App Store macOS app's in-process Swift daemon or the Node CLI daemon. The App Store app is a complete TRMNL BYOS hub; the CLI daemon adds developer-session and OAuth quota relay when you need it.
-
-- **Adaptive cadence** — refreshes faster (default 60s) only while a session is **AWAITING** the user; otherwise slower (default 180s, floor 30s). A deep-sleep panel can't be pushed and each wake flashes the screen + costs battery, so "working" does not speed it up.
-- **Information-dense layout** — canonical brand-creature icons per agent, session goal/description (extracted from the first user prompt), subscription + reset time in the header, adaptive row heights packing 6–9 sessions, with CJK font fallback. If quota is unavailable, the footer collapses to hub status instead of reserving space for empty usage gauges.
-- **Two implementations of the same contract** — Node `bridge/src/trmnl/{byos-server,frame-cache,trmnl-settings,trmnl-telemetry}.ts`; App Store Swift daemon `apple/.../Daemon/Modules/Trmnl{Module,ImageRenderer,Settings}.swift` (CoreGraphics + CoreText → 1-bit PNG, persisted enrollment, health telemetry, no subprocess).
-
-Reference hardware: the Seeed Studio × TRMNL 7.5" (OG) BYOS kit (XIAO ESP32-S3 + 800×480 monochrome ePaper). See **[Device Reference](docs/devices.md#trmnl-e-ink-byos)** for the full BYOS flow and the firmware-aligned behavior contract.
+Reference hardware: the Seeed Studio × TRMNL 7.5" (OG) DIY kit (XIAO ESP32-S3 Plus + 800×480 monochrome ePaper). See **[Device Reference](docs/devices.md#inkdeck-e-ink-custom-firmware)** for details.
 
 ---
 
@@ -1048,7 +1040,7 @@ AgentDeck is actively working on two critical areas to prepare for production re
 
 ### 1. App Store Distribution (macOS + iOS)
 
-The SwiftUI dashboard is ready for App Store submission. The macOS app ships a full in-process Swift daemon (63 files, ~32,000 LOC) — mDNS discovery, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix/TRMNL e-ink), OpenClaw Gateway WebSocket client, HTTP + WebSocket server. App Store compliance is gated by the `AGENTDECK_APP_STORE` compile flag: no bundled Node.js / `adb` / D200H helper, no subprocess spawn, no AppleScript (per Apple Review Guideline 2.5.2). User data lives in `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/` (routed through `AgentDeckPaths.swift`; never hand-write the path). USB device entitlements cover D200H HID; Input Monitoring is handled with the standard TCC prompt. OpenClaw integration uses Gateway-native pairing (self-generated Ed25519 identity in Keychain + Gateway-issued device token) — no file read of `~/.openclaw/identity/`. `apple/scripts/verify-appstore-archive.sh` is wired into CI and asserts these invariants on every archive.
+The SwiftUI dashboard is ready for App Store submission. The macOS app ships a full in-process Swift daemon (63 files, ~32,000 LOC) — mDNS discovery, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix), OpenClaw Gateway WebSocket client, HTTP + WebSocket server. App Store compliance is gated by the `AGENTDECK_APP_STORE` compile flag: no bundled Node.js / `adb` / D200H helper, no subprocess spawn, no AppleScript (per Apple Review Guideline 2.5.2). User data lives in `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/` (routed through `AgentDeckPaths.swift`; never hand-write the path). USB device entitlements cover D200H HID; Input Monitoring is handled with the standard TCC prompt. OpenClaw integration uses Gateway-native pairing (self-generated Ed25519 identity in Keychain + Gateway-issued device token) — no file read of `~/.openclaw/identity/`. `apple/scripts/verify-appstore-archive.sh` is wired into CI and asserts these invariants on every archive.
 
 ### 2. Personalized Agent Evaluation System (APME)
 
@@ -1074,7 +1066,7 @@ Eval results broadcast to every device simultaneously (Stream Deck/Apple/Android
 - [x] macOS in-process Swift daemon (Node.js-free macOS install)
 - [x] Apple TestFlight CI pipeline
 - [x] ESP32 compact displays (Round AMOLED 1.8", IPS LCD 3.5", B86 Box 4", TTGO T-Display 1.14", ESP32-C6 1.47", IPS 10.1", Ulanzi TC001)
-- [x] TRMNL e-ink BYOS panel (device-agnostic Node + App Store Swift, pull-only 1-bit PNG)
+- [ ] InkDeck e-ink panel (Seeed TRMNL 7.5" OG DIY Kit, custom ESP32 firmware, WiFi/WS partial refresh) — firmware in development
 - [x] Ulanzi D200H Deck Dock (14-key HID + 960×540 LCD via official Ulanzi Studio plugin; direct-HID fallback retired)
 - [x] TUI terminal dashboard (Unicode Braille + ANSI)
 - [x] Pixoo64 LED matrix pixel art

@@ -12,78 +12,19 @@
 | **ESP32** | USB Serial JSON | CDC/UART 115200 | None | Port scan 10s | Push only | 6 |
 | **Pixoo64** | HTTP REST (Divoom) | LAN:80 | None | Cloud API / manual | Push only | 4 |
 | **Timebox Mini** | BLE GATT (ISSC transparent-UART) | `49535343-…` | Bluetooth pairing | `TimeBox-mini-light` BLE scan | Push only | 4 |
-| **TRMNL e-ink (BYOS)** | HTTP BYOS (device pulls) | Daemon (9120) | MAC (soft) | Manual server URL | **Pull** (panel polls) | status+usage frame |
+| **InkDeck e-ink** | WebSocket JSON (WiFi) | Daemon (9120) | None | mDNS / port scan | Push only | dashboard frame |
 | **SSE** | HTTP SSE | Daemon (9120) | Token | Manual URL | Push only | All 13 |
 | **Gateway** | WebSocket Custom | 18789 | Ed25519 | Hardcoded | Bidirectional | N/A (adapter) |
 
 > **Daemon hub**: All dashboard clients connect exclusively to the daemon. Session bridges handle PTY + hooks only and do not serve external devices. Daemon port defaults to 9120; if occupied by non-daemon process, daemon falls back to next available port and records actual port in `~/.agentdeck/daemon.json`. Local clients read `daemon.json`; remote clients discover via mDNS (daemon only advertises `_agentdeck._tcp`).
 
-## TRMNL e-ink (BYOS)
+## InkDeck e-ink (custom firmware)
 
-TRMNL is **pull-only**: the panel stores one fixed server URL and polls `/api/setup` + `/api/display` on its own schedule, then downloads a server-rendered **1-bit PNG**. AgentDeck implements the BYOS contract twice — Node (`bridge/src/trmnl/`) and the App Store Swift daemon (`apple/.../Daemon/Modules/Trmnl*.swift`, CoreGraphics render, no subprocess).
+**InkDeck** is AgentDeck's wired 7.5" e-ink status panel. The hardware is a **Seeed TRMNL 7.5" OG DIY Kit** — a **XIAO ESP32-S3 Plus** wired to an 800×480 monochrome ePaper panel (GDEY075T7 / UC8179 controller), always **USB-powered** (no battery / deep-sleep).
 
-**Setup — run exactly one hub, point the panel at it.** Print the stable URL with:
+**Status: firmware in development.** InkDeck is driven by new custom AgentDeck ESP32 firmware under `esp32/` (PlatformIO env `inkdeck`). Like the other ESP32 boards, it connects to the daemon over **WiFi WebSocket** and the daemon **pushes** 1-bit dashboard frames; the panel renders with fast partial refreshes (~0.3s) plus a periodic full refresh to clear ghosting. Rendering/refresh behavior is still being built — this section documents the intended surface, not a shipping feature.
 
-```bash
-agentdeck trmnl     # prints http://<LAN-IP>:9120 + enrolled panels + health
-```
-
-Set that one URL as the panel's custom/BYOS server. It auto-enrolls on first poll (no MAC entry). **Critical:** run exactly one hub on a stable `LAN-IP:9120`: either the App Store macOS app's in-process Swift daemon or the Node CLI daemon. The App Store app is a complete TRMNL BYOS hub (registration, telemetry, rendering, health); the CLI daemon adds developer-session and OAuth quota relay when you need it. Two hubs racing for port 9120 — or a panel pinned to a fallback port that comes and goes — is what makes the firmware flip between the dashboard and its **"WiFi connected / TRMNL not responding"** error screen.
-
-**Poll loop** (the panel drives everything — the daemon never pushes):
-
-```
-TRMNL panel (battery e-ink, deep-sleep)          AgentDeck daemon (hub, :9120)
-   │
-   │ GET /api/setup   id=MAC, fw, batt, rssi, w, h     ┐ first boot only
-   ├──────────────────────────────────────────────────►│ enroll(MAC) → api_key (soft auth)
-   │◄ 200 {api_key, friendly_id, image_url, filename}  ─┘
-   │
- ┌─┤ GET /api/display id=MAC, access-token, w, h
- │ ├──────────────────────────────────────────────────►│ render frame, cache by "WxH" (LRU 8)
- │ │◄ 200 {status:0, image_url, filename,              │  filename = visual hash (NO wall-clock)
- │ │        refresh_rate, image_url_timeout, sleep}   ─┘  refresh_rate = AWAITING? 60 : 180  (floor 30)
- │ │
- │ │ filename == cached?  ─► skip download, just sleep  ← battery + flaky-WiFi saver
- │ │ filename changed?    ─► GET /trmnl/image/WxH-hash.png
- │ ├──────────────────────────────────────────────────►│ serve pre-rendered 1-bit PNG
- │ │◄ 200 image/png ────────────────────────────────────┘
- │ │ paint e-ink, deep-sleep for refresh_rate seconds
- └─┤
- sleep
-```
-
-Both hubs implement the contract: Node `bridge/src/trmnl/{byos-server,frame-cache,trmnl-settings,trmnl-telemetry}.ts`, Swift `apple/.../Daemon/Modules/Trmnl{Module,Settings,ImageRenderer}.swift` (CoreGraphics → 1-bit PNG, no subprocess) + routes in `DaemonServer.swift`. Swift persists enrolled panels in the App Store container's `settings.json`; telemetry remains runtime-only.
-
-**Behavior** (aligned to the `usetrmnl/firmware` BYOS contract):
-- **Response shape** — `/api/display` returns `status:0, image_url, filename, refresh_rate (number), image_url_timeout, special_function:"sleep", reset_firmware:false, update_firmware:false, firmware_url:null`. `refresh_rate` is a **number** (the firmware parses it as a uint; a string can read as 0). `image_url` is 1-bit **PNG** (firmware sniffs `BM` → BMP, else PNG/JPEG — PNG is supported).
-- **Stable `filename`** — the firmware caches the image by `filename` and **skips the re-download when it's unchanged**. So the frame hash changes ONLY on real visual change — never for a ticking clock. This is what keeps a battery panel on a flaky link from re-downloading (and full-flashing the e-ink) every poll.
-- **Gentle adaptive cadence** — `refresh_rate` is `trmnl.refreshActive` (default **60s**) only while a session is **AWAITING** the user; otherwise `trmnl.refreshRate` (default 180s). "Working" does NOT speed it up — a deep-sleep panel can't be pushed and each wake flashes the screen + costs battery. Floor 30s.
-- **`image_url_timeout`** (`trmnl.imageUrlTimeout`, default 50s, firmware caps ~65s; weak RSSI widens to 60s) — the download window the firmware honors, so a slow/flaky WiFi link doesn't trip the device's **"WiFi connected / not responding"** (`WIFI_FAILED`) screen. That screen is a *device-side request failure* (network/timeout), not a server error — verify LAN packet loss to the panel if it persists.
-- **Usage** — the gauges come from `usage_update` (not `state_update`); the module merges both. Known quota shows 5H/7D gauge + % + **time-until-reset**; no token tally or wall clock. Unknown quota (common for App Store-only / OAuth-blind hubs) collapses to a compact hub-status footer instead of wasting space on unavailable gauges, and never shows a misleading `0%`.
-- **AWAITING banner** — any awaiting agent gets a full-width inverted banner above the rows.
-- **Health** — `agentdeck trmnl` and `/status` `modules.trmnl` expose per-panel lastSeen/battery/RSSI + a `stale` flag.
-- **Text sanitization + blank-frame guard** — session goal/activity strings are PTY-derived and can carry raw ANSI escape / control bytes; a single one used to make resvg reject the whole SVG and the panel silently received a **blank white frame**. All SVG renderers now escape via the shared `escSvgText` (`shared/src/svg-renderers/text-utils.ts` — strips ANSI + XML-invalid controls + lone surrogates), and as defense-in-depth a failed render marks the frame `degraded`: the Node frame cache keeps serving the **last good frame** (stale beats blank) and logs the error without `--debug`.
-
-Settings (`~/.agentdeck/settings.json` `trmnl` block): `enabled`, `refreshRate`, `refreshActive`, `imageUrlTimeout`, `autoRegister`, `devices[]`.
-
-### Why it flips to "TRMNL logo → WiFi connected → not responding"
-
-That three-screen sequence is the **firmware's boot/reconnect UI**, not a server render. The panel shows it whenever a single poll **round-trip fails at the network layer** (`WIFI_FAILED` = the *device's* HTTP request timed out / was refused / had no route — never a 500 from us). On the *next* poll that succeeds it boots back through the same logo → WiFi-connected screens into the dashboard. So the "중간중간 전환" the user sees is simply **occasional failed polls**, one every time a poll lands in a dead window.
-
-The firmware-contract bugs that used to cause this on *every* poll are already fixed (commit `b5b12c72`): `refresh_rate` is a number (a string parsed as `0` → busy-loop), `image_url_timeout` is sent, and `filename` is a wall-clock-free visual hash (a ticking clock used to churn the hash → re-download every poll → flash + flaky-link failures). What remains are **transport** dead windows. Daemon-side causes, most → least controllable:
-
-1. **App Nap (FIXED).** A backgrounded menubar (`LSUIElement`) daemon with the Mac display asleep but the system awake is a prime App Nap target — macOS suspends the process and the `NWListener` stops accepting, so the panel's next poll times out. The daemon now holds a `ProcessInfo.beginActivity(.userInitiatedAllowingIdleSystemSleep)` token for its lifetime (`DaemonServer.startServices` step 15, released in `shutdown`) — App Nap can't suspend the listener while the Mac is awake, and the `…AllowingIdleSystemSleep` variant still lets the Mac sleep normally (no laptop drain). *Run the daemon as a persistent hub (Node `agentdeck daemon` or the macOS app left running) — not a foreground session that exits.*
-2. **Two hubs / port churn.** Two daemons racing for 9120, or a panel pinned to a fallback port that comes and goes, intermittently points the panel at a dead address. Run exactly one hub on a stable `LAN-IP:9120` (see Setup above). For App Store-only installs, leave the macOS app running; when using the CLI daemon, let the app connect in external-daemon client mode.
-3. **IP rebind.** The panel stores one fixed server URL; if the hub's LAN IP changes (DHCP renewal, WiFi reconnect) the URL goes stale until the panel is re-pointed. The listener binds `0.0.0.0` and survives, and the daemon re-advertises Bonjour on IP change, but the BYOS firmware stores a fixed URL and won't auto-rediscover. Pin the hub to a DHCP reservation / static IP (or a stable `.local` name the panel can resolve).
-4. **System sleep.** When the whole Mac sleeps nothing serves — unavoidable; the panel rides it out and recovers on the first post-wake poll (the daemon re-syncs sessions/usage/Bonjour on `kIOMessageSystemHasPoweredOn`).
-
-**Diagnosing:** `/api/display` polls now log at debug level (`DaemonLogger` category `TRMNL`, `id=<MAC> → http <status>`). If the panel shows "not responding" yet no `TRMNL /api/display` line appears around that time, the request never reached the daemon (transport — cases 1–4 above), not a render fault. `agentdeck trmnl` / `/status` `modules.trmnl` also expose per-panel `lastSeen` + a `stale` flag (no poll within 2× the current cadence). Three records are always visible without `--debug` on both hubs (daemon stderr lines are ISO-timestamped):
-- **Weak radio transitions** — one line when a panel's reported RSSI crosses the `TRMNL_WEAK_RSSI_DBM`/`weakRssiDbm` threshold (-78dBm) and one when it recovers (`noteRssiHealth`) — grep `weak WiFi signal` / `WiFi signal recovered`.
-- **Poll gaps** — when a panel comes back after missing its poll window (> 2× slow cadence + 30s), one line with the gap duration (`notePollGap`) — grep `back after`. Every "not responding" episode leaves exactly one of these on recovery.
-- **Device logs** — the firmware POSTs `/api/log` after failures; both hubs now log the payload (rate-limited) instead of dropping it — grep `device log from`. This carries the firmware's own error reason (image timeout, HTTP error, …).
-
-Reference: [BYOS docs](https://docs.trmnl.com/go/diy/byos) · [byos_sinatra](https://github.com/usetrmnl/byos_sinatra) (canonical response shape) · [firmware](https://github.com/usetrmnl/firmware) (`src/bl.cpp` — image sniff, `image_url_timeout`, `WIFI_FAILED`).
+**Formerly "TRMNL" (BYOS pull) — removed.** AgentDeck previously drove this same physical panel through TRMNL's commercial **BYOS** (Bring Your Own Server) pull contract, where the panel polled `/api/setup` + `/api/display` and downloaded a server-rendered PNG. That integration was **removed** (Node commit `c71044bd`; the App Store Swift `Trmnl*` modules removed alongside). Stock / commercial TRMNL panels running the upstream `usetrmnl/firmware` are **no longer supported** — InkDeck reflashes the same hardware with AgentDeck firmware and treats it as a first-class ESP32 board.
 
 ## Broadcast Architecture
 

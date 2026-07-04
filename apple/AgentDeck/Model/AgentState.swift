@@ -214,7 +214,6 @@ struct ModuleHealthState: Sendable {
     var adb: AdbHealth?
     var d200h: D200hHealth?
     var pixoo: PixooHealth?
-    var trmnl: TrmnlHealth?
     var serial: SerialHealth?
     var streamDeck: StreamDeckHealth?
     /// Divoom Timebox Mini (11×11 BLE) — daemon `statusSnapshot()`.
@@ -345,23 +344,6 @@ struct PixooDeviceHealth: Sendable {
     var online: Bool
     var failures: Int
     var backedOff: Bool
-}
-
-struct TrmnlHealth: Sendable {
-    var deviceCount: Int = 0
-    var staleDeviceCount: Int = 0
-    var currentRefreshRate: Int = 180
-    var telemetry: [TrmnlDeviceHealth] = []
-}
-
-struct TrmnlDeviceHealth: Sendable {
-    var mac: String
-    var width: Int?
-    var height: Int?
-    var rssi: Double?
-    var batteryVoltage: Double?
-    var secondsSinceSeen: Int?
-    var stale: Bool
 }
 
 struct SerialHealth: Sendable {

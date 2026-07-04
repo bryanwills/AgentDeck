@@ -12,8 +12,8 @@ Stream Deck+ controller for AI coding agents — a bidirectional local control s
 - **config/** — Default settings and prompt templates
 - **setup/** — npm setup package (`npx @agentdeck/setup`)
 - **android/** — Jetpack Compose launcher app (CremaS, Onyx, Kobo, tablets)
-- **apple/** — SwiftUI Multiplatform app (iOS/iPadOS/macOS). macOS includes **in-process Swift daemon** (`apple/AgentDeck/Daemon/`, ~63 files, no Node.js dependency) — mDNS, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix/TRMNL e-ink), Gateway proxy, HTTP+WS server
-- **esp32/** — PlatformIO Arduino firmware (LVGL touch displays + WS2812B matrix). The **TRMNL e-ink panel is NOT firmware** — it's a commercial WiFi e-ink device driven by the HTTP BYOS pull module in `bridge/src/trmnl/` + `apple/.../Daemon/Modules/Trmnl*.swift`. See [docs/devices.md](docs/devices.md#trmnl-e-ink-byos)
+- **apple/** — SwiftUI Multiplatform app (iOS/iPadOS/macOS). macOS includes **in-process Swift daemon** (`apple/AgentDeck/Daemon/`, ~63 files, no Node.js dependency) — mDNS, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix), Gateway proxy, HTTP+WS server
+- **esp32/** — PlatformIO Arduino firmware (LVGL touch displays + WS2812B matrix + **InkDeck** e-ink). **InkDeck** is a Seeed TRMNL 7.5" OG DIY Kit (XIAO ESP32-S3 Plus + 800×480 UC8179 e-ink), always USB-powered, driven by custom AgentDeck firmware (PlatformIO env `inkdeck`, WiFi/WS to the daemon like other ESP32 boards). Firmware is **in development**. Formerly the "TRMNL" commercial BYOS e-ink device — that HTTP pull integration was removed (Node commit c71044bd). See [docs/devices.md](docs/devices.md#inkdeck-e-ink-custom-firmware)
 
 See [docs/architecture.md](docs/architecture.md) for full architecture details (BridgeCore, PtyAdapter hierarchy, device modules, AgentAdapter abstraction, Gateway protocol, plugin connection model).
 
@@ -156,7 +156,6 @@ agentdeck qr                 # Pairing QR code
 agentdeck diag               # Diagnostic dump
 agentdeck pixoo {scan|add|list|remove|test}
 agentdeck timebox {scan|add|list|remove|test|sync}   # Divoom Timebox Mini (BLE)
-agentdeck trmnl              # TRMNL e-ink BYOS: server URL + enrolled panels + health
 agentdeck wifi-setup         # ESP32 WiFi provisioning (--ssid, --password)
 ```
 
@@ -234,7 +233,7 @@ The macOS app ships through the App Store and must stay **self-contained** under
 | [docs/appstore-metadata-draft.md](docs/appstore-metadata-draft.md) | App Store Connect metadata draft (ko + en) — title/subtitle/description/keywords/what's-new |
 | [docs/testflight-qa-checklist.md](docs/testflight-qa-checklist.md) | Internal tester pre-submission checklist covering onboarding, pairing, voice, sandbox invariants |
 | [docs/devices.md](docs/devices.md) | Device-specific details |
-| [docs/hardware-compatibility.md](docs/hardware-compatibility.md) | 지원 dashboard 하드웨어/OS 종합 사양 매트릭스 — 16 surface(ESP32 보드·LED·HID 데크·TRMNL e-ink·Apple/Android·TUI)의 SoC·해상도·Flash·SDK·deployment target. 시각화 뷰 [docs/hardware/index.html](docs/hardware/index.html) |
+| [docs/hardware-compatibility.md](docs/hardware-compatibility.md) | 지원 dashboard 하드웨어/OS 종합 사양 매트릭스 — 16 surface(ESP32 보드·LED·HID 데크·InkDeck e-ink·Apple/Android·TUI)의 SoC·해상도·Flash·SDK·deployment target. 시각화 뷰 [docs/hardware/index.html](docs/hardware/index.html) |
 | [docs/protocol.md](docs/protocol.md) | Bridge ↔ plugin WebSocket protocol |
 | [docs/gateway-protocol.md](docs/gateway-protocol.md) | OpenClaw Gateway WebSocket — frame format, Ed25519 handshake, RPC/event catalog, versioning |
 | [docs/testing.md](docs/testing.md) | Test infrastructure reference |

@@ -491,8 +491,7 @@ final class DaemonService: ObservableObject {
             // Patient probe + 3-miss threshold: the Node daemon can stall its
             // single-threaded event loop past 2s under load (sync SQLite, hook
             // bursts) and a plain dev restart takes a few seconds — neither
-            // should promote a rival hub. A false promotion is expensive: the
-            // TRMNL panel polls a fixed URL on the canonical port and every
+            // should promote a rival hub. A false promotion is expensive: every
             // hub flip flaps serial/Pixoo ownership. Worst-case failover for a
             // genuinely dead daemon is ~30s, fine for a passive fallback.
             let health = await registry.probeDaemonHealth(port: currentPort, patient: true)
@@ -527,10 +526,9 @@ final class DaemonService: ObservableObject {
     }
 
     /// While this hub runs on a fallback port, watch the canonical (configured)
-    /// port every health tick. Pull devices like the TRMNL panel poll ONE fixed
-    /// URL that embeds the canonical port — a hub stranded on 9121 is invisible
-    /// to them, and running there next to a returning sibling daemon flaps
-    /// serial/Pixoo ownership. Two exits:
+    /// port every health tick. A hub stranded on 9121 is invisible to clients
+    /// that resolve the canonical port, and running there next to a returning
+    /// sibling daemon flaps serial/Pixoo ownership. Two exits:
     ///   - a healthy daemon owns the canonical port again → stand down to
     ///     client mode (no rival hub, no eviction round-trip needed)
     ///   - the canonical port became free → rebind onto it immediately
@@ -690,11 +688,6 @@ final class DaemonService: ObservableObject {
             summary.pixoo = DeviceSummary.makePixooEntries(from: pixoo)
         }
 
-        // TRMNL (BYOS pull e-ink panels)
-        if let trmnl = await server.trmnlStatusSnapshot() {
-            summary.trmnl = DeviceSummary.makeTrmnlEntries(from: trmnl)
-        }
-
         // ESP32 serial boards
         if let serial = await server.serialStatusSnapshot() {
             summary.serial = DeviceSummary.makeSerialEntries(from: serial)
@@ -716,19 +709,17 @@ final class DaemonService: ObservableObject {
 struct DeviceSummary: Equatable {
     var d200h: DeviceEntry?
     var pixoo: [DeviceEntry] = []
-    var trmnl: [DeviceEntry] = []
     var serial: [DeviceEntry] = []
     var adb: [DeviceEntry] = []
 
     var isEmpty: Bool {
-        d200h == nil && pixoo.isEmpty && trmnl.isEmpty && serial.isEmpty && adb.isEmpty
+        d200h == nil && pixoo.isEmpty && serial.isEmpty && adb.isEmpty
     }
 
     var allEntries: [DeviceEntry] {
         var out: [DeviceEntry] = []
         if let d200h { out.append(d200h) }
         out.append(contentsOf: pixoo)
-        out.append(contentsOf: trmnl)
         out.append(contentsOf: serial)
         out.append(contentsOf: adb)
         return out
@@ -741,9 +732,6 @@ struct DeviceSummary: Equatable {
         }
         if let pixoo = modules["pixoo"] as? [String: Any] {
             summary.pixoo = makePixooEntries(from: pixoo)
-        }
-        if let trmnl = modules["trmnl"] as? [String: Any] {
-            summary.trmnl = makeTrmnlEntries(from: trmnl)
         }
         if let serial = modules["serial"] as? [String: Any] {
             summary.serial = makeSerialEntries(from: serial)
@@ -830,48 +818,6 @@ struct DeviceSummary: Equatable {
         }
     }
 
-    static func makeTrmnlEntries(from d: [String: Any]) -> [DeviceEntry] {
-        let telemetry = d["telemetry"] as? [[String: Any]] ?? []
-        let enrolled = d["devices"] as? [[String: Any]] ?? []
-        let rows = telemetry.isEmpty ? enrolled : telemetry
-        let deviceCount = d["deviceCount"] as? Int ?? rows.count
-        guard deviceCount > 0 || !rows.isEmpty else { return [] }
-
-        if rows.isEmpty {
-            return [DeviceEntry(
-                id: "trmnl-waiting",
-                kind: .trmnl,
-                title: "TRMNL e-ink",
-                subtitle: "waiting for first poll",
-                status: .reconnecting
-            )]
-        }
-
-        return rows.enumerated().map { idx, row in
-            let mac = row["mac"] as? String ?? "panel-\(idx + 1)"
-            let stale = row["stale"] as? Bool ?? telemetry.isEmpty
-            let width = row["width"] as? Int
-            let height = row["height"] as? Int
-            let rssi = (row["rssi"] as? Double) ?? (row["rssi"] as? Int).map(Double.init)
-            let age = row["secondsSinceSeen"] as? Int
-            let size = width.flatMap { w in height.map { h in "\(w)x\(h)" } }
-
-            var bits: [String] = []
-            if let size { bits.append(size) }
-            if let rssi { bits.append("\(Int(rssi))dBm") }
-            if let age { bits.append("\(age)s ago") }
-            if bits.isEmpty { bits.append(telemetry.isEmpty ? "enrolled" : "polling") }
-
-            return DeviceEntry(
-                id: "trmnl-\(mac)",
-                kind: .trmnl,
-                title: idx == 0 ? "TRMNL e-ink" : "TRMNL e-ink \(idx + 1)",
-                subtitle: bits.joined(separator: " · "),
-                status: stale ? .reconnecting : .connected
-            )
-        }
-    }
-
     static func makeSerialEntries(from d: [String: Any]) -> [DeviceEntry] {
         let conns = d["connections"] as? [[String: Any]] ?? []
         let globalOpenErr = (d["lastOpenError"] as? String) ?? (d["lastError"] as? String)
@@ -945,7 +891,6 @@ struct DeviceEntry: Identifiable, Equatable {
 enum DeviceKind: Equatable {
     case d200h
     case pixoo
-    case trmnl
     case serial
     case adb
 
@@ -953,7 +898,6 @@ enum DeviceKind: Equatable {
         switch self {
         case .d200h:  return "keyboard"
         case .pixoo:  return "square.grid.3x3.fill"
-        case .trmnl:  return "rectangle.on.rectangle"
         case .serial: return "cpu"
         case .adb:    return "iphone"
         }
