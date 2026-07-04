@@ -1064,6 +1064,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       if (lastStateEvent) events.push(lastStateEvent);
       events.push(core.buildUsage());
       events.push(buildDisplayStateEvent(core.displayMonitor.isDisplayOn()) as BridgeEvent);
+      // Seed the last few timeline entries so a freshly (re)connected board's
+      // ticker shows the real latest event instead of whatever its ring last
+      // held. Kept to 3 entries — the whole line must stay well under the
+      // small serial RX buffers on non-InkDeck boards.
+      const recent = core.bridgeTimeline.getHistory().slice(-3);
+      if (recent.length > 0) {
+        events.push({ type: 'timeline_history', entries: recent } as BridgeEvent);
+      }
       // Sessions list (async enrichment runs synchronously from cache here)
       core.broadcastSessionsList().catch(() => {});
       return events;

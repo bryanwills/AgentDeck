@@ -85,8 +85,7 @@ struct Snap {
     // Subscription plan lines per provider ("Max 20x ~7/12"), '' = hide
     char claudePlan[40];
     char codexPlan[40];
-    char agPlan[40];
-    float agCredits;
+    char agPlan[40];   // pre-shortened "AGY Pro ~8/1" chip text
     bool displayOn;
     char ip[16];
     // Latest timeline event, compressed to one ticker line. EXCLUDED from the
@@ -129,8 +128,9 @@ void snapshot(Snap& s) {
     s.codexS = g_state.codexSecondaryPercent;
     strncpy(s.codexPReset, g_state.codexPrimaryReset, sizeof(s.codexPReset) - 1);
     strncpy(s.codexSReset, g_state.codexSecondaryReset, sizeof(s.codexSReset) - 1);
-    // Map subscriptions[] to provider rows by name; unmatched → Antigravity/etc.
-    s.agCredits = g_state.antigravityCredits;
+    // Map subscriptions[] to provider rows by name; unmatched → AGY chip.
+    // (Antigravity credits are deliberately NOT surfaced — the raw count is
+    // meaningless to glance at; only the plan/expiry chip remains.)
     for (uint8_t i = 0; i < g_state.subscriptionCount; i++) {
         const auto& sub = g_state.subscriptions[i];
         char line[40];
@@ -143,9 +143,17 @@ void snapshot(Snap& s) {
         } else if (strncmp(sub.name, "ChatGPT", 7) == 0 || strncmp(sub.name, "Codex", 5) == 0) {
             const char* tail = line + (sub.name[1] == 'h' ? 7 : 5); while (*tail == ' ') tail++;
             strncpy(s.codexPlan, tail, sizeof(s.codexPlan) - 1);
+        } else if (strncmp(sub.name, "Antigravity", 11) == 0) {
+            const char* tail = line + 11; while (*tail == ' ') tail++;
+            snprintf(s.agPlan, sizeof(s.agPlan), "AGY %s", tail);
         } else {
             strncpy(s.agPlan, line, sizeof(s.agPlan) - 1);
         }
+    }
+    // Plan-name-only fallback when the daemon exposes antigravityStatus but
+    // no subscriptions[] entry for it.
+    if (!s.agPlan[0] && g_state.antigravityPlan[0]) {
+        snprintf(s.agPlan, sizeof(s.agPlan), "AGY %s", g_state.antigravityPlan);
     }
     // Latest timeline entry → ticker. Prefer the daemon-preformatted local
     // "HH:MM"; the raw ts fallback is UTC-derived (panel has no local tz).
@@ -195,7 +203,6 @@ uint32_t contentHash(const Snap& s) {
     h = fnvStr(h, s.fiveReset); h = fnvStr(h, s.sevenReset);
     h = fnvStr(h, s.codexPReset); h = fnvStr(h, s.codexSReset);
     h = fnvStr(h, s.claudePlan); h = fnvStr(h, s.codexPlan); h = fnvStr(h, s.agPlan);
-    int ag = (int)s.agCredits; h = fnv(h, &ag, sizeof(ag));
     h = fnv(h, &s.usageStale, 1);
     h = fnvStr(h, s.ip);
     // NOTE: tickerText intentionally NOT hashed — see Snap.
@@ -470,41 +477,57 @@ void drawUsageFooter(const Snap& s, bool showIdentity) {
                           s.sevenD, s.sevenReset, s.usageStale)) { y += 28; any = true; }
     if (drawProviderUsage(y, "codex-cli", "CODEX", s.codexPlan, s.codexP, s.codexPReset,
                           s.codexS, s.codexSReset, false)) { y += 28; any = true; }
-    // Antigravity: credits are a raw count (no window %), so a text row —
-    // shown only when the daemon actually resolves the account.
-    if (s.agCredits >= 0.0f || s.agPlan[0]) {
-        drawAgentGlyph("antigravity", 14, y + 2, 22);
-        textAt(44, y + 16, "ANTIGRAVITY", &FreeSansBold9pt7b);
-        char agLine[64] = "";
-        if (s.agCredits >= 0.0f && s.agPlan[0])
-            snprintf(agLine, sizeof(agLine), "%d credits · %s", (int)s.agCredits, s.agPlan);
-        else if (s.agCredits >= 0.0f)
-            snprintf(agLine, sizeof(agLine), "%d credits", (int)s.agCredits);
-        else
-            strncpy(agLine, s.agPlan, sizeof(agLine) - 1);
-        textAt(180, y + 16, agLine, &FreeSans9pt7b);
-        y += 28;
-        any = true;
-    }
     if (!any) textAt(16, y + 16, "usage: waiting for data", &FreeSans9pt7b);
 
-    // Ticker — latest timeline event as one compressed line ("14:32 ...").
-    // Time comes from the event itself; content updates at most every 60s.
-    if (s.tickerText[0]) {
-        int16_t ty = 476;
-        textAt(16, ty, s.tickerTime, &FreeSansBold9pt7b);
-        char t[104]; ascii(t, sizeof(t), s.tickerText);
-        char tf[108];
-        int16_t maxW = W - 90 - (showIdentity ? 110 : 16);
-        const GFXfont* f = fitCascade(tf, sizeof(tf), t, maxW, &FreeSans9pt7b, CLASSIC_FONT);
-        textAt(74, ty, tf, f);
+    // AGY subscription chip — smallest possible footprint (classic font,
+    // bottom-right corner), only when the daemon resolves the account.
+    int16_t agW = 0;
+    if (s.agPlan[0]) {
+        char agf[28];
+        fitText(agf, sizeof(agf), s.agPlan, 130, CLASSIC_FONT);
+        agW = textWidth(agf, CLASSIC_FONT) + 14;
+        textRight(W - 16, 474, agf, CLASSIC_FONT);
     }
-    // Build identity only on the searching screen (flash verification aid) —
-    // on the live dashboard it was dead weight.
     if (showIdentity) {
+        // Searching screen only: build identity (flash verification aid)
         char tag[64];
         snprintf(tag, sizeof(tag), "v%s %.7s", FIRMWARE_VERSION, GIT_SHA);
-        textRight(W - 16, 476, tag, &FreeSans9pt7b);
+        textRight(W - 16 - agW, 474, tag, &FreeSans9pt7b);
+    }
+
+    // Ticker — latest timeline event, up to TWO wrapped lines before any
+    // font drop / ellipsis. Time comes from the event itself.
+    if (s.tickerText[0]) {
+        char t[104]; ascii(t, sizeof(t), s.tickerText);
+        const int16_t l1y = 454, l2y = 474;
+        const int16_t xText = 74;
+        textAt(16, l1y, s.tickerTime, &FreeSansBold9pt7b);
+        int16_t w1 = W - 16 - xText;
+        int16_t w2 = W - 16 - xText - agW - (showIdentity ? 110 : 0);
+        if (textWidth(t, &FreeSans9pt7b) <= w1) {
+            textAt(xText, l1y, t, &FreeSans9pt7b);
+        } else {
+            // Greedy wrap at a space for line 1, remainder on line 2
+            size_t len = strlen(t), take = len;
+            while (take > 1) {
+                char probe[104];
+                strncpy(probe, t, take); probe[take] = '\0';
+                if (textWidth(probe, &FreeSans9pt7b) <= w1 &&
+                    (take == len || t[take] == ' ')) break;
+                take--;
+            }
+            char l1[104];
+            strncpy(l1, t, take); l1[take] = '\0';
+            textAt(xText, l1y, l1, &FreeSans9pt7b);
+            const char* rest = t + take;
+            while (*rest == ' ') rest++;
+            if (*rest) {
+                char l2[104];
+                const GFXfont* f2 = fitCascade(l2, sizeof(l2), rest, w2,
+                                               &FreeSans9pt7b, CLASSIC_FONT);
+                textAt(xText, l2y, l2, f2);
+            }
+        }
     }
 }
 
