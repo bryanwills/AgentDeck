@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { writeFileSync, unlinkSync, existsSync } from 'fs';
+import { writeFileSync, unlinkSync, existsSync, realpathSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { execSync, spawn } from 'child_process';
@@ -1425,8 +1425,7 @@ program
 
 // ===== Default command (no args) =====
 
-// If no command specified, show status or help
-program.action(async () => {
+async function showDefaultStatusOrHelp(): Promise<void> {
   const { listActive } = await import('./session-registry.js');
   const sessions = listActive();
 
@@ -1442,7 +1441,7 @@ program.action(async () => {
     log(`  [${type}] :${s.port} — ${s.projectName} (PID ${s.pid}, ${age}s)`);
   }
   log('\nRun `agentdeck --help` for all commands.');
-});
+}
 
 // ===== APME commands =====
 
@@ -1946,4 +1945,26 @@ apme
     }
   });
 
-program.parse();
+function isMainModule(): boolean {
+  if (!process.argv[1]) return false;
+  const thisFile = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(thisFile) === realpathSync(process.argv[1]);
+  } catch {
+    return thisFile === process.argv[1];
+  }
+}
+
+export async function runCli(argv: string[] = process.argv): Promise<void> {
+  if (argv.slice(2).length === 0) {
+    await showDefaultStatusOrHelp();
+    return;
+  }
+  program.parse(argv);
+}
+
+export { program };
+
+if (isMainModule()) {
+  void runCli();
+}

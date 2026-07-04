@@ -120,6 +120,7 @@ const foreignDenylistUntil = new Map<string, number>();
 let deviceInfoCacheLoaded = false;
 let stateProvider: (() => BridgeEvent | null) | null = null;
 let usageProvider: (() => BridgeEvent | null) | null = null;
+let displayStateProvider: (() => BridgeEvent | null) | null = null;
 let initialStateProvider: (() => BridgeEvent[]) | null = null;
 let messageHandler: ((port: string, msg: ESP32ToHostMessage) => void) | null = null;
 
@@ -716,6 +717,16 @@ export function setESP32UsageProvider(provider: () => BridgeEvent | null): void 
 }
 
 /**
+ * Register a callback that returns the current display_state event.
+ * display_state is otherwise edge-triggered (on change + on connect); a board
+ * that misses the wake edge (half-open serial, daemon handoff) would stay
+ * dark until power-cycled. The heartbeat re-sync makes it self-heal.
+ */
+export function setESP32DisplayStateProvider(provider: () => BridgeEvent | null): void {
+  displayStateProvider = provider;
+}
+
+/**
  * Register a provider that returns all initial state events (state + usage + sessions).
  * Called when a new ESP32 device connects to send full state immediately.
  */
@@ -743,6 +754,19 @@ function sendHeartbeat(): void {
   // Send state_update (stripped for serial — smaller payload)
   if (stateProvider) {
     const event = stateProvider();
+    if (event) {
+      for (const conn of connections) {
+        sendToConnection(conn, JSON.stringify(prepareForSerial(event, conn)));
+      }
+    }
+  }
+
+  // Re-sync display_state every cycle. It is edge-triggered elsewhere, and a
+  // board that misses a wake edge would otherwise stay blacked out until the
+  // next reconnect or a power cycle (payload is ~70 bytes; the firmware
+  // handler is idempotent).
+  if (displayStateProvider) {
+    const event = displayStateProvider();
     if (event) {
       for (const conn of connections) {
         sendToConnection(conn, JSON.stringify(prepareForSerial(event, conn)));

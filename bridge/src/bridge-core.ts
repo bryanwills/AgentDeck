@@ -36,12 +36,35 @@ import {
   type ModelCatalogEntry,
   type PluginCommand,
   type VoiceAssistantState,
+  type TimelineEntry,
 } from './types.js';
 
 // log(), logError(), debug() imported from logger.ts
 // - log(): suppressed in PTY mode (after setPtyMode(true))
 // - logError(): always shown (critical errors requiring user action)
 // - debug(): file-only (when --debug enabled)
+
+// links2004/WebSockets, used by the ESP32-C3 e-ink firmware, closes inbound
+// frames above 15KB with 1009 before the firmware parser can see them. Keep the
+// initial replay comfortably below that library cap; Detail views can request a
+// scoped session replay later via query_session_timeline.
+export const INITIAL_TIMELINE_HISTORY_MAX_BYTES = 12 * 1024;
+
+export function buildCappedTimelineHistory(
+  entries: TimelineEntry[],
+  maxBytes = INITIAL_TIMELINE_HISTORY_MAX_BYTES,
+  extraFields: Record<string, unknown> = {},
+): BridgeEvent | null {
+  const kept: TimelineEntry[] = [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const candidate = [entries[i], ...kept];
+    const event = { type: 'timeline_history', ...extraFields, entries: candidate } as BridgeEvent;
+    if (Buffer.byteLength(JSON.stringify(event), 'utf8') <= maxBytes) {
+      kept.unshift(entries[i]);
+    }
+  }
+  return kept.length > 0 ? ({ type: 'timeline_history', ...extraFields, entries: kept } as BridgeEvent) : null;
+}
 
 function exitProcessNow(code = 0): void {
   if (code === 0) {
@@ -647,9 +670,8 @@ export class BridgeCore {
       projectName: entry.projectName ?? this.projectName,
       sessionId: entry.sessionId ?? this.sessionId,
     }));
-    if (history.length > 0) {
-      this.wsServer.sendTo(ws, { type: 'timeline_history', entries: history } as BridgeEvent);
-    }
+    const historyEvent = buildCappedTimelineHistory(history);
+    if (historyEvent) this.wsServer.sendTo(ws, historyEvent);
 
     // Sessions list
     buildEnrichedSessionsList(

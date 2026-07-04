@@ -38,7 +38,7 @@ fun timelineDisplayGroups(groups: List<GroupedEntry>): List<GroupedEntry> =
  * dropped once a completion arrives. Mirrors `timelineIsMeaningfulChatStart`
  * in apple/AgentDeck/UI/Monitor/TimelineStripView.swift.
  */
-private fun isMeaningfulChatStart(entry: TimelineEntry): Boolean {
+internal fun isMeaningfulChatStart(entry: TimelineEntry): Boolean {
     val raw = entry.summary.trim()
     if (raw.isEmpty()) return false
     if (isTaskNotificationChatStart(entry)) return false

@@ -320,12 +320,12 @@ class TimelineStoreTest {
     }
 
     @Test
-    fun `timelineDisplayGroups keeps meaningful chat_start alongside response`() {
-        // Updated semantics (DEVELOPMENT_LOG 2026-05-10): chat_start with a
-        // user-meaningful summary stays visible after completion so the
-        // user's prompt isn't lost. Only synthetic starters ("Prompt sent",
-        // "Codex turn started", "Starting chat", "Connected", "Resumed")
-        // collapse behind the response.
+    fun `groupConsecutive merges a meaningful chat_start with its response into one turn`() {
+        // Turn-merge parity with Apple (Model/Timeline.swift): a meaningful
+        // chat_start absorbs its same-turn chat_response (matched by
+        // sameTimelineContext + startedAt anchor) so the user prompt and the
+        // reply render as ONE row instead of two. The prompt stays the anchor
+        // entry; the response rides on `mergedResponse`.
         val groups = groupConsecutive(listOf(
             TimelineEntry(
                 timestamp = 1000,
@@ -348,8 +348,10 @@ class TimelineStoreTest {
 
         val result = timelineDisplayGroups(groups)
 
-        assertEquals(2, result.size)
-        assertEquals(listOf("chat_start", "chat_response"), result.map { it.entry.type })
+        assertEquals(1, result.size)
+        assertEquals("chat_start", result[0].entry.type)
+        assertEquals("Timeline rows now show summarized unit sessions", result[0].mergedResponse?.summary)
+        assertTrue(result[0].hasResponse)
     }
 
     @Test
@@ -398,10 +400,12 @@ class TimelineStoreTest {
     }
 
     @Test
-    fun `timelineDisplayGroups hides chat_end when chat_response already represents the same turn`() {
-        // Meaningful chat_start "Prompt" stays visible (post-DEVELOPMENT_LOG
-        // 2026-05-10 visibility refactor); chat_response wins over chat_end
-        // when both represent the same turn. Result is chat_start + chat_response.
+    fun `groupConsecutive folds a whole chat_start-response-end turn into one row`() {
+        // The full turn lifecycle (chat_start + chat_response + chat_end) for
+        // one turn collapses into a single group: the chat_start absorbs the
+        // response as `mergedResponse` and the terminator as `mergedCompletion`.
+        // This is the fix for OpenClaw/Claude turns previously rendering as 2-3
+        // separate rows on Android.
         val groups = groupConsecutive(listOf(
             entry(1000, "chat_start", "Prompt").copy(sessionId = "s1", startedAt = 1000),
             entry(5000, "chat_response", "Useful summary").copy(sessionId = "s1", startedAt = 1000),
@@ -410,8 +414,10 @@ class TimelineStoreTest {
 
         val result = timelineDisplayGroups(groups)
 
-        assertEquals(2, result.size)
-        assertEquals(listOf("chat_start", "chat_response"), result.map { it.entry.type })
+        assertEquals(1, result.size)
+        assertEquals("chat_start", result[0].entry.type)
+        assertEquals("Useful summary", result[0].mergedResponse?.summary)
+        assertEquals("Completed", result[0].mergedCompletion?.summary)
     }
 
     @Test

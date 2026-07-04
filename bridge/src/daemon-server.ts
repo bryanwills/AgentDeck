@@ -14,7 +14,7 @@
 import { createServer, type Server } from 'http';
 import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
-import { BridgeCore } from './bridge-core.js';
+import { BridgeCore, buildCappedTimelineHistory } from './bridge-core.js';
 import { buildDisplayStateEvent } from './display-dim.js';
 import { OpenClawAdapter } from './adapters/openclaw.js';
 import { BridgeLogStream } from './log-stream.js';
@@ -1082,6 +1082,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       core.broadcastSessionsList().catch(() => {});
       return events;
     });
+    // Heartbeat re-sync: display_state is otherwise edge-triggered, and a board
+    // that misses the wake edge stays dark until power-cycled.
+    serialModule.setDisplayStateProvider(
+      () => buildDisplayStateEvent(core.displayMonitor.isDisplayOn()) as BridgeEvent,
+    );
     // Include ESP32 serial connections in client count for polling guards
     core.setExternalClientCountProvider(() => esp32ConnectionCount());
 
@@ -1493,9 +1498,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             entries = transcriptTimelineForSession(sessionId, { since: sinceMs });
           } catch { /* read-only best effort */ }
         }
-        try {
-          sender.send(JSON.stringify({ type: 'timeline_history', sessionId, entries }));
-        } catch { /* client disconnecting */ }
+        const historyEvent = buildCappedTimelineHistory(entries, undefined, { sessionId });
+        if (historyEvent) {
+          try {
+            sender.send(JSON.stringify(historyEvent));
+          } catch { /* client disconnecting */ }
+        }
       }
       return true; // consumed
     }

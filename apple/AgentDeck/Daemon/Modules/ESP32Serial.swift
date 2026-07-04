@@ -131,6 +131,7 @@ actor ESP32Serial {
 
     nonisolated(unsafe) private var stateProvider: (() -> [String: Any]?)?
     nonisolated(unsafe) private var usageProvider: (() -> [String: Any]?)?
+    nonisolated(unsafe) private var displayStateProvider: (() -> [String: Any])?
     nonisolated(unsafe) private var initialStateProvider: (() -> [[String: Any]])?
     var onMessage: (@Sendable (String, [String: Any]) -> Void)?
 
@@ -191,6 +192,7 @@ actor ESP32Serial {
 
     nonisolated func setStateProviderFn(_ provider: @escaping () -> [String: Any]?) { stateProvider = provider }
     nonisolated func setUsageProviderFn(_ provider: @escaping () -> [String: Any]?) { usageProvider = provider }
+    nonisolated func setDisplayStateProviderFn(_ provider: @escaping () -> [String: Any]) { displayStateProvider = provider }
     nonisolated func setInitialStateProviderFn(_ provider: @escaping () -> [[String: Any]]) { initialStateProvider = provider }
     func setOnMessage(_ handler: @escaping @Sendable (String, [String: Any]) -> Void) { onMessage = handler }
 
@@ -674,6 +676,18 @@ actor ESP32Serial {
 
         if let event = usageProvider?(),
            event["fiveHourPercent"] != nil {
+            for i in connections.indices where connections[i].connected {
+                if sendEvent(event, to: &connections[i]) {
+                    sentData = true
+                }
+            }
+        }
+
+        // Re-sync display_state every cycle. It is otherwise edge-triggered
+        // (on change + on connect); a board that misses the wake edge — half-
+        // open serial, daemon handoff — stays blacked out until power-cycled.
+        // The payload is tiny and the firmware handler is idempotent.
+        if let event = displayStateProvider?() {
             for i in connections.indices where connections[i].connected {
                 if sendEvent(event, to: &connections[i]) {
                     sentData = true

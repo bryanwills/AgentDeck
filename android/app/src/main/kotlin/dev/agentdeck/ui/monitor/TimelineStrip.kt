@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import dev.agentdeck.state.GroupedEntry
 import dev.agentdeck.state.TimelineEntry
 import dev.agentdeck.state.groupConsecutive
+import dev.agentdeck.state.isProgressChatResponse
 import dev.agentdeck.state.timelineDisplayGroups
 import dev.agentdeck.state.timelineLifecycleBounds
 import dev.agentdeck.terrarium.TerrariumColors
@@ -298,13 +299,19 @@ private fun TurnRow(
     val entry = group.entry
     val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
     val timeStr = timeFormat.format(Date(entry.timestamp))
-    val iconKey = timelineIconKey(entry.type, entry.status)
-    val iconColor = typeColor(entry.type)
+    // A merged chat_start turn is completed once its response/chat_end folded in
+    // — swap the perpetually-Running chat_start icon to the completed glyph and
+    // stop the spinner, matching Apple's hasResponse-aware row.
+    val isCompletedTurn = entry.type == "chat_start" && group.hasResponse
+    val iconKey = if (isCompletedTurn) dev.agentdeck.ui.timeline.TimelineIconKey.Success
+        else timelineIconKey(entry.type, entry.status)
+    val iconColor = if (isCompletedTurn) typeColor("chat_response") else typeColor(entry.type)
     val countSuffix = if (group.count > 1) " ×${group.count}" else ""
     val isChatEnd = entry.type == "chat_end"
     val sessionLabel = rowPrefixLabel(entry)
     val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
 
+    Column(modifier = Modifier.fillMaxWidth()) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -349,7 +356,7 @@ private fun TurnRow(
         // rotating rows get angle=0 from the helper and skip the infinite
         // transition entirely. Mirrors `isRotatingEntry` in shared.
         val rowAngle = rememberRunningRotation(
-            active = isRotatingEntry(entry, siblings),
+            active = !isCompletedTurn && isRotatingEntry(entry, siblings),
         )
         Icon(
             imageVector = iconKey.materialIcon,
@@ -398,6 +405,64 @@ private fun TurnRow(
             modifier = Modifier.weight(1f),
             style = tight,
         )
+    }
+
+        // Sub-line: assistant response body merged into this turn. Indented +
+        // dimmed so the prompt above stays the primary reading anchor. Mirrors
+        // apple/AgentDeck/UI/Monitor/TimelineStripView.swift turnRow sub-lines.
+        val subIndent = if (entry.taskId != null) 64.dp else 56.dp
+        group.mergedResponse?.let { resp ->
+            if (!isProgressChatResponse(resp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Spacer(modifier = Modifier.width(subIndent))
+                    Text(
+                        text = "→",
+                        color = TerrariumColors.HUDSubtext.copy(alpha = 0.55f),
+                        fontSize = scale.fontSub,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        style = tight,
+                    )
+                    Text(
+                        text = stripMarkdownForSummary(resp.summary),
+                        color = TerrariumColors.HUDText.copy(alpha = 0.78f),
+                        fontSize = scale.fontSub,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = if (allowMultiline) 3 else 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                        style = tight,
+                    )
+                }
+            }
+        }
+
+        // Sub-line: terminator metadata ("Completed · Ns · topic").
+        group.mergedCompletion?.let { end ->
+            if (end.summaryKind != "progress") {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Spacer(modifier = Modifier.width(subIndent))
+                    Text(
+                        text = stripMarkdownForSummary(end.summary),
+                        color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
+                        fontSize = scale.fontSub,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                        style = tight,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -588,6 +653,11 @@ private fun DetailPane(
             }
         } else {
             val entry = focusedGroup.entry
+            // When a turn is merged (chat_start absorbing its chat_response),
+            // the response body lives on `mergedResponse` — surface it here so
+            // selecting a merged turn still shows the assistant's reply instead
+            // of just the prompt (the merged rows are no longer selectable).
+            val bodyEntry = focusedGroup.mergedResponse ?: entry
             val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
             val timeStr = timeFormat.format(Date(entry.timestamp))
             val iconKey = timelineIconKey(entry.type, entry.status)
@@ -727,7 +797,7 @@ private fun DetailPane(
             // Summary — strip markdown so `**bold**` / `## heading` don't
             // appear as literal characters next to the markdown-rendered detail.
             Text(
-                text = stripMarkdownForSummary(entry.summary),
+                text = stripMarkdownForSummary(bodyEntry.summary),
                 color = TerrariumColors.HUDText,
                 fontSize = scale.fontHeader,
                 fontWeight = FontWeight.Bold,
@@ -739,10 +809,10 @@ private fun DetailPane(
             //   (a) summaryKind == "none" (heuristic last-resort: detail
             //       is just the raw response, showing it duplicates noisily)
             //   (b) timelineDetailIsRedundant matches detail against summary
-            val detailText = entry.detail
+            val detailText = bodyEntry.detail
             if (!detailText.isNullOrEmpty()
-                && entry.summaryKind != "none"
-                && !timelineDetailIsRedundant(detailText, entry.summary)) {
+                && bodyEntry.summaryKind != "none"
+                && !timelineDetailIsRedundant(detailText, bodyEntry.summary)) {
                 Spacer(modifier = Modifier.height(4.dp))
                 LazyColumn(
                     modifier = Modifier
@@ -773,6 +843,7 @@ private fun InlineDetailPane(
     scale: MonitorLayoutScale,
 ) {
     val entry = group.entry
+    val bodyEntry = group.mergedResponse ?: entry
     val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
     val lifecycleRows = lifecycleDetailRows(entry, entries)
     val labelSp = (scale.fontSub.value - 1f).sp
@@ -799,10 +870,10 @@ private fun InlineDetailPane(
                 }
             }
         }
-        val detailText = entry.detail
+        val detailText = bodyEntry.detail
         if (!detailText.isNullOrEmpty()
-            && entry.summaryKind != "none"
-            && !timelineDetailIsRedundant(detailText, entry.summary)) {
+            && bodyEntry.summaryKind != "none"
+            && !timelineDetailIsRedundant(detailText, bodyEntry.summary)) {
             TimelineMarkdownView(text = detailText)
         } else {
             Text(

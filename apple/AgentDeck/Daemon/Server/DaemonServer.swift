@@ -134,6 +134,12 @@ private final class SerialEventSnapshot: @unchecked Sendable {
         return usageEvent
     }
 
+    func currentDisplayStateEvent() -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        return ["type": "display_state", "displayOn": displayOn, "dim": displayDim]
+    }
+
     func initialEvents() -> [[String: Any]] {
         lock.lock()
         let state = stateEvent
@@ -1101,6 +1107,7 @@ final class DaemonServer {
         let serialEventSnapshot = serialEventSnapshot
         serial.serial.setStateProviderFn { serialEventSnapshot.currentStateEvent() }
         serial.serial.setUsageProviderFn { serialEventSnapshot.currentUsageEvent() }
+        serial.serial.setDisplayStateProviderFn { serialEventSnapshot.currentDisplayStateEvent() }
         serial.serial.setInitialStateProviderFn { serialEventSnapshot.initialEvents() }
 
         // Wire external client count (ESP32 serial connections count as clients for polling guards)

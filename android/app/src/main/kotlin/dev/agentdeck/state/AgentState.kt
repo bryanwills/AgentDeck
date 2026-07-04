@@ -316,7 +316,10 @@ class AgentStateHolder private constructor() {
             }
 
             is BridgeEvent.TimelineHistory -> {
-                TimelineStore.instance.addEntries(event.entries.map { it.toTimelineEntry() })
+                // The daemon's only history push to a client is the full store
+                // snapshot on (re)connect — replace, don't merge, so re-stamped
+                // OpenClaw rows can't stack up across the tablet's reconnects.
+                TimelineStore.instance.replaceSnapshot(event.entries.map { it.toTimelineEntry() })
                 StateTimelineGenerator.instance.setReceivingBridgeTimeline(true)
             }
 

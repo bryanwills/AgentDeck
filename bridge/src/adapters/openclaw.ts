@@ -11,6 +11,7 @@ import { extractTopicHint, extractTopicHintWithKind, promptSnippetFallback, prep
 import {
   cleanRawText,
   cleanNopMarkers,
+  isOpenClawCronPrompt,
   ED25519_SPKI_PREFIX_LEN,
   GATEWAY_PROTOCOL_VERSION,
 } from '@agentdeck/shared';
@@ -797,7 +798,15 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
             if (!this.chatStarted) {
               // Non-optimistic path: gateway-initiated chat (cron, web, etc.)
               this.chatStarted = true;
-              this.chatIsAutomated = !this.lastPrompt;
+              // Automated when there's no user prompt (pure gateway-initiated
+              // cron/web run) OR when the prompt itself is a `[cron:…]` job
+              // injection. The bare `!lastPrompt` heuristic mis-flagged cron
+              // turns whose prompt reached the adapter as `[cron:…]` text (a
+              // stale lastPrompt left `automated:false`), so recurring cron
+              // status polls ("Still translating") escaped the 8h automated
+              // repetitive-dedup and stacked as N separate rows instead of one
+              // `×count` row.
+              this.chatIsAutomated = !this.lastPrompt || isOpenClawCronPrompt(this.lastPrompt);
               this.chatStartTime = Date.now();
               this.chatToolCount = 0;
               this.chatToolNames = [];

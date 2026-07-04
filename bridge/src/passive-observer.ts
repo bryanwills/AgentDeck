@@ -96,6 +96,8 @@ export interface ObservedSession extends EnrichedSession {
 const SCAN_INTERVAL_MS = 5_000;
 const MAX_TAIL_BYTES = 512 * 1024;
 const MAX_SAMPLE_BYTES = 1024 * 1024;
+/** Rollout silence (no writes) after which an end-event-less turn is presumed dead. */
+const STALE_TURN_MS = 10 * 60 * 1000;
 
 export class PassiveSessionObserver {
   private lastScanAt = 0;
@@ -234,7 +236,7 @@ export function parseClaudeTranscript(raw: string): TranscriptSummary {
   };
 }
 
-export function parseCodexRollout(raw: string): TranscriptSummary & { sessionId?: string; cwd?: string; startedAt?: number; effort?: string } {
+export function parseCodexRollout(raw: string): TranscriptSummary & { sessionId?: string; cwd?: string; startedAt?: number; effort?: string; hasPendingCalls?: boolean } {
   let sessionId: string | undefined;
   let cwd: string | undefined;
   let startedAt: number | undefined;
@@ -245,7 +247,12 @@ export function parseCodexRollout(raw: string): TranscriptSummary & { sessionId?
   let totalTokens = 0;
   let lastContextTokens = 0;
   let contextWindow = 0;
-  let modelGenerating = false;
+  // A turn is in flight from task_started/user_message until task_complete/
+  // turn_aborted. Mid-turn events (agent_message, function_call) must NOT end
+  // it: most of a working turn is the thinking gap between a tool result and
+  // the next tool call, and flipping to idle there makes an actively-working
+  // Codex render as motionless on the dashboard.
+  let turnActive = false;
   const pendingCalls = new Map<string, string>();
 
   for (const parsed of parseJsonl(raw)) {
@@ -263,18 +270,31 @@ export function parseCodexRollout(raw: string): TranscriptSummary & { sessionId?
       if (!payload) continue;
       switch (stringAt(payload, 'type')) {
         case 'task_started':
+          turnActive = true;
           contextWindow = numberAt(payload, 'model_context_window') || contextWindow;
           break;
         case 'user_message':
-          modelGenerating = true;
+          turnActive = true;
+          // Turn boundary: calls left dangling by the head/tail sampling gap
+          // must not leak into the new turn's state.
+          pendingCalls.clear();
           if (!goal) {
             const cleaned = cleanGoal(stringAt(payload, 'message') ?? stringAt(payload, 'text') ?? '');
             if (cleaned) goal = cleaned;
           }
           break;
         case 'agent_message':
+          // Mid-turn assistant messages are routine; only task_complete /
+          // turn_aborted ends the turn.
+          break;
         case 'task_complete':
-          modelGenerating = false;
+        case 'turn_aborted':
+          turnActive = false;
+          // The turn is over — any unmatched function_call is a sampling
+          // artifact (its output fell in the gap between the head and tail
+          // windows), not an in-flight tool. Without this, a long rollout
+          // whose file ends in task_complete reads as 'processing' forever.
+          pendingCalls.clear();
           break;
         case 'token_count': {
           const info = objectAt(payload, 'info');
@@ -311,7 +331,6 @@ export function parseCodexRollout(raw: string): TranscriptSummary & { sessionId?
         const callId = stringAt(payload, 'call_id');
         if (callId) pendingCalls.set(callId, task);
         currentTask = task;
-        modelGenerating = false;
       } else if (stringAt(payload, 'type') === 'function_call_output') {
         const callId = stringAt(payload, 'call_id');
         if (callId) pendingCalls.delete(callId);
@@ -326,8 +345,9 @@ export function parseCodexRollout(raw: string): TranscriptSummary & { sessionId?
     }
   }
 
-  const state = modelGenerating || pendingCalls.size > 0 ? 'processing' : 'idle';
+  const state = turnActive || pendingCalls.size > 0 ? 'processing' : 'idle';
   return {
+    hasPendingCalls: pendingCalls.size > 0,
     sessionId,
     cwd,
     startedAt,
@@ -404,6 +424,15 @@ async function collectCodexSessions(processes: ProcInfo[]): Promise<ObservedSess
     const sample = readFileHeadAndTail(rollout, 256 * 1024, MAX_SAMPLE_BYTES);
     if (!sample) continue;
     const parsed = parseCodexRollout(sample);
+    // Ghost backstop: a turn whose end event never made it into the rollout
+    // (killed mid-turn, writer race) would read as processing forever. A live
+    // turn between tool calls writes the rollout every few seconds, so a long
+    // silence with no in-flight tool means the turn is dead. In-flight tools
+    // (pending call) are exempt — a quiet 10-minute build is legitimate.
+    let state = parsed.state;
+    if (state === 'processing' && !parsed.hasPendingCalls && rolloutAgeMs(rollout) > STALE_TURN_MS) {
+      state = 'idle';
+    }
     const sessionId = parsed.sessionId ?? String(proc.pid);
     const cwd = parsed.cwd;
     sessions.push({
@@ -413,7 +442,7 @@ async function collectCodexSessions(processes: ProcInfo[]): Promise<ObservedSess
       projectName: cwd ? projectNameFromCwd(cwd) : 'Codex',
       agentType: 'codex-cli',
       alive: true,
-      state: parsed.state,
+      state,
       modelName: parsed.modelName,
       startedAt: parsed.startedAt ? new Date(parsed.startedAt).toISOString() : new Date().toISOString(),
       controlMode: 'observed',
@@ -656,6 +685,14 @@ export function parseLsofRollouts(output: string): Map<number, string> {
     }
   }
   return map;
+}
+
+function rolloutAgeMs(path: string): number {
+  try {
+    return Date.now() - statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
 }
 
 function readFileHeadAndTail(path: string, headBytes: number, tailBytes: number): string {

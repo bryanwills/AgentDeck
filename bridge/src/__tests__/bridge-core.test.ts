@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createServer } from 'http';
-import { BridgeCore } from '../bridge-core.js';
+import { BridgeCore, INITIAL_TIMELINE_HISTORY_MAX_BYTES } from '../bridge-core.js';
 import { WsTestClient } from './helpers/ws-test-client.js';
 import { createTempDataDir, type TempDataDir } from './helpers/temp-data-dir.js';
 import { State, PermissionMode, CLAUDE_CODE_CAPABILITIES } from '@agentdeck/shared';
@@ -244,6 +244,39 @@ describe('BridgeCore Orchestration', () => {
       try {
         const historyEvt = await client.waitForType('timeline_history');
         expect((historyEvt as any).entries).toHaveLength(2);
+      } finally {
+        await client.close();
+      }
+    });
+
+    it('caps initial timeline_history below the ESP32 WebSocket frame limit', async () => {
+      core.wireTimeline();
+      for (let i = 0; i < 40; i++) {
+        core.bridgeTimeline.addEntry({
+          ts: 1000 + i,
+          type: 'tool_request',
+          raw: `entry-${i}-${'x'.repeat(900)}`,
+        });
+      }
+
+      core.wsServer.onClientConnect((ws) => {
+        core.sendInitialState(ws, {
+          agentType: 'claude-code',
+          isAlive: true,
+        });
+      });
+
+      const client = new WsTestClient();
+      await client.connect(`ws://127.0.0.1:${port}`);
+
+      try {
+        const historyEvt = await client.waitForType('timeline_history');
+        const entries = (historyEvt as any).entries as Array<{ raw: string }>;
+        expect(Buffer.byteLength(JSON.stringify(historyEvt), 'utf8')).toBeLessThanOrEqual(
+          INITIAL_TIMELINE_HISTORY_MAX_BYTES,
+        );
+        expect(entries.length).toBeLessThan(40);
+        expect(entries.at(-1)?.raw).toContain('entry-39-');
       } finally {
         await client.close();
       }

@@ -120,6 +120,72 @@ describe('passive-observer parsers', () => {
     expect(Math.round(summary.contextPercent ?? 0)).toBe(15);
   });
 
+  it('reads idle after task_complete even when sampling dropped tool outputs', () => {
+    // Head/tail sampling of a large rollout can capture a function_call whose
+    // function_call_output fell into the gap between the two windows. The
+    // turn-boundary events must clear those phantom pending calls.
+    const summary = parseCodexRollout(jsonl([
+      { type: 'session_meta', payload: { id: 's1', cwd: '/tmp/p', timestamp: '2026-07-03T23:01:14.000Z' } },
+      { type: 'event_msg', payload: { type: 'user_message', message: 'do the thing' } },
+      {
+        type: 'response_item',
+        payload: { type: 'function_call', call_id: 'call-lost', name: 'exec_command', arguments: '{"cmd":"ls"}' },
+      },
+      // output for call-lost is missing (sampling gap)
+      { type: 'event_msg', payload: { type: 'task_complete' } },
+    ]));
+    expect(summary.state).toBe('idle');
+  });
+
+  it('reads idle after turn_aborted with dangling tool calls', () => {
+    const summary = parseCodexRollout(jsonl([
+      { type: 'event_msg', payload: { type: 'user_message', message: 'go' } },
+      {
+        type: 'response_item',
+        payload: { type: 'function_call', call_id: 'call-1', name: 'exec_command', arguments: '{"cmd":"ls"}' },
+      },
+      { type: 'event_msg', payload: { type: 'turn_aborted' } },
+    ]));
+    expect(summary.state).toBe('idle');
+  });
+
+  it('clears stale pending calls from a prior turn when a new user message arrives', () => {
+    const summary = parseCodexRollout(jsonl([
+      {
+        type: 'response_item',
+        payload: { type: 'function_call', call_id: 'call-old', name: 'exec_command', arguments: '{"cmd":"ls"}' },
+      },
+      { type: 'event_msg', payload: { type: 'user_message', message: 'next turn' } },
+      { type: 'event_msg', payload: { type: 'task_complete' } },
+    ]));
+    expect(summary.state).toBe('idle');
+    expect(summary.hasPendingCalls).toBe(false);
+  });
+
+  it('stays processing through mid-turn thinking gaps and agent messages', () => {
+    // Most of a working turn is the gap between a tool result and the next
+    // tool call. Neither a completed tool call nor a mid-turn agent_message
+    // may flip the state to idle — only task_complete/turn_aborted ends it.
+    const midTurn = jsonl([
+      { type: 'event_msg', payload: { type: 'user_message', message: 'do work' } },
+      { type: 'event_msg', payload: { type: 'task_started', model_context_window: 200_000 } },
+      {
+        type: 'response_item',
+        payload: { type: 'function_call', call_id: 'c1', name: 'exec_command', arguments: '{"cmd":"ls"}' },
+      },
+      { type: 'response_item', payload: { type: 'function_call_output', call_id: 'c1' } },
+      { type: 'event_msg', payload: { type: 'agent_message', message: 'partial progress note' } },
+    ]);
+    expect(parseCodexRollout(midTurn).state).toBe('processing');
+
+    // task_started alone (user_message lost in the sampling gap) still arms the turn.
+    const resumed = jsonl([
+      { type: 'event_msg', payload: { type: 'task_started', model_context_window: 200_000 } },
+      { type: 'response_item', payload: { type: 'function_call_output', call_id: 'c0' } },
+    ]);
+    expect(parseCodexRollout(resumed).state).toBe('processing');
+  });
+
   it('maps lsof field output to Codex rollout files by pid', () => {
     const rollouts = parseLsofRollouts([
       'p123',
