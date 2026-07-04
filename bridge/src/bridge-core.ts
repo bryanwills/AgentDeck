@@ -50,17 +50,31 @@ import {
 // scoped session replay later via query_session_timeline.
 export const INITIAL_TIMELINE_HISTORY_MAX_BYTES = 12 * 1024;
 
+/** Attach host-local "HH:MM" to a timeline entry. Devices have no timezone
+ * (their NTP runs UTC), so rendering `ts` directly shows a 9-hour-off clock
+ * in KST. Stamped at the SOURCE (broadcast + history) so both the serial and
+ * WS transports carry it; native apps simply ignore the extra field. */
+export function stampLocalHm<T extends { ts?: number; localHm?: string }>(entry: T): T {
+  if (!entry || !Number.isFinite(entry.ts) || entry.localHm) return entry;
+  const d = new Date(entry.ts as number);
+  return {
+    ...entry,
+    localHm: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+  };
+}
+
 export function buildCappedTimelineHistory(
   entries: TimelineEntry[],
   maxBytes = INITIAL_TIMELINE_HISTORY_MAX_BYTES,
   extraFields: Record<string, unknown> = {},
 ): BridgeEvent | null {
+  const stamped = entries.map((e) => stampLocalHm(e));
   const kept: TimelineEntry[] = [];
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const candidate = [entries[i], ...kept];
+  for (let i = stamped.length - 1; i >= 0; i--) {
+    const candidate = [stamped[i], ...kept];
     const event = { type: 'timeline_history', ...extraFields, entries: candidate } as BridgeEvent;
     if (Buffer.byteLength(JSON.stringify(event), 'utf8') <= maxBytes) {
-      kept.unshift(entries[i]);
+      kept.unshift(stamped[i]);
     }
   }
   return kept.length > 0 ? ({ type: 'timeline_history', ...extraFields, entries: kept } as BridgeEvent) : null;
@@ -234,9 +248,9 @@ export class BridgeCore {
     }
     this.bridgeTimeline.onEntry((entry, upsert) => {
       // Entry is already attributed by the storage-time attributor above;
-      // forward as-is. Doing the attribution here too would be redundant
-      // (idempotent but wasteful) and risks divergence if the rule changes.
-      const evt: BridgeEvent = { type: 'timeline_event', entry, ...(upsert ? { upsert: true } : {}) };
+      // forward as-is (plus the device-local HH:MM stamp). Doing the
+      // attribution here too would be redundant and risks divergence.
+      const evt: BridgeEvent = { type: 'timeline_event', entry: stampLocalHm(entry), ...(upsert ? { upsert: true } : {}) };
       this.broadcast(evt);
     });
   }

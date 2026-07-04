@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <GxEPD2_BW.h>
+#include <U8g2_for_Adafruit_GFX.h>
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold9pt7b.h>
@@ -47,6 +48,10 @@ constexpr uint32_t FULL_MAX_AGE_MS         = 10UL * 60UL * 1000UL;
 
 using Panel = GxEPD2_750_GDEY075T7;
 GxEPD2_BW<Panel, Panel::HEIGHT> display(Panel(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+// UTF-8/한글 renderer for dynamic text (project names, prompts, activity,
+// ticker). GFX FreeFonts are Latin-only — Korean previously degraded to
+// "######?" garbage via the ASCII sanitizer.
+U8G2_FOR_ADAFRUIT_GFX u8f;
 
 constexpr int16_t W = 800, H = 480;
 
@@ -279,6 +284,65 @@ void fitText(char* out, size_t outLen, const char* s, int16_t maxW, const GFXfon
     }
 }
 
+// ===== UTF-8 / 한글 text path =====
+// ASCII text keeps the crisp GFX FreeFonts; anything with multibyte chars
+// (Korean project names / prompts / activity summaries) renders through the
+// u8g2 unifont Korean set instead of degrading to '#' runs.
+
+bool isAsciiOnly(const char* s) {
+    for (; *s; s++) if ((uint8_t)*s >= 128) return false;
+    return true;
+}
+
+// Back off `n` to a UTF-8 character boundary (never split a 한글 glyph).
+size_t utf8Boundary(const char* s, size_t n) {
+    while (n > 0 && ((uint8_t)s[n] & 0xC0) == 0x80) n--;
+    return n;
+}
+
+size_t utf8CharCount(const char* s) {
+    size_t n = 0;
+    for (; *s; s++) if (((uint8_t)*s & 0xC0) != 0x80) n++;
+    return n;
+}
+
+void uFontSetup() {
+    u8f.setFont(u8g2_font_unifont_t_korean2);
+    u8f.setFontMode(1);  // transparent background
+    u8f.setForegroundColor(inkColor);
+}
+
+int16_t smartWidth(const char* s, const GFXfont* f) {
+    if (isAsciiOnly(s)) return textWidth(s, f);
+    uFontSetup();
+    return (int16_t)u8f.getUTF8Width(s);
+}
+
+void smartTextAt(int16_t x, int16_t y, const char* s, const GFXfont* f) {
+    if (isAsciiOnly(s)) { textAt(x, y, s, f); return; }
+    uFontSetup();
+    u8f.setCursor(x, y);
+    u8f.print(s);
+}
+
+// Fit-with-ellipsis that is UTF-8 safe and font-smart.
+void smartFitText(char* out, size_t outLen, const char* s, int16_t maxW, const GFXfont* f) {
+    if (isAsciiOnly(s)) { fitText(out, outLen, s, maxW, f); return; }
+    strncpy(out, s, outLen - 1); out[outLen - 1] = '\0';
+    if (smartWidth(out, f) <= maxW) return;
+    size_t len = strlen(out);
+    while (len > 1) {
+        len = utf8Boundary(out, len - 1);
+        out[len] = '\0';
+        char probe[120];
+        snprintf(probe, sizeof(probe), "%s..", out);
+        if (smartWidth(probe, f) <= maxW) {
+            strncpy(out, probe, outLen - 1); out[outLen - 1] = '\0';
+            return;
+        }
+    }
+}
+
 // Greedy 2-line wrap in a SINGLE font (mixed sizes across the two lines read
 // as a glitch on paper). Line 1 breaks at the last space that fits — falling
 // back to a mid-word hard break only when one word alone exceeds the width
@@ -286,13 +350,14 @@ void fitText(char* out, size_t outLen, const char* s, int16_t maxW, const GFXfon
 // line). Line 2 ellipsizes as the last resort.
 void drawWrapped2(int16_t x, int16_t y1, int16_t y2, int16_t maxW,
                   const char* text, const GFXfont* f) {
-    if (textWidth(text, f) <= maxW) { textAt(x, y1, text, f); return; }
+    if (smartWidth(text, f) <= maxW) { smartTextAt(x, y1, text, f); return; }
     size_t len = strlen(text);
     size_t take = len;
     char probe[112];
     while (take > 1) {
+        take = utf8Boundary(text, take);
         strncpy(probe, text, take); probe[take] = '\0';
-        if (textWidth(probe, f) <= maxW) break;
+        if (smartWidth(probe, f) <= maxW) break;
         take--;
     }
     size_t brk = take;
@@ -302,13 +367,13 @@ void drawWrapped2(int16_t x, int16_t y1, int16_t y2, int16_t maxW,
         if (sp > take / 2) brk = sp;  // word boundary, but never a near-empty line 1
     }
     strncpy(probe, text, brk); probe[brk] = '\0';
-    textAt(x, y1, probe, f);
+    smartTextAt(x, y1, probe, f);
     const char* rest = text + brk;
     while (*rest == ' ') rest++;
     if (*rest) {
         char l2[112];
-        fitText(l2, sizeof(l2), rest, maxW, f);
-        textAt(x, y2, l2, f);
+        smartFitText(l2, sizeof(l2), rest, maxW, f);
+        smartTextAt(x, y2, l2, f);
     }
 }
 
@@ -537,16 +602,15 @@ void drawUsageFooter(const Snap& s, bool showIdentity) {
     }
 
     // Ticker — latest timeline event as ONE compressed line (the per-card
-    // activity summary is the surface that gets two lines, not this). Single
-    // 9pt font: dropping to the tiny classic font here read as a glitch.
+    // activity summary is the surface that gets two lines, not this).
+    // UTF-8/한글 safe — Korean prompts previously rendered as "######?".
     if (s.tickerText[0]) {
         const int16_t ty = 470;
         textAt(16, ty, s.tickerTime, &FreeSansBold9pt7b);
-        char t[104]; ascii(t, sizeof(t), s.tickerText);
         char tf[108];
         int16_t maxW = W - 74 - 16 - agW - (showIdentity ? 110 : 0);
-        fitText(tf, sizeof(tf), t, maxW, &FreeSans9pt7b);
-        textAt(74, ty, tf, &FreeSans9pt7b);
+        smartFitText(tf, sizeof(tf), s.tickerText, maxW, &FreeSans9pt7b);
+        smartTextAt(74, ty, tf, &FreeSans9pt7b);
     }
 }
 
@@ -574,15 +638,20 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
     int16_t tx = gx + glyph + (w >= 340 ? 18 : 12);
     int16_t maxTextW = x + w - tx - 12;
 
-    // Project name — font cascade before any truncation
-    char name[40]; ascii(name, sizeof(name), r.name);
-    if (!name[0]) strncpy(name, "(unnamed)", sizeof(name) - 1);
-    char fitted[48];
-    const GFXfont* nameFont = tall
-        ? fitCascade(fitted, sizeof(fitted), name, maxTextW, &FreeSansBold18pt7b, &FreeSansBold12pt7b)
-        : fitCascade(fitted, sizeof(fitted), name, maxTextW, &FreeSansBold12pt7b, &FreeSansBold9pt7b);
+    // Project name — ASCII gets the bold cascade; 한글 names render via the
+    // unifont path (previously mangled to '#' runs by the ASCII sanitizer)
+    const char* rawName = r.name[0] ? r.name : "(unnamed)";
+    char fitted[64];
     int16_t ny = y + (tall ? 52 : 32);
-    textAt(tx, ny, fitted, nameFont);
+    if (isAsciiOnly(rawName)) {
+        const GFXfont* nameFont = tall
+            ? fitCascade(fitted, sizeof(fitted), rawName, maxTextW, &FreeSansBold18pt7b, &FreeSansBold12pt7b)
+            : fitCascade(fitted, sizeof(fitted), rawName, maxTextW, &FreeSansBold12pt7b, &FreeSansBold9pt7b);
+        textAt(tx, ny, fitted, nameFont);
+    } else {
+        smartFitText(fitted, sizeof(fitted), rawName, maxTextW, &FreeSansBold12pt7b);
+        smartTextAt(tx, ny, fitted, &FreeSansBold12pt7b);
+    }
 
     // State line: marker + label (+ current tool while processing). Session
     // age was dropped here — elapsedSec is time since session START, and
@@ -606,24 +675,24 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
     // "what did/is this agent actually doing", far more glanceable than a timer.
     int16_t dy = sy + 24;
     if (awaiting && r.question[0]) {
-        char q[120]; ascii(q, sizeof(q), r.question);
-        // wrap up to 2 lines (3 on tall cards)
+        // wrap up to 2 lines (3 on tall cards) — UTF-8/한글 safe
         int maxLines = tall ? 3 : (h >= 130 ? 2 : 1);
-        const char* p = q;
+        const char* p = r.question;
         for (int line = 0; line < maxLines && *p && dy < y + h - 8; line++) {
-            char buf[64];
+            char buf[112];
             size_t n = strlen(p);
-            size_t take = n;
+            size_t take = n < sizeof(buf) - 1 ? n : sizeof(buf) - 1;
+            take = utf8Boundary(p, take);
             while (take > 0) {
                 strncpy(buf, p, take); buf[take] = '\0';
-                if (textWidth(buf, &FreeSans9pt7b) <= maxTextW) break;
-                // back off to previous space if any
+                if (smartWidth(buf, &FreeSans9pt7b) <= maxTextW) break;
+                // back off to previous space if any, else previous UTF-8 char
                 size_t sp = take - 1;
                 while (sp > 0 && p[sp] != ' ') sp--;
-                take = sp > 0 ? sp : take - 1;
+                take = sp > 0 ? sp : utf8Boundary(p, take - 1);
             }
             strncpy(buf, p, take); buf[take] = '\0';
-            textAt(tx, dy, buf, &FreeSans9pt7b);
+            smartTextAt(tx, dy, buf, &FreeSans9pt7b);
             p += take;
             while (*p == ' ') p++;
             dy += 20;
@@ -642,11 +711,14 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
         }
     } else if (r.activity[0] && dy < y + h - 8) {
         // Activity summary gets up to TWO wrapped lines (same font on both) —
-        // this line is the point of the card, so give it room.
-        char a[80]; ascii(a, sizeof(a), r.activity);
+        // this line is the point of the card, so give it room. UTF-8/한글 safe.
         bool roomFor2 = dy + 20 < y + h - 6;
-        if (roomFor2) drawWrapped2(tx, dy, dy + 20, maxTextW, a, &FreeSans9pt7b);
-        else { char af[84]; fitText(af, sizeof(af), a, maxTextW, &FreeSans9pt7b); textAt(tx, dy, af, &FreeSans9pt7b); }
+        if (roomFor2) drawWrapped2(tx, dy, dy + 20, maxTextW, r.activity, &FreeSans9pt7b);
+        else {
+            char af[96];
+            smartFitText(af, sizeof(af), r.activity, maxTextW, &FreeSans9pt7b);
+            smartTextAt(tx, dy, af, &FreeSans9pt7b);
+        }
     }
 
     // Model tag bottom-right on every card — narrow cards drop to the
@@ -682,18 +754,23 @@ void drawIdleDock(const Snap& s, const uint8_t* idx, uint8_t count,
     uint8_t shown = 0;
     for (uint8_t k = 0; k < count; k++) {
         const RowSnap& r = s.rows[idx[k]];
-        char name[24]; ascii(name, sizeof(name), r.name);
-        if (!name[0]) strncpy(name, "(unnamed)", sizeof(name) - 1);
-        char nf[26];
-        fitText(nf, sizeof(nf), name, 130, &FreeSans9pt7b);
-        int16_t entryW = 26 + 6 + textWidth(nf, &FreeSans9pt7b) + 22;
+        const char* rawName = r.name[0] ? r.name : "(unnamed)";
+        // Names up to 20 chars render WHOLE — the chips flow, so a wider chip
+        // just takes more row, and an ellipsized short name reads as a bug.
+        char nf[48];
+        if (utf8CharCount(rawName) <= 20) {
+            strncpy(nf, rawName, sizeof(nf) - 1); nf[sizeof(nf) - 1] = '\0';
+        } else {
+            smartFitText(nf, sizeof(nf), rawName, 170, &FreeSans9pt7b);
+        }
+        int16_t entryW = 26 + 6 + smartWidth(nf, &FreeSans9pt7b) + 22;
         if (x + entryW > right - 54) {          // leave room for +N
             if (row == 0) { row = 1; x = x0; }  // wrap to the second chip row
             else break;
             if (x + entryW > right - 54) break; // single chip wider than a row
         }
         drawAgentGlyph(r.agentType, x, rowTopY[row], 26);
-        textAt(x + 32, rowTopY[row] + 20, nf, &FreeSans9pt7b);
+        smartTextAt(x + 32, rowTopY[row] + 20, nf, &FreeSans9pt7b);
         x += entryW;
         shown++;
     }
@@ -847,6 +924,7 @@ void init() {
     // parse failures from the TX congestion).
     display.init(0, true, 2, false);
     display.setRotation(0);
+    u8f.begin(display);  // UTF-8/한글 text path (unifont) on the same canvas
     Serial.printf("[Eink] GDEY075T7 init %dx%d, partial=%d\n",
                   display.width(), display.height(),
                   (int)display.epd2.hasFastPartialUpdate);
