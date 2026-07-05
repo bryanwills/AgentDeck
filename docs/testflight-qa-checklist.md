@@ -53,10 +53,10 @@ Before starting, note your macOS version, device model, and any non-default acce
 - [ ] **C2**. Confirm no Terminal window, `.command` file, AppleScript prompt, or child process is created by AgentDeck during normal use.
 - [ ] **C3**. Open Settings → Claude Code Hooks. Click **Enable Claude Code Hooks…**
 - [ ] **C4**. An NSAlert explains what will be written. Click Continue.
-- [ ] **C5**. An NSOpenPanel opens at `~/.claude/`. Select `settings.local.json`. AgentDeck writes hooks and Settings shows a green "Hooks installed" status.
+- [ ] **C5**. An NSOpenPanel opens at `~/.claude/`. Select `settings.json`. AgentDeck writes hooks and Settings shows a green "Hooks installed" status.
 - [ ] **C6**. Type a simple prompt in Claude Code ("explain this file"). Within 2-3 seconds the dashboard terrarium shows an active creature, tools are listed in the tank panel, and the timeline strip scrolls.
 - [ ] **C7**. Finish the Claude Code session. The creature state transitions to idle.
-- [ ] **C8**. Settings → Claude Code Hooks → **Remove**. Settings shows "Not configured" again. Verify `~/.claude/settings.local.json` no longer contains AgentDeck hook entries (e.g., `cat` it in Terminal).
+- [ ] **C8**. Settings → Claude Code Hooks → **Remove**. Settings shows "Not configured" again. Verify `~/.claude/settings.json` no longer contains AgentDeck hook entries (e.g., `cat` it in Terminal).
 
 ---
 

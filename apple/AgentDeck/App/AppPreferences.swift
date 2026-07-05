@@ -223,6 +223,21 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         didSet { defaults.set(hasSeenOnboarding, forKey: Keys.hasSeenOnboarding) }
     }
 
+    /// Opt-in OpenCode server monitoring (Settings → Integrations). Default
+    /// OFF — while disabled the daemon makes ZERO OpenCode probes. When on,
+    /// OpenCodeObserver connects to a user-run `opencode serve` (user URL /
+    /// default port 4096 / explicit `--port` in argv) as a read-only SSE
+    /// client. Same "user-enabled local client to the user's own server"
+    /// posture as the OpenClaw Gateway.
+    @Published var openCodeMonitoringEnabled: Bool {
+        didSet { defaults.set(openCodeMonitoringEnabled, forKey: Keys.openCodeMonitoringEnabled) }
+    }
+
+    /// Base URL OpenCodeObserver probes first. User-editable in Settings.
+    @Published var openCodeServerURL: String {
+        didSet { defaults.set(openCodeServerURL, forKey: Keys.openCodeServerURL) }
+    }
+
     private let defaults: UserDefaults
 
     private init(defaults: UserDefaults = .standard) {
@@ -260,6 +275,8 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         self.hasSeenMonitorEmptyGuide = defaults.object(forKey: Keys.hasSeenMonitorEmptyGuide) as? Bool ?? false
         self.hasRequestedNotifications = defaults.object(forKey: Keys.hasRequestedNotifications) as? Bool ?? false
         self.hasSeenOnboarding = defaults.object(forKey: Keys.hasSeenOnboarding) as? Bool ?? false
+        self.openCodeMonitoringEnabled = defaults.object(forKey: Keys.openCodeMonitoringEnabled) as? Bool ?? false
+        self.openCodeServerURL = defaults.string(forKey: Keys.openCodeServerURL) ?? "http://127.0.0.1:4096"
     }
 
     /// Merge the new backend choice into settings.json without clobbering
@@ -781,5 +798,7 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         static let hasSeenMonitorEmptyGuide = "prefs.hasSeenMonitorEmptyGuide"
         static let hasRequestedNotifications = "prefs.hasRequestedNotifications"
         static let hasSeenOnboarding = "prefs.hasSeenOnboarding"
+        static let openCodeMonitoringEnabled = "prefs.openCodeMonitoringEnabled"
+        static let openCodeServerURL = "prefs.openCodeServerURL"
     }
 }

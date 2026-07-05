@@ -1622,9 +1622,43 @@ struct SettingsScreen: View {
             antigravityDatabaseSlot
         case "codex":
             codexUsageDirectorySlot
+        case "opencode":
+            openCodeMonitoringSlot
         default:
             EmptyView()
         }
+    }
+
+    /// Opt-in OpenCode monitoring (default OFF — zero probes while off).
+    /// Read-only SSE client to a server the user runs themselves; copy is
+    /// configuration-factual only (App Review 4.2.3 — no install nudge).
+    @ViewBuilder
+    private var openCodeMonitoringSlot: some View {
+        #if os(macOS)
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Monitor OpenCode server", isOn: $preferences.openCodeMonitoringEnabled)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .font(.system(size: 11))
+            if preferences.openCodeMonitoringEnabled {
+                HStack(spacing: 6) {
+                    Text("Server URL")
+                        .font(.system(size: 10))
+                        .foregroundStyle(TerrariumHUD.subtext)
+                    TextField("http://127.0.0.1:4096", text: $preferences.openCodeServerURL)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 10, design: .monospaced))
+                        .frame(maxWidth: 220)
+                }
+                Text("Also detects servers started with an explicit `opencode --port N`. A default TUI on a random port is not discoverable.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        #else
+        EmptyView()
+        #endif
     }
 
     @ViewBuilder

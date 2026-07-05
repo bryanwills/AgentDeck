@@ -57,7 +57,7 @@ Bonjour 자동 발견 + QR 페어링. Mac에서 돌아가는 에이전트 세션
 OpenClaw Gateway를 로컬에서 실행 중이면 자동으로 operator 클라이언트로 페어링. 세션 목록, 모델 카탈로그, 도구 승인 요청을 대시보드에서 처리.
 
 • Claude Code Hook 옵션 설치
-첫 실행 시 자동 설치하지 않습니다. 설정에서 "Enable Claude Code Hooks…" 버튼을 누르고 ~/.claude/settings.local.json을 직접 선택해야 훅이 등록됩니다. 언제든 제거 가능.
+첫 실행 시 자동 설치하지 않습니다. 설정에서 "Enable Claude Code Hooks…" 버튼을 누르고 ~/.claude/settings.json을 직접 선택해야 훅이 등록됩니다. 언제든 제거 가능.
 
 • 음성 입력 (제로 셋업)
 Apple on-device 음성 인식(SFSpeechRecognizer)으로 음성 → 텍스트 → 에이전트 전송. 추가 설치 없이 작동하며, 녹음은 기기를 떠나지 않습니다.
@@ -169,7 +169,7 @@ See how AgentDeck renders on Stream Deck+, Apple Watch, iPad, E-ink readers, ESP
 Auto-pairs as an operator client when an OpenClaw Gateway is running locally (ws://127.0.0.1:18789). Self-generated Ed25519 identity stored in Keychain; the Gateway-issued device token is reused on reconnect.
 
 • Opt-in Claude Code hooks
-AgentDeck does not auto-install hooks. Go to Settings → Claude Code Hooks → Enable, pick your ~/.claude/settings.local.json file explicitly, and we'll register 7 hooks to stream session state into the dashboard. Remove any time.
+AgentDeck does not auto-install hooks. Go to Settings → Claude Code Hooks → Enable, pick your ~/.claude/settings.json file explicitly, and we'll register 7 hooks to stream session state into the dashboard. Remove any time.
 
 • Voice input with zero install
 Press the voice button, speak your command, and Apple's on-device SFSpeechRecognizer transcribes locally — no whisper.cpp, no sox, no model download. Audio never leaves your device.

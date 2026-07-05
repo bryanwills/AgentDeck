@@ -614,6 +614,14 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
             displaySync.handleDisplayState(displayOn: e.displayOn, dim: e.dim)
         case .sessionsList(let e):
             state.siblingSessions = e.sessions
+            #if os(macOS)
+            // Post/clear the "needs your response" system notification for
+            // sessions entering/leaving an awaiting state. App-layer so it
+            // covers both tiers (in-process Swift daemon + external Node
+            // daemon client mode) with one implementation.
+            let sessions = e.sessions
+            Task { @MainActor in AttentionNotifier.sync(sessions: sessions) }
+            #endif
         case .promptOptions(let e):
             state.options = e.options
             state.promptType = PromptType(rawValue: e.promptType)

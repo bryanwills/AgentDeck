@@ -3,6 +3,7 @@
 import SwiftUI
 #if os(macOS)
 import ServiceManagement
+import UserNotifications
 #endif
 
 @main
@@ -202,6 +203,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var daemonService: DaemonService?
     weak var stateHolder: AgentStateHolder?
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Foreground-banner presentation for attention notifications
+        // (see UNUserNotificationCenterDelegate extension below).
+        UNUserNotificationCenter.current().delegate = self
+    }
+
     /// Intercept termination to run daemon cleanup without blocking the main
     /// thread. The previous `applicationWillTerminate` implementation pumped
     /// `RunLoop.main.run(before:)` in 50ms slices for up to 3 s while waiting
@@ -263,6 +270,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // MenuBarExtra keeps the app running — this only affects cases where no
         // menu bar icon is active. Return false to keep the menu bar alive.
         return false
+    }
+}
+
+/// Present attention notifications as banners even while AgentDeck is the
+/// frontmost app — without a delegate, UNUserNotificationCenter suppresses
+/// foreground notifications entirely and the "needs your response" banner
+/// (AttentionNotifier) would only ever appear when the app is backgrounded.
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 }
 #endif

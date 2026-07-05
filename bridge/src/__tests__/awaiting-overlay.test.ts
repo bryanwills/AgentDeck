@@ -152,4 +152,34 @@ describe('awaiting-overlay', () => {
       expect(out[0]).toMatchObject({ state: 'awaiting_permission', question: 'Allow Bash: ls?', requestId: 'req-xyz' });
     });
   });
+
+  // Locks the daemon-server notification-branch contract restored on
+  // 2026-07-05 (display-only; the held PreToolUse gate stays removed).
+  // Mirrors the /hooks/ handler sequence in daemon-server.ts.
+  describe('display-only notification flow (daemon restore contract)', () => {
+    const observed = (id: string, state: string) => ({ id, state });
+
+    it('permission_prompt notification → awaiting with NO requestId; next hook clears', () => {
+      const sid = 'uuid-flow';
+      // 1. Notification hook arrives — gate on the authoritative type.
+      expect(isPermissionNotification('permission_prompt', 'Claude needs your permission to use Bash')).toBe(true);
+      setAwaitingOverlay(sid, 'Claude needs your permission to use Bash'); // no requestId — display-only
+      // 2. Observed enrich renders respond-in-terminal (requestId undefined).
+      const out = applyAwaitingOverlayToObserved([observed(`observed:claude:${sid}`, 'processing')]);
+      expect(out[0]).toMatchObject({ state: 'awaiting_permission', requestId: undefined });
+      // 3. The user answered in the terminal → the tool fires → clear.
+      expect(clearAwaitingOverlay(sid)).toBe(true);
+      expect(applyAwaitingOverlayToObserved([observed(`observed:claude:${sid}`, 'processing')])[0].state)
+        .toBe('processing');
+    });
+
+    it('idle ping / auto-approved tool never sets the overlay (the 2026-06-27 false-attention bug)', () => {
+      // Idle reminder rides the same Notification hook — must not gate.
+      expect(isPermissionNotification('idle_prompt', 'Claude is waiting for your input')).toBe(false);
+      // Auto-approved tools fire PreToolUse but never a permission
+      // Notification — so no overlay is ever set for them; nothing to assert
+      // beyond the gate above rejecting non-permission types.
+      expect(isPermissionNotification(undefined, 'Running npm test')).toBe(false);
+    });
+  });
 });

@@ -99,10 +99,8 @@ export function applyAwaitingOverlayToObserved<
  * `waiting for your` / `wants to` / `confirm` / `to proceed` were too broad and
  * caught the idle ping (and arbitrary status text), which was the root cause of
  * false "Attention" popups. Biased toward precision: a missed permission
- * Notification just means no soft attention badge for a non-gated tool (the user
- * still sees the prompt in their terminal), whereas a false positive nags with a
- * dead popup. Gated tools (Bash/Write/Edit/…) are unaffected — they take the
- * held PreToolUse path with a real requestId, independent of this filter.
+ * Notification just means no attention badge (the user still sees the prompt in
+ * their terminal), whereas a false positive nags with a dead popup.
  *
  * Used only when Claude omits the structured `notification_type` (older
  * versions); current Claude is classified by `isPermissionNotification`.

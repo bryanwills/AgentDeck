@@ -131,6 +131,17 @@ enum IntegrationCatalog {
         connectInstructions: "Pick the Antigravity state.vscdb file once so the sandboxed app can read it."
     )
 
+    static let openCode = IntegrationDescriptor(
+        id: "opencode",
+        displayName: "OpenCode",
+        kind: .accountLinked,
+        iconSystemName: "circle.circle",
+        oneLineHelp: "Read-only session monitoring of an OpenCode server already running on this Mac.",
+        // Configuration-factual copy only — describes connecting to the
+        // user's own server, never an install step (App Review 4.2.3).
+        connectInstructions: "Turn on monitoring to connect to a running OpenCode server (`opencode serve`)."
+    )
+
     static let anthropicAdmin = IntegrationDescriptor(
         id: "anthropic-admin",
         displayName: "Anthropic Admin API",
@@ -143,7 +154,7 @@ enum IntegrationCatalog {
     )
 
     static let all: [IntegrationDescriptor] = [
-        claudeCode, codex, openClaw, antigravity, anthropicAdmin,
+        claudeCode, codex, openClaw, antigravity, openCode, anthropicAdmin,
     ]
 }
 
@@ -211,6 +222,8 @@ enum IntegrationStatusEvaluator {
             return openClawStatus(state: state)
         case "antigravity":
             return antigravityStatus(state: state, preferences: preferences)
+        case "opencode":
+            return openCodeStatus(preferences: preferences)
         case "anthropic-admin":
             return anthropicStatus(state: state, hasKey: anthropicKeySaved)
         default:
@@ -341,6 +354,15 @@ enum IntegrationStatusEvaluator {
         let credits = info.availableCredits.map { "\($0) cr" }
         let detail = [plan, credits].compactMap { $0 }.joined(separator: " · ")
         return .connected(detail: detail)
+    }
+
+    private static func openCodeStatus(preferences: AppPreferences) -> IntegrationStatus {
+        guard preferences.openCodeMonitoringEnabled else {
+            // Neutral copy — the feature is optional and default-off; no nag,
+            // no companion-install phrasing.
+            return .notConfigured(detail: "Optional. Monitors an OpenCode server running on this Mac when enabled.")
+        }
+        return .connected(detail: "Monitoring on — sessions appear when a server responds at \(preferences.openCodeServerURL) or an explicit --port.")
     }
 
     private static func anthropicStatus(state: DashboardState, hasKey: Bool) -> IntegrationStatus {

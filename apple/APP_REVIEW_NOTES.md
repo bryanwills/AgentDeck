@@ -4,7 +4,7 @@ _Paste the relevant sections into App Store Connect's "Notes" field when submitt
 
 ## What AgentDeck does
 
-AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding agents (Claude Code, opt-in Codex CLI lifecycle hooks, and OpenClaw Gateway sessions). It shows live session status, tool activity, and quality scores on the Mac, and — via the free iOS companion app — on an iPad or iPhone used as a secondary display. OpenCode monitoring is intentionally outside the App Store build and is available only through the optional developer bridge described below.
+AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding agents (Claude Code, opt-in Codex CLI lifecycle hooks, opt-in OpenCode server monitoring, and OpenClaw Gateway sessions). It shows live session status, tool activity, and quality scores on the Mac, and — via the free iOS companion app — on an iPad or iPhone used as a secondary display. When an agent genuinely waits for the user's decision (Claude Code reports a permission prompt via its Notification hook), the dashboard marks the session as "needs attention" and posts a local user notification — display-only; the user answers in their own terminal.
 
 **Works standalone on Mac.** All core features (dashboard, APME evaluation reports, Device Preview, Claude Code hook integration, and iOS pairing) work without any additional hardware or AgentDeck companion executable. Users run their AI agent in their own terminal; AgentDeck receives opt-in hook events.
 
@@ -32,15 +32,19 @@ AgentDeck stores daemon state (session registry, auth token, cached usage metric
 
 ## Hook installation (Claude Code settings file)
 
-AgentDeck can optionally register hooks in `~/.claude/settings.local.json` so Claude Code sessions report state to the dashboard. This is entirely opt-in:
+AgentDeck can optionally register hooks in `~/.claude/settings.json` so Claude Code sessions report state to the dashboard. This is entirely opt-in:
 
 1. On first launch the dashboard does **not** touch that file.
 2. The user navigates to Settings → Claude Code Hooks → "Enable Claude Code Hooks…".
 3. An `NSAlert` explains what keys will be written.
-4. On acceptance, an `NSOpenPanel` requires the user to explicitly pick `~/.claude/settings.local.json`. Only then do we acquire a security-scoped bookmark and write the hook entries.
+4. On acceptance, an `NSOpenPanel` requires the user to explicitly pick `~/.claude/settings.json`. Only then do we acquire a security-scoped bookmark and write the hook entries.
 5. Writes are scoped to this single user-selected file; the app reads no other files in `~/.claude/`.
 
 The UI also offers a "Remove" button that deletes our hook entries and revokes the bookmark.
+
+## Local notifications
+
+AgentDeck posts a local `UNUserNotification` when a monitored session genuinely waits for the user's response (e.g. Claude Code shows a permission prompt in the user's terminal), and clears it the moment the session moves on. Authorization is requested through an explanatory in-app prompt on first launch (the user can decline; a "Request Again" affordance lives in Settings). No push notifications, no remote notification service — everything is local.
 
 ## USB HID entitlement (`com.apple.security.device.usb`)
 
@@ -61,7 +65,7 @@ Used to communicate with the optional iDotMatrix and Divoom Timebox Mini LED pix
 
 ### What about the Claude Code hook commands?
 
-Claude Code hooks run `python3` / `curl` at the user's shell prompt, in their own terminal session, under Claude Code's process tree — not AgentDeck's. The hook *string* is data AgentDeck writes (with the user's explicit consent via `NSOpenPanel` + security-scoped bookmark) into `~/.claude/settings.local.json`. Claude Code's own runtime is what eventually executes that string when the user runs Claude Code. AgentDeck itself only receives HTTP POSTs from those hooks on `localhost:9120`.
+Claude Code hooks run `python3` / `curl` at the user's shell prompt, in their own terminal session, under Claude Code's process tree — not AgentDeck's. The hook *string* is data AgentDeck writes (with the user's explicit consent via `NSOpenPanel` + security-scoped bookmark) into `~/.claude/settings.json`. Claude Code's own runtime is what eventually executes that string when the user runs Claude Code. AgentDeck itself only receives HTTP POSTs from those hooks on `localhost:9120`.
 
 ### Bundled helpers
 
@@ -79,9 +83,16 @@ Unlike the other advanced integrations, OpenClaw **is** first-class in the App S
   2. Tap "Import token" in the OpenClaw troubleshoot row. AgentDeck presents an `NSOpenPanel`. The panel's title and message text mention `~/.openclaw/openclaw.json` as the *typical* OpenClaw config location — this is human-readable hint text only. `directoryURL` is set to `~/.openclaw/` when that folder exists (so the non-hidden `openclaw.json` is immediately visible), otherwise to the user's real home directory (resolved via `getpwuid(getuid()).pw_dir`, since `NSHomeDirectory()` inside the sandbox returns the app's container path which is not where OpenClaw lives). The only programmatic file-system call before the user selects anything is a single `FileManager.fileExists` check to choose that starting folder — no directory enumeration. The panel itself runs in Powerbox outside the sandbox and is allowed to present that path as a navigation starting point; the hint grants no read permission by itself — only what the user explicitly selects in the panel is readable. The panel does **not** preselect any specific file, the user is free to navigate elsewhere or cancel, and AgentDeck never opens, traverses, or enumerates any path under the user's real home outside the file the user picks here. The selected file's bytes are read into memory (`Data(contentsOf:)`) and parsed via `JSONSerialization`; from the resulting object **only the gateway token string is used** — it is written to the macOS Keychain via `OpenClawGatewayTokenStore`, and every other parsed value goes out of scope and is freed when the import method returns. The read is performed inside a `startAccessingSecurityScopedResource()` / `defer stop` pair under the existing `com.apple.security.files.user-selected.read-write` entitlement. AgentDeck additionally stores an app-scoped security-scoped bookmark to **the single file the user picked** (under `com.apple.security.files.bookmarks.app-scope`, the same mechanism used for the Claude/Codex/Antigravity file integrations) so that a later rotated token can be re-read from that same file on reconnect — never any other path. The bookmark is revoked when the user taps "Clear" on the token.
 - Reviewers without OpenClaw installed will see "Not configured" and can skip this integration entirely. The "Import token" button is also fully optional — reviewers can validate the panel without selecting any file.
 
-### OpenCode (not in the App Store build)
+### OpenCode (opt-in local server monitoring)
 
-OpenCode session monitoring is intentionally **not** part of the App Store build. OpenCode has plugin/event extension surfaces, but AgentDeck does not install plugins, spawn `opencode`, or scan local random ports from the sandboxed app. The App Store build therefore does not attempt to discover native OpenCode sessions. OpenCode is supported only through the optional, separately-distributed Node.js developer bridge described at the top of these notes (`agentdeck opencode` PTY+SSE, plus CLI-daemon passive discovery for already-running processes). No OpenCode-related copy in the App Store app prompts the user to install or launch anything.
+OpenCode session monitoring in the App Store build is an **opt-in, read-only local network client** to a server the user runs themselves — the same posture as the OpenClaw Gateway integration:
+
+- The feature is **off by default**. While off, AgentDeck makes zero OpenCode-related network probes. The user enables it from Settings → Integrations → OpenCode ("Monitor OpenCode server").
+- When enabled, AgentDeck connects (plain `URLSession`, `com.apple.security.network.client`) to an OpenCode HTTP server that the user started independently in their own terminal (`opencode serve`). Discovery is limited to exactly three inputs: (1) the URL the user typed into Settings (default `http://127.0.0.1:4096`), (2) a health check of OpenCode's fixed default port 4096 (the same shape as the OpenClaw fixed-port probe on 18789), and (3) macOS process metadata (`sysctl KERN_PROC_ALL` / `KERN_PROCARGS2` — the same first-party API already used for Codex Desktop detection) to notice an `opencode` process the user launched with an explicit `--port N` argument. AgentDeck does **not** port-scan, does not install OpenCode plugins, and never spawns `opencode`.
+- The connection consumes OpenCode's own read-only event stream (`GET /global/event`, Server-Sent Events) and renders session rows (project, working/idle, current tool). When OpenCode reports a permission request, AgentDeck shows a display-only "needs attention" state — the user responds in their own OpenCode terminal; AgentDeck sends no commands to the server.
+- Reviewers without OpenCode installed see "Not configured" with the toggle off; the integration is fully inert. No OpenCode-related copy in the App Store app prompts the user to install or launch anything.
+
+PTY-level OpenCode session execution remains outside the App Store build (optional developer bridge, described at the top of these notes).
 
 ### Antigravity (usage only in the App Store build)
 

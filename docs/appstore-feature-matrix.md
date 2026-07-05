@@ -4,6 +4,23 @@
 
 > **원칙**: App Store build (`bound.serendipity.agent.deck`) 는 Apple Review Guideline 2.5.2 (인터프리터 번들링 금지) 에 맞춰 `Process()` / `/bin/sh` / 번들된 Node·Python·sqlite3 바이너리를 전혀 싣지 않는다. 하드웨어 모니터링/통신은 sandbox entitlement 로 해결되므로 가능. 서브프로세스가 필요한 것만 CLI 로 밀려난다.
 
+## Two-tier product
+
+AgentDeck 은 의도된 2-티어 제품이다. 아래 매트릭스의 모든 행은 이 두 층 중 하나에 속한다.
+
+- **Tier 1 — App Store 앱 단독** (`bound.serendipity.agent.deck`, 샌드박스, PTY 없음): 그 자체로 완결된 모니터링 대시보드. Claude Code hook + Codex lifecycle/notify/OTel 모니터링(앱이 NSOpenPanel 동의로 hook 을 직접 설치), display-only attention(진짜 permission prompt 가 뜬 순간만 — `notification_type: "permission_prompt"` — awaiting + question + macOS 시스템 알림, Allow/Deny 조작 없음), opt-in OpenCode 서버 SSE 모니터링, OpenClaw Gateway, iPad 페어링, D200H/Pixoo/Timebox/iDotMatrix/ESP32 하드웨어, 음성 입력, APME Layer 2, Admin API 사용량.
+- **Tier 2 — `agentdeck` CLI 추가 설치** (Node daemon, PTY 소유): 순수한 업그레이드. PTY-managed 세션의 **실제 옵션 스티어링**(`select_option` → PTY 키 주입), Claude 구독 사용량 (5h/7d) + Codex credits relay, 이미 실행 중인 세션의 passive discovery(`ps`/`lsof`/transcript), Android/ADB 기기, ESP32 flash, APME Layer 1.
+- **업그레이드 서사는 README / 웹 / 이 문서에만 존재한다.** App Store 앱 안의 어떤 카피도 CLI 설치를 유도하지 않는다 (App Review 4.2.3) — 인앱 카피는 tier 를 모르는 것처럼 동일하게 유지하고, 외부 daemon 감지(`DaemonService.isUsingExternalDaemon`) 시 해당 섹션이 조용히 나타나는 progressive enhancement 만 쓴다.
+
+### Guard conventions (steering UI)
+
+두 티어가 한 UI 를 공유하므로, observed/hook-only 세션에 죽은 버튼이 나타나지 않도록 모든 표면이 같은 규칙을 따른다:
+
+1. **스티어링 컨트롤은 실제 `options[]` 에서만 렌더한다.** 빈 options ⇒ "Respond in the terminal" 폴백 (`MonitorScreen.attentionOptions`, `AttentionTheaterHUD`). Allow/Deny 를 조작(fabricate)하지 않는다.
+2. **observed 경로는 `requestId` 를 절대 emit 하지 않는다.** display-only awaiting = `state: awaiting_permission` + `question` 만.
+3. `respondToAwaiting`/`select_option` 를 부르는 신규 UI 는 반드시 `stateHolder.state.sessionId == session.id && isAwaiting && !options.isEmpty` 게이트를 지켜야 한다 — 게이트 없이 렌더하면 standalone 에서 no-op 버튼이 된다.
+4. attention 판정의 SSOT 는 `isPermissionNotification`(Swift `DaemonServer.swift` / Node `awaiting-overlay.ts` 미러) — `notification_type` 이 권위, free-text regex 는 구버전 fallback. PreToolUse 기반 게이팅은 자동승인 툴에도 발화하므로 금지 (2026-06-27 제거 사유).
+
 ## Core dashboard
 
 | Feature | App Store | CLI | 비고 |
@@ -51,9 +68,9 @@
 | Claude Code 세션 모니터링 (hook 경유) | ✅ | ✅ | hook HTTP POST 수신 |
 | Codex 세션 모니터링 (lifecycle hooks + fallback) | ✅ | ✅ | NSOpenPanel 명시 동의 후 `~/.codex/config.toml` 에 fenced TOML 블록만 편집. Codex lifecycle hooks → `/hooks/codex_*`, optional notify → `/hooks/codex_turn_complete`, optional OTel → `/otel/v1/traces` |
 | 외부에서 이미 실행 중인 Claude/Codex 세션 passive discovery | ❌ | ✅ | `ps`/`lsof`/`/proc` + `~/.claude`/`~/.codex` transcript/rollout JSONL read 가 필요하므로 Node CLI daemon 전용. App Store 단독 앱은 hook/lifecycle 로 opt-in 된 세션만 표시하며 결함 안내 없이 완결 UI 유지 |
-| Permission prompt 표시 (awaiting + question) | ✅ | ✅ | Notification hook 의 free-text `message` 를 `looksLikePermissionMessage` 필터 후 세션 `question` 으로 표출 — 디바이스가 attention tier 로 전환 |
-| Device approval gating (PreToolUse Allow/Deny) | ❌ | ✅ | observed 세션의 PreToolUse hook HTTP 응답을 열어둔 채 디바이스 `permission_decision` 을 기다리는 구조 (`permission-resolver.ts`). Swift daemon 은 `requestId` 를 emit 하지 않으므로 디바이스에 Allow/Deny UI 자체가 나타나지 않음 — 표시상 결함 없이 display-only awaiting 으로 완결 |
-| OpenCode 세션 모니터링 | ❌ | ✅ | OpenCode 는 plugin/event hook 표면을 제공하지만 App Store 앱이 외부 CLI/plugin 을 설치·기동하지 않는다. AgentDeck CLI/Node bridge 는 `agentdeck opencode` PTY+SSE 와 standalone `opencode` passive discovery 로 표시 |
+| Permission prompt 표시 (awaiting + question + 시스템 알림) | ✅ | ✅ | Notification hook 의 `notification_type: "permission_prompt"` (권위 신호 — Claude 가 실제로 permission prompt 를 표시한 순간만 발화; 자동승인 툴은 발화 안 함) 를 `isPermissionNotification` 으로 판별, display-only `awaiting_permission` + `question` 표출 + macOS 시스템 알림(`AttentionNotifier`). 구버전 Claude 는 `looksLikePermissionMessage` regex fallback. `options`/`requestId` 없음 → 모든 표면이 "Respond in the terminal" 렌더 |
+| Device approval gating (PreToolUse Allow/Deny) | ❌ | ❌ | **양쪽 모두 2026-06-27 제거.** PreToolUse 는 자동승인 툴에도 발화해 false attention + fabricated Allow/Deny 를 만들었다. 실제 옵션 스티어링은 PTY-managed 세션(CLI)의 OutputParser 가 읽은 real options 로만 |
+| OpenCode 세션 모니터링 | ⚠️ | ✅ | App Store: **opt-in** (Settings → Integrations, 기본 OFF ⇒ 프로브 0회). 켜면 사용자가 직접 실행한 OpenCode 서버에 read-only SSE 클라이언트로 연결 — 발견은 사용자 설정 URL / `opencode serve` 기본포트 4096 헬스프로브 / sysctl argv 의 명시적 `--port` 3경로만. **기본 TUI(랜덤 포트, argv 미노출)는 발견 불가** — 포트 스캔 안 함. permission.requested 는 display-only awaiting. CLI: `agentdeck opencode` PTY+SSE 풀 경로 + passive discovery |
 | Antigravity 세션 모니터링 | ❌ | ✅ | Antigravity 는 hook/plugin 표면을 제공하지만 App Store 앱이 외부 IDE 세션을 관측하거나 hook 을 설치하지 않는다. CLI daemon 은 standalone Antigravity 프로세스를 passive discovery 해서 creature anchor 로 표시. App Store 앱의 Antigravity 행은 user-approved `state.vscdb` 기반 사용량/크레딧 표시만 |
 | Claude / Codex / OpenCode 세션 실행 | ❌ | ✅ | App Store 는 세션 실행 진입점 없음 — `Launch Session` UI 는 2026-05-10 일괄 제거. App Store 빌드는 사용자가 자기 워크스페이스에서 실행한 agent 세션을 hook/lifecycle 로 passive monitor 만 함 |
 | OpenClaw Gateway pairing (WS 모드) | ✅ | ✅ | `ws://127.0.0.1:18789` 클라이언트 — RPC error + ws close 1008 reason 기반 auto-fallback (device 서명 거부 시 token-only retry) 포함 |
@@ -77,8 +94,8 @@
 
 ## 요약
 
-- **App Store 만 써도** 가능: Claude Code hook 모니터링, **Codex lifecycle hooks + notify/OTel fallback 모니터링**, Anthropic Admin API 사용량 조회, iPad 페어링, **D200H / Pixoo / ESP32** 하드웨어, 음성 입력, APME LLM 평가, **timeline LLM 요약 (Apple Intelligence / MLX / heuristic)**.
-- **App Store 밖 companion 경로**: **Android 기기 전부** (e-ink + 태블릿), ESP32 firmware flash, **OpenCode / Antigravity 세션 모니터링**, Codex / OpenCode PTY 세션 실행, OpenClaw CLI 페어링, APME Layer 1 결정적 평가, Claude 구독 사용량 (5h/7d) gauge.
+- **App Store 만 써도 (Tier 1)** 가능: Claude Code hook 모니터링 + **display-only attention(permission prompt awaiting + 시스템 알림)**, **Codex lifecycle hooks + notify/OTel fallback 모니터링**, **opt-in OpenCode 서버 SSE 모니터링**, Anthropic Admin API 사용량 조회, iPad 페어링, **D200H / Pixoo / ESP32** 하드웨어, 음성 입력, APME LLM 평가, **timeline LLM 요약 (Apple Intelligence / MLX / heuristic)**.
+- **App Store 밖 companion 경로 (Tier 2)**: **PTY 실옵션 스티어링**, **Android 기기 전부** (e-ink + 태블릿), ESP32 firmware flash, **Antigravity 세션 모니터링**, Codex / OpenCode PTY 세션 실행, standalone 세션 passive discovery, OpenClaw CLI 페어링, APME Layer 1 결정적 평가, Claude 구독 사용량 (5h/7d) gauge.
 
 App Store 앱은 companion executable 설치/기동을 요구하지 않는다. 이미 사용자가 터미널에서 별도 daemon을 운영하는 경우에만 같은 포트/WS 프로토콜로 선택적으로 연결되며, 그 신호(`DaemonService.isUsingExternalDaemon`)가 true 일 때만 ADB-tier 디바이스 카드와 RATE LIMITS 섹션이 노출된다(progressive enhancement). 미감지 상태에서는 해당 섹션을 숨겨 단독 앱이 결함 없이 완결성있게 보이도록 한다.
 

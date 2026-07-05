@@ -1,7 +1,7 @@
 // NotificationPermission.swift — First-launch notification authorization flow.
 //
-// AgentDeck posts local notifications for session completion, APME report
-// readiness, and usage-limit warnings via `UNUserNotificationCenter`.
+// AgentDeck posts local notifications when a session needs the user's
+// explicit response (`AttentionNotifier`) via `UNUserNotificationCenter`.
 // Without a prior `requestAuthorization` call those posts silently drop on
 // the floor and App Store users never see them. This helper shows a
 // one-time explanatory `NSAlert` on first launch, then defers to the real

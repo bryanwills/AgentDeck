@@ -22,6 +22,7 @@ import { PassiveSessionObserver } from './passive-observer.js';
 import { SessionTimelineRelay } from './session-timeline-relay.js';
 import { SessionFocusRelay } from './session-focus-relay.js';
 import { updatePushState } from './session-aggregator.js';
+import { setAwaitingOverlay, clearAwaitingOverlay, isPermissionNotification, applyAwaitingOverlayToObserved } from './awaiting-overlay.js';
 import { resolvePending, sweepStalePending, drainAllPending } from './permission-resolver.js';
 import { VoiceManager } from './voice.js';
 import { VoiceAssistantManager } from './voice-assistant.js';
@@ -430,13 +431,15 @@ function latestTimelinePath(): string | null {
   return best?.path ?? null;
 }
 
-// Observed-session attention (the hook-driven Notification overlay + PreToolUse
-// device-approval gate) was removed on 2026-06-27. Hooks carry no structured
-// permission options and PreToolUse fires even for tools Claude auto-approves,
-// so the gate produced false attention and a fabricated Allow/Deny that never
-// matched Claude's real prompt. Accurate, rich steering only exists on
-// PTY-managed sessions (`agentdeck claude`), where the OutputParser reads the
-// real prompt. Observed sessions now report idle/processing only.
+// Observed-session attention history: the held PreToolUse device-approval gate
+// was removed on 2026-06-27 and stays removed — PreToolUse fires even for tools
+// Claude auto-approves, so gating on it produced false attention + a fabricated
+// Allow/Deny that never matched Claude's real prompt. The *display-only*
+// Notification overlay was restored on 2026-07-05: `notification_type:
+// "permission_prompt"` fires only when a permission prompt is actually shown to
+// the user, so it is a genuine awaiting signal. Observed sessions surface
+// awaiting + question with NO requestId (respond-in-terminal UX); steering with
+// real options still exists only on PTY-managed sessions (`agentdeck claude`).
 
 function log(msg: string): void {
   // Timestamped like logger.ts — daemon stderr lands in a long-lived log file,
@@ -985,6 +988,39 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           core.stateMachine.handleHookEvent('PreToolUse', json);
         } else if (mapped === 'tool_end') {
           core.stateMachine.handleHookEvent('PostToolUse', json);
+        }
+        // Per-session awaiting overlay (observed/direct-`claude` sessions),
+        // display-only. Claude emits Notification with `notification_type:
+        // "permission_prompt"` only when a permission prompt is actually shown
+        // to the user (auto-approved tools fire PreToolUse but never this), so
+        // it is a genuine "waiting for explicit response" signal — unlike the
+        // removed PreToolUse gate. No requestId is ever set: surfaces render
+        // awaiting + question with the respond-in-terminal fallback, never a
+        // fabricated Allow/Deny. Keyed by Claude's own session_id and merged
+        // into the observed-session list at enrich time (awaiting-overlay.ts).
+        const claudeSid = typeof json.session_id === 'string' ? json.session_id : undefined;
+        if (claudeSid) {
+          if (mapped === 'notification') {
+            const message = typeof json.message === 'string' ? json.message : '';
+            const notificationType = typeof json.notification_type === 'string' ? json.notification_type : undefined;
+            if (isPermissionNotification(notificationType, message)) {
+              setAwaitingOverlay(claudeSid, message);
+              // Broadcast immediately rather than waiting for the 2s debounce
+              // or the 5s observer tick, so the prompt surfaces within one frame.
+              core.broadcastSessionsList().catch(() => {});
+            }
+          } else if (
+            mapped === 'tool_start' || mapped === 'tool_end' ||
+            mapped === 'user_prompt_submit' || mapped === 'stop' ||
+            mapped === 'session_start' || mapped === 'session_end'
+          ) {
+            // Any subsequent hook means the prompt was answered — drop the
+            // overlay. Only rebroadcast if there was actually one to clear
+            // (direct-`claude` sessions fire tool hooks constantly).
+            if (clearAwaitingOverlay(claudeSid)) {
+              core.broadcastSessionsList().catch(() => {});
+            }
+          }
         }
         // Observed-session activity log. Managed sessions relay their timeline
         // from the session bridge (AGENTDECK_PORT routes their hooks there),
@@ -1536,10 +1572,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // Inject OpenClaw virtual session only after Gateway authentication succeeds.
   // Reachability alone is a topology signal, not proof that commands can route.
   core.setSessionsEnricher((sessions) => {
-    // Observed (direct-`claude`) sessions report idle/processing only — they
-    // carry no accurate awaiting signal (hooks don't expose permission options),
-    // so no attention overlay is applied here.
-    const observed = passiveSessionObserver.collect(sessions);
+    // Overlay hook-driven awaiting state onto observed (direct-`claude`)
+    // sessions — display-only (no requestId, respond-in-terminal UX). Done here
+    // in the synchronous enricher (runs on every broadcast) rather than inside
+    // the 5s-throttled observer, so a Notification arriving mid-window still
+    // surfaces within one frame. Key = the Claude session UUID embedded in
+    // `observed:claude:<uuid>`.
+    const observed = applyAwaitingOverlayToObserved(passiveSessionObserver.collect(sessions));
     // Derive per-session elapsed seconds from startedAt so NTP-less devices
     // (ESP32 IPS10 mosaic) render an elapsed value per cell without a wall clock.
     const now = Date.now();

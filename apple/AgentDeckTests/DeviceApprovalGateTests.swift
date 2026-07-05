@@ -2,17 +2,19 @@
 // popups and mismatched options on the macOS dashboard.
 //
 // For observed direct-`claude` sessions the daemon has no PTY, so it
-// synthesizes awaiting-state from hook signals. Two precision fixes:
+// synthesizes awaiting-state from hook signals. Two precision classifiers:
 //
 // 1) `DaemonServer.shouldGate(permissionMode:tool:)` — Claude's PreToolUse hook
 //    fires for EVERY tool call regardless of mode/allowlist, even when Claude
-//    auto-approves and never prompts. Gate (hold for device Allow/Deny) only in
-//    modes where Claude could still surface its own prompt; otherwise the device
-//    nagged for a decision the agent never asked for.
+//    auto-approves and never prompts. (The held PreToolUse device-approval gate
+//    itself was removed on 2026-06-27 and stays removed; the classifier is
+//    retained for parity/reference.)
 //
 // 2) `DaemonServer.isPermissionNotification(notificationType:message:)` — prefer
 //    Claude's authoritative `notification_type` (only `permission_prompt` is an
 //    awaiting state); fall back to the brittle free-text regex only when absent.
+//    This is the live gate for the display-only Notification overlay restored
+//    on 2026-07-05 (awaiting + question + system notification, no options).
 //
 // Mirrors the Node `shouldGatePreToolUse` / `isPermissionNotification` tests in
 // bridge/src/__tests__/awaiting-overlay.test.ts. macOS-only (daemon path).

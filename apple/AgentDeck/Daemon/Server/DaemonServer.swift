@@ -183,6 +183,7 @@ final class DaemonServer {
     private let displayMonitor = DisplayMonitor()
     private let gatewayProbe = GatewayProbe()
     private let voiceAssistant = DaemonVoiceAssistant()
+    private let openCodeObserver = OpenCodeObserver()
     private let timelineRelay: TimelineRelay
     private let focusRelay: SessionFocusRelay
     private let timelineStore = DaemonTimelineStore()
@@ -257,12 +258,16 @@ final class DaemonServer {
     /// terrariums on every surface.
     private var pushedSessionsById: [String: DaemonSessionEntry] = [:]
 
-    // Observed-session attention (the Notification overlay + held PreToolUse
-    // device-approval gate) was removed on 2026-06-27: hooks carry no real
-    // permission options and PreToolUse fires even for tools Claude auto-approves,
-    // so the gate produced false attention + a fabricated Allow/Deny. Accurate
-    // steering only exists on PTY-managed sessions (the CLI). Observed sessions
-    // report idle/processing only.
+    // Observed-session attention history: the held PreToolUse device-approval
+    // gate was removed on 2026-06-27 and stays removed — PreToolUse fires even
+    // for tools Claude auto-approves, so gating on it produced false attention
+    // + a fabricated Allow/Deny. The *display-only* Notification overlay was
+    // restored on 2026-07-05: Claude emits `notification_type:
+    // "permission_prompt"` only when a permission prompt is actually shown to
+    // the user, so it is a genuine "waiting for explicit response" signal.
+    // Observed sessions surface awaiting + question with NO options/requestId
+    // (respond-in-terminal UX); accurate steering with real options still
+    // exists only on PTY-managed sessions (the CLI).
 
     // Debounce state for tool-boundary sessions_list broadcasts. State /
     // question transitions never ride this — see scheduleSessionsListBroadcast.
@@ -983,6 +988,22 @@ final class DaemonServer {
         _ = voiceAssistant.start()
         DaemonLogger.shared.info("startServices: step12 voiceAssistant done")
 
+        // 12.5. OpenCode observer — opt-in (Settings → Integrations, default
+        // OFF ⇒ zero probes). Read-only SSE client to a user-run
+        // `opencode serve`; updates merge into pushedSessionsById via the
+        // same contract as the Codex OTel path.
+        openCodeObserver.start(callbacks: OpenCodeObserver.Callbacks(
+            onUpdate: { [weak self] update in
+                self?.handleOpenCodeObserverUpdate(update)
+            },
+            onDisconnect: { [weak self] in
+                self?.handleOpenCodeObserverDisconnect()
+            },
+            onKeepalive: { [weak self] in
+                self?.touchOpenCodeSessions()
+            }
+        ))
+
         // 13. System sleep/wake handling — immediate cleanup on wake
         // Use Darwin notification (IOKit power assertion) — works without AppKit
         let wakePort = IONotificationPortCreate(kIOMainPortDefault)
@@ -1405,9 +1426,9 @@ final class DaemonServer {
                 // runs untouched. The daemon no longer holds the response for a
                 // device gate: hooks carry no real permission options, and PreToolUse
                 // fires even for tools Claude auto-approves, so a gate produced false
-                // attention + a fabricated Allow/Deny. Accurate steering only exists
-                // on PTY-managed sessions (the CLI), so observed sessions report
-                // idle/processing only.
+                // attention + a fabricated Allow/Deny. Genuine waits surface via the
+                // display-only Notification overlay (permission_prompt) instead;
+                // steering with real options exists only on PTY-managed sessions.
                 Task { @MainActor [weak self] in await self?.handleHookPost(rawName: rawName, body: bodyData) }
                 return .text("")
             }
@@ -2585,12 +2606,29 @@ final class DaemonServer {
             // session back to idle when the turn finishes.
             updateSessionHookState(sessionId: sessionId, state: "processing", clearTool: true)
         case "notification":
-            // Notification hooks no longer flip a session to attention. The hook
-            // carries only free-text `message` (no structured options) and fires
-            // for an observed session with no PTY to drive, so surfacing it would
-            // show a dead, unanswerable prompt. Accurate awaiting only comes from
-            // PTY-managed sessions (the CLI relays those with real options).
-            break
+            // Display-only attention: Claude emits a Notification hook with
+            // `notification_type: "permission_prompt"` only when it actually
+            // renders a permission prompt to the user (auto-approved tools fire
+            // PreToolUse but never a permission Notification — the failure mode
+            // that killed the old PreToolUse gate). The hook carries free-text
+            // `message` and no structured options, so we surface
+            // "awaiting + question" only; every surface renders the
+            // respond-in-terminal path (no fabricated Allow/Deny, no requestId).
+            // Cleared naturally by the next tool/stop/prompt hook via
+            // updateSessionHookState; 180s evictStaleHookSessions is the backstop.
+            let message = json["message"] as? String ?? ""
+            let notificationType = json["notification_type"] as? String
+            if Self.isPermissionNotification(notificationType: notificationType, message: message), let sessionId,
+               var entry = pushedSessionsById[sessionId] {
+                let q = String(message.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+                if entry.state != "awaiting_permission" || entry.question != q {
+                    entry.state = "awaiting_permission"
+                    entry.question = q
+                    pushedSessionsById[sessionId] = entry
+                    upsertIntoCachedSessions(entry)
+                    broadcastSessionsList()
+                }
+            }
         case "codex_user_prompt_submit":
             _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
             updateSessionHookState(sessionId: sessionId, state: "processing")
@@ -2845,6 +2883,103 @@ final class DaemonServer {
         }
         broadcastSessionsList()
         broadcastStateUpdate()
+    }
+
+    // MARK: - OpenCode observer integration
+
+    private static let openCodeSessionPrefix = "opencode:"
+    private static let openCodeFallbackProjectName = "OpenCode"
+
+    /// Merge one classified OpenCode SSE update into `pushedSessionsById`.
+    /// Same integration contract as the Codex OTel path: upsert + cached
+    /// sessions + eviction timestamp + broadcast-on-change. Display-only —
+    /// `options`/`requestId` are never set, so awaiting renders the
+    /// respond-in-terminal path on every surface.
+    @MainActor
+    private func handleOpenCodeObserverUpdate(_ update: OpenCodeSessionUpdate) {
+        let sid = Self.openCodeSessionPrefix + update.sessionID
+        let existing = pushedSessionsById[sid]
+
+        // Project name: session title beats directory basename beats fallback.
+        let resolvedProject = Self.nonEmptyString(update.title)
+            ?? update.directory.flatMap { Self.nonEmptyString(ProjectNameResolver.resolve(cwd: $0)) }
+        let projectName = resolvedProject
+            ?? existing.flatMap { Self.nonEmptyString($0.projectName) }
+            ?? Self.openCodeFallbackProjectName
+
+        // `projectName` is immutable on DaemonSessionEntry — rebuild.
+        var entry = DaemonSessionEntry(
+            id: sid,
+            port: existing?.port ?? Int(port),
+            pid: existing?.pid ?? 0,
+            projectName: projectName,
+            agentType: "opencode",
+            tmuxSession: existing?.tmuxSession,
+            tty: existing?.tty,
+            parentTty: existing?.parentTty,
+            startedAt: existing?.startedAt ?? ISO8601DateFormatter().string(from: Date())
+        )
+        entry.state = existing?.state ?? "idle"
+        entry.modelName = update.modelName ?? existing?.modelName
+        entry.currentTool = existing?.currentTool
+        entry.question = existing?.question
+
+        switch update.kind {
+        case .upsert, .metadata:
+            break
+        case .processing:
+            entry.state = "processing"
+            if let tool = update.currentTool { entry.currentTool = tool }
+            entry.question = nil
+        case .idle:
+            entry.state = "idle"
+            entry.currentTool = nil
+            entry.question = nil
+        case .awaitingPermission:
+            entry.state = "awaiting_permission"
+            entry.question = update.question.map { String($0.prefix(120)) }
+        }
+
+        lastHookAtByPushedSession[sid] = Date()
+        let changed = existing == nil
+            || existing?.state != entry.state
+            || existing?.question != entry.question
+            || existing?.currentTool != entry.currentTool
+            || existing?.projectName != entry.projectName
+            || existing?.modelName != entry.modelName
+        pushedSessionsById[sid] = entry
+        upsertIntoCachedSessions(entry)
+        if changed { broadcastSessionsList() }
+    }
+
+    /// SSE stream dropped (server quit / network) — flip tracked OpenCode
+    /// sessions idle immediately; TTL eviction removes them once keepalive
+    /// stamps stop.
+    @MainActor
+    private func handleOpenCodeObserverDisconnect() {
+        var changed = false
+        for (sid, var entry) in pushedSessionsById where sid.hasPrefix(Self.openCodeSessionPrefix) {
+            if entry.state != "idle" || entry.question != nil || entry.currentTool != nil {
+                entry.state = "idle"
+                entry.question = nil
+                entry.currentTool = nil
+                pushedSessionsById[sid] = entry
+                upsertIntoCachedSessions(entry)
+                changed = true
+            }
+        }
+        if changed { broadcastSessionsList() }
+    }
+
+    /// Connection-healthy tick: refresh eviction timestamps so idle-but-alive
+    /// OpenCode sessions aren't reaped between SSE events (the 180s
+    /// `evictStaleHookSessions` sweep only sees hook/SSE activity).
+    @MainActor
+    private func touchOpenCodeSessions() {
+        let now = Date()
+        for sid in pushedSessionsById.keys where sid.hasPrefix(Self.openCodeSessionPrefix) {
+            lastHookAtByPushedSession[sid] = now
+        }
     }
 
     /// Translate a batch of Codex OTLP/HTTP spans into per-session state
@@ -5034,6 +5169,7 @@ final class DaemonServer {
         initialUsageTask?.cancel()
 
         voiceAssistant.stop()
+        openCodeObserver.stop()
         await focusRelay.stop()
         await timelineRelay.stop()
         await logStream.stop()

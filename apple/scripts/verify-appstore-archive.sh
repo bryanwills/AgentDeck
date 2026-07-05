@@ -171,7 +171,7 @@ fi
 # `strings` during review, so they count. This regex is deliberately
 # narrow: it targets our actual package namespace and concrete install
 # commands, not generic words like "install" which appear legitimately
-# (e.g. the hook-installer UI that writes to ~/.claude/settings.local.json).
+# (e.g. the hook-installer UI that writes to ~/.claude/settings.json).
 if [ -f "$MAIN_EXEC" ]; then
     PROMPT_LEAK=$(strings "$MAIN_EXEC" 2>/dev/null \
         | grep -iE 'npm[[:space:]]+(i|install)[[:space:]]+(-g[[:space:]]+)?@agentdeck|npx[[:space:]]+@agentdeck|brew[[:space:]]+install[[:space:]]+agentdeck' \
