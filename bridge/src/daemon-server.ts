@@ -233,6 +233,19 @@ async function readJsonBody(req: import('http').IncomingMessage, maxBytes = 64 *
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
 }
 
+// WiFi OTA ack timeouts. The transport is a WebSocket over TCP, so a chunk/ack
+// is never lost while the connection is alive — a "timeout" means the board is
+// slow (a classic ESP32 like TTGO/TC001 can stall past several seconds on a
+// flash-sector erase or a brief WiFi-stack starvation) or the WiFi link briefly
+// blipped and TCP is retransmitting. Both recover if we wait, so the timeouts
+// are generous: a healthy board still acks in milliseconds, and these only cap
+// how long we ride out a stall before declaring the transfer dead. Resending a
+// chunk would be wrong here — it desyncs the firmware's strict seq/offset cursor
+// (see handleOtaChunk → "unexpected_offset").
+const OTA_BEGIN_ACK_TIMEOUT_MS = 15_000; // erasing/preparing the target OTA slot
+const OTA_CHUNK_ACK_TIMEOUT_MS = 30_000; // slow classic-ESP32 flash write / WiFi stall
+const OTA_END_ACK_TIMEOUT_MS = 30_000;   // whole-image MD5 verify + set-boot-partition
+
 async function performWifiEsp32Ota(core: BridgeCore, target: string, firmwarePath: string): Promise<Record<string, unknown>> {
   const { key, device, ws } = findWifiOtaTarget(target);
   if (device.otaSupported !== true) {
@@ -249,7 +262,7 @@ async function performWifiEsp32Ota(core: BridgeCore, target: string, firmwarePat
   const send = (evt: BridgeEvent) => core.wsServer.sendTo(ws, evt);
 
   send({ type: 'esp32_ota_begin', otaId, size: firmware.length, md5 } as BridgeEvent);
-  await waitForOtaAck(otaId, 'begin', undefined, 10_000);
+  await waitForOtaAck(otaId, 'begin', undefined, OTA_BEGIN_ACK_TIMEOUT_MS);
 
   const chunkSize = 1024;
   let offset = 0;
@@ -264,12 +277,12 @@ async function performWifiEsp32Ota(core: BridgeCore, target: string, firmwarePat
         offset,
         data: chunk.toString('base64'),
       } as BridgeEvent);
-      await waitForOtaAck(otaId, 'chunk', seq, 7_500);
+      await waitForOtaAck(otaId, 'chunk', seq, OTA_CHUNK_ACK_TIMEOUT_MS);
       offset += chunk.length;
       seq++;
     }
     send({ type: 'esp32_ota_end', otaId } as BridgeEvent);
-    await waitForOtaAck(otaId, 'end', undefined, 20_000);
+    await waitForOtaAck(otaId, 'end', undefined, OTA_END_ACK_TIMEOUT_MS);
     wifiEsp32Sockets.delete(key);
     wifiEsp32Devices.delete(key);
   } catch (err) {

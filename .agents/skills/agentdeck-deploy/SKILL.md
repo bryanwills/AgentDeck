@@ -57,7 +57,6 @@ Parse the argument string to determine target(s). Multiple targets can be combin
 | **IPS 3.5"** (480×320) | `ips_35` | `ips35` | `/dev/cu.usbmodem*` | ESP32-S3, native USB |
 | **Round AMOLED** (360×360) | `amoled_18` | `amoled` | `/dev/cu.usbmodem*` | ESP32-S3, native USB |
 | **TTGO T-Display** (135×240) | `tft_114` | `ttgo` | `/dev/cu.wchusbserial*` | ESP32-D0WDQ6, CH340 |
-| **ESP32-C6** (172×320) | `c6_147` | `esp32_c6_147` | `/dev/cu.usbmodem*` | ESP32-C6, native USB CDC |
 | **IPS 10.1"** (800×1280) | `ips_101` | `ips10` | `/dev/cu.wchusbserial*` | ESP32-P4 + C6 |
 | **Ulanzi TC001** (8×32 LED) | `led_8x32` | `led8x32` | `/dev/cu.usbserial-*` | ESP32-D0WD classic, CH340 |
 

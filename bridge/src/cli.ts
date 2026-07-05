@@ -163,34 +163,48 @@ function projectRootPath(): string {
   return join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 }
 
-// `target` is dual-purpose: it resolves the local PlatformIO env here for
-// `--build`/firmware-path lookup, AND is sent as-is to the daemon, which
-// matches it against the firmware's self-reported `device_info.board` string
-// (see findWifiOtaTarget in daemon-server.ts). The two only agree for the
-// aliases below marked ← firmware board string; every other alias builds
-// fine locally but the upload step fails with "No online WiFi ESP32 target
-// matches …" because the connected device never reports that string.
-const ESP32_OTA_ENV_BY_TARGET: Record<string, string> = {
-  inkdeck: 'inkdeck',
-  ulanzi_tc001: 'led8x32',
-  led8x32: 'led8x32',
-  ttgo_t_display: 'ttgo', // ← firmware board string
-  ttgo: 'ttgo',
-  round_amoled: 'amoled', // ← firmware board string
-  amoled: 'amoled',
-  ips_35: 'ips35', // ← firmware board string
-  ips35: 'ips35',
-  '86box': 'box_86', // ← firmware board string
-  box_86: 'box_86',
-  box_40: 'box_86',
-  ips_10: 'ips10', // ← firmware board string
-  ips10: 'ips10',
-  ips_101: 'ips10',
-};
+// The esp32-ota `target` is dual-purpose: it picks the local PlatformIO `env`
+// (for `--build` and firmware-path lookup) AND is matched by the daemon against
+// the firmware's self-reported `device_info.board` string (findWifiOtaTarget in
+// daemon-server.ts). These are two different namespaces — the pio env `ttgo`
+// vs. the board string `ttgo_t_display` — so a short alias used to build fine
+// locally but fail the upload with "No online WiFi ESP32 target matches …".
+// This SSOT lists each OTA-capable board with its canonical `board` string, its
+// pio `env`, and every accepted alias; the CLI resolves the alias to `board`
+// BEFORE the upload POST so every alias works end-to-end. Add both fields when
+// adding a board.
+interface Esp32OtaBoard { board: string; env: string; aliases: string[]; }
+const ESP32_OTA_BOARDS: Esp32OtaBoard[] = [
+  { board: 'inkdeck', env: 'inkdeck', aliases: [] },
+  { board: 'ulanzi_tc001', env: 'led8x32', aliases: ['led8x32'] },
+  { board: 'ttgo_t_display', env: 'ttgo', aliases: ['ttgo'] },
+  { board: 'round_amoled', env: 'amoled', aliases: ['amoled'] },
+  { board: 'ips_35', env: 'ips35', aliases: ['ips35'] },
+  { board: '86box', env: 'box_86', aliases: ['box_86', 'box_40'] },
+  { board: 'ips_10', env: 'ips10', aliases: ['ips10', 'ips_101'] },
+];
+
+// alias/board/env-key → { env, board }. Built from the SSOT above.
+export const ESP32_OTA_BY_TARGET: Record<string, { env: string; board: string }> = {};
+for (const b of ESP32_OTA_BOARDS) {
+  for (const key of [b.board, ...b.aliases]) {
+    ESP32_OTA_BY_TARGET[key] = { env: b.env, board: b.board };
+  }
+}
+
+/**
+ * Resolve an esp32-ota `target` (alias, canonical board string, or an IP) to the
+ * canonical `device_info.board` string the daemon matches against. Unknown
+ * targets (e.g. a raw IP or one-off board) pass through unchanged so IP-based
+ * and future targeting still works. Exported for testing.
+ */
+export function resolveEsp32OtaDaemonTarget(target: string): string {
+  return ESP32_OTA_BY_TARGET[target]?.board ?? target;
+}
 
 function resolveEsp32FirmwarePath(target: string, envOpt?: string, firmwareOpt?: string): string {
   if (firmwareOpt) return realpathSync(firmwareOpt);
-  const env = envOpt || ESP32_OTA_ENV_BY_TARGET[target] || target;
+  const env = envOpt || ESP32_OTA_BY_TARGET[target]?.env || target;
   const path = join(projectRootPath(), 'esp32', '.pio', 'build', env, 'firmware.bin');
   if (!existsSync(path)) {
     throw new Error(`Firmware not found: ${path}. Build it first with: /opt/homebrew/bin/pio run -e ${env}`);
@@ -776,7 +790,7 @@ program
       ? parseInt(opts.port, 10)
       : (info?.httpPort ?? info?.port ?? findDaemonPort() ?? BRIDGE_WS_PORT);
 
-    const env = opts.env || ESP32_OTA_ENV_BY_TARGET[target] || target;
+    const env = opts.env || ESP32_OTA_BY_TARGET[target]?.env || target;
     if (opts.build) {
       const pio = platformioBin();
       log(`Building ${env} with ${pio}...`);
@@ -786,11 +800,14 @@ program
       });
     }
 
+    // Send the canonical board string, not the raw alias — the daemon matches
+    // `target` against device_info.board, so `ttgo` must become `ttgo_t_display`.
+    const daemonTarget = resolveEsp32OtaDaemonTarget(target);
     const firmwarePath = resolveEsp32FirmwarePath(target, opts.env, opts.firmware);
-    log(`Uploading ${firmwarePath} to ${target} via daemon :${port}...`);
+    log(`Uploading ${firmwarePath} to ${daemonTarget} via daemon :${port}...`);
     const { statusCode, body } = await postJsonWithTimeout<Record<string, any>>(
       `http://127.0.0.1:${port}/esp32/ota`,
-      { target, firmwarePath },
+      { target: daemonTarget, firmwarePath },
       15 * 60_000,
     );
     if (statusCode < 200 || statusCode >= 300 || body.ok === false) {

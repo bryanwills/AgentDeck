@@ -111,13 +111,12 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 - **Heartbeat**: Full state re-push every 5s via `setESP32StateProvider()`
 - **Events**: 6 types (`SERIAL_FORWARDED_EVENTS`)
 - **Direction**: Dashboard state push plus OTA control/ack messages on OTA-capable WiFi boards
-- **Boards**: IPS 3.5" (480×320), 86 Box 4" (480×480), Round AMOLED (360×360), TTGO T-Display, Ulanzi TC001, IPS 10.1", InkDeck, ESP32-C6 1.47"
+- **Boards**: IPS 3.5" (480×320), 86 Box 4" (480×480), Round AMOLED (360×360), TTGO T-Display, Ulanzi TC001, IPS 10.1", InkDeck
 
 ### ESP32 WiFi OTA
 
 - **Scope**: Only directly flashed AgentDeck ESP32 firmware targets with WiFi connectivity and a dual-OTA partition table. Non-AgentDeck firmware and devices we do not flash directly are excluded.
-- **Targets**: `inkdeck`, `ulanzi_tc001`/`led8x32`, `ttgo`, `ips35`, `round_amoled`/`amoled`, `86box`/`box_86`, `ips10`/`ips_10`.
-- **Not target**: `esp32_c6_147` currently has a 4MB single-app style layout and no OTA target in the supported matrix.
+- **Targets**: `inkdeck`, `ulanzi_tc001`/`led8x32`, `ttgo`, `ips35`, `round_amoled`/`amoled`, `86box`/`box_86`, `ips10`/`ips_10`. Any board on a single-app (non-dual-OTA) partition layout is out of scope and rejected before upload.
 - **Control path**: CLI `agentdeck esp32-ota <target> [--build|--firmware <path>]` → daemon `POST /esp32/ota` → board WiFi WebSocket.
 - **Protocol**: daemon sends `esp32_ota_begin/chunk/end/abort`; firmware returns `esp32_ota_ack/error`. Firmware reports capability in `device_info` so the daemon can reject unsupported boards before upload.
 - **Migration**: `86box` and `ips10` became OTA-capable after 2026-07-05 16MB dual-OTA partition changes. Existing devices on older NO_OTA/factory layouts need one USB full flash first; future updates can use WiFi OTA.

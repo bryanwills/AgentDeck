@@ -801,7 +801,6 @@ Compact WiFi-connected displays for always-on agent monitoring.
 | **IPS LCD 3.5"** | ESP32-S3 | rectangular IPS | 480×320 | Yes |
 | **B86 Box 4"** | ESP32-S3 | wall-mount touch panel | 480×480 | Yes, after one-time USB partition migration |
 | **TTGO T-Display 1.14"** | ESP32 (classic) | LilyGO ST7789 TFT | 135×240 | Yes |
-| **ESP32-C6 1.47"** | ESP32-C6 (RISC-V) | Waveshare ST7789 TFT | 172×320 | No |
 | **IPS 10.1"** | ESP32-P4 + C6 | Guition JD9365 MIPI-DSI | 800×1280 | Yes, after one-time USB partition migration |
 | **Ulanzi TC001** | ESP32 | 8×32 WS2812B RGB LED matrix | 256 pixels | Yes |
 | **InkDeck** | XIAO ESP32-S3 Plus | Seeed 7.5" OG e-ink (UC8179) | 800×480 | Yes |
@@ -1066,7 +1065,7 @@ Eval results broadcast to every device simultaneously (Stream Deck/Apple/Android
 - [x] Apple iOS/iPad/macOS dashboard (SwiftUI multiplatform)
 - [x] macOS in-process Swift daemon (Node.js-free macOS install)
 - [x] Apple TestFlight CI pipeline
-- [x] ESP32 compact displays (Round AMOLED 1.8", IPS LCD 3.5", B86 Box 4", TTGO T-Display 1.14", ESP32-C6 1.47", IPS 10.1", Ulanzi TC001)
+- [x] ESP32 compact displays (Round AMOLED 1.8", IPS LCD 3.5", B86 Box 4", TTGO T-Display 1.14", IPS 10.1", Ulanzi TC001)
 - [ ] InkDeck e-ink panel (Seeed TRMNL 7.5" OG DIY Kit, custom ESP32 firmware, WiFi/WS partial refresh) — firmware in development
 - [x] Ulanzi D200H Deck Dock (14-key HID + 960×540 LCD via official Ulanzi Studio plugin; direct-HID fallback retired)
 - [x] TUI terminal dashboard (Unicode Braille + ANSI)
