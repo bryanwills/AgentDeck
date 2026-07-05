@@ -54,29 +54,24 @@ struct SessionListPanel: View {
 
             Spacer().frame(height: 4)
 
-            // Build unified entry list
+            // Build unified entry list, clustered into project work groups
+            // (IPS10 office huddle port — SessionGrouping.swift). Worktree/task
+            // folders sharing a long prefix render under one group header with
+            // only their differentiating tail; singletons render flat.
             let entries = buildEntries()
-            let nameCounts = Dictionary(grouping: entries, by: { "\($0.projectName)|\($0.agentType ?? "")" })
-                .mapValues(\.count)
-            var counters: [String: Int] = [:]
-
             let visibleEntries = entries.count > maxVisibleSessions
                 ? Array(entries.prefix(maxVisibleSessions))
                 : entries
+            let rows = Self.buildDisplayRows(visibleEntries)
 
-            ForEach(Array(visibleEntries.enumerated()), id: \.offset) { _, entry in
-                let key = "\(entry.projectName)|\(entry.agentType ?? "")"
-                let needsSuffix = (nameCounts[key] ?? 1) > 1
-                let suffix: String = {
-                    if needsSuffix {
-                        let idx = (counters[key] ?? 0) + 1
-                        counters[key] = idx
-                        return " #\(idx)"
-                    }
-                    return ""
-                }()
-
-                sessionRowInteractive(entry: entry, suffix: suffix)
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                switch row {
+                case .header(let key, let count):
+                    groupHeaderRow(key: key, count: count)
+                case .session(let entry, let label, let indent):
+                    sessionRowInteractive(entry: entry, label: label)
+                        .padding(.leading, indent ? 10 : 0)
+                }
             }
 
             // Overflow indicator
@@ -206,11 +201,95 @@ struct SessionListPanel: View {
 
     // MARK: - Session Row (interactive wrapper + row)
 
+    /// One flattened list row: a group header, or a session row with its
+    /// display label + indent already resolved.
+    private enum DisplayRow {
+        case header(key: String, count: Int)
+        case session(entry: SessionEntry, label: String, indent: Bool)
+    }
+
+    /// Flatten grouped entries into display rows. Precomputed (not inside the
+    /// ForEach builder) so the #N counters advance deterministically.
+    private static func buildDisplayRows(_ entries: [SessionEntry]) -> [DisplayRow] {
+        let nameCounts = Dictionary(grouping: entries, by: { "\($0.projectName)|\($0.agentType ?? "")" })
+            .mapValues(\.count)
+        var counters: [String: Int] = [:]
+        func suffix(for entry: SessionEntry) -> String {
+            let key = "\(entry.projectName)|\(entry.agentType ?? "")"
+            guard (nameCounts[key] ?? 1) > 1 else { return "" }
+            let idx = (counters[key] ?? 0) + 1
+            counters[key] = idx
+            return " #\(idx)"
+        }
+
+        var rows: [DisplayRow] = []
+        for group in SessionGrouping.group(entries, projectOf: { $0.projectName }) {
+            if group.grouped {
+                rows.append(.header(key: group.key, count: group.members.count))
+                for entry in group.members {
+                    rows.append(.session(
+                        entry: entry,
+                        label: memberLabel(groupKey: group.key, entry: entry) + suffix(for: entry),
+                        indent: true
+                    ))
+                }
+            } else {
+                let entry = group.members[0]
+                rows.append(.session(entry: entry, label: entry.projectName + suffix(for: entry), indent: false))
+            }
+        }
+        return rows
+    }
+
+    /// Display label for a member row under a group header. The header already
+    /// carries the shared stem, so the row shows only the differentiating tail
+    /// ("claude-glm" under "xteink-x3-x4-japanese-broken"). Exact-duplicate
+    /// members fall back to the agent display name; the #N suffix disambiguates.
+    private static func memberLabel(groupKey: String, entry: SessionEntry) -> String {
+        let norm = SessionGrouping.normalizeProject(entry.projectName)
+        if norm.count > groupKey.count, norm.lowercased().hasPrefix(groupKey.lowercased()) {
+            let rest = String(norm.dropFirst(groupKey.count))
+                .drop(while: { $0 == "-" || $0 == "_" || $0 == " " || $0 == "." })
+            if !rest.isEmpty { return String(rest) }
+        }
+        if norm.lowercased() == groupKey.lowercased() {
+            switch entry.agentType {
+            case "codex-cli": return "Codex CLI"
+            case "codex-app": return "Codex App"
+            case "claude-code": return "Claude Code"
+            case "openclaw": return "OpenClaw"
+            case "opencode": return "OpenCode"
+            case "antigravity": return "Antigravity"
+            default: break
+            }
+        }
+        return entry.projectName
+    }
+
+    /// Work-group header strip above clustered member rows.
+    private func groupHeaderRow(key: String, count: Int) -> some View {
+        HStack(spacing: 4) {
+            Text(key)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(TerrariumHUD.subtext)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            Text("×\(count)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(TerrariumHUD.subtext.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+    }
+
     /// Row wrapper that handles taps: dispatches `focusSession` so the
     /// dashboard/terrarium centers this session. Tapping the focused row again
     /// clears explicit focus so the HUD can return to neutral.
     @ViewBuilder
-    private func sessionRowInteractive(entry: SessionEntry, suffix: String) -> some View {
+    private func sessionRowInteractive(entry: SessionEntry, label: String) -> some View {
         Button {
             if let sid = entry.sessionId {
                 if entry.isFocused {
@@ -220,7 +299,7 @@ struct SessionListPanel: View {
                 }
             }
         } label: {
-            sessionRow(entry: entry, suffix: suffix)
+            sessionRow(entry: entry, label: label)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 3)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -240,12 +319,12 @@ struct SessionListPanel: View {
         .buttonStyle(.plain)
     }
 
-    private func sessionRow(entry: SessionEntry, suffix: String) -> some View {
+    private func sessionRow(entry: SessionEntry, label: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             // Icon + session name
             HStack(spacing: 4) {
                 agentIconView(for: entry.agentType)
-                Text("\(entry.projectName)\(suffix)")
+                Text(label)
                     .font(.system(size: 12, weight: entry.isFocused || entry.isPrimary ? .bold : .regular))
                     .foregroundStyle(TerrariumHUD.text)
                     .lineLimit(2)

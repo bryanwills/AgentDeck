@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
@@ -894,6 +895,10 @@ private fun MonitorHUD(
                 onFocusSession = { BridgeConnection.instance.sendFocusSession(it) },
                 modifier = Modifier
                     .padding(start = scale.panelEdgeInset, top = scale.panelEdgeInset)
+                    // Cap the panel height so a long session list scrolls inside
+                    // the panel instead of painting over the timeline strip that
+                    // occupies the bottom third of the screen.
+                    .heightIn(max = maxHeight * 0.60f)
                     .then(
                         if (scale.isTablet) Modifier.width(sessionPanelWidth)
                         else Modifier.widthIn(max = scale.sessionPanelMaxWidth)

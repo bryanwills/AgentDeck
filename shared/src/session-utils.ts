@@ -258,3 +258,115 @@ export function assignDisplayNames<T extends { id: string; projectName: string; 
     };
   });
 }
+
+// ===== Project-Prefix Grouping (IPS10 office huddle port) =====
+//
+// The IPS10 terrarium (esp32/src/ui/terrarium/office.cpp — normProject /
+// sameProjectGroup) clusters sessions whose project names share a long
+// delimiter-aligned prefix into one "work huddle": worktree/task folders like
+// `xteink-x3-x4-japanese-broken-claude-glm` / `…-broken-codex` read as one
+// unit of work, not N unrelated sessions. This is the SSOT port so the other
+// dashboards' session lists (Android tablet SessionListPanel.kt, Apple
+// SessionListPanel.swift — hand-mirrored, keep in lockstep) group the same way.
+
+function isProjectDelim(c: string): boolean {
+  return c === '-' || c === '_' || c === ' ' || c === '.';
+}
+
+function trimProjectTail(s: string): string {
+  let n = s.length;
+  while (n > 0 && (isProjectDelim(s[n - 1]) || s[n - 1] === '#')) n--;
+  return s.slice(0, n);
+}
+
+function projectDelimCount(s: string, len: number): number {
+  let count = 0;
+  for (let i = 0; i < len && i < s.length; i++) if (isProjectDelim(s[i])) count++;
+  return count;
+}
+
+/**
+ * Normalize a project name for grouping: strip any path to the basename and
+ * drop a trailing " #N" duplicate suffix so "Foo #1" / "Foo #2" compare equal.
+ * Mirrors office.cpp `normProject`.
+ */
+export function normalizeProjectForGrouping(project: string | undefined): string {
+  const raw = (project || '').trim();
+  const base = raw.split('/').filter(Boolean).pop() || raw;
+  const m = base.match(/^(.*?)\s*#\d+$/);
+  return trimProjectTail(m ? m[1] : base);
+}
+
+/**
+ * When two normalized project names belong to the same work group, return the
+ * shared group key (the common stem); otherwise null. Mirrors office.cpp
+ * `sameProjectGroup`:
+ *   - exact (case-insensitive) match → group
+ *   - one extends the other at a delimiter ("foo-bar" + "foo-bar-1") or they
+ *     diverge after a shared delimiter-aligned stem ("…-broken-a" + "…-broken-b")
+ *   - conservative: only long multi-token stems fuse (stem ≥ 14 chars with
+ *     ≥ 2 delimiters on both sides), so short siblings like "agentdeck-ios" /
+ *     "agentdeck-android" stay separate.
+ */
+export function projectGroupKey(a: string, b: string): string | null {
+  let i = 0;
+  let lastDelim = -1;
+  const n = Math.min(a.length, b.length);
+  while (i < n && a[i].toLowerCase() === b[i].toLowerCase()) {
+    if (isProjectDelim(a[i])) lastDelim = i;
+    i++;
+  }
+  if (i === a.length && i === b.length) return a;
+
+  let stemLen = -1;
+  if (i === a.length && i < b.length && isProjectDelim(b[i])) stemLen = i;
+  else if (i === b.length && i < a.length && isProjectDelim(a[i])) stemLen = i;
+  else if (lastDelim > 0) stemLen = lastDelim;
+
+  if (stemLen < 14 || projectDelimCount(a, stemLen) < 2 || projectDelimCount(b, stemLen) < 2) {
+    return null;
+  }
+  const key = trimProjectTail(a.slice(0, stemLen));
+  return key.length > 0 ? key : null;
+}
+
+export interface ProjectGroup<T> {
+  /** Group label — the shared stem, or the (normalized) project name for singletons. */
+  key: string;
+  /** True when ≥2 members fused (render a group header); singletons render flat. */
+  grouped: boolean;
+  members: T[];
+}
+
+/**
+ * Cluster an ordered session list into project groups, preserving the input
+ * order (first member's position anchors the group; members keep relative
+ * order). Greedy pairwise fusion with a growing group key, exactly like the
+ * office.cpp huddle builder.
+ */
+export function groupSessionsByProject<T>(
+  items: readonly T[],
+  projectOf: (item: T) => string | undefined,
+): ProjectGroup<T>[] {
+  const groups: ProjectGroup<T>[] = [];
+  const done = new Array(items.length).fill(false);
+  for (let a = 0; a < items.length; a++) {
+    if (done[a]) continue;
+    const na = normalizeProjectForGrouping(projectOf(items[a]));
+    let key = na;
+    const members: T[] = [items[a]];
+    done[a] = true;
+    for (let b = a + 1; b < items.length; b++) {
+      if (done[b]) continue;
+      const nb = normalizeProjectForGrouping(projectOf(items[b]));
+      const nextKey = projectGroupKey(key, nb) ?? projectGroupKey(na, nb);
+      if (nextKey) {
+        key = nextKey;
+        members.push(items[b]);
+        done[b] = true;
+      }
+    }
+    groups.push({ key, grouped: members.length > 1, members });
+  }
+  return groups;
+}

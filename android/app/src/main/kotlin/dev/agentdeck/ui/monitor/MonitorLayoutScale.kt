@@ -74,10 +74,13 @@ data class MonitorLayoutScale(
             fontHeader = 10.sp,
         )
 
-        /** Tablet density — macOS HUD proportions, not enlarged tablet cards. */
+        /** Tablet density — macOS HUD proportions, not enlarged tablet cards.
+         *  Session panel runs wider than the macOS 220dp cap: long worktree
+         *  project names dominate the list on tablets and 220dp wrapped nearly
+         *  every row (user request 2026-07-06). */
         val tablet = MonitorLayoutScale(
             isTablet = true,
-            sessionPanelMaxWidth = 220.dp,
+            sessionPanelMaxWidth = 300.dp,
             topologyPanelMaxWidth = 300.dp,
             panelPadding = 8.dp,
             panelEdgeInset = 12.dp,

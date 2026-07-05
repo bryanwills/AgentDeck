@@ -175,3 +175,91 @@ describe('assignDisplayNames', () => {
     expect(b.map(d => d.session.id)).toEqual(['session-1', 'session-2', 'session-10']);
   });
 });
+
+// ===== Project-prefix grouping (IPS10 office huddle port) =====
+
+import {
+  normalizeProjectForGrouping,
+  projectGroupKey,
+  groupSessionsByProject,
+} from '../session-utils.js';
+
+describe('normalizeProjectForGrouping', () => {
+  it('strips path and trailing #N suffix', () => {
+    expect(normalizeProjectForGrouping('/Users/x/github/AgentDeck')).toBe('AgentDeck');
+    expect(normalizeProjectForGrouping('AgentDeck #2')).toBe('AgentDeck');
+    expect(normalizeProjectForGrouping('foo-bar-')).toBe('foo-bar');
+  });
+
+  it('handles empty/undefined', () => {
+    expect(normalizeProjectForGrouping(undefined)).toBe('');
+    expect(normalizeProjectForGrouping('  ')).toBe('');
+  });
+});
+
+describe('projectGroupKey', () => {
+  it('exact match groups', () => {
+    expect(projectGroupKey('AgentDeck', 'agentdeck')).toBe('AgentDeck');
+  });
+
+  it('long multi-token stems fuse', () => {
+    expect(
+      projectGroupKey('xteink-x3-x4-japanese-broken-claude-glm', 'xteink-x3-x4-japanese-broken-codex'),
+    ).toBe('xteink-x3-x4-japanese-broken');
+  });
+
+  it('delimiter extension fuses ("foo…" + "foo…-1")', () => {
+    expect(
+      projectGroupKey('claude-agents-md-check', 'claude-agents-md-check-2'),
+    ).toBe('claude-agents-md-check');
+  });
+
+  it('short sibling projects stay separate', () => {
+    expect(projectGroupKey('agentdeck-ios', 'agentdeck-android')).toBeNull();
+    expect(projectGroupKey('AgentDeck', 'BabelForge')).toBeNull();
+  });
+
+  it('stems with fewer than 2 delimiters stay separate', () => {
+    expect(projectGroupKey('verylongprojectname-a', 'verylongprojectname-b')).toBeNull();
+  });
+});
+
+describe('groupSessionsByProject', () => {
+  const p = (name: string) => ({ projectName: name });
+
+  it('clusters same-stem worktrees and keeps singletons flat', () => {
+    const items = [
+      p('AgentDeck'),
+      p('xteink-x3-x4-japanese-broken-claude-glm'),
+      p('BabelForge'),
+      p('xteink-x3-x4-japanese-broken-codex'),
+      p('xteink-x3-x4-japanese-broken-opencode'),
+    ];
+    const groups = groupSessionsByProject(items, (i) => i.projectName);
+    expect(groups.map((g) => g.key)).toEqual([
+      'AgentDeck',
+      'xteink-x3-x4-japanese-broken',
+      'BabelForge',
+    ]);
+    expect(groups[1].grouped).toBe(true);
+    expect(groups[1].members).toHaveLength(3);
+    expect(groups[0].grouped).toBe(false);
+  });
+
+  it('groups duplicate sessions of the same project (#N suffixed)', () => {
+    const items = [p('AgentDeck #1'), p('BabelForge'), p('AgentDeck #2')];
+    const groups = groupSessionsByProject(items, (i) => i.projectName);
+    expect(groups.map((g) => g.key)).toEqual(['AgentDeck', 'BabelForge']);
+    expect(groups[0].members).toHaveLength(2);
+  });
+
+  it('preserves input order within groups', () => {
+    const items = [p('proj-x-long-task-name-a'), p('proj-x-long-task-name-b')];
+    const groups = groupSessionsByProject(items, (i) => i.projectName);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].members.map((m) => m.projectName)).toEqual([
+      'proj-x-long-task-name-a',
+      'proj-x-long-task-name-b',
+    ]);
+  });
+});

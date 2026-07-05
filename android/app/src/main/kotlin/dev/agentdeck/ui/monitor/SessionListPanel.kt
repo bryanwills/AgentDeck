@@ -2,6 +2,8 @@ package dev.agentdeck.ui.monitor
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,11 +28,14 @@ import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.ui.component.AgentDeckLogo
 import dev.agentdeck.ui.component.BrandIcon
 import dev.agentdeck.ui.component.stateColor
+import dev.agentdeck.ui.component.agentDisplayLabel
 import dev.agentdeck.ui.eink.agentTypeRank
 import dev.agentdeck.ui.eink.compareSessionsForDisplay
 import dev.agentdeck.ui.eink.compactStateMarker
 import dev.agentdeck.ui.eink.mapSessionState
 import dev.agentdeck.ui.eink.naturalLabelCompare
+import dev.agentdeck.util.groupSessionsByProject
+import dev.agentdeck.util.normalizeProjectForGrouping
 
 /**
  * Left HUD panel — AgentDeck logo + unified session list (primary + siblings).
@@ -177,8 +182,10 @@ fun SessionListPanel(
 
         Spacer(modifier = Modifier.height(2.dp))
 
-        // Session entries
-        displayEntries.forEach { entry ->
+        // One session row (icon + name + model/state + activity). Extracted so
+        // grouped and flat entries render identically apart from label/indent.
+        @Composable
+        fun sessionRow(entry: SessionEntry, label: String, indent: Boolean) {
             val stateMarker = compactStateMarker(entry.agentState)
             val modelEffort = when {
                 entry.modelName != null && entry.effortLevel != null
@@ -193,20 +200,10 @@ fun SessionListPanel(
                 stateMarker
             }
 
-            // #N suffix for duplicate sessions of the same agent type
-            val key = NameKey(entry.projectName, entry.agentType)
-            val needsSuffix = (nameCounts[key] ?: 1) > 1
-            val suffix = if (needsSuffix) {
-                val idx = (nameCounters[key] ?: 0) + 1
-                nameCounters[key] = idx
-                " #$idx"
-            } else {
-                ""
-            }
-
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(if (indent) Modifier.padding(start = 10.dp) else Modifier)
                     .then(
                         if (entry.sessionId != null) {
                             Modifier.clickable { onFocusSession(entry.sessionId) }
@@ -222,7 +219,7 @@ fun SessionListPanel(
                 ) {
                     BrandIcon(agentType = entry.agentType, isEink = false)
                     Text(
-                        text = "${entry.projectName}$suffix",
+                        text = label,
                         color = TerrariumColors.HUDText,
                         fontSize = scale.fontBody,
                         fontWeight = if (entry.isPrimary) FontWeight.Bold else FontWeight.Normal,
@@ -253,6 +250,70 @@ fun SessionListPanel(
             }
         }
 
+        // #N suffix for duplicate sessions of the same agent type
+        fun suffixFor(entry: SessionEntry): String {
+            val key = NameKey(entry.projectName, entry.agentType)
+            if ((nameCounts[key] ?: 1) <= 1) return ""
+            val idx = (nameCounters[key] ?: 0) + 1
+            nameCounters[key] = idx
+            return " #$idx"
+        }
+
+        // Session entries — clustered into project work groups (IPS10 office
+        // huddle port, see dev.agentdeck.util.SessionGrouping). Worktree/task
+        // folders sharing a long prefix render under one group header with
+        // only their differentiating tail; singletons render flat.
+        //
+        // Scrollable: with 8+ concurrent sessions the list used to overflow the
+        // unbounded panel and paint over the timeline strip below. The call
+        // site caps the panel height (heightIn), so weight(fill=false) hands
+        // the entries whatever space the logo leaves, and overflow scrolls.
+        Column(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(scale.sessionRowSpacing),
+        ) {
+        val groups = groupSessionsByProject(displayEntries) { it.projectName }
+        groups.forEach { group ->
+            if (group.grouped) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(TerrariumColors.HUDSubtext.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                ) {
+                    Text(
+                        text = group.key,
+                        color = TerrariumColors.HUDSubtext,
+                        fontSize = scale.fontSub,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text(
+                        text = "×${group.members.size}",
+                        color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
+                        fontSize = scale.fontSub,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                group.members.forEach { entry ->
+                    sessionRow(
+                        entry = entry,
+                        label = groupMemberLabel(group.key, entry.projectName, entry.agentType) + suffixFor(entry),
+                        indent = true,
+                    )
+                }
+            } else {
+                val entry = group.members[0]
+                sessionRow(entry = entry, label = entry.projectName + suffixFor(entry), indent = false)
+            }
+        }
+
         // Worker count
         if (workerSessionCount != null && workerSessionCount > 0) {
             Text(
@@ -262,5 +323,26 @@ fun SessionListPanel(
                 fontFamily = FontFamily.Monospace,
             )
         }
+        }
     }
+}
+
+/**
+ * Display label for a member row under a project group header. The header
+ * already carries the shared stem, so the row shows only the differentiating
+ * tail ("claude-glm" under "xteink-x3-x4-japanese-broken"). Exact-duplicate
+ * members (same project run twice) fall back to the agent display name — the
+ * caller's #N suffix disambiguates.
+ */
+private fun groupMemberLabel(groupKey: String, projectName: String, agentType: String?): String {
+    val norm = normalizeProjectForGrouping(projectName)
+    if (norm.length > groupKey.length && norm.startsWith(groupKey, ignoreCase = true)) {
+        val rest = norm.substring(groupKey.length).trimStart('-', '_', ' ', '.')
+        if (rest.isNotEmpty()) return rest
+    }
+    if (norm.equals(groupKey, ignoreCase = true)) {
+        val agent = agentDisplayLabel(agentType)
+        if (agent.isNotEmpty()) return agent
+    }
+    return projectName
 }
