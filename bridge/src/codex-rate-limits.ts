@@ -45,36 +45,99 @@ interface RawRateLimits {
   credits?: RawCredits;
 }
 
-const sessionsRoot = (): string => path.join(os.homedir(), '.codex', 'sessions');
+const defaultSessionsRoot = (): string => path.join(os.homedir(), '.codex', 'sessions');
 
-/** Descend year → month → day choosing the newest directory at each level,
- *  then return the most-recently-modified rollout file there. */
-function newestRolloutFile(): string | null {
-  let dir = sessionsRoot();
-  if (!fs.existsSync(dir)) return null;
+interface RolloutCandidate {
+  full: string;
+  mtime: number;
+}
+
+/** List immediate subdirectory names of `dir`, sorted newest-first (numeric,
+ *  so "10" > "9"). Returns [] on any read error. */
+function sortedSubdirs(dir: string): string[] {
   try {
-    for (let depth = 0; depth < 3; depth++) {
-      const subdirs = fs
-        .readdirSync(dir, { withFileTypes: true })
-        .filter((e) => e.isDirectory())
-        .map((e) => e.name)
-        .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-      if (subdirs.length === 0) return null;
-      dir = path.join(dir, subdirs[0]);
-    }
-    const files = fs
-      .readdirSync(dir)
-      .filter((f) => f.startsWith('rollout-') && f.endsWith('.jsonl'));
-    let best: { full: string; mtime: number } | null = null;
-    for (const f of files) {
-      const full = path.join(dir, f);
-      const mtime = fs.statSync(full).mtimeMs;
-      if (!best || mtime > best.mtime) best = { full, mtime };
-    }
-    return best?.full ?? null;
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
   } catch {
-    return null;
+    return [];
   }
+}
+
+/** Collect the newest `maxDays` day-directories under a year/month/day tree,
+ *  walking back across month and year boundaries when a level runs short, so a
+ *  session that spans midnight (whose rollout stays in the older day-dir) is
+ *  still reachable. Returns absolute day-directory paths, newest-first. */
+function newestDayDirs(root: string, maxDays: number): string[] {
+  const out: string[] = [];
+  for (const year of sortedSubdirs(root)) {
+    const yearDir = path.join(root, year);
+    for (const month of sortedSubdirs(yearDir)) {
+      const monthDir = path.join(yearDir, month);
+      for (const day of sortedSubdirs(monthDir)) {
+        out.push(path.join(monthDir, day));
+        if (out.length >= maxDays) return out;
+      }
+    }
+  }
+  return out;
+}
+
+/** Gather rollout files across the newest few day-directories and return them
+ *  sorted by mtime descending (capped). Selecting by mtime *across* day-dirs —
+ *  not just within the single newest day-dir — is what lets a still-appending
+ *  session started on a previous day win over a fresh-but-empty session that
+ *  merely created a newer day-directory. */
+function candidateRolloutFiles(root: string, maxDays = 3, maxFiles = 6): RolloutCandidate[] {
+  if (!fs.existsSync(root)) return [];
+  const files: RolloutCandidate[] = [];
+  for (const dayDir of newestDayDirs(root, maxDays)) {
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dayDir);
+    } catch {
+      continue;
+    }
+    for (const f of entries) {
+      if (!f.startsWith('rollout-') || !f.endsWith('.jsonl')) continue;
+      const full = path.join(dayDir, f);
+      try {
+        files.push({ full, mtime: fs.statSync(full).mtimeMs });
+      } catch {
+        /* ignore unreadable entry */
+      }
+    }
+  }
+  files.sort((a, b) => b.mtime - a.mtime);
+  return files.slice(0, maxFiles);
+}
+
+/** Scan candidates newest-first and return the first that yields a usable
+ *  rate-limits snapshot. Falls through past a newer file that carries no
+ *  `rate_limits` line (e.g. a just-started session) to an older active one. */
+function parseFirstUsable(candidates: RolloutCandidate[]): CodexRateLimits | null {
+  for (const { full, mtime } of candidates) {
+    const tail = readTail(full);
+    const parsed = tail ? parseCodexRateLimitsFromText(tail) : null;
+    if (parsed) {
+      // Stamp the rollout mtime as a secondary freshness anchor (the per-window
+      // `stale` flag set in buildUsageEvent is authoritative).
+      parsed.capturedAt = new Date(mtime).toISOString();
+      return parsed;
+    }
+  }
+  return null;
+}
+
+/**
+ * Read the newest usable Codex rate-limits snapshot from a sessions tree.
+ * Exported (root-injectable) for unit testing; `readCodexRateLimits` wraps this
+ * with mtime caching against the live `~/.codex/sessions` tree.
+ */
+export function pickCodexRateLimits(root: string = defaultSessionsRoot()): CodexRateLimits | null {
+  return parseFirstUsable(candidateRolloutFiles(root));
 }
 
 /** Read the trailing bytes of a file without slurping the whole rollout (these
@@ -158,30 +221,20 @@ export function parseCodexRateLimitsFromText(text: string): CodexRateLimits | nu
   return null;
 }
 
-// Cache keyed on the active rollout path + its mtime so repeated usage polls
-// don't re-read an unchanged file.
+// Cache keyed on the newest candidate rollout's path + mtime so repeated usage
+// polls don't re-scan unchanged files. Keying on the newest candidate (not the
+// one that yielded the snapshot) means any fresh write to the active session
+// invalidates the cache and re-scans.
 let cacheKey = '';
 let cacheValue: CodexRateLimits | null = null;
 
 export function readCodexRateLimits(): CodexRateLimits | null {
-  const file = newestRolloutFile();
-  if (!file) return null;
+  const candidates = candidateRolloutFiles(defaultSessionsRoot());
+  const newest = candidates[0];
+  const key = newest ? `${newest.full}:${newest.mtime}` : '';
+  if (key && key === cacheKey) return cacheValue;
 
-  let mtime = 0;
-  try {
-    mtime = fs.statSync(file).mtimeMs;
-  } catch {
-    return null;
-  }
-  const key = `${file}:${mtime}`;
-  if (key === cacheKey) return cacheValue;
-
-  const tail = readTail(file);
-  const parsed = tail ? parseCodexRateLimitsFromText(tail) : null;
-  // Stamp the rollout mtime as a secondary freshness anchor (the per-window
-  // `stale` flag set in buildUsageEvent is authoritative).
-  if (parsed) parsed.capturedAt = new Date(mtime).toISOString();
-
+  const parsed = parseFirstUsable(candidates);
   cacheKey = key;
   cacheValue = parsed;
   return parsed;

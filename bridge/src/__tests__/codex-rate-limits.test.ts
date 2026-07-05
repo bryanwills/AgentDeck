@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { parseCodexRateLimitsFromText } from '../codex-rate-limits.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { parseCodexRateLimitsFromText, pickCodexRateLimits } from '../codex-rate-limits.js';
 
 // A realistic token_count line as Codex CLI writes it to a rollout file.
 const tokenCountLine = JSON.stringify({
@@ -114,5 +117,106 @@ describe('parseCodexRateLimitsFromText', () => {
       payload: { type: 'token_count', rate_limits: { primary: null, secondary: null } },
     });
     expect(parseCodexRateLimitsFromText(bare)).toBeNull();
+  });
+});
+
+// A rollout line with the given primary/secondary used_percent.
+const rolloutLine = (primaryPct: number, secondaryPct = 1): string =>
+  JSON.stringify({
+    timestamp: '2026-07-05T00:00:00.000Z',
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      rate_limits: {
+        limit_id: 'codex',
+        primary: { used_percent: primaryPct, window_minutes: 300, resets_at: 1783249801 },
+        secondary: { used_percent: secondaryPct, window_minutes: 10080, resets_at: 1783836601 },
+        credits: null,
+        plan_type: 'plus',
+      },
+    },
+  });
+
+/**
+ * pickCodexRateLimits selects the newest usable snapshot across recent
+ * day-directories — not just the single newest day-dir. This guards the bug
+ * where a session that started on a prior day (its rollout stays in the older
+ * day-dir) had its live rate_limits ignored because a fresh, empty session
+ * created a newer day-directory.
+ */
+describe('pickCodexRateLimits (file selection across day-dirs)', () => {
+  const tmpRoots: string[] = [];
+
+  afterEach(() => {
+    for (const r of tmpRoots.splice(0)) {
+      try { fs.rmSync(r, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  /** Build a temp sessions tree. `files` maps `YYYY/MM/DD/rollout-name.jsonl`
+   *  → { content, mtimeMs }. Returns the sessions-root path. */
+  function makeTree(files: Record<string, { content: string; mtimeMs: number }>): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-sessions-'));
+    tmpRoots.push(root);
+    for (const [rel, { content, mtimeMs }] of Object.entries(files)) {
+      const full = path.join(root, rel);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, content);
+      const t = new Date(mtimeMs);
+      fs.utimesSync(full, t, t);
+    }
+    return root;
+  }
+
+  it('returns null when the tree does not exist', () => {
+    expect(pickCodexRateLimits(path.join(os.tmpdir(), 'no-such-codex-root-xyz'))).toBeNull();
+  });
+
+  it('picks the active prior-day rollout over a newer empty day-dir', () => {
+    // Newer day-dir (07/05) file: no rate_limits, older mtime.
+    // Prior day-dir (07/04) file: valid windows, NEWEST mtime (still appending).
+    const root = makeTree({
+      '2026/07/05/rollout-2026-07-05T17-22-21-aaaa.jsonl': {
+        content: '{"type":"message"}\n{"foo":1}\n',
+        mtimeMs: Date.parse('2026-07-05T17:22:00Z'),
+      },
+      '2026/07/04/rollout-2026-07-04T09-42-09-bbbb.jsonl': {
+        content: rolloutLine(71) + '\n',
+        mtimeMs: Date.parse('2026-07-05T17:41:00Z'),
+      },
+    });
+    const result = pickCodexRateLimits(root);
+    expect(result).not.toBeNull();
+    expect(result!.primary!.usedPercent).toBe(71);
+    expect(result!.secondary!.usedPercent).toBe(1);
+    expect(result!.planType).toBe('plus');
+  });
+
+  it('falls through a newer empty file to an older one with data in the same day-dir', () => {
+    const root = makeTree({
+      '2026/07/05/rollout-2026-07-05T18-00-00-empty.jsonl': {
+        content: '{"type":"session_meta"}\n',
+        mtimeMs: Date.parse('2026-07-05T18:00:00Z'),
+      },
+      '2026/07/05/rollout-2026-07-05T12-00-00-data.jsonl': {
+        content: rolloutLine(33) + '\n',
+        mtimeMs: Date.parse('2026-07-05T17:50:00Z'),
+      },
+    });
+    expect(pickCodexRateLimits(root)!.primary!.usedPercent).toBe(33);
+  });
+
+  it('reaches across a month boundary for a still-active prior-month session', () => {
+    const root = makeTree({
+      '2026/08/01/rollout-2026-08-01T09-00-00-fresh.jsonl': {
+        content: '{"type":"message"}\n',
+        mtimeMs: Date.parse('2026-08-01T09:00:00Z'),
+      },
+      '2026/07/31/rollout-2026-07-31T23-30-00-active.jsonl': {
+        content: rolloutLine(55) + '\n',
+        mtimeMs: Date.parse('2026-08-01T09:05:00Z'),
+      },
+    });
+    expect(pickCodexRateLimits(root)!.primary!.usedPercent).toBe(55);
   });
 });
