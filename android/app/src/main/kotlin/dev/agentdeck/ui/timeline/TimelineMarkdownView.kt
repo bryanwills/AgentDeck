@@ -322,6 +322,13 @@ fun stripMarkdownInline(s: String): String {
     return out.trim()
 }
 
+/** Row-form of a summary: markdown stripped and all whitespace runs
+ *  (including newlines) collapsed to single spaces, so a multi-line prompt
+ *  fills the one-line timeline row instead of ellipsizing at its first line
+ *  break ("Overview…" with the rest of the row blank). */
+fun rowSummary(s: String): String =
+    stripMarkdownForSummary(s).replace(Regex("\\s+"), " ").trim()
+
 /** Lightweight text-stripping mirror of `cleanRawText` from shared. Used to
  *  keep markdown decorators out of the summary row in the timeline. */
 fun stripMarkdownForSummary(s: String): String {

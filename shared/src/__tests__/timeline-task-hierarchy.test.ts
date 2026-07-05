@@ -142,8 +142,48 @@ describe('isInFlightTask', () => {
 });
 
 describe('isRotatingEntry', () => {
-  it('chat_start always rotates (icon-key running)', () => {
+  it('chat_start without a timestamp rotates (icon-key running, legacy rows)', () => {
     expect(isRotatingEntry({ type: 'chat_start' }, [])).toBe(true);
+  });
+
+  it('fresh chat_start rotates', () => {
+    expect(isRotatingEntry({ type: 'chat_start', ts: 1_000 }, [], 2_000)).toBe(true);
+  });
+
+  it('chat_start older than the age cap stops rotating', () => {
+    expect(
+      isRotatingEntry({ type: 'chat_start', ts: 1_000 }, [], 1_000 + 10 * 60 * 1000 + 1),
+    ).toBe(false);
+  });
+
+  it('chat_start with a later same-session completion stops rotating', () => {
+    expect(
+      isRotatingEntry(
+        { type: 'chat_start', ts: 1_000, sessionId: 'a' },
+        [{ type: 'chat_response', ts: 5_000, sessionId: 'a' }],
+        6_000,
+      ),
+    ).toBe(false);
+  });
+
+  it('chat_start superseded by a newer same-session prompt stops rotating', () => {
+    expect(
+      isRotatingEntry(
+        { type: 'chat_start', ts: 1_000, sessionId: 'a' },
+        [{ type: 'chat_start', ts: 5_000, sessionId: 'a' }],
+        6_000,
+      ),
+    ).toBe(false);
+  });
+
+  it("other sessions' completions do not stop a running chat_start", () => {
+    expect(
+      isRotatingEntry(
+        { type: 'chat_start', ts: 1_000, sessionId: 'a' },
+        [{ type: 'chat_response', ts: 5_000, sessionId: 'b' }],
+        6_000,
+      ),
+    ).toBe(true);
   });
 
   it('orphan task_start rotates via in-flight predicate', () => {

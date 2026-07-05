@@ -283,86 +283,114 @@ struct GroupedEntry: Identifiable, Sendable {
 
 // MARK: - Timeline Grouping
 
+/// How many prior groups a turn child (chat_response/chat_end) may scan back
+/// through to find its chat_start. With several agents running concurrently,
+/// other sessions' rows interleave between a prompt and its completion —
+/// merging only into the immediately-previous group (the old behaviour) made
+/// every busy-dashboard turn render as 2-3 scattered rows. Bounded so a
+/// pathological backlog can't go quadratic. Mirrors TURN_MERGE_LOOKBACK in
+/// android TimelineStore.kt.
+private let turnMergeLookback = 40
+private let turnMergeMaxGapMs: Double = 12 * 60 * 60 * 1000
+
 func groupConsecutive(_ entries: [TimelineEntry], windowSeconds: Double = 60) -> [GroupedEntry] {
     guard !entries.isEmpty else { return [] }
 
-    var result: [GroupedEntry] = []
-    var current = GroupedEntry(entry: entries[0], lastTs: entries[0].ts)
+    var groups: [GroupedEntry] = []
+    for entry in entries {
+        let isTaskMarker = entry.type == .taskStart || entry.type == .taskEnd
+        if !isTaskMarker, let last = groups.last {
+            // Turn merge: a chat_response/chat_end folds into the most recent
+            // same-session turn group, looking past interleaved rows from
+            // other sessions.
+            if tryMergeTurnChild(&groups, entry) { continue }
 
-    for i in 1..<entries.count {
-        let entry = entries[i]
-        let timeDiff = abs(entry.ts - current.lastTs)
-
-        // Task hierarchy entries never group — they're unique markers.
-        if entry.type == .taskStart || entry.type == .taskEnd ||
-           current.entry.type == .taskStart || current.entry.type == .taskEnd {
-            result.append(current)
-            current = GroupedEntry(entry: entry, lastTs: entry.ts)
-            continue
-        }
-
-        // Turn merge: an in-flight chat_start absorbs the chat_response and
-        // chat_end the daemon emits for the same session, so the UI shows
-        // one row per user prompt instead of three. sessionId + the
-        // chat_start anchor (`entry.startedAt == chat_start.ts`) are the
-        // gate — wall-clock isn't, because long assistant responses
-        // (multi-fix Claude Code tasks run 20 min+) push chat_end far
-        // past any reasonable window. The anchor match is critical:
-        // without it an out-of-order chat_end that arrives *after* the
-        // next user_prompt_submit would attach to the fresh chat_start,
-        // cross-talking Q1's completion onto Q2's row (Codex stop-time
-        // review #7, 2026-05-17). Legacy entries with nil startedAt
-        // fall back to allowing the merge — pre-anchor emitters
-        // shouldn't regress, and the iteration order itself constrains
-        // the worst case.
-        //
-        // Synthetic chat_start placeholders ("Prompt sent" /
-        // "Codex turn started") are still excluded — the dashboard
-        // filter promotes the trailing chat_end as the visible row,
-        // and merging would hide that completion entirely.
-        if current.entry.type == .chatStart &&
-           current.mergedCompletion == nil &&
-           timelineIsMeaningfulChatStart(current.entry) &&
-           sameSession(current.entry, entry) &&
-           sameTurnAnchor(start: current.entry, child: entry) {
-            if entry.type == .chatResponse && current.mergedResponse == nil {
-                current.mergedResponse = entry
-                continue
-            }
-            if entry.type == .chatEnd {
-                current.mergedCompletion = entry
+            // Same-type consecutive run collapse (×count).
+            // Task hierarchy entries never group — they're unique markers.
+            let timeDiff = abs(entry.ts - last.lastTs)
+            if last.entry.type != .taskStart && last.entry.type != .taskEnd &&
+               entry.type == last.entry.type &&
+               entry.raw == last.entry.raw &&
+               sameSession(last.entry, entry) &&
+               timeDiff <= timelineGroupingWindowMs(for: entry.type, defaultWindowSeconds: windowSeconds) {
+                groups[groups.count - 1].count += 1
+                groups[groups.count - 1].lastTs = entry.ts
                 continue
             }
         }
+        groups.append(GroupedEntry(entry: entry, lastTs: entry.ts))
+    }
+    return groups
+}
 
-        // If the prompt row is missing, synthetic, or filtered later, keep the
-        // response body as the visible turn row and attach the trailing
-        // chat_end metadata underneath it. Showing `Completed · ...` as its
-        // own row adds little signal and makes the timeline read like logs
-        // instead of turns. Anchor matching still prevents delayed completions
-        // from crossing into the next response.
-        if current.entry.type == .chatResponse &&
-           current.mergedCompletion == nil &&
-           entry.type == .chatEnd &&
-           sameSession(current.entry, entry) &&
-           sameResponseCompletionAnchor(response: current.entry, completion: entry) {
-            current.mergedCompletion = entry
+/// Fold a turn child (chat_response / chat_end) into the group it belongs to.
+///
+/// Scans recent groups newest-first. The first same-session group encountered
+/// decides the outcome — it is either this child's turn (merge) or evidence
+/// that the turn is already closed / distinct (stop, render standalone).
+/// sessionId + the chat_start anchor (`entry.startedAt == chat_start.ts`) are
+/// the gate — wall-clock isn't, because long assistant responses (multi-fix
+/// Claude Code tasks run 20 min+) push chat_end far past any reasonable
+/// window. The anchor match is critical: without it an out-of-order chat_end
+/// that arrives *after* the next user_prompt_submit would attach to the fresh
+/// chat_start, cross-talking Q1's completion onto Q2's row (Codex stop-time
+/// review #7, 2026-05-17). Legacy entries with nil startedAt fall back to
+/// allowing the merge — bounded by the "most recent same-session chat_start"
+/// rule.
+///
+/// Synthetic chat_start placeholders ("Prompt sent" / "Codex turn started")
+/// never absorb — the dashboard filter promotes the trailing completion as
+/// the visible row, and merging would hide that completion entirely. When the
+/// prompt row is missing or synthetic, a visible chat_response absorbs its
+/// trailing chat_end instead so "Completed · ..." doesn't spawn its own row.
+/// Mirrors `tryMergeTurnChild` in android TimelineStore.kt.
+private func tryMergeTurnChild(_ groups: inout [GroupedEntry], _ entry: TimelineEntry) -> Bool {
+    let isResponse = entry.type == .chatResponse
+    let isCompletion = entry.type == .chatEnd
+    if !isResponse && !isCompletion { return false }
+
+    var scanned = 0
+    for i in stride(from: groups.count - 1, through: 0, by: -1) {
+        scanned += 1
+        if scanned > turnMergeLookback { return false }
+        let g = groups[i]
+        let ge = g.entry
+        if entry.ts - ge.ts > turnMergeMaxGapMs { return false }
+        guard sameSession(ge, entry) else { continue }
+
+        switch ge.type {
+        case .chatStart:
+            // Most recent same-session chat_start = this child's turn. Any
+            // mismatch means the child's real turn row is missing — merging
+            // further back would cross-talk onto an older turn.
+            if !timelineIsMeaningfulChatStart(ge) { return false }
+            if g.mergedCompletion != nil { return false }
+            if !sameTurnAnchor(start: ge, child: entry) { return false }
+            if isResponse {
+                if g.mergedResponse != nil { return false }
+                groups[i].mergedResponse = entry
+            } else {
+                groups[i].mergedCompletion = entry
+            }
+            return true
+        case .chatResponse:
+            if isCompletion &&
+               g.mergedCompletion == nil &&
+               sameResponseCompletionAnchor(response: ge, completion: entry) {
+                groups[i].mergedCompletion = entry
+                return true
+            }
+            return false
+        case .toolRequest, .toolResolved, .toolExec, .modelCall, .memoryRecall:
+            // Activity *inside* the turn — look past it to the turn's chat_start.
             continue
-        }
-
-        if entry.type == current.entry.type &&
-           entry.raw == current.entry.raw &&
-           sameSession(current.entry, entry) &&
-           timeDiff <= timelineGroupingWindowMs(for: entry.type, defaultWindowSeconds: windowSeconds) {
-            current.count += 1
-            current.lastTs = entry.ts
-        } else {
-            result.append(current)
-            current = GroupedEntry(entry: entry, lastTs: entry.ts)
+        default:
+            // Any other same-session row (chat_end, task marker…) is a turn
+            // boundary for this session — stop scanning.
+            return false
         }
     }
-    result.append(current)
-    return result
+    return false
 }
 
 private func timelineGroupingWindowMs(for type: TimelineEntryType, defaultWindowSeconds: Double) -> Double {

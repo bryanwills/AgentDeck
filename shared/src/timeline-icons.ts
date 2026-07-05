@@ -95,17 +95,62 @@ export function isInFlightTask(
 }
 
 /**
+ * Age cap for the rotating "running" treatment on turn rows. Turn-completion
+ * signals are best-effort (Stop hook, transcript tail, PTY marker) and can be
+ * lost across daemon handoffs — a chat_start older than this stops spinning
+ * even without an explicit completion so dead turns don't animate forever.
+ * Matches Apple's `chatStartMaxAgeSec` (TimelineStripView.swift). Task
+ * hierarchy markers are handled by the daemon-side orphan reaper plus Apple's
+ * own in-flight cap.
+ */
+export const ROTATING_ENTRY_MAX_AGE_MS = 10 * 60 * 1000;
+
+type RotatingSibling = Pick<TimelineEntry, 'type' | 'taskId'> &
+  Partial<Pick<TimelineEntry, 'sessionId' | 'ts'>>;
+
+/** Same-session test mirroring the turn-merge rule: both ids equal, or both
+ *  absent (legacy single-session emitters). */
+function sameRotatingSession(a?: string, b?: string): boolean {
+  if (!a && !b) return true;
+  return !!a && !!b && a === b;
+}
+
+/**
  * True when a turn row should rotate its leading icon. Combines the static
  * `running` icon-key (chat_start, unknown types) with the in-flight
  * task-hierarchy signal so an open `task_start` also spins until its
  * `task_end` arrives. `siblings` should be the entries the row sees in its
  * group/list — passing `[]` falls back to icon-key only.
+ *
+ * A chat_start only spins while its turn is plausibly still open:
+ *   - no later same-session completion (chat_response / chat_end / model_response),
+ *   - no later same-session chat_start (a new prompt supersedes the turn even
+ *     when its completion signal was lost — Stop hooks are best-effort),
+ *   - younger than ROTATING_ENTRY_MAX_AGE_MS.
+ * Mirrored in Apple TimelineStripView.swift and Android TimelineIcons.kt —
+ * update all three in the same commit.
  */
 export function isRotatingEntry(
-  entry: Pick<TimelineEntry, 'type' | 'status' | 'taskId'>,
-  siblings: ReadonlyArray<Pick<TimelineEntry, 'type' | 'taskId'>>,
+  entry: Pick<TimelineEntry, 'type' | 'status' | 'taskId'> &
+    Partial<Pick<TimelineEntry, 'sessionId' | 'ts'>>,
+  siblings: ReadonlyArray<RotatingSibling>,
+  nowMs?: number,
 ): boolean {
-  if (timelineIconKey(entry) === 'running') return true;
+  if (timelineIconKey(entry) === 'running') {
+    if (entry.type !== 'chat_start') return true;
+    const ts = entry.ts;
+    if (ts != null) {
+      const now = nowMs ?? Date.now();
+      if (now - ts > ROTATING_ENTRY_MAX_AGE_MS) return false;
+      for (const s of siblings) {
+        if (s.ts == null || s.ts < ts) continue;
+        if (!sameRotatingSession(entry.sessionId, s.sessionId)) continue;
+        if (s.type === 'chat_response' || s.type === 'chat_end' || s.type === 'model_response') return false;
+        if (s.type === 'chat_start' && s.ts > ts) return false;
+      }
+    }
+    return true;
+  }
   return isInFlightTask(entry, siblings);
 }
 

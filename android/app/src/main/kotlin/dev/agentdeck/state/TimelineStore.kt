@@ -80,71 +80,110 @@ data class GroupedEntry(
  *     into one `×count` group (`canGroup`): tool_request 10s, chat_end/default
  *     60s.
  */
+/** How many prior groups a turn child (chat_response/chat_end) may scan back
+ *  through to find its chat_start. With several agents running concurrently,
+ *  other sessions' rows interleave between a prompt and its completion —
+ *  merging only into the immediately-previous group (the old behaviour) made
+ *  every busy-dashboard turn render as 2-3 scattered rows with a spinner that
+ *  never stopped. Bounded so a pathological backlog can't go quadratic. */
+private const val TURN_MERGE_LOOKBACK = 40
+private const val TURN_MERGE_MAX_GAP_MS = 12 * 60 * 60 * 1000L
+
 fun groupConsecutive(entries: List<TimelineEntry>): List<GroupedEntry> {
     if (entries.isEmpty()) return emptyList()
-    val result = mutableListOf<GroupedEntry>()
-    var current = GroupedEntry(entry = entries[0], lastTs = entries[0].timestamp)
-    for (i in 1 until entries.size) {
-        val entry = entries[i]
+    val groups = mutableListOf<GroupedEntry>()
+    for (entry in entries) {
+        val isTaskMarker = entry.type == "task_start" || entry.type == "task_end"
+        val last = groups.lastOrNull()
+        if (!isTaskMarker && last != null) {
+            // Turn merge: a chat_response/chat_end folds into the most recent
+            // same-context turn group, looking past interleaved rows from
+            // other sessions.
+            if (tryMergeTurnChild(groups, entry)) continue
 
-        // Task hierarchy markers never group — each is a unique unit of work.
-        if (entry.type == "task_start" || entry.type == "task_end" ||
-            current.entry.type == "task_start" || current.entry.type == "task_end"
-        ) {
-            result.add(current)
-            current = GroupedEntry(entry = entry, lastTs = entry.timestamp)
-            continue
-        }
-
-        // Turn merge: chat_start absorbs its chat_response + chat_end. The turn
-        // context (`sameTimelineContext` — taskId/runId/sessionId aware, so two
-        // turns in one session with distinct runIds never fold together) plus
-        // the chat_start anchor (child.startedAt == chat_start.ts) gate the
-        // merge — wall-clock does not, because long responses push chat_end far
-        // past any window. Synthetic starters ("Prompt sent" / "Connected") are
-        // excluded so the trailing completion stays the visible row.
-        if (current.entry.type == "chat_start" &&
-            current.mergedCompletion == null &&
-            isMeaningfulChatStart(current.entry) &&
-            sameTimelineContext(current.entry, entry) &&
-            sameTurnAnchor(current.entry, entry)
-        ) {
-            if (entry.type == "chat_response" && current.mergedResponse == null) {
-                current = current.copy(mergedResponse = entry)
-                continue
-            }
-            if (entry.type == "chat_end") {
-                current = current.copy(mergedCompletion = entry)
+            // Same-type consecutive run collapse (×count) — keep latest entry.
+            // Task hierarchy markers never group — each is a unique unit of work.
+            if (last.entry.type != "task_start" && last.entry.type != "task_end" &&
+                canGroup(last, entry)
+            ) {
+                groups[groups.size - 1] = last.copy(
+                    entry = entry,
+                    count = last.count + 1,
+                    lastTs = entry.timestamp,
+                )
                 continue
             }
         }
+        groups.add(GroupedEntry(entry = entry, lastTs = entry.timestamp))
+    }
+    return groups
+}
 
-        // A visible chat_response absorbs its trailing chat_end so "Completed ·
-        // …" metadata doesn't spawn its own row.
-        if (current.entry.type == "chat_response" &&
-            current.mergedCompletion == null &&
-            entry.type == "chat_end" &&
-            sameTimelineContext(current.entry, entry) &&
-            sameResponseCompletionAnchor(current.entry, entry)
-        ) {
-            current = current.copy(mergedCompletion = entry)
-            continue
-        }
+/**
+ * Fold a turn child (chat_response / chat_end) into the group it belongs to.
+ *
+ * Scans recent groups newest-first. The first same-context group encountered
+ * decides the outcome — it is either this child's turn (merge) or evidence
+ * that the turn is already closed / distinct (stop, render standalone). The
+ * turn context (`sameTimelineContext` — taskId/runId/sessionId aware) plus the
+ * chat_start anchor (child.startedAt == chat_start.ts) gate the merge —
+ * wall-clock does not, because long responses push chat_end far past any
+ * window. Synthetic starters ("Prompt sent" / "Connected") never absorb; the
+ * trailing completion stays the visible row. Mirrors Apple
+ * `apple/AgentDeck/Model/Timeline.swift::tryMergeTurnChild`.
+ */
+private fun tryMergeTurnChild(groups: MutableList<GroupedEntry>, entry: TimelineEntry): Boolean {
+    val isResponse = entry.type == "chat_response"
+    val isCompletion = entry.type == "chat_end"
+    if (!isResponse && !isCompletion) return false
 
-        // Same-type consecutive run collapse (×count) — keep latest entry.
-        if (canGroup(current, entry)) {
-            current = current.copy(
-                entry = entry,
-                count = current.count + 1,
-                lastTs = entry.timestamp,
-            )
-        } else {
-            result.add(current)
-            current = GroupedEntry(entry = entry, lastTs = entry.timestamp)
+    var scanned = 0
+    for (i in groups.indices.reversed()) {
+        if (scanned++ >= TURN_MERGE_LOOKBACK) return false
+        val g = groups[i]
+        val ge = g.entry
+        if (entry.timestamp - ge.timestamp > TURN_MERGE_MAX_GAP_MS) return false
+        if (!sameTimelineContext(ge, entry)) continue
+
+        when (ge.type) {
+            "chat_start" -> {
+                // Most recent same-context chat_start = this child's turn.
+                // Any mismatch means the child's real turn row is missing —
+                // merging further back would cross-talk onto an older turn.
+                if (!isMeaningfulChatStart(ge)) return false
+                if (g.mergedCompletion != null) return false
+                if (!sameTurnAnchor(ge, entry)) return false
+                if (isResponse) {
+                    if (g.mergedResponse != null) return false
+                    groups[i] = g.copy(mergedResponse = entry)
+                } else {
+                    groups[i] = g.copy(mergedCompletion = entry)
+                }
+                return true
+            }
+            "chat_response" -> {
+                // A visible chat_response absorbs its trailing chat_end so
+                // "Completed · …" metadata doesn't spawn its own row. A
+                // response child stopping here means its own prompt row is
+                // missing — standalone.
+                if (isCompletion &&
+                    g.mergedCompletion == null &&
+                    sameResponseCompletionAnchor(ge, entry)
+                ) {
+                    groups[i] = g.copy(mergedCompletion = entry)
+                    return true
+                }
+                return false
+            }
+            // Tool / model-call rows are activity *inside* the turn — look past
+            // them to the turn's chat_start.
+            "tool_request", "tool_resolved", "tool_exec", "model_call", "memory_recall" -> continue
+            // Any other same-context row (chat_end, task marker…) is a turn
+            // boundary for this session — stop scanning.
+            else -> return false
         }
     }
-    result.add(current)
-    return result
+    return false
 }
 
 /** True when `child` (chat_response/chat_end) belongs to `start`: the daemon

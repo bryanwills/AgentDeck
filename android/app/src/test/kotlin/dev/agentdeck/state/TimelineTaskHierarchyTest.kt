@@ -1,5 +1,6 @@
 package dev.agentdeck.state
 
+import dev.agentdeck.ui.timeline.ROTATING_ENTRY_MAX_AGE_MS
 import dev.agentdeck.ui.timeline.TimelineIconKey
 import dev.agentdeck.ui.timeline.isInFlightTask
 import dev.agentdeck.ui.timeline.isRotatingEntry
@@ -321,8 +322,40 @@ class TimelineTaskHierarchyTest {
     }
 
     @Test
-    fun `chat_start always rotates via icon-key running`() {
-        assertTrue(isRotatingEntry(entry("chat_start"), emptyList()))
+    fun `fresh chat_start rotates via icon-key running`() {
+        assertTrue(isRotatingEntry(entry("chat_start", timestamp = 1_000L), emptyList(), nowMs = 2_000L))
+    }
+
+    @Test
+    fun `chat_start older than the age cap stops rotating`() {
+        assertFalse(
+            isRotatingEntry(
+                entry("chat_start", timestamp = 1_000L),
+                emptyList(),
+                nowMs = 1_000L + ROTATING_ENTRY_MAX_AGE_MS + 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `chat_start with a later same-session completion stops rotating`() {
+        val start = entry("chat_start", timestamp = 1_000L, sessionId = "a")
+        val done = entry("chat_response", timestamp = 5_000L, sessionId = "a")
+        assertFalse(isRotatingEntry(start, listOf(start, done), nowMs = 6_000L))
+    }
+
+    @Test
+    fun `chat_start superseded by a newer same-session prompt stops rotating`() {
+        val start = entry("chat_start", timestamp = 1_000L, sessionId = "a")
+        val next = entry("chat_start", timestamp = 5_000L, sessionId = "a")
+        assertFalse(isRotatingEntry(start, listOf(start, next), nowMs = 6_000L))
+    }
+
+    @Test
+    fun `other sessions completions do not stop a running chat_start`() {
+        val start = entry("chat_start", timestamp = 1_000L, sessionId = "a")
+        val other = entry("chat_response", timestamp = 5_000L, sessionId = "b")
+        assertTrue(isRotatingEntry(start, listOf(start, other), nowMs = 6_000L))
     }
 
     @Test

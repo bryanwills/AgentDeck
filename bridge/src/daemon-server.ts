@@ -54,7 +54,7 @@ import { initApme, isTimelineProjectionEnabled, loadApmeConfig, type ApmeModule 
 import { FallbackTaskTimeline } from './fallback-task-timeline.js';
 import { handleApmeRequest } from './apme/http.js';
 import { readModelFromTranscript } from './apme/claude-transcript-reader.js';
-import { transcriptTimelineForSession } from './session-transcript-timeline.js';
+import { transcriptTimelineForSession, lastAssistantTextFromTranscript } from './session-transcript-timeline.js';
 import { callFoundationModelsHelper } from './foundation-models-helper.js';
 import {
   initModules,
@@ -68,7 +68,7 @@ import { loadWifiConfig } from './wifi-config.js';
 import { getConnectedAdbDevices, hasAdb, getAdbDeviceCount } from './adb-reverse.js';
 import { getPixooDeviceDetails, pixooDeviceCount } from './pixoo/pixoo-bridge.js';
 import { loadTimeboxDevices } from './timebox/timebox-settings.js';
-import { getLanIp, stripUnsafeText, type TimelineEntry } from '@agentdeck/shared';
+import { getLanIp, stripUnsafeText, cleanRawText, prepareMarkdownDetail, type TimelineEntry } from '@agentdeck/shared';
 import { injectOpenClawSession } from './openclaw-session.js';
 import { readFileSync, statSync } from 'fs';
 import { join } from 'path';
@@ -1131,13 +1131,73 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           const taskId = (apme
             ? apme.collector.getActiveTaskId(hookSid)
             : fallbackTasks?.getActiveTaskId(hookSid)) ?? undefined;
+          const promptText = stripUnsafeText(json.prompt.trim());
+          const now = Date.now();
           core.bridgeTimeline.addEntry({
-            ts: Date.now(), type: 'chat_start',
-            raw: stripUnsafeText(json.prompt.trim()).slice(0, 160),
+            ts: now, type: 'chat_start',
+            raw: promptText.slice(0, 160),
+            // Long prompts keep their body reachable via the detail pane —
+            // the 160-char raw alone read as clipped on the dashboards.
+            ...(promptText.length > 160 ? { detail: promptText.slice(0, 1000) } : {}),
             sessionId: hookSid,
+            startedAt: now,
             ...(taskId ? { taskId } : {}),
             ...(hookProject ? { projectName: hookProject } : {}),
           } as TimelineEntry);
+        }
+
+        // Timeline turn completion. Managed sessions relay chat_response from
+        // their session bridge, but hook-observed (direct `claude`) sessions
+        // only reach the daemon here — without a completion row their
+        // chat_start rows spin as "running" forever on every dashboard
+        // surface. Stop carries `transcript_path`; the transcript tail's last
+        // assistant text is the turn's response (same source the model reader
+        // uses above). Only emit while a turn is actually open (a chat_start
+        // newer than the session's last completion) so a duplicate/late Stop
+        // or an interrupted turn doesn't re-emit the previous response.
+        if (mapped === 'stop') {
+          const rows = core.bridgeTimeline.getHistoryForSession(hookSid, undefined, 24);
+          let lastStart: TimelineEntry | undefined;
+          let lastCompletionTs = 0;
+          for (const row of rows) {
+            if (row.type === 'chat_start') lastStart = row;
+            else if (row.type === 'chat_response' || row.type === 'chat_end') {
+              lastCompletionTs = Math.max(lastCompletionTs, row.ts);
+            }
+          }
+          if (lastStart && lastStart.ts > lastCompletionTs) {
+            const tp = typeof json.transcript_path === 'string' ? json.transcript_path : '';
+            const responseText = tp ? stripUnsafeText(lastAssistantTextFromTranscript(tp)) : '';
+            const now = Date.now();
+            const taskId = (apme
+              ? apme.collector.getActiveTaskId(hookSid)
+              : fallbackTasks?.getActiveTaskId(hookSid)) ?? lastStart.taskId ?? undefined;
+            const base = {
+              sessionId: hookSid,
+              startedAt: lastStart.startedAt ?? lastStart.ts,
+              endedAt: now,
+              ...(taskId ? { taskId } : {}),
+              ...(hookProject ? { projectName: hookProject } : {}),
+            };
+            if (responseText.length > 0) {
+              core.bridgeTimeline.addEntry({
+                ts: now, type: 'chat_response',
+                raw: cleanRawText(responseText.length > 200 ? responseText.slice(0, 197) + '...' : responseText),
+                detail: prepareMarkdownDetail(responseText.slice(0, 3000)) || undefined,
+                ...base,
+              } as TimelineEntry);
+            } else {
+              // No readable response (interrupted / tool-only turn) — still
+              // close the row so the dashboards stop the spinner.
+              const durS = Math.max(0, Math.round((now - (lastStart.startedAt ?? lastStart.ts)) / 1000));
+              core.bridgeTimeline.addEntry({
+                ts: now, type: 'chat_end',
+                raw: `Completed · ${durS}s`,
+                summaryKind: 'none',
+                ...base,
+              } as TimelineEntry);
+            }
+          }
         }
 
         // ── Response ──

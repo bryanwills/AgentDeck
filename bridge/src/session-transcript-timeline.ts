@@ -258,3 +258,42 @@ function makeEntry(
 ): TimelineEntry {
   return { ts, type, raw: rawText, sessionId };
 }
+
+/**
+ * Last assistant text in a transcript file — the turn's response at Stop-hook
+ * time. Used by the daemon's `/hook` handler to close hook-observed turns on
+ * the timeline (`stop` carries `transcript_path` directly, so no session-id
+ * scan is needed). Returns '' when the file is unreadable or the tail holds
+ * no assistant text. Never throws.
+ */
+export function lastAssistantTextFromTranscript(transcriptPath: string): string {
+  let raw: string;
+  try {
+    raw = readFileSync(transcriptPath, 'utf-8');
+  } catch {
+    return '';
+  }
+  const MAX_TAIL = 256 * 1024;
+  const tail = raw.length > MAX_TAIL ? raw.slice(raw.length - MAX_TAIL) : raw;
+  const lines = tail.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let rec: JsonlRecord;
+    try {
+      rec = JSON.parse(line) as JsonlRecord;
+    } catch {
+      continue;
+    }
+    if (rec.message?.role === 'user') {
+      // tool_result continuations are role:user with no readable text — skip
+      // those; a *real* prompt (readable text) bounds the turn: no response.
+      if (textOf(rec.message.content).trim()) break;
+      continue;
+    }
+    if (rec.message?.role !== 'assistant') continue;
+    const text = textOf(rec.message.content).trim();
+    if (text) return text;
+  }
+  return '';
+}

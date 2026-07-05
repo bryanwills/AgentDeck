@@ -37,7 +37,15 @@ class TimelineDisplayScenarioTest {
             "chat_end should not duplicate a chat_response for the same turn",
             renderedKeys.contains("claude-a:chat_end:AgentDeck"),
         )
-        assertTrue(renderedKeys.contains("claude-a:chat_response:AgentDeck"))
+        // Updated 2026-07-06: the interleave-tolerant turn merge folds the
+        // response into its chat_start group even across other sessions' rows
+        // — it renders as the turn's sub-line, not a standalone row.
+        val claudeTurn = display.first { it.entry.sessionId == "claude-a" && it.entry.type == "chat_start" }
+        assertTrue(
+            "Claude response should fold into its turn group",
+            claudeTurn.mergedResponse?.summary?.contains("unit-session summaries") == true,
+        )
+        assertFalse(renderedKeys.contains("claude-a:chat_response:AgentDeck"))
         assertTrue(renderedKeys.contains("claude-a:eval_result:AgentDeck"))
         assertTrue(
             "In-flight Codex turn should remain visible until completion",

@@ -59,7 +59,9 @@ import dev.agentdeck.ui.component.agentDisplayLabel
 import dev.agentdeck.ui.timeline.TimelineIconKey
 import dev.agentdeck.ui.timeline.TimelineMarkdownView
 import dev.agentdeck.ui.timeline.isRotatingEntry
+import dev.agentdeck.ui.timeline.rowSummary
 import dev.agentdeck.ui.timeline.stripMarkdownForSummary
+import dev.agentdeck.ui.timeline.turnHasLaterCompletion
 import dev.agentdeck.ui.timeline.timelineDetailIsRedundant
 import dev.agentdeck.ui.timeline.timelineIconKey
 import java.text.SimpleDateFormat
@@ -302,8 +304,10 @@ private fun TurnRow(
     val timeStr = timeFormat.format(Date(entry.timestamp))
     // A merged chat_start turn is completed once its response/chat_end folded in
     // — swap the perpetually-Running chat_start icon to the completed glyph and
-    // stop the spinner, matching Apple's hasResponse-aware row.
-    val isCompletedTurn = entry.type == "chat_start" && group.hasResponse
+    // stop the spinner, matching Apple's hasResponse-aware row. An unmerged turn
+    // whose completion exists elsewhere in the buffer counts too.
+    val isCompletedTurn = entry.type == "chat_start" &&
+        (group.hasResponse || turnHasLaterCompletion(entry, siblings))
     val iconKey = if (isCompletedTurn) dev.agentdeck.ui.timeline.TimelineIconKey.Success
         else timelineIconKey(entry.type, entry.status)
     val iconColor = if (isCompletedTurn) typeColor("chat_response") else typeColor(entry.type)
@@ -389,15 +393,19 @@ private fun TurnRow(
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 96.dp),
+                // Wide enough for "[project] · Agent" — 96dp cut real labels
+                // to "[OpenClaw] · Cl…", losing the attribution it exists for.
+                modifier = Modifier.widthIn(max = if (scale.isTablet) 150.dp else 110.dp),
                 style = tight,
             )
         }
         Text(
             // Strip lightweight markdown so `**bold**` / `## heading` don't
-            // leak into the row as literal characters. The detail pane (or
-            // compact inline-expand) still renders the markdown properly.
-            text = stripMarkdownForSummary(entry.summary) + countSuffix,
+            // leak into the row as literal characters, and collapse newlines so
+            // a multi-line prompt fills the row instead of ellipsizing at its
+            // first line break. The detail pane (or compact inline-expand)
+            // still renders the full markdown.
+            text = rowSummary(entry.summary) + countSuffix,
             color = if (isChatEnd) TerrariumColors.HUDText.copy(alpha = 0.6f) else TerrariumColors.HUDText,
             fontSize = scale.fontSub,
             fontFamily = FontFamily.Monospace,
@@ -429,7 +437,7 @@ private fun TurnRow(
                         style = tight,
                     )
                     Text(
-                        text = stripMarkdownForSummary(resp.summary),
+                        text = rowSummary(resp.summary),
                         color = TerrariumColors.HUDText.copy(alpha = 0.78f),
                         fontSize = scale.fontSub,
                         fontFamily = FontFamily.Monospace,
@@ -452,7 +460,7 @@ private fun TurnRow(
                 ) {
                     Spacer(modifier = Modifier.width(subIndent))
                     Text(
-                        text = stripMarkdownForSummary(end.summary),
+                        text = rowSummary(end.summary),
                         color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
                         fontSize = scale.fontSub,
                         fontFamily = FontFamily.Monospace,
@@ -537,12 +545,12 @@ private fun TaskHeaderRow(
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 96.dp),
+                modifier = Modifier.widthIn(max = if (scale.isTablet) 150.dp else 110.dp),
                 style = tight,
             )
         }
         Text(
-            text = entry.summary,
+            text = rowSummary(entry.summary),
             color = TerrariumColors.HUDText,
             fontSize = scale.fontSub,
             fontWeight = FontWeight.SemiBold,

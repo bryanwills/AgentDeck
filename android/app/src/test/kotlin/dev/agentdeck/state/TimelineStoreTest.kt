@@ -289,14 +289,52 @@ class TimelineStoreTest {
     }
 
     @Test
-    fun `groupConsecutive splits different types`() {
+    fun `groupConsecutive splits different types but folds the turn completion`() {
         val entries = listOf(
             entry(1000, "chat_start", "Hello"),
             entry(2000, "tool_request", "Read"),
             entry(3000, "chat_end", "Done"),
         )
         val result = groupConsecutive(entries)
+        // chat_start and tool_request stay distinct rows; chat_end looks past
+        // the in-turn tool row and folds into the chat_start as its completion.
+        assertEquals(2, result.size)
+        assertEquals("chat_start", result[0].entry.type)
+        assertEquals("Done", result[0].mergedCompletion?.summary)
+        assertEquals("tool_request", result[1].entry.type)
+    }
+
+    @Test
+    fun `turn merge looks past interleaved rows from other sessions`() {
+        val entries = listOf(
+            entry(1000, "chat_start", "Fix timeline").copy(sessionId = "a", startedAt = 1000),
+            entry(2000, "chat_start", "Other session prompt").copy(sessionId = "b", startedAt = 2000),
+            entry(3000, "chat_response", "Fixed it").copy(sessionId = "a", startedAt = 1000),
+        )
+        val result = groupConsecutive(entries)
+        assertEquals(2, result.size)
+        assertEquals("a", result[0].entry.sessionId)
+        assertEquals("Fixed it", result[0].mergedResponse?.summary)
+        assertTrue(result[0].hasResponse)
+        assertEquals("b", result[1].entry.sessionId)
+        assertFalse(result[1].hasResponse)
+    }
+
+    @Test
+    fun `turn merge never crosses a newer same-session chat_start`() {
+        val entries = listOf(
+            entry(1000, "chat_start", "Turn 1").copy(sessionId = "a", startedAt = 1000),
+            entry(2000, "chat_start", "Turn 2").copy(sessionId = "a", startedAt = 2000),
+            entry(3000, "chat_response", "Reply to turn 1").copy(sessionId = "a", startedAt = 1000),
+        )
+        val result = groupConsecutive(entries)
+        // The response's anchor (startedAt=1000) doesn't match the most recent
+        // same-session chat_start (Turn 2) — merging further back would
+        // cross-talk, so it stays standalone.
         assertEquals(3, result.size)
+        assertFalse(result[0].hasResponse)
+        assertFalse(result[1].hasResponse)
+        assertEquals("chat_response", result[2].entry.type)
     }
 
     // --- timelineDisplayGroups ---
