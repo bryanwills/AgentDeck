@@ -5722,6 +5722,9 @@ final class DaemonServer {
             respEntry.projectName = projectName
             respEntry.startedAt = startTs
             respEntry.endedAt = now
+            // Same active task as the matching chat_start so a Q&A turn's
+            // prompt + response group together instead of splitting.
+            respEntry.taskId = apmeCollector?.activeTaskId
             Task { await timelineStore.add(respEntry) }
             broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(respEntry)] as [String: Any])
         }
@@ -5857,6 +5860,11 @@ final class DaemonServer {
             respEntry.projectName = projectName
             respEntry.startedAt = startTs
             respEntry.endedAt = now
+            // Tag the response with the same active task as its chat_start
+            // (which carries `apmeCollector.activeTaskId`). Without this the
+            // answer row had no taskId, so a Q&A turn's prompt and response
+            // landed in different task buckets and rendered as separate tasks.
+            respEntry.taskId = apmeCollector?.activeTaskId
             Task { await timelineStore.add(respEntry) }
             broadcastRaw([
                 "type": "timeline_event",
