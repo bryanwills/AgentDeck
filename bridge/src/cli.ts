@@ -376,7 +376,41 @@ daemon
   .option('-f, --foreground', 'Run in foreground (default: background fork)')
   .option('--wake-word', 'Enable wake word voice assistant ("오픈클로")')
   .action(async (opts) => {
-    const { findExistingDaemon, probeDaemonHealth, readDaemonInfo, removeDaemonInfo, removeDaemonSession } = await import('./session-registry.js');
+    const { findExistingDaemon, probeDaemonHealth, readDaemonInfo, removeDaemonInfo, removeDaemonSession, requestDaemonStandDown, requestDaemonShutdown, waitForDaemonExit } = await import('./session-registry.js');
+
+    // Reverse two-tier upgrade path: the macOS app may already own the canonical
+    // port with its in-process Swift daemon (Tier 1 — limited: no ADB devices,
+    // no subscription usage, …). A plain "already running → exit" would strand
+    // the user on Tier 1. Instead, if the incumbent identifies as a Swift
+    // daemon, ask it to STAND DOWN (demote to client, app keeps running) so this
+    // CLI daemon can take over with the full feature set, then wait for the port
+    // to clear before binding. A real Node daemon on the port still means
+    // "already running".
+    const targetPort = opts.port ? parseInt(String(opts.port), 10) : BRIDGE_WS_PORT;
+    const incumbent = await probeDaemonHealth(targetPort);
+    if (incumbent?.mode === 'daemon') {
+      if (incumbent.isSwift) {
+        log(`AgentDeck app's in-process daemon holds port ${targetPort} — requesting stand-down to take over with the full CLI feature set…`);
+        // Prefer /stand-down (clean demote: the app stays running as a client).
+        // Fall back to /shutdown for older app builds that predate the endpoint.
+        let acked = await requestDaemonStandDown(targetPort);
+        if (!acked) {
+          await requestDaemonShutdown(targetPort);
+          acked = true; // shutdown is best-effort (no ack body); rely on the exit wait
+        }
+        if (acked && await waitForDaemonExit(targetPort, 12000)) {
+          log(`App daemon yielded port ${targetPort}. Starting CLI daemon…`);
+          // fall through — port is clear, proceed to bind below
+        } else {
+          log(`The AgentDeck app did not yield port ${targetPort} in time. Quit the app and retry 'agentdeck daemon start', or start on a different port with -p.`);
+          process.exit(1);
+        }
+      } else {
+        log(`Daemon already running on port ${targetPort}. Use 'agentdeck daemon stop' first.`);
+        process.exit(0);
+      }
+    }
+
     const daemonInfo = readDaemonInfo();
     if (daemonInfo) {
       const probePort = daemonInfo.httpPort ?? daemonInfo.port;

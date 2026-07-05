@@ -37,7 +37,20 @@ import IOKit
 @MainActor
 final class DaemonService: ObservableObject {
     @Published private(set) var isRunning = false
-    @Published private(set) var isUsingExternalDaemon = false
+    @Published private(set) var isUsingExternalDaemon = false {
+        didSet {
+            // Promotion edge: was an external-daemon client, now not (becoming
+            // owner). Purge Node-relayed usage/subscription cache so features
+            // the self-daemon can't produce stop showing as a stale trace. A
+            // false→true flip (connecting to a returning external daemon)
+            // re-populates naturally, so only true→false clears.
+            if oldValue && !isUsingExternalDaemon { onPromotedToOwner?() }
+        }
+    }
+
+    /// Fired on the external→owner promotion edge (see `isUsingExternalDaemon`
+    /// didSet). Wired at the app root to `AgentStateHolder.clearRelayedUsageState()`.
+    var onPromotedToOwner: (() -> Void)?
 
     /// `true` when the in-process Swift daemon is the one bound to port
     /// 9120 (not an external Node daemon). Drives Setup Card messaging —
@@ -76,6 +89,11 @@ final class DaemonService: ObservableObject {
     /// Re-entrancy guard for reclaimCanonicalPortIfNeeded — a patient probe
     /// (up to 5s) can outlive one 5s health tick.
     private var isReclaimingPort = false
+    /// Takeover-yield deadline. While set and in the future, promotion is
+    /// suppressed so an incoming CLI (Node) daemon that asked us to stand down
+    /// (POST /stand-down) can bind the canonical port without us racing it back.
+    private var yieldUntil: Date?
+    private static let takeoverYieldSeconds: TimeInterval = 15
     private var signalSource: DispatchSourceSignal?
     private var sigintSource: DispatchSourceSignal?
     private var listenerFailureRetries = 0
@@ -148,6 +166,9 @@ final class DaemonService: ObservableObject {
                         self.readyUrl = nil
                         await self.connectToExternalDaemon()
                     }
+                }
+                daemon.onStandDownRequested = { [weak self] in
+                    Task { @MainActor in self?.standDownForTakeover() }
                 }
                 self.server = daemon
                 self.port = daemon.port
@@ -503,6 +524,29 @@ final class DaemonService: ObservableObject {
 
             externalFailureCount += 1
             guard externalFailureCount >= 3, !isStarting else { return }
+            // Takeover-yield window: a CLI daemon asked us to stand down and is
+            // about to bind the canonical port. Don't promote back into the gap.
+            if let yieldUntil, Date() < yieldUntil {
+                DaemonLogger.shared.info("In takeover-yield window — deferring promotion to let the CLI daemon bind")
+                return
+            }
+            // Promotion guard for the `daemon restart` (stop→start) window. A
+            // missed health probe does NOT prove the port is free — during a
+            // restart the successor rebinds within a beat, so the port stays
+            // held by SOMEONE the whole time. Promoting into that window makes
+            // us bind a FALLBACK port (9121), rewrite daemon.json to it, then
+            // immediately reclaim/demote once 9120 answers again — a thrash
+            // that (a) clobbers daemon.json out from under other clients and
+            // (b) leaves this app's own client connection stuck reconnecting.
+            // If the canonical port is still held, the owner is almost
+            // certainly just restarting: stay in client mode and keep probing
+            // so we reattach cleanly the moment it answers. Only a genuinely
+            // dead daemon frees the port → isPortBindable → real promotion.
+            let canonical = AppPreferences.shared.daemonPort
+            if currentPort == canonical, !(await registry.isPortBindable(canonical)) {
+                DaemonLogger.shared.info("External daemon on \(currentPort) missed probe but port still held — owner likely restarting; staying in client mode")
+                return
+            }
             DaemonLogger.shared.error("External daemon on port \(currentPort) disappeared — promoting this app to own the daemon")
             server = nil
             isRunning = false
@@ -552,6 +596,31 @@ final class DaemonService: ObservableObject {
         DaemonLogger.shared.info("Canonical port \(canonical) is free — reclaiming it from fallback port \(port)")
         await standDownServer(current)
         start()
+    }
+
+    /// Yield the canonical port to an incoming CLI (Node) daemon that requested
+    /// takeover via `POST /stand-down`. Completes the two-tier upgrade path in
+    /// the reverse startup order (app-first, then `agentdeck daemon start`):
+    /// without this the Node daemon sees our `/health` (`mode: daemon`) and
+    /// exits "already running", so the user never gets the full CLI feature set.
+    ///
+    /// Sets a yield window (suppresses promotion so we don't re-grab the port in
+    /// the gap), tears down the in-process server, then connects as a client to
+    /// the canonical port — the patient probe in `connectToExternalDaemon` waits
+    /// for the CLI to bind. If the CLI never appears (crash), normal promotion
+    /// resumes after the window: we won't be left daemonless.
+    func standDownForTakeover() {
+        guard isSelfDaemon, let current = server else {
+            DaemonLogger.shared.info("Stand-down requested but this app is not the in-process daemon owner — ignoring")
+            return
+        }
+        let canonical = AppPreferences.shared.daemonPort
+        DaemonLogger.shared.info("Stand-down requested by CLI daemon — yielding port \(port), becoming a client of \(canonical)")
+        yieldUntil = Date().addingTimeInterval(Self.takeoverYieldSeconds)
+        Task { @MainActor in
+            await standDownServer(current)
+            await connectToExternalDaemon(port: canonical)
+        }
     }
 
     /// Tear down the in-process server for a deliberate state transition,

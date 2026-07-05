@@ -55,6 +55,7 @@ import dev.agentdeck.state.timelineLifecycleBounds
 import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.ui.theme.DesignTokens
 import dev.agentdeck.ui.component.BrandIcon
+import dev.agentdeck.ui.component.agentDisplayLabel
 import dev.agentdeck.ui.timeline.TimelineIconKey
 import dev.agentdeck.ui.timeline.TimelineMarkdownView
 import dev.agentdeck.ui.timeline.isRotatingEntry
@@ -903,23 +904,22 @@ private fun typeColor(type: String) = when (type) {
     else -> TerrariumColors.HUDSubtext
 }
 
-private fun agentTag(agentType: String?): String = when (agentType) {
-    "claude-code" -> "Claude"
-    "codex-cli" -> "Codex CLI"
-    "codex-app" -> "Codex App"
-    "openclaw" -> "OpenClaw"
-    "opencode" -> "OpenCode"
-    "antigravity" -> "Antigravity"
-    "daemon" -> "Daemon"
-    null -> ""
-    else -> "Agent"
-}
+// Delegates to the single shared Kotlin map (ui.component.agentDisplayLabel).
+private fun agentTag(agentType: String?): String = agentDisplayLabel(agentType)
 
 private fun rowPrefixLabel(entry: TimelineEntry): String {
+    // Show BOTH project and agent — the row's brand glyph (BrandIcon) conveys
+    // the agent visually, but the text label previously dropped the agent name
+    // whenever a project existed (which is almost always), so the timeline read
+    // as project-only with no explicit attribution.
     val project = entry.projectName?.takeIf { it.isNotBlank() }
-    if (project != null) return "[$project]"
     val tag = agentTag(entry.agentType)
-    return if (tag.isNotEmpty()) "[$tag]" else ""
+    return when {
+        project != null && tag.isNotEmpty() -> "[$project] · $tag"
+        project != null -> "[$project]"
+        tag.isNotEmpty() -> "[$tag]"
+        else -> ""
+    }
 }
 
 private fun sourceLabel(entry: TimelineEntry): String {

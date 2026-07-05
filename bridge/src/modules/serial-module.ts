@@ -6,6 +6,7 @@ import {
   setESP32StateProvider,
   setESP32UsageProvider,
   setESP32DisplayStateProvider,
+  setESP32SessionsListProvider,
   setESP32InitialStateProvider,
 } from '../esp32-serial.js';
 import type { BridgeEvent } from '../types.js';
@@ -39,6 +40,11 @@ export class SerialModule implements DeviceModule {
   /** Set a function that provides the current display_state for heartbeat re-sync. */
   setDisplayStateProvider(provider: () => BridgeEvent | null): void {
     setESP32DisplayStateProvider(provider);
+  }
+
+  /** Set a function that provides the current sessions_list for heartbeat re-sync. */
+  setSessionsListProvider(provider: () => BridgeEvent | null): void {
+    setESP32SessionsListProvider(provider);
   }
 
   private initialStateProvider: (() => BridgeEvent[]) | null = null;

@@ -180,6 +180,27 @@ fun brandColorForAgent(agentType: String?): Color = when (agentType) {
     else          -> Color(0xFF94A3B8)
 }
 
+/**
+ * Human-readable brand name for an agentType id. The SINGLE Kotlin copy of this
+ * map — mirror of shared/src/timeline-label.ts `agentDisplayLabel` and iOS
+ * `SessionFormatters.displayAgentLabel`. Timeline surfaces (tablet strip, e-ink
+ * panel) route through this instead of hand-rolling the switch. Never
+ * abbreviate "OpenClaw" (see memory `brand-direction.md`). Returns "" for null
+ * so callers can decide whether to show a fallback.
+ */
+fun agentDisplayLabel(agentType: String?): String = when (agentType) {
+    "claude-code" -> "Claude"
+    "codex", "codex-cli" -> "Codex CLI"
+    "codex-app" -> "Codex App"
+    "openclaw" -> "OpenClaw"
+    "opencode" -> "OpenCode"
+    "antigravity" -> "Antigravity"
+    "monitor" -> "Monitor"
+    "daemon" -> "Daemon"
+    null -> ""
+    else -> agentType.replace('-', ' ').replaceFirstChar { it.uppercase() }
+}
+
 private class BrandIconSpec(
     val pathDataList: List<String>,
     val viewBox: Float,

@@ -158,6 +158,7 @@ export class BridgeCore {
   private intervals: ReturnType<typeof setInterval>[] = [];
   private timeouts: ReturnType<typeof setTimeout>[] = [];
   private lastSessionsListBroadcast = 0;
+  private lastSessionsListEvent: BridgeEvent | null = null;
   private shutdownInProgress = false;
   private shutdownCallbacks: (() => void | Promise<void>)[] = [];
   private sseBroadcast?: (evt: BridgeEvent) => void;
@@ -232,10 +233,22 @@ export class BridgeCore {
       const sessionId = entry.sessionId ?? this.sessionId;
       const taskId = entry.taskId ?? (apme ? apme.collector.getActiveTaskId(this.sessionId) ?? undefined : undefined);
       const runId = entry.runId ?? (apme ? apme.collector.getRunId(this.sessionId) ?? undefined : undefined);
+      // agentType backfill — the single place every timeline row acquires its
+      // brand. Priority: caller-set → per-session collector run (authoritative
+      // for observed hook sessions, where this BridgeCore's own agentType is
+      // 'daemon') → this bridge's own session agent (managed session bridges
+      // whose collector run may not exist yet). 'daemon' is never stamped: it
+      // would mislabel every observed session's rows with the hub's identity.
+      const ownAgent = this.apmeAgentType && this.apmeAgentType !== ('daemon' as AgentType)
+        ? this.apmeAgentType : undefined;
+      const runAgent = apme ? apme.collector.getRunAgentType(sessionId) : null;
+      const agentType: string | undefined =
+        entry.agentType ?? runAgent ?? ownAgent ?? undefined;
       return {
         ...entry,
         projectName: entry.projectName ?? this.projectName,
         sessionId,
+        ...(agentType ? { agentType } : {}),
         ...(taskId ? { taskId } : {}),
         ...(runId ? { runId } : {}),
       };
@@ -624,7 +637,18 @@ export class BridgeCore {
       const a = activityFor(s);
       if (a) s.activity = a;
     }
-    this.wsServer.broadcast({ type: 'sessions_list', sessions } as BridgeEvent);
+    const event = { type: 'sessions_list', sessions } as BridgeEvent;
+    // Cache for the serial heartbeat re-sync (like display_state): a board that
+    // reconnects across a daemon handoff during a quiet window otherwise sits
+    // on an empty roster until the next unrelated session change broadcasts.
+    this.lastSessionsListEvent = event;
+    this.wsServer.broadcast(event);
+  }
+
+  /** The most recent sessions_list event, for the ESP32 serial heartbeat
+   *  re-sync. Null until the first broadcast. */
+  getLastSessionsListEvent(): BridgeEvent | null {
+    return this.lastSessionsListEvent;
   }
 
   /** Debounced sessions list broadcast (for state_changed handler) */
@@ -684,8 +708,14 @@ export class BridgeCore {
       projectName: entry.projectName ?? this.projectName,
       sessionId: entry.sessionId ?? this.sessionId,
     }));
-    const historyEvent = buildCappedTimelineHistory(history);
-    if (historyEvent) this.wsServer.sendTo(ws, historyEvent);
+    // Always send a timeline_history on connect — an EMPTY one when the store
+    // is empty. Clients replace (not merge) their timeline on this event, so a
+    // freshly-restarted daemon must send `entries: []` to wipe the client's
+    // stale rows; suppressing it (the old `if (historyEvent)`) left old logs
+    // frozen on Android/ESP32 across a daemon restart.
+    const historyEvent = buildCappedTimelineHistory(history)
+      ?? ({ type: 'timeline_history', entries: [] } as BridgeEvent);
+    this.wsServer.sendTo(ws, historyEvent);
 
     // Sessions list
     buildEnrichedSessionsList(

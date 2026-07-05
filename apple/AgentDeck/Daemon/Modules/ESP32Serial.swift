@@ -131,6 +131,7 @@ actor ESP32Serial {
 
     nonisolated(unsafe) private var stateProvider: (() -> [String: Any]?)?
     nonisolated(unsafe) private var usageProvider: (() -> [String: Any]?)?
+    nonisolated(unsafe) private var sessionsListProvider: (() -> [String: Any]?)?
     nonisolated(unsafe) private var displayStateProvider: (() -> [String: Any])?
     nonisolated(unsafe) private var initialStateProvider: (() -> [[String: Any]])?
     var onMessage: (@Sendable (String, [String: Any]) -> Void)?
@@ -192,6 +193,7 @@ actor ESP32Serial {
 
     nonisolated func setStateProviderFn(_ provider: @escaping () -> [String: Any]?) { stateProvider = provider }
     nonisolated func setUsageProviderFn(_ provider: @escaping () -> [String: Any]?) { usageProvider = provider }
+    nonisolated func setSessionsListProviderFn(_ provider: @escaping () -> [String: Any]?) { sessionsListProvider = provider }
     nonisolated func setDisplayStateProviderFn(_ provider: @escaping () -> [String: Any]) { displayStateProvider = provider }
     nonisolated func setInitialStateProviderFn(_ provider: @escaping () -> [[String: Any]]) { initialStateProvider = provider }
     func setOnMessage(_ handler: @escaping @Sendable (String, [String: Any]) -> Void) { onMessage = handler }
@@ -676,6 +678,20 @@ actor ESP32Serial {
 
         if let event = usageProvider?(),
            event["fiveHourPercent"] != nil {
+            for i in connections.indices where connections[i].connected {
+                if sendEvent(event, to: &connections[i]) {
+                    sentData = true
+                }
+            }
+        }
+
+        // Re-sync sessions_list every cycle for the same reason as display_state
+        // below: it is otherwise edge-triggered (on change + on connect), so a
+        // board that (re)connects during a quiet window — daemon handoff,
+        // half-open serial — sits on an empty roster ("no active sessions")
+        // until the next unrelated session change happens to broadcast. The
+        // firmware upserts idempotently.
+        if let event = sessionsListProvider?() {
             for i in connections.indices where connections[i].connected {
                 if sendEvent(event, to: &connections[i]) {
                     sentData = true

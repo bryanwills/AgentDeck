@@ -168,6 +168,15 @@ struct AgentDeckApp: App {
             }
         }
 
+        // On external→owner promotion, purge Node-relayed usage/subscription
+        // cache so unsupported-in-self-daemon data doesn't linger as a stale
+        // trace (Claude quota, ChatGPT/Google subscription rows). Self-daemon
+        // re-emits any locally-producible data (Codex limits, Antigravity plan)
+        // within one usage tick.
+        daemonService.onPromotedToOwner = { [stateHolder] in
+            DispatchQueue.main.async { stateHolder.clearRelayedUsageState() }
+        }
+
         if preferences.openDashboardOnLaunch {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 openWindow(id: "dashboard")

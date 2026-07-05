@@ -142,6 +142,7 @@ let deviceInfoCacheLoaded = false;
 let stateProvider: (() => BridgeEvent | null) | null = null;
 let usageProvider: (() => BridgeEvent | null) | null = null;
 let displayStateProvider: (() => BridgeEvent | null) | null = null;
+let sessionsListProvider: (() => BridgeEvent | null) | null = null;
 let initialStateProvider: (() => BridgeEvent[]) | null = null;
 let messageHandler: ((port: string, msg: ESP32ToHostMessage) => void) | null = null;
 
@@ -813,6 +814,17 @@ export function setESP32DisplayStateProvider(provider: () => BridgeEvent | null)
 }
 
 /**
+ * Register a callback that returns the current sessions_list event.
+ * Like display_state it is otherwise edge-triggered (on change + on connect);
+ * a board that (re)connects during a quiet window — daemon handoff, half-open
+ * serial — would sit on an empty roster ("no active sessions") until the next
+ * unrelated session change. The heartbeat re-sync makes it self-heal.
+ */
+export function setESP32SessionsListProvider(provider: () => BridgeEvent | null): void {
+  sessionsListProvider = provider;
+}
+
+/**
  * Register a provider that returns all initial state events (state + usage + sessions).
  * Called when a new ESP32 device connects to send full state immediately.
  */
@@ -862,6 +874,20 @@ function sendHeartbeat(): void {
     const event = displayStateProvider();
     if (event) {
       for (const conn of connections) {
+        sendToConnection(conn, JSON.stringify(prepareForSerial(event, conn)));
+      }
+    }
+  }
+
+  // Re-sync sessions_list every cycle for the same reason: it is edge-triggered
+  // elsewhere, so a board that reconnects during a quiet window shows "no active
+  // sessions" until the next session change. Only send once a device has
+  // identified (matches the sessions_list gating in the broadcast path).
+  if (sessionsListProvider) {
+    const event = sessionsListProvider();
+    if (event) {
+      for (const conn of connections) {
+        if (!hasLiveDeviceInfo(conn)) continue;
         sendToConnection(conn, JSON.stringify(prepareForSerial(event, conn)));
       }
     }

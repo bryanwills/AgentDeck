@@ -4,6 +4,7 @@
 #include "../assets/logo.h"
 #include "../../state/agent_state.h"
 #include "../../util/usage_format.h"
+#include "../agent_label.h"
 #include "config.h"
 #include "net/serial_client.h"
 #include "net/ws_client.h"
@@ -1714,7 +1715,7 @@ void update() {
     if (cellsBox) {
         struct MCell { uint32_t accent; uint32_t stateCol; char name[40]; char agent[16]; char state[20];
                        char model[32]; char tool[40]; uint32_t elapsed;
-                       char sid[32]; char requestId[40]; char question[160]; };
+                       char sid[32]; char requestId[40]; char question[160]; char body[96]; };
         MCell mc[MOSAIC_MAX];
         int n = 0;
         char latestAction[48] = "";
@@ -1740,6 +1741,33 @@ void update() {
             strncpy(mc[n].sid, si.id, sizeof(mc[n].sid) - 1); mc[n].sid[sizeof(mc[n].sid) - 1] = '\0';
             strncpy(mc[n].requestId, si.requestId, sizeof(mc[n].requestId) - 1); mc[n].requestId[sizeof(mc[n].requestId) - 1] = '\0';
             strncpy(mc[n].question, si.question, sizeof(mc[n].question) - 1); mc[n].question[sizeof(mc[n].question) - 1] = '\0';
+            // Per-session latest timeline line → card body ("<task> · <text>").
+            // The card already renders agent (cellName) + project (cellProj);
+            // body carries the task context + the actual work text so each card
+            // narrates its OWN timeline instead of sharing one global line.
+            mc[n].body[0] = '\0';
+            for (uint8_t k = 0; k < g_state.timelineCount; k++) {
+                uint8_t bidx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - k) % TIMELINE_MAX_ENTRIES);
+                const TimelineEntry& te = g_state.timeline[bidx];
+                if (strcmp(te.sessionId, si.id) != 0) continue;
+                if (!te.raw[0] || te.raw[0] == '{' || te.raw[0] == '[') continue;
+                size_t off = 0;
+                bool isTaskRow = strcmp(te.type, "task_start") == 0 || strcmp(te.type, "task_end") == 0;
+                if (!isTaskRow && te.taskId[0]) {  // resolve taskId → task header label
+                    for (uint8_t j = 0; j < g_state.timelineCount; j++) {
+                        const TimelineEntry& tj = g_state.timeline[(g_state.timelineHead + j) % TIMELINE_MAX_ENTRIES];
+                        if (strcmp(tj.type, "task_start") == 0 && strcmp(tj.taskId, te.taskId) == 0 && tj.raw[0]) {
+                            int nn = snprintf(mc[n].body + off, sizeof(mc[n].body) - off, "%s \xC2\xB7 ", tj.raw);
+                            if (nn > 0) off += (size_t)nn;
+                            if (off >= sizeof(mc[n].body)) off = sizeof(mc[n].body) - 1;
+                            break;
+                        }
+                    }
+                }
+                if (off < sizeof(mc[n].body) - 1)
+                    snprintf(mc[n].body + off, sizeof(mc[n].body) - off, "%s", te.raw);
+                break;
+            }
             n++;
         }
         bool hasOC = false;
@@ -1748,7 +1776,7 @@ void update() {
             mc[n].accent = Theme::CrayfishShell; mc[n].stateCol = Theme::StatusGreen;
             strcpy(mc[n].name, "OpenClaw"); strcpy(mc[n].agent, "openclaw");
             strcpy(mc[n].state, "idle"); mc[n].model[0] = '\0'; mc[n].tool[0] = '\0'; mc[n].elapsed = 0;
-            mc[n].sid[0] = '\0'; mc[n].requestId[0] = '\0'; mc[n].question[0] = '\0'; n++;
+            mc[n].sid[0] = '\0'; mc[n].requestId[0] = '\0'; mc[n].question[0] = '\0'; mc[n].body[0] = '\0'; n++;
         }
         if (n == 0 && hasData) {  // single-session fallback (no sessions_list yet)
             mc[0].accent = ips10AgentColor(g_state.agentType);
@@ -1762,7 +1790,7 @@ void update() {
             strncpy(mc[0].state, ps, sizeof(mc[0].state) - 1); mc[0].state[sizeof(mc[0].state) - 1] = '\0';
             strncpy(mc[0].tool, g_state.currentTool, sizeof(mc[0].tool) - 1); mc[0].tool[sizeof(mc[0].tool) - 1] = '\0';
             mc[0].model[0] = '\0'; mc[0].elapsed = g_state.sessionDurationSec;
-            mc[0].sid[0] = '\0'; mc[0].requestId[0] = '\0';
+            mc[0].sid[0] = '\0'; mc[0].requestId[0] = '\0'; mc[0].body[0] = '\0';
             strncpy(mc[0].question, g_state.question, sizeof(mc[0].question) - 1); mc[0].question[sizeof(mc[0].question) - 1] = '\0';
             n = 1;
         }
@@ -1771,6 +1799,7 @@ void update() {
         for (int i = 0; i < n; i++) {  // protect recolor markup
             for (char* c = mc[i].name; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
             for (char* c = mc[i].tool; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
+            for (char* c = mc[i].body; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
         }
         for (char* c = latestAction; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
 
@@ -2031,9 +2060,13 @@ void update() {
                 lv_obj_add_flag(cellTool[i], LV_OBJ_FLAG_HIDDEN);
             }
 
-            // body: awaiting → prompt; working → latest reasoning/timeline line
+            // body: awaiting → prompt; otherwise → this session's OWN latest
+            // timeline line ("<task> · <text>"). Per-card attribution replaces
+            // the old single global latestAction that only lit the first card.
+            // Falls back to the global line only for a sid-less fallback card.
             const char* body = "";
             if (awaiting && mc[i].question[0]) body = mc[i].question;
+            else if (!idle && mc[i].body[0]) body = mc[i].body;
             else if (working && latestAction[0] && !actionUsed) { body = latestAction; actionUsed = true; }
             if (!idle && body[0] && ph >= 104) {
                 lv_label_set_text(cellBody[i], body);

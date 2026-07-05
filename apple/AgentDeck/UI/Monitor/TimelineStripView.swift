@@ -272,7 +272,17 @@ struct TimelineStripView: View {
         // the dashboard look frozen on already-delivered replies.
         // Codex stop-time review #11 (2026-05-17).
         let merged = group.hasResponse
+        // A chat_start is done the moment its completion exists ANYWHERE later
+        // in the timeline with the same context — not only when it happened to
+        // be timestamp-adjacent enough to merge into this group. The unfiltered
+        // all-sessions view interleaves other sessions' rows between a turn's
+        // chat_start and its chat_response, breaking the adjacency merge
+        // (hasResponse=false) and leaving a finished prompt spinning forever.
+        // The lenient cross-group check the display filter already uses is the
+        // right test. Falls back to hasResponse for non-chatStart groups.
         let isCompleted = group.hasResponse
+            || (group.entry.type == .chatStart
+                && timelineHasLaterCompletion(for: group.entry, in: grouped))
         let iconKey: TimelineIconKey = {
             if group.entry.type == .chatStart && isCompleted { return .success }
             return timelineIconKey(for: group.entry.type, status: group.entry.status)
@@ -636,7 +646,9 @@ struct TimelineStripView: View {
                 // that keeps rotating forever even though the row above
                 // is already a static checkmark. Codex stop-time review
                 // #12 (2026-05-17).
-                let isTurnCompleted = group.entry.type == .chatStart && group.hasResponse
+                let isTurnCompleted = group.entry.type == .chatStart
+                    && (group.hasResponse
+                        || timelineHasLaterCompletion(for: group.entry, in: grouped))
                 let iconKey: TimelineIconKey = isTurnCompleted
                     ? .success
                     : timelineIconKey(for: group.entry.type, status: group.entry.status)
@@ -1958,6 +1970,10 @@ enum TimelineIconKey: String {
 /// stale row reads as completed even before that reaper runs (or on
 /// dashboard-only sessions that bypass the daemon path entirely).
 private let inFlightTaskMaxAgeSec: TimeInterval = 600
+/// Same staleness horizon for an unpaired `chat_start` (see
+/// `timelineIsRotatingEntry`). A single turn rarely runs >10min, so a
+/// chat_start still spinning past this lost its completion event.
+private let chatStartMaxAgeSec: TimeInterval = 600
 func timelineIsInFlightTask(_ entry: TimelineEntry, siblings: [TimelineEntry]) -> Bool {
     if entry.type != .taskStart { return false }
     guard let taskId = entry.taskId, !taskId.isEmpty else { return false }
@@ -1974,7 +1990,19 @@ func timelineIsInFlightTask(_ entry: TimelineEntry, siblings: [TimelineEntry]) -
 /// hierarchy signal so an open `task_start` also spins until its `task_end`
 /// arrives. Mirrors `isRotatingEntry` in shared/src/timeline-icons.ts.
 func timelineIsRotatingEntry(_ entry: TimelineEntry, siblings: [TimelineEntry]) -> Bool {
-    if timelineIconKey(for: entry.type, status: entry.status) == .running { return true }
+    if timelineIconKey(for: entry.type, status: entry.status) == .running {
+        // Staleness backstop mirroring `timelineIsInFlightTask`: a `chat_start`
+        // whose completion never arrives (Claude Stop hook ~18% reliable, or a
+        // summarizer Task that hangs) would otherwise spin forever. After
+        // `chatStartMaxAgeSec` with no completion, treat it as resolved-but-
+        // orphaned so the row reads static. Only chat_start gets the cap;
+        // genuine `.unknown`/`.running` transient rows keep spinning.
+        if entry.type == .chatStart {
+            let ageSec = Date().timeIntervalSince(entry.date)
+            if ageSec > chatStartMaxAgeSec { return false }
+        }
+        return true
+    }
     return timelineIsInFlightTask(entry, siblings: siblings)
 }
 

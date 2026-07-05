@@ -140,6 +140,7 @@ export type OnTaskMilestone = (args: {
 
 export class ApmeCollector {
   private readonly sessionToRun = new Map<string, string>(); // sessionId → runId
+  private readonly sessionToAgentType = new Map<string, AgentType>(); // sessionId → agentType (survives closeRun for late-attributed timeline rows)
   private readonly sessionToTurn = new Map<string, ActiveTurn>(); // sessionId → current turn
   private readonly sessionToLastTurnId = new Map<string, string>(); // survives closeTurn()
   private readonly sessionToTask = new Map<string, ActiveTask>(); // sessionId → current task
@@ -190,6 +191,7 @@ export class ApmeCollector {
     try {
       this.store.insertRun(row);
       this.sessionToRun.set(input.sessionId, runId);
+      this.sessionToAgentType.set(input.sessionId, input.agentType);
       debug('APME', `openRun ${runId} session=${input.sessionId} agent=${input.agentType} model=${input.modelId ?? '-'}`);
     } catch (err) {
       debug('APME', `openRun failed: ${String(err)}`);
@@ -642,6 +644,15 @@ export class ApmeCollector {
   /** Get the current run ID for a session (if any). */
   getRunId(sessionId: string): string | null {
     return this.sessionToRun.get(sessionId) ?? null;
+  }
+
+  /** Agent type established for a session at `openRun` (survives closeRun so a
+   *  late-attributed timeline row still resolves its brand). This is the single
+   *  authoritative agentType source the timeline attributor backfills from, so
+   *  every timeline entry ships with an agentType regardless of which emitter
+   *  produced it (observed hook `chat_start`, relayed managed `tool_exec`, …). */
+  getRunAgentType(sessionId: string): AgentType | null {
+    return this.sessionToAgentType.get(sessionId) ?? null;
   }
 
   // ─── SessionSample trajectory (the normalizer's typed event log) ────────────

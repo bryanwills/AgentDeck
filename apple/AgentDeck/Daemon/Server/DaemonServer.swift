@@ -95,12 +95,19 @@ private final class SerialEventSnapshot: @unchecked Sendable {
     private let lock = NSLock()
     private var stateEvent: [String: Any]?
     private var usageEvent: [String: Any]?
+    private var sessionsEvent: [String: Any]?
     private var displayOn = true
     private var displayDim: [String: Any] = ["enabled": true, "mode": "off", "level": 10]
 
     func setStateEvent(_ event: [String: Any]?) {
         lock.lock()
         stateEvent = event
+        lock.unlock()
+    }
+
+    func setSessionsEvent(_ event: [String: Any]?) {
+        lock.lock()
+        sessionsEvent = event
         lock.unlock()
     }
 
@@ -128,6 +135,12 @@ private final class SerialEventSnapshot: @unchecked Sendable {
         return stateEvent
     }
 
+    func currentSessionsEvent() -> [String: Any]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessionsEvent
+    }
+
     func currentUsageEvent() -> [String: Any]? {
         lock.lock()
         defer { lock.unlock() }
@@ -144,6 +157,7 @@ private final class SerialEventSnapshot: @unchecked Sendable {
         lock.lock()
         let state = stateEvent
         let usage = usageEvent
+        let sessions = sessionsEvent
         let display = displayOn
         let dim = displayDim
         lock.unlock()
@@ -151,6 +165,11 @@ private final class SerialEventSnapshot: @unchecked Sendable {
         var events: [[String: Any]] = []
         if let state { events.append(state) }
         if let usage { events.append(usage) }
+        // A newly-connected serial board (or one that reconnected across a
+        // daemon handoff) must receive the current session roster in its
+        // on-connect snapshot — otherwise it renders "no active sessions" until
+        // the next unrelated sessions_list change happens to broadcast.
+        if let sessions { events.append(sessions) }
         events.append(["type": "display_state", "displayOn": display, "dim": dim])
         return events
     }
@@ -172,6 +191,9 @@ final class DaemonServer {
     let port: UInt16
     let sessionId = UUID().uuidString
     var onShutdown: (() -> Void)?
+    /// Invoked when a CLI (Node) daemon POSTs `/stand-down` to take over the
+    /// canonical port. Wired to `DaemonService.standDownForTakeover()`.
+    var onStandDownRequested: (() -> Void)?
     private let wsServer = WebSocketServer()
     private let httpServer = HTTPServer()
     private let stateMachine = StateMachine()
@@ -1124,6 +1146,7 @@ final class DaemonServer {
         let serialEventSnapshot = serialEventSnapshot
         serial.serial.setStateProviderFn { serialEventSnapshot.currentStateEvent() }
         serial.serial.setUsageProviderFn { serialEventSnapshot.currentUsageEvent() }
+        serial.serial.setSessionsListProviderFn { serialEventSnapshot.currentSessionsEvent() }
         serial.serial.setDisplayStateProviderFn { serialEventSnapshot.currentDisplayStateEvent() }
         serial.serial.setInitialStateProviderFn { serialEventSnapshot.initialEvents() }
 
@@ -1360,6 +1383,15 @@ final class DaemonServer {
         await httpServer.post("/shutdown") { [weak self] _ in
             Task { @MainActor in await self?.shutdown() }
             return .json(["status": "shutting_down"])
+        }
+
+        // Takeover handshake: a CLI (Node) daemon that wants the canonical port
+        // (full Tier-2 feature set) POSTs here first. We yield the port and
+        // become a client of the incoming daemon. Ack immediately; the actual
+        // stand-down runs async so the caller can proceed to bind.
+        await httpServer.post("/stand-down") { [weak self] _ in
+            Task { @MainActor in self?.onStandDownRequested?() }
+            return .json(["status": "standing_down"])
         }
 
         // Manual APME task-close endpoint — mirrors the Node bridge
@@ -4094,7 +4126,11 @@ final class DaemonServer {
         lastSessionsListBroadcastAt = Date()
         pendingSessionsListFlushTask?.cancel()
         pendingSessionsListFlushTask = nil
-        broadcastRaw(buildSessionsListEvent())
+        let event = buildSessionsListEvent()
+        // Cache for the serial on-connect snapshot + heartbeat re-sync so a
+        // board that (re)connects during a quiet window still gets the roster.
+        serialEventSnapshot.setSessionsEvent(event)
+        broadcastRaw(event)
     }
 
     /// Debounced sessions_list broadcast for high-frequency cosmetic updates

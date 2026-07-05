@@ -18,6 +18,7 @@
 #include "net/serial_client.h"
 #include "net/ws_client.h"
 #include "ui/terrarium/creature_glyphs_generated.h"
+#include "ui/agent_label.h"
 #include "util/usage_format.h"
 
 namespace {
@@ -184,7 +185,43 @@ void snapshot(Snap& s) {
             snprintf(s.tickerTime, sizeof(s.tickerTime), "%02lu:%02lu",
                      (unsigned long)(t.ts / 3600) % 24, (unsigned long)(t.ts / 60) % 60);
         }
-        strncpy(s.tickerText, t.raw, sizeof(s.tickerText) - 1);
+        // Compose an explicitly-attributed single line "<agent> · <project> ·
+        // <task> · <text>" instead of a bare "Task 1". Parts are dropped when
+        // absent; the drawer (smartFitText below) shrinks to the ~700px line.
+        // For a turn row (chat_start/tool) inside a task, resolve its taskId to
+        // the task header's label so "which task" is present alongside the
+        // prompt text; task_start/task_end rows already carry the label in raw.
+        {
+            char comp[104];
+            comp[0] = '\0';
+            size_t off = 0;
+            auto appendPart = [&](const char* part) {
+                if (!part || !part[0] || off >= sizeof(comp) - 1) return;
+                if (off > 0) {
+                    int n = snprintf(comp + off, sizeof(comp) - off, " \xC2\xB7 "); // " · " UTF-8
+                    if (n > 0) off += (size_t)n;
+                    if (off >= sizeof(comp)) { off = sizeof(comp) - 1; return; }
+                }
+                int n = snprintf(comp + off, sizeof(comp) - off, "%s", part);
+                if (n > 0) off += (size_t)n;
+                if (off >= sizeof(comp)) off = sizeof(comp) - 1;
+            };
+            appendPart(t.agentType[0] ? agentDisplayLabel(t.agentType) : nullptr);
+            appendPart(t.projectName[0] ? t.projectName : nullptr);
+            bool isTaskRow = strcmp(t.type, "task_start") == 0 || strcmp(t.type, "task_end") == 0;
+            if (!isTaskRow && t.taskId[0]) {
+                for (uint8_t j = 0; j < g_state.timelineCount; j++) {
+                    const TimelineEntry& tj =
+                        g_state.timeline[(g_state.timelineHead + j) % TIMELINE_MAX_ENTRIES];
+                    if (strcmp(tj.type, "task_start") == 0 && strcmp(tj.taskId, t.taskId) == 0) {
+                        appendPart(tj.raw);
+                        break;
+                    }
+                }
+            }
+            appendPart(t.raw);
+            strncpy(s.tickerText, comp[0] ? comp : t.raw, sizeof(s.tickerText) - 1);
+        }
         break;
     }
     unlockState();

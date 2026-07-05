@@ -73,6 +73,9 @@ struct TimelineEntry {
     char detail[200];   // extended detail (optional)
     char status[12];    // "pending"/"approved"/"denied"
     char sessionId[32]; // owning session — lets the D1 detail overlay filter per session ("" = global)
+    char agentType[16]; // "claude-code"/"codex-cli"/... — brand attribution for the row ("" = none)
+    char projectName[40]; // worktree/project name for the row ("" = none)
+    char taskId[24];    // enclosing task id (links turn rows to their task header; "" = none)
 };
 
 // ===== Main dashboard state =====

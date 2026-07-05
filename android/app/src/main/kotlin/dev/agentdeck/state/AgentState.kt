@@ -272,6 +272,13 @@ class AgentStateHolder private constructor() {
             }
 
             is BridgeEvent.Connected -> {
+                // Clear stale timeline (logs) on (re)connect. A fresh daemon with
+                // an empty store sends NO `timeline_history`, so the replace path
+                // (BridgeEvent.TimelineHistory) never fires and old rows linger.
+                // `connection` precedes `timeline_history` in the initial burst,
+                // so a daemon that HAS history repopulates it immediately after
+                // this clear; a fresh one correctly stays empty.
+                TimelineStore.instance.clear()
                 _state.update {
                     it.copy(
                         bridgeConnected = true,
@@ -338,6 +345,20 @@ class AgentStateHolder private constructor() {
                         // AgentStateHolder.resetToDisconnected).
                         sessionId = null,
                         focusedSessionId = null,
+                        // Purge Node-relayed usage/LIMITS cache. A fresh (or
+                        // limited) daemon on reconnect never re-emits these, and
+                        // the top-level fields use null-coalescing merge that
+                        // would otherwise keep the OLD daemon's values frozen —
+                        // showing LIMITS/subscription data that is actually
+                        // unavailable. Cleared on the DISCONNECT edge (not
+                        // Connect) because the reconnect burst delivers
+                        // usage_update BEFORE the connection event, so the fresh
+                        // daemon's real values repopulate cleanly right after.
+                        // Mirrors Apple AgentStateHolder.clearRelayedUsageState().
+                        usage = UsageUpdate(),
+                        subscriptions = emptyList(),
+                        antigravityStatus = null,
+                        codexRateLimits = null,
                     )
                 }
                 SessionMetrics.instance.onDisconnected()

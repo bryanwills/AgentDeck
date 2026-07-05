@@ -901,6 +901,30 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Purge Node-daemon-relayed usage/subscription cache. Called on the
+    /// external→owner promotion edge so features the sandboxed self-daemon
+    /// cannot produce (Claude 5h/7d quota, ChatGPT/Google subscription rows)
+    /// stop lingering as a stale trace once this app becomes its own daemon.
+    ///
+    /// Codex local limits + Antigravity plan name are cleared too, but the
+    /// self-daemon RE-EMITS them within one 5s usage tick whenever it has local
+    /// file access (a user-granted security-scoped bookmark) — so
+    /// self-producible data reappears while only genuinely-Node-only data stays
+    /// hidden. Deliberately NOT part of `resetToDisconnected`: that fires on
+    /// transient external-daemon blips and would flicker legitimate data.
+    func clearRelayedUsageState() {
+        state.fiveHourPercent = nil
+        state.fiveHourResetsAt = nil
+        state.sevenDayPercent = nil
+        state.sevenDayResetsAt = nil
+        state.usageStale = nil
+        state.codexAuthMode = nil
+        state.codexPlanType = nil
+        state.codexRateLimits = nil
+        state.subscriptions = []
+        state.antigravityStatus = nil
+    }
+
     private func resetToDisconnected() {
         timelineGenerator.onDisconnected()
         timelineVersion += 1

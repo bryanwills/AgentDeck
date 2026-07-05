@@ -530,6 +530,9 @@ static void handleTimelineEvent(JsonObject& obj) {
     if (e["status"].is<const char*>())
         strncpy(entry.status, e["status"].as<const char*>(), sizeof(entry.status) - 1);
     strncpy(entry.sessionId, e["sessionId"] | "", sizeof(entry.sessionId) - 1);
+    strncpy(entry.agentType, e["agentType"] | "", sizeof(entry.agentType) - 1);
+    strncpy(entry.projectName, e["projectName"] | "", sizeof(entry.projectName) - 1);
+    strncpy(entry.taskId, e["taskId"] | "", sizeof(entry.taskId) - 1);
 
     lockState();
     // Upsert: check if existing entry matches (same ts + type)
@@ -571,6 +574,9 @@ static void handleTimelineHistory(JsonObject& obj) {
         if (e["status"].is<const char*>())
             strncpy(entry.status, e["status"].as<const char*>(), sizeof(entry.status) - 1);
         strncpy(entry.sessionId, e["sessionId"] | "", sizeof(entry.sessionId) - 1);
+        strncpy(entry.agentType, e["agentType"] | "", sizeof(entry.agentType) - 1);
+        strncpy(entry.projectName, e["projectName"] | "", sizeof(entry.projectName) - 1);
+        strncpy(entry.taskId, e["taskId"] | "", sizeof(entry.taskId) - 1);
 
         g_state.addTimelineEntry(entry);
     }

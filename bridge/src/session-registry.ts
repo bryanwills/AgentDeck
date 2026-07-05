@@ -406,6 +406,32 @@ export function requestDaemonShutdown(port: number): Promise<void> {
 }
 
 /**
+ * Ask an app-owned Swift in-process daemon to YIELD the canonical port (POST
+ * /stand-down) so this CLI daemon can take over with the full feature set.
+ * Unlike `/shutdown`, this keeps the macOS app running — it just demotes its
+ * daemon to a client of the incoming CLI daemon. Returns true if the daemon
+ * acknowledged (HTTP 2xx). The caller should then `waitForDaemonExit()` for the
+ * port to clear before binding.
+ */
+export function requestDaemonStandDown(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: '/stand-down',
+      method: 'POST',
+      timeout: 2000,
+    }, (res) => {
+      res.on('data', () => {});
+      res.on('end', () => { resolve((res.statusCode ?? 500) < 300); });
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
+/**
  * Find the daemon port for client connections.
  * Priority: daemon.json (fast) → sessions.json fallback.
  */

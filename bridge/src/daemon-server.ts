@@ -768,6 +768,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   let gatewayConnecting = false;
   let moduleHealthProvider: () => Record<string, unknown> = () => ({});
 
+  // Wi-Fi WebSocket e-ink panels (XTeink X3/X4 CrossPoint fork) self-register
+  // their device roster via `client_register{clientType:"eink-device"}` — the
+  // same volunteer model as the Stream Deck plugin. This handler lived ONLY in
+  // the Swift daemon, so when the dashboard talked to the Node daemon (the
+  // common case) these devices never surfaced on the Downstream E-ink rail.
+  // Keyed by socket; a registration drops the moment its socket closes
+  // (filtered lazily in `collectEinkDevices` on readyState), so no separate
+  // TTL sweep is needed.
+  const einkRegistrations = new Map<WebSocket, { devices: unknown[]; updatedAt: number }>();
+  const collectEinkDevices = (): unknown[] => {
+    const out: unknown[] = [];
+    for (const [ws, reg] of einkRegistrations) {
+      if (ws.readyState !== WebSocket.OPEN) { einkRegistrations.delete(ws); continue; }
+      for (const d of reg.devices) out.push(d);
+    }
+    return out;
+  };
+
   // ===== HTTP server =====
   const httpServer = createServer((req, res) => {
     // APME routes: auth-gated (task prompts, project paths, hook payloads are sensitive).
@@ -1436,7 +1454,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     { port, authToken: core.authToken, projectName: 'AgentDeck', wsServer: core.wsServer },
   );
 
-  moduleHealthProvider = () => buildNodeModuleHealth(startedModules);
+  moduleHealthProvider = () => {
+    const modules = buildNodeModuleHealth(startedModules);
+    const einkDevices = collectEinkDevices();
+    if (einkDevices.length > 0) {
+      modules.einkDevices = { available: true, devices: einkDevices };
+    }
+    return modules;
+  };
   core.setModuleHealthProvider(moduleHealthProvider);
 
   // iDotMatrix BLE is now driven by IDotMatrixModule (registered in
@@ -1472,6 +1497,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     serialModule.setDisplayStateProvider(
       () => buildDisplayStateEvent(core.displayMonitor.isDisplayOn()) as BridgeEvent,
     );
+    // Heartbeat re-sync: sessions_list is edge-triggered too, so a board that
+    // reconnects across a daemon handoff during a quiet window would otherwise
+    // stay on "no active sessions" until the next session change.
+    serialModule.setSessionsListProvider(() => core.getLastSessionsListEvent());
     // Include ESP32 serial connections in client count for polling guards
     core.setExternalClientCountProvider(() => esp32ConnectionCount());
   }
@@ -1860,6 +1889,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // sender here so OTA can address the exact socket instead of broadcasting.
     if (msg.type === 'device_info') {
       registerWifiEsp32(msg, sender);
+      return true;
+    }
+    if (msg.type === 'client_register'
+        && (msg as { clientType?: unknown }).clientType === 'eink-device') {
+      // XTeink X3/X4 (fork) volunteering its E-ink roster. Store per-socket so
+      // the Downstream E-ink rail can render it; drops on socket close.
+      const devices = Array.isArray((msg as { devices?: unknown }).devices)
+        ? (msg as { devices: unknown[] }).devices : [];
+      einkRegistrations.set(sender, { devices, updatedAt: Date.now() });
+      debug('daemon', `client_register eink-device devices=${devices.length}`);
+      // Push a fresh state so the rail appears within one frame instead of on
+      // the next periodic tick.
+      if (lastStateEvent && (lastStateEvent as { type?: string }).type === 'state_update') {
+        (lastStateEvent as unknown as Record<string, unknown>).moduleHealth = moduleHealthProvider();
+        core.wsServer.broadcast(lastStateEvent);
+      }
       return true;
     }
     if (handleEsp32OtaReply(msg)) {
