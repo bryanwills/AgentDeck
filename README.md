@@ -28,6 +28,8 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 
 > One bridge. 16 surfaces. Steer your AI — without leaving your keyboard flow.
 
+> **🚧 Direction update (in progress).** AgentDeck is shifting from *parsing* the agent to *observing* it. Reading agent state by scraping the PTY breaks every time an agent ships a UI update — so **hooks are now the primary path**: Claude Code / Codex lifecycle hooks feed session state deterministically, and PTY parsing falls back to a best-effort assist. In parallel we're hardening the **macOS App Store build** to run entirely inside the sandbox (no subprocesses, no companion binary) so a capable — if feature-gated — version can ship on its own, and stabilizing **timeline attribution** (turn completion, merge parity, per-agent labeling) across all 16 surfaces. Expect these areas to move fast.
+
 > Independent project. Not affiliated with Anthropic, OpenAI, Google, Elgato, DIVOOM, or other third parties referenced. All trademarks are property of their respective owners. See [ATTRIBUTION.md](ATTRIBUTION.md) for full notices.
 
 <p align="center">
