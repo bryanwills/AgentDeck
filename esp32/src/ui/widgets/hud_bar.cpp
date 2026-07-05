@@ -349,32 +349,48 @@ static const char* ips10StatePill(const char* state) {
 static lv_obj_t* panelRight = nullptr;
 static lv_obj_t* lblTankHeader = nullptr;
 
-// 5h gauge
-static lv_obj_t* gauge5hCol = nullptr;   // column wrapper — hidden when no Claude data
+// Per-provider tank groups: each = a brand-coloured header ("● CLAUDE" / "● CODEX")
+// over its 5h/7d water tanks. The group is the hide unit, so 1 or 2 providers lay
+// out cohesively and the panel simply grows a second block when Codex data arrives.
+// IPS10 renders usage in its D1 topbar instead — the whole tank panel is
+// !BOARD_IPS10 only.
+static lv_obj_t* claudeGroup = nullptr;
+static lv_obj_t* codexGroup  = nullptr;
+
+// Claude 5h / 7d tanks
 static lv_obj_t* gauge5hBox = nullptr;
 static lv_obj_t* gauge5hFill = nullptr;
 static lv_obj_t* gauge5hPct = nullptr;
 static lv_obj_t* gauge5hPeriod = nullptr;
 static lv_obj_t* gauge5hReset = nullptr;
-
-// 7d gauge
-static lv_obj_t* gauge7dCol = nullptr;
 static lv_obj_t* gauge7dBox = nullptr;
 static lv_obj_t* gauge7dFill = nullptr;
 static lv_obj_t* gauge7dPct = nullptr;
 static lv_obj_t* gauge7dPeriod = nullptr;
 static lv_obj_t* gauge7dReset = nullptr;
 
+// Codex 5h / 7d tanks (same water-tank widget, blue-headed group)
+static lv_obj_t* gaugeCx5hBox = nullptr;
+static lv_obj_t* gaugeCx5hFill = nullptr;
+static lv_obj_t* gaugeCx5hPct = nullptr;
+static lv_obj_t* gaugeCx5hPeriod = nullptr;
+static lv_obj_t* gaugeCx5hReset = nullptr;
+static lv_obj_t* gaugeCx7dBox = nullptr;
+static lv_obj_t* gaugeCx7dFill = nullptr;
+static lv_obj_t* gaugeCx7dPct = nullptr;
+static lv_obj_t* gaugeCx7dPeriod = nullptr;
+static lv_obj_t* gaugeCx7dReset = nullptr;
+
 // Stale indicator
 static lv_obj_t* lblStale = nullptr;
 
 #if !defined(BOARD_IPS10)
-// TANK STATUS extras for the non-IPS10 LCD boards (ips35 / 86box / round).
-// IPS10 renders Codex + Antigravity in its D1 topbar instead. Both lines hide
-// when their data is absent, so a Claude-only setup — or the App Store Swift
-// daemon, which can't supply Codex/subscription data — looks identical to before.
-static lv_obj_t* lblCodexUsage = nullptr;  // "CX 5h 47% 7d 32%"
-static lv_obj_t* lblAux = nullptr;         // "AGY Pro ~7/12  GPT ~1/15"
+// Account chip (styled pill) — shortened Antigravity plan ("AGY Pro") + any
+// subscription expiries. Hidden when the daemon supplies none (e.g. the App Store
+// Swift daemon exposes no subscription/Antigravity data). The raw Antigravity
+// credit count is never shown (meaningless at a glance).
+static lv_obj_t* acctChip = nullptr;
+static lv_obj_t* acctChipLabel = nullptr;
 #endif
 
 static bool visible = true;
@@ -487,6 +503,46 @@ static lv_obj_t* createGauge(lv_obj_t* parent,
     lv_obj_set_style_text_opa(resetLabel, (lv_opa_t)178, 0);  // 70%
     lv_label_set_text(resetLabel, "");
     return col;
+}
+
+// Provider tank group: a brand-coloured header ("● CLAUDE") stacked over a row of
+// the provider's 5h/7d water tanks. Returned container is the hide unit. Keeps the
+// existing tank aesthetic while making the provider unambiguous (matches the IPS10
+// "brand mark conveys the provider, labels stay 5h/7d" convention).
+static lv_obj_t* makeTankGroup(lv_obj_t* parent, const char* name, uint32_t brandColor,
+                               lv_obj_t*& b5, lv_obj_t*& f5, lv_obj_t*& p5, lv_obj_t*& pe5, lv_obj_t*& r5,
+                               lv_obj_t*& b7, lv_obj_t*& f7, lv_obj_t*& p7, lv_obj_t*& pe7, lv_obj_t*& r7) {
+    lv_obj_t* grp = lv_obj_create(parent);
+    lv_obj_set_size(grp, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(grp, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(grp, 0, 0);
+    lv_obj_set_style_pad_all(grp, 0, 0);
+    lv_obj_set_style_pad_row(grp, 2, 0);
+    lv_obj_clear_flag(grp, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(grp, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(grp, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    // Brand header: coloured dot + provider name
+    lv_obj_t* hdr = lv_label_create(grp);
+    lv_obj_set_style_text_font(hdr, &lv_font_montserrat_10, 0);
+    lv_label_set_recolor(hdr, true);
+    char h[48];
+    snprintf(h, sizeof(h), "#%06lX " LV_SYMBOL_BULLET "# #%06lX %s#",
+             (unsigned long)brandColor, (unsigned long)brandColor, name);
+    lv_label_set_text(hdr, h);
+
+    // Tanks row (5h + 7d side by side)
+    lv_obj_t* row = lv_obj_create(grp);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_style_pad_column(row, GAUGE_GAP, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    createGauge(row, b5, f5, p5, pe5, r5, "5h");
+    createGauge(row, b7, f7, p7, pe7, r7, "7d");
+    return grp;
 }
 
 #if defined(BOARD_IPS10)
@@ -1325,20 +1381,20 @@ void init(lv_obj_t* parent) {
     lv_label_set_text(lblTankHeader, "TANK STATUS");
 #endif
 
-    // Gauge row (horizontal) — shared by both layouts
-    lv_obj_t* gaugeRow = lv_obj_create(panelRight);
-    lv_obj_set_size(gaugeRow, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(gaugeRow, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(gaugeRow, 0, 0);
-    lv_obj_set_style_pad_all(gaugeRow, 0, 0);
-    lv_obj_set_style_pad_column(gaugeRow, GAUGE_GAP, 0);
-    lv_obj_set_style_pad_row(gaugeRow, 0, 0);
-    lv_obj_clear_flag(gaugeRow, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(gaugeRow, LV_FLEX_FLOW_ROW);
-
-    // Create two gauges side by side
-    gauge5hCol = createGauge(gaugeRow, gauge5hBox, gauge5hFill, gauge5hPct, gauge5hPeriod, gauge5hReset, "5h");
-    gauge7dCol = createGauge(gaugeRow, gauge7dBox, gauge7dFill, gauge7dPct, gauge7dPeriod, gauge7dReset, "7d");
+#if !defined(BOARD_IPS10)
+    // Provider tank groups stack vertically in panelRight: Claude first, then Codex
+    // (hidden until Codex data arrives), then the account chip. Each group is a
+    // brand-labelled header over its 5h/7d water tanks, so multiple providers read
+    // as one cohesive panel instead of tanks + loose text. Width is unchanged
+    // (2 tanks wide); the panel just grows a block when a second provider is live.
+    // IPS10 renders usage in its D1 topbar, so it builds none of this.
+    claudeGroup = makeTankGroup(panelRight, "CLAUDE", Theme::ClaudeBody,
+        gauge5hBox, gauge5hFill, gauge5hPct, gauge5hPeriod, gauge5hReset,
+        gauge7dBox, gauge7dFill, gauge7dPct, gauge7dPeriod, gauge7dReset);
+    codexGroup = makeTankGroup(panelRight, "CODEX", Theme::CloudBodyLight,
+        gaugeCx5hBox, gaugeCx5hFill, gaugeCx5hPct, gaugeCx5hPeriod, gaugeCx5hReset,
+        gaugeCx7dBox, gaugeCx7dFill, gaugeCx7dPct, gaugeCx7dPeriod, gaugeCx7dReset);
+    lv_obj_add_flag(codexGroup, LV_OBJ_FLAG_HIDDEN);
 
     // Stale indicator (only shown when data is stale, hidden by default)
     lblStale = lv_label_create(panelRight);
@@ -1347,24 +1403,25 @@ void init(lv_obj_t* parent) {
     lv_label_set_text(lblStale, "");
     lv_obj_add_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
 
-#if !defined(BOARD_IPS10)
-    // Codex usage line (below the Claude gauges) — Codex-blue, hidden until data.
-    // The "CX" prefix + brand blue make it unambiguous which provider the
-    // percentages belong to (the Claude water gauges carry no provider label).
-    lblCodexUsage = lv_label_create(panelRight);
-    lv_obj_set_style_text_color(lblCodexUsage, lv_color_hex(Theme::CloudBodyLight), 0);
-    lv_obj_set_style_text_font(lblCodexUsage, &lv_font_montserrat_10, 0);
-    lv_label_set_text(lblCodexUsage, "");
-    lv_obj_add_flag(lblCodexUsage, LV_OBJ_FLAG_HIDDEN);
-
-    // Account line: shortened Antigravity plan ("AGY Pro") + any subscription
-    // expiries. Dim, hidden until data. The raw Antigravity credit count is never
-    // shown here (it's meaningless at a glance).
-    lblAux = lv_label_create(panelRight);
-    lv_obj_set_style_text_color(lblAux, lv_color_hex(Theme::HUDDim), 0);
-    lv_obj_set_style_text_font(lblAux, &lv_font_montserrat_10, 0);
-    lv_label_set_text(lblAux, "");
-    lv_obj_add_flag(lblAux, LV_OBJ_FLAG_HIDDEN);
+    // Account chip: a subtle glass pill holding "AGY Pro ~8/1" + subscription
+    // expiries. Hidden until data (so a Claude-only / Swift-daemon setup shows no
+    // empty chip). Raw Antigravity credit count is never shown.
+    acctChip = lv_obj_create(panelRight);
+    lv_obj_set_size(acctChip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(acctChip, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_bg_opa(acctChip, (lv_opa_t)18, 0);
+    lv_obj_set_style_border_width(acctChip, 0, 0);
+    lv_obj_set_style_radius(acctChip, 7, 0);
+    lv_obj_set_style_pad_left(acctChip, 6, 0);
+    lv_obj_set_style_pad_right(acctChip, 6, 0);
+    lv_obj_set_style_pad_top(acctChip, 2, 0);
+    lv_obj_set_style_pad_bottom(acctChip, 2, 0);
+    lv_obj_clear_flag(acctChip, LV_OBJ_FLAG_SCROLLABLE);
+    acctChipLabel = lv_label_create(acctChip);
+    lv_obj_set_style_text_font(acctChipLabel, &lv_font_montserrat_10, 0);
+    lv_label_set_recolor(acctChipLabel, true);
+    lv_label_set_text(acctChipLabel, "");
+    lv_obj_add_flag(acctChip, LV_OBJ_FLAG_HIDDEN);
 #endif
 }
 
@@ -1483,13 +1540,17 @@ void update() {
 #endif
 
 #if !defined(BOARD_IPS10)
-    // Codex windows + account/subscription line for the TANK STATUS panel. Read
-    // straight from g_state (all fields exist on every board). Built here under
-    // the lock; rendered after unlockState() below.
+    // Codex windows + account-chip string for the TANK STATUS panel. Read straight
+    // from g_state (all fields exist on every board). Built here under the lock;
+    // rendered after unlockState() below.
     float cxP5h = g_state.codexPrimaryPercent;
     float cxP7d = g_state.codexSecondaryPercent;
-    char auxBuf[96]; auxBuf[0] = '\0'; size_t auxPos = 0;
+    char cxReset5h[20], cxReset7d[20];
+    strncpy(cxReset5h, g_state.codexPrimaryReset, sizeof(cxReset5h) - 1);   cxReset5h[sizeof(cxReset5h) - 1] = '\0';
+    strncpy(cxReset7d, g_state.codexSecondaryReset, sizeof(cxReset7d) - 1); cxReset7d[sizeof(cxReset7d) - 1] = '\0';
+    // Account chip: shortened Antigravity plan (gold) + subscription expiries (dim).
     char agyBuf[28]; agyBuf[0] = '\0';
+    char subsBuf[96]; subsBuf[0] = '\0'; size_t subsPos = 0;
     for (uint8_t i = 0; i < g_state.subscriptionCount; i++) {
         const auto& sub = g_state.subscriptions[i];
         if (UsageFormat::isAntigravityPlanName(sub.name)) {
@@ -1504,17 +1565,18 @@ void update() {
             char nm[16]; size_t k = 0;
             for (; sub.name[k] && sub.name[k] != ' ' && k < sizeof(nm) - 1; k++) nm[k] = sub.name[k];
             nm[k] = '\0';
-            int w = snprintf(auxBuf + auxPos, sizeof(auxBuf) - auxPos, "%s%s %s",
-                             auxPos ? "  " : "", nm, sub.until);
-            if (w > 0) auxPos += (size_t)w;
+            int w = snprintf(subsBuf + subsPos, sizeof(subsBuf) - subsPos, "%s%s %s",
+                             subsPos ? "  " : "", nm, sub.until);
+            if (w > 0) subsPos += (size_t)w;
         }
     }
     if (!agyBuf[0] && g_state.antigravityPlan[0]) {
         UsageFormat::formatAgyPlan(g_state.antigravityPlan, agyBuf, sizeof(agyBuf));
     }
-    if (agyBuf[0]) {
-        snprintf(auxBuf + auxPos, sizeof(auxBuf) - auxPos, "%s%s", auxPos ? "  " : "", agyBuf);
-    }
+    // Compose the recolored chip: Antigravity gold, subscription expiries dim.
+    char chipBuf[160]; chipBuf[0] = '\0'; size_t cp = 0;
+    if (agyBuf[0])  cp += (size_t)snprintf(chipBuf + cp, sizeof(chipBuf) - cp, "#F3D233 %s#", agyBuf);
+    if (subsBuf[0]) cp += (size_t)snprintf(chipBuf + cp, sizeof(chipBuf) - cp, "%s#94A3B8 %s#", cp ? "  " : "", subsBuf);
 #endif
 
 #if !defined(BOARD_IPS10)
@@ -1602,56 +1664,46 @@ void update() {
     if (lblSessions) lv_label_set_text(lblSessions, buf);  // null on IPS10 (mosaic instead)
 #endif
 
-    // === Right panel: water-fill gauges ===
+#if !defined(BOARD_IPS10)
+    // === Right panel: per-provider water-tank groups ===
+    // Claude group — updated + hidden as a unit when there's no Claude quota data
+    // (a Codex-only user, or the App Store Swift daemon which can't read Claude
+    // OAuth usage). Showing empty "--" tanks would read as broken.
     updateGauge(gauge5hFill, gauge5hPct, gauge5hReset, p5h, reset5h, usageStale);
     updateGauge(gauge7dFill, gauge7dPct, gauge7dReset, p7d, reset7d, usageStale);
-
-#if !defined(BOARD_IPS10)
-    // Hide the Claude gauge pair entirely when there's no Claude quota data
-    // (a Codex-only user, or the App Store Swift daemon which can't read Claude
-    // OAuth usage) — showing two empty "--" gauges would read as broken. When
-    // Claude data returns the pair reappears. The Codex line below still renders.
     {
         bool showClaude = (p5h >= 0.0f || p7d >= 0.0f);
-        if (gauge5hCol) { showClaude ? lv_obj_clear_flag(gauge5hCol, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(gauge5hCol, LV_OBJ_FLAG_HIDDEN); }
-        if (gauge7dCol) { showClaude ? lv_obj_clear_flag(gauge7dCol, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(gauge7dCol, LV_OBJ_FLAG_HIDDEN); }
-    }
-#endif
-
-    // Stale indicator (shown only when we have data but it's stale)
-    bool showStale = usageStale && (p5h >= 0.0f || p7d >= 0.0f);
-    if (showStale) {
-        lv_label_set_text(lblStale, "! stale");
-        lv_obj_clear_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_label_set_text(lblStale, "");
-        lv_obj_add_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
+        if (claudeGroup) { showClaude ? lv_obj_clear_flag(claudeGroup, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(claudeGroup, LV_OBJ_FLAG_HIDDEN); }
     }
 
-#if !defined(BOARD_IPS10)
-    // Codex usage line — shown whenever a Codex window is present, independent of
-    // Claude data (a Codex-only user has no Claude 5h/7d). Hidden when absent so
-    // the panel is unchanged for Claude-only setups.
-    if (lblCodexUsage) {
-        if (cxP5h >= 0.0f || cxP7d >= 0.0f) {
-            char cb[40]; size_t p = 0;
-            p += (size_t)snprintf(cb + p, sizeof(cb) - p, "CX");
-            if (cxP5h >= 0.0f) p += (size_t)snprintf(cb + p, sizeof(cb) - p, " 5h %d%%", (int)(cxP5h + 0.5f));
-            if (cxP7d >= 0.0f) p += (size_t)snprintf(cb + p, sizeof(cb) - p, " 7d %d%%", (int)(cxP7d + 0.5f));
-            lv_label_set_text(lblCodexUsage, cb);
-            lv_obj_clear_flag(lblCodexUsage, LV_OBJ_FLAG_HIDDEN);
+    // Codex group — same water-tank widget under a blue "● CODEX" header. Shown
+    // whenever a Codex window is present, independent of Claude data.
+    updateGauge(gaugeCx5hFill, gaugeCx5hPct, gaugeCx5hReset, cxP5h, cxReset5h, false);
+    updateGauge(gaugeCx7dFill, gaugeCx7dPct, gaugeCx7dReset, cxP7d, cxReset7d, false);
+    {
+        bool showCodex = (cxP5h >= 0.0f || cxP7d >= 0.0f);
+        if (codexGroup) { showCodex ? lv_obj_clear_flag(codexGroup, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(codexGroup, LV_OBJ_FLAG_HIDDEN); }
+    }
+
+    // Stale indicator (shown only when we have Claude data but it's stale)
+    if (lblStale) {
+        bool showStale = usageStale && (p5h >= 0.0f || p7d >= 0.0f);
+        if (showStale) {
+            lv_label_set_text(lblStale, "! stale");
+            lv_obj_clear_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
         } else {
-            lv_obj_add_flag(lblCodexUsage, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
         }
     }
-    // Account / subscription line (AGY plan + expiries). Hidden when the daemon
+
+    // Account chip (AGY plan + subscription expiries). Hidden when the daemon
     // supplies none (e.g. the App Store Swift daemon with no subscription data).
-    if (lblAux) {
-        if (auxBuf[0]) {
-            lv_label_set_text(lblAux, auxBuf);
-            lv_obj_clear_flag(lblAux, LV_OBJ_FLAG_HIDDEN);
+    if (acctChip) {
+        if (chipBuf[0]) {
+            lv_label_set_text(acctChipLabel, chipBuf);
+            lv_obj_clear_flag(acctChip, LV_OBJ_FLAG_HIDDEN);
         } else {
-            lv_obj_add_flag(lblAux, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(acctChip, LV_OBJ_FLAG_HIDDEN);
         }
     }
 #endif
@@ -2032,8 +2084,8 @@ void update() {
     bool showTankStatus = connected && (p5h >= 0.0f || p7d >= 0.0f
 #if !defined(BOARD_IPS10)
         // A Codex-only user (or the Swift daemon, which has no Claude quota) still
-        // gets the panel so its Codex/account lines are visible.
-        || cxP5h >= 0.0f || cxP7d >= 0.0f || auxBuf[0]
+        // gets the panel so its Codex tanks / account chip are visible.
+        || cxP5h >= 0.0f || cxP7d >= 0.0f || chipBuf[0]
 #endif
     );
     if (firstUpdate || showTankStatus != lastShowTankStatus) {
