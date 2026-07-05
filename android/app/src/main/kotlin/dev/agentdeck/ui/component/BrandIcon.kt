@@ -170,6 +170,7 @@ private fun appendNumber(s: String, start: Int, sb: StringBuilder): Int {
  */
 fun brandColorForAgent(agentType: String?): Color = when (agentType) {
     "claude-code" -> Color(0xFFC07058)
+    "codex"       -> Color(0xFF6166E0)
     "codex-cli"   -> Color(0xFF6166E0)
     "codex-app"   -> Color(0xFF6166E0)
     "openclaw"    -> Color(0xFFFF4D4D)
@@ -194,7 +195,9 @@ private class BrandIconSpec(
                 color = Color(0xFFC07058),  // terracotta
                 einkColor = Color(0xFF333333),
             )
-            "codex-cli", "codex-app" -> BrandIconSpec(
+            // "codex" is the generic provider key emitted by codexLimitRows for the
+            // LIMITS surfaces; "codex-cli"/"codex-app" are the session agent types.
+            "codex", "codex-cli", "codex-app" -> BrandIconSpec(
                 pathDataList = listOf(OPENAI_PATH),
                 viewBox = 24f,
                 color = Color(0xFF6166E0),  // indigo
