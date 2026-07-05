@@ -151,7 +151,7 @@ No account required. To see the app's features:
 
 ## Reviewing the conditional UI (optional)
 
-The "Advanced developer integrations" panels described above do **not** appear during a normal review. Reviewers testing on a clean macOS install see only the standalone product — Device Preview shows the 12 built-in targets (Stream Deck, D200H, Apple Watch/iPad, ESP32, Pixoo, and terminal preview); the menu bar shows no Claude-subscription quota gauge. This is the intended out-of-the-box experience and is fully functional.
+The "Advanced developer integrations" panels described above do **not** appear during a normal review. Reviewers testing on a clean macOS install see only the standalone product — Device Preview shows the 11 built-in targets (Stream Deck, D200H, iPad, ESP32, Pixoo, and terminal preview); the menu bar shows no Claude-subscription quota gauge. This is the intended out-of-the-box experience and is fully functional.
 
 If a reviewer wishes to independently verify that those conditional panels are purely read-only WebSocket visualizations and not subprocess/file-I/O paths hiding in the shipped app, the optional reproduction path is:
 

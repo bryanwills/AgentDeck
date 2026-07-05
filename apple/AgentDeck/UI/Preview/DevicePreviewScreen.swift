@@ -1,8 +1,8 @@
 // DevicePreviewScreen.swift — Capstone window for the Device Preview track.
 //
 // Layout:
-//   - Sidebar: grouped list of standalone device types across 7 categories
-//     (12 in the App Store build, 16 when an external desktop bridge is active).
+//   - Sidebar: grouped list of standalone device types across 6 categories
+//     (11 in the App Store build, 15 when an external desktop bridge is active).
 //   - Main canvas: the selected device's view, centered with a header + byline.
 //   - Toolbar: Agent / State / Sessions pickers. A running animation clock
 //     ticks `selection.animationFrame` forward twice per second so dynamic
@@ -210,7 +210,6 @@ struct DevicePreviewScreen: View {
         case .streamDeckPlus:    StreamDeckPlusPreview(selection: live)
         case .d200hKey:          D200HKeyPreview(selection: live)
         case .d200hDeck:         D200HDeckPreview(selection: live)
-        case .appleWatch:        AppleWatchPreview(selection: live)
         case .iPadLandscape:     IPadLandscapePreview(selection: live)
         case .androidTablet:     AndroidTabletPreview(selection: live)
         case .einkMono:          EinkMonoPreview(selection: live)

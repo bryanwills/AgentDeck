@@ -50,8 +50,8 @@ Bonjour 자동 발견 + QR 페어링. Mac에서 돌아가는 에이전트 세션
 • APME 에이전트 성능 평가
 각 에이전트 턴을 카테고리(coding/debug/docs/planning/review/research/conversation)별 루브릭으로 채점. Apple Intelligence Foundation Models (on-device, 무료) 또는 Anthropic API(opt-in) 선택 가능. LLM-only 평가는 App Store 빌드에서 완전 로컬.
 
-• Device Preview 14개 기기 갤러리
-하드웨어 없이도 Stream Deck+ / Apple Watch / iPad / E-ink / ESP32 / Pixoo / TUI 등 14가지 기기에서 에이전트가 어떻게 보이는지 미리보기.
+• Device Preview 13개 기기 갤러리
+하드웨어 없이도 Stream Deck+ / iPad / E-ink / ESP32 / Pixoo / TUI 등 13가지 기기에서 에이전트가 어떻게 보이는지 미리보기.
 
 • OpenClaw Gateway 네이티브 연동
 OpenClaw Gateway를 로컬에서 실행 중이면 자동으로 operator 클라이언트로 페어링. 세션 목록, 모델 카탈로그, 도구 승인 요청을 대시보드에서 처리.
@@ -162,8 +162,8 @@ Auto-discovers your Mac over Wi-Fi via Bonjour. QR pairing fallback for differen
 • APME agent performance evaluation
 Each finished agent turn is scored against category-specific rubrics (coding/debug/docs/planning/review/research/conversation). Default backend is Apple Intelligence Foundation Models — on-device, free, zero network. Anthropic API is available as an opt-in paid backend.
 
-• 14-device preview gallery
-See how AgentDeck renders on Stream Deck+, Apple Watch, iPad, E-ink readers, ESP32 displays, Divoom Pixoo matrices, and a TUI terminal — all without owning any of the hardware.
+• 13-device preview gallery
+See how AgentDeck renders on Stream Deck+, iPad, E-ink readers, ESP32 displays, Divoom Pixoo matrices, and a TUI terminal — all without owning any of the hardware.
 
 • OpenClaw Gateway native integration
 Auto-pairs as an operator client when an OpenClaw Gateway is running locally (ws://127.0.0.1:18789). Self-generated Ed25519 identity stored in Keychain; the Gateway-issued device token is reused on reconnect.

@@ -815,7 +815,7 @@ struct SettingsScreen: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.primary)
 
-            Text("AgentDeck gives you real-time monitoring and evaluation for Claude Code, Codex, OpenCode, and OpenClaw sessions. See what your agents are doing across every device — Stream Deck+, Apple Watch, E-ink readers, ESP32 boards, matrix displays, and more. Stop context-switching between chat windows. Start steering.")
+            Text("AgentDeck gives you real-time monitoring and evaluation for Claude Code, Codex, OpenCode, and OpenClaw sessions. See what your agents are doing across every device — Stream Deck+, E-ink readers, ESP32 boards, matrix displays, and more. Stop context-switching between chat windows. Start steering.")
                 .font(.system(size: 12))
                 .foregroundStyle(TerrariumHUD.subtext)
                 .fixedSize(horizontal: false, vertical: true)
