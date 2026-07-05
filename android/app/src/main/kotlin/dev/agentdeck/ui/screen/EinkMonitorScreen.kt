@@ -60,7 +60,9 @@ import dev.agentdeck.state.DashboardState
 import dev.agentdeck.state.TimelineStore
 import dev.agentdeck.ui.component.AgentDeckMark
 import dev.agentdeck.ui.component.BrandIcon
+import dev.agentdeck.ui.monitor.subscriptionTrailing
 import dev.agentdeck.util.codexLimitRows
+import java.time.Instant
 import dev.agentdeck.ui.eink.EinkAgentPanel
 import dev.agentdeck.ui.eink.EinkAttentionPanel
 import dev.agentdeck.ui.eink.EinkAquariumFrame
@@ -445,14 +447,13 @@ private fun EinkLimitsCornerCard(
 ) {
     val rows = buildEinkLimitRows(state)
     val width = if (compact) 164.dp else 190.dp
-    val height = when {
-        compact && rows.size <= 1 -> 56.dp
-        compact && rows.size == 2 -> 70.dp
-        compact -> 86.dp
-        rows.size <= 1 -> 64.dp
-        rows.size == 2 -> 80.dp
-        else -> 96.dp
-    }
+    // Height grows with row count (Claude 5h/7d + Codex 5h/7d + subscription
+    // expiry lines + the Antigravity chip can stack up to ~6 rows). A fixed
+    // per-row step keeps the card from clipping when several providers are live,
+    // while a card with no rows never renders (gated by hasEinkLimitData).
+    val perRow = if (compact) 15.dp else 17.dp
+    val base = if (compact) 26.dp else 30.dp
+    val height = base + perRow * rows.size.coerceAtLeast(1)
     Surface(
         modifier = modifier
             .width(width)
@@ -488,7 +489,7 @@ private fun EinkLimitsCornerCard(
             }
             rows.forEach { row ->
                 if (row.percent != null) {
-                    EinkLimitGaugeRow(label = row.label, percent = row.percent, agentType = row.agentType)
+                    EinkLimitGaugeRow(label = row.label, percent = row.percent, agentType = row.agentType, stale = row.stale)
                 } else {
                     EinkLimitTextRow(label = row.label, value = row.value.orEmpty())
                 }
@@ -502,53 +503,88 @@ private data class EinkLimitLine(
     val percent: Double? = null,
     val value: String? = null,
     val agentType: String? = null,
+    val stale: Boolean = false,
 )
 
-private fun buildEinkLimitRows(state: DashboardState): List<EinkLimitLine> {
+private fun buildEinkLimitRows(state: DashboardState, now: Instant = Instant.now()): List<EinkLimitLine> {
     val rows = mutableListOf<EinkLimitLine>()
     if (state.usage.usageStale != true) {
         state.usage.fiveHourPercent?.let { rows.add(EinkLimitLine(label = "5h", percent = it, agentType = "claude-code")) }
         state.usage.sevenDayPercent?.let { rows.add(EinkLimitLine(label = "7d", percent = it, agentType = "claude-code")) }
     }
-    // Codex (ChatGPT) rolling-window usage — independent of Claude's usageStale;
-    // each window carries its own stale flag. Drop stale windows on this minimal
-    // card (no stale marker here), matching how Claude rows hide when stale. The
-    // leading brand mark identifies the provider, so labels stay plain 5h/7d.
-    codexLimitRows(state.codexRateLimits).filter { !it.stale }.forEach {
-        rows.add(EinkLimitLine(label = it.label, percent = it.percent, agentType = it.agentType))
+    // Codex (ChatGPT) rolling windows — independent of Claude's usageStale, each
+    // carries its own stale flag. We keep BOTH primary (5h) and secondary (7d)
+    // even when a window has elapsed: dropping stale ones made the 7d window
+    // vanish entirely once Codex went idle (its window slides into the past). A
+    // stale window keeps its last-known percent and is flagged with a trailing
+    // "!" instead of disappearing. The leading brand mark identifies the provider,
+    // so labels stay plain 5h/7d.
+    codexLimitRows(state.codexRateLimits).forEach {
+        rows.add(EinkLimitLine(label = it.label, percent = it.percent, agentType = it.agentType, stale = it.stale))
+    }
+    // Subscription expiry rows — show "<provider> → M D" when the plan carries an
+    // expiry (Antigravity has its own chip below, so skip it here). When the
+    // daemon can't supply an expiry (e.g. the App Store Swift daemon exposes no
+    // subscription `until`), subscriptionTrailing returns null and the row is
+    // simply omitted — the card stays honest rather than showing a blank date.
+    state.subscriptions.forEach { sub ->
+        // The daemon stores the Antigravity subscription under its raw plan name
+        // ("Google AI Pro"), so skip it here — it's rendered by the AGY chip below.
+        if (isAntigravityPlanName(sub.name)) return@forEach
+        val trailing = subscriptionTrailing(sub.until, now) ?: return@forEach
+        val expiry = if (trailing.expired) "→ renew" else formatEinkExpiry(sub.until) ?: return@forEach
+        rows.add(EinkLimitLine(label = "", value = "${sub.name.substringBefore(' ')} $expiry"))
     }
     buildAntigravityLimitValue(state)?.let { rows.add(EinkLimitLine(label = "", value = it)) }
     return rows
 }
 
+/**
+ * True when a subscription entry's name is really the Antigravity plan. The
+ * daemon stores it as the raw plan name (e.g. "Google AI Pro"), not a literal
+ * "Antigravity …" string. Mirrors ESP32 `UsageFormat::isAntigravityPlanName`.
+ */
+private fun isAntigravityPlanName(name: String): Boolean =
+    name.startsWith("Google AI", ignoreCase = true) ||
+        name.startsWith("Antigravity", ignoreCase = true) ||
+        name.startsWith("AGY", ignoreCase = true)
+
+/** ISO date → "→ Mon D" for the clock-less e-ink chips; null when absent/unparseable. */
+private fun formatEinkExpiry(iso: String?): String? {
+    val raw = iso?.takeIf { it.isNotBlank() } ?: return null
+    return try {
+        val dateStr = raw.split("T")[0]
+        val parts = dateStr.split("-")
+        if (parts.size == 3) {
+            val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+            val monthIdx = parts[1].toIntOrNull()?.minus(1) ?: 0
+            val month = if (monthIdx in 0..11) months[monthIdx] else parts[1]
+            val day = parts[2].toIntOrNull()?.toString() ?: parts[2]
+            "→ $month $day"
+        } else {
+            "→ $dateStr"
+        }
+    } catch (e: Exception) {
+        null
+    }
+}
+
 private fun buildAntigravityLimitValue(state: DashboardState): String? {
     val status = state.antigravityStatus ?: return null
-    val plan = status.planName
+    // Shorten the plan to "AGY <tier>" (e.g. "Google AI Pro" → "AGY Pro"). The raw
+    // availableCredits count is deliberately NOT surfaced — it's a backend metering
+    // number that means nothing at a glance.
+    val tier = status.planName
         ?.replace("Google AI ", "")
         ?.replace("Antigravity ", "")
         ?.takeIf { it.isNotBlank() } ?: "Pro"
-    val until = status.subscriptionActiveUntil?.let { iso ->
-        try {
-            val dateStr = iso.split("T")[0]
-            val parts = dateStr.split("-")
-            if (parts.size == 3) {
-                val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-                val monthIdx = parts[1].toIntOrNull()?.minus(1) ?: 0
-                val month = if (monthIdx in 0..11) months[monthIdx] else parts[1]
-                val day = parts[2].toIntOrNull()?.toString() ?: parts[2]
-                "→ $month $day"
-            } else {
-                "→ $dateStr"
-            }
-        } catch (e: Exception) {
-            "→ $iso"
-        }
-    }
+    val plan = "AGY $tier"
+    val until = formatEinkExpiry(status.subscriptionActiveUntil)
     return if (until != null) "$plan $until" else plan
 }
 
 @Composable
-private fun EinkLimitGaugeRow(label: String, percent: Double, agentType: String? = null) {
+private fun EinkLimitGaugeRow(label: String, percent: Double, agentType: String? = null, stale: Boolean = false) {
     val pct = percent.coerceIn(0.0, 100.0).toInt()
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -558,7 +594,7 @@ private fun EinkLimitGaugeRow(label: String, percent: Double, agentType: String?
             BrandIcon(agentType = agentType, isEink = true, size = 11.dp)
         }
         Text(
-            text = "$label ${einkBlockGauge(pct)} $pct%",
+            text = "$label ${einkBlockGauge(pct)} $pct%${if (stale) "!" else ""}",
             fontSize = 11.sp,
             lineHeight = 13.sp,
             fontFamily = FontFamily.Monospace,
@@ -571,7 +607,7 @@ private fun EinkLimitGaugeRow(label: String, percent: Double, agentType: String?
 @Composable
 private fun EinkLimitTextRow(label: String, value: String) {
     Text(
-        text = "$label $value",
+        text = if (label.isBlank()) value else "$label $value",
         fontSize = 11.sp,
         lineHeight = 13.sp,
         fontFamily = FontFamily.Monospace,

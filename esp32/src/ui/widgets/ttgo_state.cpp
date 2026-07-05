@@ -257,6 +257,12 @@ void update() {
 
     float p5h = g_state.fiveHourPercent;
     float p7d = g_state.sevenDayPercent;
+    // Codex windows — on this 135px board there's no room for a third row, so the
+    // two usage labels fall back to Codex when the user has no Claude quota (a
+    // Codex-only user, or the App Store Swift daemon with no Claude 5h/7d). The
+    // "CX" prefix disambiguates the provider.
+    float cxP5h = g_state.codexPrimaryPercent;
+    float cxP7d = g_state.codexSecondaryPercent;
     bool connected = hasData && (g_state.wsConnected || Net::serialConnected());
     unlockState();
 
@@ -281,25 +287,34 @@ void update() {
         lv_label_set_text(lblModel, "");
     }
 
-    // Update usage gauges
+    // Update usage gauges. Prefer Claude; fall back to Codex when Claude has no
+    // data so a Codex-only user still sees their real windows.
     char buf[16];
-    bool showTankStatus = connected && (p5h >= 0.0f || p7d >= 0.0f);
+    bool hasClaude = p5h >= 0.0f || p7d >= 0.0f;
+    bool hasCodex = cxP5h >= 0.0f || cxP7d >= 0.0f;
+    bool showTankStatus = connected && (hasClaude || hasCodex);
     if (showTankStatus) {
         lv_obj_clear_flag(lblUsage5h, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(lblUsage7d, LV_OBJ_FLAG_HIDDEN);
 
-        if (p5h >= 0.0f) {
-            snprintf(buf, sizeof(buf), "5h: %d%%", (int)p5h);
+        const char* pfx = hasClaude ? "" : "CX ";
+        float u5 = hasClaude ? p5h : cxP5h;
+        float u7 = hasClaude ? p7d : cxP7d;
+
+        if (u5 >= 0.0f) {
+            snprintf(buf, sizeof(buf), "%s5h: %d%%", pfx, (int)u5);
             lv_label_set_text(lblUsage5h, buf);
         } else {
-            lv_label_set_text(lblUsage5h, "5h: --");
+            snprintf(buf, sizeof(buf), "%s5h: --", pfx);
+            lv_label_set_text(lblUsage5h, buf);
         }
 
-        if (p7d >= 0.0f) {
-            snprintf(buf, sizeof(buf), "7d: %d%%", (int)p7d);
+        if (u7 >= 0.0f) {
+            snprintf(buf, sizeof(buf), "%s7d: %d%%", pfx, (int)u7);
             lv_label_set_text(lblUsage7d, buf);
         } else {
-            lv_label_set_text(lblUsage7d, "7d: --");
+            snprintf(buf, sizeof(buf), "%s7d: --", pfx);
+            lv_label_set_text(lblUsage7d, buf);
         }
     } else {
         lv_obj_add_flag(lblUsage5h, LV_OBJ_FLAG_HIDDEN);

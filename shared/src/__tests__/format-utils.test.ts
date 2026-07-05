@@ -1,5 +1,34 @@
 import { describe, it, expect } from 'vitest';
-import { adjustUsagePercent, formatResetTime, isCodexWindowStale } from '../format-utils.js';
+import { adjustUsagePercent, formatAntigravityPlanShort, formatResetTime, isCodexWindowStale } from '../format-utils.js';
+
+describe('formatAntigravityPlanShort', () => {
+  it('shortens "Google AI Pro" to "AGY Pro"', () => {
+    expect(formatAntigravityPlanShort('Google AI Pro')).toBe('AGY Pro');
+  });
+
+  it('shortens "Google AI Ultra" to "AGY Ultra"', () => {
+    expect(formatAntigravityPlanShort('Google AI Ultra')).toBe('AGY Ultra');
+  });
+
+  it('strips an "Antigravity " prefix', () => {
+    expect(formatAntigravityPlanShort('Antigravity Team')).toBe('AGY Team');
+  });
+
+  it('returns undefined for blank/absent input', () => {
+    expect(formatAntigravityPlanShort(undefined)).toBeUndefined();
+    expect(formatAntigravityPlanShort('')).toBeUndefined();
+    expect(formatAntigravityPlanShort('   ')).toBeUndefined();
+  });
+
+  it('is idempotent on already-shortened values', () => {
+    expect(formatAntigravityPlanShort('AGY Pro')).toBe('AGY Pro');
+    expect(formatAntigravityPlanShort('AGY')).toBe('AGY');
+  });
+
+  it('collapses a bare "Google AI" to "AGY"', () => {
+    expect(formatAntigravityPlanShort('Google AI')).toBe('AGY');
+  });
+});
 
 describe('adjustUsagePercent', () => {
   it('returns undefined when percent is null', () => {

@@ -121,6 +121,30 @@ export function isCodexWindowStale(resetsAt: string | undefined, graceMs = 5 * 6
   return Date.now() - t > graceMs;
 }
 
+/**
+ * Antigravity plan name → compact "AGY <tier>" chip.
+ *
+ *   "Google AI Pro"   → "AGY Pro"
+ *   "Google AI Ultra" → "AGY Ultra"
+ *   "" / undefined     → undefined  (nothing to show)
+ *
+ * The raw `availableCredits` count is deliberately never surfaced — it's backend
+ * metering with no glanceable meaning (see antigravity-local.ts). This is the
+ * canonical definition; the native mirrors (ESP32 `util/usage_format.h`
+ * `formatAgyPlan`, Android `EinkMonitorScreen.buildAntigravityLimitValue`) must
+ * match it. Idempotent: an already-"AGY …" string is returned unchanged.
+ */
+export function formatAntigravityPlanShort(planName?: string | null): string | undefined {
+  const raw = planName?.trim();
+  if (!raw) return undefined;
+  if (raw === 'AGY' || raw.startsWith('AGY ')) return raw;
+  let tier = raw;
+  if (/^Google AI\b/.test(tier)) tier = tier.slice('Google AI'.length);
+  else if (/^Antigravity\b/.test(tier)) tier = tier.slice('Antigravity'.length);
+  tier = tier.trim();
+  return tier ? `AGY ${tier}` : 'AGY';
+}
+
 /** Plain-text gauge bar: "████░░" (no ANSI colors) */
 export function gaugeBar(percent: number, width = 6): string {
   const clamped = Math.max(0, Math.min(100, percent));

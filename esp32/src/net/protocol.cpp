@@ -4,6 +4,7 @@
 #include "serial_client.h"
 #include "../state/agent_state.h"
 #include "../util/ota_capability.h"
+#include "../util/usage_format.h"
 #include "config.h"
 #include <ArduinoJson.h>
 #include <Arduino.h>
@@ -256,8 +257,11 @@ static void handleUsageUpdate(JsonObject& obj) {
             auto& slot = g_state.subscriptions[g_state.subscriptionCount];
             strncpy(slot.name, sub["name"] | "", sizeof(slot.name) - 1);
             slot.name[sizeof(slot.name) - 1] = '\0';
-            strncpy(slot.until, sub["until"] | "", sizeof(slot.until) - 1);
-            slot.until[sizeof(slot.until) - 1] = '\0';
+            // `until` arrives pre-formatted ("~7/12") over serial but as raw ISO
+            // over the WiFi WS path (the daemon broadcasts the unmodified event).
+            // Normalize both to the short "~M/D" form so the panels never render
+            // a bare ISO timestamp.
+            UsageFormat::formatShortExpiry(sub["until"] | "", slot.until, sizeof(slot.until));
             if (slot.name[0]) g_state.subscriptionCount++;
         }
     }

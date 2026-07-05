@@ -18,6 +18,7 @@
 #include "net/serial_client.h"
 #include "net/ws_client.h"
 #include "ui/terrarium/creature_glyphs_generated.h"
+#include "util/usage_format.h"
 
 namespace {
 
@@ -141,16 +142,21 @@ void snapshot(Snap& s) {
         char line[40];
         if (sub.until[0]) snprintf(line, sizeof(line), "%s %s", sub.name, sub.until);
         else { strncpy(line, sub.name, sizeof(line) - 1); line[sizeof(line) - 1] = '\0'; }
-        if (strncmp(sub.name, "Claude", 6) == 0) {
+        if (UsageFormat::isAntigravityPlanName(sub.name)) {
+            // The daemon stores the Antigravity subscription under its raw plan
+            // name ("Google AI Pro"), not a literal "Antigravity …" string —
+            // route it to the AGY chip and shorten to "AGY Pro (~M/D)".
+            char agy[24];
+            UsageFormat::formatAgyPlan(sub.name, agy, sizeof(agy));
+            if (sub.until[0]) snprintf(s.agPlan, sizeof(s.agPlan), "%s %s", agy, sub.until);
+            else { strncpy(s.agPlan, agy, sizeof(s.agPlan) - 1); s.agPlan[sizeof(s.agPlan) - 1] = '\0'; }
+        } else if (strncmp(sub.name, "Claude", 6) == 0) {
             // drop the redundant "Claude " prefix under the CLAUDE label
             const char* tail = line + 6; while (*tail == ' ') tail++;
             strncpy(s.claudePlan, tail, sizeof(s.claudePlan) - 1);
         } else if (strncmp(sub.name, "ChatGPT", 7) == 0 || strncmp(sub.name, "Codex", 5) == 0) {
             const char* tail = line + (sub.name[1] == 'h' ? 7 : 5); while (*tail == ' ') tail++;
             strncpy(s.codexPlan, tail, sizeof(s.codexPlan) - 1);
-        } else if (strncmp(sub.name, "Antigravity", 11) == 0) {
-            const char* tail = line + 11; while (*tail == ' ') tail++;
-            snprintf(s.agPlan, sizeof(s.agPlan), "AGY %s", tail);
         } else {
             strncpy(s.agPlan, line, sizeof(s.agPlan) - 1);
         }
@@ -158,7 +164,7 @@ void snapshot(Snap& s) {
     // Plan-name-only fallback when the daemon exposes antigravityStatus but
     // no subscriptions[] entry for it.
     if (!s.agPlan[0] && g_state.antigravityPlan[0]) {
-        snprintf(s.agPlan, sizeof(s.agPlan), "AGY %s", g_state.antigravityPlan);
+        UsageFormat::formatAgyPlan(g_state.antigravityPlan, s.agPlan, sizeof(s.agPlan));
     }
     // Latest MILESTONE timeline entry → ticker. Only task-level rows qualify
     // (chat_start/chat_end/task_start/task_end): per-tool rows from managed

@@ -3,6 +3,7 @@
 #include "../display.h"
 #include "../assets/logo.h"
 #include "../../state/agent_state.h"
+#include "../../util/usage_format.h"
 #include "config.h"
 #include "net/serial_client.h"
 #include "net/ws_client.h"
@@ -349,6 +350,7 @@ static lv_obj_t* panelRight = nullptr;
 static lv_obj_t* lblTankHeader = nullptr;
 
 // 5h gauge
+static lv_obj_t* gauge5hCol = nullptr;   // column wrapper — hidden when no Claude data
 static lv_obj_t* gauge5hBox = nullptr;
 static lv_obj_t* gauge5hFill = nullptr;
 static lv_obj_t* gauge5hPct = nullptr;
@@ -356,6 +358,7 @@ static lv_obj_t* gauge5hPeriod = nullptr;
 static lv_obj_t* gauge5hReset = nullptr;
 
 // 7d gauge
+static lv_obj_t* gauge7dCol = nullptr;
 static lv_obj_t* gauge7dBox = nullptr;
 static lv_obj_t* gauge7dFill = nullptr;
 static lv_obj_t* gauge7dPct = nullptr;
@@ -364,6 +367,15 @@ static lv_obj_t* gauge7dReset = nullptr;
 
 // Stale indicator
 static lv_obj_t* lblStale = nullptr;
+
+#if !defined(BOARD_IPS10)
+// TANK STATUS extras for the non-IPS10 LCD boards (ips35 / 86box / round).
+// IPS10 renders Codex + Antigravity in its D1 topbar instead. Both lines hide
+// when their data is absent, so a Claude-only setup — or the App Store Swift
+// daemon, which can't supply Codex/subscription data — looks identical to before.
+static lv_obj_t* lblCodexUsage = nullptr;  // "CX 5h 47% 7d 32%"
+static lv_obj_t* lblAux = nullptr;         // "AGY Pro ~7/12  GPT ~1/15"
+#endif
 
 static bool visible = true;
 static bool lastShowTankStatus = true;
@@ -412,8 +424,10 @@ static uint32_t agentDotColor(const char* agentType) {
 
 namespace HUD {
 
-// Helper: create a water-fill gauge column: [gauge box] + "1h 55m"
-static void createGauge(lv_obj_t* parent,
+// Helper: create a water-fill gauge column: [gauge box] + "1h 55m".
+// Returns the column wrapper so callers can hide the whole gauge as a unit
+// (e.g. hide the Claude pair when only Codex data is present).
+static lv_obj_t* createGauge(lv_obj_t* parent,
                         lv_obj_t*& box, lv_obj_t*& fill,
                         lv_obj_t*& pctLabel, lv_obj_t*& periodLabel,
                         lv_obj_t*& resetLabel, const char* period) {
@@ -472,6 +486,7 @@ static void createGauge(lv_obj_t* parent,
     lv_obj_set_style_text_font(resetLabel, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_opa(resetLabel, (lv_opa_t)178, 0);  // 70%
     lv_label_set_text(resetLabel, "");
+    return col;
 }
 
 #if defined(BOARD_IPS10)
@@ -1322,8 +1337,8 @@ void init(lv_obj_t* parent) {
     lv_obj_set_flex_flow(gaugeRow, LV_FLEX_FLOW_ROW);
 
     // Create two gauges side by side
-    createGauge(gaugeRow, gauge5hBox, gauge5hFill, gauge5hPct, gauge5hPeriod, gauge5hReset, "5h");
-    createGauge(gaugeRow, gauge7dBox, gauge7dFill, gauge7dPct, gauge7dPeriod, gauge7dReset, "7d");
+    gauge5hCol = createGauge(gaugeRow, gauge5hBox, gauge5hFill, gauge5hPct, gauge5hPeriod, gauge5hReset, "5h");
+    gauge7dCol = createGauge(gaugeRow, gauge7dBox, gauge7dFill, gauge7dPct, gauge7dPeriod, gauge7dReset, "7d");
 
     // Stale indicator (only shown when data is stale, hidden by default)
     lblStale = lv_label_create(panelRight);
@@ -1331,6 +1346,26 @@ void init(lv_obj_t* parent) {
     lv_obj_set_style_text_font(lblStale, &lv_font_montserrat_10, 0);
     lv_label_set_text(lblStale, "");
     lv_obj_add_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
+
+#if !defined(BOARD_IPS10)
+    // Codex usage line (below the Claude gauges) — Codex-blue, hidden until data.
+    // The "CX" prefix + brand blue make it unambiguous which provider the
+    // percentages belong to (the Claude water gauges carry no provider label).
+    lblCodexUsage = lv_label_create(panelRight);
+    lv_obj_set_style_text_color(lblCodexUsage, lv_color_hex(Theme::CloudBodyLight), 0);
+    lv_obj_set_style_text_font(lblCodexUsage, &lv_font_montserrat_10, 0);
+    lv_label_set_text(lblCodexUsage, "");
+    lv_obj_add_flag(lblCodexUsage, LV_OBJ_FLAG_HIDDEN);
+
+    // Account line: shortened Antigravity plan ("AGY Pro") + any subscription
+    // expiries. Dim, hidden until data. The raw Antigravity credit count is never
+    // shown here (it's meaningless at a glance).
+    lblAux = lv_label_create(panelRight);
+    lv_obj_set_style_text_color(lblAux, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_text_font(lblAux, &lv_font_montserrat_10, 0);
+    lv_label_set_text(lblAux, "");
+    lv_obj_add_flag(lblAux, LV_OBJ_FLAG_HIDDEN);
+#endif
 }
 
 // Helper: status color for AgentState
@@ -1448,6 +1483,41 @@ void update() {
 #endif
 
 #if !defined(BOARD_IPS10)
+    // Codex windows + account/subscription line for the TANK STATUS panel. Read
+    // straight from g_state (all fields exist on every board). Built here under
+    // the lock; rendered after unlockState() below.
+    float cxP5h = g_state.codexPrimaryPercent;
+    float cxP7d = g_state.codexSecondaryPercent;
+    char auxBuf[96]; auxBuf[0] = '\0'; size_t auxPos = 0;
+    char agyBuf[28]; agyBuf[0] = '\0';
+    for (uint8_t i = 0; i < g_state.subscriptionCount; i++) {
+        const auto& sub = g_state.subscriptions[i];
+        if (UsageFormat::isAntigravityPlanName(sub.name)) {
+            UsageFormat::formatAgyPlan(sub.name, agyBuf, sizeof(agyBuf));
+            if (sub.until[0]) {
+                size_t l = strlen(agyBuf);
+                snprintf(agyBuf + l, sizeof(agyBuf) - l, " %s", sub.until);
+            }
+        } else if (sub.until[0]) {
+            // Non-Antigravity plan with an expiry → "<provider> ~M/D" (provider =
+            // the first word of the plan name, e.g. "ChatGPT Plus" → "ChatGPT").
+            char nm[16]; size_t k = 0;
+            for (; sub.name[k] && sub.name[k] != ' ' && k < sizeof(nm) - 1; k++) nm[k] = sub.name[k];
+            nm[k] = '\0';
+            int w = snprintf(auxBuf + auxPos, sizeof(auxBuf) - auxPos, "%s%s %s",
+                             auxPos ? "  " : "", nm, sub.until);
+            if (w > 0) auxPos += (size_t)w;
+        }
+    }
+    if (!agyBuf[0] && g_state.antigravityPlan[0]) {
+        UsageFormat::formatAgyPlan(g_state.antigravityPlan, agyBuf, sizeof(agyBuf));
+    }
+    if (agyBuf[0]) {
+        snprintf(auxBuf + auxPos, sizeof(auxBuf) - auxPos, "%s%s", auxPos ? "  " : "", agyBuf);
+    }
+#endif
+
+#if !defined(BOARD_IPS10)
     // Copy session list for the compact legacy HUD. IPS10 renders the D1 mosaic
     // below, so avoid building the legacy text buffer on its UI stack.
     uint8_t sessionCount = hasData ? g_state.sessionCount : (uint8_t)0;
@@ -1536,6 +1606,18 @@ void update() {
     updateGauge(gauge5hFill, gauge5hPct, gauge5hReset, p5h, reset5h, usageStale);
     updateGauge(gauge7dFill, gauge7dPct, gauge7dReset, p7d, reset7d, usageStale);
 
+#if !defined(BOARD_IPS10)
+    // Hide the Claude gauge pair entirely when there's no Claude quota data
+    // (a Codex-only user, or the App Store Swift daemon which can't read Claude
+    // OAuth usage) — showing two empty "--" gauges would read as broken. When
+    // Claude data returns the pair reappears. The Codex line below still renders.
+    {
+        bool showClaude = (p5h >= 0.0f || p7d >= 0.0f);
+        if (gauge5hCol) { showClaude ? lv_obj_clear_flag(gauge5hCol, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(gauge5hCol, LV_OBJ_FLAG_HIDDEN); }
+        if (gauge7dCol) { showClaude ? lv_obj_clear_flag(gauge7dCol, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(gauge7dCol, LV_OBJ_FLAG_HIDDEN); }
+    }
+#endif
+
     // Stale indicator (shown only when we have data but it's stale)
     bool showStale = usageStale && (p5h >= 0.0f || p7d >= 0.0f);
     if (showStale) {
@@ -1545,6 +1627,34 @@ void update() {
         lv_label_set_text(lblStale, "");
         lv_obj_add_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
     }
+
+#if !defined(BOARD_IPS10)
+    // Codex usage line — shown whenever a Codex window is present, independent of
+    // Claude data (a Codex-only user has no Claude 5h/7d). Hidden when absent so
+    // the panel is unchanged for Claude-only setups.
+    if (lblCodexUsage) {
+        if (cxP5h >= 0.0f || cxP7d >= 0.0f) {
+            char cb[40]; size_t p = 0;
+            p += (size_t)snprintf(cb + p, sizeof(cb) - p, "CX");
+            if (cxP5h >= 0.0f) p += (size_t)snprintf(cb + p, sizeof(cb) - p, " 5h %d%%", (int)(cxP5h + 0.5f));
+            if (cxP7d >= 0.0f) p += (size_t)snprintf(cb + p, sizeof(cb) - p, " 7d %d%%", (int)(cxP7d + 0.5f));
+            lv_label_set_text(lblCodexUsage, cb);
+            lv_obj_clear_flag(lblCodexUsage, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(lblCodexUsage, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    // Account / subscription line (AGY plan + expiries). Hidden when the daemon
+    // supplies none (e.g. the App Store Swift daemon with no subscription data).
+    if (lblAux) {
+        if (auxBuf[0]) {
+            lv_label_set_text(lblAux, auxBuf);
+            lv_obj_clear_flag(lblAux, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(lblAux, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#endif
 
 #if defined(BOARD_IPS10)
     // === Living agent mosaic — one cell per agent, height fluidly tracks activity,
@@ -1919,7 +2029,13 @@ void update() {
 #endif
 
     bool connected = hasData && (g_state.wsConnected || Net::serialConnected());
-    bool showTankStatus = connected && (p5h >= 0.0f || p7d >= 0.0f);
+    bool showTankStatus = connected && (p5h >= 0.0f || p7d >= 0.0f
+#if !defined(BOARD_IPS10)
+        // A Codex-only user (or the Swift daemon, which has no Claude quota) still
+        // gets the panel so its Codex/account lines are visible.
+        || cxP5h >= 0.0f || cxP7d >= 0.0f || auxBuf[0]
+#endif
+    );
     if (firstUpdate || showTankStatus != lastShowTankStatus) {
         firstUpdate = false;
         lastShowTankStatus = showTankStatus;
