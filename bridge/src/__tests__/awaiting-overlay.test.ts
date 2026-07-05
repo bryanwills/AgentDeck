@@ -33,10 +33,14 @@ describe('awaiting-overlay', () => {
     expect(getAwaitingOverlay('nope')).toBeUndefined();
   });
 
-  it('expires after the TTL (5 min)', () => {
+  it('survives a long away-wait, then expires past the generous backstop', () => {
     setAwaitingOverlay('sid-2', 'wants to run a command');
     expect(getAwaitingOverlay('sid-2')).toBeDefined();
-    vi.advanceTimersByTime(5 * 60_000 + 1);
+    // A genuine prompt the user hasn't answered in half an hour is still shown.
+    vi.advanceTimersByTime(30 * 60_000);
+    expect(getAwaitingOverlay('sid-2')).toBeDefined();
+    // Only a truly orphaned entry clears, well past any realistic wait.
+    vi.advanceTimersByTime(6 * 60 * 60_000 + 1);
     expect(getAwaitingOverlay('sid-2')).toBeUndefined();
   });
 
@@ -44,7 +48,7 @@ describe('awaiting-overlay', () => {
     setAwaitingOverlay('sid-2b', 'first prompt');
     vi.advanceTimersByTime(4 * 60_000);
     setAwaitingOverlay('sid-2b', 'second prompt');
-    // 4 min + 4 min exceeds the original entry's TTL, but the re-set entry is fresh.
+    // A fresh re-set keeps the entry alive; the question updates to the latest.
     vi.advanceTimersByTime(4 * 60_000);
     expect(getAwaitingOverlay('sid-2b')).toEqual({ question: 'second prompt', requestId: undefined });
   });

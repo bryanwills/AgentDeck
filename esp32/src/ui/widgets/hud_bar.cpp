@@ -567,9 +567,9 @@ static void detailBtnACb(lv_event_t* e) {
     (void)e;
     if (detailCellIdx < 0) return;
     CellMeta& m = cellMetaData[detailCellIdx];
-    if (strstr(m.state, "awaiting") != nullptr) {
-        hudSendApprove(m.requestId, m.sid, true);
-    } else if (strcmp(m.state, "processing") == 0 && m.sid[0]) {
+    // Awaiting is display-only: btnA is a plain "Close", so it just dismisses.
+    // Only processing keeps an actionable Interrupt.
+    if (strcmp(m.state, "processing") == 0 && m.sid[0]) {
         char buf[160];
         snprintf(buf, sizeof(buf),
                  "{\"type\":\"session_command\",\"sessionId\":\"%s\",\"command\":{\"type\":\"interrupt\"}}", m.sid);
@@ -579,10 +579,8 @@ static void detailBtnACb(lv_event_t* e) {
 }
 static void detailBtnBCb(lv_event_t* e) {
     (void)e;
-    if (detailCellIdx >= 0) {
-        CellMeta& m = cellMetaData[detailCellIdx];
-        if (strstr(m.state, "awaiting") != nullptr) hudSendApprove(m.requestId, m.sid, false);
-    }
+    // btnB is only shown for processing ("Close"); awaiting no longer exposes a
+    // Deny. Always just dismiss.
     detailClose();
 }
 static void detailEnsure() {
@@ -743,13 +741,13 @@ static void detailRefresh() {
 
     // Footer buttons by state.
     if (awaiting) {
+        // Attention-only: the modal SHOWS the pending prompt (detailAction above)
+        // but offers no on-device Approve/Deny — the user answers in the terminal.
+        // A single amber "Close" mirrors the idle branch; detailBtnB is hidden.
         lv_obj_set_style_bg_color(detailBtnA, lv_color_hex(Theme::StatusAmber), 0);
-        lv_label_set_text(detailBtnALabel, "Approve");
+        lv_label_set_text(detailBtnALabel, "Close");
         lv_obj_set_style_text_color(detailBtnALabel, lv_color_hex(0x1A1205), 0);
-        lv_obj_clear_flag(detailBtnB, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_bg_color(detailBtnB, lv_color_hex(Theme::StatusRed), 0);
-        lv_label_set_text(detailBtnBLabel, "Deny");
-        lv_obj_set_style_text_color(detailBtnBLabel, lv_color_hex(0x2A0C0C), 0);
+        lv_obj_add_flag(detailBtnB, LV_OBJ_FLAG_HIDDEN);
     } else if (strcmp(m.state, "processing") == 0) {
         lv_obj_set_style_bg_color(detailBtnA, lv_color_hex(Theme::HUDDim), 0);
         lv_label_set_text(detailBtnALabel, "Interrupt");
@@ -2075,15 +2073,15 @@ void update() {
                 lv_obj_add_flag(cellBody[i], LV_OBJ_FLAG_HIDDEN);
             }
 
-            // inline Approve/Deny (awaiting permission/diff with room)
-            bool showButtons = awaiting && strcmp(mc[i].state, "awaiting_option") != 0 && ph >= 132 && pw >= 130;
-            if (showButtons) {
-                lv_obj_clear_flag(cellYes[i], LV_OBJ_FLAG_HIDDEN);
-                lv_obj_clear_flag(cellNo[i], LV_OBJ_FLAG_HIDDEN);
-            } else {
-                lv_obj_add_flag(cellYes[i], LV_OBJ_FLAG_HIDDEN);
-                lv_obj_add_flag(cellNo[i], LV_OBJ_FLAG_HIDDEN);
-            }
+            // Attention-only: awaiting is a DISPLAY state now (parity with every
+            // other board). The awaiting cell still swells + turns amber + shows
+            // the prompt text as its own attention, but there are no on-device
+            // Approve/Deny buttons — the user answers in the terminal/host. The
+            // cellYes/cellNo objects stay created (layout invariants) but never
+            // show. `showButtons` is kept so the footer keeps its space.
+            const bool showButtons = false;
+            lv_obj_add_flag(cellYes[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(cellNo[i], LV_OBJ_FLAG_HIDDEN);
 
             // footer: model · elapsed (idle cards show just header + this). Hidden when
             // the inline buttons own the space.

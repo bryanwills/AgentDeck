@@ -48,13 +48,13 @@ export const transitions: StateTransition[] = [
   { from: State.AWAITING_PERMISSION, to: State.PROCESSING, trigger: 'spinner_start', source: 'pty' },
   { from: State.AWAITING_OPTION, to: State.PROCESSING, trigger: 'spinner_start', source: 'pty' },
   { from: State.AWAITING_DIFF, to: State.PROCESSING, trigger: 'spinner_start', source: 'pty' },
-  // stuck_timeout: PROCESSING recovers after STUCK_TIMEOUT_MS; AWAITING_* have a
-  // much longer backstop (AWAITING_STUCK_TIMEOUT_MS) for the rare case where the
-  // PTY parser misses the recovery spinner/idle and no follow-up hook arrives.
+  // stuck_timeout: only PROCESSING recovers after STUCK_TIMEOUT_MS (Claude hung).
+  // AWAITING_* intentionally have NO wall-clock backstop — an unanswered prompt
+  // is a genuine, indefinitely-valid wait (the user may be away); it only leaves
+  // via a real signal (spinner_start / idle_detected / user response / stop), and
+  // a truly-dead session is reaped by liveness, not a timer. A blind awaiting
+  // timer wrongly forced real prompts to IDLE and vanished them from dashboards.
   { from: State.PROCESSING, to: State.IDLE, trigger: 'stuck_timeout', source: 'internal' },
-  { from: State.AWAITING_PERMISSION, to: State.IDLE, trigger: 'stuck_timeout', source: 'internal' },
-  { from: State.AWAITING_OPTION, to: State.IDLE, trigger: 'stuck_timeout', source: 'internal' },
-  { from: State.AWAITING_DIFF, to: State.IDLE, trigger: 'stuck_timeout', source: 'internal' },
   { from: '*', to: State.DISCONNECTED, trigger: 'session_end', source: 'hook' },
   { from: '*', to: State.IDLE, trigger: 'interrupt', source: 'user' },
 ];

@@ -3,7 +3,6 @@ import {
   State,
   PermissionMode,
   STUCK_TIMEOUT_MS,
-  AWAITING_STUCK_TIMEOUT_MS,
   type StateSnapshot,
   type PromptOption,
   type StateTransition,
@@ -486,18 +485,17 @@ export class StateMachine extends EventEmitter {
     }
 
     // Manage stuck-state timer. PROCESSING recovers after STUCK_TIMEOUT_MS
-    // (Claude seems hung). AWAITING_* get a much longer backstop so a
-    // legitimately-long user pause isn't reset, but a parser-missed recovery
-    // still can't strand the session in awaiting forever.
+    // (Claude seems hung). AWAITING_* get NO wall-clock backstop: an unanswered
+    // permission/option/diff prompt is a genuine, indefinitely-valid wait — the
+    // user may be away for hours. A blind timer can't tell "away" from "parser
+    // missed the recovery", so it wrongly forced a real prompt to IDLE and made
+    // the session's creature vanish from the dashboard. Awaiting only leaves via
+    // a real signal (spinner_start / idle_detected / user response / stop), and
+    // a truly-dead session is reaped by liveness (PID death / /health grace),
+    // not by this timer.
     this.resetStuckTimer();
     if (to === State.PROCESSING) {
       this.armStuckTimer(STUCK_TIMEOUT_MS);
-    } else if (
-      to === State.AWAITING_PERMISSION ||
-      to === State.AWAITING_OPTION ||
-      to === State.AWAITING_DIFF
-    ) {
-      this.armStuckTimer(AWAITING_STUCK_TIMEOUT_MS);
     }
 
     if (prev !== to) {
@@ -506,22 +504,14 @@ export class StateMachine extends EventEmitter {
     }
   }
 
-  /** Reset the stuck timer on PTY activity. PROCESSING uses the short hang
-   *  timeout; AWAITING_* use the long backstop. Re-arming on activity makes the
-   *  backstop "N minutes of genuine silence" rather than a hard cap from entry,
-   *  so a still-rendering prompt the user is actively reading isn't reset. */
+  /** Reset the stuck timer on PTY activity. Only PROCESSING carries a hang
+   *  timeout; AWAITING_* has no wall-clock backstop (see transition()), so there
+   *  is nothing to re-arm for those states. */
   onPtyActivity(): void {
     if (!this.stuckTimer) return;
     if (this.state === State.PROCESSING) {
       debug('SM', 'PTY activity — resetting PROCESSING stuck timer');
       this.armStuckTimer(STUCK_TIMEOUT_MS);
-    } else if (
-      this.state === State.AWAITING_PERMISSION ||
-      this.state === State.AWAITING_OPTION ||
-      this.state === State.AWAITING_DIFF
-    ) {
-      debug('SM', 'PTY activity — resetting AWAITING stuck timer');
-      this.armStuckTimer(AWAITING_STUCK_TIMEOUT_MS);
     }
   }
 

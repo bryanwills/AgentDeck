@@ -369,6 +369,18 @@ final class DaemonServer {
     /// `session_start` synthesis path will recreate the entry.
     private static let pushedSessionStaleTTL: TimeInterval = 180
 
+    /// TTL for a pushed session that is currently `awaiting_permission`. A real
+    /// permission prompt fires exactly ONE Notification hook and then goes
+    /// silent while the user decides — which can legitimately take hours if they
+    /// stepped away. Under the ordinary 180 s `pushedSessionStaleTTL` such a
+    /// session was evicted mid-wait and its creature vanished from every surface
+    /// even though it was still genuinely pending (reported bug). Answering fires
+    /// a follow-up hook (PreToolUse/Stop) that clears awaiting instantly, so this
+    /// long window only ever covers a true away-wait (kept) or a rare
+    /// crash-at-prompt ghost (eventually reaped). Mirrors the Node
+    /// `awaiting-overlay` TTL.
+    private static let awaitingHookStaleTTL: TimeInterval = 6 * 60 * 60  // 6 hours
+
     /// A Codex session that is still marked processing but has no active tool
     /// after this window is probably missing its Stop/turnEnd signal. Keep this
     /// short so menubar/D200H status does not show stale WORKING rows.
@@ -2855,6 +2867,12 @@ final class DaemonServer {
                 ttl = (entry.currentTool?.isEmpty == false)
                     ? Self.codexToolObservationStaleTTL
                     : Self.codexIdleObservationStaleTTL
+            } else if (entry.state ?? "").hasPrefix("awaiting") {
+                // A genuinely-awaiting session is quiet by nature (one Notification
+                // then it waits on the user) — don't reap it in the 180 s ghost
+                // window or its creature vanishes mid-decision. Answering fires a
+                // hook that clears awaiting well before this long backstop.
+                ttl = Self.awaitingHookStaleTTL
             } else {
                 ttl = Self.pushedSessionStaleTTL
             }

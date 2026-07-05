@@ -271,10 +271,14 @@ export function renderSessionSlot(
   const modelText = formatModelEffort(session.modelName, session.effortLevel, 15);
   const p1 = agent === 'claude-code' ? '#D97757' : (agent === 'codex-cli' || agent === 'codex-app') ? '#8BA4FF' : agent === 'openclaw' ? '#FF6B6B' : '#F1ECEC';
   const sColor = stateColor(session.state);
-  const signalColor = isWorking ? '#F5B942' : sColor;
+  // RUNNING reads as a COOL teal (calm "in progress"); PERM keeps the semantic
+  // amber (stateColor → #f59e0b). Previously RUNNING used a gold #F5B942 that
+  // collided with awaiting's amber, so the two states looked near-identical.
+  const WORKING_COLOR = '#2DD4BF';   // teal — cool, clearly not amber
+  const signalColor = isWorking ? WORKING_COLOR : sColor;
   const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
   const stateLbl = isWorking ? 'RUNNING' : isAsking ? 'PERMIT?' : 'IDLE';
-  const colorText = isWorking ? '#FDE68A' : isAsking ? '#FECACA' : p1;
+  const colorText = isWorking ? '#CCFBF1' : isAsking ? '#FCD34D' : p1;
   const gradId = `sd-bg-${agent}-${session.state || 'idle'}`;
   const filterId = `pg-${animFrame}`;
   let defs = `<linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#1C1C1E"/><stop offset="100%" stop-color="#0C0C0E"/></linearGradient>`;
@@ -284,13 +288,13 @@ export function renderSessionSlot(
   let askDot = '';
   let runBadge = '';
 
-  if (isAsking || isWorking) {
+  if (isWorking) {
+    // RUNNING: a teal border of marching dashes ORBITING the key — motion that
+    // reads as "work travelling around", distinct from PERM's steady breath.
     defs += blurDef;
-    const pulseOpacity = isAsking
-      ? (animated ? 0.55 + 0.45 * Math.abs(Math.sin(animFrame * 0.15)) : 0.95)
-      : (animated ? 0.72 + 0.20 * Math.abs(Math.sin(animFrame * 0.12)) : 0.9);
-    const borderColor = isWorking ? signalColor : sColor;
-    const orbitSpeedPx = isWorking ? 22 : 20;
+    const pulseOpacity = animated ? 0.72 + 0.20 * Math.abs(Math.sin(animFrame * 0.12)) : 0.9;
+    const borderColor = signalColor;
+    const orbitSpeedPx = 22;
     // Anchor the rotation to when this session entered the animated state so
     // sibling buttons that started later orbit out of phase, not in lockstep.
     const startFrame = options?.processingStartFrame ?? animFrame;
@@ -298,16 +302,25 @@ export function renderSessionSlot(
     stateBorder = animated
       ? renderOrbitingRect({
           x: 8, y: 8, width: 128, height: 128, rx: 12, color: borderColor, animFrame,
-          speedPx: orbitSpeedPx, dashPx: isWorking ? 92 : 86,
+          speedPx: orbitSpeedPx, dashPx: 92,
           phasePx: processingPhasePx,
           glowOpacity: pulseOpacity * 0.72, coreOpacity: Math.min(1, pulseOpacity + 0.06), filterId,
         })
       : `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${borderColor}" stroke-width="4.5" opacity="${pulseOpacity.toFixed(2)}" filter="url(#${filterId})"/><rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${borderColor}" stroke-width="1.5" opacity="${(pulseOpacity * 0.9).toFixed(2)}"/>`;
-    if (isAsking) {
-      askDot = `<circle cx="114" cy="24" r="5" fill="#F5B942" filter="url(#${filterId})"/><circle cx="114" cy="24" r="3" fill="#ffffff" />`;
-    } else {
-      runBadge = `<rect x="99" y="14" width="30" height="16" rx="8" fill="${signalColor}" opacity="0.9" /><text x="114" y="25" font-size="9" font-weight="800" text-anchor="middle" fill="#0C0C0E" font-family="${fontFam}">RUN</text>`;
-    }
+    runBadge = `<rect x="99" y="14" width="30" height="16" rx="8" fill="${signalColor}" opacity="0.9" /><text x="114" y="25" font-size="9" font-weight="800" text-anchor="middle" fill="#0C0C0E" font-family="${fontFam}">RUN</text>`;
+  } else if (isAsking) {
+    // PERM / AWAITING: a SOLID amber border that BREATHES (full perimeter, no
+    // marching dashes) — a deliberately different motion + hue from RUNNING so
+    // "needs you" is unmistakable at a glance. Plus a bold amber PERM badge.
+    defs += blurDef;
+    const amber = sColor; // #f59e0b
+    const breathe = animated ? 0.45 + 0.55 * Math.abs(Math.sin(animFrame * 0.14)) : 1;
+    stateBorder = [
+      `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${amber}" stroke-width="7" opacity="${(breathe * 0.6).toFixed(2)}" filter="url(#${filterId})"/>`,
+      `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="${amber}" stroke-width="3" opacity="0.97"/>`,
+    ].join('');
+    // Bold filled amber pill — far more legible than the old 5px dot.
+    askDot = `<rect x="90" y="12" width="42" height="19" rx="9.5" fill="${amber}"/><text x="111" y="26" font-size="11" font-weight="800" text-anchor="middle" fill="#221500" font-family="${fontFam}">PERM</text>`;
   }
 
   if (isActive) {

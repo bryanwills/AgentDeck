@@ -26,11 +26,14 @@ interface AwaitingEntry {
   updatedAt: number;
 }
 
-/** Permission prompts can sit unanswered for a long time, but a stale overlay
- *  must self-clear so a session never gets stuck showing PERMIT forever (e.g.
- *  the user answered in the terminal and no follow-up hook fired, or claude
- *  crashed). Clear-on-next-hook is the primary signal; this TTL is the backstop. */
-const OVERLAY_TTL_MS = 5 * 60_000;
+/** A permission prompt is a genuine wait that can sit unanswered for hours (the
+ *  user stepped away) — so the overlay must NOT self-clear on a short clock, or
+ *  the observed session's PERMIT state vanishes from the dashboard while it is
+ *  still legitimately pending. Clear-on-next-hook is the primary signal (fires
+ *  the instant the user answers), and a dead `claude` process is reaped by the
+ *  passive observer / liveness — so this TTL is only a last-resort backstop for
+ *  a truly orphaned entry and is deliberately generous. */
+const OVERLAY_TTL_MS = 6 * 60 * 60_000; // 6 hours
 
 /** Cap question length at the source so every sessions_list broadcast stays small. */
 const MAX_QUESTION_LEN = 120;

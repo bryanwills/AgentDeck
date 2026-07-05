@@ -754,10 +754,10 @@ function buildDetail(
       // Awaiting but no real options to render — only PTY-managed sessions expose
       // Claude's actual choices. Don't fabricate Allow/Deny that may not match the
       // real prompt; guide the user to the terminal instead.
-      cells.push({ svg: renderInfoSlot('AWAITING', 'answer in terminal', 'activity', 'action'), action: null });
+      cells.push({ svg: renderInfoSlot('PERMIT?', 'answer in terminal', 'status', 'warning'), action: null });
     }
   } else if (processingState(sState)) {
-    cells.push({ svg: renderInfoSlot('RUNNING', tool || 'working', 'activity', 'action'), action: null });
+    cells.push({ svg: renderInfoSlot('RUNNING', tool || 'working', 'activity', 'info'), action: null });
   } else {
     // idle quick-actions
     const presets: Array<[string, string]> = [['GO ON', 'continue'], ['REVIEW', 'review the changes'], ['COMMIT', 'commit the changes'], ['CLEAR', '/clear']];
