@@ -374,6 +374,10 @@ extension SerialPortInfo {
         case "round_amoled":   return "ESP32 · Round AMOLED 1.8\""
         case "86box":          return "ESP32 · 86 Box 4\""
         case "ttgo_t_display": return "ESP32 · TTGO T-Display 1.14\""
+        // XTeink X3/X4 are ESP32-C3 e-ink readers running the external
+        // CrossPoint fork; surface the product name, not the raw board string.
+        case "xteink_x3":      return "XTeink X3"
+        case "xteink_x4":      return "XTeink X4"
         // Ulanzi TC001 is an ESP32 under the hood but sold as a finished
         // product, so surface the brand instead of the raw board name.
         case "ulanzi_tc001":   return "Ulanzi TC001"

@@ -13,6 +13,7 @@
 | **Pixoo64** | HTTP REST (Divoom) | LAN:80 | None | Cloud API / manual | Push only | 4 |
 | **Timebox Mini** | BLE GATT (ISSC transparent-UART) | `49535343-…` | Bluetooth pairing | `TimeBox-mini-light` BLE scan | Push only | 4 |
 | **InkDeck e-ink** | WebSocket JSON (WiFi) | Daemon (9120) | None | mDNS / port scan | Push + OTA control | dashboard frame + OTA ack/error |
+| **XTeink X3 / X4** (experimental) | WiFi WebSocket (+ UDP 9121 fallback) | Daemon (9120) | None | mDNS / UDP broadcast | Push + steering (M2) | state/sessions/usage subset; registers via `client_register`(eink-device, macOS) + `device_info`(esp32-wifi, Node) |
 | **SSE** | HTTP SSE | Daemon (9120) | Token | Manual URL | Push only | All 13 |
 | **Gateway** | WebSocket Custom | 18789 | Ed25519 | Hardcoded | Bidirectional | N/A (adapter) |
 
@@ -25,6 +26,18 @@
 **Status: firmware in development.** InkDeck is driven by new custom AgentDeck ESP32 firmware under `esp32/` (PlatformIO env `inkdeck`). Like the other ESP32 boards, it connects to the daemon over **WiFi WebSocket** and the daemon **pushes** 1-bit dashboard frames; the panel renders with fast partial refreshes (~0.3s) plus a periodic full refresh to clear ghosting. Rendering/refresh behavior is still being built — this section documents the intended surface, not a shipping feature.
 
 **Formerly "TRMNL" (BYOS pull) — removed.** AgentDeck previously drove this same physical panel through TRMNL's commercial **BYOS** (Bring Your Own Server) pull contract, where the panel polled `/api/setup` + `/api/display` and downloaded a server-rendered PNG. That integration was **removed** (Node commit `c71044bd`; the App Store Swift `Trmnl*` modules removed alongside). Stock / commercial TRMNL panels running the upstream `usetrmnl/firmware` are **no longer supported** — InkDeck reflashes the same hardware with AgentDeck firmware and treats it as a first-class ESP32 board.
+
+## XTeink X3 / X4 (external-fork client, experimental)
+
+**XTeink X3 and X4** are ESP32-C3 e-ink readers driven **not** by AgentDeck's own `esp32/` firmware but by an external **CrossPoint Reader fork** (`crosspoint-agentdeck`, AgentDeck stack on default branch `master`). Its `src/agentdeck/` module is a hand-port of AgentDeck's wire client that renders a "Decision Card" — live agent state + usage, with button-based approve/deny — over the same **WiFi WebSocket** LAN path as other ESP32 boards (plus a UDP-broadcast discovery fallback on 9121). **One firmware** auto-detects the model at runtime (`gpio.deviceIsX3()`, via an I2C IMU fingerprint) and reports the board string `xteink_x3` or `xteink_x4`. No subprocess, so it is not a sandbox-gated surface.
+
+**Dual registration — the two daemons register it differently:**
+- **macOS Swift daemon** (the macOS Dashboard) registers WiFi panels via `client_register {clientType:"eink-device", devices:[…]}` → the **E-ink rail** (`handleClientRegister` → `cachedEinkDevices` → `einkSection`). The fork already sends this, labelled "XTeink X3/X4".
+- **Node daemon** (TUI / Android) registers WiFi boards via `device_info {board}` → the `esp32-wifi` bucket (`registerWifiEsp32`). The fork now emits this too (`sendDeviceInfo()` alongside `sendClientRegister()`), so it becomes a first-class ESP32 device there as well.
+
+So once the updated fork firmware is SD-flashed, X3/X4 appear on both dashboards. They flash via SD `update.bin` only (pogo USB-data dead) → `otaSupported:false`, and have no `esp32/` pio env, so they are **not WiFi-OTA targets** (no `ESP32_OTA_BOARDS` entry). Registration is board-agnostic and needs no such entry.
+
+The contract the fork ports from is [esp32-client-contract.md](esp32-client-contract.md); the port-sync discipline that keeps it from drifting is in [esp32.md § Downstream client port sync](esp32.md#downstream-client-port-sync). Spec/experimental-status detail: [hardware-compatibility.md](hardware-compatibility.md) footnote ⁷.
 
 ## Broadcast Architecture
 

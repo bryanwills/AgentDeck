@@ -75,6 +75,22 @@ OTA 대상 SSOT. **`agentdeck esp32-ota <target>`의 `<target>`은 로컬 Platfo
 
 **TC001 matrix disconnect UI**: stale 스프라이트 대신 상태 메시지 (`CONNECT WIFI` / `FINDING BRIDGE` / `DAEMON DOWN Xm` / `NO WIFI Xm`) + 우상단 깜빡이는 빨간 점.
 
+## Downstream client port sync
+
+`esp32/src/net/protocol.cpp` 는 first-party 보드의 **AgentDeck 와이어 계약** 참조 구현이다.
+이 계약의 인간용 subset 은 [esp32-client-contract.md](esp32-client-contract.md) 에 문서화되어 있다.
+
+외부 포크가 이 계약을 **손으로 포팅**해서 쓰는 경우가 있다 — 현재는 **XTeink X3**
+(CrossPoint Reader 포크 `crosspoint-agentdeck` 의 `src/agentdeck/*`, *"TRIMMED port of
+AgentDeck esp32/src/net/protocol"*). C3(no-PSRAM/ArduinoJson)에는 C++ 코드젠을 쓸 수 없어
+포크는 이 파서를 손으로 따라간다. 따라서 **드리프트는 규율로 막는다**:
+
+- `shared/src/protocol.ts` 의 `DISPLAY_FORWARDED_EVENTS`/`SERIAL_FORWARDED_EVENTS` 를 바꾸거나
+  `sendDeviceInfo` 의 `device_info` 필드 목록을 바꾸면, first-party 파서와 **X3 포크의
+  `src/agentdeck/protocol.*` 를 함께 재포팅**해야 한다.
+- 포크 쪽 절차는 `crosspoint-agentdeck` 의 `.skills/SKILL.md`(upstream-sync 섹션의
+  downstream 짝) 에 있다. AgentDeck 쪽은 이 노트가 그 절반이다.
+
 ## 기기별 펌웨어 사양 및 포트 매핑 정보 (2026-06-10 기준)
 
 현재 연결된 디스플레이 기기의 **포트 매핑 스냅샷**(디버깅용)입니다. 포트는 USB 허브 위치/재연결에 따라 변경될 수 있으며 `device_info_request`로 실시간 확인 필요. **SoC·디스플레이 IC·터치 IC·Flash/PSRAM 등 전체 칩 사양은 [hardware-compatibility.md § A](hardware-compatibility.md#a-esp32-펌웨어-디스플레이-보드) 가 SSOT** 다.
