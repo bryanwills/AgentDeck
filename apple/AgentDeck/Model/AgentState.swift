@@ -374,7 +374,6 @@ extension SerialPortInfo {
         case "round_amoled":   return "ESP32 · Round AMOLED 1.8\""
         case "86box":          return "ESP32 · 86 Box 4\""
         case "ttgo_t_display": return "ESP32 · TTGO T-Display 1.14\""
-        case "esp32_c6_147":   return "ESP32 · C6 1.47\""
         // Ulanzi TC001 is an ESP32 under the hood but sold as a finished
         // product, so surface the brand instead of the raw board name.
         case "ulanzi_tc001":   return "Ulanzi TC001"

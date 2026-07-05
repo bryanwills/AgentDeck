@@ -32,7 +32,6 @@ AgentDeck 에서 "Dashboard" 란 **daemon hub (port 9120) 에 붙어 에이전�
 | **Round AMOLED 1.8"** | HW (ESP32 펌웨어) | ESP32-S3 | ST77916 round AMOLED · 360×360 | USB Serial / WiFi WS | USB-Serial + WiFi | ✅ |
 | **86 Box 4"** | HW (ESP32 펌웨어) | ESP32-S3 | ST7701 IPS · 480×480 | USB Serial / WiFi WS | USB-Serial + WiFi | ✅ |
 | **TTGO T-Display 1.14"** | HW (ESP32 펌웨어) | ESP32 (classic) | ST7789 TFT · 135×240 | USB Serial / WiFi WS | USB-Serial + WiFi | ✅ |
-| **ESP32-C6 1.47"** | HW (ESP32 펌웨어) | ESP32-C6 (RISC-V) | ST7789 TFT · 172×320 | USB Serial / WiFi WS | USB-CDC + WiFi | ✅ |
 | **IPS 10.1"** | HW (ESP32 펌웨어) | ESP32-P4 + C6 | JD9365 IPS MIPI-DSI · 800×1280 | USB Serial / WiFi WS | USB-Serial + WiFi | ✅ |
 | **XTeink X3** | HW (ESP32 펌웨어 · experimental) | ESP32-C3 | 3.7" e-ink · 528×792 (세로) | WiFi WS (계획) | WiFi | ⚠️⁷ |
 | **Divoom Pixoo64** | HW (상용 LED) | Divoom (비-ESP32) | RGB LED · 64×64 | HTTP REST :80 | WiFi | ✅ |
@@ -75,7 +74,6 @@ AgentDeck 에서 "Dashboard" 란 **daemon hub (port 9120) 에 붙어 에이전�
 | **Round AMOLED 1.8"** | `amoled_18` | `amoled` | JC3636W518 (Guition) | ESP32-S3 | 360×360 (원형) | ST77916 (QSPI) | CST816S (I2C) | 8MB | ✅ | Native USB JTAG |
 | **86 Box 4"** | `box_40` | `box_86`⁶ | ESP32-S3-4848S040 (Guition) | ESP32-S3 | 480×480 | ST7701 (RGB 16-bit 병렬) | GT911 (I2C) | 16MB | ✅ | CH340 |
 | **TTGO T-Display 1.14"** | `tft_114` | `ttgo` | LilyGO T-Display | ESP32-D0WDQ6 (classic) | 135×240 | ST7789 (SPI) | 없음 (버튼 2개) | 16MB | ❌ | CH340⁴ |
-| **ESP32-C6 1.47"** | `c6_147` | `esp32_c6_147` | Waveshare ESP32-C6-LCD-1.47" | ESP32-C6 (RISC-V, single-core) | 172×320 | ST7789 (SPI) | 없음 (BOOT 버튼) | 4MB | ❌ | Native USB CDC (HWCDC) |
 | **IPS 10.1"** | `ips_101` | `ips10` | JC8012P4A1C (Guition) | ESP32-P4NRW32 (RISC-V dual-core 400MHz) | 800×1280 (세로) | JD9365 (MIPI-DSI) | GSL3680 (I2C) | 16MB⁵ | ✅ 32MB | CH340 |
 | **XTeink X3**⁷ | — | — | XTeink X3 (XTeink) | ESP32-C3 (RISC-V, single-core) | 528×792 (3.7" e-ink, 세로) | e-ink EPD (컨트롤러 미확정) | 없음 | 4MB | ❌ | pogo USB (이 유닛 데이터 사망) |
 

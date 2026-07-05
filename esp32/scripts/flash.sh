@@ -16,8 +16,8 @@ Usage:
   $0 <environment> [port]
 
 Environments (canonical friendly name — panel/form + inches):
-  ips_35 | amoled_18 | box_40 | tft_114 | c6_147 | ips_101 | led_8x32
-  (legacy aliases still accepted: round_amoled, box_86, ttgo, esp32_c6_147, ulanzi_tc001, ...)
+  ips_35 | amoled_18 | box_40 | tft_114 | ips_101 | led_8x32
+  (legacy aliases still accepted: round_amoled, box_86, ttgo, ulanzi_tc001, ...)
 
 Rules:
   - auto mode only selects boards that answer device_info_request
@@ -83,7 +83,6 @@ map_env_to_pio() {
         box_40|box_86|86box) echo "box_86" ;;
         led_8x32|ulanzi_tc001|led8x32) echo "led8x32" ;;
         tft_114|ttgo_t_display|ttgo) echo "ttgo" ;;
-        c6_147|esp32_c6_147) echo "esp32_c6_147" ;;
         ips_101|ips_10|ips10) echo "ips10" ;;
         *) echo "$1" ;;
     esac
@@ -96,7 +95,6 @@ validate_env() {
         box_40|box_86|86box|\
         led_8x32|ulanzi_tc001|led8x32|\
         tft_114|ttgo_t_display|ttgo|\
-        c6_147|esp32_c6_147|\
         ips_101|ips_10|ips10) ;;
         *)
             echo "Unknown environment: $1" >&2
