@@ -1,5 +1,6 @@
 import stripAnsi from 'strip-ansi';
 import { EventEmitter } from 'events';
+import type { PromptOption } from './types.js';
 import { debug } from './logger.js';
 
 /**
@@ -32,6 +33,8 @@ const CODEX_STATUS_LINE = /[❯›]\s.*(?:gpt-|o\d|codex)[\w.-]*\s.*·.*~/;
 const APPROVAL_ALLOW = /\bAllow\b.*\bDeny\b|\bapprove\b.*\bdeny\b/i;
 const APPROVAL_YN = /\(y\)es.*\(n\)o|\[Y\/n\]|\[y\/N\]/i;
 const APPROVAL_ALWAYS = /Always\s+allow|Allow\s+once/i;
+const CODEX_COMMAND_APPROVAL =
+  /Would you like to run the following command\?|Yes,\s*proceed\s*\(y\)|Yes,\s+and\s+don['’]t\s+ask\s+again|No,\s+and\s+tell\s+Codex|Press enter to confirm or esc to cancel/i;
 
 // Tool/command execution indicators
 const TOOL_RUNNING = /(?:Running|Executing|Ran)(?:\s+in\s+\S+)?:\s*[`"]?(.+?)[`"]?\s*$/m;
@@ -115,11 +118,13 @@ export class CodexOutputParser extends EventEmitter {
     this.parseModelInfo(chunk);
 
     // --- Pre-scan ---
+    const haystack = this.buffer.slice(-4096);
     const hasIdlePrompt = IDLE_PROMPT.test(chunk) || CODEX_STATUS_LINE.test(chunk);
     const hasApproval =
       APPROVAL_ALLOW.test(chunk) ||
       APPROVAL_YN.test(chunk) ||
-      APPROVAL_ALWAYS.test(chunk);
+      APPROVAL_ALWAYS.test(chunk) ||
+      CODEX_COMMAND_APPROVAL.test(chunk);
 
     // --- Spinner + prompt handling ---
     const hasSpinner = BRAILLE_SPINNERS.test(chunk) || THINKING_TEXT.test(chunk) || CODEX_WORKING_STATUS.test(chunk);
@@ -139,7 +144,12 @@ export class CodexOutputParser extends EventEmitter {
       this.optionTimer = setTimeout(() => {
         this.optionTimer = null;
         debug('CodexParser', 'EMIT permission_prompt');
-        this.emit('permission_prompt', { options: this.extractApprovalOptions(chunk) });
+        this.emit('permission_prompt', {
+          question: this.extractApprovalQuestion(haystack),
+          options: this.extractApprovalOptions(haystack),
+          navigable: this.hasNavigableApprovalOptions(haystack),
+          cursorIndex: this.extractApprovalCursorIndex(haystack),
+        });
       }, OPTION_DEBOUNCE_MS);
       return;
     }
@@ -218,15 +228,63 @@ export class CodexOutputParser extends EventEmitter {
     }
   }
 
-  private extractApprovalOptions(chunk: string): string[] {
-    const options: string[] = [];
-    if (/Allow\s+once/i.test(chunk)) options.push('Allow once');
-    if (/Always\s+allow/i.test(chunk)) options.push('Always allow');
-    if (/\bDeny\b/i.test(chunk)) options.push('Deny');
-    if (/\(y\)es/i.test(chunk)) options.push('Yes');
-    if (/\(n\)o/i.test(chunk)) options.push('No');
-    if (options.length === 0) options.push('Allow', 'Deny');
+  private extractApprovalOptions(text: string): PromptOption[] {
+    const numbered = this.extractNumberedApprovalOptions(text);
+    if (numbered.length > 0) return numbered;
+
+    const options: PromptOption[] = [];
+    const push = (label: string, shortcut?: string) => {
+      options.push({ index: options.length, label, shortcut });
+    };
+    if (/Allow\s+once/i.test(text)) push('Allow once', 'y');
+    if (/Always\s+allow/i.test(text)) push('Always allow', 'a');
+    if (/\bDeny\b/i.test(text)) push('Deny', 'n');
+    if (/\(y\)es/i.test(text)) push('Yes', 'y');
+    if (/\(n\)o/i.test(text)) push('No', 'n');
+    if (options.length === 0) {
+      push('Allow', 'y');
+      push('Deny', 'n');
+    }
     return options;
+  }
+
+  private extractNumberedApprovalOptions(text: string): PromptOption[] {
+    const options: PromptOption[] = [];
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.replace(/\s+/g, ' ').trim();
+      const match = line.match(/^(?:[›❯>]\s*)?(\d+)\.\s+(.+)$/);
+      if (!match) continue;
+      const index = Number(match[1]) - 1;
+      if (!Number.isFinite(index) || index < 0) continue;
+      let label = match[2].trim();
+      const shortcut = label.match(/\((y|p|n|esc)\)\s*$/i)?.[1]?.toLowerCase();
+      label = label
+        .replace(/\s*\((?:y|p|n|esc)\)\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (label) options.push({ index, label, shortcut });
+    }
+    return options.sort((a, b) => a.index - b.index);
+  }
+
+  private hasNavigableApprovalOptions(text: string): boolean {
+    return /^\s*[›❯>]\s*\d+\.\s+/m.test(text);
+  }
+
+  private extractApprovalCursorIndex(text: string): number {
+    const line = text.split(/\r?\n/).find((l) => /^\s*[›❯>]\s*\d+\.\s+/.test(l));
+    const match = line?.match(/^\s*[›❯>]\s*(\d+)\.\s+/);
+    const index = match ? Number(match[1]) - 1 : 0;
+    return Number.isFinite(index) && index >= 0 ? index : 0;
+  }
+
+  private extractApprovalQuestion(text: string): string | null {
+    const commandMatch = text.match(/^\s*\$\s+(.+)$/m);
+    if (commandMatch) return commandMatch[1].trim();
+    if (/Would you like to run the following command\?/i.test(text)) {
+      return 'Run command?';
+    }
+    return null;
   }
 
   private parseToolAction(chunk: string): void {
@@ -251,7 +309,7 @@ export class CodexOutputParser extends EventEmitter {
     this.lastToolKey = key;
     this.lastToolTs = now;
     debug('CodexParser', `EMIT tool_action: ${tool} ${args}`);
-    this.emit('tool_action', { tool, args });
+    this.emit('tool_action', { tool, args, toolName: tool, toolArgs: args });
   }
 
   private resetToolDedup(): void {

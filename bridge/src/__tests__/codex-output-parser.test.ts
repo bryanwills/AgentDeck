@@ -134,7 +134,9 @@ describe('CodexOutputParser', () => {
       parser.feed('Allow this command? Allow  Deny');
       vi.advanceTimersByTime(150);
       expect(handler).toHaveBeenCalledTimes(1);
-      expect(handler.mock.calls[0][0].options).toContain('Deny');
+      expect(handler.mock.calls[0][0].options).toEqual(
+        expect.arrayContaining([expect.objectContaining({ label: 'Deny' })]),
+      );
     });
 
     it('emits permission_prompt on y/n pattern', () => {
@@ -144,8 +146,12 @@ describe('CodexOutputParser', () => {
       parser.feed('Run this command? (y)es / (n)o');
       vi.advanceTimersByTime(150);
       expect(handler).toHaveBeenCalledTimes(1);
-      expect(handler.mock.calls[0][0].options).toContain('Yes');
-      expect(handler.mock.calls[0][0].options).toContain('No');
+      expect(handler.mock.calls[0][0].options).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Yes' }),
+          expect.objectContaining({ label: 'No' }),
+        ]),
+      );
     });
 
     it('stops spinner when approval detected', () => {
@@ -170,9 +176,49 @@ describe('CodexOutputParser', () => {
       parser.feed('Allow once  Always allow  Deny');
       vi.advanceTimersByTime(150);
       const opts = handler.mock.calls[0][0].options;
-      expect(opts).toContain('Allow once');
-      expect(opts).toContain('Always allow');
-      expect(opts).toContain('Deny');
+      expect(opts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Allow once' }),
+          expect.objectContaining({ label: 'Always allow' }),
+          expect.objectContaining({ label: 'Deny' }),
+        ]),
+      );
+    });
+
+    it('detects the current Codex command approval prompt as awaiting permission', () => {
+      const handler = vi.fn();
+      parser.on('permission_prompt', handler);
+
+      parser.feed([
+        'Would you like to run the following command?',
+        '',
+        '  Environment: local',
+        '',
+        '  Reason: Run the requested ips10 WiFi OTA round trip using the local pnpm agentdeck binary and Homebrew PlatformIO.',
+        '',
+        '  $ env PATH=/opt/homebrew/bin:/Users/puritysb/Library/pnpm:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin agentdeck esp32-ota',
+        '  ips10 --build',
+        '',
+        '› 1. Yes, proceed (y)',
+        "  2. Yes, and don't ask again for commands that start with `env 'PATH=/opt/homebrew/bin:/Users/puritysb/Library/pnpm:/usr/",
+        "     local/bin:/usr/bin:/bin:/usr/sbin:/sbin' agentdeck esp32-ota ips10 --build` (p)",
+        '  3. No, and tell Codex what to do differently (esc)',
+        '',
+        '  Press enter to confirm or esc to cancel',
+      ].join('\n'));
+      vi.advanceTimersByTime(150);
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler.mock.calls[0][0]).toEqual(expect.objectContaining({
+        navigable: true,
+        cursorIndex: 0,
+        question: expect.stringContaining('env PATH='),
+        options: expect.arrayContaining([
+          expect.objectContaining({ index: 0, label: 'Yes, proceed', shortcut: 'y' }),
+          expect.objectContaining({ index: 1, label: expect.stringContaining("Yes, and don't ask again") }),
+          expect.objectContaining({ index: 2, label: 'No, and tell Codex what to do differently', shortcut: 'esc' }),
+        ]),
+      }));
     });
   });
 

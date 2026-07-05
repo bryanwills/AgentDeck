@@ -53,10 +53,11 @@ const ANIM_INTERVAL_MS = 150;
  * Per-session animFrame at which the session entered processing/awaiting.
  * Lets each button orbit out of phase with siblings — phase reflects real
  * start time instead of every PROCESSING button rotating in lockstep.
- * Cleared on animation restart (animFrame resets to 0) and when sessions
- * leave the animated state or the visible slot set.
+ * Kept across animation timer restarts so already-running sessions do not
+ * re-enter in lockstep; cleared when sessions leave the animated state or
+ * the visible slot set.
  */
-const processingStartFrame = new Map<string, number>();
+const processingStartFrame = new Map<string, { state: string; frame: number }>();
 
 /** Callback for press actions that need bridge interaction */
 let onSlotAction: ((action: ReturnType<typeof manager.handleSlotPress>) => void) | null = null;
@@ -157,7 +158,6 @@ export function setDaemonStale(stale: boolean): void {
 function startAnimation(): void {
   if (animTimer) return;
   animFrame = 0;
-  processingStartFrame.clear();
   animTimer = setInterval(() => {
     animFrame++;
     refreshAll();
@@ -268,18 +268,34 @@ function refreshAll(): void {
   }
 }
 
+function stableSessionPhaseFrames(session: SessionInfo): number {
+  const key = `${session.id}|${session.startedAt ?? ''}`;
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % 36;
+}
+
 function renderSlotSvg(config: SessionSlotConfig, _slot: number): string {
   switch (config.type) {
     case 'session': {
       const sess = config.session!;
       const animatedState = sess.state === 'processing' || (sess.state?.startsWith('awaiting') ?? false);
+      const phaseState = animatedState ? sess.state ?? 'processing' : '';
       if (animatedState) {
-        if (!processingStartFrame.has(sess.id)) processingStartFrame.set(sess.id, animFrame);
+        const existing = processingStartFrame.get(sess.id);
+        if (!existing || existing.state !== phaseState) {
+          processingStartFrame.set(sess.id, {
+            state: phaseState,
+            frame: animFrame - stableSessionPhaseFrames(sess),
+          });
+        }
       } else {
         processingStartFrame.delete(sess.id);
       }
       return renderSessionSlot(sess, config.isActive ?? false, animFrame, undefined, {
-        processingStartFrame: processingStartFrame.get(sess.id),
+        processingStartFrame: processingStartFrame.get(sess.id)?.frame,
         isStale: daemonStale,
       });
     }
