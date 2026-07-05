@@ -239,15 +239,66 @@ async function readJsonBody(req: import('http').IncomingMessage, maxBytes = 64 *
 // flash-sector erase or a brief WiFi-stack starvation) or the WiFi link briefly
 // blipped and TCP is retransmitting. Both recover if we wait, so the timeouts
 // are generous: a healthy board still acks in milliseconds, and these only cap
-// how long we ride out a stall before declaring the transfer dead. Resending a
-// chunk would be wrong here — it desyncs the firmware's strict seq/offset cursor
-// (see handleOtaChunk → "unexpected_offset").
-const OTA_BEGIN_ACK_TIMEOUT_MS = 15_000; // erasing/preparing the target OTA slot
-const OTA_CHUNK_ACK_TIMEOUT_MS = 30_000; // slow classic-ESP32 flash write / WiFi stall
-const OTA_END_ACK_TIMEOUT_MS = 30_000;   // whole-image MD5 verify + set-boot-partition
+// how long we ride out a stall before declaring the transfer dead. Resending on
+// the SAME live socket would be wrong — it desyncs the firmware's strict
+// seq/offset cursor (handleOtaChunk → "unexpected_offset"); a timeout followed
+// by a board RECONNECT is the one case where resend is correct (see
+// performWifiEsp32Ota — the board never processed the lost chunk, and its otaRx
+// cursor persisted across the reconnect). `let` (not const) so tests can shrink
+// them via __setOtaTimeoutsForTest; production never mutates them.
+let OTA_BEGIN_ACK_TIMEOUT_MS = 15_000; // erasing/preparing the target OTA slot
+let OTA_CHUNK_ACK_TIMEOUT_MS = 30_000; // slow classic-ESP32 flash write / WiFi stall
+let OTA_END_ACK_TIMEOUT_MS = 30_000;   // whole-image MD5 verify + set-boot-partition
+
+// How long to wait for a board to re-register a live WS after it drops its
+// socket mid-OTA, and the cap on such reconnect-driven resends per transfer.
+// Serial-backtrace diagnosis of the TTGO 2.5MB WiFi OTA showed the board does
+// NOT reset/brownout/watchdog mid-transfer — it survives, prints "[WS]
+// Disconnected", and re-registers under the SAME board:ip key with a NEW socket
+// ~3-4s later (classic single-core ESP32 WiFi-flash coexistence briefly starves
+// the TCP task → the connection drops, not the board). The old code captured the
+// socket once and kept sending into the dead one, so the transfer stalled at the
+// disconnect and failed 30s later on the chunk-ack timeout. Following the board
+// to its reconnected socket lets the transfer resume where it stalled, because
+// acks route by otaId (socket-independent) and the firmware keeps its otaRx
+// cursor across the reconnect.
+let OTA_RECONNECT_WAIT_MS = 20_000;
+const OTA_MAX_RECONNECT_RESENDS = 12;
+
+// ── Test-only seams for the WiFi-OTA reconnect-follow path ───────────────────
+// The reconnect-follow bug is a socket-lifecycle race that hardware reproduces
+// only probabilistically (a WiFi-flash coexistence drop). These exports let a
+// deterministic unit test register/replace a board's socket mid-transfer and
+// drive acks by otaId, with the ack timeouts shrunk so the drop→timeout→resend
+// cycle runs in milliseconds. Not used by production code.
+/** @internal */
+export function __setOtaTimeoutsForTest(t: { begin?: number; chunk?: number; end?: number; reconnectWait?: number }): void {
+  if (t.begin != null) OTA_BEGIN_ACK_TIMEOUT_MS = t.begin;
+  if (t.chunk != null) OTA_CHUNK_ACK_TIMEOUT_MS = t.chunk;
+  if (t.end != null) OTA_END_ACK_TIMEOUT_MS = t.end;
+  if (t.reconnectWait != null) OTA_RECONNECT_WAIT_MS = t.reconnectWait;
+}
+/** @internal */
+export function __resetWifiEsp32OtaState(): void {
+  for (const [, w] of otaWaiters) clearTimeout(w.timer);
+  otaWaiters.clear();
+  wifiEsp32Devices.clear();
+  wifiEsp32Sockets.clear();
+  OTA_BEGIN_ACK_TIMEOUT_MS = 15_000;
+  OTA_CHUNK_ACK_TIMEOUT_MS = 30_000;
+  OTA_END_ACK_TIMEOUT_MS = 30_000;
+  OTA_RECONNECT_WAIT_MS = 20_000;
+}
+/** @internal */
+export const __wifiOtaTestApi = {
+  registerWifiEsp32,
+  unregisterWifiEsp32Socket,
+  handleEsp32OtaReply,
+  performWifiEsp32Ota,
+};
 
 async function performWifiEsp32Ota(core: BridgeCore, target: string, firmwarePath: string): Promise<Record<string, unknown>> {
-  const { key, device, ws } = findWifiOtaTarget(target);
+  const { key, device } = findWifiOtaTarget(target);
   if (device.otaSupported !== true) {
     throw new Error(`Target ${key} does not report OTA support${device.otaReason ? ` (${device.otaReason})` : ''}`);
   }
@@ -259,45 +310,87 @@ async function performWifiEsp32Ota(core: BridgeCore, target: string, firmwarePat
 
   const otaId = randomUUID();
   const md5 = createHash('md5').update(firmware).digest('hex');
-  const send = (evt: BridgeEvent) => core.wsServer.sendTo(ws, evt);
 
-  send({ type: 'esp32_ota_begin', otaId, size: firmware.length, md5 } as BridgeEvent);
-  await waitForOtaAck(otaId, 'begin', undefined, OTA_BEGIN_ACK_TIMEOUT_MS);
+  // Always resolve the board's CURRENTLY-registered socket, never a captured
+  // reference — the board re-registers a fresh socket on a mid-OTA reconnect.
+  const liveSocket = (): WebSocket | undefined => {
+    const s = wifiEsp32Sockets.get(key);
+    return s && s.readyState === WebSocket.OPEN ? s : undefined;
+  };
+  // Wait up to ms for a live socket (rides out the ~3-4s reconnect gap).
+  const awaitLiveSocket = async (ms: number): Promise<WebSocket | undefined> => {
+    const deadline = Date.now() + ms;
+    let s = liveSocket();
+    while (!s && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+      s = liveSocket();
+    }
+    return s;
+  };
+  const sendVia = (sock: WebSocket, evt: BridgeEvent) => core.wsServer.sendTo(sock, evt);
 
-  const chunkSize = 1024;
-  let offset = 0;
-  let seq = 0;
+  let reconnectResends = 0;
+  // Send one OTA frame and wait for its ack, following the board to a fresh
+  // socket if it reconnects mid-flight. On an ack timeout, if a NEW live socket
+  // has appeared (the board reconnected), the frame was lost to the dead socket
+  // — resend the same seq on the new socket once. The firmware's otaRx cursor
+  // persists across the reconnect, so a resend of the not-yet-processed seq is
+  // accepted; a genuinely-gone board still fails after OTA_RECONNECT_WAIT_MS.
+  const sendAndAck = async (evt: BridgeEvent, stage: string, seq: number | undefined, timeoutMs: number): Promise<void> => {
+    let sock = await awaitLiveSocket(OTA_RECONNECT_WAIT_MS);
+    if (!sock) throw new Error(`OTA ${stage}${seq != null ? ` #${seq}` : ''}: board ${key} offline (no live WS)`);
+    sendVia(sock, evt);
+    try {
+      await waitForOtaAck(otaId, stage, seq, timeoutMs);
+    } catch (ackErr) {
+      const fresh = await awaitLiveSocket(OTA_RECONNECT_WAIT_MS);
+      if (fresh && fresh !== sock && reconnectResends < OTA_MAX_RECONNECT_RESENDS) {
+        reconnectResends++;
+        debug('daemon', `OTA ${key}: ${stage}${seq != null ? ` #${seq}` : ''} ack lost on dropped socket — resending on reconnected WS (resend ${reconnectResends})`);
+        sendVia(fresh, evt);
+        await waitForOtaAck(otaId, stage, seq, timeoutMs);
+        return;
+      }
+      throw ackErr;
+    }
+  };
+
   try {
+    await sendAndAck({ type: 'esp32_ota_begin', otaId, size: firmware.length, md5 } as BridgeEvent, 'begin', undefined, OTA_BEGIN_ACK_TIMEOUT_MS);
+
+    const chunkSize = 1024;
+    let offset = 0;
+    let seq = 0;
     while (offset < firmware.length) {
       const chunk = firmware.subarray(offset, Math.min(offset + chunkSize, firmware.length));
-      send({
+      await sendAndAck({
         type: 'esp32_ota_chunk',
         otaId,
         seq,
         offset,
         data: chunk.toString('base64'),
-      } as BridgeEvent);
-      await waitForOtaAck(otaId, 'chunk', seq, OTA_CHUNK_ACK_TIMEOUT_MS);
+      } as BridgeEvent, 'chunk', seq, OTA_CHUNK_ACK_TIMEOUT_MS);
       offset += chunk.length;
       seq++;
     }
-    send({ type: 'esp32_ota_end', otaId } as BridgeEvent);
-    await waitForOtaAck(otaId, 'end', undefined, OTA_END_ACK_TIMEOUT_MS);
+    await sendAndAck({ type: 'esp32_ota_end', otaId } as BridgeEvent, 'end', undefined, OTA_END_ACK_TIMEOUT_MS);
     wifiEsp32Sockets.delete(key);
     wifiEsp32Devices.delete(key);
+
+    return {
+      ok: true,
+      target: key,
+      board: device.board,
+      bytes: firmware.length,
+      chunks: seq,
+      reconnectResends,
+      md5,
+    };
   } catch (err) {
-    try { send({ type: 'esp32_ota_abort', otaId } as BridgeEvent); } catch { /* best effort */ }
+    const sock = liveSocket();
+    if (sock) { try { sendVia(sock, { type: 'esp32_ota_abort', otaId } as BridgeEvent); } catch { /* best effort */ } }
     throw err;
   }
-
-  return {
-    ok: true,
-    target: key,
-    board: device.board,
-    bytes: firmware.length,
-    chunks: seq,
-    md5,
-  };
 }
 
 function loadDaemonSettings(): Record<string, unknown> {
@@ -1293,11 +1386,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
 
   // mDNS + device modules
   const deviceModules = createDefaultModules('daemon' as any);
+  // AGENTDECK_DAEMON_NO_SERIAL=1 leaves the daemon fully functional over WiFi
+  // (mDNS, WiFi WS, WiFi OTA) but never opens the USB serial ports. This frees
+  // a board's /dev/cu.* for an exclusive external serial capture (e.g. reading a
+  // panic backtrace during a WiFi OTA) that otherwise fights the daemon's serial
+  // reader for bytes. Diagnostic gate only; normal daemons keep serial on.
+  const serialMode = process.env.AGENTDECK_DAEMON_NO_SERIAL === '1' ? false : 'auto';
   const startedModules = await initModules(
     deviceModules,
     // d200h: false — direct-HID fallback retired. The D200H is driven exclusively
     // by the Ulanzi Studio plugin (`ulanzi-plugin`); the daemon never opens it over HID.
-    { mdns: true, broadcast: true, adb: 'auto', serial: 'auto', pixoo: 'auto', timebox: 'auto', idotmatrix: 'auto', d200h: false },
+    { mdns: true, broadcast: true, adb: 'auto', serial: serialMode, pixoo: 'auto', timebox: 'auto', idotmatrix: 'auto', d200h: false },
     { port, authToken: core.authToken, projectName: 'AgentDeck', wsServer: core.wsServer },
   );
 
