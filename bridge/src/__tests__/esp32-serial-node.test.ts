@@ -23,6 +23,7 @@ import {
   EXCLUDE_PATTERNS,
   isUnidentifiedForeign,
   isHalfOpenIdentifiedCdc,
+  shouldRetryDeviceInfoIdentify,
   recordForeignProbeFailure,
   isForeignPortDenylisted,
   __resetForeignPortState,
@@ -584,5 +585,52 @@ describe('half-open identified CDC recovery', () => {
 
   it('does NOT flag a UART (non-CDC) port — handled by the read-timeout branch', () => {
     expect(isHalfOpenIdentifiedCdc(cdcConn({ port: '/dev/cu.usbserial-1420' }))).toBe(false);
+  });
+});
+
+// ─── Device-info re-identify (cache-seed refresh) ───────────────────
+// A cache-seeded connection carries a stale deviceInfo (old buildHash / pre-OTA
+// fields) but deviceInfoFresh=false. The heartbeat identify loop must keep
+// re-requesting until a LIVE reply lands, or a board reflashed/OTA-updated on
+// the same port (e.g. inkdeck round8→round9) freezes at the cache seed in
+// /devices. Regression guard for the conn.deviceInfo→conn.deviceInfoFresh gate.
+
+const identifyConn = (over: Partial<SerialConnection> = {}): SerialConnection =>
+  ({
+    connected: true,
+    deviceInfoFresh: false,
+    deviceInfo: null,
+    deviceInfoRequestsSent: 0,
+    lastDeviceInfoRequestAt: 0,
+    ...over,
+  }) as SerialConnection;
+
+describe('device-info re-identify gating', () => {
+  it('retries a brand-new (unseeded) connection that has not yet identified', () => {
+    expect(shouldRetryDeviceInfoIdentify(identifyConn())).toBe(true);
+  });
+
+  it('retries a CACHE-SEEDED connection (stale deviceInfo, not yet fresh) — the inkdeck bug', () => {
+    // Non-null deviceInfo used to freeze this connection at the cache seed.
+    const c = identifyConn({ deviceInfo: { board: 'inkdeck', buildHash: 'b6744e8f-dirty' } });
+    expect(shouldRetryDeviceInfoIdentify(c)).toBe(true);
+  });
+
+  it('STOPS once a live device_info has landed on this connection', () => {
+    expect(shouldRetryDeviceInfoIdentify(identifyConn({ deviceInfoFresh: true, deviceInfo: { board: 'inkdeck' } }))).toBe(false);
+  });
+
+  it('stops after the request budget is exhausted', () => {
+    expect(shouldRetryDeviceInfoIdentify(identifyConn({ deviceInfoRequestsSent: 10 }))).toBe(false);
+  });
+
+  it('paces requests — no retry inside the retry interval', () => {
+    const now = Date.now();
+    expect(shouldRetryDeviceInfoIdentify(identifyConn({ lastDeviceInfoRequestAt: now }), now)).toBe(false);
+    expect(shouldRetryDeviceInfoIdentify(identifyConn({ lastDeviceInfoRequestAt: now - 6000 }), now)).toBe(true);
+  });
+
+  it('does not retry a disconnected connection', () => {
+    expect(shouldRetryDeviceInfoIdentify(identifyConn({ connected: false }))).toBe(false);
   });
 });

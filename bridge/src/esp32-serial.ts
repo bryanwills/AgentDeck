@@ -886,12 +886,19 @@ function sendHeartbeat(): void {
   // Retry device identification. Some boards answer heartbeats/provisioning
   // but miss the first request after USB reset; without a retry they stay
   // anonymous and surfaces render them as reconnecting.
+  //
+  // Gate on deviceInfoFresh, NOT conn.deviceInfo: a cache-seeded connection has
+  // a non-null (stale) deviceInfo but deviceInfoFresh=false. Keying off
+  // conn.deviceInfo froze such a connection at the cache seed forever — a board
+  // reflashed/OTA-updated on the same port (e.g. inkdeck round8→round9) would
+  // keep reporting its old buildHash/no-OTA because no path ever re-requested.
+  // deviceInfoFresh only flips true once a LIVE device_info lands on THIS
+  // connection, so a fresh board stops the retries (capped at MAX) as before.
   const now = Date.now();
   for (const conn of connections) {
-    if (!conn.connected || conn.deviceInfo) continue;
-    if (conn.deviceInfoRequestsSent >= DEVICE_INFO_MAX_REQUESTS) continue;
-    if (now - conn.lastDeviceInfoRequestAt < DEVICE_INFO_RETRY_MS) continue;
-    debug('ESP32', `${conn.port}: device_info not received yet — retrying request`);
+    if (!shouldRetryDeviceInfoIdentify(conn, now)) continue;
+    const seeded = conn.deviceInfo ? ' (cache-seeded — refreshing identity)' : '';
+    debug('ESP32', `${conn.port}: no live device_info yet${seeded} — retrying request`);
     sendDeviceInfoRequest(conn);
   }
 
@@ -928,6 +935,26 @@ export function isHalfOpenIdentifiedCdc(
   if (!isCDC) return false;
   const isIdentified = Boolean(conn.deviceInfo?.board) || lastKnownDeviceInfoByPort.has(conn.port);
   return isIdentified && conn.lastReadAt === 0 && (now - conn.connectedAt) > CDC_SILENT_READ_TIMEOUT_MS;
+}
+
+/**
+ * Whether the periodic heartbeat should (re)send a device_info_request to
+ * re-identify this connection. Keys off deviceInfoFresh (a LIVE reply on THIS
+ * connection), NOT conn.deviceInfo — a cache-seeded connection carries a stale
+ * deviceInfo but deviceInfoFresh=false and must keep re-requesting until the
+ * board answers, so a reflashed/OTA-updated board on the same port refreshes
+ * its buildHash/OTA fields instead of freezing at the cache seed. Capped by
+ * DEVICE_INFO_MAX_REQUESTS and paced by DEVICE_INFO_RETRY_MS.
+ */
+/** @internal Exported for testing only */
+export function shouldRetryDeviceInfoIdentify(
+  conn: Pick<SerialConnection, 'connected' | 'deviceInfoFresh' | 'deviceInfoRequestsSent' | 'lastDeviceInfoRequestAt'>,
+  now = Date.now(),
+): boolean {
+  if (!conn.connected || conn.deviceInfoFresh) return false;
+  if (conn.deviceInfoRequestsSent >= DEVICE_INFO_MAX_REQUESTS) return false;
+  if (now - conn.lastDeviceInfoRequestAt < DEVICE_INFO_RETRY_MS) return false;
+  return true;
 }
 
 function denylistForeignPort(port: string, reason: string): void {
