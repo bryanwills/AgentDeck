@@ -20,7 +20,8 @@ enum CreatureLayout {
             backY: 0.52,
             singleRowLimit: 4,
             baseScale: 1.0,
-            minScale: 0.58
+            minScale: 0.58,
+            creatureWidth: 0.11
         )
     }
 
@@ -33,7 +34,8 @@ enum CreatureLayout {
             backY: 0.28,
             singleRowLimit: 3,
             baseScale: 0.98,
-            minScale: 0.56
+            minScale: 0.56,
+            creatureWidth: 0.080
         )
     }
 
@@ -46,7 +48,8 @@ enum CreatureLayout {
             backY: 0.46,
             singleRowLimit: 3,
             baseScale: 0.96,
-            minScale: 0.56
+            minScale: 0.56,
+            creatureWidth: 0.078
         )
     }
 
@@ -61,9 +64,19 @@ enum CreatureLayout {
             backY: 0.34,
             singleRowLimit: 3,
             baseScale: 0.96,
-            minScale: 0.56
+            minScale: 0.56,
+            creatureWidth: 0.096
         )
     }
+
+    /// Hard floor for the crowd-driven shrink. Below the per-band `minScale`
+    /// so tightly packed bands can still shrink enough to honor the overlap cap
+    /// before we give up and accept brief overlap.
+    private static let crowdedMinScale: Float = 0.40
+
+    /// Max fraction of a creature's width that two neighbors may overlap.
+    /// 0.5 → centers stay at least half a body-width apart (≤50% overlap).
+    private static let maxOverlapFraction: Float = 0.5
 
     private static func layoutBand(
         count: Int,
@@ -73,7 +86,8 @@ enum CreatureLayout {
         backY: Float,
         singleRowLimit: Int,
         baseScale: Float,
-        minScale: Float
+        minScale: Float,
+        creatureWidth: Float
     ) -> [CreatureSlot] {
         guard count > 0 else { return [] }
 
@@ -100,12 +114,25 @@ enum CreatureLayout {
             let rowInset = 0.015 + Float(row) * 0.02
             let rowMinX = xMin + rowInset
             let rowMaxX = xMax - rowInset
-            let rowScale = max(minScale, scale - Float(row) * 0.04)
+            // Alternating jitter magnitude — constant within a row.
+            let spread = max(0.003, min(0.012, (rowMaxX - rowMinX) / Float(max(rowCount * 5, 1))))
+
+            // Overlap cap: keep neighbor center-spacing ≥ maxOverlapFraction of
+            // the on-screen body width so creatures never overlap by more than
+            // ~half. When the band is too tight to honor that at the count-based
+            // scale, shrink every creature in the row by the same ratio (down to
+            // crowdedMinScale) instead of letting them pile up.
+            var rowScale = max(minScale, scale - Float(row) * 0.04)
+            if rowCount >= 2 {
+                // Worst-case gap after the alternating jitter squeezes a pair.
+                let spacing = (rowMaxX - rowMinX) / Float(rowCount - 1) - 2 * spread
+                let overlapCapScale = max(0, spacing) / (maxOverlapFraction * creatureWidth)
+                rowScale = max(crowdedMinScale, min(rowScale, overlapCapScale))
+            }
 
             for col in 0..<rowCount {
                 let t = rowCount == 1 ? 0.5 : Float(col) / Float(rowCount - 1)
                 let baseX = rowMinX + (rowMaxX - rowMinX) * t
-                let spread = max(0.003, min(0.012, (rowMaxX - rowMinX) / Float(max(rowCount * 5, 1))))
                 let phase: Float = ((absoluteIndex + row) % 2 == 0) ? -1 : 1
                 let x = min(xMax, max(xMin, baseX + spread * phase))
                 let yJitter = Float((absoluteIndex % 3) - 1) * 0.008

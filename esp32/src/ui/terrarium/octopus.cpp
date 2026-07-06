@@ -60,6 +60,22 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
 
     // Dynamic scale: shrink creatures when many sessions
     float scaleFactor = (total >= 5) ? 0.60f : (total >= 4) ? 0.70f : (total >= 3) ? 0.85f : 1.0f;
+
+    // Horizontal band the creatures spread across (fraction of width).
+    float span = (total <= 1) ? 0.0f : (total <= 2) ? 0.30f : (total <= 3) ? 0.40f : 0.50f;
+
+    // Overlap cap: shrink further so neighbor center-spacing stays ≥ 50% of the
+    // glyph width (≤50% body overlap). Footprint ≈ bodyRadius*2.2, i.e. a width
+    // fraction of OctBodyRadiusFrac*2.2*scaleFactor. When the fixed span can't
+    // give that spacing, shrink every creature by the same ratio (floor 0.45).
+    if (total >= 2) {
+        float spacing = span / (total - 1) - 0.04f;  // minus jitter squeeze margin
+        if (spacing < 0.0f) spacing = 0.0f;
+        float capScale = spacing / (0.5f * Layout::OctBodyRadiusFrac * 2.2f);
+        if (capScale < scaleFactor) scaleFactor = capScale;
+        if (scaleFactor < 0.45f) scaleFactor = 0.45f;
+    }
+
     float bodyRadius = w * Layout::OctBodyRadiusFrac * scaleFactor;
     // The robot occupies the full 24×24 viewBox; map it into a square box so the
     // on-screen footprint matches the old block glyph (~bodyRadius*2.2 wide).
@@ -70,7 +86,6 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     if (total <= 1) {
         homeX = Layout::OctHomeX;
     } else {
-        float span = (total <= 2) ? 0.30f : (total <= 3) ? 0.40f : 0.50f;
         homeX = Layout::OctHomeX - span / 2 + span * idx / (total - 1);
     }
     homeX += jitterX[idx];
