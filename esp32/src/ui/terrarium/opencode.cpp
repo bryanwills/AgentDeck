@@ -55,6 +55,20 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
 
     // Dynamic scale: shrink when many instances
     float scaleFactor = (total >= 4) ? 0.70f : (total >= 3) ? 0.85f : 1.0f;
+
+    // Horizontal band the creatures spread across (fraction of width).
+    float span = (total <= 1) ? 0.0f : (total <= 2) ? 0.25f : 0.40f;
+
+    // Overlap cap: shrink further so neighbor center-spacing stays ≥ 50% of the
+    // glyph width (≤50% overlap). Mark box ≈ bodyRadius*2.6 wide.
+    if (total >= 2) {
+        float spacing = span / (total - 1) - 0.04f;  // minus jitter squeeze margin
+        if (spacing < 0.0f) spacing = 0.0f;
+        float capScale = spacing / (0.5f * Layout::OpenCodeRadiusFrac * 2.6f);
+        if (capScale < scaleFactor) scaleFactor = capScale;
+        if (scaleFactor < 0.45f) scaleFactor = 0.45f;
+    }
+
     float bodyRadius = w * Layout::OpenCodeRadiusFrac * scaleFactor;
 
     // Calculate home position — wider spread for more creatures
@@ -62,7 +76,6 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     if (total <= 1) {
         homeX = Layout::OpenCodeHomeX;
     } else {
-        float span = (total <= 2) ? 0.25f : 0.40f;
         homeX = Layout::OpenCodeHomeX - span / 2 + span * idx / (total - 1);
     }
     homeX += jitterX[idx];

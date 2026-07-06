@@ -28,6 +28,7 @@ fun layoutOctopuses(count: Int): List<CreatureSlot> {
         singleRowLimit = 4,
         baseScale = 1.0f,
         minScale = 0.58f,
+        creatureWidth = 0.11f,
     )
 }
 
@@ -61,6 +62,7 @@ fun layoutCloudCreatures(count: Int): List<CreatureSlot> {
         singleRowLimit = 3,
         baseScale = 0.98f,
         minScale = 0.56f,
+        creatureWidth = 0.080f,
     )
 }
 
@@ -78,6 +80,7 @@ fun layoutOpenCodeCreatures(count: Int): List<CreatureSlot> {
         singleRowLimit = 3,
         baseScale = 0.96f,
         minScale = 0.56f,
+        creatureWidth = 0.078f,
     )
 }
 
@@ -95,8 +98,22 @@ fun layoutAntigravityCreatures(count: Int): List<CreatureSlot> {
         singleRowLimit = 3,
         baseScale = 0.96f,
         minScale = 0.56f,
+        creatureWidth = 0.096f,
     )
 }
+
+/**
+ * Hard floor for the crowd-driven shrink. Below the per-band [minScale] so
+ * tightly packed bands can still shrink enough to honor the overlap cap before
+ * we give up and accept brief overlap.
+ */
+private const val CROWDED_MIN_SCALE = 0.40f
+
+/**
+ * Max fraction of a creature's width that two neighbors may overlap. 0.5 →
+ * centers stay at least half a body-width apart (≤50% overlap).
+ */
+private const val MAX_OVERLAP_FRACTION = 0.5f
 
 private fun layoutBand(
     count: Int,
@@ -107,6 +124,7 @@ private fun layoutBand(
     singleRowLimit: Int,
     baseScale: Float,
     minScale: Float,
+    creatureWidth: Float,
 ): List<CreatureSlot> {
     if (count <= 0) return emptyList()
 
@@ -130,12 +148,25 @@ private fun layoutBand(
         val rowInset = 0.015f + row * 0.02f
         val rowMinX = xMin + rowInset
         val rowMaxX = xMax - rowInset
-        val rowScale = max(minScale, scale - row * 0.04f)
+        // Alternating jitter magnitude — constant within a row.
+        val spread = max(0.003f, minOf(0.012f, (rowMaxX - rowMinX) / (rowCount * 5).coerceAtLeast(1)))
+
+        // Overlap cap: keep neighbor center-spacing ≥ MAX_OVERLAP_FRACTION of
+        // the on-screen body width so creatures never overlap by more than
+        // ~half. When the band is too tight to honor that at the count-based
+        // scale, shrink every creature in the row by the same ratio (down to
+        // CROWDED_MIN_SCALE) instead of letting them pile up.
+        var rowScale = max(minScale, scale - row * 0.04f)
+        if (rowCount >= 2) {
+            // Worst-case gap after the alternating jitter squeezes a pair.
+            val spacing = (rowMaxX - rowMinX) / (rowCount - 1).toFloat() - 2 * spread
+            val overlapCapScale = max(0f, spacing) / (MAX_OVERLAP_FRACTION * creatureWidth)
+            rowScale = max(CROWDED_MIN_SCALE, minOf(rowScale, overlapCapScale))
+        }
 
         for (col in 0 until rowCount) {
             val t = if (rowCount == 1) 0.5f else col.toFloat() / (rowCount - 1).toFloat()
             val baseX = rowMinX + (rowMaxX - rowMinX) * t
-            val spread = max(0.003f, minOf(0.012f, (rowMaxX - rowMinX) / (rowCount * 5).coerceAtLeast(1)))
             val phase = if ((absoluteIndex + row) % 2 == 0) -1f else 1f
             val x = (baseX + spread * phase).coerceIn(xMin, xMax)
             val yJitter = ((absoluteIndex % 3) - 1) * 0.008f

@@ -87,13 +87,26 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     if (idx >= MAX_ANTIGRAVITY) return;
 
     float scaleFactor = (total >= 4) ? 0.70f : (total >= 3) ? 0.84f : 1.0f;
+
+    // Horizontal band the creatures spread across (fraction of width).
+    float span = (total <= 1) ? 0.0f : (total <= 2) ? 0.22f : 0.34f;
+
+    // Overlap cap: shrink further so neighbor center-spacing stays ≥ 50% of the
+    // glyph width (≤50% overlap). Mark box ≈ bodyRadius*2.7 wide.
+    if (total >= 2) {
+        float spacing = span / (total - 1) - 0.04f;  // minus jitter squeeze margin
+        if (spacing < 0.0f) spacing = 0.0f;
+        float capScale = spacing / (0.5f * Layout::AntigravityRadiusFrac * 2.7f);
+        if (capScale < scaleFactor) scaleFactor = capScale;
+        if (scaleFactor < 0.45f) scaleFactor = 0.45f;
+    }
+
     float bodyRadius = w * Layout::AntigravityRadiusFrac * scaleFactor;
 
     float homeX;
     if (total <= 1) {
         homeX = Layout::AntigravityHomeX;
     } else {
-        float span = (total <= 2) ? 0.22f : 0.34f;
         homeX = Layout::AntigravityHomeX - span / 2 + span * idx / (total - 1);
     }
     homeX += jitterX[idx];
