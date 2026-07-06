@@ -216,17 +216,6 @@
       border-radius: 999px;
     }
 
-    /* Apple Watch: rectangular with small corner radius */
-    .device-frame.watch-rect {
-      border-radius: 28px;
-      padding: 14px;
-      background: #1a1a1a;
-    }
-
-    .device-frame.watch-rect .device-screen {
-      border-radius: 18px;
-    }
-
     .device-meta {
       margin-top: 14px;
       font-size: 12px;
@@ -306,12 +295,6 @@
           <option value="on">Auto</option>
         </select>
       </label>
-      <label>Watch Size
-        <select id="watch-size">
-          <option value="46">Series 11 46mm</option>
-          <option value="42">Series 11 42mm</option>
-        </select>
-      </label>
     </div>
 
     <div class="grid">
@@ -365,7 +348,7 @@
 
     <div class="panel glass-panel">
       <h2>Device Simulations</h2>
-      <p>Device-family simulation with layout proportions pushed closer to the actual implementations. Pixoo, TUI, and Stream Deck use renderer output directly; D200H and e-ink mirror each platform's native safe areas and status language.</p>
+      <p>Per-device previews at each surface's real resolution. <strong>Pixoo64, iDotMatrix, Timebox Mini, Stream Deck, the D200H key + usage window, and the TUI render from actual renderer output</strong> (decoded frames / real SVGs). Tablet, e-ink, and ESP32 panels are hand-drawn approximations at the correct native resolution — the SwiftUI / Compose / LVGL renderers can't run in a browser.</p>
       <div class="grid devices">
         <section>
           <div class="device-frame">
@@ -404,12 +387,6 @@
           <div class="device-meta">ESP32 IPS 3.5&quot; landscape. Same aquarium screen, wider left/right HUD cards like the actual IPS layout.</div>
         </section>
         <section>
-          <div class="device-frame">
-            <svg class="device-screen" id="sim-esp32-ips-portrait" viewBox="0 0 320 480" style="aspect-ratio:2/3"></svg>
-          </div>
-          <div class="device-meta">ESP32 IPS 3.5&quot; portrait. Vertical layout: session card top, aquarium center, gauge bar bottom.</div>
-        </section>
-        <section>
           <div class="device-frame round">
             <svg class="device-screen" id="sim-esp32-round" viewBox="0 0 360 360" style="aspect-ratio:1/1"></svg>
           </div>
@@ -419,7 +396,19 @@
           <div class="device-frame">
             <svg class="device-screen" id="sim-pixoo" viewBox="0 0 64 64" style="aspect-ratio:1/1"></svg>
           </div>
-          <div class="device-meta">Pixoo64. Dot-matrix simplification, but silhouette and internal marks stay closer to the source asset.</div>
+          <div class="device-meta">Divoom Pixoo64 — actual renderer output (64×64 RGB, decoded from the real Pixoo frame).</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-idot" viewBox="0 0 32 32" style="aspect-ratio:1/1"></svg>
+          </div>
+          <div class="device-meta">iDotMatrix 32×32 — actual renderer output at native 32×32 from the same terrarium renderer as Pixoo.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-timebox" viewBox="0 0 11 11" style="aspect-ratio:1/1"></svg>
+          </div>
+          <div class="device-meta">Divoom Timebox Mini 11×11 — actual renderer output, micro layout (single dominant creature on a status field).</div>
         </section>
         <section>
           <div class="device-frame">
@@ -428,7 +417,7 @@
               <svg class="device-screen" id="sim-tc-agents" viewBox="0 0 32 8" style="aspect-ratio:4/1"></svg>
             </div>
           </div>
-          <div class="device-meta">Ulanzi TC001 / TC100-class matrix. Two pages: full-screen 5H/7D gauge and agent row plus fixed crayfish.</div>
+          <div class="device-meta">Ulanzi TC001 8×32 matrix. Two pages: full-screen 5H/7D gauge and agent row plus fixed crayfish (mirrors matrix_pages.cpp).</div>
         </section>
         <section>
           <div class="device-frame">
@@ -439,17 +428,11 @@
         <section>
           <div class="device-frame">
             <div class="d200h-previews">
-              <svg class="device-screen" id="sim-d200h" viewBox="0 0 196 196" style="aspect-ratio:1/1"></svg>
-              <svg class="device-screen" id="sim-d200h-usage" viewBox="0 0 392 196" style="aspect-ratio:2/1"></svg>
+              <svg class="device-screen" id="sim-d200h" viewBox="0 0 144 144" style="aspect-ratio:1/1"></svg>
+              <svg class="device-screen" id="sim-d200h-usage" viewBox="0 0 288 144" style="aspect-ratio:2/1"></svg>
             </div>
           </div>
-          <div class="device-meta">Ulanzi D200H key button and merged 5H/7D usage window. Text stays inside the physical safe area; usage is one wide composition, not two stretched keys.</div>
-        </section>
-        <section>
-          <div class="device-frame watch-rect">
-            <svg class="device-screen" id="sim-apple-watch" viewBox="0 0 416 496" style="aspect-ratio:416/496"></svg>
-          </div>
-          <div class="device-meta">Apple Watch Series 11 preview. Rectangular display with small corner radius, matching actual watchOS UI proportions.</div>
+          <div class="device-meta">Ulanzi D200H — canonical 144×144 session key and the real 288×144 merged 5H/7D usage window (shared/src/d200h-layout.ts renderer, not an approximation).</div>
         </section>
         <section>
           <div class="device-frame">
@@ -461,7 +444,7 @@
     </div>
 
     <div class="panel notes glass-panel">
-      <strong>Purpose:</strong> compare `assets/logos` against per-device rendering before deploying. Pixoo and TUI are inspected from actual renderer output, while tablet, e-ink, ESP32, TC matrix, Stream Deck, and watch previews follow each platform's real HUD structure and safe-area composition as closely as this simulator can without invoking those native renderers directly.
+      <strong>Purpose:</strong> compare the creature marks against per-device rendering before deploying. LED matrices (Pixoo64, iDotMatrix, Timebox Mini), Stream Deck, the D200H key + usage window, and the TUI are inspected from actual renderer output; tablet, e-ink, and ESP32 panels follow each platform's real HUD structure and native resolution as closely as this simulator can without invoking those native renderers directly.
     </div>
   </div>
 
@@ -554,10 +537,6 @@
       asking: { opacity: 1, pulse: 0.02 },
     };
     const STATE_ORDER = ["idle", "working", "asking", "sleeping"];
-    const WATCH_SPECS = {
-      "46": { width: 416, height: 496, label: "Series 11 46mm" },
-      "42": { width: 374, height: 446, label: "Series 11 42mm" },
-    };
     const MATRIX_FONT = {
       " ": [0, 0, 0, 0, 0],
       A: [0b010, 0b101, 0b111, 0b101, 0b101],
@@ -652,14 +631,14 @@
         "sim-esp32-ips": [480, 320],
         "sim-esp32-round": [360, 360],
         "sim-pixoo": [64, 64],
+        "sim-idot": [32, 32],
+        "sim-timebox": [11, 11],
         "sim-tc-usage": [32, 8],
         "sim-tc-agents": [32, 8],
-        "sim-d200h": [196, 196],
-        "sim-d200h-usage": [392, 196],
+        "sim-d200h": [144, 144],
+        "sim-d200h-usage": [288, 144],
         "sim-streamdeck": [144, 144],
-        "sim-apple-watch": [416, 496],
         "sim-tui": [720, 420],
-        "sim-esp32-ips-portrait": [320, 480],
         "pixoo-focus": [128, 128],
         "tui-focus": [960, 560],
       }[svg.id] || [320, 320];
@@ -957,6 +936,26 @@
 
     function getStreamDeckActual(agent, state) {
       return window.__SIM_DATA?.streamDeck?.[getActualKey(agent, state)] || null;
+    }
+
+    function getIdotActual(agent, state) {
+      return window.__SIM_DATA?.idot?.[getActualKey(agent, state)] || null;
+    }
+
+    function getTimeboxActual(agent, state) {
+      return window.__SIM_DATA?.timebox?.[getActualKey(agent, state)] || null;
+    }
+
+    function getD200HUsageActual() {
+      return window.__SIM_DATA?.d200hUsage || null;
+    }
+
+    // LED-matrix panels render the actual decoded RGB frame (same path as Pixoo);
+    // they intentionally have no hand-drawn fallback — if the real frame is
+    // missing, the panel stays empty rather than showing a fake.
+    function renderMatrixDotDevice(svg, frame) {
+      clear(svg);
+      if (frame) renderRgbFrame(svg, frame);
     }
 
     function renderInlineSvg(svg, rawSvg) {
@@ -2158,6 +2157,11 @@
 
     function renderD200HDevice(svg, agent, state, t) {
       clear(svg);
+      // The D200H session key uses the same shared session renderer as Stream Deck
+      // (buildSessionDeck / renderSessionSlot). Reuse the real slot SVG so the key
+      // is canonical (144×144), not an approximation.
+      const slot = getStreamDeckActual(agent, state);
+      if (slot && renderInlineSvg(svg, slot.svg)) return;
       svg.setAttribute("viewBox", "0 0 196 196");
       const isWorking = state === "working";
       const isAsking = state === "asking";
@@ -2230,6 +2234,10 @@
 
     function renderD200HUsageDevice(svg, state, t) {
       clear(svg);
+      // Prefer the real 288×144 shared renderer (shared/src/d200h-layout.ts).
+      const actual = getD200HUsageActual();
+      if (actual && renderInlineSvg(svg, actual.svg)) return;
+      // Fallback: hand-drawn approximation (only if sim-data is missing).
       const pct5 = 46;
       const pct7 = 72;
       const colorForPct = (pct) => pct > 80 ? "#EF4444" : pct > 50 ? "#EAB308" : "#22C55E";
@@ -2290,65 +2298,6 @@
       }));
     }
 
-    function renderAppleWatchDevice(svg, agent, state, t) {
-      clear(svg);
-      const selected = document.getElementById("watch-size").value;
-      const spec = WATCH_SPECS[selected] || WATCH_SPECS["46"];
-      svg.setAttribute("viewBox", `0 0 ${spec.width} ${spec.height}`);
-      svg.style.aspectRatio = `${spec.width}/${spec.height}`;
-      const [w, h] = [spec.width, spec.height];
-      const outerInset = Math.round(w * 0.03);
-      const innerInset = Math.round(w * 0.06);
-      // Apple Watch: rectangular display, small corner radius (not circular)
-      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, rx: 44, fill: "#111111" }));
-      svg.appendChild(el("rect", { x: outerInset, y: outerInset + 2, width: w - outerInset * 2, height: h - (outerInset + 2) * 2, rx: 34, fill: "#0A1018" }));
-      svg.appendChild(el("rect", { x: innerInset, y: innerInset + 6, width: w - innerInset * 2, height: h - (innerInset + 6) * 2, rx: 28, fill: "#0D1724" }));
-      svg.appendChild(el("rect", { x: w * 0.16, y: h * 0.10, width: w * 0.68, height: h * 0.10, rx: w * 0.05, fill: "#121F31" }));
-      svg.appendChild(textNode(state.toUpperCase(), {
-        x: w / 2,
-        y: h * 0.165,
-        "font-size": h * 0.035,
-        "font-weight": 700,
-        "text-anchor": "middle",
-        fill: "#D9E9F5",
-      }));
-      svg.appendChild(textNode(spec.label.toUpperCase(), {
-        x: w / 2,
-        y: h * 0.92,
-        "font-size": h * 0.028,
-        "font-weight": 600,
-        "text-anchor": "middle",
-        fill: "#93A8BC",
-      }));
-      if (agent === "claude") {
-        drawAgentMark(svg, agent, w / 2, h * 0.48, Math.min(w, h) * 0.27, { state, t, palette: { fill: "#D97757" } });
-      } else if (agent === "codex") {
-        drawAgentMark(svg, agent, w / 2, h * 0.48, Math.min(w, h) * 0.29, {
-          state, t,
-          palette: { top: "#CEC4FF", mid: "#89A7FF", bottom: "#3941FF" },
-          promptStyle: { color: "#EEF1FF", fontSize: Math.min(w, h) * 0.085, yOffset: Math.min(w, h) * 0.024 },
-        });
-      } else if (agent === "opencode") {
-        drawAgentMark(svg, agent, w / 2, h * 0.48, Math.min(w, h) * 0.22, {
-          state, t,
-          palette: { outer: "#F1ECEC", inner: "#4B4646", bg: "#0D1724" },
-        });
-      } else {
-        drawAgentMark(svg, agent, w / 2, h * 0.48, Math.min(w, h) * 0.26, {
-          state, t,
-          palette: { top: "#FF4D4D", bottom: "#991B1B", eye: "#00E5CC" },
-        });
-      }
-      svg.appendChild(textNode(AGENTS[agent].label.split(" ")[0].toUpperCase(), {
-        x: w / 2,
-        y: h * 0.83,
-        "font-size": h * 0.048,
-        "font-weight": 700,
-        "text-anchor": "middle",
-        fill: agent === "opencode" ? "#F1ECEC" : agent === "codex" ? "#AFC0FF" : agent === "openclaw" ? "#FF8B8B" : "#E08A69",
-      }));
-      if (state === "asking") drawAskIndicator(svg, "tablet", w / 2, h * 0.28, Math.min(w, h) / 520, t);
-    }
 
     function renderTuiDevice(svg, agent, state, t) {
       const actual = getTuiActual(agent, state);
@@ -2497,15 +2446,15 @@
       renderEinkDevice(document.getElementById("sim-eink-color"), agent, state, true, t);
       renderEsp32Device(document.getElementById("sim-esp32-box"), agent, state, "box", t);
       renderEsp32Device(document.getElementById("sim-esp32-ips"), agent, state, "ips", t);
-      renderEsp32Device(document.getElementById("sim-esp32-ips-portrait"), agent, state, "portrait", t);
       renderEsp32Device(document.getElementById("sim-esp32-round"), agent, state, "round", t);
       renderPixooDevice(document.getElementById("sim-pixoo"), agent, state, t);
+      renderMatrixDotDevice(document.getElementById("sim-idot"), getIdotActual(agent, state));
+      renderMatrixDotDevice(document.getElementById("sim-timebox"), getTimeboxActual(agent, state));
       renderMatrixUsageDevice(document.getElementById("sim-tc-usage"), state, t);
       renderMatrixAgentsDevice(document.getElementById("sim-tc-agents"), agent, state, t);
       renderStreamDeckDevice(document.getElementById("sim-streamdeck"), agent, state, t);
       renderD200HDevice(document.getElementById("sim-d200h"), agent, state, t);
       renderD200HUsageDevice(document.getElementById("sim-d200h-usage"), state, t);
-      renderAppleWatchDevice(document.getElementById("sim-apple-watch"), agent, state, t);
       renderTuiDevice(document.getElementById("sim-tui"), agent, state, t);
     }
 
@@ -2515,17 +2464,14 @@
       const state = params.get("state");
       const animate = params.get("animate");
       const cycle = params.get("cycle");
-      const watchSize = params.get("watch");
       if (agent && AGENTS[agent]) document.getElementById("agent").value = agent;
       if (state && STATE_STYLE[state]) document.getElementById("state").value = state;
       if (animate === "off") document.getElementById("animate").value = "off";
       if (cycle === "on") document.getElementById("cycle").value = "on";
-      if (watchSize && WATCH_SPECS[watchSize]) document.getElementById("watch-size").value = watchSize;
     }
 
     document.getElementById("agent").addEventListener("change", render);
     document.getElementById("state").addEventListener("change", render);
-    document.getElementById("watch-size").addEventListener("change", render);
     document.getElementById("animate").addEventListener("change", (e) => {
       animateEnabled = e.target.value === "on";
       render();

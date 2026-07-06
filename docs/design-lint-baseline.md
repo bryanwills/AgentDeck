@@ -25,7 +25,6 @@ Total: **93 violations** across **5 rules**.
 | `docs/appstore-migration-diagram.html` | 61 | Off-product flowchart with generic Tailwind palette; not a UI surface — skip-rule candidate |
 | `docs/design/Design System.html` | 24 | Design guide intentionally displays raw colour swatches — token-defining-ish, may move to allowlist |
 | `docs/design/Design Audit.html` | 4 | Design reference page |
-| `scripts/pages-index.html` | 4 | Internal docs index |
 
 ## Migration policy
 
@@ -42,6 +41,7 @@ The lint script exempts these from the raw-hex rule because they ARE the source 
 - `design/components.css`, `design/patterns.css`, `design/icons.jsx` — design system styles
 - `docs/design/creatures.jsx` — embeds upstream brand SVGs (DESIGN.md §6.1 forbids redrawing)
 - `apple/AgentDeck/Resources/apme-dashboard.html` — embedded HTML resource, manual mirror of token primitives in its `:root`
+- `docs/hardware/index.html`, `scripts/pages-index.html`, `docs/site/index.html`, `docs/gallery/index.html` — published GitHub Pages surfaces (hardware sheet / landing / docs hub / device gallery), each self-contained with a `:root` warm-token mirror
 - `plugin/bound.serendipity.agentdeck.sdPlugin/ui/design-tokens.css` — Stream Deck Property Inspector mirror
 
 When CSS tokens change, every file in the second half of the list (the manual mirrors) must be hand-synced.

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderFrame, resetDirector } from '../bridge/dist/pixoo/pixoo-renderer.js';
 import { renderSessionSlot } from '../shared/dist/svg-renderers/session-slot-renderer.js';
+import { renderUsageWideSlot } from '../shared/dist/d200h-layout.js';
 import {
   initTerrarium,
   setOctopi,
@@ -99,6 +100,40 @@ function renderPixooData() {
     }
   }
   return result;
+}
+
+// LED-matrix surfaces render from the SAME canonical renderer as Pixoo64, at the
+// device's native size: iDotMatrix 32×32 (standard terrarium) and Timebox Mini
+// 11×11 (micro layout). renderFrame supports size 11|32|64.
+function renderMatrixData(size, layout) {
+  const now = Date.UTC(2026, 2, 28, 12, 0, 0);
+  const result = {};
+  for (const agent of Object.keys(AGENTS)) {
+    for (const state of STATES) {
+      resetDirector();
+      const frame = renderFrame(
+        buildStateEvent(agent, state),
+        buildUsage(now),
+        buildSessions(agent, state),
+        now + STATES.indexOf(state) * 1000 + Object.keys(AGENTS).indexOf(agent) * 250,
+        size,
+        layout,
+      );
+      result[`${agent}:${state}`] = {
+        width: size,
+        height: size,
+        b64: Buffer.from(frame).toString('base64'),
+      };
+    }
+  }
+  return result;
+}
+
+// Canonical D200H merged 5H/7D usage window (288×144) — the real shared renderer
+// the plugin-ulanzi deck uses, not a bespoke approximation.
+function renderD200HUsageData() {
+  const usage = buildUsage(Date.UTC(2026, 2, 28, 12, 0, 0));
+  return { svg: renderUsageWideSlot(usage.fiveHourPercent, usage.sevenDayPercent, true) };
 }
 
 function renderStreamDeckData() {
@@ -325,6 +360,9 @@ function renderTuiTerrariumData() {
 
 const simulatorData = {
   pixoo: renderPixooData(),
+  idot: renderMatrixData(32, 'standard'),
+  timebox: renderMatrixData(11, 'micro'),
+  d200hUsage: renderD200HUsageData(),
   streamDeck: renderStreamDeckData(),
   tui: renderTuiData(),
   tuiTerrarium: renderTuiTerrariumData(),

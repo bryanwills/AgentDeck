@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<!--
+  AgentDeck — Documentation hub (GitHub Pages /docs/).
+  Self-contained single file; :root mirrors the warm-palette subset of
+  design/tokens.css (DESIGN.md §0) — token-defining file, listed in
+  design/lint.sh's TOKEN_FILES. Doc links point at GitHub blob URLs because the
+  Markdown sources are not published to Pages; the HTML surfaces link internally.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentDeck — Documentation</title>
+<meta name="description" content="AgentDeck documentation hub — architecture, devices, daemon &amp; protocol, evaluation (APME), design system, and release ops.">
+<link rel="icon" type="image/png" href="../icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --tide-50:#f5f3ec; --tide-100:#ebe6d6; --tide-200:#d8cfb6; --tide-300:#a8b09a;
+    --ink-900:#0e1f1f; --ink-800:#15302f; --ink-700:#1f4544; --ink-500:#426664; --ink-300:#7c9694;
+    --kelp-700:#1f6157; --kelp-500:#2f8a7c; --kelp-300:#6fb6a8;
+    --coral-500:#c0573a; --coral-700:#8c3a23;
+    --amber-500:#c8923a;
+    --font-sans:"IBM Plex Sans","IBM Plex Sans KR","IBM Plex Sans JP",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    --font-mono:"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace;
+    --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
+    --s-8:32px; --s-10:40px; --s-12:48px; --s-16:64px; --s-20:80px;
+    --container-max:1080px; --container-pad:24px;
+    --r-md:8px; --r-xl:12px; --r-2xl:14px; --r-pill:999px;
+    --sh-card:0 6px 20px -8px rgba(14,31,31,0.45);
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; font-family: var(--font-sans); color: var(--ink-900); background: var(--tide-50); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: var(--kelp-700); }
+  code, .mono { font-family: var(--font-mono); }
+
+  .nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(10px); background: rgba(245,243,236,0.82); border-bottom: 1px solid var(--tide-200); }
+  .nav-in { max-width: var(--container-max); margin: 0 auto; padding: var(--s-3) var(--container-pad); display: flex; align-items: center; gap: var(--s-4); }
+  .brand { display: flex; align-items: center; gap: var(--s-3); text-decoration: none; color: var(--ink-900); font-weight: 700; letter-spacing: -0.01em; }
+  .brand img { width: 30px; height: 30px; border-radius: var(--r-md); }
+  .nav-links { margin-left: auto; display: flex; gap: var(--s-2); flex-wrap: wrap; }
+  .nav-links a { font-size: 14px; font-weight: 500; text-decoration: none; color: var(--ink-700); padding: var(--s-1) var(--s-3); border-radius: var(--r-pill); }
+  .nav-links a:hover { background: var(--tide-200); color: var(--ink-900); }
+  .nav-links a.active { background: var(--tide-200); color: var(--ink-900); }
+  .nav-links a.gh { background: var(--ink-800); color: var(--tide-50); }
+
+  .wrap { max-width: var(--container-max); margin: 0 auto; padding: var(--s-12) var(--container-pad) var(--s-20); }
+  .kicker { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--kelp-700); margin: 0 0 var(--s-3); }
+  h1 { font-size: clamp(30px, 5vw, 44px); letter-spacing: -0.025em; margin: 0 0 var(--s-3); line-height: 1.08; }
+  .lede { font-size: 18px; color: var(--ink-700); max-width: 70ch; margin: 0 0 var(--s-4); }
+
+  h2 { font-size: 24px; letter-spacing: -0.015em; margin: var(--s-16) 0 var(--s-1); padding-bottom: var(--s-2); border-bottom: 2px solid var(--tide-200); }
+  h2 .h2note { font-family: var(--font-sans); font-size: 14px; font-weight: 400; color: var(--ink-500); letter-spacing: 0; margin-left: var(--s-3); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--s-3); margin-top: var(--s-4); }
+  .doc {
+    display: block; text-decoration: none; color: var(--ink-900);
+    background: var(--tide-100); border: 1px solid var(--tide-200); border-radius: var(--r-2xl);
+    padding: var(--s-4) var(--s-5); box-shadow: var(--sh-card); transition: transform .12s ease, border-color .12s ease;
+  }
+  .doc:hover { transform: translateY(-2px); border-color: var(--kelp-300); }
+  .doc .path { font-family: var(--font-mono); font-size: 11.5px; color: var(--kelp-700); }
+  .doc h3 { font-size: 16.5px; margin: var(--s-1) 0; letter-spacing: -0.01em; }
+  .doc p { font-size: 13.5px; color: var(--ink-500); margin: 0; line-height: 1.45; }
+  .doc .tag { display: inline-block; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tide-50); background: var(--ink-700); border-radius: var(--r-pill); padding: 1px 7px; margin-top: var(--s-2); }
+  .doc .tag.html { background: var(--kelp-700); }
+  .doc .tag.md { background: var(--ink-500); }
+
+  footer { max-width: var(--container-max); margin: 0 auto; padding: var(--s-10) var(--container-pad) var(--s-16); color: var(--ink-500); font-size: 13px; border-top: 2px solid var(--tide-200); }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-in">
+    <a class="brand" href="../"><img src="../icon.png" alt="">AgentDeck</a>
+    <div class="nav-links">
+      <a href="../hardware/">Hardware</a>
+      <a href="../gallery/">Gallery</a>
+      <a class="active" href="./">Docs</a>
+      <a href="../demo/">Demo</a>
+      <a href="../reports/">Reports</a>
+      <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap">
+  <p class="kicker">AgentDeck · Handbook</p>
+  <h1>Documentation</h1>
+  <p class="lede">
+    A map of the project for the curious and the contributing. HTML surfaces open here on the site;
+    Markdown docs open on GitHub. Numbers, device specs, and conventions live in these files — they are the source of truth.
+  </p>
+
+  <h2>Start here <span class="h2note">what the project is and how it's built</span></h2>
+  <div class="grid">
+    <a class="doc" href="https://github.com/puritysb/AgentDeck#readme">
+      <div class="path">README.md</div><h3>Project overview</h3>
+      <p>What AgentDeck is, install paths, the 16-surface story, and the direction shift toward hooks-first observation.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/architecture.md">
+      <div class="path">docs/architecture.md</div><h3>Architecture</h3>
+      <p>Monorepo layout, BridgeCore, the PtyAdapter / AgentAdapter hierarchy, device modules, and the plugin connection model.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/agent-harness.md">
+      <div class="path">docs/agent-harness.md</div><h3>Multi-agent dev harness</h3>
+      <p>How Claude Code / Codex / OpenCode / Antigravity each enter the repo and discover skills &amp; workflows.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+  </div>
+
+  <h2>Devices &amp; hardware <span class="h2note">the 16 surfaces</span></h2>
+  <div class="grid">
+    <a class="doc" href="../hardware/">
+      <div class="path">/hardware/</div><h3>Hardware &amp; OS spec sheet</h3>
+      <p>The full matrix — SoC, resolution, display IC, flash, transport, and App Store tier for every surface.</p>
+      <span class="tag html">Live page</span>
+    </a>
+    <a class="doc" href="../gallery/">
+      <div class="path">/gallery/</div><h3>Device gallery</h3>
+      <p>The real hardware board by board, each card carrying its live specs.</p>
+      <span class="tag html">Live page</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/hardware-compatibility.md">
+      <div class="path">docs/hardware-compatibility.md</div><h3>Compatibility SSOT</h3>
+      <p>Canonical resolutions, chips, and OS targets — the source the spec sheet renders from.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/devices.md">
+      <div class="path">docs/devices.md</div><h3>Device transport matrix</h3>
+      <p>Per-device details — serial vs WiFi WS vs BLE vs HTTP, and how each renders session state.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/esp32.md">
+      <div class="path">docs/esp32.md</div><h3>ESP32 firmware</h3>
+      <p>Boards, flash safety, WiFi provisioning, disconnect recovery, and WiFi OTA.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/esp32-client-contract.md">
+      <div class="path">docs/esp32-client-contract.md</div><h3>ESP32 client contract</h3>
+      <p>The wire contract a display-only ESP32 client must honour — inbound events and <code>device_info</code> frames.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/android.md">
+      <div class="path">docs/android.md</div><h3>Android support</h3>
+      <p>Device matrix (Crema / Onyx / Kobo / tablets) and creature rendering on e-ink.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/android-ui.md">
+      <div class="path">docs/android-ui.md</div><h3>Android UI vision</h3>
+      <p>E-ink + tablet layouts, creatures, and GC16 / DU / A2 refresh zones.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+  </div>
+
+  <h2>Daemon, plugins &amp; protocol <span class="h2note">how the pieces talk</span></h2>
+  <div class="grid">
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/daemon.md">
+      <div class="path">docs/daemon.md</div><h3>Daemon hub</h3>
+      <p>Port 9120 singleton, mDNS recovery, usage relay, Gateway isolation, multi-surface monitoring.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/protocol.md">
+      <div class="path">docs/protocol.md</div><h3>Bridge ↔ plugin protocol</h3>
+      <p>The WebSocket dialect shared across every surface.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/gateway-protocol.md">
+      <div class="path">docs/gateway-protocol.md</div><h3>OpenClaw Gateway protocol</h3>
+      <p>Frame format, Ed25519 handshake, RPC/event catalog, versioning.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/plugin-conventions.md">
+      <div class="path">docs/plugin-conventions.md</div><h3>Plugin conventions</h3>
+      <p>Encoder LCD, wide canvas, button labels, the D200H Ulanzi Studio plugin, sleep/wake.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/v4-layout.md">
+      <div class="path">docs/v4-layout.md</div><h3>Stream Deck v4 layout</h3>
+      <p>Session-per-button keypad + encoder mapping, v3→v4 changes.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/tui-dashboard.md">
+      <div class="path">docs/tui-dashboard.md</div><h3>TUI dashboard</h3>
+      <p><code>agentdeck dashboard</code> — terrarium, sprites, adaptive layouts.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+  </div>
+
+  <h2>Evaluation — APME <span class="h2note">judging agents, not projects</span></h2>
+  <div class="grid">
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/why-apme.md">
+      <div class="path">docs/why-apme.md</div><h3>Why APME</h3>
+      <p>The gut-feel routing problem, per-category evaluation strategy, composite score, and vibe-labeling first.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/apme.md">
+      <div class="path">docs/apme.md</div><h3>APME eval module</h3>
+      <p>Schema, collector, deterministic + LLM judge, scorecard/recommender, daemon API, settings.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/apme-pipeline.md">
+      <div class="path">docs/apme-pipeline.md</div><h3>APME pipeline</h3>
+      <p>The 8-layer flow — ingestion, collector → store, classifier, runner, tuner, HTTP/WS, device rendering.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+  </div>
+
+  <h2>Design system <span class="h2note">the aquarium-tide look</span></h2>
+  <div class="grid">
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/DESIGN.md">
+      <div class="path">DESIGN.md</div><h3>Design spec</h3>
+      <p>Aquarium-tide tokens, type, components, the marketing↔product palette split, hardware surfaces.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/design/tokens.css">
+      <div class="path">design/tokens.css</div><h3>Token source of truth</h3>
+      <p>Color / type / spacing tokens mirrored into TS, Swift, Kotlin, and browser JS.</p>
+      <span class="tag md">CSS</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/wake-word.md">
+      <div class="path">docs/wake-word.md · voice-setup.md</div><h3>Voice &amp; wake word</h3>
+      <p>Porcupine / microWakeWord and Apple SFSpeech permissions setup.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+  </div>
+
+  <h2>Release &amp; ops <span class="h2note">shipping the app</span></h2>
+  <div class="grid">
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/RELEASING.md">
+      <div class="path">RELEASING.md</div><h3>Release policy</h3>
+      <p>Per-track tags (apple / android / npm / esp32), monotonic-version constraints, bundle-ID steps.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/appstore-feature-matrix.md">
+      <div class="path">docs/appstore-feature-matrix.md</div><h3>App Store feature matrix</h3>
+      <p>What ships in the sandboxed App Store app vs. what needs the terminal-managed daemon.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+    <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/testing.md">
+      <div class="path">docs/testing.md · /reports/</div><h3>Testing</h3>
+      <p>Vitest, JUnit/Robolectric, XCTest, Robot Framework — and the live CI report.</p>
+      <span class="tag md">Markdown</span>
+    </a>
+  </div>
+</div>
+
+<footer>
+  Not the doc you needed? The full index lives in
+  <a href="https://github.com/puritysb/AgentDeck/blob/master/CLAUDE.md">CLAUDE.md</a> ·
+  <a href="../">Back to home</a>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<!--
+  AgentDeck — Device gallery (GitHub Pages /gallery/).
+  Self-contained single file; :root mirrors the warm-palette subset of
+  design/tokens.css (DESIGN.md §0) — token-defining file, listed in
+  design/lint.sh's TOKEN_FILES.
+
+  Adding a photo: drop a landscape image at docs/gallery/photos/<slug>.jpg
+  (or .png/.webp — update the <img src>). Until then each card shows the
+  diagonal-hatch placeholder (DESIGN.md §10 r7). Slugs are the <img src>
+  basenames below; see docs/gallery/photos/README.md.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentDeck — Device Gallery</title>
+<meta name="description" content="The real AgentDeck hardware, board by board — ESP32 displays, LED matrices, HID decks, and the software surfaces.">
+<link rel="icon" type="image/png" href="../icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --tide-50:#f5f3ec; --tide-100:#ebe6d6; --tide-200:#d8cfb6; --tide-300:#a8b09a;
+    --ink-900:#0e1f1f; --ink-800:#15302f; --ink-700:#1f4544; --ink-500:#426664; --ink-300:#7c9694;
+    --kelp-700:#1f6157; --kelp-500:#2f8a7c; --kelp-300:#6fb6a8;
+    --coral-500:#c0573a; --coral-700:#8c3a23;
+    --amber-500:#c8923a;
+    --font-sans:"IBM Plex Sans","IBM Plex Sans KR","IBM Plex Sans JP",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    --font-mono:"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace;
+    --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
+    --s-8:32px; --s-10:40px; --s-12:48px; --s-16:64px; --s-20:80px;
+    --container-max:1180px; --container-pad:24px;
+    --r-md:8px; --r-xl:12px; --r-2xl:14px; --r-pill:999px;
+    --sh-card:0 6px 20px -8px rgba(14,31,31,0.45);
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; font-family: var(--font-sans); color: var(--ink-900); background: var(--tide-50); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  a { color: var(--kelp-700); }
+  code { font-family: var(--font-mono); }
+
+  .nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(10px); background: rgba(245,243,236,0.82); border-bottom: 1px solid var(--tide-200); }
+  .nav-in { max-width: var(--container-max); margin: 0 auto; padding: var(--s-3) var(--container-pad); display: flex; align-items: center; gap: var(--s-4); }
+  .brand { display: flex; align-items: center; gap: var(--s-3); text-decoration: none; color: var(--ink-900); font-weight: 700; letter-spacing: -0.01em; }
+  .brand img { width: 30px; height: 30px; border-radius: var(--r-md); }
+  .nav-links { margin-left: auto; display: flex; gap: var(--s-2); flex-wrap: wrap; }
+  .nav-links a { font-size: 14px; font-weight: 500; text-decoration: none; color: var(--ink-700); padding: var(--s-1) var(--s-3); border-radius: var(--r-pill); }
+  .nav-links a:hover { background: var(--tide-200); color: var(--ink-900); }
+  .nav-links a.active { background: var(--tide-200); color: var(--ink-900); }
+  .nav-links a.gh { background: var(--ink-800); color: var(--tide-50); }
+
+  .wrap { max-width: var(--container-max); margin: 0 auto; padding: var(--s-12) var(--container-pad) var(--s-20); }
+  .kicker { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--kelp-700); margin: 0 0 var(--s-3); }
+  h1 { font-size: clamp(30px, 5vw, 44px); letter-spacing: -0.025em; margin: 0 0 var(--s-3); line-height: 1.08; }
+  .lede { font-size: 18px; color: var(--ink-700); max-width: 72ch; margin: 0 0 var(--s-3); }
+  .meta { font-size: 14px; color: var(--ink-500); margin: 0; }
+
+  h2 { font-size: 26px; letter-spacing: -0.015em; margin: var(--s-16) 0 var(--s-4); padding-bottom: var(--s-2); border-bottom: 2px solid var(--tide-200); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: var(--s-5); }
+  .card { background: var(--tide-100); border: 1px solid var(--tide-200); border-radius: var(--r-2xl); overflow: hidden; box-shadow: var(--sh-card); display: flex; flex-direction: column; }
+  .shot { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--tide-50); }
+  .shot .ph {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s-2);
+    background: repeating-linear-gradient(45deg, var(--tide-200), var(--tide-200) 7px, var(--tide-100) 7px, var(--tide-100) 14px);
+    color: var(--ink-500);
+  }
+  .shot .ph .pk { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .shot .ph .pn { font-family: var(--font-mono); font-size: 11px; color: var(--ink-700); background: var(--tide-50); border: 1px solid var(--tide-200); border-radius: var(--r-pill); padding: 2px 9px; }
+  .shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+  .body { padding: var(--s-4) var(--s-5) var(--s-5); display: flex; flex-direction: column; gap: var(--s-1); flex: 1; }
+  .body .top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); }
+  .body h3 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
+  .badge { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em; padding: 1px 8px; border-radius: var(--r-pill); white-space: nowrap; }
+  .b-esp { background: var(--kelp-700); color: var(--tide-50); }
+  .b-led { background: var(--coral-700); color: var(--tide-50); }
+  .b-hid { background: var(--ink-700); color: var(--tide-50); }
+  .b-sw  { background: var(--ink-500); color: var(--tide-50); }
+  .b-tui { background: var(--ink-900); color: var(--kelp-300); }
+  .b-exp { background: var(--amber-500); color: var(--ink-900); }
+  .body .sub { font-family: var(--font-mono); font-size: 12px; color: var(--ink-500); margin: 0 0 var(--s-2); }
+  .specs { margin-top: auto; display: flex; flex-direction: column; gap: 2px; }
+  .spec { display: flex; justify-content: space-between; gap: var(--s-3); font-size: 12.5px; border-top: 1px dashed var(--tide-200); padding-top: 3px; }
+  .spec .k { color: var(--ink-500); }
+  .spec .v { font-family: var(--font-mono); color: var(--ink-900); text-align: right; }
+
+  footer { max-width: var(--container-max); margin: 0 auto; padding: var(--s-10) var(--container-pad) var(--s-16); color: var(--ink-500); font-size: 13px; border-top: 2px solid var(--tide-200); }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-in">
+    <a class="brand" href="../"><img src="../icon.png" alt="">AgentDeck</a>
+    <div class="nav-links">
+      <a href="../hardware/">Hardware</a>
+      <a class="active" href="./">Gallery</a>
+      <a href="../docs/">Docs</a>
+      <a href="../demo/">Demo</a>
+      <a href="../reports/">Reports</a>
+      <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap">
+  <p class="kicker">AgentDeck · Gallery</p>
+  <h1>The hardware</h1>
+  <p class="lede">
+    Every surface AgentDeck steers, board by board. Photos are added one at a time —
+    empty slots show the hatch placeholder with the filename to drop in.
+  </p>
+  <p class="meta">Specs mirror the <a href="../hardware/">hardware spec sheet</a> (SSOT: <code>docs/hardware-compatibility.md</code>). Add a photo at <code>docs/gallery/photos/&lt;slug&gt;.jpg</code>.</p>
+
+  <h2>ESP32 firmware displays</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/ips35.jpg</span></div><img src="photos/ips35.jpg" alt="ESP32 IPS 3.5 inch" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>IPS 3.5"</h3><span class="badge b-esp">ESP32-S3</span></div>
+        <p class="sub">JC3248W535 · Guition</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">480×320</span></div><div class="spec"><span class="k">Panel</span><span class="v">AXS15231B IPS</span></div><div class="spec"><span class="k">Transport</span><span class="v">Serial / WiFi WS</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/amoled18.jpg</span></div><img src="photos/amoled18.jpg" alt="ESP32 round AMOLED 1.8 inch" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Round AMOLED 1.8"</h3><span class="badge b-esp">ESP32-S3</span></div>
+        <p class="sub">JC3636W518 · Guition</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">360×360</span></div><div class="spec"><span class="k">Panel</span><span class="v">ST77916 AMOLED</span></div><div class="spec"><span class="k">Transport</span><span class="v">Serial / WiFi WS</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/box86.jpg</span></div><img src="photos/box86.jpg" alt="ESP32 86 Box 4 inch" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>86 Box 4"</h3><span class="badge b-esp">ESP32-S3</span></div>
+        <p class="sub">ESP32-S3-4848S040 · Guition</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">480×480</span></div><div class="spec"><span class="k">Panel</span><span class="v">ST7701 IPS</span></div><div class="spec"><span class="k">Transport</span><span class="v">Serial / WiFi WS</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/ttgo.jpg</span></div><img src="photos/ttgo.jpg" alt="TTGO T-Display" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>TTGO T-Display 1.14"</h3><span class="badge b-esp">ESP32</span></div>
+        <p class="sub">LilyGO T-Display</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">135×240</span></div><div class="spec"><span class="k">Panel</span><span class="v">ST7789 TFT</span></div><div class="spec"><span class="k">Transport</span><span class="v">Serial / WiFi WS</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/ips10.jpg</span></div><img src="photos/ips10.jpg" alt="ESP32 IPS 10.1 inch" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>IPS 10.1"</h3><span class="badge b-esp">ESP32-P4 + C6</span></div>
+        <p class="sub">JC8012P4A1C · Guition</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">800×1280</span></div><div class="spec"><span class="k">Panel</span><span class="v">JD9365 MIPI-DSI</span></div><div class="spec"><span class="k">Transport</span><span class="v">Serial / WiFi WS</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/inkdeck.jpg</span></div><img src="photos/inkdeck.jpg" alt="InkDeck e-ink" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>InkDeck e-ink</h3><span class="badge b-exp">EXPERIMENTAL</span></div>
+        <p class="sub">Seeed TRMNL 7.5" OG · XIAO ESP32-S3 Plus</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">800×480</span></div><div class="spec"><span class="k">Panel</span><span class="v">UC8179 e-ink</span></div><div class="spec"><span class="k">Transport</span><span class="v">WiFi WS (planned)</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/xteink-x3.jpg</span></div><img src="photos/xteink-x3.jpg" alt="XTeink X3 e-ink" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>XTeink X3</h3><span class="badge b-exp">EXPERIMENTAL</span></div>
+        <p class="sub">ESP32-C3 · CrossPoint Reader fork</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">528×792</span></div><div class="spec"><span class="k">Panel</span><span class="v">3.7" e-ink</span></div><div class="spec"><span class="k">Transport</span><span class="v">WiFi WS</span></div></div></div>
+    </div>
+  </div>
+
+  <h2>LED matrices</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/pixoo64.jpg</span></div><img src="photos/pixoo64.jpg" alt="Divoom Pixoo64" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Divoom Pixoo64</h3><span class="badge b-led">LED</span></div>
+        <p class="sub">Commercial LED frame · WiFi</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">64×64 RGB</span></div><div class="spec"><span class="k">Transport</span><span class="v">HTTP REST :80</span></div><div class="spec"><span class="k">Connect</span><span class="v">WiFi 2.4G</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/tc001.jpg</span></div><img src="photos/tc001.jpg" alt="Ulanzi TC001" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Ulanzi TC001</h3><span class="badge b-esp">ESP32</span></div>
+        <p class="sub">WS2812B matrix · env led8x32</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">8×32 (256 LED)</span></div><div class="spec"><span class="k">Render</span><span class="v">FastLED 3.7</span></div><div class="spec"><span class="k">Transport</span><span class="v">Serial / WiFi WS</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/idotmatrix.jpg</span></div><img src="photos/idotmatrix.jpg" alt="iDotMatrix 32x32" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>iDotMatrix 32×32</h3><span class="badge b-led">BLE</span></div>
+        <p class="sub">Commercial BLE pixel display</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">32×32 AMOLED</span></div><div class="spec"><span class="k">Transport</span><span class="v">BLE GATT</span></div><div class="spec"><span class="k">Connect</span><span class="v">Bluetooth LE</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/timebox-mini.jpg</span></div><img src="photos/timebox-mini.jpg" alt="Divoom Timebox Mini" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Divoom Timebox Mini</h3><span class="badge b-led">BLE</span></div>
+        <p class="sub">Commercial BLE pixel display</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">11×11 RGB</span></div><div class="spec"><span class="k">Transport</span><span class="v">BLE GATT (ISSC)</span></div><div class="spec"><span class="k">Connect</span><span class="v">Bluetooth LE</span></div></div></div>
+    </div>
+  </div>
+
+  <h2>HID decks</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/d200h.jpg</span></div><img src="photos/d200h.jpg" alt="Ulanzi D200H Deck Dock" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Ulanzi D200H</h3><span class="badge b-hid">HID</span></div>
+        <p class="sub">SigmaStar SSD210 · Deck Dock</p>
+        <div class="specs"><div class="spec"><span class="k">Resolution</span><span class="v">960×540</span></div><div class="spec"><span class="k">Keys</span><span class="v">14 (nv3052c LCD)</span></div><div class="spec"><span class="k">Transport</span><span class="v">Ulanzi Studio plugin</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/streamdeck-plus.jpg</span></div><img src="photos/streamdeck-plus.jpg" alt="Elgato Stream Deck Plus" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Stream Deck+</h3><span class="badge b-hid">HID</span></div>
+        <p class="sub">Elgato · agentdeck-sdplus</p>
+        <div class="specs"><div class="spec"><span class="k">Keys</span><span class="v">8 (4×2)</span></div><div class="spec"><span class="k">Input</span><span class="v">4 dials + touch strip</span></div><div class="spec"><span class="k">Transport</span><span class="v">WebSocket :9120</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Photo slot</span><span class="pn">photos/streamdeck-15.jpg</span></div><img src="photos/streamdeck-15.jpg" alt="Elgato Stream Deck 15-key" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Stream Deck (15-key)</h3><span class="badge b-hid">HID</span></div>
+        <p class="sub">Elgato · agentdeck-sd</p>
+        <div class="specs"><div class="spec"><span class="k">Keys</span><span class="v">15 (5×3)</span></div><div class="spec"><span class="k">Also</span><span class="v">mini · XL auto-grid</span></div><div class="spec"><span class="k">Transport</span><span class="v">WebSocket :9120</span></div></div></div>
+    </div>
+  </div>
+
+  <h2>Software &amp; terminal surfaces</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Screenshot slot</span><span class="pn">photos/macos.jpg</span></div><img src="photos/macos.jpg" alt="AgentDeck on macOS" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Apple — macOS</h3><span class="badge b-sw">SwiftUI</span></div>
+        <p class="sub">In-process Swift daemon · App Store</p>
+        <div class="specs"><div class="spec"><span class="k">Min OS</span><span class="v">macOS 26.0</span></div><div class="spec"><span class="k">Daemon</span><span class="v">in-process :9120</span></div><div class="spec"><span class="k">Bundle</span><span class="v">agent.deck</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Screenshot slot</span><span class="pn">photos/ios.jpg</span></div><img src="photos/ios.jpg" alt="AgentDeck on iPhone and iPad" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Apple — iOS / iPadOS</h3><span class="badge b-sw">SwiftUI</span></div>
+        <p class="sub">Same-LAN WebSocket viewer</p>
+        <div class="specs"><div class="spec"><span class="k">Min OS</span><span class="v">iOS / iPadOS 17</span></div><div class="spec"><span class="k">Transport</span><span class="v">WebSocket :9120</span></div><div class="spec"><span class="k">Connect</span><span class="v">WiFi (same-LAN)</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Screenshot slot</span><span class="pn">photos/android-eink.jpg</span></div><img src="photos/android-eink.jpg" alt="AgentDeck on Android e-ink reader" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Android — e-ink</h3><span class="badge b-sw">Compose</span></div>
+        <p class="sub">Crema / Onyx / Kobo / Pantone</p>
+        <div class="specs"><div class="spec"><span class="k">Refresh</span><span class="v">GC16 / DU / A2</span></div><div class="spec"><span class="k">Transport</span><span class="v">WS (ADB localhost)</span></div><div class="spec"><span class="k">minSdk</span><span class="v">29</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Screenshot slot</span><span class="pn">photos/android-tablet.jpg</span></div><img src="photos/android-tablet.jpg" alt="AgentDeck on Android tablet" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>Android — tablet</h3><span class="badge b-sw">Compose</span></div>
+        <p class="sub">Color LCD launcher</p>
+        <div class="specs"><div class="spec"><span class="k">Render</span><span class="v">60fps color</span></div><div class="spec"><span class="k">Transport</span><span class="v">WS + mDNS</span></div><div class="spec"><span class="k">Connect</span><span class="v">WiFi (same-LAN)</span></div></div></div>
+    </div>
+    <div class="card">
+      <div class="shot"><div class="ph"><span class="pk">Screenshot slot</span><span class="pn">photos/tui.jpg</span></div><img src="photos/tui.jpg" alt="AgentDeck TUI dashboard" onerror="this.remove()"></div>
+      <div class="body"><div class="top"><h3>TUI Dashboard</h3><span class="badge b-tui">terminal</span></div>
+        <p class="sub"><code>agentdeck dashboard</code></p>
+        <div class="specs"><div class="spec"><span class="k">Render</span><span class="v">truecolor ANSI</span></div><div class="spec"><span class="k">Terrarium</span><span class="v">braille sprites</span></div><div class="spec"><span class="k">Transport</span><span class="v">WebSocket :9120</span></div></div></div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Live renderer output for these surfaces is on the <a href="../demo/">device preview</a> ·
+  Full specs on the <a href="../hardware/">hardware sheet</a> ·
+  <a href="../">Back to home</a>
+</footer>
+
+</body>
+</html>

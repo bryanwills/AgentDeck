@@ -9,6 +9,7 @@
   <a href="https://www.npmjs.com/package/@agentdeck/setup"><img src="https://img.shields.io/npm/v/@agentdeck/setup.svg" alt="npm version"></a>
   <a href="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml"><img src="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/tests-vitest%20%2B%20platform%20suites-brightgreen.svg" alt="Vitest plus platform test suites">
+  <a href="https://puritysb.github.io/AgentDeck/"><img src="https://img.shields.io/badge/website-puritysb.github.io%2FAgentDeck-1f6157.svg" alt="Website"></a>
 </p>
 
 <p align="center">
@@ -38,6 +39,15 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 
 <p align="center">
   <a href="https://youtu.be/s-f8ICBcC4o"><strong>Watch Demo on YouTube</strong></a>
+</p>
+
+<p align="center">
+  🌊 <strong><a href="https://puritysb.github.io/AgentDeck/">Explore the project website →</a></strong><br>
+  <a href="https://puritysb.github.io/AgentDeck/hardware/">Hardware specs</a> ·
+  <a href="https://puritysb.github.io/AgentDeck/gallery/">Device gallery</a> ·
+  <a href="https://puritysb.github.io/AgentDeck/docs/">Documentation</a> ·
+  <a href="https://puritysb.github.io/AgentDeck/demo/">Live device preview</a> ·
+  <a href="https://puritysb.github.io/AgentDeck/reports/">Test reports</a>
 </p>
 
 <p align="center">

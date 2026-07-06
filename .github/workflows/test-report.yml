@@ -136,12 +136,17 @@ jobs:
 
       - name: Assemble Pages site
         run: |
-          mkdir -p _site/reports _site/demo _site/hardware
+          mkdir -p _site/reports _site/demo _site/hardware _site/gallery _site/docs
           # Landing page at root
           cp scripts/pages-index.html _site/index.html
           cp docs/media/agentdeck-icon.png _site/icon.png
           # Hardware / OS spec sheet under /hardware/ (self-contained single file)
           cp docs/hardware/index.html _site/hardware/index.html
+          # Device photo gallery under /gallery/ (+ any photos dropped in)
+          cp docs/gallery/index.html _site/gallery/index.html
+          cp -R docs/gallery/photos _site/gallery/photos
+          # Documentation hub under /docs/
+          cp docs/site/index.html _site/docs/index.html
           # Live demo under /demo/
           cp -R dist/demo/. _site/demo/
           # Test report under /reports/
