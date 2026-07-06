@@ -467,7 +467,70 @@ final class CodexOtelParserTests: XCTestCase {
         XCTAssertFalse(DaemonServer.shouldIgnorePostTerminalCodexProgressForTest(event: "codex_user_prompt_submit"))
     }
 
+    func testCodexOtelActivityOnlyKeepsAlreadyProcessingSessionsFresh() {
+        XCTAssertTrue(DaemonServer.shouldUseCodexOtelActivityForState(existingState: "processing"))
+        XCTAssertFalse(DaemonServer.shouldUseCodexOtelActivityForState(existingState: nil))
+        XCTAssertFalse(DaemonServer.shouldUseCodexOtelActivityForState(existingState: "idle"))
+        XCTAssertFalse(DaemonServer.shouldUseCodexOtelActivityForState(existingState: "awaiting_permission"))
+    }
+
+    func testAnonymousCodexOtelThreadDoesNotDriveSessionState() {
+        XCTAssertFalse(DaemonServer.shouldUseCodexOtelThreadForSessionState(threadId: "otel-active"))
+        XCTAssertTrue(DaemonServer.shouldUseCodexOtelThreadForSessionState(threadId: "019f364e-d68c-7c33-9215-069c76458d62"))
+    }
+
+    func testCodexRolloutReaderPrefersTaskCompleteLastAgentMessage() throws {
+        let root = try makeTempSessionsRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sid = "019f364e-d68c-7c33-9215-069c76458d62"
+        try writeRollout(root: root, sessionId: sid, lines: [
+            ["type": "event_msg", "payload": ["type": "agent_message", "message": "intermediate reply"]],
+            ["type": "event_msg", "payload": ["type": "task_complete", "last_agent_message": "authoritative reply"]],
+        ])
+
+        XCTAssertEqual(
+            CodexRolloutResponseReader.lastAgentMessage(sessionId: "codex:\(sid)", sessionsRoot: root),
+            "authoritative reply"
+        )
+    }
+
+    func testCodexRolloutReaderFallsBackToNewestAgentMessage() throws {
+        let root = try makeTempSessionsRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sid = "019f364e-d68c-7c33-9215-069c76458d63"
+        try writeRollout(root: root, sessionId: sid, lines: [
+            ["type": "event_msg", "payload": ["type": "agent_message", "message": "older reply"]],
+            ["type": "event_msg", "payload": ["type": "agent_message", "message": "newest reply"]],
+        ])
+
+        XCTAssertEqual(
+            CodexRolloutResponseReader.lastAgentMessage(sessionId: sid, sessionsRoot: root),
+            "newest reply"
+        )
+    }
+
     // MARK: - Helpers
+
+    private func makeTempSessionsRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agentdeck-codex-rollout-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    private func writeRollout(root: URL, sessionId: String, lines: [[String: Any]]) throws {
+        let dir = root
+            .appendingPathComponent("2026", isDirectory: true)
+            .appendingPathComponent("07", isDirectory: true)
+            .appendingPathComponent("06", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("rollout-2026-07-06T00-00-00-\(sessionId).jsonl")
+        let body = try lines.map { record -> String in
+            let data = try JSONSerialization.data(withJSONObject: record)
+            return String(data: data, encoding: .utf8) ?? ""
+        }.joined(separator: "\n")
+        try body.write(to: file, atomically: true, encoding: .utf8)
+    }
 
     private func otlp(spans: [[String: Any]]) -> [String: Any] {
         return [

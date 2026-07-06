@@ -1,41 +1,18 @@
 #if os(macOS)
 // LocalCodexAppObserver.swift — passive Codex Desktop detection.
 //
-// Codex Desktop does not always emit lifecycle hooks or OTel before the
-// first turn. The App Store daemon still needs to show that a distinct
-// Codex App session exists, without spawning `ps` or any helper process.
-// This uses macOS process metadata directly (ProcessEnumerator's sysctl
-// helpers) and only creates observed, read-only session rows.
+// Codex Desktop does not always emit lifecycle hooks before the first turn.
+// Treat only kernel processes with durable session metadata as observed
+// sessions; the top-level Codex.app process alone is integration presence,
+// not an agent session.
 
-import AppKit
 import Foundation
 
 enum LocalCodexAppObserver {
-    private static let codexAppBundleIdentifier = "com.openai.codex"
     private static let fallbackProjectName = "Codex App"
 
     static func collect() -> [DaemonSessionEntry] {
-        let kernels = ProcessEnumerator.processSnapshots().compactMap(observedKernelSession)
-        if !kernels.isEmpty { return kernels }
-
-        return NSRunningApplication
-            .runningApplications(withBundleIdentifier: codexAppBundleIdentifier)
-            .filter { !$0.isTerminated }
-            .map { app in
-                var entry = DaemonSessionEntry(
-                    id: "observed:codex-app:\(app.processIdentifier)",
-                    port: 0,
-                    pid: Int(app.processIdentifier),
-                    projectName: fallbackProjectName,
-                    agentType: "codex-app",
-                    tmuxSession: nil,
-                    tty: nil,
-                    parentTty: nil,
-                    startedAt: app.launchDate.map { ISO8601DateFormatter().string(from: $0) }
-                )
-                entry.state = "idle"
-                return entry
-            }
+        ProcessEnumerator.processSnapshots().compactMap(observedKernelSession)
     }
 
     private static func observedKernelSession(_ snapshot: ProcessEnumerator.ProcessSnapshot) -> DaemonSessionEntry? {

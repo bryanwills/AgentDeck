@@ -88,6 +88,94 @@ enum CodexHookIdentity {
     }
 }
 
+enum CodexRolloutResponseReader {
+    private static let maxDayDirs = 30
+    private static let tailBytes = 128 * 1024
+
+    static func lastAgentMessage(sessionId: String, sessionsRoot: URL? = nil) -> String? {
+        guard let file = locateRollout(sessionId: sessionId, sessionsRoot: sessionsRoot) else { return nil }
+        let text = readTail(file, maxBytes: tailBytes)
+        guard !text.isEmpty else { return nil }
+        var lastAgentMessage: String?
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
+            guard let data = rawLine.data(using: .utf8),
+                  let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  record["type"] as? String == "event_msg",
+                  let payload = record["payload"] as? [String: Any],
+                  let payloadType = payload["type"] as? String else {
+                continue
+            }
+            if payloadType == "task_complete",
+               let message = payload["last_agent_message"] as? String,
+               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return message.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if lastAgentMessage == nil,
+               payloadType == "agent_message",
+               let message = payload["message"] as? String,
+               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lastAgentMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            }
+        }
+        return lastAgentMessage
+    }
+
+    static func locateRollout(sessionId: String, sessionsRoot: URL? = nil) -> URL? {
+        let normalized = sessionId.hasPrefix("codex:")
+            ? String(sessionId.dropFirst("codex:".count))
+            : sessionId
+        guard normalized.range(of: #"^[0-9a-fA-F-]{8,}$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+        let root = sessionsRoot ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex")
+            .appendingPathComponent("sessions")
+        let suffix = "-\(normalized).jsonl"
+        var checked = 0
+        for year in numericDescending(contentsOf: root) {
+            let yearURL = root.appendingPathComponent(year, isDirectory: true)
+            for month in numericDescending(contentsOf: yearURL) {
+                let monthURL = yearURL.appendingPathComponent(month, isDirectory: true)
+                for day in numericDescending(contentsOf: monthURL) {
+                    checked += 1
+                    if checked > maxDayDirs { return nil }
+                    let dayURL = monthURL.appendingPathComponent(day, isDirectory: true)
+                    for name in safeContents(of: dayURL) {
+                        if name.hasPrefix("rollout-"), name.hasSuffix(suffix) {
+                            return dayURL.appendingPathComponent(name, isDirectory: false)
+                        }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func numericDescending(contentsOf url: URL) -> [String] {
+        safeContents(of: url)
+            .filter { $0.range(of: #"^\d+$"#, options: .regularExpression) != nil }
+            .sorted { (Int($0) ?? 0) > (Int($1) ?? 0) }
+    }
+
+    private static func safeContents(of url: URL) -> [String] {
+        (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+    }
+
+    private static func readTail(_ url: URL, maxBytes: Int) -> String {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let offset = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
+        do {
+            try handle.seek(toOffset: offset)
+            return String(data: handle.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        } catch {
+            return ""
+        }
+    }
+}
+
 /// ESP32 heartbeat callbacks run from the `ESP32Serial` actor, not from the
 /// daemon's `@MainActor` context. Store serial-facing event snapshots here so
 /// heartbeat code never reaches back into `DaemonServer` actor state.
@@ -3166,10 +3254,9 @@ final class DaemonServer {
             DaemonLogger.shared.debug("CodexOTel", "Opened \(sid) project=\(displayProjectName)")
         }
 
-        let observedCodexAppSession = LocalCodexAppObserver.collect().first
-        func sessionIdForCodexOtelThread(_ threadId: String) -> (sid: String, observedProjectName: String?) {
-            if threadId == "otel-active", let observed = observedCodexAppSession {
-                return (observed.id, observed.projectName)
+        func sessionIdForCodexOtelThread(_ threadId: String) -> (sid: String, observedProjectName: String?)? {
+            if !Self.shouldUseCodexOtelThreadForSessionState(threadId: threadId) {
+                return nil
             }
             return ("codex:\(threadId)", nil)
         }
@@ -3177,7 +3264,10 @@ final class DaemonServer {
         for event in events {
             switch event {
             case .turnStart(let threadId, _, let cwd):
-                let resolved = sessionIdForCodexOtelThread(threadId)
+                guard let resolved = sessionIdForCodexOtelThread(threadId) else {
+                    DaemonLogger.shared.debug("CodexOTel", "Ignored anonymous turnStart without durable thread id")
+                    continue
+                }
                 let sid = resolved.sid
                 let projectName = resolved.observedProjectName ?? codexProjectName(from: cwd, sessionId: sid)
                 if pushedSessionsById[sid] == nil {
@@ -3192,7 +3282,10 @@ final class DaemonServer {
                 lastTerminalCodexEventBySession.removeValue(forKey: sid)
 
             case .toolCall(let threadId, _, let tool, let cwd):
-                let resolved = sessionIdForCodexOtelThread(threadId)
+                guard let resolved = sessionIdForCodexOtelThread(threadId) else {
+                    DaemonLogger.shared.debug("CodexOTel", "Ignored anonymous toolCall without durable thread id")
+                    continue
+                }
                 let sid = resolved.sid
                 guard lastTerminalCodexEventBySession[sid] == nil else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late toolCall for finished session \(sid)")
@@ -3204,7 +3297,10 @@ final class DaemonServer {
                 lastHookAtByPushedSession[sid] = Date()
 
             case .toolResult(let threadId, _):
-                let sid = sessionIdForCodexOtelThread(threadId).sid
+                guard let sid = sessionIdForCodexOtelThread(threadId)?.sid else {
+                    DaemonLogger.shared.debug("CodexOTel", "Ignored anonymous toolResult without durable thread id")
+                    continue
+                }
                 guard lastTerminalCodexEventBySession[sid] == nil else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late toolResult for finished session \(sid)")
                     continue
@@ -3213,7 +3309,10 @@ final class DaemonServer {
                 lastHookAtByPushedSession[sid] = Date()
 
             case .turnEnd(let threadId, _):
-                let sid = sessionIdForCodexOtelThread(threadId).sid
+                guard let sid = sessionIdForCodexOtelThread(threadId)?.sid else {
+                    DaemonLogger.shared.debug("CodexOTel", "Ignored anonymous turnEnd without durable thread id")
+                    continue
+                }
                 updateSessionHookState(sessionId: sid, state: "idle", clearTool: true)
                 _ = stateMachine.transition(trigger: "stop", source: .hook)
                 stateMachine.toolCalls += 1
@@ -3222,14 +3321,25 @@ final class DaemonServer {
                 lastTerminalCodexEventBySession[sid] = Date()
 
             case .activity(let threadId, _, let name, let cwd):
-                let resolved = sessionIdForCodexOtelThread(threadId)
+                guard let resolved = sessionIdForCodexOtelThread(threadId) else {
+                    DaemonLogger.shared.debug("CodexOTel", "Ignored anonymous activity \(name) without durable thread id")
+                    continue
+                }
                 let sid = resolved.sid
                 guard lastTerminalCodexEventBySession[sid] == nil else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late activity \(name) for finished session \(sid)")
                     continue
                 }
+                guard let existing = pushedSessionsById[sid] else {
+                    DaemonLogger.shared.debug("CodexOTel", "Ignored activity \(name) without active turn for \(sid)")
+                    continue
+                }
                 ensureCodexSession(sid, projectName: resolved.observedProjectName ?? codexProjectName(from: cwd, sessionId: sid))
-                updateSessionHookState(sessionId: sid, state: "processing")
+                guard Self.shouldUseCodexOtelActivityForState(existingState: existing.state) else {
+                    DaemonLogger.shared.debug("CodexOTel", "Ignored activity \(name) for idle session \(sid)")
+                    continue
+                }
+                codexProcessingTouchedAtBySession[sid] = Date()
                 lastHookAtByPushedSession[sid] = Date()
             }
         }
@@ -3256,6 +3366,14 @@ final class DaemonServer {
 
     nonisolated static func shouldIgnorePostTerminalCodexProgressForTest(event: String) -> Bool {
         shouldIgnorePostTerminalCodexProgressEvent(event)
+    }
+
+    nonisolated static func shouldUseCodexOtelActivityForState(existingState: String?) -> Bool {
+        existingState == "processing"
+    }
+
+    nonisolated static func shouldUseCodexOtelThreadForSessionState(threadId: String) -> Bool {
+        threadId != "otel-active"
     }
 
     /// Decide which unknown hook events are allowed to create a session row.
@@ -5725,6 +5843,7 @@ final class DaemonServer {
             ?? (json["response"] as? String)
             ?? (json["output"] as? String)
             ?? (json["result"] as? String)
+            ?? CodexRolloutResponseReader.lastAgentMessage(sessionId: sessionId)
             ?? ""
         guard startTs != nil || !assistantText.isEmpty else {
             // No matching turn AND no response body — nothing to anchor;

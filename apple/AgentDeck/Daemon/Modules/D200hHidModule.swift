@@ -749,11 +749,12 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
 
         switch currentMode {
         case .sessionList:
-            // Slot 13 = usage monitor (big merged button, no action)
-            if index == 13 { return .unmapped }
-            // Slots 0-12 are sessions (13 per page)
-            guard index <= 12 else { return .unmapped }
-            let startIdx = sessionPage * 13
+            let capacity = D200hRenderer.sessionListCapacity(
+                stateEvent: cachedStateEvent,
+                usageEvent: cachedUsageEvent
+            )
+            guard index < capacity else { return .unmapped }
+            let startIdx = sessionPage * capacity
             let sessionIdx = startIdx + index
             guard sessionIdx < sessions.count else { return .unmapped }
             let session = sessions[sessionIdx]
@@ -881,8 +882,12 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             )
             slots = computedSlots
             if !d200hStableStockHidEnabled() {
-                let startIdx = sessionPage * 13
-                for i in 0..<13 {
+                let capacity = D200hRenderer.sessionListCapacity(
+                    stateEvent: cachedStateEvent,
+                    usageEvent: cachedUsageEvent
+                )
+                let startIdx = sessionPage * capacity
+                for i in 0..<capacity {
                     let sessionIdx = startIdx + i
                     guard sessionIdx < allSessions.count else { break }
                     if allSessions[sessionIdx].isAwaiting || allSessions[sessionIdx].isProcessing {
@@ -913,6 +918,10 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             optionMode: currentMode == .optionSelect,
             sessions: sessions,
             sessionPage: sessionPage,
+            sessionCapacity: D200hRenderer.sessionListCapacity(
+                stateEvent: cachedStateEvent,
+                usageEvent: cachedUsageEvent
+            ),
             focusedSessionId: focusedSessionId
         )
         if zip.isEmpty {
@@ -975,7 +984,6 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         let state = currentDisplayRenderState()
         guard buttonIndex < state.slots.count else { return }
         guard state.slots[buttonIndex].enabled else { return }
-        if buttonIndex == 13 && currentMode != .optionSelect { return }
 
         var flashSlots = state.slots
         flashSlots[buttonIndex] = flashSlots[buttonIndex].pressedFlash()
@@ -985,7 +993,6 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     private func restoreButtonAfterFlash(_ buttonIndex: Int) {
         let state = currentDisplayRenderState()
         guard buttonIndex < state.slots.count else { return }
-        if buttonIndex == 13 && currentMode != .optionSelect { return }
         sendPartialUpdate(slots: state.slots, buttonIds: [buttonIndex], sessions: state.sessions)
     }
 
@@ -1719,6 +1726,17 @@ private enum D200hRenderer {
 
     // MARK: - Mode A: Session List
 
+    static func hasLiveUsage(stateEvent: [String: Any]?, usageEvent: [String: Any]?) -> Bool {
+        let pct5Opt = usageEvent?["fiveHourPercent"] as? Double ?? stateEvent?["fiveHourPercent"] as? Double
+        let pct7Opt = usageEvent?["sevenDayPercent"] as? Double ?? stateEvent?["sevenDayPercent"] as? Double
+        let usageStale = usageEvent?["usageStale"] as? Bool ?? stateEvent?["usageStale"] as? Bool ?? false
+        return !usageStale && (pct5Opt != nil || pct7Opt != nil)
+    }
+
+    static func sessionListCapacity(stateEvent: [String: Any]?, usageEvent: [String: Any]?) -> Int {
+        hasLiveUsage(stateEvent: stateEvent, usageEvent: usageEvent) ? 13 : 14
+    }
+
     static func computeSessionListSlots(
         sessions: [D200hSessionInfo], stateEvent: [String: Any]?, usageEvent: [String: Any]?,
         page: Int, animFrame: Int
@@ -1743,9 +1761,12 @@ private enum D200hRenderer {
             return (slots, false)
         }
 
-        // Slots 0-12: sessions (13 per page), slot 13: usage monitor (big merged button)
-        let startIdx = page * 13
-        for i in 0..<13 {
+        // Live usage uses slot 13 as a wide usage tile. If usage is unavailable
+        // (Swift self-daemon without a CLI relay/OAuth usage path), give the
+        // space back to session monitoring instead of showing an empty usage card.
+        let capacity = sessionListCapacity(stateEvent: stateEvent, usageEvent: usageEvent)
+        let startIdx = page * capacity
+        for i in 0..<capacity {
             let sessionIdx = startIdx + i
             guard sessionIdx < sessions.count else { break }
             let session = sessions[sessionIdx]
@@ -1810,10 +1831,11 @@ private enum D200hRenderer {
             )
         }
 
-        // Slot 13: Usage monitor (big merged button at col3+col4, row2)
-        // Rendered separately as two-cell-wide PNG in renderFullZip/renderPartialZip.
-        // Keep slot data for reference but it won't go through renderButtonPng.
-        slots[13] = .dim
+        if capacity == 13 {
+            // Slot 13: usage monitor (big merged button at col3+col4, row2).
+            // Rendered separately as two-cell-wide PNG in renderFullZip.
+            slots[13] = .dim
+        }
 
         return (slots, needsAnim)
     }
@@ -2014,6 +2036,7 @@ private enum D200hRenderer {
     ) -> Data {
         var manifest: [String: Any] = [:]
         var files: [(name: String, data: Data)] = []
+        let sessionCapacity = sessionListCapacity(stateEvent: stateEvent, usageEvent: usageEvent)
 
         for (i, key) in keyDefs.enumerated() {
             if i == 13 { continue } // Slot 13 handled below as merged button
@@ -2022,41 +2045,45 @@ private enum D200hRenderer {
             let png = renderButtonPng(slot)
             let iconPath = iconFilePath(slotId: key.id, data: png)
             let label = manifestText(for: slot, optionMode: optionMode, slotId: key.id)
-            let actionPath = actionPath(for: slot, slotId: key.id, optionMode: optionMode, sessions: sessions, sessionPage: sessionPage, focusedSessionId: focusedSessionId)
+            let actionPath = actionPath(
+                for: slot,
+                slotId: key.id,
+                optionMode: optionMode,
+                sessions: sessions,
+                sessionPage: sessionPage,
+                sessionCapacity: sessionCapacity,
+                focusedSessionId: focusedSessionId
+            )
             manifest[colRow] = manifestEntry(text: label, iconPath: iconPath, actionPath: actionPath)
             files.append((iconPath, png))
         }
 
         if !optionMode {
-            // Slot 13: big merged usage button spans col3+col4 at row2.
-            // When upstream has no live Claude usage (in-process daemon with
-            // no CLI relay, OAuth missing, stale flag set) render a neutral
-            // blank tile instead of gauge+"STALE" text — a frozen number
-            // reads as current, even with a stale marker. Matches the
-            // blank-when-nil behavior on every other AgentDeck surface.
-            let pct5Opt = usageEvent?["fiveHourPercent"] as? Double ?? stateEvent?["fiveHourPercent"] as? Double
-            let pct7Opt = usageEvent?["sevenDayPercent"] as? Double ?? stateEvent?["sevenDayPercent"] as? Double
-            let usageStale = usageEvent?["usageStale"] as? Bool ?? stateEvent?["usageStale"] as? Bool ?? false
-            let usageLive = !usageStale && (pct5Opt != nil || pct7Opt != nil)
+            let usageLive = hasLiveUsage(stateEvent: stateEvent, usageEvent: usageEvent)
 
-            let png: Data
-            let label: String
             if usageLive {
+                // Slot 13: big merged usage button spans col3+col4 at row2.
+                let pct5Opt = usageEvent?["fiveHourPercent"] as? Double ?? stateEvent?["fiveHourPercent"] as? Double
+                let pct7Opt = usageEvent?["sevenDayPercent"] as? Double ?? stateEvent?["sevenDayPercent"] as? Double
                 let pct5 = pct5Opt ?? 0
                 let pct7 = pct7Opt ?? 0
                 let reset5 = usageEvent?["fiveHourResetsAt"] as? String ?? stateEvent?["fiveHourResetsAt"] as? String
                 let reset7 = usageEvent?["sevenDayResetsAt"] as? String ?? stateEvent?["sevenDayResetsAt"] as? String
                 let renewal = billingSummary(from: usageEvent) ?? billingSummary(from: stateEvent)
-                png = renderUsageWideButton(pct5: pct5, pct7: pct7, reset5: reset5, reset7: reset7, renewal: renewal, stale: false)
-                label = hidesNativeSessionLabels ? "" : usageText(window: "5H", percent: pct5)
+                let png = renderUsageWideButton(pct5: pct5, pct7: pct7, reset5: reset5, reset7: reset7, renewal: renewal, stale: false)
+                let label = hidesNativeSessionLabels ? "" : usageText(window: "5H", percent: pct5)
+                let iconPath = iconFilePath(slotId: 13, suffix: "wide", data: png)
+                manifest["3_2"] = manifestEntry(text: label, iconPath: iconPath, clearAction: true)
+                files.append((iconPath, png))
             } else {
-                png = renderBlankWideButton()
-                label = ""
+                // No live usage: slot 13 is a regular session slot rendered
+                // into the firmware's required wide 3_2 cell.
+                let slot = slots[13]
+                let png = renderWideButton(left: slot, right: slot)
+                let iconPath = iconFilePath(slotId: 13, suffix: "wide", data: png)
+                manifest["3_2"] = manifestEntry(text: "", iconPath: iconPath, clearAction: true)
+                files.append((iconPath, png))
             }
-
-            let iconPath = iconFilePath(slotId: 13, suffix: "wide", data: png)
-            manifest["3_2"] = manifestEntry(text: label, iconPath: iconPath, clearAction: true)
-            files.append((iconPath, png))
         } else {
             // Option-select mode: slot 13 is the BACK affordance, rendered as a
             // wide 392x196 tile. The back navigation is handled locally in
@@ -2089,19 +2116,19 @@ private enum D200hRenderer {
     /// Partial ZIP (only specified buttons) — used for animation frames
     static func renderPartialZip(
         slots: [ButtonSlot], buttonIds: [Int],
-        optionMode: Bool, sessions: [D200hSessionInfo], sessionPage: Int, focusedSessionId: String?
+        optionMode: Bool, sessions: [D200hSessionInfo], sessionPage: Int, sessionCapacity: Int, focusedSessionId: String?
     ) -> Data {
         var manifest: [String: Any] = [:]
         var files: [(name: String, data: Data)] = []
 
         for btnId in buttonIds {
             if btnId == 13 {
-                guard optionMode, btnId < slots.count else { continue }
+                guard btnId < slots.count else { continue }
                 let mergedSlot = slots[13]
                 let png = renderWideButton(left: mergedSlot, right: mergedSlot)
                 let iconPath = iconFilePath(slotId: 13, suffix: "wide", data: png)
                 manifest["3_2"] = manifestEntry(
-                    text: manifestText(for: mergedSlot, optionMode: optionMode, slotId: 13),
+                    text: optionMode ? manifestText(for: mergedSlot, optionMode: optionMode, slotId: 13) : "",
                     iconPath: iconPath,
                     clearAction: true
                 )
@@ -2115,7 +2142,15 @@ private enum D200hRenderer {
             let png = renderButtonPng(slot)
             let iconPath = iconFilePath(slotId: key.id, data: png)
             let label = manifestText(for: slot, optionMode: optionMode, slotId: key.id)
-            let actionPath = actionPath(for: slot, slotId: key.id, optionMode: optionMode, sessions: sessions, sessionPage: sessionPage, focusedSessionId: focusedSessionId)
+            let actionPath = actionPath(
+                for: slot,
+                slotId: key.id,
+                optionMode: optionMode,
+                sessions: sessions,
+                sessionPage: sessionPage,
+                sessionCapacity: sessionCapacity,
+                focusedSessionId: focusedSessionId
+            )
             manifest[colRow] = manifestEntry(text: label, iconPath: iconPath, actionPath: actionPath)
             files.append((iconPath, png))
         }
@@ -2129,29 +2164,6 @@ private enum D200hRenderer {
     // MARK: - Usage Merged Button (slot 13, 2 columns wide)
 
     /// Render the merged 5H/7D window as one 392x196 image, matching the D200H simulator.
-    /// Neutral empty wide tile for slot 13 when Claude usage data isn't
-    /// live. Just the dark card background — no gauges, no text, no stale
-    /// marker. Firmware still gets a valid PNG so it doesn't fall back to
-    /// the stock clock overlay on that slot.
-    private static func renderBlankWideButton() -> Data {
-        let width = ICON_SIZE * 2
-        let height = ICON_SIZE
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(
-            data: nil, width: width, height: height,
-            bitsPerComponent: 8, bytesPerRow: width * 4,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-        ) else { return Data() }
-        let w = CGFloat(width)
-        let h = CGFloat(height)
-        drawInTopDownCoordinates(ctx, canvasHeight: h) {
-            ctx.setFillColor(rgb(15, 23, 42))
-            ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
-        }
-        return pngImage(ctx)
-    }
-
     private static func renderUsageWideButton(
         pct5: Double, pct7: Double,
         reset5: String? = nil, reset7: String? = nil,
@@ -2396,11 +2408,11 @@ private enum D200hRenderer {
 
     private static func actionPath(
         for slot: ButtonSlot, slotId: Int, optionMode: Bool,
-        sessions: [D200hSessionInfo], sessionPage: Int, focusedSessionId: String?
+        sessions: [D200hSessionInfo], sessionPage: Int, sessionCapacity: Int, focusedSessionId: String?
     ) -> String? {
         if !optionMode {
             guard slot.enabled else { return nil }
-            let sessionIdx = sessionPage * 13 + slotId
+            let sessionIdx = sessionPage * sessionCapacity + slotId
             guard sessionIdx < sessions.count else { return nil }
             return "agentdeck://session/\(sessions[sessionIdx].id)"
         } else {
