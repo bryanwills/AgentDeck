@@ -319,7 +319,28 @@ program
   .option('--local', 'Disable all device modules (WS only)')
   .option('--no-adb', 'Disable ADB reverse setup')
   .option('--no-postit', 'Disable terminal tab title updates')
+  .option('--no-opencode-hooks', 'Skip OpenCode observer plugin install')
   .action(async (opts) => {
+    // Install the OpenCode observer plugin so standalone `opencode` runs
+    // (outside this managed session) also reach the daemon timeline. The
+    // plugin self-disables inside managed PTYs via AGENTDECK_PORT, so this
+    // session is unaffected. Idempotent content-compare write.
+    if (opts.opencodeHooks !== false) {
+      try {
+        const { installOpenCodeHooksIfNeeded, opencodePluginPath } = await import('@agentdeck/hooks');
+        const result = installOpenCodeHooksIfNeeded();
+        if (result.installed) {
+          log(`OpenCode observer plugin ready at ${opencodePluginPath()}`);
+        } else if (result.reason) {
+          log(`OpenCode observer plugin skipped: ${result.reason}`);
+        }
+      } catch (err) {
+        log(`OpenCode observer plugin unavailable: ${String(err)}`);
+        // Managed SSE bridge works without the plugin.
+      }
+    } else {
+      log('OpenCode observer plugin skipped: --no-opencode-hooks');
+    }
     const { startSession } = await import('./index.js');
     await startSession({
       agentType: 'opencode',
@@ -565,6 +586,17 @@ daemon
           log(`Codex hooks skipped: ${result.reason}`);
         }
       } catch { /* hooks package not built yet — task install still succeeds */ }
+      // OpenCode observer plugin — standalone `opencode` runs report to the
+      // daemon timeline the same way direct `codex` runs do.
+      try {
+        const { installOpenCodeHooksIfNeeded } = await import('@agentdeck/hooks');
+        const result = installOpenCodeHooksIfNeeded();
+        if (result.installed) {
+          log('OpenCode observer plugin installed.');
+        } else if (result.reason) {
+          log(`OpenCode observer plugin skipped: ${result.reason}`);
+        }
+      } catch { /* hooks package not built yet — task install still succeeds */ }
       process.exit(0);
     }
     if (process.platform !== 'darwin') {
@@ -586,6 +618,17 @@ daemon
         log('Codex lifecycle hooks installed in ~/.codex/config.toml');
       } else if (result.reason) {
         log(`Codex hooks skipped: ${result.reason}`);
+      }
+    } catch { /* hooks package not built yet — daemon install still succeeds */ }
+    // OpenCode observer plugin — standalone `opencode` runs report to the
+    // daemon hub as opencode_* events, same pipeline as codex_*.
+    try {
+      const { installOpenCodeHooksIfNeeded, opencodePluginPath } = await import('@agentdeck/hooks');
+      const result = installOpenCodeHooksIfNeeded();
+      if (result.installed) {
+        log(`OpenCode observer plugin installed at ${opencodePluginPath()}`);
+      } else if (result.reason) {
+        log(`OpenCode observer plugin skipped: ${result.reason}`);
       }
     } catch { /* hooks package not built yet — daemon install still succeeds */ }
   });

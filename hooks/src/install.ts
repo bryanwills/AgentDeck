@@ -13,6 +13,16 @@ export {
 } from './codex-install.js';
 export type { InstallOptions as CodexInstallOptions, InstallResult as CodexInstallResult } from './codex-install.js';
 
+// Re-export the OpenCode plugin installer (standalone-session observation
+// via opencode_* lifecycle hooks) through the same canonical entry point.
+export {
+  installOpenCodeHooksIfNeeded,
+  uninstallOpenCodeHooks,
+  opencodePluginPath,
+  opencodePluginSource,
+} from './opencode-install.js';
+export type { OpenCodeInstallOptions, OpenCodeInstallResult } from './opencode-install.js';
+
 export const HOOK_EVENTS = [
   'SessionStart',
   'SessionEnd',
@@ -287,6 +297,11 @@ if (isMainModule) {
   const action = process.argv[2] || 'install';
   if (action === 'uninstall') {
     uninstallHooks();
+    // The OpenCode observer plugin is AgentDeck-owned in its entirety, so
+    // uninstall removes the file (unlike ~/.codex/config.toml, where only
+    // the fenced block is AgentDeck's and removal has its own dedicated
+    // flow to avoid touching user TOML).
+    import('./opencode-install.js').then((m) => m.uninstallOpenCodeHooks()).catch(() => {});
   } else {
     installHooks();
   }

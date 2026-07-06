@@ -46,6 +46,15 @@ export class OpenCodeAdapter extends PtyAdapter {
   private chatToolCount = 0;
   private chatToolNames: string[] = [];
   private accumulatedResponse = '';
+  /** Whether the current turn's chat_start row already carries real prompt
+   *  text (vs the generic "Processing …" placeholder). */
+  private chatStartHasPrompt = false;
+  /** message.updated role map — lets handlePartUpdated tell user text parts
+   *  (the prompt) apart from assistant text parts (the response). Without it
+   *  a user prompt streamed via message.part.updated overwrites
+   *  accumulatedResponse and the turn's chat_response shows the user's own
+   *  words back. Bounded: cleared each finishChat. */
+  private messageRoles = new Map<string, 'user' | 'assistant'>();
 
   // Permission tracking
   private pendingPermissionID: string | null = null;
@@ -331,12 +340,36 @@ export class OpenCodeAdapter extends PtyAdapter {
     this.chatStartTime = Date.now();
     this.chatToolCount = 0;
     this.chatToolNames = [];
-    // Emit chat_start so timeline shows when processing began
+    this.chatStartHasPrompt = false;
+    // Emit chat_start so timeline shows when processing began. The generic
+    // label is a placeholder — upsertChatStartPrompt refines it with the real
+    // user prompt as soon as the user message surfaces (message.updated /
+    // message.part.updated), matching the Claude turn shape where chat_start
+    // carries the prompt text.
     this.emitTimelineEntry({
       ts: this.chatStartTime, type: 'chat_start',
       raw: this.ocProjectName ? `Processing · ${this.ocProjectName}` : 'Processing started',
+      startedAt: this.chatStartTime,
     });
     this.emitAdapterEvent({ source: 'parser', event: 'spinner_start' });
+  }
+
+  /** Refine the current turn's chat_start row with real prompt text (once per
+   *  turn). Arms the turn first so a user message arriving before any busy /
+   *  part signal still opens it — the prompt IS the turn-start signal. */
+  private upsertChatStartPrompt(text: string): void {
+    const prompt = text.trim();
+    if (!prompt) return;
+    this.beginChatIfNeeded();
+    if (this.chatStartHasPrompt) return;
+    this.chatStartHasPrompt = true;
+    const snippet = prompt.length > 500 ? prompt.slice(0, 497) + '...' : prompt;
+    this.emitTimelineEntryUpsert({
+      ts: this.chatStartTime, type: 'chat_start',
+      raw: cleanRawText(snippet),
+      ...(prompt.length > 100 ? { detail: prompt.slice(0, 1000) } : {}),
+      startedAt: this.chatStartTime,
+    });
   }
 
   private handleSessionIdle(props: Record<string, unknown>): void {
@@ -425,9 +458,17 @@ export class OpenCodeAdapter extends PtyAdapter {
         break;
       }
 
-      case 'text':
-        if (part.text) this.accumulatedResponse = part.text;
+      case 'text': {
+        if (!part.text) break;
+        // User text parts are the prompt, not the response — routing them into
+        // accumulatedResponse echoed the user's own words as chat_response.
+        if (this.messageRoles.get(part.messageID) === 'user') {
+          this.upsertChatStartPrompt(part.text);
+        } else {
+          this.accumulatedResponse = part.text;
+        }
         break;
+      }
 
       case 'step-finish':
         if (part.tokens) {
@@ -462,6 +503,18 @@ export class OpenCodeAdapter extends PtyAdapter {
     if (!this.activeSessionID && info.sessionID) {
       this.activeSessionID = info.sessionID;
       log('Auto-tracking session from message update:', info.sessionID);
+    }
+
+    if (info.role === 'user' || info.role === 'assistant') {
+      this.messageRoles.set(info.id, info.role);
+    }
+
+    // A user message opens the turn and carries the prompt — mirror the Claude
+    // turn shape where chat_start shows what was asked, not a generic label.
+    if (info.role === 'user') {
+      const prompt = this.extractUserPrompt(info);
+      if (prompt) this.upsertChatStartPrompt(prompt);
+      else this.beginChatIfNeeded();
     }
 
     // An assistant message that hasn't completed yet means the model is
@@ -542,40 +595,59 @@ export class OpenCodeAdapter extends PtyAdapter {
   private finishChat(): void {
     if (!this.chatStarted) return;
 
-    const duration = Date.now() - this.chatStartTime;
+    const now = Date.now();
+    const duration = now - this.chatStartTime;
     const durationSec = Math.round(duration / 1000);
     const toolSummary = this.chatToolNames.length > 0
       ? this.chatToolNames.join(', ') : 'no tools';
+    const startedAt = this.chatStartTime;
 
-    if (this.accumulatedResponse) {
+    // chat_response and chat_end are mutually exclusive — same rule as the
+    // Claude / OpenClaw turn shape. A meaningful response IS the turn's
+    // completion row; a paired chat_end after it fragmented every OpenCode
+    // turn into three rows on the flat surfaces (plugin / TUI / timeline.json).
+    if (this.accumulatedResponse.length > 20) {
       const responseRaw = this.accumulatedResponse.length > 500
         ? this.accumulatedResponse.slice(0, 497) + '...'
         : this.accumulatedResponse;
       this.emitTimelineEntry({
-        ts: Date.now(), type: 'chat_response',
+        ts: now, type: 'chat_response',
         raw: cleanRawText(responseRaw),
         // Chat path — preserve markdown so the dashboard can render heading
         // / table / inline styles. Tool-output detail above stays on
         // cleanDetailText since that's typically JSON / log noise.
         detail: prepareMarkdownDetail(this.accumulatedResponse.slice(0, 1000)),
+        startedAt, endedAt: now,
+      });
+    } else {
+      // Tool-only / empty turn — chat_end closes the row so dashboards stop
+      // the spinner.
+      this.emitTimelineEntry({
+        ts: now, type: 'chat_end',
+        raw: cleanRawText(`${durationSec}s · ${this.chatToolCount} tools (${toolSummary})`),
+        startedAt, endedAt: now,
       });
     }
-
-    this.emitTimelineEntry({
-      ts: Date.now(), type: 'chat_end',
-      raw: cleanRawText(`${durationSec}s · ${this.chatToolCount} tools (${toolSummary})`),
-    });
 
     this.chatStarted = false;
     this.chatStartTime = 0;
     this.chatToolCount = 0;
     this.chatToolNames = [];
     this.accumulatedResponse = '';
+    this.chatStartHasPrompt = false;
+    this.messageRoles.clear();
   }
 
   // ===== Helpers =====
 
   private emitTimelineEntry(entry: TimelineEntry): void {
     this.emitAdapterEvent({ source: 'timeline', entry });
+  }
+
+  /** Refine an already-emitted row in place (matched by ts+type in the
+   *  timeline store) — used to fill the chat_start placeholder with the real
+   *  prompt once it surfaces. */
+  private emitTimelineEntryUpsert(entry: TimelineEntry): void {
+    this.emitAdapterEvent({ source: 'timeline', entry, upsert: true });
   }
 }

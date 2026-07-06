@@ -55,6 +55,7 @@ import { FallbackTaskTimeline } from './fallback-task-timeline.js';
 import { handleApmeRequest } from './apme/http.js';
 import { readModelFromTranscript } from './apme/claude-transcript-reader.js';
 import { transcriptTimelineForSession, lastAssistantTextFromTranscript } from './session-transcript-timeline.js';
+import { lastAgentMessageFromCodexRollout } from './codex-rollout-response.js';
 import { callFoundationModelsHelper } from './foundation-models-helper.js';
 import {
   initModules,
@@ -544,6 +545,46 @@ export function enrichGatewayTimelineEntry<T extends { agentType?: string; proje
   };
 }
 
+/**
+ * Classify a `/hooks/<eventName>` POST for the observed-session pipeline.
+ *
+ * Claude hooks arrive as PascalCase names (already snake_cased by the
+ * caller's eventMap → `mapped`); Codex lifecycle hooks (installed into
+ * `~/.codex/config.toml`) arrive as `codex_*`; the AgentDeck OpenCode
+ * observer plugin posts `opencode_*`. All three share one pipeline —
+ * APME run/turn management, the chat_start row, and the stop-completion
+ * row — keyed off the returned agent-neutral `boundary`, so a direct
+ * `codex` or standalone `opencode` run gets the same prompt → response
+ * turn shape on the timeline as a direct `claude` run. (The Swift daemon
+ * has carried Codex parity since its observation pass —
+ * DaemonServer.swift appendCodexChatStart/End; this closes the same gap
+ * on the Node daemon.)
+ *
+ * Codex notify's `turn_complete` maps to `stop`: it closes a turn the
+ * same way, and the caller's open-turn guard collapses a stop +
+ * turn_complete pair into a single completion row.
+ *
+ * `antigravity_*` is accepted for forward-compatibility: Antigravity has
+ * no hook installer yet (the IDE exposes no lifecycle hook config; its
+ * sessions surface via PassiveSessionObserver transcript polling), but
+ * anything that starts POSTing these names gets full turn parity with no
+ * daemon change.
+ */
+export function classifyObservedHookEvent(
+  eventName: string,
+  mapped: string,
+): { boundary: string; agentType: 'claude-code' | 'codex-cli' | 'opencode' | 'antigravity' } {
+  const prefixed = /^(codex|opencode|antigravity)_(session_start|session_end|user_prompt_submit|tool_start|tool_end|stop|turn_complete|notification)$/
+    .exec(eventName);
+  if (!prefixed) return { boundary: mapped, agentType: 'claude-code' };
+  return {
+    boundary: prefixed[2] === 'turn_complete' ? 'stop' : prefixed[2],
+    agentType: prefixed[1] === 'codex' ? 'codex-cli'
+      : prefixed[1] === 'opencode' ? 'opencode'
+      : 'antigravity',
+  };
+}
+
 // ===== Daemon options =====
 
 export interface DaemonOptions {
@@ -997,6 +1038,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           Notification: 'notification',
         };
         const mapped = eventMap[eventName] ?? eventName;
+        // Agent-prefixed lifecycle hooks (codex_* / opencode_*) reuse the
+        // same observed-session pipeline as Claude's PascalCase hooks —
+        // `boundary` is the agent-neutral semantic every block below keys
+        // off. State-machine calls stay Claude-only (`mapped`): observed
+        // codex/opencode *state* is owned by the passive observer's turn
+        // semantics, not these hooks.
+        const { boundary, agentType: hookAgentType } = classifyObservedHookEvent(eventName, mapped);
         // State machine
         if (mapped === 'session_start') core.stateMachine.handleHookEvent('SessionStart', json);
         else if (mapped === 'session_end') core.stateMachine.handleHookEvent('SessionEnd', json);
@@ -1069,9 +1117,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           ? json.project_name
           : (hookCwd ? hookCwd.split('/').filter(Boolean).pop() : undefined);
         const hookMessage = json.message as Record<string, unknown> | undefined;
+        // Prompt shapes: Claude `{prompt}` / `{message:{content}}`; some Codex
+        // builds send `{user_prompt}` (same fallback chain as codex-hook.ts).
         const hookPromptText = typeof json.prompt === 'string' ? json.prompt
-          : (typeof hookMessage?.content === 'string' ? hookMessage.content : '');
-        const isClearBoundary = mapped === 'user_prompt_submit' && /^\s*\/clear\s*$/i.test(hookPromptText);
+          : (typeof hookMessage?.content === 'string' ? hookMessage.content
+            : (typeof json.user_prompt === 'string' ? json.user_prompt : ''));
+        const isClearBoundary = boundary === 'user_prompt_submit' && /^\s*\/clear\s*$/i.test(hookPromptText);
 
         // ── APME collector (task/turn segmentation) ──
         if (apme) {
@@ -1091,47 +1142,54 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             // arriving after a lazy open won't double-open (the run already
             // exists → skip).
             if (!apme.collector.getRunId(hookSid)
-                && (mapped === 'session_start' || mapped === 'user_prompt_submit')) {
+                && (boundary === 'session_start' || boundary === 'user_prompt_submit')) {
               apme.collector.openRun({
                 sessionId: hookSid,
-                agentType: 'claude-code',
+                agentType: hookAgentType,
                 projectName: hookProject,
                 projectPath: hookCwd || undefined,
               });
             }
-            apme.collector.ingestHook(hookSid, mapped, json);
+            // Feed the agent-neutral boundary name: the collector's
+            // normalizeHookEventName only understands the Claude-shaped
+            // vocabulary (user_prompt_submit / tool_start / …), so raw
+            // codex_* / opencode_* names would silently skip turn management.
+            apme.collector.ingestHook(hookSid, boundary, json);
           }
           // Direct `claude` runs reach the daemon only via these hooks, which
           // never carry the model — so every such run persisted model_id=NULL.
           // Recover it from the transcript Claude writes. Must run before
           // closeRun tears down the session→run mapping.
-          if (mapped === 'stop' || mapped === 'session_end') {
+          if (boundary === 'stop' || boundary === 'session_end') {
             const tp = json.transcript_path;
             if (typeof tp === 'string' && tp) {
               const model = readModelFromTranscript(tp);
               if (model) apme.collector.updateModel(hookSid, model);
             }
           }
-          if (mapped === 'session_end') {
+          if (boundary === 'session_end') {
             apme.collector.closeRun(hookSid);
           }
         } else if (fallbackTasks) {
           // APME is down — keep the timeline's task hierarchy alive from the
           // same boundary hooks (open on first prompt, close on /clear +
           // session_end), keyed by the real session id.
-          fallbackTasks.ingestHook(hookSid, mapped, json);
+          fallbackTasks.ingestHook(hookSid, boundary, json);
         }
 
         // Timeline `chat_start`, emitted AFTER the collector so the active task
         // id is known — tag the row with it so the prompt nests under the
         // (possibly deferred) task_start header instead of reading as its own
         // top-level task. `/clear` is a boundary command, not a turn: no row.
-        if (mapped === 'user_prompt_submit' && !isClearBoundary
-            && typeof json.prompt === 'string' && json.prompt.trim()) {
+        if (boundary === 'user_prompt_submit' && !isClearBoundary
+            && hookPromptText.trim()
+            // Codex's OTel turnStarted pseudo-prompt is a turn marker, not a
+            // user prompt (same filter as the Swift daemon's chat_start path).
+            && hookPromptText.trim() !== 'Codex turn started') {
           const taskId = (apme
             ? apme.collector.getActiveTaskId(hookSid)
             : fallbackTasks?.getActiveTaskId(hookSid)) ?? undefined;
-          const promptText = stripUnsafeText(json.prompt.trim());
+          const promptText = stripUnsafeText(hookPromptText.trim());
           const now = Date.now();
           core.bridgeTimeline.addEntry({
             ts: now, type: 'chat_start',
@@ -1140,6 +1198,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             // the 160-char raw alone read as clipped on the dashboards.
             ...(promptText.length > 160 ? { detail: promptText.slice(0, 1000) } : {}),
             sessionId: hookSid,
+            agentType: hookAgentType,
             startedAt: now,
             ...(taskId ? { taskId } : {}),
             ...(hookProject ? { projectName: hookProject } : {}),
@@ -1147,33 +1206,55 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         }
 
         // Timeline turn completion. Managed sessions relay chat_response from
-        // their session bridge, but hook-observed (direct `claude`) sessions
-        // only reach the daemon here — without a completion row their
-        // chat_start rows spin as "running" forever on every dashboard
-        // surface. Stop carries `transcript_path`; the transcript tail's last
-        // assistant text is the turn's response (same source the model reader
-        // uses above). Only emit while a turn is actually open (a chat_start
-        // newer than the session's last completion) so a duplicate/late Stop
-        // or an interrupted turn doesn't re-emit the previous response.
-        if (mapped === 'stop') {
+        // their session bridge, but hook-observed (direct `claude` / `codex` /
+        // standalone `opencode`) sessions only reach the daemon here — without
+        // a completion row their chat_start rows spin as "running" forever on
+        // every dashboard surface. Claude's Stop carries `transcript_path`
+        // (the transcript tail's last assistant text is the turn's response —
+        // same source the model reader uses above); Codex/OpenCode carry the
+        // response inline (`last_assistant_message` / `response` / `output` /
+        // `result`, the Swift daemon's field chain). Only emit while a turn is
+        // actually open (a chat_start newer than the session's last
+        // completion) so a duplicate/late Stop or an interrupted turn doesn't
+        // re-emit the previous response.
+        if (boundary === 'stop') {
           const rows = core.bridgeTimeline.getHistoryForSession(hookSid, undefined, 24);
           let lastStart: TimelineEntry | undefined;
+          let lastResponse: TimelineEntry | undefined;
           let lastCompletionTs = 0;
           for (const row of rows) {
             if (row.type === 'chat_start') lastStart = row;
             else if (row.type === 'chat_response' || row.type === 'chat_end') {
+              if (row.type === 'chat_response') lastResponse = row;
               lastCompletionTs = Math.max(lastCompletionTs, row.ts);
             }
           }
-          if (lastStart && lastStart.ts > lastCompletionTs) {
-            const tp = typeof json.transcript_path === 'string' ? json.transcript_path : '';
-            const responseText = tp ? stripUnsafeText(lastAssistantTextFromTranscript(tp)) : '';
+          const turnOpen = Boolean(lastStart && lastStart.ts > lastCompletionTs);
+          const tp = typeof json.transcript_path === 'string' ? json.transcript_path : '';
+          const inlineResponse = [json.last_assistant_message, json.response, json.output, json.result]
+            .find((v): v is string => typeof v === 'string' && v.trim().length > 0) ?? '';
+          // Codex's stop payload rarely carries the text inline; its rollout
+          // JSONL (agent_message / task_complete records) is the
+          // authoritative source — the Codex counterpart of Claude's
+          // transcript tail. Read it whenever a completion row might be
+          // emitted (open turn, or a response-only close below).
+          const rolloutResponse = !tp && !inlineResponse && hookAgentType === 'codex-cli'
+            ? lastAgentMessageFromCodexRollout(hookSid)
+            : '';
+          const responseText = tp
+            ? stripUnsafeText(lastAssistantTextFromTranscript(tp))
+            : stripUnsafeText(inlineResponse || rolloutResponse);
+          const respRaw = responseText.length > 0
+            ? cleanRawText(responseText.length > 200 ? responseText.slice(0, 197) + '...' : responseText)
+            : '';
+          if (turnOpen && lastStart) {
             const now = Date.now();
             const taskId = (apme
               ? apme.collector.getActiveTaskId(hookSid)
               : fallbackTasks?.getActiveTaskId(hookSid)) ?? lastStart.taskId ?? undefined;
             const base = {
               sessionId: hookSid,
+              agentType: hookAgentType,
               startedAt: lastStart.startedAt ?? lastStart.ts,
               endedAt: now,
               ...(taskId ? { taskId } : {}),
@@ -1182,7 +1263,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             if (responseText.length > 0) {
               core.bridgeTimeline.addEntry({
                 ts: now, type: 'chat_response',
-                raw: cleanRawText(responseText.length > 200 ? responseText.slice(0, 197) + '...' : responseText),
+                raw: respRaw,
                 detail: prepareMarkdownDetail(responseText.slice(0, 3000)) || undefined,
                 ...base,
               } as TimelineEntry);
@@ -1197,6 +1278,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
                 ...base,
               } as TimelineEntry);
             }
+          } else if (respRaw && lastResponse?.raw !== respRaw) {
+            // Response-only close (Swift daemon parity): the turn's prompt
+            // hook was missed — notify-only Codex configs emit just
+            // turn_complete, and an OpenCode prompt can surface empty — so
+            // there is no open chat_start to anchor on, but the response
+            // text is still the turn's result and worth a row. The
+            // raw-equality guard keeps a duplicate/late stop from
+            // re-emitting the same response.
+            const now = Date.now();
+            const taskId = (apme
+              ? apme.collector.getActiveTaskId(hookSid)
+              : fallbackTasks?.getActiveTaskId(hookSid)) ?? undefined;
+            core.bridgeTimeline.addEntry({
+              ts: now, type: 'chat_response',
+              raw: respRaw,
+              detail: prepareMarkdownDetail(responseText.slice(0, 3000)) || undefined,
+              sessionId: hookSid,
+              agentType: hookAgentType,
+              endedAt: now,
+              ...(taskId ? { taskId } : {}),
+              ...(hookProject ? { projectName: hookProject } : {}),
+            } as TimelineEntry);
           }
         }
 

@@ -1743,12 +1743,24 @@ void update() {
             // The card already renders agent (cellName) + project (cellProj);
             // body carries the task context + the actual work text so each card
             // narrates its OWN timeline instead of sharing one global line.
+            // Two passes, milestone-first (same policy as the InkDeck ticker):
+            // prefer turn/task rows — chat_start = the ask while running,
+            // chat_response = the answer once done — over per-tool command
+            // spam; fall back to the newest raw row so tool-only histories
+            // never leave the card blank.
             mc[n].body[0] = '\0';
+            for (uint8_t pass = 0; pass < 2 && !mc[n].body[0]; pass++) {
             for (uint8_t k = 0; k < g_state.timelineCount; k++) {
                 uint8_t bidx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - k) % TIMELINE_MAX_ENTRIES);
                 const TimelineEntry& te = g_state.timeline[bidx];
                 if (strcmp(te.sessionId, si.id) != 0) continue;
                 if (!te.raw[0] || te.raw[0] == '{' || te.raw[0] == '[') continue;
+                if (pass == 0) {
+                    bool milestone = strcmp(te.type, "chat_start") == 0 || strcmp(te.type, "chat_response") == 0 ||
+                                     strcmp(te.type, "chat_end") == 0 ||
+                                     strcmp(te.type, "task_start") == 0 || strcmp(te.type, "task_end") == 0;
+                    if (!milestone) continue;
+                }
                 size_t off = 0;
                 bool isTaskRow = strcmp(te.type, "task_start") == 0 || strcmp(te.type, "task_end") == 0;
                 if (!isTaskRow && te.taskId[0]) {  // resolve taskId → task header label
@@ -1765,6 +1777,7 @@ void update() {
                 if (off < sizeof(mc[n].body) - 1)
                     snprintf(mc[n].body + off, sizeof(mc[n].body) - off, "%s", te.raw);
                 break;
+            }
             }
             n++;
         }

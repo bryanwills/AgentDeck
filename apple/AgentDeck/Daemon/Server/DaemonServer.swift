@@ -2441,6 +2441,17 @@ final class DaemonServer {
         guard let event = json["event"] as? String else { return }
         DaemonLogger.shared.debug("Hook", "Received: \(event)")
 
+        // opencode_* lifecycle hooks (posted by AgentDeck's OpenCode observer
+        // plugin) are consumed by the Node daemon's observed-session pipeline.
+        // The Swift daemon has no OpenCode turn pipeline yet — without this
+        // guard the generic Claude fallbacks below would synthesize a phantom
+        // claude-typed session row for every OpenCode session id and route
+        // opencode_* steps into the Claude-keyed ApmeCollector (the same
+        // mis-attribution hazard the codex_ filter guards). Standalone
+        // OpenCode visibility on the Swift daemon still comes from
+        // PassiveSessionObserver; timeline parity is a documented follow-up.
+        if event.hasPrefix("opencode_") { return }
+
         // Per-session id extraction. The global state_machine transitions
         // below remain for backwards compatibility with surfaces that read
         // the aggregate state (menubar badge, D200H). The authoritative

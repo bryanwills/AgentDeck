@@ -167,16 +167,21 @@ void snapshot(Snap& s) {
     if (!s.agPlan[0] && g_state.antigravityPlan[0]) {
         UsageFormat::formatAgyPlan(g_state.antigravityPlan, s.agPlan, sizeof(s.agPlan));
     }
-    // Latest MILESTONE timeline entry → ticker. Only task-level rows qualify
-    // (chat_start/chat_end/task_start/task_end): per-tool rows from managed
-    // PTY sessions ("Bash: cd /Users/…") are command spam at glance distance,
-    // and raw JSON bodies ({"exclude":[]} chat_responses) are machine noise.
+    // Latest MILESTONE timeline entry → ticker. Only turn/task-level rows
+    // qualify (chat_start/chat_response/chat_end/task_start/task_end):
+    // per-tool rows from managed PTY sessions ("Bash: cd /Users/…") are
+    // command spam at glance distance, and raw JSON bodies ({"exclude":[]})
+    // are machine noise (still guarded by the '{'/'[' skip below).
+    // chat_response is the turn's RESULT — since the chat_end dedup, turns
+    // with a response emit chat_response INSTEAD of chat_end, so without it
+    // the ticker forever showed the ask but never the answer.
     // Prefer the daemon-preformatted local "HH:MM"; ts fallback is UTC-derived.
     for (uint8_t back = 0; back < g_state.timelineCount && back < 16; back++) {
         uint8_t idx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - back) % TIMELINE_MAX_ENTRIES);
         const TimelineEntry& t = g_state.timeline[idx];
         if (!t.raw[0] || t.raw[0] == '{' || t.raw[0] == '[') continue;
         bool milestone = strcmp(t.type, "chat_start") == 0 || strcmp(t.type, "chat_end") == 0 ||
+                         strcmp(t.type, "chat_response") == 0 ||
                          strcmp(t.type, "task_start") == 0 || strcmp(t.type, "task_end") == 0;
         if (!milestone) continue;
         if (t.hm[0]) {

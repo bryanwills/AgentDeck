@@ -8,7 +8,7 @@ Stream Deck+ controller for AI coding agents — a bidirectional local control s
 - **plugin/** — Stream Deck SDK v2 plugin
 - **plugin-ulanzi/** — Ulanzi Studio plugin for the D200H Deck Dock (official UlanziDeckPlugin-SDK). One dynamic action + session-centric two-level UX, shares the `@agentdeck/shared` `buildSessionDeck` layout engine. Connects to the daemon over WS like the SD plugin; daemon stands down direct-HID when it registers (`ulanzi-plugin`). See [plugin-ulanzi/VERIFY.md](plugin-ulanzi/VERIFY.md)
 - **shared/** — TypeScript types/utils shared between bridge & plugin (protocol, states, timeline, adapter interfaces, session-utils)
-- **hooks/** — Claude Code hook installer for `~/.claude/settings.json` and Codex lifecycle hook installer for `~/.codex/config.toml`
+- **hooks/** — Claude Code hook installer for `~/.claude/settings.json`, Codex lifecycle hook installer for `~/.codex/config.toml`, and OpenCode observer plugin installer for `~/.config/opencode/plugins/agentdeck.js` (standalone `opencode` sessions POST `opencode_*` lifecycle hooks to the daemon; self-disables in managed PTYs via `AGENTDECK_PORT`)
 - **config/** — Default settings and prompt templates
 - **setup/** — npm setup package (`npx @agentdeck/setup`)
 - **android/** — Jetpack Compose launcher app (CremaS, Onyx, Kobo, tablets)
@@ -84,6 +84,7 @@ This repo is built by switching between Claude Code, Codex, OpenCode, and Antigr
 - **Workflow originals**: `.agents/workflows/` remains the canonical human-readable procedure directory; skills may route into these files. OpenCode has no skill auto-discovery — point it at these workflow files explicitly.
 - **Session handoff**: use the `session-end` repo skill before `/clear`, `/new`, or handing work to another session. It summarizes current state and updates durable docs only when the change is project-significant.
 - **Codex observation**: `agentdeck codex` installs AgentDeck-managed Codex lifecycle hooks in `~/.codex/config.toml` before launching the PTY bridge. `agentdeck daemon install` also installs/migrates those hooks for daemon-first setups.
+- **OpenCode observation**: `agentdeck opencode` / `agentdeck daemon install` install the AgentDeck observer plugin (`~/.config/opencode/plugins/agentdeck.js`) so standalone `opencode` runs report `opencode_*` lifecycle hooks to the daemon — same observed-session timeline pipeline as direct `claude`/`codex` (`classifyObservedHookEvent` in `bridge/src/daemon-server.ts`). The Swift daemon ignores `opencode_*` (timeline parity there is a follow-up); observed Codex response text comes from the rollout tail (`bridge/src/codex-rollout-response.ts`).
 
 ### Test Infrastructure
 
