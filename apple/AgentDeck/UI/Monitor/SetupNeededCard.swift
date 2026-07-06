@@ -236,7 +236,18 @@ extension AgentStateHolder {
         preferences: AppPreferences,
         daemonService: DaemonService
     ) -> [SetupItem] {
-        _ = daemonService  // Kept in signature to avoid call-site churn.
+        // When a separately-installed Node daemon owns the hub
+        // (`isUsingExternalDaemon`), IT installs and receives the Claude /
+        // Codex hooks (`~/.claude/settings.json`, `~/.codex/config.toml`) and
+        // relays the resulting hook-driven sessions to us. Our local
+        // `hooksInstalled` / `codexConfigInstalled` flags only ever flip via
+        // the app's OWN in-app installer, so in this (Tier-2) topology they
+        // stay false forever and the card falsely nags "hooks off" even while
+        // hook-driven sessions are visibly streaming. The sandbox also blocks
+        // us from reading those files to verify (App Review 2.5.2 — no
+        // home-relative entitlement), so trust the daemon: the external hub is
+        // authoritative for hook installation, suppress the two consent nudges.
+        let externalDaemonOwnsHooks = daemonService.isUsingExternalDaemon
 
         let anthropicSaved = anthropicAdminKeySavedValue()
         let shouldSurfaceClaude = Self.shouldSurfaceClaudeSetup(for: state)
@@ -269,6 +280,7 @@ extension AgentStateHolder {
         // who actively opted out aren't nagged; only surface for `.unknown`
         // or previously-accepted installs that have been wiped.
         if shouldSurfaceClaude,
+           !externalDaemonOwnsHooks,
            !preferences.hooksInstalled,
            preferences.hookInstallConsent != .declined {
             items.append(SetupItem(
@@ -284,7 +296,8 @@ extension AgentStateHolder {
         // run: the CLI can incidentally install the same managed config block,
         // but the standalone App Store app needs a visible, user-approved path
         // before any Codex App / Codex CLI session has emitted telemetry.
-        if Self.shouldShowCodexObservationSetup(
+        if !externalDaemonOwnsHooks,
+           Self.shouldShowCodexObservationSetup(
             codexAuthMode: state.codexAuthMode,
             codexConfigInstalled: preferences.codexConfigInstalled,
             codexConfigConsent: preferences.codexConfigConsent
