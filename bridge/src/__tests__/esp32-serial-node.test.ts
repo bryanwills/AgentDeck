@@ -23,6 +23,7 @@ import {
   EXCLUDE_PATTERNS,
   isUnidentifiedForeign,
   isHalfOpenIdentifiedCdc,
+  shouldSendWifiProvision,
   shouldRetryDeviceInfoIdentify,
   recordForeignProbeFailure,
   isForeignPortDenylisted,
@@ -436,6 +437,32 @@ describe('WiFi provision protocol', () => {
     expect(typeof msg.bridgeIp).toBe('string');
     expect(typeof msg.bridgePort).toBe('number');
     expect(typeof msg.authToken).toBe('string');
+  });
+
+  it('auto-provisions first-setup boards and refreshes IPS10 endpoint while online', () => {
+    expect(shouldSendWifiProvision({
+      connected: true,
+      provisionSent: false,
+      deviceInfo: { board: 'ips_10', wifiConfigured: false, wifiConnected: false },
+    } as any)).toBe(true);
+
+    expect(shouldSendWifiProvision({
+      connected: true,
+      provisionSent: false,
+      deviceInfo: { board: 'ips_10', wifiConfigured: true, wifiConnected: false, wifiRadioParked: true },
+    } as any)).toBe(false);
+
+    expect(shouldSendWifiProvision({
+      connected: true,
+      provisionSent: false,
+      deviceInfo: { board: 'ips_10', wifiConfigured: true, wifiConnected: true },
+    } as any)).toBe(true);
+
+    expect(shouldSendWifiProvision({
+      connected: true,
+      provisionSent: false,
+      deviceInfo: { board: 'ttgo_t_display', wifiConfigured: true, wifiConnected: true },
+    } as any)).toBe(false);
   });
 });
 

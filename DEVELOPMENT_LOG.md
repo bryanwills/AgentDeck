@@ -6,6 +6,70 @@
 
 ---
 
+## 2026-07-07 — 라운드 25: IPS10 WiFi payload 축약 + OpenClaw disconnected 오표시 수정
+
+### 문제
+IPS10이 USB 해제 후 WiFi로 붙은 상태에서 에이전트 활동이 감지되면 다시 리셋성 불안정이 나타났다. 동시에 OpenClaw는 다른 대시보드에서 idle/offline 계열인데 IPS10 office 화면에서는 working처럼 보였다. 라이브 WS 확인 결과 `sessions_list`의 `openclaw-gateway`는 실제로 `state:"disconnected"`였고, processing은 현재 Codex 세션이었다.
+
+### 해결
+- ESP32 WiFi 클라이언트가 WS URL에 `clientType=esp32`를 붙이도록 변경하고, Node WS 서버가 이 클라이언트에는 serial 경로와 같은 `prepareForSerial()` 축약 payload만 보내도록 함. 일반 대시보드용 `modelCatalog`/`moduleHealth` 등 대형 state_update를 ESP32가 통째로 파싱하지 않게 했다.
+- ESP32 WiFi 전송 필터는 display/session/timeline/OTA 이벤트만 통과시키고 나머지 대시보드 전용 이벤트는 drop.
+- IPS10 office worker 상태 판정을 `processing`만 working으로 좁힘. `disconnected`/빈 state/unknown은 idle 계열로 처리해 OpenClaw가 working으로 보이지 않게 함.
+- IPS10 serial RX buffer를 8192로 올려 큰 `sessions_list`가 USB 경로에서 잘리는 가능성을 줄임.
+
+### 검증
+`pnpm vitest run bridge/src/__tests__/esp32-serial-node.test.ts` 47/47 green, `pnpm --filter @agentdeck/bridge build`, `/opt/homebrew/bin/pio run -e ips10`, `/opt/homebrew/bin/pio run -e ttgo` green.
+
+---
+
+## 2026-07-07 — 라운드 24: IPS10 USB detach 무한재부팅 원인 확정 및 hosted C6 즉시 파킹
+
+### 문제
+IPS10 USB 해제/재연결 실험에서 실제 `SW_CPU_RESET` 루프가 재현됐다. 원시 시리얼 로그 기준 panic 원인은 ESP32-P4 hosted C6 경로의 `sdio_rx_get_buffer` / `sdio_push_data_to_queue` assert였다. 특히 USB serial 첫 JSON 이후에도 약 8초 동안 WiFi/mDNS/WS가 살아 있어, 그 초기 overlap 창에서 stale mDNS endpoint `192.168.68.60:9120`을 다시 저장하거나 WS를 열며 SDIO assert가 발생했다. `/health`의 낮은 `uptimeSec`만으로는 리셋 판정이 애매했지만, raw serial의 assert/backtrace로 실제 리셋임을 확인.
+
+### 해결
+- IPS10은 첫 유효 serial JSON 직후 즉시 hosted C6 라디오를 `WIFI_OFF`로 park. 기존 8초 안정화 대기 제거.
+- radio parked 상태에서는 mDNS polling, long-disconnect mDNS refresh, WS loop를 전부 skip.
+- USB serial timeout으로 serial primary가 사라질 때만 저장된 daemon WiFi credentials로 STA를 복구.
+- `wifi_provision`은 IPS10 serial-primary 상태에서 radio를 깨우지 않고 SSID/password와 bridge endpoint만 NVS에 저장한 뒤 ACK하도록 변경.
+- bridge auto-provision은 IPS10 online 상태에서도 endpoint refresh를 한 번 수행하되, provision 프레임을 priority queue로 보내 초기 payload에 밀리지 않게 변경.
+- mDNS self-heal은 WS connect 시도 중에는 실행하지 않아 저장 endpoint 연결 시도와 stale mDNS 결과가 경쟁하지 않게 함.
+
+### 검증
+`pnpm vitest run bridge/src/__tests__/esp32-serial-node.test.ts` 47/47 green, `pnpm --filter @agentdeck/bridge build`, `/opt/homebrew/bin/pio run -e ips10`, `/opt/homebrew/bin/pio run -e ttgo` green. IPS10 실기 flash 성공. 데몬 재기동 후 `/health`에서 `buildEpoch:1783351803`, `wifiConnected:false`, `wifiRadioParked:true`, `uptimeSec:73` 확인.
+
+---
+
+## 2026-07-06 — 라운드 23: IPS10 USB-primary 안정화와 C6 라디오 파킹
+
+### 문제
+IPS10(ESP32-P4 + hosted ESP32-C6)이 USB 시리얼로는 정상인데 WiFi/WebSocket 경로가 배경에서 flap하며 디스플레이 재초기화처럼 보여 "무한 재부팅"으로 오인되는 증상이 계속됐다. stale endpoint 재프로비저닝은 위생 조치였지만 flap 자체를 멈추지 못했고, configured 보드에 WiFi를 의도적으로 끄면 daemon auto-provision이 다시 credentials를 밀어 넣어 firmware 정책과 싸울 위험도 있었다.
+
+### 해결
+- IPS10 전용 USB-primary 정책 추가: `Net::serialConnected()`가 8초 이상 안정적으로 유지되면 WS를 끊고 `wifiSetRadioParked(true)`로 hosted C6 라디오를 park. USB JSON이 `SERIAL_TIMEOUT_MS` 이상 끊기면 STA를 복구해 WiFi-only/OTA 경로를 되살림.
+- `wifi_manager`에 `wifiRadioParked()` 상태를 추가하고, 명시적 `wifiConnectWith()`/수동 provision은 radio parking을 해제하도록 정리.
+- serial/device_info에 `wifiRadioParked`, `uptimeSec`를 추가하고 bridge/shared 타입과 `/health` projection까지 노출. 현장 검증에서 `/dev/cu.wchusbserial211240`은 `buildHash:"aedbeb8f-dirty"`, `wifiConnected:false`, `wifiRadioParked:true`, `uptimeSec:84`로 확인.
+- daemon auto-provision 조건을 "처음 설정되지 않은 보드"로 제한. `wifiConfigured:true` 보드는 WiFi가 꺼져 있어도 자동 provision하지 않아 IPS10 radio parking과 충돌하지 않음.
+
+### 검증
+`pnpm vitest run bridge/src/__tests__/esp32-serial-node.test.ts` 47/47 green, `pnpm --filter @agentdeck/shared typecheck`, `pnpm --filter @agentdeck/bridge typecheck`, `pnpm --filter @agentdeck/bridge build`, `/opt/homebrew/bin/pio run -e ips10`, `/opt/homebrew/bin/pio run -e ttgo` green. `/usr/local/bin/pio`는 Python x86_64 vs PlatformIO arm64 extension mismatch로 실패해 `/opt/homebrew/bin/pio`를 사용. IPS10 실기 flash 성공 후 daemon 재기동 및 `/health`로 라디오 파킹 상태 확인.
+
+---
+
+## 2026-07-06 — 라운드 22: Codex App OTel activity false-active + Swift Codex 응답 본문 복구
+
+### 문제
+Codex 데스크톱 앱이 켜져 있기만 한 상태에서 Swift 데몬이 `observed:codex-app:<pid>`를 `processing` 세션처럼 표시했다. 원인은 Codex App/app-server가 내보내는 OTel `receiving`/`stream.request`류 activity span을 실제 사용자 turn 신호처럼 처리한 것. 별개로 Swift 데몬의 Codex CLI hook 경로는 `codex_stop`/`codex_turn_complete` payload만 보고 응답 본문을 찾았는데, 실제 Codex 답변은 대개 rollout JSONL에 있어 타임라인이 질문→답변 한 턴이 아니라 빈 완료/독립 세션처럼 보였다(Node 데몬은 이미 rollout tail reader 보유).
+
+### 해결
+- Swift `handleCodexTrace`: OTel `activity`는 새 Codex App 세션 생성 또는 idle→processing 승격에 쓰지 않고, 이미 `turnStart`/`toolCall`로 `processing`인 세션의 freshness 갱신에만 사용. `turnStart`/`toolCall`/`turnEnd`가 상태 전이의 권위 신호.
+- Swift `LocalCodexAppObserver`: 최상위 `/Applications/Codex.app` 실행 여부만으로 만들던 `observed:codex-app:<pid>` fallback 제거. 세션 목록에는 `kernel.js --session-id/--working-dir`처럼 durable session metadata가 있는 Codex App 프로세스만 노출해, 단순 앱 실행 상태를 에이전트 세션으로 오인하지 않게 함.
+- Swift `CodexRolloutResponseReader` 추가: `~/.codex/sessions/<y>/<m>/<d>/rollout-*-<sessionId>.jsonl` tail에서 `task_complete.last_agent_message` 우선, 없으면 최신 `agent_message`를 읽어 `appendCodexChatEnd`가 `chat_response`를 방출하게 함. Node `codex-rollout-response.ts`와 같은 우선순위.
+- D200H Swift direct-HID: live Claude usage가 없을 때 slot 13을 빈 usage 카드로 점유하지 않고 14번째 세션 타일로 재사용. Swift self-daemon/App Store 모드처럼 사용량을 직접 표시할 수 없는 상황에서는 세션 모니터링 공간을 우선한다.
+- 회귀 테스트: OTel activity 상태 승격 predicate + rollout reader 우선순위/폴백 케이스 추가. macOS 앱 타깃 빌드 통과. 현재 Xcode project의 노출 scheme에는 테스트 타깃이 포함되지 않아 `-only-testing` XCTest 실행은 scheme 구성상 실패.
+
+---
+
 ## 2026-07-06 — 라운드 21: Android e-ink 다중행 + macOS Setup 카드 false "hooks off" + IPS10 WiFi 영속화
 
 ### 문제

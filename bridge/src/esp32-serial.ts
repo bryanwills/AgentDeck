@@ -103,6 +103,10 @@ export interface SerialConnection {
     buildEpoch?: number;
     wifiConfigured?: boolean;
     wifiConnected?: boolean;
+    wifiRadioParked?: boolean;
+    uptimeSec?: number;
+    resetReason?: string;
+    resetReasonCode?: number;
     otaSupported?: boolean;
     otaSlotCount?: number;
     otaSlotSize?: number;
@@ -568,6 +572,10 @@ export function handleSerialLine(conn: SerialConnection, line: string): void {
           buildEpoch: msg.buildEpoch,
           wifiConfigured: msg.wifiConfigured,
           wifiConnected: msg.wifiConnected,
+          wifiRadioParked: msg.wifiRadioParked,
+          uptimeSec: msg.uptimeSec,
+          resetReason: msg.resetReason,
+          resetReasonCode: msg.resetReasonCode,
           otaSupported: msg.otaSupported,
           otaSlotCount: msg.otaSlotCount,
           otaSlotSize: msg.otaSlotSize,
@@ -1204,7 +1212,7 @@ export function broadcastESP32(event: BridgeEvent): void {
 export function sendWifiProvision(port: string, msg: WifiProvisionMessage): boolean {
   const conn = connections.find(c => c.port === port && c.connected);
   if (!conn) return false;
-  sendToConnection(conn, JSON.stringify(msg));
+  sendToConnection(conn, JSON.stringify(msg), true);
   conn.provisionSent = true;
   debug('ESP32', `→ ${port}: wifi_provision (SSID: ${msg.ssid})`);
   return true;
@@ -1216,17 +1224,33 @@ export function sendWifiProvision(port: string, msg: WifiProvisionMessage): bool
 export function sendWifiProvisionToAll(msg: WifiProvisionMessage): number {
   let count = 0;
   for (const conn of connections) {
-    if (!conn.connected) continue;
-    // Skip if already provisioned or WiFi already configured
-    if (!conn.deviceInfo?.board) continue;
-    if (conn.provisionSent) continue;
-    if (conn.deviceInfo?.wifiConnected) continue;
-    sendToConnection(conn, JSON.stringify(msg));
+    if (!shouldSendWifiProvision(conn)) continue;
+    sendToConnection(conn, JSON.stringify(msg), true);
     conn.provisionSent = true;
     count++;
     debug('ESP32', `→ ${conn.port}: wifi_provision (SSID: ${msg.ssid})`);
   }
   return count;
+}
+
+/** @internal Exported for testing only */
+export function shouldSendWifiProvision(conn: Pick<SerialConnection, 'connected' | 'deviceInfo' | 'provisionSent'>): boolean {
+  if (!conn.connected) return false;
+  if (!conn.deviceInfo?.board) return false;
+  if (conn.provisionSent) return false;
+  // IPS10 carries a daemon endpoint in NVS in addition to WiFi credentials.
+  // Refresh it once while USB serial is active and the radio is online, even
+  // if the board is already configured/connected; otherwise a stale endpoint
+  // can survive and WiFi-only operation keeps dialing the old daemon host.
+  if (conn.deviceInfo.board === 'ips_10' && conn.deviceInfo.wifiConnected && !conn.deviceInfo.wifiRadioParked) {
+    return true;
+  }
+  if (conn.deviceInfo.wifiConnected) return false;
+  // Auto-provision is for first setup. A configured board may intentionally have
+  // WiFi off (IPS10 USB-primary radio parking) or may be temporarily away from
+  // its AP; repeatedly injecting credentials would fight firmware policy.
+  if (conn.deviceInfo.wifiConfigured) return false;
+  return true;
 }
 
 /**
@@ -1240,6 +1264,8 @@ export function getESP32DeviceInfo(): Array<{
   buildEpoch?: number;
   wifiConfigured?: boolean;
   wifiConnected?: boolean;
+  wifiRadioParked?: boolean;
+  uptimeSec?: number;
   otaSupported?: boolean;
   otaSlotCount?: number;
   otaSlotSize?: number;
@@ -1323,6 +1349,17 @@ export function getSerialConnectionStatus(): Array<{
   buildEpoch?: number;
   wifiConfigured?: boolean;
   wifiConnected?: boolean;
+  wifiRadioParked?: boolean;
+  uptimeSec?: number;
+  otaSupported?: boolean;
+  otaSlotCount?: number;
+  otaSlotSize?: number;
+  otaFreeSketchSpace?: number;
+  otaReason?: string;
+  timelineCount?: number;
+  sessionCount?: number;
+  usageFiveH?: number;
+  processingCount?: number;
   transportOpen: boolean;
   lastReadAt: number;
   lastWriteAt: number;
@@ -1341,6 +1378,19 @@ export function getSerialConnectionStatus(): Array<{
     buildEpoch: c.deviceInfo?.buildEpoch,
     wifiConfigured: c.deviceInfo?.wifiConfigured,
     wifiConnected: c.deviceInfo?.wifiConnected,
+    wifiRadioParked: c.deviceInfo?.wifiRadioParked,
+    uptimeSec: c.deviceInfo?.uptimeSec,
+    resetReason: c.deviceInfo?.resetReason,
+    resetReasonCode: c.deviceInfo?.resetReasonCode,
+    otaSupported: c.deviceInfo?.otaSupported,
+    otaSlotCount: c.deviceInfo?.otaSlotCount,
+    otaSlotSize: c.deviceInfo?.otaSlotSize,
+    otaFreeSketchSpace: c.deviceInfo?.otaFreeSketchSpace,
+    otaReason: c.deviceInfo?.otaReason,
+    timelineCount: c.deviceInfo?.timelineCount,
+    sessionCount: c.deviceInfo?.sessionCount,
+    usageFiveH: c.deviceInfo?.usageFiveH,
+    processingCount: c.deviceInfo?.processingCount,
     lastReadAt: c.lastReadAt,
     lastWriteAt: c.lastWriteAt,
     lastReadSecondsAgo: c.lastReadAt > 0 ? Math.floor((now - c.lastReadAt) / 1000) : null,

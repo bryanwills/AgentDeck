@@ -12,6 +12,8 @@ export class WsServer {
   private onConnectCallback: ((ws: WebSocket) => void) | null = null;
   private onDisconnectCallback: ((ws: WebSocket) => void) | null = null;
   private clientAlive = new Map<WebSocket, boolean>();
+  private esp32Clients = new Set<WebSocket>();
+  private eventTransformer: ((event: BridgeEvent, client: WebSocket) => BridgeEvent | null) | null = null;
   // Clients that registered as the Ulanzi Studio plugin. While any are present,
   // the daemon's direct-HID D200H module stands down so the two don't fight over
   // the device (Ulanzi Studio drives it through the official plugin instead).
@@ -61,6 +63,11 @@ export class WsServer {
         }
         debug('WS', `Remote client authenticated from ${remoteIp}`);
       }
+      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      if (url.searchParams.get('clientType') === 'esp32' || url.searchParams.get('esp32') === '1') {
+        this.esp32Clients.add(ws);
+        debug('WS', 'ESP32 WiFi client tagged from query');
+      }
 
       debug('WS', 'Plugin connected');
       this.clientAlive.set(ws, true);
@@ -102,6 +109,7 @@ export class WsServer {
       ws.on('close', () => {
         debug('WS', 'Plugin disconnected');
         this.clientAlive.delete(ws);
+        this.esp32Clients.delete(ws);
         if (this.ulanziClients.delete(ws) && this.ulanziClients.size === 0) {
           debug('WS', 'Ulanzi plugin gone — direct-HID D200H may resume');
           this.ulanziPresenceCallback?.(false);
@@ -124,13 +132,34 @@ export class WsServer {
     this.broadcastHooks.push(hook);
   }
 
+  setEventTransformer(transformer: ((event: BridgeEvent, client: WebSocket) => BridgeEvent | null) | null): void {
+    this.eventTransformer = transformer;
+  }
+
+  isEsp32Client(ws: WebSocket): boolean {
+    return this.esp32Clients.has(ws);
+  }
+
+  markEsp32Client(ws: WebSocket): void {
+    this.esp32Clients.add(ws);
+  }
+
+  private payloadFor(event: BridgeEvent, client: WebSocket, cachedPayload?: string): string | null {
+    if (!this.eventTransformer) return cachedPayload ?? JSON.stringify(event);
+    const transformed = this.eventTransformer(event, client);
+    if (!transformed) return null;
+    return transformed === event ? (cachedPayload ?? JSON.stringify(event)) : JSON.stringify(transformed);
+  }
+
   broadcast(event: BridgeEvent): void {
     const payload = JSON.stringify(event);
     const clientCount = this.wss.clients.size;
     debug('WS', `broadcast(${event.type}) to ${clientCount} clients`);
     for (const client of this.wss.clients) {
       if (client.readyState === WebSocket.OPEN) {
-        try { client.send(payload); } catch { /* client disconnecting */ }
+        const clientPayload = this.payloadFor(event, client, payload);
+        if (!clientPayload) continue;
+        try { client.send(clientPayload); } catch { /* client disconnecting */ }
       }
     }
     // Relay to registered hooks (ESP32 serial, etc.)
@@ -166,7 +195,9 @@ export class WsServer {
     const payload = JSON.stringify(event);
     for (const client of this.wss.clients) {
       if (client !== except && client.readyState === WebSocket.OPEN) {
-        try { client.send(payload); } catch { /* client disconnecting */ }
+        const clientPayload = this.payloadFor(event, client, payload);
+        if (!clientPayload) continue;
+        try { client.send(clientPayload); } catch { /* client disconnecting */ }
       }
     }
   }
@@ -181,7 +212,9 @@ export class WsServer {
 
   sendTo(ws: WebSocket, event: BridgeEvent): void {
     if (ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify(event)); } catch { /* client disconnecting */ }
+      const payload = this.payloadFor(event, ws);
+      if (!payload) return;
+      try { ws.send(payload); } catch { /* client disconnecting */ }
     }
   }
 

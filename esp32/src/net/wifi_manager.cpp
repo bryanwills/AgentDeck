@@ -8,6 +8,7 @@ static WiFiManager wm;
 static char ipBuf[16] = {0};
 static bool portalActive = false;
 static bool wifiWasConnected = false;
+static bool radioParked = false;
 
 #if defined(BOARD_IPS10)
 namespace {
@@ -151,12 +152,33 @@ bool wifiConfigured() {
 
 void wifiSetRadioParked(bool parked) {
     if (parked) {
+        radioParked = true;
+        wifiWasConnected = false;
         WiFi.mode(WIFI_OFF);
     } else {
+        radioParked = false;
         WiFi.mode(WIFI_STA);
         WiFi.setSleep(false);
+#if defined(BOARD_IPS10)
+        // ESP-Hosted does not reliably reconnect from WIFI_OFF with a bare
+        // WiFi.reconnect(). Re-apply the daemon-provisioned credentials so
+        // USB-detached IPS10 units actually move from "radio restored" to
+        // STA connected instead of spinning WS attempts on a down interface.
+        char savedSsid[IPS10_SSID_MAX] = {0};
+        char savedPassword[IPS10_PASSWORD_MAX] = {0};
+        if (loadIps10ProvisionedWifi(savedSsid, sizeof(savedSsid), savedPassword, sizeof(savedPassword))) {
+            if (!wifiConnectWith(savedSsid, savedPassword)) {
+                Serial.println("[WiFi] IPS10 radio restored but saved credentials failed");
+            }
+            return;
+        }
+#endif
         WiFi.reconnect();
     }
+}
+
+bool wifiRadioParked() {
+    return radioParked;
 }
 
 bool wifiConnectWith(const char* ssid, const char* password) {
@@ -164,6 +186,7 @@ bool wifiConnectWith(const char* ssid, const char* password) {
 
     // IPS10 may have turned the hosted C6 radio fully off when no saved creds
     // existed at boot. Re-enter STA mode explicitly before a daemon provision.
+    radioParked = false;
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
 
@@ -199,6 +222,15 @@ bool wifiConnectWith(const char* ssid, const char* password) {
 
     Serial.printf("[WiFi] Failed to connect to %s\n", ssid);
     return false;
+}
+
+void wifiSaveProvisionedCredentials(const char* ssid, const char* password) {
+#if defined(BOARD_IPS10)
+    saveIps10ProvisionedWifi(ssid, password);
+#else
+    (void)ssid;
+    (void)password;
+#endif
 }
 
 void wifiSaveProvisionedBridge(const char* ip, uint16_t port, const char* token) {

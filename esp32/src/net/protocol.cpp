@@ -4,6 +4,7 @@
 #include "serial_client.h"
 #include "../state/agent_state.h"
 #include "../util/ota_capability.h"
+#include "../util/reset_reason.h"
 #include "../util/usage_format.h"
 #include "config.h"
 #include <ArduinoJson.h>
@@ -605,11 +606,25 @@ static void handleWifiProvision(JsonObject& obj) {
     strncpy(g_state.authToken, authToken, sizeof(g_state.authToken) - 1);
     unlockState();
 
-    // Connect WiFi using provisioned credentials
-    bool ok = Net::wifiConnectWith(ssid, password);
-    if (ok) {
+    bool ok = false;
+#if defined(BOARD_IPS10)
+    if (Net::serialConnected()) {
+        // USB serial is the primary IPS10 transport. Persist the daemon endpoint
+        // refresh, but do not wake the hosted C6 radio; WiFi will reconnect from
+        // the serial-timeout restore path when USB is actually removed.
+        Net::wifiSaveProvisionedCredentials(ssid, password);
         Net::wifiSaveProvisionedBridge(bridgeIp, bridgePort, authToken);
-        if (bridgeIp[0] != '\0' && bridgePort != 0 && !Net::wsConnected()) {
+        ok = true;
+    } else
+#endif
+    {
+        ok = Net::wifiConnectWith(ssid, password);
+    }
+    if (ok) {
+        if (!Net::wifiRadioParked() && !Net::serialConnected()) {
+            Net::wifiSaveProvisionedBridge(bridgeIp, bridgePort, authToken);
+        }
+        if (!Net::wifiRadioParked() && !Net::serialConnected() && bridgeIp[0] != '\0' && bridgePort != 0 && !Net::wsConnected()) {
             Net::wsConnect(bridgeIp, bridgePort, authToken);
         }
     }
@@ -812,6 +827,13 @@ static void sendDeviceInfo() {
     resp["protocolRevision"] = PROTOCOL_REVISION;
     resp["wifiConfigured"] = Net::wifiConfigured();
     resp["wifiConnected"] = Net::wifiConnected();
+    resp["wifiRadioParked"] = Net::wifiRadioParked();
+    resp["uptimeSec"] = millis() / 1000;
+    {
+        esp_reset_reason_t resetReason = esp_reset_reason();
+        resp["resetReasonCode"] = (int)resetReason;
+        resp["resetReason"] = Util::resetReasonName(resetReason);
+    }
     // Debug aid: what this board actually holds — lets a host-side probe
     // (daemon /devices) distinguish "data never parsed" from "render gating"
     // without stealing the serial port.

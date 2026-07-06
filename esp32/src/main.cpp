@@ -105,6 +105,25 @@ static void networkTask(void* param) {
         // === WiFi portal (non-blocking, processes captive portal if active) ===
         Net::wifiLoop();
 
+#if defined(BOARD_IPS10)
+        // On IPS10, do not let ESP-Hosted C6 WiFi/mDNS/WS overlap with an
+        // active USB serial bridge at all. The hosted SDIO driver asserts under
+        // that overlap, so park immediately after the first valid serial JSON
+        // instead of waiting for a stability window.
+        {
+            bool serialPrimary = Net::serialConnected();
+            bool radioParked = Net::wifiRadioParked();
+            if (serialPrimary && !radioParked) {
+                if (Net::wsConnected() || Net::wsConnecting()) Net::wsDisconnect();
+                Net::wifiSetRadioParked(true);
+                Serial.println("[WiFi] IPS10 radio parked - USB serial primary");
+            } else if (!serialPrimary && radioParked) {
+                Net::wifiSetRadioParked(false);
+                Serial.println("[WiFi] IPS10 radio restored - serial inactive");
+            }
+        }
+#endif
+
         // === Continuous mDNS discovery ===
         // Only perform mDNS polling if we are NOT connected. 
         // Constant mDNS querying while connected consumes CPU, Wi-Fi bandwidth,
@@ -112,7 +131,7 @@ static void networkTask(void* param) {
         // Keep WS available even when USB serial is attached. Serial remains
         // the primary state transport, but WiFi OTA needs an addressable WS
         // socket while boards are still on the bench.
-        if (Net::wifiConnected() && !Net::wsConnected() && Net::mdnsPoll(bridge)) {
+        if (!Net::wifiRadioParked() && Net::wifiConnected() && !Net::wsConnected() && !Net::wsConnecting() && Net::mdnsPoll(bridge)) {
             bool ipChanged = (strcmp(currentBridgeIp, bridge.ip) != 0) || (currentBridgePort != bridge.port);
             if (ipChanged || !Net::wsConnected()) {
                 if (ipChanged) {
@@ -148,7 +167,7 @@ static void networkTask(void* param) {
         //     stuck at max backoff for >15s. This handles the case where the
         //     cached bridge IP is gone (daemon moved, mDNS advertiser is
         //     stale) and we need a fresh query to find the new endpoint. ===
-        if (!Net::wsConnected() && Net::wifiConnected()) {
+        if (!Net::wifiRadioParked() && !Net::wsConnected() && Net::wifiConnected()) {
             uint32_t now = millis();
             uint32_t sinceLastAttempt = now - Net::wsLastAttemptMs();
             bool saturated = (Net::wsBackoffMs() >= WS_RECONNECT_MAX_MS);
@@ -160,7 +179,9 @@ static void networkTask(void* param) {
         }
 
         // Process WebSocket events
-        Net::wsLoop();
+        if (!Net::wifiRadioParked()) {
+            Net::wsLoop();
+        }
 
         // Drain UI-queued outbound commands (approve/deny, option select) on this
         // network core — UI callbacks must not touch the WS client directly.
@@ -582,7 +603,7 @@ static void uiTask(void* param) {
 
 // ===== Arduino setup =====
 void setup() {
-#if defined(BOARD_INKDECK)
+#if defined(BOARD_INKDECK) || defined(BOARD_IPS10)
     // RX 8192 — a 10-session enriched sessions_list is ~2.2-3.5KB; the old
     // 2048 truncated it mid-line ([Protocol] JSON error: InvalidInput).
     Serial.setRxBufferSize(8192);

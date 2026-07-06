@@ -138,11 +138,11 @@ void wsConnect(const char* ip, uint16_t port, const char* token) {
     strncpy(savedToken, token, sizeof(savedToken) - 1);
 
     // Build URL path with token
-    char path[80];
+    char path[104];
     if (token[0] != '\0') {
-        snprintf(path, sizeof(path), "/?token=%s", token);
+        snprintf(path, sizeof(path), "/?token=%s&clientType=esp32", token);
     } else {
-        strcpy(path, "/");
+        strcpy(path, "/?clientType=esp32");
     }
 
     ws.begin(ip, port, path);
@@ -160,6 +160,15 @@ void wsDisconnect() {
 }
 
 void wsLoop() {
+    if (!WiFi.isConnected()) {
+        if (connected || connecting) {
+            ws.disconnect();
+        }
+        connected = false;
+        connecting = false;
+        return;
+    }
+
     ws.loop();
 
     // Exponential backoff reconnection. The library's internal reconnect timer

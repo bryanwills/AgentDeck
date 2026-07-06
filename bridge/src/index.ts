@@ -7,6 +7,8 @@
 
 import { BridgeCore } from './bridge-core.js';
 import { buildDisplayStateEvent } from './display-dim.js';
+import { SERIAL_FORWARDED_EVENTS } from '@agentdeck/shared/protocol';
+import { prepareForSerial } from './esp32-serial.js';
 import { initApme, isTimelineProjectionEnabled } from './apme/index.js';
 import { FallbackTaskTimeline } from './fallback-task-timeline.js';
 import { readLastTurn as readClaudeTranscriptLastTurn } from './apme/claude-transcript-reader.js';
@@ -243,6 +245,18 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     projectName,
     httpServer: adapter.getHttpServer(),
   });
+  const esp32WifiEvents = new Set<string>([
+    ...SERIAL_FORWARDED_EVENTS,
+    'esp32_ota_begin',
+    'esp32_ota_chunk',
+    'esp32_ota_end',
+    'esp32_ota_abort',
+  ]);
+  core.wsServer.setEventTransformer((event, client) => {
+    if (!core.wsServer.isEsp32Client(client)) return event;
+    if (!esp32WifiEvents.has(event.type)) return null;
+    return prepareForSerial(event);
+  });
 
   // ===== APME (Agent Performance Monitoring & Evaluation) =====
   // Optional: degrades to no-op if better-sqlite3 isn't installed.
@@ -436,7 +450,11 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   if (wifiConfig?.autoProvision) {
     const lanIp = getLanIp();
     onESP32Message((portPath, msg) => {
-      if (msg.type === 'device_info' && !msg.wifiConnected) {
+      const shouldRefreshIps10Endpoint = msg.type === 'device_info' &&
+        msg.board === 'ips_10' &&
+        msg.wifiConnected &&
+        !msg.wifiRadioParked;
+      if (msg.type === 'device_info' && (!msg.wifiConnected || shouldRefreshIps10Endpoint)) {
         const sent = sendWifiProvisionToAll({
           type: 'wifi_provision' as const,
           ssid: wifiConfig.ssid,
@@ -875,6 +893,10 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
   // Deck slot map relay
   core.wsServer.onRawMessage((msg, sender) => {
+    if (msg.type === 'device_info') {
+      core.wsServer.markEsp32Client(sender);
+      return false;
+    }
     if (msg.type === 'deck_slot_map') {
       cachedSlotMap = msg as unknown as DeckSlotMapEvent;
       core.wsServer.broadcastExcept(cachedSlotMap, sender);

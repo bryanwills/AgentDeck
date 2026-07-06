@@ -4,6 +4,7 @@
 #include "ws_client.h"
 #include "../state/agent_state.h"
 #include "../util/ota_capability.h"
+#include "../util/reset_reason.h"
 #if !defined(BOARD_LED8X32) && !defined(BOARD_INKDECK)
 #include "../ui/screens/splash.h"
 #endif
@@ -94,6 +95,13 @@ static void sendDeviceInfoSerial() {
         resp["processingCount"] = processing;
     }
     resp["wifiConnected"] = wifiConnected();
+    resp["wifiRadioParked"] = wifiRadioParked();
+    resp["uptimeSec"] = millis() / 1000;
+    {
+        esp_reset_reason_t resetReason = esp_reset_reason();
+        resp["resetReasonCode"] = (int)resetReason;
+        resp["resetReason"] = Util::resetReasonName(resetReason);
+    }
     if (wifiConnected()) {
         resp["ip"] = wifiLocalIP();
     }
@@ -104,7 +112,7 @@ static void sendDeviceInfoSerial() {
     resp["otaFreeSketchSpace"] = ota.freeSketchSpace;
     if (!ota.supported) resp["otaReason"] = ota.reason;
 
-    char buf[512];
+    char buf[768];
     serializeJson(resp, buf, sizeof(buf));
     serialWriteJsonLine(buf);
 }

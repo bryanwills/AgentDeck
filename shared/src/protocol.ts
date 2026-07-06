@@ -490,6 +490,14 @@ export interface DeviceInfoMessage {
   buildEpoch?: number;   // unix seconds the firmware was compiled (BUILD_EPOCH)
   wifiConfigured: boolean;
   wifiConnected: boolean;
+  /** True when firmware intentionally powered WiFi down because USB serial is primary. */
+  wifiRadioParked?: boolean;
+  /** Board uptime in seconds at the moment the info frame was emitted. */
+  uptimeSec?: number;
+  /** ESP-IDF reset reason as a stable diagnostic string, e.g. "brownout" or "panic". */
+  resetReason?: string;
+  /** Raw esp_reset_reason_t numeric code for cases not covered by resetReason. */
+  resetReasonCode?: number;
   ip?: string;
   otaSupported?: boolean;
   otaSlotCount?: number;

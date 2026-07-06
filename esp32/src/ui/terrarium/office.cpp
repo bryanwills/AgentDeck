@@ -526,8 +526,9 @@ static WDraw computeWorker(Worker& w, uint32_t now) {
     bool moving = p < 1 && (w.prevCol != w.col || w.prevRow != w.row);
     bool awaiting = strstr(w.state, "awaiting") != nullptr;
     bool error = strstr(w.state, "error") || strstr(w.state, "fail");
-    bool idle = strcmp(w.state, "idle") == 0;
-    bool working = !awaiting && !error && !idle;     // "processing" (or any non-idle active state)
+    bool disconnected = strcmp(w.state, "disconnected") == 0 || w.state[0] == '\0';
+    bool idle = strcmp(w.state, "idle") == 0 || disconnected;
+    bool working = strcmp(w.state, "processing") == 0;
     float yoff = 0, squash = 0, jit = 0;
     if (moving) { yoff = -sinf(p * 3.14159f) * tile * 0.26f; squash = sinf(p * 3.14159f) * 0.13f; }
     else if (awaiting) { float s = fabsf(sinf(now / 250.0f + w.bobPhase)); yoff = -s * tile * 0.18f; squash = s * 0.08f; }

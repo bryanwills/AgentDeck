@@ -16,6 +16,8 @@ import { createHash, randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import { BridgeCore, buildCappedTimelineHistory } from './bridge-core.js';
 import { buildDisplayStateEvent } from './display-dim.js';
+import { SERIAL_FORWARDED_EVENTS } from '@agentdeck/shared/protocol';
+import { prepareForSerial } from './esp32-serial.js';
 import { OpenClawAdapter } from './adapters/openclaw.js';
 import { BridgeLogStream } from './log-stream.js';
 import { PassiveSessionObserver } from './passive-observer.js';
@@ -105,6 +107,9 @@ interface WifiEsp32Device {
   buildEpoch?: number;
   ip?: string;
   protocolRevision?: number;
+  uptimeSec?: number;
+  resetReason?: string;
+  resetReasonCode?: number;
   otaSupported?: boolean;
   otaSlotCount?: number;
   otaSlotSize?: number;
@@ -147,6 +152,10 @@ function wifiEsp32Key(d: { board?: unknown; ip?: unknown }): string {
 
 function registerWifiEsp32(d: Record<string, unknown>, ws: WebSocket): void {
   const key = wifiEsp32Key(d);
+  const previous = wifiEsp32Devices.get(key);
+  const uptimeSec = typeof d.uptimeSec === 'number' ? d.uptimeSec : undefined;
+  const resetReason = typeof d.resetReason === 'string' ? d.resetReason : undefined;
+  const resetReasonCode = typeof d.resetReasonCode === 'number' ? d.resetReasonCode : undefined;
   wifiEsp32Devices.set(key, {
     board: typeof d.board === 'string' ? d.board : 'unknown',
     version: typeof d.version === 'string' ? d.version : undefined,
@@ -154,6 +163,9 @@ function registerWifiEsp32(d: Record<string, unknown>, ws: WebSocket): void {
     buildEpoch: typeof d.buildEpoch === 'number' ? d.buildEpoch : undefined,
     ip: typeof d.ip === 'string' ? d.ip : undefined,
     protocolRevision: typeof d.protocolRevision === 'number' ? d.protocolRevision : undefined,
+    uptimeSec,
+    resetReason,
+    resetReasonCode,
     otaSupported: typeof d.otaSupported === 'boolean' ? d.otaSupported : undefined,
     otaSlotCount: typeof d.otaSlotCount === 'number' ? d.otaSlotCount : undefined,
     otaSlotSize: typeof d.otaSlotSize === 'number' ? d.otaSlotSize : undefined,
@@ -162,7 +174,10 @@ function registerWifiEsp32(d: Record<string, unknown>, ws: WebSocket): void {
     lastSeenMs: Date.now(),
   });
   wifiEsp32Sockets.set(key, ws);
-  debug('daemon', `WiFi ESP32 registered: ${key} v${String(d.version ?? '')} build=${String(d.buildHash ?? '')}`);
+  if (previous?.uptimeSec != null && uptimeSec != null && uptimeSec + 10 < previous.uptimeSec) {
+    log(`[agentdeck] ESP32 reboot observed: ${key} uptime ${previous.uptimeSec}s -> ${uptimeSec}s reset=${resetReason ?? 'unknown'} code=${resetReasonCode ?? 'unknown'}`);
+  }
+  debug('daemon', `WiFi ESP32 registered: ${key} v${String(d.version ?? '')} build=${String(d.buildHash ?? '')} uptime=${String(uptimeSec ?? '')} reset=${String(resetReason ?? '')}`);
 }
 
 function touchWifiEsp32Socket(ws: WebSocket): void {
@@ -179,7 +194,9 @@ function unregisterWifiEsp32Socket(ws: WebSocket): void {
   for (const [key, registeredWs] of wifiEsp32Sockets) {
     if (registeredWs !== ws) continue;
     wifiEsp32Sockets.delete(key);
-    wifiEsp32Devices.delete(key);
+    // Keep the last device_info snapshot until normal age-out. A reconnect after
+    // a board reboot must compare the new uptime against the previous one; if we
+    // delete here every crash looks like a fresh device.
     debug('daemon', `WiFi ESP32 disconnected: ${key}`);
   }
 }
@@ -686,8 +703,21 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
       deviceInfo: status.board ? {
         board: status.board,
         version: status.version,
+        buildHash: status.buildHash,
+        buildEpoch: status.buildEpoch,
         wifiConfigured: status.wifiConfigured,
         wifiConnected: status.wifiConnected,
+        wifiRadioParked: status.wifiRadioParked,
+        uptimeSec: status.uptimeSec,
+        otaSupported: status.otaSupported,
+        otaSlotCount: status.otaSlotCount,
+        otaSlotSize: status.otaSlotSize,
+        otaFreeSketchSpace: status.otaFreeSketchSpace,
+        otaReason: status.otaReason,
+        timelineCount: status.timelineCount,
+        sessionCount: status.sessionCount,
+        usageFiveH: status.usageFiveH,
+        processingCount: status.processingCount,
       } : null,
       lastReadAt: status.lastReadAt,
       lastWriteAt: status.lastWriteAt,
@@ -1490,6 +1520,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     httpServer,
     isDaemon: true,
   });
+  const esp32WifiEvents = new Set<string>([
+    ...SERIAL_FORWARDED_EVENTS,
+    'esp32_ota_begin',
+    'esp32_ota_chunk',
+    'esp32_ota_end',
+    'esp32_ota_abort',
+    'device_info_request',
+  ]);
+  core.wsServer.setEventTransformer((event, client) => {
+    if (!core.wsServer.isEsp32Client(client)) return event;
+    if (!esp32WifiEvents.has(event.type)) return null;
+    return prepareForSerial(event);
+  });
 
   // Timeline
   const bridgeLogStream = new BridgeLogStream();
@@ -1691,12 +1734,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }, 15_000);
     displayResync.unref?.();
 
+    // WiFi ESP32 diagnostics: boards only announce device_info on connect unless
+    // asked. Poll slowly so /devices can show uptime/reset changes and distinguish
+    // a real reboot from a display/WS redraw.
+    const wifiDeviceInfoPoll = setInterval(() => {
+      if (core.wsServer.getClientCount() > 0) {
+        core.wsServer.broadcast({ type: 'device_info_request' } as unknown as BridgeEvent);
+      }
+    }, 30_000);
+    wifiDeviceInfoPoll.unref?.();
+
     // WiFi auto-provisioning for ESP32 (enables independent WiFi operation)
     const wifiConfig = loadWifiConfig();
     if (wifiConfig?.autoProvision) {
       const lanIp = getLanIp();
       onESP32Message((portPath, msg) => {
-        if (msg.type === 'device_info' && !msg.wifiConnected) {
+        const shouldRefreshIps10Endpoint = msg.type === 'device_info' &&
+          msg.board === 'ips_10' &&
+          msg.wifiConnected &&
+          !msg.wifiRadioParked;
+        if (msg.type === 'device_info' && (!msg.wifiConnected || shouldRefreshIps10Endpoint)) {
           const sent = sendWifiProvisionToAll({
             type: 'wifi_provision' as const,
             ssid: wifiConfig.ssid,
@@ -2061,6 +2118,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // WiFi ESP32 boards announce device_info over WS on connect. Capture the
     // sender here so OTA can address the exact socket instead of broadcasting.
     if (msg.type === 'device_info') {
+      core.wsServer.markEsp32Client(sender);
       registerWifiEsp32(msg, sender);
       return true;
     }
