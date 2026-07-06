@@ -83,7 +83,7 @@ static void sendDeviceInfoSerial() {
     resp["buildHash"] = GIT_SHA;
     resp["buildEpoch"] = (uint32_t)BUILD_EPOCH;
     resp["protocolRevision"] = PROTOCOL_REVISION;
-    resp["wifiConfigured"] = (WiFi.SSID().length() > 0);
+    resp["wifiConfigured"] = wifiConfigured();
     resp["timelineCount"] = g_state.timelineCount;  // debug aid, keep in sync with protocol.cpp copy
     resp["sessionCount"] = g_state.sessionCount;
     resp["usageFiveH"] = (int)g_state.fiveHourPercent;

@@ -77,6 +77,27 @@ static void networkTask(void* param) {
     uint16_t currentBridgePort = 0;
     uint32_t lastMdnsRefreshMs = 0;
 
+#if defined(BOARD_IPS10)
+    if (Net::wifiConnected()) {
+        char savedBridgeIp[16] = {0};
+        char savedToken[40] = {0};
+        uint16_t savedBridgePort = 0;
+        if (Net::wifiLoadProvisionedBridge(savedBridgeIp, sizeof(savedBridgeIp),
+                                           &savedBridgePort, savedToken, sizeof(savedToken))) {
+            Serial.printf("[Net] IPS10 saved bridge endpoint: %s:%d\n",
+                          savedBridgeIp, savedBridgePort);
+            strncpy(currentBridgeIp, savedBridgeIp, sizeof(currentBridgeIp) - 1);
+            currentBridgePort = savedBridgePort;
+            lockState();
+            strncpy(g_state.bridgeIp, savedBridgeIp, sizeof(g_state.bridgeIp) - 1);
+            g_state.bridgePort = savedBridgePort;
+            strncpy(g_state.authToken, savedToken, sizeof(g_state.authToken) - 1);
+            unlockState();
+            Net::wsConnect(savedBridgeIp, savedBridgePort, savedToken);
+        }
+    }
+#endif
+
     while (true) {
         // === Always poll serial (USB JSON from bridge) ===
         Net::serialLoop();

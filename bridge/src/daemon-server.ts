@@ -165,6 +165,16 @@ function registerWifiEsp32(d: Record<string, unknown>, ws: WebSocket): void {
   debug('daemon', `WiFi ESP32 registered: ${key} v${String(d.version ?? '')} build=${String(d.buildHash ?? '')}`);
 }
 
+function touchWifiEsp32Socket(ws: WebSocket): void {
+  const now = Date.now();
+  for (const [key, registeredWs] of wifiEsp32Sockets) {
+    if (registeredWs !== ws) continue;
+    const device = wifiEsp32Devices.get(key);
+    if (device) device.lastSeenMs = now;
+    return;
+  }
+}
+
 function unregisterWifiEsp32Socket(ws: WebSocket): void {
   for (const [key, registeredWs] of wifiEsp32Sockets) {
     if (registeredWs !== ws) continue;
@@ -2054,6 +2064,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       registerWifiEsp32(msg, sender);
       return true;
     }
+    touchWifiEsp32Socket(sender);
     if (msg.type === 'client_register'
         && (msg as { clientType?: unknown }).clientType === 'eink-device') {
       // XTeink X3/X4 (fork) volunteering its E-ink roster. Store per-socket so

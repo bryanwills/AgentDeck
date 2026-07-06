@@ -607,6 +607,12 @@ static void handleWifiProvision(JsonObject& obj) {
 
     // Connect WiFi using provisioned credentials
     bool ok = Net::wifiConnectWith(ssid, password);
+    if (ok) {
+        Net::wifiSaveProvisionedBridge(bridgeIp, bridgePort, authToken);
+        if (bridgeIp[0] != '\0' && bridgePort != 0 && !Net::wsConnected()) {
+            Net::wsConnect(bridgeIp, bridgePort, authToken);
+        }
+    }
 
     // Build ack response with ArduinoJson for safe serialization
     JsonDocument resp;
@@ -804,7 +810,7 @@ static void sendDeviceInfo() {
     resp["buildHash"] = GIT_SHA;
     resp["buildEpoch"] = (uint32_t)BUILD_EPOCH;
     resp["protocolRevision"] = PROTOCOL_REVISION;
-    resp["wifiConfigured"] = (WiFi.SSID().length() > 0);
+    resp["wifiConfigured"] = Net::wifiConfigured();
     resp["wifiConnected"] = Net::wifiConnected();
     // Debug aid: what this board actually holds — lets a host-side probe
     // (daemon /devices) distinguish "data never parsed" from "render gating"
