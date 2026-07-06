@@ -119,6 +119,13 @@ static void networkTask(void* param) {
                     Serial.printf("[Net] Bridge (re)discovered via mDNS: %s:%d\n", bridge.ip, bridge.port);
                     strncpy(currentBridgeIp, bridge.ip, sizeof(currentBridgeIp) - 1);
                     currentBridgePort = bridge.port;
+                    // Self-heal the persisted endpoint: 67934f94 saved the bridge
+                    // IP to NVS but never refreshed it, so a board whose daemon
+                    // moved (DHCP drift, host IP change) reloads the STALE saved
+                    // IP on every reboot and loops on "connection reset by peer".
+                    // Persisting the freshly-discovered endpoint here lets the
+                    // board recover across reboots. No-op on non-IPS10 boards.
+                    Net::wifiSaveProvisionedBridge(bridge.ip, bridge.port, bridge.token);
                     // New endpoint: tear down old WS so wsConnect rebinds cleanly
                     if (Net::wsConnected()) Net::wsDisconnect();
                 }
