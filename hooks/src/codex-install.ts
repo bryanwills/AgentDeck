@@ -16,7 +16,7 @@
 // MUST stay in sync with apple/AgentDeck/Daemon/Core/CodexConfigInstaller.swift
 // (managedBlockBody schema + lifecycle hook table layout).
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'fs';
 import { dirname, join } from 'path';
 import { homedir } from 'os';
 import {
@@ -28,6 +28,13 @@ import {
 } from './codex-mini-toml.js';
 
 export const DEFAULT_CODEX_CONFIG_PATH = join(homedir(), '.codex', 'config.toml');
+/** Sidecar script for the Windows notify fallback. Codex execs `notify`
+ *  as a bare argv array (no shell) and appends the JSON payload as the
+ *  last element; `powershell -File` is the only Windows invocation that
+ *  binds trailing argv into `$args` (`-Command` concatenates them into
+ *  the command text and `-EncodedCommand` rejects them outright), and
+ *  `-File` requires a real script on disk. */
+export const DEFAULT_WINDOWS_NOTIFY_SCRIPT_PATH = join(homedir(), '.agentdeck', 'codex-notify.ps1');
 const DEFAULT_DAEMON_PORT = 9120;
 
 export interface InstallOptions {
@@ -36,12 +43,19 @@ export interface InstallOptions {
   /** Daemon HTTP port to bake into the OTel exporter endpoint. If
    *  omitted, the installer reads `~/.agentdeck/daemon.json`. */
   daemonHttpPort?: number;
+  /** Override platform for tests. Defaults to process.platform. */
+  platform?: NodeJS.Platform;
+  /** Override the Windows notify sidecar script path (tests). */
+  notifyScriptPath?: string;
 }
 
 export interface InstallResult {
   installed: boolean;
   /** Human-readable reason when `installed === false`. */
   reason?: string;
+  /** Non-fatal degradation while `installed === true` (e.g. the Windows
+   *  notify sidecar could not be written, so notify was omitted). */
+  warning?: string;
 }
 
 /** Honour `AGENTDECK_NO_CODEX_HOOKS=1` from the environment. Callers
@@ -79,6 +93,8 @@ interface ManagedBlockOptions {
   includeOtel?: boolean;
   otelEndpoint?: string;
   daemonHttpPort?: number;
+  platform?: NodeJS.Platform;
+  notifyScriptPath?: string;
 }
 
 /** Assemble the body of the AgentDeck-managed fence. Tests call this
@@ -87,6 +103,7 @@ interface ManagedBlockOptions {
 export function managedBlockBody(opts: ManagedBlockOptions = {}): string {
   const includeNotify = opts.includeNotify ?? true;
   const includeOtel = opts.includeOtel ?? true;
+  const platform = opts.platform ?? process.platform;
 
   const lines: string[] = [
     '# Codex lifecycle hooks. Command hooks receive JSON on stdin;',
@@ -96,14 +113,20 @@ export function managedBlockBody(opts: ManagedBlockOptions = {}): string {
   ];
 
   lines.push('');
-  lines.push(...buildLifecycleHookTables());
+  lines.push(...buildLifecycleHookTables(platform));
 
   if (includeNotify) {
     lines.push('');
     lines.push('# Optional turn-complete notification fallback.');
-    lines.push('# Codex appends the JSON payload as the last argv entry,');
-    lines.push('# so the 4th array element acts as $0 and payload lands at $1.');
-    lines.push(buildNotifyAssignment('codex_turn_complete'));
+    if (platform === 'win32') {
+      lines.push('# Codex appends the JSON payload as the last argv entry;');
+      lines.push('# powershell -File binds it into $args. (-Command cannot:');
+      lines.push('# it concatenates trailing argv into the command text.)');
+    } else {
+      lines.push('# Codex appends the JSON payload as the last argv entry,');
+      lines.push('# so the 4th array element acts as $0 and payload lands at $1.');
+    }
+    lines.push(buildNotifyAssignment('codex_turn_complete', platform, opts.notifyScriptPath));
   }
 
   if (includeOtel) {
@@ -126,7 +149,11 @@ export function managedBlockBody(opts: ManagedBlockOptions = {}): string {
  *       Without our 4th element, `sh -c "<snippet>" <json>` would assign
  *       `<json>` to `$0` and leave `$1` empty. With the dummy in place,
  *       `<json>` lands at `$1` as the snippet expects. */
-function buildNotifyAssignment(event: string): string {
+function buildNotifyAssignment(event: string, platform: NodeJS.Platform, notifyScriptPath?: string): string {
+  if (platform === 'win32') {
+    const scriptPath = notifyScriptPath ?? DEFAULT_WINDOWS_NOTIFY_SCRIPT_PATH;
+    return `notify = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", ${quoted(scriptPath)}]`;
+  }
   return `notify = ["sh", "-c", ${quoted(buildNotifySnippet(event))}, "agentdeck-notify"]`;
 }
 
@@ -164,7 +191,7 @@ const LIFECYCLE_HOOKS: LifecycleHook[] = [
   { codexEvent: 'Stop',             agentDeckEvent: 'codex_stop',               matcher: null },
 ];
 
-function buildLifecycleHookTables(): string[] {
+function buildLifecycleHookTables(platform: NodeJS.Platform): string[] {
   const lines: string[] = [];
   for (let idx = 0; idx < LIFECYCLE_HOOKS.length; idx++) {
     const hook = LIFECYCLE_HOOKS[idx];
@@ -175,7 +202,7 @@ function buildLifecycleHookTables(): string[] {
     }
     lines.push(`[[hooks.${hook.codexEvent}.hooks]]`);
     lines.push(`type = "command"`);
-    lines.push(`command = ${quoted(buildLifecycleHookCommand(hook.agentDeckEvent))}`);
+    lines.push(`command = ${quoted(buildLifecycleHookCommand(hook.agentDeckEvent, platform))}`);
     lines.push(`timeout = 5`);
   }
   return lines;
@@ -184,7 +211,10 @@ function buildLifecycleHookTables(): string[] {
 /** Official Codex lifecycle hooks pass their JSON payload on stdin.
  *  Keep stdout quiet so Stop / UserPromptSubmit hooks do not accidentally
  *  feed the daemon's acknowledgement back into Codex as hook output. */
-function buildLifecycleHookCommand(event: string): string {
+function buildLifecycleHookCommand(event: string, platform: NodeJS.Platform): string {
+  if (platform === 'win32') {
+    return buildWindowsLifecycleHookCommand(event);
+  }
   return `sh -c ${shellSingleQuoted(buildStdinPostSnippet(event))}`;
 }
 
@@ -207,6 +237,59 @@ function shellSingleQuoted(s: string): string {
   return `'${s.replace(/'/g, "'\"'\"'")}'`;
 }
 
+function buildWindowsLifecycleHookCommand(event: string): string {
+  return `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${windowsEncodedCommand(buildWindowsStdinPostSnippet(event))}`;
+}
+
+function buildWindowsStdinPostSnippet(event: string): string {
+  // Read raw stdin as UTF-8: [Console]::In decodes with the console's OEM
+  // codepage (e.g. CP949) and would garble non-ASCII payload text.
+  return buildWindowsPostSnippet(
+    event,
+    '(New-Object System.IO.StreamReader([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8)).ReadToEnd()'
+  );
+}
+
+/** Body of the Windows notify sidecar script (`-File` execution binds
+ *  Codex's appended payload argv into `$args`; take the last element to
+ *  mirror POSIX `$1`). ASCII-only so PowerShell 5.1's BOM-less ANSI
+ *  fallback reads it identically to UTF-8. Exported for tests. */
+export function windowsNotifyScriptContent(event = 'codex_turn_complete'): string {
+  return buildWindowsPostSnippet(event, `$(if ($args.Count -gt 0) { [string]$args[$args.Count - 1] } else { '' })`) + '\n';
+}
+
+function buildWindowsPostSnippet(event: string, bodyExpression: string): string {
+  return [
+    `$ErrorActionPreference = 'SilentlyContinue'`,
+    `$ProgressPreference = 'SilentlyContinue'`,
+    `$port = $env:AGENTDECK_PORT`,
+    `if ([string]::IsNullOrWhiteSpace($port)) {`,
+    `  $daemonFile = Join-Path $env:USERPROFILE '.agentdeck\\daemon.json'`,
+    `  if (Test-Path -LiteralPath $daemonFile) {`,
+    `    try {`,
+    `      $daemon = Get-Content -LiteralPath $daemonFile -Raw | ConvertFrom-Json`,
+    `      $candidate = if ($daemon.httpPort) { $daemon.httpPort } else { $daemon.port }`,
+    `      if ($candidate) {`,
+    `        try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 -Uri ('http://127.0.0.1:' + $candidate + '/health') | Out-Null; $port = [string]$candidate } catch {}`,
+    `      }`,
+    `    } catch {}`,
+    `  }`,
+    `}`,
+    `if ([string]::IsNullOrWhiteSpace($port)) { $port = '9120' }`,
+    `$body = ${bodyExpression}`,
+    // Post UTF-8 bytes: Invoke-RestMethod encodes string bodies as
+    // ISO-8859-1 when the content type carries no charset, replacing
+    // non-ASCII payload characters with '?'.
+    `$bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$body)`,
+    `try { Invoke-RestMethod -Method Post -TimeoutSec 1 -Uri ('http://127.0.0.1:' + $port + '/hooks/${event}') -ContentType 'application/json; charset=utf-8' -Body $bytes | Out-Null } catch {}`,
+    `exit 0`,
+  ].join('\n');
+}
+
+function windowsEncodedCommand(s: string): string {
+  return Buffer.from(s, 'utf16le').toString('base64');
+}
+
 // ─── File I/O ───────────────────────────────────────────────────────────
 
 function readText(path: string): string {
@@ -216,6 +299,16 @@ function readText(path: string): string {
   } catch {
     return '';
   }
+}
+
+/** Write the notify sidecar only when its content changed, so repeated
+ *  installs stay idempotent (no mtime churn). Returns false when the
+ *  script cannot be guaranteed on disk. */
+function writeScriptIfChanged(content: string, path: string): boolean {
+  try {
+    if (existsSync(path) && readFileSync(path, 'utf-8') === content) return true;
+  } catch { /* unreadable — fall through to rewrite */ }
+  return writeTextAtomic(content, path);
 }
 
 function writeTextAtomic(text: string, path: string): boolean {
@@ -256,8 +349,22 @@ export function installCodexHooksIfNeeded(opts: InstallOptions = {}): InstallRes
     return { installed: false, reason: 'user-authored [hooks] present' };
   }
 
-  const includeNotify = !hasTopLevelKeyOutsideFence(original, 'notify');
-  const includeOtel = !hasTableOutsideFence(original, 'otel');
+  const platform = opts.platform ?? process.platform;
+  let includeNotify = !hasTopLevelKeyOutsideFence(original, 'notify');
+  // OTel exporter stays POSIX-only for now — deliberately omitted on
+  // win32 (unverified there); lifecycle hooks + notify carry the signal.
+  const includeOtel = platform !== 'win32' && !hasTableOutsideFence(original, 'otel');
+
+  let warning: string | undefined;
+  const notifyScriptPath = opts.notifyScriptPath ?? DEFAULT_WINDOWS_NOTIFY_SCRIPT_PATH;
+  if (includeNotify && platform === 'win32') {
+    // The Stop lifecycle hook already reports turn-complete, so a failed
+    // sidecar write downgrades to lifecycle-only rather than aborting.
+    if (!writeScriptIfChanged(windowsNotifyScriptContent(), notifyScriptPath)) {
+      includeNotify = false;
+      warning = `notify sidecar write failed (${notifyScriptPath}) — notify fallback omitted`;
+    }
+  }
 
   const otelEndpoint = includeOtel ? buildOtelEndpoint(opts.daemonHttpPort) : undefined;
   const body = managedBlockBody({
@@ -265,15 +372,17 @@ export function installCodexHooksIfNeeded(opts: InstallOptions = {}): InstallRes
     includeOtel,
     otelEndpoint,
     daemonHttpPort: opts.daemonHttpPort,
+    platform,
+    notifyScriptPath,
   });
   const updated = applyManagedBlock(original, body);
 
   if (updated === original) {
-    return { installed: true };
+    return { installed: true, warning };
   }
 
   if (writeTextAtomic(updated, path)) {
-    return { installed: true };
+    return { installed: true, warning };
   }
   return { installed: false, reason: `write failed: ${path}` };
 }
@@ -281,7 +390,10 @@ export function installCodexHooksIfNeeded(opts: InstallOptions = {}): InstallRes
 /** Strip the AgentDeck-managed fence. Idempotent — no-op when the fence
  *  is absent. Does not delete the config file even if it becomes empty
  *  (Codex may rely on its existence). */
-export function uninstallCodexHooks(opts: { configPath?: string } = {}): void {
+export function uninstallCodexHooks(opts: { configPath?: string; notifyScriptPath?: string } = {}): void {
+  try {
+    unlinkSync(opts.notifyScriptPath ?? DEFAULT_WINDOWS_NOTIFY_SCRIPT_PATH);
+  } catch { /* absent on POSIX installs — nothing to remove */ }
   const path = opts.configPath ?? DEFAULT_CODEX_CONFIG_PATH;
   if (!existsSync(path)) return;
   const original = readText(path);

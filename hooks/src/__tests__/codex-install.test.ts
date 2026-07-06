@@ -15,6 +15,7 @@ import {
   managedBlockBody,
   installCodexHooksIfNeeded,
   uninstallCodexHooks,
+  windowsNotifyScriptContent,
 } from '../codex-install.js';
 
 // ─── codex-mini-toml ────────────────────────────────────────────────────
@@ -209,6 +210,7 @@ describe('codex-install: managedBlockBody', () => {
       includeNotify: true,
       includeOtel: true,
       otelEndpoint: 'http://127.0.0.1:9120/otel/v1/traces',
+      platform: 'linux',
     });
     const withFence = applyManagedBlock(original, body);
     const stripped = removeManagedBlock(withFence);
@@ -220,6 +222,7 @@ describe('codex-install: managedBlockBody', () => {
       includeNotify: true,
       includeOtel: true,
       otelEndpoint: 'http://127.0.0.1:9120/otel/v1/traces',
+      platform: 'linux',
     });
     const withFence = applyManagedBlock('', body);
     expect(withFence).toContain('[features]');
@@ -241,6 +244,60 @@ describe('codex-install: managedBlockBody', () => {
     expect(withFence).toContain('"agentdeck-notify"');
   });
 
+  it('uses PowerShell command hooks on Windows', () => {
+    const body = managedBlockBody({
+      includeNotify: true,
+      includeOtel: true,
+      otelEndpoint: 'http://127.0.0.1:9120/otel/v1/traces',
+      platform: 'win32',
+      notifyScriptPath: 'C:\\Users\\me\\.agentdeck\\codex-notify.ps1',
+    });
+    const withFence = applyManagedBlock('', body);
+    expect(withFence).toContain('command = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ');
+    // notify must exec the sidecar via -File: Codex appends the JSON
+    // payload as trailing argv, which -Command cannot bind into $args.
+    expect(withFence).toContain('notify = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "C:\\\\Users\\\\me\\\\.agentdeck\\\\codex-notify.ps1"]');
+    expect(withFence).not.toContain('"-Command"');
+    expect(withFence).not.toContain('"agentdeck-notify"');
+
+    const decodedLifecycleCommands = [...withFence.matchAll(/-EncodedCommand ([A-Za-z0-9+/=]+)"/g)]
+      .map((match) => Buffer.from(match[1], 'base64').toString('utf16le'));
+    expect(decodedLifecycleCommands).toHaveLength(5);
+    const decoded = decodedLifecycleCommands.join('\n');
+    expect(decoded).toContain('/hooks/codex_user_prompt_submit');
+    expect(decoded).toContain('/hooks/codex_tool_start');
+    expect(decoded).toContain('/hooks/codex_tool_end');
+    expect(decoded).toContain('/hooks/codex_stop');
+    expect(decoded).toContain("$ProgressPreference = 'SilentlyContinue'");
+    expect(decoded).toContain('exit 0');
+    // Stdin must be read as UTF-8 ([Console]::In decodes with the OEM
+    // codepage) and posted as UTF-8 bytes (string bodies get ISO-8859-1).
+    expect(decoded).toContain('StreamReader([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8)');
+    expect(decoded).toContain('[System.Text.Encoding]::UTF8.GetBytes');
+
+    for (const line of withFence.split('\n').filter((value) => value.startsWith('command = '))) {
+      expect(line).not.toContain('$ErrorActionPreference');
+      expect(line).not.toContain('$port');
+    }
+    expect(withFence).not.toContain('command = "sh -c');
+    expect(withFence).not.toContain('notify = ["sh"');
+  });
+
+  it('windows notify sidecar reads payload from $args and posts codex_turn_complete', () => {
+    const script = windowsNotifyScriptContent();
+    expect(script).toContain('$args[$args.Count - 1]');
+    expect(script).toContain('/hooks/codex_turn_complete');
+    expect(script).toContain('$env:AGENTDECK_PORT');
+    expect(script).toContain("$port = '9120'");
+    expect(script).toContain('exit 0');
+    // String bodies get ISO-8859-1-encoded by Invoke-RestMethod, mangling
+    // non-ASCII payload text — the script must post UTF-8 bytes.
+    expect(script).toContain('[System.Text.Encoding]::UTF8.GetBytes');
+    // PowerShell 5.1 reads BOM-less scripts as ANSI — keep content ASCII
+    // so both interpretations are byte-identical.
+    expect(/^[\x00-\x7F]*$/.test(script)).toBe(true);
+  });
+
   it('omits conflicting optional channels when asked', () => {
     const body = managedBlockBody({
       includeNotify: false,
@@ -259,10 +316,15 @@ describe('codex-install: managedBlockBody', () => {
 describe('codex-install: install / uninstall (file I/O)', () => {
   let tmp: string;
   let configPath: string;
+  // Every install/uninstall call must pass this override: the suite may
+  // run with a win32 default platform, where the sidecar would otherwise
+  // be written to (or deleted from) the real ~/.agentdeck.
+  let notifyScriptPath: string;
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), 'codex-install-test-'));
     configPath = join(tmp, 'config.toml');
+    notifyScriptPath = join(tmp, 'codex-notify.ps1');
     delete process.env.AGENTDECK_NO_CODEX_HOOKS;
   });
 
@@ -272,7 +334,7 @@ describe('codex-install: install / uninstall (file I/O)', () => {
   });
 
   it('creates config with fence when file is absent', () => {
-    const result = installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    const result = installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, platform: 'linux' });
     expect(result.installed).toBe(true);
     const text = readFileSync(configPath, 'utf-8');
     expect(text).toContain(OPEN_FENCE);
@@ -283,7 +345,7 @@ describe('codex-install: install / uninstall (file I/O)', () => {
   it('preserves user content when installing into existing config', () => {
     const userText = `model = "gpt-5"\n[profiles.work]\nprovider = "openai"\n`;
     writeFileSync(configPath, userText, 'utf-8');
-    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, notifyScriptPath });
     const text = readFileSync(configPath, 'utf-8');
     expect(text).toContain('model = "gpt-5"');
     expect(text).toContain('[profiles.work]');
@@ -293,21 +355,21 @@ describe('codex-install: install / uninstall (file I/O)', () => {
 
   it('skips when user already has [features] table outside fence', () => {
     writeFileSync(configPath, `[features]\nhooks = true\n`, 'utf-8');
-    const result = installCodexHooksIfNeeded({ configPath });
+    const result = installCodexHooksIfNeeded({ configPath, notifyScriptPath });
     expect(result.installed).toBe(false);
     expect(result.reason).toContain('[features]');
   });
 
   it('skips when user already has [hooks] table outside fence', () => {
     writeFileSync(configPath, `[[hooks.Stop]]\nmatcher = ""\n`, 'utf-8');
-    const result = installCodexHooksIfNeeded({ configPath });
+    const result = installCodexHooksIfNeeded({ configPath, notifyScriptPath });
     expect(result.installed).toBe(false);
     expect(result.reason).toContain('[hooks]');
   });
 
   it('omits notify when user has top-level notify', () => {
     writeFileSync(configPath, `notify = ["python3", "/x.py"]\nmodel = "gpt-5"\n`, 'utf-8');
-    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, notifyScriptPath });
     const text = readFileSync(configPath, 'utf-8');
     // User notify preserved
     expect(text).toContain('"python3", "/x.py"');
@@ -320,7 +382,7 @@ describe('codex-install: install / uninstall (file I/O)', () => {
 
   it('omits OTel when user has [otel] table', () => {
     writeFileSync(configPath, `[otel]\nexporter = "otlp-grpc"\n`, 'utf-8');
-    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, notifyScriptPath });
     const text = readFileSync(configPath, 'utf-8');
     expect(text).toContain('exporter = "otlp-grpc"');
     const managed = text.split(OPEN_FENCE)[1].split(CLOSE_FENCE)[0];
@@ -328,11 +390,63 @@ describe('codex-install: install / uninstall (file I/O)', () => {
     expect(managed).toContain('hooks = true');
   });
 
+  it('omits OTel by default on Windows installs', () => {
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, platform: 'win32', notifyScriptPath });
+    const text = readFileSync(configPath, 'utf-8');
+    const managed = text.split(OPEN_FENCE)[1].split(CLOSE_FENCE)[0];
+    expect(managed).toContain('hooks = true');
+    expect(managed).toContain('powershell.exe');
+    expect(managed).not.toContain('[otel.trace_exporter.otlp-http]');
+  });
+
+  it('writes the notify sidecar script on Windows and removes it on uninstall', () => {
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, platform: 'win32', notifyScriptPath });
+
+    expect(readFileSync(notifyScriptPath, 'utf-8')).toBe(windowsNotifyScriptContent());
+    const text = readFileSync(configPath, 'utf-8');
+    expect(text).toContain('"-File"');
+    expect(text).toContain('codex-notify.ps1');
+
+    // Reinstall keeps both files byte-identical (idempotence).
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, platform: 'win32', notifyScriptPath });
+    expect(readFileSync(configPath, 'utf-8')).toBe(text);
+
+    uninstallCodexHooks({ configPath, notifyScriptPath });
+    expect(existsSync(notifyScriptPath)).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).not.toContain(OPEN_FENCE);
+  });
+
+  it('downgrades to lifecycle-only with a warning when the sidecar write fails', () => {
+    // Parent of the sidecar path is a regular file, so mkdir/write fails.
+    const blocker = join(tmp, 'blocker');
+    writeFileSync(blocker, 'not a directory', 'utf-8');
+    const result = installCodexHooksIfNeeded({
+      configPath,
+      daemonHttpPort: 9120,
+      platform: 'win32',
+      notifyScriptPath: join(blocker, 'codex-notify.ps1'),
+    });
+    expect(result.installed).toBe(true);
+    expect(result.warning).toContain('notify sidecar write failed');
+    const managed = readFileSync(configPath, 'utf-8').split(OPEN_FENCE)[1].split(CLOSE_FENCE)[0];
+    expect(managed).not.toContain('notify =');
+    expect(managed).toContain('hooks = true');
+  });
+
+  it('skips notify on Windows when user has top-level notify (no sidecar written)', () => {
+    writeFileSync(configPath, `notify = ["python3", "/x.py"]\n`, 'utf-8');
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, platform: 'win32', notifyScriptPath });
+    expect(existsSync(notifyScriptPath)).toBe(false);
+    const managed = readFileSync(configPath, 'utf-8').split(OPEN_FENCE)[1].split(CLOSE_FENCE)[0];
+    expect(managed).not.toContain('notify =');
+    expect(managed).toContain('hooks = true');
+  });
+
   it('uninstall strips fence and preserves user content', () => {
     const userText = `model = "gpt-5"\n[profiles.work]\nprovider = "openai"\n`;
     writeFileSync(configPath, userText, 'utf-8');
-    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
-    uninstallCodexHooks({ configPath });
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, notifyScriptPath });
+    uninstallCodexHooks({ configPath, notifyScriptPath });
     const text = readFileSync(configPath, 'utf-8');
     expect(text).not.toContain(OPEN_FENCE);
     expect(text).not.toContain('hooks = true');
@@ -341,28 +455,28 @@ describe('codex-install: install / uninstall (file I/O)', () => {
   });
 
   it('uninstall is idempotent when no config exists', () => {
-    expect(() => uninstallCodexHooks({ configPath })).not.toThrow();
+    expect(() => uninstallCodexHooks({ configPath, notifyScriptPath })).not.toThrow();
     expect(existsSync(configPath)).toBe(false);
   });
 
   it('honours AGENTDECK_NO_CODEX_HOOKS=1 opt-out', () => {
     process.env.AGENTDECK_NO_CODEX_HOOKS = '1';
-    const result = installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    const result = installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, notifyScriptPath });
     expect(result.installed).toBe(false);
     expect(result.reason).toContain('AGENTDECK_NO_CODEX_HOOKS');
     expect(existsSync(configPath)).toBe(false);
   });
 
   it('install is idempotent (same port → no rewrite)', () => {
-    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, notifyScriptPath });
     const firstStat = readFileSync(configPath, 'utf-8');
-    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, notifyScriptPath });
     const secondStat = readFileSync(configPath, 'utf-8');
     expect(secondStat).toBe(firstStat);
   });
 
   it('preserves Codex hook trust state across reinstall', () => {
-    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, notifyScriptPath });
     const withStateInsideFence = readFileSync(configPath, 'utf-8').replace(
       CLOSE_FENCE,
       [
@@ -376,7 +490,7 @@ describe('codex-install: install / uninstall (file I/O)', () => {
     );
     writeFileSync(configPath, withStateInsideFence, 'utf-8');
 
-    const result = installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    const result = installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, notifyScriptPath });
     expect(result.installed).toBe(true);
 
     const text = readFileSync(configPath, 'utf-8');
@@ -385,7 +499,7 @@ describe('codex-install: install / uninstall (file I/O)', () => {
     expect(managed).not.toContain('[hooks.state]');
     expect(outside).toContain('trusted_hash = "sha256:abc"');
 
-    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120 });
+    installCodexHooksIfNeeded({ configPath, daemonHttpPort: 9120, notifyScriptPath });
     expect(readFileSync(configPath, 'utf-8')).toBe(text);
   });
 });
