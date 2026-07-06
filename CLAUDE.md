@@ -99,11 +99,11 @@ Coverage thresholds (regression guard): lines ≥17%, functions ≥15%, branches
 
 ### Test Report (GitHub Pages)
 
-- **URL**: `https://puritysb.github.io/AgentDeck/` (landing) / `/reports/` (test report) / `/demo/` (creature-simulator)
-- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + Robot Framework (no-hw) + `pnpm run demo:build` → HTML report → GitHub Pages deploy
+- **URL**: `https://puritysb.github.io/AgentDeck/` (landing) / `/hardware/` (hardware+OS spec sheet) / `/gallery/` (device photo gallery) / `/docs/` (documentation hub) / `/demo/` (creature-simulator) / `/reports/` (test report)
+- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + Robot Framework (no-hw) + `pnpm run demo:build` → HTML report → GitHub Pages deploy. The "Assemble Pages site" step copies each surface into `_site/` (landing/hardware/gallery/docs/demo/reports)
 - **Report generator**: `scripts/generate-html-report.py` — tab-based SPA dashboard. Robot tab: suite→scenario→BDD steps→board matrix→per-test elapsed time→performance table. `[PERF]` log messages auto-extracted from output.xml
 - **Scenario matrix**: `scripts/scenario-matrix.json` — 10 user scenarios mapped to test files + gap analysis
-- **Landing page**: `scripts/pages-index.html`
+- **Site surfaces (all aquarium-tide, self-contained, token-defining in `design/lint.sh`)**: `scripts/pages-index.html` (landing) · `docs/hardware/index.html` (spec sheet) · `docs/gallery/index.html` (photo gallery — drop `docs/gallery/photos/<slug>.jpg`) · `docs/site/index.html` (docs hub)
 
 See [docs/testing.md](docs/testing.md) for full testing reference.
 
