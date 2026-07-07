@@ -66,7 +66,7 @@ import {
   type DeviceModule,
 } from './modules/index.js';
 import { SerialModule } from './modules/serial-module.js';
-import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendWifiProvisionToAll, handleESP32Wake, getESP32Ports, getSerialConnectionStatus, getSerialLastError } from './esp32-serial.js';
+import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendWifiProvisionToAll, handleESP32Wake, getESP32Ports, getSerialConnectionStatus, getSerialLastError, getSerialReachableBoards } from './esp32-serial.js';
 import { loadWifiConfig } from './wifi-config.js';
 import { getConnectedAdbDevices, hasAdb, getAdbDeviceCount } from './adb-reverse.js';
 import { getPixooDeviceDetails, pixooDeviceCount } from './pixoo/pixoo-bridge.js';
@@ -130,16 +130,20 @@ interface OtaWaiter {
 
 const otaWaiters = new Map<string, OtaWaiter>();
 
-function listWifiEsp32Devices(): Array<WifiEsp32Device & { stale: boolean }> {
+function listWifiEsp32Devices(): Array<WifiEsp32Device & { stale: boolean; serialActive: boolean }> {
   const now = Date.now();
-  const out: Array<WifiEsp32Device & { stale: boolean }> = [];
+  const serialBoards = getSerialReachableBoards();
+  const out: Array<WifiEsp32Device & { stale: boolean; serialActive: boolean }> = [];
   for (const [key, d] of wifiEsp32Devices) {
     if (now - d.lastSeenMs > 60 * 60 * 1000) {
       wifiEsp32Devices.delete(key);
       wifiEsp32Sockets.delete(key);
       continue;
     }
-    out.push({ ...d, stale: now - d.lastSeenMs > 90_000 });
+    // serialActive: this WiFi board is also live on USB serial, so its WiFi path
+    // is a hot standby — display events are driven over serial (single path).
+    const serialActive = isWifiTransportRedundant({ board: d.board, ip: d.ip }, serialBoards);
+    out.push({ ...d, stale: now - d.lastSeenMs > 90_000, serialActive });
   }
   return out;
 }
@@ -148,6 +152,48 @@ function wifiEsp32Key(d: { board?: unknown; ip?: unknown }): string {
   const board = typeof d.board === 'string' && d.board ? d.board : 'unknown';
   const ip = typeof d.ip === 'string' && d.ip ? d.ip : 'no-ip';
   return `${board}:${ip}`;
+}
+
+/**
+ * Single-path transport dedup. A physical ESP32 can be reachable over BOTH a
+ * USB serial connection and a WiFi WebSocket at once (e.g. inkdeck/ttgo/tc001
+ * plugged in for flashing while still joined to the AP). Serial is the more
+ * reliable, lower-latency path, so when a board is live on serial we drive it
+ * over serial only and suppress the redundant WiFi copy — no board receives the
+ * same event twice.
+ *
+ * Match is by board id, confirmed by the board's WiFi IP when both sides report
+ * one. If the serial side reports no IP (radio parked / pre-DHCP) the board id
+ * is the only shared key and we still prefer serial. Pure + exported for tests.
+ */
+export function isWifiTransportRedundant(
+  wifi: { board?: string; ip?: string } | null,
+  serialBoards: Array<{ board: string; ip?: string }>,
+): boolean {
+  if (!wifi || !wifi.board || wifi.board === 'unknown') return false;
+  for (const s of serialBoards) {
+    if (s.board !== wifi.board) continue;
+    // Same board type on serial: dedup unless both report IPs that differ
+    // (two distinct physical units of the same board model).
+    if (!s.ip || !wifi.ip || s.ip === wifi.ip) return true;
+  }
+  return false;
+}
+
+/** Reverse-lookup a WiFi ESP32 socket to its registered {board, ip} identity. */
+function wifiEsp32IdentityForSocket(ws: WebSocket): { board?: string; ip?: string } | null {
+  for (const [key, registeredWs] of wifiEsp32Sockets) {
+    if (registeredWs !== ws) continue;
+    const d = wifiEsp32Devices.get(key);
+    return d ? { board: d.board, ip: d.ip } : null;
+  }
+  return null;
+}
+
+/** True when this WiFi ESP32 socket's board is also live on USB serial, so its
+ *  WiFi event copy should be suppressed in favour of the serial path. */
+function isWifiEsp32RedundantWithSerial(ws: WebSocket): boolean {
+  return isWifiTransportRedundant(wifiEsp32IdentityForSocket(ws), getSerialReachableBoards());
 }
 
 function registerWifiEsp32(d: Record<string, unknown>, ws: WebSocket): void {
@@ -1531,6 +1577,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   core.wsServer.setEventTransformer((event, client) => {
     if (!core.wsServer.isEsp32Client(client)) return event;
     if (!esp32WifiEvents.has(event.type)) return null;
+    // Single-path guard: only the duplicated *display* payloads are deduped.
+    // When the same board is live on USB serial, serial drives it and the WiFi
+    // copy is redundant — drop it here. OTA control (esp32_ota_*, WiFi-only) and
+    // device_info_request keep flowing so the standby WiFi socket stays live and
+    // its lastSeen fresh. When serial disconnects, this flips false on the next
+    // event and WiFi resumes automatically — no state migration needed.
+    if (SERIAL_FORWARDED_EVENTS.has(event.type) && isWifiEsp32RedundantWithSerial(client)) return null;
     return prepareForSerial(event);
   });
 

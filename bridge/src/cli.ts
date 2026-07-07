@@ -785,7 +785,10 @@ program
                 ? ` OTA ${formatBytes(dev.otaSlotSize)}`
                 : dev.otaReason ? ` OTA no:${dev.otaReason}` : '';
               const stale = dev.stale ? ' stale' : '';
-              lines.push(`                 ${board}${ver}${hash}${ota}${stale} @ ${dev.ip ?? 'wifi'}`);
+              // Single-path: a board also live on USB serial is driven over
+              // serial; its WiFi link is a hot standby (no duplicate traffic).
+              const transport = dev.serialActive ? ' [serial-active · wifi standby]' : '';
+              lines.push(`                 ${board}${ver}${hash}${ota}${stale}${transport} @ ${dev.ip ?? 'wifi'}`);
             }
             total += devices.length;
           }

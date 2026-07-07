@@ -193,16 +193,14 @@ static void networkTask(void* param) {
         g_state.wsConnected = conn;
         unlockState();
 
-#if defined(BOARD_TTGO) || defined(BOARD_LED8X32)
-        // Classic ESP32 display-noise mitigation. Two coupling paths, same cure:
-        //   TTGO  — WiFi RF activity couples analog noise into the SPI panel.
-        //   TC001 — WiFi interrupts starve FastLED's RMT refill ISR, corrupting
-        //           the WS2812 bitstream (random bright/garbage pixels). The
-        //           classic ESP32 has no RMT DMA and IDF5 dropped FastLED's
-        //           anti-flicker builtin driver, so the RMT path is ISR-bound.
-        // When USB serial is the only live transport WiFi is unneeded — park the
-        // radio after it's been stable a few seconds. Keep it on while WiFi is
-        // connected because OTA needs the board to reach WS even on the USB bench.
+#if defined(BOARD_LED8X32)
+        // TC001 display-noise mitigation (UNCHANGED — deliberately excluded from
+        // the serial-primary radio parking below). WiFi interrupts starve
+        // FastLED's RMT refill ISR and corrupt the WS2812 bitstream (random
+        // bright/garbage pixels): the classic ESP32 has no RMT DMA and IDF5
+        // dropped FastLED's anti-flicker builtin driver, so the RMT path is
+        // ISR-bound. TC001 therefore keeps its WiFi radio on while connected and
+        // only parks once WiFi is already down.
         {
             static bool radioParked = false;
             static uint32_t serialStableSince = 0;
@@ -213,7 +211,43 @@ static void networkTask(void* param) {
                 if (!radioParked && (nowMs - serialStableSince) > 4000) {
                     Net::wifiSetRadioParked(true);
                     radioParked = true;
-                    Serial.println("[WiFi] radio parked — USB serial transport (display-noise mitigation)");
+                    Serial.println("[WiFi] TC001 radio parked — WiFi down, serial transport");
+                }
+            } else {
+                serialStableSince = 0;
+                if (radioParked) {
+                    Net::wifiSetRadioParked(false);
+                    radioParked = false;
+                    Serial.println("[WiFi] TC001 radio restored — serial dropped");
+                }
+            }
+        }
+#elif !defined(BOARD_IPS10)
+        // Serial-primary WiFi radio parking (TTGO, InkDeck, and every other board
+        // except TC001/LED8X32 above and IPS10 which parks via its own block).
+        // When the daemon is actively driving this board over USB serial, serial
+        // IS the transport and the 2.4GHz radio is dead weight:
+        //   • A serial-connected board is flashed over serial, so it never needs
+        //     WiFi OTA. WiFi-only boards keep serialConnected()==false, are never
+        //     parked here, and their WiFi/OTA path is untouched.
+        //   • Leaving the radio on only burns shared 2.4GHz airtime and worsens
+        //     packet loss for the WiFi-only boards (86box/round_amoled) that
+        //     depend on that band.
+        // Park after serial has been stable a few seconds (debounce transient
+        // JSON), and restore immediately when serial drops so WiFi + its OTA path
+        // recover fast.
+        {
+            static bool radioParked = false;
+            static uint32_t serialStableSince = 0;
+            uint32_t nowMs = millis();
+            bool shouldPark = Net::serialConnected();
+            if (shouldPark) {
+                if (serialStableSince == 0) serialStableSince = nowMs;
+                if (!radioParked && (nowMs - serialStableSince) > 4000) {
+                    if (Net::wsConnected() || Net::wsConnecting()) Net::wsDisconnect();
+                    Net::wifiSetRadioParked(true);
+                    radioParked = true;
+                    Serial.println("[WiFi] radio parked — USB serial primary (freeing 2.4GHz airtime)");
                 }
             } else {
                 serialStableSince = 0;

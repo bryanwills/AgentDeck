@@ -104,6 +104,10 @@ export interface SerialConnection {
     wifiConfigured?: boolean;
     wifiConnected?: boolean;
     wifiRadioParked?: boolean;
+    /** The board's own WiFi IP as it reports over serial. Lets the daemon match
+     * this serial connection to the same board's WiFi WebSocket and prefer the
+     * single serial path (getSerialReachableBoards → transport dedup). */
+    ip?: string;
     uptimeSec?: number;
     resetReason?: string;
     resetReasonCode?: number;
@@ -573,6 +577,7 @@ export function handleSerialLine(conn: SerialConnection, line: string): void {
           wifiConfigured: msg.wifiConfigured,
           wifiConnected: msg.wifiConnected,
           wifiRadioParked: msg.wifiRadioParked,
+          ip: (msg as any).ip,
           uptimeSec: msg.uptimeSec,
           resetReason: msg.resetReason,
           resetReasonCode: msg.resetReasonCode,
@@ -1279,6 +1284,30 @@ export function getESP32DeviceInfo(): Array<{
       port: c.port,
       ...c.deviceInfo,
     }));
+}
+
+/**
+ * Board identities currently reachable over a LIVE, responsive USB serial
+ * connection (has announced device_info and is actively read/written). The
+ * daemon uses this to enforce single-path communication: when a physical board
+ * is driven over serial, its WiFi WebSocket copy is redundant and is suppressed
+ * (see daemon-server transport dedup). A power-only USB (no enumerated port) or
+ * a silent/booting port is NOT responsive, so it never appears here and the
+ * board keeps using WiFi — exactly the desired fallback.
+ *
+ * `ip` is the board's own WiFi IP (when connected), used to confirm the serial
+ * connection and the WiFi socket are the same physical unit before deduping.
+ */
+export function getSerialReachableBoards(): Array<{ board: string; ip?: string }> {
+  const now = Date.now();
+  const out: Array<{ board: string; ip?: string }> = [];
+  for (const c of connections) {
+    if (!isResponsive(c, now)) continue;
+    const board = c.deviceInfo?.board;
+    if (!board) continue;
+    out.push({ board, ip: c.deviceInfo?.wifiConnected ? c.deviceInfo?.ip : undefined });
+  }
+  return out;
 }
 
 /**
