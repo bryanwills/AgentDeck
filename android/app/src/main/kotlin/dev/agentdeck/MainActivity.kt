@@ -18,6 +18,7 @@ import dev.agentdeck.data.DashboardOrientation
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.net.BridgeConstants
 import dev.agentdeck.net.ConnectionStatus
+import dev.agentdeck.net.DimConfig
 import dev.agentdeck.state.AgentStateHolder
 import dev.agentdeck.ui.monitor.MonitorScreen
 import dev.agentdeck.ui.screen.EinkMonitorScreen
@@ -37,6 +38,7 @@ import dev.agentdeck.net.DiscoveredBridge
 import dev.agentdeck.service.MonitorService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -72,10 +74,24 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Keep screen on while dashboard is active
+        // Keep the dashboard awake while active, but let LCD tablets actually
+        // sleep when the Mac display sends a full-off dim instruction. E-ink
+        // surfaces intentionally keep their panel awake and only dim lighting.
         lifecycleScope.launch {
-            displayPrefs.keepAwakeFlow.collect { keepAwake ->
-                if (keepAwake) {
+            combine(
+                displayPrefs.keepAwakeFlow,
+                displayPrefs.displaySyncEnabledFlow,
+                stateHolder.state,
+            ) { keepAwake, displaySyncEnabled, state ->
+                shouldKeepDashboardScreenOn(
+                    isEink = isEinkDevice,
+                    keepAwake = keepAwake,
+                    displaySyncEnabled = displaySyncEnabled,
+                    hostDisplayOn = state.hostDisplayOn,
+                    hostDim = state.hostDim,
+                )
+            }.collect { keepScreenOn ->
+                if (keepScreenOn) {
                     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else {
                     window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -178,6 +194,24 @@ class MainActivity : ComponentActivity() {
 
 private const val TAG = "MainActivity"
 private const val VERBOSE_MAIN_LOGS = false
+
+internal fun shouldKeepDashboardScreenOn(
+    isEink: Boolean,
+    keepAwake: Boolean,
+    displaySyncEnabled: Boolean,
+    hostDisplayOn: Boolean,
+    hostDim: DimConfig?,
+): Boolean {
+    if (!keepAwake) return false
+    if (isEink) return true
+    if (!displaySyncEnabled) return true
+    if (hostDisplayOn) return true
+    if (hostDim?.enabled == false) return true
+
+    // `min` means "stay visible at low brightness"; absent or any unknown mode
+    // preserves the legacy full-off behavior and must release KEEP_SCREEN_ON.
+    return hostDim?.mode == "min"
+}
 
 private inline fun mainDebug(message: () -> String) {
     if (VERBOSE_MAIN_LOGS || Log.isLoggable(TAG, Log.DEBUG)) {
