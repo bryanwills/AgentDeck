@@ -6,7 +6,6 @@ import { SerialModule } from './serial-module.js';
 import { PixooModule } from './pixoo-module.js';
 import { TimeboxModule } from './timebox-module.js';
 import { IDotMatrixModule } from './idotmatrix-module.js';
-import { D200hModule } from './d200h-module.js';
 import type { AgentType } from '../types.js';
 import { debug } from '../logger.js';
 
@@ -18,7 +17,6 @@ export { SerialModule } from './serial-module.js';
 export { PixooModule } from './pixoo-module.js';
 export { TimeboxModule } from './timebox-module.js';
 export { IDotMatrixModule } from './idotmatrix-module.js';
-export { D200hModule } from './d200h-module.js';
 
 /**
  * Create default module instances for a given agent type.
@@ -32,7 +30,6 @@ export function createDefaultModules(agentType: AgentType): DeviceModule[] {
     new PixooModule(),
     new TimeboxModule(),
     new IDotMatrixModule(),
-    new D200hModule(),
   ];
 }
 

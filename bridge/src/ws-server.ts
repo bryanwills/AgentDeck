@@ -222,6 +222,10 @@ export class WsServer {
     return this.wss.clients.size;
   }
 
+  getUlanziClientCount(): number {
+    return this.ulanziClients.size;
+  }
+
   close(): void {
     clearInterval(this.pingTimer);
     this.clientAlive.clear();

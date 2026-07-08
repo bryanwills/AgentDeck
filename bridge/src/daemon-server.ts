@@ -682,13 +682,6 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
     };
   }
 
-  const d200h = startedModules.find((m) => m.name === 'd200h') as DeviceModule & {
-    statusSnapshot?: () => Record<string, unknown>;
-  };
-  if (d200h?.statusSnapshot) {
-    modules.d200h = d200h.statusSnapshot();
-  }
-
   if (started.has('pixoo') || pixooDeviceCount() > 0) {
     const details = getPixooDeviceDetails();
     modules.pixoo = {
@@ -977,8 +970,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }
     if (req.method === 'GET' && pathname === '/devices') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      const d200hModule = typeof startedModules !== 'undefined' ? startedModules.find((m) => m.name === 'd200h') as any : undefined;
-      const d200hStatus = d200hModule?.statusSnapshot ? d200hModule.statusSnapshot() : { connected: false };
+      // Direct-HID D200H control was retired; the D200H is driven exclusively by
+      // the Ulanzi Studio plugin over WebSocket. Report it connected iff that
+      // plugin is attached.
+      const ulanziPluginConnected = core.wsServer.getUlanziClientCount() > 0;
       res.end(JSON.stringify({
         devices: [
           { type: 'websocket', count: core.wsServer.getClientCount() },
@@ -990,9 +985,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           { type: 'adb', count: getAdbDeviceCount() },
           {
             type: 'd200h',
-            connected: d200hStatus.connected,
-            writeOK: d200hStatus.writeOK,
-            writeFail: d200hStatus.writeFail,
+            connected: ulanziPluginConnected,
+            ulanziPluginConnected,
           },
         ],
         modules: moduleHealthProvider(),
@@ -1715,11 +1709,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // panic backtrace during a WiFi OTA) that otherwise fights the daemon's serial
   // reader for bytes. Diagnostic gate only; normal daemons keep serial on.
   const serialMode = process.env.AGENTDECK_DAEMON_NO_SERIAL === '1' ? false : 'auto';
+  // Note: the D200H has no device module — direct-HID control was retired. It is
+  // driven exclusively by the Ulanzi Studio plugin (`ulanzi-plugin`) over WebSocket;
+  // the daemon never opens it over HID. Its health is reported via the Ulanzi client
+  // count in moduleHealthProvider below.
   const startedModules = await initModules(
     deviceModules,
-    // d200h: false — direct-HID fallback retired. The D200H is driven exclusively
-    // by the Ulanzi Studio plugin (`ulanzi-plugin`); the daemon never opens it over HID.
-    { mdns: true, broadcast: true, adb: 'auto', serial: serialMode, pixoo: 'auto', timebox: 'auto', idotmatrix: 'auto', d200h: false },
+    { mdns: true, broadcast: true, adb: 'auto', serial: serialMode, pixoo: 'auto', timebox: 'auto', idotmatrix: 'auto' },
     { port, authToken: core.authToken, projectName: 'AgentDeck', wsServer: core.wsServer },
   );
 
@@ -1729,6 +1725,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     if (einkDevices.length > 0) {
       modules.einkDevices = { available: true, devices: einkDevices };
     }
+    const ulanziPluginConnected = core.wsServer.getUlanziClientCount() > 0;
+    modules.d200h = {
+      connected: ulanziPluginConnected,
+      externalOwner: ulanziPluginConnected,
+      managerOpened: ulanziPluginConnected,
+    };
     return modules;
   };
   core.setModuleHealthProvider(moduleHealthProvider);

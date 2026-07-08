@@ -4,7 +4,7 @@ import { execSync } from 'child_process';
 
 /**
  * ADB reverse tunnel module for Android dashboard clients.
- * D200H Deck Dock is now handled by D200hModule (HID protocol).
+ * D200H Deck Dock is driven by the Ulanzi Studio plugin over WebSocket.
  */
 export class AdbModule implements DeviceModule {
   readonly name = 'adb';

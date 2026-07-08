@@ -43,5 +43,4 @@ export interface ModuleConfigs {
   pixoo?: 'auto' | boolean;
   timebox?: 'auto' | boolean;
   idotmatrix?: 'auto' | boolean;
-  d200h?: 'auto' | boolean;
 }

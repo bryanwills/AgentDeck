@@ -6,7 +6,7 @@ const ANDROID_PORT = 9120;
 
 /**
  * ADB reverse tunnel management for Android dashboard clients.
- * D200H Deck Dock is now handled by D200hModule (HID protocol) — no ADB needed.
+ * D200H Deck Dock is driven by the Ulanzi Studio plugin over WebSocket — no ADB needed.
  */
 
 export function hasAdb(): boolean {

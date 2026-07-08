@@ -251,13 +251,12 @@ program
       noUpdateCheck: opts.updateCheck === false,
       postit: opts.postit !== false,
       wakeWord: !!opts.wakeWord,
-      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false, d200h: false } : {
+      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false } : {
         mdns: false,   // daemon-only — session bridges never advertise mDNS
         adb: opts.adb !== false ? 'auto' : false,
         serial: false, // daemon-only — session bridges never talk to ESP32
         pixoo: false,  // daemon-only — session bridges never talk to Pixoo
         timebox: false, // daemon-only — session bridges never talk to Timebox
-        d200h: false,  // daemon-only — session bridges never talk to D200H
       },
     });
   });
@@ -300,13 +299,12 @@ program
       command: opts.command,
       debug: opts.debug,
       postit: opts.postit !== false,
-      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false, d200h: false } : {
+      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false } : {
         mdns: false,   // daemon-only
         adb: opts.adb !== false ? 'auto' : false,
         serial: false, // daemon-only
         pixoo: false,  // daemon-only
         timebox: false, // daemon-only
-        d200h: false,  // daemon-only
       },
     });
   });
@@ -349,13 +347,12 @@ program
       command: opts.command,
       debug: opts.debug,
       postit: opts.postit !== false,
-      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false, d200h: false } : {
+      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false } : {
         mdns: false,
         adb: opts.adb !== false ? 'auto' : false,
         serial: false,
         pixoo: false,
         timebox: false,
-        d200h: false,
       },
     });
   });
@@ -375,7 +372,7 @@ program
       agentType: 'monitor',
       port,
       debug: opts.debug,
-      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false, d200h: false } : undefined,
+      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false } : undefined,
     });
   });
 
@@ -825,8 +822,7 @@ program
             total += count;
           }
         } else if (d.type === 'd200h' && d.connected) {
-          const writeInfo = d.writeOK != null ? ` (writes: ${d.writeOK} ok, ${d.writeFail} fail)` : '';
-          lines.push(`  D200H        HID connected${writeInfo}`);
+          lines.push(`  D200H        Ulanzi Studio connected (via WebSocket)`);
           total++;
         }
       }
