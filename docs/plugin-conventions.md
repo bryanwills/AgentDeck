@@ -105,12 +105,14 @@ Ulanzi D200H communicates via **stock HID protocol** (VID `0x2207`/PID `0x0019`,
 
 **Primary path: Ulanzi Studio plugin.** The D200H needs the Mac **Ulanzi Studio** app to render reliably, so the official Ulanzi Studio plugin (`plugin-ulanzi/`, registers over WS as `ulanzi-plugin`) is the **only** supported way to drive the device. It shares the `@agentdeck/shared` `buildSessionDeck` layout engine and shows an OFFLINE + press-to-launch screen when the daemon is down.
 
-**Direct-HID fallback — retired (2026-06-21).** The daemons no longer open the D200H over HID. The two driver modules below are kept dormant (code intact, easily re-enabled) but are **not activated**:
+**Direct-HID fallback — retired (2026-06-21); Node side deleted (2026-07-08).** The daemons no longer open the D200H over HID.
 
-- **Node.js CLI daemon** (`bridge/src/modules/d200h-module.ts` + `bridge/src/d200h/`): activation gated off at the daemon — `daemon-server.ts` passes `d200h: false` (was `'auto'`), so `D200hModule.shouldActivate(false)` returns `false` and the module never touches `node-hid`. Session bridges already passed `d200h: false`.
-- **Swift daemon** (`D200hHidModule.swift`, macOS app): `DaemonServer.swift` gates instantiation behind `let enableD200hDirectHID = false`, so the IOKit `IOHIDManager` is never created and `d200hModule` stays `nil`.
+- **Node.js CLI daemon**: the direct-HID module (`bridge/src/modules/d200h-module.ts`) and its protocol/renderer (`bridge/src/d200h/hid-protocol.ts`, `image-renderer.ts`) were **deleted** — the daemon had already gated them off (`d200h: false`) so they were dead at runtime. The `d200h` key was also dropped from `ModuleConfigs`. D200H connectivity is now reported purely from `ulanzi-plugin` WS presence (`WsServer.getUlanziClientCount()` → `/devices` `ulanziPluginConnected`, module-health `modules.d200h`, `agentdeck devices`). To restore direct-HID on the Node side, recover the deleted files from git history.
+- **Swift daemon** (`D200hHidModule.swift`, macOS app): **unchanged — still dormant.** `DaemonServer.swift` gates instantiation behind `let enableD200hDirectHID = false`, so the IOKit `IOHIDManager` is never created and `d200hModule` stays `nil`.
 
-The `ulanzi-plugin` stand-down arbitration (`onUlanziPluginPresence` / `setExternalOwner`) remains in place as inert dormant code — it only mattered when direct-HID was active. To re-enable direct-HID, flip the Node config back to `'auto'` and the Swift `enableD200hDirectHID` to `true`.
+The Swift `ulanzi-plugin` stand-down arbitration (`onUlanziPluginPresence` / `setExternalOwner`) remains in place as inert dormant code alongside the Swift direct-HID path.
+
+**OFFLINE brand mark.** When the daemon is down, the Stream Deck keypad, Stream Deck+ encoder, and D200H all render the canonical **AgentDeck dome-over-deck brand mark** (aquarium-tide cyan on ink) — parity with the macOS/iOS/Android connection overlays and the ESP32 splash. SVG SSOT: `renderAgentDeckMark()` + the `'agentdeck'` glyph + the `'brand'` tone in `shared/src/svg-renderers/session-slot-renderer.ts` (ported from `AgentDeckLogo.swift`). All offline paths route through it (`renderDisconnectedSlot` / `renderOpenAppGrid`/`Quadrant` / `renderOfflineTouchStrip`; D200H `buildSessionDeck` hero; plugin `response`/`voice` dial tiles).
 
 Legacy on-device C agent archived to `zkswe/agent-archive/`.
 
