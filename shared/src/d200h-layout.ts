@@ -388,15 +388,11 @@ function renderModeButton(mode: string): string {
 }
 
 function renderOfflineSlot(hero = false): string {
-  if (hero) {
-    const colors = { bg: '#07170f', text: '#dcfce7', sub: '#86efac' };
-    const elements = [
-      `<text x="72" y="54" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="${colors.text}">${PASSIVE_OFFLINE_LABEL}</text>`,
-      `<text x="72" y="82" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="${colors.sub}">${OPEN_AGENTDECK_LABEL}</text>`,
-    ].join('');
-    return svgFrame(colors.bg, elements);
-  }
-  return svgFrame('#0a0a0a', `<text x="72" y="80" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#1f2937">--</text>`);
+  // Route through the shared aquarium-tide OFFLINE card so the legacy single-page
+  // D200H grid shows the same dome-over-deck brand mark as the session-deck path
+  // and the native connection overlays.
+  if (hero) return renderInfoSlot(PASSIVE_OFFLINE_LABEL, OPEN_AGENTDECK_LABEL, 'agentdeck', 'brand');
+  return renderEmptySlot();
 }
 
 /**
@@ -616,7 +612,7 @@ export function buildSessionDeck(stateEvt: any, view: DeckView, positions: strin
   if ((state.state === 'DISCONNECTED' || state.state === 'disconnected') && state.allSessions.length === 0) {
     const hero = Math.floor(slots.length / 2);
     slots.forEach((pos, i) => out.set(pos, {
-      svg: i === hero ? renderInfoSlot(PASSIVE_OFFLINE_LABEL, OPEN_AGENTDECK_LABEL, 'activity', 'info', 'npx @agentdeck/setup') : renderEmptySlot(),
+      svg: i === hero ? renderInfoSlot(PASSIVE_OFFLINE_LABEL, OPEN_AGENTDECK_LABEL, 'agentdeck', 'brand', 'npx @agentdeck/setup') : renderEmptySlot(),
       action: { kind: 'launch' },
     }));
     return out;

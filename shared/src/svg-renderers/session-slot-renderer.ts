@@ -73,6 +73,7 @@ export type StatusCardTone =
   | 'muted'
   | 'agent'
   | 'action'
+  | 'brand'
   | 'purple';
 
 export interface StatusCardConfig {
@@ -149,6 +150,10 @@ function toneColors(tone: StatusCardTone = 'info') {
       return { bg: '#141016', panel: '#241a2b', icon: '#f0abfc', accent: '#c084fc', text: '#fae8ff', sub: '#d8b4fe' };
     case 'action':
       return { bg: '#07170f', panel: '#12331f', icon: '#bbf7d0', accent: '#22c55e', text: '#dcfce7', sub: '#86efac' };
+    case 'brand':
+      // Aquarium-tide OFFLINE tone — matches the dark-scrim + cyan AgentDeck mark
+      // the macOS/iOS/Android connection overlays and the ESP32 splash draw.
+      return { bg: '#071a1e', panel: '#0e2e33', icon: '#3ED6E8', accent: '#3ED6E8', text: '#e6f7fa', sub: '#7fb2bc' };
     case 'purple':
       return { bg: '#120d1d', panel: '#24163a', icon: '#d8b4fe', accent: '#a78bfa', text: '#f3e8ff', sub: '#d8b4fe' };
     case 'info':
@@ -183,6 +188,40 @@ function renderOrbitingRect(params: {
   ].join('');
 }
 
+/**
+ * AgentDeck product mark — the aquarium dome over a hardware deck (glass dome +
+ * waterline + highlight + rounded deck base + three keys + two bubbles). Ported
+ * unit-for-unit (0..24 space) from the SwiftUI `AgentDeckLogo` / Compose
+ * `AgentDeckMark` so the Stream Deck / D200H offline hero shows the SAME brand
+ * mark that the macOS/iOS/Android connection overlays and the ESP32 splash draw.
+ * Centered on (x,y); `size` is the mark's width in px. `color` draws the dome/deck
+ * strokes + keys; `accent` tints the waterline + bubbles.
+ */
+export function renderAgentDeckMark(x: number, y: number, size: number, color: string, accent = color): string {
+  const u = size / 24; // unit-space (0..24) → px
+  const ax = (p: number) => +(x + (p - 12) * u).toFixed(2);
+  const ay = (p: number) => +(y + (p - 12) * u).toFixed(2);
+  const w = (n: number) => +(n * u).toFixed(2);
+  const cap = 'stroke-linecap="round" stroke-linejoin="round" fill="none"';
+  return [
+    // glass dome
+    `<path d="M${ax(4.7)} ${ay(12.8)} C${ax(5.3)} ${ay(4.9)} ${ax(18.7)} ${ay(4.9)} ${ax(19.3)} ${ay(12.8)}" stroke="${color}" stroke-width="${w(1.6)}" ${cap}/>`,
+    // waterline
+    `<path d="M${ax(6.1)} ${ay(11.2)} C${ax(8.8)} ${ay(12.5)} ${ax(15.2)} ${ay(12.5)} ${ax(17.9)} ${ay(11.2)}" stroke="${accent}" stroke-width="${w(1.15)}" opacity="0.6" ${cap}/>`,
+    // dome highlight
+    `<path d="M${ax(8.0)} ${ay(7.7)} C${ax(10.0)} ${ay(5.7)} ${ax(13.2)} ${ay(5.4)} ${ax(15.8)} ${ay(6.1)}" stroke="${color}" stroke-width="${w(0.9)}" opacity="0.34" ${cap}/>`,
+    // deck base
+    `<rect x="${ax(3.4)}" y="${ay(12.2)}" width="${w(17.2)}" height="${w(7.8)}" rx="${w(2.2)}" stroke="${color}" stroke-width="${w(1.6)}" opacity="0.88" fill="none"/>`,
+    // three deck keys
+    `<rect x="${ax(6.5)}" y="${ay(15.4)}" width="${w(3.1)}" height="${w(2.0)}" rx="${w(1.0)}" fill="${color}" opacity="0.70"/>`,
+    `<rect x="${ax(10.4)}" y="${ay(15.4)}" width="${w(3.1)}" height="${w(2.0)}" rx="${w(1.0)}" fill="${color}" opacity="0.92"/>`,
+    `<rect x="${ax(14.3)}" y="${ay(15.4)}" width="${w(3.1)}" height="${w(2.0)}" rx="${w(1.0)}" fill="${color}" opacity="0.70"/>`,
+    // interior bubbles
+    `<circle cx="${ax(9.6)}" cy="${ay(9.0)}" r="${w(0.95)}" fill="${accent}" opacity="0.62"/>`,
+    `<circle cx="${ax(14.8)}" cy="${ay(8.2)}" r="${w(0.6)}" fill="${accent}" opacity="0.42"/>`,
+  ].join('');
+}
+
 function renderGlyphIcon(kind: StatusIconKind, color: string, accent: string, x = 72, y = 43, scale = 1): string {
   const s = scale;
   const sx = (n: number) => x + n * s;
@@ -206,11 +245,8 @@ function renderGlyphIcon(kind: StatusIconKind, color: string, accent: string, x 
         `<circle cx="${sx(-10)}" cy="${sy(13)}" r="${2.8 * s}" fill="${color}" opacity="0.55"/><circle cx="${x}" cy="${sy(13)}" r="${2.8 * s}" fill="${color}" opacity="0.38"/><circle cx="${sx(10)}" cy="${sy(13)}" r="${2.8 * s}" fill="${color}" opacity="0.24"/>`,
       ].join('');
     case 'agentdeck':
-      return [
-        `<rect x="${sx(-24)}" y="${sy(-19)}" width="${48 * s}" height="${36 * s}" rx="${8 * s}" fill="${accent}" opacity="0.14" stroke="${color}" stroke-width="${2.4 * s}"/>`,
-        `<path d="M${sx(-13)} ${sy(-5)} H${sx(13)} M${sx(-13)} ${sy(7)} H${sx(4)}" ${common} stroke-width="${2.8 * s}" opacity="0.82"/>`,
-        `<circle cx="${sx(-11)}" cy="${sy(27)}" r="${4 * s}" fill="${color}" opacity="0.92"/><circle cx="${x}" cy="${sy(27)}" r="${4 * s}" fill="${color}" opacity="0.68"/><circle cx="${sx(11)}" cy="${sy(27)}" r="${4 * s}" fill="${color}" opacity="0.44"/>`,
-      ].join('');
+      // The canonical dome-over-deck brand mark (parity with the native overlays).
+      return renderAgentDeckMark(x, y, 54 * s, color, accent);
     case 'tool':
       return `<circle cx="${sx(-18)}" cy="${sy(-13)}" r="${7 * s}" fill="none" stroke="${color}" stroke-width="${2.6 * s}"/><path d="M${sx(-12)} ${sy(-7)} L${sx(4)} ${sy(9)}" ${common} stroke-width="${3.8 * s}" fill="none"/><rect x="${sx(4)}" y="${sy(5)}" width="${22 * s}" height="${12 * s}" rx="${5 * s}" transform="rotate(45 ${sx(15)} ${sy(11)})" fill="${accent}" opacity="0.82"/>`;
     case 'model':
@@ -405,7 +441,7 @@ export function renderDisconnectedSlot(config: DisconnectedSlotConfig): string {
   if (config.quadrant) {
     return renderOpenAppQuadrant(config.quadrant, config.label ?? PASSIVE_OFFLINE_LABEL, config.subtitle ?? OPEN_AGENTDECK_LABEL);
   }
-  return renderStatusCard({ icon: 'open-app', label: config.label ?? PASSIVE_OFFLINE_LABEL, subtitle: config.subtitle ?? OPEN_AGENTDECK_LABEL, detail: config.detail, tone: 'action' });
+  return renderStatusCard({ icon: 'agentdeck', label: config.label ?? PASSIVE_OFFLINE_LABEL, subtitle: config.subtitle ?? OPEN_AGENTDECK_LABEL, detail: config.detail, tone: 'brand' });
 }
 
 /**
@@ -416,7 +452,7 @@ export function renderDisconnectedSlot(config: DisconnectedSlotConfig): string {
  * spanning all four keys while each key keeps its own outer rounded bezel.
  */
 export function renderOpenAppQuadrant(quadrant: ClusterQuadrant, label = PASSIVE_OFFLINE_LABEL, subtitle = OPEN_AGENTDECK_LABEL): string {
-  const colors = toneColors('action');
+  const colors = toneColors('brand');
   const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
   const offsetX = (quadrant === 'tr' || quadrant === 'br') ? -SIZE : 0;
   const offsetY = (quadrant === 'bl' || quadrant === 'br') ? -SIZE : 0;
@@ -425,7 +461,7 @@ export function renderOpenAppQuadrant(quadrant: ClusterQuadrant, label = PASSIVE
   // the per-key viewBox + transform crops to one quadrant.
   const cluster = [
     `<rect x="16" y="16" width="256" height="256" rx="28" fill="${colors.panel}" opacity="0.68" stroke="${colors.accent}" stroke-width="2.4" stroke-opacity="0.28"/>`,
-    renderGlyphIcon('open-app', colors.icon, colors.accent, 144, 86, 1.88),
+    renderGlyphIcon('agentdeck', colors.icon, colors.accent, 144, 86, 1.88),
     `<text x="144" y="208" text-anchor="middle" font-family="${fontFam}" font-size="36" font-weight="800" fill="${colors.text}">${escXml(truncate(label, 14))}</text>`,
     `<text x="144" y="240" text-anchor="middle" font-family="${fontFam}" font-size="20" font-weight="650" fill="${colors.sub}" opacity="0.86">${escXml(truncate(subtitle, 18))}</text>`,
   ].join('');
@@ -547,7 +583,7 @@ export function renderOpenAppGrid(
   label = PASSIVE_OFFLINE_LABEL,
   subtitle = OPEN_AGENTDECK_LABEL,
 ): string {
-  const colors = toneColors('action');
+  const colors = toneColors('brand');
   const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
   const offsetX = -col * SIZE;
   const offsetY = -row * SIZE;
@@ -576,7 +612,7 @@ export function renderOpenAppGrid(
 
   const cluster = [
     `<rect x="${padX}" y="${padY}" width="${rectW}" height="${rectH}" rx="${rx}" fill="${colors.panel}" opacity="0.68" stroke="${colors.accent}" stroke-width="${(2.4 * baseScale).toFixed(1)}" stroke-opacity="0.28"/>`,
-    renderGlyphIcon('open-app', colors.icon, colors.accent, glyphX, glyphY, baseScale),
+    renderGlyphIcon('agentdeck', colors.icon, colors.accent, glyphX, glyphY, baseScale),
     `<text x="${totalW / 2}" y="${labelY}" text-anchor="middle" font-family="${fontFam}" font-size="${fontSizeLabel}" font-weight="800" fill="${colors.text}">${escXml(truncate(label, 16))}</text>`,
     `<text x="${totalW / 2}" y="${subY}" text-anchor="middle" font-family="${fontFam}" font-size="${fontSizeSub}" font-weight="650" fill="${colors.sub}" opacity="0.86">${escXml(truncate(subtitle, 24))}</text>`,
   ].join('');
@@ -592,7 +628,7 @@ export function renderOpenAppGrid(
 
 export function renderOfflineTouchStrip(index: number): string {
   const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
-  const colors = toneColors('action');
+  const colors = toneColors('brand');
   const W_total = 800;
   const H_total = 100;
 
@@ -604,8 +640,8 @@ export function renderOfflineTouchStrip(index: number): string {
     // Background card panel
     `<rect x="15" y="10" width="770" height="80" rx="16" fill="${colors.panel}" opacity="0.68" stroke="${colors.accent}" stroke-width="2" stroke-opacity="0.28"/>`,
 
-    // Left side: open-app glyph icon (x=120, y=50)
-    renderGlyphIcon('open-app', colors.icon, colors.accent, 120, 50, 1.2),
+    // Left side: AgentDeck brand mark (x=120, y=50)
+    renderGlyphIcon('agentdeck', colors.icon, colors.accent, 120, 50, 1.2),
 
     // Center: Offline text and helper instruction
     `<text x="400" y="44" text-anchor="middle" font-family="${fontFam}" font-size="22" font-weight="800" fill="${colors.text}">AGENTDECK OFFLINE</text>`,

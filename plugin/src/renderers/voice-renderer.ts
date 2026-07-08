@@ -1,7 +1,14 @@
 import { isWide, charPx, measureTextWidth, sliceByPx } from './text-utils.js';
+import { renderAgentDeckMark } from '@agentdeck/shared';
 
 const W = 200;
 const H = 100;
+
+// Aquarium-tide OFFLINE tone — shared with the response dial + session-slot card.
+const OFFLINE_CYAN = '#3ED6E8';
+const OFFLINE_SUB = '#7fb2bc';
+const OFFLINE_BG = '#071a1e';
+const OFFLINE_FONT = '"IBM Plex Sans", -apple-system, system-ui, sans-serif';
 
 function escapeXml(str: string): string {
   return str
@@ -98,13 +105,13 @@ export function renderVoiceError(msg?: string): string {
   `);
 }
 
-/** Disabled state (disconnected) */
+/** Disabled state (disconnected) — aquarium-tide offline card with the brand mark. */
 export function renderVoiceDisabled(): string {
   return svgWrap(`
-    <rect width="${W}" height="${H}" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#475569">VOICE</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#475569" opacity="0.5">🎙</text>
-    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#475569">Offline</text>
+    <rect width="${W}" height="${H}" fill="${OFFLINE_BG}"/>
+    <text x="100" y="18" text-anchor="middle" font-family="${OFFLINE_FONT}" font-size="13" font-weight="bold" fill="${OFFLINE_SUB}">VOICE</text>
+    ${renderAgentDeckMark(100, 50, 30, OFFLINE_CYAN)}
+    <text x="100" y="84" text-anchor="middle" font-family="${OFFLINE_FONT}" font-size="12" font-weight="600" fill="${OFFLINE_SUB}">Offline</text>
   `);
 }
 
