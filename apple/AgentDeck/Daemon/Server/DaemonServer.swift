@@ -5291,16 +5291,35 @@ final class DaemonServer {
                 )
             }
         } else if backend == .foundationModels {
+            if ApmeJudgeFoundationModels.isAvailable {
+                return JudgeBackendStatus(
+                    backend: backend.rawValue,
+                    status: "ready",
+                    model: "foundation-models",
+                    endpoint: nil,
+                    checkedAt: checkedAt,
+                    reason: nil
+                )
+            }
             return JudgeBackendStatus(
                 backend: backend.rawValue,
-                status: "ready",
-                model: "foundation-models",
+                status: "unavailable",
+                model: nil,
                 endpoint: nil,
                 checkedAt: checkedAt,
-                reason: nil
+                reason: ApmeJudgeFoundationModels.unavailableReason
             )
         } else if backend == .api {
-            // API backend requires key check
+            if ApmeJudgeApi.isConfigured {
+                return JudgeBackendStatus(
+                    backend: backend.rawValue,
+                    status: "ready",
+                    model: ApmeJudgeApi.judgeModelLabel,
+                    endpoint: nil,
+                    checkedAt: checkedAt,
+                    reason: nil
+                )
+            }
             return JudgeBackendStatus(
                 backend: backend.rawValue,
                 status: "unavailable",
