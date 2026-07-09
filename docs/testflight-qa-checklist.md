@@ -31,7 +31,7 @@ Before starting, note your macOS version, device model, and any non-default acce
 - [ ] **A4**. Onboarding **does not reappear** on subsequent launches.
 - [ ] **A5**. After onboarding closes, the **notification permission NSAlert** fires within ~1 second (not during onboarding). Message: "Enable AgentDeck notifications?" Grant or decline — either way, dialog does not reappear.
 - [ ] **A6**. Dashboard renders with an empty terrarium. An overlay card says "Start your first session." with a "Preview Devices" button and a "Got it" dismiss. The body text reads "Sessions appear automatically once the bridge picks one up — each one shows up here as a creature in the terrarium." (no Launch button, no terminal-launch prompt).
-- [ ] **A7**. Clicking "Preview Devices" opens a 1100×760 window with 12 standalone device previews in the sidebar. Changing agent/state/session-count picker updates all device previews live. No hardware required.
+- [ ] **A7**. Clicking "Preview Devices" opens a 1100×760 window with 17 standalone device previews in the sidebar. Changing agent/state/session-count picker updates all device previews live. No hardware required.
 
 ---
 
@@ -183,7 +183,7 @@ Title: <brief symptom>
 Environment:
 - Device: <model>
 - OS: <macOS / iOS version>
-- Build: <TestFlight build number, e.g. 1.0 (12)>
+- Build: <TestFlight build number, e.g. 0.1.0 (1)>
 - Attached session: <claude-code / codex / opencode / openclaw — if relevant>
 
 Steps to reproduce:
@@ -220,4 +220,4 @@ Send to `puritysb@gmail.com` or file as a GitHub issue.
 - **Section J + K zero regressions**.
 - **Sections G, H optional** — nice to have; not blockers unless you're shipping a hardware-first marketing push.
 
-When the above looks clean across 2-3 testers, tag `apple-v1.0.0` and submit.
+When the above looks clean across 2-3 testers, tag `apple-v0.1.0` and submit.

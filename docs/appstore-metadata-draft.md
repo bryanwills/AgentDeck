@@ -50,8 +50,8 @@ Bonjour 자동 발견 + QR 페어링. Mac에서 돌아가는 에이전트 세션
 • APME 에이전트 성능 평가
 각 에이전트 턴을 카테고리(coding/debug/docs/planning/review/research/conversation)별 루브릭으로 채점. Apple Intelligence Foundation Models (on-device, 무료) 또는 Anthropic API(opt-in) 선택 가능. LLM-only 평가는 App Store 빌드에서 완전 로컬.
 
-• Device Preview 13개 기기 갤러리
-하드웨어 없이도 Stream Deck+ / iPad / E-ink / ESP32 / Pixoo / TUI 등 13가지 기기에서 에이전트가 어떻게 보이는지 미리보기.
+• Device Preview 17개 기기 갤러리
+하드웨어 없이도 Stream Deck+ / D200H / iPad / InkDeck e-ink / ESP32 보드 / Pixoo / Timebox / iDotMatrix / TUI 등 17가지 기기에서 에이전트가 어떻게 보이는지 미리보기.
 
 • OpenClaw Gateway 네이티브 연동
 OpenClaw Gateway를 로컬에서 실행 중이면 자동으로 operator 클라이언트로 페어링. 세션 목록, 모델 카탈로그, 도구 승인 요청을 대시보드에서 처리.
@@ -102,7 +102,7 @@ AgentDeck는 독립적인 프로젝트이며 Anthropic, OpenAI, Google, SST, Cor
 claude code,ai,agent,dashboard,stream deck,monitoring,apme,openclaw,codex,ipad,companion,developer
 ```
 
-### What's New (for v1.0.0, 4000자)
+### What's New (for v0.1.0, 4000자)
 
 ```
 🎉 AgentDeck Dashboard 첫 App Store 출시
@@ -111,7 +111,7 @@ claude code,ai,agent,dashboard,stream deck,monitoring,apme,openclaw,codex,ipad,c
 • Mac + iPad 동시 페어링 (Bonjour 자동 + QR 백업)
 • Claude Code + opt-in Codex/OpenClaw 세션 실시간 모니터링
 • APME 에이전트 성능 평가 (Apple Intelligence on-device)
-• Device Preview 14개 기기 갤러리
+• Device Preview 17개 기기 갤러리
 • OpenClaw Gateway 네이티브 연동 (self-gen Ed25519 identity + Keychain)
 • 음성 입력 (Apple SFSpeech on-device, 추가 설치 없음)
 • ESP32 Wi-Fi 프로비저닝 & Pixoo 매트릭스 관리 인앱 시트
@@ -162,8 +162,8 @@ Auto-discovers your Mac over Wi-Fi via Bonjour. QR pairing fallback for differen
 • APME agent performance evaluation
 Each finished agent turn is scored against category-specific rubrics (coding/debug/docs/planning/review/research/conversation). Default backend is Apple Intelligence Foundation Models — on-device, free, zero network. Anthropic API is available as an opt-in paid backend.
 
-• 13-device preview gallery
-See how AgentDeck renders on Stream Deck+, iPad, E-ink readers, ESP32 displays, Divoom Pixoo matrices, and a TUI terminal — all without owning any of the hardware.
+• 17-device preview gallery
+See how AgentDeck renders on Stream Deck+, Ulanzi D200H, iPad, InkDeck e-ink, ESP32 displays, Divoom Pixoo/Timebox matrices, iDotMatrix, and a TUI terminal — all without owning any of the hardware.
 
 • OpenClaw Gateway native integration
 Auto-pairs as an operator client when an OpenClaw Gateway is running locally (ws://127.0.0.1:18789). Self-generated Ed25519 identity stored in Keychain; the Gateway-issued device token is reused on reconnect.
@@ -199,7 +199,7 @@ Developer workflows involving Android ADB bridging, OpenCode monitoring, Codex/O
 
 • macOS 26 or later
 • iOS 17 / iPadOS 17 or later
-• Apple Silicon or Intel Mac
+• Apple Silicon Mac (Apple Intelligence-capable — required for on-device APME scoring)
 
 AgentDeck works immediately after install with Device Preview, iPad pairing, voice input, APME reports, and optional hardware status output. Turn on Claude Code hooks when you want sessions you already run to appear in the dashboard.
 
@@ -214,16 +214,16 @@ AgentDeck is an independent project and is not affiliated with, endorsed by, or 
 claude code,ai,agent,dashboard,monitoring,apme,openclaw,codex,ipad,stream deck,developer
 ```
 
-### What's New (v1.0.0, 4000 chars)
+### What's New (v0.1.0, 4000 chars)
 
 ```
 🎉 AgentDeck Dashboard — first App Store release
 
-What's in v1.0:
+What's in v0.1:
 • Mac + iPad simultaneous pairing (Bonjour auto + QR fallback)
 • Real-time Claude Code + opt-in Codex/OpenClaw session monitoring
 • APME agent performance scoring (Apple Intelligence on-device)
-• Device Preview gallery of 14 hardware targets
+• Device Preview gallery of 17 hardware targets
 • OpenClaw Gateway native pairing (self-generated Ed25519 in Keychain)
 • Voice input via Apple SFSpeech — no install, fully on-device
 • ESP32 Wi-Fi provisioning & Pixoo matrix in-app sheets

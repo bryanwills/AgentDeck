@@ -31,7 +31,7 @@ AgentDeck 은 의도된 2-티어 제품이다. 아래 매트릭스의 모든 행
 | Stream Deck+ 플러그인 연동 | ✅* | ✅ | *Elgato Stream Deck 앱 별도 설치 |
 | Claude Code hook 설치 | ✅ | ✅ | NSOpenPanel 명시적 동의 |
 | 음성 입력 (on-device SFSpeech) | ✅ | ✅ | 오디오 외부 송신 없음 |
-| Device Preview catalog | ✅* | ✅ | *App Store 단독 모드는 자체 구동 가능한 preview target 표시. 외부 daemon 감지 시 Android e-ink / Android tablet 등 ADB-tier preview 가 read-only 로 추가 노출 (TC001 은 ESP32 serial 보드라 ADB-tier 아님 — 위 Downstream 표 참조) |
+| Device Preview catalog | ✅* | ✅ | *App Store 단독 모드는 자체 구동 가능한 preview target **17종** 표시 (Stream Deck ×2, D200H ×2, iPad, InkDeck e-ink, ESP32 LCD ×6 — 86box/3.5"×2/round/TTGO/IPS10, TC001, Pixoo64, Timebox Mini, iDotMatrix, TUI). 외부 daemon 감지 시 Android e-ink / Android tablet 등 ADB-tier preview 3종이 read-only 로 추가 노출 → 20종 (TC001 은 ESP32 serial 보드라 ADB-tier 아님 — 2026-07-10 단독 카탈로그로 편입) |
 | APME 평가 Layer 2 (LLM) | ✅ | ✅ | App Store: Apple Intelligence / Anthropic API. CLI: Swift daemon proxy → bundled Swift Foundation Models helper → MLX / OpenClaw. |
 | APME 평가 Layer 1 (deterministic) | ❌ | ✅ | `git` / `pnpm` 서브프로세스 필요 |
 | Timeline `chat_end` LLM 요약 | ✅ | ✅ | App Store 빌드는 Apple Intelligence (FoundationModels, macOS 26+) → MLX (127.0.0.1:8800) → 휴리스틱 chain. Settings → Timeline summary 에서 backend 픽 가능. 서브프로세스/번들 인터프리터 없음 — `verify-appstore-archive.sh` 통과 |
@@ -41,6 +41,7 @@ AgentDeck 은 의도된 2-티어 제품이다. 아래 매트릭스의 모든 행
 | Feature | App Store | CLI | 비고 |
 |---|:---:|:---:|---|
 | Claude 구독 사용량 (5h / 7d %) | ⚠️ | ✅ | 외부 daemon 감지 시에만 RATE LIMITS 섹션 표시 (relay). 미감지 시 섹션 자체 숨김 — sandbox 안내 메시지 없이 완결성있게 보임 |
+| Codex rate limits (5h / weekly) | ✅* | ✅ | *App Store 단독 지원 — user 승인 security-scoped bookmark 로 `~/.codex` rollout JSONL 을 직접 읽음 (`UsageAPIClient.codexRateLimits`). bookmark 미설정 시 조용히 숨김 |
 | Anthropic Admin API 사용량 | ✅ | ✅ | user 가 Console API key 수동 입력 |
 | 토큰 / 비용 실시간 (PTY) | ⚠️ | ✅ | App Store 는 hook 기반만, PTY parsing 은 CLI |
 
@@ -67,7 +68,7 @@ AgentDeck 은 의도된 2-티어 제품이다. 아래 매트릭스의 모든 행
 |---|:---:|:---:|---|
 | Claude Code 세션 모니터링 (hook 경유) | ✅ | ✅ | hook HTTP POST 수신 |
 | Codex 세션 모니터링 (lifecycle hooks + fallback) | ✅ | ✅ | NSOpenPanel 명시 동의 후 `~/.codex/config.toml` 에 fenced TOML 블록만 편집. Codex lifecycle hooks → `/hooks/codex_*`, optional notify → `/hooks/codex_turn_complete`, optional OTel → `/otel/v1/traces` |
-| 외부에서 이미 실행 중인 Claude/Codex 세션 passive discovery | ❌ | ✅ | `ps`/`lsof`/`/proc` + `~/.claude`/`~/.codex` transcript/rollout JSONL read 가 필요하므로 Node CLI daemon 전용. App Store 단독 앱은 hook/lifecycle 로 opt-in 된 세션만 표시하며 결함 안내 없이 완결 UI 유지 |
+| 외부에서 이미 실행 중인 Claude/Codex 세션 passive discovery | ❌* | ✅ | `ps`/`lsof`/`/proc` + `~/.claude`/`~/.codex` transcript/rollout JSONL read 가 필요하므로 Node CLI daemon 전용. App Store 단독 앱은 hook/lifecycle 로 opt-in 된 세션만 표시하며 결함 안내 없이 완결 UI 유지. *예외 2건: **Codex Desktop 앱**은 sandbox-safe `sysctl` 로 passive 감지 (`LocalCodexAppObserver`), OpenCode 서버는 opt-in 시 argv `--port` 검사로 발견 — 터미널 CLI 세션 일반 discovery 만 ❌ |
 | Permission prompt 표시 (awaiting + question + 시스템 알림) | ✅ | ✅ | Notification hook 의 `notification_type: "permission_prompt"` (권위 신호 — Claude 가 실제로 permission prompt 를 표시한 순간만 발화; 자동승인 툴은 발화 안 함) 를 `isPermissionNotification` 으로 판별, display-only `awaiting_permission` + `question` 표출 + macOS 시스템 알림(`AttentionNotifier`). 구버전 Claude 는 `looksLikePermissionMessage` regex fallback. `options`/`requestId` 없음 → 모든 표면이 "Respond in the terminal" 렌더 |
 | Device approval gating (PreToolUse Allow/Deny) | ❌ | ❌ | **양쪽 모두 2026-06-27 제거.** PreToolUse 는 자동승인 툴에도 발화해 false attention + fabricated Allow/Deny 를 만들었다. 실제 옵션 스티어링은 PTY-managed 세션(CLI)의 OutputParser 가 읽은 real options 로만 |
 | OpenCode 세션 모니터링 | ⚠️ | ✅ | App Store: **opt-in** (Settings → Integrations, 기본 OFF ⇒ 프로브 0회). 켜면 사용자가 직접 실행한 OpenCode 서버에 read-only SSE 클라이언트로 연결 — 발견은 사용자 설정 URL / `opencode serve` 기본포트 4096 헬스프로브 / sysctl argv 의 명시적 `--port` 3경로만. **기본 TUI(랜덤 포트, argv 미노출)는 발견 불가** — 포트 스캔 안 함. permission.requested 는 display-only awaiting. CLI: `agentdeck opencode` PTY+SSE 풀 경로 + passive discovery |
