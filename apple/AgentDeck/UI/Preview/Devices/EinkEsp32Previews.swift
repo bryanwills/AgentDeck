@@ -403,3 +403,48 @@ struct Esp32RoundPreview: View {
         }
     }
 }
+
+// MARK: - ESP32 TTGO T-Display 1.14" (135×240 portrait)
+//
+// The smallest LCD terrarium — same firmware scene as the other boards
+// but on a narrow 135×240 portrait strip. Preview scales the panel
+// 1.5× so the HUD text stays legible.
+
+struct Esp32TtgoPreview: View {
+    let selection: DevicePreviewSelection
+
+    var body: some View {
+        VStack(spacing: 10) {
+            DeviceBezel(cornerRadius: 12, bezelWidth: 12, bezelColor: Color(white: 0.10)) {
+                Esp32TerrariumScene(selection: selection, hudHeight: 46)
+            }
+            .frame(width: 135 * 1.5, height: 240 * 1.5)
+            Text("ESP32 TTGO T-Display • 135×240")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - ESP32 IPS 10.1" (JC8012P4A1C, logical 1280×800 landscape)
+//
+// The largest LVGL board — an ESP32-P4 with a 10.1" MIPI-DSI panel. The
+// firmware renders a logical 1280×800 landscape scene (PPA hardware
+// rotation into the physical 800×1280 portrait panel), so the preview
+// is a wide landscape terrarium at 0.45× scale.
+
+struct Esp32Ips10Preview: View {
+    let selection: DevicePreviewSelection
+
+    var body: some View {
+        VStack(spacing: 10) {
+            DeviceBezel(cornerRadius: 16, bezelWidth: 12, bezelColor: Color(white: 0.08)) {
+                Esp32TerrariumScene(selection: selection, hudHeight: 66)
+            }
+            .frame(width: 1280 * 0.45, height: 800 * 0.45)
+            Text("ESP32 IPS 10.1\" • 1280×800 (P4 + PPA rotate)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+    }
+}

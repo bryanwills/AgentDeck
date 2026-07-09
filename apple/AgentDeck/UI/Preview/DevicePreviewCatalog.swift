@@ -1,9 +1,9 @@
 // DevicePreviewCatalog.swift — enum of previewable device types + the view factory.
 //
 // Device Preview lets users see what AgentDeck looks like on each supported
-// device without owning the hardware. The full catalog has 15 representative
-// entries; the standalone App Store app shows the 11 entries it can drive
-// without an external desktop bridge, and the 4 ADB-tier entries reappear
+// device without owning the hardware. The full catalog has 20 representative
+// entries; the standalone App Store app shows the 17 entries it can drive
+// without an external desktop bridge, and the 3 ADB-tier entries reappear
 // automatically when such a bridge is connected.
 
 import SwiftUI
@@ -19,12 +19,17 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
     case androidTablet
     case einkMono
     case einkColor
+    case inkDeck
     case esp32_86box
     case esp32_35Landscape
     case esp32_35Portrait
     case esp32Round
+    case esp32Ttgo
+    case esp32Ips10
     case ulanziMatrix
     case pixoo64
+    case timeboxMini
+    case iDotMatrix
     case terminalTerrarium
 
     var id: String { rawValue }
@@ -50,10 +55,12 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
         switch self {
         case .streamDeckKey, .streamDeckPlus, .d200hKey, .d200hDeck:            return .desk
         case .iPadLandscape, .androidTablet:                     return .tablet
-        case .einkMono, .einkColor:                              return .eink
+        case .einkMono, .einkColor, .inkDeck:                    return .eink
         case .esp32_86box, .esp32_35Landscape,
-             .esp32_35Portrait, .esp32Round:                     return .esp32
-        case .ulanziMatrix, .pixoo64:                                    return .matrix
+             .esp32_35Portrait, .esp32Round,
+             .esp32Ttgo, .esp32Ips10:                            return .esp32
+        case .ulanziMatrix, .pixoo64,
+             .timeboxMini, .iDotMatrix:                          return .matrix
         case .terminalTerrarium:                                 return .terminal
         }
     }
@@ -68,12 +75,17 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
         case .androidTablet:      return "Android Tablet"
         case .einkMono:           return "E-ink Mono (CremaS)"
         case .einkColor:          return "E-ink Color (Pantone6)"
+        case .inkDeck:            return "InkDeck 7.5\" E-ink"
         case .esp32_86box:        return "ESP32 86Box 1.28\""
         case .esp32_35Landscape:  return "ESP32 IPS 3.5\" Landscape"
         case .esp32_35Portrait:   return "ESP32 IPS 3.5\" Portrait"
         case .esp32Round:         return "ESP32 Round AMOLED 1.6\""
+        case .esp32Ttgo:          return "ESP32 TTGO T-Display 1.14\""
+        case .esp32Ips10:         return "ESP32 IPS 10.1\""
         case .ulanziMatrix:       return "Ulanzi TC001 Matrix"
         case .pixoo64:            return "Pixoo 64"
+        case .timeboxMini:        return "Divoom Timebox Mini"
+        case .iDotMatrix:         return "iDotMatrix 32×32"
         case .terminalTerrarium:  return "Terminal Terrarium (TUI)"
         }
     }
@@ -84,7 +96,10 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
     /// — they reappear automatically once the bridge is connected.
     var requiresDesktopBridge: Bool {
         switch self {
-        case .androidTablet, .einkMono, .einkColor, .ulanziMatrix: return true
+        // TC001 (`ulanziMatrix`) is deliberately NOT here: it is an ESP32
+        // serial board the standalone Swift daemon drives directly
+        // (docs/appstore-feature-matrix.md), not an ADB-tunneled device.
+        case .androidTablet, .einkMono, .einkColor: return true
         default: return false
         }
     }
@@ -94,18 +109,23 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
         switch self {
         case .streamDeckKey:      return "72×72 default Stream Deck key."
         case .streamDeckPlus:     return "144×144 session button, driven by the plugin."
-        case .d200hKey:           return "One of 14 HID-addressed key tiles, 120×120."
-        case .d200hDeck:          return "Full 14-key deck — top strip + 3×4 grid + encoders."
+        case .d200hKey:           return "One 120×120 key tile, as the layout engine assigns it."
+        case .d200hDeck:          return "Full 5×3 deck via buildSessionDeck — tiles + usage gauges."
         case .iPadLandscape:      return "Dashboard-style aquarium — sidebar + terrarium + HUD."
         case .androidTablet:      return "Compose canvas (Lenovo / generic tablet)."
         case .einkMono:           return "Dithered silhouette + name tag. Kobo / CremaS."
         case .einkColor:          return "Pantone6 colour e-ink — brand-tinted creature."
+        case .inkDeck:            return "800×480 1-bit e-ink — session cards + usage footer."
         case .esp32_86box:        return "1.28\" round LCD — creature + 2-line HUD."
         case .esp32_35Landscape:  return "3.5\" IPS landscape — wide canvas, LVGL."
         case .esp32_35Portrait:   return "3.5\" IPS portrait — split HUD + creature."
         case .esp32Round:         return "1.6\" round AMOLED — dial-style HUD."
+        case .esp32Ttgo:          return "1.14\" 135×240 LCD — the smallest terrarium."
+        case .esp32Ips10:         return "10.1\" 1280×800 panel — full terrarium, LVGL + PPA."
         case .ulanziMatrix:       return "8×32 WS2812B matrix — ultra-minimal HUD."
         case .pixoo64:            return "64×64 pixel art canvas, dot-matrix simplified."
+        case .timeboxMini:        return "11×11 BLE pixel display — native micro glyphs."
+        case .iDotMatrix:         return "32×32 BLE LED — downscaled 64×64 aquarium."
         case .terminalTerrarium:  return "agentdeck dashboard TUI — characters-only aquarium."
         }
     }

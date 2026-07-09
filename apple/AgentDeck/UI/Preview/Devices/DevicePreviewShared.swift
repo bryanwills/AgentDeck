@@ -53,8 +53,10 @@ struct DeviceBezel<Content: View>: View {
 // MARK: - Creature placeholder
 
 /// Agent creature rendered in the agent brand colour inside a soft disc.
-/// Uses the shared path renderer so previews do not drift from the dashboard
-/// and menu bar surfaces.
+/// Draws the CANONICAL aquarium creature (CreatureGeometry SSOT — robot,
+/// cloud+`>_`, ring, crayfish) — the same silhouette the real ESP32 /
+/// Android / e-ink devices raster — so previews cannot drift into showing
+/// a brand logo where hardware shows a swimming creature.
 struct PreviewCreature: View {
     let agent: PixooPreviewAgent
     let state: PixooPreviewState
@@ -66,11 +68,10 @@ struct PreviewCreature: View {
         ZStack {
             Circle()
                 .fill(tint.opacity(0.15))
-            AgentBrandIcon(
+            CanonicalCreatureView(
                 agentType: agent.rawValue,
-                tint: tint,
-                size: size,
-                contentInset: size * 0.12
+                size: size * 0.76,
+                color: tint
             )
         }
         .frame(width: size, height: size)
@@ -82,6 +83,7 @@ struct PreviewCreature: View {
 /// Bare creature glyph used inside realistic device mockups. Unlike
 /// `PreviewCreature`, this has no circular badge, so tablet/e-ink previews
 /// read like the actual screens rather than a single oversized avatar.
+/// Renders the canonical CreatureGeometry creature, not the brand mark.
 struct PreviewCreatureGlyph: View {
     let agent: PixooPreviewAgent
     let state: PixooPreviewState
@@ -91,14 +93,13 @@ struct PreviewCreatureGlyph: View {
     private var tint: Color { tintOverride ?? StateColors.brand(agent: agent.rawValue) }
 
     var body: some View {
-        AgentBrandIcon(
+        CanonicalCreatureView(
             agentType: agent.rawValue,
-            tint: tint,
             size: size,
-            contentInset: size * 0.04
+            color: tint
         )
-            .opacity(state == .disconnected ? 0.3 : 1.0)
-            .accessibilityLabel("\(agent.displayName) \(state.displayName)")
+        .opacity(state == .disconnected ? 0.3 : 1.0)
+        .accessibilityLabel("\(agent.displayName) \(state.displayName)")
     }
 }
 

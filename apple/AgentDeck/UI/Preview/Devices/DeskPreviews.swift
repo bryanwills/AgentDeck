@@ -1,10 +1,11 @@
 // DeskPreviews.swift — Stream Deck+ session button and Ulanzi D200H mockups.
 //
 // The Stream Deck+ preview reuses the production SessionSlotRenderer so this
-// is the highest-fidelity mockup in the catalog. The D200H previews are
-// pragmatic mockups — the real firmware renders via HID frames and does not
-// have a Swift-side view-layer port. We frame the key with a chunky bezel and
-// show the creature + state HUD.
+// is the highest-fidelity mockup in the catalog. The D200H previews consume
+// D200HLayoutModel — the Swift port of the shared `buildSessionDeck` engine
+// that drives the real device through the Ulanzi Studio plugin — so the slot
+// arrangement (session tiles, usage gauges, OFFLINE hero, paging) is exactly
+// what the hardware shows; only the per-tile pixel style is approximated.
 
 import SwiftUI
 
@@ -88,27 +89,51 @@ struct StreamDeckPlusPreview: View {
     }
 }
 
+// MARK: - D200H layout input (shared by key + deck previews)
+
+private func d200hDeckSlots(for selection: DevicePreviewSelection) -> [D200HKeySlot] {
+    let agents = selection.previewAgents
+    let sessions = agents.enumerated().map { index, agent in
+        D200HSession(
+            id: "preview-\(index)",
+            agentType: agent.rawValue,
+            state: selection.previewState(for: index).sessionStateStringForUI,
+            projectName: "\(agent.displayName.lowercased())-project",
+            modelName: index == 0 ? "opus-4-7" : nil,
+            options: selection.previewState(for: index) == .awaitingPrompt
+                ? [D200HOption(label: "Allow", shortcut: "y"), D200HOption(label: "Deny", shortcut: "n")]
+                : []
+        )
+    }
+    let input = D200HDeckInput(
+        state: sessions.isEmpty ? "disconnected" : selection.state.sessionStateStringForUI,
+        sessions: sessions,
+        usage: D200HUsage(fiveHourPercent: 42, sevenDayPercent: 68,
+                          codexPrimaryPercent: 23, codexSecondaryPercent: 51)
+    )
+    return D200HLayoutModel.buildSessionDeck(input, view: D200HDeckView(mode: .list))
+}
+
 // MARK: - D200H Key
 
-/// One of the 14 D200H HID keys, 120×120 logical. Compact HUD + creature.
+/// One of the D200H's 120×120 key tiles — the first session slot exactly as
+/// the layout engine assigns it.
 struct D200HKeyPreview: View {
     let selection: DevicePreviewSelection
+
+    private var slot: D200HKeySlot? {
+        d200hDeckSlots(for: selection).first {
+            if case .session = $0.kind { return true }
+            if case .offlineHero = $0.kind { return true }
+            return false
+        }
+    }
 
     var body: some View {
         VStack(spacing: 10) {
             DeviceBezel(cornerRadius: 12, bezelWidth: 6) {
-                VStack(spacing: 4) {
-                    PreviewHUD(
-                        agent: selection.agent,
-                        state: selection.state,
-                        sessionCount: selection.sessionCount,
-                        compact: true
-                    )
-                    PreviewCreatureGlyph(agent: selection.agent, state: selection.state, size: 48)
-                    Text(projectLabel)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.8))
-                        .lineLimit(1)
+                if let slot {
+                    D200HSlotTile(slot: slot, size: 116)
                 }
             }
             .frame(width: 140, height: 140)
@@ -117,63 +142,148 @@ struct D200HKeyPreview: View {
                 .foregroundStyle(.secondary)
         }
     }
-
-    private var projectLabel: String {
-        selection.agent.displayName.prefix(10).uppercased()
-    }
 }
 
 // MARK: - D200H Full Deck
 
-/// Schematic of the full 14-key D200H deck: a top strip (4 keys + encoders)
-/// plus a 3×4 grid below. Selected agent sits in the focus slot; remaining
-/// slots show the other agents faded.
+/// The full D200H 5×3 key grid, computed by D200HLayoutModel.buildSessionDeck —
+/// session tiles sorted/labelled by the engine, the pinned Claude/Codex 5H/7D
+/// usage-gauge block, and the OFFLINE brand-mark hero when the list is empty.
 struct D200HDeckPreview: View {
     let selection: DevicePreviewSelection
 
-    private let fillerAgents: [PixooPreviewAgent] = [.claudeCode, .codex, .opencode, .openclaw]
-
     var body: some View {
+        let slots = d200hDeckSlots(for: selection)
         VStack(spacing: 12) {
             DeviceBezel(cornerRadius: 22, bezelWidth: 16) {
                 VStack(spacing: 6) {
-                    // Top strip — 4 keys + 2 encoders
-                    HStack(spacing: 6) {
-                        ForEach(0..<4, id: \.self) { i in
-                            PreviewSessionTile(
-                                agent: fillerAgents[i],
-                                state: i == 0 ? selection.state : .idle,
-                                size: 44
-                            )
-                            .opacity(i == 0 ? 1 : 0.5)
-                        }
-                        Spacer()
-                        Circle().fill(Color(white: 0.18)).frame(width: 34, height: 34)
-                        Circle().fill(Color(white: 0.18)).frame(width: 34, height: 34)
-                    }
-                    // 3×4 grid (simplified to 3×3 plus one highlight)
-                    VStack(spacing: 6) {
-                        ForEach(0..<3, id: \.self) { row in
-                            HStack(spacing: 6) {
-                                ForEach(0..<4, id: \.self) { col in
-                                    let idx = row * 4 + col
-                                    let isFocus = (row == 0 && col == 0)
-                                    PreviewSessionTile(
-                                        agent: isFocus ? selection.agent : fillerAgents[idx % fillerAgents.count],
-                                        state: isFocus ? selection.state : .idle,
-                                        size: 44
-                                    )
-                                    .opacity(isFocus ? 1 : 0.35)
+                    ForEach(0..<D200HLayoutModel.gridRows, id: \.self) { row in
+                        HStack(spacing: 6) {
+                            ForEach(0..<D200HLayoutModel.gridCols, id: \.self) { col in
+                                let idx = row * D200HLayoutModel.gridCols + col
+                                if idx < slots.count {
+                                    D200HSlotTile(slot: slots[idx], size: 58)
                                 }
                             }
                         }
                     }
                 }
             }
-            .frame(width: 340, height: 260)
-            Text("Ulanzi D200H • 14 keys + 2 encoders")
+            .frame(width: 380, height: 260)
+            Text("Ulanzi D200H • 5×3 keys + 2 encoders")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+// MARK: - D200H slot tile renderer
+
+/// Maps a layout-engine slot to its visual. Style approximates the Node SVG
+/// renderers (session-slot / usage-gauge / info) — the ARRANGEMENT is exact.
+private struct D200HSlotTile: View {
+    let slot: D200HKeySlot
+    var size: CGFloat = 58
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.10, style: .continuous)
+                .fill(background)
+            content
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var background: Color {
+        switch slot.kind {
+        case .session(_, let state, _):
+            return StateColors.color(for: state).opacity(0.16)
+        case .offlineHero, .info:
+            return Color.black.opacity(0.5)
+        case .usageGauge:
+            return Color.black.opacity(0.42)
+        case .empty:
+            return Color.white.opacity(0.04)
+        default:
+            return Color.black.opacity(0.35)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch slot.kind {
+        case .session(let agentType, let state, let stateLabel):
+            VStack(spacing: size * 0.04) {
+                CanonicalCreatureView(
+                    agentType: agentType,
+                    size: size * 0.44,
+                    color: StateColors.brand(agent: agentType)
+                )
+                Text(slot.label)
+                    .font(.system(size: size * 0.11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                Text(stateLabel)
+                    .font(.system(size: size * 0.10, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(StateColors.color(for: state))
+                    .lineLimit(1)
+            }
+            .padding(size * 0.06)
+        case .offlineHero:
+            VStack(spacing: size * 0.06) {
+                AgentDeckLogo(size: size * 0.4, color: .white.opacity(0.9))
+                Text(slot.label)
+                    .font(.system(size: size * 0.12, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+        case .usageGauge(let agent, let window, let percent, let known, _):
+            VStack(spacing: size * 0.05) {
+                Text("\(agent.uppercased()) \(window)")
+                    .font(.system(size: size * 0.11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.65))
+                Text(known ? "\(Int(percent))%" : "—")
+                    .font(.system(size: size * 0.2, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(gaugeColor(percent: percent, known: known))
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.14))
+                        Capsule()
+                            .fill(gaugeColor(percent: percent, known: known))
+                            .frame(width: known ? geo.size.width * min(1, percent / 100) : 0)
+                    }
+                }
+                .frame(height: size * 0.08)
+                .padding(.horizontal, size * 0.1)
+            }
+            .padding(size * 0.06)
+        case .info(_, _):
+            Text(slot.label)
+                .font(.system(size: size * 0.11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+                .padding(size * 0.06)
+        case .nextPage:
+            VStack(spacing: 2) {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(.white.opacity(0.75))
+                Text(slot.label)
+                    .font(.system(size: size * 0.11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        case .empty:
+            EmptyView()
+        default:
+            Text(slot.label)
+                .font(.system(size: size * 0.11, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.7))
+                .lineLimit(2)
+        }
+    }
+
+    private func gaugeColor(percent: Double, known: Bool) -> Color {
+        guard known else { return .white.opacity(0.4) }
+        if percent >= 90 { return TerrariumHUD.ledRed }
+        if percent >= 70 { return TerrariumHUD.ledAmber }
+        return TerrariumHUD.ledGreen
     }
 }

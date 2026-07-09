@@ -2,7 +2,7 @@
 //
 // Layout:
 //   - Sidebar: grouped list of standalone device types across 6 categories
-//     (11 in the App Store build, 15 when an external desktop bridge is active).
+//     (17 in the App Store build, 20 when an external desktop bridge is active).
 //   - Main canvas: the selected device's view, centered with a header + byline.
 //   - Toolbar: Agent / State / Sessions pickers. A running animation clock
 //     ticks `selection.animationFrame` forward twice per second so dynamic
@@ -214,12 +214,17 @@ struct DevicePreviewScreen: View {
         case .androidTablet:     AndroidTabletPreview(selection: live)
         case .einkMono:          EinkMonoPreview(selection: live)
         case .einkColor:         EinkColorPreview(selection: live)
+        case .inkDeck:           InkDeckPreview(selection: live)
         case .esp32_86box:       Esp3286BoxPreview(selection: live)
         case .esp32_35Landscape: Esp3235LandscapePreview(selection: live)
         case .esp32_35Portrait:  Esp3235PortraitPreview(selection: live)
         case .esp32Round:        Esp32RoundPreview(selection: live)
+        case .esp32Ttgo:         Esp32TtgoPreview(selection: live)
+        case .esp32Ips10:        Esp32Ips10Preview(selection: live)
         case .pixoo64:           Pixoo64Preview(selection: live)
         case .ulanziMatrix:      UlanziMatrixPreview(selection: live)
+        case .timeboxMini:       TimeboxMiniPreview(selection: live)
+        case .iDotMatrix:        IDotMatrixPreview(selection: live)
         case .terminalTerrarium: TerminalTerrariumPreview(selection: live)
         }
     }

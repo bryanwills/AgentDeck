@@ -132,6 +132,33 @@ enum PixooPreview {
         #endif
     }
 
+    /// Native 11×11 micro-glyph frame (length = 363) — the exact
+    /// `PixooRenderer.renderMicro` output the Timebox Mini module pushes
+    /// over BLE (before software-brightness dimming). iOS returns a stub.
+    static func previewMicroRGB(_ config: PixooPreviewConfig) -> Data {
+        #if os(macOS)
+        let state = Self.synthesizeDashboardState(config)
+        let renderer = PixooRenderer()
+        return renderer.renderMicro(dashboardState: state)
+        #else
+        return Self.iOSStubRGB(side: 11)
+        #endif
+    }
+
+    /// 32×32 frame (length = 3072) — the exact pipeline IDotMatrixModule
+    /// runs for the real device: 64×64 render → box downscale → the same
+    /// brightness/contrast boost applied before the BLE upload.
+    static func preview32RGB(_ config: PixooPreviewConfig) -> Data {
+        #if os(macOS)
+        let rgb64 = [UInt8](previewRGB(config))
+        var rgb32 = IDotMatrixModule.downscale64to32(rgb64)
+        rgb32 = IDotMatrixModule.boostBrightnessContrast(rgb32, brightness: 1.6, contrast: 1.2)
+        return Data(rgb32)
+        #else
+        return Self.iOSStubRGB(side: 32)
+        #endif
+    }
+
     // MARK: CGImage
 
     /// 64×64 CGImage. Callers who need to draw at a specific size should scale
@@ -139,6 +166,16 @@ enum PixooPreview {
     static func previewCGImage(_ config: PixooPreviewConfig) -> CGImage? {
         let rgb = previewRGB(config)
         return Self.makeCGImage(rgb: rgb, width: 64, height: 64)
+    }
+
+    /// 11×11 CGImage of the Timebox Mini micro frame.
+    static func previewMicroCGImage(_ config: PixooPreviewConfig) -> CGImage? {
+        Self.makeCGImage(rgb: previewMicroRGB(config), width: 11, height: 11)
+    }
+
+    /// 32×32 CGImage of the iDotMatrix frame.
+    static func preview32CGImage(_ config: PixooPreviewConfig) -> CGImage? {
+        Self.makeCGImage(rgb: preview32RGB(config), width: 32, height: 32)
     }
 
     // MARK: SwiftUI Image
@@ -223,12 +260,13 @@ enum PixooPreview {
     /// `previewImage()` still has something visible. Consumers wanting rich
     /// previews on iOS should run the preview on macOS, or add a SwiftUI
     /// shim that layers a text overlay over this fill.
-    private static func iOSStubRGB() -> Data {
+    private static func iOSStubRGB(side: Int = 64) -> Data {
         // Dark slate (#20293A-ish): R=0x20, G=0x29, B=0x3A
-        var buf = Data(count: 64 * 64 * 3)
+        let byteCount = side * side * 3
+        var buf = Data(count: byteCount)
         buf.withUnsafeMutableBytes { raw in
             guard let base = raw.baseAddress else { return }
-            for i in stride(from: 0, to: 64 * 64 * 3, by: 3) {
+            for i in stride(from: 0, to: byteCount, by: 3) {
                 base.storeBytes(of: 0x20, toByteOffset: i,     as: UInt8.self)
                 base.storeBytes(of: 0x29, toByteOffset: i + 1, as: UInt8.self)
                 base.storeBytes(of: 0x3A, toByteOffset: i + 2, as: UInt8.self)
