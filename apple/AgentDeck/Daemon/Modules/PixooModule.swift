@@ -92,10 +92,14 @@ actor PixooModule: DeviceModule {
         self.onStateChanged = handler
     }
 
-    // Circuit breaker — matches Node.js bridge (pixoo-client.ts)
-    private let backoffThreshold = 1
+    // Circuit breaker — thresholds aligned with the Node bridge (pixoo-client.ts:
+    // BACKOFF_THRESHOLD=6, BACKOFF_MAX_MS=60s). threshold=1 marked the device
+    // offline on a single transient drop and the 300s cap stretched recovery to
+    // 5 minutes per probe; Node tolerates 6 failures and re-tests within a minute.
+    // (Node probes every 5s; this module every 15s — cadence intentionally slower.)
+    private let backoffThreshold = 6
     private let backoffInitialSec: TimeInterval = 30
-    private let backoffMaxSec: TimeInterval = 300
+    private let backoffMaxSec: TimeInterval = 60
     private let probeIntervalSec: TimeInterval = 15
     private let settingsReloadIntervalSec: TimeInterval = 5
     // Mirrors Node bridge's CHANNEL_REASSERT_MS — re-issues Channel/SetIndex

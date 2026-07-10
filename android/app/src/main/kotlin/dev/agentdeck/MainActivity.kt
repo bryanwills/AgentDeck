@@ -278,6 +278,28 @@ fun TabletDashboard(
         }
     }
 
+    // Preempt the localhost (USB) phase whenever mDNS can see a daemon: adb reverse
+    // only exists under the Node CLI daemon, so against the Swift in-process daemon
+    // the ws://127.0.0.1 attempt can never succeed and the bounded discovery windows
+    // in the effects above/below can keep missing a slow NSD resolve. Runs whenever
+    // not connected; re-resolving per connection also heals a saved URL whose port
+    // went stale after a daemon restart (e.g. 9121→9120).
+    LaunchedEffect(connectionStatus, currentUrl) {
+        if (connectionStatus == ConnectionStatus.CONNECTED) return@LaunchedEffect
+        val discovery = BridgeDiscovery(context)
+        discovery.discover().collect { bridges ->
+            val daemon = bridges.firstOrNull { it.agentType == "daemon" }
+            val cur = connection.url.value
+            val curIsLocalOrNone = cur == null ||
+                cur.contains("127.0.0.1") || cur.contains("localhost")
+            if (daemon != null && curIsLocalOrNone &&
+                connection.status.value != ConnectionStatus.CONNECTED) {
+                mainDebug { "mDNS preempts USB attempt: ${daemon.name} at ${daemon.wsUrl()}" }
+                connection.connect(daemon.wsUrl(), daemon.fallbackWsUrl())
+            }
+        }
+    }
+
     // Recovery after BridgeConnection gives up on localhost and clears URL.
     // Keep cycling so devices reconnect when the daemon starts after the app.
     LaunchedEffect(connectionStatus, currentUrl) {
