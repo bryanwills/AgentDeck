@@ -149,7 +149,7 @@ cd /Users/puritysb/github/AgentDeck/apple
 # Build (one build serves both devices)
 xcodebuild build -project AgentDeck.xcodeproj -scheme AgentDeck_iOS \
   -destination 'platform=iOS,id=00008112-001608A02ED2601E' \
-  CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=R22679GY5Z -quiet
+  CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=QF36NDHYHD -quiet
 
 APP=~/Library/Developer/Xcode/DerivedData/AgentDeck-dqyrhbwpqboxgiabhllzxkkjxqzy/Build/Products/Debug-iphoneos/AgentDeck.app
 ```

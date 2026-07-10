@@ -1,8 +1,10 @@
 # App Store Connect Certificate + Provisioning Setup
 
+> **2026-07-10 — CI moved to cloud signing under the organization team `QF36NDHYHD` (Serendipity Bound).** `apple-release.yml` now archives/exports with `CODE_SIGN_STYLE=Automatic` + the ASC API key (`-allowProvisioningUpdates -authenticationKey*`), so certificates and App Store profiles are cloud-managed. **The only GitHub secrets required are `ASC_API_KEY_ID` / `ASC_ISSUER_ID` / `ASC_API_KEY_BASE64`** — the API key must be the org team's with **App Manager or Admin** role (cloud signing requirement). `APPLE_CERTIFICATE_BASE64` / `APPLE_CERTIFICATE_PASSWORD` / `IOS_PROVISIONING_PROFILE_BASE64` / `MACOS_PROVISIONING_PROFILE_BASE64` are no longer read. The manual `.p12`/profile flow below is retained as legacy reference only.
+
 Step-by-step guide to provision the certificates and provisioning profiles that CI needs for the `apple-release.yml` workflow. The workflow ships both `build-ios` and `build-macos` jobs that upload to the same `bound.serendipity.agent.deck` record so the app sells as a **Universal Purchase** (one App Store entry, both platforms).
 
-> The `APPLE_CERTIFICATE_BASE64` secret must contain a `.p12` with both the Apple Distribution identity (signs the iOS `.ipa` *and* the macOS `.app`) and the 3rd Party Mac Developer Installer identity (signs the macOS `.pkg`). The same certificate bundle is used by both iOS and macOS jobs; the macOS job does not use separate `APPLE_MAC_INSTALLER_*` secrets.
+> (Legacy manual flow) The `APPLE_CERTIFICATE_BASE64` secret must contain a `.p12` with both the Apple Distribution identity (signs the iOS `.ipa` *and* the macOS `.app`) and the 3rd Party Mac Developer Installer identity (signs the macOS `.pkg`). The same certificate bundle is used by both iOS and macOS jobs; the macOS job does not use separate `APPLE_MAC_INSTALLER_*` secrets.
 
 ---
 
