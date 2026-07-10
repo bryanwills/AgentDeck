@@ -252,12 +252,21 @@ function encPanel(
   );
 }
 
-/** Note view (Waiting… / No usage data): title + centred note, no gauges. */
+/** Note view (Waiting… / No usage data): a brand-forward empty state. The agent
+ *  mark is centred as the focal point so the dial still reads as its provider's
+ *  usage — with the title above and a short status line beneath — instead of a
+ *  tiny corner logo next to stark floating text, which read as "broken" when a
+ *  single provider had no data. */
 function encNote(data: UsageEncoderData): string {
+  const agent = data.agent === 'codex' ? 'codex' : 'claude';
+  const logoSize = 30;
+  // brandLogo's x/y are the mark's CENTRE (see encHeader), so centre it on the
+  // canvas: title above, mark in the middle, status line beneath.
   return encSvgWrap(
     `<rect width="${ENC_W}" height="${ENC_H}" fill="${BG}"/>` +
-    encHeader(data, true) +
-    `<text x="${ENC_W / 2}" y="60" text-anchor="middle" font-family="Arial,sans-serif" font-size="15" fill="${LABEL_DIM}">${esc(data.note ?? '')}</text>`,
+    `<text x="${ENC_W / 2}" y="19" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="bold" fill="${LABEL_DIM}">${esc(data.title)}</text>` +
+    brandLogo(agent, ENC_W / 2, 42, logoSize, true) +
+    `<text x="${ENC_W / 2}" y="85" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="${LABEL_DIM}">${esc(data.note ?? '')}</text>`,
   );
 }
 

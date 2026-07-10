@@ -623,15 +623,21 @@ bool drawProviderUsage(int16_t y, const char* agentType, const char* label,
     return true;
 }
 
-void drawUsageFooter(const Snap& s, bool showIdentity) {
-    display.fillRect(0, 370, W, 2, GxEPD_BLACK);
-    int16_t y = 378;
-    bool any = false;
-    if (drawProviderUsage(y, "claude-code", "CLAUDE", s.claudePlan, s.fiveH, s.fiveReset,
-                          s.sevenD, s.sevenReset, s.usageStale)) { y += 28; any = true; }
-    if (drawProviderUsage(y, "codex-cli", "CODEX", s.codexPlan, s.codexP, s.codexPReset,
-                          s.codexS, s.codexSReset, false)) { y += 28; any = true; }
-    if (!any) textAt(16, y + 16, "usage: waiting for data", &FreeSans9pt7b);
+// `sepY` is the separator/usage-band top. Pass -1 to omit the usage band
+// entirely (dashboard reflow: when no provider reports usage the session grid
+// reclaims the space, so there's no separator or "waiting" line). The bottom
+// band (AGY chip + identity + ticker) is always pinned to y≈470–474.
+void drawUsageFooter(const Snap& s, bool showIdentity, int16_t sepY = 370) {
+    if (sepY >= 0) {
+        display.fillRect(0, sepY, W, 2, GxEPD_BLACK);
+        int16_t y = sepY + 8;
+        bool any = false;
+        if (drawProviderUsage(y, "claude-code", "CLAUDE", s.claudePlan, s.fiveH, s.fiveReset,
+                              s.sevenD, s.sevenReset, s.usageStale)) { y += 28; any = true; }
+        if (drawProviderUsage(y, "codex-cli", "CODEX", s.codexPlan, s.codexP, s.codexPReset,
+                              s.codexS, s.codexSReset, false)) { y += 28; any = true; }
+        if (!any) textAt(16, y + 16, "usage: waiting for data", &FreeSans9pt7b);
+    }
 
     // AGY subscription chip — smallest possible footprint (classic font,
     // bottom-right corner), only when the daemon resolves the account.
@@ -830,9 +836,9 @@ void drawIdleDock(const Snap& s, const uint8_t* idx, uint8_t count,
     }
 }
 
-void drawSessionGrid(const Snap& s) {
+void drawSessionGrid(const Snap& s, int16_t gridBottom = 366) {
     const int16_t top = 78, left = 12, right = W - 12;
-    int16_t bottom = 366;
+    int16_t bottom = gridBottom;
     if (s.rowCount == 0) {
         // Empty state — connected but no sessions
         drawAgentDeckMark(W / 2 - 36, 140, 72);
@@ -856,8 +862,12 @@ void drawSessionGrid(const Snap& s) {
         nCards = nAttention < MAX_CARDS ? (nAttention > 0 ? nAttention : MAX_CARDS) : MAX_CARDS;
         if (nCards < nOrder || s.totalSessions > s.rowCount) {
             dock = true;
-            bottom = 294;
-            drawIdleDock(s, order + nCards, nOrder - nCards, 298, 366, left, right);
+            // Dock is the bottom strip of the grid; anchor it to gridBottom so it
+            // rides down with the adaptive split (grid grows when usage shrinks).
+            const int16_t dockH = 72;
+            int16_t dockTop = bottom - dockH;
+            drawIdleDock(s, order + nCards, nOrder - nCards, dockTop + 4, bottom, left, right);
+            bottom = dockTop;
         }
     }
 
@@ -912,13 +922,39 @@ void drawSleep() {
     display.fillCircle(W / 2 - 65, 270, 10, GxEPD_WHITE);
 }
 
+// Provider usage rows that will actually draw (mirrors the p5<0 && p7<0 gate in
+// drawProviderUsage). 0/1/2 — drives the adaptive split so a Codex-only or
+// no-usage state doesn't waste the lower third of the panel.
+static int usageRowCount(const Snap& s) {
+    int n = 0;
+    if (s.fiveH >= 0.0f || s.sevenD >= 0.0f) n++;
+    if (s.codexP >= 0.0f || s.codexS >= 0.0f) n++;
+    return n;
+}
+
 void drawDashboard(const Snap& s) {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     setInk(false);
+    // Adaptive split between the session grid and the usage band. The bottom
+    // band (ticker at y≈470 + AGY chip at y≈474) is pinned; usage gauges are
+    // anchored just above it, and the grid grows downward to reclaim whatever
+    // the gauges leave. 0 gauges → no band, grid runs to the ticker; 1 → one
+    // row; 2 → both. Prevents the fixed ~110px footer from wasting space.
+    const int16_t bottomBand = 456;  // gauges sit above the ticker/AGY band
+    int rows = usageRowCount(s);
+    int16_t sepY, gridBottom;
+    if (rows == 0) {
+        sepY = -1;
+        gridBottom = bottomBand - 4;
+    } else {
+        int16_t gaugeTop = bottomBand - rows * 28;
+        sepY = gaugeTop - 8;
+        gridBottom = sepY - 6;
+    }
     drawBrandHeader(s);
-    drawSessionGrid(s);
-    drawUsageFooter(s, false);
+    drawSessionGrid(s, gridBottom);
+    drawUsageFooter(s, false, sepY);
     // NOTE: no Serial logging here — this runs on Core 1 while Core 0 emits
     // protocol JSON lines (device_info replies, acks). Cross-core prints
     // interleave mid-line and corrupt the newline-framed JSON the daemon

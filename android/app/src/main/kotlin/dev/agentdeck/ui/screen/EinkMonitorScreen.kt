@@ -447,12 +447,21 @@ private fun EinkLimitsCornerCard(
 ) {
     val rows = buildEinkLimitRows(state)
     val width = if (compact) 164.dp else 190.dp
+    // Corner source tag: derive from the providers actually feeding this card
+    // rather than a hardcoded "node" (the daemon may be the Swift in-process one,
+    // and a Codex-only card mislabeled as "node" reads as the wrong provider).
+    // One provider → its name; two → "a+b"; three+ → "mix". The per-row brand
+    // marks already disambiguate, so this only needs to stay honest and short.
+    val sourceTag = einkLimitsSourceTag(rows, state)
     // Height grows with row count (Claude 5h/7d + Codex 5h/7d + subscription
     // expiry lines + the Antigravity chip can stack up to ~6 rows). A fixed
     // per-row step keeps the card from clipping when several providers are live,
     // while a card with no rows never renders (gated by hasEinkLimitData).
-    val perRow = if (compact) 15.dp else 17.dp
-    val base = if (compact) 26.dp else 30.dp
+    // perRow must cover a gauge row (≈13.sp line / 11.dp icon) PLUS the 3.dp
+    // Column gap, and base must cover vertical padding (14.dp) + the header row
+    // (≈12.dp); under-provisioning clipped the bottom-most (7d) gauge.
+    val perRow = if (compact) 17.dp else 18.dp
+    val base = if (compact) 28.dp else 31.dp
     val height = base + perRow * rows.size.coerceAtLeast(1)
     Surface(
         modifier = modifier
@@ -480,7 +489,7 @@ private fun EinkLimitsCornerCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = if (state.antigravityStatus != null) "node+ag" else "node",
+                    text = sourceTag,
                     fontSize = 9.sp,
                     lineHeight = 11.sp,
                     fontFamily = FontFamily.Monospace,
@@ -537,6 +546,29 @@ private fun buildEinkLimitRows(state: DashboardState, now: Instant = Instant.now
     }
     buildAntigravityLimitValue(state)?.let { rows.add(EinkLimitLine(label = "", value = it)) }
     return rows
+}
+
+/**
+ * Short provider tag for the LIMITS card corner. Derives from the providers
+ * that actually contribute gauge rows (plus the native Antigravity chip), so a
+ * Codex-only card reads "codex" instead of the stale hardcoded "node" source
+ * badge — which was both wrong (the source may be the Swift daemon) and read as
+ * the row's provider. One provider → its name; two → "a+b"; three+ → "mix".
+ */
+private fun einkLimitsSourceTag(rows: List<EinkLimitLine>, state: DashboardState): String {
+    val providers = LinkedHashSet<String>()
+    rows.forEach { row ->
+        when (row.agentType) {
+            "claude-code" -> providers.add("claude")
+            "codex" -> providers.add("codex")
+        }
+    }
+    if (state.antigravityStatus != null) providers.add("agy")
+    return when {
+        providers.isEmpty() -> "node"
+        providers.size <= 2 -> providers.joinToString("+")
+        else -> "mix"
+    }
 }
 
 /**

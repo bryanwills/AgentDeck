@@ -217,6 +217,11 @@ fun EinkTextGauge(
     // When set, a small per-provider brand mark leads the row so Codex rows read
     // as distinct from Claude's (labels stay 5h/7d — the mark conveys the agent).
     agentType: String? = null,
+    // Codex windows carry per-window staleness (an elapsed rolling-window
+    // snapshot). Keep the last-known % but append a "*" so an idle Codex 7d row
+    // stays visible instead of vanishing — dropping stale rows made the gauge
+    // disappear entirely once a window slid into the past.
+    stale: Boolean = false,
 ) {
     val pct = percent.coerceIn(0.0, 100.0).toInt()
     val filled = (pct * barLength / 100).coerceAtMost(barLength)
@@ -237,7 +242,7 @@ fun EinkTextGauge(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            text = "[$bar] $pct%",
+            text = "[$bar] $pct%${if (stale) "*" else ""}",
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurface,
         )

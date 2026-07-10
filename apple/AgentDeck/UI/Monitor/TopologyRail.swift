@@ -841,8 +841,11 @@ struct TopologyRail: View {
 
     // MARK: - Rate-limit chips (inline under Claude row)
 
-    /// Compact chips for 5h/7d usage. Rendered inline under the Claude row
-    /// because Claude is the only provider that reports rate limits today.
+    /// Compact chips for Claude's 5h/7d subscription usage, rendered inline
+    /// under the Claude row. This path is Claude-specific — Codex now reports
+    /// its own rolling-window limits (read locally from ~/.codex by the Swift
+    /// daemon) via a separate `codexRateLimitChips` row, so this is no longer
+    /// "the only provider with limits."
     ///
     /// `stale` flag: surfaced prominently because stale usage data is the
     /// single most common source of "the number is wrong" confusion. When

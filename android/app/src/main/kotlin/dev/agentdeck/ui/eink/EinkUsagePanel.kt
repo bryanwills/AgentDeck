@@ -38,10 +38,11 @@ fun EinkUsagePanel(
         if (usage.sevenDayPercent != null) {
             EinkTextGauge(label = "7d", percent = usage.sevenDayPercent, agentType = "claude-code")
         }
-        // Codex (ChatGPT) rolling-window usage — own per-window stale; drop stale
-        // rows here (no stale marker on this panel).
-        codexLimitRows(usage.codexRateLimits).filter { !it.stale }.forEach { row ->
-            EinkTextGauge(label = row.label, percent = row.percent, agentType = row.agentType)
+        // Codex (ChatGPT) rolling-window usage — own per-window stale flag. Keep
+        // stale windows (marked "*") so an idle Codex 7d row doesn't vanish; the
+        // brand mark identifies the provider (labels stay 5h/7d).
+        codexLimitRows(usage.codexRateLimits).forEach { row ->
+            EinkTextGauge(label = row.label, percent = row.percent, agentType = row.agentType, stale = row.stale)
         }
 
         // Token counters

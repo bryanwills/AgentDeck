@@ -55,11 +55,45 @@ describe('buildSessionDeck list-view usage tiles', () => {
     expect(cmds).toHaveLength(0);
   });
 
-  it('draws "—" when usage is unknown', () => {
+  it('frees the usage slots (no residue) when usage is unknown', () => {
+    // Unlinked usage: no reserved "—" ghost gauges. The 2×2 block keys are freed
+    // so sessions/agent tiles can use them (hide-if-absent, mirroring Codex).
     const deck = buildSessionDeck(baseState(1, { usageKnown: false, fiveHourPercent: 0, sevenDayPercent: 0 }),
       { mode: 'list', showUsage: true }, POS);
-    expect(deck.get(C5H)!.svg).toContain('—');
-    expect(deck.get(C7D)!.svg).toContain('—');
+    const usageCmds = [...deck.values()].filter(
+      (c) => c.action?.kind === 'command' && (c.action as { command?: { type?: string } }).command?.type === 'query_usage',
+    );
+    expect(usageCmds).toHaveLength(0);
+    expect(deck.get(C5H)!.svg).not.toContain('5H');
+    expect(deck.get(C7D)!.svg).not.toContain('7D');
+    expect(deck.get(C5H)!.svg).not.toContain('—');
+  });
+
+  it('frees only the Claude slots when Codex-only usage is present (partial)', () => {
+    // Claude unlinked but Codex reporting: Claude 5H/7D slots are freed, Codex
+    // 5H/7D take the top-left of the block (placement order), no Claude residue.
+    const deck = buildSessionDeck(
+      baseState(1, {
+        usageKnown: false, fiveHourPercent: undefined, sevenDayPercent: undefined,
+        codexRateLimits: {
+          primary: { usedPercent: 30, windowMinutes: 300, resetsAt: undefined },
+          secondary: { usedPercent: 10, windowMinutes: 10080, resetsAt: undefined },
+          planType: 'plus',
+        },
+      }),
+      { mode: 'list', showUsage: true }, POS);
+    // Exactly two usage tiles (both Codex), wired to query_usage.
+    const usageCmds = [...deck.values()].filter(
+      (c) => c.action?.kind === 'command' && (c.action as { command?: { type?: string } }).command?.type === 'query_usage',
+    );
+    expect(usageCmds).toHaveLength(2);
+    // Codex mark present, Claude mark absent among the gauges.
+    const usageSvgs = [...deck.values()]
+      .filter((c) => c.action?.kind === 'command')
+      .map((c) => c.svg)
+      .join('');
+    expect(usageSvgs).toContain('#6166E0'); // Codex blue mark
+    expect(usageSvgs).not.toContain('#C07058'); // no Claude terracotta mark
   });
 
   it('fits sessions into the 13 non-usage keys without paging', () => {

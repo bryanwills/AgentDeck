@@ -436,12 +436,14 @@ struct ControlTowerPanel: View {
 
     // MARK: - Compact rate limits
 
-    /// Subscription rate limits depend on Claude Code's OAuth token, which
-    /// is structurally unreachable from the App Store sandbox. We surface
-    /// this section only when an external CLI daemon is relaying gauge
-    /// values, or when actual gauge data has already arrived through any
-    /// other path. Otherwise the section is hidden so the standalone app
-    /// reads as feature-complete instead of broken.
+    /// Claude's subscription rate limits depend on Claude Code's OAuth token,
+    /// which is structurally unreachable from the App Store sandbox, so those
+    /// gauges surface only when an external CLI daemon relays them. Codex
+    /// limits, by contrast, are read locally from ~/.codex by the Swift daemon
+    /// and arrive as gauge data directly (`codexRateLimits`). We surface this
+    /// section whenever any gauge data has arrived, or an external daemon is
+    /// active; otherwise it's hidden so the standalone app reads as
+    /// feature-complete instead of broken.
     @ViewBuilder
     private var rateLimitsSection: some View {
         let hasGauges = stateHolder.state.fiveHourPercent != nil

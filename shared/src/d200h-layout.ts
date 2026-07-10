@@ -331,19 +331,25 @@ export function renderCreditsTile(data: { limitId?: string; balance?: string; un
 }
 
 /**
- * Usage tiles for the session deck, in placement order. Claude 5H/7D are always
- * present (reserved gauges that draw "—" when the quota is unknown); Codex 5H
- * (primary) / 7D (secondary) appear ONLY when that datum exists in
- * `codexRateLimits`. Credit-based plans (null windows) get a single credits
- * readout tile instead. Each tile re-fetches quota on press.
+ * Usage tiles for the session deck, in placement order. Every tile is
+ * hide-if-absent: Claude 5H/7D appear only when that window's quota is actually
+ * known, and Codex 5H (primary) / 7D (secondary) only when present in
+ * `codexRateLimits`. An unlinked or partial usage state therefore emits fewer
+ * (or zero) tiles, so `buildList` reserves fewer keys and the freed slots flow
+ * to session tiles instead of leaving reserved "—" ghost gauges behind.
+ * Credit-based plans (null windows) get a single credits readout tile instead.
+ * Each tile re-fetches quota on press.
  */
 function buildUsageTiles(state: DashState): SessionDeckCell[] {
   const action: DeckAction = { kind: 'command', command: { type: 'query_usage' } };
   const known = state.usageKnown !== false;
-  const tiles: SessionDeckCell[] = [
-    { svg: renderUsageGauge({ agent: 'claude', window: '5h', label: '5H', usedPercent: state.fiveHourPercent, resetsAt: state.fiveHourResetsAt, known }), action },
-    { svg: renderUsageGauge({ agent: 'claude', window: '7d', label: '7D', usedPercent: state.sevenDayPercent, resetsAt: state.sevenDayResetsAt, known }), action },
-  ];
+  const tiles: SessionDeckCell[] = [];
+  if (known && state.fiveHourPercent != null) {
+    tiles.push({ svg: renderUsageGauge({ agent: 'claude', window: '5h', label: '5H', usedPercent: state.fiveHourPercent, resetsAt: state.fiveHourResetsAt, known: true }), action });
+  }
+  if (known && state.sevenDayPercent != null) {
+    tiles.push({ svg: renderUsageGauge({ agent: 'claude', window: '7d', label: '7D', usedPercent: state.sevenDayPercent, resetsAt: state.sevenDayResetsAt, known: true }), action });
+  }
   const cx = state.codexRateLimits;
   // Codex windows carry the same short "5H"/"7D" labels — the brand dot conveys
   // the agent, not a "CX " prefix.
