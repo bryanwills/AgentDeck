@@ -1261,7 +1261,11 @@ final class PixooRenderer {
     private func drawAntigravity(_ buf: inout [UInt8], worldX: Double, worldY: Double, state: CreatureState, animFrame: Int, camera: Camera, palette: AntigravityPalette) {
         guard isVisible(worldX, worldY, camera, padding: 0.15) else { return }
         let (scx, scy) = worldToScreen(worldX, worldY, camera)
-        let cell = max(1, Int(round((0.1875 * (round(camera.zoom * 4) / 4) * Double(Self.width)) / 11.0)))
+        // Broken into typed steps — the single expression hit the CI Xcode
+        // type-checker timeout in Release builds.
+        let quantizedZoom: Double = round(camera.zoom * 4) / 4
+        let cellRaw: Double = (0.1875 * quantizedZoom * Double(Self.width)) / 11.0
+        let cell = max(1, Int(round(cellRaw)))
         let spriteW = 11 * cell
         let spriteH = 11 * cell
         let breathPx = state == .processing

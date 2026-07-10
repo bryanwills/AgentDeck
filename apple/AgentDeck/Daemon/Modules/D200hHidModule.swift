@@ -1094,25 +1094,39 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     }
 
     private func sessionsListDigest(_ sessions: [[String: Any]]) -> String {
-        sessions.map { session in
+        // Split into small typed steps — the previous single expression hit
+        // the type-checker timeout under CI's Xcode in Release builds.
+        var rows: [String] = []
+        rows.reserveCapacity(sessions.count)
+        for session in sessions {
             let options = (session["options"] as? [[String: Any]]) ?? []
-            let optionsDigest = options.map { option in
-                option.keys.sorted().map { key in
-                    "\(key)=\(String(describing: option[key] ?? ""))"
-                }.joined(separator: "&")
-            }.joined(separator: ";")
-            return [
+            var optionRows: [String] = []
+            optionRows.reserveCapacity(options.count)
+            for option in options {
+                var pairs: [String] = []
+                for key in option.keys.sorted() {
+                    let value: Any = option[key] ?? ""
+                    pairs.append("\(key)=\(String(describing: value))")
+                }
+                optionRows.append(pairs.joined(separator: "&"))
+            }
+            let optionsDigest = optionRows.joined(separator: ";")
+            let port: Int = session["port"] as? Int ?? 0
+            let navigable: Bool = session["navigable"] as? Bool ?? false
+            let fields: [String] = [
                 session["id"] as? String ?? "",
                 session["projectName"] as? String ?? "",
                 session["agentType"] as? String ?? "",
                 session["state"] as? String ?? "",
-                String(session["port"] as? Int ?? 0),
+                String(port),
                 session["currentTool"] as? String ?? "",
                 session["modelName"] as? String ?? "",
-                String(session["navigable"] as? Bool ?? false),
+                String(navigable),
                 optionsDigest,
-            ].joined(separator: "|")
-        }.joined(separator: "\n")
+            ]
+            rows.append(fields.joined(separator: "|"))
+        }
+        return rows.joined(separator: "\n")
     }
 
     // MARK: - Animation Timer

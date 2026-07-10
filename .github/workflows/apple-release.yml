@@ -54,16 +54,6 @@ jobs:
             DEVELOPMENT_TEAM=QF36NDHYHD \
             ENABLE_PREVIEWS=NO
 
-      - name: Verify iOS App Store archive invariants
-        # Mirrors the macOS verification: guards against bundled helpers
-        # (Apple 2.5.2), `home-relative-path` entitlement exceptions, and
-        # stray embedded executables slipping into the iOS archive. iOS
-        # builds don't run copy-adb.sh so these should always pass, but
-        # the gate is free insurance against future build-script drift.
-        run: |
-          bash apple/scripts/verify-appstore-archive.sh \
-            $RUNNER_TEMP/AgentDeck_iOS.xcarchive/Products/Applications/AgentDeck.app
-
       - name: Export iOS IPA
         run: |
           xcodebuild -exportArchive \
@@ -74,6 +64,17 @@ jobs:
             -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_API_KEY_ID }}.p8 \
             -authenticationKeyID ${{ secrets.ASC_API_KEY_ID }} \
             -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }}
+
+      - name: Verify iOS App Store invariants (exported IPA)
+        # Guards against bundled helpers (Apple 2.5.2), `home-relative-path`
+        # entitlement exceptions, and stray embedded executables. Runs on the
+        # EXPORTED app (distribution-signed) — the archive itself is signed
+        # with a cloud development identity, which the verifier rightly
+        # rejects, so verifying pre-export would always fail.
+        run: |
+          unzip -q $RUNNER_TEMP/export_ios/AgentDeck.ipa -d $RUNNER_TEMP/ipa_unpacked
+          bash apple/scripts/verify-appstore-archive.sh \
+            $RUNNER_TEMP/ipa_unpacked/Payload/AgentDeck.app
 
       - name: Upload iOS to TestFlight
         run: |
@@ -131,14 +132,6 @@ jobs:
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=QF36NDHYHD
 
-      - name: Verify App Store archive invariants
-        # Fails the build if bundled Node/adb/bridge helpers, iOS-only plist
-        # keys, home-relative-path entitlement, or subprocess path strings
-        # somehow leaked into the .app. Apple Guideline 2.5.2 enforcement.
-        run: |
-          bash apple/scripts/verify-appstore-archive.sh \
-            $RUNNER_TEMP/AgentDeck_macOS.xcarchive/Products/Applications/AgentDeck.app
-
       - name: Export macOS pkg
         run: |
           xcodebuild -exportArchive \
@@ -149,6 +142,18 @@ jobs:
             -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_API_KEY_ID }}.p8 \
             -authenticationKeyID ${{ secrets.ASC_API_KEY_ID }} \
             -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }}
+
+      - name: Verify App Store invariants (exported pkg)
+        # Fails the build if bundled Node/adb/bridge helpers, iOS-only plist
+        # keys, home-relative-path entitlement, or subprocess path strings
+        # somehow leaked into the .app. Apple Guideline 2.5.2 enforcement.
+        # Runs on the EXPORTED app (distribution-signed) — the archive is
+        # signed with a cloud development identity that the verifier rejects.
+        run: |
+          pkgutil --expand-full $RUNNER_TEMP/export_macos/AgentDeck.pkg $RUNNER_TEMP/pkg_expanded
+          APP=$(find $RUNNER_TEMP/pkg_expanded -type d -name 'AgentDeck.app' | head -1)
+          test -n "$APP"
+          bash apple/scripts/verify-appstore-archive.sh "$APP"
 
       - name: Upload macOS to App Store Connect
         run: |
