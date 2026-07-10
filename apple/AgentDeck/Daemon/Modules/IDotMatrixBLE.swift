@@ -61,11 +61,21 @@ final class IDotMatrixBLE: NSObject, @unchecked Sendable {
     private var peripheral: CBPeripheral?
     private var writeChar: CBCharacteristic?
 
-    // One-shot continuations (all touched on `queue`).
-    private var stateContinuations: [CheckedContinuation<Void, Error>] = []
+    // One-shot continuations (all touched on `queue`). Every continuation here MUST
+    // also resume on task cancellation: `withTimeout` runs work + timer in a task
+    // group, and the group cannot return — even after the timer child throws — until
+    // the work child finishes. A continuation that only a CB delegate callback can
+    // resume turns "timeout" into a permanent hang when that callback never arrives
+    // (Bluetooth permission undecided, device powered off mid-connect). The
+    // *CancelPending flags close the race where onCancel fires before the
+    // queue-confined registration block has run.
+    private var stateContinuations: [UUID: CheckedContinuation<Void, Error>] = [:]
+    private var cancelledStateWaiters: Set<UUID> = []
     private var connectContinuation: CheckedContinuation<Void, Error>?
+    private var connectCancelPending = false
     private var connectTimedOut = false
-    private var writeReadyContinuation: CheckedContinuation<Void, Never>?
+    private var writeReadyContinuation: CheckedContinuation<Void, Error>?
+    private var writeReadyCancelPending = false
 
     // Scan accumulation.
     private var scanResults: [UUID: String] = [:]
@@ -78,6 +88,7 @@ final class IDotMatrixBLE: NSObject, @unchecked Sendable {
         super.init()
         central = CBCentralManager(delegate: self, queue: queue,
                                    options: [CBCentralManagerOptionShowPowerAlertKey: false])
+        DaemonLogger.shared.debug("IDotMatrixBLE", "central created — authorization=\(TimeboxBLE.describeAuthorization())")
     }
 
     // MARK: - Public async API
@@ -85,20 +96,36 @@ final class IDotMatrixBLE: NSObject, @unchecked Sendable {
     /// Resolve once the central is powered on, or throw if BT is unavailable.
     func waitUntilReady(timeout: TimeInterval = 5) async throws {
         try await withTimeout(timeout, onTimeout: { .bluetoothUnavailable("powered-on wait timed out") }) {
-            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let waiterId = UUID()
+            defer { self.queue.async { _ = self.cancelledStateWaiters.remove(waiterId) } }
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                    self.queue.async {
+                        if self.cancelledStateWaiters.remove(waiterId) != nil {
+                            cont.resume(throwing: CancellationError())
+                            return
+                        }
+                        switch self.central.state {
+                        case .poweredOn:
+                            cont.resume()
+                        case .poweredOff:
+                            cont.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("powered off"))
+                        case .unauthorized:
+                            cont.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("unauthorized"))
+                        case .unsupported:
+                            cont.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("unsupported"))
+                        default:
+                            // .unknown / .resetting — wait for the next state callback.
+                            self.stateContinuations[waiterId] = cont
+                        }
+                    }
+                }
+            } onCancel: {
                 self.queue.async {
-                    switch self.central.state {
-                    case .poweredOn:
-                        cont.resume()
-                    case .poweredOff:
-                        cont.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("powered off"))
-                    case .unauthorized:
-                        cont.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("unauthorized"))
-                    case .unsupported:
-                        cont.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("unsupported"))
-                    default:
-                        // .unknown / .resetting — wait for the next state callback.
-                        self.stateContinuations.append(cont)
+                    if let cont = self.stateContinuations.removeValue(forKey: waiterId) {
+                        cont.resume(throwing: CancellationError())
+                    } else {
+                        self.cancelledStateWaiters.insert(waiterId)
                     }
                 }
             }
@@ -147,14 +174,34 @@ final class IDotMatrixBLE: NSObject, @unchecked Sendable {
         let target: CBPeripheral = try await resolvePeripheral(uuid: uuid)
 
         try await withTimeout(connectTimeoutSec, onTimeout: { .connectTimeout }) {
-            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            defer { self.queue.async { self.connectCancelPending = false } }
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                    self.queue.async {
+                        if self.connectCancelPending {
+                            self.connectCancelPending = false
+                            cont.resume(throwing: CancellationError())
+                            return
+                        }
+                        self.peripheral = target
+                        target.delegate = self
+                        self.writeChar = nil
+                        self.connectContinuation = cont
+                        self.connectTimedOut = false
+                        self.central.connect(target, options: nil)
+                    }
+                }
+            } onCancel: {
                 self.queue.async {
-                    self.peripheral = target
-                    target.delegate = self
-                    self.writeChar = nil
-                    self.connectContinuation = cont
-                    self.connectTimedOut = false
-                    self.central.connect(target, options: nil)
+                    if let cont = self.connectContinuation {
+                        self.connectContinuation = nil
+                        // CB connect attempts never expire on their own — cancel the
+                        // pending attempt so it can't complete into a stale delegate.
+                        self.central.cancelPeripheralConnection(target)
+                        cont.resume(throwing: CancellationError())
+                    } else {
+                        self.connectCancelPending = true
+                    }
                 }
             }
         }
@@ -251,6 +298,7 @@ final class IDotMatrixBLE: NSObject, @unchecked Sendable {
 
     private func writeRaw(_ data: Data) async throws {
         try await withTimeout(writeTimeoutSec, onTimeout: { .writeTimeout }) {
+            defer { self.queue.async { self.writeReadyCancelPending = false } }
             // Snapshot the peripheral/char on the queue.
             let (p, ch): (CBPeripheral, CBCharacteristic) = try await withCheckedThrowingContinuation { cont in
                 self.queue.async {
@@ -284,12 +332,28 @@ final class IDotMatrixBLE: NSObject, @unchecked Sendable {
     private func writeChunk(_ slice: Data, to p: CBPeripheral, characteristic ch: CBCharacteristic) async throws {
         // Honor write-without-response flow control: if the peripheral's buffer is
         // full, wait for `peripheralIsReady(toSendWriteWithoutResponse:)`.
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            queue.async {
-                if p.canSendWriteWithoutResponse {
-                    cont.resume()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                self.queue.async {
+                    if self.writeReadyCancelPending {
+                        self.writeReadyCancelPending = false
+                        cont.resume(throwing: CancellationError())
+                        return
+                    }
+                    if p.canSendWriteWithoutResponse {
+                        cont.resume()
+                    } else {
+                        self.writeReadyContinuation = cont
+                    }
+                }
+            }
+        } onCancel: {
+            self.queue.async {
+                if let cont = self.writeReadyContinuation {
+                    self.writeReadyContinuation = nil
+                    cont.resume(throwing: CancellationError())
                 } else {
-                    self.writeReadyContinuation = cont
+                    self.writeReadyCancelPending = true
                 }
             }
         }
@@ -322,18 +386,19 @@ final class IDotMatrixBLE: NSObject, @unchecked Sendable {
 
 extension IDotMatrixBLE: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        DaemonLogger.shared.debug("IDotMatrixBLE", "central state → \(TimeboxBLE.describeState(central.state)) (auth=\(TimeboxBLE.describeAuthorization()))")
         // Resolve everyone waiting on a ready/state transition.
         let waiters = stateContinuations
         stateContinuations.removeAll()
         switch central.state {
         case .poweredOn:
-            waiters.forEach { $0.resume() }
+            waiters.values.forEach { $0.resume() }
         case .poweredOff:
-            waiters.forEach { $0.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("powered off")) }
+            waiters.values.forEach { $0.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("powered off")) }
         case .unauthorized:
-            waiters.forEach { $0.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("unauthorized")) }
+            waiters.values.forEach { $0.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("unauthorized")) }
         case .unsupported:
-            waiters.forEach { $0.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("unsupported")) }
+            waiters.values.forEach { $0.resume(throwing: IDotMatrixBLEError.bluetoothUnavailable("unsupported")) }
         default:
             // .resetting / .unknown — re-queue and wait for the next transition.
             stateContinuations = waiters

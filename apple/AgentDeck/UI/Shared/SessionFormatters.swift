@@ -28,6 +28,11 @@ func displayAgentLabel(_ type: String?) -> String {
 /// Shorten a model id to a compact user-facing name.
 /// e.g., "openrouter/anthropic/claude-opus-4-6-20261001" -> "opus-4-6",
 /// "openai/gpt-5.1-codex-max" -> "5.1-codex-max".
+///
+/// Compiled once: this runs per session row per render, and
+/// `String.range(of: .regularExpression)` recompiles the pattern every call.
+private let displayModelDateSuffixRegex = try! NSRegularExpression(pattern: #"-\d{8}$"#)
+
 func displayShortModelName(_ name: String, maxLength: Int? = nil) -> String {
     var s = name.trimmingCharacters(in: .whitespacesAndNewlines)
     for prefix in ["openrouter:", "api:"] {
@@ -39,7 +44,8 @@ func displayShortModelName(_ name: String, maxLength: Int? = nil) -> String {
     for prefix in ["claude-", "gpt-", "o1-", "o3-"] {
         if s.hasPrefix(prefix) { s = String(s.dropFirst(prefix.count)) }
     }
-    if let range = s.range(of: #"-\d{8}$"#, options: .regularExpression) {
+    if let match = displayModelDateSuffixRegex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
+       let range = Range(match.range, in: s) {
         s = String(s[s.startIndex..<range.lowerBound])
     }
     if let maxLength {

@@ -122,7 +122,12 @@ actor PixooModule: DeviceModule {
     private var lastSequencePushTime: Date?
     private var isPushing = false
     private let renderer = PixooRenderer()
-    private let urlSession: URLSession = {
+    // Long-lived session for probes/pushes. NOT `let`: when the NW stack wedges
+    // this session deep-hangs while fresh sessions (sweep probes, curl) still
+    // work, so recovery replaces it wholesale — see rebuildURLSession().
+    private var urlSession: URLSession = PixooModule.makeURLSession()
+
+    private static func makeURLSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 3
         config.timeoutIntervalForResource = 3
@@ -130,7 +135,15 @@ actor PixooModule: DeviceModule {
         config.waitsForConnectivity = false
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
-    }()
+    }
+
+    /// Self-heal for the documented "outbound HTTP stuck NW-stack-deep" state:
+    /// drop every in-flight request with the wedged session and start clean.
+    private func rebuildURLSession(reason: String) {
+        DaemonLogger.shared.info("[Pixoo] Rebuilding URLSession (\(reason))")
+        urlSession.invalidateAndCancel()
+        urlSession = Self.makeURLSession()
+    }
     private let frameWidth = 64
     private let frameHeight = 64
     private let requestTimeout: TimeInterval = 2
@@ -457,7 +470,8 @@ actor PixooModule: DeviceModule {
                 // app needs a restart, and try a best-effort PicID re-sync.
                 if let state = deviceLogStates[device.ip],
                    state.consecutiveFailures == backoffThreshold + deepHangProbeFailures {
-                    DaemonLogger.shared.error("[Pixoo] \(device.ip) deep hang — \(state.consecutiveFailures) total failures (push+probe). Outbound HTTP may be stuck NW-stack-deep; restart AgentDeck if push doesn't resume within 30s.")
+                    DaemonLogger.shared.error("[Pixoo] \(device.ip) deep hang — \(state.consecutiveFailures) total failures (push+probe). Outbound HTTP may be stuck NW-stack-deep; rebuilding URLSession. Restart AgentDeck if push doesn't resume.")
+                    rebuildURLSession(reason: "deep-hang boundary for \(device.ip)")
                     devicePicIds.removeValue(forKey: device.ip)
                     await prepareDevice(device)
                 }
@@ -494,6 +508,21 @@ actor PixooModule: DeviceModule {
         var found: [String] = []
         for (base, selfIP) in Self.localIPv4Subnets() {
             found += await Self.sweepSubnet(base: base, selfIP: selfIP, concurrency: 32, timeoutSec: 0.6)
+        }
+        // The sweep probes with FRESH ephemeral sessions, so a hit on the
+        // configured IP while the module's long-lived session keeps failing is
+        // proof the network path is fine and the wedged session is the problem —
+        // rebuild it instead of reporting "no relocated device" forever.
+        if found.contains(device.ip) {
+            rebuildURLSession(reason: "\(device.ip) alive on sweep probe but module session failing")
+            // Clear only the backoff window: the next probe cycle (≤15s) re-probes
+            // on the fresh session and runs the normal recovery path (grace
+            // period + re-seed) instead of duplicating it here.
+            if var state = deviceLogStates[device.ip] {
+                state.backoffUntil = nil
+                deviceLogStates[device.ip] = state
+            }
+            return
         }
         let candidates = found.filter { !currentIPs.contains($0) }
         guard !candidates.isEmpty else {

@@ -457,7 +457,11 @@ struct TimelineStripView: View {
     /// Strip lightweight markdown so `## 정리`, `**bold**`, `[text](url)`,
     /// backtick-code don't leak into the summary line. Mirrors
     /// `cleanRawText` from `shared/src/timeline.ts`.
+    private static nonisolated(unsafe) let strippedRawCache = makeTimelineMemoCache(NSString.self)
+
     private func strippedRaw(_ raw: String) -> String {
+        let key = raw as NSString
+        if let hit = Self.strippedRawCache.object(forKey: key) { return hit as String }
         var out = raw
         // Bold: **text** → text
         out = out.replacingOccurrences(of: #"\*\*([^*]+)\*\*"#, with: "$1", options: .regularExpression)
@@ -474,7 +478,9 @@ struct TimelineStripView: View {
         out = out.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
 
         let cleaned = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        return smartTruncate(cleaned, limit: 120)
+        let result = smartTruncate(cleaned, limit: 120)
+        Self.strippedRawCache.setObject(result as NSString, forKey: key)
+        return result
     }
 
     /// Truncates string at word/Korean-character boundaries rather than cutting in the middle of a token.
@@ -857,28 +863,9 @@ struct TimelineStripView: View {
     /// Lightweight inline markdown strip (mirrors `cleanDetailText` from
     /// `shared/src/timeline.ts`). Keeps line breaks; strips fences, bold,
     /// italic, headings, blockquotes, list bullets, links, inline code.
+    /// Delegates to the memoized file-scope helper (bodies were identical).
     private func stripMarkdownInline(_ s: String) -> String {
-        var out = s
-        // Code fences ```lang ... ``` → contents
-        out = out.replacingOccurrences(of: "```[\\w]*\\n?([\\s\\S]*?)```",
-                                       with: "$1", options: .regularExpression)
-        out = out.replacingOccurrences(of: "\\*\\*([^*]+)\\*\\*",
-                                       with: "$1", options: .regularExpression)
-        out = out.replacingOccurrences(of: "(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)",
-                                       with: "$1", options: .regularExpression)
-        out = out.replacingOccurrences(of: "^#{1,6}\\s+", with: "",
-                                       options: [.regularExpression])
-        // Multiline-anchored strips
-        out = out.replacingOccurrences(of: "(?m)^>\\s+", with: "", options: .regularExpression)
-        out = out.replacingOccurrences(of: "(?m)^[-*]\\s+", with: "", options: .regularExpression)
-        out = out.replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^)]+\\)",
-                                       with: "$1", options: .regularExpression)
-        out = out.replacingOccurrences(of: "`([^`]+)`",
-                                       with: "$1", options: .regularExpression)
-        // Additional strips for pre-flight polish
-        out = out.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        out = out.replacingOccurrences(of: "\\|", with: " ", options: .regularExpression)
-        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+        timelineStripMarkdownInline(s)
     }
 
     // MARK: - Helpers
@@ -1045,16 +1032,57 @@ func timelineShouldShowTaskMarker(_ group: GroupedEntry) -> Bool {
         entry.taskSummary?.isEmpty == false
 }
 
+// MARK: - Per-row classifier caches
+//
+// Timeline rows are immutable once ingested, but every timeline update
+// re-renders every visible row, and `String.range(of: .regularExpression)` /
+// `replacingOccurrences(of:options:.regularExpression)` recompile their pattern
+// on every call. Under a busy session (hook events every second) that kept the
+// daemon app's main thread pinned in libswift_StringProcessing, starving the
+// MainActor WS handlers (client registrations timed out → device churn). The
+// patterns are compiled once and pure string→result helpers are memoized;
+// NSCache is thread-safe and evicts under memory pressure.
+
+private enum TimelineRowRegex {
+    static let taskNumberEN = try! NSRegularExpression(pattern: #"^task\s+\d+$"#, options: [.caseInsensitive])
+    static let taskNumberKO = try! NSRegularExpression(pattern: #"^작업\s*\d+$"#)
+    static let progressEN: [NSRegularExpression] = [
+        #"\b(still|currently|continues? to|is|are)\s+(running|building|installing|executing|processing|waiting)\b"#,
+        #"\b(still running|still building|build is running|is still running|are still running)\b"#,
+        #"\b(waiting for|wait until|once (?:the )?.*(?:finishes|completes|arrives)|continue once|will continue once|i.ll continue once)\b"#,
+        #"\b(no interim lines|buffers? output until completion|tail buffers output)\b"#,
+    ].map { try! NSRegularExpression(pattern: $0) }
+    static let progressKO: [NSRegularExpression] = [
+        #"(아직|계속)\s*(실행|진행|빌드|설치)\s*중"#,
+        #"(완료|끝나|도착)면\s*(계속|이어)"#,
+        #"(기다리는 중|대기 중)"#,
+    ].map { try! NSRegularExpression(pattern: $0) }
+    static let finalLeadEN = try! NSRegularExpression(
+        pattern: #"^(done|completed|complete|fixed|merged|verified|all done)\b"#, options: [.caseInsensitive])
+    static let finalLeadKO = try! NSRegularExpression(pattern: #"^(완료|수정 완료|검증 완료|반영 완료|머지 완료)"#)
+
+    static func matches(_ rx: NSRegularExpression, _ s: String) -> Bool {
+        rx.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
+    }
+}
+
+private func makeTimelineMemoCache<V: AnyObject>(_ type: V.Type) -> NSCache<NSString, V> {
+    let cache = NSCache<NSString, V>()
+    cache.countLimit = 2048
+    return cache
+}
+
+// nonisolated(unsafe): NSCache is documented thread-safe; it just lacks a
+// Sendable annotation in the SDK.
+private nonisolated(unsafe) let timelineMarkdownStripCache = makeTimelineMemoCache(NSString.self)
+private nonisolated(unsafe) let timelineProgressUpdateCache = makeTimelineMemoCache(NSNumber.self)
+
 func timelineIsMeaningfulTaskTitle(_ raw: String) -> Bool {
     let title = timelineStripMarkdownInline(raw)
         .trimmingCharacters(in: .whitespacesAndNewlines)
     guard !title.isEmpty else { return false }
-    if title.range(of: #"^task\s+\d+$"#, options: [.regularExpression, .caseInsensitive]) != nil {
-        return false
-    }
-    if title.range(of: #"^작업\s*\d+$"#, options: [.regularExpression]) != nil {
-        return false
-    }
+    if TimelineRowRegex.matches(TimelineRowRegex.taskNumberEN, title) { return false }
+    if TimelineRowRegex.matches(TimelineRowRegex.taskNumberKO, title) { return false }
     return true
 }
 
@@ -1093,30 +1121,31 @@ func timelineIsProgressChatResponse(_ entry: TimelineEntry) -> Bool {
 
 func timelineLooksLikeAssistantProgressUpdate(_ text: String?) -> Bool {
     guard let text else { return false }
+    let key = text as NSString
+    if let hit = timelineProgressUpdateCache.object(forKey: key) { return hit.boolValue }
+    let result = timelineComputeLooksLikeAssistantProgressUpdate(text)
+    timelineProgressUpdateCache.setObject(NSNumber(value: result), forKey: key)
+    return result
+}
+
+private func timelineComputeLooksLikeAssistantProgressUpdate(_ text: String) -> Bool {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return false }
     let head = String(trimmed.prefix(800))
     let lower = head.lowercased()
 
-    let progressPatterns = [
-        #"\b(still|currently|continues? to|is|are)\s+(running|building|installing|executing|processing|waiting)\b"#,
-        #"\b(still running|still building|build is running|is still running|are still running)\b"#,
-        #"\b(waiting for|wait until|once (?:the )?.*(?:finishes|completes|arrives)|continue once|will continue once|i.ll continue once)\b"#,
-        #"\b(no interim lines|buffers? output until completion|tail buffers output)\b"#,
-    ]
-    let englishProgress = progressPatterns.contains {
-        lower.range(of: $0, options: .regularExpression) != nil
+    let englishProgress = TimelineRowRegex.progressEN.contains {
+        TimelineRowRegex.matches($0, lower)
     }
-    let koreanProgress =
-        head.range(of: #"(아직|계속)\s*(실행|진행|빌드|설치)\s*중"#, options: .regularExpression) != nil ||
-        head.range(of: #"(완료|끝나|도착)면\s*(계속|이어)"#, options: .regularExpression) != nil ||
-        head.range(of: #"(기다리는 중|대기 중)"#, options: .regularExpression) != nil
+    let koreanProgress = TimelineRowRegex.progressKO.contains {
+        TimelineRowRegex.matches($0, head)
+    }
 
     guard englishProgress || koreanProgress else { return false }
 
     let startsAsFinal =
-        trimmed.range(of: #"^(done|completed|complete|fixed|merged|verified|all done)\b"#, options: [.regularExpression, .caseInsensitive]) != nil ||
-        trimmed.range(of: #"^(완료|수정 완료|검증 완료|반영 완료|머지 완료)"#, options: .regularExpression) != nil
+        TimelineRowRegex.matches(TimelineRowRegex.finalLeadEN, trimmed) ||
+        TimelineRowRegex.matches(TimelineRowRegex.finalLeadKO, trimmed)
     return !startsAsFinal
 }
 
@@ -1203,6 +1232,8 @@ func timelineDetailIsRedundant(detail: String, raw: String) -> Bool {
 }
 
 func timelineStripMarkdownInline(_ s: String) -> String {
+    let key = s as NSString
+    if let hit = timelineMarkdownStripCache.object(forKey: key) { return hit as String }
     var out = s
     out = out.replacingOccurrences(of: "```[\\w]*\\n?([\\s\\S]*?)```",
                                    with: "$1", options: .regularExpression)
@@ -1220,7 +1251,9 @@ func timelineStripMarkdownInline(_ s: String) -> String {
                                    with: "$1", options: .regularExpression)
     out = out.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
     out = out.replacingOccurrences(of: "\\|", with: " ", options: .regularExpression)
-    return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    let result = out.trimmingCharacters(in: .whitespacesAndNewlines)
+    timelineMarkdownStripCache.setObject(result as NSString, forKey: key)
+    return result
 }
 
 func timelineHasLaterCompletion(for start: TimelineEntry, in groups: [GroupedEntry]) -> Bool {
