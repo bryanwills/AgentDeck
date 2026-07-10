@@ -9,6 +9,15 @@ import CryptoKit
 /// A unified server handling both HTTP requests and WebSocket connections on one port.
 /// Also advertises Bonjour service for mDNS discovery.
 actor WebSocketServer {
+    /// All NW I/O (accept, receive, send completions, pong replies, frame
+    /// parsing) runs here — NOT on .main. The daemon shares its process with
+    /// the SwiftUI dashboard, and a busy layout pass on the main queue starved
+    /// send completions and pong replies (clients timed out → reconnect churn;
+    /// `_inFlightSends` pinned at the cap because completions never drained).
+    /// Serial, so the listener ResumeGate and per-connection frame parsers
+    /// stay race-free exactly as they did under .main.
+    static let ioQueue = DispatchQueue(label: "dev.agentdeck.ws.io", qos: .userInitiated)
+
     private var listener: NWListener?
     private var connections = Set<WebSocketConnection>()
     private var broadcastHooks: [@Sendable (Data) -> Void] = []
@@ -115,7 +124,7 @@ actor WebSocketServer {
         }
 
         let failedHandler = onListenerFailed
-        // stateUpdateHandler fires on .main queue; ResumeGate is only touched there.
+        // stateUpdateHandler fires on ioQueue (serial); ResumeGate is only touched there.
         let gate = ResumeGate()
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             listener.stateUpdateHandler = { state in
@@ -146,7 +155,7 @@ actor WebSocketServer {
                 Task { await self?.handleNewConnection(nwConn) }
             }
 
-            listener.start(queue: .main)
+            listener.start(queue: Self.ioQueue)
         }
     }
 
@@ -161,7 +170,7 @@ actor WebSocketServer {
     // MARK: - Connection Detection
 
     private func handleNewConnection(_ nwConn: NWConnection) {
-        nwConn.start(queue: .main)
+        nwConn.start(queue: Self.ioQueue)
 
         // Read the first bytes, then finish the HTTP request framing before
         // protocol detection. Codex OTel POSTs can be hundreds of KB; handing
@@ -364,6 +373,10 @@ final class WebSocketConnection: Hashable, Sendable {
     private let sendLock = NSLock()
     nonisolated(unsafe) private var _inFlightSends = 0
     private static let maxInFlightSends = 64
+    /// A peer that stays saturated this long is dead or suspended, not slow —
+    /// cancel it so it reconnects cleanly instead of dropping frames forever.
+    private static let saturationEvictAfterSec: TimeInterval = 30
+    nonisolated(unsafe) private var _saturatedSince: Date?
 
     var isDisconnected: Bool {
         disconnectedLock.lock()
@@ -449,11 +462,22 @@ final class WebSocketConnection: Hashable, Sendable {
     func send(_ data: Data) {
         sendLock.lock()
         if _inFlightSends >= Self.maxInFlightSends {
+            let now = Date()
+            let since = _saturatedSince ?? now
+            _saturatedSince = since
             sendLock.unlock()
-            DaemonLogger.shared.debug("WS", "Send queue saturated (\(Self.maxInFlightSends) in flight) — dropping frame for slow client \(id)")
+            if now.timeIntervalSince(since) > Self.saturationEvictAfterSec {
+                // Cancel only — the receive loop surfaces the close through the
+                // normal error path, so onClose/cleanup still fires exactly once.
+                DaemonLogger.shared.info("WS: Client \(id) saturated for >\(Int(Self.saturationEvictAfterSec))s — evicting")
+                connection.cancel()
+            } else {
+                DaemonLogger.shared.debug("WS", "Send queue saturated (\(Self.maxInFlightSends) in flight) — dropping frame for slow client \(id)")
+            }
             return
         }
         _inFlightSends += 1
+        _saturatedSince = nil
         sendLock.unlock()
 
         let frame = Self.buildFrame(opcode: 0x1, payload: data)

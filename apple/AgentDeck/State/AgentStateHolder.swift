@@ -660,37 +660,41 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     // MARK: - State Update
 
     private func handleStateUpdate(_ e: StateUpdateEvent) {
+        // Build the update on a local copy and assign once at the end: `state`
+        // is @Published, so field-by-field writes fired ~40 objectWillChange
+        // publishes (each a full SwiftUI invalidation) per state_update.
+        var s = state
         // Null-coalescing: only update fields that are present
-        state.state = AgentConnectionState(rawValue: e.state) ?? state.state
-        if let pm = e.permissionMode { state.permissionMode = PermissionMode(rawValue: pm) ?? state.permissionMode }
-        state.agentType = e.agentType ?? state.agentType
-        if let sid = e.sessionId { state.sessionId = sid }
+        s.state = AgentConnectionState(rawValue: e.state) ?? s.state
+        if let pm = e.permissionMode { s.permissionMode = PermissionMode(rawValue: pm) ?? s.permissionMode }
+        s.agentType = e.agentType ?? s.agentType
+        if let sid = e.sessionId { s.sessionId = sid }
         if let focusedSessionId = e.focusedSessionId {
-            state.focusedSessionId = focusedSessionId.isEmpty ? nil : focusedSessionId
+            s.focusedSessionId = focusedSessionId.isEmpty ? nil : focusedSessionId
         }
-        state.agentCapabilities = e.agentCapabilities ?? state.agentCapabilities
-        state.currentTool = e.currentTool ?? state.currentTool
-        state.toolInput = e.toolInput ?? state.toolInput
-        state.toolProgress = e.toolProgress ?? state.toolProgress
-        state.projectName = e.projectName ?? state.projectName
-        state.modelName = e.modelName ?? state.modelName
-        state.effortLevel = e.effortLevel ?? state.effortLevel
-        if let bt = e.billingType { state.billingType = BillingType(rawValue: bt) ?? state.billingType }
-        if let opts = e.options { state.options = opts }
-        if let pt = e.promptType { state.promptType = PromptType(rawValue: pt) }
-        state.question = e.question ?? state.question
-        state.navigable = e.navigable ?? state.navigable
-        state.cursorIndex = e.cursorIndex ?? state.cursorIndex
-        state.suggestedPrompt = e.suggestedPrompt ?? state.suggestedPrompt
-        if let mc = e.modelCatalog { state.modelCatalog = mc }
-        state.sessionStatus = e.sessionStatus ?? state.sessionStatus
-        state.remoteUrl = e.remoteUrl ?? state.remoteUrl
-        state.pairingUrl = e.pairingUrl ?? state.pairingUrl
-        state.workerSessionCount = e.workerSessionCount ?? state.workerSessionCount
-        if let os = e.ollamaStatus { state.ollamaStatus = os }
-        state.mlxModels = e.mlxModels ?? state.mlxModels
+        s.agentCapabilities = e.agentCapabilities ?? s.agentCapabilities
+        s.currentTool = e.currentTool ?? s.currentTool
+        s.toolInput = e.toolInput ?? s.toolInput
+        s.toolProgress = e.toolProgress ?? s.toolProgress
+        s.projectName = e.projectName ?? s.projectName
+        s.modelName = e.modelName ?? s.modelName
+        s.effortLevel = e.effortLevel ?? s.effortLevel
+        if let bt = e.billingType { s.billingType = BillingType(rawValue: bt) ?? s.billingType }
+        if let opts = e.options { s.options = opts }
+        if let pt = e.promptType { s.promptType = PromptType(rawValue: pt) }
+        s.question = e.question ?? s.question
+        s.navigable = e.navigable ?? s.navigable
+        s.cursorIndex = e.cursorIndex ?? s.cursorIndex
+        s.suggestedPrompt = e.suggestedPrompt ?? s.suggestedPrompt
+        if let mc = e.modelCatalog { s.modelCatalog = mc }
+        s.sessionStatus = e.sessionStatus ?? s.sessionStatus
+        s.remoteUrl = e.remoteUrl ?? s.remoteUrl
+        s.pairingUrl = e.pairingUrl ?? s.pairingUrl
+        s.workerSessionCount = e.workerSessionCount ?? s.workerSessionCount
+        if let os = e.ollamaStatus { s.ollamaStatus = os }
+        s.mlxModels = e.mlxModels ?? s.mlxModels
         if let subscriptions = e.subscriptions {
-            state.subscriptions = subscriptions
+            s.subscriptions = subscriptions
         }
         let sawCodexAuthField = e.codexAuthMode != nil
             || e.codexWebAuthConnected != nil
@@ -698,43 +702,43 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
             || e.codexAccountId != nil
             || e.codexSubscriptionActiveUntil != nil
             || e.codexLastRefreshAt != nil
-        state.codexAuthMode = e.codexAuthMode ?? state.codexAuthMode
-        state.codexWebAuthConnected = e.codexWebAuthConnected ?? state.codexWebAuthConnected
-        state.codexPlanType = e.codexPlanType ?? state.codexPlanType
-        state.codexAccountId = e.codexAccountId ?? state.codexAccountId
-        state.codexSubscriptionActiveUntil = e.codexSubscriptionActiveUntil ?? state.codexSubscriptionActiveUntil
-        state.codexLastRefreshAt = e.codexLastRefreshAt ?? state.codexLastRefreshAt
+        s.codexAuthMode = e.codexAuthMode ?? s.codexAuthMode
+        s.codexWebAuthConnected = e.codexWebAuthConnected ?? s.codexWebAuthConnected
+        s.codexPlanType = e.codexPlanType ?? s.codexPlanType
+        s.codexAccountId = e.codexAccountId ?? s.codexAccountId
+        s.codexSubscriptionActiveUntil = e.codexSubscriptionActiveUntil ?? s.codexSubscriptionActiveUntil
+        s.codexLastRefreshAt = e.codexLastRefreshAt ?? s.codexLastRefreshAt
         if e.subscriptions == nil {
-            reconcileCodexSubscriptionFallback(clearWhenUnavailable: sawCodexAuthField)
+            reconcileCodexSubscriptionFallback(clearWhenUnavailable: sawCodexAuthField, state: &s)
         }
-        state.antigravityStatus = e.antigravityStatus ?? state.antigravityStatus
-        state.gatewayAvailable = e.gatewayAvailable ?? state.gatewayAvailable
-        state.gatewayConnected = e.gatewayConnected ?? state.gatewayConnected
-        state.gatewayHasError = e.gatewayHasError ?? state.gatewayHasError
+        s.antigravityStatus = e.antigravityStatus ?? s.antigravityStatus
+        s.gatewayAvailable = e.gatewayAvailable ?? s.gatewayAvailable
+        s.gatewayConnected = e.gatewayConnected ?? s.gatewayConnected
+        s.gatewayHasError = e.gatewayHasError ?? s.gatewayHasError
         if let gatewayAuthStatus = e.gatewayAuthStatus {
-            state.gatewayAuthStatus = gatewayAuthStatus
-            state.gatewayAuthRequestId = e.gatewayAuthRequestId
-            state.gatewayAuthMessage = e.gatewayAuthMessage
+            s.gatewayAuthStatus = gatewayAuthStatus
+            s.gatewayAuthRequestId = e.gatewayAuthRequestId
+            s.gatewayAuthMessage = e.gatewayAuthMessage
         }
-        state.gatewayDeviceId = e.gatewayDeviceId ?? state.gatewayDeviceId
-        state.daemonPort = e.daemonPort ?? state.daemonPort
-        state.mlxModelCatalog = e.mlxModelCatalog ?? state.mlxModelCatalog
-        state.voiceAssistantState = e.voiceAssistantState ?? state.voiceAssistantState
-        state.voiceAssistantText = e.voiceAssistantText  // null when idle, no fallback
-        state.voiceAssistantResponseText = e.voiceAssistantResponseText  // null when idle
-        if let mh = e.moduleHealth { state.moduleHealth = mh }
+        s.gatewayDeviceId = e.gatewayDeviceId ?? s.gatewayDeviceId
+        s.daemonPort = e.daemonPort ?? s.daemonPort
+        s.mlxModelCatalog = e.mlxModelCatalog ?? s.mlxModelCatalog
+        s.voiceAssistantState = e.voiceAssistantState ?? s.voiceAssistantState
+        s.voiceAssistantText = e.voiceAssistantText  // null when idle, no fallback
+        s.voiceAssistantResponseText = e.voiceAssistantResponseText  // null when idle
+        if let mh = e.moduleHealth { s.moduleHealth = mh }
 
         // OpenClaw Gateway provides its own rich timeline entries via timeline_event.
         // Suppress the StateTimelineGenerator fallback ("Prompt sent" etc.) as soon
         // as the gateway is confirmed connected so the generator doesn't race ahead
         // of the first timeline_event from the adapter.
-        if state.gatewayConnected == true {
+        if s.gatewayConnected == true {
             timelineGenerator.receivingBridgeTimeline = true
         }
 
         // Local timeline generation (when bridge doesn't provide rich timeline)
         timelineGenerator.onStateUpdate(
-            newState: state.state,
+            newState: s.state,
             agentType: e.agentType,
             currentTool: e.currentTool,
             toolInput: e.toolInput,
@@ -745,115 +749,123 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         timelineVersion += 1
 
         // Clear tool info on idle
-        if state.state == .idle {
-            state.currentTool = nil
-            state.toolInput = nil
-            state.toolProgress = nil
+        if s.state == .idle {
+            s.currentTool = nil
+            s.toolInput = nil
+            s.toolProgress = nil
         }
 
         // Clear options when not awaiting
-        if !state.state.isAwaiting {
-            state.options = []
-            state.question = nil
-            state.promptType = nil
+        if !s.state.isAwaiting {
+            s.options = []
+            s.question = nil
+            s.promptType = nil
         }
+
+        state = s
     }
 
     // MARK: - Usage Update
 
     private func handleUsageUpdate(_ e: UsageEvent) {
-        state.sessionDurationSec = e.sessionDurationSec ?? state.sessionDurationSec
-        state.inputTokens = e.inputTokens ?? state.inputTokens
-        state.outputTokens = e.outputTokens ?? state.outputTokens
-        state.toolCalls = e.toolCalls ?? state.toolCalls
-        state.estimatedCostUsd = e.estimatedCostUsd ?? state.estimatedCostUsd
-        state.sessionPercent = e.sessionPercent ?? state.sessionPercent
-        state.costSpent = e.costSpent ?? state.costSpent
-        state.costLimit = e.costLimit ?? state.costLimit
-        state.resetTime = e.resetTime ?? state.resetTime
-        state.resetDate = e.resetDate ?? state.resetDate
+        // Local copy + single assignment — same @Published fan-out rationale as
+        // handleStateUpdate.
+        var s = state
+        s.sessionDurationSec = e.sessionDurationSec ?? s.sessionDurationSec
+        s.inputTokens = e.inputTokens ?? s.inputTokens
+        s.outputTokens = e.outputTokens ?? s.outputTokens
+        s.toolCalls = e.toolCalls ?? s.toolCalls
+        s.estimatedCostUsd = e.estimatedCostUsd ?? s.estimatedCostUsd
+        s.sessionPercent = e.sessionPercent ?? s.sessionPercent
+        s.costSpent = e.costSpent ?? s.costSpent
+        s.costLimit = e.costLimit ?? s.costLimit
+        s.resetTime = e.resetTime ?? s.resetTime
+        s.resetDate = e.resetDate ?? s.resetDate
         // Save previous values for trend indicators before overwriting
-        if e.fiveHourPercent != nil { state.previousFiveHourPercent = state.fiveHourPercent }
-        if e.sevenDayPercent != nil { state.previousSevenDayPercent = state.sevenDayPercent }
+        if e.fiveHourPercent != nil { s.previousFiveHourPercent = s.fiveHourPercent }
+        if e.sevenDayPercent != nil { s.previousSevenDayPercent = s.sevenDayPercent }
         // When upstream signals stale (no live source could produce a fresh
         // number) clear the displayed values entirely instead of retaining
         // the last-seen ones — a stale number in the UI is the worst of both
         // worlds (looks authoritative, but isn't). Downstream surfaces then
         // naturally collapse their usage regions on nil.
         if e.usageStale == true {
-            state.fiveHourPercent = nil
-            state.sevenDayPercent = nil
-            state.fiveHourResetsAt = nil
-            state.sevenDayResetsAt = nil
+            s.fiveHourPercent = nil
+            s.sevenDayPercent = nil
+            s.fiveHourResetsAt = nil
+            s.sevenDayResetsAt = nil
         } else {
-            state.fiveHourPercent = e.fiveHourPercent ?? state.fiveHourPercent
-            state.sevenDayPercent = e.sevenDayPercent ?? state.sevenDayPercent
-            state.fiveHourResetsAt = e.fiveHourResetsAt ?? state.fiveHourResetsAt
-            state.sevenDayResetsAt = e.sevenDayResetsAt ?? state.sevenDayResetsAt
+            s.fiveHourPercent = e.fiveHourPercent ?? s.fiveHourPercent
+            s.sevenDayPercent = e.sevenDayPercent ?? s.sevenDayPercent
+            s.fiveHourResetsAt = e.fiveHourResetsAt ?? s.fiveHourResetsAt
+            s.sevenDayResetsAt = e.sevenDayResetsAt ?? s.sevenDayResetsAt
         }
-        state.extraUsageEnabled = e.extraUsageEnabled ?? state.extraUsageEnabled
-        state.extraUsageMonthlyLimit = e.extraUsageMonthlyLimit ?? state.extraUsageMonthlyLimit
-        state.extraUsageUsedCredits = e.extraUsageUsedCredits ?? state.extraUsageUsedCredits
-        state.extraUsageUtilization = e.extraUsageUtilization ?? state.extraUsageUtilization
-        state.oauthConnected = e.oauthConnected ?? state.oauthConnected
-        if let os = e.ollamaStatus { state.ollamaStatus = os }
-        state.usageStale = e.usageStale ?? state.usageStale
+        s.extraUsageEnabled = e.extraUsageEnabled ?? s.extraUsageEnabled
+        s.extraUsageMonthlyLimit = e.extraUsageMonthlyLimit ?? s.extraUsageMonthlyLimit
+        s.extraUsageUsedCredits = e.extraUsageUsedCredits ?? s.extraUsageUsedCredits
+        s.extraUsageUtilization = e.extraUsageUtilization ?? s.extraUsageUtilization
+        s.oauthConnected = e.oauthConnected ?? s.oauthConnected
+        if let os = e.ollamaStatus { s.ollamaStatus = os }
+        s.usageStale = e.usageStale ?? s.usageStale
         let sawCodexAuthField = e.codexAuthMode != nil
             || e.codexWebAuthConnected != nil
             || e.codexPlanType != nil
             || e.codexAccountId != nil
             || e.codexSubscriptionActiveUntil != nil
             || e.codexLastRefreshAt != nil
-        state.codexAuthMode = e.codexAuthMode ?? state.codexAuthMode
-        state.codexWebAuthConnected = e.codexWebAuthConnected ?? state.codexWebAuthConnected
-        state.codexPlanType = e.codexPlanType ?? state.codexPlanType
-        state.codexAccountId = e.codexAccountId ?? state.codexAccountId
-        state.codexSubscriptionActiveUntil = e.codexSubscriptionActiveUntil ?? state.codexSubscriptionActiveUntil
-        state.codexLastRefreshAt = e.codexLastRefreshAt ?? state.codexLastRefreshAt
-        state.codexRateLimits = e.codexRateLimits ?? state.codexRateLimits
-        state.modelCatalog = e.modelCatalog ?? state.modelCatalog
-        state.mlxModels = e.mlxModels ?? state.mlxModels
-        state.mlxModelCatalog = e.mlxModelCatalog ?? state.mlxModelCatalog
+        s.codexAuthMode = e.codexAuthMode ?? s.codexAuthMode
+        s.codexWebAuthConnected = e.codexWebAuthConnected ?? s.codexWebAuthConnected
+        s.codexPlanType = e.codexPlanType ?? s.codexPlanType
+        s.codexAccountId = e.codexAccountId ?? s.codexAccountId
+        s.codexSubscriptionActiveUntil = e.codexSubscriptionActiveUntil ?? s.codexSubscriptionActiveUntil
+        s.codexLastRefreshAt = e.codexLastRefreshAt ?? s.codexLastRefreshAt
+        s.codexRateLimits = e.codexRateLimits ?? s.codexRateLimits
+        s.modelCatalog = e.modelCatalog ?? s.modelCatalog
+        s.mlxModels = e.mlxModels ?? s.mlxModels
+        s.mlxModelCatalog = e.mlxModelCatalog ?? s.mlxModelCatalog
         if let subscriptions = e.subscriptions {
-            state.subscriptions = subscriptions
+            s.subscriptions = subscriptions
         } else {
-            reconcileCodexSubscriptionFallback(clearWhenUnavailable: sawCodexAuthField)
+            reconcileCodexSubscriptionFallback(clearWhenUnavailable: sawCodexAuthField, state: &s)
         }
-        state.antigravityStatus = e.antigravityStatus ?? state.antigravityStatus
+        s.antigravityStatus = e.antigravityStatus ?? s.antigravityStatus
 
-        state.adminApiKeyPresent = e.adminApiKeyPresent ?? state.adminApiKeyPresent
-        state.adminApiTodayInputTokens = e.adminApiTodayInputTokens ?? state.adminApiTodayInputTokens
-        state.adminApiTodayOutputTokens = e.adminApiTodayOutputTokens ?? state.adminApiTodayOutputTokens
-        state.adminApiTodayCacheReadTokens = e.adminApiTodayCacheReadTokens ?? state.adminApiTodayCacheReadTokens
-        state.adminApiTodayCacheCreationTokens = e.adminApiTodayCacheCreationTokens ?? state.adminApiTodayCacheCreationTokens
-        state.adminApiMonthInputTokens = e.adminApiMonthInputTokens ?? state.adminApiMonthInputTokens
-        state.adminApiMonthOutputTokens = e.adminApiMonthOutputTokens ?? state.adminApiMonthOutputTokens
-        state.adminApiMonthCacheReadTokens = e.adminApiMonthCacheReadTokens ?? state.adminApiMonthCacheReadTokens
-        state.adminApiMonthCacheCreationTokens = e.adminApiMonthCacheCreationTokens ?? state.adminApiMonthCacheCreationTokens
-        state.adminApiTopModels = e.adminApiTopModels ?? state.adminApiTopModels
-        state.adminApiFetchedAt = e.adminApiFetchedAt ?? state.adminApiFetchedAt
-        state.adminApiStale = e.adminApiStale ?? state.adminApiStale
+        s.adminApiKeyPresent = e.adminApiKeyPresent ?? s.adminApiKeyPresent
+        s.adminApiTodayInputTokens = e.adminApiTodayInputTokens ?? s.adminApiTodayInputTokens
+        s.adminApiTodayOutputTokens = e.adminApiTodayOutputTokens ?? s.adminApiTodayOutputTokens
+        s.adminApiTodayCacheReadTokens = e.adminApiTodayCacheReadTokens ?? s.adminApiTodayCacheReadTokens
+        s.adminApiTodayCacheCreationTokens = e.adminApiTodayCacheCreationTokens ?? s.adminApiTodayCacheCreationTokens
+        s.adminApiMonthInputTokens = e.adminApiMonthInputTokens ?? s.adminApiMonthInputTokens
+        s.adminApiMonthOutputTokens = e.adminApiMonthOutputTokens ?? s.adminApiMonthOutputTokens
+        s.adminApiMonthCacheReadTokens = e.adminApiMonthCacheReadTokens ?? s.adminApiMonthCacheReadTokens
+        s.adminApiMonthCacheCreationTokens = e.adminApiMonthCacheCreationTokens ?? s.adminApiMonthCacheCreationTokens
+        s.adminApiTopModels = e.adminApiTopModels ?? s.adminApiTopModels
+        s.adminApiFetchedAt = e.adminApiFetchedAt ?? s.adminApiFetchedAt
+        s.adminApiStale = e.adminApiStale ?? s.adminApiStale
+        state = s
     }
 
-    private func reconcileCodexSubscriptionFallback(clearWhenUnavailable: Bool) {
-        let nonChatGptSubscriptions = state.subscriptions.filter {
+    /// Operates on the caller's local working copy (`inout`) so the batched
+    /// single-assignment in handleStateUpdate/handleUsageUpdate stays intact.
+    private func reconcileCodexSubscriptionFallback(clearWhenUnavailable: Bool, state s: inout DashboardState) {
+        let nonChatGptSubscriptions = s.subscriptions.filter {
             !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("chatgpt")
         }
         guard let name = Self.chatGptSubscriptionName(
-            planType: state.codexPlanType,
-            authMode: state.codexAuthMode,
-            webAuthConnected: state.codexWebAuthConnected,
-            until: state.codexSubscriptionActiveUntil
+            planType: s.codexPlanType,
+            authMode: s.codexAuthMode,
+            webAuthConnected: s.codexWebAuthConnected,
+            until: s.codexSubscriptionActiveUntil
         ) else {
             if clearWhenUnavailable {
-                state.subscriptions = nonChatGptSubscriptions
+                s.subscriptions = nonChatGptSubscriptions
             }
             return
         }
 
         var subscriptions = nonChatGptSubscriptions
-        subscriptions.insert(SubscriptionInfo(name: name, until: state.codexSubscriptionActiveUntil), at: 0)
-        state.subscriptions = subscriptions
+        subscriptions.insert(SubscriptionInfo(name: name, until: s.codexSubscriptionActiveUntil), at: 0)
+        s.subscriptions = subscriptions
     }
 
     private static func chatGptSubscriptionName(
