@@ -1,6 +1,8 @@
-# AgentDeck App Store Screenshots
+# AgentDeck historical screenshot archive
 
-App Store 제출용 스크린샷 모음입니다.
+> Do not upload files from this directory to App Store Connect. The validated upload set now lives in `apple/appstore-submission/screenshots/`. This directory is retained only as raw capture history.
+
+과거 캡처 원본 모음입니다. 일부 파일은 중복 온보딩 화면이거나 브라우저·터미널·개발자 데스크톱을 포함하며, macOS 16:10 규격에도 맞지 않습니다.
 
 ## 폴더 구조
 

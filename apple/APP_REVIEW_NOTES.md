@@ -4,15 +4,15 @@ _Paste the relevant sections into App Store Connect's "Notes" field when submitt
 
 ## What AgentDeck does
 
-AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding agents (Claude Code, opt-in Codex CLI lifecycle hooks, opt-in OpenCode server monitoring, and OpenClaw Gateway sessions). It shows live session status, tool activity, and quality scores on the Mac, and — via the free iOS companion app — on an iPad or iPhone used as a secondary display. When an agent genuinely waits for the user's decision (Claude Code reports a permission prompt via its Notification hook), the dashboard marks the session as "needs attention" and posts a local user notification — display-only; the user answers in their own terminal.
+AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding agents (Claude Code, opt-in Codex lifecycle hooks, opt-in OpenCode local-server monitoring, and OpenClaw Gateway sessions). The submitted macOS app's built-in Swift daemon owns the dashboard server, hook ingestion, session state, local-network pairing, APME Layer 2 evaluation, and native hardware modules. It shows live status, tool activity, and quality scores on Mac and on the paired iOS companion. When an agent genuinely waits for a decision, AgentDeck posts a local display-only notification; the user answers in their own agent interface.
 
-**Works standalone on Mac.** All core features (dashboard, APME evaluation reports, Device Preview, Claude Code hook integration, and iOS pairing) work without any additional hardware or AgentDeck companion executable. Users run their AI agent in their own terminal; AgentDeck receives opt-in hook events.
+**Works standalone on Mac.** The review scope is a clean Mac running only the submitted Swift app. Dashboard, APME reports, the 17-target Device Preview, opt-in Claude/Codex observation, opt-in OpenCode/OpenClaw monitoring, and iOS pairing work without another AgentDeck executable. Users start their chosen agent independently and AgentDeck receives only the integrations they enable.
 
-**Optional hardware extensions** let power users drive the same state on Stream Deck+ keys, Ulanzi D200H Deck Docks (USB HID), ESP32 status displays (Wi-Fi), Divoom Pixoo matrix displays (Wi-Fi), and iDotMatrix / Divoom Timebox Mini LED displays (Bluetooth LE). Each integration is configurable from an in-app sheet — the user is never forced to open Terminal.
+**Optional hardware extensions** render the same state on Stream Deck+ (Elgato plugin), Ulanzi D200H (Ulanzi Studio plugin), supported ESP32 status displays (native serial/network), Divoom Pixoo (network), and iDotMatrix / Divoom Timebox Mini (native CoreBluetooth). Hardware is not required.
 
-**Advanced developer integrations** — Android device bridging via ADB, PTY-level launch for Codex/OpenCode, and APME Layer 1 deterministic scoring (git/pnpm introspection) — are not bundled in AgentDeck, and the App Store app never installs, downloads, runs, or prompts the user to obtain them. The UI panels that visualize these integrations are **conditional, read-only views** of data broadcast by a separately-distributed Node.js CLI daemon that a developer may independently install via npm. AgentDeck detects that daemon by attempting to bind `127.0.0.1:9120` at launch: if the port is free, AgentDeck itself becomes the server and those panels never appear; if the port is already held by the user-run daemon, AgentDeck connects as a WebSocket client and renders additional panels purely from the data received. No installer flow, App Store-visible link, or copy in AgentDeck asks the user to obtain the external daemon. `docs/appstore-feature-matrix.md` in the public repository is the source of truth for what ships in this binary vs. what is only reachable via the optional developer toolchain.
+The product page and screenshots describe only this standalone Swift-daemon experience. Features that are not implemented by the submitted Swift app are not claimed and are not part of the review flow.
 
-The app is sandboxed. All non-trivial entitlements below are used for local-network monitoring of agents the user is running themselves — no remote services, no third-party data collection.
+The app is sandboxed. Entitlements below support local monitoring and user-selected integrations. There is no analytics or advertising SDK. The optional Anthropic API evaluation backend is off by default and is disclosed in App Privacy; the default Foundation Models backend stays on-device.
 
 ## Network server rationale (port 9120+)
 
@@ -28,7 +28,7 @@ Used so the iOS companion can discover the Mac dashboard on the same LAN without
 
 ## Sandbox Data Container
 
-AgentDeck stores daemon state (session registry, auth token, cached usage metrics, APME evaluation SQLite database) inside the app's own sandbox container at `Application Support/AgentDeck`. The build does not request the optional App Groups entitlement because the submitted app has no helper, extension, or login item that needs shared container access. No user-identifiable data leaves the device.
+AgentDeck stores daemon state (session registry, auth token, cached usage metrics, APME evaluation SQLite database) inside the app's own sandbox container at `Application Support/AgentDeck`. The build does not request the optional App Groups entitlement because the submitted app has no helper, extension, or login item. Data stays local unless the user explicitly selects a disclosed network integration such as Anthropic API evaluation.
 
 ## Hook installation (Claude Code settings file)
 
@@ -69,7 +69,7 @@ Claude Code hooks run `python3` / `curl` at the user's shell prompt, in their ow
 
 ### Bundled helpers
 
-The App Store archive contains no `Contents/Helpers/`, no `Contents/Resources/node`, no `Contents/Resources/agentdeck-runtime`, and no `Contents/Resources/bridge/cli.js`. The sole binary is `Contents/MacOS/AgentDeck`. Android ADB bridging, APME Layer 1 deterministic git/pnpm scoring, and PTY-level agent parsing are outside the reviewed app and are not required for the App Store experience.
+The App Store archive contains no `Contents/Helpers/`, no `Contents/Resources/node`, no `Contents/Resources/agentdeck-runtime`, and no `Contents/Resources/bridge/cli.js`. The sole binary is `Contents/MacOS/AgentDeck`; every feature claimed on the product page is implemented by that Swift app and its sandbox-approved frameworks.
 
 ### OpenClaw Gateway integration
 
@@ -92,11 +92,9 @@ OpenCode session monitoring in the App Store build is an **opt-in, read-only loc
 - The connection consumes OpenCode's own read-only event stream (`GET /global/event`, Server-Sent Events) and renders session rows (project, working/idle, current tool). When OpenCode reports a permission request, AgentDeck shows a display-only "needs attention" state — the user responds in their own OpenCode terminal; AgentDeck sends no commands to the server.
 - Reviewers without OpenCode installed see "Not configured" with the toggle off; the integration is fully inert. No OpenCode-related copy in the App Store app prompts the user to install or launch anything.
 
-PTY-level OpenCode session execution remains outside the App Store build (optional developer bridge, described at the top of these notes).
-
 ### Antigravity (usage only in the App Store build)
 
-Antigravity coding-session monitoring is also intentionally **not** part of the App Store build. Antigravity has hook/plugin extension surfaces, but AgentDeck does not install hooks, spawn the Antigravity app/CLI, enumerate the user's real home directory, or scan processes from the sandboxed app. In the App Store build, Antigravity is limited to a user-approved local status integration: the user explicitly selects the Antigravity `state.vscdb` file through an `NSOpenPanel`, AgentDeck stores a security-scoped bookmark to that one file, and the dashboard displays plan/credit information only when parseable. Coding-session creatures for Antigravity are available only through the optional Node.js developer bridge/CLI daemon path, where passive process discovery is allowed outside the App Store sandbox. No Antigravity-related copy in the App Store app prompts the user to install or launch anything.
+Antigravity coding-session monitoring is intentionally **not** claimed by the submitted app. Its only App Store feature is a user-approved local status integration: the user explicitly selects the Antigravity `state.vscdb` file through an `NSOpenPanel`, AgentDeck stores a security-scoped bookmark to that one file, and the dashboard displays plan/credit information only when parseable. AgentDeck does not install Antigravity hooks, spawn another app, enumerate the user's real home directory, or scan processes.
 
 ### Codex observation path
 
@@ -113,7 +111,7 @@ The Settings panel offers a "Remove" button that strips AgentDeck's fenced block
 
 Separately, the Codex Integrations row offers an optional **usage display** that mirrors the Antigravity `state.vscdb` pattern exactly: the user explicitly picks their `~/.codex` folder through an `NSOpenPanel` (`canChooseDirectories`, starting at `~/.codex` resolved via `getpwuid(getuid()).pw_dir`, no preselection, no enumeration before selection), AgentDeck stores an app-scoped security-scoped bookmark to that one folder, and reads are performed inside a `startAccessingSecurityScopedResource()` / `defer stop` pair under the existing `com.apple.security.files.user-selected.read-write` entitlement. From that folder AgentDeck reads only `auth.json` (ChatGPT plan + subscription expiry) and the trailing bytes of the newest `sessions/.../rollout-*.jsonl` file (the `rate_limits` snapshot Codex itself writes — a 5h/7d-style usage gauge). No OpenAI/ChatGPT network endpoint is contacted for this; it is the user's own local files, parsed with `JSONSerialization`. There is no home-relative-path entitlement and no subprocess; when the user has not granted the folder the row simply shows the plan/usage region collapsed. A "Remove access" button revokes the bookmark.
 
-Codex and OpenCode session execution from inside AgentDeck (PTY launch) is out of scope for the App Store build — users start their CLI themselves.
+AgentDeck observes Codex and OpenCode only through the opt-in Swift paths described above; users start their chosen agent independently.
 
 ## APME evaluation module
 
@@ -149,17 +147,9 @@ No account required. To see the app's features:
 4. Click "Pair iPad" to show a QR code the iOS companion app can scan.
 5. Open Settings → Hardware Setup to see the in-app flows for ESP32 and Pixoo provisioning (no subprocess calls; writes serial config directly).
 
-## Reviewing the conditional UI (optional)
+## Standalone review scope
 
-The "Advanced developer integrations" panels described above do **not** appear during a normal review. Reviewers testing on a clean macOS install see only the standalone product — Device Preview shows the 17 built-in targets (Stream Deck, D200H, iPad, InkDeck e-ink, ESP32 boards, Ulanzi TC001, Pixoo, Timebox, iDotMatrix, and terminal preview); the menu bar shows no Claude-subscription quota gauge. This is the intended out-of-the-box experience and is fully functional.
-
-If a reviewer wishes to independently verify that those conditional panels are purely read-only WebSocket visualizations and not subprocess/file-I/O paths hiding in the shipped app, the optional reproduction path is:
-
-1. Clone the public AgentDeck repository (link in the App Store description).
-2. Follow the README's developer-install instructions to run `agentdeck daemon start` in a separate Terminal. This step is entirely outside the App Store app — it is the reviewer's own shell spawning a Node.js process.
-3. Launch the App Store build of AgentDeck Dashboard. The Device Preview screen now lists additional rows (e.g. "Android Tablet", "E-ink Mono (CremaS)"); the menu bar surfaces the Claude subscription quota gauge.
-
-At no point does AgentDeck itself install, download, or launch anything. The reviewer starts the external daemon in their own shell and observes the App Store app render the data that daemon broadcasts over `ws://127.0.0.1:9120`. The CI script `apple/scripts/verify-appstore-archive.sh` fails the build if the shipped Mach-O ever reintroduces a subprocess spawn path, a bundled Node.js/adb binary, a Contents/Helpers directory, or a home-relative-path entitlement.
+Review on a clean Mac with only AgentDeck installed. The app starts its own Swift dashboard server and exposes the complete App Store experience described above. No external AgentDeck process, developer bridge, or terminal setup is part of the review instructions. The CI script `apple/scripts/verify-appstore-archive.sh` fails the build if the shipped app contains a subprocess spawn path, bundled helper executable, or home-relative-path entitlement.
 
 ## Contact
 

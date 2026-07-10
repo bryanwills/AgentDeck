@@ -221,7 +221,7 @@
 
   <section id="privacy" class="policy" aria-labelledby="privacy-title">
     <h2 id="privacy-title">Privacy Policy</h2>
-    <p><strong>Effective date:</strong> May 24, 2026</p>
+    <p><strong>Effective date:</strong> July 10, 2026</p>
     <p>AgentDeck Dashboard is a local monitoring and evaluation app for AI coding agent sessions. It does not require an account,
       does not show ads, does not sell personal data, and does not operate a remote analytics service.</p>
     <h3>Data Stored On Device</h3>
@@ -231,6 +231,12 @@
     <p>Users may opt in to local integrations such as Claude Code hooks, Codex lifecycle hooks, OpenClaw Gateway pairing,
       iPhone/iPad dashboard pairing, voice input, ESP32, Pixoo, or D200H hardware support. User-selected hook configuration files
       are accessed only after explicit file picker consent.</p>
+    <h3>Optional Remote Model Services</h3>
+    <p>If the user explicitly selects the Anthropic API evaluation backend and provides their own API key, AgentDeck sends the
+      agent turn content needed for evaluation to Anthropic. Anthropic may process and retain that content and associated API
+      interaction data under the user's Anthropic agreement and privacy terms. This integration is off by default, is used only
+      for app functionality, is linked to the user's Anthropic account through their API credential, and is never used by
+      AgentDeck for tracking, advertising, or marketing. Users can instead keep the on-device Foundation Models backend selected.</p>
     <h3>Network, Voice, and Credentials</h3>
     <p>Local network connections are used for same-device hooks and paired iPhone/iPad dashboard display. Optional local services
       are contacted only when configured by the user. Voice input uses Apple's speech APIs for the requested command flow. Optional
