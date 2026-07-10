@@ -437,6 +437,7 @@ static void uiTask(void* param) {
 
         // Read view state
         lockState();
+        g_state.applyPendingSessionClear(now);
         bool connected = g_state.wsConnected || Net::serialConnected();
         unlockState();
 

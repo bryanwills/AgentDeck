@@ -53,6 +53,11 @@ constexpr size_t PROTOCOL_MAX_MSG_BYTES = 8192;
 constexpr size_t PROTOCOL_MAX_MSG_BYTES = 65536;
 #endif
 
+// A WiFi-only board can receive one transient empty sessions_list during daemon
+// resync/reconnect. Hold the last non-empty creature roster briefly, but clear it
+// quickly enough that real session shutdowns do not look stale.
+constexpr uint32_t SESSION_EMPTY_GRACE_MS = 2500;
+
 // ===== LVGL =====
 #ifndef BOARD_LED8X32
 constexpr uint32_t LVGL_TICK_MS        = 5;

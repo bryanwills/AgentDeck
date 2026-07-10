@@ -137,6 +137,8 @@ struct DashboardState {
     uint8_t opencodeCount;  // derived: opencode sessions alive
     uint8_t antigravityCount; // derived: antigravity sessions alive
     uint8_t crayfishCount;  // derived: openclaw sessions alive
+    bool sessionClearPending;       // empty sessions_list debounce in progress
+    uint32_t sessionClearPendingMs; // millis() when the empty list first arrived
     // Per-type display names (dedup-numbered). Sized to the session cap so they
     // safely cover every board's MAX_OCTOPUS/MAX_CLOUD/MAX_OPENCODE (≤8).
     char sessionNames[10][24]; // display names for octopus instances
@@ -199,6 +201,8 @@ struct DashboardState {
         orientationChanged = false;
         pendingLandscape = true;
         pendingRotation = -1;
+        sessionClearPending = false;
+        sessionClearPendingMs = 0;
         // Sentinel -1.0f = "no data" (0 is a valid usage value)
         fiveHourPercent = -1.0f;
         sevenDayPercent = -1.0f;
@@ -226,12 +230,7 @@ struct DashboardState {
         question[0] = '\0';
         promptType[0] = '\0';
         optionCount = 0;
-        sessionCount = 0;
-        octopusCount = 0;
-        cloudCount = 0;
-        opencodeCount = 0;
-        antigravityCount = 0;
-        crayfishCount = 0;
+        clearSessions();
         gatewayAvailable = false;
         gatewayConnected = false;
         gatewayHasError = false;
@@ -248,6 +247,29 @@ struct DashboardState {
         antigravityPlan[0] = '\0';
         usageStale = true;
         updateCreatureStates();
+    }
+
+    void clearSessions() {
+        sessionClearPending = false;
+        sessionClearPendingMs = 0;
+        sessionCount = 0;
+        octopusCount = 0;
+        cloudCount = 0;
+        opencodeCount = 0;
+        antigravityCount = 0;
+        crayfishCount = 0;
+        memset(sessions, 0, sizeof(sessions));
+        memset(sessionNames, 0, sizeof(sessionNames));
+        memset(cloudNames, 0, sizeof(cloudNames));
+        memset(opencodeNames, 0, sizeof(opencodeNames));
+        memset(antigravityNames, 0, sizeof(antigravityNames));
+        updateCreatureStates();
+    }
+
+    void applyPendingSessionClear(uint32_t nowMs) {
+        if (!sessionClearPending) return;
+        if ((uint32_t)(nowMs - sessionClearPendingMs) < SESSION_EMPTY_GRACE_MS) return;
+        clearSessions();
     }
 
     // Derive creature states from agent state

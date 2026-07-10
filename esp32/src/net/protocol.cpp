@@ -277,7 +277,29 @@ static void handleSessionsList(JsonObject& obj) {
     JsonArray sessions = obj["sessions"].as<JsonArray>();
     // Cap 10 — keep in sync with sessions[10] (agent_state.h) and
     // SERIAL_SESSIONS_CAP (bridge/src/esp32-serial.ts).
-    g_state.sessionCount = min((int)sessions.size(), 10);
+    uint8_t incomingCount = min((int)sessions.size(), 10);
+    if (incomingCount == 0) {
+        if (g_state.sessionCount > 0) {
+            uint32_t nowMs = millis();
+            if (!g_state.sessionClearPending) {
+                g_state.sessionClearPending = true;
+                g_state.sessionClearPendingMs = nowMs;
+                unlockState();
+                return;
+            }
+            if ((uint32_t)(nowMs - g_state.sessionClearPendingMs) < SESSION_EMPTY_GRACE_MS) {
+                unlockState();
+                return;
+            }
+        }
+        g_state.clearSessions();
+        unlockState();
+        return;
+    }
+
+    g_state.sessionClearPending = false;
+    g_state.sessionClearPendingMs = 0;
+    g_state.sessionCount = incomingCount;
     g_state.octopusCount = 0;
     g_state.cloudCount = 0;
     g_state.opencodeCount = 0;
@@ -727,6 +749,12 @@ static void handleOtaChunk(JsonObject& obj) {
     const char* data = obj["data"] | "";
     if (!otaRx.active || strcmp(otaRx.otaId, otaId) != 0) {
         sendOtaError(otaId, "chunk", "no_active_update");
+        return;
+    }
+    if (seq + 1 == otaRx.nextSeq && offset < otaRx.written) {
+        // Host may resend the last chunk after a WiFi reconnect if the ack was
+        // lost after flash write completed. Treat that as idempotent.
+        sendOtaAck(otaId, "chunk", seq, offset, otaRx.written);
         return;
     }
     if (seq != otaRx.nextSeq || offset != otaRx.written) {
