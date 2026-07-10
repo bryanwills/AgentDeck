@@ -224,6 +224,11 @@ struct ModuleHealthState: Sendable {
     /// `client_register {clientType:"eink-device"}`. Same volunteer-roster model
     /// as Stream Deck: present only while the panel's WS is live.
     var eink: EinkHealth?
+    /// Android dashboard apps (tablet / e-ink launcher) that registered via
+    /// `client_register {clientType:"android-dashboard"}` over Wi-Fi WS.
+    /// Same volunteer-roster model; covers devices ADB never sees (Swift
+    /// daemon has no ADB, and WiFi-only tablets have no USB bridge).
+    var androidDashboards: AndroidDashboardHealth?
 }
 
 /// Shared shape for the BLE matrix panels (Timebox Mini, iDotMatrix). Both
@@ -262,6 +267,20 @@ struct EinkDeviceInfo: Sendable, Hashable {
     /// Native panel resolution as reported by the firmware (columns×rows pixels).
     var columns: Int?
     var rows: Int?
+}
+
+/// Android dashboard apps connected over Wi-Fi WS that registered as
+/// `clientType:"android-dashboard"`. Same volunteer-roster model as Stream Deck.
+struct AndroidDashboardHealth: Sendable {
+    var devices: [AndroidDashboardDeviceInfo] = []
+}
+
+struct AndroidDashboardDeviceInfo: Sendable, Hashable {
+    var id: String
+    var name: String
+    /// "tablet" | "eink" — how the app classified its own hardware
+    /// (EinkDetector). Kept as a String for forward compatibility.
+    var kind: String?
 }
 
 struct StreamDeckDeviceInfo: Sendable, Hashable {

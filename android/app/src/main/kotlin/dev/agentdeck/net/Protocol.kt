@@ -485,6 +485,17 @@ object PluginCommands {
 
     fun queryUsage(): String = """{"type":"query_usage"}"""
 
+    /**
+     * Announce this Android dashboard app to the daemon so its topology rail
+     * can render an Android row (volunteer-roster model like the Stream Deck
+     * plugin / XTeink `eink-device`; the daemon evicts it when this WS closes).
+     */
+    fun clientRegisterAndroidDashboard(id: String, name: String, kind: String): String {
+        val enc = { s: String -> Json.encodeToString(kotlinx.serialization.serializer<String>(), s) }
+        return """{"type":"client_register","clientType":"android-dashboard",""" +
+            """"devices":[{"id":${enc(id)},"name":${enc(name)},"kind":${enc(kind)}}]}"""
+    }
+
     fun switchMode(): String = """{"type":"switch_mode"}"""
 
     fun utility(action: String, value: Int? = null): String {

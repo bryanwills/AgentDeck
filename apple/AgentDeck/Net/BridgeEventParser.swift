@@ -163,6 +163,20 @@ enum BridgeEventParser {
             health.eink = EinkHealth(devices: einkDevices)
         }
 
+        if let ad = raw["androidDashboards"] as? [String: Any] ?? raw["android_dashboards"] as? [String: Any] {
+            var androidDevices: [AndroidDashboardDeviceInfo] = []
+            if let arr = ad["devices"] as? [[String: Any]] {
+                for d in arr {
+                    androidDevices.append(AndroidDashboardDeviceInfo(
+                        id: d["id"] as? String ?? "",
+                        name: d["name"] as? String ?? "",
+                        kind: d["kind"] as? String
+                    ))
+                }
+            }
+            health.androidDashboards = AndroidDashboardHealth(devices: androidDevices)
+        }
+
         if let serial = raw["serial"] as? [String: Any] {
             var boards: [SerialPortInfo] = []
             var ports: [String] = []

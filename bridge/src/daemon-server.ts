@@ -905,6 +905,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }
     return out;
   };
+  // Android dashboard apps (tablet / e-ink launcher) over Wi-Fi WS —
+  // `client_register{clientType:"android-dashboard"}`, same volunteer model.
+  const androidDashboardRegistrations = new Map<WebSocket, { devices: unknown[]; updatedAt: number }>();
+  const collectAndroidDashboards = (): unknown[] => {
+    const out: unknown[] = [];
+    for (const [ws, reg] of androidDashboardRegistrations) {
+      if (ws.readyState !== WebSocket.OPEN) { androidDashboardRegistrations.delete(ws); continue; }
+      for (const d of reg.devices) out.push(d);
+    }
+    return out;
+  };
 
   // ===== HTTP server =====
   const httpServer = createServer((req, res) => {
@@ -1725,6 +1736,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     if (einkDevices.length > 0) {
       modules.einkDevices = { available: true, devices: einkDevices };
     }
+    const androidDashboards = collectAndroidDashboards();
+    if (androidDashboards.length > 0) {
+      modules.androidDashboards = { available: true, devices: androidDashboards };
+    }
     const ulanziPluginConnected = core.wsServer.getUlanziClientCount() > 0;
     modules.d200h = {
       connected: ulanziPluginConnected,
@@ -2188,6 +2203,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       debug('daemon', `client_register eink-device devices=${devices.length}`);
       // Push a fresh state so the rail appears within one frame instead of on
       // the next periodic tick.
+      if (lastStateEvent && (lastStateEvent as { type?: string }).type === 'state_update') {
+        (lastStateEvent as unknown as Record<string, unknown>).moduleHealth = moduleHealthProvider();
+        core.wsServer.broadcast(lastStateEvent);
+      }
+      return true;
+    }
+    if (msg.type === 'client_register'
+        && (msg as { clientType?: unknown }).clientType === 'android-dashboard') {
+      // Android dashboard app volunteering its identity (tablet / e-ink
+      // launcher on Wi-Fi) so the topology can show an Android row even when
+      // the device is not ADB-bridged; drops on socket close.
+      const devices = Array.isArray((msg as { devices?: unknown }).devices)
+        ? (msg as { devices: unknown[] }).devices : [];
+      androidDashboardRegistrations.set(sender, { devices, updatedAt: Date.now() });
+      debug('daemon', `client_register android-dashboard devices=${devices.length}`);
       if (lastStateEvent && (lastStateEvent as { type?: string }).type === 'state_update') {
         (lastStateEvent as unknown as Record<string, unknown>).moduleHealth = moduleHealthProvider();
         core.wsServer.broadcast(lastStateEvent);

@@ -498,6 +498,7 @@ struct TopologyRail: View {
         if let serial = health.serial, !serial.connectedBoards.isEmpty { return true }
         if let sd = health.streamDeck, !sd.devices.isEmpty { return true }
         if let eink = health.eink, !eink.devices.isEmpty { return true }
+        if let ad = health.androidDashboards, !ad.devices.isEmpty { return true }
         return false
     }
 
@@ -736,51 +737,62 @@ struct TopologyRail: View {
     /// when an external desktop bridge pushes ADB device data.
     @ViewBuilder
     private func androidSection(health: ModuleHealthState) -> some View {
-        if let adb = health.adb {
-            let eInk = adb.classifiedDevices.filter { $0.deviceClass.hasPrefix("e-ink.") }
-            let tablets = adb.classifiedDevices.filter { $0.deviceClass == AdbDeviceClass.androidTablet.rawValue }
-            // Fallback "ADB" aggregate row: when we have a signal
-            // (available / lastError) but no per-device classification yet
-            // — e.g. older daemons or the 1-2s window before `getprop`
-            // completes for the first time.
-            let needsAggregate = adb.classifiedDevices.isEmpty
-                && (adb.available || !adb.devices.isEmpty || adb.lastError != nil)
+        // WiFi WS dashboard apps that self-registered via
+        // `client_register {clientType:"android-dashboard"}` — visible on both
+        // tiers (the Swift daemon has no ADB, and WiFi-only tablets have no
+        // USB bridge, so without this they had no row anywhere).
+        let wifiDashboards = health.androidDashboards?.devices ?? []
+        let adb = health.adb
+        let eInk = adb?.classifiedDevices.filter { $0.deviceClass.hasPrefix("e-ink.") } ?? []
+        let tablets = adb?.classifiedDevices.filter { $0.deviceClass == AdbDeviceClass.androidTablet.rawValue } ?? []
+        // Fallback "ADB" aggregate row: when we have a signal
+        // (available / lastError) but no per-device classification yet
+        // — e.g. older daemons or the 1-2s window before `getprop`
+        // completes for the first time.
+        let needsAggregate = (adb?.classifiedDevices.isEmpty ?? true)
+            && ((adb?.available ?? false) || !(adb?.devices.isEmpty ?? true) || adb?.lastError != nil)
 
-            if !eInk.isEmpty || !tablets.isEmpty || needsAggregate {
-                VStack(alignment: .leading, spacing: 3) {
-                    downstreamSubheader("Android")
-                    ForEach(eInk, id: \.serial) { dev in
-                        DeviceRailRow(
-                            name: eInkRowName(for: dev.deviceClass),
-                            status: .ok,
-                            detail: dev.model ?? dev.serial
-                        )
-                    }
-                    ForEach(tablets, id: \.serial) { dev in
-                        let label = [dev.manufacturer, dev.model].compactMap { $0 }.joined(separator: " ")
-                        DeviceRailRow(
-                            name: "Tablet",
-                            status: .ok,
-                            detail: label.isEmpty ? dev.serial : label
-                        )
-                    }
-                    if needsAggregate {
-                        DeviceRailRow(
-                            name: "ADB",
-                            status: adb.available ? .ok : (adb.lastError != nil ? .warn : .dim),
-                            detail: {
-                                if !adb.devices.isEmpty {
-                                    let devLabel = "\(adb.devices.count) device\(adb.devices.count == 1 ? "" : "s")"
-                                    let reverse = adb.reverseReadyCount > 0
-                                        ? " · \(adb.reverseReadyCount) reverse"
-                                        : ""
-                                    return devLabel + reverse
-                                }
-                                if let err = adb.lastError, !err.isEmpty { return err }
-                                return "No devices"
-                            }()
-                        )
-                    }
+        if !wifiDashboards.isEmpty || !eInk.isEmpty || !tablets.isEmpty || needsAggregate {
+            VStack(alignment: .leading, spacing: 3) {
+                downstreamSubheader("Android")
+                ForEach(wifiDashboards, id: \.self) { dev in
+                    DeviceRailRow(
+                        name: dev.kind == "eink" ? "E-ink" : "Tablet",
+                        status: .ok,
+                        detail: (dev.name.isEmpty ? dev.id : dev.name) + " · WiFi"
+                    )
+                }
+                ForEach(eInk, id: \.serial) { dev in
+                    DeviceRailRow(
+                        name: eInkRowName(for: dev.deviceClass),
+                        status: .ok,
+                        detail: dev.model ?? dev.serial
+                    )
+                }
+                ForEach(tablets, id: \.serial) { dev in
+                    let label = [dev.manufacturer, dev.model].compactMap { $0 }.joined(separator: " ")
+                    DeviceRailRow(
+                        name: "Tablet",
+                        status: .ok,
+                        detail: label.isEmpty ? dev.serial : label
+                    )
+                }
+                if needsAggregate, let adb {
+                    DeviceRailRow(
+                        name: "ADB",
+                        status: adb.available ? .ok : (adb.lastError != nil ? .warn : .dim),
+                        detail: {
+                            if !adb.devices.isEmpty {
+                                let devLabel = "\(adb.devices.count) device\(adb.devices.count == 1 ? "" : "s")"
+                                let reverse = adb.reverseReadyCount > 0
+                                    ? " · \(adb.reverseReadyCount) reverse"
+                                    : ""
+                                return devLabel + reverse
+                            }
+                            if let err = adb.lastError, !err.isEmpty { return err }
+                            return "No devices"
+                        }()
+                    )
                 }
             }
         }

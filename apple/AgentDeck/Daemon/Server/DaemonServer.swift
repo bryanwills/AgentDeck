@@ -546,6 +546,12 @@ final class DaemonServer {
     /// as `cachedStreamDeck`. Keyed by WS connection so several panels on the LAN
     /// each survive independently and are evicted the moment their own WS closes.
     private var cachedEinkDevices: [UUID: StreamDeckRegistration] = [:]
+    /// Android dashboard apps (tablet / e-ink launcher) connected over Wi-Fi WS
+    /// that registered as `clientType:"android-dashboard"`. Same volunteer-roster
+    /// + evict-on-close model as `cachedEinkDevices` — without this a WiFi-
+    /// connected tablet is an anonymous consumer with no topology row (ADB
+    /// classification only covers USB-bridged devices, and only on the CLI tier).
+    private var cachedAndroidDashboards: [UUID: StreamDeckRegistration] = [:]
     /// Foundation Models per-session activity summaries, keyed by session id.
     /// `sig` invalidates the cache when the session's tool/state/question changes.
     /// Filled asynchronously; the next sessions_list broadcast surfaces it.
@@ -2138,6 +2144,10 @@ final class DaemonServer {
             DaemonLogger.shared.debug("Daemon", "Evicted eink-device registration: WS closed")
             broadcastStateUpdate()
         }
+        if cachedAndroidDashboards.removeValue(forKey: conn.id) != nil {
+            DaemonLogger.shared.debug("Daemon", "Evicted android-dashboard registration: WS closed")
+            broadcastStateUpdate()
+        }
         if ulanziPluginConnectionId == conn.id {
             ulanziPluginConnectionId = nil
             DaemonLogger.shared.debug("Daemon", "Ulanzi plugin disconnected — D200H may resume")
@@ -2912,6 +2922,18 @@ final class DaemonServer {
             )
             DaemonLogger.shared.debug("Daemon", "client_register eink-device devices=\(devices.count)")
             broadcastStateUpdate()
+        case "android-dashboard":
+            // Android dashboard app (tablet / e-ink launcher) over Wi-Fi WS —
+            // volunteers its device identity so the topology can show an
+            // Android row on both tiers (ADB covers only USB + CLI daemon).
+            let devices = (cmd["devices"] as? [[String: Any]]) ?? []
+            cachedAndroidDashboards[conn.id] = StreamDeckRegistration(
+                connectionId: conn.id,
+                devices: devices,
+                updatedAt: Date()
+            )
+            DaemonLogger.shared.debug("Daemon", "client_register android-dashboard devices=\(devices.count)")
+            broadcastStateUpdate()
         case "ulanzi-plugin":
             // Ulanzi Studio drives the D200H — stand down direct-HID so the two
             // don't fight over the device. Reacquired on disconnect.
@@ -2944,6 +2966,14 @@ final class DaemonServer {
         if !staleEink.isEmpty {
             for key in staleEink.keys { cachedEinkDevices.removeValue(forKey: key) }
             DaemonLogger.shared.debug("Daemon", "Evicted \(staleEink.count) stale eink-device registration(s)")
+            broadcastStateUpdate()
+        }
+        let staleAndroid = cachedAndroidDashboards.filter { _, reg in
+            !activeWSConnectionIds.contains(reg.connectionId) && reg.updatedAt < cutoff
+        }
+        if !staleAndroid.isEmpty {
+            for key in staleAndroid.keys { cachedAndroidDashboards.removeValue(forKey: key) }
+            DaemonLogger.shared.debug("Daemon", "Evicted \(staleAndroid.count) stale android-dashboard registration(s)")
             broadcastStateUpdate()
         }
     }
@@ -4671,6 +4701,12 @@ final class DaemonServer {
                 "devices": cachedEinkDevices.values.flatMap { $0.devices },
             ] as [String: Any]
         }
+        if !cachedAndroidDashboards.isEmpty {
+            modules["androidDashboards"] = [
+                "available": true,
+                "devices": cachedAndroidDashboards.values.flatMap { $0.devices },
+            ] as [String: Any]
+        }
         return SendableDict([
             "state": stateMachine.state.rawValue,
             "modules": modules,
@@ -4802,6 +4838,12 @@ final class DaemonServer {
             modules["einkDevices"] = [
                 "available": true,
                 "devices": cachedEinkDevices.values.flatMap { $0.devices },
+            ] as [String: Any]
+        }
+        if !cachedAndroidDashboards.isEmpty {
+            modules["androidDashboards"] = [
+                "available": true,
+                "devices": cachedAndroidDashboards.values.flatMap { $0.devices },
             ] as [String: Any]
         }
         return modules
