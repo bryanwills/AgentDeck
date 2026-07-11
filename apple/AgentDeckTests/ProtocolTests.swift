@@ -192,6 +192,17 @@ final class ProtocolTests: XCTestCase {
     }
     #endif
 
+    func testIOSSetupPolicyDoesNotInferClaudeSetupFromSessionAbsence() {
+        XCTAssertEqual(
+            AgentStateHolder.iOSSetupDescriptors.map(\.id),
+            [IntegrationCatalog.openClaw.id]
+        )
+        XCTAssertFalse(
+            AgentStateHolder.iOSSetupDescriptors.contains { $0.id == IntegrationCatalog.claudeCode.id },
+            "An idle Claude session list is not evidence that Mac-owned hooks are unconfigured"
+        )
+    }
+
     // MARK: - Usage Update
 
     func testDecodeUsageUpdate() throws {

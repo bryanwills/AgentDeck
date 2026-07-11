@@ -369,10 +369,7 @@ extension AgentStateHolder {
     #else
     func setupNeededItems(preferences: AppPreferences) -> [SetupItem] {
         let anthropicSaved = anthropicAdminKeySavedValue()
-        let descriptors: [IntegrationDescriptor] = [
-            IntegrationCatalog.claudeCode,
-            IntegrationCatalog.openClaw,
-        ]
+        let descriptors = Self.iOSSetupDescriptors
         return descriptors.compactMap { descriptor in
             let status = IntegrationStatusEvaluator.status(
                 for: descriptor,
@@ -393,6 +390,19 @@ extension AgentStateHolder {
         }
     }
     #endif
+
+    /// iOS is a read-only dashboard client: Claude hook installation and OAuth
+    /// ownership live on the paired Mac. In particular, an empty Claude
+    /// session list is not evidence that hooks are missing. The iOS-local
+    /// `hooksInstalled` preference is never populated, so evaluating the
+    /// Claude descriptor here turns every idle Mac into a false SETUP alert.
+    ///
+    /// Keep only integrations whose daemon reports an explicit, durable setup
+    /// state. OpenClaw qualifies via `gatewayAuthStatus`; Claude currently has
+    /// no equivalent hook-readiness field in the wire protocol.
+    static var iOSSetupDescriptors: [IntegrationDescriptor] {
+        [IntegrationCatalog.openClaw]
+    }
 
     /// Anthropic Admin key presence — Keychain on App Store, env on CLI.
     /// Checked once per `setupNeededItems` call so the catalog evaluator
