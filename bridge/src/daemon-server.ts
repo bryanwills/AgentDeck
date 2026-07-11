@@ -916,6 +916,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }
     return out;
   };
+  // Elgato Stream Deck plugin — `client_register{clientType:"streamdeck-plugin"}`
+  // with the physical device roster. The Swift daemon has handled this since the
+  // Stream Deck topology row shipped; the Node daemon silently dropped it, so on
+  // the external-CLI tier the dashboard never showed a Stream Deck row at all.
+  const streamDeckRegistrations = new Map<WebSocket, { devices: unknown[]; updatedAt: number }>();
+  const collectStreamDeckDevices = (): unknown[] => {
+    const out: unknown[] = [];
+    for (const [ws, reg] of streamDeckRegistrations) {
+      if (ws.readyState !== WebSocket.OPEN) { streamDeckRegistrations.delete(ws); continue; }
+      for (const d of reg.devices) out.push(d);
+    }
+    return out;
+  };
 
   // ===== HTTP server =====
   const httpServer = createServer((req, res) => {
@@ -1741,6 +1754,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     if (androidDashboards.length > 0) {
       modules.androidDashboards = { available: true, devices: androidDashboards };
     }
+    const streamDeckDevices = collectStreamDeckDevices();
+    if (streamDeckDevices.length > 0) {
+      modules.streamDeck = { available: true, devices: streamDeckDevices };
+    }
     // WiFi-WS ESP32 boards. Same data as /devices `esp32-wifi` — without this
     // the dashboards (macOS/iOS/Android) never learn a WiFi-only board exists,
     // since they read moduleHealth off state_update, not /devices.
@@ -2242,6 +2259,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         ? (msg as { devices: unknown[] }).devices : [];
       androidDashboardRegistrations.set(sender, { devices, updatedAt: Date.now() });
       debug('daemon', `client_register android-dashboard devices=${devices.length}`);
+      if (lastStateEvent && (lastStateEvent as { type?: string }).type === 'state_update') {
+        (lastStateEvent as unknown as Record<string, unknown>).moduleHealth = moduleHealthProvider();
+        core.wsServer.broadcast(lastStateEvent);
+      }
+      return true;
+    }
+    if (msg.type === 'client_register'
+        && (msg as { clientType?: unknown }).clientType === 'streamdeck-plugin') {
+      // Elgato plugin volunteering the physical Stream Decks it drives — the
+      // topology's Stream Deck rows. Swift-daemon parity; drops on socket close.
+      const devices = Array.isArray((msg as { devices?: unknown }).devices)
+        ? (msg as { devices: unknown[] }).devices : [];
+      streamDeckRegistrations.set(sender, { devices, updatedAt: Date.now() });
+      debug('daemon', `client_register streamdeck-plugin devices=${devices.length}`);
       if (lastStateEvent && (lastStateEvent as { type?: string }).type === 'state_update') {
         (lastStateEvent as unknown as Record<string, unknown>).moduleHealth = moduleHealthProvider();
         core.wsServer.broadcast(lastStateEvent);

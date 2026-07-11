@@ -209,19 +209,25 @@ private struct Esp32TerrariumScene<Content: View>: View {
                     .offset(y: geo.size.height * 0.12)
             }
 
-            // Background swimming creature — small and off-center, so
-            // it reads as "a creature is in the scene" instead of the
-            // giant dashboard-style icon the old preview used.
+            // Swimming creatures — ONE PER SESSION, like the real terrarium
+            // (each session spawns a creature; the old preview drew a single
+            // creature regardless of session count). Deterministic spread so
+            // the scene is stable frame-to-frame.
             GeometryReader { geo in
-                PreviewCreatureGlyph(
-                    agent: selection.agent,
-                    state: selection.state,
-                    size: min(geo.size.width, geo.size.height) * 0.26
-                )
-                .position(
-                    x: geo.size.width * 0.55,
-                    y: geo.size.height * (isRound ? 0.46 : 0.40)
-                )
+                let agents = selection.previewAgents
+                let base = min(geo.size.width, geo.size.height)
+                ForEach(Array(agents.enumerated()), id: \.offset) { index, agent in
+                    let fraction = CGFloat(index) / CGFloat(max(1, agents.count))
+                    PreviewCreatureGlyph(
+                        agent: agent,
+                        state: selection.previewState(for: index),
+                        size: base * (index == 0 ? 0.24 : 0.17)
+                    )
+                    .position(
+                        x: geo.size.width * (0.30 + 0.45 * fraction),
+                        y: geo.size.height * ((isRound ? 0.42 : 0.36) + 0.14 * CGFloat(index % 2))
+                    )
+                }
             }
 
             // Bottom HUD bar — matches hud_bar.cpp layout direction.
@@ -241,9 +247,12 @@ private struct Esp32TerrariumScene<Content: View>: View {
     }
 }
 
-/// Mini HUD bar that mirrors the real firmware's bottom panel: left
-/// side carries the AgentDeck wordmark + accent underline + session
-/// line; right side carries two water-fill gauges (5h / 7d). Values are
+/// Mini HUD bar that mirrors the real firmware's bottom panel
+/// (hud_bar.cpp, non-IPS10 boards): left side carries the AgentDeck
+/// wordmark + accent underline + a per-session LIST (state dot ·
+/// project); right side carries PROVIDER TANK GROUPS — a brand-coloured
+/// "● CLAUDE" header over its 5h/7d water tanks, plus a "● CODEX" group
+/// only when a Codex session is present (makeTankGroup). Values are
 /// placeholders — the real firmware drives them from the usage relay.
 private struct Esp32HudBar: View {
     let selection: DevicePreviewSelection
@@ -251,29 +260,39 @@ private struct Esp32HudBar: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            // Left panel: logo + underline + session line
-            VStack(alignment: .leading, spacing: 3) {
+            // Left panel: logo + underline + session list (lblSessions)
+            VStack(alignment: .leading, spacing: 2) {
                 Text("AgentDeck")
                     .font(.system(size: 11, weight: .heavy, design: .monospaced))
                     .foregroundStyle(TerrariumHUD.text)
                 Rectangle()
                     .fill(TerrariumColors.tetraNeon.opacity(0.55))
                     .frame(width: 46, height: 1)
-                HStack(spacing: 4) {
-                    PreviewStateDot(state: selection.state, size: 6)
-                    Text(sessionLine)
+                if selection.previewAgents.isEmpty {
+                    Text("no sessions")
                         .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(TerrariumHUD.text.opacity(0.88))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                        .foregroundStyle(TerrariumHUD.subtext)
+                } else {
+                    ForEach(Array(selection.previewAgents.prefix(3).enumerated()), id: \.offset) { index, agent in
+                        HStack(spacing: 4) {
+                            PreviewStateDot(state: selection.previewState(for: index), size: 5)
+                            Text("\(agent.displayName.lowercased())-project")
+                                .font(.system(size: 8.5, design: .monospaced))
+                                .foregroundStyle(TerrariumHUD.text.opacity(0.88))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
                 }
             }
             Spacer(minLength: 4)
 
-            // Right panel: 5h + 7d water-fill gauges
-            HStack(spacing: 6) {
-                waterGauge(period: "5h", percent: 0.42)
-                waterGauge(period: "7d", percent: 0.68)
+            // Right panel: provider tank groups (brand header + 5h/7d tanks).
+            HStack(alignment: .bottom, spacing: 10) {
+                tankGroup(name: "CLAUDE", brand: StateColors.brand(agent: "claude-code"), p5: 0.42, p7: 0.68)
+                if selection.previewAgents.contains(.codex) {
+                    tankGroup(name: "CODEX", brand: StateColors.brand(agent: "codex-cli"), p5: 0.23, p7: 0.51)
+                }
             }
         }
         .padding(.horizontal, isRound ? 30 : 10)
@@ -284,9 +303,21 @@ private struct Esp32HudBar: View {
         )
     }
 
-    private var sessionLine: String {
-        let base = selection.sessionCount == 1 ? "1 session" : "\(selection.sessionCount) sessions"
-        return "\(base) · \(selection.state.displayName)"
+    /// Provider tank group — port of makeTankGroup: "● NAME" brand header
+    /// stacked over the provider's 5h/7d tanks.
+    private func tankGroup(name: String, brand: Color, p5: CGFloat, p7: CGFloat) -> some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 3) {
+                Circle().fill(brand).frame(width: 5, height: 5)
+                Text(name)
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(brand)
+            }
+            HStack(spacing: 6) {
+                waterGauge(period: "5h", percent: p5)
+                waterGauge(period: "7d", percent: p7)
+            }
+        }
     }
 
     /// Water-fill gauge — mirrors the firmware's `createGauge`: glass
@@ -351,8 +382,9 @@ struct Esp3235LandscapePreview: View {
             DeviceBezel(cornerRadius: 14, bezelWidth: 10) {
                 Esp32TerrariumScene(selection: selection)
             }
-            .frame(width: 400, height: 240)
-            Text("ESP32 IPS 3.5\" landscape")
+            // Real panel is 480×320 — keep the 1.5 aspect (was 400×240 = 1.67).
+            .frame(width: 360, height: 240)
+            Text("ESP32 IPS 3.5\" landscape • 480×320")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
         }

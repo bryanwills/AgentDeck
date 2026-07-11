@@ -22,8 +22,16 @@
 - **WiFi ESP32 행도 단일경로 dedup을 따른다**: 물리 1대=행 1개. dual-home 보드는 serial 행이 대표하고 WiFi는 태그로만 표현 — `agentdeck devices`의 `[serial-active · wifi standby]`와 같은 원칙.
 - **에뮬레이터화는 3단계 로드맵**: (1) Live 미러+스냅샷(이번에 구현, 프리뷰 입력 모델이 coarse해 근사) → (2) 프리뷰 입력을 실제 WS 이벤트 스트림(sessions_list/usage_update)으로 확장해 세션별 충실 재현 → (3) 픽셀 정확 ESP32는 LVGL 호스트 시뮬레이터(pio native env)로 실펌웨어 렌더 코드를 직접 구동. Swift 손포트는 (3) 전까지의 근사이며 SSOT PORT 헤더+동커밋 규율이 유일한 드리프트 방어.
 
+### 후속(같은 날, 병렬 탐색 에이전트 감사 리포트 반영)
+- **Node 티어 Stream Deck 행 부재(신규 갭)**: SD 플러그인이 보내는 `client_register {clientType:"streamdeck-plugin"}`을 Node 데몬이 버리고 있었음(Swift 데몬만 처리) → volunteer-roster(`streamDeckRegistrations`) + moduleHealth `streamDeck` emit 추가. 외부 CLI 데몬 사용자도 이제 Stream Deck 행을 봄.
+- **메뉴바 리스트 파리티**: TopologyRail에는 있고 메뉴바에는 없던 Timebox/iDotMatrix/androidDashboards 행 추가(BLE statusReason 매핑 미러 포함).
+- **D200H 타일 충실도**: 세션 타일에 `slot.subtitle`(모델 별칭/"Running task") 렌더 추가(실 renderSessionSlot 3행 파리티), usage 타일을 가로 캡슐+"CLAUDE 5H" 텍스트 접두어에서 실기와 같은 **세로 물탱크**(bottom-up fill 0.38+level line, 브랜드 마크 우상단, 텍스트 접두어 없음, usageRampColor >80 red/>50 amber 포팅)로 교체, OFFLINE hero에 "Open AgentDeck" 서브타이틀.
+- **InkDeck**: 카드 상태 라벨을 펌웨어 `stateLabel()` 문자열(PROCESSING/PERMISSION/IDLE/OFFLINE — "AWAITING"은 실기에 없음)로, 빈 상태를 2종 구분(disconnected="searching for daemon…" vs connected-empty="no active sessions"+워크스페이스 힌트).
+- **ESP32 공유 씬**: 세션당 크리처 1마리(기존: 항상 1마리), HUD 우측을 실 hud_bar `makeTankGroup` 구조(브랜드 컬러 "● CLAUDE" 헤더 + 5h/7d 탱크, Codex 세션 존재 시 "● CODEX" 그룹)로, 좌측을 세션 리스트(상태 dot·프로젝트, 최대 3줄)로. IPS 3.5" 종횡비 480×320(1.5)로 교정.
+- 미해결(낮은 우선순위, 의도적 보류): InkDeck idle-dock "+N more"/게이지 reset countdown/AGY 칩, TC001 USAGE 페이지·antigravity 스프라이트(프리뷰 입력 모델에 antigravity 없음), iPad/Android/e-ink(CremaS·Pantone6) 프리뷰는 명시적 schematic(포트 아님).
+
 ### 검증
-vitest 전체 1693 pass(신규: ws-server TUI roster 2건), macOS `ProtocolTests` 34 pass(신규: tuiDashboards/esp32Wifi/serial.wifiConnected 디코드), `DevicePreviewSnapshotTests` live 매핑 pass + 스냅샷 14종 눈검증(IPS10 office/카드, TTGO 메트릭 패널, SD+ RUN teal/PERM amber, InkDeck codex-only 밴드, D200H codex-only 타일), macOS/iOS 양 타깃 빌드 성공. 라이브 Swift 데몬 대상 CLI devices 출력 확인(구데몬은 신규 clientType 무시 — 하위호환).
+vitest 전체 1693 pass(신규: ws-server TUI roster 2건), macOS `ProtocolTests` 34 pass(신규: tuiDashboards/esp32Wifi/serial.wifiConnected 디코드), `DevicePreviewSnapshotTests` live 매핑 pass + 스냅샷 14종 눈검증(IPS10 office/카드, TTGO 메트릭 패널, SD+ RUN teal/PERM amber, InkDeck codex-only 밴드, D200H 세로 탱크+서브타이틀, IPS3.5 브랜드 탱크 그룹), macOS/iOS 양 타깃 빌드 성공. 라이브 Swift 데몬 대상 CLI devices 출력 확인(구데몬은 신규 clientType 무시 — 하위호환).
 
 ---
 

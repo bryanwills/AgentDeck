@@ -220,6 +220,23 @@ struct MenuBarTopologyList: View {
                         )
                     }
                 }
+                // BLE matrix panels — TopologyRail parity (previously the
+                // menubar silently omitted both, so a Timebox-only setup read
+                // as "no devices" here while the dashboard showed it).
+                if let timebox = health.timebox, timebox.configuredDeviceCount > 0 {
+                    RailRow(
+                        status: bleMatrixStatus(timebox),
+                        name: "Timebox Mini",
+                        subtitle: bleMatrixDetail(timebox, fallback: "11×11 · BLE")
+                    )
+                }
+                if let idm = health.idotmatrix, idm.configuredDeviceCount > 0 {
+                    RailRow(
+                        status: bleMatrixStatus(idm),
+                        name: "iDotMatrix",
+                        subtitle: bleMatrixDetail(idm, fallback: "32×32 · BLE")
+                    )
+                }
                 // USB serial / ESP32.
                 if let serial = health.serial, !serial.connectedBoards.isEmpty {
                     ForEach(serial.connectedBoards, id: \.port) { info in
@@ -250,6 +267,16 @@ struct MenuBarTopologyList: View {
                 if let tui = health.tuiDashboards, !tui.devices.isEmpty {
                     ForEach(tui.devices, id: \.id) { dev in
                         RailRow(status: .ok, name: "TUI Dashboard", subtitle: dev.name)
+                    }
+                }
+                // WiFi WS Android dashboards — TopologyRail parity.
+                if let ad = health.androidDashboards, !ad.devices.isEmpty {
+                    ForEach(ad.devices, id: \.self) { dev in
+                        RailRow(
+                            status: .ok,
+                            name: dev.kind == "eink" ? "E-ink" : "Tablet",
+                            subtitle: (dev.name.isEmpty ? dev.id : dev.name) + " · WiFi"
+                        )
                     }
                 }
                 // Android — e-ink + tablet, with aggregate fallback.
@@ -326,7 +353,28 @@ struct MenuBarTopologyList: View {
         if let s = h.serial, !s.connectedBoards.isEmpty { return true }
         if (h.esp32Wifi?.devices ?? []).contains(where: { !$0.serialActive }) { return true }
         if let tui = h.tuiDashboards, !tui.devices.isEmpty { return true }
+        if let tb = h.timebox, tb.configuredDeviceCount > 0 { return true }
+        if let idm = h.idotmatrix, idm.configuredDeviceCount > 0 { return true }
+        if let ad = h.androidDashboards, !ad.devices.isEmpty { return true }
         return false
+    }
+
+    /// Mirrors TopologyRail's BLE-matrix status/detail mapping so the two
+    /// surfaces can't disagree about why a panel isn't streaming.
+    private func bleMatrixStatus(_ h: BLEMatrixHealth) -> LEDStatus {
+        if h.connected { return .ok }
+        let reason = (h.statusReason ?? "").lowercased()
+        if reason.contains("paused") { return .dim }
+        if reason.contains("connecting") || reason.contains("retry") || reason.contains("backed off") { return .warn }
+        if h.lastError != nil || reason.contains("error") || reason.contains("fail") { return .error }
+        return h.statusReason == nil ? .dim : .warn
+    }
+
+    private func bleMatrixDetail(_ h: BLEMatrixHealth, fallback: String) -> String {
+        if h.connected { return h.displayDimmed ? "\(fallback) · paused" : fallback }
+        if let reason = h.statusReason, !reason.isEmpty { return reason }
+        if let err = h.lastError, !err.isEmpty { return err }
+        return fallback
     }
 
     private func einkDetail(for dev: EinkDeviceInfo) -> String {

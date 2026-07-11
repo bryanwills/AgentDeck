@@ -106,12 +106,25 @@ struct InkDeckPreview: View {
         let columns = agents.count <= 1 ? 1 : 2
         return Group {
             if agents.isEmpty {
-                // drawSearching: brand mark + waiting line.
+                // Two distinct empty states, like the firmware: disconnected →
+                // drawSearching ("searching for daemon…"); connected with no
+                // sessions → drawSessionGrid's rowCount==0 branch ("no active
+                // sessions" + workspace hint). Conflating them made a healthy
+                // idle daemon read as broken.
                 VStack(spacing: 8) {
                     AgentDeckLogo(size: 44, color: ink.opacity(0.7))
-                    Text("searching for daemon…")
-                        .font(.system(size: 10))
-                        .foregroundStyle(ink.opacity(0.6))
+                    if selection.state == .disconnected {
+                        Text("searching for daemon…")
+                            .font(.system(size: 10))
+                            .foregroundStyle(ink.opacity(0.6))
+                    } else {
+                        Text("no active sessions")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(ink.opacity(0.8))
+                        Text("start claude / codex / opencode in a workspace")
+                            .font(.system(size: 9))
+                            .foregroundStyle(ink.opacity(0.55))
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -146,7 +159,7 @@ struct InkDeckPreview: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(cardInk)
                     .lineLimit(1)
-                Text(state.displayName.uppercased())
+                Text(Self.firmwareStateLabel(for: state))
                     .font(.system(size: 8, weight: .semibold, design: .monospaced))
                     .foregroundStyle(cardInk.opacity(0.72))
                 Text(activityLine(for: state))
@@ -174,6 +187,19 @@ struct InkDeckPreview: View {
         case .processing:     return "editing files…"
         case .awaitingPrompt: return "permission requested"
         case .disconnected:   return "offline"
+        }
+    }
+
+    /// Firmware card state labels (eink_display.cpp stateLabel): the panel
+    /// prints PERMISSION / CHOOSE / REVIEW for the awaiting states — never
+    /// "AWAITING" — and OFFLINE for anything unknown. The preview's coarse
+    /// state model maps awaitingPrompt to the permission variant.
+    static func firmwareStateLabel(for state: PixooPreviewState) -> String {
+        switch state {
+        case .processing:     return "PROCESSING"
+        case .awaitingPrompt: return "PERMISSION"
+        case .idle:           return "IDLE"
+        case .disconnected:   return "OFFLINE"
         }
     }
 
