@@ -8,8 +8,11 @@
 //   - session card grid: double-outline rounded cards with the agent
 //     creature glyph + project name + state line; the first awaiting
 //     card inverts to solid black with white ink;
-//   - usage footer below a rule at y≈370: CLAUDE / CODEX provider rows
-//     with 5H/7D bar gauges, and a ticker line at the very bottom.
+//   - adaptive usage band (firmware 208b1afc): provider rows (CLAUDE /
+//     CODEX, 5H/7D bar gauges) draw only for providers that actually
+//     report usage; with 0 rows the separator rule is omitted and the
+//     session grid reclaims the band. The ticker line at the very bottom
+//     is pinned regardless.
 // Update this view when the firmware layout changes.
 
 import SwiftUI
@@ -174,13 +177,38 @@ struct InkDeckPreview: View {
         }
     }
 
-    // MARK: Usage footer — drawUsageFooter
+    // MARK: Usage footer — drawUsageFooter (adaptive split, firmware 208b1afc)
+
+    /// Sample providers that "report usage" for this preview frame. Mirrors the
+    /// firmware's usageRowCount gate: a provider row draws only when its quota
+    /// data exists. Offline daemon → no usage data at all; otherwise the row
+    /// set follows the agents in the session mix (Claude-linked / Codex-linked).
+    private var usageProviderRows: [(glyph: PixooPreviewAgent, label: String, plan: String, p5: Double, p7: Double)] {
+        guard selection.state != .disconnected else { return [] }
+        let agents = selection.previewAgents
+        var rows: [(PixooPreviewAgent, String, String, Double, Double)] = []
+        // No sessions ≠ no usage — a linked daemon still reports Claude quota.
+        if agents.isEmpty || agents.contains(.claudeCode) {
+            rows.append((.claudeCode, "CLAUDE", "Max 20x", 0.42, 0.68))
+        }
+        if agents.contains(.codex) {
+            rows.append((.codex, "CODEX", "Plus", 0.23, 0.51))
+        }
+        return rows
+    }
 
     private var usageFooter: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Rectangle().fill(ink).frame(height: 1.4)
-            providerRow(glyphAgent: .claudeCode, label: "CLAUDE", plan: "Max 20x", p5: 0.42, p7: 0.68)
-            providerRow(glyphAgent: .codex, label: "CODEX", plan: "Plus", p5: 0.23, p7: 0.51)
+        let rows = usageProviderRows
+        return VStack(alignment: .leading, spacing: 4) {
+            // 0 usage rows → no separator, no gauge band (sepY = -1 in the
+            // firmware); the session grid above reclaims the space and only
+            // the pinned ticker remains.
+            if !rows.isEmpty {
+                Rectangle().fill(ink).frame(height: 1.4)
+                ForEach(rows, id: \.label) { row in
+                    providerRow(glyphAgent: row.glyph, label: row.label, plan: row.plan, p5: row.p5, p7: row.p7)
+                }
+            }
             HStack(spacing: 5) {
                 Text("14:02")
                     .font(.system(size: 8, weight: .bold, design: .monospaced))

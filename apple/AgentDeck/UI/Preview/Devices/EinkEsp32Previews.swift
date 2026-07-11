@@ -225,10 +225,15 @@ private struct Esp32TerrariumScene<Content: View>: View {
             }
 
             // Bottom HUD bar — matches hud_bar.cpp layout direction.
-            VStack {
-                Spacer()
-                Esp32HudBar(selection: selection, isRound: isRound)
-                    .frame(height: hudHeight)
+            // hudHeight <= 0 means the board has no HUD bar at all (TTGO's
+            // metric panel replaces it) — skip entirely, a 0-height frame
+            // still lets the bar's text overflow into the scene.
+            if hudHeight > 0 {
+                VStack {
+                    Spacer()
+                    Esp32HudBar(selection: selection, isRound: isRound)
+                        .frame(height: hudHeight)
+                }
             }
 
             overlay()
@@ -318,25 +323,18 @@ private struct Esp32HudBar: View {
     }
 }
 
-// MARK: - ESP32 86Box (1.28" round)
+// MARK: - ESP32 86Box (4" square, 480×480 ST7701 — wall-box form factor)
 
 struct Esp3286BoxPreview: View {
     let selection: DevicePreviewSelection
 
     var body: some View {
         VStack(spacing: 10) {
-            Esp32TerrariumScene(
-                selection: selection,
-                isRound: true,
-                hudHeight: 46
-            )
-            .frame(width: 240, height: 240)
-            .clipShape(Circle())
-            .overlay(
-                Circle()
-                    .stroke(Color(white: 0.12), lineWidth: 6)
-            )
-            Text("ESP32 86Box • 1.28\" round")
+            DeviceBezel(cornerRadius: 18, bezelWidth: 14, bezelColor: Color(white: 0.94)) {
+                Esp32TerrariumScene(selection: selection, hudHeight: 52)
+            }
+            .frame(width: 260, height: 260)
+            Text("ESP32 86Box • 4\" 480×480")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
@@ -379,7 +377,7 @@ struct Esp3235PortraitPreview: View {
     }
 }
 
-// MARK: - ESP32 Round AMOLED 1.6"
+// MARK: - ESP32 Round AMOLED 1.8" (JC3636W518, 360×360)
 
 struct Esp32RoundPreview: View {
     let selection: DevicePreviewSelection
@@ -397,7 +395,7 @@ struct Esp32RoundPreview: View {
                 Circle()
                     .stroke(Color(white: 0.14), lineWidth: 10)
             )
-            Text("ESP32 round AMOLED 1.6\"")
+            Text("ESP32 round AMOLED 1.8\" • 360×360")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
@@ -406,17 +404,29 @@ struct Esp32RoundPreview: View {
 
 // MARK: - ESP32 TTGO T-Display 1.14" (135×240 portrait)
 //
-// The smallest LCD terrarium — same firmware scene as the other boards
-// but on a narrow 135×240 portrait strip. Preview scales the panel
-// 1.5× so the HUD text stays legible.
+// The smallest LCD board. The firmware does NOT draw the shared HUD bar
+// here — the no-PSRAM classic ESP32 renders the terrarium into a
+// 135×160 buffer at the top, and the remaining 135×80 strip is the
+// TTGO metric panel (ttgo_state.cpp): warm-brown background 0x2A1F14
+// with the agent state, project, model and mini 5h/7d usage text.
+// Preview scales the panel 1.5× so the text stays legible.
 
 struct Esp32TtgoPreview: View {
     let selection: DevicePreviewSelection
 
+    private let metricBg = Color(red: 0x2A / 255.0, green: 0x1F / 255.0, blue: 0x14 / 255.0)
+
     var body: some View {
         VStack(spacing: 10) {
             DeviceBezel(cornerRadius: 12, bezelWidth: 12, bezelColor: Color(white: 0.10)) {
-                Esp32TerrariumScene(selection: selection, hudHeight: 46)
+                VStack(spacing: 0) {
+                    // Terrarium in the top 135×160 slice — no HUD overlay.
+                    Esp32TerrariumScene(selection: selection, hudHeight: 0) { EmptyView() }
+                        .frame(height: 160 * 1.5)
+                        .clipped()
+                    ttgoMetricPanel
+                        .frame(height: 80 * 1.5)
+                }
             }
             .frame(width: 135 * 1.5, height: 240 * 1.5)
             Text("ESP32 TTGO T-Display • 135×240")
@@ -424,27 +434,272 @@ struct Esp32TtgoPreview: View {
                 .foregroundStyle(.secondary)
         }
     }
+
+    /// TTGO metric panel — ttgo_state.cpp createMetricPanel: state (colored),
+    /// project, model, then mini 5h/7d usage lines on 0x2A1F14.
+    private var ttgoMetricPanel: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(selection.state.displayName.uppercased())
+                .font(.system(size: 13, weight: .heavy, design: .monospaced))
+                .foregroundStyle(StateColors.color(for: selection.state.sessionStateStringForUI))
+            Text("\(selection.agent.displayName.lowercased())-project")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(Color(red: 0xE2 / 255.0, green: 0xE8 / 255.0, blue: 0xF0 / 255.0))
+                .lineLimit(1)
+            Text(selection.agent == .codex ? "gpt-5" : "opus-4-7")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(Color(red: 0x94 / 255.0, green: 0xA3 / 255.0, blue: 0xB8 / 255.0))
+            Spacer(minLength: 0)
+            Text("5h 42% · 7d 68%")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(Color(red: 0x94 / 255.0, green: 0xA3 / 255.0, blue: 0xB8 / 255.0))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(metricBg)
+    }
 }
 
 // MARK: - ESP32 IPS 10.1" (JC8012P4A1C, logical 1280×800 landscape)
 //
-// The largest LVGL board — an ESP32-P4 with a 10.1" MIPI-DSI panel. The
-// firmware renders a logical 1280×800 landscape scene (PPA hardware
-// rotation into the physical 800×1280 portrait panel), so the preview
-// is a wide landscape terrarium at 0.45× scale.
+// The largest LVGL board — an ESP32-P4 with a 10.1" MIPI-DSI panel
+// (logical 1280×800 via PPA hardware rotation). The firmware does NOT
+// render the aquarium terrarium here: the layout is the D1 tablet
+// arrangement (hud_bar.cpp `BOARD_IPS10` + terrarium/office.cpp) —
+//   • full-width top bar: brand mark + wordmark ("Deck" in cyan),
+//     daemon status, Claude/Codex usage blocks on the right;
+//   • left ~408px: the "office" sprite scene — dark-green carpet,
+//     desk pods with room labels, agent workers with state bubbles and
+//     a state legend chip bottom-left;
+//   • right: the session-cards pane (tap a card → detail modal).
+// The preview mirrors that structure at 0.45× scale.
 
 struct Esp32Ips10Preview: View {
     let selection: DevicePreviewSelection
 
+    // Firmware palette (hud_bar.cpp / office.cpp constants).
+    private let topBarBg = Color(red: 0x07 / 255.0, green: 0x14 / 255.0, blue: 0x0F / 255.0)
+    private let carpetA = Color(red: 0x17 / 255.0, green: 0x3A / 255.0, blue: 0x33 / 255.0)
+    private let carpetEdge = Color(red: 0x0E / 255.0, green: 0x2A / 255.0, blue: 0x25 / 255.0)
+    private let deskTop = Color(red: 0x34 / 255.0, green: 0x57 / 255.0, blue: 0x4F / 255.0)
+    private let cardBg = Color(red: 0x0D / 255.0, green: 0x27 / 255.0, blue: 0x23 / 255.0)
+    private let hudText = Color(red: 0xE2 / 255.0, green: 0xE8 / 255.0, blue: 0xF0 / 255.0)
+    private let hudDim = Color(red: 0x94 / 255.0, green: 0xA3 / 255.0, blue: 0xB8 / 255.0)
+    private let d1Cyan = Color(red: 0x3E / 255.0, green: 0xD6 / 255.0, blue: 0xE8 / 255.0)
+    private let d1Amber = Color(red: 0xFF / 255.0, green: 0xA9 / 255.0, blue: 0x3D / 255.0)
+    private let d1Idle = Color(red: 0x7A / 255.0, green: 0x8A / 255.0, blue: 0x9C / 255.0)
+
+    private let scale: CGFloat = 0.45
+
     var body: some View {
         VStack(spacing: 10) {
             DeviceBezel(cornerRadius: 16, bezelWidth: 12, bezelColor: Color(white: 0.08)) {
-                Esp32TerrariumScene(selection: selection, hudHeight: 66)
+                VStack(spacing: 0) {
+                    // IPS10_TOPBAR_H = 56, IPS10_TERRARIUM_W = 408 (hud_bar.cpp).
+                    topBar
+                        .frame(height: 56 * scale)
+                    HStack(spacing: 4) {
+                        officeScene
+                            .frame(width: 408 * scale)
+                        cardsPane
+                    }
+                    .frame(maxHeight: .infinity)
+                }
+                .background(Color.black)
             }
-            .frame(width: 1280 * 0.45, height: 800 * 0.45)
+            .frame(width: 1280 * scale, height: 800 * scale)
             Text("ESP32 IPS 10.1\" • 1280×800 (P4 + PPA rotate)")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
+    }
+
+    // Full-width D1 top bar: brand · daemon status · usage blocks.
+    private var topBar: some View {
+        HStack(spacing: 8) {
+            AgentDeckLogo(size: 12, color: hudText)
+            (Text("Agent").foregroundStyle(hudText) + Text("Deck").foregroundStyle(d1Cyan))
+                .font(.system(size: 10, weight: .bold))
+            Text(selection.state == .disconnected ? "daemon offline" : "daemon :9120")
+                .font(.system(size: 7, design: .monospaced))
+                .foregroundStyle(hudDim)
+            Spacer(minLength: 4)
+            usageBlock(glyph: .claudeCode, p5: 0.42, p7: 0.68)
+            if selection.previewAgents.contains(.codex) {
+                usageBlock(glyph: .codex, p5: 0.23, p7: 0.51)
+            }
+        }
+        .padding(.horizontal, 10)
+        .background(topBarBg)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(red: 0x1B / 255.0, green: 0x3F / 255.0, blue: 0x39 / 255.0))
+                .frame(height: 0.7)
+        }
+    }
+
+    /// Compact per-agent usage block: brand glyph beside a 5H-over-7D column.
+    private func usageBlock(glyph: PixooPreviewAgent, p5: CGFloat, p7: CGFloat) -> some View {
+        HStack(spacing: 4) {
+            PreviewCreatureGlyph(agent: glyph, state: .idle, size: 11)
+            VStack(alignment: .leading, spacing: 1.5) {
+                usageFill(label: "5H", pct: p5)
+                usageFill(label: "7D", pct: p7)
+            }
+        }
+    }
+
+    private func usageFill(label: String, pct: CGFloat) -> some View {
+        HStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 6, weight: .bold, design: .monospaced))
+                .foregroundStyle(hudDim)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.12))
+                Capsule().fill(d1Cyan.opacity(0.7)).frame(width: 34 * pct)
+            }
+            .frame(width: 34, height: 4)
+            Text("\(Int(pct * 100))%")
+                .font(.system(size: 6, design: .monospaced))
+                .foregroundStyle(hudDim)
+        }
+    }
+
+    // Left office scene — carpet + desk pods + agent workers + legend chip.
+    private var officeScene: some View {
+        ZStack(alignment: .bottomLeading) {
+            carpetA
+            VStack(spacing: 10) {
+                ForEach(Array(selection.previewAgents.prefix(3).enumerated()), id: \.offset) { index, agent in
+                    officePod(agent: agent, index: index)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            legendChip
+                .padding(.leading, 6)
+                .padding(.bottom, 5)
+        }
+        .overlay(
+            Rectangle().stroke(carpetEdge, lineWidth: 1.5)
+        )
+        .clipped()
+    }
+
+    /// One project pod: desk slab + worker creature with a state bubble.
+    private func officePod(agent: PixooPreviewAgent, index: Int) -> some View {
+        let state = selection.previewState(for: index)
+        return VStack(spacing: 2) {
+            HStack(spacing: 8) {
+                PreviewCreatureGlyph(agent: agent, state: state, size: 26)
+                    .overlay(alignment: .topTrailing) {
+                        Text(bubbleChar(for: state))
+                            .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(bubbleColor(for: state))
+                            .offset(x: 7, y: -5)
+                    }
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(deskTop)
+                    .frame(width: 52, height: 12)
+            }
+            Text("\(agent.displayName.lowercased())-project")
+                .font(.system(size: 6.5, design: .monospaced))
+                .foregroundStyle(Color(red: 0xF4 / 255.0, green: 0xF4 / 255.0, blue: 0xE8 / 255.0).opacity(0.8))
+                .lineLimit(1)
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(carpetEdge.opacity(0.7))
+        )
+    }
+
+    private func bubbleChar(for state: PixooPreviewState) -> String {
+        switch state {
+        case .awaitingPrompt: return "?"
+        case .processing:     return "w"
+        case .idle:           return "z"
+        case .disconnected:   return "!"
+        }
+    }
+
+    private func bubbleColor(for state: PixooPreviewState) -> Color {
+        switch state {
+        case .awaitingPrompt: return d1Amber
+        case .processing:     return d1Cyan
+        case .idle:           return d1Idle
+        case .disconnected:   return Color(red: 1.0, green: 0x6B / 255.0, blue: 0x6B / 255.0)
+        }
+    }
+
+    /// Bottom-left state legend chip (Awaiting / Working / Idle swatches).
+    private var legendChip: some View {
+        HStack(spacing: 8) {
+            legendItem(color: d1Amber, label: "Awaiting")
+            legendItem(color: d1Cyan, label: "Working")
+            legendItem(color: d1Idle, label: "Idle")
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 5).fill(topBarBg.opacity(0.8)))
+    }
+
+    private func legendItem(color: Color, label: String) -> some View {
+        HStack(spacing: 3) {
+            Circle().fill(color).frame(width: 5, height: 5)
+            Text(label)
+                .font(.system(size: 6.5, design: .monospaced))
+                .foregroundStyle(hudDim)
+        }
+    }
+
+    // Right session-cards pane (D1 mosaic).
+    private var cardsPane: some View {
+        VStack(spacing: 6) {
+            if selection.previewAgents.isEmpty {
+                Text("no active sessions")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(hudDim)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ForEach(Array(selection.previewAgents.enumerated()), id: \.offset) { index, agent in
+                    sessionCard(agent: agent, index: index)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func sessionCard(agent: PixooPreviewAgent, index: Int) -> some View {
+        let state = selection.previewState(for: index)
+        let accent = bubbleColor(for: state)
+        return HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(accent)
+                .frame(width: 3)
+            PreviewCreatureGlyph(agent: agent, state: state, size: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(agent.displayName.lowercased())-project")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(hudText)
+                    .lineLimit(1)
+                Text(state.displayName.uppercased())
+                    .font(.system(size: 6.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(accent)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(7)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(cardBg)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(state == .awaitingPrompt ? d1Amber.opacity(0.7) : hudDim.opacity(0.25), lineWidth: 1)
+                )
+        )
     }
 }

@@ -103,11 +103,15 @@ public struct D200HSession: Equatable, Sendable {
 
 /// Global subscription/usage snapshot, surfaced as the pinned 5H/7D gauge tiles
 /// when `D200HDeckView.showUsage` is on. Mirrors the subset of `DashState`
-/// `buildUsageTiles` reads.
+/// `buildUsageTiles` reads. All four windows are hide-if-absent (nil → no tile),
+/// matching the TS engine since 208b1afc — an unlinked/partial usage state frees
+/// the reserved keys for session tiles instead of leaving "—" ghost gauges.
 public struct D200HUsage: Equatable, Sendable {
-    public var fiveHourPercent: Double
-    public var sevenDayPercent: Double
-    /// False → draw "—" instead of a confident 0% gauge.
+    /// Claude 5h window used%. nil → tile omitted.
+    public var fiveHourPercent: Double?
+    /// Claude 7d window used%. nil → tile omitted.
+    public var sevenDayPercent: Double?
+    /// False → suppress the Claude tiles entirely (usage state not trusted).
     public var known: Bool
     /// Optional Codex primary (≈5h) window used%.
     public var codexPrimaryPercent: Double?
@@ -117,8 +121,8 @@ public struct D200HUsage: Equatable, Sendable {
     public var codexSecondaryStale: Bool
 
     public init(
-        fiveHourPercent: Double,
-        sevenDayPercent: Double,
+        fiveHourPercent: Double? = nil,
+        sevenDayPercent: Double? = nil,
         known: Bool = true,
         codexPrimaryPercent: Double? = nil,
         codexPrimaryStale: Bool = false,
@@ -470,11 +474,17 @@ public enum D200HLayoutModel {
 
     // MARK: Usage tiles (port of buildUsageTiles)
 
+    /// Every tile is hide-if-absent (TS 208b1afc): Claude 5H/7D appear only
+    /// when that window's quota is actually known, so fewer (or zero) tiles are
+    /// reserved and the freed slots flow to session tiles.
     private static func buildUsageTiles(_ usage: D200HUsage) -> [(D200HSlotKind, String, String)] {
-        var tiles: [(D200HSlotKind, String, String)] = [
-            (.usageGauge(agent: "claude", window: "5h", percent: usage.fiveHourPercent, known: usage.known, stale: false), "5H", "claude"),
-            (.usageGauge(agent: "claude", window: "7d", percent: usage.sevenDayPercent, known: usage.known, stale: false), "7D", "claude"),
-        ]
+        var tiles: [(D200HSlotKind, String, String)] = []
+        if usage.known, let p = usage.fiveHourPercent {
+            tiles.append((.usageGauge(agent: "claude", window: "5h", percent: p, known: true, stale: false), "5H", "claude"))
+        }
+        if usage.known, let p = usage.sevenDayPercent {
+            tiles.append((.usageGauge(agent: "claude", window: "7d", percent: p, known: true, stale: false), "7D", "claude"))
+        }
         if let p = usage.codexPrimaryPercent {
             tiles.append((.usageGauge(agent: "codex", window: "5h", percent: p, known: true, stale: usage.codexPrimaryStale), "5H", "codex"))
         }

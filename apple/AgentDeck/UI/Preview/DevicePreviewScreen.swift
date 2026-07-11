@@ -28,6 +28,15 @@ struct DevicePreviewScreen: View {
         device: .streamDeckPlus
     )
 
+    /// Live-follow mode: derive agent/state/session-count from the daemon's
+    /// aggregate state instead of the toolbar pickers, so each preview shows
+    /// (approximately) what that device is rendering RIGHT NOW. First step
+    /// toward per-device emulators — the mapping is coarse (the preview input
+    /// model is agent+state+count), but it turns the catalog into a live
+    /// mirror for QA without hardware.
+    @State private var followLive = false
+    @EnvironmentObject private var stateHolder: AgentStateHolder
+
     /// Mark first-view-seen. The window is the only caller that should write
     /// this flag — don't leak the side-effect into subviews.
     @EnvironmentObject private var preferences: AppPreferences
@@ -168,6 +177,7 @@ struct DevicePreviewScreen: View {
             }
             .pickerStyle(.menu)
             .frame(maxWidth: 180)
+            .disabled(followLive)
 
             Picker("State", selection: $selection.state) {
                 ForEach(PixooPreviewState.allCases) { state in
@@ -176,6 +186,7 @@ struct DevicePreviewScreen: View {
             }
             .pickerStyle(.menu)
             .frame(maxWidth: 180)
+            .disabled(followLive)
 
             Picker("Sessions", selection: $selection.sessionCount) {
                 ForEach(sessionCountOptions, id: \.self) { n in
@@ -184,8 +195,17 @@ struct DevicePreviewScreen: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 200)
+            .disabled(followLive)
 
             Spacer()
+
+            // Live-follow: mirror the daemon's current sessions instead of
+            // the synthetic picker state.
+            Toggle(isOn: $followLive) {
+                Label("Live", systemImage: "dot.radiowaves.left.and.right")
+            }
+            .toggleStyle(.button)
+            .help("Follow the live daemon state — previews mirror what devices show right now")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -195,12 +215,14 @@ struct DevicePreviewScreen: View {
 
     @ViewBuilder
     private func deviceBody(animationFrame: Int) -> some View {
-        // Merge the toolbar selection with the live animation frame so each
-        // per-device view receives a single, coherent DevicePreviewSelection.
+        // Merge the toolbar selection (or, in live-follow mode, the daemon's
+        // aggregate state) with the animation frame so each per-device view
+        // receives a single, coherent DevicePreviewSelection.
+        let inputs = followLive ? Self.liveSelectionInputs(from: stateHolder.state) : nil
         let live = DevicePreviewSelection(
-            agent: selection.agent,
-            state: selection.state,
-            sessionCount: selection.sessionCount,
+            agent: inputs?.agent ?? selection.agent,
+            state: inputs?.state ?? selection.state,
+            sessionCount: inputs?.sessionCount ?? selection.sessionCount,
             device: selection.device,
             animationFrame: animationFrame
         )
@@ -235,12 +257,51 @@ struct DevicePreviewScreen: View {
     private func frameFromTimeline(_ date: Date) -> Int {
         Int(date.timeIntervalSinceReferenceDate * 10)
     }
+
+    // MARK: - Live-follow mapping
+
+    /// Coarse daemon-state → preview-selection mapping for live-follow mode.
+    /// Awaiting wins over processing (attention beats motion — same priority
+    /// every physical surface uses); session count clamps to the preview's
+    /// supported {0, 1, 2, 4} buckets.
+    static func liveSelectionInputs(
+        from state: DashboardState
+    ) -> (agent: PixooPreviewAgent, state: PixooPreviewState, sessionCount: Int) {
+        let alive = state.siblingSessions.filter(\.alive)
+        guard state.bridgeConnected else { return (.claudeCode, .disconnected, 0) }
+
+        let agentType = state.agentType ?? alive.first?.agentType
+        let agent: PixooPreviewAgent
+        switch agentType {
+        case "codex-cli", "codex-app": agent = .codex
+        case "opencode":               agent = .opencode
+        case "openclaw":               agent = .openclaw
+        default:                       agent = .claudeCode
+        }
+
+        let anyAwaiting = state.state.isAwaiting
+            || alive.contains { AgentConnectionState(rawValue: $0.state ?? "")?.isAwaiting == true }
+        let anyProcessing = state.state == .processing
+            || alive.contains { $0.state == "processing" }
+        let previewState: PixooPreviewState = anyAwaiting
+            ? .awaitingPrompt
+            : (anyProcessing ? .processing : .idle)
+
+        let count: Int
+        switch alive.count {
+        case 0, 1, 2: count = alive.count
+        case 3:       count = 2
+        default:      count = 4
+        }
+        return (agent, previewState, count)
+    }
 }
 
 #if DEBUG
 #Preview("Device preview") {
     DevicePreviewScreen()
         .environmentObject(AppPreferences.shared)
+        .environmentObject(AgentStateHolder())
         .frame(width: 1100, height: 760)
 }
 #endif

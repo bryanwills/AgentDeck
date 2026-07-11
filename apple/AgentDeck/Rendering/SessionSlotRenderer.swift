@@ -5,6 +5,12 @@
 // same rendering pipeline. The real Stream Deck hardware still receives SVG via the
 // TypeScript bridge — this Swift version is visual-parity only.
 //
+// ─────────────────────────────────────────────────────────────────────────────
+// KEEP IN SYNC (SSOT PORT): hand-maintained mirror of `renderSessionSlot` in the
+// TS renderer. When that function's visuals change, re-port here in the same
+// commit. Last synced against the RUNNING-teal / PERM-amber-breathe split
+// (TS f9869f9e) + idle-only ACT badge + brand-logo watermark placement.
+//
 // Scope for this first pass:
 //   - renderSessionSlot (primary session button)
 // Future ports if needed:
@@ -75,17 +81,20 @@ struct SessionSlotView: View {
         case .idle:    return "IDLE"
         }
     }
-    private var accentColorText: Color {
+    /// RUNNING is a cool teal, PERM the semantic amber — mirrors the TS
+    /// renderer's WORKING_COLOR/stateColor split (f9869f9e) so the two states
+    /// never read as the same hue.
+    private var signalColor: Color {
         switch mode {
-        case .working: return Color(hex: "#FDE68A")
-        case .asking:  return Color(hex: "#FECACA")
+        case .working: return Color(hex: "#2DD4BF")
+        case .asking:  return Color(hex: "#F59E0B")
         case .idle:    return palette.primary
         }
     }
-    private var leftStripColor: Color {
+    private var accentColorText: Color {
         switch mode {
-        case .working: return Color(hex: "#F5B942")
-        case .asking:  return Color(hex: "#F87171")
+        case .working: return Color(hex: "#CCFBF1")
+        case .asking:  return Color(hex: "#FCD34D")
         case .idle:    return palette.primary
         }
     }
@@ -109,48 +118,55 @@ struct SessionSlotView: View {
                 .fill(Color(hex: "#2C2C2E").opacity(0.8))
                 .padding(SessionSlot.innerInset)
 
-            // Pulsing glow border when asking (approximates the feGaussianBlur stroke in TS)
-            if mode == .asking {
-                let pulseOpacity = 0.4 + 0.5 * abs(sin(Double(animFrame) * 0.15))
+            // State border. RUNNING: teal marching dashes orbiting the key
+            // (renderOrbitingRect — dash 92px over the 512px perimeter);
+            // PERM: solid amber that breathes (full perimeter, no dashes).
+            // Deliberately different motion + hue per state (TS f9869f9e).
+            if mode == .working {
+                let pulseOpacity = 0.72 + 0.20 * abs(sin(Double(animFrame) * 0.12))
+                let phase = CGFloat(-((animFrame * 22) % 512))
                 RoundedRectangle(cornerRadius: SessionSlot.innerCornerRadius, style: .continuous)
-                    .strokeBorder(StateColors.color(for: session.state), lineWidth: 2.5)
-                    .opacity(pulseOpacity)
-                    .blur(radius: 2)
+                    .strokeBorder(signalColor, style: StrokeStyle(lineWidth: 3.6, dash: [92, 420], dashPhase: phase))
+                    .opacity(pulseOpacity * 0.72)
+                    .blur(radius: 2.4)
+                    .padding(SessionSlot.innerInset)
+                RoundedRectangle(cornerRadius: SessionSlot.innerCornerRadius, style: .continuous)
+                    .strokeBorder(signalColor, style: StrokeStyle(lineWidth: 1.8, dash: [92, 420], dashPhase: phase))
+                    .opacity(min(1, pulseOpacity + 0.06))
+                    .padding(SessionSlot.innerInset)
+            }
+            if mode == .asking {
+                let breathe = 0.45 + 0.55 * abs(sin(Double(animFrame) * 0.14))
+                RoundedRectangle(cornerRadius: SessionSlot.innerCornerRadius, style: .continuous)
+                    .strokeBorder(signalColor, lineWidth: 7)
+                    .opacity(breathe * 0.6)
+                    .blur(radius: 2.4)
+                    .padding(SessionSlot.innerInset)
+                RoundedRectangle(cornerRadius: SessionSlot.innerCornerRadius, style: .continuous)
+                    .strokeBorder(signalColor, lineWidth: 3)
+                    .opacity(0.97)
                     .padding(SessionSlot.innerInset)
             }
 
-            // Left edge color strip (x=8, y=8, w=4, h=128 in TS)
-            HStack(spacing: 0) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(leftStripColor)
-                    .frame(width: 4, height: 128)
-                    .padding(.leading, SessionSlot.innerInset)
-                Spacer()
-            }
-
-            // Agent watermark (bottom-right, 40pt), using the same official
-            // Creature* asset catalog images as the monitor and preview UI.
+            // Agent watermark (bottom-right, mirrors the TS 72px logo at 92,80).
             agentWatermark
-                .frame(width: 40, height: 40)
-                .opacity(mode == .idle ? 0.46 : 0.34)
-                .offset(x: (SessionSlot.size / 2) - 24, y: (SessionSlot.size / 2) - 30)
+                .frame(width: 56, height: 56)
+                .opacity(mode == .idle ? 0.62 : 0.55)
+                .offset(x: (SessionSlot.size / 2) - 32, y: (SessionSlot.size / 2) - 34)
 
-            // Working spinner (top-right, rotates by animFrame)
+            // Top-right badge: teal RUN pill while working, bold amber PERM pill
+            // while awaiting, faint ACT pill only when idle (TS badgeObj).
             if mode == .working {
-                workingSpinner
-                    .offset(x: 42, y: -38)
+                runBadge
+                    .offset(x: 42, y: -50)
             }
-
-            // Asking dot (top-right, amber over white)
             if mode == .asking {
-                askingDot
-                    .offset(x: 42, y: -48)
+                permBadge
+                    .offset(x: 39, y: -50)
             }
-
-            // "ACT" badge when not asking (top-right)
-            if mode != .asking {
+            if mode == .idle {
                 actBadge
-                    .offset(x: 42, y: -47)
+                    .offset(x: 42, y: -50)
             }
 
             // Text block (left-aligned, three rows)
@@ -184,24 +200,28 @@ struct SessionSlotView: View {
         )
     }
 
-    private var workingSpinner: some View {
-        let angle = Double((animFrame * 3) % 360)
-        return Image(systemName: "sparkle")
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(accentColorText)
-            .rotationEffect(.degrees(angle))
-            .frame(width: 16, height: 16)
+    /// Teal RUN pill (TS runBadge: 30×16 at x=99,y=14, dark text on signal).
+    private var runBadge: some View {
+        ZStack {
+            Capsule()
+                .fill(signalColor.opacity(0.9))
+                .frame(width: 30, height: 16)
+            Text("RUN")
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundStyle(Color(hex: "#0C0C0E"))
+        }
     }
 
-    private var askingDot: some View {
+    /// Bold amber PERM pill (TS askDot: 42×19 at x=90,y=12) — replaced the
+    /// old 5px dot so "needs you" is legible at a glance.
+    private var permBadge: some View {
         ZStack {
-            Circle()
-                .fill(Color(hex: "#F5B942"))
-                .frame(width: 10, height: 10)
-                .blur(radius: 1.5)
-            Circle()
-                .fill(Color.white)
-                .frame(width: 6, height: 6)
+            Capsule()
+                .fill(signalColor)
+                .frame(width: 42, height: 19)
+            Text("PERM")
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(Color(hex: "#221500"))
         }
     }
 

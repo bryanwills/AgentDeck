@@ -79,6 +79,9 @@ struct AgentDeckApp: App {
             DevicePreviewScreen()
                 .environmentObject(preferences)
                 .environmentObject(daemonService)
+                // Live-follow mode reads the daemon's aggregate state so the
+                // preview can mirror what devices are rendering right now.
+                .environmentObject(stateHolder)
         }
         .defaultPosition(.center)
         .defaultSize(width: 1100, height: 760)

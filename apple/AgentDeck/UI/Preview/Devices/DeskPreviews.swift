@@ -105,11 +105,21 @@ private func d200hDeckSlots(for selection: DevicePreviewSelection) -> [D200HKeyS
                 : []
         )
     }
+    // Usage tiles are hide-if-absent in the layout engine (TS 208b1afc), so the
+    // sample usage follows the session mix: Claude quota when a Claude session
+    // is present (or the daemon idles with no sessions), Codex windows only
+    // when a Codex session is. Lets the preview show the freed-slot reflow.
+    let hasClaude = agents.isEmpty || agents.contains(.claudeCode)
+    let hasCodex = agents.contains(.codex)
     let input = D200HDeckInput(
         state: sessions.isEmpty ? "disconnected" : selection.state.sessionStateStringForUI,
         sessions: sessions,
-        usage: D200HUsage(fiveHourPercent: 42, sevenDayPercent: 68,
-                          codexPrimaryPercent: 23, codexSecondaryPercent: 51)
+        usage: D200HUsage(
+            fiveHourPercent: hasClaude ? 42 : nil,
+            sevenDayPercent: hasClaude ? 68 : nil,
+            codexPrimaryPercent: hasCodex ? 23 : nil,
+            codexSecondaryPercent: hasCodex ? 51 : nil
+        )
     )
     return D200HLayoutModel.buildSessionDeck(input, view: D200HDeckView(mode: .list))
 }
