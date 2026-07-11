@@ -113,6 +113,12 @@ final class DevicePreviewSnapshotTests: XCTestCase {
         try snapshot(Esp3286BoxPreview(selection: livePixooSelection(.esp32_86box)), name: "86box-live-emulator")
         try snapshot(Esp32RoundPreview(selection: livePixooSelection(.esp32Round)), name: "round-live-emulator")
         try snapshot(Esp32TtgoPreview(selection: livePixooSelection(.esp32Ttgo)), name: "ttgo-live-emulator")
+        // Remaining surfaces made live-aware: TC001 matrix (per-session
+        // creatures), the terminal terrarium, e-ink color, and the tablet.
+        try snapshot(UlanziMatrixPreview(selection: livePixooSelection(.ulanziMatrix)), name: "tc001-live-emulator")
+        try snapshot(TerminalTerrariumPreview(selection: livePixooSelection(.terminalTerrarium)), name: "terminal-live-emulator")
+        try snapshot(EinkColorPreview(selection: livePixooSelection(.einkColor)), name: "einkcolor-live-emulator")
+        try snapshot(IPadLandscapePreview(selection: livePixooSelection(.iPadLandscape)), name: "ipad-live-emulator")
     }
 
     /// A realistic multi-agent daemon state for live-follow snapshots, wrapped

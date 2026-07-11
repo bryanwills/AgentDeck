@@ -82,19 +82,20 @@ private struct EinkScreenLayout: View {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack(alignment: .center, spacing: 5) {
                             PreviewCreatureGlyph(
-                                agent: selection.agent,
-                                state: selection.state,
+                                agent: focusAgent,
+                                state: focusState,
                                 size: 54,
                                 tintOverride: creatureTint
                             )
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(selection.agent.displayName)
+                                Text(focusSession?.projectName ?? focusAgent.displayName)
                                     .font(.system(size: 13, weight: .bold, design: .serif))
                                     .foregroundStyle(creatureTint)
-                                Text("STATE \(selection.state.displayName.uppercased())")
+                                    .lineLimit(1)
+                                Text("STATE \(focusState.displayName.uppercased())")
                                     .font(.system(size: 7, weight: .semibold, design: .monospaced))
                                     .foregroundStyle(.black.opacity(0.58))
-                                Text("\(selection.sessionCount) SESSION\(selection.sessionCount == 1 ? "" : "S")")
+                                Text("\(sessionTotal) SESSION\(sessionTotal == 1 ? "" : "S")")
                                     .font(.system(size: 7, design: .monospaced))
                                     .foregroundStyle(.black.opacity(0.45))
                             }
@@ -128,14 +129,25 @@ private struct EinkScreenLayout: View {
         )
     }
 
+    // Focused session (real in live-follow, else the synthesized primary) — the
+    // large creature + name reflect it; the mini list beside it shows the rest.
+    private var focusSession: PreviewDisplaySession? { selection.displaySessions.first }
+    private var focusAgent: PixooPreviewAgent { focusSession?.agent ?? selection.agent }
+    private var focusState: PixooPreviewState { focusSession?.state ?? selection.state }
+    private var sessionTotal: Int {
+        selection.live != nil ? selection.displaySessions.count : selection.sessionCount
+    }
+
     private var creatureTint: Color {
-        isColor ? StateColors.brand(agent: selection.agent.rawValue) : .black.opacity(0.82)
+        isColor ? StateColors.brand(agent: focusAgent.rawValue) : .black.opacity(0.82)
     }
 
     private var usageStrip: some View {
-        HStack(spacing: 4) {
-            einkGauge("5h", fill: 0.42)
-            einkGauge("7d", fill: 0.68)
+        // Real Claude window in live-follow mode, else the placeholder gauge.
+        let usage = selection.displayUsageRows.first
+        return HStack(spacing: 4) {
+            einkGauge("5h", fill: CGFloat(usage?.p5 ?? 0.42))
+            einkGauge("7d", fill: CGFloat(usage?.p7 ?? 0.68))
         }
     }
 

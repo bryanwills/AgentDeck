@@ -221,17 +221,20 @@ struct UlanziMatrixPreview: View {
             }
         }
 
-        let agents = selection.previewAgents
-        let hasOpenClaw = agents.contains(.openclaw)
+        // Live-follow → real sessions (per-session agent + state); manual → the
+        // synthesized palette. One creature per alive session, like the firmware.
+        let sessions = selection.displaySessions
+        let hasOpenClaw = sessions.contains { $0.agent == .openclaw }
         let crayfishX = 27
         let agentMaxX = hasOpenClaw ? crayfishX - 7 : matrixW - 7
 
         // Non-OpenClaw agents march left → right, 7px stride (5px sprite
         // + 2px gap), exactly like the firmware's agents area.
         var cursorX = 1
-        for (index, agent) in agents.enumerated() where agent != .openclaw {
+        for (index, session) in sessions.enumerated() where session.agent != .openclaw {
             guard cursorX <= agentMaxX else { break }
-            let state = selection.previewState(for: index)
+            let agent = session.agent
+            let state = session.state
             let bodyColor = Tc001Sprites.bodyColor(agent: agent, state: state, instanceIdx: index)
             if agent == .antigravity {
                 // Firmware special-cases antigravity: instead of a monochrome
@@ -254,21 +257,22 @@ struct UlanziMatrixPreview: View {
         }
 
         // OpenClaw crayfish pinned at the right edge — the firmware's
-        // Gateway-presence signal.
+        // Gateway-presence signal (uses the OpenClaw session's own state).
         if hasOpenClaw {
+            let ocState = sessions.first { $0.agent == .openclaw }?.state ?? selection.state
             drawSprite(
                 ctx: &ctx, atX: crayfishX, y: 1,
                 body: Tc001Sprites.body(for: .openclaw),
                 accent: Tc001Sprites.accent(for: .openclaw),
-                bodyColor: Tc001Sprites.bodyColor(agent: .openclaw, state: selection.state, instanceIdx: 0),
-                accentColor: Tc001Sprites.accentColor(agent: .openclaw, state: selection.state),
+                bodyColor: Tc001Sprites.bodyColor(agent: .openclaw, state: ocState, instanceIdx: 0),
+                accentColor: Tc001Sprites.accentColor(agent: .openclaw, state: ocState),
                 cellW: cellW, cellH: cellH
             )
         }
 
         // Empty aquarium → idle breathing octopus, matching the firmware's
         // agentCount == 0 branch (dim terracotta, mid-breath).
-        if agents.isEmpty {
+        if sessions.isEmpty {
             drawSprite(
                 ctx: &ctx, atX: 8, y: 1,
                 body: Tc001Sprites.body(for: .claudeCode),
@@ -586,6 +590,13 @@ struct TerminalTerrariumPreview: View {
     let selection: DevicePreviewSelection
 
     private var agentsAndStates: (agents: [String], states: [String]) {
+        // Live-follow → the daemon's real sessions (agent + state per session).
+        if selection.live != nil {
+            let sessions = selection.displaySessions
+            return (sessions.map { $0.agent.rawValue },
+                    sessions.map { $0.state.sessionStateStringForUI })
+        }
+        // Manual → a fixed-variety palette so the terrarium reads as populated.
         let count = max(selection.sessionCount, 1)
         let palette: [PixooPreviewAgent] = [selection.agent, .codex, .opencode, .openclaw]
         var agents: [String] = []
