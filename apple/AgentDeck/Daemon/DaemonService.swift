@@ -818,6 +818,7 @@ struct DeviceSummary: Equatable {
 
     static func makeD200hEntry(from d: [String: Any]) -> DeviceEntry {
         let connected = d["connected"] as? Bool ?? false
+        let externalOwner = d["externalOwner"] as? Bool ?? false
         let managerOpened = d["managerOpened"] as? Bool ?? false
         let lastOpenError = d["lastOpenError"] as? Int32 ?? 0
         let sandboxEnabled = d["sandboxEnabled"] as? Bool ?? false
@@ -828,7 +829,9 @@ struct DeviceSummary: Equatable {
         var subtitle: String?
         if connected {
             status = .connected
-            subtitle = pressCount > 0 ? "\(pressCount) press\(pressCount == 1 ? "" : "es")" : "ready"
+            subtitle = externalOwner
+                ? "via Ulanzi Studio"
+                : (pressCount > 0 ? "\(pressCount) press\(pressCount == 1 ? "" : "es")" : "ready")
         } else if sandboxEnabled && !usbEntitlementPresent {
             status = .error("USB entitlement missing")
             subtitle = "USB access unavailable"
@@ -845,7 +848,7 @@ struct DeviceSummary: Equatable {
         return DeviceEntry(
             id: "d200h",
             kind: .d200h,
-            title: "Stream Deck+",
+            title: "D200H",
             subtitle: subtitle,
             status: status
         )

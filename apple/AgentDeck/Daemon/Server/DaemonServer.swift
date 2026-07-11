@@ -2154,6 +2154,7 @@ final class DaemonServer {
             if let d200hModule {
                 Task { await d200hModule.setExternalOwner(false) }
             }
+            broadcastStateUpdate()
         }
     }
 
@@ -2942,6 +2943,7 @@ final class DaemonServer {
             if let d200hModule {
                 Task { await d200hModule.setExternalOwner(true) }
             }
+            broadcastStateUpdate()
         default:
             DaemonLogger.shared.debug("Daemon", "client_register ignored clientType=\(clientType)")
         }
@@ -4631,7 +4633,23 @@ final class DaemonServer {
     /// or `nil` if the D200H module isn't initialized.
     @MainActor
     func d200hStatusSnapshot() -> [String: Any]? {
-        return d200hModule?.statusSnapshot()
+        return d200hHealthSnapshot()
+    }
+
+    /// Node parity (bridge `moduleHealthProvider`): the D200H is driven
+    /// exclusively by the Ulanzi Studio plugin, so its connectivity is that
+    /// plugin's WS presence. The dormant direct-HID module stays authoritative
+    /// if it is ever re-enabled. Returns nil when neither is present so users
+    /// without a D200H never see a ghost row.
+    @MainActor
+    private func d200hHealthSnapshot() -> [String: Any]? {
+        if let d200hModule { return d200hModule.statusSnapshot() }
+        guard ulanziPluginConnectionId != nil else { return nil }
+        return [
+            "connected": true,
+            "externalOwner": true,
+            "managerOpened": true,
+        ]
     }
 
     /// In-process accessors for the other device modules. Same rationale as
@@ -4670,8 +4688,8 @@ final class DaemonServer {
         if let adbModule {
             modules["adb"] = adbModule.statusSnapshot()
         }
-        if let d200hModule {
-            modules["d200h"] = d200hModule.statusSnapshot()
+        if let d200h = d200hHealthSnapshot() {
+            modules["d200h"] = d200h
         }
         if let pixooModule {
             modules["pixoo"] = pixooModule.statusSnapshot()
@@ -4816,7 +4834,7 @@ final class DaemonServer {
     private func buildModuleHealthSync() -> [String: Any] {
         var modules: [String: Any] = [:]
         if let adb = adbModule { modules["adb"] = adb.statusSnapshot() }
-        if let d200h = d200hModule { modules["d200h"] = d200h.statusSnapshot() }
+        if let d200h = d200hHealthSnapshot() { modules["d200h"] = d200h }
         if let pixoo = pixooModule { modules["pixoo"] = pixoo.statusSnapshot() }
         if let idotMatrix = idotMatrixModule { modules["idotmatrix"] = idotMatrix.statusSnapshot() }
         if let timebox = timeboxModule { modules["timebox"] = timebox.statusSnapshot() }

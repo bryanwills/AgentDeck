@@ -632,7 +632,7 @@ struct TopologyRail: View {
                         ? .ok
                         : (d200h.managerOpened ? .warn : .dim),
                     detail: d200h.connected
-                        ? "HID · 14 keys"
+                        ? (d200h.externalOwner ? "Ulanzi Studio · 14 keys" : "HID · 14 keys")
                         : (d200h.lastOpenError
                            ?? (d200h.usbEntitlementPresent ? "Disconnected" : "No USB entitlement"))
                 )

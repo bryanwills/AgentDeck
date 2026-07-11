@@ -49,7 +49,7 @@ AgentDeck 은 의도된 2-티어 제품이다. 아래 매트릭스의 모든 행
 
 | Device | App Store | CLI | 분류 | 비고 |
 |---|:---:|:---:|---|---|
-| **Ulanzi D200H Deck Dock** | ✅ | ✅ | Built-in USB | **유일 경로: Ulanzi Studio 플러그인**(`plugin-ulanzi`, 공식 SDK, Studio 안에서 WS — AgentDeck.app 에 미번들이라 불변식 무관). direct-HID 폴백은 retire — **Node 삭제(2026-07-08)**, Swift IOKit(`com.apple.security.device.usb`)만 dormant 보존 |
+| **Ulanzi D200H Deck Dock** | ✅ | ✅ | Built-in USB | **유일 경로: Ulanzi Studio 플러그인**(`plugin-ulanzi`, 공식 SDK, Studio 안에서 WS — AgentDeck.app 에 미번들이라 불변식 무관). direct-HID 폴백은 retire — **Node 삭제(2026-07-08)**, Swift IOKit(`com.apple.security.device.usb`)만 dormant 보존. 토폴로지 행은 양쪽 티어 모두 `ulanzi-plugin` WS presence 로 합성 (Node 기존, Swift 2026-07-11) — 플러그인 미연결 시 행 자체가 사라짐(ghost row 없음) |
 | **Divoom Pixoo64** | ✅ | ✅ | Network LED | HTTP, entitlement 불필요 |
 | **Divoom Timebox Mini** | ✅ | ✅ | Bluetooth LE | 11×11 RGB. `TimeBox-mini-light` BLE GATT(ISSC transparent-UART `49535343-…`). App Store 단독 Swift 앱: 네이티브 CoreBluetooth (`com.apple.security.device.bluetooth`) — `Timebox{BLE,Module,DivoomPacket}.swift`, micro 레이아웃 11×11 렌더, 서브프로세스 없음. CLI(Node) 데몬: Python `sync_ble.py`(bleak) 자동 spawn. iDotMatrix 와 동일하게 둘 다 뜨면 BLE 단일연결 → 하나만 구동. (구 Bluetooth Classic SPP 변종은 호환성·App Store 제약으로 제거됨) |
 | **iDotMatrix LED 디스플레이** | ✅ | ✅ | Bluetooth LE | App Store 단독 Swift 앱: 네이티브 CoreBluetooth (`com.apple.security.device.bluetooth`, hub 모듈). CLI(Node) 데몬: BLE 네이티브 불가 → 데몬이 Python `idotmatrix`(bleak) `sync.py`를 **자동 spawn**(`startIDotMatrixSync`)해 구동 → CLI 데몬만으로 동작. 둘 다 뜨면 CLI 데몬 소유, Swift client-mode stand down(BLE 단일연결) |
