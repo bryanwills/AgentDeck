@@ -22,6 +22,23 @@ bash scripts/build-android-release.sh    # → dist/agentdeck-v{VERSION}.apk
 # git tag android-v{VERSION} && git push origin android-v{VERSION}  → CI builds APK
 ```
 
+### WiFi adb deploy (cable-free updates)
+
+Dashboard devices (e-ink readers, tablets) can take silent APK updates over WiFi
+once their `adbd` is switched to TCP mode:
+
+```bash
+bash scripts/deploy-android-wifi.sh enable           # one-time per device, USB attached:
+                                                     #   tcpip:5555 + record wlan0 IP
+bash scripts/deploy-android-wifi.sh deploy [--build] # install newest dist/agentdeck-v*.apk
+                                                     #   to every recorded device + relaunch
+bash scripts/deploy-android-wifi.sh status           # reconnect + show device states
+```
+
+Device IPs persist in `~/.agentdeck/android-adb-devices.json`. tcpip mode does
+**not** survive a device reboot — after a reboot, plug the device in over USB
+once and re-run `enable`. USB adb keeps working alongside TCP mode.
+
 ### Signing
 
 For local builds, create `android/signing.properties` (gitignored):
