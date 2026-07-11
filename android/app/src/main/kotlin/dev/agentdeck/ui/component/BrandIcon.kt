@@ -49,7 +49,9 @@ fun BrandIcon(
 
     Canvas(modifier = modifier.size(size)) {
         val s = this.size.minDimension / spec.viewBox
-        scale(s, s) {
+        // Pivot at the origin: the default (center) pivot shifts the scaled
+        // path up-left by center*(s-1), pushing large icons out of their box.
+        scale(s, s, pivot = Offset.Zero) {
             for (path in paths) {
                 if (rainbowBrush != null) {
                     drawPath(path, rainbowBrush)
