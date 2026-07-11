@@ -90,6 +90,17 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     // MARK: - Init
 
     init() {
+        #if DEBUG && os(iOS)
+        // App Store screenshot capture only: pin a freshly installed Simulator
+        // directly to the deterministic local mock before mDNS can discover a
+        // developer daemon. Release builds do not compile this path.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-AgentDeckScreenshotURL"),
+           arguments.indices.contains(index + 1) {
+            preferredLocalBridgeUrl = arguments[index + 1]
+        }
+        #endif
+
         connection.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.objectWillChange.send() }

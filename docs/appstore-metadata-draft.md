@@ -232,7 +232,7 @@ Feedback welcome: puritysb@gmail.com
 
 The upload-ready set is in `apple/appstore-submission/screenshots/`. Do not upload the older raw captures in `apple/appstore-screenshots/`; several are duplicate onboarding frames or non-App-Store desktop captures.
 
-Current upload-ready set: 3 macOS + 3 iPhone + 3 iPad screenshots. Capture a privacy-safe live dashboard later if desired; screenshots must not expose project names, auth tokens, local IP addresses, or USB paths.
+Current upload-ready set: 3 macOS + 3 iPhone + 3 iPad screenshots. The mobile dashboards use deterministic sample sessions and contain no real project names, auth tokens, local IP addresses, or USB paths.
 
 ### macOS upload order (2880×1800)
 
@@ -240,11 +240,17 @@ Current upload-ready set: 3 macOS + 3 iPhone + 3 iPad screenshots. Capture a pri
 2. **Agent evaluation (APME)** — Foundation Models selected and Apple Intelligence ready.
 3. **Integrations** — opt-in Claude/Codex observation and local account status handled by the Swift app.
 
-### iPhone and iPad upload order
+### iPhone upload order (1284×2778, 6.5-inch)
 
-Use the same story on both devices: value proposition → supported agents → automatic Mac discovery and QR fallback. iPhone files are 1320×2868 (6.9-inch); iPad files are 2064×2752 (13-inch).
+1. **Welcome** — product value proposition.
+2. **Live dashboard** — three privacy-safe sample agents in processing and idle states.
+3. **Attention** — a focused permission request from the Swift-daemon dashboard.
 
-An active dashboard can be added later only after replacing real project/session names with a clean demo session and verifying that the frame contains no token, IP address, local path, or device identifier.
+### iPad upload order (2064×2752, 13-inch)
+
+1. **Live dashboard** — full session list, topology, aquarium, and timeline.
+2. **Attention** — permission state with the selected agent surfaced prominently.
+3. **Aquarium view** — HUD-reduced view of the three agent creatures and timeline.
 
 ---
 
