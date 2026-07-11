@@ -7,10 +7,10 @@ This directory contains the assets that are safe to upload to App Store Connect.
 | Platform | Files | Apple slot |
 |---|---:|---|
 | macOS | 3 | Mac, 2880×1800 |
-| iPhone | 3 | 6.5-inch, 1284×2778 |
+| iPhone | 3 | 6.9-inch, 1320×2868 |
 | iPad | 3 | 13-inch, 2064×2752 |
 
-The macOS images are privacy-safe captures of Device Preview, on-device APME settings, and opt-in Swift integrations. The iOS images cover value proposition, supported agents, and Mac discovery. All are actual app UI captured from the current build on 2026-07-10 and contain no developer-daemon-only panel.
+The macOS images are privacy-safe captures of Device Preview, on-device APME settings, and opt-in Swift integrations. The iOS images cover value proposition, supported agents, and Mac discovery. All are actual app UI captured from the current build; the iPhone and iPad set was refreshed on 2026-07-12 with a normalized 9:41 status bar, English UI, and opaque PNG output. No image contains a developer-daemon-only panel.
 
 Do not upload images from `apple/appstore-screenshots/`. That directory is a raw historical capture archive and contains duplicate onboarding frames, developer desktops, browser windows, local project names, IP addresses, and device paths.
 

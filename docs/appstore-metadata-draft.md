@@ -242,7 +242,7 @@ Current upload-ready set: 3 macOS + 3 iPhone + 3 iPad screenshots. Capture a pri
 
 ### iPhone and iPad upload order
 
-Use the same story on both devices: value proposition → supported agents → automatic Mac discovery and QR fallback. iPhone files are 1284×2778 (6.5-inch); iPad files are 2064×2752 (13-inch).
+Use the same story on both devices: value proposition → supported agents → automatic Mac discovery and QR fallback. iPhone files are 1320×2868 (6.9-inch); iPad files are 2064×2752 (13-inch).
 
 An active dashboard can be added later only after replacing real project/session names with a clean demo session and verifying that the frame contains no token, IP address, local path, or device identifier.
 

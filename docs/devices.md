@@ -23,7 +23,7 @@
 
 **InkDeck** is AgentDeck's wired 7.5" e-ink status panel. The hardware is a **Seeed TRMNL 7.5" OG DIY Kit** — a **XIAO ESP32-S3 Plus** wired to an 800×480 monochrome ePaper panel (GDEY075T7 / UC8179 controller), always **USB-powered** (no battery / deep-sleep).
 
-**Status: firmware in development.** InkDeck is driven by new custom AgentDeck ESP32 firmware under `esp32/` (PlatformIO env `inkdeck`). Like the other ESP32 boards, it connects to the daemon over **WiFi WebSocket** and the daemon **pushes** 1-bit dashboard frames; the panel renders with fast partial refreshes (~0.3s) plus a periodic full refresh to clear ghosting. Rendering/refresh behavior is still being built — this section documents the intended surface, not a shipping feature.
+**Status: firmware in development.** InkDeck is driven by custom AgentDeck ESP32 firmware under `esp32/` (PlatformIO env `inkdeck`). The transport path is implemented: it connects over **WiFi WebSocket**, announces `device_info` on connect, receives daemon state, and reports OTA capability like the other directly flashed boards. Node and Swift daemons register that WiFi presence. Panel rendering, partial/full refresh behavior, and hardware release validation remain in progress, so this is not yet a shipping feature.
 
 **Formerly "TRMNL" (BYOS pull) — removed.** AgentDeck previously drove this same physical panel through TRMNL's commercial **BYOS** (Bring Your Own Server) pull contract, where the panel polled `/api/setup` + `/api/display` and downloaded a server-rendered PNG. That integration was **removed** (Node commit `c71044bd`; the App Store Swift `Trmnl*` modules removed alongside). Stock / commercial TRMNL panels running the upstream `usetrmnl/firmware` are **no longer supported** — InkDeck reflashes the same hardware with AgentDeck firmware and treats it as a first-class ESP32 board.
 
@@ -84,7 +84,7 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 - **Auth**: `~/.agentdeck/auth-token` (32-char hex), local connections bypass
 - **Protocol**: Full `BridgeEvent` / `PluginCommand` bidirectional
 - **Capability gating**: Actions check `AgentCapabilities` for feature availability
-- **When daemon unavailable**: Plugin connects directly to OpenClaw Gateway via `GatewayClient`
+- **When daemon unavailable**: Plugin remains disconnected and retries the daemon; OpenClaw traffic is always proxied through the daemon
 
 ### Android (Tablet / E-ink)
 
@@ -113,7 +113,7 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
   - iPhone (compact): Vertical stack HUD, pull-up Engine sheet
   - iPad (regular): Same as Android tablet — terrarium background + 4-corner HUD overlay
   - macOS: Separate WindowGroup, external monitor fullscreen, LSUIElement menu bar mode
-- **Distribution**: App Store (`dev.agentdeck.dashboard`), TestFlight beta
+- **Distribution**: App Store (`bound.serendipity.agent.deck`), TestFlight beta
 - **Source**: `apple/` (pnpm workspace 외부, `android/`와 동일 레벨)
 - **Status**: In progress (Phase 1–6 구현 중)
 

@@ -42,6 +42,9 @@ validate_platform() {
     else
       echo "OK: $platform/$(basename "$file") ($size)"
     fi
+    if [[ "$(sips -g hasAlpha "$file" 2>/dev/null | awk '/hasAlpha/{print $2}')" != "no" ]]; then
+      fail "$platform/$(basename "$file") must be an opaque screenshot without alpha"
+    fi
     hash="$(shasum -a 256 "$file" | awk '{print $1}')"
     if [[ " $seen_hashes " == *" $hash "* ]]; then
       fail "$platform contains a duplicate screenshot: $(basename "$file")"

@@ -8,7 +8,7 @@ This repo is built by switching between **Claude Code, Codex, OpenCode, and occa
 
 1. **`AGENTS.md`** — the entry file every agent reads first (Codex/OpenCode/Antigravity discover it by convention; Claude Code reads `CLAUDE.md` directly). It requires `CLAUDE.md` and points back here.
 2. **`CLAUDE.md`** — **SSOT** for architecture, protocol, ports, conventions, design system, and App Store invariants.
-3. **`DEVELOPMENT_LOG.md`** — searchable history. Never read in full (11k+ lines); check the top, then `rg` for keywords/filenames.
+3. **`DEVELOPMENT_LOG.md`** — searchable recent history (current month plus the preceding month). Never read it in full; check the top, then `rg` for keywords/filenames. Older months live under `docs/devlog/`.
 
 ## Supported-agents matrix
 
@@ -16,13 +16,13 @@ This repo is built by switching between **Claude Code, Codex, OpenCode, and occa
 |---|---|---|---|---|
 | **Claude Code** | native, or `agentdeck claude` | `CLAUDE.md`; `.claude/skills/` | `.claude/skills/*.md` (pointers → `.agents/skills/`) | `.claude/skills/` files must stay **pointers**, not procedure copies |
 | **Codex** | `agentdeck codex` | `AGENTS.md` → `CLAUDE.md` | `.agents/skills/` (repo-scoped) + `.agents/workflows/` | — |
-| **OpenCode** | `agentdeck opencode`, or native `opencode` | `AGENTS.md` → `CLAUDE.md` | OpenCode skills/plugins; AgentDeck also supports PTY + SSE bridge | AgentDeck workflows are still human procedures: point it at `.agents/workflows/<name>.md` explicitly when needed |
-| **Antigravity** | manual editing, or native Antigravity CLI/app | `AGENTS.md` → `CLAUDE.md` | Antigravity hooks/plugins/skills when the user configures them | AgentDeck does not auto-install Antigravity hooks. Current product session visibility is CLI daemon passive discovery only; App Store app shows usage/credit status, not coding-session observation |
+| **OpenCode** | `agentdeck opencode`, or native `opencode` | `AGENTS.md` → `CLAUDE.md` | No repo hook/skill auto-discovery | Fully supported as a product session type (PTY + SSE); when authoring this repo, point it explicitly at `.agents/workflows/<name>.md` |
+| **Antigravity** | manual editing, or native Antigravity CLI/app | `AGENTS.md` → `CLAUDE.md` | Instruction files only; no repo hook/skill auto-discovery | Current product session visibility is CLI-daemon passive discovery only; the App Store app shows usage/credit status, not coding-session observation |
 
 Notes:
-- **Claude Code & Codex** are the two first-class authoring agents: both get hooks (`~/.claude/settings.json`, `~/.codex/config.toml`) and discover skills.
-- **OpenCode** is a fully supported *product session type* through `agentdeck opencode` (PTY + SSE overlay). Native OpenCode also has plugin/event and skill surfaces, but AgentDeck does not rely on auto-installing them; explicit workflow paths remain the portable handoff.
-- **Antigravity** now has official hook/plugin/skill surfaces, but AgentDeck still treats them as user-managed. The App Store app only reads the user-approved Antigravity usage/credit database; coding-session creatures come from the optional CLI daemon passive discovery path unless/until a user installs a dedicated hook/plugin bridge.
+- **Claude Code & Codex** are the two first-class authoring agents: both get lifecycle hooks (Claude CLI installer: `~/.claude/settings.local.json`; App Store opt-in installer: user-selected `~/.claude/settings.json`; Codex: `~/.codex/config.toml`) and discover skills.
+- **OpenCode** is a fully supported *product session type* through `agentdeck opencode` (PTY + SSE overlay), but it does not auto-discover this repo's skills or hooks as an authoring tool. Explicit workflow paths are the supported handoff.
+- **Antigravity** reads the repo instruction chain only. AgentDeck does not install or auto-discover Antigravity hooks/skills; the App Store app reads only the user-approved usage/credit database, while coding-session creatures require optional CLI-daemon passive discovery.
 
 ## SSOT rules (where each kind of knowledge lives)
 

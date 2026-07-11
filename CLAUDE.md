@@ -8,7 +8,7 @@ Stream Deck+ controller for AI coding agents — a bidirectional local control s
 - **plugin/** — Stream Deck SDK v2 plugin
 - **plugin-ulanzi/** — Ulanzi Studio plugin for the D200H Deck Dock (official UlanziDeckPlugin-SDK). One dynamic action + session-centric two-level UX, shares the `@agentdeck/shared` `buildSessionDeck` layout engine. Connects to the daemon over WS like the SD plugin; it is the **sole** D200H driver — Node direct-HID was deleted (2026-07-08), Swift direct-HID stays dormant. Daemon reports D200H connectivity from `ulanzi-plugin` WS presence. See [plugin-ulanzi/VERIFY.md](plugin-ulanzi/VERIFY.md)
 - **shared/** — TypeScript types/utils shared between bridge & plugin (protocol, states, timeline, adapter interfaces, session-utils)
-- **hooks/** — Claude Code hook installer for `~/.claude/settings.json`, Codex lifecycle hook installer for `~/.codex/config.toml`, and OpenCode observer plugin installer for `~/.config/opencode/plugins/agentdeck.js` (standalone `opencode` sessions POST `opencode_*` lifecycle hooks to the daemon; self-disables in managed PTYs via `AGENTDECK_PORT`)
+- **hooks/** — Claude Code CLI hook installer for `~/.claude/settings.local.json` (the App Store opt-in installer writes the user-selected `~/.claude/settings.json`), Codex lifecycle hook installer for `~/.codex/config.toml`, and OpenCode observer plugin installer for `~/.config/opencode/plugins/agentdeck.js` (standalone `opencode` sessions POST `opencode_*` lifecycle hooks to the daemon; self-disables in managed PTYs via `AGENTDECK_PORT`)
 - **config/** — Default settings and prompt templates
 - **setup/** — npm setup package (`npx @agentdeck/setup`)
 - **android/** — Jetpack Compose launcher app (CremaS, Onyx, Kobo, tablets)
@@ -170,7 +170,7 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 
 ## Key Conventions
 
-- **Hook format (CRITICAL)**: Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "command", command: "..." }] }`. Old flat format silently fails. Bridge auto-migrates via `migrateHooksIfNeeded()` from `@agentdeck/hooks`. Codex uses lifecycle hooks in `~/.codex/config.toml` (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) installed by `installCodexHooksIfNeeded()`. Scripts use bounded `curl` and `|| true` to avoid blocking when bridge is down
+- **Hook format (CRITICAL)**: Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "command", command: "..." }] }`. Old flat format silently fails. The CLI installer auto-migrates `~/.claude/settings.local.json` via `migrateHooksIfNeeded()`; the App Store opt-in UI writes the user-selected `~/.claude/settings.json`. Codex uses lifecycle hooks in `~/.codex/config.toml` (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) installed by `installCodexHooksIfNeeded()`. Scripts use bounded `curl` and `|| true` to avoid blocking when bridge is down
 - **Plugin UUID**: `bound.serendipity.agentdeck` (immutable post-distribution)
 - **Package scope**: `@agentdeck/*` (shared, bridge, plugin, hooks, setup)
 - **User data dir**: `daemon.json`, `sessions.json`, `auth-token`, `settings.json`, `timeline.json`, `wifi-config.json`, `compatibility.json`, `apme.sqlite`. Path depends on distribution: **Node.js CLI + unsigned dev builds** → `~/.agentdeck/`. **App Store macOS** → `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/` (Apple 2.5.2 — no home-relative-path entitlement, no optional App Groups capability). Swift code routes every access through `apple/AgentDeck/App/AgentDeckPaths.swift`; never hand-write either path
@@ -238,7 +238,7 @@ The macOS app ships through the App Store and must stay **self-contained** under
 | [docs/appstore-metadata-draft.md](docs/appstore-metadata-draft.md) | App Store Connect metadata draft (ko + en) — title/subtitle/description/keywords/what's-new |
 | [docs/testflight-qa-checklist.md](docs/testflight-qa-checklist.md) | Internal tester pre-submission checklist covering onboarding, pairing, voice, sandbox invariants |
 | [docs/devices.md](docs/devices.md) | Device-specific details |
-| [docs/hardware-compatibility.md](docs/hardware-compatibility.md) | 지원 dashboard 하드웨어/OS 종합 사양 매트릭스 — 16 surface(ESP32 보드·LED·HID 데크·InkDeck e-ink·Apple/Android·TUI)의 SoC·해상도·Flash·SDK·deployment target. 시각화 뷰 [docs/hardware/index.html](docs/hardware/index.html) |
+| [docs/hardware-compatibility.md](docs/hardware-compatibility.md) | 지원 dashboard 하드웨어/OS 종합 사양 매트릭스 — ESP32 보드·LED·HID 데크·InkDeck e-ink·Apple/Android·TUI의 SoC·해상도·Flash·SDK·deployment target. 시각화 뷰 [docs/hardware/index.html](docs/hardware/index.html) |
 | [docs/protocol.md](docs/protocol.md) | Bridge ↔ plugin WebSocket protocol |
 | [docs/gateway-protocol.md](docs/gateway-protocol.md) | OpenClaw Gateway WebSocket — frame format, Ed25519 handshake, RPC/event catalog, versioning |
 | [docs/testing.md](docs/testing.md) | Test infrastructure reference |
