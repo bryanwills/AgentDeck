@@ -12,7 +12,7 @@ Run `pnpm verify-version` before every build or release. CI rejects drift betwee
 |---|---|---|---|
 | **Apple** (iOS+macOS) | `apple/project.yml` `MARKETING_VERSION` | `CURRENT_PROJECT_VERSION` (currently 2) | `apple-v*` → TestFlight |
 | **Android** | `android/app/build.gradle.kts` `versionName` | `versionCode` (currently 2) | `android-v*` → APK Release / optional Play |
-| **npm** (`@agentdeck/shared`, `bridge`, `setup`) | public `package.json` files | npm registry version floor | `npm-v*` → manual publish |
+| **npm** (`@agentdeck/hooks`, `shared`, `bridge`, `setup`) | public `package.json` files | npm registry version floor | `npm-v*` → manual publish |
 | **ESP32** | `esp32/src/config.h` `FIRMWARE_VERSION` | build hash / epoch in firmware metadata | `esp32-v*` → firmware Release |
 | **Stream Deck** | plugin manifest `Version` as `X.Y.Z.0` | fourth component if a same-product-version plugin rebuild is ever required | `streamdeck-v*` → Elgato Maker portal |
 | **Ulanzi** | Ulanzi manifest `Version` | marketplace submission record | `ulanzi-v*` → Ulanzi Studio Marketplace |
@@ -25,7 +25,7 @@ Tag prefixes remain because channels ship independently and may point to differe
 1. Bump the root `VERSION`, then update every mirror in the same commit. `pnpm verify-version` is the enforcement mechanism.
 2. Never reuse, delete-and-recreate, or lower a version that reached an external registry/store. Git tags do not reset external version floors.
 3. Apple build number and Android versionCode always increase, even when the marketing/product version jumps.
-4. Public npm packages stay in lockstep and publish in dependency order: `shared` → `bridge` → `setup`.
+4. Public npm packages stay in lockstep and publish in dependency order: `hooks` + `shared` → `bridge` → `setup`.
 5. A platform-only hotfix still advances the common product patch version. Unchanged channels may skip binary publication, but their source mirrors move with the repository.
 6. Keep prefixed tags; there is no unprefixed repo-wide release tag.
 7. The only valid version reset is a genuinely new external identity (for example a new Apple bundle ID or npm package name). Document that migration before changing source versions.
@@ -34,7 +34,7 @@ Tag prefixes remain because channels ship independently and may point to differe
 
 - **Apple / App Store Connect**: `CFBundleVersion` must increase. A lower marketing/build sequence is only possible with a new bundle ID and ASC record.
 - **Android**: `versionCode` must increase for in-place upgrades and Play submission.
-- **npm**: published versions are immutable. At convergence, registry floors were shared `0.2.0`, bridge `0.2.2`, setup `0.2.0`, so the unified train begins at `0.2.3`.
+- **npm**: published versions are immutable. At convergence, registry floors were hooks `0.2.0`, shared `0.2.0`, bridge `0.2.2`, setup `0.2.0`, so the unified train begins at `0.2.3`.
 - **Marketplaces**: plugin identifiers are immutable after distribution; only their versions advance.
 
 ## Preparing a product-version bump
@@ -50,11 +50,11 @@ Tag prefixes remain because channels ship independently and may point to differe
 
 ### npm (`@agentdeck/*`)
 
-Only `shared`, `bridge`, and `setup` are public; root, hooks, plugin, and plugin-ulanzi are private. npm publishing requires a 2FA-enabled granular token.
+`hooks`, `shared`, `bridge`, and `setup` are public; root, plugin, and plugin-ulanzi are private. `bridge` has a runtime dependency on both `hooks` and `shared`, so all four must exist at the same product version. npm publishing requires a 2FA-enabled granular token.
 
 1. Verify all public manifests match `VERSION` and that the version is unused on npm.
 2. Run `pnpm build` and tests.
-3. Publish in dependency order with `pnpm --filter @agentdeck/shared publish --access public`, then bridge, then setup.
+3. Publish the leaf packages `hooks` and `shared` first, then bridge, then setup.
 4. Confirm each package's `latest` dist-tag matches `VERSION`.
 5. Tag the exact published commit: `git tag npm-v<VERSION> && git push origin npm-v<VERSION>`.
 

@@ -110,7 +110,7 @@ iOS의 `SetupNeededCard`가 Mac 소유 상태인 Claude hook 설치 여부를 iO
 - README, CLAUDE.md, App Store 제출 체크리스트와 TestFlight QA 문서를 0.2.3 기준으로 갱신했다.
 
 ### 핵심 설계 결정
-- npm public 패키지(shared→bridge→setup)는 lockstep으로 배포한다. 플랫폼 전용 hotfix도 공통 제품 patch를 올리되, 변경 없는 채널은 바이너리 배포를 생략할 수 있다.
+- npm public 패키지(hooks+shared→bridge→setup)는 lockstep으로 배포한다. `bridge`가 hooks/shared에 런타임 의존하므로 네 패키지가 모두 같은 제품 버전으로 registry에 존재해야 한다. 플랫폼 전용 hotfix도 공통 제품 patch를 올리되, 변경 없는 채널은 바이너리 배포를 생략할 수 있다.
 - 외부 레지스트리/스토어에 도달한 버전은 태그 삭제로 리셋할 수 없다. 새 bundle ID/package name처럼 외부 identity가 바뀐 경우만 별도 migration으로 재시작할 수 있다.
 
 ### 검증

@@ -31,6 +31,23 @@ for (const path of [
   expectValue(path, jsonVersion(path), productVersion);
 }
 
+for (const path of [
+  'hooks/package.json',
+  'shared/package.json',
+  'bridge/package.json',
+  'setup/package.json',
+]) {
+  const manifest = JSON.parse(read(path));
+  if (manifest.private === true) failures.push(`${path}: required public npm package must not be private`);
+}
+
+const bridgeManifest = JSON.parse(read('bridge/package.json'));
+for (const dependency of ['@agentdeck/hooks', '@agentdeck/shared']) {
+  if (bridgeManifest.dependencies?.[dependency] !== 'workspace:*') {
+    failures.push(`bridge/package.json: ${dependency} must remain a workspace runtime dependency`);
+  }
+}
+
 expectValue(
   'plugin-ulanzi/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/manifest.json',
   jsonVersion('plugin-ulanzi/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/manifest.json', 'Version'),

@@ -1037,7 +1037,7 @@ pnpm package    # → dist/bound.serendipity.agentdeck.streamDeckPlugin
 
 Recipients double-click to install. The bridge (`agentdeck`) and Claude Code CLI must be installed separately.
 
-Published npm packages: `@agentdeck/shared`, `@agentdeck/bridge`, `@agentdeck/setup`.
+Published npm packages: `@agentdeck/hooks`, `@agentdeck/shared`, `@agentdeck/bridge`, `@agentdeck/setup`. Bridge depends on the matching hooks and shared versions at runtime.
 
 ### Debugging
 
