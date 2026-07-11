@@ -777,9 +777,23 @@ final class ApmeTaskBoundaryTests: XCTestCase {
         defer { cleanup(tmp) }
         let collector = ApmeCollector(store: tmp.store)
         collector.idleGapMinTurnAgeSec = 0
-        openSessionAndRun(collector)
+        // Mirror the production hand-off exactly: DaemonServer opens the
+        // gateway run with session_id "openclaw-gateway" on connect and
+        // stamps the same id on every synthesized prompt/tool payload
+        // (connectGatewayAdapter / handleGatewayEvent). The per-session
+        // collector drops events for sessions it never opened — attributing
+        // them to "whichever session is active" was the cross-session
+        // contamination this refactor removes.
+        collector.handleHook(event: "session_start", data: [
+            "session_id": "openclaw-gateway",
+            "agent_type": "openclaw",
+            "project_name": "OpenClaw",
+        ])
 
-        collector.handleHook(event: "UserPromptSubmit", data: ["prompt": "summarize repo"])
+        collector.handleHook(event: "UserPromptSubmit", data: [
+            "session_id": "openclaw-gateway",
+            "prompt": "summarize repo",
+        ])
 
         // Realistic OpenClaw tool_start payload after the fix: real
         // tool name + structured input dict (mirrors Claude Code's
@@ -1026,6 +1040,115 @@ final class ApmeTaskBoundaryTests: XCTestCase {
             run.efficiencyJson?.contains("\"duration_ms\":4200") ?? false,
             "efficiencyJson body must survive UPDATE/SELECT"
         )
+    }
+
+    // MARK: - Concurrent sessions (per-session task isolation)
+
+    /// Regression for cross-session taskId contamination: the collector used
+    /// to hold ONE activeTask scalar for the whole daemon, so with two
+    /// concurrent sessions every timeline stamp copied whichever session
+    /// most recently opened a task — nesting unrelated Codex/Claude turns
+    /// under one TASK header. Per-session maps must keep runs, tasks, and
+    /// turn counts fully isolated.
+    func testConcurrentSessionsKeepIsolatedTasks() throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let collector = ApmeCollector(store: tmp.store)
+        var emitted: [DaemonTimelineEntry] = []
+        collector.emitTimelineEntry = { emitted.append($0) }
+
+        collector.handleHook(event: "session_start", data: [
+            "session_id": "sess-A", "agent_type": "claude-code", "project_name": "projA",
+        ])
+        collector.handleHook(event: "session_start", data: [
+            "session_id": "sess-B", "agent_type": "claude-code", "project_name": "projB",
+        ])
+
+        // Interleaved prompts: A, B, A — B's prompt must not rotate A's task.
+        collector.handleHook(event: "UserPromptSubmit", data: ["session_id": "sess-A", "prompt": "A first"])
+        collector.handleHook(event: "UserPromptSubmit", data: ["session_id": "sess-B", "prompt": "B first"])
+        collector.handleHook(event: "UserPromptSubmit", data: ["session_id": "sess-A", "prompt": "A second"])
+
+        let taskA = collector.activeTaskId(sessionId: "sess-A")
+        let taskB = collector.activeTaskId(sessionId: "sess-B")
+        XCTAssertNotNil(taskA)
+        XCTAssertNotNil(taskB)
+        XCTAssertNotEqual(taskA, taskB, "concurrent sessions must own distinct tasks")
+
+        // Each session got its own run, keyed by the REAL session id — this
+        // is what lets task_start/task_end rows survive the dashboard's
+        // per-session filter.
+        let runs = tmp.store.listRuns()
+        let runA = runs.first { $0.sessionId == "sess-A" }
+        let runB = runs.first { $0.sessionId == "sess-B" }
+        XCTAssertNotNil(runA)
+        XCTAssertNotNil(runB)
+
+        // A reached its second turn → exactly one promoted header, carrying
+        // A's session id and A's taskId (not B's).
+        let starts = emitted.filter { $0.type == "task_start" }
+        XCTAssertEqual(starts.count, 1, "only session A reached its second turn")
+        XCTAssertEqual(starts.first?.sessionId, "sess-A")
+        XCTAssertEqual(starts.first?.taskId, taskA)
+
+        // Turn counts stay per-session: A=2, B=1.
+        XCTAssertEqual(tmp.store.listTurns(runId: runA!.id).count, 2)
+        XCTAssertEqual(tmp.store.listTurns(runId: runB!.id).count, 1)
+    }
+
+    /// `setTurnResponse(sessionId:)` must land the response on THAT
+    /// session's open turn even when another session prompted afterwards
+    /// (i.e. the response target is not the most recently active session).
+    func testSetTurnResponseRoutesBySessionId() throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let collector = ApmeCollector(store: tmp.store)
+
+        collector.handleHook(event: "session_start", data: [
+            "session_id": "sess-A", "agent_type": "claude-code",
+        ])
+        collector.handleHook(event: "session_start", data: [
+            "session_id": "sess-B", "agent_type": "claude-code",
+        ])
+        collector.handleHook(event: "UserPromptSubmit", data: ["session_id": "sess-A", "prompt": "A question"])
+        collector.handleHook(event: "UserPromptSubmit", data: ["session_id": "sess-B", "prompt": "B question"])
+
+        // A's response arrives AFTER B prompted — the sessionless legacy
+        // fallback would have written it onto B's turn.
+        _ = collector.setTurnResponse("A answer", sessionId: "sess-A")
+
+        let runs = tmp.store.listRuns()
+        guard let runA = runs.first(where: { $0.sessionId == "sess-A" }),
+              let runB = runs.first(where: { $0.sessionId == "sess-B" }) else {
+            return XCTFail("runs missing")
+        }
+        let turnA = tmp.store.listTurns(runId: runA.id).first
+        let turnB = tmp.store.listTurns(runId: runB.id).first
+        XCTAssertEqual(turnA?["response"] as? String, "A answer")
+        XCTAssertNil(turnB?["response"] as? String, "B's turn must stay untouched")
+    }
+
+    /// session_end for one session must not tear down the other session's
+    /// task (the single-activeHookSession design attributed a session_end
+    /// to whichever session started most recently).
+    func testSessionEndClosesOnlyItsOwnTask() throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let collector = ApmeCollector(store: tmp.store)
+
+        collector.handleHook(event: "session_start", data: [
+            "session_id": "sess-A", "agent_type": "claude-code",
+        ])
+        collector.handleHook(event: "session_start", data: [
+            "session_id": "sess-B", "agent_type": "claude-code",
+        ])
+        collector.handleHook(event: "UserPromptSubmit", data: ["session_id": "sess-A", "prompt": "A work"])
+        collector.handleHook(event: "UserPromptSubmit", data: ["session_id": "sess-B", "prompt": "B work"])
+
+        collector.handleHook(event: "session_end", data: ["session_id": "sess-A"])
+
+        XCTAssertNil(collector.activeTaskId(sessionId: "sess-A"), "A's task closed with its session")
+        XCTAssertNotNil(collector.activeTaskId(sessionId: "sess-B"), "B's task survives A's session_end")
     }
 
     // MARK: - task_rollup rubric seeded

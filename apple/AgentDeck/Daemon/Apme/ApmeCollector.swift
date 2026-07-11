@@ -3,10 +3,15 @@
 // Mirror of bridge/src/apme/collector.ts for the Swift daemon.
 //
 // Key design: the Swift daemon receives hook POSTs from potentially multiple
-// Claude Code sessions. Each session_start/session_end pair is tracked with
-// an auto-generated hookSessionId. Tool events between them are attributed
-// to the active session. The daemon's own sessionId is NOT used — hooks
-// carry their own lifecycle.
+// CONCURRENT Claude Code sessions. Every piece of turn/task state is keyed by
+// the hook payload's own `session_id` (real Claude session UUID), mirroring
+// the Node collector's sessionToTurn/sessionToTask maps. A payload without a
+// session id falls back to the most recently opened session so single-session
+// legacy callers (gateway tool events, tests) keep working. Before 2026-07,
+// this file held ONE activeTurn/activeTask scalar for the whole daemon —
+// with concurrent sessions the globally-active taskId got stamped onto every
+// session's timeline rows, nesting unrelated Codex/Claude turns under one
+// TASK header (cross-session taskId contamination).
 
 import Foundation
 
@@ -35,18 +40,23 @@ final class ApmeCollector {
     /// Mirrors `emitProjectedTimeline` in bridge/src/apme/index.ts.
     var emitProjectedTimelineEntry: ((DaemonTimelineEntry) -> Void)?
 
-    /// Maps a hookSessionId → runId. A hookSessionId is generated per
-    /// session_start and lives until session_end.
+    /// Maps a session key → runId. The key is the hook payload's `session_id`
+    /// when present (real Claude session UUID), or a generated
+    /// `hook-N-epoch` fallback for payloads without one. Using the real id
+    /// makes the run — and therefore every task_start/task_end row derived
+    /// from `run.sessionId` — filterable by the dashboard's per-session view.
     private var sessionToRun: [String: String] = [:]
 
-    /// The currently active hook session (most recent session_start that
-    /// hasn't yet received session_end). Tool events are attributed here.
+    /// The most recently opened session key. Fallback attribution target for
+    /// events that carry no `session_id` (gateway tool events, legacy tests)
+    /// and for `updateModel`/`updateUsage`, which arrive without session
+    /// context.
     private var activeHookSession: String?
 
-    /// Counter for generating unique hook session IDs.
+    /// Counter for generating fallback session keys.
     private var hookSessionCounter = 0
 
-    /// Active turn tracking per hook session.
+    /// Active turn tracking per session.
     private struct ActiveTurn {
         let id: String
         let runId: String
@@ -61,7 +71,9 @@ final class ApmeCollector {
         /// re-send after a response is a genuine new turn, not an echo).
         var hasResponse: Bool = false
     }
-    private var activeTurn: ActiveTurn?
+    /// session key → current open turn. Mirrors sessionToTurn in
+    /// bridge/src/apme/collector.ts.
+    private var sessionToTurn: [String: ActiveTurn] = [:]
 
     /// A user_prompt_submit with the same prompt landing on a fresh,
     /// still-empty turn within this window is a transport echo — OpenClaw's
@@ -69,11 +81,10 @@ final class ApmeCollector {
     /// map to `model_call` → user_prompt_submit for one logical prompt.
     /// Mirrors bridge/src/apme/collector.ts DUPLICATE_TURN_OPEN_WINDOW_MS.
     private static let duplicateTurnOpenWindowMs = 15_000
-    /// Most recently closed turn (one per hookSession) — survives `closeTurn()`
+    /// Most recently closed turn (one per run) — survives `closeTurn()`
     /// so late-arriving response text can still land on the right turn.
     /// Maps runId → turnId.
     private var lastClosedTurnByRun: [String: String] = [:]
-    private var turnCounter = 0
 
     /// Active task tracking. Tasks group consecutive turns between hard
     /// boundaries (/task close / /clear / session_end / idle_gap). Mirrors
@@ -92,23 +103,26 @@ final class ApmeCollector {
         /// explicit TodoWrite plan signals one is actually in flight.
         var timelineEmitted: Bool = false
     }
-    private var activeTask: ActiveTask?
-    /// Last milestone key (`taskId:turnIndex`) — a turn can carry several
-    /// all-completed TodoWrite calls; surface only the first as a
+    /// session key → current open task. Mirrors sessionToTask in
+    /// bridge/src/apme/collector.ts.
+    private var sessionToTask: [String: ActiveTask] = [:]
+    /// Last milestone key (`taskId:turnIndex`) per session — a turn can carry
+    /// several all-completed TodoWrite calls; surface only the first as a
     /// `task_milestone` row. Mirrors sessionToLastMilestone in
     /// bridge/src/apme/collector.ts.
-    private var lastMilestoneKey: String?
+    private var sessionToLastMilestone: [String: String] = [:]
     /// runId → next task_index. Lives across task close/open within a run.
     private var runTaskCount: [String: Int] = [:]
-    /// Last cumulative usage seen for the active session — ModelEvents are
-    /// emitted from the delta (snapshots carry session totals). Reset per session.
-    private var lastUsage: (inp: Int, out: Int) = (0, 0)
+    /// Last cumulative usage per session — ModelEvents are emitted from the
+    /// delta (snapshots carry session totals).
+    private var sessionToUsage: [String: (inp: Int, out: Int)] = [:]
 
-    /// Pending idle-gap timer. After every `closeTurn` we arm an `idleGapSec`
-    /// timer; if no new `user_prompt_submit` arrives, the timer fires
-    /// `closeTask(boundarySignal: "idle_gap")` so a genuinely-abandoned task
-    /// eventually closes (and gets evaluated) instead of lingering open forever.
-    private var idleGapTask: Task<Void, Never>?
+    /// Pending idle-gap timer per session. After every `setTurnResponse` we
+    /// arm an `idleGapSec` timer; if no new `user_prompt_submit` arrives for
+    /// that session, the timer fires `closeTask(boundarySignal: "idle_gap")`
+    /// so a genuinely-abandoned task eventually closes (and gets evaluated)
+    /// instead of lingering open forever.
+    private var idleGapTasks: [String: Task<Void, Never>] = [:]
 
     /// Idle-gap threshold for auto-closing tasks after the last turn. Exposed
     /// as a var so tests can compress the wait.
@@ -126,15 +140,15 @@ final class ApmeCollector {
     /// truly-idle ones. Tests inject a small value to exercise the timer.
     var idleGapSec: TimeInterval = 1800
 
-    /// Minimum age of `activeTurn` (in seconds) for `setTurnResponse` to be
-    /// allowed to arm the idle-gap timer. Defends against the late-arriving
-    /// Stop-hook response race documented in `DaemonServer.swift:2792`:
-    /// `setTurnResponse` is dispatched via `Task { await … }`, so a fast
-    /// follow-up `user_prompt_submit` can `closeTurn` + open a fresh new
-    /// turn before the response callback actually runs. Without this guard
-    /// the late callback sees `activeTurn` = the brand-new (still
-    /// generating) turn and arms idle-gap on it — exactly the
-    /// "fresh active turn" Codex stop-time review flagged 2026-05-15.
+    /// Minimum age of the session's active turn (in seconds) for
+    /// `setTurnResponse` to be allowed to arm the idle-gap timer. Defends
+    /// against the late-arriving Stop-hook response race documented in
+    /// `DaemonServer.swift:2792`: `setTurnResponse` is dispatched via
+    /// `Task { await … }`, so a fast follow-up `user_prompt_submit` can
+    /// `closeTurn` + open a fresh new turn before the response callback
+    /// actually runs. Without this guard the late callback sees the
+    /// brand-new (still generating) turn and arms idle-gap on it — exactly
+    /// the "fresh active turn" Codex stop-time review flagged 2026-05-15.
     ///
     /// Production default 0.5 s — plausible agent responses take at least
     /// that long, so a turn younger than 0.5 s receiving a response
@@ -147,114 +161,133 @@ final class ApmeCollector {
 
     // MARK: - Hook ingestion (called from DaemonServer.handleHookEvent)
 
-    /// Main entry point — routes every hook event to the right run.
+    /// Session key for a hook payload: the payload's own `session_id` when
+    /// present, else the most recently opened session. Attribution by
+    /// payload id is what keeps concurrent sessions' turns/tasks isolated.
+    private func payloadSessionKey(_ data: [String: Any]) -> String? {
+        if let sid = data["session_id"] as? String, !sid.isEmpty { return sid }
+        return activeHookSession
+    }
+
+    private func makeFallbackSessionKey() -> String {
+        hookSessionCounter += 1
+        return "hook-\(hookSessionCounter)-\(Int(Date().timeIntervalSince1970))"
+    }
+
+    /// Insert a fresh run for `sessionKey` and register it in the maps.
+    @discardableResult
+    private func openRunForSession(sessionKey: String, data: [String: Any]) -> String {
+        let runId = UUID().uuidString
+        let run = ApmeRun(
+            id: runId,
+            sessionId: sessionKey,
+            agentType: data["agent_type"] as? String ?? "claude-code",
+            modelId: data["model_name"] as? String,
+            projectName: data["project_name"] as? String,
+            projectPath: nil,
+            startedAt: nowMs(),
+            gitBefore: nil
+        )
+        store.insertRun(run)
+        sessionToRun[sessionKey] = runId
+        sessionToUsage[sessionKey] = (0, 0) // reset the cumulative-usage delta baseline per session
+        return runId
+    }
+
+    /// Close the bookkeeping for a run: endedAt + signal classification.
+    private func finalizeRun(runId: String) {
+        store.updateRun(id: runId, fields: ["endedAt": nowMs()])
+        let result = ApmeClassifier.classifyRun(store: store, runId: runId)
+        if let signals = try? JSONEncoder().encode(result.signals),
+           let json = String(data: signals, encoding: .utf8) {
+            store.updateRun(id: runId, fields: [
+                "taskSignals": json,
+                "taskCategory": result.category.rawValue,
+                "taskCategorySource": "auto",
+            ])
+        }
+    }
+
+    /// Main entry point — routes every hook event to the right session's run.
     func handleHook(event: String, data: [String: Any]) {
         guard store.isOpen else { return }
+        let isPrompt = event.lowercased() == "user_prompt_submit" || event == "UserPromptSubmit"
 
         switch event.lowercased() {
         case "session_start":
-            // Generate a unique session key for this Claude session.
-            hookSessionCounter += 1
-            let hookSessionId = "hook-\(hookSessionCounter)-\(Int(Date().timeIntervalSince1970))"
-            activeHookSession = hookSessionId
-
-            let agentType = data["agent_type"] as? String ?? "claude-code"
-            let projectName = data["project_name"] as? String
-            let modelId = data["model_name"] as? String
-
-            let runId = UUID().uuidString
-            let run = ApmeRun(
-                id: runId,
-                sessionId: hookSessionId,
-                agentType: agentType,
-                modelId: modelId,
-                projectName: projectName,
-                projectPath: nil,
-                startedAt: nowMs(),
-                gitBefore: nil
-            )
-            store.insertRun(run)
-            sessionToRun[hookSessionId] = runId
-            lastUsage = (0, 0) // reset the cumulative-usage delta baseline per session
-            DaemonLogger.shared.debug("APME", "openRun \(runId.prefix(8)) hookSession=\(hookSessionId) agent=\(agentType)")
+            let sessionKey = (data["session_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? makeFallbackSessionKey()
+            // Restarted/resumed session: finalize the previous run first so
+            // its open turn/task don't linger under the new run.
+            if let priorRunId = sessionToRun[sessionKey] {
+                closeTurn(sessionKey: sessionKey)
+                emitDeferredTaskStartIfNeeded(sessionKey: sessionKey)
+                closeTask(sessionKey: sessionKey, boundarySignal: "session_end")
+                runTaskCount.removeValue(forKey: priorRunId)
+                finalizeRun(runId: priorRunId)
+            }
+            activeHookSession = sessionKey
+            let runId = openRunForSession(sessionKey: sessionKey, data: data)
+            DaemonLogger.shared.debug("APME", "openRun \(runId.prefix(8)) session=\(sessionKey) agent=\(data["agent_type"] as? String ?? "claude-code")")
 
         case "session_end":
-            guard let hookSession = activeHookSession,
-                  let runId = sessionToRun.removeValue(forKey: hookSession) else { return }
-            activeHookSession = nil
-            closeTurn(runId: runId) // close last turn
+            guard let sessionKey = payloadSessionKey(data),
+                  let runId = sessionToRun.removeValue(forKey: sessionKey) else { return }
+            if activeHookSession == sessionKey { activeHookSession = nil }
+            closeTurn(sessionKey: sessionKey) // close last turn
             // Ensure task_start is emitted before closing, so task_end is also emitted.
             // Without this, a session that never triggered emitDeferredTaskStartIfNeeded
             // (e.g., single-turn session with no TodoWrite) would have task_start
             // omitted, leaving closeTask's timelineEmitted=false → no task_end emitted
             // → Timeline UI showing "in progress" forever.
-            emitDeferredTaskStartIfNeeded()
+            emitDeferredTaskStartIfNeeded(sessionKey: sessionKey)
             // Close the active task with session_end boundary. Fires the
             // task_judge listener wired by the runner.
-            closeTask(boundarySignal: "session_end")
+            closeTask(sessionKey: sessionKey, boundarySignal: "session_end")
             runTaskCount.removeValue(forKey: runId)
+            sessionToUsage.removeValue(forKey: sessionKey)
+            idleGapTasks.removeValue(forKey: sessionKey)?.cancel()
 
-            store.updateRun(id: runId, fields: ["endedAt": nowMs()])
-
-            // Classify based on accumulated steps
-            let result = ApmeClassifier.classifyRun(store: store, runId: runId)
-            if let signals = try? JSONEncoder().encode(result.signals),
-               let json = String(data: signals, encoding: .utf8) {
-                store.updateRun(id: runId, fields: [
-                    "taskSignals": json,
-                    "taskCategory": result.category.rawValue,
-                    "taskCategorySource": "auto",
-                ])
-            }
-            DaemonLogger.shared.debug("APME", "closeRun \(runId.prefix(8)) category=\(result.category.rawValue)")
+            finalizeRun(runId: runId)
+            DaemonLogger.shared.debug("APME", "closeRun \(runId.prefix(8)) session=\(sessionKey)")
 
             // Record the session_end step too
-            recordStep(hookSession: hookSession, runId: runId, event: event, data: data)
+            recordStep(hookSession: sessionKey, runId: runId, event: event, data: data)
             return // skip the generic recordStep below since we already handled it
 
         default:
             break
         }
 
-        // Lazy openRun: the first `user_prompt_submit` arriving with no active
-        // session — a missed or late `session_start` — must still open a run, or
-        // the turn-management block below no-ops and the whole session produces
-        // no tasks (every prompt then reads as a bare top-level chat, the exact
-        // symptom this change fixes). Mirrors the Node daemon's lazy openRun.
-        // Gated to `user_prompt_submit` so a stray post-`session_end` tool/stop
-        // hook can't spawn a phantom run (`session_end` already returned above).
-        if activeHookSession == nil
-            && (event.lowercased() == "user_prompt_submit" || event == "UserPromptSubmit") {
-            hookSessionCounter += 1
-            let hookSessionId = "hook-\(hookSessionCounter)-\(Int(Date().timeIntervalSince1970))"
-            activeHookSession = hookSessionId
-            let runId = UUID().uuidString
-            let run = ApmeRun(
-                id: runId,
-                sessionId: hookSessionId,
-                agentType: data["agent_type"] as? String ?? "claude-code",
-                modelId: data["model_name"] as? String,
-                projectName: data["project_name"] as? String,
-                projectPath: nil,
-                startedAt: nowMs(),
-                gitBefore: nil
-            )
-            store.insertRun(run)
-            sessionToRun[hookSessionId] = runId
-            lastUsage = (0, 0)
-            DaemonLogger.shared.debug("APME", "openRun(lazy) \(runId.prefix(8)) hookSession=\(hookSessionId) event=\(event)")
+        // Resolve the session this event belongs to. Lazy openRun: the first
+        // `user_prompt_submit` arriving for an untracked session — a missed or
+        // late `session_start` — must still open a run, or the turn-management
+        // block below no-ops and the whole session produces no tasks (every
+        // prompt then reads as a bare top-level chat). Mirrors the Node
+        // daemon's lazy openRun. Gated to `user_prompt_submit` so a stray
+        // post-`session_end` tool/stop hook can't spawn a phantom run
+        // (`session_end` already returned above).
+        var sessionKey = payloadSessionKey(data)
+        if isPrompt {
+            if sessionKey == nil { sessionKey = makeFallbackSessionKey() }
+            if let key = sessionKey {
+                if sessionToRun[key] == nil {
+                    let runId = openRunForSession(sessionKey: key, data: data)
+                    DaemonLogger.shared.debug("APME", "openRun(lazy) \(runId.prefix(8)) session=\(key) event=\(event)")
+                }
+                activeHookSession = key
+            }
         }
 
-        // Record every event as a step on the active session.
-        if let hookSession = activeHookSession, let runId = sessionToRun[hookSession] {
-            recordStep(hookSession: hookSession, runId: runId, event: event, data: data)
+        // Record every event as a step on its session.
+        if let key = sessionKey, let runId = sessionToRun[key] {
+            recordStep(hookSession: key, runId: runId, event: event, data: data)
 
             // ── Turn management ──
-            if event.lowercased() == "user_prompt_submit" || event == "UserPromptSubmit" {
+            if isPrompt {
                 // User is active again — cancel any pending idle-gap close
-                // we armed after the previous turn.
-                idleGapTask?.cancel()
-                idleGapTask = nil
+                // we armed after this session's previous turn.
+                idleGapTasks.removeValue(forKey: key)?.cancel()
 
                 // Claude Code sends { message: { content: "..." } }, legacy sends { prompt: "..." }
                 let prompt = data["prompt"] as? String
@@ -271,36 +304,45 @@ final class ApmeCollector {
                 // session_end, so /clear leaves the open task — and its
                 // task_start timeline row — spinning forever.
                 if let p = prompt, Self.isClearCommand(p) {
-                    closeTurn(runId: runId)
-                    closeTask(boundarySignal: "clear")
+                    closeTurn(sessionKey: key)
+                    closeTask(sessionKey: key, boundarySignal: "clear")
                     return
                 }
 
                 // Duplicate-open guard: closing and reopening on an echoed
                 // prompt would strand an empty phantom turn and shift every
                 // later turn_index. Mirrors bridge/src/apme/collector.ts.
-                if let turn = activeTurn, let p = prompt, !p.isEmpty,
+                if let turn = sessionToTurn[key], let p = prompt, !p.isEmpty,
                    turn.prompt == p, turn.toolCalls == 0, !turn.hasResponse,
                    nowMs() - turn.startedAt < Self.duplicateTurnOpenWindowMs {
                     return
                 }
 
+                // Resolve prevIndex before closing: the active turn may
+                // already have been closed explicitly, in which case fall
+                // back to the last closed turn's stored row so turn_index
+                // stays monotonically increasing per run instead of
+                // resetting. Mirrors bridge/src/apme/collector.ts.
+                var prevIndex = sessionToTurn[key]?.index ?? -1
+                if prevIndex == -1, let lastId = lastClosedTurnByRun[runId],
+                   let lastIdx = store.getTurn(id: lastId)?["turn_index"] as? Int {
+                    prevIndex = lastIdx
+                }
                 // Close previous turn
-                closeTurn(runId: runId)
+                closeTurn(sessionKey: key)
                 // Open new turn
-                turnCounter += 1
-                let turnIndex = turnCounter - 1
+                let turnIndex = prevIndex + 1
                 let turnId = UUID().uuidString
-                activeTurn = ActiveTurn(id: turnId, runId: runId, index: turnIndex, startedAt: nowMs(), prompt: prompt)
+                sessionToTurn[key] = ActiveTurn(id: turnId, runId: runId, index: turnIndex, startedAt: nowMs(), prompt: prompt)
                 // Ensure an active task exists so the new turn can attach to it.
                 // openTaskIfNone is idempotent — back-to-back turns within a task
                 // all share the same task_id until a boundary signal closes it.
-                let task = openTaskIfNone(runId: runId)
-                let priorFirstTurn = activeTask?.firstTurnIndex
-                if var t = activeTask {
+                let task = openTaskIfNone(sessionKey: key, runId: runId)
+                let priorFirstTurn = sessionToTask[key]?.firstTurnIndex
+                if var t = sessionToTask[key] {
                     if t.firstTurnIndex == nil { t.firstTurnIndex = turnIndex }
                     t.lastTurnIndex = turnIndex
-                    activeTask = t
+                    sessionToTask[key] = t
                 }
                 store.insertTurn(id: turnId, runId: runId, turnIndex: turnIndex, prompt: prompt, startedAt: nowMs(), taskId: task?.id)
 
@@ -318,7 +360,7 @@ final class ApmeCollector {
                 // can show the hierarchy. Idempotent for tasks already
                 // promoted by TodoWrite.
                 if priorFirstTurn != nil {
-                    emitDeferredTaskStartIfNeeded()
+                    emitDeferredTaskStartIfNeeded(sessionKey: key)
                 }
 
                 // Set run's task_prompt from first prompt
@@ -328,17 +370,17 @@ final class ApmeCollector {
                 }
             }
 
-            // Track tool calls on active turn
-            if (event.lowercased() == "tool_start" || event == "PreToolUse" || event == "tool_start"), var turn = activeTurn {
+            // Track tool calls on the session's active turn
+            if (event.lowercased() == "tool_start" || event == "PreToolUse"), var turn = sessionToTurn[key] {
                 turn.toolCalls += 1
                 let toolName = data["tool_name"] as? String
                 if toolName == "Edit" { turn.filesModified += 1 }
                 if toolName == "Write" { turn.filesCreated += 1 }
-                activeTurn = turn
+                sessionToTurn[key] = turn
 
                 // Sample trajectory: a tool call starts as a pending ToolEvent;
                 // its PostToolUse result resolves the SAME row (one row, not two).
-                if let task = activeTask, let toolName {
+                if let task = sessionToTask[key], let toolName {
                     appendSampleEvent(taskId: task.id, runId: turn.runId, turnIndex: turn.index,
                                       kind: "tool", core: "\(toolName):\(turn.toolCalls)",
                                       toolName: toolName, toolStatus: "pending",
@@ -351,14 +393,14 @@ final class ApmeCollector {
                 // the TASK header alongside the planned todos. Subsequent
                 // TodoWrite calls are no-ops via the idempotent helper.
                 if toolName == "TodoWrite" {
-                    emitDeferredTaskStartIfNeeded()
+                    emitDeferredTaskStartIfNeeded(sessionKey: key)
                 }
             }
 
             // Sample trajectory: resolve the pending ToolEvent on PostToolUse.
             if (event.lowercased() == "tool_end" || event == "PostToolUse"),
                let toolName = data["tool_name"] as? String,
-               let task = activeTask, let turnIndex = activeTurn?.index {
+               let task = sessionToTask[key], let turnIndex = sessionToTurn[key]?.index {
                 let isError = (data["is_error"] as? Bool ?? false) || (data["error"] != nil)
                 let output = extractToolOutput(data)
                 if let pending = store.findPendingToolEvent(taskId: task.id, turnIndex: turnIndex, toolName: toolName),
@@ -393,17 +435,18 @@ final class ApmeCollector {
             if (event.lowercased() == "tool_end" || event == "PostToolUse"),
                (data["tool_name"] as? String) == "TodoWrite",
                Self.allTodosCompleted(data: data),
-               let task = activeTask, let turnIndex = activeTurn?.index {
+               let task = sessionToTask[key], let turnIndex = sessionToTurn[key]?.index {
                 _ = appendSampleEvent(taskId: task.id, runId: task.runId, turnIndex: turnIndex,
                                       kind: "state", core: "todos_complete:\(turnIndex)",
                                       payload: ["state": "todos_completed"])
-                emitTaskMilestoneIfNeeded(task: task, turnIndex: turnIndex)
+                emitTaskMilestoneIfNeeded(sessionKey: key, task: task, turnIndex: turnIndex)
             }
         }
     }
 
     /// Update model name from state machine (called by DaemonServer when
     /// modelName changes via state_update/timeline relay, not from hooks).
+    /// No session context on this path — attributed to the most recent session.
     func updateModel(_ modelId: String?) {
         guard let hookSession = activeHookSession,
               let runId = sessionToRun[hookSession],
@@ -412,6 +455,7 @@ final class ApmeCollector {
     }
 
     /// Update token/cost usage (called when usage_update is received).
+    /// No session context on this path — attributed to the most recent session.
     func updateUsage(inputTokens: Int, outputTokens: Int, costUsd: Double?) {
         guard let hookSession = activeHookSession,
               let runId = sessionToRun[hookSession] else { return }
@@ -423,12 +467,13 @@ final class ApmeCollector {
         store.updateRun(id: runId, fields: fields)
 
         // ── Per-task ModelEvent from the cumulative delta ──
+        let lastUsage = sessionToUsage[hookSession] ?? (0, 0)
         let dIn = max(0, inputTokens - lastUsage.inp)
         let dOut = max(0, outputTokens - lastUsage.out)
-        lastUsage = (inputTokens, outputTokens)
-        if (dIn > 0 || dOut > 0), let task = activeTask {
+        sessionToUsage[hookSession] = (inputTokens, outputTokens)
+        if (dIn > 0 || dOut > 0), let task = sessionToTask[hookSession] {
             let model = store.getRun(id: runId)?.modelId
-            let turnIndex = activeTurn?.index ?? task.lastTurnIndex ?? 0
+            let turnIndex = sessionToTurn[hookSession]?.index ?? task.lastTurnIndex ?? 0
             let cost = ApmePricing.usd(model: model, inputTokens: dIn, outputTokens: dOut)
             appendSampleEvent(taskId: task.id, runId: runId, turnIndex: turnIndex,
                               kind: "model", core: "\(inputTokens):\(outputTokens)",
@@ -465,16 +510,7 @@ final class ApmeCollector {
 
     func closeSiblingRun(sessionId: String) {
         guard let runId = sessionToRun.removeValue(forKey: sessionId) else { return }
-        store.updateRun(id: runId, fields: ["endedAt": nowMs()])
-        let result = ApmeClassifier.classifyRun(store: store, runId: runId)
-        if let signals = try? JSONEncoder().encode(result.signals),
-           let json = String(data: signals, encoding: .utf8) {
-            store.updateRun(id: runId, fields: [
-                "taskSignals": json,
-                "taskCategory": result.category.rawValue,
-                "taskCategorySource": "auto",
-            ])
-        }
+        finalizeRun(runId: runId)
     }
 
     // MARK: - SessionSample trajectory (the normalizer's typed event log)
@@ -570,10 +606,9 @@ final class ApmeCollector {
 
     // MARK: - Private
 
-    private func closeTurn(runId: String) {
-        guard let turn = activeTurn else { return }
-        activeTurn = nil
-        lastClosedTurnByRun[runId] = turn.id
+    private func closeTurn(sessionKey: String) {
+        guard let turn = sessionToTurn.removeValue(forKey: sessionKey) else { return }
+        lastClosedTurnByRun[turn.runId] = turn.id
         store.updateTurn(id: turn.id, fields: [
             "endedAt": nowMs(),
             "toolCalls": turn.toolCalls,
@@ -592,7 +627,7 @@ final class ApmeCollector {
 
     // MARK: - Task lifecycle
 
-    /// Open a new task if none is active for the current run. Idempotent —
+    /// Open a new task if none is active for this session. Idempotent —
     /// repeat calls while a task is already active return the existing one.
     /// Mirrors bridge/src/apme/collector.ts openTaskIfNone.
     ///
@@ -603,8 +638,8 @@ final class ApmeCollector {
     /// TASK header on the dashboard — keeping the timeline focused on the
     /// turn rows the user actually wants to evaluate.
     @discardableResult
-    private func openTaskIfNone(runId: String) -> ActiveTask? {
-        if let existing = activeTask, existing.runId == runId { return existing }
+    private func openTaskIfNone(sessionKey: String, runId: String) -> ActiveTask? {
+        if let existing = sessionToTask[sessionKey] { return existing }
         let nextIndex = runTaskCount[runId] ?? 0
         runTaskCount[runId] = nextIndex + 1
         let task = ActiveTask(
@@ -616,7 +651,7 @@ final class ApmeCollector {
             lastTurnIndex: nil,
             timelineEmitted: false
         )
-        activeTask = task
+        sessionToTask[sessionKey] = task
         store.insertTask(ApmeTask(
             id: task.id,
             runId: runId,
@@ -627,22 +662,17 @@ final class ApmeCollector {
         return task
     }
 
-    /// Broadcast the deferred `task_start` row for the active task, if one
-    /// exists and hasn't yet been emitted. Idempotent — repeat calls are
-    /// no-ops once the emit happens. Uses the task's original `startedAt`
-    /// as the timeline timestamp so the TASK header anchors above the
-    /// first turn it groups instead of jumping in mid-conversation.
     /// Surface the TodoWrite-all-completed soft hint as a `task_milestone`
     /// timeline row — non-segmenting (the task stays open), at most once per
     /// (task, turn). Mirrors `onTaskMilestone` wiring in
     /// bridge/src/apme/index.ts.
-    private func emitTaskMilestoneIfNeeded(task: ActiveTask, turnIndex: Int) {
+    private func emitTaskMilestoneIfNeeded(sessionKey: String, task: ActiveTask, turnIndex: Int) {
         let key = "\(task.id):\(turnIndex)"
-        if lastMilestoneKey == key { return }
-        lastMilestoneKey = key
+        if sessionToLastMilestone[sessionKey] == key { return }
+        sessionToLastMilestone[sessionKey] = key
         // The milestone implies a task worth showing — promote the deferred
         // task_start first so the milestone never renders orphaned.
-        emitDeferredTaskStartIfNeeded()
+        emitDeferredTaskStartIfNeeded(sessionKey: sessionKey)
         let run = store.getRun(id: task.runId)
         emitTimelineEntry?(DaemonTimelineEntry(
             ts: Double(Date().timeIntervalSince1970 * 1000),
@@ -656,8 +686,13 @@ final class ApmeCollector {
         ))
     }
 
-    private func emitDeferredTaskStartIfNeeded() {
-        guard var task = activeTask, !task.timelineEmitted else { return }
+    /// Broadcast the deferred `task_start` row for the session's active task,
+    /// if one exists and hasn't yet been emitted. Idempotent — repeat calls
+    /// are no-ops once the emit happens. Uses the task's original `startedAt`
+    /// as the timeline timestamp so the TASK header anchors above the
+    /// first turn it groups instead of jumping in mid-conversation.
+    private func emitDeferredTaskStartIfNeeded(sessionKey: String) {
+        guard var task = sessionToTask[sessionKey], !task.timelineEmitted else { return }
         let run = store.getRun(id: task.runId)
         emitTimelineEntry?(DaemonTimelineEntry(
             ts: Double(task.startedAt),
@@ -671,13 +706,14 @@ final class ApmeCollector {
             taskId: task.id
         ))
         task.timelineEmitted = true
-        activeTask = task
+        sessionToTask[sessionKey] = task
     }
 
-    /// Arm the idle-gap timer. After `idleGapSec` of no new
-    /// `user_prompt_submit`, fires `closeTask(boundarySignal: "idle_gap")`
-    /// — mirroring the Node bridge OpenClaw adapter. Cancels any previously
-    /// armed timer so back-to-back turns don't pile up timers.
+    /// Arm the idle-gap timer for one session. After `idleGapSec` of no new
+    /// `user_prompt_submit` on that session, fires
+    /// `closeTask(boundarySignal: "idle_gap")` — mirroring the Node bridge
+    /// OpenClaw adapter. Cancels any previously armed timer for the same
+    /// session so back-to-back turns don't pile up timers.
     ///
     /// Both the active task **and** the active turn are snapshotted at arm
     /// time so `handleIdleGapFire` can refuse to close when a new turn
@@ -685,17 +721,16 @@ final class ApmeCollector {
     /// guard, a continuation that wins the race against the timer cancel
     /// can still see the task closed under it.
     ///
-    /// In addition, arming is skipped when `activeTurn` is younger than
-    /// `idleGapMinTurnAgeSec`. That blocks the late-Stop-hook race where
-    /// the response callback for the *previous* turn arrives after the
-    /// next `user_prompt_submit` has already rotated `activeTurn` to a
-    /// brand-new (still generating) turn — without that guard the fresh
-    /// turn would get an idle-gap timer pointed at it.
-    private func scheduleIdleGapClose() {
-        idleGapTask?.cancel()
-        idleGapTask = nil
-        guard let snapshotTaskId = activeTask?.id else { return }
-        guard let turn = activeTurn else {
+    /// In addition, arming is skipped when the session's active turn is
+    /// younger than `idleGapMinTurnAgeSec`. That blocks the late-Stop-hook
+    /// race where the response callback for the *previous* turn arrives
+    /// after the next `user_prompt_submit` has already rotated the active
+    /// turn to a brand-new (still generating) turn — without that guard the
+    /// fresh turn would get an idle-gap timer pointed at it.
+    private func scheduleIdleGapClose(sessionKey: String) {
+        idleGapTasks.removeValue(forKey: sessionKey)?.cancel()
+        guard let snapshotTaskId = sessionToTask[sessionKey]?.id else { return }
+        guard let turn = sessionToTurn[sessionKey] else {
             // No active turn → we're not at a "user is idle" boundary
             // (we're either between session events or mid-cleanup). Arming
             // here would be incorrect; skip.
@@ -718,11 +753,11 @@ final class ApmeCollector {
         }
         let snapshotTurnId = turn.id
         let delaySec = idleGapSec
-        idleGapTask = Task { [weak self] in
+        idleGapTasks[sessionKey] = Task { [weak self] in
             let nanos = UInt64(max(0, delaySec) * 1_000_000_000)
             try? await Task.sleep(nanoseconds: nanos)
             guard !Task.isCancelled else { return }
-            await self?.handleIdleGapFire(snapshotTaskId: snapshotTaskId, snapshotTurnId: snapshotTurnId)
+            await self?.handleIdleGapFire(sessionKey: sessionKey, snapshotTaskId: snapshotTaskId, snapshotTurnId: snapshotTurnId)
         }
     }
 
@@ -730,37 +765,46 @@ final class ApmeCollector {
     /// originally-snapshotted (task, turn) pair. If a new turn has opened —
     /// continuation prompt arrived during the gap and beat the cancel to
     /// the main actor — the snapshot mismatch keeps the task alive.
-    private func handleIdleGapFire(snapshotTaskId: String, snapshotTurnId: String) {
-        guard let active = activeTask, active.id == snapshotTaskId else { return }
-        guard let turn = activeTurn, turn.id == snapshotTurnId else { return }
-        closeTask(boundarySignal: "idle_gap")
+    private func handleIdleGapFire(sessionKey: String, snapshotTaskId: String, snapshotTurnId: String) {
+        guard let active = sessionToTask[sessionKey], active.id == snapshotTaskId else { return }
+        guard let turn = sessionToTurn[sessionKey], turn.id == snapshotTurnId else { return }
+        closeTask(sessionKey: sessionKey, boundarySignal: "idle_gap")
     }
 
     /// Public wrapper for `closeTask` — used by the daemon HTTP route the
     /// CLI / macOS detail-pane button hits. Mirrors
     /// `bridge/src/apme/collector.ts::closeTaskExternal`. Returns true when
-    /// a task was closed, false when no task was active.
+    /// a task was closed, false when no task was active. When `sessionId`
+    /// is nil, falls back to the most recent session, then to the most
+    /// recently started active task (single-task callers predate the
+    /// per-session maps).
     @discardableResult
-    func closeTaskExternal(boundarySignal: String = "manual", outcome: String? = nil) -> Bool {
-        guard let task = activeTask else { return false }
-        closeTask(boundarySignal: boundarySignal)
+    func closeTaskExternal(sessionId: String? = nil, boundarySignal: String = "manual", outcome: String? = nil) -> Bool {
+        let key: String? = {
+            if let sid = sessionId, !sid.isEmpty {
+                return sessionToTask[sid] != nil ? sid : nil
+            }
+            if let ahs = activeHookSession, sessionToTask[ahs] != nil { return ahs }
+            return sessionToTask.max(by: { $0.value.startedAt < $1.value.startedAt })?.key
+        }()
+        guard let key, let task = sessionToTask[key] else { return false }
+        closeTask(sessionKey: key, boundarySignal: boundarySignal)
         if let outcome = outcome {
             store.updateTask(id: task.id, fields: ["outcome": outcome as Any?])
         }
         return true
     }
 
-    /// Close the active task with the given boundary signal, persisting
-    /// metadata and firing `onTaskClosed`. Tasks that never saw a turn
-    /// (firstTurnIndex == nil) are dropped rather than left as phantoms.
-    private func closeTask(boundarySignal: String) {
-        guard let task = activeTask else { return }
-        activeTask = nil
-        lastMilestoneKey = nil
+    /// Close the session's active task with the given boundary signal,
+    /// persisting metadata and firing the runner's task judge. Tasks that
+    /// never saw a turn (firstTurnIndex == nil) are dropped rather than left
+    /// as phantoms.
+    private func closeTask(sessionKey: String, boundarySignal: String) {
+        guard let task = sessionToTask.removeValue(forKey: sessionKey) else { return }
+        sessionToLastMilestone.removeValue(forKey: sessionKey)
         // Always cancel any armed idle-gap timer when a task closes, so a
         // late-firing timer can't reopen a closed-task race.
-        idleGapTask?.cancel()
-        idleGapTask = nil
+        idleGapTasks.removeValue(forKey: sessionKey)?.cancel()
 
         // Empty task: no turns ever attached. Drop the row.
         guard task.firstTurnIndex != nil else {
@@ -866,10 +910,22 @@ final class ApmeCollector {
         return true
     }
 
-    // MARK: - Test accessors
+    // MARK: - Task id lookup
 
-    /// Current active task id (nil when no task open). Exposed for tests.
-    var activeTaskId: String? { activeTask?.id }
+    /// Active task id for the most recent session (nil when no task open).
+    /// Legacy accessor kept for single-session callers and tests.
+    var activeTaskId: String? { activeHookSession.flatMap { sessionToTask[$0]?.id } }
+
+    /// Active task id for one session. This is the ONLY correct lookup for
+    /// timeline-row stamping — the legacy `activeTaskId` var reflects
+    /// whichever session most recently opened, which under concurrent
+    /// sessions stamps another session's taskId onto this session's rows
+    /// (the cross-session subtree bug). Mirrors
+    /// bridge/src/apme/collector.ts getActiveTaskId(sessionId).
+    func activeTaskId(sessionId: String?) -> String? {
+        guard let sid = sessionId, !sid.isEmpty else { return activeTaskId }
+        return sessionToTask[sid]?.id
+    }
 
     // MARK: - Turn response capture (mid-session eval entry point)
 
@@ -879,54 +935,62 @@ final class ApmeCollector {
         "conversation", "planning", "research", "review",
     ]
 
-    /// Record the agent's response on the active turn (or the most recently
-    /// closed turn if close already fired) and — if this is the first response
-    /// for the run — classify the run inline so a turn_judge eval can fire
-    /// immediately. Mirrors the TS `index.ts` fix from commit e76325f7 and is
-    /// the Swift side of the category-aware pipeline.
+    /// Record the agent's response on the session's active turn (or the most
+    /// recently closed turn if close already fired) and — if this is the
+    /// first response for the run — classify the run inline so a turn_judge
+    /// eval can fire immediately. Mirrors the TS `index.ts` fix from commit
+    /// e76325f7 and is the Swift side of the category-aware pipeline.
+    ///
+    /// `sessionId` scopes the lookup to one session's turn state; callers
+    /// that know which session produced the response (chat_end rows carry
+    /// it) MUST pass it — the nil fallback attributes to the most recent
+    /// session, which is only correct when a single session is running.
     ///
     /// `chatEndTs` is the millisecond timestamp of the originating `chat_end`
     /// entry. The Claude Code stop-hook path in `DaemonServer.swift:2792`
     /// dispatches via `Task { await … }`, so a fast follow-up
-    /// `user_prompt_submit` can rotate `activeTurn` to a *fresh new turn*
+    /// `user_prompt_submit` can rotate the active turn to a *fresh new turn*
     /// before this callback runs. Without disambiguation the response would
     /// be written onto the wrong turn (Codex stop-time review flagged this
     /// as "stale response still mutates fresh turns"). When `chatEndTs` is
-    /// supplied and predates `activeTurn.startedAt`, the response is
+    /// supplied and predates the active turn's start, the response is
     /// attributed to `lastClosedTurnByRun` instead — the turn that was
     /// actually open when chat_end happened. Callers that have no
     /// trustworthy timestamp (e.g. OpenClaw Gateway's `chat.final`, which
     /// is delivered synchronously from the same MainActor) may omit the
     /// parameter; the disambiguator is then a no-op and the original
-    /// "prefer activeTurn" policy applies.
+    /// "prefer the active turn" policy applies.
     ///
     /// Returns the turnId that was updated, or nil if no turn is in scope.
     @discardableResult
-    func setTurnResponse(_ response: String, runId overrideRunId: String? = nil, chatEndTs: Double? = nil) -> String? {
+    func setTurnResponse(_ response: String, sessionId: String? = nil, runId overrideRunId: String? = nil, chatEndTs: Double? = nil) -> String? {
         guard store.isOpen else { return nil }
         guard !response.isEmpty else { return nil }
 
+        let sessionKey = sessionId.flatMap { $0.isEmpty ? nil : $0 } ?? activeHookSession
+        let candidateTurn = sessionKey.flatMap { sessionToTurn[$0] }
+
         // Detect the late-stop-hook race: if `chatEndTs` predates the
-        // current `activeTurn`'s open time, the response was generated for
+        // session's active turn's open time, the response was generated for
         // a different (earlier, now closed) turn. Without this branch the
         // response would clobber a freshly opened turn that's still mid
         // generation — the fresh turn's eventual real response would
         // overwrite it, but in the window the mid-session classifier and
         // turn_judge could pick up the stale text and mis-evaluate.
         let activeTurnIsStaleForResponse: Bool = {
-            guard let chatEndTs, let turn = activeTurn else { return false }
+            guard let chatEndTs, let turn = candidateTurn else { return false }
             return Double(turn.startedAt) > chatEndTs
         }()
 
         // Resolve target turn. `attributedToActiveTurn` gates idle-gap
         // arming at the bottom of this method — when the response lands on
-        // a closed turn via the stale-race fallback, the fresh activeTurn
+        // a closed turn via the stale-race fallback, the fresh active turn
         // is still generating and must not get an idle-gap timer pointed
         // at it. Codex stop-time review #4 (2026-05-15).
         let runId: String?
         let turnId: String?
         let attributedToActiveTurn: Bool
-        if let turn = activeTurn, !activeTurnIsStaleForResponse {
+        if let turn = candidateTurn, !activeTurnIsStaleForResponse {
             runId = turn.runId
             turnId = turn.id
             attributedToActiveTurn = true
@@ -934,16 +998,16 @@ final class ApmeCollector {
             runId = rid
             turnId = tid
             attributedToActiveTurn = false
-        } else if let hs = activeHookSession, let rid = sessionToRun[hs], let tid = lastClosedTurnByRun[rid] {
+        } else if let key = sessionKey, let rid = sessionToRun[key], let tid = lastClosedTurnByRun[rid] {
             runId = rid
             turnId = tid
             attributedToActiveTurn = false
         } else {
             // Stale response with no closed-turn fallback to land on — drop
-            // it rather than corrupt a fresh activeTurn. Logged so an
+            // it rather than corrupt a fresh active turn. Logged so an
             // unexpected drop is debuggable from the daemon log.
             if activeTurnIsStaleForResponse {
-                DaemonLogger.shared.debug("APME", "setTurnResponse dropped — stale (chat_end pre-dates activeTurn) and no closed-turn fallback")
+                DaemonLogger.shared.debug("APME", "setTurnResponse dropped — stale (chat_end pre-dates active turn) and no closed-turn fallback")
             }
             return nil
         }
@@ -960,10 +1024,12 @@ final class ApmeCollector {
             "response": clamped,
             "efficiencyJson": efficiencyJson,
         ])
-        if attributedToActiveTurn { activeTurn?.hasResponse = true }
+        if attributedToActiveTurn, let key = sessionKey {
+            sessionToTurn[key]?.hasResponse = true
+        }
         // Sample trajectory: the assistant response closes the turn's event arc.
         if let taskId = existingTurn?["task_id"] as? String {
-            let tIdx = (existingTurn?["turn_index"] as? Int) ?? activeTurn?.index ?? 0
+            let tIdx = (existingTurn?["turn_index"] as? Int) ?? candidateTurn?.index ?? 0
             appendSampleEvent(taskId: taskId, runId: runId, turnIndex: tIdx,
                               kind: "assistant_message", core: String(clamped.prefix(200)),
                               payload: ["text": clamped, "responseKind": "text"])
@@ -1010,17 +1076,17 @@ final class ApmeCollector {
         }
 
         // Arm the idle-gap auto-close ONLY when the response was actually
-        // attributed to the active turn. If we routed to a closed turn via
-        // the stale-race fallback (`chatEndTs` < `activeTurn.startedAt`),
-        // the fresh activeTurn is still mid-generation; arming an
+        // attributed to the session's active turn. If we routed to a closed
+        // turn via the stale-race fallback (`chatEndTs` < turn.startedAt),
+        // the fresh active turn is still mid-generation; arming an
         // idle-gap timer against it would race a closeTask onto a turn
         // whose real response hasn't even been captured yet. Codex
         // stop-time review #4 (2026-05-15). The age guard inside
         // `scheduleIdleGapClose` is a defensive fallback for callers
         // that don't pass `chatEndTs` (e.g. OpenClaw Gateway); this
         // earlier gate is the precise fix for the late-callback path.
-        if attributedToActiveTurn {
-            scheduleIdleGapClose()
+        if attributedToActiveTurn, let key = sessionKey {
+            scheduleIdleGapClose(sessionKey: key)
         }
 
         return turnId

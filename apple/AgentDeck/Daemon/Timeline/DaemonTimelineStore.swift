@@ -128,12 +128,27 @@ actor DaemonTimelineStore {
             }
         }
 
-        entries.append(entry)
+        insertSorted(entry)
         while entries.count > maxEntries {
             evictOne()
         }
         dirty = true
         flush()
+    }
+
+    /// Insert keeping `entries` ascending by ts. Live emits normally arrive
+    /// in order (append fast-path), but the deferred `task_start` row is
+    /// backdated to the task's original startedAt when it's promoted on the
+    /// second turn — a plain append lands it BELOW the turns it groups and
+    /// every consumer renders the TASK header out of position until the
+    /// next full reload re-sorts.
+    private func insertSorted(_ entry: DaemonTimelineEntry) {
+        if let last = entries.last, entry.ts < last.ts {
+            let idx = entries.lastIndex(where: { $0.ts <= entry.ts }).map { $0 + 1 } ?? 0
+            entries.insert(entry, at: idx)
+        } else {
+            entries.append(entry)
+        }
     }
 
     /// Evict a single entry to enforce `maxEntries`, protecting task rows —

@@ -245,6 +245,7 @@ private fun TimelineList(
                         allowMultiline = allowExpand,
                         scale = scale,
                         siblings = displayEntries,
+                        isNested = timelineRowIsNestedUnderTaskHeader(index, grouped),
                         onClick = { onClick(index) },
                     )
                     if (allowExpand && expandedIndex == index) {
@@ -254,6 +255,29 @@ private fun TimelineList(
             }
         }
     }
+}
+
+/**
+ * True when the row at [index] should render indented under a TASK header:
+ * it carries a taskId AND the nearest task marker above it in the rendered
+ * list is that same task's `task_start`. A bare `taskId != null` check is
+ * not sufficient — interleaved concurrent sessions (and legacy rows whose
+ * taskId was stamped from another session's active task before the Swift
+ * daemon's per-session collector fix) would indent under an unrelated
+ * session's header and read as a fake cross-session subtree. Mirrors
+ * `timelineRowIsNestedUnderTaskHeader` in apple TimelineStripView.swift.
+ */
+private fun timelineRowIsNestedUnderTaskHeader(index: Int, grouped: List<GroupedEntry>): Boolean {
+    if (index < 0 || index >= grouped.size) return false
+    val taskId = grouped[index].entry.taskId
+    if (taskId.isNullOrEmpty()) return false
+    for (i in index - 1 downTo 0) {
+        val e = grouped[i].entry
+        if (e.type == "task_start" || e.type == "task_end") {
+            return e.type == "task_start" && e.taskId == taskId
+        }
+    }
+    return false
 }
 
 /**
@@ -267,6 +291,7 @@ private fun CompactLogRow(
     allowMultiline: Boolean,
     scale: MonitorLayoutScale,
     siblings: List<TimelineEntry>,
+    isNested: Boolean,
     onClick: () -> Unit,
 ) {
     val entry = group.entry
@@ -285,6 +310,7 @@ private fun CompactLogRow(
             allowMultiline = allowMultiline,
             scale = scale,
             siblings = siblings,
+            isNested = isNested,
             onClick = onClick,
         )
     }
@@ -297,6 +323,7 @@ private fun TurnRow(
     allowMultiline: Boolean,
     scale: MonitorLayoutScale,
     siblings: List<TimelineEntry>,
+    isNested: Boolean,
     onClick: () -> Unit,
 ) {
     val entry = group.entry
@@ -347,7 +374,7 @@ private fun TurnRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Indent under task headers so turns visually belong to the task above.
-        if (entry.taskId != null) Spacer(modifier = Modifier.width(8.dp))
+        if (isNested) Spacer(modifier = Modifier.width(8.dp))
 
         Text(
             text = timeStr,
@@ -419,7 +446,7 @@ private fun TurnRow(
         // Sub-line: assistant response body merged into this turn. Indented +
         // dimmed so the prompt above stays the primary reading anchor. Mirrors
         // apple/AgentDeck/UI/Monitor/TimelineStripView.swift turnRow sub-lines.
-        val subIndent = if (entry.taskId != null) 64.dp else 56.dp
+        val subIndent = if (isNested) 64.dp else 56.dp
         group.mergedResponse?.let { resp ->
             if (!isProgressChatResponse(resp)) {
                 Row(

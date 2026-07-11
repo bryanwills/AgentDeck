@@ -247,7 +247,18 @@ class TimelineStore private constructor() {
             if (normalized.timestamp - e.timestamp > 5000) break
             if (e.type == normalized.type && e.summary == normalized.summary) return
         }
-        _entries.value = (list + normalized).takeLast(MAX_ENTRIES)
+        // Sorted insert: live events normally arrive ascending (append
+        // fast-path), but the daemon's deferred `task_start` is backdated to
+        // the task's original startedAt — a plain append renders the TASK
+        // header below the turns it groups until the next snapshot re-sort.
+        val last = list.lastOrNull()
+        _entries.value = if (last != null && normalized.timestamp < last.timestamp) {
+            val insertAt = list.indexOfLast { it.timestamp <= normalized.timestamp } + 1
+            (list.subList(0, insertAt) + normalized + list.subList(insertAt, list.size))
+                .takeLast(MAX_ENTRIES)
+        } else {
+            (list + normalized).takeLast(MAX_ENTRIES)
+        }
     }
 
     /** Update the most recent entry matching [type] using [transform]. */

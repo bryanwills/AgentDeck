@@ -1560,6 +1560,7 @@ final class DaemonServer {
             guard let self else { return .json(["error": "daemon offline"], status: 503) }
             var signal = "manual"
             var outcome: String? = nil
+            var sessionId: String? = nil
             if let body = request.body,
                let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
                 if let s = json["signal"] as? String { signal = s }
@@ -1567,19 +1568,20 @@ final class DaemonServer {
                    ["success", "fail", "partial", "abandoned"].contains(o) {
                     outcome = o
                 }
+                if let sid = json["sessionId"] as? String, !sid.isEmpty { sessionId = sid }
             }
-            // Both APME collectors track their own active task (Claude Code
-            // hooks vs OpenClaw Gateway). Try gateway first because the
+            // Both APME collectors track per-session active tasks (Claude
+            // Code hooks vs OpenClaw Gateway). Try gateway first because the
             // macOS app's most common use is OpenClaw chats; fall back to
             // the Claude collector when no gateway task is active. Returns
             // 404 only when neither collector has anything to close.
             let result: (closed: Bool, where: String) = await MainActor.run {
                 if let gw = self.apmeCollectorGateway,
-                   gw.closeTaskExternal(boundarySignal: signal, outcome: outcome) {
+                   gw.closeTaskExternal(sessionId: sessionId, boundarySignal: signal, outcome: outcome) {
                     return (true, "gateway")
                 }
                 if let cc = self.apmeCollector,
-                   cc.closeTaskExternal(boundarySignal: signal, outcome: outcome) {
+                   cc.closeTaskExternal(sessionId: sessionId, boundarySignal: signal, outcome: outcome) {
                     return (true, "claude")
                 }
                 return (false, "none")
@@ -2824,10 +2826,14 @@ final class DaemonServer {
             // renders Claude Code activity alongside OpenClaw/OpenCode. Before
             // this, only tool_start/tool_end entries appeared (via OpenClaw
             // path) and Claude Code conversations looked empty on the timeline.
-            // The collector already ran (apmeHandledEarly) so `activeTaskId`
-            // reflects the task THIS prompt belongs to — tag the row with it so
-            // follow-up prompts nest under one task header.
-            appendClaudeCodeChatStart(json: json, sessionId: sessionId, taskId: apmeCollector?.activeTaskId)
+            // The collector already ran (apmeHandledEarly) so the session's
+            // active task reflects the task THIS prompt belongs to — tag the
+            // row with it so follow-up prompts nest under one task header.
+            // MUST be the session-scoped lookup: the legacy `activeTaskId`
+            // var returns whichever session most recently opened, which under
+            // concurrent sessions stamped another session's taskId here
+            // (cross-session subtree contamination).
+            appendClaudeCodeChatStart(json: json, sessionId: sessionId, taskId: apmeCollector?.activeTaskId(sessionId: sessionId))
         case "stop":
             _ = stateMachine.transition(trigger: "stop", source: .hook)
             updateSessionHookState(sessionId: sessionId, state: "idle", clearTool: true)
@@ -2963,12 +2969,12 @@ final class DaemonServer {
         // a run, session_end closes it, everything in between is a step).
         //
         // Codex events (codex_turn_complete, plus future codex_* signals)
-        // are deliberately excluded: ApmeCollector keys steps off
-        // `activeHookSession`, which is set by Claude's `session_start` —
-        // routing Codex events through it would mis-attribute a Codex turn
-        // to whichever Claude session happened to be active. APME for
-        // Codex needs a distinct collector path (out of scope for this
-        // observation pass).
+        // are deliberately excluded: the collector's run/turn/task model is
+        // built around Claude's hook lifecycle; APME for Codex needs a
+        // distinct collector path (out of scope for this observation pass).
+        // Because Codex sessions never open a collector task, their timeline
+        // rows carry no taskId — they render flat, never nested under a
+        // Claude session's TASK header.
         if !event.hasPrefix("codex_") && !apmeHandledEarly {
             apmeCollector?.handleHook(event: event, data: json)
         }
@@ -3896,10 +3902,15 @@ final class DaemonServer {
                     // APME: record the response even when voice assistant is inactive.
                     // `chatEndTs` lets the collector reject the late-callback
                     // race where a follow-up user_prompt_submit has already
-                    // rotated activeTurn to a fresh turn — without it, this
-                    // response would clobber the wrong turn's record.
+                    // rotated the active turn to a fresh turn — without it,
+                    // this response would clobber the wrong turn's record.
+                    // `sessionId` scopes the write to the session that
+                    // produced the chat_end — the global PROCESSING→IDLE
+                    // edge fires for whichever session finished, and the
+                    // sessionless fallback would attribute the text to the
+                    // most recently opened session instead.
                     if !responseText.isEmpty {
-                        self.apmeCollector?.setTurnResponse(responseText, chatEndTs: chatEndTs)
+                        self.apmeCollector?.setTurnResponse(responseText, sessionId: lastEntry?.sessionId, chatEndTs: chatEndTs)
                     }
                     if self.voiceAssistant.state == .processing {
                         self.voiceAssistant.handleResponse(responseText.isEmpty ? "완료했습니다." : responseText)
@@ -4034,7 +4045,7 @@ final class DaemonServer {
                 // APME: record response text → triggers inline classification + eval
                 let response = chatPayload["response"] as? String ?? ""
                 if !response.isEmpty {
-                    apmeCollectorGateway?.setTurnResponse(response)
+                    apmeCollectorGateway?.setTurnResponse(response, sessionId: "openclaw-gateway")
                 }
             case "error":
                 gatewaySessionState = "idle"
@@ -6241,9 +6252,12 @@ final class DaemonServer {
             respEntry.projectName = projectName
             respEntry.startedAt = startTs
             respEntry.endedAt = now
-            // Same active task as the matching chat_start so a Q&A turn's
-            // prompt + response group together instead of splitting.
-            respEntry.taskId = apmeCollector?.activeTaskId
+            // NO taskId here: Codex sessions are not ingested by the APME
+            // collector (no codex_* collector path), so they never own a
+            // task. The previous `apmeCollector?.activeTaskId` stamp copied
+            // whichever CLAUDE session's task happened to be active,
+            // nesting unrelated Codex turns under a Claude TASK header
+            // (cross-session subtree contamination).
             Task { await timelineStore.add(respEntry) }
             broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(respEntry)] as [String: Any])
         }
@@ -6379,11 +6393,13 @@ final class DaemonServer {
             respEntry.projectName = projectName
             respEntry.startedAt = startTs
             respEntry.endedAt = now
-            // Tag the response with the same active task as its chat_start
-            // (which carries `apmeCollector.activeTaskId`). Without this the
-            // answer row had no taskId, so a Q&A turn's prompt and response
-            // landed in different task buckets and rendered as separate tasks.
-            respEntry.taskId = apmeCollector?.activeTaskId
+            // Tag the response with THIS session's active task — same task
+            // as its chat_start. Without this the answer row had no taskId,
+            // so a Q&A turn's prompt and response landed in different task
+            // buckets and rendered as separate tasks. Session-scoped lookup
+            // is mandatory: the legacy global accessor stamped whichever
+            // session most recently opened a task.
+            respEntry.taskId = apmeCollector?.activeTaskId(sessionId: sessionId)
             Task { await timelineStore.add(respEntry) }
             broadcastRaw([
                 "type": "timeline_event",
@@ -6404,6 +6420,12 @@ final class DaemonServer {
         // chat_end build + broadcast hops into a Task so it doesn't block the
         // Stop-hook handler. Reached only for response-less turns, so there is
         // no assistant text to summarize — the label is the prompt topic.
+        // The session's taskId is captured on the MainActor BEFORE the hop —
+        // a /clear or session_end can close the task while the Task body is
+        // queued, and the row must carry the task it belonged to when the
+        // turn ended (chat_start/chat_response already carry it; a bare
+        // chat_end without one renders un-indented next to indented peers).
+        let turnTaskId = apmeCollector?.activeTaskId(sessionId: sessionId)
         if assistantText.isEmpty {
         Task {
             let topic = topicFromPrompt
@@ -6431,6 +6453,7 @@ final class DaemonServer {
             endEntry.projectName = projectName
             endEntry.startedAt = startTs
             endEntry.endedAt = now
+            endEntry.taskId = turnTaskId
             endEntry.summaryKind = topic == nil ? nil : "heuristic"
             await timelineStore.add(endEntry)
             broadcastRaw([

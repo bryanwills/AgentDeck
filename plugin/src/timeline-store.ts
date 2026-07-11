@@ -138,9 +138,20 @@ class TimelineStore {
       return;
     }
 
-    // action === 'add' — use cleaned entry from dedup pipeline
+    // action === 'add' — use cleaned entry from dedup pipeline.
+    // Sorted insert: live events normally arrive ascending (append
+    // fast-path), but the daemon's deferred `task_start` is backdated to
+    // the task's original startedAt — a plain append renders the TASK
+    // header below the turns it groups until the next history re-sort.
     entry = result.entry as TimelineEntry;
-    this.entries.push(entry);
+    const lastEntry = this.entries[this.entries.length - 1];
+    if (lastEntry && entry.ts < lastEntry.ts) {
+      let i = this.entries.length;
+      while (i > 0 && this.entries[i - 1].ts > entry.ts) i--;
+      this.entries.splice(i, 0, entry);
+    } else {
+      this.entries.push(entry);
+    }
     if (this.entries.length > MAX_ENTRIES) {
       this.entries.shift();
     }

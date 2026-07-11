@@ -264,6 +264,12 @@ struct TimelineStripView: View {
         let isSelected = index == focusedIndex ||
             (focusedIndex < 0 && index == grouped.count - 1)
         let isChatEnd = group.entry.type == .chatEnd
+        // Nested = this row's task header is the nearest header ABOVE it.
+        // Bare `taskId != nil` is not enough: with interleaved concurrent
+        // sessions (and legacy cross-session-contaminated taskIds on disk),
+        // an unrelated row would indent under another session's TASK header
+        // and read as a fake subtree.
+        let isNested = timelineRowIsNestedUnderTaskHeader(at: index, in: grouped)
         // The turn is "completed" the moment EITHER chat_response or
         // chat_end is merged in — `GroupedEntry.hasResponse`. chat_end
         // is unreliable in production (Stop hook ~18% reliability;
@@ -302,7 +308,7 @@ struct TimelineStripView: View {
             HStack(spacing: 4) {
                 // Indent turn rows under task headers — visual cue that this turn
                 // belongs to the task above it.
-                if group.entry.taskId != nil {
+                if isNested {
                     Spacer().frame(width: 8)
                 }
 
@@ -377,7 +383,7 @@ struct TimelineStripView: View {
             // user prompt above stays the primary reading anchor.
             if let resp = group.mergedResponse, !timelineIsProgressChatResponse(resp) {
                 HStack(alignment: .top, spacing: 4) {
-                    Spacer().frame(width: group.entry.taskId != nil ? 64 : 56)
+                    Spacer().frame(width: isNested ? 64 : 56)
                     Text("→")
                         .font(.system(size: fontScale.sub, weight: .semibold, design: .monospaced))
                         .foregroundStyle(TerrariumHUD.subtext.opacity(0.55))
@@ -395,7 +401,7 @@ struct TimelineStripView: View {
             // the summary-backend pill.
             if let end = group.mergedCompletion, end.summaryKind != "progress" {
                 HStack(spacing: 4) {
-                    Spacer().frame(width: group.entry.taskId != nil ? 64 : 56)
+                    Spacer().frame(width: isNested ? 64 : 56)
                     Text(strippedRaw(end.raw))
                         .font(.system(size: fontScale.label, design: .monospaced))
                         .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
@@ -1254,6 +1260,29 @@ func timelineStripMarkdownInline(_ s: String) -> String {
     let result = out.trimmingCharacters(in: .whitespacesAndNewlines)
     timelineMarkdownStripCache.setObject(result as NSString, forKey: key)
     return result
+}
+
+/// True when the row at `index` should render indented under a TASK header:
+/// it carries a taskId AND the nearest task marker above it in the rendered
+/// list is that same task's `task_start`. A bare `taskId != nil` check is not
+/// sufficient — interleaved concurrent sessions (and legacy rows whose taskId
+/// was stamped from another session's active task before the per-session
+/// collector fix) would indent under an unrelated session's header, reading
+/// as a fake cross-session subtree. Mirrors `timelineRowIsNestedUnderTaskHeader`
+/// in android TimelineStrip.kt.
+func timelineRowIsNestedUnderTaskHeader(at index: Int, in groups: [GroupedEntry]) -> Bool {
+    guard index >= 0, index < groups.count else { return false }
+    guard let taskId = groups[index].entry.taskId, !taskId.isEmpty else { return false }
+    for i in stride(from: index - 1, through: 0, by: -1) {
+        let e = groups[i].entry
+        if e.type == .taskStart || e.type == .taskEnd {
+            // The nearest marker decides: an open header of the same task
+            // nests this row; any other header (another task's, or this
+            // task's own task_end) means the row stands at top level.
+            return e.type == .taskStart && e.taskId == taskId
+        }
+    }
+    return false
 }
 
 func timelineHasLaterCompletion(for start: TimelineEntry, in groups: [GroupedEntry]) -> Bool {

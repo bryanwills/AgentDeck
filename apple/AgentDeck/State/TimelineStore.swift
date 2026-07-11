@@ -39,7 +39,16 @@ final class TimelineStore: ObservableObject, @unchecked Sendable {
             }
         }
 
-        entries.append(entry)
+        // Sorted insert: live events normally arrive ascending (append
+        // fast-path), but the daemon's deferred `task_start` is backdated to
+        // the task's original startedAt — a plain append renders the TASK
+        // header below the turns it groups until the next history re-sort.
+        if let last = entries.last, entry.ts < last.ts {
+            let idx = entries.lastIndex(where: { $0.ts <= entry.ts }).map { $0 + 1 } ?? 0
+            entries.insert(entry, at: idx)
+        } else {
+            entries.append(entry)
+        }
 
         // Trim oldest if over limit
         if entries.count > maxEntries {
