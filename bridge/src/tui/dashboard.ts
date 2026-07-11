@@ -11,10 +11,10 @@ import type {
   ModelCatalogEntry,
 } from '@agentdeck/shared';
 import type { TimelineEntry } from '@agentdeck/shared';
-import { listActive, findDaemonPort } from '../session-registry.js';
+import { listActive, findDaemonPort, findDaemonPortAsync, DAEMON_DEFAULT_PORT } from '../session-registry.js';
 import { Screen } from './screen.js';
 import {
-  renderDashboard, getLayout, shouldShowTerrarium, spinner, buildHudEntries,
+  renderDashboard, getLayout, shouldShowTerrarium, buildHudEntries,
 } from './renderer.js';
 import {
   initTerrarium, updateTerrarium, setOctopi, setJellyfish, setOpenCode, setCrayfish,
@@ -97,11 +97,19 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
     if (daemonPort) {
       targetPort = daemonPort;
     } else {
-      process.stderr.write(
-        'No AgentDeck daemon running.\n' +
-        'Start with: agentdeck daemon start\n'
-      );
-      process.exit(1);
+      // File-based discovery (daemon.json / sessions.json) misses an App Store
+      // Swift daemon: it writes daemon.json into a sandbox container the CLI
+      // cannot read. `findDaemonPortAsync` probes the daemon port window's
+      // /health to recover it — the same blind-spot workaround the session
+      // bridge relies on. If even that comes back empty, don't bail: the Swift
+      // daemon's @MainActor /health can lag past the probe's 2s timeout, so a
+      // present daemon on the canonical port would be misread as absent. Fall
+      // back to the canonical port and let the WS reconnect loop attach — the
+      // WebSocket handshake succeeds even when the HTTP probe times out (and
+      // when no daemon is running, the dashboard simply shows "reconnecting"
+      // and connects automatically once one comes up).
+      const discovered = await findDaemonPortAsync();
+      targetPort = discovered?.port ?? DAEMON_DEFAULT_PORT;
     }
   }
 

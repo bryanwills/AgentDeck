@@ -16,7 +16,9 @@ struct StreamDeckKeyPreview: View {
     let selection: DevicePreviewSelection
 
     private var session: SessionInfo {
-        SessionInfo(
+        // Live-follow: render the real focused session verbatim.
+        if let live = liveFocusedSession(selection) { return live }
+        return SessionInfo(
             id: "preview-sd-key",
             port: 9120,
             projectName: selection.agent.displayName,
@@ -30,10 +32,11 @@ struct StreamDeckKeyPreview: View {
 
     private var modelName: String {
         switch selection.agent {
-        case .claudeCode: return "opus-4-7"
-        case .codex:      return "gpt-5"
-        case .opencode:   return "router"
-        case .openclaw:   return "router"
+        case .claudeCode:  return "opus-4-7"
+        case .codex:       return "gpt-5"
+        case .opencode:    return "router"
+        case .openclaw:    return "router"
+        case .antigravity: return "gemini-3"
         }
     }
 
@@ -57,7 +60,9 @@ struct StreamDeckPlusPreview: View {
     let selection: DevicePreviewSelection
 
     private var session: SessionInfo {
-        SessionInfo(
+        // Live-follow: render the real focused session verbatim.
+        if let live = liveFocusedSession(selection) { return live }
+        return SessionInfo(
             id: "preview-sd",
             port: 9120,
             projectName: selection.agent.displayName,
@@ -71,10 +76,11 @@ struct StreamDeckPlusPreview: View {
 
     private var modelName: String {
         switch selection.agent {
-        case .claudeCode: return "opus-4-7"
-        case .codex:      return "gpt-5"
-        case .opencode:   return "router"
-        case .openclaw:   return "router"
+        case .claudeCode:  return "opus-4-7"
+        case .codex:       return "gpt-5"
+        case .opencode:    return "router"
+        case .openclaw:    return "router"
+        case .antigravity: return "gemini-3"
         }
     }
 
@@ -89,9 +95,30 @@ struct StreamDeckPlusPreview: View {
     }
 }
 
+/// The live focused session (or the first live session) for single-tile
+/// previews, or nil in manual mode / when no sessions are live. Returned
+/// `SessionInfo` values are the daemon's real sessions, so the SessionSlotView
+/// renders the true project name, model, and state.
+private func liveFocusedSession(_ selection: DevicePreviewSelection) -> SessionInfo? {
+    guard let live = selection.live else { return nil }
+    if let fid = live.focusedSessionId,
+       let match = live.sessions.first(where: { $0.id == fid }) {
+        return match
+    }
+    return live.sessions.first
+}
+
 // MARK: - D200H layout input (shared by key + deck previews)
 
 private func d200hDeckSlots(for selection: DevicePreviewSelection) -> [D200HKeySlot] {
+    // Live-follow: feed the daemon's real sessions + usage straight into the
+    // shared layout engine — a true emulator frame (real project names, models,
+    // states, and usage %), identical to what the Ulanzi plugin drives onto the
+    // physical D200H. Falls through to the synthetic sample when not following.
+    if let input = liveD200HInput(for: selection) {
+        return D200HLayoutModel.buildSessionDeck(input, view: D200HDeckView(mode: .list))
+    }
+
     let agents = selection.previewAgents
     let sessions = agents.enumerated().map { index, agent in
         D200HSession(
@@ -122,6 +149,47 @@ private func d200hDeckSlots(for selection: DevicePreviewSelection) -> [D200HKeyS
         )
     )
     return D200HLayoutModel.buildSessionDeck(input, view: D200HDeckView(mode: .list))
+}
+
+/// Build the D200H layout input from the live daemon snapshot, or nil when the
+/// preview is in manual (toolbar) mode. Maps each real `SessionInfo` to a
+/// `D200HSession` (only the focused session carries its live prompt options)
+/// and forwards the real usage windows verbatim.
+/// Internal (not private) so the snapshot test can assert the mapping.
+func liveD200HInput(for selection: DevicePreviewSelection) -> D200HDeckInput? {
+    guard let live = selection.live else { return nil }
+    let sessions = live.sessions.map { s -> D200HSession in
+        let opts = s.id == live.focusedSessionId
+            ? live.focusedOptions.map { D200HOption(label: $0.label, shortcut: $0.shortcut) }
+            : []
+        return D200HSession(
+            id: s.id,
+            agentType: s.agentType ?? "claude-code",
+            state: s.state ?? "idle",
+            projectName: s.projectName ?? "",
+            modelName: s.modelName,
+            currentTool: s.currentTool,
+            startedAt: s.startedAt,
+            options: opts,
+            groupSize: s.groupSize,
+            foldedSessionIds: s.foldedSessionIds
+        )
+    }
+    return D200HDeckInput(
+        state: live.topLevelState,
+        sessions: sessions,
+        usage: D200HUsage(
+            fiveHourPercent: live.fiveHourPercent,
+            sevenDayPercent: live.sevenDayPercent,
+            known: live.usageKnown,
+            codexPrimaryPercent: live.codexPrimaryPercent,
+            codexPrimaryStale: live.codexPrimaryStale,
+            codexSecondaryPercent: live.codexSecondaryPercent,
+            codexSecondaryStale: live.codexSecondaryStale
+        ),
+        focusedSessionId: live.focusedSessionId,
+        navigable: live.navigable
+    )
 }
 
 // MARK: - D200H Key

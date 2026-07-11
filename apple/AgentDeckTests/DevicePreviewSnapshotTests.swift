@@ -82,6 +82,44 @@ final class DevicePreviewSnapshotTests: XCTestCase {
         // D200H deck — hide-if-absent usage tiles.
         try snapshot(D200HDeckPreview(selection: selection(.d200hDeck, agent: .codex, sessions: 1)), name: "d200h-codex-only")
         try snapshot(D200HDeckPreview(selection: selection(.d200hDeck, sessions: 2)), name: "d200h-2sess")
+
+        // Antigravity — TC001 renders it as a rainbow micro mark (not a mono
+        // sprite), and the Pixoo-pipeline previews route it through the real
+        // renderer. These exist to eyeball the new agent reaches every surface.
+        try snapshot(UlanziMatrixPreview(selection: selection(.ulanziMatrix, agent: .antigravity, sessions: 1)), name: "tc001-antigravity")
+        try snapshot(UlanziMatrixPreview(selection: selection(.ulanziMatrix, agent: .antigravity, state: .idle, sessions: 1)), name: "tc001-antigravity-idle")
+        try snapshot(IDotMatrixPreview(selection: selection(.iDotMatrix, agent: .antigravity, sessions: 1)), name: "idotmatrix-antigravity")
+        try snapshot(D200HDeckPreview(selection: selection(.d200hDeck, agent: .antigravity, sessions: 1)), name: "d200h-antigravity")
+
+        // D200H live-follow emulator — real sessions + usage fed straight into
+        // buildSessionDeck (task 3). Distinct project names/models/states + the
+        // pinned Claude 5H/7D and Codex 5H/7D usage tank tiles.
+        try snapshot(D200HDeckPreview(selection: liveD200HSelection()), name: "d200h-live-emulator")
+    }
+
+    /// A live-follow D200H selection wired with a realistic multi-agent daemon
+    /// snapshot, so the rendered deck shows true project names/models/usage.
+    private func liveD200HSelection() -> DevicePreviewSelection {
+        let live = LivePreviewData(
+            sessions: [
+                SessionInfo(id: "s1", port: 9121, projectName: "AgentDeck", agentType: "claude-code",
+                            alive: true, state: "processing", modelName: "claude-opus-4-8", startedAt: nil),
+                SessionInfo(id: "s2", port: 9122, projectName: "BabelForge", agentType: "codex-cli",
+                            alive: true, state: "idle", modelName: "gpt-5", startedAt: nil),
+                SessionInfo(id: "s3", port: 9123, projectName: "OpenClaw", agentType: "antigravity",
+                            alive: true, state: "awaiting_permission", modelName: "gemini-3", startedAt: nil),
+            ],
+            topLevelState: "processing",
+            focusedSessionId: "s1",
+            navigable: false,
+            focusedOptions: [],
+            fiveHourPercent: 42, sevenDayPercent: 68, usageKnown: true,
+            codexPrimaryPercent: 23, codexPrimaryStale: false,
+            codexSecondaryPercent: 51, codexSecondaryStale: false
+        )
+        var sel = selection(.d200hDeck, sessions: 3)
+        sel.live = live
+        return sel
     }
 
     // MARK: - Live-follow mapping
@@ -108,6 +146,11 @@ final class DevicePreviewSnapshotTests: XCTestCase {
         // Dead session excluded → 2 alive.
         XCTAssertEqual(mixed.sessionCount, 2)
 
+        // Antigravity agentType maps to the new preview agent (was falling
+        // through to Claude before it was added to the input model).
+        state.agentType = "antigravity"
+        XCTAssertEqual(DevicePreviewScreen.liveSelectionInputs(from: state).agent, .antigravity)
+
         // 3 alive clamps down to the 2-bucket; 5 alive clamps to 4.
         state.siblingSessions = (0..<3).map {
             SessionInfo(id: "s\($0)", port: 9121 + $0, projectName: "p", agentType: "claude-code", alive: true, state: "idle")
@@ -117,5 +160,35 @@ final class DevicePreviewSnapshotTests: XCTestCase {
             SessionInfo(id: "s\($0)", port: 9121 + $0, projectName: "p", agentType: "claude-code", alive: true, state: "idle")
         }
         XCTAssertEqual(DevicePreviewScreen.liveSelectionInputs(from: state).sessionCount, 4)
+    }
+
+    // MARK: - Live D200H emulator input
+
+    func testLiveD200HInputMapsRealSessionsAndUsage() throws {
+        guard let input = liveD200HInput(for: liveD200HSelection()) else {
+            return XCTFail("expected a live D200H input")
+        }
+        // Real per-session project/model/state flow through verbatim.
+        XCTAssertEqual(input.sessions.map(\.projectName).sorted(), ["AgentDeck", "BabelForge", "OpenClaw"])
+        XCTAssertEqual(input.sessions.first { $0.id == "s1" }?.modelName, "claude-opus-4-8")
+        XCTAssertEqual(input.sessions.first { $0.id == "s3" }?.agentType, "antigravity")
+        // Real usage windows forwarded verbatim.
+        XCTAssertEqual(input.usage?.fiveHourPercent, 42)
+        XCTAssertEqual(input.usage?.sevenDayPercent, 68)
+        XCTAssertEqual(input.usage?.codexPrimaryPercent, 23)
+        XCTAssertEqual(input.usage?.codexSecondaryPercent, 51)
+
+        // The shared engine renders a session tile per project (sorted +
+        // truncated by the same rules as the physical device).
+        let slots = D200HLayoutModel.buildSessionDeck(input, view: D200HDeckView(mode: .list))
+        let sessionLabels = slots.compactMap { slot -> String? in
+            if case .session = slot.kind { return slot.label }
+            return nil
+        }
+        XCTAssertTrue(sessionLabels.contains("AgentDeck"), "expected the real project label, got \(sessionLabels)")
+        XCTAssertTrue(sessionLabels.contains("BabelForge"))
+        // A pinned usage gauge tile is present (real 42% Claude 5H).
+        let hasUsageGauge = slots.contains { if case .usageGauge = $0.kind { return true } else { return false } }
+        XCTAssertTrue(hasUsageGauge, "expected pinned usage gauge tiles")
     }
 }

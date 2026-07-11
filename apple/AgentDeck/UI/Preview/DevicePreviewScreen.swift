@@ -224,7 +224,12 @@ struct DevicePreviewScreen: View {
             state: inputs?.state ?? selection.state,
             sessionCount: inputs?.sessionCount ?? selection.sessionCount,
             device: selection.device,
-            animationFrame: animationFrame
+            animationFrame: animationFrame,
+            // Rich per-session/usage snapshot for the emulator-grade previews
+            // (D200H etc.). Only attached in live-follow mode; the coarse
+            // agent/state/count above stays as the fallback for previews that
+            // don't consume it yet.
+            live: followLive ? LivePreviewData.from(stateHolder.state) : nil
         )
 
         switch selection.device {
@@ -276,6 +281,7 @@ struct DevicePreviewScreen: View {
         case "codex-cli", "codex-app": agent = .codex
         case "opencode":               agent = .opencode
         case "openclaw":               agent = .openclaw
+        case "antigravity":            agent = .antigravity
         default:                       agent = .claudeCode
         }
 

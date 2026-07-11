@@ -141,4 +141,65 @@ struct DevicePreviewSelection {
     var sessionCount: Int
     var device: PreviewDevice
     var animationFrame: Int = 0
+    /// Real daemon data, present only in live-follow mode. Device previews that
+    /// can consume rich per-session data (D200H first) render this verbatim —
+    /// actual project names, models, and usage % — instead of the coarse
+    /// agent/state/count synthesis the toolbar pickers produce. `nil` in manual
+    /// (toolbar) mode. See `DevicePreviewScreen.deviceBody`.
+    var live: LivePreviewData?
+}
+
+// MARK: - Live-follow snapshot
+
+/// A snapshot of the daemon's real session + usage state, captured by the
+/// Device Preview window when the "Live" toggle is on. It is device-agnostic:
+/// each per-device view converts it into its own layout input (the D200H
+/// preview feeds it straight into `D200HLayoutModel.buildSessionDeck`). This is
+/// the second emulator step — the previews stop approximating and mirror the
+/// exact sessions/usage a physical device is rendering right now.
+struct LivePreviewData {
+    /// The full daemon state, verbatim. The Pixoo-pipeline previews
+    /// (Pixoo 64 / Timebox / iDotMatrix) feed this straight into the real
+    /// `PixooRenderer`, so they become pixel-exact emulators with no separate
+    /// synthesis. The fields below are pre-extracted conveniences for the
+    /// schematic previews (D200H, ESP32, InkDeck, …).
+    var source: DashboardState
+    /// Alive sessions, exactly as the daemon reports them (project/model/state).
+    var sessions: [SessionInfo]
+    /// Daemon aggregate state rawValue — drives the OFFLINE gate.
+    var topLevelState: String
+    var focusedSessionId: String?
+    /// The focused session's live options are treated as navigable (TUI ❯).
+    var navigable: Bool
+    /// The focused session's live prompt options (top-level `state_update`).
+    var focusedOptions: [PromptOption]
+    // Usage snapshot (hide-if-absent: nil → the device omits that gauge tile).
+    var fiveHourPercent: Double?
+    var sevenDayPercent: Double?
+    /// False → the Claude tiles are suppressed (usage state not trusted).
+    var usageKnown: Bool
+    var codexPrimaryPercent: Double?
+    var codexPrimaryStale: Bool
+    var codexSecondaryPercent: Double?
+    var codexSecondaryStale: Bool
+
+    /// Extract the live snapshot from the daemon state. Usage windows are
+    /// hide-if-absent, mirroring the real device renderers.
+    static func from(_ state: DashboardState) -> LivePreviewData {
+        LivePreviewData(
+            source: state,
+            sessions: state.siblingSessions.filter(\.alive),
+            topLevelState: state.state.rawValue,
+            focusedSessionId: state.focusedSessionId ?? state.sessionId,
+            navigable: state.navigable,
+            focusedOptions: state.options,
+            fiveHourPercent: state.fiveHourPercent,
+            sevenDayPercent: state.sevenDayPercent,
+            usageKnown: !(state.usageStale ?? false),
+            codexPrimaryPercent: state.codexRateLimits?.primary?.usedPercent,
+            codexPrimaryStale: state.codexRateLimits?.primary?.stale ?? false,
+            codexSecondaryPercent: state.codexRateLimits?.secondary?.usedPercent,
+            codexSecondaryStale: state.codexRateLimits?.secondary?.stale ?? false
+        )
+    }
 }

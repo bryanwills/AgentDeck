@@ -28,19 +28,21 @@ import CoreGraphics
 /// Agent identity for preview. The raw values are the exact strings that
 /// PixooRenderer's creature classifier checks against.
 enum PixooPreviewAgent: String, CaseIterable, Identifiable, Sendable {
-    case claudeCode = "claude-code"
-    case codex      = "codex-cli"
-    case opencode   = "opencode"
-    case openclaw   = "openclaw"
+    case claudeCode  = "claude-code"
+    case codex       = "codex-cli"
+    case opencode    = "opencode"
+    case openclaw    = "openclaw"
+    case antigravity = "antigravity"
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .claudeCode: return "Claude"
-        case .codex:      return "Codex"
-        case .opencode:   return "OpenCode"
-        case .openclaw:   return "OpenClaw"
+        case .claudeCode:  return "Claude"
+        case .codex:       return "Codex"
+        case .opencode:    return "OpenCode"
+        case .openclaw:    return "OpenClaw"
+        case .antigravity: return "Antigravity"
         }
     }
 }

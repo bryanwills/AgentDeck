@@ -470,6 +470,49 @@ function renderModuleHealthLines(moduleHealth: ModuleMap | undefined, width: num
     push('ADB', available ? `${reverse} reverse` : 'missing', available && reverse > 0, available);
   }
 
+  // Stream Deck plugin roster — the plugin registers over WS; the daemon
+  // reports one row per attached deck. Mirrors the macOS TopologyRail /
+  // menubar Stream Deck section (Node-tier row added in bf23fb8e).
+  const streamDeck = asRecord(moduleHealth.streamDeck);
+  if (streamDeck) {
+    const devices = asArray(streamDeck.devices).map(asRecord).filter(Boolean) as Record<string, unknown>[];
+    for (const dev of devices) {
+      const name = typeof dev.name === 'string' && dev.name.length > 0 ? dev.name : 'Stream Deck';
+      const cols = asNumber(dev.columns);
+      const rows = asNumber(dev.rows);
+      const detail = cols && rows ? `${cols}×${rows}` : '';
+      push(name, detail, true);
+    }
+  }
+
+  // WiFi-only ESP32 boards. Dual-homed boards (also live on USB serial) are
+  // already shown in the Serial row, so filter them out here via the
+  // per-board `serialActive` flag — mirrors TopologyRail.wifiOnlyEsp32Boards.
+  const esp32Wifi = asRecord(moduleHealth.esp32Wifi);
+  if (esp32Wifi) {
+    const devices = asArray(esp32Wifi.devices).map(asRecord).filter(Boolean) as Record<string, unknown>[];
+    const wifiOnly = devices.filter((d) => d.serialActive !== true);
+    for (const dev of wifiOnly) {
+      const board = typeof dev.board === 'string' && dev.board.length > 0 ? dev.board : 'esp32';
+      const ip = typeof dev.ip === 'string' ? dev.ip : '';
+      const stale = dev.stale === true;
+      const detail = [ip, 'WiFi', stale ? 'stale' : ''].filter(Boolean).join(' · ');
+      push(`Wi-Fi ESP32 ${board}`, detail, !stale, stale);
+    }
+  }
+
+  // Terminal dashboards (`agentdeck dashboard`) attached to the daemon —
+  // presence-only roster, one row per open TUI WS. Mirrors the macOS
+  // TopologyRail "Terminal · TUI Dashboard" section.
+  const tuiDashboards = asRecord(moduleHealth.tuiDashboards);
+  if (tuiDashboards) {
+    const devices = asArray(tuiDashboards.devices).map(asRecord).filter(Boolean) as Record<string, unknown>[];
+    for (const dev of devices) {
+      const host = typeof dev.name === 'string' ? dev.name : '';
+      push('TUI Dashboard', host, true);
+    }
+  }
+
   return lines;
 }
 

@@ -142,6 +142,46 @@ describe('TUI dashboard models', () => {
     expect(output).toContain('ADB 1 reverse');
   });
 
+  it('renders Stream Deck, WiFi-only ESP32, and TUI dashboard downstream rows', () => {
+    const output = stripAnsi(renderDashboard(
+      makeState({
+        moduleHealth: {
+          streamDeck: {
+            available: true,
+            devices: [{ name: 'Stream Deck +', columns: 4, rows: 2 }],
+          },
+          // Dual-homed ulanzi_tc001 (serialActive:true) must be filtered out —
+          // it already shows in the Serial row; only the WiFi-only boards get
+          // their own "Wi-Fi ESP32" rows (mirrors TopologyRail dedup).
+          esp32Wifi: {
+            available: true,
+            devices: [
+              { board: 'ips_35', ip: '192.168.68.69', stale: false, serialActive: false },
+              { board: 'ulanzi_tc001', ip: '192.168.68.57', stale: false, serialActive: true },
+            ],
+          },
+          tuiDashboards: {
+            available: true,
+            devices: [{ id: 'host#1', name: 'sbstudio.local', kind: 'tui' }],
+          },
+        },
+      }),
+      200,
+      36,
+      [],
+      0,
+      0,
+    ));
+
+    expect(output).toContain('Stream Deck + 4×2');
+    expect(output).toContain('Wi-Fi ESP32 ips_35');
+    expect(output).toContain('192.168.68.69');
+    // Dual-homed board is deduped out of the WiFi rows entirely (shown only in
+    // the Serial row, which this fixture omits) — so it appears nowhere here.
+    expect(output).not.toContain('ulanzi_tc001');
+    expect(output).toContain('TUI Dashboard sbstudio.local');
+  });
+
   it('shows current session summary and control hints', () => {
     const output = stripAnsi(renderDashboard(
       makeState({
