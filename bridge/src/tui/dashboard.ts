@@ -4,6 +4,7 @@
  */
 
 import WebSocket from 'ws';
+import { hostname } from 'os';
 import type {
   BridgeEvent, StateUpdateEvent, UsageEvent,
   SessionsListEvent, SessionInfo, TimelineEventMsg, TimelineHistoryMsg,
@@ -314,6 +315,16 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
       state.connectionStatus = 'connected';
       state.isStale = false;
       state.currentPort = targetPort;
+      // Identify as a TUI dashboard so the daemon can surface a topology row
+      // on the other dashboards (macOS/iOS/Android). Volunteer-roster model —
+      // presence is tied to this WS, re-announced on every reconnect.
+      try {
+        socket.send(JSON.stringify({
+          type: 'client_register',
+          clientType: 'tui',
+          devices: [{ id: `${hostname()}#${process.pid}`, name: hostname(), kind: 'tui' }],
+        }));
+      } catch { /* daemon may be mid-handshake; re-sent on next reconnect */ }
       resetActivityTimer(socket);
       // Periodic ping so the daemon sends pong — keeps the activity timer fed.
       pingTimer = setInterval(() => {

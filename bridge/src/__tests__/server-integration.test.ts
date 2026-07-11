@@ -330,4 +330,49 @@ describe('Server Integration', () => {
     expect(snapshot.outputTokens).toBe(250);
     expect(snapshot.toolCalls).toBe(2);
   });
+
+  // ─── TUI dashboard client roster ──────────────────────────────────
+
+  it('client_register {clientType:"tui"} appears in getTuiClients until the WS closes', async () => {
+    expect(wsServer.getTuiClients()).toEqual([]);
+
+    wsClient.send({
+      type: 'client_register',
+      clientType: 'tui',
+      devices: [{ id: 'myhost#123', name: 'myhost', kind: 'tui' }],
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(wsServer.getTuiClients()).toEqual([{ id: 'myhost#123', name: 'myhost' }]);
+
+    // A second TUI on another host is a second entry.
+    const second = new WsTestClient();
+    await second.connect(`ws://127.0.0.1:${port}`);
+    second.send({
+      type: 'client_register',
+      clientType: 'tui',
+      devices: [{ id: 'otherhost#9', name: 'otherhost', kind: 'tui' }],
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(wsServer.getTuiClients()).toHaveLength(2);
+
+    // Same-id re-registration (reconnect overlap) dedups to one entry.
+    second.send({
+      type: 'client_register',
+      clientType: 'tui',
+      devices: [{ id: 'myhost#123', name: 'myhost', kind: 'tui' }],
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(wsServer.getTuiClients()).toEqual([{ id: 'myhost#123', name: 'myhost' }]);
+
+    // Presence dies with the socket.
+    await second.close();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(wsServer.getTuiClients()).toEqual([{ id: 'myhost#123', name: 'myhost' }]);
+  });
+
+  it('malformed tui client_register falls back to a "terminal" identity', async () => {
+    wsClient.send({ type: 'client_register', clientType: 'tui' });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(wsServer.getTuiClients()).toEqual([{ id: 'terminal', name: 'terminal' }]);
+  });
 });

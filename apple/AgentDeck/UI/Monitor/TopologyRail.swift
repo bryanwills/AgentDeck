@@ -499,7 +499,16 @@ struct TopologyRail: View {
         if let sd = health.streamDeck, !sd.devices.isEmpty { return true }
         if let eink = health.eink, !eink.devices.isEmpty { return true }
         if let ad = health.androidDashboards, !ad.devices.isEmpty { return true }
+        if !wifiOnlyEsp32Boards(health).isEmpty { return true }
+        if let tui = health.tuiDashboards, !tui.devices.isEmpty { return true }
         return false
+    }
+
+    /// WiFi-WS ESP32 boards that are NOT also live on USB serial. A dual-homed
+    /// board already renders as a USB-serial row (with a "· WiFi" tag), so the
+    /// WiFi standby copy is suppressed — one physical device, one row.
+    private func wifiOnlyEsp32Boards(_ health: ModuleHealthState) -> [WifiEsp32DeviceInfo] {
+        (health.esp32Wifi?.devices ?? []).filter { !$0.serialActive }
     }
 
     /// Downstream devices grouped by transport / physical family. The
@@ -525,7 +534,9 @@ struct TopologyRail: View {
                 pixelDisplaySection(health: health)
                 bleMatrixSection(health: health)
                 usbSerialSection(health: health)
+                wifiEsp32Section(health: health)
                 androidSection(health: health)
+                tuiSection(health: health)
             }
             if !hasAnyDownstreamRow {
                 emptyDownstreamPlaceholder
@@ -722,7 +733,57 @@ struct TopologyRail: View {
                     DeviceRailRow(
                         name: SerialPortInfo.esp32DisplayName(for: info.board),
                         status: .ok,
-                        detail: short
+                        // Dual-homed board: serial drives, WiFi socket is a hot
+                        // standby — tag it so "is my board on WiFi?" is answerable
+                        // without a second row.
+                        detail: info.wifiConnected == true ? "\(short) · WiFi" : short
+                    )
+                }
+            }
+        }
+    }
+
+    /// WiFi-WS ESP32 boards with no live USB serial path (e.g. a wirelessly
+    /// deployed InkDeck). Dual-homed boards are suppressed here — they render
+    /// as USB-serial rows above (single-path transport dedup, serial wins).
+    @ViewBuilder
+    private func wifiEsp32Section(health: ModuleHealthState) -> some View {
+        let boards = wifiOnlyEsp32Boards(health)
+        if !boards.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                downstreamSubheader("Wi-Fi ESP32")
+                ForEach(boards, id: \.self) { dev in
+                    DeviceRailRow(
+                        name: SerialPortInfo.esp32DisplayName(for: dev.board),
+                        status: dev.stale ? .warn : .ok,
+                        detail: wifiEsp32Detail(for: dev)
+                    )
+                }
+            }
+        }
+    }
+
+    private func wifiEsp32Detail(for dev: WifiEsp32DeviceInfo) -> String {
+        var parts: [String] = []
+        if let ip = dev.ip, !ip.isEmpty { parts.append(ip) }
+        parts.append("WiFi")
+        if dev.stale { parts.append("stale") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Terminal dashboards (`agentdeck dashboard`) currently attached to the
+    /// daemon. Presence-only roster — the row exists exactly while the TUI's
+    /// WebSocket is open, mirroring the Stream Deck plugin section.
+    @ViewBuilder
+    private func tuiSection(health: ModuleHealthState) -> some View {
+        if let tui = health.tuiDashboards, !tui.devices.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                downstreamSubheader("Terminal")
+                ForEach(tui.devices, id: \.id) { dev in
+                    DeviceRailRow(
+                        name: "TUI Dashboard",
+                        status: .ok,
+                        detail: dev.name
                     )
                 }
             }

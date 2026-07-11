@@ -229,6 +229,15 @@ struct ModuleHealthState: Sendable {
     /// Same volunteer-roster model; covers devices ADB never sees (Swift
     /// daemon has no ADB, and WiFi-only tablets have no USB bridge).
     var androidDashboards: AndroidDashboardHealth?
+    /// TUI dashboards (`agentdeck dashboard`) that registered via
+    /// `client_register {clientType:"tui"}`. Live-presence roster — a row
+    /// exists exactly while the terminal client's WS is open.
+    var tuiDashboards: TuiDashboardHealth?
+    /// WiFi-WS ESP32 boards (announced `device_info` over their WebSocket).
+    /// Both daemons emit `esp32Wifi` with per-board `serialActive` so the rail
+    /// can suppress boards already shown as USB-serial rows (single-path
+    /// transport dedup — serial drives, WiFi is a hot standby).
+    var esp32Wifi: Esp32WifiHealth?
 }
 
 /// Shared shape for the BLE matrix panels (Timebox Mini, iDotMatrix). Both
@@ -281,6 +290,37 @@ struct AndroidDashboardDeviceInfo: Sendable, Hashable {
     /// "tablet" | "eink" — how the app classified its own hardware
     /// (EinkDetector). Kept as a String for forward compatibility.
     var kind: String?
+}
+
+/// TUI dashboards (`agentdeck dashboard`) connected over WS that registered as
+/// `clientType:"tui"`. Same volunteer-roster model as Stream Deck.
+struct TuiDashboardHealth: Sendable {
+    var devices: [TuiClientInfo] = []
+}
+
+struct TuiClientInfo: Sendable, Hashable {
+    /// Stable per-process id (`hostname#pid`) so two TUIs on one host render
+    /// as two rows.
+    var id: String
+    /// Host name the TUI runs on.
+    var name: String
+}
+
+/// WiFi-WS ESP32 boards. `serialActive == true` means the same physical board
+/// is currently driven over USB serial (its WiFi socket is a hot standby) —
+/// the rail suppresses those to avoid double rows for one device.
+struct Esp32WifiHealth: Sendable {
+    var devices: [WifiEsp32DeviceInfo] = []
+}
+
+struct WifiEsp32DeviceInfo: Sendable, Hashable {
+    var board: String
+    var ip: String?
+    var version: String?
+    /// Node daemon ages entries out (90 s without device_info → stale);
+    /// the Swift daemon evicts on socket close so this stays false there.
+    var stale: Bool = false
+    var serialActive: Bool = false
 }
 
 struct StreamDeckDeviceInfo: Sendable, Hashable {
@@ -377,6 +417,10 @@ struct SerialPortInfo: Sendable, Hashable {
     var port: String
     var board: String?
     var firmwareVersion: String?
+    /// Board's own WiFi STA state from `device_info` — surfaced on the serial
+    /// row so a dual-homed board reads "USB · WiFi" instead of growing a
+    /// second row (see `Esp32WifiHealth.serialActive`).
+    var wifiConnected: Bool?
 }
 
 extension SerialPortInfo {

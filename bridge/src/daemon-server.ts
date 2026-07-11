@@ -988,6 +988,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       res.end(JSON.stringify({
         devices: [
           { type: 'websocket', count: core.wsServer.getClientCount() },
+          { type: 'tui', devices: core.wsServer.getTuiClients() },
           { type: 'esp32', count: esp32ConnectionCount(), ports: getESP32Ports(), devices: getESP32DeviceInfo() },
           { type: 'esp32-wifi', devices: listWifiEsp32Devices() },
           { type: 'pixoo', details: getPixooDeviceDetails() },
@@ -1739,6 +1740,29 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     const androidDashboards = collectAndroidDashboards();
     if (androidDashboards.length > 0) {
       modules.androidDashboards = { available: true, devices: androidDashboards };
+    }
+    // WiFi-WS ESP32 boards. Same data as /devices `esp32-wifi` — without this
+    // the dashboards (macOS/iOS/Android) never learn a WiFi-only board exists,
+    // since they read moduleHealth off state_update, not /devices.
+    const wifiEsp32 = listWifiEsp32Devices();
+    if (wifiEsp32.length > 0) {
+      modules.esp32Wifi = {
+        available: true,
+        devices: wifiEsp32.map((d) => ({
+          board: d.board,
+          ip: d.ip ?? null,
+          version: d.version ?? null,
+          stale: d.stale,
+          serialActive: d.serialActive,
+        })),
+      };
+    }
+    const tuiClients = core.wsServer.getTuiClients();
+    if (tuiClients.length > 0) {
+      modules.tuiDashboards = {
+        available: true,
+        devices: tuiClients.map((c) => ({ id: c.id, name: c.name, kind: 'tui' })),
+      };
     }
     const ulanziPluginConnected = core.wsServer.getUlanziClientCount() > 0;
     modules.d200h = {

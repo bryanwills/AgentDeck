@@ -591,6 +591,16 @@ final class DaemonServer {
     /// connected tablet is an anonymous consumer with no topology row (ADB
     /// classification only covers USB-bridged devices, and only on the CLI tier).
     private var cachedAndroidDashboards: [UUID: StreamDeckRegistration] = [:]
+    /// TUI dashboards (`agentdeck dashboard`) that registered as
+    /// `clientType:"tui"`. Same volunteer-roster + evict-on-close model.
+    private var cachedTuiDashboards: [UUID: StreamDeckRegistration] = [:]
+    /// WiFi-WS ESP32 boards. The firmware announces `device_info` right after
+    /// its WebSocket connects (nothing requests it over WS — see
+    /// esp32/src/net/ws_client.cpp), so we capture that frame as the board's
+    /// registration. Devices array holds the pruned device_info payload
+    /// (board / ip / version / buildHash). Evicted on close + TTL like the
+    /// other volunteer rosters.
+    private var cachedWifiEsp32: [UUID: StreamDeckRegistration] = [:]
     /// Foundation Models per-session activity summaries, keyed by session id.
     /// `sig` invalidates the cache when the session's tool/state/question changes.
     /// Filled asynchronously; the next sessions_list broadcast surfaces it.
@@ -2045,6 +2055,20 @@ final class DaemonServer {
             ])
         }
 
+        if let wifiEsp32 = wifiEsp32HealthSnapshot() {
+            devices.append([
+                "type": "esp32-wifi",
+                "devices": wifiEsp32["devices"] as Any,
+            ])
+        }
+
+        if !cachedTuiDashboards.isEmpty {
+            devices.append([
+                "type": "tui",
+                "devices": cachedTuiDashboards.values.flatMap { $0.devices },
+            ])
+        }
+
         return SendableDict(["devices": devices])
     }
 
@@ -2101,6 +2125,14 @@ final class DaemonServer {
     private func handleWSCommand(_ cmd: [String: Any], from conn: WebSocketConnection) {
         if cmd["type"] as? String == "client_register" {
             handleClientRegister(cmd, from: conn)
+            return
+        }
+        // WiFi-WS ESP32 boards self-identify with a spontaneous `device_info`
+        // frame on connect (and re-announce on device_info_request). Capture it
+        // so the topology can show WiFi-only boards — Node-daemon parity with
+        // `registerWifiEsp32` in bridge/src/daemon-server.ts.
+        if cmd["type"] as? String == "device_info" {
+            handleWifiEsp32DeviceInfo(cmd, from: conn)
             return
         }
         // Per-session timeline poll: reply (to this requester only) with the
@@ -2203,6 +2235,14 @@ final class DaemonServer {
         }
         if cachedAndroidDashboards.removeValue(forKey: conn.id) != nil {
             DaemonLogger.shared.debug("Daemon", "Evicted android-dashboard registration: WS closed")
+            broadcastStateUpdate()
+        }
+        if cachedTuiDashboards.removeValue(forKey: conn.id) != nil {
+            DaemonLogger.shared.debug("Daemon", "Evicted tui registration: WS closed")
+            broadcastStateUpdate()
+        }
+        if cachedWifiEsp32.removeValue(forKey: conn.id) != nil {
+            DaemonLogger.shared.debug("Daemon", "Evicted wifi-esp32 registration: WS closed")
             broadcastStateUpdate()
         }
         if ulanziPluginConnectionId == conn.id {
@@ -2409,7 +2449,7 @@ final class DaemonServer {
             case "interrupt": Task { await gw.sendRPC(method: "chat.abort", params: [:]) }
                 _ = stateMachine.transition(trigger: "interrupt", source: .user); broadcastStateUpdate()
             case "select_option": Task { await gw.sendRPC(method: "exec.approval.resolve", params: cmdBox.value) }
-                _ = stateMachine.transition(trigger: "user_sㅈelection", source: .user); broadcastStateUpdate()
+                _ = stateMachine.transition(trigger: "user_selection", source: .user); broadcastStateUpdate()
             case "send_prompt": Task { await gw.sendRPC(method: "chat.send", params: cmdBox.value) }
                 _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook); broadcastStateUpdate()
             case "escape": Task { await gw.sendRPC(method: "chat.abort", params: [:]) }
@@ -3016,6 +3056,17 @@ final class DaemonServer {
             )
             DaemonLogger.shared.debug("Daemon", "client_register android-dashboard devices=\(devices.count)")
             broadcastStateUpdate()
+        case "tui":
+            // `agentdeck dashboard` terminal client — volunteers its host name
+            // so the topology can show a TUI row while the terminal is open.
+            let devices = (cmd["devices"] as? [[String: Any]]) ?? []
+            cachedTuiDashboards[conn.id] = StreamDeckRegistration(
+                connectionId: conn.id,
+                devices: devices,
+                updatedAt: Date()
+            )
+            DaemonLogger.shared.debug("Daemon", "client_register tui devices=\(devices.count)")
+            broadcastStateUpdate()
         case "ulanzi-plugin":
             // Ulanzi Studio drives the D200H — stand down direct-HID so the two
             // don't fight over the device. Reacquired on disconnect.
@@ -3028,6 +3079,63 @@ final class DaemonServer {
         default:
             DaemonLogger.shared.debug("Daemon", "client_register ignored clientType=\(clientType)")
         }
+    }
+
+    /// Register a WiFi-WS ESP32 board from its spontaneous `device_info`
+    /// announcement. Keyed by WS connection like the other volunteer rosters —
+    /// evicted the moment the board's socket closes, TTL as the safety net.
+    /// Only the identity fields the topology needs are kept; diagnostic fields
+    /// (uptime, reset reason, OTA capability) stay a Node-daemon concern.
+    @MainActor
+    private func handleWifiEsp32DeviceInfo(_ cmd: [String: Any], from conn: WebSocketConnection) {
+        if conn.isDisconnected { return }
+        guard let board = cmd["board"] as? String, !board.isEmpty else { return }
+        var info: [String: Any] = ["board": board]
+        if let ip = cmd["ip"] as? String, !ip.isEmpty { info["ip"] = ip }
+        if let version = cmd["version"] as? String { info["version"] = version }
+        if let hash = cmd["buildHash"] as? String { info["buildHash"] = hash }
+        if let rev = cmd["protocolRevision"] as? Int { info["protocolRevision"] = rev }
+        let isNew = cachedWifiEsp32[conn.id] == nil
+        cachedWifiEsp32[conn.id] = StreamDeckRegistration(
+            connectionId: conn.id,
+            devices: [info],
+            updatedAt: Date()
+        )
+        if isNew {
+            DaemonLogger.shared.debug("Daemon", "WiFi ESP32 registered: \(board) @ \(info["ip"] as? String ?? "no-ip")")
+            broadcastStateUpdate()
+        }
+    }
+
+    /// WiFi ESP32 module-health snapshot with single-path transport dedup:
+    /// a board that is ALSO live on USB serial keeps `serialActive: true` so
+    /// the topology can suppress the redundant row (serial is the driving
+    /// path; the WiFi socket is a hot standby). Mirrors
+    /// `isWifiTransportRedundant` in bridge/src/daemon-server.ts — match by
+    /// board id, confirmed by IP when both sides report one.
+    private func wifiEsp32HealthSnapshot() -> [String: Any]? {
+        guard !cachedWifiEsp32.isEmpty else { return nil }
+        var serialBoards: [(board: String, ip: String?)] = []
+        if let conns = cachedSerialStatus?["connections"] as? [[String: Any]] {
+            for c in conns where (c["connected"] as? Bool) == true {
+                if let di = c["deviceInfo"] as? [String: Any], let b = di["board"] as? String {
+                    serialBoards.append((b, di["ip"] as? String))
+                }
+            }
+        }
+        let devices: [[String: Any]] = cachedWifiEsp32.values.flatMap { $0.devices }.map { info in
+            var d = info
+            let board = info["board"] as? String ?? ""
+            let ip = info["ip"] as? String
+            d["serialActive"] = serialBoards.contains { s in
+                s.board == board && (s.ip == nil || ip == nil || s.ip == ip)
+            }
+            // Close-driven eviction keeps this roster live-only; the field
+            // exists for Node-daemon wire parity (Node ages entries out).
+            d["stale"] = false
+            return d
+        }
+        return ["available": true, "devices": devices]
     }
 
     /// Expire the Stream Deck cache when the plugin has gone silent for
@@ -3057,6 +3165,22 @@ final class DaemonServer {
         if !staleAndroid.isEmpty {
             for key in staleAndroid.keys { cachedAndroidDashboards.removeValue(forKey: key) }
             DaemonLogger.shared.debug("Daemon", "Evicted \(staleAndroid.count) stale android-dashboard registration(s)")
+            broadcastStateUpdate()
+        }
+        let staleTui = cachedTuiDashboards.filter { _, reg in
+            !activeWSConnectionIds.contains(reg.connectionId) && reg.updatedAt < cutoff
+        }
+        if !staleTui.isEmpty {
+            for key in staleTui.keys { cachedTuiDashboards.removeValue(forKey: key) }
+            DaemonLogger.shared.debug("Daemon", "Evicted \(staleTui.count) stale tui registration(s)")
+            broadcastStateUpdate()
+        }
+        let staleWifiEsp32 = cachedWifiEsp32.filter { _, reg in
+            !activeWSConnectionIds.contains(reg.connectionId) && reg.updatedAt < cutoff
+        }
+        if !staleWifiEsp32.isEmpty {
+            for key in staleWifiEsp32.keys { cachedWifiEsp32.removeValue(forKey: key) }
+            DaemonLogger.shared.debug("Daemon", "Evicted \(staleWifiEsp32.count) stale wifi-esp32 registration(s)")
             broadcastStateUpdate()
         }
     }
@@ -4834,6 +4958,15 @@ final class DaemonServer {
                 "devices": cachedAndroidDashboards.values.flatMap { $0.devices },
             ] as [String: Any]
         }
+        if !cachedTuiDashboards.isEmpty {
+            modules["tuiDashboards"] = [
+                "available": true,
+                "devices": cachedTuiDashboards.values.flatMap { $0.devices },
+            ] as [String: Any]
+        }
+        if let wifiEsp32 = wifiEsp32HealthSnapshot() {
+            modules["esp32Wifi"] = wifiEsp32
+        }
         return SendableDict([
             "state": stateMachine.state.rawValue,
             "modules": modules,
@@ -4972,6 +5105,15 @@ final class DaemonServer {
                 "available": true,
                 "devices": cachedAndroidDashboards.values.flatMap { $0.devices },
             ] as [String: Any]
+        }
+        if !cachedTuiDashboards.isEmpty {
+            modules["tuiDashboards"] = [
+                "available": true,
+                "devices": cachedTuiDashboards.values.flatMap { $0.devices },
+            ] as [String: Any]
+        }
+        if let wifiEsp32 = wifiEsp32HealthSnapshot() {
+            modules["esp32Wifi"] = wifiEsp32
         }
         return modules
     }

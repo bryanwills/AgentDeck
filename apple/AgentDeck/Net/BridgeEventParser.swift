@@ -178,6 +178,37 @@ enum BridgeEventParser {
             health.androidDashboards = AndroidDashboardHealth(devices: androidDevices)
         }
 
+        if let tui = raw["tuiDashboards"] as? [String: Any] ?? raw["tui_dashboards"] as? [String: Any] {
+            var tuiDevices: [TuiClientInfo] = []
+            if let arr = tui["devices"] as? [[String: Any]] {
+                for d in arr {
+                    let name = d["name"] as? String ?? "terminal"
+                    tuiDevices.append(TuiClientInfo(
+                        id: d["id"] as? String ?? name,
+                        name: name
+                    ))
+                }
+            }
+            health.tuiDashboards = TuiDashboardHealth(devices: tuiDevices)
+        }
+
+        if let wifi = raw["esp32Wifi"] as? [String: Any] ?? raw["esp32_wifi"] as? [String: Any] {
+            var wifiDevices: [WifiEsp32DeviceInfo] = []
+            if let arr = wifi["devices"] as? [[String: Any]] {
+                for d in arr {
+                    guard let board = d["board"] as? String, !board.isEmpty else { continue }
+                    wifiDevices.append(WifiEsp32DeviceInfo(
+                        board: board,
+                        ip: d["ip"] as? String,
+                        version: d["version"] as? String,
+                        stale: d["stale"] as? Bool ?? false,
+                        serialActive: d["serialActive"] as? Bool ?? d["serial_active"] as? Bool ?? false
+                    ))
+                }
+            }
+            health.esp32Wifi = Esp32WifiHealth(devices: wifiDevices)
+        }
+
         if let serial = raw["serial"] as? [String: Any] {
             var boards: [SerialPortInfo] = []
             var ports: [String] = []
@@ -190,7 +221,8 @@ enum BridgeEventParser {
                     boards.append(SerialPortInfo(
                         port: port,
                         board: info?["board"] as? String,
-                        firmwareVersion: info?["version"] as? String ?? info?["firmwareVersion"] as? String
+                        firmwareVersion: info?["version"] as? String ?? info?["firmwareVersion"] as? String,
+                        wifiConnected: info?["wifiConnected"] as? Bool ?? info?["wifi_connected"] as? Bool
                     ))
                     ports.append(port)
                 }

@@ -810,9 +810,35 @@ program
             }
           }
         } else if (d.type === 'timebox') {
-          for (const tb of (d.devices ?? []) as any[]) {
-            const brightnessInfo = tb.brightness !== undefined ? ` brightness=${tb.brightness}%` : '';
-            lines.push(`  Timebox     ${tb.address} (${tb.name || 'Timebox Mini Light'})${brightnessInfo}`);
+          // Node daemon: { devices: [{address, name, brightness}] }, Swift
+          // daemon: { configuredDeviceCount, connected, deviceName, statusReason }.
+          if (Array.isArray(d.devices)) {
+            for (const tb of d.devices as any[]) {
+              const brightnessInfo = tb.brightness !== undefined ? ` brightness=${tb.brightness}%` : '';
+              lines.push(`  Timebox     ${tb.address} (${tb.name || 'Timebox Mini Light'})${brightnessInfo}`);
+              total++;
+            }
+          } else if ((d.configuredDeviceCount ?? 0) > 0) {
+            const status = d.connected ? '✓' : `⚠ ${d.statusReason ?? 'not connected'}`;
+            lines.push(`  Timebox      ${d.deviceName ?? 'Timebox Mini'} ${status}`);
+            total++;
+          }
+        } else if (d.type === 'idotmatrix') {
+          // Node daemon: { devices: [{address, name}] }, Swift daemon:
+          // { configuredDeviceCount, connected, deviceName, statusReason }.
+          if (Array.isArray(d.devices)) {
+            for (const dm of d.devices as any[]) {
+              lines.push(`  iDotMatrix   ${dm.address} (${dm.name || 'iDotMatrix'})`);
+              total++;
+            }
+          } else if ((d.configuredDeviceCount ?? 0) > 0) {
+            const status = d.connected ? '✓' : `⚠ ${d.statusReason ?? 'not connected'}`;
+            lines.push(`  iDotMatrix   ${d.deviceName ?? 'iDotMatrix'} ${status}`);
+            total++;
+          }
+        } else if (d.type === 'tui') {
+          for (const t of (d.devices ?? []) as any[]) {
+            lines.push(`  TUI          ${t.name ?? 'terminal'} (agentdeck dashboard)`);
             total++;
           }
         } else if (d.type === 'adb') {

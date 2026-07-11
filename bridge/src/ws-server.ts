@@ -19,6 +19,11 @@ export class WsServer {
   // the device (Ulanzi Studio drives it through the official plugin instead).
   private ulanziClients = new Set<WebSocket>();
   private ulanziPresenceCallback: ((present: boolean) => void) | null = null;
+  // TUI dashboards (`agentdeck dashboard`) that registered via
+  // `client_register {clientType:"tui"}`. Volunteer-roster model like the
+  // Stream Deck plugin — presence only lives as long as the WS does, so the
+  // topology row disappears the moment the TUI exits.
+  private tuiClients = new Map<WebSocket, { id: string; name: string }>();
   private pingTimer: ReturnType<typeof setInterval>;
 
   constructor(server: Server) {
@@ -94,6 +99,16 @@ export class WsServer {
               this.ulanziPresenceCallback?.(true);
             }
           }
+          // Track TUI dashboard presence (topology row on all dashboards).
+          if (msg.type === 'client_register' && msg.clientType === 'tui') {
+            const dev = (Array.isArray(msg.devices) ? msg.devices[0] : null) as
+              | { id?: unknown; name?: unknown }
+              | null;
+            const name = typeof dev?.name === 'string' && dev.name ? dev.name : 'terminal';
+            const id = typeof dev?.id === 'string' && dev.id ? dev.id : name;
+            this.tuiClients.set(ws, { id, name });
+            debug('WS', `TUI dashboard registered: ${id}`);
+          }
           // Allow raw message callback to intercept relay events (e.g. deck_slot_map)
           if (this.rawMessageCallback && this.rawMessageCallback(msg, ws)) {
             return; // handled
@@ -110,6 +125,7 @@ export class WsServer {
         debug('WS', 'Plugin disconnected');
         this.clientAlive.delete(ws);
         this.esp32Clients.delete(ws);
+        this.tuiClients.delete(ws);
         if (this.ulanziClients.delete(ws) && this.ulanziClients.size === 0) {
           debug('WS', 'Ulanzi plugin gone — direct-HID D200H may resume');
           this.ulanziPresenceCallback?.(false);
@@ -224,6 +240,15 @@ export class WsServer {
 
   getUlanziClientCount(): number {
     return this.ulanziClients.size;
+  }
+
+  /** Registered TUI dashboards (`client_register {clientType:"tui"}`), deduped
+   *  by client id so a TUI that reconnects (new WS, same host+pid) yields one
+   *  entry while both sockets briefly overlap. */
+  getTuiClients(): Array<{ id: string; name: string }> {
+    const byId = new Map<string, { id: string; name: string }>();
+    for (const info of this.tuiClients.values()) byId.set(info.id, info);
+    return [...byId.values()];
   }
 
   close(): void {

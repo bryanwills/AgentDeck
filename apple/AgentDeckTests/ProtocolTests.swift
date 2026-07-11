@@ -140,6 +140,54 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(e.codexSubscriptionActiveUntil, "2026-05-01T00:00:00Z")
     }
 
+    func testDecodeModuleHealthTuiAndWifiEsp32() throws {
+        let json = """
+        {
+            "type": "state_update",
+            "state": "idle",
+            "moduleHealth": {
+                "tuiDashboards": {
+                    "available": true,
+                    "devices": [{"id": "myhost#42", "name": "myhost", "kind": "tui"}]
+                },
+                "esp32Wifi": {
+                    "available": true,
+                    "devices": [
+                        {"board": "inkdeck", "ip": "192.168.68.64", "version": "0.1.2", "stale": false, "serialActive": false},
+                        {"board": "ulanzi_tc001", "ip": "192.168.68.57", "stale": false, "serialActive": true}
+                    ]
+                },
+                "serial": {
+                    "connections": [
+                        {"port": "/dev/cu.wchusbserial21130", "connected": true,
+                         "deviceInfo": {"board": "ulanzi_tc001", "version": "0.1.2", "wifiConnected": true}}
+                    ]
+                }
+            }
+        }
+        """
+
+        let event = BridgeEventParser.parse(json)
+        guard case .stateUpdate(let e) = event else {
+            XCTFail("Expected stateUpdate")
+            return
+        }
+
+        let tui = try XCTUnwrap(e.moduleHealth?.tuiDashboards)
+        XCTAssertEqual(tui.devices, [TuiClientInfo(id: "myhost#42", name: "myhost")])
+
+        let wifi = try XCTUnwrap(e.moduleHealth?.esp32Wifi)
+        XCTAssertEqual(wifi.devices.count, 2)
+        XCTAssertEqual(wifi.devices[0].board, "inkdeck")
+        XCTAssertEqual(wifi.devices[0].ip, "192.168.68.64")
+        XCTAssertFalse(wifi.devices[0].serialActive)
+        // Dual-homed board carries serialActive so the rail can suppress it.
+        XCTAssertTrue(wifi.devices[1].serialActive)
+
+        let serialBoards = try XCTUnwrap(e.moduleHealth?.serial?.connectedBoards)
+        XCTAssertEqual(serialBoards.first?.wifiConnected, true)
+    }
+
     #if os(macOS)
     func testCodexObservationSetupDoesNotRequirePriorCodexAuthSignal() {
         XCTAssertTrue(AgentStateHolder.shouldShowCodexObservationSetup(

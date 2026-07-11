@@ -227,8 +227,29 @@ struct MenuBarTopologyList: View {
                         RailRow(
                             status: .ok,
                             name: SerialPortInfo.esp32DisplayName(for: info.board),
-                            subtitle: short
+                            subtitle: info.wifiConnected == true ? "\(short) · WiFi" : short
                         )
+                    }
+                }
+                // WiFi-WS ESP32 boards with no live serial path. Dual-homed
+                // boards (serialActive) already render above — one row per
+                // physical device (mirrors TopologyRail.wifiEsp32Section).
+                let wifiOnlyBoards = (health.esp32Wifi?.devices ?? []).filter { !$0.serialActive }
+                if !wifiOnlyBoards.isEmpty {
+                    ForEach(wifiOnlyBoards, id: \.self) { dev in
+                        RailRow(
+                            status: dev.stale ? .warn : .ok,
+                            name: SerialPortInfo.esp32DisplayName(for: dev.board),
+                            subtitle: [dev.ip, "WiFi", dev.stale ? "stale" : nil]
+                                .compactMap { $0 }
+                                .joined(separator: " · ")
+                        )
+                    }
+                }
+                // TUI dashboards (`agentdeck dashboard`) — live-presence roster.
+                if let tui = health.tuiDashboards, !tui.devices.isEmpty {
+                    ForEach(tui.devices, id: \.id) { dev in
+                        RailRow(status: .ok, name: "TUI Dashboard", subtitle: dev.name)
                     }
                 }
                 // Android — e-ink + tablet, with aggregate fallback.
@@ -303,6 +324,8 @@ struct MenuBarTopologyList: View {
         if h.d200h != nil { return true }
         if let p = h.pixoo, p.configuredDeviceCount > 0 { return true }
         if let s = h.serial, !s.connectedBoards.isEmpty { return true }
+        if (h.esp32Wifi?.devices ?? []).contains(where: { !$0.serialActive }) { return true }
+        if let tui = h.tuiDashboards, !tui.devices.isEmpty { return true }
         return false
     }
 
