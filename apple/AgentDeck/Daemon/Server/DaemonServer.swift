@@ -385,6 +385,28 @@ final class DaemonServer {
     private var pendingSessionsListFlushTask: Task<Void, Never>?
     private static let sessionsListDebounceSeconds: TimeInterval = 2
 
+    /// Coalesces `broadcastStateUpdate()` for high-frequency volunteer-roster
+    /// churn (WiFi ESP32 boards flapping under 2.4 GHz congestion). Without
+    /// this, every board connect/disconnect drove a full-state rebuild +
+    /// all-client fan-out, so N flapping boards amplified into a broadcast
+    /// storm that pinned the daemon's CPU and stole airtime from the very
+    /// boards that were dropping — a self-sustaining loop. Mirrors the
+    /// `scheduleSessionsListBroadcast` window.
+    private var lastStateBroadcastAt: Date = .distantPast
+    private var pendingStateBroadcastTask: Task<Void, Never>?
+    private static let stateBroadcastCoalesceSeconds: TimeInterval = 0.5
+
+    /// Flap damping for the WiFi ESP32 roster. arduinoWebSockets closes the
+    /// old socket ~3 s before opening the next (disconnect-then-begin), so a
+    /// close-driven eviction would broadcast "board gone" then "board back"
+    /// on every reconnect cycle. Defer eviction by `wifiEsp32EvictGrace`; a
+    /// reconnect of the same board+ip within the window cancels it, so steady
+    /// flapping produces zero roster broadcasts. Keyed by board+ip identity —
+    /// Node parity: `bridge/src/daemon-server.ts` keys `wifiEsp32Devices` the
+    /// same way and never broadcasts on churn.
+    private var pendingWifiEsp32Evictions: [String: Task<Void, Never>] = [:]
+    private static let wifiEsp32EvictGrace: TimeInterval = 10
+
     /// Last hook-event wall-clock timestamp per pushed session, keyed on
     /// sessionId. Used to evict sessions whose Claude Code process died
     /// without delivering a `session_end` hook — Claude Code's Stop/End
@@ -2221,23 +2243,39 @@ final class DaemonServer {
         if let sd = cachedStreamDeck, sd.connectionId == conn.id {
             cachedStreamDeck = nil
             DaemonLogger.shared.debug("Daemon", "Evicted streamdeck registration: WS closed")
-            broadcastStateUpdate()
+            scheduleStateBroadcast()
         }
         if cachedEinkDevices.removeValue(forKey: conn.id) != nil {
             DaemonLogger.shared.debug("Daemon", "Evicted eink-device registration: WS closed")
-            broadcastStateUpdate()
+            scheduleStateBroadcast()
         }
         if cachedAndroidDashboards.removeValue(forKey: conn.id) != nil {
             DaemonLogger.shared.debug("Daemon", "Evicted android-dashboard registration: WS closed")
-            broadcastStateUpdate()
+            scheduleStateBroadcast()
         }
         if cachedTuiDashboards.removeValue(forKey: conn.id) != nil {
             DaemonLogger.shared.debug("Daemon", "Evicted tui registration: WS closed")
-            broadcastStateUpdate()
+            scheduleStateBroadcast()
         }
-        if cachedWifiEsp32.removeValue(forKey: conn.id) != nil {
-            DaemonLogger.shared.debug("Daemon", "Evicted wifi-esp32 registration: WS closed")
-            broadcastStateUpdate()
+        if let removed = cachedWifiEsp32.removeValue(forKey: conn.id),
+           let dev = removed.devices.first {
+            // Flap damping: a board reopens its socket ~3 s after FIN, so do
+            // NOT broadcast "board gone" here. Schedule a grace-window eviction
+            // that a reconnect cancels — steady flapping stays silent, and only
+            // a board that stays gone actually drops off the topology.
+            let board = dev["board"] as? String ?? ""
+            let identity = wifiEsp32Identity(board: board, ip: dev["ip"] as? String)
+            if !wifiEsp32IdentityPresent(identity) {
+                pendingWifiEsp32Evictions[identity]?.cancel()
+                pendingWifiEsp32Evictions[identity] = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(Self.wifiEsp32EvictGrace))
+                    guard !Task.isCancelled, let self else { return }
+                    self.pendingWifiEsp32Evictions[identity] = nil
+                    guard !self.wifiEsp32IdentityPresent(identity) else { return }
+                    DaemonLogger.shared.debug("Daemon", "Evicted wifi-esp32 registration (board gone): \(identity)")
+                    self.scheduleStateBroadcast()
+                }
+            }
         }
         if ulanziPluginConnectionId == conn.id {
             ulanziPluginConnectionId = nil
@@ -3093,15 +3131,30 @@ final class DaemonServer {
         if let version = cmd["version"] as? String { info["version"] = version }
         if let hash = cmd["buildHash"] as? String { info["buildHash"] = hash }
         if let rev = cmd["protocolRevision"] as? Int { info["protocolRevision"] = rev }
-        let isNew = cachedWifiEsp32[conn.id] == nil
+        let identity = wifiEsp32Identity(board: board, ip: info["ip"] as? String)
+        let identityPresent = wifiEsp32IdentityPresent(identity)
         cachedWifiEsp32[conn.id] = StreamDeckRegistration(
             connectionId: conn.id,
             devices: [info],
             updatedAt: Date()
         )
-        if isNew {
+        // A reconnect that lands within the flap-damp grace cancels the pending
+        // eviction: the board never really left, so no roster broadcast. Keyed
+        // by board+ip so a fresh connection id doesn't read as a new device.
+        if let pending = pendingWifiEsp32Evictions[identity] {
+            pending.cancel()
+            pendingWifiEsp32Evictions[identity] = nil
+            DaemonLogger.shared.throttledDebug(
+                "Daemon", key: "wifi-esp32-reconnect-\(identity)",
+                "WiFi ESP32 reconnected: \(board) @ \(info["ip"] as? String ?? "no-ip")",
+                minInterval: 30)
+            return
+        }
+        // Genuinely new board+ip identity → topology changed. Coalesced so a
+        // burst of first-time connects still collapses into one broadcast.
+        if !identityPresent {
             DaemonLogger.shared.debug("Daemon", "WiFi ESP32 registered: \(board) @ \(info["ip"] as? String ?? "no-ip")")
-            broadcastStateUpdate()
+            scheduleStateBroadcast()
         }
     }
 
@@ -3425,9 +3478,14 @@ final class DaemonServer {
         guard !events.isEmpty else {
             let topKeys = Array(json.keys).joined(separator: ",")
             let spanNames = CodexTelemetryModule.spanNameSummary(json)
-            DaemonLogger.shared.debug(
-                "CodexOTel",
-                "JSON parsed but no recognized spans; len=\(body.count) topKeys=\(topKeys) spanNames=\(spanNames)"
+            // Codex POSTs unrecognized OTel spans on a periodic timer — this is
+            // expected and non-actionable, so throttle it. Left un-throttled it
+            // floods swift-daemon.log (DaemonLogger.debug always writes to file)
+            // at thousands of lines/min and competes for I/O during device churn.
+            DaemonLogger.shared.throttledDebug(
+                "CodexOTel", key: "codexotel-no-recognized-spans",
+                "JSON parsed but no recognized spans; len=\(body.count) topKeys=\(topKeys) spanNames=\(spanNames)",
+                minInterval: 60
             )
             return
         }
@@ -4572,6 +4630,47 @@ final class DaemonServer {
         }
     }
 
+    /// Debounced `broadcastStateUpdate()` for volunteer-roster churn (WiFi
+    /// ESP32 connect/disconnect). Fires immediately when the last broadcast
+    /// is older than the window, else schedules one trailing flush so a burst
+    /// collapses into a single full-state broadcast. State / question
+    /// transitions must keep calling `broadcastStateUpdate()` directly.
+    private func scheduleStateBroadcast() {
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastStateBroadcastAt)
+        if elapsed >= Self.stateBroadcastCoalesceSeconds {
+            broadcastStateUpdate()
+            return
+        }
+        guard pendingStateBroadcastTask == nil else { return }
+        let delay = Self.stateBroadcastCoalesceSeconds - elapsed
+        pendingStateBroadcastTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self else { return }
+            self.pendingStateBroadcastTask = nil
+            self.broadcastStateUpdate()
+        }
+    }
+
+    /// Stable identity for a WiFi ESP32 board across reconnects: a board
+    /// reopens its socket with a fresh connection id every few seconds, but
+    /// the board+ip pair is durable. Used to flap-damp the roster.
+    private func wifiEsp32Identity(board: String, ip: String?) -> String {
+        "\(board)|\(ip ?? "")"
+    }
+
+    /// True when some live WS connection still holds this board+ip identity.
+    private func wifiEsp32IdentityPresent(_ key: String) -> Bool {
+        for reg in cachedWifiEsp32.values {
+            for d in reg.devices {
+                let board = d["board"] as? String ?? ""
+                let ip = d["ip"] as? String
+                if wifiEsp32Identity(board: board, ip: ip) == key { return true }
+            }
+        }
+        return false
+    }
+
     private func buildSessionsListEvent() -> [String: Any] {
         var sessions = cachedSessions.map { sessionToDict($0) }
         // Inject virtual OpenClaw session iff Gateway is authenticated. SSOT:
@@ -4804,6 +4903,11 @@ final class DaemonServer {
 
     @MainActor
     private func broadcastStateUpdate() {
+        // Settle the coalescer: a direct broadcast satisfies any pending
+        // trailing flush (mirror of broadcastSessionsList).
+        lastStateBroadcastAt = Date()
+        pendingStateBroadcastTask?.cancel()
+        pendingStateBroadcastTask = nil
         let gwAlive = cachedGatewayConnected
         let event = buildFullStateEvent(agentType: gwAlive ? "openclaw" : "daemon")
         lastStateEvent = event

@@ -32,9 +32,13 @@ enum CodexOtelRoutes {
             let cl = request.headers["content-length"] ?? "?"
             let te = request.headers["transfer-encoding"] ?? "-"
             let ce = request.headers["content-encoding"] ?? "-"
-            DaemonLogger.shared.debug(
-                "CodexOTel",
-                "POST headers ct=\(ct) cl=\(cl) te=\(te) ce=\(ce) bodyLen=\(request.body?.count ?? -1)"
+            // Throttled: Codex POSTs telemetry on a periodic timer, so logging
+            // every request's headers floods swift-daemon.log. One line/min is
+            // enough to confirm the exporter is still reaching us.
+            DaemonLogger.shared.throttledDebug(
+                "CodexOTel", key: "codexotel-post-headers",
+                "POST headers ct=\(ct) cl=\(cl) te=\(te) ce=\(ce) bodyLen=\(request.body?.count ?? -1)",
+                minInterval: 60
             )
             if !ct.contains("application/json") {
                 return .json([

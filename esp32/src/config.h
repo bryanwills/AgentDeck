@@ -37,7 +37,12 @@ constexpr uint8_t PROTOCOL_REVISION    = 2;
 #endif
 
 // ===== WebSocket =====
-constexpr uint32_t WS_RECONNECT_MIN_MS  = 1000;
+// Reconnect backoff resets to MIN on every successful connect (ws_client.cpp),
+// so under 2.4GHz congestion a board that keeps dropping reconnects at MIN
+// every cycle. A 3s floor spaces those retries out — halving reconnect airtime
+// during any residual flap — while staying well under the 8s ceiling so a
+// genuine one-off drop (e.g. daemon restart) still recovers promptly.
+constexpr uint32_t WS_RECONNECT_MIN_MS  = 3000;
 constexpr uint32_t WS_RECONNECT_MAX_MS  = 8000;
 constexpr uint32_t WS_PING_INTERVAL_MS  = 15000;
 constexpr uint32_t WS_PONG_TIMEOUT_MS   = 30000;
