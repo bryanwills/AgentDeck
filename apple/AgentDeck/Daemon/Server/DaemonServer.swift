@@ -414,26 +414,20 @@ final class DaemonServer {
     /// callbacks from a finished turn cannot reanimate the row.
     private var lastTerminalCodexEventBySession: [String: Date] = [:]
 
-    /// Wall-clock timestamp of the last Claude Code `UserPromptSubmit` per
-    /// session, used by `appendClaudeCodeChatEnd` to compute the turn
-    /// duration shown on the dimmed chat_end row. Mirrors the Node bridge's
-    /// `ccChatStart` accounting; without it, chat_end fell back to the same
-    /// response prefix as chat_response and the dashboard rendered the turn
-    /// as two near-identical lines (one bright ◇, one dimmed ■).
-    /// FIFO queue of in-flight chat_start ts per session. A single `Double`
-    /// slot used to suffice, but it allowed `chat_start2` to overwrite
-    /// `chat_start1`'s ts before the (delayed) Stop hook for Q1 could
-    /// stamp `chat_end1.startedAt` — the stamp then anchored to Q2 and
-    /// the Timeline-side `sameTurnAnchor` guard accepted the cross-turn
-    /// attach as legit (Codex stop-time review #8, 2026-05-17). Queue:
-    /// append on every UserPromptSubmit, pop-first on every Stop hook —
-    /// FIFO matches Claude Code's serial turn semantics and tolerates
-    /// hook-arrival reorderings. Access only through
-    /// `enqueueClaudeChatStartTs(sid:ts:)`, `dequeueClaudeChatStartTs(sid:)`
-    /// and `clearClaudeChatStartQueue(sid:)`. Backing storage is the
-    /// reusable `ChatStartTsQueue` struct so the queue mechanics
-    /// themselves are unit-testable without spinning the daemon.
-    private var claudeChatStartQueue = ChatStartTsQueue()
+    /// Open-turn chat_start anchor per Claude Code session: noted on every
+    /// UserPromptSubmit, claimed by the turn's Stop hook so chat_response /
+    /// chat_end stamp `startedAt` with the turn they belong to (the merge
+    /// anchor every timeline client backs-scans for). Replaced the FIFO
+    /// queue (Codex review #8 lineage): one lost Stop hook left an orphaned
+    /// queue head, and every later Stop then popped the previous turn's
+    /// anchor — responses mis-merged or rendered standalone from then on.
+    /// The tracker keeps only the most recent unclaimed chat_start (Node
+    /// daemon backscan parity) so a lost Stop self-heals on the next
+    /// prompt. Access only through `noteClaudeChatStart(sid:ts:)`,
+    /// `claimClaudeOpenTurnAnchor(sid:)` and `clearClaudeTurnAnchor(sid:)`.
+    /// Backing storage is the reusable `ChatTurnAnchorTracker` struct so
+    /// the anchor mechanics are unit-testable without spinning the daemon.
+    private var claudeTurnAnchors = ChatTurnAnchorTracker()
 
     /// Bounded topic prefix (≤80 chars) extracted from the last Claude Code
     /// prompt per session. Mirrors the Node bridge's `ccLastPromptText` use
@@ -443,11 +437,9 @@ final class DaemonServer {
     /// later Stop without a fresh UserPromptSubmit cannot reuse a stale
     /// label from a different turn.
     private var claudeLastPromptTopicBySession: [String: String] = [:]
-    /// Codex FIFO mirror of `claudeChatStartQueue`. Same race shape:
-    /// `appendCodexChatStart` overwrote the per-session slot, so a burst
-    /// of new turns could shift the anchor before the matching Stop
-    /// arrived. Access through the codex-prefixed enqueue/dequeue helpers.
-    private var codexChatStartQueue = ChatStartTsQueue()
+    /// Codex mirror of `claudeTurnAnchors` — same open-turn anchor
+    /// semantics. Access through the codex-prefixed note/claim helpers.
+    private var codexTurnAnchors = ChatTurnAnchorTracker()
     private var codexLastPromptTopicBySession: [String: String] = [:]
     private var codexCurrentToolBySession: [String: String] = [:]
 
@@ -2365,7 +2357,7 @@ final class DaemonServer {
         codexTerminalTombstoneBySession.removeValue(forKey: sessionId)
         codexInteractiveSessionIds.remove(sessionId)
         codexProjectNameBySession.removeValue(forKey: sessionId)
-        clearCodexChatStartQueue(sid: sessionId)
+        clearCodexTurnAnchor(sid: sessionId)
         codexLastPromptTopicBySession.removeValue(forKey: sessionId)
         codexCurrentToolBySession.removeValue(forKey: sessionId)
         lastHookAtByPushedSession.removeValue(forKey: sessionId)
@@ -2743,7 +2735,7 @@ final class DaemonServer {
         // `chat_end` (natural order). `apmeHandledEarly` prevents a double-run.
         var apmeHandledEarly = false
         if event == "user_prompt_submit" {
-            apmeCollector?.handleHook(event: event, data: json)
+            apmeCollector?.handleHook(event: event, data: apmeEnrichedHookPayload(json: json, sessionId: sessionId))
             apmeHandledEarly = true
         }
 
@@ -2848,11 +2840,11 @@ final class DaemonServer {
                 let expiredEntry = pushedSessionsById[sessionId]
                 let isCodex = expiredEntry.map { Self.isCodexSession(sessionId: sessionId, entry: $0) } ?? false
                 if isCodex {
-                    if codexChatStartQueue.depth(sid: sessionId) > 0 {
+                    if codexTurnAnchors.hasOpenTurn(sid: sessionId) {
                         appendCodexChatEnd(json: [:], sessionId: sessionId)
                     }
                 } else {
-                    if claudeChatStartQueue.depth(sid: sessionId) > 0 {
+                    if claudeTurnAnchors.hasOpenTurn(sid: sessionId) {
                         appendClaudeCodeChatEnd(json: [:], sessionId: sessionId)
                     }
                 }
@@ -2864,10 +2856,10 @@ final class DaemonServer {
                 codexTerminalTombstoneBySession.removeValue(forKey: sessionId)
                 codexInteractiveSessionIds.remove(sessionId)
                 codexProjectNameBySession.removeValue(forKey: sessionId)
-                clearCodexChatStartQueue(sid: sessionId)
+                clearCodexTurnAnchor(sid: sessionId)
                 codexLastPromptTopicBySession.removeValue(forKey: sessionId)
                 codexCurrentToolBySession.removeValue(forKey: sessionId)
-                clearClaudeChatStartQueue(sid: sessionId)
+                clearClaudeTurnAnchor(sid: sessionId)
                 claudeLastPromptTopicBySession.removeValue(forKey: sessionId)
                 broadcastSessionsList()
             }
@@ -2976,7 +2968,7 @@ final class DaemonServer {
         // rows carry no taskId — they render flat, never nested under a
         // Claude session's TASK header.
         if !event.hasPrefix("codex_") && !apmeHandledEarly {
-            apmeCollector?.handleHook(event: event, data: json)
+            apmeCollector?.handleHook(event: event, data: apmeEnrichedHookPayload(json: json, sessionId: sessionId))
         }
 
         // Attribute the next state_update + timeline entries to the session
@@ -3254,15 +3246,15 @@ final class DaemonServer {
             let isPostTerminal = lastTerminalCodexEventBySession[sid]
                 .map { $0 < codexTerminalCutoff } ?? false
 
-            // Auto-emit fallbacks for any active/uncompleted turns in the queues
-            // before clearing their backing queue structures.
+            // Auto-emit fallbacks for any open (uncompleted) turn before
+            // clearing its backing anchor state.
             let isCodex = expiredEntry.map { Self.isCodexSession(sessionId: sid, entry: $0) } ?? false
             if isCodex {
-                if codexChatStartQueue.depth(sid: sid) > 0 {
+                if codexTurnAnchors.hasOpenTurn(sid: sid) {
                     appendCodexChatEnd(json: [:], sessionId: sid)
                 }
             } else {
-                if claudeChatStartQueue.depth(sid: sid) > 0 {
+                if claudeTurnAnchors.hasOpenTurn(sid: sid) {
                     appendClaudeCodeChatEnd(json: [:], sessionId: sid)
                 }
             }
@@ -3279,10 +3271,10 @@ final class DaemonServer {
             }
             lastTerminalCodexEventBySession.removeValue(forKey: sid)
             codexProcessingTouchedAtBySession.removeValue(forKey: sid)
-            clearCodexChatStartQueue(sid: sid)
+            clearCodexTurnAnchor(sid: sid)
             codexLastPromptTopicBySession.removeValue(forKey: sid)
             codexCurrentToolBySession.removeValue(forKey: sid)
-            clearClaudeChatStartQueue(sid: sid)
+            clearClaudeTurnAnchor(sid: sid)
             claudeLastPromptTopicBySession.removeValue(forKey: sid)
             if currentHookSessionId == sid { currentHookSessionId = nil }
             if userFocusedSessionId == sid { userFocusedSessionId = nil }
@@ -5800,64 +5792,47 @@ final class DaemonServer {
         return value
     }
 
-    // MARK: - chat_start ts FIFO queues
+    // MARK: - chat turn anchors
     //
-    // sessionId-keyed FIFO queue: append on each UserPromptSubmit, pop-first
-    // on each Stop hook. Replaces the previous single-slot dict which let a
-    // fast follow-up chat_start overwrite the anchor that the next Stop
-    // hook should have stamped on the still-pending turn (Codex review #8).
+    // sessionId-keyed open-turn anchor: note on each UserPromptSubmit,
+    // claim on each Stop hook. See `ChatTurnAnchorTracker` for why this
+    // replaced the FIFO queue (lost-Stop off-by-one drift + TTL-dropped
+    // anchors on long turns).
 
-    // Wrapper accessors for the two `ChatStartTsQueue` instances. Kept
-    // as methods (not direct queue access) so the call sites read as
-    // "enqueue/dequeue per session" rather than "mutate this struct in
-    // place" — which is the historic naming the test target asserts on.
-    func enqueueClaudeChatStartTs(sid: String, ts: Double) {
-        claudeChatStartQueue.enqueue(sid: sid, ts: ts)
+    // Wrapper accessors for the two `ChatTurnAnchorTracker` instances.
+    // Kept as methods (not direct tracker access) so call sites read as
+    // "note/claim the session's turn anchor".
+    func noteClaudeChatStart(sid: String, ts: Double) {
+        claudeTurnAnchors.noteChatStart(sid: sid, ts: ts)
     }
 
-    func dequeueClaudeChatStartTs(sid: String) -> Double? {
-        claudeChatStartQueue.dequeue(sid: sid)
+    func claimClaudeOpenTurnAnchor(sid: String) -> Double? {
+        claudeTurnAnchors.claimOpenTurn(sid: sid)
     }
 
-    func clearClaudeChatStartQueue(sid: String) {
-        claudeChatStartQueue.clear(sid: sid)
+    func clearClaudeTurnAnchor(sid: String) {
+        claudeTurnAnchors.clear(sid: sid)
     }
 
-    func claudeChatStartQueueDepth(sid: String) -> Int {
-        claudeChatStartQueue.depth(sid: sid)
+    func noteCodexChatStart(sid: String, ts: Double) {
+        codexTurnAnchors.noteChatStart(sid: sid, ts: ts)
     }
 
-    func enqueueCodexChatStartTs(sid: String, ts: Double) {
-        codexChatStartQueue.enqueue(sid: sid, ts: ts)
+    /// The open Codex turn's chat_start ts. Used by mid-turn stamps like
+    /// `tool_exec.startedAt` — the tool belongs to the turn currently
+    /// generating (the most recent chat_start), and the anchor must not
+    /// be consumed here: the Stop hook owns the claim (Codex stop-time
+    /// review #10, 2026-05-17).
+    private func peekCodexOpenTurnAnchor(sid: String) -> Double? {
+        codexTurnAnchors.peekOpenTurn(sid: sid)
     }
 
-    /// **Latest** in-flight Codex chat_start ts (tail, not head). Used
-    /// by mid-turn stamps like `tool_exec.startedAt` — the tool belongs
-    /// to whatever turn is currently generating, which is the most
-    /// recently enqueued one. Returning the head (oldest pending)
-    /// caused follow-up turn events to attach to the previous turn's
-    /// row (Codex stop-time review #10, 2026-05-17).
-    private func peekLatestCodexChatStartTs(sid: String) -> Double? {
-        codexChatStartQueue.peekTail(sid: sid)
+    func claimCodexOpenTurnAnchor(sid: String) -> Double? {
+        codexTurnAnchors.claimOpenTurn(sid: sid)
     }
 
-    /// **Latest** in-flight Claude Code chat_start ts. Same role as the
-    /// Codex variant — used wherever a mid-turn row needs to anchor to
-    /// the currently active turn, not the oldest pending one.
-    private func peekLatestClaudeChatStartTs(sid: String) -> Double? {
-        claudeChatStartQueue.peekTail(sid: sid)
-    }
-
-    func dequeueCodexChatStartTs(sid: String) -> Double? {
-        codexChatStartQueue.dequeue(sid: sid)
-    }
-
-    func clearCodexChatStartQueue(sid: String) {
-        codexChatStartQueue.clear(sid: sid)
-    }
-
-    func codexChatStartQueueDepth(sid: String) -> Int {
-        codexChatStartQueue.depth(sid: sid)
+    func clearCodexTurnAnchor(sid: String) {
+        codexTurnAnchors.clear(sid: sid)
     }
 
     private func sessionToDict(_ s: DaemonSessionEntry) -> [String: Any] {
@@ -6103,6 +6078,27 @@ final class DaemonServer {
             ?? Self.nonEmptyString(pushedSessionsById[sessionId]?.projectName)
     }
 
+    /// Enrich a hook payload with `project_name` before handing it to the
+    /// APME collector. Managed-bridge hooks carry the field, but direct
+    /// `claude` installs don't — and the collector stamps its run's
+    /// projectName straight from the payload, so without this the run (and
+    /// every TASK header / projected row derived from it) has no project
+    /// label and clients fall back to the agentType prefix. Prefer the
+    /// session entry (the session_start switch case already resolved it
+    /// from the payload's cwd), then resolve the payload directly for the
+    /// lazy-openRun path where no entry exists yet.
+    @MainActor
+    private func apmeEnrichedHookPayload(json: [String: Any], sessionId: String?) -> [String: Any] {
+        if Self.nonEmptyString(json["project_name"] as? String) != nil { return json }
+        var enriched = json
+        if let sid = sessionId, let p = Self.nonEmptyString(pushedSessionsById[sid]?.projectName) {
+            enriched["project_name"] = p
+        } else if let p = Self.nonEmptyString(ProjectNameResolver.projectName(fromHookPayload: json)) {
+            enriched["project_name"] = p
+        }
+        return enriched
+    }
+
     /// Explicit new-turn signal for a Codex thread (`codex_session_start`,
     /// `codex_user_prompt_submit`, OTel `turnStart`). Clears the terminal
     /// record AND its tombstone (late progress from the *finished* turn can
@@ -6133,14 +6129,12 @@ final class DaemonServer {
         // and is filtered by the guard above, so this function only ever
         // sees the prompt event itself — one per turn.
         //
-        // The previous "peek queue head → upsert" branch overwrote Q1's
-        // pending row with Q2's prompt whenever a follow-up arrived
-        // before Q1's Stop hook drained the queue: `peek` always returns
-        // the oldest pending ts, so the upsert mutated the wrong row
-        // (Codex stop-time review #9, 2026-05-17). Dropped entirely;
-        // each prompt enqueues a new ts and emits a new row, and the
-        // FIFO `ChatStartTsQueue` keeps every in-flight turn's anchor
-        // intact for its own Stop hook to claim.
+        // The historic "peek → upsert" branch overwrote the pending row's
+        // text with a follow-up prompt (Codex stop-time review #9,
+        // 2026-05-17); each prompt now emits its own row and notes its
+        // own anchor. Noting the anchor also supersedes any unclaimed
+        // previous turn whose Stop hook was lost — the next Stop then
+        // claims THIS turn's anchor instead of drifting off-by-one.
         codexLastPromptTopicBySession.removeValue(forKey: sessionId)
 
         let ts = Date().timeIntervalSince1970 * 1000
@@ -6160,7 +6154,7 @@ final class DaemonServer {
         entry.sessionId = sessionId
         entry.projectName = codexTimelineProjectName(sessionId: sessionId, json: json)
         entry.startedAt = ts
-        enqueueCodexChatStartTs(sid: sessionId, ts: ts)
+        noteCodexChatStart(sid: sessionId, ts: ts)
         if let topic = Self.extractTopicHint(from: prompt) {
             codexLastPromptTopicBySession[sessionId] = topic
         }
@@ -6204,11 +6198,9 @@ final class DaemonServer {
         )
         entry.sessionId = sessionId
         entry.projectName = codexTimelineProjectName(sessionId: sessionId, json: json)
-        // tool_exec rows are intra-turn, so peek the **latest** pending
-        // chat_start ts (tail). The Stop hook owns the dequeue (head).
-        // Returning the head here would attach this tool to a previous
-        // turn whose Stop hook hasn't fired yet.
-        entry.startedAt = peekLatestCodexChatStartTs(sid: sessionId)
+        // tool_exec rows are intra-turn: peek (don't claim) the open
+        // turn's anchor — the Stop hook owns the claim.
+        entry.startedAt = peekCodexOpenTurnAnchor(sid: sessionId)
         Task { await timelineStore.add(entry) }
         broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(entry)] as [String: Any])
     }
@@ -6217,10 +6209,10 @@ final class DaemonServer {
     private func appendCodexChatEnd(json: [String: Any], sessionId: String?) {
         guard let sessionId else { return }
         let now = Date().timeIntervalSince1970 * 1000
-        // Dequeue the active turn's ts up front so both chat_response
+        // Claim the open turn's anchor up front so both chat_response
         // and chat_end stamp the same anchor and a delayed peer Stop
         // hook can't reach in mid-handler.
-        let startTs = dequeueCodexChatStartTs(sid: sessionId)
+        let startTs = claimCodexOpenTurnAnchor(sid: sessionId)
         let assistantText = (json["last_assistant_message"] as? String)
             ?? (json["response"] as? String)
             ?? (json["output"] as? String)
@@ -6228,9 +6220,9 @@ final class DaemonServer {
             ?? CodexRolloutResponseReader.lastAgentMessage(sessionId: sessionId)
             ?? ""
         guard startTs != nil || !assistantText.isEmpty else {
-            // No matching turn AND no response body — nothing to anchor;
+            // No open turn AND no response body — nothing to anchor;
             // wipe only the session-scoped topic / tool to clear stale
-            // labels. The queue head was already popped above.
+            // labels.
             codexLastPromptTopicBySession.removeValue(forKey: sessionId)
             codexCurrentToolBySession.removeValue(forKey: sessionId)
             return
@@ -6298,8 +6290,8 @@ final class DaemonServer {
         }
 
         // Cache cleanup synchronous on main actor — captured values above
-        // are by-value so the in-flight Task is unaffected. The chat_start
-        // ts queue was already popped at the top of this handler.
+        // are by-value so the in-flight Task is unaffected. The turn's
+        // anchor was already claimed at the top of this handler.
         codexLastPromptTopicBySession.removeValue(forKey: sessionId)
         codexCurrentToolBySession.removeValue(forKey: sessionId)
     }
@@ -6310,11 +6302,12 @@ final class DaemonServer {
     @MainActor
     private func appendClaudeCodeChatStart(json: [String: Any], sessionId: String?, taskId: String? = nil) {
         // Reset the per-session topic cache so a stale label from an
-        // abnormally-closed prior turn doesn't leak into this row. We do
-        // NOT wipe the chat_start ts queue here — that would discard an
-        // in-flight turn's anchor before its Stop hook arrives. The
-        // chat_end handler pops the queue itself, and session_end /
-        // stale-session paths call `clearClaudeChatStartQueue` explicitly.
+        // abnormally-closed prior turn doesn't leak into this row. The
+        // turn anchor is (re)noted below — superseding an unclaimed
+        // previous anchor is intentional: it is how a lost Stop hook
+        // self-heals instead of shifting every later Stop's anchor.
+        // session_end / stale-session paths call `clearClaudeTurnAnchor`
+        // explicitly.
         if let sid = sessionId {
             claudeLastPromptTopicBySession.removeValue(forKey: sid)
         }
@@ -6344,9 +6337,10 @@ final class DaemonServer {
         // rendering as a separate task. Parity with the Node daemon's chat_start.
         entry.taskId = taskId
         if let sid = sessionId {
-            // FIFO append — a delayed Stop hook for a prior turn pops
-            // *that* turn's ts off the head, not this fresh one.
-            enqueueClaudeChatStartTs(sid: sid, ts: ts)
+            // Note this turn's anchor. Turns are serial per session, so
+            // the newest chat_start IS the open turn — the next Stop
+            // hook claims exactly this ts (Node daemon backscan parity).
+            noteClaudeChatStart(sid: sid, ts: ts)
             if let topic = Self.extractTopicHint(from: prompt) {
                 claudeLastPromptTopicBySession[sid] = topic
             }
@@ -6365,14 +6359,14 @@ final class DaemonServer {
         let assistantText = (json["last_assistant_message"] as? String) ?? ""
         let now = Date().timeIntervalSince1970 * 1000
         let projectName = pushedSessionsById[sessionId ?? ""]?.projectName
-        // Pop the queue **once** at the top of the handler so both
-        // chat_response and chat_end stamp the same anchor — and so a
-        // delayed follow-up Stop hook for a previous turn can't reach in
-        // and pull the active turn's ts out from under us mid-handler.
-        // Captured by value into the async Task body below; the daemon's
-        // queue is no longer mutated after this point in the current
-        // turn's emit flow.
-        let startTs: Double? = sessionId.flatMap { dequeueClaudeChatStartTs(sid: $0) }
+        // Claim the open turn's anchor **once** at the top of the handler
+        // so both chat_response and chat_end stamp the same anchor — and
+        // so a delayed duplicate Stop can't re-claim it mid-handler.
+        // Captured by value into the async Task body below; the tracker
+        // is no longer mutated after this point in the current turn's
+        // emit flow. nil for a duplicate/late Stop (turn already closed)
+        // — the response-only fallback below still records the text.
+        let startTs: Double? = sessionId.flatMap { claimClaudeOpenTurnAnchor(sid: $0) }
         if !assistantText.isEmpty {
             let snippet = String(assistantText.prefix(200))
             let detail: String? = assistantText.count > 100
@@ -6467,10 +6461,8 @@ final class DaemonServer {
         // before the Task above completes still gets a clean session state.
         // The Task captured `startTs` / `topicFromPrompt` by value, so
         // mutating the dict here doesn't affect the in-flight chat_end
-        // entry. We don't touch the chat_start ts queue — `dequeueClaude
-        // ChatStartTs` at the top already consumed exactly this turn's
-        // slot, and wiping the whole queue would discard pending peers'
-        // anchors (the race shape Codex #8 surfaced).
+        // entry. The turn anchor was already claimed at the top of this
+        // handler — nothing else to release.
         if let sid = sessionId {
             claudeLastPromptTopicBySession.removeValue(forKey: sid)
         }
@@ -6870,73 +6862,70 @@ final class DaemonServer {
     }
 }
 
-// MARK: - chat_start ts FIFO queue (per-session)
+// MARK: - chat turn anchor tracker (per-session)
 //
-// Pulled out of `DaemonServer` so the queue mechanics can be unit-tested
-// in isolation. The bug shape Codex stop-time review #8 surfaced is a
-// pure data-structure concern (per-session FIFO vs single slot) — gating
-// its correctness on the full daemon constructor would have made the
-// regression test prohibitively heavy.
+// Replaces the chat_start ts FIFO queue (Codex review #8). The FIFO was
+// only correct while every turn's Stop hook actually arrived: one lost
+// Stop left an orphaned head, and every later Stop then popped the
+// *previous* turn's anchor — a permanent off-by-one that mis-anchored
+// (or, past the queue's 10-minute TTL, dropped) every subsequent
+// chat_response, which then rendered as a standalone row instead of
+// merging into its turn. Claude's Stop hook is best-effort (~18%
+// reliable on some paths per the DEV log), so lost-Stop drift dominated
+// in practice; the TTL additionally stripped anchors from legitimate
+// >10-minute agentic turns.
+//
+// The tracker mirrors the Node daemon's Stop-time backscan
+// (bridge/src/daemon-server.ts `boundary === 'stop'`: the most recent
+// chat_start newer than the last completion IS the open turn). A session
+// holds at most ONE open turn — `noteChatStart` supersedes any unclaimed
+// anchor (its Stop is lost, or will arrive too late to matter), and
+// `claimOpenTurn` hands the anchor to the first Stop and closes the
+// turn so a duplicate/late Stop claims nothing. This self-heals after a
+// lost Stop: the very next prompt re-syncs the anchor. Trade-off
+// (identical to Node): if a follow-up prompt genuinely lands before the
+// previous turn's Stop, that Stop anchors to the newer chat_start —
+// accepted, since hook-observed turns are serial per session and the
+// lost-Stop drift is the failure users actually saw.
+//
+// Kept as a standalone struct so the anchor mechanics stay unit-testable
+// without the full daemon constructor.
 
-struct ChatStartTsQueue: Equatable, Sendable {
-    private struct QueueEntry: Equatable, Sendable {
-        let ts: Double
-        let wallClock: Double
+struct ChatTurnAnchorTracker: Equatable, Sendable {
+    /// The open (unclaimed) turn's chat_start ts per session, wall ms.
+    /// Removed on claim — presence alone encodes "turn open". No TTL:
+    /// a long-running turn stays claimable until its Stop arrives or a
+    /// newer prompt supersedes it (Node daemon parity).
+    private var openTurnTs: [String: Double] = [:]
+
+    /// Record a new turn's chat_start anchor, superseding any unclaimed one.
+    mutating func noteChatStart(sid: String, ts: Double) {
+        openTurnTs[sid] = ts
     }
 
-    private var queues: [String: [QueueEntry]] = [:]
-
-    mutating func enqueue(sid: String, ts: Double) {
-        let entry = QueueEntry(ts: ts, wallClock: Date().timeIntervalSince1970 * 1000)
-        queues[sid, default: []].append(entry)
+    /// The open turn's anchor without consuming it — for mid-turn rows
+    /// (tool_exec) that stamp the turn currently generating. nil once the
+    /// turn was claimed by a Stop or no chat_start was seen.
+    func peekOpenTurn(sid: String) -> Double? {
+        openTurnTs[sid]
     }
 
-    /// Pop the *oldest* pending ts for `sid`. nil if the queue is empty.
-    /// Safely filters out stale/orphaned entries based on real-world elapsed time (10 minutes).
-    mutating func dequeue(sid: String) -> Double? {
-        guard var queue = queues[sid], !queue.isEmpty else { return nil }
-        let now = Date().timeIntervalSince1970 * 1000
-        let ttlMs: Double = 600_000 // 10 minutes
-
-        while !queue.isEmpty {
-            let entry = queue.removeFirst()
-            if now - entry.wallClock < ttlMs {
-                if queue.isEmpty {
-                    queues.removeValue(forKey: sid)
-                } else {
-                    queues[sid] = queue
-                }
-                return entry.ts
-            }
-        }
-        queues.removeValue(forKey: sid)
-        return nil
+    /// Claim the open turn's anchor for a Stop/turn-complete hook and
+    /// close the turn. nil when the turn was already claimed (duplicate
+    /// or late Stop) or no chat_start was seen.
+    mutating func claimOpenTurn(sid: String) -> Double? {
+        openTurnTs.removeValue(forKey: sid)
     }
 
-    /// Look at the head (oldest pending) without consuming.
-    /// Enforces the same 10-minute safety TTL.
-    func peek(sid: String) -> Double? {
-        guard let entry = queues[sid]?.first else { return nil }
-        let now = Date().timeIntervalSince1970 * 1000
-        let ttlMs: Double = 600_000
-        return (now - entry.wallClock < ttlMs) ? entry.ts : nil
-    }
-
-    /// Look at the tail (most-recently enqueued) without consuming.
-    /// Enforces the same 10-minute safety TTL.
-    func peekTail(sid: String) -> Double? {
-        guard let entry = queues[sid]?.last else { return nil }
-        let now = Date().timeIntervalSince1970 * 1000
-        let ttlMs: Double = 600_000
-        return (now - entry.wallClock < ttlMs) ? entry.ts : nil
+    /// True while a chat_start is pending its Stop — the "is there an
+    /// unfinished turn to force-close?" check used by session_end and
+    /// stale-session eviction.
+    func hasOpenTurn(sid: String) -> Bool {
+        openTurnTs[sid] != nil
     }
 
     mutating func clear(sid: String) {
-        queues.removeValue(forKey: sid)
-    }
-
-    func depth(sid: String) -> Int {
-        queues[sid]?.count ?? 0
+        openTurnTs.removeValue(forKey: sid)
     }
 }
 

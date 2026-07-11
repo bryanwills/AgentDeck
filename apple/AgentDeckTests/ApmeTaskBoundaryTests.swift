@@ -107,6 +107,37 @@ final class ApmeTaskBoundaryTests: XCTestCase {
         XCTAssertEqual(collector.activeTaskId, tasks[0].id)
     }
 
+    /// A hook `session_start` without `project_name` (direct `claude`
+    /// install payload shape) opened the run with a nil projectName, and
+    /// the TASK header — which reads run.projectName fresh from the store
+    /// at emit time — degraded to the agentType fallback prefix. The
+    /// prompt path backfills the run from the first payload carrying the
+    /// field (the daemon enriches payloads from the session entry / cwd),
+    /// and never overwrites a projectName that is already set.
+    func testRunProjectNameBackfilledFromLaterPromptButNeverOverwritten() throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let store = tmp.store
+        let collector = ApmeCollector(store: store)
+        collector.handleHook(event: "session_start", data: [
+            "agent_type": "claude-code",
+            // no project_name
+        ])
+        collector.handleHook(event: "UserPromptSubmit", data: [
+            "prompt": "hello",
+            "project_name": "agentdeck",
+        ])
+        guard let run = store.listRuns().first else { return XCTFail("no run") }
+        XCTAssertEqual(run.projectName, "agentdeck", "empty run projectName backfilled from prompt payload")
+
+        collector.handleHook(event: "UserPromptSubmit", data: [
+            "prompt": "follow-up",
+            "project_name": "some-other-project",
+        ])
+        XCTAssertEqual(store.listRuns().first?.projectName, "agentdeck",
+                       "backfill fills only empty projectName — never overwrites")
+    }
+
     func testTodoWriteAllCompletedRecordsSoftHintWithoutClosingTask() throws {
         let tmp = try makeTempStore()
         defer { cleanup(tmp) }
@@ -868,131 +899,100 @@ final class ApmeTaskBoundaryTests: XCTestCase {
         )
     }
 
-    // MARK: - Per-session chat_start ts FIFO queue (Codex review #8 / 2026-05-17)
+    // MARK: - Per-session chat turn anchor tracker (lost-Stop resync / 2026-07-11)
 
-    /// The race shape Codex #8 surfaced: a fast follow-up chat_start
-    /// overwrote the single per-session ts slot before the (delayed)
-    /// Stop hook for the previous turn could stamp its anchor. The
-    /// FIFO queue replaces the single slot — append on chat_start,
-    /// pop-first on chat_end — so a delayed Stop reads the right ts.
-    func testChatStartTsQueueFIFO() {
-        var q = ChatStartTsQueue()
-        q.enqueue(sid: "s1", ts: 10)
-        q.enqueue(sid: "s1", ts: 20)
-        q.enqueue(sid: "s1", ts: 30)
-        XCTAssertEqual(q.dequeue(sid: "s1"), 10)
-        XCTAssertEqual(q.dequeue(sid: "s1"), 20)
-        XCTAssertEqual(q.dequeue(sid: "s1"), 30)
-        XCTAssertNil(q.dequeue(sid: "s1"))
+    /// Normal turn: chat_start opens the turn, the Stop hook claims its
+    /// anchor exactly once, and a duplicate/late Stop claims nothing —
+    /// so it can't re-emit the previous turn's completion pair.
+    func testTurnAnchorClaimOnceAndDuplicateStopSuppressed() {
+        var t = ChatTurnAnchorTracker()
+        t.noteChatStart(sid: "s1", ts: 1000)
+        XCTAssertEqual(t.claimOpenTurn(sid: "s1"), 1000)
+        XCTAssertNil(t.claimOpenTurn(sid: "s1"), "duplicate Stop finds the turn closed")
     }
 
-    /// Core Codex #8 regression: follow-up chat_start must NOT shadow
-    /// the pending first turn's anchor.
-    func testChatStartTsQueueFollowupDoesNotShadowFirstPending() {
-        var q = ChatStartTsQueue()
-        q.enqueue(sid: "s1", ts: 100) // Q1
-        q.enqueue(sid: "s1", ts: 200) // Q2 follow-up before Q1's Stop hook
-        XCTAssertEqual(q.dequeue(sid: "s1"), 100, "Q1's delayed Stop reads Q1's anchor")
-        XCTAssertEqual(q.dequeue(sid: "s1"), 200, "Q2's Stop reads Q2's anchor")
+    /// THE regression the tracker replaces the FIFO queue for: turn 1's
+    /// Stop hook is lost. Under FIFO, turn 2's Stop popped turn 1's
+    /// orphaned head — a permanent off-by-one that mis-anchored every
+    /// later chat_response (responses rendered standalone / merged into
+    /// the wrong turn). The tracker re-syncs on every chat_start: the
+    /// newest prompt supersedes the orphaned anchor, so turn 2's Stop
+    /// claims turn 2's own ts.
+    func testTurnAnchorLostStopResyncsOnNextChatStart() {
+        var t = ChatTurnAnchorTracker()
+        t.noteChatStart(sid: "s1", ts: 1000) // turn 1 — its Stop never arrives
+        t.noteChatStart(sid: "s1", ts: 5000) // turn 2 supersedes the orphan
+        XCTAssertEqual(t.claimOpenTurn(sid: "s1"), 5000, "turn 2's Stop claims turn 2's anchor")
+        XCTAssertNil(t.claimOpenTurn(sid: "s1"), "orphaned turn 1 anchor is gone, not queued")
     }
 
-    /// Queues are independent per sessionId — a multi-agent dashboard
-    /// (Claude + OpenClaw running in parallel) must not cross-stamp.
-    func testChatStartTsQueueIsolatedAcrossSessions() {
-        var q = ChatStartTsQueue()
-        q.enqueue(sid: "claude", ts: 10)
-        q.enqueue(sid: "codex", ts: 99)
-        XCTAssertEqual(q.dequeue(sid: "codex"), 99)
-        XCTAssertEqual(q.dequeue(sid: "claude"), 10)
+    /// Node daemon parity trade-off, documented on purpose: when a
+    /// follow-up chat_start genuinely lands before the previous turn's
+    /// Stop, that Stop claims the NEWER turn's anchor (the Node
+    /// backscan does the same — most recent chat_start newer than the
+    /// last completion IS the open turn) and the second Stop finds the
+    /// turn closed. Accepted because hook-observed turns are serial per
+    /// session and lost Stops vastly outnumber true interleaves.
+    func testTurnAnchorFollowupSupersedesPendingAnchor() {
+        var t = ChatTurnAnchorTracker()
+        t.noteChatStart(sid: "s1", ts: 1000) // turn 1
+        t.noteChatStart(sid: "s1", ts: 5000) // turn 2 before turn 1's Stop
+        XCTAssertEqual(t.claimOpenTurn(sid: "s1"), 5000)
+        XCTAssertNil(t.claimOpenTurn(sid: "s1"))
     }
 
-    /// `peek` is for mid-turn rows (tool_exec, Codex chat_start upsert)
-    /// that need to stamp the active turn's anchor without consuming
-    /// the queue slot that the Stop hook owns.
-    func testChatStartTsQueuePeekIsNonConsuming() {
-        var q = ChatStartTsQueue()
-        q.enqueue(sid: "s1", ts: 10)
-        q.enqueue(sid: "s1", ts: 20)
-        XCTAssertEqual(q.peek(sid: "s1"), 10)
-        XCTAssertEqual(q.peek(sid: "s1"), 10, "peek is idempotent")
-        XCTAssertEqual(q.depth(sid: "s1"), 2)
-        _ = q.dequeue(sid: "s1")
-        XCTAssertEqual(q.peek(sid: "s1"), 20)
+    /// Anchors are independent per sessionId — a multi-agent dashboard
+    /// (Claude + Codex running in parallel) must not cross-stamp.
+    func testTurnAnchorIsolatedAcrossSessions() {
+        var t = ChatTurnAnchorTracker()
+        t.noteChatStart(sid: "claude", ts: 10)
+        t.noteChatStart(sid: "codex", ts: 99)
+        XCTAssertEqual(t.claimOpenTurn(sid: "codex"), 99)
+        XCTAssertEqual(t.claimOpenTurn(sid: "claude"), 10)
     }
 
-    /// Empty queue mutators / accessors must not crash.
-    func testChatStartTsQueueEmptyAccessSafe() {
-        var q = ChatStartTsQueue()
-        XCTAssertNil(q.dequeue(sid: "unknown"))
-        XCTAssertNil(q.peek(sid: "unknown"))
-        XCTAssertEqual(q.depth(sid: "unknown"), 0)
-        q.clear(sid: "unknown") // no-op
+    /// `peekOpenTurn` is for mid-turn rows (tool_exec) that stamp the
+    /// turn currently generating without consuming the anchor the Stop
+    /// hook owns — and it goes nil once the Stop claims the turn, so a
+    /// straggler tool event can't anchor to a closed turn.
+    func testTurnAnchorPeekNonConsumingAndClosedAfterClaim() {
+        var t = ChatTurnAnchorTracker()
+        t.noteChatStart(sid: "s1", ts: 1000)
+        XCTAssertEqual(t.peekOpenTurn(sid: "s1"), 1000)
+        XCTAssertEqual(t.peekOpenTurn(sid: "s1"), 1000, "peek is idempotent")
+        XCTAssertTrue(t.hasOpenTurn(sid: "s1"))
+        XCTAssertEqual(t.claimOpenTurn(sid: "s1"), 1000)
+        XCTAssertNil(t.peekOpenTurn(sid: "s1"))
+        XCTAssertFalse(t.hasOpenTurn(sid: "s1"))
     }
 
-    /// Drained queues must release their dict slot so a long-lived
-    /// session doesn't bloat the backing storage indefinitely.
-    func testChatStartTsQueueDrainedSlotRecoverable() {
-        var q = ChatStartTsQueue()
-        q.enqueue(sid: "s1", ts: 10)
-        _ = q.dequeue(sid: "s1")
-        XCTAssertEqual(q.depth(sid: "s1"), 0)
-        q.enqueue(sid: "s1", ts: 30)
-        XCTAssertEqual(q.peek(sid: "s1"), 30, "re-enqueue after drain works")
+    /// No TTL: the old queue expired entries after 10 minutes, so a
+    /// legitimately long agentic turn (>10 min of tools/thinking) lost
+    /// its anchor and the response rendered standalone. The tracker is
+    /// clock-free — an anchor stays claimable until its Stop arrives or
+    /// a newer prompt supersedes it.
+    func testTurnAnchorHasNoTTL() {
+        var t = ChatTurnAnchorTracker()
+        t.noteChatStart(sid: "s1", ts: 1) // arbitrarily old wall-ms value
+        XCTAssertEqual(t.claimOpenTurn(sid: "s1"), 1)
     }
 
-    /// Codex stop-time review #10 (2026-05-17): mid-turn rows (tool_exec
-    /// etc.) must anchor to the **currently active** turn, not the
-    /// oldest pending one. `peek` returns the FIFO head (oldest), which
-    /// is correct for "which Stop hook is up next" but wrong for "which
-    /// turn is the agent generating against right now". `peekTail`
-    /// returns the most recently enqueued ts — that's the active turn.
-    /// Without this distinction, a Q2 tool_exec stamped Q1's ts and
-    /// attached to the previous turn's row.
-    func testChatStartTsQueuePeekTailReturnsLatestEnqueued() {
-        var q = ChatStartTsQueue()
-        q.enqueue(sid: "s1", ts: 1000)  // Q1
-        q.enqueue(sid: "s1", ts: 5000)  // Q2 follow-up
-        XCTAssertEqual(q.peek(sid: "s1"), 1000, "head = oldest (FIFO for Stop hooks)")
-        XCTAssertEqual(q.peekTail(sid: "s1"), 5000, "tail = currently active turn (for mid-turn stamps)")
+    /// Empty/unknown-session access must not crash, and `clear` drops
+    /// the open turn (session_end / stale-eviction path).
+    func testTurnAnchorEmptyAccessSafeAndClear() {
+        var t = ChatTurnAnchorTracker()
+        XCTAssertNil(t.claimOpenTurn(sid: "unknown"))
+        XCTAssertNil(t.peekOpenTurn(sid: "unknown"))
+        XCTAssertFalse(t.hasOpenTurn(sid: "unknown"))
+        t.clear(sid: "unknown") // no-op
 
-        // After Q1's Stop hook drains the head, the tail should now
-        // also point to Q2 (single remaining slot).
-        _ = q.dequeue(sid: "s1")
-        XCTAssertEqual(q.peek(sid: "s1"), 5000)
-        XCTAssertEqual(q.peekTail(sid: "s1"), 5000)
-    }
+        t.noteChatStart(sid: "s1", ts: 1000)
+        t.clear(sid: "s1")
+        XCTAssertNil(t.claimOpenTurn(sid: "s1"))
 
-    /// peekTail on an empty queue is nil — same as peek.
-    func testChatStartTsQueuePeekTailEmptySafe() {
-        let q = ChatStartTsQueue()
-        XCTAssertNil(q.peekTail(sid: "anything"))
-    }
-
-    /// Codex stop-time review #9 (2026-05-17): when a follow-up
-    /// chat_start arrives before the previous turn's Stop hook drains
-    /// the queue, the new enqueue must NOT mutate the existing head —
-    /// it appends, leaving Q1's anchor intact for Q1's Stop hook to
-    /// claim and stamping the fresh row with Q2's own ts. Previously
-    /// `appendCodexChatStart`'s upsert branch peeked the head and
-    /// overwrote that row's text with the new prompt; the queue itself
-    /// is what guarantees that even with the upsert removed, the head
-    /// remains addressable as Q1.
-    func testChatStartTsQueueFollowupEnqueueLeavesHeadUntouched() {
-        var q = ChatStartTsQueue()
-        q.enqueue(sid: "s1", ts: 1000) // Q1 — emits chat_start row at ts=1000
-        XCTAssertEqual(q.peek(sid: "s1"), 1000)
-
-        // Q2's prompt arrives before Q1's Stop hook. The new enqueue
-        // appends; the head MUST still be Q1's ts. A regression where
-        // a fresh prompt overwrote the head (the bug Codex flagged in
-        // `appendCodexChatStart`) would fail this assertion.
-        q.enqueue(sid: "s1", ts: 5000) // Q2
-        XCTAssertEqual(q.peek(sid: "s1"), 1000, "Q2 enqueue must not shift the head")
-        XCTAssertEqual(q.depth(sid: "s1"), 2, "both pending turns coexist")
-
-        // FIFO order on drain: Q1's Stop hook claims 1000, then Q2's.
-        XCTAssertEqual(q.dequeue(sid: "s1"), 1000)
-        XCTAssertEqual(q.dequeue(sid: "s1"), 5000)
+        // Re-note after a claim/clear reopens cleanly.
+        t.noteChatStart(sid: "s1", ts: 2000)
+        XCTAssertEqual(t.claimOpenTurn(sid: "s1"), 2000)
     }
 
     // MARK: - updateRun outcome round-trip (Codex review #6 / 2026-05-16)

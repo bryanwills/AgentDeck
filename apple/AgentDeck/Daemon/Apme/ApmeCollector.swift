@@ -368,6 +368,17 @@ final class ApmeCollector {
                 if run?.taskPrompt == nil, let p = prompt {
                     store.updateRun(id: runId, fields: ["taskPrompt": String(p.prefix(8000))])
                 }
+                // Backfill projectName for runs opened without one (the
+                // session_start payload lacked project_name and the daemon's
+                // enrichment had no session entry yet). Task/milestone/
+                // projected rows read run.projectName fresh from the store at
+                // emit time, so a backfill before the deferred task_start
+                // emit fixes the TASK header's project prefix — without it
+                // the header degrades to the agentType fallback label.
+                if (run?.projectName ?? "").isEmpty,
+                   let proj = data["project_name"] as? String, !proj.isEmpty {
+                    store.updateRun(id: runId, fields: ["projectName": proj])
+                }
             }
 
             // Track tool calls on the session's active turn
