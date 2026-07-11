@@ -162,8 +162,10 @@ struct LivePreviewData {
     /// (Pixoo 64 / Timebox / iDotMatrix) feed this straight into the real
     /// `PixooRenderer`, so they become pixel-exact emulators with no separate
     /// synthesis. The fields below are pre-extracted conveniences for the
-    /// schematic previews (D200H, ESP32, InkDeck, …).
-    var source: DashboardState
+    /// schematic previews (D200H, ESP32, InkDeck, …). Defaulted only so the
+    /// snapshot tests can build a synthetic snapshot without a full state;
+    /// the production path (`from`) always sets the real state.
+    var source: DashboardState = DashboardState()
     /// Alive sessions, exactly as the daemon reports them (project/model/state).
     var sessions: [SessionInfo]
     /// Daemon aggregate state rawValue — drives the OFFLINE gate.

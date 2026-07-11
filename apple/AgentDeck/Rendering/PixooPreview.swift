@@ -98,19 +98,25 @@ struct PixooPreviewConfig: Sendable {
     var sessionCount: Int = 1
     var fiveHourPercent: Double? = nil
     var gatewayAvailable: Bool = false
+    /// Live-follow: the real daemon state. When set, it is rendered verbatim
+    /// (the Pixoo/Timebox/iDotMatrix previews become pixel-exact emulators) and
+    /// the coarse `agent`/`state`/`sessionCount` synthesis above is bypassed.
+    var liveState: DashboardState? = nil
 
     init(
         agent: PixooPreviewAgent,
         state: PixooPreviewState,
         sessionCount: Int = 1,
         fiveHourPercent: Double? = nil,
-        gatewayAvailable: Bool = false
+        gatewayAvailable: Bool = false,
+        liveState: DashboardState? = nil
     ) {
         self.agent = agent
         self.state = state
         self.sessionCount = sessionCount
         self.fiveHourPercent = fiveHourPercent
         self.gatewayAvailable = gatewayAvailable
+        self.liveState = liveState
     }
 }
 
@@ -198,6 +204,9 @@ enum PixooPreview {
     // MARK: - Helpers
 
     private static func synthesizeDashboardState(_ config: PixooPreviewConfig) -> DashboardState {
+        // Live-follow: render the real daemon state verbatim through the real
+        // renderer — a pixel-exact emulator frame, no synthesis.
+        if let live = config.liveState { return live }
         var ds = DashboardState()
         ds.bridgeConnected = true
         ds.fiveHourPercent = config.fiveHourPercent

@@ -30,7 +30,8 @@ struct Pixoo64Preview: View {
                     state: selection.state,
                     sessionCount: selection.sessionCount,
                     fiveHourPercent: nil,
-                    gatewayAvailable: false
+                    gatewayAvailable: false,
+                    liveState: selection.live?.source
                 )
                 #if os(macOS)
                 PixooDeviceFrameView(config: config, port: daemonService.port)
@@ -486,7 +487,8 @@ struct TimeboxMiniPreview: View {
                     state: selection.state,
                     sessionCount: selection.sessionCount,
                     fiveHourPercent: nil,
-                    gatewayAvailable: false
+                    gatewayAvailable: false,
+                    liveState: selection.live?.source
                 )
                 MatrixFrameView(cgImage: PixooPreview.previewMicroCGImage(config), gridSide: 11)
                     .frame(width: 286, height: 286)
@@ -521,7 +523,8 @@ struct IDotMatrixPreview: View {
                     state: selection.state,
                     sessionCount: selection.sessionCount,
                     fiveHourPercent: nil,
-                    gatewayAvailable: selection.agent == .openclaw
+                    gatewayAvailable: selection.agent == .openclaw,
+                    liveState: selection.live?.source
                 )
                 MatrixFrameView(cgImage: PixooPreview.preview32CGImage(config), gridSide: 32)
                     .frame(width: 320, height: 320)
