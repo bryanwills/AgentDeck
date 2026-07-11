@@ -102,10 +102,10 @@ struct InkDeckPreview: View {
     // MARK: Session grid — drawSessionGrid / drawSessionCard
 
     private var sessionGrid: some View {
-        let agents = selection.previewAgents
-        let columns = agents.count <= 1 ? 1 : 2
+        let sessions = selection.displaySessions
+        let columns = sessions.count <= 1 ? 1 : 2
         return Group {
-            if agents.isEmpty {
+            if sessions.isEmpty {
                 // Two distinct empty states, like the firmware: disconnected →
                 // drawSearching ("searching for daemon…"); connected with no
                 // sessions → drawSessionGrid's rowCount==0 branch ("no active
@@ -128,12 +128,12 @@ struct InkDeckPreview: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                let rows = Array(agents.enumerated()).chunked(into: columns)
+                let rows = Array(sessions.enumerated()).chunked(into: columns)
                 VStack(spacing: 6) {
                     ForEach(rows, id: \.first!.offset) { rowEntries in
                         HStack(spacing: 6) {
                             ForEach(rowEntries, id: \.offset) { entry in
-                                sessionCard(agent: entry.element, index: entry.offset)
+                                sessionCard(session: entry.element)
                             }
                         }
                     }
@@ -143,26 +143,28 @@ struct InkDeckPreview: View {
         }
     }
 
-    private func sessionCard(agent: PixooPreviewAgent, index: Int) -> some View {
-        let state = selection.previewState(for: index)
+    private func sessionCard(session: PreviewDisplaySession) -> some View {
+        let state = session.state
         let awaiting = state == .awaitingPrompt
         let cardInk = awaiting ? paper : ink
         return HStack(spacing: 8) {
             PreviewCreatureGlyph(
-                agent: agent,
+                agent: session.agent,
                 state: state,
                 size: 34,
                 tintOverride: cardInk
             )
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(agent.displayName.lowercased())-project")
+                Text(session.projectName)
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(cardInk)
                     .lineLimit(1)
                 Text(Self.firmwareStateLabel(for: state))
                     .font(.system(size: 8, weight: .semibold, design: .monospaced))
                     .foregroundStyle(cardInk.opacity(0.72))
-                Text(activityLine(for: state))
+                // Live-follow shows the real model on the third line; manual mode
+                // (no model) keeps the state-derived activity blurb.
+                Text(session.modelName ?? activityLine(for: state))
                     .font(.system(size: 8))
                     .foregroundStyle(cardInk.opacity(0.6))
                     .lineLimit(1)
@@ -209,30 +211,18 @@ struct InkDeckPreview: View {
     /// firmware's usageRowCount gate: a provider row draws only when its quota
     /// data exists. Offline daemon → no usage data at all; otherwise the row
     /// set follows the agents in the session mix (Claude-linked / Codex-linked).
-    private var usageProviderRows: [(glyph: PixooPreviewAgent, label: String, plan: String, p5: Double, p7: Double)] {
-        guard selection.state != .disconnected else { return [] }
-        let agents = selection.previewAgents
-        var rows: [(PixooPreviewAgent, String, String, Double, Double)] = []
-        // No sessions ≠ no usage — a linked daemon still reports Claude quota.
-        if agents.isEmpty || agents.contains(.claudeCode) {
-            rows.append((.claudeCode, "CLAUDE", "Max 20x", 0.42, 0.68))
-        }
-        if agents.contains(.codex) {
-            rows.append((.codex, "CODEX", "Plus", 0.23, 0.51))
-        }
-        return rows
-    }
-
     private var usageFooter: some View {
-        let rows = usageProviderRows
+        // Real usage windows in live-follow mode; the placeholder gauges (Claude
+        // by the session mix, Codex when a Codex session exists) otherwise.
+        let rows = selection.displayUsageRows
         return VStack(alignment: .leading, spacing: 4) {
             // 0 usage rows → no separator, no gauge band (sepY = -1 in the
             // firmware); the session grid above reclaims the space and only
             // the pinned ticker remains.
             if !rows.isEmpty {
                 Rectangle().fill(ink).frame(height: 1.4)
-                ForEach(rows, id: \.label) { row in
-                    providerRow(glyphAgent: row.glyph, label: row.label, plan: row.plan, p5: row.p5, p7: row.p7)
+                ForEach(rows) { row in
+                    providerRow(glyphAgent: row.agent, label: row.label, plan: row.plan, p5: row.p5, p7: row.p7)
                 }
             }
             HStack(spacing: 5) {

@@ -102,10 +102,22 @@ final class DevicePreviewSnapshotTests: XCTestCase {
         // snapshot cleanly (Pixoo 64 needs DaemonService, skipped here).
         try snapshot(IDotMatrixPreview(selection: livePixooSelection(.iDotMatrix)), name: "idotmatrix-live-emulator")
         try snapshot(TimeboxMiniPreview(selection: livePixooSelection(.timeboxMini)), name: "timebox-live-emulator")
+
+        // Schematic-preview live emulators — InkDeck + the ESP32 boards consume
+        // the shared displaySessions/displayUsageRows accessors: real project
+        // cards + real Claude & Codex usage. (86Box uses PreviewMiniSessionList,
+        // Round uses the tank-group HUD, IPS10 has its own office + cards pane,
+        // TTGO the focused-session metric panel — all now live-aware.)
+        try snapshot(InkDeckPreview(selection: livePixooSelection(.inkDeck)), name: "inkdeck-live-emulator")
+        try snapshot(Esp32Ips10Preview(selection: livePixooSelection(.esp32Ips10)), name: "ips10-live-emulator")
+        try snapshot(Esp3286BoxPreview(selection: livePixooSelection(.esp32_86box)), name: "86box-live-emulator")
+        try snapshot(Esp32RoundPreview(selection: livePixooSelection(.esp32Round)), name: "round-live-emulator")
+        try snapshot(Esp32TtgoPreview(selection: livePixooSelection(.esp32Ttgo)), name: "ttgo-live-emulator")
     }
 
-    /// A realistic multi-agent daemon state for Pixoo-pipeline live snapshots,
-    /// wrapped in a live-follow selection via the production `LivePreviewData.from`.
+    /// A realistic multi-agent daemon state for live-follow snapshots, wrapped
+    /// in a selection via the production `LivePreviewData.from`. Includes both
+    /// Claude and Codex usage windows so usage bands render both rows.
     private func livePixooSelection(_ device: AgentDeck.PreviewDevice) -> DevicePreviewSelection {
         var state = DashboardState()
         state.bridgeConnected = true
@@ -113,6 +125,11 @@ final class DevicePreviewSnapshotTests: XCTestCase {
         state.agentType = "claude-code"
         state.fiveHourPercent = 42
         state.sevenDayPercent = 68
+        state.codexRateLimits = CodexRateLimits(
+            primary: CodexRateLimitWindow(usedPercent: 23, windowMinutes: nil, resetsAt: nil, stale: false),
+            secondary: CodexRateLimitWindow(usedPercent: 51, windowMinutes: nil, resetsAt: nil, stale: false),
+            planType: nil, limitId: nil, credits: nil
+        )
         state.siblingSessions = [
             SessionInfo(id: "s1", port: 9121, projectName: "AgentDeck", agentType: "claude-code",
                         alive: true, state: "processing", modelName: "claude-opus-4-8", startedAt: nil),

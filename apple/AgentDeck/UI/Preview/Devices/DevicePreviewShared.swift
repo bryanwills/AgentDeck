@@ -132,6 +132,118 @@ extension DevicePreviewSelection {
     }
 }
 
+// MARK: - Live-aware display accessors
+//
+// Schematic previews (InkDeck, ESP32 boards, tablets) render a list of sessions
+// and a usage band. In live-follow mode these accessors return the daemon's
+// REAL sessions/usage — actual project names, models, states, and usage % — so
+// the preview becomes an emulator; in manual mode they synthesize the exact same
+// placeholders those previews have always shown, so the toolbar look is
+// unchanged. (The Pixoo pipeline + D200H consume `live` directly instead.)
+
+/// One session as a schematic preview wants to draw it.
+struct PreviewDisplaySession: Identifiable {
+    let id: String
+    var agent: PixooPreviewAgent
+    var projectName: String
+    var modelName: String?
+    var state: PixooPreviewState
+}
+
+/// One usage provider row (0…1 fractions) for the usage band.
+struct PreviewDisplayUsageRow: Identifiable {
+    var agent: PixooPreviewAgent
+    var label: String   // "CLAUDE" / "CODEX"
+    var plan: String    // "Max 20x" / "Plus"
+    var p5: Double       // 5h window, 0…1
+    var p7: Double       // 7d window, 0…1
+    var id: String { label }
+}
+
+extension PixooPreviewAgent {
+    /// Map a daemon `agentType` string to a preview agent (codex-app folds into
+    /// codex; unknown → Claude). Mirrors `DevicePreviewScreen.liveSelectionInputs`.
+    static func from(agentType: String?) -> PixooPreviewAgent {
+        switch agentType {
+        case "codex-cli", "codex-app": return .codex
+        case "opencode":               return .opencode
+        case "openclaw":               return .openclaw
+        case "antigravity":            return .antigravity
+        default:                       return .claudeCode
+        }
+    }
+}
+
+extension PixooPreviewState {
+    /// Map a daemon session-state string to the coarse preview state bucket.
+    static func from(sessionState: String?) -> PixooPreviewState {
+        switch sessionState {
+        case "processing":   return .processing
+        case "disconnected": return .disconnected
+        case let s? where s.hasPrefix("awaiting"): return .awaitingPrompt
+        default:             return .idle
+        }
+    }
+}
+
+extension DevicePreviewSelection {
+    /// Sessions to render: the real daemon sessions in live-follow mode, else
+    /// the synthetic palette with the `<agent>-project` labels the schematic
+    /// previews already used.
+    var displaySessions: [PreviewDisplaySession] {
+        if let live {
+            return live.sessions.map { s in
+                PreviewDisplaySession(
+                    id: s.id,
+                    agent: PixooPreviewAgent.from(agentType: s.agentType),
+                    projectName: (s.projectName?.isEmpty == false) ? s.projectName! : "session",
+                    modelName: s.modelName,
+                    state: PixooPreviewState.from(sessionState: s.state)
+                )
+            }
+        }
+        return previewAgents.enumerated().map { index, agent in
+            PreviewDisplaySession(
+                id: "preview-\(index)",
+                agent: agent,
+                projectName: "\(agent.displayName.lowercased())-project",
+                modelName: nil,
+                state: previewState(for: index)
+            )
+        }
+    }
+
+    /// Usage provider rows for the schematic usage band. Real windows in
+    /// live-follow mode (hide-if-absent), else the placeholder gauges.
+    var displayUsageRows: [PreviewDisplayUsageRow] {
+        if let live {
+            guard live.topLevelState != "disconnected" else { return [] }
+            var rows: [PreviewDisplayUsageRow] = []
+            if live.usageKnown, live.fiveHourPercent != nil || live.sevenDayPercent != nil {
+                rows.append(PreviewDisplayUsageRow(
+                    agent: .claudeCode, label: "CLAUDE", plan: "Max 20x",
+                    p5: (live.fiveHourPercent ?? 0) / 100, p7: (live.sevenDayPercent ?? 0) / 100))
+            }
+            if live.codexPrimaryPercent != nil || live.codexSecondaryPercent != nil {
+                rows.append(PreviewDisplayUsageRow(
+                    agent: .codex, label: "CODEX", plan: "Plus",
+                    p5: (live.codexPrimaryPercent ?? 0) / 100, p7: (live.codexSecondaryPercent ?? 0) / 100))
+            }
+            return rows
+        }
+        guard state != .disconnected else { return [] }
+        let agents = previewAgents
+        var rows: [PreviewDisplayUsageRow] = []
+        if agents.isEmpty || agents.contains(.claudeCode) {
+            rows.append(PreviewDisplayUsageRow(agent: .claudeCode, label: "CLAUDE", plan: "Max 20x", p5: 0.42, p7: 0.68))
+        }
+        if agents.contains(.codex) {
+            rows.append(PreviewDisplayUsageRow(agent: .codex, label: "CODEX", plan: "Plus", p5: 0.23, p7: 0.51))
+        }
+        return rows
+    }
+}
+
 // MARK: - Status dot + HUD row
 
 struct PreviewStateDot: View {
@@ -213,31 +325,34 @@ struct PreviewMiniSessionList: View {
     var compact: Bool = false
 
     var body: some View {
-        let agents = selection.previewAgents
+        // Live-follow → real sessions (project name + model state); manual → the
+        // synthesized `<agent>-project` palette. Project-name primary matches
+        // the real device (and InkDeck / D200H).
+        let sessions = selection.displaySessions
         return VStack(alignment: .leading, spacing: compact ? 3 : 4) {
             Text("SESSIONS")
                 .font(.system(size: compact ? 7 : 8, weight: .heavy, design: .monospaced))
                 .foregroundStyle(labelColor.opacity(0.72))
-            if agents.isEmpty {
+            if sessions.isEmpty {
                 Text("NO SESSIONS")
                     .font(.system(size: compact ? 7 : 8, design: .monospaced))
                     .foregroundStyle(labelColor.opacity(0.52))
             } else {
-                ForEach(Array(agents.enumerated()), id: \.offset) { index, agent in
+                ForEach(Array(sessions.enumerated()), id: \.offset) { index, session in
                     HStack(spacing: compact ? 3 : 4) {
                         PreviewCreatureGlyph(
-                            agent: agent,
-                            state: selection.previewState(for: index),
+                            agent: session.agent,
+                            state: session.state,
                             size: compact ? 12 : 14,
                             tintOverride: dark ? nil : .black.opacity(index == 0 ? 0.86 : 0.55)
                         )
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(agent.displayName)
+                            Text(session.projectName)
                                 .font(.system(size: compact ? 7 : 9, weight: index == 0 ? .semibold : .regular))
                                 .lineLimit(1)
-                            Text(index == 0 ? selection.state.displayName.uppercased() : "IDLE")
+                            Text(session.state.displayName.uppercased())
                                 .font(.system(size: compact ? 6 : 7, design: .monospaced))
-                                .foregroundStyle(rowStateColor(index: index))
+                                .foregroundStyle(rowStateColor(session.state, index: index))
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 0)
@@ -256,9 +371,9 @@ struct PreviewMiniSessionList: View {
 
     private var labelColor: Color { dark ? .white : .black }
 
-    private func rowStateColor(index: Int) -> Color {
+    private func rowStateColor(_ state: PixooPreviewState, index: Int) -> Color {
         dark
-            ? StateColors.color(for: selection.previewState(for: index).sessionStateStringForUI)
+            ? StateColors.color(for: state.sessionStateStringForUI)
             : .black.opacity(index == 0 ? 0.7 : 0.45)
     }
 }
@@ -342,11 +457,11 @@ struct PreviewAquariumScene: View {
                         .offset(x: geo.size.width * CGFloat(0.08 + Double(i) * 0.16), y: geo.size.height * 0.78)
                 }
 
-                ForEach(Array(selection.previewAgents.enumerated()), id: \.offset) { index, agent in
+                ForEach(Array(selection.displaySessions.enumerated()), id: \.offset) { index, session in
                     let position = creaturePosition(index)
-                    let creatureState = selection.previewState(for: index)
+                    let creatureState = session.state
                     PreviewCreatureGlyph(
-                        agent: agent,
+                        agent: session.agent,
                         state: creatureState,
                         size: min(max(min(geo.size.width, geo.size.height) * 0.16, 24), 52)
                     )

@@ -214,13 +214,13 @@ private struct Esp32TerrariumScene<Content: View>: View {
             // creature regardless of session count). Deterministic spread so
             // the scene is stable frame-to-frame.
             GeometryReader { geo in
-                let agents = selection.previewAgents
+                let sessions = selection.displaySessions
                 let base = min(geo.size.width, geo.size.height)
-                ForEach(Array(agents.enumerated()), id: \.offset) { index, agent in
-                    let fraction = CGFloat(index) / CGFloat(max(1, agents.count))
+                ForEach(Array(sessions.enumerated()), id: \.offset) { index, session in
+                    let fraction = CGFloat(index) / CGFloat(max(1, sessions.count))
                     PreviewCreatureGlyph(
-                        agent: agent,
-                        state: selection.previewState(for: index),
+                        agent: session.agent,
+                        state: session.state,
                         size: base * (index == 0 ? 0.24 : 0.17)
                     )
                     .position(
@@ -268,15 +268,16 @@ private struct Esp32HudBar: View {
                 Rectangle()
                     .fill(TerrariumColors.tetraNeon.opacity(0.55))
                     .frame(width: 46, height: 1)
-                if selection.previewAgents.isEmpty {
+                let sessions = selection.displaySessions
+                if sessions.isEmpty {
                     Text("no sessions")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(TerrariumHUD.subtext)
                 } else {
-                    ForEach(Array(selection.previewAgents.prefix(3).enumerated()), id: \.offset) { index, agent in
+                    ForEach(Array(sessions.prefix(3).enumerated()), id: \.offset) { _, session in
                         HStack(spacing: 4) {
-                            PreviewStateDot(state: selection.previewState(for: index), size: 5)
-                            Text("\(agent.displayName.lowercased())-project")
+                            PreviewStateDot(state: session.state, size: 5)
+                            Text(session.projectName)
                                 .font(.system(size: 8.5, design: .monospaced))
                                 .foregroundStyle(TerrariumHUD.text.opacity(0.88))
                                 .lineLimit(1)
@@ -287,11 +288,12 @@ private struct Esp32HudBar: View {
             }
             Spacer(minLength: 4)
 
-            // Right panel: provider tank groups (brand header + 5h/7d tanks).
+            // Right panel: provider tank groups (brand header + 5h/7d tanks) —
+            // real usage windows in live-follow mode, else the placeholders.
             HStack(alignment: .bottom, spacing: 10) {
-                tankGroup(name: "CLAUDE", brand: StateColors.brand(agent: "claude-code"), p5: 0.42, p7: 0.68)
-                if selection.previewAgents.contains(.codex) {
-                    tankGroup(name: "CODEX", brand: StateColors.brand(agent: "codex-cli"), p5: 0.23, p7: 0.51)
+                ForEach(selection.displayUsageRows) { row in
+                    tankGroup(name: row.label, brand: StateColors.brand(agent: row.agent.rawValue),
+                              p5: CGFloat(row.p5), p7: CGFloat(row.p7))
                 }
             }
         }
@@ -470,21 +472,30 @@ struct Esp32TtgoPreview: View {
     /// TTGO metric panel — ttgo_state.cpp createMetricPanel: state (colored),
     /// project, model, then mini 5h/7d usage lines on 0x2A1F14.
     private var ttgoMetricPanel: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(selection.state.displayName.uppercased())
+        // Focused session (real in live-follow, else the synthesized primary) +
+        // its provider's usage on the mini gauge line.
+        let session = selection.displaySessions.first
+        let state = session?.state ?? selection.state
+        let agent = session?.agent ?? selection.agent
+        let model = session?.modelName ?? (agent == .codex ? "gpt-5" : "opus-4-7")
+        let usage = selection.displayUsageRows.first
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(state.displayName.uppercased())
                 .font(.system(size: 13, weight: .heavy, design: .monospaced))
-                .foregroundStyle(StateColors.color(for: selection.state.sessionStateStringForUI))
-            Text("\(selection.agent.displayName.lowercased())-project")
+                .foregroundStyle(StateColors.color(for: state.sessionStateStringForUI))
+            Text(session?.projectName ?? "\(agent.displayName.lowercased())-project")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(Color(red: 0xE2 / 255.0, green: 0xE8 / 255.0, blue: 0xF0 / 255.0))
                 .lineLimit(1)
-            Text(selection.agent == .codex ? "gpt-5" : "opus-4-7")
+            Text(model)
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(Color(red: 0x94 / 255.0, green: 0xA3 / 255.0, blue: 0xB8 / 255.0))
             Spacer(minLength: 0)
-            Text("5h 42% · 7d 68%")
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(Color(red: 0x94 / 255.0, green: 0xA3 / 255.0, blue: 0xB8 / 255.0))
+            if let usage {
+                Text("5h \(Int(usage.p5 * 100))% · 7d \(Int(usage.p7 * 100))%")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Color(red: 0x94 / 255.0, green: 0xA3 / 255.0, blue: 0xB8 / 255.0))
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -557,9 +568,9 @@ struct Esp32Ips10Preview: View {
                 .font(.system(size: 7, design: .monospaced))
                 .foregroundStyle(hudDim)
             Spacer(minLength: 4)
-            usageBlock(glyph: .claudeCode, p5: 0.42, p7: 0.68)
-            if selection.previewAgents.contains(.codex) {
-                usageBlock(glyph: .codex, p5: 0.23, p7: 0.51)
+            // Real usage windows in live-follow mode, else the placeholders.
+            ForEach(selection.displayUsageRows) { row in
+                usageBlock(glyph: row.agent, p5: CGFloat(row.p5), p7: CGFloat(row.p7))
             }
         }
         .padding(.horizontal, 10)
@@ -603,8 +614,8 @@ struct Esp32Ips10Preview: View {
         ZStack(alignment: .bottomLeading) {
             carpetA
             VStack(spacing: 10) {
-                ForEach(Array(selection.previewAgents.prefix(3).enumerated()), id: \.offset) { index, agent in
-                    officePod(agent: agent, index: index)
+                ForEach(Array(selection.displaySessions.prefix(3).enumerated()), id: \.offset) { _, session in
+                    officePod(session: session)
                 }
                 Spacer(minLength: 0)
             }
@@ -620,11 +631,11 @@ struct Esp32Ips10Preview: View {
     }
 
     /// One project pod: desk slab + worker creature with a state bubble.
-    private func officePod(agent: PixooPreviewAgent, index: Int) -> some View {
-        let state = selection.previewState(for: index)
+    private func officePod(session: PreviewDisplaySession) -> some View {
+        let state = session.state
         return VStack(spacing: 2) {
             HStack(spacing: 8) {
-                PreviewCreatureGlyph(agent: agent, state: state, size: 26)
+                PreviewCreatureGlyph(agent: session.agent, state: state, size: 26)
                     .overlay(alignment: .topTrailing) {
                         Text(bubbleChar(for: state))
                             .font(.system(size: 8, weight: .heavy, design: .monospaced))
@@ -635,7 +646,7 @@ struct Esp32Ips10Preview: View {
                     .fill(deskTop)
                     .frame(width: 52, height: 12)
             }
-            Text("\(agent.displayName.lowercased())-project")
+            Text(session.projectName)
                 .font(.system(size: 6.5, design: .monospaced))
                 .foregroundStyle(Color(red: 0xF4 / 255.0, green: 0xF4 / 255.0, blue: 0xE8 / 255.0).opacity(0.8))
                 .lineLimit(1)
@@ -688,15 +699,16 @@ struct Esp32Ips10Preview: View {
 
     // Right session-cards pane (D1 mosaic).
     private var cardsPane: some View {
-        VStack(spacing: 6) {
-            if selection.previewAgents.isEmpty {
+        let sessions = selection.displaySessions
+        return VStack(spacing: 6) {
+            if sessions.isEmpty {
                 Text("no active sessions")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(hudDim)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ForEach(Array(selection.previewAgents.enumerated()), id: \.offset) { index, agent in
-                    sessionCard(agent: agent, index: index)
+                ForEach(Array(sessions.enumerated()), id: \.offset) { _, session in
+                    sessionCard(session: session)
                 }
                 Spacer(minLength: 0)
             }
@@ -705,22 +717,23 @@ struct Esp32Ips10Preview: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func sessionCard(agent: PixooPreviewAgent, index: Int) -> some View {
-        let state = selection.previewState(for: index)
+    private func sessionCard(session: PreviewDisplaySession) -> some View {
+        let state = session.state
         let accent = bubbleColor(for: state)
         return HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 1.5)
                 .fill(accent)
                 .frame(width: 3)
-            PreviewCreatureGlyph(agent: agent, state: state, size: 22)
+            PreviewCreatureGlyph(agent: session.agent, state: state, size: 22)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(agent.displayName.lowercased())-project")
+                Text(session.projectName)
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(hudText)
                     .lineLimit(1)
-                Text(state.displayName.uppercased())
+                // Live-follow adds the real model line; manual stays state-only.
+                Text(session.modelName ?? state.displayName.uppercased())
                     .font(.system(size: 6.5, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(accent)
+                    .foregroundStyle(session.modelName != nil ? hudDim : accent)
             }
             Spacer(minLength: 0)
         }
