@@ -95,6 +95,33 @@ final class DevicePreviewSnapshotTests: XCTestCase {
         // buildSessionDeck (task 3). Distinct project names/models/states + the
         // pinned Claude 5H/7D and Codex 5H/7D usage tank tiles.
         try snapshot(D200HDeckPreview(selection: liveD200HSelection()), name: "d200h-live-emulator")
+
+        // Pixoo-pipeline live emulator — the real DashboardState is rendered
+        // verbatim through the real PixooRenderer (no synthesis), so these are
+        // pixel-exact. iDotMatrix + Timebox have no @EnvironmentObject so they
+        // snapshot cleanly (Pixoo 64 needs DaemonService, skipped here).
+        try snapshot(IDotMatrixPreview(selection: livePixooSelection(.iDotMatrix)), name: "idotmatrix-live-emulator")
+        try snapshot(TimeboxMiniPreview(selection: livePixooSelection(.timeboxMini)), name: "timebox-live-emulator")
+    }
+
+    /// A realistic multi-agent daemon state for Pixoo-pipeline live snapshots,
+    /// wrapped in a live-follow selection via the production `LivePreviewData.from`.
+    private func livePixooSelection(_ device: AgentDeck.PreviewDevice) -> DevicePreviewSelection {
+        var state = DashboardState()
+        state.bridgeConnected = true
+        state.state = .processing
+        state.agentType = "claude-code"
+        state.fiveHourPercent = 42
+        state.sevenDayPercent = 68
+        state.siblingSessions = [
+            SessionInfo(id: "s1", port: 9121, projectName: "AgentDeck", agentType: "claude-code",
+                        alive: true, state: "processing", modelName: "claude-opus-4-8", startedAt: nil),
+            SessionInfo(id: "s2", port: 9122, projectName: "BabelForge", agentType: "codex-cli",
+                        alive: true, state: "idle", modelName: "gpt-5", startedAt: nil),
+        ]
+        var sel = selection(device, sessions: 2)
+        sel.live = LivePreviewData.from(state)
+        return sel
     }
 
     /// A live-follow D200H selection wired with a realistic multi-agent daemon
