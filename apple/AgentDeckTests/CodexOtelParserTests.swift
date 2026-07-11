@@ -554,5 +554,41 @@ final class CodexOtelParserTests: XCTestCase {
         }
         return out
     }
+
+    // MARK: - Stop-drift guard (shouldCloseOnCodexOtelTurnEnd)
+
+    /// A `turnEnd` matching the turn OTel is servicing closes it (identity set).
+    func testOtelTurnEndClosesMatchingServicedTurn() {
+        XCTAssertTrue(DaemonServer.shouldCloseOnCodexOtelTurnEnd(
+            servicedOtelTurn: "u2", endTurnId: "u2", hookTurnOpen: true))
+        XCTAssertTrue(DaemonServer.shouldCloseOnCodexOtelTurnEnd(
+            servicedOtelTurn: "u2", endTurnId: "u2", hookTurnOpen: false))
+    }
+
+    /// A late `turnEnd` for a PRIOR turn (different turnId than the one OTel is
+    /// now servicing) must not drift-close the newer turn.
+    func testOtelTurnEndFromSupersededTurnIsIgnored() {
+        XCTAssertFalse(DaemonServer.shouldCloseOnCodexOtelTurnEnd(
+            servicedOtelTurn: "u2", endTurnId: "u1", hookTurnOpen: true))
+        XCTAssertFalse(DaemonServer.shouldCloseOnCodexOtelTurnEnd(
+            servicedOtelTurn: "u2", endTurnId: "u1", hookTurnOpen: false))
+    }
+
+    /// Exact field repro: OTel never established the new turn's identity (its
+    /// `turnStart` was anonymous → serviced == nil) while a hook opened and
+    /// still anchors the turn. A stray `turnEnd` (from the previous turn) must
+    /// be ignored so the hook stop / eviction backstop attaches the real
+    /// response instead of an empty heuristic chat_end.
+    func testOtelTurnEndIgnoredWhenHookOwnsUnidentifiedTurn() {
+        XCTAssertFalse(DaemonServer.shouldCloseOnCodexOtelTurnEnd(
+            servicedOtelTurn: nil, endTurnId: "u1", hookTurnOpen: true))
+    }
+
+    /// Pure-OTel backstop: no hook anchor and no established identity → the
+    /// `turnEnd` is the only terminal signal, so it may still close the turn.
+    func testOtelTurnEndClosesPureOtelSessionWithoutHookAnchor() {
+        XCTAssertTrue(DaemonServer.shouldCloseOnCodexOtelTurnEnd(
+            servicedOtelTurn: nil, endTurnId: "u1", hookTurnOpen: false))
+    }
 }
 #endif

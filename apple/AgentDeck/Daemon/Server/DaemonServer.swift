@@ -436,6 +436,18 @@ final class DaemonServer {
     /// callbacks from a finished turn cannot reanimate the row.
     private var lastTerminalCodexEventBySession: [String: Date] = [:]
 
+    /// The Codex OTel stream's currently-serviced `turnId` per session — the
+    /// anchor that stops a *late* `turnEnd` span from drifting onto the wrong
+    /// turn. Set when an OTel `turnStart` establishes a turn's identity;
+    /// INVALIDATED whenever a hook opens a fresh turn (`appendCodexChatStart`)
+    /// so a stale `turnEnd` carrying the PREVIOUS turnId no longer matches.
+    /// Root cause it guards: a turn-#1 `turnEnd` arriving ~3 s after its own
+    /// hook stop — once prompt #2 was already open — closed #2 with an empty
+    /// payload (heuristic chat_end, no chat_response) and marked the session
+    /// finished, so #2's real answer was discarded as a late event (Stop
+    /// drift / lost turn anchor). See the `.turnEnd` OTel case for the guard.
+    private var codexOtelTurnIdBySession: [String: String] = [:]
+
     /// Open-turn chat_start anchor per Claude Code session: noted on every
     /// UserPromptSubmit, claimed by the turn's Stop hook so chat_response /
     /// chat_end stamp `startedAt` with the turn they belong to (the merge
@@ -2396,6 +2408,7 @@ final class DaemonServer {
         codexInteractiveSessionIds.remove(sessionId)
         codexProjectNameBySession.removeValue(forKey: sessionId)
         clearCodexTurnAnchor(sid: sessionId)
+        codexOtelTurnIdBySession.removeValue(forKey: sessionId)
         codexLastPromptTopicBySession.removeValue(forKey: sessionId)
         codexCurrentToolBySession.removeValue(forKey: sessionId)
         lastHookAtByPushedSession.removeValue(forKey: sessionId)
@@ -3324,6 +3337,7 @@ final class DaemonServer {
             }
             lastTerminalCodexEventBySession.removeValue(forKey: sid)
             codexProcessingTouchedAtBySession.removeValue(forKey: sid)
+            codexOtelTurnIdBySession.removeValue(forKey: sid)
             clearCodexTurnAnchor(sid: sid)
             codexLastPromptTopicBySession.removeValue(forKey: sid)
             codexCurrentToolBySession.removeValue(forKey: sid)
@@ -3581,12 +3595,17 @@ final class DaemonServer {
 
         for event in events {
             switch event {
-            case .turnStart(let threadId, _, let cwd):
+            case .turnStart(let threadId, let turnId, let cwd):
                 guard let resolved = sessionIdForCodexOtelThread(threadId) else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored anonymous turnStart without durable thread id")
                     continue
                 }
                 let sid = resolved.sid
+                // Record the turn OTel is now servicing so its eventual
+                // `turnEnd` can be matched to it — and a stale prior-turn
+                // `turnEnd` rejected — instead of closing whatever turn is
+                // currently open (Stop-drift guard).
+                codexOtelTurnIdBySession[sid] = turnId
                 let projectName = resolved.observedProjectName ?? codexProjectName(from: cwd, sessionId: sid)
                 if pushedSessionsById[sid] == nil {
                     ensureCodexSession(sid, projectName: projectName)
@@ -3626,15 +3645,38 @@ final class DaemonServer {
                 updateSessionHookState(sessionId: sid, state: "processing", clearTool: true)
                 lastHookAtByPushedSession[sid] = Date()
 
-            case .turnEnd(let threadId, _):
+            case .turnEnd(let threadId, let turnId):
                 guard let sid = sessionIdForCodexOtelThread(threadId)?.sid else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored anonymous turnEnd without durable thread id")
+                    continue
+                }
+                // Stop-drift guard. A `turnEnd` span can arrive several seconds
+                // after its own hook stop, by which point a newer prompt has
+                // already opened a fresh turn. Closing here would stamp that new
+                // turn with an empty (heuristic) chat_end, mark the session
+                // finished, and drop its real answer as a "late event". Close
+                // only when this turnEnd matches the turn OTel is servicing;
+                // when OTel never established the current turn's identity, defer
+                // to the hook stop / eviction backstop while a hook-anchored
+                // turn is still open.
+                let servicedOtelTurn = codexOtelTurnIdBySession[sid]
+                let hookTurnOpen = peekCodexOpenTurnAnchor(sid: sid) != nil
+                guard Self.shouldCloseOnCodexOtelTurnEnd(
+                    servicedOtelTurn: servicedOtelTurn,
+                    endTurnId: turnId,
+                    hookTurnOpen: hookTurnOpen
+                ) else {
+                    DaemonLogger.shared.debug(
+                        "CodexOTel",
+                        "Ignored superseded OTel turnEnd \(turnId) for \(sid) (serviced=\(servicedOtelTurn ?? "nil"), hookTurnOpen=\(hookTurnOpen))"
+                    )
                     continue
                 }
                 updateSessionHookState(sessionId: sid, state: "idle", clearTool: true)
                 _ = stateMachine.transition(trigger: "stop", source: .hook)
                 stateMachine.toolCalls += 1
                 appendCodexChatEnd(json: [:], sessionId: sid)
+                codexOtelTurnIdBySession.removeValue(forKey: sid)
                 lastHookAtByPushedSession[sid] = Date()
                 lastTerminalCodexEventBySession[sid] = Date()
 
@@ -3724,6 +3766,31 @@ final class DaemonServer {
 
     nonisolated private static func shouldIgnorePostTerminalCodexProgressEvent(_ event: String) -> Bool {
         event == "codex_tool_start" || event == "codex_tool_end"
+    }
+
+    /// Stop-drift guard predicate for an OTel `turnEnd` span: should it close
+    /// the session's current turn, or be ignored as a stale/superseded signal?
+    /// Pure so XCTest can exercise it without the daemon.
+    /// - Parameters:
+    ///   - servicedOtelTurn: the turnId OTel last established for this session,
+    ///     or nil when OTel never identified the current turn (e.g. a hook
+    ///     opened it and its OTel `turnStart` was anonymous).
+    ///   - endTurnId: the turnId carried by the arriving `turnEnd` span.
+    ///   - hookTurnOpen: whether a hook-anchored open turn exists for the
+    ///     session (its own hook stop / eviction backstop will close it).
+    /// - Returns: true to close now; false to ignore this turnEnd.
+    nonisolated static func shouldCloseOnCodexOtelTurnEnd(
+        servicedOtelTurn: String?,
+        endTurnId: String,
+        hookTurnOpen: Bool
+    ) -> Bool {
+        // OTel established a turn identity: close only its own matching turnEnd;
+        // a different turnId is a prior turn's late span drifting forward.
+        if let servicedOtelTurn { return servicedOtelTurn == endTurnId }
+        // OTel never identified the current turn. A hook owns it → defer to the
+        // hook stop / eviction so an unrelated turnEnd can't drift-close it.
+        // No hook-anchored turn → preserve the OTel-only backstop and close.
+        return !hookTurnOpen
     }
 
     /// Does a Notification `message` look like an ACTUAL permission prompt rather
@@ -6240,6 +6307,10 @@ final class DaemonServer {
         // previous turn whose Stop hook was lost — the next Stop then
         // claims THIS turn's anchor instead of drifting off-by-one.
         codexLastPromptTopicBySession.removeValue(forKey: sessionId)
+        // A hook just opened a brand-new turn; invalidate any OTel turn
+        // identity so a late `turnEnd` span from the PREVIOUS turn can no
+        // longer match and drift-close this fresh one (Stop-drift guard).
+        codexOtelTurnIdBySession.removeValue(forKey: sessionId)
 
         let ts = Date().timeIntervalSince1970 * 1000
         let raw = String(prompt.prefix(200))
