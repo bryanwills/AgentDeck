@@ -99,6 +99,11 @@ struct DaemonSessionEntry: Codable, Sendable, Identifiable {
     var question: String?  // awaiting prompt question (PTY-managed session)
     var promptType: String?  // shape of the awaiting prompt (yes_no / multi_select / diff_review)
     var elapsedSec: Int?     // seconds since startedAt — derived at broadcast for NTP-less devices (ESP32 D1 mosaic)
+    // Observed-session steering (hook-only sessions; see ObservedSteering.swift)
+    var controlMode: String?      // "observed" for hook-created entries — devices gate their buttons on this
+    var requestId: String?        // held PreToolUse gate pending device approval (Allow/Deny + permission_decision)
+    var stopRequested: Bool?      // soft STOP requested — deny at next tool call
+    var queuedDirectives: Int?    // deck prompts queued for delivery at turn end
 }
 
 final class SessionRegistry: Sendable {

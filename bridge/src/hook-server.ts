@@ -232,11 +232,12 @@ export class HookServer extends EventEmitter {
       this.emit('hook', { event: eventName, data });
 
       // Managed (`agentdeck claude`) sessions own a PTY that handles permission
-      // prompts natively, so they never gate via the hook. The PreToolUse hook
-      // script echoes our response to Claude's stdout, so reply with an EMPTY
-      // body for PreToolUse (echo → nothing → Claude's normal/ PTY flow). All
-      // other events ack as before.
-      if (eventName === 'PreToolUse') {
+      // prompts natively, so they never gate via the hook. The PreToolUse and
+      // Stop hook scripts echo our response to Claude's stdout, so reply with
+      // an EMPTY body for both (echo → nothing → Claude's normal/PTY flow —
+      // steering for managed sessions goes through the PTY, never the hook).
+      // All other events ack as before.
+      if (eventName === 'PreToolUse' || eventName === 'Stop') {
         res.type('application/json').send('');
         return;
       }

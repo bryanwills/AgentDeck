@@ -106,6 +106,7 @@
 		46086D1358BD25389E304052 /* OpenCodeCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C2005980598D651492006A3 /* OpenCodeCreature.swift */; };
 		46184E81DD69399DC187E6B6 /* Creature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05A9A073192C93C1277AE490 /* Creature.swift */; };
 		469316CAE1172CC311AD34F0 /* CloudCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A135216D37932FE68501F4 /* CloudCreature.swift */; };
+		48B83035D9FC3732361014F8 /* ObservedSteering.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4AC33AE24184BF90D4CAFE /* ObservedSteering.swift */; };
 		4A0D8F7C56E1BEB0167E62CB /* ApmeRecommender.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A8B27A341D1DAE1FCF1D01 /* ApmeRecommender.swift */; };
 		4AA7D220242CD3041FB589D8 /* SessionFocusRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */; };
 		4B34D6CBC040FE9BE5E51856 /* OctopusCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776467350B975D0CA1A18E84 /* OctopusCreature.swift */; };
@@ -113,6 +114,7 @@
 		4C5100ED3B4CE6BEDA3F2721 /* ProjectNameResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDF6D4E03A73AA83A363FA94 /* ProjectNameResolverTests.swift */; };
 		4D0E6511F2638CDF14C798AD /* MdnsModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D130EAC9287841A5BC8770DC /* MdnsModule.swift */; };
 		4D4A0A6C0120C440966AEFB3 /* DisplaySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89F9A134A1BC3EDEE8309695 /* DisplaySyncService.swift */; };
+		4D747DC11E54E8A60894D481 /* ObservedSteering.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4AC33AE24184BF90D4CAFE /* ObservedSteering.swift */; };
 		4D7595686B60FDBDE4A5210D /* AdbModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83589BA4C41B89C8EF1A46FD /* AdbModule.swift */; };
 		4EC0E953449451FC7C10AEBC /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E42A4F5681EFB215B43645 /* AppPreferences.swift */; };
 		4F534C59020FE00D6FA87610 /* ProcessEnumerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32CE020EB705544FFD580DD9 /* ProcessEnumerator.swift */; };
@@ -531,6 +533,7 @@
 		BAC179B8F91EF42F5EBDE911 /* SetupNeededCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupNeededCard.swift; sourceTree = "<group>"; };
 		BACE8D6702379152FF2F5E46 /* AgentDeckTests_iOS.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AgentDeckTests_iOS.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB282455F078889B6DB35F93 /* TerrariumCloudFoldTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrariumCloudFoldTests.swift; sourceTree = "<group>"; };
+		BB4AC33AE24184BF90D4CAFE /* ObservedSteering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservedSteering.swift; sourceTree = "<group>"; };
 		BBAB8DFED8E277FFB6136742 /* SessionGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionGrouping.swift; sourceTree = "<group>"; };
 		BC54EAD04F534E783D87D4DB /* QRPairingWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRPairingWindow.swift; sourceTree = "<group>"; };
 		BF517661B1BEF3ACD330054D /* RockFormation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RockFormation.swift; sourceTree = "<group>"; };
@@ -909,6 +912,7 @@
 			isa = PBXGroup;
 			children = (
 				118F64508CC1FE2827516440 /* LocalCodexAppObserver.swift */,
+				BB4AC33AE24184BF90D4CAFE /* ObservedSteering.swift */,
 				F9C1092C93CA846103C9692C /* OpenCodeObserver.swift */,
 				07E03521107C667F3ED4EA7A /* OpenCodeSSEClient.swift */,
 				61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */,
@@ -1375,6 +1379,7 @@
 				F5B2BB7991E7283F4B99902F /* MonitorHUD.swift in Sources */,
 				DCDA12FC8E9B9961BA2D8182 /* MonitorScreen.swift in Sources */,
 				385B3F4A96DFFFBC72851371 /* NotificationPermission.swift in Sources */,
+				4D747DC11E54E8A60894D481 /* ObservedSteering.swift in Sources */,
 				4B34D6CBC040FE9BE5E51856 /* OctopusCreature.swift in Sources */,
 				F1C357A840E59D7A188C808B /* OnboardingScreen.swift in Sources */,
 				E98F3FC6D7134E8E65163D93 /* OnboardingSheet.swift in Sources */,
@@ -1537,6 +1542,7 @@
 				DEBCF013EEAB22462CF0044C /* MonitorHUD.swift in Sources */,
 				A50EA56C00F6A51F498DD20E /* MonitorScreen.swift in Sources */,
 				0ED91B65645B05541D82E446 /* NotificationPermission.swift in Sources */,
+				48B83035D9FC3732361014F8 /* ObservedSteering.swift in Sources */,
 				CCB2A2848DDAADBEB6F7BB53 /* OctopusCreature.swift in Sources */,
 				BF6E216F74A8205677B8B82B /* OnboardingScreen.swift in Sources */,
 				F608DAD197953CC405F306A5 /* OnboardingSheet.swift in Sources */,

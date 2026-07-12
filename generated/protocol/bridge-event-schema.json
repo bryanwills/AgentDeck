@@ -1087,6 +1087,10 @@
         "question": {
           "type": "string"
         },
+        "queuedDirectives": {
+          "description": "Observed sessions: deck prompts queued for delivery at the current turn's end (Stop-hook directive queue).",
+          "type": "number"
+        },
         "requestId": {
           "type": "string"
         },
@@ -1095,6 +1099,10 @@
         },
         "state": {
           "type": "string"
+        },
+        "stopRequested": {
+          "description": "Observed sessions: a device requested a soft STOP (deny at the next tool call) — render \"stopping…\" instead of an active STOP.",
+          "type": "boolean"
         },
         "totalTokens": {
           "type": "number"

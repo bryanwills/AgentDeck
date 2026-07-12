@@ -370,6 +370,10 @@ export interface SessionInfo {
   totalTokens?: number;
   question?: string;  // awaiting prompt question text (hook/observed sessions: from Notification message; managed PTY: parsed header)
   requestId?: string;  // present when a gated PreToolUse permission is pending device approval; devices render Allow/Deny + send permission_decision
+  /** Observed sessions: a device requested a soft STOP (deny at the next tool call) — render "stopping…" instead of an active STOP. */
+  stopRequested?: boolean;
+  /** Observed sessions: deck prompts queued for delivery at the current turn's end (Stop-hook directive queue). */
+  queuedDirectives?: number;
   promptType?: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review';  // shape of the awaiting prompt (per-session, for inline approve/deny + option buttons on rich panels)
   options?: PromptOption[];  // per-session awaiting options (multi_select) — lets a 10-up panel render inline choices for any session, not just the focused one
   elapsedSec?: number;  // derived seconds since startedAt — devices without reliable NTP render elapsed without recomputing from a wall clock

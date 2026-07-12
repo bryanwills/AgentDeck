@@ -20,8 +20,9 @@
 // Counterpart consumers:
 //   - bridge/src/daemon-server.ts /hooks/ handler (opencode_* → shared
 //     observed-session pipeline: APME run/turn + chat_start/chat_response)
-//   - apple .../DaemonServer.swift ignores opencode_* events (timeline
-//     parity on the Swift daemon is a documented follow-up).
+//     + GET /opencode/commands steering long-poll (opencode-steering.ts)
+//   - apple .../DaemonServer.swift ingests opencode_* (2026-07-12) and
+//     serves the same /opencode/commands queue (OpenCodeCommandQueue).
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'fs';
 import { dirname, join } from 'path';
@@ -55,7 +56,7 @@ function envOptOut(): boolean {
   return process.env.AGENTDECK_NO_OPENCODE_HOOKS === '1';
 }
 
-const PLUGIN_VERSION = 1;
+const PLUGIN_VERSION = 2;
 
 /** Assemble the plugin source. Exported so tests can assert schema
  *  regressions (event names, payload fields, managed-session guard)
@@ -117,7 +118,69 @@ function post(event, body) {
   }).catch(() => { /* daemon down — observation is best-effort */ });
 }
 
-export const AgentDeckObserver = async ({ directory }) => {
+// ── Steering loop ──
+// The daemon queues device commands per session (soft/hard interrupt, prompt
+// injection); this loop long-polls GET /opencode/commands and executes them
+// through the in-process SDK client — abort is immediate, prompts land even
+// while the session is idle. One loop per observed session; stops on
+// opencode_stop-less session death via the poll's own error backoff.
+const steerLoops = new Set();
+
+function startSteerLoop(client, sessionID) {
+  if (!client || steerLoops.has(sessionID)) return;
+  steerLoops.add(sessionID);
+  (async () => {
+    let failures = 0;
+    while (steerLoops.has(sessionID)) {
+      const port = await resolvePort();
+      if (!port) { await new Promise((r) => setTimeout(r, 30000)); continue; }
+      try {
+        const r = await fetch(
+          "http://127.0.0.1:" + port + "/opencode/commands?sid=" + encodeURIComponent(sessionID) + "&wait=25",
+          { signal: AbortSignal.timeout(32000) },
+        );
+        if (!r.ok) throw new Error("poll " + r.status);
+        failures = 0;
+        const { commands } = await r.json();
+        for (const cmd of commands || []) {
+          try {
+            if (cmd.type === "interrupt") {
+              await client.session.abort({ path: { id: sessionID } });
+            } else if (cmd.type === "send_prompt" && cmd.text) {
+              const body = { parts: [{ type: "text", text: cmd.text }] };
+              // promptAsync (POST /session/{id}/prompt_async) returns
+              // immediately; session.prompt BLOCKS until the whole assistant
+              // turn completes, so the older fallback must not be awaited or
+              // it would stall this loop for the entire turn.
+              if (client.session.promptAsync) await client.session.promptAsync({ path: { id: sessionID }, body });
+              else if (client.session.prompt) client.session.prompt({ path: { id: sessionID }, body }).catch(() => {});
+              else if (client.session.chat) client.session.chat({ path: { id: sessionID }, body }).catch(() => {});
+            } else if (cmd.type === "permission_respond" && cmd.permissionId) {
+              // Resolve a pending OpenCode permission from the device.
+              // "once" (not "always") keeps device-approval one-shot.
+              if (client.postSessionIdPermissionsPermissionId) {
+                await client.postSessionIdPermissionsPermissionId({
+                  path: { id: sessionID, permissionID: cmd.permissionId },
+                  body: { response: cmd.response === "allow" ? "once" : "reject" },
+                });
+              }
+            }
+          } catch { /* one bad command must not kill the loop */ }
+        }
+      } catch {
+        failures += 1;
+        // Backoff on repeated failures so a dead daemon costs one probe/30s.
+        await new Promise((r) => setTimeout(r, Math.min(30000, 1000 * failures)));
+      }
+    }
+  })();
+}
+
+function stopSteerLoop(sessionID) {
+  steerLoops.delete(sessionID);
+}
+
+export const AgentDeckObserver = async ({ directory, client }) => {
   // Managed \`agentdeck opencode\` sessions already stream structured SSE
   // events through their session bridge; posting hooks too would
   // double-count every turn. AGENTDECK_PORT marks a managed PTY.
@@ -136,6 +199,10 @@ export const AgentDeckObserver = async ({ directory }) => {
     if (!sessionID || announced.has(sessionID)) return;
     announced.add(sessionID);
     post("opencode_session_start", { session_id: sessionID, cwd });
+    // Steering: start draining device commands for this session (abort /
+    // prompt injection through the in-process client). Loop lives for the
+    // opencode process lifetime — sessions in one TUI are few and cheap.
+    startSteerLoop(client, sessionID);
   }
 
   function sendPrompt(messageID, sessionID, prompt) {
@@ -192,6 +259,32 @@ export const AgentDeckObserver = async ({ directory }) => {
               post("opencode_tool_start", { session_id: sessionID, tool_name: part.tool || "tool", cwd });
             }
             if (toolPhase.size > 512) toolPhase.clear();
+          }
+        } else if (type === "permission.asked" || type === "permission.updated") {
+          // OpenCode emits this only when it is GENUINELY asking the user —
+          // no prediction needed, zero false-positive risk. Forward it so
+          // devices can render Allow/Deny; the daemon replies through the
+          // steering queue as a permission_respond command.
+          const perm = props.permission || props.info || props || {};
+          const psid = perm.sessionID;
+          if (psid && perm.id) {
+            announce(psid);
+            post("opencode_permission_asked", {
+              session_id: psid,
+              permission_id: perm.id,
+              title: typeof perm.title === "string" ? perm.title : "",
+              cwd,
+            });
+          }
+        } else if (type === "permission.replied") {
+          const perm = props.permission || props.info || props || {};
+          const psid = perm.sessionID;
+          if (psid) {
+            post("opencode_permission_replied", {
+              session_id: psid,
+              permission_id: perm.id || "",
+              cwd,
+            });
           }
         } else if (type === "session.idle") {
           const sessionID = props.sessionID;

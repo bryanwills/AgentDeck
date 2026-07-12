@@ -317,3 +317,43 @@ describe('Hook Installer', () => {
     });
   });
 });
+
+describe('steering hook channels (request-response)', () => {
+  it('PreToolUse and Stop echo the daemon response to stdout; others stay fire-and-forget', () => {
+    const pre = buildHookCommand('PreToolUse');
+    expect(pre).toContain('RESP=$(curl');
+    expect(pre).toContain("printf '%s'");
+
+    const stop = buildHookCommand('Stop');
+    expect(stop).toContain('RESP=$(curl');
+    expect(stop).toContain("printf '%s'");
+    // Runs on EVERY turn end — short timeout so a wedged daemon can't stall the TUI.
+    expect(stop).toContain('--max-time 10');
+
+    const notif = buildHookCommand('Notification');
+    expect(notif).not.toContain('RESP=');
+    expect(notif).toContain('|| true');
+  });
+
+  it('migration 5 upgrades fire-and-forget Stop hooks to request-response', () => {
+    const legacyStopCommand = [
+      'PORT="${AGENTDECK_PORT:-}"',
+      '# daemon.json lookup elided',
+      'curl -sf -X POST "http://127.0.0.1:$PORT/hooks/Stop" -H \'Content-Type: application/json\' -d @- 2>/dev/null || true',
+    ].join('\n');
+    const settings = {
+      hooks: {
+        Stop: [{ matcher: '', hooks: [{ type: 'command', command: legacyStopCommand }] }],
+      },
+    };
+    const raw = JSON.stringify(settings);
+    // Same predicate migrateHooksIfNeeded uses to decide on a rewrite.
+    expect(raw.includes('/hooks/Stop') && !/RESP=\$\(curl[^\n]*\/hooks\/Stop/.test(raw)).toBe(true);
+
+    applyHooks(settings);
+    const stopCmd = (settings.hooks.Stop as Array<{ hooks: Array<{ command: string }> }>)
+      .flatMap((h) => h.hooks).map((h) => h.command).join('\n');
+    expect(stopCmd).toContain('RESP=$(curl');
+    expect(stopCmd).toContain('/hooks/Stop');
+  });
+});

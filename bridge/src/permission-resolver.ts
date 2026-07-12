@@ -12,13 +12,18 @@ import { debug } from './logger.js';
  * calls `resolvePending` → the held response ends with
  * `{ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision } }`
  * and Claude proceeds. If no device answers within the timeout, the response
- * falls back to `ask` so Claude shows its own terminal prompt.
+ * falls back to `pass` — an EMPTY body, which Claude treats as "no hook
+ * decision" and runs its normal permission evaluation untouched. (The earlier
+ * gate returned an explicit `ask` here; `pass` is strictly safer because an
+ * `ask` decision can force a prompt for a call the allowlist would have
+ * auto-approved — the false-attention failure mode this gate must never
+ * reintroduce.)
  *
  * Lives outside the state machine (which can't attribute per-session) — same
  * rationale as awaiting-overlay.ts.
  */
 
-export type PermissionDecision = 'allow' | 'deny' | 'ask';
+export type PermissionDecision = 'allow' | 'deny' | 'pass';
 
 interface PendingEntry {
   res: ServerResponse;
@@ -34,6 +39,9 @@ interface PendingEntry {
 const pending = new Map<string, PendingEntry>();
 
 function buildDecisionBody(decision: PermissionDecision): string {
+  // `pass` = empty body: the hook's `printf '%s' "$RESP"` emits nothing and
+  // Claude's normal permission flow runs as if the gate never existed.
+  if (decision === 'pass') return '';
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -57,7 +65,7 @@ function endWith(key: string, entry: PendingEntry, decision: PermissionDecision)
 }
 
 /**
- * Register a held hook response. Auto-resolves to `ask` after `timeoutMs` so a
+ * Register a held hook response. Auto-resolves to `pass` after `timeoutMs` so a
  * never-answered prompt falls back to Claude's own terminal prompt. The hook's
  * curl `--max-time` must exceed `timeoutMs` so this fallback reaches Claude
  * before curl gives up.
@@ -67,15 +75,15 @@ export function registerPending(
   res: ServerResponse,
   opts: { sessionId?: string; tool?: string; timeoutMs: number; onResolved?: (decision: PermissionDecision) => void },
 ): void {
-  // Defensive: if a stale entry exists under this id, resolve it to ask first.
+  // Defensive: if a stale entry exists under this id, resolve it to pass first.
   const existing = pending.get(requestId);
-  if (existing) endWith(requestId, existing, 'ask');
+  if (existing) endWith(requestId, existing, 'pass');
 
   const timer = setTimeout(() => {
     const entry = pending.get(requestId);
     if (entry) {
-      debug('permission', `pending ${requestId} timed out → ask`);
-      endWith(requestId, entry, 'ask');
+      debug('permission', `pending ${requestId} timed out → pass`);
+      endWith(requestId, entry, 'pass');
     }
   }, opts.timeoutMs);
 
@@ -114,12 +122,12 @@ export function abandonPending(requestId: string): void {
 }
 
 /** Sweep entries older than maxAgeMs (backstop for any timer that didn't fire),
- *  resolving them to `ask`. Returns the number swept. */
+ *  resolving them to `pass`. Returns the number swept. */
 export function sweepStalePending(maxAgeMs: number, now: number = Date.now()): number {
   let swept = 0;
   for (const [key, entry] of Array.from(pending.entries())) {
     if (now - entry.createdAt > maxAgeMs) {
-      endWith(key, entry, 'ask');
+      endWith(key, entry, 'pass');
       swept++;
     }
   }
@@ -127,11 +135,17 @@ export function sweepStalePending(maxAgeMs: number, now: number = Date.now()): n
   return swept;
 }
 
-/** Resolve all pending to `ask` and clear — used on daemon shutdown. */
+/** Resolve all pending to `pass` and clear — used on daemon shutdown. */
 export function drainAllPending(): void {
   for (const [key, entry] of Array.from(pending.entries())) {
-    endWith(key, entry, 'ask');
+    endWith(key, entry, 'pass');
   }
+}
+
+/** Is this requestId still an open held gate? Used by the hook handler to
+ *  avoid clearing a gate's awaiting overlay on unrelated parallel-tool hooks. */
+export function isPendingRequest(requestId: string): boolean {
+  return pending.has(requestId);
 }
 
 /** Test/diagnostic helper. */

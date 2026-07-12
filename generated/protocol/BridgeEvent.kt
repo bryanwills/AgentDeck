@@ -985,11 +985,24 @@ data class SessionInfo (
     val promptType: PromptType? = null,
     val question: String? = null,
 
+    /**
+     * Observed sessions: deck prompts queued for delivery at the current turn's end (Stop-hook
+     * directive queue).
+     */
+    val queuedDirectives: Double? = null,
+
     @Json(name = "requestId")
     val requestID: String? = null,
 
     val startedAt: String? = null,
     val state: String? = null,
+
+    /**
+     * Observed sessions: a device requested a soft STOP (deny at the next tool call) — render
+     * "stopping…" instead of an active STOP.
+     */
+    val stopRequested: Boolean? = null,
+
     val totalTokens: Double? = null
 )
 

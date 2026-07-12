@@ -24,8 +24,27 @@ import { PassiveSessionObserver } from './passive-observer.js';
 import { SessionTimelineRelay } from './session-timeline-relay.js';
 import { SessionFocusRelay } from './session-focus-relay.js';
 import { updatePushState } from './session-aggregator.js';
-import { setAwaitingOverlay, clearAwaitingOverlay, isPermissionNotification, applyAwaitingOverlayToObserved } from './awaiting-overlay.js';
-import { resolvePending, sweepStalePending, drainAllPending } from './permission-resolver.js';
+import { setAwaitingOverlay, clearAwaitingOverlay, getAwaitingOverlay, isPermissionNotification, applyAwaitingOverlayToObserved } from './awaiting-overlay.js';
+import { registerPending, resolvePending, sweepStalePending, drainAllPending, isPendingRequest } from './permission-resolver.js';
+import {
+  shouldHoldPreToolUse, gateReleased, buildGateQuestion,
+  consumeStop, requestStop, clearStop, STOP_DENY_REASON,
+  queueDirective, takeDirective, clearOnUserPrompt, clearSession as clearSteeringSession,
+  notePermissionPromptShown, noteToolEnd, steeringSnapshot,
+} from './observed-steering.js';
+import { enqueueOpenCodeCommand, pollOpenCodeCommands } from './opencode-steering.js';
+
+/** Observed-session device approval gate (PreToolUse hold). Default ON — the
+ *  precision guards in observed-steering.ts/claude-permission-rules.ts ensure
+ *  only genuine would-prompt calls are held. Kill switch for field issues. */
+const OBSERVED_APPROVAL_ENABLED = process.env.AGENTDECK_OBSERVED_APPROVAL !== '0';
+/** How long a held gate waits for a device decision before releasing the tool
+ *  call to Claude's own permission flow. Must stay well under the hook curl's
+ *  --max-time 60 so the release reaches Claude before curl gives up. */
+const OBSERVED_APPROVAL_HOLD_MS = Math.min(
+  50_000,
+  Math.max(5_000, Number(process.env.AGENTDECK_APPROVAL_HOLD_MS) || 25_000),
+);
 import { VoiceManager } from './voice.js';
 import { VoiceAssistantManager } from './voice-assistant.js';
 import {
@@ -647,7 +666,7 @@ export function classifyObservedHookEvent(
   eventName: string,
   mapped: string,
 ): { boundary: string; agentType: 'claude-code' | 'codex-cli' | 'opencode' | 'antigravity' } {
-  const prefixed = /^(codex|opencode|antigravity)_(session_start|session_end|user_prompt_submit|tool_start|tool_end|stop|turn_complete|notification)$/
+  const prefixed = /^(codex|opencode|antigravity)_(session_start|session_end|user_prompt_submit|tool_start|tool_end|stop|turn_complete|notification|permission_asked|permission_replied)$/
     .exec(eventName);
   if (!prefixed) return { boundary: mapped, agentType: 'claude-code' };
   return {
@@ -1175,6 +1194,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             const message = typeof json.message === 'string' ? json.message : '';
             const notificationType = typeof json.notification_type === 'string' ? json.notification_type : undefined;
             if (isPermissionNotification(notificationType, message)) {
+              // A genuine terminal prompt appeared — recent undecided gate
+              // releases were real prompts, so nothing gets learned as
+              // auto-approved (observed-steering learner).
+              notePermissionPromptShown(claudeSid);
               setAwaitingOverlay(claudeSid, message);
               // Broadcast immediately rather than waiting for the 2s debounce
               // or the 5s observer tick, so the prompt surfaces within one frame.
@@ -1185,10 +1208,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             mapped === 'user_prompt_submit' || mapped === 'stop' ||
             mapped === 'session_start' || mapped === 'session_end'
           ) {
+            // Steering lifecycle: a PostToolUse right after an undecided gate
+            // release (no permission_prompt Notification in between) means
+            // Claude auto-approved the call — learn the signature so it is
+            // never held again this session. User prompt / session end clear
+            // pending STOP + queued directives (the user took over).
+            if (mapped === 'tool_end') {
+              noteToolEnd(claudeSid, typeof json.tool_name === 'string' ? json.tool_name : undefined);
+            } else if (mapped === 'user_prompt_submit') {
+              if (clearOnUserPrompt(claudeSid)) core.broadcastSessionsList().catch(() => {});
+            } else if (mapped === 'session_end') {
+              clearSteeringSession(claudeSid);
+            }
             // Any subsequent hook means the prompt was answered — drop the
             // overlay. Only rebroadcast if there was actually one to clear
             // (direct-`claude` sessions fire tool hooks constantly).
-            if (clearAwaitingOverlay(claudeSid)) {
+            // EXCEPT while a held gate is still pending: parallel tool calls
+            // fire their own PreToolUse/PostToolUse hooks, and clearing here
+            // would strip the Allow/Deny UI out from under the open request
+            // (its own onResolved clears the overlay when it settles).
+            const heldOverlay = getAwaitingOverlay(claudeSid);
+            const gateStillPending = Boolean(heldOverlay?.requestId && isPendingRequest(heldOverlay.requestId));
+            if (!gateStillPending && clearAwaitingOverlay(claudeSid)) {
               core.broadcastSessionsList().catch(() => {});
             }
           }
@@ -1409,16 +1450,111 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         }
 
         // ── Response ──
-        // PreToolUse returns an empty body → Claude's normal permission flow
-        // runs untouched (zero added latency, no daemon-side gate). Every other
-        // event acks immediately.
+        // PreToolUse and Stop are request-response steering channels (the hook
+        // script echoes our body to Claude's stdout); everything else acks.
         if (eventName === 'PreToolUse') {
+          const toolName = typeof json.tool_name === 'string' ? json.tool_name : '';
+          const toolInput = (json.tool_input && typeof json.tool_input === 'object')
+            ? json.tool_input as Record<string, unknown> : undefined;
+          // 1. Soft STOP: the user pressed STOP on a device — deny this tool
+          //    call with a halt instruction. One-shot (flag consumed).
+          if (claudeSid && consumeStop(claudeSid)) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: STOP_DENY_REASON,
+              },
+            }));
+            core.broadcastSessionsList().catch(() => {});
+            return;
+          }
+          // 2. Device-approval gate: hold the response for a device decision,
+          //    but ONLY for calls the precision guards say Claude would
+          //    genuinely prompt for (see shouldHoldPreToolUse — mode gate,
+          //    never-prompt/prompt-prone sets, allowlist prediction, learned
+          //    auto-approvals, connected-client check). Anything uncertain
+          //    falls through to the empty pass-through below.
+          if (claudeSid) {
+            const gate = shouldHoldPreToolUse({
+              sessionId: claudeSid,
+              tool: toolName,
+              toolInput,
+              permissionMode: typeof json.permission_mode === 'string' ? json.permission_mode : undefined,
+              cwd: hookCwd || undefined,
+              clientCount: core.wsServer.getClientCount(),
+              enabled: OBSERVED_APPROVAL_ENABLED,
+            });
+            if (gate.hold && gate.requestId) {
+              const requestId = gate.requestId;
+              debug('daemon', `PreToolUse gate held: ${toolName} (${gate.reason}) req=${requestId}`);
+              setAwaitingOverlay(claudeSid, buildGateQuestion(toolName, toolInput), requestId);
+              core.broadcastSessionsList().catch(() => {});
+              registerPending(requestId, res, {
+                sessionId: claudeSid,
+                tool: toolName,
+                timeoutMs: OBSERVED_APPROVAL_HOLD_MS,
+                onResolved: (decision) => {
+                  // `pass` (timeout) arms the auto-approval learner: if the
+                  // tool then runs with no permission_prompt Notification,
+                  // the signature is suppressed for this session.
+                  gateReleased(claudeSid, requestId, {
+                    undecided: decision === 'pass', tool: toolName, toolInput,
+                  });
+                  clearAwaitingOverlay(claudeSid);
+                  core.broadcastSessionsList().catch(() => {});
+                },
+              });
+              return; // response held open — resolved by device / timeout
+            }
+          }
+          // Pass-through: empty body → Claude's normal permission flow runs
+          // untouched (zero added latency, no daemon-side gate).
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end('');
+        } else if (eventName === 'Stop') {
+          // Turn-end directive queue: deliver at most one queued deck command
+          // by blocking the stop with the directive as the continuation
+          // reason. Empty queue (the overwhelmingly common case) → empty body,
+          // Claude ends the turn normally — no stop_hook_active loop possible.
+          const directive = claudeSid ? takeDirective(claudeSid) : undefined;
+          if (claudeSid) clearStop(claudeSid); // turn ended — a pending soft-stop is moot
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          if (directive) {
+            debug('daemon', `Stop hook delivering queued directive for ${claudeSid}: "${directive.slice(0, 60)}"`);
+            res.end(JSON.stringify({
+              decision: 'block',
+              reason: `The user sent this follow-up from their AgentDeck controller: "${directive}". Carry out this instruction now.`,
+            }));
+            core.broadcastSessionsList().catch(() => {});
+          } else {
+            res.end('');
+          }
         } else {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ received: true }));
         }
+      });
+      return;
+    }
+
+    // OpenCode observer-plugin steering: the plugin long-polls here and
+    // executes returned commands via its in-process SDK client (abort /
+    // prompt). See bridge/src/opencode-steering.ts.
+    if (req.method === 'GET' && pathname === '/opencode/commands') {
+      const sid = parsedUrl.searchParams.get('sid') ?? '';
+      if (!sid) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'sid required' }));
+        return;
+      }
+      const waitMs = Math.round(Number(parsedUrl.searchParams.get('wait') ?? '25') * 1000);
+      pollOpenCodeCommands(sid, waitMs).then((commands) => {
+        try {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ commands }));
+        } catch { /* client disconnected */ }
       });
       return;
     }
@@ -1948,7 +2084,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // the 5s-throttled observer, so a Notification arriving mid-window still
     // surfaces within one frame. Key = the Claude session UUID embedded in
     // `observed:claude:<uuid>`.
-    const observed = applyAwaitingOverlayToObserved(passiveSessionObserver.collect(sessions));
+    const observed = applyAwaitingOverlayToObserved(passiveSessionObserver.collect(sessions))
+      .map((s) => {
+        // Steering feedback for observed Claude sessions: devices render
+        // "stopping at next tool" / queued-directive badges from these.
+        if (!s.id.startsWith('observed:claude:')) return s;
+        const snap = steeringSnapshot(s.id.slice('observed:claude:'.length));
+        if (!snap.stopRequested && snap.queuedDirectives === 0) return s;
+        return {
+          ...s,
+          ...(snap.stopRequested ? { stopRequested: true } : {}),
+          ...(snap.queuedDirectives > 0 ? { queuedDirectives: snap.queuedDirectives } : {}),
+        };
+      });
     // Derive per-session elapsed seconds from startedAt so NTP-less devices
     // (ESP32 IPS10 mosaic) render an elapsed value per cell without a wall clock.
     const now = Date.now();
@@ -2338,6 +2486,36 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     return false; // not consumed — pass to command handler
   });
 
+  // Steering commands for observed (hook-only, no PTY) Claude sessions —
+  // shared by the session_command route and the bare-command fallback below.
+  // Semantics differ from managed PTY on purpose:
+  //   interrupt/escape → soft STOP (deny at the next tool call)
+  //   send_prompt      → queued, delivered when the current turn ends
+  //   respond/select_option → resolve an open device-approval gate
+  function handleObservedClaudeCommand(uuid: string, command: Record<string, unknown>): void {
+    const type = typeof command?.type === 'string' ? command.type : '';
+    if (type === 'interrupt' || type === 'escape') {
+      requestStop(uuid);
+      core.broadcastSessionsList().catch(() => {});
+      return;
+    }
+    if (type === 'send_prompt' && typeof command.text === 'string') {
+      if (queueDirective(uuid, command.text)) core.broadcastSessionsList().catch(() => {});
+      return;
+    }
+    if (type === 'respond' || type === 'select_option') {
+      const ov = getAwaitingOverlay(uuid);
+      if (ov?.requestId) {
+        const allow = type === 'select_option'
+          ? command.index === 0
+          : command.value === 'y' || command.value === 'yes';
+        resolvePending(ov.requestId, allow ? 'allow' : 'deny');
+      }
+      return;
+    }
+    debug('daemon', `observed steering: unsupported command ${type} for ${uuid}`);
+  }
+
   core.wsServer.onCommand((cmd) => {
     debug('daemon', `cmd: ${cmd.type}`);
     if (gatewayAdapter?.isAlive() && gatewayAdapter.handleCommand(cmd)) {
@@ -2399,6 +2577,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     if (cmd.type === 'permission_decision') {
       const { requestId, decision } = cmd as any;
       if (typeof requestId !== 'string' || (decision !== 'allow' && decision !== 'deny')) return;
+      // OpenCode permission (requestId = "ocperm:<rawSid>:<permissionID>"):
+      // route through the observer-plugin queue; the plugin resolves it via
+      // POST /session/{id}/permissions/{permissionID}.
+      if (requestId.startsWith('ocperm:')) {
+        const rest = requestId.slice('ocperm:'.length);
+        const sep = rest.indexOf(':');
+        if (sep > 0) {
+          enqueueOpenCodeCommand(rest.slice(0, sep), {
+            type: 'permission_respond', permissionId: rest.slice(sep + 1), response: decision,
+          });
+        }
+        return;
+      }
       // resolvePending → onResolved clears the overlay + rebroadcasts (sessions_list
       // + focused state), so all surfaces drop the gate. No-op if already resolved.
       resolvePending(requestId, decision);
@@ -2408,6 +2599,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     if (cmd.type === 'session_command') {
       const { sessionId, command } = cmd as any;
       if (!sessionId || !command) return;
+      // Observed Claude sessions have no bridge/PTY — route to the hook-based
+      // steering primitives instead (soft STOP, turn-end directive queue,
+      // gate approval). This replaces the old silent drop.
+      if (typeof sessionId === 'string' && sessionId.startsWith('observed:claude:')) {
+        handleObservedClaudeCommand(sessionId.slice('observed:claude:'.length), command);
+        return;
+      }
+      // Observed OpenCode sessions steer directly through the observer
+      // plugin's command queue (immediate abort / prompt injection).
+      if (typeof sessionId === 'string' && (sessionId.startsWith('opencode:') || sessionId.startsWith('observed:opencode:'))) {
+        const rawSid = sessionId.replace(/^(?:observed:)?opencode:/, '');
+        const type = typeof command?.type === 'string' ? command.type : '';
+        if (type === 'interrupt' || type === 'escape') {
+          enqueueOpenCodeCommand(rawSid, { type: 'interrupt' });
+        } else if (type === 'send_prompt' && typeof command.text === 'string') {
+          enqueueOpenCodeCommand(rawSid, { type: 'send_prompt', text: command.text });
+        }
+        return;
+      }
       const sessions = listActiveSessions();
       const target = sessions.find(s => s.id === sessionId);
       if (!target) {
@@ -2438,6 +2648,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }
     // Route interactive commands to focused session (if any)
     if (focusRelay.getFocusedSessionId() && focusRelay.routeCommand(cmd)) {
+      return;
+    }
+    // Bare-command fallback for an observed-focused session: older device
+    // clients send unwrapped commands after focus_session. The focus relay
+    // can't route them (no bridge), so map them to the steering primitives
+    // instead of dropping them silently.
+    if (
+      userFocusedSessionId?.startsWith('observed:claude:')
+      && ['interrupt', 'escape', 'send_prompt', 'respond', 'select_option'].includes(cmd.type)
+    ) {
+      handleObservedClaudeCommand(
+        userFocusedSessionId.slice('observed:claude:'.length),
+        cmd as unknown as Record<string, unknown>,
+      );
       return;
     }
     if (cmd.type === 'query_usage') {

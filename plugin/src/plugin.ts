@@ -157,11 +157,15 @@ function stateEventTargetsFocusedDetail(ev: StateUpdateEvent): boolean {
 
 function sendFocusedSessionCommand(command: { type: string; [key: string]: unknown }): void {
   const focused = getFocusedSession();
+  // Wrap in session_command for any session the daemon can route: managed
+  // bridges (port > 0) get PTY delivery; observed sessions get the daemon's
+  // hook-steering primitives (soft STOP / turn-end queue / gate resolution).
+  // The old code excluded observed here, which made their buttons fall through
+  // to a bare daemon command that was silently dropped.
   if (
     focused &&
     focused.agentType !== 'openclaw' &&
-    focused.controlMode !== 'observed' &&
-    focused.port > 0
+    (focused.port > 0 || focused.controlMode === 'observed')
   ) {
     connMgr.send({ type: 'session_command', sessionId: focused.id, command } as any);
     return;

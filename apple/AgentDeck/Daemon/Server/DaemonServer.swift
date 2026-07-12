@@ -367,6 +367,10 @@ final class DaemonServer {
     /// which shows up as empty `sessions_list` broadcasts and blank
     /// terrariums on every surface.
     private var pushedSessionsById: [String: DaemonSessionEntry] = [:]
+    /// Sessions with a held PreToolUse gate: updateSessionHookState must not
+    /// overwrite their awaiting_permission overlay from parallel tool hooks
+    /// while the device decision is pending (≤ hold timeout).
+    private var heldGateSessionIds: Set<String> = []
 
     // Observed-session attention history: the held PreToolUse device-approval
     // gate was removed on 2026-06-27 and stays removed — PreToolUse fires even
@@ -1642,18 +1646,48 @@ final class DaemonServer {
             let bodyData = request.body ?? Data()
             guard let self else { return .json(["received": true]) }
             if rawName == "PreToolUse" {
-                // PreToolUse returns an empty body → Claude's normal permission flow
-                // runs untouched. The daemon no longer holds the response for a
-                // device gate: hooks carry no real permission options, and PreToolUse
-                // fires even for tools Claude auto-approves, so a gate produced false
-                // attention + a fabricated Allow/Deny. Genuine waits surface via the
-                // display-only Notification overlay (permission_prompt) instead;
-                // steering with real options exists only on PTY-managed sessions.
-                Task { @MainActor [weak self] in await self?.handleHookPost(rawName: rawName, body: bodyData) }
-                return .text("")
+                // Steering channel (mirror of the Node daemon): the response may
+                // carry a soft-STOP deny or be HELD for a device approval — but
+                // ONLY for calls the precision guards in ObservedSteering verified
+                // Claude would genuinely prompt for (mode gate, never-prompt/
+                // prompt-prone sets, allowlist prediction with positive-readability
+                // proof, learned session auto-approvals, connected-client check).
+                // Everything uncertain returns an empty body → Claude's normal
+                // permission flow, zero added latency. The old always-hold gate
+                // (removed 2026-05 for false attention) must never come back.
+                // handleHookPost runs inline (not fire-and-forget) so the gate's
+                // awaiting overlay writes AFTER the tool_start state update.
+                await self.handleHookPost(rawName: rawName, body: bodyData)
+                return await self.steerPreToolUse(body: bodyData)
+            }
+            if rawName == "Stop" {
+                // Turn-end directive queue: empty body ends the turn normally;
+                // a queued deck command returns {decision:"block", reason} so
+                // Claude continues with it. Ordered inline like PreToolUse.
+                await self.handleHookPost(rawName: rawName, body: bodyData)
+                return await self.steerStop(body: bodyData)
             }
             Task { @MainActor [weak self] in await self?.handleHookPost(rawName: rawName, body: bodyData) }
             return .json(["received": true])
+        }
+
+        // OpenCode observer-plugin steering: the plugin long-polls here and
+        // executes returned commands via its in-process SDK client (abort /
+        // prompt injection). Mirror of the Node daemon's /opencode/commands.
+        await httpServer.get("/opencode/commands") { request in
+            guard let sid = request.queryParams["sid"], !sid.isEmpty else {
+                return .json(["error": "sid required"], status: 400)
+            }
+            let wait = Double(request.queryParams["wait"] ?? "25") ?? 25
+            let commands = await OpenCodeCommandQueue.shared.poll(sessionId: sid, waitSeconds: wait)
+            let payload: [[String: Any]] = commands.map { c in
+                var d: [String: Any] = ["type": c.type]
+                if let t = c.text { d["text"] = t }
+                if let p = c.permissionId { d["permissionId"] = p }
+                if let r = c.response { d["response"] = r }
+                return d
+            }
+            return .json(["commands": payload])
         }
 
         await httpServer.get("/sse") { _ in
@@ -2487,19 +2521,110 @@ final class DaemonServer {
             return
         }
 
-        // Gateway exec approval (OpenClaw) — resolve the held RPC approval. The
-        // observed-Claude device-approval gate was removed, so this only serves
-        // the OpenClaw exec-approval path now.
+        // Permission decision: FIRST try the observed-session PreToolUse gate
+        // (ObservedSteering, reinstated 2026-07 with precision guards); when
+        // the requestId isn't a held gate, fall back to the OpenClaw
+        // exec-approval path.
         if type == "permission_decision" {
             guard let requestId = cmd["requestId"] as? String,
                   let decision = cmd["decision"] as? String,
                   decision == "allow" || decision == "deny" else { return }
-            if let gw = gatewayAdapter {
-                let cmdBox = SendableDict(cmd)
-                Task { await gw.sendRPC(method: "exec.approval.resolve", params: cmdBox.value) }
+            // OpenCode permission ("ocperm:<rawSid>:<permissionID>"): route
+            // through the observer-plugin queue; clear the row optimistically
+            // so devices drop the gate without waiting for permission.replied.
+            if requestId.hasPrefix("ocperm:") {
+                let rest = requestId.dropFirst("ocperm:".count)
+                if let sep = rest.firstIndex(of: ":") {
+                    let rawSid = String(rest[rest.startIndex..<sep])
+                    let permId = String(rest[rest.index(after: sep)...])
+                    guard !rawSid.isEmpty, !permId.isEmpty else { return }
+                    Task {
+                        await OpenCodeCommandQueue.shared.enqueue(
+                            sessionId: rawSid,
+                            command: .init(type: "permission_respond", text: nil,
+                                           permissionId: permId, response: decision))
+                    }
+                    let rowId = Self.openCodeSessionPrefix + rawSid
+                    if var entry = pushedSessionsById[rowId], entry.requestId == requestId {
+                        entry.requestId = nil
+                        if entry.state == "awaiting_permission" {
+                            entry.state = "processing"
+                            entry.question = nil
+                        }
+                        pushedSessionsById[rowId] = entry
+                        upsertIntoCachedSessions(entry)
+                        broadcastSessionsList()
+                    }
+                }
                 return
             }
-            DaemonLogger.shared.debug("Daemon", "permission_decision: no gateway for request \(requestId)")
+            let gw = gatewayAdapter
+            let cmdBox = SendableDict(cmd)
+            Task {
+                if await ObservedSteering.shared.resolveGate(requestId: requestId, decision: decision) != nil {
+                    return // held route handler resumes + clears the overlay
+                }
+                if let gw {
+                    await gw.sendRPC(method: "exec.approval.resolve", params: cmdBox.value)
+                } else {
+                    DaemonLogger.shared.debug("Daemon", "permission_decision: no gate/gateway for request \(requestId)")
+                }
+            }
+            return
+        }
+
+        // Observed-Claude session_command: steer through hook primitives
+        // (soft STOP / turn-end queue / gate resolution). Must run BEFORE the
+        // gateway block below — when the OpenClaw adapter is alive it consumes
+        // or swallows everything except a small passlist, and these commands
+        // must reach the observed session, not OpenClaw.
+        if type == "session_command",
+           let sessionId = cmd["sessionId"] as? String,
+           let innerCommand = cmd["command"] as? [String: Any],
+           let target = pushedSessionsById[sessionId],
+           target.controlMode == "observed", target.agentType == "claude-code" {
+            handleObservedClaudeCommand(sessionId: sessionId, command: innerCommand)
+            return
+        }
+
+        // Observed OpenCode session_command: steer directly through the
+        // observer plugin's command queue (immediate abort / prompt
+        // injection via the in-process SDK). Queue key = raw OpenCode
+        // session id (hook rows use it bare; observer rows carry the
+        // "opencode:" prefix).
+        if type == "session_command",
+           let sessionId = cmd["sessionId"] as? String,
+           let innerCommand = cmd["command"] as? [String: Any],
+           let target = pushedSessionsById[sessionId],
+           target.controlMode == "observed", target.agentType == "opencode" {
+            let rawSid = sessionId.hasPrefix(Self.openCodeSessionPrefix)
+                ? String(sessionId.dropFirst(Self.openCodeSessionPrefix.count))
+                : sessionId
+            let innerType = innerCommand["type"] as? String ?? ""
+            let text = innerCommand["text"] as? String
+            // respond/select_option answer a pending permission gate
+            // (requestId "ocperm:<rawSid>:<permissionID>" on the row).
+            if innerType == "respond" || innerType == "select_option",
+               let rid = target.requestId, rid.hasPrefix("ocperm:") {
+                let allow = innerType == "select_option"
+                    ? (innerCommand["index"] as? Int) == 0
+                    : ["y", "yes"].contains(((innerCommand["value"] as? String) ?? "").lowercased())
+                handleCommand([
+                    "type": "permission_decision",
+                    "requestId": rid,
+                    "decision": allow ? "allow" : "deny",
+                ])
+                return
+            }
+            Task {
+                if innerType == "interrupt" || innerType == "escape" {
+                    await OpenCodeCommandQueue.shared.enqueue(
+                        sessionId: rawSid, command: .init(type: "interrupt", text: nil))
+                } else if innerType == "send_prompt", let text, !text.isEmpty {
+                    await OpenCodeCommandQueue.shared.enqueue(
+                        sessionId: rawSid, command: .init(type: "send_prompt", text: text))
+                }
+            }
             return
         }
 
@@ -2560,9 +2685,28 @@ final class DaemonServer {
             }
             return
         case "respond", "interrupt", "escape", "select_option", "send_prompt", "navigate_option", "switch_mode":
+            // Bare-command fallback for an observed-focused Claude session
+            // (older device clients send unwrapped commands after
+            // focus_session; focusLocal used to swallow them silently).
+            if let fid = userFocusedSessionId,
+               let target = pushedSessionsById[fid],
+               target.controlMode == "observed", target.agentType == "claude-code",
+               type != "navigate_option", type != "switch_mode" {
+                handleObservedClaudeCommand(sessionId: fid, command: cmd)
+                return
+            }
             // Session-scoped option select from a multi-up panel (IPS10 D1 mosaic):
             // any awaiting cell can be answered, not just the focused one. Focus the
             // named session first, then route a plain select_option to its bridge.
+            if type == "select_option",
+               let sessionId = cmd["sessionId"] as? String,
+               let observedTarget = pushedSessionsById[sessionId],
+               observedTarget.controlMode == "observed", observedTarget.agentType == "claude-code" {
+                // Observed cell on a multi-up panel: index 0/1 answers the
+                // held gate (allow/deny); there is no bridge to focus.
+                handleObservedClaudeCommand(sessionId: sessionId, command: cmd)
+                return
+            }
             if type == "select_option",
                let sessionId = cmd["sessionId"] as? String,
                let target = cachedSessions.first(where: { $0.id == sessionId }) {
@@ -2797,6 +2941,7 @@ final class DaemonServer {
                 startedAt: ISO8601DateFormatter().string(from: Date())
             )
             entry.state = "idle"
+            entry.controlMode = "observed"
             pushedSessionsById[sessionId] = entry
             upsertIntoCachedSessions(entry)
             DaemonLogger.shared.debug("Hook", "Resurrected session entry for \(sessionId) on \(event)")
@@ -2858,6 +3003,7 @@ final class DaemonServer {
                 }
                 entry.agentType = "codex-cli"
                 entry.state = "idle"
+                entry.controlMode = "observed"
                 pushedSessionsById[sessionId] = entry
                 upsertIntoCachedSessions(entry)
                 codexRegisterNewTurnSignal(sessionId: sessionId)
@@ -2890,12 +3036,22 @@ final class DaemonServer {
                     startedAt: ISO8601DateFormatter().string(from: Date())
                 )
                 entry.state = "idle"
+                entry.controlMode = "observed"
                 pushedSessionsById[sessionId] = entry
                 upsertIntoCachedSessions(entry)
                 broadcastSessionsList()
             }
         case "user_prompt_submit":
             _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
+            // Steering: the user re-engaged in the terminal — a pending soft
+            // STOP is moot and queued deck directives are superseded.
+            if let sessionId {
+                Task { @MainActor [weak self] in
+                    if await ObservedSteering.shared.clearOnUserPrompt(sessionId: sessionId) {
+                        self?.updateObservedBadges(sessionId: sessionId, stopRequested: false, queued: 0)
+                    }
+                }
+            }
             updateSessionHookState(sessionId: sessionId, state: "processing")
             // Timeline: user's question opens a chat turn so the dashboard
             // renders Claude Code activity alongside OpenClaw/OpenCode. Before
@@ -2944,6 +3100,7 @@ final class DaemonServer {
                 codexCurrentToolBySession.removeValue(forKey: sessionId)
                 clearClaudeTurnAnchor(sid: sessionId)
                 claudeLastPromptTopicBySession.removeValue(forKey: sessionId)
+                Task { await ObservedSteering.shared.clearSession(sessionId: sessionId) }
                 broadcastSessionsList()
             }
         case "tool_start":
@@ -2957,6 +3114,13 @@ final class DaemonServer {
         case "tool_end":
             stateMachine.currentTool = nil; stateMachine.toolInput = nil
             stateMachine.toolCalls += 1
+            // Steering learner: a PostToolUse right after an undecided gate
+            // release with no permission_prompt Notification in between means
+            // Claude auto-approved the call — never hold that signature again.
+            if let sessionId {
+                let tool = json["tool_name"] as? String
+                Task { await ObservedSteering.shared.noteToolEnd(sessionId: sessionId, tool: tool) }
+            }
             // Stay "processing" between tool boundaries — `stop` drops the
             // session back to idle when the turn finishes.
             updateSessionHookState(sessionId: sessionId, state: "processing", clearTool: true)
@@ -2975,6 +3139,9 @@ final class DaemonServer {
             let notificationType = json["notification_type"] as? String
             if Self.isPermissionNotification(notificationType: notificationType, message: message), let sessionId,
                var entry = pushedSessionsById[sessionId] {
+                // Steering learner: a genuine terminal prompt appeared — recent
+                // undecided gate releases were real prompts, learn nothing.
+                Task { await ObservedSteering.shared.notePermissionPromptShown(sessionId: sessionId) }
                 let q = String(message.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
                 if entry.state != "awaiting_permission" || entry.question != q {
                     entry.state = "awaiting_permission"
@@ -2983,6 +3150,38 @@ final class DaemonServer {
                     upsertIntoCachedSessions(entry)
                     broadcastSessionsList()
                 }
+            }
+        case "opencode_permission_asked":
+            // OpenCode fires this only when it is GENUINELY asking the user —
+            // a zero-false-positive gate signal (no prediction needed, unlike
+            // the Claude PreToolUse gate). requestId encodes the raw session
+            // id + permission id so permission_decision can route the answer
+            // back through the observer-plugin queue.
+            if let sessionId, var entry = pushedSessionsById[sessionId],
+               let permId = json["permission_id"] as? String, !permId.isEmpty {
+                let rawSid = sessionId.hasPrefix(Self.openCodeSessionPrefix)
+                    ? String(sessionId.dropFirst(Self.openCodeSessionPrefix.count))
+                    : sessionId
+                let title = (json["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                entry.state = "awaiting_permission"
+                entry.question = String((title.isEmpty ? "Permission requested" : title).prefix(120))
+                entry.requestId = "ocperm:\(rawSid):\(permId)"
+                pushedSessionsById[sessionId] = entry
+                upsertIntoCachedSessions(entry)
+                broadcastSessionsList()
+            }
+        case "opencode_permission_replied":
+            // Answered (in the TUI or from a device) — drop the gate overlay.
+            if let sessionId, var entry = pushedSessionsById[sessionId],
+               entry.requestId?.hasPrefix("ocperm:") == true {
+                entry.requestId = nil
+                if entry.state == "awaiting_permission" {
+                    entry.state = "processing"
+                    entry.question = nil
+                }
+                pushedSessionsById[sessionId] = entry
+                upsertIntoCachedSessions(entry)
+                broadcastSessionsList()
             }
         case "codex_user_prompt_submit":
             _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
@@ -3063,6 +3262,7 @@ final class DaemonServer {
                 entry.currentTool = existing?.currentTool
                 entry.question = existing?.question
                 entry.modelName = existing?.modelName
+                entry.controlMode = "observed"
                 pushedSessionsById[sessionId] = entry
                 upsertIntoCachedSessions(entry)
                 broadcastSessionsList()
@@ -3504,6 +3704,7 @@ final class DaemonServer {
         entry.modelName = update.modelName ?? existing?.modelName
         entry.currentTool = existing?.currentTool
         entry.question = existing?.question
+        entry.controlMode = "observed"
 
         switch update.kind {
         case .upsert, .metadata:
@@ -3994,6 +4195,10 @@ final class DaemonServer {
         clearTool: Bool = false
     ) {
         guard let sessionId, var entry = pushedSessionsById[sessionId] else { return }
+        // A held PreToolUse gate owns this session's state/question until it
+        // resolves (≤ hold timeout) — parallel tool hooks must not strip the
+        // Allow/Deny overlay out from under the open device request.
+        if heldGateSessionIds.contains(sessionId) { return }
         let oldState = entry.state
         let oldTool = entry.currentTool
         let oldQuestion = entry.question
@@ -4020,6 +4225,164 @@ final class DaemonServer {
             broadcastSessionsList()
         } else if oldTool != entry.currentTool {
             scheduleSessionsListBroadcast()
+        }
+    }
+
+    // MARK: - Observed-session steering (ObservedSteering.swift mirror wiring)
+
+    /// PreToolUse steering for hook-observed Claude sessions: soft-STOP deny,
+    /// or a held device-approval gate. Anything else → empty pass-through.
+    private func steerPreToolUse(body: Data) async -> HTTPServer.HTTPResponse {
+        guard let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
+              let sid = json["session_id"] as? String, !sid.isEmpty,
+              let entry = pushedSessionsById[sid],
+              entry.controlMode == "observed", entry.agentType == "claude-code" else {
+            return .text("")
+        }
+        // 1. Soft STOP — one-shot: deny this tool call with a halt instruction.
+        if await ObservedSteering.shared.consumeStop(sessionId: sid) {
+            updateObservedBadges(sessionId: sid, stopRequested: false)
+            DaemonLogger.shared.info("Steering: soft STOP denied \(json["tool_name"] as? String ?? "?") for \(sid)")
+            return .json([
+                "hookSpecificOutput": [
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": ObservedSteering.stopDenyReason,
+                ],
+            ])
+        }
+        // 2. Device-approval gate (precision-guarded).
+        let tool = json["tool_name"] as? String ?? ""
+        let toolInput = json["tool_input"] as? [String: Any]
+        let commandText = toolInput?["command"] as? String
+        guard let requestId = await ObservedSteering.shared.beginGate(
+            sessionId: sid,
+            tool: tool,
+            commandText: commandText,
+            permissionMode: json["permission_mode"] as? String,
+            cwd: json["cwd"] as? String,
+            clientCount: activeWSConnectionIds.count
+        ) else {
+            return .text("")
+        }
+        // Device-native question ("Allow Bash: git push…?") — never a mirror
+        // of the TUI prompt's option labels.
+        let preview = commandText
+            ?? (toolInput?["file_path"] as? String)
+            ?? (toolInput?["url"] as? String)
+            ?? ""
+        let question = String((preview.isEmpty ? "Allow \(tool)?" : "Allow \(tool): \(preview)").prefix(120))
+        if var e = pushedSessionsById[sid] {
+            e.state = "awaiting_permission"
+            e.question = question
+            e.requestId = requestId
+            pushedSessionsById[sid] = e
+            upsertIntoCachedSessions(e)
+        }
+        heldGateSessionIds.insert(sid)
+        broadcastSessionsList()
+        DaemonLogger.shared.info("Steering: gate held for \(tool) (\(sid)) req=\(requestId)")
+
+        let decision = await ObservedSteering.shared.awaitGate(requestId: requestId)
+
+        heldGateSessionIds.remove(sid)
+        if var e = pushedSessionsById[sid] {
+            e.requestId = nil
+            if e.state == "awaiting_permission" {
+                e.state = "processing"
+                e.question = nil
+            }
+            pushedSessionsById[sid] = e
+            upsertIntoCachedSessions(e)
+        }
+        broadcastSessionsList()
+        switch decision {
+        case "allow":
+            return .json(["hookSpecificOutput": [
+                "hookEventName": "PreToolUse", "permissionDecision": "allow",
+                "permissionDecisionReason": "Approved from the user's AgentDeck controller.",
+            ]])
+        case "deny":
+            return .json(["hookSpecificOutput": [
+                "hookEventName": "PreToolUse", "permissionDecision": "deny",
+                "permissionDecisionReason": "Denied from the user's AgentDeck controller.",
+            ]])
+        default:
+            // Timeout/pass: empty body → Claude's own permission flow runs
+            // untouched (its prompt then surfaces via the Notification overlay).
+            return .text("")
+        }
+    }
+
+    /// Stop-hook steering: deliver at most one queued deck directive by
+    /// blocking the stop; empty queue always lets the turn end (no
+    /// stop_hook_active loop possible).
+    private func steerStop(body: Data) async -> HTTPServer.HTTPResponse {
+        guard let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
+              let sid = json["session_id"] as? String, !sid.isEmpty,
+              let entry = pushedSessionsById[sid],
+              entry.controlMode == "observed", entry.agentType == "claude-code" else {
+            return .text("")
+        }
+        let directive = await ObservedSteering.shared.takeDirective(sessionId: sid)
+        await ObservedSteering.shared.clearStop(sessionId: sid) // turn ended — a pending soft-stop is moot
+        let queued = await ObservedSteering.shared.queuedCount(sessionId: sid)
+        updateObservedBadges(sessionId: sid, stopRequested: false, queued: queued)
+        guard let directive else { return .text("") }
+        DaemonLogger.shared.info("Steering: Stop hook delivering directive for \(sid): \(directive.prefix(60))")
+        return .json([
+            "decision": "block",
+            "reason": "The user sent this follow-up from their AgentDeck controller: \"\(directive)\". Carry out this instruction now.",
+        ])
+    }
+
+    /// Reflect steering state (stopRequested / queued count) onto the session
+    /// row so devices render STOPPING / queue badges. Broadcasts on change.
+    private func updateObservedBadges(sessionId: String, stopRequested: Bool? = nil, queued: Int? = nil) {
+        guard var e = pushedSessionsById[sessionId] else { return }
+        var changed = false
+        if let stopRequested {
+            let v: Bool? = stopRequested ? true : nil
+            if e.stopRequested != v { e.stopRequested = v; changed = true }
+        }
+        if let queued {
+            let v: Int? = queued > 0 ? queued : nil
+            if e.queuedDirectives != v { e.queuedDirectives = v; changed = true }
+        }
+        guard changed else { return }
+        pushedSessionsById[sessionId] = e
+        upsertIntoCachedSessions(e)
+        broadcastSessionsList()
+    }
+
+    /// Steering commands for observed Claude sessions (no PTY, no bridge).
+    /// Semantics differ from managed on purpose: interrupt → soft STOP (deny
+    /// at next tool), send_prompt → queued for turn end, respond/select_option
+    /// → resolve the held gate. Replaces the old silent swallow in focusLocal.
+    private func handleObservedClaudeCommand(sessionId: String, command: [String: Any]) {
+        let type = command["type"] as? String ?? ""
+        switch type {
+        case "interrupt", "escape":
+            Task { @MainActor [weak self] in
+                await ObservedSteering.shared.requestStop(sessionId: sessionId)
+                self?.updateObservedBadges(sessionId: sessionId, stopRequested: true)
+            }
+        case "send_prompt":
+            guard let text = command["text"] as? String, !text.isEmpty else { return }
+            Task { @MainActor [weak self] in
+                let count = await ObservedSteering.shared.queueDirective(sessionId: sessionId, text: text)
+                if count > 0 { self?.updateObservedBadges(sessionId: sessionId, queued: count) }
+            }
+        case "respond", "select_option":
+            guard let rid = pushedSessionsById[sessionId]?.requestId else { return }
+            let allow = type == "select_option"
+                ? (command["index"] as? Int) == 0
+                : ["y", "yes"].contains(((command["value"] as? String) ?? "").lowercased())
+            Task {
+                _ = await ObservedSteering.shared.resolveGate(requestId: rid, decision: allow ? "allow" : "deny")
+            }
+        default:
+            DaemonLogger.shared.debug("Daemon", "observed steering: unsupported command \(type) for \(sessionId)")
         }
     }
 
@@ -6170,6 +6533,10 @@ final class DaemonServer {
             d["elapsedSec"] = elapsed
         }
         if let activity = sessionActivitySummary(s) { d["activity"] = activity }
+        if let cm = s.controlMode { d["controlMode"] = cm }
+        if let rid = s.requestId { d["requestId"] = rid }
+        if s.stopRequested == true { d["stopRequested"] = true }
+        if let qd = s.queuedDirectives, qd > 0 { d["queuedDirectives"] = qd }
         return d
     }
 

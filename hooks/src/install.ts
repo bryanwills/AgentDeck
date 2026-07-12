@@ -66,13 +66,24 @@ export function buildHookCommand(eventName: string): string {
     `PORT="\${PORT:-9120}"`,
   ];
   // PreToolUse is request-response: the daemon may hold the connection open and
-  // return a permission decision (device approval). Capture the body and echo it
-  // to stdout so Claude can gate the tool; empty output (timeout/error/disabled)
-  // = Claude's normal permission flow. `--max-time 60` exceeds the daemon's
-  // internal 45s "ask" fallback so that fallback reaches Claude before curl quits.
+  // return a permission decision (device approval) or a soft-STOP deny. Capture
+  // the body and echo it to stdout so Claude can gate the tool; empty output
+  // (timeout/error/disabled) = Claude's normal permission flow. `--max-time 60`
+  // exceeds the daemon's internal hold timeout (default 25s) so the fallback
+  // reaches Claude before curl quits.
   if (eventName === 'PreToolUse') {
     return preamble.concat([
       `RESP=$(curl -s -X POST "http://127.0.0.1:$PORT/hooks/PreToolUse" -H 'Content-Type: application/json' --max-time 60 -d @- 2>/dev/null)`,
+      `printf '%s' "\${RESP:-}"`,
+    ]).join('\n');
+  }
+  // Stop is also request-response: the daemon answers instantly — either an
+  // empty body (turn ends normally) or `{decision:"block", reason}` delivering
+  // a deck-queued directive so Claude continues with it. Short --max-time:
+  // this runs on EVERY turn end, so a wedged daemon must never stall the TUI.
+  if (eventName === 'Stop') {
+    return preamble.concat([
+      `RESP=$(curl -s -X POST "http://127.0.0.1:$PORT/hooks/Stop" -H 'Content-Type: application/json' --max-time 10 -d @- 2>/dev/null)`,
       `printf '%s' "\${RESP:-}"`,
     ]).join('\n');
   }
@@ -277,6 +288,13 @@ export function migrateHooksIfNeeded(): void {
     // Migration 4: upgrade hooks using simple :-9120 fallback to daemon.json-reading format.
     // This handles existing users from before daemon.json runtime lookup was added.
     if (raw.includes('AGENTDECK_PORT') && !raw.includes('daemon.json')) {
+      applyHooks(settings);
+      migrated = true;
+    }
+
+    // Migration 5: upgrade fire-and-forget Stop hooks to the request-response
+    // form (turn-end directive queue needs the response echoed to Claude).
+    if (raw.includes('/hooks/Stop') && !/RESP=\$\(curl[^\n]*\/hooks\/Stop/.test(raw)) {
       applyHooks(settings);
       migrated = true;
     }

@@ -53,12 +53,15 @@ describe('permission-resolver', () => {
     expect(parseDecision(res.body)).toBe('deny');
   });
 
-  it('times out to "ask" after timeoutMs', () => {
+  it('times out to an EMPTY pass-through body after timeoutMs (never an explicit "ask")', () => {
+    // `ask` could force a prompt the allowlist would have auto-approved — the
+    // fallback must leave Claude's own permission evaluation untouched.
     const res = fakeRes();
     registerPending('r3', res as any, { sessionId: 'sid-3', timeoutMs: 45_000 });
     vi.advanceTimersByTime(45_000 + 1);
     expect(res.ended).toBe(true);
-    expect(parseDecision(res.body)).toBe('ask');
+    expect(res.body).toBe('');
+    expect(parseDecision(res.body)).toBeUndefined();
     expect(_pendingCount()).toBe(0);
   });
 
@@ -84,23 +87,25 @@ describe('permission-resolver', () => {
     expect(res.ended).toBe(false);
   });
 
-  it('sweepStalePending resolves entries older than maxAge to ask', () => {
+  it('sweepStalePending releases entries older than maxAge as pass-through', () => {
     const res = fakeRes();
     registerPending('r6', res as any, { sessionId: 'sid-6', timeoutMs: 999_000 });
     // createdAt uses real Date.now at register; sweep with now far ahead.
     const swept = sweepStalePending(1, Date.now() + 10_000);
     expect(swept).toBe(1);
-    expect(parseDecision(res.body)).toBe('ask');
+    expect(res.body).toBe('');
   });
 
-  it('re-registering a duplicate requestId resolves the stale entry to ask first', () => {
+  it('re-registering a duplicate requestId releases the stale entry first', () => {
     const stale = fakeRes();
     const fresh = fakeRes();
     registerPending('r7', stale as any, { sessionId: 'sid-7a', timeoutMs: 45_000 });
     registerPending('r7', fresh as any, { sessionId: 'sid-7b', timeoutMs: 45_000 });
 
-    // The first held response was flushed defensively; only one entry remains.
-    expect(parseDecision(stale.body)).toBe('ask');
+    // The first held response was flushed defensively (pass-through body);
+    // only one entry remains.
+    expect(stale.ended).toBe(true);
+    expect(stale.body).toBe('');
     expect(_pendingCount()).toBe(1);
 
     // The surviving entry is the fresh one.
@@ -126,15 +131,15 @@ describe('permission-resolver', () => {
     expect(seen).toEqual(['deny']);
   });
 
-  it('fires onResolved with "ask" on timeout', () => {
+  it('fires onResolved with "pass" on timeout (arms the auto-approval learner)', () => {
     const res = fakeRes();
     const seen: string[] = [];
     registerPending('rc2', res as any, { sessionId: 'sid-c2', timeoutMs: 45_000, onResolved: (d) => seen.push(d) });
     vi.advanceTimersByTime(45_000 + 1);
-    expect(seen).toEqual(['ask']);
+    expect(seen).toEqual(['pass']);
   });
 
-  it('drainAllPending resolves every held response to ask', () => {
+  it('drainAllPending releases every held response as pass-through', () => {
     const a = fakeRes();
     const b = fakeRes();
     registerPending('r9a', a as any, { sessionId: 'sid-9a', timeoutMs: 45_000 });
@@ -142,7 +147,7 @@ describe('permission-resolver', () => {
 
     drainAllPending();
     expect(_pendingCount()).toBe(0);
-    expect(parseDecision(a.body)).toBe('ask');
-    expect(parseDecision(b.body)).toBe('ask');
+    expect(a.body).toBe('');
+    expect(b.body).toBe('');
   });
 });

@@ -724,12 +724,49 @@ function buildDetail(
     svg: renderDetailInfo(heroSess, sState as State, tool, model, undefined),
     action: null,
   });
+
+  // Observed (hook-only, no PTY) sessions steer through hook primitives, so
+  // every actionable cell must map to something the daemon can actually
+  // deliver: STOP → soft stop (deny at next tool call), quick actions →
+  // queued for turn end, ALLOW/DENY → held PreToolUse gate. Anything
+  // undeliverable renders inert instead of pretending to work.
+  const isObserved = sess?.controlMode === 'observed';
+  // Which observed agents actually have a delivery path: Claude = hook RPC
+  // (soft stop / turn-end queue / gate), OpenCode = observer-plugin command
+  // queue (immediate abort / prompt injection). Codex hooks are notify-only —
+  // no steering exists, so its buttons must stay inert.
+  const observedSteerable = isObserved
+    && (sess?.agentType === 'claude-code' || sess?.agentType === 'opencode');
+  const stopRequested = Boolean(sess?.stopRequested);
+  const gateRequestId = sess?.requestId;
+
   if (processingState(sState)) {
-    out.set(last, { svg: renderStopButton(true), action: { kind: 'command', command: { type: 'interrupt' } } });
+    if (isObserved && !observedSteerable) {
+      out.set(last, { svg: renderStopButton(false), action: null });
+    } else if (isObserved && stopRequested) {
+      // Soft stop already requested — pressing again does nothing new.
+      out.set(last, { svg: renderInfoSlot('STOPPING', 'at next tool', 'status', 'warning'), action: null });
+    } else {
+      const command: ButtonCommand = isObserved
+        ? { type: 'session_command', sessionId: sid, command: { type: 'interrupt' } }
+        : { type: 'interrupt' };
+      out.set(last, { svg: renderStopButton(true), action: { kind: 'command', command } });
+    }
   } else if (awaitingState(sState)) {
-    out.set(last, { svg: renderEscButton(true), action: { kind: 'command', command: { type: 'escape' } } });
+    if (isObserved) {
+      // ESC can't reach an observed terminal; the gate (if any) is answered
+      // by the ALLOW/DENY content cells below.
+      out.set(last, { svg: renderEscButton(false), action: null });
+    } else {
+      out.set(last, { svg: renderEscButton(true), action: { kind: 'command', command: { type: 'escape' } } });
+    }
   } else {
-    out.set(last, { svg: renderStopButton(false), action: { kind: 'command', command: { type: 'interrupt' } } });
+    // Idle: an observed session has nothing to interrupt — render STOP inert
+    // (the old always-armed interrupt here was a silent-drop trap).
+    out.set(last, {
+      svg: renderStopButton(false),
+      action: isObserved ? null : { kind: 'command', command: { type: 'interrupt' } },
+    });
   }
 
   // Content slots between INFO and STOP.
@@ -752,6 +789,18 @@ function buildDetail(
           : { type: 'respond', value: opt.shortcut || opt.label?.charAt(0)?.toLowerCase() || String(i + 1) };
         cells.push({ svg: renderOptionButton(opt, i), action: { kind: 'command', command } });
       });
+    } else if (isObserved && gateRequestId) {
+      // Held PreToolUse gate: these two answers are device-native semantics
+      // (permit/deny THIS tool call), not a mirror of the TUI prompt — the
+      // daemon only holds calls it verified Claude would genuinely prompt for.
+      cells.push({
+        svg: actionTile('ALLOW', '#22c55e', 'this tool call'),
+        action: { kind: 'command', command: { type: 'permission_decision', requestId: gateRequestId, decision: 'allow' } },
+      });
+      cells.push({
+        svg: actionTile('DENY', '#f87171', 'this tool call'),
+        action: { kind: 'command', command: { type: 'permission_decision', requestId: gateRequestId, decision: 'deny' } },
+      });
     } else {
       // Awaiting but no real options to render — only PTY-managed sessions expose
       // Claude's actual choices. Don't fabricate Allow/Deny that may not match the
@@ -759,7 +808,42 @@ function buildDetail(
       cells.push({ svg: renderInfoSlot('PERMIT?', 'answer in terminal', 'status', 'warning'), action: null });
     }
   } else if (processingState(sState)) {
-    cells.push({ svg: renderInfoSlot('RUNNING', tool || 'working', 'activity', 'info'), action: null });
+    const queued = sess?.queuedDirectives ?? 0;
+    cells.push({
+      svg: renderInfoSlot('RUNNING', queued > 0 ? `${queued} queued` : (tool || 'working'), 'activity', 'info'),
+      action: null,
+    });
+    if (observedSteerable && !stopRequested) {
+      // Turn-end directive queue (Claude) / immediate injection (OpenCode):
+      // natural-language instructions only (the Stop-hook block reason is an
+      // instruction to Claude, not a command line — slash commands like
+      // /clear cannot execute through it).
+      const queueable: Array<[string, string]> = [
+        ['GO ON', 'continue'], ['REVIEW', 'review the changes'], ['COMMIT', 'commit the changes'],
+      ];
+      const subtitle = sess?.agentType === 'opencode' ? 'inject now' : 'at turn end';
+      queueable.forEach(([label, text]) => cells.push({
+        svg: actionTile(label, '#cbd5e1', subtitle),
+        action: { kind: 'command', command: { type: 'session_command', sessionId: sid, command: { type: 'send_prompt', text } } },
+      }));
+    }
+  } else if (isObserved) {
+    if (sess?.agentType === 'opencode') {
+      // OpenCode observed can inject prompts even while idle — the observer
+      // plugin executes them immediately via the in-process SDK.
+      const queueable: Array<[string, string]> = [
+        ['GO ON', 'continue'], ['REVIEW', 'review the changes'], ['COMMIT', 'commit the changes'],
+      ];
+      queueable.forEach(([label, text]) => cells.push({
+        svg: actionTile(label, '#cbd5e1', 'inject now'),
+        action: { kind: 'command', command: { type: 'session_command', sessionId: sid, command: { type: 'send_prompt', text } } },
+      }));
+    } else {
+      // Idle observed Claude/Codex: hooks are silent until the user's next
+      // turn, so no deliverable quick actions exist — say so instead of
+      // faking them.
+      cells.push({ svg: renderInfoSlot('OBSERVED', 'control in terminal', 'status', 'info'), action: null });
+    }
   } else {
     // idle quick-actions
     const presets: Array<[string, string]> = [['GO ON', 'continue'], ['REVIEW', 'review the changes'], ['COMMIT', 'commit the changes'], ['CLEAR', '/clear']];

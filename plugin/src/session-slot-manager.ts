@@ -156,6 +156,16 @@ const CC_PRESET_DEFS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string; 
   { label: 'CLEAR', iconSvg: CLEAR_ICON_SVG, color: '#1e293b', textColor: '#94a3b8', prompt: '/clear' },
 ];
 
+// Observed (hook-only) sessions deliver prompts via the Stop-hook directive
+// queue: the text lands as a continuation INSTRUCTION at turn end, not as a
+// typed command line — so natural language only (slash commands like /review
+// cannot execute through that channel) and no CLEAR (nothing to type into).
+const CC_OBSERVED_QUEUE_PRESETS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string }> = [
+  { label: 'GO ON', iconSvg: GO_ON_ICON_SVG, color: '#1e3a2f', textColor: '#22c55e', prompt: 'continue', subtitle: 'at turn end' },
+  { label: 'REVIEW', iconSvg: REVIEW_ICON_SVG, color: '#1e293b', textColor: '#93c5fd', prompt: 'review the changes', subtitle: 'at turn end' },
+  { label: 'COMMIT', iconSvg: COMMIT_ICON_SVG, color: '#1e293b', textColor: '#22c55e', prompt: 'commit the changes', subtitle: 'at turn end' },
+];
+
 const DEFAULT_LAYOUT: DeckLayout = { columns: 4, rows: 2, keyCount: 8, family: 'streamdeckplus' };
 const MAX_SESSIONS = 32;
 
@@ -738,13 +748,100 @@ export class SessionSlotManager {
     return cards[idx] ?? { type: 'empty' };
   }
 
+  /**
+   * Content cells for an observed (hook-only) session's detail view. Every
+   * actionable cell maps to a hook-deliverable steering primitive:
+   *   - held PreToolUse gate → Allow/Deny (select_option 0/1 resolves it)
+   *   - processing → queueable turn-end directives (Stop-hook block)
+   *   - idle → honest status only (hooks are silent until the next turn)
+   */
+  private observedContentSlot(
+    session: SessionInfo | undefined, idx: number,
+    isAwaiting: boolean, isProcessing: boolean,
+  ): SessionSlotConfig {
+    // Delivery paths: Claude = hook RPC (gate / soft stop / turn-end queue),
+    // OpenCode = observer-plugin queue (immediate). Codex = notify-only, inert.
+    const isOpenCodeObserved = session?.agentType === 'opencode';
+    const steerable = session?.agentType === 'claude-code' || isOpenCodeObserved;
+    if (isAwaiting) {
+      if (session?.requestId) {
+        // Device-native gate semantics (permit/deny THIS tool call) — the
+        // daemon only surfaces requestIds for genuine prompts (held
+        // PreToolUse gate / OpenCode permission.asked), so these two answers
+        // cannot mismatch the terminal prompt.
+        if (idx === 0) return { type: 'option', option: { label: 'Allow', shortcut: 'y', index: 0 }, optionIndex: 0 };
+        if (idx === 1) return { type: 'option', option: { label: 'Deny', shortcut: 'n', index: 1 }, optionIndex: 1 };
+        return this.awaitingStatusCard(session, idx - 2);
+      }
+      // Display-only awaiting (Notification overlay): answer in the terminal.
+      if (idx === 0) {
+        return {
+          type: 'status', label: 'PERMIT?',
+          subtitle: session?.question ? truncateStr(session.question, 18) : 'answer in terminal',
+          icon: 'option', tone: 'warning',
+        };
+      }
+      return this.modelStatusCard(session) && idx === 1
+        ? (this.modelStatusCard(session) as SessionSlotConfig)
+        : { type: 'empty' };
+    }
+    if (isProcessing) {
+      if (idx === 0) {
+        const queued = session?.queuedDirectives ?? 0;
+        return {
+          type: 'status',
+          label: session?.currentTool ?? 'WORKING',
+          subtitle: queued > 0 ? `${queued} queued` : 'running',
+          icon: 'tool', tone: 'warning',
+        };
+      }
+      if (!steerable) return { type: 'empty' };
+      if (session?.stopRequested) {
+        return idx === 1
+          ? { type: 'status', label: 'STOPPING', subtitle: 'at next tool', icon: 'tool', tone: 'warning' }
+          : { type: 'empty' };
+      }
+      const presetIdx = idx - 1;
+      if (presetIdx < CC_OBSERVED_QUEUE_PRESETS.length) {
+        const def = CC_OBSERVED_QUEUE_PRESETS[presetIdx];
+        const preset = { ...def, iconSvg: def.iconSvg ?? '' };
+        // OpenCode injects immediately via the plugin, not at turn end.
+        if (isOpenCodeObserved) preset.subtitle = 'inject now';
+        return { type: 'preset', preset };
+      }
+      return this.modelStatusCard(session) ?? { type: 'empty' };
+    }
+    // Idle observed: OpenCode can still inject prompts (plugin executes them
+    // immediately); Claude/Codex have no idle delivery path — say so.
+    if (isOpenCodeObserved) {
+      if (idx < CC_OBSERVED_QUEUE_PRESETS.length) {
+        const def = CC_OBSERVED_QUEUE_PRESETS[idx];
+        return { type: 'preset', preset: { ...def, iconSvg: def.iconSvg ?? '', subtitle: 'inject now' } };
+      }
+      return this.idleStatusCard(session, idx - CC_OBSERVED_QUEUE_PRESETS.length, true, false);
+    }
+    if (idx === 0) {
+      return { type: 'status', label: 'OBSERVED', subtitle: 'control in terminal', icon: 'ready', tone: 'info' };
+    }
+    return this.idleStatusCard(session, idx - 1, true, false);
+  }
+
   private getDetailSlotConfig(slot: number, layout: DeckLayout): SessionSlotConfig {
     const session = this.getFocusedSession();
-    const isAwaiting = this.isAwaitingDetailState();
-    const isProcessing = this._detailState === State.PROCESSING;
+    // Observed (hook-only) sessions have no state_update relay — the
+    // sessions_list row IS the live state source, so derive awaiting/
+    // processing from it instead of the (never-primed) detail relay state.
+    const isObserved = session?.controlMode === 'observed';
+    const observedState = (session?.state ?? '').toLowerCase();
+    const isAwaiting = isObserved
+      ? observedState.startsWith('awaiting')
+      : this.isAwaitingDetailState();
+    const isProcessing = isObserved
+      ? observedState === 'processing'
+      : this._detailState === State.PROCESSING;
     const isOpenClaw = session?.agentType === 'openclaw';
     const detailOptionPages = this.detailOptionPages(layout);
-    const reserveMore = isAwaiting && detailOptionPages > 1;
+    const reserveMore = isAwaiting && !isObserved && detailOptionPages > 1;
     const contentSlots = this.detailContentSlots(layout, reserveMore);
     const detailOptionStart = this._detailPage * Math.max(1, contentSlots.length);
     const controls = this.detailControlSlots(layout);
@@ -754,6 +851,19 @@ export class SessionSlotManager {
     }
 
     if (slot === controls.stop) {
+      if (isObserved) {
+        // Only steerable observed agents get an armed STOP: Claude = soft
+        // stop (deny at next tool call), OpenCode = immediate abort via the
+        // observer plugin. Codex is notify-only — inert. No button that
+        // silently drops its command.
+        const steerable = session?.agentType === 'claude-code' || session?.agentType === 'opencode';
+        if (isProcessing && steerable) {
+          return session?.stopRequested
+            ? { type: 'status', label: 'STOPPING', subtitle: 'at next tool', icon: 'tool', tone: 'warning' }
+            : { type: 'stop', label: 'active' };
+        }
+        return { type: 'empty' };
+      }
       if (isAwaiting) return { type: 'esc', label: 'active' };
       if (isProcessing) return { type: 'stop', label: 'active' };
       return { type: 'esc', label: 'dim' };
@@ -769,6 +879,13 @@ export class SessionSlotManager {
 
     let contentIdx = contentSlots.indexOf(slot);
     if (contentIdx < 0) return { type: 'empty' };
+
+    // Observed sessions get their own capability-aware content: gate
+    // Allow/Deny while a held PreToolUse is pending, queueable directives
+    // while processing, and an honest "control in terminal" tile when idle.
+    if (isObserved) {
+      return this.observedContentSlot(session, contentIdx, isAwaiting, isProcessing);
+    }
 
     // SD+ only: the suggested-prompt quick-send leads the IDLE content slots
     // (relocated from the retired E2 encoder rotate/press). Gated on the

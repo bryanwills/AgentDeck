@@ -2047,9 +2047,15 @@ struct ADSessionInfo: Codable, Equatable {
     var projectName: String
     var promptType: ADPromptType?
     var question: String?
+    /// Observed sessions: deck prompts queued for delivery at the current turn's end (Stop-hook
+    /// directive queue).
+    var queuedDirectives: Double?
     var requestId: String?
     var startedAt: String?
     var state: String?
+    /// Observed sessions: a device requested a soft STOP (deny at the next tool call) — render
+    /// "stopping…" instead of an active STOP.
+    var stopRequested: Bool?
     var totalTokens: Double?
 
     enum CodingKeys: String, CodingKey {
@@ -2074,9 +2080,11 @@ struct ADSessionInfo: Codable, Equatable {
         case projectName = "projectName"
         case promptType = "promptType"
         case question = "question"
+        case queuedDirectives = "queuedDirectives"
         case requestId = "requestId"
         case startedAt = "startedAt"
         case state = "state"
+        case stopRequested = "stopRequested"
         case totalTokens = "totalTokens"
     }
 }
@@ -2121,9 +2129,11 @@ extension ADSessionInfo {
         projectName: String? = nil,
         promptType: ADPromptType?? = nil,
         question: String?? = nil,
+        queuedDirectives: Double?? = nil,
         requestId: String?? = nil,
         startedAt: String?? = nil,
         state: String?? = nil,
+        stopRequested: Bool?? = nil,
         totalTokens: Double?? = nil
     ) -> ADSessionInfo {
         return ADSessionInfo(
@@ -2148,9 +2158,11 @@ extension ADSessionInfo {
             projectName: projectName ?? self.projectName,
             promptType: promptType ?? self.promptType,
             question: question ?? self.question,
+            queuedDirectives: queuedDirectives ?? self.queuedDirectives,
             requestId: requestId ?? self.requestId,
             startedAt: startedAt ?? self.startedAt,
             state: state ?? self.state,
+            stopRequested: stopRequested ?? self.stopRequested,
             totalTokens: totalTokens ?? self.totalTokens
         )
     }
