@@ -111,6 +111,20 @@ final class ProjectNameResolverTests: XCTestCase {
         XCTAssertEqual(ProjectNameResolver.resolve(cwd: dir.path), "barename")
     }
 
+    func testResolveFilesystemRootReturnsEmpty() {
+        // Codex App ambient tasks run at cwd "/" — NSString.lastPathComponent
+        // returns "/" for it (Node's basename returns ""), which leaked a
+        // literal "/" project label onto dashboards. Degenerate basenames
+        // must read as unresolved so callers apply their own fallback.
+        XCTAssertEqual(ProjectNameResolver.resolve(cwd: "/"), "")
+    }
+
+    func testResolveTrailingSlashStillResolvesBasename() throws {
+        let dir = tmpRoot.appendingPathComponent("slashy")
+        try mkdir(dir)
+        XCTAssertEqual(ProjectNameResolver.resolve(cwd: dir.path + "/"), "slashy")
+    }
+
     // MARK: - projectName(fromHookPayload:)
 
     func testEmptyPayloadReturnsEmpty() {

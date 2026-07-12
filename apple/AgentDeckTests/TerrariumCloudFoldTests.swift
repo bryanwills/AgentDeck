@@ -237,6 +237,21 @@ final class TerrariumCloudFoldTests: XCTestCase {
         XCTAssertFalse(DaemonServer.shouldSynthesizeUnknownHookSessionForTest(event: "codex_turn_complete"))
     }
 
+    /// OpenCode resurrection is broader than Codex: the observer plugin
+    /// announces `opencode_session_start` once per plugin process, so after a
+    /// daemon restart the next signal for a live session is a prompt/tool/
+    /// stop hook — all of those must recreate the row (there is no
+    /// companion-task noise on the OpenCode side). `session_start` creates
+    /// its entry in its own switch case; `session_end` must stay dead.
+    func testOpenCodeResurrectionPredicateAllowsMidTurn() {
+        XCTAssertFalse(DaemonServer.shouldSynthesizeUnknownHookSessionForTest(event: "opencode_session_start"))
+        XCTAssertTrue(DaemonServer.shouldSynthesizeUnknownHookSessionForTest(event: "opencode_user_prompt_submit"))
+        XCTAssertTrue(DaemonServer.shouldSynthesizeUnknownHookSessionForTest(event: "opencode_tool_start"))
+        XCTAssertTrue(DaemonServer.shouldSynthesizeUnknownHookSessionForTest(event: "opencode_tool_end"))
+        XCTAssertTrue(DaemonServer.shouldSynthesizeUnknownHookSessionForTest(event: "opencode_stop"))
+        XCTAssertFalse(DaemonServer.shouldSynthesizeUnknownHookSessionForTest(event: "opencode_session_end"))
+    }
+
     /// `CodexHookIdentity.sessionKey` must reject low-quality ids from
     /// EITHER the thread-key path or the `session_id` fallback. Both paths
     /// previously routed through `isDurableSessionId` for `session_id` only,

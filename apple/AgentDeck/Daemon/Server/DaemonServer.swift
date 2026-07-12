@@ -477,6 +477,11 @@ final class DaemonServer {
     private var codexLastPromptTopicBySession: [String: String] = [:]
     private var codexCurrentToolBySession: [String: String] = [:]
 
+    /// OpenCode mirror of `claudeTurnAnchors` — same open-turn anchor
+    /// semantics, fed by the `opencode_*` observer-plugin hooks.
+    private var openCodeTurnAnchors = ChatTurnAnchorTracker()
+    private var openCodeLastPromptTopicBySession: [String: String] = [:]
+
     /// Codex threads that re-engaged after a terminal event (second prompt on
     /// the same thread id). Companion tasks are single-turn by construction,
     /// so re-engagement is the one signal that cleanly separates a long-lived
@@ -2703,15 +2708,17 @@ final class DaemonServer {
         DaemonLogger.shared.debug("Hook", "Received: \(event)")
 
         // opencode_* lifecycle hooks (posted by AgentDeck's OpenCode observer
-        // plugin) are consumed by the Node daemon's observed-session pipeline.
-        // The Swift daemon has no OpenCode turn pipeline yet — without this
-        // guard the generic Claude fallbacks below would synthesize a phantom
-        // claude-typed session row for every OpenCode session id and route
-        // opencode_* steps into the Claude-keyed ApmeCollector (the same
-        // mis-attribution hazard the codex_ filter guards). Standalone
-        // OpenCode visibility on the Swift daemon still comes from
-        // PassiveSessionObserver; timeline parity is a documented follow-up.
-        if event.hasPrefix("opencode_") { return }
+        // plugin, hooks/src/opencode-install.ts) ride the same observed-
+        // session pipeline as codex_*: session ids are namespaced
+        // `opencode:<id>` (so hook rows converge with the SSE observer's
+        // rows, which use the same prefix), they get their own switch cases
+        // below, and they stay OUT of the Claude-keyed ApmeCollector — the
+        // collector's run/turn model is Claude-lifecycle-shaped, the same
+        // exclusion codex_ carries. Before 2026-07-12 these events were
+        // dropped wholesale, which left standalone `opencode` TUI sessions
+        // invisible on the Swift daemon (the SSE observer can't discover a
+        // bare TUI's ephemeral port; hooks are the only signal).
+        let isOpenCodeEvent = event.hasPrefix("opencode_")
 
         // Per-session id extraction. The global state_machine transitions
         // below remain for backwards compatibility with surfaces that read
@@ -2730,6 +2737,12 @@ final class DaemonServer {
         let sessionId: String? = {
             if isCodexEvent {
                 return CodexHookIdentity.sessionKey(from: json)
+            }
+            if isOpenCodeEvent {
+                // Namespace with the SSE observer's prefix so both signal
+                // paths land on one `opencode:<id>` session row.
+                return (json["session_id"] as? String)
+                    .flatMap { $0.isEmpty ? nil : Self.openCodeSessionPrefix + $0 }
             }
             return (json["session_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 ?? CodexHookIdentity.threadIdSessionKey(from: json)
@@ -2766,10 +2779,12 @@ final class DaemonServer {
             // the matching agentType so creature renderers downstream
             // (Pixoo, D200H, Terrarium, SessionListPanel) pick the Codex
             // brand instead of mis-painting them as Claude Code.
-            let resurrectedAgentType = isCodexEvent ? "codex-cli" : "claude-code"
+            let resurrectedAgentType = isCodexEvent ? "codex-cli"
+                : isOpenCodeEvent ? "opencode"
+                : "claude-code"
             let resurrectedProjectName = Self.nonEmptyString(ProjectNameResolver.projectName(fromHookPayload: json))
                 ?? (isCodexEvent ? codexProjectNameBySession[sessionId] : nil)
-                ?? ""
+                ?? (isOpenCodeEvent ? Self.openCodeFallbackProjectName : "")
             var entry = DaemonSessionEntry(
                 id: sessionId,
                 port: Int(port),
@@ -3021,6 +3036,74 @@ final class DaemonServer {
             updateSessionHookState(sessionId: sessionId, state: "idle", clearTool: true)
             appendCodexChatEnd(json: json, sessionId: sessionId)
             if let sessionId { lastTerminalCodexEventBySession[sessionId] = Date() }
+        case "opencode_session_start":
+            _ = stateMachine.transition(trigger: "session_start", source: .hook)
+            if let sessionId {
+                let resolved = Self.nonEmptyString(ProjectNameResolver.projectName(fromHookPayload: json))
+                let existing = pushedSessionsById[sessionId]
+                // Keep a richer existing label (the SSE observer prefers the
+                // session title) over the hook's cwd-derived one; only the
+                // "OpenCode" display fallback is upgradeable.
+                let projectName = Self.nonEmptyString(existing?.projectName)
+                    .flatMap { $0 == Self.openCodeFallbackProjectName ? nil : $0 }
+                    ?? resolved
+                    ?? Self.openCodeFallbackProjectName
+                var entry = DaemonSessionEntry(
+                    id: sessionId,
+                    port: existing?.port ?? Int(port),
+                    pid: existing?.pid ?? 0,
+                    projectName: projectName,
+                    agentType: "opencode",
+                    tmuxSession: existing?.tmuxSession,
+                    tty: existing?.tty,
+                    parentTty: existing?.parentTty,
+                    startedAt: existing?.startedAt ?? ISO8601DateFormatter().string(from: Date())
+                )
+                entry.state = existing?.state ?? "idle"
+                entry.currentTool = existing?.currentTool
+                entry.question = existing?.question
+                entry.modelName = existing?.modelName
+                pushedSessionsById[sessionId] = entry
+                upsertIntoCachedSessions(entry)
+                broadcastSessionsList()
+            }
+        case "opencode_user_prompt_submit":
+            _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
+            updateSessionHookState(sessionId: sessionId, state: "processing")
+            appendOpenCodeChatStart(json: json, sessionId: sessionId)
+        case "opencode_tool_start":
+            stateMachine.currentTool = json["tool_name"] as? String
+            stateMachine.toolInput = json["tool_input"] as? String
+            appendOpenCodeToolEvent(json: json, sessionId: sessionId, completed: false)
+            updateSessionHookState(
+                sessionId: sessionId,
+                state: "processing",
+                currentTool: json["tool_name"] as? String
+            )
+        case "opencode_tool_end":
+            stateMachine.currentTool = nil
+            stateMachine.toolInput = nil
+            stateMachine.toolCalls += 1
+            appendOpenCodeToolEvent(json: json, sessionId: sessionId, completed: true)
+            updateSessionHookState(sessionId: sessionId, state: "processing", clearTool: true)
+        case "opencode_stop":
+            _ = stateMachine.transition(trigger: "stop", source: .hook)
+            updateSessionHookState(sessionId: sessionId, state: "idle", clearTool: true)
+            appendOpenCodeChatEnd(json: json, sessionId: sessionId)
+        case "opencode_session_end":
+            // The current observer plugin never posts this (session teardown
+            // is TTL-evicted) — accepted for forward-compatibility.
+            _ = stateMachine.transition(trigger: "session_end", source: .hook)
+            if let sessionId {
+                if openCodeTurnAnchors.hasOpenTurn(sid: sessionId) {
+                    appendOpenCodeChatEnd(json: json, sessionId: sessionId)
+                }
+                pushedSessionsById.removeValue(forKey: sessionId)
+                cachedSessions.removeAll { $0.id == sessionId }
+                openCodeTurnAnchors.clear(sid: sessionId)
+                openCodeLastPromptTopicBySession.removeValue(forKey: sessionId)
+                broadcastSessionsList()
+            }
         default: break
         }
 
@@ -3028,14 +3111,13 @@ final class DaemonServer {
         // The collector manages its own session lifecycle (session_start opens
         // a run, session_end closes it, everything in between is a step).
         //
-        // Codex events (codex_turn_complete, plus future codex_* signals)
-        // are deliberately excluded: the collector's run/turn/task model is
-        // built around Claude's hook lifecycle; APME for Codex needs a
-        // distinct collector path (out of scope for this observation pass).
-        // Because Codex sessions never open a collector task, their timeline
-        // rows carry no taskId — they render flat, never nested under a
-        // Claude session's TASK header.
-        if !event.hasPrefix("codex_") && !apmeHandledEarly {
+        // Codex and OpenCode events are deliberately excluded: the
+        // collector's run/turn/task model is built around Claude's hook
+        // lifecycle; APME for those agents needs a distinct collector path
+        // (out of scope for this observation pass). Because their sessions
+        // never open a collector task, their timeline rows carry no taskId —
+        // they render flat, never nested under a Claude session's TASK header.
+        if !event.hasPrefix("codex_") && !isOpenCodeEvent && !apmeHandledEarly {
             apmeCollector?.handleHook(event: event, data: apmeEnrichedHookPayload(json: json, sessionId: sessionId))
         }
 
@@ -3336,6 +3418,10 @@ final class DaemonServer {
                 if codexTurnAnchors.hasOpenTurn(sid: sid) {
                     appendCodexChatEnd(json: [:], sessionId: sid)
                 }
+            } else if sid.hasPrefix(Self.openCodeSessionPrefix) {
+                if openCodeTurnAnchors.hasOpenTurn(sid: sid) {
+                    appendOpenCodeChatEnd(json: [:], sessionId: sid)
+                }
             } else {
                 if claudeTurnAnchors.hasOpenTurn(sid: sid) {
                     appendClaudeCodeChatEnd(json: [:], sessionId: sid)
@@ -3360,6 +3446,8 @@ final class DaemonServer {
             codexCurrentToolBySession.removeValue(forKey: sid)
             clearClaudeTurnAnchor(sid: sid)
             claudeLastPromptTopicBySession.removeValue(forKey: sid)
+            openCodeTurnAnchors.clear(sid: sid)
+            openCodeLastPromptTopicBySession.removeValue(forKey: sid)
             if currentHookSessionId == sid { currentHookSessionId = nil }
             if userFocusedSessionId == sid { userFocusedSessionId = nil }
             if isPostTerminal {
@@ -3777,6 +3865,16 @@ final class DaemonServer {
             // projectName), which collapses ephemeral companion tasks even
             // if mid-event resurrection does fire.
             return event == "codex_session_start" || event == "codex_user_prompt_submit"
+        }
+        if event.hasPrefix("opencode_") {
+            // The observer plugin announces opencode_session_start once per
+            // plugin process lifetime — after a daemon restart mid-session
+            // the next signal is a prompt/tool/stop hook, so all of them may
+            // recreate the row. Unlike Codex there is no companion-task noise
+            // to guard against: every opencode_* hook comes from a live user
+            // TUI. session_start creates its entry in its own switch case;
+            // session_end must stay dead.
+            return event != "opencode_session_end" && event != "opencode_session_start"
         }
         return event != "session_end" && event != "session_start"
     }
@@ -6501,6 +6599,148 @@ final class DaemonServer {
         // anchor was already claimed at the top of this handler.
         codexLastPromptTopicBySession.removeValue(forKey: sessionId)
         codexCurrentToolBySession.removeValue(forKey: sessionId)
+    }
+
+    /// Resolve the projectName to stamp on an OpenCode timeline row: the
+    /// session entry's resolved name (skipping the "OpenCode" display
+    /// fallback — an agent-name label on a timeline row is noise the
+    /// clients' agent-tag fallback already covers), then the payload's cwd.
+    @MainActor
+    private func openCodeTimelineProjectName(sessionId: String, json: [String: Any]) -> String? {
+        if let p = Self.nonEmptyString(pushedSessionsById[sessionId]?.projectName),
+           p != Self.openCodeFallbackProjectName {
+            return p
+        }
+        return Self.nonEmptyString(ProjectNameResolver.projectName(fromHookPayload: json))
+    }
+
+    /// Append a `chat_start` timeline entry for an `opencode_user_prompt_submit`
+    /// hook — the Swift-daemon mirror of the Node pipeline's agent-neutral
+    /// `user_prompt_submit` boundary (classifyObservedHookEvent), so a
+    /// standalone `opencode` run gets the same prompt → response turn shape
+    /// on the timeline as a direct `claude`/`codex` run.
+    @MainActor
+    private func appendOpenCodeChatStart(json: [String: Any], sessionId: String?) {
+        guard let sessionId else { return }
+        openCodeLastPromptTopicBySession.removeValue(forKey: sessionId)
+        let prompt = claudeCodePromptText(from: json)
+        guard !prompt.isEmpty else { return }
+        let ts = Date().timeIntervalSince1970 * 1000
+        var entry = DaemonTimelineEntry(
+            ts: ts,
+            type: "chat_start",
+            raw: String(prompt.prefix(200)),
+            detail: prompt.count > 100 ? String(prompt.prefix(1000)) : nil,
+            approvalId: nil,
+            status: nil,
+            agentType: "opencode",
+            repeatCount: nil,
+            automated: nil
+        )
+        entry.sessionId = sessionId
+        entry.projectName = openCodeTimelineProjectName(sessionId: sessionId, json: json)
+        entry.startedAt = ts
+        // Newest chat_start IS the open turn (serial per session); the next
+        // Stop claims exactly this ts — same self-healing semantics as the
+        // Claude/Codex trackers.
+        openCodeTurnAnchors.noteChatStart(sid: sessionId, ts: ts)
+        if let topic = Self.extractTopicHint(from: prompt) {
+            openCodeLastPromptTopicBySession[sessionId] = topic
+        }
+        Task { await timelineStore.add(entry) }
+        broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(entry)] as [String: Any])
+    }
+
+    @MainActor
+    private func appendOpenCodeToolEvent(json: [String: Any], sessionId: String?, completed: Bool) {
+        guard let sessionId else { return }
+        // The observer plugin sends the literal placeholder "tool" when
+        // OpenCode's part carries no tool name — a row saying "tool" is noise
+        // (usefulCodexToolName filters the same placeholders for Codex).
+        guard let tool = Self.usefulCodexToolName(json["tool_name"] as? String) else { return }
+        let inputSummary = Self.compactDebugValue(json["tool_input"], max: 600)
+        var entry = DaemonTimelineEntry(
+            ts: Date().timeIntervalSince1970 * 1000,
+            type: "tool_exec",
+            raw: Self.codexToolTimelineSummary(tool: tool, inputSummary: inputSummary, completed: completed),
+            detail: inputSummary,
+            approvalId: nil,
+            status: completed ? "complete" : nil,
+            agentType: "opencode",
+            repeatCount: nil,
+            automated: nil
+        )
+        entry.sessionId = sessionId
+        entry.projectName = openCodeTimelineProjectName(sessionId: sessionId, json: json)
+        // tool_exec rows are intra-turn: peek (don't claim) the open turn's
+        // anchor — the Stop hook owns the claim.
+        entry.startedAt = openCodeTurnAnchors.peekOpenTurn(sid: sessionId)
+        Task { await timelineStore.add(entry) }
+        broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(entry)] as [String: Any])
+    }
+
+    /// Append a `chat_response` (when the plugin captured assistant text) or
+    /// a terminating `chat_end` for an `opencode_stop` hook. No taskId is
+    /// stamped: OpenCode sessions are not ingested by the APME collector, so
+    /// they never own a task (same rationale as the Codex appenders —
+    /// borrowing a Claude session's active task cross-contaminates subtrees).
+    @MainActor
+    private func appendOpenCodeChatEnd(json: [String: Any], sessionId: String?) {
+        guard let sessionId else { return }
+        let now = Date().timeIntervalSince1970 * 1000
+        // Claim once at the top so chat_response and chat_end stamp the same
+        // anchor and a delayed duplicate Stop claims nothing.
+        let startTs = openCodeTurnAnchors.claimOpenTurn(sid: sessionId)
+        let assistantText = (json["last_assistant_message"] as? String) ?? ""
+        let projectName = openCodeTimelineProjectName(sessionId: sessionId, json: json)
+        let topicFromPrompt = openCodeLastPromptTopicBySession[sessionId]
+        openCodeLastPromptTopicBySession.removeValue(forKey: sessionId)
+        guard startTs != nil || !assistantText.isEmpty else { return }
+        if !assistantText.isEmpty {
+            var respEntry = DaemonTimelineEntry(
+                ts: now - 1,
+                type: "chat_response",
+                raw: String(assistantText.prefix(200)),
+                detail: assistantText.count > 100 ? String(assistantText.prefix(1000)) : nil,
+                approvalId: nil,
+                status: nil,
+                agentType: "opencode",
+                repeatCount: nil,
+                automated: nil
+            )
+            respEntry.sessionId = sessionId
+            respEntry.projectName = projectName
+            respEntry.startedAt = startTs
+            respEntry.endedAt = now
+            Task { await timelineStore.add(respEntry) }
+            broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(respEntry)] as [String: Any])
+            return
+        }
+        // Response-less turn: single "Completed · Ns · topic" close row —
+        // high-entropy label so the store's exact-raw dedup keeps two quick
+        // turns distinct (Claude/Codex parity).
+        let durationSec: Int? = startTs.map { Int(((now - $0) / 1000).rounded()) }
+        var endRawParts: [String] = ["Completed"]
+        if let d = durationSec { endRawParts.append("\(d)s") }
+        if let t = topicFromPrompt { endRawParts.append(t) }
+        var endEntry = DaemonTimelineEntry(
+            ts: now,
+            type: "chat_end",
+            raw: endRawParts.joined(separator: " · "),
+            detail: topicFromPrompt.map { "Prompt: \($0)" },
+            approvalId: nil,
+            status: nil,
+            agentType: "opencode",
+            repeatCount: nil,
+            automated: nil
+        )
+        endEntry.sessionId = sessionId
+        endEntry.projectName = projectName
+        endEntry.startedAt = startTs
+        endEntry.endedAt = now
+        endEntry.summaryKind = topicFromPrompt == nil ? nil : "heuristic"
+        Task { await timelineStore.add(endEntry) }
+        broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(endEntry)] as [String: Any])
     }
 
     /// Append a `chat_start` timeline entry for a Claude Code UserPromptSubmit

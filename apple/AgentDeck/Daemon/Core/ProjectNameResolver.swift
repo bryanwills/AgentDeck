@@ -33,11 +33,18 @@ enum ProjectNameResolver {
 
     /// Pure cwd-based resolution. Walk for `.git/` marker → basename, then
     /// walk for `package.json` with non-empty `name`, finally
-    /// `lastPathComponent`.
+    /// `lastPathComponent`. Returns "" when the cwd has no usable basename
+    /// (filesystem root) so callers substitute their own fallback label.
     static func resolve(cwd: String) -> String {
         if let git = gitToplevelBasename(startingAt: cwd) { return git }
         if let pkg = nearestPackageJsonName(startingAt: cwd) { return pkg }
         let base = (cwd as NSString).lastPathComponent
+        // NSString.lastPathComponent maps the filesystem root to "/" where
+        // Node's `basename('/')` maps it to "" (project-name.ts then falls
+        // through to 'unknown'). Codex App ambient tasks run at cwd "/", so
+        // without this guard their sessions surfaced a literal "/" as the
+        // project label on every dashboard.
+        if base == "/" { return "" }
         return base
     }
 
