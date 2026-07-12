@@ -149,21 +149,28 @@ function buildSuggestPreset(prompt: string): PresetAction {
   };
 }
 
+// REVIEW routes to the independent on-demand eval (review_run — daemon-side
+// judge, no agent control), so it is uniform across every session type.
 const CC_PRESET_DEFS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string; dynamicIcon?: 'model' }> = [
   { label: 'GO ON', iconSvg: GO_ON_ICON_SVG, color: '#1e3a2f', textColor: '#22c55e', prompt: 'go on' },
-  { label: 'REVIEW', iconSvg: REVIEW_ICON_SVG, color: '#1e293b', textColor: '#93c5fd', prompt: '/review' },
+  { label: 'REVIEW', iconSvg: REVIEW_ICON_SVG, color: '#1e293b', textColor: '#93c5fd', localAction: 'review_run' },
   { label: 'COMMIT', iconSvg: COMMIT_ICON_SVG, color: '#1e293b', textColor: '#22c55e', prompt: '/commit' },
   { label: 'CLEAR', iconSvg: CLEAR_ICON_SVG, color: '#1e293b', textColor: '#94a3b8', prompt: '/clear' },
 ];
 
-// Observed (hook-only) sessions deliver prompts via the Stop-hook directive
-// queue: the text lands as a continuation INSTRUCTION at turn end, not as a
-// typed command line — so natural language only (slash commands like /review
-// cannot execute through that channel) and no CLEAR (nothing to type into).
+// Observed Claude: COMMIT is the one directive worth pre-queueing while the
+// session works (Stop-hook delivery at turn end; natural language only — no
+// slash commands through that channel). GO ON was dropped: premature turn
+// stops are not a scenario that occurs in practice.
 const CC_OBSERVED_QUEUE_PRESETS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string }> = [
-  { label: 'GO ON', iconSvg: GO_ON_ICON_SVG, color: '#1e3a2f', textColor: '#22c55e', prompt: 'continue', subtitle: 'at turn end' },
-  { label: 'REVIEW', iconSvg: REVIEW_ICON_SVG, color: '#1e293b', textColor: '#93c5fd', prompt: 'review the changes', subtitle: 'at turn end' },
   { label: 'COMMIT', iconSvg: COMMIT_ICON_SVG, color: '#1e293b', textColor: '#22c55e', prompt: 'commit the changes', subtitle: 'at turn end' },
+];
+
+// OpenCode observed idle: the observer plugin injects immediately via the
+// in-process SDK — same semantics as managed idle presets.
+const OC_OBSERVED_INJECT_PRESETS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string }> = [
+  { label: 'GO ON', iconSvg: GO_ON_ICON_SVG, color: '#1e3a2f', textColor: '#22c55e', prompt: 'continue', subtitle: 'inject now' },
+  { label: 'COMMIT', iconSvg: COMMIT_ICON_SVG, color: '#1e293b', textColor: '#22c55e', prompt: 'commit the changes', subtitle: 'inject now' },
 ];
 
 const DEFAULT_LAYOUT: DeckLayout = { columns: 4, rows: 2, keyCount: 8, family: 'streamdeckplus' };
@@ -467,7 +474,7 @@ export class SessionSlotManager {
 
   /** Handle button press. Returns action to take. */
   handleSlotPress(slot: number, layout?: DeckLayout): {
-    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'refresh-usage' | 'cycle-usage-page' | 'none';
+    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'review-run' | 'refresh-usage' | 'cycle-usage-page' | 'none';
     sessionId?: string;
     sessionPort?: number;
     optionIndex?: number;
@@ -507,6 +514,9 @@ export class SessionSlotManager {
         }
         if (config.preset?.localAction === 'switch_model') {
           return { action: 'switch-model' };
+        }
+        if (config.preset?.localAction === 'review_run') {
+          return { action: 'review-run' };
         }
         if (config.preset?.prompt) {
           return { action: 'send-prompt', promptText: config.preset.prompt };
@@ -749,20 +759,47 @@ export class SessionSlotManager {
   }
 
   /**
+   * REVIEW tile = independent on-demand eval (review_run) — daemon-side
+   * judge, no agent control, valid for every session type in any
+   * non-awaiting state. Badge shows the last verdict; REVIEWING while the
+   * judge runs (not pressable).
+   */
+  private reviewSlotConfig(session: SessionInfo | undefined): SessionSlotConfig {
+    if (session?.reviewStatus === 'running') {
+      return { type: 'status', label: 'REVIEWING', subtitle: 'judge running', icon: 'tool', tone: 'info' };
+    }
+    const risk = session?.reviewRisk;
+    return {
+      type: 'preset',
+      preset: {
+        label: 'REVIEW',
+        iconSvg: REVIEW_ICON_SVG,
+        color: '#1e293b',
+        textColor: risk === 'high' ? '#f87171' : risk === 'medium' ? '#fbbf24' : '#93c5fd',
+        subtitle: risk
+          ? `risk ${risk}${session?.reviewFindings != null ? ` · ${session.reviewFindings}` : ''}`
+          : undefined,
+        localAction: 'review_run',
+      },
+    };
+  }
+
+  /**
    * Content cells for an observed (hook-only) session's detail view. Every
-   * actionable cell maps to a hook-deliverable steering primitive:
-   *   - held PreToolUse gate → Allow/Deny (select_option 0/1 resolves it)
-   *   - processing → queueable turn-end directives (Stop-hook block)
-   *   - idle → honest status only (hooks are silent until the next turn)
+   * actionable cell maps to something actually deliverable:
+   *   - held gate (Claude PreToolUse / OpenCode permission.asked) → Allow/Deny
+   *   - Claude processing → COMMIT queued for turn end (Stop-hook block)
+   *   - OpenCode idle → immediate injection presets
+   *   - REVIEW (independent eval) → everywhere, including control-less Codex
    */
   private observedContentSlot(
     session: SessionInfo | undefined, idx: number,
     isAwaiting: boolean, isProcessing: boolean,
   ): SessionSlotConfig {
     // Delivery paths: Claude = hook RPC (gate / soft stop / turn-end queue),
-    // OpenCode = observer-plugin queue (immediate). Codex = notify-only, inert.
+    // OpenCode = observer-plugin queue (immediate). Codex = notify-only.
     const isOpenCodeObserved = session?.agentType === 'opencode';
-    const steerable = session?.agentType === 'claude-code' || isOpenCodeObserved;
+    const isClaudeObserved = session?.agentType === 'claude-code';
     if (isAwaiting) {
       if (session?.requestId) {
         // Device-native gate semantics (permit/deny THIS tool call) — the
@@ -795,35 +832,39 @@ export class SessionSlotManager {
           icon: 'tool', tone: 'warning',
         };
       }
-      if (!steerable) return { type: 'empty' };
       if (session?.stopRequested) {
         return idx === 1
           ? { type: 'status', label: 'STOPPING', subtitle: 'at next tool', icon: 'tool', tone: 'warning' }
           : { type: 'empty' };
       }
-      const presetIdx = idx - 1;
-      if (presetIdx < CC_OBSERVED_QUEUE_PRESETS.length) {
-        const def = CC_OBSERVED_QUEUE_PRESETS[presetIdx];
-        const preset = { ...def, iconSvg: def.iconSvg ?? '' };
-        // OpenCode injects immediately via the plugin, not at turn end.
-        if (isOpenCodeObserved) preset.subtitle = 'inject now';
-        return { type: 'preset', preset };
+      // Claude observed: COMMIT queued for turn end, then REVIEW.
+      // OpenCode/Codex observed: REVIEW only (mid-run injection dropped).
+      const cells: SessionSlotConfig[] = [];
+      if (isClaudeObserved) {
+        const def = CC_OBSERVED_QUEUE_PRESETS[0];
+        cells.push({ type: 'preset', preset: { ...def, iconSvg: def.iconSvg ?? '' } });
       }
+      cells.push(this.reviewSlotConfig(session));
+      const cellIdx = idx - 1;
+      if (cellIdx < cells.length) return cells[cellIdx];
       return this.modelStatusCard(session) ?? { type: 'empty' };
     }
-    // Idle observed: OpenCode can still inject prompts (plugin executes them
-    // immediately); Claude/Codex have no idle delivery path — say so.
+    // Idle observed.
     if (isOpenCodeObserved) {
-      if (idx < CC_OBSERVED_QUEUE_PRESETS.length) {
-        const def = CC_OBSERVED_QUEUE_PRESETS[idx];
-        return { type: 'preset', preset: { ...def, iconSvg: def.iconSvg ?? '', subtitle: 'inject now' } };
+      if (idx < OC_OBSERVED_INJECT_PRESETS.length) {
+        const def = OC_OBSERVED_INJECT_PRESETS[idx];
+        return { type: 'preset', preset: { ...def, iconSvg: def.iconSvg ?? '' } };
       }
-      return this.idleStatusCard(session, idx - CC_OBSERVED_QUEUE_PRESETS.length, true, false);
+      if (idx === OC_OBSERVED_INJECT_PRESETS.length) return this.reviewSlotConfig(session);
+      return this.idleStatusCard(session, idx - OC_OBSERVED_INJECT_PRESETS.length - 1, true, false);
     }
-    if (idx === 0) {
+    // Claude/Codex observed idle: no prompt-delivery path, but the
+    // independent review stays live.
+    if (idx === 0) return this.reviewSlotConfig(session);
+    if (idx === 1) {
       return { type: 'status', label: 'OBSERVED', subtitle: 'control in terminal', icon: 'ready', tone: 'info' };
     }
-    return this.idleStatusCard(session, idx - 1, true, false);
+    return this.idleStatusCard(session, idx - 2, true, false);
   }
 
   private getDetailSlotConfig(slot: number, layout: DeckLayout): SessionSlotConfig {
@@ -927,6 +968,11 @@ export class SessionSlotManager {
 
     if (isProcessing && !isOpenClaw && contentIdx === 1) {
       return this.modelStatusCard(session) ?? { type: 'empty' };
+    }
+
+    // Independent review works mid-turn too (judges the current delta).
+    if (isProcessing && !isOpenClaw && contentIdx === 2) {
+      return this.reviewSlotConfig(session);
     }
 
     // OpenClaw presets (IDLE, or PROCESSING after the tool status tile)

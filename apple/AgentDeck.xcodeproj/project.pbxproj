@@ -75,6 +75,7 @@
 		2E7C2729C1B7011497854D53 /* Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E532E5457B6DFDE324D8F11C /* Protocol.swift */; };
 		2E8F7A4A759E6BE13F311440 /* SessionLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31609846ED73DC70F674FCF0 /* SessionLauncher.swift */; };
 		2FA1EFC88159FD511847AFEA /* ApmeHttpRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2D26F6BDF08F6E4F2F8439 /* ApmeHttpRoutes.swift */; };
+		30111BBD3B5622FA960F17E1 /* ReviewRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A8384A78E6B40497C01168 /* ReviewRunner.swift */; };
 		3053AF2926E3B907DAB9250F /* PixooModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9342D343A701D2BDC92C845 /* PixooModule.swift */; };
 		313772161048869FB5896E3A /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5D17A24E0C5B16A097D62E9 /* AuthManager.swift */; };
 		3173BC2B844664891B8F3934 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */; };
@@ -124,6 +125,7 @@
 		50C1853357255E13C2F9EB93 /* DaemonService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BD296835DE366BFDBB15B9 /* DaemonService.swift */; };
 		530A55B6786D79B8D42211BF /* RockFormation.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF517661B1BEF3ACD330054D /* RockFormation.swift */; };
 		53D37B6B6CCF9EFD0013F153 /* DeviceApprovalGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95997D1E19933CBB5A3F400D /* DeviceApprovalGateTests.swift */; };
+		547881B213D488EBEC3ED00C /* ReviewRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A8384A78E6B40497C01168 /* ReviewRunner.swift */; };
 		54A5C71CB7264DAFC6FF694D /* KelpField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0815111538C63CAF8766B367 /* KelpField.swift */; };
 		55474B20182CADBE77F8796E /* IDotMatrixModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3815BC9679F080521D52D2 /* IDotMatrixModule.swift */; };
 		555F794C0467FB252D1B882E /* BridgeEventParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C930EA1785B14EE276FC29A /* BridgeEventParser.swift */; };
@@ -575,6 +577,7 @@
 		F2E6BEE1A730418C1EBDC048 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		F358D3115EEB262D59BD6439 /* ToastOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastOverlay.swift; sourceTree = "<group>"; };
 		F7B4E454713DFE2DECC4D154 /* MonitorScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorScreen.swift; sourceTree = "<group>"; };
+		F8A8384A78E6B40497C01168 /* ReviewRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewRunner.swift; sourceTree = "<group>"; };
 		F8E176199605E14D2EAF35A1 /* ApmeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeStore.swift; sourceTree = "<group>"; };
 		F9413D054382510FF4664C89 /* ApmeJudgeFoundationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeJudgeFoundationModels.swift; sourceTree = "<group>"; };
 		F9C1092C93CA846103C9692C /* OpenCodeObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeObserver.swift; sourceTree = "<group>"; };
@@ -844,6 +847,7 @@
 				758AAD78310D811B993ADA21 /* ApmeScorers.swift */,
 				CBBE1258602AB5ABC83560EE /* ApmeSettings.swift */,
 				F8E176199605E14D2EAF35A1 /* ApmeStore.swift */,
+				F8A8384A78E6B40497C01168 /* ReviewRunner.swift */,
 			);
 			path = Apme;
 			sourceTree = "<group>";
@@ -1400,6 +1404,7 @@
 				7D1FA2E1BD47D35C7E3FEB23 /* Protocol.swift in Sources */,
 				16BE41E2233EEE895F569E27 /* QRPairingWindow.swift in Sources */,
 				AC658605D32EEDED79556598 /* QRScannerView.swift in Sources */,
+				30111BBD3B5622FA960F17E1 /* ReviewRunner.swift in Sources */,
 				85B903EFA7879FA42B54A258 /* RockFormation.swift in Sources */,
 				981C289DD626CAD0B9900C39 /* SandDisturbance.swift in Sources */,
 				10B201D2AF96C0838CCEC4CF /* SerialModule.swift in Sources */,
@@ -1563,6 +1568,7 @@
 				2E7C2729C1B7011497854D53 /* Protocol.swift in Sources */,
 				58B1139E0CFD432AC3D07C6E /* QRPairingWindow.swift in Sources */,
 				A869C24476DAE485D0B950EC /* QRScannerView.swift in Sources */,
+				547881B213D488EBEC3ED00C /* ReviewRunner.swift in Sources */,
 				530A55B6786D79B8D42211BF /* RockFormation.swift in Sources */,
 				86F7FE3919CB9698A247E2A3 /* SandDisturbance.swift in Sources */,
 				27B40D64FC2129FD8370BA77 /* SerialModule.swift in Sources */,

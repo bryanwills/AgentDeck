@@ -595,6 +595,28 @@ function actionTile(label: string, color: string, subtitle?: string): string {
   return svgFrame('#16181d', els);
 }
 
+/**
+ * REVIEW = independent on-demand eval (review_run), NOT a prompt to the
+ * agent — the daemon judges the session's latest work with a separate model,
+ * so this tile is valid for EVERY session type (managed, observed Claude/
+ * OpenCode, even control-less observed Codex) in any non-awaiting state.
+ * Shows the last verdict as a badge; REVIEWING while the judge runs.
+ */
+function reviewTile(sess: SessionInfo | undefined, sid: string): SessionDeckCell {
+  if (sess?.reviewStatus === 'running') {
+    return { svg: renderInfoSlot('REVIEWING', 'judge running', 'activity', 'info'), action: null };
+  }
+  const risk = sess?.reviewRisk;
+  const subtitle = risk
+    ? `risk ${risk}${sess?.reviewFindings != null ? ` · ${sess.reviewFindings}` : ''}`
+    : 'independent eval';
+  const color = risk === 'high' ? '#f87171' : risk === 'medium' ? '#fbbf24' : '#93c5fd';
+  return {
+    svg: actionTile('REVIEW', color, subtitle),
+    action: { kind: 'command', command: { type: 'review_run', sessionId: sid } },
+  };
+}
+
 export function buildSessionDeck(stateEvt: any, view: DeckView, positions: string[]): Map<string, SessionDeckCell> {
   const state = parseState(stateEvt);
   const slots = sortPositions(positions);
@@ -813,41 +835,55 @@ function buildDetail(
       svg: renderInfoSlot('RUNNING', queued > 0 ? `${queued} queued` : (tool || 'working'), 'activity', 'info'),
       action: null,
     });
-    if (observedSteerable && !stopRequested) {
-      // Turn-end directive queue (Claude) / immediate injection (OpenCode):
-      // natural-language instructions only (the Stop-hook block reason is an
-      // instruction to Claude, not a command line — slash commands like
-      // /clear cannot execute through it).
-      const queueable: Array<[string, string]> = [
-        ['GO ON', 'continue'], ['REVIEW', 'review the changes'], ['COMMIT', 'commit the changes'],
-      ];
-      const subtitle = sess?.agentType === 'opencode' ? 'inject now' : 'at turn end';
-      queueable.forEach(([label, text]) => cells.push({
-        svg: actionTile(label, '#cbd5e1', subtitle),
-        action: { kind: 'command', command: { type: 'session_command', sessionId: sid, command: { type: 'send_prompt', text } } },
-      }));
+    // COMMIT-at-completion is the one directive worth pre-queueing while an
+    // observed Claude session works (delivered by the Stop hook at turn end;
+    // natural language only — slash commands cannot execute through it).
+    // GO ON was dropped: "keep going when you finish" is not a scenario that
+    // occurs in practice — turns end deliberately, not prematurely.
+    if (isObserved && sess?.agentType === 'claude-code' && observedSteerable && !stopRequested) {
+      cells.push({
+        svg: actionTile('COMMIT', '#22c55e', 'at turn end'),
+        action: { kind: 'command', command: { type: 'session_command', sessionId: sid, command: { type: 'send_prompt', text: 'commit the changes' } } },
+      });
     }
+    // Independent review works mid-turn too (judges the current delta).
+    cells.push(reviewTile(sess, sid));
   } else if (isObserved) {
     if (sess?.agentType === 'opencode') {
-      // OpenCode observed can inject prompts even while idle — the observer
-      // plugin executes them immediately via the in-process SDK.
-      const queueable: Array<[string, string]> = [
-        ['GO ON', 'continue'], ['REVIEW', 'review the changes'], ['COMMIT', 'commit the changes'],
+      // OpenCode observed injects immediately even while idle (observer
+      // plugin + in-process SDK) — same semantics as managed idle presets.
+      const inject: Array<[string, string]> = [
+        ['GO ON', 'continue'], ['COMMIT', 'commit the changes'],
       ];
-      queueable.forEach(([label, text]) => cells.push({
+      inject.forEach(([label, text]) => cells.push({
         svg: actionTile(label, '#cbd5e1', 'inject now'),
         action: { kind: 'command', command: { type: 'session_command', sessionId: sid, command: { type: 'send_prompt', text } } },
       }));
+      cells.push(reviewTile(sess, sid));
     } else {
-      // Idle observed Claude/Codex: hooks are silent until the user's next
-      // turn, so no deliverable quick actions exist — say so instead of
-      // faking them.
+      // Idle observed Claude/Codex: no prompt-delivery path exists, but the
+      // independent review needs no control at all — it is the one action
+      // that stays live here.
+      cells.push(reviewTile(sess, sid));
       cells.push({ svg: renderInfoSlot('OBSERVED', 'control in terminal', 'status', 'info'), action: null });
     }
   } else {
-    // idle quick-actions
-    const presets: Array<[string, string]> = [['GO ON', 'continue'], ['REVIEW', 'review the changes'], ['COMMIT', 'commit the changes'], ['CLEAR', '/clear']];
-    presets.forEach(([label, text]) => cells.push({ svg: actionTile(label, '#cbd5e1'), action: { kind: 'command', command: { type: 'send_prompt', text } } }));
+    // Managed idle quick-actions. REVIEW routes to the independent eval
+    // (uniform semantics across every session type); the rest type into the
+    // PTY as before.
+    cells.push({
+      svg: actionTile('GO ON', '#cbd5e1'),
+      action: { kind: 'command', command: { type: 'send_prompt', text: 'continue' } },
+    });
+    cells.push(reviewTile(sess, sid));
+    cells.push({
+      svg: actionTile('COMMIT', '#cbd5e1'),
+      action: { kind: 'command', command: { type: 'send_prompt', text: 'commit the changes' } },
+    });
+    cells.push({
+      svg: actionTile('CLEAR', '#cbd5e1'),
+      action: { kind: 'command', command: { type: 'send_prompt', text: '/clear' } },
+    });
   }
 
   // Paginate cells into content slots; reserve last content slot for MORE if overflow.

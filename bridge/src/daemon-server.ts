@@ -33,6 +33,7 @@ import {
   notePermissionPromptShown, noteToolEnd, steeringSnapshot,
 } from './observed-steering.js';
 import { enqueueOpenCodeCommand, pollOpenCodeCommands } from './opencode-steering.js';
+import { runSessionReview, reviewSnapshot } from './review-runner.js';
 
 /** Observed-session device approval gate (PreToolUse hold). Default ON — the
  *  precision guards in observed-steering.ts/claude-permission-rules.ts ensure
@@ -2101,9 +2102,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // (ESP32 IPS10 mosaic) render an elapsed value per cell without a wall clock.
     const now = Date.now();
     const enrichedSessions = [...sessions, ...observed].map((s) => {
-      if (s.elapsedSec != null || !s.startedAt) return s;
-      const sec = Math.round((now - Date.parse(s.startedAt)) / 1000);
-      return Number.isFinite(sec) && sec >= 0 ? { ...s, elapsedSec: sec } : s;
+      // On-demand review badge (REVIEW tile verdict / REVIEWING state) —
+      // applies to every session type, managed included.
+      const review = reviewSnapshot(s.id);
+      const withReview = Object.keys(review).length > 0 ? { ...s, ...review } : s;
+      if (withReview.elapsedSec != null || !withReview.startedAt) return withReview;
+      const sec = Math.round((now - Date.parse(withReview.startedAt)) / 1000);
+      return Number.isFinite(sec) && sec >= 0 ? { ...withReview, elapsedSec: sec } : withReview;
     });
     // SSOT: inject iff Gateway is authenticated (gatewayConnected). Reachability
     // / adapter-liveness alone must not materialize a session — that kept a
@@ -2570,6 +2575,36 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       userFocusedSessionId = null;
       focusRelay.unfocus();
       broadcastFocusedState();
+      return;
+    }
+    // Independent on-demand review (REVIEW deck button): judge the session's
+    // working-tree delta with an independent model. Valid for every session
+    // type — no agent control involved. Result: WS events + badge fields +
+    // HTML report opened in the browser (this daemon's "popup" tier).
+    if (cmd.type === 'review_run') {
+      const sessionId = (cmd as any).sessionId as string;
+      if (!sessionId) return;
+      const managed = listActiveSessions().find(s => s.id === sessionId);
+      const observed = managed ? undefined
+        : passiveSessionObserver.collect([]).find(s => s.id === sessionId);
+      const target = (managed ?? observed) as (Record<string, unknown> & { projectName?: string }) | undefined;
+      // cwd sources: observed rows carry it from the process scan; managed
+      // registry rows don't — fall back to the session's APME run projectPath.
+      const cwd = (typeof target?.cwd === 'string' && target.cwd) ? target.cwd as string
+        : (apme ? (() => {
+          const runId = apme.collector.getRunId(sessionId);
+          return runId ? apme.store.getRun(runId)?.projectPath ?? undefined : undefined;
+        })() : undefined);
+      void runSessionReview({
+        sessionId,
+        cwd,
+        projectName: target?.projectName ?? cwd?.split('/').filter(Boolean).pop() ?? 'unknown',
+        onEvent: (event) => {
+          core.wsServer.broadcast(event as any);
+          core.broadcastSessionsList().catch(() => {}); // badge refresh
+        },
+      });
+      core.broadcastSessionsList().catch(() => {}); // REVIEWING tile
       return;
     }
     // Device approval for a gated PreToolUse permission request (observed session).

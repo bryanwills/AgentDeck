@@ -240,6 +240,17 @@ sealed class AgentCommand {
         }
     }
 
+    data class ReviewRun(val sessionId: String) : AgentCommand() {
+        override val typeTag: String = "review_run"
+        override fun toJson(): String {
+            val buf = StringBuilder()
+            buf.append("{\"type\":\"review_run\"")
+            buf.append(",\"sessionId\":").append(encode(sessionId))
+            buf.append("}")
+            return buf.toString()
+        }
+    }
+
     data class Esp32OtaAck(val otaId: String, val stage: String, val seq: Int? = null, val offset: Int? = null, val written: Int? = null) : AgentCommand() {
         override val typeTag: String = "esp32_ota_ack"
         override fun toJson(): String {

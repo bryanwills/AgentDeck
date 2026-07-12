@@ -28,6 +28,7 @@ public enum AgentCommand: Equatable {
     case apmeVibe(runId: String, verdict: String, note: String?)
     case apmeRecommend(taskKind: String?, budgetUsd: Int?, latencyBudgetMs: Int?, preferLocal: Bool?)
     case permissionDecision(requestId: String, decision: String)
+    case reviewRun(sessionId: String)
     case esp32OtaAck(otaId: String, stage: String, seq: Int?, offset: Int?, written: Int?)
     case esp32OtaError(error: String, otaId: String?, stage: String?)
 
@@ -117,6 +118,10 @@ public enum AgentCommand: Equatable {
             dict["requestId"] = requestId
             dict["decision"] = decision
             return dict
+        case .reviewRun(let sessionId):
+            var dict: [String: Any] = ["type": "review_run"]
+            dict["sessionId"] = sessionId
+            return dict
         case .esp32OtaAck(let otaId, let stage, let seq, let offset, let written):
             var dict: [String: Any] = ["type": "esp32_ota_ack"]
             dict["otaId"] = otaId
@@ -157,6 +162,7 @@ public enum AgentCommand: Equatable {
         case .apmeVibe: return "apme_vibe"
         case .apmeRecommend: return "apme_recommend"
         case .permissionDecision: return "permission_decision"
+        case .reviewRun: return "review_run"
         case .esp32OtaAck: return "esp32_ota_ack"
         case .esp32OtaError: return "esp32_ota_error"
         }

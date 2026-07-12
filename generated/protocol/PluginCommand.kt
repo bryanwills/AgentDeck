@@ -45,7 +45,13 @@ private val klaxon = Klaxon()
  *
  * Device approval decision for a gated PreToolUse permission request (observed sessions).
  * The daemon holds the hook's HTTP response open keyed by `requestId`; this command
- * resolves it into a Claude Code permission decision. See bridge/src/permission-resolver.ts.
+ * resolves it into a Claude Code permission decision. See
+ * bridge/src/permission-resolver.ts.
+ *
+ * Trigger an independent on-demand review of a session's latest work (the REVIEW deck
+ * button). Daemon-side eval with an independent judge model — no agent control involved, so
+ * every session type qualifies. Results flow back as review_status / review_result events
+ * plus SessionInfo badge fields.
  */
 data class PluginCommand (
     val type: Type,
@@ -236,6 +242,7 @@ enum class Type(val value: String) {
     QuerySessionTimeline("query_session_timeline"),
     QueryUsage("query_usage"),
     Respond("respond"),
+    ReviewRun("review_run"),
     SelectOption("select_option"),
     SendPrompt("send_prompt"),
     SessionCommand("session_command"),
@@ -261,6 +268,7 @@ enum class Type(val value: String) {
             "query_session_timeline" -> QuerySessionTimeline
             "query_usage"            -> QueryUsage
             "respond"                -> Respond
+            "review_run"             -> ReviewRun
             "select_option"          -> SelectOption
             "send_prompt"            -> SendPrompt
             "session_command"        -> SessionCommand

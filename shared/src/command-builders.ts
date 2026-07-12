@@ -26,6 +26,7 @@ import type {
   ApmeVibeFeedbackCommand,
   ApmeRecommendCommand,
   PermissionDecisionCommand,
+  ReviewRunCommand,
   Esp32OtaAckCommand,
   Esp32OtaErrorCommand,
 } from "./protocol.js";
@@ -90,6 +91,9 @@ export const agentCommand = {
   },
   permissionDecision(requestId: string, decision: 'allow' | 'deny'): PermissionDecisionCommand {
     return { type: "permission_decision", requestId, decision };
+  },
+  reviewRun(sessionId: string): ReviewRunCommand {
+    return { type: "review_run", sessionId };
   },
   esp32OtaAck(otaId: string, stage: 'begin' | 'chunk' | 'end' | 'abort', seq?: number, offset?: number, written?: number): Esp32OtaAckCommand {
     return { type: "esp32_ota_ack", otaId, stage, seq, offset, written };

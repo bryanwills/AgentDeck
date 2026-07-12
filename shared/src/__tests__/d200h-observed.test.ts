@@ -39,15 +39,17 @@ function commandsOf(cells: Map<string, { svg: string; action: DeckAction }>) {
 }
 
 describe('D200H observed session detail', () => {
-  it('idle: no actionable command cells at all (no fake presets, inert STOP)', () => {
+  it('idle: REVIEW (independent eval) is the only actionable cell — no fake prompts, inert STOP', () => {
     const cells = detailCells(observedStateEvt({ state: 'idle' }));
-    expect(commandsOf(cells)).toHaveLength(0);
+    const cmds = commandsOf(cells);
+    expect(cmds.map((c) => c.type)).toEqual(['review_run']);
+    expect(cmds[0].sessionId).toBe('observed:claude:uuid-1');
     const svgs = [...cells.values()].map((c) => c.svg).join('');
     expect(svgs).toContain('OBSERVED');
     expect(svgs).not.toContain('GO ON');
   });
 
-  it('processing: soft STOP + queue presets route through session_command', () => {
+  it('processing: soft STOP + COMMIT-at-turn-end + REVIEW; GO ON dropped', () => {
     const cells = detailCells(observedStateEvt({ state: 'processing' }));
     const cmds = commandsOf(cells);
     const stop = cmds.find((c) => c.type === 'session_command'
@@ -56,10 +58,11 @@ describe('D200H observed session detail', () => {
     expect(stop?.sessionId).toBe('observed:claude:uuid-1');
     const prompts = cmds.filter((c) => c.type === 'session_command'
       && (c.command as { type?: string })?.type === 'send_prompt');
-    // Natural-language directives only, no /clear (Stop-hook block reason is
-    // an instruction, not a command line).
+    // COMMIT is the one queueable directive (natural language, no slash
+    // commands through the Stop-hook channel); GO ON is gone.
     const texts = prompts.map((p) => (p.command as { text?: string }).text);
-    expect(texts).toEqual(['continue', 'review the changes', 'commit the changes']);
+    expect(texts).toEqual(['commit the changes']);
+    expect(cmds.filter((c) => c.type === 'review_run')).toHaveLength(1);
   });
 
   it('processing + stopRequested: STOP replaced by STOPPING tile, no queue presets', () => {
@@ -90,7 +93,7 @@ describe('D200H observed session detail', () => {
     expect(svgs).not.toContain('ALLOW');
   });
 
-  it('codex observed: fully inert (notify-only hooks — no steering path exists)', () => {
+  it('codex observed: REVIEW only — steering stays inert (notify-only hooks)', () => {
     const evt = {
       type: 'state_update', state: 'idle',
       allSessions: [{
@@ -99,7 +102,10 @@ describe('D200H observed session detail', () => {
       }],
     };
     const cells = buildSessionDeck(evt, { mode: 'detail', openSessionId: 'observed:codex:t1' }, POSITIONS);
-    expect(commandsOf(cells)).toHaveLength(0);
+    const cmds = commandsOf(cells);
+    // The independent eval needs no agent control, so it stays live even for
+    // control-less codex; every steering command stays absent.
+    expect(cmds.map((c) => c.type)).toEqual(['review_run']);
   });
 
   it('opencode observed idle: inject-now presets via session_command (plugin queue)', () => {
@@ -111,10 +117,14 @@ describe('D200H observed session detail', () => {
       }],
     };
     const cells = buildSessionDeck(evt, { mode: 'detail', openSessionId: 'opencode:ses_1' }, POSITIONS);
-    const prompts = commandsOf(cells).filter((c) => c.type === 'session_command'
+    const cmds = commandsOf(cells);
+    const prompts = cmds.filter((c) => c.type === 'session_command'
       && (c.command as { type?: string })?.type === 'send_prompt');
-    expect(prompts.length).toBe(3);
+    // GO ON + COMMIT inject immediately; REVIEW rides the independent eval.
+    expect(prompts.map((p) => (p.command as { text?: string }).text))
+      .toEqual(['continue', 'commit the changes']);
     expect(prompts.every((p) => p.sessionId === 'opencode:ses_1')).toBe(true);
+    expect(cmds.filter((c) => c.type === 'review_run')).toHaveLength(1);
   });
 
   it('opencode observed permission gate: ALLOW/DENY carry the ocperm requestId', () => {
@@ -144,6 +154,10 @@ describe('D200H observed session detail', () => {
     const cmds = commandsOf(cells);
     const prompts = cmds.filter((c) => c.type === 'send_prompt').map((c) => c.text);
     expect(prompts).toContain('/clear');
+    expect(prompts).toContain('continue');
+    // REVIEW switched from a PTY prompt to the independent eval.
+    expect(prompts).not.toContain('review the changes');
+    expect(cmds.filter((c) => c.type === 'review_run')).toHaveLength(1);
     expect(cmds.find((c) => c.type === 'interrupt')).toBeTruthy();
   });
 });

@@ -31,7 +31,13 @@ import Foundation
 ///
 /// Device approval decision for a gated PreToolUse permission request (observed sessions).
 /// The daemon holds the hook's HTTP response open keyed by `requestId`; this command
-/// resolves it into a Claude Code permission decision. See bridge/src/permission-resolver.ts.
+/// resolves it into a Claude Code permission decision. See
+/// bridge/src/permission-resolver.ts.
+///
+/// Trigger an independent on-demand review of a session's latest work (the REVIEW deck
+/// button). Daemon-side eval with an independent judge model — no agent control involved, so
+/// every session type qualifies. Results flow back as review_status / review_result events
+/// plus SessionInfo badge fields.
 // MARK: - ADPluginCommand
 struct ADPluginCommand: Codable, Equatable {
     var type: ADType
@@ -360,6 +366,7 @@ enum ADType: String, Codable, Equatable {
     case querySessionTimeline = "query_session_timeline"
     case queryUsage = "query_usage"
     case respond = "respond"
+    case reviewRun = "review_run"
     case selectOption = "select_option"
     case sendPrompt = "send_prompt"
     case sessionCommand = "session_command"

@@ -1,0 +1,269 @@
+#if os(macOS)
+import Foundation
+import AppKit
+import SwiftUI
+
+// ReviewRunner.swift — on-demand independent review (the REVIEW deck button),
+// Swift mirror of bridge/src/review-runner.ts with one deliberate difference:
+//
+// INPUT IS THE SESSION TRAJECTORY, NOT A GIT DIFF. The sandboxed daemon can
+// neither exec `git` (no subprocesses — App Store invariant) nor read the
+// session's cwd, but its own timeline store already records what the agent
+// was asked, which tools it ran, and what it answered — a reviewable delta
+// that needs no filesystem access at all. The judge is Apple Intelligence
+// (ApmeJudgeFoundationModels): on-device, free, independent of the coding
+// agent. Because no agent control is involved, every session type qualifies,
+// including control-less observed Codex.
+//
+// Output: a native floating panel (the app IS the UI on this tier) with an
+// "Open HTML Report" escape hatch (container file + NSWorkspace → browser),
+// plus review_status / review_result WS events and SessionInfo badge fields
+// handled by DaemonServer.
+
+struct ReviewFindingItem: Identifiable, Sendable {
+    let id = UUID()
+    let severity: String   // high | medium | low
+    let title: String
+    let detail: String
+    let file: String?
+}
+
+struct ReviewOutcomeData: Sendable {
+    let sessionId: String
+    let projectName: String
+    let risk: String       // low | medium | high
+    let summary: String
+    let findings: [ReviewFindingItem]
+    let backend: String
+    let generatedAt: Date
+}
+
+enum ReviewRunner {
+
+    /// Compress the session's timeline into a judge-readable trajectory.
+    /// Newest-last, capped so the on-device model's context stays comfortable.
+    static func trajectorySummary(entries: [DaemonTimelineEntry], maxChars: Int = 20_000) -> String {
+        var lines: [String] = []
+        for e in entries.suffix(60) {
+            let body = [e.raw, e.detail ?? ""].filter { !$0.isEmpty }.joined(separator: " — ")
+            switch e.type {
+            case "chat_start":            lines.append("USER: \(body)")
+            case "chat_response":         lines.append("ASSISTANT: \(body)")
+            case "chat_end":              lines.append("TURN ENDED: \(body)")
+            case "tool_start", "tool_use": lines.append("TOOL: \(body)")
+            case "task_start":            lines.append("TASK: \(body)")
+            case "task_end":              lines.append("TASK DONE: \(body)")
+            default: break
+            }
+        }
+        var out = lines.joined(separator: "\n")
+        if out.count > maxChars {
+            out = String(out.suffix(maxChars))
+        }
+        return out
+    }
+
+    static func buildPrompt(projectName: String, trajectory: String) -> String {
+        """
+        You are an independent reviewer assessing RISK in a coding agent's \
+        recent work, based on its session trajectory (user prompts, tools it \
+        ran, and its answers). Judge only what the agent DID in this session — \
+        not overall project quality. Focus on: destructive or irreversible \
+        operations, security issues (secrets, injection, permissions), \
+        claims of completion that the trajectory does not support, skipped \
+        verification (no tests/builds after code changes), and incomplete work.
+
+        Project: \(projectName)
+
+        --- session trajectory (oldest → newest) ---
+        \(trajectory)
+
+        Respond with STRICT JSON only, no prose, exactly this shape:
+        {"risk":"low|medium|high","summary":"<one sentence>","findings":[{"severity":"high|medium|low","title":"...","detail":"...","file":"optional/path"}]}
+        Return an empty findings array when nothing is genuinely risky. Do not \
+        invent findings to fill space.
+        """
+    }
+
+    static func parse(_ text: String) -> (risk: String, summary: String, findings: [ReviewFindingItem])? {
+        guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else { return nil }
+        let slice = String(text[start...end])
+        guard let data = slice.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        let riskRaw = obj["risk"] as? String ?? "low"
+        let risk = (riskRaw == "high" || riskRaw == "medium") ? riskRaw : "low"
+        let summary = String((obj["summary"] as? String ?? "").prefix(400))
+        let findings: [ReviewFindingItem] = ((obj["findings"] as? [[String: Any]]) ?? []).prefix(20).map { f in
+            let sevRaw = f["severity"] as? String ?? "low"
+            return ReviewFindingItem(
+                severity: (sevRaw == "high" || sevRaw == "medium") ? sevRaw : "low",
+                title: String((f["title"] as? String ?? "Finding").prefix(160)),
+                detail: String((f["detail"] as? String ?? "").prefix(1000)),
+                file: (f["file"] as? String).map { String($0.prefix(200)) }
+            )
+        }
+        return (risk, summary, findings)
+    }
+
+    private static func esc(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    /// Same self-contained aquarium-tide template as the Node runner
+    /// (bridge/src/review-runner.ts renderReviewHtml) — keep visually in sync.
+    static func renderHtml(_ o: ReviewOutcomeData) -> String {
+        let riskColor = o.risk == "high" ? "#c2410c" : o.risk == "medium" ? "#b45309" : "#15803d"
+        let rows = o.findings.map { f in
+            """
+            <div class="finding sev-\(f.severity)">
+              <div class="head"><span class="sev">\(f.severity.uppercased())</span> <strong>\(esc(f.title))</strong>\(f.file.map { "<code>\(esc($0))</code>" } ?? "")</div>
+              <p>\(esc(f.detail))</p>
+            </div>
+            """
+        }.joined(separator: "\n")
+        return """
+        <!doctype html>
+        <html lang="en"><head><meta charset="utf-8"><title>AgentDeck Review — \(esc(o.projectName))</title>
+        <style>
+          body { font-family: "IBM Plex Sans", -apple-system, sans-serif; background: #f6f3ec; color: #1c2a25; margin: 0; padding: 32px; }
+          .card { max-width: 760px; margin: 0 auto; background: #fffdf8; border: 1px solid #e2dcc9; border-radius: 12px; padding: 28px 32px; }
+          h1 { font-size: 20px; margin: 0 0 4px; }
+          .meta { color: #5b6f66; font-size: 13px; margin-bottom: 20px; }
+          .risk { display: inline-block; padding: 4px 12px; border-radius: 999px; color: #fffdf8; background: \(riskColor); font-weight: 600; font-size: 13px; }
+          .summary { font-size: 15px; margin: 16px 0 24px; }
+          .finding { border-left: 3px solid #e2dcc9; padding: 8px 14px; margin: 12px 0; }
+          .finding.sev-high { border-color: #c2410c; }
+          .finding.sev-medium { border-color: #b45309; }
+          .finding .sev { font-size: 11px; font-weight: 700; color: #5b6f66; margin-right: 6px; }
+          .finding code { margin-left: 8px; font-family: "JetBrains Mono", monospace; font-size: 12px; color: #3b5249; }
+          .finding p { margin: 6px 0 0; font-size: 14px; }
+          .empty { color: #5b6f66; font-style: italic; }
+          footer { margin-top: 24px; color: #8a9a91; font-size: 12px; }
+        </style></head><body><div class="card">
+          <h1>Independent Review — \(esc(o.projectName))</h1>
+          <div class="meta">\(esc(o.sessionId)) · \(ISO8601DateFormatter().string(from: o.generatedAt))</div>
+          <span class="risk">RISK \(o.risk.uppercased())</span>
+          <p class="summary">\(esc(o.summary.isEmpty ? "No summary provided by the judge." : o.summary))</p>
+          \(o.findings.isEmpty ? "<p class=\"empty\">No risky findings — the judge saw nothing worth flagging.</p>" : rows)
+          <footer>judge: \(esc(o.backend)) · session trajectory review · generated by AgentDeck (independent of the coding agent)</footer>
+        </div></body></html>
+        """
+    }
+
+    /// Write the HTML report into the app container and open it in the
+    /// default browser. NSWorkspace.open is sandbox-legal (no subprocess).
+    @discardableResult
+    static func openHtmlReport(_ o: ReviewOutcomeData) -> URL? {
+        let fm = FileManager.default
+        guard let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let dir = base.appendingPathComponent("AgentDeck/reviews", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let name = "review-\(Int(o.generatedAt.timeIntervalSince1970))-\(o.projectName.replacingOccurrences(of: "/", with: "_").prefix(40)).html"
+        let url = dir.appendingPathComponent(String(name))
+        guard (try? renderHtml(o).write(to: url, atomically: true, encoding: .utf8)) != nil else { return nil }
+        NSWorkspace.shared.open(url)
+        return url
+    }
+}
+
+// MARK: - Native result panel (the "macOS app popup" tier)
+
+/// Floating, NON-modal panel — a modal NSAlert would block the MainActor and
+/// stall the in-process daemon (WS handling, broadcasts), so it is forbidden
+/// here. One panel instance, reused across reviews.
+@MainActor
+final class ReviewPanelPresenter {
+    static let shared = ReviewPanelPresenter()
+    private var panel: NSPanel?
+
+    func present(_ outcome: ReviewOutcomeData) {
+        let hosting = NSHostingController(rootView: ReviewResultPanelView(outcome: outcome))
+        if let panel {
+            panel.contentViewController = hosting
+            panel.title = "Review — \(outcome.projectName)"
+            panel.orderFrontRegardless()
+            return
+        }
+        let p = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 420),
+            styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
+            backing: .buffered, defer: false
+        )
+        p.title = "Review — \(outcome.projectName)"
+        p.isFloatingPanel = true
+        p.level = .floating
+        p.isReleasedWhenClosed = false
+        p.contentViewController = hosting
+        p.center()
+        p.orderFrontRegardless()
+        panel = p
+    }
+}
+
+struct ReviewResultPanelView: View {
+    let outcome: ReviewOutcomeData
+
+    private var riskColor: Color {
+        switch outcome.risk {
+        case "high": return Color(red: 0.76, green: 0.25, blue: 0.05)
+        case "medium": return Color(red: 0.71, green: 0.33, blue: 0.04)
+        default: return Color(red: 0.08, green: 0.50, blue: 0.24)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("RISK \(outcome.risk.uppercased())")
+                    .font(.system(size: 12, weight: .bold))
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Capsule().fill(riskColor))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text(outcome.projectName).font(.headline)
+            }
+            Text(outcome.summary.isEmpty ? "No summary provided by the judge." : outcome.summary)
+                .font(.system(size: 13))
+                .fixedSize(horizontal: false, vertical: true)
+            Divider()
+            if outcome.findings.isEmpty {
+                Text("No risky findings — the judge saw nothing worth flagging.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(outcome.findings) { f in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(f.severity.uppercased())
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(f.severity == "high" ? .red : f.severity == "medium" ? .orange : .secondary)
+                                    Text(f.title).font(.system(size: 12, weight: .semibold))
+                                }
+                                if let file = f.file {
+                                    Text(file).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                                }
+                                Text(f.detail).font(.system(size: 11)).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            HStack {
+                Text("judge: \(outcome.backend)").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Spacer()
+                Button("Open HTML Report") {
+                    _ = ReviewRunner.openHtmlReport(outcome)
+                }
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 420, minHeight: 360)
+    }
+}
+#endif

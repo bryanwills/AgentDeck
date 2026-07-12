@@ -374,6 +374,11 @@ export interface SessionInfo {
   stopRequested?: boolean;
   /** Observed sessions: deck prompts queued for delivery at the current turn's end (Stop-hook directive queue). */
   queuedDirectives?: number;
+  /** On-demand review lifecycle for the REVIEW badge tile ('running' while the judge works). */
+  reviewStatus?: 'running' | 'done' | 'error';
+  /** Last review verdict (with reviewFindings) — devices render "risk: low · 2" on the REVIEW tile. */
+  reviewRisk?: 'low' | 'medium' | 'high';
+  reviewFindings?: number;
   promptType?: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review';  // shape of the awaiting prompt (per-session, for inline approve/deny + option buttons on rich panels)
   options?: PromptOption[];  // per-session awaiting options (multi_select) — lets a 10-up panel render inline choices for any session, not just the focused one
   elapsedSec?: number;  // derived seconds since startedAt — devices without reliable NTP render elapsed without recomputing from a wall clock
@@ -574,6 +579,30 @@ export type ESP32ToHostMessage =
   | Esp32OtaAckCommand
   | Esp32OtaErrorCommand;
 
+/**
+ * On-demand independent review lifecycle. Triggered by the REVIEW deck button
+ * (ReviewRunCommand) — the daemon reviews the session's latest work with an
+ * independent judge model (Node: working-tree diff; Swift: APME trajectory)
+ * and reports risk findings. Needs no agent control, so it works for every
+ * session type including observed codex.
+ */
+export interface ReviewStatusEvent {
+  type: 'review_status';
+  sessionId: string;
+  status: 'running' | 'error';
+  message?: string;
+}
+
+export interface ReviewResultEvent {
+  type: 'review_result';
+  sessionId: string;
+  risk: 'low' | 'medium' | 'high';
+  findings: number;
+  summary: string;
+  /** Local HTML report path (Node daemon writes + opens it in a browser). */
+  reportPath?: string;
+}
+
 export type BridgeEvent =
   | StateUpdateEvent
   | PromptOptionsEvent
@@ -593,6 +622,8 @@ export type BridgeEvent =
   | ApmeEvalEvent
   | ApmeScorecardEvent
   | ApmeRecommendationEvent
+  | ReviewStatusEvent
+  | ReviewResultEvent
   | Esp32OtaBeginEvent
   | Esp32OtaChunkEvent
   | Esp32OtaEndEvent
@@ -735,6 +766,17 @@ export interface SessionCommand {
 }
 
 /**
+ * Trigger an independent on-demand review of a session's latest work (the
+ * REVIEW deck button). Daemon-side eval with an independent judge model —
+ * no agent control involved, so every session type qualifies. Results flow
+ * back as review_status / review_result events plus SessionInfo badge fields.
+ */
+export interface ReviewRunCommand {
+  type: 'review_run';
+  sessionId: string;
+}
+
+/**
  * Device approval decision for a gated PreToolUse permission request (observed
  * sessions). The daemon holds the hook's HTTP response open keyed by
  * `requestId`; this command resolves it into a Claude Code permission decision.
@@ -767,6 +809,7 @@ export type PluginCommand =
   | ApmeVibeFeedbackCommand
   | ApmeRecommendCommand
   | PermissionDecisionCommand
+  | ReviewRunCommand
   | Esp32OtaAckCommand
   | Esp32OtaErrorCommand;
 

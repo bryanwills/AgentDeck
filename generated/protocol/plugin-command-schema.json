@@ -357,6 +357,9 @@
           "$ref": "#/definitions/PermissionDecisionCommand"
         },
         {
+          "$ref": "#/definitions/ReviewRunCommand"
+        },
+        {
           "$ref": "#/definitions/Esp32OtaAckCommand"
         },
         {
@@ -413,6 +416,24 @@
       "required": [
         "type",
         "value"
+      ],
+      "type": "object"
+    },
+    "ReviewRunCommand": {
+      "additionalProperties": false,
+      "description": "Trigger an independent on-demand review of a session's latest work (the REVIEW deck button). Daemon-side eval with an independent judge model — no agent control involved, so every session type qualifies. Results flow back as review_status / review_result events plus SessionInfo badge fields.",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "type": {
+          "const": "review_run",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "sessionId"
       ],
       "type": "object"
     },

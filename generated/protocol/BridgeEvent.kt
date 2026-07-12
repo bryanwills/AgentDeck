@@ -27,9 +27,11 @@ private val klaxon = Klaxon()
     .convert(Kind::class,                { Kind.fromValue(it.string!!) },                { "\"${it.value}\"" })
     .convert(PermissionMode::class,      { PermissionMode.fromValue(it.string!!) },      { "\"${it.value}\"" })
     .convert(PromptType::class,          { PromptType.fromValue(it.string!!) },          { "\"${it.value}\"" })
+    .convert(Risk::class,                { Risk.fromValue(it.string!!) },                { "\"${it.value}\"" })
     .convert(Layer::class,               { Layer.fromValue(it.string!!) },               { "\"${it.value}\"" })
     .convert(Outcome::class,             { Outcome.fromValue(it.string!!) },             { "\"${it.value}\"" })
     .convert(ControlMode::class,         { ControlMode.fromValue(it.string!!) },         { "\"${it.value}\"" })
+    .convert(ReviewStatus::class,        { ReviewStatus.fromValue(it.string!!) },        { "\"${it.value}\"" })
     .convert(State::class,               { State.fromValue(it.string!!) },               { "\"${it.value}\"" })
     .convert(BridgeEventStatus::class,   { BridgeEventStatus.fromValue(it.string!!) },   { "\"${it.value}\"" })
     .convert(TokenStatus::class,         { TokenStatus.fromValue(it.string!!) },         { "\"${it.value}\"" })
@@ -42,6 +44,11 @@ private val klaxon = Klaxon()
  * Bridge → clients — scorecard refresh (broadcast after eval completes or on demand).
  *
  * Bridge → clients — model recommendation for the next task (on-demand / context-aware).
+ *
+ * On-demand independent review lifecycle. Triggered by the REVIEW deck button
+ * (ReviewRunCommand) — the daemon reviews the session's latest work with an independent
+ * judge model (Node: working-tree diff; Swift: APME trajectory) and reports risk findings.
+ * Needs no agent control, so it works for every session type including observed codex.
  */
 data class BridgeEvent (
     val agentCapabilities: AgentCapabilities? = null,
@@ -250,6 +257,16 @@ data class BridgeEvent (
     val scorecards: List<ApmeModelScorecard>? = null,
     val candidates: List<ApmeRecommendation>? = null,
     val taskKind: String? = null,
+    val message: String? = null,
+    val findings: Double? = null,
+
+    /**
+     * Local HTML report path (Node daemon writes + opens it in a browser).
+     */
+    val reportPath: String? = null,
+
+    val risk: Risk? = null,
+    val summary: String? = null,
     val md5: String? = null,
 
     @Json(name = "otaId")
@@ -840,6 +857,25 @@ enum class PromptType(val value: String) {
 }
 
 /**
+ * Last review verdict (with reviewFindings) — devices render "risk: low · 2" on the REVIEW
+ * tile.
+ */
+enum class Risk(val value: String) {
+    High("high"),
+    Low("low"),
+    Medium("medium");
+
+    companion object {
+        public fun fromValue(value: String): Risk = when (value) {
+            "high"   -> High
+            "low"    -> Low
+            "medium" -> Medium
+            else     -> throw IllegalArgumentException()
+        }
+    }
+}
+
+/**
  * A run that has finished evaluation.
  */
 data class ApmeRunSummary (
@@ -994,6 +1030,19 @@ data class SessionInfo (
     @Json(name = "requestId")
     val requestID: String? = null,
 
+    val reviewFindings: Double? = null,
+
+    /**
+     * Last review verdict (with reviewFindings) — devices render "risk: low · 2" on the REVIEW
+     * tile.
+     */
+    val reviewRisk: Risk? = null,
+
+    /**
+     * On-demand review lifecycle for the REVIEW badge tile ('running' while the judge works).
+     */
+    val reviewStatus: ReviewStatus? = null,
+
     val startedAt: String? = null,
     val state: String? = null,
 
@@ -1015,6 +1064,24 @@ enum class ControlMode(val value: String) {
             "managed"  -> Managed
             "observed" -> Observed
             else       -> throw IllegalArgumentException()
+        }
+    }
+}
+
+/**
+ * On-demand review lifecycle for the REVIEW badge tile ('running' while the judge works).
+ */
+enum class ReviewStatus(val value: String) {
+    Done("done"),
+    Error("error"),
+    Running("running");
+
+    companion object {
+        public fun fromValue(value: String): ReviewStatus = when (value) {
+            "done"    -> Done
+            "error"   -> Error
+            "running" -> Running
+            else      -> throw IllegalArgumentException()
         }
     }
 }
@@ -1058,13 +1125,17 @@ enum class State(val value: String) {
 enum class BridgeEventStatus(val value: String) {
     Connected("connected"),
     Disconnected("disconnected"),
-    Reconnecting("reconnecting");
+    Error("error"),
+    Reconnecting("reconnecting"),
+    Running("running");
 
     companion object {
         public fun fromValue(value: String): BridgeEventStatus = when (value) {
             "connected"    -> Connected
             "disconnected" -> Disconnected
+            "error"        -> Error
             "reconnecting" -> Reconnecting
+            "running"      -> Running
             else           -> throw IllegalArgumentException()
         }
     }
@@ -1106,6 +1177,8 @@ enum class Type(val value: String) {
     Esp32OtaChunk("esp32_ota_chunk"),
     Esp32OtaEnd("esp32_ota_end"),
     PromptOptions("prompt_options"),
+    ReviewResult("review_result"),
+    ReviewStatus("review_status"),
     SessionsList("sessions_list"),
     StateUpdate("state_update"),
     TimelineEvent("timeline_event"),
@@ -1131,6 +1204,8 @@ enum class Type(val value: String) {
             "esp32_ota_chunk"       -> Esp32OtaChunk
             "esp32_ota_end"         -> Esp32OtaEnd
             "prompt_options"        -> PromptOptions
+            "review_result"         -> ReviewResult
+            "review_status"         -> ReviewStatus
             "sessions_list"         -> SessionsList
             "state_update"          -> StateUpdate
             "timeline_event"        -> TimelineEvent

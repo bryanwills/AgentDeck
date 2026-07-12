@@ -397,6 +397,12 @@
           "$ref": "#/definitions/ApmeRecommendationEvent"
         },
         {
+          "$ref": "#/definitions/ReviewStatusEvent"
+        },
+        {
+          "$ref": "#/definitions/ReviewResultEvent"
+        },
+        {
           "$ref": "#/definitions/Esp32OtaBeginEvent"
         },
         {
@@ -1004,6 +1010,73 @@
       ],
       "type": "object"
     },
+    "ReviewResultEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "type": "number"
+        },
+        "reportPath": {
+          "description": "Local HTML report path (Node daemon writes + opens it in a browser).",
+          "type": "string"
+        },
+        "risk": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "type": {
+          "const": "review_result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "sessionId",
+        "risk",
+        "findings",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "ReviewStatusEvent": {
+      "additionalProperties": false,
+      "description": "On-demand independent review lifecycle. Triggered by the REVIEW deck button (ReviewRunCommand) — the daemon reviews the session's latest work with an independent judge model (Node: working-tree diff; Swift: APME trajectory) and reports risk findings. Needs no agent control, so it works for every session type including observed codex.",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "error"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "const": "review_status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "sessionId",
+        "status"
+      ],
+      "type": "object"
+    },
     "SessionInfo": {
       "additionalProperties": false,
       "properties": {
@@ -1092,6 +1165,27 @@
           "type": "number"
         },
         "requestId": {
+          "type": "string"
+        },
+        "reviewFindings": {
+          "type": "number"
+        },
+        "reviewRisk": {
+          "description": "Last review verdict (with reviewFindings) — devices render \"risk: low · 2\" on the REVIEW tile.",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "reviewStatus": {
+          "description": "On-demand review lifecycle for the REVIEW badge tile ('running' while the judge works).",
+          "enum": [
+            "running",
+            "done",
+            "error"
+          ],
           "type": "string"
         },
         "startedAt": {

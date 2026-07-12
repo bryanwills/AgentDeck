@@ -249,6 +249,14 @@ initSessionSlots((result) => {
       break;
     }
 
+    case 'review-run': {
+      // Independent on-demand eval — a daemon-level command (the daemon
+      // resolves the session's work product + judge), never a PTY prompt.
+      const focused = getFocusedSession();
+      if (focused) connMgr.send({ type: 'review_run', sessionId: focused.id } as any);
+      break;
+    }
+
     case 'stop':
       sendFocusedSessionCommand({ type: 'interrupt' });
       break;

@@ -16,6 +16,11 @@ import Foundation
 /// Bridge → clients — scorecard refresh (broadcast after eval completes or on demand).
 ///
 /// Bridge → clients — model recommendation for the next task (on-demand / context-aware).
+///
+/// On-demand independent review lifecycle. Triggered by the REVIEW deck button
+/// (ReviewRunCommand) — the daemon reviews the session's latest work with an independent
+/// judge model (Node: working-tree diff; Swift: APME trajectory) and reports risk findings.
+/// Needs no agent control, so it works for every session type including observed codex.
 // MARK: - ADBridgeEvent
 struct ADBridgeEvent: Codable, Equatable {
     var agentCapabilities: ADAgentCapabilities?
@@ -133,6 +138,12 @@ struct ADBridgeEvent: Codable, Equatable {
     var scorecards: [ADApmeModelScorecard]?
     var candidates: [ADApmeRecommendation]?
     var taskKind: String?
+    var message: String?
+    var findings: Double?
+    /// Local HTML report path (Node daemon writes + opens it in a browser).
+    var reportPath: String?
+    var risk: ADRisk?
+    var summary: String?
     var md5: String?
     var otaId: String?
     var size: Double?
@@ -228,6 +239,11 @@ struct ADBridgeEvent: Codable, Equatable {
         case scorecards = "scorecards"
         case candidates = "candidates"
         case taskKind = "taskKind"
+        case message = "message"
+        case findings = "findings"
+        case reportPath = "reportPath"
+        case risk = "risk"
+        case summary = "summary"
         case md5 = "md5"
         case otaId = "otaId"
         case size = "size"
@@ -343,6 +359,11 @@ extension ADBridgeEvent {
         scorecards: [ADApmeModelScorecard]?? = nil,
         candidates: [ADApmeRecommendation]?? = nil,
         taskKind: String?? = nil,
+        message: String?? = nil,
+        findings: Double?? = nil,
+        reportPath: String?? = nil,
+        risk: ADRisk?? = nil,
+        summary: String?? = nil,
         md5: String?? = nil,
         otaId: String?? = nil,
         size: Double?? = nil,
@@ -438,6 +459,11 @@ extension ADBridgeEvent {
             scorecards: scorecards ?? self.scorecards,
             candidates: candidates ?? self.candidates,
             taskKind: taskKind ?? self.taskKind,
+            message: message ?? self.message,
+            findings: findings ?? self.findings,
+            reportPath: reportPath ?? self.reportPath,
+            risk: risk ?? self.risk,
+            summary: summary ?? self.summary,
             md5: md5 ?? self.md5,
             otaId: otaId ?? self.otaId,
             size: size ?? self.size,
@@ -1670,6 +1696,14 @@ enum ADPromptType: String, Codable, Equatable {
     case yesNoAlways = "yes_no_always"
 }
 
+/// Last review verdict (with reviewFindings) — devices render "risk: low · 2" on the REVIEW
+/// tile.
+enum ADRisk: String, Codable, Equatable {
+    case high = "high"
+    case low = "low"
+    case medium = "medium"
+}
+
 //
 // Hashable or Equatable:
 // The compiler will not be able to synthesize the implementation of Hashable or Equatable
@@ -2051,6 +2085,12 @@ struct ADSessionInfo: Codable, Equatable {
     /// directive queue).
     var queuedDirectives: Double?
     var requestId: String?
+    var reviewFindings: Double?
+    /// Last review verdict (with reviewFindings) — devices render "risk: low · 2" on the REVIEW
+    /// tile.
+    var reviewRisk: ADRisk?
+    /// On-demand review lifecycle for the REVIEW badge tile ('running' while the judge works).
+    var reviewStatus: ADReviewStatus?
     var startedAt: String?
     var state: String?
     /// Observed sessions: a device requested a soft STOP (deny at the next tool call) — render
@@ -2082,6 +2122,9 @@ struct ADSessionInfo: Codable, Equatable {
         case question = "question"
         case queuedDirectives = "queuedDirectives"
         case requestId = "requestId"
+        case reviewFindings = "reviewFindings"
+        case reviewRisk = "reviewRisk"
+        case reviewStatus = "reviewStatus"
         case startedAt = "startedAt"
         case state = "state"
         case stopRequested = "stopRequested"
@@ -2131,6 +2174,9 @@ extension ADSessionInfo {
         question: String?? = nil,
         queuedDirectives: Double?? = nil,
         requestId: String?? = nil,
+        reviewFindings: Double?? = nil,
+        reviewRisk: ADRisk?? = nil,
+        reviewStatus: ADReviewStatus?? = nil,
         startedAt: String?? = nil,
         state: String?? = nil,
         stopRequested: Bool?? = nil,
@@ -2160,6 +2206,9 @@ extension ADSessionInfo {
             question: question ?? self.question,
             queuedDirectives: queuedDirectives ?? self.queuedDirectives,
             requestId: requestId ?? self.requestId,
+            reviewFindings: reviewFindings ?? self.reviewFindings,
+            reviewRisk: reviewRisk ?? self.reviewRisk,
+            reviewStatus: reviewStatus ?? self.reviewStatus,
             startedAt: startedAt ?? self.startedAt,
             state: state ?? self.state,
             stopRequested: stopRequested ?? self.stopRequested,
@@ -2181,6 +2230,13 @@ enum ADControlMode: String, Codable, Equatable {
     case observed = "observed"
 }
 
+/// On-demand review lifecycle for the REVIEW badge tile ('running' while the judge works).
+enum ADReviewStatus: String, Codable, Equatable {
+    case done = "done"
+    case error = "error"
+    case running = "running"
+}
+
 /// Voice assistant pipeline state (wake word → STT → LLM → TTS)
 enum ADState: String, Codable, Equatable {
     case awaitingDiff = "awaiting_diff"
@@ -2200,7 +2256,9 @@ enum ADState: String, Codable, Equatable {
 enum ADBridgeEventStatus: String, Codable, Equatable {
     case connected = "connected"
     case disconnected = "disconnected"
+    case error = "error"
     case reconnecting = "reconnecting"
+    case running = "running"
 }
 
 //
@@ -2278,6 +2336,8 @@ enum ADType: String, Codable, Equatable {
     case esp32OtaChunk = "esp32_ota_chunk"
     case esp32OtaEnd = "esp32_ota_end"
     case promptOptions = "prompt_options"
+    case reviewResult = "review_result"
+    case reviewStatus = "review_status"
     case sessionsList = "sessions_list"
     case stateUpdate = "state_update"
     case timelineEvent = "timeline_event"

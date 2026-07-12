@@ -2578,6 +2578,17 @@ final class DaemonServer {
             return
         }
 
+        // Independent on-demand review (REVIEW deck button). Judges the
+        // session's TRAJECTORY with Apple Intelligence — no git, no cwd
+        // access, no agent control, so every session type qualifies. Must
+        // also run before the gateway-consume block below.
+        if type == "review_run" {
+            if let sessionId = cmd["sessionId"] as? String, !sessionId.isEmpty {
+                handleReviewRun(sessionId: sessionId)
+            }
+            return
+        }
+
         // Observed-Claude session_command: steer through hook primitives
         // (soft STOP / turn-end queue / gate resolution). Must run BEFORE the
         // gateway block below — when the OpenClaw adapter is alive it consumes
@@ -4344,6 +4355,78 @@ final class DaemonServer {
             "decision": "block",
             "reason": "The user sent this follow-up from their AgentDeck controller: \"\(directive)\". Carry out this instruction now.",
         ])
+    }
+
+    // MARK: - On-demand independent review (REVIEW deck button)
+
+    /// Badge state for sessionToDict (REVIEWING / verdict on the REVIEW tile).
+    private var lastReviewBySession: [String: (status: String, risk: String?, findings: Int?, ts: Date)] = [:]
+    private static let reviewBadgeTTL: TimeInterval = 1800
+
+    func reviewBadge(for sessionId: String) -> (status: String, risk: String?, findings: Int?)? {
+        guard let r = lastReviewBySession[sessionId] else { return nil }
+        guard Date().timeIntervalSince(r.ts) < Self.reviewBadgeTTL else {
+            lastReviewBySession[sessionId] = nil
+            return nil
+        }
+        return (r.status, r.risk, r.findings)
+    }
+
+    private func handleReviewRun(sessionId: String) {
+        if lastReviewBySession[sessionId]?.status == "running" { return }
+        let entry = pushedSessionsById[sessionId] ?? cachedSessions.first(where: { $0.id == sessionId })
+        let projectName = (entry?.projectName.isEmpty == false ? entry?.projectName : nil) ?? "session"
+        lastReviewBySession[sessionId] = ("running", nil, nil, Date())
+        broadcastRaw(["type": "review_status", "sessionId": sessionId, "status": "running"])
+        broadcastSessionsList()
+        DaemonLogger.shared.info("Review: started for \(sessionId) (\(projectName))")
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Closure (not a nested func) so it inherits the Task's MainActor
+            // isolation under Swift 6.
+            let fail: (String) -> Void = { message in
+                self.lastReviewBySession[sessionId] = ("error", nil, nil, Date())
+                self.broadcastRaw(["type": "review_status", "sessionId": sessionId, "status": "error", "message": message])
+                self.broadcastSessionsList()
+                DaemonLogger.shared.info("Review: failed for \(sessionId) — \(message)")
+            }
+            let entries = await self.timelineStore.historyForSession(sessionId, since: nil)
+            let trajectory = ReviewRunner.trajectorySummary(entries: entries)
+            guard !trajectory.isEmpty else {
+                fail("no recorded activity to review yet")
+                return
+            }
+            let prompt = ReviewRunner.buildPrompt(projectName: projectName, trajectory: trajectory)
+            guard let text = await ApmeJudgeFoundationModels.judge(prompt: prompt) else {
+                fail("judge unavailable (Apple Intelligence not ready)")
+                return
+            }
+            guard let parsed = ReviewRunner.parse(text) else {
+                fail("judge returned unparseable output")
+                return
+            }
+            let outcome = ReviewOutcomeData(
+                sessionId: sessionId,
+                projectName: projectName,
+                risk: parsed.risk,
+                summary: parsed.summary,
+                findings: parsed.findings,
+                backend: "foundation-models",
+                generatedAt: Date()
+            )
+            self.lastReviewBySession[sessionId] = ("done", parsed.risk, parsed.findings.count, Date())
+            self.broadcastRaw([
+                "type": "review_result", "sessionId": sessionId,
+                "risk": parsed.risk, "findings": parsed.findings.count,
+                "summary": parsed.summary,
+            ])
+            self.broadcastSessionsList()
+            // The app IS the UI on this tier — native floating panel (never a
+            // modal alert: that would block the MainActor-hosted daemon).
+            ReviewPanelPresenter.shared.present(outcome)
+            DaemonLogger.shared.info("Review: done for \(sessionId) — risk=\(parsed.risk) findings=\(parsed.findings.count)")
+        }
     }
 
     /// Reflect steering state (stopRequested / queued count) onto the session
@@ -6547,6 +6630,11 @@ final class DaemonServer {
         if let rid = s.requestId { d["requestId"] = rid }
         if s.stopRequested == true { d["stopRequested"] = true }
         if let qd = s.queuedDirectives, qd > 0 { d["queuedDirectives"] = qd }
+        if let badge = reviewBadge(for: s.id) {
+            d["reviewStatus"] = badge.status
+            if let risk = badge.risk { d["reviewRisk"] = risk }
+            if let findings = badge.findings { d["reviewFindings"] = findings }
+        }
         return d
     }
 
