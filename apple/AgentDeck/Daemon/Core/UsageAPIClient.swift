@@ -362,6 +362,35 @@ final class UsageAPIClient: Sendable {
         let idAuth = authNamespace(idPayload)
         let authMode = string(json, key: "auth_mode")
 
+        let subscriptionActiveUntilRaw = firstString([
+            string(json, key: "chatgpt_subscription_active_until"),
+            string(accessAuth, key: "chatgpt_subscription_active_until"),
+            string(idAuth, key: "chatgpt_subscription_active_until"),
+            string(accessPayload, key: "chatgpt_subscription_active_until"),
+            string(idPayload, key: "chatgpt_subscription_active_until"),
+            string(accessPayload, key: "subscription_active_until"),
+            string(idPayload, key: "subscription_active_until"),
+        ])
+        let subscriptionActiveStart = firstString([
+            string(json, key: "chatgpt_subscription_active_start"),
+            string(accessAuth, key: "chatgpt_subscription_active_start"),
+            string(idAuth, key: "chatgpt_subscription_active_start"),
+            string(accessPayload, key: "chatgpt_subscription_active_start"),
+            string(idPayload, key: "chatgpt_subscription_active_start"),
+            string(accessPayload, key: "subscription_active_start"),
+            string(idPayload, key: "subscription_active_start"),
+        ])
+        // Codex never refreshes the login-time window snapshot, so for an
+        // auto-renewing plan the raw `active_until` drifts into the past
+        // mid-cycle. Roll it to the next real renewal boundary before it reaches
+        // any renderer (macOS/D200H/ESP32) — mirrors the Node SSOT
+        // `resolveChatGptRenewalDate` in bridge/src/codex-auth.ts.
+        let subscriptionActiveUntil = Self.resolveChatGptRenewalDate(
+            activeStart: subscriptionActiveStart,
+            activeUntil: subscriptionActiveUntilRaw,
+            now: Date()
+        )
+
         return CodexAuthStatus(
             authMode: authMode,
             webAuthConnected: authMode == "chatgpt" && accessTokenPresent,
@@ -387,15 +416,7 @@ final class UsageAPIClient: Sendable {
                 string(idPayload, key: "account_id"),
                 string(json, key: "account_id"),
             ]),
-            subscriptionActiveUntil: firstString([
-                string(json, key: "chatgpt_subscription_active_until"),
-                string(accessAuth, key: "chatgpt_subscription_active_until"),
-                string(idAuth, key: "chatgpt_subscription_active_until"),
-                string(accessPayload, key: "chatgpt_subscription_active_until"),
-                string(idPayload, key: "chatgpt_subscription_active_until"),
-                string(accessPayload, key: "subscription_active_until"),
-                string(idPayload, key: "subscription_active_until"),
-            ]),
+            subscriptionActiveUntil: subscriptionActiveUntil,
             lastRefreshAt: string(json, key: "last_refresh")
         )
     }
@@ -422,6 +443,75 @@ final class UsageAPIClient: Sendable {
             subscriptionActiveUntil: current.subscriptionActiveUntil ?? previous.subscriptionActiveUntil,
             lastRefreshAt: current.lastRefreshAt ?? previous.lastRefreshAt
         )
+    }
+
+    private static let codexRenewalDaySeconds: TimeInterval = 86_400
+
+    /// Resolve the ChatGPT subscription's *next* renewal date from the login
+    /// snapshot Codex embeds in `auth.json`.
+    ///
+    /// Codex stamps `chatgpt_subscription_active_until` (and `..._active_start`)
+    /// once, at `codex login`, and silent token refreshes carry that same window
+    /// forward verbatim — so for an auto-renewing plan the snapshot's end slides
+    /// into the past mid-cycle even though the subscription is alive and paid,
+    /// which downstream surfaces (macOS/Android dashboard, D200H, ESP32 e-ink)
+    /// misread as a false "renewal needed". Given the window `[start, until]`,
+    /// roll the end forward by whole billing periods until it is strictly future
+    /// — the next real renewal boundary. The raw `until` is returned untouched
+    /// when it is already future, unparseable, or the window can't be trusted
+    /// (missing start, non-positive period, or a period outside the
+    /// monthly/annual 20–400d band) so genuine "malformed"/"unknown" signals
+    /// still reach the renderers.
+    ///
+    /// Hand-ported mirror of `resolveChatGptRenewalDate` in
+    /// `bridge/src/codex-auth.ts` — keep the two in lockstep.
+    static func resolveChatGptRenewalDate(
+        activeStart: String?,
+        activeUntil: String?,
+        now: Date
+    ) -> String? {
+        guard let activeUntil else { return activeUntil }
+        guard let until = parseCodexRenewalDate(activeUntil) else { return activeUntil }
+        if until > now { return activeUntil } // already future — trust the snapshot
+        guard let activeStart, let start = parseCodexRenewalDate(activeStart) else {
+            return activeUntil // no window to derive a period from
+        }
+        let period = until.timeIntervalSince(start)
+        // Only roll monthly/annual-ish windows; anything shorter (incl. a
+        // non-positive/malformed period) or longer is not a trustworthy cadence.
+        if period < 20 * codexRenewalDaySeconds || period > 400 * codexRenewalDaySeconds {
+            return activeUntil
+        }
+        let missed = max(1, Int((now.timeIntervalSince(until) / period).rounded(.up)))
+        var rolled = until.addingTimeInterval(Double(missed) * period)
+        if rolled <= now { rolled = rolled.addingTimeInterval(period) } // guarantee strictly future
+        return codexRenewalISOString(rolled)
+    }
+
+    private static func parseCodexRenewalDate(_ raw: String) -> Date? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.contains("T") {
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = fractional.date(from: trimmed) { return date }
+            let plain = ISO8601DateFormatter()
+            plain.formatOptions = [.withInternetDateTime]
+            return plain.date(from: trimmed)
+        }
+        // Bare `YYYY-MM-DD` (Codex sometimes stores a date-only window) — UTC midnight.
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: trimmed)
+    }
+
+    private static func codexRenewalISOString(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter.string(from: date)
     }
 
     private func decodeJWT(_ token: String?) -> [String: Any]? {
