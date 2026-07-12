@@ -195,6 +195,12 @@ actor OpenClawAdapter {
     private let standardRPCResponseTimeoutNanoseconds: UInt64 = 20_000_000_000
 
     private var currentSessionKey: String?
+    /// Model configured on the canonical main session. Gateway `models.list`
+    /// does not always expose the CLI's `default` tag, so this is the reliable
+    /// fallback for the virtual OpenClaw session row.
+    private var mainSessionModelKey: String?
+    private var modelDisplayNameByKey: [String: String] = [:]
+    private var explicitDefaultModelName: String?
     private var currentRunId: String?
     private var promptCapturedForRunId: String? // guard: emit prompt entry once per runId
     private var automatedRunId: String? // runId whose prompt was a scheduled (cron) turn — flagged automated
@@ -261,6 +267,9 @@ actor OpenClawAdapter {
         pairingRequired = false
         disableDeviceAuthForNextConnect = false
         clientInitiatedCloseTask = nil
+        mainSessionModelKey = nil
+        modelDisplayNameByKey = [:]
+        explicitDefaultModelName = nil
         // Make every fresh-cycle visible in the file log. Without this, an
         // observer inspecting daemon.log can't tell whether a new attempt is
         // running on a brand-new adapter instance (state reset to defaults)
@@ -1232,6 +1241,8 @@ actor OpenClawAdapter {
         }
         currentSessionKey = sorted.first?["key"] as? String
         DaemonLogger.shared.debug("OpenClaw", "Active session: \(currentSessionKey ?? "nil")")
+        mainSessionModelKey = Self.mainSessionModelKey(from: sessions)
+        emitResolvedModel()
         if let currentSessionKey {
             sendRPC(method: "sessions.messages.subscribe", params: ["key": currentSessionKey])
         }
@@ -1357,6 +1368,13 @@ actor OpenClawAdapter {
             "models": entries,
             "defaultModel": defaultModel as Any,
         ])
+        modelDisplayNameByKey = entries.reduce(into: [:]) { names, entry in
+            guard let key = entry["key"] as? String,
+                  let name = entry["name"] as? String else { return }
+            names[key] = name
+        }
+        explicitDefaultModelName = defaultModel
+        emitResolvedModel()
     }
 
     private func fetchModelCatalog() async -> ([[String: Any]], String?)? {
@@ -1385,9 +1403,58 @@ actor OpenClawAdapter {
                 "available": available,
             ]
         }
-        let defaultModel = entries.first(where: { ($0["role"] as? String) == "default" })?["name"] as? String
-            ?? entries.first(where: { ($0["available"] as? Bool) != false })?["name"] as? String
+        // Never infer the configured model from catalog order. `models.list`
+        // may omit the CLI-only default tag, and local models commonly sort
+        // before the actual remote primary.
+        let defaultModel = Self.explicitDefaultModelName(payload: payload, entries: entries)
         return (entries, defaultModel)
+    }
+
+    private func emitResolvedModel() {
+        let sessionModel = mainSessionModelKey.map { modelDisplayNameByKey[$0] ?? $0 }
+        let resolvedModel = explicitDefaultModelName ?? sessionModel
+        _onEvent?([
+            "type": "gateway_model",
+            "modelName": resolvedModel.map { $0 as Any } ?? NSNull(),
+        ])
+    }
+
+    static func mainSessionModelKey(from sessions: [[String: Any]]) -> String? {
+        guard let main = sessions.first(where: {
+            Self.stringValue($0["key"]) == "agent:main:main"
+                || Self.stringValue($0["id"]) == "agent:main:main"
+        }) else { return nil }
+
+        let nested = main["model"] as? [String: Any]
+        let model = Self.stringValue(main["model"])
+            ?? Self.stringValue(main["modelId"])
+            ?? Self.stringValue(nested?["id"])
+            ?? Self.stringValue(nested?["name"])
+        guard let model else { return nil }
+        let provider = Self.stringValue(main["modelProvider"])
+            ?? Self.stringValue(main["provider"])
+            ?? Self.stringValue(nested?["provider"])
+        if model.contains("/") { return model }
+        guard let provider else { return model }
+        return "\(provider)/\(model)"
+    }
+
+    static func explicitDefaultModelName(
+        payload: [String: Any],
+        entries: [[String: Any]]
+    ) -> String? {
+        let explicitDefaultKey = Self.stringValue(payload["defaultModel"])
+            ?? Self.stringValue(payload["primaryModel"])
+            ?? Self.stringValue(payload["default"])
+        return explicitDefaultKey.flatMap { key in
+            entries.first(where: { ($0["key"] as? String) == key })?["name"] as? String ?? key
+        } ?? entries.first(where: { ($0["role"] as? String) == "default" })?["name"] as? String
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        guard let text = value as? String else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     func fetchHealthHasError() async -> Bool? {

@@ -4364,6 +4364,13 @@ final class DaemonServer {
                     broadcastUsage()
                 }
             }
+        case "gateway_model":
+            // An explicit nil clears a catalog-order guess cached by an older
+            // daemon build. The adapter only emits a value sourced from the
+            // Gateway default metadata or the canonical main session.
+            gatewayModelName = event["modelName"] as? String
+            broadcastStateUpdate()
+            broadcastUsage()
         default:
             break
         }

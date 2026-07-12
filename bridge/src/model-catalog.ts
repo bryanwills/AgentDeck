@@ -109,16 +109,14 @@ export async function fetchModelCatalog(): Promise<{ entries: ModelCatalogEntry[
 /**
  * Get the default model name from the catalog, or null.
  * Returns the display name (e.g., "Claude Haiku 4.5"), not the API key.
- * Falls back to first available model if no default is marked.
+ * Returns null if no default is marked. Catalog ordering is not routing state.
  */
 export async function getDefaultModelName(): Promise<string | null> {
   const catalog = await fetchModelCatalog();
   if (!catalog) return null;
   const defaultEntry = catalog.entries.find((e) => e.role === 'default');
   if (defaultEntry) return defaultEntry.name ?? null;
-  // Fallback: first available model if no "default" tag
-  const fallback = catalog.entries.find((e) => e.available !== false);
-  return fallback?.name ?? null;
+  return null;
 }
 
 /**

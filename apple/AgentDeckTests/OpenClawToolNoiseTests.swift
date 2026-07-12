@@ -25,6 +25,48 @@ import XCTest
 @MainActor
 final class OpenClawToolNoiseTests: XCTestCase {
 
+    func testMainSessionModelUsesProviderQualifiedIdentifier() {
+        let sessions: [[String: Any]] = [
+            ["key": "agent:other:main", "model": "qwen-local"],
+            ["key": "agent:main:main", "model": "glm-5.2", "modelProvider": "zai"],
+        ]
+        XCTAssertEqual(OpenClawAdapter.mainSessionModelKey(from: sessions), "zai/glm-5.2")
+    }
+
+    func testMainSessionModelDoesNotFallBackToFirstSession() {
+        let sessions: [[String: Any]] = [
+            ["key": "agent:other:main", "model": "qwen-local", "modelProvider": "mlx"],
+        ]
+        XCTAssertNil(OpenClawAdapter.mainSessionModelKey(from: sessions))
+    }
+
+    func testMainSessionModelAcceptsNestedGatewayShape() {
+        let sessions: [[String: Any]] = [
+            ["id": "agent:main:main", "model": ["id": "glm-5.2", "provider": "zai"]],
+        ]
+        XCTAssertEqual(OpenClawAdapter.mainSessionModelKey(from: sessions), "zai/glm-5.2")
+    }
+
+    func testCatalogDoesNotTreatFirstAvailableModelAsDefault() {
+        let entries: [[String: Any]] = [
+            ["key": "mlx/qwen", "name": "Qwen Local", "role": "configured", "available": true],
+            ["key": "zai/glm-5.2", "name": "GLM-5.2 (1M)", "role": "configured", "available": true],
+        ]
+        XCTAssertNil(OpenClawAdapter.explicitDefaultModelName(payload: [:], entries: entries))
+    }
+
+    func testGatewayPrimaryKeyMapsToCatalogDisplayName() {
+        let entries: [[String: Any]] = [
+            ["key": "mlx/qwen", "name": "Qwen Local", "role": "configured"],
+            ["key": "zai/glm-5.2", "name": "GLM-5.2 (1M)", "role": "configured"],
+        ]
+        XCTAssertEqual(
+            OpenClawAdapter.explicitDefaultModelName(
+                payload: ["primaryModel": "zai/glm-5.2"], entries: entries),
+            "GLM-5.2 (1M)"
+        )
+    }
+
     // MARK: - Producer placeholder drop (OpenClawAdapter.isPlaceholderOnlySessionTool)
 
     /// Empty payload (no name, no input, no output) — the worst-case
