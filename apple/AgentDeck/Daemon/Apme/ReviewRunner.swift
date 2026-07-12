@@ -42,7 +42,14 @@ enum ReviewRunner {
 
     /// Compress the session's timeline into a judge-readable trajectory.
     /// Newest-last, capped so the on-device model's context stays comfortable.
-    static func trajectorySummary(entries: [DaemonTimelineEntry], maxChars: Int = 20_000) -> String {
+    ///
+    /// The on-device Apple Intelligence model has a small (~4k-token) context,
+    /// and the whole review prompt (this trajectory + the instructions + room
+    /// for the JSON answer) must fit inside it — a 20k-char trajectory reliably
+    /// overran it and the judge threw, which surfaced as a misleading "no
+    /// judge" panel. Default cap is now sized for that window; a stronger judge
+    /// (API / large MLX) can review far more via a larger cap.
+    static func trajectorySummary(entries: [DaemonTimelineEntry], maxChars: Int = 6_000) -> String {
         var lines: [String] = []
         for e in entries.suffix(60) {
             let body = [e.raw, e.detail ?? ""].filter { !$0.isEmpty }.joined(separator: " — ")
@@ -194,6 +201,16 @@ final class ReviewPanelPresenter {
         )
     }
 
+    /// Runtime failure (a judge IS configured, but the call failed) — distinct
+    /// from the setup guidance, so the user isn't told to configure a judge
+    /// they already have.
+    func presentError(projectName: String, message: String) {
+        showHosting(
+            NSHostingController(rootView: ReviewErrorPanelView(projectName: projectName, message: message)),
+            title: "Review — \(projectName)"
+        )
+    }
+
     private func showHosting(_ hosting: NSViewController, title: String) {
         if let panel {
             panel.contentViewController = hosting
@@ -218,6 +235,30 @@ final class ReviewPanelPresenter {
         p.center()
         p.orderFrontRegardless()
         panel = p
+    }
+}
+
+struct ReviewErrorPanelView: View {
+    let projectName: String
+    let message: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Review didn't finish").font(.headline)
+            Text("A judge is configured, but the review couldn't complete:")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(message).font(.system(size: 13))
+                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.10)).cornerRadius(6)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("The on-device Apple Intelligence judge has a small context window — large changes may not fit. For big reviews, configure a stronger judge (Anthropic API, or a 30B-class local MLX model) in APME settings.")
+                .font(.system(size: 11)).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }
+        .padding(16)
+        .frame(minWidth: 400, minHeight: 220)
     }
 }
 

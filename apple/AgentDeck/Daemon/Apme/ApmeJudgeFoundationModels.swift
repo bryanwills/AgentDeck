@@ -35,23 +35,76 @@ enum ApmeJudgeFoundationModels {
     }
 
     /// A short human-readable reason when `isAvailable` is false — surfaced
-    /// in logs and optionally in the Dashboard info card.
+    /// in logs and optionally in the Dashboard info card. Only meaningful when
+    /// `isAvailable == false`; callers must not present this for the
+    /// `.available` case (it would read as the nonsensical "available").
     static var unavailableReason: String {
 #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             switch SystemLanguageModel.default.availability {
             case .available:
-                return "available"
+                return "Apple Intelligence is available"
+            case .unavailable(.deviceNotEligible):
+                return "this Mac is not eligible for Apple Intelligence"
+            case .unavailable(.appleIntelligenceNotEnabled):
+                return "Apple Intelligence is not enabled in System Settings"
+            case .unavailable(.modelNotReady):
+                return "the on-device model is still downloading — try again shortly"
             case .unavailable(let reason):
-                return "unavailable: \(reason)"
+                return "Apple Intelligence unavailable: \(reason)"
             @unknown default:
-                return "unavailable: unknown state"
+                return "Apple Intelligence is unavailable"
             }
         } else {
-            return "macOS 26 or later required"
+            return "macOS 26 or later is required for the on-device judge"
         }
 #else
-        return "FoundationModels framework not present in this build"
+        return "this build was compiled without the FoundationModels framework"
+#endif
+    }
+
+    /// Failure surface for the on-demand REVIEW path, which needs to tell a
+    /// runtime failure (judge available but the call errored — e.g. the
+    /// change is too large for the on-device context) apart from "no judge
+    /// configured". `judge()` stays nil-returning for the best-effort eval
+    /// pipeline; this throwing variant lets REVIEW show an accurate message.
+    enum JudgeError: Error, CustomStringConvertible {
+        case notAvailable(String)
+        case empty
+        case callFailed(String)
+        var description: String {
+            switch self {
+            case .notAvailable(let r): return r
+            case .empty: return "the judge returned an empty response"
+            case .callFailed(let r): return r
+            }
+        }
+    }
+
+    static func judgeThrowing(prompt: String) async throws -> String {
+#if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            guard case .available = SystemLanguageModel.default.availability else {
+                throw JudgeError.notAvailable(unavailableReason)
+            }
+            do {
+                let session = LanguageModelSession(
+                    instructions: "You are an exacting code evaluator. Reply with strict JSON only."
+                )
+                let options = GenerationOptions(temperature: 0)
+                let response = try await session.respond(to: prompt, options: options)
+                let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                if text.isEmpty { throw JudgeError.empty }
+                return text
+            } catch let e as JudgeError {
+                throw e
+            } catch {
+                throw JudgeError.callFailed(String(describing: error))
+            }
+        }
+        throw JudgeError.notAvailable(unavailableReason)
+#else
+        throw JudgeError.notAvailable(unavailableReason)
 #endif
     }
 

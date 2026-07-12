@@ -4398,23 +4398,34 @@ final class DaemonServer {
                 return
             }
             // Judge preflight — Apple Intelligence is the on-device judge on
-            // this tier. When unavailable, show the setup guidance panel
-            // (frontier API / OpenClaw / MLX / enable Apple Intelligence)
-            // rather than a bare error — parity with the Node browser guide.
+            // this tier. NO judge configured → setup guidance panel (frontier
+            // API / OpenClaw / MLX / enable Apple Intelligence), parity with
+            // the Node browser guide. This must ONLY fire for a genuine
+            // config gap (isAvailable == false).
             guard ApmeJudgeFoundationModels.isAvailable else {
                 ReviewPanelPresenter.shared.presentGuidance(
                     reason: ApmeJudgeFoundationModels.unavailableReason)
                 fail("no judge — Apple Intelligence not ready (setup guidance shown)")
                 return
             }
+            // The judge IS available — a failure here is a RUNTIME error (most
+            // often: the change is too large for the on-device context), NOT a
+            // missing judge. Show a runtime error panel, never the setup guide.
             let prompt = ReviewRunner.buildPrompt(projectName: projectName, trajectory: trajectory)
-            guard let text = await ApmeJudgeFoundationModels.judge(prompt: prompt) else {
-                ReviewPanelPresenter.shared.presentGuidance(
-                    reason: ApmeJudgeFoundationModels.unavailableReason)
-                fail("judge unavailable (Apple Intelligence not ready)")
+            let text: String
+            do {
+                text = try await ApmeJudgeFoundationModels.judgeThrowing(prompt: prompt)
+            } catch {
+                ReviewPanelPresenter.shared.presentError(
+                    projectName: projectName,
+                    message: "The on-device judge couldn't process this review (\(error)).")
+                fail("judge call failed: \(error)")
                 return
             }
             guard let parsed = ReviewRunner.parse(text) else {
+                ReviewPanelPresenter.shared.presentError(
+                    projectName: projectName,
+                    message: "The judge replied, but its output wasn't valid review JSON. This can happen when a change is near the on-device model's size limit.")
                 fail("judge returned unparseable output")
                 return
             }
