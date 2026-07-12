@@ -122,6 +122,26 @@ void snapshot(Snap& s) {
         strncpy(dst.question, src.question, sizeof(dst.question) - 1);
         strncpy(dst.activity, src.activity, sizeof(dst.activity) - 1);
         dst.alive = src.alive;
+        // TIMELINE-derived fallback: when the live activity one-liner is empty
+        // (idle sessions have no current tool/action), surface what this session
+        // most recently accomplished — its latest milestone timeline row — so the
+        // card shows meaningful summarized work instead of a blank detail line.
+        // Bounded scan (timelineCount ≤ TIMELINE_MAX_ENTRIES) already under lock.
+        if (!dst.activity[0]) {
+            for (uint8_t back = 0; back < g_state.timelineCount; back++) {
+                uint8_t ti = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - back) % TIMELINE_MAX_ENTRIES);
+                const TimelineEntry& te = g_state.timeline[ti];
+                if (strcmp(te.sessionId, src.id) != 0) continue;
+                if (!te.raw[0] || te.raw[0] == '{' || te.raw[0] == '[') continue;
+                bool milestone = strcmp(te.type, "chat_response") == 0 || strcmp(te.type, "chat_end") == 0 ||
+                                 strcmp(te.type, "task_end") == 0 || strcmp(te.type, "chat_start") == 0 ||
+                                 strcmp(te.type, "task_start") == 0;
+                if (!milestone) continue;
+                strncpy(dst.activity, te.raw, sizeof(dst.activity) - 1);
+                dst.activity[sizeof(dst.activity) - 1] = '\0';
+                break;
+            }
+        }
     }
     s.optionCount = g_state.optionCount < 3 ? g_state.optionCount : 3;
     for (uint8_t i = 0; i < s.optionCount; i++)
@@ -658,7 +678,9 @@ void drawUsageFooter(const Snap& s, bool showIdentity, int16_t sepY = 370) {
     // Ticker — latest timeline event as ONE compressed line (the per-card
     // activity summary is the surface that gets two lines, not this).
     // UTF-8/한글 safe — Korean prompts previously rendered as "######?".
-    if (s.tickerText[0]) {
+    // Gated on the live daemon link: a stale timeline line lingering under the
+    // "searching…" / no-link screen read as if the daemon were still connected.
+    if (s.bridgeConnected && s.tickerText[0]) {
         const int16_t ty = 470;
         textAt(16, ty, s.tickerTime, &FreeSansBold9pt7b);
         char tf[108];
@@ -714,7 +736,11 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
     int16_t sy = ny + (tall ? 36 : 26);
     drawStateMarker(tx, sy - 11, 12, r.state);
     char stateLine[64];
-    if (!awaiting && r.tool[0]) {
+    // Only fall back to the raw tool ("Bash") on the state line when there is NO
+    // activity summary — the activity/timeline line below now carries the
+    // meaningful one-liner, so repeating the bare tool here is redundant noise at
+    // glance distance.
+    if (!awaiting && r.tool[0] && !r.activity[0]) {
         char t[40]; ascii(t, sizeof(t), r.tool);
         snprintf(stateLine, sizeof(stateLine), "%s · %s", label, t);
     } else {

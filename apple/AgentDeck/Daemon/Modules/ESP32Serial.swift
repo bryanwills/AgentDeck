@@ -917,9 +917,16 @@ actor ESP32Serial {
                             "state": lim(s["state"], 19),
                             "alive": s["alive"] ?? true,
                             "currentTool": lim(s["currentTool"], 39),
+                            // Clean per-session one-liner ("Editing auth.ts") from the
+                            // shared activity pipeline — glance surfaces (InkDeck cards,
+                            // XTeink X3/X4 rows) render this instead of the raw tool name.
+                            // Without it the device falls back to "Bash". Mirrors the Node
+                            // bridge serial map (bridge/src/esp32-serial.ts activity cap 79).
+                            "activity": lim(s["activity"], 79),
                             "promptType": lim(s["promptType"], 19),
                             "question": lim(s["question"], 159)
                         ]
+                        if let p = s["port"] { o["port"] = p }
                         if let es = s["elapsedSec"] { o["elapsedSec"] = es }
                         if let op = s["options"] { o["options"] = op }
                         return o

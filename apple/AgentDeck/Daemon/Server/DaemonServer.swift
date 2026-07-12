@@ -6812,6 +6812,12 @@ final class DaemonServer {
             "type": e.type,
             "raw": e.raw,
         ]
+        // Host-local "HH:MM" stamped at the source. ESP32 devices run NTP in UTC
+        // and have no timezone, so rendering `ts` directly shows a clock hours off
+        // (e.g. 9h in KST); the InkDeck ticker reads `localHm` for the wall time.
+        // Mirrors the Node bridge `stampLocalHm` (bridge/src/bridge-core.ts); native
+        // apps that derive HH:mm themselves simply ignore the extra field.
+        if e.ts > 0 { dict["localHm"] = Self.localHmString(e.ts) }
         if let v = e.detail { dict["detail"] = v }
         if let v = e.approvalId { dict["approvalId"] = v }
         if let v = e.status { dict["status"] = v }
@@ -6844,6 +6850,15 @@ final class DaemonServer {
         if let v = e.taskCategory { dict["taskCategory"] = v }
         if let v = e.taskSummary { dict["taskSummary"] = v }
         return dict
+    }
+
+    /// Format an epoch-millisecond timestamp as host-local "HH:MM". Uses
+    /// `Calendar.current` (host timezone) — no shared DateFormatter so there's
+    /// no cross-actor mutable state. Mirrors Node `stampLocalHm`.
+    private static func localHmString(_ tsMs: Double) -> String {
+        let date = Date(timeIntervalSince1970: tsMs / 1000.0)
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
     }
 
     /// Pure-function core of the orphan reaper: scan a snapshot of timeline

@@ -43,7 +43,7 @@ Dispatch on the top-level `"type"`. The forwarded sets are defined in `protocol.
 | `type` | Purpose |
 |---|---|
 | `state_update` | Per-session state (idle / processing / awaiting_* …). The primary render input. |
-| `sessions_list` | Full session roster — id, agent type, state, label. |
+| `sessions_list` | Full session roster — id, agent type, state, label. Each session also carries `activity`: a clean one-liner ("Editing auth.ts") from the shared activity pipeline — **render this, not the raw `currentTool`** ("Bash"). Both the Node bridge and the in-process Swift daemon now populate it; fall back to `currentTool`/`currentTask`/`goal` only when `activity` is empty. |
 | `usage_update` | Subscription / rate-limit gauges (Claude 5h, Codex, Antigravity, …). |
 | `connection` / `connected` | Connect/disconnect ack. Actual link state is tracked by WS event callbacks; these are logged for diagnostics. |
 
@@ -51,7 +51,7 @@ Dispatch on the top-level `"type"`. The forwarded sets are defined in `protocol.
 
 | `type` | Purpose |
 |---|---|
-| `timeline_event` | Incremental activity-log row. |
+| `timeline_event` | Incremental activity-log row. `ts` is epoch-ms; entries also carry `localHm` = daemon host-local "HH:MM" (both daemons stamp it now) — RTC-less clients render `localHm` for the wall time rather than deriving from `ts` in UTC. |
 | `timeline_history` | Backfill of recent timeline rows on (re)connect. |
 | `display_state` | Host display on/off + optional `dim {enabled, mode, level}`. Absent `dim` ⇒ legacy full-off. Level is percent 1–100 → scale to the board's backlight domain, floored at 1. |
 | `wifi_provision` | Credentials pushed over serial (USB provisioning flow). |
