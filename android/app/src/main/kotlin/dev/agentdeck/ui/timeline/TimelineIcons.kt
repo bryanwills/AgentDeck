@@ -89,18 +89,33 @@ fun entryHasDetailBody(type: String): Boolean =
     type != "task_start" && type != "task_end" && type != "task_milestone"
 
 /**
+ * Staleness cap for the in-flight task spinner: a `task_start` older than
+ * this without a matching `task_end` is treated as resolved-but-orphaned.
+ * Mirrors `IN_FLIGHT_TASK_MAX_AGE_MS` in shared/src/timeline-icons.ts and
+ * Apple `inFlightTaskMaxAgeSec` — without it, tablet task rows spun forever
+ * on orphaned tasks that macOS already rendered as completed.
+ */
+const val IN_FLIGHT_TASK_MAX_AGE_MS = 10 * 60 * 1000L
+
+/**
  * True when [entry] is a `task_start` whose matching `task_end` (same
- * `taskId`) hasn't yet appeared in [siblings]. Mirrors `isInFlightTask` in
+ * `taskId`) hasn't yet appeared in [siblings] and the row is younger than
+ * [IN_FLIGHT_TASK_MAX_AGE_MS]. Mirrors `isInFlightTask` in
  * shared/src/timeline-icons.ts — used to spin the leading icon for in-flight
  * task hierarchy markers instead of the static `task` glyph.
  */
-fun isInFlightTask(entry: TimelineEntry, siblings: List<TimelineEntry>): Boolean {
+fun isInFlightTask(
+    entry: TimelineEntry,
+    siblings: List<TimelineEntry>,
+    nowMs: Long = System.currentTimeMillis(),
+): Boolean {
     if (entry.type != "task_start") return false
     val taskId = entry.taskId ?: return false
     if (taskId.isEmpty()) return false
     for (s in siblings) {
         if (s.type == "task_end" && s.taskId == taskId) return false
     }
+    if (nowMs - entry.timestamp > IN_FLIGHT_TASK_MAX_AGE_MS) return false
     return true
 }
 
@@ -164,5 +179,5 @@ fun isRotatingEntry(
         }
         return true
     }
-    return isInFlightTask(entry, siblings)
+    return isInFlightTask(entry, siblings, nowMs)
 }

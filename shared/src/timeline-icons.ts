@@ -76,20 +76,35 @@ export const TIMELINE_ICON_KEYS: readonly TimelineIconKey[] = [
 ] as const;
 
 /**
+ * Staleness cap for the in-flight task spinner: a `task_start` older than
+ * this without a matching `task_end` is treated as resolved-but-orphaned
+ * (daemon killed mid-task / hook delivery race / session_end early-return).
+ * The daemon-side orphan reaper eventually upserts a synthetic task_end, but
+ * this UI guard is independent so a stale row reads as completed even before
+ * the reaper runs. Value matches Apple's `inFlightTaskMaxAgeSec`.
+ */
+export const IN_FLIGHT_TASK_MAX_AGE_MS = 10 * 60 * 1000;
+
+/**
  * True when `entry` is a `task_start` whose matching `task_end` (same `taskId`)
- * has not yet appeared among `siblings`. Lets clients render in-flight task
- * hierarchy markers with the rotating "running" treatment instead of the
- * static `task` icon. Mirrored in Apple `isInFlightTask` and Android
- * `isInFlightTask`.
+ * has not yet appeared among `siblings` and the row is younger than
+ * `IN_FLIGHT_TASK_MAX_AGE_MS`. Lets clients render in-flight task hierarchy
+ * markers with the rotating "running" treatment instead of the static `task`
+ * icon. Mirrored in Apple `timelineIsInFlightTask` and Android
+ * `isInFlightTask` — update all three in the same commit.
  */
 export function isInFlightTask(
-  entry: Pick<TimelineEntry, 'type' | 'taskId'>,
+  entry: Pick<TimelineEntry, 'type' | 'taskId'> & Partial<Pick<TimelineEntry, 'ts'>>,
   siblings: ReadonlyArray<Pick<TimelineEntry, 'type' | 'taskId'>>,
+  nowMs?: number,
 ): boolean {
   if (entry.type !== 'task_start') return false;
   if (!entry.taskId) return false;
   for (const s of siblings) {
     if (s.type === 'task_end' && s.taskId === entry.taskId) return false;
+  }
+  if (entry.ts != null && (nowMs ?? Date.now()) - entry.ts > IN_FLIGHT_TASK_MAX_AGE_MS) {
+    return false;
   }
   return true;
 }
@@ -151,7 +166,7 @@ export function isRotatingEntry(
     }
     return true;
   }
-  return isInFlightTask(entry, siblings);
+  return isInFlightTask(entry, siblings, nowMs);
 }
 
 /**

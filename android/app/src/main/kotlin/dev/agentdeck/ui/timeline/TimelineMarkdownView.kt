@@ -273,6 +273,58 @@ fun timelineDetailIsRedundant(detail: String, raw: String): Boolean {
 }
 
 /**
+ * Whether the bold Summary line would merely repeat the opening of the detail
+ * body shown below it. Standalone chat_response rows are stamped by every
+ * producer with `summary` (raw) as a plain character-prefix truncation of
+ * `detail` (no ellipsis), so the check is a markdown-stripped token-prefix
+ * comparison, allowing the final summary token to be cut mid-word by the
+ * truncation boundary. Mirrors Swift `timelineSummaryIsRedundantWithDetail`
+ * (apple/AgentDeck/UI/Monitor/TimelineStripView.swift) — keep in lockstep.
+ */
+fun timelineSummaryIsRedundantWithDetail(summary: String, detail: String): Boolean {
+    val sTokens = normalizeForFuzzy(stripMarkdownInline(summary)).split(' ').filter { it.isNotEmpty() }
+    val dTokens = normalizeForFuzzy(stripMarkdownInline(detail)).split(' ').filter { it.isNotEmpty() }
+    if (sTokens.isEmpty() || dTokens.isEmpty()) return false
+    if (sTokens == dTokens) return true
+    if (sTokens.size < 3 || dTokens.size < sTokens.size) return false
+    for (i in 0 until sTokens.size - 1) {
+        if (sTokens[i] != dTokens[i]) return false
+    }
+    return dTokens[sTokens.size - 1].startsWith(sTokens[sTokens.size - 1])
+}
+
+/**
+ * Promote an informative paragraph over a generic outcome lead ("반영했고…",
+ * "Done.") when summarizing a standalone chat_response. Mirrors Swift
+ * `timelinePromoteInformativeLead` (TimelineStripView.swift) — keep in
+ * lockstep.
+ */
+fun timelinePromoteInformativeLead(raw: String, type: String): String {
+    if (type != "chat_response") return raw
+    val paragraphs = raw.split("\n\n").map { it.trim() }.filter { it.isNotEmpty() }
+    if (paragraphs.size < 2) return raw
+    var index = 0
+    while (index < minOf(2, paragraphs.size - 1) && isGenericOutcomeLead(paragraphs[index])) {
+        index++
+    }
+    return paragraphs[index]
+}
+
+private fun isGenericOutcomeLead(text: String): Boolean {
+    val stripped = stripMarkdownInline(text).trim()
+    if (stripped.isEmpty() || stripped.length > 96) return false
+    val lower = stripped.lowercase()
+    if (lower.startsWith("all done") || lower == "done" || lower.startsWith("done.")) return true
+    if (stripped.startsWith("반영") || stripped.startsWith("완료") ||
+        stripped.startsWith("전부 완료") || stripped.startsWith("수정 완료") ||
+        stripped.startsWith("검증 완료") || stripped.startsWith("처리 완료")
+    ) {
+        return true
+    }
+    return lower.contains("verified") && lower.contains("desktop") && lower.length < 80
+}
+
+/**
  * Lightweight inline markdown stripper for plain-text surfaces (e-ink).
  * Strips block markers AND table syntax — bridge now ships chat detail with
  * markdown markers preserved for the colour-screen renderer, so plain

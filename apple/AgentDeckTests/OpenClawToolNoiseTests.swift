@@ -401,6 +401,70 @@ final class OpenClawToolNoiseTests: XCTestCase {
         XCTAssertFalse(timelineIsInFlightTask(start, siblings: [start, end]))
     }
 
+    // MARK: - timelineIsRotatingEntry sibling scan (shared-SSOT parity)
+
+    /// A later same-session chat_start supersedes an open turn — the spinner
+    /// must stop immediately even when the original turn's completion signal
+    /// was lost, instead of animating out the full 10-min age cap. Mirrors
+    /// `isRotatingEntry` in shared/src/timeline-icons.ts (the Swift mirror
+    /// had dropped this sibling scan).
+    func testChatStartStopsRotatingWhenSupersededBySameSessionPrompt() {
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        let first = TimelineEntry(
+            ts: nowMs - 60_000,
+            type: .chatStart,
+            raw: "첫 프롬프트",
+            sessionId: "s1"
+        )
+        let second = TimelineEntry(
+            ts: nowMs - 10_000,
+            type: .chatStart,
+            raw: "다음 프롬프트",
+            sessionId: "s1"
+        )
+        XCTAssertFalse(timelineIsRotatingEntry(first, siblings: [first, second]),
+            "superseded chat_start must stop spinning")
+        XCTAssertTrue(timelineIsRotatingEntry(second, siblings: [first, second]),
+            "the live turn keeps spinning")
+    }
+
+    /// A later chat_start from a DIFFERENT session must not stop the spinner.
+    func testChatStartKeepsRotatingAcrossSessions() {
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        let mine = TimelineEntry(
+            ts: nowMs - 60_000,
+            type: .chatStart,
+            raw: "작업 중",
+            sessionId: "s1"
+        )
+        let other = TimelineEntry(
+            ts: nowMs - 10_000,
+            type: .chatStart,
+            raw: "다른 세션",
+            sessionId: "s2"
+        )
+        XCTAssertTrue(timelineIsRotatingEntry(mine, siblings: [mine, other]))
+    }
+
+    /// A later same-session completion stops the spinner via the sibling scan
+    /// (independently of the row-level merge/isCompleted gates).
+    func testChatStartStopsRotatingOnLaterSameSessionCompletion() {
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        let start = TimelineEntry(
+            ts: nowMs - 60_000,
+            type: .chatStart,
+            raw: "작업 중",
+            sessionId: "s1"
+        )
+        let response = TimelineEntry(
+            ts: nowMs - 5_000,
+            type: .chatResponse,
+            raw: "완료했습니다",
+            sessionId: "s1"
+        )
+        XCTAssertFalse(timelineIsRotatingEntry(start, siblings: [start, response]))
+    }
+
     // MARK: - Orphan reaper (DaemonServer.computeOrphanTaskEnds)
 
     /// task_start with no matching task_end → reaper produces one synthetic

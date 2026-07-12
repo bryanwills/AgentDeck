@@ -139,6 +139,14 @@ describe('isInFlightTask', () => {
     expect(isInFlightTask({ type: 'chat_start' } as any, [])).toBe(false);
     expect(isInFlightTask({ type: 'task_end', taskId: 'a' } as any, [])).toBe(false);
   });
+
+  it('task_start older than the staleness cap is no longer in flight', () => {
+    const entry = { type: 'task_start', taskId: 'a', ts: 1_000 } as any;
+    expect(isInFlightTask(entry, [], 1_000 + 10 * 60 * 1000 + 1)).toBe(false);
+    expect(isInFlightTask(entry, [], 1_000 + 60 * 1000)).toBe(true);
+    // Legacy rows without ts keep the old uncapped behavior.
+    expect(isInFlightTask(taskStart('a'), [], Number.MAX_SAFE_INTEGER)).toBe(true);
+  });
 });
 
 describe('isRotatingEntry', () => {

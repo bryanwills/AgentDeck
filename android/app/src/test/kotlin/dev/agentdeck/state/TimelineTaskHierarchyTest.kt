@@ -1,5 +1,6 @@
 package dev.agentdeck.state
 
+import dev.agentdeck.ui.timeline.IN_FLIGHT_TASK_MAX_AGE_MS
 import dev.agentdeck.ui.timeline.ROTATING_ENTRY_MAX_AGE_MS
 import dev.agentdeck.ui.timeline.TimelineIconKey
 import dev.agentdeck.ui.timeline.isInFlightTask
@@ -7,6 +8,8 @@ import dev.agentdeck.ui.timeline.isRotatingEntry
 import dev.agentdeck.ui.timeline.parseTimelineMarkdown
 import dev.agentdeck.ui.timeline.stripMarkdownInline
 import dev.agentdeck.ui.timeline.timelineDetailIsRedundant
+import dev.agentdeck.ui.timeline.timelinePromoteInformativeLead
+import dev.agentdeck.ui.timeline.timelineSummaryIsRedundantWithDetail
 import dev.agentdeck.ui.timeline.timelineIconKey
 import dev.agentdeck.ui.timeline.TimelineMarkdownLine
 import org.junit.Assert.assertEquals
@@ -216,6 +219,60 @@ class TimelineTaskHierarchyTest {
         )
     }
 
+    @Test
+    fun `summary is redundant with detail for standalone response prefix truncation`() {
+        // Producers stamp summary = prefix(120/200) and detail = prefix(1000+)
+        // of the same response text — the summary is always the body's opening
+        // and must be suppressed, including a mid-word cut at the boundary.
+        val full = "타임라인 중복 렌더 원인을 확인했습니다. Summary 라인이 detail 본문의 접두어라서 같은 텍스트가 " +
+            "두 번 보였고, 게이트가 chat_response 분기에서 redundancy 검사를 건너뛰었습니다."
+        assertTrue(timelineSummaryIsRedundantWithDetail(summary = full.take(60), detail = full))
+        // Exact duplicate (short response: summary == detail).
+        assertTrue(
+            timelineSummaryIsRedundantWithDetail(
+                summary = "빌드 완료. 테스트 42개 통과.",
+                detail = "빌드 완료. 테스트 42개 통과.",
+            ),
+        )
+        // Markdown-formatted detail vs plain summary opening.
+        assertTrue(
+            timelineSummaryIsRedundantWithDetail(
+                summary = "정리 focusSession 의 시각 효과 추가됨",
+                detail = "## 정리\n\n**focusSession 의 시각 효과 추가됨**\n\n추가 검증 내용",
+            ),
+        )
+    }
+
+    @Test
+    fun `summary is not redundant for merged prompt-response turn`() {
+        // Merged chat_start turn: summary = the user PROMPT, detail = the
+        // assistant response. Different text — the summary must stay.
+        assertFalse(
+            timelineSummaryIsRedundantWithDetail(
+                summary = "Timeline 메세지 출력이 정확한지 검증하라",
+                detail = "반영했고 실제 Desktop 데몬에서 검증했습니다.\n\n검증:\n- vitest\n- xcodebuild",
+            ),
+        )
+        // Very short summaries never suppress unless exactly equal.
+        assertFalse(
+            timelineSummaryIsRedundantWithDetail(
+                summary = "완료",
+                detail = "완료 처리했습니다. 추가로 문서도 갱신했습니다.",
+            ),
+        )
+    }
+
+    @Test
+    fun `promote informative lead skips generic outcome paragraph`() {
+        val raw = "반영했고 실제 Desktop 데몬에서 검증했습니다.\n\n원인은 Codex hook의 tool_exec 방송 구조였습니다."
+        assertEquals(
+            "원인은 Codex hook의 tool_exec 방송 구조였습니다.",
+            timelinePromoteInformativeLead(raw, "chat_response"),
+        )
+        // Non-response types (e.g. the prompt on a merged turn) pass through.
+        assertEquals(raw, timelinePromoteInformativeLead(raw, "chat_start"))
+    }
+
     private fun entry(
         type: String,
         timestamp: Long = 0L,
@@ -292,9 +349,9 @@ class TimelineTaskHierarchyTest {
 
     @Test
     fun `task_start without matching task_end is in flight`() {
-        val taskStart = entry("task_start", taskId = "a")
-        assertTrue(isInFlightTask(taskStart, emptyList()))
-        assertTrue(isInFlightTask(taskStart, listOf(entry("task_start", taskId = "a"))))
+        val taskStart = entry("task_start", taskId = "a", timestamp = 1_000L)
+        assertTrue(isInFlightTask(taskStart, emptyList(), nowMs = 2_000L))
+        assertTrue(isInFlightTask(taskStart, listOf(entry("task_start", taskId = "a")), nowMs = 2_000L))
     }
 
     @Test
@@ -305,8 +362,15 @@ class TimelineTaskHierarchyTest {
 
     @Test
     fun `mismatched taskId on task_end does not close it`() {
-        val taskStart = entry("task_start", taskId = "a")
-        assertTrue(isInFlightTask(taskStart, listOf(entry("task_end", taskId = "b"))))
+        val taskStart = entry("task_start", taskId = "a", timestamp = 1_000L)
+        assertTrue(isInFlightTask(taskStart, listOf(entry("task_end", taskId = "b")), nowMs = 2_000L))
+    }
+
+    @Test
+    fun `task_start older than the staleness cap is no longer in flight`() {
+        val taskStart = entry("task_start", taskId = "a", timestamp = 1_000L)
+        assertFalse(isInFlightTask(taskStart, emptyList(), nowMs = 1_000L + IN_FLIGHT_TASK_MAX_AGE_MS + 1))
+        assertTrue(isInFlightTask(taskStart, emptyList(), nowMs = 1_000L + 60_000L))
     }
 
     @Test
@@ -360,8 +424,8 @@ class TimelineTaskHierarchyTest {
 
     @Test
     fun `orphan task_start rotates via in-flight predicate`() {
-        val taskStart = entry("task_start", taskId = "a")
-        assertTrue(isRotatingEntry(taskStart, listOf(taskStart)))
+        val taskStart = entry("task_start", taskId = "a", timestamp = 1_000L)
+        assertTrue(isRotatingEntry(taskStart, listOf(taskStart), nowMs = 2_000L))
     }
 
     @Test

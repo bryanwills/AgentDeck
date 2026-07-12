@@ -61,6 +61,8 @@ import dev.agentdeck.ui.timeline.TimelineMarkdownView
 import dev.agentdeck.ui.timeline.isRotatingEntry
 import dev.agentdeck.ui.timeline.rowSummary
 import dev.agentdeck.ui.timeline.stripMarkdownForSummary
+import dev.agentdeck.ui.timeline.timelinePromoteInformativeLead
+import dev.agentdeck.ui.timeline.timelineSummaryIsRedundantWithDetail
 import dev.agentdeck.ui.timeline.turnHasLaterCompletion
 import dev.agentdeck.ui.timeline.timelineDetailIsRedundant
 import dev.agentdeck.ui.timeline.timelineIconKey
@@ -431,8 +433,10 @@ private fun TurnRow(
             // leak into the row as literal characters, and collapse newlines so
             // a multi-line prompt fills the row instead of ellipsizing at its
             // first line break. The detail pane (or compact inline-expand)
-            // still renders the full markdown.
-            text = rowSummary(entry.summary) + countSuffix,
+            // still renders the full markdown. The generic-lead promotion
+            // mirrors Apple's row summary (`timelineSummaryTextForDashboard`)
+            // so a standalone response leads with its informative paragraph.
+            text = rowSummary(timelinePromoteInformativeLead(entry.summary, entry.type)) + countSuffix,
             color = if (isChatEnd) TerrariumColors.HUDText.copy(alpha = 0.6f) else TerrariumColors.HUDText,
             fontSize = scale.fontSub,
             fontFamily = FontFamily.Monospace,
@@ -595,6 +599,7 @@ private fun TaskHeaderRow(
                 outcome = entry.taskOutcome,
                 fontSize = (scale.fontSub.value - 1f).sp,
                 tight = tight,
+                closedAtMs = entry.endedAt ?: entry.timestamp,
             )
         }
         Text(
@@ -607,6 +612,10 @@ private fun TaskHeaderRow(
     }
 }
 
+/** Judges resolve in 5–30 s; 5 minutes is decisively past any real queue.
+ *  Mirrors Apple `TaskEvalBadge.unscoredAfterSec`. */
+private const val UNSCORED_AFTER_MS = 5 * 60 * 1000L
+
 /**
  * Eval chip rendered at the right edge of a `task_end` header. Stays neutral
  * (dim "…") until the judge resolves and the timeline row upserts with score
@@ -618,6 +627,11 @@ private fun TaskEvalBadge(
     outcome: String?,
     fontSize: androidx.compose.ui.unit.TextUnit,
     tight: TextStyle,
+    // When the task closed (endedAt / row ts, epoch ms). Drives the pending →
+    // "unscored" terminal transition, mirroring Apple: judges resolve in
+    // 5–30 s, so past UNSCORED_AFTER_MS the "…" will never materialize (judge
+    // disabled / backend down / enqueue lost) and reads as "still working".
+    closedAtMs: Long? = null,
 ) {
     val (glyph, color) = when (outcome) {
         "success"   -> "✓" to DesignTokens.UI.ok
@@ -628,7 +642,12 @@ private fun TaskEvalBadge(
         // score-derived class — render as a neutral "explicitly stopped"
         // so the row doesn't masquerade as pending nor as agent failure.
         "abandoned" -> "⊘" to DesignTokens.UI.error.copy(alpha = 0.55f)
-        else        -> "…" to TerrariumColors.HUDSubtext.copy(alpha = 0.6f)
+        else        ->
+            if (closedAtMs != null && System.currentTimeMillis() - closedAtMs > UNSCORED_AFTER_MS) {
+                "unscored" to TerrariumColors.HUDSubtext.copy(alpha = 0.5f)
+            } else {
+                "…" to TerrariumColors.HUDSubtext.copy(alpha = 0.6f)
+            }
     }
     Row(
         modifier = Modifier
@@ -691,9 +710,10 @@ private fun DetailPane(
             val entry = focusedGroup.entry
             // When a turn is merged (chat_start absorbing its chat_response),
             // the response body lives on `mergedResponse` — surface it here so
-            // selecting a merged turn still shows the assistant's reply instead
-            // of just the prompt (the merged rows are no longer selectable).
-            val bodyEntry = focusedGroup.mergedResponse ?: entry
+            // selecting a merged turn still shows the assistant's reply as the
+            // detail body. Progress interim responses stay hidden, mirroring
+            // Apple `timelineDetailEntryForDashboard`.
+            val bodyEntry = focusedGroup.mergedResponse?.takeIf { !isProgressChatResponse(it) } ?: entry
             val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
             val timeStr = timeFormat.format(Date(entry.timestamp))
             val iconKey = timelineIconKey(entry.type, entry.status)
@@ -804,6 +824,7 @@ private fun DetailPane(
                         outcome = entry.taskOutcome,
                         fontSize = labelSp,
                         tight = tightStyle,
+                        closedAtMs = entry.endedAt ?: entry.timestamp,
                     )
                     if (!entry.taskCategory.isNullOrEmpty()) {
                         Text(
@@ -830,25 +851,35 @@ private fun DetailPane(
                 Spacer(modifier = Modifier.height(4.dp))
             }
 
-            // Summary — strip markdown so `**bold**` / `## heading` don't
-            // appear as literal characters next to the markdown-rendered detail.
-            Text(
-                text = stripMarkdownForSummary(bodyEntry.summary),
-                color = TerrariumColors.HUDText,
-                fontSize = scale.fontHeader,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-
-            // Detail text — markdown-aware. Suppressed when:
-            //   (a) summaryKind == "none" (heuristic last-resort: detail
-            //       is just the raw response, showing it duplicates noisily)
-            //   (b) timelineDetailIsRedundant matches detail against summary
+            // Summary + detail body — Apple-parity (`TimelineStripView.detailPane`):
+            //   - the summary is the group's OWN entry (the prompt for merged
+            //     turns; `bodyEntry.summary` dropped the prompt and echoed the
+            //     response opening), with the generic-lead promotion applied to
+            //     standalone responses;
+            //   - the detail gate is `shouldShowDetailForDashboard`. The old
+            //     `timelineDetailIsRedundant` gate hid the body of nearly every
+            //     response: producers stamp summary as a prefix truncation of
+            //     detail, so the 8-token-prefix rule always fired;
+            //   - the bold summary is dropped when it is just the body's
+            //     opening, so the same text never renders twice.
+            val summarySource = timelinePromoteInformativeLead(entry.summary, entry.type)
             val detailText = bodyEntry.detail
-            if (!detailText.isNullOrEmpty()
-                && bodyEntry.summaryKind != "none"
-                && !timelineDetailIsRedundant(detailText, bodyEntry.summary)) {
+            val showDetail = !detailText.isNullOrEmpty() &&
+                shouldShowDetailForDashboard(bodyEntry, detailText)
+            val summaryIsBodyOpening = showDetail && detailText != null &&
+                timelineSummaryIsRedundantWithDetail(summarySource, detailText)
+            if (!summaryIsBodyOpening) {
+                Text(
+                    text = stripMarkdownForSummary(summarySource),
+                    color = TerrariumColors.HUDText,
+                    fontSize = scale.fontHeader,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+
+            if (showDetail && detailText != null) {
                 Spacer(modifier = Modifier.height(4.dp))
                 LazyColumn(
                     modifier = Modifier
@@ -868,6 +899,25 @@ private fun DetailPane(
 }
 
 /**
+ * Whether to render the markdown detail body for an entry — Apple-parity port
+ * of `timelineShouldShowDetailForDashboard` (TimelineStripView.swift). The
+ * chat_response branch intentionally bypasses `timelineDetailIsRedundant`:
+ * producers stamp `summary` as a strict prefix truncation of `detail`, so the
+ * redundancy rules always fire and would hide the body of every response.
+ */
+private fun shouldShowDetailForDashboard(entry: TimelineEntry, detail: String): Boolean {
+    if (entry.summaryKind == "none" || entry.summaryKind == "progress") return false
+    if (isProgressChatResponse(entry)) return false
+    val trimmed = detail.trim()
+    if (trimmed.isEmpty()) return false
+    if (entry.type == "chat_response") {
+        val summary = entry.summary.trim()
+        return trimmed.length > summary.length + 40 || trimmed.contains('\n')
+    }
+    return !timelineDetailIsRedundant(detail, entry.summary)
+}
+
+/**
  * Compact-mode inline detail block. Renders below the tapped row in
  * single-column layout. Mirrors the right-side `DetailPane` content shape
  * but laid out vertically without the type badge / timestamp header.
@@ -879,7 +929,7 @@ private fun InlineDetailPane(
     scale: MonitorLayoutScale,
 ) {
     val entry = group.entry
-    val bodyEntry = group.mergedResponse ?: entry
+    val bodyEntry = group.mergedResponse?.takeIf { !isProgressChatResponse(it) } ?: entry
     val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
     val lifecycleRows = lifecycleDetailRows(entry, entries)
     val labelSp = (scale.fontSub.value - 1f).sp
@@ -907,9 +957,7 @@ private fun InlineDetailPane(
             }
         }
         val detailText = bodyEntry.detail
-        if (!detailText.isNullOrEmpty()
-            && bodyEntry.summaryKind != "none"
-            && !timelineDetailIsRedundant(detailText, bodyEntry.summary)) {
+        if (!detailText.isNullOrEmpty() && shouldShowDetailForDashboard(bodyEntry, detailText)) {
             TimelineMarkdownView(text = detailText)
         } else {
             Text(
@@ -927,16 +975,24 @@ private fun InlineDetailPane(
 // (dev.agentdeck.ui.timeline.TimelineIcons) which maps to Material Icons
 // for tablet and ASCII brackets for e-ink.
 
-private fun typeColor(type: String) = when (type) {
-    "task_start", "task_end" -> TerrariumColors.TetraNeon
-    "tool_request", "tool_resolved", "tool_exec" -> TerrariumColors.LEDGreen
-    "model_call", "model_response" -> TerrariumColors.TetraNeon
-    "chat_response" -> TerrariumColors.TetraNeon
-    "memory_recall" -> TerrariumColors.ClaudeBody
-    "chat_start", "chat_end" -> TerrariumColors.HUDText
-    "error" -> TerrariumColors.LEDRed
-    "state_change", "eval_result" -> TerrariumColors.LEDAmber
-    else -> TerrariumColors.HUDSubtext
+// Apple parity (`timelineTypeColor`, TimelineStripView.swift): derive the row
+// accent from the semantic icon key instead of a hand-maintained per-type map.
+// The two maps had drifted visibly — chat_end (text vs green), tool_request
+// (green vs amber), eval_result (amber vs green), chat_response (neon vs
+// green) — which made the same timeline read differently on tablet vs macOS.
+private fun typeColor(type: String) = when (timelineIconKey(type, null)) {
+    TimelineIconKey.Success -> TerrariumColors.LEDGreen
+    TimelineIconKey.Error -> TerrariumColors.LEDRed
+    TimelineIconKey.Running -> TerrariumColors.HUDText
+    TimelineIconKey.Awaiting -> TerrariumColors.LEDAmber
+    TimelineIconKey.Tool -> TerrariumColors.LEDGreen
+    TimelineIconKey.Model -> TerrariumColors.TetraNeon
+    // Nearest existing palette blue to Apple's user-action blue (#3B82F6);
+    // reusing it avoids minting a new raw-hex literal (design lint).
+    TimelineIconKey.User -> TerrariumColors.AntigravityBlue
+    TimelineIconKey.Task -> TerrariumColors.TetraNeon
+    TimelineIconKey.Scheduled -> TerrariumColors.HUDSubtext
+    TimelineIconKey.Memory -> TerrariumColors.ClaudeBody
 }
 
 // Delegates to the single shared Kotlin map (ui.component.agentDisplayLabel).
@@ -1003,5 +1059,6 @@ private fun formatType(type: String): String = when (type) {
     "eval_result" -> "EVAL"
     "task_start" -> "TASK"
     "task_end" -> "TASK ✓"
+    "task_milestone" -> "TODOS ✓"
     else -> type.uppercase().take(5)
 }

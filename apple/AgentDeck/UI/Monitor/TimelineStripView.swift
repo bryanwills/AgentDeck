@@ -380,8 +380,12 @@ struct TimelineStripView: View {
             }
 
             // Sub-line: assistant response body. Indented + dimmed so the
-            // user prompt above stays the primary reading anchor.
-            if let resp = group.mergedResponse, !timelineIsProgressChatResponse(resp) {
+            // user prompt above stays the primary reading anchor. Hidden
+            // while this row's inline detail pane is expanded showing the
+            // response body — resp.raw is a prefix of resp.detail, so the
+            // sub-line would repeat the body's opening right above it.
+            if let resp = group.mergedResponse, !timelineIsProgressChatResponse(resp),
+               !(allowMultiline && expandedIndex == index && inlineDetailShowsBody(group)) {
                 HStack(alignment: .top, spacing: 4) {
                     Spacer().frame(width: isNested ? 64 : 56)
                     Text("→")
@@ -533,6 +537,9 @@ struct TimelineStripView: View {
             }
         }
         .background(Color.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+        // Same pane-wide selection as the regular detail pane — without it
+        // only the markdown body was copyable.
+        .textSelection(.enabled)
         .padding(.vertical, 2)
     }
 
@@ -542,6 +549,15 @@ struct TimelineStripView: View {
     ///   - detailIsRedundant matches against raw
     private func shouldShowDetail(entry: TimelineEntry, detail: String) -> Bool {
         timelineShouldShowDetailForDashboard(entry: entry, detail: detail)
+    }
+
+    /// Whether the inline (compact) detail pane will render a markdown body
+    /// for this group — mirrors `inlineDetailPane`'s gate so the turn row can
+    /// hide its response sub-line while the same text is expanded below it.
+    private func inlineDetailShowsBody(_ group: GroupedEntry) -> Bool {
+        let detailEntry = timelineDetailEntryForDashboard(group)
+        guard let detail = detailEntry.detail else { return false }
+        return shouldShowDetail(entry: detailEntry, detail: detail)
     }
 
     /// Task hierarchy header — visually distinct full-width row that groups
@@ -765,12 +781,6 @@ struct TimelineStripView: View {
                     Spacer().frame(height: 4)
                 }
 
-                // Summary
-                Text(timelineSummaryTextForDashboard(group))
-                    .font(.system(size: fontScale.body, weight: .bold, design: .monospaced))
-                    .foregroundStyle(TerrariumHUD.text)
-                    .padding(.horizontal, 8)
-
                 // Detail text — gated by `shouldShowDetail` which suppresses:
                 //   (a) summaryKind == "none" (heuristic last-resort: detail
                 //       is just the raw response we couldn't summarize, so
@@ -778,8 +788,32 @@ struct TimelineStripView: View {
                 //   (b) detailIsRedundant fuzzy match against raw (LLM /
                 //       heuristic summarizer paraphrased the response opening)
                 let detailEntry = timelineDetailEntryForDashboard(group)
-                if let detail = detailEntry.detail,
-                   shouldShowDetail(entry: detailEntry, detail: detail) {
+                let shownDetail: String? = {
+                    guard let detail = detailEntry.detail,
+                          shouldShowDetail(entry: detailEntry, detail: detail) else { return nil }
+                    return detail
+                }()
+
+                // Summary — dropped when the body below opens with the same
+                // text. Standalone chat_response rows carry `raw` as a plain
+                // character-prefix truncation of `detail` (producers stamp
+                // raw=prefix(120–200) / detail=prefix(1000–8000) of the same
+                // response), so rendering both printed the response opening
+                // twice: literal markdown here, formatted in the body. Merged
+                // prompt→response turns keep the summary (the prompt is not a
+                // prefix of the response).
+                let summaryText = timelineSummaryTextForDashboard(group)
+                let summaryIsBodyOpening = shownDetail.map {
+                    timelineSummaryIsRedundantWithDetail(summary: summaryText, detail: $0)
+                } ?? false
+                if !summaryIsBodyOpening {
+                    Text(summaryText)
+                        .font(.system(size: fontScale.body, weight: .bold, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.text)
+                        .padding(.horizontal, 8)
+                }
+
+                if let detail = shownDetail {
                     Spacer().frame(height: 4)
                     ScrollView {
                         TimelineMarkdownPreview(text: detail)
@@ -798,6 +832,11 @@ struct TimelineStripView: View {
             }
         }
         .background(Color.black.opacity(0.19), in: RoundedRectangle(cornerRadius: 4))
+        // Selection was only enabled on the markdown body, so the summary,
+        // timestamps, and lifecycle rows — the lines users most often copy —
+        // silently ignored drag-selection. Enable it pane-wide; Text views
+        // inherit it via the environment.
+        .textSelection(.enabled)
     }
 
     /// Whether a detail blob duplicates the summary row enough to suppress.
@@ -1117,6 +1156,30 @@ func timelineShouldShowDetailForDashboard(entry: TimelineEntry, detail: String) 
         return trimmed.count > raw.count + 40 || trimmed.contains("\n")
     }
     return !timelineDetailIsRedundant(detail: detail, raw: entry.raw)
+}
+
+/// Whether the bold Summary line would merely repeat the opening of the
+/// detail body shown below it. Standalone chat_response rows are stamped by
+/// every producer with `raw` as a plain character-prefix truncation of
+/// `detail` (no ellipsis), so the check is a markdown-stripped token-prefix
+/// comparison, allowing the final summary token to be cut mid-word by the
+/// truncation boundary. A promoted lead (`timelinePromoteInformativeLead`)
+/// is a mid-body paragraph and intentionally survives this check.
+func timelineSummaryIsRedundantWithDetail(summary: String, detail: String) -> Bool {
+    let sTokens = timelineComparableTokens(summary)
+    let dTokens = timelineComparableTokens(detail)
+    guard !sTokens.isEmpty, !dTokens.isEmpty else { return false }
+    if sTokens == dTokens { return true }
+    guard sTokens.count >= 3, dTokens.count >= sTokens.count else { return false }
+    guard dTokens.starts(with: sTokens.dropLast()) else { return false }
+    return dTokens[sTokens.count - 1].hasPrefix(sTokens[sTokens.count - 1])
+}
+
+private func timelineComparableTokens(_ s: String) -> [String] {
+    timelineStripMarkdownInline(s)
+        .lowercased()
+        .components(separatedBy: CharacterSet.alphanumerics.inverted)
+        .filter { !$0.isEmpty }
 }
 
 func timelineIsProgressChatResponse(_ entry: TimelineEntry) -> Bool {
@@ -1605,8 +1668,24 @@ private extension TimelineEntry {
 private struct TimelineMarkdownPreview: View {
     let text: String
 
+    /// Parsed lines with consecutive plain-text / code lines coalesced into
+    /// one node. macOS drag-selection cannot cross Text view boundaries, so
+    /// per-line Texts made every paragraph and code block a patchwork of
+    /// one-line selection islands; coalescing turns each paragraph and each
+    /// fenced block into a single selectable run.
     private var lines: [TimelineMarkdownLine] {
-        TimelineMarkdownLine.parse(text)
+        var out: [TimelineMarkdownLine] = []
+        for line in TimelineMarkdownLine.parse(text) {
+            switch (out.last, line) {
+            case let (.text(prev)?, .text(next)):
+                out[out.count - 1] = .text(prev + "\n" + next)
+            case let (.code(prev)?, .code(next)):
+                out[out.count - 1] = .code(prev + "\n" + next)
+            default:
+                out.append(line)
+            }
+        }
+        return out
     }
 
     var body: some View {
@@ -1669,9 +1748,9 @@ private struct TimelineMarkdownPreview: View {
                 .foregroundStyle(TerrariumHUD.ledGreen.opacity(0.8))
                 .fixedSize(horizontal: false, vertical: true)
         case let .text(content):
-            attributedText(content,
-                            font: .system(size: 10, design: .default),
-                            color: TerrariumHUD.subtext.opacity(0.86))
+            attributedMultilineText(content,
+                                    font: .system(size: 10, design: .default),
+                                    color: TerrariumHUD.subtext.opacity(0.86))
                 .fixedSize(horizontal: false, vertical: true)
         case let .table(rows, hasHeader):
             tableView(rows: rows, hasHeader: hasHeader)
@@ -1686,6 +1765,19 @@ private struct TimelineMarkdownPreview: View {
         return spans.reduce(Text("")) { acc, span in
             acc + span.text(baseFont: font, baseColor: color)
         }
+    }
+
+    /// Multi-line variant for coalesced `.text` nodes: inline spans are still
+    /// parsed per line (span markers never cross line breaks) and the lines
+    /// are folded into ONE `Text` so the whole paragraph is a single
+    /// selectable run.
+    private func attributedMultilineText(_ content: String, font: Font, color: Color) -> Text {
+        content.components(separatedBy: "\n")
+            .enumerated()
+            .reduce(Text("")) { acc, item in
+                let line = attributedText(item.element, font: font, color: color)
+                return item.offset == 0 ? acc + line : acc + Text("\n") + line
+            }
     }
 
     /// Compact table layout. Equal-width columns via Grid; first row bolded
@@ -2047,10 +2139,21 @@ func timelineIsInFlightTask(_ entry: TimelineEntry, siblings: [TimelineEntry]) -
     return true
 }
 
+/// Same-session test mirroring the turn-merge rule: both ids equal, or both
+/// absent (legacy single-session emitters). Mirrors `sameRotatingSession` in
+/// shared/src/timeline-icons.ts.
+private func timelineSameRotatingSession(_ a: String?, _ b: String?) -> Bool {
+    let aEmpty = a?.isEmpty ?? true
+    let bEmpty = b?.isEmpty ?? true
+    if aEmpty && bEmpty { return true }
+    return !aEmpty && !bEmpty && a == b
+}
+
 /// True when a turn row should rotate its leading icon. Combines the
 /// `running` icon-key (chat_start, unknown types) with the in-flight task
 /// hierarchy signal so an open `task_start` also spins until its `task_end`
-/// arrives. Mirrors `isRotatingEntry` in shared/src/timeline-icons.ts.
+/// arrives. Mirrors `isRotatingEntry` in shared/src/timeline-icons.ts —
+/// update all three mirrors (shared / Apple / Android) in the same commit.
 func timelineIsRotatingEntry(_ entry: TimelineEntry, siblings: [TimelineEntry]) -> Bool {
     if timelineIconKey(for: entry.type, status: entry.status) == .running {
         // Staleness backstop mirroring `timelineIsInFlightTask`: a `chat_start`
@@ -2062,6 +2165,17 @@ func timelineIsRotatingEntry(_ entry: TimelineEntry, siblings: [TimelineEntry]) 
         if entry.type == .chatStart {
             let ageSec = Date().timeIntervalSince(entry.date)
             if ageSec > chatStartMaxAgeSec { return false }
+            // Shared-SSOT sibling scan the Swift mirror had dropped: a later
+            // same-session completion — or a later chat_start superseding
+            // this turn even when its completion signal was lost — stops the
+            // spinner immediately instead of animating out the full age cap.
+            for s in siblings where s.ts >= entry.ts {
+                if !timelineSameRotatingSession(entry.sessionId, s.sessionId) { continue }
+                if s.type == .chatResponse || s.type == .chatEnd || s.type == .modelResponse {
+                    return false
+                }
+                if s.type == .chatStart && s.ts > entry.ts { return false }
+            }
         }
         return true
     }

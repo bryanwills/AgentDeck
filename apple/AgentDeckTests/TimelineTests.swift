@@ -905,6 +905,49 @@ final class TimelineTests: XCTestCase {
         let group = GroupedEntry(entry: response, lastTs: response.ts)
         XCTAssertTrue(timelineSummaryTextForDashboard(group).hasPrefix("원인은 Codex hook"))
         XCTAssertTrue(timelineShouldShowDetailForDashboard(entry: response, detail: response.detail!))
+        // Promoted lead is a mid-body paragraph, NOT the detail opening —
+        // the detail pane must keep showing it above the body.
+        XCTAssertFalse(timelineSummaryIsRedundantWithDetail(
+            summary: timelineSummaryTextForDashboard(group),
+            detail: response.detail!
+        ))
+    }
+
+    func testSummaryRedundantWithDetailForStandaloneChatResponsePrefix() {
+        // Producers stamp raw = prefix(200) / detail = prefix(1000) of the
+        // same response text (DaemonServer codex path, ApmeCollector,
+        // OpenClawAdapter) — the summary is always the body's opening and
+        // must be suppressed, including when the 200-char boundary cuts the
+        // last word in half.
+        let full = "타임라인 중복 렌더 원인을 확인했습니다. Summary 라인이 detail 본문의 접두어라서 같은 텍스트가 두 번 보였고, 게이트가 chatResponse 분기에서 redundancy 검사를 건너뛰었습니다. 수정은 detail 표시 시 Summary를 억제하는 방식입니다."
+        let raw = String(full.prefix(80))
+        XCTAssertTrue(timelineSummaryIsRedundantWithDetail(summary: raw, detail: full))
+
+        // Exact duplicate (short response: raw == detail).
+        XCTAssertTrue(timelineSummaryIsRedundantWithDetail(
+            summary: "빌드 완료. 테스트 42개 통과.",
+            detail: "빌드 완료. 테스트 42개 통과."
+        ))
+
+        // Markdown-formatted detail vs plain raw opening.
+        XCTAssertTrue(timelineSummaryIsRedundantWithDetail(
+            summary: "정리 focusSession 의 시각 효과 추가됨",
+            detail: "## 정리\n\n**focusSession 의 시각 효과 추가됨**\n\n| 변경 | 위치 |\n|---|---|\n| a | b |"
+        ))
+    }
+
+    func testSummaryNotRedundantForMergedPromptResponseTurn() {
+        // Merged chat_start turn: summary = the user PROMPT, detail = the
+        // assistant response. Different text — the summary must stay.
+        XCTAssertFalse(timelineSummaryIsRedundantWithDetail(
+            summary: "Timeline 메세지 출력이 정확한지 검증하라",
+            detail: "반영했고 실제 Desktop 데몬에서 검증했습니다.\n\n검증:\n- pnpm vitest\n- xcodebuild"
+        ))
+        // Very short summaries never suppress unless exactly equal.
+        XCTAssertFalse(timelineSummaryIsRedundantWithDetail(
+            summary: "완료",
+            detail: "완료 처리했습니다. 추가로 문서도 갱신했습니다."
+        ))
     }
 
     func testDashboardDetailUsesMergedAssistantResponseForCompletedTurn() {
