@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 /// Steering state for observed (hook-only, no PTY) Claude sessions — Swift
@@ -470,3 +471,5 @@ actor OpenCodeCommandQueue {
         waiter.continuation.resume(returning: [])
     }
 }
+
+#endif
