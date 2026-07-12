@@ -279,6 +279,17 @@ async function selectRun(id){
     // Active session notice
     if(!endedAt){
       h+='<div class="section" style="padding:10px 12px;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);border-radius:6px;color:var(--blue);font-size:12px">⏳ Session active — score, category, and outcome appear after the session ends.</div>';
+    }else{
+      // Completed but un-scored: no composite, no LLM/task/turn judge, no
+      // deterministic, no manual review. Without this, the panel reads as a
+      // bare header and the user can't tell whether evaluation failed, was
+      // skipped, or a judge was never configured. Explain it and point at
+      // the fix — the same judge-availability thread as the REVIEW guide.
+      const scored=compScore!=null||evals.length>0;
+      if(!scored){
+        const reason=layer1Skipped?('deterministic checks skipped ('+esc(layer1Skipped)+') and no LLM judge ran'):'no evaluation ran for this task';
+        h+='<div class="section" style="padding:10px 12px;background:rgba(148,163,184,0.12);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--muted);line-height:1.5">🔍 Not evaluated — '+reason+'.<br>Turn on a judge (Anthropic API, OpenClaw, local MLX 8B+, or Apple Intelligence) in <code>apme.judge</code> to score future tasks. Tasks without a judge still record their trajectory, cost, and outcome — they just carry no quality score.</div>';
+      }
     }
 
     // Composite score bar
