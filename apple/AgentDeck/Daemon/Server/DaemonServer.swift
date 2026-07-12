@@ -409,7 +409,12 @@ final class DaemonServer {
     /// Node parity: `bridge/src/daemon-server.ts` keys `wifiEsp32Devices` the
     /// same way and never broadcasts on churn.
     private var pendingWifiEsp32Evictions: [String: Task<Void, Never>] = [:]
-    private static let wifiEsp32EvictGrace: TimeInterval = 10
+    // Keep the topology stable across a brief weak-RF reconnect. Ten seconds
+    // covered the normal arduinoWebSockets disconnect-then-begin cycle, but
+    // no-PSRAM ESP32-C3 readers on a marginal 2.4 GHz link can need 10–30 s
+    // before their replacement socket registers. Retaining only the roster
+    // identity is cheap and does not route events to the closed connection.
+    private static let wifiEsp32EvictGrace: TimeInterval = 45
 
     /// Last hook-event wall-clock timestamp per pushed session, keyed on
     /// sessionId. Used to evict sessions whose Claude Code process died
