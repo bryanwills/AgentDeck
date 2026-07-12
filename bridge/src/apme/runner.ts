@@ -12,9 +12,8 @@
  */
 
 import { spawn } from 'child_process';
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { createRequire } from 'module';
 import { debug } from '../logger.js';
 import type { ApmeStore } from './store.js';
 import type { ApmeConfig, ApmeJudgeConfig, ApmeJudgeBackend } from './settings.js';
@@ -962,6 +961,7 @@ export async function callJudgeWithMeta(prompt: string, judgeCfg: ApmeJudgeConfi
   }
   let text: string;
   if (judgeCfg.backend === 'mlx') text = await callMlx(prompt, judgeCfg);
+  else if (judgeCfg.backend === 'openai') text = await callOpenAICompatible(prompt, judgeCfg);
   else if (judgeCfg.backend === 'openclaw') text = await callOpenClaw(prompt, judgeCfg);
   else if (judgeCfg.backend === 'api') text = await callApi(prompt, judgeCfg);
   else throw new Error(`unknown judge backend: ${String(judgeCfg.backend)}`);
@@ -1054,6 +1054,35 @@ export async function probeJudgeBackend(cfg: ApmeJudgeConfig): Promise<JudgeBack
         };
       }
       return { backend: 'mlx', status: 'ready', latencyMs: Date.now() - start, model: pickedModel, endpoint: base, checkedAt };
+    }
+    if (cfg.backend === 'openai') {
+      // Generic OpenAI-compatible (Ollama / OpenRouter / LM Studio / vLLM / …).
+      // "Ready" requires a reachable model catalog and a resolvable model id.
+      if (!cfg.endpoint) {
+        return {
+          backend: 'openai', status: 'unavailable',
+          reason: 'set apme.judge.endpoint (e.g. http://127.0.0.1:11434/v1 for Ollama, or https://openrouter.ai/api/v1 for OpenRouter)',
+          checkedAt,
+        };
+      }
+      const base = openAIBase(cfg.endpoint);
+      const isRemote = /^https?:\/\/(?!127\.0\.0\.1|localhost|\[::1\])/.test(cfg.endpoint);
+      if (isRemote && !cfg.apiKey) {
+        return {
+          backend: 'openai', status: 'unavailable',
+          reason: `remote endpoint ${base} needs an API key — set apme.judge.apiKey (OpenRouter etc.)`,
+          endpoint: base, checkedAt,
+        };
+      }
+      const model = await resolveOpenAIModel(base, cfg.apiKey, cfg.model);
+      if (!model || model === 'default') {
+        return {
+          backend: 'openai', status: 'unavailable',
+          reason: `endpoint ${base} unreachable or advertises no model — is the server running / the key valid?`,
+          endpoint: base, checkedAt,
+        };
+      }
+      return { backend: 'openai', status: 'ready', latencyMs: Date.now() - start, model, endpoint: base, checkedAt };
     }
     if (cfg.backend === 'openclaw') {
       // OpenClaw Gateway: /health proves the gateway socket is up but does NOT
@@ -1259,6 +1288,89 @@ async function callMlx(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
   if (typeof text !== 'string' || text.length === 0) {
     throw new Error('MLX judge returned empty content');
   }
+  return text;
+}
+
+/** Normalize a user-supplied base/endpoint to the chat-completions URL.
+ *  Accepts a bare host (`http://127.0.0.1:11434`), a base with `/v1`, or the
+ *  full `/v1/chat/completions` — all resolve to the same POST target. */
+export function openAIChatUrl(endpoint: string): string {
+  let e = endpoint.trim().replace(/\/+$/, '');
+  if (/\/chat\/completions$/.test(e)) return e;
+  if (/\/v1$/.test(e)) return `${e}/chat/completions`;
+  return `${e}/v1/chat/completions`;
+}
+
+function openAIBase(endpoint: string): string {
+  return endpoint.trim().replace(/\/+$/, '')
+    .replace(/\/chat\/completions$/, '')
+    .replace(/\/v1$/, '');
+}
+
+/** Resolve a model id for an OpenAI-compatible server when the user left it
+ *  unset. Ollama exposes `/api/tags`; everything else exposes `/v1/models`. */
+async function resolveOpenAIModel(base: string, apiKey: string | undefined, configured: string): Promise<string> {
+  if (configured && configured !== 'qwen3-30b' && configured !== 'default') return configured;
+  const headers: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+  // Ollama first (its /v1/models also works, but /api/tags is the canonical list).
+  try {
+    const r = await fetch(`${base}/api/tags`, { headers, signal: AbortSignal.timeout(3000) }).catch(() => null);
+    if (r?.ok) {
+      const j = await r.json() as { models?: Array<{ name?: string }> };
+      const first = j.models?.find((m) => m.name)?.name;
+      if (first) return first;
+    }
+  } catch { /* try openai path */ }
+  for (const path of ['/v1/models', '/models']) {
+    try {
+      const r = await fetch(`${base}${path}`, { headers, signal: AbortSignal.timeout(3000) }).catch(() => null);
+      if (r?.ok) {
+        const j = await r.json() as { data?: Array<{ id?: string }> };
+        const first = j.data?.find((m) => m.id && !m.id.toLowerCase().includes('nanollava'))?.id;
+        if (first) return first;
+      }
+    } catch { /* next */ }
+  }
+  return configured || 'default';
+}
+
+/**
+ * Generic OpenAI-compatible chat-completions judge. One implementation covers
+ * the de-facto standard local + cloud providers:
+ *   - Ollama       endpoint http://127.0.0.1:11434/v1   (no key)
+ *   - LM Studio    endpoint http://127.0.0.1:1234/v1    (no key)
+ *   - vLLM/llama.cpp/LiteLLM/MLX  (local OpenAI servers, no key)
+ *   - OpenRouter   endpoint https://openrouter.ai/api/v1 (Bearer apiKey)
+ *   - any other OpenAI-compatible endpoint
+ * `apiKey` is sent as a Bearer only when set — local servers ignore it.
+ */
+async function callOpenAICompatible(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
+  if (!cfg.endpoint) {
+    throw new Error('openai judge: apme.judge.endpoint is required (e.g. http://127.0.0.1:11434/v1 for Ollama)');
+  }
+  const url = openAIChatUrl(cfg.endpoint);
+  const base = openAIBase(cfg.endpoint);
+  const model = await resolveOpenAIModel(base, cfg.apiKey, cfg.model);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: 'You are an exacting code evaluator. Reply with strict JSON only.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: 1024,
+    }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!resp.ok) throw new Error(`openai judge HTTP ${resp.status} (${url})`);
+  const json = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
+  const text = json.choices?.[0]?.message?.content;
+  if (typeof text !== 'string' || text.trim().length === 0) throw new Error('openai judge returned empty content');
   return text;
 }
 

@@ -19,7 +19,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { debug } from '../logger.js';
 
-export type ApmeJudgeBackend = 'mlx' | 'api' | 'openclaw' | 'foundationModels';
+export type ApmeJudgeBackend = 'mlx' | 'api' | 'openclaw' | 'foundationModels' | 'openai';
 
 export interface ApmeJudgeConfig {
   backend: ApmeJudgeBackend;
@@ -125,7 +125,7 @@ export function loadApmeConfig(): ApmeConfig {
     judge.model = DEFAULT_APME_CONFIG.judge.model;
   };
 
-  if (!['mlx', 'api', 'openclaw', 'foundationModels'].includes(judge.backend)) {
+  if (!['mlx', 'api', 'openclaw', 'foundationModels', 'openai'].includes(judge.backend)) {
     resetBackendCoupledFields(`unknown judge.backend=${judge.backend}, falling back to mlx`);
     judge.backend = 'mlx';
   }

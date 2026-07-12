@@ -122,6 +122,16 @@ enum ApmeHttpRoutes {
             return .json(["schema": Self.schemaVersion, "categories": store.categoryScorecard()])
         }
 
+        // Local judge-provider detection (onboarding + REVIEW setup). HTTP-only
+        // loopback probe — no subprocess, App Store safe. Mirrors the Node
+        // GET /apme/judge/detect.
+        await httpServer.get("/apme/judge/detect") { request in
+            if let denied = Self.requireToken(request) { return denied }
+            let providers = await ApmeJudgeDetect.detect()
+            let payload = providers.map { ["provider": $0.provider, "label": $0.label, "endpoint": $0.endpoint, "models": $0.models] as [String: Any] }
+            return .json(["schema": Self.schemaVersion, "providers": payload])
+        }
+
         // Sample-granularity scorecard (quality vs cost per agent/model/category).
         await httpServer.get("/apme/samples") { request in
             if let denied = Self.requireToken(request) { return denied }

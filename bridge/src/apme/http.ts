@@ -138,6 +138,16 @@ export async function handleApmeRequest(
       return true;
     }
 
+    // ── Local judge-provider detection (onboarding + REVIEW setup guide) ──────
+    // HTTP-only loopback probe — no subprocess. Surfaces Ollama / LM Studio /
+    // MLX servers the user already runs so they can pick "what I have".
+    if (method === 'GET' && path === '/apme/judge/detect') {
+      const { detectLocalJudgeProviders } = await import('./judge-detect.js');
+      const providers = await detectLocalJudgeProviders();
+      sendJson(res, 200, { schema: EVAL_SCHEMA_VERSION, providers });
+      return true;
+    }
+
     // ── Pareto frontier (quality vs cost) ─────────────────────────────────────
     // The model-orchestration menu: frontier = the real quality/cost tradeoff
     // curve; dominated = strictly-worse models never worth choosing.

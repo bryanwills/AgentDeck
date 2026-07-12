@@ -4397,45 +4397,75 @@ final class DaemonServer {
                 fail("no recorded activity to review yet")
                 return
             }
-            // Judge preflight — Apple Intelligence is the on-device judge on
-            // this tier. NO judge configured → setup guidance panel (frontier
-            // API / OpenClaw / MLX / enable Apple Intelligence), parity with
-            // the Node browser guide. This must ONLY fire for a genuine
-            // config gap (isAvailable == false).
-            guard ApmeJudgeFoundationModels.isAvailable else {
-                ReviewPanelPresenter.shared.presentGuidance(
-                    reason: ApmeJudgeFoundationModels.unavailableReason)
-                fail("no judge — Apple Intelligence not ready (setup guidance shown)")
-                return
-            }
-            // The judge IS available — a failure here is a RUNTIME error (most
-            // often: the change is too large for the on-device context), NOT a
-            // missing judge. Show a runtime error panel, never the setup guide.
+            // Judge preflight — honour the user's configured backend. NO usable
+            // judge → setup guidance panel WITH the machine's detected local
+            // servers offered first (Ollama / LM Studio / MLX), parity with the
+            // Node browser guide. This must fire ONLY for a genuine config gap.
+            let judgeCfg = ApmeSettings.load().judge
             let prompt = ReviewRunner.buildPrompt(projectName: projectName, trajectory: trajectory)
             let text: String
             do {
-                text = try await ApmeJudgeFoundationModels.judgeThrowing(prompt: prompt)
+                switch judgeCfg.backend {
+                case .foundationModels:
+                    guard ApmeJudgeFoundationModels.isAvailable else {
+                        let detected = await ApmeJudgeDetect.detect()
+                        ReviewPanelPresenter.shared.presentGuidance(
+                            reason: ApmeJudgeFoundationModels.unavailableReason, detected: detected)
+                        fail("no judge — Apple Intelligence not ready (setup guidance shown)")
+                        return
+                    }
+                    text = try await ApmeJudgeFoundationModels.judgeThrowing(prompt: prompt)
+                case .openai:
+                    text = try await ApmeJudgeOpenAI.judgeThrowing(prompt: prompt, config: judgeCfg)
+                case .mlx:
+                    // MLX shares the OpenAI wire; reuse the throwing path via an
+                    // openai-shaped config so REVIEW gets a real error too.
+                    var oc = judgeCfg
+                    oc.endpoint = judgeCfg.endpoint ?? ApmeSettings.loadMlxConfig().endpoint
+                    text = try await ApmeJudgeOpenAI.judgeThrowing(prompt: prompt, config: oc)
+                case .api:
+                    guard let t = await ApmeJudgeApi.judge(prompt: prompt, config: judgeCfg) else {
+                        throw ApmeJudgeOpenAI.JudgeError.transport("Anthropic API judge returned no result — check apme.judge.apiKey / ANTHROPIC_API_KEY")
+                    }
+                    text = t
+                case .openclaw:
+                    guard let t = await ApmeJudgeFoundationModels.judge(prompt: prompt) else {
+                        throw ApmeJudgeOpenAI.JudgeError.transport("OpenClaw judge not wired; on-device fallback unavailable")
+                    }
+                    text = t
+                }
             } catch {
+                // Judge is CONFIGURED but the call failed — runtime error, not a
+                // missing judge. Offer the detected local servers as an easy
+                // switch, but don't push the full setup guide.
                 ReviewPanelPresenter.shared.presentError(
                     projectName: projectName,
-                    message: "The on-device judge couldn't process this review (\(error)).")
+                    message: "The configured judge (\(judgeCfg.backend.rawValue)) couldn't complete this review: \(error)")
                 fail("judge call failed: \(error)")
                 return
             }
             guard let parsed = ReviewRunner.parse(text) else {
                 ReviewPanelPresenter.shared.presentError(
                     projectName: projectName,
-                    message: "The judge replied, but its output wasn't valid review JSON. This can happen when a change is near the on-device model's size limit.")
+                    message: "The judge replied, but its output wasn't valid review JSON. For large changes, a stronger judge (Anthropic API, OpenRouter, or a 30B-class local model) is more reliable.")
                 fail("judge returned unparseable output")
                 return
             }
+            let judgeLabel: String = {
+                switch judgeCfg.backend {
+                case .foundationModels: return "foundation-models"
+                case .openai, .mlx: return ApmeJudgeOpenAI.judgeModelLabel
+                case .api: return ApmeJudgeApi.judgeModelLabel
+                case .openclaw: return "openclaw"
+                }
+            }()
             let outcome = ReviewOutcomeData(
                 sessionId: sessionId,
                 projectName: projectName,
                 risk: parsed.risk,
                 summary: parsed.summary,
                 findings: parsed.findings,
-                backend: "foundation-models",
+                backend: judgeLabel,
                 generatedAt: Date()
             )
             self.lastReviewBySession[sessionId] = ("done", parsed.risk, parsed.findings.count, Date())
@@ -4452,7 +4482,7 @@ final class DaemonServer {
                 store.insertEvalForTask(
                     ApmeEval(id: 0, runId: rt.runId, layer: "manual_review", metric: "risk",
                              score: score, raw: rawJSON, rubricVer: nil,
-                             judgeModel: "foundation-models",
+                             judgeModel: judgeLabel,
                              createdAt: Int(Date().timeIntervalSince1970 * 1000)),
                     taskId: rt.taskId)
             }

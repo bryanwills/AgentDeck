@@ -186,10 +186,11 @@ final class ReviewPanelPresenter {
     private var panel: NSPanel?
 
     /// Shown when the REVIEW button is pressed but no judge is ready. Same
-    /// tiered guidance as the Node browser guide, in a native panel.
-    func presentGuidance(reason: String) {
+    /// tiered guidance as the Node browser guide, in a native panel — with any
+    /// locally-detected servers offered first.
+    func presentGuidance(reason: String, detected: [DetectedJudgeProvider] = []) {
         showHosting(
-            NSHostingController(rootView: ReviewGuidancePanelView(reason: reason)),
+            NSHostingController(rootView: ReviewGuidancePanelView(reason: reason, detected: detected)),
             title: "Review — judge setup"
         )
     }
@@ -264,17 +265,20 @@ struct ReviewErrorPanelView: View {
 
 struct ReviewGuidancePanelView: View {
     let reason: String
+    var detected: [DetectedJudgeProvider] = []
 
     private struct Tier: Identifiable { let id = UUID(); let rank: Int; let name: String; let note: String; let detail: String }
     private let tiers: [Tier] = [
         .init(rank: 1, name: "Anthropic API", note: "best review quality (usage-billed, opt-in)",
               detail: "Settings → APME judge → backend \"api\", model claude-opus-4-8. Credential: ANTHROPIC_API_KEY, an `ant auth login` profile, or an apiKey in settings."),
-        .init(rank: 2, name: "OpenClaw gateway", note: "strong quality via your subscription models",
+        .init(rank: 2, name: "OpenRouter / any OpenAI-compatible cloud", note: "one key, hundreds of models",
+              detail: "backend \"openai\", endpoint https://openrouter.ai/api/v1, apiKey sk-or-…, model of your choice. Together/Groq/Fireworks work the same way."),
+        .init(rank: 3, name: "OpenClaw gateway", note: "strong quality via your subscription models",
               detail: "backend \"openclaw\" — works when the OpenClaw gateway is connected."),
-        .init(rank: 3, name: "Local MLX server", note: "free & private; needs a capable model",
-              detail: "backend \"mlx\". Realistic minimum is an 8B-class instruct model; 30B-class recommended. Smaller models give unreliable findings."),
-        .init(rank: 4, name: "Apple Intelligence", note: "free, on-device, basic screening only",
-              detail: "Enable Apple Intelligence in System Settings. Fine for a quick smoke check; too small for a thorough audit."),
+        .init(rank: 4, name: "Local Ollama / LM Studio / MLX", note: "free & private; needs a capable model",
+              detail: "backend \"openai\", endpoint e.g. http://127.0.0.1:11434/v1 (Ollama). Realistic minimum is an 8B-class instruct model; 30B-class recommended."),
+        .init(rank: 5, name: "Apple Intelligence", note: "free, on-device, basic screening only",
+              detail: "Enable Apple Intelligence in System Settings. Fine for a quick smoke check; the on-device model is small, so large changes may not fit."),
     ]
 
     var body: some View {
@@ -285,6 +289,23 @@ struct ReviewGuidancePanelView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Text(reason).font(.system(size: 11, design: .monospaced))
                 .padding(8).background(Color.secondary.opacity(0.12)).cornerRadius(6)
+            if !detected.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Detected on this machine — use what you already run", systemImage: "checkmark.seal.fill")
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(.green)
+                    ForEach(detected, id: \.endpoint) { d in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(d.label) · \(d.endpoint)").font(.system(size: 12, weight: .medium))
+                            Text("\(d.models.count) model\(d.models.count == 1 ? "" : "s"): \(d.models.prefix(5).joined(separator: ", "))")
+                                .font(.system(size: 10)).foregroundStyle(.secondary)
+                            Text("Settings → APME judge → OpenAI-compatible → \(d.endpoint)")
+                                .font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary)
+                        }
+                        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.green.opacity(0.10)).cornerRadius(6)
+                    }
+                }
+            }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {

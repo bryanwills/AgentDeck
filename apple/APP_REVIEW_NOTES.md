@@ -115,9 +115,14 @@ AgentDeck observes Codex and OpenCode only through the opt-in Swift paths descri
 
 ## APME evaluation module
 
-AgentDeck can evaluate finished agent turns against configurable rubrics. In the App Store build:
+AgentDeck can evaluate finished agent turns against configurable rubrics (and, on demand, run an independent "REVIEW" risk check). In the App Store build:
 - Default backend is **Apple Intelligence (Foundation Models)** — on-device, zero-cost, no network.
-- Alternatives (MLX local server, Anthropic API) are opt-in and clearly labeled in Settings.
+- Alternatives are opt-in and clearly labeled in Settings, and all use only already-declared entitlements — **no subprocess, no bundled interpreter, no install nudge**:
+  - **OpenAI-compatible** (`com.apple.security.network.client`): a single outbound-HTTP adapter that talks to any OpenAI-compatible chat server the user *already runs or subscribes to* — a local Ollama (`127.0.0.1:11434`), LM Studio (`127.0.0.1:1234`), vLLM/llama.cpp, or a cloud endpoint like OpenRouter (with the user's own API key). The user types the endpoint (and key, if the endpoint is remote) into Settings. AgentDeck never installs, prompts to install, or spawns any of these — it only sends `POST /v1/chat/completions`.
+  - **Anthropic API** — the user's own key, disclosed as paid.
+  - **MLX local server** — outbound HTTP to a server the user started.
+- **Local-server detection is loopback HTTP only.** Settings offers a "Detect local servers" button (and the REVIEW setup panel offers the same) that issues HTTP GETs to the standard loopback ports (`127.0.0.1:11434/api/tags`, `:1234/v1/models`, `:8800/v1/models`) to notice a server the user already runs. This is a network read, **not** a subprocess — there is no `ollama list` / CLI invocation anywhere. If nothing is running, the probe returns an empty list within ~1.2s and nothing changes.
+- The copy never tells the user to install anything: it says "point AgentDeck at a server you already run." REVIEW itself is opt-in and the on-device default works with zero setup, so the app is never broken without an external provider.
 - Layer 1 deterministic checks (git/pnpm introspection) are **disabled** in the App Store build because they require subprocess access outside the sandbox. The UI surfaces this explicitly — users still get Layer 2 LLM-based scoring.
 
 ## Timeline summary backend

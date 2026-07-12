@@ -21,6 +21,17 @@ enum ApmeJudgeBackend: String, Codable {
     case mlx
     case api
     case openclaw
+    /// Generic OpenAI-compatible chat-completions (Ollama / OpenRouter /
+    /// LM Studio / vLLM / any OpenAI-shaped endpoint). Distinguished from
+    /// `mlx` only by config UX; both speak /v1/chat/completions.
+    case openai
+
+    /// Tolerate unknown/future backend strings by falling back to the
+    /// on-device default instead of throwing during Codable decode.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ApmeJudgeBackend(rawValue: raw) ?? .foundationModels
+    }
 }
 
 struct ApmeJudgeConfig: Codable {
@@ -35,6 +46,9 @@ struct ApmeJudgeConfig: Codable {
     var onlyWhenDisagreement: Bool = false
     /// Optional custom endpoint — unused for `foundationModels`.
     var endpoint: String?
+    /// Bearer key for the `openai` backend (OpenRouter etc.). Optional for
+    /// local servers (Ollama/LM Studio). Also read by `api` (Anthropic).
+    var apiKey: String?
 }
 
 struct ApmeDeterministicConfig: Codable {

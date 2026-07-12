@@ -104,7 +104,37 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     @Published var apmeJudgeBackend: String {
         didSet {
             defaults.set(apmeJudgeBackend, forKey: Keys.apmeJudgeBackend)
-            writeApmeJudgeBackendToSettingsJson(apmeJudgeBackend)
+            writeApmeJudgeConfigToSettingsJson()
+        }
+    }
+
+    /// OpenAI-compatible judge endpoint (Ollama / OpenRouter / LM Studio / …).
+    /// Mirrored into `apme.judge.endpoint`. Only meaningful when
+    /// `apmeJudgeBackend == "openai"`.
+    @Published var apmeJudgeEndpoint: String {
+        didSet {
+            defaults.set(apmeJudgeEndpoint, forKey: Keys.apmeJudgeEndpoint)
+            writeApmeJudgeConfigToSettingsJson()
+        }
+    }
+
+    /// Model id for the openai/api backend. Mirrored into `apme.judge.model`.
+    @Published var apmeJudgeModel: String {
+        didSet {
+            defaults.set(apmeJudgeModel, forKey: Keys.apmeJudgeModel)
+            writeApmeJudgeConfigToSettingsJson()
+        }
+    }
+
+    /// Bearer key for a remote openai endpoint (OpenRouter etc.) or the
+    /// Anthropic `api` backend. Mirrored into `apme.judge.apiKey`. Optional for
+    /// local servers. Stored in UserDefaults like the rest of the judge config;
+    /// the daemon reads it from settings.json. (A future hardening could move
+    /// this to the Keychain — parity with the OpenClaw token path.)
+    @Published var apmeJudgeApiKey: String {
+        didSet {
+            defaults.set(apmeJudgeApiKey, forKey: Keys.apmeJudgeApiKey)
+            writeApmeJudgeConfigToSettingsJson()
         }
     }
 
@@ -263,6 +293,9 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         self.codexUsageSelectedPath = defaults.string(forKey: Keys.codexUsagePath)
         self.codexUsageAccessEnabled = defaults.data(forKey: Keys.codexUsageBookmark) != nil
         self.apmeJudgeBackend = defaults.string(forKey: Keys.apmeJudgeBackend) ?? "foundationModels"
+        self.apmeJudgeEndpoint = defaults.string(forKey: Keys.apmeJudgeEndpoint) ?? ""
+        self.apmeJudgeModel = defaults.string(forKey: Keys.apmeJudgeModel) ?? ""
+        self.apmeJudgeApiKey = defaults.string(forKey: Keys.apmeJudgeApiKey) ?? ""
         self.timelineSummaryProvider = defaults.string(forKey: Keys.timelineSummaryProvider) ?? "auto"
         self.displaySleepDimEnabled = defaults.object(forKey: Keys.displaySleepDimEnabled) as? Bool ?? true
         self.displaySleepDimMode = defaults.string(forKey: Keys.displaySleepDimMode) ?? "off"
@@ -283,12 +316,12 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     /// other keys. Writes atomically so a crashed write doesn't leave the
     /// file half-parsed. The path resolves via AgentDeckPaths so signed
     /// builds land in the App Store sandbox container.
-    private func writeApmeJudgeBackendToSettingsJson(_ backend: String) {
+    private func writeApmeJudgeConfigToSettingsJson() {
         #if os(macOS)
         let url = AgentDeckPaths.settingsJson
 
         // Load existing JSON (or start blank). Silently ignore parse errors —
-        // a malformed file will be rewritten fresh with just our key.
+        // a malformed file will be rewritten fresh with just our keys.
         var root: [String: Any] = [:]
         if let data = try? Data(contentsOf: url),
            let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -297,7 +330,16 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
 
         var apme = (root["apme"] as? [String: Any]) ?? [:]
         var judge = (apme["judge"] as? [String: Any]) ?? [:]
-        judge["backend"] = backend
+        judge["backend"] = apmeJudgeBackend
+        // endpoint/model/apiKey are backend-specific — write when non-empty,
+        // clear when blank so a switch away from openai doesn't leave a stale
+        // endpoint the loader would try to use.
+        let ep = apmeJudgeEndpoint.trimmingCharacters(in: .whitespaces)
+        if ep.isEmpty { judge.removeValue(forKey: "endpoint") } else { judge["endpoint"] = ep }
+        let mdl = apmeJudgeModel.trimmingCharacters(in: .whitespaces)
+        if mdl.isEmpty { judge.removeValue(forKey: "model") } else { judge["model"] = mdl }
+        let key = apmeJudgeApiKey.trimmingCharacters(in: .whitespaces)
+        if key.isEmpty { judge.removeValue(forKey: "apiKey") } else { judge["apiKey"] = key }
         apme["judge"] = judge
         root["apme"] = apme
 
@@ -778,6 +820,9 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         static let antigravityBookmark = "prefs.antigravityBookmark"
         static let antigravitySelectedPath = "prefs.antigravitySelectedPath"
         static let apmeJudgeBackend = "prefs.apmeJudgeBackend"
+        static let apmeJudgeEndpoint = "prefs.apmeJudgeEndpoint"
+        static let apmeJudgeModel = "prefs.apmeJudgeModel"
+        static let apmeJudgeApiKey = "prefs.apmeJudgeApiKey"
         static let timelineSummaryProvider = "prefs.timelineSummaryProvider"
         static let displaySleepDimEnabled = "prefs.displaySleepDimEnabled"
         static let displaySleepDimMode = "prefs.displaySleepDimMode"

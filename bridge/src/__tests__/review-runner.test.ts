@@ -58,18 +58,22 @@ describe('judgeTierNote — honest capability labelling', () => {
 });
 
 describe('renderJudgeGuidanceHtml — no-judge setup flow', () => {
-  it('ranks API first, then OpenClaw, MLX, Apple Intelligence, and states the local model minimum', () => {
+  it('ranks API → OpenRouter → OpenClaw → local → Apple, and states the local model minimum', () => {
     const html = renderJudgeGuidanceHtml({ backend: 'foundationModels', reason: 'not ready' });
     const apiIdx = html.indexOf('Anthropic API');
-    const openclawIdx = html.indexOf('OpenClaw');
-    const mlxIdx = html.indexOf('Local MLX');
+    const openrouterIdx = html.indexOf('OpenRouter');
+    const openclawIdx = html.indexOf('OpenClaw gateway');
+    const localIdx = html.indexOf('Local Ollama');
     const appleIdx = html.indexOf('Apple Intelligence');
     expect(apiIdx).toBeGreaterThan(0);
-    expect(apiIdx).toBeLessThan(openclawIdx);
-    expect(openclawIdx).toBeLessThan(mlxIdx);
-    expect(mlxIdx).toBeLessThan(appleIdx);
+    expect(apiIdx).toBeLessThan(openrouterIdx);
+    expect(openrouterIdx).toBeLessThan(openclawIdx);
+    expect(openclawIdx).toBeLessThan(localIdx);
+    expect(localIdx).toBeLessThan(appleIdx);
     expect(html).toMatch(/8B/); // realistic local minimum
     expect(html).toMatch(/ANTHROPIC_API_KEY|ant auth login/);
+    // OpenRouter path uses the generic openai backend.
+    expect(html).toContain('openrouter.ai/api/v1');
   });
 
   it('reassures that not using REVIEW is a supported choice (no background nagging)', () => {
@@ -83,5 +87,43 @@ describe('renderJudgeGuidanceHtml — no-judge setup flow', () => {
     expect(html).toContain('mlx');
     expect(html).toContain('tinyllama');
     expect(html).toContain('connection refused');
+  });
+});
+
+import { openAIChatUrl } from '../apme/runner.js';
+
+describe('openAIChatUrl — endpoint normalization (Ollama / OpenRouter / LM Studio)', () => {
+  it('bare host → /v1/chat/completions', () => {
+    expect(openAIChatUrl('http://127.0.0.1:11434')).toBe('http://127.0.0.1:11434/v1/chat/completions');
+  });
+  it('base with /v1 → appends chat/completions', () => {
+    expect(openAIChatUrl('https://openrouter.ai/api/v1')).toBe('https://openrouter.ai/api/v1/chat/completions');
+  });
+  it('already-full URL is preserved', () => {
+    expect(openAIChatUrl('http://127.0.0.1:1234/v1/chat/completions')).toBe('http://127.0.0.1:1234/v1/chat/completions');
+  });
+  it('trailing slash tolerated', () => {
+    expect(openAIChatUrl('http://127.0.0.1:11434/v1/')).toBe('http://127.0.0.1:11434/v1/chat/completions');
+  });
+});
+
+describe('renderJudgeGuidanceHtml — detected local providers', () => {
+  it('surfaces detected servers with a ready-to-paste openai config', () => {
+    const html = renderJudgeGuidanceHtml({
+      backend: 'foundationModels', reason: 'change too large',
+      detected: [{ provider: 'ollama', label: 'Ollama', endpoint: 'http://127.0.0.1:11434/v1', models: ['qwen2.5-coder:32b', 'llama3.1:8b'] }],
+    });
+    expect(html).toContain('Detected on this machine');
+    expect(html).toContain('Ollama');
+    expect(html).toContain('http://127.0.0.1:11434/v1');
+    expect(html).toContain('qwen2.5-coder:32b');
+    expect(html).toContain('"backend": "openai"');
+  });
+  it('omits the detected block when nothing is running', () => {
+    const html = renderJudgeGuidanceHtml({ backend: 'foundationModels', detected: [] });
+    expect(html).not.toContain('Detected on this machine');
+    // Still lists OpenRouter + local options as opt-in.
+    expect(html).toContain('OpenRouter');
+    expect(html).toContain('Ollama');
   });
 });

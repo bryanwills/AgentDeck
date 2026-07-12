@@ -236,8 +236,8 @@ export function judgeTierNote(backend: ApmeJudgeBackend): string | undefined {
   if (backend === 'foundationModels') {
     return 'judge tier: on-device small model — basic screening only, not a thorough audit';
   }
-  if (backend === 'mlx') {
-    return 'judge tier: local model — review depth depends on model size (8B minimum, 30B-class recommended)';
+  if (backend === 'mlx' || backend === 'openai') {
+    return 'judge tier: configured model — review depth depends on model size (8B minimum, 30B-class recommended for local)';
   }
   return undefined; // api / openclaw route to frontier-class models
 }
@@ -252,7 +252,19 @@ export function renderJudgeGuidanceHtml(opts: {
   backend: string;
   model?: string;
   reason?: string;
+  /** Locally-detected providers (judge-detect.ts) — offered first when present. */
+  detected?: Array<{ provider: string; label: string; endpoint: string; models: string[] }>;
 }): string {
+  const detected = opts.detected ?? [];
+  const detectedBlock = detected.length ? `
+  <h2 style="color:#15803d">✓ Detected on this machine — use what you already have</h2>
+  ${detected.map((d) => `<div style="margin:8px 0;padding:10px 12px;background:#e8f2ea;border:1px solid #bcd9c2;border-radius:8px">
+    <strong>${esc(d.label)}</strong> <span class="tier">at ${esc(d.endpoint)}</span>
+    <div style="font-size:12px;color:#3b5249;margin-top:2px">${d.models.length} model${d.models.length === 1 ? '' : 's'}: ${esc(d.models.slice(0, 6).join(', '))}</div>
+    <pre style="margin-top:6px">{ "apme": { "judge": { "backend": "openai", "endpoint": "${esc(d.endpoint)}", "model": "${esc(d.models[0] ?? '')}" } } }</pre>
+  </div>`).join('')}
+  <p style="font-size:12px;color:#5b6f66">Point AgentDeck at a server you already run — nothing new to install. An 8B-class instruct model is the realistic minimum for a trustworthy review; smaller models give unreliable findings.</p>
+` : '';
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>AgentDeck Review — judge setup</title>
 <style>
@@ -272,27 +284,33 @@ export function renderJudgeGuidanceHtml(opts: {
   <div class="why">The REVIEW button runs an <strong>independent</strong> risk review of your session's work — a separate model (never the coding agent itself) reads the changes and reports risks. Right now no usable judge is configured:<br><br>
   <code>backend: ${esc(opts.backend)}${opts.model ? ` · model: ${esc(opts.model)}` : ''}</code><br>
   <code>${esc(opts.reason ?? 'not ready')}</code></div>
-
+${detectedBlock}
+  <h2>All options <span class="tier">— ranked by review quality</span></h2>
   <h2><span class="rank">1</span>Anthropic API <span class="tier">— best review quality (usage-billed, opt-in)</span></h2>
-  <pre>// ~/.agentdeck/settings.json
-{ "apme": { "judge": { "backend": "api", "model": "claude-opus-4-8" } } }</pre>
+  <pre>{ "apme": { "judge": { "backend": "api", "model": "claude-opus-4-8" } } }</pre>
   <p style="font-size:13px">Credential: <code>export ANTHROPIC_API_KEY=…</code>, or <code>ant auth login</code>, or add <code>"apiKey"</code> next to the model. <code>claude-haiku-4-5</code> is the budget option if review volume is high.</p>
 
-  <h2><span class="rank">2</span>OpenClaw gateway <span class="tier">— strong quality via your existing subscription models</span></h2>
+  <h2><span class="rank">2</span>OpenRouter <span class="tier">— one key, hundreds of models (usage-billed)</span></h2>
+  <pre>{ "apme": { "judge": { "backend": "openai",
+    "endpoint": "https://openrouter.ai/api/v1",
+    "apiKey": "sk-or-…", "model": "anthropic/claude-opus-4" } } }</pre>
+  <p style="font-size:13px">If you already have an OpenRouter key. Any OpenAI-compatible cloud (Together, Groq, Fireworks, …) works the same way — set <code>endpoint</code> + <code>apiKey</code> + <code>model</code>.</p>
+
+  <h2><span class="rank">3</span>OpenClaw gateway <span class="tier">— strong quality via your existing subscription models</span></h2>
   <pre>{ "apme": { "judge": { "backend": "openclaw" } } }</pre>
   <p style="font-size:13px">Works when the OpenClaw gateway is connected in AgentDeck.</p>
 
-  <h2><span class="rank">3</span>Local MLX server <span class="tier">— free &amp; private; needs a capable model</span></h2>
-  <pre>mlx_lm.server --model Qwen/Qwen3-30B-A3B-Instruct-2507 --port 8080
-# settings.json
-{ "apme": { "judge": { "backend": "mlx", "model": "qwen3-30b" } } }</pre>
-  <p style="font-size:13px">Realistic minimum for a trustworthy risk review is an <strong>8B-class instruct model</strong>; 30B-class recommended. Smaller models produce confident-sounding but unreliable findings.</p>
+  <h2><span class="rank">4</span>Local Ollama / LM Studio / MLX <span class="tier">— free &amp; private; needs a capable model</span></h2>
+  <pre># Ollama (default port)
+{ "apme": { "judge": { "backend": "openai",
+    "endpoint": "http://127.0.0.1:11434/v1", "model": "qwen2.5-coder:32b" } } }</pre>
+  <p style="font-size:13px">Any local OpenAI-compatible server (Ollama :11434, LM Studio :1234, MLX, vLLM, llama.cpp). Realistic minimum is an <strong>8B-class instruct model</strong>; 30B-class recommended.</p>
 
-  <h2><span class="rank">4</span>Apple Intelligence <span class="tier">— free, on-device, basic screening only</span></h2>
-  <p style="font-size:13px">Available automatically when the AgentDeck macOS app is running with Apple Intelligence enabled (<code>backend: "foundationModels"</code>). Fine for a quick smoke check; too small for a thorough audit.</p>
+  <h2><span class="rank">5</span>Apple Intelligence <span class="tier">— free, on-device, basic screening only</span></h2>
+  <p style="font-size:13px">Available automatically when the AgentDeck macOS app runs with Apple Intelligence enabled (<code>backend: "foundationModels"</code>). Fine for a quick smoke check; the on-device model is small, so large changes may not fit — use one of the above for a thorough audit.</p>
 
   <div class="optout">Not planning to use REVIEW? Nothing to do — the button stays, nothing runs in the background, and no popups will nag you. This page only appears when you press REVIEW without a judge.</div>
-  <footer>AgentDeck independent review · details: docs/apme.md</footer>
+  <footer>AgentDeck independent review · settings.json path: <code>~/.agentdeck/settings.json</code> (or the app's sandbox container) · details: docs/apme.md</footer>
 </div></body></html>`;
 }
 
@@ -346,6 +364,9 @@ export async function runSessionReview(opts: {
     const probe = await probeJudgeBackend(judgeCfg);
     if (probe.status !== 'ready') {
       try {
+        // Offer the user's already-running local servers first.
+        const { detectLocalJudgeProviders } = await import('./apme/judge-detect.js');
+        const detected = await detectLocalJudgeProviders().catch(() => []);
         const dir = reviewsDir();
         mkdirSync(dir, { recursive: true });
         const guidePath = join(dir, 'review-judge-setup.html');
@@ -353,6 +374,7 @@ export async function runSessionReview(opts: {
           backend: judgeCfg.backend,
           model: judgeCfg.model,
           reason: probe.reason,
+          detected,
         }));
         openInBrowser(guidePath);
       } catch (err) {

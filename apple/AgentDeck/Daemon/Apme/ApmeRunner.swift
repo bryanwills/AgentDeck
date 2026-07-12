@@ -567,6 +567,8 @@ actor ApmeRunner {
             return await ApmeJudgeFoundationModels.judge(prompt: prompt)
         case .mlx:
             return await ApmeJudgeMlx.judge(prompt: prompt, config: config.judge)
+        case .openai:
+            return await ApmeJudgeOpenAI.judge(prompt: prompt, config: config.judge)
         case .api:
             return await ApmeJudgeApi.judge(prompt: prompt, config: config.judge)
         case .openclaw:
@@ -582,6 +584,7 @@ actor ApmeRunner {
         switch config.judge.backend {
         case .foundationModels: return ApmeJudgeFoundationModels.judgeModelLabel
         case .mlx:              return ApmeJudgeMlx.judgeModelLabel
+        case .openai:           return ApmeJudgeOpenAI.judgeModelLabel
         case .api:              return ApmeJudgeApi.judgeModelLabel
         case .openclaw:         return "openclaw:\(config.judge.model)"
         }

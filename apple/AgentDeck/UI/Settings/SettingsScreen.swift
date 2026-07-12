@@ -923,6 +923,7 @@ struct SettingsScreen: View {
 
             Picker("Backend", selection: $preferences.apmeJudgeBackend) {
                 Text("Foundation Models (on-device, free)").tag("foundationModels")
+                Text("OpenAI-compatible (Ollama / OpenRouter / LM Studio)").tag("openai")
                 Text("MLX (local server, free)").tag("mlx")
                 Text("Anthropic API (paid)").tag("api")
             }
@@ -932,6 +933,11 @@ struct SettingsScreen: View {
             .pickerStyle(.inline)
 #endif
             .labelsHidden()
+
+            // Endpoint / model / key fields for the OpenAI-compatible backend.
+            if preferences.apmeJudgeBackend == "openai" {
+                openAIJudgeFields
+            }
 
             // Inline availability hint for the current selection.
             Group {
@@ -956,6 +962,13 @@ struct SettingsScreen: View {
                 case "mlx":
                     Label(
                         "Requires a local MLX server at http://127.0.0.1:8800. Start it before scoring runs.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                case "openai":
+                    Label(
+                        "Works with Ollama (:11434), LM Studio (:1234), OpenRouter, vLLM — any OpenAI-compatible server. Point it at one you already run; nothing new to install.",
                         systemImage: "info.circle"
                     )
                     .font(.system(size: 11))
@@ -993,6 +1006,85 @@ struct SettingsScreen: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    // MARK: - OpenAI-compatible judge fields (endpoint / model / key + detect)
+
+#if os(macOS)
+    @State private var detectedProviders: [DetectedJudgeProvider] = []
+    @State private var detecting = false
+#endif
+
+    private var openAIJudgeFields: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // One-tap presets fill the endpoint for the common providers.
+            HStack(spacing: 6) {
+                Text("Preset:").font(.system(size: 11)).foregroundStyle(TerrariumHUD.subtext)
+                Button("Ollama") { preferences.apmeJudgeEndpoint = "http://127.0.0.1:11434/v1" }
+                    .buttonStyle(.link).font(.system(size: 11))
+                Button("LM Studio") { preferences.apmeJudgeEndpoint = "http://127.0.0.1:1234/v1" }
+                    .buttonStyle(.link).font(.system(size: 11))
+                Button("OpenRouter") { preferences.apmeJudgeEndpoint = "https://openrouter.ai/api/v1" }
+                    .buttonStyle(.link).font(.system(size: 11))
+            }
+
+            TextField("Endpoint (e.g. http://127.0.0.1:11434/v1)", text: $preferences.apmeJudgeEndpoint)
+                .textFieldStyle(.roundedBorder).font(.system(size: 11))
+            TextField("Model (blank = auto-detect from the server)", text: $preferences.apmeJudgeModel)
+                .textFieldStyle(.roundedBorder).font(.system(size: 11))
+            SecureField("API key (required for OpenRouter / cloud; blank for local)", text: $preferences.apmeJudgeApiKey)
+                .textFieldStyle(.roundedBorder).font(.system(size: 11))
+
+#if os(macOS)
+            HStack(spacing: 8) {
+                Button {
+                    Task { await detectLocalServers() }
+                } label: {
+                    Label(detecting ? "Detecting…" : "Detect local servers", systemImage: "magnifyingglass")
+                        .font(.system(size: 11))
+                }
+                .disabled(detecting)
+                Text("Scans Ollama / LM Studio / MLX on this Mac (loopback HTTP only).")
+                    .font(.system(size: 10)).foregroundStyle(TerrariumHUD.subtext)
+            }
+
+            if !detectedProviders.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(detectedProviders, id: \.endpoint) { d in
+                        Button {
+                            preferences.apmeJudgeEndpoint = d.endpoint
+                            preferences.apmeJudgeModel = d.models.first ?? ""
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                Text("\(d.label) · \(d.models.count) model\(d.models.count == 1 ? "" : "s")")
+                                    .font(.system(size: 11))
+                                Text(d.endpoint).font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(TerrariumHUD.subtext)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(8)
+                .background(Color.green.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+#endif
+
+            Text("An 8B-class instruct model is the realistic minimum for a trustworthy review; 30B-class is recommended for local servers.")
+                .font(.system(size: 10)).foregroundStyle(TerrariumHUD.subtext.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.leading, 4)
+    }
+
+#if os(macOS)
+    private func detectLocalServers() async {
+        detecting = true
+        defer { detecting = false }
+        detectedProviders = await ApmeJudgeDetect.detect()
+    }
+#endif
 
     // MARK: - Timeline summary section
 

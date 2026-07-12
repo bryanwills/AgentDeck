@@ -221,6 +221,8 @@ enum ApmeClassifier {
             return await ApmeJudgeFoundationModels.judge(prompt: prompt)
         case .mlx:
             return await ApmeJudgeMlx.judge(prompt: prompt, config: config.judge)
+        case .openai:
+            return await ApmeJudgeOpenAI.judge(prompt: prompt, config: config.judge)
         case .api:
             return await ApmeJudgeApi.judge(prompt: prompt, config: config.judge)
         case .openclaw:
