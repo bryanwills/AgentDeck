@@ -320,9 +320,23 @@ actor WebSocketServer {
         }
     }
 
-    func broadcastRaw(_ data: Data) {
+    /// Full-state fanout. WiFi-WS ESP32 boards (ids in `esp32ConnIds`) are
+    /// display clients, not dashboards — they must NEVER receive the full
+    /// dashboard payload. It overran their buffer over 2.4 GHz and they dropped
+    /// the socket, re-announcing every few seconds (self-reinforcing flap
+    /// storm). Each esp32 board instead gets its own whitelisted +
+    /// `prepareForSerial`-shrunk payload via `esp32Payloads`; an event absent
+    /// from the map for that id (not display-forwardable) is dropped for it.
+    /// Serial-relay `broadcastHooks` always get the full frame — the serial
+    /// module runs its own per-connection shaping. Mirrors Node's ws-server
+    /// `eventTransformer` + `esp32Clients` split.
+    func broadcastRaw(_ data: Data, esp32Payloads: [UUID: Data] = [:], esp32ConnIds: Set<UUID> = []) {
         for conn in connections {
-            conn.send(data)
+            if esp32ConnIds.contains(conn.id) {
+                if let shaped = esp32Payloads[conn.id] { conn.send(shaped) }
+            } else {
+                conn.send(data)
+            }
         }
         for hook in broadcastHooks {
             hook(data)

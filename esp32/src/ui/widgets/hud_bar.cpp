@@ -730,7 +730,16 @@ static void detailRefresh() {
         const TimelineEntry& te = g_state.timeline[idx];
         if (m.sid[0] && te.sessionId[0] && strcmp(te.sessionId, m.sid) != 0) continue;
         int hh = te.ts / 3600, mm = (te.ts % 3600) / 60;
-        lp += snprintf(logbuf + lp, sizeof(logbuf) - lp, "%02d:%02d  %s\n", hh, mm, te.raw);
+        int w = snprintf(logbuf + lp, sizeof(logbuf) - lp, "%02d:%02d  %s\n", hh, mm, te.raw);
+        if (w < 0) break;
+        lp += w;
+        // snprintf returns the would-have-written length, NOT the bytes actually
+        // written. A long host te.raw pushes lp past the buffer, and the
+        // logbuf[lp - 1] fixup below would then write out of bounds and smash the
+        // UI-task stack → SW reset (the "occasional reboot"). appendBounded() is
+        // compiled out on IPS10, so clamp lp here to the real truncated length.
+        // Same bug class as de6b1519 "Fix IPS10 HUD stack smash".
+        if ((size_t)lp >= sizeof(logbuf)) lp = (int)sizeof(logbuf) - 1;
         if ((size_t)lp >= sizeof(logbuf) - 80) break;
     }
     unlockState();

@@ -749,7 +749,7 @@ actor ESP32Serial {
     private func sendEvent(_ event: [String: Any], to conn: inout SerialConnection) -> Bool {
         guard let type = event["type"] as? String,
               Self.serialForwardedEvents.contains(type) else { return false }
-        let prepared = prepareForSerial(event, connection: conn)
+        let prepared = Self.prepareForSerial(event, deviceInfo: conn.deviceInfo)
         guard let data = try? JSONSerialization.data(withJSONObject: prepared),
               let json = String(data: data, encoding: .utf8) else { return false }
         sendToConnection(&conn, json: json)
@@ -856,7 +856,12 @@ actor ESP32Serial {
     }
 
     /// Strip fields ESP32 doesn't need (reduce payload for small RX buffers)
-    private func prepareForSerial(_ event: [String: Any], connection: SerialConnection) -> [String: Any] {
+    /// Shrink + strip a broadcast event into the lean payload a small ESP32
+    /// display can actually buffer. Static + keyed on `DeviceInfo?` so BOTH the
+    /// USB-serial path (SerialConnection) and the WiFi-WS path (cachedWifiEsp32)
+    /// run the exact same transform — no drift. Mirrors bridge/src/esp32-serial.ts
+    /// `prepareForSerial`.
+    static func prepareForSerial(_ event: [String: Any], deviceInfo: DeviceInfo?) -> [String: Any] {
         var e = event
         let type = event["type"] as? String
 
@@ -925,7 +930,7 @@ actor ESP32Serial {
         // Before the ESP32 has identified itself, keep the first burst lean.
         // CDC devices are the ones that have been stalling on the initial
         // payload, so strip the high-volume fields until device_info lands.
-        if connection.deviceInfo == nil, type == "state_update" {
+        if deviceInfo == nil, type == "state_update" {
             e.removeValue(forKey: "moduleHealth")
             e.removeValue(forKey: "subscriptions")
             e.removeValue(forKey: "voiceAssistantState")
@@ -937,7 +942,7 @@ actor ESP32Serial {
             e.removeValue(forKey: "gatewayAuthMessage")
             e.removeValue(forKey: "remoteUrl")
         }
-        if Self.needsLegacyCodexAppAlias(connection.deviceInfo) {
+        if Self.needsLegacyCodexAppAlias(deviceInfo) {
             e = Self.aliasCodexAppAgentTypes(e) as? [String: Any] ?? e
         }
         return e
@@ -1011,5 +1016,33 @@ actor ESP32Serial {
         "connection", "display_state",
         "timeline_event", "timeline_history"
     ]
+
+    // MARK: - WiFi-WS ESP32 (Node parity)
+
+    /// Reconstruct a `DeviceInfo` from a cached WiFi-ESP32 device dict
+    /// (`cachedWifiEsp32[...].devices.first`) so the WiFi path feeds
+    /// `prepareForSerial` the same board/version/protocolRevision context the
+    /// USB-serial path gets — keeps per-board caps and legacy aliases identical.
+    static func wifiDeviceInfo(_ dict: [String: Any]?) -> DeviceInfo? {
+        guard let dict, let board = dict["board"] as? String else { return nil }
+        return DeviceInfo(
+            board: board,
+            version: dict["version"] as? String,
+            protocolRevision: dict["protocolRevision"] as? Int,
+            wifiConfigured: nil,
+            wifiConnected: nil)
+    }
+
+    /// The payload a WiFi-WS ESP32 *display* board should receive for a broadcast
+    /// event, or `nil` to drop it (not display-forwardable). A WiFi board is a
+    /// display client, not a dashboard: it gets the same whitelisted +
+    /// `prepareForSerial`-shrunk stream as a USB-serial board, never the full
+    /// dashboard fanout (which overran its buffer over 2.4 GHz and flapped the
+    /// socket every few seconds). Mirrors the `esp32 eventTransformer` in
+    /// bridge/src/daemon-server.ts.
+    static func wifiEsp32Forward(_ event: [String: Any], deviceInfo: DeviceInfo?) -> [String: Any]? {
+        guard let type = event["type"] as? String, serialForwardedEvents.contains(type) else { return nil }
+        return prepareForSerial(event, deviceInfo: deviceInfo)
+    }
 }
 #endif

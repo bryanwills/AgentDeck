@@ -2189,6 +2189,17 @@ final class DaemonServer {
         Task { @MainActor [weak self] in
             guard let self = self else { return }
 
+            // WiFi-WS ESP32 boards get the lean, serial-style snapshot: each heavy
+            // frame shrunk via prepareForSerial (or dropped if not display-
+            // forwardable). Re-checked per send because the board's `device_info`
+            // self-announce lands during these 100 ms gaps; once cached, this
+            // shrinks the payload instead of blasting the full dashboard state that
+            // used to overrun the board's buffer and flap the socket.
+            @MainActor func esp32Shaped(_ event: [String: Any]) -> Data? {
+                guard let reg = self.cachedWifiEsp32[conn.id] else { return event.jsonData }
+                return ESP32Serial.wifiEsp32Forward(event, deviceInfo: ESP32Serial.wifiDeviceInfo(reg.devices.first))?.jsonData
+            }
+
             let connectionEvent: [String: Any] = [
                 "type": "connection",
                 "status": "connected",
@@ -2202,39 +2213,45 @@ final class DaemonServer {
             let gwAlive = self.cachedGatewayConnected
             let stateEvent = self.buildFullStateEvent(agentType: gwAlive ? "openclaw" : "daemon")
             self.lastStateEvent = stateEvent
-            if let data = stateEvent.jsonData { conn.send(data) }
+            if let data = esp32Shaped(stateEvent) { conn.send(data) }
 
             try? await Task.sleep(for: .milliseconds(100))
             guard !conn.isDisconnected else { return }
 
             // Sessions list
             let sessionsEvent = self.buildSessionsListEvent()
-            if let data = sessionsEvent.jsonData { conn.send(data) }
+            if let data = esp32Shaped(sessionsEvent) { conn.send(data) }
 
             try? await Task.sleep(for: .milliseconds(100))
             guard !conn.isDisconnected else { return }
 
-            // Timeline history snapshot — Node-daemon parity (bridge-core's
-            // connect burst always pushes `timeline_history`, empty included,
-            // because clients REPLACE their local store on it). Without this
-            // an Android dashboard attached to the Swift daemon (a) started
-            // with an empty timeline and (b) never flipped its
+            // Timeline history snapshot — dashboards only. Node-daemon parity
+            // (bridge-core's connect burst always pushes `timeline_history`,
+            // empty included, because clients REPLACE their local store on it).
+            // Without this an Android dashboard attached to the Swift daemon (a)
+            // started with an empty timeline and (b) never flipped its
             // "receivingBridgeTimeline" suppression flag, so its client-side
             // StateTimelineGenerator kept fabricating "Connected"/"Prompt
-            // sent"/tool rows that no Apple surface shows.
-            let recentEntries = await self.timelineStore.getRecent(100)
-            let historyEvent: [String: Any] = [
-                "type": "timeline_history",
-                "entries": recentEntries.map { Self.daemonTimelineEntryDict($0) },
-            ]
-            if let data = historyEvent.jsonData { conn.send(data) }
+            // sent"/tool rows that no Apple surface shows. ESP32 display boards
+            // are skipped: they match the USB-serial initial set
+            // (state/usage/sessions/display), which never includes a 100-entry
+            // timeline dump — the largest single frame and the one that most
+            // reliably overran their buffer and flapped the socket.
+            if self.cachedWifiEsp32[conn.id] == nil {
+                let recentEntries = await self.timelineStore.getRecent(100)
+                let historyEvent: [String: Any] = [
+                    "type": "timeline_history",
+                    "entries": recentEntries.map { Self.daemonTimelineEntryDict($0) },
+                ]
+                if let data = historyEvent.jsonData { conn.send(data) }
 
-            try? await Task.sleep(for: .milliseconds(100))
-            guard !conn.isDisconnected else { return }
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !conn.isDisconnected else { return }
+            }
 
             // Usage
             let usageEvent = self.buildUsageEvent()
-            if let data = usageEvent?.jsonData { conn.send(data) }
+            if let ue = usageEvent, let data = esp32Shaped(ue) { conn.send(data) }
 
             // Fetch usage if stale
             if self.cachedApiUsage == nil || Date().timeIntervalSince(self.lastApiFetchTime) > 300 {
@@ -4994,9 +5011,24 @@ final class DaemonServer {
 
     @MainActor
     private func broadcastRaw(_ event: [String: Any]) {
-        if let data = event.jsonData {
-            Task { await wsServer.broadcastRaw(data) }
+        guard let data = event.jsonData else { return }
+        // WiFi-WS ESP32 boards are display clients, not dashboards. Shrink +
+        // whitelist per board (Node parity: the esp32 eventTransformer in
+        // bridge/src/daemon-server.ts) so the full dashboard fanout never
+        // overruns their buffer and flaps the socket. A board whose current
+        // event isn't display-forwardable is simply left out of the map → the
+        // WS layer drops that frame for it.
+        let esp32ConnIds = Set(cachedWifiEsp32.keys)
+        var esp32Payloads: [UUID: Data] = [:]
+        if !esp32ConnIds.isEmpty {
+            for (id, reg) in cachedWifiEsp32 {
+                if let shaped = ESP32Serial.wifiEsp32Forward(event, deviceInfo: ESP32Serial.wifiDeviceInfo(reg.devices.first)),
+                   let d = shaped.jsonData {
+                    esp32Payloads[id] = d
+                }
+            }
         }
+        Task { await wsServer.broadcastRaw(data, esp32Payloads: esp32Payloads, esp32ConnIds: esp32ConnIds) }
     }
 
     /// Read the `displaySleepDim` object from settings.json into
