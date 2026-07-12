@@ -597,10 +597,11 @@ function actionTile(label: string, color: string, subtitle?: string): string {
 
 /**
  * REVIEW = independent on-demand eval (review_run), NOT a prompt to the
- * agent — the daemon judges the session's latest work with a separate model,
- * so this tile is valid for EVERY session type (managed, observed Claude/
- * OpenCode, even control-less observed Codex) in any non-awaiting state.
- * Shows the last verdict as a badge; REVIEWING while the judge runs.
+ * agent — the daemon judges the session's latest COMPLETED work with a
+ * separate model, so this tile is valid for EVERY session type (managed,
+ * observed Claude/OpenCode, even control-less observed Codex) — but only
+ * once the turn has ended. Shows the last verdict as a badge; REVIEWING
+ * while the judge runs.
  */
 function reviewTile(sess: SessionInfo | undefined, sid: string): SessionDeckCell {
   if (sess?.reviewStatus === 'running') {
@@ -615,6 +616,25 @@ function reviewTile(sess: SessionInfo | undefined, sid: string): SessionDeckCell
     svg: actionTile('REVIEW', color, subtitle),
     action: { kind: 'command', command: { type: 'review_run', sessionId: sid } },
   };
+}
+
+/**
+ * Non-pressable review status for the PROCESSING branch: REVIEWING while the
+ * judge runs, or the last verdict as an inert badge. Null when there is
+ * nothing to show. Mid-turn the tile must not fire review_run — the work is
+ * not complete yet (the Swift daemon judges the session trajectory, which
+ * mid-turn has no assistant response and systematically reads as
+ * "incomplete/unverified"; the Node daemon would judge a half-written diff).
+ */
+function reviewBadgeTile(sess: SessionInfo | undefined): SessionDeckCell | null {
+  if (sess?.reviewStatus === 'running') {
+    return { svg: renderInfoSlot('REVIEWING', 'judge running', 'activity', 'info'), action: null };
+  }
+  const risk = sess?.reviewRisk;
+  if (!risk) return null;
+  const subtitle = `risk ${risk}${sess?.reviewFindings != null ? ` · ${sess.reviewFindings}` : ''}`;
+  const color = risk === 'high' ? '#f87171' : risk === 'medium' ? '#fbbf24' : '#93c5fd';
+  return { svg: actionTile('REVIEW', color, subtitle), action: null };
 }
 
 export function buildSessionDeck(stateEvt: any, view: DeckView, positions: string[]): Map<string, SessionDeckCell> {
@@ -846,8 +866,11 @@ function buildDetail(
         action: { kind: 'command', command: { type: 'session_command', sessionId: sid, command: { type: 'send_prompt', text: 'commit the changes' } } },
       });
     }
-    // Independent review works mid-turn too (judges the current delta).
-    cells.push(reviewTile(sess, sid));
+    // No actionable REVIEW mid-turn — the work isn't complete yet, so a
+    // review now would judge an unfinished trajectory/diff. Keep the
+    // REVIEWING spinner / last-verdict badge visible as inert status.
+    const badge = reviewBadgeTile(sess);
+    if (badge) cells.push(badge);
   } else if (isObserved) {
     if (sess?.agentType === 'opencode') {
       // OpenCode observed injects immediately even while idle (observer

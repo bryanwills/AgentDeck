@@ -4375,6 +4375,19 @@ final class DaemonServer {
     private func handleReviewRun(sessionId: String) {
         if lastReviewBySession[sessionId]?.status == "running" { return }
         let entry = pushedSessionsById[sessionId] ?? cachedSessions.first(where: { $0.id == sessionId })
+        // Mid-turn guard: the review judges the session TRAJECTORY, and an
+        // in-flight turn (user prompt + tools, no assistant response yet)
+        // systematically reads as "incomplete/unverified" — a false-positive
+        // risk report. Decks no longer offer REVIEW while processing; this
+        // covers stale/third-party clients. Don't clobber the last verdict
+        // badge — just report the refusal.
+        let liveState = (entry?.state ?? "").lowercased()
+        if liveState == "processing" || liveState.hasPrefix("awaiting") {
+            broadcastRaw(["type": "review_status", "sessionId": sessionId, "status": "error",
+                          "message": "session is still working — run REVIEW after the turn completes"])
+            DaemonLogger.shared.info("Review: refused for \(sessionId) — session state \(liveState)")
+            return
+        }
         let projectName = (entry?.projectName.isEmpty == false ? entry?.projectName : nil) ?? "session"
         lastReviewBySession[sessionId] = ("running", nil, nil, Date())
         broadcastRaw(["type": "review_status", "sessionId": sessionId, "status": "running"])

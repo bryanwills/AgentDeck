@@ -760,9 +760,9 @@ export class SessionSlotManager {
 
   /**
    * REVIEW tile = independent on-demand eval (review_run) — daemon-side
-   * judge, no agent control, valid for every session type in any
-   * non-awaiting state. Badge shows the last verdict; REVIEWING while the
-   * judge runs (not pressable).
+   * judge, no agent control, valid for every session type once the turn has
+   * completed. Badge shows the last verdict; REVIEWING while the judge runs
+   * (not pressable).
    */
   private reviewSlotConfig(session: SessionInfo | undefined): SessionSlotConfig {
     if (session?.reviewStatus === 'running') {
@@ -781,6 +781,29 @@ export class SessionSlotManager {
           : undefined,
         localAction: 'review_run',
       },
+    };
+  }
+
+  /**
+   * Non-pressable review status for PROCESSING: REVIEWING while the judge
+   * runs, or the last verdict as an inert badge; null when there is nothing
+   * to show. Mid-turn the tile must not fire review_run — the work isn't
+   * complete yet (the Swift daemon judges the session trajectory, which
+   * mid-turn has no assistant response and reads as "incomplete/unverified";
+   * the Node daemon would judge a half-written diff).
+   */
+  private reviewBadgeSlotConfig(session: SessionInfo | undefined): SessionSlotConfig | null {
+    if (session?.reviewStatus === 'running') {
+      return { type: 'status', label: 'REVIEWING', subtitle: 'judge running', icon: 'tool', tone: 'info' };
+    }
+    const risk = session?.reviewRisk;
+    if (!risk) return null;
+    return {
+      type: 'status',
+      label: 'REVIEW',
+      subtitle: `risk ${risk}${session?.reviewFindings != null ? ` · ${session.reviewFindings}` : ''}`,
+      icon: 'ready',
+      tone: risk === 'high' ? 'danger' : risk === 'medium' ? 'warning' : 'info',
     };
   }
 
@@ -837,14 +860,16 @@ export class SessionSlotManager {
           ? { type: 'status', label: 'STOPPING', subtitle: 'at next tool', icon: 'tool', tone: 'warning' }
           : { type: 'empty' };
       }
-      // Claude observed: COMMIT queued for turn end, then REVIEW.
-      // OpenCode/Codex observed: REVIEW only (mid-run injection dropped).
+      // Claude observed: COMMIT queued for turn end. No actionable REVIEW
+      // mid-turn — the work isn't complete yet; only the REVIEWING spinner /
+      // last-verdict badge stays visible as inert status.
       const cells: SessionSlotConfig[] = [];
       if (isClaudeObserved) {
         const def = CC_OBSERVED_QUEUE_PRESETS[0];
         cells.push({ type: 'preset', preset: { ...def, iconSvg: def.iconSvg ?? '' } });
       }
-      cells.push(this.reviewSlotConfig(session));
+      const reviewBadge = this.reviewBadgeSlotConfig(session);
+      if (reviewBadge) cells.push(reviewBadge);
       const cellIdx = idx - 1;
       if (cellIdx < cells.length) return cells[cellIdx];
       return this.modelStatusCard(session) ?? { type: 'empty' };
@@ -970,9 +995,10 @@ export class SessionSlotManager {
       return this.modelStatusCard(session) ?? { type: 'empty' };
     }
 
-    // Independent review works mid-turn too (judges the current delta).
+    // No actionable REVIEW mid-turn — the work isn't complete yet; show the
+    // REVIEWING spinner / last-verdict badge as inert status only.
     if (isProcessing && !isOpenClaw && contentIdx === 2) {
-      return this.reviewSlotConfig(session);
+      return this.reviewBadgeSlotConfig(session) ?? { type: 'empty' };
     }
 
     // OpenClaw presets (IDLE, or PROCESSING after the tool status tile)

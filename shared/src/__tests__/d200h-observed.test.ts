@@ -49,7 +49,7 @@ describe('D200H observed session detail', () => {
     expect(svgs).not.toContain('GO ON');
   });
 
-  it('processing: soft STOP + COMMIT-at-turn-end + REVIEW; GO ON dropped', () => {
+  it('processing: soft STOP + COMMIT-at-turn-end; no actionable REVIEW mid-turn', () => {
     const cells = detailCells(observedStateEvt({ state: 'processing' }));
     const cmds = commandsOf(cells);
     const stop = cmds.find((c) => c.type === 'session_command'
@@ -62,7 +62,18 @@ describe('D200H observed session detail', () => {
     // commands through the Stop-hook channel); GO ON is gone.
     const texts = prompts.map((p) => (p.command as { text?: string }).text);
     expect(texts).toEqual(['commit the changes']);
-    expect(cmds.filter((c) => c.type === 'review_run')).toHaveLength(1);
+    // The turn is still in flight — a review now would judge incomplete work.
+    expect(cmds.filter((c) => c.type === 'review_run')).toHaveLength(0);
+  });
+
+  it('processing: last review verdict stays visible as an inert badge', () => {
+    const cells = detailCells(observedStateEvt({
+      state: 'processing', reviewRisk: 'medium', reviewFindings: 3,
+    }));
+    const cmds = commandsOf(cells);
+    expect(cmds.filter((c) => c.type === 'review_run')).toHaveLength(0);
+    const svgs = [...cells.values()].map((c) => c.svg).join('');
+    expect(svgs).toContain('risk medium · 3');
   });
 
   it('processing + stopRequested: STOP replaced by STOPPING tile, no queue presets', () => {
@@ -93,7 +104,22 @@ describe('D200H observed session detail', () => {
     expect(svgs).not.toContain('ALLOW');
   });
 
-  it('codex observed: REVIEW only — steering stays inert (notify-only hooks)', () => {
+  it('codex observed idle: REVIEW only — steering stays inert (notify-only hooks)', () => {
+    const evt = {
+      type: 'state_update', state: 'idle',
+      allSessions: [{
+        id: 'observed:codex:t1', port: 0, alive: true, projectName: 'proj',
+        agentType: 'codex-cli', controlMode: 'observed', state: 'idle',
+      }],
+    };
+    const cells = buildSessionDeck(evt, { mode: 'detail', openSessionId: 'observed:codex:t1' }, POSITIONS);
+    const cmds = commandsOf(cells);
+    // The independent eval needs no agent control, so it stays live even for
+    // control-less codex; every steering command stays absent.
+    expect(cmds.map((c) => c.type)).toEqual(['review_run']);
+  });
+
+  it('codex observed processing: nothing actionable — REVIEW waits for turn end', () => {
     const evt = {
       type: 'state_update', state: 'idle',
       allSessions: [{
@@ -102,10 +128,7 @@ describe('D200H observed session detail', () => {
       }],
     };
     const cells = buildSessionDeck(evt, { mode: 'detail', openSessionId: 'observed:codex:t1' }, POSITIONS);
-    const cmds = commandsOf(cells);
-    // The independent eval needs no agent control, so it stays live even for
-    // control-less codex; every steering command stays absent.
-    expect(cmds.map((c) => c.type)).toEqual(['review_run']);
+    expect(commandsOf(cells)).toHaveLength(0);
   });
 
   it('opencode observed idle: inject-now presets via session_command (plugin queue)', () => {
