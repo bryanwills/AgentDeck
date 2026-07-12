@@ -7,13 +7,10 @@
  *   - Default judge backend = Foundation Models via the Swift daemon, then
  *     the bundled CLI Swift helper, with explicit MLX fallback when neither
  *     Foundation Models path is available.
- *   - `backend: "api"` is **NOT supported on the Node bridge** — `callApi()`
- *     in runner.ts is a stub that always throws. The Swift daemon
- *     (App Store macOS) does implement an Anthropic API adapter; users on
- *     macOS can set "api" through the Apple Settings picker because that
- *     value rides in the App Store sandbox settings.json. On the Node
- *     bridge, "api" is silently downgraded to "mlx" with a warning so a
- *     misconfigured value never produces silent zero-eval sessions.
+ *   - `backend: "api"` (Anthropic API via @anthropic-ai/sdk) is supported on
+ *     both daemons but strictly OPT-IN: the user must set it explicitly and
+ *     provide a credential (`apme.judge.apiKey`, ANTHROPIC_API_KEY, or an
+ *     `ant auth login` profile). No code path selects it automatically.
  *   - `sampleRate` + `onlyWhenDisagreement` gate how often layer 2 runs at all.
  */
 
@@ -37,6 +34,11 @@ export interface ApmeJudgeConfig {
    *  For `foundationModels` this is the Swift daemon's `/apme/judge/foundation-models`
    *  endpoint — defaults to the daemon on the standard discovery path. */
   endpoint?: string;
+  /** Anthropic API key for `backend:"api"`. Falls back to the standard SDK
+   *  credential chain (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / `ant auth
+   *  login` profile) when unset. Mirrors the Swift ApmeJudgeApi loader, which
+   *  reads the same settings.json field. */
+  apiKey?: string;
   /** When `foundationModels` is unavailable, retry via local MLX instead of
    *  skipping the eval. Default `true` on the Node bridge so CLI-only setups
    *  still get zero-cost local evals when the Swift daemon is not running. */
@@ -127,14 +129,12 @@ export function loadApmeConfig(): ApmeConfig {
     resetBackendCoupledFields(`unknown judge.backend=${judge.backend}, falling back to mlx`);
     judge.backend = 'mlx';
   }
-  // The 'api' backend is currently a stub on the Node bridge (callApi() always
-  // throws). Downgrade silently to MLX with a one-shot diagnostic so a stale
-  // settings.json doesn't leave APME wedged. Swift daemon has its own loader
-  // that does NOT degrade — see apple/AgentDeck/Daemon/Apme/ApmeSettings.swift.
-  if (judge.backend === 'api') {
-    resetBackendCoupledFields('judge.backend="api" is not implemented on the Node bridge — downgrading to "mlx". Use the macOS app for Anthropic API judging, or pick "openclaw" / "foundationModels" / "mlx"');
-    judge.backend = 'mlx';
-  }
+  // The 'api' backend is implemented on the Node bridge via the official
+  // @anthropic-ai/sdk (2026-07-12; it used to be a stub that was silently
+  // downgraded to MLX here). It stays strictly OPT-IN per the cost-sensitive
+  // defaults policy: nothing selects it automatically, and the probe reports
+  // 'unavailable' with setup guidance when no credential is present. Swift
+  // parity: apple/AgentDeck/Daemon/Apme/ApmeJudgeApi.swift.
   judge.fallbackToMlx = Boolean(judge.fallbackToMlx);
 
   const det: ApmeDeterministicConfig = {

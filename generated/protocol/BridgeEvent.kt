@@ -921,6 +921,7 @@ data class ApmeEvalRow (
 enum class Layer(val value: String) {
     Deterministic("deterministic"),
     LlmJudge("llm_judge"),
+    ManualReview("manual_review"),
     TaskJudge("task_judge"),
     Trajectory("trajectory"),
     TurnJudge("turn_judge"),
@@ -930,6 +931,7 @@ enum class Layer(val value: String) {
         public fun fromValue(value: String): Layer = when (value) {
             "deterministic" -> Deterministic
             "llm_judge"     -> LlmJudge
+            "manual_review" -> ManualReview
             "task_judge"    -> TaskJudge
             "trajectory"    -> Trajectory
             "turn_judge"    -> TurnJudge

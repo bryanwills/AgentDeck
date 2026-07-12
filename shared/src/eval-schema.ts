@@ -83,7 +83,13 @@ export type ApmeEvalLayer =
   | 'task_judge'
   /** Pure, sample-trajectory scorers (no LLM): trajectory quality, tool
    *  efficiency, reliability. Computed over a SessionSample's typed events. */
-  | 'trajectory';
+  | 'trajectory'
+  /** User-triggered on-demand risk review (the REVIEW deck button /
+   *  review-runner). Same eval store as the automatic layers, but this layer
+   *  flags it as manually requested so the dashboard can distinguish a
+   *  hand-run review from the automatic pipeline. score = risk weight
+   *  (low=1.0, medium=0.5, high=0.0); metric='risk'. */
+  | 'manual_review';
 
 export interface ApmeEvalRowDb {
   id?: number;

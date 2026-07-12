@@ -938,6 +938,14 @@ final class ApmeCollector {
         return sessionToTask[sid]?.id
     }
 
+    /// (runId, taskId) for a session's currently-open task — used to record a
+    /// manual_review eval (REVIEW deck button) into the same store as the
+    /// automatic pipeline. Returns nil when no run/task is open for the id.
+    func activeRunAndTask(sessionId: String) -> (runId: String, taskId: String)? {
+        guard let task = sessionToTask[sessionId] else { return nil }
+        return (task.runId, task.id)
+    }
+
     // MARK: - Turn response capture (mid-session eval entry point)
 
     /// Categories where the LLM judge is triggered per-turn (non-code).

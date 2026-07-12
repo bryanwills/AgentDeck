@@ -1172,29 +1172,39 @@ export async function probeJudgeBackend(cfg: ApmeJudgeConfig): Promise<JudgeBack
       return { backend: 'foundationModels', status: 'ready', latencyMs: Date.now() - start, endpoint: url, checkedAt };
     }
     if (cfg.backend === 'api') {
-      // The 'api' backend is currently a STUB — callApi() always throws,
-      // regardless of ANTHROPIC_API_KEY or @anthropic-ai/sdk presence. A probe
-      // that returned 'ready' here would be a lie: the next judge call still
-      // throws. Per cost-sensitive-defaults policy (memory:
-      // feedback_cost_sensitive_defaults.md), local MLX is the supported path;
-      // wiring real API judging is deliberately deferred. Surface that gap
-      // honestly so users redirect to MLX/OpenClaw instead of debugging a
-      // never-firing eval.
-      const hasKey = !!process.env.ANTHROPIC_API_KEY;
-      let sdkPresent = false;
+      // Opt-in Anthropic API judge. "Ready" must mean a judge call can
+      // actually succeed, so verify a credential exists and the model id
+      // resolves via the free Models endpoint (no token spend).
+      const hasCredential = Boolean(
+        cfg.apiKey || process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN,
+      );
+      if (!hasCredential) {
+        return {
+          backend: 'api', status: 'unavailable',
+          reason: 'no Anthropic API credential — set apme.judge.apiKey in settings.json, export ANTHROPIC_API_KEY, or run `ant auth login`',
+          checkedAt,
+        };
+      }
       try {
-        const r = createRequire(import.meta.url);
-        r.resolve('@anthropic-ai/sdk');
-        sdkPresent = true;
-      } catch { /* not installed */ }
-      const env = hasKey
-        ? (sdkPresent ? 'key+SDK present' : 'key set, SDK missing')
-        : 'no ANTHROPIC_API_KEY';
-      return {
-        backend: 'api', status: 'unavailable',
-        reason: `Anthropic API judge backend is not implemented — callApi() is a stub that always throws. Switch apme.judge.backend to "mlx" or "openclaw". Environment: ${env}.`,
-        checkedAt,
-      };
+        const { default: Anthropic } = await import('@anthropic-ai/sdk');
+        const client = new Anthropic({
+          ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
+          timeout: 8_000,
+          maxRetries: 0,
+        });
+        const model = apiJudgeModel(cfg);
+        await client.models.retrieve(model);
+        return {
+          backend: 'api', status: 'ready', model,
+          latencyMs: Date.now() - start, checkedAt,
+        };
+      } catch (err) {
+        return {
+          backend: 'api', status: 'unavailable',
+          reason: `Anthropic API probe failed: ${String(err).slice(0, 200)}`,
+          checkedAt,
+        };
+      }
     }
     return { backend: cfg.backend, status: 'unknown', checkedAt };
   } catch (err) {
@@ -1362,18 +1372,42 @@ async function resolveFoundationModelsUrl(): Promise<string | null> {
   return foundationModelsResolveInFlight;
 }
 
-async function callApi(_prompt: string, _cfg: ApmeJudgeConfig): Promise<string> {
-  // Anthropic API judging is NOT implemented on the Node bridge. The macOS
-  // Swift daemon (apple/AgentDeck/Daemon/Apme/ApmeJudgeApi.swift) is the only
-  // place this backend works today. `loadApmeConfig` silently downgrades
-  // settings.json `backend:"api"` to `"mlx"`, so reaching this stub means
-  // either (a) a programmatic caller bypassed loadApmeConfig, or (b) something
-  // raced between settings load and dispatch. Either way, throw with the
-  // SAME diagnostic the probe surfaces so logs remain consistent.
-  throw new Error(
-    'APME judge backend "api" is a stub on the Node bridge — callApi() always throws. ' +
-    'Use the macOS app for Anthropic API judging, or set apme.judge.backend to "mlx" / "openclaw" / "foundationModels".',
-  );
+/** Default model for the opt-in Anthropic API judge when the configured
+ *  `model` belongs to another backend (e.g. an MLX id left over from a
+ *  backend switch). */
+const API_JUDGE_DEFAULT_MODEL = 'claude-opus-4-8';
+
+function apiJudgeModel(cfg: ApmeJudgeConfig): string {
+  return cfg.model && cfg.model.startsWith('claude') ? cfg.model : API_JUDGE_DEFAULT_MODEL;
+}
+
+async function callApi(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
+  // Opt-in Anthropic API judge (mirrors the Swift ApmeJudgeApi adapter).
+  // Credential chain: settings.json apme.judge.apiKey -> the SDK's standard
+  // resolution (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / `ant auth login`
+  // profile). Hard client timeout — a wedged judge must never wedge an eval.
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
+  const client = new Anthropic({
+    ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
+    timeout: 90_000,
+    maxRetries: 1,
+  });
+  const response = await client.messages.create({
+    model: apiJudgeModel(cfg),
+    max_tokens: 8192,
+    thinking: { type: 'adaptive' },
+    messages: [{ role: 'user', content: prompt }],
+  });
+  if (response.stop_reason === 'refusal') {
+    throw new Error('API judge refused the request (stop_reason=refusal)');
+  }
+  const text = response.content
+    .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+  if (!text) throw new Error(`API judge returned no text (stop_reason=${response.stop_reason})`);
+  return text;
 }
 
 export function parseJudgeJson(text: string): ParsedJudge | null {

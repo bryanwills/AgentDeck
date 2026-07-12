@@ -114,45 +114,21 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
     });
   });
 
-  it('downgrades judge.backend="api" to "mlx" on the Node bridge (callApi is a stub)', () => {
-    // Regression guard for "API backend diagnostics still contradict the new
-    // probe" — probe reports unavailable for 'api' AND settings loader must
-    // strip 'api' before it reaches the dispatcher, so a stale settings.json
-    // entry doesn't park the bridge in a never-fires state.
+  it('honours judge.backend="api" (opt-in Anthropic API judge) without downgrading', () => {
+    // The API backend is now implemented (@anthropic-ai/sdk) and must be
+    // preserved verbatim — it used to be silently rewritten to "mlx" when it
+    // was still a stub. Selecting it is a deliberate opt-in; the probe gates
+    // actual availability on a credential.
     withTempDataDir((dir) => {
       writeFileSync(
         join(dir, 'settings.json'),
-        JSON.stringify({ apme: { judge: { backend: 'api' } } }),
-        'utf-8',
-      );
-      expect(loadApmeConfig().judge.backend).toBe('mlx');
-    });
-  });
-
-  it('also wipes endpoint/model when downgrading backend="api" → "mlx"', () => {
-    // Regression guard for "API→MLX downgrade keeps stale API model/endpoint":
-    // if the user wrote `{backend:"api", endpoint:"https://api.anthropic.com/...",
-    // model:"claude-opus-4-7"}`, the downgrade must reset endpoint/model too,
-    // otherwise callMlx() ends up POSTing to api.anthropic.com with a model
-    // that the MLX server doesn't know — silent failure on every eval.
-    withTempDataDir((dir) => {
-      writeFileSync(
-        join(dir, 'settings.json'),
-        JSON.stringify({
-          apme: {
-            judge: {
-              backend: 'api',
-              endpoint: 'https://api.anthropic.com/v1/messages',
-              model: 'claude-opus-4-7',
-            },
-          },
-        }),
+        JSON.stringify({ apme: { judge: { backend: 'api', apiKey: 'sk-ant-test', model: 'claude-opus-4-8' } } }),
         'utf-8',
       );
       const cfg = loadApmeConfig();
-      expect(cfg.judge.backend).toBe('mlx');
-      expect(cfg.judge.endpoint).toBeUndefined();
-      expect(cfg.judge.model).toBe(DEFAULT_APME_CONFIG.judge.model);
+      expect(cfg.judge.backend).toBe('api');
+      expect(cfg.judge.apiKey).toBe('sk-ant-test');
+      expect(cfg.judge.model).toBe('claude-opus-4-8');
     });
   });
 

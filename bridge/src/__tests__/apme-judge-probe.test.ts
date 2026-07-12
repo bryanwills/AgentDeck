@@ -152,27 +152,19 @@ describe('probeJudgeBackend — OpenClaw', () => {
   });
 });
 
-describe('probeJudgeBackend — Anthropic API (stub backend)', () => {
-  // callApi() is a stub that always throws — see runner.ts:1006. The probe
-  // must therefore ALWAYS report 'unavailable' for backend='api', regardless
-  // of credentials. Returning 'ready' would lie about a backend that can
-  // never actually run. The reason string differentiates the environment
-  // state so users know what (if anything) they have set up correctly.
-  it('returns unavailable when ANTHROPIC_API_KEY is not set', async () => {
+describe('probeJudgeBackend — Anthropic API (opt-in backend)', () => {
+  // The API backend is now implemented via @anthropic-ai/sdk, but stays
+  // strictly OPT-IN: with no credential the probe must report 'unavailable'
+  // with actionable setup guidance (never a false 'ready'). A credential
+  // present drives a real Models-endpoint check — not asserted here to keep
+  // the unit test offline.
+  it('returns unavailable with setup guidance when no credential is present', async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
     const r = await probeJudgeBackend(API_CFG);
     expect(r.status).toBe('unavailable');
-    expect(r.reason).toMatch(/not implemented|stub/i);
-    expect(r.reason).toMatch(/no ANTHROPIC_API_KEY/);
-  });
-
-  it('returns unavailable even when ANTHROPIC_API_KEY is set (callApi is a stub)', async () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
-    const r = await probeJudgeBackend(API_CFG);
-    expect(r.status).toBe('unavailable');
-    expect(r.reason).toMatch(/not implemented|stub/i);
-    // Either "key set, SDK missing" or "key+SDK present" depending on the test
-    // env; both must still be 'unavailable' because callApi throws regardless.
-    expect(r.reason).toMatch(/key/i);
+    expect(r.reason).toMatch(/no Anthropic API credential/i);
+    expect(r.reason).toMatch(/ANTHROPIC_API_KEY|ant auth login|apiKey/i);
   });
 });
 

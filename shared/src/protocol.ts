@@ -408,7 +408,7 @@ export interface TimelineHistoryMsg {
 
 /** A single evaluation score on a completed run. */
 export interface ApmeEvalRow {
-  layer: 'deterministic' | 'llm_judge' | 'vibe' | 'turn_judge' | 'task_judge' | 'trajectory';
+  layer: 'deterministic' | 'llm_judge' | 'vibe' | 'turn_judge' | 'task_judge' | 'trajectory' | 'manual_review';
   metric: string;           // e.g. 'build_ok', 'tests_pass', 'intent', 'overall'
   score: number;            // 0.0 - 1.0
   rubricVer?: number;

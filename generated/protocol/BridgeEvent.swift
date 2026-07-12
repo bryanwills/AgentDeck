@@ -1893,6 +1893,7 @@ extension ADApmeEvalRow {
 enum ADLayer: String, Codable, Equatable {
     case deterministic = "deterministic"
     case llmJudge = "llm_judge"
+    case manualReview = "manual_review"
     case taskJudge = "task_judge"
     case trajectory = "trajectory"
     case turnJudge = "turn_judge"

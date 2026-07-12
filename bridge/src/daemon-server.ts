@@ -2603,6 +2603,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           core.wsServer.broadcast(event as any);
           core.broadcastSessionsList().catch(() => {}); // badge refresh
         },
+        recordEval: apme ? (record) => {
+          // Record into the same eval store as the automatic pipeline,
+          // flagged `manual_review`, on the session's active task (if any).
+          const runId = apme.collector.getRunId(sessionId);
+          const taskId = apme.collector.getActiveTaskId(sessionId);
+          if (!runId || !taskId) return;
+          apme.store.insertEvalForTask({
+            runId, taskId, layer: 'manual_review', metric: 'risk',
+            score: record.score, raw: record.raw,
+            judgeModel: record.judgeModel, createdAt: Date.now(),
+          });
+        } : undefined,
       });
       core.broadcastSessionsList().catch(() => {}); // REVIEWING tile
       return;

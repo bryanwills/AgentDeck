@@ -297,6 +297,25 @@ async function selectRun(id){
       h+=fo(outcome)+'</div>';
     }
 
+    // Manual reviews (REVIEW deck button) — distinguished from the automatic
+    // pipeline by the layer flag. score = risk weight (1=low, .5=med, 0=high).
+    const mEvals=evals.filter(e=>e.layer==='manual_review');
+    if(mEvals.length>0){
+      h+='<div class="section"><div class="section-head"><span>Manual Reviews <span style="font-size:10px;color:var(--dim);border:1px solid var(--dim);border-radius:8px;padding:1px 6px;margin-left:6px">hand-run</span></span><span style="font-size:11px;color:var(--dim)">'+mEvals.length+'</span></div>';
+      for(const e of mEvals){
+        const risk=e.score>=1?'low':e.score>=0.5?'medium':'high';
+        const rc=risk==='high'?'var(--red)':risk==='medium'?'var(--amber,#d19a3a)':'var(--green)';
+        let summary='',findings=0;
+        if(e.raw){try{const r=JSON.parse(e.raw);summary=r.summary||'';findings=(r.findings||[]).length;}catch{}}
+        h+='<div style="padding:6px 0;border-bottom:1px solid var(--border,rgba(255,255,255,.06))">';
+        h+='<span style="color:'+rc+';font-weight:600;font-size:12px">RISK '+risk.toUpperCase()+'</span>';
+        h+=' <span style="color:var(--dim);font-size:11px">'+findings+' finding'+(findings===1?'':'s')+' · '+esc(e.judgeModel||'?')+'</span>';
+        if(summary)h+='<div style="font-size:12px;color:var(--muted);margin-top:2px">'+esc(summary.slice(0,300))+'</div>';
+        h+='</div>';
+      }
+      h+='</div>';
+    }
+
     // Judge
     const jEvals=evals.filter(e=>e.layer==='llm_judge');
     if(jEvals.length>0){

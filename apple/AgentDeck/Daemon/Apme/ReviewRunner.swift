@@ -178,20 +178,39 @@ final class ReviewPanelPresenter {
     static let shared = ReviewPanelPresenter()
     private var panel: NSPanel?
 
+    /// Shown when the REVIEW button is pressed but no judge is ready. Same
+    /// tiered guidance as the Node browser guide, in a native panel.
+    func presentGuidance(reason: String) {
+        showHosting(
+            NSHostingController(rootView: ReviewGuidancePanelView(reason: reason)),
+            title: "Review — judge setup"
+        )
+    }
+
     func present(_ outcome: ReviewOutcomeData) {
-        let hosting = NSHostingController(rootView: ReviewResultPanelView(outcome: outcome))
+        showHosting(
+            NSHostingController(rootView: ReviewResultPanelView(outcome: outcome)),
+            title: "Review — \(outcome.projectName)"
+        )
+    }
+
+    private func showHosting(_ hosting: NSViewController, title: String) {
         if let panel {
             panel.contentViewController = hosting
-            panel.title = "Review — \(outcome.projectName)"
+            panel.title = title
             panel.orderFrontRegardless()
             return
         }
+        presentNew(hosting, title: title)
+    }
+
+    private func presentNew(_ hosting: NSViewController, title: String) {
         let p = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 460),
             styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
-        p.title = "Review — \(outcome.projectName)"
+        p.title = title
         p.isFloatingPanel = true
         p.level = .floating
         p.isReleasedWhenClosed = false
@@ -199,6 +218,57 @@ final class ReviewPanelPresenter {
         p.center()
         p.orderFrontRegardless()
         panel = p
+    }
+}
+
+struct ReviewGuidancePanelView: View {
+    let reason: String
+
+    private struct Tier: Identifiable { let id = UUID(); let rank: Int; let name: String; let note: String; let detail: String }
+    private let tiers: [Tier] = [
+        .init(rank: 1, name: "Anthropic API", note: "best review quality (usage-billed, opt-in)",
+              detail: "Settings → APME judge → backend \"api\", model claude-opus-4-8. Credential: ANTHROPIC_API_KEY, an `ant auth login` profile, or an apiKey in settings."),
+        .init(rank: 2, name: "OpenClaw gateway", note: "strong quality via your subscription models",
+              detail: "backend \"openclaw\" — works when the OpenClaw gateway is connected."),
+        .init(rank: 3, name: "Local MLX server", note: "free & private; needs a capable model",
+              detail: "backend \"mlx\". Realistic minimum is an 8B-class instruct model; 30B-class recommended. Smaller models give unreliable findings."),
+        .init(rank: 4, name: "Apple Intelligence", note: "free, on-device, basic screening only",
+              detail: "Enable Apple Intelligence in System Settings. Fine for a quick smoke check; too small for a thorough audit."),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("REVIEW needs a judge model").font(.headline)
+            Text("REVIEW runs an independent risk review — a separate model reads your session's work and reports risks. No usable judge is ready right now:")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(reason).font(.system(size: 11, design: .monospaced))
+                .padding(8).background(Color.secondary.opacity(0.12)).cornerRadius(6)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(tiers) { t in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text("\(t.rank)").font(.system(size: 11, weight: .bold))
+                                    .frame(width: 18, height: 18)
+                                    .background(Color.primary.opacity(0.85)).foregroundStyle(.background)
+                                    .clipShape(Circle())
+                                Text(t.name).font(.system(size: 13, weight: .semibold))
+                                Text("— \(t.note)").font(.system(size: 11)).foregroundStyle(.secondary)
+                            }
+                            Text(t.detail).font(.system(size: 11)).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Text("Not planning to use REVIEW? Nothing to do — the button stays, nothing runs in the background, and this panel only appears when you press REVIEW without a judge.")
+                .font(.system(size: 11)).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(minWidth: 430, minHeight: 400)
     }
 }
 

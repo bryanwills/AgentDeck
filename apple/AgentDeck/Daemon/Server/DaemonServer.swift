@@ -4397,8 +4397,20 @@ final class DaemonServer {
                 fail("no recorded activity to review yet")
                 return
             }
+            // Judge preflight — Apple Intelligence is the on-device judge on
+            // this tier. When unavailable, show the setup guidance panel
+            // (frontier API / OpenClaw / MLX / enable Apple Intelligence)
+            // rather than a bare error — parity with the Node browser guide.
+            guard ApmeJudgeFoundationModels.isAvailable else {
+                ReviewPanelPresenter.shared.presentGuidance(
+                    reason: ApmeJudgeFoundationModels.unavailableReason)
+                fail("no judge — Apple Intelligence not ready (setup guidance shown)")
+                return
+            }
             let prompt = ReviewRunner.buildPrompt(projectName: projectName, trajectory: trajectory)
             guard let text = await ApmeJudgeFoundationModels.judge(prompt: prompt) else {
+                ReviewPanelPresenter.shared.presentGuidance(
+                    reason: ApmeJudgeFoundationModels.unavailableReason)
                 fail("judge unavailable (Apple Intelligence not ready)")
                 return
             }
@@ -4416,6 +4428,23 @@ final class DaemonServer {
                 generatedAt: Date()
             )
             self.lastReviewBySession[sessionId] = ("done", parsed.risk, parsed.findings.count, Date())
+            // Record into the same eval store as the automatic pipeline,
+            // flagged manual_review, on the session's active task (if any).
+            if let store = self.apmeStore,
+               let rt = self.apmeCollector?.activeRunAndTask(sessionId: sessionId) {
+                let score = parsed.risk == "high" ? 0.0 : parsed.risk == "medium" ? 0.5 : 1.0
+                let rawJSON = (try? JSONSerialization.data(withJSONObject: [
+                    "risk": parsed.risk,
+                    "summary": parsed.summary,
+                    "findings": parsed.findings.map { ["severity": $0.severity, "title": $0.title, "detail": $0.detail] },
+                ])).flatMap { String(data: $0, encoding: .utf8) }
+                store.insertEvalForTask(
+                    ApmeEval(id: 0, runId: rt.runId, layer: "manual_review", metric: "risk",
+                             score: score, raw: rawJSON, rubricVer: nil,
+                             judgeModel: "foundation-models",
+                             createdAt: Int(Date().timeIntervalSince1970 * 1000)),
+                    taskId: rt.taskId)
+            }
             self.broadcastRaw([
                 "type": "review_result", "sessionId": sessionId,
                 "risk": parsed.risk, "findings": parsed.findings.count,
