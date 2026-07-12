@@ -38,7 +38,45 @@ struct TopologyRail: View {
     #endif
     @State private var hubPulse = false
 
+    /// Landscape passes the water-region height so a long DOWNSTREAM
+    /// roster scrolls instead of growing behind the timeline strip;
+    /// nil (portrait) keeps the unbounded plain layout.
+    var maxHeight: CGFloat? = nil
+    @State private var measuredContentHeight: CGFloat = 0
+
     var body: some View {
+        Group {
+            if let maxHeight {
+                let viewportCap = max(0, maxHeight - 20)   // card padding 10×2
+                ScrollView(.vertical, showsIndicators: false) {
+                    railContent
+                        .modifier(RailContentHeightReader { measuredContentHeight = $0 })
+                }
+                .onPreferenceChange(RailContentHeightKey.self) { measuredContentHeight = $0 }
+                // ScrollView is greedy, so bind its height to the content's
+                // measured natural height below the cap (ControlTowerPanel
+                // pattern). Until the first measurement lands, render at the
+                // cap; settle to natural height on the next pass.
+                .frame(height: min(measuredContentHeight > 0 ? measuredContentHeight : .infinity,
+                                   viewportCap))
+                .scrollBounceBehavior(.basedOnSize)
+                // While content demonstrably fits there is nothing to clip;
+                // keep the hub glow shadow bleeding into the card padding as
+                // it always has. Clip whenever content overflows or the
+                // measurement hasn't landed, so rows never paint outside the
+                // card.
+                .scrollClipDisabled(measuredContentHeight > 0 && measuredContentHeight <= viewportCap)
+            } else {
+                railContent
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(TerrariumHUD.bg, in: RoundedRectangle(cornerRadius: 8))
+        .opacity(stateHolder.state.bridgeConnected ? 1.0 : 0.6)
+    }
+
+    private var railContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("UPSTREAM")
             upstreamRows
@@ -46,10 +84,6 @@ struct TopologyRail: View {
             sectionHeader("DOWNSTREAM")
             downstreamRows
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TerrariumHUD.bg, in: RoundedRectangle(cornerRadius: 8))
-        .opacity(stateHolder.state.bridgeConnected ? 1.0 : 0.6)
     }
 
     // MARK: - Header / hub
@@ -1311,5 +1345,46 @@ private struct DeviceRailRow: View {
                 .truncationMode(.middle)
             Spacer(minLength: 0)
         }
+    }
+}
+
+/// Reports the rail content's natural height so the capped landscape
+/// ScrollView can shrink to fit when devices are sparse.
+///
+/// On macOS, preference changes made INSIDE ScrollView content do not
+/// reliably invalidate an ancestor's `onPreferenceChange` (AppKit-hosted
+/// scroll content sits in a separate hosting hierarchy) — ControlTowerPanel
+/// dodges this because its fits-case measurement happens outside the
+/// ScrollView. `onGeometryChange` is the API built for this and works
+/// across the scroll boundary; iOS 17 (< 18) falls back to the classic
+/// preference pattern, which does propagate out of scroll content on iOS.
+private struct RailContentHeightReader: ViewModifier {
+    let onChange: (CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                onChange(height)
+            }
+        } else {
+            content.background(GeometryReader { proxy in
+                Color.clear.preference(
+                    key: RailContentHeightKey.self,
+                    value: proxy.size.height)
+            })
+        }
+    }
+}
+
+/// iOS 17 fallback carrier for `RailContentHeightReader`. Single-source
+/// measurement — reduce just adopts the latest value.
+private struct RailContentHeightKey: PreferenceKey {
+    // `let` keeps Swift 6 strict-concurrency happy — PreferenceKey only
+    // uses defaultValue as an initial accumulator, never mutates it.
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }

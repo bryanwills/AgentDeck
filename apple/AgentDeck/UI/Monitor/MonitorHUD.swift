@@ -27,12 +27,20 @@ struct MonitorHUD: View {
                     // rail is a single unified view so we don't try to hide
                     // upstream or downstream independently anymore.
                     if preferences.showTankStatus || preferences.showDeviceDiagnostic {
-                        HStack {
-                            Spacer()
-                            TopologyRail()
-                                .frame(maxWidth: min(geo.size.width * 0.32, 300))
-                                .padding(.trailing, 12)
-                                .padding(.top, 12)
+                        // The rail must never grow behind the timeline strip
+                        // (bottom sandFraction of the window). 24 = 12 top
+                        // padding + 12 breathing room above the sand line.
+                        let railMaxHeight = (preferences.showTimeline
+                            ? geo.size.height * (1 - MonitorLayout.sandFraction)
+                            : geo.size.height) - 24
+                        if railMaxHeight >= 80 {
+                            HStack {
+                                Spacer()
+                                TopologyRail(maxHeight: railMaxHeight)
+                                    .frame(maxWidth: min(geo.size.width * 0.32, 300))
+                                    .padding(.trailing, 12)
+                                    .padding(.top, 12)
+                            }
                         }
                     }
 

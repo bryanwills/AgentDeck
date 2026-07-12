@@ -2,6 +2,14 @@
 
 import SwiftUI
 
+/// Shared Monitor overlay layout metrics. The timeline strip is sized to
+/// cover the terrarium sand bed, so this derives from the terrarium SSOT
+/// (TerrariumLayout.sandHeightFraction; Android mirror: TerrariumConfig.kt
+/// SAND_HEIGHT_FRACTION).
+enum MonitorLayout {
+    static let sandFraction = CGFloat(TerrariumLayout.sandHeightFraction)
+}
+
 struct MonitorScreen: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
     @EnvironmentObject private var preferences: AppPreferences
@@ -22,8 +30,6 @@ struct MonitorScreen: View {
     @State private var hudHidden = false
     @State private var previousAgentState: AgentConnectionState = .disconnected
     @StateObject private var toastManager = ToastManager()
-
-    private let sandFraction: CGFloat = 0.35
 
     /// Content-based key for fields that affect `DashboardState.toTerrariumState`
     /// outside the top-level connection state. The terrarium keeps its own
@@ -152,7 +158,7 @@ struct MonitorScreen: View {
             VStack {
                 Spacer()
                 TimelineStripView()
-                    .frame(height: geo.size.height * sandFraction)
+                    .frame(height: geo.size.height * MonitorLayout.sandFraction)
             }
         }
     }
@@ -219,7 +225,7 @@ struct MonitorScreen: View {
                         setupCard(items: items)
                             .padding(.leading, 14)
                             .padding(.bottom, preferences.showTimeline
-                                     ? geo.size.height * sandFraction + 14
+                                     ? geo.size.height * MonitorLayout.sandFraction + 14
                                      : 18)
                         Spacer()
                     }
@@ -387,7 +393,7 @@ struct MonitorScreen: View {
             VStack {
                 Spacer()
                 ToastOverlay(message: toast.message, icon: toast.icon)
-                    .padding(.bottom, geo.size.height * sandFraction + 8)
+                    .padding(.bottom, geo.size.height * MonitorLayout.sandFraction + 8)
             }
             .animation(.easeInOut(duration: 0.3), value: toast.message)
         }
@@ -492,6 +498,10 @@ private struct KeyboardShortcutsModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .focusable()
+            // The focusable spans the whole window; without this macOS
+            // draws a window-sized accent focus ring whose layer ghosts
+            // at the old edge during live resize.
+            .focusEffectDisabled()
             .onKeyPress(phases: .down) { keyPress in
                 guard keyPress.modifiers.contains(.command) else { return .ignored }
                 return handleCommandKey(keyPress.key)
