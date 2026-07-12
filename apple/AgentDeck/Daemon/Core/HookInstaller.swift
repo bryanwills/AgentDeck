@@ -311,6 +311,17 @@ enum HookInstaller {
             ]
             return lines.joined(separator: "\n")
         }
+        // Stop is also request-response: the daemon answers instantly — either
+        // an empty body (turn ends normally) or {decision:"block", reason}
+        // delivering a deck-queued directive. Short --max-time: this runs on
+        // EVERY turn end. See canonical commentary in hooks/src/install.ts.
+        if event == "Stop" {
+            let lines = preamble + [
+                #"RESP=$(curl -s -X POST "http://127.0.0.1:$PORT/hooks/Stop" -H 'Content-Type: application/json' --max-time 10 -d @- 2>/dev/null)"#,
+                #"printf '%s' "${RESP:-}""#,
+            ]
+            return lines.joined(separator: "\n")
+        }
         let lines = preamble + [
             "curl -sf -X POST \"http://127.0.0.1:$PORT/hooks/\(event)\" -H 'Content-Type: application/json' -d @- 2>/dev/null || true",
         ]

@@ -210,6 +210,14 @@ function buildHookCommand(eventName: string): string {
       `printf '%s' "\${RESP:-}"`,
     ]).join('\n');
   }
+  // Stop is request-response too (turn-end directive queue) — short --max-time
+  // since it runs on every turn end. See hooks/src/install.ts.
+  if (eventName === 'Stop') {
+    return preamble.concat([
+      `RESP=$(curl -s -X POST "http://127.0.0.1:$PORT/hooks/Stop" -H 'Content-Type: application/json' --max-time 10 -d @- 2>/dev/null)`,
+      `printf '%s' "\${RESP:-}"`,
+    ]).join('\n');
+  }
   return preamble.concat([
     `curl -sf -X POST "http://127.0.0.1:$PORT/hooks/${eventName}" -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
   ]).join('\n');
