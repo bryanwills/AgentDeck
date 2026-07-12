@@ -149,9 +149,14 @@ const EDIT_FAMILY_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']
  * bug). Mirrors the Swift `DaemonServer.shouldGate(permissionMode:tool:)`.
  *
  *  - `bypassPermissions` / `dontAsk` → never prompts            → don't gate
+ *  - `auto`                          → policy engine auto-approves; its
+ *    decisions live outside the settings allowlist files, so the rule
+ *    predictor can't see them and every unlisted call would false-hold.
+ *    The rare genuine prompt still surfaces via the Notification
+ *    `permission_prompt` overlay                                 → don't gate
  *  - `plan`                          → tools don't execute       → don't gate
  *  - `acceptEdits`                   → edits auto-approved, Bash still prompts
- *  - `default` / `auto` / unknown    → Claude may prompt         → gate
+ *  - `default` / unknown             → Claude may prompt         → gate
  *
  * Unknown/absent mode is treated as `default` (gate) to preserve behavior on
  * older Claude versions that don't send the field.
@@ -160,6 +165,7 @@ export function shouldGatePreToolUse(permissionMode: string | undefined, tool: s
   switch ((permissionMode || 'default').trim()) {
     case 'bypassPermissions':
     case 'dontAsk':
+    case 'auto':
     case 'plan':
       return false;
     case 'acceptEdits':

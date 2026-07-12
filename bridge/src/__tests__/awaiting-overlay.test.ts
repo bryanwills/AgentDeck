@@ -98,16 +98,19 @@ describe('awaiting-overlay', () => {
   });
 
   describe('shouldGatePreToolUse', () => {
-    it('gates in default / auto / unknown modes (Claude may prompt)', () => {
+    it('gates in default / unknown modes (Claude may prompt)', () => {
       expect(shouldGatePreToolUse('default', 'Bash')).toBe(true);
-      expect(shouldGatePreToolUse('auto', 'Edit')).toBe(true);
       expect(shouldGatePreToolUse(undefined, 'Bash')).toBe(true);
       expect(shouldGatePreToolUse('something-new', 'Write')).toBe(true);
     });
     it('never gates when Claude will not prompt or execute', () => {
+      // `auto` belongs here: the policy engine auto-approves outside the
+      // settings allowlist files, so gating it produced false attention
+      // popups (+25s hold latency) for calls the user was never asked about.
       for (const tool of ['Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
         expect(shouldGatePreToolUse('bypassPermissions', tool)).toBe(false);
         expect(shouldGatePreToolUse('dontAsk', tool)).toBe(false);
+        expect(shouldGatePreToolUse('auto', tool)).toBe(false);
         expect(shouldGatePreToolUse('plan', tool)).toBe(false);
       }
     });

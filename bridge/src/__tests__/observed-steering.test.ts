@@ -87,7 +87,7 @@ describe('shouldHoldPreToolUse — precision guards (never hold auto-approved ca
   });
 
   it('never holds in auto-approving permission modes', () => {
-    for (const mode of ['bypassPermissions', 'dontAsk', 'plan']) {
+    for (const mode of ['bypassPermissions', 'dontAsk', 'auto', 'plan']) {
       expect(shouldHoldPreToolUse(baseCtx({ permissionMode: mode })).hold).toBe(false);
     }
   });

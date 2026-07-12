@@ -28,17 +28,20 @@ final class DeviceApprovalGateTests: XCTestCase {
     // MARK: - shouldGate(permissionMode:tool:)
 
     func testGatesInPromptableModes() {
-        // default / auto / unknown / absent → Claude may prompt → gate.
+        // default / unknown / absent → Claude may prompt → gate.
         XCTAssertTrue(DaemonServer.shouldGate(permissionMode: "default", tool: "Bash"))
-        XCTAssertTrue(DaemonServer.shouldGate(permissionMode: "auto", tool: "Edit"))
         XCTAssertTrue(DaemonServer.shouldGate(permissionMode: nil, tool: "Bash"))
         XCTAssertTrue(DaemonServer.shouldGate(permissionMode: "something-new", tool: "Write"))
     }
 
     func testNeverGatesWhenClaudeWontPromptOrExecute() {
+        // `auto` belongs here: the policy engine auto-approves outside the
+        // settings allowlist files, so gating it produced false attention
+        // popups (+25s hold latency) for calls the user was never asked about.
         for tool in ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"] {
             XCTAssertFalse(DaemonServer.shouldGate(permissionMode: "bypassPermissions", tool: tool))
             XCTAssertFalse(DaemonServer.shouldGate(permissionMode: "dontAsk", tool: tool))
+            XCTAssertFalse(DaemonServer.shouldGate(permissionMode: "auto", tool: tool))
             XCTAssertFalse(DaemonServer.shouldGate(permissionMode: "plan", tool: tool))
         }
     }

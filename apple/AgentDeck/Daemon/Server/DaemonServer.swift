@@ -4154,12 +4154,17 @@ final class DaemonServer {
     /// `shouldGatePreToolUse`.
     ///
     ///  - `bypassPermissions` / `dontAsk` → never prompts            → don't gate
+    ///  - `auto`                          → policy engine auto-approves; its
+    ///    decisions live outside the settings allowlist files, so the rule
+    ///    predictor can't see them and every unlisted call would false-hold.
+    ///    The rare genuine prompt still surfaces via the Notification
+    ///    `permission_prompt` overlay                                 → don't gate
     ///  - `plan`                          → tools don't execute       → don't gate
     ///  - `acceptEdits`                   → edits auto-approved, Bash still prompts
-    ///  - `default` / `auto` / unknown    → Claude may prompt         → gate
+    ///  - `default` / unknown             → Claude may prompt         → gate
     nonisolated static func shouldGate(permissionMode: String?, tool: String) -> Bool {
         switch (permissionMode ?? "default").trimmingCharacters(in: .whitespaces) {
-        case "bypassPermissions", "dontAsk", "plan":
+        case "bypassPermissions", "dontAsk", "auto", "plan":
             return false
         case "acceptEdits":
             return !editFamilyTools.contains(tool)
