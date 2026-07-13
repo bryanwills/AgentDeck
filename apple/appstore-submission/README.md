@@ -14,6 +14,18 @@ The macOS images are privacy-safe captures of Device Preview, on-device APME set
 
 Do not upload images from `apple/appstore-screenshots/`. That directory is a raw historical capture archive and contains duplicate onboarding frames, developer desktops, browser windows, local project names, IP addresses, and device paths.
 
+## App Preview videos
+
+One upload-ready App Preview is included per platform:
+
+| Platform | File | Spec | Content |
+|---|---|---|---|
+| macOS | `previews/macOS/01-product-tour.mp4` | 1920×1080 · 16.5s | Device Preview → on-device APME → opt-in integrations |
+| iPhone | `previews/iPhone/01-live-dashboard.mp4` | 886×1920 · 15.5s | Live multi-agent dashboard → attention state |
+| iPad | `previews/iPad/01-live-dashboard.mp4` | 1200×1600 · 17.2s | Live multi-agent dashboard → attention state |
+
+All three are H.264 High Profile Level 4.0, progressive, 30 fps, 11 Mbps, silent, and below 500 MB. The iPhone and iPad videos are actual Simulator recordings driven by `scripts/appstore-screenshot-mock.mjs`; they contain only the deterministic `Sample Workspace`, `API Client`, and `Documentation` sessions. The macOS product tour uses only the three privacy-reviewed upload screenshots. Upload only the final files directly under `previews/<platform>/`; raw capture segments are intentionally not retained.
+
 ## Metadata and review material
 
 - Copy-ready Korean and English fields: `docs/appstore-metadata-draft.md`
@@ -22,7 +34,7 @@ Do not upload images from `apple/appstore-screenshots/`. That directory is a raw
 - Feature boundary: `docs/appstore-feature-matrix.md`
 - TestFlight QA: `docs/testflight-qa-checklist.md`
 - Submission decisions and remaining manual steps: `apple/appstore-submission/SUBMISSION_CHECKLIST.md`
-- Optional video plan: `apple/appstore-submission/APP_PREVIEW_STORYBOARD.md`
+- App Preview capture record and poster-frame guidance: `apple/appstore-submission/APP_PREVIEW_STORYBOARD.md`
 
 Run validation before every upload:
 
@@ -40,4 +52,4 @@ included in Release/App Store builds.
 
 Add `--network` to verify the public URLs as well.
 
-App Preview videos are optional. Do not delay the first release for one; the three screenshots per platform satisfy the required product-page media minimum. Never include Terminal, Xcode, browser chrome, secrets, real project names, or local network addresses.
+App Preview videos remain optional in App Store Connect, but upload-ready files are now provided for all three platforms. App previews appear before screenshots, so verify the 5-second poster frame after upload. Never include Terminal, Xcode, browser chrome, secrets, real project names, or local network addresses.

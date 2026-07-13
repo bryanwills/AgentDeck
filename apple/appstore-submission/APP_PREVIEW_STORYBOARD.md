@@ -1,31 +1,37 @@
-# Optional App Preview storyboard
+# App Preview capture record
 
-The first release can ship without an App Preview. If one is produced, use this 22-second structure and record only actual app UI.
+Upload-ready App Previews are in `previews/<platform>/`. The videos use only actual AgentDeck UI and deterministic sample data.
 
-## Storyboard
+## Delivered storyboards
 
-| Time | Visual | Caption |
-|---:|---|---|
-| 0–3s | Clean macOS dashboard with two anonymized creatures | `Your AI agents. One live dashboard.` |
-| 3–8s | One creature changes idle → processing → awaiting | `See state and attention at a glance.` |
-| 8–13s | Timeline receives a tool row and completed turn | `Follow tools, turns, and usage.` |
-| 13–18s | Device Preview switches Stream Deck+ → D200H → iPad | `Preview 17 display surfaces.` |
-| 18–22s | iPad connects through the in-app pairing flow | `Keep every session in sight.` |
+| Platform | Time | Visual |
+|---|---:|---|
+| macOS | 0–5.5s | Hardware-optional Device Preview with Stream Deck+ selected |
+| macOS | 5.5–11s | On-device Foundation Models judge configuration and ready state |
+| macOS | 11–16.5s | Opt-in Claude/Codex integrations and connected account status |
+| iPhone | 0–8s | Three sample agents in processing/idle states; animated creatures and timeline |
+| iPhone | 8–15.5s | Claude attention state with a display-only “respond in terminal” prompt |
+| iPad | 0–8.8s | Full dashboard, topology, animated aquarium, timeline, and detail pane |
+| iPad | 8.8–17.2s | Focused attention state while the remaining agents stay visible |
+
+The mobile source recordings were captured from iOS 18.6 Simulators using the Debug-only `-AgentDeckScreenshotURL` path and `scripts/appstore-screenshot-mock.mjs`. The mock is not included in Release/App Store builds. The macOS preview is assembled from the three upload-ready, privacy-reviewed screenshots because the live developer dashboard contains real local session and hardware state.
 
 ## Capture rules
 
-- Duration: 15–30 seconds; target 22 seconds.
-- H.264 progressive, no more than 30 fps, 10–12 Mbps target bitrate.
+- Duration: 15–30 seconds.
+- H.264 High Profile Level 4.0, progressive, 30 fps, 11 Mbps.
 - Maximum file size: 500 MB.
 - Accepted containers: `.mov`, `.m4v`, or `.mp4` for H.264.
 - macOS preview must be landscape.
 - Set a deliberate poster frame near 5 seconds.
-- Keep captions inside safe margins and readable without audio.
+- The delivered videos are silent and depend only on visible in-app labels; no narration is required.
 - Use an anonymized demo workspace such as `agentdeck-demo`; never show a real project, terminal, token, IP address, home path, USB path, or notification containing private text.
 - Record separate iPhone/iPad variants only if they add product value. Do not stretch or crop a macOS recording into portrait.
 
-## Suggested narration (optional)
+## Poster frames
 
-“AgentDeck turns your AI coding sessions into a live dashboard. See which agent is working, waiting, or finished, follow activity and usage, preview every display, and keep the whole workspace visible from iPad.”
+- macOS: use a frame around 5 seconds so Device Preview is fully visible.
+- iPhone: use a frame around 5 seconds with the three sample sessions visible.
+- iPad: use a frame around 5 seconds with the full aquarium and timeline visible.
 
-Audio is optional. If used, export stereo AAC at 44.1 or 48 kHz and verify captions independently.
+App Store Connect defaults to a poster frame near 5 seconds; verify it after processing rather than relying on the default blindly.

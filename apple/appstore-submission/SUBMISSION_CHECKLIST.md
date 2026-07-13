@@ -21,7 +21,8 @@
 - [ ] Marketing URL: `https://github.com/puritysb/AgentDeck`
 - [ ] Privacy Policy URL: `https://puritysb.github.io/AgentDeck/#privacy`
 - [ ] Upload only `apple/appstore-submission/screenshots/`
-- [ ] Leave App Preview empty for the first release (optional)
+- [x] Prepare one privacy-safe App Preview per platform under `apple/appstore-submission/previews/`
+- [ ] Upload the selected App Previews and verify each 5-second poster frame after processing
 
 ## Compliance answers
 
@@ -62,6 +63,7 @@
 ## Known blocker audit
 
 - [ ] No screenshot exposes an auth token, project/repository name, IP address, home path, USB path, Terminal, Xcode, or browser chrome
+- [ ] No App Preview exposes an auth token, real project/repository name, IP address, home path, USB path, Terminal, Xcode, browser chrome, or system permission dialog
 - [ ] Metadata consistently says 17 Swift-standalone display previews
 - [ ] Product description and screenshots claim only built-in Swift-daemon behavior; no developer-daemon-only feature appears
 - [ ] Claims about on-device speech and Foundation Models match the submitted binary

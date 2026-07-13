@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCREENSHOTS="$ROOT/apple/appstore-submission/screenshots"
+PREVIEWS="$ROOT/apple/appstore-submission/previews"
 METADATA="$ROOT/docs/appstore-metadata-draft.md"
 
 failures=0
@@ -56,6 +57,70 @@ validate_platform() {
 validate_platform "macOS" "1280x800 1440x900 2560x1600 2880x1800"
 validate_platform "iPhone" "1320x2868 2868x1320 1290x2796 2796x1290 1284x2778 2778x1284"
 validate_platform "iPad" "2064x2752 2752x2064 2048x2732 2732x2048"
+
+probe_stream() {
+  local file="$1"
+  local field="$2"
+  ffprobe -v error -select_streams v:0 -show_entries "stream=$field" \
+    -of default=noprint_wrappers=1:nokey=1 "$file" | head -n 1
+}
+
+probe_format() {
+  local file="$1"
+  local field="$2"
+  ffprobe -v error -show_entries "format=$field" \
+    -of default=noprint_wrappers=1:nokey=1 "$file" | head -n 1
+}
+
+validate_previews() {
+  local platform="$1"
+  local accepted="$2"
+  local directory="$PREVIEWS/$platform"
+  local files=()
+
+  [[ -d "$directory" ]] || return
+  if ! command -v ffprobe >/dev/null 2>&1; then
+    fail "ffprobe is required to validate App Preview videos"
+    return
+  fi
+
+  while IFS= read -r file; do files+=("$file"); done < <(find "$directory" -maxdepth 1 -type f \( -iname '*.mov' -o -iname '*.m4v' -o -iname '*.mp4' \) | sort)
+  (( ${#files[@]} <= 3 )) || fail "$platform allows at most 3 App Previews; found ${#files[@]}"
+
+  for file in "${files[@]}"; do
+    local codec profile level width height pixels fps fps_num fps_den duration bytes bitrate field_order
+    codec="$(probe_stream "$file" codec_name)"
+    profile="$(probe_stream "$file" profile)"
+    level="$(probe_stream "$file" level)"
+    width="$(probe_stream "$file" width)"
+    height="$(probe_stream "$file" height)"
+    fps="$(probe_stream "$file" r_frame_rate)"
+    field_order="$(probe_stream "$file" field_order)"
+    duration="$(probe_format "$file" duration)"
+    bitrate="$(probe_format "$file" bit_rate)"
+    bytes="$(stat -f %z "$file")"
+    pixels="${width}x${height}"
+
+    [[ "$codec" == "h264" ]] || fail "$platform/$(basename "$file") must use H.264; found $codec"
+    [[ "$profile" == "High" || "$profile" == "Main" || "$profile" == "Baseline" ]] || fail "$platform/$(basename "$file") has unsupported H.264 profile $profile"
+    [[ "$level" =~ ^[0-9]+$ ]] && (( level <= 40 )) || fail "$platform/$(basename "$file") exceeds H.264 level 4.0"
+    [[ "$field_order" == "progressive" ]] || fail "$platform/$(basename "$file") must be progressive"
+    [[ " $accepted " == *" $pixels "* ]] || fail "$platform/$(basename "$file") has unsupported App Preview dimensions $pixels"
+    awk -v d="$duration" 'BEGIN { exit !(d >= 15 && d <= 30) }' || fail "$platform/$(basename "$file") must be 15–30 seconds; found ${duration}s"
+    (( bytes <= 500000000 )) || fail "$platform/$(basename "$file") exceeds 500 MB"
+
+    fps_num="${fps%/*}"
+    fps_den="${fps#*/}"
+    awk -v n="$fps_num" -v d="$fps_den" 'BEGIN { exit !(d > 0 && n / d <= 30) }' || fail "$platform/$(basename "$file") exceeds 30 fps ($fps)"
+    awk -v b="$bitrate" 'BEGIN { exit !(b >= 10000000 && b <= 12000000) }' || fail "$platform/$(basename "$file") should target 10–12 Mbps; found $bitrate bps"
+
+    echo "OK: $platform/$(basename "$file") ($pixels, ${duration}s, $codec $profile level $level, $fps, $bitrate bps)"
+  done
+}
+
+validate_previews "macOS" "1920x1080"
+validate_previews "iPhone" "886x1920 1920x886"
+validate_previews "iPad" "1200x1600 1600x1200"
 
 python3 - "$METADATA" <<'PY' || failures=$((failures + 1))
 import re
