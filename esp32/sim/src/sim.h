@@ -19,6 +19,8 @@ namespace SimDisplay {
 void init(int w, int h);
 // Active LVGL screen — pass to Terrarium::init as the render parent.
 lv_obj_t* screen();
+// Load a screen object (from Screens::aquariumCreate) as the active screen.
+void loadScreen(lv_obj_t* scr);
 // Advance the virtual clock and LVGL tick by `ms` (drives animation phase).
 void tick(uint32_t ms);
 // Composite + flush the current LVGL tree into the framebuffer synchronously.
@@ -34,6 +36,18 @@ namespace SimPng {
 // stored DEFLATE blocks + CRC32/Adler32. Returns true on success.
 bool writeRgb565(const char* path, const uint16_t* fb, int w, int h);
 }  // namespace SimPng
+
+namespace SimMatrix {
+// Render a TC001 8×32 page ("usage" | "agents") after `frames` animation steps,
+// upscaled ×scale, to a PNG. Only defined for the BOARD_LED8X32 env.
+bool renderToPng(const char* scene, const char* page, int frames, int scale, const char* path);
+}  // namespace SimMatrix
+
+namespace SimEink {
+// Render the InkDeck 800×480 1-bit e-ink dashboard for a scene to PNG. Only
+// defined for the BOARD_INKDECK env.
+bool renderToPng(const char* scene, const char* path);
+}  // namespace SimEink
 
 namespace SimScenes {
 // Populate g_state for a named scene ("idle", "working", "multi", "permission",

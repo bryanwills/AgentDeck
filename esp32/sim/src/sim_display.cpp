@@ -45,6 +45,7 @@ void SimDisplay::init(int w, int h) {
 }
 
 lv_obj_t* SimDisplay::screen() { return lv_screen_active(); }
+void SimDisplay::loadScreen(lv_obj_t* scr) { lv_screen_load(scr); }
 
 void SimDisplay::tick(uint32_t ms) {
   g_sim_millis += ms;

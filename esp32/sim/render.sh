@@ -15,7 +15,7 @@ cd "$(dirname "$0")"
 PIO="${PIO:-pio}"
 command -v "$PIO" >/dev/null 2>&1 || PIO="$HOME/.platformio/penv/bin/pio"
 
-BOARDS_DEFAULT="box_86 ips35 amoled"
+BOARDS_DEFAULT="box_86 ips35 amoled ttgo ips10 led8x32 inkdeck"
 BOARD="${1:-}"
 SCENE="${2:-}"
 OUTDIR="${OUTDIR:-sim-out}"

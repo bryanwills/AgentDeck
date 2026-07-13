@@ -5,28 +5,34 @@ PlatformIO Arduino firmware for LVGL touch displays (ESP32-S3: 86Box 480×480, I
 ## Host simulator (no-hardware preview)
 
 `esp32/sim/` renders **real** board screens on the host — no board, no flashing.
-It compiles the firmware's LVGL terrarium render surface (`src/ui/terrarium/*`,
-minus `office.cpp`) against a native toolchain + LVGL's software renderer into a
-headless RGB565 framebuffer, dumped to PNG. Sources are pulled in verbatim with
-each board's build defines (`BOARD_*`/`SCREEN_W/H`), so output is **pixel-exact**
-— that board's firmware minus hardware I/O, not an approximation. This is the
-ESP32 counterpart to the Node preview tools (`bridge/scripts/pixoo-preview.ts`)
-and removes the drift risk of the hand-mirrored Swift Device Preview ESP32 tiles.
+It compiles the firmware's render surfaces against a native toolchain into a
+headless framebuffer, dumped to PNG. Sources are pulled in verbatim with each
+board's build defines (`BOARD_*`/`SCREEN_W/H`), so output is **pixel-exact** —
+that board's firmware minus hardware I/O, not an approximation. This is the ESP32
+counterpart to the Node preview tools (`bridge/scripts/pixoo-preview.ts`) and
+removes the drift risk of the hand-mirrored Swift Device Preview ESP32 tiles.
 
 ```bash
-pnpm esp32:sim                 # all boards (box_86/ips35/amoled), all scenes → esp32/sim/sim-out/
+pnpm esp32:sim                 # all 7 boards, all scenes → esp32/sim/sim-out/
 pnpm esp32:sim box_86 working  # one board, one scene
 ```
 
-A thin hardware shim layer (`sim/shims/`: `Arduino.h`, `esp_heap_caps.h`,
-`freertos/*`) stubs the tiny surface the render code touches (millis/Serial/
-ps_malloc/mutex). Named scenes populate the same `g_state` the firmware fills from
-the daemon's `state_update`, exercising the real session → creature derivation.
-Frames are deterministic (virtual clock + re-seeded PRNG) for golden tests. Adding
-a board = one `platformio.ini` env block. Standalone PlatformIO project (does not
-inherit `esp32/platformio.ini`), so WiFi/WebSockets/LovyanGFX never enter the
-native build. Terrarium only for now (HUD/matrix/e-ink not yet wired). See
-[esp32/sim/README.md](../esp32/sim/README.md).
+Covers all board classes: LCD terrarium + HUD (`box_86` 480×480, `ips35` 480×320,
+`amoled` 360×360 round, `ttgo` 135×240 compact overlay), the IPS10 tablet "pixel
+office" + sidebar mosaic (`ips10` 1280×800), the TC001 8×32 LED matrix (`led8x32`,
+usage/agents pages), and the InkDeck 1-bit e-ink dashboard (`inkdeck` 800×480).
+LCD boards render the **real** composed screen via `Screens::aquariumCreate()`
+(the firmware's per-board builder). A thin hardware shim layer (`sim/shims/`)
+stubs the surface the render code touches (millis/Serial/heap/mutex/FastLED/
+GxEPD2/Print/net-status); the e-ink text uses the vendored real Adafruit GFX
+fonts for pixel-exact glyphs. Named scenes populate the same `g_state` the
+firmware fills from the daemon's `state_update`, exercising the real session →
+creature/card derivation. Frames are deterministic (virtual clock + re-seeded
+PRNG) for golden tests. Adding a board = one `platformio.ini` env block.
+Standalone PlatformIO project (does not inherit `esp32/platformio.ini`), so
+WiFi/WebSockets/LovyanGFX never enter the native build. Limitations: Latin labels
+only (CJK stubbed); e-ink is a single full-buffer pass (no partial-refresh
+ghosting). See [esp32/sim/README.md](../esp32/sim/README.md).
 
 ## Flash Safety
 

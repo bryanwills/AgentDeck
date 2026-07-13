@@ -14,22 +14,27 @@ void setStr(char* dst, size_t cap, const char* src) {
   dst[cap - 1] = '\0';
 }
 
-// Append one alive session and bump the matching derived creature count.
-void addSession(const char* agentType, const char* state) {
+// Append one alive session (with a distinct project/display name) and bump the
+// matching derived creature count + per-type display-name array the way the
+// daemon's sessions_list does, so the HUD list and creature tags read distinctly.
+void addSession(const char* agentType, const char* state, const char* project) {
   if (g_state.sessionCount >= 10) return;
   SessionInfo& s = g_state.sessions[g_state.sessionCount++];
   std::memset(&s, 0, sizeof(s));
-  setStr(s.id, sizeof(s.id), "sim");
+  setStr(s.id, sizeof(s.id), project);
   setStr(s.agentType, sizeof(s.agentType), agentType);
   setStr(s.state, sizeof(s.state), state);
-  setStr(s.projectName, sizeof(s.projectName), "AgentDeck");
+  setStr(s.projectName, sizeof(s.projectName), project);
   setStr(s.modelName, sizeof(s.modelName), "opus-4.8");
   s.alive = true;
-  if (std::strcmp(agentType, "claude-code") == 0) g_state.octopusCount++;
-  else if (std::strcmp(agentType, "codex-cli") == 0 ||
-           std::strcmp(agentType, "codex-app") == 0) g_state.cloudCount++;
-  else if (std::strcmp(agentType, "opencode") == 0) g_state.opencodeCount++;
-  else if (std::strcmp(agentType, "antigravity") == 0) g_state.antigravityCount++;
+  if (std::strcmp(agentType, "claude-code") == 0)
+    setStr(g_state.sessionNames[g_state.octopusCount++], 24, project);
+  else if (std::strcmp(agentType, "codex-cli") == 0 || std::strcmp(agentType, "codex-app") == 0)
+    setStr(g_state.cloudNames[g_state.cloudCount++], 24, project);
+  else if (std::strcmp(agentType, "opencode") == 0)
+    setStr(g_state.opencodeNames[g_state.opencodeCount++], 24, project);
+  else if (std::strcmp(agentType, "antigravity") == 0)
+    setStr(g_state.antigravityNames[g_state.antigravityCount++], 24, project);
 }
 
 void base(CreatureState cs) {
@@ -42,6 +47,23 @@ void base(CreatureState cs) {
   g_state.tetraState = TetraState::HOVERING;
   setStr(g_state.agentType, sizeof(g_state.agentType), "daemon");
   setStr(g_state.projectName, sizeof(g_state.projectName), "AgentDeck");
+  setStr(g_state.modelName, sizeof(g_state.modelName), "opus-4.8");
+  g_state.hostDisplayOn = true;      // host awake (e-ink shows dashboard, not sleep card)
+  g_state.userBrightness = 255;
+  // Usage — drives the 5H/7D rate gauges (matrix usage page, HUD, e-ink).
+  g_state.fiveHourPercent = 42.0f;
+  g_state.sevenDayPercent = 68.0f;
+  setStr(g_state.fiveHourReset, sizeof(g_state.fiveHourReset), "2h 15m");
+  setStr(g_state.sevenDayReset, sizeof(g_state.sevenDayReset), "3d 4h");
+  g_state.inputTokens = 128000; g_state.outputTokens = 41000;
+  g_state.toolCalls = 87; g_state.sessionDurationSec = 5400;
+  g_state.estimatedCostUsd = 3.42f;
+  g_state.codexPrimaryPercent = -1.0f;   // no Codex-window data by default
+  g_state.codexSecondaryPercent = -1.0f;
+  g_state.antigravityCredits = -1.0f;
+  setStr(g_state.subscriptions[0].name, sizeof(g_state.subscriptions[0].name), "Claude Max");
+  setStr(g_state.subscriptions[0].until, sizeof(g_state.subscriptions[0].until), "~7/28");
+  g_state.subscriptionCount = 1;
 }
 
 }  // namespace
@@ -54,22 +76,22 @@ bool SimScenes::apply(const char* name) {
   }
   if (std::strcmp(name, "idle") == 0) {
     base(CreatureState::FLOATING);
-    addSession("claude-code", "idle");
+    addSession("claude-code", "idle", "AgentDeck");
     return true;
   }
   if (std::strcmp(name, "working") == 0) {
     base(CreatureState::WORKING);
-    addSession("claude-code", "processing");
-    addSession("claude-code", "processing");
-    addSession("codex-cli", "processing");
+    addSession("claude-code", "processing", "AgentDeck");
+    addSession("claude-code", "processing", "bridge");
+    addSession("codex-cli", "processing", "firmware");
     return true;
   }
   if (std::strcmp(name, "multi") == 0) {
     base(CreatureState::WORKING);
-    addSession("claude-code", "processing");
-    addSession("codex-cli", "processing");
-    addSession("opencode", "idle");
-    addSession("antigravity", "idle");
+    addSession("claude-code", "processing", "AgentDeck");
+    addSession("codex-cli", "processing", "esp32");
+    addSession("opencode", "idle", "docs");
+    addSession("antigravity", "idle", "apple");
     g_state.crayfishState = CrayfishState::ROUTING;
     g_state.gatewayConnected = true;   // OpenClaw gateway → crayfish visible
     g_state.crayfishCount = 1;
@@ -77,7 +99,7 @@ bool SimScenes::apply(const char* name) {
   }
   if (std::strcmp(name, "permission") == 0) {
     base(CreatureState::ASKING);
-    addSession("claude-code", "awaiting_permission");
+    addSession("claude-code", "awaiting_permission", "AgentDeck");
     g_state.state = AgentState::AWAITING_PERMISSION;
     return true;
   }
