@@ -951,6 +951,52 @@ final class ApmeTaskBoundaryTests: XCTestCase {
         XCTAssertEqual(t.claimOpenTurn(sid: "claude"), 10)
     }
 
+    // MARK: - chat_response startedAt anchor fallback (2026-07-13)
+    //
+    // The timeline data audit found 42% of Swift chat_response rows shipped
+    // `startedAt = nil` — a duplicate/late Stop claimed nil even though the
+    // turn's chat_start was still on the timeline, so the answer rendered
+    // orphaned ("답변만 튀어나옴"). `lastChatStart` survives the claim and backs
+    // the emit-path fallback `claimOpenTurn(sid) ?? lastChatStart(sid)`.
+
+    /// `lastChatStart` retains the anchor across a claim, so a second (late/
+    /// duplicate) Stop can still anchor its response to the turn's chat_start.
+    func testTurnAnchorLastChatStartSurvivesClaim() {
+        var t = ChatTurnAnchorTracker()
+        t.noteChatStart(sid: "s1", ts: 1000)
+        XCTAssertEqual(t.claimOpenTurn(sid: "s1"), 1000)
+        XCTAssertNil(t.claimOpenTurn(sid: "s1"), "open turn consumed")
+        XCTAssertEqual(t.lastChatStart(sid: "s1"), 1000,
+                       "anchor fallback survives the claim so a late response isn't orphaned")
+    }
+
+    /// The fallback tracks the MOST RECENT chat_start — a fresh prompt updates
+    /// it, so a claimed-nil response anchors to the current turn, not a stale one.
+    func testTurnAnchorLastChatStartTracksNewestPrompt() {
+        var t = ChatTurnAnchorTracker()
+        t.noteChatStart(sid: "s1", ts: 1000)
+        _ = t.claimOpenTurn(sid: "s1")
+        t.noteChatStart(sid: "s1", ts: 5000)
+        XCTAssertEqual(t.lastChatStart(sid: "s1"), 5000)
+    }
+
+    /// No chat_start seen yet → nil (a genuinely anchorless observed response
+    /// stays null; there is no turn to pair with).
+    func testTurnAnchorLastChatStartNilBeforeAnyPrompt() {
+        let t = ChatTurnAnchorTracker()
+        XCTAssertNil(t.lastChatStart(sid: "s1"))
+    }
+
+    /// `clear` (session_end / eviction) drops the fallback too — a post-close
+    /// response must not anchor to a pre-session_end prompt.
+    func testTurnAnchorLastChatStartClearedOnSessionEnd() {
+        var t = ChatTurnAnchorTracker()
+        t.noteChatStart(sid: "s1", ts: 1000)
+        t.clear(sid: "s1")
+        XCTAssertNil(t.lastChatStart(sid: "s1"))
+        XCTAssertNil(t.claimOpenTurn(sid: "s1"))
+    }
+
     /// `peekOpenTurn` is for mid-turn rows (tool_exec) that stamp the
     /// turn currently generating without consuming the anchor the Stop
     /// hook owns — and it goes nil once the Stop claims the turn, so a

@@ -7090,14 +7090,14 @@ final class DaemonServer {
         // Claim the open turn's anchor up front so both chat_response
         // and chat_end stamp the same anchor and a delayed peer Stop
         // hook can't reach in mid-handler.
-        let startTs = claimCodexOpenTurnAnchor(sid: sessionId)
+        let claimedTs = claimCodexOpenTurnAnchor(sid: sessionId)
         let assistantText = (json["last_assistant_message"] as? String)
             ?? (json["response"] as? String)
             ?? (json["output"] as? String)
             ?? (json["result"] as? String)
             ?? CodexRolloutResponseReader.lastAgentMessage(sessionId: sessionId)
             ?? ""
-        guard startTs != nil || !assistantText.isEmpty else {
+        guard claimedTs != nil || !assistantText.isEmpty else {
             // No open turn AND no response body — nothing to anchor;
             // wipe only the session-scoped topic / tool to clear stale
             // labels.
@@ -7105,6 +7105,12 @@ final class DaemonServer {
             codexCurrentToolBySession.removeValue(forKey: sessionId)
             return
         }
+        // Anchor fallback (see ChatTurnAnchorTracker.lastChatStart): a turn
+        // whose open anchor was already claimed still anchors its response to
+        // the session's last chat_start instead of shipping null. The guard
+        // above stays on `claimedTs`, so a response-less late Stop still
+        // returns early — no spurious "Completed" row.
+        let startTs = claimedTs ?? codexTurnAnchors.lastChatStart(sid: sessionId)
         let projectName = codexTimelineProjectName(sessionId: sessionId, json: json)
         if !assistantText.isEmpty {
             var respEntry = DaemonTimelineEntry(
@@ -7263,12 +7269,15 @@ final class DaemonServer {
         let now = Date().timeIntervalSince1970 * 1000
         // Claim once at the top so chat_response and chat_end stamp the same
         // anchor and a delayed duplicate Stop claims nothing.
-        let startTs = openCodeTurnAnchors.claimOpenTurn(sid: sessionId)
+        let claimedTs = openCodeTurnAnchors.claimOpenTurn(sid: sessionId)
         let assistantText = (json["last_assistant_message"] as? String) ?? ""
         let projectName = openCodeTimelineProjectName(sessionId: sessionId, json: json)
         let topicFromPrompt = openCodeLastPromptTopicBySession[sessionId]
         openCodeLastPromptTopicBySession.removeValue(forKey: sessionId)
-        guard startTs != nil || !assistantText.isEmpty else { return }
+        guard claimedTs != nil || !assistantText.isEmpty else { return }
+        // Anchor fallback (see ChatTurnAnchorTracker.lastChatStart): claimed-nil
+        // response still anchors to the session's last chat_start, not null.
+        let startTs = claimedTs ?? openCodeTurnAnchors.lastChatStart(sid: sessionId)
         if !assistantText.isEmpty {
             var respEntry = DaemonTimelineEntry(
                 ts: now - 1,
@@ -7386,7 +7395,15 @@ final class DaemonServer {
         // is no longer mutated after this point in the current turn's
         // emit flow. nil for a duplicate/late Stop (turn already closed)
         // — the response-only fallback below still records the text.
-        let startTs: Double? = sessionId.flatMap { claimClaudeOpenTurnAnchor(sid: $0) }
+        let claimedTs: Double? = sessionId.flatMap { claimClaudeOpenTurnAnchor(sid: $0) }
+        // Anchor fallback: a duplicate / late Stop (or a response arriving
+        // after the turn closed) claims nil even when the turn's chat_start is
+        // still on the timeline. Stamp the session's last chat_start so the
+        // answer anchors to its prompt instead of shipping null — a null anchor
+        // orphaned the response in the client turn-merge ("답변만 튀어나옴";
+        // timeline data audit 2026-07-13). Non-consuming, so it never mints a
+        // spurious close row for an already-closed turn.
+        let startTs: Double? = claimedTs ?? sessionId.flatMap { claudeTurnAnchors.lastChatStart(sid: $0) }
         if !assistantText.isEmpty {
             let snippet = String(assistantText.prefix(200))
             let detail: String? = assistantText.count > 100
@@ -7933,9 +7950,23 @@ struct ChatTurnAnchorTracker: Equatable, Sendable {
     /// newer prompt supersedes it (Node daemon parity).
     private var openTurnTs: [String: Double] = [:]
 
+    /// The most recent chat_start ts per session, RETAINED across claims
+    /// (unlike `openTurnTs`, which `claimOpenTurn` consumes). Pure `startedAt`
+    /// anchor fallback for a completion row whose open turn was already
+    /// claimed — a duplicate / late Stop hook, or a `chat_response` arriving
+    /// after the turn closed. Without it those rows shipped `startedAt = nil`,
+    /// and a null anchor made the client turn-merge fall back to a permissive
+    /// match that either cross-talked the answer onto a *newer* turn's row or
+    /// (for a second response in one turn) rendered it standalone — the "답변만
+    /// 튀어나옴" lone-response symptom the timeline data audit (2026-07-13)
+    /// pinned to 42% of Swift `chat_response` rows. Cleared on `clear`
+    /// (session_end / eviction — no turn left to anchor to). No TTL.
+    private var lastChatStartTs: [String: Double] = [:]
+
     /// Record a new turn's chat_start anchor, superseding any unclaimed one.
     mutating func noteChatStart(sid: String, ts: Double) {
         openTurnTs[sid] = ts
+        lastChatStartTs[sid] = ts
     }
 
     /// The open turn's anchor without consuming it — for mid-turn rows
@@ -7952,6 +7983,16 @@ struct ChatTurnAnchorTracker: Equatable, Sendable {
         openTurnTs.removeValue(forKey: sid)
     }
 
+    /// The session's most recent chat_start ts, surviving claims. Used ONLY
+    /// as the `startedAt` anchor fallback when `claimOpenTurn` returned nil
+    /// but a completion row is still being emitted — never as the open-turn
+    /// decision (that stays `claimOpenTurn` / `hasOpenTurn`, so no spurious
+    /// close rows are minted for an already-closed turn). nil until the first
+    /// chat_start is seen for the session.
+    func lastChatStart(sid: String) -> Double? {
+        lastChatStartTs[sid]
+    }
+
     /// True while a chat_start is pending its Stop — the "is there an
     /// unfinished turn to force-close?" check used by session_end and
     /// stale-session eviction.
@@ -7961,6 +8002,7 @@ struct ChatTurnAnchorTracker: Equatable, Sendable {
 
     mutating func clear(sid: String) {
         openTurnTs.removeValue(forKey: sid)
+        lastChatStartTs.removeValue(forKey: sid)
     }
 }
 

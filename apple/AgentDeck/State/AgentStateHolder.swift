@@ -651,7 +651,11 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
             timelineVersion += 1
         case .timelineHistory(let e):
             timelineGenerator.receivingBridgeTimeline = true
-            timelineStore.mergeHistory(e.entries)
+            // Authoritative snapshot: replace, don't merge — the daemon
+            // re-stamps ts on reconnect replay, and a ts-only merge stacked
+            // ghost OpenClaw rows across reconnects. Mirrors Android
+            // replace-on-connect. See TimelineStore.replaceSnapshot.
+            timelineStore.replaceSnapshot(e.entries)
             timelineVersion += 1
         }
 

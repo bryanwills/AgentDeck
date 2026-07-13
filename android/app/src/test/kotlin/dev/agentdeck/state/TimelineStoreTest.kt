@@ -755,6 +755,49 @@ class TimelineStoreTest {
 
     // --- helpers ---
 
+    // --- matchesTimelineFilter (per-session timeline filter) ---
+
+    @Test
+    fun `matchesTimelineFilter matches by sessionId`() {
+        val e = TimelineEntry(timestamp = 1, type = "chat_start", summary = "hi", sessionId = "sess-1")
+        assertTrue(e.matchesTimelineFilter(TimelineSessionFilter("sess-1")))
+        assertFalse(e.matchesTimelineFilter(TimelineSessionFilter("sess-2")))
+    }
+
+    @Test
+    fun `matchesTimelineFilter keeps sessionless OpenClaw rows under gateway`() {
+        val e = TimelineEntry(timestamp = 1, type = "chat_response", summary = "cron", agentType = "openclaw")
+        assertTrue(e.matchesTimelineFilter(TimelineSessionFilter("openclaw-gateway", "OpenClaw", "openclaw")))
+        // A non-openclaw sessionless row must NOT leak into the gateway view.
+        val other = TimelineEntry(timestamp = 1, type = "chat_response", summary = "x", agentType = "claude-code")
+        assertFalse(other.matchesTimelineFilter(TimelineSessionFilter("openclaw-gateway", "OpenClaw", "openclaw")))
+    }
+
+    @Test
+    fun `matchesTimelineFilter falls back to project plus agent for legacy sessionless rows`() {
+        val e = TimelineEntry(timestamp = 1, type = "chat_start", summary = "hi",
+            agentType = "claude-code", projectName = "AgentDeck")
+        assertTrue(e.matchesTimelineFilter(TimelineSessionFilter("sess-x", "AgentDeck", "claude-code")))
+        // Different project in the same agent must not collapse two sessions.
+        assertFalse(e.matchesTimelineFilter(TimelineSessionFilter("sess-x", "ViewTrans", "claude-code")))
+    }
+
+    @Test
+    fun `matchesTimelineFilter with sessionId ignores project fallback`() {
+        // Entry HAS a sessionId that doesn't match — the project/agent fallback
+        // is only for sessionless entries, so this must not match.
+        val e = TimelineEntry(timestamp = 1, type = "chat_start", summary = "hi",
+            agentType = "claude-code", projectName = "AgentDeck", sessionId = "sess-real")
+        assertFalse(e.matchesTimelineFilter(TimelineSessionFilter("sess-x", "AgentDeck", "claude-code")))
+    }
+
+    @Test
+    fun `TimelineSessionFilter label prefers project then friendly agent`() {
+        assertEquals("AgentDeck", TimelineSessionFilter("s", "AgentDeck", "claude-code").label)
+        assertEquals("Claude", TimelineSessionFilter("s", null, "claude-code").label)
+        assertEquals("s", TimelineSessionFilter("s", null, null).label)
+    }
+
     private fun entry(ts: Long, type: String, summary: String) =
         TimelineEntry(timestamp = ts, type = type, summary = summary)
 }

@@ -74,6 +74,7 @@ import dev.agentdeck.net.ConnectionStatus
 import dev.agentdeck.net.DiscoveredBridge
 import dev.agentdeck.state.AgentStateHolder
 import dev.agentdeck.state.DashboardState
+import dev.agentdeck.state.TimelineSessionFilter
 import dev.agentdeck.state.TimelineStore
 import dev.agentdeck.terrarium.CrayfishVisualState
 import dev.agentdeck.terrarium.TerrariumColors
@@ -122,6 +123,30 @@ fun MonitorScreen(
     val dashState by stateHolder.state.collectAsState()
     val terrariumState = remember(dashState) { dashState.toTerrariumState() }
     val timelineEntries by TimelineStore.instance.entries.collectAsState()
+    // Per-session timeline filter, driven by focusedSessionId — mirrors Swift
+    // TimelineStripView.timelineFilter. Primary session first, then siblings,
+    // then the virtual OpenClaw Gateway session, then a bare sessionId fallback.
+    val timelineFilter: TimelineSessionFilter? = remember(
+        dashState.focusedSessionId,
+        dashState.sessionId,
+        dashState.projectName,
+        dashState.agentType,
+        dashState.siblingSessions,
+    ) {
+        val focused = dashState.focusedSessionId ?: return@remember null
+        when {
+            dashState.sessionId == focused ->
+                TimelineSessionFilter(focused, dashState.projectName, dashState.agentType)
+            else -> {
+                val sib = dashState.siblingSessions.firstOrNull { it.id == focused }
+                when {
+                    sib != null -> TimelineSessionFilter(focused, sib.projectName, sib.agentType)
+                    focused == "openclaw-gateway" -> TimelineSessionFilter(focused, "OpenClaw", "openclaw")
+                    else -> TimelineSessionFilter(focused, null, null)
+                }
+            }
+        }
+    }
     val connectionStatus by connection.status.collectAsState()
     val currentUrl by connection.url.collectAsState()
     val lastError by connection.lastError.collectAsState()
@@ -243,6 +268,7 @@ fun MonitorScreen(
             if (showTimeline) {
                 TimelineStrip(
                     entries = timelineEntries,
+                    filter = timelineFilter,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()

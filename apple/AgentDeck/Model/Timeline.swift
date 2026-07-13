@@ -301,7 +301,7 @@ func groupConsecutive(_ entries: [TimelineEntry], windowSeconds: Double = 60) ->
         let isTaskMarker = entry.type == .taskStart || entry.type == .taskEnd
         if !isTaskMarker, let last = groups.last {
             // Turn merge: a chat_response/chat_end folds into the most recent
-            // same-session turn group, looking past interleaved rows from
+            // same-context turn group, looking past interleaved rows from
             // other sessions.
             if tryMergeTurnChild(&groups, entry) { continue }
 
@@ -311,7 +311,7 @@ func groupConsecutive(_ entries: [TimelineEntry], windowSeconds: Double = 60) ->
             if last.entry.type != .taskStart && last.entry.type != .taskEnd &&
                entry.type == last.entry.type &&
                entry.raw == last.entry.raw &&
-               sameSession(last.entry, entry) &&
+               sameTimelineContext(last.entry, entry) &&
                timeDiff <= timelineGroupingWindowMs(for: entry.type, defaultWindowSeconds: windowSeconds) {
                 groups[groups.count - 1].count += 1
                 groups[groups.count - 1].lastTs = entry.ts
@@ -325,7 +325,7 @@ func groupConsecutive(_ entries: [TimelineEntry], windowSeconds: Double = 60) ->
 
 /// Fold a turn child (chat_response / chat_end) into the group it belongs to.
 ///
-/// Scans recent groups newest-first. The first same-session group encountered
+/// Scans recent groups newest-first. The first same-context group encountered
 /// decides the outcome — it is either this child's turn (merge) or evidence
 /// that the turn is already closed / distinct (stop, render standalone).
 /// sessionId + the chat_start anchor (`entry.startedAt == chat_start.ts`) are
@@ -335,7 +335,7 @@ func groupConsecutive(_ entries: [TimelineEntry], windowSeconds: Double = 60) ->
 /// that arrives *after* the next user_prompt_submit would attach to the fresh
 /// chat_start, cross-talking Q1's completion onto Q2's row (Codex stop-time
 /// review #7, 2026-05-17). Legacy entries with nil startedAt fall back to
-/// allowing the merge — bounded by the "most recent same-session chat_start"
+/// allowing the merge — bounded by the "most recent same-context chat_start"
 /// rule.
 ///
 /// Synthetic chat_start placeholders ("Prompt sent" / "Codex turn started")
@@ -356,11 +356,11 @@ private func tryMergeTurnChild(_ groups: inout [GroupedEntry], _ entry: Timeline
         let g = groups[i]
         let ge = g.entry
         if entry.ts - ge.ts > turnMergeMaxGapMs { return false }
-        guard sameSession(ge, entry) else { continue }
+        guard sameTimelineContext(ge, entry) else { continue }
 
         switch ge.type {
         case .chatStart:
-            // Most recent same-session chat_start = this child's turn. Any
+            // Most recent same-context chat_start = this child's turn. Any
             // mismatch means the child's real turn row is missing — merging
             // further back would cross-talk onto an older turn.
             if !timelineIsMeaningfulChatStart(ge) { return false }
@@ -385,7 +385,7 @@ private func tryMergeTurnChild(_ groups: inout [GroupedEntry], _ entry: Timeline
             // Activity *inside* the turn — look past it to the turn's chat_start.
             continue
         default:
-            // Any other same-session row (chat_end, task marker…) is a turn
+            // Any other same-context row (chat_end, task marker…) is a turn
             // boundary for this session — stop scanning.
             return false
         }
@@ -404,15 +404,173 @@ private func timelineGroupingWindowMs(for type: TimelineEntryType, defaultWindow
     }
 }
 
-/// Same-session test for the turn merge. Treats two entries as the same
-/// session when either both carry the same non-empty sessionId, or both
-/// have nil sessionId (legacy / single-session) — keeps the merge
-/// working on entries that predate sessionId attribution.
-private func sameSession(_ a: TimelineEntry, _ b: TimelineEntry) -> Bool {
-    switch (a.sessionId, b.sessionId) {
-    case (nil, nil): return true
-    case let (x?, y?): return x == y
-    default: return false
+/// Same-context test for grouping + turn merge. Mirrors Android
+/// `TimelineDisplay.kt::sameTimelineContext` — a 4-level cascade
+/// (taskId → runId → sessionId → project+agent fallback) so concurrent
+/// sessions never cross-merge and OpenClaw runId-scoped rows group
+/// correctly. Replaces the old sessionId-only `sameSession`, which
+/// disagreed with the full-context display filter (`matchesTimelineFilter`)
+/// and mis-grouped turns that share a session but differ by runId/taskId.
+private func sameTimelineContext(_ a: TimelineEntry, _ b: TimelineEntry) -> Bool {
+    // 1) taskId — strongest grouping key; same task is same context.
+    if let at = timelineNonBlank(a.taskId), let bt = timelineNonBlank(b.taskId) {
+        return at == bt
+    }
+    // 2) runId — adapter-emitted generation id (OpenClaw groups tool/model
+    //    rows of the same generation by this).
+    if let ar = timelineNonBlank(a.runId), let br = timelineNonBlank(b.runId) {
+        return ar == br
+    }
+    // 3) sessionId — once either side has one, both must match. An earlier
+    //    (projectName, agentType) fallback collapsed two real sessions in the
+    //    same project into one timeline row.
+    let asid = timelineNonBlank(a.sessionId)
+    let bsid = timelineNonBlank(b.sessionId)
+    if asid != nil || bsid != nil {
+        return asid != nil && asid == bsid
+    }
+    // 4) Both sessionless — legacy fallback on project + agent.
+    if timelineNonBlank(a.projectName) != nil,
+       a.projectName == b.projectName,
+       a.agentType == b.agentType {
+        return true
+    }
+    return timelineNonBlank(a.projectName) == nil
+        && timelineNonBlank(b.projectName) == nil
+        && a.agentType == b.agentType
+}
+
+/// nil for a nil-or-whitespace string, else the string — the Swift analogue
+/// of Kotlin's `String?.takeIf { it.isNotBlank() }` used by
+/// `sameTimelineContext` / `normalizeTimelineEntryForStorage`.
+private func timelineNonBlank(_ s: String?) -> String? {
+    guard let s, !s.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+    return s
+}
+
+// MARK: - Storage-layer normalization (WS-client mirror)
+//
+// Client-side mirror of `DaemonTimelineStore.normalizeForStorage` /
+// `shouldDropLowSignalEntry` (macOS daemon, operates on `DaemonTimelineEntry`)
+// and Android `TimelineDisplay.kt::normalizeTimelineEntryForStorage` (operates
+// on the client `TimelineEntry`). The Swift daemon copy is macOS-only, so the
+// WS-client store — used on iOS and by macOS when it attaches to an external
+// Node daemon — needs its own copy on the shared `TimelineEntry` model, exactly
+// as Android carries a client copy separate from the bridge. Keep all four
+// mirrors (Node bridge DaemonTimelineStore.ts, Swift daemon
+// DaemonTimelineStore.swift, Android TimelineDisplay.kt, here) in lockstep.
+//
+// Purpose: drop OTel / tool-placeholder noise at the *storage* layer so it
+// never occupies a slot in the bounded buffer (aging out real turn/task rows)
+// and so `entries` readers that bypass display grouping don't see it. The
+// upstream daemon already normalizes its own store, so on a current peer this
+// is idempotent defense; it matters against a pre-filter daemon or rows
+// persisted before the filter existed — the divergence Android already closed.
+
+/// Returns nil to drop a low-signal row; a rewritten entry for OpenClaw cron
+/// `model_call` rows; else the entry unchanged.
+///
+/// The drop test reuses the client's existing display-layer
+/// `timelineIsLowSignalEntry` (tool/OTel placeholder noise; TimelineStripView)
+/// and adds `timelineIsOpenClawLowSignalResponse` — the OpenClaw polling-ack
+/// drop that Android's `isLowSignalEntry` folds in but the Swift display filter
+/// does not — so the *storage* layer matches Android's
+/// `normalizeTimelineEntryForStorage`. Dropping at storage (not just display)
+/// stops the noise from occupying a bounded-buffer slot.
+func normalizeTimelineEntryForStorage(_ entry: TimelineEntry) -> TimelineEntry? {
+    if timelineIsOpenClawLowSignalResponse(entry) || timelineIsLowSignalEntry(entry) { return nil }
+    guard entry.agentType == "openclaw",
+          entry.type == .modelCall,
+          entry.automated == true
+            || timelineIsOpenClawCronPrompt(entry.raw)
+            || timelineIsOpenClawCronPrompt(entry.detail),
+          timelineIsOpenClawCronPrompt(entry.raw) || timelineIsOpenClawCronPrompt(entry.detail)
+    else {
+        return entry
+    }
+    let source = timelineIsOpenClawCronPrompt(entry.raw) ? entry.raw : entry.detail
+    return entry.withCronSummary(timelineSummarizeOpenClawCronPrompt(source))
+}
+
+func timelineIsOpenClawLowSignalResponse(_ entry: TimelineEntry) -> Bool {
+    guard entry.agentType == "openclaw" else { return false }
+    let isResponse = entry.type == .chatResponse || entry.type == .modelResponse
+    let isAutomatedStart = entry.type == .chatStart && entry.automated == true
+    guard isResponse || isAutomatedStart else { return false }
+
+    let text = [entry.raw, entry.detail].compactMap { $0 }.joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return false }
+    if timelineHasOpenClawNotificationFailureSignal(text) { return false }
+
+    let lower = text.lowercased()
+    let hasNoReply = lower.contains("no_reply")
+    let looksLikePolling =
+        timelineRegexMatch(lower, #"still translating"#) ||
+        timelineRegexMatch(lower, #"translation still in progress"#) ||
+        timelineRegexMatch(lower, #"not all .*?(terminal|published|failed|complete|completed)"#) ||
+        timelineRegexMatch(lower, #"(in progress|still active|no action needed|nothing to notify yet)"#) ||
+        timelineRegexMatch(lower, #"cron job (stays|retained|active)"#) ||
+        timelineRegexMatch(lower, #"pipeline still active"#) ||
+        timelineRegexMatch(text, #"(아직|여전히|계속).*(번역|진행)\s*중"#) ||
+        timelineRegexMatch(text, #"알릴 필요 없음|수행할 작업이 없음|대기합니다"#)
+
+    if isAutomatedStart { return looksLikePolling }
+    return looksLikePolling
+        && (hasNoReply
+            || lower.contains("no action needed")
+            || lower.contains("nothing to notify yet")
+            || text.contains("알릴 필요 없음"))
+}
+
+private func timelineHasOpenClawNotificationFailureSignal(_ text: String) -> Bool {
+    let english = timelineRegexMatch(text, #"\b(line|notification|userid|target id|target issue)\b"#, caseInsensitive: true)
+        && timelineRegexMatch(text, #"\b(fail(ed|ure)?|missing|unconfigured|notified|needed|pending)\b"#, caseInsensitive: true)
+    let korean = timelineRegexMatch(text, #"(LINE|알림|userId|사용자 ID|대상 ID).*(실패|미등록|미설정|구성되지|필요|대기)"#, caseInsensitive: true)
+    return english || korean
+}
+
+func timelineIsOpenClawCronPrompt(_ text: String?) -> Bool {
+    guard let text else { return false }
+    return text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[cron:")
+}
+
+func timelineSummarizeOpenClawCronPrompt(_ text: String?) -> String {
+    guard let text else { return "자동 작업" }
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let end = trimmed.firstIndex(of: "]") else { return "자동 작업" }
+    let header = String(trimmed[..<end])
+    let parts = header.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+    guard parts.count == 2 else { return "자동 작업" }
+    let job = String(parts[1])
+        .replacingOccurrences(of: "[-_]+", with: " ", options: .regularExpression)
+        .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !job.isEmpty else { return "자동 작업" }
+    let capped = job.count > 64 ? String(job.prefix(61)) + "..." : job
+    return "자동 작업 · \(capped)"
+}
+
+private func timelineRegexMatch(_ text: String, _ pattern: String, caseInsensitive: Bool = false) -> Bool {
+    var options: String.CompareOptions = [.regularExpression]
+    if caseInsensitive { options.insert(.caseInsensitive) }
+    return text.range(of: pattern, options: options) != nil
+}
+
+extension TimelineEntry {
+    /// OpenClaw cron `model_call` rewrite: collapse the raw `[cron: …]` dump to
+    /// a short "자동 작업 · <job>" label, drop the noisy detail, force automated.
+    /// `raw` is `let`, so this rebuilds the entry via the memberwise init.
+    func withCronSummary(_ summary: String) -> TimelineEntry {
+        TimelineEntry(
+            ts: ts, type: type, raw: summary, detail: nil,
+            approvalId: approvalId, status: status, agentType: agentType,
+            automated: true, projectName: projectName, sessionId: sessionId,
+            runId: runId, startedAt: startedAt, endedAt: endedAt, taskId: taskId,
+            boundarySignal: boundarySignal, summaryKind: summaryKind ?? "heuristic",
+            taskScore: taskScore, taskOutcome: taskOutcome,
+            taskCategory: taskCategory, taskSummary: taskSummary
+        )
     }
 }
 

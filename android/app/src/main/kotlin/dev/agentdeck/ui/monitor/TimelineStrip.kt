@@ -48,8 +48,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.agentdeck.state.GroupedEntry
 import dev.agentdeck.state.TimelineEntry
+import dev.agentdeck.state.TimelineSessionFilter
 import dev.agentdeck.state.groupConsecutive
 import dev.agentdeck.state.isProgressChatResponse
+import dev.agentdeck.state.matchesTimelineFilter
 import dev.agentdeck.state.timelineDisplayGroups
 import dev.agentdeck.state.timelineLifecycleBounds
 import dev.agentdeck.terrarium.TerrariumColors
@@ -80,17 +82,31 @@ import java.util.Locale
 fun TimelineStrip(
     entries: List<TimelineEntry>,
     modifier: Modifier = Modifier,
+    filter: TimelineSessionFilter? = null,
     scale: MonitorLayoutScale = rememberMonitorLayoutScale(),
 ) {
     val layoutMode = rememberTimelineLayoutMode()
     val listState = rememberLazyListState()
-    val displayEntries = remember(entries) { entries.takeLast(80) }
+    // Narrow to the focused session before grouping — the grouping input must
+    // change with the filter, so this runs here (not on the raw store). Mirrors
+    // Swift TimelineStripView.filteredEntries.
+    val filteredEntries = remember(entries, filter) {
+        if (filter == null) entries else entries.filter { it.matchesTimelineFilter(filter) }
+    }
+    val displayEntries = remember(filteredEntries) { filteredEntries.takeLast(80) }
     val grouped = remember(displayEntries) {
         timelineDisplayGroups(groupConsecutive(displayEntries)).takeLast(50)
     }
 
     var focusedIndex by remember { mutableIntStateOf(-1) }
     var expandedIndex by remember { mutableIntStateOf(-1) }
+
+    // Reset selection/expansion when the filter changes so a row index from the
+    // all-sessions view doesn't point at an unrelated row after narrowing.
+    LaunchedEffect(filter) {
+        focusedIndex = -1
+        expandedIndex = -1
+    }
 
     val focusedGroup: GroupedEntry? = when {
         grouped.isEmpty() -> null
@@ -118,7 +134,7 @@ fun TimelineStrip(
                         .fillMaxHeight()
                         .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
                 ) {
-                    TimelineHeader(scale = scale)
+                    TimelineHeader(scale = scale, filter = filter)
                     // weight(1f, fill = false) bounds the LazyColumn's height
                     // to the column's remaining space — required because a
                     // scrollable composable measured with infinite max height
@@ -133,6 +149,7 @@ fun TimelineStrip(
                         scale = scale,
                         onClick = { idx -> focusedIndex = idx },
                         modifier = Modifier.weight(1f, fill = false),
+                        filter = filter,
                     )
                 }
                 Box(
@@ -155,7 +172,7 @@ fun TimelineStrip(
             TimelineLayoutMode.Compact -> Column(
                 modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 4.dp, vertical = 4.dp),
             ) {
-                TimelineHeader(scale = scale)
+                TimelineHeader(scale = scale, filter = filter)
                 // weight(1f, fill = false): bound LazyColumn height to the
                 // remaining vertical space in the compact column.
                 TimelineList(
@@ -171,6 +188,7 @@ fun TimelineStrip(
                         focusedIndex = idx
                     },
                     modifier = Modifier.weight(1f, fill = false),
+                    filter = filter,
                 )
             }
         }
@@ -200,14 +218,63 @@ private fun rememberRunningRotation(active: Boolean): Float {
 }
 
 @Composable
-private fun TimelineHeader(scale: MonitorLayoutScale) {
+private fun TimelineHeader(scale: MonitorLayoutScale, filter: TimelineSessionFilter? = null) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "TIMELINE",
+            color = TerrariumColors.HUDSubtext,
+            fontSize = scale.fontSub,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+        )
+        // When a session is focused, show "· <label>" so the narrowed view is
+        // obviously scoped. Mirrors Swift TimelineStripView.timelineHeader.
+        if (filter != null) {
+            Text(
+                text = "· ${filter.label}",
+                color = TerrariumColors.TetraNeon.copy(alpha = 0.82f),
+                fontSize = scale.fontSub,
+                fontWeight = FontWeight.Medium,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Short pill label for `summaryKind`, or null to hide the pill. Mirrors Swift
+ *  `TimelineStripView.summaryBackendLabel`: every backend AgentDeck knows it
+ *  produced (incl. heuristic) gets a visible tag so the user can confirm the
+ *  Timeline summary picker is taking effect; suppressed for the gave-up
+ *  sentinel ("none"), legacy nil rows, and unrecognized values. */
+private fun summaryBackendLabel(kind: String?): String? = when (kind) {
+    "appleIntelligence" -> "AI"
+    "mlx" -> "MLX"
+    "ollama" -> "Ollama"
+    "heuristic" -> "Heur"
+    else -> null
+}
+
+/** Tiny backend pill rendered next to a chat_end/completion summary. Mirrors
+ *  the Swift pill styling (semibold monospace on a faint rounded chip). */
+@Composable
+private fun SummaryBackendPill(label: String) {
     Text(
-        text = "TIMELINE",
-        color = TerrariumColors.HUDSubtext,
-        fontSize = scale.fontSub,
-        fontWeight = FontWeight.Bold,
+        text = label,
+        color = TerrariumColors.HUDSubtext.copy(alpha = 0.85f),
+        fontSize = 8.sp,
+        fontWeight = FontWeight.SemiBold,
         fontFamily = FontFamily.Monospace,
-        modifier = Modifier.padding(bottom = 2.dp),
+        maxLines = 1,
+        modifier = Modifier
+            .clip(RoundedCornerShape(3.dp))
+            .background(TerrariumColors.HUDSubtext.copy(alpha = 0.12f))
+            .padding(horizontal = 4.dp, vertical = 1.dp),
     )
 }
 
@@ -222,10 +289,11 @@ private fun TimelineList(
     scale: MonitorLayoutScale,
     onClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    filter: TimelineSessionFilter? = null,
 ) {
     if (grouped.isEmpty()) {
         Text(
-            text = "No events yet",
+            text = if (filter == null) "No events yet" else "No events for this session",
             color = TerrariumColors.HUDSubtext,
             fontSize = scale.fontSub,
             fontFamily = FontFamily.Monospace,
@@ -445,6 +513,12 @@ private fun TurnRow(
             modifier = Modifier.weight(1f),
             style = tight,
         )
+        // Backend pill on standalone chat_end rows (a response-less turn's
+        // close). For merged turns the pill rides the completion sub-line
+        // below instead. Mirrors Swift turnRow `isChatEnd && !merged`.
+        if (isChatEnd && !group.hasResponse) {
+            summaryBackendLabel(entry.summaryKind)?.let { SummaryBackendPill(it) }
+        }
     }
 
         // Sub-line: assistant response body merged into this turn. Indented +
@@ -500,6 +574,9 @@ private fun TurnRow(
                         modifier = Modifier.weight(1f),
                         style = tight,
                     )
+                    // Backend pill next to the "Completed · …" suffix — mirrors
+                    // Swift turnRow's completion sub-line pill.
+                    summaryBackendLabel(end.summaryKind)?.let { SummaryBackendPill(it) }
                 }
             }
         }

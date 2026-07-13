@@ -297,6 +297,56 @@ fun sameTimelineContext(a: TimelineEntry, b: TimelineEntry): Boolean {
     return !a.projectName.hasText() && !b.projectName.hasText() && a.agentType == b.agentType
 }
 
+/**
+ * Session-scoped timeline filter, driven by `state.focusedSessionId`. Mirrors
+ * Swift `TimelineStripView.TimelineSessionFilter` + `matchesTimelineFilter` so
+ * tapping a session on the tablet narrows the timeline to that session — the
+ * per-session filter the Android strip previously lacked (client-render
+ * divergence, 2026-07-13).
+ */
+data class TimelineSessionFilter(
+    val sessionId: String,
+    val projectName: String? = null,
+    val agentType: String? = null,
+) {
+    /** Human label for the header pill: project name if present, else a
+     *  friendly agent name, else the raw session id. */
+    val label: String
+        get() {
+            if (!projectName.isNullOrEmpty()) return projectName
+            return when (agentType) {
+                "openclaw" -> "OpenClaw"
+                "claude-code" -> "Claude"
+                "codex-cli" -> "Codex CLI"
+                "codex-app" -> "Codex App"
+                "opencode" -> "OpenCode"
+                "antigravity" -> "Antigravity"
+                else -> sessionId
+            }
+        }
+}
+
+/** True when this entry belongs to [filter]'s session. Matches by sessionId,
+ *  the virtual `openclaw-gateway` session (sessionless OpenClaw rows), or the
+ *  (projectName, agentType) fallback for legacy sessionless entries. Mirrors
+ *  Swift `TimelineEntry.matchesTimelineFilter`. */
+fun TimelineEntry.matchesTimelineFilter(filter: TimelineSessionFilter): Boolean {
+    val sid = sessionId?.trim()?.takeIf { it.isNotEmpty() }
+    if (sid == filter.sessionId) return true
+    // OpenClaw entries are daemon-local and historically used agent
+    // attribution without a session id — keep them visible when the virtual
+    // Gateway session is focused.
+    if (filter.sessionId == "openclaw-gateway" && agentType == "openclaw" && sid == null) return true
+    if (sid != null) return false
+    if (!filter.projectName.isNullOrEmpty() &&
+        filter.projectName == projectName &&
+        filter.agentType == agentType
+    ) {
+        return true
+    }
+    return false
+}
+
 fun pairedTimelineStart(entry: TimelineEntry, entries: List<TimelineEntry>): TimelineEntry? =
     entries.lastOrNull { candidate ->
         candidate.type == "chat_start" &&

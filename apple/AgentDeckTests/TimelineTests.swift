@@ -344,6 +344,29 @@ final class TimelineTests: XCTestCase {
         XCTAssertNil(grouped[0].mergedCompletion)
     }
 
+    /// sameTimelineContext upgrade (2026-07-13): grouping now keys on runId, not
+    /// just sessionId. Two turns sharing a session but belonging to different
+    /// OpenClaw generations (distinct runId) must NOT cross-merge — mirrors
+    /// Android `sameTimelineContext`, and matches the full-context display
+    /// filter the strip already uses.
+    func testTurnMergeRespectsRunIdWithinSession() {
+        let start = TimelineEntry(ts: 1000, type: .chatStart, raw: "gen A", sessionId: "s1", runId: "A")
+        let resp = TimelineEntry(ts: 1500, type: .chatResponse, raw: "reply B",
+                                 sessionId: "s1", runId: "B", startedAt: 1000)
+        let grouped = groupConsecutive([start, resp])
+        XCTAssertEqual(grouped.count, 2, "different runId = different context, no merge")
+        XCTAssertNil(grouped[0].mergedResponse)
+    }
+
+    func testTurnMergeSameRunIdMerges() {
+        let start = TimelineEntry(ts: 1000, type: .chatStart, raw: "gen A", sessionId: "s1", runId: "A")
+        let resp = TimelineEntry(ts: 1500, type: .chatResponse, raw: "reply A",
+                                 sessionId: "s1", runId: "A", startedAt: 1000)
+        let grouped = groupConsecutive([start, resp])
+        XCTAssertEqual(grouped.count, 1)
+        XCTAssertEqual(grouped[0].mergedResponse?.raw, "reply A")
+    }
+
     /// Long assistant responses (xcodebuild + multi-fix sessions easily
     /// run 20 min+) must NOT break the chat-turn merge. The 60 s window
     /// applies only to dedup grouping; chat merge is bounded by the
@@ -541,32 +564,52 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(store.entries[0].status, "approved")
     }
 
-    func testTimelineStoreMergeHistory() {
+    func testTimelineStoreReplaceSnapshotIsAuthoritative() {
         let store = TimelineStore()
+        // A live row present before the snapshot arrives.
         store.addEntry(TimelineEntry(ts: 2000, type: .chatStart, raw: "Current"))
 
-        store.mergeHistory([
+        // The daemon's timeline_history snapshot REPLACES the buffer (no merge)
+        // so re-stamped rows can't stack across reconnects.
+        store.replaceSnapshot([
             TimelineEntry(ts: 1000, type: .chatStart, raw: "Old"),
-            TimelineEntry(ts: 2000, type: .chatStart, raw: "Dupe"),  // should be deduped
+            TimelineEntry(ts: 2000, type: .chatStart, raw: "Dupe"),
+            TimelineEntry(ts: 2000, type: .chatStart, raw: "Dupe"),  // exact dup dropped
             TimelineEntry(ts: 3000, type: .chatEnd, raw: "New"),
         ])
 
-        XCTAssertEqual(store.entries.count, 3)
-        // Should be sorted by ts
+        XCTAssertEqual(store.entries.count, 3, "exact (ts,type,raw) duplicate deduped")
+        // Sorted by ts.
         XCTAssertEqual(store.entries[0].ts, 1000)
         XCTAssertEqual(store.entries[1].ts, 2000)
         XCTAssertEqual(store.entries[2].ts, 3000)
+        // The pre-snapshot "Current" row is gone — replace, not merge.
+        XCTAssertEqual(store.entries[1].raw, "Dupe")
+        XCTAssertFalse(store.entries.contains { $0.raw == "Current" })
+    }
+
+    func testTimelineStoreReplaceSnapshotDropsLowSignalNoise() {
+        let store = TimelineStore()
+        store.replaceSnapshot([
+            TimelineEntry(ts: 1000, type: .chatStart, raw: "Prompt"),
+            // Codex tool_exec noise must not occupy a buffer slot.
+            TimelineEntry(ts: 1500, type: .toolExec, raw: "Bash", agentType: "codex-cli"),
+            TimelineEntry(ts: 2000, type: .chatResponse, raw: "Answer"),
+        ])
+        XCTAssertEqual(store.entries.count, 2)
+        XCTAssertFalse(store.entries.contains { $0.type == .toolExec })
     }
 
     func testTimelineStoreMaxEntries() {
         let store = TimelineStore()
-        for i in 0..<250 {
+        // Cap is 500 (Android parity), up from 200.
+        for i in 0..<600 {
             store.addEntry(TimelineEntry(ts: Double(i), type: .chatStart, raw: "Entry \(i)"))
         }
 
-        XCTAssertEqual(store.entries.count, 200)
-        // Oldest should have been trimmed
-        XCTAssertEqual(store.entries[0].ts, 50)
+        XCTAssertEqual(store.entries.count, 500)
+        // Oldest 100 trimmed.
+        XCTAssertEqual(store.entries[0].ts, 100)
     }
 
     func testDashboardDisplayKeepsMeaningfulPromptAfterCompletion() {
