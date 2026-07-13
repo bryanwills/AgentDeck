@@ -168,6 +168,19 @@ actor DaemonTimelineStore {
                 return
             }
         }
+        // Shed the oldest `tool_exec` before any chat/turn row — mirrors the
+        // Node `BridgeTimelineStore.evictOne`. PTY `agentdeck claude` sessions
+        // emit a claude-code tool_exec per tool action (index.ts:1552), and
+        // only *codex* tool_exec is dropped at storage, so these accumulate.
+        // Undifferentiated FIFO would evict a turn's chat_start (the oldest ts
+        // in its turn) before its own tool rows, orphaning the response in a
+        // reconnecting client's `timeline_history`. tool_exec is standalone (no
+        // request/resolved pair to split), so shedding it first is safe and
+        // keeps the two daemons' replay buffers converged.
+        if let idx = entries.firstIndex(where: { $0.type == "tool_exec" }) {
+            entries.remove(at: idx)
+            return
+        }
         if let idx = entries.firstIndex(where: { !Self.isTaskRow($0) }) {
             entries.remove(at: idx)
             return

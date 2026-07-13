@@ -137,6 +137,21 @@ export class BridgeTimelineStore {
         return;
       }
     }
+    // Shed the oldest `tool_exec` before any chat/turn row. Observed codex/
+    // opencode command rows carry real sessionIds + command detail, so they
+    // pass the anonymous-noise storage filter and accumulate — a live daemon
+    // snapshot ran 87% tool_exec (87/100). Undifferentiated FIFO would then
+    // evict a turn's `chat_start` (always the oldest ts in its turn) before its
+    // own tool_exec rows, leaving an orphaned chat_response/chat_end in the
+    // `timeline_history` replay a reconnecting client receives — the Node-side
+    // face of the "answer with no prompt" symptom. tool_exec is standalone
+    // (unlike the tool_request/tool_resolved approval pair, which must not be
+    // split), so shedding it first is safe and preserves the turn skeleton.
+    const toolIdx = this.entries.findIndex((e) => e.type === 'tool_exec');
+    if (toolIdx >= 0) {
+      this.entries.splice(toolIdx, 1);
+      return;
+    }
     const idx = this.entries.findIndex((e) => !isTaskRow(e));
     if (idx >= 0) {
       this.entries.splice(idx, 1);

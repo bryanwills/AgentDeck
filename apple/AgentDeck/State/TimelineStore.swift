@@ -39,12 +39,12 @@ final class TimelineStore: ObservableObject, @unchecked Sendable {
             // merge in place. Mirrors `DaemonTimelineStore::upsert`.
             if entry.type == .taskEnd, let taskId = entry.taskId,
                let idx = entries.lastIndex(where: { $0.type == .taskEnd && $0.taskId == taskId }) {
-                entries[idx] = entry
+                entries[idx] = mergedUpsert(base: entries[idx], incoming: entry)
                 return
             }
             // Update existing entry with same ts + type
             if let idx = entries.firstIndex(where: { $0.ts == entry.ts && $0.type == entry.type }) {
-                entries[idx] = entry
+                entries[idx] = mergedUpsert(base: entries[idx], incoming: entry)
                 return
             }
         }
@@ -64,6 +64,42 @@ final class TimelineStore: ObservableObject, @unchecked Sendable {
         if entries.count > maxEntries {
             entries.removeFirst(entries.count - maxEntries)
         }
+    }
+
+    /// Field-merge an upsert update over the existing row instead of replacing
+    /// it wholesale. The task-judge rollup (taskScore / taskOutcome /
+    /// taskCategory / taskSummary) arrives on a **second** `task_end` emit
+    /// 5–30 s after the boundary; a later progressive re-emit — or a duplicate
+    /// carrying nils — must not clobber score fields an earlier update already
+    /// set. Coalesce every optional as `incoming ?? base`, always take the
+    /// freshest `raw` summary, and keep the base row's identity (ts / type) so
+    /// its sorted position stays put. Mirrors the Node `BridgeTimelineStore`
+    /// merge path and Android `TimelineStore.upsertEntry`; the client store used
+    /// to full-replace here, dropping the rollup whenever a nil-bearing emit
+    /// landed after the scored one (timeline client-divergence audit 2026-07-13).
+    private func mergedUpsert(base: TimelineEntry, incoming: TimelineEntry) -> TimelineEntry {
+        TimelineEntry(
+            ts: base.ts,
+            type: base.type,
+            raw: incoming.raw,
+            detail: incoming.detail ?? base.detail,
+            approvalId: incoming.approvalId ?? base.approvalId,
+            status: incoming.status ?? base.status,
+            agentType: incoming.agentType ?? base.agentType,
+            automated: incoming.automated ?? base.automated,
+            projectName: incoming.projectName ?? base.projectName,
+            sessionId: incoming.sessionId ?? base.sessionId,
+            runId: incoming.runId ?? base.runId,
+            startedAt: incoming.startedAt ?? base.startedAt,
+            endedAt: incoming.endedAt ?? base.endedAt,
+            taskId: incoming.taskId ?? base.taskId,
+            boundarySignal: incoming.boundarySignal ?? base.boundarySignal,
+            summaryKind: incoming.summaryKind ?? base.summaryKind,
+            taskScore: incoming.taskScore ?? base.taskScore,
+            taskOutcome: incoming.taskOutcome ?? base.taskOutcome,
+            taskCategory: incoming.taskCategory ?? base.taskCategory,
+            taskSummary: incoming.taskSummary ?? base.taskSummary
+        )
     }
 
     // MARK: - Replace Snapshot (authoritative history load)

@@ -9,6 +9,9 @@
 
 import XCTest
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 @testable import AgentDeck
 
 @MainActor
@@ -41,11 +44,22 @@ final class DevicePreviewSnapshotTests: XCTestCase {
             XCTFail("ImageRenderer produced no image for \(name)")
             return
         }
+        // PNG encode is platform-specific: NSBitmapImageRep (AppKit) is macOS-
+        // only, so the iOS test target — which compiles this file even though
+        // the snapshot harness is a dev-Mac visual-QA tool — needs the UIKit
+        // path to build.
+        #if os(macOS)
         let rep = NSBitmapImageRep(cgImage: cgImage)
         guard let png = rep.representation(using: .png, properties: [:]) else {
             XCTFail("PNG encode failed for \(name)")
             return
         }
+        #else
+        guard let png = UIImage(cgImage: cgImage).pngData() else {
+            XCTFail("PNG encode failed for \(name)")
+            return
+        }
+        #endif
         try png.write(to: outputDir.appendingPathComponent("\(name).png"))
     }
 

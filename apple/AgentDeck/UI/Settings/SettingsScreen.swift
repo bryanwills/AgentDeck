@@ -1020,11 +1020,11 @@ struct SettingsScreen: View {
             HStack(spacing: 6) {
                 Text("Preset:").font(.system(size: 11)).foregroundStyle(TerrariumHUD.subtext)
                 Button("Ollama") { preferences.apmeJudgeEndpoint = "http://127.0.0.1:11434/v1" }
-                    .buttonStyle(.link).font(.system(size: 11))
+                    .presetLinkButtonStyle().font(.system(size: 11))
                 Button("LM Studio") { preferences.apmeJudgeEndpoint = "http://127.0.0.1:1234/v1" }
-                    .buttonStyle(.link).font(.system(size: 11))
+                    .presetLinkButtonStyle().font(.system(size: 11))
                 Button("OpenRouter") { preferences.apmeJudgeEndpoint = "https://openrouter.ai/api/v1" }
-                    .buttonStyle(.link).font(.system(size: 11))
+                    .presetLinkButtonStyle().font(.system(size: 11))
             }
 
             TextField("Endpoint (e.g. http://127.0.0.1:11434/v1)", text: $preferences.apmeJudgeEndpoint)
@@ -1993,5 +1993,20 @@ struct SettingsScreen: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.white)
         }
+    }
+}
+
+private extension View {
+    /// SwiftUI's `.link` button style is macOS-only; referencing it in a
+    /// cross-platform view breaks the iOS target build. Fall back to
+    /// `.borderless` on iOS, which renders as accent-tinted tappable text —
+    /// the closest match to a macOS link button.
+    @ViewBuilder
+    func presetLinkButtonStyle() -> some View {
+        #if os(macOS)
+        buttonStyle(.link)
+        #else
+        buttonStyle(.borderless)
+        #endif
     }
 }

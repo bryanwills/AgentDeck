@@ -44,6 +44,27 @@ describe('BridgeTimelineStore task-row retention', () => {
     expect(history.some((e) => e.taskId === 'T0')).toBe(false);
   });
 
+  it('sheds tool_exec before chat_start so a tool-heavy turn survives replay', () => {
+    const store = new BridgeTimelineStore();
+    // The turn skeleton we must keep — chat_start is the oldest ts in its turn.
+    store.addEntry(entry({ type: 'chat_start', sessionId: 's1', raw: 'do a lot of work' }));
+    // A PTY `agentdeck claude` session emits a claude-code `tool_exec` for every
+    // tool action when the hook lags (index.ts:1552). Only *codex* tool_exec is
+    // dropped at storage, so these pass the filter and overflow the 200 cap.
+    for (let i = 0; i < 250; i++) {
+      store.addEntry(entry({ type: 'tool_exec', agentType: 'claude-code', sessionId: 's1', raw: `Edit file-${i}.ts` }));
+    }
+    store.addEntry(entry({ type: 'chat_response', sessionId: 's1', raw: 'Done.' }));
+    const history = store.getHistory();
+    expect(history.length).toBeLessThanOrEqual(200);
+    // Undifferentiated FIFO would have evicted the oldest row — the chat_start —
+    // orphaning its response on `timeline_history` replay. Tiered eviction sheds
+    // the tool_exec first, so the turn skeleton survives.
+    expect(history.some((e) => e.type === 'chat_start' && e.raw === 'do a lot of work')).toBe(true);
+    expect(history.some((e) => e.type === 'chat_response' && e.raw === 'Done.')).toBe(true);
+    expect(history.some((e) => e.type === 'tool_exec')).toBe(true); // some tool rows still fit
+  });
+
   it('getHistoryForSession returns task rows beyond the per-session limit', () => {
     const store = new BridgeTimelineStore();
     store.addEntry(entry({ type: 'task_start', taskId: 'T1', sessionId: 's1', raw: 'Task 1' }));

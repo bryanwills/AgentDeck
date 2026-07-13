@@ -564,6 +564,51 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(store.entries[0].status, "approved")
     }
 
+    /// The upsert path field-merges instead of full-replacing. The task-judge
+    /// rollup arrives on a *second* `task_end` emit (matched by taskId, not ts),
+    /// and a later nil-bearing re-emit must not clobber the score. Mirrors Node
+    /// `BridgeTimelineStore` merge-path and Android `TimelineStore.upsertEntry`.
+    func testTimelineStoreUpsertMergesTaskRollupWithoutClobbering() {
+        let store = TimelineStore()
+        // Initial boundary emit: carries boundarySignal + startedAt, no score.
+        store.addEntry(TimelineEntry(
+            ts: 1000, type: .taskEnd, raw: "Manual · 12s",
+            agentType: "claude-code", projectName: "AgentDeck",
+            startedAt: 500, endedAt: 1000,
+            taskId: "task-1", boundarySignal: .manual
+        ), upsert: true)
+
+        // Second emit (5–30 s later, different ts): the judge rollup lands, but
+        // it does NOT re-send boundarySignal / startedAt — those must survive.
+        store.addEntry(TimelineEntry(
+            ts: 30000, type: .taskEnd, raw: "Manual · 12s · added tests",
+            taskId: "task-1",
+            taskScore: 0.9, taskOutcome: "success",
+            taskCategory: "testing", taskSummary: "added tests"
+        ), upsert: true)
+
+        XCTAssertEqual(store.entries.count, 1, "matched by taskId, merged in place")
+        let merged = store.entries[0]
+        XCTAssertEqual(merged.taskScore ?? .nan, 0.9, accuracy: 0.0001)
+        XCTAssertEqual(merged.taskOutcome, "success")
+        XCTAssertEqual(merged.taskCategory, "testing")
+        XCTAssertEqual(merged.boundarySignal, .manual, "boundarySignal preserved from first emit")
+        XCTAssertEqual(merged.startedAt, 500, "startedAt preserved from first emit")
+        XCTAssertEqual(merged.raw, "Manual · 12s · added tests", "raw takes the freshest summary")
+        XCTAssertEqual(merged.ts, 1000, "identity ts stays at the boundary's sorted position")
+
+        // A later duplicate/re-emit carrying nil rollup must NOT wipe the score.
+        store.addEntry(TimelineEntry(
+            ts: 30001, type: .taskEnd, raw: "Manual · 12s",
+            taskId: "task-1", boundarySignal: .manual
+        ), upsert: true)
+        XCTAssertEqual(store.entries.count, 1)
+        XCTAssertEqual(store.entries[0].taskScore ?? .nan, 0.9, accuracy: 0.0001,
+                       "nil-score re-emit must not clobber the merged rollup")
+        XCTAssertEqual(store.entries[0].taskOutcome, "success")
+        XCTAssertEqual(store.entries[0].taskSummary, "added tests")
+    }
+
     func testTimelineStoreReplaceSnapshotIsAuthoritative() {
         let store = TimelineStore()
         // A live row present before the snapshot arrives.
@@ -1333,6 +1378,60 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(entries.count, 1)
         XCTAssertEqual(entries[0].type, "chat_start")
         XCTAssertEqual(entries[0].raw, "Fix timeline noise")
+    }
+
+    /// Under buffer pressure the store sheds `tool_exec` before chat/turn rows —
+    /// mirrors Node `BridgeTimelineStore.evictOne`. PTY `agentdeck claude`
+    /// sessions emit claude-code tool_exec per tool action; only codex tool_exec
+    /// is dropped at storage, so undifferentiated FIFO would otherwise evict a
+    /// turn's chat_start before its own tool rows and orphan the response on
+    /// `timeline_history` replay.
+    func testDaemonTimelineStoreShedsToolExecBeforeChatStart() async {
+        let store = DaemonTimelineStore()
+        // The turn skeleton to preserve — chat_start is the oldest ts in its turn.
+        await store.add(DaemonTimelineEntry(
+            ts: 1,
+            type: "chat_start",
+            raw: "do a lot of work",
+            detail: nil,
+            approvalId: nil,
+            status: nil,
+            agentType: "claude-code",
+            repeatCount: nil,
+            automated: nil,
+            projectName: "AgentDeck",
+            sessionId: "s1",
+            startedAt: 1,
+            endedAt: nil,
+            runId: nil
+        ))
+        // 250 claude-code tool_exec (PTY hook-lag fallback rows) overflow the
+        // 200-entry cap. They pass the storage filter (only codex is dropped).
+        for i in 0..<250 {
+            await store.add(DaemonTimelineEntry(
+                ts: Double(100 + i),
+                type: "tool_exec",
+                raw: "Edit file-\(i).ts",
+                detail: nil,
+                approvalId: nil,
+                status: nil,
+                agentType: "claude-code",
+                repeatCount: nil,
+                automated: nil,
+                projectName: "AgentDeck",
+                sessionId: "s1",
+                startedAt: nil,
+                endedAt: nil,
+                runId: nil
+            ))
+        }
+
+        let entries = await store.getAll()
+        XCTAssertLessThanOrEqual(entries.count, 200)
+        XCTAssertTrue(
+            entries.contains { $0.type == "chat_start" && $0.raw == "do a lot of work" },
+            "chat_start survives — tool_exec were shed first"
+        )
     }
     #endif
 
