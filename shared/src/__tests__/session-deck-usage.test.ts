@@ -182,6 +182,25 @@ describe('buildSessionDeck list-view usage tiles', () => {
     expect(codexTiles).toHaveLength(1); // only the Codex 5H window
   });
 
+  it('labels the Codex weekly window "7D" when it arrives in the primary slot (secondary null)', () => {
+    // Recent Codex reports the weekly (10080-min) window as `primary` with
+    // `secondary` null once the 5h window resets. The tile must be labelled by
+    // window length, not slot — otherwise it mislabels "5H" and the 7D gauge
+    // vanishes entirely.
+    const weeklyOnly = {
+      codexRateLimits: { primary: { usedPercent: 4, windowMinutes: 10080 }, planType: 'plus' },
+    };
+    const deck = buildSessionDeck(baseState(2, weeklyOnly), { mode: 'list', showUsage: true }, POS);
+    const codexTile = deck.get(CX5H)!.svg; // first free Codex slot below Claude
+    expect(codexTile).toContain('7D');       // labelled by length, not slot
+    expect(codexTile).not.toContain('5H');
+    expect(codexTile).toContain('>4<');      // used 4%
+    expect(codexTile).toContain('#6166E0');  // Codex brand mark
+    // Exactly one Codex gauge (no phantom secondary tile).
+    const block = [C5H, C7D, CX5H, CX7D].map((p) => deck.get(p)!.svg);
+    expect(block.filter((s) => s.includes('#6166E0'))).toHaveLength(1);
+  });
+
   it('shows a credits tile when Codex reports a credit-based plan (null windows)', () => {
     const credits = {
       codexRateLimits: {

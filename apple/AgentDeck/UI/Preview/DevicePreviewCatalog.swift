@@ -181,8 +181,10 @@ struct LivePreviewData {
     /// False → the Claude tiles are suppressed (usage state not trusted).
     var usageKnown: Bool
     var codexPrimaryPercent: Double?
+    var codexPrimaryWindowMinutes: Int?
     var codexPrimaryStale: Bool
     var codexSecondaryPercent: Double?
+    var codexSecondaryWindowMinutes: Int?
     var codexSecondaryStale: Bool
 
     /// Extract the live snapshot from the daemon state. Usage windows are
@@ -199,8 +201,10 @@ struct LivePreviewData {
             sevenDayPercent: state.sevenDayPercent,
             usageKnown: !(state.usageStale ?? false),
             codexPrimaryPercent: state.codexRateLimits?.primary?.usedPercent,
+            codexPrimaryWindowMinutes: state.codexRateLimits?.primary?.windowMinutes,
             codexPrimaryStale: state.codexRateLimits?.primary?.stale ?? false,
             codexSecondaryPercent: state.codexRateLimits?.secondary?.usedPercent,
+            codexSecondaryWindowMinutes: state.codexRateLimits?.secondary?.windowMinutes,
             codexSecondaryStale: state.codexRateLimits?.secondary?.stale ?? false
         )
     }

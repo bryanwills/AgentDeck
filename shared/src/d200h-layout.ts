@@ -242,6 +242,30 @@ function usageRampColor(used: number, stale = false): { fill: string; hi: string
   return { fill: '#22c55e', hi: '#86efac' };
 }
 
+/**
+ * Compact label for a rolling-window length in minutes, mirroring the Swift
+ * `TopologyRail.windowLabel`: whole days → "Nd" (10080 → "7D"), whole hours →
+ * "Nh" (300 → "5H"), else "Nm". Codex now sometimes reports the weekly window
+ * in the `primary` slot with `secondary` null, so usage gauges MUST label by a
+ * window's own length, never by its slot position — otherwise the 7D gauge
+ * silently vanishes and the weekly window is mislabelled "5H".
+ */
+export function usageWindowLabel(windowMinutes: number | undefined): string {
+  if (!windowMinutes || windowMinutes <= 0) return '';
+  if (windowMinutes % 1440 === 0) return `${windowMinutes / 1440}D`;
+  if (windowMinutes % 60 === 0) return `${windowMinutes / 60}H`;
+  return `${windowMinutes}M`;
+}
+
+/**
+ * Which gauge bucket ('5h' short vs '7d' long) a rolling window belongs to,
+ * derived from its length (≥ a day → long) so the clip id / styling is right
+ * regardless of whether the window arrived in the primary or secondary slot.
+ */
+export function usageWindowKind(windowMinutes: number | undefined): '5h' | '7d' {
+  return (windowMinutes ?? 0) >= 1440 ? '7d' : '5h';
+}
+
 export interface UsageTankData {
   agent: 'claude' | 'codex';
   /** Rolling window this tile represents (drives the clip id + label fallback). */
@@ -333,7 +357,8 @@ export function renderCreditsTile(data: { limitId?: string; balance?: string; un
 /**
  * Usage tiles for the session deck, in placement order. Every tile is
  * hide-if-absent: Claude 5H/7D appear only when that window's quota is actually
- * known, and Codex 5H (primary) / 7D (secondary) only when present in
+ * known, and each present Codex window (labelled by its own length, not its
+ * primary/secondary slot) only when present in
  * `codexRateLimits`. An unlinked or partial usage state therefore emits fewer
  * (or zero) tiles, so `buildList` reserves fewer keys and the freed slots flow
  * to session tiles instead of leaving reserved "—" ghost gauges behind.
@@ -352,12 +377,13 @@ function buildUsageTiles(state: DashState): SessionDeckCell[] {
   }
   const cx = state.codexRateLimits;
   // Codex windows carry the same short "5H"/"7D" labels — the brand dot conveys
-  // the agent, not a "CX " prefix.
-  if (cx?.primary) {
-    tiles.push({ svg: renderUsageGauge({ agent: 'codex', window: '5h', label: '5H', usedPercent: cx.primary.usedPercent, resetsAt: cx.primary.resetsAt, known: true, stale: cx.primary.stale === true }), action });
-  }
-  if (cx?.secondary) {
-    tiles.push({ svg: renderUsageGauge({ agent: 'codex', window: '7d', label: '7D', usedPercent: cx.secondary.usedPercent, resetsAt: cx.secondary.resetsAt, known: true, stale: cx.secondary.stale === true }), action });
+  // the agent, not a "CX " prefix. Label each present window by its own length
+  // (windowMinutes), never by slot: Codex now sometimes reports the weekly
+  // (10080-min) window as `primary` with `secondary` null, so a slot-based "7D
+  // = secondary" would drop the gauge entirely.
+  for (const w of [cx?.primary, cx?.secondary]) {
+    if (!w) continue;
+    tiles.push({ svg: renderUsageGauge({ agent: 'codex', window: usageWindowKind(w.windowMinutes), label: usageWindowLabel(w.windowMinutes) || '5H', usedPercent: w.usedPercent, resetsAt: w.resetsAt, known: true, stale: w.stale === true }), action });
   }
   // Credit-based Codex plan: no windows, show the credits balance instead so the
   // Codex usage doesn't silently vanish.

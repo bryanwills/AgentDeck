@@ -113,11 +113,15 @@ public struct D200HUsage: Equatable, Sendable {
     public var sevenDayPercent: Double?
     /// False → suppress the Claude tiles entirely (usage state not trusted).
     public var known: Bool
-    /// Optional Codex primary (≈5h) window used%.
+    /// Optional Codex primary window used%. Labelled by `codexPrimaryWindowMinutes`,
+    /// NOT by slot — Codex now sometimes reports the weekly (10080-min) window as
+    /// `primary` with `secondary` null.
     public var codexPrimaryPercent: Double?
+    public var codexPrimaryWindowMinutes: Int?
     public var codexPrimaryStale: Bool
-    /// Optional Codex secondary (≈weekly) window used%.
+    /// Optional Codex secondary window used%. Labelled by its own length.
     public var codexSecondaryPercent: Double?
+    public var codexSecondaryWindowMinutes: Int?
     public var codexSecondaryStale: Bool
 
     public init(
@@ -125,16 +129,20 @@ public struct D200HUsage: Equatable, Sendable {
         sevenDayPercent: Double? = nil,
         known: Bool = true,
         codexPrimaryPercent: Double? = nil,
+        codexPrimaryWindowMinutes: Int? = nil,
         codexPrimaryStale: Bool = false,
         codexSecondaryPercent: Double? = nil,
+        codexSecondaryWindowMinutes: Int? = nil,
         codexSecondaryStale: Bool = false
     ) {
         self.fiveHourPercent = fiveHourPercent
         self.sevenDayPercent = sevenDayPercent
         self.known = known
         self.codexPrimaryPercent = codexPrimaryPercent
+        self.codexPrimaryWindowMinutes = codexPrimaryWindowMinutes
         self.codexPrimaryStale = codexPrimaryStale
         self.codexSecondaryPercent = codexSecondaryPercent
+        self.codexSecondaryWindowMinutes = codexSecondaryWindowMinutes
         self.codexSecondaryStale = codexSecondaryStale
     }
 }
@@ -485,13 +493,32 @@ public enum D200HLayoutModel {
         if usage.known, let p = usage.sevenDayPercent {
             tiles.append((.usageGauge(agent: "claude", window: "7d", percent: p, known: true, stale: false), "7D", "claude"))
         }
+        // Label each present Codex window by its own length, never by slot: Codex
+        // now sometimes reports the weekly (10080-min) window as `primary` with
+        // `secondary` null, so a slot-based "7D = secondary" would drop the gauge.
         if let p = usage.codexPrimaryPercent {
-            tiles.append((.usageGauge(agent: "codex", window: "5h", percent: p, known: true, stale: usage.codexPrimaryStale), "5H", "codex"))
+            tiles.append((.usageGauge(agent: "codex", window: usageWindowKind(usage.codexPrimaryWindowMinutes), percent: p, known: true, stale: usage.codexPrimaryStale), usageWindowLabel(usage.codexPrimaryWindowMinutes), "codex"))
         }
         if let s = usage.codexSecondaryPercent {
-            tiles.append((.usageGauge(agent: "codex", window: "7d", percent: s, known: true, stale: usage.codexSecondaryStale), "7D", "codex"))
+            tiles.append((.usageGauge(agent: "codex", window: usageWindowKind(usage.codexSecondaryWindowMinutes), percent: s, known: true, stale: usage.codexSecondaryStale), usageWindowLabel(usage.codexSecondaryWindowMinutes), "codex"))
         }
         return tiles
+    }
+
+    /// Compact window label from a length in minutes, mirroring the TS
+    /// `usageWindowLabel`: whole days → "ND" (10080 → "7D"), whole hours → "NH"
+    /// (300 → "5H"), else "NM". Falls back to "5H" when unknown.
+    static func usageWindowLabel(_ minutes: Int?) -> String {
+        guard let m = minutes, m > 0 else { return "5H" }
+        if m % 1440 == 0 { return "\(m / 1440)D" }
+        if m % 60 == 0 { return "\(m / 60)H" }
+        return "\(m)M"
+    }
+
+    /// Gauge bucket ("5h" short vs "7d" long) from a window length, so the clip
+    /// id / styling is right regardless of the primary/secondary slot.
+    static func usageWindowKind(_ minutes: Int?) -> String {
+        (minutes ?? 0) >= 1440 ? "7d" : "5h"
     }
 
     // MARK: Label derivation

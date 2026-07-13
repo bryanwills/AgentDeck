@@ -145,7 +145,9 @@ private func d200hDeckSlots(for selection: DevicePreviewSelection) -> [D200HKeyS
             fiveHourPercent: hasClaude ? 42 : nil,
             sevenDayPercent: hasClaude ? 68 : nil,
             codexPrimaryPercent: hasCodex ? 23 : nil,
-            codexSecondaryPercent: hasCodex ? 51 : nil
+            codexPrimaryWindowMinutes: hasCodex ? 300 : nil,
+            codexSecondaryPercent: hasCodex ? 51 : nil,
+            codexSecondaryWindowMinutes: hasCodex ? 10080 : nil
         )
     )
     return D200HLayoutModel.buildSessionDeck(input, view: D200HDeckView(mode: .list))
@@ -183,8 +185,10 @@ func liveD200HInput(for selection: DevicePreviewSelection) -> D200HDeckInput? {
             sevenDayPercent: live.sevenDayPercent,
             known: live.usageKnown,
             codexPrimaryPercent: live.codexPrimaryPercent,
+            codexPrimaryWindowMinutes: live.codexPrimaryWindowMinutes,
             codexPrimaryStale: live.codexPrimaryStale,
             codexSecondaryPercent: live.codexSecondaryPercent,
+            codexSecondaryWindowMinutes: live.codexSecondaryWindowMinutes,
             codexSecondaryStale: live.codexSecondaryStale
         ),
         focusedSessionId: live.focusedSessionId,
