@@ -2,6 +2,32 @@
 
 PlatformIO Arduino firmware for LVGL touch displays (ESP32-S3: 86Box 480×480, IPS 3.5" 480×320 landscape / 320×480 portrait, Round AMOLED 360×360; ESP32-P4: Guition JC8012P4A1C 10.1" IPS 800×1280 portrait native + ESP32-C6 co-processor) + SPI TFT displays (ESP32 classic: LilyGO TTGO T-Display 1.14" 135×240 with a 160px terrarium viewport + 80px metric strip) + WS2812B LED matrix (ESP32 classic: Ulanzi TC001 8×32). Board-specific `#ifdef`, per-board partition tables, FastLED matrix renderer bypasses LVGL entirely. IPS 3.5" supports runtime portrait↔landscape switching via `set_orientation` protocol command or Settings toggle (NVS persistent, `g_screenW`/`g_screenH` runtime globals).
 
+## Host simulator (no-hardware preview)
+
+`esp32/sim/` renders **real** board screens on the host — no board, no flashing.
+It compiles the firmware's LVGL terrarium render surface (`src/ui/terrarium/*`,
+minus `office.cpp`) against a native toolchain + LVGL's software renderer into a
+headless RGB565 framebuffer, dumped to PNG. Sources are pulled in verbatim with
+each board's build defines (`BOARD_*`/`SCREEN_W/H`), so output is **pixel-exact**
+— that board's firmware minus hardware I/O, not an approximation. This is the
+ESP32 counterpart to the Node preview tools (`bridge/scripts/pixoo-preview.ts`)
+and removes the drift risk of the hand-mirrored Swift Device Preview ESP32 tiles.
+
+```bash
+pnpm esp32:sim                 # all boards (box_86/ips35/amoled), all scenes → esp32/sim/sim-out/
+pnpm esp32:sim box_86 working  # one board, one scene
+```
+
+A thin hardware shim layer (`sim/shims/`: `Arduino.h`, `esp_heap_caps.h`,
+`freertos/*`) stubs the tiny surface the render code touches (millis/Serial/
+ps_malloc/mutex). Named scenes populate the same `g_state` the firmware fills from
+the daemon's `state_update`, exercising the real session → creature derivation.
+Frames are deterministic (virtual clock + re-seeded PRNG) for golden tests. Adding
+a board = one `platformio.ini` env block. Standalone PlatformIO project (does not
+inherit `esp32/platformio.ini`), so WiFi/WebSockets/LovyanGFX never enter the
+native build. Terrarium only for now (HUD/matrix/e-ink not yet wired). See
+[esp32/sim/README.md](../esp32/sim/README.md).
+
 ## Flash Safety
 
 - **절대 `usbmodem` 포트 번호만 보고 IPS 3.5"와 Round AMOLED를 구분하지 말 것.** Native USB JTAG 보드는 허브 위치, 재연결 순서, 복구 모드에 따라 `/dev/cu.usbmodem*` 번호가 계속 바뀐다.

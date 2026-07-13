@@ -22,6 +22,7 @@
     "test:android": "bash scripts/test-report.sh --android",
     "test:html": "pnpm vitest run --coverage && python3 scripts/generate-html-report.py && open coverage/test-report/index.html",
     "d200h:preview": "node scripts/d200h-preview-dump.mjs",
+    "esp32:sim": "bash esp32/sim/render.sh",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
