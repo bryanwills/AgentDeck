@@ -16,7 +16,7 @@ Usage:
   $0 <environment> [port]
 
 Environments (canonical friendly name — panel/form + inches):
-  ips_35 | amoled_18 | box_40 | tft_114 | ips_101 | led_8x32
+  ips_35 | amoled_18 | box_40 | tft_114 | ips_101 | inkdeck | led_8x32
   (legacy aliases still accepted: round_amoled, box_86, ttgo, ulanzi_tc001, ...)
 
 Rules:
@@ -84,6 +84,7 @@ map_env_to_pio() {
         led_8x32|ulanzi_tc001|led8x32) echo "led8x32" ;;
         tft_114|ttgo_t_display|ttgo) echo "ttgo" ;;
         ips_101|ips_10|ips10) echo "ips10" ;;
+        inkdeck) echo "inkdeck" ;;
         *) echo "$1" ;;
     esac
 }
@@ -95,7 +96,8 @@ validate_env() {
         box_40|box_86|86box|\
         led_8x32|ulanzi_tc001|led8x32|\
         tft_114|ttgo_t_display|ttgo|\
-        ips_101|ips_10|ips10) ;;
+        ips_101|ips_10|ips10|\
+        inkdeck) ;;
         *)
             echo "Unknown environment: $1" >&2
             usage >&2
@@ -175,10 +177,8 @@ fi
 echo "Building and flashing: env=$ENV (PlatformIO env=$PIO_ENV) port=${PORT:-<default>}"
 cd "$PROJECT_DIR"
 
-# Build
-pio run -e "$PIO_ENV"
-
-# Upload
+# PlatformIO's upload target builds before writing. Run it once: a separate
+# `pio run` changes the injected BUILD_EPOCH and forces a second full rebuild.
 if [ -n "$PORT" ]; then
     pio run -e "$PIO_ENV" -t upload --upload-port "$PORT"
 else

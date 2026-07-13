@@ -48,7 +48,7 @@ void base(CreatureState cs) {
   setStr(g_state.agentType, sizeof(g_state.agentType), "daemon");
   setStr(g_state.projectName, sizeof(g_state.projectName), "AgentDeck");
   setStr(g_state.modelName, sizeof(g_state.modelName), "opus-4.8");
-  g_state.hostDisplayOn = true;      // host awake (e-ink shows dashboard, not sleep card)
+  g_state.hostDisplayOn = true;      // host-awake baseline for display-sync scenes
   g_state.userBrightness = 255;
   // Usage — drives the 5H/7D rate gauges (matrix usage page, HUD, e-ink).
   g_state.fiveHourPercent = 42.0f;
@@ -79,6 +79,12 @@ bool SimScenes::apply(const char* name) {
     addSession("claude-code", "idle", "AgentDeck");
     return true;
   }
+  if (std::strcmp(name, "display-off") == 0) {
+    base(CreatureState::FLOATING);
+    addSession("claude-code", "idle", "AgentDeck");
+    g_state.hostDisplayOn = false;
+    return true;
+  }
   if (std::strcmp(name, "working") == 0) {
     base(CreatureState::WORKING);
     addSession("claude-code", "processing", "AgentDeck");
@@ -107,5 +113,5 @@ bool SimScenes::apply(const char* name) {
 }
 
 const char* SimScenes::catalog() {
-  return "empty, idle, working, multi, permission";
+  return "empty, idle, display-off, working, multi, permission";
 }

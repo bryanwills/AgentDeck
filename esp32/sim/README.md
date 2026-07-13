@@ -60,10 +60,13 @@ aren't a multiple of 16 (TTGO 135/144, etc.) work without extra changes.
 
 ## Scenes
 
-`empty` (pre-connection), `idle`, `working`, `multi` (Claude + Codex + OpenCode +
-Antigravity + OpenClaw gateway crayfish), `permission` (awaiting → "?" bubble).
-Scenes populate the same `g_state` the firmware fills from the daemon's
-`state_update`, so they exercise the real session → creature/card derivation.
+`empty` (pre-connection), `idle`, `display-off` (idle dashboard with the host
+Mac display asleep), `working`, `multi` (Claude + Codex + OpenCode + Antigravity
++ OpenClaw gateway crayfish), `permission` (awaiting → "?" bubble). Scenes
+populate the same `g_state` the firmware fills from the daemon's `state_update`,
+so they exercise the real session → creature/card derivation. On InkDeck,
+`display-off` intentionally renders byte-identically to `idle`; the e-ink panel
+keeps useful status visible when the host monitors are off.
 
 Frames are deterministic: the PRNG is re-seeded per run and the clock is virtual,
 so `--out a.png` twice produces byte-identical PNGs (suitable for golden tests).

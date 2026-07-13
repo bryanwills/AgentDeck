@@ -39,11 +39,10 @@ constexpr uint8_t PIN_KEY2    = BOARD_PIN_KEY2;   // force full refresh (paging 
 // gating means these only apply on real change.
 //
 // CRITICAL: the panel is kept in powerOff() (high voltage off, controller RAM
-// RETAINED) between refreshes — NEVER hibernate() mid-session. hibernate()
-// deep-sleeps the controller and wipes its previous-frame RAM, so the next
-// partial refresh diffs against garbage → faint/ghosted text (the "blurry
-// text" bug on first hardware bring-up). hibernate() is only used for the
-// host-asleep card, and wake forces a full refresh.
+// RETAINED) between refreshes — NEVER hibernate() during normal operation.
+// hibernate() deep-sleeps the controller and wipes its previous-frame RAM, so
+// the next partial refresh diffs against garbage → faint/ghosted text (the
+// "blurry text" bug on first hardware bring-up).
 constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 3000;
 constexpr uint8_t  FULL_EVERY_N_PARTIALS   = 5;
 constexpr uint32_t FULL_MAX_AGE_MS         = 10UL * 60UL * 1000UL;
@@ -93,7 +92,6 @@ struct Snap {
     char claudePlan[40];
     char codexPlan[40];
     char agPlan[40];   // pre-shortened "AGY Pro ~8/1" chip text
-    bool displayOn;
     char ip[16];
     // Latest timeline event, compressed to one ticker line. EXCLUDED from the
     // content hash — it updates at most once a minute (piggybacks otherwise)
@@ -108,7 +106,6 @@ void snapshot(Snap& s) {
     s.serialUp = Net::serialConnected();
     lockState();
     s.bridgeConnected = g_state.wsConnected;
-    s.displayOn = g_state.hostDisplayOn;
     s.totalSessions = g_state.sessionCount;
     s.rowCount = g_state.sessionCount < MAX_ROWS ? g_state.sessionCount : MAX_ROWS;
     for (uint8_t i = 0; i < s.rowCount; i++) {
@@ -937,17 +934,6 @@ void drawSearching(const Snap& s) {
     drawUsageFooter(s, true);
 }
 
-void drawSleep() {
-    display.fillScreen(GxEPD_WHITE);
-    display.setTextColor(GxEPD_BLACK);
-    setInk(false);
-    drawAgentDeckMark(W / 2 - 28, 180, 56);
-    textAt(W / 2 - textWidth("asleep", &FreeSansBold12pt7b) / 2, 282, "asleep", &FreeSansBold12pt7b);
-    // crescent moon
-    display.fillCircle(W / 2 - 70, 274, 11, GxEPD_BLACK);
-    display.fillCircle(W / 2 - 65, 270, 10, GxEPD_WHITE);
-}
-
 // Provider usage rows that will actually draw (mirrors the p5<0 && p7<0 gate in
 // drawProviderUsage). 0/1/2 — drives the adaptive split so a Codex-only or
 // no-usage state doesn't waste the lower third of the panel.
@@ -996,7 +982,6 @@ uint32_t lastFullMs = 0;
 uint8_t partialCount = 0;
 bool firstDraw = true;
 bool forceFull = false;
-bool asleep = false;
 bool wasSearching = true;
 char lastTickerShown[104] = "";
 
@@ -1060,23 +1045,11 @@ void render() {
     uint32_t now = millis();
     Snap s; snapshot(s);
 
-    // Host display asleep → one clean sleep card, then hibernate the panel
-    // (deep sleep is safe here — wake below forces a full refresh, which
-    // doesn't depend on the controller's wiped previous-frame RAM).
-    if (!s.displayOn) {
-        if (!asleep) {
-            refresh([](const Snap&) { drawSleep(); }, s, true);
-            display.hibernate();
-            asleep = true;
-            lastHash = 0;
-        }
-        return;
-    }
-    if (asleep) {
-        asleep = false;
-        forceFull = true;  // controller RAM was wiped by hibernate
-        lastHash = 0;
-    }
+    // InkDeck intentionally ignores the host Mac's display-sleep state. E-ink
+    // retains the dashboard without panel refresh power, and this board is
+    // always USB-powered, so replacing useful status with an asleep card saves
+    // no meaningful display energy. Content updates continue while the Mac is
+    // awake even if its monitors are off.
 
     bool searching = !s.bridgeConnected;
     uint32_t h = contentHash(s);

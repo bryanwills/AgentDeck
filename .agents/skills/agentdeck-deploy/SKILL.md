@@ -25,6 +25,7 @@ Parse the argument string to determine target(s). Multiple targets can be combin
 | `apple` | iOS + macOS |
 | `esp32` | All connected ESP32 boards (LVGL only — excludes Ulanzi TC001) |
 | `esp32-all` | All ESP32 boards including Ulanzi TC001 |
+| `inkdeck` | InkDeck e-ink only |
 | `ulanzi` / `tc001` | Ulanzi TC001 LED matrix only |
 | `bridge` / `daemon` | Daemon restart only |
 | `plugin` / `sd` | Stream Deck plugin only |
@@ -58,6 +59,7 @@ Parse the argument string to determine target(s). Multiple targets can be combin
 | **Round AMOLED** (360×360) | `amoled_18` | `amoled` | `/dev/cu.usbmodem*` | ESP32-S3, native USB |
 | **TTGO T-Display** (135×240) | `tft_114` | `ttgo` | `/dev/cu.wchusbserial*` | ESP32-D0WDQ6, CH340 |
 | **IPS 10.1"** (800×1280) | `ips_101` | `ips10` | `/dev/cu.wchusbserial*` | ESP32-P4 + C6 |
+| **InkDeck** (800×480 e-ink) | `inkdeck` | `inkdeck` | `/dev/cu.usbmodem*` | XIAO ESP32-S3 Plus |
 | **Ulanzi TC001** (8×32 LED) | `led_8x32` | `led8x32` | `/dev/cu.usbserial-*` | ESP32-D0WD classic, CH340 |
 
 ## Execution Steps
@@ -248,6 +250,15 @@ pio run -e box_86  # build only
 ```
 
 After flash: USB re-plug required for JTAG boards (IPS 3.5", Round AMOLED).
+
+#### InkDeck e-ink
+
+InkDeck uses the standard PlatformIO upload path, but must still be identified by
+`device_info` before flashing because its native USB port number can change:
+
+```bash
+./scripts/flash.sh inkdeck <device_info-confirmed-port>
+```
 
 #### Ulanzi TC001 (separate target)
 

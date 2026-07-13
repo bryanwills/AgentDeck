@@ -32,7 +32,7 @@ bool flag(int argc, char** argv, const char* key) {
     if (std::strcmp(argv[i], key) == 0) return true;
   return false;
 }
-const char* SCENES[] = {"empty", "idle", "working", "multi", "permission"};
+const char* SCENES[] = {"empty", "idle", "display-off", "working", "multi", "permission"};
 }  // namespace
 
 #if defined(BOARD_LED8X32)
