@@ -6103,9 +6103,27 @@ final class DaemonServer {
             }
             return d
         }
+        // Normalize the two windows into semantic wire slots BY LENGTH, not by the
+        // slot Codex happened to use: short (< 1 day → the 5h window) → `primary`,
+        // long (≥ 1 day → the weekly window) → `secondary`. Codex now reports the
+        // weekly (10080-min) window in its own `primary` slot with `secondary` null
+        // once the 5h window resets; slot-based downstream clients (ESP32/InkDeck
+        // firmware label primary=5H, secondary=7D and never read windowMinutes)
+        // would otherwise mislabel the weekly "5H" and drop the 7D gauge. Length-
+        // based consumers still get windowMinutes and are unaffected.
+        var shortWindow: CodexRateLimitWindowLocal?
+        var longWindow: CodexRateLimitWindowLocal?
+        for w in [limits.primary, limits.secondary] {
+            guard let w else { continue }
+            if w.windowMinutes >= 1440 {
+                if longWindow == nil { longWindow = w }
+            } else if shortWindow == nil {
+                shortWindow = w
+            }
+        }
         var payload: [String: Any] = [:]
-        if let p = window(limits.primary) { payload["primary"] = p }
-        if let s = window(limits.secondary) { payload["secondary"] = s }
+        if let p = window(shortWindow) { payload["primary"] = p }
+        if let s = window(longWindow) { payload["secondary"] = s }
         if let plan = limits.planType { payload["planType"] = plan }
         return payload
     }

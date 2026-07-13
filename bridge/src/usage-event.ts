@@ -74,7 +74,21 @@ function normalizeCodexWindow(w?: CodexRateLimitWindow): CodexRateLimitWindow | 
 
 function normalizeCodexRateLimits(rl?: CodexRateLimits | null): CodexRateLimits | undefined {
   if (!rl) return undefined;
-  return { ...rl, primary: normalizeCodexWindow(rl.primary), secondary: normalizeCodexWindow(rl.secondary) };
+  // Assign windows to semantic wire slots BY LENGTH, not by the slot Codex used:
+  // short (< 1 day → the 5h window) → primary, long (≥ 1 day → weekly) →
+  // secondary. Codex now reports the weekly (10080-min) window in its own
+  // `primary` slot with `secondary` null once the 5h window resets; slot-based
+  // downstream clients (ESP32/InkDeck firmware label primary=5H, secondary=7D and
+  // never read windowMinutes) would otherwise mislabel the weekly "5H" and drop
+  // the 7D gauge. Length-based consumers still get windowMinutes, unaffected.
+  let shortWindow: CodexRateLimitWindow | undefined;
+  let longWindow: CodexRateLimitWindow | undefined;
+  for (const w of [rl.primary, rl.secondary]) {
+    if (!w) continue;
+    if (w.windowMinutes >= 1440) longWindow ??= w;
+    else shortWindow ??= w;
+  }
+  return { ...rl, primary: normalizeCodexWindow(shortWindow), secondary: normalizeCodexWindow(longWindow) };
 }
 
 function isClaudeSubscriptionModel(modelName?: string | null): boolean {

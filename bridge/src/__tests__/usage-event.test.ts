@@ -173,4 +173,20 @@ describe('buildUsageEvent Codex window normalization', () => {
     expect(evt.codexRateLimits!.secondary!.stale).toBeUndefined();
     expect(evt.codexRateLimits!.secondary!.resetsAt).toBe(future);
   });
+
+  it('routes a weekly window arriving in Codex\'s primary slot to the secondary (7D) wire slot', () => {
+    // Codex reports the weekly (10080-min) window as `primary` with `secondary`
+    // null once the 5h window resets. Slot-based downstream clients (ESP32/InkDeck
+    // firmware: primary=5H, secondary=7D) must receive it as `secondary`, and no
+    // phantom `primary` (5h) window, so the 7D gauge shows and 5H stays empty.
+    const future = new Date(Date.now() + 6 * 24 * 3600_000).toISOString();
+    const evt = buildUsageEvent(
+      ...codexArgs({ primary: { usedPercent: 4, windowMinutes: 10080, resetsAt: future } }),
+    ) as UsageEvent;
+
+    expect(evt.codexRateLimits!.primary).toBeUndefined();     // no phantom 5h window
+    expect(evt.codexRateLimits!.secondary!.usedPercent).toBe(4);
+    expect(evt.codexRateLimits!.secondary!.windowMinutes).toBe(10080);
+    expect(evt.codexRateLimits!.secondary!.resetsAt).toBe(future);
+  });
 });
