@@ -551,6 +551,38 @@ class TimelineStoreTest {
     }
 
     @Test
+    fun `addEntry drops opencode tool_exec so a tool-heavy turn does not flood`() {
+        // OpenCode emits one tool_exec per Bash/read/todowrite action via the
+        // observer plugin. Mirror the Codex suppression so its turn reads clean
+        // (prompt/response) instead of a tool firehose.
+        for (raw in listOf("bash", "bash completed", "read completed", "todowrite")) {
+            store.clear()
+            store.addEntry(
+                TimelineEntry(
+                    timestamp = 1_000,
+                    type = "tool_exec",
+                    summary = raw,
+                    agentType = "opencode",
+                    sessionId = "opencode:ses_09e7",
+                ),
+            )
+            assertTrue("opencode tool_exec '$raw' must not enter Android timeline", store.entries.value.isEmpty())
+        }
+        // chat rows for the same session are kept.
+        store.clear()
+        store.addEntry(
+            TimelineEntry(
+                timestamp = 2_000,
+                type = "chat_start",
+                summary = "openclaw 업데이트되었다 반영하고 점검하라",
+                agentType = "opencode",
+                sessionId = "opencode:ses_09e7",
+            ),
+        )
+        assertEquals(1, store.entries.value.size)
+    }
+
+    @Test
     fun `addEntry drops codex tool_exec from normal codex session`() {
         val bash = TimelineEntry(
             timestamp = 1_000,

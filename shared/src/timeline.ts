@@ -341,10 +341,18 @@ export function shouldDropLowSignalTimelineEntry(entry: TimelineEntry): boolean 
 
   const lowSignalTypes = new Set<TimelineEntryType>(['tool_exec', 'tool_request', 'tool_resolved']);
   if (!lowSignalTypes.has(entry.type)) return false;
-  // Codex tool hooks are extremely high volume (Bash/MCP start+complete for
-  // every internal action). Keep them available to APME ingestion, but do not
-  // persist them into the bounded user-facing timeline buffer.
-  if ((entry.agentType === 'codex-cli' || entry.agentType === 'codex-app') && entry.type === 'tool_exec') {
+  // Codex/OpenCode tool hooks are extremely high volume (Bash/MCP/read/
+  // todowrite start+complete for every internal action). Keep them available
+  // to APME ingestion, but do not persist them into the bounded user-facing
+  // timeline buffer — otherwise a tool-heavy observed turn drowns its own
+  // prompt/response rows (OpenCode had no suppression and flooded the strip
+  // with one row per tool while Claude/Codex read clean).
+  if (
+    (entry.agentType === 'codex-cli' ||
+      entry.agentType === 'codex-app' ||
+      entry.agentType === 'opencode') &&
+    entry.type === 'tool_exec'
+  ) {
     return true;
   }
   if (detailHasRealSignal(entry.detail)) return false;

@@ -1548,10 +1548,12 @@ func timelineIsLowSignalEntry(_ entry: TimelineEntry) -> Bool {
     guard entry.type == .toolExec || entry.type == .toolRequest || entry.type == .toolResolved else {
         return false
     }
-    // Codex emits one tool_exec per Bash/MCP action. Those rows are useful for
-    // telemetry/eval ingestion, but they drown the user-facing timeline and can
-    // make Claude work look like Codex work when multiple agents run together.
-    if (entry.agentType == "codex-cli" || entry.agentType == "codex-app"), entry.type == .toolExec {
+    // Codex/OpenCode emit one tool_exec per Bash/MCP/read/todowrite action.
+    // Those rows are useful for telemetry/eval ingestion, but they drown the
+    // user-facing timeline and can make Claude work look like observed-agent
+    // work when multiple agents run together. OpenCode had no suppression and
+    // flooded its own turn with tool rows while Codex read clean.
+    if (entry.agentType == "codex-cli" || entry.agentType == "codex-app" || entry.agentType == "opencode"), entry.type == .toolExec {
         return true
     }
     // Real signal in detail → keep regardless of placeholder raw.

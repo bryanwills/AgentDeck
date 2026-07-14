@@ -167,6 +167,31 @@ final class OpenClawToolNoiseTests: XCTestCase {
         XCTAssertTrue(DaemonTimelineStore.shouldDropLowSignalEntry(entry))
     }
 
+    /// OpenCode emits one tool_exec per Bash/read/todowrite action (via the
+    /// observer plugin's opencode_tool_start/end). Without suppression a
+    /// tool-heavy OpenCode turn floods the strip while Claude/Codex read clean.
+    /// Mirror of the Codex branch — suppress the tool_exec, keep chat rows.
+    func testStoreFilterDropsOpenCodeToolExec() {
+        for raw in ["bash", "bash completed", "read completed", "todowrite"] {
+            let entry = DaemonTimelineEntry(
+                ts: Date().timeIntervalSince1970 * 1000,
+                type: "tool_exec",
+                raw: raw,
+                agentType: "opencode",
+                sessionId: "opencode:ses_09e7"
+            )
+            XCTAssertTrue(DaemonTimelineStore.shouldDropLowSignalEntry(entry), "opencode tool_exec '\(raw)' should be dropped")
+        }
+        let chat = DaemonTimelineEntry(
+            ts: Date().timeIntervalSince1970 * 1000,
+            type: "chat_start",
+            raw: "openclaw 업데이트되었다 반영하고 점검하라",
+            agentType: "opencode",
+            sessionId: "opencode:ses_09e7"
+        )
+        XCTAssertFalse(DaemonTimelineStore.shouldDropLowSignalEntry(chat))
+    }
+
     func testStoreFilterDropsOpenClawNoReplyPollingResponse() {
         let entry = DaemonTimelineEntry(
             ts: Date().timeIntervalSince1970 * 1000,

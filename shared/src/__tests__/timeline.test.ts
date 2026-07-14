@@ -199,6 +199,27 @@ describe('normalizeTimelineEntryForStorage', () => {
     })).toBe(true);
   });
 
+  it('drops OpenCode tool rows so a tool-heavy turn does not flood the strip', () => {
+    for (const raw of ['bash', 'bash completed', 'read completed', 'todowrite']) {
+      expect(shouldDropLowSignalTimelineEntry({
+        ts: 100,
+        type: 'tool_exec',
+        raw,
+        agentType: 'opencode',
+        projectName: 'OpenClaw',
+        sessionId: 'opencode:ses_09e7',
+      })).toBe(true);
+    }
+    // chat rows for the same session are kept — only tool_exec is suppressed.
+    expect(shouldDropLowSignalTimelineEntry({
+      ts: 101,
+      type: 'chat_start',
+      raw: 'openclaw 업데이트되었다 반영하고 점검하라',
+      agentType: 'opencode',
+      sessionId: 'opencode:ses_09e7',
+    })).toBe(false);
+  });
+
   it('extracts readable labels from cron headers', () => {
     expect(summarizeOpenClawCronPrompt('[cron:id ai-eval-kindergarten-daily] body'))
       .toBe('자동 작업 · ai eval kindergarten daily');

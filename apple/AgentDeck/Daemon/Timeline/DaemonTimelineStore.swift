@@ -293,11 +293,13 @@ actor DaemonTimelineStore {
         guard entry.type == "tool_exec" || entry.type == "tool_request" || entry.type == "tool_resolved" else {
             return false
         }
-        // Codex tool hooks fire for every internal Bash/MCP action and can
-        // easily evict the actual turn/task rows from the bounded timeline.
-        // APME still ingests the hook trajectory; the device timeline keeps
-        // Codex chat/task lifecycle rows only.
-        if (entry.agentType == "codex-cli" || entry.agentType == "codex-app"), entry.type == "tool_exec" {
+        // Codex/OpenCode tool hooks fire for every internal Bash/MCP/read/
+        // todowrite action and can easily evict the actual turn/task rows from
+        // the bounded timeline. APME still ingests the hook trajectory; the
+        // device timeline keeps their chat/task lifecycle rows only. OpenCode
+        // had no suppression and flooded the strip with one row per tool while
+        // Claude/Codex read clean.
+        if (entry.agentType == "codex-cli" || entry.agentType == "codex-app" || entry.agentType == "opencode"), entry.type == "tool_exec" {
             return true
         }
         // Real signal in detail → keep regardless of placeholder raw.
