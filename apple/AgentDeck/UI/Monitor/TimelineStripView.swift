@@ -289,17 +289,34 @@ struct TimelineStripView: View {
         let isCompleted = group.hasResponse
             || (group.entry.type == .chatStart
                 && timelineHasLaterCompletion(for: group.entry, in: grouped))
+        // Queued/superseded prompt: rendered with a fold glyph + "answered with
+        // next turn" note instead of a bare completion check, so a turn the user
+        // genuinely submitted doesn't read as a finished turn with no reply.
+        let foldedInto = group.entry.type == .chatStart
+            ? timelineSupersedingGroup(for: group, at: index, in: grouped)
+            : nil
+        let isFolded = foldedInto != nil
+        // The answered turn that absorbed an earlier queued prompt — tags its
+        // response sub-line "shared" so the borrowed answer is legible.
+        let absorbsQueued = group.entry.type == .chatStart
+            && timelineAbsorbsQueuedPrompt(for: group, at: index, in: grouped)
         let iconKey: TimelineIconKey = {
             if group.entry.type == .chatStart && isCompleted { return .success }
             return timelineIconKey(for: group.entry.type, status: group.entry.status)
         }()
-        let iconColor = group.entry.type == .chatStart && isCompleted
-            ? timelineTypeColor(for: .chatEnd)
-            : timelineTypeColor(for: group.entry.type)
+        let iconColor = isFolded
+            ? TerrariumHUD.subtext.opacity(0.7)
+            : (group.entry.type == .chatStart && isCompleted
+                ? timelineTypeColor(for: .chatEnd)
+                : timelineTypeColor(for: group.entry.type))
+        // Fold turns get a distinct down-right glyph; everything else keeps its
+        // semantic icon.
+        let rowSymbolName = isFolded ? "arrow.turn.down.right" : sfSymbol(for: iconKey)
         let brandColor = SessionBrand.color(for: group.entry.agentType)
         let countSuffix = group.count > 1 ? " ×\(group.count)" : ""
         let sessionLabel = rowPrefixLabel(for: group.entry)
         let isRotating: Bool = {
+            if isFolded { return false }
             if group.entry.type == .chatStart && isCompleted { return false }
             return timelineIsRotatingEntry(group.entry, siblings: grouped.map(\.entry))
         }()
@@ -321,13 +338,13 @@ struct TimelineStripView: View {
                 // iOS 18 / macOS 15; the project's iOS deploy target is 17.0,
                 // so use a TimelineView-driven rotationEffect that works on iOS 17+.
                 RotatingTimelineIcon(
-                    symbolName: sfSymbol(for: iconKey),
+                    symbolName: rowSymbolName,
                     font: .system(size: fontScale.sub, weight: .bold),
                     color: iconColor.opacity(isChatEnd ? 0.6 : 1),
                     size: 12,
                     isRotating: isRotating
                 )
-                .accessibilityLabel(iconKey.rawValue)
+                .accessibilityLabel(isFolded ? "answered with next turn" : iconKey.rawValue)
 
                 AgentBrandIcon(
                     agentType: group.entry.agentType,
@@ -379,6 +396,23 @@ struct TimelineStripView: View {
                 }
             }
 
+            // Sub-line: folded/queued-prompt note. This turn's single shared
+            // reply landed on the following turn, so point there instead of
+            // leaving a completed-looking row with no answer.
+            if isFolded {
+                HStack(alignment: .top, spacing: 4) {
+                    Spacer().frame(width: isNested ? 64 : 56)
+                    Text("answered with next turn")
+                        .font(.system(size: fontScale.label, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext.opacity(0.6))
+                        .lineLimit(1)
+                    Image(systemName: "arrow.turn.right.down")
+                        .font(.system(size: fontScale.label, weight: .semibold))
+                        .foregroundStyle(TerrariumHUD.subtext.opacity(0.5))
+                    Spacer(minLength: 0)
+                }
+            }
+
             // Sub-line: assistant response body. Indented + dimmed so the
             // user prompt above stays the primary reading anchor. Hidden
             // while this row's inline detail pane is expanded showing the
@@ -397,6 +431,18 @@ struct TimelineStripView: View {
                         .lineLimit(allowMultiline ? 3 : 1)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: allowMultiline)
+                    if absorbsQueued {
+                        Text("shared")
+                            .font(.system(size: max(8, fontScale.label - 1), weight: .semibold, design: .monospaced))
+                            .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(
+                                TerrariumHUD.subtext.opacity(0.12),
+                                in: RoundedRectangle(cornerRadius: 3)
+                            )
+                            .accessibilityLabel("shared with the previous queued prompt")
+                    }
                     Spacer(minLength: 0)
                 }
             }
@@ -515,6 +561,11 @@ struct TimelineStripView: View {
     @ViewBuilder
     private func inlineDetailPane(_ group: GroupedEntry) -> some View {
         let entry = group.entry
+        // Folded/queued prompt: the shared reply lives on the following turn,
+        // so borrow its body here instead of showing an empty detail.
+        let foldedInto = group.entry.type == .chatStart
+            ? timelineSupersedingGroup(for: group, in: grouped) : nil
+        let bodyGroup = foldedInto ?? group
         VStack(alignment: .leading, spacing: 4) {
             let lifecycleRows = lifecycleDetailRows(for: entry)
             if !lifecycleRows.isEmpty {
@@ -526,7 +577,12 @@ struct TimelineStripView: View {
                     }
                 }
             }
-            let detailEntry = timelineDetailEntryForDashboard(group)
+            if let foldedInto {
+                Text("↳ answered together with the next turn · \(formatTime(foldedInto.entry.date))")
+                    .font(.system(size: fontScale.label, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
+            }
+            let detailEntry = timelineDetailEntryForDashboard(bodyGroup)
             if let detail = detailEntry.detail,
                shouldShowDetail(entry: detailEntry, detail: detail) {
                 TimelineMarkdownPreview(text: detail)
@@ -677,13 +733,21 @@ struct TimelineStripView: View {
                 let isTurnCompleted = group.entry.type == .chatStart
                     && (group.hasResponse
                         || timelineHasLaterCompletion(for: group.entry, in: grouped))
+                // Folded/queued prompt — borrow the following turn's shared
+                // reply for this pane's body and mark the header accordingly.
+                let foldedInto = group.entry.type == .chatStart
+                    ? timelineSupersedingGroup(for: group, in: grouped) : nil
+                let isFolded = foldedInto != nil
                 let iconKey: TimelineIconKey = isTurnCompleted
                     ? .success
                     : timelineIconKey(for: group.entry.type, status: group.entry.status)
-                let iconColor = isTurnCompleted
-                    ? timelineTypeColor(for: .chatEnd)
-                    : timelineTypeColor(for: group.entry.type)
-                let isRotating: Bool = isTurnCompleted
+                let iconColor = isFolded
+                    ? TerrariumHUD.subtext
+                    : (isTurnCompleted
+                        ? timelineTypeColor(for: .chatEnd)
+                        : timelineTypeColor(for: group.entry.type))
+                let headerSymbol = isFolded ? "arrow.turn.down.right" : sfSymbol(for: iconKey)
+                let isRotating: Bool = (isFolded || isTurnCompleted)
                     ? false
                     : timelineIsRotatingEntry(group.entry, siblings: grouped.map(\.entry))
                 let countSuffix = group.count > 1 ? " (×\(group.count))" : ""
@@ -692,7 +756,7 @@ struct TimelineStripView: View {
                 HStack(spacing: 6) {
                     HStack(spacing: 3) {
                         RotatingTimelineIcon(
-                            symbolName: sfSymbol(for: iconKey),
+                            symbolName: headerSymbol,
                             font: .system(size: fontScale.label, weight: .bold),
                             color: .white,
                             size: nil,
@@ -787,7 +851,11 @@ struct TimelineStripView: View {
                 //       showing it duplicates the summary noisily)
                 //   (b) detailIsRedundant fuzzy match against raw (LLM /
                 //       heuristic summarizer paraphrased the response opening)
-                let detailEntry = timelineDetailEntryForDashboard(group)
+                // For a folded turn the body comes from the following turn that
+                // carried the shared reply; the summary above stays this turn's
+                // own prompt so the user still sees what they asked.
+                let bodyGroup = foldedInto ?? group
+                let detailEntry = timelineDetailEntryForDashboard(bodyGroup)
                 let shownDetail: String? = {
                     guard let detail = detailEntry.detail,
                           shouldShowDetail(entry: detailEntry, detail: detail) else { return nil }
@@ -811,6 +879,14 @@ struct TimelineStripView: View {
                         .font(.system(size: fontScale.body, weight: .bold, design: .monospaced))
                         .foregroundStyle(TerrariumHUD.text)
                         .padding(.horizontal, 8)
+                }
+
+                if let foldedInto {
+                    Text("↳ answered together with the next turn · \(formatTimeSeconds(foldedInto.entry.date))")
+                        .font(.system(size: fontScale.label, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext.opacity(0.8))
+                        .padding(.horizontal, 8)
+                        .padding(.top, 2)
                 }
 
                 if let detail = shownDetail {
@@ -1354,6 +1430,57 @@ func timelineHasLaterCompletion(for start: TimelineEntry, in groups: [GroupedEnt
         guard other.entry.ts >= start.ts else { return false }
         return timelineSameContext(start, other.entry)
     }
+}
+
+/// A queued / superseded `chat_start`. The user really did submit this prompt,
+/// but a later same-session prompt took over the turn anchor before any
+/// completion arrived — Codex (and other observed agents) coalesce rapid-fire
+/// UserPromptSubmit into one turn and emit a single Stop stamped to the
+/// *latest* open turn (see `sameTurnAnchor`). The one shared response therefore
+/// merges into that later turn, leaving this one with no response of its own.
+/// Returns the later group carrying the shared response, so the folded turn
+/// can borrow it for its detail pane; nil when this turn was answered on its
+/// own or is still the live open turn (nothing has answered the batch yet).
+func timelineSupersedingGroup(for group: GroupedEntry, at index: Int,
+                              in grouped: [GroupedEntry]) -> GroupedEntry? {
+    guard group.entry.type == .chatStart, !group.hasResponse else { return nil }
+    guard index >= 0, index + 1 < grouped.count else { return nil }
+    for j in (index + 1)..<grouped.count {
+        let other = grouped[j]
+        guard timelineSameContext(group.entry, other.entry) else { continue }
+        // A same-session session boundary or standalone completion between the
+        // two prompts means this turn closed on its own boundary — not folded.
+        if other.entry.type == .taskEnd { return nil }
+        if other.entry.type == .chatStart {
+            if other.hasResponse { return other }
+            continue // another still-open queued prompt — keep looking for the answered one
+        }
+        if timelineIsCompletionEntry(other.entry) { return nil }
+    }
+    return nil
+}
+
+/// Index-free convenience for the detail pane, which only has the group.
+func timelineSupersedingGroup(for group: GroupedEntry,
+                              in grouped: [GroupedEntry]) -> GroupedEntry? {
+    guard let idx = grouped.firstIndex(where: { $0.id == group.id }) else { return nil }
+    return timelineSupersedingGroup(for: group, at: idx, in: grouped)
+}
+
+/// Mirror of `timelineSupersedingGroup`: true when `group` is the answered
+/// `chat_start` that absorbed an earlier same-session queued prompt's shared
+/// response. Drives the small "shared" tag on the response sub-line.
+func timelineAbsorbsQueuedPrompt(for group: GroupedEntry, at index: Int,
+                                 in grouped: [GroupedEntry]) -> Bool {
+    guard group.entry.type == .chatStart, group.hasResponse else { return false }
+    for j in stride(from: index - 1, through: 0, by: -1) {
+        let other = grouped[j]
+        guard timelineSameContext(group.entry, other.entry) else { continue }
+        if other.entry.type == .taskEnd { return false }
+        if other.entry.type == .chatStart { return !other.hasResponse }
+        if timelineIsCompletionEntry(other.entry) { return false }
+    }
+    return false
 }
 
 func timelineHasPairedChatResponse(for end: TimelineEntry, in groups: [GroupedEntry]) -> Bool {

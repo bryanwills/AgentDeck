@@ -372,6 +372,88 @@ private fun hasLaterCompletion(start: TimelineEntry, groups: List<GroupedEntry>)
             sameTimelineContext(start, other.entry)
     }
 
+/**
+ * The shared assistant reply that answered a queued / superseded chat_start.
+ * The user submitted this prompt, but a later same-session prompt took over the
+ * turn anchor before any completion arrived — Codex (and other observed agents)
+ * coalesce rapid-fire prompts into one turn and emit a single Stop stamped to
+ * the latest open turn (see `sameTurnAnchor`). The one shared response therefore
+ * merges into that later turn, leaving this one with no reply of its own.
+ * Returns the borrowed reply entry so the folded row can point at / show it;
+ * null when this turn was answered on its own or is still the live open turn
+ * (nothing has answered the batch yet). Mirrors Apple `timelineSupersedingGroup`.
+ */
+fun timelineSupersededSharedResponse(
+    start: TimelineEntry,
+    hasOwnResponse: Boolean,
+    siblings: List<TimelineEntry>,
+): TimelineEntry? {
+    if (start.type != "chat_start" || hasOwnResponse) return null
+    val later = siblings
+        .filter { it.timestamp > start.timestamp && sameTimelineContext(start, it) }
+        .sortedBy { it.timestamp }
+    for (row in later) {
+        when {
+            // A same-session session boundary between the two prompts means this
+            // turn closed on its own boundary — orphaned, not folded.
+            row.type == "task_end" -> return null
+            row.type == "chat_start" -> {
+                // This later prompt owns the shared reply iff a same-session
+                // completion anchors to it (child.startedAt == its timestamp).
+                val reply = later.firstOrNull {
+                    it.type == "chat_response" && it.timestamp >= row.timestamp &&
+                        queuedTurnAnchor(row, it)
+                } ?: later.firstOrNull {
+                    isTimelineCompletionEntry(it) && it.timestamp >= row.timestamp &&
+                        queuedTurnAnchor(row, it)
+                }
+                if (reply != null) return reply
+                // else another still-open queued prompt — keep looking.
+            }
+            isTimelineCompletionEntry(row) -> return null
+        }
+    }
+    return null
+}
+
+/**
+ * Mirror of [timelineSupersededSharedResponse]: true when this answered
+ * chat_start absorbed an earlier same-session queued prompt's shared reply.
+ * Drives the small "shared" tag on the response sub-line. Mirrors Apple
+ * `timelineAbsorbsQueuedPrompt`.
+ */
+fun timelineAbsorbsQueuedPrompt(
+    start: TimelineEntry,
+    hasOwnResponse: Boolean,
+    siblings: List<TimelineEntry>,
+): Boolean {
+    if (start.type != "chat_start" || !hasOwnResponse) return false
+    val earlier = siblings
+        .filter { it.timestamp < start.timestamp && sameTimelineContext(start, it) }
+        .sortedByDescending { it.timestamp }
+    for (row in earlier) {
+        when {
+            row.type == "task_end" -> return false
+            row.type == "chat_start" ->
+                // Nearest prior same-session prompt folds into us iff it has no
+                // completion of its own.
+                return siblings.none {
+                    isTimelineCompletionEntry(it) && sameTimelineContext(row, it) &&
+                        queuedTurnAnchor(row, it)
+                }
+            isTimelineCompletionEntry(row) -> return false
+        }
+    }
+    return false
+}
+
+/** `child.startedAt == start.timestamp` (or true when legacy emitters omit
+ *  startedAt). Mirrors the private `sameTurnAnchor` in TimelineStore.kt. */
+private fun queuedTurnAnchor(start: TimelineEntry, child: TimelineEntry): Boolean {
+    val anchor = child.startedAt ?: return true
+    return anchor == start.timestamp
+}
+
 private fun hasPairedChatResponse(end: TimelineEntry, groups: List<GroupedEntry>): Boolean =
     groups.any { other ->
         if (other.entry.type != "chat_response") return@any false

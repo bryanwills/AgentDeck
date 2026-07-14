@@ -2,6 +2,7 @@ package dev.agentdeck.state
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -275,6 +276,70 @@ class TimelineDisplayScenarioTest {
         assertEquals(3, groups.size)
         assertEquals(listOf("AgentDeck", "ViewTrans", "AgentDeck"), groups.map { it.entry.projectName })
         assertEquals(listOf("claude-code", "claude-code", "codex-cli"), groups.map { it.entry.agentType })
+    }
+
+    // --- Queued / superseded (folded) prompt detection (Apple parity) ---
+
+    /** Real scenario: two prompts ~26 s apart to one observed Codex session.
+     *  Codex coalesces them into one turn, emits a single Stop stamped to the
+     *  second prompt's anchor. The reply merges into the later turn; the first
+     *  must be detected as folded (→ fold glyph + borrowed reply), the second
+     *  as the turn that absorbed it (→ "shared" tag) — not a spinning orphan. */
+    @Test
+    fun `queued prompt folds into next turn`() {
+        val entries = listOf(
+            event(1000, "chat_start", "commit the rest", "codex:x", "codex-cli", "AgentDeck", startedAt = 1000),
+            event(2000, "chat_start", "push too", "codex:x", "codex-cli", "AgentDeck", startedAt = 2000),
+            event(3000, "chat_response", "committed + pushed", "codex:x", "codex-cli", "AgentDeck", startedAt = 2000, endedAt = 3000),
+            event(3001, "chat_end", "Completed · 57s", "codex:x", "codex-cli", "AgentDeck", startedAt = 2000, endedAt = 3001),
+        )
+        val groups = groupConsecutive(entries)
+        val first = groups.first { it.entry.summary == "commit the rest" }
+        val second = groups.first { it.entry.summary == "push too" }
+        assertFalse("first prompt keeps no reply of its own", first.hasResponse)
+        assertTrue("second prompt absorbed the shared reply", second.hasResponse)
+
+        val shared = timelineSupersededSharedResponse(first.entry, first.hasResponse, entries)
+        assertEquals("committed + pushed", shared?.summary)
+        assertTrue(timelineAbsorbsQueuedPrompt(second.entry, second.hasResponse, entries))
+        assertNull(timelineSupersededSharedResponse(second.entry, second.hasResponse, entries))
+        // The folded prompt still renders (meaningful chat_start survives filter).
+        val display = timelineDisplayGroups(groups)
+        assertTrue(display.any { it.entry.summary == "commit the rest" })
+    }
+
+    @Test
+    fun `answered turn is not folded`() {
+        val entries = listOf(
+            event(1000, "chat_start", "hi", "s1", "claude-code", "AgentDeck", startedAt = 1000),
+            event(2000, "chat_response", "hello", "s1", "claude-code", "AgentDeck", startedAt = 1000, endedAt = 2000),
+        )
+        val groups = groupConsecutive(entries)
+        assertNull(timelineSupersededSharedResponse(groups[0].entry, groups[0].hasResponse, entries))
+        assertFalse(timelineAbsorbsQueuedPrompt(groups[0].entry, groups[0].hasResponse, entries))
+    }
+
+    @Test
+    fun `still-open queued prompts are not folded`() {
+        val entries = listOf(
+            event(1000, "chat_start", "first", "s1", "claude-code", "AgentDeck", startedAt = 1000),
+            event(2000, "chat_start", "second", "s1", "claude-code", "AgentDeck", startedAt = 2000),
+        )
+        val groups = groupConsecutive(entries)
+        assertNull(timelineSupersededSharedResponse(groups[0].entry, groups[0].hasResponse, entries))
+        assertNull(timelineSupersededSharedResponse(groups[1].entry, groups[1].hasResponse, entries))
+    }
+
+    @Test
+    fun `task_end boundary blocks fold`() {
+        val entries = listOf(
+            event(1000, "chat_start", "orphaned", "s1", "claude-code", "AgentDeck", startedAt = 1000),
+            TimelineEntry(1500, "task_end", "Session end", sessionId = "s1", agentType = "claude-code", projectName = "AgentDeck", taskId = "t1"),
+            event(2000, "chat_start", "next session prompt", "s1", "claude-code", "AgentDeck", startedAt = 2000),
+            event(3000, "chat_response", "reply", "s1", "claude-code", "AgentDeck", startedAt = 2000, endedAt = 3000),
+        )
+        val orphan = entries.first { it.summary == "orphaned" }
+        assertNull(timelineSupersededSharedResponse(orphan, false, entries))
     }
 
     private fun event(

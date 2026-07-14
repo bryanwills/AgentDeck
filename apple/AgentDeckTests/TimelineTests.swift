@@ -1457,4 +1457,78 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(timelineTypeIcon(for: .error), "✗")
         XCTAssertEqual(timelineTypeIcon(for: .toolRequest), "⏳")
     }
+
+    // MARK: - Queued / superseded (folded) prompt detection
+
+    /// Real scenario: two prompts submitted ~26 s apart to one observed Codex
+    /// session. Codex coalesces them into one turn and emits a single Stop,
+    /// stamped to the *second* prompt's anchor. The response therefore merges
+    /// into the later turn, leaving the first as a queued/folded prompt. The
+    /// first must be detected as superseded (→ fold glyph), and the second as
+    /// the turn that absorbed it (→ "shared" tag) — not a spinning orphan.
+    func testQueuedPromptFoldsIntoNextTurn() {
+        let entries = [
+            TimelineEntry(ts: 1000, type: .chatStart, raw: "commit the rest", sessionId: "codex:x", startedAt: 1000),
+            TimelineEntry(ts: 2000, type: .chatStart, raw: "push too", sessionId: "codex:x", startedAt: 2000),
+            TimelineEntry(ts: 3000, type: .chatResponse, raw: "committed + pushed", sessionId: "codex:x", startedAt: 2000, endedAt: 3000),
+            TimelineEntry(ts: 3001, type: .chatEnd, raw: "Completed · 57s", sessionId: "codex:x", startedAt: 2000, endedAt: 3001),
+        ]
+        let grouped = groupConsecutive(entries)
+        // The response/end anchor (startedAt 2000) folds into the 2nd start.
+        XCTAssertEqual(grouped.count, 2)
+        XCTAssertNil(grouped[0].mergedResponse, "first prompt keeps no response of its own")
+        XCTAssertFalse(grouped[0].hasResponse)
+        XCTAssertEqual(grouped[1].mergedResponse?.raw, "committed + pushed")
+
+        // First prompt is superseded by the second (folded), not orphaned.
+        let superseding = timelineSupersedingGroup(for: grouped[0], at: 0, in: grouped)
+        XCTAssertNotNil(superseding, "first prompt should fold into the answered turn")
+        XCTAssertEqual(superseding?.mergedResponse?.raw, "committed + pushed")
+        // The second prompt absorbed a queued predecessor.
+        XCTAssertTrue(timelineAbsorbsQueuedPrompt(for: grouped[1], at: 1, in: grouped))
+        // The second prompt itself is not folded.
+        XCTAssertNil(timelineSupersedingGroup(for: grouped[1], at: 1, in: grouped))
+    }
+
+    /// A normally-answered turn is never treated as folded.
+    func testAnsweredTurnIsNotFolded() {
+        let entries = [
+            TimelineEntry(ts: 1000, type: .chatStart, raw: "hi", sessionId: "s1", startedAt: 1000),
+            TimelineEntry(ts: 2000, type: .chatResponse, raw: "hello", sessionId: "s1", startedAt: 1000, endedAt: 2000),
+        ]
+        let grouped = groupConsecutive(entries)
+        XCTAssertEqual(grouped.count, 1)
+        XCTAssertNil(timelineSupersedingGroup(for: grouped[0], at: 0, in: grouped))
+        XCTAssertFalse(timelineAbsorbsQueuedPrompt(for: grouped[0], at: 0, in: grouped))
+    }
+
+    /// A genuinely-open live turn (nothing has answered the batch yet) must NOT
+    /// be marked folded — there is no shared reply to point at.
+    func testStillOpenQueuedPromptsAreNotFolded() {
+        let entries = [
+            TimelineEntry(ts: 1000, type: .chatStart, raw: "first", sessionId: "s1", startedAt: 1000),
+            TimelineEntry(ts: 2000, type: .chatStart, raw: "second", sessionId: "s1", startedAt: 2000),
+        ]
+        let grouped = groupConsecutive(entries)
+        XCTAssertEqual(grouped.count, 2)
+        XCTAssertNil(timelineSupersedingGroup(for: grouped[0], at: 0, in: grouped),
+                     "no answer yet → not folded, still live")
+        XCTAssertNil(timelineSupersedingGroup(for: grouped[1], at: 1, in: grouped))
+    }
+
+    /// A same-session session boundary between the two prompts means the first
+    /// closed on its own boundary — it is orphaned by session end, not folded.
+    func testTaskEndBoundaryBlocksFold() {
+        let entries = [
+            TimelineEntry(ts: 1000, type: .chatStart, raw: "orphaned", sessionId: "s1", startedAt: 1000),
+            TimelineEntry(ts: 1500, type: .taskEnd, raw: "Session end", sessionId: "s1", taskId: "t1"),
+            TimelineEntry(ts: 2000, type: .chatStart, raw: "next session prompt", sessionId: "s1", startedAt: 2000),
+            TimelineEntry(ts: 3000, type: .chatResponse, raw: "reply", sessionId: "s1", startedAt: 2000, endedAt: 3000),
+        ]
+        let grouped = groupConsecutive(entries)
+        let firstStart = grouped.first { $0.entry.raw == "orphaned" }!
+        let idx = grouped.firstIndex { $0.id == firstStart.id }!
+        XCTAssertNil(timelineSupersedingGroup(for: firstStart, at: idx, in: grouped),
+                     "task_end boundary blocks folding across sessions")
+    }
 }
