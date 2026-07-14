@@ -239,7 +239,7 @@
 
   <h2>C. 입력 / 제어 하드웨어 (HID 데크)</h2>
   <h3>Ulanzi D200H "Deck Dock"</h3>
-  <p class="section-note">stock HID 프로토콜(ADB/펌웨어 변조 없음), daemon-only. <strong>Ulanzi Studio 플러그인</strong>(<code>plugin-ulanzi</code>)이 <strong>유일한 지원 드라이버</strong> — D200H 는 Mac Ulanzi Studio 앱을 통해야만 안정 렌더. <strong>direct-HID 폴백은 retire(2026-06-21, <code>380c6510</code>)</strong>: 두 데몬 모두 더 이상 HID 로 열지 않음(Node <code>d200h: false</code> / Swift <code>enableD200hDirectHID = false</code>). 모듈 코드와 stand-down arbitration 은 dormant(보존·재활성 가능)하나 비활성. 출처: <code>docs/plugin-conventions.md</code> §D200H, 커밋 <code>380c6510</code>.</p>
+  <p class="section-note">stock HID 프로토콜(ADB/펌웨어 변조 없음), daemon-only. <strong>Ulanzi Studio 플러그인</strong>(<code>plugin-ulanzi</code>)이 <strong>유일한 지원 드라이버</strong> — D200H 는 Mac Ulanzi Studio 앱을 통해야만 안정 렌더. direct-HID 구현은 Node·Swift 양쪽에서 삭제됐고 AgentDeck daemon은 plugin WebSocket presence만 관측한다. 출처: <code>docs/plugin-conventions.md</code> §D200H.</p>
   <div class="scroll">
     <table>
       <tbody>
@@ -249,7 +249,7 @@
         <tr><th>키</th><td>14 keys (3행×5열, Row2 col3+col4 합체), ~192×180px</td></tr>
         <tr><th>OS</th><td>FlythingsOS V2.1 (<code>Zkswe_SSD21X_SPINOR</code>)</td></tr>
         <tr><th>연결</th><td>USB HID — VID <code>0x2207</code> / PID <code>0x0019</code>, 1024B 패킷, 헤더 <code>0x7C7C</code>, ZIP 청킹 (WiFi 없음)</td></tr>
-        <tr><th>드라이버</th><td><strong>유일</strong>: Ulanzi Studio 플러그인 <code>plugin-ulanzi/</code>(daemon WS). direct-HID 모듈(Swift <code>D200hHidModule.swift</code> IOKit / Node <code>bridge/src/d200h/</code> node-hid)은 <strong>retire — dormant(비활성)</strong></td></tr>
+        <tr><th>드라이버</th><td><strong>유일</strong>: Ulanzi Studio 플러그인 <code>plugin-ulanzi/</code>(daemon WS). direct-HID 구현은 삭제됨</td></tr>
       </tbody>
     </table>
   </div>
@@ -328,7 +328,7 @@
         <tr><td class="device-name">Android e-ink</td><td><span class="badge b-no">CLI</span></td><td class="wrap-cell"><strong>진짜 제약</strong>. USB-테더 + <code>adb reverse</code> 서브프로세스 필요 → sandbox 불가</td><td class="wrap-cell">현 구조 합리적(e-ink WiFi 불안정·USB 전제). 변경 불요</td></tr>
         <tr><td class="device-name">Timebox / iDotMatrix</td><td><span class="badge b-yes">YES</span></td><td class="wrap-cell">CoreBluetooth 네이티브</td><td class="wrap-cell">최선. 단 <strong>데몬당 BLE 단일 연결</strong> — 동시 1대만. (구 Timebox-SPP serial 변종은 제거됨)</td></tr>
         <tr><td class="device-name">SSE 스트림</td><td><span class="badge b-warn">YES*</span></td><td class="wrap-cell"><strong>구현 갭</strong>. 풀 스트리밍(<code>broadcastSse</code>, 멀티클라이언트+하트비트)은 Node 브리지(<code>hook-server.ts</code>)만 구현. App Store Swift 데몬(<code>DaemonServer.swift</code>)의 <code>/sse</code>는 <code>event: connected</code> 1회 후 끊는 <strong>스텁</strong></td><td class="wrap-cell"><strong>개선 권장</strong>: 샌드박스 제약 아님(같은 HTTP 서버에 SSE 가능). Swift 데몬에 멀티클라이언트 SSE 구현 시 ✅ 승격. 현 App Store 빌드는 라이브 SSE에 외부 Node 데몬 필요</td></tr>
-        <tr><td class="device-name">D200H</td><td><span class="badge b-yes">YES</span></td><td class="wrap-cell">(갭 아님) Ulanzi Studio 플러그인이 <strong>단일 드라이버</strong>. direct-HID 폴백은 retire(2026-06-21, <code>380c6510</code>) — Node <code>d200h:false</code>/Swift <code>enableD200hDirectHID=false</code>, 모듈은 dormant 보존</td><td class="wrap-cell">최선. 플러그인 없이 HID 직구동 시 화면 깨짐 → 의도적 비활성. 재활성은 두 flip-point만 되돌리면 됨</td></tr>
+        <tr><td class="device-name">D200H</td><td><span class="badge b-yes">YES</span></td><td class="wrap-cell">Ulanzi Studio 플러그인이 <strong>단일 드라이버</strong>. direct-HID 구현과 USB entitlement는 삭제 완료</td><td class="wrap-cell">daemon은 plugin presence만 보고하며 HID 소유권 경합이 구조적으로 없음</td></tr>
         <tr><td class="device-name">XTeink X3/X4</td><td><span class="badge b-warn">EXP</span></td><td class="wrap-cell"><strong>등록 구현됨</strong>(experimental, 샌드박스 제약 아님). ESP32-C3 e-ink + 외부 <strong>CrossPoint 포크</strong> 펌웨어(<code>crosspoint-agentdeck</code>)가 <code>client_register{eink-device}</code> → macOS E-ink rail, <code>device_info{board}</code> → Node <code>esp32-wifi</code> 이중 등록. 전송은 다른 ESP32와 동일 WiFi WS(서브프로세스 없음)</td><td class="wrap-cell"><strong>개선 예정</strong>: e-ink 렌더 개발 중 + 업데이트 펌웨어 SD 플래시 대기라 ⚠️. 플래시 후 표시</td></tr>
       </tbody>
     </table>

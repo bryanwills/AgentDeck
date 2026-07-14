@@ -1919,11 +1919,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       };
     }
     const ulanziPluginConnected = core.wsServer.getUlanziClientCount() > 0;
-    modules.d200h = {
-      connected: ulanziPluginConnected,
-      externalOwner: ulanziPluginConnected,
-      managerOpened: ulanziPluginConnected,
-    };
+    if (ulanziPluginConnected) {
+      modules.d200h = {
+        connected: true,
+        driver: 'ulanzi-plugin',
+      };
+    }
     return modules;
   };
   core.setModuleHealthProvider(moduleHealthProvider);

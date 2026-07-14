@@ -673,13 +673,10 @@ struct TopologyRail: View {
                 downstreamSubheader("USB HID")
                 DeviceRailRow(
                     name: "D200H",
-                    status: d200h.connected
-                        ? .ok
-                        : (d200h.managerOpened ? .warn : .dim),
+                    status: d200h.connected ? .ok : .dim,
                     detail: d200h.connected
-                        ? (d200h.externalOwner ? "Ulanzi Studio · 14 keys" : "HID · 14 keys")
-                        : (d200h.lastOpenError
-                           ?? (d200h.usbEntitlementPresent ? "Disconnected" : "No USB entitlement"))
+                        ? "Ulanzi Studio · 14 keys"
+                        : "Plugin disconnected"
                 )
             }
         }

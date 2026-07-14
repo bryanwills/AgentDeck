@@ -378,17 +378,6 @@ enum AdbDeviceClass: String, Sendable {
 
 struct D200hHealth: Sendable {
     var connected: Bool = false
-    /// True when the Ulanzi Studio plugin drives the device (daemon HID stood down).
-    var externalOwner: Bool = false
-    var managerOpened: Bool = false
-    var sandboxEnabled: Bool = false
-    var usbEntitlementPresent: Bool = false
-    var buttonPressCount: Int = 0
-    var hidReportCount: Int = 0
-    var writeOK: Int = 0
-    var writeFail: Int = 0
-    var lastWriteError: String?
-    var lastOpenError: String?
 }
 
 struct PixooHealth: Sendable {

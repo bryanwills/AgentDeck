@@ -10,7 +10,7 @@ AgentDeck runs two daemon implementations that are **not competitors but collabo
 |---|---|---|
 | Claude/Codex/OpenCode PTY 스폰 | **CLI** | sandbox 가 사용자 binary 실행 제한 (Apple 2.5.2) |
 | OpenClaw Gateway 인증 (Keychain 토큰) | **Swift app** | Shared Keychain Access Group 설계 상 in-process 필요 |
-| D200H HID 통신 | **Swift app** | `com.apple.security.device.usb` entitlement 은 sandbox 안에서 열림 |
+| D200H 상태/제어 | **Ulanzi Studio plugin** | 공식 plugin이 daemon WS에 연결; AgentDeck daemon은 HID를 직접 열지 않음 |
 | Pixoo HTTP 스트리밍 | Swift app **또는** CLI | 둘 다 가능. 현재 Swift 에서. |
 | Timebox Mini Light BLE | **포트 소유자** | CLI(Node) 데몬이 `timeboxDevices` 를 발견하면 `sync_ble.py`(bleak)를 **자동 spawn**해 구동. 단독 Swift 앱이면 CoreBluetooth 로 네이티브 구동. 둘 다 뜨면 CLI 데몬 소유, Swift stand down (BLE 단일연결). 구 Bluetooth Classic SPP 변종은 제거됨 |
 | iDotMatrix BLE | **포트 소유자** | CLI(Node) 데몬이 포트를 쥐면 데몬이 `sync.py`(Python bleak)를 **자동 spawn**해 구동(Node는 BLE 네이티브 불가). 단독 Swift 앱(CLI 없음)이면 Swift 가 CoreBluetooth(hub 모듈)로 구동. 둘 다 뜨면 CLI 데몬이 소유, Swift 는 stand down |
@@ -19,7 +19,7 @@ AgentDeck runs two daemon implementations that are **not competitors but collabo
 | mDNS 광고 | 먼저 바인드한 쪽 | 동일 |
 | 세션 집계 + 상태 브로드캐스트 | **CLI 있을 때**, 없으면 Swift | singleton guard |
 
-**CLI 없이 Swift 앱만 실행한 경우**: port 9120 은 Swift daemon 이 잡고, 세션 0 개 상태로 pairing/device I/O 만 서비스. iPad 가 붙어서 "Device Preview + Setup card" 를 보고, D200H/Pixoo/ESP32 는 idle 상태로 대기한다. 이게 사용자가 "CLI 설치 유도" 만 보이는 상태의 의미.
+**CLI 없이 Swift 앱만 실행한 경우**: port 9120 은 Swift daemon 이 잡고, 세션 0 개 상태로 pairing/device I/O 만 서비스. iPad 가 붙어서 "Device Preview + Setup card" 를 보고, Pixoo/ESP32 는 idle 상태로 대기하며 D200H는 Ulanzi Studio plugin이 연결된 경우에만 나타난다. 이게 사용자가 "CLI 설치 유도" 만 보이는 상태의 의미.
 
 **외부 CLI daemon 이 이미 실행 중인 경우**: `DaemonService.alreadyRunning` → `connectToExternalDaemon`. Swift 앱은 죽지 않고 CLI daemon 의 WS 클라이언트가 된다 (`isUsingExternalDaemon = true`). 이 모드는 사용자가 터미널에서 별도 daemon 을 이미 운영하는 고급 경로이며, App Store 앱 자체는 외부 실행 파일 설치/기동을 요구하지 않는다. 하드웨어 상태는 CLI daemon 이 `state_update.moduleHealth` 로 브로드캐스트한 범위만 UI 에 표시한다.
 

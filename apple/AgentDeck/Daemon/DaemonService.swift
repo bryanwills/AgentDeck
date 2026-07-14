@@ -10,9 +10,9 @@
 //    Store builds.
 //
 //  - The **Swift app** owns device I/O + message brokering inside the
-//    sandbox: D200H USB HID (needs `com.apple.security.device.usb`
-//    entitlement), Pixoo HTTP streaming, ESP32 serial, iPad/Web pairing WS
-//    server, mDNS advertisement, local daemon state cache.
+//    sandbox: Pixoo HTTP streaming, ESP32 serial, iPad/Web pairing WS server,
+//    mDNS advertisement, local daemon state cache. D200H is driven solely by
+//    the external Ulanzi Studio plugin over WebSocket.
 //
 // Port 9120 coordination: both processes can listen on 9120. When the CLI
 // gets there first, this `DaemonService` catches `alreadyRunning` below and
@@ -747,7 +747,7 @@ final class DaemonService: ObservableObject {
         }
         var summary = DeviceSummary()
 
-        // D200H (Stream Deck+ via HID)
+        // D200H (Ulanzi Studio plugin presence)
         if let d200h = server.d200hStatusSnapshot() {
             summary.d200h = DeviceSummary.makeD200hEntry(from: d200h)
         }
@@ -818,32 +818,15 @@ struct DeviceSummary: Equatable {
 
     static func makeD200hEntry(from d: [String: Any]) -> DeviceEntry {
         let connected = d["connected"] as? Bool ?? false
-        let externalOwner = d["externalOwner"] as? Bool ?? false
-        let managerOpened = d["managerOpened"] as? Bool ?? false
-        let lastOpenError = d["lastOpenError"] as? Int32 ?? 0
-        let sandboxEnabled = d["sandboxEnabled"] as? Bool ?? false
-        let usbEntitlementPresent = d["usbEntitlementPresent"] as? Bool ?? true
-        let pressCount = d["buttonPressCount"] as? Int ?? 0
 
         let status: DeviceStatus
         var subtitle: String?
         if connected {
             status = .connected
-            subtitle = externalOwner
-                ? "via Ulanzi Studio"
-                : (pressCount > 0 ? "\(pressCount) press\(pressCount == 1 ? "" : "es")" : "ready")
-        } else if sandboxEnabled && !usbEntitlementPresent {
-            status = .error("USB entitlement missing")
-            subtitle = "USB access unavailable"
-        } else if lastOpenError != 0 {
-            status = .error("HID open denied")
-            subtitle = "err \(lastOpenError)"
-        } else if managerOpened {
-            status = .reconnecting
-            subtitle = "searching…"
+            subtitle = "via Ulanzi Studio"
         } else {
             status = .idle
-            subtitle = "not plugged in"
+            subtitle = "plugin disconnected"
         }
         return DeviceEntry(
             id: "d200h",

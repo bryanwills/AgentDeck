@@ -8,9 +8,9 @@
 # target ships exclusively through the App Store, and Apple Review
 # Guideline 2.5.2 forbids bundling executables we'd then spawn.
 #
-# Android tunnelling, OpenClaw CLI logs, and the bundled D200H helper now
-# live in the Node.js bridge that users install separately from npm. The
-# postCompileScript in `apple/project.yml` still invokes this file so the
+# Android tunnelling and OpenClaw CLI logs live in the Node.js bridge. The
+# obsolete bundled D200H helper and both direct-HID implementations were deleted.
+# The postCompileScript in `apple/project.yml` still invokes this file so the
 # Xcode build graph stays valid; the body is intentionally empty.
 #
 # `verify-appstore-archive.sh` continues to assert that none of the old

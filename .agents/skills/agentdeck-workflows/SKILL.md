@@ -1,11 +1,11 @@
 ---
 name: agentdeck-workflows
-description: Use for AgentDeck build, dev-server, Stream Deck plugin, Android release, D200H preview, or Apple/Xcode diagnostic workflows. Reads the matching .agents/workflows file and follows it instead of guessing commands.
+description: Use for AgentDeck build, dev-server, Stream Deck plugin, Android release, or Apple/Xcode diagnostic workflows. Reads the matching .agents/workflows file and follows it instead of guessing commands.
 ---
 
 # AgentDeck Workflows
 
-Use this skill when the user asks to build, run dev mode, link/package the Stream Deck plugin, build Android, preview D200H output, or debug an Apple/Xcode reproduction.
+Use this skill when the user asks to build, run dev mode, link/package the Stream Deck plugin, build Android, or debug an Apple/Xcode reproduction.
 
 ## Required Context
 
@@ -18,7 +18,6 @@ Use this skill when the user asks to build, run dev mode, link/package the Strea
 - Android release APK: read `.agents/workflows/build-android.md`.
 - Stream Deck plugin build/link: read `.agents/workflows/build-plugin.md`.
 - Dev watch mode: read `.agents/workflows/start-dev.md`.
-- D200H preview: read `.agents/workflows/d200h-preview.md`.
 - Apple/Xcode diagnostics: read `.agents/workflows/apple-xcode-debug.md`.
 
 ## Execution Rules

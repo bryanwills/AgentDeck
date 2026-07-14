@@ -200,12 +200,11 @@ struct MenuBarTopologyList: View {
                 // D200H first — always the most permanent peripheral.
                 if let d = health.d200h {
                     RailRow(
-                        status: d.connected ? .ok : (d.managerOpened ? .warn : .dim),
+                        status: d.connected ? .ok : .dim,
                         name: "D200H",
                         subtitle: d.connected
-                            ? "HID · 14 keys"
-                            : (d.lastOpenError
-                                ?? (d.usbEntitlementPresent ? "Disconnected" : "No USB entitlement"))
+                            ? "Ulanzi Studio · 14 keys"
+                            : "Plugin disconnected"
                     )
                 }
                 // Pixel displays — Pixoo (Wi-Fi HTTP). The Ulanzi TC001 renders

@@ -308,7 +308,6 @@ final class DaemonServer {
     private var timeboxSettingsObserver: NSObjectProtocol?
     private var displaySettingsObserver: NSObjectProtocol?
     private var adbModule: AdbModule?
-    private var d200hModule: D200hHidModule?
 
     // APME
     private var apmeStore: ApmeStore?
@@ -1311,26 +1310,13 @@ final class DaemonServer {
 
         // mDNS: Bonjour is attached to unified WebSocketServer listener — no separate module needed
 
-        // ADB (reverse tunnel only — D200H uses HID now)
+        // ADB (reverse tunnel only; D200H is handled by the Ulanzi Studio plugin)
         let adb = AdbModule(daemonPort: portInt)
         adb.commandHandler = { [weak self] cmd in
             Task { @MainActor in self?.handleCommand(cmd) }
         }
         self.adbModule = adb
         moduleManager.register(adb)
-
-        // D200H Deck Dock — direct-HID fallback retired; the device is driven
-        // exclusively by the Ulanzi Studio plugin (`ulanzi-plugin`). The daemon
-        // never opens it over IOKit HID. Flip to re-enable if ever needed.
-        let enableD200hDirectHID = false
-        if enableD200hDirectHID {
-            let d200h = D200hHidModule()
-            d200h.commandHandler = { [weak self] cmd in
-                Task { @MainActor in self?.handleCommand(cmd) }
-            }
-            self.d200hModule = d200h
-            moduleManager.register(d200h)
-        }
 
         // Serial (ESP32)
         let serial = SerialModule()
@@ -1428,9 +1414,6 @@ final class DaemonServer {
         let pixooRef = pixoo
         let idotmatrixRef = idotmatrix
         let timeboxRef = timebox
-        // D200H direct-HID is retired (enableD200hDirectHID == false), so this is
-        // nil and the broadcast fan-out below no-ops — the Ulanzi plugin drives it.
-        let d200hRef = self.d200hModule
         await wsServer.onBroadcast { [weak self] data in
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
@@ -1467,7 +1450,6 @@ final class DaemonServer {
             // Timebox (BLE) module is also an actor — same SendableDict boxing.
             let timeboxEventBox = SendableDict(json)
             Task { await timeboxRef.handleEvent(timeboxEventBox.value) }
-            d200hRef?.handleBroadcast(json)
         }
         DaemonLogger.shared.info("startDeviceModules: wsServer.onBroadcast done")
 
@@ -1561,12 +1543,6 @@ final class DaemonServer {
         await httpServer.get("/devices") { [weak self] _ in
             let devices = await self?.buildDevicesPayload().value ?? ["devices": []]
             return .json(devices)
-        }
-
-        await httpServer.post("/d200h/refresh") { [weak self] _ in
-            let payload = await self?.forceD200hRefreshPayload().value
-                ?? ["status": "error", "error": "daemon unavailable"]
-            return .json(payload)
         }
 
         await httpServer.get("/diag") { [weak self] request in
@@ -2117,13 +2093,11 @@ final class DaemonServer {
             ])
         }
 
-        if let d200hModule {
-            let d200h = d200hModule.statusSnapshot()
+        if ulanziPluginConnectionId != nil {
             devices.append([
                 "type": "d200h",
-                "connected": d200h["connected"] as Any,
-                "hasConsumerDevice": d200h["hasConsumerDevice"] as Any,
-                "hasKeyboardDevice": d200h["hasKeyboardDevice"] as Any,
+                "connected": true,
+                "driver": "ulanzi-plugin",
             ])
         }
 
@@ -2142,17 +2116,6 @@ final class DaemonServer {
         }
 
         return SendableDict(["devices": devices])
-    }
-
-    @MainActor
-    private func forceD200hRefreshPayload() -> SendableDict {
-        guard let d200hModule else {
-            return SendableDict(["status": "error", "error": "d200h module unavailable"])
-        }
-        return SendableDict([
-            "status": "ok",
-            "d200h": d200hModule.forceFullRefresh(reason: "HTTP /d200h/refresh"),
-        ])
     }
 
     @MainActor
@@ -2352,10 +2315,7 @@ final class DaemonServer {
         }
         if ulanziPluginConnectionId == conn.id {
             ulanziPluginConnectionId = nil
-            DaemonLogger.shared.debug("Daemon", "Ulanzi plugin disconnected — D200H may resume")
-            if let d200hModule {
-                Task { await d200hModule.setExternalOwner(false) }
-            }
+            DaemonLogger.shared.debug("Daemon", "Ulanzi plugin disconnected — D200H offline")
             broadcastStateUpdate()
         }
     }
@@ -3432,13 +3392,10 @@ final class DaemonServer {
             DaemonLogger.shared.debug("Daemon", "client_register tui devices=\(devices.count)")
             broadcastStateUpdate()
         case "ulanzi-plugin":
-            // Ulanzi Studio drives the D200H — stand down direct-HID so the two
-            // don't fight over the device. Reacquired on disconnect.
+            // Ulanzi Studio is the sole D200H driver. Its WebSocket presence is
+            // the device-health signal surfaced to every dashboard client.
             ulanziPluginConnectionId = conn.id
-            DaemonLogger.shared.debug("Daemon", "client_register ulanzi-plugin — D200H standing down")
-            if let d200hModule {
-                Task { await d200hModule.setExternalOwner(true) }
-            }
+            DaemonLogger.shared.debug("Daemon", "client_register ulanzi-plugin — D200H connected")
             broadcastStateUpdate()
         default:
             DaemonLogger.shared.debug("Daemon", "client_register ignored clientType=\(clientType)")
@@ -5707,31 +5664,27 @@ final class DaemonServer {
         ]
     }
 
-    /// In-process accessor for D200H module status. Same-process callers
+    /// In-process accessor for D200H plugin status. Same-process callers
     /// (e.g. `DaemonService` health monitor) must use this instead of HTTP
     /// self-probing `/health` — routing a loopback query through
     /// `URLSession.shared` creates a negative-feedback loop under connection
     /// pool contention (see memory: `bug_daemon_self_http_probe.md`).
     /// Returns the same dict that `/health` → `modules.d200h` would return,
-    /// or `nil` if the D200H module isn't initialized.
+    /// or `nil` while the Ulanzi Studio plugin is disconnected.
     @MainActor
     func d200hStatusSnapshot() -> [String: Any]? {
         return d200hHealthSnapshot()
     }
 
-    /// Node parity (bridge `moduleHealthProvider`): the D200H is driven
-    /// exclusively by the Ulanzi Studio plugin, so its connectivity is that
-    /// plugin's WS presence. The dormant direct-HID module stays authoritative
-    /// if it is ever re-enabled. Returns nil when neither is present so users
+    /// Node parity (bridge `moduleHealthProvider`): D200H connectivity is the
+    /// Ulanzi Studio plugin's WS presence. Returns nil while absent so users
     /// without a D200H never see a ghost row.
     @MainActor
     private func d200hHealthSnapshot() -> [String: Any]? {
-        if let d200hModule { return d200hModule.statusSnapshot() }
         guard ulanziPluginConnectionId != nil else { return nil }
         return [
             "connected": true,
-            "externalOwner": true,
-            "managerOpened": true,
+            "driver": "ulanzi-plugin",
         ]
     }
 

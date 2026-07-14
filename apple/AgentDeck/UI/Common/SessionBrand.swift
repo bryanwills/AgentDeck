@@ -6,7 +6,6 @@
 // render agents with the same colors and the same path-rendered marks.
 //
 // Keep the palette in sync with:
-//   * `D200hHidModule.agentBrandColor`
 //   * `bridge/src/modules/…` agent color maps
 //   * `AgentStatusIcon`'s NSColor mirror (menubar rendering path)
 

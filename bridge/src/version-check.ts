@@ -35,8 +35,6 @@ interface RegistryInfo {
 const COMPAT_PATH = join(homedir(), '.agentdeck', 'compatibility.json');
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const FETCH_TIMEOUT_MS = 3000;
-const GITHUB_RAW_URL =
-  'https://raw.githubusercontent.com/puritysb/AgentDeck/master/compatibility.json';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -133,22 +131,8 @@ async function fetchFromNpm(): Promise<RegistryInfo | null> {
   }
 }
 
-async function fetchFromGitHub(): Promise<RegistryInfo | null> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    const res = await fetch(GITHUB_RAW_URL, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const data = (await res.json()) as { latest?: RegistryInfo };
-    return data.latest ?? null;
-  } catch {
-    return null;
-  }
-}
-
 async function fetchRegistryInfo(): Promise<RegistryInfo | null> {
-  return (await fetchFromNpm()) ?? (await fetchFromGitHub());
+  return fetchFromNpm();
 }
 
 // ─── Self Update ─────────────────────────────────────────────────────

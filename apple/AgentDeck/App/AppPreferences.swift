@@ -55,12 +55,6 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     @Published var openDashboardOnLaunch: Bool {
         didSet { defaults.set(openDashboardOnLaunch, forKey: Keys.openDashboardOnLaunch) }
     }
-    @Published var d200hBakeSessionText: Bool {
-        didSet { defaults.set(d200hBakeSessionText, forKey: Keys.d200hBakeSessionText) }
-    }
-    @Published var d200hHideNativeSessionLabels: Bool {
-        didSet { defaults.set(d200hHideNativeSessionLabels, forKey: Keys.d200hHideNativeSessionLabels) }
-    }
     @Published var menuBarIconStyle: MenuBarIconStyle {
         didSet { defaults.set(menuBarIconStyle.rawValue, forKey: Keys.menuBarIconStyle) }
     }
@@ -275,8 +269,6 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         let storedPort = defaults.object(forKey: Keys.daemonPort) as? Int
         self.daemonPort = Self.clampPort(storedPort ?? Self.defaultDaemonPort)
         self.openDashboardOnLaunch = defaults.object(forKey: Keys.openDashboardOnLaunch) as? Bool ?? true
-        self.d200hBakeSessionText = defaults.object(forKey: Keys.d200hBakeSessionText) as? Bool ?? true
-        self.d200hHideNativeSessionLabels = defaults.object(forKey: Keys.d200hHideNativeSessionLabels) as? Bool ?? true
         self.menuBarIconStyle = MenuBarIconStyle(rawValue: defaults.string(forKey: Keys.menuBarIconStyle) ?? "") ?? .status
         self.showSessionList = defaults.object(forKey: Keys.showSessionList) as? Bool ?? true
         self.showTankStatus = defaults.object(forKey: Keys.showTankStatus) as? Bool ?? true
@@ -804,8 +796,6 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     private enum Keys {
         static let daemonPort = "prefs.daemonPort"
         static let openDashboardOnLaunch = "prefs.openDashboardOnLaunch"
-        static let d200hBakeSessionText = "prefs.d200hBakeSessionText"
-        static let d200hHideNativeSessionLabels = "prefs.d200hHideNativeSessionLabels"
         static let menuBarIconStyle = "prefs.menuBarIconStyle"
         static let showSessionList = "prefs.showSessionList"
         static let showTankStatus = "prefs.showTankStatus"

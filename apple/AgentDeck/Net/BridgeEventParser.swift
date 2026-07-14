@@ -94,17 +94,7 @@ enum BridgeEventParser {
 
         if let d200h = raw["d200h"] as? [String: Any] {
             health.d200h = D200hHealth(
-                connected: d200h["connected"] as? Bool ?? false,
-                externalOwner: d200h["externalOwner"] as? Bool ?? d200h["external_owner"] as? Bool ?? false,
-                managerOpened: d200h["managerOpened"] as? Bool ?? d200h["manager_opened"] as? Bool ?? false,
-                sandboxEnabled: d200h["sandboxEnabled"] as? Bool ?? d200h["sandbox_enabled"] as? Bool ?? false,
-                usbEntitlementPresent: d200h["usbEntitlementPresent"] as? Bool ?? d200h["usb_entitlement_present"] as? Bool ?? false,
-                buttonPressCount: d200h["buttonPressCount"] as? Int ?? d200h["button_press_count"] as? Int ?? 0,
-                hidReportCount: d200h["hidReportCount"] as? Int ?? d200h["hid_report_count"] as? Int ?? 0,
-                writeOK: d200h["writeOK"] as? Int ?? d200h["write_ok"] as? Int ?? 0,
-                writeFail: d200h["writeFail"] as? Int ?? d200h["write_fail"] as? Int ?? 0,
-                lastWriteError: d200h["lastWriteError"] as? String ?? d200h["last_write_error"] as? String,
-                lastOpenError: d200h["lastOpenError"] as? String ?? d200h["last_open_error"] as? String
+                connected: d200h["connected"] as? Bool ?? false
             )
         }
 
