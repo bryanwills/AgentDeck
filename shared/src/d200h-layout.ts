@@ -1,7 +1,7 @@
 /**
- * D200H / deck layout engine — SHARED between the direct-HID renderer
- * (bridge/src/d200h/image-renderer.ts) and the Ulanzi Studio plugin
- * (plugin-ulanzi). Given the current agent state it computes, for a 5×3 key
+ * D200H / deck layout engine used by the Ulanzi Studio plugin
+ * (plugin-ulanzi) and Apple device previews. Given the current agent state it
+ * computes, for a 5×3 key
  * grid, what each key shows (SVG) and does (command) — reflowing dynamically:
  * idle → sessions; a focused awaiting session → its options + ESC; processing →
  * STOP; plus mode / model / usage / tokens / cost.

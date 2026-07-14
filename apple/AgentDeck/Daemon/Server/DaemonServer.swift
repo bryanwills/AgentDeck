@@ -645,9 +645,9 @@ final class DaemonServer {
     /// Filled asynchronously; the next sessions_list broadcast surfaces it.
     private var sessionActivityCache: [String: (sig: String, summary: String)] = [:]
     private var sessionActivityInflight: Set<String> = []
-    /// Connection that registered as the Ulanzi Studio plugin. While present,
-    /// the in-process D200H module stands down (Ulanzi Studio drives the device).
-    private var ulanziPluginConnectionId: UUID?
+    /// Connections registered as the Ulanzi Studio plugin. Presence of at
+    /// least one connection is the daemon's D200H connectivity signal.
+    private var ulanziPluginConnectionIds = Set<UUID>()
     private var activeWSConnectionIds = Set<UUID>()
     private static let streamDeckStaleTTL: TimeInterval = 120
     private var cachedMlxModels: [String] = []
@@ -2093,7 +2093,7 @@ final class DaemonServer {
             ])
         }
 
-        if ulanziPluginConnectionId != nil {
+        if !ulanziPluginConnectionIds.isEmpty {
             devices.append([
                 "type": "d200h",
                 "connected": true,
@@ -2313,9 +2313,10 @@ final class DaemonServer {
                 }
             }
         }
-        if ulanziPluginConnectionId == conn.id {
-            ulanziPluginConnectionId = nil
-            DaemonLogger.shared.debug("Daemon", "Ulanzi plugin disconnected — D200H offline")
+        if ulanziPluginConnectionIds.remove(conn.id) != nil {
+            if ulanziPluginConnectionIds.isEmpty {
+                DaemonLogger.shared.debug("Daemon", "Ulanzi plugin disconnected — D200H offline")
+            }
             broadcastStateUpdate()
         }
     }
@@ -3394,9 +3395,13 @@ final class DaemonServer {
         case "ulanzi-plugin":
             // Ulanzi Studio is the sole D200H driver. Its WebSocket presence is
             // the device-health signal surfaced to every dashboard client.
-            ulanziPluginConnectionId = conn.id
-            DaemonLogger.shared.debug("Daemon", "client_register ulanzi-plugin — D200H connected")
-            broadcastStateUpdate()
+            let wasAbsent = ulanziPluginConnectionIds.isEmpty
+            if ulanziPluginConnectionIds.insert(conn.id).inserted {
+                if wasAbsent {
+                    DaemonLogger.shared.debug("Daemon", "client_register ulanzi-plugin — D200H connected")
+                }
+                broadcastStateUpdate()
+            }
         default:
             DaemonLogger.shared.debug("Daemon", "client_register ignored clientType=\(clientType)")
         }
@@ -5681,7 +5686,7 @@ final class DaemonServer {
     /// without a D200H never see a ghost row.
     @MainActor
     private func d200hHealthSnapshot() -> [String: Any]? {
-        guard ulanziPluginConnectionId != nil else { return nil }
+        guard !ulanziPluginConnectionIds.isEmpty else { return nil }
         return [
             "connected": true,
             "driver": "ulanzi-plugin",

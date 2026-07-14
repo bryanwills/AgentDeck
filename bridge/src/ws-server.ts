@@ -14,11 +14,9 @@ export class WsServer {
   private clientAlive = new Map<WebSocket, boolean>();
   private esp32Clients = new Set<WebSocket>();
   private eventTransformer: ((event: BridgeEvent, client: WebSocket) => BridgeEvent | null) | null = null;
-  // Clients that registered as the Ulanzi Studio plugin. While any are present,
-  // the daemon's direct-HID D200H module stands down so the two don't fight over
-  // the device (Ulanzi Studio drives it through the official plugin instead).
+  // Clients that registered as the Ulanzi Studio plugin. Their WebSocket
+  // presence is the daemon's D200H connectivity signal.
   private ulanziClients = new Set<WebSocket>();
-  private ulanziPresenceCallback: ((present: boolean) => void) | null = null;
   // TUI dashboards (`agentdeck dashboard`) that registered via
   // `client_register {clientType:"tui"}`. Volunteer-roster model like the
   // Stream Deck plugin — presence only lives as long as the WS does, so the
@@ -90,13 +88,12 @@ export class WsServer {
         try {
           const msg = JSON.parse(data.toString()) as Record<string, unknown>;
           debug('WS', `recv cmd: ${msg.type}`);
-          // Track Ulanzi plugin presence (device-ownership arbitration).
+          // Track Ulanzi plugin presence for D200H health reporting.
           if (msg.type === 'client_register' && msg.clientType === 'ulanzi-plugin') {
             const was = this.ulanziClients.size > 0;
             this.ulanziClients.add(ws);
             if (!was) {
-              debug('WS', 'Ulanzi plugin registered — direct-HID D200H stands down');
-              this.ulanziPresenceCallback?.(true);
+              debug('WS', 'Ulanzi plugin registered — D200H connected');
             }
           }
           // Track TUI dashboard presence (topology row on all dashboards).
@@ -127,8 +124,7 @@ export class WsServer {
         this.esp32Clients.delete(ws);
         this.tuiClients.delete(ws);
         if (this.ulanziClients.delete(ws) && this.ulanziClients.size === 0) {
-          debug('WS', 'Ulanzi plugin gone — direct-HID D200H may resume');
-          this.ulanziPresenceCallback?.(false);
+          debug('WS', 'Ulanzi plugin gone — D200H disconnected');
         }
         if (this.onDisconnectCallback) {
           this.onDisconnectCallback(ws);
@@ -186,19 +182,6 @@ export class WsServer {
 
   onCommand(callback: (cmd: PluginCommand) => void): void {
     this.commandCallback = callback;
-  }
-
-  /** Register a callback invoked when the Ulanzi-plugin presence flips (true =
-   *  at least one connected, false = none). Fires once immediately with the
-   *  current state so the consumer can sync on startup. */
-  onUlanziPluginPresence(callback: (present: boolean) => void): void {
-    this.ulanziPresenceCallback = callback;
-    callback(this.ulanziClients.size > 0);
-  }
-
-  /** Inject a command from a non-WS source (e.g., D200H agent via stdout/stdin pipe). */
-  dispatchCommand(cmd: PluginCommand): void {
-    this.commandCallback?.(cmd);
   }
 
   /** Register a callback for raw messages before PluginCommand dispatch. Return true to consume. */
