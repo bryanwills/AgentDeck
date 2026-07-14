@@ -341,16 +341,20 @@ export function shouldDropLowSignalTimelineEntry(entry: TimelineEntry): boolean 
 
   const lowSignalTypes = new Set<TimelineEntryType>(['tool_exec', 'tool_request', 'tool_resolved']);
   if (!lowSignalTypes.has(entry.type)) return false;
-  // Codex/OpenCode tool hooks are extremely high volume (Bash/MCP/read/
+  // Observed-agent tool hooks are extremely high volume (Bash/MCP/read/
   // todowrite start+complete for every internal action). Keep them available
   // to APME ingestion, but do not persist them into the bounded user-facing
   // timeline buffer — otherwise a tool-heavy observed turn drowns its own
   // prompt/response rows (OpenCode had no suppression and flooded the strip
-  // with one row per tool while Claude/Codex read clean).
+  // with one row per tool while Claude/Codex read clean). Antigravity is
+  // included forward-compat: `classifyObservedHookEvent` already accepts
+  // `antigravity_*` hooks, so if an AGY observer producer lands its tool rows
+  // must not flood the strip either.
   if (
     (entry.agentType === 'codex-cli' ||
       entry.agentType === 'codex-app' ||
-      entry.agentType === 'opencode') &&
+      entry.agentType === 'opencode' ||
+      entry.agentType === 'antigravity') &&
     entry.type === 'tool_exec'
   ) {
     return true;

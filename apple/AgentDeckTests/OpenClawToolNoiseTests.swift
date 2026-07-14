@@ -192,6 +192,20 @@ final class OpenClawToolNoiseTests: XCTestCase {
         XCTAssertFalse(DaemonTimelineStore.shouldDropLowSignalEntry(chat))
     }
 
+    /// Forward-compat: the observed-hook classifier already accepts
+    /// antigravity_* events, so Antigravity tool_exec rows must be suppressed
+    /// too if an AGY observer producer ever lands.
+    func testStoreFilterDropsAntigravityToolExec() {
+        let entry = DaemonTimelineEntry(
+            ts: Date().timeIntervalSince1970 * 1000,
+            type: "tool_exec",
+            raw: "bash",
+            agentType: "antigravity",
+            sessionId: "antigravity:sess-1"
+        )
+        XCTAssertTrue(DaemonTimelineStore.shouldDropLowSignalEntry(entry))
+    }
+
     func testStoreFilterDropsOpenClawNoReplyPollingResponse() {
         let entry = DaemonTimelineEntry(
             ts: Date().timeIntervalSince1970 * 1000,

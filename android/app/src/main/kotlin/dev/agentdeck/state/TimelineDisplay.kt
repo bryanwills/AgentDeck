@@ -102,12 +102,14 @@ internal fun isLowSignalEntry(entry: TimelineEntry): Boolean {
     if (isOpenClawLowSignalResponse(entry)) return true
 
     if (entry.type !in lowSignalTypes) return false
-    // Codex/OpenCode tool hooks fire for every internal Bash/MCP/read/todowrite
+    // Observed-agent tool hooks fire for every internal Bash/MCP/read/todowrite
     // action and can easily evict the actual turn/task rows from the bounded
     // timeline. APME still ingests the hook trajectory; the device timeline
     // keeps their chat/task lifecycle rows only. OpenCode had no suppression and
-    // flooded its own turn with tool rows while Codex read clean.
-    if ((entry.agentType == "codex-cli" || entry.agentType == "codex-app" || entry.agentType == "opencode") && entry.type == "tool_exec") {
+    // flooded its own turn with tool rows while Codex read clean. Antigravity is
+    // included forward-compat (the observed-hook classifier already accepts
+    // antigravity_* events).
+    if ((entry.agentType == "codex-cli" || entry.agentType == "codex-app" || entry.agentType == "opencode" || entry.agentType == "antigravity") && entry.type == "tool_exec") {
         return true
     }
     // Real signal in detail → keep regardless of placeholder raw. The

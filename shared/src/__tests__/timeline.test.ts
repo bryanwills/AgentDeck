@@ -220,6 +220,16 @@ describe('normalizeTimelineEntryForStorage', () => {
     })).toBe(false);
   });
 
+  it('drops Antigravity tool rows too (forward-compat with the observed classifier)', () => {
+    expect(shouldDropLowSignalTimelineEntry({
+      ts: 100,
+      type: 'tool_exec',
+      raw: 'bash',
+      agentType: 'antigravity',
+      sessionId: 'antigravity:sess-1',
+    })).toBe(true);
+  });
+
   it('extracts readable labels from cron headers', () => {
     expect(summarizeOpenClawCronPrompt('[cron:id ai-eval-kindergarten-daily] body'))
       .toBe('자동 작업 · ai eval kindergarten daily');

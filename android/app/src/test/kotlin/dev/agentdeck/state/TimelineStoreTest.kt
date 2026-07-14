@@ -583,6 +583,22 @@ class TimelineStoreTest {
     }
 
     @Test
+    fun `addEntry drops antigravity tool_exec forward-compat`() {
+        // The observed-hook classifier already accepts antigravity_* events;
+        // suppress their tool rows too so a future AGY observer can't flood.
+        store.addEntry(
+            TimelineEntry(
+                timestamp = 1_000,
+                type = "tool_exec",
+                summary = "bash",
+                agentType = "antigravity",
+                sessionId = "antigravity:sess-1",
+            ),
+        )
+        assertTrue(store.entries.value.isEmpty())
+    }
+
+    @Test
     fun `addEntry drops codex tool_exec from normal codex session`() {
         val bash = TimelineEntry(
             timestamp = 1_000,
