@@ -37,8 +37,7 @@ final class SessionLauncherTests: XCTestCase {
             ],
             "d200h": [
                 "connected": true,
-                "managerOpened": true,
-                "buttonPressCount": 2,
+                "driver": "ulanzi-plugin",
             ],
             "pixoo": [
                 "configuredDeviceCount": 1,

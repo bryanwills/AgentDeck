@@ -301,12 +301,7 @@ private fun downstreamDeviceLine(health: ModuleHealthState?): String? {
     if (streamDeckCount > 0) labels += countLabel("StreamDeck", streamDeckCount)
 
     health.d200h?.let { d200h ->
-        labels += when {
-            d200h.connected -> "D200H"
-            d200h.managerOpened -> "D200H pending"
-            d200h.lastOpenError != null -> "D200H error"
-            else -> "D200H off"
-        }
+        labels += if (d200h.connected) "D200H" else "D200H off"
     }
 
     val pixoo = health.pixoo

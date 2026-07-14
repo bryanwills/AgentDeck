@@ -454,12 +454,12 @@ function renderModuleHealthLines(moduleHealth: ModuleMap | undefined, width: num
     push(label, detail, connected, !connected);
   }
 
+  // The daemon only emits d200h while the Ulanzi Studio plugin is connected —
+  // an absent key means no D200H row at all, not an offline one.
   const d200h = asRecord(moduleHealth.d200h);
   if (d200h) {
-    const connected = d200h.connected === true || d200h.managerOpened === true;
-    const owner = d200h.externalOwner === true ? ' plugin' : '';
-    const detail = connected ? `ready${owner}` : 'offline';
-    push('D200H', detail, connected, Boolean(d200h.lastOpenError || d200h.lastWriteError));
+    const connected = d200h.connected === true;
+    push('D200H', connected ? 'ready plugin' : 'offline', connected);
   }
 
   const adb = asRecord(moduleHealth.adb);

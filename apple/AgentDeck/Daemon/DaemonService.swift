@@ -825,6 +825,8 @@ struct DeviceSummary: Equatable {
             status = .connected
             subtitle = "via Ulanzi Studio"
         } else {
+            // Defensive only: both daemons omit the `d200h` key entirely while
+            // the plugin is disconnected, so this entry is never built.
             status = .idle
             subtitle = "plugin disconnected"
         }
