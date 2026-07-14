@@ -567,6 +567,18 @@ final class DaemonServer {
     /// never reaping a Ctrl-C'd ghost.
     private static let codexInteractiveIdleTTL: TimeInterval = 30 * 60
 
+    /// Idle TTL for a standalone `opencode` session. The observer plugin only
+    /// attaches to standalone opencode runs (managed opencode uses the PTY
+    /// bridge, which self-disables the plugin via `AGENTDECK_PORT`), so every
+    /// hook-observed opencode session is an interactive multi-turn conversation
+    /// — never a single-turn companion burst. Reaping it at the 180 s ghost TTL
+    /// closed a live-but-quiet turn (e.g. a >3 min build with no tool events)
+    /// with a spurious chat_end and flapped the creature, then resurrected on
+    /// the next event. Same failure the codex interactive TTL fixes; give
+    /// opencode the same long backstop. `session.idle` still closes normal
+    /// turns promptly via `opencode_stop`.
+    private static let openCodeIdleTTL: TimeInterval = 30 * 60
+
     /// How long an evicted Codex thread's terminal timestamp survives as a
     /// tombstone. Mid-turn events (`codex_tool_start`/`codex_tool_end`) may
     /// resurrect an unknown session ONLY when no tombstone exists — a live
@@ -3558,6 +3570,11 @@ final class DaemonServer {
                         ? Self.codexToolObservationStaleTTL
                         : Self.codexIdleObservationStaleTTL
                 }
+            } else if sid.hasPrefix(Self.openCodeSessionPrefix) {
+                // Standalone opencode sessions are always interactive multi-turn
+                // conversations — the 180 s ghost TTL flapped a live-but-quiet
+                // turn. See `openCodeIdleTTL`.
+                ttl = Self.openCodeIdleTTL
             } else if (entry.state ?? "").hasPrefix("awaiting") {
                 // A genuinely-awaiting session is quiet by nature (one Notification
                 // then it waits on the user) — don't reap it in the 180 s ghost
