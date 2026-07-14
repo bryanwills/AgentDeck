@@ -4,6 +4,29 @@
 
 > **Older entries are archived by month** under [`docs/devlog/`](docs/devlog/README.md). This active file keeps the current month plus the preceding month (currently 2026-07 and 2026-06); search only the relevant monthly archive for older history.
 
+## 2026-07-14 — D200H direct-HID·legacy research tree 제거 + 루트 설정 정리
+
+### 배경
+- D200H의 유일한 지원 경로는 이미 `plugin-ulanzi/`(Ulanzi Studio 공식 플러그인)였지만, Apple 타깃에는 약 3,800줄의 비활성 `D200hHidModule.swift`, USB entitlement, stand-down arbitration, 직접-HID 진단/UI 설정이 계속 남아 있었다.
+- 루트 `zkswe/`에는 폐기된 on-device C agent와 ADB/HID reverse-engineering 도구·현행처럼 보이는 오래된 상태 문서가 보존돼 있었다. Node 쪽에도 삭제된 renderer를 참조하는 `test-d200h.cjs`와 HID 나열 스크립트, dump-preview workflow가 남아 있었다.
+- pnpm build-script 허용 설정이 `package.json`, `pnpm-workspace.yaml`, `.pnpm-approvedBuilds.json`에 서로 다른 형식으로 중복됐고, 실제 pnpm 11은 `package.json#pnpm`을 무시했다. GitHub 루트에서 이미 삭제된 `compatibility.json`을 조회하는 fallback도 코드에 남아 있었다.
+
+### 정리
+- Swift/Node 직접-HID 코드와 `node-hid`, `/d200h/refresh`, direct-HID 전용 설정·health 필드를 제거. D200H health는 양쪽 daemon 모두 `ulanzi-plugin` WS presence만 사용하며, 플러그인 미접속 시 topology row를 만들지 않는다.
+- health payload가 `{connected, driver}`로 좁아진 것을 소비자 세 미러에 모두 반영. TUI(`bridge/src/tui/renderer.ts`)는 `externalOwner`를 읽던 탓에 D200H 행이 `ready plugin` → `ready`로 회귀했고, 그 회귀를 이제는 만들어질 수 없는 fixture(`{managerOpened, externalOwner}`)가 green으로 덮고 있었다. Android(`Protocol.kt`/`EinkStatusCompact.kt`)도 `D200hHealth` 9개 필드와 pending/error 분기가 도달 불가 상태로 남아 있어 Swift와 동일하게 `connected` 하나로 축소했다.
+- 후속 review audit에서 Node `WsServer`에 남아 있던 미사용 direct-HID presence callback/non-WS command dispatch를 제거하고, Swift daemon의 단일 Ulanzi connection ID를 `Set<UUID>` presence roster로 바꿔 재연결 소켓이 잠시 겹쳐도 D200H 상태가 잘못 offline으로 전환되지 않게 했다.
+- `zkswe/` 전체, 직접-HID 실험/덤프 스크립트와 workflow를 삭제. 현행 `plugin-ulanzi/`, 공용 `shared/src/d200h-layout.ts`, Apple Device Preview와 레이아웃 테스트는 유지했다.
+- App Store USB entitlement와 관련 Review Notes를 제거하고 feature matrix/architecture/hardware 문서를 plugin-only 구조로 갱신했다.
+- 지원 pnpm 범위를 11.x로 명시하고 `allowBuilds`를 `pnpm-workspace.yaml` 하나로 통합. exact `packageManager` 필드는 이 환경의 pnpm 자체 버전 관리가 오프라인 검증 전에 재설치를 시도해 `engines.pnpm` 범위로 대체했다. npm metadata만 사용하는 compatibility check로 단순화했다.
+- 루트에 남아 있던 ignored GIF/log/profraw/scratch/test/compatibility 일회성 파일을 삭제했다.
+
+### 검증
+- `pnpm typecheck`, `pnpm test`(100 files / 1,770 tests), `pnpm verify-version` 통과.
+- macOS Debug, iOS Simulator Debug, 서명된 macOS Release 빌드 성공. `AgentDeckTests_macOS` 404 tests, Android JUnit 227 tests 통과.
+- 서명된 Release `.app`에 `apple/scripts/verify-appstore-archive.sh`를 실행해 App Store archive invariant 통과 및 USB entitlement 부재를 확인.
+- TUI D200H 행을 실제 payload 4종(구 데몬 connected/disconnected, 신 데몬 connected, 신 데몬 키 부재)에 직접 렌더해 확인: 각각 `● D200H ready plugin` / `○ D200H offline` / `● D200H ready plugin` / 행 없음. 구 데몬 payload에도 `connected`가 있어 롤링 업그레이드 중에도 행이 유지된다.
+- 후속 review audit 뒤 `pnpm typecheck`, TUI dashboard 10 tests, Android `:app:testDebugUnitTest`, macOS Debug unsigned build 통과.
+
 ## 2026-07-14 — InkDeck은 macOS 모니터 off에도 대시보드 유지
 
 ### 문제
@@ -16,6 +39,28 @@ macOS의 모니터 끄기 단축키/잠금/디스플레이 sleep은 공통 `disp
 
 ### 검증
 `pio run -e inkdeck` 펌웨어 빌드와 host simulator `inkdeck` 빌드 성공. simulator의 `idle`/`display-off` 출력 PNG SHA-256 일치로 모니터 off가 InkDeck 픽셀을 바꾸지 않음을 확인. 실기 `device_info`로 `inkdeck`/XIAO MAC `1c:db:d4:74:f4:d8`를 확정한 뒤 플래시. 다단 USB hub의 CDC/esptool 전송은 재열거 후 끊겼지만 built-in USB-JTAG OpenOCD 경로로 merged 1.6MB image write + read-back **Verify OK**, 정상 flash boot 복귀. Swift daemon serial health에서 `/dev/cu.usbmodem1CDBD474F4D81`, `board:inkdeck`, `version:0.2.3`, connected 재등록 확인.
+
+## 2026-07-14 — ESP32 host simulator: 하드웨어 없이 전 보드 화면 픽셀정확 렌더 (`esp32/sim/`)
+
+### 문제
+ESP32 보드 화면(LVGL terrarium+HUD, IPS10 office, TC001 matrix, InkDeck e-ink)을 실제 기기 없이 미리 볼 방법이 없었다. Swift Device Preview의 ESP32 타일은 펌웨어를 눈으로 재현한 손그림(T3 tier)이라 원본과 drift 위험이 상존했고, 펌웨어 렌더 로직 변경을 플래시 전에 검증할 수단이 없었다.
+
+### 해결
+`esp32/sim/` — standalone PlatformIO `platform=native` 프로젝트. 펌웨어 렌더 소스를 **verbatim 컴파일**(보드별 `BOARD_*`/`SCREEN_W/H` 그대로)해 headless 프레임버퍼에 그린 뒤 자체 PNG 인코더(stored DEFLATE+CRC32/Adler32, 무의존)로 덤프. "그 보드 펌웨어 − 하드웨어 I/O"라 픽셀정확. `pnpm esp32:sim` → 7보드 × 5씬(+matrix 2페이지) = 40 결정론적 PNG.
+- **LCD 4보드**(box_86 480², ips35 480×320, amoled 360² round, ttgo 135×240) + **IPS10 태블릿**(1280×800 office+mosaic)은 실제 `Screens::aquariumCreate()` 보드별 빌더로 합성 — 손조립 아님.
+- **TC001 matrix**(led8x32): LVGL-free CRGB 페이지 렌더러(usage/agents) ×16 업스케일.
+- **InkDeck e-ink**(inkdeck 800×480): 실제 direct-draw GxEPD2 트리. 텍스트는 vendored upstream Adafruit GFX core+FreeFont(BSD, hardware-coupled SPITFT 제외)로 픽셀정확; `GxEPD2_BW` 셰임이 `Adafruit_GFX` 서브클래스로 drawPixel만 1-bit 버퍼로 뺌.
+- 하드웨어 셰임(`sim/shims/`): Arduino/esp_heap_caps/freertos/FastLED/WiFi/Print/SPI/GxEPD2/U8g2/net — millis/Serial/heap/mutex/CRGB/GFX-Print/net-status만 스텁. 씬은 실제 `g_state`를 채워 session→creature/card 파생을 그대로 태움.
+
+### 핵심 설계 결정 (재사용 교훈)
+- **per-env 오브젝트 격리 필수**: 펌웨어 소스를 `build_src_filter`의 `../..` 경로로 직접 참조하면 오브젝트가 env 무관 shared `.pio/build/src/`에 떨어져 보드 `#if`(IS_ROUND/canvas swap/MAX_*)가 먼저 빌드된 env로 **동결**(round 마스크가 rect 보드로 샘). Fix=`src/{fw,mtx,eink}/`의 unity-include 래퍼(`#include "../../../src/..."`)로 sim src_dir 내부 컴파일 강제 → `.pio/build/<env>/` 격리. per-env `build_src_filter`로 표면 격리(fw=LCD, mtx=matrix, eink=e-ink).
+- **LVGL stride 패딩 오버런**: width×2가 32배수 아닌 보드(360 amoled, 135 ttgo)는 tight 버퍼가 LVGL의 `LV_DRAW_BUF_STRIDE_ALIGN` 패딩과 안 맞아 heap 손상 크래시(stderr無). Fix=`lv_draw_buf_width_to_stride()`로 버퍼 잡고 flush에서 stride-aware 복사.
+- **anon-namespace 전역은 별도 TU에서 extern 불가**: InkDeck `display`가 익명 네임스페이스 → SimEink 진입점을 eink wrapper TU 안(include 뒤)에 정의해야 접근.
+- **logo asset은 `.c`로 컴파일**: C++ 래퍼로 include 시 `const lv_image_dsc_t`가 internal linkage → `img_logo_48` undefined.
+- 상세 [[esp32-host-simulator]]. 문서 `esp32/sim/README.md` + `docs/esp32.md`.
+
+### 검증
+7 env(box_86/ips35/amoled/ttgo/ips10/led8x32/inkdeck) clean 빌드 + 40 PNG 렌더 성공, 시각 확인(터라리움 크리처·HUD 게이지·IPS10 office 그리드·TC001 스프라이트·InkDeck 대시보드). 동일 씬 2회 렌더 byte-identical(결정론). 커밋 `42e3f0c0`(터라리움 3보드) + `0301e43d`(전 표면).
 
 ## 2026-07-14 — 타임라인 divergence 후속 3종: 클라 upsert 필드머지 + iOS 빌드 복구 + tool_exec 축출 파리티
 

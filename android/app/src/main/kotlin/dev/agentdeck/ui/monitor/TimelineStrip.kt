@@ -27,6 +27,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SubdirectoryArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,8 +54,10 @@ import dev.agentdeck.state.TimelineSessionFilter
 import dev.agentdeck.state.groupConsecutive
 import dev.agentdeck.state.isProgressChatResponse
 import dev.agentdeck.state.matchesTimelineFilter
+import dev.agentdeck.state.timelineAbsorbsQueuedPrompt
 import dev.agentdeck.state.timelineDisplayGroups
 import dev.agentdeck.state.timelineLifecycleBounds
+import dev.agentdeck.state.timelineSupersededSharedResponse
 import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.ui.theme.DesignTokens
 import dev.agentdeck.ui.component.BrandIcon
@@ -405,9 +409,25 @@ private fun TurnRow(
     // whose completion exists elsewhere in the buffer counts too.
     val isCompletedTurn = entry.type == "chat_start" &&
         (group.hasResponse || turnHasLaterCompletion(entry, siblings))
+    // Queued/superseded prompt: the user really submitted this, but a later
+    // same-session prompt took the turn anchor and absorbed the single shared
+    // reply. Render it with a fold glyph + "answered with next turn" note
+    // rather than a bare completion check with no reply.
+    val foldedSharedResponse = timelineSupersededSharedResponse(entry, group.hasResponse, siblings)
+    val isFolded = foldedSharedResponse != null
+    // The answered turn that absorbed an earlier queued prompt — tags its reply
+    // sub-line "shared" so the borrowed answer is legible.
+    val absorbsQueued = entry.type == "chat_start" &&
+        timelineAbsorbsQueuedPrompt(entry, group.hasResponse, siblings)
     val iconKey = if (isCompletedTurn) dev.agentdeck.ui.timeline.TimelineIconKey.Success
         else timelineIconKey(entry.type, entry.status)
-    val iconColor = if (isCompletedTurn) typeColor("chat_response") else typeColor(entry.type)
+    val iconColor = if (isFolded) {
+        TerrariumColors.HUDSubtext.copy(alpha = 0.7f)
+    } else if (isCompletedTurn) {
+        typeColor("chat_response")
+    } else {
+        typeColor(entry.type)
+    }
     val countSuffix = if (group.count > 1) " ×${group.count}" else ""
     val isChatEnd = entry.type == "chat_end"
     val sessionLabel = rowPrefixLabel(entry)
@@ -458,11 +478,11 @@ private fun TurnRow(
         // rotating rows get angle=0 from the helper and skip the infinite
         // transition entirely. Mirrors `isRotatingEntry` in shared.
         val rowAngle = rememberRunningRotation(
-            active = !isCompletedTurn && isRotatingEntry(entry, siblings),
+            active = !isFolded && !isCompletedTurn && isRotatingEntry(entry, siblings),
         )
         Icon(
-            imageVector = iconKey.materialIcon,
-            contentDescription = iconKey.name,
+            imageVector = if (isFolded) Icons.Filled.SubdirectoryArrowRight else iconKey.materialIcon,
+            contentDescription = if (isFolded) "answered with next turn" else iconKey.name,
             tint = iconColor.copy(alpha = if (isChatEnd) 0.6f else 1f),
             modifier = Modifier
                 .width(12.dp)
@@ -525,6 +545,33 @@ private fun TurnRow(
         // dimmed so the prompt above stays the primary reading anchor. Mirrors
         // apple/AgentDeck/UI/Monitor/TimelineStripView.swift turnRow sub-lines.
         val subIndent = if (isNested) 64.dp else 56.dp
+        // Sub-line: folded/queued-prompt note. This turn's single shared reply
+        // landed on the following turn — point there rather than leaving a
+        // completed-looking row with no answer.
+        if (isFolded) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Spacer(modifier = Modifier.width(subIndent))
+                Text(
+                    text = "answered with next turn",
+                    color = TerrariumColors.HUDSubtext.copy(alpha = 0.6f),
+                    fontSize = scale.fontSub,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = tight,
+                )
+                Icon(
+                    imageVector = Icons.Filled.SubdirectoryArrowRight,
+                    contentDescription = null,
+                    tint = TerrariumColors.HUDSubtext.copy(alpha = 0.5f),
+                    modifier = Modifier.width(11.dp).height(11.dp),
+                )
+            }
+        }
         group.mergedResponse?.let { resp ->
             if (!isProgressChatResponse(resp)) {
                 Row(
@@ -551,6 +598,9 @@ private fun TurnRow(
                         modifier = Modifier.weight(1f),
                         style = tight,
                     )
+                    if (absorbsQueued) {
+                        SummaryBackendPill("shared")
+                    }
                 }
             }
         }
@@ -790,11 +840,27 @@ private fun DetailPane(
             // selecting a merged turn still shows the assistant's reply as the
             // detail body. Progress interim responses stay hidden, mirroring
             // Apple `timelineDetailEntryForDashboard`.
-            val bodyEntry = focusedGroup.mergedResponse?.takeIf { !isProgressChatResponse(it) } ?: entry
+            // Folded/queued prompt: the shared reply lives on the following
+            // turn, so borrow its body here rather than echoing the prompt.
+            val foldedSharedResponse =
+                timelineSupersededSharedResponse(entry, focusedGroup.hasResponse, entries)
+            val bodyEntry = foldedSharedResponse?.takeIf { !isProgressChatResponse(it) }
+                ?: focusedGroup.mergedResponse?.takeIf { !isProgressChatResponse(it) }
+                ?: entry
             val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
             val timeStr = timeFormat.format(Date(entry.timestamp))
-            val iconKey = timelineIconKey(entry.type, entry.status)
-            val iconColor = typeColor(entry.type)
+            // Mirror the row's completion-aware icon: a delivered turn whose
+            // chat_end dropped (Stop hook ~18% reliable) must not spin in the
+            // detail badge. Apple parity — TimelineStripView.detailPane
+            // `isTurnCompleted` (Codex stop-time review #12).
+            val isTurnCompleted = entry.type == "chat_start" &&
+                (focusedGroup.hasResponse || turnHasLaterCompletion(entry, entries))
+            val isFolded = foldedSharedResponse != null
+            val iconKey = if (isTurnCompleted) dev.agentdeck.ui.timeline.TimelineIconKey.Success
+                else timelineIconKey(entry.type, entry.status)
+            val iconColor = if (isFolded) TerrariumColors.HUDSubtext
+                else if (isTurnCompleted) typeColor("chat_response")
+                else typeColor(entry.type)
             val sourceLabel = sourceLabel(entry)
             val countSuffix = if (focusedGroup.count > 1) " (×${focusedGroup.count})" else ""
             val lifecycleRows = lifecycleDetailRows(entry, entries)
@@ -816,11 +882,11 @@ private fun DetailPane(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     val badgeAngle = rememberRunningRotation(
-                        active = isRotatingEntry(entry, entries),
+                        active = !isFolded && !isTurnCompleted && isRotatingEntry(entry, entries),
                     )
                     Icon(
-                        imageVector = iconKey.materialIcon,
-                        contentDescription = iconKey.name,
+                        imageVector = if (isFolded) Icons.Filled.SubdirectoryArrowRight else iconKey.materialIcon,
+                        contentDescription = if (isFolded) "answered with next turn" else iconKey.name,
                         tint = Color.White,
                         modifier = Modifier.width(10.dp).height(10.dp).rotate(badgeAngle),
                     )
@@ -956,6 +1022,18 @@ private fun DetailPane(
                 )
             }
 
+            if (foldedSharedResponse != null) {
+                val foldTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                    .format(Date(foldedSharedResponse.timestamp))
+                Text(
+                    text = "↳ answered together with the next turn · $foldTime",
+                    color = TerrariumColors.HUDSubtext.copy(alpha = 0.8f),
+                    fontSize = labelSp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(horizontal = 8.dp).padding(top = 2.dp),
+                )
+            }
+
             if (showDetail && detailText != null) {
                 Spacer(modifier = Modifier.height(4.dp))
                 LazyColumn(
@@ -1006,7 +1084,11 @@ private fun InlineDetailPane(
     scale: MonitorLayoutScale,
 ) {
     val entry = group.entry
-    val bodyEntry = group.mergedResponse?.takeIf { !isProgressChatResponse(it) } ?: entry
+    // Folded/queued prompt: borrow the following turn's shared reply as body.
+    val foldedSharedResponse = timelineSupersededSharedResponse(entry, group.hasResponse, entries)
+    val bodyEntry = foldedSharedResponse?.takeIf { !isProgressChatResponse(it) }
+        ?: group.mergedResponse?.takeIf { !isProgressChatResponse(it) }
+        ?: entry
     val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
     val lifecycleRows = lifecycleDetailRows(entry, entries)
     val labelSp = (scale.fontSub.value - 1f).sp
@@ -1032,6 +1114,15 @@ private fun InlineDetailPane(
                     )
                 }
             }
+        }
+        if (foldedSharedResponse != null) {
+            Text(
+                text = "↳ answered together with the next turn",
+                color = TerrariumColors.HUDSubtext.copy(alpha = 0.75f),
+                fontSize = labelSp,
+                fontFamily = FontFamily.Monospace,
+                style = tight,
+            )
         }
         val detailText = bodyEntry.detail
         if (!detailText.isNullOrEmpty() && shouldShowDetailForDashboard(bodyEntry, detailText)) {

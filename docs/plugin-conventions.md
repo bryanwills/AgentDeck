@@ -20,7 +20,7 @@ Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "com
 
 ## Version compatibility check
 
-`agentdeck claude` 시작 시 Claude Code 버전 → npm registry (3s) → GitHub raw JSON fallback (3s) 순으로 호환성 조회. `bridge/package.json`의 `compatibleClaudeCode` semver range로 판정. 비호환 시 자동 `npm install -g @agentdeck/bridge@latest` + 재시작 안내. `~/.agentdeck/compatibility.json` 상태 캐시 (1시간 throttle). `--no-update-check`로 비활성화. **절대 startup을 block하지 않음** — 모든 실패 케이스는 경고 후 진행.
+`agentdeck claude` 시작 시 Claude Code 버전 → npm registry metadata(3s)로 호환성을 조회한다. `bridge/package.json`의 `compatibleClaudeCode` semver range로 판정. 비호환 시 자동 `npm install -g @agentdeck/bridge@latest` + 재시작 안내. `~/.agentdeck/compatibility.json`은 상태 캐시(1시간 throttle)일 뿐 배포 manifest가 아니다. `--no-update-check`로 비활성화. **절대 startup을 block하지 않음** — 모든 실패 케이스는 경고 후 진행.
 
 ## Agent state detection
 
@@ -105,16 +105,9 @@ Ulanzi D200H communicates via **stock HID protocol** (VID `0x2207`/PID `0x0019`,
 
 **Primary path: Ulanzi Studio plugin.** The D200H needs the Mac **Ulanzi Studio** app to render reliably, so the official Ulanzi Studio plugin (`plugin-ulanzi/`, registers over WS as `ulanzi-plugin`) is the **only** supported way to drive the device. It shares the `@agentdeck/shared` `buildSessionDeck` layout engine and shows an OFFLINE + press-to-launch screen when the daemon is down.
 
-**Direct-HID fallback — retired (2026-06-21); Node side deleted (2026-07-08).** The daemons no longer open the D200H over HID.
-
-- **Node.js CLI daemon**: the direct-HID module (`bridge/src/modules/d200h-module.ts`) and its protocol/renderer (`bridge/src/d200h/hid-protocol.ts`, `image-renderer.ts`) were **deleted** — the daemon had already gated them off (`d200h: false`) so they were dead at runtime. The `d200h` key was also dropped from `ModuleConfigs`. D200H connectivity is now reported purely from `ulanzi-plugin` WS presence (`WsServer.getUlanziClientCount()` → `/devices` `ulanziPluginConnected`, module-health `modules.d200h`, `agentdeck devices`). To restore direct-HID on the Node side, recover the deleted files from git history.
-- **Swift daemon** (`D200hHidModule.swift`, macOS app): **unchanged — still dormant.** `DaemonServer.swift` gates instantiation behind `let enableD200hDirectHID = false`, so the IOKit `IOHIDManager` is never created and `d200hModule` stays `nil`.
-
-The Swift `ulanzi-plugin` stand-down arbitration (`onUlanziPluginPresence` / `setExternalOwner`) remains in place as inert dormant code alongside the Swift direct-HID path.
+**Direct-HID fallback — fully removed.** Node direct-HID was deleted on 2026-07-08. The dormant Swift `D200hHidModule`, its stand-down arbitration, USB entitlement, direct-device diagnostics, and the legacy `zkswe/` research tree were deleted on 2026-07-14. Both daemons now derive D200H connectivity solely from `ulanzi-plugin` WS presence; the physical rendering/control path remains inside Ulanzi Studio.
 
 **OFFLINE brand mark.** When the daemon is down, the Stream Deck keypad, Stream Deck+ encoder, and D200H all render the canonical **AgentDeck dome-over-deck brand mark** (aquarium-tide cyan on ink) — parity with the macOS/iOS/Android connection overlays and the ESP32 splash. SVG SSOT: `renderAgentDeckMark()` + the `'agentdeck'` glyph + the `'brand'` tone in `shared/src/svg-renderers/session-slot-renderer.ts` (ported from `AgentDeckLogo.swift`). All offline paths route through it (`renderDisconnectedSlot` / `renderOpenAppGrid`/`Quadrant` / `renderOfflineTouchStrip`; D200H `buildSessionDeck` hero; plugin `response`/`voice` dial tiles).
-
-Legacy on-device C agent archived to `zkswe/agent-archive/`.
 
 ## Display sleep/wake sync
 

@@ -46,10 +46,6 @@ The UI also offers a "Remove" button that deletes our hook entries and revokes t
 
 AgentDeck posts a local `UNUserNotification` when a monitored session genuinely waits for the user's response (e.g. Claude Code shows a permission prompt in the user's terminal), and clears it the moment the session moves on. Authorization is requested through an explanatory in-app prompt on first launch (the user can decline; a "Request Again" affordance lives in Settings). No push notifications, no remote notification service — everything is local.
 
-## USB HID entitlement (`com.apple.security.device.usb`)
-
-Used to communicate with the optional Ulanzi D200H Deck Dock (USB HID class, VID `0x2207` / PID `0x0019`). The user opts in by plugging in their own hardware. If the device is absent, the feature is inert.
-
 ## Bluetooth entitlement (`com.apple.security.device.bluetooth`)
 
 Used to communicate with the optional iDotMatrix and Divoom Timebox Mini LED pixel displays over Bluetooth Low Energy, using Apple's first-party CoreBluetooth framework (no subprocess, no bundled interpreter). AgentDeck acts only as a BLE *central*: it scans for the user's own display (iDotMatrix advertised name prefix `IDM-`; Timebox Mini advertised name `TimeBox-mini-light`), connects, and writes display frames over a GATT characteristic. The user opts in by pairing their own hardware from an in-app Settings sheet; the `NSBluetoothAlwaysUsageDescription` string explains the purpose at the system prompt. If no such display is present (or the user never pairs one), the feature is inert.

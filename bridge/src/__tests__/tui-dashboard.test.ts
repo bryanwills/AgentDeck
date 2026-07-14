@@ -124,7 +124,7 @@ describe('TUI dashboard models', () => {
             configuredDeviceCount: 1,
             devices: [{ online: true, backedOff: false }],
           },
-          d200h: { managerOpened: true, externalOwner: true },
+          d200h: { connected: true, driver: 'ulanzi-plugin' },
           adb: { available: true, devices: ['CREMA'], reverseReadyCount: 1 },
         },
       }),

@@ -3,7 +3,7 @@
 //
 // New callers should use `StateColors.color(for:)` / `StateColors.brand(agent:)`.
 // Existing callers with inline palettes (StatusBadge, ControlTowerPanel, SessionListPanel,
-// TerrariumConfig, D200hHidModule) can migrate incrementally — this file does not
+// TerrariumConfig) can migrate incrementally — this file does not
 // modify them.
 
 import SwiftUI

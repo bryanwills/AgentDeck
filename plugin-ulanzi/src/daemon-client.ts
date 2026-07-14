@@ -7,7 +7,7 @@
  *    it attaches to whichever daemon owns 9120 (Swift OR Node) and survives drift;
  *  - reconnect with backoff + a wake/activity watchdog;
  *  - announce itself via `client_register` with clientType `ulanzi-plugin`
- *    (the daemon uses this to stand down the direct-HID D200H module — Phase 4).
+ *    (the daemon uses this presence as the D200H health signal).
  */
 import WebSocket from 'ws';
 import { EventEmitter } from 'node:events';

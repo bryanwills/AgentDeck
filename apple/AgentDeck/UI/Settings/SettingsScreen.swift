@@ -612,35 +612,6 @@ struct SettingsScreen: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Toggle(isOn: $preferences.d200hBakeSessionText) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Bake Stream Deck-style session text")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white)
-                        Text("Experimental. Draw project, model, and state inside the session PNG instead of relying on the native D200H label.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(TerrariumHUD.subtext)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                Toggle(isOn: $preferences.d200hHideNativeSessionLabels) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Hide native labels in session mode")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white)
-                        Text("When enabled, AgentDeck sends `ShowTitle: 0` only for the session grid and switches labels back on in option mode.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(TerrariumHUD.subtext)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .disabled(!preferences.d200hBakeSessionText)
-
-            }
         }
         .onAppear {
             if portInput.isEmpty {
@@ -1594,7 +1565,7 @@ struct SettingsScreen: View {
                 action: { showIDotMatrixSheet = true }
             )
             Divider()
-            Text("Ulanzi D200H Deck Dock connects over USB automatically — no setup required. Plug it in and it appears in the session list.")
+            Text("Ulanzi D200H Deck Dock appears when the AgentDeck action in Ulanzi Studio connects.")
                 .font(.system(size: 11))
                 .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
                 .fixedSize(horizontal: false, vertical: true)

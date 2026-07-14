@@ -54,10 +54,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     private static let staleDataThresholdSec: TimeInterval = 20
     /// Ignore stale watchdog for this long after a wake so in-process daemon
     /// recovery (ESP32 2s serial reopen, mDNS/Bonjour republish) can complete
-    /// before we judge the socket dead. D200H HID recovery used to need a 10s
-    /// window because its 5s IOHIDManager restart blocked the main thread;
-    /// now that HID callbacks run on `HIDRunLoopThread` (see D200hHidModule),
-    /// 3s is enough for the lighter remaining work.
+    /// before we judge the socket dead.
     private static let wakeGracePeriodSec: TimeInterval = 3
     /// Debounce threshold for handleSystemWake — IOKit SystemHasPoweredOn +
     /// NSWorkspace.screensDidWake both fire on S3→wake.

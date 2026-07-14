@@ -93,14 +93,6 @@ tools/ulanzi-sdk/
 # plugin-ulanzi build output (tsc emits into the .ulanziPlugin/plugin folder)
 plugin-ulanzi/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/plugin/
 
-# zkswe hardware recon — cross-compiled ARM/Mach-O binaries rebuilt via build.sh
-zkswe/agent-archive/*
-!zkswe/agent-archive/build.sh
-!zkswe/agent-archive/*.sh
-!zkswe/agent-archive/lib/
-zkswe/recon/*.dylib
-zkswe/recon/*.so
-
 # Creature simulator generated data (rebuilt by scripts/render-creature-simulator.mjs)
 tools/creature-simulator/sim-data.js
 apple/DerivedData/

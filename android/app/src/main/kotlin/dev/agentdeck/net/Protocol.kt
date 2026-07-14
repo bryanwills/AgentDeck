@@ -343,15 +343,6 @@ data class ClassifiedDevice(
 @Serializable
 data class D200hHealth(
     val connected: Boolean = false,
-    val managerOpened: Boolean = false,
-    val sandboxEnabled: Boolean = false,
-    val usbEntitlementPresent: Boolean = false,
-    val buttonPressCount: Int = 0,
-    val hidReportCount: Int = 0,
-    val writeOK: Int = 0,
-    val writeFail: Int = 0,
-    val lastWriteError: String? = null,
-    val lastOpenError: String? = null,
 )
 
 @Serializable
