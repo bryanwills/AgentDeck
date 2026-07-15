@@ -48,7 +48,7 @@ Claude Code 훅, opt-in Codex lifecycle 훅, OpenCode 로컬 서버 이벤트, O
 Bonjour 자동 발견 + QR 페어링. Mac에서 돌아가는 에이전트 세션을 침대 머리맡 iPad에서도 볼 수 있습니다.
 
 • APME 에이전트 성능 평가
-각 에이전트 턴을 카테고리별 루브릭으로 채점. 기본 Apple Intelligence Foundation Models 백엔드는 온디바이스·무료이며, 사용자가 직접 켜는 Anthropic API 백엔드도 선택할 수 있습니다.
+각 에이전트 턴을 카테고리별 루브릭으로 채점. 기본 Apple Intelligence Foundation Models 백엔드는 온디바이스·무료이며 네트워크를 쓰지 않습니다. 사용자가 직접 엔드포인트를 지정하는 opt-in 원격 백엔드(Anthropic API, OpenAI 호환 서버, MLX 로컬 서버)도 선택할 수 있으며, 이 경우에만 평가 대상 턴 내용이 사용자가 고른 엔드포인트로 전송됩니다.
 
 • Device Preview 17개 디스플레이 갤러리
 하드웨어 없이도 Stream Deck / Stream Deck+ / D200H / iPad / InkDeck e-ink / ESP32 보드 / Pixoo / Timebox / iDotMatrix / TUI 등 Swift 앱의 17가지 디스플레이 프리뷰를 확인할 수 있습니다.
@@ -157,7 +157,7 @@ Claude Code hooks, opt-in Codex lifecycle hooks, OpenCode local-server events, a
 Auto-discovers your Mac over Wi-Fi via Bonjour. QR pairing fallback for different-subnet setups. Keep your agents visible on a second screen without alt-tabbing.
 
 • APME agent performance evaluation
-Finished turns are scored against category-specific rubrics. The default Apple Intelligence Foundation Models backend is on-device and free; Anthropic API is an opt-in alternative.
+Finished turns are scored against category-specific rubrics. The default Apple Intelligence Foundation Models backend is on-device, free, and uses no network. Opt-in remote backends you point at yourself — Anthropic API, any OpenAI-compatible server, or a local MLX server — are alternatives; only then does the evaluated turn content leave your Mac, to the endpoint you chose.
 
 • 17-display preview gallery
 Preview the Swift app's built-in layouts for Stream Deck, Stream Deck+, Ulanzi D200H, iPad, InkDeck e-ink, ESP32 displays, Pixoo, Timebox Mini, iDotMatrix, and TUI — without owning the hardware.
@@ -213,7 +213,7 @@ claude code,ai,agent,dashboard,monitoring,apme,openclaw,codex,ipad,stream deck,d
 ```
 🎉 AgentDeck Dashboard — first App Store release
 
-What's in v0.1:
+What's in v0.2.3:
 • Mac + iPad simultaneous pairing (Bonjour auto + QR fallback)
 • Real-time Claude Code + opt-in Codex/OpenClaw session monitoring
 • APME agent performance scoring (Apple Intelligence on-device)
@@ -260,9 +260,9 @@ Data collection answers for the App Privacy questionnaire:
 
 | Question | Answer |
 |---|---|
-| Does your app collect data? | **Yes** — only when the user enables the optional Anthropic API evaluation backend |
+| Does your app collect data? | **Yes** — only when the user enables an optional remote evaluation backend and points it at an endpoint they choose |
 | Data types collected | Other User Content; Product Interaction |
-| Linked to the user | Yes (the user supplies an Anthropic API credential) |
+| Linked to the user | Yes (the user supplies the API credential for the endpoint they configured) |
 | Purpose | App Functionality |
 | Data used for tracking | None |
 | Advertising/marketing use | None |
@@ -270,8 +270,12 @@ Data collection answers for the App Privacy questionnaire:
 Backed by:
 - No analytics SDKs (no Firebase, no Amplitude, no Segment).
 - No crash reporting beyond macOS/iOS system-level (users opt into via Apple, not via us).
-- APME scores are stored locally. The default Foundation Models backend is on-device.
-- When the user selects Anthropic API, the agent turn content required for evaluation and associated API interaction data are sent to Anthropic for app functionality and may be linked through the user's API credential.
+- APME scores are stored locally. The default Foundation Models backend is on-device and contacts no network endpoint.
+- Remote evaluation backends are opt-in and the user types in the endpoint. When one is selected, the agent turn content required for evaluation and the associated API interaction data are sent to that endpoint for app functionality, and may be linked through the credential the user supplied:
+  - **Anthropic API** — turn content goes to Anthropic.
+  - **OpenAI-compatible** — turn content goes to whatever OpenAI-compatible server the user configures. This may be a loopback server on their own machine (Ollama, LM Studio, vLLM, llama.cpp), in which case nothing leaves the device, or a remote third-party endpoint such as OpenRouter used with the user's own key, in which case turn content is transmitted to that third party.
+  - **MLX local server** — loopback HTTP to a server the user started; nothing leaves the device.
+- AgentDeck sends evaluation data to no endpoint of its own; there is no AgentDeck-operated server.
 - Voice audio processed on-device.
 
 ---
@@ -299,4 +303,4 @@ No demo account required — the app doesn't have user accounts. Reviewer can op
 | Marketing URL | `https://github.com/puritysb/AgentDeck` |
 | Privacy Policy URL | `https://puritysb.github.io/AgentDeck/#privacy` |
 
-The public policy must disclose the optional Anthropic API transfer as well as microphone, speech recognition, local network, user-selected files, USB/Bluetooth hardware access, credentials, and the contact email.
+The public policy must disclose every opt-in remote evaluation backend that can carry turn content off the device — Anthropic API and any user-configured OpenAI-compatible endpoint, including remote third parties such as OpenRouter — as well as microphone, speech recognition, local network, user-selected files, USB/Bluetooth hardware access, credentials, and the contact email. When a backend is added to the app, update the policy in `scripts/pages-index.html` in the same commit.

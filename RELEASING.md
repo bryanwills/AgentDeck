@@ -60,9 +60,11 @@ Tag prefixes remain because channels ship independently and may point to differe
 
 ### Apple (TestFlight / App Store)
 
-1. Confirm `MARKETING_VERSION == VERSION` and increment `CURRENT_PROJECT_VERSION` in both `apple/project.yml` and the Xcode project mirror.
+1. Confirm `MARKETING_VERSION == VERSION` in both `apple/project.yml` and the Xcode project mirror (`pnpm verify-version` checks this).
 2. Run the Release build and App Store archive verifier described in `CLAUDE.md`.
 3. Tag and push `apple-v<VERSION>`; CI archives and uploads to TestFlight.
+
+CI owns `CURRENT_PROJECT_VERSION` — `apple-release.yml` injects `github.run_number` into both archive steps, so the build number rises on every run and ASC never sees a duplicate `(version, build)` pair. Do not bump it by hand; the value in `apple/project.yml` is only a local-build default.
 
 ### Android (APK / optional Play)
 

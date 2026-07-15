@@ -38,6 +38,10 @@ jobs:
           mkdir -p ~/private_keys
           echo -n "$ASC_API_KEY_BASE64" | base64 --decode -o ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
 
+      # CI owns the build number: ASC rejects re-uploading a (MARKETING_VERSION,
+      # CURRENT_PROJECT_VERSION) pair it has already seen, so the value in
+      # project.yml is only a local-build default. github.run_number increases
+      # monotonically per workflow run, satisfying ASC on every re-tag.
       - name: Archive iOS
         run: |
           xcodebuild archive \
@@ -50,6 +54,7 @@ jobs:
             -authenticationKeyID ${{ secrets.ASC_API_KEY_ID }} \
             -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
             MARKETING_VERSION=${{ steps.version.outputs.VERSION }} \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=QF36NDHYHD \
             ENABLE_PREVIEWS=NO
@@ -129,6 +134,7 @@ jobs:
             -authenticationKeyID ${{ secrets.ASC_API_KEY_ID }} \
             -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
             MARKETING_VERSION=${{ steps.version.outputs.VERSION }} \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=QF36NDHYHD
 
