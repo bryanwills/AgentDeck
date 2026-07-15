@@ -53,6 +53,7 @@ class MonitorService : Service() {
     private lateinit var brightnessController: BrightnessController
     private lateinit var displayPrefs: DisplayPreferences
     private var idleTimeoutJob: Job? = null
+    private var displaySyncJob: Job? = null
     private var lastBridgeDisplayOn = true
 
     private inline fun serviceDebug(message: () -> String) {
@@ -95,7 +96,11 @@ class MonitorService : Service() {
     }
 
     private fun handleDisplaySync(hostDisplayOn: Boolean, bridgeConnected: Boolean, agentState: AgentState, hostDim: DimConfig?) {
-        serviceScope.launch {
+        // StateFlow can emit several snapshots during a rapid sleep/wake edge.
+        // Only the newest snapshot may change brightness; otherwise an older
+        // coroutine delayed in DataStore.first() can dim after wake was handled.
+        displaySyncJob?.cancel()
+        displaySyncJob = serviceScope.launch {
             val syncEnabled = displayPrefs.displaySyncEnabledFlow.first()
             // Host dim instruction (absent ⇒ legacy enabled/full-off).
             val dimEnabled = hostDim?.enabled ?: true
@@ -180,6 +185,8 @@ class MonitorService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        displaySyncJob?.cancel()
+        displaySyncJob = null
         idleTimeoutJob?.cancel()
         if (brightnessController.isDimmed()) brightnessController.restore()
         handler.removeCallbacks(keepaliveRunnable)

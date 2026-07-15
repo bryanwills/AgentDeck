@@ -5,6 +5,59 @@ import XCTest
 
 final class ProtocolTests: XCTestCase {
 
+    // MARK: - iOS display sleep policy
+
+    func testDisplaySyncFullOffRemainsAtZeroUntilWake() {
+        let dim = DisplayDimInstruction(enabled: true, mode: "off", level: 10)
+        XCTAssertEqual(
+            DisplaySyncService.resolvedBrightness(displayOn: false, syncEnabled: true, dim: dim),
+            0
+        )
+        XCTAssertNil(
+            DisplaySyncService.resolvedBrightness(displayOn: true, syncEnabled: true, dim: dim)
+        )
+    }
+
+    func testDisplaySyncLegacyEventUsesFullOff() {
+        XCTAssertEqual(
+            DisplaySyncService.resolvedBrightness(displayOn: false, syncEnabled: true, dim: nil),
+            0
+        )
+    }
+
+    func testDisplaySyncMinimumBrightnessIsClamped() {
+        XCTAssertEqual(
+            DisplaySyncService.resolvedBrightness(
+                displayOn: false,
+                syncEnabled: true,
+                dim: DisplayDimInstruction(enabled: true, mode: "min", level: 25)
+            ),
+            0.25
+        )
+        XCTAssertEqual(
+            DisplaySyncService.resolvedBrightness(
+                displayOn: false,
+                syncEnabled: true,
+                dim: DisplayDimInstruction(enabled: true, mode: "min", level: 250)
+            ),
+            1.0
+        )
+    }
+
+    func testDisplaySyncDisabledRestoresBrightness() {
+        let dim = DisplayDimInstruction(enabled: true, mode: "off", level: 10)
+        XCTAssertNil(
+            DisplaySyncService.resolvedBrightness(displayOn: false, syncEnabled: false, dim: dim)
+        )
+        XCTAssertNil(
+            DisplaySyncService.resolvedBrightness(
+                displayOn: false,
+                syncEnabled: true,
+                dim: DisplayDimInstruction(enabled: false, mode: "off", level: 10)
+            )
+        )
+    }
+
     // MARK: - Session Display Formatting
 
     func testDisplayShortModelNameCompactsProviderQualifiedIds() {

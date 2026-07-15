@@ -58,4 +58,30 @@ class MainActivityScreenPolicyTest {
             )
         )
     }
+
+    @Test
+    fun `LCD stays on when host disables downstream dimming`() {
+        assertTrue(
+            shouldKeepDashboardScreenOn(
+                isEink = false,
+                keepAwake = true,
+                displaySyncEnabled = true,
+                hostDisplayOn = false,
+                hostDim = DimConfig(enabled = false, mode = "off", level = 10),
+            )
+        )
+    }
+
+    @Test
+    fun `LCD releases keep-screen-on when keep-awake is disabled`() {
+        assertFalse(
+            shouldKeepDashboardScreenOn(
+                isEink = false,
+                keepAwake = false,
+                displaySyncEnabled = true,
+                hostDisplayOn = true,
+                hostDim = null,
+            )
+        )
+    }
 }
