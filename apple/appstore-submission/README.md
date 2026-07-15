@@ -35,6 +35,7 @@ All three are H.264 High Profile Level 4.0, progressive, 30 fps, 11 Mbps, silent
 - TestFlight QA: `docs/testflight-qa-checklist.md`
 - Submission decisions and remaining manual steps: `apple/appstore-submission/SUBMISSION_CHECKLIST.md`
 - App Preview capture record and poster-frame guidance: `apple/appstore-submission/APP_PREVIEW_STORYBOARD.md`
+- Repeatable launch storyline and synchronized terminal rehearsal: `apple/appstore-submission/RECORDING_RUNBOOK.md`
 
 Run validation before every upload:
 

@@ -87,10 +87,11 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     // MARK: - Init
 
     init() {
-        #if DEBUG && os(iOS)
-        // App Store screenshot capture only: pin a freshly installed Simulator
-        // directly to the deterministic local mock before mDNS can discover a
-        // developer daemon. Release builds do not compile this path.
+        #if DEBUG
+        // App Store/launch capture only: pin a Debug app directly to the
+        // deterministic local mock before mDNS can discover a developer daemon.
+        // This supports Simulator captures and privacy-safe macOS rehearsals.
+        // Release/App Store builds do not compile this path.
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-AgentDeckScreenshotURL"),
            arguments.indices.contains(index + 1) {
