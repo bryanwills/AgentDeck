@@ -12,7 +12,7 @@ AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding a
 
 The product page and screenshots describe only this standalone Swift-daemon experience. Features that are not implemented by the submitted Swift app are not claimed and are not part of the review flow.
 
-The app is sandboxed. Entitlements below support local monitoring and user-selected integrations. There is no analytics or advertising SDK. The optional Anthropic API evaluation backend is off by default and is disclosed in App Privacy; the default Foundation Models backend stays on-device.
+The app is sandboxed. Entitlements below support local monitoring and user-selected integrations. There is no analytics or advertising SDK. The optional remote evaluation backends (Anthropic API, any user-configured OpenAI-compatible endpoint, MLX) are off by default and are disclosed in App Privacy; the default Foundation Models backend stays on-device.
 
 ## Network server rationale (port 9120+)
 
