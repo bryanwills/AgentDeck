@@ -19,7 +19,7 @@ Parse the argument string to determine target(s). Multiple targets can be combin
 | `crema` | Crema S only |
 | `lenovo` / `tablet` / `tab` | Lenovo Tab only |
 | `ios` | All iOS devices (iPad + iPhone) |
-| `iphone` | iPhone 14 Pro Max only |
+| `iphone` | iPhone XR only |
 | `ipad` | iPad Air M2 only |
 | `macos` / `mac` | macOS app only |
 | `apple` | iOS + macOS |
@@ -45,7 +45,7 @@ Parse the argument string to determine target(s). Multiple targets can be combin
 | Device | devicectl ID | xcodebuild destination | Type |
 |--------|-------------|----------------------|------|
 | **iPad Air 11" (M2)** | `8B71247D-A740-535E-8B2C-6FE9A196F342` | `platform=iOS,id=00008112-001608A02ED2601E` | WiFi/USB |
-| **iPhone 14 Pro Max** | `7F0EF7A8-CB34-570E-9F26-19B574A72703` | `platform=iOS,id=00008120-001169AA11D8C01E` | USB |
+| **iPhone XR** | `E5F3252C-69A4-5AC9-9E9A-BC2B328D24E3` | `platform=iOS,id=E5F3252C-69A4-5AC9-9E9A-BC2B328D24E3` | WiFi/USB |
 | **macOS** | — | `platform=macOS` | Local |
 
 ### ESP32 Boards
