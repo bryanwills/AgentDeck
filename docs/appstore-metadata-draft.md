@@ -282,7 +282,7 @@ Backed by:
 
 ## App Review Notes
 
-Use the contents of `apple/APP_REVIEW_NOTES.md` verbatim in the App Store Connect "Review Notes" field. Key points the reviewer will care about:
+Condense `apple/APP_REVIEW_NOTES.md` into the App Store Connect "Review Notes" field — the field caps at 4,000 characters and the full file is ~23,000, so paste the relevant sections, not the whole file. Key points the reviewer will care about:
 
 1. Why we run a local WebSocket server (iPad companion).
 2. OpenClaw Gateway-native pairing (self-generated identity, not file read).

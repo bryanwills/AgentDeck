@@ -145,7 +145,7 @@ Skip if you don't have OpenClaw 2026.4.14+ installed.
   ```bash
   ls -la ~/.agentdeck/ 2>/dev/null && echo "REGRESSION" || echo "OK (doesn't exist)"
   ```
-  If a pre-existing `~/.agentdeck/` exists from CLI usage, the App Store build must not write to it. Current 1.0 builds keep App Store state in the sandbox container and leave CLI state untouched.
+  If a pre-existing `~/.agentdeck/` exists from CLI usage, the App Store build must not write to it. App Store builds keep their state in the sandbox container and leave CLI state untouched.
 - [ ] **I5**. Run `apple/scripts/verify-appstore-archive.sh /Applications/AgentDeck.app` — should print `✓ ... passes App Store archive verification`.
 - [ ] **I6**. Speak a voice command. Open Network Utility / Little Snitch. Confirm no traffic to `*.apple.com` or any speech-related endpoint — audio must stay on-device.
 - [ ] **I7**. Generate an APME judge score (finish a Claude Code session). Confirm no outbound HTTPS traffic to `api.anthropic.com` (default backend is Foundation Models, on-device).

@@ -11,7 +11,7 @@
 - [ ] Secondary category: Productivity
 - [ ] Price: Free
 - [ ] Copyright: `© 2026 Serendipity Bound`
-- [ ] Version: `0.2.3`, build `2` (increment the build number if build 2 has already been uploaded)
+- [ ] Version: `0.2.3` — build number is CI-owned (`github.run_number` injected by `apple-release.yml`); never set it by hand (RELEASING.md)
 - [ ] macOS minimum: 26.0; iOS/iPadOS minimum: 17.0
 
 ## Product page

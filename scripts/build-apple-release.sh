@@ -41,10 +41,8 @@ build_ios() {
         -archivePath "$ARCHIVE_PATH" \
         -allowProvisioningUpdates \
         MARKETING_VERSION="$VERSION" \
-        CODE_SIGN_STYLE=Manual \
-        CODE_SIGN_IDENTITY="Apple Distribution" \
-        PROVISIONING_PROFILE_SPECIFIER="AgentDeck Dashboard AppStore" \
-        DEVELOPMENT_TEAM=R22679GY5Z \
+        CODE_SIGN_STYLE=Automatic \
+        DEVELOPMENT_TEAM=QF36NDHYHD \
         | tail -5
 
     echo ">>> Verifying iOS App Store archive invariants..."
@@ -85,10 +83,8 @@ build_macos() {
         -archivePath "$ARCHIVE_PATH" \
         -allowProvisioningUpdates \
         MARKETING_VERSION="$VERSION" \
-        CODE_SIGN_STYLE=Manual \
-        CODE_SIGN_IDENTITY="Apple Distribution" \
-        PROVISIONING_PROFILE_SPECIFIER="AgentDeck Dashboard macOS AppStore" \
-        DEVELOPMENT_TEAM=R22679GY5Z \
+        CODE_SIGN_STYLE=Automatic \
+        DEVELOPMENT_TEAM=QF36NDHYHD \
         | tail -5
 
     echo ">>> Verifying macOS App Store archive invariants..."

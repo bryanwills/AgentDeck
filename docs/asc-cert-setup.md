@@ -42,11 +42,11 @@ AgentDeck uses the app's own sandbox container for App Store state. Do **not** a
 1. Open [Apple Developer → Certificates, Identifiers & Profiles → Identifiers](https://developer.apple.com/account/resources/identifiers/list).
 2. App IDs tab → find `bound.serendipity.agent.deck` → click it.
 3. Confirm the App ID exists and is available for Mac App Store profiles.
-4. Leave **App Groups** unchecked for the current 1.0 submission.
+4. Leave **App Groups** unchecked for the current submission.
 
 ---
 
-## Step 3 — Create the Mac Installer Distribution certificate
+## Step 3 (legacy — manual signing only) — Create the Mac Installer Distribution certificate
 
 This is the certificate that signs the `.pkg` the App Store ingests. Separate from the "Apple Distribution" cert that signs the `.app` itself.
 
@@ -79,7 +79,7 @@ If the line shows `unavailable`, the private key isn't in the same keychain as t
 
 ---
 
-## Step 4 — Create the macOS Provisioning Profile
+## Step 4 (legacy — manual signing only) — Create the macOS Provisioning Profile
 
 1. [Apple Developer → Profiles](https://developer.apple.com/account/resources/profiles/list) → **+**.
 2. **Distribution** section: select **Mac App Store**. Continue.
@@ -97,7 +97,7 @@ cp ~/Downloads/AgentDeck_Dashboard_macOS_AppStore.provisionprofile \
 
 ---
 
-## Step 4.5 — Create the iOS App Store Provisioning Profile
+## Step 4.5 (legacy — manual signing only) — Create the iOS App Store Provisioning Profile
 
 Required for the `build-ios` job. Without this profile the iOS half of the Universal Purchase cannot ship.
 
@@ -125,7 +125,7 @@ The base64 string is now on your clipboard — paste it into the `IOS_PROVISIONI
 
 ---
 
-## Step 5 — Export the signing identities as `.p12`
+## Step 5 (legacy — manual signing only) — Export the signing identities as `.p12`
 
 GitHub Actions needs the signing certs + private keys as a base64-encoded `.p12`. Export a bundle that includes:
 
@@ -151,7 +151,9 @@ The base64 string is now on your clipboard.
 
 ---
 
-## Step 6 — Upload secrets to GitHub
+## Step 6 (legacy — manual signing only) — Upload secrets to GitHub
+
+> Cloud signing (the current flow) needs only `ASC_API_KEY_ID` / `ASC_ISSUER_ID` / `ASC_API_KEY_BASE64` — see the banner at the top. The secrets below are read by nothing anymore.
 
 Go to [github.com/puritysb/AgentDeck/settings/secrets/actions](https://github.com/puritysb/AgentDeck/settings/secrets/actions) and add these secrets:
 
@@ -167,7 +169,7 @@ Independent App Store Connect API key (existing — needed for `xcrun altool` up
 
 ---
 
-## Step 7 — Verify `apple-release.yml`
+## Step 7 (legacy — manual signing only) — Verify `apple-release.yml`
 
 The workflow already runs both `build-ios` and `build-macos`. Verify that the macOS lane imports the combined certificate bundle:
 
@@ -222,14 +224,16 @@ Use the exact installed installer identity common name here. Xcode documents `Ma
 
 ---
 
-## Step 9 — Trigger a dry-run tag
+## Step 9 — Trigger the release tag
 
 ```bash
-git tag apple-v1.0.0-rc1
-git push origin apple-v1.0.0-rc1
+git tag apple-v0.2.3
+git push origin apple-v0.2.3
 ```
 
-Watch the `Apple Release (TestFlight)` workflow in GitHub Actions. Both `build-ios` and `build-macos` should run. The first run often surfaces missing entitlement values or cert-chain issues — iterate on `-rc2`, `-rc3` until you see the green `Upload macOS to App Store Connect` step.
+The tag suffix becomes `MARKETING_VERSION` verbatim, so it must match the root `VERSION` file and stay numeric — Apple rejects a `-rc1`-style version string. To retry after a failure, delete and re-push the *same* tag: `CURRENT_PROJECT_VERSION` comes from `github.run_number`, which rises on every run, so ASC always sees a fresh build number at the same marketing version.
+
+Watch the `Apple Release (TestFlight)` workflow in GitHub Actions. Both `build-ios` and `build-macos` should run. The first run often surfaces missing entitlement values or cert-chain issues — iterate until you see the green `Upload macOS to App Store Connect` step.
 
 After the upload, App Store Connect shows the build under **TestFlight → macOS**. Install via TestFlight on your Mac (not the archived build directly — Gatekeeper will refuse unsigned dev archives).
 
@@ -256,4 +260,4 @@ After the upload, App Store Connect shows the build under **TestFlight → macOS
 - **App Store Connect record creation (Step 1)**: Required before you can upload.
 - **Metadata (icons, screenshots, description)**: Can be filled in App Store Connect after the first successful TestFlight upload. See [appstore-metadata-draft.md](appstore-metadata-draft.md) for copy.
 
-Once Steps 1–7 are done once, subsequent releases just need `git tag apple-v1.X.Y && git push origin apple-v1.X.Y`.
+Once Steps 1–7 are done once, subsequent releases just need `git tag apple-v<VERSION> && git push origin apple-v<VERSION>` (the tag must match the root `VERSION` file).
