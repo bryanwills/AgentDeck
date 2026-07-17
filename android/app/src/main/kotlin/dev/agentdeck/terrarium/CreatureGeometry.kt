@@ -74,13 +74,18 @@ object CreatureGeometry {
     }
 
     val codexNativePath: android.graphics.Path by lazy {
-        PathParser.createPathFromPathData(CODEX_PATH_DATA).apply {
+        // CODEX_PATH_DATA uses SVG arc commands with compressed flag pairs (e.g.
+        // `0 013.046-.415`). androidx.core.graphics.PathParser misreads those as
+        // a single malformed token and overflows its internal args array →
+        // RuntimeException on e-ink surfaces (EinkRenderer). Normalise first.
+        // Regression: 2026-07-17 commit 8927ef5e dropped this call.
+        PathParser.createPathFromPathData(normalizeSvgArcFlags(CODEX_PATH_DATA)).apply {
             fillType = android.graphics.Path.FillType.EVEN_ODD
         }
     }
 
     val openCodeNativePath: android.graphics.Path by lazy {
-        PathParser.createPathFromPathData(OPENCODE_PATH_DATA).apply {
+        PathParser.createPathFromPathData(normalizeSvgArcFlags(OPENCODE_PATH_DATA)).apply {
             fillType = android.graphics.Path.FillType.EVEN_ODD
         }
     }

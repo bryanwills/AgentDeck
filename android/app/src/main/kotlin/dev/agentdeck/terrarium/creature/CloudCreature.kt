@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.vector.PathParser
 import dev.agentdeck.terrarium.CreatureGeometry
 import dev.agentdeck.terrarium.CreatureNameTagStyle
 import dev.agentdeck.terrarium.creatureNameTagMetric
+import dev.agentdeck.terrarium.normalizeSvgArcFlags
 import dev.agentdeck.terrarium.resolveCreatureNameTagLayout
 import dev.agentdeck.terrarium.OctopusVisualState
 import dev.agentdeck.terrarium.TerrariumColors
@@ -479,8 +480,14 @@ class CloudCreature(
         private val GLOW_LAVENDER = Color(0xFFD0AAFF)
         private const val GLOW_PARTICLE_COUNT = 8
 
-        private val codexPath = PathParser().parsePathString(CreatureGeometry.CODEX_PATH_DATA).toPath().apply {
-            fillType = PathFillType.EvenOdd
-        }
+        // Normalise arc-flag compression before parsing — Compose's PathParser
+        // is mostly tolerant of SVG flag compression but the core graphics
+        // parser that backs the e-ink path is not. Normalising here keeps the
+        // two surfaces byte-for-byte equivalent in input shape.
+        private val codexPath = PathParser()
+            .parsePathString(normalizeSvgArcFlags(CreatureGeometry.CODEX_PATH_DATA))
+            .toPath().apply {
+                fillType = PathFillType.EvenOdd
+            }
     }
 }
