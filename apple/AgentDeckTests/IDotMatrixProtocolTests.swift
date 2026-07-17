@@ -142,30 +142,21 @@ final class IDotMatrixProtocolTests: XCTestCase {
 
     // MARK: - Pixoo adaptive animation transport
 
-    func testPixooAdaptivePolicyKeepsActiveAnimationOnDevice() {
-        let now = Date(timeIntervalSince1970: 100)
-        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: true, retryAfter: nil, now: now), .animated)
+    func testPixooAdaptivePolicyUsesSafeMovingSingleFrames() {
+        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: true), .activeSingle)
         XCTAssertEqual(
-            PixooAdaptivePushPolicy.interval(stateChanged: false, mode: .animated),
-            PixooAdaptivePushPolicy.stableAnimationRefreshSec
+            PixooAdaptivePushPolicy.interval(stateChanged: false, mode: .activeSingle),
+            PixooAdaptivePushPolicy.activeFrameRefreshSec
         )
-        XCTAssertEqual(PixooAdaptivePushPolicy.activeAnimationFrameCount, 2)
     }
 
-    func testPixooAdaptivePolicyUsesShortMovingFallbackThenRetries() {
-        let now = Date(timeIntervalSince1970: 100)
-        let retryAt = Date(timeIntervalSince1970: 120)
-        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: true, retryAfter: retryAt, now: now), .singleRecovery)
-        XCTAssertEqual(
-            PixooAdaptivePushPolicy.interval(stateChanged: false, mode: .singleRecovery),
-            PixooAdaptivePushPolicy.fallbackFrameRefreshSec
-        )
-        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: true, retryAfter: retryAt, now: retryAt), .animated)
+    func testPixooAdaptivePolicyRefreshesActiveFramesAtTwoPointFiveSeconds() {
+        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: true), .activeSingle)
+        XCTAssertEqual(PixooAdaptivePushPolicy.interval(stateChanged: false, mode: .activeSingle), 2.5)
     }
 
     func testPixooAdaptivePolicyPrioritizesStateChangesAndIdlesCalmly() {
-        let now = Date(timeIntervalSince1970: 100)
-        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: false, retryAfter: now.addingTimeInterval(20), now: now), .idle)
+        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: false), .idle)
         XCTAssertEqual(
             PixooAdaptivePushPolicy.interval(stateChanged: false, mode: .idle),
             PixooAdaptivePushPolicy.idleRefreshSec

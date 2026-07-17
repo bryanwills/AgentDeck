@@ -143,8 +143,8 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 - **Discovery**: local `/24` probe first; Divoom Cloud API fallback in the Node daemon; manual IP in `~/.agentdeck/pixoo.json`
 - **Events**: 4 types (`DISPLAY_FORWARDED_EVENTS`)
 - **Rendering**: state → native 64×64 RGB scene with official agent masks → Divoom HTTP API
-- **Adaptive push**: active states upload a two-frame, 180ms device-side loop. A stable loop is refreshed every 30s, idle every 10s, and user-visible state changes after a 1s load floor. If a multi-frame request fails, a moving single frame is sent every 2.5s for a 45s cooldown, then animation is retried automatically. Failed attempts are rate-limited too.
-- **Why HTTP**: Pixoo64's supported LAN surface is Divoom's REST API. Animation smoothness comes from preloading a tiny GIF loop into the device rather than attempting BLE or streaming every frame across HTTP.
+- **Adaptive push**: active states advance through moving single frames every 2.5s, idle refreshes every 10s, and user-visible state changes use a 1s load floor. Multi-frame GIF upload is deliberately disabled: on the tested Pixoo64 firmware it caused REST timeout and 60–87.5% ping loss. Failed attempts are rate-limited and a fresh one-shot probe immediately replaces a wedged long-lived URLSession.
+- **Why HTTP**: Pixoo64's supported control surface is Divoom's LAN REST API; no supported raw-frame BLE path is published. The safe practical improvement is a faster bounded single-frame cadence, not an undocumented BLE transport or a GIF request that destabilizes the device.
 - **Config**: `~/.agentdeck/pixoo.json` — `{ devices: [{ ip, name? }] }`
 - **Source**: `bridge/src/pixoo/` (6 files: client, bridge, renderer, sprites, font, settings)
 
@@ -191,7 +191,7 @@ The Timebox Mini drives an 11×11 LED screen over **BLE**. A `timeboxDevices` en
 |--------|--------|----------|
 | WebSocket | `ws.ping()` | 15s |
 | ESP32 | Full state JSON re-push | 5s |
-| Pixoo64 | Adaptive device-side loop / idle refresh | 30s active loop, 10s idle, 2.5s recovery |
+| Pixoo64 | Adaptive HTTP frame refresh | 2.5s active, 10s idle, 1s state floor |
 | Timebox Mini (BLE) | Current frame poll + changed-frame push | 1.5s |
 | ADB tunnel | `adb devices` poll + re-setup | 30s |
 | SSE | No heartbeat (HTTP keep-alive) | — |

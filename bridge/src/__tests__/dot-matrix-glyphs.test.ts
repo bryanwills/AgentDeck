@@ -100,16 +100,18 @@ describe('Timebox Mini Agent Beacon', () => {
 
 describe('Pixoo adaptive push policy', () => {
   it('separates state latency from stable animation cadence', () => {
-    expect(pixooPushIntervalMs(true, 'animated')).toBe(PIXOO_PUSH_POLICY.stateChangeFloorMs);
-    expect(pixooPushIntervalMs(false, 'animated')).toBe(PIXOO_PUSH_POLICY.stableAnimationRefreshMs);
+    expect(pixooPushIntervalMs(true, 'single-frame')).toBe(PIXOO_PUSH_POLICY.stateChangeFloorMs);
+    expect(pixooPushIntervalMs(false, 'single-frame')).toBe(PIXOO_PUSH_POLICY.activeFrameRefreshMs);
     expect(pixooPushIntervalMs(false, 'idle')).toBe(PIXOO_PUSH_POLICY.idleRefreshMs);
   });
 
-  it('uses bounded moving-frame recovery and retries animation after cooldown', () => {
-    const now = 10_000;
-    expect(resolvePixooPushMode(true, now + 1_000, now)).toBe('single-recovery');
-    expect(pixooPushIntervalMs(false, 'single-recovery')).toBe(PIXOO_PUSH_POLICY.fallbackFrameRefreshMs);
-    expect(resolvePixooPushMode(true, now - 1, now)).toBe('animated');
-    expect(resolvePixooPushMode(false, now + 1_000, now)).toBe('idle');
+  it('uses safe moving single frames for active Pixoo states', () => {
+    expect(resolvePixooPushMode(true)).toBe('single-frame');
+    expect(pixooPushIntervalMs(false, 'single-frame')).toBe(PIXOO_PUSH_POLICY.activeFrameRefreshMs);
+    expect(resolvePixooPushMode(false)).toBe('idle');
+  });
+
+  it('keeps the safe active cadence at 2.5 seconds', () => {
+    expect(PIXOO_PUSH_POLICY.activeFrameRefreshMs).toBe(2_500);
   });
 });

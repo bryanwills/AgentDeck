@@ -11,25 +11,21 @@ struct PixooDevice: Codable, Equatable {
 }
 
 struct PixooAdaptivePushPolicy {
-    enum Mode: String { case animated, singleRecovery = "single-recovery", idle }
+    enum Mode: String { case activeSingle = "single-frame", idle }
 
     static let stateChangeFloorSec: TimeInterval = 1
-    static let stableAnimationRefreshSec: TimeInterval = 30
     static let idleRefreshSec: TimeInterval = 10
-    static let fallbackFrameRefreshSec: TimeInterval = 2.5
-    static let animationRetryCooldownSec: TimeInterval = 45
-    static let activeAnimationFrameCount = 2
+    static let activeFrameRefreshSec: TimeInterval = 2.5
+    static let channelReassertGuardSec: TimeInterval = 30
 
-    static func mode(active: Bool, retryAfter: Date?, now: Date) -> Mode {
-        guard active else { return .idle }
-        return retryAfter.map { $0 > now } == true ? .singleRecovery : .animated
+    static func mode(active: Bool) -> Mode {
+        active ? .activeSingle : .idle
     }
 
     static func interval(stateChanged: Bool, mode: Mode) -> TimeInterval {
         if stateChanged { return stateChangeFloorSec }
         switch mode {
-        case .animated: return stableAnimationRefreshSec
-        case .singleRecovery: return fallbackFrameRefreshSec
+        case .activeSingle: return activeFrameRefreshSec
         case .idle: return idleRefreshSec
         }
     }
@@ -132,10 +128,9 @@ actor PixooModule: DeviceModule {
     // (brownout, firmware glitch) recovers without waiting for the 80s PicID
     // overflow cycle.
     private let channelReassertIntervalSec: TimeInterval = 300
-    // State latency and animation cadence are separate concerns. State changes
-    // should feel immediate, while stable device-side loops need only a gentle
-    // periodic refresh. A failed loop temporarily uses moving single frames and
-    // then retries automatically instead of staying degraded until app restart.
+    // State latency and motion cadence are separate concerns. Multi-frame GIF
+    // uploads are deliberately disabled: tested Pixoo64 firmware loses HTTP and
+    // ICMP after them. Active states advance as safe single frames every 2.5s.
     private let pushTimeout: TimeInterval = 3
     // Probe failures past this point indicate the daemon's outbound HTTP path
     // (URLSession + macOS NW stack) is stuck in a way local mitigation can't
@@ -147,7 +142,6 @@ actor PixooModule: DeviceModule {
     private var deviceLogStates: [String: DeviceLogState] = [:]
     private var lastPushedFrames: [String: Data] = [:]
     private var deviceLastPushTime: [String: Date] = [:]
-    private var animationRetryAfterByIP: [String: Date] = [:]
     private var lastStateDigest: String?
     private var isPushing = false
     private let renderer = PixooRenderer()
@@ -295,7 +289,6 @@ actor PixooModule: DeviceModule {
         deviceLogStates.removeAll()
         lastPushedFrames.removeAll()
         deviceLastPushTime.removeAll()
-        animationRetryAfterByIP.removeAll()
         lastPushError = nil
         // Re-sync PicID from each device (may have rebooted during sleep)
         for device in devices {
@@ -363,8 +356,7 @@ actor PixooModule: DeviceModule {
                     "online": !(logState.map { $0.consecutiveFailures >= backoffThreshold } ?? false),
                     "failures": logState?.consecutiveFailures ?? 0,
                     "backedOff": isBackedOff(d.ip),
-                    "animationMode": PixooAdaptivePushPolicy.mode(active: active, retryAfter: animationRetryAfterByIP[d.ip], now: Date()).rawValue,
-                    "animationRetryAtMs": animationRetryAfterByIP[d.ip].map { Int($0.timeIntervalSince1970 * 1000) } as Any,
+                    "animationMode": PixooAdaptivePushPolicy.mode(active: active).rawValue,
                 ]
             },
         ]
@@ -640,13 +632,12 @@ actor PixooModule: DeviceModule {
         defer { isPushing = false }
 
         for device in devices where !isBackedOff(device.ip) {
-            // The adaptive scheduler already refreshes active loops every 30s
-            // and idle frames every 10s. Do not duplicate a channel switch +
-            // frame upload when a recent successful/attempted push proves the
-            // custom path is active; keep this only as a stalled-scheduler
-            // safety net.
+            // The adaptive scheduler already refreshes active frames every
+            // 2.5s and idle frames every 10s. Do not duplicate a channel switch
+            // + upload when a recent attempt proves the custom path is active;
+            // keep this only as a stalled-scheduler safety net.
             if let lastAttempt = deviceLastPushTime[device.ip],
-               Date().timeIntervalSince(lastAttempt) < PixooAdaptivePushPolicy.stableAnimationRefreshSec {
+               Date().timeIntervalSince(lastAttempt) < PixooAdaptivePushPolicy.channelReassertGuardSec {
                 continue
             }
             _ = await postCommand(device.ip, payload: [
@@ -692,30 +683,26 @@ actor PixooModule: DeviceModule {
         let now = Date()
         let active = !isDisconnectedPlaceholder && isAnimationActive(state)
 
-        var due: [(device: PixooDevice, animated: Bool)] = []
+        var due: [PixooDevice] = []
         for device in devices where !isBackedOff(device.ip) {
-            let mode = PixooAdaptivePushPolicy.mode(active: active, retryAfter: animationRetryAfterByIP[device.ip], now: now)
-            let canAnimate = mode == .animated
+            let mode = PixooAdaptivePushPolicy.mode(active: active)
             let elapsed = deviceLastPushTime[device.ip].map { now.timeIntervalSince($0) } ?? 99999
             let interval = PixooAdaptivePushPolicy.interval(stateChanged: stateChanged, mode: mode)
-            if elapsed >= interval { due.append((device, canAnimate)) }
+            if elapsed >= interval { due.append(device) }
         }
         guard !due.isEmpty else { return }
 
         lastStateDigest = currentDigest
         var firstFrameForPreview: Data?
-        for item in due {
+        for device in due {
             let frames: [Data]
             if isDisconnectedPlaceholder {
                 frames = [renderer.renderDisconnectedFrame()]
             } else {
-                frames = renderer.renderSequence(
-                    dashboardState: state,
-                    frameCount: item.animated ? PixooAdaptivePushPolicy.activeAnimationFrameCount : 1
-                )
+                frames = renderer.renderSequence(dashboardState: state, frameCount: 1)
             }
             if firstFrameForPreview == nil { firstFrameForPreview = frames.first }
-            await pushSequenceToDevice(item.device, frames: frames)
+            await pushSequenceToDevice(device, frames: frames)
         }
         if let firstFrameForPreview { shadow.writeFrame(firstFrameForPreview) }
         refreshShadow()
@@ -767,6 +754,15 @@ actor PixooModule: DeviceModule {
         guard let picId = await nextPicId(for: device.ip) else {
             recordPushFailure(ip: device.ip, reason: "failed to acquire PicID")
             lastPushError = "failed to acquire PicID for \(device.ip)"
+            // If a fresh one-shot probe reaches the same device, the Pixoo is
+            // alive and only this module's long-lived URLSession is wedged.
+            // Replace it immediately instead of consuming six 30s failures
+            // before the circuit-breaker probe can make the same distinction.
+            if await Self.probeIsPixoo(ip: device.ip, timeoutSec: 0.8) {
+                rebuildURLSession(reason: "fresh PicID probe reached \(device.ip)")
+                devicePicIds.removeValue(forKey: device.ip)
+                deviceLastPushTime.removeValue(forKey: device.ip)
+            }
             return
         }
 
@@ -791,20 +787,10 @@ actor PixooModule: DeviceModule {
             lastPushError = nil
             lastPushAt = Date()
             recordPushSuccess(ip: device.ip, picId: picId, response: response)
-            if effectiveFrames.count == 1 {
-                lastPushedFrames[ip] = effectiveFrames[0]
-            } else {
-                lastPushedFrames.removeValue(forKey: ip)
-                animationRetryAfterByIP.removeValue(forKey: ip)
-            }
+            lastPushedFrames[ip] = effectiveFrames[0]
             deviceLastPushTime[ip] = now
         } else {
             lastPushError = "push failed for \(device.ip)"
-            if effectiveFrames.count > 1 {
-                let retryAt = Date().addingTimeInterval(PixooAdaptivePushPolicy.animationRetryCooldownSec)
-                animationRetryAfterByIP[ip] = retryAt
-                DaemonLogger.shared.info("[Pixoo] \(ip) animated sequence push failed — using moving single frames for \(Int(PixooAdaptivePushPolicy.animationRetryCooldownSec))s before retry")
-            }
             devicePicIds.removeValue(forKey: device.ip)
             lastPushedFrames.removeValue(forKey: device.ip)
             recordPushFailure(ip: device.ip, reason: "push failed (picId=\(picId), count=\(effectiveFrames.count), reason=\(reason))")
@@ -916,7 +902,6 @@ actor PixooModule: DeviceModule {
             deviceLogStates.removeValue(forKey: removedIP)
             lastPushedFrames.removeValue(forKey: removedIP)
             deviceLastPushTime.removeValue(forKey: removedIP)
-            animationRetryAfterByIP.removeValue(forKey: removedIP)
         }
 
         if devices.isEmpty {

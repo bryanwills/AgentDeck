@@ -1,10 +1,10 @@
 /**
- * Pixoo64 Bridge — adaptive HTTP animation driver.
+ * Pixoo64 Bridge — safe adaptive HTTP animation driver.
  *
- * Active states use a tiny device-side loop; stable loops are refreshed gently.
- * If a sequence fails, moving single frames keep the panel alive for a bounded
- * cooldown and the loop is retried automatically. State latency is controlled
- * separately from animation cadence.
+ * Active states advance through moving single frames every 2.5s. Multi-frame
+ * GIF uploads are intentionally disabled: the supported LAN API accepts them,
+ * but tested Pixoo64 firmware loses both HTTP and ICMP after such requests.
+ * State latency is controlled separately from the motion cadence.
  */
 
 import { State } from '../types.js';
@@ -33,7 +33,6 @@ let lastPushTime = 0;
 let pushing = false; // guard against overlapping pushes
 let lastStateHash = '';
 const deviceLastPushTime = new Map<string, number>();
-const animationRetryAfter = new Map<string, number>();
 
 // Cached latest events
 let lastStateEvent: StateUpdateEvent | null = null;
@@ -52,23 +51,18 @@ let previewFps = 10; // Adjustable 1–10 FPS for /pixoo live preview
 const STATE_CHECK_INTERVAL_MS = 500;
 export const PIXOO_PUSH_POLICY = {
   stateChangeFloorMs: 1_000,
-  stableAnimationRefreshMs: 30_000,
   idleRefreshMs: 10_000,
-  fallbackFrameRefreshMs: 2_500,
-  animationRetryCooldownMs: 45_000,
-  activeAnimationFrameCount: 2,
+  activeFrameRefreshMs: 2_500,
 } as const;
-export type PixooPushMode = 'animated' | 'single-recovery' | 'idle';
+export type PixooPushMode = 'single-frame' | 'idle';
 
-export function resolvePixooPushMode(active: boolean, retryAfterMs: number | undefined, nowMs: number): PixooPushMode {
-  if (!active) return 'idle';
-  return retryAfterMs != null && retryAfterMs > nowMs ? 'single-recovery' : 'animated';
+export function resolvePixooPushMode(active: boolean): PixooPushMode {
+  return active ? 'single-frame' : 'idle';
 }
 
 export function pixooPushIntervalMs(stateChanged: boolean, mode: PixooPushMode): number {
   if (stateChanged) return PIXOO_PUSH_POLICY.stateChangeFloorMs;
-  if (mode === 'animated') return PIXOO_PUSH_POLICY.stableAnimationRefreshMs;
-  if (mode === 'single-recovery') return PIXOO_PUSH_POLICY.fallbackFrameRefreshMs;
+  if (mode === 'single-frame') return PIXOO_PUSH_POLICY.activeFrameRefreshMs;
   return PIXOO_PUSH_POLICY.idleRefreshMs;
 }
 const CHANNEL_REASSERT_MS = 30_000;     // Re-assert custom channel every 30s (fast recovery after reboots)
@@ -119,14 +113,13 @@ export function startPixooBridge(pixooDevices?: PixooDevice[]): void {
       } as any);
     }
     debug(TAG, online ? `${name} (${ip}) back online` : `${name} (${ip}) went offline`);
-    if (online) animationRetryAfter.delete(ip);
   });
 
   // Start state checking timer
   if (streamTimer) clearInterval(streamTimer);
   streamTimer = setInterval(doStateCheckAndPush, STATE_CHECK_INTERVAL_MS);
 
-  debug(TAG, 'Bridge started (adaptive device-side animation)');
+  debug(TAG, 'Bridge started (safe 2.5s active single-frame motion)');
 }
 
 export function broadcastPixoo(event: BridgeEvent): void {
@@ -244,7 +237,6 @@ export async function stopPixooBridge(): Promise<void> {
   broadcastFn = null;
   frameListeners = [];
   deviceLastPushTime.clear();
-  animationRetryAfter.clear();
   debug(TAG, 'Bridge stopped');
 }
 
@@ -290,7 +282,6 @@ export function getPixooDeviceDetails(): Array<{
   nextProbeMs: number;
   lastPushAgo: number;
   animationMode: PixooPushMode;
-  animationRetryAtMs: number | null;
 }> {
   return devices.map(dev => {
     const backoff = getDeviceBackoffStatus(dev.ip);
@@ -301,8 +292,7 @@ export function getPixooDeviceDetails(): Array<{
       failures: backoff.failures,
       nextProbeMs: backoff.nextProbeMs,
       lastPushAgo: lastPushTime > 0 ? Date.now() - lastPushTime : -1,
-      animationMode: resolvePixooPushMode(isAnimationActive(), animationRetryAfter.get(dev.ip), Date.now()),
-      animationRetryAtMs: animationRetryAfter.get(dev.ip) ?? null,
+      animationMode: resolvePixooPushMode(isAnimationActive()),
     };
   });
 }
@@ -349,7 +339,7 @@ function doStateCheckAndPush(): void {
   const now = Date.now();
   const active = isAnimationActive();
   const due = devices.flatMap(dev => {
-    const mode = resolvePixooPushMode(active, animationRetryAfter.get(dev.ip), now);
+    const mode = resolvePixooPushMode(active);
     const elapsed = now - (deviceLastPushTime.get(dev.ip) ?? 0);
     return elapsed >= pixooPushIntervalMs(stateChanged, mode) ? [{ dev, mode }] : [];
   });
@@ -363,7 +353,7 @@ function doStateCheckAndPush(): void {
     debug('Pixoo', `${ts} pushing to ${due.length} dev(s) (changed=${stateChanged}, active=${active})`);
 
     const promises = due.map(({ dev, mode }) => {
-      const count = mode === 'animated' ? PIXOO_PUSH_POLICY.activeAnimationFrameCount : 1;
+      const count = 1;
       const frames = Array.from({ length: count }, (_, i) =>
         renderFrame(lastStateEvent, lastUsageEvent, lastSessions, now + i * 180));
       // Rate-limit attempts as well as successes. This prevents a failed
@@ -373,15 +363,9 @@ function doStateCheckAndPush(): void {
         if (ok) {
           deviceLastPushTime.set(dev.ip, Date.now());
           lastPushTime = Date.now();
-          if (count > 1) animationRetryAfter.delete(dev.ip);
-        } else if (count > 1) {
-          const retryAt = Date.now() + PIXOO_PUSH_POLICY.animationRetryCooldownMs;
-          animationRetryAfter.set(dev.ip, retryAt);
-          debug('Pixoo', `${dev.ip}: sequence failed, single-frame recovery until ${new Date(retryAt).toISOString()}`);
         }
         debug('Pixoo', `${ts}   → ${dev.ip}: ${ok ? 'OK' : 'FAIL'} (${mode}, ${count} frame)`);
       }).catch((err: any) => {
-        if (count > 1) animationRetryAfter.set(dev.ip, Date.now() + PIXOO_PUSH_POLICY.animationRetryCooldownMs);
         debug('Pixoo', `${ts}   → ${dev.ip}: ERROR ${err?.message}`);
       });
     });
