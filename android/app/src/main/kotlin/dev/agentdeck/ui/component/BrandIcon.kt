@@ -14,15 +14,15 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.PathParser
+import dev.agentdeck.terrarium.normalizeSvgArcFlags
 
 /**
  * SVG-path brand icon for agent types — matches Apple SessionListPanel BrandIcon.
  *
- * Renders agent-type-specific brand marks (Claude sparkle, OpenAI knot, OpenClaw crayfish)
- * as Compose Canvas paths.
+ * Renders the canonical agent marks from design/brand as Compose Canvas paths.
  *
  * Android's PathParser doesn't support SVG arc flag compression (e.g. `01` → `0 1`).
- * [fixArcFlags] preprocesses path data to insert spaces between compressed flag pairs.
+ * [normalizeSvgArcFlags] preprocesses path data to insert spaces between compressed flag pairs.
  */
 @Composable
 fun BrandIcon(
@@ -64,105 +64,8 @@ fun BrandIcon(
 }
 
 private fun parseSvgPath(svgPathData: String): Path {
-    val fixed = fixArcFlags(svgPathData)
+    val fixed = normalizeSvgArcFlags(svgPathData)
     return PathParser.createPathFromPathData(fixed).asComposePath()
-}
-
-/**
- * Fix SVG arc flag compression for Android's PathParser.
- *
- * SVG spec allows arc flags (large-arc, sweep) to be concatenated without separators:
- * `a.527.527 0 110 1.055` — flags are `1` and `1`, dx=`0`.
- * Android's PathParser requires: `a.527.527 0 1 1 0 1.055`.
- *
- * Strategy: after consuming 3 arc params (rx, ry, rotation), the next two values
- * MUST be single-digit flags (0 or 1). If they appear concatenated, insert a space.
- */
-private fun fixArcFlags(path: String): String {
-    val sb = StringBuilder(path.length + 32)
-    var i = 0
-    while (i < path.length) {
-        val ch = path[i]
-        if (ch == 'a' || ch == 'A') {
-            sb.append(ch)
-            i++
-            // Process arc parameter groups (there can be implicit repeats)
-            while (i < path.length) {
-                i = skipWhitespaceAndCommas(path, i)
-                if (i >= path.length) break
-                val next = path[i]
-                // If we hit another command letter, stop
-                if (next.isLetter() && next != 'e' && next != 'E') break
-
-                // rx
-                i = appendNumber(path, i, sb)
-                // ry
-                i = skipWhitespaceAndCommas(path, i)
-                i = appendNumber(path, i, sb)
-                // rotation
-                i = skipWhitespaceAndCommas(path, i)
-                i = appendNumber(path, i, sb)
-
-                // large-arc-flag (must be 0 or 1)
-                i = skipWhitespaceAndCommas(path, i)
-                if (i < path.length && (path[i] == '0' || path[i] == '1')) {
-                    sb.append(' ').append(path[i])
-                    i++
-                }
-
-                // sweep-flag (must be 0 or 1)
-                // May be concatenated with large-arc-flag — no separator needed from SVG spec
-                i = skipWhitespaceAndCommas(path, i)
-                if (i < path.length && (path[i] == '0' || path[i] == '1')) {
-                    sb.append(' ').append(path[i])
-                    i++
-                }
-
-                // dx
-                i = skipWhitespaceAndCommas(path, i)
-                i = appendNumber(path, i, sb)
-                // dy
-                i = skipWhitespaceAndCommas(path, i)
-                i = appendNumber(path, i, sb)
-            }
-        } else {
-            sb.append(ch)
-            i++
-        }
-    }
-    return sb.toString()
-}
-
-private fun skipWhitespaceAndCommas(s: String, start: Int): Int {
-    var i = start
-    while (i < s.length && (s[i] == ' ' || s[i] == ',' || s[i] == '\n' || s[i] == '\t')) i++
-    return i
-}
-
-private fun appendNumber(s: String, start: Int, sb: StringBuilder): Int {
-    var i = start
-    if (i >= s.length) return i
-    sb.append(' ')
-    // Optional sign
-    if (s[i] == '-' || s[i] == '+') {
-        sb.append(s[i])
-        i++
-    }
-    // Integer part
-    while (i < s.length && s[i].isDigit()) {
-        sb.append(s[i])
-        i++
-    }
-    // Decimal part
-    if (i < s.length && s[i] == '.') {
-        sb.append('.')
-        i++
-        while (i < s.length && s[i].isDigit()) {
-            sb.append(s[i])
-            i++
-        }
-    }
-    return i
 }
 
 /**
@@ -221,7 +124,7 @@ private class BrandIconSpec(
             // "codex" is the generic provider key emitted by codexLimitRows for the
             // LIMITS surfaces; "codex-cli"/"codex-app" are the session agent types.
             "codex", "codex-cli", "codex-app" -> BrandIconSpec(
-                pathDataList = listOf(OPENAI_PATH),
+                pathDataList = listOf(CODEX_PATH),
                 viewBox = 24f,
                 color = Color(0xFF6166E0),  // indigo
                 einkColor = Color(0xFF444444),
@@ -266,9 +169,9 @@ private val ANTIGRAVITY_RAINBOW = listOf(
 private const val CLAUDE_PATH =
     "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"
 
-// OpenAI — knot mark / Codex CLI (viewBox 0 0 24 24)
-private const val OPENAI_PATH =
-    "M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"
+// Codex — canonical Codex mark (design/brand/codex.svg)
+private const val CODEX_PATH =
+    "M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"
 
 // OpenCode mark — lobe-icons MIT (viewBox 0 0 24 24, nested-square)
 private const val OPENCODE_PATH =

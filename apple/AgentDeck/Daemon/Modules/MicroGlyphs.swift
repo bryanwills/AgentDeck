@@ -4,8 +4,8 @@
 // Swift mirror of bridge/src/pixoo/micro-glyphs.ts (the SSOT). The Timebox Mini has
 // only 121 LEDs; downscaling the 32×32 terrarium creature bottoms out at a fuzzy
 // silhouette, so each creature is authored directly at 11×11 as a bold, high-contrast
-// bitmap. The glyphs are the canonical brand marks (assets/logos/*_creature_gen.png,
-// design/brand/*.svg): Claude=rusty robot, Codex=cloud+`>_`, OpenClaw=lobster,
+// bitmap. The glyphs are reviewed pixel reductions of design/brand/*.svg:
+// Claude=rusty robot, Codex=cloud+`>_`, OpenClaw=lobster,
 // OpenCode=ring, Antigravity=peak/arc.
 //
 // The grid/color DATA lives in MicroGlyphs.generated.swift, produced from the TS

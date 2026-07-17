@@ -8,8 +8,8 @@
  * this screen as a status badge, not a shrunken aquarium: one dominant creature,
  * no labels, no HUD chrome, and only the pixels that identify the canonical mark.
  *
- * The glyphs are the canonical brand marks (matching assets/logos/*_creature_gen.png
- * and design/brand/*.svg), not loose creature approximations:
+ * The glyphs are reviewed pixel reductions of design/brand/*.svg, not loose
+ * creature approximations:
  *   Claude  → rusty robot (rectangular body, dark cutout eyes, arms, legs)
  *   Codex   → lavender cloud carrying a white `>_` terminal prompt
  *   OpenClaw→ red lobster (side claws, antennae, teal eyes)
@@ -76,7 +76,7 @@ const OCTOPUS: Glyph = {
   ],
 };
 
-// Codex — lavender cloud (assets/logos/cloud_creature_gen.png, design/brand/codex.svg):
+// Codex — lavender cloud reduction of design/brand/codex.svg:
 // puffy cloud outline with no dangling legs, plus an oversized `>_` prompt. The
 // prompt is deliberately brighter than the body so it survives the LED diffuser.
 const JELLYFISH: Glyph = {
@@ -193,8 +193,8 @@ const ANTIGRAVITY: Glyph = {
   ],
 };
 
-// OpenClaw — red mechanical lobster (assets/logos/lobster_creature_gen.png,
-// Pixoo LOD): side claws, small antennae, teal eyes, and a tapered body. The
+// OpenClaw — red mechanical lobster reduction of design/brand/openclaw.svg
+// for Pixoo LOD: side claws, small antennae, teal eyes, and a tapered body. The
 // full asset's raised claws are too tall for 11px and read as a different head.
 const CRAYFISH: Glyph = {
   colors: { B: [255, 92, 92], C: [210, 52, 52], A: [225, 180, 170], E: [0, 229, 204] },

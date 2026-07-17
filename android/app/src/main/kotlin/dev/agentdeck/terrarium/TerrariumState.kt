@@ -2,7 +2,6 @@ package dev.agentdeck.terrarium
 
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.state.DashboardState
-import dev.agentdeck.terrarium.creature.AgentMark
 
 /** Visual states for each creature and the environment. */
 
@@ -47,7 +46,6 @@ enum class EnvironmentVisualState {
 data class AgentCreatureState(
     val sessionId: String,
     val agentType: String?,
-    val mark: AgentMark?,
     val visualState: OctopusVisualState,
     val isPrimary: Boolean,
     val layoutSlot: Int,
@@ -201,7 +199,6 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             AgentCreatureState(
                 sessionId = sessionId ?: "primary",
                 agentType = agentType,
-                mark = AgentMark.fromAgentType(agentType),
                 visualState = octopus,
                 isPrimary = true,
                 layoutSlot = 0,
@@ -224,7 +221,6 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             AgentCreatureState(
                 sessionId = sibling.id,
                 agentType = siblingType,
-                mark = AgentMark.fromAgentType(siblingType),
                 visualState = mapSessionOctopusState(sibling.state),
                 isPrimary = false,
                 layoutSlot = slot++,
@@ -241,7 +237,6 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             AgentCreatureState(
                 sessionId = sessionId ?: "primary-cloud",
                 agentType = agentType,
-                mark = AgentMark.fromAgentType(agentType),
                 visualState = octopus, // reuse mapped state (will be converted to CloudVisualState at render)
                 isPrimary = true,
                 layoutSlot = 0,
@@ -258,7 +253,6 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             AgentCreatureState(
                 sessionId = sibling.id,
                 agentType = sibling.agentType,
-                mark = AgentMark.fromAgentType(sibling.agentType),
                 visualState = mapSessionOctopusState(sibling.state),
                 isPrimary = false,
                 layoutSlot = cloudSlot++,
@@ -274,7 +268,6 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             AgentCreatureState(
                 sessionId = sessionId ?: "primary-opencode",
                 agentType = agentType,
-                mark = AgentMark.fromAgentType(agentType),
                 visualState = octopus,
                 isPrimary = true,
                 layoutSlot = 0,
@@ -290,7 +283,6 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             AgentCreatureState(
                 sessionId = sibling.id,
                 agentType = sibling.agentType,
-                mark = AgentMark.fromAgentType(sibling.agentType),
                 visualState = mapSessionOctopusState(sibling.state),
                 isPrimary = false,
                 layoutSlot = openCodeSlot++,
@@ -306,7 +298,6 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             AgentCreatureState(
                 sessionId = sessionId ?: "primary-antigravity",
                 agentType = agentType,
-                mark = AgentMark.fromAgentType(agentType),
                 visualState = octopus,
                 isPrimary = true,
                 layoutSlot = 0,
@@ -322,7 +313,6 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             AgentCreatureState(
                 sessionId = sibling.id,
                 agentType = sibling.agentType,
-                mark = AgentMark.fromAgentType(sibling.agentType),
                 visualState = mapSessionOctopusState(sibling.state),
                 isPrimary = false,
                 layoutSlot = antigravitySlot++,

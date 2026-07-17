@@ -1,6 +1,5 @@
 // CloudCreature.swift — Cloud creature for Codex CLI
-// 6-lobe clover shape (6 overlapping circles) matching the Codex CLI icon
-// Vertical gradient (lavender top → blue bottom), edge glow, morphing >_ prompt
+// Exact design/brand/codex.svg geometry with a lavender → blue gradient.
 
 import SwiftUI
 
@@ -14,34 +13,8 @@ enum CloudVisualState {
 }
 
 final class CloudCreature: Creature {
-    // MARK: - 5-Lobe Cloud Geometry
-
-    /// Lobe centers relative to cloud center (0,0), radius fraction of bodyWidth
-    private struct Lobe {
-        let dx: Float  // offset from center (fraction of bodyWidth)
-        let dy: Float
-        let r: Float   // radius (fraction of bodyWidth)
-    }
-
-    // 6 lobes arranged in flower pattern (matches Codex icon)
-    // Slightly rotated clockwise — top-left lobe is highest
-    private static let lobes: [Lobe] = [
-        Lobe(dx: -0.14, dy: -0.30, r: 0.30),  // top-left (highest)
-        Lobe(dx:  0.16, dy: -0.26, r: 0.28),  // top-right
-        Lobe(dx:  0.32, dy: -0.02, r: 0.28),  // right
-        Lobe(dx:  0.14, dy:  0.26, r: 0.28),  // bottom-right
-        Lobe(dx: -0.16, dy:  0.26, r: 0.28),  // bottom-left
-        Lobe(dx: -0.32, dy: -0.02, r: 0.28),  // left
-    ]
-
-    // >_ morph animation: cycle through prompt symbol states
-    private static let promptStates: [(chevron: String, bar: String, chevronFlipped: Bool)] = [
-        (">", "_", false),   // >_
-        (">", "",  false),   // >
-        ("<", "=", true),    // =<
-        ("<", "|", true),    // |<
-        (">", "_", false),   // >_
-    ]
+    private static let codexPathData = "M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"
+    private static let codexPath = CrayfishCreature.parseSvgPath(codexPathData)
 
     // MARK: - Properties
 
@@ -148,11 +121,8 @@ final class CloudCreature: Creature {
             drawGlow(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
         }
 
-        // Cloud body (5 overlapping circles with gradient)
+        // Canonical Codex mark
         drawCloudBody(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
-
-        // >_ prompt
-        drawPrompt(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
 
         // "?" bubble
         if visualState == .waiting {
@@ -172,22 +142,11 @@ final class CloudCreature: Creature {
         }
     }
 
-    // MARK: - Cloud Body (6 overlapping circles, rendered as unified shape)
+    // MARK: - Canonical Codex mark
 
     private func drawCloudBody(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
         let alpha = visualState == .dormant ? 0.3 : 0.9
         let breathScale: CGFloat = 1.0 + CGFloat(sin(time * (visualState == .pulsing ? 2.0 : 0.6)) * 0.03)
-
-        // Precompute lobe rects
-        let lobeRects: [CGRect] = Self.lobes.map { lobe in
-            let lobeCx = cx + CGFloat(lobe.dx) * bodyW * breathScale
-            let lobeCy = cy + CGFloat(lobe.dy) * bodyW * breathScale
-            let lobeR = CGFloat(lobe.r) * bodyW * breathScale
-            return CGRect(x: lobeCx - lobeR, y: lobeCy - lobeR, width: lobeR * 2, height: lobeR * 2)
-        }
-
-        let topY = cy - bodyW * 0.7
-        let bottomY = cy + bodyW * 0.6
 
         // Gradient colors
         let topColor: Color
@@ -203,93 +162,17 @@ final class CloudCreature: Creature {
             bottomColor = TerrariumColors.cloudDeep
         }
 
-        // 0. Outer edge glow — slightly expanded, behind body
-        context.drawLayer { glowCtx in
-            glowCtx.opacity = alpha * 0.12
-            for rect in lobeRects {
-                let expanded = rect.insetBy(dx: -rect.width * 0.04, dy: -rect.height * 0.04)
-                glowCtx.fill(Path(ellipseIn: expanded),
-                             with: .color(TerrariumColors.cloudGlow))
-            }
-        }
-
-        // 1. Main body — single combined path, filled ONCE (no per-circle seams)
-        var cloudPath = SwiftUI.Path()
-        for rect in lobeRects {
-            cloudPath.addEllipse(in: rect)
-        }
-        // Center patch to guarantee no gap
-        let centerR = bodyW * 0.18
-        cloudPath.addEllipse(in: CGRect(x: cx - centerR, y: cy - centerR,
-                                         width: centerR * 2, height: centerR * 2))
-
-        let nonZero = FillStyle(eoFill: false)  // non-zero winding = fills union
-
+        let markSize = bodyW * 1.28 * breathScale
+        let markScale = markSize / 24
         context.drawLayer { bodyCtx in
             bodyCtx.opacity = alpha
-
-            // Base gradient — single fill over entire union
-            bodyCtx.fill(cloudPath, with: .linearGradient(
+            bodyCtx.translateBy(x: cx - markSize / 2, y: cy - markSize / 2)
+            bodyCtx.scaleBy(x: markScale, y: markScale)
+            bodyCtx.fill(Self.codexPath, with: .linearGradient(
                 Gradient(colors: [topColor, bottomColor]),
-                startPoint: CGPoint(x: cx, y: topY),
-                endPoint: CGPoint(x: cx, y: bottomY)
-            ), style: nonZero)
-
-            // 3D highlight — top-left glossy sheen
-            bodyCtx.fill(cloudPath, with: .linearGradient(
-                Gradient(colors: [Color.white.opacity(0.15), Color.white.opacity(0.04), Color.clear]),
-                startPoint: CGPoint(x: cx - bodyW * 0.35, y: topY - bodyW * 0.1),
-                endPoint: CGPoint(x: cx + bodyW * 0.2, y: cy + bodyW * 0.15)
-            ), style: nonZero)
-        }
-    }
-
-    // MARK: - >_ Morphing Prompt
-
-    private func drawPrompt(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
-        let promptAlpha = visualState == .pulsing ?
-            Double(sin(time * 3) * 0.1 + 0.9) : 0.9
-        let promptColor = Color.white.opacity(promptAlpha)
-
-        // Morph cycle: slower when idle, faster when processing
-        let morphSpeed: Float = visualState == .pulsing ? 0.4 : 0.15
-        let morphIndex = Int(time * morphSpeed) % Self.promptStates.count
-        let state = Self.promptStates[morphIndex]
-
-        let fontSize = bodyW * 0.45
-        let chevronSize = bodyW * 0.50
-
-        if state.chevronFlipped {
-            // Bar on left, chevron on right (e.g. =< or |<)
-            if !state.bar.isEmpty {
-                context.draw(
-                    Text(state.bar).font(.system(size: fontSize, weight: .bold, design: .rounded))
-                        .foregroundColor(promptColor),
-                    at: CGPoint(x: cx - bodyW * 0.18, y: cy + bodyW * 0.02)
-                )
-            }
-            context.draw(
-                Text(state.chevron).font(.system(size: chevronSize, weight: .bold, design: .rounded))
-                    .foregroundColor(promptColor),
-                at: CGPoint(x: cx + bodyW * 0.15, y: cy)
-            )
-        } else {
-            // Chevron on left, bar on right (e.g. >_ or >)
-            context.draw(
-                Text(state.chevron).font(.system(size: chevronSize, weight: .bold, design: .rounded))
-                    .foregroundColor(promptColor),
-                at: CGPoint(x: cx - bodyW * 0.10, y: cy)
-            )
-            if !state.bar.isEmpty {
-                let visible = state.bar == "_" ? (Int(time * 2) % 2 == 0) : true
-                if visible {
-                    context.draw(
-                        Text(state.bar).font(.system(size: fontSize, weight: .bold, design: .rounded))
-                            .foregroundColor(promptColor),
-                        at: CGPoint(x: cx + bodyW * 0.20, y: cy + bodyW * 0.02)
-                    )
-                }
-            }
+                startPoint: .zero,
+                endPoint: CGPoint(x: 24, y: 24)
+            ), style: FillStyle(eoFill: true))
         }
     }
 

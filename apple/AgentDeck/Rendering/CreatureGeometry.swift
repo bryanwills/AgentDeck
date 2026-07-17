@@ -4,34 +4,26 @@
 // ⚠️ SSOT PORT — KEEP IN SYNC. The Kotlin `object CreatureGeometry` is the single
 // source of truth for the terrarium creature vector geometry shared by the Compose
 // tablet renderer and the e-ink native-Canvas renderer. This file re-transcribes the
-// exact same `*_PATH_DATA` strings, viewBox sizes, and claw pivot points so the Apple
+// exact same `*_PATH_DATA` strings and viewBox sizes so the Apple
 // device-preview / terrarium surfaces cannot silhouette-drift from the canonical
-// robot / peak / crayfish. When `CreatureGeometry.kt` changes (path data, viewBox, or
-// pivots), update the mirrored constants below in the SAME change.
+// robot / peak / OpenClaw. When `CreatureGeometry.kt` changes, update the mirrored
+// constants below in the SAME change.
 //
-// Faithful scope: the Kotlin SSOT only defines path geometry for THREE creatures —
+// Faithful scope: the Kotlin SSOT defines path geometry for the agent marks —
 //   • Octopus / Claude Code robot        (claudecode.svg,   viewBox 24)
 //   • Antigravity peak / arc mark         (antigravity.svg,  viewBox 24)
-//   • Crayfish / OpenClaw (body+claws+antennae, with claw pivots, viewBox 120)
-// Codex and OpenCode have NO path geometry in the Kotlin SSOT — their terrarium
-// creatures are drawn procedurally on Android. This port transcribes those procedural
-// shapes too, from their canonical Compose implementations:
-//   • Codex cloud — 6 overlapping lobes + center fill + `>_` prompt
-//     (CloudCreature.kt LOBE_OFFSETS / LOBE_RADII / drawPrompt)
-//   • OpenCode ring — hollow vertical rounded-rect ring, 16:20, thickness 0.28
-//     (OpenCodeCreature.kt drawNestedSquares)
-// so every agent renders its canonical creature, not a brand logo.
+//   • OpenClaw official mark              (openclaw.svg,    viewBox 24)
+// Codex and OpenCode use their exact design/brand paths rather than procedural
+// substitutes, so previews and terrarium surfaces preserve the same geometry.
 //
 // Fill / stroke roles are taken from the canonical consumers (EinkRenderer.kt):
 //   • Octopus path         → even-odd fill (the two inner rects are eye cutouts)
 //   • Antigravity path     → fill
-//   • Crayfish body & claws → fill; claws rotate about their pivots during animation
-//   • Crayfish antennae     → stroke (round-cap, ~3px in the 120 viewBox space)
+//   • OpenClaw body/claws   → even-odd fill; eye dots are separate fill layers
 //
 // Cross-platform: SwiftUI + CoreGraphics only (no AppKit / UIKit), so this compiles for
-// both the macOS and iOS targets. The self-contained mini SVG-path parser below covers
-// exactly the command set used by the SSOT paths (M L H V C S Q Z + relatives); it is
-// intentionally local so the file has no cross-file dependency beyond SwiftUI.
+// both the macOS and iOS targets. Parsing delegates to the arc-capable parser used by
+// the Apple terrarium so compact official SVG arc flags retain their exact geometry.
 
 import SwiftUI
 
@@ -52,30 +44,32 @@ enum CreatureGeometry {
     static let antigravityPathData =
         "M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z"
 
-    // --- Crayfish / OpenClaw (openclaw.svg terrarium creature, viewBox 0 0 120 120) ---
-    static let crayfishViewBox: CGFloat = 120
-    static let crayfishBodyPathData =
-        "M60 10c-30 0-45 25-45 45s15 40 30 45v10h10v-10s5 2 10 0v10h10v-10c15-5 30-25 30-45S90 10 60 10"
-    static let crayfishLeftClawPathData =
-        "M20 45C5 40 0 50 5 60s15 5 20-5c3-7 0-10-5-10"
-    static let crayfishRightClawPathData =
-        "M100 45c15-5 20 5 15 15s-15 5-20-5c-3-7 0-10 5-10"
-    static let crayfishLeftAntennaPathData = "M45 15Q35 5 30 8"
-    static let crayfishRightAntennaPathData = "M75 15Q85 5 90 8"
+    static let codexViewBox: CGFloat = 24
+    static let codexPathData =
+        "M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"
+    static let openCodeViewBox: CGFloat = 24
+    static let openCodePathData = "M16 6H8v12h8V6zm4 16H4V2h16v20z"
 
-    /// Claw pivot points in the 120×120 viewBox (where each claw attaches to the body).
-    static let crayfishLeftClawPivot = CGPoint(x: 20, y: 45)
-    static let crayfishRightClawPivot = CGPoint(x: 100, y: 45)
+    // --- OpenClaw official mark (design/brand/openclaw.svg, viewBox 0 0 24 24) ---
+    static let openClawViewBox: CGFloat = 24
+    static let openClawEyePathData = [
+        "M9.046 7.104a.527.527 0 110 1.055.527.527 0 010-1.055z",
+        "M15.376 7.104a.528.528 0 110 1.056.528.528 0 010-1.056z",
+    ]
+    static let openClawBodyPathData = [
+        "M16.877 1.912c.58-.27 1.14-.323 1.616-.037a.317.317 0 01-.326.542c-.227-.136-.547-.153-1.022.068-.352.165-.765.45-1.234.866 2.683 1.17 4.4 3.5 5.148 5.921a6.421 6.421 0 00-.704.184c-.578.016-1.174.204-1.502.735-.338.55-.268 1.276.072 2.069l.005.012.007.014c.523 1.045 1.318 1.91 2.2 2.284-.912 3.274-3.44 6.144-5.972 6.988v2.109h-2.11v-2.11c-1.043.417-2.086.01-2.11 0v2.11h-2.11v-2.11c-2.531-.843-5.061-3.713-5.973-6.987.882-.373 1.678-1.238 2.2-2.284l.007-.014.006-.012c.34-.793.41-1.518.071-2.069-.327-.531-.923-.719-1.503-.735a6.409 6.409 0 00-.704-.183c.749-2.421 2.466-4.751 5.149-5.922-.47-.416-.88-.701-1.234-.866-.474-.221-.794-.204-1.021-.068a.318.318 0 01-.435-.109.317.317 0 01.109-.433c.476-.286 1.036-.233 1.615.037.49.229 1.031.628 1.621 1.182A9.924 9.924 0 0112 2.568c1.199 0 2.284.19 3.256.526.59-.554 1.13-.953 1.62-1.182zM8.835 6.577a1.266 1.266 0 100 2.532 1.266 1.266 0 000-2.532zm6.33 0a1.267 1.267 0 100 2.533 1.267 1.267 0 000-2.533z",
+        "M.395 13.118c-.966-1.932-.163-3.863 2.41-3.365v-.001l.05.01c.084.018.17.038.26.06.033.009.067.017.1.027.084.022.168.048.255.076l.09.027c.528 0 .95.158 1.16.501.212.343.212.87-.105 1.61-.085.17-.178.333-.276.489l-.01.017a4.967 4.967 0 01-.62.791l-.019.02c-1.092 1.117-2.496 1.336-3.295-.262z",
+        "M21.193 9.753c2.574-.5 3.378 1.433 2.411 3.365-.58 1.159-1.476 1.361-2.342.96l-.011-.005a2.419 2.419 0 01-.114-.056l-.019-.01a2.751 2.751 0 01-.115-.067l-.023-.014c-.035-.022-.071-.044-.106-.068l-.05-.035c-.55-.388-1.062-1.007-1.44-1.76-.276-.647-.311-1.132-.174-1.472.176-.439.636-.639 1.23-.639.032-.011.066-.02.099-.03.08-.026.16-.05.238-.072l.117-.03a5.502 5.502 0 01.3-.067z",
+    ]
 
     // --- Parsed Paths in viewBox coordinate space (mirrors the *NativePath accessors) ---
 
-    static let octopusPath: Path = SVGPathParser.parse(octopusPathData)
-    static let antigravityPath: Path = SVGPathParser.parse(antigravityPathData)
-    static let crayfishBodyPath: Path = SVGPathParser.parse(crayfishBodyPathData)
-    static let crayfishLeftClawPath: Path = SVGPathParser.parse(crayfishLeftClawPathData)
-    static let crayfishRightClawPath: Path = SVGPathParser.parse(crayfishRightClawPathData)
-    static let crayfishLeftAntennaPath: Path = SVGPathParser.parse(crayfishLeftAntennaPathData)
-    static let crayfishRightAntennaPath: Path = SVGPathParser.parse(crayfishRightAntennaPathData)
+    static let octopusPath: Path = CrayfishCreature.parseSvgPath(octopusPathData)
+    static let antigravityPath: Path = CrayfishCreature.parseSvgPath(antigravityPathData)
+    static let codexPath: Path = CrayfishCreature.parseSvgPath(codexPathData)
+    static let openCodePath: Path = CrayfishCreature.parseSvgPath(openCodePathData)
+    static let openClawBodyPaths = openClawBodyPathData.map(CrayfishCreature.parseSvgPath)
+    static let openClawEyePaths = openClawEyePathData.map(CrayfishCreature.parseSvgPath)
 
     // MARK: - Layered creature model
 
@@ -84,27 +78,12 @@ enum CreatureGeometry {
     enum FillRole {
         case fill
         case evenOddFill
-        case stroke
-        /// Stroked, but punched OUT of the layers below (destination-out) — used for
-        /// the Codex `>_` prompt so it stays legible in a single-tint silhouette.
-        case strokeCutout
     }
 
     /// A single drawable layer in the creature's own viewBox coordinate space.
     struct Layer {
         let path: Path
         let role: FillRole
-        /// Rotation pivot in viewBox space (claws); nil for static layers.
-        let pivot: CGPoint?
-        /// Suggested stroke width in viewBox units (only meaningful for `.stroke`).
-        let strokeWidth: CGFloat
-
-        init(path: Path, role: FillRole, pivot: CGPoint? = nil, strokeWidth: CGFloat = 0) {
-            self.path = path
-            self.role = role
-            self.pivot = pivot
-            self.strokeWidth = strokeWidth
-        }
     }
 
     /// A whole creature: its authoring viewBox plus its ordered layers.
@@ -143,7 +122,7 @@ enum CreatureGeometry {
     }
 
     /// The canonical creature for an agent type, in its own viewBox coordinate space.
-    /// Returns nil for agents without SSOT path geometry (Codex, OpenCode, unknown).
+    /// Returns nil only for unknown agents.
     static func creature(for agentType: String?) -> Creature? {
         switch kind(for: agentType) {
         case .octopus:
@@ -158,98 +137,24 @@ enum CreatureGeometry {
             )
         case .crayfish:
             return Creature(
-                viewBox: crayfishViewBox,
-                layers: [
-                    Layer(path: crayfishBodyPath, role: .fill),
-                    Layer(path: crayfishLeftClawPath, role: .fill, pivot: crayfishLeftClawPivot),
-                    Layer(path: crayfishRightClawPath, role: .fill, pivot: crayfishRightClawPivot),
-                    Layer(path: crayfishLeftAntennaPath, role: .stroke, strokeWidth: 3),
-                    Layer(path: crayfishRightAntennaPath, role: .stroke, strokeWidth: 3),
-                ]
+                viewBox: openClawViewBox,
+                layers: openClawBodyPaths.map { Layer(path: $0, role: .evenOddFill) }
+                    + openClawEyePaths.map { Layer(path: $0, role: .fill) }
             )
         case .cloud:
             return Creature(
-                viewBox: cloudViewBox,
-                layers: [
-                    Layer(path: cloudBodyPath, role: .fill),
-                    Layer(path: cloudPromptPath, role: .strokeCutout, strokeWidth: cloudPromptStroke),
-                ]
+                viewBox: codexViewBox,
+                layers: [Layer(path: codexPath, role: .evenOddFill)]
             )
         case .ring:
             return Creature(
-                viewBox: ringViewBox,
-                layers: [Layer(path: ringPath, role: .evenOddFill)]
+                viewBox: openCodeViewBox,
+                layers: [Layer(path: openCodePath, role: .evenOddFill)]
             )
         case .none:
             return nil
         }
     }
-
-    // --- Codex cloud (procedural — mirrors CloudCreature.kt drawCloudBody/drawPrompt) ---
-    //
-    // 6 lobes as overlapping circles at LOBE_OFFSETS×bodyRadius with radii
-    // LOBE_RADII×bodyRadius, plus the 0.18 center gap-fill circle. The `>_`
-    // prompt is transcribed as a chevron + underscore stroke pair (the Compose
-    // original draws text; a path keeps this file self-contained and 1-bit safe).
-    static let cloudViewBox: CGFloat = 100
-    private static let cloudBodyRadius: CGFloat = 40
-    private static let cloudLobeOffsets: [(CGFloat, CGFloat)] = [
-        (-0.14, -0.30),  // top-left
-        (0.16, -0.26),   // top-right
-        (0.32, -0.02),   // right
-        (0.14, 0.26),    // bottom-right
-        (-0.16, 0.26),   // bottom-left
-        (-0.32, -0.02),  // left
-    ]
-    private static let cloudLobeRadii: [CGFloat] = [0.30, 0.29, 0.28, 0.29, 0.30, 0.28]
-    static let cloudPromptStroke: CGFloat = 4.5
-
-    static let cloudBodyPath: Path = {
-        var p = Path()
-        let c = CGPoint(x: 50, y: 50)
-        for (i, offset) in cloudLobeOffsets.enumerated() {
-            let r = cloudBodyRadius * cloudLobeRadii[i]
-            let center = CGPoint(x: c.x + cloudBodyRadius * offset.0, y: c.y + cloudBodyRadius * offset.1)
-            p.addEllipse(in: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
-        }
-        // Central fill circle to cover any inter-lobe gaps (0.18 × bodyRadius).
-        let cr = cloudBodyRadius * 0.18
-        p.addEllipse(in: CGRect(x: c.x - cr, y: c.y - cr, width: cr * 2, height: cr * 2))
-        return p
-    }()
-
-    static let cloudPromptPath: Path = {
-        var p = Path()
-        let c = CGPoint(x: 50, y: 50)
-        let r = cloudBodyRadius
-        // ">" chevron
-        p.move(to: CGPoint(x: c.x - 0.22 * r, y: c.y - 0.16 * r))
-        p.addLine(to: CGPoint(x: c.x - 0.04 * r, y: c.y))
-        p.addLine(to: CGPoint(x: c.x - 0.22 * r, y: c.y + 0.16 * r))
-        // "_" underscore
-        p.move(to: CGPoint(x: c.x + 0.04 * r, y: c.y + 0.16 * r))
-        p.addLine(to: CGPoint(x: c.x + 0.26 * r, y: c.y + 0.16 * r))
-        return p
-    }()
-
-    // --- OpenCode ring (procedural — mirrors OpenCodeCreature.kt drawNestedSquares) ---
-    //
-    // Canonical opencode mark: a vertical rectangular RING (16:20) with a hollow
-    // center. rectW = 0.80×size, thickness = 0.28×rectW, cornerR = 0.05×size.
-    static let ringViewBox: CGFloat = 100
-    static let ringPath: Path = {
-        let size: CGFloat = 96
-        let rectW = size * 0.80
-        let rectH = size
-        let thick = rectW * 0.28
-        let cornerR = size * 0.05
-        let outer = CGRect(x: 50 - rectW / 2, y: 50 - rectH / 2, width: rectW, height: rectH)
-        let inner = outer.insetBy(dx: thick, dy: thick)
-        var p = Path()
-        p.addRoundedRect(in: outer, cornerSize: CGSize(width: cornerR, height: cornerR))
-        p.addRoundedRect(in: inner, cornerSize: CGSize(width: max(1, cornerR - thick * 0.5), height: max(1, cornerR - thick * 0.5)))
-        return p
-    }()
 
     // MARK: - Rect-fitted convenience
 
@@ -265,16 +170,13 @@ enum CreatureGeometry {
             .scaledBy(x: scale, y: scale)
     }
 
-    /// Convenience: the union of the creature's *fillable* layers, transformed to fit
-    /// `rect`. Stroke-only layers (crayfish antennae) are omitted because unioning an
-    /// open path into a fill silhouette would be wrong — use `creature(for:)` +
-    /// `CanonicalCreatureView` when you need the antennae. Returns nil for agents
-    /// without SSOT geometry.
+    /// Convenience: the union of the creature's fill layers, transformed to fit `rect`.
+    /// Returns nil for agents without canonical geometry.
     static func path(for agentType: String?, in rect: CGRect) -> Path? {
         guard let creature = creature(for: agentType) else { return nil }
         let transform = fitTransform(viewBox: creature.viewBox, in: rect)
         var combined = Path()
-        for layer in creature.layers where layer.role != .stroke {
+        for layer in creature.layers {
             combined.addPath(layer.path.applying(transform))
         }
         return combined.isEmpty ? nil : combined
@@ -300,7 +202,7 @@ struct CanonicalCreatureShape: Shape {
 }
 
 /// Drop-in preview view that renders an agent's canonical creature (all layers, with the
-/// correct even-odd fill and stroked antennae) tinted a single `color`. Mirrors the
+/// correct fill rules) tinted a single `color`. Mirrors the
 /// single-tint silhouette treatment used by the terrarium/e-ink surfaces. All five agents
 /// render: robot, cloud+`>_`, ring, crayfish, peak. Unknown agents render nothing.
 struct CanonicalCreatureView: View {
@@ -313,10 +215,6 @@ struct CanonicalCreatureView: View {
             guard let creature = CreatureGeometry.creature(for: agentType) else { return }
             let rect = CGRect(origin: .zero, size: canvasSize)
             let transform = CreatureGeometry.fitTransform(viewBox: creature.viewBox, in: rect)
-            let scale = min(canvasSize.width, canvasSize.height) / creature.viewBox
-
-            // Layers composite in an offscreen pass so `.strokeCutout` can punch
-            // through the body without erasing whatever is behind the view.
             context.drawLayer { layerCtx in
                 for layer in creature.layers {
                     let transformed = layer.path.applying(transform)
@@ -325,20 +223,6 @@ struct CanonicalCreatureView: View {
                         layerCtx.fill(transformed, with: .color(color))
                     case .evenOddFill:
                         layerCtx.fill(transformed, with: .color(color), style: FillStyle(eoFill: true))
-                    case .stroke, .strokeCutout:
-                        if layer.role == .strokeCutout {
-                            layerCtx.blendMode = .destinationOut
-                        }
-                        layerCtx.stroke(
-                            transformed,
-                            with: .color(color),
-                            style: StrokeStyle(
-                                lineWidth: max(0.5, layer.strokeWidth * scale),
-                                lineCap: .round,
-                                lineJoin: .round
-                            )
-                        )
-                        layerCtx.blendMode = .normal
                     }
                 }
             }
@@ -362,187 +246,6 @@ struct CanonicalCreatureView: View {
         default:
             return "Agent creature"
         }
-    }
-}
-
-// MARK: - Self-contained SVG path parser
-
-/// Minimal SVG path-data parser covering exactly the command set used by the canonical
-/// creature paths: M/m L/l H/h V/v C/c S/s Q/q T/t Z/z. Kept local so this file has no
-/// cross-file dependency. (The SSOT paths use no elliptical-arc `A/a` commands, so arc
-/// support is intentionally omitted.)
-enum SVGPathParser {
-
-    private enum Token {
-        case command(Character)
-        case number(CGFloat)
-    }
-
-    static func parse(_ data: String) -> Path {
-        let tokens = tokenize(data)
-        var path = Path()
-
-        var current = CGPoint.zero      // current point
-        var subpathStart = CGPoint.zero // start of current subpath (for Z)
-        var lastCubicControl = CGPoint.zero
-        var lastQuadControl = CGPoint.zero
-        var previousCommand: Character = " "
-        var currentCommand: Character = " "
-
-        var index = 0
-
-        func nextNumber() -> CGFloat {
-            while index < tokens.count {
-                let token = tokens[index]
-                index += 1
-                if case let .number(value) = token { return value }
-            }
-            return 0
-        }
-
-        while index < tokens.count {
-            if case let .command(command) = tokens[index] {
-                currentCommand = command
-                index += 1
-                if command == "Z" || command == "z" {
-                    path.closeSubpath()
-                    current = subpathStart
-                    previousCommand = command
-                    continue
-                }
-            } else {
-                // Implicit command repetition: extra coordinate sets after an M/m are
-                // treated as L/l; every other command simply repeats itself.
-                if currentCommand == "M" { currentCommand = "L" }
-                else if currentCommand == "m" { currentCommand = "l" }
-            }
-
-            let relative = currentCommand.isLowercase
-            let base = relative ? current : CGPoint.zero
-
-            func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-                CGPoint(x: base.x + x, y: base.y + y)
-            }
-
-            switch currentCommand {
-            case "M", "m":
-                let p = point(nextNumber(), nextNumber())
-                path.move(to: p)
-                current = p
-                subpathStart = p
-
-            case "L", "l":
-                let p = point(nextNumber(), nextNumber())
-                path.addLine(to: p)
-                current = p
-
-            case "H", "h":
-                let x = nextNumber()
-                let p = CGPoint(x: (relative ? current.x : 0) + x, y: current.y)
-                path.addLine(to: p)
-                current = p
-
-            case "V", "v":
-                let y = nextNumber()
-                let p = CGPoint(x: current.x, y: (relative ? current.y : 0) + y)
-                path.addLine(to: p)
-                current = p
-
-            case "C", "c":
-                let c1 = point(nextNumber(), nextNumber())
-                let c2 = point(nextNumber(), nextNumber())
-                let end = point(nextNumber(), nextNumber())
-                path.addCurve(to: end, control1: c1, control2: c2)
-                lastCubicControl = c2
-                current = end
-
-            case "S", "s":
-                let smooth = "CcSs".contains(previousCommand)
-                let c1 = smooth
-                    ? CGPoint(x: 2 * current.x - lastCubicControl.x,
-                              y: 2 * current.y - lastCubicControl.y)
-                    : current
-                let c2 = point(nextNumber(), nextNumber())
-                let end = point(nextNumber(), nextNumber())
-                path.addCurve(to: end, control1: c1, control2: c2)
-                lastCubicControl = c2
-                current = end
-
-            case "Q", "q":
-                let c = point(nextNumber(), nextNumber())
-                let end = point(nextNumber(), nextNumber())
-                path.addQuadCurve(to: end, control: c)
-                lastQuadControl = c
-                current = end
-
-            case "T", "t":
-                let smooth = "QqTt".contains(previousCommand)
-                let c = smooth
-                    ? CGPoint(x: 2 * current.x - lastQuadControl.x,
-                              y: 2 * current.y - lastQuadControl.y)
-                    : current
-                let end = point(nextNumber(), nextNumber())
-                path.addQuadCurve(to: end, control: c)
-                lastQuadControl = c
-                current = end
-
-            default:
-                // Unknown command — advance defensively to avoid an infinite loop.
-                index += 1
-            }
-
-            previousCommand = currentCommand
-        }
-
-        return path
-    }
-
-    private static func tokenize(_ data: String) -> [Token] {
-        var tokens: [Token] = []
-        let chars = Array(data)
-        var i = 0
-
-        while i < chars.count {
-            let c = chars[i]
-            if c.isLetter {
-                tokens.append(.command(c))
-                i += 1
-            } else if c == " " || c == "," || c == "\n" || c == "\t" || c == "\r" {
-                i += 1
-            } else if c == "-" || c == "+" || c == "." || c.isNumber {
-                var s = ""
-                var seenDot = false
-                if c == "-" || c == "+" {
-                    s.append(c)
-                    i += 1
-                }
-                while i < chars.count {
-                    let ch = chars[i]
-                    if ch.isNumber {
-                        s.append(ch)
-                        i += 1
-                    } else if ch == "." && !seenDot {
-                        seenDot = true
-                        s.append(ch)
-                        i += 1
-                    } else if ch == "e" || ch == "E" {
-                        s.append(ch)
-                        i += 1
-                        if i < chars.count, chars[i] == "-" || chars[i] == "+" {
-                            s.append(chars[i])
-                            i += 1
-                        }
-                    } else {
-                        break
-                    }
-                }
-                tokens.append(.number(CGFloat(Double(s) ?? 0)))
-            } else {
-                i += 1
-            }
-        }
-
-        return tokens
     }
 }
 

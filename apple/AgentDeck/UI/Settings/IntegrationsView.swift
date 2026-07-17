@@ -32,9 +32,10 @@ struct IntegrationDescriptor: Identifiable, Hashable {
     let id: String
     let displayName: String
     let kind: IntegrationKind
-    /// SF Symbol name used as a fallback when no `iconAssetName` is set,
-    /// or when the asset lookup fails (iOS without bundled assets).
+    /// SF Symbol name used as a fallback when no canonical agent or service asset applies.
     let iconSystemName: String
+    /// Agent identity rendered through the shared path-based official mark.
+    let iconAgentType: String?
     /// Optional brand asset bundled in the asset catalog. When present,
     /// the row prefers this over `iconSystemName` so users see the
     /// service's actual logo instead of a generic SF Symbol. Assets are
@@ -57,6 +58,7 @@ struct IntegrationDescriptor: Identifiable, Hashable {
         displayName: String,
         kind: IntegrationKind,
         iconSystemName: String,
+        iconAgentType: String? = nil,
         iconAssetName: String? = nil,
         iconTint: Color? = nil,
         oneLineHelp: String,
@@ -66,6 +68,7 @@ struct IntegrationDescriptor: Identifiable, Hashable {
         self.displayName = displayName
         self.kind = kind
         self.iconSystemName = iconSystemName
+        self.iconAgentType = iconAgentType
         self.iconAssetName = iconAssetName
         self.iconTint = iconTint
         self.oneLineHelp = oneLineHelp
@@ -84,7 +87,7 @@ enum IntegrationCatalog {
         displayName: "Claude Code",
         kind: .accountLinked,
         iconSystemName: "bolt.fill",
-        iconAssetName: "CreatureClaudeCode",
+        iconAgentType: "claude-code",
         iconTint: TerrariumHUD.claudeBody,
         oneLineHelp: claudeOneLineHelp,
         connectInstructions: claudeConnectInstructions
@@ -95,11 +98,8 @@ enum IntegrationCatalog {
         displayName: "Codex (ChatGPT)",
         kind: .accountLinked,
         iconSystemName: "person.badge.key",
-        // OpenAI brand mark reads clearer than the Codex creature in a
-        // Settings row — users recognise "Codex = ChatGPT = OpenAI" by
-        // the hex logo before they decode the creature silhouette.
-        iconAssetName: "BrandOpenAI",
-        iconTint: Color(red: 0.92, green: 0.92, blue: 0.94),
+        iconAgentType: "codex-cli",
+        iconTint: SessionBrand.color(for: "codex-cli"),
         oneLineHelp: codexOneLineHelp,
         connectInstructions: codexConnectInstructions
     )
@@ -109,7 +109,7 @@ enum IntegrationCatalog {
         displayName: "OpenClaw Gateway",
         kind: .accountLinked,
         iconSystemName: "network",
-        iconAssetName: "CreatureOpenClaw",
+        iconAgentType: "openclaw",
         iconTint: Color(red: 1.0, green: 0.30, blue: 0.30),
         oneLineHelp: "Routes agent traffic through a local Gateway. Pairing happens in OpenClaw's Web UI.",
         // Phrased conditionally so it never reads as a "go install / launch
@@ -123,10 +123,9 @@ enum IntegrationCatalog {
         id: "antigravity",
         displayName: "Antigravity",
         kind: .accountLinked,
-        // Google Antigravity ships no public brand SVG we can bundle,
-        // so stay on the atom glyph — reads as "physics / gravity" and
-        // holds the row until we import an official mark.
         iconSystemName: "atom",
+        iconAgentType: "antigravity",
+        iconTint: SessionBrand.color(for: "antigravity"),
         oneLineHelp: "Plan name and remaining credits, read from the local Antigravity app.",
         connectInstructions: "Pick the Antigravity state.vscdb file once so the sandboxed app can read it."
     )
@@ -136,6 +135,8 @@ enum IntegrationCatalog {
         displayName: "OpenCode",
         kind: .accountLinked,
         iconSystemName: "circle.circle",
+        iconAgentType: "opencode",
+        iconTint: SessionBrand.color(for: "opencode"),
         oneLineHelp: "Read-only session monitoring of an OpenCode server already running on this Mac.",
         // Configuration-factual copy only — describes connecting to the
         // user's own server, never an install step (App Review 4.2.3).
@@ -515,7 +516,9 @@ struct IntegrationRow: View {
             ?? descriptor.iconTint
             ?? fallbackTint
             ?? TerrariumHUD.subtext
-        if let assetName = descriptor.iconAssetName {
+        if let agentType = descriptor.iconAgentType {
+            SessionCreatureIcon(agentType: agentType, tint: tint, size: size)
+        } else if let assetName = descriptor.iconAssetName {
             Image(assetName)
                 .renderingMode(.template)
                 .resizable()

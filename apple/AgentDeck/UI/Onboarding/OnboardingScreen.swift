@@ -120,28 +120,22 @@ private struct AgentInfoPaneiOS: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Brand/creature marks come from the same Assets.xcassets entries
-            // that `IntegrationsView.integrationIcon` uses. Tints are chosen
-            // to read on both light and dark `systemBackground` here —
-            // catalog brand tints (#EBEBEF / #F1ECEC) are dashboard-only
-            // values that wash out on the iOS onboarding's white surface
-            // in light mode. `Color.primary` flips with the system; Claude
-            // Code's terracotta has enough chroma to stay visible on both.
+            // Render the same canonical path marks used by dashboard sessions.
             VStack(spacing: 10) {
                 agentRow(
-                    asset: "CreatureClaudeCode",
+                    agentType: "claude-code",
                     tint: TerrariumColors.claudeBody,
                     name: "Claude Code",
                     detail: "Anthropic's CLI agent with hooks and permissions."
                 )
                 agentRow(
-                    asset: "BrandOpenAI",
-                    tint: .primary,
+                    agentType: "codex-cli",
+                    tint: SessionBrand.color(for: "codex-cli"),
                     name: "Codex",
                     detail: "OpenAI's coding agent CLI."
                 )
                 agentRow(
-                    asset: "CreatureOpenCode",
+                    agentType: "opencode",
                     tint: .primary,
                     name: "OpenCode",
                     detail: "Open-source multi-model coding agent."
@@ -158,14 +152,9 @@ private struct AgentInfoPaneiOS: View {
         .padding(24)
     }
 
-    private func agentRow(asset: String, tint: Color, name: String, detail: String) -> some View {
+    private func agentRow(agentType: String, tint: Color, name: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(asset)
-                .renderingMode(.template)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 28, height: 28)
-                .foregroundStyle(tint)
+            SessionCreatureIcon(agentType: agentType, tint: tint, size: 28)
             VStack(alignment: .leading, spacing: 3) {
                 Text(name)
                     .font(.system(size: 15, weight: .semibold))

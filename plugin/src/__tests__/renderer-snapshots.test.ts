@@ -320,7 +320,7 @@ describe('usage-gauge snapshots', () => {
     // Claude provider LOGO (brand-tinted) + short label (agent rides the logo, not a prefix).
     expect(svg).toContain('#C07058');
     // The provider logo replaces the old dot — assert the Claude brand path is drawn.
-    expect(svg).toContain('M4.709 15.955');
+    expect(svg).toContain('M20.998 10.949');
     expect(svg).toContain('>5H<');
     // Headline = USED percent (fill rises with usage).
     expect(svg).toContain('>30<');
@@ -402,7 +402,7 @@ describe('usage-encoder level-fill (SD+ 200x100) snapshots', () => {
     const svg = renderUsageEncoderBoth(claudeData);
     expect(svg).toContain('width="200" height="100"');
     expect(svg).toContain('#C07058');     // Claude brand colour (logo tint)
-    expect(svg).toContain('M4.709 15.955'); // Claude provider logo path
+    expect(svg).toContain('M20.998 10.949'); // canonical Claude Code robot path
     expect(svg).not.toContain('>CLAUDE<'); // logo-only identity, no agent-name text (matches SD)
     expect(svg).toContain('>5H<');
     expect(svg).toContain('>7D<');

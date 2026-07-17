@@ -4,9 +4,6 @@
  */
 export {
   CLAUDE_LOGO_PATH,
-  OC_BODY,
-  OC_CLAW_L,
-  OC_CLAW_R,
   CODEX_LOGO_PATH,
   OPENCLAW_LOGO_PATHS,
   agentLogoIcon,

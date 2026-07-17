@@ -12,10 +12,14 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.vector.PathParser
+import dev.agentdeck.terrarium.CreatureGeometry
 import dev.agentdeck.terrarium.CreatureNameTagStyle
 import dev.agentdeck.terrarium.creatureNameTagMetric
 import dev.agentdeck.terrarium.resolveCreatureNameTagLayout
@@ -28,9 +32,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Codex CLI cloud creature — 6-lobe clover shape with blue-purple gradient.
- * Represents Codex CLI sessions in the terrarium. The shape mirrors the Codex CLI icon:
- * a 6-lobe clover/flower pattern with a `>_` terminal prompt inside.
+ * Codex CLI creature using the exact design/brand/codex.svg geometry with a
+ * blue-purple gradient. The official path contains the `>_` cutout.
  *
  * Colors: lavender (#B394E5) top → deep blue (#3342C7) bottom gradient.
  * Working state shows bioluminescent orbiting particles.
@@ -215,11 +218,8 @@ class CloudCreature(
             drawGlowParticles(scope, centerX, centerY, bodyRadius, bodyAlpha)
         }
 
-        // Draw 6-lobe cloud body
+        // Draw canonical Codex mark
         drawCloudBody(scope, centerX, centerY, bodyRadius, bodyAlpha)
-
-        // >_ prompt inside body
-        drawPrompt(scope, centerX, centerY, bodyRadius, bodyAlpha)
 
         // ASKING: speech bubble with "?"
         if (visualState == OctopusVisualState.ASKING) {
@@ -232,18 +232,13 @@ class CloudCreature(
         }
     }
 
-    /**
-     * Draw the 6-lobe clover/cloud shape using overlapping circles.
-     * All lobes share the same gradient so overlap lines disappear.
-     * Uses drawIntoCanvas with BlendMode for seamless merging.
-     */
+    /** Draw the canonical Codex path; animation changes scale/color only. */
     private fun drawCloudBody(
         scope: DrawScope,
         cx: Float, cy: Float,
         bodyRadius: Float,
         alpha: Float,
     ) {
-        // Lobe breath animation — subtle radial pulse
         val breathScale = when (visualState) {
             OctopusVisualState.WORKING -> 1f + sin(time * TerrariumTiming.THINKING_PULSE_SPEED) * 0.04f
             OctopusVisualState.FLOATING -> 1f + sin(time * 0.8f) * 0.015f
@@ -267,71 +262,17 @@ class CloudCreature(
 
         val gradient = Brush.linearGradient(
             colors = listOf(topColor, bottomColor),
-            start = Offset(cx, cy - bodyRadius),
-            end = Offset(cx, cy + bodyRadius),
+            start = Offset.Zero,
+            end = Offset(CreatureGeometry.CODEX_VIEWBOX, CreatureGeometry.CODEX_VIEWBOX),
         )
-
-        // Draw each lobe clipped individually, all sampling from the SAME gradient
-        // so overlap regions have identical color → no visible seams
-        for (i in LOBE_OFFSETS.indices) {
-            val (dx, dy) = LOBE_OFFSETS[i]
-            val lobeRadius = bodyRadius * LOBE_RADII[i] * breathScale
-            val lobeCx = cx + bodyRadius * dx
-            val lobeCy = cy + bodyRadius * dy
-
-            scope.drawCircle(
-                brush = gradient,
-                alpha = alpha,
-                radius = lobeRadius,
-                center = Offset(lobeCx, lobeCy),
-            )
+        val markSize = bodyRadius * 1.55f * breathScale
+        val markScale = markSize / CreatureGeometry.CODEX_VIEWBOX
+        scope.withTransform({
+            translate(cx - markSize / 2f, cy - markSize / 2f)
+            scale(markScale, markScale, pivot = Offset.Zero)
+        }) {
+            drawPath(codexPath, brush = gradient, alpha = alpha)
         }
-
-        // Central fill circle to cover any inter-lobe gaps
-        scope.drawCircle(
-            brush = gradient,
-            alpha = alpha,
-            radius = bodyRadius * 0.18f * breathScale,
-            center = Offset(cx, cy),
-        )
-    }
-
-    /**
-     * Render ">_" terminal prompt inside the cloud body.
-     * Morphing animation: cursor blinks, chevron subtly pulses.
-     */
-    private fun drawPrompt(
-        scope: DrawScope,
-        cx: Float, cy: Float,
-        bodyRadius: Float,
-        alpha: Float,
-    ) {
-        if (visualState == OctopusVisualState.SLEEPING) return
-
-        val canvas = scope.drawContext.canvas.nativeCanvas
-        val textSize = bodyRadius * 0.55f
-
-        // Cursor blink (0.8s on, 0.4s off)
-        val blinkCycle = (time % 1.2f)
-        val showCursor = blinkCycle < 0.8f
-
-        val promptText = if (showCursor) ">_" else "> "
-
-        // Working state: gentle glow pulse on text
-        val textAlpha = when (visualState) {
-            OctopusVisualState.WORKING -> {
-                val pulse = sin(time * 2.0f) * 0.15f + 0.85f
-                (alpha * pulse * 0.95f).coerceIn(0f, 1f)
-            }
-            else -> alpha * 0.9f
-        }
-
-        promptPaint.textSize = textSize
-        promptPaint.alpha = (textAlpha * 255).toInt()
-        canvas.drawText(
-            promptText, cx, cy + textSize * 0.3f,
-            promptPaint,
-        )
     }
 
     /**
@@ -499,13 +440,6 @@ class CloudCreature(
         )
     }
 
-    private val promptPaint = Paint().apply {
-        isAntiAlias = true
-        color = android.graphics.Color.WHITE
-        textAlign = Paint.Align.CENTER
-        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-    }
-
     private val questionMarkPaint = Paint().apply {
         isAntiAlias = true
         color = android.graphics.Color.argb(180, 226, 232, 240)
@@ -545,24 +479,8 @@ class CloudCreature(
         private val GLOW_LAVENDER = Color(0xFFD0AAFF)
         private const val GLOW_PARTICLE_COUNT = 8
 
-        /**
-         * 6-lobe clover offsets relative to body radius.
-         * Arranged as: top-left, top-right, right, bottom-right, bottom-left, left.
-         */
-        private val LOBE_OFFSETS = arrayOf(
-            -0.14f to -0.30f,  // top-left
-             0.16f to -0.26f,  // top-right
-             0.32f to -0.02f,  // right
-             0.14f to  0.26f,  // bottom-right
-            -0.16f to  0.26f,  // bottom-left
-            -0.32f to -0.02f,  // left
-        )
-
-        /**
-         * Lobe radii as fraction of bodyRadius (0.28–0.30 range).
-         */
-        private val LOBE_RADII = floatArrayOf(
-            0.30f, 0.29f, 0.28f, 0.29f, 0.30f, 0.28f,
-        )
+        private val codexPath = PathParser().parsePathString(CreatureGeometry.CODEX_PATH_DATA).toPath().apply {
+            fillType = PathFillType.EvenOdd
+        }
     }
 }

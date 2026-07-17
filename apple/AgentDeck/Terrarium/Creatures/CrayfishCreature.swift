@@ -1,28 +1,20 @@
-// CrayfishCreature.swift — SVG Path front-facing crayfish
-// Ported from android CrayfishCreature.kt
+// CrayfishCreature.swift — exact design/brand/openclaw.svg silhouette.
 
 import SwiftUI
 
 final class CrayfishCreature {
-    // MARK: - SVG Path Data (viewBox 0 0 120 120)
-
-    private static let svgViewBox: Float = 120
-
-    private static let bodyPathData =
-        "M60 10c-30 0-45 25-45 45s15 40 30 45v10h10v-10s5 2 10 0v10h10v-10c15-5 30-25 30-45S90 10 60 10"
-    private static let leftClawPathData =
-        "M20 45C5 40 0 50 5 60s15 5 20-5c3-7 0-10-5-10"
-    private static let rightClawPathData =
-        "M100 45c15-5 20 5 15 15s-15 5-20-5c-3-7 0-10 5-10"
-    private static let leftAntennaPathData = "M45 15Q35 5 30 8"
-    private static let rightAntennaPathData = "M75 15Q85 5 90 8"
-
-    // Parsed paths (lazy)
-    private lazy var bodyPath: SwiftUI.Path = Self.parseSvgPath(Self.bodyPathData)
-    private lazy var leftClawPath: SwiftUI.Path = Self.parseSvgPath(Self.leftClawPathData)
-    private lazy var rightClawPath: SwiftUI.Path = Self.parseSvgPath(Self.rightClawPathData)
-    private lazy var leftAntennaPath: SwiftUI.Path = Self.parseSvgPath(Self.leftAntennaPathData)
-    private lazy var rightAntennaPath: SwiftUI.Path = Self.parseSvgPath(Self.rightAntennaPathData)
+    private static let svgViewBox: Float = 24
+    private static let eyePathData = [
+        "M9.046 7.104a.527.527 0 110 1.055.527.527 0 010-1.055z",
+        "M15.376 7.104a.528.528 0 110 1.056.528.528 0 010-1.056z",
+    ]
+    private static let bodyPathData = [
+        "M16.877 1.912c.58-.27 1.14-.323 1.616-.037a.317.317 0 01-.326.542c-.227-.136-.547-.153-1.022.068-.352.165-.765.45-1.234.866 2.683 1.17 4.4 3.5 5.148 5.921a6.421 6.421 0 00-.704.184c-.578.016-1.174.204-1.502.735-.338.55-.268 1.276.072 2.069l.005.012.007.014c.523 1.045 1.318 1.91 2.2 2.284-.912 3.274-3.44 6.144-5.972 6.988v2.109h-2.11v-2.11c-1.043.417-2.086.01-2.11 0v2.11h-2.11v-2.11c-2.531-.843-5.061-3.713-5.973-6.987.882-.373 1.678-1.238 2.2-2.284l.007-.014.006-.012c.34-.793.41-1.518.071-2.069-.327-.531-.923-.719-1.503-.735a6.409 6.409 0 00-.704-.183c.749-2.421 2.466-4.751 5.149-5.922-.47-.416-.88-.701-1.234-.866-.474-.221-.794-.204-1.021-.068a.318.318 0 01-.435-.109.317.317 0 01.109-.433c.476-.286 1.036-.233 1.615.037.49.229 1.031.628 1.621 1.182A9.924 9.924 0 0112 2.568c1.199 0 2.284.19 3.256.526.59-.554 1.13-.953 1.62-1.182zM8.835 6.577a1.266 1.266 0 100 2.532 1.266 1.266 0 000-2.532zm6.33 0a1.267 1.267 0 100 2.533 1.267 1.267 0 000-2.533z",
+        "M.395 13.118c-.966-1.932-.163-3.863 2.41-3.365v-.001l.05.01c.084.018.17.038.26.06.033.009.067.017.1.027.084.022.168.048.255.076l.09.027c.528 0 .95.158 1.16.501.212.343.212.87-.105 1.61-.085.17-.178.333-.276.489l-.01.017a4.967 4.967 0 01-.62.791l-.019.02c-1.092 1.117-2.496 1.336-3.295-.262z",
+        "M21.193 9.753c2.574-.5 3.378 1.433 2.411 3.365-.58 1.159-1.476 1.361-2.342.96l-.011-.005a2.419 2.419 0 01-.114-.056l-.019-.01a2.751 2.751 0 01-.115-.067l-.023-.014c-.035-.022-.071-.044-.106-.068l-.05-.035c-.55-.388-1.062-1.007-1.44-1.76-.276-.647-.311-1.132-.174-1.472.176-.439.636-.639 1.23-.639.032-.011.066-.02.099-.03.08-.026.16-.05.238-.072l.117-.03a5.502 5.502 0 01.3-.067z",
+    ]
+    private lazy var bodyPaths = Self.bodyPathData.map(Self.parseSvgPath)
+    private lazy var eyePaths = Self.eyePathData.map(Self.parseSvgPath)
 
     // MARK: - State
 
@@ -171,69 +163,11 @@ final class CrayfishCreature {
 
             let fillColor = shellColorForState()
 
-            // 1. Body
-            ctx.fill(bodyPath, with: .color(fillColor.opacity(alpha)))
-
-            // 2. Left claw with pivot rotation
-            let leftAngle = clawAngle(side: -1)
-            ctx.drawLayer { clawCtx in
-                clawCtx.translateBy(x: 20, y: 45)
-                clawCtx.rotate(by: .degrees(Double(leftAngle)))
-                clawCtx.translateBy(x: -20, y: -45)
-                clawCtx.fill(leftClawPath, with: .color(fillColor.opacity(alpha)))
+            for path in bodyPaths {
+                ctx.fill(path, with: .color(fillColor.opacity(alpha)), style: FillStyle(eoFill: true))
             }
-
-            // 3. Right claw with pivot rotation
-            let rightAngle = clawAngle(side: 1)
-            ctx.drawLayer { clawCtx in
-                clawCtx.translateBy(x: 100, y: 45)
-                clawCtx.rotate(by: .degrees(Double(rightAngle)))
-                clawCtx.translateBy(x: -100, y: -45)
-                clawCtx.fill(rightClawPath, with: .color(fillColor.opacity(alpha)))
-            }
-
-            // 4. Antennae with wiggle
-            let antennaColor = shellColorForState().opacity(alpha)
-            let antennaStroke = StrokeStyle(lineWidth: 3, lineCap: .round)
-
-            let wiggleX: CGFloat
-            let wiggleY: CGFloat
-            switch visualState {
-            case .routing:
-                wiggleX = CGFloat(sin(time * 7) * 4)
-                wiggleY = CGFloat(sin(time * 5) * 3)
-            case .sitting:
-                wiggleX = CGFloat(sin(time * 0.8) * 0.7)
-                wiggleY = CGFloat(sin(time * 0.5) * 0.4)
-            case .sick:
-                wiggleX = CGFloat(sin(time * 0.3) * 0.4)
-                wiggleY = CGFloat(2 + sin(time * 0.4) * 0.5)
-            default:
-                wiggleX = 0
-                wiggleY = 0
-            }
-
-            ctx.drawLayer { antCtx in
-                antCtx.translateBy(x: wiggleX, y: wiggleY)
-                antCtx.stroke(leftAntennaPath, with: .color(antennaColor), style: antennaStroke)
-            }
-            ctx.drawLayer { antCtx in
-                antCtx.translateBy(x: -wiggleX, y: wiggleY)
-                antCtx.stroke(rightAntennaPath, with: .color(antennaColor), style: antennaStroke)
-            }
-
-            // 5. Eyes — dark circles with teal highlights
-            let eyeDark = Color(red: 0.02, green: 0.031, blue: 0.063).opacity(alpha) // #050810
-            for eyeX in [45.0, 75.0] as [CGFloat] {
-                let eyeRect = CGRect(x: eyeX - 6, y: 35 - 6, width: 12, height: 12)
-                ctx.fill(Path(ellipseIn: eyeRect), with: .color(eyeDark))
-            }
-
-            let hlColor = eyeHighlightColor().opacity(alpha)
-            for eyeX in [46.0, 76.0] as [CGFloat] {
-                let hlRect = CGRect(x: eyeX - 2.5, y: 34 - 2.5, width: 5, height: 5)
-                ctx.fill(Path(ellipseIn: hlRect), with: .color(hlColor))
-            }
+            let eyeColor = eyeHighlightColor().opacity(alpha)
+            for path in eyePaths { ctx.fill(path, with: .color(eyeColor)) }
         }
     }
 
@@ -388,6 +322,17 @@ final class CrayfishCreature {
             return numStr.isEmpty ? nil : CGFloat(Double(numStr) ?? 0)
         }
 
+        // SVG permits the two arc flags to be concatenated with each other and
+        // the following coordinate (for example `0 110`). Consume exactly one
+        // flag character so compact canonical brand paths are parsed correctly.
+        func parseArcFlag() -> Bool? {
+            skipWhitespaceAndCommas()
+            guard idx < chars.count, chars[idx] == "0" || chars[idx] == "1" else { return nil }
+            let value = chars[idx] == "1"
+            idx += 1
+            return value
+        }
+
         while idx < chars.count {
             skipWhitespaceAndCommas()
             guard idx < chars.count else { break }
@@ -497,15 +442,15 @@ final class CrayfishCreature {
             case "A", "a":
                 let isRelative = cmd == "a"
                 while let rx = parseNumber(), let ry = parseNumber(),
-                      let xRotation = parseNumber(), let largeArcFlag = parseNumber(),
-                      let sweepFlag = parseNumber(), let rawX = parseNumber(), let rawY = parseNumber() {
+                      let xRotation = parseNumber(), let largeArc = parseArcFlag(),
+                      let sweep = parseArcFlag(), let rawX = parseNumber(), let rawY = parseNumber() {
                     let endX = isRelative ? currentX + rawX : rawX
                     let endY = isRelative ? currentY + rawY : rawY
                     Self.svgArcToBeziers(
                         &path, cx: currentX, cy: currentY,
                         rx: abs(rx), ry: abs(ry),
                         xRotationDeg: xRotation,
-                        largeArc: largeArcFlag != 0, sweep: sweepFlag != 0,
+                        largeArc: largeArc, sweep: sweep,
                         ex: endX, ey: endY
                     )
                     currentX = endX; currentY = endY

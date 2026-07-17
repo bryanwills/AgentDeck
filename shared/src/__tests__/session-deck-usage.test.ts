@@ -152,7 +152,7 @@ describe('buildSessionDeck list-view usage tiles', () => {
     const codex5 = deck.get(CX5H)!.svg, codex7 = deck.get(CX7D)!.svg;
     expect(claude5).toContain('5H');
     expect(claude5).toContain('#C07058');
-    expect(claude5).toContain('M4.709 15.955'); // Claude provider logo path
+    expect(claude5).toContain('M20.998 10.949'); // canonical Claude Code robot path
     // Legibility without a dark overlay: subtle toned level fill, no chip.
     expect(claude5).toContain('opacity="0.38"');
     expect(claude5).not.toContain('opacity="0.72"');

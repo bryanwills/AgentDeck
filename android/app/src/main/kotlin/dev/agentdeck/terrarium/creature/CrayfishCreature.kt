@@ -9,7 +9,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -19,14 +19,14 @@ import dev.agentdeck.terrarium.CreatureGeometry
 import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.terrarium.TerrariumLayout
 import dev.agentdeck.terrarium.TerrariumTiming
+import dev.agentdeck.terrarium.normalizeSvgArcFlags
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * OpenClaw — front-facing lobster SVG mascot.
- * Based on openclaw.svg (viewBox 0 0 120 120) with gradient body,
- * articulated claws (pivot rotation) and wiggling antennae.
+ * OpenClaw — exact design/brand/openclaw.svg silhouette with state motion and
+ * shell gradient. Animation moves the whole mark without redrawing its anatomy.
  *
  * SITTING/DORMANT: completely still on the rocks (no floating).
  * ROUTING: full animation — claw rotation, signal waves, eye flash, antenna wiggle.
@@ -41,12 +41,10 @@ class CrayfishCreature(
     private var time by mutableFloatStateOf(0f)
     private var transitionProgress by mutableFloatStateOf(1f)
 
-    // Lazy-init parsed SVG paths (parsed once at first use)
-    private val bodyPath by lazy { parseSvgPath(BODY_PATH_DATA) }
-    private val leftClawPath by lazy { parseSvgPath(LEFT_CLAW_PATH_DATA) }
-    private val rightClawPath by lazy { parseSvgPath(RIGHT_CLAW_PATH_DATA) }
-    private val leftAntennaPath by lazy { parseSvgPath(LEFT_ANTENNA_PATH_DATA) }
-    private val rightAntennaPath by lazy { parseSvgPath(RIGHT_ANTENNA_PATH_DATA) }
+    private val bodyPaths by lazy {
+        CreatureGeometry.OPENCLAW_BODY_PATHS.map { parseSvgPath(it).apply { fillType = PathFillType.EvenOdd } }
+    }
+    private val eyePaths by lazy { CreatureGeometry.OPENCLAW_EYE_PATHS.map(::parseSvgPath) }
 
     fun setState(newState: CrayfishVisualState) {
         if (newState != visualState) {
@@ -162,10 +160,9 @@ class CrayfishCreature(
         bodyWidth: Float,
         alpha: Float,
     ) {
-        val scale = bodyWidth / SVG_VIEWBOX
-        // SVG center is at (60, 60) — translate so it maps to (cx, cy)
-        val offsetX = cx - SVG_VIEWBOX / 2f * scale
-        val offsetY = cy - SVG_VIEWBOX / 2f * scale
+        val scale = bodyWidth / CreatureGeometry.OPENCLAW_VIEWBOX
+        val offsetX = cx - CreatureGeometry.OPENCLAW_VIEWBOX / 2f * scale
+        val offsetY = cy - CreatureGeometry.OPENCLAW_VIEWBOX / 2f * scale
 
         val brush = bodyBrush()
 
@@ -175,60 +172,12 @@ class CrayfishCreature(
             translate(left = offsetX, top = offsetY)
             scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
             if (sickTilt != 0f) {
-                rotate(sickTilt, pivot = Offset(SVG_VIEWBOX / 2f, SVG_VIEWBOX / 2f))
+                rotate(sickTilt, pivot = Offset(CreatureGeometry.OPENCLAW_VIEWBOX / 2f, CreatureGeometry.OPENCLAW_VIEWBOX / 2f))
             }
         }) {
-            // 1. Body with gradient
-            drawPath(bodyPath, brush = brush, alpha = alpha)
-
-            // 2. Left claw with pivot rotation
-            val leftAngle = clawAngleForState(side = -1f)
-            withTransform({
-                rotate(leftAngle, pivot = Offset(20f, 45f))
-            }) {
-                drawPath(leftClawPath, brush = brush, alpha = alpha)
-            }
-
-            // 3. Right claw with pivot rotation
-            val rightAngle = clawAngleForState(side = 1f)
-            withTransform({
-                rotate(rightAngle, pivot = Offset(100f, 45f))
-            }) {
-                drawPath(rightClawPath, brush = brush, alpha = alpha)
-            }
-
-            // 4. Antennae with wiggle
-            val antennaColor = shellColorForState().copy(alpha = alpha)
-            val antennaStroke = Stroke(width = 3f, cap = StrokeCap.Round)
-
-            val wiggleX = when (visualState) {
-                CrayfishVisualState.ROUTING -> sin(time * 7f) * 4f
-                CrayfishVisualState.SITTING -> sin(time * 0.8f) * 0.7f
-                CrayfishVisualState.SICK -> sin(time * 0.3f) * 0.4f
-                else -> 0f
-            }
-            val wiggleY = when (visualState) {
-                CrayfishVisualState.ROUTING -> sin(time * 5f) * 3f
-                CrayfishVisualState.SITTING -> sin(time * 0.5f) * 0.4f
-                CrayfishVisualState.SICK -> 2f + sin(time * 0.4f) * 0.5f  // antennae droop down
-                else -> 0f
-            }
-
-            withTransform({ translate(left = wiggleX, top = -wiggleY) }) {
-                drawPath(leftAntennaPath, color = antennaColor, style = antennaStroke)
-            }
-            withTransform({ translate(left = -wiggleX, top = -wiggleY) }) {
-                drawPath(rightAntennaPath, color = antennaColor, style = antennaStroke)
-            }
-
-            // 5. Eyes — dark circles with teal highlights
-            val eyeDark = Color(0xFF050810).copy(alpha = alpha)
-            drawCircle(eyeDark, radius = 6f, center = Offset(45f, 35f))
-            drawCircle(eyeDark, radius = 6f, center = Offset(75f, 35f))
-
-            val highlightColor = eyeColorForState().copy(alpha = alpha)
-            drawCircle(highlightColor, radius = 2.5f, center = Offset(46f, 34f))
-            drawCircle(highlightColor, radius = 2.5f, center = Offset(76f, 34f))
+            for (path in bodyPaths) drawPath(path, brush = brush, alpha = alpha)
+            val highlightColor = eyeColorForState()
+            for (path in eyePaths) drawPath(path, color = highlightColor, alpha = alpha)
         }
     }
 
@@ -241,7 +190,7 @@ class CrayfishCreature(
                 Brush.linearGradient(
                     colors = listOf(startColor, endColor),
                     start = Offset(0f, 0f),
-                    end = Offset(SVG_VIEWBOX, SVG_VIEWBOX),
+                    end = Offset(CreatureGeometry.OPENCLAW_VIEWBOX, CreatureGeometry.OPENCLAW_VIEWBOX),
                 )
             }
             CrayfishVisualState.SICK -> {
@@ -251,14 +200,14 @@ class CrayfishCreature(
                 Brush.linearGradient(
                     colors = listOf(sickStart, sickEnd),
                     start = Offset(0f, 0f),
-                    end = Offset(SVG_VIEWBOX, SVG_VIEWBOX),
+                    end = Offset(CreatureGeometry.OPENCLAW_VIEWBOX, CreatureGeometry.OPENCLAW_VIEWBOX),
                 )
             }
             else -> {
                 Brush.linearGradient(
                     colors = listOf(TerrariumColors.CrayfishShell, TerrariumColors.CrayfishDark),
                     start = Offset(0f, 0f),
-                    end = Offset(SVG_VIEWBOX, SVG_VIEWBOX),
+                    end = Offset(CreatureGeometry.OPENCLAW_VIEWBOX, CreatureGeometry.OPENCLAW_VIEWBOX),
                 )
             }
         }
@@ -358,16 +307,9 @@ class CrayfishCreature(
     }
 
     private fun parseSvgPath(data: String): Path {
-        return PathParser().parsePathString(data).toPath()
+        return PathParser().parsePathString(normalizeSvgArcFlags(data)).toPath()
     }
 
     companion object {
-        // Canonical 120×120 OpenClaw crayfish geometry (see CreatureGeometry).
-        private const val SVG_VIEWBOX = CreatureGeometry.CRAYFISH_VIEWBOX
-        private const val BODY_PATH_DATA = CreatureGeometry.CRAYFISH_BODY_PATH_DATA
-        private const val LEFT_CLAW_PATH_DATA = CreatureGeometry.CRAYFISH_LEFT_CLAW_PATH_DATA
-        private const val RIGHT_CLAW_PATH_DATA = CreatureGeometry.CRAYFISH_RIGHT_CLAW_PATH_DATA
-        private const val LEFT_ANTENNA_PATH_DATA = CreatureGeometry.CRAYFISH_LEFT_ANTENNA_PATH_DATA
-        private const val RIGHT_ANTENNA_PATH_DATA = CreatureGeometry.CRAYFISH_RIGHT_ANTENNA_PATH_DATA
     }
 }

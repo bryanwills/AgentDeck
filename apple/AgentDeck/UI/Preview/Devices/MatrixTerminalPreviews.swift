@@ -157,11 +157,9 @@ private struct PixooPixelGrid: View {
 // Real firmware (esp32/src/ui/matrix/matrix_pages.cpp) rotates through
 // pages: AGENTS (creature sprites), USAGE (horizontal battery gauges),
 // and a disconnect breathing pulse. The preview reproduces the AGENTS
-// page with the firmware's EXACT 5×6 sprite masks (SPR_OCTOPUS /
-// SPR_JELLYFISH / SPR_OPENCODE / SPR_CRAYFISH + their *_ACC accent
-// overlays) and its color model: body in the per-kind state color,
-// accent as a lit detail (OpenCode's inner is a dim shadow). Static
-// preview — no page cycling or text scroller.
+// page with the firmware's exact generated 8×8 alpha masks rasterized from
+// design/brand/*.svg and its per-kind state colors. Static preview — no page
+// cycling or text scroller.
 
 struct UlanziMatrixPreview: View {
     let selection: DevicePreviewSelection
@@ -225,35 +223,23 @@ struct UlanziMatrixPreview: View {
         // synthesized palette. One creature per alive session, like the firmware.
         let sessions = selection.displaySessions
         let hasOpenClaw = sessions.contains { $0.agent == .openclaw }
-        let crayfishX = 27
-        let agentMaxX = hasOpenClaw ? crayfishX - 7 : matrixW - 7
+        let crayfishX = 24
+        let agentMaxX = hasOpenClaw ? crayfishX - 8 : matrixW - 8
 
-        // Non-OpenClaw agents march left → right, 7px stride (5px sprite
-        // + 2px gap), exactly like the firmware's agents area.
-        var cursorX = 1
+        // Non-OpenClaw agents march left → right at the native 8px glyph width.
+        var cursorX = 0
         for (index, session) in sessions.enumerated() where session.agent != .openclaw {
             guard cursorX <= agentMaxX else { break }
             let agent = session.agent
             let state = session.state
-            let bodyColor = Tc001Sprites.bodyColor(agent: agent, state: state, instanceIdx: index)
-            if agent == .antigravity {
-                // Firmware special-cases antigravity: instead of a monochrome
-                // sprite it draws a 6×6 rainbow micro mark whose per-pixel hues
-                // are scaled by the state brightness envelope (matrix_pages.cpp
-                // drawAntigravityMicro). Reproduce it for visual parity.
-                let envelope = Tc001Sprites.bodyRGB255(agent: agent, state: state, instanceIdx: index)
-                drawAntigravityMicro(ctx: &ctx, atX: cursorX, y: 1, envelope: envelope, cellW: cellW, cellH: cellH)
-            } else {
-                drawSprite(
-                    ctx: &ctx, atX: cursorX, y: 1,
-                    body: Tc001Sprites.body(for: agent),
-                    accent: Tc001Sprites.accent(for: agent),
-                    bodyColor: bodyColor,
-                    accentColor: Tc001Sprites.accentColor(agent: agent, state: state),
-                    cellW: cellW, cellH: cellH
-                )
-            }
-            cursorX += 7
+            drawSprite(
+                ctx: &ctx, atX: cursorX,
+                alpha: Tc001Sprites.mask(for: agent),
+                bodyRGB: Tc001Sprites.bodyRGB255(agent: agent, state: state, instanceIdx: index),
+                rainbow: agent == .antigravity,
+                cellW: cellW, cellH: cellH
+            )
+            cursorX += 8
         }
 
         // OpenClaw crayfish pinned at the right edge — the firmware's
@@ -261,11 +247,10 @@ struct UlanziMatrixPreview: View {
         if hasOpenClaw {
             let ocState = sessions.first { $0.agent == .openclaw }?.state ?? selection.state
             drawSprite(
-                ctx: &ctx, atX: crayfishX, y: 1,
-                body: Tc001Sprites.body(for: .openclaw),
-                accent: Tc001Sprites.accent(for: .openclaw),
-                bodyColor: Tc001Sprites.bodyColor(agent: .openclaw, state: ocState, instanceIdx: 0),
-                accentColor: Tc001Sprites.accentColor(agent: .openclaw, state: ocState),
+                ctx: &ctx, atX: crayfishX,
+                alpha: Tc001Sprites.mask(for: .openclaw),
+                bodyRGB: Tc001Sprites.bodyRGB255(agent: .openclaw, state: ocState, instanceIdx: 0),
+                rainbow: false,
                 cellW: cellW, cellH: cellH
             )
         }
@@ -274,11 +259,10 @@ struct UlanziMatrixPreview: View {
         // agentCount == 0 branch (dim terracotta, mid-breath).
         if sessions.isEmpty {
             drawSprite(
-                ctx: &ctx, atX: 8, y: 1,
-                body: Tc001Sprites.body(for: .claudeCode),
-                accent: Tc001Sprites.accent(for: .claudeCode),
-                bodyColor: Color(red: 64 / 255, green: 38 / 255, blue: 29 / 255),
-                accentColor: Color(red: 188 / 255, green: 120 / 255, blue: 88 / 255),
+                ctx: &ctx, atX: 12,
+                alpha: Tc001Sprites.mask(for: .claudeCode),
+                bodyRGB: (64, 38, 29),
+                rainbow: false,
                 cellW: cellW, cellH: cellH
             )
         }
@@ -286,18 +270,22 @@ struct UlanziMatrixPreview: View {
 
     private func drawSprite(
         ctx: inout GraphicsContext,
-        atX x: Int, y: Int,
-        body: [UInt8], accent: [UInt8],
-        bodyColor: Color, accentColor: Color,
+        atX x: Int,
+        alpha: [UInt8], bodyRGB: (Double, Double, Double), rainbow: Bool,
         cellW: CGFloat, cellH: CGFloat
     ) {
-        for row in 0..<6 {
-            for col in 0..<5 {
-                let lit = (body[row] >> (4 - col)) & 1 == 1
-                let acc = (accent[row] >> (4 - col)) & 1 == 1
-                guard lit || acc else { continue }
-                drawLED(ctx: &ctx, x: x + col, y: y + row,
-                        color: acc ? accentColor : bodyColor,
+        for row in 0..<OfficialTc001Glyphs.size {
+            for col in 0..<OfficialTc001Glyphs.size {
+                let coverage = Double(alpha[row * OfficialTc001Glyphs.size + col]) / 255
+                guard coverage >= 12.0 / 255.0 else { continue }
+                let source = rainbow ? Self.rainbowBands[col] : bodyRGB
+                let envelope = rainbow ? min(1, max(bodyRGB.0, bodyRGB.1, bodyRGB.2) / 255 * 1.45) : 1
+                let color = Color(
+                    red: source.0 / 255 * envelope * coverage,
+                    green: source.1 / 255 * envelope * coverage,
+                    blue: source.2 / 255 * envelope * coverage
+                )
+                drawLED(ctx: &ctx, x: x + col, y: row, color: color,
                         cellW: cellW, cellH: cellH)
             }
         }
@@ -324,101 +312,26 @@ struct UlanziMatrixPreview: View {
         )
     }
 
-    // Antigravity 6×6 rainbow micro mark — a faithful port of the firmware's
-    // drawAntigravityMicro (matrix_pages.cpp). Each lit cell's canonical hue is
-    // scaled by the state brightness envelope (scaleByBody, boost 1.45), so the
-    // mark dims/brightens with idle/processing exactly like the LED hardware.
-    private func drawAntigravityMicro(
-        ctx: inout GraphicsContext,
-        atX x: Int, y: Int,
-        envelope: (Double, Double, Double),
-        cellW: CGFloat, cellH: CGFloat
-    ) {
-        // Rainbow glyph rows (firmware SPR_AG); '.' and 'K' are unlit.
-        let rows = [
-            ".YOO..",
-            ".LYOR.",
-            "LTORRP",
-            "TQKKVP",
-            "QK..KU",
-            "N....U",
-        ]
-        // Envelope brightness factor: (max channel / 255) × 1.45, clamped to 1
-        // (firmware scaleByBody). `envelope` is the 0–255 state body tone.
-        let bodyMax = max(envelope.0, max(envelope.1, envelope.2)) / 255
-        let s = min(1.0, bodyMax * 1.45)
-        for (row, chars) in rows.enumerated() {
-            for (col, ch) in chars.enumerated() {
-                guard let hue = Self.antigravityHues[ch] else { continue }
-                let color = Color(
-                    red: min(1.0, hue.0 * s),
-                    green: min(1.0, hue.1 * s),
-                    blue: min(1.0, hue.2 * s)
-                )
-                drawLED(ctx: &ctx, x: x + col, y: y + row, color: color, cellW: cellW, cellH: cellH)
-            }
-        }
-    }
-
-    /// Canonical antigravity rainbow palette (0…1 RGB), mirroring
-    /// `antigravityPixelColor` in the TC001 firmware. 'K'/'.' are omitted (unlit).
-    private static let antigravityHues: [Character: (Double, Double, Double)] = [
-        "L": (92 / 255,  214 / 255, 77 / 255),   // green
-        "T": (31 / 255,  198 / 255, 179 / 255),  // teal
-        "Q": (58 / 255,  199 / 255, 235 / 255),  // cyan
-        "Y": (245 / 255, 203 / 255, 36 / 255),   // yellow
-        "O": (255 / 255, 132 / 255, 16 / 255),   // orange
-        "R": (255 / 255, 82 / 255,  65 / 255),   // red
-        "P": (183 / 255, 92 / 255,  182 / 255),  // purple
-        "V": (102 / 255, 111 / 255, 225 / 255),  // violet
-        "U": (36 / 255,  126 / 255, 255 / 255),  // blue
-        "N": (41 / 255,  184 / 255, 238 / 255),  // light blue
+    /// Same left-to-right rainbow bands as firmware drawOfficialMatrixGlyph.
+    private static let rainbowBands: [(Double, Double, Double)] = [
+        (92, 214, 77), (31, 198, 179), (58, 199, 235), (245, 203, 36),
+        (255, 82, 65), (183, 92, 182), (102, 111, 225), (36, 126, 255),
     ]
 }
 
-/// Hand-maintained mirror of the TC001 firmware sprite tables + color model
-/// (esp32/src/ui/matrix/matrix_pages.cpp `SPR_*` / `agentColor`). Update this
-/// enum when the firmware sprites change.
+/// TC001 preview adapter. Geometry comes from generated OfficialTc001Glyphs;
+/// only the firmware state-color model remains hand-written here.
 private enum Tc001Sprites {
-    // Body masks — exact firmware bit patterns.
-    static func body(for agent: PixooPreviewAgent) -> [UInt8] {
+    static func mask(for agent: PixooPreviewAgent) -> [UInt8] {
+        let key: OfficialDotGlyph
         switch agent {
-        case .claudeCode: // SPR_OCTOPUS
-            return [0b01110, 0b11111, 0b10101, 0b11111, 0b01110, 0b10101]
-        case .codex:      // SPR_JELLYFISH
-            return [0b01110, 0b11111, 0b11111, 0b01110, 0b01010, 0b10001]
-        case .opencode:   // SPR_OPENCODE — canonical rectangular ring
-            return [0b11111, 0b10001, 0b10001, 0b10001, 0b10001, 0b11111]
-        case .openclaw:   // SPR_CRAYFISH
-            return [0b10001, 0b01110, 0b11111, 0b01110, 0b00100, 0b01010]
-        case .antigravity: // SPR_ANTIGRAVITY — rising peak (unused on TC001: the
-            // firmware draws antigravity as a rainbow micro mark instead, see
-            // UlanziMatrixPreview.drawAntigravityMicro — kept for completeness).
-            return [0b00100, 0b00100, 0b01110, 0b01110, 0b11011, 0b10001]
+        case .claudeCode: key = .claudeCode
+        case .codex: key = .codex
+        case .opencode: key = .openCode
+        case .openclaw: key = .openClaw
+        case .antigravity: key = .antigravity
         }
-    }
-
-    // Accent overlays — lit details (OpenCode's is a dim inner shadow).
-    static func accent(for agent: PixooPreviewAgent) -> [UInt8] {
-        switch agent {
-        case .claudeCode: // brighter head highlight
-            return [0b01110, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000]
-        case .codex:      // ">_" prompt marking (light)
-            return [0b00000, 0b00000, 0b00100, 0b00000, 0b00000, 0b00000]
-        case .opencode:   // dim inner shadow fill
-            return [0b00000, 0b01110, 0b01110, 0b01110, 0b01110, 0b00000]
-        case .openclaw:   // teal eyes (OpenClaw signature)
-            return [0b00000, 0b01010, 0b00000, 0b00000, 0b00000, 0b00000]
-        case .antigravity: // SPR_ANTIGRAVITY_ACC — lit apex (unused, see body()).
-            return [0b00100, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000]
-        }
-    }
-
-    /// Firmware `agentColor` at mid-pulse: processing pulses the per-kind
-    /// brand tone, awaiting pulses amber, idle is the dim brand tone.
-    static func bodyColor(agent: PixooPreviewAgent, state: PixooPreviewState, instanceIdx: Int) -> Color {
-        let rgb = bodyRGB255(agent: agent, state: state, instanceIdx: instanceIdx)
-        return Color(red: rgb.0 / 255, green: rgb.1 / 255, blue: rgb.2 / 255)
+        return OfficialTc001Glyphs.masks[key] ?? []
     }
 
     /// Raw 0–255 body tone behind `bodyColor` — used directly by the antigravity
@@ -453,24 +366,6 @@ private enum Tc001Sprites {
         return rgb
     }
 
-    static func accentColor(agent: PixooPreviewAgent, state: PixooPreviewState) -> Color {
-        switch agent {
-        case .opencode:
-            // Dim inner shadow — darker than the frame for depth.
-            return Color(red: 30 / 255, green: 28 / 255, blue: 28 / 255)
-        case .openclaw:
-            // Teal eyes.
-            return Color(red: 40 / 255, green: 170 / 255, blue: 160 / 255)
-        case .codex:
-            return Color(red: 200 / 255, green: 205 / 255, blue: 255 / 255)
-        case .claudeCode:
-            return Color(red: 235 / 255, green: 150 / 255, blue: 110 / 255)
-        case .antigravity:
-            // Lit apex highlight (unused: antigravity draws via the rainbow
-            // micro path, not the accent mask — kept for switch completeness).
-            return Color(red: 235 / 255, green: 238 / 255, blue: 245 / 255)
-        }
-    }
 }
 
 // MARK: - Divoom Timebox Mini (11×11)

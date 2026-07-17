@@ -6,13 +6,12 @@
 #include <cmath>
 
 /**
- * Front-facing crayfish — canonical OpenClaw body (viewBox 0 0 120 120) rendered from
- * a build-time alpha mask; claws/antennae/eyes stay procedural so their animation works.
+ * Front-facing crayfish — canonical OpenClaw mark rendered from a generated mask.
  *
  * DORMANT:  completely still, dropped down, dimmed (alpha 0.4)
  * SITTING:  nearly still on rocks, subtle heartbeat glow only
- * ROUTING:  full animation — claw clap, signal waves, eye flash, antenna wiggle
- * SICK:     desaturated, tilted, drooping claws
+ * ROUTING:  signal waves, glow, eye flash
+ * SICK:     desaturated and offset
  */
 
 constexpr float SVG_VB = 120.0f;
@@ -21,50 +20,6 @@ constexpr float HEARTBEAT_PERIOD = 4.0f;
 namespace Crayfish {
 
 void init() {}
-
-// Draw filled ellipse
-static void fillEllipse(int cx, int cy, int rx, int ry,
-                        uint32_t color, uint8_t alpha) {
-    for (int dy = -ry; dy <= ry; dy++) {
-        float t = (float)dy / (ry + 1);
-        int hw = (int)(rx * sqrtf(1.0f - t * t));
-        for (int dx = -hw; dx <= hw; dx++) {
-            Draw::pixelA(cx + dx, cy + dy, color, alpha);
-        }
-    }
-}
-
-// Draw rounded claw blob (matching Android SVG: compact oval, not long pincer)
-// SVG claws are ~20×20 unit rounded shapes that pivot-rotate around attachment point
-static void drawClaw(int pivotX, int pivotY, float scale,
-                     float side, float angleDeg,
-                     uint32_t color, uint8_t alpha) {
-    float rad = angleDeg * M_PI / 180.0f;
-    float cosA = fastCos(rad);
-    float sinA = fastSin(rad);
-
-    // Claw center offset from pivot (SVG: claw center ~12 units outward, ~5 units down)
-    float offsetX = side * 12.0f * scale;
-    float offsetY = 5.0f * scale;
-    // Rotate offset around pivot
-    int clawCX = pivotX + (int)(offsetX * cosA - offsetY * sinA);
-    int clawCY = pivotY + (int)(offsetX * sinA + offsetY * cosA);
-
-    // Claw size: rounded blob ~18×16 SVG units
-    int rx = (int)(9.0f * scale);
-    int ry = (int)(8.0f * scale);
-
-    // Draw filled ellipse for claw blob
-    fillEllipse(clawCX, clawCY, rx, ry, color, alpha);
-
-    // Small notch/slit at tip to suggest pincer (2px dark line)
-    int notchX = clawCX + (int)(side * rx * 0.7f * cosA);
-    int notchY = clawCY + (int)(side * rx * 0.7f * sinA);
-    int notchLen = (int)(4.0f * scale);
-    Draw::line(notchX, notchY - notchLen / 2,
-               notchX, notchY + notchLen / 2,
-               0x050810, (uint8_t)(alpha * 0.5f));
-}
 
 void render(uint16_t* buf, int w, int h, float time, CrayfishState state) {
     if (state == CrayfishState::DORMANT) return;
@@ -81,18 +36,12 @@ void render(uint16_t* buf, int w, int h, float time, CrayfishState state) {
     uint32_t eyeColor = Theme::CrayfishEye;
     uint8_t alpha = 255;
     float vertBob = 0;
-    float clawAngle = 0;
-    float antennaWiggleX = 0;
-    float antennaWiggleY = 0;
 
     switch (state) {
         case CrayfishState::SITTING: {
             baseY = (int)(Layout::CfSittingY * h);
             // Nearly still — matches Android's 0.008f factor (imperceptible)
             vertBob = fastSin(time * 0.5f) * bodyW * 0.008f;
-            clawAngle = fastSin(time * 0.4f) * 1.5f;
-            antennaWiggleX = fastSin(time * 0.8f) * 0.7f * scale;
-            antennaWiggleY = fastSin(time * 0.5f) * 0.4f * scale;
 
             // Heartbeat glow (4s double-pulse) — very subtle
             float cycle = fmodf(time, HEARTBEAT_PERIOD);
@@ -112,11 +61,6 @@ void render(uint16_t* buf, int w, int h, float time, CrayfishState state) {
         case CrayfishState::ROUTING: {
             baseY = (int)(Layout::CfRoutingY * h);
             vertBob = fastSin(time * 3.0f) * bodyW * 0.05f;
-            // Claw clap ±28°
-            float phase = time * 2 * M_PI / 1.2f;
-            clawAngle = fastSin(phase) * 28.0f;
-            antennaWiggleX = fastSin(time * 7.0f) * 4.0f * scale;
-            antennaWiggleY = fastSin(time * 5.0f) * 3.0f * scale;
 
             // Body color pulse
             float colorPulse = (fastSin(time * 4.0f) * 0.5f + 0.5f) * 0.3f;
@@ -155,9 +99,6 @@ void render(uint16_t* buf, int w, int h, float time, CrayfishState state) {
             shellColor = lerpColor(Theme::CrayfishShell, 0x8B7B7B, 0.55f);
             shellDark = lerpColor(Theme::CrayfishDark, 0x5A4A4A, 0.55f);
             eyeColor = lerpColor(Theme::CrayfishEye, 0x5A4A4A, 0.55f);
-            clawAngle = -8.0f + fastSin(time * 0.5f) * 2.0f;
-            antennaWiggleX = fastSin(time * 0.3f) * 0.4f * scale;
-            antennaWiggleY = 2.0f * scale + fastSin(time * 0.4f) * 0.5f * scale;
             break;
         }
 
@@ -167,77 +108,19 @@ void render(uint16_t* buf, int w, int h, float time, CrayfishState state) {
 
     int cy = baseY + (int)vertBob;
 
-    // === Draw body — canonical 120×120 OpenClaw crayfish silhouette ===
-    // Rendered from the build-time alpha mask (CreatureGlyphs::CRAYFISH_BODY_A8), which
-    // includes the leg/tail nubs. The firmware center convention maps viewBox (60,55)
-    // → (cx,cy) (shared with the claw/eye/antenna math below).
-    int bodyRX = (int)(45 * scale);  // retained for downstream layout references
-
-    // Sick tilt: offset the body
-    int tiltOffX = 0;
-    if (state == CrayfishState::SICK) {
-        tiltOffX = (int)(bodyRX * 0.08f);
-    }
-
-    // Map the full 120-unit viewBox into a square box, centered on (60,55) → (cx,cy),
-    // with the canonical top-light/bottom-dark shell gradient.
+    // Exact design/brand/openclaw.svg mark. State animation moves/tints the
+    // generated mask but never reconstructs the claws, antennae, or body.
     int bodyBox = max(1, (int)(120 * scale));
-    int bodyX0 = cx - (int)(60 * scale) + tiltOffX;
-    int bodyY0 = cy - (int)(55 * scale);
-    Draw::alphaMaskGradient(CreatureGlyphs::CRAYFISH_BODY_A8,
-                            CreatureGlyphs::CRAYFISH_BODY_W, CreatureGlyphs::CRAYFISH_BODY_H,
+    int tiltOffX = state == CrayfishState::SICK ? (int)(bodyBox * 0.04f) : 0;
+    int bodyX0 = cx - bodyBox / 2 + tiltOffX;
+    int bodyY0 = cy - bodyBox / 2;
+    Draw::alphaMaskGradient(CreatureGlyphs::OPENCLAW_MARK_A8,
+                            CreatureGlyphs::OPENCLAW_MARK_W, CreatureGlyphs::OPENCLAW_MARK_H,
                             bodyX0, bodyY0, bodyBox, bodyBox, shellColor, shellDark, alpha);
-
-    // === Claws (SVG: pivot at (20,45) and (100,45) in 120×120 viewbox) ===
-    // Left claw pivot: SVG (20,45) → offset from center (60,55) = (-40, -10)
-    int lpx = cx - (int)(40 * scale) + tiltOffX;
-    int lpy = cy - (int)(10 * scale);
-    drawClaw(lpx, lpy, scale, -1.0f, clawAngle, shellColor, alpha);
-    // Right claw pivot: SVG (100,45) → offset from center = (+40, -10)
-    int rpx = cx + (int)(40 * scale) + tiltOffX;
-    int rpy = cy - (int)(10 * scale);
-    drawClaw(rpx, rpy, scale, 1.0f, -clawAngle, shellColor, alpha);
-
-    // === Eyes (SVG: at (45,35) and (75,35), radius 6) ===
-    int eyeR = (int)(6 * scale);
-    int eyeSpacing = (int)(15 * scale);
-    int eyeY = cy - (int)(20 * scale);
-    // Dark eye base
-    Draw::circle(cx - eyeSpacing + tiltOffX, eyeY, eyeR, 0x050810, alpha);
-    Draw::circle(cx + eyeSpacing + tiltOffX, eyeY, eyeR, 0x050810, alpha);
-    // Teal highlight (smaller, offset up-right like Android)
-    int hlR = (int)(2.5f * scale);
-    Draw::circle(cx - eyeSpacing + (int)(1 * scale) + tiltOffX, eyeY - (int)(1 * scale),
-                 hlR, eyeColor, alpha);
-    Draw::circle(cx + eyeSpacing + (int)(1 * scale) + tiltOffX, eyeY - (int)(1 * scale),
-                 hlR, eyeColor, alpha);
-
-    // === Antennae — emanate from the head top (viewBox y≈15) and sweep UP-and-OUT
-    //     well above the body silhouette, so the shell-colored stroke reads against
-    //     the water instead of vanishing shell-on-shell over the body. Drawn 2px
-    //     thick with a tip knob so they stay visible at every board size. ===
-    int antBaseX = (int)(15 * scale);   // viewBox ±15 from center (on the head)
-    int antBaseY = cy - (int)(40 * scale);
-    int antTipX  = (int)(34 * scale);   // sweep outward past the body edge
-    int antTipY  = cy - (int)(64 * scale);  // clear above the head into the water
-    uint8_t antA = (uint8_t)(alpha * 0.9f);
-    int knobR = max(1, (int)(2.4f * scale));
-
-    // Left antenna
-    int lbx = cx - antBaseX + tiltOffX + (int)antennaWiggleX;
-    int ltx = cx - antTipX + tiltOffX + (int)(antennaWiggleX * 1.8f);
-    int lty = antTipY - (int)antennaWiggleY;
-    Draw::line(lbx, antBaseY, ltx, lty, shellColor, antA);
-    Draw::line(lbx + 1, antBaseY, ltx + 1, lty, shellColor, antA);  // 2px thickness
-    Draw::circle(ltx, lty, knobR, shellColor, antA);
-
-    // Right antenna
-    int rbx = cx + antBaseX + tiltOffX - (int)antennaWiggleX;
-    int rtx = cx + antTipX + tiltOffX - (int)(antennaWiggleX * 1.8f);
-    int rty = antTipY - (int)antennaWiggleY;
-    Draw::line(rbx, antBaseY, rtx, rty, shellColor, antA);
-    Draw::line(rbx - 1, antBaseY, rtx - 1, rty, shellColor, antA);  // 2px thickness
-    Draw::circle(rtx, rty, knobR, shellColor, antA);
+    int eyeY = bodyY0 + (int)(bodyBox * (7.63f / 24.0f));
+    int eyeR = max(1, (int)(bodyBox * (0.53f / 24.0f)));
+    Draw::circle(bodyX0 + (int)(bodyBox * (9.05f / 24.0f)), eyeY, eyeR, eyeColor, alpha);
+    Draw::circle(bodyX0 + (int)(bodyBox * (15.38f / 24.0f)), eyeY, eyeR, eyeColor, alpha);
 }
 
 }  // namespace Crayfish

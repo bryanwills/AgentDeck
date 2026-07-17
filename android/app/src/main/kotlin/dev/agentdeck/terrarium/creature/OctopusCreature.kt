@@ -48,7 +48,6 @@ class OctopusCreature(
     private var visualState by mutableStateOf(OctopusVisualState.FLOATING)
     private var time by mutableFloatStateOf(phaseOffset)
     private var transitionProgress by mutableFloatStateOf(1f)
-    private var agentMark: AgentMark? by mutableStateOf(null)
     private var nameTag: String? by mutableStateOf(displayName)
     /** Whether to show name tag (only for multi-session). */
     private var showNameTag by mutableStateOf(displayName != null)
@@ -78,10 +77,6 @@ class OctopusCreature(
             visualState = newState
             transitionProgress = 0f
         }
-    }
-
-    fun setMark(newMark: AgentMark?) {
-        agentMark = newMark
     }
 
     fun setDisplayName(name: String?, show: Boolean = name != null) {

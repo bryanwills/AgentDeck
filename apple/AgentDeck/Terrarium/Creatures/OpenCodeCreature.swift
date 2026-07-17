@@ -1,6 +1,4 @@
-// OpenCodeCreature.swift — Nested-square logo creature for OpenCode
-// Geometric logo only — no organic features (eyes, tentacles, limbs)
-// Outer frame #F1ECEC, inner square #4B4646, bob + pulse animation
+// OpenCodeCreature.swift — exact design/brand/opencode.svg ring geometry.
 
 import SwiftUI
 
@@ -14,6 +12,8 @@ enum OpenCodeVisualState {
 }
 
 final class OpenCodeCreature: Creature {
+    private static let pathData = "M16 6H8v12h8V6zm4 16H4V2h16v20z"
+    private static let markPath = CrayfishCreature.parseSvgPath(pathData)
     // MARK: - Properties
 
     let sessionId: String
@@ -103,7 +103,6 @@ final class OpenCodeCreature: Creature {
     // MARK: - Colors
 
     private static let outerColor = Color(red: 0.945, green: 0.925, blue: 0.925) // #F1ECEC
-    private static let innerColor = Color(red: 0.294, green: 0.275, blue: 0.275) // #4B4646
     private static let glowColor = Color(red: 0.945, green: 0.925, blue: 0.925)  // #F1ECEC for glow
     static let nameBg = Color(red: 0.294, green: 0.275, blue: 0.275).opacity(0.6)
 
@@ -127,7 +126,7 @@ final class OpenCodeCreature: Creature {
             drawGlow(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
         }
 
-        // Nested squares
+        // Canonical OpenCode ring
         drawNestedSquares(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth), alpha: alpha)
 
         // "?" bubble
@@ -148,19 +147,13 @@ final class OpenCodeCreature: Creature {
         }
     }
 
-    // MARK: - Nested Squares
+    // MARK: - Canonical ring
 
     private func drawNestedSquares(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat,
                                     bodyW: CGFloat, alpha: CGFloat) {
         let breathScale: CGFloat = 1.0 + CGFloat(sin(time * (visualState == .pulsing ? 2.0 : 0.6)) * 0.02)
 
-        let outerSize = bodyW * 1.6 * breathScale
-        let outerHalf = outerSize / 2
-
-        // Outer rectangle (light frame)
-        let outerRect = CGRect(x: cx - outerHalf, y: cy - outerHalf,
-                               width: outerSize, height: outerSize)
-        let outerCorner = outerSize * 0.08
+        let markSize = bodyW * 1.6 * breathScale
 
         var outerAlpha = alpha
         if visualState == .pulsing {
@@ -168,18 +161,13 @@ final class OpenCodeCreature: Creature {
             outerAlpha *= pulse
         }
 
-        context.fill(Path(roundedRect: outerRect, cornerRadius: outerCorner),
-                     with: .color(Self.outerColor.opacity(outerAlpha * 0.92)))
-
-        // Inner rectangle (dark square) — 50% of outer, centered
-        let innerSize = outerSize * 0.60
-        let innerHalf = innerSize / 2
-        let innerRect = CGRect(x: cx - innerHalf, y: cy - innerHalf,
-                               width: innerSize, height: innerSize)
-        let innerCorner = innerSize * 0.06
-
-        context.fill(Path(roundedRect: innerRect, cornerRadius: innerCorner),
-                     with: .color(Self.innerColor.opacity(alpha)))
+        context.drawLayer { layer in
+            layer.translateBy(x: cx - markSize / 2, y: cy - markSize / 2)
+            layer.scaleBy(x: markSize / 24, y: markSize / 24)
+            layer.fill(Self.markPath,
+                       with: .color(Self.outerColor.opacity(outerAlpha * 0.92)),
+                       style: FillStyle(eoFill: true))
+        }
     }
 
     // MARK: - Glow

@@ -544,7 +544,6 @@ private fun ColorTerrariumBackground(
             ).also {
                 if (agent != null) {
                     it.setState(agent.visualState)
-                    it.setMark(agent.mark)
                 }
                 // Wire pop burst callback
                 it.onAskingExit = { nx, ny -> bubbleSystem.emitPopBurst(nx, ny) }
@@ -560,7 +559,6 @@ private fun ColorTerrariumBackground(
             octopuses[i].setHomePosition(slot.centerXFraction, slot.centerYFraction, slot.scaleFactor)
             if (i < state.agents.size) {
                 octopuses[i].setState(state.agents[i].visualState)
-                octopuses[i].setMark(state.agents[i].mark)
                 octopuses[i].setDisplayName(
                     state.agents[i].displayName,
                     show = true,

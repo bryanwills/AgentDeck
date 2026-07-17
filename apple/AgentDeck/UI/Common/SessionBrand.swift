@@ -11,9 +11,7 @@
 
 import SwiftUI
 
-/// Canonical per-agent brand colors. Creature SVG assets are authored as
-/// `currentColor` silhouettes, so the tint applied here is what the user
-/// actually sees.
+/// Canonical per-agent brand colors applied to the path-rendered official marks.
 enum SessionBrand {
     static func color(for agentType: String?) -> Color {
         switch agentType {

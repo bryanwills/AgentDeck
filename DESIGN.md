@@ -235,17 +235,18 @@ Mono caption inside: 12px, `--ink-500`, 0.04em tracked, e.g. `// menubar popup �
 ## 6. Iconography
 
 ### 6.1 Brand marks
-**Product mark** — the AgentDeck aquarium icon (`design/brand/agentdeck-icon.png`). A full-color illustration of an aquarium dome over a keyboard base, with the four creatures inside. Used at 1024² for the App Store, 512/256/128 in the Dock and bundle, and as the splash on every hardware surface during pairing. **The aquarium icon IS the logo** — we do not have an abstract wordmark; the icon stands alone.
+**Product mark** — the AgentDeck aquarium icon (`design/brand/agentdeck-icon.png`). A full-color illustration of an aquarium dome over a keyboard base. Used at 1024² for the App Store, 512/256/128 in the Dock and bundle, and as the splash on every hardware surface during pairing. **The aquarium icon IS the logo** — we do not have an abstract wordmark; the icon stands alone.
 
 **Small-size product symbol** — when the full illustration would collapse below roughly 32pt, use the simplified aquarium-deck symbol implemented as `AgentDeckLogo`: dome outline + waterline + keyboard base/buttons. It must preserve the app icon silhouette and must not revert to abstract card-stack, router, hub, or generic deck metaphors. In product UI it is monochrome and inherits the local product chrome color (`DesignTokens.UI.cyan`, label color, or the surface accent).
 
 **Agent marks** — the real upstream brand SVGs of each tool, kept verbatim:
-- `claudecode.svg` — Claude Code (Anthropic Antigravity mark) · `#C07058`
+- `claudecode.svg` — Claude Code robot · `#C07058`
 - `codex.svg` — OpenAI Codex · `#6166E0`
 - `openclaw.svg` — OpenClaw · `#FF4D4D`
 - `opencode.svg` — OpenCode · `#3a3a3a`
+- `antigravity.svg` — Antigravity · rainbow on color, monochrome on e-ink
 
-All four live in `design/brand/` and `assets/creatures/`. They are tinted at runtime via `currentColor` in `creatures.jsx`. Brand colors come from `data.js → AGENTS` and are **the only saturated reds/blues allowed in the system**. Do not redraw, restyle, or recolor them; if an upstream changes their mark, replace the SVG.
+The five SVGs live **only** in `design/brand/`, which is the canonical source. Runtime path constants and firmware bitmaps are generated or contract-tested mirrors; they are not alternate design sources. Full-vector surfaces preserve the exact path geometry. Pixel-constrained displays may use reviewed raster or hand-tuned reductions that preserve the identifying silhouette and cutouts. Do not substitute provider-company marks (for example the generic OpenAI or Anthropic logo), redraw the vector on capable surfaces, or add a second logo dump elsewhere.
 
 > The earlier abstract logo explorations in `explore/logos.jsx` (Stacked Deck, Hub & Spokes, etc.) are kept for reference only and are not used in production.
 
@@ -256,7 +257,7 @@ The menu bar uses the small-size aquarium-deck symbol, not the full app icon ill
 22px stroke icons, 1.6px stroke, square caps. Drawn from a 24px viewbox. Build new icons in this system; never grab from a generic icon font.
 
 ### 6.4 Creature marks
-Each agent (Claude Code, Codex, OpenClaw, OpenCode) has a creature avatar in `creatures.jsx`. The creature inherits its agent's brand color and is the only place we use saturated brand reds/blues.
+Each agent (Claude Code, Codex, OpenClaw, OpenCode, Antigravity) has a creature avatar derived from its canonical mark. Motion and state effects may surround or transform the mark, but must not replace its identifying geometry.
 
 ---
 
@@ -322,7 +323,7 @@ design/
   components.css                         ← component rules (buttons, badges, kickers, …)
   patterns.css                           ← placeholder, hatch, divider patterns
   icons.jsx                              ← extended icon set
-  brand/                                 ← AgentDeck app icon + 4 upstream agent SVGs
+  brand/                                 ← AgentDeck app icon + 5 canonical agent SVGs
   lint.sh                                ← R1–R8 design rule checker
 docs/design/
   Design System.html                     ← visual style guide

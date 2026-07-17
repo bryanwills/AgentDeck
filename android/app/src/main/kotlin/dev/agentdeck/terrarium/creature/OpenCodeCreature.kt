@@ -10,9 +10,13 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.vector.PathParser
+import dev.agentdeck.terrarium.CreatureGeometry
 import dev.agentdeck.terrarium.CreatureNameTagStyle
 import dev.agentdeck.terrarium.creatureNameTagMetric
 import dev.agentdeck.terrarium.resolveCreatureNameTagLayout
@@ -25,8 +29,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * OpenCode nested-square creature -- geometric logo, NOT biomorphic.
- * Two concentric rectangles: bright outer frame (#F1ECEC) + dark inner square (#4B4646).
+ * OpenCode creature using the exact design/brand/opencode.svg ring path.
  * No eyes, tentacles, or limbs. Animation is limited to bob/pulse only.
  *
  * Same public API as OctopusCreature/CloudCreature for interchangeable use.
@@ -194,7 +197,7 @@ class OpenCodeCreature(
         }
         val scaledSize = bodySize * pulseScale
 
-        // Draw nested squares
+        // Draw canonical OpenCode ring
         drawNestedSquares(scope, centerX, centerY, scaledSize, bodyAlpha)
 
         // ASKING: speech bubble with "?"
@@ -208,24 +211,13 @@ class OpenCodeCreature(
         }
     }
 
-    /**
-     * Draw the nested-square logo: outer frame + inner square.
-     * Geometric, clean, no organic features.
-     */
+    /** Draw the canonical square-cornered OpenCode ring. */
     private fun drawNestedSquares(
         scope: DrawScope,
         cx: Float, cy: Float,
         size: Float,
         alpha: Float,
     ) {
-        // Canonical opencode mark: a single-color vertical rectangular RING (16:20) with a
-        // HOLLOW center (terrarium shows through), matching opencode.ai — not two filled
-        // nested squares whose dark inner read as a shadow.
-        val rectW = size * 0.80f   // 16:20 → slightly tall
-        val rectH = size
-        val thick = rectW * 0.28f  // frame thickness ~ brand 4/16
-        val cornerR = size * 0.05f
-
         val frameColor = when (visualState) {
             OctopusVisualState.SLEEPING -> OUTER_DIM
             OctopusVisualState.WORKING -> {
@@ -235,25 +227,22 @@ class OpenCodeCreature(
             else -> OUTER_FRAME
         }
 
-        // Thick rounded-rect stroke = hollow ring. Stroke is centered, so inset by thick/2.
-        scope.drawRoundRect(
-            color = frameColor,
-            alpha = alpha,
-            topLeft = Offset(cx - rectW / 2f + thick / 2f, cy - rectH / 2f + thick / 2f),
-            size = Size(rectW - thick, rectH - thick),
-            cornerRadius = CornerRadius(cornerR, cornerR),
-            style = Stroke(width = thick),
-        )
+        val pathScale = size / CreatureGeometry.OPENCODE_VIEWBOX
+        scope.withTransform({
+            translate(cx - size / 2f, cy - size / 2f)
+            scale(pathScale, pathScale, pivot = Offset.Zero)
+        }) {
+            drawPath(openCodePath, color = frameColor, alpha = alpha)
+        }
 
         // Working state: subtle outer glow
         if (visualState == OctopusVisualState.WORKING) {
             val glowAlpha = (sin(time * 2f) * 0.15f + 0.15f) * alpha
-            scope.drawRoundRect(
+            scope.drawRect(
                 color = GLOW_COLOR,
                 alpha = glowAlpha,
-                topLeft = Offset(cx - rectW / 2f - 2f, cy - rectH / 2f - 2f),
-                size = Size(rectW + 4f, rectH + 4f),
-                cornerRadius = CornerRadius(cornerR + 2f, cornerR + 2f),
+                topLeft = Offset(cx - size * 0.34f - 2f, cy - size * 0.43f - 2f),
+                size = Size(size * 0.68f + 4f, size * 0.86f + 4f),
                 style = Stroke(width = 2f),
             )
         }
@@ -393,6 +382,9 @@ class OpenCodeCreature(
     }
 
     companion object {
+        private val openCodePath = PathParser().parsePathString(CreatureGeometry.OPENCODE_PATH_DATA).toPath().apply {
+            fillType = PathFillType.EvenOdd
+        }
         // Body size as fraction of canvas width
         private const val BODY_SIZE_FRACTION = 0.064f
 

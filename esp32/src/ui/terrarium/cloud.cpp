@@ -4,6 +4,7 @@
 #include "../theme.h"
 #include "../display.h"
 #include "config.h"
+#include "creature_glyphs_generated.h"
 #include "../../state/agent_state.h"
 #include <Arduino.h>
 #include <lvgl.h>
@@ -13,8 +14,8 @@
 /**
  * Cloud creature — represents Codex CLI agent.
  *
- * Body is 6 overlapping filled circles forming a cumulus cloud shape.
- * Interior shows ">_" terminal prompt text.
+ * Body is the canonical design/brand/codex.svg alpha mask, including its
+ * terminal-prompt cutouts.
  * Color: indigo/blue (#5561E0) with lighter highlights.
  *
  * States map to Y positions the same as octopus:
@@ -164,47 +165,13 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         Draw::circle(cx, cy, glowR, Theme::CloudBody, (uint8_t)(glow * 25));
     }
 
-    // Render the same 6-lobe cloud silhouette used by Stream Deck, D200H,
-    // Android, and Apple terrarium. The old TC001/ESP32 glyph was a pill
-    // approximation, which made Codex read as a different character family.
-    static const float LOBE_DX[6] = {-0.14f, 0.16f, 0.32f, 0.14f, -0.16f, -0.32f};
-    static const float LOBE_DY[6] = {-0.30f, -0.26f, -0.02f, 0.26f, 0.26f, -0.02f};
-    static const float LOBE_R[6]  = { 0.30f,  0.28f,  0.28f, 0.28f, 0.28f,  0.28f};
-    float bodyW = baseRadius * 1.8f;
-    for (int i = 0; i < 6; i++) {
-        int lx = cx + (int)(LOBE_DX[i] * bodyW);
-        int ly = cy + (int)(LOBE_DY[i] * bodyW);
-        int lr = max(2, (int)(LOBE_R[i] * bodyW));
-        uint32_t lobeColor = (LOBE_DY[i] < -0.1f)
-            ? lerpColor(bodyColor, Theme::CloudBodyLight, 0.35f)
-            : bodyColor;
-        Draw::circle(lx, ly, lr, lobeColor, alpha);
-    }
-    Draw::circle(cx, cy, max(2, (int)(bodyW * 0.18f)), bodyColor, alpha);
-
-    // >_ prompt overlay (larger, centered in body)
-    if (state != CreatureState::SLEEPING) {
-        uint32_t promptColor = Theme::CloudPrompt;
-        uint8_t promptAlpha = (uint8_t)(alpha * 0.9f);
-        int ps = max(1, (int)(bodyW * 0.058f));  // larger ">_" so the prompt reads clearly in the smaller body
-        int step = ps * 3;
-        int pox = cx - step * 2;
-        int poy = cy - step / 2;
-        auto px = [&](int x, int y) { Draw::pixelA(x, y, promptColor, promptAlpha); };
-        // ">" : 3 rows
-        for (int d = 0; d < ps; d++) {
-            px(pox + d, poy + d);           // top-right diagonal
-            px(pox + ps + d, poy + ps);     // middle
-            px(pox + d, poy + ps * 2 - d);  // bottom-right diagonal
-        }
-        // "_" : underline
-        bool showCursor = (state != CreatureState::WORKING) || fmodf(t, 1.0f) < 0.6f;
-        if (showCursor) {
-            for (int d = 0; d < ps * 2; d++) {
-                px(pox + step + d, poy + ps * 2);
-            }
-        }
-    }
+    int bodyBox = max(4, (int)(baseRadius * 1.45f));
+    int bodyX0 = cx - bodyBox / 2;
+    int bodyY0 = cy - bodyBox / 2;
+    Draw::alphaMaskGradient(CreatureGlyphs::CODEX_A8,
+                            CreatureGlyphs::CODEX_W, CreatureGlyphs::CODEX_H,
+                            bodyX0, bodyY0, bodyBox, bodyBox,
+                            Theme::CloudBodyLight, bodyColor, alpha);
 
     // Speech bubble for ASKING state
     if (state == CreatureState::ASKING) {

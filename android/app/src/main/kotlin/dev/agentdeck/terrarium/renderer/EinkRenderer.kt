@@ -52,10 +52,8 @@ private const val EINK_ANIM_CYCLE = 32
 // canonical SVG paths in CreatureGeometry via canvas.drawPath — drawPath works on
 // CremaS/RK3566 e-ink (the old "no drawPath" comments were based on an unverified claim).
 
-// Codex cloud (6-lobe clover) and OpenCode (nested rounded squares) are procedural — no SVG path.
-
-// E-ink crayfish viewBox (matches CreatureGeometry.CRAYFISH_VIEWBOX).
-private const val EINK_SVG_VIEWBOX = 120f
+// Codex and OpenCode also preserve their canonical geometry; Codex uses the
+// cached path below while OpenCode's rectangular ring is equivalent primitives.
 
 internal fun einkAnimationFrameIntervalMs(colorEink: Boolean): Long =
     if (colorEink) COLOR_EINK_ANIM_FRAME_MS else EINK_ANIM_FRAME_MS
@@ -730,9 +728,7 @@ private fun drawEinkNameTag(
 }
 
 /**
- * E-ink cloud creature (Codex CLI) — 6-lobe clover/cloud silhouette.
- * Uses filled circles only (e-ink Canvas compat: no SVG union path).
- * ">_" terminal prompt rendered in high-contrast ink inside.
+ * E-ink Codex creature using the canonical design/brand/codex.svg path.
  *
  * Y position depends on state:
  *  - WORKING: hovers in the layout slot (upper swim area)
@@ -795,49 +791,25 @@ private fun drawEinkCloud(
         einkPick(GRAY_CLOUD_BODY, COLOR_CLOUD_BODY)
     }
 
-    // Body: same six-lobe Codex cloud used on Stream Deck/D200H, but drawn with
-    // primitive circles for e-ink Canvas compatibility. Keep it a little larger
-    // than the tablet color renderer: e-ink loses fine detail and the prompt must
-    // stay readable from a desk distance.
+    // Keep it a little larger than the tablet color renderer: e-ink loses fine
+    // detail and the prompt cutout must stay readable from a desk distance.
     val bodyRadius = w * 0.070f * scaleFactor
     val br = bodyRadius * breathScale
     paint.style = Paint.Style.FILL
     paint.color = bodyColor
 
-    // Tablet CloudCreature LOBE_OFFSETS (dx, dy as fraction of bodyRadius)
-    val lobeDx = floatArrayOf(-0.14f, 0.16f, 0.32f, 0.14f, -0.16f, -0.32f)
-    val lobeDy = floatArrayOf(-0.30f, -0.26f, -0.02f, 0.26f, 0.26f, -0.02f)
-    val lobeR  = floatArrayOf( 0.30f,  0.28f,  0.28f,  0.28f,  0.28f,  0.28f)
-
-    for (i in 0 until 6) {
-        canvas.drawCircle(cx + br * lobeDx[i], cy + br * lobeDy[i], br * lobeR[i], paint)
+    val markSize = br * 1.25f
+    val path = android.graphics.Path(CreatureGeometry.codexNativePath)
+    val matrix = android.graphics.Matrix().apply {
+        setScale(markSize / CreatureGeometry.CODEX_VIEWBOX, markSize / CreatureGeometry.CODEX_VIEWBOX)
+        postTranslate(cx - markSize / 2f, cy - markSize / 2f)
     }
-    // Central fill to seal inter-lobe gaps
-    canvas.drawCircle(cx, cy, br * 0.18f, paint)
+    path.transform(matrix)
+    canvas.drawPath(path, paint)
 
     // Effective body extents for positioning
-    val bodyHeight = br * 0.60f  // top lobe at dy=-0.30 + radius 0.30
-    val bodyExtentX = br * 0.60f // right lobe at dx=0.32 + radius 0.28
-
-    // ">_" terminal prompt inside the cloud body. Draw this as vector strokes,
-    // not text, so e-ink devices do not rasterize it into tiny gray noise.
-    if (state != OctopusVisualState.SLEEPING) {
-        paint.style = Paint.Style.STROKE
-        paint.color = einkPick(GRAY_AIR, COLOR_AIR)
-        paint.strokeWidth = kotlin.math.max(2.5f * scaleFactor, br * 0.075f)
-        paint.strokeCap = Paint.Cap.ROUND
-        paint.strokeJoin = Paint.Join.ROUND
-
-        canvas.drawLine(cx - br * 0.18f, cy - br * 0.12f, cx + br * 0.05f, cy, paint)
-        canvas.drawLine(cx + br * 0.05f, cy, cx - br * 0.18f, cy + br * 0.12f, paint)
-        val showCursor = state != OctopusVisualState.ASKING || frameMod4(animFrame) < 2
-        if (showCursor) {
-            canvas.drawLine(cx + br * 0.16f, cy + br * 0.12f, cx + br * 0.34f, cy + br * 0.12f, paint)
-        }
-
-        paint.strokeCap = Paint.Cap.BUTT
-        paint.strokeJoin = Paint.Join.MITER
-    }
+    val bodyHeight = markSize / 2f
+    val bodyExtentX = markSize / 2f
 
     // Name tag above cloud (reuse the shared name tag renderer)
     if (displayName != null) {
@@ -1129,105 +1101,33 @@ private fun drawEinkCrayfish(
     val cy = baseY + bobOffset
     val bodyWidth = w * 0.11f
 
-    if (state == CrayfishVisualState.DORMANT) {
-        // Only show antenna tips above rocks
-        paint.color = einkPick(GRAY_CRAY_BODY, COLOR_CRAY_BODY)
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1.5f
-        canvas.drawLine(cx - bodyWidth * 0.1f, cy - bodyWidth * 0.1f,
-            cx - bodyWidth * 0.3f, cy - bodyWidth * 0.4f, paint)
-        canvas.drawLine(cx + bodyWidth * 0.1f, cy - bodyWidth * 0.1f,
-            cx + bodyWidth * 0.3f, cy - bodyWidth * 0.4f, paint)
-        return
-    }
-
-    val scale = bodyWidth / EINK_SVG_VIEWBOX
-    val offsetX = cx - EINK_SVG_VIEWBOX / 2f * scale
-    val offsetY = cy - EINK_SVG_VIEWBOX / 2f * scale
-
-    // Claw animation — amplified for e-ink visibility, all 4 frames non-zero
-    val frame4 = frameMod4(animFrame)
-    val clawAngle = when (state) {
-        CrayfishVisualState.ROUTING -> when (frame4) {
-            0 -> 10f; 1 -> 30f; 2 -> -8f; 3 -> -20f; else -> 0f
-        }
-        CrayfishVisualState.OBSERVING -> when (frame4) {
-            0 -> 5f; 1 -> 15f; 2 -> -3f; 3 -> -10f; else -> 0f
-        }
-        CrayfishVisualState.SITTING -> when (frame4) {
-            0 -> 1f; 1 -> 3f; 2 -> 0f; 3 -> -2f; else -> 0f
-        }
-        CrayfishVisualState.WAITING -> 18f  // claws open wide
-        CrayfishVisualState.SICK -> -10f + frame4 * 1f  // claws droop, tiny movement
-        else -> 0f
-    }
-
-    // Antenna wiggle — amplified, all 4 frames moving
-    val antennaWiggle = when (state) {
-        CrayfishVisualState.ROUTING -> when (frame4) {
-            0 -> 2f; 1 -> 5f; 2 -> -2f; 3 -> -5f; else -> 0f
-        }
-        CrayfishVisualState.SITTING -> when (frame4) {
-            0 -> 0f; 1 -> 1f; 2 -> 0f; 3 -> -1f; else -> 0f
-        }
-        CrayfishVisualState.SICK -> when (frame4) {
-            0 -> 0f; 1 -> 0.5f; 2 -> 0f; 3 -> -0.5f; else -> 0f
-        }
-        else -> 0f
-    }
+    val scale = bodyWidth / CreatureGeometry.OPENCLAW_VIEWBOX
+    val offsetX = cx - CreatureGeometry.OPENCLAW_VIEWBOX / 2f * scale
+    val offsetY = cy - CreatureGeometry.OPENCLAW_VIEWBOX / 2f * scale
 
     canvas.save()
     canvas.translate(offsetX, offsetY)
     canvas.scale(scale, scale)
     if (state == CrayfishVisualState.SICK) {
-        canvas.rotate(-10f, EINK_SVG_VIEWBOX / 2f, EINK_SVG_VIEWBOX / 2f)
+        canvas.rotate(
+            -10f,
+            CreatureGeometry.OPENCLAW_VIEWBOX / 2f,
+            CreatureGeometry.OPENCLAW_VIEWBOX / 2f,
+        )
     }
 
-    // 1. Body — canonical 120×120 OpenClaw crayfish path (shared via CreatureGeometry,
-    //    leg/tail nubs are part of the path). drawPath works on e-ink Canvas.
+    // Exact design/brand/openclaw.svg mark. State motion moves the whole official
+    // silhouette instead of re-articulating an approximate body/claw construction.
     paint.style = Paint.Style.FILL
     paint.color = if (state == CrayfishVisualState.SICK) {
         einkPick(GRAY_CRAY_SICK, COLOR_CRAY_SICK)
     } else {
         einkPick(GRAY_CRAY_BODY, COLOR_CRAY_BODY)
     }
-    canvas.drawPath(CreatureGeometry.crayfishBodyNativePath, paint)
-
-    // 2. Left claw — canonical path, rotated about its body pivot
-    paint.color = if (state == CrayfishVisualState.SICK) {
-        einkPick(GRAY_CRAY_BODY, COLOR_CRAY_SICK)
-    } else {
-        einkPick(GRAY_CRAY_CLAW, COLOR_CRAY_CLAW)
-    }
-    canvas.save()
-    canvas.rotate(-clawAngle, CreatureGeometry.CRAYFISH_LEFT_CLAW_PIVOT_X, CreatureGeometry.CRAYFISH_LEFT_CLAW_PIVOT_Y)
-    canvas.drawPath(CreatureGeometry.crayfishLeftClawNativePath, paint)
-    canvas.restore()
-
-    // 3. Right claw — canonical path, rotated about its body pivot
-    canvas.save()
-    canvas.rotate(clawAngle, CreatureGeometry.CRAYFISH_RIGHT_CLAW_PIVOT_X, CreatureGeometry.CRAYFISH_RIGHT_CLAW_PIVOT_Y)
-    canvas.drawPath(CreatureGeometry.crayfishRightClawNativePath, paint)
-    canvas.restore()
-
-    // 4. Antennae — lines
-    paint.color = einkPick(GRAY_CRAY_BODY, COLOR_CRAY_BODY)
-    paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 3f
-    paint.strokeCap = Paint.Cap.ROUND
-    canvas.drawLine(45f + antennaWiggle, 20f, 30f + antennaWiggle * 2f, 0f, paint)
-    canvas.drawLine(75f - antennaWiggle, 20f, 90f - antennaWiggle * 2f, 0f, paint)
-
-    // 5. Eyes — white circles on body
-    paint.style = Paint.Style.FILL
-    paint.color = android.graphics.Color.WHITE
-    canvas.drawCircle(45f, 35f, 6f, paint)
-    canvas.drawCircle(75f, 35f, 6f, paint)
-
-    // Eye pupils
-    paint.color = android.graphics.Color.BLACK
-    canvas.drawCircle(46f, 34f, 2.5f, paint)
-    canvas.drawCircle(76f, 34f, 2.5f, paint)
+    paint.alpha = if (state == CrayfishVisualState.DORMANT) 105 else 255
+    for (path in CreatureGeometry.openClawBodyNativePaths) canvas.drawPath(path, paint)
+    for (path in CreatureGeometry.openClawEyeNativePaths) canvas.drawPath(path, paint)
+    paint.alpha = 255
 
     canvas.restore() // main transform
 

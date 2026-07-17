@@ -509,11 +509,8 @@ void drawMask64(int16_t x, int16_t y, const uint8_t* a8, int size) {
     }
 }
 
-// Agent creature glyph. OpenClaw uses the FULL canonical brand mark (eyes,
-// claws, antennae — same as the card surfaces), with the two eye pupils
-// punched back to paper so the face reads at 1-bit; the body-only
-// CRAYFISH_BODY mask is a terrarium asset that pairs with procedural claws
-// and looks like a shapeless blob on a card.
+// Agent creature glyph. OpenClaw uses the full canonical brand mark, with the
+// two eye centers punched back to paper as the documented 1-bit readability reduction.
 void drawAgentGlyph(const char* agentType, int16_t x, int16_t y, int size) {
     const uint8_t* a8 = CreatureGlyphs::OCTOPUS_A8;  // claude-code + default
     bool openclaw = false;
