@@ -90,8 +90,8 @@ function ensureDrainer(): void {
 }
 
 function deckFor(animFrame: number, animated: boolean) {
-  // showUsage pins the bottom-right two AgentDeck keys to 5H/7D gauges (just
-  // left of the D200H clock widget) — this surface has no encoder LCD for usage.
+  // showUsage pins the bottom-row keys left of the D200H clock widget to the
+  // quota gauges — this surface has no encoder LCD to carry usage.
   return buildSessionDeck(store.toLayoutInput(), { ...view, animFrame, animated, showUsage: true }, positions());
 }
 
