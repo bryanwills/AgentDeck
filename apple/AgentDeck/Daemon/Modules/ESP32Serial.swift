@@ -94,7 +94,15 @@ actor ESP32Serial {
     private static let permanentBlockDuration: TimeInterval = 300  // 5 minutes
     private static let serialOpenTimeoutSec: TimeInterval = 3
     private static let deviceInfoTimeoutSec: TimeInterval = 30  // retry device_info if absent
-    private static let deviceInfoReconnectSec: TimeInterval = 120
+    // An identified connection that read before but has been RX-silent this
+    // long is half-open: the board hung/rebooted badly or the CH340 RX path
+    // wedged, while writes keep landing in the kernel buffer so no write error
+    // ever closes it. Recycle so the poll loop reopens the port — the reopen's
+    // DTR/RTS toggle resets the board (self-heal). Safe ONLY because the
+    // heartbeat sends a keepalive every cycle and the firmware acks each one
+    // (~3s cadence): 180s = ~60 missed acks. Mirrors UART_SILENT_READ_TIMEOUT_MS
+    // in bridge/src/esp32-serial.ts.
+    private static let silentReadTimeoutSec: TimeInterval = 180
     private static let writeBackpressureRetryLimit = 100
     private static let writeBackpressureRetryUsec: useconds_t = 20_000
     private static let writeBackpressureDisconnectThreshold = 15
@@ -666,22 +674,34 @@ actor ESP32Serial {
             }
         }
 
-        var sentData = false
+        // Half-open recycle: a connection that has read before but has been
+        // RX-silent past silentReadTimeoutSec is a zombie — the board can no
+        // longer be reached and no write error will ever close the FD. Drop it
+        // here; pollForDevices() (10s cadence) reopens the port, and the
+        // reopen's DTR/RTS toggle resets the board. Never-read connections
+        // (lastReadAt == nil) are the device_info retry path's concern above.
+        for i in connections.indices.reversed() where connections[i].connected {
+            guard let lastReadAt = connections[i].lastReadAt else { continue }
+            let readAge = now.timeIntervalSince(lastReadAt)
+            if readAge > Self.silentReadTimeoutSec {
+                let conn = connections[i]
+                DaemonLogger.shared.info("ESP32 half-open serial (RX silent \(Int(readAge))s, writes healthy): \(conn.port) — recycling")
+                conn.readToken.invalidate()
+                try? conn.writeHandle?.close()
+                connections.remove(at: i)
+            }
+        }
 
         if let event = stateProvider?() {
             for i in connections.indices where connections[i].connected {
-                if sendEvent(event, to: &connections[i]) {
-                    sentData = true
-                }
+                sendEvent(event, to: &connections[i])
             }
         }
 
         if let event = usageProvider?(),
            event["fiveHourPercent"] != nil {
             for i in connections.indices where connections[i].connected {
-                if sendEvent(event, to: &connections[i]) {
-                    sentData = true
-                }
+                sendEvent(event, to: &connections[i])
             }
         }
 
@@ -693,9 +713,7 @@ actor ESP32Serial {
         // firmware upserts idempotently.
         if let event = sessionsListProvider?() {
             for i in connections.indices where connections[i].connected {
-                if sendEvent(event, to: &connections[i]) {
-                    sentData = true
-                }
+                sendEvent(event, to: &connections[i])
             }
         }
 
@@ -705,19 +723,19 @@ actor ESP32Serial {
         // The payload is tiny and the firmware handler is idempotent.
         if let event = displayStateProvider?() {
             for i in connections.indices where connections[i].connected {
-                if sendEvent(event, to: &connections[i]) {
-                    sentData = true
-                }
+                sendEvent(event, to: &connections[i])
             }
         }
 
-        // Keepalive: if no state/usage data available, send minimal JSON
-        // so ESP32 doesn't hit its 10s serial timeout
-        if !sentData {
-            let keepalive = "{\"type\":\"keepalive\"}"
-            for i in connections.indices where connections[i].connected {
-                sendToConnection(&connections[i], json: keepalive)
-            }
+        // Keepalive EVERY cycle, not only when no other data went out. The
+        // firmware acks ONLY keepalive lines (heartbeat_ack) — state/usage/
+        // sessions payloads produce no reply — so this is the sole periodic
+        // board→host liveness signal. Sending it only on idle meant an active
+        // daemon generated zero reads from healthy boards, which would make
+        // the half-open recycle above reset every board each timeout window.
+        let keepalive = "{\"type\":\"keepalive\"}"
+        for i in connections.indices where connections[i].connected {
+            sendToConnection(&connections[i], json: keepalive)
         }
         publishStatusShadow()
     }
@@ -948,6 +966,17 @@ actor ESP32Serial {
                         if let p = s["port"] { o["port"] = p }
                         if let es = s["elapsedSec"] { o["elapsedSec"] = es }
                         if let op = s["options"] { o["options"] = op }
+                        // Daemon-computed latest milestone (TIMELINE parity for the
+                        // IPS10 cards). Omitted when absent — empty strings would
+                        // cost ~50 bytes/session on the 4KB serial line budget.
+                        let lastText = lim(s["lastEventText"], 99)
+                        if !lastText.isEmpty {
+                            o["lastEventText"] = lastText
+                            let lastTask = lim(s["lastEventTask"], 39)
+                            if !lastTask.isEmpty { o["lastEventTask"] = lastTask }
+                            let lastHm = lim(s["lastEventHm"], 5)
+                            if !lastHm.isEmpty { o["lastEventHm"] = lastHm }
+                        }
                         return o
                     }
             }

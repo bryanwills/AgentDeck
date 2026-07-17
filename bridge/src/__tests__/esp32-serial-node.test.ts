@@ -23,6 +23,8 @@ import {
   EXCLUDE_PATTERNS,
   isUnidentifiedForeign,
   isHalfOpenIdentifiedCdc,
+  isSilentIdentifiedUart,
+  SERIAL_KEEPALIVE_JSON,
   shouldSendWifiProvision,
   shouldRetryDeviceInfoIdentify,
   recordForeignProbeFailure,
@@ -649,6 +651,65 @@ describe('half-open identified CDC recovery', () => {
 
   it('does NOT flag a UART (non-CDC) port — handled by the read-timeout branch', () => {
     expect(isHalfOpenIdentifiedCdc(cdcConn({ port: '/dev/cu.usbserial-1420' }))).toBe(false);
+  });
+});
+
+// ─── Keepalive ack contract ─────────────────────────────────────────
+// The firmware replies heartbeat_ack ONLY to lines containing the quoted
+// substring `"keepalive"` (esp32/src/net/serial_client.cpp). Those acks are the
+// sole periodic board→host liveness signal — every read-age check (isResponsive,
+// both half-open reapers) assumes them. The former `serial_keepalive` type
+// silently failed this match, so boards never acked.
+
+describe('serial keepalive ack contract', () => {
+  it('contains the quoted "keepalive" substring the firmware strstr-matches', () => {
+    expect(SERIAL_KEEPALIVE_JSON).toContain('"keepalive"');
+  });
+
+  it('is the exact frame the deployed firmware acks', () => {
+    expect(SERIAL_KEEPALIVE_JSON).toBe('{"type":"keepalive"}');
+  });
+});
+
+// ─── Half-open identified UART recovery ─────────────────────────────
+// The UART mirror of the CDC case above, for RX death MID-connection: the board
+// identified and read fine, then went silent while 5s heartbeat writes keep
+// writeAge ~0 — so the dual read+write stale clause can never fire. (2026-07-17
+// live case: ips_10/ulanzi_tc001/ttgo silent 4–20+ min, transportOpen=true.)
+
+const uartConn = (over: Partial<SerialConnection> = {}): SerialConnection =>
+  ({
+    port: '/dev/cu.wchusbserial21110',
+    deviceInfo: { board: 'ips_10' },
+    lastReadAt: Date.now() - 5 * 60_000, // read before, silent past the 3-min timeout
+    connectedAt: Date.now() - 10 * 60_000,
+    ...over,
+  }) as SerialConnection;
+
+describe('half-open identified UART recovery', () => {
+  it('flags an identified UART whose RX died mid-connection', () => {
+    expect(isSilentIdentifiedUart(uartConn())).toBe(true); // the ips_10/tc001 live bug
+  });
+
+  it('does NOT flag while reads are current', () => {
+    expect(isSilentIdentifiedUart(uartConn({ lastReadAt: Date.now() }))).toBe(false);
+  });
+
+  it('does NOT flag below the silence timeout (one lost device_info is not death)', () => {
+    expect(isSilentIdentifiedUart(uartConn({ lastReadAt: Date.now() - 90_000 }))).toBe(false);
+  });
+
+  it('does NOT flag a never-read UART — that is the initial-read/foreign path', () => {
+    expect(isSilentIdentifiedUart(uartConn({ lastReadAt: 0 }))).toBe(false);
+  });
+
+  it('does NOT flag an unidentified UART', () => {
+    // Fresh port so no other test's device_info cache entry can identify it.
+    expect(isSilentIdentifiedUart(uartConn({ deviceInfo: null, port: '/dev/cu.wchusbserial77777' }))).toBe(false);
+  });
+
+  it('does NOT flag a CDC port — handled by isHalfOpenIdentifiedCdc/CDC clauses', () => {
+    expect(isSilentIdentifiedUart(uartConn({ port: '/dev/cu.usbmodem2111201' }))).toBe(false);
   });
 });
 

@@ -67,10 +67,27 @@ const FOREIGN_CDC_GRACE_MS = 90_000; // a held-open CDC port gets this long to i
 // never fires. Larger than FOREIGN_CDC_GRACE_MS so an unidentified foreign port is
 // always caught by the foreign clause first.
 const CDC_SILENT_READ_TIMEOUT_MS = 120_000;
+// An *identified* UART port whose RX died mid-connection: it HAS read before,
+// then went silent. The dual read+write stale clause can never catch this —
+// heartbeat writes land in the kernel buffer every 5s, so writeAge stays ~0
+// forever (same trap the CDC comment above documents, but for a port that used
+// to read). With keepalive acks every 5s, this long a silence is ~36 missed
+// acks: the board hung, rebooted into a bad state, or the CH340 RX path
+// wedged. Recycle the FD so re-poll reopens it — the reopen's DTR/RTS toggle
+// resets the board, which is the self-heal.
+const UART_SILENT_READ_TIMEOUT_MS = 180_000;
 const SERIAL_OPEN_PROBE_TIMEOUT_MS = 1500;
 const SERIAL_WRITE_INTERVAL_MS = 120;
 const SERIAL_MAX_QUEUE = 24;
-const SERIAL_KEEPALIVE_JSON = JSON.stringify({ type: 'serial_keepalive' });
+// Firmware acks ONLY lines containing the quoted substring `"keepalive"`
+// (esp32/src/net/serial_client.cpp sendHeartbeatAck) — those acks are the sole
+// periodic board→host liveness signal, and every read-age check in this module
+// (isResponsive, the half-open reapers) is calibrated to that 5s cadence. The
+// former `serial_keepalive` type did NOT match the firmware's substring check,
+// so boards never acked and the only reads were 60s device_info refreshes —
+// one lost reply looked like a minute-long outage.
+/** @internal Exported for testing only */
+export const SERIAL_KEEPALIVE_JSON = JSON.stringify({ type: 'keepalive' });
 const SERIAL_OPEN_PROBE_SCRIPT = `
 const fs = require('fs');
 const port = process.argv[1];
@@ -360,6 +377,17 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
         // Shared activity one-liner — the glanceable "what is it doing" line
         // (InkDeck session cards render it; other boards ignore it).
         activity: limitString(s.activity, 79),
+        // Daemon-computed latest milestone (TIMELINE parity for the IPS10
+        // cards). Omitted when absent to spare the 4KB serial line budget.
+        ...(typeof s.lastEventText === 'string' && s.lastEventText
+          ? {
+              lastEventText: limitString(s.lastEventText, 99),
+              ...(typeof s.lastEventTask === 'string' && s.lastEventTask
+                ? { lastEventTask: limitString(s.lastEventTask, 39) } : {}),
+              ...(typeof s.lastEventHm === 'string' && s.lastEventHm
+                ? { lastEventHm: limitString(s.lastEventHm, 5) } : {}),
+            }
+          : {}),
         options: sanitizeOptions(s.options),
       })),
     } as BridgeEvent;
@@ -997,6 +1025,26 @@ export function isHalfOpenIdentifiedCdc(
 }
 
 /**
+ * A UART port that IS an AgentDeck board and used to read, but has been
+ * RX-silent past UART_SILENT_READ_TIMEOUT_MS. Half-open mirror of
+ * isHalfOpenIdentifiedCdc for mid-life RX death: successful heartbeat writes
+ * keep the write-death clause from ever firing, so without this check the
+ * zombie FD is held forever and the board can never be DTR/RTS-recycled.
+ * (2026-07-17 live case: ips_10 + ulanzi_tc001 + ttgo silent 4–20+ min with
+ * transportOpen=true, lastWriteSecondsAgo=0.)
+ */
+/** @internal Exported for testing only */
+export function isSilentIdentifiedUart(
+  conn: Pick<SerialConnection, 'port' | 'deviceInfo' | 'lastReadAt'>,
+  now = Date.now(),
+): boolean {
+  const isCDC = /usbmodem|ttyACM/.test(conn.port);
+  if (isCDC) return false;
+  const isIdentified = Boolean(conn.deviceInfo?.board) || lastKnownDeviceInfoByPort.has(conn.port);
+  return isIdentified && conn.lastReadAt > 0 && (now - conn.lastReadAt) > UART_SILENT_READ_TIMEOUT_MS;
+}
+
+/**
  * Whether the periodic heartbeat should (re)send a device_info_request to
  * re-identify this connection. Keys off deviceInfoFresh (a LIVE reply on THIS
  * connection), NOT conn.deviceInfo — a cache-seeded connection carries a stale
@@ -1087,6 +1135,17 @@ function checkStaleConnections(): void {
         closeConnection(conn);
         staleCount++;
       }
+      continue;
+    }
+
+    // Identified UART that read before but went RX-silent: the dual clause
+    // below requires writeAge > 60s too, which 5s heartbeat writes prevent
+    // forever. Recycle regardless of write health; re-poll's reopen (DTR/RTS
+    // toggle) resets the board.
+    if (isSilentIdentifiedUart(conn, now)) {
+      debug('ESP32', `Half-open UART (identified, RX silent ${Math.floor(readAge / 1000)}s, writes healthy): ${conn.port} — recycling`);
+      closeConnection(conn);
+      staleCount++;
       continue;
     }
 
