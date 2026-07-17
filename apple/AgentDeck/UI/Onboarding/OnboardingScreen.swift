@@ -244,6 +244,7 @@ private struct IntegrationsPaneiOS: View {
 
 private struct FindMacPaneiOS: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
+    @EnvironmentObject private var preferences: AppPreferences
     @State private var showQRScanner: Bool = false
     @State private var scanError: String?
 
@@ -298,6 +299,25 @@ private struct FindMacPaneiOS: View {
                     .foregroundStyle(.orange)
             }
 
+            if stateHolder.connection.status == .connecting {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Connecting to Mac...")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else if stateHolder.connection.status == .connected {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Successfully paired! Launching...")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.green)
+                }
+                .padding(.vertical, 4)
+            }
+
             Spacer()
         }
         .padding(24)
@@ -309,6 +329,13 @@ private struct FindMacPaneiOS: View {
                 },
                 onCancel: { showQRScanner = false }
             )
+        }
+        .onChange(of: stateHolder.connection.status) { _, newStatus in
+            if newStatus == .connected {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    preferences.hasSeenOnboarding = true
+                }
+            }
         }
     }
 
