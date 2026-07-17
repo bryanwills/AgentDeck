@@ -1947,9 +1947,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       events.push(buildDisplayStateEvent(core.displayMonitor.isDisplayOn()) as BridgeEvent);
       // Seed the last few timeline entries so a freshly (re)connected board's
       // ticker shows the real latest event instead of whatever its ring last
-      // held. Kept to 3 entries — the whole line must stay well under the
-      // small serial RX buffers on non-InkDeck boards.
-      const recent = core.bridgeTimeline.getHistory().slice(-3);
+      // held. Kept to 6 entries — the whole line must stay well under the
+      // small (4KB) serial RX buffers on non-InkDeck boards; prepareForSerial
+      // byte-caps each entry's raw/detail at send time.
+      const recent = core.bridgeTimeline.getHistory().slice(-6);
       if (recent.length > 0) {
         events.push({ type: 'timeline_history', entries: recent } as BridgeEvent);
       }

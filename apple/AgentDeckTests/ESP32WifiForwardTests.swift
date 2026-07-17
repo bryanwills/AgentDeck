@@ -103,6 +103,33 @@ final class ESP32WifiForwardTests: XCTestCase {
         XCTAssertEqual(project, String(repeating: "가", count: 13))
     }
 
+    /// The daemon-computed lastEvent* milestone fields (TIMELINE parity for the
+    /// IPS10 cards) survive the sessions_list shrink — byte-capped, and omitted
+    /// entirely when absent (empty strings would waste the serial line budget).
+    func testSessionsListLastEventFieldsForwardedConditionally() {
+        let ev: [String: Any] = [
+            "type": "sessions_list",
+            "sessions": [
+                ["id": "s1", "alive": true,
+                 "lastEventText": String(repeating: "가", count: 60),
+                 "lastEventTask": "ips10 카드 개선", "lastEventHm": "14:07"],
+                ["id": "s2", "alive": true],
+            ],
+        ]
+        guard let out = ESP32Serial.wifiEsp32Forward(ev, deviceInfo: nil),
+              let sessions = out["sessions"] as? [[String: Any]] else {
+            return XCTFail("sessions_list must be forwarded")
+        }
+        let withEvent = sessions[0]
+        XCTAssertLessThanOrEqual((withEvent["lastEventText"] as? String)?.utf8.count ?? 999, 99)
+        XCTAssertEqual(withEvent["lastEventTask"] as? String, "ips10 카드 개선")
+        XCTAssertEqual(withEvent["lastEventHm"] as? String, "14:07")
+        let without = sessions[1]
+        XCTAssertNil(without["lastEventText"], "absent milestone must be omitted, not sent as empty string")
+        XCTAssertNil(without["lastEventTask"])
+        XCTAssertNil(without["lastEventHm"])
+    }
+
     /// The whitelist must cover the display events a board renders, and match the
     /// USB-serial path (single source of truth: `serialForwardedEvents`).
     func testDisplayEventWhitelistForwarded() {

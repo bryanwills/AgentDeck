@@ -350,6 +350,14 @@ static void handleSessionsList(JsonObject& obj) {
         // summary) — the most meaningful glanceable line for a dashboard row.
         copyTextU8(g_state.sessions[i].activity, sizeof(g_state.sessions[i].activity),
                    s["activity"] | "");
+        // Daemon-computed latest milestone (TIMELINE parity for cards).
+        copyTextU8(g_state.sessions[i].lastEventText, sizeof(g_state.sessions[i].lastEventText),
+                   s["lastEventText"] | "");
+        copyTextU8(g_state.sessions[i].lastEventTask, sizeof(g_state.sessions[i].lastEventTask),
+                   s["lastEventTask"] | "");
+        strncpy(g_state.sessions[i].lastEventHm, s["lastEventHm"] | "",
+                sizeof(g_state.sessions[i].lastEventHm) - 1);
+        g_state.sessions[i].lastEventHm[sizeof(g_state.sessions[i].lastEventHm) - 1] = '\0';
 
         if (g_state.sessions[i].alive) {
             if (strcmp(g_state.sessions[i].agentType, "openclaw") == 0) {

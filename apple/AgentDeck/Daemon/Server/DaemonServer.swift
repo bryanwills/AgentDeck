@@ -184,6 +184,7 @@ private final class SerialEventSnapshot: @unchecked Sendable {
     private var stateEvent: [String: Any]?
     private var usageEvent: [String: Any]?
     private var sessionsEvent: [String: Any]?
+    private var timelineSeedEntries: [[String: Any]] = []
     private var displayOn = true
     private var displayDim: [String: Any] = ["enabled": true, "mode": "off", "level": 10]
 
@@ -202,6 +203,12 @@ private final class SerialEventSnapshot: @unchecked Sendable {
     func setUsageEvent(_ event: [String: Any]?) {
         lock.lock()
         usageEvent = event
+        lock.unlock()
+    }
+
+    func setTimelineSeedEntries(_ entries: [[String: Any]]) {
+        lock.lock()
+        timelineSeedEntries = entries
         lock.unlock()
     }
 
@@ -258,6 +265,18 @@ private final class SerialEventSnapshot: @unchecked Sendable {
         // on-connect snapshot — otherwise it renders "no active sessions" until
         // the next unrelated sessions_list change happens to broadcast.
         if let sessions { events.append(sessions) }
+        // Seed the last few timeline rows so a freshly (re)connected board's
+        // ticker/cards show the real latest milestones instead of an empty
+        // ring (Node parity: daemon-server.ts serial initial set). Kept small —
+        // the single line must stay well under the 4KB serial RX buffer on
+        // non-InkDeck boards; per-entry raw/detail caps are applied by
+        // prepareForSerial at send time.
+        lock.lock()
+        let seed = timelineSeedEntries.suffix(6)
+        lock.unlock()
+        if !seed.isEmpty {
+            events.append(["type": "timeline_history", "entries": Array(seed)])
+        }
         events.append(["type": "display_state", "displayOn": display, "dim": dim])
         return events
     }
@@ -1048,6 +1067,10 @@ final class DaemonServer {
 
         // 5. Start timeline store
         await timelineStore.start()
+        // Seed the per-session milestone caches + board timeline ring from the
+        // persisted store so device cards are meaningful immediately after a
+        // daemon restart (not just after the next live milestone).
+        await seedBoardTimelineCaches()
         // Orphan task_start reaper. The dashboard's `timelineIsInFlightTask`
         // gate spins the leading task icon until a matching `task_end` with
         // the same `taskId` appears in the visible siblings — but a previous
@@ -2294,6 +2317,19 @@ final class DaemonServer {
                     "entries": recentEntries.map { Self.daemonTimelineEntryDict($0) },
                 ]
                 if let data = historyEvent.jsonData { conn.send(data) }
+
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !conn.isDisconnected else { return }
+            } else {
+                // Identified ESP32 display board: give it the SHRUNK history
+                // (prepareForSerial caps entries to the 64-row firmware ring and
+                // byte-caps raw/detail) so its cards/ticker are meaningful right
+                // after (re)connect instead of waiting for the next milestone.
+                let historyEvent: [String: Any] = [
+                    "type": "timeline_history",
+                    "entries": self.recentTimelineForBoards,
+                ]
+                if let data = esp32Shaped(historyEvent) { conn.send(data) }
 
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !conn.isDisconnected else { return }
@@ -5464,6 +5500,18 @@ final class DaemonServer {
         }
         sessions = DashboardDataRules.foldCodexSessionPayloadsForDisplay(sessions)
         sessions = DashboardDataRules.sortSessionPayloads(sessions)
+        // Attach the daemon-computed latest milestone (TIMELINE parity) so
+        // glance surfaces (IPS10 cards) can render "HH:MM task • text" without
+        // depending on their tiny reboot-empty on-device timeline ring.
+        // Dashboards have the full timeline and simply ignore these.
+        sessions = sessions.map { s in
+            guard let sid = s["id"] as? String, let m = latestMilestoneBySession[sid] else { return s }
+            var s = s
+            s["lastEventText"] = m["text"]
+            if let task = m["task"] { s["lastEventTask"] = task }
+            if let hm = m["hm"] { s["lastEventHm"] = hm }
+            return s
+        }
         return ["type": "sessions_list", "sessions": sessions]
     }
 
@@ -5688,8 +5736,65 @@ final class DaemonServer {
         }
     }
 
+    // ── Per-session latest milestone (TIMELINE parity for device cards) ──
+    // The daemon owns the authoritative timeline store; boards' on-device rings
+    // are tiny and empty after every reboot, so glance surfaces (IPS10 cards)
+    // read these daemon-computed fields off sessions_list instead. Fed from the
+    // broadcastRaw chokepoint (every timeline_event passes through it) and
+    // seeded from the store at startup.
+    private var latestMilestoneBySession: [String: [String: String]] = [:]
+    private var taskLabelById: [String: String] = [:]
+    private var recentTimelineForBoards: [[String: Any]] = []
+
+    private static let cardMilestoneTypes: Set<String> = [
+        "chat_start", "chat_response", "chat_end", "task_start", "task_end",
+    ]
+
+    @MainActor
+    private func noteTimelineEntryForBoards(_ entry: [String: Any]) {
+        recentTimelineForBoards.append(entry)
+        if recentTimelineForBoards.count > 64 {
+            recentTimelineForBoards.removeFirst(recentTimelineForBoards.count - 64)
+        }
+        serialEventSnapshot.setTimelineSeedEntries(recentTimelineForBoards)
+
+        guard let type = entry["type"] as? String else { return }
+        let raw = (entry["raw"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        if type == "task_start", let tid = entry["taskId"] as? String, !tid.isEmpty, !raw.isEmpty {
+            taskLabelById[tid] = raw
+            if taskLabelById.count > 128 { taskLabelById.removeValue(forKey: taskLabelById.keys.first!) }
+        }
+        guard Self.cardMilestoneTypes.contains(type),
+              let sid = entry["sessionId"] as? String, !sid.isEmpty,
+              !raw.isEmpty, !raw.hasPrefix("{"), !raw.hasPrefix("[") else { return }
+        var m: [String: String] = ["text": raw]
+        if let hm = entry["localHm"] as? String, !hm.isEmpty { m["hm"] = hm }
+        let isTaskRow = type == "task_start" || type == "task_end"
+        if !isTaskRow, let tid = entry["taskId"] as? String, let label = taskLabelById[tid] {
+            m["task"] = label
+        }
+        latestMilestoneBySession[sid] = m
+        if latestMilestoneBySession.count > 64 {
+            latestMilestoneBySession.removeValue(forKey: latestMilestoneBySession.keys.first!)
+        }
+    }
+
+    /// Seed the milestone/task caches + board timeline ring from the persisted
+    /// store, so cards are meaningful right after a daemon restart instead of
+    /// waiting for the next live milestone.
+    private func seedBoardTimelineCaches() async {
+        let recent = await timelineStore.getRecent(64)
+        for e in recent {
+            noteTimelineEntryForBoards(Self.daemonTimelineEntryDict(e))
+        }
+    }
+
     @MainActor
     private func broadcastRaw(_ event: [String: Any]) {
+        if (event["type"] as? String) == "timeline_event",
+           let entry = event["entry"] as? [String: Any] {
+            noteTimelineEntryForBoards(entry)
+        }
         guard let data = event.jsonData else { return }
         // WiFi-WS ESP32 boards are display clients, not dashboards. Shrink +
         // whitelist per board (Node parity: the esp32 eventTransformer in

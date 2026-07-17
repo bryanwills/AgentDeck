@@ -637,6 +637,7 @@ export class BridgeCore {
       const a = activityFor(s);
       if (a) s.activity = a;
     }
+    this.attachLastEventFields(sessions);
     const event = { type: 'sessions_list', sessions } as BridgeEvent;
     // Cache for the serial heartbeat re-sync (like display_state): a board that
     // reconnects across a daemon handoff during a quiet window otherwise sits
@@ -649,6 +650,47 @@ export class BridgeCore {
    *  re-sync. Null until the first broadcast. */
   getLastSessionsListEvent(): BridgeEvent | null {
     return this.lastSessionsListEvent;
+  }
+
+  /**
+   * Attach each session's latest MILESTONE timeline row (TIMELINE parity for
+   * glance devices): `lastEventText` (row text), `lastEventTask` (resolved
+   * enclosing-task label) and `lastEventHm` (host-local HH:MM). Display boards
+   * (IPS10 cards) render these instead of depending on their tiny on-device
+   * timeline ring, which starts empty after every board reboot. Dashboards
+   * carry the full timeline and ignore the fields. Swift daemon mirror:
+   * DaemonServer.noteTimelineEntryForBoards / buildSessionsListEvent.
+   */
+  private attachLastEventFields(sessions: import('./session-aggregator.js').EnrichedSession[]): void {
+    const MILESTONES = new Set(['chat_start', 'chat_response', 'chat_end', 'task_start', 'task_end']);
+    const history = this.bridgeTimeline.getHistory();  // oldest → newest
+    const taskLabels = new Map<string, string>();
+    const latestBySession = new Map<string, { text: string; taskId?: string; isTaskRow: boolean; ts: number }>();
+    for (const e of history) {
+      const raw = (e.raw ?? '').trim();
+      if (e.type === 'task_start' && e.taskId && raw) taskLabels.set(e.taskId, raw);
+      if (!e.sessionId || !MILESTONES.has(e.type)) continue;
+      if (!raw || raw.startsWith('{') || raw.startsWith('[')) continue;
+      latestBySession.set(e.sessionId, {
+        text: raw,
+        taskId: e.taskId,
+        isTaskRow: e.type === 'task_start' || e.type === 'task_end',
+        ts: e.ts,
+      });
+    }
+    for (const s of sessions) {
+      const m = latestBySession.get(s.id);
+      if (!m) continue;
+      s.lastEventText = m.text;
+      if (!m.isTaskRow && m.taskId) {
+        const label = taskLabels.get(m.taskId);
+        if (label) s.lastEventTask = label;
+      }
+      if (Number.isFinite(m.ts)) {
+        const d = new Date(m.ts);
+        s.lastEventHm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      }
+    }
   }
 
   /** Debounced sessions list broadcast (for state_changed handler) */

@@ -43,7 +43,7 @@ Dispatch on the top-level `"type"`. The forwarded sets are defined in `protocol.
 | `type` | Purpose |
 |---|---|
 | `state_update` | Per-session state (idle / processing / awaiting_* …). The primary render input. |
-| `sessions_list` | Full session roster — id, agent type, state, label. Each session also carries `activity`: a clean one-liner ("Editing auth.ts") from the shared activity pipeline — **render this, not the raw `currentTool`** ("Bash"). Both the Node bridge and the in-process Swift daemon now populate it; fall back to `currentTool`/`currentTask`/`goal` only when `activity` is empty. |
+| `sessions_list` | Full session roster — id, agent type, state, label. Each session also carries `activity`: a clean one-liner ("Editing auth.ts") from the shared activity pipeline — **render this, not the raw `currentTool`** ("Bash"). Both the Node bridge and the in-process Swift daemon now populate it; fall back to `currentTool`/`currentTask`/`goal` only when `activity` is empty. Sessions with a recent milestone also carry the daemon-computed `lastEventText` (≤99 bytes, the newest chat/task row text), optional `lastEventTask` (≤39 bytes, resolved enclosing-task label) and `lastEventHm` ("HH:MM" host-local) — the TIMELINE-parity "what happened last" line; card-style surfaces should prefer `lastEventHm + lastEventTask + lastEventText` over reconstructing it from the on-device timeline ring (which starts empty after every reboot). Absent fields are omitted, never empty strings. |
 | `usage_update` | Subscription / rate-limit gauges (Claude 5h, Codex, Antigravity, …). |
 | `connection` / `connected` | Connect/disconnect ack. Actual link state is tracked by WS event callbacks; these are logged for diagnostics. |
 

@@ -446,6 +446,24 @@ describe('prepareForSerial (source)', () => {
     expect(p2.entry.raw).toBe('x'.repeat(119));
   });
 
+  it('forwards daemon-computed lastEvent* fields byte-capped, omitted when absent', () => {
+    const prepared = prepareForSerial({
+      type: 'sessions_list',
+      sessions: [
+        { id: 's1', alive: true, lastEventText: '가'.repeat(60), lastEventTask: 'ips10 카드 개선', lastEventHm: '14:07' },
+        { id: 's2', alive: true },
+      ],
+    } as any) as any;
+    const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
+    const [withEvent, without] = prepared.sessions;
+    expect(utf8Bytes(withEvent.lastEventText)).toBeLessThanOrEqual(99);
+    expect(withEvent.lastEventTask).toBe('ips10 카드 개선');
+    expect(withEvent.lastEventHm).toBe('14:07');
+    expect(without.lastEventText).toBeUndefined();   // omitted, not empty string
+    expect(without.lastEventTask).toBeUndefined();
+    expect(without.lastEventHm).toBeUndefined();
+  });
+
   it('caps timeline_history to the firmware ring size (newest 64)', () => {
     const entries = Array.from({ length: 100 }, (_, i) => ({
       ts: 1752700000000 + i, type: 'chat_start', raw: `row ${i}`,

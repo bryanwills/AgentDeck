@@ -30,6 +30,14 @@ export interface EnrichedSession {
   /** Daemon-synthesized "what is this agent doing right now" one-liner (heuristic,
    *  upgraded to a Foundation Models summary when available). Shared by X3 + TRMNL. */
   activity?: string;
+  /** Daemon-computed latest MILESTONE timeline row for this session (TIMELINE
+   *  parity for glance devices — IPS10 cards render "HH:MM task • text" from
+   *  these instead of their tiny reboot-empty on-device timeline ring). */
+  lastEventText?: string;
+  /** Resolved enclosing-task label for that row ("" / absent when none). */
+  lastEventTask?: string;
+  /** Host-local "HH:MM" of that row (boards are NTP-UTC or clockless). */
+  lastEventHm?: string;
 }
 
 /** Cache last-known sibling state to avoid propagating undefined on transient fetch failures.

@@ -136,6 +136,17 @@ bool SimScenes::apply(const char* name) {
            "Building the AgentDeck CLI");
     setStr(g_state.sessions[4].question, sizeof(g_state.sessions[4].question),
            "Bash 명령 실행을 허용할까요? rm -rf build/");
+    // Daemon-computed lastEvent* (TIMELINE parity) — the PRIMARY card-body
+    // source. Session 2 exercises the full "HH:MM task • text" compose;
+    // session 0 has only on-device timeline rows → exercises the ring fallback.
+    setStr(g_state.sessions[2].lastEventText, sizeof(g_state.sessions[2].lastEventText),
+           "카드 영역에 TIMELINE 과 같은 세션별 최신 마일스톤을 표시");
+    setStr(g_state.sessions[2].lastEventTask, sizeof(g_state.sessions[2].lastEventTask),
+           "ips10 카드 개선");
+    setStr(g_state.sessions[2].lastEventHm, sizeof(g_state.sessions[2].lastEventHm), "14:07");
+    setStr(g_state.sessions[3].lastEventText, sizeof(g_state.sessions[3].lastEventText),
+           "Reviewed the treemap sizing fix and merged it");
+    setStr(g_state.sessions[3].lastEventHm, sizeof(g_state.sessions[3].lastEventHm), "13:52");
     // Per-session timeline rows (Korean + long task headers) — exercises the
     // card-body "<task> · <text>" compose, taskId resolution, and UTF-8-safe
     // truncation exactly the way live daemon rows do.

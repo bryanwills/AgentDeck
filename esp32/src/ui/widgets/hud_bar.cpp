@@ -85,7 +85,7 @@ static lv_obj_t* tbAgIcon   = nullptr;
 static lv_obj_t* tbAg       = nullptr;
 // Leading agent icons before the gauge pairs (Codex icon hides with its gauges).
 static lv_obj_t* tbCodexIcon = nullptr;
-#include "../terrarium/creature_glyphs_generated.h"  // OCTOPUS_A8 / CRAYFISH_BODY_A8 / OPENCODE_A8 masks
+#include "../terrarium/creature_glyphs_generated.h"  // canonical agent-mark masks
 static constexpr int IPS10_SIDEBAR_W_MIN = 372;     // portrait / fallback minimum
 static constexpr int IPS10_TERRARIUM_W = 408;       // keep in sync with terrarium/renderer.cpp
 // Actual treemap-pane width, computed from g_screenW at init so it fills the space
@@ -181,8 +181,7 @@ static void ips10InitGlyphs() {
     if (glyphsReady) return;
     using namespace CreatureGlyphs;
     ips10BuildGlyph(glyphOctopus,  OCTOPUS_A8,       OCTOPUS_W,       OCTOPUS_H);
-    // Cards use the FULL OpenClaw mark (eyes + both claws), not the body-only CRAYFISH_BODY
-    // the terrarium pairs with procedural claws — the body alone reads as a shapeless blob.
+    // Full official OpenClaw mark, rasterized directly from design/brand/openclaw.svg.
     ips10BuildGlyph(glyphCrayfish, OPENCLAW_MARK_A8, OPENCLAW_MARK_W, OPENCLAW_MARK_H);
     ips10BuildGlyph(glyphOpencode, OPENCODE_A8,      OPENCODE_W,      OPENCODE_H);
     ips10BuildAntigravityColorGlyph();
@@ -1724,7 +1723,7 @@ void update() {
     if (cellsBox) {
         struct MCell { uint32_t accent; uint32_t stateCol; char name[40]; char agent[16]; char state[20];
                        char model[32]; char tool[40]; uint32_t elapsed;
-                       char sid[32]; char requestId[40]; char question[160]; char body[144];
+                       char sid[32]; char requestId[40]; char question[160]; char body[160];
                        char activity[80]; };
         MCell mc[MOSAIC_MAX];
         int n = 0;
@@ -1746,29 +1745,46 @@ void update() {
             strncpy(mc[n].requestId, si.requestId, sizeof(mc[n].requestId) - 1); mc[n].requestId[sizeof(mc[n].requestId) - 1] = '\0';
             strncpy(mc[n].question, si.question, sizeof(mc[n].question) - 1); mc[n].question[sizeof(mc[n].question) - 1] = '\0';
             strncpy(mc[n].activity, si.activity, sizeof(mc[n].activity) - 1); mc[n].activity[sizeof(mc[n].activity) - 1] = '\0';
-            // Per-session latest timeline line → card body ("<task> · <text>").
-            // The card already renders agent (cellName) + project (cellProj);
-            // body carries the task context + the actual work text so each card
-            // narrates its OWN timeline instead of sharing one global line.
-            // Two passes, milestone-first (same policy as the InkDeck ticker):
-            // prefer turn/task rows — chat_start = the ask while running,
-            // chat_response = the answer once done — over per-tool command
-            // spam; fall back to the newest raw row so tool-only histories
-            // never leave the card blank.
+            // Card body = this session's latest MILESTONE line, TIMELINE-style
+            // ("HH:MM task • text"). Primary source is the DAEMON-computed
+            // lastEvent* fields on sessions_list — the daemon owns the full
+            // timeline store, so this survives board reboots (the on-device
+            // ring starts empty and only ever holds a 64-row window). The
+            // on-device ring compose remains as a fallback for daemons that
+            // don't send lastEvent* yet. Separator is U+2022 (LV_SYMBOL_BULLET):
+            // montserrat has it; U+00B7 " · " is in NEITHER montserrat nor the
+            // Noto KR fallback (한글 syllables only) → drew a tofu box.
             mc[n].body[0] = '\0';
-            for (uint8_t pass = 0; pass < 2 && !mc[n].body[0]; pass++) {
-            for (uint8_t k = 0; k < g_state.timelineCount; k++) {
+            if (si.lastEventText[0]) {
+                size_t off = 0;
+                auto append = [&](const char* part, const char* suffix) {
+                    if (!part || !part[0] || off >= sizeof(mc[n].body) - 1) return;
+                    int nn = snprintf(mc[n].body + off, sizeof(mc[n].body) - off, "%s%s", part, suffix);
+                    if (nn > 0) off += (size_t)nn;
+                    if (off >= sizeof(mc[n].body)) off = sizeof(mc[n].body) - 1;
+                };
+                append(si.lastEventHm, "  ");
+                append(si.lastEventTask, " " LV_SYMBOL_BULLET " ");
+                append(si.lastEventText, "");
+                Utf8::utf8TrimEnd(mc[n].body);   // snprintf byte cap can split a 한글 glyph
+            }
+            // Fallback: newest milestone row for this session from the on-device
+            // ring. Milestone-only — per-tool rows ("Bash") are command spam at
+            // glance distance, exactly the meaningless text this card replaced.
+            for (uint8_t k = 0; k < g_state.timelineCount && !mc[n].body[0]; k++) {
                 uint8_t bidx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - k) % TIMELINE_MAX_ENTRIES);
                 const TimelineEntry& te = g_state.timeline[bidx];
                 if (strcmp(te.sessionId, si.id) != 0) continue;
                 if (!te.raw[0] || te.raw[0] == '{' || te.raw[0] == '[') continue;
-                if (pass == 0) {
-                    bool milestone = strcmp(te.type, "chat_start") == 0 || strcmp(te.type, "chat_response") == 0 ||
-                                     strcmp(te.type, "chat_end") == 0 ||
-                                     strcmp(te.type, "task_start") == 0 || strcmp(te.type, "task_end") == 0;
-                    if (!milestone) continue;
-                }
+                bool milestone = strcmp(te.type, "chat_start") == 0 || strcmp(te.type, "chat_response") == 0 ||
+                                 strcmp(te.type, "chat_end") == 0 ||
+                                 strcmp(te.type, "task_start") == 0 || strcmp(te.type, "task_end") == 0;
+                if (!milestone) continue;
                 size_t off = 0;
+                if (te.hm[0]) {
+                    int nn = snprintf(mc[n].body + off, sizeof(mc[n].body) - off, "%s  ", te.hm);
+                    if (nn > 0) off += (size_t)nn;
+                }
                 bool isTaskRow = strcmp(te.type, "task_start") == 0 || strcmp(te.type, "task_end") == 0;
                 if (!isTaskRow && te.taskId[0]) {  // resolve taskId → task header label
                     for (uint8_t j = 0; j < g_state.timelineCount; j++) {
@@ -1780,9 +1796,6 @@ void update() {
                             char task[48];
                             strncpy(task, tj.raw, sizeof(task) - 1); task[sizeof(task) - 1] = '\0';
                             Utf8::utf8TrimEnd(task);
-                            // Separator is U+2022 (LV_SYMBOL_BULLET): montserrat has it.
-                            // U+00B7 " · " is in NEITHER montserrat nor the Noto KR
-                            // fallback (한글 syllables only) → rendered as a tofu box.
                             int nn = snprintf(mc[n].body + off, sizeof(mc[n].body) - off, "%s " LV_SYMBOL_BULLET " ", task);
                             if (nn > 0) off += (size_t)nn;
                             if (off >= sizeof(mc[n].body)) off = sizeof(mc[n].body) - 1;
@@ -1792,9 +1805,8 @@ void update() {
                 }
                 if (off < sizeof(mc[n].body) - 1)
                     snprintf(mc[n].body + off, sizeof(mc[n].body) - off, "%s", te.raw);
-                Utf8::utf8TrimEnd(mc[n].body);   // snprintf byte cap can split a 한글 glyph
+                Utf8::utf8TrimEnd(mc[n].body);
                 break;
-            }
             }
             n++;
         }
@@ -2091,15 +2103,17 @@ void update() {
             }
 
             // body: awaiting → prompt; otherwise → this session's OWN latest
-            // timeline line ("<task> · <text>"), then its live activity
+            // milestone line ("HH:MM task • text"), then its live activity
             // one-liner. STRICTLY per-session — the old global latest-action
             // fallback painted some OTHER session's row onto whichever working
             // card rendered first, which read as wrong/meaningless info.
+            // Idle cards keep their milestone too (InkDeck parity: an idle
+            // session showing "what it last did" beats a blank card).
             const char* body = "";
             if (awaiting && mc[i].question[0]) body = mc[i].question;
-            else if (!idle && mc[i].body[0]) body = mc[i].body;
+            else if (mc[i].body[0]) body = mc[i].body;
             else if (!idle && mc[i].activity[0]) body = mc[i].activity;
-            if (!idle && body[0] && ph >= 104) {
+            if (body[0] && ph >= 104) {
                 lv_label_set_text(cellBody[i], body);
                 lv_obj_clear_flag(cellBody[i], LV_OBJ_FLAG_HIDDEN);
             } else {

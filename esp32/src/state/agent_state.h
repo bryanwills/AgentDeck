@@ -62,6 +62,13 @@ struct SessionInfo {
     char promptType[20];    // "yes_no" / "multi_select" / "diff_review" / ...
     char requestId[40];     // gated PreToolUse request id → reply permission_decision
     char activity[80];      // shared one-liner summary of recent work ("" when none)
+    // Daemon-computed "latest milestone" for this session (TIMELINE parity):
+    // the newest chat/task row from the daemon's authoritative timeline store.
+    // The on-device ring is tiny and empty after every (re)boot, so cards that
+    // relied on it went blank/meaningless — the daemon owns this line instead.
+    char lastEventText[100]; // milestone row text (turn ask/answer, task label)
+    char lastEventTask[40];  // resolved enclosing-task label ("" when none)
+    char lastEventHm[6];     // host-local "HH:MM" of that row ("" when unknown)
 };
 
 // ===== Timeline entry =====
