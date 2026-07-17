@@ -171,7 +171,13 @@ export function buildUsageEvent(
     extraUsageUtilization: subscriptionQuotaApplies ? (apiUsage?.extraUsageUtilization ?? undefined) : undefined,
     oauthConnected: oauthStatus,
     ollamaStatus: ollamaStatus ?? undefined,
-    usageStale: stale || undefined,
+    // No quota numbers at all (never fetched / not applicable) must read as
+    // stale: clients treat "field absent + usageStale falsy" as "keep the
+    // previous value", so an omitted-but-not-stale frame lets a dashboard
+    // that roamed from another daemon render foreign quota forever. The
+    // cost-based API-billing percent path keeps usageStale honest (defined
+    // percent → not forced stale).
+    usageStale: (stale || (fiveHourPercent === undefined && sevenDayPercent === undefined)) || undefined,
     tokenStatus: getTokenStatus() !== 'unknown' ? getTokenStatus() : undefined,
     codexAuthMode: codexAuth?.authMode,
     codexWebAuthConnected: codexAuth?.webAuthConnected,

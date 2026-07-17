@@ -12,12 +12,18 @@
 // lv_font_montserrat_12 with a Noto Sans KR fallback pointer; the sim bundles
 // the same Noto KR face (fw/font_noto_kr_12.c) so 한글 labels render exactly
 // as the panel does instead of degrading to .notdef boxes.
+// Guarded out for the non-LVGL boards (inkdeck = Adafruit GFX direct-draw,
+// led8x32 = raw matrix): their build filters exclude fw/, so referencing the
+// Noto face here is an undefined symbol at link.
+#if !defined(BOARD_INKDECK) && !defined(BOARD_LED8X32)
 extern "C" const lv_font_t font_noto_kr_12;
 lv_font_t font_kr_12 = lv_font_montserrat_12;
 #if defined(BOARD_IPS10)
-// Larger Korean-safe faces for the IPS10 detail overlay (display.h declares these
-// only under BOARD_IPS10). Latin renders from Montserrat at size; 한글 falls back
-// to the 12px Noto face — same tradeoff as the device (display.cpp).
+// Larger Korean-safe faces for the IPS10 cards/detail overlay (display.h
+// declares these only under BOARD_IPS10). Latin renders from Montserrat at
+// size; 한글 falls back to the 16px Noto face — same chain as the device
+// (display.cpp).
+extern "C" const lv_font_t font_noto_kr_16;
 lv_font_t font_kr_16 = lv_font_montserrat_16;
 lv_font_t font_kr_20 = lv_font_montserrat_20;
 #endif
@@ -25,11 +31,12 @@ static struct KrFontInit {
     KrFontInit() {
         font_kr_12.fallback = &font_noto_kr_12;
 #if defined(BOARD_IPS10)
-        font_kr_16.fallback = &font_noto_kr_12;
-        font_kr_20.fallback = &font_noto_kr_12;
+        font_kr_16.fallback = &font_noto_kr_16;
+        font_kr_20.fallback = &font_noto_kr_16;
 #endif
     }
 } s_krFontInit;
+#endif
 
 // Firmware state singletons (defined in main.cpp on-device).
 DashboardState g_state;

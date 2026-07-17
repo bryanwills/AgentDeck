@@ -1,4 +1,3 @@
-#if os(macOS)
 // MicroGlyphs.generated.swift — AUTO-GENERATED, DO NOT EDIT.
 //
 // Source of truth: design/brand/*.svg
@@ -262,4 +261,3 @@ enum OfficialTc001Glyphs {
         ],
     ]
 }
-#endif

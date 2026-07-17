@@ -6306,7 +6306,13 @@ final class DaemonServer {
         }
 
         e["oauthConnected"] = effectiveOauthConnected()
-        e["usageStale"] = apiUsageStale || cachedApiUsage?.stale == true
+        // `cachedApiUsage == nil` (never fetched — sandboxed daemon with no
+        // OAuth/relay path) must read as stale too: the frame carries no
+        // percent keys, and clients treat "field absent + usageStale false"
+        // as "keep previous value". Without this a dashboard that roamed
+        // from a Node daemon keeps rendering the other host's quota forever
+        // (iOS stale-usage bug, 2026-07-17).
+        e["usageStale"] = apiUsageStale || (cachedApiUsage?.stale ?? true)
         mergeEngineSnapshot(into: &e)
         let ts = usageAPI.tokenStatus
         if ts != .unknown { e["tokenStatus"] = ts.rawValue }

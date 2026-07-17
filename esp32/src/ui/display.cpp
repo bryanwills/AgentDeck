@@ -2,6 +2,9 @@
 #include "config.h"
 #include "../boards/board_config.h"
 #include "fonts/font_noto_kr_12.h"
+#if defined(BOARD_IPS10)
+#include "fonts/font_noto_kr_16.h"
+#endif
 
 #include <lvgl.h>
 #include <Arduino.h>
@@ -1021,8 +1024,11 @@ void displayInit() {
     font_kr_12 = lv_font_montserrat_12;  // Copy struct to RAM
     font_kr_12.fallback = &font_noto_kr_12;  // Set Korean fallback
 #if defined(BOARD_IPS10)
-    font_kr_16 = lv_font_montserrat_16; font_kr_16.fallback = &font_noto_kr_12;
-    font_kr_20 = lv_font_montserrat_20; font_kr_20.fallback = &font_noto_kr_12;
+    // 16/20px faces fall back to the 16px Noto KR face (IPS10 carries it —
+    // ~1.5MB flash) so Korean card/summary text is legible on the 10" panel
+    // instead of dropping to the 12px face beside 16–20px Latin.
+    font_kr_16 = lv_font_montserrat_16; font_kr_16.fallback = &font_noto_kr_16;
+    font_kr_20 = lv_font_montserrat_20; font_kr_20.fallback = &font_noto_kr_16;
 #endif
 
 #if defined(BOARD_IPS10)

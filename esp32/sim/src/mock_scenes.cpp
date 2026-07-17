@@ -119,6 +119,13 @@ bool SimScenes::apply(const char* name) {
     g_state.crayfishState = CrayfishState::ROUTING;
     g_state.gatewayConnected = true;   // OpenClaw gateway → crayfish visible
     g_state.crayfishCount = 1;
+    // Codex with BOTH windows live → exercises the two-slot gauge layout.
+    g_state.codexPrimaryPercent = 12.0f;
+    g_state.codexSecondaryPercent = 31.0f;
+    setStr(g_state.codexPrimaryReset, sizeof(g_state.codexPrimaryReset), "3h 40m");
+    setStr(g_state.codexSecondaryReset, sizeof(g_state.codexSecondaryReset), "5d 12h");
+    setStr(g_state.subscriptions[1].name, sizeof(g_state.subscriptions[1].name), "ChatGPT Plus");
+    g_state.subscriptionCount = 2;
     return true;
   }
   if (std::strcmp(name, "crowd") == 0) {
@@ -134,8 +141,18 @@ bool SimScenes::apply(const char* name) {
     addSession("codex-cli", "idle", "openclaw");
     setStr(g_state.sessions[1].activity, sizeof(g_state.sessions[1].activity),
            "Building the AgentDeck CLI");
+    setStr(g_state.sessions[1].lastEventText, sizeof(g_state.sessions[1].lastEventText),
+           "Wired the daemon milestone line into the session cards");
+    setStr(g_state.sessions[1].lastEventTask, sizeof(g_state.sessions[1].lastEventTask),
+           "InkDeck timeline");
+    setStr(g_state.sessions[1].lastEventHm, sizeof(g_state.sessions[1].lastEventHm), "14:21");
     setStr(g_state.sessions[4].question, sizeof(g_state.sessions[4].question),
            "Bash 명령 실행을 허용할까요? rm -rf build/");
+    // Codex post-5h-reset shape: the 5H window is GONE (slot flip), only 7D
+    // remains → the provider row must render one clean 7D gauge, no "--".
+    g_state.codexPrimaryPercent = -1.0f;
+    g_state.codexSecondaryPercent = 44.0f;
+    setStr(g_state.codexSecondaryReset, sizeof(g_state.codexSecondaryReset), "6d 2h");
     // Daemon-computed lastEvent* (TIMELINE parity) — the PRIMARY card-body
     // source. Session 2 exercises the full "HH:MM task • text" compose;
     // session 0 has only on-device timeline rows → exercises the ring fallback.

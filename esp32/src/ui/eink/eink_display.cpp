@@ -70,6 +70,11 @@ struct RowSnap {
     char model[32];
     char question[120];
     char activity[80];
+    // TIMELINE-grade work summary for the card detail ("HH:MM · task · text"):
+    // the daemon-computed latest milestone (chat/task row), NOT the live tool
+    // one-liner — mid-turn "Running cd …" churn is state-line material, the
+    // detail line carries what the agent actually asked/answered/finished.
+    char work[152];
     bool alive;
 };
 
@@ -94,11 +99,15 @@ struct Snap {
     char codexPlan[40];
     char agPlan[40];   // pre-shortened "AGY Pro ~8/1" chip text
     char ip[16];
-    // Latest timeline event, compressed to one ticker line. EXCLUDED from the
-    // content hash — it updates at most once a minute (piggybacks otherwise)
-    // so tool-event churn can't strobe the e-ink.
-    char tickerTime[8];
-    char tickerText[104];
+    // Recent-work strip: latest milestone timeline events, newest first.
+    // EXCLUDED from the content hash — the strip earns its own redraw at most
+    // once a minute (piggybacks otherwise) so tool-event churn can't strobe
+    // the e-ink. Was a single ticker line; widened to a multi-row strip
+    // because one line carried too little information at glance distance.
+    static constexpr uint8_t TICKER_ROWS = 3;
+    uint8_t tickerCount;
+    char tickerTime[TICKER_ROWS][8];
+    char tickerText[TICKER_ROWS][104];
 };
 
 void snapshot(Snap& s) {
@@ -120,12 +129,30 @@ void snapshot(Snap& s) {
         strncpy(dst.question, src.question, sizeof(dst.question) - 1);
         strncpy(dst.activity, src.activity, sizeof(dst.activity) - 1);
         dst.alive = src.alive;
-        // TIMELINE-derived fallback: when the live activity one-liner is empty
-        // (idle sessions have no current tool/action), surface what this session
-        // most recently accomplished — its latest milestone timeline row — so the
-        // card shows meaningful summarized work instead of a blank detail line.
+        // TIMELINE-grade work summary for the card detail: prefer the
+        // daemon-computed latest milestone (authoritative store — survives
+        // board reboots), composed as "HH:MM · task · text". Fall back to the
+        // on-device timeline ring (empty after every reboot) for old daemons.
         // Bounded scan (timelineCount ≤ TIMELINE_MAX_ENTRIES) already under lock.
-        if (!dst.activity[0]) {
+        if (src.lastEventText[0]) {
+            size_t off = 0;
+            auto append = [&](const char* part) {
+                if (!part || !part[0] || off >= sizeof(dst.work) - 1) return;
+                if (off > 0) {
+                    int n = snprintf(dst.work + off, sizeof(dst.work) - off, " \xC2\xB7 "); // " · "
+                    if (n > 0) off += (size_t)n;
+                    if (off >= sizeof(dst.work)) { off = sizeof(dst.work) - 1; return; }
+                }
+                int n = snprintf(dst.work + off, sizeof(dst.work) - off, "%s", part);
+                if (n > 0) off += (size_t)n;
+                if (off >= sizeof(dst.work)) off = sizeof(dst.work) - 1;
+            };
+            append(src.lastEventHm);
+            append(src.lastEventTask);
+            append(src.lastEventText);
+            // A multibyte truncation can leave a split UTF-8 char at the end.
+            dst.work[Utf8::utf8Boundary(dst.work, strlen(dst.work))] = '\0';
+        } else {
             for (uint8_t back = 0; back < g_state.timelineCount; back++) {
                 uint8_t ti = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - back) % TIMELINE_MAX_ENTRIES);
                 const TimelineEntry& te = g_state.timeline[ti];
@@ -135,8 +162,8 @@ void snapshot(Snap& s) {
                                  strcmp(te.type, "task_end") == 0 || strcmp(te.type, "chat_start") == 0 ||
                                  strcmp(te.type, "task_start") == 0;
                 if (!milestone) continue;
-                strncpy(dst.activity, te.raw, sizeof(dst.activity) - 1);
-                dst.activity[sizeof(dst.activity) - 1] = '\0';
+                strncpy(dst.work, te.raw, sizeof(dst.work) - 1);
+                dst.work[sizeof(dst.work) - 1] = '\0';
                 break;
             }
         }
@@ -185,16 +212,16 @@ void snapshot(Snap& s) {
     if (!s.agPlan[0] && g_state.antigravityPlan[0]) {
         UsageFormat::formatAgyPlan(g_state.antigravityPlan, s.agPlan, sizeof(s.agPlan));
     }
-    // Latest MILESTONE timeline entry → ticker. Only turn/task-level rows
-    // qualify (chat_start/chat_response/chat_end/task_start/task_end):
-    // per-tool rows from managed PTY sessions ("Bash: cd /Users/…") are
-    // command spam at glance distance, and raw JSON bodies ({"exclude":[]})
-    // are machine noise (still guarded by the '{'/'[' skip below).
-    // chat_response is the turn's RESULT — since the chat_end dedup, turns
-    // with a response emit chat_response INSTEAD of chat_end, so without it
-    // the ticker forever showed the ask but never the answer.
+    // Latest MILESTONE timeline entries → recent-work strip (newest first).
+    // Only turn/task-level rows qualify (chat_start/chat_response/chat_end/
+    // task_start/task_end): per-tool rows from managed PTY sessions
+    // ("Bash: cd /Users/…") are command spam at glance distance, and raw JSON
+    // bodies ({"exclude":[]}) are machine noise (still guarded by the '{'/'['
+    // skip below). chat_response is the turn's RESULT — since the chat_end
+    // dedup, turns with a response emit chat_response INSTEAD of chat_end, so
+    // without it the strip forever showed the ask but never the answer.
     // Prefer the daemon-preformatted local "HH:MM"; ts fallback is UTC-derived.
-    for (uint8_t back = 0; back < g_state.timelineCount && back < 16; back++) {
+    for (uint8_t back = 0; back < g_state.timelineCount && s.tickerCount < Snap::TICKER_ROWS; back++) {
         uint8_t idx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - back) % TIMELINE_MAX_ENTRIES);
         const TimelineEntry& t = g_state.timeline[idx];
         if (!t.raw[0] || t.raw[0] == '{' || t.raw[0] == '[') continue;
@@ -202,10 +229,11 @@ void snapshot(Snap& s) {
                          strcmp(t.type, "chat_response") == 0 ||
                          strcmp(t.type, "task_start") == 0 || strcmp(t.type, "task_end") == 0;
         if (!milestone) continue;
+        uint8_t row = s.tickerCount;
         if (t.hm[0]) {
-            strncpy(s.tickerTime, t.hm, sizeof(s.tickerTime) - 1);
+            strncpy(s.tickerTime[row], t.hm, sizeof(s.tickerTime[row]) - 1);
         } else {
-            snprintf(s.tickerTime, sizeof(s.tickerTime), "%02lu:%02lu",
+            snprintf(s.tickerTime[row], sizeof(s.tickerTime[row]), "%02lu:%02lu",
                      (unsigned long)(t.ts / 3600) % 24, (unsigned long)(t.ts / 60) % 60);
         }
         // Compose an explicitly-attributed single line "<agent> · <project> ·
@@ -243,9 +271,9 @@ void snapshot(Snap& s) {
                 }
             }
             appendPart(t.raw);
-            strncpy(s.tickerText, comp[0] ? comp : t.raw, sizeof(s.tickerText) - 1);
+            strncpy(s.tickerText[row], comp[0] ? comp : t.raw, sizeof(s.tickerText[row]) - 1);
         }
-        break;
+        s.tickerCount++;
     }
     unlockState();
     strncpy(s.ip, Net::wifiLocalIP(), sizeof(s.ip) - 1);
@@ -271,7 +299,7 @@ uint32_t contentHash(const Snap& s) {
         const RowSnap& r = s.rows[i];
         h = fnvStr(h, r.name); h = fnvStr(h, r.agentType); h = fnvStr(h, r.state);
         h = fnvStr(h, r.tool); h = fnvStr(h, r.model); h = fnvStr(h, r.question);
-        h = fnvStr(h, r.activity);
+        h = fnvStr(h, r.activity); h = fnvStr(h, r.work);
         h = fnv(h, &r.alive, 1);
     }
     h = fnv(h, &s.optionCount, 1);
@@ -284,7 +312,10 @@ uint32_t contentHash(const Snap& s) {
     h = fnvStr(h, s.claudePlan); h = fnvStr(h, s.codexPlan); h = fnvStr(h, s.agPlan);
     h = fnv(h, &s.usageStale, 1);
     h = fnvStr(h, s.ip);
-    // NOTE: tickerText intentionally NOT hashed — see Snap.
+    // NOTE: ticker row TEXT intentionally NOT hashed — see Snap. The row
+    // COUNT is hashed: it moves the grid/strip split (layout), and it only
+    // changes a couple of times after boot, so it can't strobe the panel.
+    h = fnv(h, &s.tickerCount, 1);
     return h;
 }
 
@@ -411,8 +442,8 @@ void drawWrapped2(int16_t x, int16_t y1, int16_t y2, int16_t maxW,
                   const char* text, const GFXfont* f) {
     if (smartWidth(text, f) <= maxW) { smartTextAt(x, y1, text, f); return; }
     size_t len = strlen(text);
-    size_t take = len;
-    char probe[112];
+    char probe[160];
+    size_t take = len < sizeof(probe) - 1 ? len : utf8Boundary(text, sizeof(probe) - 1);
     while (take > 1) {
         take = utf8Boundary(text, take);
         strncpy(probe, text, take); probe[take] = '\0';
@@ -430,7 +461,7 @@ void drawWrapped2(int16_t x, int16_t y1, int16_t y2, int16_t maxW,
     const char* rest = text + brk;
     while (*rest == ' ') rest++;
     if (*rest) {
-        char l2[112];
+        char l2[160];
         smartFitText(l2, sizeof(l2), rest, maxW, f);
         smartTextAt(x, y2, l2, f);
     }
@@ -612,7 +643,11 @@ void drawGaugeBar(int16_t x, int16_t y, const char* tag, float pct, const char* 
 }
 
 // Provider row (28px): mini glyph + label (+ subscription plan sub-line in the
-// classic font when known) + 5H/7D gauges. Returns true if drawn.
+// classic font when known) + available-window gauges. Returns true if drawn.
+// A missing window is NOT rendered as a "--" placeholder: after a Codex 5h
+// reset the 5H window disappears entirely (7d flips to the primary slot), and
+// a dead "--" gauge next to the live 7D read as breakage. Present windows
+// pack left instead.
 bool drawProviderUsage(int16_t y, const char* agentType, const char* label,
                        const char* plan, float p5, const char* r5,
                        float p7, const char* r7, bool stale) {
@@ -626,8 +661,9 @@ bool drawProviderUsage(int16_t y, const char* agentType, const char* label,
         fitText(pf, sizeof(pf), plan, 100, CLASSIC_FONT);
         textAt(44, y + 26, pf, CLASSIC_FONT);  // "Max 20x ~7/12" under the label
     }
-    drawGaugeBar(150, y + 2, "5H", p5, r5);
-    drawGaugeBar(490, y + 2, "7D", p7, r7);
+    int16_t slotX = 150;
+    if (p5 >= 0.0f) { drawGaugeBar(slotX, y + 2, "5H", p5, r5); slotX = 490; }
+    if (p7 >= 0.0f) drawGaugeBar(slotX, y + 2, "7D", p7, r7);
     return true;
 }
 
@@ -663,18 +699,23 @@ void drawUsageFooter(const Snap& s, bool showIdentity, int16_t sepY = 370) {
         textRight(W - 16 - agW, 474, tag, &FreeSans9pt7b);
     }
 
-    // Ticker — latest timeline event as ONE compressed line (the per-card
-    // activity summary is the surface that gets two lines, not this).
-    // UTF-8/한글 safe — Korean prompts previously rendered as "######?".
-    // Gated on the live daemon link: a stale timeline line lingering under the
-    // "searching…" / no-link screen read as if the daemon were still connected.
-    if (s.bridgeConnected && s.tickerText[0]) {
-        const int16_t ty = 470;
-        textAt(16, ty, s.tickerTime, &FreeSansBold9pt7b);
-        char tf[108];
-        int16_t maxW = W - 74 - 16 - agW - (showIdentity ? 110 : 0);
-        smartFitText(tf, sizeof(tf), s.tickerText, maxW, &FreeSans9pt7b);
-        smartTextAt(74, ty, tf, &FreeSans9pt7b);
+    // Recent-work strip — up to TICKER_ROWS milestone timeline rows, newest
+    // at the top. UTF-8/한글 safe — Korean prompts previously rendered as
+    // "######?". Gated on the live daemon link: a stale timeline line
+    // lingering under the "searching…" / no-link screen read as if the daemon
+    // were still connected. Only the bottom row shares its width with the AGY
+    // chip / identity tag pinned at y≈474.
+    if (s.bridgeConnected && s.tickerCount > 0) {
+        constexpr int16_t rowH = 21;
+        for (uint8_t i = 0; i < s.tickerCount; i++) {
+            int16_t ty = 470 - (int16_t)(s.tickerCount - 1 - i) * rowH;
+            bool bottomRow = (i == s.tickerCount - 1);
+            textAt(16, ty, s.tickerTime[i], &FreeSansBold9pt7b);
+            char tf[108];
+            int16_t maxW = W - 74 - 16 - (bottomRow ? agW + (showIdentity ? 110 : 0) : 0);
+            smartFitText(tf, sizeof(tf), s.tickerText[i], maxW, &FreeSans9pt7b);
+            smartTextAt(74, ty, tf, &FreeSans9pt7b);
+        }
     }
 }
 
@@ -724,13 +765,20 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
     int16_t sy = ny + (tall ? 36 : 26);
     drawStateMarker(tx, sy - 11, 12, r.state);
     char stateLine[64];
-    // Only fall back to the raw tool ("Bash") on the state line when there is NO
-    // activity summary — the activity/timeline line below now carries the
-    // meaningful one-liner, so repeating the bare tool here is redundant noise at
-    // glance distance.
-    if (!awaiting && r.tool[0] && !r.activity[0]) {
+    // The state line carries the LIVE "right now" one-liner (activity summary,
+    // falling back to the raw tool) — mid-turn churn belongs here, next to the
+    // state marker. The detail lines below are reserved for the TIMELINE-grade
+    // work summary, so "Running cd …" never displaces what the agent actually
+    // asked/answered.
+    // ASCII-only separator: this line rides the fitCascade → CLASSIC_FONT
+    // fallback, and the built-in CP437 font renders the UTF-8 " · " pair as
+    // "Â·" garbage (FreeFonts silently skip it — either way it's wrong).
+    if (!awaiting && r.activity[0]) {
+        char t[48]; ascii(t, sizeof(t), r.activity);
+        snprintf(stateLine, sizeof(stateLine), "%s: %s", label, t);
+    } else if (!awaiting && r.tool[0]) {
         char t[40]; ascii(t, sizeof(t), r.tool);
-        snprintf(stateLine, sizeof(stateLine), "%s · %s", label, t);
+        snprintf(stateLine, sizeof(stateLine), "%s: %s", label, t);
     } else {
         strncpy(stateLine, label, sizeof(stateLine) - 1); stateLine[sizeof(stateLine) - 1] = '\0';
     }
@@ -777,14 +825,16 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
                 dy += 20;
             }
         }
-    } else if (r.activity[0] && dy < y + h - 8) {
-        // Activity summary gets up to TWO wrapped lines (same font on both) —
-        // this line is the point of the card, so give it room. UTF-8/한글 safe.
+    } else if (r.work[0] && dy < y + h - 8) {
+        // TIMELINE work summary ("HH:MM · task · text") gets up to TWO wrapped
+        // lines (same font on both) — this line is the point of the card, so
+        // give it room. UTF-8/한글 safe. The live activity one-liner is NOT
+        // repeated here (it already rides the state line above).
         bool roomFor2 = dy + 20 < y + h - 6;
-        if (roomFor2) drawWrapped2(tx, dy, dy + 20, maxTextW, r.activity, &FreeSans9pt7b);
+        if (roomFor2) drawWrapped2(tx, dy, dy + 20, maxTextW, r.work, &FreeSans9pt7b);
         else {
-            char af[96];
-            smartFitText(af, sizeof(af), r.activity, maxTextW, &FreeSans9pt7b);
+            char af[156];
+            smartFitText(af, sizeof(af), r.work, maxTextW, &FreeSans9pt7b);
             smartTextAt(tx, dy, af, &FreeSans9pt7b);
         }
     }
@@ -940,11 +990,15 @@ void drawDashboard(const Snap& s) {
     display.setTextColor(GxEPD_BLACK);
     setInk(false);
     // Adaptive split between the session grid and the usage band. The bottom
-    // band (ticker at y≈470 + AGY chip at y≈474) is pinned; usage gauges are
-    // anchored just above it, and the grid grows downward to reclaim whatever
-    // the gauges leave. 0 gauges → no band, grid runs to the ticker; 1 → one
-    // row; 2 → both. Prevents the fixed ~110px footer from wasting space.
-    const int16_t bottomBand = 456;  // gauges sit above the ticker/AGY band
+    // band (recent-work strip ending at y≈470 + AGY chip at y≈474) is pinned;
+    // usage gauges are anchored just above it, and the grid grows downward to
+    // reclaim whatever the gauges and strip leave. 0 gauges → no band, grid
+    // runs to the strip; 1 → one row; 2 → both. The strip itself is adaptive
+    // too: each extra milestone row (beyond the first) lifts the band by 21px,
+    // so an idle deck with little history gives the space back to the cards.
+    const int16_t stripLift = (s.bridgeConnected && s.tickerCount > 1)
+        ? (int16_t)((s.tickerCount - 1) * 21) : 0;
+    const int16_t bottomBand = 456 - stripLift;  // gauges sit above the strip/AGY band
     int rows = usageRowCount(s);
     int16_t sepY, gridBottom;
     if (rows == 0) {
@@ -1014,7 +1068,11 @@ void init() {
     Serial.printf("[Eink] GDEY075T7 init %dx%d, partial=%d\n",
                   display.width(), display.height(),
                   (int)display.epd2.hasFastPartialUpdate);
-    Snap s; snapshot(s);
+    // static: Snap grew past 5KB (10 rows × work[152] + the multi-row strip)
+    // — too big for the loop-task stack alongside the GxEPD2 page render.
+    // init() and render() run on the same Core 1 loop task, so one static
+    // scratch Snap is race-free.
+    static Snap s; snapshot(s);
     refresh(drawSearching, s, true);
     firstDraw = false;
     lastDrawMs = millis();
@@ -1034,7 +1092,7 @@ void update(float /*dt*/) {
 
 void render() {
     uint32_t now = millis();
-    Snap s; snapshot(s);
+    static Snap s; snapshot(s);  // static: see init() — Snap outgrew the task stack
 
     // InkDeck intentionally ignores the host Mac's display-sleep state. E-ink
     // retains the dashboard without panel refresh power, and this board is
@@ -1049,8 +1107,8 @@ void render() {
     // piggybacks on whatever refresh the hashed content triggers. The FIRST
     // ticker (blank → text) draws immediately — an empty bottom line for up
     // to a minute after boot read as "timeline broken".
-    bool tickerDue = s.tickerText[0] &&
-                     strcmp(s.tickerText, lastTickerShown) != 0 &&
+    bool tickerDue = s.tickerCount > 0 &&
+                     strcmp(s.tickerText[0], lastTickerShown) != 0 &&
                      (lastTickerShown[0] == '\0' || (now - lastDrawMs) >= 60000);
     if (h == lastHash && !forceFull && !tickerDue) return;
     if (!forceFull && (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts
@@ -1066,7 +1124,7 @@ void render() {
     firstDraw = false;
     forceFull = false;
     wasSearching = searching;
-    strncpy(lastTickerShown, s.tickerText, sizeof(lastTickerShown) - 1);
+    strncpy(lastTickerShown, s.tickerCount > 0 ? s.tickerText[0] : "", sizeof(lastTickerShown) - 1);
     lastTickerShown[sizeof(lastTickerShown) - 1] = '\0';
 }
 

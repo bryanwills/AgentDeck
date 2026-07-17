@@ -74,7 +74,8 @@ static lv_obj_t* tb5hPct   = nullptr;    // "62% 2h13m"
 static lv_obj_t* tb7dPct   = nullptr;
 // Codex (ChatGPT) usage gauges — mirror the Claude 5h/7d pair, blue-tinted.
 // The whole group hides when no Codex limits are present (common case).
-static lv_obj_t* tbCx5hGrp = nullptr;    // group container (hide when no data)
+static lv_obj_t* tbCodexBlock = nullptr; // whole Codex block (hide when no data at all)
+static lv_obj_t* tbCx5hGrp = nullptr;    // per-window ROW (hide when that window is absent)
 static lv_obj_t* tbCx7dGrp = nullptr;
 static lv_obj_t* tbCx5hFill = nullptr;
 static lv_obj_t* tbCx7dFill = nullptr;
@@ -849,7 +850,8 @@ static lv_obj_t* makeUsageRow(lv_obj_t* parent, const char* lab, uint32_t labCol
 // without the rightmost item clipping past the bar's right padding.
 static lv_obj_t* makeUsageBlock(lv_obj_t* parent, const lv_image_dsc_t* icon, uint32_t iconCol,
                                 uint32_t labCol, uint32_t fillCol, lv_obj_t** icoOut,
-                                lv_obj_t** f5, lv_obj_t** p5, lv_obj_t** f7, lv_obj_t** p7) {
+                                lv_obj_t** f5, lv_obj_t** p5, lv_obj_t** f7, lv_obj_t** p7,
+                                lv_obj_t** row5Out = nullptr, lv_obj_t** row7Out = nullptr) {
     lv_obj_t* block = lv_obj_create(parent);
     lv_obj_set_size(block, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(block, LV_OPA_TRANSP, 0);
@@ -878,8 +880,10 @@ static lv_obj_t* makeUsageBlock(lv_obj_t* parent, const lv_image_dsc_t* icon, ui
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
-    makeUsageRow(col, "5H", labCol, fillCol, f5, p5);
-    makeUsageRow(col, "7D", labCol, fillCol, f7, p7);
+    lv_obj_t* r5 = makeUsageRow(col, "5H", labCol, fillCol, f5, p5);
+    lv_obj_t* r7 = makeUsageRow(col, "7D", labCol, fillCol, f7, p7);
+    if (row5Out) *row5Out = r5;
+    if (row7Out) *row7Out = r7;
     return block;
 }
 #endif // BOARD_IPS10
@@ -965,12 +969,13 @@ void init(lv_obj_t* parent) {
         ips10InitGlyphs();
         makeUsageBlock(tb, &glyphOctopus, Theme::ClaudeBody, 0x5D7470, D1_OK,
                        nullptr, &tb5hFill, &tb5hPct, &tb7dFill, &tb7dPct);
-        // The whole Codex block is the hide unit; keep tbCx5hGrp pointing at it so
-        // the existing update() hide logic works. tbCx7dGrp is unused now.
-        tbCx5hGrp = makeUsageBlock(tb, &glyphCodex, Theme::CloudBody, 0x7A80E8, D1_CODEX,
-                                   &tbCodexIcon, &tbCx5hFill, &tbCx5hPct, &tbCx7dFill, &tbCx7dPct);
-        lv_obj_add_flag(tbCx5hGrp, LV_OBJ_FLAG_HIDDEN);
-        tbCx7dGrp = nullptr;
+        // The block hides as a whole when Codex reports nothing; each usage ROW
+        // also hides individually so a post-5h-reset 7D-only state renders one
+        // clean gauge instead of a dead "-" 5H row.
+        tbCodexBlock = makeUsageBlock(tb, &glyphCodex, Theme::CloudBody, 0x7A80E8, D1_CODEX,
+                                   &tbCodexIcon, &tbCx5hFill, &tbCx5hPct, &tbCx7dFill, &tbCx7dPct,
+                                   &tbCx5hGrp, &tbCx7dGrp);
+        lv_obj_add_flag(tbCodexBlock, LV_OBJ_FLAG_HIDDEN);
 
         // Antigravity chip — brand mark + plan name (no credit count: it's a raw
         // backend metering number). Hidden until usage_update carries a status.
@@ -1122,9 +1127,12 @@ void init(lv_obj_t* parent) {
         lv_obj_clear_flag(cellGlyph[i], LV_OBJ_FLAG_CLICKABLE);  // taps fall through to the cell
 
         // Name line: ●agent-name (bold) + colored [STATE] (one recolor label, no flex).
+        // Fonts across the card were lifted one step (12→16, 16→20, KR fallback
+        // 12→16px via font_noto_kr_16) — at 1280×800 on a 10.1" panel the old
+        // 12px lines were ~2mm tall and unreadable at desk distance.
         cellName[i] = lv_label_create(cell[i]);
         lv_obj_set_style_text_color(cellName[i], lv_color_hex(Theme::HUDText), 0);
-        lv_obj_set_style_text_font(cellName[i], &font_kr_16, 0);   // larger for legibility (D1)
+        lv_obj_set_style_text_font(cellName[i], &font_kr_20, 0);
         lv_label_set_recolor(cellName[i], true);
         lv_label_set_long_mode(cellName[i], LV_LABEL_LONG_DOT);
         lv_obj_set_width(cellName[i], 60);
@@ -1133,7 +1141,7 @@ void init(lv_obj_t* parent) {
         // State pill chip — short content-sized rounded label (NOT a nested flex row, so it
         // stays layout-cheap). bg/text colored per state at render time.
         cellPill[i] = lv_label_create(cell[i]);
-        lv_obj_set_style_text_font(cellPill[i], &font_kr_12, 0);
+        lv_obj_set_style_text_font(cellPill[i], &font_kr_16, 0);
         lv_obj_set_style_text_color(cellPill[i], lv_color_hex(0x05140F), 0);
         lv_obj_set_style_bg_opa(cellPill[i], LV_OPA_COVER, 0);
         lv_obj_set_style_radius(cellPill[i], 8, 0);
@@ -1146,7 +1154,7 @@ void init(lv_obj_t* parent) {
 
         cellProj[i] = lv_label_create(cell[i]);
         lv_obj_set_style_text_color(cellProj[i], lv_color_hex(Theme::HUDDim), 0);
-        lv_obj_set_style_text_font(cellProj[i], &font_kr_12, 0);
+        lv_obj_set_style_text_font(cellProj[i], &font_kr_16, 0);
         lv_label_set_long_mode(cellProj[i], LV_LABEL_LONG_DOT);
         lv_obj_set_width(cellProj[i], 60);
         lv_label_set_text(cellProj[i], "");
@@ -1154,7 +1162,7 @@ void init(lv_obj_t* parent) {
         // Tool box: "▸ tool" in a bordered/filled box.
         cellTool[i] = lv_label_create(cell[i]);
         lv_obj_set_style_text_color(cellTool[i], lv_color_hex(Theme::HUDText), 0);
-        lv_obj_set_style_text_font(cellTool[i], &font_kr_12, 0);
+        lv_obj_set_style_text_font(cellTool[i], &font_kr_16, 0);
         lv_obj_set_style_bg_color(cellTool[i], lv_color_hex(0x07140F), 0);
         lv_obj_set_style_bg_opa(cellTool[i], (lv_opa_t)150, 0);
         lv_obj_set_style_border_width(cellTool[i], 1, 0);
@@ -1169,9 +1177,15 @@ void init(lv_obj_t* parent) {
         lv_obj_set_width(cellTool[i], 60);
         lv_label_set_text(cellTool[i], "");
 
+        // Body: the TIMELINE feed — newest milestone bright, older rows dimmed
+        // via recolor markup. This is the card's payload, so it gets the bright
+        // text color and the legible face (the old dim 12px single line is what
+        // made the region read as noise).
         cellBody[i] = lv_label_create(cell[i]);
-        lv_obj_set_style_text_color(cellBody[i], lv_color_hex(Theme::HUDDim), 0);
-        lv_obj_set_style_text_font(cellBody[i], &font_kr_12, 0);
+        lv_obj_set_style_text_color(cellBody[i], lv_color_hex(Theme::HUDText), 0);
+        lv_obj_set_style_text_font(cellBody[i], &font_kr_16, 0);
+        lv_obj_set_style_text_line_space(cellBody[i], 6, 0);
+        lv_label_set_recolor(cellBody[i], true);
         lv_label_set_long_mode(cellBody[i], LV_LABEL_LONG_DOT);
         lv_obj_set_width(cellBody[i], 60);
         lv_label_set_text(cellBody[i], "");
@@ -1180,7 +1194,7 @@ void init(lv_obj_t* parent) {
         cellMeta[i] = lv_label_create(cell[i]);
         lv_obj_set_width(cellMeta[i], 60);
         lv_obj_set_style_text_color(cellMeta[i], lv_color_hex(Theme::HUDFaint), 0);
-        lv_obj_set_style_text_font(cellMeta[i], &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(cellMeta[i], &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_opa(cellMeta[i], (lv_opa_t)180, 0);
         lv_label_set_long_mode(cellMeta[i], LV_LABEL_LONG_DOT);
         lv_label_set_text(cellMeta[i], "");
@@ -1723,9 +1737,15 @@ void update() {
     if (cellsBox) {
         struct MCell { uint32_t accent; uint32_t stateCol; char name[40]; char agent[16]; char state[20];
                        char model[32]; char tool[40]; uint32_t elapsed;
-                       char sid[32]; char requestId[40]; char question[160]; char body[160];
+                       char sid[32]; char requestId[40]; char question[160]; char body[240];
+                       // Older per-session milestone rows (newest-first) for the
+                       // card's TIMELINE feed — rendered dimmed under `body`,
+                       // count gated by the cell height at label-set time.
+                       char feed[3][120]; uint8_t feedCount;
                        char activity[80]; };
-        MCell mc[MOSAIC_MAX];
+        // static: ~10 × 1.2KB no longer fits comfortably on the LVGL task
+        // stack; update() is only ever entered from the single UI task.
+        static MCell mc[MOSAIC_MAX];
         int n = 0;
 
         lockState();
@@ -1808,6 +1828,38 @@ void update() {
                 Utf8::utf8TrimEnd(mc[n].body);
                 break;
             }
+            // Older milestones → the card's dimmed TIMELINE feed rows (newest
+            // first, "HH:MM  text"). Tall treemap cells were mostly empty deck;
+            // per-session history is the valuable content to fill them with.
+            mc[n].feedCount = 0;
+            {
+                bool skippedNewest = false;   // the row already surfaced as `body`
+                for (uint8_t k = 0; k < g_state.timelineCount && mc[n].feedCount < 3; k++) {
+                    uint8_t bidx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - k) % TIMELINE_MAX_ENTRIES);
+                    const TimelineEntry& te = g_state.timeline[bidx];
+                    if (strcmp(te.sessionId, si.id) != 0) continue;
+                    if (!te.raw[0] || te.raw[0] == '{' || te.raw[0] == '[') continue;
+                    bool milestone = strcmp(te.type, "chat_start") == 0 || strcmp(te.type, "chat_response") == 0 ||
+                                     strcmp(te.type, "chat_end") == 0 ||
+                                     strcmp(te.type, "task_start") == 0 || strcmp(te.type, "task_end") == 0;
+                    if (!milestone) continue;
+                    if (!skippedNewest) {
+                        skippedNewest = true;
+                        // The newest ring milestone is (or duplicates) the body line.
+                        if (mc[n].body[0]) continue;
+                    }
+                    char* row = mc[n].feed[mc[n].feedCount];
+                    size_t off = 0;
+                    if (te.hm[0]) {
+                        int nn = snprintf(row, sizeof(mc[n].feed[0]), "%s  ", te.hm);
+                        if (nn > 0) off = (size_t)nn;
+                    }
+                    if (off < sizeof(mc[n].feed[0]) - 1)
+                        snprintf(row + off, sizeof(mc[n].feed[0]) - off, "%s", te.raw);
+                    Utf8::utf8TrimEnd(row);
+                    mc[n].feedCount++;
+                }
+            }
             n++;
         }
         bool hasOC = false;
@@ -1817,7 +1869,7 @@ void update() {
             strcpy(mc[n].name, "OpenClaw"); strcpy(mc[n].agent, "openclaw");
             strcpy(mc[n].state, "idle"); mc[n].model[0] = '\0'; mc[n].tool[0] = '\0'; mc[n].elapsed = 0;
             mc[n].sid[0] = '\0'; mc[n].requestId[0] = '\0'; mc[n].question[0] = '\0'; mc[n].body[0] = '\0';
-            mc[n].activity[0] = '\0'; n++;
+            mc[n].feedCount = 0; mc[n].activity[0] = '\0'; n++;
         }
         if (n == 0 && hasData) {  // single-session fallback (no sessions_list yet)
             mc[0].accent = ips10AgentColor(g_state.agentType);
@@ -1831,7 +1883,8 @@ void update() {
             strncpy(mc[0].state, ps, sizeof(mc[0].state) - 1); mc[0].state[sizeof(mc[0].state) - 1] = '\0';
             strncpy(mc[0].tool, g_state.currentTool, sizeof(mc[0].tool) - 1); mc[0].tool[sizeof(mc[0].tool) - 1] = '\0';
             mc[0].model[0] = '\0'; mc[0].elapsed = g_state.sessionDurationSec;
-            mc[0].sid[0] = '\0'; mc[0].requestId[0] = '\0'; mc[0].body[0] = '\0'; mc[0].activity[0] = '\0';
+            mc[0].sid[0] = '\0'; mc[0].requestId[0] = '\0'; mc[0].body[0] = '\0'; mc[0].feedCount = 0;
+            mc[0].activity[0] = '\0';
             strncpy(mc[0].question, g_state.question, sizeof(mc[0].question) - 1); mc[0].question[sizeof(mc[0].question) - 1] = '\0';
             n = 1;
         }
@@ -1842,6 +1895,10 @@ void update() {
             for (char* c = mc[i].tool; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
             for (char* c = mc[i].body; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
             for (char* c = mc[i].activity; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
+            // question + feed ride the recolor-enabled body label now.
+            for (char* c = mc[i].question; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
+            for (uint8_t r = 0; r < mc[i].feedCount; r++)
+                for (char* c = mc[i].feed[r]; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
         }
 
         // Top-bar daemon status + office caption track the live agent count.
@@ -1871,18 +1928,22 @@ void update() {
         setTopbarGauge(tb5hFill, tb5hPct, p5h, reset5h, usageStale, D1_OK);
         setTopbarGauge(tb7dFill, tb7dPct, p7d, reset7d, usageStale, D1_OK);
 
+        // Per-window visibility: after a Codex 5h reset the 5H window vanishes
+        // entirely (the 7d window flips to the primary slot) — a "-" gauge next
+        // to the live 7D read as breakage, so a missing window hides its whole
+        // group instead.
         bool hasCodex = (pcx5h >= 0.0f || pcx7d >= 0.0f);
-        if (tbCodexIcon) {
-            if (hasCodex) lv_obj_clear_flag(tbCodexIcon, LV_OBJ_FLAG_HIDDEN);
-            else          lv_obj_add_flag(tbCodexIcon, LV_OBJ_FLAG_HIDDEN);
+        if (tbCodexBlock) {
+            if (hasCodex) lv_obj_clear_flag(tbCodexBlock, LV_OBJ_FLAG_HIDDEN);
+            else          lv_obj_add_flag(tbCodexBlock, LV_OBJ_FLAG_HIDDEN);
         }
         if (tbCx5hGrp) {
-            if (hasCodex) lv_obj_clear_flag(tbCx5hGrp, LV_OBJ_FLAG_HIDDEN);
-            else          lv_obj_add_flag(tbCx5hGrp, LV_OBJ_FLAG_HIDDEN);
+            if (pcx5h >= 0.0f) lv_obj_clear_flag(tbCx5hGrp, LV_OBJ_FLAG_HIDDEN);
+            else               lv_obj_add_flag(tbCx5hGrp, LV_OBJ_FLAG_HIDDEN);
         }
         if (tbCx7dGrp) {
-            if (hasCodex) lv_obj_clear_flag(tbCx7dGrp, LV_OBJ_FLAG_HIDDEN);
-            else          lv_obj_add_flag(tbCx7dGrp, LV_OBJ_FLAG_HIDDEN);
+            if (pcx7d >= 0.0f) lv_obj_clear_flag(tbCx7dGrp, LV_OBJ_FLAG_HIDDEN);
+            else               lv_obj_add_flag(tbCx7dGrp, LV_OBJ_FLAG_HIDDEN);
         }
         if (hasCodex) {
             setTopbarGauge(tbCx5hFill, tbCx5hPct, pcx5h, resetCx5h, false, D1_CODEX);
@@ -2025,6 +2086,8 @@ void update() {
             for (const char* s = mc[i].question; *s; s++) sig = sig * 31u + (uint8_t)*s;
             for (const char* s = mc[i].body;     *s; s++) sig = sig * 31u + (uint8_t)*s;
             for (const char* s = mc[i].activity; *s; s++) sig = sig * 31u + (uint8_t)*s;
+            for (uint8_t r = 0; r < mc[i].feedCount; r++)
+                for (const char* s = mc[i].feed[r]; *s; s++) sig = sig * 31u + (uint8_t)*s;
             sig ^= (uint32_t)mc[i].elapsed + (uint32_t)(pw * 131) + (uint32_t)(ph * 17) + (linked ? 7u : 0u);
             if (sig == cellSig[i]) continue;     // settled + unchanged → no LVGL work
             cellSig[i] = sig;
@@ -2041,7 +2104,9 @@ void update() {
             // cell (32–60px). Skipped on tiny cells and for unknown agents with no mask.
             const lv_image_dsc_t* gdsc = ips10AgentGlyph(mc[i].agent);
             int glyphSz = 0;
-            if (gdsc && pw >= 92 && ph >= 52) {
+            // pw gate raised 92→150: on narrow idle tiles the top-right glyph
+            // ate the name's width and wrapped it mid-word ("Claud/e").
+            if (gdsc && pw >= 150 && ph >= 52) {
                 const bool agGlyph = ips10IsAntigravityAgent(mc[i].agent);
                 glyphSz = (pw < ph ? pw : ph) * 42 / 100;
                 if (glyphSz < 32) glyphSz = 32;
@@ -2061,6 +2126,9 @@ void update() {
             }
 
             int nameW = innerW - (glyphSz ? glyphSz + 8 : 0); if (nameW < 24) nameW = 24;
+            // Narrow tiles drop the name a size instead of mid-word wrapping
+            // ("Ope/nCo/de" at 20px in a 110px idle tile).
+            lv_obj_set_style_text_font(cellName[i], pw < 170 ? &font_kr_16 : &font_kr_20, 0);
             lv_obj_set_width(cellName[i], nameW);
             lv_obj_set_width(cellProj[i], innerW);
             lv_obj_set_width(cellTool[i], innerW);
@@ -2114,7 +2182,32 @@ void update() {
             else if (mc[i].body[0]) body = mc[i].body;
             else if (!idle && mc[i].activity[0]) body = mc[i].activity;
             if (body[0] && ph >= 104) {
-                lv_label_set_text(cellBody[i], body);
+                // TIMELINE feed: the newest line renders bright; up to
+                // `feedCount` older rows follow dimmed (recolor markup), the
+                // count gated by cell height so tall treemap cells spend their
+                // former empty deck on per-session history.
+                char full[900];
+                size_t off = (size_t)snprintf(full, sizeof(full), "%s", body);
+                if (off >= sizeof(full)) off = sizeof(full) - 1;
+                int extraRows = ph >= 380 ? 3 : (ph >= 280 ? 2 : (ph >= 190 ? 1 : 0));
+                // An awaiting card leads with the question — its milestone line
+                // (mc.body) joins the dimmed history instead of vanishing, so
+                // the tall amber tile still tells what the agent was doing.
+                if (awaiting && body == mc[i].question && mc[i].body[0] && extraRows > 0
+                    && off < sizeof(full) - 16) {
+                    int nn = snprintf(full + off, sizeof(full) - off, "\n#8fa6a2 %s#", mc[i].body);
+                    if (nn > 0) off += (size_t)nn;
+                    if (off >= sizeof(full)) off = sizeof(full) - 1;
+                    extraRows--;
+                }
+                if (extraRows > mc[i].feedCount) extraRows = mc[i].feedCount;
+                for (int r = 0; r < extraRows && off < sizeof(full) - 16; r++) {
+                    int nn = snprintf(full + off, sizeof(full) - off, "\n#8fa6a2 %s#", mc[i].feed[r]);
+                    if (nn > 0) off += (size_t)nn;
+                    if (off >= sizeof(full)) off = sizeof(full) - 1;
+                }
+                Utf8::utf8TrimEnd(full);   // byte cap can split a 한글 glyph
+                lv_label_set_text(cellBody[i], full);
                 lv_obj_clear_flag(cellBody[i], LV_OBJ_FLAG_HIDDEN);
             } else {
                 lv_obj_add_flag(cellBody[i], LV_OBJ_FLAG_HIDDEN);

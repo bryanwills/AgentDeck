@@ -124,6 +124,58 @@ describe('buildUsageEvent subscription quota scoping', () => {
   });
 });
 
+describe('buildUsageEvent staleness contract', () => {
+  it('flags usageStale when no quota numbers ride the frame (never fetched)', () => {
+    // Clients treat "percent fields absent + usageStale falsy" as "keep the
+    // previous value" — a daemon with nothing to report must say stale so a
+    // dashboard roaming from another daemon purges the foreign numbers.
+    const evt = buildUsageEvent(
+      snapshot({ modelName: 'claude-fable-5', billingType: 'subscription' }),
+      null,
+      true,
+    ) as UsageEvent;
+
+    expect(evt.fiveHourPercent).toBeUndefined();
+    expect(evt.sevenDayPercent).toBeUndefined();
+    expect(evt.usageStale).toBe(true);
+  });
+
+  it('does not flag usageStale when fresh quota numbers are present', () => {
+    const evt = buildUsageEvent(
+      snapshot({ modelName: 'claude-fable-5', billingType: 'subscription' }),
+      usage(),
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    ) as UsageEvent;
+
+    expect(evt.fiveHourPercent).toBe(55);
+    expect(evt.usageStale).toBeUndefined();
+  });
+
+  it('does not force usageStale when the cost-based API-billing percent is present', () => {
+    const evt = buildUsageEvent(
+      snapshot({ billingType: 'api', costSpent: 5, costLimit: 10 }),
+      null,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'api',
+    ) as UsageEvent;
+
+    expect(evt.fiveHourPercent).toBe(50);
+    expect(evt.usageStale).toBeUndefined();
+  });
+});
+
 describe('buildUsageEvent Codex window normalization', () => {
   const codexArgs = (codexRateLimits: unknown) =>
     [

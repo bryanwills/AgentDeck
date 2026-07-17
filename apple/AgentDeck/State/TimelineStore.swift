@@ -19,6 +19,16 @@ final class TimelineStore: ObservableObject, @unchecked Sendable {
     // filtered, tool_exec noise ate the buffer even quicker (timeline data
     // audit 2026-07-13).
     private let maxEntries = 500
+    /// Task hierarchy rows are exempt from the generic FIFO so a long task's
+    /// `task_start` doesn't scroll away while its turns stream in (which would
+    /// render an unpaired `task_end`). Mirrors `DaemonTimelineStore.maxTaskEntries`
+    /// / Node `BridgeTimelineStore.MAX_TASK_ENTRIES` — the eviction half of the
+    /// daemon store design that never made it into the client store.
+    private let maxTaskEntries = 60
+
+    private static func isTaskRow(_ e: TimelineEntry) -> Bool {
+        e.type == .taskStart || e.type == .taskEnd || e.type == .taskMilestone
+    }
 
     /// Whether we're receiving timeline from bridge (suppress local generation)
     @Published var receivingBridgeTimeline = false
@@ -61,9 +71,38 @@ final class TimelineStore: ObservableObject, @unchecked Sendable {
         }
 
         // Trim oldest if over limit
-        if entries.count > maxEntries {
-            entries.removeFirst(entries.count - maxEntries)
+        while entries.count > maxEntries {
+            evictOne()
         }
+    }
+
+    /// Evict a single entry to enforce `maxEntries`, protecting task rows —
+    /// ported from `DaemonTimelineStore.evictOne`. Task rows only leave under
+    /// their own cap, an in-flight task's `task_start` (no matching `task_end`
+    /// yet) is never evicted, and the oldest `tool_exec` is shed before any
+    /// chat/turn row so a turn's `chat_start` doesn't orphan its response.
+    private func evictOne() {
+        let taskRowCount = entries.lazy.filter { Self.isTaskRow($0) }.count
+        if taskRowCount > maxTaskEntries {
+            let closed = Set(entries.compactMap { $0.type == .taskEnd ? $0.taskId : nil })
+            if let idx = entries.firstIndex(where: { e in
+                guard Self.isTaskRow(e) else { return false }
+                if e.type == .taskStart, let id = e.taskId, !closed.contains(id) { return false }
+                return true
+            }) {
+                entries.remove(at: idx)
+                return
+            }
+        }
+        if let idx = entries.firstIndex(where: { $0.type == .toolExec }) {
+            entries.remove(at: idx)
+            return
+        }
+        if let idx = entries.firstIndex(where: { !Self.isTaskRow($0) }) {
+            entries.remove(at: idx)
+            return
+        }
+        entries.removeFirst()
     }
 
     /// Field-merge an upsert update over the existing row instead of replacing

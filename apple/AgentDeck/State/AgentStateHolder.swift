@@ -917,6 +917,16 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
 
             // Save successful URL for next launch
             if let url = connection.url {
+                // Daemon switch (roaming to a different host / different
+                // daemon): usage and subscription rows relayed by the old
+                // daemon are that host's numbers — purge them so the new
+                // daemon's first usage tick repopulates from scratch instead
+                // of the UI carrying foreign quota across. Same-URL
+                // reconnects (transient blips) keep data to avoid flicker,
+                // matching the clearRelayedUsageState() doc contract.
+                if let previous = savedUrl, previous != url {
+                    clearRelayedUsageState()
+                }
                 savedUrl = url
             }
         case "disconnected":

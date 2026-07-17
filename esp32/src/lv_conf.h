@@ -32,6 +32,9 @@
 #define LV_FONT_MONTSERRAT_18 1
 #define LV_FONT_MONTSERRAT_20 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
+/* font_noto_kr_16 (IPS10): full 가-힣 at 16px puts glyph bitmap offsets past
+ * the 20-bit small-format limit — LARGE widens the offset fields. */
+#define LV_FONT_FMT_TXT_LARGE 1
 
 /* OS */
 #define LV_USE_OS LV_OS_NONE
