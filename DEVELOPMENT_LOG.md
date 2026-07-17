@@ -47,6 +47,20 @@ Node/Swift 11px·32px nearest-neighbor montage 시각 검수, bridge typecheck/b
 ### 핵심 설계 결정
 초저해상도는 동일 장면을 축소하는 문제가 아니라 **동일 identity를 각 패널 문법으로 번역하는 문제**다. geometry는 공식 SVG 생성 마스크로 고정하되, 32px는 compact composition, 11px는 stable identity + perimeter status, 64px는 안전한 bounded HTTP cadence로 서로 다른 제약을 직접 다룬다. Pixoo BLE 비공개 프로토콜을 새로 역공학하지 않고 공식 LAN REST 면을 사용한다.
 
+## 2026-07-17 (저녁) — flap 3막: "등록됐는가"로 보드를 판별하면 레이스에서 지는 보드는 영원히 미등록
+
+### 문제
+앞선 라운드에서 flap을 고쳤다고 선언했는데 사용자가 **"round_amoled가 reconnecting 상태"**라고 지적했다. 확인해보니 5초 수명으로 계속 죽고 로스터에서도 퇴출돼 있었다 — 내 "4보드 로스터 안정" 검증이 틀렸다. 창이 90초로 짧았고, **접속 횟수만 세고 연결 수명·로스터 잔류를 안 봤다.**
+
+### 원인 (commit `d352844d`)
+`DaemonServer.handleClientConnect`의 timeline 분기가 `if cachedWifiEsp32[conn.id] == nil { 원본 100행 } else { 셰이핑 }` — **"등록됐는가"가 기준**이었다. 그런데 보드는 WS open **후에야** device_info를 announce하므로 burst의 timeline 단계(~300ms)에선 **언제나 미등록**이다. 결과: 대시보드용 원본 **115,236B**(4096B 라인버퍼의 28배) → announce 전에 소켓 사망 → 재접속 → 또 레이스 패배 → **영원히 미등록**이라는 자기영속 루프. 2막에서 `conn.isEsp32`(업그레이드 URL 태깅)를 넣고도 이 분기만 안 거쳐 놓쳤다. 86box가 멀쩡했던 건 레이스를 이겨서였을 뿐. Fix=분기 기준을 `isEsp32`로. 실측 **115,236B→3,159B**(라이브 데몬에 `clientType=esp32`로 붙어 device_info 없이 측정). Node는 무관 — esp32Clients를 업그레이드 시 태깅하고 serial seed를 6행으로 캡한다.
+
+### 남은 한계는 RF (데몬 밖)
+fix 후 실패 양상이 바뀌었다: `peer FIN (no close frame)` 5초 → `Receive error: POSIXErrorCode 60 (Operation timed out)` ~75초. 데몬 계층을 다 고치자 남은 churn이 **패킷 손실과 정확히 상관**했다 — 86box 10% loss→2회/5.5분(안정), ips_35 20%(RTT 258ms/max 1037ms)→7회, **round_amoled 70~96.7%(RTT 157~1235ms)→등록 유지 불가**. round_amoled는 링크 자체가 죽어 소프트웨어로 못 고친다(물리 점검 필요). **계층 구분법: `peer FIN` 5초=프레임 오버런(데몬 버그) vs `ETIMEDOUT`=RF/링크.**
+
+### IPS10 SDIO panic 재발 (별건, 미수정)
+오늘 추가한 panic 캡처가 첫날부터 실제 크래시를 잡았다: `assert failed: sdio_rx_get_buffer sdio_drv.c:896` / `sdio_push_data_to_queue sdio_drv.c:928` 3회(06:37:58, 07:22:34, 09:29:10) + `rst:0xc (SW_CPU_RESET)` = P4 전체 재부팅. **07-08에 19회 발생 후 커밋 `79579148`에서 고쳤다고 문서화된 그 버그**인데, 수정 포함 빌드(`a1d59de8`)에서 동일 빈도(≈1회/시간)로 재발한다 — 당시 검증이 300초·90초 창이라 1시간 주기 이벤트에 원리적으로 무력했다. 트리거는 로그로 특정: 데몬 기동 `09:29:08` → assert `09:29:10`(2초 후). 시리얼 JSON 도착 순간 `main.cpp:108-125`가 라디오를 **즉시** 파킹(`hostedDeinitWiFi`)하는데 그때 WiFi RX가 진행 중이면 SDIO 버퍼가 사라진 채 C6가 밀어넣어 assert. 그 코드 주석이 *"hosted SDIO가 오버랩에서 assert하니 stability window 없이 즉시 파킹"*인데 — **즉시 파킹이 오히려 레이스를 만든다**는 게 관측 결과다. 확률적이라 다른 재시작(08:39/08:43/08:50/09:20/09:34)에선 안 터졌다.
+
 ## 2026-07-17 — Swift 데몬 WiFi OTA 포팅 + WiFi 보드 만성 flap의 진범(37KB 단일 프레임)
 
 ### Swift 데몬 ESP32 WiFi OTA (commit `e2edaa27`)
