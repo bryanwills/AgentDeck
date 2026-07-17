@@ -44,7 +44,7 @@ Pixoo64·iDotMatrix·Timebox Mini·TC001의 에이전트 표시를 다시 대조
 - Timebox는 11px에서 자동 축소보다 승인된 hand-tuned bitmap이 더 읽기 좋아 그대로 유지하되, 5종 렌더·OpenCode hollow·OpenClaw teal eye 회귀 테스트를 추가했다. 크리처 시뮬레이터는 Antigravity와 생성된 실제 TC001 frame data를 사용한다.
 
 ### 검증
-공식 mask/Timebox/Pixoo/Timebox BLE focused Vitest 37개와 전체 Vitest 101 files / 1,784 tests 통과. monorepo typecheck, bridge build, creature-simulator production build, macOS Debug unsigned build 성공. ESP32 host simulator `led8x32` 전 scene 렌더 성공 후 실제 `led8x32` PlatformIO firmware build 성공(Flash 46.8%, RAM 25.9%). 생성기 결정론적 재실행 및 `git diff --check` 통과. 디자인 린트는 신규 vendor/emulator·DerivedData까지 스캔하는 기존 scope 문제로 task 외 baseline 607건을 보고했다(본 작업 simulator 경로는 lint prune 대상).
+공식 mask/Timebox/Pixoo/Timebox BLE focused Vitest 37개와 전체 Vitest 101 files / 1,784 tests 통과. monorepo typecheck, bridge build, creature-simulator production build, macOS Debug unsigned build 성공. ESP32 host simulator `led8x32` 전 scene 렌더 성공 후 실제 `led8x32` PlatformIO firmware build 성공(Flash 46.8%, RAM 25.9%). TC001에는 bootloader+partitions+firmware 전체 이미지를 115200 baud로 실기기 플래시해 각 영역 hash 검증, 하드 리셋, 32×8 matrix task, 저장 AP/Wi-Fi 재연결까지 확인했다. Apple Silicon에서는 `flash.sh`가 PATH의 Intel Homebrew `pio`를 먼저 잡으면 ARM64 `littlefs` 모듈과 충돌하므로 `~/.platformio/penv/bin`을 PATH 앞에 두어야 한다. 생성기 결정론적 재실행 및 `git diff --check` 통과. 디자인 린트는 신규 vendor/emulator·DerivedData까지 스캔하는 기존 scope 문제로 task 외 baseline 607건을 보고했다(본 작업 simulator 경로는 lint prune 대상).
 
 ### 핵심 설계 결정
 초저해상도에서도 **상태 애니메이션과 공식 geometry를 분리**한다. 색·pulse·sparkle는 기기별 표현 계층이지만 실루엣/음각은 `design/brand/*.svg`에서 생성한다. 유일한 예외인 Timebox 11×11은 자동 downscale가 기능 픽셀을 잃기 때문에 hand-tuned accessibility reduction을 유지하고 자동 테스트로 정의적 특징을 고정한다.
