@@ -22,7 +22,11 @@ import { State } from '../types.js';
 import { PASSIVE_OFFLINE_LABEL } from '@agentdeck/shared';
 import type { StateUpdateEvent, UsageEvent } from '../types.js';
 import type { SessionInfo } from '@agentdeck/shared/protocol';
-import { hasOpenClawSession } from '@agentdeck/shared';
+import { hasOpenClawSession, foldCodexSessionsForDisplay } from '@agentdeck/shared';
+import {
+  type CreatureSlot,
+  layoutOctopuses, layoutCloudCreatures, layoutOpenCodeCreatures, layoutAntigravityCreatures,
+} from '@agentdeck/shared';
 import { drawTextCentered } from './pixoo-font.js';
 import {
   type RGB, COLORS, setPixel, blendPixel, glowPixel, fillRect, lerpColor,
@@ -72,6 +76,8 @@ interface CreatureInstance {
   worldX: number;
   worldY: number;
   phaseOffset: number;
+  /** Crowd-driven shrink from the shared CreatureLayout band engine. */
+  sizeScale: number;
 }
 
 /** Golden ratio constant for position distribution. */
@@ -91,22 +97,57 @@ const ANTIGRAVITY_AGENTS = new Set(['antigravity']);
 
 type CreatureType = 'octopus' | 'jellyfish' | 'opencode' | 'antigravity';
 
-// Y positions by state — idle nearly on sand, active higher up
-const IDLE_Y = 0.78;      // just above sand line (sleeping on ground)
-const WORKING_Y = 0.42;   // mid-water (working/starburst)
-const ASKING_Y = 0.38;    // slightly higher (room for "?" bubble)
-
-function stateY(state: 'idle' | 'processing' | 'awaiting'): number {
-  if (state === 'processing') return WORKING_Y;
-  if (state === 'awaiting') return ASKING_Y;
-  return IDLE_Y;
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
-function stateYForType(state: 'idle' | 'processing' | 'awaiting', creatureType: CreatureType): number {
-  if (creatureType !== 'antigravity') return stateY(state);
-  if (state === 'processing') return 0.30;
-  if (state === 'awaiting') return 0.48;
-  return 0.62;
+/**
+ * Vertical stratification per creature type, applied on top of the band's base
+ * Y. Each type keeps its own water layer so a mixed Claude+Codex+OpenCode tank
+ * stays readable: clouds ride near the surface while working and sink to answer,
+ * octopuses hold mid-water, and everything settles to the sand when idle.
+ *
+ * Mirror of `stateY(_:kind:baseY:)` in apple/AgentDeck/Daemon/Modules/PixooRenderer.swift.
+ */
+function stateYForType(
+  state: 'idle' | 'processing' | 'awaiting',
+  creatureType: CreatureType,
+  baseY: number,
+): number {
+  switch (creatureType) {
+    case 'octopus':
+      if (state === 'processing') return clamp(baseY, 0.40, 0.54);
+      if (state === 'awaiting') return clamp(baseY - 0.04, 0.35, 0.48);
+      return 0.80;
+    case 'jellyfish':
+      if (state === 'processing') return clamp(baseY, 0.16, 0.28);
+      if (state === 'awaiting') return clamp(baseY + 0.26, 0.52, 0.64);
+      return clamp(baseY + 0.40, 0.80, 0.82);
+    case 'opencode':
+      if (state === 'processing') return clamp(baseY - 0.02, 0.20, 0.34);
+      if (state === 'awaiting') return clamp(baseY + 0.22, 0.50, 0.62);
+      return clamp(baseY + 0.36, 0.79, 0.81);
+    case 'antigravity':
+      if (state === 'processing') return clamp(baseY - 0.04, 0.16, 0.30);
+      if (state === 'awaiting') return clamp(baseY + 0.22, 0.46, 0.54);
+      return clamp(baseY + 0.34, 0.56, 0.64);
+  }
+}
+
+function slotsForType(creatureType: CreatureType, count: number): CreatureSlot[] {
+  switch (creatureType) {
+    case 'octopus': return layoutOctopuses(count);
+    case 'jellyfish': return layoutCloudCreatures(count);
+    case 'opencode': return layoutOpenCodeCreatures(count);
+    case 'antigravity': return layoutAntigravityCreatures(count);
+  }
+}
+
+const FALLBACK_SLOT: CreatureSlot = { x: 0.38, y: 0.42, scale: 1.0 };
+
+function slotAt(slots: CreatureSlot[], index: number): CreatureSlot {
+  if (slots.length === 0) return FALLBACK_SLOT;
+  return slots[Math.min(index, slots.length - 1)];
 }
 
 /** Check if agent type gets a creature. */
@@ -125,11 +166,15 @@ function syncCreatures(
   sessions: SessionInfo[] | null,
   stateEvent: StateUpdateEvent | null,
 ): void {
-  // Determine which sessions are alive creature agents (octopus or jellyfish)
+  // Determine which sessions are alive creature agents (octopus or jellyfish).
+  // Codex rows fold by project first: each Claude Code rescue/stop-gate spawns a
+  // fresh codex thread, so without folding one workspace lights up 4-5 cloud
+  // marks at once. Octopus / opencode are NOT folded — running several of those
+  // against one project is a deliberate user pattern.
   const aliveCoding: { id: string; agentType: string; state: string }[] = [];
   if (sessions) {
-    for (const s of sessions) {
-      if (s.alive && s.agentType && isCreatureAgent(s.agentType)) {
+    for (const s of foldCodexSessionsForDisplay(sessions.filter(s => s.alive))) {
+      if (s.agentType && isCreatureAgent(s.agentType)) {
         aliveCoding.push({ id: s.id, agentType: s.agentType, state: s.state ?? 'idle' });
       }
     }
@@ -152,24 +197,42 @@ function syncCreatures(
     }
   }
 
+  // Each agent type owns an X band and wraps to a second/third row as it fills,
+  // so a mixed tank clusters by agent instead of interleaving along one line.
+  const typeCounts = new Map<CreatureType, number>();
+  for (const s of aliveCoding) {
+    const t = creatureTypeFor(s.agentType);
+    typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1);
+  }
+  const slotsByType = new Map<CreatureType, CreatureSlot[]>();
+  for (const [type, count] of typeCounts) slotsByType.set(type, slotsForType(type, count));
+  const typeIndices = new Map<CreatureType, number>();
+  // Band base Y per session, kept so the `_primary` refresh below can re-derive
+  // its stratified Y from the band instead of compounding onto an already
+  // stratified worldY.
+  const baseYById = new Map<string, number>();
+
   // Add/update creatures
   for (let i = 0; i < aliveCoding.length; i++) {
     const s = aliveCoding[i];
     const existing = creatureInstances.get(s.id);
     const sessionState = mapSessionState(s.state);
     const creatureType = creatureTypeFor(s.agentType);
-    
-    // Uniformly distribute X positions to maximize spacing and prevent overlap
-    const x = aliveCoding.length === 1
-      ? (creatureType === 'antigravity' ? 0.68 : 0.38)  // single session: type-native band
-      : 0.15 + (i / (aliveCoding.length - 1)) * 0.70;
+
+    const slotIndex = typeIndices.get(creatureType) ?? 0;
+    typeIndices.set(creatureType, slotIndex + 1);
+    const slot = slotAt(slotsByType.get(creatureType) ?? [], slotIndex);
+    const x = slot.x;
+    baseYById.set(s.id, slot.y);
+    const worldY = stateYForType(sessionState, creatureType, slot.y);
 
     if (existing) {
       existing.state = sessionState;
       existing.agentType = s.agentType;
       existing.creatureType = creatureType;
       existing.worldX = x; // Update X dynamically to maintain even spacing
-      existing.worldY = stateYForType(sessionState, creatureType);
+      existing.worldY = worldY;
+      existing.sizeScale = slot.scale;
     } else {
       creatureInstances.set(s.id, {
         sessionId: s.id,
@@ -177,23 +240,29 @@ function syncCreatures(
         creatureType,
         state: sessionState,
         worldX: x,
-        worldY: stateYForType(sessionState, creatureType),
+        worldY,
         phaseOffset: i * 5,
+        sizeScale: slot.scale,
       });
     }
   }
 
-  // Override primary session state from stateEvent (more precise than polling)
-  // Only when stateEvent is from a creature agent — daemon/openclaw report stale IDLE
+  // Refresh the synthetic `_primary` creature from stateEvent — it *is* the
+  // stateEvent, so this keeps it precise before the first sessions_list lands.
+  //
+  // Real sessions are deliberately left alone. stateEvent.sessionId can name a
+  // row that folding has already collapsed into a representative, and stamping
+  // that member's state onto the representative would downgrade a group the fold
+  // resolved to `processing` down to the one idle sibling the event came from.
+  // The sessions list is daemon-pushed and already carries per-session state.
   const aType = stateEvent?.agentType as string | undefined;
   const isCreature = isCreatureAgent(aType ?? '');
-  if (stateEvent && isCreature && aliveCoding.length > 0) {
-    const primaryId = aliveCoding[0].id;
-    const primary = creatureInstances.get(primaryId);
+  if (stateEvent && isCreature) {
+    const primary = creatureInstances.get('_primary');
     if (primary) {
       const st = simplifiedState(stateEvent.state ?? State.IDLE) as 'idle' | 'processing' | 'awaiting';
       primary.state = st;
-      primary.worldY = stateYForType(st, primary.creatureType);
+      primary.worldY = stateYForType(st, primary.creatureType, baseYById.get('_primary') ?? primary.worldY);
     }
   }
 }
@@ -624,24 +693,28 @@ function drawUsageHUD(
   const providers: Provider[] = [];
   if (usageEvent.usageStale !== true && usageEvent.fiveHourPercent != null) {
     providers.push({
-      glyph: 'claudeCode', markerWidth: 9, brand: [255, 112, 76],
+      glyph: 'claudeCode', markerWidth: 7, brand: [255, 112, 76],
       primary: { percent: usageEvent.fiveHourPercent, resetsAt: usageEvent.fiveHourResetsAt },
       secondary: usageEvent.sevenDayPercent == null ? undefined : {
         percent: usageEvent.sevenDayPercent, resetsAt: usageEvent.sevenDayResetsAt,
       },
     });
   }
-  const codexPrimary = usageEvent.codexRateLimits?.primary;
-  const codexSecondary = usageEvent.codexRateLimits?.secondary;
-  if ((codexPrimary && codexPrimary.stale !== true) || (codexSecondary && codexSecondary.stale !== true)) {
+  // A window counts as renderable only when it is both fresh AND carries a
+  // number. "Not stale but no percent" is a malformed frame, not a zero — the
+  // gauge must stay absent rather than draw an authoritative-looking 0%.
+  // Mirror of `freshCodexWindow` in apple/AgentDeck/Daemon/Modules/PixooRenderer.swift.
+  const freshCodexWindow = (w: { stale?: boolean; usedPercent?: number; resetsAt?: string } | undefined) =>
+    w && w.stale !== true && w.usedPercent != null
+      ? { percent: w.usedPercent, resetsAt: w.resetsAt }
+      : undefined;
+  const codexPrimaryWindow = freshCodexWindow(usageEvent.codexRateLimits?.primary);
+  const codexSecondaryWindow = freshCodexWindow(usageEvent.codexRateLimits?.secondary);
+  if (codexPrimaryWindow || codexSecondaryWindow) {
     providers.push({
-      glyph: 'codex', markerWidth: 9, brand: [126, 116, 255],
-      primary: codexPrimary?.stale === true ? undefined : codexPrimary && {
-        percent: codexPrimary.usedPercent, resetsAt: codexPrimary.resetsAt,
-      },
-      secondary: codexSecondary?.stale === true ? undefined : codexSecondary && {
-        percent: codexSecondary.usedPercent, resetsAt: codexSecondary.resetsAt,
-      },
+      glyph: 'codex', markerWidth: 7, brand: [126, 116, 255],
+      primary: codexPrimaryWindow,
+      secondary: codexSecondaryWindow,
     });
   }
   if (providers.length === 0) return;
@@ -1087,6 +1160,7 @@ export function renderFrame(
       animFrame + c.phaseOffset,
       camera,
       sessionToneIndex,
+      c.sizeScale,
     );
   }
 
@@ -1102,6 +1176,7 @@ export function renderFrame(
       animFrame,
       camera,
       0,
+      1.0,
       gatewayHasError,
     );
   }
@@ -1158,6 +1233,39 @@ export function renderDisconnectedFrame(): Uint8Array {
 }
 
 // ===== Preview API (re-export camera controls) =====
+/**
+ * Introspection seam: the creature set `renderFrame` would draw for this input,
+ * without rasterizing anything. Counting marks back out of a 64×64 buffer is
+ * far too fragile to assert on, so tests and the preview CLI read the resolved
+ * world placement from here instead.
+ *
+ * This runs the same `syncCreatures` the renderer runs, so it mutates the module's
+ * creature state exactly as a real frame would.
+ */
+export function getCreatureLayoutSnapshot(
+  sessions: SessionInfo[] | null,
+  stateEvent: StateUpdateEvent | null,
+): Array<{
+  sessionId: string;
+  agentType: string;
+  creatureType: CreatureType;
+  state: 'idle' | 'processing' | 'awaiting';
+  worldX: number;
+  worldY: number;
+  sizeScale: number;
+}> {
+  syncCreatures(sessions, stateEvent);
+  return [...creatureInstances.values()].map(c => ({
+    sessionId: c.sessionId,
+    agentType: c.agentType,
+    creatureType: c.creatureType,
+    state: c.state,
+    worldX: c.worldX,
+    worldY: c.worldY,
+    sizeScale: c.sizeScale,
+  }));
+}
+
 export { setZone, setOverride, resetDirector } from './pixoo-camera.js';
 export type { Camera } from './pixoo-camera.js';
 export { ZONES } from './pixoo-camera.js';

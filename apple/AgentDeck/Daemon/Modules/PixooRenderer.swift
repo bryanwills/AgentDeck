@@ -77,6 +77,9 @@ final class PixooRenderer {
         var worldX: Double
         var worldY: Double
         var phaseOffset: Int
+        /// Crowd-driven shrink from CreatureLayout — shared with the Node
+        /// renderer via shared/src/creature-layout.ts.
+        var sizeScale: Double
     }
 
     private struct CompactMark {
@@ -428,13 +431,13 @@ final class PixooRenderer {
         let dt = lastRenderTimeMs > 0 ? min(5, (nowMs - lastRenderTimeMs) / 1000) : 1.0
         lastRenderTimeMs = nowMs
         let schoolPos = getSchoolCenter()
-        let camera = updateDirector(
+        let camera = quantizeCameraPixels(updateDirector(
             dt: dt,
             activeCreatures: activeCreatures,
             crayfishRouting: crayfishRouting,
             crayfishPos: hasGateway ? (Self.cfDefaultX, Self.cfDefaultY) : nil,
             schoolPos: schoolPos
-        )
+        ))
 
         var frames: [Data] = []
         let baseAnimFrame = Self.getAnimFrame(atTimeMs: nowMs)
@@ -496,7 +499,7 @@ final class PixooRenderer {
                 case .antigravity: .antigravity
                 case .octopus: .claudeCode
                 }
-                drawOfficialDotGlyph(&output, glyph: glyph, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, sessionToneIndex: sessionToneIndex)
+                drawOfficialDotGlyph(&output, glyph: glyph, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, sessionToneIndex: sessionToneIndex, sizeScale: creature.sizeScale)
             }
 
             if hasGateway {
@@ -726,8 +729,8 @@ final class PixooRenderer {
                     set(Int(round(Double(slot.x) + cos(angle) * radius)), Int(round(Double(slot.y + bob) + sin(angle) * radius)), (110, 235, 255))
                 }
             } else if mark.state == .awaiting {
-                set(min(31, x0 + slot.size), max(2, y0), (255, 184, 54))
-                set(min(31, x0 + slot.size), max(2, y0 + 1), (255, 184, 54))
+                set(min(31, x0 + slot.size), max(2, y0), (255, 190, 45))
+                set(min(31, x0 + slot.size), max(2, y0 + 1), (255, 190, 45))
             }
         }
 
@@ -830,8 +833,17 @@ final class PixooRenderer {
             aliveCoding.append((id: entry.id, agentType: entry.agentType, state: entry.state))
         }
 
+        // Synthesize a creature from the dashboard state only BEFORE the first
+        // sessions_list arrives. Once the list is known, an empty list means an
+        // empty tank — firing this fallback then leaves a stale Claude octopus
+        // blinking whenever only non-creature agents (e.g. OpenClaw) are live.
         let primaryAgentType = dashboardState.agentType ?? "claude-code"
-        if aliveCoding.isEmpty && isCreatureAgent(primaryAgentType) && dashboardState.state != .disconnected {
+        if
+            aliveCoding.isEmpty,
+            !dashboardState.sessionsListReceived,
+            isCreatureAgent(primaryAgentType),
+            dashboardState.state != .disconnected
+        {
             aliveCoding.append((id: "_primary", agentType: primaryAgentType, state: simplifiedState(dashboardState.state)))
         }
 
@@ -860,6 +872,7 @@ final class PixooRenderer {
                 existing.creatureType = kind
                 existing.worldX = worldX
                 existing.worldY = worldY
+                existing.sizeScale = Double(slot.scale)
                 creatureInstances[session.id] = existing
             } else {
                 creatureInstances[session.id] = CreatureInstance(
@@ -869,7 +882,8 @@ final class PixooRenderer {
                     state: session.state,
                     worldX: worldX,
                     worldY: worldY,
-                    phaseOffset: index * 5
+                    phaseOffset: index * 5,
+                    sizeScale: Double(slot.scale)
                 )
                 creatureOrder.append(session.id)
             }
@@ -1278,7 +1292,7 @@ final class PixooRenderer {
         var providers: [ProviderRow] = []
         if dashboardState.usageStale != true, let fiveHour = dashboardState.fiveHourPercent {
             providers.append(ProviderRow(
-                glyph: .claudeCode, markerWidth: 9, brand: (255, 112, 76),
+                glyph: .claudeCode, markerWidth: 7, brand: (255, 112, 76),
                 primary: UsageWindow(percent: fiveHour, resetsAt: dashboardState.fiveHourResetsAt),
                 secondary: dashboardState.sevenDayPercent.map {
                     UsageWindow(percent: $0, resetsAt: dashboardState.sevenDayResetsAt)
@@ -1289,7 +1303,7 @@ final class PixooRenderer {
         let codexSecondary = freshCodexWindow(dashboardState.codexRateLimits?.secondary)
         if codexPrimary != nil || codexSecondary != nil {
             providers.append(ProviderRow(
-                glyph: .codex, markerWidth: 9, brand: (126, 116, 255),
+                glyph: .codex, markerWidth: 7, brand: (126, 116, 255),
                 primary: codexPrimary,
                 secondary: codexSecondary
             ))
@@ -1384,12 +1398,16 @@ final class PixooRenderer {
         animFrame: Int,
         camera: Camera,
         sessionToneIndex: Int,
+        sizeScale: Double = 1.0,
         sick: Bool = false
     ) {
         guard isVisible(worldX, worldY, camera, padding: 0.15),
               let mask = OfficialDotGlyphs.masks[glyph] else { return }
         let (scx, scy) = worldToScreen(worldX, worldY, camera)
-        let target = max(8, Int(round(0.1875 * camera.zoom * Double(Self.width))))
+        // The 8px floor is the legibility limit of the official mask — a crowd
+        // shrink is allowed to reach it but never to go under it and turn a
+        // brand mark into mush.
+        let target = max(8, Int(round(0.1875 * sizeScale * camera.zoom * Double(Self.width))))
         let bob = state == .processing ? Int(round(sin(Double(animFrame) * 0.28) * max(1, Double(target) / 14))) : 0
         let x0 = Int(round(scx - Double(target) / 2))
         let y0 = Int(round(scy - Double(target) / 2)) + bob
@@ -1738,6 +1756,15 @@ final class PixooRenderer {
         fillCell(&buf, finX, Int(round(sy)), max(1, Int(round(px * 0.5))), bh, Self.colors.tetraFin)
     }
 
+    /// Awaiting affordance: a soft white disc with an amber "?" on top.
+    ///
+    /// `centerX`/`centerY` are the CENTER of the disc. The disc is the backing
+    /// that keeps the mark legible against mid-water blues; the glyph is the
+    /// 5-pixel question mark (top bar → curve → stem → dot), which is the
+    /// smallest form that still reads as "?" rather than as noise.
+    ///
+    /// Mirror of `drawQuestionBubble` in bridge/src/pixoo/pixoo-sprites.ts —
+    /// keep the radius, alpha, and glyph offsets identical.
     private func drawQuestionBubble(_ buf: inout [UInt8], centerX: Int, centerY: Int) {
         let r = 3
         for dy in -r...r {
@@ -1745,10 +1772,14 @@ final class PixooRenderer {
                 blendPixel(&buf, centerX + dx, centerY + dy, Self.colors.white, 0.7)
             }
         }
-        setPixel(&buf, centerX + 1, centerY - Int(round(Double(r) * 0.4)), Self.colors.stateAwaiting)
-        setPixel(&buf, centerX + 1, centerY - Int(round(Double(r) * 0.2)), Self.colors.stateAwaiting)
-        setPixel(&buf, centerX, centerY, Self.colors.stateAwaiting)
-        setPixel(&buf, centerX, centerY + max(1, Int(round(Double(r) * 0.35))), Self.colors.stateAwaiting)
+        // 5-px "?" centered in the disc — every pixel stays inside radius 3.
+        let gx = centerX
+        let gy = centerY - 2
+        setPixel(&buf, gx, gy, Self.colors.stateAwaiting)
+        setPixel(&buf, gx + 1, gy, Self.colors.stateAwaiting)
+        setPixel(&buf, gx + 1, gy + 1, Self.colors.stateAwaiting)
+        setPixel(&buf, gx, gy + 2, Self.colors.stateAwaiting)
+        setPixel(&buf, gx, gy + 4, Self.colors.stateAwaiting)
     }
 
     private static func getAnimFrame(atTimeMs timeMs: Double? = nil) -> Int {
@@ -2039,6 +2070,27 @@ final class PixooRenderer {
     private func isVisible(_ wx: Double, _ wy: Double, _ cam: Camera, padding: Double) -> Bool {
         let halfView = 0.5 / cam.zoom + padding
         return abs(wx - cam.cx) <= halfView && abs(wy - cam.cy) <= halfView
+    }
+
+    /// Snap the camera center to the device-pixel grid.
+    ///
+    /// The background blit and the integer-snapped sprite origin round
+    /// independently, so a sub-pixel camera center lets their rounding *phase*
+    /// drift frame-to-frame — a fixed sprite cell (a creature eye) shimmers 1px
+    /// even though the creature isn't moving. Quantizing the center so
+    /// `cx * width * zoom ∈ ℤ` freezes that phase, leaving only the creature's
+    /// own whole-pixel translation. At the ~1fps Pixoo push rate the cost to pan
+    /// smoothness is invisible.
+    ///
+    /// Mirror of `quantizeCameraPixels` in bridge/src/pixoo/pixoo-camera.ts.
+    private func quantizeCameraPixels(_ cam: Camera) -> Camera {
+        let s = Double(Self.width) * cam.zoom // output pixels per world unit
+        guard s > 0 else { return cam }
+        return Camera(
+            cx: (cam.cx * s).rounded() / s,
+            cy: (cam.cy * s).rounded() / s,
+            zoom: cam.zoom
+        )
     }
 
     private func clampCamera(_ cam: Camera) -> Camera {

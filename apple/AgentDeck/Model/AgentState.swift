@@ -195,6 +195,12 @@ struct DashboardState: Sendable {
 
     // Multi-session
     var siblingSessions: [SessionInfo] = []
+    /// Whether a `sessions_list` has ever arrived. `siblingSessions` alone
+    /// cannot distinguish "no list yet" from "list arrived and is empty", and
+    /// the Pixoo `_primary` fallback needs that difference — see
+    /// PixooRenderer.syncCreatures. Defaults to false ("not received yet") so
+    /// any surface that never sets it keeps the pre-list fallback behavior.
+    var sessionsListReceived = false
 
     // Device module health (from daemon statusSnapshot aggregation)
     var moduleHealth: ModuleHealthState?

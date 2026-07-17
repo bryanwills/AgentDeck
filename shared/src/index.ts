@@ -12,6 +12,7 @@ export * from './timeline-markdown.js';
 export * from './format-utils.js';
 export * from './timeline-summarizer.js';
 export * from './session-utils.js';
+export * from './creature-layout.js';
 export * from './state-colors.js';
 export * from './connection-status.js';
 export * from './design-tokens.js';

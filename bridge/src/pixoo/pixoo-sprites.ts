@@ -1201,6 +1201,28 @@ function drawQuestionMark(buf: Uint8Array, x: number, y: number, color: RGB): vo
 }
 
 /**
+ * Awaiting affordance: a soft white disc with an amber "?" on top.
+ *
+ * (centerX, centerY) is the CENTER of the disc. The disc is the backing that
+ * keeps the mark legible against mid-water blues; the glyph is the 5-pixel
+ * question mark above, which is the smallest form that still reads as "?"
+ * rather than as noise.
+ *
+ * Mirror of `drawQuestionBubble` in apple/AgentDeck/Daemon/Modules/PixooRenderer.swift —
+ * keep the radius, alpha, and glyph offsets identical.
+ */
+export function drawQuestionBubble(buf: Uint8Array, centerX: number, centerY: number): void {
+  const r = 3;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy <= r * r) blendPixel(buf, centerX + dx, centerY + dy, COLORS.white, 0.7);
+    }
+  }
+  // 5-px "?" centered in the disc — every pixel stays inside radius 3.
+  drawQuestionMark(buf, centerX, centerY - 2, COLORS.stateAwaiting);
+}
+
+/**
  * Draw a canonical agent mark rasterized from design/brand/*.svg.
  *
  * Pixoo64 and iDotMatrix used to maintain independent hand-drawn creature grids;
@@ -1219,12 +1241,15 @@ export function drawOfficialDotGlyph(
   animFrame: number,
   camera: Camera,
   sessionToneIndex = 0,
+  sizeScale = 1.0,
   sick = false,
 ): void {
   if (!isVisible(worldX, worldY, camera, 0.15)) return;
   const [scx, scy] = worldToScreen(worldX, worldY, camera);
   const canvasW = Math.sqrt(buf.length / 3);
-  const target = Math.max(8, Math.round(0.1875 * camera.zoom * canvasW));
+  // The 8px floor is the legibility limit of the official mask — a crowd shrink
+  // is allowed to reach it but never to go under it and turn a brand mark into mush.
+  const target = Math.max(8, Math.round(0.1875 * sizeScale * camera.zoom * canvasW));
   const bob = state === 'working' ? Math.round(Math.sin(animFrame * 0.28) * Math.max(1, target / 14)) : 0;
   const x0 = Math.round(scx - target / 2);
   const y0 = Math.round(scy - target / 2) + bob;
@@ -1283,7 +1308,7 @@ export function drawOfficialDotGlyph(
   }
 
   if (state === 'asking') {
-    drawQuestionMark(buf, x0 + target + 1, y0, COLORS.stateAwaiting);
+    drawQuestionBubble(buf, x0 + target + 1, y0);
   } else if (state === 'working') {
     const sparkle = glyph === 'antigravity' ? [0xff, 0xd8, 0x50] as RGB : lerpColor(base, COLORS.white, 0.45);
     for (let i = 0; i < 4; i++) {

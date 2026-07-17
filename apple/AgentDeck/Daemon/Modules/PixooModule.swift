@@ -369,6 +369,10 @@ actor PixooModule: DeviceModule {
     private var cachedTool: String?
     private var cachedAgentType: String?
     private var cachedSessions: [[String: Any]] = []
+    /// Set once the first `sessions_list` lands. Gates the renderer's `_primary`
+    /// fallback so an empty-but-received list draws an empty tank instead of a
+    /// ghost creature (Node parity — bridge commit e9562525).
+    private var cachedSessionsListReceived = false
     private var cached5h: Double?
     private var cached7d: Double?
     private var cached5hResetsAt: String?
@@ -416,6 +420,7 @@ actor PixooModule: DeviceModule {
             cachedCodexRateLimits = dotMatrixCodexRateLimits(from: event["codexRateLimits"])
         case "sessions_list":
             cachedSessions = event["sessions"] as? [[String: Any]] ?? []
+            cachedSessionsListReceived = true
         case "display_state":
             let displayOn = event["displayOn"] as? Bool ?? true
             // Resolve the dim instruction (absent ⇒ legacy enabled/full-off).
@@ -864,6 +869,7 @@ actor PixooModule: DeviceModule {
         state.gatewayConnected = cachedGatewayConnected
         state.gatewayHasError = cachedGatewayHasError
         state.siblingSessions = cachedSessions.compactMap(Self.makeSessionInfo)
+        state.sessionsListReceived = cachedSessionsListReceived
         return state
     }
 
