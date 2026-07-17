@@ -44,10 +44,22 @@ export interface KeySlot {
 /** 5 columns × 3 rows. Physical key index == row * GRID_COLS + col. */
 export const GRID_COLS = 5;
 
-/** D200H usage placement: the 2×2 block directly above the wide bottom-right
- * button (cols 3–4, rows 0–1), in reading order. Cleaner than the trailing keys
- * — Claude 5H/7D fill the top row, Codex 5H/7D the row below. */
-const USAGE_PREFERRED_POS = ['3_0', '4_0', '3_1', '4_1'];
+/**
+ * D200H usage placement: the three bottom-row keys immediately LEFT of the wide
+ * bottom-right clock widget (0_2, 1_2, 2_2) — a single horizontal quota strip
+ * along the bottom edge, so the whole upper grid stays session tiles.
+ *
+ * The strip is filled from its RIGHT end (see `buildList`), keeping the gauges
+ * flush against the clock: with the usual three tiles (Claude 5H, Claude 7D,
+ * Codex) it fills exactly; when a tile is absent — Codex now commonly reports
+ * only its weekly window, and an unlinked Claude reports none — the LEFTMOST
+ * key falls out of the strip and flows back to sessions instead of leaving a
+ * hole in the middle of the row.
+ *
+ * Its length also caps usage at three keys: a fourth tile (Codex 5H *and* 7D)
+ * drops, Claude prioritised by `buildUsageTiles` order.
+ */
+const USAGE_PREFERRED_POS = ['0_2', '1_2', '2_2'];
 
 export interface DashState {
   state: string;
@@ -704,29 +716,30 @@ function buildList(
 ): Map<string, SessionDeckCell> {
   const sessions = sortSessions(foldCodexSessionsForDisplay(state.allSessions));
 
-  // Pin the trailing keys to global usage gauges (opt-in, water-tank style). On
-  // the D200H these land just left of the native clock widget; on classic Stream
-  // Deck they replace the encoder LCD this surface lacks. We reserve as many keys
-  // as we have usage tiles (Claude 5H/7D + any Codex windows), but NEVER more
-  // than `slots.length - 1` so at least one key stays for sessions — this is the
-  // fix for the old `slots.length >= 6` gate that silently dropped ALL usage when
-  // the user placed only a few AgentDeck keys. Codex tiles drop first on tiny
-  // decks (Claude prioritised). Reserved keys are pinned on EVERY page (usage is
-  // global), and paging math below treats them as unavailable for sessions.
+  // Pin the bottom-row usage strip to the global quota gauges (opt-in,
+  // water-tank style). On the D200H the strip sits just left of the native clock
+  // widget; on classic Stream Deck it replaces the encoder LCD this surface
+  // lacks. We reserve as many keys as we have usage tiles (Claude 5H/7D + any
+  // Codex window), but never more than the strip is wide, and never more than
+  // `slots.length - 1` so at least one key stays for sessions — the latter is
+  // the fix for the old `slots.length >= 6` gate that silently dropped ALL usage
+  // when the user placed only a few AgentDeck keys. Reserved keys are pinned on
+  // EVERY page (usage is global), and paging math below treats them as
+  // unavailable for sessions.
   const usageHere = new Map<string, SessionDeckCell>();
   if (view.showUsage) {
     const usageTiles = buildUsageTiles(state);
     const maxReserve = Math.max(0, slots.length - 1);
-    const reserveCount = Math.min(usageTiles.length, maxReserve);
-    // Prefer the 2×2 block directly ABOVE the wide bottom-right button
-    // (cols 3–4, rows 0–1) — cleaner on the D200H than the trailing keys.
-    // Reading order (top→bottom) puts Claude 5H/7D on the top row and any
-    // Codex 5H/7D below. Falls back to trailing positions for tiles whose
-    // preferred slot wasn't placed by the user.
-    const preferred = USAGE_PREFERRED_POS.filter((p) => slots.includes(p));
-    const rest = slots.filter((p) => !preferred.includes(p));
-    const fallback = rest.slice(rest.length - Math.max(0, reserveCount - preferred.length));
-    const reserved = sortPositions([...preferred, ...fallback]).slice(0, reserveCount);
+    const preferred = sortPositions(USAGE_PREFERRED_POS.filter((p) => slots.includes(p)));
+    const reserveCount = Math.min(usageTiles.length, USAGE_PREFERRED_POS.length, maxReserve);
+    // Fill the strip from its RIGHT end so a missing tile frees the LEFTMOST key
+    // (which flows back to sessions) and the gauges stay flush against the clock
+    // — never a hole mid-strip.
+    const pinned = preferred.slice(Math.max(0, preferred.length - reserveCount));
+    // Tiles whose strip key the user didn't place fall back to trailing keys.
+    const rest = slots.filter((p) => !pinned.includes(p));
+    const fallback = rest.slice(rest.length - Math.max(0, reserveCount - pinned.length));
+    const reserved = sortPositions([...pinned, ...fallback]).slice(0, reserveCount);
     reserved.forEach((pos, i) => usageHere.set(pos, usageTiles[i]));
   }
   // Positions left for sessions / NEXT after carving out usage.

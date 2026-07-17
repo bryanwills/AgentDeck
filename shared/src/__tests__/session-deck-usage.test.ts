@@ -2,21 +2,31 @@ import { describe, it, expect } from 'vitest';
 import { buildSessionDeck } from '../d200h-layout.js';
 
 // Locks the list-view USAGE behaviour of the shared session deck (D200H /
-// Ulanzi): with `showUsage`, the 2×2 block directly ABOVE the wide bottom-right
-// button (cols 3–4, rows 0–1) is pinned to the quota gauges — Claude 5H/7D on
-// the top row (3_0/4_0), Codex 5H/7D on the row below (3_1/4_1). Sessions/paging
-// reflow into the remaining keys, and the tiles refresh usage on press.
+// Ulanzi): with `showUsage`, the three bottom-row keys LEFT of the wide clock
+// widget (0_2/1_2/2_2) form a horizontal quota strip. The strip fills from its
+// RIGHT end — flush against the clock — so an absent tile frees the LEFTMOST
+// key back to sessions instead of holing the row, and it caps usage at three
+// keys (Claude prioritised). Sessions/paging reflow into the remaining keys,
+// and the tiles refresh usage on press.
 
 const POS = ['0_0', '1_0', '2_0', '3_0', '4_0', '0_1', '1_1', '2_1', '3_1', '4_1', '0_2', '1_2', '2_2', '3_2', '4_2'];
 
-// Usage placement: the block above the wide button.
-const C5H = '3_0';   // Claude 5H (top-left of block)
-const C7D = '4_0';   // Claude 7D (top-right of block)
-const CX5H = '3_1';  // Codex 5H (below Claude 5H)
-const CX7D = '4_1';  // Codex 7D
-// With only Claude reserved (3_0/4_0), the last free slot is the wide-button cell
-// 4_2, where the overflow NEXT→ button lands.
+// The bottom-row usage strip, left→right. Which tile lands where depends on how
+// many tiles exist (the strip fills from STRIP_R backwards).
+const STRIP_L = '0_2';
+const STRIP_M = '1_2';
+const STRIP_R = '2_2';
+
+// Claude-only usage = 2 tiles → they occupy the RIGHT two strip keys; STRIP_L
+// stays free for a session.
+const C5H = STRIP_M;
+const C7D = STRIP_R;
+// With Claude-only usage (2 keys reserved on the bottom row), the last free slot
+// is the wide-button cell 4_2, where the overflow NEXT→ button lands.
 const NEXT_POS = '4_2';
+
+const CLAUDE_MARK = '#C07058';  // terracotta Claude Code mark
+const CODEX_MARK = '#6166E0';   // blue Codex mark
 
 const mkSessions = (n: number) =>
   Array.from({ length: n }, (_, i) => ({
@@ -33,8 +43,14 @@ const baseState = (sessions: number, over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const usageCells = (deck: Map<string, { svg: string; action: unknown }>) =>
+  [...deck.values()].filter(
+    (c) => (c.action as { kind?: string } | null)?.kind === 'command'
+      && ((c.action as { command?: { type?: string } }).command?.type === 'query_usage'),
+  );
+
 describe('buildSessionDeck list-view usage tiles', () => {
-  it('pins 5H/7D to the block above the wide button and wires them to query_usage', () => {
+  it('pins 5H/7D to the bottom strip and wires them to query_usage', () => {
     const deck = buildSessionDeck(baseState(3), { mode: 'list', showUsage: true }, POS);
     const c5 = deck.get(C5H)!;
     const c7 = deck.get(C7D)!;
@@ -47,6 +63,30 @@ describe('buildSessionDeck list-view usage tiles', () => {
     expect(c7.action).toEqual({ kind: 'command', command: { type: 'query_usage' } });
   });
 
+  it('leaves the upper grid and the clock-side keys entirely to sessions', () => {
+    // Regression: usage used to occupy the 2×2 block at cols 3–4 / rows 0–1.
+    const deck = buildSessionDeck(baseState(6), { mode: 'list', showUsage: true }, POS);
+    for (const pos of ['3_0', '4_0', '3_1', '4_1']) {
+      expect(deck.get(pos)!.action).not.toEqual({ kind: 'command', command: { type: 'query_usage' } });
+    }
+    // All reserved keys live on the bottom strip.
+    const reserved = [...deck.entries()]
+      .filter(([, c]) => (c.action as { kind?: string } | null)?.kind === 'command')
+      .map(([pos]) => pos);
+    expect(reserved.sort()).toEqual([STRIP_M, STRIP_R]);
+  });
+
+  it('fills the strip from the right, freeing the leftmost key for a session', () => {
+    // 2 Claude tiles on a 3-wide strip → 1_2/2_2 (flush against the clock);
+    // 0_2 flows back to the session grid rather than holing the row. 11 sessions
+    // is what it takes for the reflow to actually reach 0_2 (it is the 11th free
+    // key in row-major order), so this proves the key is a real session slot.
+    const deck = buildSessionDeck(baseState(11), { mode: 'list', showUsage: true }, POS);
+    expect(deck.get(STRIP_L)!.action).toEqual({ kind: 'open', sessionId: 's10' });
+    expect(deck.get(STRIP_M)!.svg).toContain('5H');
+    expect(deck.get(STRIP_R)!.svg).toContain('7D');
+  });
+
   it('does not reserve usage slots when showUsage is off (regression: full grid)', () => {
     const deck = buildSessionDeck(baseState(3), { mode: 'list' }, POS);
     expect(deck.get(C7D)!.svg).not.toContain('7D');
@@ -56,22 +96,19 @@ describe('buildSessionDeck list-view usage tiles', () => {
   });
 
   it('frees the usage slots (no residue) when usage is unknown', () => {
-    // Unlinked usage: no reserved "—" ghost gauges. The 2×2 block keys are freed
-    // so sessions/agent tiles can use them (hide-if-absent, mirroring Codex).
+    // Unlinked usage: no reserved "—" ghost gauges. The whole strip is freed so
+    // sessions/agent tiles can use it (hide-if-absent, mirroring Codex).
     const deck = buildSessionDeck(baseState(1, { usageKnown: false, fiveHourPercent: 0, sevenDayPercent: 0 }),
       { mode: 'list', showUsage: true }, POS);
-    const usageCmds = [...deck.values()].filter(
-      (c) => c.action?.kind === 'command' && (c.action as { command?: { type?: string } }).command?.type === 'query_usage',
-    );
-    expect(usageCmds).toHaveLength(0);
+    expect(usageCells(deck)).toHaveLength(0);
     expect(deck.get(C5H)!.svg).not.toContain('5H');
     expect(deck.get(C7D)!.svg).not.toContain('7D');
     expect(deck.get(C5H)!.svg).not.toContain('—');
   });
 
   it('frees only the Claude slots when Codex-only usage is present (partial)', () => {
-    // Claude unlinked but Codex reporting: Claude 5H/7D slots are freed, Codex
-    // 5H/7D take the top-left of the block (placement order), no Claude residue.
+    // Claude unlinked but Codex reporting: the Claude tiles reserve nothing, so
+    // the two Codex windows take the right of the strip and 0_2 stays a session.
     const deck = buildSessionDeck(
       baseState(1, {
         usageKnown: false, fiveHourPercent: undefined, sevenDayPercent: undefined,
@@ -83,17 +120,14 @@ describe('buildSessionDeck list-view usage tiles', () => {
       }),
       { mode: 'list', showUsage: true }, POS);
     // Exactly two usage tiles (both Codex), wired to query_usage.
-    const usageCmds = [...deck.values()].filter(
-      (c) => c.action?.kind === 'command' && (c.action as { command?: { type?: string } }).command?.type === 'query_usage',
-    );
-    expect(usageCmds).toHaveLength(2);
+    expect(usageCells(deck)).toHaveLength(2);
     // Codex mark present, Claude mark absent among the gauges.
-    const usageSvgs = [...deck.values()]
-      .filter((c) => c.action?.kind === 'command')
-      .map((c) => c.svg)
-      .join('');
-    expect(usageSvgs).toContain('#6166E0'); // Codex blue mark
-    expect(usageSvgs).not.toContain('#C07058'); // no Claude terracotta mark
+    const usageSvgs = usageCells(deck).map((c) => c.svg).join('');
+    expect(usageSvgs).toContain(CODEX_MARK);
+    expect(usageSvgs).not.toContain(CLAUDE_MARK);
+    // The absent Claude tiles reserve nothing: 0_2 is back in the session grid.
+    expect(deck.get(STRIP_L)!.action).toBeNull();
+    expect(deck.get(STRIP_L)!.svg).not.toContain('5H');
   });
 
   it('fits sessions into the 13 non-usage keys without paging', () => {
@@ -103,7 +137,7 @@ describe('buildSessionDeck list-view usage tiles', () => {
     // No NEXT page button — everything fits.
     const pages = [...deck.values()].filter((c) => c.action?.kind === 'page');
     expect(pages).toHaveLength(0);
-    // Usage still pinned above the wide button.
+    // Usage still pinned on the strip.
     expect(deck.get(C5H)!.svg).toContain('5H');
     expect(deck.get(C7D)!.svg).toContain('7D');
   });
@@ -136,7 +170,9 @@ describe('buildSessionDeck list-view usage tiles', () => {
     expect(deck.get(C7D)!.svg).toContain('7D');
   });
 
-  it('appends Codex 5H/7D below Claude when codexRateLimits is present (each datum)', () => {
+  it('caps the strip at 3 keys, dropping the 4th tile (Claude prioritised)', () => {
+    // Claude 5H/7D + Codex 5H/7D = 4 tiles, but the strip is 3 wide: the trailing
+    // Codex window drops rather than pushing usage off the bottom row.
     const codex = {
       codexRateLimits: {
         primary: { usedPercent: 30, windowMinutes: 300, resetsAt: undefined },
@@ -145,27 +181,27 @@ describe('buildSessionDeck list-view usage tiles', () => {
       },
     };
     const deck = buildSessionDeck(baseState(2, codex), { mode: 'list', showUsage: true }, POS);
-    // 2×2 block: Claude 5H/7D top row (3_0/4_0), Codex 5H/7D below (3_1/4_1).
+    expect(usageCells(deck)).toHaveLength(3);
     // Labels are short ("5H"/"7D") on both agents; the agent is conveyed by the
     // provider LOGO — terracotta-tinted Claude mark, blue Codex mark.
-    const claude5 = deck.get(C5H)!.svg, claude7 = deck.get(C7D)!.svg;
-    const codex5 = deck.get(CX5H)!.svg, codex7 = deck.get(CX7D)!.svg;
+    const claude5 = deck.get(STRIP_L)!.svg;
+    const claude7 = deck.get(STRIP_M)!.svg;
+    const codex5 = deck.get(STRIP_R)!.svg;
     expect(claude5).toContain('5H');
-    expect(claude5).toContain('#C07058');
+    expect(claude5).toContain(CLAUDE_MARK);
     expect(claude5).toContain('M20.998 10.949'); // canonical Claude Code robot path
     // Legibility without a dark overlay: subtle toned level fill, no chip.
     expect(claude5).toContain('opacity="0.38"');
     expect(claude5).not.toContain('opacity="0.72"');
     expect(claude7).toContain('7D');
-    expect(claude7).toContain('#C07058');
+    expect(claude7).toContain(CLAUDE_MARK);
     expect(codex5).toContain('5H');       // Codex 5H, used 30%
     expect(codex5).toContain('>30<');
-    expect(codex5).toContain('#6166E0');
+    expect(codex5).toContain(CODEX_MARK);
     expect(codex5).toContain('M8.086.457'); // Codex provider logo path
     expect(codex5).toContain('opacity="0.38"');
-    expect(codex7).toContain('7D');       // Codex 7D, used 10%
-    expect(codex7).toContain('>10<');
-    expect(codex7).toContain('#6166E0');
+    // The Codex weekly window (10% used) is the tile that dropped.
+    expect(usageCells(deck).map((c) => c.svg).join('')).not.toContain('>10<');
   });
 
   it('renders only the Codex window whose datum exists', () => {
@@ -173,32 +209,35 @@ describe('buildSessionDeck list-view usage tiles', () => {
       codexRateLimits: { primary: { usedPercent: 25, windowMinutes: 300 } },
     };
     const deck = buildSessionDeck(baseState(2, onlyPrimary), { mode: 'list', showUsage: true }, POS);
-    // 3 tiles reserved (Claude 5H/7D + Codex 5H) → fill 3_0, 4_0, 3_1 in reading
-    // order; the absent Codex 7D reserves no key (4_1 stays free for a session).
-    expect(deck.get(CX5H)!.svg).toContain('#6166E0'); // Codex 5H lands below Claude 5H
-    expect(deck.get(CX5H)!.svg).toContain('>25<');
-    const block = [C5H, C7D, CX5H, CX7D].map((p) => deck.get(p)!.svg);
-    const codexTiles = block.filter((s) => s.includes('#6166E0'));
+    // 3 tiles (Claude 5H/7D + Codex 5H) → the strip fills exactly.
+    expect(deck.get(STRIP_R)!.svg).toContain(CODEX_MARK);
+    expect(deck.get(STRIP_R)!.svg).toContain('>25<');
+    const codexTiles = usageCells(deck).filter((c) => c.svg.includes(CODEX_MARK));
     expect(codexTiles).toHaveLength(1); // only the Codex 5H window
   });
 
   it('labels the Codex weekly window "7D" when it arrives in the primary slot (secondary null)', () => {
     // Recent Codex reports the weekly (10080-min) window as `primary` with
-    // `secondary` null once the 5h window resets. The tile must be labelled by
-    // window length, not slot — otherwise it mislabels "5H" and the 7D gauge
-    // vanishes entirely.
+    // `secondary` null once the 5h window resets — the live case this strip is
+    // sized for: Claude 5H/7D + one Codex window = exactly 3 keys. The tile must
+    // be labelled by window length, not slot — otherwise it mislabels "5H" and
+    // the 7D gauge vanishes entirely.
     const weeklyOnly = {
       codexRateLimits: { primary: { usedPercent: 4, windowMinutes: 10080 }, planType: 'plus' },
     };
     const deck = buildSessionDeck(baseState(2, weeklyOnly), { mode: 'list', showUsage: true }, POS);
-    const codexTile = deck.get(CX5H)!.svg; // first free Codex slot below Claude
+    expect(usageCells(deck)).toHaveLength(3);
+    expect(deck.get(STRIP_L)!.svg).toContain('5H');   // Claude 5H
+    expect(deck.get(STRIP_L)!.svg).toContain(CLAUDE_MARK);
+    expect(deck.get(STRIP_M)!.svg).toContain('7D');   // Claude 7D
+    expect(deck.get(STRIP_M)!.svg).toContain(CLAUDE_MARK);
+    const codexTile = deck.get(STRIP_R)!.svg;         // Codex weekly, flush to the clock
     expect(codexTile).toContain('7D');       // labelled by length, not slot
     expect(codexTile).not.toContain('5H');
     expect(codexTile).toContain('>4<');      // used 4%
-    expect(codexTile).toContain('#6166E0');  // Codex brand mark
+    expect(codexTile).toContain(CODEX_MARK);
     // Exactly one Codex gauge (no phantom secondary tile).
-    const block = [C5H, C7D, CX5H, CX7D].map((p) => deck.get(p)!.svg);
-    expect(block.filter((s) => s.includes('#6166E0'))).toHaveLength(1);
+    expect(usageCells(deck).filter((c) => c.svg.includes(CODEX_MARK))).toHaveLength(1);
   });
 
   it('shows a credits tile when Codex reports a credit-based plan (null windows)', () => {
@@ -209,14 +248,14 @@ describe('buildSessionDeck list-view usage tiles', () => {
       },
     };
     const deck = buildSessionDeck(baseState(2, credits), { mode: 'list', showUsage: true }, POS);
-    // No Codex windows → a single credits readout lands at the first free Codex
-    // slot below Claude (3_1), carrying the limit label + balance + Codex logo.
-    const tile = deck.get(CX5H)!.svg;
+    // No Codex windows → a single credits readout takes the strip's right key,
+    // carrying the limit label + balance + Codex logo.
+    const tile = deck.get(STRIP_R)!.svg;
     expect(tile).toContain('PREMIUM');
     expect(tile).toContain('CREDITS');
     expect(tile).toContain('>0<');           // balance
-    expect(tile).toContain('#6166E0');       // Codex brand mark
-    expect(deck.get(CX5H)!.action).toEqual({ kind: 'command', command: { type: 'query_usage' } });
+    expect(tile).toContain(CODEX_MARK);      // Codex brand mark
+    expect(deck.get(STRIP_R)!.action).toEqual({ kind: 'command', command: { type: 'query_usage' } });
   });
 
   it('renders ∞ for an unlimited-credits Codex plan', () => {
@@ -224,13 +263,13 @@ describe('buildSessionDeck list-view usage tiles', () => {
       codexRateLimits: { limitId: 'premium', credits: { hasCredits: true, unlimited: true } },
     };
     const deck = buildSessionDeck(baseState(2, credits), { mode: 'list', showUsage: true }, POS);
-    expect(deck.get(CX5H)!.svg).toContain('∞');
+    expect(deck.get(STRIP_R)!.svg).toContain('∞');
   });
 
-  it('falls back to trailing keys on a tiny deck where the block is not placed', () => {
-    // Only 3 keys placed (none of 3_0/4_0/3_1/4_1) → preferred block empty, so
-    // usage falls back to the trailing keys. Old `slots.length >= 6` gate dropped
-    // ALL usage here; the adaptive reserve keeps it.
+  it('falls back to trailing keys on a tiny deck where the strip is not placed', () => {
+    // Only 3 keys placed (none of 0_2/1_2/2_2) → strip empty, so usage falls back
+    // to the trailing keys. Old `slots.length >= 6` gate dropped ALL usage here;
+    // the adaptive reserve keeps it.
     const tiny = ['0_0', '1_0', '2_0'];
     const deck = buildSessionDeck(baseState(1), { mode: 'list', showUsage: true }, tiny);
     // 2 trailing keys = Claude 5H/7D; first key stays for the session.

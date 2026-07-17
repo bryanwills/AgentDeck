@@ -255,9 +255,12 @@ public enum D200HLayoutModel {
     public static let gridCols = 5
     public static let gridRows = 3
 
-    /// D200H usage placement — the 2×2 block above the wide bottom-right button,
-    /// in reading order (Claude 5H/7D top row, Codex 5H/7D below).
-    static let usagePreferredPositions = ["3_0", "4_0", "3_1", "4_1"]
+    /// D200H usage placement — the three bottom-row keys immediately left of the
+    /// wide bottom-right clock widget, filled from the RIGHT end so a missing
+    /// tile frees the leftmost key instead of holing the strip. Its length also
+    /// caps usage at three keys (Claude prioritised). Mirrors the shared
+    /// `USAGE_PREFERRED_POS`.
+    static let usagePreferredPositions = ["0_2", "1_2", "2_2"]
 
     static let offlineLabel = "OFFLINE"
     static let openAgentDeckLabel = "Open AgentDeck"
@@ -313,20 +316,22 @@ public enum D200HLayoutModel {
     private static func buildList(_ input: D200HDeckInput, view: D200HDeckView, slots: [String]) -> [D200HKeySlot] {
         let sessions = sortSessions(foldCodexSessionsForDisplay(input.sessions))
 
-        // Reserve keys for the global usage gauges (opt-in). Prefer the 2×2 block
-        // above the wide bottom-right button; fall back to trailing positions.
-        // Never reserve more than slots.count - 1 so at least one key stays for
-        // sessions. Codex tiles drop first on tiny decks (Claude prioritised).
+        // Reserve keys for the global usage gauges (opt-in) on the bottom-row
+        // strip left of the clock widget, filled from its right end; fall back to
+        // trailing positions for strip keys the user didn't place. Never reserve
+        // more than the strip is wide, nor more than slots.count - 1 so at least
+        // one key stays for sessions. Codex tiles drop first (Claude prioritised).
         var usageHere: [String: (D200HSlotKind, String, String)] = [:]
         if view.showUsage, let usage = input.usage {
             let usageTiles = buildUsageTiles(usage)
             let maxReserve = max(0, slots.count - 1)
-            let reserveCount = min(usageTiles.count, maxReserve)
-            let preferred = usagePreferredPositions.filter { slots.contains($0) }
-            let rest = slots.filter { !preferred.contains($0) }
-            let fallbackCount = max(0, reserveCount - preferred.count)
+            let preferred = sortPositions(usagePreferredPositions.filter { slots.contains($0) })
+            let reserveCount = min(usageTiles.count, usagePreferredPositions.count, maxReserve)
+            let pinned = Array(preferred.suffix(reserveCount))
+            let rest = slots.filter { !pinned.contains($0) }
+            let fallbackCount = max(0, reserveCount - pinned.count)
             let fallback = Array(rest.suffix(fallbackCount))
-            let reserved = Array(sortPositions(preferred + fallback).prefix(reserveCount))
+            let reserved = Array(sortPositions(pinned + fallback).prefix(reserveCount))
             for (i, pos) in reserved.enumerated() where i < usageTiles.count {
                 usageHere[pos] = usageTiles[i]
             }
