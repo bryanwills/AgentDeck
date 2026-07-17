@@ -26,11 +26,10 @@ import { hasOpenClawSession } from '@agentdeck/shared';
 import { drawTextCentered } from './pixoo-font.js';
 import {
   type RGB, COLORS, setPixel, blendPixel, glowPixel, fillRect, lerpColor,
-  drawOctopus, drawJellyfish, drawOpenCode, drawAntigravity, drawCrayfish, drawTetra,
+  drawOfficialDotGlyph, drawTetra,
   drawText,
   getOctopusPaletteForSession, getJellyfishPaletteForSession, getOpenCodePaletteForSession,
   getAntigravityPaletteForSession,
-  OCTO_WORLD_W, JF_WORLD_W, CF_WORLD_W,
 } from './pixoo-sprites.js';
 import {
   type Camera, type ActiveCreature, CAMERA_WIDE, blitWithCamera, quantizeCameraPixels,
@@ -911,53 +910,36 @@ export function renderFrame(
         : c.state === 'awaiting' ? 'asking'
           : 'idle'; // IDLE → idle (limbs move, body color preserved)
 
-    if (c.creatureType === 'jellyfish') {
-      drawJellyfish(
-        outputBuf,
-        c.worldX,
-        c.worldY,
-        spriteState,
-        animFrame + c.phaseOffset,
-        camera,
-        getJellyfishPaletteForSession(sessionToneIndex),
-      );
-    } else if (c.creatureType === 'opencode') {
-      drawOpenCode(
-        outputBuf,
-        c.worldX,
-        c.worldY,
-        spriteState,
-        animFrame + c.phaseOffset,
-        camera,
-        getOpenCodePaletteForSession(sessionToneIndex),
-      );
-    } else if (c.creatureType === 'antigravity') {
-      drawAntigravity(
-        outputBuf,
-        c.worldX,
-        c.worldY,
-        spriteState,
-        animFrame + c.phaseOffset,
-        camera,
-        getAntigravityPaletteForSession(sessionToneIndex),
-      );
-    } else {
-      drawOctopus(
-        outputBuf,
-        c.worldX,
-        c.worldY,
-        spriteState,
-        animFrame + c.phaseOffset,
-        camera,
-        getOctopusPaletteForSession(sessionToneIndex),
-      );
-    }
+    const glyph = c.creatureType === 'jellyfish' ? 'codex'
+      : c.creatureType === 'opencode' ? 'openCode'
+        : c.creatureType === 'antigravity' ? 'antigravity'
+          : 'claudeCode';
+    drawOfficialDotGlyph(
+      outputBuf,
+      glyph,
+      c.worldX,
+      c.worldY,
+      spriteState,
+      animFrame + c.phaseOffset,
+      camera,
+      sessionToneIndex,
+    );
   }
 
   // Crayfish — always drawn when gateway available; IDLE = sitting (subtle breathing only)
   if (hasGateway) {
     const gatewayHasError = stateEvent?.gatewayHasError ?? false;
-    drawCrayfish(outputBuf, cfX, cfY, crayfishRouting, animFrame, camera, gatewayHasError);
+    drawOfficialDotGlyph(
+      outputBuf,
+      'openClaw',
+      cfX,
+      cfY,
+      crayfishRouting ? 'working' : 'idle',
+      animFrame,
+      camera,
+      0,
+      gatewayHasError,
+    );
   }
 
   // ========================================

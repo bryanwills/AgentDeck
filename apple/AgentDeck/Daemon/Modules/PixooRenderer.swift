@@ -473,20 +473,17 @@ final class PixooRenderer {
                 guard let creature = creatureInstances[sessionId] else { continue }
                 let sessionToneIndex = creatureOrder.firstIndex(of: creature.sessionId) ?? 0
                 let spriteState = creature.state
-                switch creature.creatureType {
-                case .cloud:
-                    drawCloud(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: cloudPalette(for: sessionToneIndex))
-                case .opencode:
-                    drawOpenCode(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: opencodePalette(for: sessionToneIndex))
-                case .antigravity:
-                    drawAntigravity(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: antigravityPalette(for: sessionToneIndex))
-                case .octopus:
-                    drawOctopus(&output, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, palette: octopusPalette(for: sessionToneIndex))
+                let glyph: OfficialDotGlyph = switch creature.creatureType {
+                case .cloud: .codex
+                case .opencode: .openCode
+                case .antigravity: .antigravity
+                case .octopus: .claudeCode
                 }
+                drawOfficialDotGlyph(&output, glyph: glyph, worldX: creature.worldX, worldY: creature.worldY, state: spriteState, animFrame: animFrame + creature.phaseOffset, camera: camera, sessionToneIndex: sessionToneIndex)
             }
 
             if hasGateway {
-                drawCrayfish(&output, worldX: Self.cfDefaultX, worldY: Self.cfDefaultY, routing: crayfishRouting, animFrame: animFrame, camera: camera, sick: dashboardState.gatewayHasError)
+                drawOfficialDotGlyph(&output, glyph: .openClaw, worldX: Self.cfDefaultX, worldY: Self.cfDefaultY, state: crayfishRouting ? .processing : .idle, animFrame: animFrame, camera: camera, sessionToneIndex: 0, sick: dashboardState.gatewayHasError)
             }
 
             if usagePct >= 90 {
@@ -1111,6 +1108,84 @@ final class PixooRenderer {
             renderZone("\(Int(round(pct7)))%", formatResetDetailed(dashboardState.sevenDayResetsAt), pct7, 32, 63)
         } else {
             renderZone("\(Int(round(pct5)))%", formatResetDetailed(dashboardState.fiveHourResetsAt), pct5, 0, 63)
+        }
+    }
+
+    /// Canonical dot-matrix mark generated from design/brand/*.svg.
+    /// Geometry is shared with the Node renderer; state only changes motion/color.
+    private func drawOfficialDotGlyph(
+        _ buf: inout [UInt8],
+        glyph: OfficialDotGlyph,
+        worldX: Double,
+        worldY: Double,
+        state: CreatureState,
+        animFrame: Int,
+        camera: Camera,
+        sessionToneIndex: Int,
+        sick: Bool = false
+    ) {
+        guard isVisible(worldX, worldY, camera, padding: 0.15),
+              let mask = OfficialDotGlyphs.masks[glyph] else { return }
+        let (scx, scy) = worldToScreen(worldX, worldY, camera)
+        let target = max(8, Int(round(0.1875 * camera.zoom * Double(Self.width))))
+        let bob = state == .processing ? Int(round(sin(Double(animFrame) * 0.28) * max(1, Double(target) / 14))) : 0
+        let x0 = Int(round(scx - Double(target) / 2))
+        let y0 = Int(round(scy - Double(target) / 2)) + bob
+        let octopus = octopusPalette(for: sessionToneIndex)
+        let codex = cloudPalette(for: sessionToneIndex)
+        let openCode = opencodePalette(for: sessionToneIndex)
+        let processingPulse = 0.28 + 0.18 * ((sin(Double(animFrame) * 0.2) + 1) / 2)
+
+        let base: RGB = {
+            if sick { return Self.colors.crayfishSick }
+            switch glyph {
+            case .claudeCode:
+                return state == .processing ? octopus.starburst : octopus.body
+            case .codex:
+                return state == .processing ? lerpColor(codex.body, codex.pulse, processingPulse) : codex.body
+            case .openCode:
+                return state == .processing ? lerpColor(openCode.outer, openCode.pulse, processingPulse) : openCode.outer
+            case .openClaw:
+                return state == .processing ? Self.colors.crayfishRouting : Self.colors.crayfishBody
+            case .antigravity:
+                return Self.colors.white
+            }
+        }()
+
+        func antigravityColor(_ sourceX: Int) -> RGB {
+            let t = Double(sourceX) / Double(OfficialDotGlyphs.size - 1)
+            if t < 0.25 { return lerpColor((92, 214, 77), (245, 203, 36), t * 4) }
+            if t < 0.55 { return lerpColor((245, 203, 36), (255, 82, 65), (t - 0.25) / 0.3) }
+            if t < 0.78 { return lerpColor((255, 82, 65), (183, 92, 182), (t - 0.55) / 0.23) }
+            return lerpColor((183, 92, 182), (36, 126, 255), (t - 0.78) / 0.22)
+        }
+
+        for dy in 0..<target {
+            let sy = min(OfficialDotGlyphs.size - 1, dy * OfficialDotGlyphs.size / target)
+            for dx in 0..<target {
+                let sx = min(OfficialDotGlyphs.size - 1, dx * OfficialDotGlyphs.size / target)
+                let alpha = Double(mask[sy * OfficialDotGlyphs.size + sx]) / 255
+                if alpha <= 0.02 { continue }
+                let color = glyph == .antigravity ? antigravityColor(sx) : base
+                blendPixel(&buf, x0 + dx, y0 + dy, color, alpha)
+            }
+        }
+
+        if glyph == .openClaw && !sick {
+            for (vx, vy) in [(9.05, 7.63), (15.38, 7.63)] {
+                setPixel(&buf, x0 + Int(round(vx / 24 * Double(target))), y0 + Int(round(vy / 24 * Double(target))), Self.colors.crayfishEye)
+            }
+        }
+
+        if state == .awaiting {
+            drawQuestionBubble(&buf, centerX: x0 + target + 1, centerY: y0)
+        } else if state == .processing {
+            let sparkle: RGB = glyph == .antigravity ? (255, 216, 80) : lerpColor(base, Self.colors.white, 0.45)
+            for i in 0..<4 {
+                let angle = Double(animFrame) * 0.22 + Double(i) * Double.pi / 2
+                let distance = Double(target) / 2 + 2
+                setPixel(&buf, Int(round(scx + cos(angle) * distance)), Int(round(scy + Double(bob) + sin(angle) * distance)), sparkle)
+            }
         }
     }
 

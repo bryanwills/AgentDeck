@@ -24,7 +24,7 @@ pnpm install
 pnpm build                  # shared must build before bridge/plugin
 pnpm generate-icons         # SVG → PNG icons (first build or after icon changes)
 pnpm generate-creature-glyphs  # canonical creature SVG → ESP32 alpha-mask C header (esp32/.../creature_glyphs_generated.h)
-pnpm generate-micro-glyphs  # Timebox Mini 11×11 glyph SSOT (bridge/src/pixoo/micro-glyphs.ts) → Swift mirror (apple/.../MicroGlyphs.generated.swift)
+pnpm generate-micro-glyphs  # Timebox 11×11 TS→Swift mirror + official brand SVG → Pixoo/iDotMatrix/TC001 generated alpha masks
 pnpm generate-protocol      # protocol.ts → JSON Schema → Swift/Kotlin types (generated/protocol/)
 ```
 
@@ -199,6 +199,8 @@ Aquarium-tide design system. Spec: [DESIGN.md](DESIGN.md). Source of truth for c
 5. **Marketing vs product UI palette split.** Marketing surfaces (landing, docs, print) use the warm tokens. Product UI (menubar / e-ink / hardware / TTY) may also use the brighter `--ui-*` set. Marketing must NEVER touch `--ui-*`
 6. **Brand marks are upstream — do not redraw.** `design/brand/{claudecode,codex,openclaw,opencode,antigravity}.svg` are the canonical agent marks. Brand colors (#C07058 / #6166E0 / #FF4D4D / #3a3a3a / #5F6368) are the only saturated reds/blues allowed
 7. **Real assets > drawn ones.** Hardware shots and brand marks come from `assets/` and `design/brand/`. Never illustrate hardware with hand-drawn SVG; ship the diagonal-hatch placeholder pattern (`.ad-hatch` / `.ad-placeholder`) when real assets aren't ready
+
+**Dot-matrix brand assets:** Pixoo64/iDotMatrix use the generated 24×24 alpha masks and TC001 uses the generated 8×8 masks emitted by `pnpm generate-micro-glyphs` from `design/brand/*.svg`. Node, Swift, and ESP32 consumers may add state color, pulse, and particles, but must not replace those masks with hand-drawn agent geometry. Timebox Mini remains a hand-authored 11×11 accessibility reduction in `bridge/src/pixoo/micro-glyphs.ts`; the same generator mirrors it into Swift and regression tests preserve each official mark's defining negative space.
 
 **Migration**: existing UI uses pre-design-system palettes (`StateColors.Hex.*`, `AgentDeckColors.*`). New code reaches for `DesignTokens.*`; migration is incremental, not a sweep. Run `bash design/lint.sh` for the violation count baseline
 

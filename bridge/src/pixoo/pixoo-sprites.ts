@@ -26,6 +26,11 @@
 import type { Camera } from './pixoo-camera.js';
 import { worldToScreen, isVisible } from './pixoo-camera.js';
 import { State, STATE_COLORS } from '@agentdeck/shared';
+import {
+  OFFICIAL_DOT_GLYPHS,
+  OFFICIAL_DOT_GLYPH_SIZE,
+  type OfficialDotGlyphName,
+} from './official-dot-glyphs.generated.js';
 
 // ===== Cell Types (shared with ESP32/Android) =====
 const EMPTY = 0;
@@ -1193,6 +1198,100 @@ function drawQuestionMark(buf: Uint8Array, x: number, y: number, color: RGB): vo
   setPixel(buf, x + 1, y + 1, color);
   setPixel(buf, x, y + 2, color);
   setPixel(buf, x, y + 4, color);
+}
+
+/**
+ * Draw a canonical agent mark rasterized from design/brand/*.svg.
+ *
+ * Pixoo64 and iDotMatrix used to maintain independent hand-drawn creature grids;
+ * the Swift daemon carried another copy. That made the smallest panels look like
+ * approximations of the agents while vector/e-ink surfaces showed their real marks.
+ * This renderer consumes the generated 24×24 alpha masks so both daemon families
+ * preserve the official silhouette and cutouts. State remains a motion/color layer
+ * around the mark, never a geometry rewrite.
+ */
+export function drawOfficialDotGlyph(
+  buf: Uint8Array,
+  glyph: OfficialDotGlyphName,
+  worldX: number,
+  worldY: number,
+  state: 'idle' | 'working' | 'sleeping' | 'asking',
+  animFrame: number,
+  camera: Camera,
+  sessionToneIndex = 0,
+  sick = false,
+): void {
+  if (!isVisible(worldX, worldY, camera, 0.15)) return;
+  const [scx, scy] = worldToScreen(worldX, worldY, camera);
+  const canvasW = Math.sqrt(buf.length / 3);
+  const target = Math.max(8, Math.round(0.1875 * camera.zoom * canvasW));
+  const bob = state === 'working' ? Math.round(Math.sin(animFrame * 0.28) * Math.max(1, target / 14)) : 0;
+  const x0 = Math.round(scx - target / 2);
+  const y0 = Math.round(scy - target / 2) + bob;
+  const mask = OFFICIAL_DOT_GLYPHS[glyph];
+
+  const octopus = getOctopusPaletteForSession(sessionToneIndex);
+  const codex = getJellyfishPaletteForSession(sessionToneIndex);
+  const openCode = getOpenCodePaletteForSession(sessionToneIndex);
+  const processingPulse = 0.28 + 0.18 * ((Math.sin(animFrame * 0.2) + 1) / 2);
+
+  const solidColor = (): RGB => {
+    if (sick) return COLORS.crayfishSick;
+    switch (glyph) {
+      case 'claudeCode':
+        return state === 'working' ? octopus.starburst : state === 'sleeping' ? octopus.sleeping : octopus.body;
+      case 'codex':
+        return state === 'working' ? lerpColor(codex.body, codex.pulse, processingPulse) : state === 'sleeping' ? codex.sleeping : codex.body;
+      case 'openCode':
+        return state === 'working' ? lerpColor(openCode.outer, openCode.pulse, processingPulse) : state === 'sleeping' ? openCode.sleeping : openCode.outer;
+      case 'openClaw': {
+        const base = state === 'working' ? COLORS.crayfishRouting : COLORS.crayfishBody;
+        return sick ? COLORS.crayfishSick : base;
+      }
+      case 'antigravity':
+        return COLORS.white;
+    }
+  };
+  const base = solidColor();
+
+  for (let dy = 0; dy < target; dy++) {
+    const sy = Math.min(OFFICIAL_DOT_GLYPH_SIZE - 1, Math.floor(dy * OFFICIAL_DOT_GLYPH_SIZE / target));
+    for (let dx = 0; dx < target; dx++) {
+      const sx = Math.min(OFFICIAL_DOT_GLYPH_SIZE - 1, Math.floor(dx * OFFICIAL_DOT_GLYPH_SIZE / target));
+      const alpha = mask[sy * OFFICIAL_DOT_GLYPH_SIZE + sx] / 255;
+      if (alpha <= 0.02) continue;
+      let color = base;
+      if (glyph === 'antigravity') {
+        const t = sx / (OFFICIAL_DOT_GLYPH_SIZE - 1);
+        color = t < 0.25 ? lerpColor([0x5c, 0xd6, 0x4d], [0xf5, 0xcb, 0x24], t * 4)
+          : t < 0.55 ? lerpColor([0xf5, 0xcb, 0x24], [0xff, 0x52, 0x41], (t - 0.25) / 0.3)
+            : t < 0.78 ? lerpColor([0xff, 0x52, 0x41], [0xb7, 0x5c, 0xb6], (t - 0.55) / 0.23)
+              : lerpColor([0xb7, 0x5c, 0xb6], [0x24, 0x7e, 0xff], (t - 0.78) / 0.22);
+      }
+      blendPixel(buf, x0 + dx, y0 + dy, color, alpha);
+    }
+  }
+
+  // OpenClaw's official mark has eye cutouts too small to survive every 32px
+  // camera position. Re-light the canonical eye coordinates without changing
+  // the silhouette so the hardware keeps its teal OpenClaw signature.
+  if (glyph === 'openClaw' && !sick) {
+    const eye: RGB = COLORS.crayfishEye;
+    for (const [vx, vy] of [[9.05, 7.63], [15.38, 7.63]] as const) {
+      setPixel(buf, x0 + Math.round(vx / 24 * target), y0 + Math.round(vy / 24 * target), eye);
+    }
+  }
+
+  if (state === 'asking') {
+    drawQuestionMark(buf, x0 + target + 1, y0, COLORS.stateAwaiting);
+  } else if (state === 'working') {
+    const sparkle = glyph === 'antigravity' ? [0xff, 0xd8, 0x50] as RGB : lerpColor(base, COLORS.white, 0.45);
+    for (let i = 0; i < 4; i++) {
+      const angle = animFrame * 0.22 + i * Math.PI / 2;
+      const distance = target / 2 + 2;
+      setPixel(buf, Math.round(scx + Math.cos(angle) * distance), Math.round(scy + bob + Math.sin(angle) * distance), sparkle);
+    }
+  }
 }
 
 export function drawAntigravity(
