@@ -8,6 +8,7 @@ import {
   OFFICIAL_TC001_GLYPH_SIZE,
 } from '../pixoo/official-dot-glyphs.generated.js';
 import { MICRO_SIZE, paintTimeboxBeacon, type MicroCreature } from '../pixoo/micro-glyphs.js';
+import { renderFrame } from '../pixoo/pixoo-renderer.js';
 import {
   PIXOO_PUSH_POLICY,
   pixooPushIntervalMs,
@@ -74,8 +75,8 @@ describe('Timebox Mini Agent Beacon', () => {
     paintTimeboxBeacon(openCode, 'opencode', 'idle', 0);
     paintTimeboxBeacon(openClaw, 'crayfish', 'idle', 0);
     expect(pixel(openCode, 5, 5)).toEqual(background);
-    expect(pixel(openClaw, 4, 4)).toEqual([0, 188, 167]); // idle intensity 0.82
-    expect(pixel(openClaw, 7, 4)).toEqual([0, 188, 167]);
+    expect(pixel(openClaw, 4, 4)).toEqual([0, 211, 188]); // idle intensity 0.92
+    expect(pixel(openClaw, 7, 4)).toEqual([0, 211, 188]);
   });
 
   it('keeps identity fixed and moves only the perimeter rail while processing', () => {
@@ -95,6 +96,37 @@ describe('Timebox Mini Agent Beacon', () => {
     const frame = new Uint8Array(MICRO_SIZE * MICRO_SIZE * 3);
     paintTimeboxBeacon(frame, null, 'idle', 0);
     expect(pixel(frame, 5, 6)).not.toEqual(background);
+  });
+
+  it('uses a continuous dim status frame instead of isolated floating pixels', () => {
+    const frame = new Uint8Array(MICRO_SIZE * MICRO_SIZE * 3);
+    paintTimeboxBeacon(frame, 'octopus', 'idle', 0);
+    expect(pixel(frame, 5, 0)).not.toEqual(background);
+    expect(pixel(frame, 0, 5)).not.toEqual(background);
+  });
+});
+
+describe('iDotMatrix native 32×32 stage', () => {
+  it('keeps a vivid official mark and four source-keyed telemetry rails', () => {
+    const frame = renderFrame(
+      { type: 'state_update', state: 'idle', permissionMode: 'default', agentType: 'opencode' } as any,
+      {
+        type: 'usage_update', sessionDurationSec: 0, inputTokens: 0, outputTokens: 0, toolCalls: 0,
+        fiveHourPercent: 25, sevenDayPercent: 40,
+        codexRateLimits: {
+          primary: { usedPercent: 50, windowMinutes: 300 },
+          secondary: { usedPercent: 75, windowMinutes: 10080 },
+        },
+      },
+      [{ id: 'oc', port: 9120, alive: true, agentType: 'opencode', state: 'idle' }],
+      0, 32,
+    );
+    expect(frame).toHaveLength(32 * 32 * 3);
+    const pixel32 = (x: number, y: number) => [...frame.slice((y * 32 + x) * 3, (y * 32 + x) * 3 + 3)];
+    expect(Math.max(...frame.slice(0, 28 * 32 * 3))).toBeGreaterThan(240);
+    expect(pixel32(0, 30)).toEqual([185, 86, 255]);
+    expect(pixel32(3, 30)).toEqual([185, 86, 255]);
+    expect(pixel32(3, 31)).toEqual([255, 183, 38]);
   });
 });
 

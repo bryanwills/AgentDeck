@@ -142,7 +142,7 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 - **Transport**: HTTP REST to Divoom device LAN IP (port 80)
 - **Discovery**: local `/24` probe first; Divoom Cloud API fallback in the Node daemon; manual IP in `~/.agentdeck/pixoo.json`
 - **Events**: 4 types (`DISPLAY_FORWARDED_EVENTS`)
-- **Rendering**: state → native 64×64 RGB scene with official agent masks → Divoom HTTP API
+- **Rendering**: state → native 64×64 RGB scene with official agent masks, Claude text HUD, and two Codex token-window rails → Divoom HTTP API
 - **Adaptive push**: active states advance through moving single frames every 2.5s, idle refreshes every 10s, and user-visible state changes use a 1s load floor. Multi-frame GIF upload is deliberately disabled: on the tested Pixoo64 firmware it caused REST timeout and 60–87.5% ping loss. Failed attempts are rate-limited and a fresh one-shot probe immediately replaces a wedged long-lived URLSession.
 - **Why HTTP**: Pixoo64's supported control surface is Divoom's LAN REST API; no supported raw-frame BLE path is published. The safe practical improvement is a faster bounded single-frame cadence, not an undocumented BLE transport or a GIF request that destabilizes the device.
 - **Config**: `~/.agentdeck/pixoo.json` — `{ devices: [{ ip, name? }] }`
@@ -151,7 +151,7 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 ### iDotMatrix 32×32
 
 - **Transport**: BLE GATT transparent-UART. The App Store daemon uses native CoreBluetooth; the CLI daemon uses `bridge/src/idotmatrix/sync.py`.
-- **Rendering**: the Swift path composes a dedicated native 32×32 compact terrarium. Up to three generated official marks are placed directly at 16/12/9 physical pixels with simplified terrain and screen-space state effects. It does not shrink the finished Pixoo64 scene, so hollow centers, eyes, and negative space survive the diffuser.
+- **Rendering**: Node and Swift compose the same native 32×32 identity stage. Up to three generated official marks are placed directly at 18/13/10 physical pixels on a blue-black field using a high-saturation device palette. Four one-pixel rails reserve fixed positions for Claude 5h/7d and Codex primary/secondary limits. It does not shrink the finished Pixoo64 scene, so hollow centers, eyes, and negative space survive the diffuser.
 - **Output tuning**: conservative 1.22 brightness / 1.08 contrast compensation in both native and CLI paths; the former 1.6 / 1.2 boost washed out defining holes.
 - **Constraint**: one BLE connection per daemon; brightness command range 5–100%.
 
@@ -161,7 +161,7 @@ The Timebox Mini drives an 11×11 LED screen over **BLE**. A `timeboxDevices` en
 
 - **BLE** — BLE GATT over the ISSC transparent-UART service `49535343-fe7d-…` (write char `49535343-8841-…`, write-without-response, 20-byte chunks). Advertises as `TimeBox-mini-light` (sharing its BD_ADDR with the Classic audio endpoint `TimeBox-mini-audio`). Driven by `sync_ble.py` (bleak) on the CLI daemon **and natively by the App Store Swift daemon over CoreBluetooth** (no subprocess). (The legacy Bluetooth Classic SPP variant was removed — poor macOS compatibility, no App Store path.)
 
-- **Rendering — Agent Beacon**: the panel is intentionally not a miniature aquarium. A generated 9×9 official agent mark occupies the stable center and a dedicated one-pixel perimeter rail carries all status motion: cyan chase for processing, alternating amber corners for awaiting, red dashed pulse for error, and calm green corners for idle. Identity geometry never animates or deforms. The 9×9 masks come directly from `design/brand/*.svg` through `pnpm generate-micro-glyphs`; `bridge/src/pixoo/micro-glyphs.ts` and `apple/.../Modules/MicroGlyphs.swift` own only device-specific color and motion. This removes the old parallel hand-authored creature set. The 11×11 RGB → Divoom static-image packet uses 4-bit nibbles, `0x44`, and escaped `0x01…0x02` framing; `TimeboxDivoomPacket` is byte-verified against `sync_ble.py`.
+- **Rendering — Agent Beacon**: the panel is intentionally not a miniature aquarium. A generated 9×9 official agent mark occupies the stable center with four deliberate 4-bit-safe shading levels, while a continuous dim perimeter frame carries brighter status motion: cyan chase for processing, alternating amber corners for awaiting, red dashed pulse for error, and calm green corners for idle. Identity geometry never animates or deforms. The 9×9 masks come directly from `design/brand/*.svg` through `pnpm generate-micro-glyphs`; `bridge/src/pixoo/micro-glyphs.ts` and `apple/.../Modules/MicroGlyphs.swift` own only device-specific color, shading, and motion. Usage rails are intentionally omitted because they would consume the identity pixels. The 11×11 RGB → Divoom static-image packet uses 4-bit nibbles, `0x44`, and escaped `0x01…0x02` framing; `TimeboxDivoomPacket` is byte-verified against `sync_ble.py`.
 - **Heartbeat**: polls the frame endpoint (~1.5s) and sends only changed frames.
 - **Config**: `~/.agentdeck/settings.json` — `{ timeboxDevices: [{ address, name?, brightness? }] }`
 - **Source**: `bridge/src/timebox/` (settings, daemon sync manager, `sync_ble.py`/`scan_ble.py`); App Store: `apple/AgentDeck/Daemon/Modules/Timebox{BLE,Module,DivoomPacket}.swift`

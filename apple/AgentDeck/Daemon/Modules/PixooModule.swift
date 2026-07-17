@@ -373,6 +373,7 @@ actor PixooModule: DeviceModule {
     private var cached7d: Double?
     private var cached5hResetsAt: String?
     private var cached7dResetsAt: String?
+    private var cachedCodexRateLimits: CodexRateLimits?
     private var cachedGatewayAvailable = false
     private var cachedGatewayConnected = false
     private var cachedGatewayHasError = false
@@ -412,6 +413,7 @@ actor PixooModule: DeviceModule {
             cached7d = event["sevenDayPercent"] as? Double
             cached5hResetsAt = event["fiveHourResetsAt"] as? String
             cached7dResetsAt = event["sevenDayResetsAt"] as? String
+            cachedCodexRateLimits = dotMatrixCodexRateLimits(from: event["codexRateLimits"])
         case "sessions_list":
             cachedSessions = event["sessions"] as? [[String: Any]] ?? []
         case "display_state":
@@ -657,10 +659,13 @@ actor PixooModule: DeviceModule {
         let r7 = renderer.formatResetDetailed(state.sevenDayResetsAt)
         let u5 = state.fiveHourPercent != nil ? Int(floor(state.fiveHourPercent!)) : -1
         let u7 = state.sevenDayPercent != nil ? Int(floor(state.sevenDayPercent!)) : -1
+        let cx1 = state.codexRateLimits?.primary?.usedPercent.map { Int(floor($0)) } ?? -1
+        let cx2 = state.codexRateLimits?.secondary?.usedPercent.map { Int(floor($0)) } ?? -1
+        let cxStale = "\(state.codexRateLimits?.primary?.stale == true)|\(state.codexRateLimits?.secondary?.stale == true)"
 
         let sessionInfo = state.siblingSessions.map { "\($0.id):\($0.agentType ?? ""):\($0.state ?? "")" }.joined(separator: ",")
 
-        return "\(stateStr)|\(gatewayConnected)|\(gatewayHasError)|\(r5)|\(r7)|\(u5)|\(u7)|\(sessionInfo)|\(displayDimmed)"
+        return "\(stateStr)|\(gatewayConnected)|\(gatewayHasError)|\(r5)|\(r7)|\(u5)|\(u7)|\(cx1)|\(cx2)|\(cxStale)|\(sessionInfo)|\(displayDimmed)"
     }
 
     private func checkAndPush() async {
@@ -848,6 +853,7 @@ actor PixooModule: DeviceModule {
         state.sevenDayPercent = cached7d
         state.fiveHourResetsAt = cached5hResetsAt
         state.sevenDayResetsAt = cached7dResetsAt
+        state.codexRateLimits = cachedCodexRateLimits
         // Gateway flags come straight from the daemon broadcast — no OR
         // fallback on "siblingSessions contains openclaw". DaemonServer only
         // injects the virtual openclaw session when `cachedGatewayConnected`

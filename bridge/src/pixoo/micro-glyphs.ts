@@ -72,17 +72,19 @@ function antigravityColor(sourceX: number): RGB {
 function paintOfficialMark(buf: Uint8Array, creature: MicroCreature, aggregate: MicroAggregate): void {
   const name = officialName(creature);
   const mask = OFFICIAL_TIMEBOX_GLYPHS[name];
-  const stateIntensity = aggregate === 'idle' ? 0.82 : aggregate === 'error' ? 0.68 : 1;
+  const stateIntensity = aggregate === 'idle' ? 0.92 : aggregate === 'error' ? 0.72 : 1;
 
   for (let y = 0; y < OFFICIAL_TIMEBOX_GLYPH_SIZE; y++) {
     for (let x = 0; x < OFFICIAL_TIMEBOX_GLYPH_SIZE; x++) {
       const alpha = mask[y * OFFICIAL_TIMEBOX_GLYPH_SIZE + x];
-      // Three coverage levels survive the Timebox's 4-bit channel packing much
-      // better than continuous antialiasing, while true holes remain black.
-      const coverage = alpha >= 192 ? 1 : alpha >= 64 ? 0.68 : 0;
+      // Four deliberate levels survive the Timebox's 4-bit channel packing while
+      // restoring the contour/shading that the old two-step body reduced to a
+      // flat block. Keep true cutouts black so the official negative space reads.
+      const coverage = alpha >= 224 ? 1 : alpha >= 144 ? 0.82 : alpha >= 56 ? 0.56 : alpha >= 20 ? 0.32 : 0;
       if (coverage === 0) continue;
       const color = name === 'antigravity' ? antigravityColor(x) : AGENT_COLORS[name];
-      setPixel(buf, x + 1, y + 1, color, coverage * stateIntensity);
+      const light = 0.88 + (1 - y / (OFFICIAL_TIMEBOX_GLYPH_SIZE - 1)) * 0.12;
+      setPixel(buf, x + 1, y + 1, color, coverage * stateIntensity * light);
     }
   }
 
@@ -103,6 +105,12 @@ function paintStandby(buf: Uint8Array, animFrame: number): void {
 }
 
 function paintStatusRail(buf: Uint8Array, aggregate: MicroAggregate, animFrame: number): void {
+  const railColor = aggregate === 'processing' ? PROCESSING_RAIL
+    : aggregate === 'awaiting' ? AWAITING_RAIL
+      : aggregate === 'error' ? ERROR_RAIL : IDLE_RAIL;
+  const baseIntensity = aggregate === 'idle' ? 0.10 : 0.13;
+  for (const [x, y] of PERIMETER) setPixel(buf, x, y, railColor, baseIntensity);
+
   switch (aggregate) {
     case 'processing': {
       const head = Math.floor(animFrame / 3) % PERIMETER.length;
@@ -129,7 +137,7 @@ function paintStatusRail(buf: Uint8Array, aggregate: MicroAggregate, animFrame: 
       break;
     }
     case 'idle': {
-      const intensity = 0.45 + 0.18 * ((Math.sin(animFrame * 0.12) + 1) / 2);
+      const intensity = 0.56 + 0.16 * ((Math.sin(animFrame * 0.12) + 1) / 2);
       for (const [x, y] of [[0, 0], [10, 0], [10, 10], [0, 10]] as const) {
         setPixel(buf, x, y, IDLE_RAIL, intensity);
       }

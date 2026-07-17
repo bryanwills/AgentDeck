@@ -41,6 +41,10 @@ import {
   MICRO_SIZE, paintTimeboxBeacon,
   type MicroCreature, type MicroAggregate,
 } from './micro-glyphs.js';
+import {
+  OFFICIAL_DOT_GLYPHS, OFFICIAL_DOT_GLYPH_SIZE,
+  type OfficialDotGlyphName,
+} from './official-dot-glyphs.generated.js';
 
 const W = WORLD_SIZE;
 const ACTIVE_OFFSET = (WORLD_SIZE - ACTIVE_SIZE) / 2; // 16
@@ -601,7 +605,7 @@ export function formatResetDetailed(resetsAt: string | undefined): string {
 }
 
 /** Draw Usage HUD in screen space (bottom right, zoom-independent).
- *  Single row at rows 57-63:
+ *  Claude text row at rows 57-63 plus Codex token-window rails at 55-56:
  *    - 7d absent: full-width, right-aligned (original behavior)
  *    - 7d present: left half [0..30]=5h  |  right half [32..63]=7d
  */
@@ -612,11 +616,19 @@ function drawUsageHUD(
   // an old "12%" frozen on-screen looks authoritative to the user even though
   // the CLI daemon isn't live to produce a fresh fetch. Matches the collapse
   // behavior on every other surface (macOS dashboard, plugin, Android, D200H).
-  if (!usageEvent || usageEvent.fiveHourPercent == null) return;
+  if (!usageEvent) return;
   if (usageEvent.usageStale === true) return;
 
+  const codexPrimary = usageEvent.codexRateLimits?.primary?.stale === true
+    ? undefined : usageEvent.codexRateLimits?.primary?.usedPercent;
+  const codexSecondary = usageEvent.codexRateLimits?.secondary?.stale === true
+    ? undefined : usageEvent.codexRateLimits?.secondary?.usedPercent;
+  const hasClaude = usageEvent.fiveHourPercent != null;
+  const hasCodex = codexPrimary != null || codexSecondary != null;
+  if (!hasClaude && !hasCodex) return;
+
   const w = Math.sqrt(buf.length / 3);
-  const textY = w === 32 ? 26 : 58;
+  const textY = 58;
   const bgTop = textY - 1;
   const bgBot = textY + 5;
 
@@ -628,6 +640,24 @@ function drawUsageHUD(
   }
 
   const timeColor: RGB = [0x60, 0x70, 0x80];
+
+  // Codex's short/weekly token windows stay visible even while the larger
+  // Claude text HUD occupies the bottom row. Violet and indigo source keys
+  // distinguish these from the green/blue Claude rails used on iDotMatrix.
+  const codexRails: Array<[number | undefined, RGB]> = [
+    [codexPrimary, [185, 86, 255]],
+    [codexSecondary, [104, 116, 255]],
+  ];
+  codexRails.forEach(([raw, brand], row) => {
+    const y = 55 + row;
+    for (let x = 0; x < 64; x++) blendPixel(buf, x, y, COLORS.black, 0.72);
+    if (raw == null) return;
+    const pct = Math.max(0, Math.min(100, raw));
+    const color: RGB = pct >= 90 ? [255, 58, 72] : pct >= 70 ? [255, 183, 38] : brand;
+    setPixel(buf, 0, y, brand); setPixel(buf, 1, y, brand);
+    const fill = Math.round(pct / 100 * 61);
+    for (let x = 3; x < 3 + fill; x++) setPixel(buf, x, y, color);
+  });
 
   /** Render a zone: usage background fill + two-color text (pct + time). */
   function renderZone(
@@ -652,14 +682,18 @@ function drawUsageHUD(
     }
   }
 
-  const pct5 = usageEvent.fiveHourPercent;
-
-  if (w === 32) {
-    // Single compact zone for 32x32 screens
-    const r5 = formatResetDetailed(usageEvent.fiveHourResetsAt);
-    renderZone(`${Math.round(pct5)}%`, r5, pct5, 0, 31);
+  if (!hasClaude) {
+    if (codexPrimary != null && codexSecondary != null) {
+      renderZone(`C${Math.round(codexPrimary)}`, '', codexPrimary, 0, 30);
+      renderZone(`C${Math.round(codexSecondary)}`, '', codexSecondary, 32, 63);
+    } else {
+      const pct = codexPrimary ?? codexSecondary!;
+      renderZone(`C${Math.round(pct)}%`, '', pct, 0, 63);
+    }
     return;
   }
+
+  const pct5 = usageEvent.fiveHourPercent!;
 
   if (usageEvent.sevenDayPercent == null) {
     // Single full-width zone
@@ -735,6 +769,131 @@ function renderMicroFrame(
   }
 }
 
+/** Native 32×32 iDotMatrix identity stage. The panel gets saturated official
+ * marks on a quiet field plus four fixed telemetry rails; no 64px scene is
+ * downsampled, so cutouts remain physical pixels. */
+function renderCompact32Frame(
+  outputBuf: Uint8Array,
+  animFrame: number,
+  stateEvent: StateUpdateEvent | null,
+  sessions: SessionInfo[] | null,
+  usageEvent: UsageEvent | null,
+): void {
+  const set = (x: number, y: number, color: RGB) => setPixel(outputBuf, x, y, color);
+  const state = String(stateEvent?.state ?? State.IDLE);
+
+  for (let y = 0; y < 28; y++) {
+    const t = y / 27;
+    const color: RGB = [2 + Math.round(5 * t), 7 + Math.round(10 * t), 18 + Math.round(18 * t)];
+    for (let x = 0; x < 32; x++) set(x, y, color);
+  }
+  const surface: RGB = state.startsWith('awaiting') ? [255, 190, 45]
+    : state === 'processing' ? [50, 225, 255] : [38, 210, 145];
+  for (let x = 0; x < 32; x++) {
+    if ((x + Math.floor(animFrame / 4)) % (state === 'processing' ? 3 : 6) === 0) set(x, 2, surface);
+  }
+
+  const glyphFor = (kind: CreatureType): OfficialDotGlyphName =>
+    kind === 'jellyfish' ? 'codex' : kind === 'opencode' ? 'openCode'
+      : kind === 'antigravity' ? 'antigravity' : 'claudeCode';
+  const priority = (s: CreatureInstance['state']) => s === 'awaiting' ? 0 : s === 'processing' ? 1 : 2;
+  const marks: Array<{ glyph: OfficialDotGlyphName; state: CreatureInstance['state'] }> =
+    [...creatureInstances.values()].map((c) => ({ glyph: glyphFor(c.creatureType), state: c.state }));
+  if (hasOpenClawSession(sessions ?? [])) {
+    const routing = sessions?.some((s) => s.agentType === 'openclaw' && s.state === 'processing') ?? false;
+    marks.push({ glyph: 'openClaw', state: routing ? 'processing' : 'idle' });
+  }
+  marks.sort((a, b) => priority(a.state) - priority(b.state));
+  marks.splice(3);
+
+  const slots = marks.length === 1 ? [{ x: 16, y: 14, size: 18 }]
+    : marks.length === 2 ? [{ x: 9, y: 14, size: 13 }, { x: 23, y: 14, size: 13 }]
+      : [{ x: 6, y: 14, size: 10 }, { x: 16, y: 14, size: 10 }, { x: 26, y: 14, size: 10 }];
+  const antigravityBands: RGB[] = [
+    [92, 214, 77], [245, 203, 36], [255, 132, 16], [255, 82, 65],
+    [183, 92, 182], [102, 111, 225], [36, 126, 255],
+  ];
+  const baseColor = (glyph: OfficialDotGlyphName, sx: number): RGB => {
+    if (glyph === 'claudeCode') return [255, 112, 76];
+    if (glyph === 'codex') return [126, 116, 255];
+    if (glyph === 'openCode') return [255, 246, 248];
+    if (glyph === 'openClaw') return [255, 67, 84];
+    return antigravityBands[Math.min(antigravityBands.length - 1,
+      Math.floor(sx * antigravityBands.length / OFFICIAL_DOT_GLYPH_SIZE))];
+  };
+
+  marks.forEach((mark, index) => {
+    const slot = slots[index];
+    const mask = OFFICIAL_DOT_GLYPHS[mark.glyph];
+    const bob = mark.state === 'processing' ? Math.round(Math.sin((animFrame + index * 5) * 0.28)) : 0;
+    const x0 = slot.x - Math.floor(slot.size / 2);
+    const y0 = slot.y - Math.floor(slot.size / 2) + bob;
+    for (let dy = 0; dy < slot.size; dy++) {
+      const sy = Math.min(OFFICIAL_DOT_GLYPH_SIZE - 1, Math.floor(dy * OFFICIAL_DOT_GLYPH_SIZE / slot.size));
+      for (let dx = 0; dx < slot.size; dx++) {
+        const sx = Math.min(OFFICIAL_DOT_GLYPH_SIZE - 1, Math.floor(dx * OFFICIAL_DOT_GLYPH_SIZE / slot.size));
+        const alpha = mask[sy * OFFICIAL_DOT_GLYPH_SIZE + sx] / 255;
+        if (alpha <= 0.04) continue;
+        const color = baseColor(mark.glyph, sx);
+        blendPixel(outputBuf, x0 + dx + 1, y0 + dy + 1, [0, 0, 0], alpha * 0.55);
+        if (alpha > 0.42) {
+          blendPixel(outputBuf, x0 + dx - 1, y0 + dy, color, 0.055);
+          blendPixel(outputBuf, x0 + dx + 1, y0 + dy, color, 0.055);
+        }
+        const coverage = Math.min(1, Math.pow(alpha, 0.72) * 1.12);
+        const light = 1.08 - dy / Math.max(1, slot.size - 1) * 0.12;
+        const lit: RGB = [
+          Math.min(255, Math.round(color[0] * light)),
+          Math.min(255, Math.round(color[1] * light)),
+          Math.min(255, Math.round(color[2] * light)),
+        ];
+        blendPixel(outputBuf, x0 + dx, y0 + dy, lit, coverage);
+      }
+    }
+    if (mark.glyph === 'openClaw') {
+      set(x0 + Math.round(9.05 / 24 * slot.size), y0 + Math.round(7.63 / 24 * slot.size), [0, 229, 204]);
+      set(x0 + Math.round(15.38 / 24 * slot.size), y0 + Math.round(7.63 / 24 * slot.size), [0, 229, 204]);
+    }
+    if (mark.state === 'processing') {
+      for (let spark = 0; spark < 3; spark++) {
+        const angle = animFrame * 0.24 + spark * Math.PI * 2 / 3;
+        const radius = slot.size / 2 + 1;
+        set(Math.round(slot.x + Math.cos(angle) * radius), Math.round(slot.y + bob + Math.sin(angle) * radius), [110, 235, 255]);
+      }
+    } else if (mark.state === 'awaiting') {
+      set(Math.min(31, x0 + slot.size), Math.max(2, y0), [255, 190, 45]);
+      set(Math.min(31, x0 + slot.size), Math.max(2, y0 + 1), [255, 190, 45]);
+    }
+  });
+
+  if (marks.length === 0) {
+    for (const [x, y] of [[14, 12], [15, 11], [16, 12], [17, 11], [18, 12], [15, 14], [16, 15], [17, 14]]) {
+      set(x, y, [76, 206, 220]);
+    }
+  }
+
+  const primary = usageEvent?.codexRateLimits?.primary?.stale === true
+    ? undefined : usageEvent?.codexRateLimits?.primary?.usedPercent;
+  const secondary = usageEvent?.codexRateLimits?.secondary?.stale === true
+    ? undefined : usageEvent?.codexRateLimits?.secondary?.usedPercent;
+  const telemetry: Array<[number | undefined, RGB]> = [
+    [usageEvent?.fiveHourPercent, [42, 220, 154]],
+    [usageEvent?.sevenDayPercent, [54, 154, 255]],
+    [primary, [185, 86, 255]],
+    [secondary, [104, 116, 255]],
+  ];
+  telemetry.forEach(([raw, brand], row) => {
+    const y = 28 + row;
+    for (let x = 0; x < 32; x++) set(x, y, [5, 8, 14]);
+    if (raw == null) return;
+    const pct = Math.max(0, Math.min(100, raw));
+    const color: RGB = pct >= 90 ? [255, 58, 72] : pct >= 70 ? [255, 183, 38] : brand;
+    set(0, y, brand); set(1, y, brand);
+    const width = Math.round(pct / 100 * 29);
+    for (let x = 3; x < 3 + width; x++) set(x, y, color);
+  });
+}
+
 /**
  * Render a complete frame with camera system.
  * Returns RGB buffer.
@@ -758,6 +917,12 @@ export function renderFrame(
     // Still sync creature instances so dominant-creature selection reflects live state.
     syncCreatures(sessions, stateEvent);
     renderMicroFrame(outputBuf, size, animFrame, stateEvent, sessions, usageEvent?.fiveHourPercent ?? 0);
+    return outputBuf;
+  }
+
+  if (size === 32) {
+    syncCreatures(sessions, stateEvent);
+    renderCompact32Frame(outputBuf, animFrame, stateEvent, sessions, usageEvent);
     return outputBuf;
   }
 

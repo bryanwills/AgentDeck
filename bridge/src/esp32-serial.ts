@@ -304,10 +304,10 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
     const cx = e.codexRateLimits
       ? {
           primary: e.codexRateLimits.primary
-            ? { usedPercent: e.codexRateLimits.primary.usedPercent, resetsAt: formatResetTime(e.codexRateLimits.primary.resetsAt) }
+            ? { usedPercent: e.codexRateLimits.primary.usedPercent, resetsAt: formatResetTime(e.codexRateLimits.primary.resetsAt), stale: e.codexRateLimits.primary.stale }
             : undefined,
           secondary: e.codexRateLimits.secondary
-            ? { usedPercent: e.codexRateLimits.secondary.usedPercent, resetsAt: formatResetTime(e.codexRateLimits.secondary.resetsAt) }
+            ? { usedPercent: e.codexRateLimits.secondary.usedPercent, resetsAt: formatResetTime(e.codexRateLimits.secondary.resetsAt), stale: e.codexRateLimits.secondary.stale }
             : undefined,
         }
       : undefined;

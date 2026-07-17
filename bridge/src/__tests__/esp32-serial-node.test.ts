@@ -463,6 +463,19 @@ describe('prepareForSerial (source)', () => {
     expect(prepared.toolCalls).toBe(10);
   });
 
+  it('preserves Codex window freshness for firmware-side hiding', () => {
+    const event: UsageEvent = {
+      type: 'usage_update', sessionDurationSec: 0, inputTokens: 0, outputTokens: 0, toolCalls: 0,
+      codexRateLimits: {
+        primary: { usedPercent: 62, windowMinutes: 300, stale: true },
+        secondary: { usedPercent: 31, windowMinutes: 10080, stale: false },
+      },
+    };
+    const prepared = prepareForSerial(event) as any;
+    expect(prepared.codexRateLimits.primary).toMatchObject({ usedPercent: 62, stale: true });
+    expect(prepared.codexRateLimits.secondary).toMatchObject({ usedPercent: 31, stale: false });
+  });
+
   it('passes through other events unchanged', () => {
     const event: BridgeEvent = {
       type: 'connection',

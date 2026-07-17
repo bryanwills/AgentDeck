@@ -3,6 +3,17 @@
 
 import Foundation
 
+/// Decode the nested usage payload once at the device-module boundary. Keeping
+/// the typed value in DashboardState gives Pixoo64 and iDotMatrix identical
+/// Codex-window semantics without duplicating dictionary parsing in render code.
+func dotMatrixCodexRateLimits(from raw: Any?) -> CodexRateLimits? {
+    guard let raw, JSONSerialization.isValidJSONObject(raw),
+          let data = try? JSONSerialization.data(withJSONObject: raw),
+          let limits = try? JSONDecoder().decode(CodexRateLimits.self, from: data)
+    else { return nil }
+    return limits
+}
+
 final class PixooRenderer {
     private typealias RGB = (UInt8, UInt8, UInt8)
 
@@ -605,28 +616,25 @@ final class PixooRenderer {
             out[i + 2] = UInt8(min(255, Int(round(Double(out[i + 2]) * inv + Double(color.2) * a))))
         }
 
-        // Quiet, high-contrast aquarium field. Detail density is intentionally
-        // lower than Pixoo64 so identity pixels win on the diffuser.
-        for y in 0..<26 {
-            let t = Double(y) / 25
+        // iDotMatrix is an identity stage, not a miniature aquarium. A deep
+        // blue-black field and one state horizon leave the saturated marks as
+        // the first thing the diffuser resolves; the old sand/terrain bands
+        // competed with the silhouettes on a 32px panel.
+        for y in 0..<28 {
+            let t = Double(y) / 27
             let color: RGB = (
-                UInt8(4 + Int(8 * t)),
-                UInt8(24 + Int(28 * t)),
-                UInt8(40 + Int(30 * t))
+                UInt8(2 + Int(5 * t)),
+                UInt8(7 + Int(10 * t)),
+                UInt8(18 + Int(18 * t))
             )
             for x in 0..<n { set(x, y, color) }
         }
-        for x in 0..<n {
-            set(x, 26, (54, 88, 72))
-            for y in 27..<31 { set(x, y, y.isMultiple(of: 2) ? (94, 72, 48) : (80, 61, 43)) }
-            set(x, 31, (12, 20, 25))
-        }
 
         let surface: RGB = dashboardState.state.isAwaiting
-            ? (255, 184, 54)
-            : dashboardState.state == .processing ? (82, 220, 255) : (55, 166, 138)
-        for x in 0..<n where (x + animFrame / 4).isMultiple(of: dashboardState.state == .processing ? 3 : 5) {
-            set(x, 1, surface)
+            ? (255, 190, 45)
+            : dashboardState.state == .processing ? (50, 225, 255) : (38, 210, 145)
+        for x in 0..<n where (x + animFrame / 4).isMultiple(of: dashboardState.state == .processing ? 3 : 6) {
+            set(x, 2, surface)
         }
 
         func glyph(for kind: CreatureKind) -> OfficialDotGlyph {
@@ -656,17 +664,17 @@ final class PixooRenderer {
 
         let slots: [(x: Int, y: Int, size: Int)]
         switch marks.count {
-        case 1: slots = [(16, 14, 16)]
-        case 2: slots = [(9, 14, 12), (23, 14, 12)]
-        default: slots = [(6, 14, 9), (16, 14, 9), (26, 14, 9)]
+        case 1: slots = [(16, 14, 18)]
+        case 2: slots = [(9, 14, 13), (23, 14, 13)]
+        default: slots = [(6, 14, 10), (16, 14, 10), (26, 14, 10)]
         }
 
         func baseColor(_ mark: CompactMark, _ sourceX: Int) -> RGB {
             switch mark.glyph {
-            case .claudeCode: return octopusPalette(for: mark.toneIndex).body
-            case .codex: return cloudPalette(for: mark.toneIndex).body
-            case .openCode: return opencodePalette(for: mark.toneIndex).outer
-            case .openClaw: return Self.colors.crayfishBody
+            case .claudeCode: return (255, 112, 76)
+            case .codex: return (126, 116, 255)
+            case .openCode: return (255, 246, 248)
+            case .openClaw: return (255, 67, 84)
             case .antigravity:
                 let bands: [RGB] = [
                     (92, 214, 77), (245, 203, 36), (255, 132, 16),
@@ -687,7 +695,24 @@ final class PixooRenderer {
                 for dx in 0..<slot.size {
                     let sx = min(OfficialDotGlyphs.size - 1, dx * OfficialDotGlyphs.size / slot.size)
                     let alpha = Double(mask[sy * OfficialDotGlyphs.size + sx]) / 255
-                    if alpha > 0.08 { blend(x0 + dx, y0 + dy, baseColor(mark, sx), alpha) }
+                    guard alpha > 0.04 else { continue }
+                    let color = baseColor(mark, sx)
+                    // One-pixel shadow separates adjacent official-mask cells;
+                    // a restrained halo lets the physical diffuser reconnect
+                    // the silhouette without washing out its negative space.
+                    blend(x0 + dx + 1, y0 + dy + 1, (0, 0, 0), alpha * 0.55)
+                    if alpha > 0.42 {
+                        blend(x0 + dx - 1, y0 + dy, color, 0.055)
+                        blend(x0 + dx + 1, y0 + dy, color, 0.055)
+                    }
+                    let coverage = min(1, pow(alpha, 0.72) * 1.12)
+                    let light = 1.08 - Double(dy) / Double(max(1, slot.size - 1)) * 0.12
+                    let lit: RGB = (
+                        UInt8(min(255, Int(round(Double(color.0) * light)))),
+                        UInt8(min(255, Int(round(Double(color.1) * light)))),
+                        UInt8(min(255, Int(round(Double(color.2) * light))))
+                    )
+                    blend(x0 + dx, y0 + dy, lit, coverage)
                 }
             }
             if mark.glyph == .openClaw {
@@ -712,10 +737,30 @@ final class PixooRenderer {
             }
         }
 
-        let usage = max(0, min(100, dashboardState.fiveHourPercent ?? 0))
-        let usageWidth = Int(round(usage / 100 * 32))
-        let usageColor: RGB = usage >= 90 ? (255, 70, 70) : usage >= 70 ? (255, 184, 54) : (55, 190, 132)
-        if usageWidth > 0 { for x in 0..<usageWidth { set(x, 31, usageColor) } }
+        // Four one-pixel telemetry rails: Claude 5h/7d, then Codex primary/
+        // secondary token windows. The two-pixel source key stays lit while
+        // the 29-pixel track encodes used percentage. Timebox intentionally
+        // omits these rails; at 11px they would destroy the identity badge.
+        let codexPrimary = dashboardState.codexRateLimits?.primary?.stale == true
+            ? nil : dashboardState.codexRateLimits?.primary?.usedPercent
+        let codexSecondary = dashboardState.codexRateLimits?.secondary?.stale == true
+            ? nil : dashboardState.codexRateLimits?.secondary?.usedPercent
+        let telemetry: [(Double?, RGB)] = [
+            (dashboardState.fiveHourPercent, (42, 220, 154)),
+            (dashboardState.sevenDayPercent, (54, 154, 255)),
+            (codexPrimary, (185, 86, 255)),
+            (codexSecondary, (104, 116, 255)),
+        ]
+        for (row, item) in telemetry.enumerated() {
+            let y = 28 + row
+            for x in 0..<n { set(x, y, (5, 8, 14)) }
+            guard let raw = item.0 else { continue }
+            let pct = max(0, min(100, raw))
+            let color: RGB = pct >= 90 ? (255, 58, 72) : pct >= 70 ? (255, 183, 38) : item.1
+            set(0, y, item.1); set(1, y, item.1)
+            let width = Int(round(pct / 100 * 29))
+            if width > 0 { for x in 3..<(3 + width) { set(x, y, color) } }
+        }
 
         return Data(out)
     }
@@ -1214,7 +1259,11 @@ final class PixooRenderer {
     }
 
     private func drawUsageHUD(_ buf: inout [UInt8], dashboardState: DashboardState, animFrame: Int) {
-        guard let pct5 = dashboardState.fiveHourPercent else { return }
+        let codexPrimary = dashboardState.codexRateLimits?.primary?.stale == true
+            ? nil : dashboardState.codexRateLimits?.primary?.usedPercent
+        let codexSecondary = dashboardState.codexRateLimits?.secondary?.stale == true
+            ? nil : dashboardState.codexRateLimits?.secondary?.usedPercent
+        guard dashboardState.fiveHourPercent != nil || codexPrimary != nil || codexSecondary != nil else { return }
         let textY = 58
         let bgTop = textY - 1
         for y in bgTop...(textY + 5) {
@@ -1223,6 +1272,21 @@ final class PixooRenderer {
             }
         }
         let timeColor: RGB = (0x60, 0x70, 0x80)
+
+        let codexRails: [(Double?, RGB)] = [
+            (codexPrimary, (185, 86, 255)),
+            (codexSecondary, (104, 116, 255)),
+        ]
+        for (row, item) in codexRails.enumerated() {
+            let y = 55 + row
+            for x in 0..<Self.width { blendPixel(&buf, x, y, Self.colors.black, 0.72) }
+            guard let raw = item.0 else { continue }
+            let pct = max(0, min(100, raw))
+            let color: RGB = pct >= 90 ? (255, 58, 72) : pct >= 70 ? (255, 183, 38) : item.1
+            setPixel(&buf, 0, y, item.1); setPixel(&buf, 1, y, item.1)
+            let width = Int(round(pct / 100 * 61))
+            if width > 0 { for x in 3..<(3 + width) { setPixel(&buf, x, y, color) } }
+        }
 
         func renderZone(_ percentText: String, _ timeText: String, _ percent: Double, _ leftX: Int, _ rightX: Int) {
             let color = gaugeColor(percent, animFrame: animFrame)
@@ -1240,6 +1304,16 @@ final class PixooRenderer {
             } else {
                 drawText(&buf, text: percentText, rightX: rightX, y: textY, color: color)
             }
+        }
+
+        guard let pct5 = dashboardState.fiveHourPercent else {
+            if let primary = codexPrimary, let secondary = codexSecondary {
+                renderZone("C\(Int(round(primary)))", "", primary, 0, 30)
+                renderZone("C\(Int(round(secondary)))", "", secondary, 32, 63)
+            } else if let pct = codexPrimary ?? codexSecondary {
+                renderZone("C\(Int(round(pct)))%", "", pct, 0, 63)
+            }
+            return
         }
 
         if let pct7 = dashboardState.sevenDayPercent {

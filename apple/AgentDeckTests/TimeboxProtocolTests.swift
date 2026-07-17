@@ -73,7 +73,7 @@ final class TimeboxProtocolTests: XCTestCase {
         var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
         MicroGlyphs.paintBeacon(&buf, creature: .octopus, aggregate: .idle, animFrame: 0)
         XCTAssertNotEqual(pixel(buf, 5, 3), [2, 6, 10])
-        XCTAssertEqual(pixel(buf, 5, 5), [193, 107, 74]) // 0.82 × Claude terracotta
+        XCTAssertEqual(pixel(buf, 5, 5), [203, 112, 78]) // lit 0.92 idle Claude
         XCTAssertNotEqual(pixel(buf, 0, 0), [2, 6, 10]) // idle status corner
     }
 
@@ -83,8 +83,8 @@ final class TimeboxProtocolTests: XCTestCase {
         MicroGlyphs.paintBeacon(&openCode, creature: .opencode, aggregate: .idle, animFrame: 0)
         MicroGlyphs.paintBeacon(&openClaw, creature: .crayfish, aggregate: .idle, animFrame: 0)
         XCTAssertEqual(pixel(openCode, 5, 5), [2, 6, 10])
-        XCTAssertEqual(pixel(openClaw, 4, 4), [0, 188, 167])
-        XCTAssertEqual(pixel(openClaw, 7, 4), [0, 188, 167])
+        XCTAssertEqual(pixel(openClaw, 4, 4), [0, 211, 188])
+        XCTAssertEqual(pixel(openClaw, 7, 4), [0, 211, 188])
     }
 
     func testBeaconProcessingMovesOnlyPerimeter() {
@@ -100,6 +100,13 @@ final class TimeboxProtocolTests: XCTestCase {
         var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
         MicroGlyphs.paintBeacon(&buf, creature: nil, aggregate: .idle, animFrame: 0)
         XCTAssertNotEqual(pixel(buf, 5, 6), [2, 6, 10])
+    }
+
+    func testBeaconUsesContinuousDimStatusFrame() {
+        var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
+        MicroGlyphs.paintBeacon(&buf, creature: .octopus, aggregate: .idle, animFrame: 0)
+        XCTAssertNotEqual(pixel(buf, 5, 0), [2, 6, 10])
+        XCTAssertNotEqual(pixel(buf, 0, 5), [2, 6, 10])
     }
 }
 #endif

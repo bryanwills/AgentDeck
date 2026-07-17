@@ -321,6 +321,7 @@ actor IDotMatrixModule: DeviceModule {
     private var cached7d: Double?
     private var cached5hResetsAt: String?
     private var cached7dResetsAt: String?
+    private var cachedCodexRateLimits: CodexRateLimits?
     private var cachedGatewayAvailable = false
     private var cachedGatewayConnected = false
     private var cachedGatewayHasError = false
@@ -349,6 +350,7 @@ actor IDotMatrixModule: DeviceModule {
             cached7d = event["sevenDayPercent"] as? Double
             cached5hResetsAt = event["fiveHourResetsAt"] as? String
             cached7dResetsAt = event["sevenDayResetsAt"] as? String
+            cachedCodexRateLimits = dotMatrixCodexRateLimits(from: event["codexRateLimits"])
         case "sessions_list":
             cachedSessions = event["sessions"] as? [[String: Any]] ?? []
         case "display_state":
@@ -396,6 +398,7 @@ actor IDotMatrixModule: DeviceModule {
         state.sevenDayPercent = cached7d
         state.fiveHourResetsAt = cached5hResetsAt
         state.sevenDayResetsAt = cached7dResetsAt
+        state.codexRateLimits = cachedCodexRateLimits
         state.gatewayAvailable = cachedGatewayAvailable
         state.gatewayConnected = cachedGatewayConnected
         state.gatewayHasError = cachedGatewayHasError

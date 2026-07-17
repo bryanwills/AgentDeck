@@ -845,8 +845,7 @@ Compact 8×32 RGB LED matrix for always-on status-at-a-glance monitoring.
 The TC001 is a minimal always-on display — separate from the larger ESP32 touch panels. It connects to the bridge via WiFi WebSocket and displays:
 
 - **Agent state animation** — idle, processing, awaiting option states reflected in creature movement
-- **Rate limit gauges** — visual countdown for token limits and API quotas
-- **Usage HUD** — compact numeric readout (cost, tokens, time)
+- **Rate limit gauges** — separate Claude and violet Codex primary/weekly limit pages
 - **Multi-agent support** — pixel-based creature sprites for Claude Code, Codex, OpenCode, OpenClaw
 
 Simple desk or shelf mounting; low power consumption via USB. Firmware in `esp32/` with board support for TC001 (8×32 WS2812B addressable RGB LEDs).
@@ -861,7 +860,7 @@ Simple desk or shelf mounting; low power consumption via USB. Firmware in `esp32
   <img src="docs/media/pixoo64-night.jpg" width="360" alt="Pixoo64 LED matrix — pixel art octopus and crayfish glowing in the dark">
 </p>
 
-The Pixoo module renders dot-art creatures, water zone colors reflecting agent state, and a compact usage HUD — all pushed over HTTP to the device's local API.
+The Pixoo module renders official dot-art agent marks, state-reactive water, a compact Claude usage HUD, and dedicated Codex token-window rails — all pushed over HTTP to the device's local API.
 
 Manage devices with `agentdeck pixoo {scan|add|list|remove|test}` — see [CLI Reference](#cli-reference).
 
@@ -875,7 +874,7 @@ Manage devices with `agentdeck pixoo {scan|add|list|remove|test}` — see [CLI R
 
 - **BLE** — advertises as `TimeBox-mini-light` over BLE GATT (ISSC transparent-UART). Driven by `bridge/src/timebox/sync_ble.py` (bleak) on the CLI daemon, **and natively by the App Store macOS app over CoreBluetooth** (no subprocess). (The legacy Bluetooth Classic SPP variant was removed — poor macOS compatibility and no App Store path.)
 
-It renders the dedicated **micro** layout (`/pixoo/frame?size=11&layout=micro`) — one dominant creature on a status field, legible at 121 LEDs — and writes the Divoom static-image protocol packet.
+It renders the dedicated **Agent Beacon** layout (`/pixoo/frame?size=11&layout=micro`) — one shaded official mark inside a continuous status frame, legible at 121 LEDs — and writes the Divoom static-image protocol packet. Usage rails are intentionally omitted at this resolution.
 
 Manage devices with `agentdeck timebox {scan|add|list|remove|test|sync}`. `scan` discovers BLE peripherals; `add <address>` registers one. After adding a device, restart the CLI daemon; the Timebox module auto-starts sync for configured devices.
 

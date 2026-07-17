@@ -281,7 +281,8 @@ static CRGB gaugeColor(float percent, float animTime) {
 
 // Full-screen gauge: percent number (gauge color, left) + reset time (gray, right)
 static void drawFullScreenGauge(CRGB* leds, float percent,
-                                 const char* resetStr, float animTime, int slideX) {
+                                 const char* resetStr, float animTime, int slideX,
+                                 bool codex = false) {
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
 
@@ -304,7 +305,9 @@ static void drawFullScreenGauge(CRGB* leds, float percent,
     char pctBuf[5];
     snprintf(pctBuf, sizeof(pctBuf), "%d%%", (int)(percent + 0.5f));
     bool dim = isDimMode();
-    CRGB pctColor = CRGB(255, 255, 255);
+    // Codex windows use an electric-violet numeral; the fill still follows
+    // blue→amber→red severity so a nearly exhausted token limit is unmistakable.
+    CRGB pctColor = codex ? CRGB(196, 112, 255) : CRGB(255, 255, 255);
     MatrixFont::drawScrollText(leds, pctBuf, 1 + slideX, 1, pctColor, MATRIX_W, MATRIX_H);
 
     // Reset time in muted gray (right-aligned)
@@ -313,6 +316,37 @@ static void drawFullScreenGauge(CRGB* leds, float percent,
         int tw = MatrixFont::textWidth(timeBuf);
         CRGB timeColor = dim ? CRGB(0xA0, 0xA0, 0xA0) : CRGB(0x60, 0x70, 0x80);
         MatrixFont::drawScrollText(leds, timeBuf, MATRIX_W - tw - 1 + slideX, 1, timeColor, MATRIX_W, MATRIX_H);
+    }
+}
+
+static void renderGaugePair(CRGB* leds, float animTime,
+                            float first, const char* firstReset,
+                            float second, const char* secondReset,
+                            bool codex) {
+    if (first < 0 && second >= 0) {
+        first = second;
+        firstReset = secondReset;
+        second = -1;
+    }
+    if (first < 0) return;
+    if (second < 0) {
+        drawFullScreenGauge(leds, first, firstReset, animTime, 0, codex);
+        return;
+    }
+
+    const float phase = fmodf(animTime, 9.0f);
+    if (phase < 4.0f) {
+        drawFullScreenGauge(leds, first, firstReset, animTime, 0, codex);
+    } else if (phase < 4.5f) {
+        const int offset = (int)(((phase - 4.0f) / 0.5f) * MATRIX_W);
+        drawFullScreenGauge(leds, first, firstReset, animTime, -offset, codex);
+        drawFullScreenGauge(leds, second, secondReset, animTime, MATRIX_W - offset, codex);
+    } else if (phase < 8.5f) {
+        drawFullScreenGauge(leds, second, secondReset, animTime, 0, codex);
+    } else {
+        const int offset = (int)(((phase - 8.5f) / 0.5f) * MATRIX_W);
+        drawFullScreenGauge(leds, second, secondReset, animTime, -offset, codex);
+        drawFullScreenGauge(leds, first, firstReset, animTime, MATRIX_W - offset, codex);
     }
 }
 
@@ -336,38 +370,43 @@ void MatrixPages::renderUsage(CRGB* leds, float animTime) {
         return;
     }
 
-    if (pct5h < 0) {
+    if (pct5h < 0 && pct7d < 0) {
         CRGB dimColor = CRGB(30, 30, 40);
         MatrixFont::drawScrollText(leds, "---", 10, 2, dimColor, MATRIX_W, MATRIX_H);
         return;
     }
 
-    // Cycle: 4s show 5H → 0.5s slide → 4s show 7D → 0.5s slide back
-    float cycle = 9.0f;
-    float phase = fmodf(animTime, cycle);
-
-    if (phase < 4.0f) {
-        drawFullScreenGauge(leds, pct5h, reset5h, animTime, 0);
-    } else if (phase < 4.5f) {
-        float t = (phase - 4.0f) / 0.5f;
-        int offset = (int)(t * MATRIX_W);
-        drawFullScreenGauge(leds, pct5h, reset5h, animTime, -offset);
-        drawFullScreenGauge(leds, pct7d, reset7d, animTime, MATRIX_W - offset);
-    } else if (phase < 8.5f) {
-        drawFullScreenGauge(leds, pct7d, reset7d, animTime, 0);
-    } else {
-        float t = (phase - 8.5f) / 0.5f;
-        int offset = (int)(t * MATRIX_W);
-        drawFullScreenGauge(leds, pct7d, reset7d, animTime, -offset);
-        drawFullScreenGauge(leds, pct5h, reset5h, animTime, MATRIX_W - offset);
-    }
+    renderGaugePair(leds, animTime, pct5h, reset5h, pct7d, reset7d, false);
 
     // State dot overlay — shows agent activity on gauge page
     drawStateDot(leds, animTime);
 }
 
 // ================================================================
-// PAGE 2: AGENTS — Crayfish fixed right + octopus scroll
+// PAGE 2: CODEX — Primary/secondary token-limit windows
+// ================================================================
+void MatrixPages::renderCodex(CRGB* leds, float animTime) {
+    lockState();
+    bool connected = g_state.wsConnected || Net::serialConnected();
+    float primary = g_state.codexPrimaryPercent;
+    float secondary = g_state.codexSecondaryPercent;
+    char primaryReset[20], secondaryReset[20];
+    strncpy(primaryReset, g_state.codexPrimaryReset, sizeof(primaryReset) - 1);
+    primaryReset[sizeof(primaryReset) - 1] = '\0';
+    strncpy(secondaryReset, g_state.codexSecondaryReset, sizeof(secondaryReset) - 1);
+    secondaryReset[sizeof(secondaryReset) - 1] = '\0';
+    unlockState();
+
+    if (!connected) {
+        renderDisconnectStatus(leds, animTime);
+        return;
+    }
+    renderGaugePair(leds, animTime, primary, primaryReset, secondary, secondaryReset, true);
+    drawStateDot(leds, animTime);
+}
+
+// ================================================================
+// PAGE 3: AGENTS — Crayfish fixed right + octopus scroll
 // ================================================================
 void MatrixPages::renderAgents(CRGB* leds, float animTime) {
     // Disconnect check first — never render stale creature/session sprites

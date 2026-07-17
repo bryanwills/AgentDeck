@@ -48,8 +48,9 @@ describe('micro layout (Timebox 11×11)', () => {
     const buf = renderFrame(null, null, [], 1000, 11, 'micro');
     expect(pixel(buf, 5, 6)).not.toEqual([2, 6, 10]);
     expect(pixel(buf, 5, 5)).toEqual([2, 6, 10]);
-    // Idle status is deliberately confined to the four rail corners.
+    // Idle status uses a dim continuous frame with brighter corners.
     expect(pixel(buf, 0, 0)[1]).toBeGreaterThan(pixel(buf, 0, 0)[0]);
+    expect(pixel(buf, 5, 0)[1]).toBeGreaterThan(pixel(buf, 5, 0)[0]);
     expect(pixel(buf, 10, 10)[1]).toBeGreaterThan(pixel(buf, 10, 10)[0]);
   });
 
@@ -63,17 +64,21 @@ describe('micro layout (Timebox 11×11)', () => {
   });
 
   it.each([
-    ['claude-code', claudeSession('idle'), [193, 107, 74]],
-    ['codex-cli', codexSession('idle'), [92, 102, 209]],
-    ['opencode', openCodeSession('idle'), [195, 195, 195]],
-    ['openclaw', openClawSession('idle'), [209, 75, 75]],
-  ] as const)('maps %s to its official generated mark and product color', (agentType, sessions, signature) => {
+    ['claude-code', claudeSession('idle'), 'warm'],
+    ['codex-cli', codexSession('idle'), 'cool'],
+    ['opencode', openCodeSession('idle'), 'neutral'],
+    ['openclaw', openClawSession('idle'), 'red'],
+  ] as const)('maps %s to its shaded official mark and product color', (agentType, sessions, tone) => {
     const buf = renderFrame(
       { state: State.IDLE, agentType } as never,
       null, sessions, 1000, 11, 'micro',
     );
     const interior = Array.from({ length: 9 * 9 }, (_, i) => pixel(buf, i % 9 + 1, Math.floor(i / 9) + 1));
-    expect(interior).toContainEqual(signature);
+    const vivid = interior.filter((p) => Math.max(...p) > 180);
+    expect(vivid.length).toBeGreaterThan(4);
+    if (tone === 'cool') expect(vivid.some((p) => p[2] > p[0] * 1.8)).toBe(true);
+    else if (tone === 'neutral') expect(vivid.some((p) => Math.abs(p[0] - p[2]) < 3)).toBe(true);
+    else expect(vivid.some((p) => p[0] > p[1] * 1.8)).toBe(true);
   });
 
   it('preserves OpenCode negative space and OpenClaw teal eyes', () => {
@@ -86,8 +91,8 @@ describe('micro layout (Timebox 11×11)', () => {
       null, openClawSession('idle'), 1000, 11, 'micro',
     );
     expect(pixel(openCode, 5, 5)).toEqual([2, 6, 10]);
-    expect(pixel(openClaw, 4, 4)).toEqual([0, 188, 167]);
-    expect(pixel(openClaw, 7, 4)).toEqual([0, 188, 167]);
+    expect(pixel(openClaw, 4, 4)).toEqual([0, 211, 188]);
+    expect(pixel(openClaw, 7, 4)).toEqual([0, 211, 188]);
   });
 
   it('renders the generated Antigravity mark as a multicolor open arc', () => {

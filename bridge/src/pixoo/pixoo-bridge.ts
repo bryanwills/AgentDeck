@@ -311,13 +311,18 @@ function calculateStateHash(): string {
   const r7 = lastUsageEvent ? formatResetDetailed(lastUsageEvent.sevenDayResetsAt) : '';
   const u5 = lastUsageEvent?.fiveHourPercent != null ? Math.floor(lastUsageEvent.fiveHourPercent) : -1;
   const u7 = lastUsageEvent?.sevenDayPercent != null ? Math.floor(lastUsageEvent.sevenDayPercent) : -1;
+  const cx1 = lastUsageEvent?.codexRateLimits?.primary?.usedPercent != null
+    ? Math.floor(lastUsageEvent.codexRateLimits.primary.usedPercent) : -1;
+  const cx2 = lastUsageEvent?.codexRateLimits?.secondary?.usedPercent != null
+    ? Math.floor(lastUsageEvent.codexRateLimits.secondary.usedPercent) : -1;
+  const cxStale = `${lastUsageEvent?.codexRateLimits?.primary?.stale === true}|${lastUsageEvent?.codexRateLimits?.secondary?.stale === true}`;
   const uStale = lastUsageEvent?.usageStale ?? false;
 
   const sessionInfo = lastSessions
     ? lastSessions.map(s => `${s.id}:${s.agentType}:${s.state}`).join(',')
     : '';
 
-  return `${stateStr}|${gatewayConnected}|${gatewayHasError}|${r5}|${r7}|${u5}|${u7}|${uStale}|${sessionInfo}|${displayDimmed}`;
+  return `${stateStr}|${gatewayConnected}|${gatewayHasError}|${r5}|${r7}|${u5}|${u7}|${cx1}|${cx2}|${cxStale}|${uStale}|${sessionInfo}|${displayDimmed}`;
 }
 
 function isAnimationActive(): boolean {

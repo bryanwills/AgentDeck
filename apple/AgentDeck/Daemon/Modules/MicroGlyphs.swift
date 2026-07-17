@@ -75,18 +75,20 @@ enum MicroGlyphs {
     ) {
         let glyph = officialGlyph(for: creature)
         guard let mask = OfficialTimeboxGlyphs.masks[glyph] else { return }
-        let stateIntensity = aggregate == .idle ? 0.82 : (aggregate == .error ? 0.68 : 1)
+        let stateIntensity = aggregate == .idle ? 0.92 : (aggregate == .error ? 0.72 : 1)
         let n = OfficialTimeboxGlyphs.size
 
         for y in 0..<n {
             for x in 0..<n {
                 let alpha = mask[y * n + x]
-                let coverage = alpha >= 192 ? 1.0 : (alpha >= 64 ? 0.68 : 0)
+                let coverage = alpha >= 224 ? 1.0
+                    : (alpha >= 144 ? 0.82 : (alpha >= 56 ? 0.56 : (alpha >= 20 ? 0.32 : 0)))
                 guard coverage > 0 else { continue }
+                let light = 0.88 + (1 - Double(y) / Double(n - 1)) * 0.12
                 setPixel(
                     &buf, x: x + 1, y: y + 1,
                     color: agentColor(glyph, sourceX: x),
-                    intensity: coverage * stateIntensity
+                    intensity: coverage * stateIntensity * light
                 )
             }
         }
@@ -108,6 +110,18 @@ enum MicroGlyphs {
     private static func paintStatusRail(
         _ buf: inout [UInt8], aggregate: MicroAggregate, animFrame: Int
     ) {
+        let railColor: RGB
+        switch aggregate {
+        case .processing: railColor = processingRail
+        case .awaiting: railColor = awaitingRail
+        case .error: railColor = errorRail
+        case .idle: railColor = idleRail
+        }
+        let baseIntensity = aggregate == .idle ? 0.10 : 0.13
+        for (x, y) in perimeter {
+            setPixel(&buf, x: x, y: y, color: railColor, intensity: baseIntensity)
+        }
+
         switch aggregate {
         case .processing:
             let head = (animFrame / 3) % perimeter.count
@@ -129,7 +143,7 @@ enum MicroGlyphs {
                 setPixel(&buf, x: x, y: y, color: errorRail, intensity: intensity)
             }
         case .idle:
-            let intensity = 0.45 + 0.18 * ((sin(Double(animFrame) * 0.12) + 1) / 2)
+            let intensity = 0.56 + 0.16 * ((sin(Double(animFrame) * 0.12) + 1) / 2)
             for (x, y) in [(0, 0), (10, 0), (10, 10), (0, 10)] {
                 setPixel(&buf, x: x, y: y, color: idleRail, intensity: intensity)
             }

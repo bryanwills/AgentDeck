@@ -140,6 +140,55 @@ final class IDotMatrixProtocolTests: XCTestCase {
         XCTAssertGreaterThan(brightIdentityPixels, 24)
     }
 
+    func testCompactRendererShowsClaudeAndCodexTelemetryRails() {
+        var state = DashboardState()
+        state.state = .idle
+        state.agentType = "codex-cli"
+        state.siblingSessions = [
+            SessionInfo(id: "cx", port: 9120, projectName: "AgentDeck", agentType: "codex-cli", state: "idle")
+        ]
+        state.fiveHourPercent = 25
+        state.sevenDayPercent = 40
+        state.codexRateLimits = CodexRateLimits(
+            primary: CodexRateLimitWindow(usedPercent: 50, windowMinutes: 300, resetsAt: nil, stale: false),
+            secondary: CodexRateLimitWindow(usedPercent: 75, windowMinutes: 10080, resetsAt: nil, stale: false),
+            planType: "plus", limitId: nil, credits: nil
+        )
+        let frame = PixooRenderer().renderCompact32(dashboardState: state)
+        XCTAssertEqual(compactPixel(frame, 0, 30), [185, 86, 255])
+        XCTAssertEqual(compactPixel(frame, 3, 30), [185, 86, 255])
+        XCTAssertEqual(compactPixel(frame, 3, 31), [255, 183, 38])
+    }
+
+    func testDotMatrixCodexPayloadDecodePreservesFreshness() {
+        let limits = dotMatrixCodexRateLimits(from: [
+            "primary": ["usedPercent": 62.0, "windowMinutes": 300, "stale": true],
+            "secondary": ["usedPercent": 31.0, "windowMinutes": 10080, "stale": false],
+        ])
+        XCTAssertEqual(limits?.primary?.usedPercent, 62)
+        XCTAssertEqual(limits?.primary?.stale, true)
+        XCTAssertEqual(limits?.secondary?.usedPercent, 31)
+        XCTAssertEqual(limits?.secondary?.stale, false)
+    }
+
+    func testPixoo64RendererShowsCodexTokenWindowRails() {
+        var state = DashboardState()
+        state.state = .idle
+        state.codexRateLimits = CodexRateLimits(
+            primary: CodexRateLimitWindow(usedPercent: 50, windowMinutes: 300, resetsAt: nil, stale: false),
+            secondary: CodexRateLimitWindow(usedPercent: 25, windowMinutes: 10080, resetsAt: nil, stale: false),
+            planType: "plus", limitId: nil, credits: nil
+        )
+        let bytes = [UInt8](PixooRenderer().render(dashboardState: state))
+        func pixel64(_ x: Int, _ y: Int) -> [UInt8] {
+            let i = (y * 64 + x) * 3
+            return [bytes[i], bytes[i + 1], bytes[i + 2]]
+        }
+        XCTAssertEqual(pixel64(0, 55), [185, 86, 255])
+        XCTAssertEqual(pixel64(3, 55), [185, 86, 255])
+        XCTAssertEqual(pixel64(0, 56), [104, 116, 255])
+    }
+
     // MARK: - Pixoo adaptive animation transport
 
     func testPixooAdaptivePolicyUsesSafeMovingSingleFrames() {
