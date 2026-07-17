@@ -290,8 +290,6 @@ final class PixooRenderer {
         "h": [0b100, 0b100, 0b111, 0b101, 0b101],
         "m": [0b101, 0b111, 0b101, 0b101, 0b101],
         "d": [0b001, 0b001, 0b011, 0b101, 0b011],
-        "A": [0b010, 0b101, 0b111, 0b101, 0b101],
-        "C": [0b111, 0b100, 0b100, 0b100, 0b111],
         " ": [0b000, 0b000, 0b000, 0b000, 0b000],
         // Uppercase glyphs for "OFFLINE" disconnected frame — mirrors
         // bridge/src/pixoo/pixoo-font.ts.
@@ -1266,7 +1264,8 @@ final class PixooRenderer {
             let resetsAt: String?
         }
         struct ProviderRow {
-            let marker: String
+            let glyph: OfficialDotGlyph
+            let markerWidth: Int
             let brand: RGB
             let primary: UsageWindow?
             let secondary: UsageWindow?
@@ -1279,7 +1278,7 @@ final class PixooRenderer {
         var providers: [ProviderRow] = []
         if dashboardState.usageStale != true, let fiveHour = dashboardState.fiveHourPercent {
             providers.append(ProviderRow(
-                marker: "A", brand: (255, 112, 76),
+                glyph: .claudeCode, markerWidth: 9, brand: (255, 112, 76),
                 primary: UsageWindow(percent: fiveHour, resetsAt: dashboardState.fiveHourResetsAt),
                 secondary: dashboardState.sevenDayPercent.map {
                     UsageWindow(percent: $0, resetsAt: dashboardState.sevenDayResetsAt)
@@ -1290,7 +1289,7 @@ final class PixooRenderer {
         let codexSecondary = freshCodexWindow(dashboardState.codexRateLimits?.secondary)
         if codexPrimary != nil || codexSecondary != nil {
             providers.append(ProviderRow(
-                marker: "C", brand: (126, 116, 255),
+                glyph: .codex, markerWidth: 9, brand: (126, 116, 255),
                 primary: codexPrimary,
                 secondary: codexSecondary
             ))
@@ -1299,6 +1298,32 @@ final class PixooRenderer {
 
         let timeColor: RGB = (0x60, 0x70, 0x80)
         let firstY = providers.count > 1 ? 50 : 57
+
+        func drawCreatureMarker(_ provider: ProviderRow, rowY: Int) {
+            guard let mask = OfficialDotGlyphs.masks[provider.glyph] else { return }
+            let sourceSize = OfficialDotGlyphs.size
+            var minX = sourceSize, minY = sourceSize, maxX = -1, maxY = -1
+            for sy in 0..<sourceSize {
+                for sx in 0..<sourceSize where mask[sy * sourceSize + sx] > 12 {
+                    minX = min(minX, sx); minY = min(minY, sy)
+                    maxX = max(maxX, sx); maxY = max(maxY, sy)
+                }
+            }
+            guard maxX >= minX, maxY >= minY else { return }
+            let sourceWidth = maxX - minX + 1
+            let sourceHeight = maxY - minY + 1
+            let markerX = (9 - provider.markerWidth) / 2
+            for dy in 0..<7 {
+                let sy = min(maxY, minY + Int(floor((Double(dy) + 0.5) * Double(sourceHeight) / 7)))
+                for dx in 0..<provider.markerWidth {
+                    let sx = min(maxX, minX + Int(floor((Double(dx) + 0.5) * Double(sourceWidth) / Double(provider.markerWidth))))
+                    let alpha = mask[sy * sourceSize + sx]
+                    guard alpha > 16 else { continue }
+                    let intensity = alpha >= 96 ? 1.0 : 0.56
+                    setPixel(&buf, markerX + dx, rowY + dy, lerpColor(Self.colors.black, provider.brand, intensity))
+                }
+            }
+        }
 
         func fittedReset(_ resetsAt: String?, percentText: String, zoneWidth: Int) -> String {
             let detailed = formatResetDetailed(resetsAt)
@@ -1337,13 +1362,13 @@ final class PixooRenderer {
             for y in rowY..<(rowY + 7) {
                 for x in 0..<Self.width { blendPixel(&buf, x, y, Self.colors.black, 0.62) }
             }
-            drawText(&buf, text: provider.marker, rightX: 3, y: rowY + 1, color: provider.brand)
+            drawCreatureMarker(provider, rowY: rowY)
             if let primary = provider.primary, let secondary = provider.secondary {
-                for y in (rowY + 1)..<(rowY + 6) { blendPixel(&buf, 34, y, provider.brand, 0.28) }
-                renderWindow(primary, leftX: 5, rightX: 34, rowY: rowY)
-                renderWindow(secondary, leftX: 35, rightX: 64, rowY: rowY)
+                for y in (rowY + 1)..<(rowY + 6) { blendPixel(&buf, 36, y, provider.brand, 0.28) }
+                renderWindow(primary, leftX: 10, rightX: 36, rowY: rowY)
+                renderWindow(secondary, leftX: 37, rightX: 64, rowY: rowY)
             } else if let only = provider.primary ?? provider.secondary {
-                renderWindow(only, leftX: 5, rightX: 64, rowY: rowY)
+                renderWindow(only, leftX: 10, rightX: 64, rowY: rowY)
             }
         }
     }

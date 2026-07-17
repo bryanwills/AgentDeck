@@ -605,7 +605,8 @@ export function formatResetDetailed(resetsAt: string | undefined): string {
 }
 
 /** Draw Usage HUD in screen space (bottom, zoom-independent).
- *  Each provider uses the same seven-pixel band with a brand marker, usage
+ *  Each provider uses the same seven-pixel band with its official creature
+ *  silhouette, usage
  *  fill, percentage and reset countdown. When both are present Claude occupies
  *  rows 50-56 and Codex rows 57-63; a lone provider stays on rows 57-63.
  *  Primary/5h is the left zone and secondary/7d is the right zone.
@@ -615,12 +616,15 @@ function drawUsageHUD(
 ): void {
   if (!usageEvent) return;
   type Window = { percent: number; resetsAt?: string };
-  type Provider = { marker: 'A' | 'C'; brand: RGB; primary?: Window; secondary?: Window };
+  type Provider = {
+    glyph: OfficialDotGlyphName; markerWidth: number; brand: RGB;
+    primary?: Window; secondary?: Window;
+  };
 
   const providers: Provider[] = [];
   if (usageEvent.usageStale !== true && usageEvent.fiveHourPercent != null) {
     providers.push({
-      marker: 'A', brand: [255, 112, 76],
+      glyph: 'claudeCode', markerWidth: 9, brand: [255, 112, 76],
       primary: { percent: usageEvent.fiveHourPercent, resetsAt: usageEvent.fiveHourResetsAt },
       secondary: usageEvent.sevenDayPercent == null ? undefined : {
         percent: usageEvent.sevenDayPercent, resetsAt: usageEvent.sevenDayResetsAt,
@@ -631,7 +635,7 @@ function drawUsageHUD(
   const codexSecondary = usageEvent.codexRateLimits?.secondary;
   if ((codexPrimary && codexPrimary.stale !== true) || (codexSecondary && codexSecondary.stale !== true)) {
     providers.push({
-      marker: 'C', brand: [126, 116, 255],
+      glyph: 'codex', markerWidth: 9, brand: [126, 116, 255],
       primary: codexPrimary?.stale === true ? undefined : codexPrimary && {
         percent: codexPrimary.usedPercent, resetsAt: codexPrimary.resetsAt,
       },
@@ -644,6 +648,33 @@ function drawUsageHUD(
 
   const timeColor: RGB = [0x60, 0x70, 0x80];
   const firstY = providers.length > 1 ? 50 : 57;
+
+  function drawCreatureMarker(provider: Provider, rowY: number): void {
+    const mask = OFFICIAL_DOT_GLYPHS[provider.glyph];
+    const sourceSize = OFFICIAL_DOT_GLYPH_SIZE;
+    let minX = sourceSize; let minY = sourceSize; let maxX = -1; let maxY = -1;
+    for (let sy = 0; sy < sourceSize; sy++) {
+      for (let sx = 0; sx < sourceSize; sx++) {
+        if (mask[sy * sourceSize + sx] <= 12) continue;
+        minX = Math.min(minX, sx); minY = Math.min(minY, sy);
+        maxX = Math.max(maxX, sx); maxY = Math.max(maxY, sy);
+      }
+    }
+    if (maxX < minX || maxY < minY) return;
+    const sourceWidth = maxX - minX + 1;
+    const sourceHeight = maxY - minY + 1;
+    const markerX = Math.floor((9 - provider.markerWidth) / 2);
+    for (let dy = 0; dy < 7; dy++) {
+      const sy = Math.min(maxY, minY + Math.floor((dy + 0.5) * sourceHeight / 7));
+      for (let dx = 0; dx < provider.markerWidth; dx++) {
+        const sx = Math.min(maxX, minX + Math.floor((dx + 0.5) * sourceWidth / provider.markerWidth));
+        const alpha = mask[sy * sourceSize + sx];
+        if (alpha <= 16) continue;
+        const intensity = alpha >= 96 ? 1 : 0.56;
+        setPixel(buf, markerX + dx, rowY + dy, lerpColor(COLORS.black, provider.brand, intensity));
+      }
+    }
+  }
 
   function fittedReset(resetsAt: string | undefined, pctText: string, zoneWidth: number): string {
     const detailed = formatResetDetailed(resetsAt);
@@ -677,15 +708,15 @@ function drawUsageHUD(
     for (let y = rowY; y < rowY + 7; y++) {
       for (let x = 0; x < 64; x++) blendPixel(buf, x, y, COLORS.black, 0.62);
     }
-    drawText(buf, provider.marker, 3, rowY + 1, provider.brand);
+    drawCreatureMarker(provider, rowY);
 
     if (provider.primary && provider.secondary) {
-      for (let y = rowY + 1; y < rowY + 6; y++) blendPixel(buf, 34, y, provider.brand, 0.28);
-      renderWindow(provider.primary, 5, 34, rowY);
-      renderWindow(provider.secondary, 35, 64, rowY);
+      for (let y = rowY + 1; y < rowY + 6; y++) blendPixel(buf, 36, y, provider.brand, 0.28);
+      renderWindow(provider.primary, 10, 36, rowY);
+      renderWindow(provider.secondary, 37, 64, rowY);
     } else {
       const only = provider.primary ?? provider.secondary;
-      if (only) renderWindow(only, 5, 64, rowY);
+      if (only) renderWindow(only, 10, 64, rowY);
     }
   });
 }

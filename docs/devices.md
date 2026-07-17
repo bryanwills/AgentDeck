@@ -142,7 +142,7 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 - **Transport**: HTTP REST to Divoom device LAN IP (port 80)
 - **Discovery**: local `/24` probe first; Divoom Cloud API fallback in the Node daemon; manual IP in `~/.agentdeck/pixoo.json`
 - **Events**: 4 types (`DISPLAY_FORWARDED_EVENTS`)
-- **Rendering**: state → native 64×64 RGB scene with official agent masks and matched Claude/Codex provider rows; each row shows primary/5h and secondary/7d percentage fills with reset countdowns → Divoom HTTP API
+- **Rendering**: state → native 64×64 RGB scene with official agent masks and matched Claude/Codex provider rows; 9×7 official-mask creature silhouettes identify the rows, which show primary/5h and secondary/7d percentage fills with reset countdowns → Divoom HTTP API
 - **Adaptive push**: active states advance through moving single frames every 2.5s, idle refreshes every 10s, and user-visible state changes use a 1s load floor. Multi-frame GIF upload is deliberately disabled: on the tested Pixoo64 firmware it caused REST timeout and 60–87.5% ping loss. Failed attempts are rate-limited and a fresh one-shot probe immediately replaces a wedged long-lived URLSession.
 - **Why HTTP**: Pixoo64's supported control surface is Divoom's LAN REST API; no supported raw-frame BLE path is published. The safe practical improvement is a faster bounded single-frame cadence, not an undocumented BLE transport or a GIF request that destabilizes the device.
 - **Config**: `~/.agentdeck/pixoo.json` — `{ devices: [{ ip, name? }] }`

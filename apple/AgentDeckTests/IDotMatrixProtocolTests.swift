@@ -190,8 +190,12 @@ final class IDotMatrixProtocolTests: XCTestCase {
             let i = (y * 64 + x) * 3
             return [bytes[i], bytes[i + 1], bytes[i + 2]]
         }
-        XCTAssertEqual(pixel64(1, 51), [255, 112, 76])
-        XCTAssertEqual(pixel64(0, 58), [126, 116, 255])
+        func markerPixels(_ top: Int, _ brand: [UInt8]) -> Int {
+            (top..<(top + 7)).flatMap { y in (0..<9).map { pixel64($0, y) } }
+                .filter { $0 == brand }.count
+        }
+        XCTAssertGreaterThan(markerPixels(50, [255, 112, 76]), 3)
+        XCTAssertGreaterThan(markerPixels(57, [126, 116, 255]), 3)
         let resetColor: [UInt8] = [0x60, 0x70, 0x80]
         let claudeResetPixels = (50...56).flatMap { y in (0..<64).map { pixel64($0, y) } }
             .filter { $0 == resetColor }.count

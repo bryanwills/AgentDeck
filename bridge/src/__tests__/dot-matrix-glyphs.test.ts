@@ -149,8 +149,12 @@ describe('Pixoo64 provider usage HUD', () => {
       0, 64,
     );
     const pixel64 = (x: number, y: number) => [...frame.slice((y * 64 + x) * 3, (y * 64 + x) * 3 + 3)];
-    expect(pixel64(1, 51)).toEqual([255, 112, 76]); // Anthropic/Claude marker
-    expect(pixel64(0, 58)).toEqual([126, 116, 255]); // Codex marker
+    const markerPixels = (top: number, brand: number[]) => Array.from({ length: 7 * 9 }, (_, index) => {
+      const y = top + Math.floor(index / 9);
+      return pixel64(index % 9, y).join() === brand.join();
+    }).filter(Boolean).length;
+    expect(markerPixels(50, [255, 112, 76])).toBeGreaterThan(3);
+    expect(markerPixels(57, [126, 116, 255])).toBeGreaterThan(3);
     const resetColor = [0x60, 0x70, 0x80].join();
     const resetPixels = (top: number) => Array.from({ length: 7 * 64 }, (_, index) => {
       const y = top + Math.floor(index / 64);
