@@ -560,11 +560,21 @@ final class DaemonServer {
 
     /// Idle TTL for a Codex thread promoted to *interactive* (it re-engaged
     /// after a terminal event, so it is a long-lived `codex` CLI conversation,
-    /// not a single-turn companion task). The sandbox blocks `ps`, so unlike
-    /// the Node daemon we cannot ground liveness in the process table — this
-    /// long window is the compromise between the 60/90 s companion TTLs
-    /// (which made interactive creatures flap on every turn boundary) and
-    /// never reaping a Ctrl-C'd ghost.
+    /// not a single-turn companion task). We cannot tell a quiet thread from a
+    /// Ctrl-C'd ghost, so this long window is the compromise between the
+    /// 60/90 s companion TTLs (which made interactive creatures flap on every
+    /// turn boundary) and never reaping a ghost.
+    ///
+    /// The blocker is attribution, not visibility. This comment used to claim
+    /// the sandbox denies us the process table; it does not. Only *spawning*
+    /// `ps` is barred (subprocess, App Store 2.5.2) — `sysctl(KERN_PROC_ALL)`
+    /// is permitted and `ProcessEnumerator` already reads pid + start time +
+    /// argv here (measured: 642 processes, every agent CLI visible, from the
+    /// sandboxed host). What is missing is a session→pid mapping: hooks carry
+    /// `session_id` and never the CLI's pid, and concurrent `claude` processes
+    /// are indistinguishable by argv (all argv0 == "claude"). Grounding this
+    /// ladder in real liveness needs the hook snippet to report its `$PPID`
+    /// first; until it does, every TTL here is a guess.
     private static let codexInteractiveIdleTTL: TimeInterval = 30 * 60
 
     /// Idle TTL for a standalone `opencode` session. The observer plugin only
