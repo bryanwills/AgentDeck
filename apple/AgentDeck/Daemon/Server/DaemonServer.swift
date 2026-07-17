@@ -579,6 +579,27 @@ final class DaemonServer {
     /// turns promptly via `opencode_stop`.
     private static let openCodeIdleTTL: TimeInterval = 30 * 60
 
+    /// Idle TTL for a hook-observed `claude-code` session. Only standalone
+    /// `claude` runs reach the daemon's /hooks endpoint — `agentdeck claude`
+    /// exports `AGENTDECK_PORT`, so a managed session's hooks go to its own
+    /// session bridge and it never lands in `lastHookAtByPushedSession`. Every
+    /// session on this path is therefore a long-lived interactive conversation,
+    /// never a single-turn companion burst.
+    ///
+    /// Claude Code fires hooks only at SessionStart/UserPromptSubmit/PreToolUse/
+    /// PostToolUse/Stop/Notification/SessionEnd, so ONE tool call longer than
+    /// 180 s (a long build, a test run, a subagent fan-out, extended thinking)
+    /// emits nothing in between. Under `pushedSessionStaleTTL` that live turn
+    /// was evicted, force-closed with a spurious chat_end, and its creature
+    /// flapped — resurrecting on the next hook. Idling between turns tripped
+    /// the same window while the user simply typed. Same failure
+    /// `codexInteractiveIdleTTL` and `openCodeIdleTTL` already fix; claude was
+    /// the last agent still exposed.
+    ///
+    /// `SessionEnd` drops the row immediately on a clean exit, so this long
+    /// window only ever covers a crash/Ctrl-C ghost.
+    private static let claudeInteractiveIdleTTL: TimeInterval = 30 * 60
+
     /// How long an evicted Codex thread's terminal timestamp survives as a
     /// tombstone. Mid-turn events (`codex_tool_start`/`codex_tool_end`) may
     /// resurrect an unknown session ONLY when no tombstone exists — a live
@@ -3545,6 +3566,45 @@ final class DaemonServer {
     /// floating forever. A fresh start-like hook for the same sessionId
     /// re-creates the entry through the synthesis path.
     @MainActor
+    /// Idle TTL for one hook-observed session — how long it may stay quiet
+    /// before `evictStaleHookSessions` reaps its row.
+    ///
+    /// Pure and non-private so the ladder's ORDER is testable; the constants
+    /// carry the per-agent reasoning. The order is the part that breaks
+    /// silently: `awaiting` must outrank the per-agent interactive TTLs (a
+    /// permission prompt is quiet for hours by nature, and 30 min would evict
+    /// it mid-decision), and every agent-specific branch must outrank the
+    /// 180 s `pushedSessionStaleTTL` default — which now only catches an agent
+    /// we do not model yet.
+    static func hookIdleTTL(
+        sessionId sid: String,
+        entry: DaemonSessionEntry,
+        isCodexInteractive: Bool
+    ) -> TimeInterval {
+        if isCodexSession(sessionId: sid, entry: entry) {
+            // Multi-turn interactive `codex` CLI conversation — the user is
+            // thinking between turns, not a dead companion thread. Companion
+            // TTLs made this creature flap on every turn boundary (evict
+            // 60-90 s after each stop, resurrect on the next prompt).
+            if isCodexInteractive { return codexInteractiveIdleTTL }
+            return (entry.currentTool?.isEmpty == false)
+                ? codexToolObservationStaleTTL
+                : codexIdleObservationStaleTTL
+        }
+        // Standalone opencode sessions are always interactive multi-turn
+        // conversations — the 180 s ghost TTL flapped a live-but-quiet turn.
+        if sid.hasPrefix(openCodeSessionPrefix) { return openCodeIdleTTL }
+        // A genuinely-awaiting session is quiet by nature (one Notification
+        // then it waits on the user) — don't reap it in the 180 s ghost
+        // window or its creature vanishes mid-decision. Answering fires a
+        // hook that clears awaiting well before this long backstop. Must stay
+        // ABOVE the claude-code branch: awaiting is the longer, more specific
+        // window and applies to every agent.
+        if (entry.state ?? "").hasPrefix("awaiting") { return awaitingHookStaleTTL }
+        if entry.agentType == "claude-code" { return claudeInteractiveIdleTTL }
+        return pushedSessionStaleTTL
+    }
+
     private func evictStaleHookSessions() async {
         let now = Date()
         let codexTerminalCutoff = now.addingTimeInterval(-Self.codexPostTerminalTTL)
@@ -3556,34 +3616,11 @@ final class DaemonServer {
 
         var expired = Set(lastHookAtByPushedSession.compactMap { (sid, ts) -> String? in
             guard let entry = pushedSessionsById[sid] else { return sid }
-            let ttl: TimeInterval
-            if Self.isCodexSession(sessionId: sid, entry: entry) {
-                if codexInteractiveSessionIds.contains(sid) {
-                    // Multi-turn interactive `codex` CLI conversation — the
-                    // user is thinking between turns, not a dead companion
-                    // thread. Companion TTLs made this creature flap on
-                    // every turn boundary (evict 60-90 s after each stop,
-                    // resurrect on the next prompt).
-                    ttl = Self.codexInteractiveIdleTTL
-                } else {
-                    ttl = (entry.currentTool?.isEmpty == false)
-                        ? Self.codexToolObservationStaleTTL
-                        : Self.codexIdleObservationStaleTTL
-                }
-            } else if sid.hasPrefix(Self.openCodeSessionPrefix) {
-                // Standalone opencode sessions are always interactive multi-turn
-                // conversations — the 180 s ghost TTL flapped a live-but-quiet
-                // turn. See `openCodeIdleTTL`.
-                ttl = Self.openCodeIdleTTL
-            } else if (entry.state ?? "").hasPrefix("awaiting") {
-                // A genuinely-awaiting session is quiet by nature (one Notification
-                // then it waits on the user) — don't reap it in the 180 s ghost
-                // window or its creature vanishes mid-decision. Answering fires a
-                // hook that clears awaiting well before this long backstop.
-                ttl = Self.awaitingHookStaleTTL
-            } else {
-                ttl = Self.pushedSessionStaleTTL
-            }
+            let ttl = Self.hookIdleTTL(
+                sessionId: sid,
+                entry: entry,
+                isCodexInteractive: codexInteractiveSessionIds.contains(sid)
+            )
             return ts < now.addingTimeInterval(-ttl) ? sid : nil
         })
         // Faster eviction for Codex sessions whose terminal event (codex_stop /
@@ -3647,14 +3684,23 @@ final class DaemonServer {
             if userFocusedSessionId == sid { userFocusedSessionId = nil }
             if isPostTerminal {
                 DaemonLogger.shared.debug("Hook", "Evicted finished codex session \(sid) (post-terminal \(Int(Self.codexPostTerminalTTL))s)")
-            } else if let entry = expiredEntry,
-                      Self.isCodexSession(sessionId: sid, entry: entry) {
-                let ttl = (entry.currentTool?.isEmpty == false)
-                    ? Self.codexToolObservationStaleTTL
-                    : Self.codexIdleObservationStaleTTL
-                DaemonLogger.shared.debug("Hook", "Evicted stale codex session \(sid) (no hook in \(Int(ttl))s)")
+            } else if let entry = expiredEntry {
+                // Report the TTL the ladder actually applied. Restating a
+                // constant here drifts from `hookIdleTTL` the moment a branch
+                // is added: this line claimed "no hook in 180s" for opencode
+                // and interactive codex rows that in fact got 30 min, and sent
+                // an investigation chasing a window that no longer applied.
+                let ttl = Self.hookIdleTTL(
+                    sessionId: sid,
+                    entry: entry,
+                    isCodexInteractive: codexInteractiveSessionIds.contains(sid)
+                )
+                DaemonLogger.shared.debug(
+                    "Hook",
+                    "Evicted stale session \(sid) (\(entry.agentType ?? "unknown"), no hook in \(Int(ttl))s)"
+                )
             } else {
-                DaemonLogger.shared.debug("Hook", "Evicted stale session \(sid) (no hook in \(Int(Self.pushedSessionStaleTTL))s)")
+                DaemonLogger.shared.debug("Hook", "Evicted stale session \(sid) (no session entry)")
             }
         }
         broadcastSessionsList()
