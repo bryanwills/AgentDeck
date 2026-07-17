@@ -92,10 +92,10 @@ struct MonitorScreen: View {
             ZStack {
                 terrariumLayer
 
+                hudLayer(geo: geo, disconnected: !stateHolder.state.bridgeConnected)
+
                 if !stateHolder.state.bridgeConnected {
                     ConnectionOverlay()
-                } else {
-                    hudLayer(geo: geo)
                 }
 
                 attentionTheaterLayer(geo: geo)
@@ -147,11 +147,19 @@ struct MonitorScreen: View {
         }
     }
 
+    /// `disconnected` hides the HUD without unmounting it. Swapping this whole
+    /// layer out for ConnectionOverlay destroys the subtree, and with it every
+    /// @State inside — the timeline's scroll offset, sticky-bottom mode, and
+    /// expand state. Bridge drops here are routinely transient (~5s while the
+    /// daemon stands down to reclaim the canonical port from a fallback), so a
+    /// blip the user barely sees was silently throwing them back to the bottom
+    /// of the timeline. Hidden-but-mounted keeps ConnectionOverlay's look (it
+    /// draws its own scrim on top) while the state survives the round trip.
     @ViewBuilder
-    private func hudLayer(geo: GeometryProxy) -> some View {
+    private func hudLayer(geo: GeometryProxy, disconnected: Bool) -> some View {
         MonitorHUD()
-            .opacity(hudHidden ? 0 : 1)
-            .allowsHitTesting(!hudHidden)
+            .opacity(hudHidden || disconnected ? 0 : 1)
+            .allowsHitTesting(!hudHidden && !disconnected)
             .animation(.easeInOut(duration: 0.25), value: hudHidden)
 
         if preferences.showTimeline {
@@ -160,6 +168,8 @@ struct MonitorScreen: View {
                 TimelineStripView()
                     .frame(height: geo.size.height * MonitorLayout.sandFraction)
             }
+            .opacity(disconnected ? 0 : 1)
+            .allowsHitTesting(!disconnected)
         }
     }
 
