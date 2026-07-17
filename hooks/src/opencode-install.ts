@@ -224,6 +224,11 @@ export const AgentDeckObserver = async ({ directory, client }) => {
           const sessionID = info.sessionID;
           announce(sessionID);
           if (info.role === "user" && info.id) {
+            // userMsgs/promptSent are dedup memory keyed on user messageID and
+            // must outlive the turn (see the session.idle note), so cap them
+            // here instead of clearing per turn — same bound as toolPhase.
+            if (userMsgs.size > 512) userMsgs.clear();
+            if (promptSent.size > 512) promptSent.clear();
             userMsgs.set(info.id, sessionID);
             // Prompt text usually streams via message.part.updated moments
             // later; flush immediately when the info carries it, otherwise
@@ -296,9 +301,15 @@ export const AgentDeckObserver = async ({ directory, client }) => {
           });
           responses.delete(sessionID);
           startedAt.delete(sessionID);
-          for (const [mid, sid] of userMsgs) {
-            if (sid === sessionID) { userMsgs.delete(mid); promptSent.delete(mid); }
-          }
+          // Do NOT clear userMsgs/promptSent for this session. OpenCode
+          // re-emits message.updated for a user message after the turn
+          // settles; dropping its promptSent entry let that trailing update
+          // re-post opencode_user_prompt_submit, which flips the row back to
+          // processing and opens a phantom turn. The session is already idle
+          // by then, so no session.idle follows to close it and the row reads
+          // WORKING until the 30-min idle TTL evicts it. A messageID is never
+          // re-submitted, so these entries are pure dedup memory — bounded
+          // where they are added, not here.
         }
       } catch { /* never throw into OpenCode's event loop */ }
     },

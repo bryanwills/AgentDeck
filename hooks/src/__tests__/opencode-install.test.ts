@@ -1,7 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { pathToFileURL } from 'url';
 import {
   installOpenCodeHooksIfNeeded,
   uninstallOpenCodeHooks,
@@ -57,6 +58,94 @@ describe('opencodePluginSource contract', () => {
   it('separates user prompt parts from assistant response parts by messageID role', () => {
     expect(src).toContain('userMsgs');
     expect(src).toContain('responses.set');
+  });
+});
+
+/**
+ * Behavioural coverage — the contract tests above pin event *names*, but the
+ * regression these guard is a *sequence*, so they run the real plugin body.
+ * `client: null` keeps the steering long-poll loop from starting.
+ */
+describe('AgentDeckObserver event sequencing', () => {
+  let dir: string | null = null;
+  let posts: Array<{ event: string; body: Record<string, unknown> }> = [];
+
+  beforeEach(() => {
+    posts = [];
+    delete process.env.AGENTDECK_PORT;
+    vi.stubGlobal('fetch', async (url: unknown, init?: { body?: string }) => {
+      const u = String(url);
+      if (u.endsWith('/health')) return { ok: true };
+      const hook = u.match(/\/hooks\/([a-z_]+)$/);
+      if (hook && init?.body) {
+        posts.push({ event: hook[1], body: JSON.parse(init.body) });
+        return { ok: true };
+      }
+      return { ok: false };
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = null;
+  });
+
+  /** Load a fresh copy of the plugin (module-level port cache resets per file). */
+  async function observer() {
+    dir = mkdtempSync(join(tmpdir(), 'agentdeck-oc-run-'));
+    const file = join(dir, 'agentdeck.mjs');
+    writeFileSync(file, opencodePluginSource(), 'utf-8');
+    const mod = await import(pathToFileURL(file).href);
+    return mod.AgentDeckObserver({ directory: '/tmp/proj', client: null });
+  }
+
+  /** post() is fire-and-forget through a promise chain — let it drain. */
+  const flush = () => new Promise((r) => setTimeout(r, 20));
+
+  const userMessage = {
+    type: 'message.updated',
+    properties: { info: { id: 'm1', sessionID: 's1', role: 'user', text: 'hi' } },
+  };
+
+  it('posts one user_prompt_submit per user message, including after the turn settles', async () => {
+    const { event } = await observer();
+
+    await event({ event: userMessage });
+    await flush();
+    await event({ event: { type: 'session.idle', properties: { sessionID: 's1' } } });
+    await flush();
+    // OpenCode re-emits message.updated for the settled user message. Before
+    // the dedup entry survived session.idle this re-posted user_prompt_submit,
+    // flipping the row back to processing and opening a phantom turn — with
+    // no session.idle left to close it, the row read WORKING for 30 minutes.
+    await event({ event: userMessage });
+    await flush();
+
+    expect(posts.filter((p) => p.event === 'opencode_user_prompt_submit')).toHaveLength(1);
+    expect(posts.filter((p) => p.event === 'opencode_stop')).toHaveLength(1);
+    // The daemon's last word on this session must be the stop.
+    expect(posts[posts.length - 1].event).toBe('opencode_stop');
+  });
+
+  it('still reports a genuine second turn on a new user message', async () => {
+    const { event } = await observer();
+
+    await event({ event: userMessage });
+    await flush();
+    await event({ event: { type: 'session.idle', properties: { sessionID: 's1' } } });
+    await flush();
+    await event({
+      event: {
+        type: 'message.updated',
+        properties: { info: { id: 'm2', sessionID: 's1', role: 'user', text: 'again' } },
+      },
+    });
+    await flush();
+
+    const submits = posts.filter((p) => p.event === 'opencode_user_prompt_submit');
+    expect(submits).toHaveLength(2);
+    expect(submits[1].body.prompt).toBe('again');
   });
 });
 
