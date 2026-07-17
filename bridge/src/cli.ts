@@ -909,11 +909,24 @@ program
     const daemonTarget = resolveEsp32OtaDaemonTarget(target);
     const firmwarePath = resolveEsp32FirmwarePath(target, opts.env, opts.firmware);
     log(`Uploading ${firmwarePath} to ${daemonTarget} via daemon :${port}...`);
-    const { statusCode, body } = await postJsonWithTimeout<Record<string, any>>(
+    let { statusCode, body } = await postJsonWithTimeout<Record<string, any>>(
       `http://127.0.0.1:${port}/esp32/ota`,
       { target: daemonTarget, firmwarePath },
       15 * 60_000,
     );
+    if (body.ok === false && String(body.error ?? '').startsWith('firmware_unreadable')) {
+      // Sandboxed Swift daemon can't read files outside its container —
+      // resend with the image inlined instead of failing over to a manual
+      // daemon swap.
+      log('Daemon cannot read the firmware path (sandbox) — resending inline...');
+      const { readFileSync } = await import('fs');
+      const firmwareB64 = readFileSync(firmwarePath).toString('base64');
+      ({ statusCode, body } = await postJsonWithTimeout<Record<string, any>>(
+        `http://127.0.0.1:${port}/esp32/ota`,
+        { target: daemonTarget, firmwareB64 },
+        15 * 60_000,
+      ));
+    }
     if (statusCode < 200 || statusCode >= 300 || body.ok === false) {
       throw new Error(String(body.error ?? `HTTP ${statusCode}`));
     }

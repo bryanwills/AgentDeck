@@ -702,6 +702,13 @@ final class DaemonServer {
     /// (board / ip / version / buildHash). Evicted on close + TTL like the
     /// other volunteer rosters.
     private var cachedWifiEsp32: [UUID: StreamDeckRegistration] = [:]
+    /// Live WS connection objects for WiFi ESP32 boards, keyed like
+    /// `cachedWifiEsp32`. OTA needs to write frames to a specific board's
+    /// socket; every other roster consumer only reads the registration dict.
+    private var wifiEsp32Conns: [UUID: WebSocketConnection] = [:]
+    /// WiFi OTA driver (esp32_ota_begin/chunk/end over the board's WS) —
+    /// Node-daemon parity for `POST /esp32/ota`. Wired in setupWifiOta().
+    private let esp32Ota = ESP32WifiOtaManager()
     /// Foundation Models per-session activity summaries, keyed by session id.
     /// `sig` invalidates the cache when the session's tool/state/question changes.
     /// Filled asynchronously; the next sessions_list broadcast surfaces it.
@@ -1021,6 +1028,7 @@ final class DaemonServer {
 
         // 1. Setup HTTP routes + Bonjour, then start unified server
         await setupHTTPRoutes()
+        setupWifiOta()
         await wsServer.setHTTPHandler(httpServer)
 
         // Bonjour mDNS advertisement on the same listener
@@ -1631,6 +1639,60 @@ final class DaemonServer {
             return .json(["status": "standing_down"])
         }
 
+        // WiFi OTA push to a connected ESP32 board (Node parity:
+        // POST /esp32/ota in daemon-server.ts). Body:
+        //   { target, firmwarePath? , firmwareB64? }
+        // `firmwarePath` is tried first (CLI sends it); the sandbox denies
+        // reads outside the container, so callers hitting the Swift daemon
+        // fall back to inlining the image as `firmwareB64` (the CLI does this
+        // automatically on the firmware_unreadable error).
+        await httpServer.post("/esp32/ota") { [weak self] request in
+            guard let self else {
+                return .json(["ok": false, "error": "daemon unavailable"], status: 500)
+            }
+            guard let body = request.body,
+                  let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
+                  let target = json["target"] as? String, !target.isEmpty else {
+                return .json(["ok": false, "error": "target is required"], status: 400)
+            }
+
+            let firmware: Data
+            if let b64 = json["firmwareB64"] as? String {
+                guard let decoded = Data(base64Encoded: b64), !decoded.isEmpty else {
+                    return .json(["ok": false, "error": "firmwareB64 is not valid base64"], status: 400)
+                }
+                firmware = decoded
+            } else if let path = json["firmwarePath"] as? String, !path.isEmpty {
+                guard let read = FileManager.default.contents(atPath: path), !read.isEmpty else {
+                    // Distinctive token — the CLI retries with firmwareB64 on it.
+                    return .json([
+                        "ok": false,
+                        "error": "firmware_unreadable: \(path) (sandboxed daemon cannot read outside its container — resend with firmwareB64)",
+                    ], status: 422)
+                }
+                firmware = read
+            } else {
+                return .json(["ok": false, "error": "firmwarePath or firmwareB64 is required"], status: 400)
+            }
+
+            do {
+                let result = try await self.esp32Ota.performOta(target: target, firmware: firmware)
+                return .json([
+                    "ok": true,
+                    "target": result.target,
+                    "board": result.board,
+                    "bytes": result.bytes,
+                    "chunks": result.chunks,
+                    "reconnectResends": result.reconnectResends,
+                    "md5": result.md5,
+                ] as [String: Any])
+            } catch {
+                let message = (error as? ESP32WifiOtaManager.OtaError)?.errorDescription
+                    ?? error.localizedDescription
+                return .json(["ok": false, "error": message], status: 500)
+            }
+        }
+
         // Manual APME task-close endpoint — mirrors the Node bridge
         // POST /task/close route. Drives `closeTaskExternal` on the Swift
         // collector. Body: { sessionId?: string, signal?: "manual",
@@ -2236,6 +2298,10 @@ final class DaemonServer {
             handleWifiEsp32DeviceInfo(cmd, from: conn)
             return
         }
+        // WiFi OTA acks/errors from a board mid-transfer — routed by otaId.
+        if esp32Ota.handleReply(cmd) {
+            return
+        }
         // Per-session timeline poll: reply (to this requester only) with the
         // session's recent entries so a device that connected mid-session can fill
         // its Detail view without waiting for live events.
@@ -2372,6 +2438,7 @@ final class DaemonServer {
             DaemonLogger.shared.debug("Daemon", "Evicted tui registration: WS closed")
             scheduleStateBroadcast()
         }
+        wifiEsp32Conns.removeValue(forKey: conn.id)
         if let removed = cachedWifiEsp32.removeValue(forKey: conn.id),
            let dev = removed.devices.first {
             // Flap damping: a board reopens its socket ~3 s after FIN, so do
@@ -3500,6 +3567,11 @@ final class DaemonServer {
         if let version = cmd["version"] as? String { info["version"] = version }
         if let hash = cmd["buildHash"] as? String { info["buildHash"] = hash }
         if let rev = cmd["protocolRevision"] as? Int { info["protocolRevision"] = rev }
+        // OTA capability flags — the /esp32/ota precheck reads these from the
+        // registration (Node parity: registerWifiEsp32 keeps them too).
+        if let ota = cmd["otaSupported"] as? Bool { info["otaSupported"] = ota }
+        if let slot = cmd["otaSlotSize"] as? Int { info["otaSlotSize"] = slot }
+        if let reason = cmd["otaReason"] as? String { info["otaReason"] = reason }
         let identity = wifiEsp32Identity(board: board, ip: info["ip"] as? String)
         let identityPresent = wifiEsp32IdentityPresent(identity)
         cachedWifiEsp32[conn.id] = StreamDeckRegistration(
@@ -3507,6 +3579,7 @@ final class DaemonServer {
             devices: [info],
             updatedAt: Date()
         )
+        wifiEsp32Conns[conn.id] = conn
         // A reconnect that lands within the flap-damp grace cancels the pending
         // eviction: the board never really left, so no roster broadcast. Keyed
         // by board+ip so a fresh connection id doesn't read as a new device.
@@ -3556,6 +3629,73 @@ final class DaemonServer {
             return d
         }
         return ["available": true, "devices": devices]
+    }
+
+    // MARK: - WiFi OTA (Node parity: performWifiEsp32Ota in daemon-server.ts)
+
+    /// The target's CURRENTLY-registered live socket. Re-resolved on every
+    /// OTA send because a board re-registers a fresh connection after the
+    /// WiFi-flash coexistence drop; when the old socket's close hasn't been
+    /// processed yet, prefer the newest registration.
+    private func liveWifiEsp32Connection(forKey key: String) -> WebSocketConnection? {
+        var best: (conn: WebSocketConnection, updatedAt: Date)?
+        for (connId, reg) in cachedWifiEsp32 {
+            guard let dev = reg.devices.first,
+                  let board = dev["board"] as? String,
+                  wifiEsp32Identity(board: board, ip: dev["ip"] as? String) == key,
+                  let conn = wifiEsp32Conns[connId], !conn.isDisconnected else { continue }
+            if best == nil || reg.updatedAt > best!.updatedAt {
+                best = (conn, reg.updatedAt)
+            }
+        }
+        return best?.conn
+    }
+
+    private func setupWifiOta() {
+        esp32Ota.resolveTarget = { [weak self] target in
+            guard let self else { throw ESP32WifiOtaManager.OtaError.noTarget(target) }
+            // `target` may be a board name, a "board:ip" key, or a bare IP —
+            // dedup by identity so the old and new socket of one flapping
+            // board never read as an ambiguous pair.
+            var matches: [String: ESP32WifiOtaManager.ResolvedTarget] = [:]
+            for (connId, reg) in self.cachedWifiEsp32 {
+                guard let dev = reg.devices.first,
+                      let board = dev["board"] as? String,
+                      let conn = self.wifiEsp32Conns[connId], !conn.isDisconnected else { continue }
+                let ip = dev["ip"] as? String
+                let key = self.wifiEsp32Identity(board: board, ip: ip)
+                guard key == target || board == target || ip == target else { continue }
+                matches[key] = ESP32WifiOtaManager.ResolvedTarget(
+                    key: key,
+                    board: board,
+                    otaSupported: dev["otaSupported"] as? Bool ?? false,
+                    otaSlotSize: dev["otaSlotSize"] as? Int,
+                    otaReason: dev["otaReason"] as? String)
+            }
+            guard let only = matches.first?.value else {
+                throw ESP32WifiOtaManager.OtaError.noTarget(target)
+            }
+            guard matches.count == 1 else {
+                throw ESP32WifiOtaManager.OtaError.ambiguousTarget(target, matches.keys.sorted())
+            }
+            return only
+        }
+        esp32Ota.liveConnection = { [weak self] key in
+            self?.liveWifiEsp32Connection(forKey: key)
+        }
+        esp32Ota.onTransferComplete = { [weak self] key in
+            guard let self else { return }
+            // Drop the roster row now — the board reboots into the new image
+            // and re-registers fresh, so a stale pre-OTA buildHash must not
+            // linger through the reboot gap.
+            for (connId, reg) in self.cachedWifiEsp32 {
+                guard let dev = reg.devices.first,
+                      let board = dev["board"] as? String,
+                      self.wifiEsp32Identity(board: board, ip: dev["ip"] as? String) == key else { continue }
+                self.cachedWifiEsp32.removeValue(forKey: connId)
+                self.wifiEsp32Conns.removeValue(forKey: connId)
+            }
+        }
     }
 
     /// Expire the Stream Deck cache when the plugin has gone silent for

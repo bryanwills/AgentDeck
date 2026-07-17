@@ -156,6 +156,17 @@ actor HTTPServer {
         }
     }
 
+    /// True when the (possibly partial) request buffer's request line targets
+    /// POST /esp32/ota. Only the first line is examined; a buffer too short
+    /// to contain the full request line yet returns false, which is safe —
+    /// the default cap is far above any request-line length, so the check
+    /// re-runs with more data before the cap can trigger.
+    private static func requestLineIsEsp32Ota(_ data: Data) -> Bool {
+        let prefix = data.prefix(64)
+        guard let line = String(data: prefix, encoding: .utf8) else { return false }
+        return line.hasPrefix("POST /esp32/ota ") || line.hasPrefix("POST /esp32/ota/")
+    }
+
     private static func completeRequestIfReady(
         _ data: Data,
         isComplete: Bool,
@@ -171,7 +182,11 @@ actor HTTPServer {
         }
 
         // Cap at 4 MB to bound the listener's per-connection memory.
-        if data.count >= 4 * 1024 * 1024 {
+        // Exception: /esp32/ota carries a base64-inlined firmware image
+        // (sandbox blocks path reads) — a 16 MB-class board firmware is
+        // ~8 MB, ~10.7 MB as base64, so that one route gets a 24 MB cap.
+        let cap = requestLineIsEsp32Ota(data) ? 24 * 1024 * 1024 : 4 * 1024 * 1024
+        if data.count >= cap {
             completion(data)
             return true
         }
