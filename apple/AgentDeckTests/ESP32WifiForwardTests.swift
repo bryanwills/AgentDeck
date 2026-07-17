@@ -103,6 +103,36 @@ final class ESP32WifiForwardTests: XCTestCase {
         XCTAssertEqual(project, String(repeating: "가", count: 13))
     }
 
+    /// An ESP32 board is unregistered for the first few hundred ms of every
+    /// connection (device_info is announced only after its WS opens), so the
+    /// shaping path must hold with `deviceInfo: nil` — that is the state the
+    /// connect burst actually sees. Keying board-vs-dashboard on registration
+    /// instead sent boards the raw 100-entry history (115 KB, 28× their 4 KB
+    /// line buffer), killing the socket before the announce landed: the board
+    /// reconnected, lost the race again, and never registered (round_amoled's
+    /// 5-second flap). Every shaped frame must fit the smallest line buffer.
+    func testUnregisteredBoardFramesFitSmallestLineBuffer() {
+        let entries: [[String: Any]] = (0..<100).map { i in
+            ["ts": Double(i), "type": "chat_start",
+             "raw": "\(i)-" + String(repeating: "가", count: 60),
+             "detail": String(repeating: "나", count: 60)]
+        }
+        let events: [[String: Any]] = [
+            ["type": "timeline_history", "entries": entries],
+            ["type": "sessions_list", "sessions": (0..<14).map { i in
+                ["id": "s\(i)", "alive": true, "agentType": "claude", "state": "processing",
+                 "projectName": String(repeating: "다", count: 20)] }],
+        ]
+        for ev in events {
+            guard let shaped = ESP32Serial.wifiEsp32Forward(ev, deviceInfo: nil),
+                  let data = try? JSONSerialization.data(withJSONObject: shaped) else {
+                return XCTFail("\(ev["type"] ?? "?") must be forwarded for an unregistered board")
+            }
+            XCTAssertLessThan(data.count, 4096,
+                              "\(ev["type"] ?? "?") shaped to \(data.count)B — overruns the 4096B board line buffer")
+        }
+    }
+
     /// timeline_history is byte-budgeted, not just row-capped — a busy
     /// afternoon of CJK entries made the 64-row frame ~37KB, past every
     /// board's line buffer (serial: silent discard; WiFi: socket-killing).

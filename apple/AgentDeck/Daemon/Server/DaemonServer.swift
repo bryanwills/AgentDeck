@@ -2385,7 +2385,17 @@ final class DaemonServer {
             // (state/usage/sessions/display), which never includes a 100-entry
             // timeline dump — the largest single frame and the one that most
             // reliably overran their buffer and flapped the socket.
-            if self.cachedWifiEsp32[conn.id] == nil {
+            //
+            // The board test is `isEsp32` (tagged from the upgrade URL), NOT
+            // "has it registered yet": a board announces device_info only after
+            // its WS opens, so it is still unregistered when this step runs
+            // ~300 ms into the burst. Keying the branch on registration sent
+            // those boards the raw 100-entry dump (measured: 115 KB — 28× the
+            // 4 KB line buffer), which killed the socket BEFORE the announce
+            // arrived; the board then reconnected, lost the race again, and
+            // never once reached the registered branch. That self-perpetuating
+            // loop is the round_amoled 5-second flap.
+            if self.cachedWifiEsp32[conn.id] == nil && !conn.isEsp32 {
                 let recentEntries = await self.timelineStore.getRecent(100)
                 let historyEvent: [String: Any] = [
                     "type": "timeline_history",
@@ -2396,7 +2406,7 @@ final class DaemonServer {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !conn.isDisconnected else { return }
             } else {
-                // Identified ESP32 display board: give it the SHRUNK history
+                // ESP32 display board: give it the SHRUNK history
                 // (prepareForSerial caps entries to the 64-row firmware ring and
                 // byte-caps raw/detail) so its cards/ticker are meaningful right
                 // after (re)connect instead of waiting for the next milestone.
