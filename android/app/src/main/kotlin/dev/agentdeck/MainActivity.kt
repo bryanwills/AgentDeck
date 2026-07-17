@@ -258,7 +258,9 @@ fun TabletDashboard(
             // Phase 1: collect bridges, connect immediately if daemon found
             withTimeoutOrNull(6000) {
                 discovery.discover().collect { bridges ->
-                    val daemon = bridges.firstOrNull { it.agentType == "daemon" }
+                    val daemon = bridges.firstOrNull {
+                        it.agentType == "daemon" && it.port == BridgeConstants.WS_PORT
+                    }
                     if (daemon != null) {
                         mainDebug { "mDNS auto-connect (daemon): ${daemon.name} at ${daemon.wsUrl()}" }
                         connection.connect(daemon.wsUrl(), daemon.fallbackWsUrl())
@@ -288,7 +290,9 @@ fun TabletDashboard(
         if (connectionStatus == ConnectionStatus.CONNECTED) return@LaunchedEffect
         val discovery = BridgeDiscovery(context)
         discovery.discover().collect { bridges ->
-            val daemon = bridges.firstOrNull { it.agentType == "daemon" }
+            val daemon = bridges.firstOrNull {
+                it.agentType == "daemon" && it.port == BridgeConstants.WS_PORT
+            }
             val cur = connection.url.value
             val curIsLocalOrNone = cur == null ||
                 cur.contains("127.0.0.1") || cur.contains("localhost")
@@ -309,7 +313,9 @@ fun TabletDashboard(
             val discovery = BridgeDiscovery(context)
             withTimeoutOrNull(6000) {
                 discovery.discover().collect { bridges ->
-                    val daemon = bridges.firstOrNull { it.agentType == "daemon" }
+                    val daemon = bridges.firstOrNull {
+                        it.agentType == "daemon" && it.port == BridgeConstants.WS_PORT
+                    }
                     if (daemon != null) {
                         mainDebug { "Re-discover (daemon): ${daemon.name} at ${daemon.wsUrl()}" }
                         connection.connect(daemon.wsUrl(), daemon.fallbackWsUrl())

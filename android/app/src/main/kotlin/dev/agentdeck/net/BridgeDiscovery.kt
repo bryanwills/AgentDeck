@@ -8,6 +8,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -113,67 +115,178 @@ class BridgeDiscovery(context: Context) {
             val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
             val bridges = mutableMapOf<String, DiscoveredBridge>()
 
+            // Android NsdManager allows only one in-flight resolveService() per
+            // process on many platform versions; a second concurrent call fails
+            // immediately with errorCode=3 (FAILURE_ALREADY_ACTIVE). Stale
+            // _agentdeck._tcp records from past session bridges (e.g. 9121+)
+            // can race the live daemon's advertisement and silently lose this
+            // race, leaving the live daemon unresolved. We (a) pre-filter by
+            // TXT port so stale services never even reach resolve, (b) prefer
+            // a TXT-only fast path that skips resolve entirely when TXT already
+            // carries ip+port, and (c) serialize the remaining resolves with a
+            // 250ms retry on errorCode=3.
+            val resolveLock = Any()
+            val resolveQueue = ArrayDeque<NsdServiceInfo>()
+            val queuedNames = mutableSetOf<String>()
+            var resolveInFlight = false
+
+            fun tryEmit() {
+                trySend(bridges.values.toList())
+            }
+
+            fun startNextResolve() {
+                synchronized(resolveLock) {
+                    if (resolveInFlight) return
+                    val next = resolveQueue.removeFirstOrNull() ?: return
+                    resolveInFlight = true
+
+                    val listener = object : NsdManager.ResolveListener {
+                        override fun onResolveFailed(si: NsdServiceInfo, errorCode: Int) {
+                            synchronized(resolveLock) { resolveInFlight = false }
+                            if (errorCode == 3 /* FAILURE_ALREADY_ACTIVE */) {
+                                // Another resolve (possibly leaked getaddrinfo on Lenovo
+                                // Android 11) still holds the slot. Re-queue at head and
+                                // retry after a short backoff so the live daemon eventually
+                                // resolves instead of being silently dropped.
+                                Log.w(TAG, "Resolve busy (errorCode=3) for ${si.serviceName} — retrying in 250ms")
+                                scope.launch {
+                                    delay(250)
+                                    synchronized(resolveLock) {
+                                        if (queuedNames.add(si.serviceName)) {
+                                            resolveQueue.addFirst(si)
+                                        }
+                                        startNextResolve()
+                                    }
+                                }
+                            } else {
+                                Log.w(TAG, "Resolve failed for ${si.serviceName}: errorCode=$errorCode")
+                                queuedNames.remove(si.serviceName)
+                                startNextResolve()
+                            }
+                        }
+
+                        override fun onServiceResolved(si: NsdServiceInfo) {
+                            synchronized(resolveLock) {
+                                resolveInFlight = false
+                                queuedNames.remove(si.serviceName)
+                            }
+                            val resolvedHost = si.host?.hostAddress
+                            val token = try {
+                                si.attributes["token"]?.let { String(it, Charsets.UTF_8) }
+                            } catch (_: Exception) { null }
+                            val agentType = try {
+                                si.attributes["agent"]?.let { String(it, Charsets.UTF_8) }
+                            } catch (_: Exception) { null }
+                            val txtIp = try {
+                                si.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
+                            } catch (_: Exception) { null }
+
+                            val host = txtIp
+                                ?.takeIf(::isUsableBridgeHost)
+                                ?: resolvedHost?.takeIf(::isUsableBridgeHost)
+                                ?: run { startNextResolve(); return }
+                            val fallbackHost = resolvedHost
+                                ?.takeIf { it != host && isUsableBridgeHost(it) }
+                            val bridge = DiscoveredBridge(
+                                name = si.serviceName,
+                                host = host,
+                                port = si.port,
+                                token = token,
+                                agentType = agentType,
+                                fallbackHost = fallbackHost,
+                            )
+                            discoveryDebug { "Resolved ${si.serviceName} -> ${bridge.host}:${bridge.port} (agent=$agentType)" }
+                            bridges[si.serviceName] = bridge
+                            tryEmit()
+                            startNextResolve()
+                        }
+                    }
+                    try {
+                        nsdManager.resolveService(next, listener)
+                    } catch (e: Exception) {
+                        // NsdManager throws when the same listener is reused or
+                        // discovery is gone. Re-queue and try the next.
+                        resolveInFlight = false
+                        queuedNames.remove(next.serviceName)
+                        Log.w(TAG, "resolveService threw for ${next.serviceName}: ${e.message}")
+                        startNextResolve()
+                    }
+                }
+            }
+
+            fun enqueueResolve(info: NsdServiceInfo) {
+                synchronized(resolveLock) {
+                    if (!queuedNames.add(info.serviceName)) return
+                    resolveQueue.addLast(info)
+                    startNextResolve()
+                }
+            }
+
             val discoveryListener = object : NsdManager.DiscoveryListener {
                 override fun onDiscoveryStarted(serviceType: String) {}
 
                 override fun onDiscoveryStopped(serviceType: String) {}
 
                 override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                    if (serviceInfo.serviceType.contains("_agentdeck")) {
-                        // Each resolveService() call needs its own listener —
-                        // NsdManager throws if a listener is reused while active
-                        val resolveListener = object : NsdManager.ResolveListener {
-                            override fun onResolveFailed(si: NsdServiceInfo, errorCode: Int) {
-                                Log.w(TAG, "Resolve failed for ${si.serviceName}: errorCode=$errorCode")
-                            }
+                    if (!serviceInfo.serviceType.contains("_agentdeck")) return
 
-                            override fun onServiceResolved(si: NsdServiceInfo) {
-                                val resolvedHost = si.host?.hostAddress
-                                // Parse TXT records for token, agentType, and the advertised LAN ip.
-                                // The TXT `ip` is preferred over the NSD-resolved host: the daemon
-                                // selects its default-route LAN address explicitly, whereas the NSD
-                                // hostname resolve can yield a secondary/unroutable interface on
-                                // dual-homed hosts. Both fall back to each other.
-                                val token = try {
-                                    si.attributes["token"]?.let { String(it, Charsets.UTF_8) }
-                                } catch (_: Exception) { null }
-                                val agentType = try {
-                                    si.attributes["agent"]?.let { String(it, Charsets.UTF_8) }
-                                } catch (_: Exception) { null }
-                                val txtIp = try {
-                                    si.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
-                                } catch (_: Exception) { null }
-
-                                val host = txtIp
-                                    ?.takeIf(::isUsableBridgeHost)
-                                    ?: resolvedHost?.takeIf(::isUsableBridgeHost)
-                                    ?: return
-                                // Keep the NSD-resolved address as a fallback when it's a distinct,
-                                // non-link-local host. When `host` came from the TXT `ip` but that
-                                // interface's return path is broken (dual-homed daemon), the
-                                // connection layer fails over to this resolved address.
-                                val fallbackHost = resolvedHost
-                                    ?.takeIf { it != host && isUsableBridgeHost(it) }
-                                val bridge = DiscoveredBridge(
-                                    name = si.serviceName,
-                                    host = host,
-                                    port = si.port,
-                                    token = token,
-                                    agentType = agentType,
-                                    fallbackHost = fallbackHost,
-                                )
-                                discoveryDebug { "Resolved ${si.serviceName} -> ${bridge.host}:${bridge.port} (agent=$agentType)" }
-                                bridges[si.serviceName] = bridge
-                                trySend(bridges.values.toList())
-                            }
+                    // Pre-filter stale session-bridge advertisements. Only the
+                    // daemon hub advertises on BridgeConstants.WS_PORT; past
+                    // session bridges (or older daemons) advertised on 9121+
+                    // and their mDNS records can linger in NSD cache beyond TTL.
+                    val txtPort = try {
+                        serviceInfo.attributes["port"]
+                            ?.let { String(it, Charsets.UTF_8).toIntOrNull() }
+                    } catch (_: Exception) { null }
+                    if (txtPort != null && txtPort != BridgeConstants.WS_PORT) {
+                        discoveryDebug {
+                            "Skip ${serviceInfo.serviceName} (TXT port=$txtPort ≠ ${BridgeConstants.WS_PORT})"
                         }
-                        nsdManager.resolveService(serviceInfo, resolveListener)
+                        return
                     }
+
+                    val txtIp = try {
+                        serviceInfo.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
+                    } catch (_: Exception) { null }
+                    val token = try {
+                        serviceInfo.attributes["token"]?.let { String(it, Charsets.UTF_8) }
+                    } catch (_: Exception) { null }
+                    val agentType = try {
+                        serviceInfo.attributes["agent"]?.let { String(it, Charsets.UTF_8) }
+                    } catch (_: Exception) { null }
+
+                    // Fast path: TXT provides ip (+port). Emit immediately and
+                    // skip resolveService() entirely — this avoids the platform's
+                    // 1-in-flight-resolve limit that otherwise makes the live
+                    // daemon lose to a stale service in a discovery race.
+                    if (txtIp != null && isUsableBridgeHost(txtIp)) {
+                        val port = txtPort ?: BridgeConstants.WS_PORT
+                        val bridge = DiscoveredBridge(
+                            name = serviceInfo.serviceName,
+                            host = txtIp,
+                            port = port,
+                            token = token,
+                            agentType = agentType,
+                            fallbackHost = null,
+                        )
+                        discoveryDebug { "TXT-resolved ${serviceInfo.serviceName} -> $txtIp:$port (agent=$agentType)" }
+                        bridges[serviceInfo.serviceName] = bridge
+                        tryEmit()
+                        return
+                    }
+
+                    // Slow path: TXT missing ip. Fall back to resolveService,
+                    // serialized through the queue above so concurrent finds
+                    // don't trip FAILURE_ALREADY_ACTIVE.
+                    enqueueResolve(serviceInfo)
                 }
 
                 override fun onServiceLost(serviceInfo: NsdServiceInfo) {
                     bridges.remove(serviceInfo.serviceName)
-                    trySend(bridges.values.toList())
+                    synchronized(resolveLock) {
+                        queuedNames.remove(serviceInfo.serviceName)
+                    }
+                    tryEmit()
                 }
 
                 override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
