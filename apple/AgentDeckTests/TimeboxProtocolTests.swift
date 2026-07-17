@@ -62,63 +62,44 @@ final class TimeboxProtocolTests: XCTestCase {
         XCTAssertEqual(viaRGB, viaPayload)
     }
 
-    // MARK: - Micro glyphs (Swift mirror of micro-glyphs.ts)
+    // MARK: - Timebox Mini Agent Beacon
 
     private func pixel(_ buf: [UInt8], _ x: Int, _ y: Int) -> [UInt8] {
         let i = (y * 11 + x) * 3
         return [buf[i], buf[i + 1], buf[i + 2]]
     }
 
-    /// The Claude robot glyph must match the bridge's micro-glyphs.ts colors/positions.
-    func testMicroGlyphRobot() {
+    func testBeaconUsesOfficialClaudeMaskInsideStatusRail() {
         var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
-        MicroGlyphs.paint(&buf, creature: .octopus, state: .idle, animFrame: 0)
-        XCTAssertEqual(pixel(buf, 5, 3), [235, 130, 90])   // terracotta body
-        XCTAssertEqual(pixel(buf, 3, 3), [0, 0, 0])        // dark cutout eye (idle, rows 3–4)
-        XCTAssertEqual(pixel(buf, 7, 4), [0, 0, 0])        // dark cutout eye (idle)
-        XCTAssertEqual(pixel(buf, 0, 5), [235, 130, 90])   // full-width side arm
-        XCTAssertEqual(pixel(buf, 0, 0), [0, 0, 0])        // transparent → untouched
+        MicroGlyphs.paintBeacon(&buf, creature: .octopus, aggregate: .idle, animFrame: 0)
+        XCTAssertNotEqual(pixel(buf, 5, 3), [2, 6, 10])
+        XCTAssertEqual(pixel(buf, 5, 5), [193, 107, 74]) // 0.82 × Claude terracotta
+        XCTAssertNotEqual(pixel(buf, 0, 0), [2, 6, 10]) // idle status corner
     }
 
-    /// While working, the robot's eyes light up cyan (activity cue). animFrame 4
-    /// selects the `work` frame ((4 >> 2) & 1 == 1).
-    func testMicroGlyphRobotWorkingEyesLit() {
+    func testBeaconOpenCodeHollowAndOpenClawEyes() {
+        var openCode = [UInt8](repeating: 0, count: 11 * 11 * 3)
+        var openClaw = [UInt8](repeating: 0, count: 11 * 11 * 3)
+        MicroGlyphs.paintBeacon(&openCode, creature: .opencode, aggregate: .idle, animFrame: 0)
+        MicroGlyphs.paintBeacon(&openClaw, creature: .crayfish, aggregate: .idle, animFrame: 0)
+        XCTAssertEqual(pixel(openCode, 5, 5), [2, 6, 10])
+        XCTAssertEqual(pixel(openClaw, 4, 4), [0, 188, 167])
+        XCTAssertEqual(pixel(openClaw, 7, 4), [0, 188, 167])
+    }
+
+    func testBeaconProcessingMovesOnlyPerimeter() {
+        var first = [UInt8](repeating: 0, count: 11 * 11 * 3)
+        var later = [UInt8](repeating: 0, count: 11 * 11 * 3)
+        MicroGlyphs.paintBeacon(&first, creature: .codex, aggregate: .processing, animFrame: 0)
+        MicroGlyphs.paintBeacon(&later, creature: .codex, aggregate: .processing, animFrame: 12)
+        for y in 1...9 { for x in 1...9 { XCTAssertEqual(pixel(first, x, y), pixel(later, x, y)) } }
+        XCTAssertNotEqual(Array(first.prefix(11 * 3)), Array(later.prefix(11 * 3)))
+    }
+
+    func testBeaconStandbyTide() {
         var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
-        MicroGlyphs.paint(&buf, creature: .octopus, state: .working, animFrame: 4)
-        XCTAssertEqual(pixel(buf, 3, 3), [120, 226, 255])  // lit cyan eye
-        XCTAssertEqual(pixel(buf, 7, 3), [120, 226, 255])
+        MicroGlyphs.paintBeacon(&buf, creature: nil, aggregate: .idle, animFrame: 0)
+        XCTAssertNotEqual(pixel(buf, 5, 6), [2, 6, 10])
     }
-
-    /// Codex glyph carries the pure-white `>`/`_` terminal-prompt marking on the cloud.
-    func testMicroGlyphCodexPrompt() {
-        var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
-        MicroGlyphs.paint(&buf, creature: .codex, state: .idle, animFrame: 0)
-        XCTAssertEqual(pixel(buf, 2, 4), [255, 255, 255])  // `>` chevron (pure white, bold)
-        XCTAssertEqual(pixel(buf, 5, 8), [255, 255, 255])  // `_` cursor
-        XCTAssertEqual(pixel(buf, 0, 4), [86, 92, 220])    // deeper indigo cloud body
-    }
-
-    /// Antigravity uses the reference rainbow peak/arc with a transparent center hollow
-    /// (not a black cutout — the status field shows through the gap in the arc).
-    func testMicroGlyphAntigravityPeak() {
-        var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
-        MicroGlyphs.paint(&buf, creature: .antigravity, state: .idle, animFrame: 0)
-        XCTAssertEqual(pixel(buf, 4, 1), [245, 203, 36])    // yellow peak
-        XCTAssertEqual(pixel(buf, 5, 0), [255, 132, 16])    // orange peak tip
-        XCTAssertEqual(pixel(buf, 3, 2), [92, 214, 77])     // green left slope
-        XCTAssertEqual(pixel(buf, 5, 6), [0, 0, 0])         // central hollow (transparent, untouched buffer)
-        XCTAssertEqual(pixel(buf, 9, 8), [36, 126, 255])    // blue right foot
-    }
-
-    /// Status-field colors match micro-glyphs.ts microStatusBg.
-    func testMicroStatusBg() {
-        // processing now breathes: p = 0.68 + 0.32·((sin(0)+1)/2) = 0.84 →
-        // (UInt8(16·0.84), UInt8(40·0.84), UInt8(88·0.84)) = (13, 33, 73).
-        XCTAssertEqual(tupleBytes(MicroGlyphs.statusBg(.processing, animFrame: 0)), [13, 33, 73])
-        XCTAssertEqual(tupleBytes(MicroGlyphs.statusBg(.idle, animFrame: 0)), [16, 56, 28])
-        XCTAssertEqual(tupleBytes(MicroGlyphs.statusBg(.error, animFrame: 0)), [64, 18, 18])
-    }
-
-    private func tupleBytes(_ t: (UInt8, UInt8, UInt8)) -> [UInt8] { [t.0, t.1, t.2] }
 }
 #endif

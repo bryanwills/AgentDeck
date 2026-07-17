@@ -221,21 +221,18 @@ actor IDotMatrixModule: DeviceModule {
             guard await ensureConnected(device) else { return }
         }
 
-        // Render the 64×64 scene locally and box-downscale to 32×32 (this is the
-        // standalone/hub path — when a CLI daemon is present IT drives iDotMatrix
-        // via its Python sync client and this module isn't started). Render EVERY
-        // tick: PixooRenderer's creature animation is wall-clock driven (Date()),
-        // so re-rendering advances it; we dedup on pixels below so a static frame
-        // costs no BLE write.
+        // Render the native 32×32 compact terrarium. The old completed-scene
+        // 64→32 reduction shrank official marks to 5–6 physical LEDs and merged
+        // their negative space. Render EVERY tick; pixel dedup below prevents a
+        // static frame from costing a BLE write.
         let state = currentDashboardState()
         let isDisconnectedPlaceholder = state.state == .disconnected && cachedAgentType == nil && cachedSessions.isEmpty
-        let rgb64 = isDisconnectedPlaceholder ? renderer.renderDisconnectedFrame() : renderer.render(dashboardState: state)
-        var rgb32 = Self.downscale64to32([UInt8](rgb64))
-        // Software brightness/contrast boost (mirrors the reference sync client's
-        // ImageEnhance.Brightness → Contrast); without it the panel reads dim.
-        // Canonical brightness = 1.6 — keep in sync: idotmatrix-daemon-sync.ts
-        // (--boost), sync.py (run_sync boost default), IDotMatrixModule.swift.
-        rgb32 = Self.boostBrightnessContrast(rgb32, brightness: 1.6, contrast: 1.2)
+        var rgb32 = isDisconnectedPlaceholder
+            ? Self.downscale64to32([UInt8](renderer.renderDisconnectedFrame()))
+            : [UInt8](renderer.renderCompact32(dashboardState: state))
+        // A restrained panel compensation keeps dark water visible without
+        // clipping the mark's edge coverage and hollow features.
+        rgb32 = Self.boostBrightnessContrast(rgb32, brightness: 1.22, contrast: 1.08)
         if rgb32 == lastPushedRGB { return }
         guard let png = Self.rgb32ToPNG(rgb32) else { return }
 
@@ -496,7 +493,8 @@ actor IDotMatrixModule: DeviceModule {
     /// Software brightness + contrast boost, replicating the reference iDotMatrix
     /// sync client (sync.py → PIL `ImageEnhance.Brightness` then `Contrast`). The
     /// panel's hardware brightness alone reads dim/washed-out at 32×32, so the
-    /// Python path boosts in software before upload; we mirror it for parity.
+    /// Python path boosts in software before upload; callers use the restrained
+    /// 1.22/1.08 profile to preserve small negative-space features.
     /// Order matters: brightness first, then contrast about the image's luminance
     /// mean (PIL's Contrast degenerate is the mean grayscale level).
     static func boostBrightnessContrast(_ rgb: [UInt8], brightness: Double, contrast: Double) -> [UInt8] {

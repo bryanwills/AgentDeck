@@ -38,8 +38,8 @@ import {
   WORLD_SIZE, ACTIVE_SIZE,
 } from './pixoo-camera.js';
 import {
-  MICRO_SIZE, microStatusBg, paintMicroGlyph,
-  type MicroCreature, type MicroState,
+  MICRO_SIZE, paintTimeboxBeacon,
+  type MicroCreature, type MicroAggregate,
 } from './micro-glyphs.js';
 
 const W = WORLD_SIZE;
@@ -677,11 +677,9 @@ function drawUsageHUD(
 }
 
 /**
- * Render the micro layout natively at 11×11 using hand-authored creature glyphs,
- * then nearest-scale into the `size`×`size` output. The Timebox Mini has 121 LEDs;
- * downscaling the 32×32 terrarium bottoms out at a fuzzy silhouette, so micro draws
- * a bold per-pixel glyph (octopus/jellyfish/opencode/crayfish) on a dark
- * status-color field. The device fetches `size=11` for a pixel-perfect 1:1 frame.
+ * Render the Timebox Mini's native 11×11 Agent Beacon, then nearest-scale into
+ * the requested output. A stable 9×9 official mark carries identity while the
+ * one-pixel perimeter rail alone carries state and motion.
  */
 function renderMicroFrame(
   outputBuf: Uint8Array,
@@ -706,34 +704,24 @@ function renderMicroFrame(
   // drives the background (no dominant creature instance exists for OpenClaw).
   const routing = sessions?.some((s) => s.agentType === 'openclaw' && s.state === 'processing') ?? false;
 
-  const aggregate: 'idle' | 'processing' | 'awaiting' | 'error' =
+  const aggregate: MicroAggregate =
     gatewayHasError || usagePct >= 90 ? 'error'
       : dominant?.state === 'awaiting' ? 'awaiting'
         : (dominant?.state === 'processing' || (!dominant && routing)) ? 'processing'
           : 'idle';
 
-  // Build the native 11×11 frame: dark status field + bold creature glyph.
   const base = new Uint8Array(MICRO_SIZE * MICRO_SIZE * 3);
-  const bg = microStatusBg(aggregate, animFrame);
-  for (let i = 0; i < MICRO_SIZE * MICRO_SIZE; i++) {
-    base[i * 3] = bg[0]; base[i * 3 + 1] = bg[1]; base[i * 3 + 2] = bg[2];
-  }
-
-  const glyphState: MicroState =
-    dominant?.state === 'processing' ? 'working'
-      : dominant?.state === 'awaiting' ? 'asking'
-        : 'idle';
+  let creature: MicroCreature | null = null;
   if (dominant) {
-    const creature: MicroCreature =
+    creature =
       dominant.agentType === 'antigravity' ? 'antigravity'
         : dominant.creatureType === 'jellyfish' ? 'jellyfish'
           : dominant.creatureType === 'opencode' ? 'opencode'
             : 'octopus';
-    paintMicroGlyph(base, creature, glyphState, animFrame);
   } else if (hasGateway) {
-    paintMicroGlyph(base, 'crayfish', routing ? 'working' : 'idle', animFrame);
+    creature = 'crayfish';
   }
-  // else: no creatures at all → the solid status field is the whole signal.
+  paintTimeboxBeacon(base, creature, aggregate, animFrame);
 
   // Scale the 11×11 base into the size×size output (1:1 when size === 11).
   for (let y = 0; y < size; y++) {
@@ -751,8 +739,8 @@ function renderMicroFrame(
  * Render a complete frame with camera system.
  * Returns RGB buffer.
  *
- * `layout='micro'` renders a single dominant creature on a status field for
- * tiny screens (Timebox Mini 11×11); `'standard'` is the full terrarium.
+ * `layout='micro'` renders the Timebox Mini Agent Beacon;
+ * `'standard'` is the full terrarium.
  */
 export function renderFrame(
   stateEvent: StateUpdateEvent | null,

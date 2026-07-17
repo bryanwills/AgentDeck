@@ -271,9 +271,14 @@ Each panel has its own pixel grid, dynamic range, and refresh rate. Designs MUST
 | macOS popup          | 360×520      | Vibrant blur, dark mode default     | Aquarium-deep, kelp accents        |
 | iPad full UI         | 2160×1620    | Touch, 44pt min targets             | Sand background, full color        |
 | Lenovo Tab dashboard | 1920×1200    | Always-on, slight burn-in risk      | Dark ink ground, calm motion       |
-| E-ink (D200H/Pixoo)  | 280×240 / 64²| 1-bit / 16-bit indexed              | High-contrast, hatch fills, mono   |
-| TC001 LED            | 32×8         | RGB matrix, blocky                  | Single-glyph status, mono palette  |
+| E-ink (D200H)        | 280×240      | 1-bit, slow refresh                 | High-contrast, hatch fills, mono   |
+| Pixoo64 LED          | 64×64        | LAN HTTP, fragile GIF buffer        | Terrarium + tiny device-side loop  |
+| iDotMatrix LED       | 32×32        | BLE, diffuser, constrained detail   | Native compact terrarium           |
+| Timebox Mini LED     | 11×11        | 121 LEDs, 4-bit packed color        | Official mark + perimeter status rail |
+| TC001 LED            | 32×8         | RGB matrix, blocky                  | Multi-mark status strip            |
 | ESP32 round AMOLED   | 466×466      | Round mask, low brightness          | Single creature centered           |
+
+Dot-matrix marks are generated from `design/brand/*.svg`; device code may tune color and surrounding motion, not invent replacement geometry. At 11×11, Timebox uses the dedicated Agent Beacon grammar: the 9×9 identity mark is stable and all motion lives on the one-pixel perimeter. At 32×32, iDotMatrix composes natively instead of reducing a completed 64×64 scene. Pixoo64 keeps HTTP load low by preloading a short loop for device-side playback.
 
 ---
 

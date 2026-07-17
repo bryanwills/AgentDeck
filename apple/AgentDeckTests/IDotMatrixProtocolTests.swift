@@ -100,5 +100,80 @@ final class IDotMatrixProtocolTests: XCTestCase {
     func testRgb32ToPNGRejectsWrongSize() {
         XCTAssertNil(IDotMatrixModule.rgb32ToPNG([UInt8](repeating: 0, count: 100)))
     }
+
+    // MARK: - Native 32×32 compact terrarium
+
+    private func compactPixel(_ data: Data, _ x: Int, _ y: Int) -> [UInt8] {
+        let bytes = [UInt8](data)
+        let i = (y * 32 + x) * 3
+        return [bytes[i], bytes[i + 1], bytes[i + 2]]
+    }
+
+    func testCompactRendererIsNative32AndKeepsOpenCodeHollow() {
+        var state = DashboardState()
+        state.state = .idle
+        state.agentType = "opencode"
+        state.siblingSessions = [
+            SessionInfo(id: "oc", port: 9120, projectName: "AgentDeck", agentType: "opencode", state: "idle")
+        ]
+        let frame = PixooRenderer().renderCompact32(dashboardState: state)
+        XCTAssertEqual(frame.count, 32 * 32 * 3)
+        // One mark is centered at (16,14); the official OpenCode center stays
+        // water-colored while its top stroke is bright.
+        XCTAssertLessThan(compactPixel(frame, 16, 14)[0], 40)
+        XCTAssertGreaterThan(compactPixel(frame, 16, 8)[0], 120)
+    }
+
+    func testCompactRendererUsesLargerSingleAgentFootprint() {
+        var state = DashboardState()
+        state.state = .processing
+        state.agentType = "claude-code"
+        state.siblingSessions = [
+            SessionInfo(id: "cc", port: 9120, projectName: "AgentDeck", agentType: "claude-code", state: "processing")
+        ]
+        let frame = [UInt8](PixooRenderer().renderCompact32(dashboardState: state))
+        var brightIdentityPixels = 0
+        for y in 6...22 { for x in 8...24 {
+            let i = (y * 32 + x) * 3
+            if frame[i] > 90 || frame[i + 1] > 110 || frame[i + 2] > 130 { brightIdentityPixels += 1 }
+        } }
+        XCTAssertGreaterThan(brightIdentityPixels, 24)
+    }
+
+    // MARK: - Pixoo adaptive animation transport
+
+    func testPixooAdaptivePolicyKeepsActiveAnimationOnDevice() {
+        let now = Date(timeIntervalSince1970: 100)
+        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: true, retryAfter: nil, now: now), .animated)
+        XCTAssertEqual(
+            PixooAdaptivePushPolicy.interval(stateChanged: false, mode: .animated),
+            PixooAdaptivePushPolicy.stableAnimationRefreshSec
+        )
+        XCTAssertEqual(PixooAdaptivePushPolicy.activeAnimationFrameCount, 2)
+    }
+
+    func testPixooAdaptivePolicyUsesShortMovingFallbackThenRetries() {
+        let now = Date(timeIntervalSince1970: 100)
+        let retryAt = Date(timeIntervalSince1970: 120)
+        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: true, retryAfter: retryAt, now: now), .singleRecovery)
+        XCTAssertEqual(
+            PixooAdaptivePushPolicy.interval(stateChanged: false, mode: .singleRecovery),
+            PixooAdaptivePushPolicy.fallbackFrameRefreshSec
+        )
+        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: true, retryAfter: retryAt, now: retryAt), .animated)
+    }
+
+    func testPixooAdaptivePolicyPrioritizesStateChangesAndIdlesCalmly() {
+        let now = Date(timeIntervalSince1970: 100)
+        XCTAssertEqual(PixooAdaptivePushPolicy.mode(active: false, retryAfter: now.addingTimeInterval(20), now: now), .idle)
+        XCTAssertEqual(
+            PixooAdaptivePushPolicy.interval(stateChanged: false, mode: .idle),
+            PixooAdaptivePushPolicy.idleRefreshSec
+        )
+        XCTAssertEqual(
+            PixooAdaptivePushPolicy.interval(stateChanged: true, mode: .idle),
+            PixooAdaptivePushPolicy.stateChangeFloorSec
+        )
+    }
 }
 #endif

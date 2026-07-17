@@ -12,10 +12,9 @@
 // was removed — poor macOS compatibility and no App Store path.)
 //
 // Frames come from the same in-process PixooRenderer as Pixoo/iDotMatrix, but via the
-// dedicated `renderMicro` layout — bold hand-authored native 11×11 creature glyphs
-// (MicroGlyphs) on a status field, so the 11×11 panel stays legible. The glyph colors
-// are device-tuned (WYSIWYG); prepareFrame applies only the software brightness dim
-// before TimeboxDivoomPacket nibble-encodes the frame.
+// dedicated 11×11 Agent Beacon layout: a generated 9×9 official mark inside an
+// animated one-pixel status rail. Identity stays fixed; only the rail communicates
+// state. prepareFrame applies the software brightness dim before packet encoding.
 
 import Foundation
 import AppKit
@@ -215,8 +214,8 @@ actor TimeboxModule: DeviceModule {
             guard await ensureConnected(device) else { return }
         }
 
-        // renderMicro returns the native 11×11 glyph frame (idle status field when
-        // nothing is active), so no separate disconnected placeholder is needed.
+        // renderMicro returns the native 11×11 Agent Beacon frame, so no separate
+        // disconnected placeholder is needed.
         let state = currentDashboardState()
         let rgb11Data = renderer.renderMicro(dashboardState: state)
 

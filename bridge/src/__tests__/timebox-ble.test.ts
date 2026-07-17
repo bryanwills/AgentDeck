@@ -44,92 +44,63 @@ describe('micro layout (Timebox 11×11)', () => {
     expect(bright).toBeGreaterThan(50); // a sizeable creature, not just a status field
   });
 
-  it('shows only the status field (no bright creature) when no sessions exist', () => {
-    const buf = renderFrame(null, null, [], 1000, 32, 'micro');
-    let bright = 0;
-    for (let i = 0; i < buf.length; i++) if (buf[i] > 120) bright++;
-    expect(bright).toBe(0);
-    // Dark idle-green field: green channel of the center pixel dominates.
-    const c = (16 * 32 + 16) * 3;
-    expect(buf[c + 1]).toBeGreaterThan(buf[c]);
-    expect(buf[c + 1]).toBeGreaterThan(buf[c + 2]);
+  it('shows the device-native standby tide when no session exists', () => {
+    const buf = renderFrame(null, null, [], 1000, 11, 'micro');
+    expect(pixel(buf, 5, 6)).not.toEqual([2, 6, 10]);
+    expect(pixel(buf, 5, 5)).toEqual([2, 6, 10]);
+    // Idle status is deliberately confined to the four rail corners.
+    expect(pixel(buf, 0, 0)[1]).toBeGreaterThan(pixel(buf, 0, 0)[0]);
+    expect(pixel(buf, 10, 10)[1]).toBeGreaterThan(pixel(buf, 10, 10)[0]);
   });
 
-  it('tints the field red on critical usage (≥90%)', () => {
+  it('moves critical usage to a red perimeter rail without tinting identity', () => {
     const buf = renderFrame(
-      null, { fiveHourPercent: 95 } as never, [], 1000, 32, 'micro',
+      null, { fiveHourPercent: 95 } as never, [], 1000, 11, 'micro',
     );
-    const c = (16 * 32 + 16) * 3;
-    expect(buf[c]).toBeGreaterThan(buf[c + 1]); // red channel dominates
-    expect(buf[c]).toBeGreaterThan(buf[c + 2]);
+    expect(pixel(buf, 0, 0)[0]).toBeGreaterThan(pixel(buf, 0, 0)[1]);
+    expect(pixel(buf, 0, 0)[0]).toBeGreaterThan(pixel(buf, 0, 0)[2]);
+    expect(pixel(buf, 5, 5)).toEqual([2, 6, 10]);
   });
 
-  it('draws the Claude robot as a block mark with dark cutout eyes', () => {
+  it.each([
+    ['claude-code', claudeSession('idle'), [193, 107, 74]],
+    ['codex-cli', codexSession('idle'), [92, 102, 209]],
+    ['opencode', openCodeSession('idle'), [195, 195, 195]],
+    ['openclaw', openClawSession('idle'), [209, 75, 75]],
+  ] as const)('maps %s to its official generated mark and product color', (agentType, sessions, signature) => {
     const buf = renderFrame(
-      { state: State.IDLE, agentType: 'claude-code' } as never,
-      null, claudeSession('idle'), 1000, 11, 'micro',
+      { state: State.IDLE, agentType } as never,
+      null, sessions, 1000, 11, 'micro',
     );
-    expect(pixel(buf, 3, 3)).toEqual([0, 0, 0]);
-    expect(pixel(buf, 3, 4)).toEqual([0, 0, 0]);
-    expect(pixel(buf, 7, 3)).toEqual([0, 0, 0]);
-    expect(pixel(buf, 7, 4)).toEqual([0, 0, 0]);
-    expect(pixel(buf, 0, 5)).toEqual([235, 130, 90]); // full-width side arm
-    expect(pixel(buf, 10, 5)).toEqual([235, 130, 90]);
-    expect(pixel(buf, 2, 8)).toEqual([235, 130, 90]); // straight vertical legs
-    expect(pixel(buf, 2, 9)).toEqual([235, 130, 90]);
-    expect(pixel(buf, 8, 8)).toEqual([235, 130, 90]);
-    expect(pixel(buf, 8, 9)).toEqual([235, 130, 90]);
-    expect(pixel(buf, 5, 9)).toEqual([16, 56, 28]); // separated legs, not a blob
+    const interior = Array.from({ length: 9 * 9 }, (_, i) => pixel(buf, i % 9 + 1, Math.floor(i / 9) + 1));
+    expect(interior).toContainEqual(signature);
   });
 
-  it('draws the Codex cloud with a visible prompt mark', () => {
-    const buf = renderFrame(
-      { state: State.IDLE, agentType: 'codex-cli' } as never,
-      null, codexSession('idle'), 1000, 11, 'micro',
-    );
-    expect(pixel(buf, 0, 0)).toEqual([16, 56, 28]); // rounded/lumpy top, not a rectangle
-    expect(pixel(buf, 3, 1)).toEqual([86, 92, 220]); // deeper indigo body so white pops
-    expect(pixel(buf, 2, 4)).toEqual([255, 255, 255]); // pure-white ">" chevron (bold)
-    expect(pixel(buf, 4, 5)).toEqual([255, 255, 255]);
-    expect(pixel(buf, 5, 8)).toEqual([255, 255, 255]); // full-width "_" cursor
-    expect(pixel(buf, 3, 10)).toEqual([86, 92, 220]); // bottom cloud lobe, not dangling legs
-    expect(pixel(buf, 5, 10)).toEqual([86, 92, 220]);
-  });
-
-  it('draws OpenCode as one tall hollow ring', () => {
-    const buf = renderFrame(
+  it('preserves OpenCode negative space and OpenClaw teal eyes', () => {
+    const openCode = renderFrame(
       { state: State.IDLE, agentType: 'opencode' } as never,
       null, openCodeSession('idle'), 1000, 11, 'micro',
     );
-    expect(pixel(buf, 2, 1)).toEqual([232, 232, 232]);
-    expect(pixel(buf, 8, 9)).toEqual([232, 232, 232]);
-    expect(pixel(buf, 5, 4)).toEqual([16, 56, 28]); // hollow center
-    expect(pixel(buf, 1, 1)).toEqual([16, 56, 28]); // not an offset second square
-  });
-
-  it('draws OpenClaw with side claws and teal eyes', () => {
-    const buf = renderFrame(
+    const openClaw = renderFrame(
       { state: State.IDLE, agentType: 'openclaw' } as never,
       null, openClawSession('idle'), 1000, 11, 'micro',
     );
-    expect(pixel(buf, 0, 0)).toEqual([16, 56, 28]); // no oversized top claws on 11px
-    expect(pixel(buf, 10, 0)).toEqual([16, 56, 28]);
-    expect(pixel(buf, 4, 3)).toEqual([0, 229, 204]);
-    expect(pixel(buf, 6, 3)).toEqual([0, 229, 204]);
-    expect(pixel(buf, 0, 4)).toEqual([210, 52, 52]); // side claw silhouette
-    expect(pixel(buf, 10, 4)).toEqual([210, 52, 52]);
+    expect(pixel(openCode, 5, 5)).toEqual([2, 6, 10]);
+    expect(pixel(openClaw, 4, 4)).toEqual([0, 188, 167]);
+    expect(pixel(openClaw, 7, 4)).toEqual([0, 188, 167]);
   });
 
-  it('draws the Antigravity rainbow peak with transparent center hollow', () => {
+  it('renders the generated Antigravity mark as a multicolor open arc', () => {
     const buf = renderFrame(
       { state: State.IDLE, agentType: 'antigravity' } as never,
       null, antigravitySession('idle'), 1000, 11, 'micro',
     );
-    expect(pixel(buf, 5, 0)).toEqual([255, 132, 16]);  // orange tip
-    expect(pixel(buf, 3, 3)).toEqual([92, 214, 77]);   // green left slope
-    expect(pixel(buf, 2, 6)).toEqual([31, 198, 179]);  // teal left leg
-    expect(pixel(buf, 7, 3)).toEqual([183, 92, 182]);  // magenta right slope
-    expect(pixel(buf, 5, 7)).toEqual([16, 56, 28]);    // transparent central hollow
-    expect(pixel(buf, 10, 9)).toEqual([36, 126, 255]); // blue right foot
+    const colors = new Set<string>();
+    for (let y = 1; y <= 9; y++) for (let x = 1; x <= 9; x++) {
+      const p = pixel(buf, x, y);
+      if (p.some((v, i) => v !== [2, 6, 10][i])) colors.add(p.join(','));
+    }
+    expect(colors.size).toBeGreaterThan(3);
+    expect(pixel(buf, 5, 8)).toEqual([2, 6, 10]);
   });
 });

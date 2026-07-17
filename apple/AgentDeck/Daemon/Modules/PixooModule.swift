@@ -10,6 +10,31 @@ struct PixooDevice: Codable, Equatable {
     var brightness: Int?
 }
 
+struct PixooAdaptivePushPolicy {
+    enum Mode: String { case animated, singleRecovery = "single-recovery", idle }
+
+    static let stateChangeFloorSec: TimeInterval = 1
+    static let stableAnimationRefreshSec: TimeInterval = 30
+    static let idleRefreshSec: TimeInterval = 10
+    static let fallbackFrameRefreshSec: TimeInterval = 2.5
+    static let animationRetryCooldownSec: TimeInterval = 45
+    static let activeAnimationFrameCount = 2
+
+    static func mode(active: Bool, retryAfter: Date?, now: Date) -> Mode {
+        guard active else { return .idle }
+        return retryAfter.map { $0 > now } == true ? .singleRecovery : .animated
+    }
+
+    static func interval(stateChanged: Bool, mode: Mode) -> TimeInterval {
+        if stateChanged { return stateChangeFloorSec }
+        switch mode {
+        case .animated: return stableAnimationRefreshSec
+        case .singleRecovery: return fallbackFrameRefreshSec
+        case .idle: return idleRefreshSec
+        }
+    }
+}
+
 private final class PixooSettingsDataBox: @unchecked Sendable {
     private let lock = NSLock()
     private var data: Data?
@@ -107,10 +132,11 @@ actor PixooModule: DeviceModule {
     // (brownout, firmware glitch) recovers without waiting for the 80s PicID
     // overflow cycle.
     private let channelReassertIntervalSec: TimeInterval = 300
-    private let minimumPushIntervalSec: TimeInterval = 12
-    private let forceRefreshIntervalSec: TimeInterval = 60
+    // State latency and animation cadence are separate concerns. State changes
+    // should feel immediate, while stable device-side loops need only a gentle
+    // periodic refresh. A failed loop temporarily uses moving single frames and
+    // then retries automatically instead of staying degraded until app restart.
     private let pushTimeout: TimeInterval = 3
-    private let activeAnimationFrameCount = 2
     // Probe failures past this point indicate the daemon's outbound HTTP path
     // (URLSession + macOS NW stack) is stuck in a way local mitigation can't
     // unblock — escalate with one ERROR log so the user knows to restart.
@@ -121,9 +147,8 @@ actor PixooModule: DeviceModule {
     private var deviceLogStates: [String: DeviceLogState] = [:]
     private var lastPushedFrames: [String: Data] = [:]
     private var deviceLastPushTime: [String: Date] = [:]
-    private var animatedSequenceDisabledIPs: Set<String> = []
+    private var animationRetryAfterByIP: [String: Date] = [:]
     private var lastStateDigest: String?
-    private var lastSequencePushTime: Date?
     private var isPushing = false
     private let renderer = PixooRenderer()
     // Long-lived session for probes/pushes. NOT `let`: when the NW stack wedges
@@ -270,7 +295,7 @@ actor PixooModule: DeviceModule {
         deviceLogStates.removeAll()
         lastPushedFrames.removeAll()
         deviceLastPushTime.removeAll()
-        animatedSequenceDisabledIPs.removeAll()
+        animationRetryAfterByIP.removeAll()
         lastPushError = nil
         // Re-sync PicID from each device (may have rebooted during sleep)
         for device in devices {
@@ -317,7 +342,13 @@ actor PixooModule: DeviceModule {
     }
 
     private func buildSnapshot() -> [String: Any] {
-        [
+        let active = cachedState == "processing"
+            || cachedState.hasPrefix("awaiting")
+            || cachedSessions.contains {
+                let state = $0["state"] as? String ?? ""
+                return state == "processing" || state.hasPrefix("awaiting")
+            }
+        return [
             "configuredDeviceCount": devices.count,
             "deviceIps": devices.map(\.ip),
             "hasFrame": shadow.readFrame() != nil,
@@ -332,6 +363,8 @@ actor PixooModule: DeviceModule {
                     "online": !(logState.map { $0.consecutiveFailures >= backoffThreshold } ?? false),
                     "failures": logState?.consecutiveFailures ?? 0,
                     "backedOff": isBackedOff(d.ip),
+                    "animationMode": PixooAdaptivePushPolicy.mode(active: active, retryAfter: animationRetryAfterByIP[d.ip], now: Date()).rawValue,
+                    "animationRetryAtMs": animationRetryAfterByIP[d.ip].map { Int($0.timeIntervalSince1970 * 1000) } as Any,
                 ]
             },
         ]
@@ -456,17 +489,35 @@ actor PixooModule: DeviceModule {
                 if devices.contains(where: { $0.ip == device.ip }) {
                     await prepareDevice(device)
                     await seedCurrentFrame(device, reason: "recovery")
-
-                    var state = deviceLogStates[device.ip] ?? DeviceLogState()
-                    state.consecutiveFailures = 0
-                    state.backoffUntil = nil
-                    state.lastFailureMessage = nil
-                    deviceLogStates[device.ip] = state
-                    DaemonLogger.shared.info("[Pixoo] \(device.ip) stabilization grace period complete — custom frame re-seeded, resuming frame pushes")
+                    if !isBackedOff(device.ip) {
+                        DaemonLogger.shared.info("[Pixoo] \(device.ip) stabilization grace period complete — custom frame re-seeded, resuming frame pushes")
+                    } else {
+                        DaemonLogger.shared.info("[Pixoo] \(device.ip) answered probe but frame re-seed still failed — keeping backoff active")
+                    }
                 }
             } else {
                 lastPushError = "probe failed for \(device.ip)"
                 recordPushFailure(ip: device.ip, reason: "probe failed")
+
+                // A Pixoo can keep answering fresh clients while a long-lived
+                // URLSession is wedged in Network.framework. Confirm that split
+                // immediately at the first backed-off probe instead of waiting
+                // for the full deep-hang / subnet-rediscovery threshold.
+                if await Self.probeIsPixoo(ip: device.ip, timeoutSec: 0.8) {
+                    rebuildURLSession(reason: "fresh probe reached \(device.ip) while module probe failed")
+                    devicePicIds.removeValue(forKey: device.ip)
+                    lastPushedFrames.removeValue(forKey: device.ip)
+                    deviceLastPushTime.removeValue(forKey: device.ip)
+                    if var state = deviceLogStates[device.ip] {
+                        state.backoffUntil = nil
+                        deviceLogStates[device.ip] = state
+                    }
+                    try? await Task.sleep(for: .seconds(1))
+                    await prepareDevice(device)
+                    await seedCurrentFrame(device, reason: "fresh-session recovery")
+                    continue
+                }
+
                 // Deep hang surfacing: when push-fail (6) + probe-fail (6)
                 // accumulate without recovery, the daemon's outbound HTTP path
                 // is likely stuck NW-stack-deep — local circuit breaker can't
@@ -589,6 +640,15 @@ actor PixooModule: DeviceModule {
         defer { isPushing = false }
 
         for device in devices where !isBackedOff(device.ip) {
+            // The adaptive scheduler already refreshes active loops every 30s
+            // and idle frames every 10s. Do not duplicate a channel switch +
+            // frame upload when a recent successful/attempted push proves the
+            // custom path is active; keep this only as a stalled-scheduler
+            // safety net.
+            if let lastAttempt = deviceLastPushTime[device.ip],
+               Date().timeIntervalSince(lastAttempt) < PixooAdaptivePushPolicy.stableAnimationRefreshSec {
+                continue
+            }
             _ = await postCommand(device.ip, payload: [
                 "Command": "Channel/SetIndex",
                 "SelectIndex": 3,
@@ -628,51 +688,48 @@ actor PixooModule: DeviceModule {
             currentDigest = buildStateDigest(state: state)
         }
 
-        let timeSinceLastPush = lastSequencePushTime.map { Date().timeIntervalSince($0) } ?? 99999.0
         let stateChanged = currentDigest != lastStateDigest
+        let now = Date()
+        let active = !isDisconnectedPlaceholder && isAnimationActive(state)
 
-        if stateChanged && timeSinceLastPush < minimumPushIntervalSec {
-            return
+        var due: [(device: PixooDevice, animated: Bool)] = []
+        for device in devices where !isBackedOff(device.ip) {
+            let mode = PixooAdaptivePushPolicy.mode(active: active, retryAfter: animationRetryAfterByIP[device.ip], now: now)
+            let canAnimate = mode == .animated
+            let elapsed = deviceLastPushTime[device.ip].map { now.timeIntervalSince($0) } ?? 99999
+            let interval = PixooAdaptivePushPolicy.interval(stateChanged: stateChanged, mode: mode)
+            if elapsed >= interval { due.append((device, canAnimate)) }
         }
-        if !stateChanged && timeSinceLastPush < forceRefreshIntervalSec {
-            return
-        }
+        guard !due.isEmpty else { return }
 
         lastStateDigest = currentDigest
-        lastSequencePushTime = Date()
-
-        let frames: [Data]
-        if isDisconnectedPlaceholder {
-            frames = [renderer.renderDisconnectedFrame()]
-        } else {
-            frames = renderer.renderSequence(
-                dashboardState: state,
-                frameCount: frameCountForNextPush(state: state, stateChanged: stateChanged)
-            )
+        var firstFrameForPreview: Data?
+        for item in due {
+            let frames: [Data]
+            if isDisconnectedPlaceholder {
+                frames = [renderer.renderDisconnectedFrame()]
+            } else {
+                frames = renderer.renderSequence(
+                    dashboardState: state,
+                    frameCount: item.animated ? PixooAdaptivePushPolicy.activeAnimationFrameCount : 1
+                )
+            }
+            if firstFrameForPreview == nil { firstFrameForPreview = frames.first }
+            await pushSequenceToDevice(item.device, frames: frames)
         }
-
-        if let firstFrame = frames.first {
-            shadow.writeFrame(firstFrame)
-        }
-
-        for device in devices where !isBackedOff(device.ip) {
-            await pushSequenceToDevice(device, frames: frames)
-        }
+        if let firstFrameForPreview { shadow.writeFrame(firstFrameForPreview) }
         refreshShadow()
     }
 
-    private func frameCountForNextPush(state: DashboardState, stateChanged: Bool) -> Int {
-        guard stateChanged else { return 1 }
-        guard activeAnimationFrameCount > 1 else { return 1 }
+    private func isAnimationActive(_ state: DashboardState) -> Bool {
         switch state.state {
         case .processing, .awaitingPermission, .awaitingOption, .awaitingDiff:
-            return activeAnimationFrameCount
+            return true
         default:
-            let hasActiveSession = state.siblingSessions.contains {
+            return state.siblingSessions.contains {
                 guard $0.alive else { return false }
                 return $0.state == "processing" || ($0.state?.hasPrefix("awaiting") ?? false)
             }
-            return hasActiveSession ? activeAnimationFrameCount : 1
         }
     }
 
@@ -700,21 +757,12 @@ actor PixooModule: DeviceModule {
     ) async {
         let ip = device.ip
         let now = Date()
-        let effectiveFrames: [Data]
-        if frames.count > 1, animatedSequenceDisabledIPs.contains(ip), let first = frames.first {
-            effectiveFrames = [first]
-        } else {
-            effectiveFrames = frames
-        }
+        let effectiveFrames = frames
 
-        if !force,
-           effectiveFrames.count == 1,
-           let lastFrame = lastPushedFrames[ip],
-           lastFrame == effectiveFrames[0],
-           let lastPush = deviceLastPushTime[ip],
-           now.timeIntervalSince(lastPush) < minimumPushIntervalSec {
-            return
-        }
+        // Rate-limit attempts as well as successes. A failed Pixoo endpoint
+        // must not turn the 500 ms scheduler into a retry flood while its HTTP
+        // server or GIF buffer is recovering.
+        deviceLastPushTime[ip] = now
 
         guard let picId = await nextPicId(for: device.ip) else {
             recordPushFailure(ip: device.ip, reason: "failed to acquire PicID")
@@ -747,17 +795,18 @@ actor PixooModule: DeviceModule {
                 lastPushedFrames[ip] = effectiveFrames[0]
             } else {
                 lastPushedFrames.removeValue(forKey: ip)
+                animationRetryAfterByIP.removeValue(forKey: ip)
             }
             deviceLastPushTime[ip] = now
         } else {
             lastPushError = "push failed for \(device.ip)"
             if effectiveFrames.count > 1 {
-                animatedSequenceDisabledIPs.insert(ip)
-                DaemonLogger.shared.info("[Pixoo] \(ip) animated sequence push failed — falling back to single-frame mode for this run")
+                let retryAt = Date().addingTimeInterval(PixooAdaptivePushPolicy.animationRetryCooldownSec)
+                animationRetryAfterByIP[ip] = retryAt
+                DaemonLogger.shared.info("[Pixoo] \(ip) animated sequence push failed — using moving single frames for \(Int(PixooAdaptivePushPolicy.animationRetryCooldownSec))s before retry")
             }
             devicePicIds.removeValue(forKey: device.ip)
             lastPushedFrames.removeValue(forKey: device.ip)
-            deviceLastPushTime.removeValue(forKey: device.ip)
             recordPushFailure(ip: device.ip, reason: "push failed (picId=\(picId), count=\(effectiveFrames.count), reason=\(reason))")
         }
     }
@@ -867,7 +916,7 @@ actor PixooModule: DeviceModule {
             deviceLogStates.removeValue(forKey: removedIP)
             lastPushedFrames.removeValue(forKey: removedIP)
             deviceLastPushTime.removeValue(forKey: removedIP)
-            animatedSequenceDisabledIPs.remove(removedIP)
+            animationRetryAfterByIP.removeValue(forKey: removedIP)
         }
 
         if devices.isEmpty {

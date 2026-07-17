@@ -109,12 +109,12 @@ function spawnSync(venvPython: string, syncScript: string, httpPort: number): vo
   squelch.logStart(`Starting BLE sync for ${device.name ?? addr} (bridge ${url}, brightness ${brightness}%)`);
   startedAt = Date.now();
   runningKey = deviceKey(device);
-  // iDotMatrix software brightness boost canonical = 1.6 — keep in sync:
+  // iDotMatrix software brightness boost canonical = 1.22 — keep in sync:
   // sync.py (run_sync boost default), IDotMatrixModule.swift (boostBrightnessContrast).
   // stdout/stderr are captured into small rings so clean exits and crashes both
   // leave enough context without flooding the daemon log while running.
   const { proc, stderrTail, outputTail } = spawnPythonSync(venvPython, [
-    syncScript, '-a', addr, '-u', url, '-b', String(brightness), '--boost', '1.6',
+    syncScript, '-a', addr, '-u', url, '-b', String(brightness), '--boost', '1.22',
   ]);
   child = proc;
 

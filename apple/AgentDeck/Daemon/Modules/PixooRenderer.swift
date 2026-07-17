@@ -68,6 +68,12 @@ final class PixooRenderer {
         var phaseOffset: Int
     }
 
+    private struct CompactMark {
+        let glyph: OfficialDotGlyph
+        let state: CreatureState
+        let toneIndex: Int
+    }
+
     private struct Bubble {
         var x: Double
         var y: Double
@@ -524,12 +530,9 @@ final class PixooRenderer {
         return frames
     }
 
-    /// Render the micro layout natively at 11×11 using hand-authored creature
-    /// glyphs, returning an 11×11 RGB Data. Mirrors `renderFrame(..., layout:'micro')`
-    /// + `micro-glyphs.ts` in the bridge: the Timebox Mini has 121 LEDs, so instead
-    /// of downscaling the 32×32 terrarium (which bottoms out at a fuzzy silhouette)
-    /// each creature is drawn per-pixel as a bold glyph on a dark status field.
-    /// The glyph tables and brand colors are kept byte-identical to micro-glyphs.ts.
+    /// Render the Timebox Mini's native 11×11 Agent Beacon. A stable generated
+    /// 9×9 official mark carries identity while the one-pixel perimeter rail
+    /// alone carries processing/awaiting/error motion.
     func renderMicro(dashboardState: DashboardState) -> Data {
         let usagePct = dashboardState.fiveHourPercent ?? 0
         let hasGateway = dashboardState.gatewayConnected || dashboardState.siblingSessions.contains { $0.agentType == "openclaw" }
@@ -559,24 +562,160 @@ final class PixooRenderer {
 
         let animFrame = Self.getAnimFrame(atTimeMs: Date().timeIntervalSince1970 * 1000)
 
-        // Dark status field so the bright creature pops (11×11 native buffer).
         let n = MicroGlyphs.size
         var out = [UInt8](repeating: 0, count: n * n * 3)
-        let bg = MicroGlyphs.statusBg(aggregate, animFrame: animFrame)
-        for i in 0..<(n * n) { out[i * 3] = bg.0; out[i * 3 + 1] = bg.1; out[i * 3 + 2] = bg.2 }
-
-        let glyphState: MicroGlyphState =
-            dominant?.state == .processing ? .working : (dominant?.state == .awaiting ? .asking : .idle)
+        var creature: MicroCreature?
         if let dominant {
-            let creature: MicroCreature =
+            creature =
                 dominant.agentType == "antigravity" ? .antigravity
                     : dominant.creatureType == .cloud ? .codex
                     : (dominant.creatureType == .opencode ? .opencode : .octopus)
-            MicroGlyphs.paint(&out, creature: creature, state: glyphState, animFrame: animFrame)
         } else if hasGateway {
-            MicroGlyphs.paint(&out, creature: .crayfish, state: routing ? .working : .idle, animFrame: animFrame)
+            creature = .crayfish
         }
-        // else: no creatures → the solid status field is the whole signal.
+        MicroGlyphs.paintBeacon(&out, creature: creature, aggregate: aggregate, animFrame: animFrame)
+
+        return Data(out)
+    }
+
+    /// Native 32×32 compact terrarium for iDotMatrix.
+    ///
+    /// Rendering the completed 64×64 scene and then halving it made a nominal
+    /// 9–12px official mark land at only 5–6 physical LEDs. This path composes
+    /// directly at panel resolution: simplified water/terrain, at most three
+    /// official marks, and screen-space state effects. No resampling occurs
+    /// after the mark is painted, so negative-space features remain readable.
+    func renderCompact32(dashboardState: DashboardState) -> Data {
+        syncCreatures(dashboardState: dashboardState)
+        let n = 32
+        var out = [UInt8](repeating: 0, count: n * n * 3)
+        let animFrame = Self.getAnimFrame(atTimeMs: Date().timeIntervalSince1970 * 1000)
+
+        func set(_ x: Int, _ y: Int, _ color: RGB) {
+            guard x >= 0, x < n, y >= 0, y < n else { return }
+            let i = (y * n + x) * 3
+            out[i] = color.0; out[i + 1] = color.1; out[i + 2] = color.2
+        }
+        func blend(_ x: Int, _ y: Int, _ color: RGB, _ alpha: Double) {
+            guard x >= 0, x < n, y >= 0, y < n, alpha > 0 else { return }
+            let i = (y * n + x) * 3
+            let a = min(1, alpha), inv = 1 - a
+            out[i] = UInt8(min(255, Int(round(Double(out[i]) * inv + Double(color.0) * a))))
+            out[i + 1] = UInt8(min(255, Int(round(Double(out[i + 1]) * inv + Double(color.1) * a))))
+            out[i + 2] = UInt8(min(255, Int(round(Double(out[i + 2]) * inv + Double(color.2) * a))))
+        }
+
+        // Quiet, high-contrast aquarium field. Detail density is intentionally
+        // lower than Pixoo64 so identity pixels win on the diffuser.
+        for y in 0..<26 {
+            let t = Double(y) / 25
+            let color: RGB = (
+                UInt8(4 + Int(8 * t)),
+                UInt8(24 + Int(28 * t)),
+                UInt8(40 + Int(30 * t))
+            )
+            for x in 0..<n { set(x, y, color) }
+        }
+        for x in 0..<n {
+            set(x, 26, (54, 88, 72))
+            for y in 27..<31 { set(x, y, y.isMultiple(of: 2) ? (94, 72, 48) : (80, 61, 43)) }
+            set(x, 31, (12, 20, 25))
+        }
+
+        let surface: RGB = dashboardState.state.isAwaiting
+            ? (255, 184, 54)
+            : dashboardState.state == .processing ? (82, 220, 255) : (55, 166, 138)
+        for x in 0..<n where (x + animFrame / 4).isMultiple(of: dashboardState.state == .processing ? 3 : 5) {
+            set(x, 1, surface)
+        }
+
+        func glyph(for kind: CreatureKind) -> OfficialDotGlyph {
+            switch kind {
+            case .octopus: return .claudeCode
+            case .cloud: return .codex
+            case .opencode: return .openCode
+            case .antigravity: return .antigravity
+            }
+        }
+        func priority(_ state: CreatureState) -> Int {
+            switch state { case .awaiting: return 0; case .processing: return 1; case .idle: return 2 }
+        }
+
+        var marks = creatureOrder.compactMap { id -> CompactMark? in
+            guard let c = creatureInstances[id] else { return nil }
+            let tone = max(0, creatureOrder.firstIndex(of: id) ?? 0)
+            return CompactMark(glyph: glyph(for: c.creatureType), state: c.state, toneIndex: tone)
+        }
+        let hasGateway = dashboardState.gatewayConnected || dashboardState.siblingSessions.contains { $0.agentType == "openclaw" }
+        if hasGateway {
+            let routing = dashboardState.siblingSessions.contains { $0.agentType == "openclaw" && $0.state == "processing" }
+            marks.append(CompactMark(glyph: .openClaw, state: routing ? .processing : .idle, toneIndex: 0))
+        }
+        marks.sort { priority($0.state) < priority($1.state) }
+        marks = Array(marks.prefix(3))
+
+        let slots: [(x: Int, y: Int, size: Int)]
+        switch marks.count {
+        case 1: slots = [(16, 14, 16)]
+        case 2: slots = [(9, 14, 12), (23, 14, 12)]
+        default: slots = [(6, 14, 9), (16, 14, 9), (26, 14, 9)]
+        }
+
+        func baseColor(_ mark: CompactMark, _ sourceX: Int) -> RGB {
+            switch mark.glyph {
+            case .claudeCode: return octopusPalette(for: mark.toneIndex).body
+            case .codex: return cloudPalette(for: mark.toneIndex).body
+            case .openCode: return opencodePalette(for: mark.toneIndex).outer
+            case .openClaw: return Self.colors.crayfishBody
+            case .antigravity:
+                let bands: [RGB] = [
+                    (92, 214, 77), (245, 203, 36), (255, 132, 16),
+                    (255, 82, 65), (183, 92, 182), (102, 111, 225), (36, 126, 255),
+                ]
+                return bands[min(bands.count - 1, sourceX * bands.count / OfficialDotGlyphs.size)]
+            }
+        }
+
+        for (index, mark) in marks.enumerated() {
+            let slot = slots[index]
+            guard let mask = OfficialDotGlyphs.masks[mark.glyph] else { continue }
+            let bob = mark.state == .processing ? Int(round(sin(Double(animFrame + index * 5) * 0.28))) : 0
+            let x0 = slot.x - slot.size / 2
+            let y0 = slot.y - slot.size / 2 + bob
+            for dy in 0..<slot.size {
+                let sy = min(OfficialDotGlyphs.size - 1, dy * OfficialDotGlyphs.size / slot.size)
+                for dx in 0..<slot.size {
+                    let sx = min(OfficialDotGlyphs.size - 1, dx * OfficialDotGlyphs.size / slot.size)
+                    let alpha = Double(mask[sy * OfficialDotGlyphs.size + sx]) / 255
+                    if alpha > 0.08 { blend(x0 + dx, y0 + dy, baseColor(mark, sx), alpha) }
+                }
+            }
+            if mark.glyph == .openClaw {
+                set(x0 + Int(round(9.05 / 24 * Double(slot.size))), y0 + Int(round(7.63 / 24 * Double(slot.size))), Self.colors.crayfishEye)
+                set(x0 + Int(round(15.38 / 24 * Double(slot.size))), y0 + Int(round(7.63 / 24 * Double(slot.size))), Self.colors.crayfishEye)
+            }
+            if mark.state == .processing {
+                for spark in 0..<3 {
+                    let angle = Double(animFrame) * 0.24 + Double(spark) * Double.pi * 2 / 3
+                    let radius = Double(slot.size) / 2 + 1
+                    set(Int(round(Double(slot.x) + cos(angle) * radius)), Int(round(Double(slot.y + bob) + sin(angle) * radius)), (110, 235, 255))
+                }
+            } else if mark.state == .awaiting {
+                set(min(31, x0 + slot.size), max(2, y0), (255, 184, 54))
+                set(min(31, x0 + slot.size), max(2, y0 + 1), (255, 184, 54))
+            }
+        }
+
+        if marks.isEmpty {
+            for (x, y) in [(14, 12), (15, 11), (16, 12), (17, 11), (18, 12), (15, 14), (16, 15), (17, 14)] {
+                set(x, y, (76, 206, 220))
+            }
+        }
+
+        let usage = max(0, min(100, dashboardState.fiveHourPercent ?? 0))
+        let usageWidth = Int(round(usage / 100 * 32))
+        let usageColor: RGB = usage >= 90 ? (255, 70, 70) : usage >= 70 ? (255, 184, 54) : (55, 190, 132)
+        if usageWidth > 0 { for x in 0..<usageWidth { set(x, 31, usageColor) } }
 
         return Data(out)
     }

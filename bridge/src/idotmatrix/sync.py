@@ -107,9 +107,9 @@ async def _interruptible_sleep(stop_event: asyncio.Event, secs: float) -> None:
     except asyncio.TimeoutError:
         pass
 
-# iDotMatrix software brightness boost canonical = 1.6 — keep in sync:
+# iDotMatrix software brightness boost canonical = 1.22 — keep in sync:
 # idotmatrix-daemon-sync.ts (--boost), sync.py (this default), IDotMatrixModule.swift.
-async def run_sync(address: str, url: str, brightness: int = 100, boost: float = 1.6):
+async def run_sync(address: str, url: str, brightness: int = 100, boost: float = 1.22):
     print(f"Initializing iDotMatrix Synchronization...")
     print(f"Target Device BLE Address: {address}")
     print(f"AgentDeck Bridge API URL: {url}")
@@ -302,9 +302,10 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
                 bright_enhancer = ImageEnhance.Brightness(img)
                 img = bright_enhancer.enhance(boost)
                 
-                # Boost contrast slightly to prevent color washing out
+                # Restrained contrast preserves official-mark holes and edge
+                # coverage instead of clipping the small glyph into a blob.
                 contrast_enhancer = ImageEnhance.Contrast(img)
-                img = contrast_enhancer.enhance(1.2)
+                img = contrast_enhancer.enhance(1.08)
             
             # Use uploadUnprocessed because we already resized and enhanced the image
             res = await upload_pil_image(idm_image, img)
@@ -363,7 +364,7 @@ def main():
     parser.add_argument("-a", "--address", required=True, help="BLE MAC/UUID Address of the iDotMatrix device")
     parser.add_argument("-u", "--url", default=DEFAULT_URL, help=f"AgentDeck Bridge URL (default: {DEFAULT_URL})")
     parser.add_argument("-b", "--brightness", type=int, default=100, help="Initial hardware brightness percent (5-100, default: 100)")
-    parser.add_argument("--boost", type=float, default=1.6, help="Software brightness boost factor (default: 1.6)")
+    parser.add_argument("--boost", type=float, default=1.22, help="Software brightness boost factor (default: 1.22)")
     args = parser.parse_args()
     
     if args.brightness not in range(5, 101):

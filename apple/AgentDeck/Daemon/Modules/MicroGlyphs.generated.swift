@@ -1,12 +1,8 @@
 #if os(macOS)
 // MicroGlyphs.generated.swift — AUTO-GENERATED, DO NOT EDIT.
 //
-// Source of truth: bridge/src/pixoo/micro-glyphs.ts
+// Source of truth: design/brand/*.svg
 // Regenerate with: pnpm generate-micro-glyphs
-//
-// The grid/color tables below are emitted byte-for-byte from the TS glyph literals so
-// the App Store macOS daemon and the Node CLI render identical Timebox Mini frames.
-// Edit micro-glyphs.ts and re-run the generator — never hand-edit this file.
 
 import Foundation
 
@@ -150,6 +146,67 @@ enum OfficialDotGlyphs {
     ]
 }
 
+enum OfficialTimeboxGlyphs {
+    static let size = 9
+    static let masks: [OfficialDotGlyph: [UInt8]] = [
+        .claudeCode: [
+            0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 28, 32, 32, 32, 32, 32, 28, 0,
+            0, 224, 255, 255, 255, 255, 255, 224, 0,
+            0, 224, 118, 255, 255, 255, 118, 224, 0,
+            229, 252, 240, 255, 255, 255, 240, 252, 229,
+            69, 232, 255, 255, 255, 255, 255, 232, 69,
+            0, 139, 171, 161, 104, 161, 171, 139, 0,
+            0, 40, 56, 48, 0, 48, 56, 40, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ],
+        .codex: [
+            0, 0, 107, 227, 226, 111, 86, 12, 0,
+            0, 77, 255, 255, 255, 255, 255, 212, 10,
+            114, 255, 254, 255, 255, 255, 255, 255, 86,
+            235, 255, 96, 243, 255, 255, 255, 255, 114,
+            226, 255, 170, 156, 255, 255, 255, 255, 224,
+            110, 255, 96, 238, 192, 119, 142, 255, 231,
+            82, 255, 250, 255, 249, 238, 243, 255, 113,
+            14, 209, 255, 255, 255, 255, 255, 76, 0,
+            0, 11, 82, 112, 224, 230, 109, 0, 0,
+        ],
+        .openCode: [
+            0, 32, 64, 64, 64, 64, 64, 32, 0,
+            0, 128, 255, 255, 255, 255, 255, 128, 0,
+            0, 128, 255, 64, 64, 64, 255, 128, 0,
+            0, 128, 255, 0, 0, 0, 255, 128, 0,
+            0, 128, 255, 0, 0, 0, 255, 128, 0,
+            0, 128, 255, 0, 0, 0, 255, 128, 0,
+            0, 128, 255, 64, 64, 64, 255, 128, 0,
+            0, 128, 255, 255, 255, 255, 255, 128, 0,
+            0, 32, 64, 64, 64, 64, 64, 32, 0,
+        ],
+        .openClaw: [
+            0, 0, 54, 0, 0, 0, 54, 0, 0,
+            0, 0, 115, 232, 253, 232, 113, 0, 0,
+            0, 93, 245, 176, 255, 179, 246, 91, 0,
+            65, 151, 250, 194, 255, 195, 250, 152, 64,
+            237, 180, 255, 255, 255, 255, 255, 177, 236,
+            52, 189, 255, 255, 255, 255, 255, 188, 47,
+            0, 114, 255, 255, 255, 255, 255, 112, 0,
+            0, 2, 148, 253, 255, 253, 147, 2, 0,
+            0, 0, 0, 154, 69, 154, 0, 0, 0,
+        ],
+        .antigravity: [
+            0, 0, 0, 54, 141, 56, 0, 0, 0,
+            0, 0, 24, 242, 255, 243, 26, 0, 0,
+            0, 0, 126, 255, 255, 255, 130, 0, 0,
+            0, 0, 208, 255, 255, 255, 212, 0, 0,
+            0, 30, 255, 253, 225, 252, 255, 34, 0,
+            0, 106, 251, 68, 0, 64, 250, 111, 0,
+            0, 205, 134, 0, 0, 0, 129, 209, 0,
+            100, 209, 10, 0, 0, 0, 8, 206, 105,
+            132, 20, 0, 0, 0, 0, 0, 18, 128,
+        ],
+    ]
+}
+
 enum OfficialTc001Glyphs {
     static let size = 8
     static let masks: [OfficialDotGlyph: [UInt8]] = [
@@ -203,158 +260,6 @@ enum OfficialTc001Glyphs {
             88, 190, 2, 0, 0, 2, 187, 93,
             131, 12, 0, 0, 0, 0, 10, 130,
         ],
-    ]
-}
-
-extension MicroGlyphs {
-    // Keyed by the TS MicroCreature names; MicroGlyphs.glyph(for:) maps the Swift enum
-    // (note: Swift .codex == TS "jellyfish").
-    static let generatedGlyphs: [String: Glyph] = [
-    "octopus": Glyph(
-        colors: ["B": (235, 130, 90), "D": (150, 84, 64), "K": (0, 0, 0), "E": (120, 226, 255)],
-        idle: [
-            "...........",
-            ".BBBBBBBBB.",
-            ".BBBBBBBBB.",
-            ".BBKBBBKBB.",
-            ".BBKBBBKBB.",
-            "BBBBBBBBBBB",
-            "BBBBBBBBBBB",
-            ".BBBBBBBBB.",
-            "..BB...BB..",
-            "..BB...BB..",
-            "...........",
-        ],
-        work: [
-            "...........",
-            ".BBBBBBBBB.",
-            ".BBBBBBBBB.",
-            ".BBEBBBEBB.",
-            ".BBEBBBEBB.",
-            "BBBBBBBBBBB",
-            "BBBBBBBBBBB",
-            ".BBBBBBBBB.",
-            "..BB...BB..",
-            "...B...BB..",
-            "...........",
-        ]
-    ),
-    "jellyfish": Glyph(
-        colors: ["B": (86, 92, 220), "M": (255, 255, 255)],
-        idle: [
-            "...........",
-            "...BBBBB...",
-            ".BBBBBBBBB.",
-            "BBBBBBBBBBB",
-            "BBMMBBBBBBB",
-            "BBBMMBBBBBB",
-            "BBMMBBBBBBB",
-            "BBBBBBBBBBB",
-            "BBBMMMMMBBB",
-            ".BBBBBBBBB.",
-            "...BBBBB...",
-        ],
-        work: [
-            "...........",
-            "...BBBBB...",
-            ".BBBBBBBBB.",
-            "BBBBBBBBBBB",
-            "BBMMBBBBBBB",
-            "BBBMMBBBBBB",
-            "BBMMBBBBBBB",
-            "BBBBBBBBBBB",
-            "BBBBBBBBBBB",
-            ".BBBBBBBBB.",
-            "...BBBBB...",
-        ]
-    ),
-    "opencode": Glyph(
-        colors: ["F": (232, 232, 232)],
-        idle: [
-            "...........",
-            "..FFFFFFF..",
-            "..FFFFFFF..",
-            "..FF...FF..",
-            "..FF...FF..",
-            "..FF...FF..",
-            "..FF...FF..",
-            "..FF...FF..",
-            "..FFFFFFF..",
-            "..FFFFFFF..",
-            "...........",
-        ],
-        work: [
-            "...........",
-            "..FFFFFFF..",
-            "..FFFFFFF..",
-            "..FFF.FFF..",
-            "..FFF.FFF..",
-            "..FFF.FFF..",
-            "..FFF.FFF..",
-            "..FFF.FFF..",
-            "..FFFFFFF..",
-            "..FFFFFFF..",
-            "...........",
-        ]
-    ),
-    "crayfish": Glyph(
-        colors: ["B": (255, 92, 92), "C": (210, 52, 52), "A": (225, 180, 170), "E": (0, 229, 204)],
-        idle: [
-            "...A...A...",
-            "....A.A....",
-            "....BBB....",
-            "...BEBEB...",
-            "C.BBBBBBB.C",
-            "CC.BBBBB.CC",
-            ".CBBBBBBB.C",
-            "..BBBBBBB..",
-            "...BBBBB...",
-            "...BB.BB...",
-            "..BB...BB..",
-        ],
-        work: [
-            "....A.A....",
-            "...A...A...",
-            "....BBB....",
-            "...BEBEB...",
-            ".CBBBBBBB.C",
-            "CC.BBBBB.CC",
-            "C.BBBBBBB.C",
-            "..BBBBBBB..",
-            "...BBBBB...",
-            "...B.B.B...",
-            "..BB...BB..",
-        ]
-    ),
-    "antigravity": Glyph(
-        colors: ["L": (92, 214, 77), "T": (31, 198, 179), "Q": (58, 199, 235), "Y": (245, 203, 36), "O": (255, 132, 16), "R": (255, 82, 65), "P": (183, 92, 182), "V": (102, 111, 225), "U": (36, 126, 255), "N": (41, 184, 238)],
-        idle: [
-            ".....O.....",
-            "....YOR....",
-            "...LYORP...",
-            "...LYORPV..",
-            "...LTQRPV..",
-            "..LTQRPVU..",
-            "..TQ...VU..",
-            "..Q.....U..",
-            ".NQ.....UU.",
-            ".N.......UU",
-            "...........",
-        ],
-        work: [
-            "....YO.....",
-            "....YORP...",
-            "...LYORPV..",
-            "...LTQRPV..",
-            "..LTQRPVU..",
-            "..TQ...VU..",
-            "..Q.....U..",
-            ".NQ.....UU.",
-            ".N.......UU",
-            "...........",
-            "...........",
-        ]
-    ),
     ]
 }
 #endif
