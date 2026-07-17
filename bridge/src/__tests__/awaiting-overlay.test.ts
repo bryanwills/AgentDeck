@@ -21,12 +21,12 @@ describe('awaiting-overlay', () => {
 
   it('set then get returns the trimmed question', () => {
     setAwaitingOverlay('sid-1', '  Claude needs your   permission to use Bash  ');
-    expect(getAwaitingOverlay('sid-1')).toEqual({ question: 'Claude needs your permission to use Bash', requestId: undefined });
+    expect(getAwaitingOverlay('sid-1')).toMatchObject({ question: 'Claude needs your permission to use Bash', requestId: undefined });
   });
 
   it('carries an optional requestId (actionable PreToolUse gate)', () => {
     setAwaitingOverlay('sid-1b', 'Allow Bash: npm test?', 'req-123');
-    expect(getAwaitingOverlay('sid-1b')).toEqual({ question: 'Allow Bash: npm test?', requestId: 'req-123' });
+    expect(getAwaitingOverlay('sid-1b')).toMatchObject({ question: 'Allow Bash: npm test?', requestId: 'req-123' });
   });
 
   it('returns undefined for an unknown session', () => {
@@ -50,7 +50,7 @@ describe('awaiting-overlay', () => {
     setAwaitingOverlay('sid-2b', 'second prompt');
     // A fresh re-set keeps the entry alive; the question updates to the latest.
     vi.advanceTimersByTime(4 * 60_000);
-    expect(getAwaitingOverlay('sid-2b')).toEqual({ question: 'second prompt', requestId: undefined });
+    expect(getAwaitingOverlay('sid-2b')).toMatchObject({ question: 'second prompt', requestId: undefined });
   });
 
   it('clear removes the entry and reports whether one existed', () => {
@@ -157,6 +157,73 @@ describe('awaiting-overlay', () => {
       setAwaitingOverlay('uuid-gate', 'Allow Bash: ls?', 'req-xyz');
       const out = applyAwaitingOverlayToObserved([observed('observed:claude:uuid-gate', 'processing')]);
       expect(out[0]).toMatchObject({ state: 'awaiting_permission', question: 'Allow Bash: ls?', requestId: 'req-xyz' });
+    });
+  });
+
+  // The ESC-stuck fix: a display-only permission prompt fires no hook when the
+  // user presses ESC, so the ONLY signal it was dismissed is that the session's
+  // transcript advanced (a `[Request interrupted…]` record) after the overlay
+  // was set. The overlay must yield to that recency, not sit until the 6h TTL.
+  describe('transcript-recency supersession (ESC-dismissed prompt)', () => {
+    const withActivity = (id: string, state: string, lastActivityAt?: number) =>
+      ({ id, state, lastActivityAt });
+
+    it('drops a display-only overlay once the transcript moves past it, and purges the entry', () => {
+      const sid = 'uuid-esc';
+      setAwaitingOverlay(sid, 'Claude needs your permission to use Bash');
+      const setAt = Date.now();
+      // Transcript wrote a record 2s after the prompt (answered OR ESC'd).
+      const out = applyAwaitingOverlayToObserved([
+        withActivity(`observed:claude:${sid}`, 'idle', setAt + 2_000),
+      ]);
+      // No override — the session shows its own (post-interrupt idle) state.
+      expect(out[0]).toMatchObject({ id: `observed:claude:${sid}`, state: 'idle' });
+      expect(out[0]).not.toHaveProperty('question');
+      // And the stuck entry is gone from the map (no waiting out the 6h TTL).
+      expect(getAwaitingOverlay(sid)).toBeUndefined();
+    });
+
+    it('keeps the overlay while the transcript stays frozen (genuine wait)', () => {
+      const sid = 'uuid-wait';
+      setAwaitingOverlay(sid, 'Claude needs your permission to use Bash');
+      const setAt = Date.now();
+      // The tool_use write precedes the Notification, so the frozen transcript's
+      // mtime is at/just-before setAt — well within the margin. Overlay holds.
+      const out = applyAwaitingOverlayToObserved([
+        withActivity(`observed:claude:${sid}`, 'processing', setAt - 3_000),
+      ]);
+      expect(out[0]).toMatchObject({ state: 'awaiting_permission' });
+      expect(getAwaitingOverlay(sid)).toBeDefined();
+    });
+
+    it('holds within the jitter margin (a write at ~setAt is not a resolution)', () => {
+      const sid = 'uuid-margin';
+      setAwaitingOverlay(sid, 'permission to use Edit');
+      const setAt = Date.now();
+      const out = applyAwaitingOverlayToObserved([
+        withActivity(`observed:claude:${sid}`, 'processing', setAt + 500),
+      ]);
+      expect(out[0]).toMatchObject({ state: 'awaiting_permission' });
+    });
+
+    it('keeps the overlay when the session carries no transcript recency', () => {
+      const sid = 'uuid-notx';
+      setAwaitingOverlay(sid, 'permission to use Bash');
+      const out = applyAwaitingOverlayToObserved([
+        withActivity(`observed:claude:${sid}`, 'idle', undefined),
+      ]);
+      expect(out[0]).toMatchObject({ state: 'awaiting_permission' });
+    });
+
+    it('never drops a held device-approval gate on recency (its tool is blocked, resolve via onResolved)', () => {
+      const sid = 'uuid-held';
+      setAwaitingOverlay(sid, 'Allow Bash: rm?', 'req-held');
+      const setAt = Date.now();
+      const out = applyAwaitingOverlayToObserved([
+        withActivity(`observed:claude:${sid}`, 'processing', setAt + 60_000),
+      ]);
+      expect(out[0]).toMatchObject({ state: 'awaiting_permission', requestId: 'req-held' });
+      expect(getAwaitingOverlay(sid)).toBeDefined();
     });
   });
 

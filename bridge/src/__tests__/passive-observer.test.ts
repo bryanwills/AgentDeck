@@ -72,6 +72,36 @@ describe('passive-observer parsers', () => {
     expect(summary.currentTask).not.toContain('token-123');
   });
 
+  it('reads idle after an ESC/interrupt marker aborts a pending tool_use', () => {
+    // A permission prompt on a pending tool_use, then the user presses ESC.
+    // The interrupt fires NO lifecycle hook — the `[Request interrupted…]`
+    // record is the only trace — and it must read as idle (turn aborted),
+    // not as a fresh 'processing' user turn.
+    const summary = parseClaudeTranscript(jsonl([
+      {
+        type: 'user',
+        timestamp: '2026-04-26T01:00:00.000Z',
+        message: { role: 'user', content: [{ type: 'text', text: 'run the build' }] },
+      },
+      {
+        type: 'assistant',
+        timestamp: '2026-04-26T01:00:01.000Z',
+        message: {
+          model: 'claude-sonnet-4-5',
+          content: [{ type: 'tool_use', name: 'Bash', input: { command: 'npm run build' } }],
+        },
+      },
+      {
+        type: 'user',
+        timestamp: '2026-04-26T01:00:05.000Z',
+        message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] },
+      },
+    ]));
+    expect(summary.state).toBe('idle');
+    // The session goal is still the real first prompt, not the interrupt marker.
+    expect(summary.goal).toBe('run the build');
+  });
+
   it('summarizes Codex rollout metadata, context, and pending tool calls', () => {
     const summary = parseCodexRollout(jsonl([
       {

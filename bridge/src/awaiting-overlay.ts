@@ -35,6 +35,18 @@ interface AwaitingEntry {
  *  a truly orphaned entry and is deliberately generous. */
 const OVERLAY_TTL_MS = 6 * 60 * 60_000; // 6 hours
 
+/** A display-only permission Notification (no requestId) is cleared the instant
+ *  the user answers via a subsequent hook — but pressing ESC to dismiss the
+ *  prompt fires NO hook, so that path had nothing to clear it short of the 6h
+ *  TTL (the reported "attention stuck after ESC" bug). The transcript is the
+ *  only observable signal: it stays frozen for the entire genuine wait (no
+ *  records are written between an assistant tool_use and its resolution), so
+ *  any transcript write dated after the overlay was set means the prompt is
+ *  over — the tool was answered OR the user ESC'd. This margin guards the
+ *  comparison against the sub-second jitter between the tool_use write and the
+ *  Notification that follows it. */
+const RESOLVED_ACTIVITY_MARGIN_MS = 1_000;
+
 /** Cap question length at the source so every sessions_list broadcast stays small. */
 const MAX_QUESTION_LEN = 120;
 
@@ -46,15 +58,18 @@ export function setAwaitingOverlay(sessionId: string, question: string, requestI
 }
 
 /** Returns the overlay entry if it exists and is still fresh (< TTL). Stale
- *  entries are pruned on read. */
-export function getAwaitingOverlay(sessionId: string): { question: string; requestId?: string } | undefined {
+ *  entries are pruned on read. `updatedAt` is exposed so the observed-session
+ *  overlay can compare it against the session's transcript recency. */
+export function getAwaitingOverlay(
+  sessionId: string,
+): { question: string; requestId?: string; updatedAt: number } | undefined {
   const entry = overlay.get(sessionId);
   if (!entry) return undefined;
   if (Date.now() - entry.updatedAt > OVERLAY_TTL_MS) {
     overlay.delete(sessionId);
     return undefined;
   }
-  return { question: entry.question, requestId: entry.requestId };
+  return { question: entry.question, requestId: entry.requestId, updatedAt: entry.updatedAt };
 }
 
 /** Called on any subsequent hook for a session (tool_start/tool_end/
@@ -75,17 +90,32 @@ export function _resetAwaitingOverlay(): void {
  * Overlay any fresh awaiting state onto a list of observed (`observed:claude:…`
  * / `observed:codex:…`) sessions, keyed by the embedded Claude session UUID.
  * Returns a new array; unaffected sessions are passed through unchanged.
- * Pure (reads the module overlay map but mutates nothing), so the daemon
- * enricher can call it on every broadcast and tests can assert it directly.
+ *
+ * Not pure: like `getAwaitingOverlay`'s TTL prune-on-read, it drops a
+ * display-only entry the moment the session's transcript proves the prompt was
+ * resolved off-hook (ESC/cancel writes a record but fires no hook — see
+ * `RESOLVED_ACTIVITY_MARGIN_MS`). Held device-approval gates (requestId set)
+ * are never dropped this way: their tool stays blocked so the transcript can't
+ * advance, and they resolve through their own `onResolved` path.
  */
 export function applyAwaitingOverlayToObserved<
-  T extends { id: string; state?: string; question?: string; requestId?: string },
+  T extends { id: string; state?: string; question?: string; requestId?: string; lastActivityAt?: number },
 >(sessions: T[]): T[] {
   return sessions.map((s) => {
     const uuid = s.id.replace(/^observed:(?:claude|codex):/, '');
     const ov = getAwaitingOverlay(uuid);
-    if (ov) return { ...s, state: 'awaiting_permission', question: ov.question, requestId: ov.requestId };
-    return s;
+    if (!ov) return s;
+    // Display-only Notification prompt whose transcript has moved on since the
+    // overlay was set → answered or ESC-dismissed. Drop it (no hook will).
+    if (
+      !ov.requestId &&
+      typeof s.lastActivityAt === 'number' &&
+      s.lastActivityAt > ov.updatedAt + RESOLVED_ACTIVITY_MARGIN_MS
+    ) {
+      clearAwaitingOverlay(uuid);
+      return s;
+    }
+    return { ...s, state: 'awaiting_permission', question: ov.question, requestId: ov.requestId };
   });
 }
 

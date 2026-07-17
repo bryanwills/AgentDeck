@@ -3891,6 +3891,57 @@ final class DaemonServer {
         return pushedSessionStaleTTL
     }
 
+    /// Epoch-ms of a transcript file's last write, or nil if it can't be
+    /// stat'd (missing file, or a sandboxed build with no `~/.claude` access).
+    private func transcriptMTimeMs(_ path: String) -> Double? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let date = attrs[.modificationDate] as? Date else { return nil }
+        return date.timeIntervalSince1970 * 1000
+    }
+
+    /// Recover a display-only permission prompt the user dismissed with ESC.
+    ///
+    /// ESC fires NO lifecycle hook, so `updateSessionHookState` never clears the
+    /// `awaiting_permission` entry — it would otherwise sit until the 6 h
+    /// `awaitingHookStaleTTL`, leaving the creature stuck in attention (reported
+    /// bug). The transcript is the only observable trace: it stays frozen for
+    /// the entire genuine wait (nothing is written between an assistant
+    /// `tool_use` and its resolution), so a transcript write dated after the
+    /// awaiting hook was recorded means the prompt is over — answered (a hook
+    /// already cleared it) or ESC-dismissed. Flip those back to idle.
+    ///
+    /// Held device-approval gates (requestId set / `heldGateSessionIds`) and
+    /// OpenCode `ocperm:` gates are excluded: their tool is blocked so the
+    /// transcript cannot advance, and they resolve through their own reply path.
+    /// The margin guards the compare against the sub-second jitter between the
+    /// `tool_use` write and the Notification hook that follows it. Mirrors the
+    /// Node `applyAwaitingOverlayToObserved` transcript-recency drop.
+    private func recoverAbandonedAwaitingSessions() {
+        let marginMs: Double = 1_000
+        var toIdle: [String] = []
+        for (sid, entry) in pushedSessionsById {
+            guard entry.state == "awaiting_permission",
+                  entry.requestId == nil,
+                  !heldGateSessionIds.contains(sid),
+                  let recordedAt = lastHookAtByPushedSession[sid],
+                  let path = claudeTranscriptPathBySession[sid],
+                  let mtimeMs = transcriptMTimeMs(path) else { continue }
+            if mtimeMs > recordedAt.timeIntervalSince1970 * 1000 + marginMs {
+                toIdle.append(sid)
+            }
+        }
+        guard !toIdle.isEmpty else { return }
+        for sid in toIdle {
+            guard var entry = pushedSessionsById[sid] else { continue }
+            entry.state = "idle"
+            entry.question = nil
+            pushedSessionsById[sid] = entry
+            upsertIntoCachedSessions(entry)
+            DaemonLogger.shared.info("Awaiting recovered (transcript advanced past ESC/answer) for \(sid)")
+        }
+        broadcastSessionsList()
+    }
+
     private func evictStaleHookSessions() async {
         let now = Date()
         let codexTerminalCutoff = now.addingTimeInterval(-Self.codexPostTerminalTTL)
@@ -5285,6 +5336,7 @@ final class DaemonServer {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
                 guard let self else { break }
+                self.recoverAbandonedAwaitingSessions()
                 await self.evictStaleHookSessions()
                 self.settleStaleCodexProcessingSessions()
                 await self.evictStaleClientRegistrations()

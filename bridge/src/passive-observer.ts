@@ -91,6 +91,12 @@ export interface ObservedSession extends EnrichedSession {
   goal?: string;
   contextPercent?: number;
   totalTokens?: number;
+  /** Epoch ms of the transcript's last write (file mtime), when a transcript
+   *  was found. Used by the awaiting overlay to detect that a permission prompt
+   *  was resolved without a hook (ESC/cancel): the transcript stays frozen
+   *  while genuinely waiting, so any write after the overlay was set means the
+   *  prompt is over. Absent when no transcript could be located. */
+  lastActivityAt?: number;
 }
 
 const SCAN_INTERVAL_MS = 5_000;
@@ -210,7 +216,19 @@ export function parseClaudeTranscript(raw: string): TranscriptSummary {
       }
     } else if (type === 'user') {
       const message = objectAt(value, 'message');
-      if (!isClaudeToolResultUserMessage(message)) {
+      if (isClaudeInterruptMessage(message)) {
+        // ESC / interrupt aborts the in-flight turn: the pending tool_use will
+        // never resolve and no assistant reply follows, so the session is idle
+        // (awaiting the user's next prompt), NOT processing. Without this the
+        // `[Request interrupted by user…]` marker reads as a fresh user turn
+        // (realUserOpen) and the observed session shows a false 'processing'
+        // spinner after a cancel — and after the awaiting overlay is dropped,
+        // that stale 'processing' is what the ESC'd session would otherwise
+        // fall back to.
+        realUserOpen = false;
+        latestAssistantHadTool = false;
+        currentTask = undefined;
+      } else if (!isClaudeToolResultUserMessage(message)) {
         realUserOpen = true;
         currentTask = undefined;
         latestAssistantHadTool = false;
@@ -405,6 +423,7 @@ function collectClaudeSessions(processes: ProcInfo[]): ObservedSession[] {
       goal: summary.goal,
       contextPercent: summary.contextPercent,
       totalTokens: summary.totalTokens,
+      lastActivityAt: transcript ? fileMtimeMs(transcript) : undefined,
     });
   }
   return sessions;
@@ -695,6 +714,15 @@ function rolloutAgeMs(path: string): number {
   }
 }
 
+/** Epoch-ms of a file's last write, or undefined if it can't be stat'd. */
+function fileMtimeMs(path: string): number | undefined {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
 function readFileHeadAndTail(path: string, headBytes: number, tailBytes: number): string {
   let fd: number | null = null;
   try {
@@ -793,6 +821,14 @@ function redactSecrets(value: string): string {
 function isClaudeToolResultUserMessage(message: Record<string, unknown> | null): boolean {
   const content = message ? arrayAt(message, 'content') : null;
   return !!content?.length && content.every((block) => isRecord(block) && stringAt(block, 'type') === 'tool_result');
+}
+
+/** Does a user record carry Claude Code's interrupt/cancel marker
+ *  (`[Request interrupted by user…]`) rather than real user prose? Emitted when
+ *  the user presses ESC on a prompt or mid-turn — it fires no lifecycle hook,
+ *  so the transcript is the only place the cancel is observable. */
+function isClaudeInterruptMessage(message: Record<string, unknown> | null): boolean {
+  return /\[Request interrupted by user/i.test(claudeUserText(message));
 }
 
 function contextWindowForModel(modelName?: string): number {
