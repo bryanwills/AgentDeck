@@ -48,6 +48,61 @@ final class ESP32WifiForwardTests: XCTestCase {
         XCTAssertEqual(out["agentType"] as? String, "claude", "display-relevant fields survive the shrink")
     }
 
+    /// Timeline rows must be capped to the firmware's byte-sized TimelineEntry
+    /// buffers on a UTF-8 character boundary. Uncapped raw let the board's
+    /// 119-byte strncpy cut mid-한글 and the IPS10 cards / InkDeck ticker drew a
+    /// broken trailing glyph (Node parity: bridge/src/esp32-serial.ts `stamp`).
+    func testTimelineEventRawIsByteCappedUtf8Safe() {
+        let raw = String(repeating: "가", count: 60)   // 180 UTF-8 bytes, 60 Characters
+        let ev: [String: Any] = [
+            "type": "timeline_event",
+            "entry": ["ts": 1_752_700_000_000, "type": "chat_start", "raw": raw,
+                      "detail": String(repeating: "나", count: 100),
+                      "projectName": String(repeating: "다", count: 30)],
+        ]
+        guard let out = ESP32Serial.wifiEsp32Forward(ev, deviceInfo: nil),
+              let entry = out["entry"] as? [String: Any],
+              let outRaw = entry["raw"] as? String,
+              let outDetail = entry["detail"] as? String,
+              let outProject = entry["projectName"] as? String else {
+            return XCTFail("timeline_event must be forwarded with a shrunk entry")
+        }
+        XCTAssertLessThanOrEqual(outRaw.utf8.count, 119)
+        XCTAssertEqual(outRaw, String(repeating: "가", count: 39), "cut must land on a character boundary")
+        XCTAssertLessThanOrEqual(outDetail.utf8.count, 199)
+        XCTAssertLessThanOrEqual(outProject.utf8.count, 39)
+    }
+
+    /// History seeds are capped to the firmware ring (newest 64) with each entry shrunk.
+    func testTimelineHistoryCappedToFirmwareRing() {
+        let entries: [[String: Any]] = (0..<100).map { ["ts": $0, "type": "chat_start", "raw": "row \($0)"] }
+        let ev: [String: Any] = ["type": "timeline_history", "entries": entries]
+        guard let out = ESP32Serial.wifiEsp32Forward(ev, deviceInfo: nil),
+              let outEntries = out["entries"] as? [[String: Any]] else {
+            return XCTFail("timeline_history must be forwarded")
+        }
+        XCTAssertEqual(outEntries.count, 64)
+        XCTAssertEqual(outEntries.first?["raw"] as? String, "row 36", "newest 64 survive")
+        XCTAssertEqual(outEntries.last?["raw"] as? String, "row 99")
+    }
+
+    /// sessions_list string caps are UTF-8 BYTE budgets, not Character counts —
+    /// 39 한글 Characters would be 117 bytes and overflow projectName[40] on-device.
+    func testSessionsListCapsAreByteBudgets() {
+        let ev: [String: Any] = [
+            "type": "sessions_list",
+            "sessions": [["id": "s1", "alive": true,
+                          "projectName": String(repeating: "가", count: 39)]],
+        ]
+        guard let out = ESP32Serial.wifiEsp32Forward(ev, deviceInfo: nil),
+              let sessions = out["sessions"] as? [[String: Any]],
+              let project = sessions.first?["projectName"] as? String else {
+            return XCTFail("sessions_list must be forwarded")
+        }
+        XCTAssertLessThanOrEqual(project.utf8.count, 39)
+        XCTAssertEqual(project, String(repeating: "가", count: 13))
+    }
+
     /// The whitelist must cover the display events a board renders, and match the
     /// USB-serial path (single source of truth: `serialForwardedEvents`).
     func testDisplayEventWhitelistForwarded() {

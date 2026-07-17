@@ -9,16 +9,27 @@
 #include "state/agent_state.h"
 
 // Korean-fallback label font. On-device (display.cpp) this is a RAM copy of
-// lv_font_montserrat_12 with a Noto Sans KR fallback pointer. The sim has no
-// CJK glyphs bundled, so it falls back to plain Montserrat 12 — Latin labels
-// (agent names, states) render identically; CJK would show as .notdef boxes.
+// lv_font_montserrat_12 with a Noto Sans KR fallback pointer; the sim bundles
+// the same Noto KR face (fw/font_noto_kr_12.c) so 한글 labels render exactly
+// as the panel does instead of degrading to .notdef boxes.
+extern "C" const lv_font_t font_noto_kr_12;
 lv_font_t font_kr_12 = lv_font_montserrat_12;
 #if defined(BOARD_IPS10)
 // Larger Korean-safe faces for the IPS10 detail overlay (display.h declares these
-// only under BOARD_IPS10). Latin falls back to Montserrat at size; CJK unbundled.
+// only under BOARD_IPS10). Latin renders from Montserrat at size; 한글 falls back
+// to the 12px Noto face — same tradeoff as the device (display.cpp).
 lv_font_t font_kr_16 = lv_font_montserrat_16;
 lv_font_t font_kr_20 = lv_font_montserrat_20;
 #endif
+static struct KrFontInit {
+    KrFontInit() {
+        font_kr_12.fallback = &font_noto_kr_12;
+#if defined(BOARD_IPS10)
+        font_kr_16.fallback = &font_noto_kr_12;
+        font_kr_20.fallback = &font_noto_kr_12;
+#endif
+    }
+} s_krFontInit;
 
 // Firmware state singletons (defined in main.cpp on-device).
 DashboardState g_state;

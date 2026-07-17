@@ -324,15 +324,19 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
       const d = new Date(entry.ts);
       return {
         ...entry,
-        // Bound to the firmware's TimelineEntry buffers (raw[120]/detail[200])
-        // so a history seed with long chat bodies can't balloon the line.
+        // Bound to the firmware's TimelineEntry buffers (raw[120]/detail[200]/
+        // projectName[40]) so a history seed with long chat bodies can't
+        // balloon the line.
         raw: limitString(entry.raw, 119) ?? '',
         detail: limitString(entry.detail, 199),
+        ...(typeof entry.projectName === 'string' ? { projectName: limitString(entry.projectName, 39) } : {}),
         localHm: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
       };
     };
     if (event.type === 'timeline_event') return { ...e, entry: stamp(e.entry) };
-    return { ...e, entries: Array.isArray(e.entries) ? e.entries.map(stamp) : e.entries };
+    // The firmware ring keeps at most 64 rows (TIMELINE_MAX_ENTRIES) — older
+    // entries would be shifted straight out again, so ship only the newest.
+    return { ...e, entries: Array.isArray(e.entries) ? e.entries.slice(-64).map(stamp) : e.entries };
   }
 
   if (event.type === 'sessions_list') {
@@ -364,9 +368,25 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
   return event;
 }
 
-function limitString(value: unknown, max: number): string | undefined {
+/**
+ * Truncate to a UTF-8 BYTE budget on a code-point boundary. Firmware buffers are
+ * byte-sized (`char raw[120]`, `question[160]`, …); the old UTF-16 `slice(0, max)`
+ * let a 119-"char" 한글 string weigh ~357 bytes, so the board's strncpy did the
+ * real cut — mid-sequence — and the panel rendered a broken trailing glyph.
+ * Mirrored by the Swift daemon (ESP32Serial.limitUtf8Bytes).
+ */
+function limitString(value: unknown, maxBytes: number): string | undefined {
   if (typeof value !== 'string') return undefined;
-  return value.length > max ? value.slice(0, max) : value;
+  if (Buffer.byteLength(value, 'utf-8') <= maxBytes) return value;
+  let used = 0;
+  let end = 0;
+  for (const ch of value) {                       // iterates code points, not UTF-16 units
+    const n = Buffer.byteLength(ch, 'utf-8');
+    if (used + n > maxBytes) break;
+    used += n;
+    end += ch.length;
+  }
+  return value.slice(0, end);
 }
 
 /** ISO date → short "~M/D" for clock-less serial panels ('' when absent/invalid). */

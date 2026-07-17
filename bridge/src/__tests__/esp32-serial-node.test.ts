@@ -322,7 +322,10 @@ describe('prepareForSerial (source)', () => {
     } as any) as any;
 
     const s = prepared.sessions[0];
-    expect(s.currentTool).toHaveLength(39);
+    // Caps are UTF-8 BYTE budgets (firmware buffers are byte-sized): the "·"
+    // in the tool name weighs 2 bytes, so 39 bytes = 38 characters here.
+    expect(new TextEncoder().encode(s.currentTool).length).toBeLessThanOrEqual(39);
+    expect(s.currentTool).toBe('Write · ' + 'x'.repeat(30));
     expect(s.question).toHaveLength(159);
     expect(s.requestId).toBeUndefined(); // observed gate removed — no requestId passthrough
     expect(s.promptType).toBe('yes_no');
@@ -415,6 +418,40 @@ describe('prepareForSerial (source)', () => {
 
     const prepared = prepareForSerial(event);
     expect(prepared).toEqual(event);
+  });
+
+  it('caps timeline raw by UTF-8 BYTES on a code-point boundary (한글-safe)', () => {
+    // 60 한글 syllables = 180 UTF-8 bytes but only 60 UTF-16 units — a length
+    // cap would pass it through and the firmware's 119-byte strncpy would cut
+    // mid-glyph. The cap must be bytes, and must never split a code point.
+    const raw = '가'.repeat(60);
+    const prepared = prepareForSerial({
+      type: 'timeline_event',
+      entry: { ts: 1752700000000, type: 'chat_start', raw, projectName: '프로젝트'.repeat(20) },
+    } as any) as any;
+    const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
+    const outRaw: string = prepared.entry.raw;
+    expect(utf8Bytes(outRaw)).toBeLessThanOrEqual(119);
+    expect(outRaw).toBe('가'.repeat(39));           // 39 × 3 bytes = 117 ≤ 119, whole glyphs only
+    expect(utf8Bytes(prepared.entry.projectName)).toBeLessThanOrEqual(39);
+
+    // ASCII behaviour is unchanged: 119 bytes == 119 chars.
+    const ascii = 'x'.repeat(200);
+    const p2 = prepareForSerial({
+      type: 'timeline_event',
+      entry: { ts: 1752700000000, type: 'chat_start', raw: ascii },
+    } as any) as any;
+    expect(p2.entry.raw).toBe('x'.repeat(119));
+  });
+
+  it('caps timeline_history to the firmware ring size (newest 64)', () => {
+    const entries = Array.from({ length: 100 }, (_, i) => ({
+      ts: 1752700000000 + i, type: 'chat_start', raw: `row ${i}`,
+    }));
+    const prepared = prepareForSerial({ type: 'timeline_history', entries } as any) as any;
+    expect(prepared.entries).toHaveLength(64);
+    expect(prepared.entries[0].raw).toBe('row 36');   // oldest surviving = newest 64
+    expect(prepared.entries[63].raw).toBe('row 99');
   });
 });
 

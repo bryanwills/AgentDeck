@@ -896,15 +896,34 @@ actor ESP32Serial {
             e.removeValue(forKey: "voiceAssistantText")
             e.removeValue(forKey: "voiceAssistantResponseText")
             // Keep gatewayAvailable and gatewayHasError — ESP32 needs them for crayfish rendering
+        } else if type == "timeline_event" || type == "timeline_history" {
+            // Cap timeline text to the firmware's byte-sized TimelineEntry buffers
+            // (raw[120]/detail[200]/projectName[40]). Uncapped, the board's strncpy
+            // does the cut — mid-UTF-8 for 한글/CJK — and the card/ticker renders a
+            // broken trailing glyph. Mirrors the Node bridge `stamp` shrink
+            // (bridge/src/esp32-serial.ts). `localHm` is already stamped at source
+            // (daemonTimelineEntryDict).
+            func shrinkEntry(_ entry: [String: Any]) -> [String: Any] {
+                var o = entry
+                o["raw"] = limitUtf8Bytes(entry["raw"], 119)
+                if entry["detail"] != nil { o["detail"] = limitUtf8Bytes(entry["detail"], 199) }
+                if entry["projectName"] != nil { o["projectName"] = limitUtf8Bytes(entry["projectName"], 39) }
+                return o
+            }
+            if type == "timeline_event" {
+                if let entry = e["entry"] as? [String: Any] { e["entry"] = shrinkEntry(entry) }
+            } else if let entries = e["entries"] as? [[String: Any]] {
+                // The firmware ring keeps at most 64 rows (TIMELINE_MAX_ENTRIES);
+                // older entries would be shifted straight out again, so ship only
+                // the newest ones and keep the frame within board RX buffers.
+                e["entries"] = entries.suffix(64).map(shrinkEntry)
+            }
         } else if type == "sessions_list" {
             // Per-session fields the device needs, with serial-size caps. Mirrors the Node
             // bridge's prepareForSerial map (bridge/src/esp32-serial.ts) so the App-Store Swift
             // daemon drives the same IPS10 D1 cards + pixel-office (project pods, desks, real
             // option buttons) even when no CLI daemon is running. Dead sessions excluded.
-            func lim(_ v: Any?, _ n: Int) -> String {
-                guard let s = v as? String else { return "" }
-                return s.count > n ? String(s.prefix(n)) : s
-            }
+            func lim(_ v: Any?, _ n: Int) -> String { limitUtf8Bytes(v, n) }
             if let sessions = e["sessions"] as? [[String: Any]] {
                 e["sessions"] = sessions
                     .filter { s in (s["alive"] as? Bool) ?? true }
@@ -1014,6 +1033,25 @@ actor ESP32Serial {
             return array.map { aliasCodexAppAgentTypes($0) }
         }
         return value
+    }
+
+    /// Truncate to a UTF-8 BYTE budget on a character boundary. Firmware buffers
+    /// are byte-sized (`char raw[120]` …); the old `String.prefix(n)` counted
+    /// Characters, so n=39 한글 graphemes could still be 117 bytes — the board's
+    /// strncpy then cut mid-sequence and the panel drew a broken glyph. Mirrors
+    /// the Node bridge `limitString` (bridge/src/esp32-serial.ts).
+    static func limitUtf8Bytes(_ v: Any?, _ maxBytes: Int) -> String {
+        guard let s = v as? String else { return "" }
+        if s.utf8.count <= maxBytes { return s }
+        var out = ""
+        var used = 0
+        for ch in s {
+            let n = String(ch).utf8.count
+            if used + n > maxBytes { break }
+            out.append(ch)
+            used += n
+        }
+        return out
     }
 
     // MARK: - Constants

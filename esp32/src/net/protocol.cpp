@@ -6,6 +6,7 @@
 #include "../util/ota_capability.h"
 #include "../util/reset_reason.h"
 #include "../util/usage_format.h"
+#include "../util/utf8.h"
 #include "config.h"
 #include <ArduinoJson.h>
 #include <Arduino.h>
@@ -47,6 +48,16 @@ static bool isCodexAgent(const char* agentType) {
             strcmp(agentType, "codex-app") == 0);
 }
 
+// strncpy + NUL + drop any mid-UTF-8 cut. Daemon text (prompts, activity,
+// timeline rows, 프로젝트명) can exceed these byte-sized buffers — a plain
+// strncpy leaves a split 한글/CJK sequence that renders as a broken glyph.
+static void copyTextU8(char* dst, size_t cap, const char* src) {
+    if (cap == 0) return;
+    strncpy(dst, src ? src : "", cap - 1);
+    dst[cap - 1] = '\0';
+    Utf8::utf8TrimEnd(dst);
+}
+
 static void handleStateUpdate(JsonObject& obj) {
     lockState();
 
@@ -54,7 +65,7 @@ static void handleStateUpdate(JsonObject& obj) {
 
     // Project & model
     if (obj["projectName"].is<const char*>())
-        strncpy(g_state.projectName, obj["projectName"].as<const char*>(), sizeof(g_state.projectName) - 1);
+        copyTextU8(g_state.projectName, sizeof(g_state.projectName), obj["projectName"].as<const char*>());
     if (obj["modelName"].is<const char*>())
         strncpy(g_state.modelName, obj["modelName"].as<const char*>(), sizeof(g_state.modelName) - 1);
     if (obj["agentType"].is<const char*>())
@@ -68,13 +79,13 @@ static void handleStateUpdate(JsonObject& obj) {
     else
         g_state.currentTool[0] = '\0';
     if (obj["toolInput"].is<const char*>())
-        strncpy(g_state.toolInput, obj["toolInput"].as<const char*>(), sizeof(g_state.toolInput) - 1);
+        copyTextU8(g_state.toolInput, sizeof(g_state.toolInput), obj["toolInput"].as<const char*>());
     else
         g_state.toolInput[0] = '\0';
 
     // Permission/Options
     if (obj["question"].is<const char*>())
-        strncpy(g_state.question, obj["question"].as<const char*>(), sizeof(g_state.question) - 1);
+        copyTextU8(g_state.question, sizeof(g_state.question), obj["question"].as<const char*>());
     if (obj["promptType"].is<const char*>())
         strncpy(g_state.promptType, obj["promptType"].as<const char*>(), sizeof(g_state.promptType) - 1);
 
@@ -84,7 +95,7 @@ static void handleStateUpdate(JsonObject& obj) {
         g_state.optionCount = min((int)opts.size(), 8);
         for (uint8_t i = 0; i < g_state.optionCount; i++) {
             JsonObject o = opts[i].as<JsonObject>();
-            strncpy(g_state.options[i].label, o["label"] | "", sizeof(g_state.options[i].label) - 1);
+            copyTextU8(g_state.options[i].label, sizeof(g_state.options[i].label), o["label"] | "");
             g_state.options[i].index = o["index"] | i;
             g_state.options[i].recommended = o["recommended"] | false;
             g_state.options[i].selected = o["selected"] | false;
@@ -309,8 +320,8 @@ static void handleSessionsList(JsonObject& obj) {
     for (uint8_t i = 0; i < g_state.sessionCount; i++) {
         JsonObject s = sessions[i].as<JsonObject>();
         strncpy(g_state.sessions[i].id, s["id"] | "", sizeof(g_state.sessions[i].id) - 1);
-        strncpy(g_state.sessions[i].projectName, s["projectName"] | "",
-                sizeof(g_state.sessions[i].projectName) - 1);
+        copyTextU8(g_state.sessions[i].projectName, sizeof(g_state.sessions[i].projectName),
+                   s["projectName"] | "");
         strncpy(g_state.sessions[i].modelName, s["modelName"] | "",
                 sizeof(g_state.sessions[i].modelName) - 1);
         strncpy(g_state.sessions[i].agentType, s["agentType"] | "",
@@ -327,9 +338,8 @@ static void handleSessionsList(JsonObject& obj) {
                 sizeof(g_state.sessions[i].currentTool) - 1);
         g_state.sessions[i].currentTool[sizeof(g_state.sessions[i].currentTool) - 1] = '\0';
         g_state.sessions[i].elapsedSec = s["elapsedSec"] | 0;
-        strncpy(g_state.sessions[i].question, s["question"] | "",
-                sizeof(g_state.sessions[i].question) - 1);
-        g_state.sessions[i].question[sizeof(g_state.sessions[i].question) - 1] = '\0';
+        copyTextU8(g_state.sessions[i].question, sizeof(g_state.sessions[i].question),
+                   s["question"] | "");
         strncpy(g_state.sessions[i].promptType, s["promptType"] | "",
                 sizeof(g_state.sessions[i].promptType) - 1);
         g_state.sessions[i].promptType[sizeof(g_state.sessions[i].promptType) - 1] = '\0';
@@ -338,9 +348,8 @@ static void handleSessionsList(JsonObject& obj) {
         g_state.sessions[i].requestId[sizeof(g_state.sessions[i].requestId) - 1] = '\0';
         // Shared per-session activity one-liner (heuristic → Foundation Models
         // summary) — the most meaningful glanceable line for a dashboard row.
-        strncpy(g_state.sessions[i].activity, s["activity"] | "",
-                sizeof(g_state.sessions[i].activity) - 1);
-        g_state.sessions[i].activity[sizeof(g_state.sessions[i].activity) - 1] = '\0';
+        copyTextU8(g_state.sessions[i].activity, sizeof(g_state.sessions[i].activity),
+                   s["activity"] | "");
 
         if (g_state.sessions[i].alive) {
             if (strcmp(g_state.sessions[i].agentType, "openclaw") == 0) {
@@ -547,14 +556,14 @@ static void handleTimelineEvent(JsonObject& obj) {
     strncpy(entry.hm, e["localHm"] | "", sizeof(entry.hm) - 1);
 
     strncpy(entry.type, e["type"] | "", sizeof(entry.type) - 1);
-    strncpy(entry.raw, e["raw"] | "", sizeof(entry.raw) - 1);
+    copyTextU8(entry.raw, sizeof(entry.raw), e["raw"] | "");
     if (e["detail"].is<const char*>())
-        strncpy(entry.detail, e["detail"].as<const char*>(), sizeof(entry.detail) - 1);
+        copyTextU8(entry.detail, sizeof(entry.detail), e["detail"].as<const char*>());
     if (e["status"].is<const char*>())
         strncpy(entry.status, e["status"].as<const char*>(), sizeof(entry.status) - 1);
     strncpy(entry.sessionId, e["sessionId"] | "", sizeof(entry.sessionId) - 1);
     strncpy(entry.agentType, e["agentType"] | "", sizeof(entry.agentType) - 1);
-    strncpy(entry.projectName, e["projectName"] | "", sizeof(entry.projectName) - 1);
+    copyTextU8(entry.projectName, sizeof(entry.projectName), e["projectName"] | "");
     strncpy(entry.taskId, e["taskId"] | "", sizeof(entry.taskId) - 1);
 
     lockState();
@@ -591,14 +600,14 @@ static void handleTimelineHistory(JsonObject& obj) {
         entry.ts = (uint32_t)((tsMs / 1000) % 86400);
         strncpy(entry.hm, e["localHm"] | "", sizeof(entry.hm) - 1);
         strncpy(entry.type, e["type"] | "", sizeof(entry.type) - 1);
-        strncpy(entry.raw, e["raw"] | "", sizeof(entry.raw) - 1);
+        copyTextU8(entry.raw, sizeof(entry.raw), e["raw"] | "");
         if (e["detail"].is<const char*>())
-            strncpy(entry.detail, e["detail"].as<const char*>(), sizeof(entry.detail) - 1);
+            copyTextU8(entry.detail, sizeof(entry.detail), e["detail"].as<const char*>());
         if (e["status"].is<const char*>())
             strncpy(entry.status, e["status"].as<const char*>(), sizeof(entry.status) - 1);
         strncpy(entry.sessionId, e["sessionId"] | "", sizeof(entry.sessionId) - 1);
         strncpy(entry.agentType, e["agentType"] | "", sizeof(entry.agentType) - 1);
-        strncpy(entry.projectName, e["projectName"] | "", sizeof(entry.projectName) - 1);
+        copyTextU8(entry.projectName, sizeof(entry.projectName), e["projectName"] | "");
         strncpy(entry.taskId, e["taskId"] | "", sizeof(entry.taskId) - 1);
 
         g_state.addTimelineEntry(entry);

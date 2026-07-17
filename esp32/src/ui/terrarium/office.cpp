@@ -34,6 +34,10 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 #define HEX565(h) rgb565((uint8_t)((h)>>16), (uint8_t)((h)>>8), (uint8_t)(h))
 static const uint16_t C_carpetA = HEX565(0x173a33), C_carpetB = HEX565(0x143631), C_carpetEdge = HEX565(0x0e2a25);
 static const uint16_t C_deskTop = HEX565(0x34574f), C_deskHi = HEX565(0x3e655c), C_deskEdge = HEX565(0x1d342f);
+// Project-zone rug: a visibly bounded floor area under each huddle so seated
+// creatures read as INSIDE their project room (the table alone only covered
+// part of the seat rows — bottom-row agents looked parked outside the area).
+static const uint16_t C_rug = HEX565(0x1c4a41), C_rugEdge = HEX565(0x2a5c52);
 static const uint16_t C_bubble = HEX565(0x0a1714);
 // Office props (office.js C): plant, water cooler, coffee machine + a filing cabinet.
 static const uint16_t C_plantPot = HEX565(0x7a4a2c), C_plant = HEX565(0x3f8f63), C_plant2 = HEX565(0x4fa873);
@@ -437,10 +441,19 @@ static void renderBaseInto() {
             if ((c + r) & 1) { int x, y; tilePx(c, r, x, y); blk(x, y, tile, tile, C_carpetB); }
     for (int c = 0; c <= cols; c++) { int x = gx + c * tile; for (int y = gy; y < gy + rows * tile; y++) blendPx(x, y, C_carpetEdge, 60); }
     for (int r = 0; r <= rows; r++) { int y = gy + r * tile; for (int x = gx; x < gx + cols * tile; x++) blendPx(x, y, C_carpetEdge, 60); }
-    // a shared table under each project huddle — the team gathers around it
+    // each project huddle: a bounded zone rug (the visible "room") + the shared
+    // table the team gathers around. The rug spans ALL seat rows so every seated
+    // creature — bottom row included — clearly sits inside its project area.
     for (int i = 0; i < podCount; i++) {
         int px, py; tilePx(pods[i].c, pods[i].r + 1, px, py);   // below the nametag row
         int tw = pods[i].w * tile, th = (pods[i].h - 1) * tile;
+        blk(px - u, py - u, tw + 2 * u, th + 2 * u, C_rug);
+        for (int x = px - u; x < px - u + tw + 2 * u; x++) {    // soft zone outline
+            blendPx(x, py - u, C_rugEdge, 170); blendPx(x, py + th + u - 1, C_rugEdge, 170);
+        }
+        for (int y = py - u; y < py + th + u; y++) {
+            blendPx(px - u, y, C_rugEdge, 170); blendPx(px + tw + u - 1, y, C_rugEdge, 170);
+        }
         drawTable(px + u, py + th / 5, tw - 2 * u, (th * 3) / 5);
     }
     // props — potted plants in the top corners (ambient office greenery)
@@ -492,23 +505,50 @@ static bool stepWorker(Worker& w, uint32_t nowMs) {
     int self = (int)(&w - wk);
     int tc, tr; targetFor(w, tc, tr);
     if (w.col == tc && w.row == tr) return false;
-    int dx = (tc > w.col) - (tc < w.col), dy = (tr > w.row) - (tr < w.row);
-    int order[2][2];
-    if (abs(tc - w.col) >= abs(tr - w.row)) { order[0][0]=dx; order[0][1]=0; order[1][0]=0; order[1][1]=dy; }
-    else                                    { order[0][0]=0; order[0][1]=dy; order[1][0]=dx; order[1][1]=0; }
-    for (int t = 0; t < 2; t++) {
-        int mx = order[t][0], my = order[t][1];
-        if (!mx && !my) continue;
-        int nc = w.col + mx, nr = w.row + my;
-        if (nc < 0 || nc >= cols || nr < 1 || nr >= rows) continue;
-        if (workerCell(nc, nr, self)) continue;                          // never overlap another creature
-        if (blockedCell(nc, nr) && !(tc == nc && tr == nr)) continue;    // avoid props
-        w.prevCol = w.col; w.prevRow = w.row; w.stepAtMs = nowMs;
-        w.col = nc; w.row = nr;
-        w.facing = mx > 0 ? 'R' : mx < 0 ? 'L' : my < 0 ? 'U' : 'D';
-        return true;
+    // BFS shortest path around props + other creatures. The old greedy axis walk
+    // only ever tried the two direct moves, so a SEATED teammate in the corridor
+    // wedged late arrivals permanently just outside their own huddle (repro:
+    // sim `crowd` scene — two workers parked outside the AgentDeck pod forever).
+    // The floor grid is tiny (≤ ~15×47 cells) and this runs on the 200ms logic
+    // tick only, so a full BFS per moving worker is negligible.
+    static constexpr int GRID_MAX = 32 * 48;
+    if (cols * rows > GRID_MAX) return false;
+    static int16_t from[GRID_MAX];
+    static int16_t fifo[GRID_MAX];
+    for (int i = 0; i < cols * rows; i++) from[i] = -1;
+    auto cellId = [&](int c, int r) { return (int16_t)(r * cols + c); };
+    int16_t start = cellId(w.col, w.row), goal = cellId(tc, tr);
+    from[start] = start;
+    int head = 0, tail = 0;
+    fifo[tail++] = start;
+    // Neighbor order biases toward the target axis so open-floor motion keeps
+    // the old straight-line look; BFS levels guarantee the path stays shortest.
+    int dxp = (tc > w.col) - (tc < w.col), dyp = (tr > w.row) - (tr < w.row);
+    if (dxp == 0) dxp = 1; if (dyp == 0) dyp = 1;
+    const int dirs[4][2] = {{dxp, 0}, {0, dyp}, {-dxp, 0}, {0, -dyp}};
+    while (head < tail && from[goal] < 0) {
+        int16_t cur = fifo[head++];
+        int cc = cur % cols, cr = cur / cols;
+        for (int t = 0; t < 4; t++) {
+            int nc = cc + dirs[t][0], nr = cr + dirs[t][1];
+            if (nc < 0 || nc >= cols || nr < 1 || nr >= rows) continue;
+            int16_t nid = cellId(nc, nr);
+            if (from[nid] >= 0) continue;
+            if (workerCell(nc, nr, self)) continue;                          // never overlap another creature
+            if (blockedCell(nc, nr) && !(tc == nc && tr == nr)) continue;    // avoid props
+            from[nid] = cur;
+            fifo[tail++] = nid;
+        }
     }
-    return false;
+    if (from[goal] < 0) return false;   // seat momentarily unreachable → wait a tick
+    int16_t step = goal;
+    while (from[step] != start) step = from[step];
+    int nc = step % cols, nr = step / cols;
+    int mx = nc - w.col, my = nr - w.row;
+    w.prevCol = w.col; w.prevRow = w.row; w.stepAtMs = nowMs;
+    w.col = nc; w.row = nr;
+    w.facing = mx > 0 ? 'R' : mx < 0 ? 'L' : my < 0 ? 'U' : 'D';
+    return true;
 }
 
 // ── per-frame draw ──

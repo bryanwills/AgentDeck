@@ -20,6 +20,7 @@
 #include "ui/terrarium/creature_glyphs_generated.h"
 #include "ui/agent_label.h"
 #include "util/usage_format.h"
+#include "util/utf8.h"
 
 namespace {
 
@@ -360,16 +361,9 @@ bool isAsciiOnly(const char* s) {
 }
 
 // Back off `n` to a UTF-8 character boundary (never split a 한글 glyph).
-size_t utf8Boundary(const char* s, size_t n) {
-    while (n > 0 && ((uint8_t)s[n] & 0xC0) == 0x80) n--;
-    return n;
-}
-
-size_t utf8CharCount(const char* s) {
-    size_t n = 0;
-    for (; *s; s++) if (((uint8_t)*s & 0xC0) != 0x80) n++;
-    return n;
-}
+// SSOT: util/utf8.h (shared with protocol ingestion + the IPS10 cards).
+size_t utf8Boundary(const char* s, size_t n) { return Utf8::utf8Boundary(s, n); }
+size_t utf8CharCount(const char* s) { return Utf8::utf8CharCount(s); }
 
 void uFontSetup() {
     u8f.setFont(u8g2_font_unifont_t_korean2);

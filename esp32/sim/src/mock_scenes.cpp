@@ -5,6 +5,7 @@
 #include "sim.h"
 #include "config.h"
 #include "state/agent_state.h"
+#include <cstdio>
 #include <cstring>
 
 namespace {
@@ -19,9 +20,12 @@ void setStr(char* dst, size_t cap, const char* src) {
 // daemon's sessions_list does, so the HUD list and creature tags read distinctly.
 void addSession(const char* agentType, const char* state, const char* project) {
   if (g_state.sessionCount >= 10) return;
-  SessionInfo& s = g_state.sessions[g_state.sessionCount++];
+  SessionInfo& s = g_state.sessions[g_state.sessionCount];
   std::memset(&s, 0, sizeof(s));
-  setStr(s.id, sizeof(s.id), project);
+  // Unique per-session id (real sessions are UUIDs); same-project sessions must
+  // still be distinct so per-card timeline attribution can be exercised.
+  std::snprintf(s.id, sizeof(s.id), "s%u-%s", (unsigned)g_state.sessionCount, project);
+  g_state.sessionCount++;
   setStr(s.agentType, sizeof(s.agentType), agentType);
   setStr(s.state, sizeof(s.state), state);
   setStr(s.projectName, sizeof(s.projectName), project);
@@ -35,6 +39,20 @@ void addSession(const char* agentType, const char* state, const char* project) {
     setStr(g_state.opencodeNames[g_state.opencodeCount++], 24, project);
   else if (std::strcmp(agentType, "antigravity") == 0)
     setStr(g_state.antigravityNames[g_state.antigravityCount++], 24, project);
+}
+
+// Append a timeline row the way protocol.cpp handleTimelineEvent does, so card
+// bodies / tickers exercise the real per-session attribution + compose paths.
+void addTimeline(const char* type, const char* sid, const char* raw, const char* taskId) {
+  TimelineEntry e;
+  std::memset(&e, 0, sizeof(e));
+  setStr(e.type, sizeof(e.type), type);
+  setStr(e.raw, sizeof(e.raw), raw);
+  setStr(e.sessionId, sizeof(e.sessionId), sid);
+  if (taskId) setStr(e.taskId, sizeof(e.taskId), taskId);
+  setStr(e.hm, sizeof(e.hm), "12:34");
+  e.ts = 12 * 3600 + 34 * 60;
+  g_state.addTimelineEntry(e);
 }
 
 void base(CreatureState cs) {
@@ -101,6 +119,34 @@ bool SimScenes::apply(const char* name) {
     g_state.crayfishState = CrayfishState::ROUTING;
     g_state.gatewayConnected = true;   // OpenClaw gateway → crayfish visible
     g_state.crayfishCount = 1;
+    return true;
+  }
+  if (std::strcmp(name, "crowd") == 0) {
+    // Real-world shape: many concurrent sessions in the SAME project (one big
+    // huddle) plus a couple of stragglers — exercises pod grouping + seating.
+    base(CreatureState::WORKING);
+    addSession("claude-code", "processing", "AgentDeck");
+    addSession("claude-code", "processing", "AgentDeck");
+    addSession("codex-cli", "processing", "AgentDeck");
+    addSession("opencode", "idle", "AgentDeck");
+    addSession("claude-code", "awaiting_permission", "AgentDeck");
+    addSession("claude-code", "idle", "babelforge");
+    addSession("codex-cli", "idle", "openclaw");
+    setStr(g_state.sessions[1].activity, sizeof(g_state.sessions[1].activity),
+           "Building the AgentDeck CLI");
+    setStr(g_state.sessions[4].question, sizeof(g_state.sessions[4].question),
+           "Bash 명령 실행을 허용할까요? rm -rf build/");
+    // Per-session timeline rows (Korean + long task headers) — exercises the
+    // card-body "<task> · <text>" compose, taskId resolution, and UTF-8-safe
+    // truncation exactly the way live daemon rows do.
+    addTimeline("task_start", "s0-AgentDeck",
+                "ips10 기기에서 에이전트들이 프로젝트 영역 안으로 들어오지 못하는 문제와 카드 텍스트 깨짐을 함께 개선", "t1");
+    addTimeline("chat_start", "s0-AgentDeck",
+                "타임라인 카드 텍스트가 깨져 보이는 원인을 조사해서 수정하라", "t1");
+    addTimeline("chat_response", "s2-AgentDeck",
+                "Fixed the treemap sizing so cards fill the pane", nullptr);
+    addTimeline("chat_start", "s4-AgentDeck",
+                "권한 요청: rm -rf build/ 실행을 허용할까요?", nullptr);
     return true;
   }
   if (std::strcmp(name, "permission") == 0) {
