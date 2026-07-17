@@ -49,6 +49,19 @@ struct TimelineStripView: View {
     @State private var focusedIndex: Int = -1
     /// Compact-mode tap-to-expand. -1 = none expanded.
     @State private var expandedIndex: Int = -1
+    /// Sticky-bottom: the list follows new rows until the user scrolls away
+    /// from the bottom, and re-engages the moment they scroll back. Selection
+    /// deliberately does NOT gate this — when auto-scroll hung off
+    /// `focusedIndex < 0`, tapping a row once to read it in the detail pane
+    /// froze the list until the session filter changed.
+    @State private var stickToBottom = true
+    /// Row count the last scroll-geometry callback was baselined against.
+    @State private var stickyLayoutCount = -1
+
+    /// Slack for "at the bottom", in points — absorbs sub-pixel rounding and
+    /// the 1pt inter-row spacing.
+    private static let stickyBottomSlop: CGFloat = 12
+    private static let scrollSpace = "timelineScroll"
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
@@ -198,55 +211,119 @@ struct TimelineStripView: View {
 
     /// `allowExpand=true` — compact mode: tap toggles inline detail.
     /// `allowExpand=false` — regular mode: tap selects for the right detail pane.
-    @ViewBuilder
+    // The ScrollView is built unconditionally, with the empty state as its
+    // content. An `if grouped.isEmpty` branch AROUND it meant the empty →
+    // first-history-snapshot transition constructed the scrolling branch fresh
+    // with its final count, so `onChange(of:)` never observed a change and the
+    // very first load stayed pinned to the OLDEST row. One stable view identity
+    // makes 0→N an ordinary content change the handler below already covers.
+    // (A ScrollView top-anchors its content, so the empty-state text keeps the
+    // top alignment its own frame used to force.)
     private func timelineList(allowExpand: Bool) -> some View {
-        if grouped.isEmpty {
-            // Hard-anchor empty-state text to the top — even if the parent
-            // alignment hint isn't honoured (e.g. on a SwiftUI version that
-            // centres single-child VStacks), the trailing Spacer here pushes
-            // the text up.
-            VStack(alignment: .leading, spacing: 0) {
-                Text(timelineFilter == nil ? "No events yet" : "No events for this session")
-                    .font(.system(size: fontScale.sub, design: .monospaced))
-                    .foregroundStyle(TerrariumHUD.subtext)
-                    .padding(.horizontal, 8)
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        } else {
+        GeometryReader { viewport in
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(grouped.enumerated()), id: \.offset) { index, group in
-                            VStack(alignment: .leading, spacing: 0) {
-                                compactLogRow(group, index: index, allowMultiline: allowExpand)
-                                    .id(index)
-                                    .onTapGesture {
-                                        if allowExpand {
-                                            expandedIndex = (expandedIndex == index) ? -1 : index
-                                            focusedIndex = index
-                                        } else {
-                                            focusedIndex = index
-                                        }
+                    if grouped.isEmpty {
+                        Text(timelineFilter == nil ? "No events yet" : "No events for this session")
+                            .font(.system(size: fontScale.sub, design: .monospaced))
+                            .foregroundStyle(TerrariumHUD.subtext)
+                            .padding(.horizontal, 8)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 1) {
+                            ForEach(Array(grouped.enumerated()), id: \.offset) { index, group in
+                                VStack(alignment: .leading, spacing: 0) {
+                                    // Day break above the first row of each calendar
+                                    // day — bare HH:mm stamps otherwise read as today
+                                    // on a buffer that spans midnight.
+                                    if let dayLabel = timelineDayBreakLabel(at: index, in: grouped) {
+                                        dayBreakRow(dayLabel)
                                     }
-                                if allowExpand && expandedIndex == index {
-                                    inlineDetailPane(group)
-                                        .padding(.leading, 18)
-                                        .padding(.trailing, 6)
-                                        .padding(.vertical, 4)
+                                    compactLogRow(group, index: index, allowMultiline: allowExpand)
+                                        .id(index)
+                                        .onTapGesture {
+                                            if allowExpand {
+                                                expandedIndex = (expandedIndex == index) ? -1 : index
+                                                focusedIndex = index
+                                            } else {
+                                                focusedIndex = index
+                                            }
+                                        }
+                                    if allowExpand && expandedIndex == index {
+                                        inlineDetailPane(group)
+                                            .padding(.leading, 18)
+                                            .padding(.trailing, 6)
+                                            .padding(.vertical, 4)
+                                    }
                                 }
                             }
                         }
+                        .padding(.horizontal, 4)
+                        .background(
+                            // Reads the content's bottom edge to decide whether the
+                            // list is parked at the bottom. A plain geometry read +
+                            // onChange, deliberately NOT a PreferenceKey: those do
+                            // not propagate out of a ScrollView on macOS.
+                            GeometryReader { content in
+                                Color.clear.onChange(
+                                    of: content.frame(in: .named(Self.scrollSpace)).maxY,
+                                    initial: true
+                                ) { _, contentMaxY in
+                                    updateStickToBottom(
+                                        contentMaxY: contentMaxY,
+                                        viewportHeight: viewport.size.height
+                                    )
+                                }
+                            }
+                        )
                     }
-                    .padding(.horizontal, 4)
                 }
-                .onChange(of: grouped.count) {
-                    if !grouped.isEmpty, focusedIndex < 0 {
-                        proxy.scrollTo(grouped.count - 1, anchor: .bottom)
-                    }
+                .coordinateSpace(.named(Self.scrollSpace))
+                // Keyed on timelineVersion, not grouped.count: a chat_response
+                // folding into an existing group, an ×count collapse, or a
+                // task_end upsert all change a row's content — and its height —
+                // without changing the row count, and the list must stay pinned
+                // to the bottom through those too. `initial: true` covers a strip
+                // created with rows already present (filter switch, HUD toggled
+                // back on), which produces no transition at all.
+                .onChange(of: timelineVersion, initial: true) {
+                    guard !grouped.isEmpty, stickToBottom else { return }
+                    proxy.scrollTo(grouped.count - 1, anchor: .bottom)
                 }
             }
         }
+    }
+
+    /// Re-evaluates sticky-bottom from the scroll position.
+    private func updateStickToBottom(contentMaxY: CGFloat, viewportHeight: CGFloat) {
+        guard viewportHeight > 0 else { return }
+        // A relayout caused by the row set itself changing is not the user
+        // moving: the appended row lands below the viewport before the
+        // scroll-to-bottom above has run, which would read as "scrolled away"
+        // and disengage the very mode that is about to scroll. Re-baseline and
+        // keep the current mode.
+        guard stickyLayoutCount == grouped.count else {
+            stickyLayoutCount = grouped.count
+            return
+        }
+        stickToBottom = contentMaxY <= viewportHeight + Self.stickyBottomSlop
+    }
+
+    /// Day-break separator: uppercase label + hairline rule to the trailing edge.
+    private func dayBreakRow(_ label: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: fontScale.sub, weight: .bold, design: .monospaced))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
+            Rectangle()
+                .fill(TerrariumHUD.subtext.opacity(0.25))
+                .frame(height: 1)
+        }
+        .padding(.top, 5)
+        .padding(.bottom, 2)
+        .padding(.horizontal, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Entries from \(label.lowercased())")
     }
 
     // MARK: - Compact Log Row
@@ -1102,6 +1179,55 @@ struct TimelineStripView: View {
         case .unknown(let raw): return raw.uppercased()
         }
     }
+}
+
+// MARK: - Day Break
+
+/// Label to render ABOVE the row at `index`, or nil when that row continues the
+/// previous row's calendar day. Mirrors Kotlin `timelineDayBreakLabel`
+/// (android .../ui/monitor/TimelineDayBreak.kt) — keep the two in sync.
+///
+/// Index 0 is deliberately asymmetric: it emits a separator only when the
+/// oldest visible row is NOT from today. A single-day buffer is the
+/// overwhelmingly common case, and a "TODAY" banner atop a HUD strip this small
+/// is pure chrome; a buffer that opens on an older day genuinely needs the
+/// anchor, because every row below it shows only HH:mm.
+func timelineDayBreakLabel(
+    at index: Int,
+    in groups: [GroupedEntry],
+    now: Date = Date(),
+    calendar: Calendar = .current
+) -> String? {
+    guard index >= 0, index < groups.count else { return nil }
+    let day = groups[index].entry.date
+    if index == 0 {
+        guard !calendar.isDate(day, inSameDayAs: now) else { return nil }
+    } else {
+        guard !calendar.isDate(day, inSameDayAs: groups[index - 1].entry.date) else { return nil }
+    }
+    return timelineDayLabel(for: day, now: now, calendar: calendar)
+}
+
+func timelineDayLabel(for date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+    if calendar.isDate(date, inSameDayAs: now) { return "TODAY" }
+    if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+       calendar.isDate(date, inSameDayAs: yesterday) {
+        return "YESTERDAY"
+    }
+    let fmt = DateFormatter()
+    // Fixed POSIX locale, matching the rest of this English-only HUD ("No
+    // events yet"). A device-locale month name would also break the monospaced
+    // column rhythm the strip is built on.
+    fmt.locale = Locale(identifier: "en_US_POSIX")
+    // Format in the same zone the day comparison above used, or a caller
+    // passing a non-current calendar would get a label naming a different day
+    // than the one that triggered the break.
+    fmt.calendar = calendar
+    fmt.timeZone = calendar.timeZone
+    fmt.dateFormat = calendar.isDate(date, equalTo: now, toGranularity: .year)
+        ? "EEE, MMM d"
+        : "MMM d, yyyy"
+    return fmt.string(from: date).uppercased()
 }
 
 func timelineDisplayGroupsForDashboard(_ groups: [GroupedEntry]) -> [GroupedEntry] {

@@ -35,8 +35,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -104,6 +106,14 @@ fun TimelineStrip(
 
     var focusedIndex by remember { mutableIntStateOf(-1) }
     var expandedIndex by remember { mutableIntStateOf(-1) }
+    // Sticky-bottom: the list follows new rows until the user scrolls away from
+    // the bottom, and re-engages the moment they scroll back. Selection
+    // deliberately does NOT gate this — when auto-scroll hung off
+    // `focusedIndex < 0`, tapping a row once to read it in the detail pane froze
+    // the list until the session filter changed. Mirrors Swift
+    // TimelineStripView.stickToBottom.
+    var stickToBottom by remember { mutableStateOf(true) }
+    var stickyLayoutCount by remember { mutableIntStateOf(-1) }
 
     // Reset selection/expansion when the filter changes so a row index from the
     // all-sessions view doesn't point at an unrelated row after narrowing.
@@ -118,8 +128,32 @@ fun TimelineStrip(
         else -> grouped[focusedIndex]
     }
 
-    LaunchedEffect(grouped.size) {
-        if (grouped.isNotEmpty() && focusedIndex < 0) {
+    // Re-evaluate sticky-bottom from the scroll position. `canScrollForward` is
+    // false exactly when the list is parked at the end (and when the rows don't
+    // fill the viewport at all), so the transitions this collects are precisely
+    // "user left the bottom" / "user came back".
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo.totalItemsCount to listState.canScrollForward }
+            .collect { (count, canScrollForward) ->
+                // A relayout caused by the row set itself changing is not the
+                // user moving: the appended row lands below the viewport before
+                // the scroll below has run, which would read as "scrolled away"
+                // and disengage the very mode that is about to scroll.
+                // Re-baseline and keep the current mode.
+                if (stickyLayoutCount != count) {
+                    stickyLayoutCount = count
+                    return@collect
+                }
+                stickToBottom = !canScrollForward
+            }
+    }
+
+    // Keyed on `grouped`, not `grouped.size`: a chat_response folding into an
+    // existing group, an ×count collapse, or a task_end upsert all change a
+    // row's content — and its height — without changing the row count, and the
+    // list must stay pinned to the bottom through those too.
+    LaunchedEffect(grouped) {
+        if (grouped.isNotEmpty() && stickToBottom) {
             listState.animateScrollToItem(grouped.lastIndex)
         }
     }
@@ -313,6 +347,12 @@ private fun TimelineList(
                 val isSelected = index == focusedIndex ||
                     (focusedIndex < 0 && index == grouped.lastIndex)
                 Column {
+                    // Day break above the first row of each calendar day — bare
+                    // HH:mm stamps otherwise read as today on a buffer that
+                    // spans midnight.
+                    timelineDayBreakLabel(index, grouped)?.let { dayLabel ->
+                        DayBreakRow(label = dayLabel, scale = scale)
+                    }
                     CompactLogRow(
                         group = group,
                         isSelected = isSelected,
@@ -328,6 +368,32 @@ private fun TimelineList(
                 }
             }
         }
+    }
+}
+
+/** Day-break separator: uppercase label + hairline rule to the trailing edge. */
+@Composable
+private fun DayBreakRow(label: String, scale: MonitorLayoutScale) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 5.dp, bottom = 2.dp, start = 2.dp, end = 2.dp),
+    ) {
+        Text(
+            text = label,
+            color = TerrariumColors.HUDSubtext.copy(alpha = 0.75f),
+            fontSize = scale.fontSub,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(TerrariumColors.HUDSubtext.copy(alpha = 0.25f)),
+        )
     }
 }
 

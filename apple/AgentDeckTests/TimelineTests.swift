@@ -1532,3 +1532,79 @@ final class TimelineTests: XCTestCase {
                      "task_end boundary blocks folding across sessions")
     }
 }
+
+// MARK: - Day Break
+
+/// Day-break policy. Mirrors Kotlin `TimelineDayBreakTest` in
+/// android/app/src/test/kotlin/dev/agentdeck/ui/monitor/ — the two suites
+/// assert the same cases so the platforms can't drift.
+final class TimelineDayBreakTests: XCTestCase {
+
+    private let seoul: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Seoul")!
+        return cal
+    }()
+
+    private let utc: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        return cal
+    }()
+
+    /// Fri 2026-07-17 14:30 KST.
+    private var now: Date { at(2026, 7, 17, 14, 30) }
+
+    private func at(_ y: Int, _ m: Int, _ d: Int, _ h: Int, _ min: Int, in cal: Calendar? = nil) -> Date {
+        (cal ?? seoul).date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!
+    }
+
+    private func groups(_ dates: Date...) -> [GroupedEntry] {
+        dates.map { date in
+            let entry = TimelineEntry(ts: date.timeIntervalSince1970 * 1000, type: .chatStart, raw: "turn")
+            return GroupedEntry(entry: entry, lastTs: entry.ts)
+        }
+    }
+
+    func testAllTodayBufferGetsNoSeparatorAtAll() {
+        let grouped = groups(at(2026, 7, 17, 9, 0), at(2026, 7, 17, 10, 0))
+        XCTAssertNil(timelineDayBreakLabel(at: 0, in: grouped, now: now, calendar: seoul))
+        XCTAssertNil(timelineDayBreakLabel(at: 1, in: grouped, now: now, calendar: seoul))
+    }
+
+    func testSeparatorLandsOnFirstRowOfNewDay() {
+        let grouped = groups(at(2026, 7, 16, 23, 50), at(2026, 7, 17, 0, 10))
+        XCTAssertEqual(timelineDayBreakLabel(at: 0, in: grouped, now: now, calendar: seoul), "YESTERDAY")
+        XCTAssertEqual(timelineDayBreakLabel(at: 1, in: grouped, now: now, calendar: seoul), "TODAY")
+    }
+
+    func testIndexZeroAnchorsOlderBufferButStaysSilentOnToday() {
+        XCTAssertEqual(
+            timelineDayBreakLabel(at: 0, in: groups(at(2026, 7, 15, 9, 0)), now: now, calendar: seoul),
+            "WED, JUL 15"
+        )
+        XCTAssertNil(
+            timelineDayBreakLabel(at: 0, in: groups(at(2026, 7, 17, 9, 0)), now: now, calendar: seoul)
+        )
+    }
+
+    func testDayOlderThanThisYearCarriesTheYear() {
+        let grouped = groups(at(2025, 12, 31, 9, 0), at(2026, 7, 17, 9, 0))
+        XCTAssertEqual(timelineDayBreakLabel(at: 0, in: grouped, now: now, calendar: seoul), "DEC 31, 2025")
+        XCTAssertEqual(timelineDayBreakLabel(at: 1, in: grouped, now: now, calendar: seoul), "TODAY")
+    }
+
+    func testSameInstantReadsAsDifferentDayAcrossZones() {
+        // 2026-07-17 08:30 KST == 2026-07-16 23:30 UTC. The separator must
+        // follow the viewer's zone, not the stored epoch.
+        let grouped = groups(at(2026, 7, 16, 23, 50), at(2026, 7, 17, 8, 30))
+        XCTAssertEqual(timelineDayBreakLabel(at: 1, in: grouped, now: now, calendar: seoul), "TODAY")
+        XCTAssertNil(timelineDayBreakLabel(at: 1, in: grouped, now: now, calendar: utc))
+    }
+
+    func testOutOfRangeIndexYieldsNoSeparator() {
+        let grouped = groups(at(2026, 7, 17, 9, 0))
+        XCTAssertNil(timelineDayBreakLabel(at: -1, in: grouped, now: now, calendar: seoul))
+        XCTAssertNil(timelineDayBreakLabel(at: 1, in: grouped, now: now, calendar: seoul))
+    }
+}
