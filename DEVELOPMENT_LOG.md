@@ -4,6 +4,44 @@
 
 > **Older entries are archived by month** under [`docs/devlog/`](docs/devlog/README.md). This active file keeps the current month plus the preceding month (currently 2026-07 and 2026-06); search only the relevant monthly archive for older history.
 
+## 2026-07-17 (심야) — InkDeck/XTeink X3·X4 공통 responsive e-ink dashboard
+
+### 문제
+- InkDeck은 800×480 좌표와 2/3열 분기를 `eink_display.cpp` 안에 직접 갖고, 외부 CrossPoint 포크의 X3/X4는 별도 세로 list UI를 구현했다. 같은 ESP32 e-ink dashboard인데도 geometry·카드 우선순위·상태 표현이 갈라져 X3 528×792, X4/InkDeck 800×480 같은 해상도/방향 차이를 새 magic number로 대응해야 했다.
+- XTeink 쪽 UI는 세션 glyph/상태/활동을 행으로만 표시해 넓은 X4 화면을 활용하지 못했고, 선택·attention 계층도 InkDeck 카드와 달랐다. 반대로 두 프로젝트는 GxEPD2와 GfxRenderer, 폰트/버튼/refresh lifecycle이 달라 렌더러 전체를 억지로 합칠 수는 없었다.
+
+### 해결
+- `esp32/src/ui/eink/eink_dashboard_layout.h`를 allocation-free geometry SSOT로 추가했다. 입력은 패널 크기·헤더/컨트롤 높이·usage/activity 행·세션 수뿐이며, 출력은 header/cards/usage/activity/controls Rect와 density, 1/2/3열·가독 가능한 행/용량이다. 가로 800px는 2열(5세션부터 3열), X3 portrait는 1열 paged stack으로 자동 결정하며 힙/`std::vector`/`String`이 없다.
+- InkDeck `eink_display.cpp`의 고정 grid/footer/empty/searching 좌표를 공통 Layout 소비로 바꿨다. GxEPD2 draw, FreeFont/U8g2, content-hash 및 partial/full refresh 정책은 그대로 유지했다.
+- `crosspoint-agentdeck`의 `AgentDashboardActivity` Overview를 같은 geometry를 쓰는 paper-card 컴포넌트로 교체했다. glyph+project+activity+state chip, attention 우선, 선택 double outline/rail, capacity 기반 page를 적용했고 Detail timeline/승인 버튼/CJK font/물리 버튼 동작은 유지했다. 회색 fill 없이 1-bit 선·solid chip만 사용한다.
+- 별도 저장소 경계를 명시적으로 관리하도록 `scripts/sync-xteink-eink-dashboard.sh`와 `--check` drift gate를 추가했다. 정본을 포크 `src/agentdeck/eink_dashboard_layout.h`로 byte-identical 미러한다.
+
+### 검증
+- `scripts/test-eink-dashboard-layout.sh`가 InkDeck 800×480, X3 528×792, X4 800×480 geometry invariants를 C++11 `-Wall -Wextra -Werror`로 통과했다.
+- InkDeck host simulator `multi` scene을 실제 firmware renderer로 800×480 PNG 렌더하고 헤더·2×2 카드·2행 usage band를 시각 확인했다.
+- simulator가 한 프로세스에서 장면을 연속 렌더할 때 `init()`의 searching frame 뒤 이전 장면 hash가 남아 `display-off`가 searching 화면으로 저장되던 harness 상태 누수도 수정했다. init 후 hash/ticker cache를 무효화해 `idle`/`display-off` PNG byte-identical 불변을 복원했다.
+- CrossPoint 포크 전체 `default` ESP32-C3 build 성공(arm64 `~/.platformio/penv/bin/pio`; RAM 113,908B/34.8%, Flash 5,327,641B/81.3%). 공통 모듈은 정적/스택 값 타입뿐이라 새 heap allocation이 없다.
+
+### 실기 배포
+- InkDeck는 WiFi OTA가 chunk 659 timeout으로 중단되어 기존 슬롯을 유지한 것을 확인한 뒤, `device_info`로 식별한 USB 장치의 재열거된 bootloader 포트(`/dev/cu.usbmodem3111101`)에 ARM64 PlatformIO로 full flash했다. bootloader/partition/app 기록 100%와 각 SHA 검증을 통과했고, daemon 재기동 후 새 빌드 `e596f7ed-dirty`가 원래 포트(`/dev/cu.usbmodem1CDBD474F4D81`)에서 재접속했다.
+- XTeink 공통 `firmware/update.bin`(5,340,928B, SHA-256 `1dcb0874bf52d4366b9d776615b04a641655f62f063cecc10aa933a2ccf07305`)은 준비했으나, X3/X4는 `sd-update-bin` 전용이고 작업 시점에 외장 SD 카드가 마운트되지 않았다. X4는 잠시 `192.168.68.73`으로 감지된 뒤 절전/오프라인이 되었고 X3는 미검출이라 실기 설치는 SD 카드 연결과 기기 복구 화면 확인이 필요하다.
+
+### X3/X4 실기 피드백 후속
+- X3/X4 설치 후 카드에 세 줄 공간이 있어도 활동이 한 줄로 잘리고, Detail을 열면 조회 응답이 다른 세션의 16행 링에 밀려 `No recent activity yet…`로 남을 수 있음을 확인했다. XTeink 세션 요약을 고정 192B로 확장하고 daemon의 짧은 `activity/currentTask`와 긴 `goal`을 고정 버퍼 안에서 합성했다. 카드에는 힙 할당 없는 UTF-8 2–3줄 래퍼를 적용하고, Detail 상단에도 `Current work` 요약을 최대 3줄로 항상 표시한다.
+- `query_session_timeline` 응답의 top-level `sessionId`가 있으면 혼합 live ring을 해당 세션 history로 교체하고 `timelineRevision`을 올린다. 같은 개수의 이력이 들어와도 e-ink 재렌더가 보장되며, 실제 이력이 없는 경우도 빈 문구만 보이지 않고 현재 작업 요약과 상세 이벤트 대기 안내가 함께 나온다.
+- Codex가 7D window만 제공하면 비어 있던 5H cell에 `SUB <plan> <active-until>`을 배치하고 별도 구독 행을 생략한다. 사용량 footer 높이를 한 행 절약해 카드 영역도 유지한다.
+- CrossPoint ESP32-C3 전체 build 성공(RAM 115,028B/35.1%, Flash 5,329,557B/81.3%). 새 `firmware/update.bin`은 5,342,848B, SHA-256 `a21533a39fa5a997321f0648218da29573d5c326ee1b927a1f0d29ad5e40d17c`이며 X3/X4 공용이다.
+
+## 2026-07-17 — Pixoo64 사용량 HUD 로고 공간 1:1 종횡비(정사각형) 개선
+
+### 문제
+- Pixoo64 사용량 HUD의 로고 영역이 $9\times7\text{px}$ 크기의 비대칭 직사각형으로 고정되어 있어, 원래 $24\times24$ 크기의 1:1 종횡비를 가진 브랜드 마크(Claude Code, Codex 크리처)가 가로로 찌그러져 렌더링되며 이질감이 들었다.
+
+### 해결
+- **정사각형 렌더링 적용**: CLI daemon (`pixoo-renderer.ts`) 및 Swift daemon (`PixooRenderer.swift`)의 `drawUsageHUD` 렌더링 코드에서 프로바이더 로고의 `markerWidth`를 `9`에서 `7`로 변경했다.
+- 이를 통해 가로 영역 $0\sim9\text{px}$ 내에서 좌우 $1\text{px}$ 여백을 확보하며 중앙에 정렬시키고, Y축 $7\text{px}$ 높이에 맞게 완벽한 $7\times7\text{px}$ 정사각형 공간에서 $1:1$ 종횡비로 마스크가 스케일링되도록 보정했다. 찌그러짐이 사라져 고유의 크리처 음각 실루엣이 선명하게 표현된다.
+- **검증**: `dot-matrix-glyphs.test.ts` 및 `pixoo-sprites.test.ts` unit test를 돌려 렌더링 데이터의 무결성을 검증하고 정상 통과(Pass)를 확인했다.
+
 ## 2026-07-17 — Stream Deck/D200H 선택 세션 상태 격리
 
 ### 문제
@@ -19,6 +57,23 @@
 ### 검증/배포
 - 교차 오염 회귀 테스트를 추가하고 전체 Vitest **104 files / 1,846 tests**, `pnpm -r exec tsc --noEmit`, `pnpm build`, protocol codegen, macOS Debug compile, Stream Deck validate, `git diff --check`를 통과했다.
 - Stream Deck 플러그인을 재링크·재시작했고, D200H self-contained Ulanzi 플러그인을 사용자 Studio 폴더에 설치한 뒤 Ulanzi Studio를 재기동했다. 양 설치 번들에서 새 격리 코드를 확인했다. 검증 시점에는 port 9120 데몬이 꺼져 있어 실제 세션 버튼 왕복은 수행하지 않았다.
+
+## 2026-07-17 (밤) — TTGO T-Display offline layout overflow fix and serial flashing
+
+### 문제
+- TTGO T-Display 기기가 offline 상태(데몬과 미연결 상태)일 때, 화면 중앙에 표시되는 AgentDeck 로고와 연결 카드(connCard)가 135x240 LCD 액정 경계를 벗어나서 잘리는 등 화면 밖으로 넘치고 뭉개지는 레이아웃 어색함이 있었다.
+- 또한, 기기가 USB Serial에 연결되어 있을 때 firmware가 WiFi 라디오를 자동으로 파킹(WiFi off)하므로 WiFi OTA를 통한 펌웨어 업데이트가 불가능했다.
+
+### 해결
+- **레이아웃 개선**: [esp32/src/ui/screens/aquarium.cpp](file:///Users/puritysb/github/AgentDeck/esp32/src/ui/screens/aquarium.cpp)를 수정하여 TTGO 보드(`BOARD_TTGO`)의 컴팩트 세로 화면(width 135)에 맞게 `connCard` 너비를 화면 가로 길이에 연동(`g_screenW - 16`, 최대 260)하고 패딩을 줄여 좌우 8px의 여백을 깔끔하게 유지하게 했다.
+- **방향 대응**: 화면 세로 길이가 150px 미만인 가로 모드 상황을 감안해 레이아웃 플로우를 세로(`COLUMN`)에서 가로(`ROW`) 형태로 동적 전환하여 로고와 텍스트를 좌우 배치함으로써 컴팩트 액정에서의 상하 오버플로우를 완전히 제거했다.
+- **폰트 최적화**: 좁은 액정에 적합하도록 카드 제목과 상태 메시지 폰트를 Montserrat 14/12로 줄여 가독성을 높였다.
+- **업로드 속도 튜닝**: [esp32/platformio.ini](file:///Users/puritysb/github/AgentDeck/esp32/platformio.ini) 내 `[env:ttgo]`의 시리얼 플래시 업로드 속도를 `57600`에서 표준적이고 훨씬 안정적인 `115200`으로 2배 상향 조정했다.
+- **시리얼 플래싱**: 데몬을 잠시 종료해 포트 점유를 해제한 뒤 `pio run -e ttgo -t upload`를 수행하여 USB Serial로 펌웨어를 성공적으로 안전하게 주입했다.
+
+### 검증
+- **시뮬레이터 렌더**: `esp32/sim/render.sh`를 활용해 `ttgo` 타겟의 `empty`(offline) 및 `idle`(connected) 씬을 렌더링하고, 생성된 `ttgo-empty.png`, `ttgo-idle.png`를 visual inspection하여 135x240 화면 경계 내에 모든 요소가 비율을 맞춰 완벽히 배치되는 것을 확인했다.
+- **기기 실측**: 데몬 재기동 후 TTGO 보드의 시리얼 handshake와 WiFi 자동 프로비저닝(`wifi_provision_ack` 수신) 및 WiFi AP 연결 수립 상태(`wifiConnected: true`, `wifiConfigured: true`)를 확인했다.
 
 ## 2026-07-17 — Pixoo64 Claude/Codex usage HUD parity
 

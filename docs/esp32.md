@@ -112,14 +112,19 @@ OTA 대상 SSOT. **`agentdeck esp32-ota <target>`의 `<target>`은 로컬 Platfo
 `esp32/src/net/protocol.cpp` 는 first-party 보드의 **AgentDeck 와이어 계약** 참조 구현이다.
 이 계약의 인간용 subset 은 [esp32-client-contract.md](esp32-client-contract.md) 에 문서화되어 있다.
 
-외부 포크가 이 계약을 **손으로 포팅**해서 쓰는 경우가 있다 — 현재는 **XTeink X3**
+외부 포크가 이 계약을 **손으로 포팅**해서 쓰는 경우가 있다 — 현재는 **XTeink X3/X4**
 (CrossPoint Reader 포크 `crosspoint-agentdeck` 의 `src/agentdeck/*`, *"TRIMMED port of
 AgentDeck esp32/src/net/protocol"*). C3(no-PSRAM/ArduinoJson)에는 C++ 코드젠을 쓸 수 없어
 포크는 이 파서를 손으로 따라간다. 따라서 **드리프트는 규율로 막는다**:
 
 - `shared/src/protocol.ts` 의 `DISPLAY_FORWARDED_EVENTS`/`SERIAL_FORWARDED_EVENTS` 를 바꾸거나
-  `sendDeviceInfo` 의 `device_info` 필드 목록을 바꾸면, first-party 파서와 **X3 포크의
+  `sendDeviceInfo` 의 `device_info` 필드 목록을 바꾸면, first-party 파서와 **X3/X4 포크의
   `src/agentdeck/protocol.*` 를 함께 재포팅**해야 한다.
+- 렌더 API(GxEPD2/GfxRenderer)는 기기별로 유지하되, 카드 열/행·헤더·usage/activity/footer
+  영역 계산은 `esp32/src/ui/eink/eink_dashboard_layout.h`가 정본이다. 변경 후
+  `scripts/sync-xteink-eink-dashboard.sh`로 포크의 `src/agentdeck/eink_dashboard_layout.h`를
+  갱신하고, `--check`로 byte-for-byte drift를 검사한다. 이 헤더는 고정 크기 구조체만 쓰며
+  힙 할당이 없다.
 - 포크 쪽 절차는 `crosspoint-agentdeck` 의 `.skills/SKILL.md`(upstream-sync 섹션의
   downstream 짝) 에 있다. AgentDeck 쪽은 이 노트가 그 절반이다.
 

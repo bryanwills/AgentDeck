@@ -27,6 +27,8 @@
 
 **Display-sleep policy:** InkDeck keeps its dashboard visible when the host Mac's displays sleep or are turned off with a keyboard shortcut. Unlike LCD/OLED/LED devices, its e-ink image needs no panel refresh power to remain visible, and InkDeck is already continuously USB-powered. The firmware therefore ignores `display_state.displayOn` for rendering while continuing to receive and draw meaningful dashboard changes whenever the Mac itself remains awake.
 
+**Responsive dashboard:** the direct GxEPD2 renderer consumes the allocation-free layout model in `esp32/src/ui/eink/eink_dashboard_layout.h`. It derives header, card grid, usage, recent-activity, and control bands from the panel dimensions instead of 800×480 constants; the hardware-specific font/glyph/panel refresh code stays in `eink_display.cpp`.
+
 **Formerly "TRMNL" (BYOS pull) — removed.** AgentDeck previously drove this same physical panel through TRMNL's commercial **BYOS** (Bring Your Own Server) pull contract, where the panel polled `/api/setup` + `/api/display` and downloaded a server-rendered PNG. That integration was **removed** (Node commit `c71044bd`; the App Store Swift `Trmnl*` modules removed alongside). Stock / commercial TRMNL panels running the upstream `usetrmnl/firmware` are **no longer supported** — InkDeck reflashes the same hardware with AgentDeck firmware and treats it as a first-class ESP32 board.
 
 ## XTeink X3 / X4 (external-fork client, experimental)
@@ -40,6 +42,8 @@
 So once the updated fork firmware is SD-flashed, X3/X4 appear on both dashboards. They flash via SD `update.bin` only (pogo USB-data dead) → `otaSupported:false`, and have no `esp32/` pio env, so they are **not WiFi-OTA targets** (no `ESP32_OTA_BOARDS` entry). Registration is board-agnostic and needs no such entry.
 
 The contract the fork ports from is [esp32-client-contract.md](esp32-client-contract.md); the port-sync discipline that keeps it from drifting is in [esp32.md § Downstream client port sync](esp32.md#downstream-client-port-sync). Spec/experimental-status detail: [hardware-compatibility.md](hardware-compatibility.md) footnote ⁷.
+
+**Dashboard layout parity:** X3/X4 use the same mirrored `eink_dashboard_layout.h` geometry as InkDeck while retaining CrossPoint's GfxRenderer, CJK font loader, button hints, and detail/decision interaction. X3's 528×792 portrait surface becomes a one-column paged card stack; X4/InkDeck landscape surfaces select two columns, or three when five or more sessions need to fit. Attention sessions stay first and use a solid state chip; selection uses a double outline + rail, avoiding gray dither on partial refreshes.
 
 ## Broadcast Architecture
 

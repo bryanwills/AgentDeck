@@ -19,6 +19,7 @@
 #include "net/ws_client.h"
 #include "ui/terrarium/creature_glyphs_generated.h"
 #include "ui/agent_label.h"
+#include "ui/eink/eink_dashboard_layout.h"
 #include "util/usage_format.h"
 #include "util/utf8.h"
 
@@ -55,12 +56,11 @@ GxEPD2_BW<Panel, Panel::HEIGHT> display(Panel(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RS
 // "######?" garbage via the ASCII sanitizer.
 U8G2_FOR_ADAFRUIT_GFX u8f;
 
-constexpr int16_t W = 800, H = 480;
+constexpr int16_t W = SCREEN_W, H = SCREEN_H;
 
 // ===== Render snapshot (copied out of g_state under the mutex so the slow
 // e-ink refresh never holds the lock) =====
 constexpr uint8_t MAX_ROWS = 10;   // matches the sessions_list cap
-constexpr uint8_t MAX_CARDS = 6;   // most sessions rendered as full cards
 
 struct RowSnap {
     char name[40];
@@ -560,7 +560,9 @@ void drawAgentGlyph(const char* agentType, int16_t x, int16_t y, int size) {
     }
 }
 
-bool isAwaiting(const char* state) { return strncmp(state, "awaiting", 8) == 0; }
+bool isAwaiting(const char* state) {
+    return AgentDeckEink::classifyStatus(state) == AgentDeckEink::StatusKind::Attention;
+}
 
 void stateLabel(const char* state, char* out, size_t outLen) {
     if (strcmp(state, "processing") == 0) strncpy(out, "PROCESSING", outLen - 1);
@@ -667,14 +669,33 @@ bool drawProviderUsage(int16_t y, const char* agentType, const char* label,
     return true;
 }
 
-// `sepY` is the separator/usage-band top. Pass -1 to omit the usage band
-// entirely (dashboard reflow: when no provider reports usage the session grid
-// reclaims the space, so there's no separator or "waiting" line). The bottom
-// band (AGY chip + identity + ticker) is always pinned to y≈470–474.
-void drawUsageFooter(const Snap& s, bool showIdentity, int16_t sepY = 370) {
-    if (sepY >= 0) {
-        display.fillRect(0, sepY, W, 2, GxEPD_BLACK);
-        int16_t y = sepY + 8;
+// Provider usage rows that will actually draw (mirrors the p5<0 && p7<0 gate
+// above). This count feeds the shared geometry engine used by InkDeck + XTeink.
+static int usageRowCount(const Snap& s) {
+    int n = 0;
+    if (s.fiveH >= 0.0f || s.sevenD >= 0.0f) n++;
+    if (s.codexP >= 0.0f || s.codexS >= 0.0f) n++;
+    return n;
+}
+
+AgentDeckEink::Layout dashboardLayout(const Snap& s) {
+    uint8_t activityRows = s.bridgeConnected && s.tickerCount > 0 ? s.tickerCount : 1;
+    return AgentDeckEink::makeLayout(AgentDeckEink::LayoutInput{
+        W, H,
+        68,  // product header + double rule
+        0,   // InkDeck has no persistent button-hint bar
+        28, 21,
+        (uint8_t)usageRowCount(s), activityRows,
+        s.rowCount, 2,
+    });
+}
+
+// Usage + recent-work components are anchored by the shared responsive layout,
+// rather than magic 800x480 coordinates. X3/X4 use the same band contract.
+void drawUsageFooter(const Snap& s, bool showIdentity, const AgentDeckEink::Layout& layout) {
+    if (!layout.usage.empty()) {
+        display.fillRect(0, layout.usage.y, W, 2, GxEPD_BLACK);
+        int16_t y = layout.usage.y + layout.gap;
         bool any = false;
         if (drawProviderUsage(y, "claude-code", "CLAUDE", s.claudePlan, s.fiveH, s.fiveReset,
                               s.sevenD, s.sevenReset, s.usageStale)) { y += 28; any = true; }
@@ -690,13 +711,13 @@ void drawUsageFooter(const Snap& s, bool showIdentity, int16_t sepY = 370) {
         char agf[28];
         fitText(agf, sizeof(agf), s.agPlan, 130, CLASSIC_FONT);
         agW = textWidth(agf, CLASSIC_FONT) + 14;
-        textRight(W - 16, 474, agf, CLASSIC_FONT);
+        textRight(W - layout.pad, H - 6, agf, CLASSIC_FONT);
     }
     if (showIdentity) {
         // Searching screen only: build identity (flash verification aid)
         char tag[64];
         snprintf(tag, sizeof(tag), "v%s %.7s", FIRMWARE_VERSION, GIT_SHA);
-        textRight(W - 16 - agW, 474, tag, &FreeSans9pt7b);
+        textRight(W - layout.pad - agW, H - 6, tag, &FreeSans9pt7b);
     }
 
     // Recent-work strip — up to TICKER_ROWS milestone timeline rows, newest
@@ -708,13 +729,15 @@ void drawUsageFooter(const Snap& s, bool showIdentity, int16_t sepY = 370) {
     if (s.bridgeConnected && s.tickerCount > 0) {
         constexpr int16_t rowH = 21;
         for (uint8_t i = 0; i < s.tickerCount; i++) {
-            int16_t ty = 470 - (int16_t)(s.tickerCount - 1 - i) * rowH;
+            int16_t ty = layout.activity.y + 16 + (int16_t)i * rowH;
             bool bottomRow = (i == s.tickerCount - 1);
-            textAt(16, ty, s.tickerTime[i], &FreeSansBold9pt7b);
+            textAt(layout.pad, ty, s.tickerTime[i], &FreeSansBold9pt7b);
             char tf[108];
-            int16_t maxW = W - 74 - 16 - (bottomRow ? agW + (showIdentity ? 110 : 0) : 0);
+            int16_t textX = layout.pad + 58;
+            int16_t maxW = W - textX - layout.pad -
+                (bottomRow ? agW + (showIdentity ? 110 : 0) : 0);
             smartFitText(tf, sizeof(tf), s.tickerText[i], maxW, &FreeSans9pt7b);
-            smartTextAt(74, ty, tf, &FreeSans9pt7b);
+            smartTextAt(textX, ty, tf, &FreeSans9pt7b);
         }
     }
 }
@@ -854,92 +877,31 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
 }
 
 bool needsAttention(const RowSnap& r) {
-    return isAwaiting(r.state) || strcmp(r.state, "processing") == 0;
+    AgentDeckEink::StatusKind status = AgentDeckEink::classifyStatus(r.state);
+    return status == AgentDeckEink::StatusKind::Attention ||
+           status == AgentDeckEink::StatusKind::Processing;
 }
 
-// Compact idle dock — TWO chip rows of glyph+name for sessions that don't
-// need attention. Cards stay reserved for sessions doing/asking something;
-// parked ones shrink to their creature + name instead of shrinking every
-// card into unreadability.
-void drawIdleDock(const Snap& s, const uint8_t* idx, uint8_t count,
-                  int16_t top, int16_t bottom, int16_t left, int16_t right) {
-    display.drawFastHLine(left, top, right - left, GxEPD_BLACK);
-    textAt(left + 4, top + 26, "IDLE", &FreeSansBold9pt7b);
-    const int16_t x0 = left + 62;
-    int16_t rowTopY[2] = { (int16_t)(top + 6), (int16_t)(top + 38) };
-    int row = 0;
-    int16_t x = x0;
-    uint8_t shown = 0;
-    for (uint8_t k = 0; k < count; k++) {
-        const RowSnap& r = s.rows[idx[k]];
-        const char* rawName = r.name[0] ? r.name : "(unnamed)";
-        // Names up to 20 chars render WHOLE — the chips flow, so a wider chip
-        // just takes more row, and an ellipsized short name reads as a bug.
-        char nf[48];
-        if (utf8CharCount(rawName) <= 20) {
-            strncpy(nf, rawName, sizeof(nf) - 1); nf[sizeof(nf) - 1] = '\0';
-        } else {
-            smartFitText(nf, sizeof(nf), rawName, 170, &FreeSans9pt7b);
-        }
-        int16_t entryW = 26 + 6 + smartWidth(nf, &FreeSans9pt7b) + 22;
-        if (x + entryW > right - 54) {          // leave room for +N
-            if (row == 0) { row = 1; x = x0; }  // wrap to the second chip row
-            else break;
-            if (x + entryW > right - 54) break; // single chip wider than a row
-        }
-        drawAgentGlyph(r.agentType, x, rowTopY[row], 26);
-        smartTextAt(x + 32, rowTopY[row] + 20, nf, &FreeSans9pt7b);
-        x += entryW;
-        shown++;
-    }
-    uint8_t hidden = (uint8_t)((count - shown) + (s.totalSessions - s.rowCount));
-    if (hidden > 0) {
-        char more[16];
-        snprintf(more, sizeof(more), "+%d", hidden);
-        textRight(right - 4, rowTopY[1] + 20, more, &FreeSansBold9pt7b);
-    }
-}
-
-void drawSessionGrid(const Snap& s, int16_t gridBottom = 366) {
-    const int16_t top = 78, left = 12, right = W - 12;
-    int16_t bottom = gridBottom;
+void drawSessionGrid(const Snap& s, const AgentDeckEink::Layout& layout) {
     if (s.rowCount == 0) {
         // Empty state — connected but no sessions
-        drawAgentDeckMark(W / 2 - 36, 140, 72);
-        textAt(W / 2 - textWidth("no active sessions", &FreeSansBold12pt7b) / 2, 260,
+        const int16_t centerY = layout.cards.y + layout.cards.h / 2;
+        drawAgentDeckMark(W / 2 - 36, centerY - 82, 72);
+        textAt(W / 2 - textWidth("no active sessions", &FreeSansBold12pt7b) / 2, centerY + 24,
                "no active sessions", &FreeSansBold12pt7b);
         const char* hint = "start claude / codex / opencode in a workspace";
-        textAt(W / 2 - textWidth(hint, &FreeSans9pt7b) / 2, 290, hint, &FreeSans9pt7b);
+        textAt(W / 2 - textWidth(hint, &FreeSans9pt7b) / 2, centerY + 54, hint, &FreeSans9pt7b);
         return;
     }
 
     // Partition: attention (awaiting/processing) ahead of idle, daemon order
-    // preserved within each group. With ≤6 sessions everyone gets a card;
-    // beyond that the idle group collapses into the dock strip.
+    // preserved within each group. Shared geometry decides whether this panel
+    // can show 1/2/3 columns and how many readable rows fit.
     uint8_t order[MAX_ROWS]; uint8_t nAttention = 0, nOrder = 0;
     for (uint8_t i = 0; i < s.rowCount; i++) if (needsAttention(s.rows[i])) order[nOrder++] = i, nAttention++;
     for (uint8_t i = 0; i < s.rowCount; i++) if (!needsAttention(s.rows[i])) order[nOrder++] = i;
 
-    uint8_t nCards = s.rowCount;
-    bool dock = false;
-    if (s.rowCount > MAX_CARDS || s.totalSessions > s.rowCount) {
-        nCards = nAttention < MAX_CARDS ? (nAttention > 0 ? nAttention : MAX_CARDS) : MAX_CARDS;
-        if (nCards < nOrder || s.totalSessions > s.rowCount) {
-            dock = true;
-            // Dock is the bottom strip of the grid; anchor it to gridBottom so it
-            // rides down with the adaptive split (grid grows when usage shrinks).
-            const int16_t dockH = 72;
-            int16_t dockTop = bottom - dockH;
-            drawIdleDock(s, order + nCards, nOrder - nCards, dockTop + 4, bottom, left, right);
-            bottom = dockTop;
-        }
-    }
-
-    int cols = nCards <= 2 ? nCards : (nCards <= 4 ? 2 : 3);
-    int rows = nCards <= 2 ? 1 : 2;
-    const int16_t gut = 10;
-    int16_t cardW = (right - left - (cols - 1) * gut) / cols;
-    int16_t cardH = (bottom - top - (rows - 1) * gut) / rows;
+    uint8_t nCards = nOrder < layout.capacity ? nOrder : layout.capacity;
 
     int firstAwaitingIdx = -1;
     for (uint8_t k = 0; k < nCards; k++) {
@@ -947,15 +909,9 @@ void drawSessionGrid(const Snap& s, int16_t gridBottom = 366) {
     }
 
     for (uint8_t k = 0; k < nCards; k++) {
-        int c = k % cols, rw = k / cols;
-        int16_t cx = left + c * (cardW + gut);
-        int16_t cy = top + rw * (cardH + gut);
-        drawSessionCard(s, s.rows[order[k]], (int)order[k] == firstAwaitingIdx, cx, cy, cardW, cardH);
-    }
-    if (!dock && s.totalSessions > s.rowCount) {
-        char more[24];
-        snprintf(more, sizeof(more), "+%d more", s.totalSessions - s.rowCount);
-        textRight(right - 4, bottom - 6, more, &FreeSans9pt7b);
+        AgentDeckEink::Rect card = layout.card(k);
+        drawSessionCard(s, s.rows[order[k]], (int)order[k] == firstAwaitingIdx,
+                        card.x, card.y, card.w, card.h);
     }
 }
 
@@ -963,55 +919,28 @@ void drawSearching(const Snap& s) {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     setInk(false);
+    const AgentDeckEink::Layout layout = dashboardLayout(s);
     drawBrandHeader(s);
-    drawAgentDeckMark(W / 2 - 44, 130, 88);
+    const int16_t centerY = layout.cards.y + layout.cards.h / 2;
+    drawAgentDeckMark(W / 2 - 44, centerY - 88, 88);
     const char* msg = s.wifiUp || s.serialUp ? "searching for AgentDeck daemon..."
                                              : "no WiFi — connect USB or provision WiFi";
-    textAt(W / 2 - textWidth(msg, &FreeSansBold12pt7b) / 2, 268, msg, &FreeSansBold12pt7b);
+    textAt(W / 2 - textWidth(msg, &FreeSansBold12pt7b) / 2, centerY + 46, msg, &FreeSansBold12pt7b);
     if (s.wifiUp && s.ip[0]) {
         char line[64]; snprintf(line, sizeof(line), "panel %s · mDNS _agentdeck._tcp", s.ip);
-        textAt(W / 2 - textWidth(line, &FreeSans9pt7b) / 2, 298, line, &FreeSans9pt7b);
+        textAt(W / 2 - textWidth(line, &FreeSans9pt7b) / 2, centerY + 76, line, &FreeSans9pt7b);
     }
-    drawUsageFooter(s, true);
-}
-
-// Provider usage rows that will actually draw (mirrors the p5<0 && p7<0 gate in
-// drawProviderUsage). 0/1/2 — drives the adaptive split so a Codex-only or
-// no-usage state doesn't waste the lower third of the panel.
-static int usageRowCount(const Snap& s) {
-    int n = 0;
-    if (s.fiveH >= 0.0f || s.sevenD >= 0.0f) n++;
-    if (s.codexP >= 0.0f || s.codexS >= 0.0f) n++;
-    return n;
+    drawUsageFooter(s, true, layout);
 }
 
 void drawDashboard(const Snap& s) {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     setInk(false);
-    // Adaptive split between the session grid and the usage band. The bottom
-    // band (recent-work strip ending at y≈470 + AGY chip at y≈474) is pinned;
-    // usage gauges are anchored just above it, and the grid grows downward to
-    // reclaim whatever the gauges and strip leave. 0 gauges → no band, grid
-    // runs to the strip; 1 → one row; 2 → both. The strip itself is adaptive
-    // too: each extra milestone row (beyond the first) lifts the band by 21px,
-    // so an idle deck with little history gives the space back to the cards.
-    const int16_t stripLift = (s.bridgeConnected && s.tickerCount > 1)
-        ? (int16_t)((s.tickerCount - 1) * 21) : 0;
-    const int16_t bottomBand = 456 - stripLift;  // gauges sit above the strip/AGY band
-    int rows = usageRowCount(s);
-    int16_t sepY, gridBottom;
-    if (rows == 0) {
-        sepY = -1;
-        gridBottom = bottomBand - 4;
-    } else {
-        int16_t gaugeTop = bottomBand - rows * 28;
-        sepY = gaugeTop - 8;
-        gridBottom = sepY - 6;
-    }
+    const AgentDeckEink::Layout layout = dashboardLayout(s);
     drawBrandHeader(s);
-    drawSessionGrid(s, gridBottom);
-    drawUsageFooter(s, false, sepY);
+    drawSessionGrid(s, layout);
+    drawUsageFooter(s, false, layout);
     // NOTE: no Serial logging here — this runs on Core 1 while Core 0 emits
     // protocol JSON lines (device_info replies, acks). Cross-core prints
     // interleave mid-line and corrupt the newline-framed JSON the daemon
@@ -1074,6 +1003,12 @@ void init() {
     // scratch Snap is race-free.
     static Snap s; snapshot(s);
     refresh(drawSearching, s, true);
+    // init() is once-per-boot on hardware, but the host simulator reuses this
+    // translation unit across multiple named scenes. The searching frame above
+    // replaces the framebuffer, so invalidate the prior scene hash even when
+    // the next scene differs only in hostDisplayOn (intentionally un-hashed).
+    lastHash = 0;
+    lastTickerShown[0] = '\0';
     firstDraw = false;
     lastDrawMs = millis();
 }

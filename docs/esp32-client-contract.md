@@ -7,10 +7,10 @@ that a board firmware implements; the machine-readable source of truth is
 implementation is [`esp32/src/net/protocol.cpp`](../esp32/src/net/protocol.cpp).
 
 **Who this is for.** First-party `esp32/` boards already implement the full contract. This
-doc exists so a *third-party or forked* firmware — today the **XTeink X3** (an external
+doc exists so a *third-party or forked* firmware — today the **XTeink X3/X4** (an external
 CrossPoint Reader fork, `crosspoint-agentdeck`; see
 [hardware-compatibility.md](hardware-compatibility.md) footnote ⁷) — can port a minimal,
-correct client without reading the whole 39KB reference parser. The X3's `src/agentdeck/`
+correct client without reading the whole 39KB reference parser. The X3/X4 fork's `src/agentdeck/`
 is explicitly a *"TRIMMED port of AgentDeck esp32/src/net/protocol"*; this is the contract
 it ports **from**. When the events or `device_info` fields below change, that port must be
 re-synced — see [esp32.md § Downstream client port sync](esp32.md#downstream-client-port-sync).
@@ -27,7 +27,7 @@ port-sync discipline is.
   `_agentdeck._tcp`. Reconnect with backoff (`RECONNECT_BACKOFF_MS` ladder 1→2→4→8s). Also
   the fallback UDP-broadcast discovery on 9121 that the X3 port carries.
 - **USB Serial JSON** (115200, newline-framed) is the other first-party transport. A
-  WiFi-only client (X3, InkDeck) can skip serial, but then it is only registrable once it
+  WiFi-only client (X3/X4, InkDeck) can skip serial, but then it is only registrable once it
   emits `device_info` over WS (see below).
 - Frames are single-line JSON. Reject anything larger than `PROTOCOL_MAX_MSG_BYTES` before
   feeding an elastic JSON document — an unbounded `sessions_list`/`timeline_history` will
@@ -43,7 +43,7 @@ Dispatch on the top-level `"type"`. The forwarded sets are defined in `protocol.
 | `type` | Purpose |
 |---|---|
 | `state_update` | Per-session state (idle / processing / awaiting_* …). The primary render input. |
-| `sessions_list` | Full session roster — id, agent type, state, label. Each session also carries `activity`: a clean one-liner ("Editing auth.ts") from the shared activity pipeline — **render this, not the raw `currentTool`** ("Bash"). Both the Node bridge and the in-process Swift daemon now populate it; fall back to `currentTool`/`currentTask`/`goal` only when `activity` is empty. Sessions with a recent milestone also carry the daemon-computed `lastEventText` (≤99 bytes, the newest chat/task row text), optional `lastEventTask` (≤39 bytes, resolved enclosing-task label) and `lastEventHm` ("HH:MM" host-local) — the TIMELINE-parity "what happened last" line; card-style surfaces should prefer `lastEventHm + lastEventTask + lastEventText` over reconstructing it from the on-device timeline ring (which starts empty after every reboot). Absent fields are omitted, never empty strings. |
+| `sessions_list` | Full session roster — id, agent type, state, label. Each session also carries `activity`: a clean one-liner ("Editing auth.ts") from the shared activity pipeline — **render this, not the raw `currentTool`** ("Bash"). Both the Node bridge and the in-process Swift daemon now populate it; fall back to `currentTool`/`currentTask`/`goal` only when `activity` is empty. A card with 2–3 available lines may compose the concise `activity/currentTask` with the richer `goal`, but must do so in a bounded buffer on no-PSRAM boards. Sessions with a recent milestone also carry the daemon-computed `lastEventText` (≤99 bytes, the newest chat/task row text), optional `lastEventTask` (≤39 bytes, resolved enclosing-task label) and `lastEventHm` ("HH:MM" host-local) — the TIMELINE-parity "what happened last" line; card-style surfaces should prefer `lastEventHm + lastEventTask + lastEventText` over reconstructing it from the on-device timeline ring (which starts empty after every reboot). Absent fields are omitted, never empty strings. |
 | `usage_update` | Subscription / rate-limit gauges (Claude 5h, Codex, Antigravity, …). |
 | `connection` / `connected` | Connect/disconnect ack. Actual link state is tracked by WS event callbacks; these are logged for diagnostics. |
 
@@ -52,11 +52,11 @@ Dispatch on the top-level `"type"`. The forwarded sets are defined in `protocol.
 | `type` | Purpose |
 |---|---|
 | `timeline_event` | Incremental activity-log row. `ts` is epoch-ms; entries also carry `localHm` = daemon host-local "HH:MM" (both daemons stamp it now) — RTC-less clients render `localHm` for the wall time rather than deriving from `ts` in UTC. |
-| `timeline_history` | Backfill of recent timeline rows on (re)connect. |
+| `timeline_history` | Backfill of recent timeline rows on (re)connect. A reply to `query_session_timeline` includes top-level `sessionId`; constrained clients may replace their mixed live ring with that session-specific batch so unrelated busy sessions cannot evict the requested Detail rows. |
 | `display_state` | Host display on/off + optional `dim {enabled, mode, level}`. Absent `dim` ⇒ legacy full-off. Level is percent 1–100 → scale to the board's backlight domain, floored at 1. |
 | `wifi_provision` | Credentials pushed over serial (USB provisioning flow). |
 | `set_orientation` | `landscape` bool; portrait↔landscape toggle. |
-| `device_info_request` | Reply with `device_info` (see below). **The X3 stubs this today — which is exactly why it is not dashboard-visible.** |
+| `device_info_request` | Reply with `device_info` (see below). X3/X4 already announce `device_info` on initial connect; request/reply parity remains recommended for host diagnostics. |
 
 A display-only client may ignore the OTA frames (`esp32_ota_begin/chunk/end/abort`) unless
 it opts into WiFi OTA with a dual-OTA partition table.
@@ -93,8 +93,9 @@ A client with buttons can steer sessions. Two prompt shapes:
 
 - First-party boards: [`esp32/src/net/protocol.cpp`](../esp32/src/net/protocol.cpp) (full
   parser + `sendDeviceInfo` + OTA).
-- X3 port: `crosspoint-agentdeck` `src/agentdeck/{ws_client,protocol,mdns_discovery,udp_discovery,agent_state,agent_commands}.*`.
-  Its known M3 gap is `device_info` emission (plus `display_state`/`set_orientation`).
+- X3/X4 port: `crosspoint-agentdeck` `src/agentdeck/{ws_client,protocol,mdns_discovery,udp_discovery,agent_state,agent_commands}.*`.
+  It emits `client_register` plus `device_info` on connect; `display_state`/`set_orientation`
+  remain optional accept-and-ignore messages for this reader activity.
 - Change discipline: edits to `DISPLAY_FORWARDED_EVENTS`/`SERIAL_FORWARDED_EVENTS` in
   `protocol.ts` or to the `device_info` field list must be reflected into both the
   first-party parser and the X3 port. See the port-sync sections in
