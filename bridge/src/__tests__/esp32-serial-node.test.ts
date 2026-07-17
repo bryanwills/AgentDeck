@@ -26,6 +26,8 @@ import {
   isHalfOpenIdentifiedCdc,
   isSilentIdentifiedUart,
   SERIAL_KEEPALIVE_JSON,
+  budgetTimelineEntries,
+  TIMELINE_HISTORY_BYTE_BUDGET,
   shouldSendWifiProvision,
   shouldRetryDeviceInfoIdentify,
   recordForeignProbeFailure,
@@ -199,6 +201,28 @@ describe('handleSerialLine (source)', () => {
     handleSerialLine(conn, '{"type":"wifi_provision_ack","success":true,"ip":"192.168.68.70"}');
 
     expect(conn.deviceInfo).toBeNull();
+  });
+});
+
+describe('budgetTimelineEntries', () => {
+  it('keeps the newest entries under the byte budget, in chronological order', () => {
+    // ~330B of CJK per stamped entry → 64 rows ≈ 21KB unbudgeted
+    const entries = Array.from({ length: 64 }, (_, i) => ({
+      ts: i, raw: `${i}-${'가'.repeat(80)}`, localHm: '12:00',
+    }));
+    const kept = budgetTimelineEntries(entries);
+    expect(kept.length).toBeLessThan(entries.length);
+    expect(kept.length).toBeGreaterThan(0);
+    const total = kept.reduce((n, e) => n + new TextEncoder().encode(JSON.stringify(e)).length + 1, 0);
+    expect(total).toBeLessThanOrEqual(TIMELINE_HISTORY_BYTE_BUDGET);
+    // Newest survive; order stays chronological
+    expect(kept[kept.length - 1].ts).toBe(63);
+    expect(kept.every((e, i) => i === 0 || e.ts > kept[i - 1].ts)).toBe(true);
+  });
+
+  it('passes small histories through untouched', () => {
+    const entries = [{ ts: 1, raw: 'a' }, { ts: 2, raw: 'b' }];
+    expect(budgetTimelineEntries(entries)).toEqual(entries);
   });
 });
 
@@ -492,14 +516,20 @@ describe('prepareForSerial (source)', () => {
     expect(without.lastEventHm).toBeUndefined();
   });
 
-  it('caps timeline_history to the firmware ring size (newest 64)', () => {
+  it('caps timeline_history to the firmware ring (64) AND the line-buffer byte budget', () => {
     const entries = Array.from({ length: 100 }, (_, i) => ({
       ts: 1752700000000 + i, type: 'chat_start', raw: `row ${i}`,
     }));
     const prepared = prepareForSerial({ type: 'timeline_history', entries } as any) as any;
-    expect(prepared.entries).toHaveLength(64);
-    expect(prepared.entries[0].raw).toBe('row 36');   // oldest surviving = newest 64
-    expect(prepared.entries[63].raw).toBe('row 99');
+    // Newest-first byte budget: never more than the 64-row ring, and the
+    // summed frame always fits TIMELINE_HISTORY_BYTE_BUDGET.
+    expect(prepared.entries.length).toBeLessThanOrEqual(64);
+    const total = prepared.entries.reduce(
+      (n: number, e: unknown) => n + new TextEncoder().encode(JSON.stringify(e)).length + 1, 0);
+    expect(total).toBeLessThanOrEqual(TIMELINE_HISTORY_BYTE_BUDGET);
+    // Newest survive, chronological order preserved
+    expect(prepared.entries[prepared.entries.length - 1].raw).toBe('row 99');
+    expect(prepared.entries[0].ts).toBeLessThan(prepared.entries[1].ts);
   });
 });
 

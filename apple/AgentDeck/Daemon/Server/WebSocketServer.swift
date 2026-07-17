@@ -242,6 +242,14 @@ actor WebSocketServer {
             return
         }
 
+        // ESP32 boards self-identify in the upgrade URL (firmware ws_client:
+        // "/?token=…&clientType=esp32") — Node parity (ws-server.ts tags
+        // esp32Clients from the same query). Knowing this BEFORE any frame is
+        // exchanged closes the race where the connect burst fired ahead of
+        // the board's device_info and blasted an unshaped full-state frame.
+        let requestLine = text.components(separatedBy: "\r\n").first ?? ""
+        let isEsp32 = requestLine.contains("clientType=esp32") || requestLine.contains("esp32=1")
+
         // Compute accept key (RFC 6455)
         let magic = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
         let hash = Insecure.SHA1.hash(data: Data(magic.utf8))
@@ -255,12 +263,12 @@ actor WebSocketServer {
                 nwConn.cancel()
                 return
             }
-            Task { await self?.setupWebSocketConnection(nwConn) }
+            Task { await self?.setupWebSocketConnection(nwConn, isEsp32: isEsp32) }
         }))
     }
 
-    private func setupWebSocketConnection(_ nwConn: NWConnection) {
-        let conn = WebSocketConnection(connection: nwConn)
+    private func setupWebSocketConnection(_ nwConn: NWConnection, isEsp32: Bool) {
+        let conn = WebSocketConnection(connection: nwConn, isEsp32: isEsp32)
         connections.insert(conn)
         let remote = Self.describeRemote(nwConn.endpoint)
         DaemonLogger.shared.info("WS: Client connected from \(remote) (\(connections.count) total)")
@@ -334,6 +342,13 @@ actor WebSocketServer {
         for conn in connections {
             if esp32ConnIds.contains(conn.id) {
                 if let shaped = esp32Payloads[conn.id] { conn.send(shaped) }
+            } else if conn.isEsp32 {
+                // Tagged ESP32 (upgrade query `clientType=esp32`) whose
+                // device_info hasn't registered yet. The full dashboard frame
+                // used to go out here and overrun the board's 4 KB line
+                // buffer — the chronic connect→choke→reconnect flap. Drop it;
+                // the shaped stream starts as soon as the board registers.
+                continue
             } else {
                 conn.send(data)
             }
@@ -357,6 +372,9 @@ actor WebSocketServer {
 
 final class WebSocketConnection: Hashable, Sendable {
     let id = UUID()
+    /// Tagged from the upgrade URL (`clientType=esp32` / `esp32=1`) — a
+    /// display client whose frames must be shaped/dropped, never full-fanout.
+    let isEsp32: Bool
     private let connection: NWConnection
     private let frameParser = WebSocketFrameParser()
 
@@ -404,8 +422,9 @@ final class WebSocketConnection: Hashable, Sendable {
         _disconnected = true
     }
 
-    init(connection: NWConnection) {
+    init(connection: NWConnection, isEsp32: Bool = false) {
         self.connection = connection
+        self.isEsp32 = isEsp32
     }
 
     func startReceiveLoop() {

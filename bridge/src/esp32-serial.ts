@@ -233,6 +233,27 @@ export const SERIAL_SESSIONS_CAP = 10;
  * (non-idle) sessions are preferred so a processing session is never dropped in
  * favour of an idle sibling. Order within a type is otherwise preserved (stable).
  */
+/** Total byte budget for a shipped timeline_history frame. The smallest board
+ * line buffer is 4096 (InkDeck is 8192) — a larger line is discarded whole
+ * on-device, so shipping it is pure waste at best and a WS-client killer at
+ * worst. Mirrors ESP32Serial.timelineHistoryByteBudget (Swift daemon). */
+export const TIMELINE_HISTORY_BYTE_BUDGET = 3500;
+
+/** Keep the NEWEST entries whose summed JSON size fits the byte budget,
+ * preserving chronological order for the ones that survive.
+ * @internal Exported for testing only */
+export function budgetTimelineEntries(entries: any[]): any[] {
+  const kept: any[] = [];
+  let total = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const size = Buffer.byteLength(JSON.stringify(entries[i]), 'utf8') + 1;
+    if (total + size > TIMELINE_HISTORY_BYTE_BUDGET) break;
+    total += size;
+    kept.push(entries[i]);
+  }
+  return kept.reverse();
+}
+
 export function roundRobinByAgentType(sessions: any[], cap: number): any[] {
   if (sessions.length <= cap) return sessions;
 
@@ -359,7 +380,16 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
     if (event.type === 'timeline_event') return { ...e, entry: stamp(e.entry) };
     // The firmware ring keeps at most 64 rows (TIMELINE_MAX_ENTRIES) — older
     // entries would be shifted straight out again, so ship only the newest.
-    return { ...e, entries: Array.isArray(e.entries) ? e.entries.slice(-64).map(stamp) : e.entries };
+    // Row cap alone is not enough: a busy afternoon of CJK entries made the
+    // 64-row frame ~37KB — far past the boards' 4KB line buffer, so serial
+    // firmware discarded it whole and heap-tight WiFi boards dropped the
+    // socket on it (chronic reconnect flap). Budget by BYTES, newest first.
+    return {
+      ...e,
+      entries: Array.isArray(e.entries)
+        ? budgetTimelineEntries(e.entries.slice(-64).map(stamp))
+        : e.entries,
+    };
   }
 
   if (event.type === 'sessions_list') {

@@ -970,20 +970,110 @@ actor ESP32Serial {
             if type == "timeline_event" {
                 if let entry = e["entry"] as? [String: Any] { e["entry"] = shrinkEntry(entry) }
             } else if let entries = e["entries"] as? [[String: Any]] {
-                // The firmware ring keeps at most 64 rows (TIMELINE_MAX_ENTRIES);
-                // older entries would be shifted straight out again, so ship only
-                // the newest ones and keep the frame within board RX buffers.
-                e["entries"] = entries.suffix(64).map(shrinkEntry)
+                // The firmware ring keeps at most 64 rows (TIMELINE_MAX_ENTRIES),
+                // but the row cap alone is not enough: a busy afternoon of CJK
+                // entries made the 64-row frame ~37 KB — far past the boards'
+                // 4 KB line buffer, so serial firmware discarded it silently and
+                // the WiFi WS client on heap-tight boards dropped the socket,
+                // reconnected, got the same frame, and flapped forever. Budget
+                // the shipped history by BYTES, newest first, so the frame
+                // always fits what a board can actually ingest.
+                e["entries"] = Self.budgetTimelineEntries(entries.suffix(64).map(shrinkEntry))
             }
-        } else if type == "sessions_list" {
+        }
+        return shapeSessionsList(e, type: type, deviceInfo: deviceInfo)
+    }
+
+    /// Node parity: SERIAL_SESSIONS_CAP in bridge/src/esp32-serial.ts.
+    static let serialSessionsCap = 10
+
+    /// Total byte budget for a shipped timeline_history frame. The smallest
+    /// board line buffer is 4096 (util/line_buffer defaults; InkDeck is 8192)
+    /// — anything larger is discarded whole on-device, so shipping it is pure
+    /// waste at best and a WS-client killer at worst.
+    static let timelineHistoryByteBudget = 3500
+
+    /// Keep the NEWEST entries whose summed JSON size fits the byte budget,
+    /// preserving chronological order for the ones that survive.
+    static func budgetTimelineEntries(_ entries: [[String: Any]]) -> [[String: Any]] {
+        var kept: [[String: Any]] = []
+        var total = 0
+        for entry in entries.reversed() {
+            guard let data = try? JSONSerialization.data(withJSONObject: entry) else { continue }
+            // +1 for the array comma; the envelope overhead lives in the
+            // budget's headroom (4096 - 3500).
+            if total + data.count + 1 > timelineHistoryByteBudget { break }
+            total += data.count + 1
+            kept.append(entry)
+        }
+        return kept.reversed()
+    }
+
+    /// Fair per-agentType session pick under the cap — a direct port of
+    /// `roundRobinByAgentType` (bridge/src/esp32-serial.ts): one session per
+    /// agent type per round, alive-then-active first within each type, so a
+    /// burst of observed Claude sessions can't evict the codex/opencode rows.
+    static func roundRobinByAgentType(_ sessions: [[String: Any]], cap: Int) -> [[String: Any]] {
+        guard sessions.count > cap else { return sessions }
+
+        var groups: [String: [[String: Any]]] = [:]
+        var order: [String] = []
+        for s in sessions {
+            let key = s["agentType"] as? String ?? ""
+            if groups[key] == nil { groups[key] = []; order.append(key) }
+            groups[key]!.append(s)
+        }
+
+        func rank(_ s: [String: Any]) -> Int {
+            let alive = ((s["alive"] as? Bool) ?? false) ? 1 : 0
+            let state = s["state"] as? String ?? ""
+            let active = (!state.isEmpty && state != "idle") ? 1 : 0
+            return alive * 2 + active
+        }
+        for key in order {
+            // Stable for ties — enumerate to keep the original index as the
+            // secondary sort key (Swift's sort is not guaranteed stable).
+            groups[key] = groups[key]!.enumerated()
+                .sorted { a, b in
+                    let ra = rank(a.element), rb = rank(b.element)
+                    return ra != rb ? ra > rb : a.offset < b.offset
+                }
+                .map { $0.element }
+        }
+
+        var result: [[String: Any]] = []
+        var progressed = true
+        while result.count < cap && progressed {
+            progressed = false
+            for key in order {
+                guard !groups[key]!.isEmpty else { continue }
+                result.append(groups[key]!.removeFirst())
+                progressed = true
+                if result.count >= cap { break }
+            }
+        }
+        return result
+    }
+
+    private static func shapeSessionsList(_ event: [String: Any], type: String?, deviceInfo: DeviceInfo?) -> [String: Any] {
+        var e = event
+        if type == "sessions_list" {
             // Per-session fields the device needs, with serial-size caps. Mirrors the Node
             // bridge's prepareForSerial map (bridge/src/esp32-serial.ts) so the App-Store Swift
             // daemon drives the same IPS10 D1 cards + pixel-office (project pods, desks, real
             // option buttons) even when no CLI daemon is running. Dead sessions excluded.
             func lim(_ v: Any?, _ n: Int) -> String { limitUtf8Bytes(v, n) }
             if let sessions = e["sessions"] as? [[String: Any]] {
-                e["sessions"] = sessions
-                    .filter { s in (s["alive"] as? Bool) ?? true }
+                // Cap the roster like Node (SERIAL_SESSIONS_CAP=10,
+                // roundRobinByAgentType). Uncapped, an afternoon of many
+                // observed Claude sessions pushed the frame past the boards'
+                // 4 KB line buffer: serial firmware silently discards the
+                // line (stale cards), but the WiFi WS client CLOSES on it —
+                // the chronic connect→choke→reconnect flap of every
+                // WiFi-only board whenever session count was high.
+                e["sessions"] = Self.roundRobinByAgentType(
+                    sessions.filter { s in (s["alive"] as? Bool) ?? true },
+                    cap: Self.serialSessionsCap)
                     .map { s -> [String: Any] in
                         var o: [String: Any] = [
                             "id": lim(s["id"], 31),

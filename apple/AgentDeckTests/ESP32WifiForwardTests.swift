@@ -103,6 +103,46 @@ final class ESP32WifiForwardTests: XCTestCase {
         XCTAssertEqual(project, String(repeating: "가", count: 13))
     }
 
+    /// timeline_history is byte-budgeted, not just row-capped — a busy
+    /// afternoon of CJK entries made the 64-row frame ~37KB, past every
+    /// board's line buffer (serial: silent discard; WiFi: socket-killing).
+    func testTimelineHistoryByteBudgeted() {
+        let entries: [[String: Any]] = (0..<64).map { i in
+            ["ts": Double(i), "raw": "\(i)-" + String(repeating: "가", count: 39)]
+        }
+        let ev: [String: Any] = ["type": "timeline_history", "entries": entries]
+        guard let out = ESP32Serial.wifiEsp32Forward(ev, deviceInfo: nil),
+              let kept = out["entries"] as? [[String: Any]] else {
+            return XCTFail("timeline_history must be forwarded")
+        }
+        XCTAssertLessThan(kept.count, entries.count)
+        XCTAssertFalse(kept.isEmpty)
+        let total = kept.compactMap { try? JSONSerialization.data(withJSONObject: $0).count + 1 }.reduce(0, +)
+        XCTAssertLessThanOrEqual(total, ESP32Serial.timelineHistoryByteBudget)
+        // Newest survive
+        XCTAssertEqual(kept.last?["ts"] as? Double, 63)
+    }
+
+    /// The roster is capped at SERIAL_SESSIONS_CAP (Node parity). Uncapped, a
+    /// burst of observed Claude sessions pushed the frame past the boards'
+    /// 4 KB line buffer — serial firmware discards the line silently, but the
+    /// WiFi WS firmware closes the socket (the WiFi-only board reconnect flap).
+    func testSessionsListCappedRoundRobinAcrossAgentTypes() {
+        var sessions: [[String: Any]] = (0..<14).map { i in
+            ["id": "claude-\(i)", "alive": true, "agentType": "claude", "state": "processing"]
+        }
+        sessions.append(["id": "codex-0", "alive": true, "agentType": "codex", "state": "idle"])
+        let ev: [String: Any] = ["type": "sessions_list", "sessions": sessions]
+        guard let out = ESP32Serial.wifiEsp32Forward(ev, deviceInfo: nil),
+              let shaped = out["sessions"] as? [[String: Any]] else {
+            return XCTFail("sessions_list must be forwarded")
+        }
+        XCTAssertEqual(shaped.count, ESP32Serial.serialSessionsCap)
+        // Round-robin keeps the lone codex row instead of letting 14 claude
+        // sessions evict it.
+        XCTAssertTrue(shaped.contains { ($0["id"] as? String) == "codex-0" })
+    }
+
     /// The daemon-computed lastEvent* milestone fields (TIMELINE parity for the
     /// IPS10 cards) survive the sessions_list shrink — byte-capped, and omitted
     /// entirely when absent (empty strings would waste the serial line budget).

@@ -2335,7 +2335,16 @@ final class DaemonServer {
             // shrinks the payload instead of blasting the full dashboard state that
             // used to overrun the board's buffer and flap the socket.
             @MainActor func esp32Shaped(_ event: [String: Any]) -> Data? {
-                guard let reg = self.cachedWifiEsp32[conn.id] else { return event.jsonData }
+                guard let reg = self.cachedWifiEsp32[conn.id] else {
+                    // Not registered yet — but a board tagged in its upgrade
+                    // URL is still an ESP32: shape (or drop) from frame zero.
+                    // The unshaped full-state frame used to land here when the
+                    // burst won the race against the board's device_info and
+                    // choked its 4 KB line buffer into a reconnect loop.
+                    return conn.isEsp32
+                        ? ESP32Serial.wifiEsp32Forward(event, deviceInfo: nil)?.jsonData
+                        : event.jsonData
+                }
                 return ESP32Serial.wifiEsp32Forward(event, deviceInfo: ESP32Serial.wifiDeviceInfo(reg.devices.first))?.jsonData
             }
 
