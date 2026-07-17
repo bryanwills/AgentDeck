@@ -91,7 +91,7 @@ import { loadWifiConfig } from './wifi-config.js';
 import { getConnectedAdbDevices, hasAdb, getAdbDeviceCount } from './adb-reverse.js';
 import { getPixooDeviceDetails, pixooDeviceCount } from './pixoo/pixoo-bridge.js';
 import { loadTimeboxDevices } from './timebox/timebox-settings.js';
-import { getLanIp, stripUnsafeText, cleanRawText, prepareMarkdownDetail, type TimelineEntry } from '@agentdeck/shared';
+import { getLanIp, stripUnsafeText, cleanRawText, prepareMarkdownDetail, normalizeCommandPrompt, formatDurationSec, type TimelineEntry } from '@agentdeck/shared';
 import { injectOpenClawSession } from './openclaw-session.js';
 import { readFileSync, statSync } from 'fs';
 import { join } from 'path';
@@ -900,6 +900,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // Fallback task-row emitter, created only when initApme() returns null —
   // keeps task_start/task_end rows on the timeline without the collector.
   let fallbackTasks: FallbackTaskTimeline | null = null;
+  // Sessions that posted any hook since this daemon started — the delayed
+  // orphan-chat reaper must never force-close a turn belonging to a session
+  // that is provably alive (agentic turns regularly outlive any fixed age
+  // threshold). Declared before the HTTP handlers that populate it.
+  const hookSessionsSeen = new Set<string>();
 
   // Declare early — HTTP /health handler references this in its closure.
   // Must be declared before the HTTP server so it's initialized (not in TDZ)
@@ -1256,6 +1261,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         // run mapping. Falls back to a stable id only when a hook omits it.
         const hookSid = typeof json.session_id === 'string' && json.session_id
           ? json.session_id : 'daemon-hook';
+        // Liveness marker for the delayed orphan-chat reaper: a session that
+        // posts ANY hook after daemon startup is alive, and its open turn
+        // (even one persisted before the restart) must not be force-closed.
+        hookSessionsSeen.add(hookSid);
         // Claude hooks carry `cwd` (the worktree dir), not project_name/path —
         // capture it so APME runs are attributable to a specific worktree.
         const hookCwd = (typeof json.cwd === 'string' ? json.cwd
@@ -1266,10 +1275,48 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         const hookMessage = json.message as Record<string, unknown> | undefined;
         // Prompt shapes: Claude `{prompt}` / `{message:{content}}`; some Codex
         // builds send `{user_prompt}` (same fallback chain as codex-hook.ts).
-        const hookPromptText = typeof json.prompt === 'string' ? json.prompt
-          : (typeof hookMessage?.content === 'string' ? hookMessage.content
-            : (typeof json.user_prompt === 'string' ? json.user_prompt : ''));
+        // Command XML envelopes (`<command-name>/merge</command-name>` …)
+        // collapse to their "/merge args" form so a slash-command turn reads
+        // as the command the user typed, not an XML blob.
+        const hookPromptText = normalizeCommandPrompt(
+          typeof json.prompt === 'string' ? json.prompt
+            : (typeof hookMessage?.content === 'string' ? hookMessage.content
+              : (typeof json.user_prompt === 'string' ? json.user_prompt : '')));
         const isClearBoundary = boundary === 'user_prompt_submit' && /^\s*\/clear\s*$/i.test(hookPromptText);
+
+        // Session ended with a turn still open (the user interrupted the turn
+        // then exited, or the process was torn down before its Stop could
+        // fire): close the row honestly so dashboards stop the spinner instead
+        // of showing "in progress" forever. Runs BEFORE the collector so the
+        // interrupted chat_end sorts above the session_end task_end row.
+        // Mirrors the Swift daemon's session_end force-close (`hasOpenTurn`
+        // → interrupted chat_end).
+        if (boundary === 'session_end') {
+          const rows = core.bridgeTimeline.getHistoryForSession(hookSid, undefined, 24);
+          let lastStart: TimelineEntry | undefined;
+          let lastCompletionTs = 0;
+          for (const row of rows) {
+            if (row.type === 'chat_start') lastStart = row;
+            else if (row.type === 'chat_response' || row.type === 'chat_end') {
+              lastCompletionTs = Math.max(lastCompletionTs, row.ts);
+            }
+          }
+          if (lastStart && lastStart.ts > lastCompletionTs) {
+            const now = Date.now();
+            const durS = Math.max(0, Math.round((now - (lastStart.startedAt ?? lastStart.ts)) / 1000));
+            core.bridgeTimeline.addEntry({
+              ts: now, type: 'chat_end',
+              raw: `Interrupted · ${formatDurationSec(durS)}`,
+              summaryKind: 'none',
+              sessionId: hookSid,
+              agentType: hookAgentType,
+              startedAt: lastStart.startedAt ?? lastStart.ts,
+              endedAt: now,
+              ...(lastStart.taskId ? { taskId: lastStart.taskId } : {}),
+              ...(hookProject ? { projectName: hookProject } : {}),
+            } as TimelineEntry);
+          }
+        }
 
         // ── APME collector (task/turn segmentation) ──
         if (apme) {
@@ -1420,7 +1467,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
               const durS = Math.max(0, Math.round((now - (lastStart.startedAt ?? lastStart.ts)) / 1000));
               core.bridgeTimeline.addEntry({
                 ts: now, type: 'chat_end',
-                raw: `Completed · ${durS}s`,
+                raw: `Completed · ${formatDurationSec(durS)}`,
                 summaryKind: 'none',
                 ...base,
               } as TimelineEntry);
@@ -1754,6 +1801,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // clients would otherwise spin their in-flight marker forever.
     const reaped = core.bridgeTimeline.reapOrphanTaskStarts();
     if (reaped > 0) log(`[agentdeck] Closed ${reaped} orphaned task_start rows as interrupted`);
+    // Same for chat turns: a session killed mid-turn (no Stop / SessionEnd)
+    // leaves its chat_start spinning "in progress" on every surface. Runs
+    // DELAYED (5 min) so live sessions have posted a hook and registered in
+    // `hookSessionsSeen` — only stale rows (30 min+) of sessions that stayed
+    // silent since startup close; a live long-running turn is untouched and
+    // its real Stop still lands normally.
+    const chatReaperTimer = setTimeout(() => {
+      const reapedTurns = core.bridgeTimeline.reapOrphanChatStarts(undefined, undefined, hookSessionsSeen);
+      if (reapedTurns > 0) log(`[agentdeck] Closed ${reapedTurns} orphaned chat_start rows as interrupted`);
+    }, 5 * 60_000);
+    chatReaperTimer.unref?.();
   }
   core.wireDisplayMonitor();
   let lastStateEvent: BridgeEvent | null = null;

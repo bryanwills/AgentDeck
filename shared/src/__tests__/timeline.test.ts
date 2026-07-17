@@ -3,8 +3,11 @@ import {
   cleanDetailText,
   cleanRawText,
   cleanNopMarkers,
+  deduplicateEntry,
   extractSemanticCore,
   isRepetitiveEntry,
+  normalizeCommandPrompt,
+  parseSlashCommandPrompt,
   isAssistantProgressUpdate,
   normalizeTimelineEntryForStorage,
   parseLogLine,
@@ -533,5 +536,71 @@ describe('parseLogLine', () => {
       module: 'whatsapp',
       time: '2025-01-01T00:00:00Z',
     })).toBeNull();
+  });
+});
+
+describe('parseSlashCommandPrompt', () => {
+  it('parses a bare command', () => {
+    expect(parseSlashCommandPrompt('/merge')).toEqual({ command: '/merge' });
+    expect(parseSlashCommandPrompt('  /session-end  ')).toEqual({ command: '/session-end' });
+  });
+
+  it('parses a command with arguments', () => {
+    expect(parseSlashCommandPrompt('/merge --squash now')).toEqual({ command: '/merge', args: '--squash now' });
+  });
+
+  it('parses plugin-scoped command names', () => {
+    expect(parseSlashCommandPrompt('/plugin:cmd arg')).toEqual({ command: '/plugin:cmd', args: 'arg' });
+  });
+
+  it('parses the Claude Code command XML envelope', () => {
+    const xml = '<command-message>merge</command-message>\n<command-name>/merge</command-name>\n<command-args>--squash</command-args>';
+    expect(parseSlashCommandPrompt(xml)).toEqual({ command: '/merge', args: '--squash' });
+  });
+
+  it('normalizes an envelope name missing the leading slash', () => {
+    expect(parseSlashCommandPrompt('<command-name>merge</command-name>')).toEqual({ command: '/merge' });
+  });
+
+  it('rejects ordinary prompts and filesystem paths', () => {
+    expect(parseSlashCommandPrompt('그냥 질문입니다')).toBeNull();
+    expect(parseSlashCommandPrompt('/Users/x/file.txt 읽어줘')).toBeNull();
+    expect(parseSlashCommandPrompt('/usr/bin/env 확인')).toBeNull();
+    expect(parseSlashCommandPrompt('')).toBeNull();
+    expect(parseSlashCommandPrompt(undefined)).toBeNull();
+  });
+});
+
+describe('normalizeCommandPrompt', () => {
+  it('collapses an XML envelope to "/name args"', () => {
+    const xml = '<command-message>merge</command-message>\n<command-name>/merge</command-name>\n<command-args>--squash</command-args>';
+    expect(normalizeCommandPrompt(xml)).toBe('/merge --squash');
+  });
+
+  it('passes ordinary prompts through unchanged', () => {
+    expect(normalizeCommandPrompt('/merge')).toBe('/merge');
+    expect(normalizeCommandPrompt('일반 프롬프트')).toBe('일반 프롬프트');
+  });
+});
+
+describe('deduplicateEntry — interrupted close + cross-session guards', () => {
+  const mk = (over: Partial<TimelineEntry>): TimelineEntry => ({
+    ts: 1000, type: 'chat_end', raw: 'x', ...over,
+  });
+
+  it('never repetitive-merges rows from different sessions', () => {
+    const a = mk({ ts: 1000, type: 'chat_response', raw: '빌드 수정 완료 결과 정리', sessionId: 'A' });
+    const b = mk({ ts: 2000, type: 'chat_response', raw: '빌드 수정 완료 결과 정리 보고', sessionId: 'B' });
+    const result = deduplicateEntry(b, [a]);
+    expect(result.action).toBe('add');
+  });
+
+  it('adds interrupted chat_end rows instead of merging them by semantic core', () => {
+    const a = mk({ ts: 1000, raw: 'Interrupted · 42s', sessionId: 'A' });
+    // Same session, later interrupted close of a DIFFERENT turn — must not
+    // merge away (that would reopen the earlier turn's spinner).
+    const b = mk({ ts: 500_000, raw: 'Interrupted · ~2m', sessionId: 'A' });
+    const result = deduplicateEntry(b, [a]);
+    expect(result.action).toBe('add');
   });
 });

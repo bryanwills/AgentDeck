@@ -617,6 +617,21 @@ func timelineIsMeaningfulChatStart(_ entry: TimelineEntry) -> Bool {
     return !syntheticStarts.contains(normalized)
 }
 
+/// The slash-command invocation a `chat_start` row's raw text represents
+/// ("/merge", "/session-end --now"), or nil for an ordinary prompt.
+/// Display-side mirror of shared/src/timeline.ts `parseSlashCommandPrompt` —
+/// the command token must be the whole first word, so absolute paths
+/// ("/Users/x/file") never match. Renderers use this to style command turns
+/// distinctly (terminal glyph + CMD chip instead of a chat bubble).
+func timelineSlashCommand(_ raw: String) -> String? {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.hasPrefix("/") else { return nil }
+    guard trimmed.range(of: #"^/[A-Za-z][\w:-]*(\s|$)"#, options: .regularExpression) != nil else {
+        return nil
+    }
+    return trimmed
+}
+
 func timelineIsTaskNotificationChatStart(_ entry: TimelineEntry) -> Bool {
     guard entry.type == .chatStart else { return false }
     let raw = entry.raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

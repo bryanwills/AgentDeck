@@ -870,10 +870,15 @@ final class ApmeCollector {
             default:              signalLabel = "Task end"
             }
             let durationSec = max(0, (endedAt - task.startedAt) / 1000)
+            // "<signal> · <N> turns · <duration>" — the turn count says what
+            // the boundary covered, the human duration replaces raw second
+            // counts. Mirrors `taskEndRowText` in bridge/src/apme/index.ts.
+            let turns = (task.lastTurnIndex ?? task.firstTurnIndex ?? 0) - (task.firstTurnIndex ?? 0) + 1
+            let turnsLabel = turns == 1 ? "1 turn" : "\(turns) turns"
             emitTimelineEntry?(DaemonTimelineEntry(
                 ts: Double(endedAt),
                 type: "task_end",
-                raw: "\(signalLabel) · \(durationSec)s",
+                raw: "\(signalLabel) · \(turnsLabel) · \(DaemonTimelineStore.formatDurationSec(durationSec))",
                 agentType: run?.agentType,
                 projectName: run?.projectName,
                 sessionId: run?.sessionId,

@@ -17,12 +17,15 @@
  */
 
 import { randomUUID } from 'crypto';
+import { formatDurationSec } from '@agentdeck/shared';
 import type { TimelineEntry } from '@agentdeck/shared';
 
 interface ActiveFallbackTask {
   taskId: string;
   startedAt: number;
   index: number;
+  /** Prompts seen while the task was open — the task_end row's turn count. */
+  turns: number;
 }
 
 export class FallbackTaskTimeline {
@@ -50,6 +53,8 @@ export class FallbackTaskTimeline {
         return;
       }
       this.openIfNone(sessionId);
+      const active = this.active.get(sessionId);
+      if (active) active.turns++;
       return;
     }
     if (e === 'sessionend') {
@@ -68,7 +73,7 @@ export class FallbackTaskTimeline {
     if (this.active.has(sessionId)) return;
     const index = this.counts.get(sessionId) ?? 0;
     this.counts.set(sessionId, index + 1);
-    const task: ActiveFallbackTask = { taskId: randomUUID(), startedAt: Date.now(), index };
+    const task: ActiveFallbackTask = { taskId: randomUUID(), startedAt: Date.now(), index, turns: 0 };
     this.active.set(sessionId, task);
     this.emit({
       ts: task.startedAt,
@@ -93,10 +98,13 @@ export class FallbackTaskTimeline {
     const endedAt = Date.now();
     const durationSec = Math.max(0, Math.round((endedAt - task.startedAt) / 1000));
     const signalLabel = boundarySignal === 'clear' ? '/clear' : 'Session end';
+    const turnsLabel = task.turns > 0
+      ? ` · ${task.turns === 1 ? '1 turn' : `${task.turns} turns`}`
+      : '';
     this.emit({
       ts: endedAt,
       type: 'task_end',
-      raw: `${signalLabel} · ${durationSec}s`,
+      raw: `${signalLabel}${turnsLabel} · ${formatDurationSec(durationSec)}`,
       sessionId,
       taskId: task.taskId,
       boundarySignal,

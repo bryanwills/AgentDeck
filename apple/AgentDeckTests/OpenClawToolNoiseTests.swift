@@ -590,6 +590,124 @@ final class OpenClawToolNoiseTests: XCTestCase {
         XCTAssertTrue(DaemonServer.computeOrphanTaskEnds(from: [start]).isEmpty)
     }
 
+    /// A task with turn rows anchors its synthetic end AFTER the last row
+    /// carrying the taskId (not at task_start+1, which rendered TASK END
+    /// above every turn of the task), and derives an approximate duration
+    /// from that row.
+    func testReaperAnchorsSyntheticEndAfterLastTaskRow() {
+        let start = DaemonTimelineEntry(
+            ts: 1_000, type: "task_start", raw: "Task 1",
+            sessionId: "s", startedAt: 1_000, taskId: "task-A"
+        )
+        var turn = DaemonTimelineEntry(
+            ts: 2_000, type: "chat_start", raw: "질문", sessionId: "s"
+        )
+        turn.taskId = "task-A"
+        var resp = DaemonTimelineEntry(
+            ts: 130_000, type: "chat_response", raw: "답변", sessionId: "s"
+        )
+        resp.taskId = "task-A"
+        let synthetics = DaemonServer.computeOrphanTaskEnds(from: [start, turn, resp])
+        XCTAssertEqual(synthetics.count, 1)
+        let end = synthetics[0]
+        XCTAssertEqual(end.ts, 130_001, "sorts below the turns it closes")
+        XCTAssertEqual(end.endedAt, 130_000)
+        XCTAssertEqual(end.raw, "Interrupted · ~2m 9s")
+    }
+
+    // MARK: - Orphan chat reaper (DaemonServer.computeOrphanChatEnds)
+
+    /// A stale chat_start with no completion gets a synthetic interrupted
+    /// chat_end anchored after the turn's last row; completed and fresh
+    /// turns are untouched.
+    func testChatReaperClosesOnlyStaleOrphans() {
+        let minute: Double = 60_000
+        let now = 100 * minute
+        var dead = DaemonTimelineEntry(
+            ts: 10 * minute, type: "chat_start", raw: "/merge",
+            sessionId: "dead", startedAt: 10 * minute
+        )
+        dead.taskId = "t1"
+        let deadTool = DaemonTimelineEntry(
+            ts: 12 * minute, type: "tool_exec", raw: "Bash: git merge", sessionId: "dead"
+        )
+        let doneStart = DaemonTimelineEntry(
+            ts: 20 * minute, type: "chat_start", raw: "질문", sessionId: "done"
+        )
+        let doneResp = DaemonTimelineEntry(
+            ts: 21 * minute, type: "chat_response", raw: "답변", sessionId: "done"
+        )
+        let live = DaemonTimelineEntry(
+            ts: 95 * minute, type: "chat_start", raw: "작업중", sessionId: "live"
+        )
+        let synthetics = DaemonServer.computeOrphanChatEnds(
+            from: [dead, deadTool, doneStart, doneResp, live],
+            staleMs: 30 * minute,
+            now: now
+        )
+        XCTAssertEqual(synthetics.count, 1)
+        let end = synthetics[0]
+        XCTAssertEqual(end.sessionId, "dead")
+        XCTAssertEqual(end.type, "chat_end")
+        XCTAssertEqual(end.ts, 12 * minute + 1, "anchored after the turn's last row")
+        XCTAssertEqual(end.raw, "Interrupted · ~2m")
+        XCTAssertEqual(end.summaryKind, "none")
+        XCTAssertEqual(end.taskId, "t1", "keeps the turn's task nesting")
+    }
+
+    /// The synthetic close must sort BEFORE the session's next chat_start —
+    /// a completion after a newer prompt would stop that turn's spinner too.
+    func testChatReaperBoundsCloseBeforeNextTurn() {
+        let minute: Double = 60_000
+        let first = DaemonTimelineEntry(
+            ts: 10 * minute, type: "chat_start", raw: "첫 턴", sessionId: "s"
+        )
+        let second = DaemonTimelineEntry(
+            ts: 95 * minute, type: "chat_start", raw: "새 턴", sessionId: "s"
+        )
+        let synthetics = DaemonServer.computeOrphanChatEnds(
+            from: [first, second], staleMs: 30 * minute, now: 100 * minute
+        )
+        XCTAssertEqual(synthetics.count, 1)
+        XCTAssertLessThan(synthetics[0].ts, 95 * minute)
+        XCTAssertGreaterThan(synthetics[0].ts, 10 * minute)
+    }
+
+    // MARK: - Slash-command prompt normalization
+
+    func testNormalizeCommandPromptCollapsesXmlEnvelope() {
+        let xml = "<command-message>merge</command-message>\n<command-name>/merge</command-name>\n<command-args>--squash</command-args>"
+        XCTAssertEqual(DaemonServer.normalizeCommandPrompt(xml), "/merge --squash")
+        XCTAssertEqual(
+            DaemonServer.normalizeCommandPrompt("<command-name>merge</command-name>"),
+            "/merge"
+        )
+    }
+
+    func testNormalizeCommandPromptPassesOrdinaryTextThrough() {
+        XCTAssertEqual(DaemonServer.normalizeCommandPrompt("/merge"), "/merge")
+        XCTAssertEqual(DaemonServer.normalizeCommandPrompt("일반 프롬프트"), "일반 프롬프트")
+    }
+
+    // MARK: - Duration formatting (DaemonTimelineStore.formatDurationSec)
+
+    func testFormatDurationSecMirrorsSharedFormatter() {
+        XCTAssertEqual(DaemonTimelineStore.formatDurationSec(42), "42s")
+        XCTAssertEqual(DaemonTimelineStore.formatDurationSec(300), "5m")
+        XCTAssertEqual(DaemonTimelineStore.formatDurationSec(312), "5m 12s")
+        XCTAssertEqual(DaemonTimelineStore.formatDurationSec(3720), "1h 2m")
+        XCTAssertEqual(DaemonTimelineStore.formatDurationSec(7200), "2h")
+        XCTAssertEqual(DaemonTimelineStore.formatDurationSec(-5), "0s")
+    }
+
+    /// Display-side slash-command detection (Model/Timeline.swift).
+    func testTimelineSlashCommandDetection() {
+        XCTAssertEqual(timelineSlashCommand("/merge"), "/merge")
+        XCTAssertEqual(timelineSlashCommand("/session-end --now"), "/session-end --now")
+        XCTAssertNil(timelineSlashCommand("/Users/x/file.txt 읽어줘"))
+        XCTAssertNil(timelineSlashCommand("일반 프롬프트"))
+    }
+
     // MARK: - Gateway chat message text extraction
 
     /// The Gateway ships the assistant text inside the message structure

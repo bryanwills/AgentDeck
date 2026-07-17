@@ -73,6 +73,22 @@ actor DaemonTimelineStore {
     static func isTaskRow(_ e: DaemonTimelineEntry) -> Bool {
         e.type == "task_start" || e.type == "task_end" || e.type == "task_milestone"
     }
+
+    /// Compact human duration for an elapsed span of seconds — "42s",
+    /// "5m 12s", "1h 2m" (zero remainders dropped). Mirror of the canonical
+    /// TS `formatDurationSec` in shared/src/format-utils.ts; keep in sync.
+    static func formatDurationSec(_ sec: Int) -> String {
+        let s = max(0, sec)
+        if s < 60 { return "\(s)s" }
+        if s < 3600 {
+            let m = s / 60
+            let r = s % 60
+            return r > 0 ? "\(m)m \(r)s" : "\(m)m"
+        }
+        let h = s / 3600
+        let rm = (s % 3600) / 60
+        return rm > 0 ? "\(h)h \(rm)m" : "\(h)h"
+    }
     private let persistFile: URL
     private var dirty = false
     private var persistenceStarted = false

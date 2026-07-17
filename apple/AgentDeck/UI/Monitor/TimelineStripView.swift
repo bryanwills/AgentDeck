@@ -386,9 +386,17 @@ struct TimelineStripView: View {
             : (group.entry.type == .chatStart && isCompleted
                 ? timelineTypeColor(for: .chatEnd)
                 : timelineTypeColor(for: group.entry.type))
+        // Slash-command turn ("/merge", "/session-end") — rendered with a
+        // terminal glyph + CMD chip instead of a chat bubble so command
+        // invocations are legible at a glance. Completed command turns keep
+        // the success check (completion signal outranks the command marker).
+        let slashCommand = group.entry.type == .chatStart
+            ? timelineSlashCommand(group.entry.raw) : nil
         // Fold turns get a distinct down-right glyph; everything else keeps its
         // semantic icon.
-        let rowSymbolName = isFolded ? "arrow.turn.down.right" : sfSymbol(for: iconKey)
+        let rowSymbolName = isFolded
+            ? "arrow.turn.down.right"
+            : (slashCommand != nil && !isCompleted ? "terminal.fill" : sfSymbol(for: iconKey))
         let brandColor = SessionBrand.color(for: group.entry.agentType)
         let countSuffix = group.count > 1 ? " ×\(group.count)" : ""
         let sessionLabel = rowPrefixLabel(for: group.entry)
@@ -438,12 +446,28 @@ struct TimelineStripView: View {
                         .lineLimit(1)
                 }
 
+                // Command chip — marks a slash-command invocation before its
+                // text so "/merge" reads as an executed command, not a chat.
+                if slashCommand != nil {
+                    Text("CMD")
+                        .font(.system(size: max(8, fontScale.label - 1), weight: .heavy, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 0.5)
+                        .background(iconColor.opacity(0.7), in: RoundedRectangle(cornerRadius: 2))
+                        .accessibilityLabel("slash command")
+                }
+
                 // Strip markdown decorators from the summary so `**bold**` /
                 // `## heading` don't leak into the row as literal characters.
                 // (The regular detail pane / compact inline-expand still renders
                 // the full markdown.)
                 Text(strippedRaw(timelineSummaryTextForDashboard(group)) + countSuffix)
-                    .font(.system(size: fontScale.sub, design: .monospaced))
+                    .font(.system(
+                        size: fontScale.sub,
+                        weight: slashCommand != nil ? .semibold : .regular,
+                        design: .monospaced
+                    ))
                     .foregroundStyle(isChatEnd ? TerrariumHUD.text.opacity(0.6) : TerrariumHUD.text)
                     .lineLimit(allowMultiline ? 2 : 1)
                     .multilineTextAlignment(.leading)

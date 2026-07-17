@@ -22,7 +22,18 @@ import { ApmeRunner } from './runner.js';
 import { ApmeHwSampler } from './hw-sampler.js';
 import { ApmeRecommender } from './recommend.js';
 import { sampleEventToTimeline } from './sample-to-timeline.js';
+import { formatDurationSec } from '@agentdeck/shared';
 import type { TimelineEntry } from '@agentdeck/shared';
+
+/** Task boundary rows read "<signal> · <N> turns · <duration>" — the turn
+ *  count says what the boundary covered, the human duration replaces the
+ *  raw "3672s" second counts. */
+function taskEndRowText(signalLabel: string, turns: number | undefined, durationSec: number): string {
+  const parts = [signalLabel];
+  if (turns && turns > 0) parts.push(turns === 1 ? '1 turn' : `${turns} turns`);
+  parts.push(formatDurationSec(durationSec));
+  return parts.join(' · ');
+}
 
 export interface ApmeModule {
   store: ApmeStore;
@@ -88,7 +99,7 @@ export async function initApme(
   // hard dependency on the runner.
   collector.onTaskClosed = ({
     taskId, runId, sessionId, agentType, projectName,
-    startedAt, endedAt, boundarySignal, taskCategory, timelineEmitted,
+    startedAt, endedAt, boundarySignal, taskCategory, turns, timelineEmitted,
   }) => {
     runner.enqueueTask({
       runId,
@@ -109,7 +120,7 @@ export async function initApme(
       emitTimeline({
         ts: endedAt,
         type: 'task_end',
-        raw: `${signalLabel} · ${durationSec}s`,
+        raw: taskEndRowText(signalLabel, turns, durationSec),
         agentType: agentType ?? undefined,
         projectName: projectName ?? undefined,
         sessionId,
@@ -200,7 +211,7 @@ export async function initApme(
       emitTimeline({
         ts: e.endedAt,
         type: 'task_end',
-        raw: `${signalLabel} · ${durationSec}s`,
+        raw: taskEndRowText(signalLabel, e.turns, durationSec),
         agentType: e.agentType,
         projectName: e.projectName,
         sessionId: e.sessionId,

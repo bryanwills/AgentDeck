@@ -1,5 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { adjustUsagePercent, formatAntigravityPlanShort, formatResetTime, isCodexWindowStale } from '../format-utils.js';
+import { adjustUsagePercent, formatAntigravityPlanShort, formatDurationSec, formatResetTime, isCodexWindowStale } from '../format-utils.js';
+
+describe('formatDurationSec', () => {
+  it('formats sub-minute spans as seconds', () => {
+    expect(formatDurationSec(0)).toBe('0s');
+    expect(formatDurationSec(42)).toBe('42s');
+    expect(formatDurationSec(59.4)).toBe('59s');
+  });
+
+  it('formats minute spans, dropping a zero-second remainder', () => {
+    expect(formatDurationSec(300)).toBe('5m');
+    expect(formatDurationSec(312)).toBe('5m 12s');
+  });
+
+  it('formats hour spans, dropping a zero-minute remainder', () => {
+    expect(formatDurationSec(3720)).toBe('1h 2m');
+    expect(formatDurationSec(7200)).toBe('2h');
+    expect(formatDurationSec(3672)).toBe('1h 1m');
+  });
+
+  it('clamps negatives to zero', () => {
+    expect(formatDurationSec(-5)).toBe('0s');
+  });
+});
 
 describe('formatAntigravityPlanShort', () => {
   it('shortens "Google AI Pro" to "AGY Pro"', () => {

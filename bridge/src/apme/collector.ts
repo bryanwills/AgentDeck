@@ -91,6 +91,10 @@ export type OnTaskClosed = (args: {
   endedAt: number;
   boundarySignal: TaskBoundarySignal;
   taskCategory: string | null;
+  /** Number of turns the task spanned (≥1 — empty tasks are dropped before
+   *  this fires). The timeline emitter puts it in the task_end row text so
+   *  the boundary says what it covered, not just when it happened. */
+  turns: number;
   /** True when this task's `task_start` row reached the timeline. The timeline
    *  emitter gates the `task_end` row on this so an unpromoted single-turn task
    *  never leaves an orphan end row; the eval enqueue runs regardless. */
@@ -633,6 +637,7 @@ export class ApmeCollector {
           endedAt: Date.now(),
           boundarySignal,
           taskCategory,
+          turns: (task.lastTurnIndex ?? task.firstTurnIndex ?? 0) - (task.firstTurnIndex ?? 0) + 1,
           timelineEmitted: task.timelineEmitted,
         });
       } catch (err) {

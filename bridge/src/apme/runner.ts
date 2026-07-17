@@ -70,6 +70,9 @@ export interface TaskEvaluatedEvent {
   taskCategory?: string;
   summary?: string;
   boundarySignal: string;
+  /** Turn count the task spanned, when the store recorded its indices. The
+   *  timeline emitter mirrors it into the upserted task_end row text. */
+  turns?: number;
 }
 
 function deriveTaskOutcome(score: number | null | undefined): TaskEvaluatedEvent['outcome'] {
@@ -376,6 +379,9 @@ export class ApmeRunner {
           taskCategory: category ?? updatedTask.taskCategory ?? undefined,
           summary: parsed.summary ?? undefined,
           boundarySignal: boundarySignal ?? updatedTask.boundarySignal,
+          turns: updatedTask.firstTurnIndex != null
+            ? (updatedTask.lastTurnIndex ?? updatedTask.firstTurnIndex) - updatedTask.firstTurnIndex + 1
+            : undefined,
         };
         for (const fn of this.taskListeners) {
           try { fn(event); } catch { /* ignore */ }

@@ -279,6 +279,66 @@ export function isOpenClawPlaceholderRaw(raw: string): boolean {
   return normalized === 'tool' || normalized.startsWith('tool \u00b7 ');
 }
 
+/**
+ * A user prompt that invokes a slash command ("/merge", "/session-end args").
+ *
+ * Two wire shapes reach the daemons' UserPromptSubmit paths:
+ *   1. Plain text — the user's literal keystrokes: "/merge --squash"
+ *   2. Claude Code's command XML envelope (what the transcript records and
+ *      some hook versions forward):
+ *        <command-message>merge</command-message>
+ *        <command-name>/merge</command-name>
+ *        <command-args>--squash</command-args>
+ *
+ * `parseSlashCommandPrompt` recognizes both and returns the normalized
+ * invocation, so emit paths can store a clean "/merge --squash" row and
+ * renderers can style command turns distinctly (terminal glyph instead of a
+ * chat bubble). Returns null for ordinary prompts — including absolute paths
+ * ("/Users/x/file" never matches because path segments contain further "/").
+ *
+ * Mirror: TimelineStripView.swift `timelineSlashCommand` must match.
+ */
+export interface SlashCommandInvocation {
+  /** Command including the leading slash, e.g. "/merge". */
+  command: string;
+  /** Argument string after the command, if any. */
+  args?: string;
+}
+
+export function parseSlashCommandPrompt(text?: string): SlashCommandInvocation | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  // Shape 2: command XML envelope.
+  if (trimmed.includes('<command-name>')) {
+    const name = /<command-name>\s*(\/?[A-Za-z][\w:-]*)\s*<\/command-name>/.exec(trimmed)?.[1];
+    if (!name) return null;
+    const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(trimmed)?.[1]?.trim();
+    return {
+      command: name.startsWith('/') ? name : `/${name}`,
+      ...(args ? { args } : {}),
+    };
+  }
+
+  // Shape 1: plain "/command [args...]" — the command token must be the whole
+  // first word (a "/" inside the token means it's a filesystem path, not a
+  // command).
+  const m = /^\/([A-Za-z][\w:-]*)(?:\s+([\s\S]+))?$/.exec(trimmed);
+  if (!m) return null;
+  const args = m[2]?.trim();
+  return { command: `/${m[1]}`, ...(args ? { args } : {}) };
+}
+
+/** Normalize a prompt for timeline display: command XML envelopes collapse to
+ *  their "/name args" form; everything else passes through unchanged. */
+export function normalizeCommandPrompt(text: string): string {
+  if (!text.includes('<command-name>')) return text;
+  const cmd = parseSlashCommandPrompt(text);
+  if (!cmd) return text;
+  return cmd.args ? `${cmd.command} ${cmd.args}` : cmd.command;
+}
+
 export function isTaskNotificationChatStart(entry: TimelineEntry): boolean {
   if (entry.type !== 'chat_start') return false;
   const raw = entry.raw.trim().toLowerCase();
@@ -491,6 +551,13 @@ export function isRepetitiveEntry(
     const e = recentEntries[i];
     if (entry.ts - e.ts > effectiveWindowMs) break;
     if (e.type !== entry.type) continue;
+    // Never merge across sessions. Turn rows are structural (a chat_end pairs
+    // with ITS session's chat_start); merging session B's "Interrupted"/
+    // "Completed" close into session A's row moves the close out of B — and
+    // the merge path reassigns sessionId, stealing A's close too. Only applies
+    // when both sides carry a sessionId (legacy unattributed rows keep the
+    // old behavior).
+    if (entry.sessionId && e.sessionId && entry.sessionId !== e.sessionId) continue;
 
     // Automated entries: content-agnostic dedup (any two automated chats collapse)
     if (entry.automated && e.automated) return i;
@@ -538,7 +605,14 @@ export function deduplicateEntry(
     if (e.type === entry.type && e.raw === entry.raw) return { action: 'skip' };
   }
 
-  // 3. Repetitive entry dedup (1h window)
+  // 3. Repetitive entry dedup (1h window). Interrupted turn-closes are exempt:
+  // they are structural pair-closers for a specific turn (their semantic core
+  // collapses to just "Interrupted", so two interrupted turns in the window
+  // would merge — silently reopening the earlier turn's spinner). The exact
+  // 8s dedup above still absorbs duplicate emits of the same close.
+  if (entry.type === 'chat_end' && /^Interrupted\b/.test(entry.raw)) {
+    return { action: 'add', entry };
+  }
   const repIdx = isRepetitiveEntry(entry, entries);
   if (repIdx >= 0) {
     let removeChatStartIndex: number | undefined;

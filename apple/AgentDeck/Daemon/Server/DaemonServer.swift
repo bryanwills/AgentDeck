@@ -176,6 +176,59 @@ enum CodexRolloutResponseReader {
     }
 }
 
+/// Tail-reader for Claude Code's transcript JSONL (`transcript_path` on every
+/// hook payload). The Claude counterpart of `CodexRolloutResponseReader`:
+/// when a Stop hook arrives without `last_assistant_message` (~18% reliable),
+/// or a session dies mid-turn and its close is synthesized at eviction /
+/// session_end, the transcript tail is the authoritative source of the turn's
+/// final assistant text — the same source the Node daemon reads
+/// (`lastAssistantTextFromTranscript`). Sandboxed (App Store) builds can't
+/// read `~/.claude`; every access is guarded and callers degrade to a plain
+/// close row.
+enum ClaudeTranscriptTailReader {
+    private static let tailBytes = 256 * 1024
+
+    /// The last assistant text message in the transcript, with its timestamp
+    /// (epoch ms; 0 when the record has no parseable timestamp). Reads only
+    /// the file tail. nil when the file is unreadable or has no assistant
+    /// text in the tail window.
+    static func lastAssistantText(transcriptPath: String) -> (text: String, tsMs: Double)? {
+        guard !transcriptPath.isEmpty else { return nil }
+        let url = URL(fileURLWithPath: transcriptPath)
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let offset = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
+        guard (try? handle.seek(toOffset: offset)) != nil else { return nil }
+        let text = String(data: handle.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard !text.isEmpty else { return nil }
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoPlain = ISO8601DateFormatter()
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
+            guard let data = rawLine.data(using: .utf8),
+                  let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  record["type"] as? String == "assistant",
+                  let message = record["message"] as? [String: Any],
+                  let content = message["content"] as? [[String: Any]] else { continue }
+            let textParts = content.compactMap { block -> String? in
+                guard block["type"] as? String == "text",
+                      let t = block["text"] as? String,
+                      !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return t
+            }
+            guard !textParts.isEmpty else { continue }
+            var tsMs: Double = 0
+            if let iso = record["timestamp"] as? String,
+               let date = isoFractional.date(from: iso) ?? isoPlain.date(from: iso) {
+                tsMs = date.timeIntervalSince1970 * 1000
+            }
+            return (textParts.joined(separator: "\n\n"), tsMs)
+        }
+        return nil
+    }
+}
+
 /// ESP32 heartbeat callbacks run from the `ESP32Serial` actor, not from the
 /// daemon's `@MainActor` context. Store serial-facing event snapshots here so
 /// heartbeat code never reaches back into `DaemonServer` actor state.
@@ -498,6 +551,12 @@ final class DaemonServer {
     /// later Stop without a fresh UserPromptSubmit cannot reuse a stale
     /// label from a different turn.
     private var claudeLastPromptTopicBySession: [String: String] = [:]
+    /// Last `transcript_path` seen per Claude session (every Claude hook
+    /// carries it). Lets a force-close at eviction — where no fresh hook
+    /// payload exists — recover the turn's final assistant text from the
+    /// transcript tail (`ClaudeTranscriptTailReader`) instead of dropping the
+    /// result on the floor. Cleared on session_end and stale eviction.
+    private var claudeTranscriptPathBySession: [String: String] = [:]
     /// Codex mirror of `claudeTurnAnchors` — same open-turn anchor
     /// semantics. Access through the codex-prefixed note/claim helpers.
     private var codexTurnAnchors = ChatTurnAnchorTracker()
@@ -995,10 +1054,19 @@ final class DaemonServer {
                         default:              signalLabel = "Task end"
                         }
                         let durationSec = max(0, (event.endedAt - event.startedAt) / 1000)
+                        // Same "<signal> · <N> turns · <duration>" text as the
+                        // collector's initial task_end emit — the upsert
+                        // REPLACES raw, so dropping the turn count here would
+                        // strip it from the header the moment the judge lands.
+                        var rawParts = [signalLabel]
+                        if let turns = event.turns, turns > 0 {
+                            rawParts.append(turns == 1 ? "1 turn" : "\(turns) turns")
+                        }
+                        rawParts.append(DaemonTimelineStore.formatDurationSec(durationSec))
                         let updated = DaemonTimelineEntry(
                             ts: Double(event.endedAt),
                             type: "task_end",
-                            raw: "\(signalLabel) · \(durationSec)s",
+                            raw: rawParts.joined(separator: " · "),
                             agentType: event.agentType,
                             projectName: event.projectName,
                             sessionId: event.sessionId,
@@ -3109,6 +3177,15 @@ final class DaemonServer {
             apmeHandledEarly = true
         }
 
+        // Remember the session's transcript path (every Claude hook carries
+        // one) so an eviction-time force-close — which has no fresh hook
+        // payload — can still recover the turn's final text from the
+        // transcript tail.
+        if let sessionId, !isCodexEvent, !isOpenCodeEvent,
+           let tp = json["transcript_path"] as? String, !tp.isEmpty {
+            claudeTranscriptPathBySession[sessionId] = tp
+        }
+
         switch event {
         case "codex_session_start":
             _ = stateMachine.transition(trigger: "session_start", source: .hook)
@@ -3222,11 +3299,14 @@ final class DaemonServer {
                 let isCodex = expiredEntry.map { Self.isCodexSession(sessionId: sessionId, entry: $0) } ?? false
                 if isCodex {
                     if codexTurnAnchors.hasOpenTurn(sid: sessionId) {
-                        appendCodexChatEnd(json: [:], sessionId: sessionId)
+                        appendCodexChatEnd(json: json, sessionId: sessionId, interrupted: true)
                     }
                 } else {
                     if claudeTurnAnchors.hasOpenTurn(sid: sessionId) {
-                        appendClaudeCodeChatEnd(json: [:], sessionId: sessionId)
+                        // Real payload (not [:]) — SessionEnd carries
+                        // transcript_path, letting the force-close recover the
+                        // turn's final text from the transcript tail.
+                        appendClaudeCodeChatEnd(json: json, sessionId: sessionId, interrupted: true)
                     }
                 }
 
@@ -3242,6 +3322,7 @@ final class DaemonServer {
                 codexCurrentToolBySession.removeValue(forKey: sessionId)
                 clearClaudeTurnAnchor(sid: sessionId)
                 claudeLastPromptTopicBySession.removeValue(forKey: sessionId)
+                claudeTranscriptPathBySession.removeValue(forKey: sessionId)
                 Task { await ObservedSteering.shared.clearSession(sessionId: sessionId) }
                 broadcastSessionsList()
             }
@@ -3438,7 +3519,7 @@ final class DaemonServer {
             _ = stateMachine.transition(trigger: "session_end", source: .hook)
             if let sessionId {
                 if openCodeTurnAnchors.hasOpenTurn(sid: sessionId) {
-                    appendOpenCodeChatEnd(json: json, sessionId: sessionId)
+                    appendOpenCodeChatEnd(json: json, sessionId: sessionId, interrupted: true)
                 }
                 pushedSessionsById.removeValue(forKey: sessionId)
                 cachedSessions.removeAll { $0.id == sessionId }
@@ -3849,19 +3930,23 @@ final class DaemonServer {
                 .map { $0 < codexTerminalCutoff } ?? false
 
             // Auto-emit fallbacks for any open (uncompleted) turn before
-            // clearing its backing anchor state.
+            // clearing its backing anchor state. `interrupted: true` — the
+            // turn's own Stop never fired (session died / hooks went silent),
+            // so the close must not read "Completed". The Claude path can
+            // still recover the turn's final text from the cached transcript
+            // path; Codex recovers via its rollout reader.
             let isCodex = expiredEntry.map { Self.isCodexSession(sessionId: sid, entry: $0) } ?? false
             if isCodex {
                 if codexTurnAnchors.hasOpenTurn(sid: sid) {
-                    appendCodexChatEnd(json: [:], sessionId: sid)
+                    appendCodexChatEnd(json: [:], sessionId: sid, interrupted: true)
                 }
             } else if sid.hasPrefix(Self.openCodeSessionPrefix) {
                 if openCodeTurnAnchors.hasOpenTurn(sid: sid) {
-                    appendOpenCodeChatEnd(json: [:], sessionId: sid)
+                    appendOpenCodeChatEnd(json: [:], sessionId: sid, interrupted: true)
                 }
             } else {
                 if claudeTurnAnchors.hasOpenTurn(sid: sid) {
-                    appendClaudeCodeChatEnd(json: [:], sessionId: sid)
+                    appendClaudeCodeChatEnd(json: [:], sessionId: sid, interrupted: true)
                 }
             }
 
@@ -3883,6 +3968,7 @@ final class DaemonServer {
             codexCurrentToolBySession.removeValue(forKey: sid)
             clearClaudeTurnAnchor(sid: sid)
             claudeLastPromptTopicBySession.removeValue(forKey: sid)
+            claudeTranscriptPathBySession.removeValue(forKey: sid)
             openCodeTurnAnchors.clear(sid: sid)
             openCodeLastPromptTopicBySession.removeValue(forKey: sid)
             if currentHookSessionId == sid { currentHookSessionId = nil }
@@ -7385,7 +7471,7 @@ final class DaemonServer {
     }
 
     @MainActor
-    private func appendCodexChatEnd(json: [String: Any], sessionId: String?) {
+    private func appendCodexChatEnd(json: [String: Any], sessionId: String?, interrupted: Bool = false) {
         guard let sessionId else { return }
         let now = Date().timeIntervalSince1970 * 1000
         // Claim the open turn's anchor up front so both chat_response
@@ -7451,8 +7537,11 @@ final class DaemonServer {
                 : await TimelineSummarizer.summarize(assistantText, provider: provider)
             let topic = summary?.text ?? topicFromPrompt
             let durationSec = startTs.map { Int(((now - $0) / 1000).rounded()) }
-            var parts = ["Completed"]
-            if let durationSec { parts.append("\(durationSec)s") }
+            // "Interrupted" when this close was synthesized (session_end /
+            // eviction with an open turn) — the turn's own Stop never fired,
+            // so claiming "Completed" would be dishonest.
+            var parts = [interrupted && assistantText.isEmpty ? "Interrupted" : "Completed"]
+            if let durationSec { parts.append(DaemonTimelineStore.formatDurationSec(durationSec)) }
             if let topic { parts.append(topic) }
             var endEntry = DaemonTimelineEntry(
                 ts: now,
@@ -7565,7 +7654,7 @@ final class DaemonServer {
     /// they never own a task (same rationale as the Codex appenders —
     /// borrowing a Claude session's active task cross-contaminates subtrees).
     @MainActor
-    private func appendOpenCodeChatEnd(json: [String: Any], sessionId: String?) {
+    private func appendOpenCodeChatEnd(json: [String: Any], sessionId: String?, interrupted: Bool = false) {
         guard let sessionId else { return }
         let now = Date().timeIntervalSince1970 * 1000
         // Claim once at the top so chat_response and chat_end stamp the same
@@ -7601,10 +7690,11 @@ final class DaemonServer {
         }
         // Response-less turn: single "Completed · Ns · topic" close row —
         // high-entropy label so the store's exact-raw dedup keeps two quick
-        // turns distinct (Claude/Codex parity).
+        // turns distinct (Claude/Codex parity). "Interrupted" on a
+        // synthesized close (session_end / eviction with an open turn).
         let durationSec: Int? = startTs.map { Int(((now - $0) / 1000).rounded()) }
-        var endRawParts: [String] = ["Completed"]
-        if let d = durationSec { endRawParts.append("\(d)s") }
+        var endRawParts: [String] = [interrupted ? "Interrupted" : "Completed"]
+        if let d = durationSec { endRawParts.append(DaemonTimelineStore.formatDurationSec(d)) }
         if let t = topicFromPrompt { endRawParts.append(t) }
         var endEntry = DaemonTimelineEntry(
             ts: now,
@@ -7684,9 +7774,13 @@ final class DaemonServer {
 
     /// Append a `chat_response` (when `last_assistant_message` arrived) + a
     /// terminating `chat_end` for a Claude Code Stop hook.
+    ///
+    /// `interrupted: true` marks a force-close (session_end with an open turn,
+    /// stale-session eviction): the close row reads "Interrupted" instead of
+    /// dishonestly claiming "Completed" for a turn whose Stop never fired.
     @MainActor
-    private func appendClaudeCodeChatEnd(json: [String: Any], sessionId: String?) {
-        let assistantText = (json["last_assistant_message"] as? String) ?? ""
+    private func appendClaudeCodeChatEnd(json: [String: Any], sessionId: String?, interrupted: Bool = false) {
+        var assistantText = (json["last_assistant_message"] as? String) ?? ""
         let now = Date().timeIntervalSince1970 * 1000
         let projectName = pushedSessionsById[sessionId ?? ""]?.projectName
         // Claim the open turn's anchor **once** at the top of the handler
@@ -7705,6 +7799,24 @@ final class DaemonServer {
         // timeline data audit 2026-07-13). Non-consuming, so it never mints a
         // spurious close row for an already-closed turn.
         let startTs: Double? = claimedTs ?? sessionId.flatMap { claudeTurnAnchors.lastChatStart(sid: $0) }
+        // Transcript-tail fallback (Node daemon parity): Stop's
+        // `last_assistant_message` is only ~18% reliable, and a force-close
+        // has no payload at all — the transcript JSONL is the authoritative
+        // record of the turn's final text. Only adopt text NEWER than the
+        // turn's start when the start is known: a turn that produced no text
+        // (killed mid-tool, or a genuine tool-only turn) would otherwise
+        // re-emit the PREVIOUS turn's response as this turn's result. With no
+        // known start, adopt only on a real Stop — a force-close without an
+        // anchor has nothing to pin the text to. Sandboxed builds fail the
+        // read and fall through to the plain close row.
+        if assistantText.isEmpty {
+            let tp = (json["transcript_path"] as? String)
+                ?? sessionId.flatMap { claudeTranscriptPathBySession[$0] }
+            if let tp, let tail = ClaudeTranscriptTailReader.lastAssistantText(transcriptPath: tp),
+               startTs.map({ tail.tsMs >= $0 }) ?? !interrupted {
+                assistantText = tail.text
+            }
+        }
         if !assistantText.isEmpty {
             let snippet = String(assistantText.prefix(200))
             let detail: String? = assistantText.count > 100
@@ -7762,12 +7874,14 @@ final class DaemonServer {
         Task {
             let topic = topicFromPrompt
             let durationSec: Int? = startTs.map { Int(((now - $0) / 1000).rounded()) }
-            // "Completed · {duration}s · {prompt topic}" is the single
-            // turn-close row for a response-less turn. High-entropy label
-            // (duration + topic) keeps DaemonTimelineStore's 8 s exact-dedup
-            // from collapsing two legitimate quick turns.
-            var endRawParts: [String] = ["Completed"]
-            if let d = durationSec { endRawParts.append("\(d)s") }
+            // "Completed · {duration} · {prompt topic}" is the single
+            // turn-close row for a response-less turn — "Interrupted · …"
+            // when this is a force-close (the turn's Stop never fired).
+            // High-entropy label (duration + topic) keeps
+            // DaemonTimelineStore's 8 s exact-dedup from collapsing two
+            // legitimate quick turns.
+            var endRawParts: [String] = [interrupted ? "Interrupted" : "Completed"]
+            if let d = durationSec { endRawParts.append(DaemonTimelineStore.formatDurationSec(d)) }
             if let t = topic { endRawParts.append(t) }
             let endRaw = endRawParts.joined(separator: " · ")
             var endEntry = DaemonTimelineEntry(
@@ -7786,7 +7900,7 @@ final class DaemonServer {
             endEntry.startedAt = startTs
             endEntry.endedAt = now
             endEntry.taskId = turnTaskId
-            endEntry.summaryKind = topic == nil ? nil : "heuristic"
+            endEntry.summaryKind = interrupted ? "none" : (topic == nil ? nil : "heuristic")
             await timelineStore.add(endEntry)
             broadcastRaw([
                 "type": "timeline_event",
@@ -7823,14 +7937,41 @@ final class DaemonServer {
 
     /// Pull the user's prompt from either Claude Code's legacy `prompt` field
     /// or the newer `message.content` shape. Mirrors the collector's parsing.
+    /// Slash-command XML envelopes (`<command-name>/merge</command-name>` …)
+    /// collapse to their "/merge args" form — mirror of the shared
+    /// `normalizeCommandPrompt` (shared/src/timeline.ts).
     private func claudeCodePromptText(from json: [String: Any]) -> String {
-        if let s = json["prompt"] as? String, !s.isEmpty { return s }
-        if let s = json["text"] as? String, !s.isEmpty { return s }
-        if let message = json["message"] as? [String: Any],
-           let content = message["content"] as? String {
-            return content
+        let raw: String
+        if let s = json["prompt"] as? String, !s.isEmpty { raw = s }
+        else if let s = json["text"] as? String, !s.isEmpty { raw = s }
+        else if let message = json["message"] as? [String: Any],
+                let content = message["content"] as? String { raw = content }
+        else { return "" }
+        return Self.normalizeCommandPrompt(raw)
+    }
+
+    /// Mirror of shared/src/timeline.ts `normalizeCommandPrompt`: collapse a
+    /// Claude Code command XML envelope to "/name args"; pass anything else
+    /// through unchanged.
+    static func normalizeCommandPrompt(_ text: String) -> String {
+        guard text.contains("<command-name>") else { return text }
+        guard let nameRange = text.range(
+            of: #"<command-name>\s*/?[A-Za-z][\w:-]*\s*</command-name>"#,
+            options: .regularExpression
+        ) else { return text }
+        var name = String(text[nameRange])
+            .replacingOccurrences(of: "<command-name>", with: "")
+            .replacingOccurrences(of: "</command-name>", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.hasPrefix("/") { name = "/" + name }
+        var args = ""
+        if let argsRange = text.range(of: #"<command-args>[\s\S]*?</command-args>"#, options: .regularExpression) {
+            args = String(text[argsRange])
+                .replacingOccurrences(of: "<command-args>", with: "")
+                .replacingOccurrences(of: "</command-args>", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        return ""
+        return args.isEmpty ? name : "\(name) \(args)"
     }
 
     private static func compactDebugValue(_ value: Any?, max: Int) -> String? {
@@ -8009,20 +8150,30 @@ final class DaemonServer {
             guard let taskId = start.taskId, !taskId.isEmpty else { continue }
             if closedTaskIds.contains(taskId) { continue }
             let startedAtMs = start.startedAt ?? start.ts
-            // ts: nudge 1ms past the task_start so the synthetic end
-            // sorts immediately after the orphaned start in chronological
-            // views. endedAt: leave nil — duration is genuinely unknown
-            // (daemon died between start and end), and the UI renders
-            // "Interrupted · –" for that case rather than guessing.
+            // Anchor the synthetic end 1ms after the task's LAST known row so
+            // it sorts below the turns it closes — anchoring at task_start+1
+            // rendered "TASK END" directly under its header, ABOVE every turn
+            // of the task. That last row also gives an honest lower-bound
+            // duration ("Interrupted · ~55m"); "–" remains only for a task
+            // with no other rows (endedAt stays nil in that case so clients
+            // don't render a fabricated duration). Mirrors
+            // BridgeTimelineStore.reapOrphanTaskStarts.
+            var lastTs = startedAtMs
+            for e in snapshot where e.type != "task_start" && e.taskId == taskId && e.ts > lastTs {
+                lastTs = e.ts
+            }
+            let approxSec = Int(((lastTs - startedAtMs) / 1000).rounded())
             result.append(DaemonTimelineEntry(
-                ts: startedAtMs + 1,
+                ts: lastTs + 1,
                 type: "task_end",
-                raw: "Interrupted · –",
+                raw: approxSec > 0
+                    ? "Interrupted · ~\(DaemonTimelineStore.formatDurationSec(approxSec))"
+                    : "Interrupted · –",
                 agentType: start.agentType,
                 projectName: start.projectName,
                 sessionId: start.sessionId,
                 startedAt: startedAtMs,
-                endedAt: nil,
+                endedAt: approxSec > 0 ? lastTs : nil,
                 runId: start.runId,
                 taskId: taskId,
                 boundarySignal: "interrupted"
@@ -8031,6 +8182,64 @@ final class DaemonServer {
             // (which would be a producer bug, not a normal state) doesn't
             // produce two synthetics for one logical task.
             closedTaskIds.insert(taskId)
+        }
+        return result
+    }
+
+    /// Chat-turn counterpart of `computeOrphanTaskEnds`: synthesize a
+    /// `chat_end` for every persisted `chat_start` whose completion
+    /// (chat_response / chat_end) never arrived — a session killed mid-turn
+    /// (no Stop, no SessionEnd; e.g. a /merge skill removing its own
+    /// worktree + tmux window) leaves the prompt row spinning "in progress"
+    /// forever on every dashboard.
+    ///
+    /// Only rows older than `staleMs` close (default: the 30-minute
+    /// interactive idle TTL) so a live turn surviving a quick daemon restart
+    /// is not falsely interrupted. Each synthetic is anchored after the
+    /// turn's last same-session row but strictly BEFORE the session's next
+    /// chat_start — a completion sorted after a newer prompt would stop that
+    /// (possibly live) turn's spinner too. Mirrors
+    /// BridgeTimelineStore.reapOrphanChatStarts.
+    static func computeOrphanChatEnds(
+        from snapshot: [DaemonTimelineEntry],
+        staleMs: Double = claudeInteractiveIdleTTL * 1000,
+        now: Double = Date().timeIntervalSince1970 * 1000
+    ) -> [DaemonTimelineEntry] {
+        let sorted = snapshot.sorted { $0.ts < $1.ts }
+        var result: [DaemonTimelineEntry] = []
+        for (i, start) in sorted.enumerated() {
+            guard start.type == "chat_start",
+                  let sid = start.sessionId, !sid.isEmpty,
+                  now - start.ts > staleMs else { continue }
+            var nextStartTs = Double.infinity
+            var completed = false
+            var lastTurnTs = start.ts
+            for j in (i + 1)..<sorted.count {
+                let e = sorted[j]
+                guard e.sessionId == sid else { continue }
+                if e.type == "chat_start" { nextStartTs = e.ts; break }
+                if e.type == "chat_response" || e.type == "chat_end" { completed = true; break }
+                if e.ts > lastTurnTs { lastTurnTs = e.ts }
+            }
+            if completed { continue }
+            let approxSec = Int(((lastTurnTs - start.ts) / 1000).rounded())
+            var entry = DaemonTimelineEntry(
+                ts: min(lastTurnTs + 1, nextStartTs - 1),
+                type: "chat_end",
+                raw: approxSec > 0
+                    ? "Interrupted · ~\(DaemonTimelineStore.formatDurationSec(approxSec))"
+                    : "Interrupted · –",
+                agentType: start.agentType,
+                projectName: start.projectName,
+                sessionId: sid,
+                startedAt: start.startedAt ?? start.ts,
+                endedAt: nil,
+                runId: start.runId,
+                taskId: start.taskId,
+                boundarySignal: nil
+            )
+            entry.summaryKind = "none"
+            result.append(entry)
         }
         return result
     }
@@ -8067,6 +8276,41 @@ final class DaemonServer {
         }
         if !synthetics.isEmpty {
             DaemonLogger.shared.info("Timeline reaper: synthesized \(synthetics.count) task_end row(s) for orphaned task_start entries")
+        }
+        // Chat-turn pass runs DELAYED (5 min), not here: a live session's
+        // long-running turn (agentic turns regularly exceed any fixed age
+        // threshold) must not be force-closed at startup. By reap time the
+        // live sessions have posted hooks and registered in
+        // `lastHookAtByPushedSession`; their turns are skipped.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5 * 60 * 1_000_000_000)
+            await self?.reapOrphanChatStartsDelayed()
+        }
+    }
+
+    /// Delayed chat-turn reaper pass — see `computeOrphanChatEnds`. Skips
+    /// sessions that have posted any hook since this daemon started (provably
+    /// alive; their pre-restart open turn still gets its real completion via
+    /// the Stop path). `add` (not upsert) — chat closes have no taskId upsert
+    /// key; the store's exact 8s dedup absorbs a double-run in one process,
+    /// and the synthetic itself is a completion so the next startup's scan
+    /// finds the turn closed (idempotent across restarts).
+    @MainActor
+    private func reapOrphanChatStartsDelayed() async {
+        let aliveSessions = Set(lastHookAtByPushedSession.keys)
+        let snapshot = await timelineStore.getAll()
+        let chatSynthetics = Self.computeOrphanChatEnds(from: snapshot).filter { e in
+            e.sessionId.map { !aliveSessions.contains($0) } ?? true
+        }
+        for synthetic in chatSynthetics {
+            await timelineStore.add(synthetic)
+            broadcastRaw([
+                "type": "timeline_event",
+                "entry": claudeCodeEntryDict(synthetic),
+            ] as [String: Any])
+        }
+        if !chatSynthetics.isEmpty {
+            DaemonLogger.shared.info("Timeline reaper: closed \(chatSynthetics.count) orphaned chat_start row(s) as interrupted")
         }
     }
 

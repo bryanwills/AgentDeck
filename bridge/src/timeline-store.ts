@@ -5,7 +5,7 @@
  */
 
 import type { TimelineEntry } from './types.js';
-import { deduplicateEntry, normalizeTimelineEntryForStorage } from '@agentdeck/shared';
+import { deduplicateEntry, formatDurationSec, normalizeTimelineEntryForStorage } from '@agentdeck/shared';
 import { readFileSync } from 'fs';
 
 type EntryListener = (entry: TimelineEntry, upsert?: boolean) => void;
@@ -233,22 +233,91 @@ export class BridgeTimelineStore {
     for (const start of [...this.entries]) {
       if (start.type !== 'task_start' || !start.taskId || closed.has(start.taskId)) continue;
       const startedAtMs = start.startedAt ?? start.ts;
-      // ts nudged 1ms past the task_start so the synthetic end sorts right
-      // after the orphaned start. endedAt stays unset — the duration is
-      // genuinely unknown, and clients render "Interrupted · –" for that.
+      // Anchor the synthetic end 1ms after the task's LAST known row so it
+      // sorts below the turns it closes. Anchoring at task_start+1 (the
+      // original behavior) rendered "TASK END" directly under its header,
+      // ABOVE every turn of the task — an empty-looking closed task with its
+      // rows dangling underneath. The last row's ts also gives an honest
+      // lower-bound duration ("Interrupted · ~55m"); "–" remains only when
+      // the task has no other rows at all.
+      let lastTs = startedAtMs;
+      for (const e of this.entries) {
+        if (e !== start && e.taskId === start.taskId && e.ts > lastTs) lastTs = e.ts;
+      }
+      const approxSec = Math.round((lastTs - startedAtMs) / 1000);
       this.addEntry({
-        ts: startedAtMs + 1,
+        ts: lastTs + 1,
         type: 'task_end',
-        raw: 'Interrupted · –',
+        raw: approxSec > 0 ? `Interrupted · ~${formatDurationSec(approxSec)}` : 'Interrupted · –',
         ...(start.agentType ? { agentType: start.agentType } : {}),
         ...(start.projectName ? { projectName: start.projectName } : {}),
         ...(start.sessionId ? { sessionId: start.sessionId } : {}),
         ...(start.runId ? { runId: start.runId } : {}),
         startedAt: startedAtMs,
+        ...(approxSec > 0 ? { endedAt: lastTs } : {}),
         taskId: start.taskId,
         boundarySignal: 'interrupted',
       }, { bypassSuppression: true });
       closed.add(start.taskId);
+      count++;
+    }
+    return count;
+  }
+
+  /** Chat-turn counterpart of `reapOrphanTaskStarts`: close persisted
+   *  `chat_start` rows whose completion (chat_response / chat_end) never
+   *  arrived — a session killed mid-turn (no Stop, no SessionEnd — e.g. a
+   *  /merge skill removing its own worktree+tmux window) leaves the prompt
+   *  row spinning "in progress" forever on every dashboard.
+   *
+   *  Two live-turn guards, because agentic turns regularly run past any
+   *  fixed age threshold: only rows older than `staleMs` (default: the
+   *  30-minute interactive idle TTL) are considered, AND sessions in
+   *  `skipSessionIds` — sessions that posted a hook since this daemon
+   *  started, i.e. provably alive — are never touched. Callers should
+   *  therefore run this DELAYED after startup, not immediately, so live
+   *  sessions have had a chance to identify themselves. The synthetic
+   *  close is anchored after the turn's last same-session row but strictly
+   *  BEFORE the session's next chat_start — a completion row placed after
+   *  a newer prompt would stop that newer (possibly live) turn's spinner
+   *  too. */
+  reapOrphanChatStarts(
+    staleMs = 30 * 60_000,
+    now = Date.now(),
+    skipSessionIds?: ReadonlySet<string>,
+  ): number {
+    let count = 0;
+    const sorted = [...this.entries].sort((a, b) => a.ts - b.ts);
+    for (let i = 0; i < sorted.length; i++) {
+      const start = sorted[i];
+      if (start.type !== 'chat_start' || !start.sessionId) continue;
+      if (skipSessionIds?.has(start.sessionId)) continue;
+      if (now - start.ts <= staleMs) continue;
+      // Next chat_start of the same session bounds this turn.
+      let nextStartTs = Number.POSITIVE_INFINITY;
+      let completed = false;
+      let lastTurnTs = start.ts;
+      for (let j = i + 1; j < sorted.length; j++) {
+        const e = sorted[j];
+        if (e.sessionId !== start.sessionId) continue;
+        if (e.type === 'chat_start') { nextStartTs = e.ts; break; }
+        if (e.type === 'chat_response' || e.type === 'chat_end') { completed = true; break; }
+        if (e.ts > lastTurnTs) lastTurnTs = e.ts;
+      }
+      if (completed) continue;
+      const approxSec = Math.round((lastTurnTs - start.ts) / 1000);
+      this.addEntry({
+        ts: Math.min(lastTurnTs + 1, nextStartTs - 1),
+        type: 'chat_end',
+        raw: approxSec > 0 ? `Interrupted · ~${formatDurationSec(approxSec)}` : 'Interrupted · –',
+        summaryKind: 'none',
+        ...(start.agentType ? { agentType: start.agentType } : {}),
+        ...(start.projectName ? { projectName: start.projectName } : {}),
+        sessionId: start.sessionId,
+        ...(start.runId ? { runId: start.runId } : {}),
+        ...(start.taskId ? { taskId: start.taskId } : {}),
+        startedAt: start.startedAt ?? start.ts,
+      }, { bypassSuppression: true });
       count++;
     }
     return count;

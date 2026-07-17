@@ -75,6 +75,9 @@ struct ApmeTaskEvaluatedEvent: Sendable {
     let taskCategory: String?
     let summary: String?
     let boundarySignal: String
+    /// Turn count the task spanned. The timeline emitter mirrors it into the
+    /// upserted task_end row text (parity with TS `TaskEvaluatedEvent.turns`).
+    let turns: Int?
 }
 
 /// Parsed judge output.
@@ -446,7 +449,8 @@ actor ApmeRunner {
                 outcome: taskOutcome,
                 taskCategory: category ?? refreshedTask.taskCategory,
                 summary: parsed.summary,
-                boundarySignal: boundarySignal ?? refreshedTask.boundarySignal
+                boundarySignal: boundarySignal ?? refreshedTask.boundarySignal,
+                turns: turns.count
             )
             for listener in taskEvaluatedListeners { listener(event) }
         }

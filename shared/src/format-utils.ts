@@ -145,6 +145,31 @@ export function formatAntigravityPlanShort(planName?: string | null): string | u
   return tier ? `AGY ${tier}` : 'AGY';
 }
 
+/**
+ * Compact human duration for an elapsed span of seconds. Timeline task/turn
+ * close rows previously printed raw seconds ("Session end · 3672s"), which is
+ * unreadable past a few minutes.
+ *
+ *   42    → "42s"
+ *   312   → "5m 12s"   (zero-second remainder dropped: 300 → "5m")
+ *   3720  → "1h 2m"    (zero-minute remainder dropped: 7200 → "2h")
+ *
+ * Canonical definition; the Swift daemon mirror
+ * (DaemonTimelineStore.formatDurationSec) must match.
+ */
+export function formatDurationSec(sec: number): string {
+  const s = Math.max(0, Math.round(sec));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return r > 0 ? `${m}m ${r}s` : `${m}m`;
+  }
+  const h = Math.floor(s / 3600);
+  const rm = Math.floor((s % 3600) / 60);
+  return rm > 0 ? `${h}h ${rm}m` : `${h}h`;
+}
+
 /** Plain-text gauge bar: "████░░" (no ANSI colors) */
 export function gaugeBar(percent: number, width = 6): string {
   const clamped = Math.max(0, Math.min(100, percent));
