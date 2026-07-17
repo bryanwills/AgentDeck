@@ -63,6 +63,11 @@ actor ESP32Serial {
         var deviceInfoRequestsSent = 0
         var needsLineReset = false
         var writeBackpressureCount = 0
+        /// While set and in the future, non-JSON serial lines from this port
+        /// are logged verbatim — opened by a panic marker line so crash
+        /// backtraces land in the daemon log instead of being discarded.
+        var panicLogUntil: Date?
+        var panicLogLines = 0
     }
 
     struct DeviceInfo {
@@ -590,6 +595,35 @@ actor ESP32Serial {
         }
     }
 
+    // ESP32 crash output is plain text on the same UART/CDC stream as the
+    // JSON protocol. These markers open a capture window so the whole dump
+    // (register dump lines don't individually match) is logged before the
+    // board reboots.
+    private static let panicMarkers = [
+        "guru meditation", "backtrace:", "register dump", "abort() was called",
+        "assert failed", "stack smashing", "stack canary",
+        "debug exception reason", "elf file sha256", "rebooting...",
+    ]
+    private static let panicCaptureWindowSec: TimeInterval = 10
+    private static let panicCaptureMaxLines = 200
+
+    private func capturePanicLine(idx: Int, line: String) {
+        let now = Date()
+        let inWindow = connections[idx].panicLogUntil.map { now < $0 } ?? false
+        let lowered = line.lowercased()
+        let isMarker = Self.panicMarkers.contains { lowered.contains($0) }
+        guard inWindow || isMarker else { return }
+        if isMarker {
+            // (Re)open the window on every marker — "Rebooting..." after the
+            // dump keeps the bootloader reset-cause lines in scope too.
+            connections[idx].panicLogUntil = now.addingTimeInterval(Self.panicCaptureWindowSec)
+            if !inWindow { connections[idx].panicLogLines = 0 }
+        }
+        guard connections[idx].panicLogLines < Self.panicCaptureMaxLines else { return }
+        connections[idx].panicLogLines += 1
+        DaemonLogger.shared.info("ESP32 panic capture \(connections[idx].port): \(line)")
+    }
+
     private func markReadFailure(port: String, message: String) {
         lastReadError = message
         if let idx = connections.firstIndex(where: { $0.port == port }) {
@@ -615,7 +649,12 @@ actor ESP32Serial {
             let line = String(connections[idx].readBuffer[..<newlineIdx]).trimmingCharacters(in: .whitespaces)
             connections[idx].readBuffer = String(connections[idx].readBuffer[connections[idx].readBuffer.index(after: newlineIdx)...])
 
-            guard line.hasPrefix("{") else { continue }
+            guard line.hasPrefix("{") else {
+                // Not protocol JSON — usually boot/debug chatter, but ESP32
+                // crash dumps arrive on this stream too. Capture those.
+                capturePanicLine(idx: idx, line: line)
+                continue
+            }
             guard let jsonData = line.data(using: .utf8),
                   let msg = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                   let type = msg["type"] as? String else { continue }

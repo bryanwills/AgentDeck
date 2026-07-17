@@ -30,7 +30,7 @@ import type { BridgeEvent } from './types.js';
 import { SERIAL_FORWARDED_EVENTS } from '@agentdeck/shared/protocol';
 import type { ESP32ToHostMessage, WifiProvisionMessage } from '@agentdeck/shared/protocol';
 import { formatResetTime } from '@agentdeck/shared';
-import { debug } from './logger.js';
+import { debug, logTagged } from './logger.js';
 
 /** @internal Exported for testing only */
 export const ESP32_PORT_PATTERNS = [
@@ -151,6 +151,12 @@ export interface SerialConnection {
   deviceInfoRequestsSent: number;
   writeQueue: string[];
   writeTimer: ReturnType<typeof setTimeout> | null;
+  /** While set and in the future, non-JSON serial lines from this port are
+   * logged verbatim — opened by a panic marker line so crash backtraces
+   * (Guru Meditation / register dump / Backtrace) land in the daemon log
+   * instead of being silently discarded. */
+  panicLogUntil?: number;
+  panicLogLines?: number;
 }
 
 let connections: SerialConnection[] = [];
@@ -606,9 +612,40 @@ function hasLiveDeviceInfo(conn: Pick<SerialConnection, 'deviceInfo' | 'lastRead
   return Boolean(conn.deviceInfo?.board) && conn.lastReadAt > 0;
 }
 
+// ESP32 crash output is plain text on the same UART/CDC stream as the JSON
+// protocol. These markers open a capture window so the whole dump (register
+// dump lines don't individually match) is logged before the board reboots.
+const PANIC_MARKER_RE = /Guru Meditation|Backtrace:|register dump|abort\(\) was called|assert failed|Stack smashing|Stack canary|Debug exception reason|ELF file SHA256|Rebooting\.\.\./i;
+const PANIC_CAPTURE_WINDOW_MS = 10_000;
+const PANIC_CAPTURE_MAX_LINES = 200;
+
+/** @internal Exported for testing only */
+export function capturePanicLine(conn: SerialConnection, line: string): boolean {
+  const now = Date.now();
+  const inWindow = conn.panicLogUntil != null && now < conn.panicLogUntil;
+  const isMarker = PANIC_MARKER_RE.test(line);
+  if (!inWindow && !isMarker) return false;
+  if (isMarker) {
+    // (Re)open the window on every marker — "Rebooting..." after the dump
+    // keeps the bootloader reset-cause lines in scope too.
+    conn.panicLogUntil = now + PANIC_CAPTURE_WINDOW_MS;
+    if (!inWindow) conn.panicLogLines = 0;
+  }
+  const count = conn.panicLogLines ?? 0;
+  if (count >= PANIC_CAPTURE_MAX_LINES) return false;
+  conn.panicLogLines = count + 1;
+  logTagged('esp32-panic', `${conn.port}: ${line}`);
+  return true;
+}
+
 /** @internal Exported for testing only */
 export function handleSerialLine(conn: SerialConnection, line: string): void {
-  if (!line.startsWith('{')) return; // Skip debug output like "[WiFi] Connected"
+  if (!line.startsWith('{')) {
+    // Not protocol JSON — usually boot/debug chatter, but crash dumps arrive
+    // here too. Capture those instead of dropping them.
+    capturePanicLine(conn, line);
+    return;
+  }
 
   try {
     const msg = JSON.parse(line) as ESP32ToHostMessage;

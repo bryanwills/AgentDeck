@@ -18,6 +18,7 @@ import {
   roundRobinByAgentType,
   SERIAL_SESSIONS_CAP,
   handleSerialLine,
+  capturePanicLine,
   isRetryableSerialIoError,
   ESP32_PORT_PATTERNS,
   EXCLUDE_PATTERNS,
@@ -142,6 +143,33 @@ describe('handleSerialLine (source)', () => {
     handleSerialLine(conn, '');
 
     expect(conn.deviceInfo).toBeNull(); // Nothing parsed
+  });
+
+  it('opens a panic capture window on crash markers and captures the dump', () => {
+    const conn = mockConn();
+    // Ordinary chatter before a crash is not captured
+    expect(capturePanicLine(conn, '[WiFi] Connected to network')).toBe(false);
+
+    // Marker opens the window; subsequent register-dump lines are captured
+    expect(capturePanicLine(conn, "Guru Meditation Error: Core  1 panic'ed (LoadProhibited). Exception was unhandled.")).toBe(true);
+    expect(capturePanicLine(conn, 'Core  1 register dump:')).toBe(true);
+    expect(capturePanicLine(conn, 'PC      : 0x42012345  PS      : 0x00060030')).toBe(true);
+    expect(capturePanicLine(conn, 'Backtrace: 0x42012345:0x3fc9e0 0x42011111:0x3fca00')).toBe(true);
+    expect(capturePanicLine(conn, 'Rebooting...')).toBe(true);
+
+    // handleSerialLine routes non-JSON lines into the capture window
+    handleSerialLine(conn, 'rst:0x3 (RTC_SW_SYS_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)');
+    expect(conn.panicLogLines).toBe(6);
+  });
+
+  it('closes the panic window after expiry and caps captured lines', () => {
+    const conn = mockConn();
+    conn.panicLogUntil = Date.now() - 1;
+    expect(capturePanicLine(conn, 'PC      : 0x42012345')).toBe(false);
+
+    conn.panicLogUntil = Date.now() + 10_000;
+    conn.panicLogLines = 200;
+    expect(capturePanicLine(conn, 'PC      : 0x42012345')).toBe(false);
   });
 
   it('recovers from malformed JSON', () => {
