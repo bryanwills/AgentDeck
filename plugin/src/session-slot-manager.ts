@@ -158,14 +158,6 @@ const CC_PRESET_DEFS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string; 
   { label: 'CLEAR', iconSvg: CLEAR_ICON_SVG, color: '#1e293b', textColor: '#94a3b8', prompt: '/clear' },
 ];
 
-// Observed Claude: COMMIT is the one directive worth pre-queueing while the
-// session works (Stop-hook delivery at turn end; natural language only — no
-// slash commands through that channel). GO ON was dropped: premature turn
-// stops are not a scenario that occurs in practice.
-const CC_OBSERVED_QUEUE_PRESETS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string }> = [
-  { label: 'COMMIT', iconSvg: COMMIT_ICON_SVG, color: '#1e293b', textColor: '#22c55e', prompt: 'commit the changes', subtitle: 'at turn end' },
-];
-
 // OpenCode observed idle: the observer plugin injects immediately via the
 // in-process SDK — same semantics as managed idle presets.
 const OC_OBSERVED_INJECT_PRESETS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string }> = [
@@ -810,7 +802,7 @@ export class SessionSlotManager {
    * Content cells for an observed (hook-only) session's detail view. Every
    * actionable cell maps to something actually deliverable:
    *   - held gate (Claude PreToolUse / OpenCode permission.asked) → Allow/Deny
-   *   - Claude processing → COMMIT queued for turn end (Stop-hook block)
+   *   - processing → live readouts + STOP only
    *   - OpenCode idle → immediate injection presets
    *   - REVIEW (independent eval) → everywhere, including control-less Codex
    */
@@ -821,7 +813,6 @@ export class SessionSlotManager {
     // Delivery paths: Claude = hook RPC (gate / soft stop / turn-end queue),
     // OpenCode = observer-plugin queue (immediate). Codex = notify-only.
     const isOpenCodeObserved = session?.agentType === 'opencode';
-    const isClaudeObserved = session?.agentType === 'claude-code';
     if (isAwaiting) {
       if (session?.requestId) {
         // Device-native gate semantics (permit/deny THIS tool call) — the
@@ -859,14 +850,9 @@ export class SessionSlotManager {
           ? { type: 'status', label: 'STOPPING', subtitle: 'at next tool', icon: 'tool', tone: 'warning' }
           : { type: 'empty' };
       }
-      // Claude observed: COMMIT queued for turn end. No actionable REVIEW
-      // mid-turn — the work isn't complete yet; only the REVIEWING spinner /
-      // last-verdict badge stays visible as inert status.
+      // No queued task buttons mid-turn. PROCESSING stays glanceable and only
+      // STOP is actionable; review remains an inert status badge.
       const cells: SessionSlotConfig[] = [];
-      if (isClaudeObserved) {
-        const def = CC_OBSERVED_QUEUE_PRESETS[0];
-        cells.push({ type: 'preset', preset: { ...def, iconSvg: def.iconSvg ?? '' } });
-      }
       const reviewBadge = this.reviewBadgeSlotConfig(session);
       if (reviewBadge) cells.push(reviewBadge);
       const cellIdx = idx - 1;

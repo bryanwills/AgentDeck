@@ -32,6 +32,8 @@ struct ADBridgeEvent: Codable, Equatable {
     var cursorIndex: Double?
     var effortLevel: String?
     /// Session explicitly focused by the user; visual selection should use this.
+    ///
+    /// Session explicitly focused when the daemon relayed this event.
     var focusedSessionId: String?
     /// Human-readable OpenClaw auth/pairing diagnostic
     var gatewayAuthMessage: String?
@@ -67,6 +69,8 @@ struct ADBridgeEvent: Codable, Equatable {
     /// bridge/src/permission-resolver.ts.
     var requestId: String?
     /// Session ID associated with this state payload; may move with hook activity.
+    ///
+    /// Session that produced these options. Required for safe device actions.
     ///
     /// Set when this history is a reply to `query_session_timeline` — scopes the entries to one
     /// session so reconnecting glance devices (XTeink X3) can fill a per-session Detail view on

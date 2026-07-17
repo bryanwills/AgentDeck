@@ -89,10 +89,15 @@ function ensureDrainer(): void {
   }, PUSH_TICK_MS);
 }
 
+function layoutInput(): Record<string, unknown> {
+  const selectedSessionId = view.mode === 'detail' ? view.openSessionId : undefined;
+  return store.toLayoutInput(selectedSessionId);
+}
+
 function deckFor(animFrame: number, animated: boolean) {
   // showUsage pins the bottom-row keys left of the D200H clock widget to the
   // quota gauges — this surface has no encoder LCD to carry usage.
-  return buildSessionDeck(store.toLayoutInput(), { ...view, animFrame, animated, showUsage: true }, positions());
+  return buildSessionDeck(layoutInput(), { ...view, animFrame, animated, showUsage: true }, positions());
 }
 
 // Compact signature of everything the deck renders from — lets us skip the
@@ -109,12 +114,13 @@ function deckSignature(ev: Record<string, unknown>): string {
   const usage = `${ev.fiveHourPercent ?? ''}:${ev.sevenDayPercent ?? ''}:${ev.usageKnown ?? ''}`
     + `:${cx?.primary?.usedPercent ?? ''}:${cx?.secondary?.usedPercent ?? ''}`;
   return [ev.state, ev.mode, ev.focusedSessionId ?? ev.sessionId ?? '', ev.requestId ?? '',
-    ev.promptType ?? '', ev.currentTool ?? '', opts, usage, sessions].join('|');
+    ev.promptType ?? '', ev.currentTool ?? '', ev.toolInput ?? '', ev.modelName ?? '',
+    ev.question ?? '', ev.navigable ?? '', ev.cursorIndex ?? '', opts, usage, sessions].join('|');
 }
 let lastDeckSig = '';
 
 function renderAll(): void {
-  const ev = store.toLayoutInput();
+  const ev = layoutInput();
   // If the focused session vanished, drop back to the list.
   if (view.mode === 'detail' && view.openSessionId) {
     const sessions = (ev.allSessions as Array<{ id: string }>) ?? [];
@@ -210,6 +216,7 @@ function onPress(m: UlanziMessage): void {
   if (!action) { dlog(TAG, `press ${inst.key} (inert)`); return; }
   switch (action.kind) {
     case 'open':
+      store.prepareFocus(action.sessionId);
       view = { mode: 'detail', openSessionId: action.sessionId, page: 0 };
       daemon.send({ type: 'focus_session', sessionId: action.sessionId });
       renderAll();

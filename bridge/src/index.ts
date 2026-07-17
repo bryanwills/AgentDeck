@@ -795,6 +795,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
       }
       core.broadcast({
         type: 'prompt_options',
+        sessionId: core.sessionId,
         promptType,
         question: snapshot.question ?? undefined,
         options: snapshot.options,
@@ -965,6 +966,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
       }
       extraEvents.push({
         type: 'prompt_options',
+        sessionId: core.sessionId,
         promptType: initPromptType,
         question: snapshot.question ?? undefined,
         options: snapshot.options,

@@ -128,7 +128,13 @@ export class SessionFocusRelay {
         const evt = JSON.parse(raw.toString()) as BridgeEvent;
         if (RELAYED_EVENTS.has(evt.type)) {
           debug(TAG, `Relay ${evt.type} from session ${sessionId}`);
-          this.onEvent?.(evt);
+          // prompt_options used to be source-less, allowing a late event from
+          // the previous focus to become buttons for the newly selected session.
+          // Stamp the captured relay identity before it leaves this boundary.
+          const tagged = evt.type === 'prompt_options' && sessionId
+            ? { ...evt, sessionId, focusedSessionId: sessionId }
+            : evt;
+          this.onEvent?.(tagged as BridgeEvent);
         }
       } catch {
         // Ignore non-JSON messages

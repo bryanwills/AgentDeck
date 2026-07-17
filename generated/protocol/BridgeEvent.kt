@@ -66,6 +66,8 @@ data class BridgeEvent (
 
     /**
      * Session explicitly focused by the user; visual selection should use this.
+     *
+     * Session explicitly focused when the daemon relayed this event.
      */
     @Json(name = "focusedSessionId")
     val focusedSessionID: String? = null,
@@ -147,6 +149,8 @@ data class BridgeEvent (
 
     /**
      * Session ID associated with this state payload; may move with hook activity.
+     *
+     * Session that produced these options. Required for safe device actions.
      *
      * Set when this history is a reply to `query_session_timeline` — scopes the entries to one
      * session so reconnecting glance devices (XTeink X3) can fill a per-session Detail view on

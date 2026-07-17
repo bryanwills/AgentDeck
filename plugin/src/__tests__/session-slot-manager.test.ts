@@ -236,6 +236,23 @@ describe('SessionSlotManager detail layout', () => {
     expect(idleTiles).toHaveLength(0);
   });
 
+  it('keeps observed Claude PROCESSING free of queued task buttons', () => {
+    const manager = new SessionSlotManager();
+    manager.updateSessions([makeSession({
+      id: 'observed:claude:1',
+      controlMode: 'observed',
+      port: 0,
+      state: State.PROCESSING,
+      currentTool: 'Edit',
+    })], false);
+    manager.enterDetailView('observed:claude:1');
+
+    const configs = Array.from({ length: SD_PLUS_LAYOUT.keyCount }, (_, i) =>
+      manager.getSlotConfig(i, SD_PLUS_LAYOUT));
+    expect(configs.filter((config) => config.type === 'preset')).toHaveLength(0);
+    expect(configs.filter((config) => config.type === 'stop')).toHaveLength(1);
+  });
+
   it('does not render a STANDBY/idle tile while an OpenClaw session is PROCESSING', () => {
     const manager = new SessionSlotManager();
     manager.updateSessions([makeSession({ id: 'oc', agentType: 'openclaw', state: State.PROCESSING, modelName: 'gpt-5' })], true);

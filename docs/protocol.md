@@ -103,8 +103,10 @@ Communication between the daemon (port 9120) and all dashboard clients (Plugin, 
   toolInput: 'src/index.ts', navigable: false, suggestedPrompt: 'fix the bug',
   gatewayAvailable: true, gatewayHasError: false }
 
-// Prompt options (backward-compat, options-only)
-{ type: 'prompt_options', promptType: 'yes_no_always', options: [{ index: 0, label: 'Yes' }, ...] }
+// Prompt options (backward-compat). Multi-session clients treat these as
+// actionable only when sessionId/focusedSessionId matches the selected session.
+{ type: 'prompt_options', sessionId: 'session-123', focusedSessionId: 'session-123',
+  promptType: 'yes_no_always', options: [{ index: 0, label: 'Yes' }, ...] }
 
 // Usage stats (session + API-sourced plan usage + ollama status)
 { type: 'usage_update', sessionDurationSec: 120, inputTokens: 5000, outputTokens: 3000, toolCalls: 7,

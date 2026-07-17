@@ -73,6 +73,7 @@ import {
   updateSlotUsage,
 } from './actions/session-slot-button.js';
 import { timelineStore } from './timeline-store.js';
+import { FocusedDetailState, type FocusedDetailSnapshot } from './focused-detail-state.js';
 
 // ---- Setup detection ----
 let setupRequired = false;
@@ -113,46 +114,28 @@ let proxiedAgentType: AgentType | null = null;
 let currentVoiceAssistantState: VoiceAssistantState = 'disabled';
 let currentGatewayHasError = false;
 
-function stateFromSession(session?: SessionInfo): State {
-  const state = session?.state;
-  if (
-    state === State.IDLE ||
-    state === State.PROCESSING ||
-    state === State.AWAITING_PERMISSION ||
-    state === State.AWAITING_OPTION ||
-    state === State.AWAITING_DIFF ||
-    state === State.DISCONNECTED
-  ) {
-    return state;
-  }
-  return session?.alive ? State.IDLE : State.DISCONNECTED;
-}
+const focusedDetailState = new FocusedDetailState();
 
-function primeDetailViewFromSession(session?: SessionInfo): void {
+function renderFocusedDetail(snapshot: FocusedDetailSnapshot): void {
   updateDetailViewState(
-    stateFromSession(session),
-    [],
-    session?.currentTask,
-    undefined,
-    undefined,
-    session?.modelName,
-    undefined,
-    session?.effortLevel,
-    currentSuggestedPrompt,
+    snapshot.state,
+    snapshot.options,
+    snapshot.tool,
+    snapshot.toolInput,
+    snapshot.question,
+    snapshot.modelName,
+    snapshot.mode,
+    snapshot.effortLevel,
+    snapshot.suggestedPrompt,
   );
 }
 
-function stateEventTargetsFocusedDetail(ev: StateUpdateEvent): boolean {
-  const focused = getFocusedSession();
-  if (!focused) return true;
-  // Codex fold: the representative's id is the only authoritative source for
-  // detail state. Events tagged with absorbed-thread ids may be late-arriving
-  // termination signals from threads that no longer drive the focused row;
-  // letting them through would overwrite the live representative's state.
-  // updateSessions already re-points _focusedSessionId at the new
-  // representative, so subsequent representative events match focused.id.
-  if (ev.sessionId) return ev.sessionId === focused.id;
-  return focused.agentType === 'openclaw' && ev.agentType === 'openclaw';
+function primeDetailViewFromSession(session?: SessionInfo): void {
+  if (!session) {
+    focusedDetailState.clear();
+    return;
+  }
+  renderFocusedDetail(focusedDetailState.prime(session));
 }
 
 function sendFocusedSessionCommand(command: { type: string; [key: string]: unknown }): void {
@@ -216,6 +199,7 @@ initSessionSlots((result) => {
     }
 
     case 'exit-detail':
+      focusedDetailState.clear();
       exitDetailView();
       broadcastStateUpdate();  // refresh encoders (timeline ↔ normal)
       break;
@@ -357,20 +341,33 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
     currentToolInput = undefined;
   }
 
-  // v4: Update detail view state if in detail mode
-  if (isInDetailView() && stateEventTargetsFocusedDetail(ev)) {
-    updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string, currentEffortLevel, currentSuggestedPrompt);
+  // Keypad detail state is session-owned. Never render it from the plugin's
+  // global caches: those intentionally follow the latest daemon/agent event.
+  if (isInDetailView()) {
+    const focused = getFocusedSession();
+    const detail = focused ? focusedDetailState.applyState(ev, focused) : null;
+    if (detail) {
+      renderFocusedDetail(detail);
+    } else if (focused) {
+      dlog('Plugin', `drop detail state_update source=${ev.focusedSessionId || ev.sessionId || '-'} focused=${focused.id}`);
+    }
   }
 
   broadcastStateUpdate();
 });
 
 connMgr.on('prompt_options', (ev: PromptOptionsEvent) => {
-  dlog('Plugin', `prompt_options: type=${ev.promptType} count=${ev.options.length} q=${ev.question ? `"${ev.question.slice(0, 40)}"` : '-'}`);
+  dlog('Plugin', `prompt_options: source=${ev.focusedSessionId || ev.sessionId || '-'} type=${ev.promptType} count=${ev.options.length} q=${ev.question ? `"${ev.question.slice(0, 40)}"` : '-'}`);
   currentOptions = ev.options;
-  if (ev.question) currentQuestion = ev.question;
+  currentQuestion = ev.question;
   if (isInDetailView()) {
-    updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string, currentEffortLevel, currentSuggestedPrompt);
+    const focused = getFocusedSession();
+    const detail = focused ? focusedDetailState.applyOptions(ev, focused) : null;
+    if (detail) {
+      renderFocusedDetail(detail);
+    } else if (focused) {
+      dlog('Plugin', `drop prompt_options source=${ev.focusedSessionId || ev.sessionId || '-'} focused=${focused.id}`);
+    }
   }
   broadcastStateUpdate();
 });
@@ -410,6 +407,7 @@ connMgr.on('usage_update', (ev: UsageEvent) => {
 connMgr.on('connection', (ev: ConnectionEvent) => {
   dinfo('Plugin', `connection: ${ev.status}`);
   if (ev.status === 'disconnected') {
+    focusedDetailState.clear();
     currentState = State.DISCONNECTED;
     currentOptions = [];
     currentQuestion = undefined;
@@ -427,6 +425,17 @@ connMgr.on('connection', (ev: ConnectionEvent) => {
 connMgr.on('sessions_list', (ev: { type: 'sessions_list'; sessions: SessionInfo[] }) => {
   dlog('Plugin', `sessions_list: ${ev.sessions.length} sessions`);
   updateSessionSlotSessions(ev.sessions, connMgr.isGatewayAvailable());
+  if (isInDetailView()) {
+    const focused = getFocusedSession();
+    const snapshot = focusedDetailState.snapshot;
+    // A Codex fold can replace the selected thread id. Observed sessions have
+    // no focused bridge relay, so their sessions_list row is always canonical.
+    if (focused && (snapshot?.sessionId !== focused.id || focused.controlMode === 'observed')) {
+      primeDetailViewFromSession(focused);
+    }
+  } else {
+    focusedDetailState.clear();
+  }
   // Forward to Control Tower utility mode
   updateTowerSessions(
     ev.sessions.map(s => ({

@@ -981,6 +981,10 @@
     "PromptOptionsEvent": {
       "additionalProperties": false,
       "properties": {
+        "focusedSessionId": {
+          "description": "Session explicitly focused when the daemon relayed this event.",
+          "type": "string"
+        },
         "options": {
           "items": {
             "$ref": "#/definitions/PromptOption"
@@ -997,6 +1001,10 @@
           "type": "string"
         },
         "question": {
+          "type": "string"
+        },
+        "sessionId": {
+          "description": "Session that produced these options. Required for safe device actions.",
           "type": "string"
         },
         "type": {

@@ -111,3 +111,28 @@ describe('buildSessionDeck — daemon offline', () => {
     expect(openable.length).toBe(2);
   });
 });
+
+describe('buildSessionDeck — selected session isolation', () => {
+  it('does not render another agent model while selected-session focus is pending', () => {
+    const selectedId = 'claude:enhance-timeline';
+    const deck = buildSessionDeck({
+      state: 'processing',
+      sessionId: 'openclaw-gateway',
+      focusedSessionId: 'openclaw-gateway',
+      agentType: 'openclaw',
+      modelName: 'GLM-5.2 (1M)',
+      allSessions: [{
+        id: selectedId,
+        port: 9121,
+        alive: true,
+        projectName: 'enhance-timeline',
+        agentType: 'claude-code',
+        state: 'processing',
+      }],
+    }, { mode: 'detail', openSessionId: selectedId }, positions(8));
+
+    const svg = [...deck.values()].map((cell) => cell.svg).join('');
+    expect(svg).not.toContain('GLM-5.2');
+    expect(svg).toContain('enhance-t');
+  });
+});

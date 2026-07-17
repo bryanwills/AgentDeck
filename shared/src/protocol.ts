@@ -225,6 +225,10 @@ export interface StateUpdateEvent {
 
 export interface PromptOptionsEvent {
   type: 'prompt_options';
+  /** Session that produced these options. Required for safe device actions. */
+  sessionId?: string;
+  /** Session explicitly focused when the daemon relayed this event. */
+  focusedSessionId?: string;
   promptType: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review';
   question?: string;
   options: PromptOption[];

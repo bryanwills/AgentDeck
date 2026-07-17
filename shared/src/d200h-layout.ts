@@ -791,7 +791,10 @@ function buildDetail(
   const sState = (focused ? state.state : (sess?.state ?? 'idle')).toLowerCase();
   const options = (focused ? state.options : (sess?.options ?? [])) ?? [];
   const tool = focused ? state.currentTool : sess?.currentTool;
-  const model = sess?.modelName ?? state.modelName;
+  // A selected session with no model is UNKNOWN, not an invitation to borrow
+  // the daemon-global model from another agent. Only a matching focused event
+  // may override the sessions_list row.
+  const model = focused ? (state.modelName || sess?.modelName || '') : (sess?.modelName || '');
 
   const heroSess: SessionInfo = sess ?? {
     id: sid, port: 0, alive: true, projectName: state.projectName,
@@ -894,19 +897,9 @@ function buildDetail(
       svg: renderInfoSlot('RUNNING', queued > 0 ? `${queued} queued` : (tool || 'working'), 'activity', 'info'),
       action: null,
     });
-    // COMMIT-at-completion is the one directive worth pre-queueing while an
-    // observed Claude session works (delivered by the Stop hook at turn end;
-    // natural language only — slash commands cannot execute through it).
-    // GO ON was dropped: "keep going when you finish" is not a scenario that
-    // occurs in practice — turns end deliberately, not prematurely.
-    if (isObserved && sess?.agentType === 'claude-code' && observedSteerable && !stopRequested) {
-      cells.push({
-        svg: actionTile('COMMIT', '#22c55e', 'at turn end'),
-        action: { kind: 'command', command: { type: 'session_command', sessionId: sid, command: { type: 'send_prompt', text: 'commit the changes' } } },
-      });
-    }
-    // No actionable REVIEW mid-turn — the work isn't complete yet, so a
-    // review now would judge an unfinished trajectory/diff. Keep the
+    // No queued task buttons mid-turn: PROCESSING is deliberately limited to
+    // live status + STOP so users cannot mistake a future directive for the
+    // agent's current work. Keep the
     // REVIEWING spinner / last-verdict badge visible as inert status.
     const badge = reviewBadgeTile(sess);
     if (badge) cells.push(badge);

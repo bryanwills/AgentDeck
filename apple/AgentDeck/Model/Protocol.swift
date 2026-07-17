@@ -644,6 +644,8 @@ struct SessionsListEvent: Codable, Sendable {
 
 struct PromptOptionsEvent: Codable, Sendable {
     let type: String  // "prompt_options"
+    var sessionId: String?
+    var focusedSessionId: String?
     let promptType: String
     var question: String?
     let options: [PromptOption]

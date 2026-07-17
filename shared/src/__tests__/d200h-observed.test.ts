@@ -49,7 +49,7 @@ describe('D200H observed session detail', () => {
     expect(svgs).not.toContain('GO ON');
   });
 
-  it('processing: soft STOP + COMMIT-at-turn-end; no actionable REVIEW mid-turn', () => {
+  it('processing: soft STOP is the only action; no queued task or REVIEW mid-turn', () => {
     const cells = detailCells(observedStateEvt({ state: 'processing' }));
     const cmds = commandsOf(cells);
     const stop = cmds.find((c) => c.type === 'session_command'
@@ -58,10 +58,9 @@ describe('D200H observed session detail', () => {
     expect(stop?.sessionId).toBe('observed:claude:uuid-1');
     const prompts = cmds.filter((c) => c.type === 'session_command'
       && (c.command as { type?: string })?.type === 'send_prompt');
-    // COMMIT is the one queueable directive (natural language, no slash
-    // commands through the Stop-hook channel); GO ON is gone.
-    const texts = prompts.map((p) => (p.command as { text?: string }).text);
-    expect(texts).toEqual(['commit the changes']);
+    expect(prompts).toHaveLength(0);
+    const svgs = [...cells.values()].map((c) => c.svg).join('');
+    expect(svgs).not.toContain('COMMIT');
     // The turn is still in flight — a review now would judge incomplete work.
     expect(cmds.filter((c) => c.type === 'review_run')).toHaveLength(0);
   });

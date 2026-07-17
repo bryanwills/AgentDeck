@@ -150,10 +150,14 @@ actor SessionFocusRelay {
                     switch message {
                     case .string(let text):
                         if let data = text.data(using: .utf8),
-                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                            let type = json["type"] as? String,
                            relayedEvents.contains(type) {
                             DaemonLogger.shared.debug("FocusRelay", "Relay \(type)")
+                            if type == "prompt_options", let sessionId {
+                                json["sessionId"] = sessionId
+                                json["focusedSessionId"] = sessionId
+                            }
                             // Sync daemon cache before broadcasting to avoid oscillation
                             if type == "usage_update" {
                                 await self.onUsageRelayed?(SendableDict(json))

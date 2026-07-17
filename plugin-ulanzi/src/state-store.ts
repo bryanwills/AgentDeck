@@ -8,6 +8,8 @@ import type { BridgeEvent, SessionInfo } from '@agentdeck/shared';
 export class StateStore {
   /** Last raw state_update event (carries focused session's project/model/etc). */
   private lastState: Record<string, unknown> = { state: 'IDLE' };
+  /** Full focused snapshots, isolated by session identity. */
+  private sessionStates = new Map<string, Record<string, unknown>>();
   private sessions: SessionInfo[] = [];
   private usage: Record<string, unknown> = {};
   /** Daemon link state — false until connected, false again on disconnect. */
@@ -18,19 +20,68 @@ export class StateStore {
     this.connected = connected;
   }
 
+  /** Start a focus handshake from the selected sessions_list row, not stale detail. */
+  prepareFocus(sessionId: string): void {
+    this.sessionStates.delete(sessionId);
+  }
+
+  private eventSessionId(e: Record<string, unknown>): string | undefined {
+    const focused = typeof e.focusedSessionId === 'string' ? e.focusedSessionId : '';
+    if (focused) return focused;
+    return typeof e.sessionId === 'string' && e.sessionId ? e.sessionId : undefined;
+  }
+
+  private sessionBase(sessionId: string): Record<string, unknown> | undefined {
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session) return undefined;
+    return {
+      state: session.state ?? (session.alive ? 'IDLE' : 'DISCONNECTED'),
+      sessionId,
+      focusedSessionId: '',
+      projectName: session.projectName,
+      agentType: session.agentType,
+      modelName: session.modelName,
+      currentTool: session.currentTool,
+      question: session.question,
+      promptType: session.promptType,
+      options: session.options ?? [],
+    };
+  }
+
   /** Apply a daemon event. Returns true if the visible state likely changed. */
   apply(ev: BridgeEvent): boolean {
     const e = ev as unknown as Record<string, unknown>;
     switch (ev.type) {
       case 'sessions_list':
         this.sessions = (e.sessions as SessionInfo[]) ?? [];
+        for (const id of this.sessionStates.keys()) {
+          if (!this.sessions.some((session) => session.id === id)) this.sessionStates.delete(id);
+        }
         return true;
-      case 'state_update':
+      case 'state_update': {
         this.lastState = e;
+        const sessionId = this.eventSessionId(e);
+        if (sessionId) {
+          // Replacement, not merge: absent fields must not survive from a
+          // previous agent or an earlier state of this session.
+          this.sessionStates.set(sessionId, { ...e, sessionId });
+        }
         return true;
-      case 'prompt_options':
-        this.lastState = { ...this.lastState, options: e.options, promptType: e.promptType, question: e.question };
+      }
+      case 'prompt_options': {
+        const sessionId = this.eventSessionId(e);
+        // Source-less legacy events are display-only noise on a multi-session
+        // daemon and must never become actionable D200H keys.
+        if (!sessionId) return false;
+        const base = this.sessionStates.get(sessionId) ?? this.sessionBase(sessionId) ?? { sessionId };
+        this.sessionStates.set(sessionId, {
+          ...base,
+          options: e.options,
+          promptType: e.promptType,
+          question: e.question,
+        });
         return true;
+      }
       case 'usage_update':
         this.usage = e;
         return true;
@@ -40,7 +91,7 @@ export class StateStore {
   }
 
   /** Merged event for the shared layout engine. `allSessions` is the live list. */
-  toLayoutInput(): Record<string, unknown> {
+  toLayoutInput(selectedSessionId?: string): Record<string, unknown> {
     // Daemon down → force DISCONNECTED so the deck shows OFFLINE, not a stale list.
     if (!this.connected) {
       return { state: 'DISCONNECTED', allSessions: [] };
@@ -56,13 +107,21 @@ export class StateStore {
     // (the gauge bar needs a number); display is gated by usageKnown.
     const stale = this.usage.usageStale === true;
     const usageKnown = !stale && (this.usage.fiveHourPercent != null || this.usage.sevenDayPercent != null);
+    // In detail mode, use only the selected session's row/snapshot. Never fall
+    // back to lastState, which may belong to OpenClaw or another PTY.
+    const selected = selectedSessionId
+      ? {
+          ...(this.sessionBase(selectedSessionId) ?? {}),
+          ...(this.sessionStates.get(selectedSessionId) ?? {}),
+        }
+      : this.lastState;
     return {
-      ...this.lastState,
+      ...selected,
       allSessions: this.sessions,
       totalTokens,
-      totalCost: (this.usage.totalCost as number) ?? (this.lastState.totalCost as number) ?? 0,
-      fiveHourPercent: (this.usage.fiveHourPercent as number) ?? (this.lastState.fiveHourPercent as number) ?? 0,
-      sevenDayPercent: (this.usage.sevenDayPercent as number) ?? (this.lastState.sevenDayPercent as number) ?? 0,
+      totalCost: (this.usage.totalCost as number) ?? (selected.totalCost as number) ?? 0,
+      fiveHourPercent: (this.usage.fiveHourPercent as number) ?? (selected.fiveHourPercent as number) ?? 0,
+      sevenDayPercent: (this.usage.sevenDayPercent as number) ?? (selected.sevenDayPercent as number) ?? 0,
       fiveHourResetsAt: this.usage.fiveHourResetsAt as string | undefined,
       sevenDayResetsAt: this.usage.sevenDayResetsAt as string | undefined,
       // Codex (ChatGPT) rolling-window quota rides the same usage_update event.
