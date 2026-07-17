@@ -860,7 +860,7 @@ Simple desk or shelf mounting; low power consumption via USB. Firmware in `esp32
   <img src="docs/media/pixoo64-night.jpg" width="360" alt="Pixoo64 LED matrix — pixel art octopus and crayfish glowing in the dark">
 </p>
 
-The Pixoo module renders official dot-art agent marks, state-reactive water, a compact Claude usage HUD, and dedicated Codex token-window rails — all pushed over HTTP to the device's local API.
+The Pixoo module renders official dot-art agent marks, state-reactive water, and matching Claude/Codex usage rows with primary/5h and secondary/7d percentages plus reset countdowns — all pushed over HTTP to the device's local API.
 
 Manage devices with `agentdeck pixoo {scan|add|list|remove|test}` — see [CLI Reference](#cli-reference).
 

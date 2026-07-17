@@ -290,6 +290,8 @@ final class PixooRenderer {
         "h": [0b100, 0b100, 0b111, 0b101, 0b101],
         "m": [0b101, 0b111, 0b101, 0b101, 0b101],
         "d": [0b001, 0b001, 0b011, 0b101, 0b011],
+        "A": [0b010, 0b101, 0b111, 0b101, 0b101],
+        "C": [0b111, 0b100, 0b100, 0b100, 0b111],
         " ": [0b000, 0b000, 0b000, 0b000, 0b000],
         // Uppercase glyphs for "OFFLINE" disconnected frame — mirrors
         // bridge/src/pixoo/pixoo-font.ts.
@@ -1259,68 +1261,90 @@ final class PixooRenderer {
     }
 
     private func drawUsageHUD(_ buf: inout [UInt8], dashboardState: DashboardState, animFrame: Int) {
-        let codexPrimary = dashboardState.codexRateLimits?.primary?.stale == true
-            ? nil : dashboardState.codexRateLimits?.primary?.usedPercent
-        let codexSecondary = dashboardState.codexRateLimits?.secondary?.stale == true
-            ? nil : dashboardState.codexRateLimits?.secondary?.usedPercent
-        guard dashboardState.fiveHourPercent != nil || codexPrimary != nil || codexSecondary != nil else { return }
-        let textY = 58
-        let bgTop = textY - 1
-        for y in bgTop...(textY + 5) {
-            for x in 0..<Self.width {
-                blendPixel(&buf, x, y, Self.colors.black, 0.55)
-            }
+        struct UsageWindow {
+            let percent: Double
+            let resetsAt: String?
         }
-        let timeColor: RGB = (0x60, 0x70, 0x80)
-
-        let codexRails: [(Double?, RGB)] = [
-            (codexPrimary, (185, 86, 255)),
-            (codexSecondary, (104, 116, 255)),
-        ]
-        for (row, item) in codexRails.enumerated() {
-            let y = 55 + row
-            for x in 0..<Self.width { blendPixel(&buf, x, y, Self.colors.black, 0.72) }
-            guard let raw = item.0 else { continue }
-            let pct = max(0, min(100, raw))
-            let color: RGB = pct >= 90 ? (255, 58, 72) : pct >= 70 ? (255, 183, 38) : item.1
-            setPixel(&buf, 0, y, item.1); setPixel(&buf, 1, y, item.1)
-            let width = Int(round(pct / 100 * 61))
-            if width > 0 { for x in 3..<(3 + width) { setPixel(&buf, x, y, color) } }
+        struct ProviderRow {
+            let marker: String
+            let brand: RGB
+            let primary: UsageWindow?
+            let secondary: UsageWindow?
+        }
+        func freshCodexWindow(_ window: CodexRateLimitWindow?) -> UsageWindow? {
+            guard window?.stale != true, let percent = window?.usedPercent else { return nil }
+            return UsageWindow(percent: percent, resetsAt: window?.resetsAt)
         }
 
-        func renderZone(_ percentText: String, _ timeText: String, _ percent: Double, _ leftX: Int, _ rightX: Int) {
-            let color = gaugeColor(percent, animFrame: animFrame)
-            let zoneW = rightX - leftX + 1
-            let fillW = Int(round(Double(zoneW) * max(0, min(100, percent)) / 100.0))
-            for y in bgTop...(textY + 5) {
-                for x in leftX..<(leftX + fillW) {
-                    blendPixel(&buf, x, y, color, 0.35)
+        var providers: [ProviderRow] = []
+        if dashboardState.usageStale != true, let fiveHour = dashboardState.fiveHourPercent {
+            providers.append(ProviderRow(
+                marker: "A", brand: (255, 112, 76),
+                primary: UsageWindow(percent: fiveHour, resetsAt: dashboardState.fiveHourResetsAt),
+                secondary: dashboardState.sevenDayPercent.map {
+                    UsageWindow(percent: $0, resetsAt: dashboardState.sevenDayResetsAt)
                 }
+            ))
+        }
+        let codexPrimary = freshCodexWindow(dashboardState.codexRateLimits?.primary)
+        let codexSecondary = freshCodexWindow(dashboardState.codexRateLimits?.secondary)
+        if codexPrimary != nil || codexSecondary != nil {
+            providers.append(ProviderRow(
+                marker: "C", brand: (126, 116, 255),
+                primary: codexPrimary,
+                secondary: codexSecondary
+            ))
+        }
+        guard !providers.isEmpty else { return }
+
+        let timeColor: RGB = (0x60, 0x70, 0x80)
+        let firstY = providers.count > 1 ? 50 : 57
+
+        func fittedReset(_ resetsAt: String?, percentText: String, zoneWidth: Int) -> String {
+            let detailed = formatResetDetailed(resetsAt)
+            guard !detailed.isEmpty else { return "" }
+            let maxCharacters = zoneWidth / 4
+            if percentText.count + detailed.count <= maxCharacters { return detailed }
+            var digits = ""
+            for character in detailed {
+                if character.isNumber { digits.append(character) }
+                else if "dhm".contains(character), !digits.isEmpty { return digits + String(character) }
+                else { break }
             }
-            if !timeText.isEmpty {
-                drawText(&buf, text: timeText, rightX: rightX, y: textY, color: timeColor)
-                let timeW = timeText.count * 4
-                drawText(&buf, text: percentText, rightX: rightX - timeW, y: textY, color: color)
+            return String(detailed.prefix(max(0, maxCharacters - percentText.count)))
+        }
+
+        func renderWindow(_ window: UsageWindow, leftX: Int, rightX: Int, rowY: Int) {
+            let percent = max(0, min(100, window.percent))
+            let color = gaugeColor(percent, animFrame: animFrame)
+            let zoneWidth = rightX - leftX
+            let fillWidth = Int(round(Double(zoneWidth) * percent / 100.0))
+            for y in rowY..<(rowY + 7) {
+                for x in leftX..<(leftX + fillWidth) { blendPixel(&buf, x, y, color, 0.35) }
+            }
+            let percentText = "\(Int(round(percent)))%"
+            let resetText = fittedReset(window.resetsAt, percentText: percentText, zoneWidth: zoneWidth)
+            if resetText.isEmpty {
+                drawText(&buf, text: percentText, rightX: rightX, y: rowY + 1, color: color)
             } else {
-                drawText(&buf, text: percentText, rightX: rightX, y: textY, color: color)
+                drawText(&buf, text: resetText, rightX: rightX, y: rowY + 1, color: timeColor)
+                drawText(&buf, text: percentText, rightX: rightX - resetText.count * 4, y: rowY + 1, color: color)
             }
         }
 
-        guard let pct5 = dashboardState.fiveHourPercent else {
-            if let primary = codexPrimary, let secondary = codexSecondary {
-                renderZone("C\(Int(round(primary)))", "", primary, 0, 30)
-                renderZone("C\(Int(round(secondary)))", "", secondary, 32, 63)
-            } else if let pct = codexPrimary ?? codexSecondary {
-                renderZone("C\(Int(round(pct)))%", "", pct, 0, 63)
+        for (index, provider) in providers.enumerated() {
+            let rowY = firstY + index * 7
+            for y in rowY..<(rowY + 7) {
+                for x in 0..<Self.width { blendPixel(&buf, x, y, Self.colors.black, 0.62) }
             }
-            return
-        }
-
-        if let pct7 = dashboardState.sevenDayPercent {
-            renderZone("\(Int(round(pct5)))%", formatResetDetailed(dashboardState.fiveHourResetsAt), pct5, 0, 30)
-            renderZone("\(Int(round(pct7)))%", formatResetDetailed(dashboardState.sevenDayResetsAt), pct7, 32, 63)
-        } else {
-            renderZone("\(Int(round(pct5)))%", formatResetDetailed(dashboardState.fiveHourResetsAt), pct5, 0, 63)
+            drawText(&buf, text: provider.marker, rightX: 3, y: rowY + 1, color: provider.brand)
+            if let primary = provider.primary, let secondary = provider.secondary {
+                for y in (rowY + 1)..<(rowY + 6) { blendPixel(&buf, 34, y, provider.brand, 0.28) }
+                renderWindow(primary, leftX: 5, rightX: 34, rowY: rowY)
+                renderWindow(secondary, leftX: 35, rightX: 64, rowY: rowY)
+            } else if let only = provider.primary ?? provider.secondary {
+                renderWindow(only, leftX: 5, rightX: 64, rowY: rowY)
+            }
         }
     }
 

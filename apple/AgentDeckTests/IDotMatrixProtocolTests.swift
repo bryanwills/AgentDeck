@@ -171,12 +171,18 @@ final class IDotMatrixProtocolTests: XCTestCase {
         XCTAssertEqual(limits?.secondary?.stale, false)
     }
 
-    func testPixoo64RendererShowsCodexTokenWindowRails() {
+    func testPixoo64RendererShowsMatchingClaudeAndCodexResetBands() {
         var state = DashboardState()
         state.state = .idle
+        let primaryReset = ISO8601DateFormatter().string(from: Date().addingTimeInterval(90 * 60))
+        let secondaryReset = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3 * 24 * 60 * 60))
+        state.fiveHourPercent = 25
+        state.fiveHourResetsAt = primaryReset
+        state.sevenDayPercent = 40
+        state.sevenDayResetsAt = secondaryReset
         state.codexRateLimits = CodexRateLimits(
-            primary: CodexRateLimitWindow(usedPercent: 50, windowMinutes: 300, resetsAt: nil, stale: false),
-            secondary: CodexRateLimitWindow(usedPercent: 25, windowMinutes: 10080, resetsAt: nil, stale: false),
+            primary: CodexRateLimitWindow(usedPercent: 50, windowMinutes: 300, resetsAt: primaryReset, stale: false),
+            secondary: CodexRateLimitWindow(usedPercent: 75, windowMinutes: 10080, resetsAt: secondaryReset, stale: false),
             planType: "plus", limitId: nil, credits: nil
         )
         let bytes = [UInt8](PixooRenderer().render(dashboardState: state))
@@ -184,9 +190,15 @@ final class IDotMatrixProtocolTests: XCTestCase {
             let i = (y * 64 + x) * 3
             return [bytes[i], bytes[i + 1], bytes[i + 2]]
         }
-        XCTAssertEqual(pixel64(0, 55), [185, 86, 255])
-        XCTAssertEqual(pixel64(3, 55), [185, 86, 255])
-        XCTAssertEqual(pixel64(0, 56), [104, 116, 255])
+        XCTAssertEqual(pixel64(1, 51), [255, 112, 76])
+        XCTAssertEqual(pixel64(0, 58), [126, 116, 255])
+        let resetColor: [UInt8] = [0x60, 0x70, 0x80]
+        let claudeResetPixels = (50...56).flatMap { y in (0..<64).map { pixel64($0, y) } }
+            .filter { $0 == resetColor }.count
+        let codexResetPixels = (57...63).flatMap { y in (0..<64).map { pixel64($0, y) } }
+            .filter { $0 == resetColor }.count
+        XCTAssertGreaterThan(claudeResetPixels, 0)
+        XCTAssertGreaterThan(codexResetPixels, 0)
     }
 
     // MARK: - Pixoo adaptive animation transport

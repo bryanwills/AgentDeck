@@ -65,12 +65,28 @@ function buildSessions(selectedAgent, state) {
   return selected ? [selected, ...rest].map(({ key, ...session }) => session) : ordered.map(({ key, ...session }) => session);
 }
 
-function buildUsage(now) {
+function buildUsage(_animationNow) {
+  // Reset labels are formatted against wall-clock time inside the device
+  // renderers, so keep simulator deadlines relative to generation time even
+  // though animation frames use a fixed timestamp for deterministic poses.
+  const now = Date.now();
   return {
     fiveHourPercent: 46,
     sevenDayPercent: 72,
     fiveHourResetsAt: new Date(now + 1000 * 60 * 90).toISOString(),
     sevenDayResetsAt: new Date(now + 1000 * 60 * 60 * 28).toISOString(),
+    codexRateLimits: {
+      primary: {
+        usedPercent: 38,
+        windowMinutes: 300,
+        resetsAt: new Date(now + 1000 * 60 * 150).toISOString(),
+      },
+      secondary: {
+        usedPercent: 64,
+        windowMinutes: 10080,
+        resetsAt: new Date(now + 1000 * 60 * 60 * 52).toISOString(),
+      },
+    },
   };
 }
 

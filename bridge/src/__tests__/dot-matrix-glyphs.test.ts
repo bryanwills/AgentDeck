@@ -130,6 +130,37 @@ describe('iDotMatrix native 32×32 stage', () => {
   });
 });
 
+describe('Pixoo64 provider usage HUD', () => {
+  it('renders Claude and Codex as matching percentage-plus-reset bands', () => {
+    const primaryReset = new Date(Date.now() + 90 * 60_000).toISOString();
+    const secondaryReset = new Date(Date.now() + 3 * 24 * 60 * 60_000).toISOString();
+    const frame = renderFrame(
+      { type: 'state_update', state: 'idle', permissionMode: 'default', agentType: 'claude-code' } as any,
+      {
+        type: 'usage_update', sessionDurationSec: 0, inputTokens: 0, outputTokens: 0, toolCalls: 0,
+        fiveHourPercent: 25, fiveHourResetsAt: primaryReset,
+        sevenDayPercent: 40, sevenDayResetsAt: secondaryReset,
+        codexRateLimits: {
+          primary: { usedPercent: 50, windowMinutes: 300, resetsAt: primaryReset },
+          secondary: { usedPercent: 75, windowMinutes: 10080, resetsAt: secondaryReset },
+        },
+      },
+      [{ id: 'cc', port: 9120, alive: true, agentType: 'claude-code', state: 'idle' }],
+      0, 64,
+    );
+    const pixel64 = (x: number, y: number) => [...frame.slice((y * 64 + x) * 3, (y * 64 + x) * 3 + 3)];
+    expect(pixel64(1, 51)).toEqual([255, 112, 76]); // Anthropic/Claude marker
+    expect(pixel64(0, 58)).toEqual([126, 116, 255]); // Codex marker
+    const resetColor = [0x60, 0x70, 0x80].join();
+    const resetPixels = (top: number) => Array.from({ length: 7 * 64 }, (_, index) => {
+      const y = top + Math.floor(index / 64);
+      return pixel64(index % 64, y).join();
+    }).filter((value) => value === resetColor).length;
+    expect(resetPixels(50)).toBeGreaterThan(0);
+    expect(resetPixels(57)).toBeGreaterThan(0);
+  });
+});
+
 describe('Pixoo adaptive push policy', () => {
   it('separates state latency from stable animation cadence', () => {
     expect(pixooPushIntervalMs(true, 'single-frame')).toBe(PIXOO_PUSH_POLICY.stateChangeFloorMs);

@@ -604,110 +604,90 @@ export function formatResetDetailed(resetsAt: string | undefined): string {
   return `${mins}m`;
 }
 
-/** Draw Usage HUD in screen space (bottom right, zoom-independent).
- *  Claude text row at rows 57-63 plus Codex token-window rails at 55-56:
- *    - 7d absent: full-width, right-aligned (original behavior)
- *    - 7d present: left half [0..30]=5h  |  right half [32..63]=7d
+/** Draw Usage HUD in screen space (bottom, zoom-independent).
+ *  Each provider uses the same seven-pixel band with a brand marker, usage
+ *  fill, percentage and reset countdown. When both are present Claude occupies
+ *  rows 50-56 and Codex rows 57-63; a lone provider stays on rows 57-63.
+ *  Primary/5h is the left zone and secondary/7d is the right zone.
  */
 function drawUsageHUD(
   buf: Uint8Array, usageEvent: UsageEvent | null, animFrame: number,
 ): void {
-  // Hide the HUD entirely when upstream flags the data as stale — otherwise
-  // an old "12%" frozen on-screen looks authoritative to the user even though
-  // the CLI daemon isn't live to produce a fresh fetch. Matches the collapse
-  // behavior on every other surface (macOS dashboard, plugin, Android, D200H).
   if (!usageEvent) return;
-  if (usageEvent.usageStale === true) return;
+  type Window = { percent: number; resetsAt?: string };
+  type Provider = { marker: 'A' | 'C'; brand: RGB; primary?: Window; secondary?: Window };
 
-  const codexPrimary = usageEvent.codexRateLimits?.primary?.stale === true
-    ? undefined : usageEvent.codexRateLimits?.primary?.usedPercent;
-  const codexSecondary = usageEvent.codexRateLimits?.secondary?.stale === true
-    ? undefined : usageEvent.codexRateLimits?.secondary?.usedPercent;
-  const hasClaude = usageEvent.fiveHourPercent != null;
-  const hasCodex = codexPrimary != null || codexSecondary != null;
-  if (!hasClaude && !hasCodex) return;
-
-  const w = Math.sqrt(buf.length / 3);
-  const textY = 58;
-  const bgTop = textY - 1;
-  const bgBot = textY + 5;
-
-  // Full-width dark base — hides sand/terrain at HUD rows regardless of camera zoom
-  for (let y = bgTop; y <= bgBot; y++) {
-    for (let x = 0; x < w; x++) {
-      blendPixel(buf, x, y, COLORS.black, 0.55);
-    }
+  const providers: Provider[] = [];
+  if (usageEvent.usageStale !== true && usageEvent.fiveHourPercent != null) {
+    providers.push({
+      marker: 'A', brand: [255, 112, 76],
+      primary: { percent: usageEvent.fiveHourPercent, resetsAt: usageEvent.fiveHourResetsAt },
+      secondary: usageEvent.sevenDayPercent == null ? undefined : {
+        percent: usageEvent.sevenDayPercent, resetsAt: usageEvent.sevenDayResetsAt,
+      },
+    });
   }
+  const codexPrimary = usageEvent.codexRateLimits?.primary;
+  const codexSecondary = usageEvent.codexRateLimits?.secondary;
+  if ((codexPrimary && codexPrimary.stale !== true) || (codexSecondary && codexSecondary.stale !== true)) {
+    providers.push({
+      marker: 'C', brand: [126, 116, 255],
+      primary: codexPrimary?.stale === true ? undefined : codexPrimary && {
+        percent: codexPrimary.usedPercent, resetsAt: codexPrimary.resetsAt,
+      },
+      secondary: codexSecondary?.stale === true ? undefined : codexSecondary && {
+        percent: codexSecondary.usedPercent, resetsAt: codexSecondary.resetsAt,
+      },
+    });
+  }
+  if (providers.length === 0) return;
 
   const timeColor: RGB = [0x60, 0x70, 0x80];
+  const firstY = providers.length > 1 ? 50 : 57;
 
-  // Codex's short/weekly token windows stay visible even while the larger
-  // Claude text HUD occupies the bottom row. Violet and indigo source keys
-  // distinguish these from the green/blue Claude rails used on iDotMatrix.
-  const codexRails: Array<[number | undefined, RGB]> = [
-    [codexPrimary, [185, 86, 255]],
-    [codexSecondary, [104, 116, 255]],
-  ];
-  codexRails.forEach(([raw, brand], row) => {
-    const y = 55 + row;
-    for (let x = 0; x < 64; x++) blendPixel(buf, x, y, COLORS.black, 0.72);
-    if (raw == null) return;
-    const pct = Math.max(0, Math.min(100, raw));
-    const color: RGB = pct >= 90 ? [255, 58, 72] : pct >= 70 ? [255, 183, 38] : brand;
-    setPixel(buf, 0, y, brand); setPixel(buf, 1, y, brand);
-    const fill = Math.round(pct / 100 * 61);
-    for (let x = 3; x < 3 + fill; x++) setPixel(buf, x, y, color);
-  });
+  function fittedReset(resetsAt: string | undefined, pctText: string, zoneWidth: number): string {
+    const detailed = formatResetDetailed(resetsAt);
+    if (!detailed) return '';
+    const maxChars = Math.floor(zoneWidth / 4);
+    if (pctText.length + detailed.length <= maxChars) return detailed;
+    const unit = detailed.match(/^(\d+)[dhm]/);
+    return unit ? `${unit[1]}${unit[0].at(-1)}` : detailed.slice(0, Math.max(0, maxChars - pctText.length));
+  }
 
-  /** Render a zone: usage background fill + two-color text (pct + time). */
-  function renderZone(
-    pctText: string, timeText: string, pct: number, leftX: number, rightX: number,
-  ): void {
+  function renderWindow(window: Window, leftX: number, rightX: number, rowY: number): void {
+    const pct = Math.max(0, Math.min(100, window.percent));
     const color = gaugeColor(pct, animFrame);
-    const zoneW = rightX - leftX + 1;
-    const fillW = Math.round(zoneW * Math.max(0, Math.min(100, pct)) / 100);
-    // Background fill proportional to usage
-    for (let y = bgTop; y <= bgBot; y++) {
-      for (let x = leftX; x < leftX + fillW; x++) {
-        blendPixel(buf, x, y, color, 0.35);
-      }
+    const zoneWidth = rightX - leftX;
+    const fillWidth = Math.round(zoneWidth * pct / 100);
+    for (let y = rowY; y < rowY + 7; y++) {
+      for (let x = leftX; x < leftX + fillWidth; x++) blendPixel(buf, x, y, color, 0.35);
     }
-    // Two-color text: time (dimmed) right-aligned, then pct (gauge color) to its left
-    if (timeText) {
-      drawText(buf, timeText, rightX, textY, timeColor);
-      const timeW = timeText.length * 4; // 3px glyph + 1px gap per char
-      drawText(buf, pctText, rightX - timeW, textY, color);
+    const pctText = `${Math.round(pct)}%`;
+    const resetText = fittedReset(window.resetsAt, pctText, zoneWidth);
+    if (resetText) {
+      drawText(buf, resetText, rightX, rowY + 1, timeColor);
+      drawText(buf, pctText, rightX - resetText.length * 4, rowY + 1, color);
     } else {
-      drawText(buf, pctText, rightX, textY, color);
+      drawText(buf, pctText, rightX, rowY + 1, color);
     }
   }
 
-  if (!hasClaude) {
-    if (codexPrimary != null && codexSecondary != null) {
-      renderZone(`C${Math.round(codexPrimary)}`, '', codexPrimary, 0, 30);
-      renderZone(`C${Math.round(codexSecondary)}`, '', codexSecondary, 32, 63);
+  providers.forEach((provider, index) => {
+    const rowY = firstY + index * 7;
+    for (let y = rowY; y < rowY + 7; y++) {
+      for (let x = 0; x < 64; x++) blendPixel(buf, x, y, COLORS.black, 0.62);
+    }
+    drawText(buf, provider.marker, 3, rowY + 1, provider.brand);
+
+    if (provider.primary && provider.secondary) {
+      for (let y = rowY + 1; y < rowY + 6; y++) blendPixel(buf, 34, y, provider.brand, 0.28);
+      renderWindow(provider.primary, 5, 34, rowY);
+      renderWindow(provider.secondary, 35, 64, rowY);
     } else {
-      const pct = codexPrimary ?? codexSecondary!;
-      renderZone(`C${Math.round(pct)}%`, '', pct, 0, 63);
+      const only = provider.primary ?? provider.secondary;
+      if (only) renderWindow(only, 5, 64, rowY);
     }
-    return;
-  }
-
-  const pct5 = usageEvent.fiveHourPercent!;
-
-  if (usageEvent.sevenDayPercent == null) {
-    // Single full-width zone
-    const r5 = formatResetDetailed(usageEvent.fiveHourResetsAt);
-    renderZone(`${Math.round(pct5)}%`, r5, pct5, 0, 63);
-    return;
-  }
-
-  // Two-column layout: [5h | 7d]
-  const pct7 = usageEvent.sevenDayPercent;
-  const r5 = formatResetDetailed(usageEvent.fiveHourResetsAt);
-  const r7 = formatResetDetailed(usageEvent.sevenDayResetsAt);
-  renderZone(`${Math.round(pct5)}%`, r5, pct5, 0, 30);
-  renderZone(`${Math.round(pct7)}%`, r7, pct7, 32, 63);
+  });
 }
 
 /**
