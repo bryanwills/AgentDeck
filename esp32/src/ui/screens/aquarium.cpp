@@ -90,15 +90,16 @@ lv_obj_t* aquariumCreate() {
 
     // Card container (centered in scrim)
     connCard = lv_obj_create(connScrim);
-#if defined(BOARD_TTGO)
-    lv_obj_set_width(connCard, 200);
-#elif defined(BOARD_ESP32_C6_147)
-    lv_obj_set_width(connCard, 160);  // fit within 172px panel width
+    int cardW;
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+    cardW = g_screenW - 16;
+    if (cardW > 260) cardW = 260;
 #elif IS_ROUND
-    lv_obj_set_width(connCard, 220);
+    cardW = 220;
 #else
-    lv_obj_set_width(connCard, 260);
+    cardW = 260;
 #endif
+    lv_obj_set_width(connCard, cardW);
     lv_obj_set_height(connCard, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(connCard, lv_color_hex(0x111827), 0);
     lv_obj_set_style_bg_opa(connCard, 255, 0);
@@ -106,12 +107,29 @@ lv_obj_t* aquariumCreate() {
     lv_obj_set_style_border_color(connCard, lv_color_hex(0x38BDF8), 0); // cyan/sky glow border
     lv_obj_set_style_border_width(connCard, 1, 0);
     lv_obj_set_style_border_opa(connCard, 60, 0);
-    lv_obj_set_style_pad_ver(connCard, 22, 0);
-    lv_obj_set_style_pad_hor(connCard, 16, 0);
-    lv_obj_set_style_pad_row(connCard, 10, 0);
+
+    bool useRowLayout = (g_screenH < 150);
+    if (useRowLayout) {
+        lv_obj_set_style_pad_ver(connCard, 10, 0);
+        lv_obj_set_style_pad_hor(connCard, 12, 0);
+        lv_obj_set_style_pad_row(connCard, 12, 0); // Spacing between logo and text column
+        lv_obj_set_flex_flow(connCard, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(connCard, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    } else {
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+        lv_obj_set_style_pad_ver(connCard, 12, 0);
+        lv_obj_set_style_pad_hor(connCard, 12, 0);
+        lv_obj_set_style_pad_row(connCard, 8, 0);
+#else
+        lv_obj_set_style_pad_ver(connCard, 22, 0);
+        lv_obj_set_style_pad_hor(connCard, 16, 0);
+        lv_obj_set_style_pad_row(connCard, 10, 0);
+#endif
+        lv_obj_set_flex_flow(connCard, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(connCard, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    }
+
     lv_obj_align(connCard, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_flex_flow(connCard, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(connCard, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(connCard, LV_OBJ_FLAG_SCROLLABLE);
 
     // Card border glow breathing animation
@@ -130,16 +148,42 @@ lv_obj_t* aquariumCreate() {
     connLogoImg = lv_image_create(connCard);
     lv_image_set_src(connLogoImg, &img_logo_48);
 
+    // Text column (only nested inside card if in row layout mode)
+    lv_obj_t* textCol = connCard;
+    if (useRowLayout) {
+        textCol = lv_obj_create(connCard);
+        lv_obj_set_size(textCol, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(textCol, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(textCol, 0, 0);
+        lv_obj_set_style_pad_all(textCol, 0, 0);
+        lv_obj_set_style_pad_row(textCol, 2, 0); // Tight spacing between Title & Status
+        lv_obj_set_flex_flow(textCol, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(textCol, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_clear_flag(textCol, LV_OBJ_FLAG_SCROLLABLE);
+    }
+
+    const lv_font_t* titleFont = &lv_font_montserrat_20;
+    const lv_font_t* statusFont = &lv_font_montserrat_16;
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+    if (g_screenH < 150) {
+        titleFont = &lv_font_montserrat_14;
+        statusFont = &lv_font_montserrat_12;
+    } else {
+        titleFont = &lv_font_montserrat_16;
+        statusFont = &lv_font_montserrat_12;
+    }
+#endif
+
     // Title "AgentDeck"
-    connTitleLabel = lv_label_create(connCard);
+    connTitleLabel = lv_label_create(textCol);
     lv_obj_set_style_text_color(connTitleLabel, lv_color_hex(Theme::HUDText), 0);
-    lv_obj_set_style_text_font(connTitleLabel, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(connTitleLabel, titleFont, 0);
     lv_label_set_text(connTitleLabel, "AgentDeck");
 
     // Status text
-    connStatusLabel = lv_label_create(connCard);
+    connStatusLabel = lv_label_create(textCol);
     lv_obj_set_style_text_color(connStatusLabel, lv_color_hex(Theme::HUDDim), 0);
-    lv_obj_set_style_text_font(connStatusLabel, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(connStatusLabel, statusFont, 0);
     lv_label_set_text(connStatusLabel, "");
 
     // Tap detection: toggle HUD visibility.
