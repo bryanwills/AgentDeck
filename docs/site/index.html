@@ -15,7 +15,7 @@
 <link rel="icon" type="image/png" href="../icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+KR:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
 <style>
   :root {
     --tide-50:#f5f3ec; --tide-100:#ebe6d6; --tide-200:#d8cfb6; --tide-300:#a8b09a;
@@ -70,6 +70,13 @@
   .doc .tag.md { background: var(--ink-500); }
 
   footer { max-width: var(--container-max); margin: 0 auto; padding: var(--s-10) var(--container-pad) var(--s-16); color: var(--ink-500); font-size: 13px; border-top: 2px solid var(--tide-200); }
+  @media (max-width: 720px) {
+    .nav-in { align-items: flex-start; padding-inline: var(--s-4); }
+    .nav-links { overflow-x: auto; flex-wrap: nowrap; padding-bottom: var(--s-1); }
+    .nav-links a { white-space: nowrap; }
+    .nav-links .gh { display: none; }
+    .wrap { padding-inline: var(--s-4); }
+  }
 </style>
 </head>
 <body>
@@ -78,11 +85,11 @@
   <div class="nav-in">
     <a class="brand" href="../"><img src="../icon.png" alt="">AgentDeck</a>
     <div class="nav-links">
-      <a href="../hardware/">Hardware</a>
-      <a href="../gallery/">Gallery</a>
+      <a href="../">Overview</a>
+      <a href="../hardware/">Devices</a>
+      <a href="../demo/">Live Preview</a>
       <a class="active" href="./">Docs</a>
-      <a href="../demo/">Demo</a>
-      <a href="../reports/">Reports</a>
+      <a href="../reports/">Build Health</a>
       <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
     </div>
   </div>
@@ -118,18 +125,18 @@
   <h2>Devices &amp; hardware <span class="h2note">the 16 surfaces</span></h2>
   <div class="grid">
     <a class="doc" href="../hardware/">
-      <div class="path">/hardware/</div><h3>Hardware &amp; OS spec sheet</h3>
-      <p>The full matrix — SoC, resolution, display IC, flash, transport, and App Store tier for every surface.</p>
+      <div class="path">/hardware/</div><h3>Devices catalog</h3>
+      <p>A public map of supported displays and controllers, with links to live render output and board-level detail.</p>
       <span class="tag html">Live page</span>
     </a>
-    <a class="doc" href="../gallery/">
-      <div class="path">/gallery/</div><h3>Device gallery</h3>
-      <p>The real hardware board by board, each card carrying its live specs.</p>
-      <span class="tag html">Live page</span>
+    <a class="doc" href="../demo/">
+      <div class="path">/demo/</div><h3>Live device preview</h3>
+      <p>Interactive renderer output across agents, states, and device classes.</p>
+      <span class="tag html">Interactive page</span>
     </a>
     <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/hardware-compatibility.md">
       <div class="path">docs/hardware-compatibility.md</div><h3>Compatibility SSOT</h3>
-      <p>Canonical resolutions, chips, and OS targets — the source the spec sheet renders from.</p>
+      <p>Canonical resolutions, chips, and OS targets — the source the Devices catalog summarizes.</p>
       <span class="tag md">Markdown</span>
     </a>
     <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/devices.md">
@@ -244,8 +251,8 @@
       <span class="tag md">Markdown</span>
     </a>
     <a class="doc" href="https://github.com/puritysb/AgentDeck/blob/master/docs/testing.md">
-      <div class="path">docs/testing.md · /reports/</div><h3>Testing</h3>
-      <p>Vitest, JUnit/Robolectric, XCTest, Robot Framework — and the live CI report.</p>
+      <div class="path">docs/testing.md · /reports/</div><h3>Testing &amp; build health</h3>
+      <p>Vitest, JUnit/Robolectric, XCTest, Robot Framework — and the latest automated quality evidence.</p>
       <span class="tag md">Markdown</span>
     </a>
   </div>

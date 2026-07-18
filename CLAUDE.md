@@ -98,14 +98,14 @@ This repo is built by switching between Claude Code, Codex, OpenCode, and Antigr
 
 Coverage thresholds (regression guard): lines ≥17%, functions ≥15%, branches ≥14%, statements ≥16%. CI runs `coverage check` step after tests.
 
-### Test Report (GitHub Pages)
+### GitHub Pages and Build Health
 
-- **URL**: `https://puritysb.github.io/AgentDeck/` (landing) / `/hardware/` (hardware+OS spec sheet) / `/gallery/` (device photo gallery) / `/docs/` (documentation hub) / `/demo/` (creature-simulator) / `/reports/` (test report)
-- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + Robot Framework (no-hw) + `pnpm run demo:build` → HTML report → GitHub Pages deploy. The "Assemble Pages site" step copies each surface into `_site/` (landing/hardware/gallery/docs/demo/reports)
-- **Demo device fidelity**: `/demo` panels use canonical renderer output only — Node renderers via `scripts/render-creature-simulator.mjs` (sim-data.js) and **pixel-exact ESP32 firmware frames via `scripts/render-esp32-sim-frames.mjs`** (esp32/sim `demo:<agent>:<state>` scenes → `sim-frames/`, needs `pio`; missing frames show the hatch placeholder, never hand-drawn ESP32/e-ink/TC001). Hand-maintained Swift Device Preview mirrors carry `SYNC-HASH` origin pins enforced by `node scripts/check-preview-mirror-sync.mjs` (CI)
-- **Report generator**: `scripts/generate-html-report.py` — tab-based SPA dashboard. Robot tab: suite→scenario→BDD steps→board matrix→per-test elapsed time→performance table. `[PERF]` log messages auto-extracted from output.xml
+- **URL**: `https://puritysb.github.io/AgentDeck/` (overview) / `/hardware/` (**Devices** public surface catalog) / `/demo/` (**Live Preview** interactive renderer) / `/docs/` (documentation hub) / `/reports/` (**Build Health** CI evidence). The retired `/gallery/` route redirects to `/hardware/`; do not restore it as a separate menu or duplicate device catalog.
+- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + Robot Framework (no-hw) + `pnpm run demo:build` → HTML report → GitHub Pages deploy. The "Assemble Pages site" step copies each surface into `_site/` (overview/devices/live-preview/docs/build-health plus the gallery redirect).
+- **Live Preview fidelity**: `/demo` panels use canonical renderer output only — Node renderers via `scripts/render-creature-simulator.mjs` (sim-data.js) and **pixel-exact ESP32 firmware frames via `scripts/render-esp32-sim-frames.mjs`** (esp32/sim `demo:<agent>:<state>` scenes → `sim-frames/`, needs `pio`; missing frames show the hatch placeholder, never hand-drawn ESP32/e-ink/TC001). Hand-maintained Swift Device Preview mirrors carry `SYNC-HASH` origin pins enforced by `node scripts/check-preview-mirror-sync.mjs` (CI)
+- **Build Health generator**: `scripts/generate-html-report.py` — tab-based SPA quality dashboard. Robot tab: suite→scenario→BDD steps→board matrix→per-test elapsed time→performance table. `[PERF]` log messages auto-extracted from output.xml
 - **Scenario matrix**: `scripts/scenario-matrix.json` — 10 user scenarios mapped to test files + gap analysis
-- **Site surfaces (all aquarium-tide, self-contained, token-defining in `design/lint.sh`)**: `scripts/pages-index.html` (landing) · `docs/hardware/index.html` (spec sheet) · `docs/gallery/index.html` (photo gallery — drop `docs/gallery/photos/<slug>.jpg`) · `docs/site/index.html` (docs hub)
+- **Site surfaces (all aquarium-tide)**: `scripts/pages-index.html` (overview) · `docs/hardware/index.html` (public device catalog; detailed SSOT remains `docs/hardware-compatibility.md`) · `tools/creature-simulator/index.html` (Live Preview) · `docs/site/index.html` (docs hub) · generated `/reports/` (Build Health) · `docs/gallery/index.html` (redirect only). The static marketing files remain self-contained and token-defining in `design/lint.sh`.
 
 See [docs/testing.md](docs/testing.md) for full testing reference.
 

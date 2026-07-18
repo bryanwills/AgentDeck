@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AgentDeck Test Report — HTML Generator
+AgentDeck Build Health — HTML Generator
 
 Reads vitest JSON, Android JUnit XML, coverage-summary.json, scenario-matrix.json,
 and produces a single self-contained HTML dashboard with:
@@ -405,7 +405,7 @@ TEST_LAYERS = [
     {
         "id": "terminal-parsing",
         "name": "Terminal Output Parsing",
-        "question": "Claude Code와 Codex CLI의 터미널 출력을 정확히 해석하는가?",
+        "question": "Does the bridge interpret Claude Code and Codex terminal output correctly?",
         "icon": "◈",
         "color": "#22d3ee",
         "files": [
@@ -417,7 +417,7 @@ TEST_LAYERS = [
     {
         "id": "state-adapter",
         "name": "State Machine & Adapters",
-        "question": "에이전트의 상태 전이와 타입별 명령 라우팅이 정확한가?",
+        "question": "Are agent state transitions and type-specific command routes correct?",
         "icon": "◇",
         "color": "#a78bfa",
         "files": [
@@ -429,7 +429,7 @@ TEST_LAYERS = [
     {
         "id": "timeline",
         "name": "Timeline Pipeline",
-        "question": "이벤트 타임라인의 저장, 중복 제거, 세션 간 릴레이가 올바른가?",
+        "question": "Are timeline storage, deduplication, and cross-session relays correct?",
         "icon": "◆",
         "color": "#f472b6",
         "files": [
@@ -441,7 +441,7 @@ TEST_LAYERS = [
     {
         "id": "daemon-infra",
         "name": "Daemon & Infrastructure",
-        "question": "데몬 싱글톤, 세션 레지스트리, 사용량 릴레이가 안정적인가?",
+        "question": "Are the daemon singleton, session registry, and usage relay stable?",
         "icon": "◉",
         "color": "#fb923c",
         "files": [
@@ -454,7 +454,7 @@ TEST_LAYERS = [
     {
         "id": "integration",
         "name": "Integration Tests",
-        "question": "전체 파이프라인이 실제 서버 환경에서 동작하는가?",
+        "question": "Does the end-to-end pipeline work in a real server environment?",
         "icon": "◎",
         "color": "#34d399",
         "files": [
@@ -465,7 +465,7 @@ TEST_LAYERS = [
     {
         "id": "plugin-ui",
         "name": "Stream Deck Plugin UI",
-        "question": "플러그인의 연결 관리, 옵션 레이아웃, 렌더링이 정확한가?",
+        "question": "Are plugin connections, option layouts, and renderers correct?",
         "icon": "▣",
         "color": "#38bdf8",
         "files": [
@@ -479,7 +479,7 @@ TEST_LAYERS = [
     {
         "id": "tui-dashboard",
         "name": "TUI Dashboard",
-        "question": "터미널 대시보드의 상태 렌더링과 테라리움 애니메이션이 올바른가?",
+        "question": "Does the terminal dashboard render state and terrarium motion correctly?",
         "icon": "▤",
         "color": "#c084fc",
         "files": [
@@ -491,7 +491,7 @@ TEST_LAYERS = [
     {
         "id": "serial-protocol",
         "name": "Serial Protocol",
-        "question": "ESP32와의 시리얼 바이트스트림이 정확히 프레이밍되는가?",
+        "question": "Is the ESP32 serial byte stream framed correctly?",
         "icon": "▥",
         "color": "#fbbf24",
         "files": [
@@ -501,7 +501,7 @@ TEST_LAYERS = [
     {
         "id": "display-render",
         "name": "Display Rendering",
-        "question": "외부 디스플레이에 전송할 이미지 데이터가 올바른가?",
+        "question": "Is image data for external displays rendered correctly?",
         "icon": "▦",
         "color": "#f87171",
         "files": [
@@ -511,7 +511,7 @@ TEST_LAYERS = [
     {
         "id": "hook-install",
         "name": "Hook Installation",
-        "question": "Claude Code hook의 설치, 제거, 마이그레이션이 안전한가?",
+        "question": "Are Claude Code hook installation, removal, and migration safe?",
         "icon": "▧",
         "color": "#4ade80",
         "files": [
@@ -1688,25 +1688,45 @@ def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results,
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AgentDeck Test Report</title>
+<title>AgentDeck — Build Health</title>
+<meta name="description" content="Latest AgentDeck automated checks, scenario coverage, test history, and known quality gaps.">
+<link rel="icon" type="image/png" href="../icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+KR:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
 <style>
-:root {{ --bg: #0f172a; --surface: #1e293b; --surface2: #334155; --text: #e2e8f0; --dim: #64748b; --accent: #38bdf8; --sidebar-w: 240px; }}
+:root {{ --bg: #f5f3ec; --surface: #ebe6d6; --surface2: #d8cfb6; --text: #0e1f1f; --dim: #426664; --accent: #2f8a7c; --sidebar-w: 240px; --ink-800:#15302f; --kelp-700:#1f6157; --tide-300:#a8b09a; --coral-500:#c0573a; }}
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-body {{ background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', 'Inter', system-ui, sans-serif; line-height: 1.5; }}
+body {{ background: var(--bg); color: var(--text); font-family:'IBM Plex Sans','IBM Plex Sans KR',-apple-system,BlinkMacSystemFont,system-ui,sans-serif; line-height: 1.5; }}
 
 /* Layout */
 .app {{ display: flex; min-height: 100vh; }}
-.sidebar {{ width: var(--sidebar-w); position: fixed; top: 0; left: 0; bottom: 0; background: var(--surface); border-right: 1px solid var(--surface2); overflow-y: auto; z-index: 10; display: flex; flex-direction: column; }}
+.sidebar {{ width: var(--sidebar-w); position: fixed; top: 55px; left: 0; bottom: 0; background: var(--surface); border-right: 1px solid var(--surface2); overflow-y: auto; z-index: 10; display: flex; flex-direction: column; }}
 .sidebar-header {{ padding: 1.25rem 1rem 1rem; border-bottom: 1px solid var(--surface2); }}
 .sidebar-header h1 {{ font-size: 1rem; font-weight: 700; }}
 .sidebar-header .subtitle {{ color: var(--dim); font-size: 0.7rem; margin-top: 0.25rem; }}
 .sidebar-nav {{ flex: 1; padding: 0.5rem 0; overflow-y: auto; }}
 .content {{ margin-left: var(--sidebar-w); flex: 1; padding: 2rem; min-width: 0; }}
 
+/* Public Pages shell */
+.site-nav {{ position:sticky; top:0; z-index:30; backdrop-filter:blur(10px); background:rgba(245,243,236,.86); border-bottom:1px solid var(--surface2); }}
+.site-nav-in {{ max-width:1180px; margin:0 auto; padding:12px 24px; display:flex; align-items:center; gap:16px; }}
+.site-brand {{ display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; font-weight:700; }}
+.site-brand img {{ width:30px; height:30px; border-radius:8px; }}
+.site-links {{ margin-left:auto; display:flex; gap:8px; }}
+.site-links a {{ color:var(--dim); text-decoration:none; font-size:14px; font-weight:500; padding:4px 12px; border-radius:999px; white-space:nowrap; }}
+.site-links a:hover, .site-links a.active {{ color:var(--text); background:var(--surface2); }}
+.site-links .gh {{ color:var(--bg); background:var(--ink-800); }}
+.report-intro {{ max-width:850px; margin:0 0 2rem; padding-bottom:1.5rem; border-bottom:2px solid var(--surface2); }}
+.report-intro .kicker {{ color:var(--kelp-700); font:600 12px/1.4 'JetBrains Mono',monospace; letter-spacing:.18em; text-transform:uppercase; }}
+.report-intro h2 {{ margin:.5rem 0; font-size:clamp(2rem,5vw,3.5rem); letter-spacing:-.035em; line-height:1.03; }}
+.report-intro p {{ color:var(--dim); font-size:1.05rem; max-width:64ch; }}
+.report-intro .freshness {{ margin-top:.75rem; font:500 .75rem/1.4 'JetBrains Mono',monospace; color:var(--kelp-700); }}
+
 /* Nav items */
 .nav-item {{ display: flex; align-items: center; padding: 0.5rem 0.75rem; cursor: pointer; transition: background 0.15s; position: relative; gap: 0.5rem; }}
 .nav-item:hover {{ background: var(--surface2); }}
-.nav-item.active {{ background: rgba(56, 189, 248, 0.08); }}
+.nav-item.active {{ background: rgba(47, 138, 124, 0.12); }}
 .nav-item.active .nav-indicator {{ opacity: 1; }}
 .nav-indicator {{ width: 3px; border-radius: 2px; align-self: stretch; opacity: 0.3; transition: opacity 0.15s; flex-shrink: 0; }}
 .nav-label {{ display: flex; align-items: center; gap: 0.4rem; flex: 1; min-width: 0; }}
@@ -1731,14 +1751,14 @@ body {{ background: var(--bg); color: var(--text); font-family: -apple-system, B
 .file-block {{ background: var(--surface); border-radius: 10px; margin-bottom: 0.75rem; overflow: hidden; }}
 .file-header {{ display: flex; align-items: center; padding: 0.75rem 1rem; gap: 0.5rem; }}
 .file-icon {{ font-size: 0.9rem; font-weight: 600; flex-shrink: 0; }}
-.file-name {{ font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.file-name {{ font-family:'JetBrains Mono','IBM Plex Mono',monospace; font-size: 0.8rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
 .file-stats {{ display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; flex-shrink: 0; }}
 .file-sep {{ color: var(--dim); }}
 .file-dur {{ color: var(--dim); font-size: 0.75rem; margin-left: 0.5rem; }}
 
 /* Describe groups */
-.describe-group {{ border-top: 1px solid #1a2332; }}
-.describe-header {{ display: flex; align-items: center; padding: 0.5rem 1rem; gap: 0.5rem; background: rgba(0,0,0,0.15); }}
+.describe-group {{ border-top: 1px solid var(--surface2); }}
+.describe-header {{ display: flex; align-items: center; padding: 0.5rem 1rem; gap: 0.5rem; background: rgba(14,31,31,0.04); }}
 .describe-icon {{ font-size: 0.8rem; flex-shrink: 0; }}
 .describe-name {{ font-size: 0.8rem; font-weight: 600; flex: 1; }}
 .describe-stats {{ font-size: 0.75rem; color: var(--dim); }}
@@ -1751,14 +1771,14 @@ body {{ background: var(--bg); color: var(--text); font-family: -apple-system, B
 .bdd-steps {{ padding: 0.4rem 1rem 0.25rem 2.5rem; }}
 .bdd-step {{ font-size: 0.78rem; line-height: 1.6; font-family: 'SF Mono', 'Fira Code', monospace; }}
 .bdd-kw {{ font-weight: 700; display: inline-block; min-width: 3.5em; }}
-.bdd-text {{ color: #cbd5e1; }}
+.bdd-text {{ color: var(--text); }}
 .board-matrix {{ display: flex; gap: 0.35rem; padding: 0.35rem 1rem 0.5rem 2.5rem; flex-wrap: wrap; }}
 .board-chip {{ font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; border: 1px solid; white-space: nowrap; }}
 .board-chip-na {{ background: rgba(51,65,85,0.3); color: #475569; border-color: rgba(51,65,85,0.4); }}
 .perf-table-wrap {{ margin: 0 0 1rem; }}
 .perf-table {{ width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 10px; overflow: hidden; }}
-.perf-table th {{ text-align: left; padding: 0.6rem 0.75rem; color: var(--dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid #1a2332; }}
-.perf-table td {{ padding: 0.5rem 0.75rem; font-size: 0.8rem; font-family: 'SF Mono', 'Fira Code', monospace; border-bottom: 1px solid #0f1923; }}
+.perf-table th {{ text-align: left; padding: 0.6rem 0.75rem; color: var(--dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--surface2); }}
+.perf-table td {{ padding: 0.5rem 0.75rem; font-size: 0.8rem; font-family:'JetBrains Mono','IBM Plex Mono',monospace; border-bottom: 1px solid var(--surface2); }}
 .perf-table tr:last-child td {{ border-bottom: none; }}
 
 /* Test cases */
@@ -1820,7 +1840,7 @@ body {{ background: var(--bg); color: var(--text); font-family: -apple-system, B
 table {{ width: 100%; border-collapse: collapse; }}
 th {{ text-align: left; color: var(--dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--surface2); }}
 td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85rem; }}
-.file-path {{ font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; }}
+.file-path {{ font-family:'JetBrains Mono','IBM Plex Mono',monospace; font-size: 0.8rem; }}
 
 /* Scenario matrix */
 .scenario-table {{ margin-top: 1rem; }}
@@ -1833,8 +1853,8 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
 .sc-gaps {{ list-style: none; margin-top: 0.25rem; }}
 .sc-gaps li {{ font-size: 0.7rem; color: #f97316; padding-left: 0.75rem; position: relative; }}
 .sc-gaps li::before {{ content: "!"; position: absolute; left: 0; font-weight: 700; }}
-.sc-detail-row {{ background: #0c1222; }}
-.sc-detail-row td {{ border-bottom: 1px solid #1a2332; }}
+.sc-detail-row {{ background: rgba(14,31,31,.035); }}
+.sc-detail-row td {{ border-bottom: 1px solid var(--surface2); }}
 .sc-summary-bar {{ display: flex; gap: 1.5rem; margin-bottom: 1rem; margin-top: 1rem; }}
 .sc-summary-item {{ font-size: 0.85rem; }}
 
@@ -1843,7 +1863,10 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
 
 /* Responsive: collapse sidebar on small screens */
 @media (max-width: 768px) {{
-  .sidebar {{ width: 100%; position: relative; border-right: none; border-bottom: 1px solid var(--surface2); }}
+  .site-nav-in {{ align-items:flex-start; padding-inline:16px; }}
+  .site-links {{ overflow-x:auto; }}
+  .site-links .gh {{ display:none; }}
+  .sidebar {{ width: 100%; position: relative; top:0; border-right: none; border-bottom: 1px solid var(--surface2); }}
   .sidebar-nav {{ display: flex; flex-wrap: wrap; padding: 0.5rem; gap: 0.25rem; }}
   .nav-item {{ padding: 0.35rem 0.6rem; border-radius: 6px; }}
   .nav-indicator {{ display: none; }}
@@ -1856,10 +1879,23 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
 </style>
 </head>
 <body>
+<nav class="site-nav">
+  <div class="site-nav-in">
+    <a class="site-brand" href="../"><img src="../icon.png" alt="">AgentDeck</a>
+    <div class="site-links">
+      <a href="../">Overview</a>
+      <a href="../hardware/">Devices</a>
+      <a href="../demo/">Live Preview</a>
+      <a href="../docs/">Docs</a>
+      <a class="active" href="./">Build Health</a>
+      <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
+    </div>
+  </div>
+</nav>
 <div class="app">
   <aside class="sidebar">
     <div class="sidebar-header">
-      <h1>AgentDeck Test Report</h1>
+      <h1>Build Health</h1>
       <div class="subtitle">Generated {now}<br>profile {metadata.get("run_profile", "unknown") if metadata else "unknown"}</div>
     </div>
     <nav class="sidebar-nav">
@@ -1867,6 +1903,12 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
     </nav>
   </aside>
   <main class="content">
+    <header class="report-intro">
+      <p class="kicker">AgentDeck · Automated quality evidence</p>
+      <h2>Build Health</h2>
+      <p>This is the latest CI evidence for the project: test outcomes, user-scenario coverage, trends, and gaps. It is a maintainer view—not a product analytics dashboard.</p>
+      <p class="freshness">LATEST RUN · {overall_status} · GENERATED {now}</p>
+    </header>
     {tab_panels}
   </main>
 </div>

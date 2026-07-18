@@ -4,6 +4,14 @@
 
 > **Older entries are archived by month** under [`docs/devlog/`](docs/devlog/README.md). This active file keeps the current month plus the preceding month (currently 2026-07 and 2026-06); search only the relevant monthly archive for older history.
 
+## 2026-07-18 — GitHub Pages information architecture and visual unification
+
+- Reorganized the public site around four distinct roles: **Devices** (supported surface catalog), **Live Preview** (interactive canonical renderer output), **Docs** (project handbook), and **Build Health** (latest automated quality evidence). All public surfaces now use aquarium-tide navigation, typography, naming, responsive behavior, and English-language page headers.
+- Folded the empty photo Gallery into Devices instead of maintaining a duplicate catalog with invisible image slots. `/gallery/` remains as a backward-compatible redirect to `/hardware/`, while Devices links to Live Preview for render output and to `docs/hardware-compatibility.md` for board-level specifications.
+- Reframed the former creature-simulator Demo as Live Preview, moved canonical per-device output to the public focus, and hid internal proposal/reference panels without removing their renderer DOM. Reframed Reports as Build Health with an explicit maintainer/CI role and the shared Pages shell.
+- Updated the Pages assembly workflow and `CLAUDE.md` site-surface SSOT to preserve the new roles.
+- Verification: `pnpm run demo:build` generated all 160 ESP32 simulator frames and completed the Vite production build; `python3 scripts/generate-html-report.py`, Python bytecode compile, and `git diff --check` passed. The repository-wide design lint still reports its pre-existing generated/vendor findings, while the touched token-defining Pages files add no reported violations.
+
 ## 2026-07-18 — Xcode 26.6 recommended settings + Swift 경고 정리
 
 - `apple/project.yml`의 Xcode 정본 버전을 26.4에서 26.6으로 올리고 `xcodegen generate`를 실행했다. 프로젝트와 macOS/iOS scheme의 `LastUpgradeCheck`/`LastUpgradeVersion`이 2660으로 동기화됐으며, App Store 빌드 조건과 의도적인 `ENABLE_USER_SCRIPT_SANDBOXING=NO`는 유지됐다.

@@ -40,13 +40,13 @@ SCOPE_FILES=$(find . \
 # block manually mirrors design/tokens.css since WKWebView can't <link> the
 # canonical file. Treat it as a token-defining file; sync drift would manifest
 # as visible regression and is caught by manual review during dashboard work.
-# `docs/hardware/index.html` is the published hardware spec sheet (GitHub Pages
+# `docs/hardware/index.html` is the published Devices catalog (GitHub Pages
 # /hardware/). It must stay a single self-contained file (no external <link>) so
 # the same file renders on Pages and from file://; its :root mirrors the warm
 # token subset. Same token-defining treatment as apme-dashboard.html.
 # `scripts/pages-index.html`, `docs/site/index.html`, `docs/gallery/index.html`
-# are the other published GitHub Pages surfaces (landing / docs hub / device
-# gallery). Each is self-contained with the same :root warm-token mirror, so
+# are the other published GitHub Pages surfaces (overview / docs hub / legacy
+# gallery redirect). Each is self-contained with the same :root warm-token mirror, so
 # they get the same token-defining treatment as the hardware sheet.
 TOKEN_FILES='design/tokens\.css|design/tokens\.js|design/icons\.jsx|design/components\.css|design/patterns\.css|docs/design/creatures\.jsx|apple/AgentDeck/Resources/apme-dashboard\.html|docs/hardware/index\.html|scripts/pages-index\.html|docs/site/index\.html|docs/gallery/index\.html|plugin/bound\.serendipity\.agentdeck\.sdPlugin/ui/design-tokens\.css'
 
