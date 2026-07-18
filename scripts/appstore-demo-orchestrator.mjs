@@ -6,21 +6,34 @@
 // time-based three-agent scenario. `terminal` replays the matching fictional
 // terminal transcript. Neither mode launches a real coding agent or touches a
 // user workspace, and this file is never bundled in AgentDeck.app.
+//
+// The cycle opens on an empty dashboard and introduces one session at a time
+// (claude → codex → opencode), so a recording shows the product filling up
+// the way it does on a real machine instead of starting mid-story.
 
 import process from 'node:process';
+import { readFileSync } from 'node:fs';
 import { WebSocketServer } from '../bridge/node_modules/ws/wrapper.mjs';
 
-const CYCLE_MS = 24_000;
+const CYCLE_MS = 60_000;
 const DEFAULT_PORT = Number(process.env.AGENTDECK_DEMO_PORT || 9220);
+const productVersion = readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim();
 
 const phases = [
+  // Cold open: a connected daemon with no sessions yet. This is the frame the
+  // recording starts on, and it is what a new user actually sees before the
+  // first agent runs.
   {
     at: 0,
+    focus: null,
+    sessions: {},
+    timeline: null,
+  },
+  {
+    at: 4_000,
     focus: 'demo-claude',
     sessions: {
-      claude: ['processing', 'Edit', 'Mapping the responsive dashboard'],
-      codex: ['idle', undefined, 'Ready to run verification'],
-      opencode: ['idle', undefined, 'Ready to prepare release notes'],
+      claude: ['processing', 'Read', 'Mapping the responsive dashboard'],
     },
     timeline: {
       agent: 'claude',
@@ -29,26 +42,38 @@ const phases = [
     },
   },
   {
-    at: 3_000,
+    at: 9_000,
+    focus: 'demo-claude',
+    sessions: {
+      claude: ['processing', 'Edit', 'Refining the session cards'],
+    },
+    timeline: {
+      agent: 'claude',
+      type: 'tool_exec',
+      raw: 'Edit · MonitorScreen.swift',
+      detail: 'input: responsive session cards',
+    },
+  },
+  {
+    at: 14_000,
     focus: 'demo-codex',
     sessions: {
       claude: ['processing', 'Edit', 'Refining the session cards'],
       codex: ['processing', 'Bash', 'Running the integration test suite'],
-      opencode: ['idle', undefined, 'Ready to prepare release notes'],
     },
     timeline: {
       agent: 'codex',
       type: 'chat_start',
       raw: 'Verify the release candidate',
     },
+    usage: { primaryPercent: 41, secondaryPercent: 23 },
   },
   {
-    at: 6_000,
-    focus: 'demo-codex',
+    at: 19_000,
+    focus: 'demo-claude',
     sessions: {
       claude: ['idle', undefined, 'Dashboard polish complete'],
       codex: ['processing', 'Test', 'Checking protocol and UI tests'],
-      opencode: ['idle', undefined, 'Ready to prepare release notes'],
     },
     timeline: {
       agent: 'claude',
@@ -57,7 +82,7 @@ const phases = [
     },
   },
   {
-    at: 8_500,
+    at: 24_000,
     focus: 'demo-opencode',
     sessions: {
       claude: ['idle', undefined, 'Dashboard polish complete'],
@@ -69,9 +94,10 @@ const phases = [
       type: 'chat_start',
       raw: 'Draft the launch release notes',
     },
+    usage: { primaryPercent: 44, secondaryPercent: 23 },
   },
   {
-    at: 11_000,
+    at: 30_000,
     focus: 'demo-claude',
     sessions: {
       claude: [
@@ -90,24 +116,40 @@ const phases = [
     },
   },
   {
-    at: 15_000,
+    at: 36_000,
     focus: 'demo-claude',
     sessions: {
       claude: ['processing', 'Edit', 'Applying the approved adjustment'],
+      codex: ['processing', 'Test', 'Checking protocol and UI tests'],
+      opencode: ['processing', 'Write', 'Drafting concise release notes'],
+    },
+    timeline: {
+      agent: 'claude',
+      type: 'tool_exec',
+      raw: 'Edit · DashboardLayout.swift',
+      detail: 'input: final layout adjustment',
+    },
+  },
+  {
+    at: 41_000,
+    focus: 'demo-codex',
+    sessions: {
+      claude: ['processing', 'Edit', 'Applying the approved adjustment'],
       codex: ['idle', undefined, 'All release checks passed'],
-      opencode: ['idle', undefined, 'Release notes are ready'],
+      opencode: ['processing', 'Write', 'Drafting concise release notes'],
     },
     timeline: {
       agent: 'codex',
       type: 'chat_response',
       raw: 'All release checks passed.',
     },
+    usage: { primaryPercent: 47, secondaryPercent: 24 },
   },
   {
-    at: 18_500,
-    focus: 'demo-claude',
+    at: 46_000,
+    focus: 'demo-opencode',
     sessions: {
-      claude: ['idle', undefined, 'Final adjustment complete'],
+      claude: ['processing', 'Edit', 'Applying the approved adjustment'],
       codex: ['idle', undefined, 'All release checks passed'],
       opencode: ['idle', undefined, 'Release notes are ready'],
     },
@@ -115,6 +157,22 @@ const phases = [
       agent: 'opencode',
       type: 'chat_response',
       raw: 'Release notes are ready for publication.',
+    },
+  },
+  // Closing frame: every session idle for the last ~9s so the terrarium
+  // settles to its rest state before the loop restarts.
+  {
+    at: 51_000,
+    focus: 'demo-claude',
+    sessions: {
+      claude: ['idle', undefined, 'Final adjustment complete'],
+      codex: ['idle', undefined, 'All release checks passed'],
+      opencode: ['idle', undefined, 'Release notes are ready'],
+    },
+    timeline: {
+      agent: 'claude',
+      type: 'chat_response',
+      raw: 'Final adjustment complete.',
     },
   },
 ];
@@ -128,6 +186,7 @@ const agents = {
     modelName: 'Claude Sonnet',
     color: '\u001b[38;5;208m',
     label: 'CLAUDE CODE · Sample Workspace',
+    appearsAt: 4_000,
   },
   codex: {
     id: 'demo-codex',
@@ -137,6 +196,7 @@ const agents = {
     modelName: 'GPT-5 Codex',
     color: '\u001b[38;5;45m',
     label: 'CODEX · API Client',
+    appearsAt: 14_000,
   },
   opencode: {
     id: 'demo-opencode',
@@ -146,35 +206,36 @@ const agents = {
     modelName: 'Qwen Coder',
     color: '\u001b[38;5;141m',
     label: 'OPENCODE · Documentation',
+    appearsAt: 24_000,
   },
 };
 
 const terminalLines = {
   claude: [
-    [0, '❯ Polish the dashboard for the launch capture'],
-    [900, '  Reading MonitorScreen.swift'],
-    [2_100, '  Editing responsive session cards…'],
-    [5_700, '✓ Dashboard polish complete'],
-    [10_900, '❯ Apply the final layout adjustment'],
-    [11_400, '  Permission required: update dashboard layout'],
-    [14_700, '  Permission granted'],
-    [15_300, '  Applying final adjustment…'],
-    [18_200, '✓ Final adjustment complete'],
+    [4_000, '❯ Polish the dashboard for the launch capture'],
+    [5_200, '  Reading MonitorScreen.swift'],
+    [9_000, '  Editing responsive session cards…'],
+    [18_600, '✓ Dashboard polish complete'],
+    [29_800, '❯ Apply the final layout adjustment'],
+    [30_400, '  Permission required: update dashboard layout'],
+    [35_400, '  Permission granted'],
+    [36_000, '  Applying final adjustment…'],
+    [50_800, '✓ Final adjustment complete'],
   ],
   codex: [
-    [2_900, '› Verify the release candidate'],
-    [3_600, '• Running integration test suite'],
-    [6_200, '• Checking protocol contract tests'],
-    [9_500, '• Checking SwiftUI state projection'],
-    [14_800, '✓ 1842 tests passed'],
-    [15_300, '✓ Release candidate verified'],
+    [14_000, '› Verify the release candidate'],
+    [14_800, '• Running integration test suite'],
+    [19_000, '• Checking protocol contract tests'],
+    [26_000, '• Checking SwiftUI state projection'],
+    [40_400, '✓ 1842 tests passed'],
+    [40_900, '✓ Release candidate verified'],
   ],
   opencode: [
-    [8_400, '❯ Draft the launch release notes'],
-    [9_100, '  Reading the release summary…'],
-    [10_300, '  Writing concise feature highlights…'],
-    [13_300, '  Checking names and privacy-safe examples…'],
-    [14_900, '✓ Release notes are ready'],
+    [24_000, '❯ Draft the launch release notes'],
+    [25_000, '  Reading the release summary…'],
+    [28_000, '  Writing concise feature highlights…'],
+    [38_000, '  Checking names and privacy-safe examples…'],
+    [45_600, '✓ Release notes are ready'],
   ],
 };
 
@@ -232,39 +293,90 @@ function timelineEntry(phase, cycleStartedAt) {
     agentType: agent.agentType,
     projectName: agent.projectName,
     sessionId: agent.id,
+    ...(phase.timeline.detail ? { detail: phase.timeline.detail } : {}),
   };
 }
+
+// Codex rolling-window quota, the one provider gauge the sandboxed App Store
+// build can produce on its own (the Swift daemon reads ~/.codex directly).
+// Claude's 5h/7d fields are deliberately omitted: those depend on OAuth token
+// and relay data only the external Node daemon supplies, so `TopologyRail`
+// collapses the Claude row. Sending them here would show the App Store app
+// doing something it cannot do.
+function usageEvent(usage, cycleStartedAt) {
+  const isoAfter = (ms) => new Date(cycleStartedAt + ms).toISOString();
+  return {
+    type: 'usage_update',
+    usageStale: false,
+    codexPlanType: 'plus',
+    codexRateLimits: {
+      planType: 'plus',
+      primary: {
+        usedPercent: usage.primaryPercent,
+        windowMinutes: 300,
+        resetsAt: isoAfter(2.6 * 60 * 60 * 1000),
+        stale: false,
+      },
+      secondary: {
+        usedPercent: usage.secondaryPercent,
+        windowMinutes: 10_080,
+        resetsAt: isoAfter(3.4 * 24 * 60 * 60 * 1000),
+        stale: false,
+      },
+    },
+  };
+}
+
+/// Most recent usage snapshot at or before `index`, so a client that connects
+/// mid-cycle still sees a populated gauge instead of an empty provider row.
+function usageAt(index) {
+  for (let i = index; i >= 0; i -= 1) {
+    if (phases[i].usage) return phases[i].usage;
+  }
+  return null;
+}
+
+const moduleHealth = {
+  streamDeck: { available: true, connected: true, deviceCount: 1 },
+  pixoo: { available: true, configuredDeviceCount: 1, connectedDeviceCount: 1 },
+  esp32Wifi: {
+    available: true,
+    devices: [{ board: 'inkdeck', version: productVersion, stale: false, serialActive: false }],
+  },
+};
 
 function eventsForPhase(index, cycleStartedAt, includeHistory) {
   const phase = phases[index];
   const focusedKey = Object.keys(agents).find((key) => agents[key].id === phase.focus);
   const focused = agents[focusedKey];
-  const focusedTuple = phase.sessions[focusedKey];
-  const [state, currentTool, , question] = focusedTuple;
+  // The cold-open phase has no sessions at all: report a healthy, connected
+  // daemon with nothing focused so the app renders its real empty state.
+  const focusState = focused
+    ? (() => {
+        const [state, currentTool, , question] = phase.sessions[focusedKey];
+        return {
+          state,
+          sessionId: focused.id,
+          focusedSessionId: focused.id,
+          agentType: focused.agentType,
+          projectName: focused.projectName,
+          modelName: focused.modelName,
+          ...(currentTool ? { currentTool } : {}),
+          ...(question ? { question } : {}),
+        };
+      })()
+    : { state: 'idle' };
+
   const events = [
     {
       type: 'state_update',
-      state,
+      ...focusState,
       permissionMode: 'default',
-      sessionId: focused.id,
-      focusedSessionId: focused.id,
-      agentType: focused.agentType,
-      projectName: focused.projectName,
-      modelName: focused.modelName,
-      ...(currentTool ? { currentTool } : {}),
-      ...(question ? { question } : {}),
       gatewayAvailable: false,
       gatewayConnected: false,
       gatewayHasError: false,
       daemonPort: 9120,
-      moduleHealth: {
-        streamDeck: { available: true, connected: true, deviceCount: 1 },
-        pixoo: { available: true, configuredDeviceCount: 1, connectedDeviceCount: 1 },
-        esp32Wifi: {
-          available: true,
-          devices: [{ board: 'inkdeck', version: '0.2.3', stale: false, serialActive: false }],
-        },
-      },
+      moduleHealth,
     },
     {
       type: 'sessions_list',
@@ -272,12 +384,20 @@ function eventsForPhase(index, cycleStartedAt, includeHistory) {
     },
   ];
 
+  // On (re)connect replay the standing snapshot; mid-cycle only emit on the
+  // phases that actually move the gauge.
+  const usage = includeHistory ? usageAt(index) : phase.usage;
+  if (usage) events.push(usageEvent(usage, cycleStartedAt));
+
   if (includeHistory) {
     events.push({
       type: 'timeline_history',
-      entries: phases.slice(0, index + 1).map((item) => timelineEntry(item, cycleStartedAt)),
+      entries: phases
+        .slice(0, index + 1)
+        .filter((item) => item.timeline)
+        .map((item) => timelineEntry(item, cycleStartedAt)),
     });
-  } else {
+  } else if (phase.timeline) {
     events.push({ type: 'timeline_event', entry: timelineEntry(phase, cycleStartedAt) });
   }
   return events;
@@ -300,7 +420,11 @@ async function serve(options) {
     const cycle = Math.floor(elapsed / CYCLE_MS);
     const cycleStartedAt = epochMs + cycle * CYCLE_MS;
     const index = phaseIndexAt(cyclePosition(epochMs, now));
-    send(socket, { type: 'connection', status: 'connected', sessionId: phases[index].focus });
+    send(socket, {
+      type: 'connection',
+      status: 'connected',
+      ...(phases[index].focus ? { sessionId: phases[index].focus } : {}),
+    });
     for (const event of eventsForPhase(index, cycleStartedAt, true)) send(socket, event);
 
     socket.on('message', (data) => {
@@ -361,6 +485,10 @@ async function replayTerminal(options) {
     if (waitForCycle > 0) await sleep(waitForCycle);
 
     process.stdout.write('\u001b[2J\u001b[H');
+    // Hold the pane blank until this agent's session appears on the dashboard,
+    // so the terminal side of the frame fills in one agent at a time too.
+    const headerDelay = Math.max(0, cycleStartedAt + agent.appearsAt - Date.now());
+    if (headerDelay > 0) await sleep(headerDelay);
     console.log(`${agent.color}${agent.label}${reset}`);
     console.log(`${faint}deterministic launch rehearsal · no real workspace data${reset}\n`);
 

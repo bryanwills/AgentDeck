@@ -17,29 +17,72 @@ mock. A developer-only performance harness is safer because it:
 - gives every take the same timing and privacy-safe content;
 - leaves the existing static screenshot captures reproducible.
 
-`scripts/appstore-demo-orchestrator.mjs` adds a looping 24-second performance
+`scripts/appstore-demo-orchestrator.mjs` adds a looping 60-second performance
 with Claude Code, Codex, and OpenCode. `scripts/record-feature-demo.sh` starts
 the feed and, for marketing footage, a synchronized three-pane fictional
 terminal replay.
 
-## Story A — App Store Preview (app UI only, 20–24 seconds)
+## The cycle
+
+Every cycle opens **cold** — a connected daemon with zero sessions — and then
+introduces one agent at a time, which is what a real machine looks like as a
+developer starts working. All timings are relative to the shared epoch, so the
+app feed and the terminal panes always agree.
+
+| Time | Dashboard | Terminal panes |
+|---:|---|---|
+| 0–4s | Empty state; no sessions | All three blank |
+| 4s | **Claude appears** — reading, then editing | Claude pane opens |
+| 9s | Claude tool row (`Edit · MonitorScreen.swift`) | Editing line |
+| 14s | **Codex appears** — running the test suite; Codex quota gauge lights up at 41% | Codex pane opens |
+| 19s | Claude completes and goes idle | `✓ Dashboard polish complete` |
+| 24s | **OpenCode appears** — drafting release notes | OpenCode pane opens |
+| 30s | Claude enters the amber attention state | `Permission required` |
+| 36s | Attention clears; Claude applies the change | `Permission granted` |
+| 41s | Codex completes; quota ticks to 47% | `✓ 1842 tests passed` |
+| 46s | OpenCode completes | `✓ Release notes are ready` |
+| 51–60s | All three idle; creatures settle to the floor | Panes at rest |
+
+### Quota gauges: Codex only, on purpose
+
+The cycle emits a `usage_update` carrying **Codex rolling-window limits only**
+(5h primary climbing 41 → 44 → 47%, 7d secondary 23 → 24%, ChatGPT Plus). The
+Claude `fiveHourPercent` / `sevenDayPercent` fields are deliberately absent.
+
+This is not a shortcut — it is what the App Store build actually shows.
+`TopologyRail.rateLimitChips` gates Claude's gauges on
+`daemonService.isUsingExternalDaemon`, because they need OAuth token and relay
+data the sandboxed app cannot produce alone; the Codex gauges sit outside that
+gate because the Swift daemon reads `~/.codex` directly. A preview showing a
+populated Claude quota row would depict a capability the shipped app does not
+have without the separately-installed Node daemon.
+
+Verify the shape of a run without the app at all:
+
+```bash
+node scripts/appstore-demo-orchestrator.mjs serve --port 9221
+```
+
+## Story A — App Store Preview (app UI only, ≤30 seconds)
 
 Apple App Review Guideline 2.3.4 permits only screen capture of the app itself
 in an App Preview. Do not show Terminal, tmux, Xcode, browser chrome, a desktop,
-or a hardware camera shot in this asset.
+or a hardware camera shot in this asset. App Previews are also capped at 30
+seconds, so **record the full 60-second cycle and trim** — do not try to make
+the harness itself fit the limit.
 
-| Time | AgentDeck UI | Message |
-|---:|---|---|
-| 0–3s | Aquarium and three sessions appear; Claude is editing | One view for every coding agent |
-| 3–6s | Codex starts tests while Claude continues | Work continues in parallel |
-| 6–11s | Claude completes; OpenCode begins release notes | See progress without changing context |
-| 11–15s | Claude enters the amber attention state | Know exactly when a human is needed |
-| 15–19s | Attention clears; tests and notes complete | Return to flow immediately |
-| 19–24s | All three creatures settle to idle | Your agents, calmly orchestrated |
+The recommended cut is **0–30s**: it opens on an empty dashboard, fills up one
+agent at a time, and lands on the amber attention state as the closing beat.
 
-Use a frame around 5 seconds as the poster frame: it contains three sessions,
-two active agents, the aquarium, and timeline without the more alarming amber
-attention state.
+| Cut | Message |
+|---|---|
+| 0–4s | Nothing to manage yet |
+| 4–14s | Your first agent shows up on its own |
+| 14–24s | Every agent, one surface |
+| 24–30s | Know exactly when a human is needed |
+
+Use a frame around **26 seconds** as the poster frame: three sessions present,
+two active, aquarium and timeline populated, no amber attention state yet.
 
 Start the animated feed:
 
@@ -53,24 +96,25 @@ Launch an iOS Debug Simulator build with these arguments:
 -AgentDeckScreenshotURL ws://127.0.0.1:9220
 ```
 
-Record the app itself for one complete 24-second cycle. The existing
-`apple/appstore-submission/previews/` files remain the current upload-ready
-assets until a replacement passes `validate-appstore-submission.sh`.
+Record at least one complete 60-second cycle, then trim in the editor. The
+existing `apple/appstore-submission/previews/` files remain the current
+upload-ready assets until a replacement passes
+`validate-appstore-submission.sh`.
 
-## Story B — launch film (website, social, press; 35–45 seconds)
+## Story B — launch film (website, social, press; 45–60 seconds)
 
 This version may show the developer workflow because it is not an App Store
 Preview.
 
 | Time | Shot | Direction |
 |---:|---|---|
-| 0–4s | Three terminal panes, empty prompts | “Three agents. Three workstreams.” |
-| 4–10s | Claude edits, Codex tests, OpenCode waits | Terminal lines begin at staggered cues |
-| 10–16s | Cut to AgentDeck aquarium | Match the same active/idle states in the app |
-| 16–22s | Split view: terminals + AgentDeck | Show parallel work resolving into one dashboard |
-| 22–28s | Tight crop on amber attention state | Human attention becomes the visual climax |
-| 28–34s | Attention clears and agents complete | Show control without pretending the app approved it |
-| 34–40s | Full AgentDeck hero frame | End card: “Your agents. One calm control surface.” |
+| 0–4s | Empty dashboard beside three blank panes | “Nothing running yet.” |
+| 4–14s | Claude pane opens; its card slides into the app | One agent, two surfaces, same instant |
+| 14–24s | Codex then OpenCode join | Show the dashboard filling up, not a static grid |
+| 24–30s | Split view: terminals + AgentDeck | Parallel work resolving into one surface |
+| 30–36s | Tight crop on amber attention state | Human attention becomes the visual climax |
+| 36–51s | Attention clears and agents complete | Show control without pretending the app approved it |
+| 51–60s | Full AgentDeck hero frame, creatures at rest | End card: “Your agents. One calm control surface.” |
 
 Start the synchronized terminal rehearsal:
 

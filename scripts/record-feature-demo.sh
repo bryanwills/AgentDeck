@@ -81,6 +81,11 @@ trap - EXIT
 echo "Animated app feed: ws://127.0.0.1:$PORT"
 echo "Launch a Debug build with:"
 echo "  -AgentDeckScreenshotURL ws://127.0.0.1:$PORT"
+echo
+echo "The 60s cycle opens on an empty dashboard and adds one session at a"
+echo "time (claude 4s, codex 14s, opencode 24s, attention 30s, all idle 51s)."
+echo "Connect the app first, then start recording when the dashboard next"
+echo "goes empty — that frame recurs every 60s."
 
 if [ "$MODE" = "app-only" ]; then
   echo "App-only rehearsal is running. Stop with:"
