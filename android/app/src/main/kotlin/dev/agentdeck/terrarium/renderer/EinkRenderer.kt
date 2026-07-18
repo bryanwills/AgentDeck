@@ -754,8 +754,9 @@ private fun drawEinkCloud(
     val cx = w * (centerXFraction + wanderX)
     // State-based Y: WORKING uses layout swim slot (top),
     // IDLE/SLEEPING rests near ground so idle sessions don't hover up top.
-    // X-correlated depth offset mimics the octopus "standingOffset" pattern.
-    val restY = (0.64f + (centerXFraction - 0.40f) * 0.08f).coerceAtMost(0.76f)
+    // homeY-relative (not a shared constant) so idle Cloud creatures rest in
+    // their own strip instead of converging with OpenCode/Antigravity.
+    val restY = (centerYFraction + 0.30f).coerceIn(0.58f, 0.62f)
     val baseYFraction = when (state) {
         OctopusVisualState.WORKING -> centerYFraction
         OctopusVisualState.ASKING -> (centerYFraction + restY) * 0.5f
@@ -863,7 +864,9 @@ private fun drawEinkOpenCode(
     val cx = w * (centerXFraction + wanderX)
     // State-based Y: WORKING uses layout swim slot (mid-upper),
     // IDLE/SLEEPING rests near ground so idle sessions don't hover in the water.
-    val restY = (0.64f + (centerXFraction - 0.55f) * 0.06f).coerceAtMost(0.76f)
+    // homeY-relative (not a shared constant) so idle OpenCode creatures rest in
+    // their own strip instead of converging with Cloud/Antigravity.
+    val restY = (centerYFraction + 0.18f).coerceIn(0.59f, 0.63f)
     val baseYFraction = when (state) {
         OctopusVisualState.WORKING -> centerYFraction
         OctopusVisualState.ASKING -> (centerYFraction + restY) * 0.5f

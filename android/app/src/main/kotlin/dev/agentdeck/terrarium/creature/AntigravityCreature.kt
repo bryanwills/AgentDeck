@@ -116,14 +116,17 @@ class AntigravityCreature(
                 currentY += (myDeepY - currentY) * dt * 4f
             }
             OctopusVisualState.FLOATING -> {
-                val myStandingY = (STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
+                // homeY-relative (not the shared Octopus STANDING_Y) so idle
+                // Antigravity creatures rest in their own strip instead of
+                // converging with Octopus/Cloud/OpenCode onto the same standing row.
+                val myStandingY = (homeY + 0.34f).coerceIn(0.56f, 0.64f) + standingJitter
                 val breathBob = sin(time * 0.72f) * 0.006f
                 val idleSway = sin(time * 0.34f) * 0.010f
                 currentX += (homeX + idleSway - currentX) * dt * 4f
                 currentY += (myStandingY + breathBob - currentY) * dt * 4f
             }
             OctopusVisualState.ASKING -> {
-                val myStandingY = (ASKING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
+                val myStandingY = (homeY + 0.22f).coerceIn(0.46f, 0.52f) + standingJitter
                 val fidgetX = sin(time * 1.2f) * 0.012f
                 currentX += (homeX + fidgetX - currentX) * dt * 4f
                 currentY += (myStandingY - currentY) * dt * 4f
@@ -166,12 +169,12 @@ class AntigravityCreature(
 
     private fun swimLane(): SwimLane {
         val halfWidth = minOf(0.15f, maxOf(0.08f, 0.08f + scaleFactor * 0.05f))
-        val centerX = homeX.coerceIn(TerrariumLayout.SWIM_MIN_X + 0.06f, TerrariumLayout.SWIM_MAX_X - 0.06f)
+        val centerX = homeX.coerceIn(TerrariumLayout.ANTIGRAVITY_SWIM_MIN_X + 0.06f, TerrariumLayout.ANTIGRAVITY_SWIM_MAX_X - 0.06f)
         val centerY = homeY.coerceIn(WORKING_MIN_Y + 0.04f, WORKING_MAX_Y - 0.04f)
         val verticalSlack = minOf(0.08f, maxOf(0.04f, 0.04f + scaleFactor * 0.02f))
         return SwimLane(
-            minX = maxOf(TerrariumLayout.SWIM_MIN_X, centerX - halfWidth),
-            maxX = minOf(TerrariumLayout.SWIM_MAX_X, centerX + halfWidth),
+            minX = maxOf(TerrariumLayout.ANTIGRAVITY_SWIM_MIN_X, centerX - halfWidth),
+            maxX = minOf(TerrariumLayout.ANTIGRAVITY_SWIM_MAX_X, centerX + halfWidth),
             minY = maxOf(WORKING_MIN_Y, centerY - verticalSlack),
             maxY = minOf(WORKING_MAX_Y, centerY + verticalSlack),
             centerX = centerX,
@@ -471,12 +474,8 @@ class AntigravityCreature(
     }
 
     companion object {
-        /** Standing position Y — just above the sand line (0.65). */
-        private const val STANDING_Y = 0.635f
         /** Deep sleeping position Y — lower, partially hidden. */
         private const val STANDING_Y_DEEP = 0.75f
-        /** ASKING: mid-water. */
-        private const val ASKING_Y = 0.48f
         /** WORKING swim band — upper-mid water. */
         private const val WORKING_MIN_Y = 0.18f
         private const val WORKING_MAX_Y = 0.42f

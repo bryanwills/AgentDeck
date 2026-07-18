@@ -104,14 +104,17 @@ class OpenCodeCreature(
                 currentY += (myDeepY - currentY) * dt * 4f
             }
             OctopusVisualState.FLOATING -> {
-                val myStandingY = (STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
+                // homeY-relative (not the shared Octopus STANDING_Y) so idle OpenCode
+                // creatures rest in their own strip instead of converging with
+                // Octopus/Cloud/Antigravity onto the same standing row.
+                val myStandingY = (homeY + 0.18f).coerceIn(0.59f, 0.63f) + standingJitter
                 val breathBob = sin(time * 0.5f) * 0.003f
                 val idleSway = sin(time * 0.2f) * 0.003f
                 currentX += (homeX + idleSway - currentX) * dt * 4f
                 currentY += (myStandingY + breathBob - currentY) * dt * 4f
             }
             OctopusVisualState.ASKING -> {
-                val myStandingY = (ASKING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
+                val myStandingY = (homeY + 0.10f).coerceIn(0.46f, 0.52f) + standingJitter
                 val fidgetX = sin(time * 0.8f) * 0.004f
                 currentX += (homeX + fidgetX - currentX) * dt * 4f
                 currentY += (myStandingY - currentY) * dt * 4f
@@ -154,12 +157,12 @@ class OpenCodeCreature(
 
     private fun swimLane(): SwimLane {
         val halfWidth = minOf(0.14f, maxOf(0.08f, 0.07f + scaleFactor * 0.05f))
-        val centerX = homeX.coerceIn(TerrariumLayout.SWIM_MIN_X + 0.06f, TerrariumLayout.SWIM_MAX_X - 0.06f)
+        val centerX = homeX.coerceIn(TerrariumLayout.OPENCODE_SWIM_MIN_X + 0.06f, TerrariumLayout.OPENCODE_SWIM_MAX_X - 0.06f)
         val centerY = homeY.coerceIn(WORKING_MIN_Y + 0.04f, WORKING_MAX_Y - 0.04f)
         val verticalSlack = minOf(0.08f, maxOf(0.04f, 0.04f + scaleFactor * 0.02f))
         return SwimLane(
-            minX = maxOf(TerrariumLayout.SWIM_MIN_X, centerX - halfWidth),
-            maxX = minOf(TerrariumLayout.SWIM_MAX_X, centerX + halfWidth),
+            minX = maxOf(TerrariumLayout.OPENCODE_SWIM_MIN_X, centerX - halfWidth),
+            maxX = minOf(TerrariumLayout.OPENCODE_SWIM_MAX_X, centerX + halfWidth),
             minY = maxOf(WORKING_MIN_Y, centerY - verticalSlack),
             maxY = minOf(WORKING_MAX_Y, centerY + verticalSlack),
             centerX = centerX,
@@ -389,9 +392,7 @@ class OpenCodeCreature(
         private const val BODY_SIZE_FRACTION = 0.064f
 
         // Positions
-        private const val STANDING_Y = 0.635f
         private const val STANDING_Y_DEEP = 0.75f
-        private const val ASKING_Y = 0.48f
         private const val WORKING_CENTER_Y = 0.35f
         private const val WORKING_MIN_Y = 0.25f
         private const val WORKING_MAX_Y = 0.50f

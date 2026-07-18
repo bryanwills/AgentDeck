@@ -129,14 +129,17 @@ class CloudCreature(
                 currentY += (myDeepY - currentY) * dt * 4f
             }
             OctopusVisualState.FLOATING -> {
-                val myStandingY = (STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
+                // homeY-relative (not the shared Octopus STANDING_Y) so idle Cloud
+                // creatures rest in their own strip instead of converging with
+                // Octopus/OpenCode/Antigravity onto the same standing row.
+                val myStandingY = (homeY + 0.30f).coerceIn(0.58f, 0.62f) + standingJitter
                 val breathBob = sin(time * 0.6f) * 0.003f
                 val idleSway = sin(time * 0.25f) * 0.004f
                 currentX += (homeX + idleSway - currentX) * dt * 4f
                 currentY += (myStandingY + breathBob - currentY) * dt * 4f
             }
             OctopusVisualState.ASKING -> {
-                val myStandingY = (ASKING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
+                val myStandingY = (homeY + 0.18f).coerceIn(0.48f, 0.54f) + standingJitter
                 val fidgetX = sin(time * 1.0f) * 0.006f
                 currentX += (homeX + fidgetX - currentX) * dt * 4f
                 currentY += (myStandingY - currentY) * dt * 4f
@@ -179,12 +182,12 @@ class CloudCreature(
 
     private fun swimLane(): SwimLane {
         val halfWidth = minOf(0.16f, maxOf(0.09f, 0.08f + scaleFactor * 0.05f))
-        val centerX = homeX.coerceIn(TerrariumLayout.SWIM_MIN_X + 0.06f, TerrariumLayout.SWIM_MAX_X - 0.06f)
+        val centerX = homeX.coerceIn(TerrariumLayout.CLOUD_SWIM_MIN_X + 0.06f, TerrariumLayout.CLOUD_SWIM_MAX_X - 0.06f)
         val centerY = homeY.coerceIn(WORKING_MIN_Y + 0.04f, WORKING_MAX_Y - 0.04f)
         val verticalSlack = minOf(0.08f, maxOf(0.04f, 0.04f + scaleFactor * 0.02f))
         return SwimLane(
-            minX = maxOf(TerrariumLayout.SWIM_MIN_X, centerX - halfWidth),
-            maxX = minOf(TerrariumLayout.SWIM_MAX_X, centerX + halfWidth),
+            minX = maxOf(TerrariumLayout.CLOUD_SWIM_MIN_X, centerX - halfWidth),
+            maxX = minOf(TerrariumLayout.CLOUD_SWIM_MAX_X, centerX + halfWidth),
             minY = maxOf(WORKING_MIN_Y, centerY - verticalSlack),
             maxY = minOf(WORKING_MAX_Y, centerY + verticalSlack),
             centerX = centerX,
@@ -457,12 +460,8 @@ class CloudCreature(
 
     companion object {
         // Positions
-        /** FLOATING (idle): rests on floor. */
-        private const val STANDING_Y = 0.635f
         /** SLEEPING: dim, near bottom. */
         private const val STANDING_Y_DEEP = 0.75f
-        /** ASKING: mid-water. */
-        private const val ASKING_Y = 0.45f
         /** WORKING: floats near surface, wide drift zone. */
         private const val WORKING_CENTER_Y = 0.10f
         private const val WORKING_MIN_Y = 0.05f

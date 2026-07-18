@@ -111,6 +111,20 @@ object TerrariumLayout {
     const val SWIM_MIN_Y = 0.15f   // below surface (0.05) margin
     const val SWIM_MAX_Y = 0.55f   // above sand (0.65)
 
+    // Cloud/OpenCode/Antigravity swim boundaries -- deliberately distinct from
+    // the Octopus box above. Their home bands (CreatureLayout.kt) extend well
+    // past SWIM_MAX_X (Cloud to 0.55, OpenCode to 0.68, Antigravity to 0.82);
+    // clamping their WORKING-state swim lane into the Octopus box would drag
+    // every creature whose home slot is right of ~0.49 back into the
+    // Octopus/Cloud region, causing cross-type overlap. Mirrors Apple's
+    // per-type homeX +/- offset clamp (apple/.../Creatures/{Cloud,OpenCode,Antigravity}Creature.swift).
+    const val CLOUD_SWIM_MIN_X = 0.18f
+    const val CLOUD_SWIM_MAX_X = 0.72f
+    const val OPENCODE_SWIM_MIN_X = 0.20f
+    const val OPENCODE_SWIM_MAX_X = 0.70f
+    const val ANTIGRAVITY_SWIM_MIN_X = 0.50f
+    const val ANTIGRAVITY_SWIM_MAX_X = 0.88f
+
     // Cloud creature sizing (Codex CLI)
     const val CLOUD_WIDTH_FRACTION = 0.09f
     const val CLOUD_CENTER_X_FRACTION = 0.55f
