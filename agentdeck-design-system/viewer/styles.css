@@ -95,6 +95,14 @@ dt {
   background: var(--tide-100);
 }
 
+.site-links .gh {
+  color: var(--tide-50);
+  background: var(--ink-800);
+}
+.site-links .gh:hover {
+  background: var(--ink-900);
+  color: var(--tide-50);
+}
 .lang {
   font: 500 13px var(--font-sans);
   color: var(--ink-700);

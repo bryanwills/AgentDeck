@@ -57,6 +57,9 @@
   .lang:hover { background:var(--tide-200); color:var(--ink-900); }
 
   .wrap { max-width:var(--container-max); margin:0 auto; padding:var(--s-10) var(--container-pad) var(--s-20); }
+  .hero-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,46%); gap:var(--s-10); align-items:center; }
+  .hero-shot { margin:0; border-radius:var(--r-2xl); overflow:hidden; background:var(--ink-900); box-shadow:var(--sh-card); }
+  .hero-shot img { display:block; width:100%; aspect-ratio:3/2; object-fit:cover; }
   .kicker { font-family:var(--font-mono); font-size:var(--t-kicker); letter-spacing:var(--tr-kicker); text-transform:uppercase; color:var(--kelp-700); margin:0 0 var(--s-3); }
   h1 { font-size:var(--t-page-title); letter-spacing:var(--tr-hero); line-height:1.02; margin:0 0 var(--s-4); }
   .lede { font-size:var(--t-lede); color:var(--ink-700); max-width:68ch; margin:0; }
@@ -104,6 +107,7 @@
 
   @media (max-width:900px) {
     .grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .hero-grid { grid-template-columns:1fr; gap:var(--s-6); }
     .section-head { grid-template-columns:1fr; gap:var(--s-2); }
   }
   @media (max-width:640px) {
@@ -141,12 +145,17 @@
 
 <main class="wrap">
   <header>
+    <div class="hero-grid">
+      <div>
     <p class="kicker" data-i18n="hero.kicker">AgentDeck · Surface catalog</p>
     <h1 data-i18n="hero.h1">One session.<br>Made physical.</h1>
     <p class="lede" data-i18n="hero.lede">Every card is the real thing running a live session — photographed on the desk, or captured from the surface itself. Board-level specifications live in the compatibility matrix.</p>
     <div class="hero-actions">
       <a class="btn primary" href="../demo/" data-i18n="hero.demo">Try the interactive preview</a>
       <a class="btn secondary" href="../design-system/#hardware.compatibility" data-i18n="hero.matrix">Read the full spec matrix</a>
+    </div>
+      </div>
+      <figure class="hero-shot"><img src="../media/setup-full.jpg" alt="A desk running AgentDeck on every surface at once — monitors, InkDeck e-ink, XTeink readers, Timebox Mini, Pixoo64, TC001, Stream Deck+, Ulanzi D200H, iPad, and phone" loading="eager" onerror="this.parentNode.style.display='none'"></figure>
     </div>
     <nav class="jump" aria-label="Device categories">
       <a href="#controls" data-i18n="jump.controls">Control decks</a><a href="#apps" data-i18n="jump.apps">Apps &amp; terminal</a><a href="#esp32" data-i18n="jump.esp32">ESP32 displays</a><a href="#pixel" data-i18n="jump.pixel">Pixel displays</a>

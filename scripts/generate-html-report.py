@@ -1700,20 +1700,22 @@ def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results,
 body {{ background: var(--bg); color: var(--text); font-family:'IBM Plex Sans','IBM Plex Sans KR',-apple-system,BlinkMacSystemFont,system-ui,sans-serif; line-height: 1.5; }}
 
 /* Layout */
-.app {{ display: flex; min-height: 100vh; }}
-.sidebar {{ width: var(--sidebar-w); position: fixed; top: 55px; left: 0; bottom: 0; background: var(--surface); border-right: 1px solid var(--surface2); overflow-y: auto; z-index: 10; display: flex; flex-direction: column; }}
+.app {{ display: flex; min-height: 100vh; max-width: 1240px; margin: 0 auto; padding: 0 32px; gap: 0; }}
+.sidebar {{ width: var(--sidebar-w); flex: 0 0 var(--sidebar-w); position: sticky; top: 55px; align-self: flex-start; max-height: calc(100vh - 55px); background: var(--surface); border-right: 1px solid var(--surface2); overflow-y: auto; z-index: 10; display: flex; flex-direction: column; }}
 .sidebar-header {{ padding: 1.25rem 1rem 1rem; border-bottom: 1px solid var(--surface2); }}
 .sidebar-header h1 {{ font-size: 1rem; font-weight: 700; }}
 .sidebar-header .subtitle {{ color: var(--dim); font-size: 0.7rem; margin-top: 0.25rem; }}
 .sidebar-nav {{ flex: 1; padding: 0.5rem 0; overflow-y: auto; }}
-.content {{ margin-left: var(--sidebar-w); flex: 1; padding: 2rem; min-width: 0; }}
+.content {{ flex: 1; padding: 2rem; min-width: 0; }}
 
 /* Public Pages shell */
 .site-nav {{ position:sticky; top:0; z-index:30; backdrop-filter:blur(10px); background:rgba(245,243,236,.86); border-bottom:1px solid var(--surface2); }}
-.site-nav-in {{ max-width:1180px; margin:0 auto; padding:12px 24px; display:flex; align-items:center; gap:16px; }}
+.site-nav-in {{ max-width:1240px; margin:0 auto; padding:12px 32px; display:flex; align-items:center; gap:16px; }}
 .site-brand {{ display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; font-weight:700; }}
 .site-brand img {{ width:30px; height:30px; border-radius:8px; }}
-.site-links {{ margin-left:auto; display:flex; gap:8px; }}
+.site-links {{ margin-left:auto; display:flex; gap:8px; align-items:center; }}
+.lang {{ font:500 13px 'IBM Plex Sans',system-ui,sans-serif; color:var(--dim); background:var(--surface); border:1px solid var(--surface2); border-radius:999px; padding:4px 10px; cursor:pointer; }}
+.lang:hover {{ background:var(--surface2); color:var(--text); }}
 .site-links a {{ color:var(--dim); text-decoration:none; font-size:14px; font-weight:500; padding:4px 12px; border-radius:999px; white-space:nowrap; }}
 .site-links a:hover, .site-links a.active {{ color:var(--text); background:var(--surface2); }}
 .site-links .gh {{ color:var(--bg); background:var(--ink-800); }}
@@ -1866,12 +1868,13 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
   .site-nav-in {{ align-items:flex-start; padding-inline:16px; }}
   .site-links {{ overflow-x:auto; }}
   .site-links .gh {{ display:none; }}
-  .sidebar {{ width: 100%; position: relative; top:0; border-right: none; border-bottom: 1px solid var(--surface2); }}
+  .app {{ flex-direction: column; padding: 0; }}
+  .sidebar {{ width: 100%; flex: none; position: relative; top:0; max-height: none; border-right: none; border-bottom: 1px solid var(--surface2); }}
   .sidebar-nav {{ display: flex; flex-wrap: wrap; padding: 0.5rem; gap: 0.25rem; }}
   .nav-item {{ padding: 0.35rem 0.6rem; border-radius: 6px; }}
   .nav-indicator {{ display: none; }}
   .nav-separator {{ margin-top: 0; padding-top: 0; border-top: none; }}
-  .app {{ flex-direction: column; }}
+  .app {{ flex-direction: column; padding: 0; }}
   .content {{ margin-left: 0; padding: 1rem; }}
   .summary {{ grid-template-columns: repeat(2, 1fr); }}
   .sparkline-row {{ flex-direction: column; }}
@@ -1889,6 +1892,11 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
       <a href="../design-system/">Design System</a>
       <a class="active" href="./">Build Health</a>
       <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
+      <select id="lang" class="lang" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="ko">KO</option>
+        <option value="ja">JA</option>
+      </select>
     </div>
   </div>
 </nav>
@@ -1949,6 +1957,15 @@ function toggleScenario(id) {{
 (function() {{
   const hash = location.hash.slice(1);
   if (hash) {{
+    const langEl = document.getElementById('lang');
+    if (langEl) {{
+      const KEY = 'agentdeck-design-locale';
+      const saved = localStorage.getItem(KEY) || 'en';
+      if (['en', 'ko', 'ja'].indexOf(saved) >= 0) langEl.value = saved;
+      langEl.addEventListener('change', function () {{
+        localStorage.setItem(KEY, langEl.value);
+      }});
+    }}
     const navEl = document.querySelector('.nav-item[data-tab="' + hash + '"]');
     if (navEl) switchTab(hash, navEl);
   }}

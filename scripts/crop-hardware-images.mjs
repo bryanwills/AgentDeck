@@ -29,7 +29,7 @@ const WAVESHARE_SRC = process.env.WAVESHARE_SRC ||
 // Output frames. Keep in sync with the .shot aspect rules in docs/hardware/index.html.
 const STANDARD = { width: 1400, height: 800 }; // 1.75:1 — single-column device card
 const WIDE = { width: 2240, height: 600 }; //     3.73:1 — .device.wide card
-const HERO = { width: 2400, height: 1350 }; //    16:9   — README hero
+const HERO = { width: 2400, height: 1600 }; //    3:2    — desk overview hero
 
 // Side-by-side composites: one card, two devices.
 const composites = [
@@ -71,7 +71,7 @@ const tasks = [
   { name: 'tc001.jpg', src: 'IMG_9698.jpeg', crop: { left: 578, top: 706, width: 3200, height: 1829 }, out: STANDARD },
 
   // --- README hero ---
-  { name: 'setup-full.jpg', src: 'IMG_9709.jpeg', crop: { left: 0, top: 378, width: 4032, height: 2268 }, out: HERO },
+  { name: 'setup-full.jpg', src: 'IMG_9710.jpeg', crop: { left: 0, top: 150, width: 4032, height: 2688 }, out: HERO },
 ];
 
 async function run() {
