@@ -72,6 +72,15 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     private var waterfallStage: WaterfallStage = .idle
     private var preferredLocalBridgeUrl: String?
 
+    #if DEBUG
+    /// True when `-AgentDeckScreenshotURL` pinned the bridge at launch. The pin
+    /// must outrank later `setPreferredLocalBridge` calls: on macOS the
+    /// in-process daemon's `onReady` fires ~0.5s after launch and would
+    /// otherwise repoint the app at its own :9120, silently discarding the pin
+    /// and putting real workspace data on camera.
+    private var hasLaunchArgumentBridgePin = false
+    #endif
+
     /// Bridges that failed to connect — skip them until browseResults refresh
     private var failedBridgeIds: Set<String> = []
     /// Track last browseResults count to detect mDNS refresh and clear blacklist
@@ -96,6 +105,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         if let index = arguments.firstIndex(of: "-AgentDeckScreenshotURL"),
            arguments.indices.contains(index + 1) {
             preferredLocalBridgeUrl = arguments[index + 1]
+            hasLaunchArgumentBridgePin = true
         }
         #endif
 
@@ -1000,6 +1010,10 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
 
     func setPreferredLocalBridge(url: String?) {
         guard !isTerminating else { return }
+        #if DEBUG
+        // A launch-argument pin is deliberate and wins over daemon discovery.
+        guard !hasLaunchArgumentBridgePin else { return }
+        #endif
         preferredLocalBridgeUrl = url
         if let url {
             autoConnectTimer?.invalidate()

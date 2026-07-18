@@ -75,6 +75,13 @@ targets:
       configs:
         debug:
           CODE_SIGN_STYLE: Automatic
+          # Setting the base condition above REPLACES Xcode's per-config
+          # default, so a Debug macOS build had no `DEBUG` flag and every
+          # `#if DEBUG` block compiled out — including the
+          # `-AgentDeckScreenshotURL` launch pin the recording runbook
+          # depends on. Re-add it for Debug only; Release keeps the App
+          # Store token alone, so debug-only paths still never ship.
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: AGENTDECK_APP_STORE DEBUG
         release:
           # Cloud signing — see the iOS release config note.
           CODE_SIGN_STYLE: Automatic
@@ -132,6 +139,10 @@ targets:
         # would reference symbols the host compiled out (e.g. the
         # `.bundledBridge` launch mode fallback) and fail at link or run.
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: AGENTDECK_APP_STORE
+      configs:
+        debug:
+          # Keep in step with the host app's Debug conditions above.
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: AGENTDECK_APP_STORE DEBUG
 
 schemes:
   AgentDeck_iOS:
