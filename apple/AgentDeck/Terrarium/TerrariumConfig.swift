@@ -203,17 +203,18 @@ enum TerrariumLayout {
     static let tetraMinY: Float = 0.08
     static let tetraMaxY: Float = 0.61
 
-    // Crayfish — home mirrors Android CRAYFISH_CENTER_*_FRACTION (0.78, 0.64);
+    // Crayfish — home + clear-anchor come from the cross-platform rules SSOT
+    // (shared/src/terrarium-rules.ts → TerrariumRules.generated.swift).
     // 0.68 sat exactly on the OpenCode band's right edge and idle OpenCode
     // creatures landed on top of the crayfish.
-    static let crayfishWidthFraction: Float = 0.11
-    static let crayfishDefaultX: Float = 0.78
-    static let crayfishSittingY: Float = 0.64
+    static let crayfishWidthFraction: Float = TerrariumRules.crayfishWidthFraction
+    static let crayfishDefaultX: Float = TerrariumRules.crayfishHomeX
+    static let crayfishSittingY: Float = TerrariumRules.crayfishSittingY
     static let crayfishRoutingY: Float = 0.48
     /// Floor-resting drifters (idle OpenCode, sleeping Antigravity) keep their
     /// rest anchor X at or left of this so the crayfish's floor territory
     /// (claws reach ~0.67) stays clear.
-    static let crayfishClearMaxX: Float = 0.62
+    static let crayfishClearMaxX: Float = TerrariumRules.crayfishClearMaxX
 
     // Cloud
     static let cloudBodyRadius: Float = 0.050

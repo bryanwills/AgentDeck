@@ -10,6 +10,7 @@
  */
 
 import { fg, bg, RESET, DIM, colors } from './ansi.js';
+import { TERRARIUM_RULES } from '@agentdeck/shared';
 
 // ===== Braille Renderer =====
 
@@ -464,7 +465,9 @@ export function updateTerrarium(ctx: TerrariumContext, frame: number): void {
     const driftAmp = isProcessing ? 0.06 : 0.002;
     const driftSpeed = isProcessing ? 0.02 : 0.02;
     jf.x += Math.sin((frame + jf.phaseOffset) * driftSpeed) * driftAmp;
-    jf.x = Math.max(0.08, Math.min(0.65, jf.x));
+    // Cap the drift at the crayfish clear anchor — idle jellyfish also sink
+    // to the floor and 0.65 reached into the crayfish claws (left edge ~0.64).
+    jf.x = Math.max(0.08, Math.min(TERRARIUM_RULES.crayfish.clearMaxX, jf.x));
   }
 
   // OpenCode Y — same state-Y mapping as octopus
@@ -596,7 +599,12 @@ export function setOpenCode(
     const seq = (nameSeq.get(baseName) || 0) + 1;
     nameSeq.set(baseName, seq);
     const displayName = (nameCounts.get(baseName) || 0) > 1 ? `${baseName} #${seq}` : baseName;
-    const homeX = count === 1 ? 0.55 : 0.48 + (i * 0.20) / Math.max(1, count - 1);
+    // Idle OpenCode sinks to the floor at homeX — keep the anchor clear of the
+    // crayfish territory (cross-platform rule, shared/src/terrarium-rules.ts).
+    const homeX = Math.min(
+      TERRARIUM_RULES.crayfish.clearMaxX,
+      count === 1 ? 0.55 : 0.48 + (i * 0.20) / Math.max(1, count - 1),
+    );
     const existing = ctx.opencode.find(o => o.id === sid);
     if (existing) {
       existing.state = s.state; existing.name = displayName || undefined;

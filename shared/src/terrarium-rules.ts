@@ -1,0 +1,65 @@
+// terrarium-rules.ts — Cross-platform terrarium behavior rules (SSOT).
+//
+// This file is the single source of truth for terrarium *rules*: numeric
+// invariants every surface must agree on regardless of its own world model
+// (creature homes that are unified across dashboards, exclusion zones,
+// rest strips). Surface-specific *tuning* (per-board Y offsets, swim lanes,
+// sprite sizes) stays local to each platform.
+//
+// Consumers:
+//   TypeScript  — import { TERRARIUM_RULES } from '@agentdeck/shared'
+//                 (TUI terrarium, Pixoo renderer, future web surfaces)
+//   Swift       — apple/AgentDeck/Terrarium/TerrariumRules.generated.swift
+//   Kotlin      — android/.../terrarium/TerrariumRules.generated.kt
+//   C++ (ESP32) — esp32/src/ui/terrarium/terrarium_rules_generated.h
+//
+// The Swift/Kotlin/C++ files are GENERATED — run `pnpm generate-terrarium-rules`
+// after editing this file and commit the regenerated outputs. A vitest sync
+// test (shared/src/__tests__/terrarium-rules.test.ts) fails CI when the
+// generated files drift from this source, so hand-editing them cannot stick.
+//
+// When adding a new cross-platform rule (a coordinate, clamp, or zone that
+// more than one surface must respect), add it HERE first, regenerate, and
+// wire each surface to the generated constant — never introduce the literal
+// in platform code. That is what keeps new features from re-fragmenting.
+
+/**
+ * Terrarium cross-platform rules.
+ *
+ * crayfish — the OpenClaw crayfish's unified dashboard home and territory.
+ *   `clearMaxX` is the load-bearing invariant: idle/sleeping floor-resting
+ *   drifters (OpenCode, sleeping Antigravity, idle Cloud) must clamp their
+ *   rest anchor X to ≤ clearMaxX so the crayfish's floor territory (claws
+ *   reach ~homeX − widthFrac) stays clear. Fix origin: 610fe15c — idle
+ *   OpenCode landed exactly on the crayfish when two sessions were idle.
+ *
+ * floorRestStrip — the sand strip idle drifters converge to on the full
+ *   dashboard surfaces (macOS/Android). Y is surface-tunable elsewhere
+ *   (TUI floor ≈ 0.88, ESP32 SleepY per board); the strip here documents
+ *   the canonical dashboard band.
+ *
+ * antigravityHoverStrip — Antigravity idles as a HOVER, not a floor rest:
+ *   its band extends to x 0.82 (inside crayfish territory), so landing it
+ *   would collide. Hover Y band for the full dashboard surfaces.
+ *
+ * resterMaxWidthFrac — widest floor-resting creature body (Antigravity,
+ *   0.096; see creature-layout.ts band specs). Input to the clearance
+ *   invariant: clearMaxX + resterMaxWidthFrac/2 < crayfish claw left edge.
+ */
+export const TERRARIUM_RULES = {
+  crayfish: {
+    /** Unified dashboard home center X (Swift/Android agreed on 0.78). */
+    homeX: 0.78,
+    /** Unified dashboard sitting/home center Y. */
+    sittingY: 0.64,
+    /** Crayfish body width as fraction of world width. */
+    widthFrac: 0.11,
+    /** Idle floor-resters clamp rest-anchor X to ≤ this. */
+    clearMaxX: 0.62,
+  },
+  floorRestStrip: { yMin: 0.56, yMax: 0.64 },
+  antigravityHoverStrip: { yMin: 0.48, yMax: 0.54 },
+  resterMaxWidthFrac: 0.096,
+} as const;
+
+export type TerrariumRules = typeof TERRARIUM_RULES;

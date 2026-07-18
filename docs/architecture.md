@@ -37,6 +37,14 @@ Core bridge architecture, adapter hierarchy, and module system. See [daemon.md](
 
 `bridge/src/modules/` — Pluggable `DeviceModule` interface with auto-detect. Modules include mDNS, serial, Pixoo, Timebox, and ADB. Timebox Mini Light is BLE (ISSC transparent-UART): the CLI daemon spawns `sync_ble.py`, while the App Store Swift daemon drives it natively through CoreBluetooth. D200H direct-HID was removed from both daemons; the **sole supported driver is `plugin-ulanzi/` running inside Ulanzi Studio**, with daemon connectivity derived from its WS presence. Session bridges never activate hardware modules — dashboard devices connect through the daemon. CLI flags include `--local` and `--no-{module}`.
 
+## Terrarium rules SSOT (cross-platform behavior invariants)
+
+`shared/src/terrarium-rules.ts` is the single source of truth for terrarium **rules** — numeric invariants every rendering surface must agree on regardless of its own world model: the OpenClaw crayfish's unified dashboard home (0.78, 0.64), the idle floor-rester clear anchor (`clearMaxX` 0.62), the dashboard floor-rest strip, and the Antigravity idle-hover strip. Surface-specific *tuning* (per-board Y offsets, swim lanes, sprite sizes, TUI/Pixoo local homes) stays local to each platform.
+
+`pnpm generate-terrarium-rules` emits three mirrors — `apple/AgentDeck/Terrarium/TerrariumRules.generated.swift`, `android/.../terrarium/TerrariumRules.generated.kt`, `esp32/src/ui/terrarium/terrarium_rules_generated.h` — and TypeScript surfaces (TUI, Pixoo) import `TERRARIUM_RULES` from `@agentdeck/shared` directly. A vitest gate (`shared/src/__tests__/terrarium-rules.test.ts`) re-emits from source and diffs against the files on disk, so hand edits or a skipped regeneration fail `pnpm test`; the same file asserts the clearance invariant itself (`clearMaxX + widest-rester/2 < crayfish claw left edge`, the 610fe15c bug class).
+
+**Rule for new features**: when a coordinate, clamp, or exclusion zone must hold on more than one surface, add it to `terrarium-rules.ts` first, regenerate, and reference the generated constant from platform code — never introduce the literal per-platform. This is the same codegen-SSOT pattern as creature glyphs and the protocol types, applied to behavior constants. (The multi-session band layout in `shared/src/creature-layout.ts` remains a 3-way hand mirror with test parity — a candidate for future migration into this pipeline.)
+
 ## AgentAdapter abstraction (Phase 1-2 complete)
 
 - `shared/src/adapter.ts` — `AgentAdapter` interface, `AgentCapabilities`, `AdapterEvent` types, and the canonical `AgentType` union (`claude-code`, `openclaw`, `codex-cli`, `codex-app`, `opencode`, `antigravity`, `monitor`)

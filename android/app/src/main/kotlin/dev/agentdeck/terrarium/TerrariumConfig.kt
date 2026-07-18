@@ -96,18 +96,18 @@ object TerrariumLayout {
     const val OCTOPUS_CENTER_Y_FRACTION = 0.45f
     // (TENTACLE_LENGTH_FRACTION removed — pixel mascot has no tentacles)
 
-    // Crayfish sizing
-    const val CRAYFISH_WIDTH_FRACTION = 0.11f
-    const val CRAYFISH_CENTER_X_FRACTION = 0.78f
-    const val CRAYFISH_CENTER_Y_FRACTION = 0.64f
+    // Crayfish sizing — home + clear-anchor come from the cross-platform
+    // rules SSOT (shared/src/terrarium-rules.ts → TerrariumRules.generated.kt).
+    const val CRAYFISH_WIDTH_FRACTION = TerrariumRules.CRAYFISH_WIDTH_FRACTION
+    const val CRAYFISH_CENTER_X_FRACTION = TerrariumRules.CRAYFISH_HOME_X
+    const val CRAYFISH_CENTER_Y_FRACTION = TerrariumRules.CRAYFISH_SITTING_Y
 
     /**
      * Floor-resting drifters (idle/sleeping OpenCode, sleeping Antigravity)
      * keep their rest anchor X at or left of this so the crayfish's floor
-     * territory (claws reach ~0.67) stays clear. Mirrors
-     * apple/.../TerrariumConfig.swift crayfishClearMaxX.
+     * territory (claws reach ~0.67) stays clear.
      */
-    const val CRAYFISH_CLEAR_MAX_X = 0.62f
+    const val CRAYFISH_CLEAR_MAX_X = TerrariumRules.CRAYFISH_CLEAR_MAX_X
 
     // Tetra sizing
     const val TETRA_SIZE_FRACTION = 0.015f

@@ -2,6 +2,7 @@
 #include "draw.h"
 #include "renderer.h"
 #include "creature_glyphs_generated.h"
+#include "terrarium_rules_generated.h"
 #include "../theme.h"
 #include "../display.h"
 #include "config.h"
@@ -79,6 +80,12 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         homeX = Layout::OpenCodeHomeX - span / 2 + span * idx / (total - 1);
     }
     homeX += jitterX[idx];
+    // Resting states park on/near the floor — keep the anchor clear of the
+    // crayfish's territory (cross-platform rule, shared/src/terrarium-rules.ts).
+    if (state != CreatureState::WORKING && state != CreatureState::ASKING &&
+        homeX > TerrariumRules::CrayfishClearMaxX) {
+        homeX = TerrariumRules::CrayfishClearMaxX;
+    }
 
     float homeY;
     switch (state) {

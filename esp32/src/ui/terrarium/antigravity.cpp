@@ -2,6 +2,7 @@
 #include "draw.h"
 #include "renderer.h"
 #include "creature_glyphs_generated.h"
+#include "terrarium_rules_generated.h"
 #include "../theme.h"
 #include "../display.h"
 #include "config.h"
@@ -110,6 +111,13 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         homeX = Layout::AntigravityHomeX - span / 2 + span * idx / (total - 1);
     }
     homeX += jitterX[idx];
+    // Sleeping Antigravity sinks to the floor (SleepY 0.67–0.74) at home
+    // x 0.72–0.74 — exactly the crayfish's seat. Clamp the rest anchor clear
+    // (cross-platform rule, shared/src/terrarium-rules.ts). Awake idle stays
+    // a mid-water hover at its own home, matching the dashboard contract.
+    if (state == CreatureState::SLEEPING && homeX > TerrariumRules::CrayfishClearMaxX) {
+        homeX = TerrariumRules::CrayfishClearMaxX;
+    }
 
     float homeY;
     switch (state) {
