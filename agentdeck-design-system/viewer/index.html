@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentDeck — Design System</title>
+    <meta
+      name="description"
+      content="AgentDeck design, hardware specifications, policy, validation, assets, and agent handover in one viewer."
+    />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+JP:wght@400;500;600&amp;family=IBM+Plex+Sans+KR:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/tokens.css" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="site-nav">
+      <div class="site-nav__inner">
+        <a class="brand" href="../"><img src="assets/brand/agentdeck-icon.png" alt="" /><span>AgentDeck</span></a>
+        <nav class="site-links" aria-label="Primary">
+          <a href="../">Overview</a>
+          <a href="../hardware/">Devices</a>
+          <a href="../demo/">Live Preview</a>
+          <a class="active" href="./">Design System</a>
+          <a href="../reports/">Build Health</a>
+        </nav>
+      </div>
+    </header>
+
+    <section class="system-head">
+      <div>
+        <p class="kicker">AgentDeck · Living system</p>
+        <h1>Design, specs, and proof.<br /><em>One review surface.</em></h1>
+        <p class="lede">
+          Canonical Markdown, rendered beside its metadata, assets, and validation contract. English is the source;
+          Korean and Japanese are reader modes.
+        </p>
+      </div>
+      <div class="system-head__controls">
+        <label class="search"
+          ><span>Search</span
+          ><input id="search" type="search" placeholder="tokens, hardware, handover…" autocomplete="off"
+        /></label>
+        <label class="locale"
+          ><span>Language</span
+          ><select id="locale">
+            <option value="en">EN · Canonical</option>
+            <option value="ko">KR · 한국어</option>
+            <option value="ja">JP · 日本語</option>
+          </select></label
+        >
+      </div>
+    </section>
+
+    <div class="workspace">
+      <aside class="rail" aria-label="Design system sections">
+        <div id="navigation"></div>
+        <div class="rail-note">
+          <span class="status-dot"></span><strong>Catalog verified</strong><small id="generated-at"></small>
+        </div>
+      </aside>
+
+      <main id="content" class="content" tabindex="-1">
+        <div id="fallback" class="fallback" hidden></div>
+        <header class="content-head">
+          <div>
+            <p id="eyebrow" class="kicker"></p>
+            <h2 id="title"></h2>
+            <p id="description" class="description"></p>
+          </div>
+          <div id="badges" class="badges"></div>
+        </header>
+        <div class="view-tabs" role="tablist" aria-label="Document view">
+          <button class="active" data-view="preview" role="tab" aria-selected="true">Preview</button>
+          <button data-view="source" role="tab" aria-selected="false">Markdown</button>
+          <button data-view="metadata" role="tab" aria-selected="false">Metadata</button>
+        </div>
+        <section id="view" class="view"></section>
+      </main>
+    </div>
+
+    <footer><span>AgentDeck Design System</span><span>Warm tide, honest signal.</span></footer>
+    <script src="manifest.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

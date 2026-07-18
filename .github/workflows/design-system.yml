@@ -17,6 +17,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       # Token mirrors must match design/tokens.css — drift here is always a bug.
       - name: Verify token mirrors are in sync
         run: python3 design/verify-tokens-sync.py
@@ -26,6 +31,9 @@ jobs:
       # If any pattern slips through, the verifier itself has regressed.
       - name: Self-test verifier gap detection
         run: python3 design/verify-tokens-sync.py --self-test
+
+      - name: Verify design-system catalog, frontmatter, and translations
+        run: node scripts/build-design-system-viewer.mjs --check
 
       # lint.sh is baseline-aware. The current count must be ≤ the snapshot
       # recorded in docs/design-lint-baseline.md. Lower is welcome (no action);

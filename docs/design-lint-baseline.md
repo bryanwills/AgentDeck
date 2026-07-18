@@ -6,25 +6,23 @@ Run `bash design/lint.sh` to see the current count. Run `bash design/lint.sh --j
 
 ## Current snapshot
 
-<!-- Updated 2026-05-10 after Phase 2 hotspot migration (apme-dashboard + plugin PI HTMLs). -->
+<!-- Updated 2026-07-18 after replacing the legacy docs hub with the token-driven design-system viewer. -->
 
-Total: **93 violations** across **5 rules**.
+Total: **89 violations** across **3 rules**.
 
 | Rule | Count | Meaning |
 |---|---|---|
 | `R1_pure_white_black` | 2 | Pure `#fff` / `#000` — should use `--tide-50` / `--ink-900` |
-| `R2_hardcoded_hex` | 83 | Hardcoded hex outside token files |
-| `R3_forbidden_font` | 1 | `Inter` / `Roboto` / `Arial` / `Fraunces` — should be Plex/JetBrains only |
-| `R5_non_warm_shadow` | 1 | `box-shadow` with `rgba(0,0,0,…)` — should use `--sh-*` warm tokens |
-| `R7_arbitrary_radius` | 6 | `border-radius` outside `{0, 4, 8, 10, 12, 14, 16, 18, 999}` |
+| `R2_hardcoded_hex` | 82 | Hardcoded hex outside token files |
+| `R7_arbitrary_radius` | 5 | `border-radius` outside `{0, 4, 8, 10, 12, 14, 16, 18, 999}` |
 
 ## Top offenders
 
 | File | Total | Notes |
 |---|---|---|
 | `docs/appstore-migration-diagram.html` | 61 | Off-product flowchart with generic Tailwind palette; not a UI surface — skip-rule candidate |
-| `docs/design/Design System.html` | 24 | Design guide intentionally displays raw colour swatches — token-defining-ish, may move to allowlist |
-| `docs/design/Design Audit.html` | 4 | Design reference page |
+| `docs/design/Design System.html` | 23 | Legacy design guide intentionally displays raw colour swatches; the Pages viewer reads the canonical token file instead |
+| `docs/design/Design Audit.html` | 3 | Legacy design reference page |
 
 ## Migration policy
 
@@ -41,7 +39,7 @@ The lint script exempts these from the raw-hex rule because they ARE the source 
 - `design/components.css`, `design/patterns.css`, `design/icons.jsx` — design system styles
 - `docs/design/creatures.jsx` — embeds upstream brand SVGs (DESIGN.md §6.1 forbids redrawing)
 - `apple/AgentDeck/Resources/apme-dashboard.html` — embedded HTML resource, manual mirror of token primitives in its `:root`
-- `docs/hardware/index.html`, `scripts/pages-index.html`, `docs/site/index.html`, `docs/gallery/index.html` — published GitHub Pages surfaces (hardware sheet / landing / docs hub / device gallery), each self-contained with a `:root` warm-token mirror
+- `docs/hardware/index.html`, `scripts/pages-index.html`, `docs/site/index.html`, `docs/gallery/index.html` — published GitHub Pages surfaces and compatibility redirects with a self-contained `:root` warm-token mirror
 - `plugin/bound.serendipity.agentdeck.sdPlugin/ui/design-tokens.css` — Stream Deck Property Inspector mirror
 
 When CSS tokens change, every file in the second half of the list (the manual mirrors) must be hand-synced.
@@ -81,3 +79,4 @@ CI runs the same logic in `.github/workflows/design-system.yml` — see that fil
 
 - **2026-05-09** — Foundation install. Baseline 111.
 - **2026-05-10** — Phase 2 hotspot migration. apme-dashboard.html (11 → 0) + plugin PI HTMLs (7 → 0) + Motion pulse/wiggle tokens added to CSS. Baseline 93.
+- **2026-07-18** — Legacy docs hub replaced by the token-driven design-system viewer. Baseline 89.

@@ -1886,7 +1886,7 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
       <a href="../">Overview</a>
       <a href="../hardware/">Devices</a>
       <a href="../demo/">Live Preview</a>
-      <a href="../docs/">Docs</a>
+      <a href="../design-system/">Design System</a>
       <a class="active" href="./">Build Health</a>
       <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
     </div>

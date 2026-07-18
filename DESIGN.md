@@ -1,3 +1,18 @@
+---
+id: design.foundation
+title: AgentDeck Design System
+description: Visual principles, tokens, components, assets, motion, and copy rules.
+category: Foundations
+locale: en
+canonical: true
+status: stable
+owner: Design system maintainers
+reviewed: 2026-07-18
+revision: 2026-07-18
+source_of_truth: DESIGN.md
+validators: [python3 design/verify-tokens-sync.py, bash design/lint.sh]
+---
+
 # AgentDeck — Design System
 
 > A glanceable command surface for AI coding agents.

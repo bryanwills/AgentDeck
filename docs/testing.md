@@ -1,3 +1,18 @@
+---
+id: validation.testing
+title: Testing Guide
+description: Meaningful verification by runtime, platform, and evidence level.
+category: Validation
+locale: en
+canonical: true
+status: stable
+owner: Quality maintainers
+reviewed: 2026-07-18
+revision: 2026-07-18
+source_of_truth: docs/testing.md
+validators: [pnpm test, bash scripts/test-report.sh]
+---
+
 # Testing Guide
 
 AgentDeck currently uses 4 test frameworks across the monorepo:

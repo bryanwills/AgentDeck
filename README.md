@@ -43,9 +43,8 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 
 <p align="center">
   🌊 <strong><a href="https://puritysb.github.io/AgentDeck/">Explore the project website →</a></strong><br>
-  <a href="https://puritysb.github.io/AgentDeck/hardware/">Hardware specs</a> ·
-  <a href="https://puritysb.github.io/AgentDeck/gallery/">Device gallery</a> ·
-  <a href="https://puritysb.github.io/AgentDeck/docs/">Documentation</a> ·
+  <a href="https://puritysb.github.io/AgentDeck/hardware/">Devices</a> ·
+  <a href="https://puritysb.github.io/AgentDeck/design-system/">Design system &amp; specs</a> ·
   <a href="https://puritysb.github.io/AgentDeck/demo/">Live device preview</a> ·
   <a href="https://puritysb.github.io/AgentDeck/reports/">Test reports</a>
 </p>
@@ -822,6 +821,7 @@ Compact WiFi-connected displays for always-on agent monitoring.
 | **IPS LCD 3.5"** | ESP32-S3 | rectangular IPS | 480×320 | Yes |
 | **B86 Box 4"** | ESP32-S3 | wall-mount touch panel | 480×480 | Yes, after one-time USB partition migration |
 | **TTGO T-Display 1.14"** | ESP32 (classic) | LilyGO ST7789 TFT | 135×240 | Yes |
+| **Waveshare LCD 1.47"** | ESP32-C6 | ST7789 TFT | 172×320 | Yes |
 | **IPS 10.1"** | ESP32-P4 + C6 | Guition JD9365 MIPI-DSI | 800×1280 | Yes, after one-time USB partition migration |
 | **Ulanzi TC001** | ESP32 | 8×32 WS2812B RGB LED matrix | 256 pixels | Yes |
 | **InkDeck** | XIAO ESP32-S3 Plus | Seeed 7.5" OG e-ink (UC8179) | 800×480 | Yes |

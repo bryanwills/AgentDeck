@@ -61,6 +61,9 @@ jobs:
       - name: Build creature-simulator demo
         run: pnpm run demo:build
 
+      - name: Build design system viewer
+        run: pnpm run design-system:build
+
       - name: Run Vitest with coverage
         id: vitest
         continue-on-error: true
@@ -117,7 +120,7 @@ jobs:
 
       - name: Assemble Pages site
         run: |
-          mkdir -p _site/reports _site/demo _site/hardware _site/gallery _site/docs
+          mkdir -p _site/reports _site/demo _site/hardware _site/gallery _site/docs _site/design-system
           # Landing page at root
           cp scripts/pages-index.html _site/index.html
           cp docs/media/agentdeck-icon.png _site/icon.png
@@ -127,6 +130,8 @@ jobs:
           cp docs/gallery/index.html _site/gallery/index.html
           # Documentation hub under /docs/
           cp docs/site/index.html _site/docs/index.html
+          # Rendered Markdown, metadata, design tokens, and canonical assets
+          cp -R dist/design-system/. _site/design-system/
           # Live demo under /demo/
           cp -R dist/demo/. _site/demo/
           # Test report under /reports/

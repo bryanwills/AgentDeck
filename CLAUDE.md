@@ -101,12 +101,12 @@ Coverage thresholds (regression guard): lines ≥17%, functions ≥15%, branches
 
 ### GitHub Pages and Build Health
 
-- **URL**: `https://puritysb.github.io/AgentDeck/` (overview) / `/hardware/` (**Devices** public surface catalog) / `/demo/` (**Live Preview** interactive renderer) / `/docs/` (documentation hub) / `/reports/` (**Build Health** CI evidence). The retired `/gallery/` route redirects to `/hardware/`; do not restore it as a separate menu or duplicate device catalog.
-- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + `pnpm run demo:build` → HTML report → GitHub Pages deploy. Robot Framework is intentionally excluded from GitHub-hosted runs: its meaningful `hw`/`protocol`/`perf` suites require connected boards, while the former `no-hw` subset only duplicated PlatformIO compilation. The "Assemble Pages site" step copies each surface into `_site/` (overview/devices/live-preview/docs/build-health plus the gallery redirect).
+- **URL**: `https://puritysb.github.io/AgentDeck/` (overview) / `/hardware/` (**Devices**) / `/demo/` (**Live Preview**) / `/design-system/` (**Design System** viewer) / `/reports/` (**Build Health**). `/docs/` redirects to the viewer; `/gallery/` redirects to `/hardware/`. Do not restore either route as a duplicate catalog.
+- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + demo build + design-system build → HTML report → GitHub Pages deploy. Robot Framework is intentionally excluded from GitHub-hosted runs: its meaningful `hw`/`protocol`/`perf` suites require connected boards, while the former `no-hw` subset only duplicated PlatformIO compilation. The assembly step publishes overview, devices, live preview, design-system viewer, build health, and compatibility redirects.
 - **Live Preview fidelity**: `/demo` panels use canonical renderer output only — Node renderers via `scripts/render-creature-simulator.mjs` (sim-data.js) and **pixel-exact ESP32 firmware frames via `scripts/render-esp32-sim-frames.mjs`** (esp32/sim `demo:<agent>:<state>` scenes → `sim-frames/`, needs `pio`; missing frames show the hatch placeholder, never hand-drawn ESP32/e-ink/TC001). Hand-maintained Swift Device Preview mirrors carry `SYNC-HASH` origin pins enforced by `node scripts/check-preview-mirror-sync.mjs` (CI)
 - **Build Health generator**: `scripts/generate-html-report.py` — tab-based SPA quality dashboard. Robot tab: suite→scenario→BDD steps→board matrix→per-test elapsed time→performance table. `[PERF]` log messages auto-extracted from output.xml
 - **Scenario matrix**: `scripts/scenario-matrix.json` — 10 user scenarios mapped to test files + gap analysis
-- **Site surfaces (all aquarium-tide)**: `scripts/pages-index.html` (overview) · `docs/hardware/index.html` (public device catalog; detailed SSOT remains `docs/hardware-compatibility.md`) · `tools/creature-simulator/index.html` (Live Preview) · `docs/site/index.html` (docs hub) · generated `/reports/` (Build Health) · `docs/gallery/index.html` (redirect only). The static marketing files remain self-contained and token-defining in `design/lint.sh`.
+- **Site surfaces (all aquarium-tide)**: `scripts/pages-index.html` (overview) · `docs/hardware/index.html` (Devices; detailed SSOT remains `docs/hardware-compatibility.md`) · `tools/creature-simulator/index.html` (Live Preview) · `agentdeck-design-system/viewer/` + generated manifest (Design System) · generated `/reports/` (Build Health) · `docs/site/index.html` and `docs/gallery/index.html` (redirects only). The viewer consumes `design/tokens.css` directly; generated content under `dist/` is never hand-edited.
 
 See [docs/testing.md](docs/testing.md) for full testing reference.
 
@@ -187,6 +187,8 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 
 Aquarium-tide design system. Spec: [DESIGN.md](DESIGN.md). Source of truth for color/type/spacing tokens: [design/tokens.css](design/tokens.css). Visual reference: [docs/design/Design System.html](docs/design/Design%20System.html). Coverage matrix + lint rules: [docs/design/Design Audit.html](docs/design/Design%20Audit.html).
 
+`agentdeck-design-system/` is the integration and handover layer: `catalog.json` binds canonical design/spec/policy/validation Markdown to the GitHub Pages viewer, `docs/handover.md` defines ownership and evidence levels, and `locales/{ko,ja}/` contains reader translations. English is always canonical. Every catalog document has YAML frontmatter; translations must match the canonical `source_revision`. Validate with `pnpm design-system:check`, build with `pnpm design-system:build`, and never edit generated `dist/design-system/` content.
+
 **Token bindings** (all four mirror `design/tokens.css`; CSS stays canonical — update all four mirrors in the same commit when CSS tokens change):
 - Browser JS — `design/tokens.js` (IIFE that exposes `window.DT.{Tide,Ink,Kelp,Coral,Amber,Status,UI,Brand}`). Used by `docs/design/data.js` and Design System.html mockups
 - TS — `shared/src/design-tokens.ts` (re-exported via `@agentdeck/shared`). Use for plugin renderers, bridge, hooks
@@ -243,7 +245,7 @@ The macOS app ships through the App Store and must stay **self-contained** under
 | [docs/appstore-metadata-draft.md](docs/appstore-metadata-draft.md) | App Store Connect metadata draft (ko + en) — title/subtitle/description/keywords/what's-new |
 | [docs/testflight-qa-checklist.md](docs/testflight-qa-checklist.md) | Internal tester pre-submission checklist covering onboarding, pairing, voice, sandbox invariants |
 | [docs/devices.md](docs/devices.md) | Device-specific details |
-| [docs/hardware-compatibility.md](docs/hardware-compatibility.md) | 지원 dashboard 하드웨어/OS 종합 사양 매트릭스 — ESP32 보드·LED·HID 데크·InkDeck e-ink·Apple/Android·TUI의 SoC·해상도·Flash·SDK·deployment target. 시각화 뷰 [docs/hardware/index.html](docs/hardware/index.html) |
+| [docs/hardware-compatibility.md](docs/hardware-compatibility.md) | Canonical dashboard hardware and OS matrix: panels, transports, host requirements, support state, and App Store compatibility. Rendered in the Design System viewer; public summary at [docs/hardware/index.html](docs/hardware/index.html). |
 | [docs/protocol.md](docs/protocol.md) | Bridge ↔ plugin WebSocket protocol |
 | [docs/gateway-protocol.md](docs/gateway-protocol.md) | OpenClaw Gateway WebSocket — frame format, Ed25519 handshake, RPC/event catalog, versioning |
 | [docs/testing.md](docs/testing.md) | Test infrastructure reference |

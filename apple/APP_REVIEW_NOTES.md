@@ -1,3 +1,18 @@
+---
+id: policy.app-review
+title: App Review Notes
+description: Review-facing rationale and sandbox invariants for the shipped Apple apps.
+category: Policy
+locale: en
+canonical: true
+status: required
+owner: Apple release maintainers
+reviewed: 2026-07-18
+revision: 2026-07-18
+source_of_truth: apple/APP_REVIEW_NOTES.md
+validators: [bash apple/scripts/verify-appstore-archive.sh]
+---
+
 # AgentDeck Dashboard — App Review Notes
 
 _Paste the relevant sections into App Store Connect's "Notes" field when submitting `apple-v<version>`._

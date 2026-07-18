@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "defaultLocale": "en",
+  "locales": ["en", "ko", "ja"],
+  "documents": [
+    {
+      "id": "system.readme",
+      "sources": { "en": "agentdeck-design-system/README.md" }
+    },
+    {
+      "id": "system.handover",
+      "sources": {
+        "en": "agentdeck-design-system/docs/handover.md",
+        "ko": "agentdeck-design-system/locales/ko/handover.md",
+        "ja": "agentdeck-design-system/locales/ja/handover.md"
+      }
+    },
+    {
+      "id": "design.foundation",
+      "sources": { "en": "DESIGN.md" }
+    },
+    {
+      "id": "hardware.compatibility",
+      "sources": {
+        "en": "docs/hardware-compatibility.md",
+        "ko": "agentdeck-design-system/locales/ko/hardware-compatibility.md",
+        "ja": "agentdeck-design-system/locales/ja/hardware-compatibility.md"
+      }
+    },
+    {
+      "id": "policy.product-tiers",
+      "sources": { "en": "docs/appstore-feature-matrix.md" }
+    },
+    {
+      "id": "policy.app-review",
+      "sources": { "en": "apple/APP_REVIEW_NOTES.md" }
+    },
+    {
+      "id": "validation.testing",
+      "sources": { "en": "docs/testing.md" }
+    }
+  ]
+}
