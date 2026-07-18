@@ -4,6 +4,12 @@
 
 > **Older entries are archived by month** under [`docs/devlog/`](docs/devlog/README.md). This active file keeps the current month plus the preceding month (currently 2026-07 and 2026-06); search only the relevant monthly archive for older history.
 
+## 2026-07-18 — Robot Framework CI signal audit
+
+- Audited the ESP32 Robot suites by assertion type. The physical `hw`, `protocol`, and `perf` suites exercise real boot, serial recovery, protocol framing, latency, throughput, and heap behavior and remain valuable lab validation. The GitHub `no-hw` subset only repeated PlatformIO builds already performed in the same job, then asserted generated-file existence, source-file existence, and config parsing; it did not execute firmware behavior.
+- Removed the duplicate no-hardware Robot job and its second PlatformIO cache/build pass from GitHub Pages. Build Health now marks Robot as not run with the honest reason that physical hardware is unavailable on hosted runners, rather than presenting compilation wrappers as hardware-test evidence.
+- Kept `01_build.robot` as an explicit local pre-flash smoke path with firmware size and partition artifact gates, but removed the meaningless source-file-presence and redundant `pio project config` cases and their dead keywords. Updated the public report label and testing/Pages SSOT accordingly.
+
 ## 2026-07-18 — Terrarium rules SSOT: 손미러 3곳 체제를 codegen+drift 게이트로 교체
 
 - idle 바닥수렴/crayfish 제외(610fe15c) 계약이 Swift·Android에만 손미러로 반영되고 TUI·ESP32에는 같은 버그가 살아 있는 파편화를 구조적으로 해소했다. `shared/src/terrarium-rules.ts`가 크로스플랫폼 터라리움 **룰**(crayfish 홈/영토, clear 앵커 0.62, 바닥휴식·hover strip)의 SSOT이고, `pnpm generate-terrarium-rules`가 Swift/Kotlin/C++ 미러를 생성한다. 표면별 **튜닝**(보드별 Y, swim lane)은 로컬에 남긴다.

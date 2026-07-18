@@ -76,37 +76,6 @@ jobs:
         continue-on-error: true
         run: cd android && ./gradlew testDebugUnitTest
 
-      - name: Cache PlatformIO
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio/packages
-            ~/.platformio/platforms
-            esp32/.pio
-          key: pio-${{ hashFiles('esp32/platformio.ini') }}
-          restore-keys: pio-
-
-      - name: Run Robot Framework tests (no-hw)
-        id: robot
-        continue-on-error: true
-        env:
-          PIO_TIMEOUT: 600
-        run: |
-          pip install robotframework platformio pyserial pyyaml intelhex
-          # Pre-build all envs to cache toolchains + frameworks
-          cd esp32
-          pio run -e box_86 || true
-          pio run -e ips_35 || true
-          pio run -e round_amoled || true
-          pio run -e ulanzi_tc001 || true
-          pio run -e boot_test || true
-          pio run -e boot_test_qspi || true
-          cd ..
-          mkdir -p coverage/test-report/robot
-          cd esp32/robot && python3 -m robot --include no-hw --exclude hw --exclude local-only \
-            --outputdir ../../coverage/test-report/robot \
-            tests/
-
       - name: Fetch previous history
         run: |
           PAGES_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
@@ -135,7 +104,7 @@ jobs:
                   "vitest": suite(os.environ["VITEST_OUTCOME"], True, "Coverage + JSON report"),
                   "android": suite(os.environ["ANDROID_OUTCOME"], True, "JUnit + Robolectric on ubuntu"),
                   "apple": suite("not-run", False, "Not executed in Pages workflow (requires macOS runner)"),
-                  "robot": suite(os.environ["ROBOT_OUTCOME"], True, "Robot Framework no-hw subset"),
+                  "robot": suite("not-run", False, "Physical hardware suite; not executed on GitHub-hosted runners"),
               },
           }
           (report_dir / "run-metadata.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -144,7 +113,6 @@ jobs:
         env:
           VITEST_OUTCOME: ${{ steps.vitest.outcome }}
           ANDROID_OUTCOME: ${{ steps.android.outcome }}
-          ROBOT_OUTCOME: ${{ steps.robot.outcome }}
           GITHUB_SHA: ${{ github.sha }}
 
       - name: Assemble Pages site

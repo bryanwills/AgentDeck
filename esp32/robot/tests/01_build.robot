@@ -45,18 +45,6 @@ Boot Test QSPI Environment Builds Successfully
     Given the "boot_test_qspi" firmware is built
     Then the firmware binary should exist for "boot_test_qspi"
 
-# ── Source and config sanity ─────────────────────────────────────
-
-Source Files Are Present
-    [Documentation]    Key source files must exist before build.
-    [Tags]    quick
-    Then key source files should exist
-
-PlatformIO Configuration Parses Cleanly
-    [Documentation]    platformio.ini must parse without errors.
-    [Tags]    quick
-    Given the PlatformIO configuration is valid
-
 *** Keywords ***
 Build And Verify Scenario
     [Documentation]    Given a board, build firmware and verify outputs.

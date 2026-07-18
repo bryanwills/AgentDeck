@@ -102,7 +102,7 @@ Coverage thresholds (regression guard): lines ≥17%, functions ≥15%, branches
 ### GitHub Pages and Build Health
 
 - **URL**: `https://puritysb.github.io/AgentDeck/` (overview) / `/hardware/` (**Devices** public surface catalog) / `/demo/` (**Live Preview** interactive renderer) / `/docs/` (documentation hub) / `/reports/` (**Build Health** CI evidence). The retired `/gallery/` route redirects to `/hardware/`; do not restore it as a separate menu or duplicate device catalog.
-- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + Robot Framework (no-hw) + `pnpm run demo:build` → HTML report → GitHub Pages deploy. The "Assemble Pages site" step copies each surface into `_site/` (overview/devices/live-preview/docs/build-health plus the gallery redirect).
+- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + `pnpm run demo:build` → HTML report → GitHub Pages deploy. Robot Framework is intentionally excluded from GitHub-hosted runs: its meaningful `hw`/`protocol`/`perf` suites require connected boards, while the former `no-hw` subset only duplicated PlatformIO compilation. The "Assemble Pages site" step copies each surface into `_site/` (overview/devices/live-preview/docs/build-health plus the gallery redirect).
 - **Live Preview fidelity**: `/demo` panels use canonical renderer output only — Node renderers via `scripts/render-creature-simulator.mjs` (sim-data.js) and **pixel-exact ESP32 firmware frames via `scripts/render-esp32-sim-frames.mjs`** (esp32/sim `demo:<agent>:<state>` scenes → `sim-frames/`, needs `pio`; missing frames show the hatch placeholder, never hand-drawn ESP32/e-ink/TC001). Hand-maintained Swift Device Preview mirrors carry `SYNC-HASH` origin pins enforced by `node scripts/check-preview-mirror-sync.mjs` (CI)
 - **Build Health generator**: `scripts/generate-html-report.py` — tab-based SPA quality dashboard. Robot tab: suite→scenario→BDD steps→board matrix→per-test elapsed time→performance table. `[PERF]` log messages auto-extracted from output.xml
 - **Scenario matrix**: `scripts/scenario-matrix.json` — 10 user scenarios mapped to test files + gap analysis
@@ -256,3 +256,14 @@ The macOS app ships through the App Store and must stay **self-contained** under
   - [Actions](https://docs.elgato.com/streamdeck/sdk/plugin-guides/actions) · [Keys](https://docs.elgato.com/streamdeck/sdk/plugin-guides/keys) · [Dials & Touch Strip](https://docs.elgato.com/streamdeck/sdk/plugin-guides/dials-touch-strip)
   - [Manifest schema](https://docs.elgato.com/streamdeck/sdk/references/manifest) · [Touch Strip Layout](https://docs.elgato.com/streamdeck/sdk/references/touch-strip-layout) · [WebSocket API](https://docs.elgato.com/streamdeck/sdk/references/websocket-api)
 - **Plugin Samples**: https://github.com/elgatosf/streamdeck-plugin-samples (layouts, cat-keys, hello-world, data-sources, lights-out)
+
+## Worktree 자동 정리 (workmux)
+
+현재 작업 경로(`pwd`)가 `__worktrees` 를 포함하면 workmux worktree 안에서 작업 중인 것이다.
+이 경우 **작업이 완전히 끝났을 때 (모든 서브에이전트/teammate 완료 포함)** 다음을 실행한다:
+
+    workmux remove --keep-branch
+
+- `--keep-branch`: worktree/session/pane만 정리하고 **브랜치는 살림** (나중에 `workmux merge` 로 머지 가능)
+- 이 지시는 메인 repo(`__worktrees` 경로 아님)에서는 무시한다
+- 진행 중에는 절대 실행 금지 — 완료 확인 후에만

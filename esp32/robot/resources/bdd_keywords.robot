@@ -68,13 +68,6 @@ the ESP32 device "${board}" is connected and booted
         Log    Already running: board=${info}[board], version=${info}[version]
     END
 
-the PlatformIO configuration is valid
-    [Documentation]    Verify platformio.ini can be parsed without errors.
-    ${result}=    Run Process    pio    project    config
-    ...    cwd=${PROJECT_DIR}    timeout=30s    stderr=STDOUT
-    Should Be Equal As Integers    ${result.rc}    0
-    ...    msg=PlatformIO config invalid:\n${result.stdout}
-
 # ═══════════════════════════════════════════════════════════════════
 # When — Actions
 # ═══════════════════════════════════════════════════════════════════
@@ -311,13 +304,6 @@ the CPU frequency should be "${freq}" MHz
     Should Be True    ${info}[cpu] == ${freq}
     ...    msg=Unexpected CPU: ${info}[cpu] MHz (expected ${freq})
 
-key source files should exist
-    [Documentation]    Verify critical source files are present.
-    File Should Exist    ${PROJECT_DIR}/src/main.cpp
-    File Should Exist    ${PROJECT_DIR}/src/net/protocol.cpp
-    File Should Exist    ${PROJECT_DIR}/src/net/serial_client.cpp
-    File Should Exist    ${PROJECT_DIR}/src/net/wifi_manager.cpp
-    File Should Exist    ${PROJECT_DIR}/src/net/ws_client.cpp
     File Should Exist    ${PROJECT_DIR}/src/state/agent_state.h
     File Should Exist    ${PROJECT_DIR}/platformio.ini
 

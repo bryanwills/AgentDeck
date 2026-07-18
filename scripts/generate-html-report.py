@@ -1648,10 +1648,10 @@ def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results,
       <div class="layer-tab-header" style="border-left:4px solid #fb923c">
         <div class="layer-tab-title">
           <span style="color:#fb923c;font-size:1.25rem;margin-right:0.5rem">&#9641;</span>
-          <span style="font-size:1.1rem;font-weight:600">Robot Framework</span>
+          <span style="font-size:1.1rem;font-weight:600">ESP32 Firmware Verification</span>
           <span class="layer-tab-badge">{status_badge(robot_meta["status"])}</span>
         </div>
-        <div class="layer-tab-question">ESP32 Hardware Tests &middot; {len(robot.get("suites", [])) if robot else 0} suites &middot; {robot.get("scenario_count", 0) if robot else 0} scenarios &middot; {rob_total} tests &middot; {len(robot.get("boards", [])) if robot else 0} boards</div>
+      <div class="layer-tab-question">Robot Framework &middot; physical hardware behavior when an HW-tagged run is supplied &middot; {len(robot.get("suites", [])) if robot else 0} suites &middot; {robot.get("scenario_count", 0) if robot else 0} scenarios &middot; {rob_total} tests &middot; {len(robot.get("boards", [])) if robot else 0} boards</div>
       </div>
       {_build_robot_perf_table(robot) if robot and robot.get("perf_summary") else ""}
       {robot_tab_html if robot else '<div class="empty-state">No Robot Framework test results available.</div>'}

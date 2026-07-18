@@ -88,12 +88,15 @@ apple/AgentDeckTests/
 
 ```
 esp32/robot/tests/
-  01_build.robot               # PlatformIO build validation, binary size (no hardware)
+  01_build.robot               # Local pre-flash smoke: build outputs + binary size (no hardware)
   02_flash_and_boot.robot      # Device flash, boot messages, heap/PSRAM (hardware required)
   03_serial_protocol.robot     # JSON protocol, state_update, error recovery (hardware required)
+  04_performance.robot         # Boot, latency, throughput, and heap metrics (hardware required)
 ```
 
 Run with `bash esp32/robot/run.sh build` (no hardware) or `bash esp32/robot/run.sh all` (full).
+
+The `no-hw` build suite is intentionally local-only validation before flashing. It is not run in GitHub CI or Pages because it only wraps the same PlatformIO compilation and artifact checks, adding substantial duplicate build time without exercising firmware behavior. The meaningful Robot suites are the `hw`, `protocol`, and `perf` runs against connected boards.
 
 ## Coverage
 
@@ -196,9 +199,9 @@ Current CI details:
 - Runner: `ubuntu-latest`
 - Node version: 20
 - Included: build, typecheck, Vitest, Vitest coverage
-- Not included: Android JUnit, Apple XCTest, ESP32 Robot Framework
+- Not included: Apple XCTest and physical-hardware ESP32 Robot Framework
 
-Android and Apple tests are not yet in CI. Robot Framework also depends on local tooling and, for full coverage, physical hardware.
+Android JUnit runs in CI as a non-blocking diagnostic. Apple XCTest is not yet in the Linux CI job. Robot Framework's meaningful behavioral coverage requires physical hardware and remains a lab/local workflow rather than a GitHub-hosted check.
 
 Release workflows (Android, Apple) are tag-triggered and do not run tests.
 
