@@ -217,6 +217,16 @@ struct MonitorScreen: View {
     /// creature behavior that something is wrong. Suppressed when the
     /// bridge itself is disconnected (ConnectionOverlay owns the screen)
     /// and when nothing needs setup (steady state stays clean).
+    /// Always false outside Debug — the capture pin does not exist in shipped
+    /// builds, so the Setup card behaves exactly as before for real users.
+    private var isCaptureFeedPinned: Bool {
+        #if DEBUG
+        stateHolder.isCaptureFeedPinned
+        #else
+        false
+        #endif
+    }
+
     @ViewBuilder
     private func setupNeededLayer(geo: GeometryProxy) -> some View {
         if stateHolder.state.bridgeConnected {
@@ -228,7 +238,7 @@ struct MonitorScreen: View {
             #else
             let items = stateHolder.setupNeededItems(preferences: preferences)
             #endif
-            if !items.isEmpty {
+            if !items.isEmpty, !isCaptureFeedPinned {
                 VStack {
                     Spacer()
                     HStack {

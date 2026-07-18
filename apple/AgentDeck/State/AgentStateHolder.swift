@@ -79,6 +79,12 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     /// otherwise repoint the app at its own :9120, silently discarding the pin
     /// and putting real workspace data on camera.
     private var hasLaunchArgumentBridgePin = false
+
+    /// True when this process was launched pinned to a capture feed. UI that
+    /// reflects *local machine* state rather than the pinned feed (the Setup
+    /// card's integration gaps, for one) hides itself in this mode, so a
+    /// launch recording shows the product instead of the operator's setup.
+    var isCaptureFeedPinned: Bool { hasLaunchArgumentBridgePin }
     #endif
 
     /// Bridges that failed to connect — skip them until browseResults refresh

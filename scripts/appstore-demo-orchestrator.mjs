@@ -66,7 +66,7 @@ const phases = [
       type: 'chat_start',
       raw: 'Verify the release candidate',
     },
-    usage: { primaryPercent: 41, secondaryPercent: 23 },
+    usage: { weeklyPercent: 78 },
   },
   {
     at: 19_000,
@@ -94,7 +94,7 @@ const phases = [
       type: 'chat_start',
       raw: 'Draft the launch release notes',
     },
-    usage: { primaryPercent: 44, secondaryPercent: 23 },
+    usage: { weeklyPercent: 79 },
   },
   {
     at: 30_000,
@@ -143,7 +143,7 @@ const phases = [
       type: 'chat_response',
       raw: 'All release checks passed.',
     },
-    usage: { primaryPercent: 47, secondaryPercent: 24 },
+    usage: { weeklyPercent: 80 },
   },
   {
     at: 46_000,
@@ -311,14 +311,12 @@ function usageEvent(usage, cycleStartedAt) {
     codexPlanType: 'plus',
     codexRateLimits: {
       planType: 'plus',
+      // A single 7d window, matching what a real machine reports once the 5h
+      // window has reset: the short window drops out and the weekly one is
+      // all that remains. The label is derived from `windowMinutes`, not the
+      // slot, so 10080 reads as "7d" in whichever slot it lands.
       primary: {
-        usedPercent: usage.primaryPercent,
-        windowMinutes: 300,
-        resetsAt: isoAfter(2.6 * 60 * 60 * 1000),
-        stale: false,
-      },
-      secondary: {
-        usedPercent: usage.secondaryPercent,
+        usedPercent: usage.weeklyPercent,
         windowMinutes: 10_080,
         resetsAt: isoAfter(3.4 * 24 * 60 * 60 * 1000),
         stale: false,
@@ -336,12 +334,64 @@ function usageAt(index) {
   return null;
 }
 
+// A full downstream fleet. The rail renders a row per *device entry*, not per
+// count: `streamDeck`/`pixoo` are gated on a non-empty `devices` array and
+// ignore `deviceCount`/`connectedDeviceCount` entirely, which is why the
+// earlier count-only payload produced an empty "Pixel displays" header and no
+// Stream Deck section at all. Addresses are fictional — never a real LAN.
 const moduleHealth = {
-  streamDeck: { available: true, connected: true, deviceCount: 1 },
-  pixoo: { available: true, configuredDeviceCount: 1, connectedDeviceCount: 1 },
+  streamDeck: {
+    available: true,
+    devices: [
+      { id: 'sd-xl', family: 'streamdeckxl', columns: 6, rows: 3 },
+      { id: 'sd-plus', family: 'streamdeckplus', columns: 4, rows: 2 },
+    ],
+  },
+  d200h: { connected: true },
+  pixoo: {
+    configuredDeviceCount: 1,
+    hasFrame: true,
+    devices: [{ ip: '192.168.0.51', online: true, failures: 0, backedOff: false }],
+  },
+  timebox: {
+    configuredDeviceCount: 1,
+    connected: true,
+    deviceName: 'Timebox-Mini',
+    statusReason: 'connected',
+    hasFrame: true,
+  },
+  idotmatrix: {
+    configuredDeviceCount: 1,
+    connected: true,
+    deviceName: 'IDM-32',
+    statusReason: 'connected',
+    hasFrame: true,
+  },
+  serial: {
+    connections: [
+      {
+        connected: true,
+        port: '/dev/tty.usbmodem1101',
+        deviceInfo: { board: 'ips_10', version: productVersion, wifiConnected: true },
+      },
+      {
+        connected: true,
+        port: '/dev/tty.usbserial-0001',
+        deviceInfo: { board: 'ulanzi_tc001', version: productVersion, wifiConnected: false },
+      },
+    ],
+  },
   esp32Wifi: {
     available: true,
-    devices: [{ board: 'inkdeck', version: productVersion, stale: false, serialActive: false }],
+    devices: [
+      { board: 'inkdeck', ip: '192.168.0.71', version: productVersion, stale: false, serialActive: false },
+      { board: 'round_amoled', ip: '192.168.0.72', version: productVersion, stale: false, serialActive: false },
+      { board: 'ttgo_t_display', ip: '192.168.0.73', version: productVersion, stale: false, serialActive: false },
+    ],
+  },
+  tuiDashboards: {
+    available: true,
+    devices: [{ id: 'demo-tui', name: 'workstation' }],
   },
 };
 
