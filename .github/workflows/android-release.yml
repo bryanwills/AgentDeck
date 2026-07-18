@@ -15,6 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#android-v}"
+          test "$VERSION" = "$(tr -d '\n' < VERSION)"
+          node scripts/verify-version-sync.mjs
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:

@@ -4,8 +4,8 @@
 # INSTALLED plugin dir (no access to our workspace node_modules), so we:
 #   1. esbuild-bundle our TS + @agentdeck/shared + gifenc + vendored SDK → app.js
 #      (ESM; @resvg/resvg-js and ws left external — native / optional-native).
-#   2. ship a clean npm-layout node_modules with @resvg/resvg-js (+ platform
-#      native) and ws, which Studio's node resolves at runtime.
+#   2. ship a clean npm-layout node_modules with @resvg/resvg-js, every native
+#      binary needed by the manifest's macOS/Windows support matrix, and ws.
 #   3. assemble manifest + en.json + resources (icons + fonts) + plugin/app.js.
 #
 # Output: plugin-ulanzi/dist/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/
@@ -16,6 +16,8 @@ PKG="$ROOT/plugin-ulanzi"
 NAME="com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin"
 SRC_PLUGIN="$PKG/$NAME"
 OUT="$PKG/dist/$NAME"
+VERSION=$(node -p "require('$SRC_PLUGIN/manifest.json').Version")
+ARCHIVE="$ROOT/dist/agentdeck-ulanzi-v${VERSION}.zip"
 
 RESVG_VERSION="2.6.2"
 WS_VERSION="^8.20.0"
@@ -42,9 +44,20 @@ echo "==> build runtime node_modules (resvg native + ws) via npm"
 TMP="$(mktemp -d)"
 cat > "$TMP/package.json" <<JSON
 { "name": "agentdeck-ulanzi-runtime", "private": true,
-  "dependencies": { "@resvg/resvg-js": "$RESVG_VERSION", "ws": "$WS_VERSION" } }
+  "dependencies": {
+    "@resvg/resvg-js": "$RESVG_VERSION",
+    "@resvg/resvg-js-darwin-arm64": "$RESVG_VERSION",
+    "@resvg/resvg-js-darwin-x64": "$RESVG_VERSION",
+    "@resvg/resvg-js-win32-x64-msvc": "$RESVG_VERSION",
+    "@resvg/resvg-js-win32-arm64-msvc": "$RESVG_VERSION",
+    "@resvg/resvg-js-win32-ia32-msvc": "$RESVG_VERSION",
+    "ws": "$WS_VERSION"
+  } }
 JSON
-( cd "$TMP" && npm install --omit=dev --no-audit --no-fund --silent )
+# npm normally skips optional packages for other OS/CPU pairs. These are
+# direct dependencies because one Marketplace bundle must run on every OS
+# declared in manifest.json; --force permits assembling that universal set.
+( cd "$TMP" && npm install --force --omit=dev --no-audit --no-fund --silent )
 mkdir -p "$OUT/node_modules"
 cp -R "$TMP/node_modules/." "$OUT/node_modules/"
 rm -rf "$TMP"
@@ -55,11 +68,22 @@ node -e "const fs=require('fs');const p='$OUT';
   const nm=p+'/node_modules';
   if(!fs.existsSync(nm+'/@resvg/resvg-js')) throw new Error('missing resvg');
   if(!fs.existsSync(nm+'/ws')) throw new Error('missing ws');
-  const native=require('child_process').execSync('find '+nm+' -name *.node').toString().trim();
-  if(!native) throw new Error('missing resvg native .node');
-  console.log('OK — bundle '+(fs.statSync(p+'/plugin/app.js').size/1024|0)+'KB, native: '+native.split('/').pop());
+  const targets=['darwin-arm64','darwin-x64','win32-x64-msvc','win32-arm64-msvc','win32-ia32-msvc'];
+  for (const target of targets) {
+    const dir=nm+'/@resvg/resvg-js-'+target;
+    if(!fs.existsSync(dir)) throw new Error('missing resvg target '+target);
+    if(!require('child_process').execSync('find '+dir+' -name *.node').toString().trim()) throw new Error('missing native binary '+target);
+  }
+  console.log('OK — bundle '+(fs.statSync(p+'/plugin/app.js').size/1024|0)+'KB, resvg targets: '+targets.join(', '));
 "
 echo "==> packaged at: $OUT"
+
+echo "==> create Marketplace upload archive"
+mkdir -p "$ROOT/dist"
+rm -f "$ARCHIVE"
+( cd "$PKG/dist" && COPYFILE_DISABLE=1 zip -qry "$ARCHIVE" "$NAME" )
+unzip -tq "$ARCHIVE"
+echo "==> upload archive: $ARCHIVE"
 
 # Optional: install into Ulanzi Studio (macOS). `--install` or INSTALL=1.
 STUDIO_PLUGINS="$HOME/Library/Application Support/Ulanzi/UlanziDeck/Plugins"

@@ -215,13 +215,13 @@ AgentDeck uses one **unified product version** across all maintained artifacts w
 
 | Channel | Artifact | Tag | Current | Status / how to get |
 |---|---|---|---|---|
-| **npm** | `@agentdeck/setup` (CLI + Node daemon) | `npm-v*` | 0.2.3 | Published on npm |
-| **Apple App Store / TestFlight** | macOS + iOS app | `apple-v*` | 0.2.3 / build 2 | Unified source ready; TestFlight delivery pending |
+| **npm** | `@agentdeck/setup` (CLI + Node daemon) | `npm-v*` | 1.0.0 | Version synchronized; publish pending (registry latest: 0.2.3) |
+| **Apple App Store / TestFlight** | macOS + iOS app | `apple-v*` | 1.0.0 / build 2 | First-release source ready; App Store delivery pending |
 | **Google Play** | Android app (AAB) | `android-v*` | — | CI upload **wired but gated** (`ANDROID_PLAY_ENABLED` + `PLAY_SERVICE_ACCOUNT_JSON`); needs Play Console app + first manual upload. Until then, Android ships via the GitHub APK below |
-| **GitHub Release — Android** | signed APK | `android-v*` | 0.2.3 / code 2 | Unified source ready; release pending (last public APK: 0.1.0) |
-| **GitHub Release — ESP32** | firmware `.bin` (per board) | `esp32-v*` | 0.2.3 | Unified source ready; release pending (last public firmware: 0.1.1) |
-| **Elgato Marketplace** | Stream Deck / Mini / Stream Deck+ plugin | `streamdeck-v*` | 0.2.3.0 | Regular 15-key, Mini, and Plus profiles ready; Marketplace upload pending |
-| **Ulanzi Studio Marketplace** | D200H Deck Dock plugin | `ulanzi-v*` | 0.2.3 | Unified source ready; Marketplace upload pending |
+| **GitHub Release — Android** | signed APK | `android-v*` | 1.0.0 / code 3 | Version synchronized; release not scheduled in this train (last public APK: 0.1.0) |
+| **GitHub Release — ESP32** | firmware `.bin` (per board) | `esp32-v*` | 1.0.0 | Version synchronized; release not scheduled in this train (last public firmware: 0.1.1) |
+| **Elgato Marketplace** | Stream Deck / Mini / Stream Deck+ plugin | `streamdeck-v*` | 1.0.0.0 | Regular 15-key, Mini, and Plus profiles ready; Marketplace upload pending |
+| **Ulanzi Studio Marketplace** | D200H Deck Dock plugin | `ulanzi-v*` | 1.0.0 | First-release package ready; Marketplace upload pending |
 
 > **The Stream Deck and Ulanzi plugins are thin clients** — they require the AgentDeck daemon (install via `npx @agentdeck/setup` or the macOS app), the way the OBS plugin requires OBS. They never embed the daemon (it's a port-9120 singleton). Without a daemon they show an OFFLINE state pointing to the install. See [RELEASING.md](RELEASING.md) for the rationale.
 
@@ -663,7 +663,7 @@ The upgrade story lives here and in [docs/appstore-feature-matrix.md](docs/appst
 
 ### App Store Distribution
 
-The macOS and iOS builds are ready for App Store submission. The macOS build ships as a **self-contained Swift daemon** gated by the `AGENTDECK_APP_STORE` compile flag — no bundled Node.js, no bundled `adb`, no subprocess spawn, no AppleScript. User data lives in the app sandbox container (`~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/`, not `~/.agentdeck/`) per Apple Review Guideline 2.5.2. D200H is reached only through the Ulanzi Studio WebSocket plugin, so AgentDeck requests no USB HID entitlement. The first-launch onboarding asks for Claude Code hook access via explicit NSOpenPanel consent. OpenClaw integration uses the Gateway-native WebSocket path (see §OpenClaw Gateway below), not a file-based identity. The app uses the fresh bundle ID `bound.serendipity.agent.deck`; its first unified product train is **0.2.3 / build 2**, delivered by the `apple-v0.2.3` channel tag (see [RELEASING.md](RELEASING.md)).
+The macOS and iOS builds are ready for App Store submission. The macOS build ships as a **self-contained Swift daemon** gated by the `AGENTDECK_APP_STORE` compile flag — no bundled Node.js, no bundled `adb`, no subprocess spawn, no AppleScript. User data lives in the app sandbox container (`~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/`, not `~/.agentdeck/`) per Apple Review Guideline 2.5.2. D200H is reached only through the Ulanzi Studio WebSocket plugin, so AgentDeck requests no USB HID entitlement. The first-launch onboarding asks for Claude Code hook access via explicit NSOpenPanel consent. OpenClaw integration uses the Gateway-native WebSocket path (see §OpenClaw Gateway below), not a file-based identity. The app uses the fresh bundle ID `bound.serendipity.agent.deck`; its first public product release is **1.0.0 / build 2**, delivered by the `apple-v1.0.0` channel tag (see [RELEASING.md](RELEASING.md)).
 
 ### OpenClaw Gateway (Gateway-native pairing)
 

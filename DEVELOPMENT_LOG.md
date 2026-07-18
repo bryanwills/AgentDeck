@@ -4,6 +4,14 @@
 
 > **Older entries are archived by month** under [`docs/devlog/`](docs/devlog/README.md). This active file keeps the current month plus the preceding month (currently 2026-07 and 2026-06); search only the relevant monthly archive for older history.
 
+## 2026-07-18 — 1.0.0 첫 공개 릴리스 정비 (Apple · Elgato · Ulanzi)
+
+- 루트 `VERSION`과 모든 JS package, Apple marketing version, Android `versionName`, ESP32 `FIRMWARE_VERSION`, Stream Deck manifest/profile snapshot, Ulanzi manifest를 `1.0.0`으로 동기화했다. Stream Deck의 네 번째 버전 컴포넌트는 SDK 형식에 따라 `1.0.0.0`; Android `versionCode`는 3으로 증가했다. Android About은 하드코딩 문자열 대신 `BuildConfig.VERSION_NAME`을 읽는다.
+- Apple 제출 구성은 macOS/iOS 제품명을 모두 `AgentDeck.app`으로 고정하고 XcodeGen 정본에 signing team/test signing/category를 반영했다. 실제 export 결과는 두 플랫폼 모두 `1.0.0 (2)`, Developer Tools 카테고리, embedded `PrivacyInfo.xcprivacy`를 확인했다. macOS 배포 entitlement는 sandbox + network client/server + microphone/BLE/serial + user-selected bookmark 범위로 심사 노트와 일치했고, iOS는 `get-task-allow=false`였다.
+- 로컬 Apple release 스크립트가 development-signed archive를 export 전에 검사해 정상 빌드를 거부하던 순서를 수정했다. 이제 iOS IPA와 macOS pkg를 먼저 App Store 배포 서명으로 export한 뒤 실제 포함된 `.app`을 검증한다. Apple/Android/ESP32 tag workflow도 tag suffix가 루트 `VERSION`과 다르면 즉시 실패하며, 버전 검증기는 numeric `X.Y.Z`만 허용한다.
+- Elgato manifest를 최신 validator 기준으로 정비했다: 256/512 plugin icon, Support/Product URL, Stream Deck 6.9 최소 버전, 정확한 multi-agent 설명. `.sdignore`와 공식 `streamdeck pack`을 사용해 `dist/bound.serendipity.agentdeck.streamDeckPlugin`을 생성했다. 실제 앱 UI 캡처에서 288px app icon, 1920×960 thumbnail/3 gallery assets와 영문 listing/release notes를 준비했다.
+- Ulanzi package는 debug inspector 선언을 제거하고, manifest가 약속한 macOS/Windows 지원과 달리 빌드 호스트의 darwin-arm64 native renderer만 포함하던 결함을 수정했다. darwin arm64/x64 및 Windows x64/arm64/ia32 resvg 모듈을 강제 검증하며 `dist/agentdeck-ulanzi-v1.0.0.zip`을 재현 가능하게 생성한다.
+- 검증: `pnpm verify-version`, `pnpm build`, Vitest 1889/1889, Android release APK + signature + `1.0.0/code 3`, Android unit tests, macOS XCTest 447 tests(1 skip), iOS XCTest 112 tests(1 skip), iOS/macOS App Store archive+export+binary invariant gate, App Store submission metadata/media/network validator, latest Elgato schema validate/package, Ulanzi universal package/archive integrity 모두 통과했다. 업로드·tag push·외부 마켓 심사 제출은 수행하지 않았다.
 ## 2026-07-18 — AgentDeck design-system viewer and documentation contract
 
 - Replaced the Korean, narrative-heavy hardware compatibility document with a concise English canonical matrix. Added the previously omitted Waveshare ESP32-C6-LCD-1.47 surface, separated specifications from operational ownership, and added revision-linked Korean/Japanese reader translations.

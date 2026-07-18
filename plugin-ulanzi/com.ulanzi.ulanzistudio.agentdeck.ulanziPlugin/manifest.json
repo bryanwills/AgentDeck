@@ -1,12 +1,11 @@
 {
-  "Version": "0.2.3",
+  "Version": "1.0.0",
   "Author": "AgentDeck",
   "Name": "AgentDeck",
   "Description": "Monitor and steer AI coding agents (Claude Code, Codex, OpenCode, OpenClaw) from your D200H.",
   "Icon": "resources/icons/plugin.png",
   "CodePath": "plugin/app.js",
   "Type": "JavaScript",
-  "Inspect": "--inspect=127.0.0.1:9251",
   "UUID": "com.ulanzi.ulanzistudio.agentdeck",
   "Devices": ["D200H"],
   "OS": [

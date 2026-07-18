@@ -28,6 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#esp32-v}"
+          test "$VERSION" = "$(tr -d '\n' < VERSION)"
+          node scripts/verify-version-sync.mjs
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

@@ -16,6 +16,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#apple-v}"
+          test "$VERSION" = "$(tr -d '\n' < VERSION)"
+          node scripts/verify-version-sync.mjs
+
       - name: Select Xcode
         run: |
           XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
@@ -100,6 +106,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#apple-v}"
+          test "$VERSION" = "$(tr -d '\n' < VERSION)"
+          node scripts/verify-version-sync.mjs
 
       - name: Select Xcode
         run: |

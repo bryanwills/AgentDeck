@@ -45,10 +45,6 @@ build_ios() {
         DEVELOPMENT_TEAM=QF36NDHYHD \
         | tail -5
 
-    echo ">>> Verifying iOS App Store archive invariants..."
-    bash "$APPLE_DIR/scripts/verify-appstore-archive.sh" \
-        "$ARCHIVE_PATH/Products/Applications/AgentDeck.app"
-
     echo ">>> Exporting IPA..."
     EXPORT_PATH="$DIST_DIR/export_ios"
     rm -rf "$EXPORT_PATH"
@@ -62,6 +58,13 @@ build_ios() {
 
     IPA_PATH="$EXPORT_PATH/AgentDeck.ipa"
     if [ -f "$IPA_PATH" ]; then
+        echo ">>> Verifying exported iOS App Store invariants..."
+        VERIFY_PATH="$(mktemp -d "$DIST_DIR/verify-ios.XXXXXX")"
+        unzip -q "$IPA_PATH" -d "$VERIFY_PATH"
+        bash "$APPLE_DIR/scripts/verify-appstore-archive.sh" \
+            "$VERIFY_PATH/Payload/AgentDeck.app"
+        rm -rf "$VERIFY_PATH"
+
         cp "$IPA_PATH" "$DIST_DIR/agentdeck-ios-v${VERSION}.ipa"
         echo ">>> iOS IPA: dist/agentdeck-ios-v${VERSION}.ipa"
     else
@@ -87,10 +90,6 @@ build_macos() {
         DEVELOPMENT_TEAM=QF36NDHYHD \
         | tail -5
 
-    echo ">>> Verifying macOS App Store archive invariants..."
-    bash "$APPLE_DIR/scripts/verify-appstore-archive.sh" \
-        "$ARCHIVE_PATH/Products/Applications/AgentDeck.app"
-
     echo ">>> Exporting macOS app..."
     EXPORT_PATH="$DIST_DIR/export_macos"
     rm -rf "$EXPORT_PATH"
@@ -101,6 +100,24 @@ build_macos() {
         -exportPath "$EXPORT_PATH" \
         -allowProvisioningUpdates \
         | tail -5
+
+    PKG_PATH=$(find "$EXPORT_PATH" -name "*.pkg" -type f | head -1)
+    if [ -z "${PKG_PATH:-}" ]; then
+        echo "ERROR: macOS pkg not found under $EXPORT_PATH"
+        exit 1
+    fi
+
+    echo ">>> Verifying exported macOS App Store invariants..."
+    VERIFY_PATH="$(mktemp -d "$DIST_DIR/verify-macos.XXXXXX")"
+    PKG_EXPANDED="$VERIFY_PATH/pkg"
+    pkgutil --expand-full "$PKG_PATH" "$PKG_EXPANDED"
+    APP_PATH=$(find "$PKG_EXPANDED" -type d -name "AgentDeck.app" | head -1)
+    if [ -z "${APP_PATH:-}" ]; then
+        echo "ERROR: AgentDeck.app not found in exported pkg"
+        exit 1
+    fi
+    bash "$APPLE_DIR/scripts/verify-appstore-archive.sh" "$APP_PATH"
+    rm -rf "$VERIFY_PATH"
 
     echo ">>> macOS export: dist/export_macos/"
 }

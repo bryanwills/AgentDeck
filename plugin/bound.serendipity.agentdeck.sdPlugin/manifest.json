@@ -11,7 +11,9 @@
           "ShowTitle": false
         }
       ],
-      "Controllers": ["Keypad"],
+      "Controllers": [
+        "Keypad"
+      ],
       "SupportedInMultiActions": true,
       "UUID": "bound.serendipity.agentdeck.session-slot"
     },
@@ -25,7 +27,9 @@
           "ShowTitle": false
         }
       ],
-      "Controllers": ["Encoder"],
+      "Controllers": [
+        "Encoder"
+      ],
       "Encoder": {
         "layout": "layouts/voice-layout.json",
         "TriggerDescription": {
@@ -46,7 +50,9 @@
           "ShowTitle": false
         }
       ],
-      "Controllers": ["Encoder"],
+      "Controllers": [
+        "Encoder"
+      ],
       "Encoder": {
         "layout": "layouts/voice-layout.json",
         "TriggerDescription": {
@@ -67,7 +73,9 @@
           "ShowTitle": false
         }
       ],
-      "Controllers": ["Encoder"],
+      "Controllers": [
+        "Encoder"
+      ],
       "Encoder": {
         "layout": "layouts/voice-layout.json",
         "TriggerDescription": {
@@ -89,7 +97,9 @@
           "ShowTitle": false
         }
       ],
-      "Controllers": ["Encoder"],
+      "Controllers": [
+        "Encoder"
+      ],
       "Encoder": {
         "layout": "layouts/voice-layout.json",
         "TriggerDescription": {
@@ -105,13 +115,15 @@
   "Category": "AgentDeck",
   "CategoryIcon": "static/imgs/category",
   "CodePath": "bin/plugin.js",
-  "Description": "Control AI coding agents with Stream Deck",
+  "Description": "Monitor and steer AI coding agents through AgentDeck on Stream Deck and Stream Deck +.",
   "Icon": "static/imgs/plugin",
   "UUID": "bound.serendipity.agentdeck",
   "Name": "AgentDeck",
+  "SupportURL": "https://github.com/puritysb/AgentDeck/issues",
+  "URL": "https://puritysb.github.io/AgentDeck/",
   "SDKVersion": 2,
   "Software": {
-    "MinimumVersion": "6.7"
+    "MinimumVersion": "6.9"
   },
   "OS": [
     {
@@ -150,5 +162,5 @@
       "Readonly": false
     }
   ],
-  "Version": "0.2.3.0"
+  "Version": "1.0.0.0"
 }

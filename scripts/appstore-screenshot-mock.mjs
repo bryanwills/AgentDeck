@@ -4,8 +4,10 @@
 // This is a development-only capture helper. It is never bundled in AgentDeck.app.
 
 import { WebSocketServer } from '../bridge/node_modules/ws/wrapper.mjs';
+import { readFileSync } from 'node:fs';
 
 const port = Number(process.env.AGENTDECK_SCREENSHOT_PORT || 9220);
+const productVersion = readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim();
 const wss = new WebSocketServer({ host: '127.0.0.1', port });
 
 const now = Date.now();
@@ -35,7 +37,7 @@ const events = [
       pixoo: { available: true, configuredDeviceCount: 1, connectedDeviceCount: 1 },
       esp32Wifi: {
         available: true,
-        devices: [{ board: 'inkdeck', version: '0.2.3', stale: false, serialActive: false }],
+        devices: [{ board: 'inkdeck', version: productVersion, stale: false, serialActive: false }],
       },
     },
   },

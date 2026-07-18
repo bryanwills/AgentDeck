@@ -11,7 +11,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.2.3"
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: 2
     ENABLE_USER_SCRIPT_SANDBOXING: NO
 
@@ -19,6 +19,7 @@ targets:
   AgentDeck_iOS:
     type: application
     platform: iOS
+    productName: AgentDeck
     sources:
       - path: AgentDeck
         excludes:
@@ -30,6 +31,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: bound.serendipity.agent.deck
         INFOPLIST_FILE: AgentDeck/Resources/Info.plist
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         PRODUCT_NAME: AgentDeck
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: true
@@ -46,6 +48,7 @@ targets:
   AgentDeck_macOS:
     type: application
     platform: macOS
+    productName: AgentDeck
     sources:
       - path: AgentDeck
         excludes:
@@ -59,6 +62,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: bound.serendipity.agent.deck
         INFOPLIST_FILE: AgentDeck/Resources/Info-macOS.plist
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         PRODUCT_NAME: AgentDeck
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: true
@@ -101,6 +105,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: bound.serendipity.agent.deck.tests
+        DEVELOPMENT_TEAM: QF36NDHYHD
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/AgentDeck.app/AgentDeck"
         BUNDLE_LOADER: "$(TEST_HOST)"
         GENERATE_INFOPLIST_FILE: YES
@@ -115,6 +120,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: bound.serendipity.agent.deck.tests
+        CODE_SIGN_IDENTITY: Apple Development
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: QF36NDHYHD
+        PROVISIONING_PROFILE_SPECIFIER: ""
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/AgentDeck.app/Contents/MacOS/AgentDeck"
         BUNDLE_LOADER: "$(TEST_HOST)"
         GENERATE_INFOPLIST_FILE: YES

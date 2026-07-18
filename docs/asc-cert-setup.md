@@ -227,8 +227,8 @@ Use the exact installed installer identity common name here. Xcode documents `Ma
 ## Step 9 — Trigger the release tag
 
 ```bash
-git tag apple-v0.2.3
-git push origin apple-v0.2.3
+git tag apple-v1.0.0
+git push origin apple-v1.0.0
 ```
 
 The tag suffix becomes `MARKETING_VERSION` verbatim, so it must match the root `VERSION` file and stay numeric — Apple rejects a `-rc1`-style version string. To retry after a failure, delete and re-push the *same* tag: `CURRENT_PROJECT_VERSION` comes from `github.run_number`, which rises on every run, so ASC always sees a fresh build number at the same marketing version.

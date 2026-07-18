@@ -2,7 +2,7 @@
 
 AgentDeck uses one product version across every maintained surface. The canonical value is the root [`VERSION`](VERSION) file; package manifests and platform project files mirror it because their build and distribution tools require native version fields.
 
-The current product version is **0.2.3**. This is the first unified release train after the 2026-06-26 reset exposed a registry mismatch: Apple could legitimately restart under a new bundle ID, but the existing npm package identities could not reuse or lower already-published versions. `0.2.3` is the first version above every published npm package and is therefore the common convergence point.
+The current product version is **1.0.0**, the first public multi-marketplace release. The unified release train originally converged at `0.2.3` after the 2026-06-26 reset exposed a registry mismatch: Apple could legitimately restart under a new bundle ID, but the existing npm package identities could not reuse or lower already-published versions. `1.0.0` remains above every published package and store version floor.
 
 Run `pnpm verify-version` before every build or release. CI rejects drift between `VERSION` and its mirrors.
 
@@ -11,7 +11,7 @@ Run `pnpm verify-version` before every build or release. CI rejects drift betwee
 | Surface | Product-version mirror | Independent monotonic value | Tag / delivery |
 |---|---|---|---|
 | **Apple** (iOS+macOS) | `apple/project.yml` `MARKETING_VERSION` | `CURRENT_PROJECT_VERSION` (currently 2) | `apple-v*` → TestFlight |
-| **Android** | `android/app/build.gradle.kts` `versionName` | `versionCode` (currently 2) | `android-v*` → APK Release / optional Play |
+| **Android** | `android/app/build.gradle.kts` `versionName` | `versionCode` (currently 3) | `android-v*` → APK Release / optional Play |
 | **npm** (`@agentdeck/hooks`, `shared`, `bridge`, `setup`) | public `package.json` files | npm registry version floor | `npm-v*` → manual publish |
 | **ESP32** | `esp32/src/config.h` `FIRMWARE_VERSION` | build hash / epoch in firmware metadata | `esp32-v*` → firmware Release |
 | **Stream Deck** | plugin manifest `Version` as `X.Y.Z.0` | fourth component if a same-product-version plugin rebuild is ever required | `streamdeck-v*` → Elgato Maker portal |

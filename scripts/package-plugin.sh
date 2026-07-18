@@ -15,20 +15,10 @@ SDC_PROD=1 pnpm build
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
-# Create .streamDeckPlugin file (it's just a zip).
-# Elgato rejects the package with "No manifest.json found in package" unless
-# the .sdPlugin folder is the zip's single top-level entry — zipping the
-# folder *contents* at root fails integrity check. Also exclude logs/ so
-# local dev log files (tens of MB) don't bloat the distribution.
-cd "$PROJECT_DIR/plugin"
+# Package with Elgato's official CLI. `.sdignore` excludes local logs, source
+# maps, and development-only dependencies before the CLI validates the bundle.
 rm -f "$OUTPUT_DIR/$PLUGIN_ID.streamDeckPlugin"
-
-zip -r "$OUTPUT_DIR/$PLUGIN_ID.streamDeckPlugin" "$PLUGIN_ID.sdPlugin" \
-  -x "$PLUGIN_ID.sdPlugin/node_modules/*" \
-  -x "$PLUGIN_ID.sdPlugin/logs/*" \
-  -x "*/.DS_Store" \
-  -x "*/*.log" \
-  -x "*/*.log.*"
+streamdeck pack --force --no-update-check --output "$OUTPUT_DIR" "$PLUGIN_DIR"
 
 echo ""
 echo "Package created: dist/$PLUGIN_ID.streamDeckPlugin"

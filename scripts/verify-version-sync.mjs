@@ -7,6 +7,10 @@ const root = resolve(import.meta.dirname, '..');
 const productVersion = readFileSync(resolve(root, 'VERSION'), 'utf8').trim();
 const failures = [];
 
+if (!/^\d+\.\d+\.\d+$/.test(productVersion)) {
+  failures.push(`VERSION: expected numeric X.Y.Z SemVer, found ${productVersion || '<empty>'}`);
+}
+
 function read(path) {
   return readFileSync(resolve(root, path), 'utf8');
 }

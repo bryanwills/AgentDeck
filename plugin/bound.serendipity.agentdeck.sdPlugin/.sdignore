@@ -1,0 +1,6 @@
+logs/**
+node_modules/**
+**/*.log
+**/*.log.*
+**/*.map
+**/.DS_Store
