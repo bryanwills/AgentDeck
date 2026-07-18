@@ -83,11 +83,24 @@ route to a board; a client that never emits it never appears on the dashboard. F
 
 ### Command frames (steering — optional)
 
-A client with buttons can steer sessions. Two prompt shapes:
+A client with buttons must derive controls from the wire payload, never merely from an
+`awaiting_*` state:
 
-- **Observed gate** (`requestId` present) → `{"type":"permission_decision","requestId":"<id>","decision":"allow|deny"}`
-- **Managed PTY prompt** (no `requestId`, `sessionId` present) → approve = `{"type":"select_option","index":0[,"sessionId":"<sid>"]}`; escape = `{"type":"session_command","sessionId":"<sid>","command":{"type":"escape"}}`
-- `{"type":"query_session_timeline","sessionId":"<sid>"}` — request a session's Detail timeline on demand (glance-surface backfill).
+- **Device approval gate** (`requestId` present) → render exactly Allow/Deny and send
+  `{"type":"permission_decision","requestId":"<id>","decision":"allow|deny"}`.
+- **Managed PTY prompt** → first send `{"type":"focus_session","sessionId":"<sid>"}`.
+  Render options only after a `state_update`/`prompt_options` whose `sessionId` (or stamped
+  `focusedSessionId` for backward-compatible `prompt_options`) matches that session.
+  `navigable:true` uses `{"type":"select_option","index":<wire-index>,"sessionId":"<sid>"}`;
+  non-navigable options use `{"type":"respond","value":"<option.shortcut>"}`.
+- **Observed prompt without `requestId`** → display-only “respond in terminal.” Hook
+  observation does not expose the terminal's complete choice list, so clients must not
+  synthesize Approve/Deny (or Yes/No/Always), emit `select_option`, or map Deny to a delayed
+  `escape`.
+- Keep the decision view open until a daemon event confirms the state transition; do not
+  make a queued/no-op command appear successful optimistically.
+- `{"type":"query_session_timeline","sessionId":"<sid>"}` requests a session's Detail
+  timeline on demand (glance-surface backfill).
 
 ## Relationship to the reference implementation
 

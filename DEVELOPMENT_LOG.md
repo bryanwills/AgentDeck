@@ -4,6 +4,38 @@
 
 > **Older entries are archived by month** under [`docs/devlog/`](docs/devlog/README.md). This active file keeps the current month plus the preceding month (currently 2026-07 and 2026-06); search only the relevant monthly archive for older history.
 
+## 2026-07-18 — IPS10 ESP-Hosted SDIO 패닉: 런타임 deinit 제거
+
+### 원인과 수정
+- IPS10이 `reset=panic code=4`로 19~494초마다 실제 재부팅했고, raw serial에는 `sdio_rx_get_buffer` / `sdio_push_data_to_queue (pkt_rxbuff)` assert 뒤 `SW_CPU_RESET`이 남았다. USB serial 첫 JSON 직후 `wifiSetRadioParked(true)`가 `WiFi.mode(WIFI_OFF)`를 호출하고, Arduino P4 remote-WiFi 구현이 이를 `esp_wifi_deinit()` → `hostedDeinitWiFi()`까지 내려 보내 RX 중인 SDIO 버퍼 수명과 경합하는 경로였다.
+- `BOARD_IPS10`의 serial-primary parking을 완전 radio-off가 아닌 **STA quiesce**로 변경했다. WebSocket을 먼저 닫고 `WiFi.disconnect(false, 1000)`로 AP 연결만 해제하며 ESP-Hosted/SDIO transport는 계속 초기화된 상태로 둔다. `wifiRadioParked()`는 mDNS/WS 루프를 억제하므로 네트워크 트래픽은 멈추되 in-flight RX 버퍼를 파괴하지 않는다. 다른 ESP32 보드는 기존 `WIFI_OFF` 정책을 유지한다.
+- USB가 끊기면 저장 credential로 STA를 복구한다. cold boot에서 credential이 없어 이미 `WIFI_OFF`였던 경우에만 STA mode를 다시 초기화한다.
+
+### 검증·배포 상태
+- `/opt/homebrew/bin/pio run -e ips10` 성공: RAM 29.0%, Flash 64.7%, firmware 4,068,386B. PATH의 `/usr/local/bin/pio`는 기존 x86_64 Python/arm64 littlefs 불일치로 실패해 arm64 경로를 사용했다.
+- WiFi OTA를 두 번 시도했으나 구펌웨어가 전송 약 15초 안에 다시 패닉해 각각 `no_active_update`로 중단됐다. CH340 `/dev/cu.wchusbserial21110`도 macOS driver wedge가 발생했으나 물리적으로 재연결해 복구했다. 이후 USB full flash가 전체 data hash 검증까지 성공했고(`buildHash=aa91e5a1-dirty`, `buildEpoch=1784343722`), CLI daemon 재연결 시 `wifiRadioParked=true`, `wifiConnected=false` 상태에서 연결/stale 없이 추정 uptime 501초까지 단조 증가했다. 이는 기존 관측 최장 재부팅 간격 494초를 넘긴 짧은 soak이며 새 SDIO 패닉 로그는 없었다. 장시간 현장 안정성은 계속 확인한다.
+
+## 2026-07-18 — Pixoo64 사용량 HUD 실루엣·배경 fill·Codex 만료일 개선
+
+### 문제
+- 전날 Pixoo64 사용량 HUD의 provider 마커를 7×7 정사각형으로 바꾸면서, 실제 점유 영역이 24×15인 Claude Code 마스크까지 내용 경계를 잘라 7×7로 늘려 원본보다 세로로 긴 로봇이 됐다.
+- 9px 마커 영역 뒤에 사용량 창이 x=10부터 시작해 마커의 왼쪽은 1px, 오른쪽은 2px처럼 보였고, primary/secondary 창 너비도 26px/27px로 미세하게 달랐다.
+- 사용률이 하단 1px rail로만 남아 TC001의 면적형 gauge보다 한눈에 읽기 어려웠고, 로고 슬롯과 수치 영역도 별개 조각처럼 보였다.
+- Codex rollout이 secondary(7D) window만 제공할 때 행 앞 절반을 활용하지 못했고, 이미 수집 중인 ChatGPT 구독 만료일도 Pixoo에서는 보이지 않았다.
+
+### 해결
+- Node/Swift `drawUsageHUD`가 마스크의 점유 bbox를 crop하지 않고 canonical 24×24 캔버스 전체를 7×7로 샘플링하게 했다. 따라서 Codex는 정사각형 실루엣을 유지하고 Claude는 원본처럼 7×5의 넓고 낮은 외곽으로 렌더된다.
+- HUD geometry를 `9px marker + 27px primary + 1px divider + 27px secondary`로 재배치했다. 마커는 x=1…7을 써 좌우 여백이 정확히 1px이고 사용량은 x=9에서 바로 이어진다.
+- TC001처럼 사용된 폭을 7px 높이 전체의 어두운 색면으로 채운다. 로고 슬롯에도 조금 더 짙은 provider tint를 이어 붙이고, 70% 미만은 Claude coral/Codex violet, 70%/90%부터 amber/red 경고색을 써 마커·수치·fill이 한 밴드로 읽힌다.
+- Codex primary가 없고 secondary만 있을 때 왼쪽 27px zone에 `M/D` 구독 만료일을 가운데 배치하고, 오른쪽에는 기존 7D 퍼센트+reset countdown을 유지한다. 날짜가 없거나 해석 불가능하면 기존처럼 단일 window를 전체 폭으로 렌더한다.
+- Node/Swift 회귀 테스트에 마커 x=1…7 대칭, Claude의 비정사각 실루엣, full-height fill, Codex-only 만료일 배치를 추가했다.
+
+### 검증
+- `pnpm vitest run bridge/src/__tests__/dot-matrix-glyphs.test.ts bridge/src/__tests__/pixoo-sprites.test.ts` — 36/36 통과.
+- `pnpm build` — 전체 workspace build 통과.
+- `xcodebuild test -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -destination platform=macOS -only-testing:AgentDeckTests_macOS/IDotMatrixProtocolTests` — 18/18 통과.
+- 실제 Node 렌더러로 Claude 35/58%, Codex 7D 72%, 구독 만료 8/1인 64×64 프레임을 nearest-neighbor 8배 확대해 full-height fill, 로고 슬롯 연결감, `8/1 | 72% 3d` 가독성을 시각 확인했다.
+
 ## 2026-07-17 (심야) — InkDeck/XTeink X3·X4 공통 responsive e-ink dashboard
 
 ### 문제
@@ -31,6 +63,13 @@
 - `query_session_timeline` 응답의 top-level `sessionId`가 있으면 혼합 live ring을 해당 세션 history로 교체하고 `timelineRevision`을 올린다. 같은 개수의 이력이 들어와도 e-ink 재렌더가 보장되며, 실제 이력이 없는 경우도 빈 문구만 보이지 않고 현재 작업 요약과 상세 이벤트 대기 안내가 함께 나온다.
 - Codex가 7D window만 제공하면 비어 있던 5H cell에 `SUB <plan> <active-until>`을 배치하고 별도 구독 행을 생략한다. 사용량 footer 높이를 한 행 절약해 카드 영역도 유지한다.
 - CrossPoint ESP32-C3 전체 build 성공(RAM 115,028B/35.1%, Flash 5,329,557B/81.3%). 새 `firmware/update.bin`은 5,342,848B, SHA-256 `a21533a39fa5a997321f0648218da29573d5c326ee1b927a1f0d29ad5e40d17c`이며 X3/X4 공용이다.
+
+### X3/X4 Attention 실제 선택지·명령 라우팅 정합성 후속
+- `creature-positions`는 `controlMode:observed`, `port:0`, `requestId/options 없음`인 Claude 관찰 세션이었다. 실제 터미널에는 세 선택지가 있었지만 Notification/PreToolUse 관찰 이벤트는 그 목록을 내보내지 않았고, X3/X4는 `awaiting_*`만 보고 임의의 Approve/Deny를 만들었다. Approve의 session-scoped `select_option(0)`은 managed registry에서 관찰 세션을 찾지 못했고, Deny의 `escape`는 현재 prompt 응답이 아니라 다음 tool을 막는 soft STOP으로 지연 적용될 수 있었다.
+- XTeink 포트에 allocation-free `AttentionMode` 계약을 추가했다. `requestId`가 있는 실제 device gate만 Allow/Deny, 세션 ID가 상관된 실제 options만 option row가 되며, 관찰 세션에 둘 다 없으면 Select 힌트를 숨기고 `Respond in the agent terminal`을 표시한다. 가짜 `Approve → select_option(0)`과 `Deny → escape` fallback은 제거했다.
+- managed Detail을 열 때 `focus_session`을 먼저 보내고 `prompt_options`도 파싱한다. options snapshot에는 owner session ID를 저장해 이전 focus/다른 세션의 선택지가 섞이지 않게 했으며, navigable은 wire index의 `select_option`, non-navigable은 option shortcut의 `respond`를 사용한다. 전송 후에는 daemon 상태 전환을 받을 때까지 Detail을 유지한다.
+- 순수 계약 테스트 6개가 observed terminal-only, requestId gate, managed correlation 대기, 3-option actionability를 통과했다. CrossPoint default ESP32-C3 build도 성공(RAM 115,220B/35.2%, DRAM static 181,941B/56.63%, Flash 5,331,365B/81.4%)했고 `firmware/update.bin` 5,344,656B(SHA-256 `bd7104dfd3c7366a403600ab224e37a85d6b9795433f8630b26749ebbb8750bc`)를 생성했다. 새 경로는 고정 버퍼만 사용하고 render/protocol loop에 새 동적 할당을 추가하지 않았다.
+- 같은 `update.bin`을 X4(`192.168.68.73`)와 X3(`192.168.68.74`)의 File Transfer 저장소에 업로드하고 두 기기 모두 `/api/files`에서 5,344,656B를 확인했다. X3는 기본 4KB WebSocket 프레임이 0.6~3.1MB 구간에서 반복 단절됐지만, 재부팅 후 **1KB 프레임을 64KB 응답마다 멈추지 않고 연속 전송**하자 5,344,656B와 서버 `DONE`까지 완료됐다. 두 기기의 실제 펌웨어 교체는 복구 메뉴에서 `update.bin`을 선택하는 물리 단계가 남아 있다.
 
 ## 2026-07-17 — Pixoo64 사용량 HUD 로고 공간 1:1 종횡비(정사각형) 개선
 
