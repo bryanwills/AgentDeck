@@ -4787,8 +4787,15 @@ final class DaemonServer {
                 self.broadcastSessionsList()
                 DaemonLogger.shared.info("Review: failed for \(sessionId) — \(message)")
             }
+            // Judge tier decides the prompt shape AND the trajectory budget,
+            // so load the config before summarizing.
+            let judgeCfg = ApmeSettings.load().judge
+            let tier = ReviewRunner.judgeTier(for: judgeCfg.backend)
             let entries = await self.timelineStore.historyForSession(sessionId, since: nil)
-            let trajectory = ReviewRunner.trajectorySummary(entries: entries)
+            let trajectory = ReviewRunner.trajectorySummary(
+                entries: entries,
+                maxChars: ReviewRunner.trajectoryCharCap(for: tier),
+                maxEntries: ReviewRunner.trajectoryEntryCap(for: tier))
             guard !trajectory.isEmpty else {
                 ReviewPanelPresenter.shared.presentNotice(
                     projectName: projectName,
@@ -4800,8 +4807,7 @@ final class DaemonServer {
             // judge → setup guidance panel WITH the machine's detected local
             // servers offered first (Ollama / LM Studio / MLX), parity with the
             // Node browser guide. This must fire ONLY for a genuine config gap.
-            let judgeCfg = ApmeSettings.load().judge
-            let prompt = ReviewRunner.buildPrompt(projectName: projectName, trajectory: trajectory)
+            let prompt = ReviewRunner.buildPrompt(projectName: projectName, trajectory: trajectory, tier: tier)
             let text: String
             do {
                 // Every backend call rides a hard wall-clock timeout: a silent

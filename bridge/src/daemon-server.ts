@@ -2655,10 +2655,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           const runId = apme.collector.getRunId(sessionId);
           return runId ? apme.store.getRun(runId)?.projectPath ?? undefined : undefined;
         })() : undefined);
+      // Recent request↔response lines so the judge evaluates the diff
+      // against what the user actually asked (not just code in isolation).
+      const recentActivity = core.bridgeTimeline.getHistoryForSession(sessionId, undefined, 16)
+        .filter((e) => e.type === 'chat_start' || e.type === 'chat_response')
+        .map((e) => `${e.type === 'chat_start' ? 'USER' : 'AGENT'}: ${e.raw}`)
+        .join('\n');
       void runSessionReview({
         sessionId,
         cwd,
         projectName: target?.projectName ?? cwd?.split('/').filter(Boolean).pop() ?? 'unknown',
+        recentActivity,
         onEvent: (event) => {
           core.wsServer.broadcast(event as any);
           core.broadcastSessionsList().catch(() => {}); // badge refresh
