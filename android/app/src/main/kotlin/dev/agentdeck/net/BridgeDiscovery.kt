@@ -3,6 +3,7 @@ package dev.agentdeck.net
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -114,6 +115,23 @@ class BridgeDiscovery(context: Context) {
         private fun rawDiscover(context: Context): Flow<List<DiscoveredBridge>> = callbackFlow {
             val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
             val bridges = mutableMapOf<String, DiscoveredBridge>()
+
+            // Many WiFi chipsets drop multicast frames in hardware unless a
+            // MulticastLock is held, so NSD silently never sees the daemon's
+            // mDNS advertisement (device-dependent: some pass multicast anyway).
+            // Held only while discovery is active — the shared-flow 5s
+            // stop-timeout above bounds the battery cost.
+            val multicastLock: WifiManager.MulticastLock? = try {
+                val wifi = context.applicationContext
+                    .getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                wifi?.createMulticastLock("agentdeck-mdns")?.apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "MulticastLock unavailable: ${e.message}")
+                null
+            }
 
             // Android NsdManager allows only one in-flight resolveService() per
             // process on many platform versions; a second concurrent call fails
@@ -304,6 +322,11 @@ class BridgeDiscovery(context: Context) {
                     nsdManager.stopServiceDiscovery(discoveryListener)
                 } catch (_: Exception) {
                     // Already stopped
+                }
+                try {
+                    multicastLock?.release()
+                } catch (_: Exception) {
+                    // Already released
                 }
             }
         }
