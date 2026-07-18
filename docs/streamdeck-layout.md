@@ -1,5 +1,7 @@
 # Stream Deck+ Layout Reference
 
+> **Superseded (historical reference).** This documents the retired **v3** layout. The current session-per-button model is [v4 Layout](v4-layout.md); rendering conventions live in [Plugin Conventions](plugin-conventions.md). Kept for the encoder/dial diagrams and v3→v4 migration context only.
+
 Detailed reference for the Stream Deck+ button and encoder layout in AgentDeck v3.
 
 ---

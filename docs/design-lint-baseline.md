@@ -1,3 +1,18 @@
+---
+id: validation.design-lint
+title: Design Lint Baseline
+description: Regression-gate baseline for the DESIGN.md rule checker and how to move it.
+category: Validation
+locale: en
+canonical: true
+status: stable
+owner: Design system maintainers
+reviewed: 2026-07-18
+revision: 2026-07-18
+source_of_truth: docs/design-lint-baseline.md
+validators: [node scripts/build-design-system-viewer.mjs --check, bash design/lint.sh]
+---
+
 # Design Lint Baseline
 
 Snapshot of the violation count for files under `lint.sh`'s scope (see [DESIGN.md](../DESIGN.md), [design/lint.sh](../design/lint.sh)). Used by CI as a regression gate — PRs that raise the count above this baseline fail.

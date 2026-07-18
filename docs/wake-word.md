@@ -1,5 +1,7 @@
 # Wake Word Detection
 
+> **Status note (2026-07-18):** last verified 2026-03. The Porcupine flow below matches the shipped setup; §2 microWakeWord describes an in-progress experiment (external trainer repo) and may be stale — re-verify before relying on it.
+
 AgentDeck는 두 가지 wake word 감지 시스템을 지원한다.
 
 ## 1. Porcupine (Mac — 현재 운영)

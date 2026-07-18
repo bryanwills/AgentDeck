@@ -321,6 +321,11 @@ h1 em {
   border-radius: var(--r-xl);
   background: var(--tide-100);
 }
+/* `display: flex` outranks the UA rule for [hidden], so the specimen views
+ * (which have no Markdown/Metadata mode) could not actually hide the tabs. */
+.view-tabs[hidden] {
+  display: none;
+}
 .view-tabs button {
   flex: 0 1 140px;
   min-height: 34px;
@@ -561,79 +566,244 @@ h1 em {
   font: 10px var(--font-mono);
   overflow-wrap: anywhere;
 }
-.component-grid {
+.asset-stage--spec {
+  padding: 0;
+  background-image: none;
+}
+.asset-hatch {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--r-lg);
+}
+.asset-card--spec .asset-note {
+  margin: 6px 0 8px;
+  color: var(--ink-700);
+  font: 12px/1.5 var(--font-sans);
+}
+.asset-link {
+  display: inline-block;
+  margin-top: 10px;
+  font: 11px var(--font-mono);
+}
+/* === Component lab ===
+ * The stage hosts canonical `.ad-*` markup from design/components.css and
+ * design/patterns.css. Nothing below may restyle an `.ad-*` class — these rules
+ * only lay specimens out and label them.
+ */
+.specimen-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
-.component-card {
-  min-height: 170px;
+.specimen {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   padding: 24px;
   background: var(--tide-100);
   border: 1px solid var(--tide-200);
   border-radius: var(--r-2xl);
 }
-.component-card.dark {
-  color: var(--tide-50);
-  background: var(--ink-900);
-  border-color: var(--ink-800);
+.specimen--wide {
+  grid-column: 1 / -1;
 }
-.component-card h3 {
-  margin: 12px 0 6px;
+.specimen-head .ad-kicker {
+  margin-bottom: 6px;
+}
+.specimen-head h3 {
+  margin: 0 0 8px;
   font-size: 20px;
+  letter-spacing: var(--tr-h3);
 }
-.component-card p {
-  margin: 0;
-  color: var(--ink-500);
-  font-size: 13px;
-}
-.component-card.dark p {
-  color: var(--ink-300);
-}
-.demo-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.demo-button {
-  padding: 10px 16px;
-  border-radius: var(--r-xl);
-  border: 1px solid var(--ink-900);
-  color: var(--tide-50);
-  background: var(--ink-900);
-  font-size: 13px;
-  font-weight: 600;
-}
-.demo-button.ghost {
-  color: var(--ink-900);
-  background: transparent;
-}
-.demo-kicker {
-  color: var(--kelp-700);
-  font: 600 11px var(--font-mono);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-.demo-status {
+.specimen-class {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font: 11px var(--font-mono);
+  padding: 4px 8px;
+  color: var(--ink-700);
+  background: var(--tide-50);
+  border: 1px solid var(--tide-200);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.specimen-class-label {
+  color: var(--ink-300);
+  font-size: 9px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
-.demo-status i {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--r-pill);
-  background: var(--amber-500);
-  box-shadow: 0 0 0 3px rgba(200, 146, 58, 0.2);
-  animation: pulse var(--d-pulse) ease-in-out infinite;
+.specimen-stage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  padding: 20px;
+  background: var(--tide-50);
+  border: 1px solid var(--tide-200);
+  border-radius: var(--r-xl);
 }
-@keyframes pulse {
-  50% {
-    opacity: 0.55;
-    transform: scale(0.85);
+.specimen-stage > * {
+  min-width: 0;
+}
+.specimen-note {
+  margin: auto 0 0;
+  color: var(--ink-500);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.specimen-copy {
+  margin: 5px 0 0;
+  color: var(--ink-500);
+  font-size: 12.5px;
+}
+.specimen-inkpad {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+}
+.specimen-inkpad .ad-kicker {
+  margin-bottom: 0;
+}
+.specimen-inkwrap {
+  padding: 12px;
+  border-radius: var(--r-2xl);
+}
+.specimen-cards,
+.specimen-devices,
+.specimen-patterns,
+.specimen-surfaces {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+.specimen-patterns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.specimen-stack {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+.specimen-hatch {
+  min-height: 200px;
+  border: 1px solid var(--tide-200);
+  border-radius: var(--r-3xl);
+}
+.specimen-surface {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-height: 96px;
+  padding: 18px;
+  border: 1px solid var(--tide-200);
+  border-radius: var(--r-lg);
+}
+.specimen-surface .ad-kicker {
+  margin-bottom: 0;
+}
+.specimen-surface small {
+  font: 10px var(--font-mono);
+  opacity: 0.7;
+}
+.type-scale {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+}
+.type-row {
+  display: grid;
+  grid-template-columns: 132px 84px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--tide-200);
+}
+.type-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.type-row code {
+  color: var(--kelp-700);
+  font-size: 11px;
+}
+.type-row small {
+  color: var(--ink-500);
+  font: 10px var(--font-mono);
+}
+.type-sample {
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.08;
+  letter-spacing: var(--tr-h2);
+  white-space: nowrap;
+}
+
+/* === Token specimens ===
+ * A token is only legible through the property it drives, so each group gets a
+ * stage that applies the raw value the way a consumer would.
+ */
+.tk-stage {
+  display: grid;
+  place-items: center;
+  height: 68px;
+  padding: 10px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--tide-200);
+}
+.tk-stage--bar,
+.tk-stage--motion {
+  place-items: center start;
+}
+.tk-stage--shadow {
+  background: var(--tide-50);
+}
+.tk-radius {
+  width: 46px;
+  height: 46px;
+  background: var(--ink-900);
+}
+.tk-bar {
+  height: 10px;
+  background: var(--kelp-500);
+  border-radius: var(--r-pill);
+}
+.tk-type {
+  color: var(--ink-900);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.tk-motion {
+  width: 12px;
+  height: 12px;
+  background: var(--kelp-500);
+  border-radius: var(--r-pill);
+  animation-name: tk-travel;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+@keyframes tk-travel {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(96px);
+  }
+}
+.tk-shadow {
+  width: 74px;
+  height: 34px;
+  background: var(--tide-100);
+  border-radius: var(--r-md);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tk-motion {
+    animation: none;
   }
 }
 
@@ -730,8 +900,18 @@ footer {
     flex: 1;
   }
   .metadata-grid,
-  .component-grid {
+  .specimen-grid,
+  .specimen-cards,
+  .specimen-devices,
+  .specimen-patterns,
+  .specimen-surfaces {
     grid-template-columns: 1fr;
+  }
+  .type-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .type-sample {
+    grid-column: 1 / -1;
   }
   .markdown h1 {
     font-size: 31px;

@@ -169,4 +169,4 @@ Review on a clean Mac with only AgentDeck installed. The app starts its own Swif
 
 ## Contact
 
-For anything unclear: `puritysb@gmail.com`.
+For anything unclear: `admin@foundby.kr`.

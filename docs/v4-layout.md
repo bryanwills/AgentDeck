@@ -1,4 +1,4 @@
-# v4 Layout (0.4.0) — Session-Per-Button
+# v4 Layout — Session-Per-Button
 
 **Manifest actions** (5 total): `session-slot` (Keypad; device-grid aware) + 4 encoders (`option-dial`, `voice-dial`, `utility-dial`, `usage-dial`) on Stream Deck+. v3 keypad actions (mode/session/usage/response/stop) removed. Usage dial UUID kept as `iterm-dial` for profile backward compat.
 

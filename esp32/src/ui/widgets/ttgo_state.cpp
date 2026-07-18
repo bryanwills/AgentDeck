@@ -5,6 +5,7 @@
 #include "../boards/board_config.h"
 #include "config.h"
 #include <cstring>
+#include <cstdio>
 #include <algorithm>
 #include "net/serial_client.h"
 

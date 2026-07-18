@@ -12,6 +12,12 @@
 #include <cstring>
 #include <cstddef>
 #include <string>
+// Pre-load the libstdc++ headers whose inline min()/max() members would
+// otherwise be macro-expanded after the BOARD_INKDECK min/max macros below
+// (gcc/libstdc++ builds; libc++ never trips this). Include guards make any
+// later transitive include a no-op, so the macros never see these bodies.
+#include <algorithm>
+#include <limits>
 
 // Arduino String / flash-string types referenced by Adafruit_GFX.h signatures.
 // The e-ink path only uses the const char* overloads, but the types must exist.

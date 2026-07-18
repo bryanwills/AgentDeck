@@ -35,7 +35,7 @@ Core bridge architecture, adapter hierarchy, and module system. See [daemon.md](
 
 ## Device module system
 
-`bridge/src/modules/` — Pluggable `DeviceModule` interface with auto-detect. Modules include mDNS, serial, Pixoo, Timebox, and ADB. Timebox Mini Light is BLE (ISSC transparent-UART): the CLI daemon spawns `sync_ble.py`, while the App Store Swift daemon drives it natively through CoreBluetooth. D200H direct-HID was removed from both daemons; the **sole supported driver is `plugin-ulanzi/` running inside Ulanzi Studio**, with daemon connectivity derived from its WS presence. Session bridges never activate hardware modules — dashboard devices connect through the daemon. CLI flags include `--local` and `--no-{module}`.
+`bridge/src/modules/` — Pluggable `DeviceModule` interface with auto-detect. Modules include mDNS, serial, Pixoo, Timebox, and ADB. Timebox Mini Light is BLE (ISSC transparent-UART): the CLI daemon spawns `sync_ble.py`, while the App Store Swift daemon drives it natively through CoreBluetooth. D200H direct-HID was removed from both daemons; the **sole supported driver is `plugin-ulanzi/` running inside Ulanzi Studio**, with daemon connectivity derived from its WS presence. Session bridges never activate hardware modules — dashboard devices connect through the daemon. Session CLI flags are `--local` (all device modules off) and `--no-adb` only.
 
 ## Terrarium rules SSOT (cross-platform behavior invariants)
 

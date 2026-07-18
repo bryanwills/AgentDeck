@@ -114,7 +114,7 @@ claude code,ai,agent,dashboard,stream deck,monitoring,apme,openclaw,codex,ipad,c
 • ESP32 Wi-Fi 프로비저닝 & Pixoo 매트릭스 관리 인앱 시트
 • 첫 실행 3-pane 온보딩
 
-피드백 환영: puritysb@gmail.com
+피드백 환영: admin@foundby.kr
 ```
 
 ---
@@ -223,7 +223,7 @@ What's in v1.0.0:
 • ESP32 Wi-Fi provisioning & Pixoo matrix in-app sheets
 • 3-pane first-launch onboarding
 
-Feedback welcome: puritysb@gmail.com
+Feedback welcome: admin@foundby.kr
 ```
 
 ---

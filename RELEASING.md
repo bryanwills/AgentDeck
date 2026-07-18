@@ -1,3 +1,18 @@
+---
+id: policy.releasing
+title: Releasing and Versioning
+description: Unified product version SSOT, per-track release tags, and monotonic version constraints.
+category: Policy
+locale: en
+canonical: true
+status: required
+owner: Release maintainers
+reviewed: 2026-07-18
+revision: 2026-07-18
+source_of_truth: RELEASING.md
+validators: [node scripts/build-design-system-viewer.mjs --check, pnpm verify-version]
+---
+
 # Releasing & Versioning
 
 AgentDeck uses one product version across every maintained surface. The canonical value is the root [`VERSION`](VERSION) file; package manifests and platform project files mirror it because their build and distribution tools require native version fields.

@@ -98,7 +98,8 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 - [Daemon](docs/daemon.md) — daemon hub, singleton guard, mDNS recovery, usage relay, multi-surface monitoring
 - [Plugin Conventions](docs/plugin-conventions.md) — encoder LCD, wide canvas, OC timeline pipeline, D200H HID, sleep/wake
 - [v4 Layout](docs/v4-layout.md) — v4 Session-Per-Button keypad + encoder mapping, v3→v4 changes
-- [Stream Deck+ Layout Reference](docs/streamdeck-layout.md) — per-state layouts, encoder details, button colors
+- [Stream Deck+ Layout Reference](docs/streamdeck-layout.md) — historical v3 reference (superseded by v4 Layout)
+- [ESP32 Client Contract](docs/esp32-client-contract.md) — the wire contract external/forked display clients must honour
 - [TUI Dashboard](docs/tui-dashboard.md) — terrarium, sprites, adaptive layouts
 - [Android Reference](docs/android.md) — device support, build/signing, creature behavior
 - [Android UI/UX Vision](docs/android-ui.md) — e-ink + tablet layouts, creatures, refresh zones
@@ -406,7 +407,7 @@ The CLI command is `agentdeck`.
 | `agentdeck monitor` | Hook-only bridge (no PTY — run `claude` separately) |
 
 **Flags:** `-p <port>`, `-c <command>`, `-d` (debug), `--no-update-check`
-**Module flags:** `--local` (all off), `--no-mdns`, `--no-adb`, `--no-serial`, `--no-pixoo`
+**Module flags:** `--local` (all device modules off), `--no-adb` (skip ADB reverse). Hardware modules (mDNS/serial/Pixoo/Timebox) are daemon-only — session bridges never activate them, so there are no per-session `--no-mdns`/`--no-serial`/`--no-pixoo` flags.
 
 The `-c` flag sets the full command AgentDeck spawns inside the session PTY, so any arguments you add are forwarded straight to the underlying agent. For example, to resume an earlier Claude Code session (the interactive picker appears when no id is given):
 
@@ -834,7 +835,7 @@ Compact WiFi-connected displays for always-on agent monitoring.
 | **Ulanzi TC001** | ESP32 | 8×32 WS2812B RGB LED matrix | 256 pixels | Yes |
 | **InkDeck** | XIAO ESP32-S3 Plus | Seeed 7.5" OG e-ink (UC8179) | 800×480 | Yes |
 
-> **InkDeck** (7.5" e-ink) is a Seeed TRMNL OG DIY Kit running custom AgentDeck firmware — see [InkDeck e-ink](#inkdeck-e-ink) below. Its firmware is still in development.
+> **InkDeck** (7.5" e-ink) is a Seeed TRMNL OG DIY Kit running custom AgentDeck firmware — see [InkDeck e-ink](#inkdeck-e-ink) below.
 
 ### Setup
 
@@ -872,7 +873,7 @@ The Pixoo module renders official dot-art agent marks, state-reactive water, and
 
 Manage devices with `agentdeck pixoo {scan|add|list|remove|test}` — see [CLI Reference](#cli-reference).
 
-> **Note:** The Pixoo's built-in HTTP server can crash under frequent requests. AgentDeck throttles updates automatically. Use `--no-pixoo` to disable if needed.
+> **Note:** The Pixoo's built-in HTTP server can crash under frequent requests. AgentDeck throttles updates automatically. Remove the device with `agentdeck pixoo remove` if you need to disable it.
 
 ---
 
@@ -894,7 +895,7 @@ A wired (USB-powered) **7.5" e-ink status panel** that mirrors a compact AgentDe
 
 InkDeck runs **custom AgentDeck ESP32 firmware** (PlatformIO env `inkdeck`) and, like every other ESP32 board, connects to the daemon over WiFi WebSocket — the daemon pushes 1-bit dashboard frames and the panel does fast partial refreshes (~0.3s) with periodic full refreshes. This replaces the former "TRMNL" commercial BYOS pull integration, which was removed; stock/commercial TRMNL panels are no longer supported.
 
-> **Status: firmware in development.** The `inkdeck` PlatformIO env and its rendering/refresh behavior are being built under `esp32/`; the panel is not yet driven end-to-end.
+> **Status: hardware-verified, shipping via WiFi OTA.** The `inkdeck` PlatformIO env renders the full dashboard on hardware over both USB serial and WiFi WebSocket, and routine updates deploy with `agentdeck esp32-ota inkdeck`.
 
 Reference hardware: the Seeed Studio × TRMNL 7.5" (OG) DIY kit (XIAO ESP32-S3 Plus + 800×480 monochrome ePaper). See **[Device Reference](docs/devices.md#inkdeck-e-ink-custom-firmware)** for details.
 
@@ -1068,7 +1069,7 @@ AgentDeck is actively working on two critical areas to prepare for production re
 
 ### 1. App Store Distribution (macOS + iOS)
 
-The SwiftUI dashboard is ready for App Store submission. The macOS app ships a full in-process Swift daemon (63 files, ~32,000 LOC) — mDNS discovery, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix), OpenClaw Gateway WebSocket client, HTTP + WebSocket server. App Store compliance is gated by the `AGENTDECK_APP_STORE` compile flag: no bundled Node.js / `adb` / D200H helper, no subprocess spawn, no AppleScript (per Apple Review Guideline 2.5.2). User data lives in `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/` (routed through `AgentDeckPaths.swift`; never hand-write the path). USB device entitlements cover D200H HID; Input Monitoring is handled with the standard TCC prompt. OpenClaw integration uses Gateway-native pairing (self-generated Ed25519 identity in Keychain + Gateway-issued device token) — no file read of `~/.openclaw/identity/`. `apple/scripts/verify-appstore-archive.sh` is wired into CI and asserts these invariants on every archive.
+The SwiftUI dashboard is ready for App Store submission. The macOS app ships a full in-process Swift daemon (63 files, ~32,000 LOC) — mDNS discovery, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix), OpenClaw Gateway WebSocket client, HTTP + WebSocket server. App Store compliance is gated by the `AGENTDECK_APP_STORE` compile flag: no bundled Node.js / `adb` / D200H helper, no subprocess spawn, no AppleScript (per Apple Review Guideline 2.5.2). User data lives in `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/` (routed through `AgentDeckPaths.swift`; never hand-write the path). AgentDeck requests no USB HID entitlement — the D200H is driven solely by the Ulanzi Studio plugin. OpenClaw integration uses Gateway-native pairing (self-generated Ed25519 identity in Keychain + Gateway-issued device token) — no file read of `~/.openclaw/identity/`. `apple/scripts/verify-appstore-archive.sh` is wired into CI and asserts these invariants on every archive.
 
 ### 2. Personalized Agent Evaluation System (APME)
 
@@ -1094,7 +1095,7 @@ Eval results broadcast to every device simultaneously (Stream Deck/Apple/Android
 - [x] macOS in-process Swift daemon (Node.js-free macOS install)
 - [x] Apple TestFlight CI pipeline
 - [x] ESP32 compact displays (Round AMOLED 1.8", IPS LCD 3.5", B86 Box 4", TTGO T-Display 1.14", IPS 10.1", Ulanzi TC001)
-- [ ] InkDeck e-ink panel (Seeed TRMNL 7.5" OG DIY Kit, custom ESP32 firmware, WiFi/WS partial refresh) — firmware in development
+- [x] InkDeck e-ink panel (Seeed TRMNL 7.5" OG DIY Kit, custom ESP32 firmware, WiFi/WS partial refresh, WiFi OTA updates)
 - [x] Ulanzi D200H Deck Dock (14-key HID + 960×540 LCD via official Ulanzi Studio plugin; direct-HID fallback retired)
 - [x] TUI terminal dashboard (Unicode Braille + ANSI)
 - [x] Pixoo64 LED matrix pixel art
@@ -1118,7 +1119,7 @@ Eval results broadcast to every device simultaneously (Stream Deck/Apple/Android
 
 - [x] **Windows daemon autostart** — `agentdeck daemon install` registers a per-user Scheduled Task (`AgentDeckDaemon`, logon trigger) so the daemon auto-starts in the interactive session, the Windows analog of the macOS LaunchAgent. See [docs/daemon.md → Autostart](docs/daemon.md#autostart-loginlogon).
 - [ ] Play Store distribution (Android app)
-- [ ] Stream Deck Marketplace registration (plugin distribution)
+- [ ] Stream Deck Marketplace registration — listing assets and packages prepared under `marketplace/elgato/`, submission pending
 
 ---
 

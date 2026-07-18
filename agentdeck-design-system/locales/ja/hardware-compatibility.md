@@ -58,6 +58,7 @@ AgentDeck の dashboard surface を一覧する読者向け翻訳です。英語
 
 ## 主な制約
 
+- **集計サーフェス数: production 20 + 実験 2 (XTeink X3/X4)。** 公開サーフェス数(README、ランディング)はこの算定をミラーします — プロトコル行(SSE stream)を除く全行を数え、実験行は別記します。
 - App Store 列は第三者アプリの同梱ではなく、提出する Apple アプリと Swift daemon との互換性を示します。
 - D200H は Ulanzi Studio plugin のみ対応し、direct-HID は廃止済みです。
 - Stream Deck family には Elgato アプリが必要です。

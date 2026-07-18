@@ -25,6 +25,14 @@
       tools: 'Specimens',
       docs: 'Documents',
       noResults: 'No catalog entries match this search.',
+      componentsNote:
+        'Every specimen below is real markup rendered by design/components.css and design/patterns.css — the same stylesheets the product surfaces load. Nothing here is a viewer-local imitation.',
+      typeScale: 'Type scale',
+      typeScaleNote:
+        'Each row renders at the token’s true size. Kicker and mono-badge steps are set in JetBrains Mono when used.',
+      specimenClass: 'Class',
+      specSourceOnly: 'Source only',
+      specOpen: 'View source on GitHub',
     },
     ko: {
       preview: '미리보기',
@@ -44,6 +52,13 @@
       tools: '미리보기',
       docs: '문서',
       noResults: '검색과 일치하는 문서가 없습니다.',
+      componentsNote:
+        '아래 specimen은 모두 design/components.css와 design/patterns.css가 그리는 실제 마크업이에요. 제품 화면이 쓰는 스타일시트와 같고, 뷰어용 모조 클래스는 없어요.',
+      typeScale: '타입 스케일',
+      typeScaleNote: '각 행은 토큰의 실제 크기로 렌더합니다. kicker와 mono-badge 단계는 실사용 시 JetBrains Mono예요.',
+      specimenClass: '클래스',
+      specSourceOnly: '소스 전용',
+      specOpen: 'GitHub에서 소스 보기',
     },
     ja: {
       preview: 'プレビュー',
@@ -63,6 +78,13 @@
       tools: 'Specimen',
       docs: '文書',
       noResults: '検索に一致する文書がありません。',
+      componentsNote:
+        '以下の specimen はすべて design/components.css と design/patterns.css が描く実際のマークアップです。製品面と同じ stylesheet を読み込み、Viewer 独自の模倣クラスはありません。',
+      typeScale: 'タイプスケール',
+      typeScaleNote: '各行は token の実サイズで描画します。kicker と mono-badge の段は実使用時 JetBrains Mono です。',
+      specimenClass: 'クラス',
+      specSourceOnly: 'ソースのみ',
+      specOpen: 'GitHub でソースを見る',
     },
   };
 
@@ -348,6 +370,39 @@
       .join('')}</dl>`;
   }
 
+  const COLOR_GROUPS = new Set(['Tide', 'Ink', 'Kelp', 'Coral', 'Amber', 'Brand', 'Status', 'Product UI']);
+
+  /* A token is only understood by looking at what it does. Each group gets a
+   * specimen that exercises the value the way a consumer would apply it. */
+  function tokenSpecimen(token) {
+    const value = escapeHtml(token.value);
+    if (COLOR_GROUPS.has(token.group)) return `<div class="tk-stage swatch" style="--swatch:${value}"></div>`;
+    if (token.group === 'Radius') {
+      return `<div class="tk-stage"><div class="tk-radius" style="border-radius:${value}"></div></div>`;
+    }
+    if (token.group === 'Layout') {
+      return `<div class="tk-stage tk-stage--bar"><div class="tk-bar" style="width:min(${value}, 100%)"></div></div>`;
+    }
+    if (token.group === 'Type') {
+      const property = token.name.startsWith('--font-')
+        ? `font-family:${value}`
+        : token.name.startsWith('--tr-')
+          ? `letter-spacing:${value}`
+          : `font-size:min(${value}, 30px)`;
+      return `<div class="tk-stage"><span class="tk-type" style="${property}">Ag한글</span></div>`;
+    }
+    if (token.group === 'Motion') {
+      const animation = token.name.startsWith('--ease-')
+        ? `animation-duration:800ms;animation-timing-function:${value}`
+        : `animation-duration:${value};animation-timing-function:var(--ease-snap)`;
+      return `<div class="tk-stage tk-stage--motion"><span class="tk-motion" style="${animation}"></span></div>`;
+    }
+    if (token.group === 'Shadow') {
+      return `<div class="tk-stage tk-stage--shadow"><div class="tk-shadow" style="box-shadow:${value}"></div></div>`;
+    }
+    return `<div class="tk-stage swatch" style="--swatch:${value}"></div>`;
+  }
+
   function renderTokens() {
     const grouped = new Map();
     for (const token of data.tokens) {
@@ -357,7 +412,7 @@
     const sections = [...grouped.entries()]
       .map(
         ([group, tokens]) =>
-          `<section class="token-section"><h3>${escapeHtml(group)}</h3><div class="token-grid">${tokens.map((token) => `<article class="token-card"><div class="swatch" style="--swatch:${escapeHtml(token.value)}"></div><div class="token-copy"><strong>${escapeHtml(token.name)}</strong><small>${escapeHtml(token.value)}</small></div></article>`).join('')}</div></section>`,
+          `<section class="token-section"><h3>${escapeHtml(group)}</h3><div class="token-grid">${tokens.map((token) => `<article class="token-card">${tokenSpecimen(token)}<div class="token-copy"><strong>${escapeHtml(token.name)}</strong><small>${escapeHtml(token.value)}</small></div></article>`).join('')}</div></section>`,
       )
       .join('');
     specialHeader(
@@ -376,22 +431,186 @@
       'Foundations · design/brand',
       badge(`${data.assets.length} assets`, 'canonical'),
     );
-    els.view.innerHTML = `<p class="specimen-intro">${escapeHtml(strings().assetsDesc)}</p><div class="asset-grid">${data.assets.map((asset) => `<article class="asset-card"><div class="asset-stage"><img src="${escapeHtml(asset.url)}" alt="${escapeHtml(asset.name)}"></div><h3>${escapeHtml(asset.name)}</h3><p>${escapeHtml(asset.source)} · ${escapeHtml(asset.type)} · ${asset.bytes.toLocaleString()} B</p></article>`).join('')}</div>`;
+    els.view.innerHTML = `<p class="specimen-intro">${escapeHtml(strings().assetsDesc)}</p><div class="asset-grid">${data.assets.map(assetCard).join('')}</div>`;
+  }
+
+  function assetCard(asset) {
+    const meta = `<p>${escapeHtml(asset.source)} · ${escapeHtml(asset.type)} · ${asset.bytes.toLocaleString()} B</p>`;
+    if (asset.kind === 'spec') {
+      // Source-only pointer: the viewer must not try to render JSX as an image.
+      return `<article class="asset-card asset-card--spec"><div class="asset-stage asset-stage--spec"><div class="ad-hatch asset-hatch"><span class="ad-tier ad-tier--cli">${escapeHtml(strings().specSourceOnly)}</span></div></div><h3>${escapeHtml(asset.name)}</h3><p class="asset-note">${escapeHtml(asset.note || '')}</p>${meta}<a class="asset-link" href="${escapeHtml(asset.url)}" rel="noreferrer">${escapeHtml(strings().specOpen)}</a></article>`;
+    }
+    return `<article class="asset-card"><div class="asset-stage"><img src="${escapeHtml(asset.url)}" alt="${escapeHtml(asset.name)}"></div><h3>${escapeHtml(asset.name)}</h3>${meta}</article>`;
+  }
+
+  /* Declarative specimen list. Every `html` string is canonical `.ad-*` markup
+   * from design/components.css + design/patterns.css — never a viewer-local
+   * imitation, so a rule change in the design system shows up here immediately.
+   */
+  const COMPONENT_SPECIMENS = [
+    {
+      group: 'Actions',
+      title: 'Buttons',
+      classes: '.ad-btn--primary · --ghost · --coral',
+      note: 'DESIGN.md §5.1. Primary is an ink fill that lifts 1px on hover; ghost inverts; coral marks the developer edge. Primary may carry a kelp mono badge.',
+      html: `<button class="ad-btn ad-btn--primary" type="button">Get on App Store<span class="ad-btn-badge">App Store</span></button>
+        <button class="ad-btn ad-btn--ghost" type="button">Read spec</button>
+        <button class="ad-btn ad-btn--coral" type="button">Run npx setup</button>`,
+    },
+    {
+      group: 'Editorial',
+      title: 'Kicker',
+      classes: '.ad-kicker · --coral · --kelp-light',
+      note: 'DESIGN.md §5.3. Mono, 12px, 0.18em tracked, uppercase. Kelp on light, coral in developer sections, kelp-300 on ink.',
+      html: `<span class="ad-kicker">Foundations</span>
+        <span class="ad-kicker ad-kicker--coral">Developer</span>
+        <span class="ad-surface-ink specimen-inkpad"><span class="ad-kicker ad-kicker--kelp-light">On ink</span></span>`,
+    },
+    {
+      group: 'Tiers',
+      title: 'Tier badges',
+      classes: '.ad-tier--store · --store-on-dark · --dev · --cli',
+      note: 'DESIGN.md §5.2. Store reads ink-on-sand, or kelp-on-ink when the surface is dark. Developer is always a solid coral fill; CLI is the one outlined variant.',
+      html: `<span class="ad-tier ad-tier--store">App Store</span>
+        <span class="ad-surface-ink specimen-inkpad"><span class="ad-tier ad-tier--store-on-dark">App Store</span></span>
+        <span class="ad-tier ad-tier--dev">Developer</span>
+        <span class="ad-tier ad-tier--cli">CLI</span>`,
+    },
+    {
+      group: 'Chrome',
+      title: 'Hero kicker chip',
+      classes: '.ad-chip',
+      note: 'DESIGN.md §5.4. Pill on tide-100 with a leading kelp dot and a 4px ring at 18% alpha.',
+      html: `<span class="ad-chip">20 surfaces · one daemon</span>`,
+    },
+    {
+      group: 'Signal',
+      title: 'Status dots — all four states',
+      classes: '.ad-dot--idle · --processing · --awaiting · --error',
+      note: 'DESIGN.md §2.7 + R4. Only the amber awaiting dot animates (1.1s ease-in-out). Kelp and coral must stay perfectly still — motion is how the user knows they are being asked for something.',
+      wide: true,
+      html: `<span class="ad-status"><span class="ad-dot ad-dot--idle"></span>Idle</span>
+        <span class="ad-status"><span class="ad-dot ad-dot--processing"></span>Processing</span>
+        <span class="ad-status"><span class="ad-dot ad-dot--awaiting"></span>Awaiting input</span>
+        <span class="ad-status"><span class="ad-dot ad-dot--error"></span>Error</span>`,
+    },
+    {
+      group: 'Containers',
+      title: 'Cards',
+      classes: '.ad-card · --ink · --dev',
+      note: 'The neutral card, the ink card for dark sections, and the developer card with its 3px coral left rule.',
+      wide: true,
+      html: `<div class="specimen-cards">
+          <div class="ad-card"><strong>Default</strong><p class="specimen-copy">Sand fill, hairline ink border, 14px radius.</p></div>
+          <div class="ad-surface-ink specimen-inkwrap"><div class="ad-card ad-card--ink"><strong>Ink</strong><p class="specimen-copy">Translucent white over an ink section.</p></div></div>
+          <div class="ad-card ad-card--dev"><strong>Developer</strong><p class="specimen-copy">Coral left rule, 12px radius.</p></div>
+        </div>`,
+    },
+    {
+      group: 'Chrome',
+      title: 'Language switcher',
+      classes: '.ad-lang',
+      note: 'DESIGN.md §1.5. KO/EN/JA are peers on the same pill; the active locale takes the ink fill.',
+      html: `<div class="ad-lang">
+          <button type="button" aria-pressed="true">EN</button>
+          <button type="button" aria-pressed="false">한국어</button>
+          <button type="button" aria-pressed="false">日本語</button>
+        </div>`,
+    },
+    {
+      group: 'Hardware',
+      title: 'Device tile',
+      classes: '.ad-device',
+      note: 'DESIGN.md §5.8. Tier badge top-left, device name pinned to the bottom in 13px sans 500, 96px min-height.',
+      html: `<div class="specimen-devices">
+          <div class="ad-device"><span class="ad-tier ad-tier--store">App Store</span><span class="ad-device-name">macOS menubar</span></div>
+          <div class="ad-device"><span class="ad-tier ad-tier--dev">Dev</span><span class="ad-device-name">InkDeck 7.5" e-ink</span></div>
+          <div class="ad-device"><span class="ad-tier ad-tier--dev">Dev</span><span class="ad-device-name">TC001 LED 32×8</span></div>
+        </div>`,
+    },
+    {
+      group: 'Machine',
+      title: 'Code block',
+      classes: '.ad-code',
+      note: 'DESIGN.md §5.7. Mono on ink with a leading kelp-300 `$` supplied by the pseudo-element — never typed into the copy.',
+      html: `<span class="ad-code">npx @agentdeck/setup</span>`,
+    },
+    {
+      group: 'Signal',
+      title: 'Inline notices',
+      classes: '.ad-notice--awaiting · --error · --ok',
+      note: 'Tinted at 8% over the hairline border. Notices carry status color but never animate — the dot does that job.',
+      wide: true,
+      html: `<div class="specimen-stack">
+          <div class="ad-notice ad-notice--awaiting"><span class="ad-dot ad-dot--awaiting"></span>Claude Code is waiting on a permission decision.</div>
+          <div class="ad-notice ad-notice--error"><span class="ad-dot ad-dot--error"></span>Board <code>ips10</code> dropped its WiFi socket.</div>
+          <div class="ad-notice ad-notice--ok"><span class="ad-dot ad-dot--processing"></span>OTA verified — buildHash matches.</div>
+        </div>`,
+    },
+    {
+      group: 'Patterns',
+      title: 'Hatch and honest placeholder',
+      classes: '.ad-hatch · .ad-placeholder',
+      note: 'DESIGN.md §5.10 + R7. When a real hardware photo is not ready we ship the diagonal hatch with a mono caption — we never illustrate hardware with a hand-drawn SVG.',
+      wide: true,
+      html: `<div class="specimen-patterns">
+          <div class="ad-hatch specimen-hatch"></div>
+          <div class="ad-placeholder" data-label="// menubar popup — sessions list"></div>
+        </div>`,
+    },
+    {
+      group: 'Patterns',
+      title: 'Surface paints',
+      classes: '.ad-surface-sand · --cream · --ink',
+      note: 'The three section grounds. Sand is the default page, cream separates a band, ink carries the dark editorial sections.',
+      wide: true,
+      html: `<div class="specimen-surfaces">
+          <div class="ad-surface-sand specimen-surface"><span class="ad-kicker">Sand</span><small>--tide-50</small></div>
+          <div class="ad-surface-cream specimen-surface"><span class="ad-kicker">Cream</span><small>--tide-100</small></div>
+          <div class="ad-surface-ink specimen-surface"><span class="ad-kicker ad-kicker--kelp-light">Ink</span><small>--ink-900</small></div>
+        </div>`,
+    },
+  ];
+
+  function typeScaleSpecimen() {
+    const steps = data.tokens.filter((token) => token.name.startsWith('--t-'));
+    const rows = steps
+      .map(
+        (token) =>
+          `<div class="type-row"><code>${escapeHtml(token.name)}</code><small>${escapeHtml(token.value)}</small><span class="type-sample" style="font-size:${escapeHtml(token.value)}">Ag 한글 カナ</span></div>`,
+      )
+      .join('');
+    return {
+      group: 'Typography',
+      title: `${strings().typeScale} — ${steps.length} steps`,
+      classes: '--t-hero … --t-mono-badge',
+      note: strings().typeScaleNote,
+      wide: true,
+      html: `<div class="type-scale">${rows}</div>`,
+    };
+  }
+
+  function specimenCard(spec) {
+    return `<article class="specimen${spec.wide ? ' specimen--wide' : ''}">
+      <header class="specimen-head">
+        <span class="ad-kicker">${escapeHtml(spec.group)}</span>
+        <h3>${escapeHtml(spec.title)}</h3>
+        <code class="specimen-class"><span class="specimen-class-label">${escapeHtml(strings().specimenClass)}</span>${escapeHtml(spec.classes)}</code>
+      </header>
+      <div class="specimen-stage">${spec.html}</div>
+      <p class="specimen-note">${escapeHtml(spec.note)}</p>
+    </article>`;
   }
 
   function renderComponents() {
     specialHeader(
       strings().components,
       strings().componentsDesc,
-      'Foundations · reviewed specimens',
-      badge('Token driven', 'canonical'),
+      'Foundations · design/components.css + design/patterns.css',
+      badge('Canonical CSS', 'canonical'),
     );
-    els.view.innerHTML = `<p class="specimen-intro">${escapeHtml(strings().componentsDesc)}</p><div class="component-grid">
-      <article class="component-card"><span class="demo-kicker">Actions</span><h3>Primary and ghost</h3><div class="demo-row"><button class="demo-button">View devices</button><button class="demo-button ghost">Read spec</button></div></article>
-      <article class="component-card dark"><span class="badge canonical">App Store</span><h3>Two tiers, one surface</h3><p>Kelp and ink for the calm product tier. Coral marks developer-only edges.</p></article>
-      <article class="component-card"><span class="demo-kicker">Attention only</span><h3>Status semantics</h3><div class="demo-row"><span class="demo-status"><i></i>Awaiting input</span><span class="status-dot"></span><span class="path">processing</span></div></article>
-      <article class="component-card"><span class="demo-kicker">Type as instrument</span><h3>IBM Plex Sans</h3><p>Human copy stays calm. <code>JetBrains Mono</code> carries paths, timestamps, tokens, and machine output.</p></article>
-    </div>`;
+    const specimens = [...COMPONENT_SPECIMENS, typeScaleSpecimen()];
+    els.view.innerHTML = `<p class="specimen-intro">${escapeHtml(strings().componentsNote)}</p><div class="specimen-grid">${specimens.map(specimenCard).join('')}</div>`;
   }
 
   function specialHeader(title, description, eyebrow, badges) {

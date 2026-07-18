@@ -1,3 +1,18 @@
+---
+id: spec.plugin-conventions
+title: Plugin Conventions
+description: Stream Deck+ encoder LCD, button rendering, OC Timeline, and D200H plugin conventions.
+category: Specifications
+locale: en
+canonical: true
+status: stable
+owner: Plugin maintainers
+reviewed: 2026-07-18
+revision: 2026-07-18
+source_of_truth: docs/plugin-conventions.md
+validators: [node scripts/build-design-system-viewer.mjs --check]
+---
+
 # Plugin Conventions
 
 Stream Deck+ plugin internals — encoder LCD design, button rendering, OC Timeline panel, and cross-cutting conventions.

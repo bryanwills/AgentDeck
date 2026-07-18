@@ -36,8 +36,20 @@
       "sources": { "en": "apple/APP_REVIEW_NOTES.md" }
     },
     {
+      "id": "policy.releasing",
+      "sources": { "en": "RELEASING.md" }
+    },
+    {
+      "id": "spec.plugin-conventions",
+      "sources": { "en": "docs/plugin-conventions.md" }
+    },
+    {
       "id": "validation.testing",
       "sources": { "en": "docs/testing.md" }
+    },
+    {
+      "id": "validation.design-lint",
+      "sources": { "en": "docs/design-lint-baseline.md" }
     }
   ]
 }

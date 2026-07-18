@@ -357,13 +357,15 @@ android/app/.../ui/theme/DesignTokens.kt       ← Compose binding
 ```
 
 `design/tokens.css` is the **single source of truth.** Every other token file
-(`tokens.js`, `design-tokens.ts`, `DesignTokens.swift`, `DesignTokens.kt`) is a
-language-specific mirror — when CSS values change, all four mirrors must be
-updated in the same commit. Verify with `python3 design/verify-tokens-sync.py`.
+(`tokens.js`, `design-tokens.ts`, `DesignTokens.swift`, `DesignTokens.kt`, plus
+the embedded copies in the APME dashboard HTML and the Stream Deck PI
+`design-tokens.css`) is a mirror — when CSS values change, all six mirrors must
+be updated in the same commit. Verify with `python3 design/verify-tokens-sync.py`,
+which gates exactly that mirror set.
 
 When adding a new component:
 1. Define its tokens in `design/tokens.css` if you need new ones (rare).
-2. Sync the new values into `tokens.js` + `design-tokens.ts` + `DesignTokens.swift` + `DesignTokens.kt`.
+2. Sync the new values into `tokens.js` + `design-tokens.ts` + `DesignTokens.swift` + `DesignTokens.kt` (and the embedded mirrors — `verify-tokens-sync.py` will catch misses).
 3. Write the rule in `design/components.css`.
-4. Add a card to `docs/design/Design System.html` so it's visible in review.
+4. Add a specimen to the design-system viewer's Component lab (`agentdeck-design-system/viewer/`) so it renders on `/design-system/` for review. (`docs/design/Design System.html` is the legacy surface — do not extend it.)
 5. Update this doc if it changes a principle.

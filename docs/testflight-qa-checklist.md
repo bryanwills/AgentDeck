@@ -206,7 +206,7 @@ Logs:
 Screenshots/video: <attachments>
 ```
 
-Send to `puritysb@gmail.com` or file as a GitHub issue.
+Send to `admin@foundby.kr` or file as a GitHub issue.
 
 ---
 

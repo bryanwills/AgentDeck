@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -8,6 +8,10 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const systemRoot = path.join(repoRoot, 'agentdeck-design-system');
 const outputRoot = path.join(repoRoot, 'dist', 'design-system');
 const checkOnly = process.argv.includes('--check');
+
+/* Exact pin, not a floor: a silently dropped token is as much a regression as a
+ * silently added one. Bump this deliberately when design/tokens.css changes. */
+const EXPECTED_TOKEN_COUNT = 96;
 const requiredFields = [
   'id',
   'title',
@@ -99,23 +103,40 @@ async function loadTokens() {
   for (const match of css.matchAll(/^\s*--([\w-]+):\s*([^;]+);/gm)) {
     tokens.push({ name: `--${match[1]}`, value: match[2].trim(), group: tokenGroup(match[1]) });
   }
-  if (tokens.length < 40) fail(`expected at least 40 design tokens, found ${tokens.length}`);
+  if (tokens.length !== EXPECTED_TOKEN_COUNT) {
+    fail(
+      `expected exactly ${EXPECTED_TOKEN_COUNT} design tokens, found ${tokens.length}. ` +
+        'If you intentionally added or removed a token in design/tokens.css, update EXPECTED_TOKEN_COUNT ' +
+        'in scripts/build-design-system-viewer.mjs (and the token mirrors listed in DESIGN.md §11).',
+    );
+  }
   return tokens;
 }
 
+const IMAGE_EXTENSIONS = new Set(['.png', '.svg', '.jpg', '.jpeg', '.webp']);
+
+/* Non-image canonical design sources that belong in the asset library as
+ * pointers. They are source-only: the viewer links them, never renders them. */
+const SPEC_POINTERS = [
+  {
+    source: 'design/icons.jsx',
+    name: 'icons',
+    note: 'Canonical UI icon set — 22px marks on a 24px viewbox, 1.6px stroke (DESIGN.md §6.3). JSX source, not rendered here.',
+  },
+];
+
 async function loadAssets() {
-  const files = [
-    'agentdeck-icon.png',
-    'antigravity.svg',
-    'claudecode.svg',
-    'codex.svg',
-    'openclaw.svg',
-    'opencode.svg',
-  ];
+  const brandDir = path.join(repoRoot, 'design', 'brand');
+  const entries = await readdir(brandDir, { withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile() && IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
+    .map((entry) => entry.name)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  if (files.length === 0) fail('design/brand contains no brand assets');
+
   const assets = [];
   for (const file of files) {
-    const absolute = path.join(repoRoot, 'design', 'brand', file);
-    const info = await stat(absolute);
+    const info = await stat(path.join(brandDir, file));
     assets.push({
       name: file.replace(/\.[^.]+$/, ''),
       file,
@@ -123,6 +144,21 @@ async function loadAssets() {
       bytes: info.size,
       url: `assets/brand/${file}`,
       source: `design/brand/${file}`,
+      kind: 'image',
+    });
+  }
+
+  for (const pointer of SPEC_POINTERS) {
+    const info = await stat(safeSourcePath(pointer.source));
+    assets.push({
+      name: pointer.name,
+      file: path.basename(pointer.source),
+      type: path.extname(pointer.source).slice(1).toUpperCase(),
+      bytes: info.size,
+      url: `https://github.com/puritysb/AgentDeck/blob/master/${pointer.source}`,
+      source: pointer.source,
+      kind: 'spec',
+      note: pointer.note,
     });
   }
   return assets;

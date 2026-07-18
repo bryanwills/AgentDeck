@@ -71,6 +71,8 @@ Do not copy numeric specifications into domain guides. Link back to this matrix 
 
 `App Store` describes compatibility with the submitted Apple app and its Swift daemon, not whether third-party host software is bundled. Stream Deck and D200H still require their vendor applications.
 
+**Counted surfaces: 20 production + 2 experimental (XTeink X3/X4).** Public surface-count claims (README, landing page) mirror this derivation: every row above except the protocol rows (SSE stream) counts, and Experimental rows are stated separately. Update this line and the mirrors together when rows change.
+
 ## ESP32 board specifications
 
 The AgentDeck firmware uses PlatformIO and Arduino. LVGL 9.2 drives LCD boards; TC001 uses FastLED; InkDeck uses its e-ink renderer. USB port names are not identities—probe `device_info_request` before flashing.
