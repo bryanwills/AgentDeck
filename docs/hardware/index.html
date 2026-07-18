@@ -75,7 +75,7 @@
 
   /* Card preview: canonical render (contain, dark stage) or real photo (cover).
      A missing file flips to the diagonal-hatch placeholder — DESIGN.md R7. */
-  .shot { position:relative; height:180px; border-radius:var(--r-xl); overflow:hidden; background:var(--ink-900); margin:0 0 var(--s-4); flex:0 0 auto; }
+  .shot { position:relative; height:200px; border-radius:var(--r-xl); overflow:hidden; background:var(--ink-900); margin:0 0 var(--s-4); flex:0 0 auto; }
   .shot img { width:100%; height:100%; object-fit:cover; display:block; }
   .shot.render img { object-fit:contain; padding:var(--s-2); }
   .shot.pixel img { image-rendering:pixelated; }
@@ -141,7 +141,7 @@
   <header>
     <p class="kicker" data-i18n="hero.kicker">AgentDeck · Surface catalog</p>
     <h1 data-i18n="hero.h1">One session.<br>Made physical.</h1>
-    <p class="lede" data-i18n="hero.lede">Every card shows the surface actually rendering a session — canonical renderer output, pixel-exact firmware frames, or real hardware photography. Board-level specifications live in the compatibility matrix.</p>
+    <p class="lede" data-i18n="hero.lede">Every card shows the surface actually running a session — photographed on the desk, or rendered by the canonical renderer where no unit was on hand. Board-level specifications live in the compatibility matrix.</p>
     <div class="hero-actions">
       <a class="btn primary" href="../demo/" data-i18n="hero.demo">Try the interactive preview</a>
       <a class="btn secondary" href="../design-system/#hardware.compatibility" data-i18n="hero.matrix">Read the full spec matrix</a>
@@ -155,13 +155,13 @@
     <div class="section-head"><h2 data-i18n="s.controls.h">Control decks</h2><p data-i18n="s.controls.p">Two-way surfaces: they show session state and let you focus, approve, stop, and respond without returning to the terminal.</p></div>
     <div class="grid">
       <article class="device wide">
-        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/previews/streamdeck-key.svg" alt="Stream Deck session key rendered by the real plugin renderer" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/streamdeck-plus.jpg" alt="Elgato Stream Deck+ showing one AgentDeck session per key" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>Elgato Stream Deck family</h3><span class="badge bridge">SDK v2</span></div>
         <p class="sub" data-i18n="d.sd">Session-per-button control — the exact key the plugin renders. Bundled profiles for the 15-key, Mini, and Stream Deck+.</p>
         <div class="specs"><div class="spec"><span>Profiles</span><strong>15-key · Mini · Plus</strong></div><div class="spec"><span>Layout</span><strong>Session per button</strong></div></div>
       </article>
       <article class="device">
-        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/d200h-session-buttons.jpg" alt="Ulanzi D200H Deck Dock with lit session buttons" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/d200h.jpg" alt="Ulanzi D200H Deck Dock with lit AgentDeck session keys" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>Ulanzi D200H</h3><span class="badge bridge">14 keys</span></div>
         <p class="sub" data-i18n="d.d200h">Deck Dock with LCD keys, driven by the Ulanzi Studio plugin.</p>
         <div class="specs"><div class="spec"><span>Canvas</span><strong>960×540</strong></div><div class="spec"><span>Driver</span><strong>Studio plugin</strong></div></div>
@@ -179,13 +179,13 @@
         <div class="specs"><div class="spec"><span>Role</span><strong>Dashboard + hub</strong></div><div class="spec"><span>Daemon</span><strong>In process</strong></div></div>
       </article>
       <article class="device">
-        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/ipad-iphone-closeup.jpg" alt="iPad and iPhone running the AgentDeck companion app" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/ipad.jpg" alt="iPad running the AgentDeck companion app" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>iOS / iPadOS</h3><span class="badge native" data-i18n="b.native">Native</span></div>
         <p class="sub" data-i18n="d.ios">Same-LAN SwiftUI companion — monitoring on iPhone, terrarium second screen on iPad.</p>
         <div class="specs"><div class="spec"><span>Transport</span><strong>Paired WebSocket</strong></div><div class="spec"><span>Input</span><strong>Touch + voice</strong></div></div>
       </article>
       <article class="device">
-        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/LenovoTab_screenshot.jpg" alt="AgentDeck Android tablet photography" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/android-tablet.jpg" alt="Android tablet running the AgentDeck Compose dashboard" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>Android Tablet</h3><span class="badge native" data-i18n="b.native">Native</span></div>
         <p class="sub" data-i18n="d.android.tablet">Compose color dashboard — 60fps terrarium + HUD overlay.</p>
         <div class="specs"><div class="spec"><span>Canvas</span><strong>Color LCD</strong></div><div class="spec"><span>Discovery</span><strong>mDNS · Wi-Fi WS</strong></div></div>
@@ -206,22 +206,22 @@
   </section>
 
   <section id="esp32">
-    <div class="section-head"><h2 data-i18n="s.esp32.h">ESP32 displays</h2><p data-i18n="s.esp32.p">Purpose-built firmware on native pixel grids — the previews below are pixel-exact frames compiled from the real firmware sources (esp32/sim).</p></div>
+    <div class="section-head"><h2 data-i18n="s.esp32.h">ESP32 displays</h2><p data-i18n="s.esp32.p">Purpose-built firmware on native pixel grids, photographed running a live session. Pixel-exact firmware frames for these boards live in the Live Preview.</p></div>
     <div class="grid">
       <article class="device">
-        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/sim-frames/ips35-claude-working.png" alt="ESP32 IPS 3.5-inch firmware frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/ips35.jpg" alt="ESP32 IPS 3.5-inch panel running AgentDeck" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>IPS 3.5&quot;</h3><span class="badge native">ESP32-S3</span></div>
         <p class="sub" data-i18n="d.ips35">Landscape LVGL terrarium + HUD on a 480×320 IPS panel (JC3248W535).</p>
         <div class="specs"><div class="spec"><span>Canvas</span><strong>480×320 IPS</strong></div><div class="spec"><span>Transport</span><strong>Serial · Wi-Fi</strong></div></div>
       </article>
       <article class="device">
-        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/sim-frames/box86-claude-working.png" alt="ESP32 86 Box firmware frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/box86.jpg" alt="ESP32 86 Box wall panel running AgentDeck" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>86 Box 4&quot;</h3><span class="badge native">ESP32-S3</span></div>
         <p class="sub" data-i18n="d.box86">4-inch 480×480 wall-box with GT911 touch (ESP32-S3-4848S040).</p>
         <div class="specs"><div class="spec"><span>Canvas</span><strong>480×480 IPS</strong></div><div class="spec"><span>Input</span><strong>GT911 touch</strong></div></div>
       </article>
       <article class="device">
-        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/esp32-round-amoled.jpg" alt="ESP32 round AMOLED photography" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/round-amoled.jpg" alt="ESP32 round AMOLED panel running AgentDeck" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>Round AMOLED 1.8&quot;</h3><span class="badge native">ESP32-S3</span></div>
         <p class="sub" data-i18n="d.round">1.8-inch 360×360 round AMOLED — compact terrarium (JC3636W518).</p>
         <div class="specs"><div class="spec"><span>Canvas</span><strong>360×360</strong></div><div class="spec"><span>Shape</span><strong>Round AMOLED</strong></div></div>
@@ -233,13 +233,13 @@
         <div class="specs"><div class="spec"><span>Canvas</span><strong>135×240 TFT</strong></div><div class="spec"><span>Input</span><strong>2 buttons</strong></div></div>
       </article>
       <article class="device">
-        <figure class="shot"><img src="../media/waveshare-147.jpg" alt="Waveshare LCD 1.47&quot; running AgentDeck" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="shot missing"></div>
         <div class="device-top"><h3>Waveshare LCD 1.47&quot;</h3><span class="badge native">ESP32-C6</span></div>
         <p class="sub" data-i18n="d.waveshare">172×320 portrait strip on ESP32-C6 — no host-sim frame is baked for this board yet.</p>
         <div class="specs"><div class="spec"><span>Canvas</span><strong>172×320 TFT</strong></div><div class="spec"><span>Transport</span><strong>Serial · Wi-Fi</strong></div></div>
       </article>
       <article class="device">
-        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/sim-frames/ips10-claude-working.png" alt="ESP32 IPS 10.1-inch firmware frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/ips10.jpg" alt="ESP32 IPS 10.1-inch panel running the AgentDeck dashboard" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>IPS 10.1&quot;</h3><span class="badge native">ESP32-P4 + C6</span></div>
         <p class="sub" data-i18n="d.ips10">10.1-inch 800×1280 &quot;pixel office&quot; dashboard (JC8012P4A1C).</p>
         <div class="specs"><div class="spec"><span>Panel</span><strong>800×1280 MIPI-DSI</strong></div><div class="spec"><span>Memory</span><strong>16MB flash · 32MB PSRAM</strong></div></div>
@@ -250,17 +250,17 @@
         <p class="sub" data-i18n="d.inkdeck">7.5-inch 800×480 1-bit e-ink dashboard — custom firmware on the Seeed TRMNL OG DIY Kit, USB serial + Wi-Fi, updates via WiFi OTA.</p>
         <div class="specs"><div class="spec"><span>Canvas</span><strong>800×480 e-ink</strong></div><div class="spec"><span>Transport</span><strong>Serial · Wi-Fi</strong></div></div>
       </article>
-      <article class="device wide">
-        <figure class="shot"><img src="../media/xteink.jpg" alt="XTeink X3 / X4 e-ink readers running AgentDeck" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+      <article class="device">
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/xteink.jpg" alt="XTeink X3 / X4 e-ink readers running AgentDeck" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>XTeink X3 / X4</h3><span class="badge bridge" data-i18n="b.fork">Community fork</span></div>
-        <p class="sub" data-i18n="d.xteink">CrossPoint Reader fork on ESP32-C3 e-ink readers — decision cards + timeline, registered with both daemons over Wi-Fi. Distributed by the fork project (SD-card flash); its renderer lives outside this repository, so no canonical frame can be shown.</p>
+        <p class="sub" data-i18n="d.xteink">CrossPoint Reader fork on ESP32-C3 e-ink readers — decision cards + timeline, registered with both daemons over Wi-Fi. Distributed by the fork project (SD-card flash); its renderer lives outside this repository, so the Live Preview has no canonical frame for it.</p>
         <div class="specs"><div class="spec"><span>X3</span><strong>528×792 portrait</strong></div><div class="spec"><span>X4</span><strong>800×480 landscape</strong></div></div>
       </article>
     </div>
   </section>
 
   <section id="pixel">
-    <div class="section-head"><h2 data-i18n="s.pixel.h">Pixel displays</h2><p data-i18n="s.pixel.p">Small commercial displays turn session state and usage windows into ambient, glanceable signals — previews are the same frames the daemon pushes.</p></div>
+    <div class="section-head"><h2 data-i18n="s.pixel.h">Pixel displays</h2><p data-i18n="s.pixel.p">Small commercial displays turn session state and usage windows into ambient, glanceable signals — photographed showing what the daemon pushes.</p></div>
     <div class="grid">
       <article class="device">
         <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/pixoo64.jpg" alt="Divoom Pixoo64 Wi-Fi LED photography" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
@@ -269,7 +269,7 @@
         <div class="specs"><div class="spec"><span>Grid</span><strong>64×64 RGB</strong></div><div class="spec"><span>Role</span><strong>Terrarium + usage</strong></div></div>
       </article>
       <article class="device">
-        <figure class="shot render pixel" style="margin:0 0 var(--s-4)"><img src="../demo/previews/idotmatrix.svg" alt="iDotMatrix 32 by 32 frame from the canonical renderer" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/idotmatrix.jpg" alt="iDotMatrix 32 by 32 LED display running AgentDeck" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>iDotMatrix</h3><span class="badge bridge">BLE</span></div>
         <p class="sub" data-i18n="d.idot">32×32 BLE pixel display — the same terrarium renderer at native size.</p>
         <div class="specs"><div class="spec"><span>Grid</span><strong>32×32 RGB</strong></div><div class="spec"><span>Role</span><strong>Compact terrarium</strong></div></div>
@@ -306,7 +306,7 @@
       ko: {
         'hero.kicker': 'AgentDeck · 서피스 카탈로그',
         'hero.h1': '하나의 세션.<br>물리적 실체로.',
-        'hero.lede': '모든 카드는 해당 서피스가 실제로 세션을 렌더링하는 모습을 보여줍니다 — 정본 렌더러 출력, 펌웨어 그대로의 픽셀 프레임, 또는 실기 사진. 보드 수준 사양은 호환성 매트릭스에 있습니다.',
+        'hero.lede': '모든 카드는 해당 서피스가 실제로 세션을 구동하는 모습을 보여줍니다 — 책상 위에서 촬영했거나, 실기가 없는 경우 정본 렌더러 출력입니다. 보드 수준 사양은 호환성 매트릭스에 있습니다.',
         'hero.demo': '인터랙티브 프리뷰 열기',
         'hero.matrix': '전체 스펙 매트릭스 보기',
         'jump.controls': '컨트롤 데크',
@@ -318,9 +318,9 @@
         's.apps.h': '앱 & 터미널',
         's.apps.p': '각 앱은 따로 설계된 UI입니다 — macOS와 iOS/iPadOS는 비슷하지만 별개이고, Android 태블릿과 Android e-ink는 완전히 다른 레이아웃입니다. 의존성 없는 TUI는 같은 세션을 터미널 안에서 보여줍니다.',
         's.esp32.h': 'ESP32 디스플레이',
-        's.esp32.p': '네이티브 픽셀 그리드 위의 전용 펌웨어 — 아래 미리보기는 실제 펌웨어 소스를 컴파일해 얻은 픽셀 단위 프레임입니다(esp32/sim).',
+        's.esp32.p': '네이티브 픽셀 그리드 위의 전용 펌웨어를 실제 세션 구동 중에 촬영했습니다. 픽셀 단위 펌웨어 프레임은 라이브 프리뷰에 있습니다.',
         's.pixel.h': '픽셀 디스플레이',
-        's.pixel.p': '소형 상용 디스플레이가 세션 상태와 사용량을 은은한 신호로 바꿉니다 — 미리보기는 데몬이 실제로 푸시하는 프레임입니다.',
+        's.pixel.p': '소형 상용 디스플레이가 세션 상태와 사용량을 은은한 신호로 바꿉니다 — 데몬이 푸시한 화면을 실기로 촬영했습니다.',
         'd.sd': '버튼당 세션 하나 — 플러그인이 실제로 렌더링하는 키 그대로입니다. 15키·Mini·Stream Deck+ 프로필 번들.',
         'd.d200h': 'LCD 키를 갖춘 Deck Dock, Ulanzi Studio 플러그인으로 구동.',
         'd.macos': 'in-process 데몬 허브를 품은 SwiftUI 데스크톱 대시보드 — App Store 앱.',
@@ -335,7 +335,7 @@
         'd.waveshare': 'ESP32-C6의 172×320 세로형 스트립 — 이 보드의 호스트 sim 프레임은 아직 없습니다.',
         'd.ips10': '10.1인치 800×1280 "픽셀 오피스" 대시보드 (JC8012P4A1C).',
         'd.inkdeck': 'Seeed TRMNL OG DIY Kit 위의 커스텀 펌웨어 — 7.5인치 800×480 1-bit e-ink 대시보드, USB serial + Wi-Fi, WiFi OTA 업데이트.',
-        'd.xteink': 'ESP32-C3 e-ink 리더에서 도는 CrossPoint Reader 포크 — 결정 카드 + 타임라인, 양 데몬에 Wi-Fi로 등록됩니다. 배포는 포크 프로젝트가 담당(SD 카드 플래시)하며, 렌더러가 이 저장소 밖에 있어 정본 프레임을 보여줄 수 없습니다.',
+        'd.xteink': 'ESP32-C3 e-ink 리더에서 도는 CrossPoint Reader 포크 — 결정 카드 + 타임라인, 양 데몬에 Wi-Fi로 등록됩니다. 배포는 포크 프로젝트가 담당(SD 카드 플래시)하며, 렌더러가 이 저장소 밖에 있어 라이브 프리뷰에는 정본 프레임이 없습니다.',
         'd.pixoo': '64×64 Wi-Fi LED 프레임 — 은은한 테라리움 + 사용량 행.',
         'd.idot': '32×32 BLE 픽셀 디스플레이 — 같은 테라리움 렌더러의 네이티브 크기 출력.',
         'd.timebox': '11×11 BLE 마이크로 글리프 — 상태 필드 위 대표 크리처 하나.',
@@ -349,7 +349,7 @@
       ja: {
         'hero.kicker': 'AgentDeck · サーフェスカタログ',
         'hero.h1': 'ひとつのセッションを、<br>フィジカルに。',
-        'hero.lede': 'すべてのカードは、そのサーフェスが実際にセッションを描画する様子を示します — 正本レンダラー出力、ファームウェアそのままのピクセルフレーム、または実機写真。ボードレベル仕様は互換性マトリクスにあります。',
+        'hero.lede': 'すべてのカードは、そのサーフェスが実際にセッションを動かす様子を示します — 机の上で撮影したもの、実機がない場合は正本レンダラー出力です。ボードレベル仕様は互換性マトリクスにあります。',
         'hero.demo': 'インタラクティブプレビューを開く',
         'hero.matrix': 'フル仕様マトリクスを読む',
         'jump.controls': 'コントロールデッキ',
@@ -361,9 +361,9 @@
         's.apps.h': 'アプリ & ターミナル',
         's.apps.p': '各アプリは別設計のUIです — macOSとiOS/iPadOSは似ていて別物、AndroidタブレットとAndroid e-inkは完全に異なるレイアウトです。依存なしのTUIは同じセッションをターミナル内に表示します。',
         's.esp32.h': 'ESP32ディスプレイ',
-        's.esp32.p': 'ネイティブピクセルグリッド上の専用ファームウェア — 下のプレビューは実際のファームウェアソースをコンパイルして得たピクセル単位のフレームです(esp32/sim)。',
+        's.esp32.p': 'ネイティブピクセルグリッド上の専用ファームウェアを、実際のセッション動作中に撮影しました。ピクセル単位のファームウェアフレームはライブプレビューにあります。',
         's.pixel.h': 'ピクセルディスプレイ',
-        's.pixel.p': '小型の市販ディスプレイがセッション状態と使用量をさりげないシグナルに変えます — プレビューはdaemonが実際にプッシュするフレームです。',
+        's.pixel.p': '小型の市販ディスプレイがセッション状態と使用量をさりげないシグナルに変えます — daemonがプッシュした画面を実機で撮影しました。',
         'd.sd': 'ボタンごとにセッションひとつ — プラグインが実際に描画するキーそのものです。15キー・Mini・Stream Deck+のプロファイル同梱。',
         'd.d200h': 'LCDキーを備えたDeck Dock、Ulanzi Studioプラグインで駆動。',
         'd.macos': 'in-process daemonハブを内蔵したSwiftUIデスクトップダッシュボード — App Storeアプリ。',
@@ -378,7 +378,7 @@
         'd.waveshare': 'ESP32-C6の172×320縦型ストリップ — このボードのホストsimフレームはまだありません。',
         'd.ips10': '10.1インチ800×1280「ピクセルオフィス」ダッシュボード (JC8012P4A1C)。',
         'd.inkdeck': 'Seeed TRMNL OG DIY Kit上のカスタムファームウェア — 7.5インチ800×480 1-bit e-inkダッシュボード、USB serial + Wi-Fi、WiFi OTA更新。',
-        'd.xteink': 'ESP32-C3 e-inkリーダーで動くCrossPoint Readerフォーク — 決定カード + タイムライン、両daemonにWi-Fiで登録されます。配布はフォークプロジェクトが担当(SDカード書き込み)し、レンダラーがこのリポジトリの外にあるため正本フレームは表示できません。',
+        'd.xteink': 'ESP32-C3 e-inkリーダーで動くCrossPoint Readerフォーク — 決定カード + タイムライン、両daemonにWi-Fiで登録されます。配布はフォークプロジェクトが担当(SDカード書き込み)し、レンダラーがこのリポジトリの外にあるためライブプレビューには正本フレームがありません。',
         'd.pixoo': '64×64 Wi-Fi LEDフレーム — さりげないテラリウム + 使用量行。',
         'd.idot': '32×32 BLEピクセルディスプレイ — 同じテラリウムレンダラーのネイティブサイズ出力。',
         'd.timebox': '11×11 BLEマイクログリフ — ステータスフィールドに代表クリーチャーひとつ。',

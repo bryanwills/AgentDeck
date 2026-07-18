@@ -816,11 +816,14 @@ Run table (session · model · task · composite score · cost · git delta), ca
 Compact WiFi-connected displays for always-on agent monitoring.
 
 <p align="center">
-  <img src="docs/media/esp32-round-amoled.jpg" width="360" alt="ESP32 Round AMOLED — circular terrarium with octopus and crayfish">
+  <img src="docs/media/round-amoled.jpg" width="360" alt="ESP32 Round AMOLED — circular terrarium with agent creatures and tank status">
   &nbsp;&nbsp;
-  <img src="docs/media/esp32-displays.jpg" width="360" alt="ESP32 Round AMOLED and IPS LCD side by side">
+  <img src="docs/media/box86.jpg" width="360" alt="ESP32 86 Box 4-inch wall panel showing the AgentDeck terrarium">
 </p>
-<p align="center"><em>Left: Round AMOLED close-up (1.8" circular) &nbsp;|&nbsp; Right: Round AMOLED + IPS LCD side by side</em></p>
+<p align="center">
+  <img src="docs/media/ips10.jpg" width="720" alt="ESP32 IPS 10.1-inch panel showing the pixel-office dashboard with per-session cards">
+</p>
+<p align="center"><em>Round AMOLED 1.8" &nbsp;|&nbsp; 86 Box 4" &nbsp;|&nbsp; IPS 10.1" pixel-office dashboard</em></p>
 
 ### Supported Boards
 
@@ -848,7 +851,7 @@ Run `agentdeck wifi-setup` to provision WiFi over serial (see [CLI Reference](#c
 Compact 8×32 RGB LED matrix for always-on status-at-a-glance monitoring.
 
 <p align="center">
-  <img src="docs/media/tc001-led-matrix.png" width="720" alt="Ulanzi TC001 LED matrix — 8×32 RGB pixels showing agent state HUD with creature animation, rate limits, and usage gauge">
+  <img src="docs/media/tc001.jpg" width="720" alt="Ulanzi TC001 8×32 LED matrix showing the official agent dot-marks">
 </p>
 
 The TC001 is a minimal always-on display — separate from the larger ESP32 touch panels. It connects to the bridge via WiFi WebSocket and displays:
@@ -866,7 +869,7 @@ Simple desk or shelf mounting; low power consumption via USB. Firmware in `esp32
 64×64 RGB LED pixel art terrarium on a Divoom Pixoo64.
 
 <p align="center">
-  <img src="docs/media/pixoo64-night.jpg" width="360" alt="Pixoo64 LED matrix — pixel art octopus and crayfish glowing in the dark">
+  <img src="docs/media/pixoo64.jpg" width="640" alt="Divoom Pixoo64 showing the Claude creature over the terrarium with a usage row">
 </p>
 
 The Pixoo module renders official dot-art agent marks, state-reactive water, and matching Claude/Codex usage rows with primary/5h and secondary/7d percentages plus reset countdowns — all pushed over HTTP to the device's local API.
@@ -892,6 +895,10 @@ Manage devices with `agentdeck timebox {scan|add|list|remove|test|sync}`. `scan`
 ## InkDeck e-ink
 
 A wired (USB-powered) **7.5" e-ink status panel** that mirrors a compact AgentDeck dashboard. The hardware is a **Seeed TRMNL 7.5" OG DIY Kit** — a XIAO ESP32-S3 Plus wired to an 800×480 monochrome ePaper panel (GDEY075T7 / UC8179).
+
+<p align="center">
+  <img src="docs/media/inkdeck.jpg" width="720" alt="InkDeck 7.5-inch e-ink panel in a wooden frame showing five AgentDeck session cards and a usage footer">
+</p>
 
 InkDeck runs **custom AgentDeck ESP32 firmware** (PlatformIO env `inkdeck`) and, like every other ESP32 board, connects to the daemon over WiFi WebSocket — the daemon pushes 1-bit dashboard frames and the panel does fast partial refreshes (~0.3s) with periodic full refreshes. This replaces the former "TRMNL" commercial BYOS pull integration, which was removed; stock/commercial TRMNL panels are no longer supported.
 
