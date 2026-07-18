@@ -9,13 +9,14 @@
 //
 // The cycle opens on an empty dashboard and introduces one session at a time
 // (claude → codex → opencode), so a recording shows the product filling up
-// the way it does on a real machine instead of starting mid-story.
+// the way it does on a real machine instead of starting mid-story. The whole
+// arc fits inside 28s because an App Store App Preview may not exceed 30s.
 
 import process from 'node:process';
 import { readFileSync } from 'node:fs';
 import { WebSocketServer } from '../bridge/node_modules/ws/wrapper.mjs';
 
-const CYCLE_MS = 60_000;
+const CYCLE_MS = 30_000;
 const DEFAULT_PORT = Number(process.env.AGENTDECK_DEMO_PORT || 9220);
 const productVersion = readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim();
 
@@ -30,7 +31,7 @@ const phases = [
     timeline: null,
   },
   {
-    at: 4_000,
+    at: 2_500,
     focus: 'demo-claude',
     sessions: {
       claude: ['processing', 'Read', 'Mapping the responsive dashboard'],
@@ -42,7 +43,7 @@ const phases = [
     },
   },
   {
-    at: 9_000,
+    at: 5_500,
     focus: 'demo-claude',
     sessions: {
       claude: ['processing', 'Edit', 'Refining the session cards'],
@@ -55,7 +56,7 @@ const phases = [
     },
   },
   {
-    at: 14_000,
+    at: 8_000,
     focus: 'demo-codex',
     sessions: {
       claude: ['processing', 'Edit', 'Refining the session cards'],
@@ -69,7 +70,7 @@ const phases = [
     usage: { weeklyPercent: 78 },
   },
   {
-    at: 19_000,
+    at: 11_000,
     focus: 'demo-claude',
     sessions: {
       claude: ['idle', undefined, 'Dashboard polish complete'],
@@ -82,7 +83,7 @@ const phases = [
     },
   },
   {
-    at: 24_000,
+    at: 13_500,
     focus: 'demo-opencode',
     sessions: {
       claude: ['idle', undefined, 'Dashboard polish complete'],
@@ -97,7 +98,7 @@ const phases = [
     usage: { weeklyPercent: 79 },
   },
   {
-    at: 30_000,
+    at: 16_500,
     focus: 'demo-claude',
     sessions: {
       claude: [
@@ -116,7 +117,7 @@ const phases = [
     },
   },
   {
-    at: 36_000,
+    at: 20_000,
     focus: 'demo-claude',
     sessions: {
       claude: ['processing', 'Edit', 'Applying the approved adjustment'],
@@ -131,7 +132,7 @@ const phases = [
     },
   },
   {
-    at: 41_000,
+    at: 22_500,
     focus: 'demo-codex',
     sessions: {
       claude: ['processing', 'Edit', 'Applying the approved adjustment'],
@@ -146,7 +147,7 @@ const phases = [
     usage: { weeklyPercent: 80 },
   },
   {
-    at: 46_000,
+    at: 24_500,
     focus: 'demo-opencode',
     sessions: {
       claude: ['processing', 'Edit', 'Applying the approved adjustment'],
@@ -159,10 +160,10 @@ const phases = [
       raw: 'Release notes are ready for publication.',
     },
   },
-  // Closing frame: every session idle for the last ~9s so the terrarium
+  // Closing frame: every session idle for the last few seconds so the terrarium
   // settles to its rest state before the loop restarts.
   {
-    at: 51_000,
+    at: 26_500,
     focus: 'demo-claude',
     sessions: {
       claude: ['idle', undefined, 'Final adjustment complete'],
@@ -186,7 +187,7 @@ const agents = {
     modelName: 'Claude Sonnet',
     color: '\u001b[38;5;208m',
     label: 'CLAUDE CODE · Sample Workspace',
-    appearsAt: 4_000,
+    appearsAt: 2_500,
   },
   codex: {
     id: 'demo-codex',
@@ -196,7 +197,7 @@ const agents = {
     modelName: 'GPT-5 Codex',
     color: '\u001b[38;5;45m',
     label: 'CODEX · API Client',
-    appearsAt: 14_000,
+    appearsAt: 8_000,
   },
   opencode: {
     id: 'demo-opencode',
@@ -206,36 +207,36 @@ const agents = {
     modelName: 'Qwen Coder',
     color: '\u001b[38;5;141m',
     label: 'OPENCODE · Documentation',
-    appearsAt: 24_000,
+    appearsAt: 13_500,
   },
 };
 
 const terminalLines = {
   claude: [
-    [4_000, '❯ Polish the dashboard for the launch capture'],
-    [5_200, '  Reading MonitorScreen.swift'],
-    [9_000, '  Editing responsive session cards…'],
-    [18_600, '✓ Dashboard polish complete'],
-    [29_800, '❯ Apply the final layout adjustment'],
-    [30_400, '  Permission required: update dashboard layout'],
-    [35_400, '  Permission granted'],
-    [36_000, '  Applying final adjustment…'],
-    [50_800, '✓ Final adjustment complete'],
+    [2_500, '❯ Polish the dashboard for the launch capture'],
+    [3_300, '  Reading MonitorScreen.swift'],
+    [5_500, '  Editing responsive session cards…'],
+    [10_700, '✓ Dashboard polish complete'],
+    [16_300, '❯ Apply the final layout adjustment'],
+    [16_900, '  Permission required: update dashboard layout'],
+    [19_400, '  Permission granted'],
+    [20_000, '  Applying final adjustment…'],
+    [26_300, '✓ Final adjustment complete'],
   ],
   codex: [
-    [14_000, '› Verify the release candidate'],
-    [14_800, '• Running integration test suite'],
-    [19_000, '• Checking protocol contract tests'],
-    [26_000, '• Checking SwiftUI state projection'],
-    [40_400, '✓ 1842 tests passed'],
-    [40_900, '✓ Release candidate verified'],
+    [8_000, '› Verify the release candidate'],
+    [8_600, '• Running integration test suite'],
+    [11_000, '• Checking protocol contract tests'],
+    [14_500, '• Checking SwiftUI state projection'],
+    [22_100, '✓ 1842 tests passed'],
+    [22_400, '✓ Release candidate verified'],
   ],
   opencode: [
-    [24_000, '❯ Draft the launch release notes'],
-    [25_000, '  Reading the release summary…'],
-    [28_000, '  Writing concise feature highlights…'],
-    [38_000, '  Checking names and privacy-safe examples…'],
-    [45_600, '✓ Release notes are ready'],
+    [13_500, '❯ Draft the launch release notes'],
+    [14_200, '  Reading the release summary…'],
+    [15_800, '  Writing concise feature highlights…'],
+    [21_000, '  Checking names and privacy-safe examples…'],
+    [24_300, '✓ Release notes are ready'],
   ],
 };
 
