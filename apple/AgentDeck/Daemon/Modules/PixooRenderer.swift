@@ -290,6 +290,7 @@ final class PixooRenderer {
         "8": [0b111, 0b101, 0b111, 0b101, 0b111],
         "9": [0b111, 0b101, 0b111, 0b001, 0b111],
         "%": [0b101, 0b001, 0b010, 0b100, 0b101],
+        "/": [0b001, 0b001, 0b010, 0b100, 0b100],
         "h": [0b100, 0b100, 0b111, 0b101, 0b101],
         "m": [0b101, 0b111, 0b101, 0b101, 0b101],
         "d": [0b001, 0b001, 0b011, 0b101, 0b011],
@@ -1279,10 +1280,10 @@ final class PixooRenderer {
         }
         struct ProviderRow {
             let glyph: OfficialDotGlyph
-            let markerWidth: Int
             let brand: RGB
             let primary: UsageWindow?
             let secondary: UsageWindow?
+            let subscriptionUntil: String?
         }
         func freshCodexWindow(_ window: CodexRateLimitWindow?) -> UsageWindow? {
             guard window?.stale != true, let percent = window?.usedPercent else { return nil }
@@ -1292,20 +1293,22 @@ final class PixooRenderer {
         var providers: [ProviderRow] = []
         if dashboardState.usageStale != true, let fiveHour = dashboardState.fiveHourPercent {
             providers.append(ProviderRow(
-                glyph: .claudeCode, markerWidth: 7, brand: (255, 112, 76),
+                glyph: .claudeCode, brand: (255, 112, 76),
                 primary: UsageWindow(percent: fiveHour, resetsAt: dashboardState.fiveHourResetsAt),
                 secondary: dashboardState.sevenDayPercent.map {
                     UsageWindow(percent: $0, resetsAt: dashboardState.sevenDayResetsAt)
-                }
+                },
+                subscriptionUntil: nil
             ))
         }
         let codexPrimary = freshCodexWindow(dashboardState.codexRateLimits?.primary)
         let codexSecondary = freshCodexWindow(dashboardState.codexRateLimits?.secondary)
         if codexPrimary != nil || codexSecondary != nil {
             providers.append(ProviderRow(
-                glyph: .codex, markerWidth: 7, brand: (126, 116, 255),
+                glyph: .codex, brand: (126, 116, 255),
                 primary: codexPrimary,
-                secondary: codexSecondary
+                secondary: codexSecondary,
+                subscriptionUntil: dashboardState.codexSubscriptionActiveUntil
             ))
         }
         guard !providers.isEmpty else { return }
@@ -1316,21 +1319,16 @@ final class PixooRenderer {
         func drawCreatureMarker(_ provider: ProviderRow, rowY: Int) {
             guard let mask = OfficialDotGlyphs.masks[provider.glyph] else { return }
             let sourceSize = OfficialDotGlyphs.size
-            var minX = sourceSize, minY = sourceSize, maxX = -1, maxY = -1
-            for sy in 0..<sourceSize {
-                for sx in 0..<sourceSize where mask[sy * sourceSize + sx] > 12 {
-                    minX = min(minX, sx); minY = min(minY, sy)
-                    maxX = max(maxX, sx); maxY = max(maxY, sy)
-                }
-            }
-            guard maxX >= minX, maxY >= minY else { return }
-            let sourceWidth = maxX - minX + 1
-            let sourceHeight = maxY - minY + 1
-            let markerX = (9 - provider.markerWidth) / 2
+            // Preserve the canonical canvas proportions. Claude's occupied
+            // bounds are wider than tall; cropping and stretching them to 7x7
+            // changes the robot silhouette. The 9px slot leaves one LED on
+            // both sides of the seven-pixel mark.
+            let markerSize = 7
+            let markerX = 1
             for dy in 0..<7 {
-                let sy = min(maxY, minY + Int(floor((Double(dy) + 0.5) * Double(sourceHeight) / 7)))
-                for dx in 0..<provider.markerWidth {
-                    let sx = min(maxX, minX + Int(floor((Double(dx) + 0.5) * Double(sourceWidth) / Double(provider.markerWidth))))
+                let sy = min(sourceSize - 1, Int(floor((Double(dy) + 0.5) * Double(sourceSize) / Double(markerSize))))
+                for dx in 0..<markerSize {
+                    let sx = min(sourceSize - 1, Int(floor((Double(dx) + 0.5) * Double(sourceSize) / Double(markerSize))))
                     let alpha = mask[sy * sourceSize + sx]
                     guard alpha > 16 else { continue }
                     let intensity = alpha >= 96 ? 1.0 : 0.56
@@ -1353,13 +1351,45 @@ final class PixooRenderer {
             return String(detailed.prefix(max(0, maxCharacters - percentText.count)))
         }
 
-        func renderWindow(_ window: UsageWindow, leftX: Int, rightX: Int, rowY: Int) {
+        func subscriptionDate(_ until: String?) -> String {
+            guard let value = until?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+                return ""
+            }
+            let datePart = String(value.prefix(10))
+            let parts = datePart.split(separator: "-")
+            if parts.count == 3, parts[0].count == 4,
+               let month = Int(parts[1]), let day = Int(parts[2]),
+               (1...12).contains(month), (1...31).contains(day) {
+                return "\(month)/\(day)"
+            }
+            let compact = value.hasPrefix("~") ? String(value.dropFirst()) : value
+            let compactParts = compact.split(separator: "/")
+            if compactParts.count == 2,
+               let month = Int(compactParts[0]), let day = Int(compactParts[1]),
+               (1...12).contains(month), (1...31).contains(day) {
+                return "\(month)/\(day)"
+            }
+            return ""
+        }
+
+        func drawCenteredLabel(_ text: String, leftX: Int, rightX: Int, rowY: Int) {
+            guard !text.isEmpty else { return }
+            let textWidth = text.count * 4 - 1
+            let startX = leftX + max(0, (rightX - leftX - textWidth) / 2)
+            drawText(&buf, text: text, rightX: startX + textWidth, y: rowY + 1, color: timeColor)
+        }
+
+        func renderWindow(_ window: UsageWindow, leftX: Int, rightX: Int, rowY: Int, brand: RGB) {
             let percent = max(0, min(100, window.percent))
-            let color = gaugeColor(percent, animFrame: animFrame)
+            let color = gaugeColor(percent, animFrame: animFrame, brand: brand)
             let zoneWidth = rightX - leftX
             let fillWidth = Int(round(Double(zoneWidth) * percent / 100.0))
-            for y in rowY..<(rowY + 7) {
-                for x in leftX..<(leftX + fillWidth) { blendPixel(&buf, x, y, color, 0.35) }
+            // TC001-style fill: use a dim, full-height field for the consumed
+            // portion and keep the percentage/reset text bright above it.
+            if fillWidth > 0 {
+                for y in rowY..<(rowY + 7) {
+                    for x in leftX..<(leftX + fillWidth) { blendPixel(&buf, x, y, color, 0.24) }
+                }
             }
             let percentText = "\(Int(round(percent)))%"
             let resetText = fittedReset(window.resetsAt, percentText: percentText, zoneWidth: zoneWidth)
@@ -1374,15 +1404,28 @@ final class PixooRenderer {
         for (index, provider) in providers.enumerated() {
             let rowY = firstY + index * 7
             for y in rowY..<(rowY + 7) {
-                for x in 0..<Self.width { blendPixel(&buf, x, y, Self.colors.black, 0.62) }
+                for x in 0..<Self.width {
+                    blendPixel(&buf, x, y, Self.colors.black, 0.70)
+                    blendPixel(&buf, x, y, provider.brand, 0.08)
+                }
+            }
+            // Slightly denser provider tint behind the mark joins the logo to
+            // the usage band without obscuring its canonical silhouette.
+            for y in rowY..<(rowY + 7) {
+                for x in 0..<9 { blendPixel(&buf, x, y, provider.brand, 0.12) }
             }
             drawCreatureMarker(provider, rowY: rowY)
             if let primary = provider.primary, let secondary = provider.secondary {
                 for y in (rowY + 1)..<(rowY + 6) { blendPixel(&buf, 36, y, provider.brand, 0.28) }
-                renderWindow(primary, leftX: 10, rightX: 36, rowY: rowY)
-                renderWindow(secondary, leftX: 37, rightX: 64, rowY: rowY)
+                renderWindow(primary, leftX: 9, rightX: 36, rowY: rowY, brand: provider.brand)
+                renderWindow(secondary, leftX: 37, rightX: 64, rowY: rowY, brand: provider.brand)
+            } else if provider.primary == nil, let secondary = provider.secondary,
+                      !subscriptionDate(provider.subscriptionUntil).isEmpty {
+                for y in (rowY + 1)..<(rowY + 6) { blendPixel(&buf, 36, y, provider.brand, 0.28) }
+                drawCenteredLabel(subscriptionDate(provider.subscriptionUntil), leftX: 9, rightX: 36, rowY: rowY)
+                renderWindow(secondary, leftX: 37, rightX: 64, rowY: rowY, brand: provider.brand)
             } else if let only = provider.primary ?? provider.secondary {
-                renderWindow(only, leftX: 10, rightX: 64, rowY: rowY)
+                renderWindow(only, leftX: 9, rightX: 64, rowY: rowY, brand: provider.brand)
             }
         }
     }
@@ -1916,14 +1959,13 @@ final class PixooRenderer {
         Swift.min(maxValue, Swift.max(minValue, value))
     }
 
-    private func gaugeColor(_ pct: Double, animFrame: Int) -> RGB {
+    private func gaugeColor(_ pct: Double, animFrame: Int, brand: RGB) -> RGB {
         if pct >= 90 {
             let pulse = (sin(Double(animFrame) * 0.2) + 1) * 0.3
             return lerpColor(Self.colors.stateError, Self.colors.white, pulse)
         }
         if pct >= 70 { return Self.colors.stateAwaiting }
-        if pct >= 50 { return (0x00, 0xC8, 0xB4) }
-        return Self.colors.stateProcessing
+        return brand
     }
 
     func formatResetDetailed(_ resetsAt: String?) -> String {

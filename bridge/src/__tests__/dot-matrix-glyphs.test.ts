@@ -155,6 +155,28 @@ describe('Pixoo64 provider usage HUD', () => {
     }).filter(Boolean).length;
     expect(markerPixels(50, [255, 112, 76])).toBeGreaterThan(3);
     expect(markerPixels(57, [126, 116, 255])).toBeGreaterThan(3);
+    const markerBounds = (top: number, brand: number[]) => {
+      const points: Array<{ x: number; y: number }> = [];
+      for (let y = top; y < top + 7; y++) for (let x = 0; x < 9; x++) {
+        if (pixel64(x, y).join() === brand.join()) points.push({ x, y });
+      }
+      return {
+        minX: Math.min(...points.map((point) => point.x)),
+        maxX: Math.max(...points.map((point) => point.x)),
+        minY: Math.min(...points.map((point) => point.y)),
+        maxY: Math.max(...points.map((point) => point.y)),
+      };
+    };
+    const claudeBounds = markerBounds(50, [255, 112, 76]);
+    expect(claudeBounds.minX).toBe(1);
+    expect(claudeBounds.maxX).toBe(7);
+    expect(claudeBounds.maxY - claudeBounds.minY + 1).toBeLessThan(7);
+    const codexBounds = markerBounds(57, [126, 116, 255]);
+    expect(codexBounds.minX).toBe(1);
+    expect(codexBounds.maxX).toBe(7);
+    // TC001-style usage fill occupies the full band height, not only y=56.
+    expect(pixel64(10, 50)).not.toEqual(pixel64(35, 50));
+    expect(pixel64(10, 56)).not.toEqual(pixel64(35, 56));
     const resetColor = [0x60, 0x70, 0x80].join();
     const resetPixels = (top: number) => Array.from({ length: 7 * 64 }, (_, index) => {
       const y = top + Math.floor(index / 64);
@@ -162,6 +184,29 @@ describe('Pixoo64 provider usage HUD', () => {
     }).filter((value) => value === resetColor).length;
     expect(resetPixels(50)).toBeGreaterThan(0);
     expect(resetPixels(57)).toBeGreaterThan(0);
+  });
+
+  it('uses the empty Codex primary zone for the subscription date', () => {
+    const frame = renderFrame(
+      { type: 'state_update', state: 'idle', permissionMode: 'default', agentType: 'codex-cli' } as any,
+      {
+        type: 'usage_update', sessionDurationSec: 0, inputTokens: 0, outputTokens: 0, toolCalls: 0,
+        codexSubscriptionActiveUntil: '2099-12-31T00:00:00Z',
+        codexRateLimits: {
+          secondary: { usedPercent: 50, windowMinutes: 10080 },
+        },
+      },
+      [{ id: 'cx', port: 9120, alive: true, agentType: 'codex-cli', state: 'idle' }],
+      0, 64,
+    );
+    const pixel64 = (x: number, y: number) => [...frame.slice((y * 64 + x) * 3, (y * 64 + x) * 3 + 3)];
+    const timeColor = [0x60, 0x70, 0x80].join();
+    const datePixels = Array.from({ length: 7 }, (_, row) => row + 57)
+      .flatMap((y) => Array.from({ length: 27 }, (_, x) => pixel64(x + 9, y)))
+      .filter((pixel) => pixel.join() === timeColor).length;
+    expect(datePixels).toBeGreaterThan(0);
+    // The 7D fill remains isolated to the right half beside that date.
+    expect(pixel64(38, 57)).not.toEqual(pixel64(63, 57));
   });
 });
 

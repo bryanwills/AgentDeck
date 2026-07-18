@@ -196,6 +196,26 @@ final class IDotMatrixProtocolTests: XCTestCase {
         }
         XCTAssertGreaterThan(markerPixels(50, [255, 112, 76]), 3)
         XCTAssertGreaterThan(markerPixels(57, [126, 116, 255]), 3)
+        func markerBounds(_ top: Int, _ brand: [UInt8]) -> (minX: Int, maxX: Int, minY: Int, maxY: Int) {
+            var points: [(x: Int, y: Int)] = []
+            for y in top..<(top + 7) { for x in 0..<9 where pixel64(x, y) == brand {
+                points.append((x, y))
+            } }
+            return (
+                points.map(\.x).min()!, points.map(\.x).max()!,
+                points.map(\.y).min()!, points.map(\.y).max()!
+            )
+        }
+        let claudeBounds = markerBounds(50, [255, 112, 76])
+        XCTAssertEqual(claudeBounds.minX, 1)
+        XCTAssertEqual(claudeBounds.maxX, 7)
+        XCTAssertLessThan(claudeBounds.maxY - claudeBounds.minY + 1, 7)
+        let codexBounds = markerBounds(57, [126, 116, 255])
+        XCTAssertEqual(codexBounds.minX, 1)
+        XCTAssertEqual(codexBounds.maxX, 7)
+        // TC001-style usage fill occupies the full band height, not only y=56.
+        XCTAssertNotEqual(pixel64(10, 50), pixel64(35, 50))
+        XCTAssertNotEqual(pixel64(10, 56), pixel64(35, 56))
         let resetColor: [UInt8] = [0x60, 0x70, 0x80]
         let claudeResetPixels = (50...56).flatMap { y in (0..<64).map { pixel64($0, y) } }
             .filter { $0 == resetColor }.count
@@ -203,6 +223,29 @@ final class IDotMatrixProtocolTests: XCTestCase {
             .filter { $0 == resetColor }.count
         XCTAssertGreaterThan(claudeResetPixels, 0)
         XCTAssertGreaterThan(codexResetPixels, 0)
+    }
+
+    func testPixoo64CodexOnlyUsesPrimaryZoneForSubscriptionDate() {
+        var state = DashboardState()
+        state.state = .idle
+        state.codexSubscriptionActiveUntil = "2099-12-31T00:00:00Z"
+        state.codexRateLimits = CodexRateLimits(
+            primary: nil,
+            secondary: CodexRateLimitWindow(
+                usedPercent: 50, windowMinutes: 10080, resetsAt: nil, stale: false
+            ),
+            planType: "plus", limitId: nil, credits: nil
+        )
+        let bytes = [UInt8](PixooRenderer().render(dashboardState: state))
+        func pixel64(_ x: Int, _ y: Int) -> [UInt8] {
+            let i = (y * 64 + x) * 3
+            return [bytes[i], bytes[i + 1], bytes[i + 2]]
+        }
+        let timeColor: [UInt8] = [0x60, 0x70, 0x80]
+        let datePixels = (57...63).flatMap { y in (9..<36).map { pixel64($0, y) } }
+            .filter { $0 == timeColor }.count
+        XCTAssertGreaterThan(datePixels, 0)
+        XCTAssertNotEqual(pixel64(38, 57), pixel64(63, 57))
     }
 
     // MARK: - Pixoo adaptive animation transport

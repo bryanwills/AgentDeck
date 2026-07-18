@@ -645,15 +645,14 @@ function simplifiedState(state: State): 'idle' | 'processing' | 'awaiting' {
 // ===== Usage HUD Helpers =====
 
 /** Gauge bar color based on usage percentage. */
-function gaugeColor(pct: number, animFrame: number): RGB {
+function gaugeColor(pct: number, animFrame: number, brand: RGB): RGB {
   if (pct >= 90) {
     // Red with pulse
     const pulse = (Math.sin(animFrame * 0.2) + 1) * 0.3;
     return lerpColor(COLORS.stateError, COLORS.white, pulse) as RGB;
   }
   if (pct >= 70) return COLORS.stateAwaiting;  // amber
-  if (pct >= 50) return [0x00, 0xC8, 0xB4] as unknown as RGB;  // teal
-  return COLORS.stateProcessing;  // blue
+  return brand;
 }
 
 /** Pixoo HUD reset time: "1h23", "4d6", "59m". */
@@ -675,10 +674,11 @@ export function formatResetDetailed(resetsAt: string | undefined): string {
 
 /** Draw Usage HUD in screen space (bottom, zoom-independent).
  *  Each provider uses the same seven-pixel band with its official creature
- *  silhouette, usage
- *  fill, percentage and reset countdown. When both are present Claude occupies
+ *  silhouette, full-height usage fill, percentage and reset countdown. When both are present Claude occupies
  *  rows 50-56 and Codex rows 57-63; a lone provider stays on rows 57-63.
  *  Primary/5h is the left zone and secondary/7d is the right zone.
+ *  When Codex only reports 7d, its subscription date occupies the otherwise
+ *  empty primary zone.
  */
 function drawUsageHUD(
   buf: Uint8Array, usageEvent: UsageEvent | null, animFrame: number,
@@ -686,14 +686,15 @@ function drawUsageHUD(
   if (!usageEvent) return;
   type Window = { percent: number; resetsAt?: string };
   type Provider = {
-    glyph: OfficialDotGlyphName; markerWidth: number; brand: RGB;
+    glyph: OfficialDotGlyphName; brand: RGB;
     primary?: Window; secondary?: Window;
+    subscriptionUntil?: string;
   };
 
   const providers: Provider[] = [];
   if (usageEvent.usageStale !== true && usageEvent.fiveHourPercent != null) {
     providers.push({
-      glyph: 'claudeCode', markerWidth: 7, brand: [255, 112, 76],
+      glyph: 'claudeCode', brand: [255, 112, 76],
       primary: { percent: usageEvent.fiveHourPercent, resetsAt: usageEvent.fiveHourResetsAt },
       secondary: usageEvent.sevenDayPercent == null ? undefined : {
         percent: usageEvent.sevenDayPercent, resetsAt: usageEvent.sevenDayResetsAt,
@@ -712,9 +713,10 @@ function drawUsageHUD(
   const codexSecondaryWindow = freshCodexWindow(usageEvent.codexRateLimits?.secondary);
   if (codexPrimaryWindow || codexSecondaryWindow) {
     providers.push({
-      glyph: 'codex', markerWidth: 7, brand: [126, 116, 255],
+      glyph: 'codex', brand: [126, 116, 255],
       primary: codexPrimaryWindow,
       secondary: codexSecondaryWindow,
+      subscriptionUntil: usageEvent.codexSubscriptionActiveUntil,
     });
   }
   if (providers.length === 0) return;
@@ -725,22 +727,16 @@ function drawUsageHUD(
   function drawCreatureMarker(provider: Provider, rowY: number): void {
     const mask = OFFICIAL_DOT_GLYPHS[provider.glyph];
     const sourceSize = OFFICIAL_DOT_GLYPH_SIZE;
-    let minX = sourceSize; let minY = sourceSize; let maxX = -1; let maxY = -1;
-    for (let sy = 0; sy < sourceSize; sy++) {
-      for (let sx = 0; sx < sourceSize; sx++) {
-        if (mask[sy * sourceSize + sx] <= 12) continue;
-        minX = Math.min(minX, sx); minY = Math.min(minY, sy);
-        maxX = Math.max(maxX, sx); maxY = Math.max(maxY, sy);
-      }
-    }
-    if (maxX < minX || maxY < minY) return;
-    const sourceWidth = maxX - minX + 1;
-    const sourceHeight = maxY - minY + 1;
-    const markerX = Math.floor((9 - provider.markerWidth) / 2);
+    // Sample the canonical square canvas instead of cropping its occupied
+    // bounds. Claude's source silhouette is intentionally wider than it is
+    // tall; cropping and stretching those bounds to 7x7 turns the robot into
+    // a square. The 9px slot leaves one physical LED on both sides.
+    const markerSize = 7;
+    const markerX = 1;
     for (let dy = 0; dy < 7; dy++) {
-      const sy = Math.min(maxY, minY + Math.floor((dy + 0.5) * sourceHeight / 7));
-      for (let dx = 0; dx < provider.markerWidth; dx++) {
-        const sx = Math.min(maxX, minX + Math.floor((dx + 0.5) * sourceWidth / provider.markerWidth));
+      const sy = Math.min(sourceSize - 1, Math.floor((dy + 0.5) * sourceSize / markerSize));
+      for (let dx = 0; dx < markerSize; dx++) {
+        const sx = Math.min(sourceSize - 1, Math.floor((dx + 0.5) * sourceSize / markerSize));
         const alpha = mask[sy * sourceSize + sx];
         if (alpha <= 16) continue;
         const intensity = alpha >= 96 ? 1 : 0.56;
@@ -758,13 +754,33 @@ function drawUsageHUD(
     return unit ? `${unit[1]}${unit[0].at(-1)}` : detailed.slice(0, Math.max(0, maxChars - pctText.length));
   }
 
-  function renderWindow(window: Window, leftX: number, rightX: number, rowY: number): void {
+  function subscriptionDate(until: string | undefined): string {
+    const value = until?.trim();
+    if (!value) return '';
+    const iso = value.match(/^\d{4}-(\d{1,2})-(\d{1,2})/);
+    if (iso) return `${Number(iso[1])}/${Number(iso[2])}`;
+    const compact = value.match(/^~?(\d{1,2})\/(\d{1,2})$/);
+    return compact ? `${Number(compact[1])}/${Number(compact[2])}` : '';
+  }
+
+  function drawCenteredLabel(text: string, leftX: number, rightX: number, rowY: number): void {
+    if (!text) return;
+    const textWidth = text.length * 4 - 1;
+    const startX = leftX + Math.max(0, Math.floor((rightX - leftX - textWidth) / 2));
+    drawText(buf, text, startX + textWidth, rowY + 1, timeColor);
+  }
+
+  function renderWindow(
+    window: Window, leftX: number, rightX: number, rowY: number, brand: RGB,
+  ): void {
     const pct = Math.max(0, Math.min(100, window.percent));
-    const color = gaugeColor(pct, animFrame);
+    const color = gaugeColor(pct, animFrame, brand);
     const zoneWidth = rightX - leftX;
     const fillWidth = Math.round(zoneWidth * pct / 100);
+    // TC001-style fill: the used portion is a dim full-height color field, so
+    // the gauge reads at a glance while bright text remains crisp above it.
     for (let y = rowY; y < rowY + 7; y++) {
-      for (let x = leftX; x < leftX + fillWidth; x++) blendPixel(buf, x, y, color, 0.35);
+      for (let x = leftX; x < leftX + fillWidth; x++) blendPixel(buf, x, y, color, 0.24);
     }
     const pctText = `${Math.round(pct)}%`;
     const resetText = fittedReset(window.resetsAt, pctText, zoneWidth);
@@ -779,17 +795,29 @@ function drawUsageHUD(
   providers.forEach((provider, index) => {
     const rowY = firstY + index * 7;
     for (let y = rowY; y < rowY + 7; y++) {
-      for (let x = 0; x < 64; x++) blendPixel(buf, x, y, COLORS.black, 0.62);
+      for (let x = 0; x < 64; x++) {
+        blendPixel(buf, x, y, COLORS.black, 0.70);
+        blendPixel(buf, x, y, provider.brand, 0.08);
+      }
+    }
+    // A slightly denser identity dock lets the official mark join the same
+    // color band without placing quota fill behind the silhouette itself.
+    for (let y = rowY; y < rowY + 7; y++) {
+      for (let x = 0; x < 9; x++) blendPixel(buf, x, y, provider.brand, 0.12);
     }
     drawCreatureMarker(provider, rowY);
 
     if (provider.primary && provider.secondary) {
       for (let y = rowY + 1; y < rowY + 6; y++) blendPixel(buf, 36, y, provider.brand, 0.28);
-      renderWindow(provider.primary, 10, 36, rowY);
-      renderWindow(provider.secondary, 37, 64, rowY);
+      renderWindow(provider.primary, 9, 36, rowY, provider.brand);
+      renderWindow(provider.secondary, 37, 64, rowY, provider.brand);
+    } else if (!provider.primary && provider.secondary && subscriptionDate(provider.subscriptionUntil)) {
+      for (let y = rowY + 1; y < rowY + 6; y++) blendPixel(buf, 36, y, provider.brand, 0.28);
+      drawCenteredLabel(subscriptionDate(provider.subscriptionUntil), 9, 36, rowY);
+      renderWindow(provider.secondary, 37, 64, rowY, provider.brand);
     } else {
       const only = provider.primary ?? provider.secondary;
-      if (only) renderWindow(only, 10, 64, rowY);
+      if (only) renderWindow(only, 9, 64, rowY, provider.brand);
     }
   });
 }

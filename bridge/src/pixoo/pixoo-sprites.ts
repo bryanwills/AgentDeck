@@ -1593,6 +1593,7 @@ const PIXEL_FONT: Record<string, number[]> = {
   '8': [0b111, 0b101, 0b111, 0b101, 0b111],
   '9': [0b111, 0b101, 0b111, 0b001, 0b111],
   '%': [0b101, 0b001, 0b010, 0b100, 0b101],
+  '/': [0b001, 0b001, 0b010, 0b100, 0b100],
   'h': [0b100, 0b100, 0b111, 0b101, 0b101],
   'm': [0b101, 0b111, 0b101, 0b101, 0b101],  // two pillars joined — distinct from 'n'
   'd': [0b001, 0b001, 0b011, 0b101, 0b011],  // lowercase d — for day units (e.g. "6d22h")
