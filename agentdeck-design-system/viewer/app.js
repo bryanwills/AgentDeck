@@ -400,7 +400,11 @@
       badge(meta.locale);
 
     if (viewMode === 'preview') {
-      els.view.innerHTML = `<article class="markdown">${markdownToHtml(page.body, page.path)}</article>`;
+      // The page header already renders the document title (frontmatter), so a
+      // leading body H1 would repeat it at display size — drop it in preview.
+      // Markdown/source tabs keep the raw file untouched.
+      const body = page.body.replace(/^\s*#\s+[^\n]+\n/, '');
+      els.view.innerHTML = `<article class="markdown">${markdownToHtml(body, page.path)}</article>`;
     } else if (viewMode === 'source') {
       els.view.innerHTML = `<pre class="source-code">${escapeHtml(page.raw)}</pre>`;
     } else {
