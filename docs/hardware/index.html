@@ -2,12 +2,14 @@
 <!--
   AgentDeck — public device catalog (GitHub Pages /hardware/).
   Canonical specifications live in docs/hardware-compatibility.md; this page is
-  the visual index: every card carries a real preview (canonical renderer
-  output, pixel-exact firmware sim frames, or real hardware photography —
-  DESIGN.md R7, never hand-drawn). Preview media is referenced relatively
-  (../demo/previews/, ../demo/sim-frames/, ../media/) and every card degrades
-  to the hatch placeholder when a file is missing, so the page itself stays a
-  self-contained single file that renders from file:// (minus the images).
+  the visual index: every card carries a photograph of the actual device running
+  a session (DESIGN.md R7 — real assets, never hand-drawn). Pixel-exact firmware
+  frames are the Live Preview's job, not this page's. Photos are cropped by
+  scripts/crop-hardware-images.mjs to match the card frames exactly (349x200
+  standard, 747x200 wide) so object-fit never re-crops the framing. Media is
+  referenced relatively (../media/) and every card degrades to the hatch
+  placeholder when a file is missing, so the page stays a self-contained single
+  file that renders from file:// (minus the images).
   Type/layout values mirror design/tokens.css (token-defining file).
 -->
 <html lang="en">
@@ -141,7 +143,7 @@
   <header>
     <p class="kicker" data-i18n="hero.kicker">AgentDeck · Surface catalog</p>
     <h1 data-i18n="hero.h1">One session.<br>Made physical.</h1>
-    <p class="lede" data-i18n="hero.lede">Every card shows the surface actually running a session — photographed on the desk, or rendered by the canonical renderer where no unit was on hand. Board-level specifications live in the compatibility matrix.</p>
+    <p class="lede" data-i18n="hero.lede">Every card is the real thing running a live session — photographed on the desk, or captured from the surface itself. Board-level specifications live in the compatibility matrix.</p>
     <div class="hero-actions">
       <a class="btn primary" href="../demo/" data-i18n="hero.demo">Try the interactive preview</a>
       <a class="btn secondary" href="../design-system/#hardware.compatibility" data-i18n="hero.matrix">Read the full spec matrix</a>
@@ -155,7 +157,7 @@
     <div class="section-head"><h2 data-i18n="s.controls.h">Control decks</h2><p data-i18n="s.controls.p">Two-way surfaces: they show session state and let you focus, approve, stop, and respond without returning to the terminal.</p></div>
     <div class="grid">
       <article class="device wide">
-        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/streamdeck-plus.jpg" alt="Elgato Stream Deck+ showing one AgentDeck session per key" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/streamdeck-family.jpg" alt="Elgato Stream Deck+ and the 15-key Stream Deck, both showing one AgentDeck session per key" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>Elgato Stream Deck family</h3><span class="badge bridge">SDK v2</span></div>
         <p class="sub" data-i18n="d.sd">Session-per-button control — the exact key the plugin renders. Bundled profiles for the 15-key, Mini, and Stream Deck+.</p>
         <div class="specs"><div class="spec"><span>Profiles</span><strong>15-key · Mini · Plus</strong></div><div class="spec"><span>Layout</span><strong>Session per button</strong></div></div>
@@ -233,9 +235,9 @@
         <div class="specs"><div class="spec"><span>Canvas</span><strong>135×240 TFT</strong></div><div class="spec"><span>Input</span><strong>2 buttons</strong></div></div>
       </article>
       <article class="device">
-        <div class="shot missing"></div>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/waveshare-147.jpg" alt="Waveshare ESP32-C6 LCD 1.47-inch board running AgentDeck" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>Waveshare LCD 1.47&quot;</h3><span class="badge native">ESP32-C6</span></div>
-        <p class="sub" data-i18n="d.waveshare">172×320 portrait strip on ESP32-C6 — no host-sim frame is baked for this board yet.</p>
+        <p class="sub" data-i18n="d.waveshare">172×320 strip on an ESP32-C6 — the smallest always-on surface, powered over USB-C.</p>
         <div class="specs"><div class="spec"><span>Canvas</span><strong>172×320 TFT</strong></div><div class="spec"><span>Transport</span><strong>Serial · Wi-Fi</strong></div></div>
       </article>
       <article class="device">
@@ -260,7 +262,7 @@
   </section>
 
   <section id="pixel">
-    <div class="section-head"><h2 data-i18n="s.pixel.h">Pixel displays</h2><p data-i18n="s.pixel.p">Small commercial displays turn session state and usage windows into ambient, glanceable signals — photographed showing what the daemon pushes.</p></div>
+    <div class="section-head"><h2 data-i18n="s.pixel.h">Pixel displays</h2><p data-i18n="s.pixel.p">Small commercial displays turn session state and usage windows into ambient, glanceable signals — photographed showing exactly what the daemon pushed.</p></div>
     <div class="grid">
       <article class="device">
         <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/pixoo64.jpg" alt="Divoom Pixoo64 Wi-Fi LED photography" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
@@ -275,7 +277,7 @@
         <div class="specs"><div class="spec"><span>Grid</span><strong>32×32 RGB</strong></div><div class="spec"><span>Role</span><strong>Compact terrarium</strong></div></div>
       </article>
       <article class="device">
-        <figure class="shot render pixel" style="margin:0 0 var(--s-4)"><img src="../demo/previews/timebox.svg" alt="Timebox Mini 11 by 11 micro glyph frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/timebox.jpg" alt="Divoom Timebox Mini showing an AgentDeck micro glyph" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
         <div class="device-top"><h3>Timebox Mini</h3><span class="badge bridge">BLE</span></div>
         <p class="sub" data-i18n="d.timebox">11×11 BLE micro glyph — one dominant creature on a status field.</p>
         <div class="specs"><div class="spec"><span>Grid</span><strong>11×11 RGB</strong></div><div class="spec"><span>Role</span><strong>Micro glyph</strong></div></div>
@@ -306,7 +308,7 @@
       ko: {
         'hero.kicker': 'AgentDeck · 서피스 카탈로그',
         'hero.h1': '하나의 세션.<br>물리적 실체로.',
-        'hero.lede': '모든 카드는 해당 서피스가 실제로 세션을 구동하는 모습을 보여줍니다 — 책상 위에서 촬영했거나, 실기가 없는 경우 정본 렌더러 출력입니다. 보드 수준 사양은 호환성 매트릭스에 있습니다.',
+        'hero.lede': '모든 카드는 실제로 세션을 구동 중인 실물입니다 — 책상 위에서 촬영했거나, 해당 서피스에서 직접 캡처했습니다. 보드 수준 사양은 호환성 매트릭스에 있습니다.',
         'hero.demo': '인터랙티브 프리뷰 열기',
         'hero.matrix': '전체 스펙 매트릭스 보기',
         'jump.controls': '컨트롤 데크',
@@ -332,7 +334,7 @@
         'd.box86': 'GT911 터치를 갖춘 4인치 480×480 월박스 (ESP32-S3-4848S040).',
         'd.round': '1.8인치 360×360 원형 AMOLED — 컴팩트 테라리움 (JC3636W518).',
         'd.ttgo': '주머니 크기 135×240 상태 스트립 — 미니 테라리움 + 지표 (LilyGO).',
-        'd.waveshare': 'ESP32-C6의 172×320 세로형 스트립 — 이 보드의 호스트 sim 프레임은 아직 없습니다.',
+        'd.waveshare': 'ESP32-C6의 172×320 스트립 — USB-C로 급전하는 가장 작은 상시 표시 서피스입니다.',
         'd.ips10': '10.1인치 800×1280 "픽셀 오피스" 대시보드 (JC8012P4A1C).',
         'd.inkdeck': 'Seeed TRMNL OG DIY Kit 위의 커스텀 펌웨어 — 7.5인치 800×480 1-bit e-ink 대시보드, USB serial + Wi-Fi, WiFi OTA 업데이트.',
         'd.xteink': 'ESP32-C3 e-ink 리더에서 도는 CrossPoint Reader 포크 — 결정 카드 + 타임라인, 양 데몬에 Wi-Fi로 등록됩니다. 배포는 포크 프로젝트가 담당(SD 카드 플래시)하며, 렌더러가 이 저장소 밖에 있어 라이브 프리뷰에는 정본 프레임이 없습니다.',
@@ -349,7 +351,7 @@
       ja: {
         'hero.kicker': 'AgentDeck · サーフェスカタログ',
         'hero.h1': 'ひとつのセッションを、<br>フィジカルに。',
-        'hero.lede': 'すべてのカードは、そのサーフェスが実際にセッションを動かす様子を示します — 机の上で撮影したもの、実機がない場合は正本レンダラー出力です。ボードレベル仕様は互換性マトリクスにあります。',
+        'hero.lede': 'すべてのカードは実際にセッションを動かしている実物です — 机の上で撮影したもの、あるいはそのサーフェス自身からキャプチャしたものです。ボードレベル仕様は互換性マトリクスにあります。',
         'hero.demo': 'インタラクティブプレビューを開く',
         'hero.matrix': 'フル仕様マトリクスを読む',
         'jump.controls': 'コントロールデッキ',
@@ -375,7 +377,7 @@
         'd.box86': 'GT911タッチ付き4インチ480×480ウォールボックス (ESP32-S3-4848S040)。',
         'd.round': '1.8インチ360×360円形AMOLED — コンパクトテラリウム (JC3636W518)。',
         'd.ttgo': 'ポケットサイズ135×240ステータスストリップ — ミニテラリウム + メトリクス (LilyGO)。',
-        'd.waveshare': 'ESP32-C6の172×320縦型ストリップ — このボードのホストsimフレームはまだありません。',
+        'd.waveshare': 'ESP32-C6の172×320ストリップ — USB-Cで給電する最小の常時表示サーフェスです。',
         'd.ips10': '10.1インチ800×1280「ピクセルオフィス」ダッシュボード (JC8012P4A1C)。',
         'd.inkdeck': 'Seeed TRMNL OG DIY Kit上のカスタムファームウェア — 7.5インチ800×480 1-bit e-inkダッシュボード、USB serial + Wi-Fi、WiFi OTA更新。',
         'd.xteink': 'ESP32-C3 e-inkリーダーで動くCrossPoint Readerフォーク — 決定カード + タイムライン、両daemonにWi-Fiで登録されます。配布はフォークプロジェクトが担当(SDカード書き込み)し、レンダラーがこのリポジトリの外にあるためライブプレビューには正本フレームがありません。',
