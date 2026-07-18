@@ -154,16 +154,40 @@ void wifiSetRadioParked(bool parked) {
     if (parked) {
         radioParked = true;
         wifiWasConnected = false;
+#if defined(BOARD_IPS10)
+        // ESP32-P4 reaches WiFi through an ESP32-C6 running ESP-Hosted over
+        // SDIO. WiFi.mode(WIFI_OFF) tears that transport down all the way
+        // through hostedDeinitWiFi(). If a final RX packet is still in flight,
+        // the C6 can enqueue into buffers that the P4 just destroyed and trip
+        // sdio_rx_get_buffer/sdio_push_data_to_queue assertions.
+        //
+        // A serial-primary IPS10 only needs network traffic quiesced; it does
+        // not need the hosted transport destroyed. Disassociate the STA while
+        // leaving ESP-Hosted initialized. radioParked suppresses mDNS/WS work
+        // in main.cpp, so the disconnected link stays quiet until USB drops.
+        if (WiFi.getMode() != WIFI_OFF && WiFi.isConnected()) {
+            if (!WiFi.disconnect(false, 1000)) {
+                Serial.println("[WiFi] IPS10 STA quiesce timed out; hosted transport kept alive");
+            }
+        }
+#else
         WiFi.mode(WIFI_OFF);
+#endif
     } else {
         radioParked = false;
+#if !defined(BOARD_IPS10)
         WiFi.mode(WIFI_STA);
         WiFi.setSleep(false);
-#if defined(BOARD_IPS10)
+#else
         // ESP-Hosted does not reliably reconnect from WIFI_OFF with a bare
-        // WiFi.reconnect(). Re-apply the daemon-provisioned credentials so
-        // USB-detached IPS10 units actually move from "radio restored" to
-        // STA connected instead of spinning WS attempts on a down interface.
+        // WiFi.reconnect(). Normally the IPS10 transport remained initialized
+        // while parked; WiFi.mode(WIFI_STA) in wifiConnectWith() is then a
+        // harmless no-op. It also covers the cold boot path where no saved
+        // credentials caused wifiInit() to turn the transport fully off.
+        if (WiFi.getMode() == WIFI_OFF) {
+            WiFi.mode(WIFI_STA);
+            WiFi.setSleep(false);
+        }
         char savedSsid[IPS10_SSID_MAX] = {0};
         char savedPassword[IPS10_PASSWORD_MAX] = {0};
         if (loadIps10ProvisionedWifi(savedSsid, sizeof(savedSsid), savedPassword, sizeof(savedPassword))) {

@@ -65,10 +65,10 @@ void wifiReset();
 const char* wifiLocalIP();
 
 /**
- * Park (true) or restore (false) the WiFi radio. Parking powers the radio off
- * (WIFI_OFF); restoring re-enters STA and reconnects to the saved AP. Used on
- * classic ESP32 (TTGO) to eliminate WiFi RF noise coupling into the SPI display
- * while USB serial is the active transport.
+ * Park (true) or restore (false) WiFi while USB serial is primary. Most boards
+ * power the radio off (WIFI_OFF). ESP32-P4/C6 IPS10 keeps ESP-Hosted initialized
+ * and only disassociates STA, because deinitializing the hosted SDIO transport
+ * while RX is in flight can assert. Restoring reconnects to the saved AP.
  */
 void wifiSetRadioParked(bool parked);
 

@@ -106,20 +106,20 @@ static void networkTask(void* param) {
         Net::wifiLoop();
 
 #if defined(BOARD_IPS10)
-        // On IPS10, do not let ESP-Hosted C6 WiFi/mDNS/WS overlap with an
-        // active USB serial bridge at all. The hosted SDIO driver asserts under
-        // that overlap, so park immediately after the first valid serial JSON
-        // instead of waiting for a stability window.
+        // On IPS10, stop C6 network traffic as soon as USB serial is active.
+        // wifiSetRadioParked() deliberately keeps ESP-Hosted/SDIO initialized
+        // on this board and only disassociates STA: a full WIFI_OFF teardown can
+        // race an in-flight RX packet and assert inside the hosted SDIO driver.
         {
             bool serialPrimary = Net::serialConnected();
             bool radioParked = Net::wifiRadioParked();
             if (serialPrimary && !radioParked) {
                 if (Net::wsConnected() || Net::wsConnecting()) Net::wsDisconnect();
                 Net::wifiSetRadioParked(true);
-                Serial.println("[WiFi] IPS10 radio parked - USB serial primary");
+                Serial.println("[WiFi] IPS10 STA quiesced - USB serial primary");
             } else if (!serialPrimary && radioParked) {
                 Net::wifiSetRadioParked(false);
-                Serial.println("[WiFi] IPS10 radio restored - serial inactive");
+                Serial.println("[WiFi] IPS10 STA restored - serial inactive");
             }
         }
 #endif
