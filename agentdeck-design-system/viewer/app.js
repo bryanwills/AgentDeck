@@ -371,7 +371,7 @@
     els.navigation.innerHTML = [...grouped.entries()]
       .map(
         ([category, items]) =>
-          `<section class="rail-group"><h3 class="rail-title">${escapeHtml(category)}</h3>${items.map((item) => `<button class="rail-button${item.id === activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.title)}</span><small>${escapeHtml(item.locale)}</small></button>`).join('')}</section>`,
+          `<section class="rail-group"><h3 class="rail-title">${escapeHtml(category)}</h3>${items.map((item) => `<button class="rail-button${item.id === activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.title)}</span></button>`).join('')}</section>`,
       )
       .join('');
     for (const button of els.navigation.querySelectorAll('[data-id]')) {

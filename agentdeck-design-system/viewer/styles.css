@@ -202,10 +202,7 @@ h1 em {
 }
 .rail-button {
   width: 100%;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  align-items: center;
+  display: block;
   padding: 8px 10px;
   color: var(--ink-700);
   text-align: left;
@@ -215,15 +212,10 @@ h1 em {
   cursor: pointer;
 }
 .rail-button span:first-child {
+  display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rail-button small {
-  color: var(--ink-300);
-  font: 10px var(--font-mono);
-  text-transform: uppercase;
+  white-space: normal;
+  line-height: 1.3;
 }
 .rail-button:hover {
   background: var(--tide-100);

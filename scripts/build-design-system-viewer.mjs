@@ -120,7 +120,7 @@ function blobUrl(relativePath) {
   return `https://github.com/puritysb/AgentDeck/blob/master/${encodeURI(relativePath)}`;
 }
 
-async function specPointer({ source, name, note, type }) {
+async function specPointer({ source, name, note, type, renderUrl }) {
   const absolute = safeSourcePath(source);
   const info = await stat(absolute);
   return {
@@ -129,7 +129,9 @@ async function specPointer({ source, name, note, type }) {
     file: path.basename(source.replace(/\/$/, '')),
     type: type || path.extname(source).slice(1).toUpperCase() || 'DIR',
     bytes: info.isDirectory() ? 0 : info.size,
-    url: blobUrl(source.replace(/\/$/, '')),
+    // renderUrl points at the rendered copy the build ships under reference/;
+    // without it the card falls back to the GitHub blob (source view).
+    url: renderUrl || blobUrl(source.replace(/\/$/, '')),
     source,
     note,
   };
@@ -281,16 +283,19 @@ async function loadReferenceSurfaces() {
     specPointer({
       source: 'docs/design/Design System.html',
       name: 'Design System.html',
+      renderUrl: encodeURI('reference/docs/design/Design System.html'),
       note: 'Legacy visual style guide. Superseded by this viewer for anything it covers; kept for the mockups it still hosts.',
     }),
     specPointer({
       source: 'docs/design/Design Audit.html',
       name: 'Design Audit.html',
+      renderUrl: encodeURI('reference/docs/design/Design Audit.html'),
       note: 'Coverage matrix and the R1–R8 lint rules in narrative form. The enforced version is `bash design/lint.sh`.',
     }),
     specPointer({
       source: 'docs/design/AgentDeck Tide Bento (D1).html',
       name: 'Tide Bento (D1).html',
+      renderUrl: encodeURI('reference/docs/design/AgentDeck Tide Bento (D1).html'),
       note: 'Bento landing exploration that set the current tide palette direction. Historical.',
     }),
     specPointer({
@@ -394,6 +399,16 @@ async function main() {
   await cp(path.join(repoRoot, 'design', 'tokens.css'), path.join(outputRoot, 'assets', 'tokens.css'));
   await cp(path.join(repoRoot, 'design', 'components.css'), path.join(outputRoot, 'assets', 'components.css'));
   await cp(path.join(repoRoot, 'design', 'patterns.css'), path.join(outputRoot, 'assets', 'patterns.css'));
+  // Rendered copies of the reference HTML surfaces (asset cards open real
+  // pages, not GitHub source). docs/design/*.html reference ../../design/*,
+  // so mirroring both directory levels under reference/ keeps them working.
+  const referenceRoot = path.join(outputRoot, 'reference');
+  await mkdir(path.join(referenceRoot, 'design'), { recursive: true });
+  for (const file of ['tokens.css', 'components.css', 'patterns.css', 'tokens.js', 'icons.jsx']) {
+    await cp(path.join(repoRoot, 'design', file), path.join(referenceRoot, 'design', file));
+  }
+  await cp(path.join(repoRoot, 'design', 'brand'), path.join(referenceRoot, 'design', 'brand'), { recursive: true });
+  await cp(path.join(repoRoot, 'docs', 'design'), path.join(referenceRoot, 'docs', 'design'), { recursive: true });
   await writeFile(
     path.join(outputRoot, 'manifest.js'),
     `window.AGENTDECK_DESIGN_SYSTEM = ${JSON.stringify(manifest)};\n`,
