@@ -34,16 +34,20 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    // Categories follow how the UIs actually differ, not form factor alone:
+    // the Android tablet and Android e-ink apps are entirely different
+    // Compose layouts (grouped under one Android platform header), while
+    // InkDeck is AgentDeck ESP32 firmware and sits with the other boards.
     enum Category: String, CaseIterable, Identifiable {
-        case desk, tablet, eink, esp32, matrix, terminal
+        case desk, apple, android, esp32, matrix, terminal
 
         var id: String { rawValue }
 
         var displayName: String {
             switch self {
             case .desk:     return "Desk"
-            case .tablet:   return "Tablet"
-            case .eink:     return "E-ink"
+            case .apple:    return "Apple"
+            case .android:  return "Android"
             case .esp32:    return "ESP32"
             case .matrix:   return "Matrix"
             case .terminal: return "Terminal"
@@ -54,11 +58,11 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
     var category: Category {
         switch self {
         case .streamDeckKey, .streamDeckPlus, .d200hKey, .d200hDeck:            return .desk
-        case .iPadLandscape, .androidTablet:                     return .tablet
-        case .einkMono, .einkColor, .inkDeck:                    return .eink
+        case .iPadLandscape:                                     return .apple
+        case .androidTablet, .einkMono, .einkColor:              return .android
         case .esp32_86box, .esp32_35Landscape,
              .esp32_35Portrait, .esp32Round,
-             .esp32Ttgo, .esp32Ips10:                            return .esp32
+             .esp32Ttgo, .esp32Ips10, .inkDeck:                  return .esp32
         case .ulanziMatrix, .pixoo64,
              .timeboxMini, .iDotMatrix:                          return .matrix
         case .terminalTerrarium:                                 return .terminal
@@ -73,8 +77,8 @@ enum PreviewDevice: String, CaseIterable, Identifiable {
         case .d200hDeck:          return "Ulanzi D200H Deck"
         case .iPadLandscape:      return "iPad (Landscape)"
         case .androidTablet:      return "Android Tablet"
-        case .einkMono:           return "E-ink Mono (CremaS)"
-        case .einkColor:          return "E-ink Color (Pantone6)"
+        case .einkMono:           return "Android E-ink Mono (CremaS)"
+        case .einkColor:          return "Android E-ink Color (Pantone6)"
         case .inkDeck:            return "InkDeck 7.5\" E-ink"
         case .esp32_86box:        return "ESP32 86Box 4\""
         case .esp32_35Landscape:  return "ESP32 IPS 3.5\" Landscape"

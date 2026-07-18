@@ -39,7 +39,7 @@ AgentDeck 대시보드 표면의 호환성을 한눈에 보기 위한 독자용 
 | Waveshare LCD 1.47  | ESP32 디스플레이     | ESP32-C6              | ST7789 · 172×320               | USB serial · Wi-Fi WS |   지원    |
 | IPS 10.1            | ESP32 디스플레이     | ESP32-P4 + C6         | JD9365 MIPI-DSI · 800×1280     | USB serial · Wi-Fi WS |   지원    |
 | Ulanzi TC001        | ESP32 LED            | ESP32 classic         | WS2812B · 32×8                 | USB serial · Wi-Fi WS |   일부    |
-| InkDeck             | ESP32 e-ink          | XIAO ESP32-S3 Plus    | UC8179 · 800×480               | Wi-Fi WS              |   실험    |
+| InkDeck             | ESP32 e-ink          | XIAO ESP32-S3 Plus    | UC8179 · 800×480               | USB serial · Wi-Fi WS |   지원    |
 | XTeink X3           | e-ink 리더           | ESP32-C3              | 3.7-inch · 528×792             | Wi-Fi WS              |   실험    |
 | XTeink X4           | e-ink 리더           | ESP32-C3              | 800×480                        | Wi-Fi WS              |   실험    |
 | Divoom Pixoo64      | 상용 LED             | Divoom controller     | RGB LED · 64×64                | HTTP REST             |   지원    |

@@ -25,11 +25,11 @@
 
 **Stop Chatting. Start Steering.**
 
-AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **16 display surfaces simultaneously** — tablets, e-ink readers (Android + the InkDeck ESP32 panel), phones, ESP32 modules, LED matrices, HID decks, and terminals.
+AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **20 display surfaces simultaneously** — tablets, e-ink readers (Android + the InkDeck ESP32 panel), phones, ESP32 modules, LED matrices, HID decks, and terminals — plus two experimental XTeink e-ink fork targets. The surface count is derived from the canonical matrix in [docs/hardware-compatibility.md](docs/hardware-compatibility.md).
 
-> One bridge. 16 surfaces. Steer your AI — without leaving your keyboard flow.
+> One bridge. 20 surfaces. Steer your AI — without leaving your keyboard flow.
 
-> **🚧 Direction update (in progress).** AgentDeck is shifting from *parsing* the agent to *observing* it. Reading agent state by scraping the PTY breaks every time an agent ships a UI update — so **hooks are now the primary path**: Claude Code / Codex lifecycle hooks feed session state deterministically, and PTY parsing falls back to a best-effort assist. In parallel we're hardening the **macOS App Store build** to run entirely inside the sandbox (no subprocesses, no companion binary) so a capable — if feature-gated — version can ship on its own, and stabilizing **timeline attribution** (turn completion, merge parity, per-agent labeling) across all 16 surfaces. Expect these areas to move fast.
+> **🚧 Direction update (in progress).** AgentDeck is shifting from *parsing* the agent to *observing* it. Reading agent state by scraping the PTY breaks every time an agent ships a UI update — so **hooks are now the primary path**: Claude Code / Codex lifecycle hooks feed session state deterministically, and PTY parsing falls back to a best-effort assist. In parallel we're hardening the **macOS App Store build** to run entirely inside the sandbox (no subprocesses, no companion binary) so a capable — if feature-gated — version can ship on its own, and stabilizing **timeline attribution** (turn completion, merge parity, per-agent labeling) across all surfaces. Expect these areas to move fast.
 
 > Independent project. Not affiliated with Anthropic, OpenAI, Google, Elgato, DIVOOM, or other third parties referenced. All trademarks are property of their respective owners. See [ATTRIBUTION.md](ATTRIBUTION.md) for full notices.
 
@@ -132,7 +132,7 @@ A **control surface** — like an audio mixing console, but for AI coding agents
 - **System utilities** — volume, mic, media, timer from the Utility encoder
 - **Terminal sessions** — iTerm dial switches sessions, auto-attaches tmux
 - **Multiple coding agents** — Claude Code, Codex CLI, OpenCode, and OpenClaw in one multi-agent daemon view
-- **Works from anywhere** — all 16 surfaces can monitor the agent; interactive surfaces (Stream Deck, D200H, Android, Apple) can also control it
+- **Works from anywhere** — every surface can monitor the agent; interactive surfaces (Stream Deck, D200H, Android, Apple) can also control it
 
 The bridge is transparent: if it's off, Claude Code works exactly as before.
 
@@ -149,24 +149,32 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 
 > Full hardware/OS inventory (SoC, resolution, transport, App Store tier) is the canonical matrix in **[docs/hardware-compatibility.md](docs/hardware-compatibility.md)**.
 
+The rows below mirror the surface matrix in [docs/hardware-compatibility.md](docs/hardware-compatibility.md) (20 production surfaces + 2 experimental fork targets). Each app row is a genuinely distinct UI — macOS and iOS/iPadOS are similar but separately designed; Android tablet and Android e-ink are entirely different layouts.
+
 | # | Surface | Description |
 |---|---------|-------------|
 | 1 | **Stream Deck+** | Primary — 8 keys, 4 encoders, LCD touch strip (v4 session-per-button) |
-| 2 | **Ulanzi D200H Deck Dock** | 14-key HID controller + 960×540 LCD — multi-session agent controller, usage monitor, premium CoreGraphics widgets |
-| 3 | **Android Tablet** | Color terrarium + HUD overlay (60fps) |
-| 4 | **E-ink Reader** | B&W 16-level grayscale + **Color E-ink** (Kaleido 3, 4096 colors) + partial refresh |
-| 5 | **iPhone** | SwiftUI app — mobile agent monitoring |
-| 6 | **iPad** | SwiftUI app — terrarium second screen |
-| 7 | **macOS** | SwiftUI app — desktop monitoring window + in-process Swift daemon |
-| 8 | **ESP32 Round AMOLED** | 1.8" circular 360×360 — compact WiFi display |
+| 2 | **Stream Deck** | Standard 15-key — bundled session-per-button profile |
+| 3 | **Stream Deck Mini** | 6-key — bundled compact profile |
+| 4 | **Ulanzi D200H Deck Dock** | 14-key HID controller + 960×540 LCD — multi-session agent controller, usage monitor, premium CoreGraphics widgets |
+| 5 | **macOS** | SwiftUI App Store app — desktop dashboard + in-process Swift daemon |
+| 6 | **iOS / iPadOS** | SwiftUI same-LAN companion — mobile monitoring (iPhone) and terrarium second screen (iPad), touch + voice |
+| 7 | **Android Tablet** | Compose color dashboard — terrarium + HUD overlay (60fps) |
+| 8 | **Android E-ink** | Reader-specific layouts — B&W 16-level grayscale + **Color E-ink** (Kaleido 3, 4096 colors) + partial refresh |
 | 9 | **ESP32 IPS LCD** | 3.5" rectangular 480×320 |
 | 10 | **ESP32 B86 Box** | 4" wall-mount touch panel 480×480 |
-| 11 | **Ulanzi TC001** | 8×32 RGB LED matrix — compact HUD pages and creature sprites |
-| 12 | **Pixoo64 LED** | 64×64 RGB LED pixel art terrarium |
-| 13 | **iDotMatrix 32×32** | 32×32 RGB AMOLED pixel display — BLE |
-| 14 | **Divoom Timebox Mini** | 11×11 RGB LED — BLE (App Store + CLI) |
-| 15 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote |
-| 16 | **InkDeck e-ink** | 7.5" 800×480 1-bit e-ink (XIAO ESP32-S3 Plus + UC8179 panel) — custom AgentDeck ESP32 firmware (in development), WiFi/WS to the daemon, partial-refresh dashboard |
+| 11 | **ESP32 Round AMOLED** | 1.8" circular 360×360 — compact WiFi display |
+| 12 | **ESP32 TTGO T-Display** | 1.14" 135×240 — compact status surface |
+| 13 | **ESP32 Waveshare LCD 1.47"** | ESP32-C6 172×320 |
+| 14 | **ESP32 IPS 10.1"** | 800×1280 MIPI-DSI — pixel-office dashboard (ESP32-P4 + C6) |
+| 15 | **InkDeck e-ink** | 7.5" 800×480 1-bit e-ink (XIAO ESP32-S3 Plus + UC8179 panel) — custom AgentDeck firmware, hardware-verified, USB serial + WiFi/WS, updates via WiFi OTA |
+| 16 | **Ulanzi TC001** | 8×32 RGB LED matrix — compact HUD pages and creature sprites |
+| 17 | **Pixoo64 LED** | 64×64 RGB LED pixel art terrarium |
+| 18 | **iDotMatrix 32×32** | 32×32 RGB pixel display — BLE |
+| 19 | **Divoom Timebox Mini** | 11×11 RGB LED — BLE (App Store + CLI) |
+| 20 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote |
+| 21 | **XTeink X3** *(experimental)* | 528×792 portrait e-ink reader — external CrossPoint fork, SD-card flash only |
+| 22 | **XTeink X4** *(experimental)* | 800×480 landscape e-ink reader — external CrossPoint fork, SD-card flash only |
 
 > Full hardware/OS spec sheet (SoC, resolution, flash, SDK, deployment targets) for every surface: **[docs/hardware-compatibility.md](docs/hardware-compatibility.md)** (visual view: [docs/hardware/index.html](docs/hardware/index.html)).
 
@@ -203,7 +211,7 @@ Claude Code Hooks ─ HTTP ───►│  Output Parser → State Machine    �
                               └──────────────────────────────────┘
 ```
 
-The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to all 16 surfaces. Local clients are auto-trusted; LAN clients authenticate with a token stored in the AgentDeck data directory (`~/.agentdeck/auth-token` for Node CLI / unsigned dev builds, `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/auth-token` for the Mac App Store build — routed through `AgentDeckPaths.swift`). Interactive surfaces (Stream Deck, D200H, Android, Apple) can control the agent; monitoring surfaces (Pixoo, Timebox, TUI, ESP32, InkDeck e-ink) display state.
+The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to every connected surface. Local clients are auto-trusted; LAN clients authenticate with a token stored in the AgentDeck data directory (`~/.agentdeck/auth-token` for Node CLI / unsigned dev builds, `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/auth-token` for the Mac App Store build — routed through `AgentDeckPaths.swift`). Interactive surfaces (Stream Deck, D200H, Android, Apple) can control the agent; monitoring surfaces (Pixoo, Timebox, TUI, ESP32, InkDeck e-ink) display state.
 
 On macOS, the AgentDeck Dashboard SwiftUI app ships with a full **in-process Swift daemon** (63 files, ~32,000 LOC) that re-implements the Node.js bridge — mDNS, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix), Gateway proxy, and WebSocket server. Installing the macOS app gives you the full bridge without Node.js. The `agentdeck` CLI remains the canonical path for Claude Code / Codex / OpenCode PTY sessions.
 

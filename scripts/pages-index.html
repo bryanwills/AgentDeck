@@ -11,7 +11,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentDeck — Stop Chatting. Start Steering.</title>
-<meta name="description" content="AgentDeck is a physical control surface for AI coding agents — one bridge, 16 display surfaces: Stream Deck+, e-ink readers, tablets, ESP32 displays, LED matrices, HID decks, and terminals.">
+<meta name="description" content="AgentDeck is a physical control surface for AI coding agents — one bridge, 20 display surfaces: Stream Deck+, e-ink readers, tablets, ESP32 displays, LED matrices, HID decks, and terminals.">
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -60,6 +60,11 @@
   .nav-links a:hover, .nav-links a.active { background: var(--tide-200); color: var(--ink-900); }
   .nav-links a.gh { background: var(--ink-800); color: var(--tide-50); }
   .nav-links a.gh:hover { background: var(--ink-900); }
+  .lang {
+    font: 500 13px var(--font-sans); color: var(--ink-700); background: var(--tide-100);
+    border: 1px solid var(--tide-200); border-radius: var(--r-pill); padding: 4px 10px; cursor: pointer;
+  }
+  .lang:hover { background: var(--tide-200); color: var(--ink-900); }
 
   .wrap { max-width: var(--container-max); margin: 0 auto; padding: var(--s-16) var(--container-pad) var(--s-20); }
 
@@ -145,6 +150,11 @@
       <a href="design-system/">Design System</a>
       <a href="reports/">Build Health</a>
       <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
+      <select id="lang" class="lang" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="ko">KO</option>
+        <option value="ja">JA</option>
+      </select>
     </div>
   </div>
 </nav>
@@ -152,77 +162,82 @@
 <div class="wrap">
   <header class="hero">
     <div class="logo"><img src="icon.png" alt="AgentDeck icon"></div>
-    <p class="kicker">Physical control surface for AI coding agents</p>
+    <p class="kicker" data-i18n="hero.kicker">Physical control surface for AI coding agents</p>
     <h1>Stop Chatting.<br><span class="tagline">Start Steering.</span></h1>
-    <p class="lede">
+    <p class="lede" data-i18n="hero.lede">
       AgentDeck turns Stream Deck+, e-ink readers, tablets, ESP32 displays, LED matrices, and
       terminals into a live cockpit for Claude Code, Codex, OpenCode, and OpenClaw — one daemon hub,
       shared across native apps, terminals, and physical hardware.
     </p>
     <div class="cta">
-      <a class="btn btn-primary" href="hardware/">Explore the devices</a>
-      <a class="btn btn-ghost" href="demo/">Try the live preview</a>
+      <a class="btn btn-primary" href="hardware/" data-i18n="cta.devices">Explore the devices</a>
+      <a class="btn btn-ghost" href="demo/" data-i18n="cta.demo">Try the live preview</a>
     </div>
     <div class="stats">
-      <div class="stat"><div class="n">EN</div><div class="l">canonical docs</div></div>
-      <div class="stat"><div class="n">4</div><div class="l">agent CLIs</div></div>
-      <div class="stat"><div class="n">KR·JP</div><div class="l">reader modes</div></div>
+      <div class="stat"><div class="n">EN</div><div class="l" data-i18n="stat.docs">canonical docs</div></div>
+      <div class="stat"><div class="n">4</div><div class="l" data-i18n="stat.clis">agent CLIs</div></div>
+      <div class="stat"><div class="n">KR·JP</div><div class="l" data-i18n="stat.readers">reader modes</div></div>
     </div>
   </header>
 
-  <h2>Explore AgentDeck</h2>
-  <p class="section-lede">Four focused views: what runs where, how it looks, how it works, and whether the current build is healthy.</p>
+  <h2 data-i18n="explore.h">Explore AgentDeck</h2>
+  <p class="section-lede" data-i18n="explore.p">Four focused views: what runs where, how it looks, how it works, and whether the current build is healthy.</p>
   <div class="cards">
     <a class="card" href="hardware/">
-      <div class="ci">Surface catalog</div>
+      <div class="ci" data-i18n="card.devices.ci">Surface catalog</div>
       <h3>Devices</h3>
-      <p>Browse supported displays and controllers, then open the detailed compatibility matrix.</p>
+      <p data-i18n="card.devices.p">Browse supported displays and controllers, then open the detailed compatibility matrix.</p>
     </a>
     <a class="card" href="design-system/">
-      <div class="ci">Living system</div>
+      <div class="ci" data-i18n="card.design.ci">Living system</div>
       <h3>Design system</h3>
-      <p>Rendered specs, source Markdown, metadata, tokens, assets, validation, and agent handover.</p>
+      <p data-i18n="card.design.p">Rendered specs, source Markdown, metadata, tokens, assets, validation, and agent handover.</p>
     </a>
     <a class="card" href="demo/">
-      <div class="ci">Interactive renderer</div>
+      <div class="ci" data-i18n="card.demo.ci">Interactive renderer</div>
       <h3>Live Preview</h3>
-      <p>Change the agent and state to compare real renderer output across device classes.</p>
+      <p data-i18n="card.demo.p">Change the agent and state to compare real renderer output across device classes.</p>
     </a>
     <a class="card" href="reports/">
-      <div class="ci">Quality evidence</div>
+      <div class="ci" data-i18n="card.health.ci">Quality evidence</div>
       <h3>Build Health</h3>
-      <p>See the latest automated checks, scenario coverage, history, and known gaps.</p>
+      <p data-i18n="card.health.p">See the latest automated checks, scenario coverage, history, and known gaps.</p>
     </a>
     <a class="card" href="https://github.com/puritysb/AgentDeck">
-      <div class="ci">Open source</div>
+      <div class="ci" data-i18n="card.src.ci">Open source</div>
       <h3>Source Code</h3>
-      <p>MIT-licensed monorepo on GitHub — bridge, plugins, firmware, apps.</p>
+      <p data-i18n="card.src.p">MIT-licensed monorepo on GitHub — bridge, plugins, firmware, apps.</p>
     </a>
   </div>
 
-  <h2>16 surfaces, one bridge</h2>
-  <p class="section-lede">The same session state renders natively on each, and they run simultaneously.</p>
+  <h2 data-i18n="surf.h">20 surfaces, one bridge</h2>
+  <p class="section-lede" data-i18n="surf.p">The same session state renders natively on each, and they run simultaneously — counted from the canonical compatibility matrix. Each app chip is a separately designed UI. Two experimental XTeink e-ink fork targets ride alongside.</p>
   <div class="surfaces">
     <div class="chip"><b>Stream Deck+</b><span>8 keys · 4 dials</span></div>
     <div class="chip"><b>Stream Deck</b><span>15 keys</span></div>
+    <div class="chip"><b>Stream Deck Mini</b><span>6 keys</span></div>
     <div class="chip"><b>Ulanzi D200H</b><span>960×540 · 14 keys</span></div>
+    <div class="chip"><b>macOS</b><span>SwiftUI dashboard + hub</span></div>
+    <div class="chip"><b>iOS / iPadOS</b><span>SwiftUI companion</span></div>
+    <div class="chip"><b>Android Tablet</b><span>Compose color dashboard</span></div>
+    <div class="chip"><b>Android E-ink</b><span>Compose reader layouts</span></div>
     <div class="chip"><b>ESP32 IPS 3.5"</b><span>480×320</span></div>
     <div class="chip"><b>ESP32 86 Box 4"</b><span>480×480</span></div>
     <div class="chip"><b>Round AMOLED 1.8"</b><span>360×360</span></div>
     <div class="chip"><b>ESP32 IPS 10.1"</b><span>800×1280</span></div>
     <div class="chip"><b>TTGO T-Display</b><span>135×240</span></div>
-    <div class="chip"><b>InkDeck e-ink</b><span>800×480</span></div>
+    <div class="chip"><b>Waveshare LCD 1.47"</b><span>172×320</span></div>
+    <div class="chip"><b>InkDeck e-ink</b><span>800×480 · WiFi OTA</span></div>
     <div class="chip"><b>Divoom Pixoo64</b><span>64×64 LED</span></div>
     <div class="chip"><b>Ulanzi TC001</b><span>8×32 LED</span></div>
     <div class="chip"><b>iDotMatrix</b><span>32×32 LED</span></div>
     <div class="chip"><b>Timebox Mini</b><span>11×11 LED</span></div>
-    <div class="chip"><b>Apple iOS / macOS</b><span>SwiftUI</span></div>
-    <div class="chip"><b>Android e-ink / tablet</b><span>Compose</span></div>
     <div class="chip"><b>TUI Dashboard</b><span>terminal</span></div>
   </div>
 
   <section id="privacy" class="policy" aria-labelledby="privacy-title">
     <h2 id="privacy-title">Privacy Policy</h2>
+    <p class="disclaimer" data-i18n="policy.canonical"></p>
     <p><strong>Effective date:</strong> July 15, 2026</p>
     <p>AgentDeck Dashboard is a local monitoring and evaluation app for AI coding agent sessions. It does not require an account,
       does not show ads, does not sell personal data, and does not operate a remote analytics service.</p>
@@ -265,5 +280,84 @@
     parties referenced. All trademarks are property of their respective owners.</p>
 </footer>
 
+<script>
+  // Site-wide language selection. Shares the design-system viewer's
+  // localStorage key so one choice follows the visitor across every route.
+  // English stays canonical in the DOM; ko/ja strings override per key.
+  (function () {
+    var I18N = {
+      ko: {
+        'hero.kicker': 'AI 코딩 에이전트를 위한 피지컬 컨트롤 서피스',
+        'hero.lede': 'AgentDeck은 Stream Deck+, e-ink 리더, 태블릿, ESP32 디스플레이, LED 매트릭스, 터미널을 Claude Code · Codex · OpenCode · OpenClaw의 라이브 콕핏으로 바꿉니다 — 하나의 데몬 허브를 네이티브 앱, 터미널, 피지컬 하드웨어가 함께 사용합니다.',
+        'cta.devices': '디바이스 살펴보기',
+        'cta.demo': '라이브 프리뷰 열기',
+        'stat.docs': '영어 정본 문서',
+        'stat.clis': '에이전트 CLI',
+        'stat.readers': '한국어·일본어 번역',
+        'explore.h': 'AgentDeck 둘러보기',
+        'explore.p': '네 가지 뷰 — 무엇이 어디서 돌아가는지, 어떻게 보이는지, 어떻게 동작하는지, 현재 빌드가 건강한지.',
+        'card.devices.ci': '서피스 카탈로그',
+        'card.devices.p': '지원 디스플레이·컨트롤러를 둘러보고 상세 호환성 매트릭스를 열어보세요.',
+        'card.design.ci': '살아있는 시스템',
+        'card.design.p': '렌더링된 스펙, 원본 Markdown, 메타데이터, 토큰, 에셋, 검증, 에이전트 인계 문서.',
+        'card.demo.ci': '인터랙티브 렌더러',
+        'card.demo.p': '에이전트와 상태를 바꿔가며 디바이스 클래스별 실제 렌더러 출력을 비교해 보세요.',
+        'card.health.ci': '품질 증거',
+        'card.health.p': '최신 자동화 검사, 시나리오 커버리지, 히스토리, 알려진 갭을 확인하세요.',
+        'card.src.ci': '오픈소스',
+        'card.src.p': 'GitHub의 MIT 라이선스 모노레포 — 브리지, 플러그인, 펌웨어, 앱.',
+        'surf.h': '20개 서피스, 하나의 브리지',
+        'surf.p': '동일한 세션 상태가 각 서피스에 네이티브로 렌더링되며 동시에 구동됩니다 — 개수는 정본 호환성 매트릭스 기준입니다. 앱 칩은 각각 따로 설계된 UI이며, 실험 단계인 XTeink e-ink 포크 타깃 2종이 함께합니다.',
+        'policy.canonical': '개인정보 처리방침은 영어 원문이 정본입니다.'
+      },
+      ja: {
+        'hero.kicker': 'AIコーディングエージェントのためのフィジカルコントロールサーフェス',
+        'hero.lede': 'AgentDeckはStream Deck+、e-inkリーダー、タブレット、ESP32ディスプレイ、LEDマトリクス、ターミナルをClaude Code · Codex · OpenCode · OpenClawのライブコックピットに変えます — ひとつのdaemonハブをネイティブアプリ、ターミナル、フィジカルハードウェアが共有します。',
+        'cta.devices': 'デバイスを見る',
+        'cta.demo': 'ライブプレビューを試す',
+        'stat.docs': '英語正本ドキュメント',
+        'stat.clis': 'エージェントCLI',
+        'stat.readers': '韓国語・日本語訳',
+        'explore.h': 'AgentDeckを見る',
+        'explore.p': '4つのビュー — 何がどこで動くか、どう見えるか、どう動くか、現在のビルドは健全か。',
+        'card.devices.ci': 'サーフェスカタログ',
+        'card.devices.p': '対応ディスプレイとコントローラーを眺めて、詳細な互換性マトリクスを開けます。',
+        'card.design.ci': 'リビングシステム',
+        'card.design.p': 'レンダリング済み仕様、元Markdown、メタデータ、トークン、アセット、検証、エージェント引き継ぎ。',
+        'card.demo.ci': 'インタラクティブレンダラー',
+        'card.demo.p': 'エージェントと状態を切り替えて、デバイスクラスごとの実レンダラー出力を比較できます。',
+        'card.health.ci': '品質エビデンス',
+        'card.health.p': '最新の自動チェック、シナリオカバレッジ、履歴、既知のギャップを確認できます。',
+        'card.src.ci': 'オープンソース',
+        'card.src.p': 'GitHubのMITライセンスmonorepo — ブリッジ、プラグイン、ファームウェア、アプリ。',
+        'surf.h': '20のサーフェス、ひとつのブリッジ',
+        'surf.p': '同じセッション状態が各サーフェスにネイティブ描画され、同時に動作します — 数は正本の互換性マトリクスに基づきます。アプリのチップはそれぞれ別設計のUIで、実験段階のXTeink e-inkフォークターゲット2種も並走しています。',
+        'policy.canonical': 'プライバシーポリシーは英語原文が正本です。'
+      }
+    };
+    var KEY = 'agentdeck-design-locale';
+    var sel = document.getElementById('lang');
+    var nodes = Array.prototype.slice.call(document.querySelectorAll('[data-i18n]'));
+    var orig = new Map();
+    nodes.forEach(function (n) { orig.set(n, n.innerHTML); });
+    function apply(l) {
+      document.documentElement.lang = l === 'ko' ? 'ko' : l === 'ja' ? 'ja' : 'en';
+      nodes.forEach(function (n) {
+        var k = n.getAttribute('data-i18n');
+        var t = l !== 'en' && I18N[l] && I18N[l][k];
+        n.innerHTML = t || orig.get(n);
+        if (!t && !orig.get(n)) n.innerHTML = '';
+      });
+      sel.value = l;
+    }
+    var l = localStorage.getItem(KEY) || 'en';
+    if (['en', 'ko', 'ja'].indexOf(l) < 0) l = 'en';
+    apply(l);
+    sel.addEventListener('change', function () {
+      localStorage.setItem(KEY, sel.value);
+      apply(sel.value);
+    });
+  })();
+</script>
 </body>
 </html>

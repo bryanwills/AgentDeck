@@ -39,7 +39,7 @@ AgentDeck の dashboard surface を一覧する読者向け翻訳です。英語
 | Waveshare LCD 1.47  | ESP32 display  | ESP32-C6              | ST7789 · 172×320               | USB serial · Wi-Fi WS   |   対応    |
 | IPS 10.1            | ESP32 display  | ESP32-P4 + C6         | JD9365 MIPI-DSI · 800×1280     | USB serial · Wi-Fi WS   |   対応    |
 | Ulanzi TC001        | ESP32 LED      | ESP32 classic         | WS2812B · 32×8                 | USB serial · Wi-Fi WS   |   一部    |
-| InkDeck             | ESP32 e-ink    | XIAO ESP32-S3 Plus    | UC8179 · 800×480               | Wi-Fi WS                |   実験    |
+| InkDeck             | ESP32 e-ink    | XIAO ESP32-S3 Plus    | UC8179 · 800×480               | USB serial · Wi-Fi WS   |   対応    |
 | XTeink X3           | e-ink reader   | ESP32-C3              | 3.7-inch · 528×792             | Wi-Fi WS                |   実験    |
 | XTeink X4           | e-ink reader   | ESP32-C3              | 800×480                        | Wi-Fi WS                |   実験    |
 | Divoom Pixoo64      | Commercial LED | Divoom controller     | RGB LED · 64×64                | HTTP REST               |   対応    |

@@ -52,7 +52,7 @@ Do not copy numeric specifications into domain guides. Link back to this matrix 
 | Waveshare LCD 1.47 | ESP32 display | ESP32-C6 | ST7789 · 172×320 | USB serial · Wi-Fi WS | Yes |
 | IPS 10.1 | ESP32 display | ESP32-P4 + C6 | JD9365 MIPI-DSI · 800×1280 | USB serial · Wi-Fi WS | Yes |
 | Ulanzi TC001 | ESP32 LED | ESP32 classic | WS2812B · 32×8 | USB serial · Wi-Fi WS | Partial |
-| InkDeck | ESP32 e-ink | XIAO ESP32-S3 Plus | UC8179 · 800×480 | Wi-Fi WS | Experimental |
+| InkDeck | ESP32 e-ink | XIAO ESP32-S3 Plus | UC8179 · 800×480 | USB serial · Wi-Fi WS | Yes |
 | XTeink X3 | e-ink reader | ESP32-C3 | 3.7-inch · 528×792 | Wi-Fi WS | Experimental |
 | XTeink X4 | e-ink reader | ESP32-C3 | 800×480 | Wi-Fi WS | Experimental |
 | Divoom Pixoo64 | Commercial LED | Divoom controller | RGB LED · 64×64 | HTTP REST | Yes |
@@ -92,7 +92,8 @@ Operational exceptions:
 - TTGO flashing uses 57,600 baud with `--no-stub`; its no-PSRAM renderer has a deliberately small buffer.
 - IPS 10.1 uses a 16 MB dual-OTA layout with 6 MB slots and requires internal-memory LVGL buffers. Its ESP32-C6 is the Wi-Fi coprocessor.
 - Existing factory or old-partition 86 Box and IPS 10.1 units require one USB full flash before OTA.
-- XTeink X3/X4 run the external CrossPoint Reader fork, not the `esp32/` PlatformIO project. Their wire contract is [ESP32 client contract](esp32-client-contract.md).
+- InkDeck serial reflashing must go through the download-mode port with `boot_app0.bin` included (native-CDC re-enumeration makes plain `pio -t upload` unreliable); routine updates ship over WiFi OTA instead. A residual crash in the prebuilt Espressif mDNS component is under observation and does not affect the render or OTA path.
+- XTeink X3/X4 run the external CrossPoint Reader fork, not the `esp32/` PlatformIO project. They are not distributed through AgentDeck releases and flash via SD-card `update.bin` only (no WiFi OTA). Their wire contract is [ESP32 client contract](esp32-client-contract.md).
 
 ## Pixel displays and control decks
 
