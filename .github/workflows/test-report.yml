@@ -126,6 +126,16 @@ jobs:
           cp docs/media/agentdeck-icon.png _site/icon.png
           # Public Devices catalog under /hardware/ (self-contained single file)
           cp docs/hardware/index.html _site/hardware/index.html
+          # Real device photography/screenshots referenced by the catalog cards
+          # (missing files degrade to the hatch placeholder via <img onerror>)
+          mkdir -p _site/media
+          cp assets/screenshots/macos-dashboard.png _site/media/ 2>/dev/null || true
+          cp assets/LenovoTab_screenshot.png _site/media/ 2>/dev/null || true
+          cp docs/media/ipad-iphone-closeup.jpg _site/media/ 2>/dev/null || true
+          cp docs/media/android-eink.png _site/media/ 2>/dev/null || true
+          cp docs/media/tui-dashboard.png _site/media/ 2>/dev/null || true
+          cp docs/media/d200h-session-buttons.jpg _site/media/ 2>/dev/null || true
+          cp docs/media/esp32-displays.jpg _site/media/ 2>/dev/null || true
           # Backward-compatible /gallery/ redirect (gallery content now lives in Devices)
           cp docs/gallery/index.html _site/gallery/index.html
           # Documentation hub under /docs/

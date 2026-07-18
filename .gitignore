@@ -97,6 +97,7 @@ plugin-ulanzi/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/plugin/
 # and scripts/render-esp32-sim-frames.mjs)
 tools/creature-simulator/sim-data.js
 tools/creature-simulator/sim-frames/
+tools/creature-simulator/previews/
 apple/DerivedData/
 .ds-sync/
 ds-bundle/

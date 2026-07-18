@@ -1,16 +1,21 @@
 <!DOCTYPE html>
 <!--
   AgentDeck — public device catalog (GitHub Pages /hardware/).
-  Canonical specifications live in docs/hardware-compatibility.md. This page is
-  the approachable visual index; the linked SSOT carries board-level detail.
-  Self-contained by design so it renders identically on Pages and from file://.
+  Canonical specifications live in docs/hardware-compatibility.md; this page is
+  the visual index: every card carries a real preview (canonical renderer
+  output, pixel-exact firmware sim frames, or real hardware photography —
+  DESIGN.md R7, never hand-drawn). Preview media is referenced relatively
+  (../demo/previews/, ../demo/sim-frames/, ../media/) and every card degrades
+  to the hatch placeholder when a file is missing, so the page itself stays a
+  self-contained single file that renders from file:// (minus the images).
+  Type/layout values mirror design/tokens.css (token-defining file).
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentDeck — Devices</title>
-<meta name="description" content="Supported AgentDeck displays and controllers — ESP32 panels, LED matrices, HID decks, Apple and Android apps, e-ink readers, and the terminal dashboard.">
+<meta name="description" content="Supported AgentDeck surfaces with live previews — control decks, native apps, ESP32 panels, e-ink, and LED matrices.">
 <link rel="icon" type="image/png" href="../icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,8 +30,11 @@
     --font-mono:"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace;
     --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
     --s-8:32px; --s-10:40px; --s-12:48px; --s-16:64px; --s-20:80px;
-    --container-max:1180px; --container-pad:24px;
-    --r-md:8px; --r-xl:12px; --r-2xl:14px; --r-3xl:18px; --r-pill:999px;
+    --t-hero:clamp(54px,7vw,96px); --tr-hero:-0.035em;
+    --t-h2:44px; --tr-h2:-0.02em; --t-lede:18px; --t-card-title:19px;
+    --t-caption:13px; --t-kicker:12px; --tr-kicker:0.18em;
+    --container-max:1240px; --container-pad:32px;
+    --r-md:8px; --r-xl:12px; --r-2xl:14px; --r-3xl:16px; --r-pill:999px;
     --sh-card:0 6px 20px -8px rgba(14,31,31,0.45);
   }
   * { box-sizing: border-box; }
@@ -39,7 +47,7 @@
   .nav-in { max-width:var(--container-max); margin:0 auto; padding:var(--s-3) var(--container-pad); display:flex; align-items:center; gap:var(--s-4); }
   .brand { display:flex; align-items:center; gap:var(--s-3); text-decoration:none; color:var(--ink-900); font-weight:700; }
   .brand img { width:30px; height:30px; border-radius:var(--r-md); }
-  .nav-links { margin-left:auto; display:flex; gap:var(--s-2); flex-wrap:wrap; }
+  .nav-links { margin-left:auto; display:flex; gap:var(--s-2); flex-wrap:wrap; align-items:center; }
   .nav-links a { font-size:14px; font-weight:500; text-decoration:none; color:var(--ink-700); padding:var(--s-1) var(--s-3); border-radius:var(--r-pill); }
   .nav-links a:hover, .nav-links a.active { background:var(--tide-200); color:var(--ink-900); }
   .nav-links a.gh { background:var(--ink-800); color:var(--tide-50); }
@@ -47,26 +55,37 @@
   .lang:hover { background:var(--tide-200); color:var(--ink-900); }
 
   .wrap { max-width:var(--container-max); margin:0 auto; padding:var(--s-16) var(--container-pad) var(--s-20); }
-  .kicker { font-family:var(--font-mono); font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--kelp-700); margin:0 0 var(--s-3); }
-  h1 { font-size:clamp(38px,6vw,64px); letter-spacing:-.035em; line-height:1.02; margin:0 0 var(--s-4); }
-  .lede { font-size:clamp(17px,2vw,20px); color:var(--ink-700); max-width:68ch; margin:0; }
+  .kicker { font-family:var(--font-mono); font-size:var(--t-kicker); letter-spacing:var(--tr-kicker); text-transform:uppercase; color:var(--kelp-700); margin:0 0 var(--s-3); }
+  h1 { font-size:var(--t-hero); letter-spacing:var(--tr-hero); line-height:1.02; margin:0 0 var(--s-4); }
+  .lede { font-size:var(--t-lede); color:var(--ink-700); max-width:68ch; margin:0; }
   .hero-actions { display:flex; gap:var(--s-3); flex-wrap:wrap; margin-top:var(--s-6); }
   .btn { display:inline-flex; align-items:center; text-decoration:none; font-weight:600; font-size:14px; padding:10px 18px; border-radius:var(--r-pill); border:1px solid var(--ink-700); }
   .btn.primary { background:var(--ink-900); color:var(--tide-50); }
   .btn.secondary { color:var(--ink-900); }
   .jump { display:flex; gap:var(--s-2); flex-wrap:wrap; margin:var(--s-10) 0 0; padding:var(--s-3); background:var(--tide-100); border:1px solid var(--tide-200); border-radius:var(--r-xl); }
-  .jump a { text-decoration:none; font-family:var(--font-mono); font-size:12px; padding:6px 10px; border-radius:var(--r-pill); }
+  .jump a { text-decoration:none; font-family:var(--font-mono); font-size:var(--t-kicker); padding:6px 10px; border-radius:var(--r-pill); }
   .jump a:hover { background:var(--tide-200); }
 
   .section-head { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,44%); gap:var(--s-8); align-items:end; margin:var(--s-20) 0 var(--s-6); padding-bottom:var(--s-4); border-bottom:2px solid var(--tide-200); }
-  h2 { font-size:clamp(28px,4vw,40px); letter-spacing:-.025em; line-height:1.08; margin:0; }
+  h2 { font-size:clamp(30px,4vw,var(--t-h2)); letter-spacing:var(--tr-h2); line-height:1.08; margin:0; }
   .section-head p { color:var(--ink-500); margin:0; }
   .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--s-4); }
-  .device { min-height:218px; display:flex; flex-direction:column; background:var(--tide-100); border:1px solid var(--tide-200); border-radius:var(--r-2xl); padding:var(--s-5); box-shadow:var(--sh-card); }
+  .device { display:flex; flex-direction:column; background:var(--tide-100); border:1px solid var(--tide-200); border-radius:var(--r-2xl); padding:var(--s-4); box-shadow:var(--sh-card); }
   .device.wide { grid-column:span 2; }
+
+  /* Card preview: canonical render (contain, dark stage) or real photo (cover).
+     A missing file flips to the diagonal-hatch placeholder — DESIGN.md R7. */
+  .shot { position:relative; height:180px; border-radius:var(--r-xl); overflow:hidden; background:var(--ink-900); margin:0 0 var(--s-4); flex:0 0 auto; }
+  .shot img { width:100%; height:100%; object-fit:cover; display:block; }
+  .shot.render img { object-fit:contain; padding:var(--s-2); }
+  .shot.pixel img { image-rendering:pixelated; }
+  .shot.missing img { display:none; }
+  .shot.missing::before { content:""; position:absolute; inset:0;
+    background:repeating-linear-gradient(45deg, var(--ink-800) 0 9px, var(--ink-700) 9px 12px); opacity:.55; }
+
   .device-top { display:flex; align-items:flex-start; justify-content:space-between; gap:var(--s-3); }
-  .device h3 { font-size:19px; letter-spacing:-.01em; margin:0; }
-  .device .sub { color:var(--ink-500); font-size:13px; margin:3px 0 var(--s-6); }
+  .device h3 { font-size:var(--t-card-title); letter-spacing:-.01em; margin:0; }
+  .device .sub { color:var(--ink-500); font-size:var(--t-caption); margin:4px 0 var(--s-4); }
   .badge { flex:0 0 auto; font-family:var(--font-mono); font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; padding:3px 8px; border-radius:var(--r-pill); }
   .native { background:var(--kelp-700); color:var(--tide-50); }
   .bridge { background:var(--ink-800); color:var(--tide-50); }
@@ -74,24 +93,24 @@
   .specs { display:grid; grid-template-columns:1fr 1fr; gap:var(--s-3); margin-top:auto; }
   .spec { padding-top:var(--s-2); border-top:1px solid var(--tide-200); }
   .spec span { display:block; font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-500); }
-  .spec strong { display:block; margin-top:2px; font-size:13px; font-weight:600; }
-  .note { margin-top:var(--s-5); padding:var(--s-5); border-left:4px solid var(--coral-500); background:var(--tide-100); border-radius:0 var(--r-xl) var(--r-xl) 0; color:var(--ink-700); }
+  .spec strong { display:block; margin-top:2px; font-size:var(--t-caption); font-weight:600; }
   .detail-link { margin-top:var(--s-12); padding:var(--s-6); border-radius:var(--r-2xl); background:var(--ink-900); color:var(--tide-300); display:flex; align-items:center; justify-content:space-between; gap:var(--s-6); }
   .detail-link h2 { color:var(--tide-50); font-size:24px; }
   .detail-link p { margin:4px 0 0; }
   .detail-link a { color:var(--tide-50); white-space:nowrap; }
-  footer { max-width:var(--container-max); margin:0 auto; padding:var(--s-10) var(--container-pad) var(--s-16); border-top:2px solid var(--tide-200); color:var(--ink-500); font-size:13px; }
+  footer { max-width:var(--container-max); margin:0 auto; padding:var(--s-10) var(--container-pad) var(--s-16); border-top:2px solid var(--tide-200); color:var(--ink-500); font-size:var(--t-caption); }
 
   @media (max-width:900px) {
     .grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .section-head { grid-template-columns:1fr; gap:var(--s-2); }
   }
   @media (max-width:640px) {
-    .nav-in { align-items:flex-start; padding-inline:var(--s-4); }
+    :root { --container-pad:16px; }
+    .nav-in { align-items:flex-start; }
     .nav-links { overflow-x:auto; flex-wrap:nowrap; padding-bottom:var(--s-1); }
     .nav-links a { white-space:nowrap; }
     .nav-links .gh { display:none; }
-    .wrap { padding:var(--s-12) var(--s-4) var(--s-16); }
+    .wrap { padding:var(--s-12) var(--container-pad) var(--s-16); }
     .grid { grid-template-columns:1fr; }
     .device.wide { grid-column:auto; }
     .detail-link { align-items:flex-start; flex-direction:column; }
@@ -122,58 +141,152 @@
   <header>
     <p class="kicker" data-i18n="hero.kicker">AgentDeck · Surface catalog</p>
     <h1 data-i18n="hero.h1">One session.<br>Made physical.</h1>
-    <p class="lede" data-i18n="hero.lede">AgentDeck renders the same coding-agent state for everything from an 11×11 LED matrix to a 10.1-inch ESP32 panel. This catalog explains what each surface is for; the live preview shows what the renderers produce.</p>
+    <p class="lede" data-i18n="hero.lede">Every card shows the surface actually rendering a session — canonical renderer output, pixel-exact firmware frames, or real hardware photography. Board-level specifications live in the compatibility matrix.</p>
     <div class="hero-actions">
-      <a class="btn primary" href="../demo/" data-i18n="hero.demo">Open live preview</a>
+      <a class="btn primary" href="../demo/" data-i18n="hero.demo">Try the interactive preview</a>
       <a class="btn secondary" href="../design-system/#hardware.compatibility" data-i18n="hero.matrix">Read the full spec matrix</a>
     </div>
     <nav class="jump" aria-label="Device categories">
-      <a href="#esp32" data-i18n="jump.esp32">ESP32 displays</a><a href="#pixel" data-i18n="jump.pixel">Pixel displays</a><a href="#controls" data-i18n="jump.controls">Control decks</a><a href="#apps" data-i18n="jump.apps">Apps &amp; terminal</a>
+      <a href="#controls" data-i18n="jump.controls">Control decks</a><a href="#apps" data-i18n="jump.apps">Apps &amp; terminal</a><a href="#esp32" data-i18n="jump.esp32">ESP32 displays</a><a href="#pixel" data-i18n="jump.pixel">Pixel displays</a>
     </nav>
   </header>
 
-  <section id="esp32">
-    <div class="section-head"><h2 data-i18n="s.esp32.h">ESP32 displays</h2><p data-i18n="s.esp32.p">Purpose-built firmware, native pixel grids, touch where the panel supports it, and direct serial or Wi-Fi WebSocket transport.</p></div>
-    <div class="grid">
-      <article class="device"><div class="device-top"><div><h3>IPS 3.5&quot;</h3><p class="sub">JC3248W535 · Guition</p></div><span class="badge native">ESP32-S3</span></div><div class="specs"><div class="spec"><span>Canvas</span><strong>480×320 IPS</strong></div><div class="spec"><span>Transport</span><strong>Serial · Wi-Fi</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>86 Box 4&quot;</h3><p class="sub">ESP32-S3-4848S040</p></div><span class="badge native">ESP32-S3</span></div><div class="specs"><div class="spec"><span>Canvas</span><strong>480×480 IPS</strong></div><div class="spec"><span>Input</span><strong>GT911 touch</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>Round AMOLED 1.8&quot;</h3><p class="sub">JC3636W518 · Guition</p></div><span class="badge native">ESP32-S3</span></div><div class="specs"><div class="spec"><span>Canvas</span><strong>360×360</strong></div><div class="spec"><span>Shape</span><strong>Round AMOLED</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>TTGO T-Display</h3><p class="sub">LilyGO · compact status surface</p></div><span class="badge native">ESP32</span></div><div class="specs"><div class="spec"><span>Canvas</span><strong>135×240 TFT</strong></div><div class="spec"><span>Input</span><strong>2 buttons</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>Waveshare LCD 1.47&quot;</h3><p class="sub">ESP32-C6 · compact portrait</p></div><span class="badge native">ESP32-C6</span></div><div class="specs"><div class="spec"><span>Canvas</span><strong>172×320 TFT</strong></div><div class="spec"><span>Transport</span><strong>Serial · Wi-Fi</strong></div></div></article>
-      <article class="device wide"><div class="device-top"><div><h3>IPS 10.1&quot;</h3><p class="sub">JC8012P4A1C · pixel-office dashboard</p></div><span class="badge native">ESP32-P4 + C6</span></div><div class="specs"><div class="spec"><span>Panel</span><strong>800×1280 MIPI-DSI</strong></div><div class="spec"><span>Memory</span><strong>16MB flash · 32MB PSRAM</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>InkDeck</h3><p class="sub" data-i18n="d.inkdeck">Seeed TRMNL 7.5&quot; OG DIY Kit · custom firmware, WiFi OTA</p></div><span class="badge native">ESP32-S3</span></div><div class="specs"><div class="spec"><span>Canvas</span><strong>800×480 e-ink</strong></div><div class="spec"><span>Transport</span><strong>Serial · Wi-Fi</strong></div></div></article>
-      <article class="device wide"><div class="device-top"><div><h3>XTeink X3 / X4</h3><p class="sub" data-i18n="d.xteink">External CrossPoint Reader fork · decision cards · SD-card flash, not shipped via AgentDeck releases</p></div><span class="badge experimental" data-i18n="b.experimental">Experimental</span></div><div class="specs"><div class="spec"><span>X3</span><strong>528×792 portrait</strong></div><div class="spec"><span>X4</span><strong>800×480 landscape</strong></div></div></article>
-    </div>
-  </section>
-
-  <section id="pixel">
-    <div class="section-head"><h2 data-i18n="s.pixel.h">Pixel displays</h2><p data-i18n="s.pixel.p">Small commercial displays turn session state and usage windows into ambient, glanceable signals.</p></div>
-    <div class="grid">
-      <article class="device"><div class="device-top"><div><h3>Divoom Pixoo64</h3><p class="sub">Wi-Fi LED frame</p></div><span class="badge bridge">HTTP</span></div><div class="specs"><div class="spec"><span>Grid</span><strong>64×64 RGB</strong></div><div class="spec"><span>Role</span><strong>Terrarium + usage</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>iDotMatrix</h3><p class="sub">Commercial BLE display</p></div><span class="badge bridge">BLE</span></div><div class="specs"><div class="spec"><span>Grid</span><strong>32×32 RGB</strong></div><div class="spec"><span>Role</span><strong>Compact terrarium</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>Timebox Mini</h3><p class="sub">Divoom · BLE</p></div><span class="badge bridge">BLE</span></div><div class="specs"><div class="spec"><span>Grid</span><strong>11×11 RGB</strong></div><div class="spec"><span>Role</span><strong>Micro glyph</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>Ulanzi TC001</h3><p class="sub">AgentDeck ESP32 firmware</p></div><span class="badge native">ESP32</span></div><div class="specs"><div class="spec"><span>Grid</span><strong>32×8 RGB</strong></div><div class="spec"><span>Role</span><strong>Usage + agents</strong></div></div></article>
-    </div>
-  </section>
-
   <section id="controls">
-    <div class="section-head"><h2 data-i18n="s.controls.h">Control decks</h2><p data-i18n="s.controls.p">These are two-way surfaces: they show session state and let you focus, approve, stop, and respond without returning to the terminal.</p></div>
+    <div class="section-head"><h2 data-i18n="s.controls.h">Control decks</h2><p data-i18n="s.controls.p">Two-way surfaces: they show session state and let you focus, approve, stop, and respond without returning to the terminal.</p></div>
     <div class="grid">
-      <article class="device wide"><div class="device-top"><div><h3>Elgato Stream Deck family</h3><p class="sub">Bundled profiles for standard 15-key, Mini, and Stream Deck+</p></div><span class="badge bridge">SDK v2</span></div><div class="specs"><div class="spec"><span>Profiles</span><strong>15-key · Mini 3×2 · Plus</strong></div><div class="spec"><span>XL</span><strong>Dynamic layout only</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>Ulanzi D200H</h3><p class="sub">Deck Dock · Ulanzi Studio plugin</p></div><span class="badge bridge">14 keys</span></div><div class="specs"><div class="spec"><span>Canvas</span><strong>960×540</strong></div><div class="spec"><span>Driver</span><strong>Studio plugin</strong></div></div></article>
+      <article class="device wide">
+        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/previews/streamdeck-key.svg" alt="Stream Deck session key rendered by the real plugin renderer" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>Elgato Stream Deck family</h3><span class="badge bridge">SDK v2</span></div>
+        <p class="sub" data-i18n="d.sd">Session-per-button control — the exact key the plugin renders. Bundled profiles for the 15-key, Mini, and Stream Deck+.</p>
+        <div class="specs"><div class="spec"><span>Profiles</span><strong>15-key · Mini · Plus</strong></div><div class="spec"><span>Layout</span><strong>Session per button</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/d200h-session-buttons.jpg" alt="Ulanzi D200H Deck Dock with lit session buttons" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>Ulanzi D200H</h3><span class="badge bridge">14 keys</span></div>
+        <p class="sub" data-i18n="d.d200h">Deck Dock with LCD keys, driven by the Ulanzi Studio plugin.</p>
+        <div class="specs"><div class="spec"><span>Canvas</span><strong>960×540</strong></div><div class="spec"><span>Driver</span><strong>Studio plugin</strong></div></div>
+      </article>
     </div>
   </section>
 
   <section id="apps">
     <div class="section-head"><h2 data-i18n="s.apps.h">Apps &amp; terminal</h2><p data-i18n="s.apps.p">Each app is a separately designed UI — macOS and iOS/iPadOS are similar but distinct, while Android tablet and Android e-ink are entirely different layouts. The dependency-free TUI keeps the same sessions visible inside a terminal.</p></div>
     <div class="grid">
-      <article class="device"><div class="device-top"><div><h3>macOS</h3><p class="sub" data-i18n="d.macos">SwiftUI · App Store · desktop dashboard UI</p></div><span class="badge native" data-i18n="b.native">Native</span></div><div class="specs"><div class="spec"><span>Role</span><strong>Dashboard + hub</strong></div><div class="spec"><span>Daemon</span><strong>In process</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>iOS / iPadOS</h3><p class="sub" data-i18n="d.ios">SwiftUI · same-LAN companion UI (iPhone &amp; iPad)</p></div><span class="badge native" data-i18n="b.native">Native</span></div><div class="specs"><div class="spec"><span>Transport</span><strong>Paired WebSocket</strong></div><div class="spec"><span>Input</span><strong>Touch + voice</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>Android Tablet</h3><p class="sub" data-i18n="d.android.tablet">Compose · color dashboard (terrarium + HUD, 60fps)</p></div><span class="badge native" data-i18n="b.native">Native</span></div><div class="specs"><div class="spec"><span>Canvas</span><strong>Color LCD</strong></div><div class="spec"><span>Discovery</span><strong>mDNS · Wi-Fi WS</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>Android E-ink</h3><p class="sub" data-i18n="d.android.eink">Compose · reader-specific e-ink layouts (Crema, Onyx, Kobo, Bigme)</p></div><span class="badge native" data-i18n="b.native">Native</span></div><div class="specs"><div class="spec"><span>Refresh</span><strong>GC16 · DU · A2</strong></div><div class="spec"><span>Color</span><strong>B&amp;W + Kaleido 3</strong></div></div></article>
-      <article class="device"><div class="device-top"><div><h3>TUI Dashboard</h3><p class="sub"><code>agentdeck dashboard</code></p></div><span class="badge bridge">Terminal</span></div><div class="specs"><div class="spec"><span>Render</span><strong>Truecolor ANSI</strong></div><div class="spec"><span>Layout</span><strong>Adaptive</strong></div></div></article>
+      <article class="device">
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/macos-dashboard.png" alt="AgentDeck macOS dashboard screenshot" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>macOS</h3><span class="badge native" data-i18n="b.native">Native</span></div>
+        <p class="sub" data-i18n="d.macos">SwiftUI desktop dashboard with the in-process daemon hub — the App Store app.</p>
+        <div class="specs"><div class="spec"><span>Role</span><strong>Dashboard + hub</strong></div><div class="spec"><span>Daemon</span><strong>In process</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/ipad-iphone-closeup.jpg" alt="iPad and iPhone running the AgentDeck companion app" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>iOS / iPadOS</h3><span class="badge native" data-i18n="b.native">Native</span></div>
+        <p class="sub" data-i18n="d.ios">Same-LAN SwiftUI companion — monitoring on iPhone, terrarium second screen on iPad.</p>
+        <div class="specs"><div class="spec"><span>Transport</span><strong>Paired WebSocket</strong></div><div class="spec"><span>Input</span><strong>Touch + voice</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/LenovoTab_screenshot.png" alt="AgentDeck Android tablet dashboard screenshot" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>Android Tablet</h3><span class="badge native" data-i18n="b.native">Native</span></div>
+        <p class="sub" data-i18n="d.android.tablet">Compose color dashboard — 60fps terrarium + HUD overlay.</p>
+        <div class="specs"><div class="spec"><span>Canvas</span><strong>Color LCD</strong></div><div class="spec"><span>Discovery</span><strong>mDNS · Wi-Fi WS</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/android-eink.png" alt="AgentDeck Android e-ink reader layout" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>Android E-ink</h3><span class="badge native" data-i18n="b.native">Native</span></div>
+        <p class="sub" data-i18n="d.android.eink">Reader-tuned Compose layouts for Crema, Onyx, Kobo, and Bigme — B&amp;W and Kaleido 3 color.</p>
+        <div class="specs"><div class="spec"><span>Refresh</span><strong>GC16 · DU · A2</strong></div><div class="spec"><span>Color</span><strong>B&amp;W + Kaleido 3</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot" style="margin:0 0 var(--s-4)"><img src="../media/tui-dashboard.png" alt="AgentDeck TUI dashboard in a terminal" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>TUI Dashboard</h3><span class="badge bridge">Terminal</span></div>
+        <p class="sub" data-i18n="d.tui"><code>agentdeck dashboard</code> — the same sessions in truecolor ANSI, over SSH if you like.</p>
+        <div class="specs"><div class="spec"><span>Render</span><strong>Truecolor ANSI</strong></div><div class="spec"><span>Layout</span><strong>Adaptive</strong></div></div>
+      </article>
     </div>
-    <p class="note" data-i18n="note.gallery"><strong>Why there is no separate gallery:</strong> a gallery without real photographs duplicated this catalog and showed empty image slots. Device identity and specifications now live here; canonical renderer output lives in Live Preview. Real field photography can be added later as evidence within the relevant device card.</p>
+  </section>
+
+  <section id="esp32">
+    <div class="section-head"><h2 data-i18n="s.esp32.h">ESP32 displays</h2><p data-i18n="s.esp32.p">Purpose-built firmware on native pixel grids — the previews below are pixel-exact frames compiled from the real firmware sources (esp32/sim).</p></div>
+    <div class="grid">
+      <article class="device">
+        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/sim-frames/ips35-claude-working.png" alt="ESP32 IPS 3.5-inch firmware frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>IPS 3.5&quot;</h3><span class="badge native">ESP32-S3</span></div>
+        <p class="sub" data-i18n="d.ips35">Landscape LVGL terrarium + HUD on a 480×320 IPS panel (JC3248W535).</p>
+        <div class="specs"><div class="spec"><span>Canvas</span><strong>480×320 IPS</strong></div><div class="spec"><span>Transport</span><strong>Serial · Wi-Fi</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/sim-frames/box86-claude-working.png" alt="ESP32 86 Box firmware frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>86 Box 4&quot;</h3><span class="badge native">ESP32-S3</span></div>
+        <p class="sub" data-i18n="d.box86">4-inch 480×480 wall-box with GT911 touch (ESP32-S3-4848S040).</p>
+        <div class="specs"><div class="spec"><span>Canvas</span><strong>480×480 IPS</strong></div><div class="spec"><span>Input</span><strong>GT911 touch</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/sim-frames/round-claude-working.png" alt="ESP32 round AMOLED firmware frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>Round AMOLED 1.8&quot;</h3><span class="badge native">ESP32-S3</span></div>
+        <p class="sub" data-i18n="d.round">1.8-inch 360×360 round AMOLED — compact terrarium (JC3636W518).</p>
+        <div class="specs"><div class="spec"><span>Canvas</span><strong>360×360</strong></div><div class="spec"><span>Shape</span><strong>Round AMOLED</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/sim-frames/ttgo-claude-working.png" alt="TTGO T-Display firmware frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>TTGO T-Display</h3><span class="badge native">ESP32</span></div>
+        <p class="sub" data-i18n="d.ttgo">Pocket 135×240 status strip — mini terrarium + metrics (LilyGO).</p>
+        <div class="specs"><div class="spec"><span>Canvas</span><strong>135×240 TFT</strong></div><div class="spec"><span>Input</span><strong>2 buttons</strong></div></div>
+      </article>
+      <article class="device">
+        <div class="shot missing"></div>
+        <div class="device-top"><h3>Waveshare LCD 1.47&quot;</h3><span class="badge native">ESP32-C6</span></div>
+        <p class="sub" data-i18n="d.waveshare">172×320 portrait strip on ESP32-C6 — no host-sim frame is baked for this board yet.</p>
+        <div class="specs"><div class="spec"><span>Canvas</span><strong>172×320 TFT</strong></div><div class="spec"><span>Transport</span><strong>Serial · Wi-Fi</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/sim-frames/ips10-claude-working.png" alt="ESP32 IPS 10.1-inch firmware frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>IPS 10.1&quot;</h3><span class="badge native">ESP32-P4 + C6</span></div>
+        <p class="sub" data-i18n="d.ips10">10.1-inch 800×1280 &quot;pixel office&quot; dashboard (JC8012P4A1C).</p>
+        <div class="specs"><div class="spec"><span>Panel</span><strong>800×1280 MIPI-DSI</strong></div><div class="spec"><span>Memory</span><strong>16MB flash · 32MB PSRAM</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot render" style="margin:0 0 var(--s-4)"><img src="../demo/sim-frames/inkdeck-claude-working.png" alt="InkDeck e-ink firmware frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>InkDeck</h3><span class="badge native">ESP32-S3</span></div>
+        <p class="sub" data-i18n="d.inkdeck">7.5-inch 800×480 1-bit e-ink dashboard — custom firmware on the Seeed TRMNL OG DIY Kit, USB serial + Wi-Fi, updates via WiFi OTA.</p>
+        <div class="specs"><div class="spec"><span>Canvas</span><strong>800×480 e-ink</strong></div><div class="spec"><span>Transport</span><strong>Serial · Wi-Fi</strong></div></div>
+      </article>
+      <article class="device wide">
+        <div class="shot missing"></div>
+        <div class="device-top"><h3>XTeink X3 / X4</h3><span class="badge experimental" data-i18n="b.experimental">Experimental</span></div>
+        <p class="sub" data-i18n="d.xteink">External CrossPoint Reader fork — decision cards on ESP32-C3 e-ink readers. SD-card flash only, not shipped via AgentDeck releases; its renderer lives outside this repository, so no canonical frame can be shown.</p>
+        <div class="specs"><div class="spec"><span>X3</span><strong>528×792 portrait</strong></div><div class="spec"><span>X4</span><strong>800×480 landscape</strong></div></div>
+      </article>
+    </div>
+  </section>
+
+  <section id="pixel">
+    <div class="section-head"><h2 data-i18n="s.pixel.h">Pixel displays</h2><p data-i18n="s.pixel.p">Small commercial displays turn session state and usage windows into ambient, glanceable signals — previews are the same frames the daemon pushes.</p></div>
+    <div class="grid">
+      <article class="device">
+        <figure class="shot render pixel" style="margin:0 0 var(--s-4)"><img src="../demo/previews/pixoo64.svg" alt="Pixoo64 terrarium frame from the canonical renderer" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>Divoom Pixoo64</h3><span class="badge bridge">HTTP</span></div>
+        <p class="sub" data-i18n="d.pixoo">64×64 Wi-Fi LED frame — ambient terrarium + usage rows.</p>
+        <div class="specs"><div class="spec"><span>Grid</span><strong>64×64 RGB</strong></div><div class="spec"><span>Role</span><strong>Terrarium + usage</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot render pixel" style="margin:0 0 var(--s-4)"><img src="../demo/previews/idotmatrix.svg" alt="iDotMatrix 32 by 32 frame from the canonical renderer" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>iDotMatrix</h3><span class="badge bridge">BLE</span></div>
+        <p class="sub" data-i18n="d.idot">32×32 BLE pixel display — the same terrarium renderer at native size.</p>
+        <div class="specs"><div class="spec"><span>Grid</span><strong>32×32 RGB</strong></div><div class="spec"><span>Role</span><strong>Compact terrarium</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot render pixel" style="margin:0 0 var(--s-4)"><img src="../demo/previews/timebox.svg" alt="Timebox Mini 11 by 11 micro glyph frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>Timebox Mini</h3><span class="badge bridge">BLE</span></div>
+        <p class="sub" data-i18n="d.timebox">11×11 BLE micro glyph — one dominant creature on a status field.</p>
+        <div class="specs"><div class="spec"><span>Grid</span><strong>11×11 RGB</strong></div><div class="spec"><span>Role</span><strong>Micro glyph</strong></div></div>
+      </article>
+      <article class="device">
+        <figure class="shot render pixel" style="margin:0 0 var(--s-4)"><img src="../demo/sim-frames/tc001-claude-working-agents.png" alt="Ulanzi TC001 8 by 32 matrix firmware frame" loading="lazy" onerror="this.parentNode.classList.add('missing')"></figure>
+        <div class="device-top"><h3>Ulanzi TC001</h3><span class="badge native">ESP32</span></div>
+        <p class="sub" data-i18n="d.tc001">8×32 LED matrix running AgentDeck firmware — usage + agent pages.</p>
+        <div class="specs"><div class="spec"><span>Grid</span><strong>32×8 RGB</strong></div><div class="spec"><span>Role</span><strong>Usage + agents</strong></div></div>
+      </article>
+    </div>
   </section>
 
   <aside class="detail-link">
@@ -185,38 +298,50 @@
 <footer>AgentDeck device catalog · <a href="../demo/">Live Preview</a> · <a href="../design-system/">Design System</a> · <a href="../">Back to overview</a></footer>
 
 <script>
-  // Site-wide language selection (shares the design-system viewer's
-  // localStorage key so one choice follows the visitor across routes).
-  // English stays canonical in the DOM; ko/ja strings override per key.
+  // Site-wide language selection (shared localStorage key across all routes).
+  // English stays canonical in the DOM; ko/ja strings override per key and
+  // anything untranslated falls back to the English DOM content.
   (function () {
     var I18N = {
       ko: {
         'hero.kicker': 'AgentDeck · 서피스 카탈로그',
         'hero.h1': '하나의 세션.<br>물리적 실체로.',
-        'hero.lede': 'AgentDeck은 11×11 LED 매트릭스부터 10.1인치 ESP32 패널까지 동일한 코딩 에이전트 상태를 렌더링합니다. 이 카탈로그는 각 서피스의 역할을 설명하고, 라이브 프리뷰는 렌더러의 실제 출력을 보여줍니다.',
-        'hero.demo': '라이브 프리뷰 열기',
+        'hero.lede': '모든 카드는 해당 서피스가 실제로 세션을 렌더링하는 모습을 보여줍니다 — 정본 렌더러 출력, 펌웨어 그대로의 픽셀 프레임, 또는 실기 사진. 보드 수준 사양은 호환성 매트릭스에 있습니다.',
+        'hero.demo': '인터랙티브 프리뷰 열기',
         'hero.matrix': '전체 스펙 매트릭스 보기',
-        'jump.esp32': 'ESP32 디스플레이',
-        'jump.pixel': '픽셀 디스플레이',
         'jump.controls': '컨트롤 데크',
         'jump.apps': '앱 & 터미널',
-        's.esp32.h': 'ESP32 디스플레이',
-        's.esp32.p': '전용 펌웨어, 네이티브 픽셀 그리드, 패널이 지원하면 터치까지 — 시리얼 또는 Wi-Fi WebSocket 직결 전송.',
-        's.pixel.h': '픽셀 디스플레이',
-        's.pixel.p': '소형 상용 디스플레이가 세션 상태와 사용량 윈도우를 은은하게 흘깃 볼 수 있는 신호로 바꿉니다.',
+        'jump.esp32': 'ESP32 디스플레이',
+        'jump.pixel': '픽셀 디스플레이',
         's.controls.h': '컨트롤 데크',
         's.controls.p': '양방향 서피스입니다. 세션 상태를 보여주면서 터미널로 돌아가지 않고도 포커스·승인·중지·응답을 할 수 있습니다.',
         's.apps.h': '앱 & 터미널',
         's.apps.p': '각 앱은 따로 설계된 UI입니다 — macOS와 iOS/iPadOS는 비슷하지만 별개이고, Android 태블릿과 Android e-ink는 완전히 다른 레이아웃입니다. 의존성 없는 TUI는 같은 세션을 터미널 안에서 보여줍니다.',
-        'd.inkdeck': 'Seeed TRMNL 7.5" OG DIY Kit · 커스텀 펌웨어, WiFi OTA',
-        'd.xteink': '외부 CrossPoint Reader 포크 · 결정 카드 · SD 카드 플래시, AgentDeck 릴리스로 배포되지 않음',
-        'd.macos': 'SwiftUI · App Store · 데스크톱 대시보드 UI',
-        'd.ios': 'SwiftUI · 동일 LAN 컴패니언 UI (iPhone & iPad)',
-        'd.android.tablet': 'Compose · 컬러 대시보드 (테라리움 + HUD, 60fps)',
-        'd.android.eink': 'Compose · 리더별 e-ink 레이아웃 (Crema, Onyx, Kobo, Bigme)',
+        's.esp32.h': 'ESP32 디스플레이',
+        's.esp32.p': '네이티브 픽셀 그리드 위의 전용 펌웨어 — 아래 미리보기는 실제 펌웨어 소스를 컴파일해 얻은 픽셀 단위 프레임입니다(esp32/sim).',
+        's.pixel.h': '픽셀 디스플레이',
+        's.pixel.p': '소형 상용 디스플레이가 세션 상태와 사용량을 은은한 신호로 바꿉니다 — 미리보기는 데몬이 실제로 푸시하는 프레임입니다.',
+        'd.sd': '버튼당 세션 하나 — 플러그인이 실제로 렌더링하는 키 그대로입니다. 15키·Mini·Stream Deck+ 프로필 번들.',
+        'd.d200h': 'LCD 키를 갖춘 Deck Dock, Ulanzi Studio 플러그인으로 구동.',
+        'd.macos': 'in-process 데몬 허브를 품은 SwiftUI 데스크톱 대시보드 — App Store 앱.',
+        'd.ios': '동일 LAN SwiftUI 컴패니언 — iPhone은 모니터링, iPad는 테라리움 세컨드 스크린.',
+        'd.android.tablet': 'Compose 컬러 대시보드 — 60fps 테라리움 + HUD 오버레이.',
+        'd.android.eink': 'Crema·Onyx·Kobo·Bigme에 맞춘 리더 전용 Compose 레이아웃 — 흑백과 Kaleido 3 컬러.',
+        'd.tui': '<code>agentdeck dashboard</code> — 같은 세션을 truecolor ANSI로, 원하면 SSH 너머에서도.',
+        'd.ips35': '480×320 IPS 패널의 가로형 LVGL 테라리움 + HUD (JC3248W535).',
+        'd.box86': 'GT911 터치를 갖춘 4인치 480×480 월박스 (ESP32-S3-4848S040).',
+        'd.round': '1.8인치 360×360 원형 AMOLED — 컴팩트 테라리움 (JC3636W518).',
+        'd.ttgo': '주머니 크기 135×240 상태 스트립 — 미니 테라리움 + 지표 (LilyGO).',
+        'd.waveshare': 'ESP32-C6의 172×320 세로형 스트립 — 이 보드의 호스트 sim 프레임은 아직 없습니다.',
+        'd.ips10': '10.1인치 800×1280 "픽셀 오피스" 대시보드 (JC8012P4A1C).',
+        'd.inkdeck': 'Seeed TRMNL OG DIY Kit 위의 커스텀 펌웨어 — 7.5인치 800×480 1-bit e-ink 대시보드, USB serial + Wi-Fi, WiFi OTA 업데이트.',
+        'd.xteink': '외부 CrossPoint Reader 포크 — ESP32-C3 e-ink 리더의 결정 카드. SD 카드 플래시 전용이고 AgentDeck 릴리스로 배포되지 않으며, 렌더러가 이 저장소 밖에 있어 정본 프레임을 보여줄 수 없습니다.',
+        'd.pixoo': '64×64 Wi-Fi LED 프레임 — 은은한 테라리움 + 사용량 행.',
+        'd.idot': '32×32 BLE 픽셀 디스플레이 — 같은 테라리움 렌더러의 네이티브 크기 출력.',
+        'd.timebox': '11×11 BLE 마이크로 글리프 — 상태 필드 위 대표 크리처 하나.',
+        'd.tc001': 'AgentDeck 펌웨어로 구동되는 8×32 LED 매트릭스 — 사용량 + 에이전트 페이지.',
         'b.native': '네이티브',
         'b.experimental': '실험적',
-        'note.gallery': '<strong>별도 갤러리가 없는 이유:</strong> 실제 사진 없는 갤러리는 이 카탈로그를 중복하며 빈 이미지 슬롯만 보여줬습니다. 기기 정보와 사양은 여기에, 정본 렌더러 출력은 라이브 프리뷰에 있습니다. 실물 사진은 나중에 해당 기기 카드에 증거로 추가할 수 있습니다.',
         'detail.h': '보드 수준 상세가 필요하신가요?',
         'detail.p': '정본 매트릭스는 SoC, 디스플레이 IC, 터치 컨트롤러, 플래시, PSRAM, 전송, 플랫폼 티어를 다룹니다.',
         'detail.a': '호환성 SSOT 열기'
@@ -224,30 +349,42 @@
       ja: {
         'hero.kicker': 'AgentDeck · サーフェスカタログ',
         'hero.h1': 'ひとつのセッションを、<br>フィジカルに。',
-        'hero.lede': 'AgentDeckは11×11のLEDマトリクスから10.1インチESP32パネルまで、同じコーディングエージェント状態を描画します。このカタログは各サーフェスの役割を説明し、ライブプレビューはレンダラーの実際の出力を示します。',
-        'hero.demo': 'ライブプレビューを開く',
+        'hero.lede': 'すべてのカードは、そのサーフェスが実際にセッションを描画する様子を示します — 正本レンダラー出力、ファームウェアそのままのピクセルフレーム、または実機写真。ボードレベル仕様は互換性マトリクスにあります。',
+        'hero.demo': 'インタラクティブプレビューを開く',
         'hero.matrix': 'フル仕様マトリクスを読む',
-        'jump.esp32': 'ESP32ディスプレイ',
-        'jump.pixel': 'ピクセルディスプレイ',
         'jump.controls': 'コントロールデッキ',
         'jump.apps': 'アプリ & ターミナル',
-        's.esp32.h': 'ESP32ディスプレイ',
-        's.esp32.p': '専用ファームウェア、ネイティブピクセルグリッド、パネルが対応すればタッチも — シリアルまたはWi-Fi WebSocketの直結トランスポート。',
-        's.pixel.h': 'ピクセルディスプレイ',
-        's.pixel.p': '小型の市販ディスプレイが、セッション状態と使用量ウィンドウをさりげなく一目で分かるシグナルに変えます。',
+        'jump.esp32': 'ESP32ディスプレイ',
+        'jump.pixel': 'ピクセルディスプレイ',
         's.controls.h': 'コントロールデッキ',
         's.controls.p': '双方向サーフェスです。セッション状態を表示しながら、ターミナルに戻らずにフォーカス・承認・停止・応答ができます。',
         's.apps.h': 'アプリ & ターミナル',
         's.apps.p': '各アプリは別設計のUIです — macOSとiOS/iPadOSは似ていて別物、AndroidタブレットとAndroid e-inkは完全に異なるレイアウトです。依存なしのTUIは同じセッションをターミナル内に表示します。',
-        'd.inkdeck': 'Seeed TRMNL 7.5" OG DIY Kit · カスタムファームウェア、WiFi OTA',
-        'd.xteink': '外部CrossPoint Readerフォーク · 決定カード · SDカード書き込み、AgentDeckリリースでは配布されません',
-        'd.macos': 'SwiftUI · App Store · デスクトップダッシュボードUI',
-        'd.ios': 'SwiftUI · 同一LANコンパニオンUI (iPhone & iPad)',
-        'd.android.tablet': 'Compose · カラーダッシュボード (テラリウム + HUD, 60fps)',
-        'd.android.eink': 'Compose · リーダー別e-inkレイアウト (Crema, Onyx, Kobo, Bigme)',
+        's.esp32.h': 'ESP32ディスプレイ',
+        's.esp32.p': 'ネイティブピクセルグリッド上の専用ファームウェア — 下のプレビューは実際のファームウェアソースをコンパイルして得たピクセル単位のフレームです(esp32/sim)。',
+        's.pixel.h': 'ピクセルディスプレイ',
+        's.pixel.p': '小型の市販ディスプレイがセッション状態と使用量をさりげないシグナルに変えます — プレビューはdaemonが実際にプッシュするフレームです。',
+        'd.sd': 'ボタンごとにセッションひとつ — プラグインが実際に描画するキーそのものです。15キー・Mini・Stream Deck+のプロファイル同梱。',
+        'd.d200h': 'LCDキーを備えたDeck Dock、Ulanzi Studioプラグインで駆動。',
+        'd.macos': 'in-process daemonハブを内蔵したSwiftUIデスクトップダッシュボード — App Storeアプリ。',
+        'd.ios': '同一LANのSwiftUIコンパニオン — iPhoneはモニタリング、iPadはテラリウムのセカンドスクリーン。',
+        'd.android.tablet': 'Composeカラーダッシュボード — 60fpsテラリウム + HUDオーバーレイ。',
+        'd.android.eink': 'Crema・Onyx・Kobo・Bigme向けのリーダー専用Composeレイアウト — 白黒とKaleido 3カラー。',
+        'd.tui': '<code>agentdeck dashboard</code> — 同じセッションをtruecolor ANSIで、SSH越しでも。',
+        'd.ips35': '480×320 IPSパネルの横型LVGLテラリウム + HUD (JC3248W535)。',
+        'd.box86': 'GT911タッチ付き4インチ480×480ウォールボックス (ESP32-S3-4848S040)。',
+        'd.round': '1.8インチ360×360円形AMOLED — コンパクトテラリウム (JC3636W518)。',
+        'd.ttgo': 'ポケットサイズ135×240ステータスストリップ — ミニテラリウム + メトリクス (LilyGO)。',
+        'd.waveshare': 'ESP32-C6の172×320縦型ストリップ — このボードのホストsimフレームはまだありません。',
+        'd.ips10': '10.1インチ800×1280「ピクセルオフィス」ダッシュボード (JC8012P4A1C)。',
+        'd.inkdeck': 'Seeed TRMNL OG DIY Kit上のカスタムファームウェア — 7.5インチ800×480 1-bit e-inkダッシュボード、USB serial + Wi-Fi、WiFi OTA更新。',
+        'd.xteink': '外部CrossPoint Readerフォーク — ESP32-C3 e-inkリーダーの決定カード。SDカード書き込み専用でAgentDeckリリースでは配布されず、レンダラーがこのリポジトリの外にあるため正本フレームは表示できません。',
+        'd.pixoo': '64×64 Wi-Fi LEDフレーム — さりげないテラリウム + 使用量行。',
+        'd.idot': '32×32 BLEピクセルディスプレイ — 同じテラリウムレンダラーのネイティブサイズ出力。',
+        'd.timebox': '11×11 BLEマイクログリフ — ステータスフィールドに代表クリーチャーひとつ。',
+        'd.tc001': 'AgentDeckファームウェアで動く8×32 LEDマトリクス — 使用量 + エージェントページ。',
         'b.native': 'ネイティブ',
         'b.experimental': '実験的',
-        'note.gallery': '<strong>独立したギャラリーがない理由:</strong> 実写真のないギャラリーはこのカタログを複製し、空の画像スロットを見せるだけでした。デバイス情報と仕様はここに、正本レンダラー出力はライブプレビューにあります。実機写真は後から該当カードにエビデンスとして追加できます。',
         'detail.h': 'ボードレベルの詳細が必要ですか？',
         'detail.p': '正本マトリクスはSoC、ディスプレイIC、タッチコントローラー、フラッシュ、PSRAM、トランスポート、プラットフォームtierを扱います。',
         'detail.a': '互換性SSOTを開く'

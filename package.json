@@ -7,7 +7,7 @@
     "build": "pnpm --filter @agentdeck/shared build && pnpm --filter=!@agentdeck/shared -r build",
     "dev": "pnpm -r --parallel dev",
     "demo": "node scripts/render-creature-simulator.mjs && node scripts/render-esp32-sim-frames.mjs && npx --yes vite tools/creature-simulator",
-    "demo:build": "node scripts/render-creature-simulator.mjs && node scripts/render-esp32-sim-frames.mjs && vite build tools/creature-simulator --base=/AgentDeck/demo/ --outDir ../../dist/demo --emptyOutDir && cp tools/creature-simulator/sim-data.js dist/demo/sim-data.js && cp -R tools/creature-simulator/sim-frames dist/demo/sim-frames",
+    "demo:build": "node scripts/render-creature-simulator.mjs && node scripts/render-esp32-sim-frames.mjs && node scripts/render-device-previews.mjs && vite build tools/creature-simulator --base=/AgentDeck/demo/ --outDir ../../dist/demo --emptyOutDir && cp tools/creature-simulator/sim-data.js dist/demo/sim-data.js && cp -R tools/creature-simulator/sim-frames dist/demo/sim-frames && cp -R tools/creature-simulator/previews dist/demo/previews",
     "clean": "pnpm -r clean",
     "typecheck": "pnpm -r typecheck",
     "generate-icons": "node scripts/generate-icons.mjs",
