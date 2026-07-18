@@ -4,6 +4,24 @@
 
 > **Older entries are archived by month** under [`docs/devlog/`](docs/devlog/README.md). This active file keeps the current month plus the preceding month (currently 2026-07 and 2026-06); search only the relevant monthly archive for older history.
 
+## 2026-07-18 — 런치 녹화 하네스: 콜드 오픈 시나리오 + Codex 쿼터 게이지
+
+### 문제
+
+App Store 프리뷰/마케팅 영상을 찍으려면 "에이전트가 하나씩 실행되고, attention이 뜨고, 작업이 끝나는" 자연스러운 서사가 필요했다. 기존 `scripts/appstore-demo-orchestrator.mjs`는 24초 사이클이 **세션 3개가 이미 다 떠 있는 상태**에서 시작해서, 제품이 채워지는 과정을 찍을 수 없었다. 또 쿼터 게이지가 비어 있어 토폴로지 행이 허전했다.
+
+### 해결
+
+앱 안에 dry-run 모드를 넣지 않고 기존 방식(외부 가짜 데몬이 진짜 WS 계약을 구동)을 유지한 채 시나리오만 재구성했다. 60초 사이클이 빈 대시보드에서 시작해 claude(4s) → codex(14s) → opencode(24s) 순으로 세션을 하나씩 추가하고, 30s에 amber attention을 찍고, 마지막 9초는 전원 idle로 두어 terrarium이 rest 상태에 안착한 뒤 루프한다. tmux 터미널 페인도 각 에이전트의 `appearsAt`까지 비워 둬 두 표면이 같은 서사를 그린다.
+
+`usage_update`를 3개 지점에서 발행해 provider 쿼터 게이지를 채웠다.
+
+### 핵심 설계 결정
+
+- **인앱 dry-run 모드를 만들지 않는다.** 심사 대상 바이너리에 데모 전용 데드코드가 들어가고, "데모용 렌더 분기"가 생기면 영상이 실제 제품 화면이 아니게 된다. 현 구조는 `#if DEBUG` URL 오버라이드 한 줄(`AgentStateHolder.swift`)뿐이고 데이터만 가짜, 렌더 경로는 100% 실제다.
+- **쿼터 게이지는 Codex만 발행한다.** Claude의 `fiveHourPercent`/`sevenDayPercent`는 의도적으로 누락시켰다. `TopologyRail.rateLimitChips`가 이를 `isUsingExternalDaemon`에 게이팅하기 때문에(OAuth 토큰/relay 데이터는 샌드박스 앱이 단독 생성 불가), Claude 쿼터가 채워진 프리뷰는 **출시 앱이 갖지 못한 기능을 묘사**하게 된다. Codex 게이지는 Swift 데몬이 `~/.codex`를 직접 읽으므로 그 게이트 밖에 있다.
+- **App Preview 30초 제한은 하네스가 아니라 편집으로 흡수한다.** 60초 전체를 녹화하고 0–30s로 트림한다. 하네스를 30초에 맞춰 압축하면 마케팅 필름용 서사가 같이 망가진다.
+
 ## 2026-07-18 — 1.0.0 첫 공개 릴리스 정비 (Apple · Elgato · Ulanzi)
 
 - 루트 `VERSION`과 모든 JS package, Apple marketing version, Android `versionName`, ESP32 `FIRMWARE_VERSION`, Stream Deck manifest/profile snapshot, Ulanzi manifest를 `1.0.0`으로 동기화했다. Stream Deck의 네 번째 버전 컴포넌트는 SDK 형식에 따라 `1.0.0.0`; Android `versionCode`는 3으로 증가했다. Android About은 하드코딩 문자열 대신 `BuildConfig.VERSION_NAME`을 읽는다.
@@ -12,6 +30,8 @@
 - Elgato manifest를 최신 validator 기준으로 정비했다: 256/512 plugin icon, Support/Product URL, Stream Deck 6.9 최소 버전, 정확한 multi-agent 설명. `.sdignore`와 공식 `streamdeck pack`을 사용해 `dist/bound.serendipity.agentdeck.streamDeckPlugin`을 생성했다. 실제 앱 UI 캡처에서 288px app icon, 1920×960 thumbnail/3 gallery assets와 영문 listing/release notes를 준비했다.
 - Ulanzi package는 debug inspector 선언을 제거하고, manifest가 약속한 macOS/Windows 지원과 달리 빌드 호스트의 darwin-arm64 native renderer만 포함하던 결함을 수정했다. darwin arm64/x64 및 Windows x64/arm64/ia32 resvg 모듈을 강제 검증하며 `dist/agentdeck-ulanzi-v1.0.0.zip`을 재현 가능하게 생성한다.
 - 검증: `pnpm verify-version`, `pnpm build`, Vitest 1889/1889, Android release APK + signature + `1.0.0/code 3`, Android unit tests, macOS XCTest 447 tests(1 skip), iOS XCTest 112 tests(1 skip), iOS/macOS App Store archive+export+binary invariant gate, App Store submission metadata/media/network validator, latest Elgato schema validate/package, Ulanzi universal package/archive integrity 모두 통과했다. 업로드·tag push·외부 마켓 심사 제출은 수행하지 않았다.
+- 후속: Stream Deck Mini 프로파일이 이 버전 범프와 **병렬로** master에 올라와, 합류 시점에만 embedded 버전이 `0.2.3.0`으로 남아 `verify-version-sync`가 깨졌다. 양쪽 브랜치는 각각 green이었다 — SSOT 범프는 "그때 존재하던 미러"만 덮는다. `fb820882`에서 6곳을 `1.0.0.0`으로 맞췄다.
+
 ## 2026-07-18 — AgentDeck design-system viewer and documentation contract
 
 - Replaced the Korean, narrative-heavy hardware compatibility document with a concise English canonical matrix. Added the previously omitted Waveshare ESP32-C6-LCD-1.47 surface, separated specifications from operational ownership, and added revision-linked Korean/Japanese reader translations.
