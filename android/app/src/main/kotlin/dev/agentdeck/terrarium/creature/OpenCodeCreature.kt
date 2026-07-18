@@ -100,17 +100,21 @@ class OpenCodeCreature(
         when (visualState) {
             OctopusVisualState.SLEEPING -> {
                 val myDeepY = STANDING_Y_DEEP + standingJitter * 0.5f
-                currentX += (homeX - currentX) * dt * 4f
+                val restX = homeX.coerceAtMost(TerrariumLayout.CRAYFISH_CLEAR_MAX_X)
+                currentX += (restX - currentX) * dt * 4f
                 currentY += (myDeepY - currentY) * dt * 4f
             }
             OctopusVisualState.FLOATING -> {
                 // homeY-relative (not the shared Octopus STANDING_Y) so idle OpenCode
                 // creatures rest in their own strip instead of converging with
-                // Octopus/Cloud/Antigravity onto the same standing row.
+                // Octopus/Cloud/Antigravity onto the same standing row. Rest X stays
+                // left of the crayfish floor territory — the band's right edge (0.68)
+                // otherwise drops idle OpenCode onto the OpenClaw crayfish.
                 val myStandingY = (homeY + 0.18f).coerceIn(0.59f, 0.63f) + standingJitter
+                val restX = homeX.coerceAtMost(TerrariumLayout.CRAYFISH_CLEAR_MAX_X)
                 val breathBob = sin(time * 0.5f) * 0.003f
                 val idleSway = sin(time * 0.2f) * 0.003f
-                currentX += (homeX + idleSway - currentX) * dt * 4f
+                currentX += (restX + idleSway - currentX) * dt * 4f
                 currentY += (myStandingY + breathBob - currentY) * dt * 4f
             }
             OctopusVisualState.ASKING -> {

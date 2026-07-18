@@ -87,9 +87,11 @@ final class AntigravityCreature: Creature {
     }
 
     private func updatePosition(dt: Float) {
-        // homeY anchors the upper-right band (~0.22..0.34). Idle/sleeping push
-        // downward; working rises high toward the surface (anti-gravity).
-        let idleY = min(0.64, max(0.56, homeY + 0.34))
+        // homeY anchors the upper-right band (~0.22..0.34). Working rises high
+        // toward the surface (anti-gravity). Idle HOVERS above the floor strip
+        // instead of landing: the band reaches x 0.82, so a floor rest would
+        // sit directly on the OpenClaw crayfish home (0.78, 0.64).
+        let idleY = min(0.54, max(0.48, homeY + 0.26))
         let askingY = min(0.52, max(0.46, homeY + 0.22))
         let workingY = min(0.30, max(0.10, homeY - 0.04))
         let sleepingY = min(0.72, max(0.64, homeY + 0.44))
@@ -109,10 +111,15 @@ final class AntigravityCreature: Creature {
         let driftAmp: Float = visualState == .working ? min(0.04, 0.015 + scale * 0.025) : 0.005
         let driftSpeed: Float = visualState == .working ? 0.15 : 0.25
         let driftX = sin((time + driftPhase) * driftSpeed) * driftAmp
-        currentX += (homeX + driftX - currentX) * dt * lerpRate
+        // Sleeping sinks to the floor — drift left of the crayfish territory
+        // so a right-band sleeper doesn't settle onto the OpenClaw crayfish.
+        let anchorX = visualState == .sleeping
+            ? min(homeX, TerrariumLayout.crayfishClearMaxX)
+            : homeX
+        currentX += (anchorX + driftX - currentX) * dt * lerpRate
 
-        let minX = max(0.50, homeX - 0.07)
-        let maxX = min(0.88, homeX + 0.07)
+        let minX = max(0.50, anchorX - 0.07)
+        let maxX = min(0.88, anchorX + 0.07)
         currentX = min(maxX, max(minX, currentX))
         currentY = min(0.72, max(0.08, currentY))
     }

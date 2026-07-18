@@ -26,6 +26,7 @@ import dev.agentdeck.terrarium.CrayfishVisualState
 import dev.agentdeck.terrarium.CreatureGeometry
 import dev.agentdeck.terrarium.OctopusVisualState
 import dev.agentdeck.terrarium.TetraVisualState
+import dev.agentdeck.terrarium.TerrariumLayout
 import dev.agentdeck.terrarium.TerrariumState
 import dev.agentdeck.terrarium.CreatureNameTagStyle
 import dev.agentdeck.terrarium.creatureNameTagMetric
@@ -861,7 +862,11 @@ private fun drawEinkOpenCode(
         0.06f * kotlin.math.sin(phase * kotlin.math.PI / 16.0).toFloat()
     } else 0f
 
-    val cx = w * (centerXFraction + wanderX)
+    // Resting states stay left of the crayfish floor territory (e-ink crayfish
+    // sits at x 0.75) — the band's right edge otherwise lands on its claws.
+    val anchorX = if (state == OctopusVisualState.WORKING) centerXFraction
+    else centerXFraction.coerceAtMost(TerrariumLayout.CRAYFISH_CLEAR_MAX_X)
+    val cx = w * (anchorX + wanderX)
     // State-based Y: WORKING uses layout swim slot (mid-upper),
     // IDLE/SLEEPING rests near ground so idle sessions don't hover in the water.
     // homeY-relative (not a shared constant) so idle OpenCode creatures rest in

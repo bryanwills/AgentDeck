@@ -111,15 +111,19 @@ class AntigravityCreature(
 
         when (visualState) {
             OctopusVisualState.SLEEPING -> {
+                // Sleeping sinks to the floor — drift left of the crayfish
+                // territory so a right-band sleeper doesn't settle onto the
+                // OpenClaw crayfish column.
                 val myDeepY = STANDING_Y_DEEP + standingJitter * 0.5f
-                currentX += (homeX - currentX) * dt * 4f
+                val restX = homeX.coerceAtMost(TerrariumLayout.CRAYFISH_CLEAR_MAX_X)
+                currentX += (restX - currentX) * dt * 4f
                 currentY += (myDeepY - currentY) * dt * 4f
             }
             OctopusVisualState.FLOATING -> {
-                // homeY-relative (not the shared Octopus STANDING_Y) so idle
-                // Antigravity creatures rest in their own strip instead of
-                // converging with Octopus/Cloud/OpenCode onto the same standing row.
-                val myStandingY = (homeY + 0.34f).coerceIn(0.56f, 0.64f) + standingJitter
+                // Idle HOVERS above the floor strip instead of landing: the band
+                // reaches x 0.82, so a floor rest would sit directly on the
+                // OpenClaw crayfish home (0.78, 0.64). Hover keeps homeX spacing.
+                val myStandingY = (homeY + 0.26f).coerceIn(0.48f, 0.54f) + standingJitter
                 val breathBob = sin(time * 0.72f) * 0.006f
                 val idleSway = sin(time * 0.34f) * 0.010f
                 currentX += (homeX + idleSway - currentX) * dt * 4f

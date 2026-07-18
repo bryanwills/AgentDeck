@@ -51,6 +51,21 @@ class CreatureLayoutTest {
     }
 
     @Test
+    fun `floor-rest clear anchor stays left of the crayfish claws`() {
+        // Idle/sleeping drifters anchor at ≤ CRAYFISH_CLEAR_MAX_X. Their right
+        // edge must stay left of the crayfish's left claw reach (~one body
+        // width left of center), else idle OpenCode lands on the OpenClaw
+        // crayfish again (the original macOS/Android full-overlap bug).
+        val clawLeftEdge =
+            TerrariumLayout.CRAYFISH_CENTER_X_FRACTION - TerrariumLayout.CRAYFISH_WIDTH_FRACTION
+        val widestRester = maxOf(openCodeWidth, antigravityWidth)
+        assertTrue(
+            "clear anchor ${TerrariumLayout.CRAYFISH_CLEAR_MAX_X} + half body reaches into crayfish claws",
+            TerrariumLayout.CRAYFISH_CLEAR_MAX_X + widestRester / 2f < clawLeftEdge,
+        )
+    }
+
+    @Test
     fun `low counts keep full size and do not shrink`() {
         // 1-2 sessions must not trigger any crowd shrink — they render large.
         assertTrue(layoutOctopuses(1).first().scaleFactor > 0.9f)

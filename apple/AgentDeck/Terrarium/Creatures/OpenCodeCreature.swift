@@ -89,10 +89,15 @@ final class OpenCodeCreature: Creature {
         let driftAmp: Float = visualState == .pulsing ? min(0.04, 0.015 + scale * 0.025) : 0.005
         let driftSpeed: Float = visualState == .pulsing ? 0.15 : 0.25
         let driftX = sin((time + driftPhase) * driftSpeed) * driftAmp
-        currentX += (homeX + driftX - currentX) * dt * lerpRate
+        // Floor rest stays clear of the crayfish territory: the band's right
+        // edge (0.68) otherwise drops idle OpenCode onto the OpenClaw crayfish.
+        let anchorX = visualState == .drifting
+            ? min(homeX, TerrariumLayout.crayfishClearMaxX)
+            : homeX
+        currentX += (anchorX + driftX - currentX) * dt * lerpRate
 
-        let minX = max(0.20, homeX - 0.07)
-        let maxX = min(0.70, homeX + 0.07)
+        let minX = max(0.20, anchorX - 0.07)
+        let maxX = min(0.70, anchorX + 0.07)
         currentX = min(maxX, max(minX, currentX))
         currentY = min(0.60, max(0.10, currentY))
     }

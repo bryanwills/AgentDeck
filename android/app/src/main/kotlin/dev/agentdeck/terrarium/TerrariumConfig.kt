@@ -101,6 +101,14 @@ object TerrariumLayout {
     const val CRAYFISH_CENTER_X_FRACTION = 0.78f
     const val CRAYFISH_CENTER_Y_FRACTION = 0.64f
 
+    /**
+     * Floor-resting drifters (idle/sleeping OpenCode, sleeping Antigravity)
+     * keep their rest anchor X at or left of this so the crayfish's floor
+     * territory (claws reach ~0.67) stays clear. Mirrors
+     * apple/.../TerrariumConfig.swift crayfishClearMaxX.
+     */
+    const val CRAYFISH_CLEAR_MAX_X = 0.62f
+
     // Tetra sizing
     const val TETRA_SIZE_FRACTION = 0.015f
     const val TETRA_COUNT = 7
