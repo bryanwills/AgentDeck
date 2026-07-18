@@ -50,7 +50,7 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 </p>
 
 <p align="center">
-  <img src="docs/media/desk-setup-3.jpg" width="720" alt="AgentDeck — TUI dashboard, Pixoo64, Stream Deck+, Ulanzi D200H, TC001 matrix, Apple and Android surfaces running simultaneously">
+  <img src="docs/media/setup-full.jpg" width="720" alt="AgentDeck — TUI dashboard, Pixoo64, Stream Deck+, Ulanzi D200H, TC001 matrix, Apple and Android surfaces running simultaneously">
 </p>
 
 | | Requirement |
