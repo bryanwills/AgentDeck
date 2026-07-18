@@ -419,15 +419,18 @@ struct TimelineStripView: View {
                     .foregroundStyle(TerrariumHUD.subtext.opacity(isChatEnd ? 0.4 : 0.5))
 
                 // Animate the leading icon when the row is in flight (running
-                // state). `.symbolEffect(.rotate)` would be cleaner but requires
-                // iOS 18 / macOS 15; the project's iOS deploy target is 17.0,
-                // so use a TimelineView-driven rotationEffect that works on iOS 17+.
+                // state). Swap semantic icons such as the slash-command terminal
+                // for the circular running glyph while rotating; rectangular
+                // symbols spinning around their centre read as a rendering glitch.
+                // `.symbolEffect(.rotate)` would be cleaner but requires iOS 18 /
+                // macOS 15, so use a TimelineView-driven rotationEffect on iOS 17+.
                 RotatingTimelineIcon(
                     symbolName: rowSymbolName,
                     font: .system(size: fontScale.sub, weight: .bold),
                     color: iconColor.opacity(isChatEnd ? 0.6 : 1),
                     size: 12,
-                    isRotating: isRotating
+                    isRotating: isRotating,
+                    rotatingSymbolName: sfSymbol(for: .running)
                 )
                 .accessibilityLabel(isFolded ? "answered with next turn" : iconKey.rawValue)
 
