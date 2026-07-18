@@ -40,8 +40,8 @@ AgentDeck の dashboard surface を一覧する読者向け翻訳です。英語
 | IPS 10.1            | ESP32 display  | ESP32-P4 + C6         | JD9365 MIPI-DSI · 800×1280     | USB serial · Wi-Fi WS   |   対応    |
 | Ulanzi TC001        | ESP32 LED      | ESP32 classic         | WS2812B · 32×8                 | USB serial · Wi-Fi WS   |   一部    |
 | InkDeck             | ESP32 e-ink    | XIAO ESP32-S3 Plus    | UC8179 · 800×480               | USB serial · Wi-Fi WS   |   対応    |
-| XTeink X3           | e-ink reader   | ESP32-C3              | 3.7-inch · 528×792             | Wi-Fi WS                |   実験    |
-| XTeink X4           | e-ink reader   | ESP32-C3              | 800×480                        | Wi-Fi WS                |   実験    |
+| XTeink X3           | e-ink reader   | ESP32-C3              | 3.7-inch · 528×792             | Wi-Fi WS                |   一部    |
+| XTeink X4           | e-ink reader   | ESP32-C3              | 800×480                        | Wi-Fi WS                |   一部    |
 | Divoom Pixoo64      | Commercial LED | Divoom controller     | RGB LED · 64×64                | HTTP REST               |   対応    |
 | iDotMatrix          | Pixel display  | BLE SoC               | RGB · 32×32                    | BLE GATT                |   対応    |
 | Divoom Timebox Mini | Commercial LED | BLE SoC               | RGB LED · 11×11                | BLE GATT                |   対応    |
@@ -58,7 +58,7 @@ AgentDeck の dashboard surface を一覧する読者向け翻訳です。英語
 
 ## 主な制約
 
-- **集計サーフェス数: production 20 + 実験 2 (XTeink X3/X4)。** 公開サーフェス数(README、ランディング)はこの算定をミラーします — プロトコル行(SSE stream)を除く全行を数え、実験行は別記します。
+- **集計サーフェス数: 22。** 公開サーフェス数(README、ランディング)はこの算定をミラーします — プロトコル行(SSE stream)を除く全行を数えます。XTeink X3/X4は正常稼働中(両daemonにWi-Fi登録)ですが、コミュニティのCrossPointフォークで駆動され、一部表記はその配布上の制約を示します。
 - App Store 列は第三者アプリの同梱ではなく、提出する Apple アプリと Swift daemon との互換性を示します。
 - D200H は Ulanzi Studio plugin のみ対応し、direct-HID は廃止済みです。
 - Stream Deck family には Elgato アプリが必要です。

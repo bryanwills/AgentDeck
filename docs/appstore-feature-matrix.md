@@ -74,7 +74,7 @@ All surfaces follow the same rule:
 | ESP32 Wi-Fi OTA push | Yes | Yes | Firmware bytes pushed over existing WS; firmware build remains CLI-only |
 | Ulanzi TC001 | Pending | Yes | Swift `led8x32` hardware verification gap, not sandbox restriction |
 | InkDeck | Experimental | Experimental | Registration exists; physical render/refresh release validation incomplete |
-| XTeink X3 / X4 | Experimental | Experimental | External CrossPoint firmware; Wi-Fi registration exists |
+| XTeink X3 / X4 | Yes | Yes | Community CrossPoint firmware; registers with both daemons over Wi-Fi (SD-card flash distribution) |
 | Android e-ink / tablet presence | Partial | Yes | Same-LAN self-registration is safe; ADB preview/tunnel requires CLI |
 
 ## Agent sessions

@@ -11,7 +11,7 @@ const checkOnly = process.argv.includes('--check');
 
 /* Exact pin, not a floor: a silently dropped token is as much a regression as a
  * silently added one. Bump this deliberately when design/tokens.css changes. */
-const EXPECTED_TOKEN_COUNT = 96;
+const EXPECTED_TOKEN_COUNT = 97;
 const requiredFields = [
   'id',
   'title',
@@ -115,17 +115,115 @@ async function loadTokens() {
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.svg', '.jpg', '.jpeg', '.webp']);
 
-/* Non-image canonical design sources that belong in the asset library as
- * pointers. They are source-only: the viewer links them, never renders them. */
-const SPEC_POINTERS = [
-  {
-    source: 'design/icons.jsx',
-    name: 'icons',
-    note: 'Canonical UI icon set — 22px marks on a 24px viewbox, 1.6px stroke (DESIGN.md §6.3). JSX source, not rendered here.',
-  },
-];
+function blobUrl(relativePath) {
+  // Several reference surfaces have spaces in their filenames.
+  return `https://github.com/puritysb/AgentDeck/blob/master/${encodeURI(relativePath)}`;
+}
 
-async function loadAssets() {
+async function specPointer({ source, name, note, type }) {
+  const absolute = safeSourcePath(source);
+  const info = await stat(absolute);
+  return {
+    kind: 'spec',
+    name,
+    file: path.basename(source.replace(/\/$/, '')),
+    type: type || path.extname(source).slice(1).toUpperCase() || 'DIR',
+    bytes: info.isDirectory() ? 0 : info.size,
+    url: blobUrl(source.replace(/\/$/, '')),
+    source,
+    note,
+  };
+}
+
+/* === Generated dot-matrix masks ===
+ * `pnpm generate-micro-glyphs` renders design/brand/*.svg down to alpha masks
+ * for the LED surfaces. Parsing the generated file (rather than restating the
+ * pixels here) is the whole point: the viewer must show what actually ships, so
+ * a regenerated mask changes this page without anyone editing it.
+ */
+const GLYPH_SOURCE = 'bridge/src/pixoo/official-dot-glyphs.generated.ts';
+const GLYPH_BLOCKS = [
+  { constant: 'OFFICIAL_DOT_GLYPHS', size: 24, surface: 'Pixoo64 · iDotMatrix' },
+  { constant: 'OFFICIAL_TIMEBOX_GLYPHS', size: 9, surface: 'Timebox Mini' },
+  { constant: 'OFFICIAL_TC001_GLYPHS', size: 8, surface: 'TC001' },
+];
+const AGENT_LABELS = {
+  claudeCode: 'Claude Code',
+  codex: 'Codex',
+  openCode: 'OpenCode',
+  openClaw: 'OpenClaw',
+  antigravity: 'Antigravity',
+};
+
+function parseGlyphBlock(source, constant, size) {
+  const start = source.indexOf(`export const ${constant}`);
+  if (start < 0) fail(`${GLYPH_SOURCE} has no ${constant} export`);
+  const end = source.indexOf('\n};', start);
+  if (end < 0) fail(`${GLYPH_SOURCE} ${constant} block is not terminated`);
+  const block = source.slice(start, end);
+
+  const glyphs = {};
+  for (const match of block.matchAll(/(\w+):\s*new Uint8Array\(\[([\s\S]*?)\]\)/g)) {
+    const values = match[2]
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== '')
+      .map(Number);
+    if (values.length !== size * size) {
+      fail(`${GLYPH_SOURCE} ${constant}.${match[1]} has ${values.length} cells, expected ${size * size}`);
+    }
+    if (values.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+      fail(`${GLYPH_SOURCE} ${constant}.${match[1]} has a cell outside 0-255`);
+    }
+    glyphs[match[1]] = values;
+  }
+  if (Object.keys(glyphs).length === 0) fail(`${GLYPH_SOURCE} ${constant} yielded no glyphs`);
+  return glyphs;
+}
+
+/* Horizontal run-merge keeps the inline SVG small — a 24×24 mask collapses from
+ * ~500 single-cell rects to a few dozen spans without changing a pixel. */
+function maskToSvg(cells, size) {
+  const rects = [];
+  for (let y = 0; y < size; y += 1) {
+    let x = 0;
+    while (x < size) {
+      const alpha = cells[y * size + x];
+      let run = 1;
+      while (x + run < size && cells[y * size + x + run] === alpha) run += 1;
+      if (alpha > 0) {
+        const opacity = Math.round((alpha / 255) * 100) / 100;
+        rects.push(`<rect x="${x}" y="${y}" width="${run}" height="1" opacity="${opacity}"/>`);
+      }
+      x += run;
+    }
+  }
+  return `<svg viewBox="0 0 ${size} ${size}" role="img" fill="currentColor" shape-rendering="crispEdges">${rects.join('')}</svg>`;
+}
+
+async function loadGlyphMasks() {
+  const source = await readFile(safeSourcePath(GLYPH_SOURCE), 'utf8');
+  const items = [];
+  for (const block of GLYPH_BLOCKS) {
+    const glyphs = parseGlyphBlock(source, block.constant, block.size);
+    for (const [agent, cells] of Object.entries(glyphs)) {
+      items.push({
+        kind: 'mask',
+        name: `${AGENT_LABELS[agent] || agent} ${block.size}×${block.size}`,
+        agent,
+        size: block.size,
+        surface: block.surface,
+        lit: cells.filter((value) => value > 0).length,
+        svg: maskToSvg(cells, block.size),
+        source: `${GLYPH_SOURCE} · ${block.constant}`,
+        url: blobUrl(GLYPH_SOURCE),
+      });
+    }
+  }
+  return items;
+}
+
+async function loadBrandMarks() {
   const brandDir = path.join(repoRoot, 'design', 'brand');
   const entries = await readdir(brandDir, { withFileTypes: true });
   const files = entries
@@ -134,34 +232,100 @@ async function loadAssets() {
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   if (files.length === 0) fail('design/brand contains no brand assets');
 
-  const assets = [];
+  const marks = [];
   for (const file of files) {
     const info = await stat(path.join(brandDir, file));
-    assets.push({
+    marks.push({
+      kind: 'image',
       name: file.replace(/\.[^.]+$/, ''),
       file,
       type: path.extname(file).slice(1).toUpperCase(),
       bytes: info.size,
       url: `assets/brand/${file}`,
       source: `design/brand/${file}`,
-      kind: 'image',
     });
   }
+  return marks;
+}
 
-  for (const pointer of SPEC_POINTERS) {
-    const info = await stat(safeSourcePath(pointer.source));
-    assets.push({
-      name: pointer.name,
-      file: path.basename(pointer.source),
-      type: path.extname(pointer.source).slice(1).toUpperCase(),
-      bytes: info.size,
-      url: `https://github.com/puritysb/AgentDeck/blob/master/${pointer.source}`,
-      source: pointer.source,
-      kind: 'spec',
-      note: pointer.note,
-    });
-  }
-  return assets;
+async function loadCreatures() {
+  const items = Object.entries(AGENT_LABELS).map(([agent, label]) => ({
+    kind: 'link',
+    name: label,
+    agent,
+    url: '../demo/',
+    note: `Canonical ${label} creature. Rendered live — with state, motion, and the terrarium — on the Live Preview surface.`,
+  }));
+  items.push(
+    await specPointer({
+      source: 'shared/src/terrarium-rules.ts',
+      name: 'terrarium-rules.ts',
+      note: 'Terrarium behaviour SSOT — generated outward to Swift/Kotlin/C++ behind a vitest drift gate. New creature rules land here first.',
+    }),
+    await specPointer({
+      source: 'android/app/src/main/kotlin/dev/agentdeck/terrarium/CreatureGeometry.kt',
+      name: 'CreatureGeometry.kt',
+      note: 'Canonical creature geometry. ESP32 alpha masks are generated from the same shapes by `pnpm generate-creature-glyphs`.',
+    }),
+    await specPointer({
+      source: 'docs/design/creatures.jsx',
+      name: 'creatures.jsx',
+      note: 'Creature reference drawings used by the legacy Design System page. Reference only — the geometry SSOT above wins.',
+    }),
+  );
+  return items;
+}
+
+async function loadReferenceSurfaces() {
+  return Promise.all([
+    specPointer({
+      source: 'docs/design/Design System.html',
+      name: 'Design System.html',
+      note: 'Legacy visual style guide. Superseded by this viewer for anything it covers; kept for the mockups it still hosts.',
+    }),
+    specPointer({
+      source: 'docs/design/Design Audit.html',
+      name: 'Design Audit.html',
+      note: 'Coverage matrix and the R1–R8 lint rules in narrative form. The enforced version is `bash design/lint.sh`.',
+    }),
+    specPointer({
+      source: 'docs/design/AgentDeck Tide Bento (D1).html',
+      name: 'Tide Bento (D1).html',
+      note: 'Bento landing exploration that set the current tide palette direction. Historical.',
+    }),
+    specPointer({
+      source: 'docs/design/tenin',
+      name: 'tenin/',
+      type: 'DIR',
+      note: 'Mockup application built on the tide system. Design provenance, not a shipped surface.',
+    }),
+    specPointer({
+      source: 'docs/design-mockups',
+      name: 'design-mockups/',
+      type: 'DIR',
+      note: 'Interactive React explorations (menubar popup, e-ink screens, options A–D). Non-production per DESIGN.md §11.',
+    }),
+  ]);
+}
+
+async function loadAssets() {
+  const groups = [
+    { id: 'brand', items: await loadBrandMarks() },
+    { id: 'masks', items: await loadGlyphMasks() },
+    { id: 'creatures', items: await loadCreatures() },
+    {
+      id: 'icons',
+      items: [
+        await specPointer({
+          source: 'design/icons.jsx',
+          name: 'icons.jsx',
+          note: 'Canonical UI icon set — 22px marks on a 24px viewbox, 1.6px stroke (DESIGN.md §6.3). JSX source, not rendered here.',
+        }),
+      ],
+    },
+    { id: 'reference', items: await loadReferenceSurfaces() },
+  ];
+  return { groups, total: groups.reduce((sum, group) => sum + group.items.length, 0) };
 }
 
 async function buildManifest() {
@@ -218,7 +382,7 @@ async function main() {
   const manifest = await buildManifest();
   if (checkOnly) {
     console.log(
-      `[design-system] ${manifest.documents.length} documents, ${manifest.tokens.length} tokens, ${manifest.assets.length} assets verified`,
+      `[design-system] ${manifest.documents.length} documents, ${manifest.tokens.length} tokens, ${manifest.assets.total} assets in ${manifest.assets.groups.length} groups verified`,
     );
     return;
   }

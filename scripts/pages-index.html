@@ -11,7 +11,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentDeck — Stop Chatting. Start Steering.</title>
-<meta name="description" content="AgentDeck is a physical control surface for AI coding agents — one bridge, 20 display surfaces: Stream Deck+, e-ink readers, tablets, ESP32 displays, LED matrices, HID decks, and terminals.">
+<meta name="description" content="AgentDeck is a physical control surface for AI coding agents — one bridge, 22 display surfaces: Stream Deck+, e-ink readers, tablets, ESP32 displays, LED matrices, HID decks, and terminals.">
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -50,8 +50,8 @@
     max-width: var(--container-max); margin: 0 auto; padding: var(--s-3) var(--container-pad);
     display: flex; align-items: center; gap: var(--s-4);
   }
-  .brand { display: flex; align-items: center; gap: var(--s-3); text-decoration: none; color: var(--ink-900); font-weight: 700; letter-spacing: -0.01em; }
-  .brand img { width: 30px; height: 30px; border-radius: var(--r-md); }
+  .brand { display: flex; align-items: center; gap: var(--s-3); text-decoration: none; color: var(--ink-900); font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+  .brand img { width: 36px; height: 36px; border-radius: var(--r-md); }
   .nav-links { margin-left: auto; display: flex; gap: var(--s-2); flex-wrap: wrap; }
   .nav-links a {
     font-size: 14px; font-weight: 500; text-decoration: none; color: var(--ink-700);
@@ -66,7 +66,7 @@
   }
   .lang:hover { background: var(--tide-200); color: var(--ink-900); }
 
-  .wrap { max-width: var(--container-max); margin: 0 auto; padding: var(--s-16) var(--container-pad) var(--s-20); }
+  .wrap { max-width: var(--container-max); margin: 0 auto; padding: var(--s-10) var(--container-pad) var(--s-20); }
 
   /* ── Hero ── */
   .hero { text-align: center; }
@@ -75,7 +75,7 @@
     font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
     color: var(--kelp-700); margin: var(--s-6) 0 var(--s-3);
   }
-  h1 { font-size: clamp(54px, 7vw, 96px); letter-spacing: -0.035em; line-height: 1.02; margin: 0 0 var(--s-4); }
+  h1 { font-size: clamp(44px, 6vw, 72px); letter-spacing: -0.035em; line-height: 1.02; margin: 0 0 var(--s-4); }
   .tagline { color: var(--coral-700); font-weight: 600; }
   .lede { font-size: 18px; color: var(--ink-700); max-width: 62ch; margin: 0 auto var(--s-6); }
   .cta { display: flex; gap: var(--s-3); justify-content: center; flex-wrap: wrap; margin-bottom: var(--s-8); }
@@ -166,14 +166,14 @@
     <h1>Stop Chatting.<br><span class="tagline">Start Steering.</span></h1>
     <p class="lede" data-i18n="hero.lede">
       AgentDeck puts your coding agents on the desk. One daemon hub renders every session live
-      across 20 surfaces — and lets you steer them without leaving the keyboard.
+      across 22 surfaces — and lets you steer them without leaving the keyboard.
     </p>
     <div class="cta">
       <a class="btn btn-primary" href="hardware/" data-i18n="cta.devices">Explore the devices</a>
       <a class="btn btn-ghost" href="demo/" data-i18n="cta.demo">Try the live preview</a>
     </div>
     <div class="stats">
-      <div class="stat"><div class="n">20</div><div class="l" data-i18n="stat.surfaces">display surfaces</div></div>
+      <div class="stat"><div class="n">22</div><div class="l" data-i18n="stat.surfaces">display surfaces</div></div>
       <div class="stat"><div class="n">4</div><div class="l" data-i18n="stat.agents">coding agents</div></div>
       <div class="stat"><div class="n">100%</div><div class="l" data-i18n="stat.local">local — no cloud</div></div>
     </div>
@@ -209,8 +209,8 @@
     </a>
   </div>
 
-  <h2 data-i18n="surf.h">20 surfaces, one bridge</h2>
-  <p class="section-lede" data-i18n="surf.p">The same session state renders natively on each, and they run simultaneously — counted from the canonical compatibility matrix. Each app chip is a separately designed UI. Two experimental XTeink e-ink fork targets ride alongside.</p>
+  <h2 data-i18n="surf.h">22 surfaces, one bridge</h2>
+  <p class="section-lede" data-i18n="surf.p">The same session state renders natively on each, and they run simultaneously — counted from the canonical compatibility matrix. Each app chip is a separately designed UI; the XTeink readers run the community CrossPoint fork.</p>
   <div class="surfaces">
     <div class="chip"><b>Stream Deck+</b><span>8 keys · 4 dials</span></div>
     <div class="chip"><b>Stream Deck</b><span>15 keys</span></div>
@@ -227,6 +227,8 @@
     <div class="chip"><b>TTGO T-Display</b><span>135×240</span></div>
     <div class="chip"><b>Waveshare LCD 1.47"</b><span>172×320</span></div>
     <div class="chip"><b>InkDeck e-ink</b><span>800×480 · WiFi OTA</span></div>
+    <div class="chip"><b>XTeink X3</b><span>528×792 e-ink · fork</span></div>
+    <div class="chip"><b>XTeink X4</b><span>800×480 e-ink · fork</span></div>
     <div class="chip"><b>Divoom Pixoo64</b><span>64×64 LED</span></div>
     <div class="chip"><b>Ulanzi TC001</b><span>8×32 LED</span></div>
     <div class="chip"><b>iDotMatrix</b><span>32×32 LED</span></div>
@@ -287,7 +289,7 @@
     var I18N = {
       ko: {
         'hero.kicker': 'AI 코딩 에이전트를 위한 피지컬 컨트롤 서피스',
-        'hero.lede': 'AgentDeck은 코딩 에이전트를 책상 위로 꺼내 놓습니다. 하나의 데몬 허브가 모든 세션을 20개 서피스에 라이브로 렌더링하고 — 키보드를 떠나지 않고 조종하게 해줍니다.',
+        'hero.lede': 'AgentDeck은 코딩 에이전트를 책상 위로 꺼내 놓습니다. 하나의 데몬 허브가 모든 세션을 22개 서피스에 라이브로 렌더링하고 — 키보드를 떠나지 않고 조종하게 해줍니다.',
         'cta.devices': '디바이스 살펴보기',
         'cta.demo': '라이브 프리뷰 열기',
         'stat.surfaces': '디스플레이 서피스',
@@ -305,13 +307,13 @@
         'card.health.p': '최신 자동화 검사, 시나리오 커버리지, 히스토리, 알려진 갭을 확인하세요.',
         'card.src.ci': '오픈소스',
         'card.src.p': 'GitHub의 MIT 라이선스 모노레포 — 브리지, 플러그인, 펌웨어, 앱.',
-        'surf.h': '20개 서피스, 하나의 브리지',
-        'surf.p': '동일한 세션 상태가 각 서피스에 네이티브로 렌더링되며 동시에 구동됩니다 — 개수는 정본 호환성 매트릭스 기준입니다. 앱 칩은 각각 따로 설계된 UI이며, 실험 단계인 XTeink e-ink 포크 타깃 2종이 함께합니다.',
+        'surf.h': '22개 서피스, 하나의 브리지',
+        'surf.p': '동일한 세션 상태가 각 서피스에 네이티브로 렌더링되며 동시에 구동됩니다 — 개수는 정본 호환성 매트릭스 기준입니다. 앱 칩은 각각 따로 설계된 UI이고, XTeink 리더는 커뮤니티 CrossPoint 포크로 구동됩니다.',
         'policy.canonical': '개인정보 처리방침은 영어 원문이 정본입니다.'
       },
       ja: {
         'hero.kicker': 'AIコーディングエージェントのためのフィジカルコントロールサーフェス',
-        'hero.lede': 'AgentDeckはコーディングエージェントを机の上に連れ出します。ひとつのdaemonハブがすべてのセッションを20のサーフェスにライブ描画し — キーボードを離れずに操縦させてくれます。',
+        'hero.lede': 'AgentDeckはコーディングエージェントを机の上に連れ出します。ひとつのdaemonハブがすべてのセッションを22のサーフェスにライブ描画し — キーボードを離れずに操縦させてくれます。',
         'cta.devices': 'デバイスを見る',
         'cta.demo': 'ライブプレビューを試す',
         'stat.surfaces': 'ディスプレイサーフェス',
@@ -329,8 +331,8 @@
         'card.health.p': '最新の自動チェック、シナリオカバレッジ、履歴、既知のギャップを確認できます。',
         'card.src.ci': 'オープンソース',
         'card.src.p': 'GitHubのMITライセンスmonorepo — ブリッジ、プラグイン、ファームウェア、アプリ。',
-        'surf.h': '20のサーフェス、ひとつのブリッジ',
-        'surf.p': '同じセッション状態が各サーフェスにネイティブ描画され、同時に動作します — 数は正本の互換性マトリクスに基づきます。アプリのチップはそれぞれ別設計のUIで、実験段階のXTeink e-inkフォークターゲット2種も並走しています。',
+        'surf.h': '22のサーフェス、ひとつのブリッジ',
+        'surf.p': '同じセッション状態が各サーフェスにネイティブ描画され、同時に動作します — 数は正本の互換性マトリクスに基づきます。アプリのチップはそれぞれ別設計のUIで、XTeinkリーダーはコミュニティのCrossPointフォークで動きます。',
         'policy.canonical': 'プライバシーポリシーは英語原文が正本です。'
       }
     };

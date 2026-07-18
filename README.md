@@ -25,9 +25,9 @@
 
 **Stop Chatting. Start Steering.**
 
-AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **20 display surfaces simultaneously** — tablets, e-ink readers (Android + the InkDeck ESP32 panel), phones, ESP32 modules, LED matrices, HID decks, and terminals — plus two experimental XTeink e-ink fork targets. The surface count is derived from the canonical matrix in [docs/hardware-compatibility.md](docs/hardware-compatibility.md).
+AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **22 display surfaces simultaneously** — tablets, e-ink readers (Android, the InkDeck ESP32 panel, and XTeink readers via the community CrossPoint fork), phones, ESP32 modules, LED matrices, HID decks, and terminals. The surface count is derived from the canonical matrix in [docs/hardware-compatibility.md](docs/hardware-compatibility.md).
 
-> One bridge. 20 surfaces. Steer your AI — without leaving your keyboard flow.
+> One bridge. 22 surfaces. Steer your AI — without leaving your keyboard flow.
 
 > **🚧 Direction update (in progress).** AgentDeck is shifting from *parsing* the agent to *observing* it. Reading agent state by scraping the PTY breaks every time an agent ships a UI update — so **hooks are now the primary path**: Claude Code / Codex lifecycle hooks feed session state deterministically, and PTY parsing falls back to a best-effort assist. In parallel we're hardening the **macOS App Store build** to run entirely inside the sandbox (no subprocesses, no companion binary) so a capable — if feature-gated — version can ship on its own, and stabilizing **timeline attribution** (turn completion, merge parity, per-agent labeling) across all surfaces. Expect these areas to move fast.
 
@@ -150,7 +150,7 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 
 > Full hardware/OS inventory (SoC, resolution, transport, App Store tier) is the canonical matrix in **[docs/hardware-compatibility.md](docs/hardware-compatibility.md)**.
 
-The rows below mirror the surface matrix in [docs/hardware-compatibility.md](docs/hardware-compatibility.md) (20 production surfaces + 2 experimental fork targets). Each app row is a genuinely distinct UI — macOS and iOS/iPadOS are similar but separately designed; Android tablet and Android e-ink are entirely different layouts.
+The rows below mirror the surface matrix in [docs/hardware-compatibility.md](docs/hardware-compatibility.md) (22 surfaces; XTeink X3/X4 run the community CrossPoint fork). Each app row is a genuinely distinct UI — macOS and iOS/iPadOS are similar but separately designed; Android tablet and Android e-ink are entirely different layouts.
 
 | # | Surface | Description |
 |---|---------|-------------|
@@ -174,8 +174,8 @@ The rows below mirror the surface matrix in [docs/hardware-compatibility.md](doc
 | 18 | **iDotMatrix 32×32** | 32×32 RGB pixel display — BLE |
 | 19 | **Divoom Timebox Mini** | 11×11 RGB LED — BLE (App Store + CLI) |
 | 20 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote |
-| 21 | **XTeink X3** *(experimental)* | 528×792 portrait e-ink reader — external CrossPoint fork, SD-card flash only |
-| 22 | **XTeink X4** *(experimental)* | 800×480 landscape e-ink reader — external CrossPoint fork, SD-card flash only |
+| 21 | **XTeink X3** | 528×792 portrait e-ink reader — community CrossPoint fork, registers with both daemons over Wi-Fi (SD-card flash) |
+| 22 | **XTeink X4** | 800×480 landscape e-ink reader — community CrossPoint fork, registers with both daemons over Wi-Fi (SD-card flash) |
 
 > Full hardware/OS spec sheet (SoC, resolution, flash, SDK, deployment targets) for every surface: **[docs/hardware-compatibility.md](docs/hardware-compatibility.md)** (visual view: [docs/hardware/index.html](docs/hardware/index.html)).
 

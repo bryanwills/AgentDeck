@@ -30,7 +30,7 @@
     --font-mono:"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace;
     --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
     --s-8:32px; --s-10:40px; --s-12:48px; --s-16:64px; --s-20:80px;
-    --t-hero:clamp(54px,7vw,96px); --tr-hero:-0.035em;
+    --t-page-title:clamp(38px,5vw,64px); --tr-hero:-0.035em;
     --t-h2:44px; --tr-h2:-0.02em; --t-lede:18px; --t-card-title:19px;
     --t-caption:13px; --t-kicker:12px; --tr-kicker:0.18em;
     --container-max:1240px; --container-pad:32px;
@@ -45,8 +45,8 @@
 
   .nav { position:sticky; top:0; z-index:20; backdrop-filter:blur(10px); background:rgba(245,243,236,.82); border-bottom:1px solid var(--tide-200); }
   .nav-in { max-width:var(--container-max); margin:0 auto; padding:var(--s-3) var(--container-pad); display:flex; align-items:center; gap:var(--s-4); }
-  .brand { display:flex; align-items:center; gap:var(--s-3); text-decoration:none; color:var(--ink-900); font-weight:700; }
-  .brand img { width:30px; height:30px; border-radius:var(--r-md); }
+  .brand { display:flex; align-items:center; gap:var(--s-3); text-decoration:none; color:var(--ink-900); font-weight:700; font-size:17px; letter-spacing:-.01em; }
+  .brand img { width:36px; height:36px; border-radius:var(--r-md); }
   .nav-links { margin-left:auto; display:flex; gap:var(--s-2); flex-wrap:wrap; align-items:center; }
   .nav-links a { font-size:14px; font-weight:500; text-decoration:none; color:var(--ink-700); padding:var(--s-1) var(--s-3); border-radius:var(--r-pill); }
   .nav-links a:hover, .nav-links a.active { background:var(--tide-200); color:var(--ink-900); }
@@ -54,9 +54,9 @@
   .lang { font:500 13px var(--font-sans); color:var(--ink-700); background:var(--tide-100); border:1px solid var(--tide-200); border-radius:var(--r-pill); padding:4px 10px; cursor:pointer; }
   .lang:hover { background:var(--tide-200); color:var(--ink-900); }
 
-  .wrap { max-width:var(--container-max); margin:0 auto; padding:var(--s-16) var(--container-pad) var(--s-20); }
+  .wrap { max-width:var(--container-max); margin:0 auto; padding:var(--s-10) var(--container-pad) var(--s-20); }
   .kicker { font-family:var(--font-mono); font-size:var(--t-kicker); letter-spacing:var(--tr-kicker); text-transform:uppercase; color:var(--kelp-700); margin:0 0 var(--s-3); }
-  h1 { font-size:var(--t-hero); letter-spacing:var(--tr-hero); line-height:1.02; margin:0 0 var(--s-4); }
+  h1 { font-size:var(--t-page-title); letter-spacing:var(--tr-hero); line-height:1.02; margin:0 0 var(--s-4); }
   .lede { font-size:var(--t-lede); color:var(--ink-700); max-width:68ch; margin:0; }
   .hero-actions { display:flex; gap:var(--s-3); flex-wrap:wrap; margin-top:var(--s-6); }
   .btn { display:inline-flex; align-items:center; text-decoration:none; font-weight:600; font-size:14px; padding:10px 18px; border-radius:var(--r-pill); border:1px solid var(--ink-700); }
@@ -252,8 +252,8 @@
       </article>
       <article class="device wide">
         <div class="shot missing"></div>
-        <div class="device-top"><h3>XTeink X3 / X4</h3><span class="badge experimental" data-i18n="b.experimental">Experimental</span></div>
-        <p class="sub" data-i18n="d.xteink">External CrossPoint Reader fork — decision cards on ESP32-C3 e-ink readers. SD-card flash only, not shipped via AgentDeck releases; its renderer lives outside this repository, so no canonical frame can be shown.</p>
+        <div class="device-top"><h3>XTeink X3 / X4</h3><span class="badge bridge" data-i18n="b.fork">Community fork</span></div>
+        <p class="sub" data-i18n="d.xteink">CrossPoint Reader fork on ESP32-C3 e-ink readers — decision cards + timeline, registered with both daemons over Wi-Fi. Distributed by the fork project (SD-card flash); its renderer lives outside this repository, so no canonical frame can be shown.</p>
         <div class="specs"><div class="spec"><span>X3</span><strong>528×792 portrait</strong></div><div class="spec"><span>X4</span><strong>800×480 landscape</strong></div></div>
       </article>
     </div>
@@ -335,13 +335,13 @@
         'd.waveshare': 'ESP32-C6의 172×320 세로형 스트립 — 이 보드의 호스트 sim 프레임은 아직 없습니다.',
         'd.ips10': '10.1인치 800×1280 "픽셀 오피스" 대시보드 (JC8012P4A1C).',
         'd.inkdeck': 'Seeed TRMNL OG DIY Kit 위의 커스텀 펌웨어 — 7.5인치 800×480 1-bit e-ink 대시보드, USB serial + Wi-Fi, WiFi OTA 업데이트.',
-        'd.xteink': '외부 CrossPoint Reader 포크 — ESP32-C3 e-ink 리더의 결정 카드. SD 카드 플래시 전용이고 AgentDeck 릴리스로 배포되지 않으며, 렌더러가 이 저장소 밖에 있어 정본 프레임을 보여줄 수 없습니다.',
+        'd.xteink': 'ESP32-C3 e-ink 리더에서 도는 CrossPoint Reader 포크 — 결정 카드 + 타임라인, 양 데몬에 Wi-Fi로 등록됩니다. 배포는 포크 프로젝트가 담당(SD 카드 플래시)하며, 렌더러가 이 저장소 밖에 있어 정본 프레임을 보여줄 수 없습니다.',
         'd.pixoo': '64×64 Wi-Fi LED 프레임 — 은은한 테라리움 + 사용량 행.',
         'd.idot': '32×32 BLE 픽셀 디스플레이 — 같은 테라리움 렌더러의 네이티브 크기 출력.',
         'd.timebox': '11×11 BLE 마이크로 글리프 — 상태 필드 위 대표 크리처 하나.',
         'd.tc001': 'AgentDeck 펌웨어로 구동되는 8×32 LED 매트릭스 — 사용량 + 에이전트 페이지.',
         'b.native': '네이티브',
-        'b.experimental': '실험적',
+        'b.fork': '커뮤니티 포크',
         'detail.h': '보드 수준 상세가 필요하신가요?',
         'detail.p': '정본 매트릭스는 SoC, 디스플레이 IC, 터치 컨트롤러, 플래시, PSRAM, 전송, 플랫폼 티어를 다룹니다.',
         'detail.a': '호환성 SSOT 열기'
@@ -378,13 +378,13 @@
         'd.waveshare': 'ESP32-C6の172×320縦型ストリップ — このボードのホストsimフレームはまだありません。',
         'd.ips10': '10.1インチ800×1280「ピクセルオフィス」ダッシュボード (JC8012P4A1C)。',
         'd.inkdeck': 'Seeed TRMNL OG DIY Kit上のカスタムファームウェア — 7.5インチ800×480 1-bit e-inkダッシュボード、USB serial + Wi-Fi、WiFi OTA更新。',
-        'd.xteink': '外部CrossPoint Readerフォーク — ESP32-C3 e-inkリーダーの決定カード。SDカード書き込み専用でAgentDeckリリースでは配布されず、レンダラーがこのリポジトリの外にあるため正本フレームは表示できません。',
+        'd.xteink': 'ESP32-C3 e-inkリーダーで動くCrossPoint Readerフォーク — 決定カード + タイムライン、両daemonにWi-Fiで登録されます。配布はフォークプロジェクトが担当(SDカード書き込み)し、レンダラーがこのリポジトリの外にあるため正本フレームは表示できません。',
         'd.pixoo': '64×64 Wi-Fi LEDフレーム — さりげないテラリウム + 使用量行。',
         'd.idot': '32×32 BLEピクセルディスプレイ — 同じテラリウムレンダラーのネイティブサイズ出力。',
         'd.timebox': '11×11 BLEマイクログリフ — ステータスフィールドに代表クリーチャーひとつ。',
         'd.tc001': 'AgentDeckファームウェアで動く8×32 LEDマトリクス — 使用量 + エージェントページ。',
         'b.native': 'ネイティブ',
-        'b.experimental': '実験的',
+        'b.fork': 'コミュニティフォーク',
         'detail.h': 'ボードレベルの詳細が必要ですか？',
         'detail.p': '正本マトリクスはSoC、ディスプレイIC、タッチコントローラー、フラッシュ、PSRAM、トランスポート、プラットフォームtierを扱います。',
         'detail.a': '互換性SSOTを開く'

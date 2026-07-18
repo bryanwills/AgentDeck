@@ -75,6 +75,7 @@ MIRRORS = {
         "omit": {
             "--t-hero":      "clamp() fluid type doesn't translate to UIKit/SwiftUI; native Dynamic Type used instead",
             "--t-editorial": "clamp() fluid type doesn't translate to UIKit/SwiftUI; native Dynamic Type used instead",
+            "--t-page-title": "clamp() fluid type doesn't translate to UIKit/SwiftUI; native Dynamic Type used instead",
             "--sh-card":     "shadows applied via SwiftUI .shadow modifiers, not pre-rendered",
             "--sh-card-h":   "shadows applied via SwiftUI .shadow modifiers, not pre-rendered",
             "--sh-frame":    "shadows applied via SwiftUI .shadow modifiers, not pre-rendered",
@@ -90,6 +91,7 @@ MIRRORS = {
         "omit": {
             "--t-hero":      "clamp() fluid type doesn't translate to Compose; sp values via FontSize used instead",
             "--t-editorial": "clamp() fluid type doesn't translate to Compose; sp values via FontSize used instead",
+            "--t-page-title": "clamp() fluid type doesn't translate to Compose; sp values via FontSize used instead",
             "--sh-card":     "shadows applied via Modifier.shadow, not pre-rendered",
             "--sh-card-h":   "shadows applied via Modifier.shadow, not pre-rendered",
             "--sh-frame":    "shadows applied via Modifier.shadow, not pre-rendered",

@@ -280,17 +280,17 @@
     .site-nav { position:sticky; top:0; z-index:200; backdrop-filter:blur(10px); background:rgba(245,243,236,.82); border-bottom:1px solid var(--tide-200); }
     .site-nav-in { max-width:var(--site-max); margin:0 auto; padding:12px 32px; display:flex; align-items:center; gap:16px; }
     .site-brand { display:flex; align-items:center; gap:12px; color:var(--ink-900); text-decoration:none; font-weight:700; }
-    .site-brand img { width:30px; height:30px; border-radius:8px; }
+    .site-brand img { width:36px; height:36px; border-radius:8px; }
     .site-links { margin-left:auto; display:flex; gap:8px; }
     .site-links a { color:var(--ink-700); text-decoration:none; font-size:14px; font-weight:500; padding:4px 12px; border-radius:999px; white-space:nowrap; }
     .site-links a:hover, .site-links a.active { color:var(--ink-900); background:var(--tide-200); }
     .site-links .gh { color:var(--tide-50); background:var(--ink-800); }
     .lang { font:500 13px var(--font-sans); color:var(--ink-700); background:var(--tide-100); border:1px solid var(--tide-200); border-radius:999px; padding:4px 10px; cursor:pointer; }
     .lang:hover { background:var(--tide-200); color:var(--ink-900); }
-    .shell { max-width:var(--site-max); padding:64px 32px 80px; gap:24px; }
+    .shell { max-width:var(--site-max); padding:40px 32px 80px; gap:24px; }
     .preview-intro { max-width:760px; margin-bottom:8px; }
     .preview-intro .kicker { margin:0 0 12px; color:var(--kelp-700); font:600 12px/1.4 var(--font-mono); letter-spacing:.18em; text-transform:uppercase; }
-    .preview-intro h1 { margin:0; font-size:clamp(54px,7vw,96px); line-height:1.02; letter-spacing:-.035em; }
+    .preview-intro h1 { margin:0; font-size:clamp(38px,5vw,64px); line-height:1.02; letter-spacing:-.035em; }
     .preview-intro p { margin:16px 0 0; color:var(--ink-700); font-size:18px; max-width:66ch; }
     .glass-panel { background:var(--tide-100); backdrop-filter:none; border:1px solid var(--tide-200); border-radius:14px; box-shadow:0 6px 20px -8px rgba(14,31,31,.45); }
     .toolbar { top:70px; padding:16px 20px; gap:18px; }
@@ -538,7 +538,7 @@
           <div class="device-meta">Terminal TUI preview (actual renderDashboard output, 160×40 chars).</div>
         </section>
         <section>
-          <div class="device-meta" data-i18n="dev.xteink"><strong>XTeink X3 / X4 (experimental):</strong> these e-ink readers are rendered by the external CrossPoint Reader fork's own firmware — it shares InkDeck's e-ink layout SSOT, but its renderer lives outside this repository, so no canonical frame can be shown here. Specs are in the <a href="../hardware/">Devices catalog</a>.</div>
+          <div class="device-meta" data-i18n="dev.xteink"><strong>XTeink X3 / X4 (community fork):</strong> these e-ink readers are rendered by the CrossPoint Reader fork's own firmware and register with the daemon over Wi-Fi — it shares InkDeck's e-ink layout SSOT, but its renderer lives outside this repository, so no canonical frame can be shown here. Specs are in the <a href="../hardware/">Devices catalog</a>.</div>
         </section>
       </div>
     </div>
@@ -2438,7 +2438,7 @@
           'intro.p': '에이전트와 상태를 고르고, 같은 신호가 태블릿·e-ink·ESP32·LED 매트릭스·컨트롤 데크·터미널 제약에 어떻게 적응하는지 비교해 보세요.',
           'dev.h': '디바이스 프리뷰',
           'dev.p': '각 프레임은 대상 서피스의 실제 종횡비와 제약을 유지합니다. <strong>LED 매트릭스, Stream Deck, D200H, TUI, 모든 ESP32 서피스는 정본 렌더러 출력을 사용합니다</strong>. iPadOS·Android 태블릿·Android e-ink 뷰는 SwiftUI와 Compose가 브라우저에서 돌지 않아 명시적으로 표기된 브라우저 근사치입니다. 각 앱은 따로 설계된 UI이며, macOS 대시보드는 앱 자체이므로 프레임으로 프리뷰하지 않습니다.',
-          'dev.xteink': '<strong>XTeink X3 / X4 (실험적):</strong> 이 e-ink 리더들은 외부 CrossPoint Reader 포크의 자체 펌웨어가 렌더링합니다 — InkDeck과 e-ink 레이아웃 SSOT를 공유하지만 렌더러가 이 저장소 밖에 있어 정본 프레임을 여기서 보여줄 수 없습니다. 사양은 <a href="../hardware/">디바이스 카탈로그</a>에 있습니다.',
+          'dev.xteink': '<strong>XTeink X3 / X4 (커뮤니티 포크):</strong> 이 e-ink 리더들은 CrossPoint Reader 포크의 자체 펌웨어가 렌더링하며 Wi-Fi로 데몬에 등록됩니다 — InkDeck과 e-ink 레이아웃 SSOT를 공유하지만 렌더러가 이 저장소 밖에 있어 정본 프레임을 여기서 보여줄 수 없습니다. 사양은 <a href="../hardware/">디바이스 카탈로그</a>에 있습니다.',
           'notes.proves': '<strong>이 페이지가 증명하는 것:</strong> 하나의 세션 모델이 극단적으로 다른 픽셀 그리드를 존중하면서도 알아볼 수 있게 유지된다는 점입니다. 하드웨어 사양과 연결 경로는 <a href="../hardware/">디바이스 카탈로그</a>를 참고하세요.'
         },
         ja: {
@@ -2447,7 +2447,7 @@
           'intro.p': 'エージェントと状態を選び、同じシグナルがタブレット・e-ink・ESP32・LEDマトリクス・コントロールデッキ・ターミナルの制約にどう適応するか比較できます。',
           'dev.h': 'デバイスプレビュー',
           'dev.p': '各フレームは対象サーフェスの実アスペクト比と制約を保ちます。<strong>LEDマトリクス、Stream Deck、D200H、TUI、すべてのESP32サーフェスは正本レンダラー出力を使用します</strong>。iPadOS・Androidタブレット・Android e-inkビューはSwiftUIとComposeがブラウザで動かないため、明示されたブラウザ近似です。各アプリは別設計のUIで、macOSダッシュボードはアプリそのものなのでフレームとしてはプレビューしません。',
-          'dev.xteink': '<strong>XTeink X3 / X4 (実験的):</strong> これらのe-inkリーダーは外部CrossPoint Readerフォーク自身のファームウェアが描画します — InkDeckとe-inkレイアウトSSOTを共有しますが、レンダラーがこのリポジトリの外にあるため、正本フレームをここでは表示できません。仕様は<a href="../hardware/">デバイスカタログ</a>にあります。',
+          'dev.xteink': '<strong>XTeink X3 / X4 (コミュニティフォーク):</strong> これらのe-inkリーダーはCrossPoint Readerフォーク自身のファームウェアが描画し、Wi-Fiでdaemonに登録されます — InkDeckとe-inkレイアウトSSOTを共有しますが、レンダラーがこのリポジトリの外にあるため、正本フレームをここでは表示できません。仕様は<a href="../hardware/">デバイスカタログ</a>にあります。',
           'notes.proves': '<strong>このページが証明すること:</strong> ひとつのセッションモデルが、大きく異なるピクセルグリッドを尊重しながらも認識可能であり続けることです。ハードウェア仕様と接続経路は<a href="../hardware/">デバイスカタログ</a>をご覧ください。'
         }
       };

@@ -73,6 +73,7 @@
   /* Type scale */
   --t-hero:       clamp(54px, 7vw, 96px);
   --t-editorial:  clamp(56px, 8vw, 112px);
+  --t-page-title: clamp(38px, 5vw, 64px);   /* inner-page H1 — hero stays marketing-only */
   --t-h2:         44px;
   --t-h3:         26px;
   --t-h3-lg:      32px;

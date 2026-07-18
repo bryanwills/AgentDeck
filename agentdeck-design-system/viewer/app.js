@@ -21,7 +21,7 @@
       assets: 'Asset library',
       tokensDesc: 'Live values parsed from design/tokens.css, the cross-platform token source of truth.',
       componentsDesc: 'Reference specimens rendered with the same tokens used by this viewer.',
-      assetsDesc: 'Canonical product and agent marks from design/brand. No duplicate asset source.',
+      assetsDesc: 'Every design resource the system actually uses, in one index: brand marks, generated device masks, creatures, icons, and the reference surfaces they came from.',
       tools: 'Specimens',
       docs: 'Documents',
       noResults: 'No catalog entries match this search.',
@@ -33,6 +33,22 @@
       specimenClass: 'Class',
       specSourceOnly: 'Source only',
       specOpen: 'View source on GitHub',
+      livePreview: 'Live',
+      openLivePreview: 'Open in Live Preview',
+      assetGroups: {
+        brand: 'Brand marks',
+        masks: 'Generated dot-matrix masks',
+        creatures: 'Creatures',
+        icons: 'Icon set',
+        reference: 'Reference surfaces',
+      },
+      assetGroupNotes: {
+        brand: 'The product mark and the five agent marks, verbatim upstream. DESIGN.md R6 — never redraw them.',
+        masks: 'Rendered from the brand SVGs by `pnpm generate-micro-glyphs`, parsed here straight out of the generated file. Device code may add color, shading, and motion around a mask, but must never replace it with hand-drawn agent geometry — regression tests pin each mark’s defining negative space.',
+        creatures: 'Creatures are rendered live on the Live Preview surface, from the geometry SSOT. They are deliberately not redrawn here.',
+        icons: 'The one canonical UI icon system. Never substitute a generic icon font.',
+        reference: 'Design provenance — superseded by this viewer wherever it covers the same ground. Kept because it records how the system got here.',
+      },
     },
     ko: {
       preview: '미리보기',
@@ -48,7 +64,7 @@
       assets: '에셋 라이브러리',
       tokensDesc: '크로스플랫폼 토큰 정본 design/tokens.css에서 읽은 실제 값입니다.',
       componentsDesc: '이 뷰어와 동일한 토큰으로 렌더한 기준 specimen입니다.',
-      assetsDesc: 'design/brand가 소유하는 제품·에이전트 정본 에셋입니다. 중복 소스는 없습니다.',
+      assetsDesc: '디자인 시스템이 실제로 쓰는 리소스를 한 곳에 모았어요 — 브랜드 마크, 생성된 기기 마스크, 크리처, 아이콘, 그리고 출처가 된 레퍼런스 표면까지.',
       tools: '미리보기',
       docs: '문서',
       noResults: '검색과 일치하는 문서가 없습니다.',
@@ -59,6 +75,22 @@
       specimenClass: '클래스',
       specSourceOnly: '소스 전용',
       specOpen: 'GitHub에서 소스 보기',
+      livePreview: '라이브',
+      openLivePreview: 'Live Preview에서 보기',
+      assetGroups: {
+        brand: '브랜드 마크',
+        masks: '생성된 도트매트릭스 마스크',
+        creatures: '크리처',
+        icons: '아이콘 세트',
+        reference: '레퍼런스 표면',
+      },
+      assetGroupNotes: {
+        brand: '제품 마크와 5개 에이전트 마크를 업스트림 그대로 씁니다. DESIGN.md R6 — 다시 그리지 않아요.',
+        masks: '`pnpm generate-micro-glyphs`가 브랜드 SVG에서 만든 마스크를, 생성 파일에서 직접 파싱해 표시해요. 기기 코드는 마스크 주위에 색·음영·모션을 더할 수 있지만 손으로 그린 에이전트 도형으로 대체하면 안 됩니다 — 각 마크의 여백을 회귀 테스트가 고정하고 있어요.',
+        creatures: '크리처는 지오메트리 SSOT를 통해 Live Preview에서 실제로 렌더됩니다. 여기서 다시 그리지 않아요.',
+        icons: '정본 UI 아이콘 시스템 하나뿐이에요. 범용 아이콘 폰트로 대체 금지.',
+        reference: '디자인 출처 기록 — 이 뷰어가 다루는 범위는 뷰어가 우선합니다. 여기까지 온 경로를 남기려고 보존해요.',
+      },
     },
     ja: {
       preview: 'プレビュー',
@@ -74,7 +106,7 @@
       assets: 'アセットライブラリ',
       tokensDesc: 'クロスプラットフォーム正本 design/tokens.css から取得した実値です。',
       componentsDesc: 'この Viewer と同じ token で描画する基準 specimen です。',
-      assetsDesc: 'design/brand が所有する製品・agent の正本 asset です。重複 source はありません。',
+      assetsDesc: 'Design System が実際に使う resource を一つの index に集約 — brand mark、生成された device mask、クリーチャー、icon、そして出自となった reference 面まで。',
       tools: 'Specimen',
       docs: '文書',
       noResults: '検索に一致する文書がありません。',
@@ -85,6 +117,22 @@
       specimenClass: 'クラス',
       specSourceOnly: 'ソースのみ',
       specOpen: 'GitHub でソースを見る',
+      livePreview: 'ライブ',
+      openLivePreview: 'Live Preview で開く',
+      assetGroups: {
+        brand: 'ブランドマーク',
+        masks: '生成ドットマトリクス mask',
+        creatures: 'クリーチャー',
+        icons: 'アイコンセット',
+        reference: 'リファレンス面',
+      },
+      assetGroupNotes: {
+        brand: '製品マークと 5 つの agent マークを upstream のまま使います。DESIGN.md R6 — 描き直しません。',
+        masks: '`pnpm generate-micro-glyphs` が brand SVG から生成した mask を、生成ファイルから直接 parse して表示します。デバイス側は mask の周囲に色・陰影・motion を足せますが、手描きの agent 図形に置き換えてはいけません — 各マークの余白は regression test が固定しています。',
+        creatures: 'クリーチャーは geometry SSOT を通じて Live Preview で実際に描画されます。ここでは描き直しません。',
+        icons: '正本の UI アイコンシステムはこれ一つ。汎用アイコンフォントで代替しないこと。',
+        reference: 'デザインの出自記録 — この Viewer が扱う範囲は Viewer が優先します。経緯を残すために保存しています。',
+      },
     },
   };
 
@@ -304,7 +352,7 @@
         title: strings().assets,
         category: strings().tools,
         locale: 'live',
-        search: 'assets logo icon brands claude codex openclaw opencode antigravity',
+        search: 'assets logo icon brands masks glyphs creatures reference mockups claude codex openclaw opencode antigravity',
       },
     );
     return items.filter((item) => !query || item.search.includes(query));
@@ -425,22 +473,43 @@
   }
 
   function renderAssets() {
+    const text = strings();
     specialHeader(
-      strings().assets,
-      strings().assetsDesc,
-      'Foundations · design/brand',
-      badge(`${data.assets.length} assets`, 'canonical'),
+      text.assets,
+      text.assetsDesc,
+      'Foundations · design resources index',
+      badge(`${data.assets.total} assets`, 'canonical'),
     );
-    els.view.innerHTML = `<p class="specimen-intro">${escapeHtml(strings().assetsDesc)}</p><div class="asset-grid">${data.assets.map(assetCard).join('')}</div>`;
+    const sections = data.assets.groups
+      .map(
+        (group) =>
+          `<section class="asset-section"><header class="asset-section-head"><h3>${escapeHtml(text.assetGroups[group.id] || group.id)}</h3><p>${escapeHtml(text.assetGroupNotes[group.id] || '')}</p></header><div class="asset-grid">${group.items.map(assetCard).join('')}</div></section>`,
+      )
+      .join('');
+    els.view.innerHTML = `<p class="specimen-intro">${escapeHtml(text.assetsDesc)}</p><div class="asset-groups">${sections}</div>`;
+  }
+
+  function assetMeta(asset) {
+    const parts = [asset.source];
+    if (asset.type) parts.push(asset.type);
+    if (asset.bytes) parts.push(`${asset.bytes.toLocaleString()} B`);
+    return `<p>${parts.map(escapeHtml).join(' · ')}</p>`;
   }
 
   function assetCard(asset) {
-    const meta = `<p>${escapeHtml(asset.source)} · ${escapeHtml(asset.type)} · ${asset.bytes.toLocaleString()} B</p>`;
-    if (asset.kind === 'spec') {
-      // Source-only pointer: the viewer must not try to render JSX as an image.
-      return `<article class="asset-card asset-card--spec"><div class="asset-stage asset-stage--spec"><div class="ad-hatch asset-hatch"><span class="ad-tier ad-tier--cli">${escapeHtml(strings().specSourceOnly)}</span></div></div><h3>${escapeHtml(asset.name)}</h3><p class="asset-note">${escapeHtml(asset.note || '')}</p>${meta}<a class="asset-link" href="${escapeHtml(asset.url)}" rel="noreferrer">${escapeHtml(strings().specOpen)}</a></article>`;
+    if (asset.kind === 'mask') {
+      /* `asset.svg` is emitted by the builder from the generated mask file, not
+       * from user input — injected as markup so the real pixels render. */
+      return `<article class="asset-card asset-card--mask"><div class="asset-stage asset-stage--mask">${asset.svg}</div><h3>${escapeHtml(asset.name)}</h3><p class="asset-note">${escapeHtml(asset.surface)} · ${asset.lit} lit cells</p>${assetMeta(asset)}</article>`;
     }
-    return `<article class="asset-card"><div class="asset-stage"><img src="${escapeHtml(asset.url)}" alt="${escapeHtml(asset.name)}"></div><h3>${escapeHtml(asset.name)}</h3>${meta}</article>`;
+    if (asset.kind === 'link') {
+      return `<article class="asset-card asset-card--link"><div class="asset-stage asset-stage--spec"><div class="ad-hatch asset-hatch"><span class="ad-tier ad-tier--store">${escapeHtml(strings().livePreview)}</span></div></div><h3>${escapeHtml(asset.name)}</h3><p class="asset-note">${escapeHtml(asset.note || '')}</p><a class="asset-link" href="${escapeHtml(asset.url)}">${escapeHtml(strings().openLivePreview)}</a></article>`;
+    }
+    if (asset.kind === 'spec') {
+      // Source-only pointer: the viewer must not try to render JSX or HTML here.
+      return `<article class="asset-card asset-card--spec"><div class="asset-stage asset-stage--spec"><div class="ad-hatch asset-hatch"><span class="ad-tier ad-tier--cli">${escapeHtml(strings().specSourceOnly)}</span></div></div><h3>${escapeHtml(asset.name)}</h3><p class="asset-note">${escapeHtml(asset.note || '')}</p>${assetMeta(asset)}<a class="asset-link" href="${escapeHtml(asset.url)}" rel="noreferrer">${escapeHtml(strings().specOpen)}</a></article>`;
+    }
+    return `<article class="asset-card"><div class="asset-stage"><img src="${escapeHtml(asset.url)}" alt="${escapeHtml(asset.name)}"></div><h3>${escapeHtml(asset.name)}</h3>${assetMeta(asset)}</article>`;
   }
 
   /* Declarative specimen list. Every `html` string is canonical `.ad-*` markup

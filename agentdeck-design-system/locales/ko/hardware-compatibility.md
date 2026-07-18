@@ -40,8 +40,8 @@ AgentDeck 대시보드 표면의 호환성을 한눈에 보기 위한 독자용 
 | IPS 10.1            | ESP32 디스플레이     | ESP32-P4 + C6         | JD9365 MIPI-DSI · 800×1280     | USB serial · Wi-Fi WS |   지원    |
 | Ulanzi TC001        | ESP32 LED            | ESP32 classic         | WS2812B · 32×8                 | USB serial · Wi-Fi WS |   일부    |
 | InkDeck             | ESP32 e-ink          | XIAO ESP32-S3 Plus    | UC8179 · 800×480               | USB serial · Wi-Fi WS |   지원    |
-| XTeink X3           | e-ink 리더           | ESP32-C3              | 3.7-inch · 528×792             | Wi-Fi WS              |   실험    |
-| XTeink X4           | e-ink 리더           | ESP32-C3              | 800×480                        | Wi-Fi WS              |   실험    |
+| XTeink X3           | e-ink 리더           | ESP32-C3              | 3.7-inch · 528×792             | Wi-Fi WS              |   일부    |
+| XTeink X4           | e-ink 리더           | ESP32-C3              | 800×480                        | Wi-Fi WS              |   일부    |
 | Divoom Pixoo64      | 상용 LED             | Divoom controller     | RGB LED · 64×64                | HTTP REST             |   지원    |
 | iDotMatrix          | 상용 픽셀 디스플레이 | BLE SoC               | RGB · 32×32                    | BLE GATT              |   지원    |
 | Divoom Timebox Mini | 상용 LED             | BLE SoC               | RGB LED · 11×11                | BLE GATT              |   지원    |
@@ -58,7 +58,7 @@ AgentDeck 대시보드 표면의 호환성을 한눈에 보기 위한 독자용 
 
 ## 핵심 제약
 
-- **집계 표면 수: production 20 + 실험 2 (XTeink X3/X4).** 공개 표면 수(README, 랜딩)는 이 산정을 미러링한다 — 프로토콜 행(SSE stream)을 제외한 모든 행이 집계되고, 실험 행은 별도로 표기한다.
+- **집계 표면 수: 22.** 공개 표면 수(README, 랜딩)는 이 산정을 미러링한다 — 프로토콜 행(SSE stream)을 제외한 모든 행이 집계된다. XTeink X3/X4는 정상 운영되나(양쪽 데몬에 Wi-Fi 등록) 커뮤니티 CrossPoint 포크로 구동되며, 일부 표기는 그 배포 제약을 뜻한다.
 - App Store 열은 제3자 호스트 앱의 번들 포함 여부가 아니라 제출된 Apple 앱과 Swift daemon의 호환성을 뜻한다.
 - D200H는 Ulanzi Studio plugin만 지원하고 direct-HID 경로는 폐기됐다.
 - Stream Deck 계열은 Elgato 앱이 필요하다.

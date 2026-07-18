@@ -77,6 +77,7 @@ export const Font = {
 export const Type = {
   hero: "clamp(54px, 7vw, 96px)",
   editorial: "clamp(56px, 8vw, 112px)",
+  pageTitle: "clamp(38px, 5vw, 64px)",
   h2: "44px",
   h3: "26px",
   h3Lg: "32px",

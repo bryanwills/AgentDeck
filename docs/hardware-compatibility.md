@@ -53,8 +53,8 @@ Do not copy numeric specifications into domain guides. Link back to this matrix 
 | IPS 10.1 | ESP32 display | ESP32-P4 + C6 | JD9365 MIPI-DSI · 800×1280 | USB serial · Wi-Fi WS | Yes |
 | Ulanzi TC001 | ESP32 LED | ESP32 classic | WS2812B · 32×8 | USB serial · Wi-Fi WS | Partial |
 | InkDeck | ESP32 e-ink | XIAO ESP32-S3 Plus | UC8179 · 800×480 | USB serial · Wi-Fi WS | Yes |
-| XTeink X3 | e-ink reader | ESP32-C3 | 3.7-inch · 528×792 | Wi-Fi WS | Experimental |
-| XTeink X4 | e-ink reader | ESP32-C3 | 800×480 | Wi-Fi WS | Experimental |
+| XTeink X3 | e-ink reader | ESP32-C3 | 3.7-inch · 528×792 | Wi-Fi WS | Partial |
+| XTeink X4 | e-ink reader | ESP32-C3 | 800×480 | Wi-Fi WS | Partial |
 | Divoom Pixoo64 | Commercial LED | Divoom controller | RGB LED · 64×64 | HTTP REST | Yes |
 | iDotMatrix | Commercial pixel display | BLE SoC | RGB · 32×32 | BLE GATT | Yes |
 | Divoom Timebox Mini | Commercial LED | BLE SoC | RGB LED · 11×11 | BLE GATT | Yes |
@@ -71,7 +71,7 @@ Do not copy numeric specifications into domain guides. Link back to this matrix 
 
 `App Store` describes compatibility with the submitted Apple app and its Swift daemon, not whether third-party host software is bundled. Stream Deck and D200H still require their vendor applications.
 
-**Counted surfaces: 20 production + 2 experimental (XTeink X3/X4).** Public surface-count claims (README, landing page) mirror this derivation: every row above except the protocol rows (SSE stream) counts, and Experimental rows are stated separately. Update this line and the mirrors together when rows change.
+**Counted surfaces: 22.** Public surface-count claims (README, landing page) mirror this derivation: every row above except the protocol rows (SSE stream) counts. XTeink X3/X4 operate normally (both register with the daemon over Wi-Fi) but run the community CrossPoint fork — their Partial mark states that distribution limitation, see operational exceptions. Update this line and the mirrors together when rows change.
 
 ## ESP32 board specifications
 
