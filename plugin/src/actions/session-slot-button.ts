@@ -126,6 +126,18 @@ export function getSessionSlotManager(): SessionSlotManager {
   return manager;
 }
 
+/** Instant press-ack: flip the REVIEW tile to REVIEWING before the daemon round trip. */
+export function markSessionReviewPending(sessionId: string): void {
+  manager.markReviewPending(sessionId);
+  refreshAll();
+}
+
+/** Daemon refused/errored the review — drop the optimistic REVIEWING flip. */
+export function clearSessionReviewPending(sessionId: string): void {
+  manager.clearReviewPending(sessionId);
+  refreshAll();
+}
+
 export function isInDetailView(): boolean {
   return manager.view === 'detail';
 }

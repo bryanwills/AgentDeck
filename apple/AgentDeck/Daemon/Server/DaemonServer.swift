@@ -4729,6 +4729,11 @@ final class DaemonServer {
     /// Badge state for sessionToDict (REVIEWING / verdict on the REVIEW tile).
     private var lastReviewBySession: [String: (status: String, risk: String?, findings: Int?, ts: Date)] = [:]
     private static let reviewBadgeTTL: TimeInterval = 1800
+    /// A "running" entry older than this no longer blocks a new review — a
+    /// dead judge Task must not brick the button until app restart.
+    private static let reviewRunningStaleTTL: TimeInterval = 300
+    /// Wall-clock cap on any judge backend call (peer silence = failure).
+    private static let reviewJudgeTimeoutSeconds: TimeInterval = 180
 
     func reviewBadge(for sessionId: String) -> (status: String, risk: String?, findings: Int?)? {
         guard let r = lastReviewBySession[sessionId] else { return nil }
@@ -4740,25 +4745,36 @@ final class DaemonServer {
     }
 
     private func handleReviewRun(sessionId: String) {
-        if lastReviewBySession[sessionId]?.status == "running" { return }
+        if let running = lastReviewBySession[sessionId], running.status == "running",
+           Date().timeIntervalSince(running.ts) < Self.reviewRunningStaleTTL { return }
         let entry = pushedSessionsById[sessionId] ?? cachedSessions.first(where: { $0.id == sessionId })
+        let projectName = (entry?.projectName.isEmpty == false ? entry?.projectName : nil) ?? "session"
         // Mid-turn guard: the review judges the session TRAJECTORY, and an
         // in-flight turn (user prompt + tools, no assistant response yet)
         // systematically reads as "incomplete/unverified" — a false-positive
         // risk report. Decks no longer offer REVIEW while processing; this
         // covers stale/third-party clients. Don't clobber the last verdict
-        // badge — just report the refusal.
+        // badge — just report the refusal. The notice panel is the visible
+        // response: a refused press must never look like a dead button.
         let liveState = (entry?.state ?? "").lowercased()
         if liveState == "processing" || liveState.hasPrefix("awaiting") {
             broadcastRaw(["type": "review_status", "sessionId": sessionId, "status": "error",
                           "message": "session is still working — run REVIEW after the turn completes"])
+            ReviewPanelPresenter.shared.presentNotice(
+                projectName: projectName,
+                message: "The session is still working. REVIEW judges completed work — run it again after the turn finishes.")
             DaemonLogger.shared.info("Review: refused for \(sessionId) — session state \(liveState)")
             return
         }
-        let projectName = (entry?.projectName.isEmpty == false ? entry?.projectName : nil) ?? "session"
+        let judgeBackend = ApmeSettings.load().judge.backend
         lastReviewBySession[sessionId] = ("running", nil, nil, Date())
         broadcastRaw(["type": "review_status", "sessionId": sessionId, "status": "running"])
         broadcastSessionsList()
+        // Immediate press feedback on the app tier: progress panel with a live
+        // elapsed timer; the verdict/error/guidance panel replaces it in place.
+        ReviewPanelPresenter.shared.presentRunning(
+            projectName: projectName,
+            backend: ReviewRunner.backendDisplayName(judgeBackend))
         DaemonLogger.shared.info("Review: started for \(sessionId) (\(projectName))")
 
         Task { @MainActor [weak self] in
@@ -4774,6 +4790,9 @@ final class DaemonServer {
             let entries = await self.timelineStore.historyForSession(sessionId, since: nil)
             let trajectory = ReviewRunner.trajectorySummary(entries: entries)
             guard !trajectory.isEmpty else {
+                ReviewPanelPresenter.shared.presentNotice(
+                    projectName: projectName,
+                    message: "No recorded activity to review yet — this session's timeline is empty.")
                 fail("no recorded activity to review yet")
                 return
             }
@@ -4785,6 +4804,10 @@ final class DaemonServer {
             let prompt = ReviewRunner.buildPrompt(projectName: projectName, trajectory: trajectory)
             let text: String
             do {
+                // Every backend call rides a hard wall-clock timeout: a silent
+                // judge (hung local server, stalled on-device model) must fail
+                // loudly instead of leaving the badge stuck on "running".
+                let timeout = Self.reviewJudgeTimeoutSeconds
                 switch judgeCfg.backend {
                 case .foundationModels:
                     guard ApmeJudgeFoundationModels.isAvailable else {
@@ -4794,22 +4817,33 @@ final class DaemonServer {
                         fail("no judge — Apple Intelligence not ready (setup guidance shown)")
                         return
                     }
-                    text = try await ApmeJudgeFoundationModels.judgeThrowing(prompt: prompt)
+                    text = try await ReviewRunner.withTimeout(seconds: timeout) {
+                        try await ApmeJudgeFoundationModels.judgeThrowing(prompt: prompt)
+                    }
                 case .openai:
-                    text = try await ApmeJudgeOpenAI.judgeThrowing(prompt: prompt, config: judgeCfg)
+                    text = try await ReviewRunner.withTimeout(seconds: timeout) {
+                        try await ApmeJudgeOpenAI.judgeThrowing(prompt: prompt, config: judgeCfg)
+                    }
                 case .mlx:
                     // MLX shares the OpenAI wire; reuse the throwing path via an
                     // openai-shaped config so REVIEW gets a real error too.
                     var oc = judgeCfg
                     oc.endpoint = judgeCfg.endpoint ?? ApmeSettings.loadMlxConfig().endpoint
-                    text = try await ApmeJudgeOpenAI.judgeThrowing(prompt: prompt, config: oc)
+                    let mlxCfg = oc
+                    text = try await ReviewRunner.withTimeout(seconds: timeout) {
+                        try await ApmeJudgeOpenAI.judgeThrowing(prompt: prompt, config: mlxCfg)
+                    }
                 case .api:
-                    guard let t = await ApmeJudgeApi.judge(prompt: prompt, config: judgeCfg) else {
+                    guard let t = try await ReviewRunner.withTimeout(seconds: timeout, {
+                        await ApmeJudgeApi.judge(prompt: prompt, config: judgeCfg)
+                    }) else {
                         throw ApmeJudgeOpenAI.JudgeError.transport("Anthropic API judge returned no result — check apme.judge.apiKey / ANTHROPIC_API_KEY")
                     }
                     text = t
                 case .openclaw:
-                    guard let t = await ApmeJudgeFoundationModels.judge(prompt: prompt) else {
+                    guard let t = try await ReviewRunner.withTimeout(seconds: timeout, {
+                        await ApmeJudgeFoundationModels.judge(prompt: prompt)
+                    }) else {
                         throw ApmeJudgeOpenAI.JudgeError.transport("OpenClaw judge not wired; on-device fallback unavailable")
                     }
                     text = t
@@ -5792,6 +5826,14 @@ final class DaemonServer {
                 }
                 if let tool = gatewayCurrentTool { gatewaySession["currentTool"] = tool }
                 if let modelName = gatewayModelName { gatewaySession["modelName"] = modelName }
+                // The virtual row bypasses sessionToDict, so attach the REVIEW
+                // badge here too — without it the deck never shows REVIEWING /
+                // the verdict for OpenClaw reviews.
+                if let badge = reviewBadge(for: "openclaw-gateway") {
+                    gatewaySession["reviewStatus"] = badge.status
+                    if let risk = badge.risk { gatewaySession["reviewRisk"] = risk }
+                    if let findings = badge.findings { gatewaySession["reviewFindings"] = findings }
+                }
                 sessions.append(gatewaySession)
             }
         }

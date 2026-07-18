@@ -71,6 +71,8 @@ import {
   setDaemonConnected,
   setDaemonStale,
   updateSlotUsage,
+  markSessionReviewPending,
+  clearSessionReviewPending,
 } from './actions/session-slot-button.js';
 import { timelineStore } from './timeline-store.js';
 import { FocusedDetailState, type FocusedDetailSnapshot } from './focused-detail-state.js';
@@ -237,7 +239,13 @@ initSessionSlots((result) => {
       // Independent on-demand eval — a daemon-level command (the daemon
       // resolves the session's work product + judge), never a PTY prompt.
       const focused = getFocusedSession();
-      if (focused) connMgr.send({ type: 'review_run', sessionId: focused.id } as any);
+      if (focused) {
+        connMgr.send({ type: 'review_run', sessionId: focused.id } as any);
+        // Instant press-ack: flip the tile to REVIEWING before the daemon's
+        // review_status/sessions_list round trip (which can lag many seconds
+        // while a judge is busy). Cleared on refusal via review_status error.
+        markSessionReviewPending(focused.id);
+      }
       break;
     }
 
@@ -451,6 +459,14 @@ connMgr.on('sessions_list', (ev: { type: 'sessions_list'; sessions: SessionInfo[
 
 connMgr.on('user_prompt', (ev: UserPromptEvent) => {
   dlog('Plugin', `user_prompt: "${ev.text.slice(0, 60)}"`);
+});
+
+// Review lifecycle: an error (mid-turn refusal, judge failure) must clear the
+// optimistic REVIEWING flip set at press time — success flows through the
+// sessions_list reviewStatus badge instead.
+connMgr.on('review_status', (ev: { type: 'review_status'; sessionId: string; status: string; message?: string }) => {
+  dlog('Plugin', `review_status: ${ev.sessionId} ${ev.status}${ev.message ? ` (${ev.message})` : ''}`);
+  if (ev.status === 'error' && ev.sessionId) clearSessionReviewPending(ev.sessionId);
 });
 
 connMgr.on('voice_state', (ev: VoiceStateEvent) => {

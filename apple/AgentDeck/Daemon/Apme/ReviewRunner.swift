@@ -40,6 +40,39 @@ struct ReviewOutcomeData: Sendable {
 
 enum ReviewRunner {
 
+    /// Human-readable judge name for the running/progress panel.
+    static func backendDisplayName(_ backend: ApmeJudgeBackend) -> String {
+        switch backend {
+        case .foundationModels: return "Apple Intelligence"
+        case .openai: return "OpenAI-compatible server"
+        case .mlx: return "local MLX server"
+        case .api: return "Anthropic API"
+        case .openclaw: return "OpenClaw gateway"
+        }
+    }
+
+    /// Hard wall-clock cap around any judge backend call. Peer silence is a
+    /// first-class failure signal (repo async-I/O rule): without this, a hung
+    /// local server or a stalled on-device model leaves the REVIEW badge stuck
+    /// on "running" and the progress panel spinning forever.
+    static func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw ApmeJudgeOpenAI.JudgeError.transport("the judge did not answer within \(Int(seconds))s")
+            }
+            guard let first = try await group.next() else {
+                throw ApmeJudgeOpenAI.JudgeError.transport("judge task group produced no result")
+            }
+            group.cancelAll()
+            return first
+        }
+    }
+
     /// Compress the session's timeline into a judge-readable trajectory.
     /// Newest-last, capped so the on-device model's context stays comfortable.
     ///
@@ -80,15 +113,23 @@ enum ReviewRunner {
         claims of completion that the trajectory does not support, skipped \
         verification (no tests/builds after code changes), and incomplete work.
 
+        The trajectory may omit TOOL rows entirely for some session types. \
+        Never report "skipped verification" or "no tests were run" merely \
+        because TOOL rows are absent — only flag verification gaps the \
+        assistant's own text reveals. A documentation issue is not a security \
+        issue; use "high"/"medium" only for concrete, evidenced risk.
+
         Project: \(projectName)
 
         --- session trajectory (oldest → newest) ---
         \(trajectory)
 
         Respond with STRICT JSON only, no prose, exactly this shape:
-        {"risk":"low|medium|high","summary":"<one sentence>","findings":[{"severity":"high|medium|low","title":"...","detail":"...","file":"optional/path"}]}
-        Return an empty findings array when nothing is genuinely risky. Do not \
-        invent findings to fill space.
+        {"risk":"low|medium|high","summary":"<one sentence>","findings":[{"severity":"high|medium|low","title":"...","detail":"...","file":"..."}]}
+        Include "file" only when a real file path appears in the trajectory; \
+        otherwise omit the key. Every finding must cite something that is \
+        actually in the trajectory above — return an empty findings array when \
+        nothing is genuinely risky. Do not invent findings to fill space.
         """
     }
 
@@ -98,7 +139,7 @@ enum ReviewRunner {
         guard let data = slice.data(using: .utf8),
               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
         let riskRaw = obj["risk"] as? String ?? "low"
-        let risk = (riskRaw == "high" || riskRaw == "medium") ? riskRaw : "low"
+        var risk = (riskRaw == "high" || riskRaw == "medium") ? riskRaw : "low"
         let summary = String((obj["summary"] as? String ?? "").prefix(400))
         let findings: [ReviewFindingItem] = ((obj["findings"] as? [[String: Any]]) ?? []).prefix(20).map { f in
             let sevRaw = f["severity"] as? String ?? "low"
@@ -106,9 +147,17 @@ enum ReviewRunner {
                 severity: (sevRaw == "high" || sevRaw == "medium") ? sevRaw : "low",
                 title: String((f["title"] as? String ?? "Finding").prefix(160)),
                 detail: String((f["detail"] as? String ?? "").prefix(1000)),
-                file: (f["file"] as? String).map { String($0.prefix(200)) }
+                // Small judges echo schema placeholders back as the path.
+                file: (f["file"] as? String).flatMap {
+                    ($0.isEmpty || $0 == "optional/path" || $0 == "...") ? nil : String($0.prefix(200))
+                }
             )
         }
+        // Coherence guard (mirrored in bridge/src/review-runner.ts): an
+        // above-low risk with zero findings is judge noise — the badge would
+        // alarm with nothing to show. Risk must be substantiated by at least
+        // one finding.
+        if findings.isEmpty { risk = "low" }
         return (risk, summary, findings)
     }
 
@@ -202,6 +251,27 @@ final class ReviewPanelPresenter {
         )
     }
 
+    /// Immediate press feedback: shown the moment a review is accepted, before
+    /// the judge runs. The verdict / error / guidance panel replaces it in
+    /// place, so the deck button press always has a visible response within a
+    /// second instead of nothing until the judge finishes.
+    func presentRunning(projectName: String, backend: String) {
+        showHosting(
+            NSHostingController(rootView: ReviewRunningPanelView(
+                projectName: projectName, backend: backend, startedAt: Date())),
+            title: "Review — \(projectName)"
+        )
+    }
+
+    /// Non-error notice (e.g. review refused mid-turn, empty trajectory) —
+    /// still a visible response to the button press.
+    func presentNotice(projectName: String, message: String) {
+        showHosting(
+            NSHostingController(rootView: ReviewNoticePanelView(projectName: projectName, message: message)),
+            title: "Review — \(projectName)"
+        )
+    }
+
     /// Runtime failure (a judge IS configured, but the call failed) — distinct
     /// from the setup guidance, so the user isn't told to configure a judge
     /// they already have.
@@ -236,6 +306,53 @@ final class ReviewPanelPresenter {
         p.center()
         p.orderFrontRegardless()
         panel = p
+    }
+}
+
+struct ReviewRunningPanelView: View {
+    let projectName: String
+    let backend: String
+    let startedAt: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Reviewing \(projectName)…").font(.headline)
+            }
+            Text("An independent judge (\(backend)) is reading this session's recent trajectory and assessing risk. No agent is interrupted.")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Text("elapsed").font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text(startedAt, style: .timer)
+                    .font(.system(size: 12, design: .monospaced))
+            }
+            Text("On-device judges typically answer in 30–90 seconds. The verdict will replace this panel.")
+                .font(.system(size: 11)).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }
+        .padding(16)
+        .frame(minWidth: 400, minHeight: 190)
+    }
+}
+
+struct ReviewNoticePanelView: View {
+    let projectName: String
+    let message: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Review — \(projectName)").font(.headline)
+            Text(message).font(.system(size: 13))
+                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.10)).cornerRadius(6)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }
+        .padding(16)
+        .frame(minWidth: 400, minHeight: 150)
     }
 }
 

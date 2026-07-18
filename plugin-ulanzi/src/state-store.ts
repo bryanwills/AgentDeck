@@ -14,6 +14,20 @@ export class StateStore {
   private usage: Record<string, unknown> = {};
   /** Daemon link state — false until connected, false again on disconnect. */
   private connected = false;
+  /**
+   * Optimistic REVIEWING flip: sessionId → expiry. Set on the local REVIEW
+   * press so the tile acknowledges instantly; superseded as soon as the
+   * daemon's own reviewStatus lands on the row, cleared on a review_status
+   * error (refusal) or the TTL (daemon dead / message lost).
+   */
+  private pendingReviewUntil = new Map<string, number>();
+
+  /** Local press-ack for REVIEW — show REVIEWING before the daemon round trip. */
+  markReviewPending(sessionId: string): void {
+    this.pendingReviewUntil.set(sessionId, Date.now() + StateStore.PENDING_REVIEW_TTL_MS);
+  }
+
+  private static readonly PENDING_REVIEW_TTL_MS = 20_000;
 
   /** Reflect daemon connect/disconnect so the deck shows OFFLINE when down. */
   setConnected(connected: boolean): void {
@@ -85,9 +99,31 @@ export class StateStore {
       case 'usage_update':
         this.usage = e;
         return true;
+      case 'review_status': {
+        // Refusal / failure ends the optimistic REVIEWING flip immediately;
+        // success lands as reviewStatus on the sessions_list row instead.
+        const sessionId = typeof e.sessionId === 'string' ? e.sessionId : '';
+        if (sessionId && e.status !== 'running' && this.pendingReviewUntil.delete(sessionId)) return true;
+        return false;
+      }
       default:
         return false;
     }
+  }
+
+  /** Sessions with the optimistic REVIEWING flip applied (daemon rows win). */
+  private sessionsWithPendingReview(): SessionInfo[] {
+    if (this.pendingReviewUntil.size === 0) return this.sessions;
+    const now = Date.now();
+    return this.sessions.map((s) => {
+      const until = this.pendingReviewUntil.get(s.id);
+      if (until == null) return s;
+      if (s.reviewStatus != null || now > until) {
+        this.pendingReviewUntil.delete(s.id);
+        return s;
+      }
+      return { ...s, reviewStatus: 'running' as const };
+    });
   }
 
   /** Merged event for the shared layout engine. `allSessions` is the live list. */
@@ -117,7 +153,7 @@ export class StateStore {
       : this.lastState;
     return {
       ...selected,
-      allSessions: this.sessions,
+      allSessions: this.sessionsWithPendingReview(),
       totalTokens,
       totalCost: (this.usage.totalCost as number) ?? (selected.totalCost as number) ?? 0,
       fiveHourPercent: (this.usage.fiveHourPercent as number) ?? (selected.fiveHourPercent as number) ?? 0,

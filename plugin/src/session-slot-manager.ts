@@ -750,13 +750,49 @@ export class SessionSlotManager {
   }
 
   /**
+   * Optimistic REVIEWING flip: sessionId → expiry. Set on the local REVIEW
+   * press so the tile acknowledges instantly; superseded once the daemon's
+   * own reviewStatus lands on the row, cleared on review_status error
+   * (refusal) or the TTL (daemon dead / message lost).
+   */
+  private _pendingReviewUntil = new Map<string, number>();
+  private static readonly PENDING_REVIEW_TTL_MS = 20_000;
+
+  /** Local press-ack for REVIEW — show REVIEWING before the daemon round trip. */
+  markReviewPending(sessionId: string): void {
+    this._pendingReviewUntil.set(sessionId, Date.now() + SessionSlotManager.PENDING_REVIEW_TTL_MS);
+  }
+
+  /** Drop the optimistic flip (daemon refused / errored the review). */
+  clearReviewPending(sessionId: string): void {
+    this._pendingReviewUntil.delete(sessionId);
+  }
+
+  private isReviewRunning(session: SessionInfo | undefined): boolean {
+    if (!session) return false;
+    if (session.reviewStatus === 'running') return true;
+    if (session.reviewStatus != null) {
+      // Daemon has a verdict/error for this session — its row wins.
+      this._pendingReviewUntil.delete(session.id);
+      return false;
+    }
+    const until = this._pendingReviewUntil.get(session.id);
+    if (until == null) return false;
+    if (Date.now() > until) {
+      this._pendingReviewUntil.delete(session.id);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * REVIEW tile = independent on-demand eval (review_run) — daemon-side
    * judge, no agent control, valid for every session type once the turn has
    * completed. Badge shows the last verdict; REVIEWING while the judge runs
    * (not pressable).
    */
   private reviewSlotConfig(session: SessionInfo | undefined): SessionSlotConfig {
-    if (session?.reviewStatus === 'running') {
+    if (this.isReviewRunning(session)) {
       return { type: 'status', label: 'REVIEWING', subtitle: 'judge running', icon: 'tool', tone: 'info' };
     }
     const risk = session?.reviewRisk;
@@ -784,7 +820,7 @@ export class SessionSlotManager {
    * the Node daemon would judge a half-written diff).
    */
   private reviewBadgeSlotConfig(session: SessionInfo | undefined): SessionSlotConfig | null {
-    if (session?.reviewStatus === 'running') {
+    if (this.isReviewRunning(session)) {
       return { type: 'status', label: 'REVIEWING', subtitle: 'judge running', icon: 'tool', tone: 'info' };
     }
     const risk = session?.reviewRisk;

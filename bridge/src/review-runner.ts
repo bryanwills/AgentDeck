@@ -164,7 +164,10 @@ function parseJudgeJson(text: string): { risk: 'low' | 'medium' | 'high'; summar
         } as ReviewFinding];
       })
       : [];
-    return { risk, summary, findings };
+    // Coherence guard (mirrored in apple ReviewRunner.parse): an above-low
+    // risk with zero findings is judge noise — the badge would alarm with
+    // nothing to show. Risk must be substantiated by at least one finding.
+    return { risk: findings.length === 0 ? 'low' : risk, summary, findings };
   } catch {
     return null;
   }

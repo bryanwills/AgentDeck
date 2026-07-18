@@ -43,6 +43,7 @@ const FORWARDED_EVENTS = [
   'display_state',
   'voice_assistant_state',
   'sessions_list',
+  'review_status',
 ] as const;
 
 export class ConnectionManager extends EventEmitter implements AgentLink {
