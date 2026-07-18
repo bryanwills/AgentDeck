@@ -1,19 +1,33 @@
 // InkDeckPreview.swift — InkDeck 7.5" e-ink (Seeed TRMNL OG DIY Kit) preview.
 //
 // Hand-maintained mirror of the firmware dashboard layout in
-// esp32/src/ui/eink/eink_display.cpp (drawDashboard): a print-style 1-bit
-// 800×480 page with
+// esp32/src/ui/eink/eink_display.cpp (drawDashboard). The responsive geometry
+// the firmware now uses lives in esp32/src/ui/eink/eink_dashboard_layout.h
+// (AgentDeckEink::makeLayout) — a print-style 1-bit 800×480 page with
 //   - brand header: dome-over-deck mark + "AgentDeck" wordmark, a link
 //     chip (filled when connected), session count, double rule at y≈62;
 //   - session card grid: double-outline rounded cards with the agent
-//     creature glyph + project name + state line; the first awaiting
-//     card inverts to solid black with white ink;
-//   - adaptive usage band (firmware 208b1afc): provider rows (CLAUDE /
-//     CODEX, 5H/7D bar gauges) draw only for providers that actually
-//     report usage; with 0 rows the separator rule is omitted and the
-//     session grid reclaims the band. The ticker line at the very bottom
-//     is pinned regardless.
-// Update this view when the firmware layout changes.
+//     creature glyph + project name + state line + a TIMELINE-grade work
+//     summary; the first awaiting card inverts to solid black with white ink.
+//     Columns are chosen by makeLayout: 1 for a lone session, 2 landscape,
+//     3 once five+ sessions share the 800px panel (rows capped at 2);
+//   - adaptive usage band (usageRowCount 0/1/2): provider rows (CLAUDE /
+//     CODEX, 5H/7D bar gauges) draw only for providers that actually report
+//     usage, and a missing window is dropped (present ones pack left) rather
+//     than shown as a dead "--". With 0 rows the separator rule is omitted and
+//     the session grid reclaims the band;
+//   - recent-work strip: up to Snap::TICKER_ROWS (3) latest milestone timeline
+//     rows, newest at the top, gated on the live daemon link. Replaces the old
+//     single ticker line. The host-display-sleep card was removed — InkDeck is
+//     always USB-powered and keeps the dashboard retained instead.
+//
+// Sync pins (below) are the git blob hashes of the origin files at the last
+// re-sync; scripts/check-preview-mirror-sync.mjs verifies they still match and
+// fails CI when the firmware drifts ahead of this mirror. Update this view and
+// re-pin whenever the firmware layout changes.
+//
+// SYNC-HASH esp32/src/ui/eink/eink_display.cpp 1d814c737d82dd5652ea5daaa4a2799380fbb077
+// SYNC-HASH esp32/src/ui/eink/eink_dashboard_layout.h 4a5ad793f08081d8ac96a02b53b473521f2c1f90
 
 import SwiftUI
 
@@ -103,7 +117,10 @@ struct InkDeckPreview: View {
 
     private var sessionGrid: some View {
         let sessions = selection.displaySessions
-        let columns = sessions.count <= 1 ? 1 : 2
+        // Column count mirrors AgentDeckEink::makeLayout for the 800×480
+        // landscape panel: 1 for a lone session, 3 once five+ sessions pack the
+        // panel, else 2. (Portrait X3/X4 use a single wide column — N/A here.)
+        let columns = sessions.count <= 1 ? 1 : (sessions.count >= 5 ? 3 : 2)
         return Group {
             if sessions.isEmpty {
                 // Two distinct empty states, like the firmware: disconnected →
@@ -128,6 +145,8 @@ struct InkDeckPreview: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                // makeLayout caps the grid at 2 card rows; with ≤5 preview
+                // sessions and 2–3 columns the chunking never exceeds that.
                 let rows = Array(sessions.enumerated()).chunked(into: columns)
                 VStack(spacing: 6) {
                     ForEach(rows, id: \.first!.offset) { rowEntries in
@@ -159,20 +178,38 @@ struct InkDeckPreview: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(cardInk)
                     .lineLimit(1)
-                Text(Self.firmwareStateLabel(for: state))
+                // State line: "<LABEL>: <live activity>" (colon, not the old
+                // " · " — the firmware moved to an ASCII colon so the CP437
+                // fallback font can't mangle a UTF-8 middot). Awaiting cards
+                // show the label alone.
+                Text(stateLine(for: state))
                     .font(.system(size: 8, weight: .semibold, design: .monospaced))
                     .foregroundStyle(cardInk.opacity(0.72))
-                // Live-follow shows the real model on the third line; manual mode
-                // (no model) keeps the state-derived activity blurb.
-                Text(session.modelName ?? activityLine(for: state))
+                    .lineLimit(1)
+                // Detail line: the awaiting question, else the TIMELINE-grade
+                // work summary ("HH:MM · task · text") — NOT the live activity,
+                // which already rides the state line above. The model tag sits
+                // bottom-right (below), not on this line.
+                Text(detailLine(for: state))
                     .font(.system(size: 8))
                     .foregroundStyle(cardInk.opacity(0.6))
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
             Spacer(minLength: 0)
         }
         .padding(8)
         .frame(maxWidth: .infinity)
+        // Model tag bottom-right, when the daemon reports one (live-follow).
+        .overlay(alignment: .bottomTrailing) {
+            if let model = session.modelName {
+                Text(model)
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundStyle(cardInk.opacity(0.55))
+                    .lineLimit(1)
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 6)
+            }
+        }
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(awaiting ? ink : .clear)
@@ -181,6 +218,29 @@ struct InkDeckPreview: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(ink, lineWidth: awaiting ? 0 : 1.4)
         )
+    }
+
+    /// State line text — "<LABEL>: <activity>" for a busy session (firmware
+    /// `"%s: %s"`), just the label for awaiting/idle-with-no-activity.
+    private func stateLine(for state: PixooPreviewState) -> String {
+        let label = Self.firmwareStateLabel(for: state)
+        switch state {
+        case .awaitingPrompt, .disconnected:
+            return label
+        case .processing, .idle:
+            return "\(label): \(activityLine(for: state))"
+        }
+    }
+
+    /// Card detail — awaiting shows the pending question; otherwise the
+    /// daemon-computed latest milestone as "HH:MM · task · text".
+    private func detailLine(for state: PixooPreviewState) -> String {
+        switch state {
+        case .awaitingPrompt: return "may I edit eink_display.cpp?"
+        case .processing:     return "14:01 · edit · refactor e-ink layout SSOT"
+        case .idle:           return "13:57 · task · finished dashboard sync"
+        case .disconnected:   return ""
+        }
     }
 
     private func activityLine(for state: PixooPreviewState) -> String {
@@ -205,7 +265,7 @@ struct InkDeckPreview: View {
         }
     }
 
-    // MARK: Usage footer — drawUsageFooter (adaptive split, firmware 208b1afc)
+    // MARK: Usage footer — drawUsageFooter (adaptive split + recent-work strip)
 
     /// Sample providers that "report usage" for this preview frame. Mirrors the
     /// firmware's usageRowCount gate: a provider row draws only when its quota
@@ -216,34 +276,57 @@ struct InkDeckPreview: View {
         // by the session mix, Codex when a Codex session exists) otherwise.
         let rows = selection.displayUsageRows
         return VStack(alignment: .leading, spacing: 4) {
-            // 0 usage rows → no separator, no gauge band (sepY = -1 in the
-            // firmware); the session grid above reclaims the space and only
-            // the pinned ticker remains.
+            // 0 usage rows → no separator, no gauge band (usage.empty() in the
+            // firmware layout); the session grid above reclaims the space and
+            // only the recent-work strip remains.
             if !rows.isEmpty {
                 Rectangle().fill(ink).frame(height: 1.4)
                 ForEach(rows) { row in
                     providerRow(glyphAgent: row.agent, label: row.label, plan: row.plan, p5: row.p5, p7: row.p7)
                 }
             }
-            HStack(spacing: 5) {
-                Text("14:02")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                Text(tickerText)
-                    .font(.system(size: 8))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
+            // Recent-work strip — up to Snap::TICKER_ROWS (3) latest milestone
+            // rows, newest first, gated on the live daemon link (a stale line
+            // under the "searching…" screen read as if still connected).
+            if selection.state != .disconnected {
+                ForEach(Array(workStripRows.enumerated()), id: \.offset) { _, row in
+                    HStack(spacing: 5) {
+                        Text(row.time)
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        Text(row.text)
+                            .font(.system(size: 8))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(ink.opacity(0.7))
+                }
             }
-            .foregroundStyle(ink.opacity(0.7))
         }
         .padding(.bottom, 2)
     }
 
-    private var tickerText: String {
+    /// Up to 3 synthetic milestone rows, newest first — stands in for the
+    /// firmware's timeline-ring recent-work strip.
+    private var workStripRows: [(time: String, text: String)] {
         switch selection.state {
-        case .processing:     return "response streaming — usage gauge updated"
-        case .awaitingPrompt: return "waiting for permission decision"
-        case .idle:           return "turn complete · aquarium idle"
-        case .disconnected:   return "daemon offline — reconnecting"
+        case .processing:
+            return [
+                ("14:02", "claude · agentdeck · response streaming…"),
+                ("13:57", "claude · agentdeck · edited eink_display.cpp"),
+                ("13:41", "codex · bridge · task complete"),
+            ]
+        case .awaitingPrompt:
+            return [
+                ("14:02", "claude · agentdeck · awaiting permission"),
+                ("13:57", "claude · agentdeck · ran the test suite"),
+            ]
+        case .idle:
+            return [
+                ("13:58", "claude · agentdeck · turn complete"),
+                ("13:41", "codex · bridge · task complete"),
+            ]
+        case .disconnected:
+            return []
         }
     }
 
@@ -259,6 +342,9 @@ struct InkDeckPreview: View {
             }
             .foregroundStyle(ink)
             .frame(width: 52, alignment: .leading)
+            // Present windows pack left (firmware: p5 at x=150, p7 next); a
+            // missing window is dropped, never shown as "--". The preview's
+            // sample rows always carry both, so both render here.
             gaugeBar(tag: "5H", pct: p5)
             gaugeBar(tag: "7D", pct: p7)
             Spacer(minLength: 0)

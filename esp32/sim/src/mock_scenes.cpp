@@ -84,9 +84,80 @@ void base(CreatureState cs) {
   g_state.subscriptionCount = 1;
 }
 
+// `demo:<agent>:<state>` — the creature-simulator web demo's agent × state
+// matrix (agents: claude|codex|opencode|openclaw|antigravity, states:
+// idle|working|asking|sleeping). Session shape and usage values mirror
+// scripts/render-creature-simulator.mjs buildSessions()/buildUsage() so the
+// ESP32 panels on the demo page stay visually coherent with the LED-matrix /
+// deck panels rendered from the Node-side canonical renderers. State mapping
+// follows the demo's simStateToBridge(): working→processing,
+// asking→awaiting_permission, sleeping/idle→idle. OpenClaw is not a PTY
+// session on-device — it surfaces as the gateway crayfish.
+bool applyDemoScene(const char* agent, const char* state) {
+  const bool working = std::strcmp(state, "working") == 0;
+  const bool asking = std::strcmp(state, "asking") == 0;
+  base(working ? CreatureState::WORKING
+               : asking ? CreatureState::ASKING
+                        : CreatureState::FLOATING);
+  g_state.state = working ? AgentState::PROCESSING
+                          : asking ? AgentState::AWAITING_PERMISSION
+                                   : AgentState::IDLE;
+  // Usage parity with the demo's buildUsage().
+  g_state.fiveHourPercent = 46.0f;
+  g_state.sevenDayPercent = 72.0f;
+  setStr(g_state.fiveHourReset, sizeof(g_state.fiveHourReset), "1h 30m");
+  setStr(g_state.sevenDayReset, sizeof(g_state.sevenDayReset), "1d 4h");
+  g_state.codexPrimaryPercent = 38.0f;
+  g_state.codexSecondaryPercent = 64.0f;
+  setStr(g_state.codexPrimaryReset, sizeof(g_state.codexPrimaryReset), "2h 30m");
+  setStr(g_state.codexSecondaryReset, sizeof(g_state.codexSecondaryReset), "2d 4h");
+
+  struct Row { const char* key; const char* agentType; const char* project; };
+  const Row rows[] = {
+      {"claude", "claude-code", "Claude"},
+      {"codex", "codex-cli", "Codex"},
+      {"opencode", "opencode", "OpenCode"},
+      {"antigravity", "antigravity", "Antigravity"},
+  };
+  bool known = std::strcmp(agent, "openclaw") == 0;
+  const char* selectedState = working ? "processing"
+                                      : asking ? "awaiting_permission" : "idle";
+  // Selected agent first (demo ordering), then the rest idle.
+  for (const Row& r : rows)
+    if (std::strcmp(agent, r.key) == 0) {
+      addSession(r.agentType, selectedState, r.project);
+      if (asking)
+        setStr(g_state.sessions[0].question, sizeof(g_state.sessions[0].question),
+               "Allow Bash command? rm -rf build/");
+      known = true;
+    }
+  for (const Row& r : rows)
+    if (std::strcmp(agent, r.key) != 0) addSession(r.agentType, "idle", r.project);
+
+  // Gateway crayfish — visible in every demo scene; routing when OpenClaw works.
+  g_state.gatewayAvailable = true;
+  g_state.gatewayConnected = true;
+  g_state.crayfishCount = 1;
+  g_state.crayfishState = (std::strcmp(agent, "openclaw") == 0 && working)
+                              ? CrayfishState::ROUTING
+                              : CrayfishState::DORMANT;
+  return known;
+}
+
 }  // namespace
 
 bool SimScenes::apply(const char* name) {
+  if (std::strncmp(name, "demo:", 5) == 0) {
+    char agent[16] = {0};
+    const char* sep = std::strchr(name + 5, ':');
+    if (!sep || (size_t)(sep - (name + 5)) >= sizeof(agent)) return false;
+    std::memcpy(agent, name + 5, (size_t)(sep - (name + 5)));
+    const char* state = sep + 1;
+    if (std::strcmp(state, "idle") && std::strcmp(state, "working") &&
+        std::strcmp(state, "asking") && std::strcmp(state, "sleeping"))
+      return false;
+    return applyDemoScene(agent, state);
+  }
   if (std::strcmp(name, "empty") == 0) {
     std::memset(&g_state, 0, sizeof(g_state));
     g_state.dataReceived = false;   // pre-connection: idle aquarium, no creatures
@@ -187,5 +258,6 @@ bool SimScenes::apply(const char* name) {
 }
 
 const char* SimScenes::catalog() {
-  return "empty, idle, display-off, working, multi, permission";
+  return "empty, idle, display-off, working, multi, permission, "
+         "demo:<agent>:<state>";
 }

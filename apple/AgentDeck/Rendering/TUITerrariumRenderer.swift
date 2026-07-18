@@ -6,6 +6,11 @@
 // NOT output ANSI codes, it renders into a SwiftUI Canvas with a monospaced
 // font, one character cell at a time.
 //
+// Sync pin — verified by `scripts/check-preview-mirror-sync.mjs` (CI). When the
+// origin changes, re-port (or confirm no visual impact given the deliberate
+// simplifications below) and bump the pin in the same commit.
+// SYNC-HASH bridge/src/tui/terrarium.ts fd825e4143f53222785fb293b789a1fd685309e8
+//
 // Scope / deliberate simplifications (vs the TS original):
 //   - No Braille sprites: creatures render as 3-char ASCII glyphs colored by
 //     agent brand (via StateColors.brand). Preserves silhouette/position.

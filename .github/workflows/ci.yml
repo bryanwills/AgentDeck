@@ -46,6 +46,9 @@ jobs:
           COLORTERM: truecolor
           TZ: Asia/Seoul
 
+      - name: Preview mirror sync check
+        run: node scripts/check-preview-mirror-sync.mjs
+
       - name: Protocol drift check
         run: |
           pnpm generate-protocol

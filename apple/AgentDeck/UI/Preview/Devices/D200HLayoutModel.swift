@@ -20,6 +20,13 @@
 // it relies on) changes in the TS engine, re-port the corresponding code here.
 // The visual/layout semantics must stay complete.
 //
+// The SYNC-HASH lines below pin the exact origin blobs this port was reconciled
+// against; `scripts/check-preview-mirror-sync.mjs` verifies they match the
+// current `git hash-object` of each file and fails CI when the origin drifts
+// ahead of this mirror. Update them whenever you re-port.
+// SYNC-HASH shared/src/d200h-layout.ts 3878b6cc7dd2efaa3dac99344ab8d365c4771135
+// SYNC-HASH shared/src/session-utils.ts 91cf2510e4b2bff520909f53e1ea7cc5ac7aa4f7
+//
 // INTENTIONALLY OMITTED (not needed by a read-only preview):
 //   • Actual SVG rasterization. The TS engine emits per-key SVG strings via the
 //     `svg-renderers/*` module; here each key carries a semantic `Kind` +
@@ -398,6 +405,13 @@ public enum D200HLayoutModel {
         let sState = (sess?.state ?? "idle").lowercased()
         let options = sess?.options ?? []
         let tool = sess?.currentTool
+        // A selected session with no model is UNKNOWN (empty) — it must NOT borrow
+        // a daemon-global model from another agent. TS resolves this as
+        //   focused ? (state.modelName || sess?.modelName || '') : (sess?.modelName || '')
+        // This mirror deliberately does not model the top-level daemon `state.modelName`
+        // (see "focused-session state_update merge" in INTENTIONALLY OMITTED), so
+        // `sess?.modelName` alone is the faithful reproduction: it matches the
+        // non-focused branch exactly and never fabricates a borrowed model.
         let model = sess?.modelName ?? ""
         let agentType = sess?.agentType ?? "claude-code"
 
@@ -451,6 +465,12 @@ public enum D200HLayoutModel {
                 cells.append(Cell(kind: .info(icon: "status", tone: "warning"), label: "PERMIT?", subtitle: "answer in terminal", action: .none))
             }
         } else if isProcessing(sState) {
+            // PROCESSING is deliberately live-status only (RUNNING) — no queued
+            // task tiles. The TS engine removed its COMMIT-at-completion pre-queue
+            // tile so users can't mistake a future directive for the agent's
+            // current work; this mirror never modeled that tile (nor the inert
+            // review badge), so it is already at parity. STOP is added by the
+            // shared last-slot logic above.
             cells.append(Cell(kind: .info(icon: "activity", tone: "info"), label: "RUNNING", subtitle: (tool?.isEmpty == false ? tool : "working"), action: .none))
         } else {
             // Idle quick-actions.

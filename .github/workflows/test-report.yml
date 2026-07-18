@@ -45,6 +45,19 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Cache PlatformIO (sim)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+            esp32/sim/.pio
+          key: pio-sim-${{ hashFiles('esp32/sim/platformio.ini') }}
+          restore-keys: pio-sim-
+
+      - name: Install PlatformIO (demo ESP32 frames)
+        run: pip install platformio
+
       - name: Build creature-simulator demo
         run: pnpm run demo:build
 

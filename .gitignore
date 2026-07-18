@@ -93,8 +93,10 @@ tools/ulanzi-sdk/
 # plugin-ulanzi build output (tsc emits into the .ulanziPlugin/plugin folder)
 plugin-ulanzi/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/plugin/
 
-# Creature simulator generated data (rebuilt by scripts/render-creature-simulator.mjs)
+# Creature simulator generated data (rebuilt by scripts/render-creature-simulator.mjs
+# and scripts/render-esp32-sim-frames.mjs)
 tools/creature-simulator/sim-data.js
+tools/creature-simulator/sim-frames/
 apple/DerivedData/
 .ds-sync/
 ds-bundle/

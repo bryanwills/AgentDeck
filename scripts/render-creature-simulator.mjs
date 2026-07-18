@@ -16,7 +16,6 @@ import {
   renderTerrariumFrame,
 } from '../bridge/dist/tui/terrarium.js';
 import { renderDashboard } from '../bridge/dist/tui/renderer.js';
-import { OFFICIAL_TC001_GLYPHS, OFFICIAL_TC001_GLYPH_SIZE } from '../bridge/dist/pixoo/official-dot-glyphs.generated.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sourcePath = path.resolve(__dirname, '../tools/creature-simulator/index.html');
@@ -143,39 +142,6 @@ function renderMatrixData(size, layout) {
         height: size,
         b64: Buffer.from(frame).toString('base64'),
       };
-    }
-  }
-  return result;
-}
-
-function renderTC001Data() {
-  const glyphForAgent = {
-    claude: 'claudeCode', codex: 'codex', opencode: 'openCode', openclaw: 'openClaw', antigravity: 'antigravity',
-  };
-  const colors = {
-    claudeCode: [192, 112, 88], codex: [97, 102, 224], openCode: [241, 236, 236],
-    openClaw: [255, 77, 77], antigravity: [102, 111, 225],
-  };
-  const result = {};
-  for (const agent of Object.keys(AGENTS)) {
-    for (const state of STATES) {
-      const key = glyphForAgent[agent];
-      const alpha = OFFICIAL_TC001_GLYPHS[key];
-      const frame = new Uint8Array(32 * 8 * 3);
-      const base = colors[key];
-      const dim = state === 'sleeping' ? 0.35 : state === 'idle' ? 0.62 : 1;
-      const x0 = agent === 'openclaw' ? 24 : 0;
-      for (let y = 0; y < OFFICIAL_TC001_GLYPH_SIZE; y++) {
-        for (let x = 0; x < OFFICIAL_TC001_GLYPH_SIZE; x++) {
-          const a = alpha[y * OFFICIAL_TC001_GLYPH_SIZE + x] / 255;
-          if (a < 0.04) continue;
-          const i = (y * 32 + x0 + x) * 3;
-          frame[i] = Math.round(base[0] * a * dim);
-          frame[i + 1] = Math.round(base[1] * a * dim);
-          frame[i + 2] = Math.round(base[2] * a * dim);
-        }
-      }
-      result[`${agent}:${state}`] = { width: 32, height: 8, b64: Buffer.from(frame).toString('base64') };
     }
   }
   return result;
@@ -416,7 +382,6 @@ const simulatorData = {
   pixoo: renderPixooData(),
   idot: renderMatrixData(32, 'standard'),
   timebox: renderMatrixData(11, 'micro'),
-  tc001: renderTC001Data(),
   d200hUsage: renderD200HUsageData(),
   streamDeck: renderStreamDeckData(),
   tui: renderTuiData(),

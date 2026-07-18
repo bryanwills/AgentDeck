@@ -349,7 +349,7 @@
 
     <div class="panel glass-panel">
       <h2>Device Simulations</h2>
-      <p>Per-device previews at each surface's real resolution. <strong>Pixoo64, iDotMatrix, Timebox Mini, Stream Deck, the D200H key + usage window, and the TUI render from actual renderer output</strong> (decoded frames / real SVGs). Tablet, e-ink, and ESP32 panels are hand-drawn approximations at the correct native resolution — the SwiftUI / Compose / LVGL renderers can't run in a browser.</p>
+      <p>Per-device previews at each surface's real resolution. <strong>Pixoo64, iDotMatrix, Timebox Mini, Stream Deck, the D200H key + usage window, and the TUI render from actual renderer output</strong> (decoded frames / real SVGs), and <strong>every ESP32 surface — the LCD boards, TC001 matrix pages, and the InkDeck e-ink dashboard — is a pixel-exact frame from the real firmware</strong> compiled by the <code>esp32/sim</code> host simulator (hatch placeholder if frames weren't generated). Only the tablet and e-reader panels remain hand-drawn approximations — SwiftUI / Compose can't run in a browser.</p>
       <div class="grid devices">
         <section>
           <div class="device-frame">
@@ -379,19 +379,37 @@
           <div class="device-frame">
             <svg class="device-screen" id="sim-esp32-box" viewBox="0 0 480 480" style="aspect-ratio:1/1"></svg>
           </div>
-          <div class="device-meta">ESP32 86Box. Full-screen aquarium with left session card and right gauge card, matching the LVGL HUD overlay.</div>
+          <div class="device-meta">ESP32 86Box 480×480 — actual firmware frame (LVGL terrarium + HUD, esp32/sim).</div>
         </section>
         <section>
           <div class="device-frame">
             <svg class="device-screen" id="sim-esp32-ips" viewBox="0 0 480 320" style="aspect-ratio:3/2"></svg>
           </div>
-          <div class="device-meta">ESP32 IPS 3.5&quot; landscape. Same aquarium screen, wider left/right HUD cards like the actual IPS layout.</div>
+          <div class="device-meta">ESP32 IPS 3.5&quot; 480×320 landscape — actual firmware frame (esp32/sim).</div>
         </section>
         <section>
           <div class="device-frame round">
             <svg class="device-screen" id="sim-esp32-round" viewBox="0 0 360 360" style="aspect-ratio:1/1"></svg>
           </div>
-          <div class="device-meta">ESP32 round AMOLED. Top status stack and bottom dual gauges like the actual round HUD layout.</div>
+          <div class="device-meta">ESP32 round AMOLED 360×360 — actual firmware frame with the circular mask (esp32/sim).</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-esp32-ttgo" viewBox="0 0 135 240" style="aspect-ratio:135/240;max-height:280px;margin:0 auto;display:block"></svg>
+          </div>
+          <div class="device-meta">TTGO T-Display 135×240 — actual firmware frame (compact terrarium + metric overlay, esp32/sim).</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-esp32-ips10" viewBox="0 0 1280 800" style="aspect-ratio:16/10"></svg>
+          </div>
+          <div class="device-meta">ESP32 IPS 10.1&quot; 1280×800 — actual firmware frame (&quot;pixel office&quot; tablet layout + HUD sidebar, esp32/sim).</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-inkdeck" viewBox="0 0 800 480" style="aspect-ratio:5/3"></svg>
+          </div>
+          <div class="device-meta">InkDeck 7.5&quot; e-ink 800×480 — actual firmware frame (1-bit UC8179 dashboard, esp32/sim).</div>
         </section>
         <section>
           <div class="device-frame">
@@ -418,7 +436,7 @@
               <svg class="device-screen" id="sim-tc-agents" viewBox="0 0 32 8" style="aspect-ratio:4/1"></svg>
             </div>
           </div>
-          <div class="device-meta">Ulanzi TC001 8×32 matrix. Two pages: full-screen 5H/7D gauge and agent row plus fixed crayfish (mirrors matrix_pages.cpp).</div>
+          <div class="device-meta">Ulanzi TC001 8×32 matrix — actual firmware page frames (matrix_pages.cpp usage + agents pages, esp32/sim).</div>
         </section>
         <section>
           <div class="device-frame">
@@ -445,7 +463,7 @@
     </div>
 
     <div class="panel notes glass-panel">
-      <strong>Purpose:</strong> compare the creature marks against per-device rendering before deploying. LED matrices (Pixoo64, iDotMatrix, Timebox Mini), Stream Deck, the D200H key + usage window, and the TUI are inspected from actual renderer output; tablet, e-ink, and ESP32 panels follow each platform's real HUD structure and native resolution as closely as this simulator can without invoking those native renderers directly.
+      <strong>Purpose:</strong> compare the creature marks against per-device rendering before deploying. LED matrices (Pixoo64, iDotMatrix, Timebox Mini), Stream Deck, the D200H key + usage window, and the TUI are inspected from actual renderer output, and every ESP32 surface (LCD boards, TC001 matrix, InkDeck e-ink) from pixel-exact esp32/sim firmware frames; only the tablet and e-reader panels are hand-drawn stand-ins for renderers that can't run in a browser.
     </div>
   </div>
 
@@ -545,31 +563,6 @@
       asking: { opacity: 1, pulse: 0.02 },
     };
     const STATE_ORDER = ["idle", "working", "asking", "sleeping"];
-    const MATRIX_FONT = {
-      " ": [0, 0, 0, 0, 0],
-      A: [0b010, 0b101, 0b111, 0b101, 0b101],
-      C: [0b011, 0b100, 0b100, 0b100, 0b011],
-      D: [0b110, 0b101, 0b101, 0b101, 0b110],
-      E: [0b111, 0b100, 0b110, 0b100, 0b111],
-      H: [0b101, 0b101, 0b111, 0b101, 0b101],
-      I: [0b111, 0b010, 0b010, 0b010, 0b111],
-      L: [0b100, 0b100, 0b100, 0b100, 0b111],
-      N: [0b101, 0b111, 0b111, 0b101, 0b101],
-      O: [0b010, 0b101, 0b101, 0b101, 0b010],
-      P: [0b110, 0b101, 0b110, 0b100, 0b100],
-      T: [0b111, 0b010, 0b010, 0b010, 0b010],
-      U: [0b101, 0b101, 0b101, 0b101, 0b010],
-      X: [0b101, 0b101, 0b010, 0b101, 0b101],
-      0: [0b010, 0b101, 0b101, 0b101, 0b010],
-      2: [0b110, 0b001, 0b010, 0b100, 0b111],
-      4: [0b101, 0b101, 0b111, 0b001, 0b001],
-      5: [0b111, 0b100, 0b110, 0b001, 0b110],
-      6: [0b011, 0b100, 0b110, 0b101, 0b010],
-      7: [0b111, 0b001, 0b010, 0b010, 0b010],
-      "%": [0b101, 0b001, 0b010, 0b100, 0b101],
-      "-": [0b000, 0b000, 0b111, 0b000, 0b000],
-      ".": [0b000, 0b000, 0b000, 0b000, 0b010],
-    };
     let simTime = 0;
     let animateEnabled = true;
     let cycleStates = false;
@@ -601,6 +594,9 @@
         "sim-esp32-box": [480, 480],
         "sim-esp32-ips": [480, 320],
         "sim-esp32-round": [360, 360],
+        "sim-esp32-ttgo": [135, 240],
+        "sim-esp32-ips10": [1280, 800],
+        "sim-inkdeck": [800, 480],
         "sim-pixoo": [64, 64],
         "sim-idot": [32, 32],
         "sim-timebox": [11, 11],
@@ -872,39 +868,6 @@
       }
     }
 
-    function drawMatrixLedGrid(svg, width = 32, height = 8) {
-      svg.appendChild(el("rect", { x: 0, y: 0, width, height, fill: "#11161B" }));
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          svg.appendChild(el("circle", {
-            cx: x + 0.5,
-            cy: y + 0.5,
-            r: 0.32,
-            fill: "#06090C",
-            opacity: 0.92,
-          }));
-        }
-      }
-    }
-
-    function drawMatrixPixel(svg, x, y, color, opacity = 1) {
-      svg.appendChild(el("rect", { x, y, width: 1, height: 1, fill: color, opacity }));
-    }
-
-    function drawMatrixText(svg, text, x, y, color, opacity = 1) {
-      let cursor = x;
-      for (const rawChar of text) {
-        const char = rawChar.toUpperCase();
-        const glyph = MATRIX_FONT[char] || MATRIX_FONT[" "];
-        for (let row = 0; row < glyph.length; row++) {
-          const bits = glyph[row];
-          for (let col = 0; col < 3; col++) {
-            if (bits & (1 << (2 - col))) drawMatrixPixel(svg, cursor + col, y + row, color, opacity);
-          }
-        }
-        cursor += 4;
-      }
-    }
 
     function getActualKey(agent, state) {
       return `${agent}:${state}`;
@@ -931,10 +894,6 @@
       return window.__SIM_DATA?.timebox?.[getActualKey(agent, state)] || null;
     }
 
-    function getTC001Actual(agent, state) {
-      return window.__SIM_DATA?.tc001?.[getActualKey(agent, state)] || null;
-    }
-
     function getD200HUsageActual() {
       return window.__SIM_DATA?.d200hUsage || null;
     }
@@ -945,6 +904,56 @@
     function renderMatrixDotDevice(svg, frame) {
       clear(svg);
       if (frame) renderRgbFrame(svg, frame);
+    }
+
+    // ── ESP32 firmware frames (esp32/sim host simulator) ────────────────────
+    // Every ESP32 surface — LCD boards, TC001 matrix pages, InkDeck e-ink — is a
+    // pixel-exact PNG rendered from the real firmware sources by esp32/sim.
+    // scripts/render-esp32-sim-frames.mjs emits sim-frames/ + manifest.json at
+    // demo build time. There is deliberately no hand-drawn fallback: a missing
+    // frame shows the design-system hatch placeholder instead (DESIGN.md §10
+    // rule 7 — never illustrate hardware by hand).
+    let simFrameSet = null; // null = manifest still loading
+    fetch("./sim-frames/manifest.json")
+      .then((r) => (r.ok ? r.json() : { frames: [] }))
+      .catch(() => ({ frames: [] }))
+      .then((m) => { simFrameSet = new Set(m.frames || []); });
+
+    function renderFirmwareFrame(svg, name) {
+      const key = simFrameSet === null ? "loading"
+        : simFrameSet.has(name) ? name : `missing:${name}`;
+      if (svg.dataset.frame === key) return; // rAF loop — only touch DOM on change
+      svg.dataset.frame = key;
+      clear(svg);
+      const [w, h] = svgSize(svg);
+      if (key === name) {
+        const img = el("image", {
+          x: 0, y: 0, width: w, height: h,
+          href: `./sim-frames/${name}`,
+          preserveAspectRatio: "none",
+          style: "image-rendering:pixelated",
+        });
+        svg.appendChild(img);
+      } else if (simFrameSet !== null) {
+        drawHatchPlaceholder(svg, w, h);
+      }
+    }
+
+    function drawHatchPlaceholder(svg, w, h) {
+      const patId = `hatch-${svg.id}`;
+      const defs = el("defs");
+      const pat = el("pattern", { id: patId, width: 12, height: 12, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+      pat.appendChild(el("rect", { x: 0, y: 0, width: 12, height: 12, fill: "#101D2B" }));
+      pat.appendChild(el("rect", { x: 0, y: 0, width: 3, height: 12, fill: "#1C3247" }));
+      defs.appendChild(pat);
+      svg.appendChild(defs);
+      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, fill: `url(#${patId})` }));
+      svg.appendChild(textNode("sim frame not generated", {
+        x: w / 2, y: h / 2, "text-anchor": "middle", "dominant-baseline": "middle",
+        "font-size": Math.max(10, Math.round(Math.min(w, h) / 16)),
+        "font-family": '"JetBrains Mono", ui-monospace, monospace',
+        fill: "#4E6A82",
+      }));
     }
 
     function renderInlineSvg(svg, rawSvg) {
@@ -1800,121 +1809,6 @@
       drawEinkTimelinePanel(svg, rightX, h * 0.63, rightW, h * 0.37, colorMode);
     }
 
-    function drawEsp32SessionHud(svg, x, y, w, h, opts = {}) {
-      const round = !!opts.round;
-      const titleSize = round ? 14 : 20;
-      const sessionSize = round ? 10 : 12;
-      const padX = 8;
-      svg.appendChild(el("rect", { x, y, width: w, height: h, rx: round ? 12 : 8, fill: "#000000", opacity: 0.50 }));
-      svg.appendChild(textNode("AgentDeck", {
-        x: x + w / 2, y: y + (round ? 18 : 24), fill: "#E2E8F0", "font-size": titleSize,
-        "font-weight": 800, "text-anchor": "middle", "font-family": "ui-sans-serif, system-ui, sans-serif",
-      }));
-      svg.appendChild(el("rect", {
-        x: x + (round ? (w - 100) / 2 : (w - 130) / 2),
-        y: y + (round ? 24 : 31),
-        width: round ? 100 : 130,
-        height: 2,
-        rx: 1,
-        fill: "#3B82F6",
-      }));
-      const sessions = round ? [
-        ["Claude", "#C07058", "#22C55E"],
-        ["Codex", "#5561E0", "#3B82F6"],
-      ] : [
-        ["AgentDeck", "#C07058", "#22C55E"],
-        ["Codex", "#5561E0", "#3B82F6"],
-        ["OpenClaw", "#FF4D4D", "#22C55E"],
-      ];
-      let rowY = y + (round ? 44 : 52);
-      sessions.forEach(([name, brand, status]) => {
-        svg.appendChild(textNode("●", {
-          x: x + padX, y: rowY, fill: brand, "font-size": sessionSize,
-          "font-family": "ui-sans-serif, system-ui, sans-serif",
-        }));
-        svg.appendChild(textNode(name, {
-          x: x + padX + 14, y: rowY, fill: "#94A3B8", "font-size": sessionSize,
-          "font-family": "ui-sans-serif, system-ui, sans-serif",
-        }));
-        svg.appendChild(textNode("●", {
-          x: x + w - padX - 12, y: rowY, fill: status, "font-size": sessionSize,
-          "font-family": "ui-sans-serif, system-ui, sans-serif",
-        }));
-        rowY += round ? 14 : 17;
-      });
-    }
-
-    function drawEsp32WaterGauge(svg, x, y, size, percent, label, reset) {
-      const pct = Math.max(0, Math.min(100, percent));
-      const color = pct >= 90 ? "#EF4444" : pct >= 70 ? "#FBBF24" : "#22C55E";
-      const inner = size - 2;
-      const fillH = inner * pct / 100;
-      svg.appendChild(el("rect", {
-        x, y, width: size, height: size, rx: 6, fill: "#FFFFFF", opacity: 0.125,
-        stroke: "#FFFFFF", "stroke-width": 1, "stroke-opacity": 0.10,
-      }));
-      svg.appendChild(el("rect", {
-        x: x + 1, y: y + 1 + inner - fillH, width: inner, height: fillH,
-        fill: color, opacity: 0.50,
-      }));
-      svg.appendChild(textNode(label, {
-        x: x + size / 2, y: y + 14, fill: "#94A3B8", "font-size": 10,
-        "text-anchor": "middle", "font-family": "ui-sans-serif, system-ui, sans-serif",
-      }));
-      svg.appendChild(textNode(`${Math.round(pct)}%`, {
-        x: x + size / 2, y: y + size / 2 + 7, fill: "#E2E8F0", "font-size": 16,
-        "font-weight": 800, "text-anchor": "middle", "font-family": "ui-sans-serif, system-ui, sans-serif",
-      }));
-      svg.appendChild(textNode(reset, {
-        x: x + size / 2, y: y + size + 12, fill: "#94A3B8", "font-size": 10,
-        "text-anchor": "middle", opacity: 0.70, "font-family": "ui-sans-serif, system-ui, sans-serif",
-      }));
-    }
-
-    function drawEsp32GaugeHud(svg, x, y, w, h, opts = {}) {
-      const round = !!opts.round;
-      const gaugeSize = round ? 44 : 58;
-      const gap = 8;
-      svg.appendChild(el("rect", { x, y, width: w, height: h, rx: round ? 12 : 8, fill: "#000000", opacity: 0.50 }));
-      let gaugeY = y + 9;
-      if (!round) {
-        svg.appendChild(textNode("TANK STATUS", {
-          x: x + 8, y: y + 15, fill: "#94A3B8", "font-size": 10,
-          "font-weight": 800, "font-family": "ui-sans-serif, system-ui, sans-serif",
-        }));
-        gaugeY = y + 23;
-      }
-      const rowW = gaugeSize * 2 + gap;
-      const startX = x + (w - rowW) / 2;
-      drawEsp32WaterGauge(svg, startX, gaugeY, gaugeSize, 46, "5h", "1h24m");
-      drawEsp32WaterGauge(svg, startX + gaugeSize + gap, gaugeY, gaugeSize, 72, "7d", "1d12h");
-    }
-
-    function renderEsp32Device(svg, agent, state, variant, t) {
-      clear(svg);
-      const [w, h] = svgSize(svg);
-      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, fill: "#000000" }));
-      drawTabletTerrarium(svg, 0, 0, w, h, agent, state, t, {
-        waterTop: "#16324A",
-        waterBottom: "#102338",
-        sand: "#2A2118",
-        kelp: "#2E5A47",
-        bubble: "#9BC9FF",
-        askKind: "esp32",
-      });
-      if (variant === "round") {
-        drawEsp32SessionHud(svg, (w - 260) / 2, 20, 260, 82, { round: true });
-        drawEsp32GaugeHud(svg, (w - 112) / 2, h - 30 - 78, 112, 78, { round: true });
-      } else if (variant === "portrait") {
-        drawEsp32SessionHud(svg, 8, 28, w - 16, 112, { round: false });
-        drawEsp32GaugeHud(svg, w - 140 - 8, h - 104, 140, 96, { round: false });
-      } else {
-        const topY = 28;
-        drawEsp32SessionHud(svg, 8, topY, 170, 116, { round: false });
-        drawEsp32GaugeHud(svg, w - 140 - 8, topY, 140, 96, { round: false });
-      }
-    }
-
     function renderPixooDevice(svg, agent, state, t) {
       const actual = getPixooActual(agent, state);
       if (actual) {
@@ -2007,36 +1901,14 @@
       scene.appendChild(el("rect", { x: 33, y: 58, width: fill7d, height: 5, fill: color7d, opacity: 0.35 }));
     }
 
-    function renderMatrixUsageDevice(svg, state, t) {
-      clear(svg);
-      drawMatrixLedGrid(svg);
-      const pct = state === "working" ? 72 : state === "asking" ? 46 : state === "sleeping" ? 18 : 34;
-      const reset = Math.floor((t / 4) % 2) === 0 ? "1H24" : "1D12";
-      const fillW = Math.max(0, Math.min(32, Math.round((pct / 100) * 32)));
-      // Pixoo/TC001-matched color palette
-      let fillColor;
-      if (pct >= 90) {
-        const pulse = 0.7 + 0.3 * Math.sin(t * 6);
-        fillColor = `rgb(${Math.round(239*pulse)},${Math.round(68*pulse)},${Math.round(68*pulse)})`;
-      } else if (pct >= 70) fillColor = "#F59E0B";
-      else if (pct >= 50) fillColor = "#00C8B4";
-      else fillColor = "#3B82F6";
-      for (let x = 0; x < fillW; x++) {
-        for (let y = 0; y < 8; y++) drawMatrixPixel(svg, x, y, fillColor, 0.9);
-      }
-      // Dark unfilled area
-      for (let x = fillW; x < 32; x++) {
-        for (let y = 0; y < 8; y++) drawMatrixPixel(svg, x, y, "#0F0F14", 0.5);
-      }
-      drawMatrixText(svg, `${pct}%`, 1, 1, "#F5FAFF");
-      drawMatrixText(svg, reset, 32 - reset.length * 4, 1, "#607080");
-      if (state === "working" || state === "asking") {
-        drawMatrixPixel(svg, 31, 7, state === "working" ? "#C8785A" : "#C88C00", 0.9);
-      }
+    // TC001 pages come straight from the firmware's matrix_pages.cpp via the
+    // esp32/sim led8x32 env — no hand-coded page layout in the demo.
+    function renderMatrixUsageDevice(svg, agent, state) {
+      renderFirmwareFrame(svg, `tc001-${agent}-${state}-usage.png`);
     }
 
-    function renderMatrixAgentsDevice(svg, agent, state, t) {
-      renderMatrixDotDevice(svg, getTC001Actual(agent, state));
+    function renderMatrixAgentsDevice(svg, agent, state) {
+      renderFirmwareFrame(svg, `tc001-${agent}-${state}-agents.png`);
     }
 
     function renderStreamDeckDevice(svg, agent, state, t) {
@@ -2419,14 +2291,17 @@
       renderTabletDevice(document.getElementById("sim-android"), agent, state, "android", t);
       renderEinkDevice(document.getElementById("sim-eink-bw"), agent, state, false, t);
       renderEinkDevice(document.getElementById("sim-eink-color"), agent, state, true, t);
-      renderEsp32Device(document.getElementById("sim-esp32-box"), agent, state, "box", t);
-      renderEsp32Device(document.getElementById("sim-esp32-ips"), agent, state, "ips", t);
-      renderEsp32Device(document.getElementById("sim-esp32-round"), agent, state, "round", t);
+      renderFirmwareFrame(document.getElementById("sim-esp32-box"), `box86-${agent}-${state}.png`);
+      renderFirmwareFrame(document.getElementById("sim-esp32-ips"), `ips35-${agent}-${state}.png`);
+      renderFirmwareFrame(document.getElementById("sim-esp32-round"), `round-${agent}-${state}.png`);
+      renderFirmwareFrame(document.getElementById("sim-esp32-ttgo"), `ttgo-${agent}-${state}.png`);
+      renderFirmwareFrame(document.getElementById("sim-esp32-ips10"), `ips10-${agent}-${state}.png`);
+      renderFirmwareFrame(document.getElementById("sim-inkdeck"), `inkdeck-${agent}-${state}.png`);
       renderPixooDevice(document.getElementById("sim-pixoo"), agent, state, t);
       renderMatrixDotDevice(document.getElementById("sim-idot"), getIdotActual(agent, state));
       renderMatrixDotDevice(document.getElementById("sim-timebox"), getTimeboxActual(agent, state));
-      renderMatrixUsageDevice(document.getElementById("sim-tc-usage"), state, t);
-      renderMatrixAgentsDevice(document.getElementById("sim-tc-agents"), agent, state, t);
+      renderMatrixUsageDevice(document.getElementById("sim-tc-usage"), agent, state);
+      renderMatrixAgentsDevice(document.getElementById("sim-tc-agents"), agent, state);
       renderStreamDeckDevice(document.getElementById("sim-streamdeck"), agent, state, t);
       renderD200HDevice(document.getElementById("sim-d200h"), agent, state, t);
       renderD200HUsageDevice(document.getElementById("sim-d200h-usage"), state, t);

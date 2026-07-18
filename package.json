@@ -6,8 +6,8 @@
   "scripts": {
     "build": "pnpm --filter @agentdeck/shared build && pnpm --filter=!@agentdeck/shared -r build",
     "dev": "pnpm -r --parallel dev",
-    "demo": "node scripts/render-creature-simulator.mjs && npx --yes vite tools/creature-simulator",
-    "demo:build": "node scripts/render-creature-simulator.mjs && vite build tools/creature-simulator --base=/AgentDeck/demo/ --outDir ../../dist/demo --emptyOutDir && cp tools/creature-simulator/sim-data.js dist/demo/sim-data.js",
+    "demo": "node scripts/render-creature-simulator.mjs && node scripts/render-esp32-sim-frames.mjs && npx --yes vite tools/creature-simulator",
+    "demo:build": "node scripts/render-creature-simulator.mjs && node scripts/render-esp32-sim-frames.mjs && vite build tools/creature-simulator --base=/AgentDeck/demo/ --outDir ../../dist/demo --emptyOutDir && cp tools/creature-simulator/sim-data.js dist/demo/sim-data.js && cp -R tools/creature-simulator/sim-frames dist/demo/sim-frames",
     "clean": "pnpm -r clean",
     "typecheck": "pnpm -r typecheck",
     "generate-icons": "node scripts/generate-icons.mjs",
@@ -15,6 +15,7 @@
     "generate-micro-glyphs": "node scripts/generate-micro-glyphs.mjs",
     "generate-protocol": "bash scripts/generate-protocol.sh",
     "verify-version": "node scripts/verify-version-sync.mjs",
+    "check-preview-sync": "node scripts/check-preview-mirror-sync.mjs",
     "package": "bash scripts/package-plugin.sh",
     "setup": "bash scripts/install.sh",
     "test": "vitest run",

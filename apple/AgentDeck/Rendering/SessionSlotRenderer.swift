@@ -11,6 +11,11 @@
 // commit. Last synced against the RUNNING-teal / PERM-amber-breathe split
 // (TS f9869f9e) + idle-only ACT badge + brand-logo watermark placement.
 //
+// Sync pin — verified by `scripts/check-preview-mirror-sync.mjs` (CI). When the
+// origin changes, re-port (or confirm no visual impact) and bump the pin in the
+// same commit.
+// SYNC-HASH shared/src/svg-renderers/session-slot-renderer.ts 2ff8fb9fa5253a0503e14fed992df4393b43e39f
+//
 // Scope for this first pass:
 //   - renderSessionSlot (primary session button)
 // Future ports if needed:

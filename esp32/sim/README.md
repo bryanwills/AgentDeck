@@ -68,6 +68,15 @@ so they exercise the real session → creature/card derivation. On InkDeck,
 `display-off` intentionally renders byte-identically to `idle`; the e-ink panel
 keeps useful status visible when the host monitors are off.
 
+There is also a parameterized scene family `demo:<agent>:<state>` (agents:
+`claude|codex|opencode|openclaw|antigravity`; states:
+`idle|working|asking|sleeping`) that mirrors the creature-simulator web demo's
+agent × state matrix — session shape and usage values match
+`scripts/render-creature-simulator.mjs`, so the GitHub Pages `/demo` ESP32
+panels are rendered from these scenes (`scripts/render-esp32-sim-frames.mjs`,
+invoked by `pnpm run demo:build`). `--all` renders only the named catalog above;
+demo scenes are requested explicitly via `--scene`.
+
 Frames are deterministic: the PRNG is re-seeded per run and the clock is virtual,
 so `--out a.png` twice produces byte-identical PNGs (suitable for golden tests).
 

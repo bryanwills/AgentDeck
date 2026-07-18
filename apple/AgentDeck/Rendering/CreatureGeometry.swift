@@ -9,6 +9,14 @@
 // robot / peak / OpenClaw. When `CreatureGeometry.kt` changes, update the mirrored
 // constants below in the SAME change.
 //
+// Sync pins — verified by `scripts/check-preview-mirror-sync.mjs` (CI). When an
+// origin changes, re-port (or confirm no visual impact) and bump its pin in the
+// same commit. Note: Kotlin-side parser workarounds (e.g. normalizeSvgArcFlags)
+// don't change path geometry and only need a pin bump.
+// SYNC-HASH android/app/src/main/kotlin/dev/agentdeck/terrarium/CreatureGeometry.kt 572daa6ea96266eb0d0d6467bd06a0192c1c9457
+// SYNC-HASH android/app/src/main/kotlin/dev/agentdeck/terrarium/creature/CloudCreature.kt bb4ba5599a3f5b9c79042f42355388203090d5f7
+// SYNC-HASH android/app/src/main/kotlin/dev/agentdeck/terrarium/creature/OpenCodeCreature.kt 9a1f55256723685ab8305cdf23d70b3730fced90
+//
 // Faithful scope: the Kotlin SSOT defines path geometry for the agent marks —
 //   • Octopus / Claude Code robot        (claudecode.svg,   viewBox 24)
 //   • Antigravity peak / arc mark         (antigravity.svg,  viewBox 24)

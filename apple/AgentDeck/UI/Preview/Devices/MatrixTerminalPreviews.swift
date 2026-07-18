@@ -155,11 +155,27 @@ private struct PixooPixelGrid: View {
 // MARK: - Ulanzi TC001 matrix
 //
 // Real firmware (esp32/src/ui/matrix/matrix_pages.cpp) rotates through
-// pages: AGENTS (creature sprites), USAGE (horizontal battery gauges),
-// and a disconnect breathing pulse. The preview reproduces the AGENTS
-// page with the firmware's exact generated 8×8 alpha masks rasterized from
-// design/brand/*.svg and its per-kind state colors. Static preview — no page
-// cycling or text scroller.
+// pages: AGENTS (creature sprites, renderAgents), USAGE (full-screen 5h/7d
+// percent gauges, renderUsage), CODEX (primary/secondary token-window
+// gauges, renderCodex), and a disconnect breathing pulse. USAGE and CODEX
+// both delegate to renderGaugePair(): with two windows present it cross-fades
+// first↔second on a 9s cycle (0.5s slides); a single window draws one gauge,
+// and a missing first window promotes the second. Gauge fill follows the
+// blue→amber→red severity ramp; the CODEX page paints its percent numeral
+// electric-violet CRGB(196,112,255) while the USAGE page keeps it white.
+//
+// This preview reproduces ONLY the AGENTS page — the firmware's exact
+// generated 8×8 alpha masks rasterized from design/brand/*.svg and its
+// per-kind state colors — as a single static frame (no page cycling, gauge
+// numerals, or text scroller). The USAGE/CODEX gauge additions above (the
+// codex violet numeral + renderGaugePair) render on pages this preview does
+// not draw, so they leave the mirrored AGENTS pixels unchanged; they are
+// documented here so the pin bump below is a conscious "checked, does not
+// affect the AGENTS render" acknowledgement.
+//
+// SYNC-HASH esp32/src/ui/matrix/matrix_pages.cpp 88235454ec81da31c0cd9b46616ef735d41993aa
+// scripts/check-preview-mirror-sync.mjs fails CI when the origin above drifts
+// from this pin — re-verify AGENTS-page parity and bump the hash together.
 
 struct UlanziMatrixPreview: View {
     let selection: DevicePreviewSelection
@@ -189,7 +205,7 @@ struct UlanziMatrixPreview: View {
             Text("Ulanzi TC001 • 8×32 WS2812B")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
-            Text("AGENTS page — one creature sprite per alive session; OpenClaw crayfish pins to the right edge. Firmware also rotates a USAGE page with 5h/7d bar gauges.")
+            Text("AGENTS page — one creature sprite per alive session; OpenClaw crayfish pins to the right edge. Firmware also rotates USAGE (5h/7d percent gauges) and CODEX (violet token-window gauges) pages.")
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -198,8 +214,9 @@ struct UlanziMatrixPreview: View {
     }
 
     // Draw the AGENTS page directly into a Canvas using one filled rect
-    // per "lit" LED. Mirrors matrix_pages.cpp: agents left-to-right with
-    // a 7px stride, crayfish at x=27 when OpenClaw is in the mix.
+    // per "lit" LED. Mirrors matrix_pages.cpp renderAgents: agents left-to-
+    // right at the 8px official-mark stride, crayfish pinned at x=24 when
+    // OpenClaw is in the mix.
     private func drawMatrix(ctx: inout GraphicsContext, size: CGSize) {
         let cellW = size.width / CGFloat(matrixW)
         let cellH = size.height / CGFloat(matrixH)
