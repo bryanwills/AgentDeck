@@ -16,8 +16,13 @@
 // otherwise be macro-expanded after the BOARD_INKDECK min/max macros below
 // (gcc/libstdc++ builds; libc++ never trips this). Include guards make any
 // later transitive include a no-op, so the macros never see these bodies.
+// <cmath> matters too: on gcc it drags in bits/specfun.h + tr1 internals
+// whose numeric_limits<>::max() calls the macro would corrupt.
 #include <algorithm>
 #include <limits>
+#include <cmath>
+#include <chrono>
+#include <random>
 
 // Arduino String / flash-string types referenced by Adafruit_GFX.h signatures.
 // The e-ink path only uses the const char* overloads, but the types must exist.
