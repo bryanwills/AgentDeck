@@ -17,22 +17,20 @@ import UIKit
 @MainActor
 final class DevicePreviewSnapshotTests: XCTestCase {
 
-    private var outputDir: URL?
-
-    override func setUp() {
-        super.setUp()
+    private lazy var outputDir: URL? = {
         // Sandbox note: the test host is the sandboxed app, so arbitrary paths
         // are not writable. Snapshots always land in the container's temp dir
         // (…/Data/tmp/agentdeck-previews); the env var only opts the run in.
         // Run via: TEST_RUNNER_AGENTDECK_PREVIEW_SNAPSHOTS=1 xcodebuild … test
-        if ProcessInfo.processInfo.environment["AGENTDECK_PREVIEW_SNAPSHOTS"] != nil {
-            let dir = FileManager.default.temporaryDirectory
-                .appendingPathComponent("agentdeck-previews", isDirectory: true)
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            outputDir = dir
-            NSLog("[DevicePreviewSnapshotTests] writing snapshots to %@", dir.path)
+        guard ProcessInfo.processInfo.environment["AGENTDECK_PREVIEW_SNAPSHOTS"] != nil else {
+            return nil
         }
-    }
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agentdeck-previews", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        NSLog("[DevicePreviewSnapshotTests] writing snapshots to %@", dir.path)
+        return dir
+    }()
 
     private func snapshot<V: View>(_ view: V, name: String, scale: CGFloat = 2) throws {
         guard let outputDir else {

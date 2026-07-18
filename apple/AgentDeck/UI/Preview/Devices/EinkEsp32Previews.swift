@@ -574,7 +574,7 @@ struct Esp32Ips10Preview: View {
     private var topBar: some View {
         HStack(spacing: 8) {
             AgentDeckLogo(size: 12, color: hudText)
-            (Text("Agent").foregroundStyle(hudText) + Text("Deck").foregroundStyle(d1Cyan))
+            Text("\(Text("Agent").foregroundStyle(hudText))\(Text("Deck").foregroundStyle(d1Cyan))")
                 .font(.system(size: 10, weight: .bold))
             Text(selection.state == .disconnected ? "daemon offline" : "daemon :9120")
                 .font(.system(size: 7, design: .monospaced))

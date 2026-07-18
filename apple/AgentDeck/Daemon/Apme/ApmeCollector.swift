@@ -768,7 +768,7 @@ final class ApmeCollector {
             let nanos = UInt64(max(0, delaySec) * 1_000_000_000)
             try? await Task.sleep(nanoseconds: nanos)
             guard !Task.isCancelled else { return }
-            await self?.handleIdleGapFire(sessionKey: sessionKey, snapshotTaskId: snapshotTaskId, snapshotTurnId: snapshotTurnId)
+            self?.handleIdleGapFire(sessionKey: sessionKey, snapshotTaskId: snapshotTaskId, snapshotTurnId: snapshotTurnId)
         }
     }
 

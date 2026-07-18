@@ -2047,7 +2047,8 @@ private struct TimelineMarkdownPreview: View {
     private func attributedText(_ content: String, font: Font, color: Color) -> Text {
         let spans = TimelineInlineSpan.parse(content)
         return spans.reduce(Text("")) { acc, span in
-            acc + span.text(baseFont: font, baseColor: color)
+            let next = span.text(baseFont: font, baseColor: color)
+            return Text("\(acc)\(next)")
         }
     }
 
@@ -2060,7 +2061,7 @@ private struct TimelineMarkdownPreview: View {
             .enumerated()
             .reduce(Text("")) { acc, item in
                 let line = attributedText(item.element, font: font, color: color)
-                return item.offset == 0 ? acc + line : acc + Text("\n") + line
+                return item.offset == 0 ? line : Text("\(acc)\n\(line)")
             }
     }
 

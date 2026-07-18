@@ -15,8 +15,8 @@ final class AuthManager: Sendable {
     static var tokenFile: URL { AgentDeckPaths.authToken }
     private static let tokenLength = 32 // 32 hex chars = 16 bytes
 
-    private static func hostnameString(from hostname: [CChar]) -> String {
-        let bytes = hostname.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+    private static func string(from nullTerminatedBytes: [CChar]) -> String {
+        let bytes = nullTerminatedBytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
         return String(decoding: bytes, as: UTF8.self)
     }
 
@@ -131,7 +131,7 @@ final class AuthManager: Sendable {
             var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             if getnameinfo(ptr.pointee.ifa_addr, socklen_t(addr.sa_len),
                            &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
-                let ip = Self.hostnameString(from: hostname)
+                let ip = Self.string(from: hostname)
                 if !ip.hasPrefix("169.254.") { return ip } // Skip link-local
             }
         }
@@ -165,7 +165,7 @@ final class AuthManager: Sendable {
 
         var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
         inet_ntop(AF_INET, &local.sin_addr, &buf, socklen_t(INET_ADDRSTRLEN))
-        let ip = String(cString: buf)
+        let ip = Self.string(from: buf)
         if ip.isEmpty || ip == "0.0.0.0" || ip.hasPrefix("169.254.") { return nil }
         return ip
     }
@@ -182,7 +182,7 @@ final class AuthManager: Sendable {
             var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             if getnameinfo(ptr.pointee.ifa_addr, socklen_t(addr.sa_len),
                            &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
-                result.insert(Self.hostnameString(from: hostname))
+                result.insert(Self.string(from: hostname))
             }
         }
         return result

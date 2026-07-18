@@ -993,7 +993,10 @@ actor PixooModule: DeviceModule {
             var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             guard getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count),
                               nil, 0, NI_NUMERICHOST) == 0 else { continue }
-            let ip = String(cString: host)
+            let ip = String(
+                decoding: host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) },
+                as: UTF8.self
+            )
             let parts = ip.split(separator: ".")
             guard parts.count == 4 else { continue }
             let base = parts[0...2].joined(separator: ".")
