@@ -188,7 +188,7 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 
 ## Design System
 
-Aquarium-tide design system. Spec: [DESIGN.md](DESIGN.md). Source of truth for color/type/spacing tokens: [design/tokens.css](design/tokens.css). Visual reference: [docs/design/Design System.html](docs/design/Design%20System.html). Coverage matrix + lint rules: [docs/design/Design Audit.html](docs/design/Design%20Audit.html).
+Aquarium-tide design system. Spec: [DESIGN.md](DESIGN.md). Source of truth for color/type/spacing tokens: [design/tokens.css](design/tokens.css). **Resource map (which directory is SSOT for what, and which gate stops drift): [design/RESOURCES.md](design/RESOURCES.md)** — bound into the Pages viewer via `catalog.json`; update it in the same commit when a design-resource location or gate changes. Visual reference: [docs/design/Design System.html](docs/design/Design%20System.html). Coverage matrix + lint rules: [docs/design/Design Audit.html](docs/design/Design%20Audit.html).
 
 `agentdeck-design-system/` is the integration and handover layer: `catalog.json` binds canonical design/spec/policy/validation Markdown to the GitHub Pages viewer, `docs/handover.md` defines ownership and evidence levels, and `locales/{ko,ja}/` contains reader translations. English is always canonical. Every catalog document has YAML frontmatter; translations must match the canonical `source_revision`. Validate with `pnpm design-system:check`, build with `pnpm design-system:build`, and never edit generated `dist/design-system/` content.
 

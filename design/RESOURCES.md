@@ -1,0 +1,70 @@
+---
+id: design.resources
+title: Design Resource Map
+description: Where every design asset lives, which copy is canonical, and which gate stops drift.
+category: Foundations
+locale: en
+canonical: true
+status: stable
+owner: Design system maintainers
+reviewed: 2026-07-19
+revision: 2026-07-19
+source_of_truth: design/RESOURCES.md
+validators: [node scripts/build-design-system-viewer.mjs --check, python3 design/verify-tokens-sync.py]
+---
+
+# Design Resource Map
+
+Design material is spread across several top-level directories on purpose —
+each has one job — but only one copy of anything is canonical. This map is the
+index. If a location or gate changes, update this file in the same commit.
+
+## Canonical sources (SSOT)
+
+| Resource | Canonical location | Enforced by |
+|---|---|---|
+| Visual language spec | `DESIGN.md` | `design/lint.sh` (R1–R8, CI baseline in `docs/design-lint-baseline.md`) |
+| Color/type/spacing tokens | `design/tokens.css` | `design/verify-tokens-sync.py` (6 mirrors) |
+| Component & pattern CSS | `design/components.css`, `design/patterns.css` | consumed verbatim by generators |
+| Icons | `design/icons.jsx` | `scripts/design-sync-gen.mjs` transform |
+| Brand marks (agents) | `design/brand/*.svg` | `pnpm generate-creature-glyphs` / `generate-micro-glyphs` regression tests |
+| Brand type (Latin) | `bridge/assets/fonts/` (IBM Plex Sans, JetBrains Mono) | first consumer: bridge renderers |
+| Brand type (CJK) | `design/fonts/` (IBM Plex Sans KR/JP, OFL) | `design/fonts/README.md` records origin |
+| Real photography / captures | `assets/` (sources: `assets/hardware-photos/`) | `scripts/crop-hardware-images.mjs` crop table |
+| Published image crops | `docs/media/` | regenerated from `assets/`, never hand-edited |
+| Doc-to-viewer binding | `agentdeck-design-system/catalog.json` | `pnpm design-system:check` |
+
+## Token mirrors (never edit without the CSS)
+
+`design/tokens.js` (browser) · `shared/src/design-tokens.ts` (TS) ·
+`apple/AgentDeck/UI/Common/DesignTokens.swift` · Kotlin `DesignTokens.kt` ·
+embedded copies in the APME dashboard HTML and the Stream Deck PI CSS.
+`python3 design/verify-tokens-sync.py` diffs all six against `tokens.css`.
+
+## Derived / consumer surfaces (safe to regenerate, never edit)
+
+| Surface | Built from | By |
+|---|---|---|
+| GitHub Pages **Design System viewer** | `catalog.json` + bound Markdown + `design/tokens.css` | `pnpm design-system:build` |
+| `.design-sync/` + `_ds_gen/` | `design/*.css`, `design/icons.jsx` | `scripts/design-sync-gen.mjs`, `design-sync-previews.mjs` (see `.design-sync/NOTES.md`) |
+| App Store screenshots `apple/appstore-submission/screenshots/{en,ko,ja}/` | `screenshots-raw/` captures + captions | `scripts/compose-appstore-screenshots.py` |
+| App Store previews | demo feed (`scripts/appstore-demo-orchestrator.mjs`) | `scripts/record-appstore-previews.sh` |
+| Marketplace listing assets | app captures | `scripts/generate-elgato-marketplace-assets.mjs` |
+
+## Reference-only surfaces (historical, superseded for publication)
+
+`docs/design/Design System.html` and `docs/design/Design Audit.html` are the
+original hand-built visual references. They remain linked from `DESIGN.md` as
+mockup references, but the **published** design-system surface is the Pages
+viewer (`/design-system/`), which renders the cataloged Markdown against the
+live tokens. Do not extend the HTML files with new canonical content — bind new
+documents through `catalog.json` instead.
+
+## Rules of thumb
+
+1. New numeric/visual truth starts in a canonical file above, then mirrors
+   outward behind a gate — never as a per-surface literal (CLAUDE.md
+   "Cross-platform rules are SSOT-first").
+2. New design documentation gets YAML frontmatter and a `catalog.json` entry so
+   the viewer publishes it; `docs/design/` HTML is frozen.
+3. Anything under a "Derived" row is disposable output: fixes go to its source.

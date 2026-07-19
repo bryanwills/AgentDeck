@@ -1,11 +1,17 @@
 {
   "version": 1,
   "defaultLocale": "en",
-  "locales": ["en", "ko", "ja"],
+  "locales": [
+    "en",
+    "ko",
+    "ja"
+  ],
   "documents": [
     {
       "id": "system.readme",
-      "sources": { "en": "agentdeck-design-system/README.md" }
+      "sources": {
+        "en": "agentdeck-design-system/README.md"
+      }
     },
     {
       "id": "system.handover",
@@ -17,7 +23,15 @@
     },
     {
       "id": "design.foundation",
-      "sources": { "en": "DESIGN.md" }
+      "sources": {
+        "en": "DESIGN.md"
+      }
+    },
+    {
+      "id": "design.resources",
+      "sources": {
+        "en": "design/RESOURCES.md"
+      }
     },
     {
       "id": "hardware.compatibility",
@@ -29,27 +43,39 @@
     },
     {
       "id": "policy.product-tiers",
-      "sources": { "en": "docs/appstore-feature-matrix.md" }
+      "sources": {
+        "en": "docs/appstore-feature-matrix.md"
+      }
     },
     {
       "id": "policy.app-review",
-      "sources": { "en": "apple/APP_REVIEW_NOTES.md" }
+      "sources": {
+        "en": "apple/APP_REVIEW_NOTES.md"
+      }
     },
     {
       "id": "policy.releasing",
-      "sources": { "en": "RELEASING.md" }
+      "sources": {
+        "en": "RELEASING.md"
+      }
     },
     {
       "id": "spec.plugin-conventions",
-      "sources": { "en": "docs/plugin-conventions.md" }
+      "sources": {
+        "en": "docs/plugin-conventions.md"
+      }
     },
     {
       "id": "validation.testing",
-      "sources": { "en": "docs/testing.md" }
+      "sources": {
+        "en": "docs/testing.md"
+      }
     },
     {
       "id": "validation.design-lint",
-      "sources": { "en": "docs/design-lint-baseline.md" }
+      "sources": {
+        "en": "docs/design-lint-baseline.md"
+      }
     }
   ]
 }
