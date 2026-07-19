@@ -111,7 +111,7 @@
   "Category": "AgentDeck",
   "CategoryIcon": "static/imgs/category",
   "CodePath": "bin/plugin.js",
-  "Description": "Monitor and steer AI coding agents from Stream Deck. Requires the free AgentDeck companion daemon (npx @agentdeck/setup) running on the same Mac.",
+  "Description": "Monitor and steer AI coding agents from Stream Deck. Requires the free AgentDeck app for Mac, or the AgentDeck CLI, running on the same Mac.",
   "Icon": "static/imgs/plugin",
   "UUID": "bound.serendipity.agentdeck",
   "Name": "AgentDeck",
