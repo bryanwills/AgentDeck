@@ -59,6 +59,9 @@ export function getCandidateDaemonJsonPaths(): string[] {
 }
 
 function getSessionsFile(): string { return join(getDataDir(), 'sessions.json'); }
+/** Where THIS process persists the device timeline. Reads may come from any
+ *  candidate dir (see `latestTimelinePath`), but the daemon writes only here. */
+export function getOwnTimelineFile(): string { return join(getDataDir(), 'timeline.json'); }
 function getDaemonFile(): string { return join(getDataDir(), 'daemon.json'); }
 export const DAEMON_DEFAULT_PORT = 9120;
 const BASE_PORT = 9120;

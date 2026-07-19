@@ -222,6 +222,34 @@ export function renderAgentDeckMark(x: number, y: number, size: number, color: s
   ].join('');
 }
 
+/**
+ * Small-size reduction of {@link renderAgentDeckMark}.
+ *
+ * The full mark carries a waterline, a dome highlight and interior bubbles at
+ * 0.34–0.62 opacity. Those read at 72px+ but collapse into a grey blob by 20px,
+ * which is the size Stream Deck draws action-list icons at. This keeps the
+ * mark's three identifying features — dome arc, deck body, three keys — at full
+ * opacity and drops everything that cannot survive the downsample.
+ *
+ * Keep the two in sync: if the mark's silhouette changes, change this too.
+ */
+export function renderAgentDeckMarkCompact(x: number, y: number, size: number, color: string): string {
+  const u = size / 24;
+  const ax = (p: number) => +(x + (p - 12) * u).toFixed(2);
+  const ay = (p: number) => +(y + (p - 12) * u).toFixed(2);
+  const w = (n: number) => +(n * u).toFixed(2);
+  const cap = 'stroke-linecap="round" stroke-linejoin="round" fill="none"';
+  const key = (kx: number) =>
+    `<rect x="${ax(kx)}" y="${ay(14.6)}" width="${w(3.4)}" height="${w(2.4)}" rx="${w(1.2)}" fill="${color}"/>`;
+  return [
+    // dome arc, seated on the deck lip
+    `<path d="M${ax(4.6)} ${ay(11.6)} C${ax(5.3)} ${ay(3.9)} ${ax(18.7)} ${ay(3.9)} ${ax(19.4)} ${ay(11.6)}" stroke="${color}" stroke-width="${w(1.7)}" ${cap}/>`,
+    // deck body
+    `<rect x="${ax(3.2)}" y="${ay(11.6)}" width="${w(17.6)}" height="${w(8.6)}" rx="${w(2.3)}" stroke="${color}" stroke-width="${w(1.7)}" fill="none"/>`,
+    key(6.0), key(10.3), key(14.6),
+  ].join('');
+}
+
 function renderGlyphIcon(kind: StatusIconKind, color: string, accent: string, x = 72, y = 43, scale = 1): string {
   const s = scale;
   const sx = (n: number) => x + n * s;

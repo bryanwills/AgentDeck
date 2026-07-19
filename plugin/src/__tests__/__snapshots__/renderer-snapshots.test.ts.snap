@@ -4,16 +4,6 @@ exports[`agent-logos snapshots > claude-code watermark 1`] = `"<g transform="tra
 
 exports[`agent-logos snapshots > openclaw watermark 1`] = `"<g transform="translate(72,72) scale(2.760) translate(-12,-12)" opacity="0.32"><defs><linearGradient id="openclaw_shell_72_720_720" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#FF6B6B"/><stop offset="100%" stop-color="#991B1B"/></linearGradient></defs><g fill="url(#openclaw_shell_72_720_720)" fill-rule="evenodd" clip-rule="evenodd"><path d="M16.877 1.912c.58-.27 1.14-.323 1.616-.037a.317.317 0 01-.326.542c-.227-.136-.547-.153-1.022.068-.352.165-.765.45-1.234.866 2.683 1.17 4.4 3.5 5.148 5.921a6.421 6.421 0 00-.704.184c-.578.016-1.174.204-1.502.735-.338.55-.268 1.276.072 2.069l.005.012.007.014c.523 1.045 1.318 1.91 2.2 2.284-.912 3.274-3.44 6.144-5.972 6.988v2.109h-2.11v-2.11c-1.043.417-2.086.01-2.11 0v2.11h-2.11v-2.11c-2.531-.843-5.061-3.713-5.973-6.987.882-.373 1.678-1.238 2.2-2.284l.007-.014.006-.012c.34-.793.41-1.518.071-2.069-.327-.531-.923-.719-1.503-.735a6.409 6.409 0 00-.704-.183c.749-2.421 2.466-4.751 5.149-5.922-.47-.416-.88-.701-1.234-.866-.474-.221-.794-.204-1.021-.068a.318.318 0 01-.435-.109.317.317 0 01.109-.433c.476-.286 1.036-.233 1.615.037.49.229 1.031.628 1.621 1.182A9.924 9.924 0 0112 2.568c1.199 0 2.284.19 3.256.526.59-.554 1.13-.953 1.62-1.182zM8.835 6.577a1.266 1.266 0 100 2.532 1.266 1.266 0 000-2.532zm6.33 0a1.267 1.267 0 100 2.533 1.267 1.267 0 000-2.533z"/><path d="M.395 13.118c-.966-1.932-.163-3.863 2.41-3.365v-.001l.05.01c.084.018.17.038.26.06.033.009.067.017.1.027.084.022.168.048.255.076l.09.027c.528 0 .95.158 1.16.501.212.343.212.87-.105 1.61-.085.17-.178.333-.276.489l-.01.017a4.967 4.967 0 01-.62.791l-.019.02c-1.092 1.117-2.496 1.336-3.295-.262z"/><path d="M21.193 9.753c2.574-.5 3.378 1.433 2.411 3.365-.58 1.159-1.476 1.361-2.342.96l-.011-.005a2.419 2.419 0 01-.114-.056l-.019-.01a2.751 2.751 0 01-.115-.067l-.023-.014c-.035-.022-.071-.044-.106-.068l-.05-.035c-.55-.388-1.062-1.007-1.44-1.76-.276-.647-.311-1.132-.174-1.472.176-.439.636-.639 1.23-.639.032-.011.066-.02.099-.03.08-.026.16-.05.238-.072l.117-.03a5.502 5.502 0 01.3-.067z"/></g><circle cx="8.835" cy="7.843" r="1.266" fill="#050810"/><circle cx="15.165" cy="7.843" r="1.266" fill="#050810"/><circle cx="9.046" cy="7.632" r="0.527" fill="#00E5CC" opacity="0.9"/><circle cx="15.376" cy="7.632" r="0.527" fill="#00E5CC" opacity="0.9"/></g>"`;
 
-exports[`button-renderer snapshots > basic text button 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="12" fill="#1e3a5f"/><text x="72" y="84" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="#93c5fd" opacity="1">GO ON</text></svg>"`;
-
-exports[`button-renderer snapshots > button with subtitle 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="12" fill="#1e293b"/><text x="72" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="#e2e8f0" opacity="1">Session</text><text x="72" y="102" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#e2e8f0" opacity="0.6">claude-code</text></svg>"`;
-
-exports[`button-renderer snapshots > disabled button 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="12" fill="#1e293b"/><text x="72" y="84" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="#ef4444" opacity="0.4">Stop</text></svg>"`;
-
-exports[`button-renderer snapshots > loading button 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="12" fill="#1e293b"/><defs><filter id="ld-glow" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><rect x="1.5" y="1.5" width="141" height="141" rx="11.5" fill="none" stroke="#818cf8" stroke-width="1.5" opacity="0.12"/><rect x="1.5" y="1.5" width="141" height="141" rx="11.5" fill="none" stroke="#818cf8" stroke-width="3" stroke-dasharray="160 384" stroke-dashoffset="-508" opacity="0.9" filter="url(#ld-glow)"/><text x="72" y="84" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#818cf8" opacity="0.6">Installing</text></svg>"`;
-
-exports[`button-renderer snapshots > long text that needs abbreviation 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="12" fill="#14532d"/><text x="72" y="56" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#86efac" opacity="1">Yes, allow</text><text x="72" y="84" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#86efac" opacity="1">and don&apos;t</text><text x="72" y="112" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#86efac" opacity="1">ask again</text></svg>"`;
-
 exports[`display-tile snapshots > renderSessionReadout keeps name/model/state, flat & non-interactive 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="16" fill="#08090d"/><rect x="0" y="22" width="4" height="100" rx="2" fill="#D97757" opacity="0.55"/><circle cx="124" cy="22" r="5" fill="#D97757" opacity="0.85"/><text x="16" y="38" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif" font-size="18" font-weight="800" fill="#e2e8f0" opacity="0.92">AgentDeck</text><text x="16" y="60" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif" font-size="12" font-weight="600" fill="#94a3b8">opus-4 · high</text><text x="16" y="122" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif" font-size="12" font-weight="700" fill="#22c55e" opacity="0.85">IDLE</text></svg>"`;
 
 exports[`display-tile snapshots > renderSessionReadout openclaw hides model, shows STANDBY 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="16" fill="#08090d"/><rect x="0" y="22" width="4" height="100" rx="2" fill="#FF6B6B" opacity="0.55"/><circle cx="124" cy="22" r="5" fill="#FF6B6B" opacity="0.85"/><text x="16" y="38" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif" font-size="18" font-weight="800" fill="#e2e8f0" opacity="0.92">Gateway</text><text x="16" y="122" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif" font-size="12" font-weight="700" fill="#22c55e" opacity="0.85">STANDBY</text></svg>"`;
@@ -26,119 +16,36 @@ exports[`display-tile snapshots > renderStatusReadout MODEL is flat (no raised b
 
 exports[`display-tile snapshots > renderStatusReadout READY (label only) 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="16" fill="#08090d"/><rect x="0" y="22" width="4" height="100" rx="2" fill="#22c55e" opacity="0.55"/><text x="16" y="64" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif" font-size="19" font-weight="800" fill="#dcfce7" opacity="0.9">READY</text><text x="16" y="86" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif" font-size="13" font-weight="600" fill="#86efac" opacity="0.72">idle</text></svg>"`;
 
-exports[`option-renderer snapshots > renderContextPanel diff 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#78350f"/><stop offset="100%" stop-color="#451a03"/></linearGradient></defs>
-    <rect width="200" height="100" fill="url(#cg)"/>
-    <text x="10" y="16" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#fcd34d">DIFF REVIEW</text>
-    <text x="190" y="15" text-anchor="end" font-family="Arial,sans-serif" font-size="10" fill="#64748b">1/2</text>
-    <text x="100" y="44" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#e2e8f0"></text>
-    <text x="100" y="66" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">Choose option (2)</text>
-  </svg>"
-`;
-
-exports[`option-renderer snapshots > renderContextPanel permission 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#7f1d1d"/><stop offset="100%" stop-color="#450a0a"/></linearGradient></defs>
-    <rect width="200" height="100" fill="url(#cg)"/>
-    <text x="10" y="16" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#fca5a5">PERMISSION</text>
-    <text x="190" y="15" text-anchor="end" font-family="Arial,sans-serif" font-size="10" fill="#64748b">1/3</text>
-    <text x="100" y="44" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#e2e8f0">Write</text>
-    <text x="100" y="66" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">Allow file write?</text>
-  </svg>"
-`;
-
-exports[`option-renderer snapshots > renderDetailPanel 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><linearGradient id="dg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1a0505"/><stop offset="100%" stop-color="#0f172a"/></linearGradient></defs><rect width="200" height="100" fill="url(#dg)"/><text x="10" y="16" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#fca5a5">DETAIL</text><text x="10" y="34" font-family="monospace,Courier" font-size="13" fill="#e2e8f0">/Users/dev/project/src/mai</text><text x="10" y="50" font-family="monospace,Courier" font-size="13" fill="#e2e8f0">n.ts</text></svg>"`;
-
-exports[`option-renderer snapshots > renderFocusPanel with recommended option 1`] = `
+exports[`launcher-renderer snapshots > renderLauncher first entry 1`] = `
 "<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
     <rect width="200" height="100" fill="#0f172a"/>
-    <rect x="61.2" y="16" width="77.6" height="36" rx="18" fill="#1e3a5f"/>
-    <text x="100" y="44" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="#93c5fd">Yes,</text>
-    <text x="100" y="68" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">allow this</text>
-    <text x="100" y="86" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#86efac">★ Recommended</text>
-  </svg>"
-`;
-
-exports[`option-renderer snapshots > renderListPanel 3 options 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="#0f172a"/><rect x="2" y="2" width="194" height="23" rx="3" fill="#166534" opacity="0.25"/><text x="14" y="19" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">1. Allow</text><rect x="2" y="26" width="194" height="23" rx="3" fill="#991b1b"/><text x="8" y="43" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#ffffff">▶ 2. Deny</text><rect x="2" y="50" width="194" height="23" rx="3" fill="#1e3a5f" opacity="0.25"/><text x="14" y="67" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">3. Allow always</text></svg>"`;
-
-exports[`option-renderer snapshots > renderListPanel 6 options (scroll indicator) 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="#0f172a"/><text x="14" y="19" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">2. Option 2</text><text x="14" y="43" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">3. Option 3</text><rect x="2" y="50" width="194" height="23" rx="3" fill="#1e3a5f"/><text x="8" y="67" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#ffffff">▶ 4. Option 4</text><text x="14" y="91" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">5. Option 5</text><rect x="196" y="2" width="3" height="94" rx="1.5" fill="#1e293b"/><rect x="196" y="17.666666666666668" width="3" height="62.666666666666664" rx="1.5" fill="#475569"/></svg>"`;
-
-exports[`option-renderer snapshots > renderWideOptionList returns correct panel count 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><clipPath id="ol"><rect x="0" y="0" width="600" height="100"/></clipPath></defs><g transform="translate(0,0)"><rect width="600" height="100" fill="#0f172a"/><g clip-path="url(#ol)"><g transform="translate(0,0)"><text x="18" y="16" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">1. Choice 1</text><text x="18" y="38" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">2. Choice 2</text><rect x="6" y="45" width="588" height="20" rx="4" fill="#1e3a5f"/><text x="12" y="60" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#ffffff">▶ 3. Choice 3</text><text x="18" y="82" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">4. Choice 4</text><text x="18" y="104" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">5. Choice 5</text></g></g><rect x="596" y="2" width="3" height="96" rx="1.5" fill="#1e293b"/><rect x="596" y="2" width="3" height="87.27272727272727" rx="1.5" fill="#475569"/></g></svg>"`;
-
-exports[`qr-renderer snapshots > qrPathData deterministic 1`] = `"M10,10h4v4h-4zM14,10h4v4h-4zM18,10h4v4h-4zM22,10h4v4h-4zM26,10h4v4h-4zM30,10h4v4h-4zM34,10h4v4h-4zM54,10h4v4h-4zM58,10h4v4h-4zM62,10h4v4h-4zM74,10h4v4h-4zM82,10h4v4h-4zM86,10h4v4h-4zM90,10h4v4h-4zM94,10h4v4h-4zM98,10h4v4h-4zM102,10h4v4h-4zM106,10h4v4h-4zM10,14h4v4h-4zM34,14h4v4h-4zM50,14h4v4h-4zM62,14h4v4h-4zM66,14h4v4h-4zM70,14h4v4h-4zM74,14h4v4h-4zM82,14h4v4h-4zM106,14h4v4h-4zM10,18h4v4h-4zM18,18h4v4h-4zM22,18h4v4h-4zM26,18h4v4h-4zM34,18h4v4h-4zM42,18h4v4h-4zM46,18h4v4h-4zM54,18h4v4h-4zM66,18h4v4h-4zM82,18h4v4h-4zM90,18h4v4h-4zM94,18h4v4h-4zM98,18h4v4h-4zM106,18h4v4h-4zM10,22h4v4h-4zM18,22h4v4h-4zM22,22h4v4h-4zM26,22h4v4h-4zM34,22h4v4h-4zM42,22h4v4h-4zM62,22h4v4h-4zM66,22h4v4h-4zM70,22h4v4h-4zM82,22h4v4h-4zM90,22h4v4h-4zM94,22h4v4h-4zM98,22h4v4h-4zM106,22h4v4h-4zM10,26h4v4h-4zM18,26h4v4h-4zM22,26h4v4h-4zM26,26h4v4h-4zM34,26h4v4h-4zM42,26h4v4h-4zM46,26h4v4h-4zM50,26h4v4h-4zM62,26h4v4h-4zM74,26h4v4h-4zM82,26h4v4h-4zM90,26h4v4h-4zM94,26h4v4h-4zM98,26h4v4h-4zM106,26h4v4h-4zM10,30h4v4h-4zM34,30h4v4h-4zM42,30h4v4h-4zM54,30h4v4h-4zM66,30h4v4h-4zM70,30h4v4h-4zM82,30h4v4h-4zM106,30h4v4h-4zM10,34h4v4h-4zM14,34h4v4h-4zM18,34h4v4h-4zM22,34h4v4h-4zM26,34h4v4h-4zM30,34h4v4h-4zM34,34h4v4h-4zM42,34h4v4h-4zM50,34h4v4h-4zM58,34h4v4h-4zM66,34h4v4h-4zM74,34h4v4h-4zM82,34h4v4h-4zM86,34h4v4h-4zM90,34h4v4h-4zM94,34h4v4h-4zM98,34h4v4h-4zM102,34h4v4h-4zM106,34h4v4h-4zM42,38h4v4h-4zM66,38h4v4h-4zM74,38h4v4h-4zM10,42h4v4h-4zM18,42h4v4h-4zM22,42h4v4h-4zM26,42h4v4h-4zM30,42h4v4h-4zM34,42h4v4h-4zM58,42h4v4h-4zM82,42h4v4h-4zM86,42h4v4h-4zM90,42h4v4h-4zM94,42h4v4h-4zM98,42h4v4h-4zM14,46h4v4h-4zM26,46h4v4h-4zM30,46h4v4h-4zM42,46h4v4h-4zM50,46h4v4h-4zM54,46h4v4h-4zM62,46h4v4h-4zM78,46h4v4h-4zM86,46h4v4h-4zM102,46h4v4h-4zM10,50h4v4h-4zM14,50h4v4h-4zM18,50h4v4h-4zM22,50h4v4h-4zM26,50h4v4h-4zM34,50h4v4h-4zM42,50h4v4h-4zM46,50h4v4h-4zM62,50h4v4h-4zM66,50h4v4h-4zM70,50h4v4h-4zM74,50h4v4h-4zM86,50h4v4h-4zM94,50h4v4h-4zM102,50h4v4h-4zM106,50h4v4h-4zM10,54h4v4h-4zM14,54h4v4h-4zM22,54h4v4h-4zM26,54h4v4h-4zM30,54h4v4h-4zM42,54h4v4h-4zM50,54h4v4h-4zM54,54h4v4h-4zM62,54h4v4h-4zM70,54h4v4h-4zM74,54h4v4h-4zM82,54h4v4h-4zM86,54h4v4h-4zM106,54h4v4h-4zM14,58h4v4h-4zM18,58h4v4h-4zM22,58h4v4h-4zM34,58h4v4h-4zM54,58h4v4h-4zM58,58h4v4h-4zM66,58h4v4h-4zM70,58h4v4h-4zM78,58h4v4h-4zM82,58h4v4h-4zM90,58h4v4h-4zM98,58h4v4h-4zM102,58h4v4h-4zM106,58h4v4h-4zM10,62h4v4h-4zM14,62h4v4h-4zM18,62h4v4h-4zM22,62h4v4h-4zM26,62h4v4h-4zM42,62h4v4h-4zM50,62h4v4h-4zM74,62h4v4h-4zM86,62h4v4h-4zM94,62h4v4h-4zM102,62h4v4h-4zM10,66h4v4h-4zM34,66h4v4h-4zM38,66h4v4h-4zM50,66h4v4h-4zM54,66h4v4h-4zM58,66h4v4h-4zM70,66h4v4h-4zM82,66h4v4h-4zM86,66h4v4h-4zM90,66h4v4h-4zM94,66h4v4h-4zM102,66h4v4h-4zM106,66h4v4h-4zM10,70h4v4h-4zM22,70h4v4h-4zM38,70h4v4h-4zM54,70h4v4h-4zM66,70h4v4h-4zM70,70h4v4h-4zM74,70h4v4h-4zM78,70h4v4h-4zM82,70h4v4h-4zM86,70h4v4h-4zM90,70h4v4h-4zM106,70h4v4h-4zM10,74h4v4h-4zM18,74h4v4h-4zM30,74h4v4h-4zM34,74h4v4h-4zM42,74h4v4h-4zM46,74h4v4h-4zM50,74h4v4h-4zM54,74h4v4h-4zM74,74h4v4h-4zM78,74h4v4h-4zM82,74h4v4h-4zM86,74h4v4h-4zM90,74h4v4h-4zM98,74h4v4h-4zM42,78h4v4h-4zM46,78h4v4h-4zM58,78h4v4h-4zM62,78h4v4h-4zM66,78h4v4h-4zM70,78h4v4h-4zM74,78h4v4h-4zM90,78h4v4h-4zM94,78h4v4h-4zM10,82h4v4h-4zM14,82h4v4h-4zM18,82h4v4h-4zM22,82h4v4h-4zM26,82h4v4h-4zM30,82h4v4h-4zM34,82h4v4h-4zM62,82h4v4h-4zM66,82h4v4h-4zM74,82h4v4h-4zM82,82h4v4h-4zM90,82h4v4h-4zM98,82h4v4h-4zM102,82h4v4h-4zM106,82h4v4h-4zM10,86h4v4h-4zM34,86h4v4h-4zM42,86h4v4h-4zM46,86h4v4h-4zM58,86h4v4h-4zM62,86h4v4h-4zM74,86h4v4h-4zM90,86h4v4h-4zM94,86h4v4h-4zM102,86h4v4h-4zM10,90h4v4h-4zM18,90h4v4h-4zM22,90h4v4h-4zM26,90h4v4h-4zM34,90h4v4h-4zM42,90h4v4h-4zM46,90h4v4h-4zM50,90h4v4h-4zM58,90h4v4h-4zM66,90h4v4h-4zM70,90h4v4h-4zM74,90h4v4h-4zM78,90h4v4h-4zM82,90h4v4h-4zM86,90h4v4h-4zM90,90h4v4h-4zM98,90h4v4h-4zM106,90h4v4h-4zM10,94h4v4h-4zM18,94h4v4h-4zM22,94h4v4h-4zM26,94h4v4h-4zM34,94h4v4h-4zM42,94h4v4h-4zM70,94h4v4h-4zM78,94h4v4h-4zM82,94h4v4h-4zM90,94h4v4h-4zM94,94h4v4h-4zM98,94h4v4h-4zM102,94h4v4h-4zM106,94h4v4h-4zM10,98h4v4h-4zM18,98h4v4h-4zM22,98h4v4h-4zM26,98h4v4h-4zM34,98h4v4h-4zM42,98h4v4h-4zM46,98h4v4h-4zM50,98h4v4h-4zM54,98h4v4h-4zM58,98h4v4h-4zM70,98h4v4h-4zM94,98h4v4h-4zM98,98h4v4h-4zM106,98h4v4h-4zM10,102h4v4h-4zM34,102h4v4h-4zM54,102h4v4h-4zM66,102h4v4h-4zM74,102h4v4h-4zM78,102h4v4h-4zM86,102h4v4h-4zM90,102h4v4h-4zM94,102h4v4h-4zM106,102h4v4h-4zM10,106h4v4h-4zM14,106h4v4h-4zM18,106h4v4h-4zM22,106h4v4h-4zM26,106h4v4h-4zM30,106h4v4h-4zM34,106h4v4h-4zM42,106h4v4h-4zM46,106h4v4h-4zM54,106h4v4h-4zM78,106h4v4h-4zM82,106h4v4h-4zM86,106h4v4h-4zM90,106h4v4h-4zM94,106h4v4h-4zM98,106h4v4h-4zM102,106h4v4h-4zM106,106h4v4h-4z"`;
-
-exports[`qr-renderer snapshots > renderQrButtonSvg 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="12" fill="#0c0e10"/><rect x="19" y="14" width="106" height="106" rx="3" fill="#ffffff"/><path d="M22,17h4v4h-4zM26,17h4v4h-4zM30,17h4v4h-4zM34,17h4v4h-4zM38,17h4v4h-4zM42,17h4v4h-4zM46,17h4v4h-4zM66,17h4v4h-4zM70,17h4v4h-4zM74,17h4v4h-4zM86,17h4v4h-4zM94,17h4v4h-4zM98,17h4v4h-4zM102,17h4v4h-4zM106,17h4v4h-4zM110,17h4v4h-4zM114,17h4v4h-4zM118,17h4v4h-4zM22,21h4v4h-4zM46,21h4v4h-4zM62,21h4v4h-4zM74,21h4v4h-4zM78,21h4v4h-4zM82,21h4v4h-4zM86,21h4v4h-4zM94,21h4v4h-4zM118,21h4v4h-4zM22,25h4v4h-4zM30,25h4v4h-4zM34,25h4v4h-4zM38,25h4v4h-4zM46,25h4v4h-4zM54,25h4v4h-4zM58,25h4v4h-4zM66,25h4v4h-4zM78,25h4v4h-4zM94,25h4v4h-4zM102,25h4v4h-4zM106,25h4v4h-4zM110,25h4v4h-4zM118,25h4v4h-4zM22,29h4v4h-4zM30,29h4v4h-4zM34,29h4v4h-4zM38,29h4v4h-4zM46,29h4v4h-4zM54,29h4v4h-4zM74,29h4v4h-4zM78,29h4v4h-4zM82,29h4v4h-4zM94,29h4v4h-4zM102,29h4v4h-4zM106,29h4v4h-4zM110,29h4v4h-4zM118,29h4v4h-4zM22,33h4v4h-4zM30,33h4v4h-4zM34,33h4v4h-4zM38,33h4v4h-4zM46,33h4v4h-4zM54,33h4v4h-4zM58,33h4v4h-4zM62,33h4v4h-4zM74,33h4v4h-4zM86,33h4v4h-4zM94,33h4v4h-4zM102,33h4v4h-4zM106,33h4v4h-4zM110,33h4v4h-4zM118,33h4v4h-4zM22,37h4v4h-4zM46,37h4v4h-4zM54,37h4v4h-4zM66,37h4v4h-4zM78,37h4v4h-4zM82,37h4v4h-4zM94,37h4v4h-4zM118,37h4v4h-4zM22,41h4v4h-4zM26,41h4v4h-4zM30,41h4v4h-4zM34,41h4v4h-4zM38,41h4v4h-4zM42,41h4v4h-4zM46,41h4v4h-4zM54,41h4v4h-4zM62,41h4v4h-4zM70,41h4v4h-4zM78,41h4v4h-4zM86,41h4v4h-4zM94,41h4v4h-4zM98,41h4v4h-4zM102,41h4v4h-4zM106,41h4v4h-4zM110,41h4v4h-4zM114,41h4v4h-4zM118,41h4v4h-4zM54,45h4v4h-4zM78,45h4v4h-4zM86,45h4v4h-4zM22,49h4v4h-4zM30,49h4v4h-4zM34,49h4v4h-4zM38,49h4v4h-4zM42,49h4v4h-4zM46,49h4v4h-4zM70,49h4v4h-4zM94,49h4v4h-4zM98,49h4v4h-4zM102,49h4v4h-4zM106,49h4v4h-4zM110,49h4v4h-4zM26,53h4v4h-4zM38,53h4v4h-4zM42,53h4v4h-4zM54,53h4v4h-4zM62,53h4v4h-4zM66,53h4v4h-4zM74,53h4v4h-4zM90,53h4v4h-4zM98,53h4v4h-4zM114,53h4v4h-4zM22,57h4v4h-4zM26,57h4v4h-4zM30,57h4v4h-4zM34,57h4v4h-4zM38,57h4v4h-4zM46,57h4v4h-4zM54,57h4v4h-4zM58,57h4v4h-4zM74,57h4v4h-4zM78,57h4v4h-4zM82,57h4v4h-4zM86,57h4v4h-4zM98,57h4v4h-4zM106,57h4v4h-4zM114,57h4v4h-4zM118,57h4v4h-4zM22,61h4v4h-4zM26,61h4v4h-4zM34,61h4v4h-4zM38,61h4v4h-4zM42,61h4v4h-4zM54,61h4v4h-4zM62,61h4v4h-4zM66,61h4v4h-4zM74,61h4v4h-4zM82,61h4v4h-4zM86,61h4v4h-4zM94,61h4v4h-4zM98,61h4v4h-4zM118,61h4v4h-4zM26,65h4v4h-4zM30,65h4v4h-4zM34,65h4v4h-4zM46,65h4v4h-4zM66,65h4v4h-4zM70,65h4v4h-4zM78,65h4v4h-4zM82,65h4v4h-4zM90,65h4v4h-4zM94,65h4v4h-4zM102,65h4v4h-4zM110,65h4v4h-4zM114,65h4v4h-4zM118,65h4v4h-4zM22,69h4v4h-4zM26,69h4v4h-4zM30,69h4v4h-4zM34,69h4v4h-4zM38,69h4v4h-4zM54,69h4v4h-4zM62,69h4v4h-4zM86,69h4v4h-4zM98,69h4v4h-4zM106,69h4v4h-4zM114,69h4v4h-4zM22,73h4v4h-4zM46,73h4v4h-4zM50,73h4v4h-4zM62,73h4v4h-4zM66,73h4v4h-4zM70,73h4v4h-4zM82,73h4v4h-4zM94,73h4v4h-4zM98,73h4v4h-4zM102,73h4v4h-4zM106,73h4v4h-4zM114,73h4v4h-4zM118,73h4v4h-4zM22,77h4v4h-4zM34,77h4v4h-4zM50,77h4v4h-4zM66,77h4v4h-4zM78,77h4v4h-4zM82,77h4v4h-4zM86,77h4v4h-4zM90,77h4v4h-4zM94,77h4v4h-4zM98,77h4v4h-4zM102,77h4v4h-4zM118,77h4v4h-4zM22,81h4v4h-4zM30,81h4v4h-4zM42,81h4v4h-4zM46,81h4v4h-4zM54,81h4v4h-4zM58,81h4v4h-4zM62,81h4v4h-4zM66,81h4v4h-4zM86,81h4v4h-4zM90,81h4v4h-4zM94,81h4v4h-4zM98,81h4v4h-4zM102,81h4v4h-4zM110,81h4v4h-4zM54,85h4v4h-4zM58,85h4v4h-4zM70,85h4v4h-4zM74,85h4v4h-4zM78,85h4v4h-4zM82,85h4v4h-4zM86,85h4v4h-4zM102,85h4v4h-4zM106,85h4v4h-4zM22,89h4v4h-4zM26,89h4v4h-4zM30,89h4v4h-4zM34,89h4v4h-4zM38,89h4v4h-4zM42,89h4v4h-4zM46,89h4v4h-4zM74,89h4v4h-4zM78,89h4v4h-4zM86,89h4v4h-4zM94,89h4v4h-4zM102,89h4v4h-4zM110,89h4v4h-4zM114,89h4v4h-4zM118,89h4v4h-4zM22,93h4v4h-4zM46,93h4v4h-4zM54,93h4v4h-4zM58,93h4v4h-4zM70,93h4v4h-4zM74,93h4v4h-4zM86,93h4v4h-4zM102,93h4v4h-4zM106,93h4v4h-4zM114,93h4v4h-4zM22,97h4v4h-4zM30,97h4v4h-4zM34,97h4v4h-4zM38,97h4v4h-4zM46,97h4v4h-4zM54,97h4v4h-4zM58,97h4v4h-4zM62,97h4v4h-4zM70,97h4v4h-4zM78,97h4v4h-4zM82,97h4v4h-4zM86,97h4v4h-4zM90,97h4v4h-4zM94,97h4v4h-4zM98,97h4v4h-4zM102,97h4v4h-4zM110,97h4v4h-4zM118,97h4v4h-4zM22,101h4v4h-4zM30,101h4v4h-4zM34,101h4v4h-4zM38,101h4v4h-4zM46,101h4v4h-4zM54,101h4v4h-4zM82,101h4v4h-4zM90,101h4v4h-4zM94,101h4v4h-4zM102,101h4v4h-4zM106,101h4v4h-4zM110,101h4v4h-4zM114,101h4v4h-4zM118,101h4v4h-4zM22,105h4v4h-4zM30,105h4v4h-4zM34,105h4v4h-4zM38,105h4v4h-4zM46,105h4v4h-4zM54,105h4v4h-4zM58,105h4v4h-4zM62,105h4v4h-4zM66,105h4v4h-4zM70,105h4v4h-4zM82,105h4v4h-4zM106,105h4v4h-4zM110,105h4v4h-4zM118,105h4v4h-4zM22,109h4v4h-4zM46,109h4v4h-4zM66,109h4v4h-4zM78,109h4v4h-4zM86,109h4v4h-4zM90,109h4v4h-4zM98,109h4v4h-4zM102,109h4v4h-4zM106,109h4v4h-4zM118,109h4v4h-4zM22,113h4v4h-4zM26,113h4v4h-4zM30,113h4v4h-4zM34,113h4v4h-4zM38,113h4v4h-4zM42,113h4v4h-4zM46,113h4v4h-4zM54,113h4v4h-4zM58,113h4v4h-4zM66,113h4v4h-4zM90,113h4v4h-4zM94,113h4v4h-4zM98,113h4v4h-4zM102,113h4v4h-4zM106,113h4v4h-4zM110,113h4v4h-4zM114,113h4v4h-4zM118,113h4v4h-4z" fill="#000000"/><circle cx="64" cy="136" r="3" fill="#818cf840"/><circle cx="72" cy="136" r="3" fill="#818cf8"/><circle cx="80" cy="136" r="3" fill="#818cf840"/></svg>"`;
-
-exports[`response-renderer snapshots > renderResponseDisabled 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#475569">PROMPT</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#475569" opacity="0.5">⚡</text>
-    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#475569">--</text>
-  </svg>"
-`;
-
-exports[`response-renderer snapshots > renderResponseDisconnected 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#071a1e"/>
-    <text x="100" y="18" text-anchor="middle" font-family=""IBM Plex Sans", -apple-system, system-ui, sans-serif" font-size="13" font-weight="bold" fill="#7fb2bc">PROMPT</text>
-    <path d="M90.88 51 C91.63 41.13 108.38 41.13 109.13 51" stroke="#3ED6E8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M92.63 49 C96 50.63 104 50.63 107.38 49" stroke="#3ED6E8" stroke-width="1.44" opacity="0.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M95 44.63 C97.5 42.13 101.5 41.75 104.75 42.63" stroke="#3ED6E8" stroke-width="1.13" opacity="0.34" stroke-linecap="round" stroke-linejoin="round" fill="none"/><rect x="89.25" y="50.25" width="21.5" height="9.75" rx="2.75" stroke="#3ED6E8" stroke-width="2" opacity="0.88" fill="none"/><rect x="93.13" y="54.25" width="3.88" height="2.5" rx="1.25" fill="#3ED6E8" opacity="0.70"/><rect x="98" y="54.25" width="3.88" height="2.5" rx="1.25" fill="#3ED6E8" opacity="0.92"/><rect x="102.88" y="54.25" width="3.88" height="2.5" rx="1.25" fill="#3ED6E8" opacity="0.70"/><circle cx="97" cy="46.25" r="1.19" fill="#3ED6E8" opacity="0.62"/><circle cx="103.5" cy="45.25" r="0.75" fill="#3ED6E8" opacity="0.42"/>
-    <text x="100" y="84" text-anchor="middle" font-family=""IBM Plex Sans", -apple-system, system-ui, sans-serif" font-size="12" font-weight="600" fill="#7fb2bc">Offline</text>
-  </svg>"
-`;
-
-exports[`response-renderer snapshots > renderResponseIdle 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">PROMPT</text>
-    <text x="190" y="18" text-anchor="end" font-family="Arial,sans-serif" font-size="11" fill="#475569">1/5</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" fill="#818cf8" opacity="0.8">⚡</text>
-    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#818cf8" opacity="0.6">Run tests</text>
+    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#818cf8">LAUNCH</text>
+    <text x="100" y="50" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#e2e8f0">Claude</text>
+    <text x="100" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">Open</text>
+    <text x="186" y="70" text-anchor="end" font-family="Arial,sans-serif" font-size="10" fill="#475569">1/3</text>
     <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="36" height="2" rx="1" fill="#818cf8" opacity="0.3"/>
+    <rect x="10" y="89" width="60" height="4" rx="2" fill="#818cf8" opacity="0.85"/>
   </svg>"
 `;
 
-exports[`response-renderer snapshots > renderResponseInteractive 1`] = `
+exports[`launcher-renderer snapshots > renderLauncher last entry 1`] = `
 "<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
     <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#fca5a5">PERMISSION</text>
-    <text x="190" y="18" text-anchor="end" font-family="Arial,sans-serif" font-size="11" fill="#475569">1/2</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#e2e8f0">Allow Write</text>
+    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#818cf8">LAUNCH</text>
+    <text x="100" y="50" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#e2e8f0">OpenClaw</text>
+    <text x="100" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">Open</text>
+    <text x="186" y="70" text-anchor="end" font-family="Arial,sans-serif" font-size="10" fill="#475569">3/3</text>
     <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="90" height="2" rx="1" fill="#ef4444" opacity="0.8"/>
+    <rect x="130" y="89" width="60" height="4" rx="2" fill="#818cf8" opacity="0.85"/>
   </svg>"
 `;
 
-exports[`response-renderer snapshots > renderResponseProcessing 1`] = `
+exports[`launcher-renderer snapshots > renderLauncherEmpty 1`] = `
 "<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
     <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">PROMPT</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" fill="#f59e0b" opacity="0.8">⏳</text>
-    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#f59e0b" opacity="0.6">Working...</text>
-    <rect x="60" y="90" width="80" height="2" rx="1" fill="#f59e0b" opacity="0.2"/>
-  </svg>"
-`;
-
-exports[`response-renderer snapshots > renderResponseSuggestion 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#c4b5fd">SUGGEST</text>
-    <text x="190" y="18" text-anchor="end" font-family="Arial,sans-serif" font-size="11" fill="#475569">2/3</text>
-    <text x="100" y="36" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" fill="#a78bfa" opacity="0.8">✦</text>
-    <text x="100" y="54" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#a78bfa" opacity="0.6">Review the test results</text>
-    <text x="100" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#a78bfa" opacity="0.6">for potential errors</text>
+    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">LAUNCH</text>
+    <text x="100" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="bold" fill="#475569">No targets</text>
     <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="120" height="2" rx="1" fill="#a78bfa" opacity="0.3"/>
-  </svg>"
-`;
-
-exports[`response-renderer snapshots > renderSetupPrompt 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#818cf8">INSTALL</text>
-    <text x="82" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#818cf8" opacity="0.7">📦</text>
-    <text x="120" y="55" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#818cf8" opacity="0.6">Push START</text>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#818cf8" opacity="0.2"/>
   </svg>"
 `;
 
@@ -159,90 +66,6 @@ exports[`session-slot-renderer snapshots > disconnected hero is icon-rich 1`] = 
 exports[`session-slot-renderer snapshots > disconnected non-center slot is empty 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><defs><linearGradient id="frame-bg-test" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#0a0a0a"/><stop offset="100%" stop-color="#0A0A0E"/></linearGradient></defs><rect width="144" height="144" rx="16" fill="url(#frame-bg-test)"/><rect x="8" y="8" width="128" height="128" rx="12" fill="#2C2C2E" opacity="0.6"/></svg>"`;
 
 exports[`session-slot-renderer snapshots > stale session dims the render and shows a STALE badge 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><defs><linearGradient id="sd-bg-claude-code-idle" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#1C1C1E"/><stop offset="100%" stop-color="#0C0C0E"/></linearGradient></defs><rect width="144" height="144" rx="16" fill="url(#sd-bg-claude-code-idle)"/><rect x="8" y="8" width="128" height="128" rx="12" fill="#2C2C2E" opacity="0.8"/><g transform="translate(92, 80)" opacity="0.62"><g transform="translate(0,0) scale(3.000) translate(-12,-12)" opacity="1"><path d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#C07058" fill-rule="evenodd" clip-rule="evenodd"/></g></g><rect x="100" y="14" width="28" height="16" rx="8" fill="#ffffff" opacity="0.1" /><text x="114" y="25" font-size="10" font-weight="700" text-anchor="middle" fill="#A1A1AA" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif">ACT</text><text x="20" y="32" font-size="17" font-weight="800" text-anchor="start" fill="#D97757" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif">IDLE</text><text x="20" y="52" font-size="13" font-weight="600" text-anchor="start" fill="#E2E8F0" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif">AgentDeck</text><text x="20" y="120" font-size="14" font-weight="500" text-anchor="start" fill="#D97757" opacity="0.8" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif">opus-4 · high</text><rect width="144" height="144" rx="16" fill="#0C0C0E" opacity="0.5"/><rect x="20" y="62" width="50" height="17" rx="8" fill="#71717A" opacity="0.92"/><text x="45" y="74" font-size="10" font-weight="800" text-anchor="middle" fill="#0C0C0E" font-family="Inter, -apple-system, system-ui, Helvetica Neue, sans-serif">STALE</text></svg>"`;
-
-exports[`timeline-renderer snapshots > detail mode 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><g transform="translate(0,0)"><rect width="400" height="100" fill="#000000"/><text x="15" y="18" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#c084fc">⚠ TOOL REQUEST</text><text x="385" y="18" text-anchor="end" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">07:13</text><text x="15" y="32" font-family="Arial,sans-serif" font-size="11" fill="#e2e8f0">Read file.ts</text></g></svg>"`;
-
-exports[`timeline-renderer snapshots > empty timeline 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><g transform="translate(0,0)"><rect width="400" height="100" fill="#000000"/><text x="200" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">TIMELINE</text><text x="200" y="63" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">No events</text></g></svg>"`;
-
-exports[`timeline-renderer snapshots > multiple entries fisheye 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><clipPath id="evtClip"><rect x="0" y="26" width="400" height="74"/></clipPath></defs><g transform="translate(0,0)"><rect width="400" height="100" fill="#000000"/><text x="200" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">TIMELINE</text><g clip-path="url(#evtClip)"><text x="10" y="63.0" font-family="Arial,sans-serif" font-size="15.0" fill="#fbbf24" opacity="1.00">07:13 ⚠ Write test.ts (×3)</text><text x="10" y="46.9" font-family="Arial,sans-serif" font-size="13.3" fill="#fbbf24" opacity="0.77">07:13 ⚠ Read main.ts</text><text x="10" y="32.8" font-family="Arial,sans-serif" font-size="11.7" fill="#4ade80" opacity="0.53">07:13 ▶ Start coding</text><text x="10" y="79.1" font-family="Arial,sans-serif" font-size="13.3" fill="#60a5fa" opacity="0.77">07:13 ■ Done</text><text x="10" y="93.2" font-family="Arial,sans-serif" font-size="11.7" fill="#f87171" opacity="0.53">07:14 ✗ Connection timeout</text></g><rect x="0" y="98" width="400" height="2" fill="#c084fc" opacity="0.14"/></g></svg>"`;
-
-exports[`timeline-renderer snapshots > single entry 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><clipPath id="evtClip"><rect x="0" y="26" width="400" height="74"/></clipPath></defs><g transform="translate(0,0)"><rect width="400" height="100" fill="#000000"/><text x="200" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">TIMELINE</text><g clip-path="url(#evtClip)"><text x="10" y="63.0" font-family="Arial,sans-serif" font-size="15.0" fill="#4ade80" opacity="1.00">07:13 ▶ Hello world</text></g><rect x="0" y="98" width="400" height="2" fill="#c084fc" opacity="0.05"/></g></svg>"`;
-
-exports[`timeline-renderer snapshots > with session status 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><g transform="translate(0,0)"><rect width="400" height="100" fill="#000000"/><text x="15" y="18" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#c084fc">▶ CHAT START</text><text x="385" y="18" text-anchor="end" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">07:13</text><text x="15" y="32" font-family="Arial,sans-serif" font-size="11" fill="#e2e8f0">Working</text></g></svg>"`;
-
-exports[`usage-dial-renderer snapshots > renderUsageDetail 5h 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">5H LIMIT</text>
-    <text x="100" y="44" text-anchor="middle" font-family="monospace" font-size="14" fill="#22c55e">█████░░░░░░░</text>
-    <text x="100" y="68" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#ffffff">45%</text>
-    <text x="100" y="84" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" fill="#94a3b8">resets in 27441d1h</text>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#22c55e" opacity="0.4"/>
-  </svg>"
-`;
-
-exports[`usage-dial-renderer snapshots > renderUsageDetail 7d 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">7D LIMIT</text>
-    <text x="100" y="44" text-anchor="middle" font-family="monospace" font-size="14" fill="#22c55e">████░░░░░░░░</text>
-    <text x="100" y="68" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#ffffff">32%</text>
-    <text x="100" y="84" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" fill="#94a3b8">resets in 27442d1h</text>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#22c55e" opacity="0.4"/>
-  </svg>"
-`;
-
-exports[`usage-dial-renderer snapshots > renderUsageDisconnected 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#475569">USAGE</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#475569" opacity="0.5">📊</text>
-    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#475569">Waiting...</text>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-  </svg>"
-`;
-
-exports[`usage-dial-renderer snapshots > renderUsageExtra disabled 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-      <rect width="200" height="100" fill="#0f172a"/>
-      <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">EXTRA USAGE</text>
-      <text x="100" y="56" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#475569">disabled</text>
-      <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="2" height="2" rx="1" fill="#6b7280" opacity="0.4"/>
-    </svg>"
-`;
-
-exports[`usage-dial-renderer snapshots > renderUsageExtra enabled 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">EXTRA USAGE</text>
-    <text x="100" y="42" text-anchor="middle" font-family="monospace" font-size="14" fill="#60a5fa">██░░░░░░░░░░</text>
-    <text x="100" y="62" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#ffffff">15%</text>
-    
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="27" height="2" rx="1" fill="#60a5fa" opacity="0.4"/>
-  </svg>"
-`;
-
-exports[`usage-dial-renderer snapshots > renderUsageOverview 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">USAGE</text>
-    <text x="18" y="36" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">5H</text>
-    <text x="42" y="36" font-family="monospace" font-size="12" fill="#22c55e">████░░░░</text>
-    <text x="190" y="36" text-anchor="end" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#ffffff">45%</text>
-    <text x="190" y="47" text-anchor="end" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">27441d1h</text>
-    <text x="18" y="63" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">7D</text>
-    <text x="42" y="63" font-family="monospace" font-size="12" fill="#22c55e">███░░░░░</text>
-    <text x="190" y="63" text-anchor="end" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#ffffff">32%</text>
-    <text x="190" y="74" text-anchor="end" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">27442d1h</text>
-    
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#22c55e" opacity="0.4"/>
-  </svg>"
-`;
 
 exports[`usage-dial-renderer snapshots > renderUsageSession 1`] = `
 "<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
@@ -282,168 +105,22 @@ exports[`usage-gauge snapshots > renderUsageGauge critical (>80 used → red ram
 
 exports[`usage-gauge snapshots > renderUsageGauge unknown draws a dim tile + dash, no fill 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><defs><clipPath id="ug-codex-5h"><rect x="0" y="0" width="144" height="144" rx="12"/></clipPath></defs><rect width="144" height="144" rx="12" fill="#0f172a"/><text x="14" y="36" font-family="JetBrains Mono, monospace" font-size="26" font-weight="bold" fill="#64748b">5H</text><circle cx="124" cy="22" r="16.0" fill="#0b1220" opacity="0.55"/><g transform="translate(124,22) scale(1.083) translate(-12,-12)"><path d="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z" fill="#64748b" fill-rule="evenodd"/></g><text x="72" y="94" text-anchor="middle" font-family="Arial,sans-serif" font-size="44" font-weight="bold" fill="#475569">—</text></svg>"`;
 
-exports[`utility-renderer snapshots > renderSetupUtility 1`] = `
+exports[`utility-renderer snapshots > renderUtilityGeneric muted (text-only value) 1`] = `
 "<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
     <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#818cf8">SETUP</text>
-    <text x="82" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#818cf8" opacity="0.7">⚙️</text>
-    <text x="120" y="58" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#818cf8" opacity="0.6">Required</text>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#818cf8" opacity="0.2"/>
-  </svg>"
-`;
-
-exports[`utility-renderer snapshots > renderUtilityGeneric text-only (no icon) 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">MIC</text>
-    <text x="100" y="56" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#ef4444" opacity="0.9">Muted</text>
-    <text x="100" y="76" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569" letter-spacing="2">○●○○○</text>
+    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">VOL</text>
+    <text x="100" y="62" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#64748b" opacity="0.9">Muted</text>
     <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="2" height="2" rx="1" fill="#ef4444" opacity="0.4"/>
+    <rect x="10" y="90" width="2" height="2" rx="1" fill="#64748b" opacity="0.4"/>
   </svg>"
 `;
 
 exports[`utility-renderer snapshots > renderUtilityGeneric with icon 1`] = `
 "<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
     <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">VOLUME</text>
-    <text x="79" y="56" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" fill="#22c55e" opacity="0.7">🔊</text><text x="93" y="56" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="#22c55e" opacity="0.9">72%</text>
-    <text x="100" y="76" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569" letter-spacing="2">●○○○○</text>
+    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">VOL</text>
+    <text x="79" y="62" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" fill="#22c55e" opacity="0.7">🔊</text><text x="93" y="62" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="#22c55e" opacity="0.9">72%</text>
     <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
     <rect x="10" y="90" width="130" height="2" rx="1" fill="#22c55e" opacity="0.4"/>
   </svg>"
 `;
-
-exports[`utility-renderer snapshots > renderUtilityMedia 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#a855f7">MEDIA</text>
-    <text x="22" y="48" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#a855f7" opacity="0.8">▶</text><text x="32" y="48" font-family="Arial,sans-serif" font-size="16" font-weight="bold" fill="#e2e8f0">Bohemian Rhapsody</text>
-    <text x="100" y="66" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">Queen</text>
-    <text x="100" y="82" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569" letter-spacing="2">○○●○○</text>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="90" height="2" rx="1" fill="#a855f7" opacity="0.4"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceAssistantListening frame 0 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0a2a2e"/>
-    <rect x="1" y="1" width="198" height="98" rx="4" fill="none" stroke="#22d3ee" stroke-opacity="0.48" stroke-width="1"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#67e8f9">ASSISTANT</text>
-    <text x="100" y="52" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" fill="#22d3ee" opacity="0.60">🎤</text>
-    <text x="100" y="74" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#22d3ee">LISTENING</text>
-    <rect x="58" y="90" width="84" height="3" rx="1.5" fill="#22d3ee" opacity="0.64"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceAssistantProcessing frame 5 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#1a1a0a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#fbbf24">ASSISTANT</text>
-    <text x="100" y="38" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#fbbf24" opacity="0.7">What is the weather?</text>
-    <circle cx="85" cy="52" r="2.5" fill="#fbbf24" opacity="0.3"/><circle cx="100" cy="52" r="4" fill="#fbbf24" opacity="1"/><circle cx="115" cy="52" r="2.5" fill="#fbbf24" opacity="0.3"/>
-    <text x="100" y="74" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#fbbf24">Processing...</text>
-    <rect x="10" y="90" width="180" height="3" rx="1.5" fill="#1e293b"/>
-    <rect x="72.52382540388928" y="90" width="80" height="3" rx="1.5" fill="#fbbf24" opacity="0.7"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceAssistantSpeaking frame 0 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0a2e14"/>
-    <rect x="1" y="1" width="198" height="98" rx="4" fill="none" stroke="#4ade80" stroke-opacity="0.38" stroke-width="1"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#4ade80">ASSISTANT</text>
-    <text x="80" y="56" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" fill="#4ade80" opacity="0.60">🔊</text>
-    <path d="M109,40.8 A18,18 0 0 1 109,55.2" fill="none" stroke="#4ade80" stroke-width="2" opacity="0.18"/><path d="M114,36.8 A28,28 0 0 1 114,59.2" fill="none" stroke="#4ade80" stroke-width="2" opacity="0.57"/><path d="M119,32.8 A38,38 0 0 1 119,63.2" fill="none" stroke="#4ade80" stroke-width="2" opacity="0.46"/>
-    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#4ade80">SPEAKING</text>
-    <rect x="40" y="90" width="120" height="3" rx="1.5" fill="#4ade80" opacity="0.54"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceDisabled 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#071a1e"/>
-    <text x="100" y="18" text-anchor="middle" font-family=""IBM Plex Sans", -apple-system, system-ui, sans-serif" font-size="13" font-weight="bold" fill="#7fb2bc">VOICE</text>
-    <path d="M90.88 51 C91.63 41.13 108.38 41.13 109.13 51" stroke="#3ED6E8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M92.63 49 C96 50.63 104 50.63 107.38 49" stroke="#3ED6E8" stroke-width="1.44" opacity="0.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M95 44.63 C97.5 42.13 101.5 41.75 104.75 42.63" stroke="#3ED6E8" stroke-width="1.13" opacity="0.34" stroke-linecap="round" stroke-linejoin="round" fill="none"/><rect x="89.25" y="50.25" width="21.5" height="9.75" rx="2.75" stroke="#3ED6E8" stroke-width="2" opacity="0.88" fill="none"/><rect x="93.13" y="54.25" width="3.88" height="2.5" rx="1.25" fill="#3ED6E8" opacity="0.70"/><rect x="98" y="54.25" width="3.88" height="2.5" rx="1.25" fill="#3ED6E8" opacity="0.92"/><rect x="102.88" y="54.25" width="3.88" height="2.5" rx="1.25" fill="#3ED6E8" opacity="0.70"/><circle cx="97" cy="46.25" r="1.19" fill="#3ED6E8" opacity="0.62"/><circle cx="103.5" cy="45.25" r="0.75" fill="#3ED6E8" opacity="0.42"/>
-    <text x="100" y="84" text-anchor="middle" font-family=""IBM Plex Sans", -apple-system, system-ui, sans-serif" font-size="12" font-weight="600" fill="#7fb2bc">Offline</text>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceError default 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="30" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#ef4444">⚠</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#fca5a5">Error</text>
-    <text x="100" y="75" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#64748b">Push to clear</text>
-    <rect x="10" y="90" width="180" height="3" rx="1.5" fill="#991b1b"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceError with message 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="30" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#ef4444">⚠</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#fca5a5">Microphone not found</text>
-    <text x="100" y="75" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#64748b">Push to clear</text>
-    <rect x="10" y="90" width="180" height="3" rx="1.5" fill="#991b1b"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceReady 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">VOICE</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" fill="#67e8f9" opacity="0.8">🎙</text>
-    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#67e8f9" opacity="0.6">Ready</text>
-    <rect x="60" y="90" width="80" height="2" rx="1" fill="#67e8f9" opacity="0.2"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceRecording frame 0 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><linearGradient id="rg" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0%" stop-color="#7f1d1d"/><stop offset="100%" stop-color="#450a0a"/>
-  </linearGradient></defs>
-    <rect width="200" height="100" fill="url(#rg)"/>
-    <rect x="1" y="1" width="198" height="98" rx="4" fill="none" stroke="#ef4444" stroke-opacity="0.3" stroke-width="1"/>
-    <circle cx="55" cy="30" r="6" fill="rgb(246,117,117)"/>
-    <text x="68" y="35" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#fca5a5">REC</text>
-    <text x="130" y="35" font-family="Arial,sans-serif" font-size="16" fill="#fca5a5" opacity="0.8">0:05</text>
-    <rect x="60" y="65" width="8" rx="2" height="17" fill="#ef4444" opacity="0.8"/><rect x="80" y="56.23537132209624" width="8" rx="2" height="25.764628677903758" fill="#ef4444" opacity="0.8"/><rect x="100" y="68.98268398965368" width="8" rx="2" height="13.017316010346327" fill="#ef4444" opacity="0.8"/><rect x="120" y="71.95488038800389" width="8" rx="2" height="10.045119611996116" fill="#ef4444" opacity="0.8"/><rect x="140" y="57.85698922535762" width="8" rx="2" height="24.143010774642377" fill="#ef4444" opacity="0.8"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceRecording frame 30 (>1min) 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><linearGradient id="rg" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0%" stop-color="#7f1d1d"/><stop offset="100%" stop-color="#450a0a"/>
-  </linearGradient></defs>
-    <rect width="200" height="100" fill="url(#rg)"/>
-    <rect x="1" y="1" width="198" height="98" rx="4" fill="none" stroke="#ef4444" stroke-opacity="0.3" stroke-width="1"/>
-    <circle cx="55" cy="30" r="6" fill="rgb(239,69,69)"/>
-    <text x="68" y="35" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#fca5a5">REC</text>
-    <text x="130" y="35" font-family="Arial,sans-serif" font-size="16" fill="#fca5a5" opacity="0.8">1:05</text>
-    <rect x="60" y="67.51473948379034" width="8" rx="2" height="14.485260516209667" fill="#ef4444" opacity="0.8"/><rect x="80" y="56.01310989162855" width="8" rx="2" height="25.986890108371448" fill="#ef4444" opacity="0.8"/><rect x="100" y="66.56894103100682" width="8" rx="2" height="15.431058968993185" fill="#ef4444" opacity="0.8"/><rect x="120" y="73.27395673098208" width="8" rx="2" height="8.726043269017918" fill="#ef4444" opacity="0.8"/><rect x="140" y="59.67133836763499" width="8" rx="2" height="22.32866163236501" fill="#ef4444" opacity="0.8"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceTranscribing frame 0 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <circle cx="85" cy="45" r="5" fill="#fbbf24" opacity="1"/><circle cx="100" cy="45" r="3" fill="#fbbf24" opacity="0.3"/><circle cx="115" cy="45" r="3" fill="#fbbf24" opacity="0.3"/>
-    <text x="100" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#fbbf24">Transcribing...</text>
-    <rect x="10" y="88" width="180" height="3" rx="1.5" fill="#1e293b"/>
-    <rect x="55" y="88" width="80" height="3" rx="1.5" fill="#fbbf24" opacity="0.7"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderVoiceTranscribing frame 10 (different dot phase) 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <circle cx="85" cy="45" r="5" fill="#fbbf24" opacity="1"/><circle cx="100" cy="45" r="3" fill="#fbbf24" opacity="0.3"/><circle cx="115" cy="45" r="3" fill="#fbbf24" opacity="0.3"/>
-    <text x="100" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#fbbf24">Transcribing...</text>
-    <rect x="10" y="88" width="180" height="3" rx="1.5" fill="#1e293b"/>
-    <rect x="87.28102409047852" y="88" width="80" height="3" rx="1.5" fill="#fbbf24" opacity="0.7"/>
-  </svg>"
-`;
-
-exports[`voice-renderer snapshots > renderWideVoiceText returns correct panel count 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><clipPath id="ta"><rect x="0" y="22" width="800" height="58"/></clipPath></defs><g transform="translate(0,0)"><rect width="800" height="100" fill="#0f172a"/><text x="10" y="16" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#fbbf24">🎙 REVIEW</text><rect x="680" y="80" width="50" height="16" rx="5" fill="#14532d"/><text x="705" y="93" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#4ade80">tap ✓</text><rect x="734" y="80" width="56" height="16" rx="5" fill="#450a0a"/><text x="762" y="93" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#f87171">hold ✕</text><rect x="10" y="95" width="780" height="2" rx="1" fill="#fbbf24" opacity="0.15"/><g clip-path="url(#ta)"><g transform="translate(0,0)"><text x="400" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" fill="#e2e8f0">Hello world test text that spans across multiple panels</text></g></g></g></svg>"`;

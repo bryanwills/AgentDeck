@@ -1,143 +1,154 @@
 import sharp from 'sharp';
-import { mkdirSync } from 'fs';
+import { mkdirSync, readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { renderAgentDeckMarkCompact } from '../shared/dist/svg-renderers/session-slot-renderer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outputDir = resolve(__dirname, '../plugin/bound.serendipity.agentdeck.sdPlugin/static/imgs');
+const keyOutputDir = resolve(outputDir, 'keys');
 
 mkdirSync(outputDir, { recursive: true });
+mkdirSync(keyOutputDir, { recursive: true });
+
+// ---- Shared drawing language -------------------------------------------------
+//
+// Every icon is monochrome white on transparent (the Stream Deck convention) and
+// is drawn on the same 40x40 grid with round caps, so the set reads as one
+// family on a key row. Stroke weight matches the AgentDeck mark's 1.6/24 ratio.
+const STROKE = 2.7;
+const CAP = 'stroke-linecap="round" stroke-linejoin="round" fill="none"';
+
+/**
+ * Pull the single path out of an official brand SVG (24x24, fill=currentColor)
+ * and scale it onto the 40x40 icon grid.
+ *
+ * DESIGN.md rule 6: brand marks are upstream — never redraw them. Using the real
+ * file also means an upstream mark update flows into the icons for free.
+ */
+function brandGlyph(name, { scale = 1.34, dx = 0, dy = 0 } = {}) {
+  const svg = readFileSync(resolve(__dirname, `../design/brand/${name}.svg`), 'utf-8');
+  const paths = [...svg.matchAll(/<path\b[^>]*\bd="([^"]+)"[^>]*>/g)].map((m) => m[1]);
+  if (paths.length === 0) throw new Error(`no path found in design/brand/${name}.svg`);
+  // Centre the 24-unit artwork on the 40-unit grid, then apply the caller's scale.
+  const offset = (40 - 24 * scale) / 2;
+  const inner = paths
+    .map((d) => `<path d="${d}" fill="white" fill-rule="evenodd" clip-rule="evenodd"/>`)
+    .join('');
+  return `<g transform="translate(${(offset + dx).toFixed(2)} ${(offset + dy).toFixed(2)}) scale(${scale})">${inner}</g>`;
+}
 
 // All SVGs designed at 40x40 viewBox, will be rendered at target sizes
 const svgs = {
   // Plugin icon — rounded "C" with diamond accent (Claude-style)
-  plugin: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M22 6C13.2 6 6 13.2 6 22s7.2 16 16 16c3.2 0 6.2-1 8.7-2.6" fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
-    <polygon points="32,8 36,14 32,20 28,14" fill="white"/>
+
+
+  // Session Slot — the canonical AgentDeck dome-over-deck mark, from the shared
+  // SSOT rather than redrawn. The compact reduction is used because Stream Deck
+  // draws action-list icons at 20px, where the full mark's low-opacity waterline
+  // and bubbles collapse into a blob.
+  session: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    ${renderAgentDeckMarkCompact(20, 20, 37, 'white')}
   </svg>`,
 
-  // Category icon — same as plugin
-  category: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M22 6C13.2 6 6 13.2 6 22s7.2 16 16 16c3.2 0 6.2-1 8.7-2.6" fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
-    <polygon points="32,8 36,14 32,20 28,14" fill="white"/>
+  // Claude Usage (E2) — the official Claude Code mark. The action name supplies
+  // "usage"; the mark supplies "whose", which is what you need at a glance.
+  option: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    ${brandGlyph('claudecode', { scale: 1.28 })}
+  </svg>`,
+
+  // Codex Usage (E3) — official Codex mark, same treatment.
+  usage: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    ${brandGlyph('codex', { scale: 1.22 })}
+  </svg>`,
+
+  // Volume (E1) — speaker + two arcs. Replaces a brightness sun that survived
+  // the utility-dial reduction and no longer described the action.
+  utility: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    <path d="M8 16.2h5.2L20 10.4v19.2l-6.8-5.8H8z" fill="white" stroke="white" stroke-width="${STROKE}" stroke-linejoin="round"/>
+    <path d="M25.2 15.4a7.2 7.2 0 0 1 0 9.2" stroke="white" stroke-width="${STROKE}" ${CAP}/>
+    <path d="M29.4 11.6a12.4 12.4 0 0 1 0 16.8" stroke="white" stroke-width="${STROKE}" ${CAP}/>
+  </svg>`,
+
+  // Launcher (E4) — an arrow leaving a rounded frame: "open this elsewhere".
+  // Reads at 20px, unlike the rocket it replaces, and matches the stroke family.
+  launcher: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    <path d="M18.5 10.5H12A3.5 3.5 0 0 0 8.5 14v14A3.5 3.5 0 0 0 12 31.5h14a3.5 3.5 0 0 0 3.5-3.5v-6.5" stroke="white" stroke-width="${STROKE}" ${CAP}/>
+    <path d="M23 8.5h9v9" stroke="white" stroke-width="${STROKE}" ${CAP}/>
+    <path d="M31.2 9.3 19.6 20.9" stroke="white" stroke-width="${STROKE}" ${CAP}/>
   </svg>`,
 
   // Response — chat bubble with reply arrow
-  response: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M6 8h28a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H14l-6 6V28H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
-    <path d="M22 15l4 4-4 4" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M14 19h12" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/>
-  </svg>`,
 
   // Stop — octagon stop symbol
-  stop: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <polygon points="14,4 26,4 36,14 36,26 26,36 14,36 4,26 4,14" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
-    <rect x="14" y="14" width="12" height="12" rx="1" fill="white"/>
-  </svg>`,
 
   // Mode — cycle arrows (toggle through Default/Plan/Accept)
-  mode: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M30 14A11 11 0 0 0 10 14" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <polyline points="28,8 30,14 24,16" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M10 26A11 11 0 0 0 30 26" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <polyline points="12,32 10,26 16,24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>`,
 
   // Option — list/menu icon (three lines with bullets)
-  option: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <circle cx="10" cy="12" r="2.5" fill="white"/>
-    <line x1="17" y1="12" x2="33" y2="12" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <circle cx="10" cy="20" r="2.5" fill="white"/>
-    <line x1="17" y1="20" x2="33" y2="20" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <circle cx="10" cy="28" r="2.5" fill="white"/>
-    <line x1="17" y1="28" x2="33" y2="28" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-  </svg>`,
 
   // History — clock with circular arrow
-  history: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <circle cx="22" cy="22" r="13" fill="none" stroke="white" stroke-width="2.5"/>
-    <polyline points="22,13 22,22 29,26" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M10 8v8h8" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M10 16A14 14 0 0 1 22 8a14 14 0 0 1 13 9" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-  </svg>`,
 
   // Voice — microphone icon
-  voice: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <rect x="15" y="4" width="10" height="18" rx="5" fill="none" stroke="white" stroke-width="2.5"/>
-    <path d="M9 20a11 11 0 0 0 22 0" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <line x1="20" y1="31" x2="20" y2="37" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <line x1="14" y1="37" x2="26" y2="37" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-  </svg>`,
 
   // Session — terminal window with prompt
-  session: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <rect x="3" y="6" width="34" height="28" rx="3" fill="none" stroke="white" stroke-width="2.5"/>
-    <path d="M10 16l5 5-5 5" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <line x1="19" y1="26" x2="28" y2="26" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-  </svg>`,
 
   // Usage — bar chart icon
-  usage: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <rect x="6" y="22" width="6" height="14" rx="1" fill="white" opacity="0.5"/>
-    <rect x="14" y="14" width="6" height="22" rx="1" fill="white" opacity="0.7"/>
-    <rect x="22" y="8" width="6" height="28" rx="1" fill="white" opacity="0.85"/>
-    <rect x="30" y="18" width="6" height="18" rx="1" fill="white"/>
-  </svg>`,
 
   // Command — slash in a rounded box (quick commands)
-  command: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <rect x="4" y="6" width="32" height="28" rx="4" fill="none" stroke="white" stroke-width="2.5"/>
-    <text x="20" y="27" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="bold" fill="white">/</text>
-  </svg>`,
 
   // Context — eye icon (display/observe)
-  context: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M4 20s6-12 16-12 16 12 16 12-6 12-16 12S4 20 4 20z" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
-    <circle cx="20" cy="20" r="5" fill="none" stroke="white" stroke-width="2.5"/>
-    <circle cx="20" cy="20" r="2" fill="white"/>
-  </svg>`,
 
   // Utility — gear icon (system utilities)
-  utility: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <circle cx="20" cy="20" r="7" fill="none" stroke="white" stroke-width="2.5"/>
-    <circle cx="20" cy="20" r="3" fill="white"/>
-    <line x1="20" y1="3" x2="20" y2="9" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="20" y1="31" x2="20" y2="37" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="3" y1="20" x2="9" y2="20" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="31" y1="20" x2="37" y2="20" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="8" y1="8" x2="12.5" y2="12.5" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="27.5" y1="27.5" x2="32" y2="32" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="32" y1="8" x2="27.5" y2="12.5" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="12.5" y1="27.5" x2="8" y2="32" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  </svg>`,
+
+  // Launcher — rocket (start a session). Pure geometry, no text.
 
   // Terminal — monitor with prompt cursor
-  terminal: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <rect x="3" y="4" width="34" height="24" rx="3" fill="none" stroke="white" stroke-width="2.5"/>
-    <path d="M10 12l5 4-5 4" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <line x1="18" y1="20" x2="26" y2="20" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <line x1="14" y1="34" x2="26" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <line x1="20" y1="28" x2="20" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-  </svg>`,
 };
 
 // Size specs: plugin/category are 28/56, action icons are 20/40
+// Action-list icons are 20 (@2x 40).
+//
+// The two brand icons (plugin + category) are NOT drawn here — they are resized
+// from the canonical artwork in design/brand/agentdeck-icon.png, the same mark
+// the dashboard app uses. Drawing them by hand is what produced the previous
+// category icon: a "C with a diamond" left over from the plugin's Claude Code
+// days, which had nothing to do with AgentDeck.
 const sizeMap = {
-  plugin:   [28, 56],
-  category: [28, 56],
-  response: [20, 40],
-  stop:     [20, 40],
-  mode:     [20, 40],
   option:   [20, 40],
-  history:  [20, 40],
-  voice:    [20, 40],
   session:  [20, 40],
   usage:    [20, 40],
-  command:  [20, 40],
-  context:  [20, 40],
   utility:  [20, 40],
-  terminal: [20, 40],
+  launcher: [20, 40],
 };
+
+// Stream Deck key state images must be 72x72 (@1x) / 144x144 (@2x).
+// Any icon referenced from an action's States[].Image needs a key-sized variant.
+const KEY_SIZE_1X = 72;
+const KEY_SIZE_2X = 144;
+// Glyph is drawn inset on the key canvas so it doesn't bleed to the key edge.
+const KEY_GLYPH_1X = 50; // 2x variant is exactly double, keeping the pair aligned
+const KEY_GLYPH_2X = KEY_GLYPH_1X * 2;
+
+const keyIcons = ['session', 'option', 'utility', 'usage', 'launcher'];
+
+async function renderKeyVariant(svgBuffer, name, keySize, glyphSize, suffix) {
+  const pad = (keySize - glyphSize) / 2;
+  const glyph = await sharp(svgBuffer, { density: 300 })
+    .resize(glyphSize, glyphSize)
+    .png()
+    .toBuffer();
+
+  await sharp(glyph)
+    .extend({
+      top: pad,
+      bottom: pad,
+      left: pad,
+      right: pad,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .png()
+    .toFile(resolve(keyOutputDir, `${name}${suffix}.png`));
+}
 
 let count = 0;
 for (const [name, svg] of Object.entries(svgs)) {
@@ -158,4 +169,37 @@ for (const [name, svg] of Object.entries(svgs)) {
   console.log(`  ${name}.png (${size1x}x${size1x}) + ${name}@2x.png (${size2x}x${size2x})`);
 }
 
+let keyCount = 0;
+for (const name of keyIcons) {
+  const svg = svgs[name];
+  if (!svg) throw new Error(`keyIcons references unknown icon: ${name}`);
+  const buf = Buffer.from(svg);
+
+  await renderKeyVariant(buf, name, KEY_SIZE_1X, KEY_GLYPH_1X, '');
+  await renderKeyVariant(buf, name, KEY_SIZE_2X, KEY_GLYPH_2X, '@2x');
+
+  keyCount += 2;
+  console.log(
+    `  keys/${name}.png (${KEY_SIZE_1X}x${KEY_SIZE_1X}) + keys/${name}@2x.png (${KEY_SIZE_2X}x${KEY_SIZE_2X})`
+  );
+}
+
+// ---- Brand icons from the canonical asset ----------------------------------
+const brandSource = resolve(__dirname, '../design/brand/agentdeck-icon.png');
+const brandIcons = [
+  ['plugin', 256, 512],   // Marketplace listing / plugin manager
+  ['category', 28, 56],   // actions-list category header
+];
+for (const [name, s1x, s2x] of brandIcons) {
+  for (const [size, suffix] of [[s1x, ''], [s2x, '@2x']]) {
+    await sharp(brandSource)
+      .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .png()
+      .toFile(resolve(outputDir, `${name}${suffix}.png`));
+    count++;
+  }
+  console.log(`  ${name}.png (${s1x}x${s1x}) + ${name}@2x.png (${s2x}x${s2x}) — from design/brand/agentdeck-icon.png`);
+}
+
 console.log(`\nGenerated ${count} icon files in ${outputDir}`);
+console.log(`Generated ${keyCount} key state images in ${keyOutputDir}`);

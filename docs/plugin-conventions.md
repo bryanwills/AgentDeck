@@ -43,17 +43,24 @@ Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "com
 - **BillingType detection**: PTY `model_info` parser event의 `plan` 필드로 subscription/api/unknown 판별. API 사용자는 OAuth fetch 스킵 + session 페이지만 표시
 - **Effort level detection**: PTY `/model` UI에서 `(high|medium|low) effort` 패턴 파싱. Levels: high/medium(default)/low. `"medium"`은 기본값이므로 UI 표시에서 제외 (high/low만 모델명 옆에 표시). Parser→SM→WS→Plugin/Android 전체 파이프라인
 
-## QR code display
+## QR code display (retired)
+
+> v3 Usage 버튼과 함께 폐지됐다. `qr-renderer.ts`와 `qrcode` 의존성은 플러그인에서
+> 제거됐다(호출부 없음). 페어링 QR은 `agentdeck qr` CLI와 앱에서 제공한다.
+> 아래는 히스토리 참고용이다.
 
 Usage 버튼 `qr` 페이지 — `qrcode` 라이브러리 → SVG path 렌더링 (144×144, Version 3 QR 29 modules × 4px = 116px). URL 우선순위: (1) `--remote` URL (PTY 자동감지) (2) OC Gateway `http://LAN:18789`. Bridge OutputParser가 raw ANSI에서 cursor-forward 시퀀스 제거 후 URL 추출. Push → 클립보드 복사 (`pbcopy`).
 
 ## Encoder LCD design
 
-모든 인코더 LCD는 SVG pixmap 렌더링 (`voice-layout.json` 공용). 배경 `#0f172a`, 14px 가운데 정렬 헤더, icon+value 가운데 그룹, 2px accent bar 패턴 통일. Renderer는 `plugin/src/renderers/{name}-renderer.ts` 순수 함수로 분리. Utility 모드는 clean 영문 title + emoji icon + value 구조 통일.
+모든 인코더 LCD는 SVG pixmap 렌더링 (`encoder-layout.json` 공용). 배경 `#0f172a`, 14px 가운데 정렬 헤더, icon+value 가운데 그룹, 2px accent bar 패턴 통일. Renderer는 `plugin/src/renderers/{name}-renderer.ts` 순수 함수로 분리. Volume 다이얼(E1)은 clean 영문 title + emoji icon + value 구조를 따른다.
 
-### Encoder takeover wide canvas
+### Encoder takeover wide canvas (retired)
 
-Option/permission/diff 선택 시 E1=context 패널, E2-E4=600px wide canvas 옵션 목록 (voice text와 동일한 `translate(-i*200,0)` 슬라이싱). `renderWideOptionList()` 함수, `autoScrollToIndex()`로 선택 항목 자동 스크롤.
+> Option/permission/diff 선택이 인코더를 점유하던 방식(E1=context 패널, E2-E4=600px
+> wide canvas)은 v4 Phase 2에서 폐지됐다. 선택은 키패드 detail view(`session-slot`)가
+> 담당하고, `option-renderer.ts`/`renderWideOptionList()`는 삭제됐다. 인코더는
+> E1 Volume, E2/E3 usage, E4 Launcher로 고정이다.
 
 ### Encoder takeover race guard
 
@@ -61,11 +68,21 @@ Option/permission/diff 선택 시 E1=context 패널, E2-E4=600px wide canvas 옵
 
 ## Button label intelligence
 
-3-tier 라벨 축약 시스템 — (1) CJK-aware 픽셀 기반 줄바꿈 (`text-utils.ts`) (2) 로컬 휴리스틱 약어 (`abbreviateLabel`) (3) `claude -p --model haiku` CLI 폴백 (`label-summarizer.ts`). 1-2단계 즉시(0ms), 3단계 1-3초(캐시 200개). 약어된 버튼 우하단 `~` 표시. CJK 문자 1em, Latin 0.55em 폭 계산. Wide canvas는 충분한 가로폭이라 변경 불필요.
+> **폐지됨.** 3-tier 라벨 축약(픽셀 줄바꿈 → 휴리스틱 약어 → `claude -p --model haiku`
+> 폴백)은 이를 호출하던 키패드 버튼 렌더러와 함께 삭제됐다. `text-utils.ts`,
+> `label-summarizer.ts`(로컬 MLX 서버 POST 포함), `button-renderer`의 축약 경로 모두
+> 도달 불가 상태였다. 현재 키 타일은 `@agentdeck/shared`의 session-slot 렌더러가
+> 그리고, 축약이 필요하면 거기서 처리한다.
 
 ## OC Timeline panel (Phase 4 complete)
 
-OpenClaw 세션 상세 뷰(detail view) 진입 시 E2+E3 합체 400px 와이드 캔버스로 이벤트 타임라인 표시. 리스트 뷰에서는 일반 option/usage dial 유지. 배경 `#000000` (LCD 네이티브 블랙 — 투명 효과). Fisheye 렌더링 (font size 15→10px, opacity 1.0→0.3 보간), grouped entries (연속 중복 60s 윈도우 내 병합), detail mode (push 토글). `timeline-store.ts` 싱글톤, `timeline-renderer.ts` SVG 렌더러. 이벤트 `~/.agentdeck/timeline.json` 디스크 영속, 재연결 시 `events.history` RPC로 오프라인 이벤트 복구. OC Response 버튼: GATEWAY (웹 UI) + GO ON (continue) 프리셋.
+OpenClaw 세션 상세 뷰(detail view) 진입 시 E2+E3 합체 400px 와이드 캔버스로 이벤트 타임라인 표시. 리스트 뷰에서는 일반 option/usage dial 유지. 배경 `#000000` (LCD 네이티브 블랙 — 투명 효과). Fisheye 렌더링 (font size 15→10px, opacity 1.0→0.3 보간), grouped entries (연속 중복 60s 윈도우 내 병합), detail mode (push 토글). **(플러그인 측 폐지)** 이 패널을 그리던 `timeline-store.ts` / `timeline-renderer.ts`는
+삭제됐다 — E2/E3는 이제 Claude/Codex usage 게이지 전용이다. **타임라인 영속성은 데몬이
+소유한다**: `BridgeTimelineStore.enablePersistence()`가 `~/.agentdeck/timeline.json`을
+원자적으로(tmp+rename) 기록하고 기동 시 복원한다. 이전에는 플러그인이 유일한 기록자여서
+Stream Deck 없는 사용자는 영속성이 아예 없었다. Swift 데몬은 자기 컨테이너에 같은 형식
+(평면 JSON 배열)으로 기록하므로 두 구현이 서로의 파일에서 이어받을 수 있다.
+재연결 시 `events.history` RPC로 오프라인 이벤트 복구. OC Response 버튼: GATEWAY (웹 UI) + GO ON (continue) 프리셋.
 
 ### 시각 3계층
 
@@ -84,7 +101,7 @@ OpenClaw 세션 상세 뷰(detail view) 진입 시 E2+E3 합체 400px 와이드 
 3. Final에서 `chat_response` (응답 전문) + `chat_end` (도구/시간 요약) 생성
 4. async `summarizeResponse()` → MLX qwen (port 8800, `/no_think`) → Ollama fallback → 한국어 1줄 요약으로 `chat_end` enrichment
 
-Bridge(daemon)에서만 요약 수행 — plugin은 daemon 경유 단일 경로. LLM 실패 시 60s TTL 후 재시도 (영구 disable 방지). ConnectionManager `FORWARDED_EVENTS`에 `timeline_event`/`timeline_history` 포함.
+Bridge(daemon)에서만 요약 수행 — plugin은 daemon 경유 단일 경로. LLM 실패 시 60s TTL 후 재시도 (영구 disable 방지). 플러그인은 더 이상 `timeline_event`/`timeline_history`를 구독하지 않는다(렌더 대상이 없음) — 두 이벤트는 `FORWARDED_EVENTS`에서 빠졌다.
 
 **Claude Code LLM 요약**: OpenClaw과 동일하게 `Stop` hook에서 `summarizeResponse()` → `upsertEntry()`로 chat_end async enrichment. `extractTopicHint()` 개선 — code fence 내부 스킵, markdown decorator 제거.
 
@@ -100,7 +117,7 @@ Bridge(daemon)에서만 요약 수행 — plugin은 daemon 경유 단일 경로.
 
 **폴백 라벨 개선**: cron/web 시작 `'Prompt sent'` → `'자동 작업'`, LLM 실패 시 `'Completed'` → `extractTopicHint(response)` 폴백 (응답 첫줄 topic 사용).
 
-**mergeHistory dedup**: plugin `mergeHistory()` (bridge 재연결 시 `timeline_history` 수신)에 `deduplicateEntry()` 적용 — 기존 exact `ts:type:raw` 매칭만으로는 semantic dedup 우회됨.
+**mergeHistory dedup**: `mergeHistory()`(bridge 재연결 시 `timeline_history` 수신)에 `deduplicateEntry()` 적용 — 기존 exact `ts:type:raw` 매칭만으로는 semantic dedup 우회됨. 플러그인 사본이 삭제된 뒤로는 데몬 측 `BridgeTimelineStore`에만 해당한다.
 
 **parseLogLine cron 요약**: cron list 테이블 행 (UUID 패턴)을 감지, error 상태만 `"Cron error: {name}"` 한 줄로 요약 표시 (ok/skipped는 스킵). `{"event":...}` JSON blob, 5자 미만 fragment도 필터.
 
@@ -122,7 +139,7 @@ Ulanzi D200H communicates via **stock HID protocol** (VID `0x2207`/PID `0x0019`,
 
 **Direct-HID fallback — fully removed.** Node direct-HID was deleted on 2026-07-08. The dormant Swift `D200hHidModule`, its stand-down arbitration, USB entitlement, direct-device diagnostics, and the legacy `zkswe/` research tree were deleted on 2026-07-14. Both daemons now derive D200H connectivity solely from `ulanzi-plugin` WS presence; the physical rendering/control path remains inside Ulanzi Studio.
 
-**OFFLINE brand mark.** When the daemon is down, the Stream Deck keypad, Stream Deck+ encoder, and D200H all render the canonical **AgentDeck dome-over-deck brand mark** (aquarium-tide cyan on ink) — parity with the macOS/iOS/Android connection overlays and the ESP32 splash. SVG SSOT: `renderAgentDeckMark()` + the `'agentdeck'` glyph + the `'brand'` tone in `shared/src/svg-renderers/session-slot-renderer.ts` (ported from `AgentDeckLogo.swift`). All offline paths route through it (`renderDisconnectedSlot` / `renderOpenAppGrid`/`Quadrant` / `renderOfflineTouchStrip`; D200H `buildSessionDeck` hero; plugin `response`/`voice` dial tiles).
+**OFFLINE brand mark.** When the daemon is down, the Stream Deck keypad, Stream Deck+ encoder, and D200H all render the canonical **AgentDeck dome-over-deck brand mark** (aquarium-tide cyan on ink) — parity with the macOS/iOS/Android connection overlays and the ESP32 splash. SVG SSOT: `renderAgentDeckMark()` + the `'agentdeck'` glyph + the `'brand'` tone in `shared/src/svg-renderers/session-slot-renderer.ts` (ported from `AgentDeckLogo.swift`). All offline paths route through it (`renderDisconnectedSlot` / `renderOpenAppGrid`/`Quadrant` / `renderOfflineTouchStrip`; D200H `buildSessionDeck` hero; plugin 인코더 offline 배너).
 
 ## Display sleep/wake sync
 

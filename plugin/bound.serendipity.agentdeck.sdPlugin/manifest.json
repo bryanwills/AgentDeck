@@ -5,7 +5,7 @@
       "Name": "Session Slot",
       "States": [
         {
-          "Image": "static/imgs/session",
+          "Image": "static/imgs/keys/session",
           "Name": "Session Slot",
           "TitleAlignment": "middle",
           "ShowTitle": false
@@ -19,11 +19,11 @@
     },
     {
       "Icon": "static/imgs/option",
-      "Name": "Action",
+      "Name": "Claude Usage",
       "States": [
         {
-          "Image": "static/imgs/option",
-          "Name": "Action",
+          "Image": "static/imgs/keys/option",
+          "Name": "Claude Usage",
           "ShowTitle": false
         }
       ],
@@ -31,45 +31,21 @@
         "Encoder"
       ],
       "Encoder": {
-        "layout": "layouts/voice-layout.json",
+        "layout": "layouts/encoder-layout.json",
         "TriggerDescription": {
-          "Rotate": "Scroll options / cycle prompts",
-          "Push": "Send prompt / Confirm"
+          "Rotate": "Cycle usage view",
+          "Push": "Refresh usage data"
         }
       },
-      "PropertyInspectorPath": "ui/response-dial-pi.html",
       "UUID": "bound.serendipity.agentdeck.option-dial"
     },
     {
-      "Icon": "static/imgs/voice",
-      "Name": "Voice",
-      "States": [
-        {
-          "Image": "static/imgs/voice",
-          "Name": "Voice",
-          "ShowTitle": false
-        }
-      ],
-      "Controllers": [
-        "Encoder"
-      ],
-      "Encoder": {
-        "layout": "layouts/voice-layout.json",
-        "TriggerDescription": {
-          "Rotate": "Scroll text",
-          "Push": "Record voice",
-          "Touch": "Show status"
-        }
-      },
-      "UUID": "bound.serendipity.agentdeck.voice-dial"
-    },
-    {
       "Icon": "static/imgs/utility",
-      "Name": "Utility",
+      "Name": "Volume",
       "States": [
         {
-          "Image": "static/imgs/utility",
-          "Name": "Utility",
+          "Image": "static/imgs/keys/utility",
+          "Name": "Volume",
           "ShowTitle": false
         }
       ],
@@ -77,23 +53,21 @@
         "Encoder"
       ],
       "Encoder": {
-        "layout": "layouts/voice-layout.json",
+        "layout": "layouts/encoder-layout.json",
         "TriggerDescription": {
-          "Rotate": "Adjust value",
-          "Push": "Toggle/Action",
-          "Touch": "Switch mode"
+          "Rotate": "Adjust volume",
+          "Push": "Toggle mute"
         }
       },
-      "PropertyInspectorPath": "ui/utility-dial-pi.html",
       "UUID": "bound.serendipity.agentdeck.utility-dial"
     },
     {
-      "Icon": "static/imgs/utility",
-      "Name": "Usage",
+      "Icon": "static/imgs/usage",
+      "Name": "Codex Usage",
       "States": [
         {
-          "Image": "static/imgs/utility",
-          "Name": "Usage",
+          "Image": "static/imgs/keys/usage",
+          "Name": "Codex Usage",
           "ShowTitle": false
         }
       ],
@@ -101,21 +75,43 @@
         "Encoder"
       ],
       "Encoder": {
-        "layout": "layouts/voice-layout.json",
+        "layout": "layouts/encoder-layout.json",
         "TriggerDescription": {
-          "Rotate": "Cycle usage pages",
-          "Push": "Refresh usage data",
-          "Touch": "Next page"
+          "Rotate": "Cycle usage view",
+          "Push": "Refresh usage data"
         }
       },
       "UUID": "bound.serendipity.agentdeck.iterm-dial"
+    },
+    {
+      "Icon": "static/imgs/launcher",
+      "Name": "Launcher",
+      "States": [
+        {
+          "Image": "static/imgs/keys/launcher",
+          "Name": "Launcher",
+          "ShowTitle": false
+        }
+      ],
+      "Controllers": [
+        "Encoder"
+      ],
+      "Encoder": {
+        "layout": "layouts/encoder-layout.json",
+        "TriggerDescription": {
+          "Rotate": "Select agent",
+          "Push": "Open agent"
+        }
+      },
+      "PropertyInspectorPath": "ui/launcher-pi.html",
+      "UUID": "bound.serendipity.agentdeck.launcher"
     }
   ],
   "Author": "AgentDeck",
   "Category": "AgentDeck",
   "CategoryIcon": "static/imgs/category",
   "CodePath": "bin/plugin.js",
-  "Description": "Monitor and steer AI coding agents through AgentDeck on Stream Deck and Stream Deck +.",
+  "Description": "Monitor and steer AI coding agents from Stream Deck. Requires the free AgentDeck app for Mac, or the AgentDeck CLI, running on the same Mac.",
   "Icon": "static/imgs/plugin",
   "UUID": "bound.serendipity.agentdeck",
   "Name": "AgentDeck",
@@ -128,16 +124,11 @@
   "OS": [
     {
       "Platform": "mac",
-      "MinimumVersion": "15.0"
-    },
-    {
-      "Platform": "windows",
-      "MinimumVersion": "10"
+      "MinimumVersion": "26.0"
     }
   ],
   "Nodejs": {
-    "Version": "20",
-    "Debug": "enabled"
+    "Version": "20"
   },
   "Profiles": [
     {

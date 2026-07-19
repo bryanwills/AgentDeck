@@ -5,29 +5,19 @@ import {
   UsageEvent,
   ConnectionEvent,
   UserPromptEvent,
-  VoiceStateEvent,
   State,
   PermissionMode,
   OPENCLAW_GATEWAY_PORT,
   type AgentType,
-  type BillingType,
   type DeckSlotConfig,
   type DeckSlotMapEvent,
-  type VoiceAssistantStateEvent,
-  type VoiceAssistantState,
   type SessionInfo,
 } from '@agentdeck/shared';
 
 import { ConnectionManager } from './connection-manager.js';
 import { updateUsageModeData, setUsageRefreshCallback } from './utility-modes/usage.js';
-import { updatePermissionModeData, setPermissionModeSwitchCallback } from './utility-modes/permission-mode.js';
-import { pushApmeEval, type ApmeEvalEntry } from './utility-modes/apme.js';
-import { updateTowerSessions } from './utility-modes/tower.js';
-import { setVoiceTextExitCallback, setEncoderDaemonConnected } from './encoder-registry.js';
+import { setEncoderDaemonConnected } from './encoder-registry.js';
 import { dlog, dinfo } from './log.js';
-import { existsSync } from 'fs';
-import { execSync } from 'child_process';
-import { homedir } from 'os';
 
 // Encoder actions
 import {
@@ -35,22 +25,16 @@ import {
   initOptionDial,
   updateClaudeUsageDial,
   refreshClaudeUsageDial,
-  setOptionSetupRequired,
 } from './actions/option-dial.js';
 import {
-  VoiceDialAction,
-  initVoiceDial,
-  updateVoiceDialState,
-  setVoiceRecordingState,
-  setVoiceTranscription,
-  setVoiceError,
-  updateVoiceAssistantIndicator,
-} from './actions/voice-dial.js';
+  LauncherDialAction,
+  initLauncherDial,
+  updateLauncherDialState,
+} from './actions/launcher-dial.js';
 import {
   UtilityDialAction,
   initUtilityDial,
   updateUtilityDialState,
-  setUtilitySetupRequired,
 } from './actions/utility-dial.js';
 import {
   UsageDialAction,
@@ -62,7 +46,6 @@ import {
   SessionSlotButtonAction,
   initSessionSlots,
   updateSessionSlotSessions,
-  setActiveSession,
   updateDetailViewState,
   exitDetailView,
   isInDetailView,
@@ -74,47 +57,13 @@ import {
   markSessionReviewPending,
   clearSessionReviewPending,
 } from './actions/session-slot-button.js';
-import { timelineStore } from './timeline-store.js';
 import { FocusedDetailState, type FocusedDetailSnapshot } from './focused-detail-state.js';
-
-// ---- Setup detection ----
-let setupRequired = false;
-
-function detectSetupState(): void {
-  const bridgeEverStarted = existsSync(`${homedir()}/.agentdeck/`);
-  let sdcInPath = false;
-  try {
-    execSync('which agentdeck', { stdio: 'ignore', timeout: 3000 });
-    sdcInPath = true;
-  } catch { /* not found */ }
-  setupRequired = !bridgeEverStarted && !sdcInPath;
-  dinfo('Plugin', `detectSetupState: bridgeEverStarted=${bridgeEverStarted} agentdeckInPath=${sdcInPath} setupRequired=${setupRequired}`);
-}
-
-function propagateSetupRequired(value: boolean): void {
-  setupRequired = value;
-  setUtilitySetupRequired(value);
-  setOptionSetupRequired(value);
-}
 
 // ---- Shared state ----
 let currentState = State.DISCONNECTED;
 let currentMode = PermissionMode.DEFAULT;
-let currentTool: string | undefined;
-let currentToolInput: string | undefined;
-let currentProjectName: string | undefined;
-let currentModelName: string | undefined;
-let currentEffortLevel: string | undefined;
-let currentBillingType: BillingType = 'unknown';
 let currentOptions: import('@agentdeck/shared').PromptOption[] = [];
-let currentQuestion: string | undefined;
-let currentNavigable = false;
-let currentCursorIndex = 0;
-let currentSuggestedPrompt: string | undefined;
-let currentSessionStatus: Record<string, unknown> | null = null;
 let proxiedAgentType: AgentType | null = null;
-let currentVoiceAssistantState: VoiceAssistantState = 'disabled';
-let currentGatewayHasError = false;
 
 const focusedDetailState = new FocusedDetailState();
 
@@ -163,7 +112,7 @@ const connMgr = new ConnectionManager();
 
 // ---- Initialize action modules ----
 initOptionDial(connMgr);
-initVoiceDial(connMgr);
+initLauncherDial();
 initUtilityDial();
 initUsageDial(connMgr);
 
@@ -171,10 +120,6 @@ initUsageDial(connMgr);
 setUsageRefreshCallback(() => {
   connMgr.send({ type: 'query_usage' });
 });
-setPermissionModeSwitchCallback(() => {
-  connMgr.send({ type: 'switch_mode' });
-});
-
 // ---- Initialize v4 session slot buttons ----
 initSessionSlots((result) => {
   dlog('Plugin', `sessionSlot action: ${result.action} session=${result.sessionId ?? '-'} port=${result.sessionPort ?? '-'}`);
@@ -263,75 +208,17 @@ initSessionSlots((result) => {
   }
 });
 
-// Refresh the encoder LCDs (E1 utility, E2 Claude usage, E3 Codex usage) when
-// voice-text takeover exits and releases the borrowed panels.
-setVoiceTextExitCallback(() => {
-  updateUtilityDialState(currentState);
-  refreshClaudeUsageDial();
-  updateUsageDialState();
-});
-
 // ---- Bridge event handlers ----
 
 connMgr.on('state_update', (ev: StateUpdateEvent) => {
   dlog('Plugin', `state_update: ${ev.state} mode=${ev.permissionMode} tool=${ev.currentTool || '-'} project=${ev.projectName || '-'} opts=${ev.options?.length ?? '-'} nav=${ev.navigable ?? '-'}`);
 
-  // Auto-resolve setup state on first bridge connection
-  if (setupRequired) {
-    propagateSetupRequired(false);
-  }
-
   currentState = ev.state;
   currentMode = ev.permissionMode;
-  updatePermissionModeData(ev.permissionMode); // v4: feed to E1 utility mode
-  currentTool = ev.currentTool;
-  currentToolInput = ev.toolInput;
-  if (ev.projectName) currentProjectName = ev.projectName;
-  if (ev.modelName) currentModelName = ev.modelName;
-  if (ev.effortLevel !== undefined) currentEffortLevel = ev.effortLevel;
-  if (ev.billingType) currentBillingType = ev.billingType;
-  if (ev.gatewayAvailable !== undefined) {
-    connMgr.setBridgeGatewayAvailable(ev.gatewayAvailable);
-  }
-  if (ev.gatewayHasError !== undefined) {
-    currentGatewayHasError = ev.gatewayHasError;
-  }
 
   // Track proxied agent type from daemon (state_update.agentType overrides connection-level detection)
   if (ev.agentType === 'openclaw' || ev.agentType === 'claude-code' || ev.agentType === 'codex-cli' || ev.agentType === 'codex-app' || ev.agentType === 'opencode' || ev.agentType === 'antigravity') {
     proxiedAgentType = ev.agentType;
-  }
-
-  // Capture question from state_update
-  if (ev.question !== undefined) {
-    currentQuestion = ev.question;
-  }
-
-  // Capture navigable/cursorIndex
-  if (ev.navigable !== undefined) {
-    currentNavigable = ev.navigable;
-  }
-  if (ev.cursorIndex !== undefined) {
-    currentCursorIndex = ev.cursorIndex;
-  }
-
-  // Capture suggested prompt
-  if (ev.suggestedPrompt !== undefined) {
-    currentSuggestedPrompt = ev.suggestedPrompt;
-  }
-  // Capture session status (OpenClaw)
-  if (ev.sessionStatus !== undefined) {
-    currentSessionStatus = ev.sessionStatus;
-  }
-  // Voice assistant state piggybacked on state_update
-  if (ev.voiceAssistantState !== undefined) {
-    currentVoiceAssistantState = ev.voiceAssistantState;
-    updateVoiceAssistantIndicator(ev.voiceAssistantState, ev.voiceAssistantText);
-  }
-
-  // Clear suggestion on non-IDLE states
-  if (ev.state !== State.IDLE) {
-    currentSuggestedPrompt = undefined;
   }
 
   // Use options from state_update atomically (avoids race with separate prompt_options)
@@ -343,10 +230,6 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
     ev.state !== State.AWAITING_DIFF
   ) {
     currentOptions = [];
-    currentQuestion = undefined;
-    currentNavigable = false;
-    currentCursorIndex = 0;
-    currentToolInput = undefined;
   }
 
   // Keypad detail state is session-owned. Never render it from the plugin's
@@ -367,7 +250,6 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
 connMgr.on('prompt_options', (ev: PromptOptionsEvent) => {
   dlog('Plugin', `prompt_options: source=${ev.focusedSessionId || ev.sessionId || '-'} type=${ev.promptType} count=${ev.options.length} q=${ev.question ? `"${ev.question.slice(0, 40)}"` : '-'}`);
   currentOptions = ev.options;
-  currentQuestion = ev.question;
   if (isInDetailView()) {
     const focused = getFocusedSession();
     const detail = focused ? focusedDetailState.applyOptions(ev, focused) : null;
@@ -418,11 +300,6 @@ connMgr.on('connection', (ev: ConnectionEvent) => {
     focusedDetailState.clear();
     currentState = State.DISCONNECTED;
     currentOptions = [];
-    currentQuestion = undefined;
-    currentNavigable = false;
-    currentCursorIndex = 0;
-    currentToolInput = undefined;
-    currentSuggestedPrompt = undefined;
     broadcastStateUpdate();
   }
   // 'connected' case: state_update (sent before connection event) already
@@ -432,7 +309,7 @@ connMgr.on('connection', (ev: ConnectionEvent) => {
 // ---- v4 Session Slot: sessions_list → slot assignment ----
 connMgr.on('sessions_list', (ev: { type: 'sessions_list'; sessions: SessionInfo[] }) => {
   dlog('Plugin', `sessions_list: ${ev.sessions.length} sessions`);
-  updateSessionSlotSessions(ev.sessions, connMgr.isGatewayAvailable());
+  updateSessionSlotSessions(ev.sessions);
   if (isInDetailView()) {
     const focused = getFocusedSession();
     const snapshot = focusedDetailState.snapshot;
@@ -444,17 +321,6 @@ connMgr.on('sessions_list', (ev: { type: 'sessions_list'; sessions: SessionInfo[
   } else {
     focusedDetailState.clear();
   }
-  // Forward to Control Tower utility mode
-  updateTowerSessions(
-    ev.sessions.map(s => ({
-      sessionId: s.id ?? '',
-      projectName: s.projectName ?? '',
-      agentType: s.agentType ?? '',
-      state: s.state ?? 'disconnected',
-      modelName: s.modelName,
-    })),
-    connMgr.isConnected(),
-  );
 });
 
 connMgr.on('user_prompt', (ev: UserPromptEvent) => {
@@ -467,66 +333,6 @@ connMgr.on('user_prompt', (ev: UserPromptEvent) => {
 connMgr.on('review_status', (ev: { type: 'review_status'; sessionId: string; status: string; message?: string }) => {
   dlog('Plugin', `review_status: ${ev.sessionId} ${ev.status}${ev.message ? ` (${ev.message})` : ''}`);
   if (ev.status === 'error' && ev.sessionId) clearSessionReviewPending(ev.sessionId);
-});
-
-connMgr.on('voice_state', (ev: VoiceStateEvent) => {
-  dlog('Plugin', `voice_state: ${ev.state} text=${ev.text ? `"${ev.text.slice(0, 40)}"` : '-'} err=${ev.error || '-'}`);
-  if (ev.state === 'error') {
-    setVoiceError(ev.error);
-  } else {
-    const vs = ev.state === 'recording' ? 'recording'
-      : ev.state === 'transcribing' ? 'transcribing'
-      : 'idle';
-    setVoiceRecordingState(vs);
-  }
-  // Show transcribed text on voice dial LCD
-  if (ev.state === 'idle' && ev.text) {
-    setVoiceTranscription(ev.text);
-  }
-});
-
-connMgr.on('voice_assistant_state', (ev: VoiceAssistantStateEvent) => {
-  dlog('Plugin', `voice_assistant_state: ${ev.state} text=${ev.text ? `"${ev.text.slice(0, 40)}"` : '-'}`);
-  currentVoiceAssistantState = ev.state;
-  updateVoiceAssistantIndicator(ev.state, ev.text);
-  broadcastStateUpdate();
-});
-
-connMgr.on('timeline_event', (ev: { type: 'timeline_event'; entry: import('@agentdeck/shared').TimelineEntry; upsert?: boolean }) => {
-  dlog('Plugin', `timeline_event from bridge: ${ev.entry.type} "${ev.entry.raw.slice(0, 60)}"${ev.upsert ? ' (upsert)' : ''}`);
-  if (ev.upsert) {
-    // Find existing entry with same type and ts within 1s tolerance
-    const idx = timelineStore.findLastIndex(ev.entry.type);
-    if (idx >= 0) {
-      timelineStore.updateEntryRaw(idx, ev.entry.raw);
-    } else {
-      timelineStore.addEntry(ev.entry);
-    }
-  } else {
-    timelineStore.addEntry(ev.entry);
-  }
-
-  // Forward eval_result entries to APME utility mode
-  if (ev.entry.type === 'eval_result') {
-    const raw = ev.entry.raw;
-    const scoreMatch = raw.match(/(\d+)%/);
-    const catMatch = raw.match(/\[(\w+)\]/);
-    const modelMatch = raw.match(/model=(\S+)/);
-    if (scoreMatch) {
-      pushApmeEval({
-        runId: '',
-        category: catMatch?.[1] ?? 'general',
-        overall: parseInt(scoreMatch[1], 10),
-        model: modelMatch?.[1] ?? '',
-        ts: ev.entry.ts,
-      });
-    }
-  }
-});
-
-connMgr.on('timeline_history', (ev: { type: 'timeline_history'; entries: import('@agentdeck/shared').TimelineEntry[] }) => {
-  dlog('Plugin', `timeline_history from bridge: ${ev.entries.length} entries`);
-  timelineStore.mergeHistory(ev.entries);
 });
 
 // ---- Display sleep/wake dimming ----
@@ -628,15 +434,8 @@ connMgr.on('disconnected', () => {
   setDaemonConnected(false);
   setEncoderDaemonConnected(false);
   proxiedAgentType = null;
-  currentVoiceAssistantState = 'disabled';
-  updateVoiceAssistantIndicator('disabled');
   currentState = State.DISCONNECTED;
   currentOptions = [];
-  currentQuestion = undefined;
-  currentNavigable = false;
-  currentCursorIndex = 0;
-  currentToolInput = undefined;
-  currentSuggestedPrompt = undefined;
   broadcastStateUpdate();
 });
 
@@ -647,13 +446,12 @@ function broadcastStateUpdate(): void {
   dlog('Plugin', `broadcast: state=${currentState} mode=${currentMode} opts=${currentOptions.length}`);
 
   // Phase 2 SD+ encoder roles are fixed: E1 utility, E2 Claude usage, E3 Codex
-  // usage, E4 voice. None get commandeered for AWAITING anymore — option /
+  // usage, E4 launcher. None get commandeered for AWAITING anymore — option /
   // permission selection lives on the keypad detail view (session-slot), which
-  // is driven by updateDetailViewState. The usage encoders are permanent; we
-  // still repaint them here so display-wake / voice-text-takeover-exit restore
-  // them. (Each refresh is a no-op SVG redraw and self-gates on voice-text
-  // takeover + daemon-down.)
-  updateVoiceDialState(currentState);
+  // is driven by updateDetailViewState. The encoders are permanent; we still
+  // repaint them here so display-wake restores them. (Each refresh is a no-op
+  // SVG redraw and self-gates on daemon-down.)
+  updateLauncherDialState();
   updateUtilityDialState(currentState);
   refreshClaudeUsageDial();
   updateUsageDialState();
@@ -661,7 +459,7 @@ function broadcastStateUpdate(): void {
 
 // ---- Register actions ----
 streamDeck.actions.registerAction(new ResponseDialAction());
-streamDeck.actions.registerAction(new VoiceDialAction());
+streamDeck.actions.registerAction(new LauncherDialAction());
 streamDeck.actions.registerAction(new UtilityDialAction());
 streamDeck.actions.registerAction(new UsageDialAction());
 streamDeck.actions.registerAction(new SessionSlotButtonAction());
@@ -672,7 +470,7 @@ streamDeck.actions.registerAction(new SessionSlotButtonAction());
 const UUID_TO_ACTION_TYPE: Record<string, string> = {
   'session-slot': 'session-slot',
   'response-dial': 'option-dial',
-  'voice-dial': 'voice-dial',
+  'launcher': 'launcher',
   'utility-dial': 'utility-dial',
   'iterm-dial': 'iterm-dial',
 };
@@ -750,11 +548,6 @@ function sendSlotMap(): void {
 
 streamDeck.connect().then(() => {
   dinfo('Plugin', 'Stream Deck connected, starting daemon-only connection');
-  detectSetupState();
-  if (setupRequired) {
-    propagateSetupRequired(true);
-    broadcastStateUpdate();
-  }
   connMgr.start();
 
   // Auto-switch to the bundled profile that matches the physical key grid.

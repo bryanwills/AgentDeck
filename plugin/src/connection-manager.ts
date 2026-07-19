@@ -20,6 +20,11 @@ import { dlog, dinfo, dwarn } from './log.js';
 
 const TAG = 'ConnMgr';
 
+/** How long a port that failed to connect is skipped during discovery. Long
+ *  enough to fall through to the other daemon.json candidate on the next
+ *  backoff tick, short enough that a daemon restart is picked up quickly. */
+const PORT_QUARANTINE_MS = 30_000;
+
 export interface ConnectionSnapshot {
   connected: boolean;
   bridgePort: number;
@@ -37,11 +42,7 @@ const FORWARDED_EVENTS = [
   'usage_update',
   'connection',
   'user_prompt',
-  'voice_state',
-  'timeline_event',
-  'timeline_history',
   'display_state',
-  'voice_assistant_state',
   'sessions_list',
   'review_status',
 ] as const;
@@ -49,8 +50,9 @@ const FORWARDED_EVENTS = [
 export class ConnectionManager extends EventEmitter implements AgentLink {
   readonly bridge: BridgeClient;
   private started = false;
-  private gatewayAvailable = false;
   private lastDaemonPort: number | null = null;
+  /** port → epoch-ms of the failure that quarantined it. */
+  private portQuarantine = new Map<number, number>();
   private daemonStatus: ConnectionSnapshot['daemonStatus'] = 'unknown';
   private lastProbeAt = 0;
   private lastRetryAt: number | null = null;
@@ -158,17 +160,6 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
     this.bridge.send({ type: 'switch_agent', agent: 'claude-code' });
   }
 
-  /**
-   * Whether OpenClaw Gateway is available (reported by daemon).
-   */
-  setBridgeGatewayAvailable(available: boolean): void {
-    this.gatewayAvailable = available;
-  }
-
-  isGatewayAvailable(): boolean {
-    return this.gatewayAvailable;
-  }
-
   // ===== Private =====
 
   /** Read daemon.json to find the daemon's port.
@@ -177,6 +168,15 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
    * daemon (App Store sandboxed macOS app) writes inside the app sandbox.
    * A legacy App Group path remains as a read fallback for pre-1.0 App Store
    * candidates. First live match wins.
+   *
+   * A live pid is NOT proof the port is served: a daemon can be wedged, a
+   * daemon.json can outlive the process that wrote it, and pids get recycled.
+   * Without the quarantine below, one unhealthy candidate permanently shadows
+   * the healthy one behind it — the plugin would sit "offline" forever on a
+   * machine where the other daemon is running fine. Ports that fail to connect
+   * are skipped for a cooldown so discovery falls through to the next
+   * candidate, and the quarantine self-clears once every candidate is
+   * exhausted so recovery never requires a plugin restart.
    */
   private findDaemonPort(): number | null {
     this.lastProbeAt = Date.now();
@@ -192,23 +192,58 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
           join(home, 'Library', 'Group Containers',
                'group.bound.serendipity.agent.deck', 'daemon.json'),
         ];
-    for (const daemonFile of candidates) {
-      try {
-        const data = readFileSync(daemonFile, 'utf-8');
-        const info = JSON.parse(data) as { port: number; pid: number };
-        try { process.kill(info.pid, 0); } catch { continue; }
-        this.lastDaemonPort = info.port;
-        this.daemonStatus = 'found';
-        this.discoveryMessage = daemonFile;
-        return info.port;
-      } catch {
-        continue;
+
+    const readCandidates = (): Array<{ file: string; port: number }> => {
+      const out: Array<{ file: string; port: number }> = [];
+      for (const daemonFile of candidates) {
+        try {
+          const data = readFileSync(daemonFile, 'utf-8');
+          const info = JSON.parse(data) as { port: number; pid: number };
+          try { process.kill(info.pid, 0); } catch { continue; }
+          out.push({ file: daemonFile, port: info.port });
+        } catch {
+          continue;
+        }
       }
+      return out;
+    };
+
+    const live = readCandidates();
+    const now = Date.now();
+    let fresh = live.filter(c => {
+      const failedAt = this.portQuarantine.get(c.port);
+      return failedAt === undefined || now - failedAt >= PORT_QUARANTINE_MS;
+    });
+
+    // Every live candidate is quarantined — drop the quarantine and retry them
+    // all rather than reporting "missing" while daemons are demonstrably up.
+    if (fresh.length === 0 && live.length > 0) {
+      this.portQuarantine.clear();
+      fresh = live;
     }
+
+    const chosen = fresh[0];
+    if (chosen) {
+      this.lastDaemonPort = chosen.port;
+      this.daemonStatus = 'found';
+      this.discoveryMessage = chosen.file;
+      return chosen.port;
+    }
+
     this.lastDaemonPort = null;
     this.daemonStatus = 'missing';
     this.discoveryMessage = 'daemon.json not found';
     return null;
+  }
+
+  /** Quarantine the port we just failed on so the next probe tries the next
+   *  daemon.json candidate instead of retrying the same dead endpoint. */
+  private quarantineCurrentPort(): void {
+    const port = this.bridge.getPort();
+    if (port > 0) {
+      this.portQuarantine.set(port, Date.now());
+      dlog(TAG, `quarantined port ${port} for ${PORT_QUARANTINE_MS}ms`);
+    }
   }
 
   private setupBridgeListeners(): void {
@@ -221,11 +256,18 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
 
     this.bridge.on('connected', () => {
       dinfo(TAG, 'Daemon connected');
+      // Proven good — clear the quarantine so a later failure gets a full
+      // sweep of candidates rather than a partially-exhausted one.
+      this.portQuarantine.clear();
       this.emit('connected');
     });
 
     this.bridge.on('disconnected', () => {
       dinfo(TAG, 'Daemon disconnected');
+      // The endpoint we were told about did not hold up. Quarantine it so the
+      // next discovery pass can fall through to the other daemon (Swift app vs
+      // CLI) instead of retrying this one forever.
+      this.quarantineCurrentPort();
       this.emit('disconnected');
     });
 

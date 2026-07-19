@@ -36,7 +36,7 @@ function stateFromSession(session: SessionInfo): State {
 }
 
 /** Prefer an explicit user focus, then the event's source session. */
-export function eventSessionId(ev: { sessionId?: string; focusedSessionId?: string }): string | undefined {
+function eventSessionId(ev: { sessionId?: string; focusedSessionId?: string }): string | undefined {
   return ev.focusedSessionId || ev.sessionId || undefined;
 }
 

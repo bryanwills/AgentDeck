@@ -1,6 +1,12 @@
 # Stream Deck+ Layout Reference
 
 > **Superseded (historical reference).** This documents the retired **v3** layout. The current session-per-button model is [v4 Layout](v4-layout.md); rendering conventions live in [Plugin Conventions](plugin-conventions.md). Kept for the encoder/dial diagrams and v3→v4 migration context only.
+>
+> Several features below no longer exist anywhere in the product, not merely in
+> this layout: the **Voice dial** (push-to-talk + whisper transcription + voice-text
+> takeover) and the **multi-mode Utility dial** (mic / media / timer) were removed
+> before the Marketplace submission — E1 is Volume-only and E4 is the Launcher. See
+> [v4 Layout § Marketplace submission scope](v4-layout.md#marketplace-submission-scope-2026-07-19).
 
 Detailed reference for the Stream Deck+ button and encoder layout in AgentDeck v3.
 

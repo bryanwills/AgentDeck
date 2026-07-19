@@ -36,14 +36,14 @@ describe('SessionSlotManager detail layout', () => {
     const manager = new SessionSlotManager();
     manager.updateSessions([
       makeSession({ id: 'codex:old', agentType: 'codex-cli', state: State.IDLE, startedAt: '2026-04-11T10:00:00Z' }),
-    ], false);
+    ]);
     manager.enterDetailView('codex:old');
     expect(manager.focusedSessionId).toBe('codex:old');
 
     manager.updateSessions([
       makeSession({ id: 'codex:old', agentType: 'codex-cli', state: State.IDLE, startedAt: '2026-04-11T10:00:00Z' }),
       makeSession({ id: 'codex:new', agentType: 'codex-cli', state: State.PROCESSING, startedAt: '2026-04-11T10:02:00Z' }),
-    ], false);
+    ]);
 
     expect(manager.view).toBe('detail');
     expect(manager.focusedSessionId).toBe('codex:new');
@@ -54,10 +54,10 @@ describe('SessionSlotManager detail layout', () => {
     const manager = new SessionSlotManager();
     manager.updateSessions([
       makeSession({ id: 'claude:1', agentType: 'claude-code', state: State.IDLE }),
-    ], false);
+    ]);
     manager.enterDetailView('claude:1');
 
-    manager.updateSessions([], false);
+    manager.updateSessions([]);
 
     expect(manager.view).toBe('list');
     expect(manager.focusedSessionId).toBeNull();
@@ -85,7 +85,7 @@ describe('SessionSlotManager detail layout', () => {
         state: State.IDLE,
         startedAt: '2026-04-11T10:01:00Z',
       }),
-    ], false);
+    ]);
 
     expect(manager.sessions.map(s => s.id)).toEqual(['claude:1', 'codex:new']);
     expect(manager.sessions[1]).toMatchObject({
@@ -98,7 +98,7 @@ describe('SessionSlotManager detail layout', () => {
 
   it('renders connected no-session list as status cards instead of text-only empty buttons', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions([], false);
+    manager.updateSessions([]);
 
     expect(manager.getSlotConfig(0, SD_PLUS_LAYOUT)).toMatchObject({
       type: 'status',
@@ -129,7 +129,7 @@ describe('SessionSlotManager detail layout', () => {
         state: State.PROCESSING,
         modelName: 'gpt-5',
       }),
-    ], true);
+    ]);
     manager.enterDetailView('openclaw');
     manager.updateDetailState(State.PROCESSING, [], 'logs.tail', 'tail latest logs', undefined, 'gpt-5');
 
@@ -161,7 +161,7 @@ describe('SessionSlotManager detail layout', () => {
         agentType: 'openclaw',
         state: State.PROCESSING,
       }),
-    ], true);
+    ]);
     manager.enterDetailView('openclaw');
     manager.updateDetailState(State.PROCESSING, []);
 
@@ -180,7 +180,7 @@ describe('SessionSlotManager detail layout', () => {
   it('aliases the model name on detail MODEL surfaces (status card + OpenClaw preset)', () => {
     // Claude Code IDLE: MODEL status card subtitle uses the alias, not the raw upstream id.
     const cc = new SessionSlotManager();
-    cc.updateSessions([makeSession({ modelName: 'claude-sonnet-4-6', effortLevel: undefined })], false);
+    cc.updateSessions([makeSession({ modelName: 'claude-sonnet-4-6', effortLevel: undefined })]);
     cc.enterDetailView('session-1');
     cc.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'claude-sonnet-4-6');
     const ccModelCard = [0, 1, 2, 3, 4, 5, 6, 7]
@@ -190,7 +190,7 @@ describe('SessionSlotManager detail layout', () => {
 
     // OpenClaw IDLE: model preset subtitle is aliased too.
     const oc = new SessionSlotManager();
-    oc.updateSessions([makeSession({ id: 'oc', agentType: 'openclaw', modelName: 'claude-opus-4-7' })], true);
+    oc.updateSessions([makeSession({ id: 'oc', agentType: 'openclaw', modelName: 'claude-opus-4-7' })]);
     oc.enterDetailView('oc');
     oc.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'claude-opus-4-7');
     const ocModelPreset = [0, 1, 2, 3, 4, 5, 6, 7]
@@ -201,7 +201,7 @@ describe('SessionSlotManager detail layout', () => {
 
   it('renders the MODEL tile exactly once in Claude PROCESSING detail (no duplicate)', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions([makeSession({ state: State.PROCESSING, modelName: 'claude-opus-4-8' })], false);
+    manager.updateSessions([makeSession({ state: State.PROCESSING, modelName: 'claude-opus-4-8' })]);
     manager.enterDetailView('session-1');
     manager.updateDetailState(State.PROCESSING, [], 'Edit', 'cli.ts', undefined, 'claude-opus-4-8', 'acceptEdits');
 
@@ -213,7 +213,7 @@ describe('SessionSlotManager detail layout', () => {
 
   it('does not duplicate MODEL on OpenClaw idle (preset + status card)', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions([makeSession({ id: 'oc', agentType: 'openclaw', modelName: 'gpt-5' })], true);
+    manager.updateSessions([makeSession({ id: 'oc', agentType: 'openclaw', modelName: 'gpt-5' })]);
     manager.enterDetailView('oc');
     manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'gpt-5');
 
@@ -226,7 +226,7 @@ describe('SessionSlotManager detail layout', () => {
 
   it('does not render a READY/idle tile while a Claude session is PROCESSING', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions([makeSession({ state: State.PROCESSING, modelName: 'claude-opus-4-8' })], false);
+    manager.updateSessions([makeSession({ state: State.PROCESSING, modelName: 'claude-opus-4-8' })]);
     manager.enterDetailView('session-1');
     manager.updateDetailState(State.PROCESSING, [], 'Edit', 'cli.ts', undefined, 'claude-opus-4-8', 'acceptEdits');
 
@@ -244,7 +244,7 @@ describe('SessionSlotManager detail layout', () => {
       port: 0,
       state: State.PROCESSING,
       currentTool: 'Edit',
-    })], false);
+    })]);
     manager.enterDetailView('observed:claude:1');
 
     const configs = Array.from({ length: SD_PLUS_LAYOUT.keyCount }, (_, i) =>
@@ -255,7 +255,7 @@ describe('SessionSlotManager detail layout', () => {
 
   it('does not render a STANDBY/idle tile while an OpenClaw session is PROCESSING', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions([makeSession({ id: 'oc', agentType: 'openclaw', state: State.PROCESSING, modelName: 'gpt-5' })], true);
+    manager.updateSessions([makeSession({ id: 'oc', agentType: 'openclaw', state: State.PROCESSING, modelName: 'gpt-5' })]);
     manager.enterDetailView('oc');
     manager.updateDetailState(State.PROCESSING, [], 'route', undefined, undefined, 'gpt-5');
 
@@ -267,7 +267,7 @@ describe('SessionSlotManager detail layout', () => {
 
   it('uses actual parser options and reserves MORE only when awaiting overflow exists', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions([makeSession({ state: State.AWAITING_OPTION })], false);
+    manager.updateSessions([makeSession({ state: State.AWAITING_OPTION })]);
     manager.enterDetailView('session-1');
     manager.updateDetailState(State.AWAITING_OPTION, [
       { index: 0, label: 'Yes' },
@@ -289,7 +289,7 @@ describe('SessionSlotManager detail layout', () => {
 describe('SD+ keypad relocation (Phase 2)', () => {
   it('AWAITING permission renders selectable option buttons + ESC on the SD+ keypad', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions([makeSession({ state: State.AWAITING_PERMISSION })], false);
+    manager.updateSessions([makeSession({ state: State.AWAITING_PERMISSION })]);
     manager.enterDetailView('session-1');
     manager.updateDetailState(State.AWAITING_PERMISSION, [
       { index: 0, label: 'Yes', shortcut: 'y' },
@@ -308,7 +308,7 @@ describe('SD+ keypad relocation (Phase 2)', () => {
 
   it('shows a SUGGESTED quick-send button leading the IDLE detail content on SD+', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions([makeSession({ state: State.IDLE })], false);
+    manager.updateSessions([makeSession({ state: State.IDLE })]);
     manager.enterDetailView('session-1');
     manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'claude-opus-4-8', undefined, undefined, 'run the test suite');
 
@@ -325,7 +325,7 @@ describe('SD+ keypad relocation (Phase 2)', () => {
 
   it('does NOT add a SUGGESTED button on classic Stream Deck (behavior unchanged)', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions([makeSession({ state: State.IDLE })], false);
+    manager.updateSessions([makeSession({ state: State.IDLE })]);
     manager.enterDetailView('session-1');
     manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'claude-opus-4-8', undefined, undefined, 'run the test suite');
 
@@ -339,7 +339,7 @@ describe('SD+ keypad relocation (Phase 2)', () => {
 
   it('drops the SUGGESTED button when the session leaves IDLE', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions([makeSession({ state: State.IDLE })], false);
+    manager.updateSessions([makeSession({ state: State.IDLE })]);
     manager.enterDetailView('session-1');
     manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'm', undefined, undefined, 'do the thing');
     expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ preset: { label: 'SUGGESTED' } });
@@ -365,7 +365,7 @@ describe('SessionSlotManager list-view usage tiles', () => {
   it('pins Claude 5H/7D to the last two keys of a classic Stream Deck (no Codex)', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17 });
-    manager.updateSessions(fewSessions(3), false);
+    manager.updateSessions(fewSessions(3));
 
     expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '7D', usagePercent: 17, usageKnown: true, usageAgent: 'claude', usageWindow: '7d' });
     expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '5H', usagePercent: 42, usageKnown: true, usageAgent: 'claude', usageWindow: '5h' });
@@ -382,7 +382,7 @@ describe('SessionSlotManager list-view usage tiles', () => {
       sevenDayResetsAt: '2099-01-02T00:00:00Z',
       codexRateLimits: CODEX_LIMITS,
     });
-    manager.updateSessions(fewSessions(3), false);
+    manager.updateSessions(fewSessions(3));
 
     // Block is the last 4 keys: 11=C5h, 12=C7d, 13=CX5h, 14=CX7d.
     expect(manager.getSlotConfig(11, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '5H', usageAgent: 'claude', usageWindow: '5h', usagePercent: 42 });
@@ -397,7 +397,7 @@ describe('SessionSlotManager list-view usage tiles', () => {
   it('hides Codex tiles when only Claude reports quota (reserve 2, not 4)', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17 });
-    manager.updateSessions(fewSessions(3), false);
+    manager.updateSessions(fewSessions(3));
 
     const types = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type);
     expect(types.filter((t) => t === 'usage')).toHaveLength(2);
@@ -409,7 +409,7 @@ describe('SessionSlotManager list-view usage tiles', () => {
   it('hides Claude tiles when only Codex reports quota (reserve 2 Codex tiles)', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ codexRateLimits: CODEX_LIMITS });
-    manager.updateSessions(fewSessions(3), false);
+    manager.updateSessions(fewSessions(3));
 
     expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '5H', usageAgent: 'codex' });
     expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '7D', usageAgent: 'codex' });
@@ -420,7 +420,7 @@ describe('SessionSlotManager list-view usage tiles', () => {
   it('does NOT reserve usage on Stream Deck+ (encoder carries usage)', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17, codexRateLimits: CODEX_LIMITS });
-    manager.updateSessions(fewSessions(3), false);
+    manager.updateSessions(fewSessions(3));
 
     for (let slot = 0; slot < 8; slot++) {
       expect(manager.getSlotConfig(slot, SD_PLUS_LAYOUT).type).not.toBe('usage');
@@ -429,7 +429,7 @@ describe('SessionSlotManager list-view usage tiles', () => {
 
   it('reserves NO usage keys when no quota was fed (hide-if-absent)', () => {
     const manager = new SessionSlotManager();
-    manager.updateSessions(fewSessions(1), false);
+    manager.updateSessions(fewSessions(1));
     const types = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type);
     expect(types.filter((t) => t === 'usage')).toHaveLength(0);
   });
@@ -437,7 +437,7 @@ describe('SessionSlotManager list-view usage tiles', () => {
   it('drops Claude tiles when its quota goes stale (hide-if-absent on stale)', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17 });
-    manager.updateSessions(fewSessions(3), false);
+    manager.updateSessions(fewSessions(3));
     expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT).type).toBe('usage');
 
     manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17, usageStale: true });
@@ -448,7 +448,7 @@ describe('SessionSlotManager list-view usage tiles', () => {
   it('fits 13 sessions on a classic deck without paging (15 keys − 2 usage)', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 1, sevenDayPercent: 2 });
-    manager.updateSessions(fewSessions(13), false);
+    manager.updateSessions(fewSessions(13));
 
     const types = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type);
     expect(types.filter((t) => t === 'session')).toHaveLength(13);
@@ -459,7 +459,7 @@ describe('SessionSlotManager list-view usage tiles', () => {
   it('paginates over capacity: NEXT→ at slot 12, usage at 13/14', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 1, sevenDayPercent: 2 });
-    manager.updateSessions(fewSessions(15), false); // > 13 cap → 12/page + NEXT
+    manager.updateSessions(fewSessions(15)); // > 13 cap → 12/page + NEXT
 
     expect(manager.getSlotConfig(12, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'next-page', label: '1/2' });
     expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT).type).toBe('usage');
@@ -472,7 +472,7 @@ describe('SessionSlotManager list-view usage tiles', () => {
   it('repositions NEXT→ ahead of a 4-key usage block when paginating', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 1, sevenDayPercent: 2, codexRateLimits: CODEX_LIMITS });
-    manager.updateSessions(fewSessions(15), false); // > (15 − 4) cap → paginate
+    manager.updateSessions(fewSessions(15)); // > (15 − 4) cap → paginate
 
     // NEXT→ sits just before the reserved block: keyCount(15) − 1 − reserve(4) = 10.
     expect(manager.getSlotConfig(10, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'next-page' });
@@ -487,14 +487,14 @@ describe('SessionSlotManager list-view usage tiles', () => {
   it('pressing a usage tile resolves to refresh-usage', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 5, sevenDayPercent: 6 });
-    manager.updateSessions(fewSessions(2), false);
+    manager.updateSessions(fewSessions(2));
     expect(manager.handleSlotPress(14, SD_CLASSIC_LAYOUT)).toEqual({ action: 'refresh-usage' });
   });
 
   it('shows usage tiles even with zero sessions', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 5, sevenDayPercent: 6 });
-    manager.updateSessions([], false);
+    manager.updateSessions([]);
     expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT).type).toBe('usage');
     expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT).type).toBe('usage');
     // Status cards still render on the front keys.

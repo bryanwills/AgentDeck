@@ -6,7 +6,8 @@
 
 import type { TimelineEntry } from './types.js';
 import { deduplicateEntry, formatDurationSec, normalizeTimelineEntryForStorage } from '@agentdeck/shared';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from 'fs';
+import { dirname } from 'path';
 
 type EntryListener = (entry: TimelineEntry, upsert?: boolean) => void;
 /** Attribute an entry with session-scoped metadata (sessionId, projectName,
@@ -21,6 +22,11 @@ const MAX_ENTRIES = 200;
  *  a long task's `task_start` must not scroll away while its turns stream
  *  in, or the eventual `task_end` renders as an unpaired orphan. ~30 pairs. */
 const MAX_TASK_ENTRIES = 60;
+
+/** Coalescing window for persistence writes. Timeline mutation is bursty (a
+ *  single turn emits chat_start + several tool rows + chat_response + chat_end),
+ *  so writing per mutation would amplify a turn into a dozen disk writes. */
+const PERSIST_DEBOUNCE_MS = 500;
 
 function isTaskRow(e: Pick<TimelineEntry, 'type'>): boolean {
   return e.type === 'task_start' || e.type === 'task_end' || e.type === 'task_milestone';
@@ -38,6 +44,12 @@ export class BridgeTimelineStore {
   private entries: TimelineEntry[] = [];
   private listeners: EntryListener[] = [];
   private attributor: EntryAttributor | null = null;
+  /** Set only by the daemon (see enablePersistence). Session bridges share this
+   *  class but must never write: several can run at once and would clobber each
+   *  other and the daemon's file. */
+  private persistPath: string | null = null;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private dirty = false;
   /** Phase 6 cutover (default OFF). When true, locally-emitted chat/tool rows
    *  are dropped — the SessionSample projection (added via `bypassSuppression`)
    *  becomes the single source. Relayed + projected entries bypass this. */
@@ -103,6 +115,7 @@ export class BridgeTimelineStore {
       if (result.removeChatStartIndex != null) {
         this.entries.splice(result.removeChatStartIndex, 1);
       }
+      this.schedulePersist();
       for (const cb of this.listeners) cb(existing, true);
       return;
     }
@@ -113,6 +126,7 @@ export class BridgeTimelineStore {
     if (this.entries.length > MAX_ENTRIES) {
       this.evictOne();
     }
+    this.schedulePersist();
     for (const cb of this.listeners) cb(result.entry);
   }
 
@@ -160,6 +174,66 @@ export class BridgeTimelineStore {
     // Pathological: buffer is 100% task rows — fall back to plain FIFO so the
     // buffer stays bounded.
     this.entries.shift();
+  }
+
+  /**
+   * Take ownership of on-disk persistence.
+   *
+   * The daemon is the timeline's source of truth — every surface's entries flow
+   * through it — so it is also the only process that may write the file. Call
+   * this once at daemon startup, AFTER `loadPersistedFile`, so the first write
+   * carries the rehydrated history rather than truncating it.
+   *
+   * Session bridges deliberately do not call this: they are per-session and
+   * short-lived, and concurrent writers would interleave partial histories.
+   */
+  enablePersistence(path: string): void {
+    this.persistPath = path;
+  }
+
+  /** Mark the buffer dirty and schedule a coalesced write. */
+  private schedulePersist(): void {
+    if (!this.persistPath) return;
+    this.dirty = true;
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      this.flushPersist();
+    }, PERSIST_DEBOUNCE_MS);
+    this.persistTimer.unref?.();
+  }
+
+  /**
+   * Write the buffer to disk now. Safe to call when persistence is off or the
+   * buffer is clean — both are no-ops.
+   *
+   * Writes through a temp file + rename so a crash or a concurrent reader can
+   * never observe a half-written array: `loadPersistedFile` treats malformed
+   * JSON as "no history", so a torn write would silently erase the timeline.
+   */
+  flushPersist(): void {
+    if (!this.persistPath || !this.dirty) return;
+    this.dirty = false;
+    const target = this.persistPath;
+    const tmp = `${target}.tmp`;
+    try {
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(tmp, JSON.stringify(this.entries), 'utf-8');
+      renameSync(tmp, target);
+    } catch {
+      // Disk full, permissions, read-only home — persistence is best-effort and
+      // must never take the daemon down with it.
+      try { unlinkSync(tmp); } catch { /* nothing to clean up */ }
+    }
+  }
+
+  /** Stop the pending write timer, flushing anything outstanding first. */
+  stopPersistence(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    this.flushPersist();
   }
 
   getHistory(since?: number): TimelineEntry[] {

@@ -129,7 +129,6 @@ export function renderSessionReadout(
   session: SessionInfo,
   state: State | undefined,
   modelName?: string,
-  mode?: string,
   displayName?: string,
   effortLevel?: string,
 ): string {
@@ -140,7 +139,6 @@ export function renderSessionReadout(
   const sColor = effectiveState ? stateColor(effectiveState) : READOUT_INK;
   const stateLbl = stateLabelFor(effectiveState, agent);
   const showModel = modelName && agent !== 'openclaw';
-  const showMode = mode && mode !== 'default' && agent !== 'openclaw';
 
   const els: string[] = [];
   // Agent dot (top-right) — quiet identity marker, not a button badge.
@@ -151,11 +149,6 @@ export function renderSessionReadout(
   if (showModel) {
     els.push(
       `<text x="16" y="60" font-family="${FONT}" font-size="12" font-weight="600" fill="#94a3b8">${escXml(formatModelEffort(modelName, effortLevel, 17))}</text>`,
-    );
-  }
-  if (showMode) {
-    els.push(
-      `<text x="16" y="78" font-family="${FONT}" font-size="11" font-weight="700" fill="#a78bfa">${escXml(mode!.toUpperCase())}</text>`,
     );
   }
   els.push(

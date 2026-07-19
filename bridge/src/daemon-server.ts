@@ -63,6 +63,7 @@ import {
   readDaemonInfo,
   removeDaemonSession,
   getCandidateDataDirs,
+  getOwnTimelineFile,
 } from './session-registry.js';
 import { fetchUsageFromApi, hasOAuthToken, resetConsecutiveFailures, type ApiUsageData } from './usage-api.js';
 import { isLocalConnection, validateToken } from './auth.js';
@@ -1791,6 +1792,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   });
 
   // Timeline
+  //
+  // The daemon owns timeline persistence: every surface's entries flow through
+  // it, so it is the only process positioned to hold the complete history and
+  // the only one allowed to write the file. Reads still sweep every candidate
+  // data dir (`latestTimelinePath`) so a Node daemon can pick up where a Swift
+  // daemon left off, and vice versa — the two implementations share one
+  // on-disk format.
   const bridgeLogStream = new BridgeLogStream();
   core.wireTimeline(bridgeLogStream);
   const timelinePath = latestTimelinePath();
@@ -1813,6 +1821,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }, 5 * 60_000);
     chatReaperTimer.unref?.();
   }
+  // Enabled AFTER rehydration + reaping so the first write carries the restored
+  // history instead of truncating the file to whatever this run has seen.
+  core.bridgeTimeline.enablePersistence(getOwnTimelineFile());
   core.wireDisplayMonitor();
   let lastStateEvent: BridgeEvent | null = null;
   let userFocusedSessionId: string | null = null;
@@ -3011,6 +3022,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     voiceAssistant?.stop();
     voiceManager?.disconnectFromServer();
     bridgeLogStream.stop();
+    // Flush synchronously — the process exits a few lines below and a pending
+    // debounce timer would take the last turn's entries with it.
+    core.bridgeTimeline.stopPersistence();
     // iDotMatrix BLE sync is stopped by IDotMatrixModule.stop() via stopModules below.
     await Promise.all([
       gatewayAdapter ? gatewayAdapter.shutdown().catch(() => {}) : Promise.resolve(),

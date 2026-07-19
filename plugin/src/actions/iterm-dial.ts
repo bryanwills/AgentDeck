@@ -19,7 +19,7 @@ import streamDeck, {
   WillDisappearEvent,
   TouchTapEvent,
 } from '@elgato/streamdeck';
-import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, isDaemonConnected } from '../encoder-registry.js';
+import { encoderRegistry, isDaemonConnected } from '../encoder-registry.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderUsageEncoderBoth, renderUsageEncoderSingle } from '../renderers/usage-gauge.js';
 import { renderUsageSession } from '../renderers/usage-dial-renderer.js';
@@ -29,7 +29,7 @@ import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 import { dlog, dinfo } from '../log.js';
 import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 
-const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
+const PIXMAP_LAYOUT = 'layouts/encoder-layout.json';
 
 /** Views the dial rotates through. */
 const USAGE_VIEWS = ['both', '5h', '7d', 'session'] as const;
@@ -83,7 +83,6 @@ function refreshUsageDials(): void {
     setCanvasFeedback(renderOfflineTouchStrip(2));
     return;
   }
-  if (isVoiceTextTakeoverActive()) return;
 
   setCanvasFeedback(renderCodexUsageView());
 }
@@ -125,12 +124,10 @@ export class UsageDialAction extends SingletonAction {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
-    if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     if (!isDaemonConnected()) return;
-    if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
     // Rotation cycles the usage view (both → 5h → 7d → session).
     const dir = ev.payload.ticks >= 0 ? 1 : -1;
     viewIndex = (viewIndex + dir + USAGE_VIEWS.length) % USAGE_VIEWS.length;
@@ -143,14 +140,12 @@ export class UsageDialAction extends SingletonAction {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
-    if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
     // Push: pull fresh usage.
     fireUsageRefresh();
     dlog('CodexUsageDial', 'push: requesting usage refresh');
   }
 
   override async onDialUp(_ev: DialUpEvent): Promise<void> {
-    if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
   }
 
   override onWillDisappear(ev: WillDisappearEvent): void {
