@@ -24,7 +24,7 @@ exports[`launcher-renderer snapshots > renderLauncher first entry 1`] = `
     <text x="100" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">Open</text>
     <text x="186" y="70" text-anchor="end" font-family="Arial,sans-serif" font-size="10" fill="#475569">1/3</text>
     <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="60" height="2" rx="1" fill="#818cf8" opacity="0.4"/>
+    <rect x="10" y="89" width="60" height="4" rx="2" fill="#818cf8" opacity="0.85"/>
   </svg>"
 `;
 
@@ -36,7 +36,7 @@ exports[`launcher-renderer snapshots > renderLauncher last entry 1`] = `
     <text x="100" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">Open</text>
     <text x="186" y="70" text-anchor="end" font-family="Arial,sans-serif" font-size="10" fill="#475569">3/3</text>
     <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#818cf8" opacity="0.4"/>
+    <rect x="130" y="89" width="60" height="4" rx="2" fill="#818cf8" opacity="0.85"/>
   </svg>"
 `;
 

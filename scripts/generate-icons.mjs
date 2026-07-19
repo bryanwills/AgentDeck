@@ -42,11 +42,6 @@ function brandGlyph(name, { scale = 1.34, dx = 0, dy = 0 } = {}) {
 const svgs = {
   // Plugin icon — rounded "C" with diamond accent (Claude-style)
 
-  // Category icon — same as plugin
-  category: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M22 6C13.2 6 6 13.2 6 22s7.2 16 16 16c3.2 0 6.2-1 8.7-2.6" fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
-    <polygon points="32,8 36,14 32,20 28,14" fill="white"/>
-  </svg>`,
 
   // Session Slot — the canonical AgentDeck dome-over-deck mark, from the shared
   // SSOT rather than redrawn. The compact reduction is used because Stream Deck
@@ -111,14 +106,14 @@ const svgs = {
 };
 
 // Size specs: plugin/category are 28/56, action icons are 20/40
-// Category icon is 28 (@2x 56); action-list icons are 20 (@2x 40).
+// Action-list icons are 20 (@2x 40).
 //
-// NOT generated: `static/imgs/plugin.png` + `@2x`. That is the Marketplace
-// listing icon and a designed asset (94KB / 349KB) — an earlier revision of
-// this file declared it here at 28x28, so running the generator replaced the
-// real icon with a crude placeholder at the wrong size. Keep it out.
+// The two brand icons (plugin + category) are NOT drawn here — they are resized
+// from the canonical artwork in design/brand/agentdeck-icon.png, the same mark
+// the dashboard app uses. Drawing them by hand is what produced the previous
+// category icon: a "C with a diamond" left over from the plugin's Claude Code
+// days, which had nothing to do with AgentDeck.
 const sizeMap = {
-  category: [28, 56],
   option:   [20, 40],
   session:  [20, 40],
   usage:    [20, 40],
@@ -187,6 +182,23 @@ for (const name of keyIcons) {
   console.log(
     `  keys/${name}.png (${KEY_SIZE_1X}x${KEY_SIZE_1X}) + keys/${name}@2x.png (${KEY_SIZE_2X}x${KEY_SIZE_2X})`
   );
+}
+
+// ---- Brand icons from the canonical asset ----------------------------------
+const brandSource = resolve(__dirname, '../design/brand/agentdeck-icon.png');
+const brandIcons = [
+  ['plugin', 256, 512],   // Marketplace listing / plugin manager
+  ['category', 28, 56],   // actions-list category header
+];
+for (const [name, s1x, s2x] of brandIcons) {
+  for (const [size, suffix] of [[s1x, ''], [s2x, '@2x']]) {
+    await sharp(brandSource)
+      .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .png()
+      .toFile(resolve(outputDir, `${name}${suffix}.png`));
+    count++;
+  }
+  console.log(`  ${name}.png (${s1x}x${s1x}) + ${name}@2x.png (${s2x}x${s2x}) — from design/brand/agentdeck-icon.png`);
 }
 
 console.log(`\nGenerated ${count} icon files in ${outputDir}`);
