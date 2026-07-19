@@ -242,13 +242,13 @@ AgentDeck uses one **unified product version** across all maintained artifacts w
 |------|----------|---------|
 | **macOS 26+** | Yes (App Store dashboard) | Primary Swift dashboard platform. Foundation Models integration requires Apple Intelligence availability at runtime. |
 | **macOS 15+** (Sequoia) | Yes (Node bridge) | CLI daemon / Stream Deck plugin host. Windows 11 bridge support is below; Linux not supported |
-| **Xcode Command Line Tools** | Yes | `xcode-select --install` (node-pty native build) |
+| **Xcode Command Line Tools** | Only if the prebuilt fails | `xcode-select --install`. `npx @agentdeck/setup` installs node-pty's prebuilt binary and falls back to a source build — which is the only step needing a compiler |
 | **Node.js** >= 22 | Yes | `brew install node` |
 | **pnpm** >= 9 | Yes | `npm install -g pnpm` |
 | **Python 3** | Yes | `brew install python` (display sleep detection) |
-| **Elgato Stream Deck app** >= 6.7 | Yes | [Elgato Downloads](https://www.elgato.com/downloads) |
-| **Elgato Stream Deck hardware** | Yes | 15-key, Mini, or Stream Deck+ |
-| **iTerm2** | Yes | Terminal management, voice paste, session switching |
+| **Elgato Stream Deck app** >= 6.7 | For Stream Deck only | [Elgato Downloads](https://www.elgato.com/downloads). The daemon runs headless — D200H, the macOS app, `agentdeck dashboard` and ESP32 boards need none of it |
+| **Elgato Stream Deck hardware** | For Stream Deck only | 15-key, Mini, or Stream Deck+ |
+| **iTerm2** | For PTY session management | Terminal management, voice paste, session switching |
 | **Claude Code CLI** | Yes | `npm install -g @anthropic-ai/claude-code` |
 | **JDK 17+** | For Android | `brew install openjdk@17` |
 | **Stream Deck CLI** | Auto | Installed by `pnpm setup` if missing |
@@ -265,6 +265,10 @@ npx @agentdeck/setup
 # Option B: from source
 git clone https://github.com/puritysb/AgentDeck.git && cd AgentDeck && pnpm setup
 ```
+
+**Option A** installs the `agentdeck` CLI and daemon and registers the Claude Code hooks. It requires Node 22+ and at least one agent CLI (Claude Code or Codex); everything else — the Stream Deck app, Stream Deck hardware, Xcode Command Line Tools — is checked and reported but never blocks the install, because the daemon drives the D200H, the macOS app, the TUI and ESP32 boards without any of them.
+
+**Option B** is the from-source developer path. It additionally installs `@elgato/cli` and links the Stream Deck plugin from this checkout, so it does assume a Stream Deck setup.
 
 The `pnpm setup` command:
 1. Checks required dependencies (Node.js 22+, pnpm, Claude CLI, Stream Deck app)

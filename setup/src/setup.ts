@@ -55,21 +55,17 @@ function checkPrerequisites(): boolean {
     pass = false;
   }
 
-  // Xcode Command Line Tools — required because `npm install -g @agentdeck/bridge`
-  // below sets `npm_config_build_from_source=true` (see installBridge). Without
-  // CLT the node-pty source build fails with a cryptic compiler-missing error
-  // deep inside node-gyp. Catch it here with a clear message so the user
-  // knows the one command to run.
-  // Windows uses node-pty's prebuilt binary (no source build), so this check
-  // is darwin-only.
+  // Xcode Command Line Tools — NOT a hard requirement. installBridge tries
+  // node-pty's prebuilt binary first and only falls back to a source build,
+  // which is the sole thing that needs a compiler. Demanding CLT up front made
+  // every user install Xcode tooling for a fallback most of them never hit.
+  // Windows always uses the prebuilt binary.
   if (!IS_WIN) {
     if (which('xcode-select') && checkXcodeCliTools()) {
       ok('Xcode Command Line Tools installed');
     } else {
-      fail('Xcode Command Line Tools not installed — required to build node-pty from source.');
-      console.log(`       Install with: ${YELLOW}xcode-select --install${NC}`);
-      console.log('       After the installer finishes, re-run `npx @agentdeck/setup`.');
-      pass = false;
+      warn('Xcode Command Line Tools not installed — only needed if the prebuilt node-pty binary does not work.');
+      console.log(`     If the install below fails, run: ${YELLOW}xcode-select --install${NC} and re-run this command.`);
     }
   }
 
@@ -103,11 +99,17 @@ function checkPrerequisites(): boolean {
         join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Programs', 'Elgato', 'StreamDeck', 'StreamDeck.exe'),
       ]
     : ['/Applications/Elgato Stream Deck.app', '/Applications/Stream Deck.app'];
+  // Stream Deck is ONE of several surfaces, not a requirement. The daemon runs
+  // headless and drives the Ulanzi D200H, the macOS app, the TUI dashboard and
+  // ESP32 boards without it. Failing here made `npx @agentdeck/setup` refuse to
+  // run for D200H users — who are told to run exactly that by the plugin's own
+  // OFFLINE screen (shared/src/d200h-layout.ts).
   if (streamDeckPaths.some((p) => existsSync(p))) {
     ok('Stream Deck app installed');
   } else {
-    fail('Stream Deck app not found — download from https://www.elgato.com/downloads');
-    pass = false;
+    warn('Stream Deck app not found — Stream Deck keys will be unavailable.');
+    console.log('     Other surfaces (Ulanzi D200H, macOS app, `agentdeck dashboard`) work without it.');
+    console.log('     Stream Deck app: https://www.elgato.com/downloads');
   }
 
   if (!pass) {
@@ -137,32 +139,34 @@ function checkXcodeCliTools(): boolean {
 
 // ─── 3. Stream Deck CLI ──────────────────────────────────────────────
 
-function installStreamDeckCli() {
-  if (which('streamdeck')) {
-    ok('Stream Deck CLI found');
-    return;
-  }
-
-  info('Installing Stream Deck CLI (@elgato/cli)...');
-  execSync('npm install -g @elgato/cli', { stdio: 'inherit' });
-  ok('Stream Deck CLI installed');
-}
-
 // ─── 4. Install Bridge (agentdeck CLI) ──────────────────────────────
 
 function installBridge() {
   info('Installing AgentDeck bridge (@agentdeck/bridge)...');
-  // Force source build of node-pty on macOS to avoid prebuilt binary ABI
-  // mismatch (see #3). On Windows we rely on node-pty's prebuilt binary —
-  // forcing a source build would require Visual Studio Build Tools, which
-  // is a much larger prereq than we want.
-  const env = IS_WIN
-    ? { ...process.env }
-    : { ...process.env, npm_config_build_from_source: 'true' };
-  execSync('npm install -g @agentdeck/bridge', {
-    stdio: 'inherit',
-    env,
-  });
+
+  // Prebuilt first. This used to force `npm_config_build_from_source=true` on
+  // macOS because of a node-pty prebuilt ABI mismatch (#3), which made a
+  // working compiler mandatory for every user. Try the prebuilt binary, and
+  // only pay the source-build cost — and its Xcode CLT requirement — if the
+  // prebuilt one actually fails. Windows has always used the prebuilt binary:
+  // a source build there needs Visual Studio Build Tools.
+  try {
+    execSync('npm install -g @agentdeck/bridge', { stdio: 'inherit' });
+  } catch {
+    if (IS_WIN) throw new Error('bridge install failed — see the npm output above');
+
+    warn('Prebuilt install failed — retrying with a source build of node-pty.');
+    if (!(which('xcode-select') && checkXcodeCliTools())) {
+      fail('A source build needs Xcode Command Line Tools.');
+      console.log(`       Install with: ${YELLOW}xcode-select --install${NC}`);
+      console.log('       Then re-run `npx @agentdeck/setup`.');
+      process.exit(1);
+    }
+    execSync('npm install -g @agentdeck/bridge', {
+      stdio: 'inherit',
+      env: { ...process.env, npm_config_build_from_source: 'true' },
+    });
+  }
 
   if (which('agentdeck')) {
     ok('agentdeck CLI installed');
@@ -415,8 +419,6 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('');
-  installStreamDeckCli();
   console.log('');
   installBridge();
   console.log('');
