@@ -128,7 +128,13 @@ validate_previews "macOS" "1920x1080"
 validate_previews "iPhone" "886x1920 1920x886"
 validate_previews "iPad" "1200x1600 1600x1200"
 
-python3 - "$METADATA" <<'PY' || failures=$((failures + 1))
+metadata_errors=0
+while IFS= read -r line; do
+  case "$line" in
+    ERROR:*) echo "$line" >&2; failures=$((failures + 1)); metadata_errors=$((metadata_errors + 1)) ;;
+    *) echo "$line" ;;
+  esac
+done < <(python3 - "$METADATA" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -142,34 +148,52 @@ limits = {
     "Keywords": 100,
     "What's New": 4000,
 }
-errors = []
+
+# Fields whose copy differs per platform are authored as `**macOS App**` /
+# `**iOS App**` sub-blocks under one `###` heading, each with its own fence.
+# Every fence under the heading is a real ASC field value, so all of them are
+# length-checked. Shared fields (App Name, Subtitle, Keywords) carry a single
+# fence and fall out of the same code path.
+def blocks(section, field):
+    heading = re.search(rf"^### {re.escape(field)}[^\n]*$", section, re.M)
+    if not heading:
+        return []
+    rest = section[heading.end():]
+    nxt = re.search(r"^#{2,3} ", rest, re.M)
+    body = rest[: nxt.start()] if nxt else rest
+    labelled = []
+    for fence in re.finditer(r"```\n(.*?)\n```", body, re.S):
+        before = body[: fence.start()]
+        variant = re.findall(r"^\*\*(.+?)\*\*$", before, re.M)
+        labelled.append((variant[-1] if variant else None, fence.group(1)))
+    return labelled
+
 for language, start, end in (
-    ("ko", "## 🇰🇷 Korean", "## 🇺🇸 English"),
+    ("ko", "## 🇰🇷 Korean", "## 🇯🇵 Japanese"),
+    ("ja", "## 🇯🇵 Japanese", "## 🇺🇸 English"),
     ("en", "## 🇺🇸 English", "## Screenshot Guidance"),
 ):
     section = text.split(start, 1)[1].split(end, 1)[0]
     for field, limit in limits.items():
-        match = re.search(rf"^### {re.escape(field)}[^\n]*\n\n```\n(.*?)\n```", section, re.M | re.S)
-        if not match:
-            errors.append(f"{language}: missing {field}")
+        found = blocks(section, field)
+        if not found:
+            print(f"ERROR: {language}: missing {field}")
             continue
-        value = match.group(1)
-        length = len(value)
-        if length > limit:
-            errors.append(f"{language}: {field} is {length}/{limit} characters")
-        else:
-            print(f"OK: {language} {field} ({length}/{limit})")
+        for variant, value in found:
+            label = f"{field} [{variant}]" if variant else field
+            length = len(value)
+            if length > limit:
+                print(f"ERROR: {language}: {label} is {length}/{limit} characters")
+            else:
+                print(f"OK: {language} {label} ({length}/{limit})")
     field_values = "\n".join(re.findall(r"```\n(.*?)\n```", section, re.S))
     forbidden = re.search(r"\b(?:ADB|PTY|Android|agentdeck CLI|Node(?:\.js)? daemon|external daemon)\b", field_values, re.I)
     if forbidden:
-        errors.append(f"{language}: App Store metadata contains non-Swift-tier term {forbidden.group(0)!r}")
+        print(f"ERROR: {language}: App Store metadata contains non-Swift-tier term {forbidden.group(0)!r}")
     if "16-display" in field_values or "16개 디스플레이" in field_values:
-        errors.append(f"{language}: stale 16-display preview count")
-if errors:
-    for error in errors:
-        print(f"ERROR: {error}", file=sys.stderr)
-    raise SystemExit(1)
+        print(f"ERROR: {language}: stale 16-display preview count")
 PY
+)
 
 for plist in "$ROOT/apple/AgentDeck/Resources/Info.plist" "$ROOT/apple/AgentDeck/Resources/Info-macOS.plist"; do
   value="$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$plist" 2>/dev/null || true)"
