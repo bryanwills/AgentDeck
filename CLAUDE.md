@@ -247,7 +247,7 @@ The macOS app ships through the App Store and must stay **self-contained** under
 | [docs/voice-setup.md](docs/voice-setup.md) | Apple SFSpeech permissions + dictation model download troubleshooting |
 | [docs/asc-cert-setup.md](docs/asc-cert-setup.md) | Mac Installer Distribution cert + macOS provisioning profile + GitHub Secrets step-by-step |
 | [docs/appstore-feature-matrix.md](docs/appstore-feature-matrix.md) | App Store 앱 vs CLI 설치 기능 매트릭스 — downstream 디바이스 분류(ESP32/Pixoo/D200H/ADB/TC001/Android) + session 실행/usage 범위 |
-| [docs/appstore-metadata-draft.md](docs/appstore-metadata-draft.md) | App Store Connect metadata draft (ko + en) — title/subtitle/description/keywords/what's-new |
+| [docs/appstore-metadata-draft.md](docs/appstore-metadata-draft.md) | App Store Connect metadata draft (ko/ja/en) — title/subtitle/description/keywords/what's-new |
 | [docs/testflight-qa-checklist.md](docs/testflight-qa-checklist.md) | Internal tester pre-submission checklist covering onboarding, pairing, voice, sandbox invariants |
 | [docs/devices.md](docs/devices.md) | Device-specific details |
 | [docs/hardware-compatibility.md](docs/hardware-compatibility.md) | Canonical dashboard hardware and OS matrix: panels, transports, host requirements, support state, and App Store compatibility. Rendered in the Design System viewer; public summary at [docs/hardware/index.html](docs/hardware/index.html). |
