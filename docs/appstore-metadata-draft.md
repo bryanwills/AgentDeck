@@ -630,7 +630,9 @@ No demo account required — the app doesn't have user accounts.
 |---|---|
 | Copyright | `© 2026 Serendipity Bound` |
 | Support URL | `https://github.com/puritysb/AgentDeck/issues` |
-| Marketing URL | `https://github.com/puritysb/AgentDeck` |
+| Marketing URL | `https://puritysb.github.io/AgentDeck/` |
 | Privacy Policy URL | `https://puritysb.github.io/AgentDeck/#privacy` |
+
+Marketing URL은 GitHub Pages 랜딩(2026-07-19 제출 시 실제 입력값). 레포 자체는 Support URL로만 노출한다.
 
 The public policy must disclose every opt-in remote evaluation backend that can carry turn content off the device — Anthropic API and any user-configured OpenAI-compatible endpoint, including remote third parties such as OpenRouter — as well as microphone, speech recognition, local network, user-selected files, USB/Bluetooth hardware access, credentials, and the contact email. When a backend is added to the app, update the policy in `scripts/pages-index.html` in the same commit.
