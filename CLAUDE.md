@@ -238,8 +238,8 @@ The macOS app ships through the App Store and must stay **self-contained** under
 | [docs/agent-harness.md](docs/agent-harness.md) | Cross-agent developer harness — how Claude Code / Codex / OpenCode / Antigravity each enter the repo, read instructions, and discover skills/workflows; skill SSOT rules |
 | [docs/architecture.md](docs/architecture.md) | Monorepo layout, BridgeCore, PtyAdapter, AgentAdapter, Gateway protocol, plugin connection |
 | [docs/daemon.md](docs/daemon.md) | Daemon hub, singleton guard, mDNS recovery, usage relay, Gateway isolation, multi-surface monitoring |
-| [docs/plugin-conventions.md](docs/plugin-conventions.md) | Encoder LCD, wide canvas, button label, OC Timeline pipeline, D200H (Ulanzi Studio plugin), display sleep/wake |
-| [docs/v4-layout.md](docs/v4-layout.md) | v4 Session-Per-Button keypad + encoder mapping, v3→v4 changes |
+| [docs/plugin-conventions.md](docs/plugin-conventions.md) | Encoder LCD, timeline pipeline (daemon-owned persistence), D200H (Ulanzi Studio plugin), display sleep/wake. Retired v3 sections are marked as such |
+| [docs/v4-layout.md](docs/v4-layout.md) | v4 Session-Per-Button keypad + encoder mapping (E1 Volume / E2 Claude usage / E3 Codex usage / E4 Launcher), v3→v4 changes, Marketplace submission scope |
 | [docs/tui-dashboard.md](docs/tui-dashboard.md) | `agentdeck dashboard` — terrarium, sprites, adaptive layouts |
 | [docs/esp32.md](docs/esp32.md) | Firmware boards, flash safety, WiFi provisioning, disconnect recovery |
 | [docs/android.md](docs/android.md) | Android device support matrix, creature rendering |

@@ -1,6 +1,16 @@
 # v4 Layout — Session-Per-Button
 
-**Manifest actions** (5 total): `session-slot` (Keypad; device-grid aware) + 4 encoders (`option-dial`, `voice-dial`, `utility-dial`, `usage-dial`) on Stream Deck+. v3 keypad actions (mode/session/usage/response/stop) removed. Usage dial UUID kept as `iterm-dial` for profile backward compat.
+**Manifest actions** (5 total): `session-slot` (Keypad; device-grid aware) + 4 encoders on Stream Deck+. v3 keypad actions (mode/session/usage/response/stop) removed.
+
+UUIDs are immutable post-distribution, so several no longer describe their role. Current mapping:
+
+| UUID | Display name | Role |
+|---|---|---|
+| `session-slot` | Session Slot | Keypad, device-grid aware |
+| `utility-dial` | Volume | E1 — macOS output volume |
+| `option-dial` | Claude Usage | E2 — Claude quota gauge |
+| `iterm-dial` | Codex Usage | E3 — Codex quota gauge |
+| `launcher` | Launcher | E4 — open an agent |
 
 ## Keypad
 
@@ -33,7 +43,7 @@ No session while daemon is connected: healthy idle dashboard, not recovery UI. S
 ### Stream Deck+
 
 - Keypad UX 는 Stream Deck 과 동일하지만, encoder 가 상세 화면의 보조 조작면이다.
-- E2 는 긴 옵션 목록 스크롤/확정, E3 는 usage page, E4 는 voice/send/cancel 이다.
+- E1 은 볼륨, E2/E3 는 Claude/Codex usage 게이지, E4 는 에이전트 런처다.
 - Session detail 에 들어가면 keypad 는 "결정 버튼", encoder LCD 는 "읽기/스크롤" 역할로 분리한다. 긴 approval 문구를 키 타일에 억지로 넣지 않고 wide canvas 에서 읽게 한다.
 
 ### Ulanzi D200H
@@ -46,12 +56,19 @@ No session while daemon is connected: healthy idle dashboard, not recovery UI. S
 
 ## Encoders (4 slots)
 
-| E# | Action | Rotate | Push | Touch |
-|----|--------|--------|------|-------|
-| E1 | Utility | Adjust value | Toggle/Action | Switch mode |
-| E2 | Action | Scroll options / cycle prompts | Send prompt / Confirm | Same as push |
-| E3 | Usage | Cycle pages (overview/5h/7d/session/extra) | Refresh usage data | Next page |
-| E4 | Voice | Scroll text | Hold=record, tap(<500ms)=cancel, VT push=send/paste | — |
+| E# | Action | Rotate | Push |
+|----|--------|--------|------|
+| E1 | Volume | Adjust output volume | Toggle mute |
+| E2 | Claude Usage | Cycle view (both/5h/7d/session) | Refresh usage data |
+| E3 | Codex Usage | Cycle view (both/5h/7d/session) | Refresh usage data |
+| E4 | Launcher | Select agent | Open agent |
+
+No encoder handles LCD touch. Touch-tap previously cycled E1's utility modes, but it
+was undiscoverable and did nothing at the default single-mode setting; the modes and
+the touch handler were both removed before the Marketplace submission.
+
+When the daemon is down, all four LCDs render one 800px OFFLINE banner and a press
+opens the AgentDeck app.
 
 ## v4 Changes from v3
 
@@ -63,3 +80,12 @@ No session while daemon is connected: healthy idle dashboard, not recovery UI. S
 - **State-aware ESC/STOP**: Active=bright, idle=dimmed, always accessible on the last physical key
 - **No-daemon/no-session dashboards**: disconnected = single OFFLINE hero on the center key (auto-reconnect runs in the background); connected with zero sessions = HUB READY/NO SESSION/AgentDeck idle cards.
 - **Plugin icon**: Monochrome terrarium+octopus SVG (transparent bg, white — SD convention)
+
+## Marketplace submission scope (2026-07-19)
+
+Trimmed to what works reliably on a clean machine:
+
+- **Voice dial removed.** Push-to-talk borrowed iTerm2's microphone grant via AppleScript and needed Homebrew `sox` plus a local whisper model — none of which a reviewer or typical user has, so it failed silently. E4 became the Launcher.
+- **Utility dial → Volume.** The mic/media/timer/diag/apme/tower modes leaned on `System Events` synthetic key codes (Accessibility permission) that fail silently when the grant is missing.
+- **Project picker removed.** It launched terminals via `tell application "Terminal" to do script` and had no caller — unreachable code carrying the riskiest AppleScript surface in the plugin.
+- **macOS only.** Volume and Launcher are `osascript` / `open -a`; the Windows manifest entry would have shipped two dead dials.
