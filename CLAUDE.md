@@ -229,7 +229,8 @@ The macOS app ships through the App Store and must stay **self-contained** under
 
 | Doc | Topic |
 |---|---|
-| [RELEASING.md](RELEASING.md) | Versioning & release policy — per-track tags (apple-v/android-v/npm-v/esp32-v), monotonic-version constraints, bundle-ID change steps |
+| [RELEASING.md](RELEASING.md) | Versioning & release policy — per-track tags (apple-v/android-v/npm-v/esp32-v/streamdeck-v/ulanzi-v), monotonic-version constraints, bundle-ID change steps. Every track has a tag-triggered workflow; marketplace/npm upload steps stay manual |
+| [CHANGELOG.md](CHANGELOG.md) | Per-version, per-channel release notes |
 | [DESIGN.md](DESIGN.md) | Design system spec — aquarium-tide tokens, type, components, marketing↔product palette split, hardware surfaces |
 | [docs/why-apme.md](docs/why-apme.md) | **WHY** APME — 감 기반 라우팅 문제, 카테고리별 평가 전략, composite score, vibe labeling 우선 원칙 |
 | [docs/apme.md](docs/apme.md) | APME eval module — schema, collector, deterministic+LLM judge, scorecard/recommender, daemon API, settings |
