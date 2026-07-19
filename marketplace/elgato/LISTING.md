@@ -11,7 +11,7 @@ against our files on 2026-07-20.
 |---|---|---|---|
 | App icon | 288×288 PNG | `marketplace/elgato/1.0.0/app-icon-288.png` | 288×288 |
 | Thumbnail | 1920×960 PNG | `marketplace/elgato/1.0.0/thumbnail-1920x960.png` | 1920×960 |
-| Gallery | 1920×960 PNG, **min 3**, max 10 | the three `gallery-*.png` | 3 × 1920×960 |
+| Gallery | 1920×960 PNG, **min 3**, max 10 | `gallery-01-session-keys.png` · `gallery-02-dials.png` · `gallery-03-hardware.png` | 3 × 1920×960 |
 | Gallery video (optional) | 1920×1080 MP4, <250 MB | `apple/appstore-submission/previews/macOS/agentdeck-preview.mp4` | 1920×1080, 28s, 37 MB |
 | Product name | ≤30 chars | `AgentDeck` | 9 |
 | Description | 250–1,500 chars | below | 948 |
@@ -71,12 +71,23 @@ First public release.
 - Gallery: the three `marketplace/elgato/1.0.0/gallery-*.png` files
 - Optional gallery video: `apple/appstore-submission/previews/macOS/agentdeck-preview.mp4`
 
-## Known asset-pipeline gap
+## Gallery sources
 
-`scripts/generate-elgato-marketplace-assets.mjs` no longer runs: it reads
-`apple/appstore-submission/screenshots/macOS/{01-device-preview,02-apme-on-device,03-integrations}.png`,
-but the screenshots moved under per-locale directories and were renamed
-(`screenshots/en/macOS/01-fleet.png` …). The committed assets above are valid
-and were produced before that move, so this does not block submission — but the
-gallery cannot currently be regenerated from source. Repoint the script the next
-time these assets are refreshed.
+The gallery shows the plugin on Stream Deck hardware rather than the Mac app.
+Sources live in `docs/media/` and are 2026-07-20 captures of the shipped 1.0.0
+layout:
+
+| File | Source |
+|---|---|
+| `gallery-01-session-keys.png` | `streamdeck-keys-app.png` — Stream Deck app, 15-key grid |
+| `gallery-02-dials.png` | `streamdeck-plus-app.png` — Stream Deck + keys, touch strip, dials |
+| `gallery-03-hardware.png` | `streamdeck-plus-hw.jpg` — the physical deck running live sessions |
+
+**Do not reuse `docs/media/hardware-d200h-tc001-closeup.png` for Stream Deck
+imagery.** Its touch strip reads VOL / PROMPT / USAGE / VOICE, and the Voice and
+Prompt dials were removed in `f20af561` — it advertises features that no longer
+ship. The same applies to any capture predating that commit.
+
+Sources are modest resolution (910×548 / 794×560 app captures, 1280×960 photos),
+so the generator composes each near native scale on an ink-tide canvas instead of
+upscaling to fill 1920×960.
