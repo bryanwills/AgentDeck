@@ -1341,50 +1341,59 @@ final class DaemonServer {
         }
 
         // 12. Voice assistant
+        // The @DaemonActor callback bodies are built HERE, in the daemon's own
+        // isolation, before hopping to the main actor. Building them inside
+        // `MainActor.run` makes each inner `Task { @DaemonActor in ... }`
+        // capture the main-actor region's strong `self`, which Xcode 26.3's
+        // region analysis rejects as a cross-actor send (26.6 accepts it —
+        // the release CI pins 26.3).
+        let voiceSendPrompt: @Sendable (String) -> Void = { [weak self] text in
+            Task { @DaemonActor in
+                guard let self else { return }
+                // Route to gateway or session bridge
+                if let gw = self.gatewayAdapter {
+                    await gw.sendRPC(method: "chat.send", params: ["message": text])
+                    _ = self.stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
+                    self.broadcastStateUpdate()
+                } else {
+                    self.forwardCommandToSession(AgentCommand.sendPrompt(text: text).dictionary)
+                }
+            }
+        }
+        let voiceStateChanged: @Sendable (DaemonVoiceAssistant.State, String?, String?) -> Void = { [weak self] state, text, responseText in
+            Task { @DaemonActor in
+                guard let self else { return }
+                // Cache voice state for piggybacking on state_update
+                self.cachedVoiceAssistantState = state.rawValue
+                self.cachedVoiceAssistantText = text
+                self.cachedVoiceAssistantResponseText = responseText
+                self.broadcastRaw([
+                    "type": "voice_assistant_state",
+                    "state": state.rawValue,
+                    "deviceId": "mac-builtin",
+                    "text": text as Any,
+                    "responseText": responseText as Any,
+                ])
+                // Also trigger state_update so all clients get voice state
+                self.broadcastStateUpdate()
+            }
+        }
+        let voiceWakeWord: @Sendable (String, TimeInterval) -> Void = { [weak self] deviceId, timestamp in
+            Task { @DaemonActor in
+                self?.broadcastRaw([
+                    "type": "wake_word_detected",
+                    "deviceId": deviceId,
+                    "timestamp": timestamp,
+                ])
+            }
+        }
         await MainActor.run { [weak self] in
             guard let self else { return }
             let voiceAssistant = DaemonVoiceAssistant()
             self.voiceAssistant = voiceAssistant
-            voiceAssistant.sendPrompt = { [weak self] text in
-                Task { @DaemonActor in
-                    guard let self else { return }
-                    // Route to gateway or session bridge
-                    if let gw = self.gatewayAdapter {
-                        await gw.sendRPC(method: "chat.send", params: ["message": text])
-                        _ = self.stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
-                        self.broadcastStateUpdate()
-                    } else {
-                        self.forwardCommandToSession(AgentCommand.sendPrompt(text: text).dictionary)
-                    }
-                }
-            }
-            voiceAssistant.onStateChanged = { [weak self] state, text, responseText in
-                Task { @DaemonActor in
-                    guard let self else { return }
-                    // Cache voice state for piggybacking on state_update
-                    self.cachedVoiceAssistantState = state.rawValue
-                    self.cachedVoiceAssistantText = text
-                    self.cachedVoiceAssistantResponseText = responseText
-                    self.broadcastRaw([
-                        "type": "voice_assistant_state",
-                        "state": state.rawValue,
-                        "deviceId": "mac-builtin",
-                        "text": text as Any,
-                        "responseText": responseText as Any,
-                    ])
-                    // Also trigger state_update so all clients get voice state
-                    self.broadcastStateUpdate()
-                }
-            }
-            voiceAssistant.onWakeWordDetected = { [weak self] deviceId, timestamp in
-                Task { @DaemonActor in
-                    self?.broadcastRaw([
-                        "type": "wake_word_detected",
-                        "deviceId": deviceId,
-                        "timestamp": timestamp,
-                    ])
-                }
-            }
+            voiceAssistant.sendPrompt = voiceSendPrompt
+            voiceAssistant.onStateChanged = voiceStateChanged
+            voiceAssistant.onWakeWordDetected = voiceWakeWord
             _ = voiceAssistant.start()
         }
         DaemonLogger.shared.info("startServices: step12 voiceAssistant done")

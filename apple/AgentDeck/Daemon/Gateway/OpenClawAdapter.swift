@@ -509,9 +509,17 @@ actor OpenClawAdapter {
             // answers. Probe message text → legacy `response` → accumulated
             // deltas.
             if chatState == "final" {
-                let response = Self.extractMessageText(payload)
-                    ?? (payload["response"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                    ?? currentRunId.flatMap { accumulatedResponseByRunId[$0] }
+                // Unrolled from a `??` chain: the `??` autoclosure wrapping
+                // `.flatMap { ... }` captures `payload`, and Xcode 26.3's
+                // region analysis rejects that as a cross-actor send (26.6
+                // accepts it; CI pins 26.3).
+                var response = Self.extractMessageText(payload)
+                if response == nil, let flat = payload["response"] as? String, !flat.isEmpty {
+                    response = flat
+                }
+                if response == nil, let runId = currentRunId {
+                    response = accumulatedResponseByRunId[runId]
+                }
                 if let runId = currentRunId { accumulatedResponseByRunId.removeValue(forKey: runId) }
                 if let response, !response.isEmpty {
                     let isAutomated = automatedRunId == currentRunId
