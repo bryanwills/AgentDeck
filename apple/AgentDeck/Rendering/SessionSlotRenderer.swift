@@ -19,7 +19,7 @@
 // was modified (28 insertions, 0 deletions) and the only consumer is
 // scripts/generate-icons.mjs, so the mirrored surface (renderSessionSlot) is
 // unaffected — no re-port needed.
-// SYNC-HASH shared/src/svg-renderers/session-slot-renderer.ts bface34f9c4cc2ac4c4471d6301c2fc3ae8cb453
+// SYNC-HASH shared/src/svg-renderers/session-slot-renderer.ts 85667bbfd3ba244427139ae1e7cdc94fe65bc6ff
 //
 // Scope for this first pass:
 //   - renderSessionSlot (primary session button)

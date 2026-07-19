@@ -438,7 +438,12 @@ export function renderStatusCard(config: StatusCardConfig): string {
   const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
   const label = truncate(config.label, 14);
   const subtitle = truncate(config.subtitle ?? '', 18);
-  const detail = truncate(config.detail ?? '', 17);
+  // 22, not 17: the only detail we ship is the daemon install hint
+  // (`npx @agentdeck/setup`, 20 chars) on the D200H offline hero, and a 17-char
+  // cap rendered it as `npx @agentdeck/s…` — a truncated command is worse than
+  // none. At font-size 9 on the 144-wide canvas, 22 chars is ~99px, still well
+  // inside the frame.
+  const detail = truncate(config.detail ?? '', 22);
   const elements = [
     `<rect x="25" y="18" width="94" height="58" rx="14" fill="${colors.panel}" opacity="0.68" stroke="${colors.accent}" stroke-width="1.2" stroke-opacity="0.28"/>`,
     renderGlyphIcon(config.icon, colors.icon, colors.accent, 72, 43, 0.94),

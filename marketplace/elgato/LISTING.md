@@ -14,7 +14,7 @@ against our files on 2026-07-20.
 | Gallery | 1920×960 PNG, **min 3**, max 10 | `gallery-01-session-keys.png` · `gallery-02-dials.png` · `gallery-03-hardware.png` | 3 × 1920×960 |
 | Gallery video (optional) | 1920×1080 MP4, <250 MB | `apple/appstore-submission/previews/macOS/agentdeck-preview.mp4` | 1920×1080, 28s, 37 MB |
 | Product name | ≤30 chars | `AgentDeck` | 9 |
-| Description | 250–1,500 chars | below | 948 |
+| Description | 250–1,500 per guidelines; console field allows 4000 | below | see check |
 
 Plugin package: `dist/bound.serendipity.agentdeck.streamDeckPlugin` — rebuild with
 `pnpm package`, which runs Elgato's `streamdeck validate` before packing.
@@ -40,7 +40,14 @@ Session keys show Claude Code, Codex, OpenCode, and OpenClaw sessions at a glanc
 
 Profiles for Stream Deck, Stream Deck Mini, and Stream Deck + are bundled and install automatically.
 
-AgentDeck is a thin client: it needs the free AgentDeck app for Mac (App Store), or the AgentDeck CLI, running on the same machine. It does not embed a daemon, collect analytics, or modify your shell configuration.
+Getting set up
+AgentDeck is a thin client — it needs the free AgentDeck daemon running on the same Mac. Install it from a terminal:
+
+    npx @agentdeck/setup
+
+That is the whole setup. Start Claude Code, Codex, or OpenCode as you normally would and your sessions appear on the keys. (An AgentDeck app for Mac is also on the way through the App Store, which will remove the terminal step.)
+
+The plugin does not embed a daemon, collect analytics, or modify your shell configuration.
 
 AgentDeck is an independent project and is not affiliated with or endorsed by Elgato, Anthropic, OpenAI, or any other third party mentioned. All trademarks belong to their owners.
 ```
