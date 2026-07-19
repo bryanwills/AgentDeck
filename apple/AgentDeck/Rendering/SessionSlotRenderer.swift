@@ -14,7 +14,12 @@
 // Sync pin — verified by `scripts/check-preview-mirror-sync.mjs` (CI). When the
 // origin changes, re-port (or confirm no visual impact) and bump the pin in the
 // same commit.
-// SYNC-HASH shared/src/svg-renderers/session-slot-renderer.ts 2ff8fb9fa5253a0503e14fed992df4393b43e39f
+// Pin bumped 2026-07-19 for an additive-only origin change: `renderAgentDeckMarkCompact`
+// was added for the Stream Deck plugin's 20px action-list icons. Nothing existing
+// was modified (28 insertions, 0 deletions) and the only consumer is
+// scripts/generate-icons.mjs, so the mirrored surface (renderSessionSlot) is
+// unaffected — no re-port needed.
+// SYNC-HASH shared/src/svg-renderers/session-slot-renderer.ts bface34f9c4cc2ac4c4471d6301c2fc3ae8cb453
 //
 // Scope for this first pass:
 //   - renderSessionSlot (primary session button)
