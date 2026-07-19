@@ -73,6 +73,8 @@ Tag prefixes remain because channels ship independently and may point to differe
 4. Confirm each package's `latest` dist-tag matches `VERSION`.
 5. Tag the exact published commit: `git tag npm-v<VERSION> && git push origin npm-v<VERSION>`.
 
+`npm-release.yml` runs on the tag: it re-verifies the version, builds, tests, and creates the GitHub Release. **Publishing stays manual by default** — step 3 above is still yours. To hand publishing to CI, set the repo variable `NPM_PUBLISH_ENABLED=true` and add an `NPM_TOKEN` secret holding a *granular automation* token (a 2FA-on-publish token cannot run unattended); the workflow then publishes in dependency order.
+
 ### Apple (TestFlight / App Store)
 
 1. Confirm `MARKETING_VERSION == VERSION` in both `apple/project.yml` and the Xcode project mirror (`pnpm verify-version` checks this).
@@ -95,13 +97,19 @@ CI owns `CURRENT_PROJECT_VERSION` — `apple-release.yml` injects `github.run_nu
 ### Stream Deck plugin
 
 1. Confirm the main manifest and embedded profile snapshots use `VERSION.0`.
-2. Follow `.agents/workflows/build-plugin.md`, then run `pnpm package`.
+2. Follow `.agents/workflows/build-plugin.md`, then run `pnpm package` — this validates with Elgato's official CLI (pinned as the `@elgato/cli` devDependency) before packing, so a local failure is a submission the Marketplace would have rejected.
 3. Upload to the Elgato Maker portal and tag `streamdeck-v<VERSION>` when actually submitted/released.
+
+`streamdeck-release.yml` runs on the tag: it validates, packs, attaches the `.streamDeckPlugin` to a GitHub Release, and uploads it as a build artifact. The Maker-portal upload itself stays manual — Elgato has no submission API.
 
 ### Ulanzi plugin
 
 1. Confirm both Ulanzi package and marketplace manifests match `VERSION`.
 2. Run `pnpm --filter @agentdeck/plugin-ulanzi package`, upload the artifact, and tag `ulanzi-v<VERSION>` when actually submitted/released.
+
+`ulanzi-release.yml` runs on the tag and produces/attaches `dist/agentdeck-ulanzi-v<VERSION>.zip` the same way. The Marketplace upload stays manual.
+
+The plugin declares **one** dynamic action; its keys reflow by agent state. Every localization file's `Actions` array is index-mapped onto `manifest.json`'s, so adding entries silently mislabels the action in the palette — `plugin-ulanzi/src/__tests__/manifest-localization.test.ts` gates that alignment.
 
 ## Marketplace plugins are thin clients
 

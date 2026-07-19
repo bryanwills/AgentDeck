@@ -24,6 +24,12 @@ jobs:
             name: "IPS 3.5\" 480x320"
           - env: amoled
             name: "Round AMOLED 1.8\" 360x360"
+          - env: ips10
+            name: "IPS 10.1\" 1280x800"
+          - env: inkdeck
+            name: "InkDeck 7.5\" e-ink 800x480"
+          - env: ttgo
+            name: "TTGO T-Display 240x135"
 
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +104,9 @@ jobs:
             | 86 Box | `agentdeck-box_86.bin` | 4" 480×480 ST7701 |
             | IPS 3.5" | `agentdeck-ips35.bin` | 3.5" 480×320 AXS15231B |
             | Round AMOLED | `agentdeck-amoled.bin` | 1.8" 360×360 ST77916 |
+            | IPS 10.1" | `agentdeck-ips10.bin` | 10.1" 1280×800 JC8012P4A1C |
+            | InkDeck | `agentdeck-inkdeck.bin` | 7.5" 800×480 e-ink UC8179 |
+            | TTGO T-Display | `agentdeck-ttgo.bin` | 1.14" 240×135 ST7789 |
 
             ### Flash
             ```bash

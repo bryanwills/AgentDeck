@@ -1,0 +1,73 @@
+name: Ulanzi Release
+
+on:
+  push:
+    tags:
+      - 'ulanzi-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # The packaging script ships @resvg/resvg-js native binaries for every
+    # darwin/win32 target in the manifest's OS matrix by resolving them from
+    # the pnpm store, so the host platform does not constrain the artifact.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#ulanzi-v}"
+          test "$VERSION" = "$(tr -d '\n' < VERSION)"
+          node scripts/verify-version-sync.mjs
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#ulanzi-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Package plugin
+        run: pnpm --filter @agentdeck/plugin-ulanzi package
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "AgentDeck Ulanzi v${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## AgentDeck Ulanzi v${{ steps.version.outputs.VERSION }}
+
+            Ulanzi Studio plugin for the D200H Deck Dock — one dynamic action
+            whose keys reflow by agent state (sessions, options, mode, stop, usage).
+
+            Distributed through the **Ulanzi Marketplace**; the archive below is
+            the same artifact submitted there, for manual installation.
+
+            ### Install
+            1. Download `agentdeck-ulanzi-v${{ steps.version.outputs.VERSION }}.zip` below
+            2. Unzip and move `com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin` into
+               Ulanzi Studio's `Plugins` directory
+            3. Restart Ulanzi Studio and drag the **AgentDeck** action onto your keys
+
+            Requires Ulanzi Studio 2.1.4+ and AgentDeck running on the same machine.
+          files: dist/agentdeck-ulanzi-v${{ steps.version.outputs.VERSION }}.zip
+
+      - name: Upload packaged plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ulanzi-plugin-v${{ steps.version.outputs.VERSION }}
+          path: dist/agentdeck-ulanzi-v${{ steps.version.outputs.VERSION }}.zip

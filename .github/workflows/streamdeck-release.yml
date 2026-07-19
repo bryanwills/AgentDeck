@@ -1,0 +1,69 @@
+name: Stream Deck Release
+
+on:
+  push:
+    tags:
+      - 'streamdeck-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#streamdeck-v}"
+          test "$VERSION" = "$(tr -d '\n' < VERSION)"
+          node scripts/verify-version-sync.mjs
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#streamdeck-v}" >> "$GITHUB_OUTPUT"
+
+      # Runs Elgato's official validator then packs. `streamdeck validate` is
+      # the same gate the Marketplace applies on upload, so a failure here is a
+      # submission that would have been rejected.
+      - name: Package plugin
+        run: pnpm package
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "AgentDeck Stream Deck v${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## AgentDeck Stream Deck v${{ steps.version.outputs.VERSION }}
+
+            Stream Deck+ plugin — session-per-button keypad, encoder dials, and
+            live touch-strip timeline for Claude Code, Codex, OpenCode, and OpenClaw.
+
+            Distributed through the **Elgato Marketplace**; the `.streamDeckPlugin`
+            below is the same artifact submitted there, for manual installation.
+
+            ### Install
+            1. Download `bound.serendipity.agentdeck.streamDeckPlugin` below
+            2. Double-click it — the Stream Deck app installs the plugin
+            3. Start a Claude Code / Codex / OpenCode session; sessions appear automatically
+
+            Requires the Stream Deck app 6.9+ and AgentDeck running on the same machine.
+          files: dist/bound.serendipity.agentdeck.streamDeckPlugin
+
+      - name: Upload packaged plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: streamdeck-plugin-v${{ steps.version.outputs.VERSION }}
+          path: dist/bound.serendipity.agentdeck.streamDeckPlugin
