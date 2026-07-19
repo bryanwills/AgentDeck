@@ -9,7 +9,23 @@ permissions:
   contents: write
 
 jobs:
+  # Fail before burning two 30-minute archive jobs (and before consuming a
+  # build number) if the submission bundle itself is invalid.
+  validate-submission:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg (App Preview probing)
+        run: brew install ffmpeg
+
+      - name: Validate App Store submission bundle
+        run: bash apple/scripts/validate-appstore-submission.sh
+
   build-ios:
+    needs: validate-submission
     runs-on: macos-15
     timeout-minutes: 30
 
@@ -46,8 +62,13 @@ jobs:
 
       # CI owns the build number: ASC rejects re-uploading a (MARKETING_VERSION,
       # CURRENT_PROJECT_VERSION) pair it has already seen, so the value in
-      # project.yml is only a local-build default. github.run_number increases
-      # monotonically per workflow run, satisfying ASC on every re-tag.
+      # project.yml is only a local-build default.
+      #
+      # run_number alone is NOT enough: "Re-run jobs" keeps run_number and only
+      # bumps run_attempt, so re-running a partially-failed release (iOS uploaded,
+      # macOS archive failed) would re-upload iOS with an identical pair and altool
+      # would reject it. run_number*100 + run_attempt is strictly monotonic across
+      # both re-tags and re-runs.
       - name: Archive iOS
         run: |
           xcodebuild archive \
@@ -60,7 +81,7 @@ jobs:
             -authenticationKeyID ${{ secrets.ASC_API_KEY_ID }} \
             -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
             MARKETING_VERSION=${{ steps.version.outputs.VERSION }} \
-            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CURRENT_PROJECT_VERSION=$(( ${{ github.run_number }} * 100 + ${{ github.run_attempt }} )) \
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=QF36NDHYHD \
             ENABLE_PREVIEWS=NO
@@ -101,6 +122,7 @@ jobs:
           rm -rf ~/private_keys
 
   build-macos:
+    needs: validate-submission
     runs-on: macos-15
     timeout-minutes: 30
 
@@ -146,7 +168,7 @@ jobs:
             -authenticationKeyID ${{ secrets.ASC_API_KEY_ID }} \
             -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
             MARKETING_VERSION=${{ steps.version.outputs.VERSION }} \
-            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CURRENT_PROJECT_VERSION=$(( ${{ github.run_number }} * 100 + ${{ github.run_attempt }} )) \
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=QF36NDHYHD
 
@@ -190,12 +212,18 @@ jobs:
     needs: [build-ios, build-macos]
     runs-on: ubuntu-latest
     steps:
+      # github.ref_name is the full tag (apple-v1.0.0); strip the channel prefix
+      # so the release reads "AgentDeck Apple v1.0.0", not "…vapple-v1.0.0".
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#apple-v}" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "AgentDeck Apple v${{ github.ref_name }}"
+          name: "AgentDeck Apple v${{ steps.version.outputs.version }}"
           body: |
-            ## AgentDeck Apple ${{ github.ref_name }}
+            ## AgentDeck Apple v${{ steps.version.outputs.version }}
 
             Universal dashboard app for monitoring coding agent sessions.
 

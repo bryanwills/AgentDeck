@@ -7,6 +7,7 @@ on:
       - 'apple/**'
       - 'shared/**'
       - 'generated/protocol/**'
+      - 'docs/appstore-metadata-draft.md'
       - '.github/workflows/apple-test.yml'
   pull_request:
     branches: [master]
@@ -14,9 +15,27 @@ on:
       - 'apple/**'
       - 'shared/**'
       - 'generated/protocol/**'
+      - 'docs/appstore-metadata-draft.md'
       - '.github/workflows/apple-test.yml'
 
 jobs:
+  # Gates the App Store submission bundle (metadata field limits per locale,
+  # screenshot/preview dimensions, privacy manifest, encryption declaration).
+  # Without this the metadata draft can drift out of ASC's limits — or out of
+  # the shape the validator parses — and only fail at submission time.
+  validate-submission:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg (App Preview probing)
+        run: brew install ffmpeg
+
+      - name: Validate App Store submission bundle
+        run: bash apple/scripts/validate-appstore-submission.sh
+
   test-macos:
     runs-on: macos-15
     timeout-minutes: 30
@@ -36,6 +55,12 @@ jobs:
       - name: Regenerate Xcode project
         working-directory: apple
         run: xcodegen generate
+
+      # apple-release.yml builds the committed .xcodeproj directly and never
+      # runs xcodegen, so a project.yml edit without a regenerated pbxproj
+      # would ship the stale project. Fail here instead.
+      - name: Xcode project drift check
+        run: git diff --exit-code -- apple/AgentDeck.xcodeproj
 
       - name: Build AgentDeck_macOS
         run: |
