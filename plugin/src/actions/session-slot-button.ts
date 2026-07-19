@@ -15,7 +15,6 @@ import streamDeck, {
 import { State, PASSIVE_OFFLINE_LABEL, OPEN_AGENTDECK_LABEL } from '@agentdeck/shared';
 import type { SessionInfo, PromptOption, CodexRateLimits } from '@agentdeck/shared';
 import { SessionSlotManager, type DeckLayout, type SessionSlotConfig } from '../session-slot-manager.js';
-import { computeCenterCluster } from '../center-slot.js';
 import {
   renderSessionSlot,
   renderEmptySlot,
@@ -78,15 +77,11 @@ export function initSessionSlots(
   onSlotAction = callback;
 }
 
-export function updateSessionSlotSessions(sessions: SessionInfo[], gatewayAvailable: boolean): void {
-  manager.updateSessions(sessions, gatewayAvailable);
+export function updateSessionSlotSessions(sessions: SessionInfo[]): void {
+  manager.updateSessions(sessions);
   refreshAll();
 }
 
-export function setActiveSession(sessionId: string | null, port: number | null): void {
-  manager.setActiveSession(sessionId, port);
-  if (manager.view === 'list') refreshAll();
-}
 
 /** Feed latest Claude 5H/7D + Codex quota; re-render only the list view (where usage tiles live). */
 export function updateSlotUsage(usage: {
@@ -151,7 +146,7 @@ export function setDaemonConnected(connected: boolean): void {
   if (!connected) {
     daemonStale = false;
     // Clear sessions on daemon disconnect
-    manager.updateSessions([], false);
+    manager.updateSessions([]);
     if (manager.view === 'detail') {
       manager.exitDetailView();
     }
@@ -194,7 +189,6 @@ function needsAnimation(): boolean {
   for (const { slot, layout } of slotMap.values()) {
     const config = manager.getSlotConfig(slot, layout);
     if (config.type !== 'session' || !config.session) continue;
-    if (config.isActive) return true;
     if (config.session.state?.startsWith('awaiting')) return true;
     if (config.session.state === 'processing') return true;
   }
@@ -306,7 +300,7 @@ function renderSlotSvg(config: SessionSlotConfig, _slot: number): string {
       } else {
         processingStartFrame.delete(sess.id);
       }
-      return renderSessionSlot(sess, config.isActive ?? false, animFrame, undefined, {
+      return renderSessionSlot(sess, false, animFrame, undefined, {
         processingStartFrame: processingStartFrame.get(sess.id)?.frame,
         isStale: daemonStale,
       });
@@ -323,7 +317,6 @@ function renderSlotSvg(config: SessionSlotConfig, _slot: number): string {
           config.session,
           manager.detailState,
           manager.detailModelName ?? config.session.modelName,
-          undefined,
           config.label,
           manager.detailEffortLevel ?? config.session.effortLevel,
         );

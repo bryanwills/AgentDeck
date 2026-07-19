@@ -13,11 +13,7 @@ export {
   renderDetailInfo,
   renderOptionButton,
   renderPresetButton,
-  renderInfoSlot,
   renderStatusCard,
-  renderQuietSlot,
-  svgFrame,
-  renderOpenAppGrid,
   renderOfflineTouchStrip,
 } from '@agentdeck/shared';
 export type {

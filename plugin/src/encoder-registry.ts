@@ -1,33 +1,20 @@
 /**
  * Registry for encoder action IDs (Stream Deck+ E1–E4).
- * Each action module registers its IDs here so cross-cutting features (voice-text
- * takeover, offline banner, project picker) can address every encoder LCD.
+ * Each action module registers its IDs here so cross-cutting features
+ * (the offline banner) can address every encoder LCD.
  *
- * SD+ encoder roles (rotate cycles views: both → 5h → 7d → session; press refreshes):
- *   E1 = utility (volume/mic/etc.)   — utilityIds
- *   E2 = Claude usage gauge          — optionIds (UUID kept as `option-dial`)
- *   E3 = Codex usage gauge           — usageIds  (UUID kept as `iterm-dial`)
- *   E4 = voice                       — voiceIds
+ * SD+ encoder roles (E2/E3 rotate cycles both → 5h → 7d → session; press refreshes):
+ *   E1 = volume                      — utilityIds (UUID kept as `utility-dial`)
+ *   E2 = Claude usage gauge          — optionIds  (UUID kept as `option-dial`)
+ *   E3 = Codex usage gauge           — usageIds   (UUID kept as `iterm-dial`)
+ *   E4 = launcher                    — launcherIds
  */
 export const encoderRegistry = {
-  utilityIds: [] as string[],  // Utility Dial (E1)
-  optionIds: [] as string[],   // Claude usage dial (E2)
-  voiceIds: [] as string[],    // Voice dial (E4)
-  usageIds: [] as string[],    // Codex usage dial (E3)
+  utilityIds: [] as string[],   // Volume dial (E1)
+  optionIds: [] as string[],    // Claude usage dial (E2)
+  usageIds: [] as string[],     // Codex usage dial (E3)
+  launcherIds: [] as string[],  // Launcher dial (E4)
 };
-
-/**
- * Layout state tracking shared with action modules (and the project picker).
- * The voice-text takeover resets this when it releases the borrowed encoder LCDs.
- */
-export const encoderLayout = {
-  option: '',
-};
-
-/** Reset layout tracking (called when voice-text takeover exits). */
-export function resetEncoderLayouts(): void {
-  encoderLayout.option = '';
-}
 
 // ─── Daemon connection state (shared with all four encoder dials) ────────
 // The encoder OFFLINE banner (renderOfflineTouchStrip) is an all-or-nothing
@@ -42,54 +29,9 @@ let _daemonConnected = false;
 export function setEncoderDaemonConnected(v: boolean): void { _daemonConnected = v; }
 export function isDaemonConnected(): boolean { return _daemonConnected; }
 
-/**
- * Voice text takeover state.
- * When long transcription text needs all encoder LCDs for word-wrapped display.
- * Handlers set by voice-dial; called by other dials to delegate interactions.
- */
-let _vtActive = false;
-let _vtRotateHandler: ((ticks: number) => void) | null = null;
-let _vtDownHandler: (() => void) | null = null;
-let _vtUpHandler: (() => void) | null = null;
-let _onVtExitCallback: (() => void) | null = null;
-
-/** Register callback invoked when voice text takeover exits (for refreshing other dials). */
-export function setVoiceTextExitCallback(cb: () => void): void {
-  _onVtExitCallback = cb;
-}
-
-export function isVoiceTextTakeoverActive(): boolean {
-  return _vtActive;
-}
-
-export function setVoiceTextTakeover(
-  active: boolean,
-  onRotate?: (ticks: number) => void,
-  onDown?: () => void,
-  onUp?: () => void,
-): void {
-  _vtActive = active;
-  _vtRotateHandler = active ? (onRotate ?? null) : null;
-  _vtDownHandler = active ? (onDown ?? null) : null;
-  _vtUpHandler = active ? (onUp ?? null) : null;
-  if (!active) _onVtExitCallback?.();
-}
-
-export function handleVtRotate(ticks: number): void {
-  _vtRotateHandler?.(ticks);
-}
-
-export function handleVtDown(): void {
-  _vtDownHandler?.();
-}
-
-export function handleVtUp(): void {
-  _vtUpHandler?.();
-}
-
 // The encoder option-TAKEOVER (E1–E4 commandeered for AWAITING option/permission
 // selection) was retired in the Phase 2 SD+ redesign: E2/E3 now permanently show
 // Claude/Codex usage, and option/permission selection lives on the keypad detail
 // view (session-slot). The takeover cross-module callback cycles were removed
-// along with encoder-takeover.ts; only the voice-text-takeover wiring above
-// remains (it still borrows the encoder LCDs for transcription review).
+// along with encoder-takeover.ts. The voice-text takeover that also borrowed
+// these LCDs went with the Voice dial.

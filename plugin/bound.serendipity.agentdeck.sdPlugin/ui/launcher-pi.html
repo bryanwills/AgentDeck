@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="sdpi-components.js"></script>
+  <link rel="stylesheet" href="design-tokens.css" />
+  <style>
+    .sdpi-info {
+      margin: 0 1em 0.5em;
+      padding: 0.5em 0.75em;
+      font-size: 11px;
+      color: var(--ink-300);
+      line-height: 1.5;
+      border-left: 2px solid var(--ink-700);
+    }
+    .sdpi-info code {
+      background: var(--ink-800);
+      padding: 1px 4px;
+      border-radius: 4px;
+      color: var(--ui-tty-text);
+    }
+  </style>
+</head>
+<body>
+  <sdpi-item label="Claude">
+    <sdpi-textfield setting="claudeTarget" placeholder="app:Claude|url:https://claude.ai"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="Codex">
+    <sdpi-textfield setting="codexTarget" placeholder="app:Codex|url:https://chatgpt.com/codex/cloud"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="OpenClaw">
+    <sdpi-textfield setting="openclawTarget" placeholder="url:http://127.0.0.1:8787"></sdpi-textfield>
+  </sdpi-item>
+  <div class="sdpi-info">
+    Rotate to pick an agent, press to open it.<br/>
+    Set a target as <code>app:Name</code> to open a desktop app, or
+    <code>url:https://…</code> to open a page. Chain fallbacks with
+    <code>|</code> — the first one that works wins. Leave blank for the default.
+  </div>
+</body>
+</html>

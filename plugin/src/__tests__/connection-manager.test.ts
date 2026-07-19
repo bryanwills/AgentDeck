@@ -47,6 +47,25 @@ vi.mock('../bridge-client.js', async () => {
   return { BridgeClient: MockBridgeClient };
 });
 
+// Mock fs so daemon.json discovery can be driven from the tests.
+// `daemonFiles` maps an absolute path → the JSON that file should contain.
+const daemonFiles = new Map<string, string>();
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    readFileSync: (path: any, ...rest: any[]) => {
+      const key = String(path);
+      if (key.endsWith('daemon.json')) {
+        const hit = [...daemonFiles.entries()].find(([f]) => key === f);
+        if (!hit) throw new Error(`ENOENT: ${key}`);
+        return hit[1];
+      }
+      return (actual.readFileSync as any)(path, ...rest);
+    },
+  };
+});
+
 // Mock logger
 vi.mock('../log.js', () => ({
   dlog: vi.fn(),
@@ -56,6 +75,8 @@ vi.mock('../log.js', () => ({
   dtrace: vi.fn(),
 }));
 
+import os from 'os';
+import path from 'path';
 import { ConnectionManager } from '../connection-manager.js';
 
 // Helper to access internal mock
@@ -209,22 +230,71 @@ describe('ConnectionManager', () => {
     });
   });
 
-  // ===== Gateway Availability =====
+  // ===== Daemon discovery fallthrough =====
+  //
+  // Both daemons can be installed: the CLI writes ~/.agentdeck/daemon.json and
+  // the App Store app writes inside its sandbox container. A live pid does not
+  // prove the port is served, so an unhealthy first candidate must not
+  // permanently shadow a healthy second one.
 
-  describe('isGatewayAvailable()', () => {
-    it('returns false by default', () => {
-      expect(cm.isGatewayAvailable()).toBe(false);
+  describe('findDaemonPort() candidate fallthrough', () => {
+    const home = os.homedir();
+    const cliFile = path.join(home, '.agentdeck', 'daemon.json');
+    const swiftFile = path.join(
+      home, 'Library', 'Containers', 'bound.serendipity.agent.deck', 'Data',
+      'Library', 'Application Support', 'AgentDeck', 'daemon.json',
+    );
+
+    beforeEach(() => {
+      daemonFiles.clear();
+      delete process.env.AGENTDECK_DATA_DIR;
+      // Every pid in these fixtures is "alive" — the whole point is that
+      // liveness alone is not enough to pick the right daemon.
+      vi.spyOn(process, 'kill').mockImplementation(() => true as any);
     });
 
-    it('returns true when bridge reports gateway available', () => {
-      cm.setBridgeGatewayAvailable(true);
-      expect(cm.isGatewayAvailable()).toBe(true);
+    it('prefers the CLI daemon when it is healthy', () => {
+      daemonFiles.set(cliFile, JSON.stringify({ port: 9120, pid: 1234 }));
+      daemonFiles.set(swiftFile, JSON.stringify({ port: 9130, pid: 5678 }));
+
+      cm.start();
+      expect(cm.getConnectionSnapshot().daemonPort).toBe(9120);
     });
 
-    it('returns false when bridge reports gateway unavailable', () => {
-      cm.setBridgeGatewayAvailable(true);
-      cm.setBridgeGatewayAvailable(false);
-      expect(cm.isGatewayAvailable()).toBe(false);
+    it('falls through to the Swift daemon after the CLI port fails', () => {
+      daemonFiles.set(cliFile, JSON.stringify({ port: 9120, pid: 1234 }));
+      daemonFiles.set(swiftFile, JSON.stringify({ port: 9130, pid: 5678 }));
+
+      cm.start();
+      expect(cm.getConnectionSnapshot().daemonPort).toBe(9120);
+
+      // The CLI endpoint drops — its pid is still alive, so without the
+      // quarantine discovery would hand back 9120 forever.
+      (cm.bridge as any)._simulateDisconnect();
+      expect(cm.retryNow().daemonPort).toBe(9130);
+    });
+
+    it('reports the daemon as found even when every candidate has failed', () => {
+      daemonFiles.set(cliFile, JSON.stringify({ port: 9120, pid: 1234 }));
+      daemonFiles.set(swiftFile, JSON.stringify({ port: 9130, pid: 5678 }));
+
+      cm.start();
+      (cm.bridge as any)._simulateDisconnect();   // quarantines 9120
+      cm.retryNow();
+      (cm.bridge as any)._simulateDisconnect();   // quarantines 9130
+      const snap = cm.retryNow();
+
+      // Quarantine self-clears rather than degrading to "missing" while both
+      // daemons are demonstrably running.
+      expect(snap.daemonStatus).toBe('found');
+      expect([9120, 9130]).toContain(snap.daemonPort);
+    });
+
+    it('reports missing when no daemon.json exists', () => {
+      cm.start();
+      const snap = cm.getConnectionSnapshot();
+      expect(snap.daemonStatus).toBe('missing');
+      expect(snap.daemonPort).toBeNull();
     });
   });
 });

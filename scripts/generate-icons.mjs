@@ -5,16 +5,14 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outputDir = resolve(__dirname, '../plugin/bound.serendipity.agentdeck.sdPlugin/static/imgs');
+const keyOutputDir = resolve(outputDir, 'keys');
 
 mkdirSync(outputDir, { recursive: true });
+mkdirSync(keyOutputDir, { recursive: true });
 
 // All SVGs designed at 40x40 viewBox, will be rendered at target sizes
 const svgs = {
   // Plugin icon — rounded "C" with diamond accent (Claude-style)
-  plugin: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M22 6C13.2 6 6 13.2 6 22s7.2 16 16 16c3.2 0 6.2-1 8.7-2.6" fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
-    <polygon points="32,8 36,14 32,20 28,14" fill="white"/>
-  </svg>`,
 
   // Category icon — same as plugin
   category: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
@@ -23,25 +21,10 @@ const svgs = {
   </svg>`,
 
   // Response — chat bubble with reply arrow
-  response: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M6 8h28a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H14l-6 6V28H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
-    <path d="M22 15l4 4-4 4" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M14 19h12" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/>
-  </svg>`,
 
   // Stop — octagon stop symbol
-  stop: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <polygon points="14,4 26,4 36,14 36,26 26,36 14,36 4,26 4,14" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
-    <rect x="14" y="14" width="12" height="12" rx="1" fill="white"/>
-  </svg>`,
 
   // Mode — cycle arrows (toggle through Default/Plan/Accept)
-  mode: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M30 14A11 11 0 0 0 10 14" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <polyline points="28,8 30,14 24,16" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M10 26A11 11 0 0 0 30 26" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <polyline points="12,32 10,26 16,24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>`,
 
   // Option — list/menu icon (three lines with bullets)
   option: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
@@ -54,20 +37,8 @@ const svgs = {
   </svg>`,
 
   // History — clock with circular arrow
-  history: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <circle cx="22" cy="22" r="13" fill="none" stroke="white" stroke-width="2.5"/>
-    <polyline points="22,13 22,22 29,26" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M10 8v8h8" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M10 16A14 14 0 0 1 22 8a14 14 0 0 1 13 9" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-  </svg>`,
 
   // Voice — microphone icon
-  voice: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <rect x="15" y="4" width="10" height="18" rx="5" fill="none" stroke="white" stroke-width="2.5"/>
-    <path d="M9 20a11 11 0 0 0 22 0" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <line x1="20" y1="31" x2="20" y2="37" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <line x1="14" y1="37" x2="26" y2="37" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-  </svg>`,
 
   // Session — terminal window with prompt
   session: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
@@ -85,17 +56,8 @@ const svgs = {
   </svg>`,
 
   // Command — slash in a rounded box (quick commands)
-  command: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <rect x="4" y="6" width="32" height="28" rx="4" fill="none" stroke="white" stroke-width="2.5"/>
-    <text x="20" y="27" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="bold" fill="white">/</text>
-  </svg>`,
 
   // Context — eye icon (display/observe)
-  context: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M4 20s6-12 16-12 16 12 16 12-6 12-16 12S4 20 4 20z" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
-    <circle cx="20" cy="20" r="5" fill="none" stroke="white" stroke-width="2.5"/>
-    <circle cx="20" cy="20" r="2" fill="white"/>
-  </svg>`,
 
   // Utility — gear icon (system utilities)
   utility: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
@@ -111,33 +73,62 @@ const svgs = {
     <line x1="12.5" y1="27.5" x2="8" y2="32" stroke="white" stroke-width="3" stroke-linecap="round"/>
   </svg>`,
 
-  // Terminal — monitor with prompt cursor
-  terminal: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <rect x="3" y="4" width="34" height="24" rx="3" fill="none" stroke="white" stroke-width="2.5"/>
-    <path d="M10 12l5 4-5 4" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <line x1="18" y1="20" x2="26" y2="20" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <line x1="14" y1="34" x2="26" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <line x1="20" y1="28" x2="20" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+  // Launcher — rocket (start a session). Pure geometry, no text.
+  launcher: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    <path d="M20 3c5 5 8 12 8 18v6H12v-6c0-6 3-13 8-18z" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
+    <circle cx="20" cy="14" r="3.2" fill="white"/>
+    <polygon points="12,20 5,29 12,27" fill="white"/>
+    <polygon points="28,20 35,29 28,27" fill="white"/>
+    <polygon points="16,30 20,38 24,30" fill="white"/>
   </svg>`,
+
+  // Terminal — monitor with prompt cursor
 };
 
 // Size specs: plugin/category are 28/56, action icons are 20/40
+// Category icon is 28 (@2x 56); action-list icons are 20 (@2x 40).
+//
+// NOT generated: `static/imgs/plugin.png` + `@2x`. That is the Marketplace
+// listing icon and a designed asset (94KB / 349KB) — an earlier revision of
+// this file declared it here at 28x28, so running the generator replaced the
+// real icon with a crude placeholder at the wrong size. Keep it out.
 const sizeMap = {
-  plugin:   [28, 56],
   category: [28, 56],
-  response: [20, 40],
-  stop:     [20, 40],
-  mode:     [20, 40],
   option:   [20, 40],
-  history:  [20, 40],
-  voice:    [20, 40],
   session:  [20, 40],
   usage:    [20, 40],
-  command:  [20, 40],
-  context:  [20, 40],
   utility:  [20, 40],
-  terminal: [20, 40],
+  launcher: [20, 40],
 };
+
+// Stream Deck key state images must be 72x72 (@1x) / 144x144 (@2x).
+// Any icon referenced from an action's States[].Image needs a key-sized variant.
+const KEY_SIZE_1X = 72;
+const KEY_SIZE_2X = 144;
+// Glyph is drawn inset on the key canvas so it doesn't bleed to the key edge.
+const KEY_GLYPH_1X = 50; // 2x variant is exactly double, keeping the pair aligned
+const KEY_GLYPH_2X = KEY_GLYPH_1X * 2;
+
+const keyIcons = ['session', 'option', 'utility', 'usage', 'launcher'];
+
+async function renderKeyVariant(svgBuffer, name, keySize, glyphSize, suffix) {
+  const pad = (keySize - glyphSize) / 2;
+  const glyph = await sharp(svgBuffer, { density: 300 })
+    .resize(glyphSize, glyphSize)
+    .png()
+    .toBuffer();
+
+  await sharp(glyph)
+    .extend({
+      top: pad,
+      bottom: pad,
+      left: pad,
+      right: pad,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .png()
+    .toFile(resolve(keyOutputDir, `${name}${suffix}.png`));
+}
 
 let count = 0;
 for (const [name, svg] of Object.entries(svgs)) {
@@ -158,4 +149,20 @@ for (const [name, svg] of Object.entries(svgs)) {
   console.log(`  ${name}.png (${size1x}x${size1x}) + ${name}@2x.png (${size2x}x${size2x})`);
 }
 
+let keyCount = 0;
+for (const name of keyIcons) {
+  const svg = svgs[name];
+  if (!svg) throw new Error(`keyIcons references unknown icon: ${name}`);
+  const buf = Buffer.from(svg);
+
+  await renderKeyVariant(buf, name, KEY_SIZE_1X, KEY_GLYPH_1X, '');
+  await renderKeyVariant(buf, name, KEY_SIZE_2X, KEY_GLYPH_2X, '@2x');
+
+  keyCount += 2;
+  console.log(
+    `  keys/${name}.png (${KEY_SIZE_1X}x${KEY_SIZE_1X}) + keys/${name}@2x.png (${KEY_SIZE_2X}x${KEY_SIZE_2X})`
+  );
+}
+
 console.log(`\nGenerated ${count} icon files in ${outputDir}`);
+console.log(`Generated ${keyCount} key state images in ${keyOutputDir}`);

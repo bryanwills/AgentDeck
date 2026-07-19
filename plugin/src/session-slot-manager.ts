@@ -52,7 +52,6 @@ export interface SessionSlotConfig {
   tone?: StatusCardTone;
   preset?: PresetAction;
   /** For list view: is this the currently "active" (connected) session? */
-  isActive?: boolean;
   /** For type 'usage': 5H/7D quota gauge tile (water-tank). */
   usageLabel?: string;
   usagePercent?: number;
@@ -184,9 +183,6 @@ export class SessionSlotManager {
   private _sessions: SessionInfo[] = [];
   private _displayNames = new Map<string, string>();
   private _focusedSessionId: string | null = null;
-  private _activeSessionId: string | null = null;
-  private _activeSessionPort: number | null = null;
-  private _gatewayAvailable = false;
 
   // Global subscription quota (rides usage_update), pinned to the list view's
   // last keys on decks without an encoder LCD. Defaults read as "unknown" so an
@@ -264,8 +260,7 @@ export class SessionSlotManager {
 
   // ---- Session list updates ----
 
-  updateSessions(sessions: SessionInfo[], gatewayAvailable: boolean): void {
-    this._gatewayAvailable = gatewayAvailable;
+  updateSessions(sessions: SessionInfo[]): void {
     // Build ordered list: sorted by agentType (openclaw→claude→codex→opencode) then name→startedAt
     const alive = foldCodexSessionsForDisplay(
       sessions.filter(s => (s.agentType as string) !== 'daemon' && s.alive),
@@ -302,14 +297,7 @@ export class SessionSlotManager {
     dlog('SlotMgr', `updateSessions: ${this._sessions.length} sessions, page=${this._currentPage}, view=${this._view}`);
   }
 
-  setActiveSession(sessionId: string | null, port: number | null): void {
-    this._activeSessionId = sessionId;
-    this._activeSessionPort = port;
-  }
 
-  setGatewayAvailable(available: boolean): void {
-    this._gatewayAvailable = available;
-  }
 
   /** Feed the latest Claude 5H/7D + Codex quota for the pinned list-view tiles. */
   updateUsage(usage: {
@@ -559,12 +547,6 @@ export class SessionSlotManager {
         this._focusedSessionId = next;
       }
     }
-
-    if (this._activeSessionId) {
-      const next = findSuccessor(this._activeSessionId);
-      if (next === null) this._activeSessionId = null;
-      else if (next !== this._activeSessionId) this._activeSessionId = next;
-    }
   }
 
   // ---- Internal helpers ----
@@ -684,7 +666,6 @@ export class SessionSlotManager {
       return {
         type: 'session',
         session,
-        isActive: session.id === this._activeSessionId || session.port === this._activeSessionPort,
       };
     }
 

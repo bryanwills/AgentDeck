@@ -51,10 +51,6 @@ export function fireUsageRefresh(): void {
   onRefreshRequest?.();
 }
 
-export function gaugeBar(percent: number, width = 10): string {
-  const filled = Math.round((percent / 100) * width);
-  return '\u2588'.repeat(filled) + '\u2591'.repeat(width - filled);
-}
 
 export function formatResetTime(iso?: string): string {
   if (!iso) return '';

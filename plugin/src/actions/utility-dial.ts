@@ -1,85 +1,95 @@
+/**
+ * E1 — Volume dial (Stream Deck+).
+ *
+ * Rotate adjusts macOS output volume; press toggles mute. The LCD shows the
+ * current level and mirrors changes made elsewhere on the system via a 2s poll.
+ *
+ * The multi-mode utility dial (mic / media / timer / diag / apme / tower, cycled
+ * by tapping the LCD) was removed ahead of the Marketplace submission: touch-tap
+ * mode switching was undiscoverable, did nothing at the default single-mode
+ * setting, and the extra modes leaned on `System Events` synthetic key codes
+ * (Accessibility permission) that fail silently when the grant is missing.
+ * The UUID stays `utility-dial` for profile/manifest stability.
+ */
 import streamDeck, {
   action,
   SingletonAction,
   DialRotateEvent,
   DialDownEvent,
-  DialUpEvent,
   WillAppearEvent,
   WillDisappearEvent,
-  DidReceiveSettingsEvent,
-  TouchTapEvent,
 } from '@elgato/streamdeck';
 import { State } from '@agentdeck/shared';
-import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
-import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, isDaemonConnected } from '../encoder-registry.js';
-import { createModes, modeDots, type UtilityMode } from '../utility-modes/index.js';
+import { encoderRegistry, isDaemonConnected } from '../encoder-registry.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
-import { renderUtilityGeneric, renderUtilityMedia, type UtilityRenderData } from '../renderers/utility-renderer.js';
+import { renderUtilityGeneric, type UtilityRenderData } from '../renderers/utility-renderer.js';
 import { dlog, dinfo, dwarn } from '../log.js';
-import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
+import {
+  openAgentDeckAppOrGitHub,
+  getVolumeSettings,
+  setOutputVolume,
+  setOutputMuted,
+} from '../utility-modes/macos.js';
 import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 
-import type { JsonValue } from '@elgato/utils';
+const PIXMAP_LAYOUT = 'layouts/encoder-layout.json';
 
-interface UtilityDialSettings {
-  [key: string]: JsonValue;
-  enabledModes?: string | string[];
+const POLL_INTERVAL = 2000;
+/** Skip polling briefly after a user action so the optimistic value isn't clobbered. */
+const SKIP_AFTER_ACTION = 3000;
+const VOLUME_STEP = 1;
+
+let currentLayout = '';
+let volume = 50;
+let muted = false;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let lastActionAt = 0;
+let polling = false;
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
 }
 
-const DEFAULT_MODES = ['volume'];
-
-/** Normalize enabledModes (string or string[]) to comma-separated string. */
-function normalizeEnabledModes(val: string | string[] | undefined): string {
-  if (Array.isArray(val)) return val.length > 0 ? val.join(',') : DEFAULT_MODES.join(',');
-  if (typeof val === 'string' && val.trim()) return val;
-  return DEFAULT_MODES.join(',');
-}
-
-const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
-
-const LONG_PRESS_MS = 500;
-
-let setupRequired = false;
-let modes: UtilityMode[] = [];
-let activeIndex = 0;
-let settings: UtilityDialSettings = {};
-let currentLayout = PIXMAP_LAYOUT;
-let dialDownTime = 0;
-
-function rebuildModes(): void {
-  // Deactivate all existing modes (full cleanup — stops timer etc.)
-  for (const m of modes) m.onDeactivate?.();
-
-  modes = createModes(normalizeEnabledModes(settings.enabledModes), {
-    refresh: refreshUtilityDials,
-  });
-  activeIndex = 0;
-  dinfo('UtilDial', `rebuildModes: ${modes.length} modes [${modes.map(m => m.id).join(',')}]`);
-  if (modes.length > 0) {
-    // Activate first mode, then refresh LCD when system values are fetched
-    const first = modes[0];
-    if (first.onActivate) {
-      void first.onActivate().then(() => refreshUtilityDials()).catch((e) => {
-        dwarn('UtilDial', `onActivate error: ${e}`);
-      });
+async function syncFromSystem(): Promise<void> {
+  if (polling) return;
+  if (Date.now() - lastActionAt < SKIP_AFTER_ACTION) return;
+  polling = true;
+  try {
+    const s = await getVolumeSettings();
+    if (s.outputVolume !== volume || s.outputMuted !== muted) {
+      volume = s.outputVolume;
+      muted = s.outputMuted;
+      refreshUtilityDials();
     }
+  } catch (err) {
+    dwarn('VolumeDial', `syncFromSystem failed: ${err}`);
+  } finally {
+    polling = false;
   }
 }
 
-export function setUtilitySetupRequired(value: boolean): void {
-  setupRequired = value;
-  refreshUtilityDials();
+function startPolling(): void {
+  stopPolling();
+  pollTimer = setInterval(() => { void syncFromSystem(); }, POLL_INTERVAL);
 }
 
+function stopPolling(): void {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+
 export function initUtilityDial(): void {
-  dinfo('UtilDial', 'initUtilityDial called');
-  rebuildModes();
+  dinfo('VolumeDial', 'initUtilityDial');
+  void syncFromSystem().then(() => refreshUtilityDials());
+  startPolling();
 }
 
 export function updateUtilityDialState(_state: State): void {
-  // Utility modes (volume/media/etc.) are session-independent; the offline banner
-  // and input gating now key off isDaemonConnected(), so session state is unused.
-  // Force layout re-apply on next refresh (covers voice-text-takeover exit).
+  // Volume is session-independent; the offline banner keys off isDaemonConnected().
+  // Force a layout re-apply on the next refresh.
   currentLayout = '';
   refreshUtilityDials();
 }
@@ -94,13 +104,12 @@ function ensurePixmapLayout(): void {
 }
 
 export function refreshUtilityDials(): void {
-  // Offline banner is highest priority and all-or-nothing across the 4 encoders.
+  // Offline banner is highest priority and all-or-nothing across the encoders.
   // Gate on real daemon-down, NOT session-level currentState === DISCONNECTED
   // (which flips transiently during multi-session switching while the daemon is up).
   if (!isDaemonConnected()) {
     ensurePixmapLayout();
-    const svg = renderOfflineTouchStrip(0);
-    const canvasFeedback = { canvas: svgToDataUrl(svg) };
+    const canvasFeedback = { canvas: svgToDataUrl(renderOfflineTouchStrip(0)) };
     for (const id of encoderRegistry.utilityIds) {
       const dial = streamDeck.actions.getActionById(id) as any;
       if (dial) void dial.setFeedback(canvasFeedback).catch(() => {});
@@ -108,34 +117,19 @@ export function refreshUtilityDials(): void {
     return;
   }
 
-  if (isVoiceTextTakeoverActive()) return;
-
-  if (modes.length === 0) return;
-
   ensurePixmapLayout();
 
-  const mode = modes[activeIndex];
-  const feedback = mode.getFeedback();
-  const dots = modeDots(activeIndex, modes.length);
-
-  // Build render data from mode feedback
-  const indicator = (feedback.indicator as { value: number; bar_fill_c: string }) || { value: 0, bar_fill_c: '#333' };
   const data: UtilityRenderData = {
-    title: String(feedback.title ?? ''),
-    icon: feedback.icon != null ? String(feedback.icon) : undefined,
-    value: feedback.value != null ? String(feedback.value) : undefined,
-    indicator,
-    dots,
-    state: feedback.state != null ? String(feedback.state) : undefined,
-    track: feedback.track != null ? String(feedback.track) : undefined,
-    artist: feedback.artist != null ? String(feedback.artist) : undefined,
+    title: 'VOL',
+    icon: muted ? '🔇' : '🔊',
+    value: muted ? 'Muted' : `${volume}%`,
+    indicator: {
+      value: muted ? 0 : volume,
+      bar_fill_c: muted ? '#64748b' : '#22c55e',
+    },
   };
 
-  // Media mode has track field; generic for everything else
-  const isMedia = data.track !== undefined;
-  const svg = isMedia ? renderUtilityMedia(data) : renderUtilityGeneric(data);
-  const canvasFeedback = { canvas: svgToDataUrl(svg) };
-
+  const canvasFeedback = { canvas: svgToDataUrl(renderUtilityGeneric(data)) };
   for (const id of encoderRegistry.utilityIds) {
     const dial = streamDeck.actions.getActionById(id) as any;
     if (dial) void dial.setFeedback(canvasFeedback).catch(() => {});
@@ -147,110 +141,58 @@ export class UtilityDialAction extends SingletonAction {
   static get actionIds(): string[] { return encoderRegistry.utilityIds; }
 
   override async onWillAppear(ev: WillAppearEvent): Promise<void> {
-    dinfo('UtilDial', `onWillAppear: id=${ev.action.id} controller=${ev.payload.controller}`);
+    dinfo('VolumeDial', `onWillAppear: id=${ev.action.id} controller=${ev.payload.controller}`);
     if (!encoderRegistry.utilityIds.includes(ev.action.id)) {
       encoderRegistry.utilityIds.push(ev.action.id);
     }
-
-    // Load settings
-    const s = (ev.payload?.settings ?? {}) as UtilityDialSettings;
-    if (s.enabledModes) {
-      // Migrate legacy comma-string to array so PI checkbox-list shows correctly
-      if (typeof s.enabledModes === 'string') {
-        s.enabledModes = s.enabledModes.split(',').map(x => x.trim()).filter(Boolean);
-        void ev.action.setSettings(s as Record<string, JsonValue>).catch(() => {});
-      }
-      settings = s;
-    } else {
-      // Persist defaults so PI checkbox-list shows them checked
-      settings = { enabledModes: [...DEFAULT_MODES] };
-      void ev.action.setSettings(settings as Record<string, JsonValue>).catch(() => {});
-    }
-    rebuildModes();
-    refreshUtilityDials();
-  }
-
-  override onDidReceiveSettings(ev: DidReceiveSettingsEvent<UtilityDialSettings>): void {
-    dlog('UtilDial', `onDidReceiveSettings: ${JSON.stringify(ev.payload.settings)}`);
-    settings = ev.payload.settings;
-    rebuildModes();
-    refreshUtilityDials();
-  }
-
-  override async onTouchTap(ev: TouchTapEvent): Promise<void> {
-    dlog('UtilDial', `onTouchTap: modes=${modes.length} hold=${ev.payload.hold}`);
-    if (!isDaemonConnected()) {
-      void openAgentDeckAppOrGitHub().catch(() => {});
-      return;
-    }
-    if (modes.length <= 1) return;
-
-    // Pause current mode (stops polling etc. but preserves state)
-    const prev = modes[activeIndex];
-    prev.onPause?.();
-
-    activeIndex = (activeIndex + 1) % modes.length;
-    const next = modes[activeIndex];
-    dlog('UtilDial', `touch: mode=${next.id} idx=${activeIndex}`);
-
-    // Resume or activate new mode
-    const resumeOrActivate = next.onResume ?? next.onActivate;
-    if (resumeOrActivate) {
-      void resumeOrActivate().then(() => refreshUtilityDials()).catch((e) => {
-        dwarn('UtilDial', `onResume/Activate error: ${e}`);
-      });
-    }
-    // Immediate refresh with local state (optimistic)
+    await syncFromSystem();
+    startPolling();
     refreshUtilityDials();
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
-    dlog('UtilDial', `onDialRotate: modes=${modes.length} ticks=${ev.payload.ticks}`);
     if (!isDaemonConnected()) return;
-    if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
-    if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
-    if (modes.length === 0) return;
 
-    await modes[activeIndex].onRotate(ev.payload.ticks);
-    dlog('UtilDial', `rotate done: mode=${modes[activeIndex].id}`);
+    // Rotation is high-frequency: the underlying setter is debounced and
+    // fire-and-forget, so a failed tick surfaces as the poll snapping the
+    // value back rather than as a per-tick alert.
+    lastActionAt = Date.now();
+    volume = clamp(volume + ev.payload.ticks * VOLUME_STEP, 0, 100);
+    muted = false;
+    setOutputVolume(volume);
+    dlog('VolumeDial', `rotate: ${volume}%`);
     refreshUtilityDials();
   }
 
   override async onDialDown(ev: DialDownEvent): Promise<void> {
-    dlog('UtilDial', `onDialDown: modes=${modes.length}`);
     if (!isDaemonConnected()) {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
-    if (isPickerActive()) { void selectProject(); return; }
-    if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
-    dialDownTime = Date.now();
-  }
 
-  override async onDialUp(_ev: DialUpEvent): Promise<void> {
-    if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
-    if (modes.length === 0) return;
-
-    const mode = modes[activeIndex];
-    const elapsed = Date.now() - dialDownTime;
-
-    if (elapsed >= LONG_PRESS_MS && mode.onLongPush) {
-      dlog('UtilDial', `longPush (${elapsed}ms): mode=${mode.id}`);
-      await mode.onLongPush();
-    } else {
-      dlog('UtilDial', `push (${elapsed}ms): mode=${mode.id}`);
-      await mode.onPush();
+    lastActionAt = Date.now();
+    const next = !muted;
+    try {
+      await setOutputMuted(next);
+      muted = next;
+      dlog('VolumeDial', `push: muted=${muted}`);
+    } catch (err) {
+      // Discrete, user-initiated action — a silent no-op here reads as a broken
+      // dial, so surface it on the key per the Elgato feedback guideline.
+      dwarn('VolumeDial', `setOutputMuted failed: ${err}`);
+      void (ev.action as any).showAlert?.().catch(() => {});
     }
     refreshUtilityDials();
   }
 
   override onWillDisappear(ev: WillDisappearEvent): void {
-    dinfo('UtilDial', `onWillDisappear: id=${ev.action.id}`);
+    dinfo('VolumeDial', `onWillDisappear: id=${ev.action.id}`);
     const idx = encoderRegistry.utilityIds.indexOf(ev.action.id);
     if (idx !== -1) {
       encoderRegistry.utilityIds.splice(idx, 1);
     }
-    // Full cleanup — deactivate all modes (stops timers etc.)
-    for (const m of modes) m.onDeactivate?.();
+    if (encoderRegistry.utilityIds.length === 0) {
+      stopPolling();
+    }
   }
 }

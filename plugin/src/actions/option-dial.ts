@@ -19,7 +19,7 @@ import streamDeck, {
   WillDisappearEvent,
 } from '@elgato/streamdeck';
 import type { AgentLink } from '../agent-link.js';
-import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp, isDaemonConnected } from '../encoder-registry.js';
+import { encoderRegistry, isDaemonConnected } from '../encoder-registry.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderUsageEncoderBoth, renderUsageEncoderSingle } from '../renderers/usage-gauge.js';
 import { renderUsageSession } from '../renderers/usage-dial-renderer.js';
@@ -28,7 +28,7 @@ import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 import { dlog } from '../log.js';
 import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 
-const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
+const PIXMAP_LAYOUT = 'layouts/encoder-layout.json';
 
 /** Views the dial rotates through. */
 const USAGE_VIEWS = ['both', '5h', '7d', 'session'] as const;
@@ -39,10 +39,6 @@ let hasReceivedData = false;
 /** Dial-cycled view index for the Claude usage encoder (E2). */
 let viewIndex = 0;
 
-/** Retained for plugin.ts compatibility; the usage dial has no setup state. */
-export function setOptionSetupRequired(_value: boolean): void {
-  /* no-op */
-}
 
 export function initOptionDial(_b: AgentLink): void {
   // No bridge interaction required — refreshes ride fireUsageRefresh().
@@ -88,8 +84,6 @@ function refreshClaudeUsageDials(): void {
     setCanvasFeedback(renderOfflineTouchStrip(1));
     return;
   }
-  // Voice text takeover paints all encoders itself — skip.
-  if (isVoiceTextTakeoverActive()) return;
 
   setCanvasFeedback(renderClaudeUsageView());
 }
@@ -121,7 +115,6 @@ export class ResponseDialAction extends SingletonAction {
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     if (!isDaemonConnected()) return;
-    if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
     // Rotation cycles the usage view (both → 5h → 7d → session).
     const dir = ev.payload.ticks >= 0 ? 1 : -1;
     viewIndex = (viewIndex + dir + USAGE_VIEWS.length) % USAGE_VIEWS.length;
@@ -134,14 +127,12 @@ export class ResponseDialAction extends SingletonAction {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
-    if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
     // Push: pull fresh usage.
     fireUsageRefresh();
     dlog('ClaudeUsageDial', 'push: requesting usage refresh');
   }
 
   override async onDialUp(_ev: DialUpEvent): Promise<void> {
-    if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
   }
 
   override async onTouchTap(_ev: TouchTapEvent): Promise<void> {
@@ -149,7 +140,6 @@ export class ResponseDialAction extends SingletonAction {
       void openAgentDeckAppOrGitHub().catch(() => {});
       return;
     }
-    if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
   }
 
   override onWillDisappear(ev: WillDisappearEvent): void {

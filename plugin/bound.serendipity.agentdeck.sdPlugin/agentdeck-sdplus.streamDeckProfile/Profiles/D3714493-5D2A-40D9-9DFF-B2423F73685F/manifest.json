@@ -5,19 +5,14 @@
         "0,0": {
           "ActionID": "c09b9d18-a1f8-4022-977b-7aa12209d0eb",
           "LinkedTitle": true,
-          "Name": "Utility",
+          "Name": "Volume",
           "Plugin": {
             "Name": "AgentDeck",
             "UUID": "bound.serendipity.agentdeck",
             "Version": "1.0.0.0"
           },
           "Resources": null,
-          "Settings": {
-            "enabledModes": [
-              "volume",
-              "mode"
-            ]
-          },
+          "Settings": {},
           "State": 0,
           "States": [
             {}
@@ -27,16 +22,14 @@
         "1,0": {
           "ActionID": "31529612-1b13-4a2f-a1cc-da752baa2867",
           "LinkedTitle": true,
-          "Name": "Action",
+          "Name": "Claude Usage",
           "Plugin": {
             "Name": "AgentDeck",
             "UUID": "bound.serendipity.agentdeck",
             "Version": "1.0.0.0"
           },
           "Resources": null,
-          "Settings": {
-            "commandList": "continue\n/review\n/commit\n/clear"
-          },
+          "Settings": {},
           "State": 0,
           "States": [
             {}
@@ -46,7 +39,7 @@
         "2,0": {
           "ActionID": "ad0f20d8-d667-4c6b-8418-bb2ed457e412",
           "LinkedTitle": true,
-          "Name": "Usage",
+          "Name": "Codex Usage",
           "Plugin": {
             "Name": "AgentDeck",
             "UUID": "bound.serendipity.agentdeck",
@@ -63,7 +56,7 @@
         "3,0": {
           "ActionID": "dbd112dc-5093-4fd9-8b01-6b3df791402a",
           "LinkedTitle": true,
-          "Name": "Voice",
+          "Name": "Launcher",
           "Plugin": {
             "Name": "AgentDeck",
             "UUID": "bound.serendipity.agentdeck",
@@ -75,7 +68,7 @@
           "States": [
             {}
           ],
-          "UUID": "bound.serendipity.agentdeck.voice-dial"
+          "UUID": "bound.serendipity.agentdeck.launcher"
         }
       },
       "Type": "Encoder"
