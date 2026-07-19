@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
@@ -85,14 +85,38 @@ if (xcodeVersions.length === 0 || xcodeVersions.some((version) => version !== pr
   failures.push(`apple/AgentDeck.xcodeproj/project.pbxproj: MARKETING_VERSION mirrors must all be ${productVersion}`);
 }
 
-const profilePaths = [
-  'plugin/bound.serendipity.agentdeck.sdPlugin/agentdeck-sd.sdProfile/Profiles/7F6C6400-1A9F-4F57-8D58-0F5C6C102A15/manifest.json',
-  'plugin/bound.serendipity.agentdeck.sdPlugin/agentdeck-sd.streamDeckProfile/Profiles/7F6C6400-1A9F-4F57-8D58-0F5C6C102A15/manifest.json',
-  'plugin/bound.serendipity.agentdeck.sdPlugin/agentdeck-sdmini.sdProfile/Profiles/A63D9B52-2C41-4A8B-9E63-1D5F7C20B601/manifest.json',
-  'plugin/bound.serendipity.agentdeck.sdPlugin/agentdeck-sdmini.streamDeckProfile/Profiles/A63D9B52-2C41-4A8B-9E63-1D5F7C20B601/manifest.json',
-  'plugin/bound.serendipity.agentdeck.sdPlugin/agentdeck-sdplus.sdProfile/Profiles/D3714493-5D2A-40D9-9DFF-B2423F73685F/manifest.json',
-  'plugin/bound.serendipity.agentdeck.sdPlugin/agentdeck-sdplus.streamDeckProfile/Profiles/D3714493-5D2A-40D9-9DFF-B2423F73685F/manifest.json',
-];
+/**
+ * Bundled profiles are DISCOVERED, not listed.
+ *
+ * This used to be six hardcoded paths, three of which pointed at `.sdProfile`
+ * copies. Deleting those copies (the manifest schema references
+ * `.streamDeckProfile`) made this script crash with ENOENT instead of
+ * reporting a version mismatch — a check that fails on its own file list is
+ * worse than no check. Walking the plugin directory keeps it correct when
+ * profiles are added, removed or renamed.
+ */
+function findProfileManifests() {
+  const pluginDir = 'plugin/bound.serendipity.agentdeck.sdPlugin';
+  const abs = resolve(root, pluginDir);
+  if (!existsSync(abs)) return [];
+  const out = [];
+  for (const entry of readdirSync(abs, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.endsWith('.streamDeckProfile')) continue;
+    const pagesDir = resolve(abs, entry.name, 'Profiles');
+    if (!existsSync(pagesDir)) continue;
+    for (const page of readdirSync(pagesDir, { withFileTypes: true })) {
+      if (!page.isDirectory()) continue;
+      const manifest = `${pluginDir}/${entry.name}/Profiles/${page.name}/manifest.json`;
+      if (existsSync(resolve(root, manifest))) out.push(manifest);
+    }
+  }
+  return out;
+}
+
+const profilePaths = findProfileManifests();
+if (profilePaths.length === 0) {
+  failures.push('plugin/bound.serendipity.agentdeck.sdPlugin: no bundled .streamDeckProfile page manifests found');
+}
 for (const path of profilePaths) {
   const versions = [...read(path).matchAll(/"Version"\s*:\s*"([^"]+)"/g)].map((match) => match[1]);
   if (versions.length === 0 || versions.some((version) => version !== `${productVersion}.0`)) {
