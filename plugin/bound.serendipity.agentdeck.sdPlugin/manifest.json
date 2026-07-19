@@ -117,7 +117,7 @@
   "Name": "AgentDeck",
   "SupportURL": "https://github.com/puritysb/AgentDeck/issues",
   "URL": "https://puritysb.github.io/AgentDeck/",
-  "SDKVersion": 3,
+  "SDKVersion": 2,
   "Software": {
     "MinimumVersion": "6.9"
   },
