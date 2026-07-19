@@ -105,6 +105,14 @@ struct AttentionTheaterHUD: View {
         .padding(12)
         .background(
             ZStack {
+                // Opaque base. Every other HUD surface is translucent over the
+                // terrarium, which reads well when only water is behind it —
+                // but this card is the one that must be *read*, and on iPhone
+                // and iPad it overlaps the session panel and topology rail.
+                // With a translucent fill their text showed straight through
+                // the permission prompt and neither layer was legible.
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(DesignTokens.Ink.s900)
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.black.opacity(0.65))
                 RoundedRectangle(cornerRadius: 12)

@@ -31,75 +31,93 @@ const phases = [
     timeline: null,
   },
   {
-    at: 2_500,
+    at: 2_000,
     focus: 'demo-claude',
     sessions: {
       claude: ['processing', 'Read', 'Mapping the responsive dashboard'],
     },
-    timeline: {
-      agent: 'claude',
-      type: 'chat_start',
-      raw: 'Polish the dashboard for the launch capture',
-    },
+    timeline: { agent: 'claude', type: 'chat_start', raw: 'Polish the dashboard for the launch capture' },
   },
   {
-    at: 5_500,
+    at: 4_500,
     focus: 'demo-claude',
-    sessions: {
-      claude: ['processing', 'Edit', 'Refining the session cards'],
-    },
-    timeline: {
-      agent: 'claude',
-      type: 'tool_exec',
-      raw: 'Edit · MonitorScreen.swift',
-      detail: 'input: responsive session cards',
-    },
-  },
-  {
-    at: 8_000,
-    focus: 'demo-codex',
     sessions: {
       claude: ['processing', 'Edit', 'Refining the session cards'],
       codex: ['processing', 'Bash', 'Running the integration test suite'],
     },
-    timeline: {
-      agent: 'codex',
-      type: 'chat_start',
-      raw: 'Verify the release candidate',
-    },
+    timeline: { agent: 'codex', type: 'chat_start', raw: 'Verify the release candidate' },
     usage: { weeklyPercent: 78 },
   },
+  // A second Claude session on a different project — the same agent can run in
+  // as many workspaces as you like, and each gets its own creature.
   {
-    at: 11_000,
-    focus: 'demo-claude',
+    at: 7_000,
+    focus: 'demo-claude-2',
     sessions: {
-      claude: ['idle', undefined, 'Dashboard polish complete'],
+      claude: ['processing', 'Edit', 'Refining the session cards'],
       codex: ['processing', 'Test', 'Checking protocol and UI tests'],
+      claude2: ['processing', 'Grep', 'Auditing the token mirrors'],
     },
-    timeline: {
-      agent: 'claude',
-      type: 'chat_response',
-      raw: 'Responsive dashboard polish is complete.',
-    },
+    timeline: { agent: 'claude2', type: 'chat_start', raw: 'Audit the design token mirrors' },
   },
   {
-    at: 13_500,
+    at: 9_500,
     focus: 'demo-opencode',
     sessions: {
       claude: ['idle', undefined, 'Dashboard polish complete'],
       codex: ['processing', 'Test', 'Checking protocol and UI tests'],
+      claude2: ['processing', 'Grep', 'Auditing the token mirrors'],
       opencode: ['processing', 'Write', 'Drafting concise release notes'],
     },
-    timeline: {
-      agent: 'opencode',
-      type: 'chat_start',
-      raw: 'Draft the launch release notes',
-    },
-    usage: { weeklyPercent: 79 },
+    timeline: { agent: 'opencode', type: 'chat_start', raw: 'Draft the launch release notes' },
   },
   {
-    at: 16_500,
+    at: 11_500,
+    focus: 'demo-openclaw',
+    gateway: true,
+    sessions: {
+      claude: ['idle', undefined, 'Dashboard polish complete'],
+      codex: ['processing', 'Test', 'Checking protocol and UI tests'],
+      claude2: ['processing', 'Grep', 'Auditing the token mirrors'],
+      opencode: ['processing', 'Write', 'Drafting concise release notes'],
+      openclaw: ['processing', 'Bash', 'Reproducing the reported issue'],
+    },
+    timeline: { agent: 'openclaw', type: 'chat_start', raw: 'Reproduce the reported pairing issue' },
+    usage: { weeklyPercent: 79 },
+  },
+  // Nothing focused: the timeline drops its per-session filter and every
+  // agent's events interleave in one stream. `TimelineStripView` keys this
+  // entirely off a missing `focusedSessionId`.
+  {
+    at: 13_500,
+    focus: null,
+    gateway: true,
+    sessions: {
+      claude: ['idle', undefined, 'Dashboard polish complete'],
+      codex: ['processing', 'Test', 'Checking protocol and UI tests'],
+      claude2: ['processing', 'Edit', 'Fixing two drifted mirrors'],
+      opencode: ['processing', 'Write', 'Drafting concise release notes'],
+      openclaw: ['processing', 'Bash', 'Reproducing the reported issue'],
+    },
+    timeline: { agent: 'claude2', type: 'tool_exec', raw: 'Edit · design-tokens.ts', detail: 'input: two drifted mirrors' },
+  },
+  {
+    at: 16_000,
+    focus: null,
+    gateway: true,
+    sessions: {
+      claude: ['idle', undefined, 'Dashboard polish complete'],
+      codex: ['idle', undefined, 'All release checks passed'],
+      claude2: ['processing', 'Edit', 'Fixing two drifted mirrors'],
+      opencode: ['idle', undefined, 'Release notes are ready'],
+      openclaw: ['processing', 'Bash', 'Reproducing the reported issue'],
+    },
+    timeline: { agent: 'codex', type: 'chat_response', raw: 'All release checks passed.' },
+  },
+  {
+    at: 18_000,
     focus: 'demo-claude',
+    gateway: true,
     sessions: {
       claude: [
         'awaiting_permission',
@@ -107,74 +125,54 @@ const phases = [
         'Waiting for permission to update the interface',
         'Allow the agent to update the dashboard layout?',
       ],
-      codex: ['processing', 'Test', 'Checking protocol and UI tests'],
-      opencode: ['processing', 'Write', 'Drafting concise release notes'],
+      codex: ['idle', undefined, 'All release checks passed'],
+      claude2: ['processing', 'Edit', 'Fixing two drifted mirrors'],
+      opencode: ['idle', undefined, 'Release notes are ready'],
+      openclaw: ['processing', 'Bash', 'Reproducing the reported issue'],
     },
-    timeline: {
-      agent: 'claude',
-      type: 'chat_start',
-      raw: 'Apply the final layout adjustment',
-    },
+    timeline: { agent: 'claude', type: 'chat_start', raw: 'Apply the final layout adjustment' },
   },
   {
-    at: 20_000,
+    at: 21_500,
     focus: 'demo-claude',
-    sessions: {
-      claude: ['processing', 'Edit', 'Applying the approved adjustment'],
-      codex: ['processing', 'Test', 'Checking protocol and UI tests'],
-      opencode: ['processing', 'Write', 'Drafting concise release notes'],
-    },
-    timeline: {
-      agent: 'claude',
-      type: 'tool_exec',
-      raw: 'Edit · DashboardLayout.swift',
-      detail: 'input: final layout adjustment',
-    },
-  },
-  {
-    at: 22_500,
-    focus: 'demo-codex',
+    gateway: true,
     sessions: {
       claude: ['processing', 'Edit', 'Applying the approved adjustment'],
       codex: ['idle', undefined, 'All release checks passed'],
-      opencode: ['processing', 'Write', 'Drafting concise release notes'],
+      claude2: ['idle', undefined, 'Token mirrors back in sync'],
+      opencode: ['idle', undefined, 'Release notes are ready'],
+      openclaw: ['processing', 'Bash', 'Reproducing the reported issue'],
     },
-    timeline: {
-      agent: 'codex',
-      type: 'chat_response',
-      raw: 'All release checks passed.',
-    },
+    timeline: { agent: 'claude', type: 'tool_exec', raw: 'Edit · DashboardLayout.swift', detail: 'input: final layout adjustment' },
     usage: { weeklyPercent: 80 },
   },
   {
-    at: 24_500,
-    focus: 'demo-opencode',
+    at: 24_000,
+    focus: 'demo-openclaw',
+    gateway: true,
     sessions: {
       claude: ['processing', 'Edit', 'Applying the approved adjustment'],
       codex: ['idle', undefined, 'All release checks passed'],
+      claude2: ['idle', undefined, 'Token mirrors back in sync'],
       opencode: ['idle', undefined, 'Release notes are ready'],
+      openclaw: ['idle', undefined, 'Issue reproduced and captured'],
     },
-    timeline: {
-      agent: 'opencode',
-      type: 'chat_response',
-      raw: 'Release notes are ready for publication.',
-    },
+    timeline: { agent: 'openclaw', type: 'chat_response', raw: 'Reproduced the pairing issue and captured the log.' },
   },
   // Closing frame: every session idle for the last few seconds so the terrarium
   // settles to its rest state before the loop restarts.
   {
-    at: 26_500,
-    focus: 'demo-claude',
+    at: 26_000,
+    focus: null,
+    gateway: true,
     sessions: {
       claude: ['idle', undefined, 'Final adjustment complete'],
       codex: ['idle', undefined, 'All release checks passed'],
+      claude2: ['idle', undefined, 'Token mirrors back in sync'],
       opencode: ['idle', undefined, 'Release notes are ready'],
+      openclaw: ['idle', undefined, 'Issue reproduced and captured'],
     },
-    timeline: {
-      agent: 'claude',
-      type: 'chat_response',
-      raw: 'Final adjustment complete.',
-    },
+    timeline: { agent: 'claude', type: 'chat_response', raw: 'Final adjustment complete.' },
   },
 ];
 
@@ -187,7 +185,7 @@ const agents = {
     modelName: 'Claude Sonnet',
     color: '\u001b[38;5;208m',
     label: 'CLAUDE CODE · Sample Workspace',
-    appearsAt: 2_500,
+    appearsAt: 2_000,
   },
   codex: {
     id: 'demo-codex',
@@ -197,7 +195,17 @@ const agents = {
     modelName: 'GPT-5 Codex',
     color: '\u001b[38;5;45m',
     label: 'CODEX · API Client',
-    appearsAt: 8_000,
+    appearsAt: 4_500,
+  },
+  claude2: {
+    id: 'demo-claude-2',
+    port: 9124,
+    projectName: 'Design System',
+    agentType: 'claude-code',
+    modelName: 'Claude Sonnet',
+    color: '\u001b[38;5;214m',
+    label: 'CLAUDE CODE · Design System',
+    appearsAt: 7_000,
   },
   opencode: {
     id: 'demo-opencode',
@@ -207,36 +215,57 @@ const agents = {
     modelName: 'Qwen Coder',
     color: '\u001b[38;5;141m',
     label: 'OPENCODE · Documentation',
-    appearsAt: 13_500,
+    appearsAt: 9_500,
+  },
+  openclaw: {
+    id: 'demo-openclaw',
+    port: 9125,
+    projectName: 'OpenClaw',
+    agentType: 'openclaw',
+    modelName: 'Claude Sonnet',
+    color: '\u001b[38;5;203m',
+    label: 'OPENCLAW · Issue triage',
+    appearsAt: 11_500,
   },
 };
 
 const terminalLines = {
   claude: [
-    [2_500, '❯ Polish the dashboard for the launch capture'],
-    [3_300, '  Reading MonitorScreen.swift'],
-    [5_500, '  Editing responsive session cards…'],
-    [10_700, '✓ Dashboard polish complete'],
-    [16_300, '❯ Apply the final layout adjustment'],
-    [16_900, '  Permission required: update dashboard layout'],
-    [19_400, '  Permission granted'],
-    [20_000, '  Applying final adjustment…'],
-    [26_300, '✓ Final adjustment complete'],
+    [2_000, '❯ Polish the dashboard for the launch capture'],
+    [2_800, '  Reading MonitorScreen.swift'],
+    [4_500, '  Editing responsive session cards…'],
+    [9_300, '✓ Dashboard polish complete'],
+    [17_800, '❯ Apply the final layout adjustment'],
+    [18_400, '  Permission required: update dashboard layout'],
+    [21_000, '  Permission granted'],
+    [21_500, '  Applying final adjustment…'],
+    [25_800, '✓ Final adjustment complete'],
   ],
   codex: [
-    [8_000, '› Verify the release candidate'],
-    [8_600, '• Running integration test suite'],
-    [11_000, '• Checking protocol contract tests'],
-    [14_500, '• Checking SwiftUI state projection'],
-    [22_100, '✓ 1842 tests passed'],
-    [22_400, '✓ Release candidate verified'],
+    [4_500, '› Verify the release candidate'],
+    [5_100, '• Running integration test suite'],
+    [7_000, '• Checking protocol contract tests'],
+    [11_500, '• Checking SwiftUI state projection'],
+    [15_800, '✓ 1842 tests passed'],
+    [16_000, '✓ Release candidate verified'],
+  ],
+  claude2: [
+    [7_000, '❯ Audit the design token mirrors'],
+    [7_800, '  Grepping four token mirrors…'],
+    [13_500, '  Editing design-tokens.ts'],
+    [21_300, '✓ Token mirrors back in sync'],
   ],
   opencode: [
-    [13_500, '❯ Draft the launch release notes'],
-    [14_200, '  Reading the release summary…'],
-    [15_800, '  Writing concise feature highlights…'],
-    [21_000, '  Checking names and privacy-safe examples…'],
-    [24_300, '✓ Release notes are ready'],
+    [9_500, '❯ Draft the launch release notes'],
+    [10_200, '  Reading the release summary…'],
+    [12_000, '  Writing concise feature highlights…'],
+    [15_900, '✓ Release notes are ready'],
+  ],
+  openclaw: [
+    [11_500, '❯ Reproduce the reported pairing issue'],
+    [12_300, '  Replaying the gateway handshake…'],
+    [18_000, '  Capturing the failing log window…'],
+    [23_800, '✓ Issue reproduced and captured'],
   ],
 };
 
@@ -416,15 +445,21 @@ function eventsForPhase(index, cycleStartedAt, includeHistory) {
           ...(question ? { question } : {}),
         };
       })()
-    : { state: 'idle' };
+    // An *empty* focusedSessionId is what clears the selection — omitting the
+    // field leaves the previous focus in place, so the timeline would stay
+    // filtered to whichever session was focused last
+    // (`AgentStateHolder.swift`: `if let id = e.focusedSessionId { … isEmpty ? nil : id }`).
+    : { state: 'idle', focusedSessionId: '' };
 
   const events = [
     {
       type: 'state_update',
       ...focusState,
       permissionMode: 'default',
-      gatewayAvailable: false,
-      gatewayConnected: false,
+      // OpenClaw sessions only read as connected when the Gateway does; the
+      // flag flips on in the phase where the OpenClaw session joins.
+      gatewayAvailable: phase.gateway === true,
+      gatewayConnected: phase.gateway === true,
       gatewayHasError: false,
       daemonPort: 9120,
       moduleHealth,

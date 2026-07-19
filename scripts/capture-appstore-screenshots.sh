@@ -7,12 +7,12 @@
 #   bash scripts/capture-appstore-screenshots.sh iphone
 #   bash scripts/capture-appstore-screenshots.sh ipad
 #
-# Three beats are captured per platform, at fixed offsets into the 30s cycle:
+# Four beats are captured per platform, at fixed offsets into the 30s cycle:
 #   1. fleet    — several agents working at once, quota gauge live
-#   2. attention— the amber "a human is needed" moment (late enough that the
-#                 HUD has finished animating in; capturing at ~1s reads as a
-#                 half-faded overlay with the panel bleeding through)
-#   3. complete — every session resolved, terrarium at rest
+#   2. all-sessions — nothing focused, so every agent's events interleave in
+#                 one timeline (the view keys off a missing focusedSessionId)
+#   3. attention— the amber "a human is needed" moment
+#   4. complete — every session resolved, terrarium at rest
 #
 # Native capture sizes are already App Store-legal, so nothing is rescaled:
 #   iPhone 16 Pro Max 1320x2868 · iPad Pro 13" 2064x2752 · macOS 2880x1800
@@ -26,14 +26,14 @@ PLATFORM="${1:-}"
 PORT="${AGENTDECK_DEMO_PORT:-9220}"
 WS="ws://127.0.0.1:$PORT"
 LEAD_SECONDS=12
-SHOTS="$ROOT/apple/appstore-submission/screenshots"
+SHOTS="$ROOT/apple/appstore-submission/screenshots-raw"
 MACOS_APP="$ROOT/apple/DerivedData/Build/Products/Debug/AgentDeck.app"
 IOS_APP="$ROOT/apple/DerivedData/Build/Products/Debug-iphonesimulator/AgentDeck.app"
 BUNDLE_ID="bound.serendipity.agent.deck"
 
 # Cycle offsets, in seconds, for the three beats.
-BEAT_TIMES=(9.5 18.8 27.5)
-BEAT_NAMES=(01-fleet 02-attention 03-complete)
+BEAT_TIMES=(9.5 14.5 18.8 27.5)
+BEAT_NAMES=(01-fleet 02-all-sessions 03-attention 04-complete)
 
 # 16:10 window so the macOS capture is exactly 2880x1800 physical.
 MAC_WIN_W=1440; MAC_WIN_H=900; MAC_WIN_X=0; MAC_WIN_Y=30
