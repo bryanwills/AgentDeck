@@ -3,9 +3,11 @@
 //
 //   node scripts/crop-hardware-images.mjs [sourceDir]
 //
-// The multi-MB originals are not committed; only the cropped results under
-// docs/media/ are. The table below records which original each shipped image
-// came from, so a re-crop stays reproducible while the originals exist.
+// Sources live in assets/hardware-photos/ (committed): the captures actually
+// used, re-encoded with the EXIF rotation baked in so they are already upright.
+// Pass a directory to crop from the raw camera originals instead. The task
+// table records which capture each shipped image came from, so re-framing a
+// card never depends on files outside the repo.
 //
 // CRITICAL: `.rotate()` with NO argument applies the EXIF orientation tag. Many
 // iPhone captures here are orientation 6 — the stored buffer is 4032x3024 while
@@ -19,12 +21,17 @@ import { fileURLToPath } from 'url';
 import sharp from 'sharp';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const sourceDir = process.argv[2] || path.join(process.env.HOME, 'Desktop/agentdeck-0719');
+const sourceDir = process.argv[2] || path.join(__dirname, '../assets/hardware-photos');
+// Archived sources are .jpg; the raw camera originals are .jpeg.
+const resolveSource = (name) => {
+  const jpg = path.join(sourceDir, name.replace(/\.jpeg$/, '.jpg'));
+  return fs.existsSync(jpg) ? jpg : path.join(sourceDir, name);
+};
 const destDir = path.join(__dirname, '../docs/media');
 // The Waveshare 1.47" never made it into the photo set; this hand-captured
 // screenshot is the only image of it. Override with WAVESHARE_SRC if it moves.
 const WAVESHARE_SRC = process.env.WAVESHARE_SRC ||
-  path.join(process.env.HOME, 'Desktop/\uc2a4\ud06c\ub9b0\uc0f7 2026-07-19 \uc624\uc804 4.06.04.png');
+  path.join(__dirname, '../assets/hardware-photos/waveshare-147-source.jpg');
 
 // Output frames. Keep in sync with the .shot aspect rules in docs/hardware/index.html.
 const STANDARD = { width: 1400, height: 800 }; // 1.75:1 — single-column device card
@@ -78,7 +85,7 @@ async function run() {
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   let ok = 0;
   for (const task of tasks) {
-    const srcPath = task.srcPath || path.join(sourceDir, task.src);
+    const srcPath = task.srcPath || resolveSource(task.src);
     if (!fs.existsSync(srcPath)) {
       console.warn(`[crop] SKIP ${task.name} — source missing: ${srcPath}`);
       continue;
@@ -108,7 +115,7 @@ async function run() {
       const paneW = Math.floor((comp.out.width - gap) / 2);
       const panes = [];
       for (const pane of comp.panes) {
-        const srcPath = path.join(sourceDir, pane.src);
+        const srcPath = resolveSource(pane.src);
         if (!fs.existsSync(srcPath)) throw new Error(`source missing: ${pane.src}`);
         panes.push(
           await sharp(srcPath).rotate().extract(pane.crop)
