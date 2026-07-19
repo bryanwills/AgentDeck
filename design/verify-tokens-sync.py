@@ -108,6 +108,19 @@ MIRRORS = {
         "path": ROOT / "plugin" / "bound.serendipity.agentdeck.sdPlugin"
                      / "ui" / "design-tokens.css",
     },
+    # Build Health generator: its CSS lives inside a Python f-string, so braces
+    # are doubled ({{ }}); unescape before the :root parse. Aliases like --bg
+    # resolve via var(--canonical) and are validated transitively.
+    "build-health": {
+        "type": "css-root",
+        "path": ROOT / "scripts" / "generate-html-report.py",
+        "unescape_braces": True,
+        # :root declarations only. The generator's BODY also carries chart /
+        # badge hex (sparklines, category colors) that predate the token
+        # system; sweeping them is a separate normalization, tracked in the
+        # design-lint baseline, not a sync gate.
+        "body_sweep": False,
+    },
 }
 
 # ─── CSS parsing ──────────────────────────────────────────────────────────────
@@ -693,7 +706,8 @@ def _mask_root_regions(text: str, suffix: str) -> str:
 
 
 def verify_css_root_mirror(
-    path: Path, canonical_by_name: dict[str, "Token"]
+    path: Path, canonical_by_name: dict[str, "Token"],
+    unescape_braces: bool = False, body_sweep: bool = True
 ) -> tuple[list[str], list[str]]:
     """Validate an HTML / CSS file whose `:root` block declares a subset of
     the canonical design tokens. Returns (drift_messages, stray_messages).
@@ -709,7 +723,10 @@ def verify_css_root_mirror(
     if not path.exists():
         return ([f"file missing: {path}"], [])
 
-    raw = _strip_comments(path.read_text())
+    raw = path.read_text()
+    if unescape_braces:
+        raw = raw.replace("{{", "{").replace("}}", "}")
+    raw = _strip_comments(raw)
 
     # Locate every REAL <style>…</style> region (or, for .css, the whole file).
     # Real-CSS detection masks scripts + HTML comments so a fake <style>
@@ -792,13 +809,14 @@ def verify_css_root_mirror(
     # report any remaining hex. (Mask scope matters: an attacker can wrap
     # raw hex in a fake `:root { … }` inside a JS string; restricting masking
     # to <style>-resident :root keeps that hex exposed to the sweep.)
-    body_text = _mask_root_regions(raw, path.suffix)
-    body_hex = sorted({h.lower() for h in re.findall(r"#[0-9a-fA-F]{3,8}\b", body_text)})
-    for h in body_hex:
-        stray.append(
-            f"{h} found outside :root — css-root mirror bodies must use "
-            f"`var(--…)` references only"
-        )
+    if body_sweep:
+        body_text = _mask_root_regions(raw, path.suffix)
+        body_hex = sorted({h.lower() for h in re.findall(r"#[0-9a-fA-F]{3,8}\b", body_text)})
+        for h in body_hex:
+            stray.append(
+                f"{h} found outside :root — css-root mirror bodies must use "
+                f"`var(--…)` references only"
+            )
 
     return drift, stray
 
@@ -854,7 +872,11 @@ def main() -> int:
         # canonical CSS inside a :root block. They go through a dedicated
         # validator so hex drift inside lint-allowlisted files is caught.
         if mirror_type == "css-root":
-            drift_msgs, stray_msgs = verify_css_root_mirror(path, canonical_by_name)
+            drift_msgs, stray_msgs = verify_css_root_mirror(
+                path, canonical_by_name,
+                unescape_braces=spec.get("unescape_braces", False),
+                body_sweep=spec.get("body_sweep", True),
+            )
             if not drift_msgs and not stray_msgs:
                 print(f"  \033[32m✓\033[0m  {path.relative_to(ROOT)}  [css-root]")
                 continue

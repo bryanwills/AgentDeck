@@ -145,7 +145,7 @@
   const els = {
     navigation: document.querySelector('#navigation'),
     search: document.querySelector('#search'),
-    locale: document.querySelector('#locale'),
+    locale: document.querySelector('#lang'),
     generatedAt: document.querySelector('#generated-at'),
     fallback: document.querySelector('#fallback'),
     eyebrow: document.querySelector('#eyebrow'),

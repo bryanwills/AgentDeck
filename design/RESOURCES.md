@@ -33,13 +33,15 @@ index. If a location or gate changes, update this file in the same commit.
 | Real photography / captures | `assets/` (sources: `assets/hardware-photos/`) | `scripts/crop-hardware-images.mjs` crop table |
 | Published image crops | `docs/media/` | regenerated from `assets/`, never hand-edited |
 | Doc-to-viewer binding | `agentdeck-design-system/catalog.json` | `pnpm design-system:check` |
+| Pages global nav (GNB) | `scripts/pages-nav.html` | `scripts/sync-pages-nav.mjs --check` (CI: design-system.yml) |
 
 ## Token mirrors (never edit without the CSS)
 
 `design/tokens.js` (browser) · `shared/src/design-tokens.ts` (TS) ·
 `apple/AgentDeck/UI/Common/DesignTokens.swift` · Kotlin `DesignTokens.kt` ·
-embedded copies in the APME dashboard HTML and the Stream Deck PI CSS.
-`python3 design/verify-tokens-sync.py` diffs all six against `tokens.css`.
+embedded copies in the APME dashboard HTML, the Stream Deck PI CSS, and the
+Build Health generator's `:root` (`scripts/generate-html-report.py`).
+`python3 design/verify-tokens-sync.py` diffs all seven against `tokens.css`.
 
 ## Derived / consumer surfaces (safe to regenerate, never edit)
 

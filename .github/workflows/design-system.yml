@@ -35,6 +35,12 @@ jobs:
       - name: Verify design-system catalog, frontmatter, and translations
         run: node scripts/build-design-system-viewer.mjs --check
 
+      # The Pages GNB is single-sourced from scripts/pages-nav.html; the four
+      # committed surfaces must match the rendered partial (Build Health
+      # renders it at generation time and cannot drift).
+      - name: Verify Pages GNB parity
+        run: node scripts/sync-pages-nav.mjs --check
+
       # lint.sh is baseline-aware. The current count must be ≤ the snapshot
       # recorded in docs/design-lint-baseline.md. Lower is welcome (no action);
       # higher fails the PR with a delta report.

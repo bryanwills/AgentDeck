@@ -277,14 +277,14 @@
       --site-max:1240px;
     }
     body { padding:0; background:var(--tide-50); color:var(--ink-900); font-family:var(--font-sans); }
-    .site-nav { position:sticky; top:0; z-index:200; backdrop-filter:blur(10px); background:rgba(245,243,236,.82); border-bottom:1px solid var(--tide-200); }
-    .site-nav-in { max-width:var(--site-max); margin:0 auto; padding:12px 32px; display:flex; align-items:center; gap:16px; }
-    .site-brand { display:flex; align-items:center; gap:12px; color:var(--ink-900); text-decoration:none; font-weight:700; }
-    .site-brand img { width:36px; height:36px; border-radius:8px; }
-    .site-links { margin-left:auto; display:flex; gap:8px; }
-    .site-links a { color:var(--ink-700); text-decoration:none; font-size:14px; font-weight:500; padding:4px 12px; border-radius:999px; white-space:nowrap; }
-    .site-links a:hover, .site-links a.active { color:var(--ink-900); background:var(--tide-200); }
-    .site-links .gh { color:var(--tide-50); background:var(--ink-800); }
+    .nav { position:sticky; top:0; z-index:200; backdrop-filter:blur(10px); background:rgba(245,243,236,.82); border-bottom:1px solid var(--tide-200); }
+    .nav-in { max-width:var(--site-max); margin:0 auto; padding:12px 32px; display:flex; align-items:center; gap:16px; }
+    .brand { display:flex; align-items:center; gap:12px; color:var(--ink-900); text-decoration:none; font-weight:700; }
+    .brand img { width:36px; height:36px; border-radius:8px; }
+    .nav-links { margin-left:auto; display:flex; gap:8px; }
+    .nav-links a { color:var(--ink-700); text-decoration:none; font-size:14px; font-weight:500; padding:4px 12px; border-radius:999px; white-space:nowrap; }
+    .nav-links a:hover, .nav-links a.active { color:var(--ink-900); background:var(--tide-200); }
+    .nav-links .gh { color:var(--tide-50); background:var(--ink-800); }
     .lang { font:500 13px var(--font-sans); color:var(--ink-700); background:var(--tide-100); border:1px solid var(--tide-200); border-radius:999px; padding:4px 10px; cursor:pointer; }
     .lang:hover { background:var(--tide-200); color:var(--ink-900); }
     .shell { max-width:var(--site-max); padding:40px 32px 80px; gap:24px; }
@@ -310,33 +310,35 @@
     .research-grid { display:none; }
     @media (max-width:720px) {
       body { padding:0; }
-      .site-nav-in { align-items:flex-start; padding-inline:16px; }
-      .site-links { overflow-x:auto; }
-      .site-links .gh { display:none; }
+      .nav-in { align-items:flex-start; padding-inline:16px; }
+      .nav-links { overflow-x:auto; }
+      .nav-links .gh { display:none; }
       .shell { padding:48px 16px 64px; }
       .toolbar { top:58px; }
     }
   </style>
 </head>
 <body>
-  <nav class="site-nav">
-    <div class="site-nav-in">
-      <a class="site-brand" href="../"><img src="../icon.png" alt="">AgentDeck</a>
-      <div class="site-links">
-        <a href="../">Overview</a>
-        <a href="../hardware/">Devices</a>
-        <a class="active" href="./">Live Preview</a>
-        <a href="../design-system/">Design System</a>
-        <a href="../reports/">Build Health</a>
-        <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
-        <select id="lang" class="lang" aria-label="Language">
-          <option value="en">EN</option>
-          <option value="ko">KO</option>
-          <option value="ja">JA</option>
-        </select>
-      </div>
+  <!-- GNB:BEGIN (generated from scripts/pages-nav.html — do not edit by hand) -->
+<nav class="nav" aria-label="Primary" data-gnb>
+  <div class="nav-in">
+    <a class="brand" href="../"><img src="../icon.png" alt="">AgentDeck</a>
+    <div class="nav-links">
+      <a href="../">Overview</a>
+      <a href="../hardware/">Devices</a>
+      <a class="active" href="../demo/">Live Preview</a>
+      <a href="../design-system/">Design System</a>
+      <a href="../reports/">Build Health</a>
+      <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
+      <select id="lang" class="lang" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="ko">KO</option>
+        <option value="ja">JA</option>
+      </select>
     </div>
-  </nav>
+  </div>
+</nav>
+<!-- GNB:END -->
   <div class="shell">
     <header class="preview-intro">
       <p class="kicker" data-i18n="intro.kicker">AgentDeck · Interactive renderer</p>

@@ -891,6 +891,22 @@ def _build_robot_perf_table(robot):
     </div>'''
 
 
+
+def render_gnb():
+    """Render the shared Pages GNB from the canonical partial so Build Health
+    can never drift from the other four surfaces (scripts/pages-nav.html)."""
+    partial_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pages-nav.html")
+    with open(partial_path, encoding="utf-8") as fh:
+        partial = fh.read()
+    partial = re.sub(r"<!--[\s\S]*?-->\s*", "", partial, count=1)
+    partial = partial.replace("{{base}}", "../")
+    partial = re.sub(
+        r"\{\{active:([a-z]+)\}\}",
+        lambda m: ' class="active"' if m.group(1) == "reports" else "",
+        partial,
+    )
+    return partial.rstrip()
+
 def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results, history, metadata, robot=None):
     """Generate tab-based SPA test report."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1683,6 +1699,7 @@ def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results,
           {coverage_tab_html}
         </div>'''
 
+    gnb = render_gnb()
     html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1695,9 +1712,9 @@ def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results,
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+KR:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
 <style>
-:root {{ --bg: #f5f3ec; --surface: #ebe6d6; --surface2: #d8cfb6; --text: #0e1f1f; --dim: #426664; --accent: #2f8a7c; --sidebar-w: 240px; --ink-800:#15302f; --kelp-700:#1f6157; --tide-300:#a8b09a; --coral-500:#c0573a; }}
+:root {{ --tide-50:#f5f3ec; --tide-100:#ebe6d6; --tide-200:#d8cfb6; --ink-900:#0e1f1f; --ink-500:#426664; --kelp-500:#2f8a7c; --ink-800:#15302f; --kelp-700:#1f6157; --tide-300:#a8b09a; --coral-500:#c0573a; --bg:var(--tide-50); --surface:var(--tide-100); --surface2:var(--tide-200); --text:var(--ink-900); --dim:var(--ink-500); --accent:var(--kelp-500); }} /* canonical names mirror design/tokens.css — gated by verify-tokens-sync.py */
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-body {{ background: var(--bg); color: var(--text); font-family:'IBM Plex Sans','IBM Plex Sans KR',-apple-system,BlinkMacSystemFont,system-ui,sans-serif; line-height: 1.5; }}
+body {{ --sidebar-w: 240px; background: var(--bg); color: var(--text); font-family:'IBM Plex Sans','IBM Plex Sans KR',-apple-system,BlinkMacSystemFont,system-ui,sans-serif; line-height: 1.5; }}
 
 /* Layout */
 .app {{ display: flex; min-height: 100vh; max-width: 1240px; margin: 0 auto; padding: 0 32px; gap: 0; }}
@@ -1709,16 +1726,16 @@ body {{ background: var(--bg); color: var(--text); font-family:'IBM Plex Sans','
 .content {{ flex: 1; padding: 2rem; min-width: 0; }}
 
 /* Public Pages shell */
-.site-nav {{ position:sticky; top:0; z-index:30; backdrop-filter:blur(10px); background:rgba(245,243,236,.86); border-bottom:1px solid var(--surface2); }}
-.site-nav-in {{ max-width:1240px; margin:0 auto; padding:12px 32px; display:flex; align-items:center; gap:16px; }}
-.site-brand {{ display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; font-weight:700; }}
-.site-brand img {{ width:30px; height:30px; border-radius:8px; }}
-.site-links {{ margin-left:auto; display:flex; gap:8px; align-items:center; }}
+.nav {{ position:sticky; top:0; z-index:30; backdrop-filter:blur(10px); background:rgba(245,243,236,.86); border-bottom:1px solid var(--surface2); }}
+.nav-in {{ max-width:1240px; margin:0 auto; padding:12px 32px; display:flex; align-items:center; gap:16px; }}
+.brand {{ display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; font-weight:700; }}
+.brand img {{ width:30px; height:30px; border-radius:8px; }}
+.nav-links {{ margin-left:auto; display:flex; gap:8px; align-items:center; }}
 .lang {{ font:500 13px 'IBM Plex Sans',system-ui,sans-serif; color:var(--dim); background:var(--surface); border:1px solid var(--surface2); border-radius:999px; padding:4px 10px; cursor:pointer; }}
 .lang:hover {{ background:var(--surface2); color:var(--text); }}
-.site-links a {{ color:var(--dim); text-decoration:none; font-size:14px; font-weight:500; padding:4px 12px; border-radius:999px; white-space:nowrap; }}
-.site-links a:hover, .site-links a.active {{ color:var(--text); background:var(--surface2); }}
-.site-links .gh {{ color:var(--bg); background:var(--ink-800); }}
+.nav-links a {{ color:var(--dim); text-decoration:none; font-size:14px; font-weight:500; padding:4px 12px; border-radius:999px; white-space:nowrap; }}
+.nav-links a:hover, .nav-links a.active {{ color:var(--text); background:var(--surface2); }}
+.nav-links .gh {{ color:var(--bg); background:var(--ink-800); }}
 .report-intro {{ max-width:850px; margin:0 0 2rem; padding-bottom:1.5rem; border-bottom:2px solid var(--surface2); }}
 .report-intro .kicker {{ color:var(--kelp-700); font:600 12px/1.4 'JetBrains Mono',monospace; letter-spacing:.18em; text-transform:uppercase; }}
 .report-intro h2 {{ margin:.5rem 0; font-size:clamp(2rem,5vw,3.5rem); letter-spacing:-.035em; line-height:1.03; }}
@@ -1865,9 +1882,9 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
 
 /* Responsive: collapse sidebar on small screens */
 @media (max-width: 768px) {{
-  .site-nav-in {{ align-items:flex-start; padding-inline:16px; }}
-  .site-links {{ overflow-x:auto; }}
-  .site-links .gh {{ display:none; }}
+  .nav-in {{ align-items:flex-start; padding-inline:16px; }}
+  .nav-links {{ overflow-x:auto; }}
+  .nav-links .gh {{ display:none; }}
   .app {{ flex-direction: column; padding: 0; }}
   .sidebar {{ width: 100%; flex: none; position: relative; top:0; max-height: none; border-right: none; border-bottom: 1px solid var(--surface2); }}
   .sidebar-nav {{ display: flex; flex-wrap: wrap; padding: 0.5rem; gap: 0.25rem; }}
@@ -1882,24 +1899,7 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
 </style>
 </head>
 <body>
-<nav class="site-nav">
-  <div class="site-nav-in">
-    <a class="site-brand" href="../"><img src="../icon.png" alt="">AgentDeck</a>
-    <div class="site-links">
-      <a href="../">Overview</a>
-      <a href="../hardware/">Devices</a>
-      <a href="../demo/">Live Preview</a>
-      <a href="../design-system/">Design System</a>
-      <a class="active" href="./">Build Health</a>
-      <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
-      <select id="lang" class="lang" aria-label="Language">
-        <option value="en">EN</option>
-        <option value="ko">KO</option>
-        <option value="ja">JA</option>
-      </select>
-    </div>
-  </div>
-</nav>
+{gnb}
 <div class="app">
   <aside class="sidebar">
     <div class="sidebar-header">
