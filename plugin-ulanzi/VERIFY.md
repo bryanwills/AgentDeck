@@ -39,7 +39,8 @@ Already set up for you:
    Expect logs: `daemon connected`, `Ulanzi Studio bridge connected`.
 
 5. **In the simulator UI**: find the **AgentDeck** plugin in the action palette,
-   drag **Session / Option / Mode / Stop / Usage** actions onto keys, then watch:
+   drag the single **AgentDeck** action onto several keys — each key reflows by
+   agent state (session, option, mode, stop, usage), then watch:
    - tiles render text + creatures (font fix),
    - an `awaiting`/`processing` Session key shows an **animated GIF** (pulsing border),
    - pressing a key dispatches a command — confirm with `agentdeck daemon status`
@@ -73,9 +74,9 @@ service itself from the installed plugin folder, so the plugin must be
    (Omit `:install` to only build under `plugin-ulanzi/dist/`.)
 
 3. **Restart Ulanzi Studio.** The **AgentDeck** plugin appears in the action list
-   with Session / Option / Mode / Stop / Usage.
+   with its single dynamic **AgentDeck** action.
 
-4. Drag actions onto D200H keys, run a daemon + agent session, and verify on real
+4. Drag that action onto D200H keys, run a daemon + agent session, and verify on real
    hardware: tile rendering, GIF animation on awaiting/processing, key-press dispatch.
 
 Debug the Studio-launched Node service: launch Studio with

@@ -2,11 +2,10 @@
   "Name": "AgentDeck",
   "Description": "Monitor and steer AI coding agents from your D200H.",
   "Actions": [
-    { "Name": "Session", "Tooltip": "Show an AgentDeck session; press to focus it." },
-    { "Name": "Option", "Tooltip": "Prompt option; press to select." },
-    { "Name": "Mode", "Tooltip": "Toggle the focused session's mode." },
-    { "Name": "Stop", "Tooltip": "Interrupt / cancel the focused session." },
-    { "Name": "Usage", "Tooltip": "Token / cost usage; press to cycle." }
+    {
+      "Name": "AgentDeck",
+      "Tooltip": "AgentDeck — fill your keys with this; each key reflows by agent state (sessions, options, mode, stop, usage). Press to act."
+    }
   ],
   "Localization": {}
 }
