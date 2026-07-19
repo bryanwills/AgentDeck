@@ -17,7 +17,10 @@ import {
 import { blockGauge, resetTimeStr, formatTokens } from './gauge.js';
 import type { DashboardState, LayoutMode } from './dashboard.js';
 import type { ModelCatalogEntry, OllamaStatus, SessionInfo, TimelineEntry, TimelineEntryType } from '@agentdeck/shared';
-import { stateRank, sortSessions, assignDisplayNames } from '@agentdeck/shared';
+import {
+  stateRank, sortSessions, assignDisplayNames,
+  timelineShouldRenderTaskRow, timelineTaskHeaderDisplay,
+} from '@agentdeck/shared';
 
 // ===== Layout Breakpoints =====
 
@@ -740,7 +743,13 @@ function renderTimelineLines(
   state: DashboardState, width: number, maxLines: number, scrollOffset: number,
 ): string[] {
   const lines: string[] = [];
-  const entries = state.timeline;
+  // One-row-per-task render contract (shared/src/timeline-task-display.ts):
+  // task_end rows are data-only closure records — the task_start header folds
+  // in the closure label + judge verdict instead. Bare "Task N" headers with
+  // no eval payload (including every interrupted reaper closure) drop out.
+  const entries = state.timeline.filter(
+    (e) => timelineShouldRenderTaskRow(e, state.timeline),
+  );
   if (entries.length === 0) {
     lines.push(`${colors.dim} No events yet${RESET}`);
     return lines;
@@ -751,13 +760,18 @@ function renderTimelineLines(
     const e = entries[i];
     const time = new Date(e.ts);
     const timeStr = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
-    // task_end rows append a score+outcome suffix once the LLM judge resolves
-    // (5–30 s after the boundary itself). Until then the `taskOutcome` field
-    // is undefined and we render only the boundary label.
-    const evalSuffix = (e.type === 'task_end' && e.taskOutcome)
-      ? formatTaskEvalSuffix(e.taskScore, e.taskOutcome)
-      : '';
-    const raw = truncText(`${e.raw}${evalSuffix}`, width - 10);
+    // Task headers render their folded closure: judge summary as title when
+    // the own title is a bare "Task N", the closure label ("Session end ·
+    // 2 turns · 6m") as a chip, and the score+outcome suffix once the judge
+    // resolves (5–30 s after the boundary itself).
+    let text = e.raw;
+    let evalSuffix = '';
+    if (e.type === 'task_start') {
+      const d = timelineTaskHeaderDisplay(e, state.timeline);
+      text = d.closureText ? `${d.title} · ${d.closureText}` : d.title;
+      if (d.taskOutcome) evalSuffix = formatTaskEvalSuffix(d.taskScore, d.taskOutcome);
+    }
+    const raw = truncText(`${text}${evalSuffix}`, width - 10);
     const pending = e.status === 'pending' ? `${colors.dim} [PENDING]${RESET}` : '';
     lines.push(` ${colors.dim}${timeStr}${RESET} ${typeColor(e.type)}${typeIcon(e.type)}${RESET} ${raw}${pending}`);
   }

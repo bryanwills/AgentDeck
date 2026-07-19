@@ -6096,8 +6096,13 @@ final class DaemonServer {
     private var taskLabelById: [String: String] = [:]
     private var recentTimelineForBoards: [[String: Any]] = []
 
+    // Task hierarchy rows (task_start/task_end) are data-only markers under
+    // the one-row-per-task render contract (shared/src/timeline-task-display.ts)
+    // — a reaper-synthesized "Interrupted · ~6h" must never become a card's
+    // "latest event". task_start labels are still harvested below as task
+    // CONTEXT for turn rows. Node mirror: BridgeCore.attachLastEventFields.
     private static let cardMilestoneTypes: Set<String> = [
-        "chat_start", "chat_response", "chat_end", "task_start", "task_end",
+        "chat_start", "chat_response", "chat_end",
     ]
 
     private func noteTimelineEntryForBoards(_ entry: [String: Any]) {
@@ -6118,8 +6123,7 @@ final class DaemonServer {
               !raw.isEmpty, !raw.hasPrefix("{"), !raw.hasPrefix("[") else { return }
         var m: [String: String] = ["text": raw]
         if let hm = entry["localHm"] as? String, !hm.isEmpty { m["hm"] = hm }
-        let isTaskRow = type == "task_start" || type == "task_end"
-        if !isTaskRow, let tid = entry["taskId"] as? String, let label = taskLabelById[tid] {
+        if let tid = entry["taskId"] as? String, let label = taskLabelById[tid] {
             m["task"] = label
         }
         latestMilestoneBySession[sid] = m

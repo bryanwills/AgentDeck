@@ -12,7 +12,8 @@ fun timelineDisplayGroups(groups: List<GroupedEntry>): List<GroupedEntry> =
     groups.filter { group ->
         val entry = group.entry
         when {
-            entry.type == "task_start" || entry.type == "task_end" -> shouldShowTaskMarker(entry)
+            entry.type == "task_start" || entry.type == "task_end" ->
+                shouldShowTaskMarker(entry, groups.map { it.entry })
             // Suppress codex:otel-active no-op tool noise (matches Apple).
             isLowSignalEntry(entry) -> false
             isTaskNotificationChatStart(entry) -> false
@@ -61,22 +62,73 @@ private val syntheticChatStarts = setOf(
     "resumed",
 )
 
-internal fun shouldShowTaskMarker(entry: TimelineEntry): Boolean {
-    if (entry.type != "task_start" && entry.type != "task_end") return true
+// One-row-per-task render contract — mirrors shared/src/timeline-task-display.ts
+// (`timelineShouldRenderTaskRow` / `timelineTaskClosure` /
+// `timelineTaskHeaderDisplay`) and Apple TimelineStripView.swift; update all
+// three in the same commit.
+//
+// `task_end` is a DATA-ONLY closure record: it stops the in-flight spinner,
+// carries the judge-result upsert, and is what the orphan reaper synthesizes —
+// but it never renders as a standalone row. The `task_start` header folds the
+// closure in instead. Bare "Task N" headers with no eval payload (own or
+// closure) render nothing, so interrupted reaper closures leave no visible row.
+internal fun shouldShowTaskMarker(entry: TimelineEntry, siblings: List<TimelineEntry>): Boolean {
+    if (entry.type == "task_end") return false
+    if (entry.type != "task_start") return true
     if (entry.taskCategory == "_empty") return false
-    // session_end and idle_gap are internal sample boundaries, not user
-    // activity. Showing them as standalone TASK END rows makes the visible
-    // timeline depend on workflow hygiene or timer expiry rather than actual
-    // work.
-    if (entry.type == "task_end" &&
-        (entry.boundarySignal == "session_end" || entry.boundarySignal == "idle_gap")
-    ) return false
-    if (entry.type == "task_end") return true
+    val closure = taskClosure(entry, siblings)
+    if (closure?.taskCategory == "_empty") return false
     if (isMeaningfulTaskTitle(entry.summary)) return true
+    return hasTaskEvalPayload(entry) || hasTaskEvalPayload(closure)
+}
+
+/** The matching `task_end` closure record for a `task_start` header, if it
+ *  has arrived among [siblings]. Null for non-headers and open tasks. */
+internal fun taskClosure(entry: TimelineEntry, siblings: List<TimelineEntry>): TimelineEntry? {
+    if (entry.type != "task_start") return null
+    val taskId = entry.taskId?.takeIf { it.isNotBlank() } ?: return null
+    return siblings.firstOrNull { it.type == "task_end" && it.taskId == taskId }
+}
+
+private fun hasTaskEvalPayload(entry: TimelineEntry?): Boolean {
+    if (entry == null) return false
     return entry.taskScore != null ||
         !entry.taskOutcome.isNullOrBlank() ||
-        !entry.taskCategory.isNullOrBlank() ||
+        (!entry.taskCategory.isNullOrBlank() && entry.taskCategory != "_empty") ||
         !entry.taskSummary.isNullOrBlank()
+}
+
+/** Displayed pieces of a task header with its closure folded in. Mirrors
+ *  `timelineTaskHeaderDisplay` in shared/src/timeline-task-display.ts. */
+internal data class TaskHeaderDisplay(
+    /** Own title when meaningful, else the judge's one-line summary, else raw. */
+    val title: String,
+    /** Closure label chip ("Session end · 2 turns · 6m 5s"); null while open. */
+    val closureText: String?,
+    /** True once the matching `task_end` exists. */
+    val closed: Boolean,
+    /** Badge inputs — closure fields win (the judge upserts onto the closure). */
+    val taskScore: Double?,
+    val taskOutcome: String?,
+    /** Epoch ms the task closed at, for the pending → unscored transition. */
+    val closedAtMs: Long?,
+)
+
+internal fun taskHeaderDisplay(entry: TimelineEntry, siblings: List<TimelineEntry>): TaskHeaderDisplay {
+    val closure = taskClosure(entry, siblings)
+    val ownTitle = entry.summary.trim()
+    val summary = (closure?.taskSummary ?: entry.taskSummary)?.trim().orEmpty()
+    val title = if (isMeaningfulTaskTitle(ownTitle)) ownTitle else summary.ifEmpty { ownTitle }
+    val closureText = closure?.summary?.trim()?.takeIf { it.isNotEmpty() }
+    val outcome = (closure?.taskOutcome ?: entry.taskOutcome)?.trim()?.takeIf { it.isNotEmpty() }
+    return TaskHeaderDisplay(
+        title = title,
+        closureText = closureText,
+        closed = closure != null,
+        taskScore = closure?.taskScore ?: entry.taskScore,
+        taskOutcome = outcome,
+        closedAtMs = closure?.let { it.endedAt ?: it.timestamp },
+    )
 }
 
 private fun isMeaningfulTaskTitle(raw: String): Boolean {

@@ -52,17 +52,54 @@ class TimelineTaskHierarchyTest {
     }
 
     @Test
-    fun `manual task boundary is visible in display projection`() {
+    fun `closed task renders as a single header row, never a standalone task_end`() {
+        // One-row-per-task contract (shared/src/timeline-task-display.ts):
+        // the meaningful header stays; the closure folds into it.
         val entries = listOf(
             entry("task_start", timestamp = 1_000, summary = "Timeline cleanup", taskId = "a"),
             entry("chat_start", timestamp = 2_000, sessionId = "s", taskId = "a", startedAt = 2_000),
             entry("chat_end",   timestamp = 6_000, sessionId = "s", taskId = "a", startedAt = 2_000, endedAt = 6_000),
-            entry("task_end",   timestamp = 6_500, taskId = "a", boundarySignal = "manual"),
+            entry("task_end",   timestamp = 6_500, taskId = "a", boundarySignal = "manual", summary = "Manual · 5s"),
         )
         val display = timelineDisplayGroups(groupConsecutive(entries))
         val types = display.map { it.entry.type }
         assertTrue(types.contains("task_start"))
-        assertTrue(types.contains("task_end"))
+        assertFalse(types.contains("task_end"))
+
+        val header = taskHeaderDisplay(entries[0], entries)
+        assertTrue(header.closed)
+        assertEquals("Timeline cleanup", header.title)
+        assertEquals("Manual · 5s", header.closureText)
+    }
+
+    @Test
+    fun `judged closure makes a bare header visible with the summary as title`() {
+        val entries = listOf(
+            entry("task_start", timestamp = 1_000, summary = "Task 1", taskId = "a"),
+            entry(
+                "task_end", timestamp = 6_500, taskId = "a", boundarySignal = "session_end",
+                summary = "Session end · 2 turns · 6m 5s",
+                taskScore = 0.2, taskOutcome = "abandoned", taskSummary = "10min session with no commit",
+            ),
+        )
+        val display = timelineDisplayGroups(groupConsecutive(entries))
+        assertEquals(listOf("task_start"), display.map { it.entry.type })
+
+        val header = taskHeaderDisplay(entries[0], entries)
+        assertEquals("10min session with no commit", header.title)
+        assertEquals("Session end · 2 turns · 6m 5s", header.closureText)
+        assertEquals(0.2, header.taskScore!!, 1e-9)
+        assertEquals("abandoned", header.taskOutcome)
+    }
+
+    @Test
+    fun `interrupted reaper closure pair leaves no visible row`() {
+        val entries = listOf(
+            entry("task_start", timestamp = 1_000, summary = "Task 1", taskId = "a"),
+            entry("task_end", timestamp = 6_500, taskId = "a", boundarySignal = "interrupted", summary = "Interrupted · ~6h"),
+        )
+        val display = timelineDisplayGroups(groupConsecutive(entries))
+        assertTrue(display.none { it.entry.type == "task_start" || it.entry.type == "task_end" })
     }
 
     @Test
@@ -287,6 +324,9 @@ class TimelineTaskHierarchyTest {
         endedAt: Long? = null,
         detail: String? = null,
         automated: Boolean? = null,
+        taskScore: Double? = null,
+        taskOutcome: String? = null,
+        taskSummary: String? = null,
     ) = TimelineEntry(
         timestamp = timestamp,
         type = type,
@@ -301,6 +341,9 @@ class TimelineTaskHierarchyTest {
         startedAt = startedAt,
         endedAt = endedAt,
         automated = automated,
+        taskScore = taskScore,
+        taskOutcome = taskOutcome,
+        taskSummary = taskSummary,
     )
 
     @Suppress("unused")

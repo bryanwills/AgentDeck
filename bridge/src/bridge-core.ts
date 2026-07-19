@@ -662,10 +662,15 @@ export class BridgeCore {
    * DaemonServer.noteTimelineEntryForBoards / buildSessionsListEvent.
    */
   private attachLastEventFields(sessions: import('./session-aggregator.js').EnrichedSession[]): void {
-    const MILESTONES = new Set(['chat_start', 'chat_response', 'chat_end', 'task_start', 'task_end']);
+    // Task hierarchy rows (task_start/task_end) are data-only markers under
+    // the one-row-per-task render contract (shared/src/timeline-task-display.ts)
+    // — a reaper-synthesized "Interrupted · ~6h" must never become a card's
+    // "latest event". task_start labels are still harvested as task CONTEXT
+    // for turn rows. Swift daemon mirror: DaemonServer.cardMilestoneTypes.
+    const MILESTONES = new Set(['chat_start', 'chat_response', 'chat_end']);
     const history = this.bridgeTimeline.getHistory();  // oldest → newest
     const taskLabels = new Map<string, string>();
-    const latestBySession = new Map<string, { text: string; taskId?: string; isTaskRow: boolean; ts: number }>();
+    const latestBySession = new Map<string, { text: string; taskId?: string; ts: number }>();
     for (const e of history) {
       const raw = (e.raw ?? '').trim();
       if (e.type === 'task_start' && e.taskId && raw) taskLabels.set(e.taskId, raw);
@@ -674,7 +679,6 @@ export class BridgeCore {
       latestBySession.set(e.sessionId, {
         text: raw,
         taskId: e.taskId,
-        isTaskRow: e.type === 'task_start' || e.type === 'task_end',
         ts: e.ts,
       });
     }
@@ -682,7 +686,7 @@ export class BridgeCore {
       const m = latestBySession.get(s.id);
       if (!m) continue;
       s.lastEventText = m.text;
-      if (!m.isTaskRow && m.taskId) {
+      if (m.taskId) {
         const label = taskLabels.get(m.taskId);
         if (label) s.lastEventTask = label;
       }

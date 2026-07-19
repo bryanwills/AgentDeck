@@ -397,6 +397,22 @@ composite = 0.40 × outcomeScore
 
 공통 경로: `bridge/src/plugin/renderers/timeline-renderer.ts` (`evalScoreColor`).
 
+### Task hierarchy rows — one-row-per-task render contract (2026-07-19)
+
+`task_start`/`task_end` timeline 행은 **데이터 계층에서는 쌍으로 유지**되지만
+(스피너 정지, judge 결과 upsert 매개체, orphan reaper 합성 대상), 렌더링은
+태스크당 **헤더(`task_start`) 한 행**뿐이다. 헤더는 매칭 closure(`task_end`,
+같은 `taskId`)를 접어 넣는다: judge 요약이 "Task N" 제목을 대체하고, closure
+라벨("Session end · 2 turns · 6m 5s")이 칩으로, score/outcome 배지가 함께
+렌더된다. eval payload 없는 bare 태스크(리퍼 합성 `interrupted` closure 포함)는
+아무 행도 남기지 않는다 — 타임라인은 실제 턴의 activity log로 유지된다.
+
+SSOT: `shared/src/timeline-task-display.ts` (`timelineShouldRenderTaskRow` /
+`timelineTaskClosure` / `timelineTaskHeaderDisplay`). 미러: Apple
+`TimelineStripView.swift`, Android `TimelineDisplay.kt`+`TimelineStrip.kt`,
+TUI `renderer.ts`. 글랜스 표면(ESP32 카드/티커, 양 데몬의
+`lastEventText` milestone 선정)은 task 행을 아예 제외하고 turn 행만 쓴다.
+
 ## Settings
 
 `~/.agentdeck/settings.json` 의 `apme` 블록:

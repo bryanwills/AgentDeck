@@ -158,9 +158,12 @@ void snapshot(Snap& s) {
                 const TimelineEntry& te = g_state.timeline[ti];
                 if (strcmp(te.sessionId, src.id) != 0) continue;
                 if (!te.raw[0] || te.raw[0] == '{' || te.raw[0] == '[') continue;
+                // Turn rows only — task_start/task_end are data-only hierarchy
+                // markers (one-row-per-task contract, shared/src/
+                // timeline-task-display.ts): a reaper-synthesized
+                // "Interrupted · ~6h" must never surface as a session's work line.
                 bool milestone = strcmp(te.type, "chat_response") == 0 || strcmp(te.type, "chat_end") == 0 ||
-                                 strcmp(te.type, "task_end") == 0 || strcmp(te.type, "chat_start") == 0 ||
-                                 strcmp(te.type, "task_start") == 0;
+                                 strcmp(te.type, "chat_start") == 0;
                 if (!milestone) continue;
                 strncpy(dst.work, te.raw, sizeof(dst.work) - 1);
                 dst.work[sizeof(dst.work) - 1] = '\0';
@@ -225,9 +228,10 @@ void snapshot(Snap& s) {
         uint8_t idx = (uint8_t)((g_state.timelineHead + g_state.timelineCount - 1 - back) % TIMELINE_MAX_ENTRIES);
         const TimelineEntry& t = g_state.timeline[idx];
         if (!t.raw[0] || t.raw[0] == '{' || t.raw[0] == '[') continue;
+        // Turn rows only (see the one-row-per-task note above); task_start
+        // labels are still resolved below as the turn's task CONTEXT chip.
         bool milestone = strcmp(t.type, "chat_start") == 0 || strcmp(t.type, "chat_end") == 0 ||
-                         strcmp(t.type, "chat_response") == 0 ||
-                         strcmp(t.type, "task_start") == 0 || strcmp(t.type, "task_end") == 0;
+                         strcmp(t.type, "chat_response") == 0;
         if (!milestone) continue;
         uint8_t row = s.tickerCount;
         if (t.hm[0]) {
@@ -237,11 +241,10 @@ void snapshot(Snap& s) {
                      (unsigned long)(t.ts / 3600) % 24, (unsigned long)(t.ts / 60) % 60);
         }
         // Compose an explicitly-attributed single line "<agent> · <project> ·
-        // <task> · <text>" instead of a bare "Task 1". Parts are dropped when
-        // absent; the drawer (smartFitText below) shrinks to the ~700px line.
-        // For a turn row (chat_start/tool) inside a task, resolve its taskId to
-        // the task header's label so "which task" is present alongside the
-        // prompt text; task_start/task_end rows already carry the label in raw.
+        // <task> · <text>". Parts are dropped when absent; the drawer
+        // (smartFitText below) shrinks to the ~700px line. For a turn row
+        // (chat_start/tool) inside a task, resolve its taskId to the task
+        // header's label so "which task" is present alongside the prompt text.
         {
             char comp[104];
             comp[0] = '\0';
@@ -259,8 +262,7 @@ void snapshot(Snap& s) {
             };
             appendPart(t.agentType[0] ? agentDisplayLabel(t.agentType) : nullptr);
             appendPart(t.projectName[0] ? t.projectName : nullptr);
-            bool isTaskRow = strcmp(t.type, "task_start") == 0 || strcmp(t.type, "task_end") == 0;
-            if (!isTaskRow && t.taskId[0]) {
+            if (t.taskId[0]) {  // rows here are always turn rows (task rows excluded above)
                 for (uint8_t j = 0; j < g_state.timelineCount; j++) {
                     const TimelineEntry& tj =
                         g_state.timeline[(g_state.timelineHead + j) % TIMELINE_MAX_ENTRIES];

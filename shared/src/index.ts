@@ -8,6 +8,7 @@ export * from './net-utils.js';
 export * from './timeline.js';
 export * from './timeline-icons.js';
 export * from './timeline-label.js';
+export * from './timeline-task-display.js';
 export * from './timeline-markdown.js';
 export * from './format-utils.js';
 export * from './timeline-summarizer.js';

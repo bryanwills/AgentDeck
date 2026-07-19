@@ -1139,7 +1139,10 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(displayed[0].entry.raw, "Timeline noise cleanup")
     }
 
-    func testDashboardDisplayKeepsTaskEndEvaluationRow() {
+    func testDashboardDisplayNeverShowsStandaloneTaskEnd() {
+        // One-row-per-task contract (shared/src/timeline-task-display.ts):
+        // task_end is a data-only closure record — even a fully judged one
+        // renders nothing on its own.
         let entry = TimelineEntry(
             ts: 2000,
             type: .taskEnd,
@@ -1155,8 +1158,72 @@ final class TimelineTests: XCTestCase {
         )
 
         let displayed = timelineDisplayGroupsForDashboard(groupConsecutive([entry]))
-        XCTAssertEqual(displayed.count, 1)
-        XCTAssertEqual(displayed[0].entry.type, .taskEnd)
+        XCTAssertTrue(displayed.isEmpty)
+    }
+
+    func testDashboardDisplayShowsJudgedTaskAsSingleHeaderRow() {
+        // A bare "Task N" header becomes visible once its closure carries the
+        // judge verdict — and the pair renders as exactly one row (the header).
+        let entries = [
+            TimelineEntry(
+                ts: 1000,
+                type: .taskStart,
+                raw: "Task 1",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                taskId: "task-1"
+            ),
+            TimelineEntry(
+                ts: 2000,
+                type: .taskEnd,
+                raw: "Session end · 2 turns · 6m 5s",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                taskId: "task-1",
+                boundarySignal: .sessionEnd,
+                taskScore: 0.2,
+                taskOutcome: "abandoned",
+                taskCategory: "general",
+                taskSummary: "10min session with no commit"
+            ),
+        ]
+
+        let displayed = timelineDisplayGroupsForDashboard(groupConsecutive(entries))
+        XCTAssertEqual(displayed.map { $0.entry.type }, [TimelineEntryType.taskStart])
+
+        let header = timelineTaskHeaderDisplay(for: entries[0], in: entries)
+        XCTAssertTrue(header.closed)
+        XCTAssertEqual(header.title, "10min session with no commit")
+        XCTAssertEqual(header.closureText, "Session end · 2 turns · 6m 5s")
+        XCTAssertEqual(header.taskScore, 0.2)
+        XCTAssertEqual(header.taskOutcome, "abandoned")
+    }
+
+    func testDashboardDisplayHidesInterruptedReaperClosurePair() {
+        // Reaper-synthesized interrupted closures carry no judge payload —
+        // the whole pair stays invisible instead of surfacing lifecycle noise.
+        let entries = [
+            TimelineEntry(
+                ts: 1000,
+                type: .taskStart,
+                raw: "Task 1",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                taskId: "task-1"
+            ),
+            TimelineEntry(
+                ts: 2000,
+                type: .taskEnd,
+                raw: "Interrupted · ~6h 33m",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                taskId: "task-1",
+                boundarySignal: TaskBoundarySignal(rawValue: "interrupted")
+            ),
+        ]
+
+        let displayed = timelineDisplayGroupsForDashboard(groupConsecutive(entries))
+        XCTAssertTrue(displayed.isEmpty)
     }
 
     func testDashboardDisplayHidesSessionEndTaskBoundary() {

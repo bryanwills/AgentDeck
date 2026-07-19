@@ -720,13 +720,20 @@ struct TimelineStripView: View {
         return shouldShowDetail(entry: detailEntry, detail: detail)
     }
 
-    /// Task hierarchy header — visually distinct full-width row that groups
-    /// the turn rows below it. Renders for both task_start and task_end so
-    /// the timeline shows where work units begin and where they were declared
-    /// finished (and by which boundary signal).
+    /// Task hierarchy header — one row per task. Renders the `task_start`
+    /// header with its matching closure (`task_end`, same taskId) folded in:
+    /// the judge's one-line summary becomes the title when the own title is a
+    /// bare "Task N", the closure label ("Session end · 2 turns · 6m 5s")
+    /// renders as a trailing chip, and the eval badge reads the closure's
+    /// score/outcome. `task_end` rows never render standalone — they are
+    /// data-only closure records (spinner stop, judge upsert vehicle, reaper
+    /// synthesis). Contract SSOT: shared/src/timeline-task-display.ts.
     private func taskHeaderRow(_ group: GroupedEntry, index: Int) -> some View {
         let entry = group.entry
-        let isEnd = entry.type == .taskEnd
+        // Closure lookup + spinner must see PRE-display-filter rows: the
+        // matching task_end is filtered out of `grouped` by design, so
+        // scanning `grouped` would leave every closed task spinning forever.
+        let display = timelineTaskHeaderDisplay(for: entry, in: filteredEntries)
         let isSelected = index == focusedIndex ||
             (focusedIndex < 0 && index == grouped.count - 1)
         let accent = TerrariumHUD.tetraNeon
@@ -744,10 +751,10 @@ struct TimelineStripView: View {
                 font: .system(size: fontScale.body, weight: .bold),
                 color: accent,
                 size: 14,
-                isRotating: timelineIsRotatingEntry(entry, siblings: grouped.map(\.entry)),
+                isRotating: timelineIsRotatingEntry(entry, siblings: filteredEntries),
                 rotatingSymbolName: sfSymbol(for: .running)
             )
-            Text(isEnd ? "TASK END" : "TASK")
+            Text("TASK")
                 .font(.system(size: fontScale.sub, weight: .heavy, design: .monospaced))
                 .foregroundStyle(accent)
             if !sessionLabel.isEmpty {
@@ -756,20 +763,26 @@ struct TimelineStripView: View {
                     .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
                     .lineLimit(1)
             }
-            Text(entry.raw)
+            Text(display.title)
                 .font(.system(size: fontScale.sub, weight: .semibold, design: .monospaced))
                 .foregroundStyle(TerrariumHUD.text)
                 .lineLimit(1)
+            if let closureText = display.closureText {
+                Text(closureText)
+                    .font(.system(size: fontScale.label, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
+                    .lineLimit(1)
+            }
             Spacer()
-            // Eval badge — only meaningful on task_end. While the judge is
-            // still running (taskOutcome == nil / "pending"), shows a dim "…"
+            // Eval badge — once the task closed. While the judge is still
+            // running (taskOutcome == nil / "pending"), shows a dim "…"
             // placeholder so users learn that an evaluation is on the way.
-            if isEnd {
+            if display.closed {
                 TaskEvalBadge(
-                    score: entry.taskScore,
-                    outcome: entry.taskOutcome,
+                    score: display.taskScore,
+                    outcome: display.taskOutcome,
                     fontSize: fontScale.label,
-                    closedAt: entry.endedAt.map { Date(timeIntervalSince1970: $0 / 1000) } ?? entry.date
+                    closedAt: display.closedAt
                 )
             }
             Text(formatTime(entry.date))
@@ -783,16 +796,11 @@ struct TimelineStripView: View {
             in: RoundedRectangle(cornerRadius: 3)
         )
         .overlay(
-            // Top hairline on task_start, bottom hairline on task_end — gives
-            // each task a visual envelope without doubling vertical padding.
+            // Top hairline marks the task envelope's opening; the envelope
+            // closes implicitly at the next header (no standalone end row).
             VStack(spacing: 0) {
-                if !isEnd {
-                    Rectangle().fill(accent.opacity(0.6)).frame(height: 1)
-                }
+                Rectangle().fill(accent.opacity(0.6)).frame(height: 1)
                 Spacer()
-                if isEnd {
-                    Rectangle().fill(accent.opacity(0.6)).frame(height: 1)
-                }
             }
         )
         // Selection indicator overlay (drawn outside the row content so it
@@ -915,38 +923,44 @@ struct TimelineStripView: View {
 
                 // Task eval verdict — rendered between the lifecycle rows and
                 // the raw summary so the score is visible without scrolling.
-                // Only meaningful on task_end; non-task entries skip this view.
-                if group.entry.type == .taskEnd {
-                    HStack(alignment: .top, spacing: 6) {
-                        TaskEvalBadge(
-                            score: group.entry.taskScore,
-                            outcome: group.entry.taskOutcome,
-                            fontSize: fontScale.body,
-                            closedAt: group.entry.endedAt.map { Date(timeIntervalSince1970: $0 / 1000) } ?? group.entry.date
-                        )
-                        if let cat = group.entry.taskCategory, !cat.isEmpty {
-                            Text(cat)
-                                .font(.system(size: fontScale.label, weight: .medium, design: .monospaced))
-                                .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .stroke(TerrariumHUD.subtext.opacity(0.4), lineWidth: 0.5)
-                                )
+                // Selected task headers fold in their closure's verdict
+                // (task_end rows themselves are never selectable — data-only
+                // under the one-row-per-task contract).
+                if group.entry.type == .taskStart {
+                    let closure = timelineTaskClosure(for: group.entry, in: filteredEntries)
+                    let verdict = closure ?? group.entry
+                    if closure != nil || timelineTaskHasEvalPayload(group.entry) {
+                        HStack(alignment: .top, spacing: 6) {
+                            TaskEvalBadge(
+                                score: verdict.taskScore,
+                                outcome: verdict.taskOutcome,
+                                fontSize: fontScale.body,
+                                closedAt: (closure?.endedAt ?? closure?.ts).map { Date(timeIntervalSince1970: $0 / 1000) }
+                            )
+                            if let cat = verdict.taskCategory, !cat.isEmpty {
+                                Text(cat)
+                                    .font(.system(size: fontScale.label, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .stroke(TerrariumHUD.subtext.opacity(0.4), lineWidth: 0.5)
+                                    )
+                            }
+                            Spacer()
                         }
-                        Spacer()
+                        .padding(.horizontal, 8)
+                        if let summary = verdict.taskSummary ?? group.entry.taskSummary, !summary.isEmpty {
+                            Text(summary)
+                                .font(.system(size: fontScale.label, design: .monospaced))
+                                .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                                .lineLimit(3)
+                                .padding(.horizontal, 8)
+                                .padding(.top, 2)
+                        }
+                        Spacer().frame(height: 4)
                     }
-                    .padding(.horizontal, 8)
-                    if let summary = group.entry.taskSummary, !summary.isEmpty {
-                        Text(summary)
-                            .font(.system(size: fontScale.label, design: .monospaced))
-                            .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
-                            .lineLimit(3)
-                            .padding(.horizontal, 8)
-                            .padding(.top, 2)
-                    }
-                    Spacer().frame(height: 4)
                 }
 
                 // Detail text — gated by `shouldShowDetail` which suppresses:
@@ -1261,7 +1275,7 @@ func timelineDisplayGroupsForDashboard(_ groups: [GroupedEntry]) -> [GroupedEntr
     groups.filter { group in
         let entry = group.entry
         if entry.type == .taskStart || entry.type == .taskEnd {
-            return timelineShouldShowTaskMarker(group)
+            return timelineShouldShowTaskMarker(group, in: groups)
         }
         if timelineIsLowSignalEntry(entry) { return false }
         if timelineIsTaskNotificationChatStart(entry) { return false }
@@ -1286,24 +1300,77 @@ func timelineDisplayGroupsForDashboard(_ groups: [GroupedEntry]) -> [GroupedEntr
     }
 }
 
-func timelineShouldShowTaskMarker(_ group: GroupedEntry) -> Bool {
+// One-row-per-task render contract — mirrors shared/src/timeline-task-display.ts
+// (`timelineShouldRenderTaskRow` / `timelineTaskClosure` /
+// `timelineTaskHeaderDisplay`); update both in the same commit.
+//
+// `task_end` is a DATA-ONLY closure record: it stops the in-flight spinner,
+// carries the judge-result upsert, and is what the orphan reaper synthesizes —
+// but it never renders as a standalone row. The `task_start` header folds the
+// closure in instead. Bare "Task N" headers with no eval payload (own or
+// closure) render nothing, so interrupted reaper closures leave no visible row.
+func timelineShouldShowTaskMarker(_ group: GroupedEntry, in groups: [GroupedEntry]) -> Bool {
     let entry = group.entry
-    guard entry.type == .taskStart || entry.type == .taskEnd else { return true }
+    if entry.type == .taskEnd { return false }
+    guard entry.type == .taskStart else { return true }
     if entry.taskCategory == "_empty" { return false }
-    // session_end and idle_gap are internal sample boundaries, not user
-    // activity. Showing them as standalone TASK END rows makes the visible
-    // timeline depend on workflow hygiene or timer expiry rather than actual
-    // work.
-    if entry.type == .taskEnd &&
-        (entry.boundarySignal == .sessionEnd || entry.boundarySignal == .idleGap) {
-        return false
-    }
-    if entry.type == .taskEnd { return true }
+    let closure = timelineTaskClosure(for: entry, in: groups.map(\.entry))
+    if closure?.taskCategory == "_empty" { return false }
     if timelineIsMeaningfulTaskTitle(entry.raw) { return true }
-    return entry.taskScore != nil ||
-        entry.taskOutcome?.isEmpty == false ||
-        entry.taskCategory?.isEmpty == false ||
-        entry.taskSummary?.isEmpty == false
+    return timelineTaskHasEvalPayload(entry) || timelineTaskHasEvalPayload(closure)
+}
+
+/// The matching `task_end` closure record for a `task_start` header, if it
+/// has arrived among `siblings`. nil for non-headers and open tasks.
+func timelineTaskClosure(for entry: TimelineEntry, in siblings: [TimelineEntry]) -> TimelineEntry? {
+    guard entry.type == .taskStart, let taskId = entry.taskId, !taskId.isEmpty else { return nil }
+    return siblings.first { $0.type == .taskEnd && $0.taskId == taskId }
+}
+
+private func timelineTaskHasEvalPayload(_ entry: TimelineEntry?) -> Bool {
+    guard let entry else { return false }
+    if entry.taskScore != nil { return true }
+    if entry.taskOutcome?.isEmpty == false { return true }
+    if let category = entry.taskCategory, !category.isEmpty, category != "_empty" { return true }
+    if entry.taskSummary?.isEmpty == false { return true }
+    return false
+}
+
+/// Displayed pieces of a task header with its closure folded in. Mirrors
+/// `timelineTaskHeaderDisplay` in shared/src/timeline-task-display.ts.
+struct TimelineTaskHeaderDisplay {
+    /// Own title when meaningful, else the judge's one-line summary, else raw.
+    let title: String
+    /// Closure label chip ("Session end · 2 turns · 6m 5s"); nil while open.
+    let closureText: String?
+    /// True once the matching `task_end` exists.
+    let closed: Bool
+    /// Badge inputs — closure fields win (the judge upserts onto the closure).
+    let taskScore: Double?
+    let taskOutcome: String?
+    /// When the task closed, for the pending → unscored badge transition.
+    let closedAt: Date?
+}
+
+func timelineTaskHeaderDisplay(
+    for entry: TimelineEntry, in siblings: [TimelineEntry]
+) -> TimelineTaskHeaderDisplay {
+    let closure = timelineTaskClosure(for: entry, in: siblings)
+    let ownTitle = entry.raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let summary = (closure?.taskSummary ?? entry.taskSummary)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let title = timelineIsMeaningfulTaskTitle(ownTitle) ? ownTitle : (summary.isEmpty ? ownTitle : summary)
+    let closureText = closure?.raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let outcome = (closure?.taskOutcome ?? entry.taskOutcome)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    return TimelineTaskHeaderDisplay(
+        title: title,
+        closureText: closureText?.isEmpty == false ? closureText : nil,
+        closed: closure != nil,
+        taskScore: closure?.taskScore ?? entry.taskScore,
+        taskOutcome: outcome?.isEmpty == false ? outcome : nil,
+        closedAt: closure.map { Date(timeIntervalSince1970: ($0.endedAt ?? $0.ts) / 1000) }
+    )
 }
 
 // MARK: - Per-row classifier caches

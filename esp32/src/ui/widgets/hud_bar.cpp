@@ -1796,17 +1796,19 @@ void update() {
                 const TimelineEntry& te = g_state.timeline[bidx];
                 if (strcmp(te.sessionId, si.id) != 0) continue;
                 if (!te.raw[0] || te.raw[0] == '{' || te.raw[0] == '[') continue;
+                // Turn rows only — task_start/task_end are data-only hierarchy
+                // markers (one-row-per-task contract, shared/src/
+                // timeline-task-display.ts): a reaper-synthesized
+                // "Interrupted · ~6h" must never surface as a card's body line.
                 bool milestone = strcmp(te.type, "chat_start") == 0 || strcmp(te.type, "chat_response") == 0 ||
-                                 strcmp(te.type, "chat_end") == 0 ||
-                                 strcmp(te.type, "task_start") == 0 || strcmp(te.type, "task_end") == 0;
+                                 strcmp(te.type, "chat_end") == 0;
                 if (!milestone) continue;
                 size_t off = 0;
                 if (te.hm[0]) {
                     int nn = snprintf(mc[n].body + off, sizeof(mc[n].body) - off, "%s  ", te.hm);
                     if (nn > 0) off += (size_t)nn;
                 }
-                bool isTaskRow = strcmp(te.type, "task_start") == 0 || strcmp(te.type, "task_end") == 0;
-                if (!isTaskRow && te.taskId[0]) {  // resolve taskId → task header label
+                if (te.taskId[0]) {  // resolve taskId → task header label (context chip)
                     for (uint8_t j = 0; j < g_state.timelineCount; j++) {
                         const TimelineEntry& tj = g_state.timeline[(g_state.timelineHead + j) % TIMELINE_MAX_ENTRIES];
                         if (strcmp(tj.type, "task_start") == 0 && strcmp(tj.taskId, te.taskId) == 0 && tj.raw[0]) {
@@ -1839,9 +1841,9 @@ void update() {
                     const TimelineEntry& te = g_state.timeline[bidx];
                     if (strcmp(te.sessionId, si.id) != 0) continue;
                     if (!te.raw[0] || te.raw[0] == '{' || te.raw[0] == '[') continue;
+                    // Turn rows only (see the one-row-per-task note above).
                     bool milestone = strcmp(te.type, "chat_start") == 0 || strcmp(te.type, "chat_response") == 0 ||
-                                     strcmp(te.type, "chat_end") == 0 ||
-                                     strcmp(te.type, "task_start") == 0 || strcmp(te.type, "task_end") == 0;
+                                     strcmp(te.type, "chat_end") == 0;
                     if (!milestone) continue;
                     if (!skippedNewest) {
                         skippedNewest = true;

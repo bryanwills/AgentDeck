@@ -56,6 +56,7 @@ import dev.agentdeck.state.TimelineSessionFilter
 import dev.agentdeck.state.groupConsecutive
 import dev.agentdeck.state.isProgressChatResponse
 import dev.agentdeck.state.matchesTimelineFilter
+import dev.agentdeck.state.taskHeaderDisplay
 import dev.agentdeck.state.timelineAbsorbsQueuedPrompt
 import dev.agentdeck.state.timelineDisplayGroups
 import dev.agentdeck.state.timelineLifecycleBounds
@@ -708,7 +709,12 @@ private fun TaskHeaderRow(
     onClick: () -> Unit,
 ) {
     val entry = group.entry
-    val isEnd = entry.type == "task_end"
+    // One-row-per-task contract (shared/src/timeline-task-display.ts): this
+    // header folds in its matching closure (`task_end`, same taskId) — judge
+    // summary as title when the own title is a bare "Task N", closure label
+    // as a trailing chip, badge from the closure's score/outcome. task_end
+    // rows themselves never render standalone.
+    val display = taskHeaderDisplay(entry, siblings)
     val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
     val timeStr = timeFormat.format(Date(entry.timestamp))
     val accent = TerrariumColors.TetraNeon
@@ -753,7 +759,7 @@ private fun TaskHeaderRow(
             modifier = Modifier.width(14.dp).height(14.dp).rotate(taskAngle),
         )
         Text(
-            text = if (isEnd) "TASK END" else "TASK",
+            text = "TASK",
             color = accent,
             fontSize = scale.fontSub,
             fontWeight = FontWeight.ExtraBold,
@@ -774,7 +780,7 @@ private fun TaskHeaderRow(
             )
         }
         Text(
-            text = rowSummary(entry.summary),
+            text = rowSummary(display.title),
             color = TerrariumColors.HUDText,
             fontSize = scale.fontSub,
             fontWeight = FontWeight.SemiBold,
@@ -784,15 +790,27 @@ private fun TaskHeaderRow(
             modifier = Modifier.weight(1f),
             style = tight,
         )
-        // Task-judge verdict badge — only on task_end. Renders score + outcome
-        // glyph once the async judge resolves. While pending shows a dim "…".
-        if (isEnd) {
+        if (display.closureText != null) {
+            Text(
+                text = display.closureText,
+                color = TerrariumColors.HUDSubtext.copy(alpha = 0.75f),
+                fontSize = (scale.fontSub.value - 1f).sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = if (scale.isTablet) 200.dp else 130.dp),
+                style = tight,
+            )
+        }
+        // Task-judge verdict badge — once the task closed. Renders score +
+        // outcome glyph after the async judge resolves; pending shows a dim "…".
+        if (display.closed) {
             TaskEvalBadge(
-                score = entry.taskScore,
-                outcome = entry.taskOutcome,
+                score = display.taskScore,
+                outcome = display.taskOutcome,
                 fontSize = (scale.fontSub.value - 1f).sp,
                 tight = tight,
-                closedAtMs = entry.endedAt ?: entry.timestamp,
+                closedAtMs = display.closedAtMs,
             )
         }
         Text(
