@@ -1,7 +1,8 @@
 import sharp from 'sharp';
-import { mkdirSync } from 'fs';
+import { mkdirSync, readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { renderAgentDeckMarkCompact } from '../shared/dist/svg-renderers/session-slot-renderer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outputDir = resolve(__dirname, '../plugin/bound.serendipity.agentdeck.sdPlugin/static/imgs');
@@ -9,6 +10,33 @@ const keyOutputDir = resolve(outputDir, 'keys');
 
 mkdirSync(outputDir, { recursive: true });
 mkdirSync(keyOutputDir, { recursive: true });
+
+// ---- Shared drawing language -------------------------------------------------
+//
+// Every icon is monochrome white on transparent (the Stream Deck convention) and
+// is drawn on the same 40x40 grid with round caps, so the set reads as one
+// family on a key row. Stroke weight matches the AgentDeck mark's 1.6/24 ratio.
+const STROKE = 2.7;
+const CAP = 'stroke-linecap="round" stroke-linejoin="round" fill="none"';
+
+/**
+ * Pull the single path out of an official brand SVG (24x24, fill=currentColor)
+ * and scale it onto the 40x40 icon grid.
+ *
+ * DESIGN.md rule 6: brand marks are upstream — never redraw them. Using the real
+ * file also means an upstream mark update flows into the icons for free.
+ */
+function brandGlyph(name, { scale = 1.34, dx = 0, dy = 0 } = {}) {
+  const svg = readFileSync(resolve(__dirname, `../design/brand/${name}.svg`), 'utf-8');
+  const paths = [...svg.matchAll(/<path\b[^>]*\bd="([^"]+)"[^>]*>/g)].map((m) => m[1]);
+  if (paths.length === 0) throw new Error(`no path found in design/brand/${name}.svg`);
+  // Centre the 24-unit artwork on the 40-unit grid, then apply the caller's scale.
+  const offset = (40 - 24 * scale) / 2;
+  const inner = paths
+    .map((d) => `<path d="${d}" fill="white" fill-rule="evenodd" clip-rule="evenodd"/>`)
+    .join('');
+  return `<g transform="translate(${(offset + dx).toFixed(2)} ${(offset + dy).toFixed(2)}) scale(${scale})">${inner}</g>`;
+}
 
 // All SVGs designed at 40x40 viewBox, will be rendered at target sizes
 const svgs = {
@@ -20,6 +48,41 @@ const svgs = {
     <polygon points="32,8 36,14 32,20 28,14" fill="white"/>
   </svg>`,
 
+  // Session Slot — the canonical AgentDeck dome-over-deck mark, from the shared
+  // SSOT rather than redrawn. The compact reduction is used because Stream Deck
+  // draws action-list icons at 20px, where the full mark's low-opacity waterline
+  // and bubbles collapse into a blob.
+  session: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    ${renderAgentDeckMarkCompact(20, 20, 37, 'white')}
+  </svg>`,
+
+  // Claude Usage (E2) — the official Claude Code mark. The action name supplies
+  // "usage"; the mark supplies "whose", which is what you need at a glance.
+  option: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    ${brandGlyph('claudecode', { scale: 1.28 })}
+  </svg>`,
+
+  // Codex Usage (E3) — official Codex mark, same treatment.
+  usage: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    ${brandGlyph('codex', { scale: 1.22 })}
+  </svg>`,
+
+  // Volume (E1) — speaker + two arcs. Replaces a brightness sun that survived
+  // the utility-dial reduction and no longer described the action.
+  utility: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    <path d="M8 16.2h5.2L20 10.4v19.2l-6.8-5.8H8z" fill="white" stroke="white" stroke-width="${STROKE}" stroke-linejoin="round"/>
+    <path d="M25.2 15.4a7.2 7.2 0 0 1 0 9.2" stroke="white" stroke-width="${STROKE}" ${CAP}/>
+    <path d="M29.4 11.6a12.4 12.4 0 0 1 0 16.8" stroke="white" stroke-width="${STROKE}" ${CAP}/>
+  </svg>`,
+
+  // Launcher (E4) — an arrow leaving a rounded frame: "open this elsewhere".
+  // Reads at 20px, unlike the rocket it replaces, and matches the stroke family.
+  launcher: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+    <path d="M18.5 10.5H12A3.5 3.5 0 0 0 8.5 14v14A3.5 3.5 0 0 0 12 31.5h14a3.5 3.5 0 0 0 3.5-3.5v-6.5" stroke="white" stroke-width="${STROKE}" ${CAP}/>
+    <path d="M23 8.5h9v9" stroke="white" stroke-width="${STROKE}" ${CAP}/>
+    <path d="M31.2 9.3 19.6 20.9" stroke="white" stroke-width="${STROKE}" ${CAP}/>
+  </svg>`,
+
   // Response — chat bubble with reply arrow
 
   // Stop — octagon stop symbol
@@ -27,60 +90,22 @@ const svgs = {
   // Mode — cycle arrows (toggle through Default/Plan/Accept)
 
   // Option — list/menu icon (three lines with bullets)
-  option: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <circle cx="10" cy="12" r="2.5" fill="white"/>
-    <line x1="17" y1="12" x2="33" y2="12" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <circle cx="10" cy="20" r="2.5" fill="white"/>
-    <line x1="17" y1="20" x2="33" y2="20" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <circle cx="10" cy="28" r="2.5" fill="white"/>
-    <line x1="17" y1="28" x2="33" y2="28" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-  </svg>`,
 
   // History — clock with circular arrow
 
   // Voice — microphone icon
 
   // Session — terminal window with prompt
-  session: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <rect x="3" y="6" width="34" height="28" rx="3" fill="none" stroke="white" stroke-width="2.5"/>
-    <path d="M10 16l5 5-5 5" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <line x1="19" y1="26" x2="28" y2="26" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-  </svg>`,
 
   // Usage — bar chart icon
-  usage: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <rect x="6" y="22" width="6" height="14" rx="1" fill="white" opacity="0.5"/>
-    <rect x="14" y="14" width="6" height="22" rx="1" fill="white" opacity="0.7"/>
-    <rect x="22" y="8" width="6" height="28" rx="1" fill="white" opacity="0.85"/>
-    <rect x="30" y="18" width="6" height="18" rx="1" fill="white"/>
-  </svg>`,
 
   // Command — slash in a rounded box (quick commands)
 
   // Context — eye icon (display/observe)
 
   // Utility — gear icon (system utilities)
-  utility: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <circle cx="20" cy="20" r="7" fill="none" stroke="white" stroke-width="2.5"/>
-    <circle cx="20" cy="20" r="3" fill="white"/>
-    <line x1="20" y1="3" x2="20" y2="9" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="20" y1="31" x2="20" y2="37" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="3" y1="20" x2="9" y2="20" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="31" y1="20" x2="37" y2="20" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="8" y1="8" x2="12.5" y2="12.5" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="27.5" y1="27.5" x2="32" y2="32" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="32" y1="8" x2="27.5" y2="12.5" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <line x1="12.5" y1="27.5" x2="8" y2="32" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  </svg>`,
 
   // Launcher — rocket (start a session). Pure geometry, no text.
-  launcher: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-    <path d="M20 3c5 5 8 12 8 18v6H12v-6c0-6 3-13 8-18z" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
-    <circle cx="20" cy="14" r="3.2" fill="white"/>
-    <polygon points="12,20 5,29 12,27" fill="white"/>
-    <polygon points="28,20 35,29 28,27" fill="white"/>
-    <polygon points="16,30 20,38 24,30" fill="white"/>
-  </svg>`,
 
   // Terminal — monitor with prompt cursor
 };
