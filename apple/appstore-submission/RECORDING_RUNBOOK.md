@@ -69,12 +69,21 @@ bash scripts/record-appstore-previews.sh macos    # → previews/macOS/agentdeck
 bash scripts/record-appstore-previews.sh iphone   # → previews/iPhone/…
 bash scripts/record-appstore-previews.sh ipad     # → previews/iPad/…
 
-bash scripts/capture-appstore-screenshots.sh macos    # → screenshots/macOS/01-fleet, 02-attention, 03-complete
+bash scripts/capture-appstore-screenshots.sh macos    # → screenshots-raw/macOS/ (4 beats)
 bash scripts/capture-appstore-screenshots.sh iphone
 bash scripts/capture-appstore-screenshots.sh ipad
 
+python3 scripts/compose-appstore-screenshots.py       # → screenshots/{en,ko,ja}/<platform>/
+
 bash apple/scripts/validate-appstore-submission.sh
 ```
+
+Screenshots ship per locale (en/ko/ja) with captions set in IBM Plex Sans /
+KR / JP and a JetBrains Mono kicker, on the marketing token palette only —
+`compose-appstore-screenshots.py` owns captions and layout; raw captures are
+locale-independent (the app UI itself is English). macOS additionally gets a
+`05-devices` panel — an enlarged crop of the topology rail from the fleet
+capture, real pixels, no fabricated UI. App Previews stay locale-common.
 
 Output is already encoded to everything the validator enforces: H.264 High,
 level 4.0, progressive, 30 fps, 28s, 10–12 Mbps, and the exact per-platform

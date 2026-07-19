@@ -25,12 +25,13 @@ validate_platform() {
   local platform="$1"
   local accepted="$2"
   local directory="$SCREENSHOTS/$platform"
+  local label="${SCREENSHOTS##*/}/$platform"
   local files=()
 
   while IFS= read -r file; do files+=("$file"); done < <(find "$directory" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) | sort)
 
   if (( ${#files[@]} < 1 || ${#files[@]} > 10 )); then
-    fail "$platform requires 1–10 screenshots; found ${#files[@]}"
+    fail "$label requires 1–10 screenshots; found ${#files[@]}"
     return
   fi
 
@@ -39,24 +40,29 @@ validate_platform() {
     local size hash
     size="$(dimension "$file")"
     if [[ " $accepted " != *" $size "* ]]; then
-      fail "$platform/$(basename "$file") has unsupported dimensions $size"
+      fail "$label/$(basename "$file") has unsupported dimensions $size"
     else
-      echo "OK: $platform/$(basename "$file") ($size)"
+      echo "OK: $label/$(basename "$file") ($size)"
     fi
     if [[ "$(sips -g hasAlpha "$file" 2>/dev/null | awk '/hasAlpha/{print $2}')" != "no" ]]; then
-      fail "$platform/$(basename "$file") must be an opaque screenshot without alpha"
+      fail "$label/$(basename "$file") must be an opaque screenshot without alpha"
     fi
     hash="$(shasum -a 256 "$file" | awk '{print $1}')"
     if [[ " $seen_hashes " == *" $hash "* ]]; then
-      fail "$platform contains a duplicate screenshot: $(basename "$file")"
+      fail "$label contains a duplicate screenshot: $(basename "$file")"
     fi
     seen_hashes+=" $hash"
   done
 }
 
-validate_platform "macOS" "1280x800 1440x900 2560x1600 2880x1800"
-validate_platform "iPhone" "1320x2868 2868x1320 1290x2796 2796x1290 1284x2778 2778x1284"
-validate_platform "iPad" "2064x2752 2752x2064 2048x2732 2732x2048"
+# Screenshots are localized (App Store Connect keeps one set per locale);
+# App Previews below stay locale-common.
+for locale in en ko ja; do
+  SCREENSHOTS="$ROOT/apple/appstore-submission/screenshots/$locale"
+  validate_platform "macOS" "1280x800 1440x900 2560x1600 2880x1800"
+  validate_platform "iPhone" "1320x2868 2868x1320 1290x2796 2796x1290 1284x2778 2778x1284"
+  validate_platform "iPad" "2064x2752 2752x2064 2048x2732 2732x2048"
+done
 
 probe_stream() {
   local file="$1"
