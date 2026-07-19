@@ -15,10 +15,14 @@ SDC_PROD=1 pnpm build
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
-# Package with Elgato's official CLI. `.sdignore` excludes local logs, source
-# maps, and development-only dependencies before the CLI validates the bundle.
+# Package with Elgato's official CLI, resolved from the pinned @elgato/cli
+# devDependency rather than a globally-installed binary — Marketplace packaging
+# has to be reproducible on a clean checkout and in CI. `.sdignore` excludes
+# local logs, source maps, and development-only dependencies before the CLI
+# validates the bundle.
 rm -f "$OUTPUT_DIR/$PLUGIN_ID.streamDeckPlugin"
-streamdeck pack --force --no-update-check --output "$OUTPUT_DIR" "$PLUGIN_DIR"
+pnpm exec streamdeck validate "$PLUGIN_DIR"
+pnpm exec streamdeck pack --force --no-update-check --output "$OUTPUT_DIR" "$PLUGIN_DIR"
 
 echo ""
 echo "Package created: dist/$PLUGIN_ID.streamDeckPlugin"

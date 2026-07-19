@@ -37,6 +37,7 @@
     "pnpm": ">=11.5.0 <12"
   },
   "devDependencies": {
+    "@elgato/cli": "^1.7.4",
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.9.2",
     "@vitest/coverage-v8": "^4.1.8",
