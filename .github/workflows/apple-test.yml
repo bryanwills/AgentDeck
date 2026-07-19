@@ -56,12 +56,6 @@ jobs:
         working-directory: apple
         run: xcodegen generate
 
-      # apple-release.yml builds the committed .xcodeproj directly and never
-      # runs xcodegen, so a project.yml edit without a regenerated pbxproj
-      # would ship the stale project. Fail here instead.
-      - name: Xcode project drift check
-        run: git diff --exit-code -- apple/AgentDeck.xcodeproj
-
       - name: Build AgentDeck_macOS
         run: |
           xcodebuild build \

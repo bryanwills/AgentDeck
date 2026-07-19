@@ -44,6 +44,18 @@ jobs:
           echo "Using: $XCODE"
           sudo xcode-select -s "$XCODE/Contents/Developer"
 
+      # Archive the project derived from project.yml rather than the committed
+      # .xcodeproj, so a project.yml edit whose pbxproj was never regenerated
+      # cannot ship a stale project. (Byte-comparing the committed pbxproj is
+      # not a viable gate: xcodegen orders targets differently between patch
+      # releases, so the check would fail on tool-version skew, not real drift.)
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Regenerate Xcode project
+        working-directory: apple
+        run: xcodegen generate
+
       - name: Extract version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#apple-v}" >> "$GITHUB_OUTPUT"
@@ -140,6 +152,18 @@ jobs:
           XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
           echo "Using: $XCODE"
           sudo xcode-select -s "$XCODE/Contents/Developer"
+
+      # Archive the project derived from project.yml rather than the committed
+      # .xcodeproj, so a project.yml edit whose pbxproj was never regenerated
+      # cannot ship a stale project. (Byte-comparing the committed pbxproj is
+      # not a viable gate: xcodegen orders targets differently between patch
+      # releases, so the check would fail on tool-version skew, not real drift.)
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Regenerate Xcode project
+        working-directory: apple
+        run: xcodegen generate
 
       - name: Extract version from tag
         id: version
