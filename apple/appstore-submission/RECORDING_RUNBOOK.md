@@ -89,8 +89,32 @@ Output is already encoded to everything the validator enforces: H.264 High,
 level 4.0, progressive, 30 fps, 28s, 10–12 Mbps, and the exact per-platform
 dimensions (macOS 1920×1080, iPhone 886×1920, iPad 1200×1600). Screenshots come
 out at native capture size — macOS 2880×1800 from a 1440×900 logical window,
-iPhone 1320×2868, iPad 2064×2752 — with the alpha channel flattened, which the
-App Store rejects.
+iPhone 1284×2778 (iPhone 14 Plus simulator — see below), iPad 2064×2752 —
+with the alpha channel flattened, which the App Store rejects.
+
+**iPhone screenshot size (2026-07-19 incident)**: the iPhone capture device
+was "iPhone 16 Pro Max" (1320×2868, the 6.9"-class resolution) until ASC
+rejected an upload with "스크린샷 크기가 잘못되었습니다 — 1242×2688, 2688×1242,
+1284×2778 또는 2778×1284이어야 합니다" — this app's screenshot slot in ASC only
+accepts the "6.5-inch Display" bucket, not 6.9" or 6.7"/1290×2796. Fixed by
+switching `scripts/capture-appstore-screenshots.sh`'s iPhone capture device
+to "iPhone 14 Plus" (native 1284×2778, one of the two accepted sizes), and
+`apple/scripts/validate-appstore-submission.sh`'s iPhone accepted-size list
+now matches ASC's literal error text exactly instead of guessing at "any
+valid Apple size." Before re-adding a newer/larger iPhone simulator here,
+confirm in ASC's UI which bucket this app record's screenshot slot actually
+accepts — it does not auto-widen just because Apple ships a new device.
+
+**Every App Preview carries a silent AAC-LC audio track** (44.1kHz stereo,
+muxed in via `anullsrc`), even though the captures have no real sound. App
+Store Connect rejects an uploaded preview with no audio stream at all with
+"unsupported or corrupted audio" — it does not accept an absent track as
+equivalent to a silent one. This has bitten this repo twice (recordings from
+2026-07-14 and 2026-07-19 both shipped audio-less `.mp4`s); do not reintroduce
+`-an` in `scripts/record-appstore-previews.sh`'s `encode()`. The validator
+(`apple/scripts/validate-appstore-submission.sh`) now fails any preview
+missing an AAC audio stream, so a regression here is caught locally instead
+of surfacing only at ASC upload time.
 
 Verify the shape of a run without the app at all:
 

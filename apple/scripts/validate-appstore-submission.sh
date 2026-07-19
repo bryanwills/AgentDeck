@@ -60,7 +60,7 @@ validate_platform() {
 for locale in en ko ja; do
   SCREENSHOTS="$ROOT/apple/appstore-submission/screenshots/$locale"
   validate_platform "macOS" "1280x800 1440x900 2560x1600 2880x1800"
-  validate_platform "iPhone" "1320x2868 2868x1320 1290x2796 2796x1290 1284x2778 2778x1284"
+  validate_platform "iPhone" "1242x2688 2688x1242 1284x2778 2778x1284"
   validate_platform "iPad" "2064x2752 2752x2064 2048x2732 2732x2048"
 done
 
@@ -95,6 +95,7 @@ validate_previews() {
 
   for file in "${files[@]}"; do
     local codec profile level width height pixels fps fps_num fps_den duration bytes bitrate field_order
+    local audio_codec audio_rate
     codec="$(probe_stream "$file" codec_name)"
     profile="$(probe_stream "$file" profile)"
     level="$(probe_stream "$file" level)"
@@ -106,6 +107,15 @@ validate_previews() {
     bitrate="$(probe_format "$file" bit_rate)"
     bytes="$(stat -f %z "$file")"
     pixels="${width}x${height}"
+    audio_codec="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$file" | head -n 1)"
+    audio_rate="$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of default=noprint_wrappers=1:nokey=1 "$file" | head -n 1)"
+
+    # ASC rejects App Previews with no audio stream ("unsupported or
+    # corrupted audio") — a silent AAC-LC track is required even for
+    # genuinely silent captures. See scripts/record-appstore-previews.sh.
+    [[ -n "$audio_codec" ]] || fail "$platform/$(basename "$file") has no audio stream — ASC requires a silent AAC track"
+    [[ -z "$audio_codec" || "$audio_codec" == "aac" ]] || fail "$platform/$(basename "$file") audio must be AAC; found $audio_codec"
+    [[ -z "$audio_rate" || "$audio_rate" -ge 8000 ]] || fail "$platform/$(basename "$file") audio sample rate too low: $audio_rate"
 
     [[ "$codec" == "h264" ]] || fail "$platform/$(basename "$file") must use H.264; found $codec"
     [[ "$profile" == "High" || "$profile" == "Main" || "$profile" == "Baseline" ]] || fail "$platform/$(basename "$file") has unsupported H.264 profile $profile"
@@ -120,7 +130,7 @@ validate_previews() {
     awk -v n="$fps_num" -v d="$fps_den" 'BEGIN { exit !(d > 0 && n / d <= 30) }' || fail "$platform/$(basename "$file") exceeds 30 fps ($fps)"
     awk -v b="$bitrate" 'BEGIN { exit !(b >= 10000000 && b <= 12000000) }' || fail "$platform/$(basename "$file") should target 10–12 Mbps; found $bitrate bps"
 
-    echo "OK: $platform/$(basename "$file") ($pixels, ${duration}s, $codec $profile level $level, $fps, $bitrate bps)"
+    echo "OK: $platform/$(basename "$file") ($pixels, ${duration}s, $codec $profile level $level, $fps, $bitrate bps, audio $audio_codec ${audio_rate}Hz)"
   done
 }
 

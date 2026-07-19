@@ -15,8 +15,14 @@
 #   4. complete — every session resolved, terrarium at rest
 #
 # Native capture sizes are already App Store-legal, so nothing is rescaled:
-#   iPhone 16 Pro Max 1320x2868 · iPad Pro 13" 2064x2752 · macOS 2880x1800
+#   iPhone 14 Plus 1284x2778 · iPad Pro 13" 2064x2752 · macOS 2880x1800
 #   (a 1440x900 logical window on a 2x display).
+#
+# iPhone was "iPhone 16 Pro Max" (1320x2868) until 2026-07-19: ASC rejected
+# that size for this app's screenshot slot with "unsupported screenshot
+# size" (accepts only 1242x2688 or 1284x2778 — the "6.5-inch Display"
+# bucket). Do not switch back to a 6.9"-class simulator without confirming
+# ASC now accepts that bucket for this app record.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -135,7 +141,7 @@ capture_ios() {
 
 case "$PLATFORM" in
   macos)  capture_macos ;;
-  iphone) capture_ios "iPhone 16 Pro Max" "iPhone" ;;
+  iphone) capture_ios "iPhone 14 Plus" "iPhone" ;;
   ipad)   capture_ios "iPad Pro 13-inch (M4)" "iPad" ;;
 esac
 

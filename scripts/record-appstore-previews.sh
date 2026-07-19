@@ -66,15 +66,23 @@ now_ms() { python3 -c "import time;print(int(time.time()*1000))"; }
 encode() {
   local raw="$1" offset="$2" filter="$3" out="$4"
   mkdir -p "$(dirname "$out")"
+  # App Store Connect rejects App Previews with no audio stream at all
+  # ("unsupported or corrupted audio") — a silent AAC-LC track is required
+  # even though the captures themselves are silent. Do not reintroduce `-an`.
   ffmpeg -y -v error -accurate_seek -ss "$offset" -t "$CLIP_SECONDS" -i "$raw" \
+    -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
     -vf "$filter,format=yuv420p" -r 30 \
     -c:v libx264 -profile:v high -level:v 4.0 \
     -b:v 11M -maxrate 11M -bufsize 22M \
-    -an -movflags +faststart "$out"
+    -c:a aac -b:a 128k -ar 44100 -ac 2 \
+    -map 0:v:0 -map 1:a:0 -shortest \
+    -movflags +faststart "$out"
   echo "wrote $out"
   ffprobe -v error -select_streams v:0 \
     -show_entries stream=width,height,r_frame_rate,profile,level \
     -show_entries format=duration,bit_rate -of default=nw=1 "$out"
+  ffprobe -v error -select_streams a:0 \
+    -show_entries stream=codec_name,sample_rate,channels -of default=nw=1 "$out"
 }
 
 # ---------------------------------------------------------------- macOS
