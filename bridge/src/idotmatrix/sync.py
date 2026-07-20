@@ -51,9 +51,10 @@ async def bridge_reachable(url: str) -> bool:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _bridge_reachable_sync, url)
 
-def resolve_display_brightness(display_state, normal_brightness: int) -> tuple[int, bool, str]:
-    """Return (hardware brightness, dimmed, signature) for the current host state.
-    iDotMatrix firmware accepts 5-100 only; 5% is the practical off floor."""
+def resolve_display_brightness(display_state, normal_brightness: int) -> tuple[int, bool, str, str]:
+    """Return (hardware brightness, dimmed, signature, dim_mode) for the host state.
+    iDotMatrix firmware accepts 5-100 only; 5% is the practical off floor, which is why
+    mode 'off' additionally pushes a black frame (see run_sync)."""
     return _resolve_display_brightness_common(
         display_state, normal_brightness, off_floor=5, level_floor=5
     )
@@ -99,6 +100,14 @@ async def upload_pil_image(idm_image: IdmImage, img: PilImage.Image) -> bool:
 
 async def upload_offline_frame(idm_image: IdmImage) -> bool:
     return await upload_pil_image(idm_image, make_offline_image())
+
+BLANK_HASH = "blank"
+
+async def upload_blank_frame(idm_image: IdmImage) -> bool:
+    """Push an all-black 32x32 frame. Dim mode 'off' cannot be expressed through
+    hardware brightness on this panel — the firmware floor is 5% — so blanking the
+    pixels is what actually makes it read as asleep. Mirrors IDotMatrixModule.swift."""
+    return await upload_pil_image(idm_image, PilImage.new("RGB", (32, 32), (0, 0, 0)))
 
 async def _interruptible_sleep(stop_event: asyncio.Event, secs: float) -> None:
     """Sleep up to `secs`, but wake immediately if shutdown was requested."""
@@ -190,11 +199,12 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
                 try:
                     display_state = await fetch_display_state(url)
                     last_bridge_ok = time.monotonic()
-                    current_hw_brightness, display_dimmed, last_display_signature = resolve_display_brightness(display_state, brightness)
+                    current_hw_brightness, display_dimmed, last_display_signature, dim_mode = resolve_display_brightness(display_state, brightness)
                 except Exception:
                     current_hw_brightness = brightness
                     display_dimmed = False
                     last_display_signature = ""
+                    dim_mode = "off"
 
                 # Set initial hardware brightness
                 if current_hw_brightness:
@@ -232,14 +242,24 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
                 # cleanly every BRIDGE_GONE_EXIT_SEC while the host display
                 # sleeps — the daemon then respawns it forever at 60s cadence.
                 last_bridge_ok = time.monotonic()
-                target_brightness, target_dimmed, signature = resolve_display_brightness(display_state, brightness)
+                target_brightness, target_dimmed, signature, target_mode = resolve_display_brightness(display_state, brightness)
                 if signature != last_display_signature or target_brightness != current_hw_brightness:
                     print(f"Host display {'off' if target_dimmed else 'on'} — setting hardware brightness to {target_brightness}%")
                     await idm_common.setBrightness(target_brightness)
                     current_hw_brightness = target_brightness
                     display_dimmed = target_dimmed
+                    dim_mode = target_mode
                     last_display_signature = signature
                     last_brightness_assert = time.monotonic()
+                    if display_dimmed and dim_mode == "off":
+                        # 5% is the firmware floor, so blank the pixels to make the
+                        # panel read as asleep instead of frozen on the last frame.
+                        if await upload_blank_frame(idm_image):
+                            last_hash = BLANK_HASH
+                    elif not display_dimmed:
+                        # Force a repaint over the blank/dim frame on wake — the hash
+                        # dedup below would otherwise swallow an unchanged dashboard.
+                        last_hash = None
             except Exception:
                 # Older/session-only bridges do not expose /display-state; keep
                 # the configured brightness rather than failing sync.

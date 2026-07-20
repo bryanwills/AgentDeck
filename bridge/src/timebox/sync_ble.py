@@ -253,7 +253,7 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                 # Honor the host display dim state already at connect time so a
                 # reconnect while the screen is asleep comes up dim/blank, not bright.
                 try:
-                    current_brightness, display_dimmed, last_display_signature = \
+                    current_brightness, display_dimmed, last_display_signature, _mode = \
                         resolve_display_brightness(fetch_display_state(url), brightness)
                     last_bridge_ok = time.monotonic()
                 except Exception:
@@ -276,7 +276,7 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                     #    only bridges omit it (keep the configured brightness).
                     transitioned = False
                     try:
-                        eff_b, dimmed, sig = resolve_display_brightness(fetch_display_state(url), brightness)
+                        eff_b, dimmed, sig, _mode = resolve_display_brightness(fetch_display_state(url), brightness)
                         last_bridge_ok = time.monotonic()
                         if sig != last_display_signature or eff_b != current_brightness:
                             current_brightness, display_dimmed, last_display_signature = eff_b, dimmed, sig

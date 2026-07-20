@@ -53,7 +53,7 @@ def bridge_reachable(url: str, timeout: float = 1.0) -> bool:
 
 
 def resolve_display_brightness(display_state, normal_brightness, *, off_floor, level_floor):
-    """Return (effective brightness, dimmed, signature) for the current host state.
+    """Return (effective brightness, dimmed, signature, dim_mode) for the host state.
 
     `off_floor`   — brightness used when the display is off and dim mode is 'off'.
     `level_floor` — minimum the configured dim 'level' is clamped to.
@@ -61,9 +61,15 @@ def resolve_display_brightness(display_state, normal_brightness, *, off_floor, l
     iDotMatrix firmware accepts 5-100 (floors = 5); the Timebox bakes brightness into
     the encoded frame and 0 == a fully blank panel (floors = 0). The signature lets the
     caller detect host-state transitions and force a re-encode/re-push at the new level.
+
+    `dim_mode` ('off' | 'min') is returned because a brightness floor alone cannot
+    express "dark" on every panel: the Timebox reaches black at 0, but the iDotMatrix
+    floor is 5, so that caller has to push an explicitly black frame instead. Callers
+    must branch on the mode rather than inferring it from the brightness value —
+    level 5 in 'min' mode is indistinguishable from the iDotMatrix 'off' floor.
     """
     if not isinstance(display_state, dict):
-        return normal_brightness, False, f"on|true|off|10|{normal_brightness}"
+        return normal_brightness, False, f"on|true|off|10|{normal_brightness}", "off"
 
     display_on = bool(display_state.get("displayOn", True))
     dim = display_state.get("dim") if isinstance(display_state.get("dim"), dict) else {}
@@ -79,5 +85,5 @@ def resolve_display_brightness(display_state, normal_brightness, *, off_floor, l
     signature = f"{display_on}|{dim_enabled}|{dim_mode}|{dim_level}|{normal_brightness}"
 
     if display_on or not dim_enabled:
-        return normal_brightness, False, signature
-    return (dim_level if dim_mode == "min" else off_floor), True, signature
+        return normal_brightness, False, signature, dim_mode
+    return (dim_level if dim_mode == "min" else off_floor), True, signature, dim_mode
