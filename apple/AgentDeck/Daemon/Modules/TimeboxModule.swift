@@ -119,13 +119,18 @@ actor TimeboxModule: DeviceModule {
         settingsReloadTask?.cancel(); await settingsReloadTask?.value; settingsReloadTask = nil
 
         // Graceful teardown: blank the panel (11×11 black) then drop the BLE link.
-        if connected, let ble {
-            let n = TimeboxDivoomPacket.width
-            try? await ble.uploadFrame(rgb11x11: [UInt8](repeating: 0, count: n * n * 3))
-        }
+        await blankPanelIfConnected()
         await ble?.disconnect()
         connected = false
         refreshShadow()
+    }
+
+    /// Write an all-black 11×11 frame so the panel does not keep displaying the last
+    /// session state after we stop driving it. No-op when the link is already down.
+    private func blankPanelIfConnected() async {
+        guard connected, let ble else { return }
+        let n = TimeboxDivoomPacket.width
+        try? await ble.uploadFrame(rgb11x11: [UInt8](repeating: 0, count: n * n * 3))
     }
 
     func handleWake() async {
@@ -163,6 +168,12 @@ actor TimeboxModule: DeviceModule {
         }
 
         if previousActive != newActive {
+            // Timebox is a stateful-push panel: it holds whatever frame was written
+            // last. Dropping the link without a farewell leaves the previous session's
+            // creature frozen on a device we no longer drive, which reads as "still
+            // connected". stop() already blanks for the same reason — unpairing (and
+            // swapping devices) has to as well.
+            await blankPanelIfConnected()
             await ble?.disconnect()
             connected = false
             consecutiveFailures = 0

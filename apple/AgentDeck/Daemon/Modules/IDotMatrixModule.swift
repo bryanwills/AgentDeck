@@ -123,12 +123,17 @@ actor IDotMatrixModule: DeviceModule {
         settingsReloadTask?.cancel(); await settingsReloadTask?.value; settingsReloadTask = nil
 
         // Graceful teardown: paint OFFLINE then drop the BLE link.
-        if connected, let ble, let png = Self.renderPNG(renderer.renderDisconnectedFrame()) {
-            try? await ble.uploadImage(pngData: png)
-        }
+        await paintOfflineIfConnected()
         await ble?.disconnect()
         connected = false
         refreshShadow()
+    }
+
+    /// Paint the OFFLINE frame so the panel does not keep displaying the last session
+    /// state after we stop driving it. No-op when the link is already down.
+    private func paintOfflineIfConnected() async {
+        guard connected, let ble, let png = Self.renderPNG(renderer.renderDisconnectedFrame()) else { return }
+        try? await ble.uploadImage(pngData: png)
     }
 
     func handleWake() async {
@@ -168,6 +173,10 @@ actor IDotMatrixModule: DeviceModule {
 
         // If the active device changed/was removed, drop the current link.
         if previousActive != newActive {
+            // Stateful-push panel: it holds the last frame written, so dropping the
+            // link without a farewell leaves the previous session's state on a device
+            // we no longer drive. stop() paints OFFLINE for the same reason.
+            await paintOfflineIfConnected()
             await ble?.disconnect()
             connected = false
             consecutiveFailures = 0
