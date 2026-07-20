@@ -134,6 +134,9 @@ actor IDotMatrixModule: DeviceModule {
     private func paintOfflineIfConnected() async {
         guard connected, let ble, let png = Self.renderPNG(renderer.renderDisconnectedFrame()) else { return }
         try? await ble.uploadImage(pngData: png)
+        // Write-without-response has no ACK; let the frame land before the caller drops
+        // the GATT link, or the panel keeps showing the previous scene.
+        try? await Task.sleep(for: .milliseconds(300))
     }
 
     func handleWake() async {

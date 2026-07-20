@@ -260,10 +260,21 @@ actor PixooModule: DeviceModule {
     }
 
     private func pushOfflineFrame() async {
-        let targets = devices.filter { !isBackedOff($0.ip) }
+        await pushOfflineFrame(to: devices, updateShadow: true)
+    }
+
+    /// Push the OFFLINE placeholder to a specific set of devices.
+    ///
+    /// Used for full teardown (`stop()`, which also refreshes the shadow) and for
+    /// devices the user just removed in Settings. A Pixoo holds the last frame it was
+    /// sent, so dropping one from the roster without a farewell leaves a stale creature
+    /// scene on hardware AgentDeck no longer drives. Removal passes
+    /// `updateShadow: false` because the remaining devices still own the shadow frame.
+    private func pushOfflineFrame(to list: [PixooDevice], updateShadow: Bool) async {
+        let targets = list.filter { !isBackedOff($0.ip) }
         guard !targets.isEmpty else { return }
         let frame = renderer.renderDisconnectedFrame()
-        shadow.writeFrame(frame)
+        if updateShadow { shadow.writeFrame(frame) }
 
         let pushes = Task { [weak self] in
             guard let self else { return }
@@ -909,7 +920,16 @@ actor PixooModule: DeviceModule {
         devices = latest
         lastPushError = nil
 
-        for removedIP in previousIPs.subtracting(latestIPs) {
+        // Farewell before we forget them: a removed Pixoo keeps displaying the last
+        // frame it was sent. Push OFFLINE while the PicID cache is still populated,
+        // then drop the per-device state.
+        let removedIPs = previousIPs.subtracting(latestIPs)
+        let removedDevices = removedIPs.compactMap { previousByIP[$0] }
+        if !removedDevices.isEmpty {
+            await pushOfflineFrame(to: removedDevices, updateShadow: false)
+        }
+
+        for removedIP in removedIPs {
             devicePicIds.removeValue(forKey: removedIP)
             deviceLogStates.removeValue(forKey: removedIP)
             lastPushedFrames.removeValue(forKey: removedIP)

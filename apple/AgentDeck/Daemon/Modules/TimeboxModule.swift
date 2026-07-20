@@ -131,6 +131,11 @@ actor TimeboxModule: DeviceModule {
         guard connected, let ble else { return }
         let n = TimeboxDivoomPacket.width
         try? await ble.uploadFrame(rgb11x11: [UInt8](repeating: 0, count: n * n * 3))
+        // Writes are write-without-response, so there is no ACK to wait on. Give the
+        // frame time to reach the panel before the caller drops the GATT link —
+        // disconnecting immediately can cut it off and leave the old frame displayed.
+        // Mirrors the 300ms settle ensureConnected() uses on the way in.
+        try? await Task.sleep(for: .milliseconds(300))
     }
 
     func handleWake() async {
