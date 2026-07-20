@@ -40,24 +40,37 @@ no visual difference between "saved" and "not saved" — the submit just fails.
 Verify by checking that each thumbnail's `src` is a `/cdn/uploadPath/...` URL and
 not a `data:` URI. A thumbnail is not evidence of an upload.
 
-### Known blocker — 작품 업데이트 returns 404 (Ulanzi-side, 2026-07-20)
+### Known blocker — 작품 업데이트 returns 404 while under review (Ulanzi-side, 2026-07-20)
 
 Pressing 업데이트 클릭 fails for reasons that have nothing to do with our content.
-The deployed frontend posts to `/api/api/updateAuditResources`, which the backend
-answers with a plain HTTP 404 "Not Found". Evidence that this is theirs, not ours:
+The bundle's API map splits the update call in two, and the backend only serves
+one of them:
 
-- A **pristine reload with zero edits** still 404s on submit.
-- The JS bundle is current (`index-7TL9tKSN.js` matches a fresh fetch), so it is
-  not a stale-frontend problem on our machine.
-- Every other route answers: `userInfo`, `myList`, `cateList`, `dictData`,
-  `upload` all 200. The record itself is fine (id 1064, status 0).
-- **`/api/api/updateResources` returns 200 — `updateAuditResources` does not
-  exist.** The update modal is calling a route the backend does not serve.
+| Branch | Endpoint | Backend |
+|---|---|---|
+| normal edit | `/api/updateResources` | 200 |
+| **edit while under review** | `/api/updateAuditResources` | **404** |
 
-Nothing in this file can work around that. Re-report it to Ulanzi rather than
-re-editing the listing. Do NOT hand-craft a POST to `updateResources` to force
-the save: the payload contract is unknown and it would be writing to a live
-listing through an API we have not verified.
+Our listing is status 0 (awaiting review), so it always takes the broken branch.
+The branch is chosen by the listing's audit state, **not** by which fields
+changed — which is why editing one thing at a time does not help, and why a
+pristine reload with zero edits still 404s.
+
+Supporting evidence that this is theirs, not ours: the JS bundle is current
+(`index-7TL9tKSN.js` matches a fresh fetch), every sibling route answers
+(`userInfo`, `myList`, `cateList`, `dictData`, `upload`, `saveResources`,
+`updateResources` all 200), and the record itself is fine (id 1064).
+
+**Decision (2026-07-20): wait.** What is in review is the previous image set,
+which is a complete and shippable listing. Once it is approved the entry leaves
+the audit state, at which point edits should route to the working
+`updateResources` branch and the reworked media in `1.0.0/` can go up. Deleting
+and re-registering was considered and rejected: `saveResources` works, but a
+re-registered entry lands right back in review and hits the same branch, so it
+would forfeit the queue position for nothing.
+
+Do NOT hand-craft a POST to `updateResources` to force the save — the payload
+contract is unverified and it would be writing to a live listing.
 
 ### Gotcha 2 — the 1000-character cap truncates silently
 
