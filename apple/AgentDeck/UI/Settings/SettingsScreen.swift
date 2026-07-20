@@ -1532,6 +1532,7 @@ struct SettingsScreen: View {
     @State private var showESP32Sheet: Bool = false
     @State private var showPixooSheet: Bool = false
     @State private var showIDotMatrixSheet: Bool = false
+    @State private var showTimeboxSheet: Bool = false
     #endif
 
     /// Hardware integrations that ship with in-app setup UI. D200H is plug
@@ -1565,6 +1566,14 @@ struct SettingsScreen: View {
                 action: { showIDotMatrixSheet = true }
             )
             Divider()
+            hardwareRow(
+                icon: "dot.radiowaves.left.and.right",
+                title: "Divoom Timebox Mini",
+                subtitle: "Pair an 11×11 Timebox Mini over Bluetooth. AgentDeck renders session state on it.",
+                buttonLabel: "Pair…",
+                action: { showTimeboxSheet = true }
+            )
+            Divider()
             Text("Ulanzi D200H Deck Dock appears when the AgentDeck action in Ulanzi Studio connects.")
                 .font(.system(size: 11))
                 .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
@@ -1578,6 +1587,9 @@ struct SettingsScreen: View {
         }
         .sheet(isPresented: $showIDotMatrixSheet) {
             IDotMatrixSheet()
+        }
+        .sheet(isPresented: $showTimeboxSheet) {
+            TimeboxSheet()
         }
     }
 

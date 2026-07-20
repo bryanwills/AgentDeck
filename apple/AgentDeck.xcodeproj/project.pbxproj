@@ -214,6 +214,7 @@
 		8693E499DE95572584CC9DA9 /* OpenCodeObserverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21073CA63BB9403D46212547 /* OpenCodeObserverTests.swift */; };
 		86F7FE3919CB9698A247E2A3 /* SandDisturbance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F9B51FC480E3419A6334A20 /* SandDisturbance.swift */; };
 		870485DE54A08A2F09A9BE6A /* IDotMatrixBLE.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F068BCFDB979A23AEDA5C3 /* IDotMatrixBLE.swift */; };
+		87DEC76D4B119C02E02D43E4 /* TimeboxSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 362BC758256086C0D78EF7A8 /* TimeboxSheet.swift */; };
 		88E5BC49F042917DFE14A2C9 /* ToastOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F358D3115EEB262D59BD6439 /* ToastOverlay.swift */; };
 		896B4B7AD5A5DA6FB6B4B7D4 /* CodexTelemetryModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81ECEA1581963132423FB0C8 /* CodexTelemetryModule.swift */; };
 		89B569F2096B99D8C6ED3044 /* ApmeScorers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 758AAD78310D811B993ADA21 /* ApmeScorers.swift */; };
@@ -300,6 +301,7 @@
 		C2EE2077BC999B5E03141F89 /* TimelineStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48F37E295246F5931D533E31 /* TimelineStripView.swift */; };
 		C329FA364A949AB61F0A8AD9 /* ApmeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBBE1258602AB5ABC83560EE /* ApmeSettings.swift */; };
 		C32B1F7FE07A02EE3EB41E04 /* CreatureGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA25996ACA820A3C8D6273A /* CreatureGeometry.swift */; };
+		C37CD3CFD263A0903096C515 /* TimeboxSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 362BC758256086C0D78EF7A8 /* TimeboxSheet.swift */; };
 		C4F117E796C0C81A8E52A02B /* PortDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15083D65B8571C662DD6E2CE /* PortDiagnostics.swift */; };
 		C68C5F90DA83B7DFE263289D /* ESP32ProvisionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6229A084E6CE2AB75D86F83 /* ESP32ProvisionSheet.swift */; };
 		C71587998379ED779ADFF54F /* ESP32Serial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C62F7ABA6BDEE39F39DBDFA /* ESP32Serial.swift */; };
@@ -452,6 +454,7 @@
 		31609846ED73DC70F674FCF0 /* SessionLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLauncher.swift; sourceTree = "<group>"; };
 		31F34DE9E44936BAC6D96F19 /* BridgeDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeDiscovery.swift; sourceTree = "<group>"; };
 		32CE020EB705544FFD580DD9 /* ProcessEnumerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessEnumerator.swift; sourceTree = "<group>"; };
+		362BC758256086C0D78EF7A8 /* TimeboxSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeboxSheet.swift; sourceTree = "<group>"; };
 		38C2485BC8700CBDD9EDE70E /* StateTimelineGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateTimelineGenerator.swift; sourceTree = "<group>"; };
 		3A70C6FAC4BDE4DAAFA08E74 /* CodexConfigInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConfigInstaller.swift; sourceTree = "<group>"; };
 		3B1754EEF69FF454C638CF1C /* MiniTomlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniTomlTests.swift; sourceTree = "<group>"; };
@@ -785,6 +788,7 @@
 				01B7BAB1080F7958F74A1B74 /* IntegrationsView.swift */,
 				47FFD673C1AD8EAF690B9E82 /* PixooSheet.swift */,
 				DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */,
+				362BC758256086C0D78EF7A8 /* TimeboxSheet.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -1491,6 +1495,7 @@
 				BC79AA685EFE9DDBEBE2F945 /* TimeboxBLE.swift in Sources */,
 				5C124CE89476651AE712EE47 /* TimeboxDivoomPacket.swift in Sources */,
 				28C908B7D7C412A638C6DA31 /* TimeboxModule.swift in Sources */,
+				87DEC76D4B119C02E02D43E4 /* TimeboxSheet.swift in Sources */,
 				9ED5461741C1FC0A6ADC249F /* Timeline.swift in Sources */,
 				B8830354996DCFC054A9AD5A /* TimelineRelay.swift in Sources */,
 				DCD31A20E9139F8661F0E321 /* TimelineStore.swift in Sources */,
@@ -1659,6 +1664,7 @@
 				6D9C5D2BBACEF2F070863C45 /* TimeboxBLE.swift in Sources */,
 				1755CE50FB5EBB217B02AED7 /* TimeboxDivoomPacket.swift in Sources */,
 				8FAFF0B6F124FB2FBA4B25B0 /* TimeboxModule.swift in Sources */,
+				C37CD3CFD263A0903096C515 /* TimeboxSheet.swift in Sources */,
 				9E30D4D0BEE3CB402E8741D8 /* Timeline.swift in Sources */,
 				C9A93A44534B81815553F80B /* TimelineRelay.swift in Sources */,
 				EA32929C78C6088451DDF476 /* TimelineStore.swift in Sources */,
