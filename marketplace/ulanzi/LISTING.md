@@ -29,6 +29,36 @@ then flips to `1:1`: "플러그인 커버는 UlanziStudio MarketPlace용으로 1
 If no cover is supplied the portal auto-fills one from the plugin's own
 `resources/icons/plugin.png`, so an empty-looking slot is not actually empty.
 
+### Gotcha 3 — upload assets ONE AT A TIME
+
+Every image upload opens an 이미지 자르기 (crop) dialog, and the file is only sent
+to the server when you press 확인 in that dialog. Queue four uploads back to back
+and the crop dialogs stack: the ones you never confirm stay as **local `data:`
+previews**. The slot renders a perfectly normal thumbnail either way, so there is
+no visual difference between "saved" and "not saved" — the submit just fails.
+
+Verify by checking that each thumbnail's `src` is a `/cdn/uploadPath/...` URL and
+not a `data:` URI. A thumbnail is not evidence of an upload.
+
+### Known blocker — 작품 업데이트 returns 404 (Ulanzi-side, 2026-07-20)
+
+Pressing 업데이트 클릭 fails for reasons that have nothing to do with our content.
+The deployed frontend posts to `/api/api/updateAuditResources`, which the backend
+answers with a plain HTTP 404 "Not Found". Evidence that this is theirs, not ours:
+
+- A **pristine reload with zero edits** still 404s on submit.
+- The JS bundle is current (`index-7TL9tKSN.js` matches a fresh fetch), so it is
+  not a stale-frontend problem on our machine.
+- Every other route answers: `userInfo`, `myList`, `cateList`, `dictData`,
+  `upload` all 200. The record itself is fine (id 1064, status 0).
+- **`/api/api/updateResources` returns 200 — `updateAuditResources` does not
+  exist.** The update modal is calling a route the backend does not serve.
+
+Nothing in this file can work around that. Re-report it to Ulanzi rather than
+re-editing the listing. Do NOT hand-craft a POST to `updateResources` to force
+the save: the payload contract is unknown and it would be writing to a live
+listing through an API we have not verified.
+
 ### Gotcha 2 — the 1000-character cap truncates silently
 
 `상세 소개` is capped at 1000 characters and the form **cuts the overflow without
