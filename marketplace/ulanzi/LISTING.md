@@ -40,37 +40,44 @@ no visual difference between "saved" and "not saved" — the submit just fails.
 Verify by checking that each thumbnail's `src` is a `/cdn/uploadPath/...` URL and
 not a `data:` URI. A thumbnail is not evidence of an upload.
 
-### Known blocker — 작품 업데이트 returns 404 while under review (Ulanzi-side, 2026-07-20)
+### Publishing is a MANUAL, email-gated step — my uploads is not the store
 
-Pressing 업데이트 클릭 fails for reasons that have nothing to do with our content.
-The bundle's API map splits the update call in two, and the backend only serves
-one of them:
+Ulanzi support (2026-07-20), on how an upload reaches the Marketplace:
+
+> 업로드하신 콘텐츠를 Marketplace에 추가하려면 반드시 고객 지원팀에 문의해 주세요.
+> 공식 이메일 주소(ustudioservice@ulanzi.com)로 [업로드한 파일 ID 또는 이름 / 공유를
+> 원하는 이유 및 사용 사례]를 보내주시면 담당 팀에서 검토 후 반영합니다.
+> 추후 Marketplace에 사용자 생성 콘텐츠를 직접 게시할 수 있는 기능이 추가될 예정입니다.
+
+So there is **no automatic review pipeline**. Uploading through 작품 업로드 only
+parks the entry in your own my-uploads list; a human at Ulanzi publishes it after
+you email them. `status: 0` means "sitting in my uploads", NOT "queued for
+review" — an earlier revision of this file read it as a queue position and
+recommended waiting on that basis. That was wrong.
+
+### Known blocker — 작품 업데이트 returns 404 (Ulanzi-side, 2026-07-20)
+
+Editing an existing upload fails. The bundle's API map splits the update call
+and the backend serves only one side:
 
 | Branch | Endpoint | Backend |
 |---|---|---|
 | normal edit | `/api/updateResources` | 200 |
-| **edit while under review** | `/api/updateAuditResources` | **404** |
+| **edit in audit state** | `/api/updateAuditResources` | **404** |
 
-Our listing is status 0 (awaiting review), so it always takes the broken branch.
-The branch is chosen by the listing's audit state, **not** by which fields
-changed — which is why editing one thing at a time does not help, and why a
-pristine reload with zero edits still 404s.
+Our entry takes the second branch and always 404s. Given that user uploads never
+enter a real audit flow, the likeliest reading is that the audit-edit path was
+never implemented server-side while the frontend still routes to it.
 
-Supporting evidence that this is theirs, not ours: the JS bundle is current
-(`index-7TL9tKSN.js` matches a fresh fetch), every sibling route answers
-(`userInfo`, `myList`, `cateList`, `dictData`, `upload`, `saveResources`,
-`updateResources` all 200), and the record itself is fine (id 1064).
+Evidence it is theirs, not ours: a pristine reload with zero edits still 404s;
+the JS bundle is current (`index-7TL9tKSN.js` matches a fresh fetch); every
+sibling route answers (`userInfo`, `myList`, `cateList`, `dictData`, `upload`,
+`saveResources`, `updateResources`); the record itself is fine.
 
-**Decision (2026-07-20): wait.** What is in review is the previous image set,
-which is a complete and shippable listing. Once it is approved the entry leaves
-the audit state, at which point edits should route to the working
-`updateResources` branch and the reworked media in `1.0.0/` can go up. Deleting
-and re-registering was considered and rejected: `saveResources` works, but a
-re-registered entry lands right back in review and hits the same branch, so it
-would forfeit the queue position for nothing.
-
-Do NOT hand-craft a POST to `updateResources` to force the save — the payload
-contract is unverified and it would be writing to a live listing.
+**Workaround: delete and re-upload.** Since publishing is manual and nothing is
+queued, deleting costs no position — it only costs re-entry, and every field is
+recoverable from this file plus `1.0.0/`. Registration (`saveResources`) works.
+Do NOT hand-craft a POST to `updateResources`: the payload contract is unverified.
 
 ### Gotcha 2 — the 1000-character cap truncates silently
 
