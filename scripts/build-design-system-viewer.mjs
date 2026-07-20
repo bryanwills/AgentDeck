@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -74,9 +75,40 @@ function parseMarkdown(source, sourcePath) {
   return { metadata, body, raw: source.trim() };
 }
 
+/* Every asset source must be committed, not merely present on this disk. A
+ * gitignored source resolves fine locally and then ENOENTs on a clean CI
+ * checkout — and even if the build survived, blobUrl() would hand the published
+ * viewer a 404. Checking tracked-ness here, at the one path all three asset
+ * loaders funnel through, turns that into a local failure. */
+const trackedPaths = (() => {
+  try {
+    return new Set(
+      execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+        .split('\0')
+        .filter(Boolean),
+    );
+  } catch {
+    // Not a git checkout (tarball export, vendored copy) — skip the guard
+    // rather than fail a build that has no way to answer the question.
+    return null;
+  }
+})();
+
+function assertTracked(relativePath) {
+  if (!trackedPaths) return;
+  const normalized = relativePath.replace(/\/$/, '');
+  if (trackedPaths.has(normalized)) return;
+  const asDir = `${normalized}/`;
+  for (const tracked of trackedPaths) {
+    if (tracked.startsWith(asDir)) return;
+  }
+  fail(`source is not tracked by git (gitignored or never added): ${relativePath}`);
+}
+
 function safeSourcePath(relativePath) {
   const absolute = path.resolve(repoRoot, relativePath);
   if (!absolute.startsWith(`${repoRoot}${path.sep}`)) fail(`source escapes repository: ${relativePath}`);
+  assertTracked(relativePath);
   return absolute;
 }
 
@@ -467,8 +499,11 @@ async function loadProductMarks() {
       destination: 'assets/product/agentdeck-original.png',
       note: 'Full-resolution master.',
     }),
+    /* docs/media/, not assets/screenshots/ — the latter is gitignored scratch
+     * space, so sourcing it here passed locally and ENOENT'd in CI. Both copies
+     * are byte-identical; this is the tracked one. */
     imageAsset({
-      source: 'assets/screenshots/macos-dashboard.png',
+      source: 'docs/media/macos-dashboard.png',
       destination: 'assets/product/macos-dashboard.png',
       note: 'macOS dashboard capture — the reference for how the tokens resolve in the shipped app.',
     }),
