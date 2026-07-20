@@ -50,6 +50,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Declared once, here, rather than toggled from the display-sync
+        // collector: the screen only goes dark after full-off dimming lets the
+        // system sleep it, and Android STOPS this activity at that point, so the
+        // collector is not running when the flag would be needed. Set up front it
+        // is already in effect when MonitorService brings us back to the front,
+        // which is what turns the panel on. showWhenLocked keeps that working
+        // when the device locked itself while asleep.
+        setShowWhenLocked(true)
+        setTurnScreenOn(true)
+
         isEinkDevice = EinkDetector.isEinkDevice()
 
         // E-ink: set landscape IMMEDIATELY — before any async/layout.
@@ -91,28 +101,14 @@ class MainActivity : ComponentActivity() {
                     hostDim = state.hostDim,
                 )
             }.collect { keepScreenOn ->
+                // Only KEEP_SCREEN_ON is toggled here. The turn-on capability is
+                // declared once in onCreate — see the note there: this collector
+                // is not running at the moment it would be needed, because the
+                // activity is stopped while the screen is dark.
                 if (keepScreenOn) {
-                    // KEEP_SCREEN_ON only keeps an already-lit screen lit — adding it
-                    // to a screen that has gone dark does nothing. Full-off dimming
-                    // puts the panel to sleep via SCREEN_OFF_TIMEOUT, so waking needs
-                    // an explicit turn-on. BrightnessController.wakeScreen()'s
-                    // SCREEN_BRIGHT_WAKE_LOCK has been deprecated since API 17 and no
-                    // longer lights the display on the API levels we ship to
-                    // (minSdk 29), which is why the tablet slept but never came back.
-                    // FLAG_TURN_SCREEN_ON added while this window is visible does.
-                    setTurnScreenOn(true)
-                    window.addFlags(
-                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                    )
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else {
-                    // Drop TURN_SCREEN_ON as well, or it re-lights the panel and
-                    // fights the short screen-off timeout we just installed.
-                    setTurnScreenOn(false)
-                    window.clearFlags(
-                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                    )
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
             }
         }

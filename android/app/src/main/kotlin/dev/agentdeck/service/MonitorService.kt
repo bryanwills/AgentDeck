@@ -131,6 +131,7 @@ class MonitorService : Service() {
                     // Display on, or host disabled device dimming → restore.
                     if (brightnessController.isDimmed()) {
                         Log.i(TAG, "Host display on / dim disabled — restoring brightness")
+                        wakeDashboardToFront()
                     }
                     brightnessController.restore()
                 }
@@ -367,5 +368,30 @@ class MonitorService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .build()
+    }
+
+    /**
+     * Bring the dashboard forward so its window can light the panel back up.
+     *
+     * Full-off dimming lets the system sleep the screen, and Android STOPS the
+     * activity when that happens (measured: wakefulness Dozing ⇒ activity
+     * STOPPED). A stopped activity cannot apply FLAG_TURN_SCREEN_ON — the flag
+     * only takes effect on a window being shown — and the lifecycle-scoped
+     * collector that sets it does not run while stopped either. So the activity
+     * could never wake itself; the fix has to come from this service, which
+     * stays alive in the foreground. Starting it with REORDER_TO_FRONT puts it
+     * through resume with turnScreenOn already set, which is what actually
+     * lights the panel.
+     */
+    private fun wakeDashboardToFront() {
+        try {
+            startActivity(
+                Intent(this, MainActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                )
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not bring dashboard forward to wake the screen: ${e.message}")
+        }
     }
 }
