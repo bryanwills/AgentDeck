@@ -49,12 +49,16 @@ jobs:
       - name: Preview mirror sync check
         run: node scripts/check-preview-mirror-sync.mjs
 
+      # Backstop only — the same drift now fails locally in `pnpm test`
+      # (shared/src/__tests__/protocol-generated-sync.test.ts), which is what
+      # stops it reaching master in the first place. command-builders.ts is
+      # generated from protocol.ts too and was previously left ungated here.
       - name: Protocol drift check
         run: |
           pnpm generate-protocol
-          if ! git diff --quiet generated/protocol/; then
-            echo "::error::Protocol artifacts under generated/protocol/ are out of sync with shared/src/*protocol.ts."
+          if ! git diff --quiet generated/protocol/ shared/src/command-builders.ts; then
+            echo "::error::Protocol artifacts are out of sync with shared/src/*protocol.ts."
             echo "::error::Run 'pnpm generate-protocol' locally and commit the result."
-            git diff generated/protocol/
+            git diff generated/protocol/ shared/src/command-builders.ts
             exit 1
           fi

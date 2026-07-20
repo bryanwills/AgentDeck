@@ -9,11 +9,16 @@
 #   generated/protocol/Protocol.swift        — Swift Codable structs
 #   generated/protocol/Protocol.kt           — Kotlin data classes
 #
+# Set AGENTDECK_PROTOCOL_OUT_DIR to emit somewhere else. The drift gate
+# (shared/src/__tests__/protocol-generated-sync.test.ts) uses it to regenerate
+# into a temp dir and byte-compare, so checking for drift never mutates the
+# working tree.
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-OUT_DIR="$PROJECT_DIR/generated/protocol"
+OUT_DIR="${AGENTDECK_PROTOCOL_OUT_DIR:-$PROJECT_DIR/generated/protocol}"
 
 mkdir -p "$OUT_DIR"
 

@@ -19,7 +19,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectDir = path.resolve(__dirname, "..");
 const protocolPath = path.join(projectDir, "shared/src/protocol.ts");
-const outDir = path.join(projectDir, "generated/protocol");
+
+// AGENTDECK_PROTOCOL_OUT_DIR redirects every artifact — including the TS
+// builders that normally land in shared/src — so the drift gate can regenerate
+// into a temp dir and byte-compare without touching the working tree.
+const outDirOverride = process.env.AGENTDECK_PROTOCOL_OUT_DIR;
+const outDir = outDirOverride ?? path.join(projectDir, "generated/protocol");
+const tsOutPath = outDirOverride
+  ? path.join(outDirOverride, "command-builders.ts")
+  : path.join(projectDir, "shared/src/command-builders.ts");
 
 const source = fs.readFileSync(protocolPath, "utf8");
 
@@ -342,9 +350,8 @@ function emitTypeScript() {
   lines.push("} as const;");
   lines.push("");
 
-  const tsOut = path.join(projectDir, "shared/src/command-builders.ts");
-  fs.writeFileSync(tsOut, lines.join("\n"));
-  console.log("   → shared/src/command-builders.ts");
+  fs.writeFileSync(tsOutPath, lines.join("\n"));
+  console.log(`   → ${path.relative(projectDir, tsOutPath)}`);
 }
 
 // ---- Main ---------------------------------------------------------------
