@@ -5,8 +5,8 @@
 // on LVGL and e-ink). Every strncpy of daemon-supplied text should be followed
 // by utf8TrimEnd(), and manual compositions should back off with utf8Boundary().
 //
-// C++11-safe (shared by pioarduino C++20/23 envs, the rgb48 C++11 env, and the
-// host simulator).
+// C++11-safe (shared by pioarduino C++20/23 envs, the `led8x32` espressif32
+// env, and the host simulator).
 #include <stddef.h>
 #include <stdint.h>
 

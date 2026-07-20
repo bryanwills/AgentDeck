@@ -862,7 +862,7 @@ static void sendDeviceInfo() {
     resp["board"] = "esp32_c6_147";
     #elif IS_ROUND
     resp["board"] = "round_amoled";
-    #elif defined(BOARD_RGB48) || defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
+    #elif defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
     resp["board"] = "86box";
     #elif defined(BOARD_IPS10)
     resp["board"] = "ips_10";

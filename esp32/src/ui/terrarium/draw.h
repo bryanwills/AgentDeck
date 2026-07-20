@@ -49,11 +49,7 @@ inline uint16_t toRGB565(uint32_t c24) {
     uint16_t c = (uint16_t)((((c24 >> 16) & 0xFF) >> 3) << 11 |
                             (((c24 >> 8) & 0xFF) >> 2) << 5 |
                             ((c24 & 0xFF) >> 3));
-#if defined(BOARD_RGB48)
-    return (c >> 8) | (c << 8);  // Byte-swap for RGB565_SWAPPED
-#else
     return c;
-#endif
 }
 
 inline uint32_t lerpColor(uint32_t a, uint32_t b, float t) {

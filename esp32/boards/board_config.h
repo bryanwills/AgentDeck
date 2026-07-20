@@ -5,7 +5,7 @@
 
 #if defined(BOARD_IPS35) || defined(BOARD_IPS_35)
     #include "board_35_ips.h"
-#elif defined(BOARD_RGB48) || defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
+#elif defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
     #include "board_86_box.h"
 #elif defined(BOARD_AMOLED) || defined(BOARD_ROUND_AMOLED)
     #include "board_round_amoled.h"
@@ -20,5 +20,5 @@
 #elif defined(BOARD_INKDECK)
     #include "board_inkdeck.h"
 #else
-    #error "No board defined! Use -DBOARD_IPS35, -DBOARD_RGB48, -DBOARD_AMOLED, -DBOARD_LED8X32, -DBOARD_TTGO, -DBOARD_ESP32_C6_147, or -DBOARD_IPS10"
+    #error "No board defined! Use -DBOARD_IPS35, -DBOARD_BOX_86, -DBOARD_AMOLED, -DBOARD_LED8X32, -DBOARD_TTGO, -DBOARD_ESP32_C6_147, or -DBOARD_IPS10"
 #endif

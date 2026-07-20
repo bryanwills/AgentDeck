@@ -13,7 +13,7 @@ procedure you run while writing firmware and the gate before handing it back.
 
 AgentDeck firmware targets two memory regimes. Check the board macros first.
 
-- **PSRAM boards** — `BOARD_RGB48`, `BOARD_IPS35`, `BOARD_AMOLED`, `BOARD_IPS10`
+- **PSRAM boards** — `BOARD_BOX_86`, `BOARD_IPS35`, `BOARD_AMOLED`, `BOARD_IPS10`
   (ESP32-S3 / -P4, 8–32MB PSRAM). Large canvases/caches go in PSRAM
   (`ps_malloc` / `MALLOC_CAP_SPIRAM`). **But** per-pixel / LVGL draw buffers and
   PPA rotation buffers must stay in **internal SRAM** (`MALLOC_CAP_INTERNAL`):
@@ -45,7 +45,7 @@ Ask in order; stop at the first yes.
 4. **Dynamic and fallible?** `makeUniqueNoThrow<T>(...)` /
    `makeUniqueNoThrow<T[]>(n)` from `esp32/src/util/memory.h`. Null-check, log,
    return. It frees on every exit path. Use `makeScopedCleanup([&]{ … })` for
-   non-owning teardown (the header is kept C++11-safe — BOARD_RGB48 builds at
+   non-owning teardown (the header is kept C++11-safe — `led8x32` builds at
    gnu++11 — so construct the guard via the factory, not C++17 CTAD).
 5. **A C/SDK API takes ownership / the object lives for the device lifetime?**
    Only then raw `new` / `heap_caps_alloc` / `ps_malloc`, with a null-check +

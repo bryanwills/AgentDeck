@@ -37,7 +37,7 @@ ghosting). See [esp32/sim/README.md](../esp32/sim/README.md).
 ## Flash Safety
 
 - **절대 `usbmodem` 포트 번호만 보고 IPS 3.5"와 Round AMOLED를 구분하지 말 것.** Native USB JTAG 보드는 허브 위치, 재연결 순서, 복구 모드에 따라 `/dev/cu.usbmodem*` 번호가 계속 바뀐다.
-- **정상 부팅 중인 보드는 반드시 `device_info_request`로 보드 식별 후 플래시한다.** 기대값은 `ips35`, `amoled`, `rgb48`, `led8x32`.
+- **정상 부팅 중인 보드는 반드시 `device_info_request`로 보드 식별 후 플래시한다.** 기대값은 `ips35`, `amoled`, `86box`, `led8x32`.
 - **`esp32/scripts/flash.sh auto`는 `device_info_request` 성공 시에만 자동 선택한다.** 응답이 없으면 추정하지 말고 중단해야 한다.
 - **Native USB 보드가 벽돌 상태일 때는 BOOT/RST로 먼저 ROM 다운로드 모드에 진입시킨 뒤, 그 다음에만 수동 업로드한다.** 복구 모드에서는 `device_info_request`가 동작하지 않으므로 환경(`ips35` 또는 `amoled`)을 사람이 명시해야 한다.
 - **한 번이라도 잘못된 디스플레이 펌웨어를 Native USB 보드에 올리면 USB가 잠깐만 살아 있다가 끊길 수 있다.** 이 상태는 하드웨어 사망이 아니라 잘못된 앱이 USB PHY를 끊는 케이스일 수 있다.
@@ -83,7 +83,7 @@ OTA 대상 SSOT. **`agentdeck esp32-ota <target>`의 `<target>`은 로컬 Platfo
 | **`ttgo_t_display`**, `ttgo` | `ttgo` | ~6.0MB | PSRAM 없는 classic ESP32, 작은 렌더 버퍼 유지 |
 | **`ips_35`**, `ips35` | `ips35` | ~3.5MB | FAT 포함 dual-OTA layout |
 | **`round_amoled`**, `amoled`, `amoled_18` | `amoled` | ~3.0MB | 8MB flash dual-OTA layout |
-| **`86box`**, `box_86`, `box_40` | `box_86` (`rgb48` default env도 같은 파티션) | ~7.75MB | 실험실 유닛은 2026-07-05 USB 마이그레이션 완료; 이전 layout 유닛은 최초 1회 USB full flash 필요 |
+| **`86box`**, `box_86`, `box_40` | `box_86` | ~7.75MB | 실험실 유닛은 2026-07-05 USB 마이그레이션 완료; 이전 layout 유닛은 최초 1회 USB full flash 필요 |
 | **`ips_10`**, `ips10`, `ips_101` | `ips10` | ~6.0MB | 실험실 유닛은 2026-07-05 USB 마이그레이션 완료; 이전 layout 유닛은 최초 1회 USB full flash 필요 |
 
 최초 마이그레이션 주의:

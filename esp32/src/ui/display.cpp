@@ -19,7 +19,7 @@ int16_t g_screenH = SCREEN_H;
 #endif
 
 // Platform-specific includes for ESP32-S3 Bus_RGB / Panel_RGB
-#if defined(BOARD_RGB48) || defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
+#if defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
 #include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
 #include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
 #endif
@@ -29,7 +29,7 @@ int16_t g_screenH = SCREEN_H;
 // Board-specific display driver
 // ============================================================
 
-#if defined(BOARD_RGB48) || defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
+#if defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
 // ===== ESP32-S3-4848S040: ST7701 RGB 16-bit parallel =====
 // Verified pin map from factory firmware backup.
 // ST7701 init via 3-wire SPI, display via RGB parallel bus.
@@ -586,30 +586,8 @@ static void disp_flush(lv_display_t* display, const lv_area_t* area, uint8_t* px
         stride_pixels = draw_buf->header.stride / sizeof(uint16_t);
     }
 
-#if defined(BOARD_RGB48)
-    static uint32_t flushCount = 0;
-    static uint32_t lastFlushMs = 0;
-    uint32_t now = millis();
-    flushCount++;
-    if (now - lastFlushMs > 5000 || flushCount < 5) {
-        Serial.printf("[Display] Flush #%u: area(%d,%d %dx%d) px_map=%p stride_pixels=%u\n",
-                      flushCount, area->x1, area->y1, w, h, px_map, stride_pixels);
-        lastFlushMs = now;
-    }
-#endif
 
-#if defined(BOARD_RGB48)
-    // RGB panel: pushImage writes directly to DMA framebuffer (handle stride alignment)
-    // swap565_t tells LovyanGFX data is already byte-swapped (RGB565_SWAPPED from LVGL)
-    if (stride_pixels == w) {
-        tft.pushImage(area->x1, area->y1, w, h, (lgfx::swap565_t*)px_map);
-    } else {
-        uint16_t* src = (uint16_t*)px_map;
-        for (uint32_t y = 0; y < h; y++) {
-            tft.pushImage(area->x1, area->y1 + y, w, 1, (lgfx::swap565_t*)&src[y * stride_pixels]);
-        }
-    }
-#elif defined(BOARD_IPS35)
+#if defined(BOARD_IPS35)
     // AXS15231B via Canvas: draw partial area to buffer, flush only on last area (handle stride alignment)
     if (stride_pixels == w) {
         gfx->draw16bitBeRGBBitmap(area->x1, area->y1, (uint16_t*)px_map, w, h);
@@ -957,7 +935,7 @@ void displayInit() {
     Serial.println("[Display] ===== TTGO PANEL TEST END =====");
 #endif
 
-#if defined(BOARD_RGB48) || defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
+#if defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
     // 86box: Test panel rendering with colored screens to diagnose black screen issue
     Serial.println("[Display] ===== PANEL TEST START =====");
     Serial.printf("[Display] Screen size: %dx%d\n", tft.width(), tft.height());
@@ -1040,40 +1018,6 @@ void displayInit() {
     lv_display_set_flush_cb(disp, disp_flush);
 #endif
 
-#if defined(BOARD_RGB48)
-    // RGB panel: LVGL renders into internal SRAM buffer (fast), then memcpy to DMA
-    // RGB565_SWAPPED = LVGL outputs big-endian RGB565 matching DMA byte order
-    // Use internal SRAM (not PSRAM) for LVGL buffer to avoid PSRAM bus contention
-    static constexpr size_t BUF_LINES = 40;
-    size_t strideBytes = rgb565StrideBytes(g_screenW);
-    size_t bufPixels = g_screenW * BUF_LINES;
-    size_t bufSize = strideBytes * BUF_LINES;
-    Serial.printf("[Display] Buffer alloc: %zu logical pixels, %zu bytes (%d lines, stride=%zu)\n",
-                  bufPixels, bufSize, BUF_LINES, strideBytes);
-
-    // Try internal SRAM first for speed, fall back to PSRAM
-    uint16_t* buf1 = (uint16_t*)heap_caps_malloc(bufSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    uint16_t* buf2 = (uint16_t*)heap_caps_malloc(bufSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    if (!buf1 || !buf2) {
-        // Fallback to PSRAM
-        if (buf1) free(buf1);
-        if (buf2) free(buf2);
-        buf1 = (uint16_t*)ps_malloc(bufSize);
-        buf2 = (uint16_t*)ps_malloc(bufSize);
-        Serial.println("[Display] Using PSRAM buffers (SRAM unavailable)");
-    } else {
-        Serial.println("[Display] Using internal SRAM buffers (fast)");
-    }
-    if (!buf1 || !buf2) {
-        Serial.println("[Display] Buffer alloc failed!");
-        return;
-    }
-    Serial.printf("[Display] Buffers: buf1=%p, buf2=%p\n", buf1, buf2);
-    lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
-    lv_display_set_buffers(disp, buf1, buf2, bufSize,
-                           LV_DISPLAY_RENDER_MODE_PARTIAL);
-    Serial.printf("[Display] LVGL initialized %dx%d (RGB565 swapped, partial)\n", g_screenW, g_screenH);
-#else
     // SPI/QSPI panels: partial render with DMA-capable buffers, big-endian RGB565.
     // TTGO has no PSRAM and very tight DMA-capable heap, so keep its LVGL
     // draw buffers smaller than the larger SPI/QSPI panels.
@@ -1132,7 +1076,6 @@ void displayInit() {
 #else
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
     Serial.printf("[Display] LVGL initialized %dx%d (RGB565 swapped)\n", g_screenW, g_screenH);
-#endif
 #endif
 
     lv_indev_t* indev = lv_indev_create();

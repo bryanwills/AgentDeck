@@ -63,13 +63,8 @@ static inline uint16_t swap16(uint16_t v) {
 
 static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
     uint16_t c = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-#if defined(BOARD_RGB48)
-    // LovyanGFX flush uses swap565_t* — canvas data must be pre-swapped
-    return swap16(c);
-#else
     // Arduino_GFX: canvas is RGB565, LVGL converts to SWAPPED during compositing
     return c;
-#endif
 }
 
 static bool isCodexAgentType(const char* agentType) {
@@ -80,9 +75,6 @@ static bool isCodexAgentType(const char* agentType) {
 
 // Decode a pixel back to R/G/B (handles swap)
 static inline void decodePixel(uint16_t px, uint8_t& r, uint8_t& g, uint8_t& b) {
-#if defined(BOARD_RGB48)
-    px = swap16(px);  // Canvas stores swapped — un-swap for decode
-#endif
     r = ((px >> 11) & 0x1F) << 3;
     g = ((px >> 5) & 0x3F) << 2;
     b = (px & 0x1F) << 3;
@@ -282,13 +274,8 @@ void init(lv_obj_t* parent) {
     baseCacheDirty = true;   // (re)build on next render (orientation change re-inits)
 #endif
 
-#if defined(BOARD_RGB48)
-    // LovyanGFX: canvas must match display format (swapped) — no LVGL conversion
-    lv_color_format_t canvasFmt = LV_COLOR_FORMAT_RGB565_SWAPPED;
-#else
     // Arduino_GFX: canvas in native RGB565, LVGL converts to SWAPPED on flush
     lv_color_format_t canvasFmt = LV_COLOR_FORMAT_RGB565;
-#endif
     canvas = lv_canvas_create(parent);
     // Explicit stride = width * 2 bytes (no alignment padding).
     uint32_t canvasStride = canvasW * sizeof(uint16_t);

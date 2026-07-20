@@ -30,6 +30,8 @@ jobs:
             name: "InkDeck 7.5\" e-ink 800x480"
           - env: ttgo
             name: "TTGO T-Display 240x135"
+          - env: led8x32
+            name: "Ulanzi TC001 32x8 LED matrix"
 
     steps:
       - uses: actions/checkout@v4

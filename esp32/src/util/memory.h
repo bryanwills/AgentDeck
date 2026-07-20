@@ -9,10 +9,12 @@
 // can be far smaller than the reported free heap. See
 // .agents/skills/esp32-heap-discipline/SKILL.md for the full rule set.
 //
-// Kept C++11-compatible: BOARD_RGB48 builds on espressif32@6.9.0 /
-// arduino-esp32 2.x (gnu++11), while the other boards use the pioarduino
-// toolchain (C++20/23). Avoid `enable_if_t`, CTAD deduction guides, and
-// `[[nodiscard]]` so the header compiles everywhere.
+// Kept C++11-compatible. The last gnu++11 environment (`rgb48`, on
+// espressif32@6.9.0) was removed when 86 Box consolidated onto `box_86`, so
+// every board now builds on the pioarduino toolchain (C++20/23) and this header
+// could be modernised. It is left C++11-safe deliberately: `led8x32` is still on
+// plain `espressif32`, and the host simulator compiles it too. Avoid
+// `enable_if_t`, CTAD deduction guides, and `[[nodiscard]]`.
 
 #include <cstddef>
 #include <memory>

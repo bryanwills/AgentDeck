@@ -90,7 +90,7 @@ The AgentDeck firmware uses PlatformIO and Arduino. LVGL 9.2 drives LCD boards; 
 
 Operational exceptions:
 
-- `box_86` retains the legacy duplicate `rgb48` environment and is the current `default_envs` target.
+- `box_86` is the 86 Box environment and the `default_envs` target. The former `rgb48` duplicate — a LovyanGFX build on espressif32@6.9.0 — was removed on 2026-07-20 when the board consolidated onto the pioarduino/Arduino_GFX stack the other S3 boards use.
 - TTGO flashing uses 57,600 baud with `--no-stub`; its no-PSRAM renderer has a deliberately small buffer.
 - IPS 10.1 uses a 16 MB dual-OTA layout with 6 MB slots and requires internal-memory LVGL buffers. Its ESP32-C6 is the Wi-Fi coprocessor.
 - Existing factory or old-partition 86 Box and IPS 10.1 units require one USB full flash before OTA.

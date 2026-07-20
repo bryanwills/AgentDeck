@@ -697,7 +697,7 @@ void setup() {
         "InkDeck 7.5\" e-ink",
 #elif defined(BOARD_IPS35)
         "IPS 3.5\"",
-#elif defined(BOARD_RGB48)
+#elif defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
         "86 Box 4\"",
 #elif defined(BOARD_AMOLED)
         "AMOLED Round 1.8\"",
