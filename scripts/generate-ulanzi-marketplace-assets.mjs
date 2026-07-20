@@ -60,13 +60,21 @@ const edge = (w, h, x, y, dw, dh) =>
     </svg>
   `);
 
+// docs/media/d200h-hero.jpg is a 4032x3024 capture, so every asset below is
+// built by DOWNscaling — the earlier 1400x800 source forced an upscale on the
+// 1920-wide banners. Crop is the deck body: it sits at roughly x 200..3950,
+// y 380..2540 in the original frame.
 async function device(width) {
-  return sharp(resolve(media, 'd200h.jpg'))
-    // Trim the desk clutter at the frame edges down to the deck body itself.
-    .extract({ left: 40, top: 20, width: 1320, height: 760 })
+  return sharp(resolve(media, 'd200h-hero.jpg'))
+    .extract({ left: 200, top: 380, width: 3750, height: 2160 })
     .resize(width, null)
     .png()
     .toBuffer();
+}
+
+/** Clean Ulanzi Studio render of the same deck — crisper type than a photo. */
+async function appRender(width) {
+  return sharp(resolve(media, 'd200h-app.png')).resize(width, null).png().toBuffer();
 }
 
 // ---------------------------------------------------------------- cover (2:1)
@@ -154,10 +162,14 @@ async function device(width) {
     </svg>
   `);
 
+  const app = await appRender(dw);
+  const appH = (await sharp(app).metadata()).height;
+  const appY = Math.round((H - appH) / 2) + 90;
+
   await sharp(backdrop(W, H))
     .composite([
-      { input: await device(dw), left: dx, top: dy },
-      { input: edge(W, H, dx, dy, dw, dh) },
+      { input: app, left: dx, top: appY },
+      { input: edge(W, H, dx, appY, dw, appH) },
       { input: text },
     ])
     .jpeg({ quality: 90, mozjpeg: true })
@@ -188,8 +200,8 @@ async function device(width) {
     </svg>
   `);
 
-  await sharp(resolve(media, 'hardware-d200h-tc001-closeup.png'))
-    .extract({ left: 1860, top: 1700, width: 1380, height: 920 })
+  await sharp(resolve(media, 'd200h-hero.jpg'))
+    .extract({ left: 260, top: 420, width: 3600, height: 2400 })
     .resize(W, H, { fit: 'cover', position: 'centre' })
     .composite([{ input: text }])
     .jpeg({ quality: 90, mozjpeg: true })
