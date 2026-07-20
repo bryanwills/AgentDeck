@@ -384,12 +384,33 @@ final class SessionRegistry: Sendable {
         return true
     }
 
+    /// Probe whether `port` can be taken, erring toward "yes".
+    ///
+    /// The probe answers one question — *is someone already holding this port* —
+    /// and it must distinguish that from *the probe itself could not run*. It
+    /// used to collapse both into `false`, and under the app sandbox the probe
+    /// reliably cannot run: a raw bind()/listen() on the wildcard address is
+    /// refused even when the port is completely free, while NWListener (which
+    /// goes through the sanctioned path) binds the very same port a moment
+    /// later. One log showed 97 "not bindable" verdicts and 0 recoveries on a
+    /// port `lsof` reported as empty.
+    ///
+    /// A verdict that is always "taken" is not a signal, and four callers were
+    /// branching on it: port selection fell back to 9121 on every launch, stale
+    /// registry entries were misread as a startup race, a dead external daemon
+    /// was never promoted away from, and the canonical port was never reclaimed
+    /// from a fallback. So only EADDRINUSE — the kernel positively saying the
+    /// address is taken — counts as occupied. Any other failure means "unknown",
+    /// and unknown resolves to free: the real NWListener bind decides, and
+    /// handleStartupBindFailure → retryOrFallback already recovers from a losing
+    /// race by re-probing /health, clearing same-bundle zombies, and only then
+    /// stepping to an alternate port.
     private func isPortFree(_ port: Int) async -> Bool {
         // Test IPv6 wildcard (::) in dual-stack mode — matches what NWListener actually binds.
         // NWListener binds to "::.<port>" by default, so an IPv4-only 127.0.0.1 test can
         // succeed while the actual NWListener bind fails with EADDRINUSE.
         let fd = socket(AF_INET6, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
+        guard fd >= 0 else { return true }   // cannot probe ⇒ let the real bind decide
         defer { close(fd) }
 
         // SO_REUSEADDR to match NWParameters.allowLocalEndpointReuse
@@ -410,13 +431,27 @@ final class SessionRegistry: Sendable {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size))
             }
         }
-        guard bindResult == 0 else { return false }
+        guard bindResult == 0 else {
+            // EADDRINUSE is the kernel telling us the address really is taken.
+            // Anything else (EACCES/EPERM under the sandbox, and friends) means
+            // the probe was refused, not that the port is busy.
+            let err = errno
+            if err == EADDRINUSE { return false }
+            DaemonLogger.shared.debug(
+                "Daemon", "Port \(port) bind probe inconclusive (errno \(err)) — treating as free")
+            return true
+        }
 
         // SO_REUSEADDR allows TWO sockets to bind() the same port, but only one
         // can listen(). Without this check, the probe can report "free" while
         // another REUSEADDR socket already owns the listen slot, then NWListener
         // loses the race and fails with EADDRINUSE.
-        return listen(fd, 1) == 0
+        if listen(fd, 1) == 0 { return true }
+        let listenErr = errno
+        if listenErr == EADDRINUSE { return false }
+        DaemonLogger.shared.debug(
+            "Daemon", "Port \(port) listen probe inconclusive (errno \(listenErr)) — treating as free")
+        return true
     }
 
     private func readDataBounded(from url: URL) -> Data? {

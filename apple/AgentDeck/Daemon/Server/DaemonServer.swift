@@ -947,33 +947,28 @@ final class DaemonServer {
                 } else {
                     throw DaemonError.noPortAvailable
                 }
-            } else if !(await registry.isPortBindable(requestedPort)) {
-                // No health response + pre-check says not bindable. NWListener
-                // sets `allowLocalEndpointReuse` (SO_REUSEADDR), so the bind is
-                // usually fine despite TIME_WAIT — but the bind+listen probe
-                // can still report false right after an abrupt shutdown. Give
-                // the kernel a brief moment to reap the previous socket, then
-                // commit: either use the requested port (letting NWListener
-                // make the final call) or fall back to an alt port. The prior
-                // implementation slept up to 15 s here, which turned a fast
-                // relaunch-after-kill flow into a perceived freeze on the
-                // Dashboard.
-                DaemonLogger.shared.info("Port \(requestedPort) not immediately bindable — brief recheck")
-                try? await Task.sleep(for: .milliseconds(400))
-                // A real daemon may have finished starting during the pause.
-                if let health = await registry.probeDaemonHealth(port: requestedPort),
-                   health["mode"] as? String == "daemon" {
-                    throw DaemonError.alreadyRunning(port: requestedPort)
-                }
-                if await registry.isPortBindable(requestedPort) {
-                    DaemonLogger.shared.info("Port \(requestedPort) reclaimed after 400ms")
-                } else if let alt = await registry.findAvailablePort() {
-                    DaemonLogger.shared.info("Port \(requestedPort) still held, falling back to \(alt)")
-                    resolvedPort = UInt16(alt)
-                } else {
-                    throw DaemonError.noPortAvailable
-                }
             }
+            // No health response ⇒ nobody is serving the requested port, so keep
+            // it and let NWListener make the final call.
+            //
+            // There used to be a raw bind()+listen() pre-check here that fell back
+            // to an alt port when it reported "not bindable". It reported that
+            // every single time: 97 occurrences in one log against 0 recoveries,
+            // on a port `lsof` showed as completely free — and NWListener then
+            // bound that same port successfully moments later. A probe that never
+            // says yes is a constant, not a signal, and branching on it moved the
+            // daemon to 9121 on every launch. That in turn wrote 9121 into
+            // daemon.json and advertised it over mDNS while the listener ended up
+            // on 9120, so the app's own dashboard and the iOS companion searched
+            // the wrong port and sat on "Searching for AgentDeck…" forever.
+            //
+            // The pre-check was also redundant. A genuine conflict still has two
+            // defenses that work: the /health probe above (plain HTTP, unaffected
+            // by whatever blocks the raw socket) detects a real daemon and hands
+            // over to client mode, and a real EADDRINUSE from NWListener lands in
+            // handleStartupBindFailure → retryOrFallback, which re-probes for an
+            // external daemon, clears same-bundle zombies via SquatterCleaner, and
+            // only then backs off to an alternate port.
         }
 
         self.port = resolvedPort
@@ -1613,21 +1608,13 @@ final class DaemonServer {
         let pixooRef = pixoo
         let idotmatrixRef = idotmatrix
         let timeboxRef = timebox
-        // Seed every newly-connected WS client with the current display state.
-        // display_state is only broadcast on the sleep/wake *edge*, so a client
-        // that connects while the host is asleep (Stream Deck plugin restarted,
-        // WiFi board reconnected) would otherwise render at full brightness
-        // until the next edge — and one that misses the wake edge stays blank
-        // forever. The serial path already gets this via initialEvents(); the
-        // WS path had no equivalent because setConnectHandler was never wired.
-        // Node does the same on connect (bridge-core.ts) plus a periodic
-        // re-broadcast (see startDisplayStateResync below).
-        let snapshotForConnect = serialEventSnapshot
-        await wsServer.setConnectHandler { [weak wsServer] conn in
-            guard let wsServer else { return }
-            let event = SendableDict(snapshotForConnect.currentDisplayStateEvent())
-            Task { await wsServer.sendTo(conn, event: event.value) }
-        }
+        // The on-connect display_state seed lives in handleClientConnect's burst,
+        // NOT here. setConnectHandler assigns a single stored property, so calling
+        // it again silently replaced setupWSHandlers' handler — which is the one
+        // that sends `connection: connected` and the whole initial state burst.
+        // Clients then connected, received only display_state, and never saw the
+        // connection event, so the dashboard sat on "Searching for AgentDeck…"
+        // while its socket was in fact open.
         startDisplayStateResync()
 
         await wsServer.onBroadcast { [weak self] data in
@@ -2504,6 +2491,18 @@ final class DaemonServer {
             // Sessions list
             let sessionsEvent = self.buildSessionsListEvent()
             if let data = esp32Shaped(sessionsEvent) { conn.send(data) }
+
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !conn.isDisconnected else { return }
+
+            // Current display state. Only the sleep/wake *edge* broadcasts this,
+            // so without it a client that connects while the host is asleep
+            // renders at full brightness until the next edge, and one that missed
+            // the wake edge stays blank indefinitely. The serial path has always
+            // carried it in its initial set (SerialEventSnapshot.initialEvents);
+            // the WS burst did not. Node sends it on connect for the same reason.
+            let displayEvent = self.serialEventSnapshot.currentDisplayStateEvent()
+            if let data = esp32Shaped(displayEvent) { conn.send(data) }
 
             try? await Task.sleep(for: .milliseconds(100))
             guard !conn.isDisconnected else { return }
