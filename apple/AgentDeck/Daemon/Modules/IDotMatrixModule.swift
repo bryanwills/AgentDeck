@@ -90,6 +90,10 @@ actor IDotMatrixModule: DeviceModule {
     private var lastPushAtMs: Int64?
 
     private var displayDimmed = false
+    /// True while dimmed with mode "off". Mode "min" keeps rendering live content at
+    /// the dim brightness; "off" renders black instead. Mirrors TimeboxModule's
+    /// `dimBrightnessOverride == 0` branch so both panels behave the same on sleep.
+    private var dimIsOff = false
     private var lastDimSignature = ""
 
     func setOnStateChanged(_ handler: @escaping @Sendable () -> Void) {
@@ -219,7 +223,7 @@ actor IDotMatrixModule: DeviceModule {
     // MARK: - Render / push loop
 
     private func tick() async {
-        guard let device = devices.first, !displayDimmed else { return }
+        guard let device = devices.first else { return }
         guard !isPushing else { return }
         isPushing = true
         defer { isPushing = false }
@@ -237,14 +241,24 @@ actor IDotMatrixModule: DeviceModule {
         // 64→32 reduction shrank official marks to 5–6 physical LEDs and merged
         // their negative space. Render EVERY tick; pixel dedup below prevents a
         // static frame from costing a BLE write.
-        let state = currentDashboardState()
-        let isDisconnectedPlaceholder = state.state == .disconnected && cachedAgentType == nil && cachedSessions.isEmpty
-        var rgb32 = isDisconnectedPlaceholder
-            ? Self.downscale64to32([UInt8](renderer.renderDisconnectedFrame()))
-            : [UInt8](renderer.renderCompact32(dashboardState: state))
-        // A restrained panel compensation keeps dark water visible without
-        // clipping the mark's edge coverage and hollow features.
-        rgb32 = Self.boostBrightnessContrast(rgb32, brightness: 1.22, contrast: 1.08)
+        var rgb32: [UInt8]
+        if dimIsOff {
+            // Dim mode "off" means the panel should read as dark, matching Timebox.
+            // There is no screen-off command on this device and the hardware
+            // brightness floor is 5%, so a black frame is what actually blanks it.
+            // Rendering (rather than suspending) keeps the dedup path in charge:
+            // the black frame is pushed once, then costs nothing until wake.
+            rgb32 = [UInt8](repeating: 0, count: 32 * 32 * 3)
+        } else {
+            let state = currentDashboardState()
+            let isDisconnectedPlaceholder = state.state == .disconnected && cachedAgentType == nil && cachedSessions.isEmpty
+            rgb32 = isDisconnectedPlaceholder
+                ? Self.downscale64to32([UInt8](renderer.renderDisconnectedFrame()))
+                : [UInt8](renderer.renderCompact32(dashboardState: state))
+            // A restrained panel compensation keeps dark water visible without
+            // clipping the mark's edge coverage and hollow features.
+            rgb32 = Self.boostBrightnessContrast(rgb32, brightness: 1.22, contrast: 1.08)
+        }
         if rgb32 == lastPushedRGB { return }
         guard let png = Self.rgb32ToPNG(rgb32) else { return }
 
@@ -374,15 +388,20 @@ actor IDotMatrixModule: DeviceModule {
             let signature = "\(dimEnabled)|\(dimMode)|\(dimLevel)"
             if !displayOn {
                 if !dimEnabled {
-                    if displayDimmed { displayDimmed = false; Task { await restoreBrightness() } }
+                    if displayDimmed { displayDimmed = false; dimIsOff = false; Task { await restoreBrightness() } }
                 } else if !displayDimmed || signature != lastDimSignature {
                     displayDimmed = true
-                    // No screen-off command wired; minimum brightness is the dim floor.
-                    let target = dimMode == "off" ? 5 : dimLevel
+                    dimIsOff = dimMode == "off"
+                    // There is no screen-off command on this panel, so "off" is a
+                    // black frame (see tick()) plus the 5% hardware floor; "min"
+                    // keeps live content at the configured dim level.
+                    let target = dimIsOff ? 5 : dimLevel
                     Task { await setBrightness(target) }
                 }
             } else if displayDimmed {
                 displayDimmed = false
+                dimIsOff = false
+                lastPushedRGB = nil   // force a repaint over the black/dim frame
                 Task { await restoreBrightness() }
             }
             lastDimSignature = signature
