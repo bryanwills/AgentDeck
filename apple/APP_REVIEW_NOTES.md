@@ -194,6 +194,88 @@ No account required. To see the app's features:
 
 Review on a clean Mac with only AgentDeck installed. The app starts its own Swift dashboard server and exposes the complete App Store experience described above. No external AgentDeck process, developer bridge, or terminal setup is part of the review instructions. The CI script `apple/scripts/verify-appstore-archive.sh` fails the build if the shipped app contains a subprocess spawn path, bundled helper executable, or home-relative-path entitlement.
 
+## Resolution Center — Guideline 2.4.5(i) entitlement reply
+
+Sent 2026-07-20 in response to the review of 1.0.0 (3501), which asked where the app uses
+`com.apple.security.device.bluetooth` and `com.apple.security.network.server`. Fill in the two demo
+video links before sending. Guideline 5 (China) was resolved by deselecting the China mainland
+storefront in Availability rather than stripping Codex/OpenAI functionality.
+
+```text
+Thank you for the review. Both entitlements are used by shipping functionality;
+below is where each one is exercised in the app, plus demo videos showing it.
+
+Demo videos (Guideline 2.1):
+• Bluetooth / hardware pairing: <PASTE LINK>
+• iPad companion pairing (network.server): <PASTE LINK>
+
+--------------------------------------------------------------------------
+com.apple.security.device.bluetooth
+--------------------------------------------------------------------------
+AgentDeck renders live coding-session status on optional Bluetooth LE pixel
+displays, acting only as a BLE central via Apple's CoreBluetooth framework.
+
+Where in the app — Settings → ESP32 & Pixoo, two separate pairing sheets:
+
+1. "iDotMatrix LED display" → Pair…
+   Tapping Scan runs a CoreBluetooth scan for peripherals advertising the
+   "IDM-" name prefix. The user selects one and taps Pair. AgentDeck stores the
+   CBPeripheral.identifier and then writes 32x32 display frames over a GATT
+   characteristic.
+
+2. "Divoom Timebox Mini" → Pair…
+   The same flow against the "TimeBox-mini-light" advertised name, writing
+   11x11 frames.
+
+Each sheet also has a brightness slider that changes the connected panel's
+output live, and an unpair button that sends a farewell frame before dropping
+the GATT link. The demo video shows the full sequence on real hardware: the
+panel dark before pairing, Scan discovering the device, Pair, the panel
+rendering session state, and the brightness slider changing it.
+
+Please note these are BLE peripherals connected directly through CoreBluetooth
+— they never appear in macOS System Settings → Bluetooth, so the in-app sheets
+above are the only pairing UI. A reviewer without either display sees "No
+device yet" and a Scan that finds nothing; the feature is inert and nothing
+else in the app depends on it.
+
+--------------------------------------------------------------------------
+com.apple.security.network.server
+--------------------------------------------------------------------------
+The app runs a local-only HTTP + WebSocket dashboard hub built on
+Network.framework NWListener (port 9120 by default, user-configurable in
+Settings → Port). It must be a server because it accepts inbound connections
+from three sources it cannot reach as a client:
+
+1. The AgentDeck Dashboard iOS companion app (same bundle family). The user's
+   own iPhone/iPad discovers the Mac over Bonjour (_agentdeck._tcp) on their
+   Wi-Fi and opens a WebSocket connection TO the Mac to receive live session
+   events. The iOS app is a pure client with no server entitlement, so this
+   data path only exists if the Mac accepts inbound connections. The second
+   demo video shows this: the iPad goes from "Disconnected" to "Connected" on
+   ws://192.168.68.100:9120 after scanning the pairing QR shown on the Mac.
+
+2. AI coding-agent lifecycle hooks. When the user opts in, Claude Code / Codex
+   (their own separately-installed CLIs, running in their own terminal under
+   their own process tree) POST session events to 127.0.0.1. AgentDeck is the
+   HTTP server receiving those POSTs.
+
+3. The optional Elgato Stream Deck and Ulanzi Studio plugins, which connect
+   inbound over WebSocket to render session state on deck hardware.
+
+Binding is limited to loopback and the local network interfaces. The app opens
+no firewall rules, performs no port mapping or UPnP, and accepts no traffic
+from the public internet. Endpoints are read-only dashboard reads plus the
+local hook POST endpoint, and connections from outside the machine must be
+paired via the QR/token flow shown in the video.
+
+To verify in the app: Settings → Port shows the active listening port, and
+"Pair iPad" in the menu bar shows the inbound pairing QR.
+
+Without these two entitlements the BLE displays, the iOS companion, the agent
+hooks, and the deck plugins all lose their only data path.
+```
+
 ## App Store Connect — App Review Information → Notes
 
 The Notes field is capped at 4,000 characters and persists across every submission, so it carries a
