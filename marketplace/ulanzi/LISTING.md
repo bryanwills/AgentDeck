@@ -15,7 +15,7 @@ asset spec. Two things the form does NOT tell you up front are recorded below.
 | Cover image | yes | **1:1 for plugins** | `marketplace/ulanzi/1.0.0/cover-1024x1024.jpg` |
 | Banner 01 | yes | 3:2 | `marketplace/ulanzi/1.0.0/banner-01-1920x1280.jpg` |
 | Banner 02 | optional | 3:2 | `marketplace/ulanzi/1.0.0/banner-02-1920x1280.jpg` |
-| Banner 03 | optional | 3:2 | — not supplied |
+| Banner 03 | optional | 3:2 | `marketplace/ulanzi/1.0.0/banner-03-1920x1280.jpg` |
 
 Regenerate with `node scripts/generate-ulanzi-marketplace-assets.mjs`.
 
@@ -23,8 +23,8 @@ Regenerate with `node scripts/generate-ulanzi-marketplace-assets.mjs`.
 
 The form shows `2:1` until the main file is uploaded and recognised as a plugin,
 then flips to `1:1`: "플러그인 커버는 UlanziStudio MarketPlace용으로 1:1 비율을
-사용합니다." **Upload the zip first, then read the cover requirement.** The 2:1
-`cover-1920x960.jpg` is kept for non-plugin surfaces and is not what we submit.
+사용합니다." **Upload the zip first, then read the cover requirement.** Only the
+1:1 file is generated; there is no 2:1 variant to pick up by mistake.
 
 If no cover is supplied the portal auto-fills one from the plugin's own
 `resources/icons/plugin.png`, so an empty-looking slot is not actually empty.
@@ -360,17 +360,28 @@ AgentDeck es un proyecto independiente, sin afiliación con los terceros mencion
 
 ## Gallery sources
 
-Built from high-resolution captures so nothing is upscaled:
+Nothing is upscaled. The deck face is not screenshotted at all — it is rendered
+from the canonical `buildSessionDeck` slots, which are viewBox SVG and therefore
+rasterise crisp at any size (DESIGN.md R7). That replaced the previous
+`d200h-app.png` composite, a 964×590 capture drawn at 1020px — a 1.06× upscale
+that also filled only 53% of the 1920 canvas, making it the soft one in the
+carousel.
 
 | File | Source |
 |---|---|
-| `cover-1024x1024.jpg` | `docs/media/d200h-hero.jpg` — 4032×3024 photo of the deck |
-| `banner-01-1920x1280.jpg` | `docs/media/d200h-app.png` — Ulanzi Studio render, crisper type than a photo |
-| `banner-02-1920x1280.jpg` | `docs/media/d200h-hero.jpg`, framed on the whole deck |
+| `cover-1024x1024.jpg` | `buildSessionDeck` @132px/key + `design/brand/agentdeck-icon.png` + the four upstream agent marks |
+| `banner-01-1920x1280.jpg` | `buildSessionDeck` @268px/key — 77% of canvas width |
+| `banner-02-1920x1280.jpg` | `docs/media/d200h-hero.jpg` 4032×3024, framed on the whole deck (0.53× downscale) |
+| `banner-03-1920x1280.jpg` | `docs/media/macos-dashboard.png` 2362×1430, timeline pane cropped (0.71× downscale) |
 
-Imagery is deliberately D200H-only. Desk shots that also contain an Elgato
-Stream Deck were tried and rejected — a competitor's device reading as the most
-legible thing in frame does not belong on Ulanzi's own storefront.
+Photographic imagery is deliberately D200H-only. Desk shots that also contain an
+Elgato Stream Deck were tried and rejected — a competitor's device reading as the
+most legible thing in frame does not belong on Ulanzi's own storefront.
+
+**banner-03 privacy note.** The macOS capture's bottom quarter is the live
+timeline, and at storefront size its rows are legible real project chatter. The
+generator crops above the timeline and fades the cut, so the banner carries only
+the terrarium, session list, and quota gauges. Do not re-crop it taller.
 
 ## Release notes (v1.0.0)
 

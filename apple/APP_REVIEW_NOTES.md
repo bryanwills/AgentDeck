@@ -217,7 +217,7 @@ Evaluation defaults to on-device Apple Intelligence Foundation Models — no net
 
 All hardware integrations are optional (Stream Deck+ additionally needs Elgato's software); reviewers can skip them and the rest of the app is unaffected.
 
-Contact: puritysb@gmail.com
+Contact: admin@foundby.kr
 ```
 
 <!-- notes-field:end -->
