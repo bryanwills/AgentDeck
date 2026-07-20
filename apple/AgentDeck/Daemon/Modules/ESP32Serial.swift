@@ -317,16 +317,12 @@ actor ESP32Serial {
 
     /// Send display state (on/off) to all connected ESP32 devices.
     /// Called by IOKit display sleep/wake handlers.
-    func sendDisplayState(displayOn: Bool) {
-        let event: [String: Any] = ["type": "display_state", "displayOn": displayOn]
-        guard let data = try? JSONSerialization.data(withJSONObject: event),
-              let json = String(data: data, encoding: .utf8) else { return }
-        for i in connections.indices where connections[i].connected {
-            sendToConnection(&connections[i], json: json)
-        }
-        publishStatusShadow()
-        DaemonLogger.shared.debug("ESP32", "Display state: \(displayOn ? "ON" : "OFF")")
-    }
+    // A `sendDisplayState(displayOn:)` helper used to live here. It built the
+    // event without the `dim` object, which boards read as legacy full-off — so
+    // reviving it would have silently downgraded every serial board's dim
+    // setting. It had no callers: the live paths (broadcast fan-out and the
+    // on-connect snapshot in DaemonServer) both send `dim`. Removed rather than
+    // fixed so the trap cannot be re-armed by an innocent-looking call.
 
     // MARK: - Port Detection
 

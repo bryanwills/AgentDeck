@@ -413,6 +413,8 @@ final class DaemonServer {
     private var apmeCollectorGateway: ApmeCollector? // OpenClaw gateway (separate to avoid activeHookSession collision)
     private var apmeRunner: ApmeRunner?
     private var apmeEvalTimerTask: Task<Void, Never>?
+    /// Slow display_state heartbeat — see startDisplayStateResync().
+    private var displayStateResyncTask: Task<Void, Never>?
 
     // Gateway
     private var gatewayAdapter: OpenClawAdapter?
@@ -1482,6 +1484,26 @@ final class DaemonServer {
 
     // MARK: - Device Modules
 
+    /// Re-broadcast the current display state on a slow cadence.
+    ///
+    /// The sleep/wake edge is the only other source, so a dropped or missed
+    /// edge is unrecoverable without this: a panel that blanked on sleep and
+    /// never saw the wake would stay dark until something else happened to
+    /// change. Node carries the same heartbeat (daemon-server.ts) for exactly
+    /// this reason. Cheap — a handful of bytes per client per interval, and
+    /// every consumer already de-dupes on an unchanged signature.
+    private func startDisplayStateResync() {
+        displayStateResyncTask?.cancel()
+        let snapshot = serialEventSnapshot
+        displayStateResyncTask = Task { @DaemonActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled, let self else { return }
+                self.broadcastRaw(snapshot.currentDisplayStateEvent())
+            }
+        }
+    }
+
     private func startDeviceModules() async {
         let portInt = Int(port)
 
@@ -1591,6 +1613,23 @@ final class DaemonServer {
         let pixooRef = pixoo
         let idotmatrixRef = idotmatrix
         let timeboxRef = timebox
+        // Seed every newly-connected WS client with the current display state.
+        // display_state is only broadcast on the sleep/wake *edge*, so a client
+        // that connects while the host is asleep (Stream Deck plugin restarted,
+        // WiFi board reconnected) would otherwise render at full brightness
+        // until the next edge — and one that misses the wake edge stays blank
+        // forever. The serial path already gets this via initialEvents(); the
+        // WS path had no equivalent because setConnectHandler was never wired.
+        // Node does the same on connect (bridge-core.ts) plus a periodic
+        // re-broadcast (see startDisplayStateResync below).
+        let snapshotForConnect = serialEventSnapshot
+        await wsServer.setConnectHandler { [weak wsServer] conn in
+            guard let wsServer else { return }
+            let event = SendableDict(snapshotForConnect.currentDisplayStateEvent())
+            Task { await wsServer.sendTo(conn, event: event.value) }
+        }
+        startDisplayStateResync()
+
         await wsServer.onBroadcast { [weak self] data in
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
@@ -7061,6 +7100,7 @@ final class DaemonServer {
         gatewayHealthTask?.cancel(); usageTickTask?.cancel()
         antigravityPollTask?.cancel()
         initialUsageTask?.cancel()
+        displayStateResyncTask?.cancel(); displayStateResyncTask = nil
 
         Task { @MainActor in self.voiceAssistant?.stop() }
         openCodeObserver.stop()
