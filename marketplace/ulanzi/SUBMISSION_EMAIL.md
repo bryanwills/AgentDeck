@@ -1,72 +1,107 @@
-# Marketplace listing request — email to Ulanzi
+# Email to Ulanzi support
 
-Ulanzi does not publish user uploads automatically. Per support (2026-07-20), an
-entry sitting in 내 업로드 reaches the Marketplace only after you email them and a
-person reviews it. Send the message below **after** the upload exists, so the
-file name in it resolves.
+Two things have to go through this channel, so they go in one message:
+
+1. **Marketplace listing is manual.** Per support (2026-07-20), uploading through
+   작품 업로드 only parks an entry in 내 업로드; a person at Ulanzi publishes it after
+   you email them with the file ID and a use case.
+2. **We cannot delete or edit our own entry.** Everything on the `*AuditResources`
+   branch 404s, so the entry is frozen with its first-draft images. Only Ulanzi
+   can clear it. Evidence is in `LISTING.md`; the short version is in the mail.
+
+Asking them to delete (rather than publish as-is) is deliberate: the current
+entry carries the old media, and the reworked cover/banners in `1.0.0/` are
+better. One human touch resolves both.
 
 - **To:** ustudioservice@ulanzi.com
-- **Subject:** Marketplace listing request — AgentDeck (D200H plugin, v1.0.0)
-
-English, since the support address is the international one. Fill in the two
-bracketed values from the portal before sending.
+- **Subject:** Please delete upload #1064 (AgentDeck) — blocked by a 404 on removeAuditResources
 
 ---
 
 Hello,
 
-I have uploaded a plugin to UlanziStudio and would like to request that it be
-published on the Marketplace.
+I uploaded a D200H plugin to UlanziStudio and I need help with it, because I
+cannot modify or delete it myself.
 
-**Upload details**
+**The entry**
 
+- Upload ID: 1064
 - Name: AgentDeck
-- Unique ID: com.ulanzi.ulanzistudio.agentdeck
 - Version: 1.0.0
+- Unique ID: com.ulanzi.ulanzistudio.agentdeck
 - Type / category: Plugin / Tools
-- Upload ID: [fill in from 내 업로드]
-- Main file: [fill in the .zip name shown in the portal]
-- Supported device: D200H
-- Supported systems: Windows, macOS (Apple Silicon), macOS (Intel)
-- Supported languages: English, 한국어, 日本語, 简体中文, Deutsch, Português, Español
+- Main file (as stored): 659ac84fa3d24ce4aba7b246c6f3d945.zip
+- Uploaded: 2026-07-20 14:05:18, status 0
 
-**What it does**
+**What I would like**
+
+Please delete this entry. I want to re-upload it with corrected cover and banner
+images, and then ask you to publish that new version on the Marketplace.
+
+**Why I cannot do it myself**
+
+Both the edit and delete buttons fail silently in 내 업로드. The frontend picks a
+different endpoint depending on whether an entry is in the audit state, and the
+backend appears to serve only one side of that split:
+
+| Action | Endpoint called | Response |
+|---|---|---|
+| Edit (normal) | `/api/api/updateResources` | 200 |
+| Edit (audit) | `/api/api/updateAuditResources` | **404** |
+| Delete (normal) | `/api/api/removeResources` | 200 |
+| Delete (audit) | `/api/api/removeAuditResources` | **404** |
+
+My entry takes the audit branch, so it is frozen. A few notes that may save your
+team time:
+
+- It reproduces on a freshly loaded page with no edits at all, so it is not
+  payload-related.
+- The JS bundle is current (`index-7TL9tKSN.js` matches a fresh fetch), so it is
+  not a stale client on my side.
+- Every other endpoint responds normally: `userInfo`, `myList`, `cateList`,
+  `dictData`, `upload`, `saveResources`, `updateResources`, `removeResources`.
+- The 404 is a plain HTTP 404, not an application-level error message.
+
+So the whole `*AuditResources` family looks absent from the deployed backend
+rather than any single route being broken.
+
+**About the plugin, for when I re-upload**
 
 AgentDeck turns the D200H into a live control surface for AI coding agents
 (Claude Code, Codex, OpenCode, OpenClaw). Each key is a session: it shows the
 agent, the project, and whether that session is working, waiting on you, or idle,
-and it repaints itself as the state changes. The bottom-row keys carry
-subscription quota gauges. Pressing a key opens that session's detail view.
+and repaints itself as the state changes. Bottom-row keys carry quota gauges, and
+pressing a key opens that session's detail view.
 
-**Use case**
+Use case: developers now run several coding agents at once, and the costly moment
+is not the work — it is failing to notice that an agent has stopped and is waiting
+for an answer. Buried in terminal tabs that state is invisible; on the D200H it is
+a glanceable wall of keys.
 
-Developers increasingly run several coding agents at once, and the expensive
-moment is not the work — it is noticing that an agent has stopped and is waiting
-for an answer. That state is invisible when it is buried in terminal tabs. On the
-D200H it is a glanceable wall of keys, so the deck earns its desk space for
-anyone doing agent-assisted development.
+The plugin ships a single dynamic action, so the user fills their keys with it and
+each key assigns itself. It bundles no daemon, does not access USB HID directly,
+and collects no analytics — it talks only to a local AgentDeck instance on the
+user's own machine.
 
-The plugin ships a single dynamic action; the user fills their keys with it and
-each key assigns itself. It does not bundle a daemon, does not access USB HID
-directly, and collects no analytics. It talks only to a local AgentDeck instance
-on the user's own machine.
-
-**Links**
-
+- Supported device: D200H
+- Supported systems: Windows, macOS (Apple Silicon), macOS (Intel)
+- Listing languages: English, 한국어, 日本語, 简体中文, Deutsch, Português, Español
 - Project page: https://puritysb.github.io/AgentDeck/
 - Source: https://github.com/puritysb/AgentDeck
 
-Please let me know if you need anything else — a different asset ratio, extra
-screenshots, or a signed build.
+Once #1064 is removed I will upload the final build and reply with the new upload
+ID so you can review it for the Marketplace.
 
 Thank you,
 Serendipity Bound (admin@foundby.kr)
 
 ---
 
-## Note on the 404
+## After they reply
 
-If they ask why the entry was re-uploaded rather than edited: editing an existing
-upload fails because the frontend posts to `/api/api/updateAuditResources`, which
-returns HTTP 404, while `/api/api/updateResources` exists. Worth reporting in the
-same thread — see the blocker section in `LISTING.md` for the full evidence.
+1. Confirm #1064 is gone from 내 업로드.
+2. Re-upload from `1.0.0/` — **one image at a time**, confirming each 이미지 자르기
+   dialog; a thumbnail is not proof the file reached the server (see LISTING.md).
+3. Set 작성자 to `admin@foundby.kr` (shared across all seven locales).
+4. Reply to the same thread with the new upload ID to request the listing.
+5. Tag `ulanzi-v1.0.0` once it is live.

@@ -60,24 +60,34 @@ recommended waiting on that basis. That was wrong.
 Editing an existing upload fails. The bundle's API map splits the update call
 and the backend serves only one side:
 
-| Branch | Endpoint | Backend |
+| Action | Endpoint | Backend |
 |---|---|---|
-| normal edit | `/api/updateResources` | 200 |
-| **edit in audit state** | `/api/updateAuditResources` | **404** |
+| edit (normal) | `/api/updateResources` | 200 |
+| **edit (audit)** | `/api/updateAuditResources` | **404** |
+| delete (normal) | `/api/removeResources` | 200 |
+| **delete (audit)** | `/api/removeAuditResources` | **404** |
+| register | `/api/saveResources` | 200 |
 
-Our entry takes the second branch and always 404s. Given that user uploads never
-enter a real audit flow, the likeliest reading is that the audit-edit path was
-never implemented server-side while the frontend still routes to it.
+Our entry takes the audit branch, so it can be neither edited NOR deleted — the
+delete button's confirm dialog appears but no request ever leaves. The whole
+`*AuditResources` family is absent from the deployed backend, which reads as the
+audit feature never having shipped server-side while the frontend still routes to
+it. Consistent with user uploads never entering a real audit flow.
 
 Evidence it is theirs, not ours: a pristine reload with zero edits still 404s;
 the JS bundle is current (`index-7TL9tKSN.js` matches a fresh fetch); every
 sibling route answers (`userInfo`, `myList`, `cateList`, `dictData`, `upload`,
 `saveResources`, `updateResources`); the record itself is fine.
 
-**Workaround: delete and re-upload.** Since publishing is manual and nothing is
-queued, deleting costs no position — it only costs re-entry, and every field is
-recoverable from this file plus `1.0.0/`. Registration (`saveResources`) works.
-Do NOT hand-craft a POST to `updateResources`: the payload contract is unverified.
+**There is no self-service workaround.** Delete-and-re-upload was the obvious
+escape and it does not work either: deletion takes the same broken branch. The
+entry is frozen with its first-draft media until Ulanzi removes it, so the only
+path is the mail in `SUBMISSION_EMAIL.md`, which asks them to delete #1064 so the
+final assets can be uploaded fresh. Registration (`saveResources`) does work, so
+re-uploading is fine once the old entry is gone.
+
+Do NOT hand-craft a POST to `updateResources` or `removeResources` to force it:
+the payload contract is unverified and it would be writing to a live account.
 
 ### Gotcha 2 — the 1000-character cap truncates silently
 
