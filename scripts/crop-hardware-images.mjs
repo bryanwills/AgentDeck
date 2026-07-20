@@ -52,6 +52,12 @@ const composites = [
 
 const tasks = [
   // --- Control decks ---
+  // Stream Deck+ also appears in the streamdeck-family composite, but that one is
+  // a two-pane WIDE card. The README gallery needs it as a single STANDARD card,
+  // so it gets its own crop from the same frame — pulled up slightly from the
+  // composite pane's box to make 1.75:1, and dropped below the lid logo so it is
+  // not clipped mid-word.
+  { name: 'streamdeck-plus.jpg', src: 'IMG_9703.jpeg', crop: { left: 108, top: 352, width: 3816, height: 2181 }, out: STANDARD },
   { name: 'd200h.jpg', src: 'IMG_9701.jpeg', crop: { left: 0, top: 288, width: 4032, height: 2304 }, out: STANDARD },
 
   // --- Apps ---
