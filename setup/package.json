@@ -1,6 +1,6 @@
 {
   "name": "@agentdeck/setup",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -12,7 +12,9 @@
     "@agentdeck/setup": "./dist/setup.js",
     "agentdeck-setup": "./dist/setup.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",

@@ -27,12 +27,40 @@ for (const path of [
   'package.json',
   'shared/package.json',
   'bridge/package.json',
-  'setup/package.json',
   'hooks/package.json',
   'plugin/package.json',
   'plugin-ulanzi/package.json',
 ]) {
   expectValue(path, jsonVersion(path), productVersion);
+}
+
+// `setup` is the ONE package allowed to run a patch ahead of VERSION.
+//
+// It is a bootstrapper: it installs @agentdeck/bridge and registers hooks, and
+// carries no protocol, wire format, or rendering contract that any other
+// surface has to agree with. npm versions are immutable, so a bug in its
+// install flow can only be fixed by publishing a new version — and forcing a
+// whole-product bump for that would drag Apple, Elgato and Ulanzi builds along
+// while they are mid-review at the current version.
+//
+// Constraint: same major.minor as VERSION, patch >= VERSION's. A minor or major
+// ahead means the product version moved on and setup was left behind, which is
+// real drift.
+{
+  const path = 'setup/package.json';
+  const actual = jsonVersion(path);
+  const [pMajor, pMinor, pPatch] = productVersion.split('.').map(Number);
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(actual ?? '');
+  if (!match) {
+    failures.push(`${path}: expected numeric X.Y.Z SemVer, found ${actual ?? '<missing>'}`);
+  } else {
+    const [, major, minor, patch] = match.map(Number);
+    if (major !== pMajor || minor !== pMinor || patch < pPatch) {
+      failures.push(
+        `${path}: expected ${productVersion} or a later patch of ${pMajor}.${pMinor}.x, found ${actual}`,
+      );
+    }
+  }
 }
 
 for (const path of [
