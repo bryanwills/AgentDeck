@@ -44,20 +44,29 @@ struct MonitorScreen: View {
             stateHolder.state.projectName ?? "",
             stateHolder.state.modelName ?? "",
         ].joined(separator: "|")
-        let siblings = stateHolder.state.siblingSessions
-            .sorted { $0.id < $1.id }
-            .map {
-                [
-                    $0.id,
-                    $0.agentType ?? "",
-                    $0.state ?? "",
-                    $0.projectName ?? "",
-                    $0.modelName ?? "",
-                    "\($0.alive)",
-                ].joined(separator: "|")
-            }
-            .joined(separator: ",")
-        return "\(primary)::\(siblings)"
+        // Built with a plain loop and a comparator-free `sort()` on purpose.
+        // `sorted(by:)`/`map` hand a caller-supplied closure to nonisolated
+        // stdlib generics; that closure statically inherits this view's
+        // @MainActor isolation, and Debug builds compile an executor assertion
+        // into its prologue — the same shape that trapped in the IOKit power
+        // callback. Nothing here needs a closure, so don't pay for one.
+        // Ordering only has to be deterministic (this is a change-detection
+        // key, not display order), and sorting the composed rows is: the id is
+        // the leading field and ids are unique.
+        var rows: [String] = []
+        rows.reserveCapacity(stateHolder.state.siblingSessions.count)
+        for session in stateHolder.state.siblingSessions {
+            rows.append([
+                session.id,
+                session.agentType ?? "",
+                session.state ?? "",
+                session.projectName ?? "",
+                session.modelName ?? "",
+                "\(session.alive)",
+            ].joined(separator: "|"))
+        }
+        rows.sort()
+        return "\(primary)::\(rows.joined(separator: ","))"
     }
 
     var body: some View {
