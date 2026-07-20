@@ -597,7 +597,13 @@ final class UsageAPIClient: Sendable {
         let start = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
         try? handle.seek(toOffset: start)
         guard let data = try? handle.readToEnd() else { return nil }
-        return String(data: data, encoding: .utf8)
+        return Self.decodeRolloutTail(data, seekedPastStart: start > 0)
+    }
+
+    /// Rollout tails are JSONL read from an arbitrary byte offset; see
+    /// `TailDecoder` for why a strict decode silently loses the whole window.
+    static func decodeRolloutTail(_ data: Data, seekedPastStart: Bool) -> String? {
+        TailDecoder.decode(data, seekedPastStart: seekedPastStart)
     }
 
     /// Parse the newest token_count `rate_limits` snapshot out of rollout text.

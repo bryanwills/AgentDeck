@@ -287,6 +287,7 @@
 		BC74AE57E83DCC133989A7C9 /* TerrariumRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 481253E76BD28E883C65121F /* TerrariumRenderer.swift */; };
 		BC7898764CE415919C2E81AC /* BridgeEventParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C930EA1785B14EE276FC29A /* BridgeEventParser.swift */; };
 		BC79AA685EFE9DDBEBE2F945 /* TimeboxBLE.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06FFF88A2747DFBB1E626CA9 /* TimeboxBLE.swift */; };
+		BCBA361B299FFE8F5C9CE65E /* TailDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CEC7D8557C3DA805DBA75E1 /* TailDecoder.swift */; };
 		BD4E00F831DF1A005F413275 /* AgentCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E37B7FE721FDD18B11DAC32 /* AgentCommand.swift */; };
 		BDCB2D139D067100AE0880B5 /* ApmeJudgeDetect.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB1470AE66304DC838676016 /* ApmeJudgeDetect.swift */; };
 		BDEDD6038EA83D66CC78F12C /* ApmeCategoryE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F083DDE39507B6693AED227 /* ApmeCategoryE2ETests.swift */; };
@@ -381,6 +382,7 @@
 		F781DA13FBEBEBD70F5ED73A /* DevicePreviewShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46AB7A0263C3AFB217C9DF13 /* DevicePreviewShared.swift */; };
 		F87FAB4C9CC261368ED37DEA /* DaemonTimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE17EFB01F43FCB1A53F644D /* DaemonTimelineStore.swift */; };
 		F8BE29A6A14F481757A966DB /* DeskPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83D5CE0F7637C0913938BA6B /* DeskPreviews.swift */; };
+		F940158912CF7ACA80C3376C /* TailDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CEC7D8557C3DA805DBA75E1 /* TailDecoder.swift */; };
 		F9D579C6EF0D2683CD40F9FC /* ProviderRailEvaluatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BBA59C83638DB2F6B90C44A /* ProviderRailEvaluatorTests.swift */; };
 		F9EEBCC88FC55225E6D60AEE /* OpenCodeObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9C1092C93CA846103C9692C /* OpenCodeObserver.swift */; };
 		FA0A73634F02279804DDF386 /* ApmeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBBE1258602AB5ABC83560EE /* ApmeSettings.swift */; };
@@ -478,6 +480,7 @@
 		4AA25996ACA820A3C8D6273A /* CreatureGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreatureGeometry.swift; sourceTree = "<group>"; };
 		4BE102D050319B6A78A505B3 /* AquariumSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AquariumSurface.swift; sourceTree = "<group>"; };
 		4C2005980598D651492006A3 /* OpenCodeCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeCreature.swift; sourceTree = "<group>"; };
+		4CEC7D8557C3DA805DBA75E1 /* TailDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailDecoder.swift; sourceTree = "<group>"; };
 		4D60A0390EDEA34DD8F09055 /* ControlTowerPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlTowerPanel.swift; sourceTree = "<group>"; };
 		4E033ABF49F0DDF31D309181 /* DevicePreviewSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicePreviewSnapshotTests.swift; sourceTree = "<group>"; };
 		4FD4B5CF393BD9B6CEDBCFAF /* AgentDeckTests_macOS.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgentDeckTests_macOS.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -646,6 +649,7 @@
 				5F7897FE76F480951CD34749 /* ProjectNameResolver.swift */,
 				31609846ED73DC70F674FCF0 /* SessionLauncher.swift */,
 				DA46D3D4A84FBDE6C8B3AB62 /* StateMachine.swift */,
+				4CEC7D8557C3DA805DBA75E1 /* TailDecoder.swift */,
 				DBBD731AC01994F5C7C1A78A /* UsageAPIClient.swift */,
 			);
 			path = Core;
@@ -1487,6 +1491,7 @@
 				A8293F557BD8D3FB91BF4CF4 /* StateTimelineGenerator.swift in Sources */,
 				DF804392C56333041A3C2784 /* StatusBadge.swift in Sources */,
 				98B8B1F86B399218B89247D8 /* TUITerrariumRenderer.swift in Sources */,
+				F940158912CF7ACA80C3376C /* TailDecoder.swift in Sources */,
 				F20373DB53552C2F36204EDF /* TerrariumConfig.swift in Sources */,
 				20BC342C63610F58CFF51A74 /* TerrariumRenderer.swift in Sources */,
 				AA5C41BFDE43A8EDC2C85AA3 /* TerrariumRules.generated.swift in Sources */,
@@ -1656,6 +1661,7 @@
 				942DEF7F0BE77DF0FA264AF8 /* StateTimelineGenerator.swift in Sources */,
 				67FA80518E8F347B39576FCC /* StatusBadge.swift in Sources */,
 				7F401B71F68C95DEBD74DAFE /* TUITerrariumRenderer.swift in Sources */,
+				BCBA361B299FFE8F5C9CE65E /* TailDecoder.swift in Sources */,
 				076E08E5217ECF4528B4AC9A /* TerrariumConfig.swift in Sources */,
 				BC74AE57E83DCC133989A7C9 /* TerrariumRenderer.swift in Sources */,
 				A5FEB3C538CE2A4C9C385F2F /* TerrariumRules.generated.swift in Sources */,

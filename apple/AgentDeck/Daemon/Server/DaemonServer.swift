@@ -169,7 +169,9 @@ enum CodexRolloutResponseReader {
         let offset = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
         do {
             try handle.seek(toOffset: offset)
-            return String(data: handle.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            // Strict decoding drops the whole window when the offset splits a
+            // character — see TailDecoder.
+            return TailDecoder.decode(handle.readDataToEndOfFile(), seekedPastStart: offset > 0) ?? ""
         } catch {
             return ""
         }
@@ -200,7 +202,11 @@ enum ClaudeTranscriptTailReader {
         let size = (try? handle.seekToEnd()) ?? 0
         let offset = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
         guard (try? handle.seek(toOffset: offset)) != nil else { return nil }
-        let text = String(data: handle.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        // Korean/CJK transcripts split a character at the offset far more often
+        // than not, and a strict decode would throw away the entire tail — which
+        // on this path means the turn loses its assistant text and closes as a
+        // plain row. See TailDecoder.
+        let text = TailDecoder.decode(handle.readDataToEndOfFile(), seekedPastStart: offset > 0) ?? ""
         guard !text.isEmpty else { return nil }
         let isoFractional = ISO8601DateFormatter()
         isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
