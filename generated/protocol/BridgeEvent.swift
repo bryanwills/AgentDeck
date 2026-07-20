@@ -1057,8 +1057,20 @@ struct ADDisplayDimInstruction: Codable, Equatable {
     /// Master toggle. false ⇒ leave devices at their normal brightness.
     var enabled: Bool
     /// Minimum-brightness percent (1-100). Ignored when mode='off'.
+    ///
+    /// This is the requested level, not a promise. Consumers clamp it up to their own hardware
+    /// floor (Pixoo 1, iDotMatrix 5, Timebox 0 because brightness is baked into the frame), so
+    /// the same `level` legitimately renders differently across panels. Do not "fix" that
+    /// divergence by forcing a shared floor — it would push devices below what their firmware
+    /// accepts.
     var level: Double
-    /// 'off' ⇒ brightness 0; 'min' ⇒ dim to `level`.
+    /// 'off' ⇒ the panel must read as dark; 'min' ⇒ dim to `level` but stay readable.
+    ///
+    /// Consumers must branch on this rather than inferring intent from the resulting brightness
+    /// number: a device whose hardware floor is 5 cannot distinguish "off" from "min at level 5"
+    /// by value alone. Where a floor makes brightness unable to express dark — the iDotMatrix
+    /// firmware accepts 5-100, and there is no screen-off command — 'off' means pushing black
+    /// pixels, not the lowest brightness.
     var mode: ADMode
 
     enum CodingKeys: String, CodingKey {
@@ -1107,7 +1119,13 @@ extension ADDisplayDimInstruction {
     }
 }
 
-/// 'off' ⇒ brightness 0; 'min' ⇒ dim to `level`.
+/// 'off' ⇒ the panel must read as dark; 'min' ⇒ dim to `level` but stay readable.
+///
+/// Consumers must branch on this rather than inferring intent from the resulting brightness
+/// number: a device whose hardware floor is 5 cannot distinguish "off" from "min at level 5"
+/// by value alone. Where a floor makes brightness unable to express dark — the iDotMatrix
+/// firmware accepts 5-100, and there is no screen-off command — 'off' means pushing black
+/// pixels, not the lowest brightness.
 enum ADMode: String, Codable, Equatable {
     case min = "min"
     case off = "off"
