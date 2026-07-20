@@ -11,12 +11,23 @@ below are ours.
 | Slot | Required | Ratio | Our file |
 |---|---|---|---|
 | Main file | yes | — (`.zip`, ≤50 MB/file) | `dist/agentdeck-ulanzi-v1.0.0.zip` (9.1 MB) |
-| Cover image | yes | 2:1 | `marketplace/ulanzi/1.0.0/cover-1920x960.jpg` |
+| Cover image | yes | **1:1 for plugins** | `marketplace/ulanzi/1.0.0/cover-1024x1024.jpg` |
 | Banner 01 | yes | 3:2 | `marketplace/ulanzi/1.0.0/banner-01-1920x1280.jpg` |
 | Banner 02 | optional | 3:2 | `marketplace/ulanzi/1.0.0/banner-02-1920x1280.jpg` |
 | Banner 03 | optional | 3:2 | — not supplied |
 
 Regenerate with `node scripts/generate-ulanzi-marketplace-assets.mjs`.
+
+**The cover ratio is conditional and the form lies about it up front.** It shows
+`2:1` until the main file is uploaded and recognised as a plugin, at which point
+it flips to `1:1` — "플러그인 커버는 UlanziStudio MarketPlace용으로 1:1 비율을
+사용합니다." Upload the zip first, then read the cover requirement. The 2:1
+`cover-1920x960.jpg` is kept for any non-plugin surface but is NOT what this
+listing submits.
+
+If no cover is supplied the portal auto-fills one from the plugin's own
+`resources/icons/plugin.png`, so an empty-looking cover slot is not actually
+empty — check which image is selected before submitting.
 
 Banner imagery is deliberately D200H-only. `docs/media/d200h-session-buttons.jpg`
 (the full desk) was tried and rejected for a banner slot: it renders the D200H as

@@ -97,6 +97,47 @@ async function device(width) {
     .toFile(resolve(out, 'cover-1920x960.jpg'));
 }
 
+// ------------------------------------------------------- cover square (1:1)
+// The portal advertises a 2:1 cover until it recognises the uploaded main file
+// as a plugin, at which point the requirement flips to 1:1: "플러그인 커버는
+// UlanziStudio MarketPlace용으로 1:1 비율을 사용합니다." Ship the square one —
+// the 2:1 file below stays for any non-plugin surface that still wants it.
+{
+  const S = 1024;
+  const dw = 880;
+  const dh = Math.round((760 / 1320) * dw);
+  const dx = Math.round((S - dw) / 2);
+  const dy = 322;
+
+  const square = Buffer.from(`
+    <svg width="${S}" height="${S}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="lift" cx="0.5" cy="0.62" r="0.72">
+          <stop offset="0" stop-color="${INK_800}"/>
+          <stop offset="1" stop-color="${INK_900}"/>
+        </radialGradient>
+      </defs>
+      <rect width="${S}" height="${S}" fill="url(#lift)"/>
+    </svg>
+  `);
+
+  const text = Buffer.from(`
+    <svg width="${S}" height="${S}" xmlns="http://www.w3.org/2000/svg">
+      <text x="${S / 2}" y="196" fill="${TIDE_50}" font-family="${FONT}" font-size="86" font-weight="700" text-anchor="middle">AgentDeck</text>
+      <text x="${S / 2}" y="252" fill="${KELP_300}" font-family="${FONT}" font-size="31" font-weight="500" text-anchor="middle">AI coding agents on your D200H</text>
+    </svg>
+  `);
+
+  await sharp(square)
+    .composite([
+      { input: await device(dw), left: dx, top: dy },
+      { input: edge(S, S, dx, dy, dw, dh) },
+      { input: text },
+    ])
+    .jpeg({ quality: 90, mozjpeg: true })
+    .toFile(resolve(out, 'cover-1024x1024.jpg'));
+}
+
 // ------------------------------------------------------------ banner 01 (3:2)
 {
   const W = 1920;
