@@ -1,209 +1,97 @@
-# Stream Deck+ Layout Reference
-
-> **Superseded (historical reference).** This documents the retired **v3** layout. The current session-per-button model is [v4 Layout](v4-layout.md); rendering conventions live in [Plugin Conventions](plugin-conventions.md). Kept for the encoder/dial diagrams and v3→v4 migration context only.
->
-> Several features below no longer exist anywhere in the product, not merely in
-> this layout: the **Voice dial** (push-to-talk + whisper transcription + voice-text
-> takeover) and the **multi-mode Utility dial** (mic / media / timer) were removed
-> before the Marketplace submission — E1 is Volume-only and E4 is the Launcher. See
-> [v4 Layout § Marketplace submission scope](v4-layout.md#marketplace-submission-scope-2026-07-19).
-
-Detailed reference for the Stream Deck+ button and encoder layout in AgentDeck v3.
-
 ---
-
-## Utility Dial Modes (E1)
-
-The Utility encoder supports multiple modes, switchable via touch (long press >=500ms):
-
-| Mode | Rotate | Push | Display |
-|------|--------|------|---------|
-| **Volume** | Adjust output volume (+-5%) | Toggle mute | Volume % + bar |
-| **Mic** | Adjust input volume (+-5%) | Toggle mute | Input level + bar |
-| **Media** | Adjust volume | Play / Pause | Track + artist (Spotify / Music.app) |
-| **Timer** | Adjust time (+-5 min) | Start / Pause / Reset | Countdown + bar |
-
-## Action Dial Features (E2)
-
-- **IDLE**: Cycles through prompt templates (rotate) and sends on push. If Claude Code shows a ghost text suggestion (autocomplete), it appears as the first prompt option
-- **Interactive**: Scrolls options (rotate) and confirms selection (push). For navigable prompts with `>` cursor, arrow keys move the cursor in the PTY
-
-## Voice Dial Features (E4)
-
-- **Recording**: Hold push to record, release to transcribe. Pulsing red indicator with waveform animation
-- **Voice Text Takeover**: After transcription, the text spans all 4 encoder LCDs (wide canvas, adaptive font 48->16px). Short push (<500ms) = send to Claude, long push (>=500ms) = cancel
-- **Offline-first**: Recording works even when bridge is disconnected — text is pasted via clipboard
-
+id: spec.streamdeck-layout
+title: Stream Deck+ Layout
+description: The current session-per-button keypad, the four encoder assignments, and the immutable action UUID mapping.
+category: Specifications
+locale: en
+canonical: true
+status: stable
+owner: Plugin maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/streamdeck-layout.md
+validators: [pnpm test]
 ---
+# Stream Deck+ Layout
 
-## Semantic Button Colors
+**Manifest actions** (5 total): `session-slot` (Keypad; device-grid aware) + 4 encoders on Stream Deck+.
+The earlier mode-dial keypad and the capabilities dropped on the way here are recorded in
+[Retired and Experimental Surfaces](retired-surfaces.md).
 
-Permission and diff response buttons are automatically color-coded by intent:
+UUIDs are immutable post-distribution, so several no longer describe their role. Current mapping:
 
-| Color | Hex | Meaning | Matched by |
-|-------|-----|---------|------------|
-| Green | `#166534` | Approve | shortcut `y`/`a`, or label starts with *Yes* / *Allow* / *Apply* |
-| Red | `#991b1b` | Deny | shortcut `n`/`d`, or label starts with *No* / *Deny* |
-| Blue | `#1e40af` | Permanent | label starts with *Always*, or contains *Don't ask again* / *Allow all sessions* |
-| Teal | `#1e3a5f` | Other | Default for unrecognized options |
+| UUID | Display name | Role |
+|---|---|---|
+| `session-slot` | Session Slot | Keypad, device-grid aware |
+| `utility-dial` | Volume | E1 — macOS output volume |
+| `option-dial` | Claude Usage | E2 — Claude quota gauge |
+| `iterm-dial` | Codex Usage | E3 — Codex quota gauge |
+| `launcher` | Launcher | E4 — open an agent |
 
-Option buttons (non-permission) use teal `#1e3a5f` by default, green `#1e4d2b` for recommended options.
+## Keypad
 
----
+All keypad buttons are `session-slot`; the plugin reads the physical device grid from Stream Deck and maps `slot = row * columns + column`.
 
-## Per-State Layout
+| Device | List View | Detail View |
+|--------|-----------|-------------|
+| Stream Deck+ (4×2) | 8 sessions, or 7 + NEXT | 0 BACK, 1 INFO, 2/3/4/5 content, 6 MORE, 7 ESC/STOP |
+| Stream Deck (5×3) | 15 sessions, or 14 + NEXT | 0 BACK, 1 INFO, 2-12 content, 13 MORE, 14 ESC/STOP |
+| Other key grids | `keyCount` sessions, or `keyCount - 1` + NEXT | 0 BACK, 1 INFO, last ESC/STOP, penultimate MORE, remaining content |
 
-Slots 3-6 (quick actions) and slot 7 (stop/escape) reconfigure based on agent state. Slots 0-2 (Mode, Session, Usage) always remain in place.
+No daemon: single recovery hero. The geometric center key (`floor(rows/2) * columns + floor(columns/2)` — SD+ 4×2 → slot 6, SD MK2 5×3 → slot 7, SD XL 8×4 → slot 20, SD Mini 3×2 → slot 4) shows **OFFLINE / Open AgentDeck** and launches the AgentDeck Dashboard app on press; every other key is intentionally dark and inert. Auto-reconnect handles re-discovery so no manual RETRY affordance is exposed.
 
-### IDLE — waiting for user input
+No session while daemon is connected: healthy idle dashboard, not recovery UI. Slot 0 = **HUB READY / CONNECTED**, slot 1 = **NO SESSION / WAITING**, slot 2 = **AgentDeck / IDLE**, rest intentionally dark. These are icon-rich image cards; they must not fall back to text-only `Empty` buttons.
 
-```
-+----------+----------+----------+----------+
-|  MODE    | SESSION  |  USAGE   |  GO ON   |  <- teal
-+----------+----------+----------+----------+
-| REVIEW   | COMMIT   |  CLEAR   |   ESC    |  <- slate, dim ESC
-+----------+----------+----------+----------+
-```
+**OpenClaw presets** (detail view): STATUS, MODEL (dynamic model name + switch), GATEWAY (browser). In PROCESSING, current tool/status is shown before these presets.
 
-| Slot | Default Label | Color | Action |
-|------|---------------|-------|--------|
-| 3 | GO ON | teal `#1e3a2f` | Send `continue` prompt |
-| 4 | REVIEW | slate `#1e293b` | Send `/review` |
-| 5 | COMMIT | slate `#1e293b` | Send `/commit` |
-| 6 | CLEAR | slate `#1e293b` | Send `/clear` |
-| 7 | ESC | dim `#3d2607` | Send escape key |
+## Agent Session UX Scenarios
 
-All four quick-action labels and commands are customizable per-instance via the Stream Deck Property Inspector.
+목표는 모든 하드웨어에서 같은 mental model 을 유지하는 것이다: **세션 버튼은 들어가기, 상세 화면은 상태 기반 명령, BACK 은 빠져나가기**. 다만 화면/입력 장치 특성에 따라 정보 밀도와 조작 깊이를 다르게 둔다.
 
-### PROCESSING — agent working
+### Stream Deck / Keypad-only
 
-```
-+----------+----------+----------+----------+
-|  MODE    | SESSION  |  USAGE   |  START   |  <- blue
-+----------+----------+----------+----------+
-| REVIEW   | COMMIT   |  CLEAR   |  STOP    |  <- greyed out, red STOP
-+----------+----------+----------+----------+
-```
+- **List**: 각 키는 하나의 세션이다. AgentDeck terrarium creature mark + 상태 링으로 빠르게 훑는다.
+- **Press session**: 먼저 선택 세션의 list-state 로 상세 화면을 즉시 표시하고, daemon focus relay 가 도착하면 tool/options/current model 을 갱신한다. 사용자는 빈 화면이나 다른 세션 옵션을 보지 않는다.
+- **Detail idle**: GO ON / REVIEW / COMMIT / CLEAR 를 1-tap 명령으로 두고, 남는 칸은 MODEL/MODE/READY 이미지 카드로 채운다.
+- **Detail awaiting**: 실제 parser options 를 아이콘이 붙은 선택 카드로 노출한다. overflow 는 MORE 로 페이지 전환한다.
+- **Detail processing**: 현재 tool/status 를 첫 content 키에 고정하고, STOP 을 항상 기기의 마지막 버튼에 둔다. OpenClaw 도 STATUS/MODEL/GATEWAY 보다 현재 작업 문맥을 먼저 보여준다.
 
-| Slot | Label | Color | Action |
-|------|-------|-------|--------|
-| 3 | START | blue `#0f3460` | Open project picker, spawn parallel `agentdeck claude` session |
-| 4-6 | *(idle labels, greyed out)* | dim `#1a1a1a` | Disabled — labels remain visible but inactive |
-| 7 | **STOP** | red `#cc0000` | Send Ctrl+C interrupt |
+### Stream Deck+
 
-START appears only on slots with a `disconnectedAction` configured (default: slot 3 runs `agentdeck claude`).
+- Keypad UX 는 Stream Deck 과 동일하지만, encoder 가 상세 화면의 보조 조작면이다.
+- E1 은 볼륨, E2/E3 는 Claude/Codex usage 게이지, E4 는 에이전트 런처다.
+- Session detail 에 들어가면 keypad 는 "결정 버튼", encoder LCD 는 "읽기/스크롤" 역할로 분리한다. 긴 approval 문구를 키 타일에 억지로 넣지 않고 wide canvas 에서 읽게 한다.
 
-### AWAITING_PERMISSION — tool/file approval prompt
+### Ulanzi D200H
 
-```
-+----------+----------+----------+----------+
-|  MODE    | SESSION  |  USAGE   |   YES    |  <- green
-+----------+----------+----------+----------+
-|   NO     | ALWAYS   | DON'T... |   ESC    |  <- red, blue, blue, orange
-+----------+----------+----------+----------+
-```
+- 14키/5×3 구조를 살려 **overview 우선**으로 둔다. List mode 는 최대 13세션 + merged usage monitor 이고, 세션을 누르면 optionSelect 로 들어간다.
+- D200H 는 실질적으로 정지 이미지 파이프라인이므로 상태 표현은 애니메이션 의존도를 낮춘다. PROCESSING 은 고정 amber ring + STOP, AWAITING 은 밝은 solid/pulse peak ring + 실제 option 버튼으로 읽힌다. D200H 세션 타일은 provider logo path 가 아니라 terrarium creature 축약형(Claude robot, Codex cloud prompt, OpenClaw crayfish, OpenCode nested square)을 그린다.
+- D200H no-session/detail action 텍스트는 native label 에만 맡기지 않고 PNG 에 직접 굽는다. `HUB READY / NO SESSION / AgentDeck`, quick actions, STOP/ESC/MORE/BACK 은 모두 icon + baked label 구성을 유지한다.
+- Detail mode 는 BACK(0/13), INFO(1), options/quick actions(2-9), STOP/ESC(10), MORE(11) 의 고정 좌표를 유지한다. 손이 기억해야 하는 위험 명령은 STOP/ESC 하나뿐이다.
+- 버튼 명령은 선택된 sessionId 를 기준으로 전달한다. 포커스 전환 지연 때문에 다른 세션으로 STOP/option 이 가는 일을 막는다.
 
-Up to 4 options from the bridge, each auto-colored by semantic matching (see color table above). A typical Claude Code permission prompt shows: *Yes, allow once* (green) / *No, deny* (red) / *Always allow* (blue) / *Don't ask again for this tool* (blue). If the bridge sends no structured options, the fallback is hardcoded YES / NO / ALWAYS.
+## Encoders (4 slots)
 
-| Slot | Color rule | Action |
-|------|------------|--------|
-| 3-6 | Semantic (green / red / blue / teal) | `respond:{shortcut}` |
-| 7 | ESC — orange `#b45309` | Cancel prompt |
+| E# | Action | Rotate | Push |
+|----|--------|--------|------|
+| E1 | Volume | Adjust output volume | Toggle mute |
+| E2 | Claude Usage | Cycle view (both/5h/7d/session) | Refresh usage data |
+| E3 | Codex Usage | Cycle view (both/5h/7d/session) | Refresh usage data |
+| E4 | Launcher | Select agent | Open agent |
 
-### AWAITING_OPTION — multi-choice selection (<=4 options)
+No encoder handles LCD touch.
 
-```
-+----------+----------+----------+----------+
-|  MODE    | SESSION  |  USAGE   |  Opt 1   |  <- teal (green if recommended)
-+----------+----------+----------+----------+
-|  Opt 2   |  Opt 3   |  Opt 4   |   ESC    |  <- teal, orange ESC
-+----------+----------+----------+----------+
-```
+When the daemon is down, all four LCDs render one 800px OFFLINE banner and a press
+opens the AgentDeck app.
 
-### AWAITING_OPTION — multi-choice selection (5+ options)
+## Marketplace submission constraints
 
-```
-+----------+----------+----------+----------+
-|  MODE    | SESSION  |  USAGE   |  Opt 1   |
-+----------+----------+----------+----------+
-|  Opt 2   |  Opt 3   | MORE ▼   |   ESC    |  <- gray MORE, orange ESC
-+----------+----------+----------+----------+
-```
+Decided for the 2026-07-19 submission and still binding. The capabilities that were
+dropped to get here — the voice dial, the multi-mode utility dial, the project picker —
+are in [Retired and Experimental Surfaces](retired-surfaces.md).
 
-Badges: ★ on recommended option (green `#1e4d2b`), ✓ on currently selected. MORE ▼ (gray `#334155`) triggers encoder takeover — wide-canvas LCD across E2-E4 shows the full scrollable list.
+- **macOS only.** Volume and Launcher are `osascript` / `open -a`; the Windows manifest entry would have shipped two dead dials.
+- **`SDKVersion: 3` — required, not a choice.** We shipped 2 first on the reading that 3 is merely the opt-in flag for DRM (plugin encryption) rather than an API level. Maker Console refuted that on upload (2026-07-20): it flags 2 with *"Minimum Manifest SDK version must be 3 or later"* and disables Continue, so a `SDKVersion: 2` bundle cannot be submitted at all. DRM is not separately selectable either — the console's second flag reads *"DRM protection is not enabled due to SDK compatibility"*, i.e. DRM follows from the SDK version.
 
-### AWAITING_DIFF — file edit review
-
-```
-+----------+----------+----------+----------+
-|  MODE    | SESSION  |  USAGE   |  APPLY   |  <- green
-+----------+----------+----------+----------+
-|  DENY    |  VIEW    |  (dim)   |   ESC    |  <- red, teal, orange ESC
-+----------+----------+----------+----------+
-```
-
-Same semantic coloring as permission. Fallback if no options from bridge: APPLY (green) / DENY (red) / VIEW (teal).
-
-### DISCONNECTED — no active session
-
-```
-+----------+----------+----------+----------+
-|  (dim)   |  (dim)   |  USAGE   |  START   |  <- blue
-+----------+----------+----------+----------+
-|  (dim)   |  (dim)   |  (dim)   |  (dim)   |
-+----------+----------+----------+----------+
-```
-
-| Slot | Label | Color | Action |
-|------|-------|-------|--------|
-| 3 | START | blue `#0f3460` | Open project picker, run `agentdeck claude` |
-| 4-6 | — | dim `#1a1a1a` | Disabled |
-| 7 | STOP | dim red `#3a1111` | Disabled |
-
-START appears on any slot with `disconnectedAction` configured. Mode and Session dim; Usage remains active (independent render loop).
-
----
-
-## Terminal Dial (E3) — iTerm Session Manager
-
-| Action | Behavior |
-|--------|----------|
-| **Rotate** | Cycle through iTerm sessions + focus the selected window/tab |
-| **Push** | Activate the selected session. If it's a detached tmux session, opens a new iTerm window and attaches |
-| **Auto-switch** | When you focus an iTerm tab that belongs to an AgentDeck session, the bridge auto-switches to that session (2s polling) |
-
-Detached tmux sessions from AgentDeck appear in the list with a plug prefix (e.g. `ViewLingo`). Pushing on these opens a new iTerm window and runs `tmux attach`.
-
-The **Session button** long press also focuses the terminal — if the tmux session is detached, it auto-attaches in a new iTerm window.
-
----
-
-## Encoder Takeover (Wide Canvas)
-
-When Claude presents options, permissions, or diff prompts, the encoder LCDs switch to a **wide canvas** mode:
-
-| Encoder | Panel | Content |
-|---------|-------|---------|
-| E1 | **Context** | State indicator (color-coded), question text, cursor position |
-| E2-E4 | **Option List** | 600px-wide scrollable list with highlight, badges (★ recommended, ✓ selected), semantic colors |
-
-Rotate E2 to scroll, push to confirm. The wide canvas auto-scrolls to keep the selected option visible. When the prompt is answered, all encoders restore to their normal displays.
-
----
-
-## Button Label Intelligence
-
-Permission and option labels can be long (e.g. "Yes, allow and don't ask again"). AgentDeck uses a 3-tier system to fit them on 144x144px buttons:
-
-| Tier | Method | Latency | Example |
-|------|--------|---------|---------|
-| 1. **Pixel-aware wrap** | CJK-aware text measurement + multi-line wrap | Instant | "Yes, allow once" -> fits as-is |
-| 2. **Local abbreviation** | Pattern-based heuristic (known phrases) | Instant | "Yes, I trust this folder" -> "Trust folder" |
-| 3. **Haiku summarization** | `claude -p --model haiku` CLI fallback | ~1-3s | Unknown long label -> AI-shortened version |
-
-- **CJK support**: Korean, Chinese, and Japanese characters are measured at double-width (1em vs 0.55em for Latin), preventing overflow on CJK labels
-- **Haiku fallback**: Only triggers when tiers 1-2 fail. First render shows ellipsis (`...`), then re-renders with the AI summary once it arrives. Results are cached (200 entries) so repeated labels are instant
-- **Abbreviated indicator**: Buttons that were shortened show a subtle `~` mark at the bottom-right corner
-- **Wide canvas unaffected**: Encoder LCD option lists (E2-E4) have enough horizontal space to display full labels without abbreviation
-
-> **Requirement**: Tier 3 (Haiku) requires Claude Code CLI (`claude`) installed and authenticated. Subscription accounts work — no separate API key needed.
+  The original concern is **still open**: DRM is applied server-side after upload, so a local `streamdeck pack` cannot prove the encrypted build still works, and Elgato does not document how encryption treats the custom encoder layout JSON the four encoders load by path. Since 3 is mandatory, the mitigation is the review loop, not the version choice — upload with "publish after review" unselected, download the processed build, and verify the encoders before going live.
+- **`OS.mac MinimumVersion: 26.0`, deliberately.** Matches the Swift daemon's deployment target (`apple/project.yml`). Note the plugin also works against the Node CLI daemon, which runs on far older macOS, so this floor is a product decision rather than a technical requirement.

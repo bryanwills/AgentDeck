@@ -1,3 +1,17 @@
+---
+id: arch.gateway-protocol
+title: Gateway Protocol
+description: OpenClaw Gateway WebSocket — frame format, Ed25519 handshake, RPC and event catalog, versioning rules.
+category: Architecture
+locale: en
+canonical: true
+status: stable
+owner: Gateway maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/gateway-protocol.md
+validators: [pnpm test]
+---
 # Gateway Protocol (OpenClaw)
 
 AgentDeck의 `openclaw` 어댑터가 OpenClaw Gateway(기본 포트 `18789`)에 연결할 때 사용하는 WebSocket 프로토콜 스펙. Node 어댑터(`bridge/src/adapters/openclaw.ts`)와 Swift 어댑터(`apple/AgentDeck/Daemon/Gateway/OpenClawAdapter.swift`)가 **동일한 와이어 포맷**을 주고받는다.

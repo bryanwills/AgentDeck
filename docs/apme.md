@@ -1,3 +1,17 @@
+---
+id: arch.apme
+title: APME Evaluation Module
+description: Agent Performance Monitoring and Evaluation — sample schema, collector, judges, scorecard, recommender, daemon API.
+category: Architecture
+locale: en
+canonical: true
+status: stable
+owner: APME maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/apme.md
+validators: [pnpm test]
+---
 # APME — Agent Performance Monitoring & Evaluation
 
 에이전트 세션(Claude Code, OpenClaw, OpenCode, Codex CLI)의 작업 결과를 **데이터셋화**하고, 결정론적 검증 + LLM judge로 **자동 평가**하며, 사용자 피드백(vibe check)으로 judge 루브릭을 **자동 튜닝**하는 모듈.

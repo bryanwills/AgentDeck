@@ -1,3 +1,17 @@
+---
+id: validation.ulanzi-plugin
+title: Ulanzi Plugin Verification
+description: How to verify the D200H plugin without hardware or Ulanzi Studio, and what the hardware pass adds.
+category: Validation
+locale: en
+canonical: true
+status: stable
+owner: Plugin maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: plugin-ulanzi/VERIFY.md
+validators: [pnpm test]
+---
 # Verifying the AgentDeck Ulanzi plugin (no hardware / no Ulanzi Studio needed)
 
 The official SDK ships a browser **UlanziDeckSimulator**. It renders a virtual

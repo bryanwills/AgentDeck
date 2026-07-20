@@ -1,3 +1,17 @@
+---
+id: spec.devices
+title: Device Catalog
+description: Per-device behaviour for every supported dashboard surface — panels, transports, and rendering specifics.
+category: Specifications
+locale: en
+canonical: true
+status: stable
+owner: Device maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/devices.md
+validators: [pnpm design-system:check]
+---
 # AgentDeck Dashboard Devices
 
 대시보드 디바이스 + 프로토콜 종합 레퍼런스 (전송/디스커버리/이벤트 중심). 하드웨어/OS 사양 전체 인벤토리는 [hardware-compatibility.md](hardware-compatibility.md) 가 SSOT.

@@ -1,3 +1,17 @@
+---
+id: design.android-ui
+title: Android UI Vision
+description: How the aquarium-tide language lands on e-ink and tablet Android surfaces — layouts, creatures, refresh zones.
+category: Specifications
+locale: en
+canonical: true
+status: stable
+owner: Android maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/android-ui.md
+validators: [bash design/lint.sh, pnpm test:android]
+---
 # Android UI/UX Vision
 
 두 디바이스에서 iOS Dashboard 와 같은 에이전트 정보를 같은 조작 모델로 시각화한다. Android tablet 은 iOS Dashboard 의 UX parity 를 목표로 하고, e-ink 는 별도 “기능 UX”가 아니라 느린 화면 갱신/저대비/작은 화면을 위한 고대비 projection 을 둔다. 빌드/기기 레퍼런스는 [android.md](android.md) 참조.

@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: stable
 owner: Design system maintainers
-reviewed: 2026-07-19
-revision: 2026-07-19
+reviewed: 2026-07-21
+revision: 2026-07-21
 source_of_truth: design/RESOURCES.md
 validators: [node scripts/build-design-system-viewer.mjs --check, python3 design/verify-tokens-sync.py]
 ---
@@ -33,6 +33,7 @@ index. If a location or gate changes, update this file in the same commit.
 | Real photography / captures | `assets/` (sources: `assets/hardware-photos/`) | `scripts/crop-hardware-images.mjs` crop table |
 | Published image crops | `docs/media/` | regenerated from `assets/`, never hand-edited |
 | Doc-to-viewer binding | `agentdeck-design-system/catalog.json` | `pnpm design-system:check` |
+| Documentation coverage | `catalog.json` → `coverage.scan` / `coverage.exclusions` | `pnpm design-system:check` — a `docs/*.md` that is neither cataloged nor excluded-with-a-reason fails the build |
 | Pages global nav (GNB) | `scripts/pages-nav.html` | `scripts/sync-pages-nav.mjs --check` (CI: design-system.yml) |
 
 ## Token mirrors (never edit without the CSS)
@@ -61,6 +62,19 @@ mockup references, but the **published** design-system surface is the Pages
 viewer (`/design-system/`), which renders the cataloged Markdown against the
 live tokens. Do not extend the HTML files with new canonical content — bind new
 documents through `catalog.json` instead.
+
+## What the viewer indexes automatically
+
+The Asset library page is built from the real files, not from a hand-written list —
+so a regenerated mask or a new brand SVG changes the page without anyone editing
+it. Eight groups: brand marks, generated dot-matrix masks, creatures, icons, brand
+type, product marks and captures, hardware photography, and reference surfaces.
+
+Two rules keep it honest. Images at or under **1 MiB** are copied into the published
+build and render inline; anything larger becomes a pointer card that links to the
+source, so the Pages artifact never turns into an image host (`assets/` and
+`docs/media/` together are ~80 MB). Directories are summarised with a real file
+count and byte total read at build time, never a number typed into a doc.
 
 ## Rules of thumb
 

@@ -1,3 +1,17 @@
+---
+id: spec.tui-dashboard
+title: TUI Dashboard
+description: The terminal dashboard surface — terrarium rendering, sprites, and adaptive layout breakpoints.
+category: Specifications
+locale: en
+canonical: true
+status: stable
+owner: Bridge maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/tui-dashboard.md
+validators: [pnpm test]
+---
 # TUI Dashboard
 
 `agentdeck dashboard` — zero-dependency TUI monitoring via raw ANSI escape codes. WS client connects to running Daemon via `findDaemonPort()` (`daemon.json` → `sessions.json` fallback).

@@ -1,3 +1,32 @@
+/* The brand faces ship with the build (staged from bridge/assets/fonts by the
+ * builder). Relying on the reader having IBM Plex installed meant the design
+ * system's own page could render in a system font — DESIGN.md R3 applies here
+ * first. CJK falls through to the installed KR/JP cut named in --font-sans. */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  src: url('assets/fonts/IBMPlexSans-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  src: url('assets/fonts/IBMPlexSans-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('assets/fonts/JetBrainsMono-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('assets/fonts/JetBrainsMono-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -610,6 +639,31 @@ h1 em {
   height: 100%;
   max-width: 118px;
   max-height: 118px;
+}
+.asset-stage--type {
+  grid-auto-flow: row;
+  gap: 6px;
+  padding: 14px;
+  color: var(--ink-900);
+  text-align: center;
+}
+/* Scoped to the asset stage on purpose: `.type-sample` and `.type-row` already
+ * belong to the Component lab type scale. */
+.asset-stage--type .face-aa {
+  font-size: 56px;
+  line-height: 1;
+  font-weight: 700;
+}
+.asset-stage--type .face-sample {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-700);
+  /* The stage centres its children, so an auto-width line overflows the card
+   * instead of wrapping. Pin the width and let it break. */
+  width: 100%;
+  /* nowrap is inherited from the card chrome — a specimen line must wrap. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .asset-hatch {
   display: grid;

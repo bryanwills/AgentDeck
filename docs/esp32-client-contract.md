@@ -1,3 +1,17 @@
+---
+id: spec.esp32-client
+title: ESP32 Client Contract
+description: The wire contract an external or forked display-only ESP32 client must honour — inbound events and device_info frames.
+category: Specifications
+locale: en
+canonical: true
+status: stable
+owner: Firmware maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/esp32-client-contract.md
+validators: [bash scripts/sync-xteink-eink-dashboard.sh --check]
+---
 # AgentDeck ESP32 Client Contract
 
 The wire contract a **display-only AgentDeck client** must honour to render live agent

@@ -1,3 +1,17 @@
+---
+id: spec.esp32
+title: ESP32 Firmware
+description: Supported boards, flash safety rules, WiFi provisioning, OTA, and disconnect recovery for the ESP32 surfaces.
+category: Specifications
+locale: en
+canonical: true
+status: stable
+owner: Firmware maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/esp32.md
+validators: [bash esp32/robot/run.sh build]
+---
 # ESP32 Firmware
 
 PlatformIO Arduino firmware for LVGL touch displays (ESP32-S3: 86Box 480×480, IPS 3.5" 480×320 landscape / 320×480 portrait, Round AMOLED 360×360; ESP32-P4: Guition JC8012P4A1C 10.1" IPS 800×1280 portrait native + ESP32-C6 co-processor) + SPI TFT displays (ESP32 classic: LilyGO TTGO T-Display 1.14" 135×240 with a 160px terrarium viewport + 80px metric strip) + WS2812B LED matrix (ESP32 classic: Ulanzi TC001 8×32). Board-specific `#ifdef`, per-board partition tables, FastLED matrix renderer bypasses LVGL entirely. IPS 3.5" supports runtime portrait↔landscape switching via `set_orientation` protocol command or Settings toggle (NVS persistent, `g_screenW`/`g_screenH` runtime globals).

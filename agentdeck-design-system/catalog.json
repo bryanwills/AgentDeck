@@ -6,6 +6,27 @@
     "ko",
     "ja"
   ],
+  "coverage": {
+    "scan": [
+      "docs"
+    ],
+    "exclusions": {
+      "docs/why-apme.md": "Rationale essay, Korean body. English is canonical in the catalog; bind it once translated.",
+      "docs/apme-pipeline.md": "Implementation walkthrough, Korean body. Superseded for reader purposes by the cataloged arch.apme.",
+      "docs/appstore-metadata-draft.md": "Store listing copy in three locales — marketing input, not a canonical spec.",
+      "docs/asc-cert-setup.md": "Credential and certificate runbook. Operational steps, no design or specification surface.",
+      "docs/otel-standardization-study.md": "Exploratory study. Nothing here is adopted, so binding it would imply a decision that was not made.",
+      "docs/voice-setup.md": "Permission troubleshooting runbook for a single platform capability.",
+      "docs/wake-word.md": "Engine evaluation notes for Porcupine / microWakeWord.",
+      "docs/install.md": "User manual — indexed by README, not the catalog. It tells a reader how to use the product; the catalog documents how the product is designed and specified.",
+      "docs/cli.md": "User manual (see docs/install.md). The CLI surface it describes is defined by bridge/src/cli.ts.",
+      "docs/configuration.md": "User manual (see docs/install.md). The settings it describes are defined by config/default-settings.json and the APME schema, both already covered.",
+      "docs/apple-app.md": "User manual (see docs/install.md). The canonical tier boundary is docs/appstore-feature-matrix.md, already cataloged as policy.product-tiers.",
+      "docs/windows.md": "User manual (see docs/install.md). Platform setup steps rather than a platform contract.",
+      "docs/troubleshooting.md": "User manual (see docs/install.md). Symptom-to-fix table, not a specification surface.",
+      "docs/roadmap.md": "Forward-looking plan. Binding it would imply the catalog publishes commitments rather than the system as built."
+    }
+  },
   "documents": [
     {
       "id": "system.readme",
@@ -22,6 +43,12 @@
       }
     },
     {
+      "id": "system.agent-harness",
+      "sources": {
+        "en": "docs/agent-harness.md"
+      }
+    },
+    {
       "id": "design.foundation",
       "sources": {
         "en": "DESIGN.md"
@@ -34,11 +61,89 @@
       }
     },
     {
+      "id": "arch.overview",
+      "sources": {
+        "en": "docs/architecture.md"
+      }
+    },
+    {
+      "id": "arch.daemon",
+      "sources": {
+        "en": "docs/daemon.md"
+      }
+    },
+    {
+      "id": "arch.protocol",
+      "sources": {
+        "en": "docs/protocol.md"
+      }
+    },
+    {
+      "id": "arch.gateway-protocol",
+      "sources": {
+        "en": "docs/gateway-protocol.md"
+      }
+    },
+    {
+      "id": "arch.apme",
+      "sources": {
+        "en": "docs/apme.md"
+      }
+    },
+    {
       "id": "hardware.compatibility",
       "sources": {
         "en": "docs/hardware-compatibility.md",
         "ko": "agentdeck-design-system/locales/ko/hardware-compatibility.md",
         "ja": "agentdeck-design-system/locales/ja/hardware-compatibility.md"
+      }
+    },
+    {
+      "id": "spec.devices",
+      "sources": {
+        "en": "docs/devices.md"
+      }
+    },
+    {
+      "id": "spec.esp32",
+      "sources": {
+        "en": "docs/esp32.md"
+      }
+    },
+    {
+      "id": "spec.esp32-client",
+      "sources": {
+        "en": "docs/esp32-client-contract.md"
+      }
+    },
+    {
+      "id": "spec.android",
+      "sources": {
+        "en": "docs/android.md"
+      }
+    },
+    {
+      "id": "design.android-ui",
+      "sources": {
+        "en": "docs/android-ui.md"
+      }
+    },
+    {
+      "id": "spec.plugin-conventions",
+      "sources": {
+        "en": "docs/plugin-conventions.md"
+      }
+    },
+    {
+      "id": "spec.streamdeck-layout",
+      "sources": {
+        "en": "docs/streamdeck-layout.md"
+      }
+    },
+    {
+      "id": "spec.tui-dashboard",
+      "sources": {
+        "en": "docs/tui-dashboard.md"
       }
     },
     {
@@ -60,12 +165,6 @@
       }
     },
     {
-      "id": "spec.plugin-conventions",
-      "sources": {
-        "en": "docs/plugin-conventions.md"
-      }
-    },
-    {
       "id": "validation.testing",
       "sources": {
         "en": "docs/testing.md"
@@ -75,6 +174,24 @@
       "id": "validation.design-lint",
       "sources": {
         "en": "docs/design-lint-baseline.md"
+      }
+    },
+    {
+      "id": "validation.testflight-qa",
+      "sources": {
+        "en": "docs/testflight-qa-checklist.md"
+      }
+    },
+    {
+      "id": "validation.ulanzi-plugin",
+      "sources": {
+        "en": "plugin-ulanzi/VERIFY.md"
+      }
+    },
+    {
+      "id": "reference.retired",
+      "sources": {
+        "en": "docs/retired-surfaces.md"
       }
     }
   ]

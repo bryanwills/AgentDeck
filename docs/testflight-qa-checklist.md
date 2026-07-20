@@ -1,3 +1,17 @@
+---
+id: validation.testflight-qa
+title: TestFlight QA Checklist
+description: Pre-submission tester pass covering onboarding, pairing, voice, and the App Store sandbox invariants.
+category: Validation
+locale: en
+canonical: true
+status: stable
+owner: Apple maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/testflight-qa-checklist.md
+validators: [bash apple/scripts/verify-appstore-archive.sh]
+---
 # TestFlight QA Checklist — AgentDeck Dashboard
 
 Hand this checklist to internal testers (you + 2-3 trusted reviewers) before submitting to App Review. The goal is to catch the categories of issues that cause App Store rejections or one-star reviews on day one.

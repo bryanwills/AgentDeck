@@ -1,3 +1,17 @@
+---
+id: arch.overview
+title: System Architecture
+description: Monorepo layout and the core abstractions — BridgeCore, PtyAdapter, AgentAdapter, device modules, plugin connection model.
+category: Architecture
+locale: en
+canonical: true
+status: stable
+owner: Bridge maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/architecture.md
+validators: [pnpm build, pnpm test]
+---
 # Architecture
 
 Core bridge architecture, adapter hierarchy, and module system. See [daemon.md](daemon.md) for the daemon hub design and [plugin-conventions.md](plugin-conventions.md) for plugin internals.

@@ -43,52 +43,32 @@ Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "com
 - **BillingType detection**: PTY `model_info` parser event의 `plan` 필드로 subscription/api/unknown 판별. API 사용자는 OAuth fetch 스킵 + session 페이지만 표시
 - **Effort level detection**: PTY `/model` UI에서 `(high|medium|low) effort` 패턴 파싱. Levels: high/medium(default)/low. `"medium"`은 기본값이므로 UI 표시에서 제외 (high/low만 모델명 옆에 표시). Parser→SM→WS→Plugin/Android 전체 파이프라인
 
-## QR code display (retired)
-
-> v3 Usage 버튼과 함께 폐지됐다. `qr-renderer.ts`와 `qrcode` 의존성은 플러그인에서
-> 제거됐다(호출부 없음). 페어링 QR은 `agentdeck qr` CLI와 앱에서 제공한다.
-> 아래는 히스토리 참고용이다.
-
-Usage 버튼 `qr` 페이지 — `qrcode` 라이브러리 → SVG path 렌더링 (144×144, Version 3 QR 29 modules × 4px = 116px). URL 우선순위: (1) `--remote` URL (PTY 자동감지) (2) OC Gateway `http://LAN:18789`. Bridge OutputParser가 raw ANSI에서 cursor-forward 시퀀스 제거 후 URL 추출. Push → 클립보드 복사 (`pbcopy`).
-
 ## Encoder LCD design
 
 모든 인코더 LCD는 SVG pixmap 렌더링 (`encoder-layout.json` 공용). 배경 `#0f172a`, 14px 가운데 정렬 헤더, icon+value 가운데 그룹, 2px accent bar 패턴 통일. Renderer는 `plugin/src/renderers/{name}-renderer.ts` 순수 함수로 분리. Volume 다이얼(E1)은 clean 영문 title + emoji icon + value 구조를 따른다.
-
-### Encoder takeover wide canvas (retired)
-
-> Option/permission/diff 선택이 인코더를 점유하던 방식(E1=context 패널, E2-E4=600px
-> wide canvas)은 v4 Phase 2에서 폐지됐다. 선택은 키패드 detail view(`session-slot`)가
-> 담당하고, `option-renderer.ts`/`renderWideOptionList()`는 삭제됐다. 인코더는
-> E1 Volume, E2/E3 usage, E4 Launcher로 고정이다.
 
 ### Encoder takeover race guard
 
 `takeoverGeneration` counter in `plugin.ts` — exit/enter `.then()` 콜백이 실행 시점에 이미 새 전환이 발생했으면 스킵. PROCESSING→PERMISSION 빠른 전환 시 exit 콜백이 enter 이후 layout을 덮어쓰는 레이스 방지.
 
-## Button label intelligence
+## 타임라인 영속성 (데몬 소유)
 
-> **폐지됨.** 3-tier 라벨 축약(픽셀 줄바꿈 → 휴리스틱 약어 → `claude -p --model haiku`
-> 폴백)은 이를 호출하던 키패드 버튼 렌더러와 함께 삭제됐다. `text-utils.ts`,
-> `label-summarizer.ts`(로컬 MLX 서버 POST 포함), `button-renderer`의 축약 경로 모두
-> 도달 불가 상태였다. 현재 키 타일은 `@agentdeck/shared`의 session-slot 렌더러가
-> 그리고, 축약이 필요하면 거기서 처리한다.
+**타임라인 영속성은 데몬이 소유한다**: `BridgeTimelineStore.enablePersistence()`가
+`~/.agentdeck/timeline.json`을 원자적으로(tmp+rename) 기록하고 기동 시 복원한다.
+Swift 데몬은 자기 컨테이너에 같은 형식(평면 JSON 배열)으로 기록하므로 두 구현이
+서로의 파일에서 이어받을 수 있다. 재연결 시 `events.history` RPC로 오프라인 이벤트를
+복구한다.
 
-## OC Timeline panel (Phase 4 complete)
+이 패널을 인코더에 그리던 시절과 플러그인이 유일한 기록자였던 경위는
+[Retired and Experimental Surfaces](retired-surfaces.md)에 있다.
 
-OpenClaw 세션 상세 뷰(detail view) 진입 시 E2+E3 합체 400px 와이드 캔버스로 이벤트 타임라인 표시. 리스트 뷰에서는 일반 option/usage dial 유지. 배경 `#000000` (LCD 네이티브 블랙 — 투명 효과). Fisheye 렌더링 (font size 15→10px, opacity 1.0→0.3 보간), grouped entries (연속 중복 60s 윈도우 내 병합), detail mode (push 토글). **(플러그인 측 폐지)** 이 패널을 그리던 `timeline-store.ts` / `timeline-renderer.ts`는
-삭제됐다 — E2/E3는 이제 Claude/Codex usage 게이지 전용이다. **타임라인 영속성은 데몬이
-소유한다**: `BridgeTimelineStore.enablePersistence()`가 `~/.agentdeck/timeline.json`을
-원자적으로(tmp+rename) 기록하고 기동 시 복원한다. 이전에는 플러그인이 유일한 기록자여서
-Stream Deck 없는 사용자는 영속성이 아예 없었다. Swift 데몬은 자기 컨테이너에 같은 형식
-(평면 JSON 배열)으로 기록하므로 두 구현이 서로의 파일에서 이어받을 수 있다.
-재연결 시 `events.history` RPC로 오프라인 이벤트 복구. OC Response 버튼: GATEWAY (웹 UI) + GO ON (continue) 프리셋.
+### Gateway 어댑터가 단일 source
 
-### 시각 3계층
-
-1. `typeColor()` 이벤트 타입별 컬러 코딩 (green/blue/amber/red/cyan/purple), 하단 2px 활동 밀도 바
-2. **Gateway 어댑터가 단일 source** — `bridge/src/adapters/openclaw.ts`가 RPC 이벤트(`chat`/`tool.*`/`error`)를 직접 timeline entry로 변환. 과거 `log-stream.ts`의 `openclaw logs --follow --json` 휴리스틱 파싱 경로는 중복/오분류(`memory|recall|search` / `tool|exec|execute|command` 광범위 regex가 무관 로그를 fake event로 합성)를 일으켜 retire (커밋 `8c3a4278`). `BridgeLogStream`은 호환을 위해 no-op stub만 남음
-3. Usage 버튼 `oc-usage` 페이지 (`openclaw status --usage --json` 60s 폴링)
+`bridge/src/adapters/openclaw.ts`가 RPC 이벤트(`chat`/`tool.*`/`error`)를 직접 timeline
+entry로 변환한다. 과거 `log-stream.ts`의 `openclaw logs --follow --json` 휴리스틱 파싱
+경로는 중복/오분류(`memory|recall|search` / `tool|exec|execute|command` 광범위 regex가
+무관 로그를 fake event로 합성)를 일으켜 retire 됐다(커밋 `8c3a4278`). `BridgeLogStream`은
+호환을 위해 no-op stub만 남아 있다.
 
 ### Bridge→Android relay
 

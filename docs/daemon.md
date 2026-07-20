@@ -1,3 +1,17 @@
+---
+id: arch.daemon
+title: Daemon Hub
+description: The singleton daemon on port 9120 — session-bridge push, mDNS recovery, usage relay, multi-surface monitoring.
+category: Architecture
+locale: en
+canonical: true
+status: stable
+owner: Bridge maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/daemon.md
+validators: [pnpm test, agentdeck daemon status]
+---
 # Daemon Hub Architecture
 
 The daemon is the **sole hub** for all dashboard clients. Session bridges never advertise mDNS or serve external WS/SSE — all external devices connect via daemon only.

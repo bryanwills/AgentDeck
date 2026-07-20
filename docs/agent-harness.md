@@ -1,3 +1,17 @@
+---
+id: system.agent-harness
+title: Agent Harness
+description: How each coding agent enters the repository, what it reads, and where skills and workflows are discovered.
+category: Governance
+locale: en
+canonical: true
+status: stable
+owner: Repository maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/agent-harness.md
+validators: [pnpm design-system:check]
+---
 # Agent Harness — developing AgentDeck with any coding agent
 
 This repo is built by switching between **Claude Code, Codex, OpenCode, and occasionally Antigravity**. This doc is the canonical map of the *developer-facing harness*: the instruction files, skills, workflows, and discovery surfaces that steer whichever agent is currently editing the code, so an agent can be swapped in without re-learning the project or following stale procedures.

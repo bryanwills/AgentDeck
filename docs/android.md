@@ -1,3 +1,17 @@
+---
+id: spec.android
+title: Android Devices
+description: Android device support matrix and creature rendering behaviour across e-ink readers and tablets.
+category: Specifications
+locale: en
+canonical: true
+status: stable
+owner: Android maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/android.md
+validators: [pnpm test:android]
+---
 # Android Dashboard
 
 Detailed reference for the AgentDeck Android app — build, device support, and creature behavior.

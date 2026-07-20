@@ -1,3 +1,17 @@
+---
+id: arch.protocol
+title: Bridge Protocol
+description: The bridge-to-client WebSocket protocol — event catalog, state machine, and the generated Swift/Kotlin type mirrors.
+category: Architecture
+locale: en
+canonical: true
+status: stable
+owner: Bridge maintainers
+reviewed: 2026-07-21
+revision: 2026-07-21
+source_of_truth: docs/protocol.md
+validators: [pnpm generate-protocol, pnpm test]
+---
 # Protocol & Architecture Reference
 
 Internal reference for the AgentDeck state machine, WebSocket protocol, and project structure.
