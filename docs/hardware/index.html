@@ -45,16 +45,104 @@
   a { color:var(--kelp-700); }
   code, .mono { font-family:var(--font-mono); }
 
-  .nav { position:sticky; top:0; z-index:20; backdrop-filter:blur(10px); background:rgba(245,243,236,.82); border-bottom:1px solid var(--tide-200); }
-  .nav-in { max-width:var(--container-max); margin:0 auto; padding:var(--s-3) var(--container-pad); display:flex; align-items:center; gap:var(--s-4); }
-  .brand { display:flex; align-items:center; gap:var(--s-3); text-decoration:none; color:var(--ink-900); font-weight:700; font-size:17px; letter-spacing:-.01em; }
-  .brand img { width:36px; height:36px; border-radius:var(--r-md); }
-  .nav-links { margin-left:auto; display:flex; gap:var(--s-2); flex-wrap:wrap; align-items:center; }
-  .nav-links a { font-size:14px; font-weight:500; text-decoration:none; color:var(--ink-700); padding:var(--s-1) var(--s-3); border-radius:var(--r-pill); }
-  .nav-links a:hover, .nav-links a.active { background:var(--tide-200); color:var(--ink-900); }
-  .nav-links a.gh { background:var(--ink-800); color:var(--tide-50); }
-  .lang { font:500 13px var(--font-sans); color:var(--ink-700); background:var(--tide-100); border:1px solid var(--tide-200); border-radius:var(--r-pill); padding:4px 10px; cursor:pointer; }
-  .lang:hover { background:var(--tide-200); color:var(--ink-900); }
+  /* GNB-CSS:BEGIN (generated from scripts/pages-nav.css — do not edit by hand) */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--tide-50) 85%, transparent);
+  border-bottom: 1px solid var(--tide-200);
+}
+.nav-in {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 12px 32px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--ink-900);
+  /* Family inherits from the page body (IBM Plex on every surface), so the bar
+     needs no --font-sans token — which keeps it out of the token-sync gate. */
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.brand img {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+.nav-links {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.nav-links a {
+  font-weight: 500;
+  font-size: 14px;
+  text-decoration: none;
+  color: var(--ink-700);
+  padding: 6px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.nav-links a:hover,
+.nav-links a.active {
+  background: var(--tide-200);
+  color: var(--ink-900);
+}
+.nav-links a.gh {
+  color: var(--tide-50);
+  background: var(--ink-800);
+}
+.nav-links a.gh:hover {
+  background: var(--ink-900);
+  color: var(--tide-50);
+}
+.lang {
+  /* A <select> does not inherit font-family by default, so state it. */
+  font-family: inherit;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--ink-700);
+  background: var(--tide-100);
+  border: 1px solid var(--tide-200);
+  border-radius: 999px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.lang:hover {
+  background: var(--tide-200);
+  color: var(--ink-900);
+}
+@media (max-width: 768px) {
+  .nav-in {
+    align-items: flex-start;
+    padding-inline: 16px;
+  }
+  .nav-links {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 4px;
+  }
+  .nav-links a {
+    white-space: nowrap;
+  }
+  .nav-links .gh {
+    display: none;
+  }
+}
+/* GNB-CSS:END */
 
   .wrap { max-width:var(--container-max); margin:0 auto; padding:var(--s-10) var(--container-pad) var(--s-20); }
   .hero-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,46%); gap:var(--s-10); align-items:center; }
@@ -112,10 +200,7 @@
   }
   @media (max-width:640px) {
     :root { --container-pad:16px; }
-    .nav-in { align-items:flex-start; }
-    .nav-links { overflow-x:auto; flex-wrap:nowrap; padding-bottom:var(--s-1); }
-    .nav-links a { white-space:nowrap; }
-    .nav-links .gh { display:none; }
+    /* GNB responsive rules live in the canonical GNB-CSS block above. */
     .wrap { padding:var(--s-12) var(--container-pad) var(--s-16); }
     .grid { grid-template-columns:1fr; }
     .device.wide { grid-column:auto; }
@@ -133,7 +218,7 @@
       <a class="active" href="../hardware/">Devices</a>
       <a href="../demo/">Live Preview</a>
       <a href="../design-system/">Design System</a>
-      <a href="../reports/">Build Health</a>
+      <a href="../reports/">Test Report</a>
       <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
       <select id="lang" class="lang" aria-label="Language">
         <option value="en">EN</option>
@@ -150,7 +235,7 @@
     <div class="hero-grid">
       <div>
     <p class="kicker" data-i18n="hero.kicker">AgentDeck · Surface catalog</p>
-    <h1 data-i18n="hero.h1">One session.<br>Made physical.</h1>
+    <h1 data-i18n="hero.h1">Every surface,<br>made physical.</h1>
     <p class="lede" data-i18n="hero.lede">Every card is the real thing running a live session — photographed on the desk, or captured from the surface itself. Board-level specifications live in the compatibility matrix.</p>
     <div class="hero-actions">
       <a class="btn primary" href="../demo/" data-i18n="hero.demo">Try the interactive preview</a>
@@ -318,7 +403,7 @@
     var I18N = {
       ko: {
         'hero.kicker': 'AgentDeck · 서피스 카탈로그',
-        'hero.h1': '하나의 세션.<br>물리적 실체로.',
+        'hero.h1': '모든 서피스를,<br>실물로.',
         'hero.lede': '모든 카드는 실제로 세션을 구동 중인 실물입니다 — 책상 위에서 촬영했거나, 해당 서피스에서 직접 캡처했습니다. 보드 수준 사양은 호환성 매트릭스에 있습니다.',
         'hero.demo': '인터랙티브 프리뷰 열기',
         'hero.matrix': '전체 스펙 매트릭스 보기',
@@ -361,7 +446,7 @@
       },
       ja: {
         'hero.kicker': 'AgentDeck · サーフェスカタログ',
-        'hero.h1': 'ひとつのセッションを、<br>フィジカルに。',
+        'hero.h1': 'すべてのサーフェスを、<br>実機で。',
         'hero.lede': 'すべてのカードは実際にセッションを動かしている実物です — 机の上で撮影したもの、あるいはそのサーフェス自身からキャプチャしたものです。ボードレベル仕様は互換性マトリクスにあります。',
         'hero.demo': 'インタラクティブプレビューを開く',
         'hero.matrix': 'フル仕様マトリクスを読む',

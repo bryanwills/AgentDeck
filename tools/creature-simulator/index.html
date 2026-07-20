@@ -277,16 +277,104 @@
       --site-max:1240px;
     }
     body { padding:0; background:var(--tide-50); color:var(--ink-900); font-family:var(--font-sans); }
-    .nav { position:sticky; top:0; z-index:200; backdrop-filter:blur(10px); background:rgba(245,243,236,.82); border-bottom:1px solid var(--tide-200); }
-    .nav-in { max-width:var(--site-max); margin:0 auto; padding:12px 32px; display:flex; align-items:center; gap:16px; }
-    .brand { display:flex; align-items:center; gap:12px; color:var(--ink-900); text-decoration:none; font-weight:700; }
-    .brand img { width:36px; height:36px; border-radius:8px; }
-    .nav-links { margin-left:auto; display:flex; gap:8px; }
-    .nav-links a { color:var(--ink-700); text-decoration:none; font-size:14px; font-weight:500; padding:4px 12px; border-radius:999px; white-space:nowrap; }
-    .nav-links a:hover, .nav-links a.active { color:var(--ink-900); background:var(--tide-200); }
-    .nav-links .gh { color:var(--tide-50); background:var(--ink-800); }
-    .lang { font:500 13px var(--font-sans); color:var(--ink-700); background:var(--tide-100); border:1px solid var(--tide-200); border-radius:999px; padding:4px 10px; cursor:pointer; }
-    .lang:hover { background:var(--tide-200); color:var(--ink-900); }
+    /* GNB-CSS:BEGIN (generated from scripts/pages-nav.css — do not edit by hand) */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--tide-50) 85%, transparent);
+  border-bottom: 1px solid var(--tide-200);
+}
+.nav-in {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 12px 32px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--ink-900);
+  /* Family inherits from the page body (IBM Plex on every surface), so the bar
+     needs no --font-sans token — which keeps it out of the token-sync gate. */
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.brand img {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+.nav-links {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.nav-links a {
+  font-weight: 500;
+  font-size: 14px;
+  text-decoration: none;
+  color: var(--ink-700);
+  padding: 6px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.nav-links a:hover,
+.nav-links a.active {
+  background: var(--tide-200);
+  color: var(--ink-900);
+}
+.nav-links a.gh {
+  color: var(--tide-50);
+  background: var(--ink-800);
+}
+.nav-links a.gh:hover {
+  background: var(--ink-900);
+  color: var(--tide-50);
+}
+.lang {
+  /* A <select> does not inherit font-family by default, so state it. */
+  font-family: inherit;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--ink-700);
+  background: var(--tide-100);
+  border: 1px solid var(--tide-200);
+  border-radius: 999px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.lang:hover {
+  background: var(--tide-200);
+  color: var(--ink-900);
+}
+@media (max-width: 768px) {
+  .nav-in {
+    align-items: flex-start;
+    padding-inline: 16px;
+  }
+  .nav-links {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 4px;
+  }
+  .nav-links a {
+    white-space: nowrap;
+  }
+  .nav-links .gh {
+    display: none;
+  }
+}
+/* GNB-CSS:END */
     .shell { max-width:var(--site-max); padding:40px 32px 80px; gap:24px; }
     .preview-intro { max-width:760px; margin-bottom:8px; }
     .preview-intro .kicker { margin:0 0 12px; color:var(--kelp-700); font:600 12px/1.4 var(--font-mono); letter-spacing:.18em; text-transform:uppercase; }
@@ -310,9 +398,7 @@
     .research-grid { display:none; }
     @media (max-width:720px) {
       body { padding:0; }
-      .nav-in { align-items:flex-start; padding-inline:16px; }
-      .nav-links { overflow-x:auto; }
-      .nav-links .gh { display:none; }
+      /* GNB responsive rules live in the canonical GNB-CSS block above. */
       .shell { padding:48px 16px 64px; }
       .toolbar { top:58px; }
     }
@@ -328,7 +414,7 @@
       <a href="../hardware/">Devices</a>
       <a class="active" href="../demo/">Live Preview</a>
       <a href="../design-system/">Design System</a>
-      <a href="../reports/">Build Health</a>
+      <a href="../reports/">Test Report</a>
       <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
       <select id="lang" class="lang" aria-label="Language">
         <option value="en">EN</option>
@@ -342,7 +428,7 @@
   <div class="shell">
     <header class="preview-intro">
       <p class="kicker" data-i18n="intro.kicker">AgentDeck · Interactive renderer</p>
-      <h1 data-i18n="intro.h1">See one session<br>across every surface.</h1>
+      <h1 data-i18n="intro.h1">The real render,<br>on every grid.</h1>
       <p data-i18n="intro.p">Choose an agent and state, then compare how the same signal adapts to tablet, e-ink, ESP32, LED matrix, control deck, and terminal constraints.</p>
     </header>
     <div class="toolbar glass-panel">
@@ -2436,7 +2522,7 @@
       var I18N = {
         ko: {
           'intro.kicker': 'AgentDeck · 인터랙티브 렌더러',
-          'intro.h1': '하나의 세션을<br>모든 서피스에서.',
+          'intro.h1': '진짜 렌더링을<br>모든 그리드에.',
           'intro.p': '에이전트와 상태를 고르고, 같은 신호가 태블릿·e-ink·ESP32·LED 매트릭스·컨트롤 데크·터미널 제약에 어떻게 적응하는지 비교해 보세요.',
           'dev.h': '디바이스 프리뷰',
           'dev.p': '각 프레임은 대상 서피스의 실제 종횡비와 제약을 유지합니다. <strong>LED 매트릭스, Stream Deck, D200H, TUI, 모든 ESP32 서피스는 정본 렌더러 출력을 사용합니다</strong>. iPadOS·Android 태블릿·Android e-ink 뷰는 SwiftUI와 Compose가 브라우저에서 돌지 않아 명시적으로 표기된 브라우저 근사치입니다. 각 앱은 따로 설계된 UI이며, macOS 대시보드는 앱 자체이므로 프레임으로 프리뷰하지 않습니다.',
@@ -2445,7 +2531,7 @@
         },
         ja: {
           'intro.kicker': 'AgentDeck · インタラクティブレンダラー',
-          'intro.h1': 'ひとつのセッションを<br>あらゆるサーフェスで。',
+          'intro.h1': '本物のレンダリングを<br>あらゆるグリッドで。',
           'intro.p': 'エージェントと状態を選び、同じシグナルがタブレット・e-ink・ESP32・LEDマトリクス・コントロールデッキ・ターミナルの制約にどう適応するか比較できます。',
           'dev.h': 'デバイスプレビュー',
           'dev.p': '各フレームは対象サーフェスの実アスペクト比と制約を保ちます。<strong>LEDマトリクス、Stream Deck、D200H、TUI、すべてのESP32サーフェスは正本レンダラー出力を使用します</strong>。iPadOS・Androidタブレット・Android e-inkビューはSwiftUIとComposeがブラウザで動かないため、明示されたブラウザ近似です。各アプリは別設計のUIで、macOSダッシュボードはアプリそのものなのでフレームとしてはプレビューしません。',

@@ -42,29 +42,104 @@
   code, .mono { font-family: var(--font-mono); }
 
   /* ── Top nav (shared across site pages) ── */
-  .nav {
-    position: sticky; top: 0; z-index: 20; backdrop-filter: blur(10px);
-    background: rgba(245,243,236,0.82); border-bottom: 1px solid var(--tide-200);
-  }
+  /* GNB-CSS:BEGIN (generated from scripts/pages-nav.css — do not edit by hand) */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--tide-50) 85%, transparent);
+  border-bottom: 1px solid var(--tide-200);
+}
+.nav-in {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 12px 32px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--ink-900);
+  /* Family inherits from the page body (IBM Plex on every surface), so the bar
+     needs no --font-sans token — which keeps it out of the token-sync gate. */
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.brand img {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+.nav-links {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.nav-links a {
+  font-weight: 500;
+  font-size: 14px;
+  text-decoration: none;
+  color: var(--ink-700);
+  padding: 6px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.nav-links a:hover,
+.nav-links a.active {
+  background: var(--tide-200);
+  color: var(--ink-900);
+}
+.nav-links a.gh {
+  color: var(--tide-50);
+  background: var(--ink-800);
+}
+.nav-links a.gh:hover {
+  background: var(--ink-900);
+  color: var(--tide-50);
+}
+.lang {
+  /* A <select> does not inherit font-family by default, so state it. */
+  font-family: inherit;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--ink-700);
+  background: var(--tide-100);
+  border: 1px solid var(--tide-200);
+  border-radius: 999px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.lang:hover {
+  background: var(--tide-200);
+  color: var(--ink-900);
+}
+@media (max-width: 768px) {
   .nav-in {
-    max-width: var(--container-max); margin: 0 auto; padding: var(--s-3) var(--container-pad);
-    display: flex; align-items: center; gap: var(--s-4);
+    align-items: flex-start;
+    padding-inline: 16px;
   }
-  .brand { display: flex; align-items: center; gap: var(--s-3); text-decoration: none; color: var(--ink-900); font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
-  .brand img { width: 36px; height: 36px; border-radius: var(--r-md); }
-  .nav-links { margin-left: auto; display: flex; gap: var(--s-2); flex-wrap: wrap; }
+  .nav-links {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 4px;
+  }
   .nav-links a {
-    font-size: 14px; font-weight: 500; text-decoration: none; color: var(--ink-700);
-    padding: var(--s-1) var(--s-3); border-radius: var(--r-pill);
+    white-space: nowrap;
   }
-  .nav-links a:hover, .nav-links a.active { background: var(--tide-200); color: var(--ink-900); }
-  .nav-links a.gh { background: var(--ink-800); color: var(--tide-50); }
-  .nav-links a.gh:hover { background: var(--ink-900); }
-  .lang {
-    font: 500 13px var(--font-sans); color: var(--ink-700); background: var(--tide-100);
-    border: 1px solid var(--tide-200); border-radius: var(--r-pill); padding: 4px 10px; cursor: pointer;
+  .nav-links .gh {
+    display: none;
   }
-  .lang:hover { background: var(--tide-200); color: var(--ink-900); }
+}
+/* GNB-CSS:END */
 
   .wrap { max-width: var(--container-max); margin: 0 auto; padding: var(--s-10) var(--container-pad) var(--s-20); }
 
@@ -141,10 +216,7 @@
   footer { max-width: var(--container-max); margin: 0 auto; padding: var(--s-10) var(--container-pad) var(--s-16); color: var(--ink-500); font-size: 13px; text-align: center; }
   .disclaimer { max-width: 70ch; margin: var(--s-3) auto 0; color: var(--ink-300); }
   @media (max-width: 720px) {
-    .nav-in { align-items: flex-start; padding-inline: var(--s-4); }
-    .nav-links { overflow-x: auto; flex-wrap: nowrap; padding-bottom: var(--s-1); }
-    .nav-links a { white-space: nowrap; }
-    .nav-links .gh { display: none; }
+    /* GNB responsive rules live in the canonical GNB-CSS block above. */
     .wrap { padding: var(--s-12) var(--s-4) var(--s-16); }
   }
 </style>
@@ -160,7 +232,7 @@
       <a href="./hardware/">Devices</a>
       <a href="./demo/">Live Preview</a>
       <a href="./design-system/">Design System</a>
-      <a href="./reports/">Build Health</a>
+      <a href="./reports/">Test Report</a>
       <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
       <select id="lang" class="lang" aria-label="Language">
         <option value="en">EN</option>
@@ -197,7 +269,7 @@
   </header>
 
   <h2 data-i18n="explore.h">Explore AgentDeck</h2>
-  <p class="section-lede" data-i18n="explore.p">Four focused views: what runs where, how it looks, how it works, and whether the current build is healthy.</p>
+  <p class="section-lede" data-i18n="explore.p">Four focused views: what runs where, how it looks, how it works, and whether the tests pass.</p>
   <div class="cards">
     <a class="card" href="hardware/">
       <div class="ci" data-i18n="card.devices.ci">Surface catalog</div>
@@ -215,9 +287,9 @@
       <p data-i18n="card.demo.p">Change the agent and state to compare real renderer output across device classes.</p>
     </a>
     <a class="card" href="reports/">
-      <div class="ci" data-i18n="card.health.ci">Quality evidence</div>
-      <h3>Build Health</h3>
-      <p data-i18n="card.health.p">See the latest automated checks, scenario coverage, history, and known gaps.</p>
+      <div class="ci" data-i18n="card.health.ci">CI evidence</div>
+      <h3>Test Report</h3>
+      <p data-i18n="card.health.p">The latest CI run — passing tests, scenario coverage, trends, and known gaps.</p>
     </a>
     <a class="card" href="https://github.com/puritysb/AgentDeck">
       <div class="ci" data-i18n="card.src.ci">Open source</div>
@@ -314,15 +386,15 @@
         'stat.local': '로컬 — 클라우드 없음',
         'hero.caption': '하나의 데몬, 하나의 세션 모델 — 위의 모든 서피스가 동시에 살아 있습니다.',
         'explore.h': 'AgentDeck 둘러보기',
-        'explore.p': '네 가지 뷰 — 무엇이 어디서 돌아가는지, 어떻게 보이는지, 어떻게 동작하는지, 현재 빌드가 건강한지.',
+        'explore.p': '네 가지 뷰 — 무엇이 어디서 돌아가는지, 어떻게 보이는지, 어떻게 동작하는지, 테스트는 통과하는지.',
         'card.devices.ci': '서피스 카탈로그',
         'card.devices.p': '지원 디스플레이·컨트롤러를 둘러보고 상세 호환성 매트릭스를 열어보세요.',
         'card.design.ci': '살아있는 시스템',
         'card.design.p': '렌더링된 스펙, 원본 Markdown, 메타데이터, 토큰, 에셋, 검증, 에이전트 인계 문서.',
         'card.demo.ci': '인터랙티브 렌더러',
         'card.demo.p': '에이전트와 상태를 바꿔가며 디바이스 클래스별 실제 렌더러 출력을 비교해 보세요.',
-        'card.health.ci': '품질 증거',
-        'card.health.p': '최신 자동화 검사, 시나리오 커버리지, 히스토리, 알려진 갭을 확인하세요.',
+        'card.health.ci': 'CI 증거',
+        'card.health.p': '최신 CI 실행 — 통과한 테스트, 시나리오 커버리지, 추세, 알려진 갭.',
         'card.src.ci': '오픈소스',
         'card.src.p': 'GitHub의 MIT 라이선스 모노레포 — 브리지, 플러그인, 펌웨어, 앱.',
         'surf.h': '22개 서피스, 하나의 브리지',
@@ -339,15 +411,15 @@
         'stat.local': 'ローカル — クラウドなし',
         'hero.caption': 'ひとつのdaemon、ひとつのセッションモデル — 上のすべてのサーフェスが同時に生きています。',
         'explore.h': 'AgentDeckを見る',
-        'explore.p': '4つのビュー — 何がどこで動くか、どう見えるか、どう動くか、現在のビルドは健全か。',
+        'explore.p': '4つのビュー — 何がどこで動くか、どう見えるか、どう動くか、テストは通るか。',
         'card.devices.ci': 'サーフェスカタログ',
         'card.devices.p': '対応ディスプレイとコントローラーを眺めて、詳細な互換性マトリクスを開けます。',
         'card.design.ci': 'リビングシステム',
         'card.design.p': 'レンダリング済み仕様、元Markdown、メタデータ、トークン、アセット、検証、エージェント引き継ぎ。',
         'card.demo.ci': 'インタラクティブレンダラー',
         'card.demo.p': 'エージェントと状態を切り替えて、デバイスクラスごとの実レンダラー出力を比較できます。',
-        'card.health.ci': '品質エビデンス',
-        'card.health.p': '最新の自動チェック、シナリオカバレッジ、履歴、既知のギャップを確認できます。',
+        'card.health.ci': 'CI エビデンス',
+        'card.health.p': '最新の CI 実行 — 通過したテスト、シナリオカバレッジ、推移、既知のギャップ。',
         'card.src.ci': 'オープンソース',
         'card.src.p': 'GitHubのMITライセンスmonorepo — ブリッジ、プラグイン、ファームウェア、アプリ。',
         'surf.h': '22のサーフェス、ひとつのブリッジ',

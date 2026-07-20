@@ -1,0 +1,104 @@
+/* Canonical GNB styles — the single source for the GitHub Pages global-nav CSS.
+   scripts/sync-pages-nav.mjs injects this between the GNB-CSS markers in the four
+   committed surfaces; scripts/generate-html-report.py injects it into Build
+   Health at generation time. Colour and type come from the shared design tokens,
+   which every surface defines; the bar's geometry is fixed here so it can never
+   drift with each page's own container or spacing scale — which is exactly what
+   left the five navs a few pixels apart. Edit THIS file, then run:
+   node scripts/sync-pages-nav.mjs */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--tide-50) 85%, transparent);
+  border-bottom: 1px solid var(--tide-200);
+}
+.nav-in {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 12px 32px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--ink-900);
+  /* Family inherits from the page body (IBM Plex on every surface), so the bar
+     needs no --font-sans token — which keeps it out of the token-sync gate. */
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.brand img {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+.nav-links {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.nav-links a {
+  font-weight: 500;
+  font-size: 14px;
+  text-decoration: none;
+  color: var(--ink-700);
+  padding: 6px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.nav-links a:hover,
+.nav-links a.active {
+  background: var(--tide-200);
+  color: var(--ink-900);
+}
+.nav-links a.gh {
+  color: var(--tide-50);
+  background: var(--ink-800);
+}
+.nav-links a.gh:hover {
+  background: var(--ink-900);
+  color: var(--tide-50);
+}
+.lang {
+  /* A <select> does not inherit font-family by default, so state it. */
+  font-family: inherit;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--ink-700);
+  background: var(--tide-100);
+  border: 1px solid var(--tide-200);
+  border-radius: 999px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.lang:hover {
+  background: var(--tide-200);
+  color: var(--ink-900);
+}
+@media (max-width: 768px) {
+  .nav-in {
+    align-items: flex-start;
+    padding-inline: 16px;
+  }
+  .nav-links {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 4px;
+  }
+  .nav-links a {
+    white-space: nowrap;
+  }
+  .nav-links .gh {
+    display: none;
+  }
+}
