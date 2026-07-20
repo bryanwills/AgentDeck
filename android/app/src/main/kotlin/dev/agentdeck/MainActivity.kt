@@ -92,9 +92,27 @@ class MainActivity : ComponentActivity() {
                 )
             }.collect { keepScreenOn ->
                 if (keepScreenOn) {
-                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    // KEEP_SCREEN_ON only keeps an already-lit screen lit — adding it
+                    // to a screen that has gone dark does nothing. Full-off dimming
+                    // puts the panel to sleep via SCREEN_OFF_TIMEOUT, so waking needs
+                    // an explicit turn-on. BrightnessController.wakeScreen()'s
+                    // SCREEN_BRIGHT_WAKE_LOCK has been deprecated since API 17 and no
+                    // longer lights the display on the API levels we ship to
+                    // (minSdk 29), which is why the tablet slept but never came back.
+                    // FLAG_TURN_SCREEN_ON added while this window is visible does.
+                    setTurnScreenOn(true)
+                    window.addFlags(
+                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                    )
                 } else {
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    // Drop TURN_SCREEN_ON as well, or it re-lights the panel and
+                    // fights the short screen-off timeout we just installed.
+                    setTurnScreenOn(false)
+                    window.clearFlags(
+                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                    )
                 }
             }
         }
