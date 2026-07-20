@@ -30,6 +30,7 @@ import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderLauncher, renderLauncherEmpty, type LauncherRenderData } from '../renderers/launcher-renderer.js';
 import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 import { dlog, dinfo, dwarn } from '../log.js';
+import { isDisplayDimmed, dimActionIfNeeded } from '../display-dim.js';
 import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 import { buildEntries, rollIndex, runTarget } from '../launch-targets.js';
 
@@ -72,6 +73,7 @@ function ensurePixmapLayout(): void {
 }
 
 export function refreshLauncherDials(): void {
+  if (isDisplayDimmed()) return;
   if (!isDaemonConnected()) {
     ensurePixmapLayout();
     const canvasFeedback = { canvas: svgToDataUrl(renderOfflineTouchStrip(3)) };
@@ -116,6 +118,7 @@ export class LauncherDialAction extends SingletonAction {
       encoderRegistry.launcherIds.push(ev.action.id);
     }
     settings = (ev.payload?.settings ?? {}) as LauncherSettings;
+    if (dimActionIfNeeded(ev.action, 'Encoder')) return;
     refreshLauncherDials();
   }
 

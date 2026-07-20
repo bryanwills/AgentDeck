@@ -56,7 +56,9 @@ import {
   updateSlotUsage,
   markSessionReviewPending,
   clearSessionReviewPending,
+  refreshSessionSlots,
 } from './actions/session-slot-button.js';
+import { isDisplayDimmed, setDisplayDimmed, dimActionIfNeeded } from './display-dim.js';
 import { FocusedDetailState, type FocusedDetailSnapshot } from './focused-detail-state.js';
 
 // ---- Shared state ----
@@ -336,24 +338,15 @@ connMgr.on('review_status', (ev: { type: 'review_status'; sessionId: string; sta
 });
 
 // ---- Display sleep/wake dimming ----
-let displayDimmed = false;
-
-const BLACK_BUTTON_SVG = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144"><rect width="144" height="144" fill="#000"/></svg>'
-);
-const BLACK_LCD_SVG = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#000"/></svg>'
-);
+// The gate itself lives in display-dim.ts so the per-action repaint paths that
+// never pass through broadcastStateUpdate() (usage ticks, the volume poll, the
+// awaiting animation) can consult it too.
 
 function dimAllActions(): void {
   for (const [actionId, entry] of appearedActions.entries()) {
     const act = streamDeck.actions.getActionById(actionId);
     if (!act) continue;
-    if (entry.controller === 'Encoder') {
-      void (act as any).setFeedback({ canvas: BLACK_LCD_SVG }).catch(() => {});
-    } else {
-      void act.setImage(BLACK_BUTTON_SVG).catch(() => {});
-    }
+    dimActionIfNeeded(act, entry.controller);
   }
 }
 
@@ -371,11 +364,11 @@ connMgr.on('display_state', (ev: {
   const blanks = ev.dim?.mode !== 'min';
   const shouldDim = !ev.displayOn && dimEnabled && blanks;
   dinfo('Plugin', `display_state: displayOn=${ev.displayOn} enabled=${dimEnabled} mode=${ev.dim?.mode ?? 'off'}`);
-  if (shouldDim && !displayDimmed) {
-    displayDimmed = true;
+  if (shouldDim && !isDisplayDimmed()) {
+    setDisplayDimmed(true);
     dimAllActions();
-  } else if (!shouldDim && displayDimmed) {
-    displayDimmed = false;
+  } else if (!shouldDim && isDisplayDimmed()) {
+    setDisplayDimmed(false);
     broadcastStateUpdate(); // Re-render everything
   }
 });
@@ -453,7 +446,7 @@ connMgr.on('disconnected', () => {
 
 function broadcastStateUpdate(): void {
   // Skip rendering while display is dimmed (Mac display asleep)
-  if (displayDimmed) return;
+  if (isDisplayDimmed()) return;
 
   dlog('Plugin', `broadcast: state=${currentState} mode=${currentMode} opts=${currentOptions.length}`);
 
@@ -467,6 +460,9 @@ function broadcastStateUpdate(): void {
   updateUtilityDialState(currentState);
   refreshClaudeUsageDial();
   updateUsageDialState();
+  // Keypad slots too — on display wake nothing else will repaint them, since
+  // sessions_list only fires when the session set actually changes.
+  refreshSessionSlots();
 }
 
 // ---- Register actions ----

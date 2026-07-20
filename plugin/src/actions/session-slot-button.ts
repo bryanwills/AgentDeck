@@ -31,6 +31,7 @@ import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderUsageGauge } from '../renderers/usage-gauge.js';
 import { renderStatusReadout, renderSessionReadout } from '../renderers/display-tile.js';
 import { dlog } from '../log.js';
+import { isDisplayDimmed, dimActionIfNeeded } from '../display-dim.js';
 import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 
 // ---- Module state ----
@@ -114,6 +115,14 @@ export function updateDetailViewState(
 export function exitDetailView(): void {
   manager.exitDetailView();
   stopAnimation();
+  refreshAll();
+}
+
+/**
+ * Repaint every key from current state. Used on display wake, where nothing
+ * changed except that the keys are allowed to light up again.
+ */
+export function refreshSessionSlots(): void {
   refreshAll();
 }
 
@@ -236,6 +245,9 @@ function getDisconnectedSlotConfig(slot: number, layout: DeckLayout): Disconnect
 }
 
 function refreshAll(): void {
+  // The awaiting/processing animation timer keeps ticking while the host
+  // display sleeps; without this gate it would repaint over the black frame.
+  if (isDisplayDimmed()) return;
   // Daemon not connected -> single OFFLINE hero on the center key, the rest empty.
   if (!daemonConnected) {
     for (const id of actionIds) {
@@ -395,6 +407,7 @@ export class SessionSlotButtonAction extends SingletonAction {
     dlog('SesSlot', `willAppear: id=${id.slice(-6)} slot=${slot} (row=${row} col=${col} grid=${layout.columns}x${layout.rows}) daemon=${daemonConnected}`);
 
     // Render appropriate state
+    if (dimActionIfNeeded(ev.action, 'Keypad')) return;
     if (!daemonConnected) {
       await ev.action.setImage(svgToDataUrl(renderDisconnectedSlot(getDisconnectedSlotConfig(slot, layout))));
     } else {

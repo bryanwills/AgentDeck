@@ -24,6 +24,7 @@ import { encoderRegistry, isDaemonConnected } from '../encoder-registry.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderUtilityGeneric, type UtilityRenderData } from '../renderers/utility-renderer.js';
 import { dlog, dinfo, dwarn } from '../log.js';
+import { isDisplayDimmed, dimActionIfNeeded } from '../display-dim.js';
 import {
   openAgentDeckAppOrGitHub,
   getVolumeSettings,
@@ -104,6 +105,8 @@ function ensurePixmapLayout(): void {
 }
 
 export function refreshUtilityDials(): void {
+  // The volume poll timer keeps firing while the host display sleeps.
+  if (isDisplayDimmed()) return;
   // Offline banner is highest priority and all-or-nothing across the encoders.
   // Gate on real daemon-down, NOT session-level currentState === DISCONNECTED
   // (which flips transiently during multi-session switching while the daemon is up).
@@ -147,6 +150,7 @@ export class UtilityDialAction extends SingletonAction {
     }
     await syncFromSystem();
     startPolling();
+    if (dimActionIfNeeded(ev.action, 'Encoder')) return;
     refreshUtilityDials();
   }
 

@@ -27,6 +27,7 @@ import { type UsageModeData, updateUsageModeData, getUsageModeData, fireUsageRef
 import type { ConnectionManager } from '../connection-manager.js';
 import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 import { dlog, dinfo } from '../log.js';
+import { isDisplayDimmed, dimActionIfNeeded } from '../display-dim.js';
 import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 
 const PIXMAP_LAYOUT = 'layouts/encoder-layout.json';
@@ -75,6 +76,8 @@ function setCanvasFeedback(svg: string): void {
 }
 
 function refreshUsageDials(): void {
+  // See option-dial: usage ticks must not undo display-sleep blanking.
+  if (isDisplayDimmed()) return;
   if (encoderRegistry.usageIds.length === 0) return;
   ensurePixmapLayout();
 
@@ -115,6 +118,7 @@ export class UsageDialAction extends SingletonAction {
       encoderRegistry.usageIds.push(ev.action.id);
     }
     currentLayout = PIXMAP_LAYOUT;
+    if (dimActionIfNeeded(ev.action, 'Encoder')) return;
     fireUsageRefresh();
     refreshUsageDials();
   }

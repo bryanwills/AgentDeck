@@ -26,6 +26,7 @@ import { renderUsageSession } from '../renderers/usage-dial-renderer.js';
 import { type UsageModeData, updateUsageModeData, getUsageModeData, fireUsageRefresh, buildClaudeUsageEncoder } from '../utility-modes/usage.js';
 import { renderOfflineTouchStrip } from '../renderers/session-slot-renderer.js';
 import { dlog } from '../log.js';
+import { isDisplayDimmed, dimActionIfNeeded } from '../display-dim.js';
 import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 
 const PIXMAP_LAYOUT = 'layouts/encoder-layout.json';
@@ -75,6 +76,9 @@ function setCanvasFeedback(svg: string): void {
 }
 
 function refreshClaudeUsageDials(): void {
+  // `usage_update` ticks arrive continuously; without this the LCD would light
+  // back up seconds after the host display slept.
+  if (isDisplayDimmed()) return;
   if (encoderRegistry.optionIds.length === 0) return;
   ensurePixmapLayout();
 
@@ -109,6 +113,9 @@ export class ResponseDialAction extends SingletonAction {
       encoderRegistry.optionIds.push(ev.action.id);
     }
     currentLayout = PIXMAP_LAYOUT;
+    // An encoder that appears while the host display is already asleep never
+    // saw the sleep edge, so blank it here instead of drawing usage.
+    if (dimActionIfNeeded(ev.action, 'Encoder')) return;
     fireUsageRefresh();
     refreshClaudeUsageDials();
   }
