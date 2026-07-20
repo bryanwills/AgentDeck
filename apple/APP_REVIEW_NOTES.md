@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: required
 owner: Apple release maintainers
-reviewed: 2026-07-18
-revision: 2026-07-18
+reviewed: 2026-07-20
+revision: 2026-07-20
 source_of_truth: apple/APP_REVIEW_NOTES.md
 validators: [bash apple/scripts/verify-appstore-archive.sh]
 ---
@@ -31,11 +31,27 @@ The app is sandboxed. Entitlements below support local monitoring and user-selec
 
 ## Network server rationale (port 9120+)
 
-`com.apple.security.network.server` is used to run a local-only HTTP + WebSocket dashboard hub on `127.0.0.1:9120`. The reason this must be a server (and not an outbound client) is that AgentDeck is a companion to **the same user's own iPad/iPhone running the AgentDeck Dashboard iOS app**, which connects over the local Wi-Fi network and renders the same data. Without `network.server`, the iOS companion cannot receive live session events.
+> An automated App Review analysis (2026-07-20) flagged this entitlement as having no matching functionality. The section below is the canonical reply text — paste it into the Resolution Center thread **and** into App Store Connect → App Review Information → Notes. Both are required; the Notes copy is what prevents the same automated rejection on the next build.
 
-- Port 9120 is the default; the user can override via Settings when another process holds it.
-- Binding is `127.0.0.1` + the local-network interface. We do not open firewall rules or bind externally. No inbound traffic from the public internet.
-- The server exposes only read-only dashboard endpoints + a hook POST endpoint that the Claude Code CLI (running in the user's own terminal) uses to report session events.
+AgentDeck Dashboard requires `com.apple.security.network.server`. The app is not only an outbound client — it listens for and responds to incoming connections on the local network.
+
+**What listens.** The app runs an in-process local dashboard hub implemented with Apple's Network.framework. Two `NWListener` instances are created at launch — HTTP (`apple/AgentDeck/Daemon/Server/HTTPServer.swift`) and WebSocket (`apple/AgentDeck/Daemon/Server/WebSocketServer.swift`) — on port 9120 by default (user-configurable in Settings → Port, range 1024–65535; falls back within 9120–9139 when the default is occupied). The service is advertised on the local network via Bonjour as `_agentdeck._tcp`, as described by `NSLocalNetworkUsageDescription` in Info.plist.
+
+**Who connects in** (all incoming, none of which the app can initiate itself):
+
+1. **The AgentDeck Dashboard iOS companion app** (same bundle family, `bound.serendipity.agent.deck`). The user's own iPhone/iPad discovers the Mac over Bonjour on the same Wi-Fi network and opens a WebSocket connection to the Mac to receive live session events. The Mac cannot reach the iOS device as a client — the iOS app is a pure client with no server entitlement, so this data path only exists if the Mac accepts inbound connections.
+2. **AI coding-agent lifecycle hooks.** When the user opts in, Claude Code / Codex (the user's own separately-installed CLIs, running in their own terminal under their own process tree) POST session events to `http://127.0.0.1:<port>/hooks/...`. AgentDeck is the HTTP server receiving those POSTs.
+3. **Optional hardware plugins** on the same machine or LAN — the Elgato Stream Deck plugin and the Ulanzi Studio plugin connect inbound over WebSocket to render session state on the user's deck hardware.
+
+**Scope and safety.**
+
+- Binding is limited to loopback and the local network interfaces. The app opens no firewall rules, performs no port mapping/UPnP, and accepts no traffic from the public internet.
+- Endpoints are read-only dashboard reads plus the local hook POST endpoint.
+- Connections from outside the machine must be paired (the iOS companion pairs via a QR code / auth token shown on the Mac).
+
+**How to verify during review.** Launch the app, then open Settings → Port to see the active listening port (9120 by default), and use "Pair iPad" in the menu bar to display the pairing QR code the iOS companion scans to connect inbound. With the app running, `lsof -nP -iTCP -sTCP:LISTEN | grep AgentDeck` shows the AgentDeck process listening on it.
+
+Without `com.apple.security.network.server` the iOS companion, the agent hooks, and the hardware plugins all lose their only data path, which removes the central feature of the product.
 
 ## Bonjour (`_agentdeck._tcp`)
 
