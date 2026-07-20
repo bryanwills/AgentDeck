@@ -1,7 +1,5 @@
 # Troubleshooting
 
-# Troubleshooting
-
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Plugin shows DISCONNECTED | Bridge not running | Run `agentdeck claude` |
