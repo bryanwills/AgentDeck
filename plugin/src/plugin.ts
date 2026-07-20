@@ -357,12 +357,24 @@ function dimAllActions(): void {
   }
 }
 
-connMgr.on('display_state', (ev: { type: 'display_state'; displayOn: boolean }) => {
-  dinfo('Plugin', `display_state: displayOn=${ev.displayOn}`);
-  if (!ev.displayOn && !displayDimmed) {
+connMgr.on('display_state', (ev: {
+  type: 'display_state';
+  displayOn: boolean;
+  dim?: { enabled?: boolean; mode?: 'off' | 'min'; level?: number };
+}) => {
+  // The SDK exposes no key brightness, so "dark" can only be black pixels.
+  // That makes mode "min" (dim but readable) unrepresentable — blanking would
+  // hide more than it dims — so only "off" blanks; "min" stays lit. Honor
+  // `enabled: false` too: the user turned dimming off, and blanking anyway was
+  // the previous behavior because this handler never parsed `dim` at all.
+  const dimEnabled = ev.dim?.enabled !== false;
+  const blanks = ev.dim?.mode !== 'min';
+  const shouldDim = !ev.displayOn && dimEnabled && blanks;
+  dinfo('Plugin', `display_state: displayOn=${ev.displayOn} enabled=${dimEnabled} mode=${ev.dim?.mode ?? 'off'}`);
+  if (shouldDim && !displayDimmed) {
     displayDimmed = true;
     dimAllActions();
-  } else if (ev.displayOn && displayDimmed) {
+  } else if (!shouldDim && displayDimmed) {
     displayDimmed = false;
     broadcastStateUpdate(); // Re-render everything
   }

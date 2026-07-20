@@ -123,7 +123,26 @@ function deckSignature(ev: Record<string, unknown>): string {
 }
 let lastDeckSig = '';
 
+// Host display asleep. The D200H has no brightness command exposed through the
+// Studio SDK, so "dark" has to be pixels: push a black icon to every key and
+// stop rendering until wake. Mirrors the Stream Deck plugin's dimAllActions().
+const BLACK_KEY_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144"><rect width="144" height="144" fill="#000"/></svg>';
+let displayDimmed = false;
+
+function dimAllKeys(): void {
+  const dataUri = `data:image/png;base64,${svgToBase64Png(BLACK_KEY_SVG)}`;
+  for (const inst of instances.values()) {
+    // Clear lastSig so the wake repaint is not swallowed by the per-key dedup.
+    inst.lastSig = '';
+    pushQueue.set(inst.context, { dataUri, isGif: false });
+  }
+  lastDeckSig = '';
+  if (instances.size > 0) ensureDrainer();
+}
+
 function renderAll(): void {
+  if (displayDimmed) return;
   const ev = layoutInput();
   // If the focused session vanished, drop back to the list.
   if (view.mode === 'detail' && view.openSessionId) {
@@ -260,7 +279,22 @@ $UD.onKeyDown((m: UlanziMessage) => flog('RAW', 'keydown(ignored)', m.key));
 $UD.onKeyUp((m: UlanziMessage) => flog('RAW', 'keyUp(ignored)', m.key));
 
 // ---- AgentDeck daemon side ----
-daemon.on('event', (ev) => { if (store.apply(ev)) scheduleRender(); });
+daemon.on('event', (ev) => {
+  if ((ev as { type?: string }).type === 'display_state') {
+    const e = ev as { displayOn?: boolean; dim?: { enabled?: boolean } };
+    // `dim.enabled === false` means the user asked us to leave hardware lit.
+    const shouldDim = e.displayOn === false && e.dim?.enabled !== false;
+    if (shouldDim && !displayDimmed) {
+      displayDimmed = true;
+      dimAllKeys();
+    } else if (!shouldDim && displayDimmed) {
+      displayDimmed = false;
+      scheduleRender();
+    }
+    return;
+  }
+  if (store.apply(ev)) scheduleRender();
+});
 daemon.on('connected', () => {
   dinfo(TAG, 'daemon connected');
   store.setConnected(true);
