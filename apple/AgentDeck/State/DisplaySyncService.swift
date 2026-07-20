@@ -4,8 +4,11 @@
 // When it wakes (hostDisplayOn=true), restores the previous brightness.
 // The dim state remains authoritative until the host reports wake, the user
 // disables sync, or the bridge disconnects. iOS does not expose a public API
-// for third-party apps to lock the screen, so full-off means brightness 0 while
-// the normal system auto-lock policy remains in effect.
+// for third-party apps to lock the screen, so full-off means brightness 0.
+//
+// The service also owns the idle-timer hold: while the host display is on the
+// device is kept awake, and the hold is released when the host sleeps so the
+// device may auto-lock normally.
 
 import Foundation
 import Combine
@@ -103,6 +106,25 @@ final class DisplaySyncService: ObservableObject, @unchecked Sendable {
             // Display awake, sync disabled, or host disabled device dimming.
             restoreBrightness()
         }
+        applyIdleTimerPolicy()
+    }
+
+    /// Hold the screen awake while the host display is on.
+    ///
+    /// A wall-mounted dashboard that auto-locks after the device's Auto-Lock
+    /// interval stops being a dashboard — which is what happened: the iPhone
+    /// slept on its own with the Mac display still on, while an iPad set to
+    /// Auto-Lock "Never" looked fine. Nothing in the app touched
+    /// isIdleTimerDisabled, so the system timer always won. Android already has
+    /// this as FLAG_KEEP_SCREEN_ON driven by its keepAwake preference.
+    ///
+    /// Scoped to `enabled`: if the user turned display sync off we leave their
+    /// device's power behavior alone rather than silently pinning it awake. When
+    /// the host sleeps we release the hold, so the device may auto-lock — that
+    /// complements dimming rather than fighting it.
+    @MainActor
+    private func applyIdleTimerPolicy() {
+        UIApplication.shared.isIdleTimerDisabled = enabled && desiredDisplayOn
     }
 
     @MainActor
