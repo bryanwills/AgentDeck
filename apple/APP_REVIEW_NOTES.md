@@ -79,7 +79,18 @@ AgentDeck posts a local `UNUserNotification` when a monitored session genuinely 
 
 ## Bluetooth entitlement (`com.apple.security.device.bluetooth`)
 
-Used to communicate with the optional iDotMatrix and Divoom Timebox Mini LED pixel displays over Bluetooth Low Energy, using Apple's first-party CoreBluetooth framework (no subprocess, no bundled interpreter). AgentDeck acts only as a BLE *central*: it scans for the user's own display (iDotMatrix advertised name prefix `IDM-`; Timebox Mini advertised name `TimeBox-mini-light`), connects, and writes display frames over a GATT characteristic. The user opts in by pairing their own hardware from an in-app Settings sheet; the `NSBluetoothAlwaysUsageDescription` string explains the purpose at the system prompt. If no such display is present (or the user never pairs one), the feature is inert.
+> This section is also the canonical reply to the Guideline 2.4.5(i) question "describe how and where the app uses `com.apple.security.device.bluetooth`".
+
+Used to drive the optional iDotMatrix and Divoom Timebox Mini LED pixel displays over Bluetooth Low Energy, using Apple's first-party CoreBluetooth framework (no subprocess, no bundled interpreter). AgentDeck acts only as a BLE *central*: it scans for the user's own display, connects, and writes display frames over a GATT characteristic. `NSBluetoothAlwaysUsageDescription` in Info.plist explains the purpose at the system prompt.
+
+**Where in the app.** Both devices are paired from Settings → ESP32 & Pixoo, each with its own sheet:
+
+- **iDotMatrix LED display → "Pair…"** (`UI/Settings/IDotMatrixSheet.swift`). Tapping **Scan** runs a CoreBluetooth scan for peripherals advertising the `IDM-` name prefix; the user picks one and taps **Pair**. The selected `CBPeripheral.identifier` is stored and `IDotMatrixModule` drives the panel over BLE.
+- **Divoom Timebox Mini → "Pair…"** (`UI/Settings/TimeboxSheet.swift`). Same flow against the `TimeBox-mini-light` advertised name, driven by `TimeboxModule`.
+
+Each sheet also exposes a brightness slider that writes to the connected panel live, and a trash button that unpairs — on unpair AgentDeck sends a farewell frame (black for Timebox, OFFLINE for iDotMatrix) so the hardware does not keep displaying stale state, then drops the GATT link.
+
+Note that these are BLE peripherals reached directly through CoreBluetooth, so they never appear in macOS System Settings → Bluetooth; the in-app sheets above are the only pairing UI. A reviewer without either display sees an empty "No device yet" list and a Scan button that finds nothing — the feature is inert, and nothing else in the app depends on it.
 
 ## Audio input + serial entitlements
 
