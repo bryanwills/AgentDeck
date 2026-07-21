@@ -548,6 +548,69 @@ static lv_obj_t* makeTankGroup(lv_obj_t* parent, const char* name, uint32_t bran
 }
 
 #if defined(BOARD_IPS10)
+// Helper to sanitize UTF-8 strings by replacing or removing unsupported/broken symbols
+// that are not in Montserrat or Noto Sans KR ranges to avoid tofu boxes (empty rectangles).
+static void sanitizeIps10Text(char* s) {
+    if (!s) return;
+    char* d = s;
+    while (*s) {
+        uint32_t cp = 0;
+        size_t len = 0;
+        uint8_t b1 = (uint8_t)s[0];
+        if (b1 < 0x80) {
+            cp = b1;
+            len = 1;
+        } else if ((b1 & 0xE0) == 0xC0) {
+            if ((uint8_t)s[1] == 0) break;
+            cp = ((b1 & 0x1F) << 6) | ((uint8_t)s[1] & 0x3F);
+            len = 2;
+        } else if ((b1 & 0xF0) == 0xE0) {
+            if ((uint8_t)s[1] == 0 || (uint8_t)s[2] == 0) break;
+            cp = ((b1 & 0x0F) << 12) | (((uint8_t)s[1] & 0x3F) << 6) | ((uint8_t)s[2] & 0x3F);
+            len = 3;
+        } else if ((b1 & 0xF8) == 0xF0) {
+            if ((uint8_t)s[1] == 0 || (uint8_t)s[2] == 0 || (uint8_t)s[3] == 0) break;
+            cp = ((b1 & 0x07) << 18) | (((uint8_t)s[1] & 0x3F) << 12) | (((uint8_t)s[2] & 0x3F) << 6) | ((uint8_t)s[3] & 0x3F);
+            len = 4;
+        } else {
+            s++;
+            continue;
+        }
+
+        if (cp == 0x2022) { // • (bullet)
+            *d++ = '-';
+        } else if (cp == 0x00B7) { // · (middle dot)
+            *d++ = '-';
+        } else if (cp == 0x2013 || cp == 0x2014) { // – or — (dash)
+            *d++ = '-';
+        } else if (cp == 0x201C || cp == 0x201D) { // “ or ”
+            *d++ = '"';
+        } else if (cp == 0x2018 || cp == 0x2019) { // ‘ or ’
+            *d++ = '\'';
+        } else if (cp == 0x2192) { // →
+            *d++ = '>';
+        } else if (cp == 0x2026) { // … (ellipsis)
+            *d++ = '.';
+            *d++ = '.';
+        } else {
+            bool allowed = (cp >= 0x20 && cp <= 0x7E) || 
+                           (cp == 0x0A) || (cp == 0x0D) || (cp == 0x09) || 
+                           (cp >= 0xAC00 && cp <= 0xD7A3) || 
+                           (cp >= 0xF000 && cp <= 0xF8FF) || 
+                           (cp == '#');
+            if (allowed) {
+                for (size_t i = 0; i < len; i++) {
+                    *d++ = s[i];
+                }
+            } else {
+                *d++ = ' ';
+            }
+        }
+        s += len;
+    }
+    *d = '\0';
+}
+
 // ───────── D1 detail overlay (tap a cell → header · activity log · actions) ─────────
 static void detailClose() {
     detailCellIdx = -1;
@@ -706,7 +769,11 @@ static void detailRefresh() {
     uint32_t _drt0 = micros();
 #endif
     CellMeta& m = cellMetaData[detailCellIdx];
-    lv_label_set_text(detailTitle, m.name[0] ? m.name : "Session");
+    char titleBuf[64];
+    strncpy(titleBuf, m.name[0] ? m.name : "Session", sizeof(titleBuf) - 1);
+    titleBuf[sizeof(titleBuf) - 1] = '\0';
+    sanitizeIps10Text(titleBuf);
+    lv_label_set_text(detailTitle, titleBuf);
 
     char sub[96];
     snprintf(sub, sizeof(sub), "#%06lX %s# " LV_SYMBOL_BULLET " %s", (unsigned long)m.accent,
@@ -714,11 +781,18 @@ static void detailRefresh() {
     lv_label_set_text(detailSub, sub);
 
     bool awaiting = (strstr(m.state, "awaiting") != nullptr);
+    char actionBuf[256];
     if (awaiting && m.question[0]) {
-        lv_label_set_text(detailAction, m.question);
+        strncpy(actionBuf, m.question, sizeof(actionBuf) - 1);
+        actionBuf[sizeof(actionBuf) - 1] = '\0';
+        sanitizeIps10Text(actionBuf);
+        lv_label_set_text(detailAction, actionBuf);
     } else if (m.tool[0]) {
         char t[64]; snprintf(t, sizeof(t), LV_SYMBOL_PLAY " %s", m.tool);
-        lv_label_set_text(detailAction, t);
+        strncpy(actionBuf, t, sizeof(actionBuf) - 1);
+        actionBuf[sizeof(actionBuf) - 1] = '\0';
+        sanitizeIps10Text(actionBuf);
+        lv_label_set_text(detailAction, actionBuf);
     } else {
         lv_label_set_text(detailAction, ips10StatePhrase(m.state));
     }
@@ -748,6 +822,7 @@ static void detailRefresh() {
     else if (logbuf[lp - 1] == '\n') logbuf[lp - 1] = '\0';
     Utf8::utf8TrimEnd(logbuf);   // the last appended row may have been byte-cut mid-한글
     for (char* c = logbuf; *c; c++) if (*c == '#') *c = ' ';
+    sanitizeIps10Text(logbuf);
     lv_label_set_text(detailLog, logbuf);
 
     // Footer buttons by state.
@@ -1090,10 +1165,9 @@ void init(lv_obj_t* parent) {
         cell[i] = lv_obj_create(cellsBox);
         lv_obj_set_size(cell[i], 80, 60);
         lv_obj_set_pos(cell[i], 0, 0);
-        // D1 card: raised-surface vertical gradient (#16413c → #102a27), rounded, agent-color
-        // accent rail on the left edge. Matches docs/design/tenin/screen.css .cell background.
-        lv_obj_set_style_bg_color(cell[i], lv_color_hex(0x16413C), 0);
-        lv_obj_set_style_bg_grad_color(cell[i], lv_color_hex(0x102A27), 0);
+        // D1 card: light card background for maximum readability (cards on a dark green deck)
+        lv_obj_set_style_bg_color(cell[i], lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_bg_grad_color(cell[i], lv_color_hex(0xF1F5F9), 0); // slate-100 gradient
         lv_obj_set_style_bg_grad_dir(cell[i], LV_GRAD_DIR_VER, 0);
         lv_obj_set_style_bg_opa(cell[i], LV_OPA_COVER, 0);   // opaque (no per-pixel blend)
         lv_obj_set_style_radius(cell[i], 12, 0);
@@ -1110,28 +1184,21 @@ void init(lv_obj_t* parent) {
         lv_obj_set_flex_align(cell[i], LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
         // Cells are PASSIVE status tiles: everything the user needs is shown inline as text
         // (name · state · tool · activity · meta) and awaiting cells expose explicit Approve/Deny
-        // buttons. No tap-to-open detail overlay — it popped spuriously on stray/phantom touches
-        // and a separate modal isn't needed when the card already carries the text. Non-clickable
-        // so a phantom press on the cell body does nothing. (cellTapCb kept but never bound/fired.)
+        // buttons. No tap-to-open detail overlay. Non-clickable so a phantom press does nothing.
         lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_CLICKABLE);
-        (void)cellTapCb;  // retained for reference; intentionally not wired to a tap
+        (void)cellTapCb;
 
-        // Creature mark — top-right overlay, OUTSIDE the flex flow (IGNORE_LAYOUT) so it
-        // never perturbs the text column's layout (nested layout churn is what black-
-        // screened earlier builds). Tinted to the agent accent at render time.
+        // Creature mark — top-right overlay, OUTSIDE the flex flow (IGNORE_LAYOUT)
         cellGlyph[i] = lv_image_create(cell[i]);
         lv_obj_add_flag(cellGlyph[i], LV_OBJ_FLAG_IGNORE_LAYOUT);
         lv_obj_add_flag(cellGlyph[i], LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_image_recolor_opa(cellGlyph[i], LV_OPA_COVER, 0);
         lv_obj_set_style_image_opa(cellGlyph[i], (lv_opa_t)235, 0);
-        lv_obj_clear_flag(cellGlyph[i], LV_OBJ_FLAG_CLICKABLE);  // taps fall through to the cell
+        lv_obj_clear_flag(cellGlyph[i], LV_OBJ_FLAG_CLICKABLE);
 
-        // Name line: ●agent-name (bold) + colored [STATE] (one recolor label, no flex).
-        // Fonts across the card were lifted one step (12→16, 16→20, KR fallback
-        // 12→16px via font_noto_kr_16) — at 1280×800 on a 10.1" panel the old
-        // 12px lines were ~2mm tall and unreadable at desk distance.
+        // Name line: ●agent-name (bold) + colored [STATE]
         cellName[i] = lv_label_create(cell[i]);
-        lv_obj_set_style_text_color(cellName[i], lv_color_hex(Theme::HUDText), 0);
+        lv_obj_set_style_text_color(cellName[i], lv_color_hex(0x0F172A), 0); // slate-900 (very dark)
         lv_obj_set_style_text_font(cellName[i], &font_kr_20, 0);
         lv_label_set_recolor(cellName[i], true);
         lv_label_set_long_mode(cellName[i], LV_LABEL_LONG_DOT);
@@ -1153,7 +1220,7 @@ void init(lv_obj_t* parent) {
         lv_label_set_text(cellPill[i], "");
 
         cellProj[i] = lv_label_create(cell[i]);
-        lv_obj_set_style_text_color(cellProj[i], lv_color_hex(Theme::HUDDim), 0);
+        lv_obj_set_style_text_color(cellProj[i], lv_color_hex(0x475569), 0); // slate-600 (medium-dark)
         lv_obj_set_style_text_font(cellProj[i], &font_kr_16, 0);
         lv_label_set_long_mode(cellProj[i], LV_LABEL_LONG_DOT);
         lv_obj_set_width(cellProj[i], 60);
@@ -1177,12 +1244,9 @@ void init(lv_obj_t* parent) {
         lv_obj_set_width(cellTool[i], 60);
         lv_label_set_text(cellTool[i], "");
 
-        // Body: the TIMELINE feed — newest milestone bright, older rows dimmed
-        // via recolor markup. This is the card's payload, so it gets the bright
-        // text color and the legible face (the old dim 12px single line is what
-        // made the region read as noise).
+        // Body: the TIMELINE feed — newest milestone bright, older rows dimmed via recolor markup.
         cellBody[i] = lv_label_create(cell[i]);
-        lv_obj_set_style_text_color(cellBody[i], lv_color_hex(Theme::HUDText), 0);
+        lv_obj_set_style_text_color(cellBody[i], lv_color_hex(0x1E293B), 0); // slate-800
         lv_obj_set_style_text_font(cellBody[i], &font_kr_16, 0);
         lv_obj_set_style_text_line_space(cellBody[i], 6, 0);
         lv_label_set_recolor(cellBody[i], true);
@@ -1193,7 +1257,7 @@ void init(lv_obj_t* parent) {
         // Footer: model · elapsed (faint).
         cellMeta[i] = lv_label_create(cell[i]);
         lv_obj_set_width(cellMeta[i], 60);
-        lv_obj_set_style_text_color(cellMeta[i], lv_color_hex(Theme::HUDFaint), 0);
+        lv_obj_set_style_text_color(cellMeta[i], lv_color_hex(0x64748B), 0); // slate-500
         lv_obj_set_style_text_font(cellMeta[i], &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_opa(cellMeta[i], (lv_opa_t)180, 0);
         lv_label_set_long_mode(cellMeta[i], LV_LABEL_LONG_DOT);
@@ -1220,7 +1284,7 @@ void init(lv_obj_t* parent) {
         lv_obj_add_event_cb(cellNo[i], cellNoCb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
         lv_obj_t* noLbl = lv_label_create(cellNo[i]);
         lv_label_set_text(noLbl, "Deny");
-        lv_obj_set_style_text_color(noLbl, lv_color_hex(Theme::HUDText), 0);
+        lv_obj_set_style_text_color(noLbl, lv_color_hex(0xFFFFFF), 0); // white text on dark green button
         lv_obj_center(noLbl);
         lv_obj_add_flag(cellNo[i], LV_OBJ_FLAG_HIDDEN);
 
@@ -2162,7 +2226,7 @@ void update() {
                 lv_label_set_text(cellPill[i], ips10StatePill(mc[i].state));
                 lv_obj_set_style_bg_color(cellPill[i], lv_color_hex(mc[i].stateCol), 0);
                 lv_obj_set_style_text_color(cellPill[i],
-                    lv_color_hex(idle ? Theme::HUDText : 0x05140F), 0);
+                    lv_color_hex(idle ? 0x1E293B : 0x05140F), 0);
                 lv_obj_set_style_bg_opa(cellPill[i], idle ? (lv_opa_t)90 : LV_OPA_COVER, 0);
                 lv_obj_clear_flag(cellPill[i], LV_OBJ_FLAG_HIDDEN);
             } else {
@@ -2171,7 +2235,11 @@ void update() {
 
             // project (dim) — its own line under the name
             if (ph >= 56 && mc[i].name[0]) {
-                lv_label_set_text(cellProj[i], mc[i].name);
+                char projBuf[64];
+                strncpy(projBuf, mc[i].name, sizeof(projBuf) - 1);
+                projBuf[sizeof(projBuf) - 1] = '\0';
+                sanitizeIps10Text(projBuf);
+                lv_label_set_text(cellProj[i], projBuf);
                 lv_obj_clear_flag(cellProj[i], LV_OBJ_FLAG_HIDDEN);
             } else {
                 lv_obj_add_flag(cellProj[i], LV_OBJ_FLAG_HIDDEN);
@@ -2180,6 +2248,7 @@ void update() {
             // tool box (working/awaiting, when there's room)
             if (!idle && mc[i].tool[0] && ph >= 80) {
                 char tb[64]; snprintf(tb, sizeof(tb), LV_SYMBOL_PLAY " %s", mc[i].tool);
+                sanitizeIps10Text(tb);
                 lv_label_set_text(cellTool[i], tb);
                 lv_obj_clear_flag(cellTool[i], LV_OBJ_FLAG_HIDDEN);
             } else {
@@ -2211,18 +2280,19 @@ void update() {
                 // the tall amber tile still tells what the agent was doing.
                 if (awaiting && body == mc[i].question && mc[i].body[0] && extraRows > 0
                     && off < sizeof(full) - 16) {
-                    int nn = snprintf(full + off, sizeof(full) - off, "\n#8fa6a2 %s#", mc[i].body);
+                    int nn = snprintf(full + off, sizeof(full) - off, "\n#64748b %s#", mc[i].body);
                     if (nn > 0) off += (size_t)nn;
                     if (off >= sizeof(full)) off = sizeof(full) - 1;
                     extraRows--;
                 }
                 if (extraRows > mc[i].feedCount) extraRows = mc[i].feedCount;
                 for (int r = 0; r < extraRows && off < sizeof(full) - 16; r++) {
-                    int nn = snprintf(full + off, sizeof(full) - off, "\n#8fa6a2 %s#", mc[i].feed[r]);
+                    int nn = snprintf(full + off, sizeof(full) - off, "\n#64748b %s#", mc[i].feed[r]);
                     if (nn > 0) off += (size_t)nn;
                     if (off >= sizeof(full)) off = sizeof(full) - 1;
                 }
                 Utf8::utf8TrimEnd(full);   // byte cap can split a 한글 glyph
+                sanitizeIps10Text(full);
                 lv_label_set_text(cellBody[i], full);
                 lv_obj_clear_flag(cellBody[i], LV_OBJ_FLAG_HIDDEN);
             } else {
