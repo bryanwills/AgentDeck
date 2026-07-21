@@ -35,8 +35,8 @@ cannot modify or delete it myself.
 
 **What I would like**
 
-Please delete this entry. I want to re-upload it with corrected cover and banner
-images, and then ask you to publish that new version on the Marketplace.
+Please delete this entry. I want to re-upload version 1.0.1 with corrected cover
+and banner images, and then ask you to publish that replacement on the Marketplace.
 
 **Why I cannot do it myself**
 
@@ -100,8 +100,10 @@ Serendipity Bound (admin@foundby.kr)
 ## After they reply
 
 1. Confirm #1064 is gone from 내 업로드.
-2. Re-upload from `1.0.0/` — **one image at a time**, confirming each 이미지 자르기
-   dialog; a thumbnail is not proof the file reached the server (see LISTING.md).
-3. Set 작성자 to `admin@foundby.kr` (shared across all seven locales).
-4. Reply to the same thread with the new upload ID to request the listing.
-5. Tag `ulanzi-v1.0.0` once it is live.
+2. Upload `dist/agentdeck-ulanzi-v1.0.1.zip`, then reuse the final images from
+   `1.0.0/` — **one image at a time**, confirming each 이미지 자르기 dialog; a
+   thumbnail is not proof the file reached the server (see LISTING.md).
+3. Set the version to `1.0.1` and 작성자 to `admin@foundby.kr` (shared across all
+   seven locales).
+4. Reply to the same thread with the new upload ID and the `ulanzi-v1.0.1`
+   GitHub release URL to request Marketplace publication.

@@ -32,6 +32,13 @@ on their own schedules; the iOS companion carries its fix on a later train while
 - Preserve the notify-only Codex contract: processing details expose no steering
   action that the observed session cannot deliver
 
+### Ulanzi plugin — D200H
+
+- Publish the current self-contained 1.0.1 bundle for every declared macOS and
+  Windows architecture
+- Keep D200H rendering dark while the host display sleeps instead of allowing a
+  later session repaint to wake the keys
+
 ### iOS companion (ships after 1.0.0 review completes)
 
 - Hold the screen awake while the paired Mac's display is on

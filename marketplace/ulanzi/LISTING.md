@@ -4,6 +4,9 @@ Submission target: **https://ugc.ulanzistudio.com** → `작품 업로드` (Uplo
 Submitted 2026-07-20; the entry sits under `개인 센터 → 내 업로드` awaiting review
 (`내 게시물` stays empty until it is published).
 
+The frozen entry is version **1.0.0**. Its replacement build is **1.0.1**; upload
+that archive after Ulanzi support removes entry #1064.
+
 ## Upload-form requirements
 
 Read off the portal's own form, not from documentation — Ulanzi publishes no
@@ -11,7 +14,7 @@ asset spec. Two things the form does NOT tell you up front are recorded below.
 
 | Slot | Required | Ratio | Our file |
 |---|---|---|---|
-| Main file | yes | — (`.zip`, ≤50 MB/file) | `dist/agentdeck-ulanzi-v1.0.0.zip` (9.3 MB) |
+| Main file | yes | — (`.zip`, ≤50 MB/file) | `dist/agentdeck-ulanzi-v1.0.1.zip` (9.5 MB) |
 | Cover image | yes | **1:1 for plugins** | `marketplace/ulanzi/1.0.0/cover-1024x1024.jpg` |
 | Banner 01 | yes | 3:2 | `marketplace/ulanzi/1.0.0/banner-01-1920x1280.jpg` |
 | Banner 02 | optional | 3:2 | `marketplace/ulanzi/1.0.0/banner-02-1920x1280.jpg` |
@@ -443,14 +446,15 @@ timeline, and at storefront size its rows are legible real project chatter. The
 generator crops above the timeline and fades the cut, so the banner carries only
 the terrarium, session list, and quota gauges. Do not re-crop it taller.
 
-## Release notes (v1.0.0)
+## Release notes (v1.0.1)
 
-First public release for the D200H. Dynamic session keys, multi-agent state and
-attention rendering, prompt steering, stop and mode controls, usage views, and
-reconnect behavior through the official Ulanzi Studio plugin runtime.
+First public Marketplace candidate for the D200H, synchronized to AgentDeck
+1.0.1. Dynamic session keys, multi-agent state and attention rendering, prompt
+steering, stop and mode controls, usage views, reconnect behavior, and correct
+host display sleep/wake handling through the official Ulanzi Studio runtime.
 
 ## Submission files
 
 - Installable folder: `plugin-ulanzi/dist/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/`
-- Upload archive: `dist/agentdeck-ulanzi-v1.0.0.zip`
+- Upload archive: `dist/agentdeck-ulanzi-v1.0.1.zip`
 - Verification guide: `plugin-ulanzi/VERIFY.md`
