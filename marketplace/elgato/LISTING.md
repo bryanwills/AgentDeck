@@ -2,6 +2,10 @@
 
 Submission target: **https://maker.elgato.com** (Maker Console → Publish).
 
+> Maker Console Draft description synced to this file on 2026-07-21 (the "Getting
+> set up" copy now leads with the live Mac App Store app). The submitted
+> "Pending review" version is a separate snapshot and was left untouched.
+
 ## Store asset requirements
 
 Per [Product Guidelines](https://docs.elgato.com/guidelines/products/), checked
@@ -41,10 +45,9 @@ Session keys show Claude Code, Codex, OpenCode, and OpenClaw sessions at a glanc
 Profiles for Stream Deck, Stream Deck Mini, and Stream Deck + are bundled and install automatically.
 
 Getting set up
-AgentDeck is a thin client — it needs the free AgentDeck daemon running on the same Mac. Two ways to get it:
+AgentDeck is a thin client — it needs the free AgentDeck daemon running on the same Mac. Get it either from the free AgentDeck app on the Mac App Store (no terminal needed), or from a terminal:
 
-- Install the free AgentDeck app from the Mac App Store. It bundles the daemon, so there is no terminal step.
-- Or run one command in a terminal: npx @agentdeck/setup
+    npx @agentdeck/setup
 
 Either way, start Claude Code, Codex, or OpenCode as you normally would and your sessions appear on the keys.
 

@@ -147,10 +147,9 @@ Features
 • Automatic reconnect and an explicit OFFLINE state
 
 Getting set up
-A thin client — it needs the free AgentDeck daemon on the same Mac. Two ways to get it:
+A thin client — it needs the free AgentDeck daemon on the same Mac. Get it either from the free AgentDeck app on the Mac App Store (no terminal needed), or from a terminal:
 
-- Install the free AgentDeck app from the Mac App Store. It carries the daemon, so there is no terminal step.
-- Or run one command in a terminal: npx @agentdeck/setup
+    npx @agentdeck/setup
 
 That is the whole setup.
 
