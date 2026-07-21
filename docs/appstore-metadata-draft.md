@@ -425,7 +425,7 @@ Auto-discovers your Mac over Wi-Fi via Bonjour. QR pairing fallback for differen
 Finished turns are scored against category-specific rubrics. The default Apple Intelligence Foundation Models backend is on-device, free, and uses no network. Opt-in remote backends you point at yourself — Anthropic API, any OpenAI-compatible server, or a local MLX server — are alternatives; only then does the evaluated turn content leave your Mac, to the endpoint you chose.
 
 • 17-display preview gallery
-Preview the Swift app's built-in layouts for Stream Deck, Stream Deck+, Ulanzi D200H, iPad, InkDeck e-ink, ESP32 displays, Pixoo, Timebox Mini, iDotMatrix, and TUI — without owning the hardware.
+Preview the app's built-in layouts for Stream Deck+, e-ink readers, ESP32 panels, LED matrices, iPad, and TUI — no hardware needed. See all 17 surfaces, previewed live: https://puritysb.github.io/AgentDeck/
 
 • OpenClaw Gateway native integration
 Auto-pairs as an operator client when an OpenClaw Gateway is running locally (ws://127.0.0.1:18789). Self-generated Ed25519 identity stored in Keychain; the Gateway-issued device token is reused on reconnect.
@@ -513,6 +513,23 @@ AgentDeck is independent and is not affiliated with or endorsed by Anthropic, Op
 
 ```
 claude code,ai,agent,dashboard,monitoring,apme,openclaw,codex,ipad,stream deck,developer
+```
+
+### What's New (v1.0.1, macOS — maintenance)
+
+Only the macOS app ships 1.0.1 now; the iPhone/iPad companion carries its fix on a
+later train while 1.0.0 finishes review. Build 3702.
+
+```
+Maintenance update — reliability fixes for the first release.
+
+• Fixed the dashboard sometimes failing to connect to its own built-in daemon
+• Fixed a rare crash in the live session view
+• Display-sleep now behaves consistently across every connected surface
+• Restored the Codex usage gauge (a text-decoding bug could blank it)
+• More resilient recovery when a connected ESP32's serial port stalls
+
+Thanks for the early feedback — keep it coming: admin@foundby.kr
 ```
 
 ### What's New (v1.0.0, 4000 chars)
