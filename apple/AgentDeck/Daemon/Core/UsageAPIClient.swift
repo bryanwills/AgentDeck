@@ -67,6 +67,22 @@ struct CodexRateLimitWindowLocal: Sendable {
     var stale: Bool = false
 }
 
+/// Codex credit balance — the metering credit-based plans report (e.g.
+/// `limit_id: "premium"`) when the 5h/7d windows are null. Mirrors the TS
+/// `CodexCredits` so the daemon can map an exhausted balance onto a synthetic
+/// usage gauge.
+struct CodexCreditsLocal: Sendable {
+    var hasCredits: Bool
+    var unlimited: Bool
+    var balance: String?
+
+    /// Remaining balance parsed as a number, or nil when absent / non-numeric.
+    var balanceValue: Double? {
+        guard let balance else { return nil }
+        return Double(balance)
+    }
+}
+
 /// Codex usage limits parsed from the user's own local Codex session rollout
 /// files (`~/.codex/sessions/.../rollout-*.jsonl`). Same posture as
 /// `readRawCodexAuthStatus` reading `~/.codex/auth.json` — local files only,
@@ -75,6 +91,8 @@ struct CodexRateLimitsLocal: Sendable {
     var primary: CodexRateLimitWindowLocal?
     var secondary: CodexRateLimitWindowLocal?
     var planType: String?
+    var limitId: String?
+    var credits: CodexCreditsLocal?
 }
 
 enum TokenStatus: String, Sendable {
@@ -616,13 +634,39 @@ final class UsageAPIClient: Sendable {
                   let rl = payload["rate_limits"] as? [String: Any] else { continue }
             let primary = parseCodexWindow(rl["primary"] as? [String: Any])
             let secondary = parseCodexWindow(rl["secondary"] as? [String: Any])
-            if primary == nil && secondary == nil { continue }
+            let limitId = rl["limit_id"] as? String
+            let credits = parseCodexCredits(rl["credits"] as? [String: Any])
+            // Skip only when nothing is usable. Credit-based plans (limitId
+            // "premium") carry null windows + a credits block and must be kept so
+            // the daemon can map them onto a synthetic gauge downstream.
+            if primary == nil && secondary == nil && limitId == nil && credits == nil { continue }
             return CodexRateLimitsLocal(
                 primary: primary,
                 secondary: secondary,
-                planType: rl["plan_type"] as? String
+                planType: rl["plan_type"] as? String,
+                limitId: limitId,
+                credits: credits
             )
         }
+        return nil
+    }
+
+    private static func parseCodexCredits(_ raw: [String: Any]?) -> CodexCreditsLocal? {
+        guard let raw else { return nil }
+        guard raw["has_credits"] != nil || raw["unlimited"] != nil || raw["balance"] != nil else { return nil }
+        let hasCredits = boolValue(raw, "has_credits") ?? false
+        let unlimited = boolValue(raw, "unlimited") ?? false
+        let balance: String? = {
+            if let s = raw["balance"] as? String { return s }
+            if let n = raw["balance"] as? NSNumber { return n.stringValue }
+            return nil
+        }()
+        return CodexCreditsLocal(hasCredits: hasCredits, unlimited: unlimited, balance: balance)
+    }
+
+    private static func boolValue(_ raw: [String: Any], _ key: String) -> Bool? {
+        if let b = raw[key] as? Bool { return b }
+        if let n = raw[key] as? NSNumber { return n.boolValue }
         return nil
     }
 

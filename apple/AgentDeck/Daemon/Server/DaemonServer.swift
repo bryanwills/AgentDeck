@@ -6675,10 +6675,35 @@ final class DaemonServer {
                 shortWindow = w
             }
         }
+        // Credit-based plans (limitId "premium" etc.) report null 5h/7d windows
+        // and convey usage via a `credits` block. With no timed windows the
+        // percentage gauges would vanish entirely on slot-based surfaces. Map the
+        // credit state onto a synthetic primary window so every surface reads
+        // consistently: exhausted credits read as 100% used, unlimited as 0%. A
+        // partial balance can't become an honest percentage (no cap is exposed),
+        // so it stays absent. No `resetsAt` → never flagged stale (credits refresh
+        // on plan renewal, not a rolling timer). Mirrors the TS path in
+        // `normalizeCodexRateLimits` (usage-event.ts).
+        if shortWindow == nil && longWindow == nil, let credits = limits.credits {
+            if credits.unlimited {
+                shortWindow = CodexRateLimitWindowLocal(usedPercent: 0, windowMinutes: 0)
+            } else if !credits.hasCredits || (credits.balanceValue.map { $0 <= 0 } ?? false) {
+                shortWindow = CodexRateLimitWindowLocal(usedPercent: 100, windowMinutes: 0)
+            }
+        }
         var payload: [String: Any] = [:]
         if let p = window(shortWindow) { payload["primary"] = p }
         if let s = window(longWindow) { payload["secondary"] = s }
         if let plan = limits.planType { payload["planType"] = plan }
+        if let limitId = limits.limitId { payload["limitId"] = limitId }
+        if let credits = limits.credits {
+            var c: [String: Any] = [
+                "hasCredits": credits.hasCredits,
+                "unlimited": credits.unlimited,
+            ]
+            if let balance = credits.balance { c["balance"] = balance }
+            payload["credits"] = c
+        }
         return payload
     }
 

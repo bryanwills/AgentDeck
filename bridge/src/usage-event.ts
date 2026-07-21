@@ -88,6 +88,25 @@ function normalizeCodexRateLimits(rl?: CodexRateLimits | null): CodexRateLimits 
     if (w.windowMinutes >= 1440) longWindow ??= w;
     else shortWindow ??= w;
   }
+  // Credit-based plans (limitId "premium" etc.) report null 5h/7d windows and
+  // convey usage via a `credits` block instead. With no timed windows the
+  // percentage gauges would vanish entirely on slot-based surfaces. Map the
+  // credit state onto a synthetic primary window so every surface reads
+  // consistently: exhausted credits read as 100% used, unlimited as 0%. A
+  // partial balance can't be turned into an honest percentage (no cap is
+  // exposed), so it stays absent rather than guessing. No `resetsAt` is set, so
+  // the window is never flagged stale (credits refresh on plan renewal, not a
+  // rolling timer).
+  if (!shortWindow && !longWindow && rl.credits) {
+    if (rl.credits.unlimited === true) {
+      shortWindow = { usedPercent: 0, windowMinutes: 0 };
+    } else if (
+      rl.credits.hasCredits === false ||
+      (rl.credits.balance != null && Number.isFinite(Number(rl.credits.balance)) && Number(rl.credits.balance) <= 0)
+    ) {
+      shortWindow = { usedPercent: 100, windowMinutes: 0 };
+    }
+  }
   return { ...rl, primary: normalizeCodexWindow(shortWindow), secondary: normalizeCodexWindow(longWindow) };
 }
 

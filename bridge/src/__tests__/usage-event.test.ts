@@ -241,4 +241,41 @@ describe('buildUsageEvent Codex window normalization', () => {
     expect(evt.codexRateLimits!.secondary!.windowMinutes).toBe(10080);
     expect(evt.codexRateLimits!.secondary!.resetsAt).toBe(future);
   });
+
+  it('maps exhausted credit-based plan (null windows) to a 100% primary gauge', () => {
+    // Credit plans (limitId "premium") report null 5h/7d windows. An exhausted
+    // balance reads as 100% used so the gauge shows instead of vanishing, and is
+    // NOT marked stale (no resetsAt → not stale) so surfaces don't hide it.
+    const evt = buildUsageEvent(
+      ...codexArgs({
+        limitId: 'premium',
+        primary: null,
+        secondary: null,
+        credits: { hasCredits: false, unlimited: false, balance: '0' },
+        planType: 'plus',
+      }),
+    ) as UsageEvent;
+
+    expect(evt.codexRateLimits!.primary!.usedPercent).toBe(100);
+    expect(evt.codexRateLimits!.primary!.stale).toBeUndefined();
+    expect(evt.codexRateLimits!.secondary).toBeUndefined();
+  });
+
+  it('maps an unlimited credit plan to a 0% primary gauge', () => {
+    const evt = buildUsageEvent(
+      ...codexArgs({ credits: { hasCredits: true, unlimited: true } }),
+    ) as UsageEvent;
+
+    expect(evt.codexRateLimits!.primary!.usedPercent).toBe(0);
+    expect(evt.codexRateLimits!.primary!.stale).toBeUndefined();
+  });
+
+  it('leaves a partial credit balance absent (no honest percentage)', () => {
+    const evt = buildUsageEvent(
+      ...codexArgs({ credits: { hasCredits: true, unlimited: false, balance: '42' } }),
+    ) as UsageEvent;
+
+    expect(evt.codexRateLimits!.primary).toBeUndefined();
+    expect(evt.codexRateLimits!.secondary).toBeUndefined();
+  });
 });
