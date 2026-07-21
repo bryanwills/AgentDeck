@@ -58,7 +58,14 @@ export function parseAntigravityTranscript(raw: string): AntigravityTranscriptSu
   let goal: string | undefined;
   let model: string | undefined;
   let currentTask: string | undefined;
-  let processing = false;
+  // Track the newest step to read its live status. agy appends a `RUNNING`
+  // record when a step starts and a `DONE` record when it finishes, so the
+  // transcript accumulates historical `RUNNING` entries that are never
+  // rewritten. A session is processing ONLY while its newest step is still
+  // RUNNING — scanning every record for RUNNING would freeze a finished
+  // session into "processing" forever (verified: real transcripts carry
+  // dozens of stray RUNNING records after the last DONE step).
+  let latestStep: AgyRecord | undefined;
 
   for (const rec of records) {
     if (rec.type === 'USER_INPUT' && typeof rec.content === 'string') {
@@ -71,12 +78,21 @@ export function parseAntigravityTranscript(raw: string): AntigravityTranscriptSu
       const change = rec.content.match(/Model Selection`?\s+from\s+.*?\s+to\s+(.+?)\.(?:\s|$)/);
       if (change && change[1].trim()) model = change[1].trim();
     }
-    if (rec.status === 'RUNNING') processing = true;
     if (rec.type && TOOL_TYPES.has(rec.type)) {
       currentTask = rec.tool_calls?.[0]?.name ?? rec.type.toLowerCase();
     }
+    // Records arrive in file order (newest last within the tail), so prefer a
+    // higher step_index and otherwise advance on every record so records
+    // without step_index still resolve to the newest by position.
+    if (
+      latestStep === undefined ||
+      (rec.step_index ?? -1) >= (latestStep.step_index ?? -1)
+    ) {
+      latestStep = rec;
+    }
   }
 
+  const processing = latestStep?.status === 'RUNNING';
   return { goal, model, currentTask, state: processing ? 'processing' : 'idle' };
 }
 
