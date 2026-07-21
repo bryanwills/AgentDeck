@@ -6,6 +6,27 @@ ship independently under their own tags (`apple-v*`, `streamdeck-v*`, `ulanzi-v*
 `npm-v*`, `android-v*`, `esp32-v*`), so a given version may reach each store on a
 different day. See [RELEASING.md](RELEASING.md).
 
+## 1.0.1
+
+Maintenance release for the macOS app — reliability fixes that landed after the
+1.0.0 build (03ed5a94) went to the App Store. macOS ships first; the iOS
+companion carries its fix on a later train while 1.0.0 finishes review.
+
+### macOS app — App Store
+
+- Fix the dashboard failing to attach to its own in-process daemon (WS connect
+  handler was being clobbered and ports were mis-probed)
+- Remove an actor-isolated closure that could trap at runtime
+- Display-sleep correctness: re-sync `display_state` to clients, disarm two dim
+  traps, and make iDotMatrix "off" render actually dark
+- Recover a wedged ESP32 serial port by backing off instead of resetting the board
+- Stop dropping whole tail windows on a split UTF-8 character (restores the Codex
+  usage gauge)
+
+### iOS companion (ships after 1.0.0 review completes)
+
+- Hold the screen awake while the paired Mac's display is on
+
 ## 1.0.0
 
 First public release. Previous 0.x versions were development and TestFlight-only builds.
