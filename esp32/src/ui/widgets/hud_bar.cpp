@@ -299,7 +299,7 @@ static const char* ips10StatePhrase(const char* state) {
 static uint32_t ips10AgentColor(const char* agentType) {
     if (strstr(agentType, "openclaw") != nullptr) return Theme::CrayfishShell;
     if (strstr(agentType, "codex") != nullptr) return Theme::CloudBody;
-    if (strstr(agentType, "opencode") != nullptr) return Theme::OpenCodeOuter;
+    if (strstr(agentType, "opencode") != nullptr) return Theme::OpenCodeInner; // Use dark grey instead of light off-white on white cards
     if (strstr(agentType, "antigravity") != nullptr) return Theme::AntigravityCyan;
     if (strstr(agentType, "claude") != nullptr) return Theme::ClaudeBody;
     return Theme::HUDDim;
@@ -728,17 +728,24 @@ static void detailEnsure() {
     lv_label_set_long_mode(detailAction, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(detailAction, LV_PCT(100));
 
-    detailLog = lv_label_create(detailPanel);
+    // Scrollable container for the terminal-like log feed to prevent truncation
+    lv_obj_t* logScroll = lv_obj_create(detailPanel);
+    lv_obj_set_width(logScroll, LV_PCT(100));
+    lv_obj_set_flex_grow(logScroll, 1);
+    lv_obj_set_style_bg_color(logScroll, lv_color_hex(0x07140F), 0);
+    lv_obj_set_style_bg_opa(logScroll, (lv_opa_t)150, 0);
+    lv_obj_set_style_border_width(logScroll, 0, 0);
+    lv_obj_set_style_radius(logScroll, 9, 0);
+    lv_obj_set_style_pad_all(logScroll, 10, 0);
+    lv_obj_set_scroll_dir(logScroll, LV_DIR_VER);
+
+    detailLog = lv_label_create(logScroll);
     lv_obj_set_style_text_color(detailLog, lv_color_hex(Theme::HUDDim), 0);
     lv_obj_set_style_text_font(detailLog, &font_kr_12, 0);
-    lv_obj_set_style_bg_color(detailLog, lv_color_hex(0x07140F), 0);
-    lv_obj_set_style_bg_opa(detailLog, (lv_opa_t)150, 0);
-    lv_obj_set_style_pad_all(detailLog, 10, 0);
-    lv_obj_set_style_radius(detailLog, 9, 0);
     lv_label_set_recolor(detailLog, true);
     lv_label_set_long_mode(detailLog, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(detailLog, LV_PCT(100));
-    lv_obj_set_flex_grow(detailLog, 1);
+    lv_obj_set_height(detailLog, LV_SIZE_CONTENT);
 
     detailFoot = lv_obj_create(detailPanel);
     lv_obj_set_size(detailFoot, LV_PCT(100), LV_SIZE_CONTENT);
@@ -798,7 +805,7 @@ static void detailRefresh() {
     }
 
     // Activity log — this session's timeline entries (oldest → newest).
-    char logbuf[640]; int lp = 0; logbuf[0] = '\0';
+    static char logbuf[2048]; int lp = 0; logbuf[0] = '\0';
     lockState();
     for (uint8_t i = 0; i < g_state.timelineCount; i++) {
         uint8_t idx = (g_state.timelineHead + i) % TIMELINE_MAX_ENTRIES;
@@ -808,14 +815,8 @@ static void detailRefresh() {
         int w = snprintf(logbuf + lp, sizeof(logbuf) - lp, "%02d:%02d  %s\n", hh, mm, te.raw);
         if (w < 0) break;
         lp += w;
-        // snprintf returns the would-have-written length, NOT the bytes actually
-        // written. A long host te.raw pushes lp past the buffer, and the
-        // logbuf[lp - 1] fixup below would then write out of bounds and smash the
-        // UI-task stack → SW reset (the "occasional reboot"). appendBounded() is
-        // compiled out on IPS10, so clamp lp here to the real truncated length.
-        // Same bug class as de6b1519 "Fix IPS10 HUD stack smash".
         if ((size_t)lp >= sizeof(logbuf)) lp = (int)sizeof(logbuf) - 1;
-        if ((size_t)lp >= sizeof(logbuf) - 80) break;
+        if ((size_t)lp >= sizeof(logbuf) - 160) break;
     }
     unlockState();
     if (lp == 0) snprintf(logbuf, sizeof(logbuf), "No activity recorded for this session yet.");
@@ -1345,8 +1346,7 @@ void init(lv_obj_t* parent) {
 
     // Bottom gauge panel — centered at bottom of circle
     panelRight = lv_obj_create(parent);
-    int panelW = GAUGE_SIZE * 2 + GAUGE_GAP + 16;
-    lv_obj_set_size(panelRight, panelW, LV_SIZE_CONTENT);
+    lv_obj_set_size(panelRight, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_align(panelRight, LV_ALIGN_BOTTOM_MID, 0, -30);
     lv_obj_set_style_bg_color(panelRight, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(panelRight, LV_OPA_50, 0);
@@ -1436,16 +1436,15 @@ void init(lv_obj_t* parent) {
 
     // === Right panel: Tank Status with water-fill gauges ===
     panelRight = lv_obj_create(parent);
-    int panelW = GAUGE_SIZE * 2 + GAUGE_GAP + 16;
-    lv_obj_set_size(panelRight, panelW, LV_SIZE_CONTENT);
+    lv_obj_set_size(panelRight, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 #if defined(BOARD_TTGO)
-    lv_obj_set_pos(panelRight, g_screenW - panelW - 6, 6);
+    lv_obj_align(panelRight, LV_ALIGN_TOP_RIGHT, -6, 6);
 #else
     if (portrait) {
         // Portrait: below left panel, aligned to bottom-right
         lv_obj_align(panelRight, LV_ALIGN_BOTTOM_RIGHT, -8, -8);
     } else {
-        lv_obj_set_pos(panelRight, g_screenW - panelW - 8, PANEL_TOP_Y);
+        lv_obj_align(panelRight, LV_ALIGN_TOP_RIGHT, -8, PANEL_TOP_Y);
     }
 #endif
     lv_obj_set_style_bg_color(panelRight, lv_color_hex(0x000000), 0);
@@ -1461,11 +1460,12 @@ void init(lv_obj_t* parent) {
     lv_obj_clear_flag(panelRight, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(panelRight, LV_FLEX_FLOW_COLUMN);
 
-    // Header
+    // Header (hidden per user request)
     lblTankHeader = lv_label_create(panelRight);
     lv_obj_set_style_text_color(lblTankHeader, lv_color_hex(Theme::HUDDim), 0);
     lv_obj_set_style_text_font(lblTankHeader, &lv_font_montserrat_10, 0);
-    lv_label_set_text(lblTankHeader, "TANK STATUS");
+    lv_label_set_text(lblTankHeader, "");
+    lv_obj_add_flag(lblTankHeader, LV_OBJ_FLAG_HIDDEN);
 #endif
 
 #if !defined(BOARD_IPS10)
@@ -1758,6 +1758,20 @@ void update() {
     // OAuth usage). Showing empty "--" tanks would read as broken.
     updateGauge(gauge5hFill, gauge5hPct, gauge5hReset, p5h, reset5h, usageStale);
     updateGauge(gauge7dFill, gauge7dPct, gauge7dReset, p7d, reset7d, usageStale);
+    if (gauge5hBox) {
+        if (p5h >= 0.0f) {
+            lv_obj_clear_flag(lv_obj_get_parent(gauge5hBox), LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(lv_obj_get_parent(gauge5hBox), LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (gauge7dBox) {
+        if (p7d >= 0.0f) {
+            lv_obj_clear_flag(lv_obj_get_parent(gauge7dBox), LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(lv_obj_get_parent(gauge7dBox), LV_OBJ_FLAG_HIDDEN);
+        }
+    }
     {
         bool showClaude = (p5h >= 0.0f || p7d >= 0.0f);
         if (claudeGroup) { showClaude ? lv_obj_clear_flag(claudeGroup, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(claudeGroup, LV_OBJ_FLAG_HIDDEN); }
