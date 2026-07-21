@@ -187,7 +187,7 @@ The iOS app (same bundle family `bound.serendipity.agent.deck`) is a read-only r
 No account required. To see the app's features:
 
 1. Launch the app. A first-run onboarding sheet walks the user through the value prop, available AI agents, and iPad pairing. Dismissing it opens the empty dashboard with a prompt to "Preview Devices".
-2. Click "Preview Devices" from the menu bar to see how AgentDeck renders sessions on 17 built-in preview targets — no real hardware required.
+2. Click "Preview Devices" from the menu bar to see how AgentDeck renders sessions on the built-in preview targets — no real hardware required.
 3. After hooks are enabled, sessions the user starts independently appear automatically in the dashboard. AgentDeck never launches Terminal scripts or command-line tools itself.
 4. Click "Pair iPad" to show a QR code the iOS companion app can scan.
 5. Open Settings → Hardware Setup to see the in-app flows for ESP32 and Pixoo provisioning (no subprocess calls; writes serial config directly).
@@ -284,33 +284,33 @@ The Notes field is capped at 4,000 characters and persists across every submissi
 condensed version rather than this document in full. Paste the block below verbatim; the long-form
 sections above are for the Resolution Center reply, where length is not constrained.
 
-<!-- notes-field:begin (3,992 chars — recount with `wc -m` after any edit) -->
+<!-- notes-field:begin (3,552 chars — recount with `wc -m` after any edit) -->
 
 ```text
 NO ACCOUNT REQUIRED. Review on a clean Mac with only AgentDeck installed — no external process or terminal setup is part of these instructions.
 
 WHAT IT DOES
-AgentDeck Dashboard monitors and evaluates AI coding agent sessions (Claude Code, opt-in Codex lifecycle hooks, opt-in OpenCode local-server events, OpenClaw Gateway). The app's built-in sandboxed Swift daemon owns the dashboard server, hook ingestion, session state, local-network pairing, and evaluation. Users start their chosen agent independently; AgentDeck receives only the integrations they explicitly enable.
+AgentDeck Dashboard monitors and evaluates AI coding-agent sessions (Claude Code, opt-in Codex hooks, opt-in OpenCode events, OpenClaw Gateway). Its built-in sandboxed Swift daemon owns the dashboard server, hook ingestion, session state, local-network pairing, and evaluation. Users start their agent independently; AgentDeck receives only the integrations they explicitly enable.
 
 HOW TO SEE THE FEATURES WITHOUT ANY AGENT INSTALLED
-1. Launch the app. A first-run onboarding sheet explains the value prop and iPad pairing. Dismiss it to reach the dashboard.
-2. Click "Preview Devices" in the menu bar — this renders sessions on 17 built-in preview targets with no hardware and no agent required. This is the fastest way to review the UI.
-3. Click "Pair iPad" to show the QR code the iOS companion scans.
+1. Launch the app; dismiss the first-run onboarding sheet to reach the dashboard.
+2. Click "Preview Devices" in the menu bar — it renders sessions on the built-in preview targets, no hardware or agent required. Fastest way to review the UI.
+3. Click "Pair iPad" to show the QR the iOS companion scans.
 
 NO SUBPROCESS (Guideline 2.5.2)
-The build spawns no subprocess and writes no shell scripts: no Process() invocation, no .command writer, no AppleScript path, no external-binary probes. The sole bundled executable is Contents/MacOS/AgentDeck. Our CI script apple/scripts/verify-appstore-archive.sh runs after archive and fails the build if a forbidden path string reappears in the shipped Mach-O, if an extra bundled executable is present, or if a home-relative-path entitlement is requested.
+The build spawns no subprocess and writes no shell scripts: no Process(), no .command writer, no AppleScript, no external-binary probes. The sole bundled executable is Contents/MacOS/AgentDeck. Our CI (apple/scripts/verify-appstore-archive.sh) fails the build if a forbidden path string reappears in the shipped Mach-O, if an extra bundled executable is present, or if a home-relative-path entitlement is requested.
 
 ENTITLEMENT RATIONALE
-• network.server — the app runs a local-only HTTP+WebSocket dashboard hub built on Network.framework NWListener (port 9120 by default, user-configurable in Settings → Port). It must be a server because it accepts inbound connections from three sources it cannot reach as a client: (1) the same user's own iPhone/iPad running our AgentDeck Dashboard companion app, which finds the Mac via Bonjour over their Wi-Fi and connects in to render live session data; (2) AI coding-agent lifecycle hooks, which POST session events to 127.0.0.1 from the user's own CLI running in their own terminal; (3) the optional Elgato Stream Deck and Ulanzi plugins. Binding is loopback + the local network interfaces only — no firewall rules, no port mapping, no traffic from the public internet — and endpoints are read-only dashboard reads plus that hook POST. To verify: Settings → Port shows the active listening port, and "Pair iPad" in the menu bar shows the QR the companion scans to connect inbound.
-• Bonjour (_agentdeck._tcp) — lets the companion find the Mac without the user typing an IP. Explained via NSLocalNetworkUsageDescription.
-• device.bluetooth — optional iDotMatrix and Divoom Timebox Mini LED displays via first-party CoreBluetooth, as a BLE central only. Inert unless the user pairs one.
-• device.audio-input — optional voice command input. device.serial — optional ESP32 USB-serial displays; inert without such hardware.
-• files.user-selected.read-write + bookmarks.app-scope — hook installation is fully opt-in: an NSAlert explains the keys, then an NSOpenPanel requires the user to pick ~/.claude/settings.json themselves. Only then do we take a security-scoped bookmark and write. A Remove button reverts it.
+• network.server — the app runs a local-only HTTP+WebSocket dashboard hub on Network.framework NWListener (port 9120, user-configurable in Settings → Port). It must be a server because it accepts inbound connections from three sources it cannot reach as a client: (1) the same user's iPhone/iPad running our AgentDeck companion, which finds the Mac via Bonjour over Wi-Fi; (2) AI-agent lifecycle hooks that POST session events to 127.0.0.1 from the user's own terminal; (3) the optional Elgato Stream Deck and Ulanzi plugins. Binding is loopback + local interfaces only — no firewall rules, no port mapping, no public-internet traffic — and endpoints are read-only dashboard reads plus that hook POST. To verify: Settings → Port shows the listening port, and "Pair iPad" shows the QR the companion scans to connect inbound.
+• Bonjour (_agentdeck._tcp) — lets the companion find the Mac without typing an IP. Explained via NSLocalNetworkUsageDescription.
+• device.bluetooth — optional iDotMatrix and Divoom Timebox Mini LED displays via CoreBluetooth, BLE central only. Inert unless the user pairs one.
+• device.audio-input — optional voice input. device.serial — optional ESP32 USB-serial displays; inert without such hardware.
+• files.user-selected.read-write + bookmarks.app-scope — hook installation is fully opt-in: an NSAlert explains it, then an NSOpenPanel requires the user to pick ~/.claude/settings.json themselves. Only then do we take a security-scoped bookmark and write. A Remove button reverts it.
 
 PRIVACY / EVALUATION BACKENDS
-Evaluation defaults to on-device Apple Intelligence Foundation Models — no network. Remote backends are opt-in alternatives the user configures with their own endpoint and key: Anthropic API, any OpenAI-compatible server (loopback ones they run such as Ollama/LM Studio, or a remote endpoint such as OpenRouter), or a local MLX server. Only when one is selected does turn content leave the device, to the endpoint the user chose. Disclosed in App Privacy and our privacy policy. No analytics or advertising SDK, and we operate no cloud backend.
+Evaluation defaults to on-device Apple Intelligence Foundation Models — no network. Remote backends are opt-in alternatives the user configures with their own endpoint and key (Anthropic API, any OpenAI-compatible server, or a local MLX server). Only when one is selected does turn content leave the device, to the endpoint the user chose. Disclosed in App Privacy and our privacy policy. No analytics or advertising SDK, and we operate no cloud backend.
 
-All hardware integrations are optional (Stream Deck+ additionally needs Elgato's software); reviewers can skip them and the rest of the app is unaffected.
+All hardware integrations are optional (Stream Deck+ also needs Elgato's software); reviewers can skip them and the rest of the app is unaffected.
 
 Contact: admin@foundby.kr
 ```
