@@ -169,6 +169,16 @@ claude code,ai,agent,dashboard,stream deck,monitoring,apme,openclaw,codex,ipad,c
 피드백은 언제든 환영합니다: admin@foundby.kr
 ```
 
+### What's New (v1.0.1, iOS — 1.0.0 심사 통과 후 배포)
+
+```
+안정성 개선 업데이트.
+
+• 페어링된 Mac의 화면이 켜져 있는 동안 iPad·iPhone 화면도 꺼지지 않아 실시간 상태가 계속 보입니다
+
+피드백은 언제든 환영합니다: admin@foundby.kr
+```
+
 ### What's New (for v1.0.0, 4000자)
 
 **macOS App**
@@ -359,6 +369,16 @@ claude code,ai,エージェント,ダッシュボード,stream deck,monitoring,a
 • 接続中のすべてのサーフェスで画面スリープの挙動を統一
 • Codex使用量ゲージを復元（テキストデコードの不具合で空白になることがありました）
 • 接続中のESP32シリアルポートが停止した際の復旧を強化
+
+フィードバックはいつでも歓迎します: admin@foundby.kr
+```
+
+### What's New (v1.0.1, iOS — 1.0.0審査通過後に配信)
+
+```
+安定性の改善アップデート。
+
+• ペアリング中のMacの画面が点いている間、iPad・iPhoneの画面も消えず、ライブ状態が見え続けます
 
 フィードバックはいつでも歓迎します: admin@foundby.kr
 ```
@@ -556,6 +576,16 @@ Maintenance update — reliability fixes for the first release.
 • Display-sleep now behaves consistently across every connected surface
 • Restored the Codex usage gauge (a text-decoding bug could blank it)
 • More resilient recovery when a connected ESP32's serial port stalls
+
+Thanks for the early feedback — keep it coming: admin@foundby.kr
+```
+
+### What's New (v1.0.1, iOS — ships after 1.0.0 review clears)
+
+```
+Reliability update.
+
+• The screen now stays awake while your paired Mac's display is on, so live status stays visible
 
 Thanks for the early feedback — keep it coming: admin@foundby.kr
 ```
