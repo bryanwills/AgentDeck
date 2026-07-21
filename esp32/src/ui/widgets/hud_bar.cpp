@@ -1703,6 +1703,20 @@ void update() {
     // whenever a Codex window is present, independent of Claude data.
     updateGauge(gaugeCx5hFill, gaugeCx5hPct, gaugeCx5hReset, cxP5h, cxReset5h, false);
     updateGauge(gaugeCx7dFill, gaugeCx7dPct, gaugeCx7dReset, cxP7d, cxReset7d, false);
+    if (gaugeCx5hBox) {
+        if (cxP5h >= 0.0f) {
+            lv_obj_clear_flag(lv_obj_get_parent(gaugeCx5hBox), LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(lv_obj_get_parent(gaugeCx5hBox), LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (gaugeCx7dBox) {
+        if (cxP7d >= 0.0f) {
+            lv_obj_clear_flag(lv_obj_get_parent(gaugeCx7dBox), LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(lv_obj_get_parent(gaugeCx7dBox), LV_OBJ_FLAG_HIDDEN);
+        }
+    }
     {
         bool showCodex = (cxP5h >= 0.0f || cxP7d >= 0.0f);
         if (codexGroup) { showCodex ? lv_obj_clear_flag(codexGroup, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(codexGroup, LV_OBJ_FLAG_HIDDEN); }
