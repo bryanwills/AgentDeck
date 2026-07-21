@@ -2,7 +2,7 @@
 id: design.resources
 title: Design Resource Map
 description: Where every design asset lives, which copy is canonical, and which gate stops drift.
-category: Foundations
+category: Design
 locale: en
 canonical: true
 status: stable

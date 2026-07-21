@@ -2,7 +2,7 @@
 id: validation.ulanzi-plugin
 title: Ulanzi Plugin Verification
 description: How to verify the D200H plugin without hardware or Ulanzi Studio, and what the hardware pass adds.
-category: Validation
+category: Engineering
 locale: en
 canonical: true
 status: stable

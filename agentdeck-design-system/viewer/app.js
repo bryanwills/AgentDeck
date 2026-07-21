@@ -23,6 +23,11 @@
       componentsDesc: 'Reference specimens rendered with the same tokens used by this viewer.',
       assetsDesc: 'Every design resource the system actually uses, in one index: brand marks, generated device masks, creatures, icons, brand type, product marks, hardware photography, and the reference surfaces they came from.',
       tools: 'Specimens',
+      catPreview: 'Preview',
+      catDesign: 'Design',
+      catSpecs: 'Specs',
+      catEngineering: 'Engineering',
+      engineeringToggle: 'Engineering',
       docs: 'Documents',
       noResults: 'No catalog entries match this search.',
       componentsNote:
@@ -72,6 +77,11 @@
       componentsDesc: '이 뷰어와 동일한 토큰으로 렌더한 기준 specimen입니다.',
       assetsDesc: '디자인 시스템이 실제로 쓰는 리소스를 한 곳에 모았어요 — 브랜드 마크, 생성된 기기 마스크, 크리처, 아이콘, 브랜드 서체, 제품 마크, 하드웨어 사진, 그리고 출처가 된 레퍼런스 표면까지.',
       tools: '미리보기',
+      catPreview: '미리보기',
+      catDesign: '디자인',
+      catSpecs: '스펙',
+      catEngineering: '엔지니어링',
+      engineeringToggle: '엔지니어링',
       docs: '문서',
       noResults: '검색과 일치하는 문서가 없습니다.',
       componentsNote:
@@ -120,6 +130,11 @@
       componentsDesc: 'この Viewer と同じ token で描画する基準 specimen です。',
       assetsDesc: 'Design System が実際に使う resource を一つの index に集約 — brand mark、生成された device mask、クリーチャー、icon、ブランド書体、製品マーク、ハードウェア写真、そして出自となった reference 面まで。',
       tools: 'Specimen',
+      catPreview: 'プレビュー',
+      catDesign: 'デザイン',
+      catSpecs: '仕様',
+      catEngineering: 'エンジニアリング',
+      engineeringToggle: 'エンジニアリング',
       docs: '文書',
       noResults: '検索に一致する文書がありません。',
       componentsNote:
@@ -191,9 +206,17 @@
 
   function inlineMarkdown(value, sourcePath) {
     const code = [];
+    // Extract inline code first to avoid mangling
     let output = String(value).replace(/`([^`]+)`/g, (_, inner) => {
       code.push(`<code>${escapeHtml(inner)}</code>`);
       return `\u0000CODE${code.length - 1}\u0000`;
+    });
+    // Extract images before escaping (![alt](url))
+    const images = [];
+    output = output.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
+      const resolvedSrc = /^https?:/.test(src) ? src : src;
+      images.push(`<img class="md-img" src="${escapeHtml(resolvedSrc)}" alt="${escapeHtml(alt)}" data-lightbox data-caption="${escapeHtml(alt)}">`);
+      return `\u0000IMG${images.length - 1}\u0000`;
     });
     output = escapeHtml(output)
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -202,7 +225,9 @@
         const target = resolveLink(href, sourcePath);
         return `<a href="${escapeHtml(target)}">${label}</a>`;
       });
-    return output.replace(/\u0000CODE(\d+)\u0000/g, (_, index) => code[Number(index)]);
+    output = output.replace(/\u0000CODE(\d+)\u0000/g, (_, index) => code[Number(index)]);
+    output = output.replace(/\u0000IMG(\d+)\u0000/g, (_, index) => images[Number(index)]);
+    return output;
   }
 
   function resolveLink(href, sourcePath) {
@@ -338,6 +363,24 @@
     els.generatedAt.textContent = `${text.generated} ${date.toLocaleDateString(document.documentElement.lang)}`;
   }
 
+  // Fixed category display order — determines rail section sequence.
+  const CATEGORY_ORDER = ['Preview', 'Design', 'Specs', 'Engineering',
+                          '미리보기', '디자인', '스펙', '엔지니어링',
+                          'プレビュー', 'デザイン', '仕様', 'エンジニアリング'];
+
+  // Engineering section collapses by default; state is persisted.
+  const ENG_KEY = 'agentdeck-design-engineering-open';
+  let engineeringOpen = localStorage.getItem(ENG_KEY) === 'true';
+
+  function categoryLabel(raw) {
+    const t = strings();
+    if (raw === 'Preview') return t.catPreview;
+    if (raw === 'Design') return t.catDesign;
+    if (raw === 'Specs') return t.catSpecs;
+    if (raw === 'Engineering') return t.catEngineering;
+    return raw;
+  }
+
   function navigationItems() {
     const items = data.documents.map((entry) => {
       const localized = localizedDocument(entry);
@@ -354,23 +397,23 @@
       {
         id: 'tokens',
         title: strings().tokens,
-        category: strings().tools,
+        category: 'Preview',
         locale: 'live',
-        search: 'tokens colors type spacing radius motion',
+        search: 'tokens colors type spacing radius motion preview live',
       },
       {
         id: 'components',
         title: strings().components,
-        category: strings().tools,
+        category: 'Preview',
         locale: 'live',
-        search: 'components buttons badges status placeholder typography',
+        search: 'components buttons badges status placeholder typography preview live',
       },
       {
         id: 'assets',
         title: strings().assets,
-        category: strings().tools,
+        category: 'Preview',
         locale: 'live',
-        search: 'assets logo icon brands masks glyphs creatures reference mockups typography fonts plex jetbrains photography hardware photos captures claude codex openclaw opencode antigravity',
+        search: 'assets logo icon brands masks glyphs creatures reference mockups typography fonts plex jetbrains photography hardware photos captures claude codex openclaw opencode antigravity preview live',
       },
     );
     return items.filter((item) => !query || item.search.includes(query));
@@ -378,22 +421,79 @@
 
   function renderNavigation() {
     const grouped = new Map();
-    for (const item of navigationItems()) {
-      if (!grouped.has(item.category)) grouped.set(item.category, []);
+    // Collect items in fixed order
+    const allItems = navigationItems();
+    const orderedKeys = [];
+    for (const item of allItems) {
+      if (!grouped.has(item.category)) {
+        grouped.set(item.category, []);
+        orderedKeys.push(item.category);
+      }
       grouped.get(item.category).push(item);
     }
+
     if (grouped.size === 0) {
       els.navigation.innerHTML = `<p class="description">${escapeHtml(strings().noResults)}</p>`;
       return;
     }
-    els.navigation.innerHTML = [...grouped.entries()]
-      .map(
-        ([category, items]) =>
-          `<section class="rail-group"><h3 class="rail-title">${escapeHtml(category)}</h3>${items.map((item) => `<button class="rail-button${item.id === activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.title)}</span></button>`).join('')}</section>`,
-      )
+
+    // Sort keys by CATEGORY_ORDER, unknown categories go last
+    orderedKeys.sort((a, b) => {
+      const ai = CATEGORY_ORDER.indexOf(a);
+      const bi = CATEGORY_ORDER.indexOf(b);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+
+    // Check if active item is in Engineering — if so, force Engineering open
+    const engItems = grouped.get('Engineering') || [];
+    const activeInEng = engItems.some((item) => item.id === activeId);
+    if (activeInEng) engineeringOpen = true;
+
+    // When searching, always show Engineering expanded
+    const searching = query.length > 0;
+
+    els.navigation.innerHTML = orderedKeys
+      .map((category) => {
+        const items = grouped.get(category);
+        const isEng = category === 'Engineering';
+        const isOpen = !isEng || engineeringOpen || searching;
+        const label = categoryLabel(category);
+        const itemCount = items.length;
+        if (isEng) {
+          return `<section class="rail-group rail-group--collapsible${isOpen ? ' is-open' : ''}" data-category="Engineering">
+            <button class="rail-title rail-title--toggle" aria-expanded="${isOpen}" data-toggle="Engineering">
+              <span>${escapeHtml(label)}</span>
+              <span class="rail-toggle-count">${itemCount}</span>
+              <span class="rail-toggle-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="rail-group-body">
+              <div class="rail-group-inner">
+                ${items.map((item) => `<button class="rail-button${item.id === activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.title)}</span></button>`).join('')}
+              </div>
+            </div>
+          </section>`;
+        }
+        return `<section class="rail-group">
+          <h3 class="rail-title">${escapeHtml(label)}</h3>
+          ${items.map((item) => `<button class="rail-button${item.id === activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.title)}</span></button>`).join('')}
+        </section>`;
+      })
       .join('');
+
     for (const button of els.navigation.querySelectorAll('[data-id]')) {
       button.addEventListener('click', () => activate(button.dataset.id));
+    }
+    // Collapsible Engineering toggle
+    const toggle = els.navigation.querySelector('[data-toggle="Engineering"]');
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        engineeringOpen = !engineeringOpen;
+        localStorage.setItem(ENG_KEY, String(engineeringOpen));
+        renderNavigation();
+      });
     }
   }
 
@@ -539,7 +639,15 @@
       // Source-only pointer: the viewer must not try to render JSX or HTML here.
       return `<article class="asset-card asset-card--spec"><div class="asset-stage asset-stage--spec"><div class="ad-hatch asset-hatch"><span class="ad-tier ad-tier--cli">${escapeHtml(strings().specSourceOnly)}</span></div></div><h3>${escapeHtml(asset.name)}</h3><p class="asset-note">${escapeHtml(asset.note || '')}</p>${assetMeta(asset)}<a class="asset-link" href="${escapeHtml(asset.url)}" rel="noreferrer">${escapeHtml(strings().specOpen)}</a></article>`;
     }
-    return `<article class="asset-card"><div class="asset-stage"><img src="${escapeHtml(asset.url)}" alt="${escapeHtml(asset.name)}"></div><h3>${escapeHtml(asset.name)}</h3>${assetMeta(asset)}</article>`;
+    // Default image card — clickable for lightbox
+    return `<article class="asset-card asset-card--img" tabindex="0" role="button" aria-label="View ${escapeHtml(asset.name)}" data-lightbox-src="${escapeHtml(asset.url)}" data-lightbox-cap="${escapeHtml(asset.name)}">
+      <div class="asset-stage">
+        <img src="${escapeHtml(asset.url)}" alt="${escapeHtml(asset.name)}" loading="lazy">
+        <span class="asset-zoom-hint" aria-hidden="true">&#x2B07; Click to zoom</span>
+      </div>
+      <h3>${escapeHtml(asset.name)}</h3>
+      ${assetMeta(asset)}
+    </article>`;
   }
 
   /* Declarative specimen list. Every `html` string is canonical `.ad-*` markup
@@ -690,13 +798,17 @@
   }
 
   function specimenCard(spec) {
+    const copyId = `copy-${Math.random().toString(36).slice(2)}`;
     return `<article class="specimen${spec.wide ? ' specimen--wide' : ''}">
       <header class="specimen-head">
         <span class="ad-kicker">${escapeHtml(spec.group)}</span>
         <h3>${escapeHtml(spec.title)}</h3>
-        <code class="specimen-class"><span class="specimen-class-label">${escapeHtml(strings().specimenClass)}</span>${escapeHtml(spec.classes)}</code>
+        <div class="specimen-head-row">
+          <code class="specimen-class"><span class="specimen-class-label">${escapeHtml(strings().specimenClass)}</span>${escapeHtml(spec.classes)}</code>
+          <button class="specimen-copy-btn" data-copy-id="${copyId}" title="Copy HTML" aria-label="Copy HTML for ${escapeHtml(spec.title)}">&#x2398; Copy</button>
+        </div>
       </header>
-      <div class="specimen-stage">${spec.html}</div>
+      <div class="specimen-stage" id="${copyId}">${spec.html}</div>
       <p class="specimen-note">${escapeHtml(spec.note)}</p>
     </article>`;
   }
@@ -771,6 +883,73 @@
       updateTabs();
       render();
     }
+  });
+
+  // ── Lightbox ─────────────────────────────────────────────────────────────
+  const lightbox = document.getElementById('lightbox');
+  const lightboxImg = document.getElementById('lightbox-img');
+  const lightboxCap = document.getElementById('lightbox-cap');
+
+  function openLightbox(src, caption) {
+    lightboxImg.src = src;
+    lightboxImg.alt = caption || '';
+    lightboxCap.textContent = caption || '';
+    lightbox.hidden = false;
+    document.body.classList.add('lightbox-open');
+    lightbox.querySelector('.lightbox-close').focus();
+  }
+
+  function closeLightbox() {
+    lightbox.hidden = true;
+    document.body.classList.remove('lightbox-open');
+  }
+
+  lightbox.querySelector('.lightbox-close').addEventListener('click', closeLightbox);
+  lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !lightbox.hidden) closeLightbox(); });
+
+  // Delegate: asset cards (data-lightbox-src) + markdown images (data-lightbox)
+  document.addEventListener('click', (e) => {
+    const card = e.target.closest('[data-lightbox-src]');
+    if (card) { openLightbox(card.dataset.lightboxSrc, card.dataset.lightboxCap); return; }
+    const img = e.target.closest('img[data-lightbox]');
+    if (img) { openLightbox(img.src, img.dataset.caption || img.alt); return; }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      const card = e.target.closest('[data-lightbox-src]');
+      if (card) { e.preventDefault(); openLightbox(card.dataset.lightboxSrc, card.dataset.lightboxCap); }
+    }
+  });
+
+  // ── Copy HTML toast ───────────────────────────────────────────────────────
+  const copyToast = document.getElementById('copy-toast');
+  let toastTimer;
+
+  function showToast() {
+    copyToast.hidden = false;
+    copyToast.classList.add('is-visible');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      copyToast.classList.remove('is-visible');
+      setTimeout(() => { copyToast.hidden = true; }, 300);
+    }, 1800);
+  }
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.specimen-copy-btn');
+    if (!btn) return;
+    const stage = document.getElementById(btn.dataset.copyId);
+    if (!stage) return;
+    const html = stage.innerHTML.trim();
+    navigator.clipboard.writeText(html).then(showToast).catch(() => {
+      // Fallback for non-secure contexts
+      const ta = document.createElement('textarea');
+      ta.value = html; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+      showToast();
+    });
   });
 
   updateTabs();

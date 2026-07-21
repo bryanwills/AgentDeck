@@ -2,7 +2,7 @@
 id: policy.releasing
 title: Releasing and Versioning
 description: Unified product version SSOT, per-track release tags, and monotonic version constraints.
-category: Policy
+category: Engineering
 locale: en
 canonical: true
 status: required

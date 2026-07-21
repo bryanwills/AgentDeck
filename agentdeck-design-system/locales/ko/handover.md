@@ -2,7 +2,7 @@
 id: system.handover
 title: 에이전트 인계 계약
 description: 에이전트가 소유권을 찾고 스펙을 변경하며 검증 근거와 인계 내용을 남기는 방법.
-category: Governance
+category: Engineering
 locale: ko
 canonical: false
 status: reader-translation

@@ -2,7 +2,7 @@
 id: validation.testflight-qa
 title: TestFlight QA Checklist
 description: Pre-submission tester pass covering onboarding, pairing, voice, and the App Store sandbox invariants.
-category: Validation
+category: Engineering
 locale: en
 canonical: true
 status: stable

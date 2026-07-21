@@ -2,7 +2,7 @@
 id: system.readme
 title: AgentDeck Design System Workspace
 description: Entry point for canonical design, specification, policy, validation, and handover sources.
-category: Governance
+category: Engineering
 locale: en
 canonical: true
 status: stable

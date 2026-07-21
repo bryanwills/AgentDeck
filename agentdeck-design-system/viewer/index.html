@@ -87,7 +87,19 @@
       </main>
     </div>
 
+    <!-- Lightbox for asset zoom -->
+    <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Asset preview" hidden>
+      <button class="lightbox-close" aria-label="Close">&times;</button>
+      <figure class="lightbox-fig">
+        <img id="lightbox-img" src="" alt="" />
+        <figcaption id="lightbox-cap"></figcaption>
+      </figure>
+    </div>
+    <!-- Copy toast notification -->
+    <div id="copy-toast" class="copy-toast" aria-live="assertive" hidden>Copied!</div>
+
     <footer><span>AgentDeck Design System</span><span>Warm tide, honest signal.</span></footer>
+
     <script src="manifest.js"></script>
     <script src="app.js"></script>
   </body>

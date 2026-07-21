@@ -2,7 +2,7 @@
 id: spec.esp32-client
 title: ESP32 Client Contract
 description: The wire contract an external or forked display-only ESP32 client must honour — inbound events and device_info frames.
-category: Specifications
+category: Specs
 locale: en
 canonical: true
 status: stable

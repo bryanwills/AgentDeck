@@ -2,7 +2,7 @@
 id: spec.devices
 title: Device Catalog
 description: Per-device behaviour for every supported dashboard surface — panels, transports, and rendering specifics.
-category: Specifications
+category: Specs
 locale: en
 canonical: true
 status: stable

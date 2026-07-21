@@ -2,7 +2,7 @@
 id: spec.streamdeck-layout
 title: Stream Deck+ Layout
 description: The current session-per-button keypad, the four encoder assignments, and the immutable action UUID mapping.
-category: Specifications
+category: Specs
 locale: en
 canonical: true
 status: stable

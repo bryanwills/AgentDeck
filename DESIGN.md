@@ -2,7 +2,7 @@
 id: design.foundation
 title: AgentDeck Design System
 description: Visual principles, tokens, components, assets, motion, and copy rules.
-category: Foundations
+category: Design
 locale: en
 canonical: true
 status: stable

@@ -2,7 +2,7 @@
 id: reference.retired
 title: Retired and Experimental Surfaces
 description: What was built, shipped or prototyped, and then removed — with the reason, the date, and whatever residue it left behind.
-category: Reference
+category: Engineering
 locale: en
 canonical: true
 status: stable

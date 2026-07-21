@@ -2,7 +2,7 @@
 id: policy.app-review
 title: App Review Notes
 description: Review-facing rationale and sandbox invariants for the shipped Apple apps.
-category: Policy
+category: Engineering
 locale: en
 canonical: true
 status: required

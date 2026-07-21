@@ -2,7 +2,7 @@
 id: hardware.compatibility
 title: ハードウェア・OS 互換性
 description: デバイス、パネル、通信、ホスト、App Store 互換性の正本翻訳です。
-category: Specifications
+category: Specs
 locale: ja
 canonical: false
 status: reader-translation

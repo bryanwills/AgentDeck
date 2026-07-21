@@ -2,7 +2,7 @@
 id: policy.product-tiers
 title: App Store and CLI Product Tiers
 description: Canonical capability boundary between the standalone App Store app and the external CLI daemon.
-category: Policy
+category: Engineering
 locale: en
 canonical: true
 status: required
@@ -56,7 +56,7 @@ All surfaces follow the same rule:
 
 | Capability | App Store | CLI | Boundary |
 |---|:---:|:---:|---|
-| Claude subscription 5h / 7d usage | Relay only | Yes | Tier 1 shows it only when an external daemon supplies it |
+| Claude subscription 5h / 7d usage | Relay only | Yes | Tier 1 relays only what an external daemon supplies — no standalone Tier-1 path exists. Anthropic ToS prohibits third-party Claude.ai login / routing through subscription credentials (enforced 2026-04-04 vs OpenClaw/OpenCode/NanoClaw); the only documented Usage API is org-admin-only and returns token/USD, not consumer %; the true 5h/7d % lives only in Claude Code's undocumented `/api/oauth/usage`. Shipped competitors (LimitWatch, Usage for Claude) use the same broker→iCloud→display architecture — LimitWatch ships its Mac broker as a non-App-Store direct download because the sandbox blocks reading AI-tool config files. |
 | Codex rate limits | Yes | Yes | User grants a security-scoped bookmark to `~/.codex` |
 | Anthropic Admin API usage | Yes | Yes | User supplies the API key |
 | PTY token and cost stream | Hook-only | Yes | PTY parsing belongs to Tier 2 |

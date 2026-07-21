@@ -2,7 +2,7 @@
 id: spec.android
 title: Android Devices
 description: Android device support matrix and creature rendering behaviour across e-ink readers and tablets.
-category: Specifications
+category: Specs
 locale: en
 canonical: true
 status: stable

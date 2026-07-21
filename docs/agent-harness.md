@@ -2,7 +2,7 @@
 id: system.agent-harness
 title: Agent Harness
 description: How each coding agent enters the repository, what it reads, and where skills and workflows are discovered.
-category: Governance
+category: Engineering
 locale: en
 canonical: true
 status: stable

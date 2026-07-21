@@ -2,7 +2,7 @@
 id: hardware.compatibility
 title: 하드웨어 및 OS 호환성
 description: 기기, 패널, 전송, 호스트, App Store 호환성의 정본 번역.
-category: Specifications
+category: Specs
 locale: ko
 canonical: false
 status: reader-translation

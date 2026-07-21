@@ -2,7 +2,7 @@
 id: hardware.compatibility
 title: Hardware and OS Compatibility
 description: Canonical device, panel, transport, host, and App Store compatibility matrix.
-category: Specifications
+category: Specs
 locale: en
 canonical: true
 status: stable

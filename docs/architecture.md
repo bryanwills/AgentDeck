@@ -2,7 +2,7 @@
 id: arch.overview
 title: System Architecture
 description: Monorepo layout and the core abstractions — BridgeCore, PtyAdapter, AgentAdapter, device modules, plugin connection model.
-category: Architecture
+category: Engineering
 locale: en
 canonical: true
 status: stable

@@ -2,7 +2,7 @@
 id: spec.plugin-conventions
 title: Plugin Conventions
 description: Stream Deck+ encoder LCD, button rendering, OC Timeline, and D200H plugin conventions.
-category: Specifications
+category: Specs
 locale: en
 canonical: true
 status: stable

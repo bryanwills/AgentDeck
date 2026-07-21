@@ -2,7 +2,7 @@
 id: spec.tui-dashboard
 title: TUI Dashboard
 description: The terminal dashboard surface — terrarium rendering, sprites, and adaptive layout breakpoints.
-category: Specifications
+category: Specs
 locale: en
 canonical: true
 status: stable

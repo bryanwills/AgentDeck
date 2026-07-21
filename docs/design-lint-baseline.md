@@ -2,7 +2,7 @@
 id: validation.design-lint
 title: Design Lint Baseline
 description: Regression-gate baseline for the DESIGN.md rule checker and how to move it.
-category: Validation
+category: Engineering
 locale: en
 canonical: true
 status: stable

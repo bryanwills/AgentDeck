@@ -2,7 +2,7 @@
 id: design.android-ui
 title: Android UI Vision
 description: How the aquarium-tide language lands on e-ink and tablet Android surfaces — layouts, creatures, refresh zones.
-category: Specifications
+category: Design
 locale: en
 canonical: true
 status: stable

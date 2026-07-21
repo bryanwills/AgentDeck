@@ -2,7 +2,7 @@
 id: arch.apme
 title: APME Evaluation Module
 description: Agent Performance Monitoring and Evaluation — sample schema, collector, judges, scorecard, recommender, daemon API.
-category: Architecture
+category: Engineering
 locale: en
 canonical: true
 status: stable

@@ -2,7 +2,7 @@
 id: system.handover
 title: Agent Handover Contract
 description: How agents locate ownership, change specifications, prove behavior, and leave a reviewable handover.
-category: Governance
+category: Engineering
 locale: en
 canonical: true
 status: required

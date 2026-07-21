@@ -2,7 +2,7 @@
 id: validation.testing
 title: Testing Guide
 description: Meaningful verification by runtime, platform, and evidence level.
-category: Validation
+category: Engineering
 locale: en
 canonical: true
 status: stable

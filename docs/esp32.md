@@ -2,7 +2,7 @@
 id: spec.esp32
 title: ESP32 Firmware
 description: Supported boards, flash safety rules, WiFi provisioning, OTA, and disconnect recovery for the ESP32 surfaces.
-category: Specifications
+category: Specs
 locale: en
 canonical: true
 status: stable

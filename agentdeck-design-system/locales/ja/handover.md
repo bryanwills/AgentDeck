@@ -2,7 +2,7 @@
 id: system.handover
 title: エージェント引き継ぎ契約
 description: 所有元を特定し、仕様を変更し、検証根拠と引き継ぎを残すための契約です。
-category: Governance
+category: Engineering
 locale: ja
 canonical: false
 status: reader-translation
