@@ -30,6 +30,12 @@
 * {
   box-sizing: border-box;
 }
+/* Author-level display rules (for example `.lightbox { display: flex }`) beat
+ * the browser's built-in `[hidden] { display: none }`. Keep the HTML `hidden`
+ * contract authoritative for every viewer surface, including overlays. */
+[hidden] {
+  display: none !important;
+}
 html {
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
@@ -456,11 +462,6 @@ h1 em {
   border: 1px solid var(--tide-200);
   border-radius: var(--r-xl);
   background: var(--tide-100);
-}
-/* `display: flex` outranks the UA rule for [hidden], so the specimen views
- * (which have no Markdown/Metadata mode) could not actually hide the tabs. */
-.view-tabs[hidden] {
-  display: none;
 }
 .view-tabs button {
   flex: 0 1 140px;
@@ -1052,7 +1053,12 @@ footer {
     overflow-x: auto;
     padding-bottom: 8px;
   }
-  .rail-group {
+  /* Flatten both regular and collapsible groups into one horizontal chip row.
+   * Leaving the Engineering wrappers as a grid makes their tall inner list set
+   * the flex line height and stretches every sibling button to ~1000px. */
+  .rail-group,
+  .rail-group-body,
+  .rail-group-inner {
     display: contents;
   }
   .rail-title,

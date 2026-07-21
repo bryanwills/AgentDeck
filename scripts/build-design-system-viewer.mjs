@@ -32,6 +32,19 @@ function fail(message) {
   throw new Error(`[design-system] ${message}`);
 }
 
+async function verifyViewerShell() {
+  const [html, css] = await Promise.all([
+    readFile(path.join(systemRoot, 'viewer', 'index.html'), 'utf8'),
+    readFile(path.join(systemRoot, 'viewer', 'styles.css'), 'utf8'),
+  ]);
+  if (!html.includes('id="lightbox"') || !html.includes('aria-label="Asset preview" hidden')) {
+    fail('asset lightbox must be hidden in the initial HTML');
+  }
+  if (!/\[hidden\]\s*\{[^}]*display:\s*none\s*!important\s*;/s.test(css)) {
+    fail('viewer CSS must preserve the HTML hidden contract against author-level display rules');
+  }
+}
+
 function parseScalar(raw) {
   const value = raw.trim();
   if (value === 'true') return true;
@@ -658,6 +671,7 @@ async function buildManifest() {
 }
 
 async function main() {
+  await verifyViewerShell();
   const manifest = await buildManifest();
   if (checkOnly) {
     console.log(
