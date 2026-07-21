@@ -45,6 +45,27 @@ async function verifyViewerShell() {
   }
 }
 
+function verifyNavigationLabels(catalog, documentIds) {
+  const labels = catalog.navigationLabels;
+  if (!labels || typeof labels !== 'object') fail('catalog.json must declare navigationLabels');
+
+  const labelIds = new Set(Object.keys(labels));
+  for (const id of documentIds) {
+    const localized = labels[id];
+    if (!localized) fail(`navigationLabels is missing ${id}`);
+    for (const locale of catalog.locales) {
+      const label = localized[locale];
+      if (typeof label !== 'string' || label.trim() !== label || label.length === 0) {
+        fail(`navigationLabels.${id}.${locale} must be a non-empty trimmed string`);
+      }
+      if ([...label].length > 24) fail(`navigationLabels.${id}.${locale} exceeds 24 characters`);
+    }
+    labelIds.delete(id);
+  }
+  if (labelIds.size > 0) fail(`navigationLabels has unknown document ids: ${[...labelIds].join(', ')}`);
+  return labels;
+}
+
 function parseScalar(raw) {
   const value = raw.trim();
   if (value === 'true') return true;
@@ -658,12 +679,14 @@ async function buildManifest() {
   }
 
   const coverage = await verifyCoverage(catalog, catalogedPaths);
+  const navigationLabels = verifyNavigationLabels(catalog, seen);
 
   return {
     generatedAt: new Date().toISOString(),
     defaultLocale: catalog.defaultLocale,
     locales: catalog.locales,
     documents,
+    navigationLabels,
     coverage,
     tokens: await loadTokens(),
     assets: await loadAssets(),

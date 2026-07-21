@@ -1,5 +1,7 @@
 # App Store Connect submission checklist
 
+> **Release status (2026-07-22):** macOS 1.0.0 was approved and released on 2026-07-21: [AgentDeck Dashboard on the Mac App Store](https://apps.apple.com/us/app/agentdeck-dashboard/id6784822497). The iPhone/iPad companion remains in review. Keep this checklist as the reusable gate for subsequent submissions.
+
 ## App record
 
 - [ ] App name: `AgentDeck Dashboard`

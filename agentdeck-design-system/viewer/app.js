@@ -16,18 +16,17 @@
       canonical: 'Canonical',
       translated: 'Reader translation',
       generated: 'Generated',
-      tokens: 'Token library',
-      components: 'Component lab',
-      assets: 'Asset library',
+      tokens: 'Tokens',
+      components: 'Components',
+      assets: 'Assets',
       tokensDesc: 'Live values parsed from design/tokens.css, the cross-platform token source of truth.',
       componentsDesc: 'Reference specimens rendered with the same tokens used by this viewer.',
       assetsDesc: 'Every design resource the system actually uses, in one index: brand marks, generated device masks, creatures, icons, brand type, product marks, hardware photography, and the reference surfaces they came from.',
       tools: 'Specimens',
-      catPreview: 'Preview',
+      catPreview: 'Library',
       catDesign: 'Design',
-      catSpecs: 'Specs',
-      catEngineering: 'Engineering',
-      engineeringToggle: 'Engineering',
+      catSpecs: 'Platforms',
+      catEngineering: 'Project',
       docs: 'Documents',
       noResults: 'No catalog entries match this search.',
       componentsNote:
@@ -70,18 +69,17 @@
       canonical: '영어 정본',
       translated: '독자용 번역',
       generated: '생성',
-      tokens: '토큰 라이브러리',
-      components: '컴포넌트 랩',
-      assets: '에셋 라이브러리',
+      tokens: '토큰',
+      components: '컴포넌트',
+      assets: '에셋',
       tokensDesc: '크로스플랫폼 토큰 정본 design/tokens.css에서 읽은 실제 값입니다.',
       componentsDesc: '이 뷰어와 동일한 토큰으로 렌더한 기준 specimen입니다.',
       assetsDesc: '디자인 시스템이 실제로 쓰는 리소스를 한 곳에 모았어요 — 브랜드 마크, 생성된 기기 마스크, 크리처, 아이콘, 브랜드 서체, 제품 마크, 하드웨어 사진, 그리고 출처가 된 레퍼런스 표면까지.',
       tools: '미리보기',
-      catPreview: '미리보기',
+      catPreview: '라이브러리',
       catDesign: '디자인',
-      catSpecs: '스펙',
-      catEngineering: '엔지니어링',
-      engineeringToggle: '엔지니어링',
+      catSpecs: '플랫폼',
+      catEngineering: '프로젝트',
       docs: '문서',
       noResults: '검색과 일치하는 문서가 없습니다.',
       componentsNote:
@@ -123,18 +121,17 @@
       canonical: '英語正本',
       translated: '読者向け翻訳',
       generated: '生成',
-      tokens: 'トークンライブラリ',
-      components: 'コンポーネントラボ',
-      assets: 'アセットライブラリ',
+      tokens: 'トークン',
+      components: 'コンポーネント',
+      assets: 'アセット',
       tokensDesc: 'クロスプラットフォーム正本 design/tokens.css から取得した実値です。',
       componentsDesc: 'この Viewer と同じ token で描画する基準 specimen です。',
       assetsDesc: 'Design System が実際に使う resource を一つの index に集約 — brand mark、生成された device mask、クリーチャー、icon、ブランド書体、製品マーク、ハードウェア写真、そして出自となった reference 面まで。',
       tools: 'Specimen',
-      catPreview: 'プレビュー',
+      catPreview: 'ライブラリ',
       catDesign: 'デザイン',
-      catSpecs: '仕様',
-      catEngineering: 'エンジニアリング',
-      engineeringToggle: 'エンジニアリング',
+      catSpecs: 'プラットフォーム',
+      catEngineering: 'プロジェクト',
       docs: '文書',
       noResults: '検索に一致する文書がありません。',
       componentsNote:
@@ -192,8 +189,8 @@
 
   let locale = localStorage.getItem('agentdeck-design-locale') || data.defaultLocale;
   if (!data.locales.includes(locale)) locale = data.defaultLocale;
-  let activeId = decodeURIComponent(location.hash.slice(1)) || 'system.readme';
-  if (!special.has(activeId) && !data.documents.some((item) => item.id === activeId)) activeId = 'system.readme';
+  let activeId = decodeURIComponent(location.hash.slice(1)) || 'tokens';
+  if (!special.has(activeId) && !data.documents.some((item) => item.id === activeId)) activeId = 'tokens';
   let viewMode = 'preview';
   let query = '';
 
@@ -364,13 +361,12 @@
   }
 
   // Fixed category display order — determines rail section sequence.
-  const CATEGORY_ORDER = ['Preview', 'Design', 'Specs', 'Engineering',
-                          '미리보기', '디자인', '스펙', '엔지니어링',
-                          'プレビュー', 'デザイン', '仕様', 'エンジニアリング'];
+  const CATEGORY_ORDER = ['Preview', 'Design', 'Specs', 'Engineering'];
 
-  // Engineering section collapses by default; state is persisted.
-  const ENG_KEY = 'agentdeck-design-engineering-open';
-  let engineeringOpen = localStorage.getItem(ENG_KEY) === 'true';
+  // Project section collapses by default; the new key resets the formerly
+  // over-expanded Engineering rail for returning visitors.
+  const PROJECT_KEY = 'agentdeck-design-project-open';
+  let projectOpen = localStorage.getItem(PROJECT_KEY) === 'true';
 
   function categoryLabel(raw) {
     const t = strings();
@@ -384,19 +380,23 @@
   function navigationItems() {
     const items = data.documents.map((entry) => {
       const localized = localizedDocument(entry);
+      const title = localized.page.metadata.title;
+      const label = data.navigationLabels[entry.id][locale];
       return {
         id: entry.id,
-        title: localized.page.metadata.title,
+        title,
+        label,
         category: localized.page.metadata.category,
         locale: localized.page.metadata.locale,
         search:
-          `${localized.page.metadata.title} ${localized.page.metadata.description} ${localized.page.body}`.toLowerCase(),
+          `${label} ${title} ${localized.page.metadata.description} ${localized.page.body}`.toLowerCase(),
       };
     });
     items.push(
       {
         id: 'tokens',
         title: strings().tokens,
+        label: strings().tokens,
         category: 'Preview',
         locale: 'live',
         search: 'tokens colors type spacing radius motion preview live',
@@ -404,6 +404,7 @@
       {
         id: 'components',
         title: strings().components,
+        label: strings().components,
         category: 'Preview',
         locale: 'live',
         search: 'components buttons badges status placeholder typography preview live',
@@ -411,6 +412,7 @@
       {
         id: 'assets',
         title: strings().assets,
+        label: strings().assets,
         category: 'Preview',
         locale: 'live',
         search: 'assets logo icon brands masks glyphs creatures reference mockups typography fonts plex jetbrains photography hardware photos captures claude codex openclaw opencode antigravity preview live',
@@ -447,22 +449,22 @@
       return ai - bi;
     });
 
-    // Check if active item is in Engineering — if so, force Engineering open
-    const engItems = grouped.get('Engineering') || [];
-    const activeInEng = engItems.some((item) => item.id === activeId);
-    if (activeInEng) engineeringOpen = true;
+    // Open Project only when it owns the active document.
+    const projectItems = grouped.get('Engineering') || [];
+    const activeInProject = projectItems.some((item) => item.id === activeId);
+    if (activeInProject) projectOpen = true;
 
-    // When searching, always show Engineering expanded
+    // Searching spans every document, so reveal Project matches while filtering.
     const searching = query.length > 0;
 
     els.navigation.innerHTML = orderedKeys
       .map((category) => {
         const items = grouped.get(category);
-        const isEng = category === 'Engineering';
-        const isOpen = !isEng || engineeringOpen || searching;
+        const isProject = category === 'Engineering';
+        const isOpen = !isProject || projectOpen || searching;
         const label = categoryLabel(category);
         const itemCount = items.length;
-        if (isEng) {
+        if (isProject) {
           return `<section class="rail-group rail-group--collapsible${isOpen ? ' is-open' : ''}" data-category="Engineering">
             <button class="rail-title rail-title--toggle" aria-expanded="${isOpen}" data-toggle="Engineering">
               <span>${escapeHtml(label)}</span>
@@ -471,14 +473,14 @@
             </button>
             <div class="rail-group-body">
               <div class="rail-group-inner">
-                ${items.map((item) => `<button class="rail-button${item.id === activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.title)}</span></button>`).join('')}
+                ${items.map((item) => `<button class="rail-button${item.id === activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}" title="${escapeHtml(item.title)}"><span>${escapeHtml(item.label)}</span></button>`).join('')}
               </div>
             </div>
           </section>`;
         }
         return `<section class="rail-group">
           <h3 class="rail-title">${escapeHtml(label)}</h3>
-          ${items.map((item) => `<button class="rail-button${item.id === activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.title)}</span></button>`).join('')}
+          ${items.map((item) => `<button class="rail-button${item.id === activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}" title="${escapeHtml(item.title)}"><span>${escapeHtml(item.label)}</span></button>`).join('')}
         </section>`;
       })
       .join('');
@@ -486,12 +488,12 @@
     for (const button of els.navigation.querySelectorAll('[data-id]')) {
       button.addEventListener('click', () => activate(button.dataset.id));
     }
-    // Collapsible Engineering toggle
+    // Collapsible Project toggle (canonical category remains Engineering).
     const toggle = els.navigation.querySelector('[data-toggle="Engineering"]');
     if (toggle) {
       toggle.addEventListener('click', () => {
-        engineeringOpen = !engineeringOpen;
-        localStorage.setItem(ENG_KEY, String(engineeringOpen));
+        projectOpen = !projectOpen;
+        localStorage.setItem(PROJECT_KEY, String(projectOpen));
         renderNavigation();
       });
     }

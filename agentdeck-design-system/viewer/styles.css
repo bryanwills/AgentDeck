@@ -249,8 +249,8 @@ h1 em {
   margin: 0 auto;
   padding: 0 var(--container-pad) 96px;
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
-  gap: 48px;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 40px;
 }
 .rail {
   position: sticky;
@@ -261,7 +261,7 @@ h1 em {
   padding: 32px 0;
 }
 .rail-group + .rail-group {
-  margin-top: 28px;
+  margin-top: 22px;
 }
 .rail-title {
   margin: 0 0 8px;
@@ -271,7 +271,7 @@ h1 em {
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
-/* Collapsible Engineering toggle button */
+/* Collapsible Project toggle button */
 .rail-title--toggle {
   display: flex;
   align-items: center;
@@ -335,6 +335,9 @@ h1 em {
   grid-template-rows: 0fr;
   transition: grid-template-rows 0.22s var(--ease-snap, ease);
 }
+.rail-group--collapsible:not(.is-open) .rail-group-body {
+  visibility: hidden;
+}
 .rail-group-inner {
   min-height: 0;
 }
@@ -345,7 +348,7 @@ h1 em {
 .rail-button {
   width: 100%;
   display: block;
-  padding: 8px 10px;
+  padding: 7px 10px;
   color: var(--ink-700);
   text-align: left;
   background: transparent;
@@ -356,7 +359,9 @@ h1 em {
 .rail-button span:first-child {
   display: block;
   min-width: 0;
-  white-space: normal;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   line-height: 1.3;
 }
 .rail-button:hover {
@@ -371,7 +376,7 @@ h1 em {
   color: var(--kelp-300);
 }
 .rail-note {
-  margin-top: 32px;
+  margin-top: 24px;
   padding: 14px;
   border: 1px solid var(--tide-200);
   border-radius: var(--r-xl);
@@ -1023,8 +1028,8 @@ footer {
     grid-template-columns: 1fr 220px;
   }
   .workspace {
-    grid-template-columns: 210px minmax(0, 1fr);
-    gap: 28px;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 24px;
   }
 }
 @media (max-width: 720px) {
@@ -1054,12 +1059,15 @@ footer {
     padding-bottom: 8px;
   }
   /* Flatten both regular and collapsible groups into one horizontal chip row.
-   * Leaving the Engineering wrappers as a grid makes their tall inner list set
+   * Leaving the Project wrappers as a grid makes their tall inner list set
    * the flex line height and stretches every sibling button to ~1000px. */
   .rail-group,
   .rail-group-body,
   .rail-group-inner {
     display: contents;
+  }
+  .rail-group-body {
+    visibility: visible !important;
   }
   .rail-title,
   .rail-note {

@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: required
 owner: Release maintainers
-reviewed: 2026-07-18
-revision: 2026-07-18
+reviewed: 2026-07-22
+revision: 2026-07-22
 source_of_truth: RELEASING.md
 validators: [node scripts/build-design-system-viewer.mjs --check, pnpm verify-version]
 ---
@@ -17,7 +17,7 @@ validators: [node scripts/build-design-system-viewer.mjs --check, pnpm verify-ve
 
 AgentDeck uses one product version across every maintained surface. The canonical value is the root [`VERSION`](VERSION) file; package manifests and platform project files mirror it because their build and distribution tools require native version fields.
 
-The current product version is **1.0.0**, the first public multi-marketplace release. The unified release train originally converged at `0.2.3` after the 2026-06-26 reset exposed a registry mismatch: Apple could legitimately restart under a new bundle ID, but the existing npm package identities could not reuse or lower already-published versions. `1.0.0` remains above every published package and store version floor.
+The current product version is **1.0.1**. The first public Mac App Store release remains `1.0.0`; channels ship independently, so the source train can advance before a new store binary is published. The unified release train originally converged at `0.2.3` after the 2026-06-26 reset exposed a registry mismatch: Apple could legitimately restart under a new bundle ID, but the existing npm package identities could not reuse or lower already-published versions. `1.0.0` remains above every pre-convergence package and store version floor.
 
 Run `pnpm verify-version` before every build or release. CI rejects drift between `VERSION` and its mirrors.
 
@@ -25,7 +25,7 @@ Run `pnpm verify-version` before every build or release. CI rejects drift betwee
 
 | Surface | Product-version mirror | Independent monotonic value | Tag / delivery |
 |---|---|---|---|
-| **Apple** (iOS+macOS) | `apple/project.yml` `MARKETING_VERSION` | `CURRENT_PROJECT_VERSION` (currently 2) | `apple-v*` → TestFlight |
+| **Apple** (iOS+macOS) | `apple/project.yml` `MARKETING_VERSION` | `CURRENT_PROJECT_VERSION` (CI-owned) | `apple-v*` → TestFlight / App Store |
 | **Android** | `android/app/build.gradle.kts` `versionName` | `versionCode` (currently 3) | `android-v*` → APK Release / optional Play |
 | **npm** (`@agentdeck/hooks`, `shared`, `bridge`, `setup`) | public `package.json` files | npm registry version floor | `npm-v*` → manual publish |
 | **ESP32** | `esp32/src/config.h` `FIRMWARE_VERSION` | build hash / epoch in firmware metadata | `esp32-v*` → firmware Release |
@@ -76,6 +76,8 @@ Tag prefixes remain because channels ship independently and may point to differe
 `npm-release.yml` runs on the tag: it re-verifies the version, builds, tests, and creates the GitHub Release. **Publishing stays manual by default** — step 3 above is still yours. To hand publishing to CI, set the repo variable `NPM_PUBLISH_ENABLED=true` and add an `NPM_TOKEN` secret holding a *granular automation* token (a 2FA-on-publish token cannot run unattended); the workflow then publishes in dependency order.
 
 ### Apple (TestFlight / App Store)
+
+macOS `1.0.0` has been publicly available since 2026-07-21 at [AgentDeck Dashboard on the Mac App Store](https://apps.apple.com/us/app/agentdeck-dashboard/id6784822497). The iPhone/iPad companion remains in review. A successful CI upload reaches App Store Connect/TestFlight; public App Store release remains a separate App Store Connect action.
 
 1. Confirm `MARKETING_VERSION == VERSION` in both `apple/project.yml` and the Xcode project mirror (`pnpm verify-version` checks this).
 2. Run the Release build and App Store archive verifier described in `CLAUDE.md`.

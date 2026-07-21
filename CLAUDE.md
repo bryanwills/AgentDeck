@@ -50,21 +50,22 @@ pnpm package                # create dist/bound.serendipity.agentdeck.streamDeck
 bash scripts/uninstall.sh   # remove hooks, unlink CLI and plugin
 ```
 
-### Apple Release (TestFlight)
+### Apple Release (App Store / TestFlight)
 
 ```bash
 bash scripts/build-apple-release.sh --ios     # local iOS build
 bash scripts/build-apple-release.sh --macos   # local macOS build
 bash scripts/build-apple-release.sh --all     # both + TestFlight upload
-git tag apple-v1.0.0 && git push origin apple-v1.0.0  # CI → TestFlight
+git tag apple-v1.0.1 && git push origin apple-v1.0.1  # CI → TestFlight
 ```
 
 - **Apple Bundle ID**: `bound.serendipity.agent.deck` (App Store Connect 앱명: "AgentDeck Dashboard")
+- **App Store**: macOS `1.0.0`은 2026-07-21 공개 출시됨 — https://apps.apple.com/us/app/agentdeck-dashboard/id6784822497 (iPhone/iPad companion은 심사 중)
 - **Team**: 조직 `QF36NDHYHD` (Serendipity Bound) — 2026-07-10 개인 팀(R22679GY5Z)에서 이관. 서명은 **cloud signing** (`CODE_SIGN_STYLE=Automatic` + ASC API key `-allowProvisioningUpdates`); 수동 p12/프로파일 시크릿 불필요
 - **CI**: `.github/workflows/apple-release.yml` — `apple-v*` 태그 → macOS-15 runner → archive → TestFlight 업로드
 - **Secrets**: `ASC_API_KEY_ID`, `ASC_ISSUER_ID`, `ASC_API_KEY_BASE64` (조직 팀 App Manager+ 역할 키)
 - **Note**: the `bound.serendipity.agentdeck.*` tree is retired (the former `.dashboard` app record carries an immovable ASC build floor at 1.0.6/build 8). The fresh App Store app uses the `bound.serendipity.agent.*` tree → `bound.serendipity.agent.deck`. The Stream Deck **plugin UUID** `bound.serendipity.agentdeck` (no suffix) is a separate, immutable identifier and is unrelated to the app bundle ID.
-- **Versioning**: root `VERSION` is the unified product-version SSOT (`1.0.0`); all package/platform manifests mirror it and CI enforces `pnpm verify-version`. Apple build number and Android versionCode advance independently. Delivery tags remain channel-prefixed (`apple-v*`, `android-v*`, `esp32-v*`, `npm-v*`, `streamdeck-v*`, `ulanzi-v*`). Policy + commands: [RELEASING.md](RELEASING.md)
+- **Versioning**: root `VERSION` is the unified product-version SSOT (`1.0.1`); all package/platform manifests mirror it and CI enforces `pnpm verify-version`. Apple build number and Android versionCode advance independently. Delivery tags remain channel-prefixed (`apple-v*`, `android-v*`, `esp32-v*`, `npm-v*`, `streamdeck-v*`, `ulanzi-v*`). Policy + commands: [RELEASING.md](RELEASING.md)
 
 ## Development
 
