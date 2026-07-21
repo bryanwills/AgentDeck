@@ -872,9 +872,10 @@ export class SessionSlotManager {
       const cells: SessionSlotConfig[] = [];
       const reviewBadge = this.reviewBadgeSlotConfig(session);
       if (reviewBadge) cells.push(reviewBadge);
+      const modelCard = this.modelStatusCard(session);
+      if (modelCard) cells.push(modelCard);
       const cellIdx = idx - 1;
-      if (cellIdx < cells.length) return cells[cellIdx];
-      return this.modelStatusCard(session) ?? { type: 'empty' };
+      return cells[cellIdx] ?? { type: 'empty' };
     }
     // Idle observed.
     if (isOpenCodeObserved) {

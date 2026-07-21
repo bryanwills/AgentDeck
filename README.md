@@ -94,7 +94,7 @@ Any of these attach to the same daemon, and you can add them in any order:
 
 | Surface | How to attach |
 |---|---|
-| **Stream Deck / Mini / Plus** | Install the plugin from the [Elgato Marketplace](https://marketplace.elgato.com/) *(in review)*, or `cd plugin && streamdeck link` from a checkout |
+| **Stream Deck / Mini / Plus** | Install the plugin from the [Elgato Marketplace](https://marketplace.elgato.com/) *(in review)*, or `cd plugin && streamdeck link bound.serendipity.agentdeck.sdPlugin` from a checkout |
 | **Ulanzi D200H** | Install the plugin in Ulanzi Studio — see [plugin-ulanzi/VERIFY.md](plugin-ulanzi/VERIFY.md) |
 | **macOS app** | [Download on the Mac App Store](https://apps.apple.com/app/id6784822497) — the SwiftUI dashboard carries its own daemon, so it needs no Node.js. iPhone/iPad companion in review |
 | **Android tablet / e-ink** | Signed APK from [Releases](https://github.com/puritysb/AgentDeck/releases) — see [docs/android.md](docs/android.md) |
@@ -223,10 +223,10 @@ builds on [Releases](https://github.com/puritysb/AgentDeck/releases).
 |---|---|---|
 | **npm** — `@agentdeck/setup` | `npm-v*` | Published |
 | **Apple App Store** — macOS | `apple-v*` | [Live](https://apps.apple.com/app/id6784822497) (iOS companion in review) |
-| **Elgato Marketplace** — Stream Deck plugin | `streamdeck-v*` | In review |
+| **Elgato Marketplace** — Stream Deck plugin | `streamdeck-v*` | [1.0.1 release](https://github.com/puritysb/AgentDeck/releases/tag/streamdeck-v1.0.1); Maker review update pending |
 | **Ulanzi Marketplace** — D200H plugin | `ulanzi-v*` | Blocked upstream ([details](marketplace/ulanzi/LISTING.md)) |
-| **GitHub Release** — Android APK | `android-v*` | Version ready, release not scheduled |
-| **GitHub Release** — ESP32 firmware | `esp32-v*` | Version ready, release not scheduled |
+| **GitHub Release** — Android APK | `android-v*` | [1.0.1](https://github.com/puritysb/AgentDeck/releases/tag/android-v1.0.1) |
+| **GitHub Release** — ESP32 firmware | `esp32-v*` | [1.0.1](https://github.com/puritysb/AgentDeck/releases/tag/esp32-v1.0.1) |
 | **Google Play** — Android AAB | `android-v*` | CI wired, gated on Play Console setup |
 
 ---

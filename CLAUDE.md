@@ -75,7 +75,7 @@ pnpm test                # run unit tests (vitest)
 pnpm vitest run --coverage  # coverage report + threshold check
 pnpm test:report         # unified report (vitest + Android + Apple + Robot)
 pnpm test:android        # Android JUnit tests only
-cd plugin && streamdeck link   # link plugin to Stream Deck app
+cd plugin && streamdeck link bound.serendipity.agentdeck.sdPlugin   # link plugin to Stream Deck app
 ```
 
 ### Multi-Agent Development Surface

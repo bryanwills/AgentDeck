@@ -253,6 +253,33 @@ describe('SessionSlotManager detail layout', () => {
     expect(configs.filter((config) => config.type === 'stop')).toHaveLength(1);
   });
 
+  it('renders one inert MODEL readout for observed Codex PROCESSING on every Stream Deck layout', () => {
+    for (const layout of [SD_PLUS_LAYOUT, SD_CLASSIC_LAYOUT]) {
+      const manager = new SessionSlotManager();
+      manager.updateSessions([makeSession({
+        id: 'observed:codex:1',
+        agentType: 'codex-cli',
+        controlMode: 'observed',
+        port: 0,
+        state: State.PROCESSING,
+        modelName: 'gpt-5.6-sol high',
+      })]);
+      manager.enterDetailView('observed:codex:1');
+
+      const configs = Array.from({ length: layout.keyCount }, (_, i) =>
+        manager.getSlotConfig(i, layout));
+      const modelSlots = configs
+        .map((config, slot) => ({ config, slot }))
+        .filter(({ config }) => config.type === 'status' && config.label === 'MODEL');
+
+      expect(modelSlots).toHaveLength(1);
+      expect(manager.handleSlotPress(modelSlots[0].slot, layout)).toEqual({ action: 'none' });
+      expect(configs.filter((config) => config.type === 'status' && config.label === 'WORKING')).toHaveLength(1);
+      expect(configs.filter((config) => config.type === 'preset')).toHaveLength(0);
+      expect(configs.filter((config) => config.type === 'empty')).toHaveLength(layout.keyCount - 4);
+    }
+  });
+
   it('does not render a STANDBY/idle tile while an OpenClaw session is PROCESSING', () => {
     const manager = new SessionSlotManager();
     manager.updateSessions([makeSession({ id: 'oc', agentType: 'openclaw', state: State.PROCESSING, modelName: 'gpt-5' })]);

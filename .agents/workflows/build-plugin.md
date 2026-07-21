@@ -13,4 +13,4 @@ pnpm build
 
 3. 빌드된 플러그인을 데스크탑 Stream Deck 애플리케이션에 링크합니다. (이 과정 후 Stream Deck 앱이 플러그인을 인식하게 됩니다.)
 // turbo
-cd plugin && streamdeck link
+cd plugin && streamdeck link bound.serendipity.agentdeck.sdPlugin

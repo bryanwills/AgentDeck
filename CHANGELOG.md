@@ -8,9 +8,10 @@ different day. See [RELEASING.md](RELEASING.md).
 
 ## 1.0.1
 
-Maintenance release for the macOS app — reliability fixes that landed after the
-1.0.0 build (03ed5a94) went to the App Store. macOS ships first; the iOS
-companion carries its fix on a later train while 1.0.0 finishes review.
+Maintenance release across independently delivered channels — reliability fixes
+that landed after the 1.0.0 build (03ed5a94) went to the App Store. Channels ship
+on their own schedules; the iOS companion carries its fix on a later train while
+1.0.0 finishes review.
 
 ### macOS app — App Store
 
@@ -22,6 +23,14 @@ companion carries its fix on a later train while 1.0.0 finishes review.
 - Recover a wedged ESP32 serial port by backing off instead of resetting the board
 - Stop dropping whole tail windows on a split UTF-8 character (restores the Codex
   usage gauge)
+
+### Stream Deck plugin — Elgato Marketplace
+
+- Keep observed-agent processing details capability-aware on every keypad size:
+  show the current model once as an inert readout instead of filling every unused
+  key with duplicate `MODEL` tiles
+- Preserve the notify-only Codex contract: processing details expose no steering
+  action that the observed session cannot deliver
 
 ### iOS companion (ships after 1.0.0 review completes)
 

@@ -9,7 +9,7 @@
 | Stream Deck buttons inactive | Hardware not connected | Reconnect + restart app |
 | Stuck in PROCESSING > 5 min | Agent stalled | STOP button or Ctrl+C in terminal |
 | Voice transcription returns empty | Speech recognition permission denied, or OS dictation model still downloading | macOS Settings → Privacy & Security → Speech Recognition → enable AgentDeck. First-time recognition may wait ~30s while the OS finishes the on-device model download |
-| Plugin not in Stream Deck app | Plugin not linked | Restart Stream Deck app, then `cd plugin && streamdeck link .sdPlugin` |
+| Plugin not in Stream Deck app | Plugin not linked | Restart Stream Deck app, then `cd plugin && streamdeck link bound.serendipity.agentdeck.sdPlugin` |
 | Hooks not firing | Hooks not installed or stale | `node hooks/dist/install.js` (re-installs all 7 hooks) |
 | Need to remove hooks | Uninstalling AgentDeck | `node hooks/dist/install.js uninstall` |
 | Plugin loads but buttons blank | Plugin needs rebuild | `pnpm build && pnpm generate-icons`, restart Stream Deck app |

@@ -49,7 +49,7 @@ Registers 7 hooks in `~/.claude/settings.local.json`: `SessionStart`, `SessionEn
 ## 2. Link Stream Deck Plugin
 
 ```bash
-cd plugin && streamdeck link .sdPlugin
+cd plugin && streamdeck link bound.serendipity.agentdeck.sdPlugin
 ```
 
 Creates a symlink in `~/Library/Application Support/com.elgato.StreamDeck/Plugins/`. **Restart the Stream Deck app** to load.

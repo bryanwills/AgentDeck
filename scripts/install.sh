@@ -147,7 +147,7 @@ info "Linking plugin to Stream Deck..."
 cd "$PROJECT_DIR/plugin"
 streamdeck link bound.serendipity.agentdeck.sdPlugin 2>/dev/null || {
   warn "streamdeck link failed — you may need to link manually"
-  warn "Run: cd plugin && streamdeck link .sdPlugin"
+  warn "Run: cd plugin && streamdeck link bound.serendipity.agentdeck.sdPlugin"
 }
 ok "Plugin linked"
 
