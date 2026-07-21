@@ -1137,7 +1137,7 @@ footer {
   padding: 3px 8px;
   border-radius: var(--r-pill);
   background: rgba(14, 31, 31, 0.72);
-  color: #fff;
+  color: var(--tide-50);
   font: 10px var(--font-mono);
   white-space: nowrap;
   opacity: 0;
@@ -1188,7 +1188,7 @@ body.lightbox-open {
   background: rgba(255,255,255,0.1);
   border: 1px solid rgba(255,255,255,0.2);
   border-radius: var(--r-pill);
-  color: #fff;
+  color: var(--tide-50);
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
@@ -1211,7 +1211,7 @@ body.lightbox-open {
   max-height: calc(90vh - 60px);
   object-fit: contain;
   border-radius: var(--r-xl);
-  box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+  box-shadow: var(--sh-frame);
 }
 .lightbox-fig figcaption {
   color: rgba(255,255,255,0.7);
