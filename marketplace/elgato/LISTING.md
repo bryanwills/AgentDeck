@@ -41,11 +41,12 @@ Session keys show Claude Code, Codex, OpenCode, and OpenClaw sessions at a glanc
 Profiles for Stream Deck, Stream Deck Mini, and Stream Deck + are bundled and install automatically.
 
 Getting set up
-AgentDeck is a thin client — it needs the free AgentDeck daemon running on the same Mac. Install it from a terminal:
+AgentDeck is a thin client — it needs the free AgentDeck daemon running on the same Mac. Two ways to get it:
 
-    npx @agentdeck/setup
+- Install the free AgentDeck app from the Mac App Store. It bundles the daemon, so there is no terminal step.
+- Or run one command in a terminal: npx @agentdeck/setup
 
-That is the whole setup. Start Claude Code, Codex, or OpenCode as you normally would and your sessions appear on the keys. (An AgentDeck app for Mac is also on the way through the App Store, which will remove the terminal step.)
+Either way, start Claude Code, Codex, or OpenCode as you normally would and your sessions appear on the keys.
 
 The plugin does not embed a daemon, collect analytics, or modify your shell configuration.
 
