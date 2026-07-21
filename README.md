@@ -5,7 +5,7 @@
 # AgentDeck
 
 <p align="center">
-  <a href="https://apps.apple.com/us/app/agentdeck-dashboard/id6784822497"><img src="https://img.shields.io/badge/Mac%20App%20Store-AgentDeck%20Dashboard-1f6157.svg?logo=apple" alt="Mac App Store"></a>
+  <a href="https://apps.apple.com/app/id6784822497"><img src="https://img.shields.io/badge/Mac%20App%20Store-AgentDeck%20Dashboard-1f6157.svg?logo=apple" alt="Mac App Store"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="https://www.npmjs.com/package/@agentdeck/setup"><img src="https://img.shields.io/npm/v/@agentdeck/setup.svg" alt="npm version"></a>
   <a href="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml"><img src="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -48,7 +48,7 @@ about a minute.
 
 ### 1. Install
 
-For the standalone native dashboard, [download AgentDeck Dashboard from the Mac App Store](https://apps.apple.com/us/app/agentdeck-dashboard/id6784822497). It carries its own Swift daemon and needs no Node.js.
+For the standalone native dashboard, [download AgentDeck Dashboard from the Mac App Store](https://apps.apple.com/app/id6784822497). It carries its own Swift daemon and needs no Node.js.
 
 For the CLI, terminal dashboard, and PTY steering:
 
@@ -96,7 +96,7 @@ Any of these attach to the same daemon, and you can add them in any order:
 |---|---|
 | **Stream Deck / Mini / Plus** | Install the plugin from the [Elgato Marketplace](https://marketplace.elgato.com/) *(in review)*, or `cd plugin && streamdeck link` from a checkout |
 | **Ulanzi D200H** | Install the plugin in Ulanzi Studio — see [plugin-ulanzi/VERIFY.md](plugin-ulanzi/VERIFY.md) |
-| **macOS app** | [Download on the Mac App Store](https://apps.apple.com/us/app/agentdeck-dashboard/id6784822497) — the SwiftUI dashboard carries its own daemon, so it needs no Node.js. iPhone/iPad companion in review |
+| **macOS app** | [Download on the Mac App Store](https://apps.apple.com/app/id6784822497) — the SwiftUI dashboard carries its own daemon, so it needs no Node.js. iPhone/iPad companion in review |
 | **Android tablet / e-ink** | Signed APK from [Releases](https://github.com/puritysb/AgentDeck/releases) — see [docs/android.md](docs/android.md) |
 | **ESP32 panels · InkDeck e-ink** | Flash firmware, then Wi-Fi OTA — see [docs/esp32.md](docs/esp32.md) |
 | **Pixoo64 · TC001 · Timebox · iDotMatrix** | `agentdeck pixoo scan` / `agentdeck timebox scan` — see [docs/devices.md](docs/devices.md) |
@@ -222,7 +222,7 @@ builds on [Releases](https://github.com/puritysb/AgentDeck/releases).
 | Channel | Tag | Status |
 |---|---|---|
 | **npm** — `@agentdeck/setup` | `npm-v*` | Published |
-| **Apple App Store** — macOS | `apple-v*` | [Live](https://apps.apple.com/us/app/agentdeck-dashboard/id6784822497) (iOS companion in review) |
+| **Apple App Store** — macOS | `apple-v*` | [Live](https://apps.apple.com/app/id6784822497) (iOS companion in review) |
 | **Elgato Marketplace** — Stream Deck plugin | `streamdeck-v*` | In review |
 | **Ulanzi Marketplace** — D200H plugin | `ulanzi-v*` | Blocked upstream ([details](marketplace/ulanzi/LISTING.md)) |
 | **GitHub Release** — Android APK | `android-v*` | Version ready, release not scheduled |

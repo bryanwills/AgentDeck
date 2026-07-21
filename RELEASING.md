@@ -77,7 +77,7 @@ Tag prefixes remain because channels ship independently and may point to differe
 
 ### Apple (TestFlight / App Store)
 
-macOS `1.0.0` has been publicly available since 2026-07-21 at [AgentDeck Dashboard on the Mac App Store](https://apps.apple.com/us/app/agentdeck-dashboard/id6784822497). The iPhone/iPad companion remains in review. A successful CI upload reaches App Store Connect/TestFlight; public App Store release remains a separate App Store Connect action.
+macOS `1.0.0` has been publicly available since 2026-07-21 at [AgentDeck Dashboard on the Mac App Store](https://apps.apple.com/app/id6784822497). The iPhone/iPad companion remains in review. A successful CI upload reaches App Store Connect/TestFlight; public App Store release remains a separate App Store Connect action.
 
 1. Confirm `MARKETING_VERSION == VERSION` in both `apple/project.yml` and the Xcode project mirror (`pnpm verify-version` checks this).
 2. Run the Release build and App Store archive verifier described in `CLAUDE.md`.
