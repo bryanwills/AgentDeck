@@ -273,6 +273,42 @@ export function writeDaemonInfo(info: DaemonInfo): void {
   debug('SessionRegistry', `Wrote daemon.json: port=${info.port} pid=${info.pid}`);
 }
 
+/**
+ * Restore this daemon's discovery file when an external process deleted or
+ * corrupted it while the daemon itself is still healthy.
+ *
+ * A second live daemon must win ownership of an existing file: overwriting
+ * that record would hide a real split-brain instead of resolving it. The
+ * caller therefore repairs only missing/malformed records, stale PIDs, or a
+ * record for its own PID whose bound port changed.
+ *
+ * Returns true when the file was rewritten.
+ */
+export function ensureDaemonInfo(info: DaemonInfo): boolean {
+  try {
+    const current = JSON.parse(readFileSync(getDaemonFile(), 'utf-8')) as Partial<DaemonInfo>;
+    if (
+      current.pid === info.pid
+      && current.port === info.port
+      && (current.httpPort ?? null) === (info.httpPort ?? null)
+    ) {
+      return false;
+    }
+    if (
+      typeof current.pid === 'number'
+      && current.pid !== info.pid
+      && isProcessAlive(current.pid)
+    ) {
+      return false;
+    }
+  } catch {
+    // Missing or malformed — rewrite below.
+  }
+
+  writeDaemonInfo(info);
+  return true;
+}
+
 /** Remove daemon.json on shutdown — try every candidate dir in case a stale
  *  file lingers in a sibling world (e.g. Swift died before cleanup). */
 export function removeDaemonInfo(): void {

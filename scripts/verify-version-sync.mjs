@@ -19,56 +19,46 @@ function expectValue(path, actual, expected) {
   if (actual !== expected) failures.push(`${path}: expected ${expected}, found ${actual ?? '<missing>'}`);
 }
 
+const productMatch = /^(\d+)\.(\d+)\.(\d+)$/.exec(productVersion);
+const productMajor = Number(productMatch?.[1]);
+const productMinor = Number(productMatch?.[2]);
+const productPatch = Number(productMatch?.[3]);
+
+function expectCompatible(path, actual) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(actual ?? '');
+  if (!match) {
+    failures.push(`${path}: expected numeric X.Y.Z SemVer, found ${actual ?? '<missing>'}`);
+    return;
+  }
+  const [, major, minor, patch] = match.map(Number);
+  if (major !== productMajor || minor !== productMinor) {
+    failures.push(`${path}: expected compatibility line ${productMajor}.${productMinor}.x, found ${actual}`);
+  } else if (patch > productPatch) {
+    failures.push(`${path}: patch ${actual} is ahead of root VERSION ${productVersion}`);
+  }
+}
+
 function jsonVersion(path, key = 'version') {
   return JSON.parse(read(path))[key];
 }
 
-for (const path of [
-  'package.json',
-  'shared/package.json',
-  'bridge/package.json',
-  'hooks/package.json',
-  'plugin/package.json',
-  'plugin-ulanzi/package.json',
-]) {
-  expectValue(path, jsonVersion(path), productVersion);
+expectValue('package.json', jsonVersion('package.json'), productVersion);
+
+// Major.minor is the cross-target compatibility contract. Patch versions are
+// delivery counters and may lag on targets that were not part of a hotfix.
+// Packages that ship together inside one target must still agree exactly.
+const npmVersion = jsonVersion('bridge/package.json');
+expectCompatible('bridge/package.json', npmVersion);
+for (const path of ['hooks/package.json', 'shared/package.json', 'setup/package.json']) {
+  expectValue(path, jsonVersion(path), npmVersion);
 }
 
-// `setup` is the ONE package allowed to run a patch ahead of VERSION.
-//
-// It is a bootstrapper: it installs @agentdeck/bridge and registers hooks, and
-// carries no protocol, wire format, or rendering contract that any other
-// surface has to agree with. npm versions are immutable, so a bug in its
-// install flow can only be fixed by publishing a new version — and forcing a
-// whole-product bump for that would drag Apple, Elgato and Ulanzi builds along
-// while they are mid-review at the current version.
-//
-// Constraint: same major.minor as VERSION, patch >= VERSION's. A minor or major
-// ahead means the product version moved on and setup was left behind, which is
-// real drift.
-{
-  const path = 'setup/package.json';
-  const actual = jsonVersion(path);
-  const [pMajor, pMinor, pPatch] = productVersion.split('.').map(Number);
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(actual ?? '');
-  if (!match) {
-    failures.push(`${path}: expected numeric X.Y.Z SemVer, found ${actual ?? '<missing>'}`);
-  } else {
-    const [, major, minor, patch] = match.map(Number);
-    if (major !== pMajor || minor !== pMinor || patch < pPatch) {
-      failures.push(
-        `${path}: expected ${productVersion} or a later patch of ${pMajor}.${pMinor}.x, found ${actual}`,
-      );
-    }
-  }
-}
+const streamDeckVersion = jsonVersion('plugin/package.json');
+expectCompatible('plugin/package.json', streamDeckVersion);
+const ulanziVersion = jsonVersion('plugin-ulanzi/package.json');
+expectCompatible('plugin-ulanzi/package.json', ulanziVersion);
 
-for (const path of [
-  'hooks/package.json',
-  'shared/package.json',
-  'bridge/package.json',
-  'setup/package.json',
-]) {
+for (const path of ['hooks/package.json', 'shared/package.json', 'bridge/package.json', 'setup/package.json']) {
   const manifest = JSON.parse(read(path));
   if (manifest.private === true) failures.push(`${path}: required public npm package must not be private`);
 }
@@ -83,11 +73,11 @@ for (const dependency of ['@agentdeck/hooks', '@agentdeck/shared']) {
 expectValue(
   'plugin-ulanzi/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/manifest.json',
   jsonVersion('plugin-ulanzi/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/manifest.json', 'Version'),
-  productVersion,
+  ulanziVersion,
 );
 const streamDeckManifestPath = 'plugin/bound.serendipity.agentdeck.sdPlugin/manifest.json';
 const streamDeckManifest = JSON.parse(read(streamDeckManifestPath));
-expectValue(streamDeckManifestPath, streamDeckManifest.Version, `${productVersion}.0`);
+expectValue(streamDeckManifestPath, streamDeckManifest.Version, `${streamDeckVersion}.0`);
 for (const [name, deviceType] of [
   ['agentdeck-sd', 0],
   ['agentdeck-sdmini', 1],
@@ -97,20 +87,20 @@ for (const [name, deviceType] of [
   expectValue(`${streamDeckManifestPath} profile ${name}`, profile?.DeviceType, deviceType);
 }
 
-const textChecks = [
-  ['apple/project.yml', /MARKETING_VERSION:\s*"([^"]+)"/, productVersion],
-  ['android/app/build.gradle.kts', /versionName\s*=\s*"([^"]+)"/, productVersion],
-  ['esp32/src/config.h', /FIRMWARE_VERSION\s*=\s*"([^"]+)"/, productVersion],
-  ['bridge/src/daemon.ts', /\.version\('([^']+)'\)/, productVersion],
-];
-for (const [path, pattern, expected] of textChecks) {
-  expectValue(path, read(path).match(pattern)?.[1], expected);
-}
+const appleVersion = read('apple/project.yml').match(/MARKETING_VERSION:\s*"([^"]+)"/)?.[1];
+const androidVersion = read('android/app/build.gradle.kts').match(/versionName\s*=\s*"([^"]+)"/)?.[1];
+const esp32Version = read('esp32/src/config.h').match(/FIRMWARE_VERSION\s*=\s*"([^"]+)"/)?.[1];
+const daemonVersion = read('bridge/src/daemon.ts').match(/\.version\('([^']+)'\)/)?.[1];
+expectCompatible('apple/project.yml', appleVersion);
+expectCompatible('android/app/build.gradle.kts', androidVersion);
+expectCompatible('esp32/src/config.h', esp32Version);
+expectValue('bridge/src/daemon.ts', daemonVersion, npmVersion);
 
-const xcodeVersions = [...read('apple/AgentDeck.xcodeproj/project.pbxproj').matchAll(/MARKETING_VERSION = ([^;]+);/g)]
-  .map((match) => match[1]);
-if (xcodeVersions.length === 0 || xcodeVersions.some((version) => version !== productVersion)) {
-  failures.push(`apple/AgentDeck.xcodeproj/project.pbxproj: MARKETING_VERSION mirrors must all be ${productVersion}`);
+const xcodeVersions = [
+  ...read('apple/AgentDeck.xcodeproj/project.pbxproj').matchAll(/MARKETING_VERSION = ([^;]+);/g),
+].map((match) => match[1]);
+if (xcodeVersions.length === 0 || xcodeVersions.some((version) => version !== appleVersion)) {
+  failures.push(`apple/AgentDeck.xcodeproj/project.pbxproj: MARKETING_VERSION mirrors must all be ${appleVersion}`);
 }
 
 /**
@@ -147,15 +137,19 @@ if (profilePaths.length === 0) {
 }
 for (const path of profilePaths) {
   const versions = [...read(path).matchAll(/"Version"\s*:\s*"([^"]+)"/g)].map((match) => match[1]);
-  if (versions.length === 0 || versions.some((version) => version !== `${productVersion}.0`)) {
-    failures.push(`${path}: embedded plugin versions must all be ${productVersion}.0`);
+  if (versions.length === 0 || versions.some((version) => version !== `${streamDeckVersion}.0`)) {
+    failures.push(`${path}: embedded plugin versions must all be ${streamDeckVersion}.0`);
   }
 }
 
 if (failures.length > 0) {
-  console.error(`Product version drift (VERSION=${productVersion}):`);
+  console.error(`Compatibility/version drift (VERSION=${productVersion}):`);
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
 
-console.log(`Product version ${productVersion} is synchronized across all release surfaces.`);
+console.log(
+  `Compatibility line ${productMajor}.${productMinor} is synchronized; target patches: ` +
+    `npm ${npmVersion}, Apple ${appleVersion}, Android ${androidVersion}, ESP32 ${esp32Version}, ` +
+    `Stream Deck ${streamDeckVersion}, Ulanzi ${ulanziVersion}.`,
+);

@@ -59,6 +59,7 @@ import {
   shouldConcedePortToOccupant,
   waitForDaemonExit,
   writeDaemonInfo,
+  ensureDaemonInfo,
   removeDaemonInfo,
   readDaemonInfo,
   removeDaemonSession,
@@ -1760,8 +1761,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }
   });
 
-  // Write daemon.json for client discovery (must be after successful bind)
-  writeDaemonInfo({ port, pid: process.pid, startedAt: new Date().toISOString() });
+  // Write daemon.json for client discovery (must be after successful bind).
+  // Keep the original startedAt stable when the self-heal timer rewrites it.
+  const daemonInfo = { port, pid: process.pid, startedAt: new Date().toISOString() };
+  writeDaemonInfo(daemonInfo);
 
   // ===== BridgeCore =====
   const core = new BridgeCore({
@@ -1770,6 +1773,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     httpServer,
     isDaemon: true,
   });
+  // Hooks resolve a fallback daemon port through daemon.json. Another process
+  // can delete that file while this daemon remains healthy, which makes every
+  // standalone Claude/Codex hook silently fall back to an empty :9120. Mirror
+  // the Swift daemon's 10-second registry self-heal so timeline ingestion does
+  // not stop merely because the discovery file disappeared.
+  const daemonInfoHealTimer = setInterval(() => {
+    if (ensureDaemonInfo(daemonInfo)) {
+      debug('daemon', `Self-healed daemon.json for port ${port}`);
+    }
+  }, 10_000);
+  daemonInfoHealTimer.unref?.();
   const esp32WifiEvents = new Set<string>([
     ...SERIAL_FORWARDED_EVENTS,
     'esp32_ota_begin',
@@ -3015,6 +3029,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // ===== Shutdown =====
   core.onShutdown(async () => {
     clearInterval(permissionSweepTimer);
+    clearInterval(daemonInfoHealTimer);
     drainAllPending();
     removeDaemonInfo();
     focusRelay.stop();

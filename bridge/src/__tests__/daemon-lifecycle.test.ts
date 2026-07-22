@@ -5,7 +5,7 @@
  * Tests daemon.json lifecycle, session registry, port discovery, and PID validation.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { createTempDataDir, type TempDataDir } from './helpers/temp-data-dir.js';
 import {
   register,
@@ -13,6 +13,7 @@ import {
   listActive,
   findExistingDaemon,
   writeDaemonInfo,
+  ensureDaemonInfo,
   removeDaemonInfo,
   readDaemonInfo,
   findDaemonPort,
@@ -84,6 +85,32 @@ describe('daemon.json lifecycle', () => {
   it('removeDaemonInfo is safe when file already gone', () => {
     // Should not throw
     expect(() => removeDaemonInfo()).not.toThrow();
+  });
+
+  it('self-heals daemon.json after an external deletion', () => {
+    const info: DaemonInfo = {
+      port: 9125,
+      pid: process.pid,
+      startedAt: '2026-07-22T00:00:00.000Z',
+    };
+    writeDaemonInfo(info);
+    unlinkSync(tempDir.daemonFile);
+
+    expect(ensureDaemonInfo(info)).toBe(true);
+    expect(JSON.parse(readFileSync(tempDir.daemonFile, 'utf-8'))).toEqual(info);
+  });
+
+  it('repairs a malformed daemon.json without rewriting a healthy record', () => {
+    const info: DaemonInfo = {
+      port: 9121,
+      pid: process.pid,
+      startedAt: '2026-07-22T00:00:00.000Z',
+    };
+    writeFileSync(tempDir.daemonFile, '{broken', 'utf-8');
+
+    expect(ensureDaemonInfo(info)).toBe(true);
+    expect(ensureDaemonInfo(info)).toBe(false);
+    expect(JSON.parse(readFileSync(tempDir.daemonFile, 'utf-8'))).toEqual(info);
   });
 });
 

@@ -1,7 +1,7 @@
 ---
 id: policy.releasing
 title: Releasing and Versioning
-description: Unified product version SSOT, per-track release tags, and monotonic version constraints.
+description: Shared compatibility line, per-target patch versions, release tags, and monotonic constraints.
 category: Engineering
 locale: en
 canonical: true
@@ -15,15 +15,15 @@ validators: [node scripts/build-design-system-viewer.mjs --check, pnpm verify-ve
 
 # Releasing & Versioning
 
-AgentDeck uses one product version across every maintained surface. The canonical value is the root [`VERSION`](VERSION) file; package manifests and platform project files mirror it because their build and distribution tools require native version fields.
+AgentDeck uses one `major.minor` compatibility line across every maintained surface. The root [`VERSION`](VERSION) is the current source-train ceiling; each delivery target keeps its own full `X.Y.Z` version and may lag at the patch component when it was not part of a hotfix.
 
-The current product version is **1.0.1**. The first public Mac App Store release remains `1.0.0`; channels ship independently, so the source train can advance before a new store binary is published. The unified release train originally converged at `0.2.3` after the 2026-06-26 reset exposed a registry mismatch: Apple could legitimately restart under a new bundle ID, but the existing npm package identities could not reuse or lower already-published versions. `1.0.0` remains above every pre-convergence package and store version floor.
+The current source-train ceiling is **1.0.2** and the compatibility line is **1.0**. npm/CLI is at `1.0.2`; Apple, Android, ESP32, Stream Deck, and Ulanzi remain at their independently delivered `1.0.1` patches until those targets need another release. The first public Mac App Store release remains `1.0.0`.
 
-Run `pnpm verify-version` before every build or release. CI rejects drift between `VERSION` and its mirrors.
+Run `pnpm verify-version` before every build or release. CI rejects a `major.minor` compatibility split, a target-internal mismatch, or a target patch ahead of root `VERSION`.
 
-## Unified version, independent delivery
+## Compatible line, independent patch and delivery
 
-| Surface | Product-version mirror | Independent monotonic value | Tag / delivery |
+| Surface | Target version | Independent monotonic value | Tag / delivery |
 |---|---|---|---|
 | **Apple** (iOS+macOS) | `apple/project.yml` `MARKETING_VERSION` | `CURRENT_PROJECT_VERSION` (CI-owned) | `apple-v*` → TestFlight / App Store |
 | **Android** | `android/app/build.gradle.kts` `versionName` | `versionCode` (currently 3) | `android-v*` → APK Release / optional Play |
@@ -33,15 +33,15 @@ Run `pnpm verify-version` before every build or release. CI rejects drift betwee
 | **Ulanzi** | Ulanzi manifest `Version` | marketplace submission record | `ulanzi-v*` → Ulanzi Studio Marketplace |
 | **Private JS workspaces** | their `package.json` files | not published | no independent delivery |
 
-Tag prefixes remain because channels ship independently and may point to different commits. A product version bump updates every source mirror, but a channel is considered shipped only when its prefixed tag and external release/submission exist. Do not claim an unsubmitted marketplace artifact as released merely because its source manifest is synchronized.
+Tag prefixes remain because channels ship independently and may point to different commits. A patch bump updates only the target being delivered (plus root `VERSION` when it establishes a new ceiling). A channel is considered shipped only when its prefixed tag and external release/submission exist. Do not claim an unsubmitted marketplace artifact as released merely because another target advanced.
 
 ## Version rules
 
-1. Bump the root `VERSION`, then update every mirror in the same commit. `pnpm verify-version` is the enforcement mechanism.
-2. Never reuse, delete-and-recreate, or lower a version that reached an external registry/store. Git tags do not reset external version floors.
-3. Apple build number and Android versionCode always increase, even when the marketing/product version jumps.
-4. Public npm packages stay in lockstep and publish in dependency order: `hooks` + `shared` → `bridge` → `setup`.
-5. A platform-only hotfix still advances the common product patch version. Unchanged channels may skip binary publication, but their source mirrors move with the repository.
+1. All targets must share root `VERSION`'s `major.minor`; changing either component is a coordinated compatibility release.
+2. Patch versions may differ by target. Bump only the target being delivered and raise root `VERSION` if that patch establishes a new source-train ceiling.
+3. Never reuse, delete-and-recreate, or lower a version that reached an external registry/store. Git tags do not reset external version floors.
+4. Apple build number and Android versionCode increase only when those targets are actually built for delivery.
+5. Public npm packages stay in lockstep and publish in dependency order: `hooks` + `shared` → `bridge` → `setup`.
 6. Keep prefixed tags; there is no unprefixed repo-wide release tag.
 7. The only valid version reset is a genuinely new external identity (for example a new Apple bundle ID or npm package name). Document that migration before changing source versions.
 
@@ -52,11 +52,11 @@ Tag prefixes remain because channels ship independently and may point to differe
 - **npm**: published versions are immutable. At convergence, registry floors were hooks `0.2.0`, shared `0.2.0`, bridge `0.2.2`, setup `0.2.0`, so the unified train begins at `0.2.3`.
 - **Marketplaces**: plugin identifiers are immutable after distribution; only their versions advance.
 
-## Preparing a product-version bump
+## Preparing a target patch release
 
-1. Choose the next SemVer greater than all external floors and update `VERSION`.
-2. Update all mirrors checked by `scripts/verify-version-sync.mjs`.
-3. Increment Apple `CURRENT_PROJECT_VERSION` and Android `versionCode`.
+1. Choose the next SemVer for the target, preserving the shared `major.minor` compatibility line.
+2. Update that target's internal mirrors and raise root `VERSION` if needed.
+3. Increment Apple `CURRENT_PROJECT_VERSION` or Android `versionCode` only when releasing that target.
 4. Update user-facing release notes and the delivery table in `README.md`.
 5. Run `pnpm verify-version`, `pnpm build`, and the relevant platform workflows.
 6. Commit the synchronized release state. Create only the channel tags that are actually being delivered.
@@ -67,11 +67,11 @@ Tag prefixes remain because channels ship independently and may point to differe
 
 `hooks`, `shared`, `bridge`, and `setup` are public; root, plugin, and plugin-ulanzi are private. `bridge` has a runtime dependency on both `hooks` and `shared`, so all four must exist at the same product version. npm publishing requires a 2FA-enabled granular token.
 
-1. Verify all public manifests match `VERSION` and that the version is unused on npm.
+1. Verify all four public npm manifests match each other and that the target version is unused on npm.
 2. Run `pnpm build` and tests.
 3. Publish the leaf packages `hooks` and `shared` first, then bridge, then setup.
-4. Confirm each package's `latest` dist-tag matches `VERSION`.
-5. Tag the exact published commit: `git tag npm-v<VERSION> && git push origin npm-v<VERSION>`.
+4. Confirm each package's `latest` dist-tag matches the npm target version.
+5. Tag the exact published commit as `npm-v<TARGET_VERSION>` and push it.
 
 `npm-release.yml` runs on the tag: it re-verifies the version, builds, tests, and creates the GitHub Release. **Publishing stays manual by default** — step 3 above is still yours. To hand publishing to CI, set the repo variable `NPM_PUBLISH_ENABLED=true` and add an `NPM_TOKEN` secret holding a *granular automation* token (a 2FA-on-publish token cannot run unattended); the workflow then publishes in dependency order.
 
@@ -79,35 +79,35 @@ Tag prefixes remain because channels ship independently and may point to differe
 
 macOS `1.0.0` has been publicly available since 2026-07-21 at [AgentDeck Dashboard on the Mac App Store](https://apps.apple.com/app/id6784822497). The iPhone/iPad companion remains in review. A successful CI upload reaches App Store Connect/TestFlight; public App Store release remains a separate App Store Connect action.
 
-1. Confirm `MARKETING_VERSION == VERSION` in both `apple/project.yml` and the Xcode project mirror (`pnpm verify-version` checks this).
+1. Confirm Apple `MARKETING_VERSION` matches between `apple/project.yml` and the Xcode project mirror (`pnpm verify-version` checks this).
 2. Run the Release build and App Store archive verifier described in `CLAUDE.md`.
-3. Tag and push `apple-v<VERSION>`; CI archives and uploads to TestFlight.
+3. Tag and push `apple-v<APPLE_VERSION>`; CI archives and uploads to TestFlight.
 
 CI owns `CURRENT_PROJECT_VERSION` — `apple-release.yml` injects `github.run_number` into both archive steps, so the build number rises on every run and ASC never sees a duplicate `(version, build)` pair. Do not bump it by hand; the value in `apple/project.yml` is only a local-build default.
 
 ### Android (APK / optional Play)
 
-1. Confirm `versionName == VERSION` and increment `versionCode`.
+1. Confirm the Android `versionName` remains on the shared compatibility line and increment `versionCode`.
 2. Follow `.agents/workflows/build-android.md` for the signed release APK.
-3. Tag and push `android-v<VERSION>` to create the GitHub Release. Optional Play upload remains gated by `ANDROID_PLAY_ENABLED` and its service-account secret.
+3. Tag and push `android-v<ANDROID_VERSION>` to create the GitHub Release. Optional Play upload remains gated by `ANDROID_PLAY_ENABLED` and its service-account secret.
 
 ### ESP32 firmware
 
-1. Confirm `FIRMWARE_VERSION == VERSION` and run the relevant PlatformIO/hardware verification.
-2. Tag and push `esp32-v<VERSION>`.
+1. Confirm `FIRMWARE_VERSION` remains on the shared compatibility line and run the relevant PlatformIO/hardware verification.
+2. Tag and push `esp32-v<ESP32_VERSION>`.
 
 ### Stream Deck plugin
 
-1. Confirm the main manifest and embedded profile snapshots use `VERSION.0`.
+1. Confirm the main manifest and embedded profile snapshots match the Stream Deck package version as `X.Y.Z.0`.
 2. Follow `.agents/workflows/build-plugin.md`, then run `pnpm package` — this validates with Elgato's official CLI (pinned as the `@elgato/cli` devDependency) before packing, so a local failure is a submission the Marketplace would have rejected.
-3. Upload to the Elgato Maker portal and tag `streamdeck-v<VERSION>` when actually submitted/released.
+3. Upload to the Elgato Maker portal and tag `streamdeck-v<STREAMDECK_VERSION>` when actually submitted/released.
 
 `streamdeck-release.yml` runs on the tag: it validates, packs, attaches the `.streamDeckPlugin` to a GitHub Release, and uploads it as a build artifact. The Maker-portal upload itself stays manual — Elgato has no submission API.
 
 ### Ulanzi plugin
 
-1. Confirm both Ulanzi package and marketplace manifests match `VERSION`.
-2. Run `pnpm --filter @agentdeck/plugin-ulanzi package`, upload the artifact, and tag `ulanzi-v<VERSION>` when actually submitted/released.
+1. Confirm both Ulanzi package and marketplace manifests match each other.
+2. Run `pnpm --filter @agentdeck/plugin-ulanzi package`, upload the artifact, and tag `ulanzi-v<ULANZI_VERSION>` when actually submitted/released.
 
 `ulanzi-release.yml` runs on the tag and produces/attaches `dist/agentdeck-ulanzi-v<VERSION>.zip` the same way. The Marketplace upload stays manual.
 

@@ -215,13 +215,13 @@ build health.
 
 ## Releases
 
-One unified product version across every artifact; each channel ships on its own
-tag. Root [`VERSION`](VERSION) is canonical — policy in [RELEASING.md](RELEASING.md),
+One `major.minor` compatibility line across every artifact; target patches and
+delivery tags advance independently. Root [`VERSION`](VERSION) is the source-train ceiling — policy in [RELEASING.md](RELEASING.md),
 builds on [Releases](https://github.com/puritysb/AgentDeck/releases).
 
 | Channel | Tag | Status |
 |---|---|---|
-| **npm** — `@agentdeck/setup` | `npm-v*` | Published |
+| **npm** — `@agentdeck/setup` | `npm-v*` | [1.0.2](https://github.com/puritysb/AgentDeck/releases/tag/npm-v1.0.2) |
 | **Apple App Store** — macOS | `apple-v*` | [Live](https://apps.apple.com/app/id6784822497) (iOS companion in review) |
 | **Elgato Marketplace** — Stream Deck plugin | `streamdeck-v*` | [1.0.1 release](https://github.com/puritysb/AgentDeck/releases/tag/streamdeck-v1.0.1); Maker review update pending |
 | **Ulanzi Marketplace** — D200H plugin | `ulanzi-v*` | [1.0.1 release](https://github.com/puritysb/AgentDeck/releases/tag/ulanzi-v1.0.1); support handoff pending ([details](marketplace/ulanzi/LISTING.md)) |

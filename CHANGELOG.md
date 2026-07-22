@@ -1,10 +1,20 @@
 # Changelog
 
-Product versions are unified across every delivery channel — the root `VERSION`
-file is the source of truth and `pnpm verify-version` gates the mirrors. Channels
-ship independently under their own tags (`apple-v*`, `streamdeck-v*`, `ulanzi-v*`,
-`npm-v*`, `android-v*`, `esp32-v*`), so a given version may reach each store on a
-different day. See [RELEASING.md](RELEASING.md).
+All delivery channels share one `major.minor` compatibility line. Patch versions
+and prefixed release tags (`apple-v*`, `streamdeck-v*`, `ulanzi-v*`, `npm-v*`,
+`android-v*`, `esp32-v*`) advance independently by target. Root `VERSION` is the
+source-train ceiling; `pnpm verify-version` gates compatibility and target-internal
+version consistency. See [RELEASING.md](RELEASING.md).
+
+## 1.0.2
+
+### Daemon and timeline
+
+- Keep the Node daemon discovery registry healthy while the process is running,
+  restoring a missing, malformed, or stale `daemon.json` every ten seconds
+- Preserve hook timeline ingestion when the daemon binds a fallback port instead
+  of silently sending Claude Code and Codex lifecycle events to an empty port
+- Avoid overwriting another live daemon's discovery record during self-repair
 
 ## 1.0.1
 
