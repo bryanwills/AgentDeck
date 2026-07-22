@@ -35,6 +35,9 @@ jobs:
       - name: Verify design-system catalog, frontmatter, and translations
         run: node scripts/build-design-system-viewer.mjs --check
 
+      - name: Verify Markdown links, anchors, and heading structure
+        run: node scripts/check-docs.mjs
+
       # The Pages GNB is single-sourced from scripts/pages-nav.html; the four
       # committed surfaces must match the rendered partial (Build Health
       # renders it at generation time and cannot drift).

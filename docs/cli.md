@@ -3,7 +3,7 @@
 Every `agentdeck` command, plus how a session is started and stopped.
 For the one-command install see [README → Start here](../README.md#start-here).
 
-# Usage
+## Usage
 
 ## Start
 

@@ -22,7 +22,7 @@
 
 ## 저장소에 추가한 프로브
 
-`[usb_hotplug_probe.py](/Users/puritysb/github/AgentDeck/esp32/scripts/usb_hotplug_probe.py)`
+[usb_hotplug_probe.py](scripts/usb_hotplug_probe.py)
 
 이 스크립트는 `libusb` hotplug 콜백으로 Espressif `0x303a:0x1001`이 붙는 즉시:
 
@@ -38,7 +38,7 @@
 - JTAG로 보이는 인터페이스가 따로 있는지
 - 인터페이스를 잡고 있어도 전체 디바이스가 동일 시점에 사라지는지
 
-`[usb_bulk_probe.py](/Users/puritysb/github/AgentDeck/esp32/scripts/usb_bulk_probe.py)`
+[usb_bulk_probe.py](scripts/usb_bulk_probe.py)
 
 이 스크립트는 한 단계 더 내려가서:
 
@@ -101,7 +101,9 @@ python3 esp32/scripts/usb_bulk_probe.py --write
 
 ## OpenOCD에 대한 현실적 판단
 
-`[esp_usb_jtag.cfg](/Users/puritysb/.platformio/tools/tool-openocd-esp32/share/openocd/scripts/interface/esp_usb_jtag.cfg)`와 `[esp32s3-builtin.cfg](/Users/puritysb/.platformio/tools/tool-openocd-esp32/share/openocd/scripts/board/esp32s3-builtin.cfg)`를 보면 OpenOCD는 별도 시리얼 포트가 아니라 USB 디바이스 `0x303a:0x1001` 자체에 붙는다.
+PlatformIO의 `tool-openocd-esp32/share/openocd/scripts/interface/esp_usb_jtag.cfg`와
+`tool-openocd-esp32/share/openocd/scripts/board/esp32s3-builtin.cfg`를 보면 OpenOCD는
+별도 시리얼 포트가 아니라 USB 디바이스 `0x303a:0x1001` 자체에 붙는다.
 
 그래서 OpenOCD 실험의 전제는 단순하다.
 

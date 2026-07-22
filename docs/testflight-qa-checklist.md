@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: stable
 owner: Apple maintainers
-reviewed: 2026-07-21
-revision: 2026-07-21
+reviewed: 2026-07-22
+revision: 2026-07-22
 source_of_truth: docs/testflight-qa-checklist.md
 validators: [bash apple/scripts/verify-appstore-archive.sh]
 ---
@@ -128,7 +128,7 @@ Skip if you don't have OpenClaw 2026.4.14+ installed.
 
 ### Ulanzi D200H Deck Dock
 
-- [ ] **H4**. Plug in D200H. Dashboard menu bar shows the D200H in the devices section within 5 seconds. Native keys display session tiles.
+- [ ] **H4**. Install the AgentDeck plugin in Ulanzi Studio, place its single dynamic action on the D200H keys, and launch Ulanzi Studio. With the daemon running, the plugin connects over WebSocket as `ulanzi-plugin`; the dashboard menu bar shows D200H within 5 seconds and the native keys display session tiles. AgentDeck itself must not open the device over HID.
 - [ ] **H5**. Press a D200H key. The corresponding session is focused in the dashboard.
 
 ### ESP32 display (e.g., 86Box, IPS 3.5", Round AMOLED)
@@ -197,7 +197,7 @@ Title: <brief symptom>
 Environment:
 - Device: <model>
 - OS: <macOS / iOS version>
-- Build: <TestFlight build number, e.g. 1.0.0 (2)>
+- Build: <marketing version and TestFlight build number, e.g. 1.0.1 (3801)>
 - Attached session: <claude-code / codex / opencode / openclaw — if relevant>
 
 Steps to reproduce:
@@ -234,4 +234,5 @@ Send to `admin@foundby.kr` or file as a GitHub issue.
 - **Section J + K zero regressions**.
 - **Sections G, H optional** — nice to have; not blockers unless you're shipping a hardware-first marketing push.
 
-When the above looks clean across 2-3 testers, tag `apple-v1.0.0` and submit.
+When the above looks clean across 2-3 testers, confirm `VERSION`, tag
+`apple-v<VERSION>`, and submit the build produced by that exact tag.

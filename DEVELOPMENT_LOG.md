@@ -45,6 +45,40 @@ review entry와 content record 사이의 서버 매핑 결함으로 판단하고
 thread에 재현 URL과 1.0.1 UUID/category를 보내 다른 작품에 영향을 주지 않도록
 연결 상태를 확인해 달라고 요청했다.
 
+## 2026-07-22 — README/내부 문서 정합성 감사 + Markdown 링크 게이트
+
+README 의 D200H direct-HID 다이어그램과 “full bridge” 표현을 현재 2-tier 구조에
+맞게 고쳤다. D200H는 Ulanzi Studio plugin이 daemon WS에 연결하는 유일한 경로이며,
+App Store Swift daemon은 standalone 모니터링 허브지만 PTY Session Bridge는 아니다.
+같은 경계를 `docs/daemon.md`와 Apple 사용자 문서에도 반영해, Swift 단독 실행을
+“세션 0개 + CLI 설치 유도”로 설명하던 폐기 문구를 제거했다.
+
+`hardware-compatibility.md` 재구성 후 남아 있던 Android/ESP32의 옛 §A/§D 앵커를
+현행 섹션으로 연결했고, TestFlight QA의 D200H 절차를 Ulanzi Studio plugin/WS
+presence 기준으로 바꿨다. 출시 태그도 고정 `apple-v1.0.0` 대신
+`apple-v<VERSION>`으로 일반화했다. 사용자 매뉴얼 5개의 중복 H1을 정리하고,
+Swift daemon 파일/LOC 고정 수치를 없앴으며 개인 `file:///Users/...` 링크를
+저장소 상대 링크로 치환했다.
+
+재발 방지로 `pnpm docs:check`를 추가했다. 추적 중이거나 새로 추가된 Markdown
+전체의 로컬 파일·이미지 경로와 `.md` 앵커를 검사하고, machine-local/저장소 밖
+링크를 거부하며, README 및 `docs/` 문서는 H1 하나만 허용한다. Design System
+CI도 이 게이트를 실행한다.
+
+릴리스 형상도 함께 재검증했다. `pnpm test` 110 files / 1,876 tests, 전체
+TypeScript typecheck와 production build, Android debug unit tests, macOS XCTest
+466개(1 snapshot opt-in skip), iOS XCTest 114개(1 snapshot opt-in skip)가 모두
+통과했다. 1.0.1 macOS/iOS를 각각 Release archive·App Store export한 뒤 실제
+배포 앱에 `verify-appstore-archive.sh`를 적용해 두 플랫폼 모두 불변식 통과를
+확인했고, 제출 패키지의 3개 locale 메타데이터·39개 screenshot·3개 preview
+video도 검증했다. TestFlight upload는 ASC 환경 변수를 주입하지 않아 의도적으로
+생략했다.
+
+비차단 잔여 진단은 두 건이다. Android 컴파일러가 `SettingsScreen.isEink` 미사용
+parameter 경고 1건을 내며, `bash design/lint.sh`는 `.venv`, `apple/DerivedData`,
+vendor Ulanzi SDK/시뮬레이터까지 스캔하는 기존 scope 문제로 725건을 보고한다.
+둘 다 이번 출시 바이너리·문서 수정의 실패는 아니지만 별도 정리 대상으로 남긴다.
+
 > **Older entries are archived by month** under [`docs/devlog/`](docs/devlog/README.md). This active file keeps the current month plus the preceding month (currently 2026-07 and 2026-06); search only the relevant monthly archive for older history.
 
 ## 2026-07-22 — 관찰형 processing의 MODEL 타일 증식 수정 + Stream Deck 1.0.1 준비
@@ -793,10 +827,10 @@ App Store 프리뷰/마케팅 영상을 찍으려면 "에이전트가 하나씩 
 - 또한, 기기가 USB Serial에 연결되어 있을 때 firmware가 WiFi 라디오를 자동으로 파킹(WiFi off)하므로 WiFi OTA를 통한 펌웨어 업데이트가 불가능했다.
 
 ### 해결
-- **레이아웃 개선**: [esp32/src/ui/screens/aquarium.cpp](file:///Users/puritysb/github/AgentDeck/esp32/src/ui/screens/aquarium.cpp)를 수정하여 TTGO 보드(`BOARD_TTGO`)의 컴팩트 세로 화면(width 135)에 맞게 `connCard` 너비를 화면 가로 길이에 연동(`g_screenW - 16`, 최대 260)하고 패딩을 줄여 좌우 8px의 여백을 깔끔하게 유지하게 했다.
+- **레이아웃 개선**: [esp32/src/ui/screens/aquarium.cpp](esp32/src/ui/screens/aquarium.cpp)를 수정하여 TTGO 보드(`BOARD_TTGO`)의 컴팩트 세로 화면(width 135)에 맞게 `connCard` 너비를 화면 가로 길이에 연동(`g_screenW - 16`, 최대 260)하고 패딩을 줄여 좌우 8px의 여백을 깔끔하게 유지하게 했다.
 - **방향 대응**: 화면 세로 길이가 150px 미만인 가로 모드 상황을 감안해 레이아웃 플로우를 세로(`COLUMN`)에서 가로(`ROW`) 형태로 동적 전환하여 로고와 텍스트를 좌우 배치함으로써 컴팩트 액정에서의 상하 오버플로우를 완전히 제거했다.
 - **폰트 최적화**: 좁은 액정에 적합하도록 카드 제목과 상태 메시지 폰트를 Montserrat 14/12로 줄여 가독성을 높였다.
-- **업로드 속도 튜닝**: [esp32/platformio.ini](file:///Users/puritysb/github/AgentDeck/esp32/platformio.ini) 내 `[env:ttgo]`의 시리얼 플래시 업로드 속도를 `57600`에서 표준적이고 훨씬 안정적인 `115200`으로 2배 상향 조정했다.
+- **업로드 속도 튜닝**: [esp32/platformio.ini](esp32/platformio.ini) 내 `[env:ttgo]`의 시리얼 플래시 업로드 속도를 `57600`에서 표준적이고 훨씬 안정적인 `115200`으로 2배 상향 조정했다.
 - **시리얼 플래싱**: 데몬을 잠시 종료해 포트 점유를 해제한 뒤 `pio run -e ttgo -t upload`를 수행하여 USB Serial로 펌웨어를 성공적으로 안전하게 주입했다.
 
 ### 검증
@@ -3781,7 +3815,7 @@ Pixoo64 실시간 스트리밍 시, 다중 프레임 애니메이션 시퀀스(`
 
 1. **단일 프레임 전송 복구**:
    - `frameCount`를 다시 `1`로 고정하여 약 **~16 KB** 크기의 단일 프레임만 전송하도록 복구함. 이를 통해 "Loading..." 화면의 노출을 완벽히 방지하고 요청 속도를 대폭 높임.
-   - [pixoo-bridge.ts](file:///Users/puritysb/github/AgentDeck/bridge/src/pixoo/pixoo-bridge.ts) 및 [PixooModule.swift](file:///Users/puritysb/github/AgentDeck/apple/AgentDeck/Daemon/Modules/PixooModule.swift)에서 `frameCount`를 `1`로 수정.
+   - [pixoo-bridge.ts](bridge/src/pixoo/pixoo-bridge.ts) 및 [PixooModule.swift](apple/AgentDeck/Daemon/Modules/PixooModule.swift)에서 `frameCount`를 `1`로 수정.
 2. **동적 전송 주기 적용**:
    - **대기/안정 상태 (Idle)**: 물고기 애니메이션 등 배경 업데이트를 위한 프레임 전송 간격(하트비트)을 기존의 과도한 주기 대신 **1.5초(1500ms)당 1회 (0.67 FPS)**로 늘려 디바이스 부하 및 대역폭 점유율을 75% 이상 낮춤.
    - **상태 변경 상태 (State Changed)**: 사용자 프롬프트 시작, 완료, 세션 목록 변경 등 테라리움의 상태 변경이 감지되는 즉시 타이머 주기와 상관없이 **즉시 단일 프레임을 푸시**하여 snappiness(체감 속도)를 극대화함.
@@ -3811,14 +3845,14 @@ ESP32-P4 기반의 Guition JC8012P4A1C 10.1인치 HMI 기기 및 LilyGO TTGO T-D
 ### 수정
 
 1. **보드 설정 및 기본 방향 세팅**: 
-   - [board_jc8012p4a1c.h](file:///Users/puritysb/github/AgentDeck/esp32/boards/board_jc8012p4a1c.h) 신규 생성 (JD9365 MIPI-DSI, GSL3680 터치 핀 맵, 800x1280 해상도).
-   - [board_ttgo_t_display.h](file:///Users/puritysb/github/AgentDeck/esp32/boards/board_ttgo_t_display.h) 기본값을 **Portrait**로 설정 (`BOARD_ROTATION = 0`, `SCREEN_W = 135`, `SCREEN_H = 240`).
+   - [board_jc8012p4a1c.h](esp32/boards/board_jc8012p4a1c.h) 신규 생성 (JD9365 MIPI-DSI, GSL3680 터치 핀 맵, 800x1280 해상도).
+   - [board_ttgo_t_display.h](esp32/boards/board_ttgo_t_display.h) 기본값을 **Portrait**로 설정 (`BOARD_ROTATION = 0`, `SCREEN_W = 135`, `SCREEN_H = 240`).
 2. **JC8012P4A1C 가로모드(Landscape) 소프트웨어 회전 및 터치 축 대입**:
-   - [display.cpp](file:///Users/puritysb/github/AgentDeck/esp32/src/ui/display.cpp)에서 JC8012P4A1C의 `g_screenW`/`g_screenH`를 가로 크기(1280x800)로 세팅.
+   - [display.cpp](esp32/src/ui/display.cpp)에서 JC8012P4A1C의 `g_screenW`/`g_screenH`를 가로 크기(1280x800)로 세팅.
    - `displayInit` 호출 시 LVGL 디스플레이를 물리 크기(800x1280)로 생성한 뒤 `lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_90)`를 통해 소프트웨어적으로 90도 가로 회전 적용.
    - `touch_read` 함수에서 물리 터치 입력 좌표(X, Y)를 90도 시계방향 회전 수식(`temp_x = x; x = BOARD_NATIVE_H - y; y = temp_x;`)을 적용하여 논리 landscape 맵에 매핑.
-3. **색상 순서 교정**: [jd9365_lcd.cpp](file:///Users/puritysb/github/AgentDeck/esp32/src/ui/lcd/jd9365_lcd.cpp)에서 `.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB`로 설정하여 색상 스왑 현상 해결.
-4. **업로드 포트/속도 튜닝**: [platformio.ini](file:///Users/puritysb/github/AgentDeck/esp32/platformio.ini)에서 업로드 포트를 `/dev/cu.usbmodem101`로, 속도를 `115200`으로 지정하여 native USB 통신 노이즈 방지 및 쓰기 안정성 확보.
+3. **색상 순서 교정**: [jd9365_lcd.cpp](esp32/src/ui/lcd/jd9365_lcd.cpp)에서 `.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB`로 설정하여 색상 스왑 현상 해결.
+4. **업로드 포트/속도 튜닝**: [platformio.ini](esp32/platformio.ini)에서 업로드 포트를 `/dev/cu.usbmodem101`로, 속도를 `115200`으로 지정하여 native USB 통신 노이즈 방지 및 쓰기 안정성 확보.
 
 ### 검증
 

@@ -3,7 +3,7 @@
 Prerequisites, manual build steps, and uninstall. Most people want the
 one-command path in [README → Start here](../README.md#start-here) instead.
 
-# Prerequisites
+## Prerequisites
 
 | Item | Required | Install |
 |------|----------|---------|
@@ -23,7 +23,7 @@ one-command path in [README → Start here](../README.md#start-here) instead.
 
 ---
 
-# Manual Build & Install
+## Manual Build & Install
 
 ## Build
 
@@ -68,7 +68,7 @@ All audio stays on-device (`requiresOnDeviceRecognition = true`), so the capture
 
 ---
 
-# Uninstall
+## Uninstall
 
 ```bash
 bash scripts/uninstall.sh

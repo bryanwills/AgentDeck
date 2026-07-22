@@ -7,10 +7,10 @@ locale: en
 canonical: true
 status: stable
 owner: Design system maintainers
-reviewed: 2026-07-21
-revision: 2026-07-21
+reviewed: 2026-07-22
+revision: 2026-07-22
 source_of_truth: agentdeck-design-system/README.md
-validators: [node scripts/build-design-system-viewer.mjs --check]
+validators: [node scripts/build-design-system-viewer.mjs --check, pnpm docs:check]
 ---
 
 # AgentDeck Design System Workspace
@@ -27,15 +27,15 @@ The layer a document belongs to is its `category`, and the viewer's rail is
 generated from those values — so this table is the categories, not a second
 taxonomy alongside them. Each layer answers one reader question.
 
-| Layer (`category`) | Answers                              | Examples                                                                       |
-| ------------------ | ------------------------------------ | ------------------------------------------------------------------------------ |
-| Governance         | How do I work on this system?        | this README, the handover contract, `docs/agent-harness.md`                    |
-| Foundations        | What is the visual language, and where does its material live? | `DESIGN.md`, `design/RESOURCES.md`                   |
-| Architecture       | How does it work?                    | `docs/architecture.md`, `daemon.md`, `protocol.md`, `gateway-protocol.md`, `apme.md` |
-| Specifications     | What must a given surface do?        | `hardware-compatibility.md`, `devices.md`, `esp32*.md`, `android*.md`, `plugin-conventions.md`, `streamdeck-layout.md`, `tui-dashboard.md` |
-| Policy             | What are we allowed to ship?         | `appstore-feature-matrix.md`, `apple/APP_REVIEW_NOTES.md`, `RELEASING.md`      |
-| Validation         | How do I prove it works?             | `docs/testing.md`, `design-lint-baseline.md`, `plugin-ulanzi/VERIFY.md`        |
-| Reference          | Why is this absent, or named oddly?  | `docs/retired-surfaces.md`                                                     |
+| Layer (`category`) | Answers                                                        | Examples                                                                                                                                   |
+| ------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Governance         | How do I work on this system?                                  | this README, the handover contract, `docs/agent-harness.md`                                                                                |
+| Foundations        | What is the visual language, and where does its material live? | `DESIGN.md`, `design/RESOURCES.md`                                                                                                         |
+| Architecture       | How does it work?                                              | `docs/architecture.md`, `daemon.md`, `protocol.md`, `gateway-protocol.md`, `apme.md`                                                       |
+| Specifications     | What must a given surface do?                                  | `hardware-compatibility.md`, `devices.md`, `esp32*.md`, `android*.md`, `plugin-conventions.md`, `streamdeck-layout.md`, `tui-dashboard.md` |
+| Policy             | What are we allowed to ship?                                   | `appstore-feature-matrix.md`, `apple/APP_REVIEW_NOTES.md`, `RELEASING.md`                                                                  |
+| Validation         | How do I prove it works?                                       | `docs/testing.md`, `design-lint-baseline.md`, `plugin-ulanzi/VERIFY.md`                                                                    |
+| Reference          | Why is this absent, or named oddly?                            | `docs/retired-surfaces.md`                                                                                                                 |
 
 Two things are indexed rather than cataloged, because they are not documents:
 **assets** (`design/brand/`, `design/fonts/`, `assets/`, generated masks) are read
@@ -67,8 +67,8 @@ catalog.
 
 **The user manual is excluded as a class.** `docs/install.md`, `cli.md`,
 `configuration.md`, `apple-app.md`, `windows.md`, and `troubleshooting.md` tell a
-reader how to *use* the product; this catalog documents how it is *designed and
-specified*. Two audiences, two indexes — the manual is indexed by
+reader how to _use_ the product; this catalog documents how it is _designed and
+specified_. Two audiences, two indexes — the manual is indexed by
 [README](../README.md), and the thing each manual page describes (the CLI, the
 settings schema, the tier boundary) is already cataloged here at its canonical
 source. That is a deliberate split, not a gap.
@@ -80,6 +80,7 @@ source. That is a deliberate split, not a gap.
 3. Choose the `category` from the ones already in use — a new category creates a new
    rail group in the viewer, so add one only when the document genuinely does not
    belong to an existing layer.
-4. Run `pnpm design-system:check`.
+4. Run `pnpm design-system:check` and `pnpm docs:check`.
 
 Build with `pnpm design-system:build`. Validate without keeping output with `pnpm design-system:check`.
+Validate local Markdown links, anchors, and document title structure with `pnpm docs:check`.

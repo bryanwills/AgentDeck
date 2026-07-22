@@ -3,8 +3,6 @@
 Canonical Windows setup reference. The Node bridge, hook installer, and Stream
 Deck plugin run on Windows 11; Apple/Android/ESP32 native builds are out of scope.
 
-# Windows (Bridge + Plugin)
-
 The Node.js **bridge**, the Claude Code **hook installer**, and the **Stream Deck plugin** run on Windows 11. The Apple, Android, and ESP32 native builds are macOS/Linux-only and are out of scope on Windows — but the core "steer Claude Code from a Stream Deck+" experience works.
 
 ## Prerequisites (Windows 11)

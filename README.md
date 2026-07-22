@@ -118,7 +118,7 @@ Full build-from-source and manual steps: **[docs/install.md](docs/install.md)**.
 </tr>
 <tr>
 <td><b>Stream Deck+</b> — one key per session, plus encoders for volume, quota, and launch</td>
-<td><b>Ulanzi D200H</b> — 14 keys and a 960×540 LCD, driven over USB HID</td>
+<td><b>Ulanzi D200H</b> — 14 keys and a 960×540 LCD, driven by the official Ulanzi Studio plugin</td>
 </tr>
 <tr>
 <td><img src="docs/media/inkdeck.jpg" alt="InkDeck 7.5-inch e-ink panel showing the AgentDeck session board"></td>
@@ -165,16 +165,16 @@ Full build-from-source and manual steps: **[docs/install.md](docs/install.md)**.
 | **OpenCode** | Supported |
 | **OpenClaw** | Experimental |
 
-State comes from each agent's **lifecycle hooks** rather than by scraping the
-terminal, so a UI change in the agent does not break AgentDeck. PTY parsing remains
-as a best-effort assist.
+State comes from agent-native lifecycle and event channels — hooks for Claude Code
+and Codex, OpenCode SSE, and the OpenClaw Gateway — rather than terminal-screen
+scraping. PTY parsing remains a best-effort assist for CLI-managed sessions.
 
 ### How it fits together
 
 ```
                               ┌── Daemon (port 9120, sole hub) ──┐
 Stream Deck Plugin ◄── WS ──►│                                   │
-D200H Deck Dock    ◄ USB HID►│                                   │
+D200H via Studio  ◄── WS ──►│                                   │
 Android Dashboard  ◄── WS ──►│  WS Server + mDNS + Device Mods   │
 Apple Dashboard    ◄── WS ──►│  Gateway Proxy + Usage Relay      │
 TUI Dashboard      ◄── WS ──►│  Pixoo + ESP32 + Timebox + SSE    │
@@ -188,9 +188,10 @@ Agent Hooks     ─── HTTP ───►│  Hook Server → State Machine   
 ```
 
 One daemon aggregates every session and broadcasts to every surface. Interactive
-surfaces (Stream Deck, D200H, Android, Apple) can also steer; the rest display.
-On macOS the SwiftUI app ships an **in-process Swift daemon**, so installing the app
-gives you the full bridge with no Node.js.
+surfaces (Stream Deck, D200H, Android, Apple) can steer when a PTY-managed session
+supplies real options; observed sessions remain display-only. On macOS the SwiftUI
+app ships a **standalone in-process Swift dashboard daemon** with no Node.js. The
+PTY Session Bridge remains a CLI feature.
 
 Details: **[docs/architecture.md](docs/architecture.md)**.
 

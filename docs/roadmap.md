@@ -3,13 +3,13 @@
 Where AgentDeck is going. Shipped history lives in
 [CHANGELOG.md](../CHANGELOG.md); release mechanics in [RELEASING.md](../RELEASING.md).
 
-# Next Milestones — Current Focus
+## Next Milestones — Current Focus
 
 AgentDeck is actively working on the next Apple companion release and on personalized agent evaluation:
 
 ## 1. App Store Distribution (iOS / iPadOS)
 
-[AgentDeck Dashboard 1.0.0 is live on the Mac App Store](https://apps.apple.com/app/id6784822497). The iPhone/iPad companion is still in review. The macOS app ships a full in-process Swift daemon (63 files, ~32,000 LOC) — mDNS discovery, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix), OpenClaw Gateway WebSocket client, HTTP + WebSocket server. App Store compliance is gated by the `AGENTDECK_APP_STORE` compile flag: no bundled Node.js / `adb` / D200H helper, no subprocess spawn, no AppleScript (per Apple Review Guideline 2.5.2). User data lives in `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/` (routed through `AgentDeckPaths.swift`; never hand-write the path). AgentDeck requests no USB HID entitlement — the D200H is driven solely by the Ulanzi Studio plugin. OpenClaw integration uses Gateway-native pairing (self-generated Ed25519 identity in Keychain + Gateway-issued device token) — no file read of `~/.openclaw/identity/`. `apple/scripts/verify-appstore-archive.sh` is wired into CI and asserts these invariants on every archive.
+[AgentDeck Dashboard 1.0.0 is live on the Mac App Store](https://apps.apple.com/app/id6784822497). The iPhone/iPad companion is still in review. The macOS app ships a standalone in-process Swift daemon — mDNS discovery, native device modules, OpenClaw Gateway WebSocket client, hook ingestion, and HTTP + WebSocket server. App Store compliance is gated by the `AGENTDECK_APP_STORE` compile flag: no bundled Node.js / `adb` / D200H helper, no subprocess spawn, no AppleScript (per Apple Review Guideline 2.5.2). User data lives in `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/` (routed through `AgentDeckPaths.swift`; never hand-write the path). AgentDeck requests no USB HID entitlement — the D200H is driven solely by the Ulanzi Studio plugin. OpenClaw integration uses Gateway-native pairing (self-generated Ed25519 identity in Keychain + Gateway-issued device token) — no file read of `~/.openclaw/identity/`. `apple/scripts/verify-appstore-archive.sh` is wired into CI and asserts these invariants on every archive.
 
 ## 2. Personalized Agent Evaluation System (APME)
 
@@ -26,7 +26,7 @@ Eval results broadcast to every device simultaneously (Stream Deck/Apple/Android
 
 ---
 
-# Roadmap
+## Roadmap
 
 ## Achieved
 

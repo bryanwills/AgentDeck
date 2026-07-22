@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: stable
 owner: Bridge maintainers
-reviewed: 2026-07-21
-revision: 2026-07-21
+reviewed: 2026-07-22
+revision: 2026-07-22
 source_of_truth: docs/daemon.md
 validators: [pnpm test, agentdeck daemon status]
 ---
@@ -33,7 +33,13 @@ AgentDeck runs two daemon implementations that are **not competitors but collabo
 | mDNS 광고 | 먼저 바인드한 쪽 | 동일 |
 | 세션 집계 + 상태 브로드캐스트 | **CLI 있을 때**, 없으면 Swift | singleton guard |
 
-**CLI 없이 Swift 앱만 실행한 경우**: port 9120 은 Swift daemon 이 잡고, 세션 0 개 상태로 pairing/device I/O 만 서비스. iPad 가 붙어서 "Device Preview + Setup card" 를 보고, Pixoo/ESP32 는 idle 상태로 대기하며 D200H는 Ulanzi Studio plugin이 연결된 경우에만 나타난다. 이게 사용자가 "CLI 설치 유도" 만 보이는 상태의 의미.
+**CLI 없이 Swift 앱만 실행한 경우**: port 9120 은 Swift daemon 이 잡고 완결된
+Tier 1 모니터링 허브로 동작한다. 사용자가 명시적으로 활성화한 Claude/Codex hook,
+OpenCode SSE, OpenClaw Gateway 이벤트가 세션을 만들고, 같은 daemon 이 iPad pairing,
+Device Preview, APME Layer 2, Pixoo/ESP32/BLE device I/O를 서비스한다. D200H는 Ulanzi
+Studio plugin이 WS로 연결된 경우에만 나타난다. 이 경로는 PTY를 spawn하거나 조향
+선택지를 만들어내지 않으며, 그런 Tier 2 기능은 외부 CLI daemon이 제공한다. App Store
+UI는 CLI 전용 섹션을 숨기고 companion executable 설치를 유도하지 않는다.
 
 **외부 CLI daemon 이 이미 실행 중인 경우**: `DaemonService.alreadyRunning` → `connectToExternalDaemon`. Swift 앱은 죽지 않고 CLI daemon 의 WS 클라이언트가 된다 (`isUsingExternalDaemon = true`). 이 모드는 사용자가 터미널에서 별도 daemon 을 이미 운영하는 고급 경로이며, App Store 앱 자체는 외부 실행 파일 설치/기동을 요구하지 않는다. 하드웨어 상태는 CLI daemon 이 `state_update.moduleHealth` 로 브로드캐스트한 범위만 UI 에 표시한다.
 

@@ -19,6 +19,7 @@
     "check-preview-sync": "node scripts/check-preview-mirror-sync.mjs",
     "design-system:build": "node scripts/build-design-system-viewer.mjs",
     "design-system:check": "node scripts/build-design-system-viewer.mjs --check",
+    "docs:check": "node scripts/check-docs.mjs",
     "package": "bash scripts/package-plugin.sh",
     "setup": "bash scripts/install.sh",
     "test": "vitest run",

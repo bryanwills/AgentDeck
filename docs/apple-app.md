@@ -1,10 +1,8 @@
-# Apple Dashboard (iOS · iPadOS · macOS)
+# Apple Dashboard
 
-The SwiftUI companion. What ships in the App Store build versus the
+SwiftUI for iOS, iPadOS, and macOS. What ships in the App Store build versus the
 terminal-managed daemon is tracked in
 [appstore-feature-matrix.md](appstore-feature-matrix.md).
-
-# Apple Dashboard
 
 Monitor and control your AI agents from iPhone, iPad, or Mac — a native SwiftUI experience.
 
@@ -12,7 +10,7 @@ Monitor and control your AI agents from iPhone, iPad, or Mac — a native SwiftU
   <img src="media/ipad-iphone-closeup.jpg" width="720" alt="Apple dashboard — iPad and iPhone showing terrarium with pixel art creatures and HUD overlay">
 </p>
 
-The Apple app is a SwiftUI multiplatform app that connects to the bridge on iOS/iPadOS, and **on macOS ships with a full in-process Swift daemon** (63 files, ~32,000 LOC) — mDNS, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix), Gateway proxy, and WebSocket server — so the macOS build works standalone without Node.js. You can still use the `agentdeck` CLI alongside it for Claude Code / Codex / OpenCode PTY sessions; the app's daemon auto-detects and defers to a running CLI daemon on the same port.
+The Apple app is a SwiftUI multiplatform app that connects to the dashboard hub on iOS/iPadOS, and **on macOS ships with a standalone in-process Swift daemon** — mDNS, device modules (serial/Pixoo/Timebox/iDotMatrix), Gateway proxy, hook ingestion, and WebSocket server — so the macOS build monitors sessions without Node.js. You can still use the `agentdeck` CLI alongside it for Claude Code / Codex / OpenCode PTY sessions and CLI-only integrations; the app's daemon auto-detects and defers to a running CLI daemon on the same port.
 
 ## Three-Tab Navigation
 
