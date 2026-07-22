@@ -234,14 +234,14 @@ static void handleUsageUpdate(JsonObject& obj) {
         JsonObject cx = obj["codexRateLimits"].as<JsonObject>();
         if (cx["primary"].is<JsonObject>()) {
             JsonObject p = cx["primary"].as<JsonObject>();
-            if (p["stale"] != true) {
+            if (!p["stale"].as<bool>()) {
                 if (p["usedPercent"].is<float>()) g_state.codexPrimaryPercent = p["usedPercent"].as<float>();
                 storeResetTime(p, "resetsAt", g_state.codexPrimaryReset, sizeof(g_state.codexPrimaryReset));
             }
         }
         if (cx["secondary"].is<JsonObject>()) {
             JsonObject s = cx["secondary"].as<JsonObject>();
-            if (s["stale"] != true) {
+            if (!s["stale"].as<bool>()) {
                 if (s["usedPercent"].is<float>()) g_state.codexSecondaryPercent = s["usedPercent"].as<float>();
                 storeResetTime(s, "resetsAt", g_state.codexSecondaryReset, sizeof(g_state.codexSecondaryReset));
             }
