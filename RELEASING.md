@@ -17,7 +17,7 @@ validators: [node scripts/build-design-system-viewer.mjs --check, pnpm verify-ve
 
 AgentDeck uses one `major.minor` compatibility line across every maintained surface. The root [`VERSION`](VERSION) is the current source-train ceiling; each delivery target keeps its own full `X.Y.Z` version and may lag at the patch component when it was not part of a hotfix.
 
-The current source-train ceiling is **1.0.2** and the compatibility line is **1.0**. npm/CLI, Apple, and Android are at `1.0.2`; ESP32, Stream Deck, and Ulanzi remain at their independently delivered `1.0.1` patches. The first public Mac App Store release remains `1.0.0` until the Apple 1.0.2 update completes review.
+The current source-train ceiling is **1.0.2** and the compatibility line is **1.0**. npm/CLI, Apple, Android, and Stream Deck are at `1.0.2`; ESP32 and Ulanzi remain at their independently delivered `1.0.1` patches. The first public Mac App Store release remains `1.0.0` until the Apple 1.0.2 update completes review.
 
 Run `pnpm verify-version` before every build or release. CI rejects a `major.minor` compatibility split, a target-internal mismatch, or a target patch ahead of root `VERSION`.
 

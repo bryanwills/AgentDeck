@@ -24,6 +24,13 @@ version consistency. See [RELEASING.md](RELEASING.md).
 - Mirror the same session-ID canonicalization in macOS, Android, and the Node
   per-session history query to prevent client-specific timeline gaps
 
+### Stream Deck plugin
+
+- Remove MODEL key tiles entirely from passively observed Claude, Codex, and
+  OpenCode sessions; model information without a deliverable selection action
+  no longer occupies a button-shaped surface in idle, processing, or awaiting
+  states
+
 ## 1.0.1
 
 Maintenance release across independently delivered channels — reliability fixes

@@ -253,7 +253,7 @@ describe('SessionSlotManager detail layout', () => {
     expect(configs.filter((config) => config.type === 'stop')).toHaveLength(1);
   });
 
-  it('renders one inert MODEL readout for observed Codex PROCESSING on every Stream Deck layout', () => {
+  it('renders no MODEL tile for observed Codex PROCESSING on every Stream Deck layout', () => {
     for (const layout of [SD_PLUS_LAYOUT, SD_CLASSIC_LAYOUT]) {
       const manager = new SessionSlotManager();
       manager.updateSessions([makeSession({
@@ -268,15 +268,45 @@ describe('SessionSlotManager detail layout', () => {
 
       const configs = Array.from({ length: layout.keyCount }, (_, i) =>
         manager.getSlotConfig(i, layout));
-      const modelSlots = configs
-        .map((config, slot) => ({ config, slot }))
-        .filter(({ config }) => config.type === 'status' && config.label === 'MODEL');
+      const modelSlots = configs.filter(
+        config => config.type === 'status' && config.label === 'MODEL',
+      );
 
-      expect(modelSlots).toHaveLength(1);
-      expect(manager.handleSlotPress(modelSlots[0].slot, layout)).toEqual({ action: 'none' });
+      expect(modelSlots).toHaveLength(0);
       expect(configs.filter((config) => config.type === 'status' && config.label === 'WORKING')).toHaveLength(1);
       expect(configs.filter((config) => config.type === 'preset')).toHaveLength(0);
-      expect(configs.filter((config) => config.type === 'empty')).toHaveLength(layout.keyCount - 4);
+      expect(configs.filter((config) => config.type === 'empty')).toHaveLength(layout.keyCount - 3);
+    }
+  });
+
+  it('never renders MODEL as a key for any observed session state', () => {
+    const scenarios: Partial<SessionInfo>[] = [
+      { id: 'observed:claude:idle', agentType: 'claude-code', state: State.IDLE },
+      { id: 'observed:opencode:idle', agentType: 'opencode', state: State.IDLE },
+      { id: 'observed:claude:notice', agentType: 'claude-code', state: State.AWAITING_PERMISSION },
+      {
+        id: 'observed:claude:gate',
+        agentType: 'claude-code',
+        state: State.AWAITING_PERMISSION,
+        requestId: 'request-1',
+      },
+    ];
+
+    for (const layout of [SD_PLUS_LAYOUT, SD_CLASSIC_LAYOUT]) {
+      for (const scenario of scenarios) {
+        const manager = new SessionSlotManager();
+        manager.updateSessions([makeSession({
+          controlMode: 'observed',
+          port: 0,
+          modelName: 'must-not-render',
+          ...scenario,
+        })]);
+        manager.enterDetailView(scenario.id!);
+
+        const configs = Array.from({ length: layout.keyCount }, (_, i) =>
+          manager.getSlotConfig(i, layout));
+        expect(configs.some(config => config.type === 'status' && config.label === 'MODEL')).toBe(false);
+      }
     }
   });
 

@@ -15,10 +15,16 @@ provider 회귀 테스트를 추가했다.
 Stream Deck 중복 MODEL 수정은 소스/테스트에는 이미 있었지만 실제 plugin process가
 7월 20일부터 `1.0.0.0`을 메모리에 올린 채 살아 있어 새 번들을 전혀 로드하지 않았다.
 표준 build/link 후 plugin을 재시작해 PID 49970/1.0.0.0에서 PID 32965/1.0.1.0으로
-교체했고, observed processing은 WORKING 1개 + inert MODEL 1개만 두고 나머지를 비우는
-36개 Node/plugin 회귀 테스트가 통과했다. 타임라인 수정이 클라이언트 바이너리에
-필요하므로 Apple과 Android만 1.0.2로 올리고 Stream Deck/Ulanzi/ESP32는 1.0.1을
-유지한다.
+교체했다. 기존 1.0.1 수정은 증식만 막고 inert MODEL 한 개를 의도적으로 남겼으나,
+버튼형 표면에 수행 불가능한 모델 선택처럼 보이는 정보 자체가 없어야 한다는 원래
+요구에는 부족했다. observed Claude/Codex/OpenCode의 idle/processing/awaiting 전
+상태에서 MODEL 키를 0개로 만들고 Stream Deck만 1.0.2로 추가 진행한다. Ulanzi와
+ESP32는 1.0.1을 유지한다.
+
+Stream Deck 1.0.2.0은 공식 Elgato validate/pack을 통과했고 산출물은 712K,
+SHA-256 `5cc63109e802ab639389df4dd7c7255b84271e96220644c553f64e71a8c32792`다.
+실행 plugin도 PID 93329/1.0.2.0으로 교체했다. 최종 Vitest는 110 files/1,880
+tests가 통과했으며 observed 상태 매트릭스는 MODEL 0개를 고정한다.
 
 최종 검증은 Vitest 110 files/1,879 tests, Android 타임라인 JUnit과 signed Release
 APK 빌드, macOS TimelineTests를 통과했다. Android 1.0.2(versionCode 4)는 Pantone 6,

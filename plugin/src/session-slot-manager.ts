@@ -715,7 +715,11 @@ export class SessionSlotManager {
     return cards[idx] ?? { type: 'empty' };
   }
 
-  private awaitingStatusCard(session: SessionInfo | undefined, idx: number): SessionSlotConfig {
+  private awaitingStatusCard(
+    session: SessionInfo | undefined,
+    idx: number,
+    includeModel = true,
+  ): SessionSlotConfig {
     const question = this._detailQuestion ? truncateStr(this._detailQuestion, 18) : 'choose option';
     const cards = [
       {
@@ -725,7 +729,7 @@ export class SessionSlotManager {
         icon: 'option',
         tone: 'warning',
       } satisfies SessionSlotConfig,
-      this.modelStatusCard(session),
+      includeModel ? this.modelStatusCard(session) : null,
     ].filter((card): card is SessionSlotConfig => card != null);
     return cards[idx] ?? { type: 'empty' };
   }
@@ -838,7 +842,7 @@ export class SessionSlotManager {
         // cannot mismatch the terminal prompt.
         if (idx === 0) return { type: 'option', option: { label: 'Allow', shortcut: 'y', index: 0 }, optionIndex: 0 };
         if (idx === 1) return { type: 'option', option: { label: 'Deny', shortcut: 'n', index: 1 }, optionIndex: 1 };
-        return this.awaitingStatusCard(session, idx - 2);
+        return this.awaitingStatusCard(session, idx - 2, false);
       }
       // Display-only awaiting (Notification overlay): answer in the terminal.
       if (idx === 0) {
@@ -848,9 +852,7 @@ export class SessionSlotManager {
           icon: 'option', tone: 'warning',
         };
       }
-      return this.modelStatusCard(session) && idx === 1
-        ? (this.modelStatusCard(session) as SessionSlotConfig)
-        : { type: 'empty' };
+      return { type: 'empty' };
     }
     if (isProcessing) {
       if (idx === 0) {
@@ -867,13 +869,12 @@ export class SessionSlotManager {
           ? { type: 'status', label: 'STOPPING', subtitle: 'at next tool', icon: 'tool', tone: 'warning' }
           : { type: 'empty' };
       }
-      // No queued task buttons mid-turn. PROCESSING stays glanceable and only
-      // STOP is actionable; review remains an inert status badge.
+      // No queued task or model-looking buttons mid-turn. PROCESSING stays
+      // glanceable and only STOP is actionable; review remains an inert
+      // status badge.
       const cells: SessionSlotConfig[] = [];
       const reviewBadge = this.reviewBadgeSlotConfig(session);
       if (reviewBadge) cells.push(reviewBadge);
-      const modelCard = this.modelStatusCard(session);
-      if (modelCard) cells.push(modelCard);
       const cellIdx = idx - 1;
       return cells[cellIdx] ?? { type: 'empty' };
     }
@@ -884,7 +885,7 @@ export class SessionSlotManager {
         return { type: 'preset', preset: { ...def, iconSvg: def.iconSvg ?? '' } };
       }
       if (idx === OC_OBSERVED_INJECT_PRESETS.length) return this.reviewSlotConfig(session);
-      return this.idleStatusCard(session, idx - OC_OBSERVED_INJECT_PRESETS.length - 1, true, false);
+      return this.idleStatusCard(session, idx - OC_OBSERVED_INJECT_PRESETS.length - 1, false, false);
     }
     // Claude/Codex observed idle: no prompt-delivery path, but the
     // independent review stays live.
@@ -892,7 +893,7 @@ export class SessionSlotManager {
     if (idx === 1) {
       return { type: 'status', label: 'OBSERVED', subtitle: 'control in terminal', icon: 'ready', tone: 'info' };
     }
-    return this.idleStatusCard(session, idx - 2, true, false);
+    return this.idleStatusCard(session, idx - 2, false, false);
   }
 
   private getDetailSlotConfig(slot: number, layout: DeckLayout): SessionSlotConfig {
