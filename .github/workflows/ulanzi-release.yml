@@ -21,7 +21,7 @@ jobs:
       - name: Verify release version
         run: |
           VERSION="${GITHUB_REF_NAME#ulanzi-v}"
-          test "$VERSION" = "$(tr -d '\n' < VERSION)"
+          node scripts/verify-release-version.mjs ulanzi "$VERSION"
           node scripts/verify-version-sync.mjs
 
       - uses: pnpm/action-setup@v4

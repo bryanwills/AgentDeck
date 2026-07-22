@@ -15,11 +15,11 @@ validators: [node scripts/build-design-system-viewer.mjs --check, pnpm verify-ve
 
 # Releasing & Versioning
 
-AgentDeck uses one `major.minor` compatibility line across every maintained surface. The root [`VERSION`](VERSION) is the current source-train ceiling; each delivery target keeps its own full `X.Y.Z` version and may lag at the patch component when it was not part of a hotfix.
+AgentDeck uses one `major.minor` compatibility line across every maintained surface. Two numeric `X.Y.Z` product versions are mutually compatible if and only if their first two components match. Patch values are ignored in both directions: for example, `1.0.1` and `1.0.9` are compatible regardless of which side is newer.
 
-The current source-train ceiling is **1.0.2** and the compatibility line is **1.0**. npm/CLI, Apple, Android, and Stream Deck are at `1.0.2`; ESP32 and Ulanzi remain at their independently delivered `1.0.1` patches. The first public Mac App Store release remains `1.0.0` until the Apple 1.0.2 update completes review.
+Root [`VERSION`](VERSION) is the repository baseline and compatibility-line anchor, not a patch ceiling and not a runtime negotiation value. It currently reads **1.0.2**, so every maintained target must remain on compatibility line **1.0**. npm/CLI, Apple, Android, and Stream Deck are at `1.0.2`; ESP32 and Ulanzi remain at their independently delivered `1.0.1` patches. A target may also advance beyond root's patch without forcing unrelated targets or root to ship. The first public Mac App Store release remains `1.0.0` until the Apple 1.0.2 update completes review.
 
-Run `pnpm verify-version` before every build or release. CI rejects a `major.minor` compatibility split, a target-internal mismatch, or a target patch ahead of root `VERSION`.
+Run `pnpm verify-version` before every build or release. CI rejects a `major.minor` compatibility split or a target-internal mismatch. Release CI additionally requires a channel tag's full `X.Y.Z` to equal that target's own declared version; it does not compare the tag's patch with root `VERSION`.
 
 ## Compatible line, independent patch and delivery
 
@@ -33,17 +33,18 @@ Run `pnpm verify-version` before every build or release. CI rejects a `major.min
 | **Ulanzi** | Ulanzi manifest `Version` | marketplace submission record | `ulanzi-v*` → Ulanzi Studio Marketplace |
 | **Private JS workspaces** | their `package.json` files | not published | no independent delivery |
 
-Tag prefixes remain because channels ship independently and may point to different commits. A patch bump updates only the target being delivered (plus root `VERSION` when it establishes a new ceiling). A channel is considered shipped only when its prefixed tag and external release/submission exist. Do not claim an unsubmitted marketplace artifact as released merely because another target advanced.
+Tag prefixes remain because channels ship independently and may point to different commits. A patch bump updates only the target being delivered. A channel is considered shipped only when its prefixed tag and external release/submission exist. Do not claim an unsubmitted marketplace artifact as released merely because another target advanced.
 
 ## Version rules
 
 1. All targets must share root `VERSION`'s `major.minor`; changing either component is a coordinated compatibility release.
-2. Patch versions may differ by target. Bump only the target being delivered and raise root `VERSION` if that patch establishes a new source-train ceiling.
+2. Patch versions may differ by target without ordering constraints. `A.B.C` and `A.B.D` are mutually compatible for any numeric `C` and `D`; bump only the target being delivered.
 3. Never reuse, delete-and-recreate, or lower a version that reached an external registry/store. Git tags do not reset external version floors.
 4. Apple build number and Android versionCode increase only when those targets are actually built for delivery.
 5. Public npm packages stay in lockstep and publish in dependency order: `hooks` + `shared` → `bridge` → `setup`.
 6. Keep prefixed tags; there is no unprefixed repo-wide release tag.
-7. The only valid version reset is a genuinely new external identity (for example a new Apple bundle ID or npm package name). Document that migration before changing source versions.
+7. Every release tag must exactly match its own target source (`apple-v1.0.3` requires Apple `MARKETING_VERSION` `1.0.3`, for example), even when root or another target has a different patch.
+8. The only valid version reset is a genuinely new external identity (for example a new Apple bundle ID or npm package name). Document that migration before changing source versions.
 
 ## Hard external constraints
 
@@ -55,11 +56,11 @@ Tag prefixes remain because channels ship independently and may point to differe
 ## Preparing a target patch release
 
 1. Choose the next SemVer for the target, preserving the shared `major.minor` compatibility line.
-2. Update that target's internal mirrors and raise root `VERSION` if needed.
+2. Update that target's internal mirrors. Do not bump unrelated targets merely to align patch values.
 3. Increment Apple `CURRENT_PROJECT_VERSION` or Android `versionCode` only when releasing that target.
 4. Update user-facing release notes and the delivery table in `README.md`.
 5. Run `pnpm verify-version`, `pnpm build`, and the relevant platform workflows.
-6. Commit the synchronized release state. Create only the channel tags that are actually being delivered.
+6. Commit the synchronized release state. Create only the channel tags that are actually being delivered, using the exact target version.
 
 ## Channel release steps
 

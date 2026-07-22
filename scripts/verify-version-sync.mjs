@@ -3,11 +3,13 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { areVersionsCompatible, compatibilityLine, parseNumericVersion } from './version-policy.mjs';
+
 const root = resolve(import.meta.dirname, '..');
 const productVersion = readFileSync(resolve(root, 'VERSION'), 'utf8').trim();
 const failures = [];
 
-if (!/^\d+\.\d+\.\d+$/.test(productVersion)) {
+if (!parseNumericVersion(productVersion)) {
   failures.push(`VERSION: expected numeric X.Y.Z SemVer, found ${productVersion || '<empty>'}`);
 }
 
@@ -19,22 +21,15 @@ function expectValue(path, actual, expected) {
   if (actual !== expected) failures.push(`${path}: expected ${expected}, found ${actual ?? '<missing>'}`);
 }
 
-const productMatch = /^(\d+)\.(\d+)\.(\d+)$/.exec(productVersion);
-const productMajor = Number(productMatch?.[1]);
-const productMinor = Number(productMatch?.[2]);
-const productPatch = Number(productMatch?.[3]);
+const productCompatibilityLine = compatibilityLine(productVersion) ?? '<invalid>';
 
 function expectCompatible(path, actual) {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(actual ?? '');
-  if (!match) {
+  if (!parseNumericVersion(actual)) {
     failures.push(`${path}: expected numeric X.Y.Z SemVer, found ${actual ?? '<missing>'}`);
     return;
   }
-  const [, major, minor, patch] = match.map(Number);
-  if (major !== productMajor || minor !== productMinor) {
-    failures.push(`${path}: expected compatibility line ${productMajor}.${productMinor}.x, found ${actual}`);
-  } else if (patch > productPatch) {
-    failures.push(`${path}: patch ${actual} is ahead of root VERSION ${productVersion}`);
+  if (!areVersionsCompatible(productVersion, actual)) {
+    failures.push(`${path}: expected compatibility line ${productCompatibilityLine}.x, found ${actual}`);
   }
 }
 
@@ -149,7 +144,7 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Compatibility line ${productMajor}.${productMinor} is synchronized; target patches: ` +
+  `Compatibility line ${productCompatibilityLine} is synchronized (patch ordering is independent); target patches: ` +
     `npm ${npmVersion}, Apple ${appleVersion}, Android ${androidVersion}, ESP32 ${esp32Version}, ` +
     `Stream Deck ${streamDeckVersion}, Ulanzi ${ulanziVersion}.`,
 );

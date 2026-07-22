@@ -217,7 +217,7 @@ build health.
 ## Releases
 
 One `major.minor` compatibility line across every artifact; target patches and
-delivery tags advance independently. Root [`VERSION`](VERSION) is the source-train ceiling — policy in [RELEASING.md](RELEASING.md),
+delivery tags advance independently without patch-order constraints. Root [`VERSION`](VERSION) anchors the compatibility line but is not a patch ceiling — policy in [RELEASING.md](RELEASING.md),
 builds on [Releases](https://github.com/puritysb/AgentDeck/releases).
 
 | Channel | Tag | Status |

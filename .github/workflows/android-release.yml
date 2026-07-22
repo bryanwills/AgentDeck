@@ -18,7 +18,7 @@ jobs:
       - name: Verify release version
         run: |
           VERSION="${GITHUB_REF_NAME#android-v}"
-          test "$VERSION" = "$(tr -d '\n' < VERSION)"
+          node scripts/verify-release-version.mjs android "$VERSION"
           node scripts/verify-version-sync.mjs
 
       - name: Set up JDK 17

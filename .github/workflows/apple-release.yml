@@ -35,7 +35,7 @@ jobs:
       - name: Verify release version
         run: |
           VERSION="${GITHUB_REF_NAME#apple-v}"
-          test "$VERSION" = "$(tr -d '\n' < VERSION)"
+          node scripts/verify-release-version.mjs apple "$VERSION"
           node scripts/verify-version-sync.mjs
 
       - name: Select Xcode
@@ -144,7 +144,7 @@ jobs:
       - name: Verify release version
         run: |
           VERSION="${GITHUB_REF_NAME#apple-v}"
-          test "$VERSION" = "$(tr -d '\n' < VERSION)"
+          node scripts/verify-release-version.mjs apple "$VERSION"
           node scripts/verify-version-sync.mjs
 
       - name: Select Xcode

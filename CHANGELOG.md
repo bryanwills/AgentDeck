@@ -3,8 +3,9 @@
 All delivery channels share one `major.minor` compatibility line. Patch versions
 and prefixed release tags (`apple-v*`, `streamdeck-v*`, `ulanzi-v*`, `npm-v*`,
 `android-v*`, `esp32-v*`) advance independently by target. Root `VERSION` is the
-source-train ceiling; `pnpm verify-version` gates compatibility and target-internal
-version consistency. See [RELEASING.md](RELEASING.md).
+repository baseline, not a patch ceiling: any numeric `A.B.C` and `A.B.D` are
+mutually compatible. `pnpm verify-version` gates the shared `A.B` line and
+target-internal version consistency. See [RELEASING.md](RELEASING.md).
 
 ## 1.0.2
 
