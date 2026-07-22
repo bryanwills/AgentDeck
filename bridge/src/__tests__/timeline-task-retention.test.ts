@@ -80,6 +80,17 @@ describe('BridgeTimelineStore task-row retention', () => {
     expect(history[history.length - 1].type).toBe('task_end');
   });
 
+  it('getHistoryForSession canonicalizes observed session ids', () => {
+    const store = new BridgeTimelineStore();
+    store.addEntry(entry({ type: 'chat_start', sessionId: 'session-uuid', raw: 'start' }));
+
+    for (const provider of ['claude', 'codex', 'codex-app', 'opencode', 'antigravity']) {
+      expect(store.getHistoryForSession(`observed:${provider}:session-uuid`))
+        .toHaveLength(1);
+    }
+    expect(store.getHistoryForSession('observed:codex:other-uuid')).toHaveLength(0);
+  });
+
   it('loadPersistedEntries keeps task rows past the generic trim', () => {
     const store = new BridgeTimelineStore();
     const rows: TimelineEntry[] = [];

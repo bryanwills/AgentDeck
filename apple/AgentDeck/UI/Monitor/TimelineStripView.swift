@@ -1963,7 +1963,7 @@ private struct SizedFrame: ViewModifier {
     }
 }
 
-private struct TimelineSessionFilter: Equatable {
+struct TimelineSessionFilter: Equatable {
     let sessionId: String
     let projectName: String?
     let agentType: String?
@@ -1984,9 +1984,11 @@ private struct TimelineSessionFilter: Equatable {
     }
 }
 
-private extension TimelineEntry {
+extension TimelineEntry {
     func matchesTimelineFilter(_ filter: TimelineSessionFilter) -> Bool {
-        if normalized(sessionId) == filter.sessionId {
+        let entrySessionId = canonicalTimelineSessionId(sessionId)
+        let focusedSessionId = canonicalTimelineSessionId(filter.sessionId)
+        if entrySessionId != nil, entrySessionId == focusedSessionId {
             return true
         }
 
@@ -1995,11 +1997,11 @@ private extension TimelineEntry {
         // virtual Gateway session is focused.
         if filter.sessionId == "openclaw-gateway",
            agentType == "openclaw",
-           normalized(sessionId) == nil {
+           entrySessionId == nil {
             return true
         }
 
-        guard normalized(sessionId) == nil else { return false }
+        guard entrySessionId == nil else { return false }
         if let projectName = filter.projectName,
            !projectName.isEmpty,
            projectName == self.projectName,
@@ -2007,12 +2009,6 @@ private extension TimelineEntry {
             return true
         }
         return false
-    }
-
-    private func normalized(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

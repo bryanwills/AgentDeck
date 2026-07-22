@@ -440,6 +440,26 @@ private func sameTimelineContext(_ a: TimelineEntry, _ b: TimelineEntry) -> Bool
         && a.agentType == b.agentType
 }
 
+/// Session-list rows for passively observed agents use a provider prefix
+/// (`observed:codex:<uuid>`), while hook timeline rows use the raw session id.
+/// Canonicalize both sides before filtering so selecting an observed session
+/// does not hide its timeline. Mirrors Android `canonicalTimelineSessionId`
+/// and Node `BridgeTimelineStore.getHistoryForSession`.
+func canonicalTimelineSessionId(_ value: String?) -> String? {
+    guard let value = timelineNonBlank(value) else { return nil }
+    let prefixes = [
+        "observed:claude:",
+        "observed:codex:",
+        "observed:codex-app:",
+        "observed:opencode:",
+        "observed:antigravity:",
+    ]
+    for prefix in prefixes where value.hasPrefix(prefix) {
+        return timelineNonBlank(String(value.dropFirst(prefix.count)))
+    }
+    return value
+}
+
 /// nil for a nil-or-whitespace string, else the string — the Swift analogue
 /// of Kotlin's `String?.takeIf { it.isNotBlank() }` used by
 /// `sameTimelineContext` / `normalizeTimelineEntryForStorage`.

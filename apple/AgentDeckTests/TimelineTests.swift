@@ -5,6 +5,38 @@ import XCTest
 
 final class TimelineTests: XCTestCase {
 
+    func testObservedSessionFilterMatchesRawTimelineSessionId() {
+        let entry = TimelineEntry(
+            ts: 1,
+            type: .chatStart,
+            raw: "hi",
+            agentType: "codex-cli",
+            projectName: "AgentDeck",
+            sessionId: "session-uuid"
+        )
+
+        XCTAssertTrue(entry.matchesTimelineFilter(TimelineSessionFilter(
+            sessionId: "observed:codex:session-uuid",
+            projectName: "AgentDeck",
+            agentType: "codex-cli"
+        )))
+        XCTAssertFalse(entry.matchesTimelineFilter(TimelineSessionFilter(
+            sessionId: "observed:codex:other-uuid",
+            projectName: "AgentDeck",
+            agentType: "codex-cli"
+        )))
+    }
+
+    func testObservedSessionFilterCanonicalizesEveryObservedProvider() {
+        let providers = ["claude", "codex", "codex-app", "opencode", "antigravity"]
+        for provider in providers {
+            XCTAssertEqual(
+                canonicalTimelineSessionId("observed:\(provider):session-uuid"),
+                "session-uuid"
+            )
+        }
+    }
+
     // MARK: - Timeline Entry Decoding
 
     func testDecodeTimelineEvent() throws {

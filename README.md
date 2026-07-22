@@ -223,10 +223,10 @@ builds on [Releases](https://github.com/puritysb/AgentDeck/releases).
 | Channel | Tag | Status |
 |---|---|---|
 | **npm** — `@agentdeck/setup` | `npm-v*` | [1.0.2](https://github.com/puritysb/AgentDeck/releases/tag/npm-v1.0.2) |
-| **Apple App Store** — macOS | `apple-v*` | [Live](https://apps.apple.com/app/id6784822497) (iOS companion in review) |
+| **Apple App Store** — macOS | `apple-v*` | [1.0.0 live](https://apps.apple.com/app/id6784822497); 1.0.2 update prepared (iOS companion in review) |
 | **Elgato Marketplace** — Stream Deck plugin | `streamdeck-v*` | [1.0.1 release](https://github.com/puritysb/AgentDeck/releases/tag/streamdeck-v1.0.1); Maker review update pending |
 | **Ulanzi Marketplace** — D200H plugin | `ulanzi-v*` | [1.0.1 release](https://github.com/puritysb/AgentDeck/releases/tag/ulanzi-v1.0.1); support handoff pending ([details](marketplace/ulanzi/LISTING.md)) |
-| **GitHub Release** — Android APK | `android-v*` | [1.0.1](https://github.com/puritysb/AgentDeck/releases/tag/android-v1.0.1) |
+| **GitHub Release** — Android APK | `android-v*` | 1.0.2 release prepared; [1.0.1](https://github.com/puritysb/AgentDeck/releases/tag/android-v1.0.1) remains latest until publishing |
 | **GitHub Release** — ESP32 firmware | `esp32-v*` | [1.0.1](https://github.com/puritysb/AgentDeck/releases/tag/esp32-v1.0.1) |
 | **Google Play** — Android AAB | `android-v*` | CI wired, gated on Play Console setup |
 

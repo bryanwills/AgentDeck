@@ -813,6 +813,17 @@ class TimelineStoreTest {
     }
 
     @Test
+    fun `matchesTimelineFilter canonicalizes observed session prefixes`() {
+        val e = TimelineEntry(timestamp = 1, type = "chat_start", summary = "hi", sessionId = "session-uuid")
+        assertTrue(e.matchesTimelineFilter(TimelineSessionFilter("observed:codex:session-uuid")))
+        assertFalse(e.matchesTimelineFilter(TimelineSessionFilter("observed:codex:other-uuid")))
+
+        listOf("claude", "codex", "codex-app", "opencode", "antigravity").forEach { provider ->
+            assertEquals("session-uuid", canonicalTimelineSessionId("observed:$provider:session-uuid"))
+        }
+    }
+
+    @Test
     fun `matchesTimelineFilter keeps sessionless OpenClaw rows under gateway`() {
         val e = TimelineEntry(timestamp = 1, type = "chat_response", summary = "cron", agentType = "openclaw")
         assertTrue(e.matchesTimelineFilter(TimelineSessionFilter("openclaw-gateway", "OpenClaw", "openclaw")))

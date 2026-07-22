@@ -2,6 +2,32 @@
 
 ---
 
+## 2026-07-22 — 관찰 세션 타임라인 필터 정규화 + Stream Deck 실기 재기동
+
+Node daemon의 `timeline.json`은 계속 증가하고 WebSocket 클라이언트도 정상 연결돼
+있었지만 macOS/Android에서 관찰 세션을 선택하면 타임라인이 비는 별도 표시 회귀를
+확인했다. `sessions_list`는 `observed:codex:<uuid>`처럼 provider prefix가 붙은 ID를
+쓰고 hook timeline 행은 raw `<uuid>`를 쓰는데, 양 클라이언트 필터가 이를 exact match해
+sessionId가 있는 모든 행을 탈락시켰다. Node의 per-session query에는 이미 있던 prefix
+제거 규칙을 Swift/Kotlin에 미러하고 Claude/Codex/Codex App/OpenCode/Antigravity 전
+provider 회귀 테스트를 추가했다.
+
+Stream Deck 중복 MODEL 수정은 소스/테스트에는 이미 있었지만 실제 plugin process가
+7월 20일부터 `1.0.0.0`을 메모리에 올린 채 살아 있어 새 번들을 전혀 로드하지 않았다.
+표준 build/link 후 plugin을 재시작해 PID 49970/1.0.0.0에서 PID 32965/1.0.1.0으로
+교체했고, observed processing은 WORKING 1개 + inert MODEL 1개만 두고 나머지를 비우는
+36개 Node/plugin 회귀 테스트가 통과했다. 타임라인 수정이 클라이언트 바이너리에
+필요하므로 Apple과 Android만 1.0.2로 올리고 Stream Deck/Ulanzi/ESP32는 1.0.1을
+유지한다.
+
+최종 검증은 Vitest 110 files/1,879 tests, Android 타임라인 JUnit과 signed Release
+APK 빌드, macOS TimelineTests를 통과했다. Android 1.0.2(versionCode 4)는 Pantone 6,
+Crema S, Lenovo Tab에 설치·실행하고 PID/버전을 확인했다. Apple 1.0.2는 iOS/macOS
+모두 Release archive와 App Store export에 성공했으며 실제 IPA/PKG 내부 앱에
+`verify-appstore-archive.sh`를 적용해 두 플랫폼 모두 통과했다. ASC 자격변수는
+의도적으로 제거해 로컬 TestFlight/App Store 업로드는 수행하지 않았다. 로컬 macOS
+검증 앱은 1.0.2 Debug 빌드(PID 62784)로 재기동했다.
+
 ## 2026-07-22 — Node daemon registry self-heal + npm 1.0.2
 
 장시간 실행 중인 Node daemon이 9121 fallback port에서 정상 동작하고 있어도

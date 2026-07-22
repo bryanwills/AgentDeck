@@ -17,7 +17,7 @@ validators: [node scripts/build-design-system-viewer.mjs --check, pnpm verify-ve
 
 AgentDeck uses one `major.minor` compatibility line across every maintained surface. The root [`VERSION`](VERSION) is the current source-train ceiling; each delivery target keeps its own full `X.Y.Z` version and may lag at the patch component when it was not part of a hotfix.
 
-The current source-train ceiling is **1.0.2** and the compatibility line is **1.0**. npm/CLI is at `1.0.2`; Apple, Android, ESP32, Stream Deck, and Ulanzi remain at their independently delivered `1.0.1` patches until those targets need another release. The first public Mac App Store release remains `1.0.0`.
+The current source-train ceiling is **1.0.2** and the compatibility line is **1.0**. npm/CLI, Apple, and Android are at `1.0.2`; ESP32, Stream Deck, and Ulanzi remain at their independently delivered `1.0.1` patches. The first public Mac App Store release remains `1.0.0` until the Apple 1.0.2 update completes review.
 
 Run `pnpm verify-version` before every build or release. CI rejects a `major.minor` compatibility split, a target-internal mismatch, or a target patch ahead of root `VERSION`.
 
@@ -26,7 +26,7 @@ Run `pnpm verify-version` before every build or release. CI rejects a `major.min
 | Surface | Target version | Independent monotonic value | Tag / delivery |
 |---|---|---|---|
 | **Apple** (iOS+macOS) | `apple/project.yml` `MARKETING_VERSION` | `CURRENT_PROJECT_VERSION` (CI-owned) | `apple-v*` → TestFlight / App Store |
-| **Android** | `android/app/build.gradle.kts` `versionName` | `versionCode` (currently 3) | `android-v*` → APK Release / optional Play |
+| **Android** | `android/app/build.gradle.kts` `versionName` | `versionCode` (currently 4) | `android-v*` → APK Release / optional Play |
 | **npm** (`@agentdeck/hooks`, `shared`, `bridge`, `setup`) | public `package.json` files | npm registry version floor | `npm-v*` → manual publish |
 | **ESP32** | `esp32/src/config.h` `FIRMWARE_VERSION` | build hash / epoch in firmware metadata | `esp32-v*` → firmware Release |
 | **Stream Deck** | plugin manifest `Version` as `X.Y.Z.0` | fourth component if a same-product-version plugin rebuild is ever required | `streamdeck-v*` → Elgato Maker portal |

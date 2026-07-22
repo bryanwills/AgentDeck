@@ -381,13 +381,31 @@ data class TimelineSessionFilter(
         }
 }
 
+/** Canonical session id shared by session-list filters and timeline rows.
+ * Observed sessions carry a provider prefix in `sessions_list`, while hook
+ * timeline entries use the raw id. Mirrors Swift
+ * `canonicalTimelineSessionId` and Node `getHistoryForSession`. */
+fun canonicalTimelineSessionId(value: String?): String? {
+    val trimmed = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val prefixes = listOf(
+        "observed:claude:",
+        "observed:codex:",
+        "observed:codex-app:",
+        "observed:opencode:",
+        "observed:antigravity:",
+    )
+    val prefix = prefixes.firstOrNull { trimmed.startsWith(it) } ?: return trimmed
+    return trimmed.removePrefix(prefix).trim().takeIf { it.isNotEmpty() }
+}
+
 /** True when this entry belongs to [filter]'s session. Matches by sessionId,
  *  the virtual `openclaw-gateway` session (sessionless OpenClaw rows), or the
  *  (projectName, agentType) fallback for legacy sessionless entries. Mirrors
  *  Swift `TimelineEntry.matchesTimelineFilter`. */
 fun TimelineEntry.matchesTimelineFilter(filter: TimelineSessionFilter): Boolean {
-    val sid = sessionId?.trim()?.takeIf { it.isNotEmpty() }
-    if (sid == filter.sessionId) return true
+    val sid = canonicalTimelineSessionId(sessionId)
+    val focusedSid = canonicalTimelineSessionId(filter.sessionId)
+    if (sid != null && sid == focusedSid) return true
     // OpenClaw entries are daemon-local and historically used agent
     // attribution without a session id — keep them visible when the virtual
     // Gateway session is focused.

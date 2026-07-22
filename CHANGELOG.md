@@ -16,6 +16,14 @@ version consistency. See [RELEASING.md](RELEASING.md).
   of silently sending Claude Code and Codex lifecycle events to an empty port
 - Avoid overwriting another live daemon's discovery record during self-repair
 
+### macOS and Android timeline
+
+- Keep a focused observed Claude, Codex, OpenCode, Antigravity, or Codex App
+  session visible when session-list IDs carry an `observed:<provider>:` prefix
+  but timeline events use the agent's raw session ID
+- Mirror the same session-ID canonicalization in macOS, Android, and the Node
+  per-session history query to prevent client-specific timeline gaps
+
 ## 1.0.1
 
 Maintenance release across independently delivered channels — reliability fixes
