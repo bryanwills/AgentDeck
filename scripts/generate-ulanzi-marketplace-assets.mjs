@@ -15,7 +15,9 @@
 // one in the carousel. The deck face is now rendered from the canonical
 // renderers instead of screenshotted, which removes the ceiling entirely: the
 // slots are viewBox SVG, so they rasterise crisp at any size (also DESIGN.md R7
-// — real renderer output, never a hand-drawn mock).
+// — real renderer output, never hand-drawn application UI). The device shell
+// follows the D200H's physical 5 + 5 + 3 keys and wide clock widget instead of
+// presenting the simulator's generic 5x3 grid as hardware.
 
 import { mkdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -23,7 +25,7 @@ import sharp from 'sharp';
 import { buildSessionDeck } from '../shared/dist/d200h-layout.js';
 
 const root = resolve(import.meta.dirname, '..');
-const out = resolve(root, 'marketplace/ulanzi/1.0.0');
+const out = resolve(root, 'marketplace/ulanzi/1.0.1');
 const media = resolve(root, 'docs/media');
 const brand = resolve(root, 'design/brand');
 
@@ -86,22 +88,29 @@ const STATE_EVENT = {
 };
 
 /**
- * The 5x3 AgentDeck grid as a single PNG, rasterised at `key` px per slot.
+ * An accurate D200H face as a single PNG, rasterised at `key` px per square
+ * slot. The upper rows contain five keys each; the bottom row contains three
+ * AgentDeck keys followed by the device-owned wide clock widget.
  * `density` is scaled off the slots' intrinsic 144px viewBox so the vector art
  * is rendered at target size rather than resampled up from 144.
  */
 async function deckFace(key, gap, pad) {
   const positions = [];
-  for (let r = 0; r < 3; r++) for (let c = 0; c < 5; c++) positions.push(`${c}_${r}`);
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 5; c++) positions.push(`${c}_${r}`);
+  for (let c = 0; c < 3; c++) positions.push(`${c}_2`);
   const deck = buildSessionDeck(STATE_EVENT, { mode: 'list', showUsage: true, animFrame: 0 }, positions);
 
+  const labelH = Math.round(key * 0.22);
   const W = 5 * key + 4 * gap + 2 * pad;
-  const H = 3 * key + 2 * gap + 2 * pad;
+  const H = labelH + 3 * key + 2 * gap + 2 * pad;
   const density = Math.round(72 * (key / 144));
 
   const body = svg(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${W}" height="${H}" rx="${Math.round(pad * 0.9)}" fill="#0a1616"
           stroke="${KELP_300}" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="${W / 2}" y="${pad + Math.round(labelH * 0.55)}" fill="${TIDE_50}"
+          font-family="${FONT}" font-size="${Math.round(key * 0.12)}" font-weight="700"
+          letter-spacing="${Math.max(1, Math.round(key * 0.012))}" text-anchor="middle" opacity="0.78">U·STUDIO</text>
   </svg>`);
 
   const tiles = [];
@@ -113,9 +122,24 @@ async function deckFace(key, gap, pad) {
         .png()
         .toBuffer(),
       left: pad + c * (key + gap),
-      top: pad + r * (key + gap),
+      top: pad + labelH + r * (key + gap),
     });
   }
+
+  const clockW = 2 * key + gap;
+  const clock = svg(`<svg width="${clockW}" height="${key}" xmlns="http://www.w3.org/2000/svg">
+    <rect width="${clockW}" height="${key}" rx="${Math.round(key * 0.09)}" fill="#050909"
+          stroke="#334746" stroke-width="${Math.max(2, Math.round(key * 0.012))}"/>
+    <text x="${clockW * 0.47}" y="${key * 0.66}" fill="${TIDE_50}" font-family="${FONT}"
+          font-size="${Math.round(key * 0.42)}" font-weight="500" text-anchor="middle">02:12</text>
+    <text x="${clockW * 0.83}" y="${key * 0.66}" fill="${TIDE_50}" font-family="${FONT}"
+          font-size="${Math.round(key * 0.12)}" font-weight="600">PM</text>
+  </svg>`);
+  tiles.push({
+    input: clock,
+    left: pad + 3 * (key + gap),
+    top: pad + labelH + 2 * (key + gap),
+  });
   return { buf: await sharp(body).composite(tiles).png().toBuffer(), W, H };
 }
 
@@ -177,9 +201,9 @@ async function agentMarks(size, gap) {
 {
   const W = 1920;
   const H = 1280;
-  const deck = await deckFace(268, 15, 36);
+  const deck = await deckFace(250, 15, 36);
   const dx = Math.round((W - deck.W) / 2);
-  const dy = 274;
+  const dy = 284;
 
   const text = svg(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <text x="${W / 2}" y="168" fill="${TIDE_50}" font-family="${FONT}" font-size="76" font-weight="700" text-anchor="middle">Your agents, on the D200H</text>
@@ -191,7 +215,7 @@ async function agentMarks(size, gap) {
     .composite([{ input: deck.buf, left: dx, top: dy }, { input: text }])
     .jpeg({ quality: 92, mozjpeg: true })
     .toFile(resolve(out, 'banner-01-1920x1280.jpg'));
-  console.log(`banner-01 deck ${deck.W}x${deck.H} @268px/key = ${Math.round((deck.W / W) * 100)}% of canvas width`);
+  console.log(`banner-01 deck ${deck.W}x${deck.H} @250px/key = ${Math.round((deck.W / W) * 100)}% of canvas width`);
 }
 
 // ------------------------------------------------------------ banner 02 (3:2)
@@ -259,9 +283,9 @@ async function agentMarks(size, gap) {
   </svg>`);
 
   const text = svg(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-    <text x="${W / 2}" y="168" fill="${TIDE_50}" font-family="${FONT}" font-size="76" font-weight="700" text-anchor="middle">Driven by the AgentDeck app</text>
-    <text x="${W / 2}" y="238" fill="${KELP_300}" font-family="${FONT}" font-size="35" font-weight="500" text-anchor="middle">The deck mirrors whatever the companion app is watching</text>
-    <text x="${W / 2}" y="308" fill="${TIDE_50}" font-family="${FONT}" font-size="27" opacity="0.72" text-anchor="middle">macOS · one daemon feeds the deck, the app, and every other surface</text>
+    <text x="${W / 2}" y="168" fill="${TIDE_50}" font-family="${FONT}" font-size="76" font-weight="700" text-anchor="middle">One local daemon, every surface</text>
+    <text x="${W / 2}" y="238" fill="${KELP_300}" font-family="${FONT}" font-size="35" font-weight="500" text-anchor="middle">The Ulanzi Studio plugin connects locally to AgentDeck</text>
+    <text x="${W / 2}" y="308" fill="${TIDE_50}" font-family="${FONT}" font-size="27" opacity="0.72" text-anchor="middle">macOS &amp; Windows · local connection · no analytics</text>
   </svg>`);
 
   await sharp(backdrop(W, H, 0.5, 0.5, 0.8))

@@ -17,7 +17,11 @@ NAME="com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin"
 SRC_PLUGIN="$PKG/$NAME"
 OUT="$PKG/dist/$NAME"
 VERSION=$(node -p "require('$SRC_PLUGIN/manifest.json').Version")
-ARCHIVE="$ROOT/dist/agentdeck-ulanzi-v${VERSION}.zip"
+# The Marketplace validator requires the ZIP basename to match the single
+# top-level plugin folder exactly. Keep versioning in the release tag and
+# manifest; changing this filename makes an otherwise valid package fail the
+# portal's client-side root check.
+ARCHIVE="$ROOT/dist/${NAME}.zip"
 
 RESVG_VERSION="2.6.2"
 WS_VERSION="^8.20.0"

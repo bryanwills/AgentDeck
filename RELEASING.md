@@ -109,7 +109,11 @@ CI owns `CURRENT_PROJECT_VERSION` — `apple-release.yml` injects `github.run_nu
 1. Confirm both Ulanzi package and marketplace manifests match each other.
 2. Run `pnpm --filter @agentdeck/plugin-ulanzi package`, upload the artifact, and tag `ulanzi-v<ULANZI_VERSION>` when actually submitted/released.
 
-`ulanzi-release.yml` runs on the tag and produces/attaches `dist/agentdeck-ulanzi-v<VERSION>.zip` the same way. The Marketplace upload stays manual.
+`ulanzi-release.yml` runs on the tag and produces/attaches
+`dist/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin.zip` the same way. The
+archive basename deliberately matches its single top-level `.ulanziPlugin`
+folder because the Marketplace rejects any other filename/root pairing. The
+Marketplace upload stays manual.
 
 The plugin declares **one** dynamic action; its keys reflow by agent state. Every localization file's `Actions` array is index-mapped onto `manifest.json`'s, so adding entries silently mislabels the action in the palette — `plugin-ulanzi/src/__tests__/manifest-localization.test.ts` gates that alignment.
 

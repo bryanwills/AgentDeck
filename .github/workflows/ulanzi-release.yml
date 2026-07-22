@@ -60,16 +60,16 @@ jobs:
             the same artifact submitted there, for manual installation.
 
             ### Install
-            1. Download `agentdeck-ulanzi-v${{ steps.version.outputs.VERSION }}.zip` below
+            1. Download `com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin.zip` below
             2. Unzip and move `com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin` into
                Ulanzi Studio's `Plugins` directory
             3. Restart Ulanzi Studio and drag the **AgentDeck** action onto your keys
 
             Requires Ulanzi Studio 2.1.4+ and AgentDeck running on the same machine.
-          files: dist/agentdeck-ulanzi-v${{ steps.version.outputs.VERSION }}.zip
+          files: dist/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin.zip
 
       - name: Upload packaged plugin artifact
         uses: actions/upload-artifact@v4
         with:
           name: ulanzi-plugin-v${{ steps.version.outputs.VERSION }}
-          path: dist/agentdeck-ulanzi-v${{ steps.version.outputs.VERSION }}.zip
+          path: dist/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin.zip

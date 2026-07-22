@@ -99,11 +99,22 @@ Serendipity Bound (admin@foundby.kr)
 
 ## After they reply
 
-1. Confirm #1064 is gone from 내 업로드.
-2. Upload `dist/agentdeck-ulanzi-v1.0.1.zip`, then reuse the final images from
-   `1.0.0/` — **one image at a time**, confirming each 이미지 자르기 dialog; a
-   thumbnail is not proof the file reached the server (see LISTING.md).
+Status on 2026-07-22: #1064 is gone and the corrected 1.0.1 ZIP, form, and media
+were submitted after the main-file uploader began working. AgentDeck appears in
+`Works under review`, but its `/contentView/32` link displays the unrelated
+`Douyin Live Studio` Profile. A second follow-up was sent in the same thread
+with the reproduction URL and AgentDeck UUID/category, asking Ulanzi to confirm
+the review entry is mapped correctly and cannot affect the unrelated work.
+
+1. Confirm #1064 is gone from 내 업로드. **Done 2026-07-22.**
+2. Upload `dist/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin.zip`, then reuse
+   the final images from `1.0.1/` — **one image at a time**, confirming each 이미지 자르기 dialog; a
+   thumbnail is not proof the file reached the server (see LISTING.md). **Done
+   2026-07-22.**
 3. Set the version to `1.0.1` and 작성자 to `admin@foundby.kr` (shared across all
    seven locales).
-4. Reply to the same thread with the new upload ID and the `ulanzi-v1.0.1`
-   GitHub release URL to request Marketplace publication.
+4. Record the generated content route. Current route: `/contentView/32`
+   (reported because it resolves to the wrong work).
+5. Reply to the same thread with the route and the `ulanzi-v1.0.1` GitHub
+   release URL to request Marketplace publication. **Done 2026-07-22; awaiting
+   mapping confirmation.**
