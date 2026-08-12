@@ -2,15 +2,46 @@
 
 ---
 
+## 2026-08-12 — Apple 사용 지표 수집과 네이티브 평점 흐름 추가
+
+### 변경
+
+- iOS/macOS 대시보드가 실제 live agent session을 본 날짜만 로컬 `UserDefaults`에
+  기록하고, 서로 다른 3일의 의미 있는 사용 뒤 StoreKit 네이티브 평점 요청을 시도한다.
+  production App Store 거래만 허용하고 TestFlight/Debug는 제외했으며, 시도 뒤 180일
+  cooldown을 둔다. 세션 ID·프로젝트명·명령은 저장하거나 전송하지 않는다.
+- Settings → About에 사용자가 직접 누를 수 있는 App Store 평가 링크를 추가했다.
+- `scripts/app-store-connect-analytics.mjs`와 `pnpm analytics:apple`을 추가했다. 별도
+  분석 SDK나 AgentDeck 운영 서버 없이 Apple의 opt-in·privacy-thresholded App Usage
+  보고서(App Sessions, Installations and Deletions, Opt-in)를 ONGOING request로 만들고
+  내려받는다. 원본 export는 `reports/app-store-connect/`에 저장하며 gitignored다.
+- 기능 매트릭스, 릴리스 운영 문서, iOS/macOS 심사 노트를 동일한 privacy 경계로
+  갱신했다. App Privacy disclosure를 바꾸는 자체 수집은 추가하지 않았다.
+
+### 검증
+
+- `xcodegen generate --spec apple/project.yml`, macOS Debug build, iOS Simulator build,
+  AppReviewPromptPolicy 독립 runtime assertions, Node syntax check, targeted ESLint,
+  JS/JSON targeted Prettier, `pnpm docs:check`, App Store submission validator,
+  `git diff --check` 통과.
+- macOS XCTest 실행은 설치된 배포판 AgentDeck과 같은 bundle id의 test host를 띄우는
+  Xcode 26.6 LaunchServices assertion으로 중단됐다. iOS test target은 기존
+  `SpokenDigestParityTests`가 iOS에서 제외된 `DaemonServer`를 참조해 전체 target compile이
+  중단됐지만, 새 `AppReviewPromptTests.swift` 자체는 양쪽 test target에서 컴파일됐다.
+
+---
+
 ## 2026-08-12 — 외부 이슈·PR·마켓 배포 상태 재점검
 
 ### 확인
 
-- 새 외부 이슈나 PR은 없었다. 열린 외부 이슈는 #174, #171, #143, #103이다.
+- 새 외부 이슈나 PR은 없었다. 현재 열린 외부 이슈는 #174, #173, #143, #103이다.
   #174 작성자는 D200X 구매를 아직 검토 중이며, 장비를 마련하면 프리릴리스 테스트에
-  참여하겠다고 회신했다. 실기 확보 전까지 구현 착수나 추가 요청은 하지 않는다. 열린
-  PR #168과 #163은 기존 변경 요청 이후 기여자 업데이트가 없으며, `master`의 GitHub
-  Actions는 모두 통과 중이다.
+  참여하겠다고 회신했다. 실기 확보 전까지 구현 착수나 추가 요청은 하지 않는다. #171은
+  수정이 App Store 1.0.5와 npm 1.0.17에 배포된 뒤 해결 완료로 닫았다. PR #176은 검증 후
+  병합했고, 현재 형태로 병합 경로가 없던 PR #168과 #163은 후속 구현 방향을 남긴 뒤
+  `status:superseded`로 닫았다. 열린 PR은 없으며 `master`의 GitHub Actions는 모두 통과
+  중이다.
 - Apple 공개 스토어의 플랫폼별 페이지에서 macOS와 iPhone/iPad **1.0.5**가 모두
   노출됨을 확인했다. 이 Mac의 MAS 영수증 설치본은 아직 1.0.4 (4501)여서 자동
   업데이트가 뒤처질 수 있다는 문서의 경계를 실제로 재확인했다.
@@ -26,7 +57,8 @@
 ### 대응
 
 - #171에 App Store 1.0.5 공개 완료, 양쪽 앱 업데이트·Mac 앱/데몬 재시작·새 QR
-  재스캔 절차를 안내했다. 기존 약속대로 제보자 확인 전에는 이슈를 열어 둔다.
+  재스캔 절차를 안내했다. 추가 재현 보고가 없고 수정본이 공개됐으므로 해결 완료로
+  닫았으며, 문제가 지속되면 버전과 거부 로그를 첨부해 다시 열도록 안내했다.
 - README 릴리스 표, `RELEASING.md`, `apple/APP_REVIEW_NOTES.md`를 실제 전달 상태로
   동기화했다. 심사 중인 Ulanzi/Google Play에는 교체 제출이나 게시 동작을 하지 않았다.
 
