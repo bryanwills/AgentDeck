@@ -262,7 +262,7 @@ describe('StateMachine', () => {
       expect(sm.getState()).toBe(State.AWAITING_DIFF);
     });
 
-    it('AWAITING leaves only on a real signal — user responds via keyboard → PROCESSING', () => {
+    it('AWAITING leaves only on a real signal — parser spinner (OpenCode/OpenClaw adapters) → PROCESSING', () => {
       const sm = bootToIdle();
       sm.handleHookEvent('UserPromptSubmit', {});
       sm.handleParserEvent('permission_prompt', {
@@ -270,7 +270,9 @@ describe('StateMachine', () => {
       });
       expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
 
-      // Long pause, then the user answers in the terminal — PTY spinner recovers to PROCESSING.
+      // Long pause, then the user answers in the terminal. Only adapters that
+      // still emit parser lifecycle events reach this path; Claude/Codex
+      // keyboard answers recover via the hook exits tested below.
       vi.advanceTimersByTime(20 * 60 * 1000);
       sm.handleParserEvent('spinner_start', {});
       expect(sm.getState()).toBe(State.PROCESSING);
@@ -295,6 +297,200 @@ describe('StateMachine', () => {
       const sm = bootToIdle();
       vi.advanceTimersByTime(10 * 60 * 1000);
       expect(sm.getState()).toBe(State.IDLE);
+    });
+  });
+
+  // === Hook exits from AWAITING (keyboard-answered prompts) ===
+  // Claude/Codex adapters no longer emit parser spinner/idle, so a prompt
+  // answered at the terminal keyboard must be dismissed by lifecycle hooks.
+  // These drive the REAL production route (handleHookEvent), not the parser.
+
+  describe('hook exits from awaiting states', () => {
+    function bootToAwaitingPermission() {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleTerminalUiEvent('permission_prompt', {
+        options: [{ index: 0, label: 'Yes' }, { index: 1, label: 'No' }],
+        question: 'Allow Bash?',
+      });
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+      return sm;
+    }
+
+    it('Stop from AWAITING_PERMISSION → IDLE with prompt fields cleared', () => {
+      const sm = bootToAwaitingPermission();
+      sm.handleHookEvent('Stop', {});
+      expect(sm.getState()).toBe(State.IDLE);
+      const snap = sm.getSnapshot();
+      expect(snap.options).toEqual([]);
+      expect(snap.question).toBeNull();
+    });
+
+    it('Stop from AWAITING_OPTION → IDLE (keyboard-answered AskUserQuestion ends the turn)', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleTerminalUiEvent('option_prompt', {
+        options: [{ index: 0, label: 'A' }, { index: 1, label: 'B' }],
+        question: 'Pick one',
+      });
+      expect(sm.getState()).toBe(State.AWAITING_OPTION);
+      sm.handleHookEvent('Stop', {});
+      expect(sm.getState()).toBe(State.IDLE);
+      expect(sm.getSnapshot().question).toBeNull();
+    });
+
+    it('Stop from AWAITING_DIFF → IDLE', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleTerminalUiEvent('diff_prompt', {
+        options: [{ index: 0, label: 'Accept' }],
+      });
+      expect(sm.getState()).toBe(State.AWAITING_DIFF);
+      sm.handleHookEvent('Stop', {});
+      expect(sm.getState()).toBe(State.IDLE);
+    });
+
+    it('UserPromptSubmit from AWAITING_PERMISSION → PROCESSING (new turn dismisses the prompt)', () => {
+      const sm = bootToAwaitingPermission();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      expect(sm.getState()).toBe(State.PROCESSING);
+      expect(sm.getSnapshot().options).toEqual([]);
+    });
+
+    it('PostToolUse after the grace period dismisses AWAITING_PERMISSION → PROCESSING', () => {
+      const sm = bootToAwaitingPermission();
+      vi.advanceTimersByTime(5000);
+      sm.handleHookEvent('PostToolUse', { tool_name: 'Bash' });
+      expect(sm.getState()).toBe(State.PROCESSING);
+      expect(sm.getSnapshot().question).toBeNull();
+    });
+
+    it('PreToolUse after the grace period dismisses AWAITING_OPTION → PROCESSING', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleTerminalUiEvent('option_prompt', {
+        options: [{ index: 0, label: 'A' }],
+        question: 'Pick',
+      });
+      vi.advanceTimersByTime(5000);
+      sm.handleHookEvent('PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/tmp/x' } });
+      expect(sm.getState()).toBe(State.PROCESSING);
+      expect(sm.getSnapshot().currentTool).toBe('Read');
+      expect(sm.getSnapshot().question).toBeNull();
+    });
+
+    it('tool activity within the grace period keeps a fresh prompt awaiting', () => {
+      const sm = bootToAwaitingPermission();
+      // A parallel tool finishing (or a late hook curl) right after the prompt
+      // was drawn must not hide the answerable prompt from devices.
+      vi.advanceTimersByTime(500);
+      sm.handleHookEvent('PostToolUse', { tool_name: 'Read' });
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+      expect(sm.getSnapshot().question).toBe('Allow Bash?');
+    });
+
+    it('PreToolUse from IDLE recovers a dropped user_prompt_submit → PROCESSING', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' } });
+      expect(sm.getState()).toBe(State.PROCESSING);
+    });
+
+    it('codex_turn_complete from AWAITING_OPTION → IDLE (notify closes a keyboard-answered prompt)', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('codex_user_prompt_submit', {});
+      sm.handleTerminalUiEvent('option_prompt', {
+        options: [{ index: 0, label: 'A' }],
+        question: 'Pick',
+      });
+      expect(sm.getState()).toBe(State.AWAITING_OPTION);
+      sm.handleHookEvent('codex_turn_complete', {});
+      expect(sm.getState()).toBe(State.IDLE);
+      expect(sm.getSnapshot().question).toBeNull();
+    });
+
+    it('codex_tool_end after the grace period dismisses AWAITING_PERMISSION → PROCESSING', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('codex_user_prompt_submit', {});
+      sm.handleTerminalUiEvent('permission_prompt', {
+        options: [{ index: 0, label: 'Yes' }],
+        question: 'Run command?',
+      });
+      vi.advanceTimersByTime(5000);
+      sm.handleHookEvent('codex_tool_end', { tool_name: 'shell' });
+      expect(sm.getState()).toBe(State.PROCESSING);
+    });
+
+    it('a parallel sibling finishing does not dismiss the prompt while the gated tool is in flight', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      // Batch dispatch: both PreToolUse fire before the prompt is drawn.
+      sm.handleHookEvent('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'make build' } });
+      sm.handleHookEvent('PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/x' } });
+      sm.handleTerminalUiEvent('permission_prompt', {
+        options: [{ index: 0, label: 'Yes' }],
+        question: 'Allow Bash?',
+      });
+      // Sibling Read finishes long after the grace — Bash is still gated.
+      vi.advanceTimersByTime(8000);
+      sm.handleHookEvent('PostToolUse', { tool_name: 'Read' });
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+      expect(sm.getSnapshot().question).toBe('Allow Bash?');
+      // The gated tool completing (user answered at the keyboard) dismisses.
+      sm.handleHookEvent('PostToolUse', { tool_name: 'Bash' });
+      expect(sm.getState()).toBe(State.PROCESSING);
+    });
+
+    it('a straggler PostToolUse landing after Stop does not reopen a finished session', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleHookEvent('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' } });
+      sm.handleHookEvent('Stop', {});
+      expect(sm.getState()).toBe(State.IDLE);
+      // Fire-and-forget hook curls are unordered; the turn's last tool-end
+      // can arrive after Stop. It must not reopen PROCESSING (nothing would
+      // ever re-close it — the watchdog only arms on UserPromptSubmit).
+      sm.handleHookEvent('PostToolUse', { tool_name: 'Bash' });
+      expect(sm.getState()).toBe(State.IDLE);
+    });
+
+    it('a re-detected prompt refreshes the dismissal grace', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleHookEvent('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: {} });
+      sm.handleTerminalUiEvent('option_prompt', {
+        options: [{ index: 0, label: 'A' }],
+        question: 'First?',
+      });
+      vi.advanceTimersByTime(10_000);
+      // A NEW same-kind prompt re-parses while still AWAITING_OPTION — it must
+      // not inherit the first prompt's expired grace.
+      sm.handleTerminalUiEvent('option_prompt', {
+        options: [{ index: 0, label: 'B' }],
+        question: 'Second?',
+      });
+      sm.handleHookEvent('PostToolUse', { tool_name: 'AskUserQuestion' });
+      expect(sm.getState()).toBe(State.AWAITING_OPTION);
+      expect(sm.getSnapshot().question).toBe('Second?');
+    });
+
+    it('the daemon hub machine never dismisses prompts or reopens IDLE on tool activity', () => {
+      const tracker = new UsageTracker();
+      const sm = new StateMachine(tracker, { toolActivityRecovery: false });
+      sm.handleHookEvent('SessionStart', {});
+      // An unrelated observed session's tool hook must not reopen IDLE…
+      sm.handleHookEvent('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' } });
+      expect(sm.getState()).toBe(State.IDLE);
+      // …nor dismiss a held prompt (e.g. an OpenClaw approval).
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleParserEvent('permission_prompt', {
+        options: [{ index: 0, label: 'Allow' }],
+        question: 'OpenClaw approval',
+      });
+      vi.advanceTimersByTime(60_000);
+      sm.handleHookEvent('PostToolUse', { tool_name: 'Bash' });
+      sm.handleHookEvent('PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/y' } });
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+      expect(sm.getSnapshot().question).toBe('OpenClaw approval');
     });
   });
 

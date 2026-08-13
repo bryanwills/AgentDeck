@@ -49,6 +49,10 @@ function truncateToolInput(s: string): string {
   return line.length > 120 ? line.slice(0, 119) + '\u2026' : line;
 }
 
+/** Grace period during which hook tool activity may not dismiss a freshly
+ *  drawn AWAITING_* prompt — see recoverProcessingFromToolActivity(). */
+export const AWAITING_TOOL_DISMISS_GRACE_MS = 1500;
+
 const TERMINAL_UI_EVENTS = new Set([
   'permission_prompt',
   'option_prompt',
@@ -83,10 +87,22 @@ export class StateMachine extends EventEmitter {
   private lastValidSuggestedPrompt: string | null = null;
   private usageTracker: UsageTracker;
   private stuckTimer: ReturnType<typeof setTimeout> | null = null;
+  private awaitingEnteredAt = 0;
+  /** Best-effort count of tool calls started but not yet finished this turn
+   *  (PreToolUse++ / PostToolUse--). Used to tell "the gated tool ran" from
+   *  "a parallel sibling finished while the prompt is still open". Reset at
+   *  turn boundaries so a dropped hook cannot skew it forever. */
+  private inFlightTools = 0;
+  /** False for the daemon hub's global machine: it multiplexes EVERY observed
+   *  session's hooks, so an unrelated session's tool activity must never
+   *  dismiss an AWAITING prompt (e.g. a held OpenClaw approval) or reopen
+   *  IDLE. Session bridges own exactly one agent and keep this true. */
+  private readonly toolActivityRecovery: boolean;
 
-  constructor(usageTracker: UsageTracker) {
+  constructor(usageTracker: UsageTracker, opts?: { toolActivityRecovery?: boolean }) {
     super();
     this.usageTracker = usageTracker;
+    this.toolActivityRecovery = opts?.toolActivityRecovery ?? true;
   }
 
   handleHookEvent(eventName: string, data: Record<string, unknown>): void {
@@ -100,6 +116,7 @@ export class StateMachine extends EventEmitter {
       case 'UserPromptSubmit':
         this.suggestedPrompt = null;
         this.lastValidSuggestedPrompt = null;
+        this.inFlightTools = 0;
         this.transition(State.PROCESSING, 'user_prompt_submit', 'hook');
         break;
 
@@ -109,6 +126,11 @@ export class StateMachine extends EventEmitter {
         this.currentTool = toolName;
         this.toolInput = formatToolInput(toolName, toolInputData);
         this.toolProgress = `Using ${toolName}`;
+        this.inFlightTools++;
+        // Tool activity proves the turn is running: recovers AWAITING_* after a
+        // keyboard-answered prompt and IDLE after a dropped user_prompt_submit.
+        // A no-op from PROCESSING (transition table rejects it).
+        this.recoverProcessingFromToolActivity('start');
         this.emitSnapshot();
         break;
       }
@@ -118,6 +140,8 @@ export class StateMachine extends EventEmitter {
         this.currentTool = null;
         this.toolInput = null;
         this.toolProgress = null;
+        this.inFlightTools = Math.max(0, this.inFlightTools - 1);
+        this.recoverProcessingFromToolActivity('end');
         this.emitSnapshot();
         break;
       }
@@ -130,6 +154,7 @@ export class StateMachine extends EventEmitter {
         this.question = null;
         this.navigable = false;
         this.cursorIndex = 0;
+        this.inFlightTools = 0;
         this.transition(State.IDLE, 'stop', 'hook');
         break;
 
@@ -166,6 +191,7 @@ export class StateMachine extends EventEmitter {
       case 'codex_user_prompt_submit':
         this.suggestedPrompt = null;
         this.lastValidSuggestedPrompt = null;
+        this.inFlightTools = 0;
         this.transition(State.PROCESSING, 'user_prompt_submit', 'hook');
         break;
 
@@ -175,6 +201,9 @@ export class StateMachine extends EventEmitter {
         this.currentTool = toolName;
         this.toolInput = formatToolInput(toolName, toolInputData);
         this.toolProgress = toolName ? `Using ${toolName}` : null;
+        this.inFlightTools++;
+        // Same recovery contract as Claude PreToolUse (see above).
+        this.recoverProcessingFromToolActivity('start');
         this.emitSnapshot();
         break;
       }
@@ -184,6 +213,8 @@ export class StateMachine extends EventEmitter {
         this.currentTool = null;
         this.toolInput = null;
         this.toolProgress = null;
+        this.inFlightTools = Math.max(0, this.inFlightTools - 1);
+        this.recoverProcessingFromToolActivity('end');
         this.emitSnapshot();
         break;
       }
@@ -196,6 +227,7 @@ export class StateMachine extends EventEmitter {
         this.question = null;
         this.navigable = false;
         this.cursorIndex = 0;
+        this.inFlightTools = 0;
         this.transition(State.IDLE, 'stop', 'hook');
         break;
 
@@ -210,6 +242,7 @@ export class StateMachine extends EventEmitter {
         this.question = null;
         this.navigable = false;
         this.cursorIndex = 0;
+        this.inFlightTools = 0;
         this.transition(State.IDLE, 'stop', 'hook');
         break;
 
@@ -226,7 +259,15 @@ export class StateMachine extends EventEmitter {
         this.question = (data?.question as string) || null;
         this.navigable = (data?.navigable as boolean) ?? false;
         this.cursorIndex = (data?.cursorIndex as number) ?? 0;
-        this.transition(State.AWAITING_PERMISSION, 'permission_prompt', 'pty');
+        if (this.state === State.AWAITING_PERMISSION) {
+          // Re-detected (redraw or a NEW same-kind prompt): refresh the
+          // dismissal grace so a follow-up prompt never inherits an expired
+          // window, and rebroadcast the updated fields.
+          this.awaitingEnteredAt = Date.now();
+          this.emitSnapshot();
+        } else {
+          this.transition(State.AWAITING_PERMISSION, 'permission_prompt', 'pty');
+        }
         break;
       }
 
@@ -237,8 +278,10 @@ export class StateMachine extends EventEmitter {
         this.cursorIndex = (data?.cursorIndex as number) ?? 0;
         if (this.state === State.AWAITING_OPTION) {
           // Already in AWAITING_OPTION — just update options and re-emit snapshot
-          // (debounced chunks may re-parse with more complete data)
+          // (debounced chunks may re-parse with more complete data). Refresh the
+          // dismissal grace: this may be a NEW prompt of the same kind.
           debug('SM', `option_prompt update: ${this.options.length} options, nav=${this.navigable}, cursor=${this.cursorIndex}`);
+          this.awaitingEnteredAt = Date.now();
           this.emitSnapshot();
         } else {
           this.transition(State.AWAITING_OPTION, 'option_ui_detected', 'pty');
@@ -248,7 +291,12 @@ export class StateMachine extends EventEmitter {
 
       case 'diff_prompt': {
         this.options = (data?.options as PromptOption[]) || [];
-        this.transition(State.AWAITING_DIFF, 'diff_ui_detected', 'pty');
+        if (this.state === State.AWAITING_DIFF) {
+          this.awaitingEnteredAt = Date.now();
+          this.emitSnapshot();
+        } else {
+          this.transition(State.AWAITING_DIFF, 'diff_ui_detected', 'pty');
+        }
         break;
       }
 
@@ -491,6 +539,46 @@ export class StateMachine extends EventEmitter {
     }
   }
 
+  /** Tool activity (PreToolUse/PostToolUse and Codex equivalents) is dismissal
+   *  evidence for AWAITING_* / recovery evidence for IDLE, with three guards:
+   *
+   *  - Disabled entirely on the daemon hub's global machine
+   *    (`toolActivityRecovery: false`) — it multiplexes every observed
+   *    session, so "some session used a tool" proves nothing about the prompt
+   *    or turn this machine is displaying.
+   *  - AWAITING_*: a short grace after the prompt was drawn (a parallel tool
+   *    or a late hook curl can land while a fresh prompt is genuinely open),
+   *    and a tool END only counts when no other tool is still in flight —
+   *    while the gated tool's own PreToolUse is outstanding, a sibling
+   *    finishing is not evidence the prompt was answered. A tool START from
+   *    awaiting is always evidence (batch PreToolUse all fire before the
+   *    prompt is drawn, so a new start means the turn resumed).
+   *  - IDLE: only a tool START recovers a dropped user_prompt_submit. A
+   *    straggler tool-END curl landing after Stop must not reopen a finished
+   *    session (nothing would ever re-close it).
+   *
+   *  A dismissal skipped by any guard is retried by the next hook — a
+   *  keyboard-answered prompt always produces later tool activity or a stop. */
+  private recoverProcessingFromToolActivity(kind: 'start' | 'end'): void {
+    if (!this.toolActivityRecovery) return;
+    const inAwaiting =
+      this.state === State.AWAITING_PERMISSION ||
+      this.state === State.AWAITING_OPTION ||
+      this.state === State.AWAITING_DIFF;
+    if (this.state === State.IDLE && kind !== 'start') return;
+    if (inAwaiting) {
+      if (Date.now() - this.awaitingEnteredAt < AWAITING_TOOL_DISMISS_GRACE_MS) {
+        debug('SM', 'tool_activity within awaiting grace — keeping prompt');
+        return;
+      }
+      if (kind === 'end' && this.inFlightTools > 0) {
+        debug('SM', `sibling tool ended with ${this.inFlightTools} still in flight — keeping prompt`);
+        return;
+      }
+    }
+    this.transition(State.PROCESSING, 'tool_activity', 'hook');
+  }
+
   transition(to: State, trigger: string, source: string): void {
     const valid = transitions.some(
       (t: StateTransition) =>
@@ -507,13 +595,29 @@ export class StateMachine extends EventEmitter {
     const prev = this.state;
     this.state = to;
 
-    // Reset cursor authority when leaving AWAITING states
+    // Leaving AWAITING_*: the prompt on screen is gone, so the prompt fields
+    // must not outlive it — a stale answerable question on a device would
+    // inject keystrokes into a running turn. Cleared here (not per-caller) so
+    // every exit path agrees.
     if (
-      prev === State.AWAITING_OPTION ||
-      prev === State.AWAITING_PERMISSION ||
-      prev === State.AWAITING_DIFF
+      (prev === State.AWAITING_OPTION ||
+        prev === State.AWAITING_PERMISSION ||
+        prev === State.AWAITING_DIFF) &&
+      to !== prev
     ) {
+      this.options = [];
+      this.question = null;
+      this.navigable = false;
+      this.cursorIndex = 0;
       this.cursorAuthority = 'pty';
+    }
+    if (
+      to !== prev &&
+      (to === State.AWAITING_OPTION ||
+        to === State.AWAITING_PERMISSION ||
+        to === State.AWAITING_DIFF)
+    ) {
+      this.awaitingEnteredAt = Date.now();
     }
 
     // Manage stuck-state timer. PROCESSING recovers after STUCK_TIMEOUT_MS
@@ -522,7 +626,8 @@ export class StateMachine extends EventEmitter {
     // user may be away for hours. A blind timer can't tell "away" from "parser
     // missed the recovery", so it wrongly forced a real prompt to IDLE and made
     // the session's creature vanish from the dashboard. Awaiting only leaves via
-    // a real signal (spinner_start / idle_detected / user response / stop), and
+    // a real signal (hook tool_activity / stop / user_prompt_submit, parser
+    // spinner_start / idle_detected where still emitted, or a user response);
     // a truly-dead session is reaped by liveness (PID death / /health grace),
     // not by this timer.
     this.resetStuckTimer();

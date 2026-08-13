@@ -16,7 +16,7 @@
  * `tool_only`) is the fallback.
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, openSync, readSync, fstatSync, closeSync } from 'fs';
 import { debug } from '../logger.js';
 
 export interface LastTurnExcerpt {
@@ -134,6 +134,84 @@ export function readModelFromTranscript(transcriptPath: string): string | null {
     } catch { /* skip malformed line */ }
   }
   return null;
+}
+
+export interface TurnEndProbe {
+  /** Role of the last message-bearing JSONL record. */
+  role: string;
+  /** `message.stop_reason` on that record (null when absent). */
+  stopReason: string | null;
+  /** Record `timestamp` in epoch ms (null when absent/unparseable). */
+  timestampMs: number | null;
+}
+
+/**
+ * Probe whether the transcript's most recent turn has finished. A completed
+ * turn's last message-bearing record is `role: "assistant"` with
+ * `stop_reason: "end_turn"`; mid-turn tails end in `stop_reason: "tool_use"`
+ * or a `user` tool_result record. Non-message records (`type: "mode"` etc.)
+ * can trail the assistant message, so the walk skips records without a
+ * `message.role`. Never throws; returns null when unreadable/empty.
+ *
+ * Used by the turn watchdog to close a turn whose Stop hook was dropped —
+ * the caller must additionally check `timestampMs` against its own turn-open
+ * time, because at turn start the tail still shows the PREVIOUS turn's
+ * `end_turn`.
+ */
+export function readTurnEndProbe(transcriptPath: string): TurnEndProbe | null {
+  // Unlike the per-Stop readers above, this runs on a POLL (the missed-Stop
+  // watchdog, every few seconds while a turn is quiet), and real transcripts
+  // reach tens of MB — so read only the trailing bytes through a file
+  // descriptor instead of slurping the whole file. Reading from a byte offset
+  // can start mid-line; the backward walk already skips lines that fail to
+  // parse, which covers the truncated head line.
+  const PROBE_TAIL_BYTES = 256 * 1024;
+  const tail = readTailString(transcriptPath, PROBE_TAIL_BYTES);
+  if (tail == null) return null;
+  const lines = tail.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    let rec: {
+      timestamp?: string;
+      message?: { role?: string; stop_reason?: string | null };
+    };
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue; // skip malformed (possibly truncated) line
+    }
+    const role = rec?.message?.role;
+    if (!role) continue;
+    const ts = rec.timestamp ? Date.parse(rec.timestamp) : NaN;
+    return {
+      role,
+      stopReason: rec.message?.stop_reason ?? null,
+      timestampMs: Number.isFinite(ts) ? ts : null,
+    };
+  }
+  return null;
+}
+
+/** Read at most `maxBytes` from the end of a file without loading the rest.
+ *  Returns null when the file is unreadable. */
+function readTailString(path: string, maxBytes: number): string | null {
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, 'r');
+    const size = fstatSync(fd).size;
+    const len = Math.min(size, maxBytes);
+    if (len === 0) return '';
+    const buf = Buffer.allocUnsafe(len);
+    readSync(fd, buf, 0, len, size - len);
+    return buf.toString('utf-8');
+  } catch {
+    return null;
+  } finally {
+    if (fd != null) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
+  }
 }
 
 function contentToString(content: unknown): string {
