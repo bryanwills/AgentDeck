@@ -60,6 +60,11 @@
   판정과 동일한 시험을 통과하는데 결과만 달랐던 것. 끄면 USB 테더링 안드로이드
   대시보드 3대가 보안 이득 0 에 조용히 죽는다. "quiet by default" 는 LAN 방출이
   있는 모듈에만 적용할 논리다. `--local` (모듈 전체 off)은 여전히 ADB 를 끈다.
+  단 이 "USB 채널" 판정은 가정이 아니라 강제다: `adb reverse` 는 네트워크
+  transport(`adb connect <ip>:5555`, 무선 디버깅 mDNS)에도 똑같이 걸리고 그 경우
+  터널이 LAN 을 타므로, loopback 에서는 `isNetworkAdbTransport` 가 USB serial 형태만
+  통과시킨다(적대적 리뷰가 잡은 구멍 — "USB 채널이라 안전"이라는 문장 자체가
+  transport 를 확인하지 않으면 거짓이 된다).
 - **자동발견을 끄면서 만든 회귀 2건을 되돌렸다.** ① Swift `attemptRediscoverIfStuck`
   가 자동발견 게이트 뒤에 있어서, 등록된 패널의 DHCP 주소가 바뀌면 영구 블랙아웃이
   됐다. 게이트를 뺐다 — **사용자가 등록한 기기의 주소를 다시 찾는 것은 모르는 기기를
@@ -79,8 +84,16 @@
   보고 정상 종료해서다(가드 자체는 올바른 동작). 검증은 유닛 + 빌드 산출물에서
   4가지 posture 조합·plist 생성 실행 + 빌드된 `daemon-server.js` 의
   `resolveDaemonPosture → bindHostFor → listen` 배선 확인 수준.
-- **Swift 데몬에는 posture 스위치가 없다.** 앱만 쓰는 기업 사용자는 mDNS 광고를 끌
-  방법이 없다 — `AppPreferences` 토글 + Settings UI 필요(로드맵 12번).
+- ~~**Swift 데몬에는 posture 스위치가 없다.**~~ → 08-17 해소(로드맵 12번 done):
+  **Settings → Local server** 에 Loopback only / Disable device modules 토글
+  (`AppPreferences.daemonLoopbackOnly`/`daemonNoDeviceModules`) → `DaemonPosture`
+  로 한 번 결정, 토글 변경은 데몬 재시작으로 적용. loopback 이면 `NWListener` 가
+  `requiredLocalEndpoint` 로 127.0.0.1 바인드하고 Bonjour 광고를 아예 안 붙이며,
+  `startDeviceModules` 는 `allowsModule()` deny-by-default 게이트로 모듈을
+  **생성 자체를 안 한다**(등록만 건너뛰면 미등록 모듈이 observer/broadcast 경유로
+  살아남는다). posture 는 Swift `/health` 에도 실려 `qr`/`pair` 경고와 `daemon
+  restart` 승계가 Node 와 동일하게 동작. XCTest `DaemonPostureTests` 가 Node
+  `network-posture.test.ts` 의 케이스를 미러링.
 
 ---
 
