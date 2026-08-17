@@ -37,8 +37,8 @@ android {
         applicationId = "dev.agentdeck"
         minSdk = 29
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.0.9"
+        versionCode = 12
+        versionName = "1.0.10"
     }
 
     buildTypes {
