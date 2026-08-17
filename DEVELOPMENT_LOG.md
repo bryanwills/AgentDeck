@@ -24,6 +24,77 @@
 
 ---
 
+## 2026-08-17 — Kiro 는 아무것도 보고하지 않는다 (그래서 양쪽 데몬이 직접 읽는다)
+
+### 측정: 훅은 로드되지만 발화하지 않는다
+
+"크리처가 왜 늦게 뜨나?" 에서 시작해 훅부터 확인했다. `~/.kiro/hooks/agentdeck-lifecycle.json`
+은 설치돼 있고 Kiro 자신의 로그도 `[KiroAgent] v2 hooks loaded 5 standalone hooks` 라고
+적는다. 그런데 데몬에는 `kiro_*` 이벤트가 **한 번도** 온 적이 없었다(로그 grep 0건).
+
+추측 대신 계측했다. 훅 5개에 각각 마커 파일 생성을 심고 진짜 턴을 돌렸다:
+
+```
+$ kiro-cli chat --no-interactive "reply with the single word: ok"
+> ok                                  ← 실제 응답, 0.06 크레딧
+$ ls /tmp/kiro-fired-*
+없음                                   ← SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/Stop 전부 0
+```
+
+수신 경로는 멀쩡하다 — 손으로 POST 하니 `chat_start | agentType=kiro-cli` 행이 정상 생성됐다.
+**standalone hook 표면은 Kiro IDE 것이고 CLI chat 은 호출하지 않는다.** CLAUDE.md 의
+"v3 CLI 가 전역 훅을 공식 지원한다" 는 문장을 실측으로 교체했다.
+
+이것이 두 증상의 공통 원인이다: 크리처가 몇 초 늦는 것(밀어주는 게 없어 폴링한다)과
+타임라인이 비는 것(생산자가 없다).
+
+### Swift 단독 지원 — 3중 장벽
+
+App Store 앱만 쓰는 사용자에게 Kiro 는 **아예 안 보였다**. 장벽이 셋이었다:
+
+- **샌드박스가 `~/.kiro` 를 못 읽는다.** home-relative 엔타이틀먼트는 없고 앞으로도 없다.
+  → `~/.codex` 용으로 이미 확립된 패턴(NSOpenPanel → security-scoped bookmark →
+  `withKiroDirectoryAccess`)을 그대로 미러링. **승인이 없으면 아무것도 관측하지 않는다** —
+  부분 관측이나 추측이 아니라 0.
+- **Swift 에 Kiro 관측자가 없었다.** → `LocalKiroObserver`. 전사 파일이 곧 세션 목록이다
+  (mtime 30분 이내 = 라이브). 프로세스 열거로는 세션 id 를 얻을 수 없는데, id 가 모든
+  표면의 키다.
+- **타임라인 생산자가 없었다.** → `KiroTimelineFeed`(Node 쪽과 동일한 시드 규칙: 첫 목격은
+  무발화, 안 그러면 데몬 시작마다 이틀치 대화가 바운디드 로그를 밀어낸다).
+
+그리고 사용자가 권한을 줄 방법이 필요해서 Settings → Integrations 에 Kiro CLI 행을 넣었다.
+
+### 실행해서 잡은 버그 둘
+
+빌드가 통과했다고 끝이 아니었다. Node 데몬을 내려 **앱이 유일한 데몬**인 상태를 만들고
+화면으로 확인하다가 둘을 잡았다.
+
+1. **저장은 되는데 화면에 안 뜬다.** 타임라인 행을 store 에 넣고 `timeline_event` 방송을
+   빠뜨렸다. WS 히스토리에는 행이 있는데 라이브 스트립은 그대로였다. 같은 파일의 다른
+   생산자 두 곳은 전부 store+방송을 짝으로 하고 있었다. **저장은 표시가 아니다.**
+2. **방금 준 권한이 재시작하면 사라진다.** 이 앱은 종료 시 force-exit 한다(AppDelegate 의
+   3초 워치독 — 먹통 모듈이 종료를 막지 못하게). `UserDefaults` 가 flush 되기 전에 죽어서,
+   저장된 24개 키 중 kiro 키만 없었다. `synchronize()` 로 고쳤다. 사용자가 방금 대화형으로
+   승인한 권한은 그렇게 잃기에 가장 나쁜 값이다.
+
+### 검증
+
+화면 실측: 권한 전 kiro 0 → 승인 후 HUD 에 `Kiro CLI · IDLE` + 수조에 보라 유령 크리처.
+권한 지속: 재시작 후에도 키 2개 유지, 세션 재관측. Swift 테스트 5개, vitest 3209,
+macOS·iOS 빌드, 미러 핀 10개 전부 통과.
+
+**확인하지 못한 것**: 타임라인 라이브 방송은 코드만 고쳤고 화면으로는 못 봤다.
+`--no-interactive` 원샷 턴은 **전사 파일을 남기지 않아서**(응답과 크레딧 차감은 정상인데
+`~/.kiro` mtime 이 움직이지 않는다) 전사 기반 관측자가 볼 수 없고, 대화형 세션은
+이 세션에서 구동할 수 없었다.
+
+### 남는 두 한계는 구조적이다
+
+- **몇 초 늦게 뜬다.** 밀어주는 게 없으니 폴링이다(`SCAN_INTERVAL_MS`).
+- **항상 `idle` 로 보고한다.** 전사는 답이 끝나야 assistant 레코드가 생긴다. 진행 중인 턴을
+  볼 방법이 없고, `processing` 이라 쓰면 없는 상태를 지어내는 것이다.
+
+---
 ## 2026-08-17 — 병렬 서브에이전트는 왜 한 줄로 보였나: 중복제거·축출·정체성 축
 
 ### 계기
@@ -83,6 +154,19 @@ tool_exec 를 가장 많이 만드는 세션이 곧 팬아웃 세션이라, 지�
 빠질 때 필드를 빼면 retain-on-absent 병합에서 `8 running` 이 영구히 박힌다(`usageStale` 이
 반대 방향으로 두 번 당한 그 래치).
 
+### 4-b. 그런데 배지가 모델명을 밀어냈다
+
+좌측 HUD 패널은 **220pt 상한**이라 메타 줄에 ~194pt 가 남는다. 처음 쓴
+`● IDLE ⟨8 running⟩ · glm-5.3 · z.ai` 는 ~204pt 로 넘쳤고, 카운트는 `fixedSize`
+인데 detail 은 `truncationMode(.middle)` 이라 **넘친 만큼을 모델명이 냈다** —
+오래 가는 사실이 잠깐 있다 사라지는 사실에게 자리를 뺏기는 구조다.
+
+`+N` 으로 줄였다(~152pt). 임의 선택이 아니라 리포에 이미 있는 표기다: 테라리움이
+못 그리는 자식에 `+N` 을 쓰고, 그룹 헤더의 `×N` 은 **세션 수**라 의미가 안 겹친다.
+색(amber)과 툴팁은 유지했으므로 축약해도 의미는 남는다.
+
+자식이 **행으로는 여전히 안 나온다** — 팬아웃이 8개든 목록 길이는 그대로다.
+
 ### 5. claude-glm 은 새 agentType 이 아니라 provider 축이다
 
 `agentType` 은 **하네스 정체성**이다 — 같은 바이너리, 같은 훅 세트, 같은 transcript, 같은
@@ -118,6 +202,59 @@ vitest 3201 통과(신규 14), Android unit + compileDebugKotlin, macOS/iOS 아�
 
 ---
 
+## 2026-08-17 — ESP32 에 Kiro 를 그리다 (그리고 미러가 펌웨어보다 앞서 있었다)
+
+#216 이 남긴 마지막 조각. 보드 쪽 폴백 **극성은 옳았지만**(허용목록 + 중립 폴백) Kiro 는
+사실상 안 보였다 — ticker/pocket 은 회색 행, IPS10 HUD 는 글리프 대신 점, LED matrix 는
+`continue` 로 **행 자체가 없었고**, 수조엔 크리처가 없었다. 여섯 대 전부 실제 플릿에 있는
+표면이다(86box, ulanzi_tc001, ips_10, inkdeck, t_embed, t_display_pro).
+
+### 있던 것과 없던 것
+
+재료는 이미 있었다. `Theme::KiroMark = 0x7C3AED`, 수조용 `KIRO_A8` 64×64 알파 마스크,
+matrix 용 `OfficialDotGlyphs::KIRO` 8×8 도트 글리프, 라벨은 `agent_label.h` 가 이미
+"Kiro CLI"/"Kiro IDE" 로 반환하고 있었다. 없던 것은 **배선**뿐이다 — 8월 16일에 Kiro 관측을
+머지하면서 데몬이 Kiro 를 *보게* 만들었지만, 보드가 그걸 *그리게* 만들지는 않았다.
+
+- ticker / pocket `agentColor` → `Theme::KiroMark` (미지 에이전트는 여전히 `HUDDim`)
+- IPS10 `ips10AgentGlyph` → `glyphKiro` (`KIRO_A8` 를 A8 이미지 디스크립터로)
+- LED matrix → `AGENT_KIRO` 종류 + 도트 글리프 + processing/idle 색
+- 수조 → 새 크리처 `kiro.{h,cpp}`
+
+`kiro-cli` 와 `kiro-ide` 는 **한 크리처**로 합쳤다. 같은 에이전트를 두 프런트엔드로 보는
+것이고, 크리처를 나누면 아니라고 말하는 셈이다.
+
+크리처는 antigravity 의 형제다(둘 다 손으로 그린 몸이 아니라 알파 마스크 마크). 차이는
+둘: 그라디언트 대신 브랜드 색 하나로 채운다(Kiro 마크는 단색이고, 그라디언트를 지어내는 건
+남의 마크를 다시 그리는 것이다), 그리고 헤엄치는 대신 **떠다닌다** — 유령이니까. 레인은
+문어(0.32)와 OpenCode(0.63) 사이 0.46 으로 잡아 셋이 한 열에 겹치지 않게 했다.
+
+### 미러가 펌웨어보다 앞서 있었다
+
+`matrix_pages.cpp` 는 `MatrixTerminalPreviews.swift` 의 SYNC-HASH pinned origin 이다.
+핀이 깨져서 열어 보니 **미러엔 이미 Kiro 가 완비돼 있었다** — 마스크, processing 색,
+idle 색 전부. 포팅할 게 없었고, 반대로 펌웨어 색을 미러에 맞추는 작업이 됐다.
+
+거기서 하나 잡았다. 미러의 색은 **mid-pulse 표본**이지 base/range 가 아니다(antigravity 로
+교차 확인: 펌웨어 `70 + 140*pulse` → mid 140 = 미러 140). 그걸 그대로 base/range 로 옮기면
+Kiro 파랑이 `87 + 174 = 261` 로 **uint8 오버플로**해서 피크 펄스에서 색이 뒤집힌다. range 를
+168 로 깎아 mid 171(미러 174)·max 255 로 맞췄다.
+
+교훈: SYNC-HASH 는 "픽셀이 같은가"의 핀처럼 읽히지만 실제로 옮기는 것은 **파라미터**다.
+미러의 숫자가 렌더 결과의 표본일 때 역산은 안전하지 않고, 다른 크리처로 한 번 교차
+확인하는 것이 그 계측을 검증하는 방법이다.
+
+### 검증
+
+PlatformIO 11개 env 전부 컴파일 통과(led8x32 / ips10 / ips35 / amoled / box_86 /
+t_display_pro / t_embed / inkdeck / ttgo / esp32_c6_147 포함). vitest 3201,
+`check-preview-mirror-sync` 10 pin 전부 in sync.
+
+**시각 검증은 아직 안 했다.** 여섯 대가 전부 시리얼 연결이라(시리얼이 primary 면 보드가
+WS 를 내려놓는다) WiFi OTA 가 불가능하고, 시리얼 플래시는 데몬이 포트를 놓아야 한다.
+플래시 전까지 이 변경은 "컴파일되는 코드"이지 "보드에서 확인된 화면"이 아니다.
+
+---
 ## 2026-08-17 — Kiro 는 어디에 반영되었나: 표면별 실측과 세 가지 결함
 
 ### 계기

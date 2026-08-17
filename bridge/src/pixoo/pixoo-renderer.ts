@@ -995,6 +995,19 @@ function renderCompact32Frame(
     marks.push({ glyph: 'openClaw', state: routing ? 'processing' : 'idle' });
   }
   marks.sort((a, b) => priority(a.state) - priority(b.state));
+  // One slot per DISTINCT agent before any agent gets a second one.
+  //
+  // Three slots filled in priority order renders whatever the user happens to
+  // run most of — five Claude sessions took all three and Codex, Kiro and
+  // OpenClaw vanished from a 32x32 whose entire job is "which agents are
+  // live". Three identical marks carry strictly less information than three
+  // different ones, and the agent that disappears is always the one the user
+  // has fewest of, which is exactly the one worth reporting. Measured with the
+  // live session set (2026-08-18): kiro 0px before, visible after.
+  const seen = new Set<OfficialDotGlyphName>();
+  const distinct = marks.filter((m) => !seen.has(m.glyph) && seen.add(m.glyph));
+  const duplicates = marks.filter((m) => !distinct.includes(m));
+  marks.splice(0, marks.length, ...distinct, ...duplicates);
   marks.splice(3);
 
   const slots = marks.length === 1 ? [{ x: 16, y: 14, size: 18 }]
