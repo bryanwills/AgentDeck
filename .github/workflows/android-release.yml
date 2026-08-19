@@ -53,20 +53,14 @@ jobs:
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk "dist/agentdeck-v${{ steps.version.outputs.VERSION }}.apk"
 
+      - name: Render release notes
+        run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "AgentDeck Android v${{ steps.version.outputs.VERSION }}"
-          body: |
-            ## AgentDeck Android v${{ steps.version.outputs.VERSION }}
-
-            E-ink dashboard app for monitoring Claude Code sessions.
-
-            ### Install
-            1. Download `agentdeck-v${{ steps.version.outputs.VERSION }}.apk` below
-            2. Transfer to your Android device
-            3. Open the APK to install (enable "Install from unknown sources" if prompted)
-            4. Launch AgentDeck and scan the QR code from your bridge to pair
+          body_path: notes.md
           files: dist/agentdeck-v${{ steps.version.outputs.VERSION }}.apk
 
       # --- Google Play (optional) ---

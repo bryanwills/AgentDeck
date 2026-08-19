@@ -94,6 +94,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # This job publishes artifacts built elsewhere, but the release body is
+      # rendered from CHANGELOG.md, so it needs the repository too.
+      - uses: actions/checkout@v4
+
       - name: Extract version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#esp32-v}" >> "$GITHUB_OUTPUT"
@@ -117,10 +121,7 @@ jobs:
       - name: Render release notes
         run: |
           set -euo pipefail
-          VERSION='${{ steps.version.outputs.VERSION }}'
           {
-            echo "## AgentDeck ESP32 v$VERSION"
-            echo
             echo "Firmware for every board this repository builds. Each asset is named by"
             echo "the board's **canonical id** — the same string the firmware reports as"
             echo '`device_info.board` and the one `agentdeck esp32-ota <target>` takes, so'
@@ -154,7 +155,11 @@ jobs:
             echo "# or the application image alone; app0 starts at 0x10000 on every board here"
             echo "esptool.py --port PORT write_flash 0x10000 agentdeck-<board>.bin"
             echo '```'
-          } > notes.md
+          } > firmware-detail.md
+          # The board table is rendered from the artifacts that actually built,
+          # so it cannot be a checked-in template — it is passed in as the tail
+          # that follows this version's CHANGELOG section.
+          node scripts/release-notes.mjs "$GITHUB_REF_NAME" --template firmware-detail.md > notes.md
           cat notes.md
 
       - name: Create GitHub Release

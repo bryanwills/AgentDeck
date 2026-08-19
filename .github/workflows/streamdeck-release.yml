@@ -43,25 +43,14 @@ jobs:
       - name: Package plugin
         run: pnpm package
 
+      - name: Render release notes
+        run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "AgentDeck Stream Deck v${{ steps.version.outputs.VERSION }}"
-          body: |
-            ## AgentDeck Stream Deck v${{ steps.version.outputs.VERSION }}
-
-            Stream Deck+ plugin — session-per-button keypad, encoder dials, and
-            live touch-strip timeline for Claude Code, Codex, OpenCode, and OpenClaw.
-
-            Distributed through the **Elgato Marketplace**; the `.streamDeckPlugin`
-            below is the same artifact submitted there, for manual installation.
-
-            ### Install
-            1. Download `bound.serendipity.agentdeck.streamDeckPlugin` below
-            2. Double-click it — the Stream Deck app installs the plugin
-            3. Start a Claude Code / Codex / OpenCode session; sessions appear automatically
-
-            Requires the Stream Deck app 6.9+ and AgentDeck running on the same machine.
+          body_path: notes.md
           files: dist/bound.serendipity.agentdeck.streamDeckPlugin
 
       - name: Upload packaged plugin artifact

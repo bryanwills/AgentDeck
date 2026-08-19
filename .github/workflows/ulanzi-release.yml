@@ -46,26 +46,14 @@ jobs:
       - name: Package plugin
         run: pnpm --filter @agentdeck/plugin-ulanzi package
 
+      - name: Render release notes
+        run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "AgentDeck Ulanzi v${{ steps.version.outputs.VERSION }}"
-          body: |
-            ## AgentDeck Ulanzi v${{ steps.version.outputs.VERSION }}
-
-            Ulanzi Studio plugin for the D200H Deck Dock — one dynamic action
-            whose keys reflow by agent state (sessions, options, mode, stop, usage).
-
-            Distributed through the **Ulanzi Marketplace**; the archive below is
-            the same artifact submitted there, for manual installation.
-
-            ### Install
-            1. Download `com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin.zip` below
-            2. Unzip and move `com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin` into
-               Ulanzi Studio's `Plugins` directory
-            3. Restart Ulanzi Studio and drag the **AgentDeck** action onto your keys
-
-            Requires Ulanzi Studio 2.1.4+ and AgentDeck running on the same machine.
+          body_path: notes.md
           files: dist/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin.zip
 
       - name: Upload packaged plugin artifact

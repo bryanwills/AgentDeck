@@ -268,22 +268,21 @@ jobs:
     needs: [build-ios, build-macos]
     runs-on: ubuntu-latest
     steps:
+      # This job builds nothing, but the release body is rendered from
+      # CHANGELOG.md by scripts/release-notes.mjs, so it needs the repository.
+      - uses: actions/checkout@v4
+
       # github.ref_name is the full tag (apple-v1.0.0); strip the channel prefix
       # so the release reads "AgentDeck Apple v1.0.0", not "…vapple-v1.0.0".
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#apple-v}" >> "$GITHUB_OUTPUT"
 
+      - name: Render release notes
+        run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: 'AgentDeck Apple v${{ steps.version.outputs.version }}'
-          body: |
-            ## AgentDeck Apple v${{ steps.version.outputs.version }}
-
-            Universal dashboard app for monitoring coding agent sessions.
-
-            ### Install via TestFlight
-            1. Open **TestFlight** on your iPhone/iPad/Mac
-            2. Accept the invite or check for available builds
-            3. Install **AgentDeck Dashboard**
+          body_path: notes.md

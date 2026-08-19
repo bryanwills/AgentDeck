@@ -7,7 +7,163 @@ repository baseline, not a patch ceiling: any numeric `A.B.C` and `A.B.D` are
 mutually compatible. `pnpm verify-version` gates the shared `A.B` line and
 target-internal version consistency. See [RELEASING.md](RELEASING.md).
 
-## 1.0.9
+**This file is the source of every GitHub Release body.** `scripts/release-notes.mjs`
+looks up a delivery tag here and renders the release page from what it finds;
+`pnpm verify-release-version` refuses a tag with no entry. So a heading has to
+name its channel: the channels no longer share a patch number — npm is at
+1.0.21 while Apple is at 1.0.7 — and a bare `## 1.0.7` is ambiguous the moment a
+second channel reaches it. Write `## <YYYY-MM-DD> — <Channel> <version>`, and
+list every channel in the heading when one round is cut across several.
+
+Entries below `## 2026-08-07 — npm 1.0.8` predate that rule and are kept as
+written, under the shared numbering of the time. They are not looked up by tag.
+
+### Known gaps
+
+These versions shipped without an entry and are not reconstructed here, because
+inventing a changelog after the fact states things nobody measured:
+`npm 1.0.9`–`1.0.18`, `apple 1.0.4`–`1.0.6`, `android 1.0.5`–`1.0.8`,
+`streamdeck 1.0.4`–`1.0.5`, `esp32 1.0.2`–`1.0.4`, `ulanzi 1.0.2`.
+Their content is recoverable from the commit range between their tags.
+
+## 2026-08-18 — npm 1.0.21 · Apple 1.0.7 · Android 1.0.10 · Stream Deck 1.0.6 · ESP32 1.0.5
+
+One round, cut across five channels from the same commit, so the entries are
+grouped by what they change rather than by which artifact carries them.
+
+### Kiro observation
+
+- Observe Kiro sessions without being asked to manage them. Users run native
+  `kiro-cli` or the Kiro IDE as usual and the daemon correlates the process with
+  Kiro's own stores — the v2 app-data SQLite, or the v3 `sessions/` JSON plus
+  `messages.jsonl` — read through a query-only handle that never touches auth or
+  telemetry tables ([#198](https://github.com/puritysb/AgentDeck/pull/198),
+  [#202](https://github.com/puritysb/AgentDeck/pull/202))
+- Fill the Kiro timeline from Kiro's own transcript, because nothing else ever
+  will. Kiro's global standalone hooks load and then fire for no CLI chat turn
+  at all (measured on kiro-cli 2.18.1: a live turn produced zero hook markers
+  while a hand-POSTed hook produced a timeline row normally), so both daemons
+  poll the transcript instead. Two consequences are by design: a Kiro session
+  appears seconds late rather than instantly, and it always reads `idle` —
+  a transcript gains its assistant record only once the reply has landed, and
+  claiming `processing` would be inventing a state
+  ([#218](https://github.com/puritysb/AgentDeck/pull/218))
+- Draw Kiro as Kiro, or as nothing — never as Claude. The surfaces that bucketed
+  agents with a deny-list dressed every agent they predated as the bucket's
+  owner, so Kiro sessions swam as Claude octopuses and took Claude's glyph and
+  OpenCode's palette. Those buckets are allow-lists now, pinned by tests on the
+  polarity rather than on the membership, so a future agent renders as neutral
+  instead of as somebody else
+  ([#216](https://github.com/puritysb/AgentDeck/pull/216))
+- Give Kiro its name, mark, colour and terrarium creature across the dashboard,
+  the decks and the ESP32 boards
+  ([#205](https://github.com/puritysb/AgentDeck/pull/205),
+  [#206](https://github.com/puritysb/AgentDeck/pull/206),
+  [#217](https://github.com/puritysb/AgentDeck/pull/217))
+- Capture Kiro's spoken reply instead of its redacted `Reasoning` placeholder,
+  and keep the subject in a tool label rather than just the tool name
+  ([#200](https://github.com/puritysb/AgentDeck/pull/200),
+  [#204](https://github.com/puritysb/AgentDeck/pull/204))
+- Count one Kiro chat as one session, tell an unreadable transcript apart from
+  one nobody has typed into, and read the store from the sandboxed macOS app too
+  — through a user-granted directory bookmark in Settings → Integrations, so
+  with no grant it observes nothing rather than guessing
+  ([#202](https://github.com/puritysb/AgentDeck/pull/202),
+  [#207](https://github.com/puritysb/AgentDeck/pull/207),
+  [#220](https://github.com/puritysb/AgentDeck/pull/220))
+- Add `agentdeck diag kiro [--json]`, a daemon-free probe that is safe to paste
+  into an issue: content-free, with report-scoped opaque keys for cwd and
+  session identity ([#198](https://github.com/puritysb/AgentDeck/pull/198))
+
+### Sessions, turns and subagents
+
+- Count subagents at the hook and report them as `SessionInfo.subagents`
+  (`active` / `peak` / `completed`). A parent whose turn closed is genuinely
+  idle while its children work, so this is a second axis beside `state`, not a
+  correction to it. Deriving it from timeline rows read near zero in exactly the
+  fan-outs it describes — siblings of one workflow emit byte-identical rows in
+  the same millisecond and were deduped to one, and eviction shed the dispatch
+  row first. Measured on a real workflow session: 72 completions, peak 8
+  concurrent, and zero surviving dispatch rows
+  ([#219](https://github.com/puritysb/AgentDeck/pull/219))
+- Say which company answered, without calling it a different agent. A Claude
+  Code session pointed at another provider's endpoint is still Claude Code —
+  same binary, hooks and transcript — so it keeps its `agentType`, and the fact
+  that its weights came from somewhere else rides a separate signal that is set
+  only when both sides are known and disagree
+  ([#219](https://github.com/puritysb/AgentDeck/pull/219))
+- Recover turns whose Stop hook never arrived, in observed sessions as well as
+  managed ones — the previous release wired the watchdog only to PTY bridges,
+  which covered none of the real traffic. Recovery re-enters the real Stop path
+  rather than reimplementing it
+  ([#194](https://github.com/puritysb/AgentDeck/pull/194))
+- Tell a turn that never owed a Stop apart from one that lost it. A user cancel
+  emits no hook at all, so counting it as a dropped Stop inflated the loss
+  ratio with events that were never due; ESC cancels are now their own bucket
+  and stay out of that ratio, detected both while the marker is still the
+  transcript tail and on the commoner cancel-then-retype shape
+  ([#195](https://github.com/puritysb/AgentDeck/pull/195),
+  [#213](https://github.com/puritysb/AgentDeck/pull/213))
+
+### Daemon
+
+- Ask which user owns a daemon before adopting its token or shutting it down. On
+  a shared host every same-machine privilege reached every account on the box:
+  starting a CLI daemon shut down every colleague's macOS app, and a port scan
+  registered one user's sessions with whoever answered first. Ownership is now a
+  three-valued question answered at the point a peer is discovered; unproven
+  ownership stays permissive, because refusing there is what breaks a whole
+  paired fleet's authentication ([#215](https://github.com/puritysb/AgentDeck/pull/215))
+- Give the CLI daemon a preferred port and make it wait for that port. A daemon
+  bumped to a fallback had no record of the port it wanted, so a 14-second
+  kernel hold on 9120 became permanent until someone restarted it by hand. The
+  intent is persisted and only the user writes it (`agentdeck daemon port <n>`);
+  the outcome never is, since recording the fallback would make it preferred
+  forever after ([#212](https://github.com/puritysb/AgentDeck/pull/212))
+- Make the daemon port window overridable, so a throwaway daemon can exist
+  alongside the real one ([#211](https://github.com/puritysb/AgentDeck/pull/211))
+- Surface the network posture in the macOS app as Settings toggles, matching the
+  CLI's two axes, and tighten loopback mode's ADB reverse to USB transports
+  only — a cable-carried tunnel terminates on the host's own loopback, but a
+  wireless-debugging transport would carry it over the LAN
+  ([#203](https://github.com/puritysb/AgentDeck/pull/203))
+- Generate the Swift daemon's state-transition table from the shared TypeScript
+  source. A row present in one daemon and absent in the other is a session that
+  wedges on one platform and recovers on the other, with nothing in either log
+  saying why ([#196](https://github.com/puritysb/AgentDeck/pull/196))
+
+### OpenClaw
+
+- Make an OpenClaw approval something the user can read and answer, rather than
+  a prompt that renders without its question
+  ([#214](https://github.com/puritysb/AgentDeck/pull/214))
+- Say why an OpenClaw turn failed, and let the failed turn close its task
+  instead of leaving it open — an open task is never judged
+  ([#209](https://github.com/puritysb/AgentDeck/pull/209))
+
+### macOS app — Apple 1.0.7
+
+- Hide the Dock icon while no AgentDeck window is open, so a menu-bar-only user
+  gets a menu-bar-only app. The rule is an allow-list of scene ids rather than a
+  window count: `NSApp.windows` also holds the menu-bar panel and AppKit
+  internals, so a count never reaches zero and the rule silently never fires
+  ([#222](https://github.com/puritysb/AgentDeck/pull/222))
+
+### Stream Deck plugin — 1.0.6
+
+- Show up to four usage keys on 15-key and larger devices (Claude 5h and 7d,
+  Fable, Codex 7d) instead of stopping at the first two
+  ([#225](https://github.com/puritysb/AgentDeck/pull/225))
+
+### Devices — ESP32 1.0.5
+
+- Carry Kiro's colour, glyph and creature onto the boards
+  ([#217](https://github.com/puritysb/AgentDeck/pull/217))
+- Clamp Pixoo creatures above the active Usage HUD rows, so idle sprites stay
+  visible instead of being drawn under the gauges
+  ([#225](https://github.com/puritysb/AgentDeck/pull/225))
+
+## 2026-08-15 — Android 1.0.9
 
 ### Android dashboard
 
@@ -20,7 +176,7 @@ target-internal version consistency. See [RELEASING.md](RELEASING.md).
   rejected
 - Keep the 1.0.8 e-ink usage-limit clipping fix in the Play release
 
-## 1.0.20
+## 2026-08-14 — npm 1.0.20
 
 ### CLI and daemon — npm
 
@@ -57,7 +213,7 @@ of these was not called out in the 1.0.19 notes.
   field instead of a hardcoded literal, and align the remaining
   architecture docs (protocol, APME pipeline) with the hook-primary design
 
-## 1.0.19
+## 2026-08-13 — npm 1.0.19
 
 ### CLI and daemon — npm
 
@@ -77,7 +233,28 @@ of these was not called out in the 1.0.19 notes.
   explicitly disabling Codex hooks leaves managed terminal UI observation but
   not lifecycle timelines
 
-## 1.0.8
+## 2026-08-10 — Ulanzi 1.0.3
+
+Backfilled after the fact from the `ulanzi-v1.0.2..ulanzi-v1.0.3` commit range,
+so it lists only changes that provably touched `plugin-ulanzi/`.
+
+- Ship the setup tutorial the Ulanzi review asked for, built on their SDK's own
+  rails rather than a hand-rolled panel, with `en` / `ko_KR` / `ja_JP` copy
+  ([#157](https://github.com/puritysb/AgentDeck/pull/157))
+- Let the D200H animate, and give every key its own phase. Motion is baked into
+  a looping GIF — Ulanzi Studio plays and loops it on the device, so a
+  transition costs one push and steady-state motion costs nothing — which means
+  every animated value has to return to its start on the same frame or the tile
+  jumps once per loop. The phase rotation has one definition, because deriving
+  it separately for "collect the frames" and "is this tile still current?" made
+  every phase-shifted key read as permanently stale, so its encode was cancelled
+  and requeued forever and the only symptom was that nothing animated
+- Make the D200H voice key actually work — two bugs, both measured
+  ([#158](https://github.com/puritysb/AgentDeck/pull/158))
+- Measure what the D200H push path actually admits, and keep the plugin inside
+  it rather than guessing at the limit
+
+## 2026-08-07 — npm 1.0.8
 
 ### Setup — npm
 
@@ -89,7 +266,7 @@ of these was not called out in the 1.0.19 notes.
   install and run without one, and sessions appear as soon as an agent does.
   The check now warns and points at the install commands instead of failing
 
-## 1.0.7
+## 2026-08-06 — 1.0.7
 
 ### Answering an agent's question from a device
 
@@ -179,7 +356,7 @@ of these was not called out in the 1.0.19 notes.
   no consumer nothing caught it claiming `judge.backend: mlx` while the code
   defaults to Foundation Models
 
-## 1.0.6
+## 2026-08-05 — npm 1.0.6
 
 ### CLI and daemon — npm
 
@@ -194,7 +371,7 @@ of these was not called out in the 1.0.19 notes.
 `1.0.5` shipped push-to-talk as a feature while that chain was still broken;
 this is the patch that makes it work, so prefer it over `1.0.5`.
 
-## 1.0.5
+## 2026-08-05 — 1.0.5
 
 ### Android dashboard
 
@@ -256,7 +433,7 @@ this is the patch that makes it work, so prefer it over `1.0.5`.
   ([#113](https://github.com/puritysb/AgentDeck/pull/113))
 - Show subagent work as activity rather than as separate sessions
 
-## 1.0.4
+## 2026-07-30 — 1.0.4
 
 ### Stream Deck plugin
 
@@ -300,7 +477,7 @@ this is the patch that makes it work, so prefer it over `1.0.5`.
   `agentdeck ble setup` guidance instead of crashing on a missing Python
   executable or silently disabling daemon sync
 
-## 1.0.3
+## 2026-07-29 — 1.0.3
 
 ### macOS and iPhone/iPad — App Store
 
@@ -347,7 +524,7 @@ this is the patch that makes it work, so prefer it over `1.0.5`.
 - Pair subagent start/completion rows per parent session and expire orphaned
   activity so stale satellites do not remain on the dashboard
 
-## 1.0.2
+## 2026-07-22 — 1.0.2
 
 ### Ulanzi plugin — D200H
 
@@ -406,7 +583,7 @@ this is the patch that makes it work, so prefer it over `1.0.5`.
   no longer occupies a button-shaped surface in idle, processing, or awaiting
   states
 
-## 1.0.1
+## 2026-07-22 — 1.0.1
 
 Maintenance release across independently delivered channels — reliability fixes
 that landed after the 1.0.0 build (03ed5a94) went to the App Store. Channels ship
@@ -443,7 +620,7 @@ on their own schedules; the iOS companion carries its fix on a later train while
 
 - Hold the screen awake while the paired Mac's display is on
 
-## 1.0.0
+## 2026-07-20 — 1.0.0
 
 First public release. Previous 0.x versions were development and TestFlight-only builds.
 

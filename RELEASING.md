@@ -92,9 +92,22 @@ Tag prefixes remain because channels ship independently and may point to differe
 1. Choose the next SemVer for the target, preserving the shared `major.minor` compatibility line.
 2. Update that target's internal mirrors. Do not bump unrelated targets merely to align patch values.
 3. Increment Apple `CURRENT_PROJECT_VERSION` or Android `versionCode` only when releasing that target.
-4. Update user-facing release notes and the delivery table in `README.md`.
+4. **Write the `CHANGELOG.md` entry, and the delivery table in `README.md`.** The
+   changelog is not a courtesy copy — `scripts/release-notes.mjs` renders the
+   GitHub Release body from it, so an unwritten entry is a release page with an
+   install blurb where its notes should be. Heading format is
+   `## <YYYY-MM-DD> — <Channel> <version>`; list every channel in one heading
+   when a round is cut across several, which is what a simultaneous cut is.
+   Verify before tagging: `pnpm verify-release-version <target> <X.Y.Z>`.
 5. Run `pnpm verify-version`, `pnpm build`, and the relevant platform workflows.
 6. Commit the synchronized release state. Create only the channel tags that are actually being delivered, using the exact target version.
+
+Step 4 used to say "update user-facing release notes" and was skipped without
+consequence, because every workflow hardcoded its release body: the 2026-08-18
+round shipped a whole new observed agent across five channels with no line about
+it anywhere a user could read. Each release workflow now fails at its
+`verify-release-version` step when the entry is missing — before anything is
+built, published, or tagged.
 
 ## Channel release steps
 
