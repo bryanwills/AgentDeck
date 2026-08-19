@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: stable
 owner: Bridge maintainers
-reviewed: 2026-07-21
-revision: 2026-07-21
+reviewed: 2026-08-19
+revision: 2026-08-19
 source_of_truth: docs/protocol.md
 validators: [pnpm generate-protocol, pnpm test]
 ---
@@ -168,7 +168,38 @@ Communication between the daemon (port 9120) and all dashboard clients (Plugin, 
 
 // Active sessions list (multi-session + sibling state)
 { type: 'sessions_list', sessions: [{ id: 'abc', project: 'MyApp', state: 'idle' }] }
+```
 
+#### `SessionInfo` — the axes that are easy to conflate
+
+`SessionInfo` is the row every deck, dashboard and board renders. Several of its
+fields describe things that look like one fact and are not; the canonical
+definitions and their reasoning live in `shared/src/protocol.ts`.
+
+| Field | What it answers | What it is *not* |
+|---|---|---|
+| `state` | What this session's own turn is doing | Not "is any work happening" — see `subagents` |
+| `subagents` | `{ active, peak, completed }` child census | Not derived from timeline rows; those are deduped and evicted, so a derived count reads zero in exactly the fan-out it describes |
+| `agentType` | Which CLI/app drives the session (hook set, transcript format, creature) | Not which model, and not whose endpoint served it |
+| `modelName` | Which weights answered | Not which company's endpoint they came from |
+| `weight` | Explicit deck/tab sort override, `SESSION_WEIGHT_MIN..MAX`, default 0 | Not a priority the daemon computes |
+| `liveAnswerable` | Whether the daemon can actually deliver an answer to this session right now | Not "is a question pending" — that is `question` |
+
+Two rules apply to all of them, and both have caused shipped bugs:
+
+- **A parent whose turn closed is genuinely `idle` while its children run.**
+  `subagents` is a second axis beside `state`, not a correction to it.
+- **An absent key means "no information", never "false" or "zero".** Clients
+  merge retain-on-absent, so a field emitted only when non-empty latches one
+  way and can never be retracted. `subagents` is therefore emitted with explicit
+  zeros once a session has ever had a child.
+
+Whether a session's harness and its endpoint disagree — a Claude Code session
+answered by a third party — is derived from `agentType` + `modelName` at the
+consumer through `shared/src/model-provider.ts`, and is non-null only when both
+sides are known and they differ. Two unknowns must never combine into a claim.
+
+```typescript
 // --- Multi-surface events (Android Deck mirroring) ---
 
 // Encoder LCD state (4 encoder panels: utility/action/terminal/voice)

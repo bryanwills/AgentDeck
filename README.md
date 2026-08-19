@@ -93,13 +93,15 @@ useful to you.
 
 ```bash
 agentdeck daemon install   # installs/refreshes hooks and starts the daemon
-claude                     # or: codex · opencode
+claude                     # or: codex · opencode · kiro-cli
 ```
 
 AgentDeck observes normal agent commands through lifecycle hooks and native event
 channels. `agentdeck claude`, `agentdeck codex`, and `agentdeck opencode` remain
 available when you specifically want a managed terminal, session weights, or
 cross-machine remote attach; they are not required for ordinary local monitoring.
+Kiro has no managed form at all — see [Agents](#agents) for why, and for what its
+sessions do and do not report.
 
 Running agents on **several machines** with one deck on a main node? Sessions can
 attach to the main node's daemon. `--remote-daemon` is the opt-in switch — without
@@ -185,22 +187,40 @@ Full build-from-source and manual steps: **[docs/install.md](docs/install.md)**.
 - **Switch modes** — cycle Plan / Accept Edits / Default
 - **Quick actions** — GO ON / REVIEW / COMMIT / CLEAR, plus custom prompt templates
 - **Usage gauges** — subscription quota with reset countdowns
+- **Subagent count** — how many children a session has running, beside its own state
 - **Voice** — push-to-talk and wake word, on-device via Apple SFSpeech, no model download
 - **Display sync** — host sleep dims every surface; wake restores them
 
 ### Agents
 
-| Agent | Status |
-|---|---|
-| **Claude Code** | Supported (primary) |
-| **Codex CLI** | Supported |
-| **OpenCode** | Supported |
-| **OpenClaw** | Experimental |
+| Agent | Status | How its state is read |
+|---|---|---|
+| **Claude Code** | Supported (primary) | Lifecycle hooks |
+| **Codex CLI** | Supported | Lifecycle hooks + rollout JSONL |
+| **OpenCode** | Supported | Observer plugin (SSE) |
+| **Kiro** | Observed | Kiro's own transcript, polled |
+| **OpenClaw** | Experimental | Gateway |
 
 State comes from agent-native lifecycle and event channels — hooks for Claude Code
 and Codex, OpenCode SSE, and the OpenClaw Gateway — rather than terminal-screen
 scraping. CLI-managed sessions retain an optional terminal UI observer only for
 real mode/diff/option affordances that those lifecycle payloads do not expose.
+
+**Kiro is observed, never managed.** Run `kiro-cli` or the Kiro IDE exactly as
+usual; there is no `agentdeck kiro` command, because Kiro's hook surface does not
+fire for a CLI chat turn — its global standalone hooks load and then produce
+nothing for a real turn. AgentDeck reads Kiro's own transcript instead, which
+sets two honest expectations: a Kiro session shows up seconds late rather than
+instantly, and it reads `idle` rather than `processing`, because a transcript
+only gains its assistant record once the reply has landed. On the sandboxed
+macOS app it needs a one-time folder grant in Settings → Integrations → Kiro CLI;
+without one it observes nothing rather than guessing.
+
+**Whose model answered is a separate question from which agent it is.** A Claude
+Code session pointed at a third-party endpoint is still Claude Code — same
+binary, same hooks — so it keeps its agent identity and the surfaces mark the
+provider separately, only when the harness and the endpoint are both known and
+disagree.
 
 ### How it fits together
 

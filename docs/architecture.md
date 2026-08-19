@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: stable
 owner: Bridge maintainers
-reviewed: 2026-07-21
-revision: 2026-07-21
+reviewed: 2026-08-19
+revision: 2026-08-19
 source_of_truth: docs/architecture.md
 validators: [pnpm build, pnpm test]
 ---
@@ -75,7 +75,7 @@ Regression tests: `HTTPServerMainThreadStallTests` (transport must accept while 
 
 ## AgentAdapter abstraction (Phase 1-2 complete)
 
-- `shared/src/adapter.ts` — `AgentAdapter` interface, `AgentCapabilities`, `AdapterEvent` types, and the canonical `AgentType` union (`claude-code`, `openclaw`, `codex-cli`, `codex-app`, `opencode`, `antigravity`, `monitor`)
+- `shared/src/adapter.ts` — `AgentAdapter` interface, `AgentCapabilities`, `AdapterEvent` types, and the canonical `AgentType` union (`claude-code`, `openclaw`, `codex-cli`, `codex-app`, `opencode`, `antigravity`, `kiro-cli`, `kiro-ide`, `monitor`). Kiro's two members have no adapter — they are [passively observed](#passive-observation-no-adapter-no-pty)
 - `bridge/src/adapters/pty-adapter.ts` — `PtyAdapter` abstract base (PtyManager + HookServer + common start/command handling)
 - `bridge/src/adapters/claude-code.ts` — `ClaudeCodeAdapter extends PtyAdapter` (hook-owned lifecycle + terminal UI observer + Shift+Tab mode switch)
 - `bridge/src/adapters/monitor.ts` — `MonitorAdapter` (hook-only, no PTY, `isAlive()` always true)
@@ -97,6 +97,54 @@ Regression tests: `HTTPServerMainThreadStallTests` (transport must accept while 
 - Events: `connect.challenge`, `health`, `sessions.changed`, `session.message`, `session.tool`, `chat` (delta/final/aborted/error), `exec.approval.requested/resolved`, `presence`, `tick`, `shutdown`
 - Session tracking via `sessionKey` from `sessions.list` / `chat` events
 - Default port 18789, auto-reconnect with exponential backoff; auth failures (`pairing_required`/`token_mismatch`/`device_auth_invalid`) surface to UI instead of looping. See [docs/gateway-protocol.md](gateway-protocol.md) for wire format.
+
+## Passive observation (no adapter, no PTY)
+
+Not every agent enters through an adapter. Three tiers exist, and which one an
+agent lands in is decided by what that agent will actually tell us — not by
+preference.
+
+1. **Managed PTY** — `agentdeck <agent>`. AgentDeck owns the terminal.
+2. **Hook-observed** — the user runs `claude` / `codex` / `opencode` normally and
+   AgentDeck-installed lifecycle hooks POST to the daemon. This is the default
+   and covers the great majority of real traffic.
+3. **Transcript-observed** — the agent has no usable hook surface, so the daemon
+   correlates its process with the agent's own on-disk store and polls it.
+
+**Kiro is tier 3 on both of its versions**, and that is a measurement, not a
+default. Kiro CLI 2.13+ accepts global `~/.kiro/hooks/*.json` and AgentDeck can
+install a telemetry-only file there — but installing it buys nothing for CLI
+chat: measured on kiro-cli 2.18.1, Kiro logs the hooks as loaded and a real
+`kiro-cli chat` turn then fires none of them (each hook was instrumented with a
+marker file; a live turn produced zero markers, while a hand-POSTed hook
+produced a timeline row normally, so the receiving side was never in question).
+That surface belongs to the Kiro IDE agent.
+
+- Node: `bridge/src/kiro-session.ts`, `bridge/src/passive-observer.ts`,
+  `bridge/src/kiro-transcript-timeline.ts`, `bridge/src/kiro-timeline-feed.ts`
+- Swift: `LocalKiroObserver`, `KiroTimelineFeed`
+- Stores: v2 uses the macOS app-data `kiro-cli/data.sqlite3` (`conversations_v2`),
+  read through a read-only/query-only handle that never touches auth or
+  telemetry tables; v3 writes `KIRO_HOME/sessions/<workspace-hash>/<session>/`
+  with `session.json` + `messages.jsonl`
+- Sandbox: the App Store app reaches `~/.kiro` only through a user-granted
+  security-scoped bookmark (Settings → Integrations → Kiro CLI). With no grant
+  it observes nothing rather than guessing
+- Probe: `agentdeck diag kiro [--json]` — daemon-free, content-free, safe to
+  paste into an issue
+
+Two properties follow from polling rather than being pushed, and both are
+intended behaviour that surfaces must not paper over: a Kiro session **appears
+seconds late** (`SCAN_INTERVAL_MS`), and it is **always reported `idle`**,
+because a transcript gains its assistant record only once the reply has landed
+and reporting `processing` would be inventing a state.
+
+**Rendering rule for any agent a surface predates.** Every surface's agent
+handling is an allow-list, never a deny-list. A bucket spelled as "not these
+known agents" dresses a future agent as the bucket's owner, which is a *wrong*
+view rather than a degraded one — that is how Kiro sessions rendered as Claude
+octopuses with Claude's glyph and OpenCode's palette. Gates pin the polarity,
+not the membership, so adding a real agent needs no test edit.
 
 ## Plugin connection (daemon-only single path)
 
