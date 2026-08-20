@@ -268,3 +268,51 @@ export function terminateSyncChild(proc: ChildProcess, timeoutMs = 3_000): Promi
     }
   });
 }
+
+/** Consecutive SIGABRT exits before the respawn loop halts for this daemon run. */
+export const SIGABRT_HALT_THRESHOLD = 3;
+
+export interface SigabrtCircuitBreaker {
+  /**
+   * Record an exit. Returns a halt message once the consecutive-SIGABRT streak
+   * reaches the threshold (and keeps returning it for any further exits) —
+   * the caller must stop respawning and surface the message. Any exit that is
+   * not a SIGABRT resets the streak.
+   */
+  noteExit(signal: NodeJS.Signals | null): string | null;
+}
+
+/**
+ * Halts the respawn loop when the sync child is being *killed at startup*
+ * rather than failing on its own.
+ *
+ * On macOS a SIGABRT seconds after spawn is TCC: the Python client touched
+ * CoreBluetooth, the responsible process (whatever launched the daemon — its
+ * Bluetooth grant is pinned to an exact binary path, so a `brew upgrade` or a
+ * Claude Code auto-update silently revokes it) has no Bluetooth authorization,
+ * and an unbundled interpreter has no usage description to prompt with, so
+ * macOS kills it outright. Respawning re-rolls that kill every backoff period
+ * — 60+ crash dialogs and diagnostic reports a day (measured 2026-08-20) for a
+ * loop that can never succeed until the user grants the permission. A clean
+ * exit ("device not found") resets the streak, so a healthy scan loop against
+ * a powered-off panel never trips this.
+ */
+export function createSigabrtCircuitBreaker(
+  what: string,
+  threshold = SIGABRT_HALT_THRESHOLD,
+): SigabrtCircuitBreaker {
+  let streak = 0;
+  return {
+    noteExit(signal: NodeJS.Signals | null): string | null {
+      streak = signal === 'SIGABRT' ? streak + 1 : 0;
+      if (streak < threshold) return null;
+      const cause = process.platform === 'darwin'
+        ? 'macOS killed it before it could start — usually Bluetooth privacy (TCC): grant Bluetooth to the app or binary that launches the daemon in System Settings → Privacy & Security → Bluetooth'
+        : 'the interpreter aborted before it could start';
+      return (
+        `${what} was killed ${streak}× in a row (SIGABRT); ${cause}. ` +
+        `Halting respawns; \`agentdeck daemon restart\` re-arms this device.`
+      );
+    },
+  };
+}

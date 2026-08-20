@@ -8,7 +8,7 @@
  */
 
 import { spawnSync, type SpawnSyncOptions } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -39,6 +39,8 @@ export interface BleRuntimeOptions {
   packageRoot?: string;
   dataDir?: string;
   platform?: NodeJS.Platform;
+  /** Host CPU architecture (`process.arch` shape: 'arm64', 'x64', ...). */
+  hostArch?: string;
   env?: NodeJS.ProcessEnv;
   log?: (message: string) => void;
   run?: BleCommandRunner;
@@ -105,6 +107,64 @@ export function resolveBleRuntimePaths(options: BleRuntimeOptions = {}): BleRunt
   };
 }
 
+// CPU types from <mach/machine.h>, CPU_ARCH_ABI64-tagged.
+const CPU_TYPE_X86_64 = 0x01000007;
+const CPU_TYPE_ARM64 = 0x0100000c;
+
+/**
+ * Best-effort Mach-O CPU-type probe (thin and fat headers). Returns null when
+ * the file is unreadable or not recognizably Mach-O — never a claim.
+ */
+function machOCpuTypes(path: string): number[] | null {
+  let buf: Buffer;
+  try {
+    buf = readFileSync(path); // follows the venv's bin/python symlink chain
+  } catch {
+    return null;
+  }
+  if (buf.length < 8) return null;
+  const magicLE = buf.readUInt32LE(0);
+  if (magicLE === 0xfeedfacf || magicLE === 0xfeedface) return [buf.readUInt32LE(4)];
+  const magicBE = buf.readUInt32BE(0);
+  if (magicBE === 0xcafebabe || magicBE === 0xcafebabf) {
+    // Fat headers are big-endian. Java class files share FAT_MAGIC; their
+    // version field lands where nfat_arch does and is always > 32, so the
+    // bound doubles as the disambiguator.
+    const count = buf.readUInt32BE(4);
+    if (count === 0 || count > 32) return null;
+    const entrySize = magicBE === 0xcafebabf ? 32 : 20;
+    const types: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const off = 8 + i * entrySize;
+      if (off + 4 > buf.length) return null;
+      types.push(buf.readUInt32BE(off));
+    }
+    return types;
+  }
+  return null;
+}
+
+/**
+ * Non-null when `python` is an x86_64-only interpreter on an arm64 Mac — a
+ * Rosetta leftover (e.g. a venv created by an Intel-Homebrew python that
+ * survived a machine migration). It imports everything fine under Rosetta, so
+ * a dependency probe cannot catch it; only the binary itself says. Such an
+ * environment must be rebuilt, not used: every BLE client it runs is a
+ * translated process, and its native wheels are the wrong architecture for
+ * any native interpreter that replaces it.
+ */
+function rosettaInterpreterReason(
+  python: string,
+  platform: NodeJS.Platform,
+  hostArch: string,
+): string | null {
+  if (platform !== 'darwin' || hostArch !== 'arm64') return null;
+  const types = machOCpuTypes(python);
+  if (!types || types.includes(CPU_TYPE_ARM64)) return null;
+  if (!types.includes(CPU_TYPE_X86_64)) return null; // unknown arch — no claim
+  return `${python} is an x86_64 (Rosetta) Python on this arm64 Mac`;
+}
+
 function packagedAssetsMissing(paths: BleRuntimePaths): string[] {
   return [paths.requirements, ...Object.values(paths.scripts)].filter((path) => !existsSync(path));
 }
@@ -129,6 +189,8 @@ function readyMarkerMatches(paths: BleRuntimePaths): boolean {
  */
 export function getBleRuntimeStatus(options: BleRuntimeOptions = {}): BleRuntimeStatus {
   const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const hostArch = options.hostArch ?? process.arch;
   const paths = resolveBleRuntimePaths(options);
   const missing = packagedAssetsMissing(paths);
   if (missing.length > 0) {
@@ -147,13 +209,17 @@ export function getBleRuntimeStatus(options: BleRuntimeOptions = {}): BleRuntime
   }
 
   if (existsSync(paths.venvPython) && readyMarkerMatches(paths)) {
-    return { ready: true, python: paths.venvPython, paths };
+    const rosetta = rosettaInterpreterReason(paths.venvPython, platform, hostArch);
+    if (!rosetta) return { ready: true, python: paths.venvPython, paths };
+    return { ready: false, paths, reason: `${rosetta}; run \`agentdeck ble setup\` to rebuild it` };
   }
 
   // Preserve source-checkout and pre-1.0.4 manual environments. An explicit BLE
   // command will import-probe this interpreter before using it.
   if (existsSync(paths.legacyPython)) {
-    return { ready: true, python: paths.legacyPython, paths };
+    const rosetta = rosettaInterpreterReason(paths.legacyPython, platform, hostArch);
+    if (!rosetta) return { ready: true, python: paths.legacyPython, paths };
+    return { ready: false, paths, reason: `${rosetta}; run \`agentdeck ble setup\` to rebuild it` };
   }
 
   return {
@@ -191,6 +257,7 @@ function dependencyProbe(run: BleCommandRunner, python: string): boolean {
 function systemPython(
   run: BleCommandRunner,
   platform: NodeJS.Platform,
+  hostArch: string,
 ): { command: string; prefix: string[] } | null {
   const candidates = platform === 'win32'
     ? [
@@ -199,6 +266,14 @@ function systemPython(
         { command: 'python', prefix: [] },
       ]
     : [
+        // On an arm64 Mac a bare `python3` can resolve to a leftover Intel
+        // Homebrew install (/usr/local precedes /opt/homebrew in the default
+        // /etc/paths order for daemon-spawned shells), building the whole BLE
+        // venv on Rosetta. Probe the native Homebrew interpreter first; it is
+        // simply skipped where it does not exist.
+        ...(platform === 'darwin' && hostArch === 'arm64'
+          ? [{ command: '/opt/homebrew/bin/python3', prefix: [] }]
+          : []),
         { command: 'python3', prefix: [] },
         { command: 'python', prefix: [] },
       ];
@@ -222,6 +297,7 @@ function systemPython(
 export function ensureBleRuntime(options: BleRuntimeOptions = {}): BleRuntimeStatus & { ready: true; python: string } {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
+  const hostArch = options.hostArch ?? process.arch;
   const paths = resolveBleRuntimePaths(options);
   const log = options.log ?? (() => {});
   const run = options.run ?? defaultRun;
@@ -248,7 +324,13 @@ export function ensureBleRuntime(options: BleRuntimeOptions = {}): BleRuntimeSta
     return { ready: true, python: override, paths };
   }
 
-  if (existsSync(paths.venvPython) && dependencyProbe(run, paths.venvPython)) {
+  // The Rosetta check precedes the dependency probe: a translated interpreter
+  // imports everything just fine, so probing it would accept exactly the
+  // environment we need to rebuild.
+  const venvRosetta = existsSync(paths.venvPython)
+    ? rosettaInterpreterReason(paths.venvPython, platform, hostArch)
+    : null;
+  if (existsSync(paths.venvPython) && !venvRosetta && dependencyProbe(run, paths.venvPython)) {
     mkdirSync(paths.runtimeDir, { recursive: true });
     writeFileSync(paths.readyMarker, JSON.stringify({
       requirementsSha256: requirementsDigest(paths),
@@ -257,13 +339,25 @@ export function ensureBleRuntime(options: BleRuntimeOptions = {}): BleRuntimeSta
     return { ready: true, python: paths.venvPython, paths };
   }
 
-  if (existsSync(paths.legacyPython) && dependencyProbe(run, paths.legacyPython)) {
+  const legacyRosetta = existsSync(paths.legacyPython)
+    ? rosettaInterpreterReason(paths.legacyPython, platform, hostArch)
+    : null;
+  if (legacyRosetta) log(`Ignoring legacy BLE venv: ${legacyRosetta}.`);
+  if (existsSync(paths.legacyPython) && !legacyRosetta && dependencyProbe(run, paths.legacyPython)) {
     return { ready: true, python: paths.legacyPython, paths };
   }
 
-  const python = systemPython(run, platform);
+  const python = systemPython(run, platform, hostArch);
   if (!python) {
     throw new Error('Python 3.10 or newer is required for optional BLE device support.');
+  }
+
+  if (venvRosetta) {
+    // `python -m venv` over an existing venv relinks the interpreter but keeps
+    // site-packages — native wheels compiled for the wrong architecture. Start
+    // clean instead.
+    log(`Rebuilding BLE venv: ${venvRosetta}.`);
+    rmSync(paths.venvDir, { recursive: true, force: true });
   }
 
   mkdirSync(paths.runtimeDir, { recursive: true });

@@ -8,7 +8,14 @@
 
 import { type ChildProcess } from 'child_process';
 import { deviceId, loadTimeboxDevices, type TimeboxDevice } from './timebox-settings.js';
-import { createSyncCycleSquelch, spawnPythonSync, terminateSyncChild, type SyncCycleSquelch } from '../ble-sync-spawn.js';
+import {
+  createSigabrtCircuitBreaker,
+  createSyncCycleSquelch,
+  spawnPythonSync,
+  terminateSyncChild,
+  type SigabrtCircuitBreaker,
+  type SyncCycleSquelch,
+} from '../ble-sync-spawn.js';
 import {
   createBleLinkTracker,
   mergeBleLinkSnapshots,
@@ -28,6 +35,8 @@ interface SyncEntry {
   squelch: SyncCycleSquelch;
   /** Live BLE link state, fed by the child's `AGENTDECK_STATUS` lines. */
   link: BleLinkTracker;
+  /** Halts the respawn loop when the OS keeps killing the client (TCC). */
+  abortBreaker: SigabrtCircuitBreaker;
 }
 
 const entries = new Map<string, SyncEntry>();
@@ -69,6 +78,7 @@ export function startTimeboxSync(httpPort: number): void {
       startedAt: 0,
       squelch: createSyncCycleSquelch(log),
       link: createBleLinkTracker(),
+      abortBreaker: createSigabrtCircuitBreaker(`Timebox BLE sync for ${id}`),
     };
     entries.set(id, entry);
     spawnSync(entry, runtime.python, runtime.paths.scripts.timeboxSync, httpPort);
@@ -113,6 +123,15 @@ function spawnSync(entry: SyncEntry, venvPython: string, syncScript: string, htt
     const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * entry.consecutiveFailures);
     const tail = stderrTail() || outputTail();
     const why = tail ? `; output: ${tail}` : '';
+    // A streak of SIGABRT kills means the OS is refusing the client (TCC on
+    // macOS) — respawning can only produce another crash dialog, so halt and
+    // say why instead of looping forever.
+    const halt = entry.abortBreaker.noteExit(signal);
+    if (halt) {
+      log(halt);
+      entry.link.noteUnavailable(halt);
+      return;
+    }
     entry.link.noteExit(tail || `sync exited (code=${code} signal=${signal})`, Date.now() + delay);
     entry.squelch.logExit(
       code,

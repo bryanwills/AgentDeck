@@ -134,3 +134,101 @@ describe('bridge npm BLE assets', () => {
     ]));
   });
 });
+
+describe('Rosetta interpreter guard (darwin/arm64)', () => {
+  const machOThin = (cputype: number): Buffer => {
+    const buf = Buffer.alloc(8);
+    buf.writeUInt32LE(0xfeedfacf, 0);
+    buf.writeUInt32LE(cputype, 4);
+    return buf;
+  };
+  const machOFat = (cputypes: number[]): Buffer => {
+    const buf = Buffer.alloc(8 + cputypes.length * 20);
+    buf.writeUInt32BE(0xcafebabe, 0);
+    buf.writeUInt32BE(cputypes.length, 4);
+    cputypes.forEach((t, i) => buf.writeUInt32BE(t, 8 + i * 20));
+    return buf;
+  };
+  const X86_64 = 0x01000007;
+  const ARM64 = 0x0100000c;
+
+  it('refuses an x86_64-only legacy venv on an arm64 Mac with a rebuild hint', () => {
+    const root = join(tempDir(), 'bridge');
+    makePackage(root);
+    const paths = resolveBleRuntimePaths({ packageRoot: root, dataDir: join(root, '.data'), env: {} });
+    write(paths.legacyPython);
+    writeFileSync(paths.legacyPython, machOThin(X86_64));
+
+    const status = getBleRuntimeStatus({
+      packageRoot: root,
+      dataDir: join(root, '.data'),
+      env: {},
+      platform: 'darwin',
+      hostArch: 'arm64',
+    });
+    expect(status.ready).toBe(false);
+    expect(status.reason).toContain('Rosetta');
+    expect(status.reason).toContain('agentdeck ble setup');
+  });
+
+  it('accepts a universal binary carrying an arm64 slice, and anything on non-arm64 hosts', () => {
+    const root = join(tempDir(), 'bridge');
+    makePackage(root);
+    const paths = resolveBleRuntimePaths({ packageRoot: root, dataDir: join(root, '.data'), env: {} });
+    write(paths.legacyPython);
+    writeFileSync(paths.legacyPython, machOFat([ARM64, X86_64]));
+
+    const base = { packageRoot: root, dataDir: join(root, '.data'), env: {} };
+    expect(getBleRuntimeStatus({ ...base, platform: 'darwin', hostArch: 'arm64' }).ready).toBe(true);
+
+    // The same x86_64-only binary is fine where Rosetta is not in play.
+    writeFileSync(paths.legacyPython, machOThin(X86_64));
+    expect(getBleRuntimeStatus({ ...base, platform: 'darwin', hostArch: 'x64' }).ready).toBe(true);
+    expect(getBleRuntimeStatus({ ...base, platform: 'linux', hostArch: 'arm64' }).ready).toBe(true);
+  });
+
+  it('makes no claim about an unrecognized binary (scripts, ELF, truncated files)', () => {
+    const root = join(tempDir(), 'bridge');
+    makePackage(root);
+    const paths = resolveBleRuntimePaths({ packageRoot: root, dataDir: join(root, '.data'), env: {} });
+    write(paths.legacyPython, '#!/bin/sh\nexec python3 "$@"\n');
+
+    const status = getBleRuntimeStatus({
+      packageRoot: root,
+      dataDir: join(root, '.data'),
+      env: {},
+      platform: 'darwin',
+      hostArch: 'arm64',
+    });
+    expect(status.ready).toBe(true);
+  });
+
+  it('rebuilds a Rosetta venv with the native Homebrew interpreter probed first', () => {
+    const root = join(tempDir(), 'bridge');
+    const dataDir = join(root, '.data');
+    makePackage(root);
+    const paths = resolveBleRuntimePaths({ packageRoot: root, dataDir, env: {} });
+    write(paths.legacyPython);
+    writeFileSync(paths.legacyPython, machOThin(X86_64));
+
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const runtime = ensureBleRuntime({
+      packageRoot: root,
+      dataDir,
+      env: {},
+      platform: 'darwin',
+      hostArch: 'arm64',
+      run: (command, args) => {
+        calls.push({ command, args });
+        if (args.includes('venv')) write(paths.venvPython);
+        return { status: 0 };
+      },
+    });
+
+    // The Rosetta legacy venv was never dependency-probed or returned.
+    expect(runtime.python).toBe(paths.venvPython);
+    expect(calls.some((c) => c.command === paths.legacyPython)).toBe(false);
+    // Interpreter probing starts at the native Homebrew path.
+    expect(calls[0].command).toBe('/opt/homebrew/bin/python3');
+  });
+});

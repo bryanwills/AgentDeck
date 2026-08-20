@@ -18,7 +18,13 @@
 
 import { type ChildProcess } from 'child_process';
 import { loadIDotMatrixDevices, type IDotMatrixDevice } from './idotmatrix-settings.js';
-import { createSyncCycleSquelch, spawnPythonSync, terminateSyncChild } from '../ble-sync-spawn.js';
+import {
+  createSigabrtCircuitBreaker,
+  createSyncCycleSquelch,
+  spawnPythonSync,
+  terminateSyncChild,
+  type SigabrtCircuitBreaker,
+} from '../ble-sync-spawn.js';
 import { createBleLinkTracker, type BleLinkSnapshot } from '../ble-sync-status.js';
 import { getBleRuntimeStatus } from '../python-ble-runtime.js';
 
@@ -50,6 +56,8 @@ function log(msg: string): void {
 // Repeated identical respawn cycles (panel off/out of range) collapse into an
 // hourly summary instead of flooding the daemon log all night.
 const squelch = createSyncCycleSquelch(log);
+// Recreated on every startIDotMatrixSync so a daemon restart re-arms the loop.
+let abortBreaker: SigabrtCircuitBreaker = createSigabrtCircuitBreaker('iDotMatrix BLE sync');
 
 /**
  * Start (or no-op if already running) the managed BLE sync for the first
@@ -84,6 +92,7 @@ export function startIDotMatrixSync(httpPort: number): void {
     return;
   }
 
+  abortBreaker = createSigabrtCircuitBreaker('iDotMatrix BLE sync');
   spawnSync(runtime.python, runtime.paths.scripts.idotmatrixSync, httpPort);
 }
 
@@ -128,6 +137,15 @@ function spawnSync(venvPython: string, syncScript: string, httpPort: number): vo
     const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * consecutiveFailures);
     const tail = stderrTail() || outputTail();
     const why = tail ? `; output: ${tail}` : '';
+    // A streak of SIGABRT kills means the OS is refusing the client (TCC on
+    // macOS) — respawning can only produce another crash dialog, so halt and
+    // say why instead of looping forever.
+    const halt = abortBreaker.noteExit(signal);
+    if (halt) {
+      log(halt);
+      link.noteUnavailable(halt);
+      return;
+    }
     link.noteExit(tail || `BLE sync exited (code=${code} signal=${signal})`, Date.now() + delay);
     squelch.logExit(
       code,
