@@ -276,6 +276,18 @@ in [SECURITY.md](SECURITY.md) for vulnerabilities, and follow the
 agents is human-owned and documented in
 [AI-assisted maintenance](docs/ai-assisted-maintenance.md).
 
+### Community integrations
+
+Independent projects that drive AgentDeck through the daemon's WebSocket API.
+Each is maintained by its own author — report issues on that project's tracker,
+not here. The daemon protocol has no stability guarantee for external clients;
+changes aim to be additive, but integrations are expected to track
+[`shared/src/protocol.ts`](shared/src/protocol.ts) themselves.
+
+| Integration | What it does |
+|---|---|
+| [companion-module-agentdeck](https://github.com/houtacheng/companion-module-agentdeck) | Unofficial [Bitfocus Companion](https://bitfocus.io/companion) module — session tiles, approval queue, usage gauges, and creatures on any Companion-supported surface (by [@houtacheng](https://github.com/houtacheng)) |
+
 ---
 
 ## Releases
