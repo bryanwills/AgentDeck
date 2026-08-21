@@ -44,7 +44,7 @@ constexpr uint32_t OpenCodeInner = 0x4B4646;
 constexpr uint32_t OpenCodePulse = 0xCFCECD;
 
 // --- Antigravity (peak/arc mark) ---
-constexpr uint32_t AntigravityMark = 0xD2D6DC;  // canonical brand gray (agent-logos.ts)
+constexpr uint32_t AntigravityMark = 0xD2D6DC;  // NOT the brand token (--brand-antigravity is #5F6368): a lighter gray kept for dark-panel legibility; doubles as tag stroke (terrarium) and agent accent (pocket/ticker/knob)
 constexpr uint32_t AntigravityCyan = 0x28BDF3;
 constexpr uint32_t AntigravityGreen = 0x2FD66D;
 constexpr uint32_t AntigravityYellow = 0xF3D233;

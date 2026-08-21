@@ -46,15 +46,21 @@ static const uint16_t C_coffee = HEX565(0x2a2622), C_coffeeOn = HEX565(0xc07058)
 static const uint16_t C_cabinet = HEX565(0x33514a), C_cabinetHi = HEX565(0x436a61), C_cabinetEdge = HEX565(0x1d342f);
 
 // ── agent + state mapping (data.js AGENTS / STATE) ──
+// Values are the design/tokens.css --brand-* hexes, with two deliberate
+// departures: OpenCode's #3a3a3a is invisible on this dark scene, so it keeps
+// a legibility lift (do not "fix" it back to the token); and the null/unknown
+// fallback is a warm sand-gray chosen to share a hue with NO mapped agent —
+// an agent this firmware predates must read as neutral, never as OpenCode.
+static const uint32_t C_agentUnknown = 0xB0A89A;
 static uint32_t agentColor(const char* t) {
-    if (!t) return 0x9aa0a8;
-    if (strstr(t, "openclaw")) return 0xFF6B5B;
+    if (!t) return C_agentUnknown;
+    if (strstr(t, "openclaw")) return 0xFF4D4D;
     if (strstr(t, "codex"))    return 0x6166E0;
-    if (strstr(t, "opencode")) return 0x9aa0a8;
-    if (strstr(t, "antigravity")) return 0xD2D6DC;
+    if (strstr(t, "opencode")) return 0x9aa0a8;  // lifted from #3a3a3a (see above)
+    if (strstr(t, "antigravity")) return 0x5F6368;
     if (strstr(t, "kiro"))    return 0x7C3AED;
     if (strstr(t, "claude"))   return 0xC07058;
-    return 0x9aa0a8;
+    return C_agentUnknown;
 }
 // Two maps used to sit here and both were dead, for different reasons worth
 // keeping apart. `agentShort` never had a call site at all — this scene draws
