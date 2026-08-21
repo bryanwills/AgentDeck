@@ -314,6 +314,65 @@ export function codexWindowsBeside<T>(
 }
 
 /**
+ * Display name for a raw `chatgpt_plan_type`, keyed by the tier with every
+ * separator removed — `prolite`, `pro_lite` and `pro lite` are one plan.
+ *
+ * SSOT for both daemons: the Swift mirror (`ChatGPTPlan` in
+ * CodexFreshnessRules.generated.swift) is emitted from this table. It used to be
+ * a hand copy, and a tier missing from one copy does not degrade gracefully —
+ * it renders as the fallback capitalisation ("ChatGPT Prolite") on that surface
+ * only, so the same account reads differently on the dashboard and the deck.
+ */
+export const CHATGPT_PLAN_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  free: 'ChatGPT Free',
+  plus: 'ChatGPT Plus',
+  pro: 'ChatGPT Pro',
+  prolite: 'ChatGPT Pro Lite',
+  team: 'ChatGPT Team',
+  enterprise: 'ChatGPT Enterprise',
+};
+
+/**
+ * Format a raw `chatgpt_plan_type` for display, or `undefined` when there is no
+ * tier to show.
+ *
+ * An unrecognised tier is capitalised rather than dropped: OpenAI mints new plan
+ * names on its own schedule (`prolite` arrived unannounced), and a tier this
+ * build predates must still read as a plan beside Plus/Pro/Team — never as the
+ * raw lowercase token, and never as nothing.
+ */
+export function formatChatGptPlanName(planType?: string | null): string | undefined {
+  const raw = planType?.trim();
+  if (!raw) return undefined;
+  const known = CHATGPT_PLAN_DISPLAY_NAMES[normalizeChatGptPlanKey(raw)];
+  if (known) return known;
+  return `ChatGPT ${raw.charAt(0).toUpperCase()}${raw.slice(1)}`;
+}
+
+/**
+ * The one comparison form for a raw `chatgpt_plan_type`.
+ *
+ * Trimmed, lowercased, and stripped of separators — `prolite`, `pro_lite` and
+ * `pro lite` are one plan, so they must key the display table AND compare equal.
+ * Normalizing only the display path was an internal contradiction with teeth:
+ * the two sides of the plan check come from different producers (the auth token
+ * for the account tier, the rollout stamp for the snapshot), so a spelling the
+ * table was written to absorb would still land every candidate in the "mismatch"
+ * class — ranking would have nothing to prefer, the winner would be voided, and
+ * on the Node daemon `passivePlanMatchesAccount` would be permanently false, so
+ * `codex app-server` would be spawned every 5 minutes forever and its answer
+ * voided too. The exact failure this module exists to prevent, via a different
+ * spelling.
+ *
+ * A value that is nothing but separators normalizes to `''` — i.e. "unknown",
+ * which the predicate already treats as no information rather than as a licence
+ * to void.
+ */
+export function normalizeChatGptPlanKey(value?: string | null): string {
+  return (value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+}
+
+/**
  * True when the ChatGPT tier carries no paid Codex subscription.
  *
  * The tier string comes from `~/.codex/auth.json` (`chatgpt_plan_type`), which is
@@ -321,7 +380,7 @@ export function codexWindowsBeside<T>(
  * rollout snapshots below.
  */
 export function isCodexFreePlan(plan?: string | null): boolean {
-  return (plan ?? '').trim().toLowerCase() === 'free';
+  return normalizeChatGptPlanKey(plan) === 'free';
 }
 
 /**
@@ -340,15 +399,59 @@ export function isCodexFreePlan(plan?: string | null): boolean {
  * Unknown on either side → matches. Absence is "no information", never a licence
  * to void real data: an API-key Codex install reports no account tier, and a
  * pre-`plan_type` rollout reports no snapshot tier.
+ *
+ * The emptiness test MUST stay ahead of the equality test, and not because it is
+ * a cheap early-out. Normalization strips separators, so two separator-only
+ * values (`"-"`, `" "`) both reduce to `''` — reordered, they would compare equal
+ * and report a positive plan MATCH where the answer is "neither side named a
+ * tier". Every current caller happens to act the same way on both answers, which
+ * is exactly why the difference would go unnoticed. Mirrored in Swift.
  */
 export function codexSnapshotMatchesAccountPlan(
   snapshotPlan?: string | null,
   accountPlan?: string | null,
 ): boolean {
-  const snap = (snapshotPlan ?? '').trim().toLowerCase();
-  const account = (accountPlan ?? '').trim().toLowerCase();
+  const snap = normalizeChatGptPlanKey(snapshotPlan);
+  const account = normalizeChatGptPlanKey(accountPlan);
   if (!snap || !account) return true;
   return snap === account;
+}
+
+/**
+ * Rank one Codex usage snapshot against another for the live account tier.
+ *
+ * Recency alone is the wrong ordering, because a snapshot that will be VOIDED a
+ * step later must not first win the selection. Codex stamps `plan_type` from the
+ * auth token the WRITING PROCESS started with, so a Codex session opened before
+ * a plan change keeps appending old-plan snapshots for as long as it stays open
+ * — and, being the busiest session, it also keeps minting the newest timestamps.
+ * A newest-wins picker therefore hands `normalizeCodexRateLimits` a mismatched
+ * snapshot on every single build, the windows are voided, and every gauge goes
+ * blank even though a valid same-plan snapshot is sitting right there in another
+ * rollout (measured 2026-08-22: a 20:35 pre-upgrade session out-stamping a 01:43
+ * post-upgrade one indefinitely).
+ *
+ * So plan agreement is the PRIMARY key and age is only the tie-break:
+ *   1. a snapshot matching the account plan outranks one that does not, at any age
+ *   2. within the same match class, the newer `capturedAtMs` wins
+ *   3. exact ties keep the incumbent (both pickers scan in priority order)
+ *
+ * This orders snapshots; it never rescues one. A mismatched snapshot that wins
+ * because it is the only one left is still voided downstream — the point is that
+ * it must not displace a valid peer first.
+ *
+ * `capturedAtMs` is a number, not a string, so both a parsed rollout stamp and
+ * "unknown" (`-Infinity` / `-.infinity`) order without a second date parse.
+ */
+export function codexSnapshotOutranks(
+  candidate: { planType?: string | null; capturedAtMs: number },
+  incumbent: { planType?: string | null; capturedAtMs: number },
+  accountPlan?: string | null,
+): boolean {
+  const candidateMatches = codexSnapshotMatchesAccountPlan(candidate.planType, accountPlan);
+  const incumbentMatches = codexSnapshotMatchesAccountPlan(incumbent.planType, accountPlan);
+  if (candidateMatches !== incumbentMatches) return candidateMatches;
+  return candidate.capturedAtMs > incumbent.capturedAtMs;
 }
 
 /**

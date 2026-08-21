@@ -26,7 +26,7 @@ const projectDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const HEADER =
   'GENERATED FILE — DO NOT EDIT.\n' +
   'Source of truth: shared/src/format-utils.ts (CODEX_SNAPSHOT_STALE_MS, codexUsageFootnote,\n' +
-  'codexSnapshotMatchesAccountPlan)\n' +
+  'codexSnapshotMatchesAccountPlan, codexSnapshotOutranks, CHATGPT_PLAN_DISPLAY_NAMES)\n' +
   'Regenerate: pnpm generate-codex-freshness-rules (drift gated by shared/src/__tests__/codex-freshness-rules.test.ts)';
 
 function comment(prefix) {
@@ -122,22 +122,91 @@ enum CodexUsageFreshness {
 enum CodexPlanRules {
     /// True when the ChatGPT tier carries no paid Codex subscription.
     static func isFreePlan(_ plan: String?) -> Bool {
-        return normalized(plan) == "free"
+        return planKey(plan) == "free"
     }
 
     /// True when the snapshot still belongs to the plan the account holds.
     /// Unknown on either side matches: absence is "no information", never a
     /// licence to void real data (an API-key install reports no account tier, a
     /// pre-\`plan_type\` rollout reports no snapshot tier).
+    ///
+    /// The emptiness test MUST stay ahead of the equality test: \`planKey\` strips
+    /// separators, so two separator-only values both reduce to "" and, reordered,
+    /// would compare equal and report a positive plan MATCH where the answer is
+    /// "neither side named a tier".
     static func snapshotMatchesAccountPlan(snapshot: String?, account: String?) -> Bool {
-        let snap = normalized(snapshot)
-        let acct = normalized(account)
+        let snap = planKey(snapshot)
+        let acct = planKey(account)
         if snap.isEmpty || acct.isEmpty { return true }
         return snap == acct
     }
 
-    private static func normalized(_ value: String?) -> String {
-        return (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    /// Rank one snapshot against another for the live account tier.
+    ///
+    /// Recency alone is the wrong ordering: a snapshot that will be VOIDED a step
+    /// later must not first win the selection. Codex stamps \`plan_type\` from the
+    /// auth token the WRITING PROCESS started with, so a session opened before a
+    /// plan change keeps appending old-plan snapshots for as long as it stays
+    /// open — and, being the busiest session, keeps minting the newest timestamps
+    /// too. A newest-wins picker hands the void rule a mismatched snapshot on
+    /// every build and every gauge goes blank, while a valid same-plan snapshot
+    /// sits unread in another rollout.
+    ///
+    /// Plan agreement is the PRIMARY key, age only the tie-break; exact ties keep
+    /// the incumbent. This orders snapshots, it never rescues one — a mismatched
+    /// snapshot that wins for lack of a peer is still voided downstream.
+    ///
+    /// Capture stamps are seconds-since-epoch so "unknown" can be \`-.infinity\`
+    /// and order without a second date parse.
+    static func snapshotOutranks(
+        candidatePlan: String?,
+        candidateCapturedAt: TimeInterval,
+        incumbentPlan: String?,
+        incumbentCapturedAt: TimeInterval,
+        account: String?
+    ) -> Bool {
+        let candidateMatches = snapshotMatchesAccountPlan(snapshot: candidatePlan, account: account)
+        let incumbentMatches = snapshotMatchesAccountPlan(snapshot: incumbentPlan, account: account)
+        if candidateMatches != incumbentMatches { return candidateMatches }
+        return candidateCapturedAt > incumbentCapturedAt
+    }
+
+    /// The one comparison form for a raw \`chatgpt_plan_type\`: trimmed,
+    /// lowercased, separators stripped. \`prolite\`, \`pro_lite\` and \`pro lite\` are
+    /// one plan, so they must key the display table AND compare equal — the two
+    /// sides of the plan check come from different producers (the auth token for
+    /// the account tier, the rollout stamp for the snapshot), and normalizing
+    /// only one path would land every candidate in the "mismatch" class for a
+    /// spelling the table exists to absorb. A value that is nothing but
+    /// separators normalizes to "", which reads as unknown, not as void.
+    static func planKey(_ value: String?) -> String {
+        return (value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .filter { !$0.isWhitespace && $0 != "_" && $0 != "-" }
+    }
+}
+
+/// Display name for a raw \`chatgpt_plan_type\`.
+///
+/// Generated so the daemons cannot disagree about what an account is called. The
+/// mapping had already drifted into three hand-written Swift call sites once,
+/// each passing an unrecognised plan through verbatim; keeping it hand-mirrored
+/// against the TS copy repeated that at the platform level — OpenAI mints tiers
+/// on its own schedule (\`prolite\` arrived unannounced) and whichever copy was
+/// not updated renders the fallback capitalisation for the same account.
+///
+/// Keys carry no separators: \`prolite\`, \`pro_lite\` and \`pro lite\` are one plan.
+/// An unrecognised tier is capitalised, never dropped and never shown raw.
+enum ChatGPTPlan {
+    static func displayName(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch CodexPlanRules.planKey(trimmed) {
+${Object.entries(rules.planNames)
+        .map(([key, name]) => `        case "${key}": return "${name}"`)
+        .join('\n')}
+        default: return "ChatGPT " + trimmed.prefix(1).uppercased() + trimmed.dropFirst()
+        }
     }
 }
 `;
@@ -216,6 +285,31 @@ object CodexFreshnessRules {
         return formatSnapshotAge(capturedAt, nowMs) ?: "stale"
     }
 }
+
+/**
+ * Display name for a raw \`chatgpt_plan_type\`.
+ *
+ * Android is a pure consumer of the wire for the SNAPSHOT, but not for this:
+ * the Codex row subtitle formats \`codexPlanType\` itself rather than reading the
+ * pre-formatted \`subscriptions[].name\`, so a hand copy here renders the fallback
+ * capitalisation for any tier it predates while every other surface shows the
+ * real name (\`prolite\` -> "ChatGPT Prolite" vs "ChatGPT Pro Lite", 2026-08-22).
+ *
+ * Keys carry no separators: \`prolite\`, \`pro_lite\` and \`pro lite\` are one plan.
+ * An unrecognised tier is capitalised, never dropped and never shown raw.
+ */
+object ChatGPTPlan {
+    fun displayName(raw: String): String {
+        val trimmed = raw.trim()
+        val key = trimmed.lowercase().filterNot { it.isWhitespace() || it == '_' || it == '-' }
+        return when (key) {
+${Object.entries(rules.planNames)
+        .map(([key, name]) => `            "${key}" -> "${name}"`)
+        .join('\n')}
+            else -> "ChatGPT " + trimmed.replaceFirstChar { it.uppercase() }
+        }
+    }
+}
 `;
 }
 
@@ -226,13 +320,26 @@ export const OUTPUTS = [
 
 async function main() {
   let staleMs;
+  let planNames;
   try {
-    ({ CODEX_SNAPSHOT_STALE_MS: staleMs } = await import('../shared/dist/format-utils.js'));
+    ({ CODEX_SNAPSHOT_STALE_MS: staleMs, CHATGPT_PLAN_DISPLAY_NAMES: planNames } = await import(
+      '../shared/dist/format-utils.js'
+    ));
   } catch {
     console.error('shared/dist not found — run `pnpm --filter @agentdeck/shared build` first');
     process.exit(1);
   }
-  const rules = { staleMs };
+  // A STALE dist imports fine and then blows up inside the emitters with an
+  // opaque TypeError. Same cause as a missing dist, so give it the same message
+  // instead of a stack trace: every export this generator reads is checked here.
+  if (staleMs == null || planNames == null) {
+    console.error(
+      'shared/dist predates this generator (missing CODEX_SNAPSHOT_STALE_MS or '
+        + 'CHATGPT_PLAN_DISPLAY_NAMES) — run `pnpm --filter @agentdeck/shared build` first',
+    );
+    process.exit(1);
+  }
+  const rules = { staleMs, planNames };
   const check = process.argv.includes('--check');
   let drifted = false;
   for (const [rel, emit] of OUTPUTS) {

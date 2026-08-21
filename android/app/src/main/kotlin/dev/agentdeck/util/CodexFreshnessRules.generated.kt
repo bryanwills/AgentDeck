@@ -1,6 +1,6 @@
 // GENERATED FILE — DO NOT EDIT.
 // Source of truth: shared/src/format-utils.ts (CODEX_SNAPSHOT_STALE_MS, codexUsageFootnote,
-// codexSnapshotMatchesAccountPlan)
+// codexSnapshotMatchesAccountPlan, codexSnapshotOutranks, CHATGPT_PLAN_DISPLAY_NAMES)
 // Regenerate: pnpm generate-codex-freshness-rules (drift gated by shared/src/__tests__/codex-freshness-rules.test.ts)
 package dev.agentdeck.util
 
@@ -71,5 +71,33 @@ object CodexFreshnessRules {
         val age = snapshotAgeMs(capturedAt, nowMs) ?: return null
         if (age <= SNAPSHOT_STALE_MS) return null
         return formatSnapshotAge(capturedAt, nowMs) ?: "stale"
+    }
+}
+
+/**
+ * Display name for a raw `chatgpt_plan_type`.
+ *
+ * Android is a pure consumer of the wire for the SNAPSHOT, but not for this:
+ * the Codex row subtitle formats `codexPlanType` itself rather than reading the
+ * pre-formatted `subscriptions[].name`, so a hand copy here renders the fallback
+ * capitalisation for any tier it predates while every other surface shows the
+ * real name (`prolite` -> "ChatGPT Prolite" vs "ChatGPT Pro Lite", 2026-08-22).
+ *
+ * Keys carry no separators: `prolite`, `pro_lite` and `pro lite` are one plan.
+ * An unrecognised tier is capitalised, never dropped and never shown raw.
+ */
+object ChatGPTPlan {
+    fun displayName(raw: String): String {
+        val trimmed = raw.trim()
+        val key = trimmed.lowercase().filterNot { it.isWhitespace() || it == '_' || it == '-' }
+        return when (key) {
+            "free" -> "ChatGPT Free"
+            "plus" -> "ChatGPT Plus"
+            "pro" -> "ChatGPT Pro"
+            "prolite" -> "ChatGPT Pro Lite"
+            "team" -> "ChatGPT Team"
+            "enterprise" -> "ChatGPT Enterprise"
+            else -> "ChatGPT " + trimmed.replaceFirstChar { it.uppercase() }
+        }
     }
 }

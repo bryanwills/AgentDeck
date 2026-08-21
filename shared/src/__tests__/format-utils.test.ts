@@ -11,6 +11,7 @@ import {
   formatSnapshotAge,
   isCodexSnapshotAged,
   codexSnapshotMatchesAccountPlan,
+  codexSnapshotOutranks,
   isCodexFreePlan,
   scopedLimitClaimsUsageKey,
   codexWindowsBeside,
@@ -300,12 +301,79 @@ describe('codexSnapshotMatchesAccountPlan', () => {
     expect(codexSnapshotMatchesAccountPlan(' Plus ', 'plus')).toBe(true);
   });
 
+  it('compares the same normalized form the display table is keyed by', () => {
+    // The two sides come from different producers — the auth token names the
+    // account tier, the rollout stamp names the snapshot's — so a spelling the
+    // display table absorbs must not still read as a mismatch here. Otherwise
+    // every candidate lands in the "mismatch" class, ranking has nothing to
+    // prefer, the winner is voided, and the live query is respawned every 5
+    // minutes forever only to have its answer voided too.
+    expect(codexSnapshotMatchesAccountPlan('pro_lite', 'prolite')).toBe(true);
+    expect(codexSnapshotMatchesAccountPlan('prolite', 'pro lite')).toBe(true);
+    expect(codexSnapshotMatchesAccountPlan('Pro-Lite', 'prolite')).toBe(true);
+    // Still a real mismatch when the tiers genuinely differ.
+    expect(codexSnapshotMatchesAccountPlan('plus', 'pro_lite')).toBe(false);
+    // A value that is nothing but separators is unknown, not void.
+    expect(codexSnapshotMatchesAccountPlan('-', 'prolite')).toBe(true);
+  });
+
   it('treats an unknown tier on either side as no information, never as licence to void', () => {
     // API-key installs report no account tier; pre-`plan_type` rollouts report
     // no snapshot tier. Voiding real data on absence is the bug, not the fix.
     expect(codexSnapshotMatchesAccountPlan('plus', undefined)).toBe(true);
     expect(codexSnapshotMatchesAccountPlan(undefined, 'free')).toBe(true);
     expect(codexSnapshotMatchesAccountPlan('', '')).toBe(true);
+  });
+});
+
+describe('codexSnapshotOutranks', () => {
+  const T0 = Date.parse('2026-08-22T00:00:00Z');
+
+  it('prefers a plan-matching snapshot over a NEWER mismatched one', () => {
+    // The upgrade case, measured 2026-08-22: a Codex session opened before the
+    // plan change keeps appending `plus` snapshots with ever-newer timestamps
+    // while a session started after it holds the only valid `prolite` reading.
+    // Newest-wins hands the void rule the `plus` one on every build and every
+    // gauge goes blank with a good snapshot unread on disk.
+    const valid = { planType: 'prolite', capturedAtMs: T0 };
+    const staleplan = { planType: 'plus', capturedAtMs: T0 + 600_000 };
+    expect(codexSnapshotOutranks(valid, staleplan, 'prolite')).toBe(true);
+    expect(codexSnapshotOutranks(staleplan, valid, 'prolite')).toBe(false);
+  });
+
+  it('falls back to recency within the same match class', () => {
+    const older = { planType: 'prolite', capturedAtMs: T0 };
+    const newer = { planType: 'prolite', capturedAtMs: T0 + 1 };
+    expect(codexSnapshotOutranks(newer, older, 'prolite')).toBe(true);
+    expect(codexSnapshotOutranks(older, newer, 'prolite')).toBe(false);
+    // Both mismatched: still ordered, because one of them will be all we have.
+    const oldMiss = { planType: 'plus', capturedAtMs: T0 };
+    const newMiss = { planType: 'plus', capturedAtMs: T0 + 1 };
+    expect(codexSnapshotOutranks(newMiss, oldMiss, 'prolite')).toBe(true);
+  });
+
+  it('keeps the incumbent on an exact tie — both scanners walk in priority order', () => {
+    const a = { planType: 'plus', capturedAtMs: T0 };
+    const b = { planType: 'plus', capturedAtMs: T0 };
+    expect(codexSnapshotOutranks(a, b, 'plus')).toBe(false);
+  });
+
+  it('orders an unstamped snapshot below a stamped one of the same class', () => {
+    const unstamped = { planType: 'plus', capturedAtMs: -Infinity };
+    const stamped = { planType: 'plus', capturedAtMs: T0 };
+    expect(codexSnapshotOutranks(unstamped, stamped, 'plus')).toBe(false);
+    // ...but plan agreement still outranks a stamp: an unstamped VALID snapshot
+    // beats a stamped void one, because the void one carries no usable number.
+    const unstampedValid = { planType: 'prolite', capturedAtMs: -Infinity };
+    expect(codexSnapshotOutranks(unstampedValid, stamped, 'prolite')).toBe(true);
+  });
+
+  it('degrades to pure recency when the account tier is unknown', () => {
+    // API-key installs report no tier. Absence must not reshuffle real data.
+    const older = { planType: 'plus', capturedAtMs: T0 };
+    const newer = { planType: 'prolite', capturedAtMs: T0 + 1 };
+    expect(codexSnapshotOutranks(newer, older, undefined)).toBe(true);
+    expect(codexSnapshotOutranks(older, newer, undefined)).toBe(false);
   });
 });
 
