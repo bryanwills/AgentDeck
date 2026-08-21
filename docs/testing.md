@@ -218,6 +218,8 @@ Current CI details:
 
 Android compilation and its JUnit + Robolectric suite are a **separate, path-scoped check** — `.github/workflows/android-test.yml` runs `./gradlew :app:testDebugUnitTest` on pushes and PRs that touch `android/**`, and uploads the HTML/XML reports as an artifact. It exists because `ci.yml` never reads the Android sources: before it, a PR changing only `android/**` could go all-green without anything having compiled its Kotlin, since the Android run inside `test-report.yml` fires only on push to `master`. The debug variant needs no release signing secrets, and the GitHub-hosted runners ship the Android SDK, so the job is just JDK 17 + Gradle.
 
+ESP32 C++ has the same path-scoped shape (#243) — `.github/workflows/esp32-sim.yml` runs `pio run` over every `esp32/sim` env (the native host build of the real `esp32/src` render trees, no Xtensa toolchain) on PRs touching `esp32/**`. Before it, the only job compiling firmware sources was the sim build inside `test-report.yml`, which fires on push to `master` — so a firmware compile error surfaced after merge, or at an `esp32-v*` tag. It shares `test-report.yml`'s `pio-sim-*` cache key so master pushes keep the cache PR runs restore from. It is a compile gate only; the hardware Robot suites stay lab-only as below.
+
 The Android run inside `test-report.yml` remains a non-blocking diagnostic feeding the Build Health page. Apple XCTest is not yet in the Linux CI job. Robot Framework's meaningful behavioral coverage requires physical hardware and remains a lab/local workflow rather than a GitHub-hosted check.
 
 Release workflows (Android, Apple) are tag-triggered and do not run tests.

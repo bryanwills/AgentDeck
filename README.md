@@ -319,7 +319,8 @@ pnpm test:report               # unified: Vitest + Android + Apple + Robot
 
 Four test frameworks cover the tree — Vitest for the Node/TS packages, JUnit +
 Robolectric for Android, XCTest for Apple, and Robot Framework for ESP32 hardware.
-Only Vitest runs in default CI; the rest go through `scripts/test-report.sh`. Current
+Default CI runs Vitest, with path-scoped PR checks compiling Android (Gradle) and the
+ESP32 render trees (host sim); the rest go through `scripts/test-report.sh`. Current
 results are published at [/reports/](https://puritysb.github.io/AgentDeck/reports/).
 
 Working on AgentDeck with a coding agent? Start at **[CLAUDE.md](CLAUDE.md)** and
