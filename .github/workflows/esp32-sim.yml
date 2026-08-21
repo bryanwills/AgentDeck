@@ -1,0 +1,50 @@
+# The one PR gate that compiles C++ (#243). Every other PR workflow is
+# TS/Kotlin/Swift, so before this job an esp32/src change could merge fully
+# green without a compiler ever reading it — the failure then surfaced on
+# master in test-report.yml (the Pages build-health job) or, for trees the sim
+# excludes, not until an esp32-v* tag was cut.
+#
+# `pio run` in esp32/sim builds every env on the *native* host platform — one
+# render tree per env (fw/, mtx/, eink/, knob/, ticker/) compiled against the
+# real esp32/src headers — so it needs no Xtensa toolchain and no hardware.
+# It is a compile gate, not the hardware Robot suite; that stays hardware-only.
+#
+# The paths gate keeps the cost off unrelated PRs, mirroring android-test.yml /
+# apple-test.yml. The cache key is shared with test-report.yml on purpose:
+# master pushes keep the default-branch cache warm, and PR runs restore from it
+# (warm-cache full build is ~1–2 minutes; only a platformio.ini change pays the
+# cold toolchain download).
+name: ESP32 Sim Compile
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'esp32/**'
+      - '.github/workflows/esp32-sim.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache PlatformIO (sim)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+            esp32/sim/.pio
+          key: pio-sim-${{ hashFiles('esp32/sim/platformio.ini') }}
+          restore-keys: pio-sim-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Compile every sim env
+        working-directory: esp32/sim
+        run: pio run
