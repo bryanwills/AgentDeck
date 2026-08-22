@@ -160,6 +160,63 @@ describe('esp32PreflightVerdict', () => {
     });
   });
 
+  describe('image geometry', () => {
+    // The guard must check the value that will actually be WRITTEN. The board
+    // spec is bundled with the page/CLI; the geometry comes from a release
+    // manifest resolved separately (--tag, or whichever release Pages
+    // deployed), so the two can legitimately disagree.
+    const b = board('86box');
+
+    it('passes when the image agrees with the board spec', () => {
+      const v = esp32PreflightVerdict({
+        board: b,
+        surface: 'cli',
+        detectedChip: 'ESP32-S3 (QFN56) (revision v0.2)',
+        detectedFlashSize: '16MB',
+        imageGeometry: { chipFamily: b.chipFamily, flashSize: b.flashSize },
+      });
+      expect(v).toMatchObject({ code: 'ok', mayWrite: true });
+    });
+
+    it('refuses a 16MB image for a board this build calls 4MB, even on an 8MB part', () => {
+      // Without this check the size rule sees 4 <= 8 and passes, while a 16MB
+      // flash-params header lands on an 8MB part — the brick every other rule
+      // here exists to prevent, waved through on a value nobody writes.
+      const corrected = { ...b, flashSize: '4MB' as const };
+      const v = esp32PreflightVerdict({
+        board: corrected,
+        surface: 'cli',
+        detectedChip: 'ESP32-S3 (QFN56) (revision v0.2)',
+        detectedFlashSize: '8MB',
+        imageGeometry: { chipFamily: 'ESP32-S3', flashSize: '16MB' },
+      });
+      expect(v).toMatchObject({ code: 'image-geometry-mismatch', mayWrite: false });
+    });
+
+    it('refuses an image built for a different chip family', () => {
+      const v = esp32PreflightVerdict({
+        board: b,
+        surface: 'cli',
+        detectedChip: 'ESP32-S3 (QFN56) (revision v0.2)',
+        detectedFlashSize: '16MB',
+        imageGeometry: { chipFamily: 'ESP32', flashSize: b.flashSize },
+      });
+      expect(v).toMatchObject({ code: 'image-geometry-mismatch', mayWrite: false });
+    });
+
+    it('omitting it does not weaken the other guards', () => {
+      // --firmware supplies an image with no manifest to disagree with. The
+      // chip and size rules must still apply.
+      const v = esp32PreflightVerdict({
+        board: b,
+        surface: 'cli',
+        detectedChip: 'ESP32-D0WDQ6 (revision v1.1)',
+        detectedFlashSize: '16MB',
+      });
+      expect(v.code).toBe('chip-mismatch');
+    });
+  });
+
   it('every board the browser offers accepts its own declared identity', () => {
     // Pins the invariant, not the membership: adding a verified board needs no
     // test edit, but a board whose SSOT row contradicts itself fails here.
@@ -169,6 +226,7 @@ describe('esp32PreflightVerdict', () => {
         surface: 'browser',
         detectedChip: b.chipFamily,
         detectedFlashSize: b.flashSize,
+        imageGeometry: { chipFamily: b.chipFamily, flashSize: b.flashSize },
       });
       expect(v.mayWrite, `${b.id} refuses itself`).toBe(true);
     }

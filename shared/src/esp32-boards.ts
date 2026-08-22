@@ -369,7 +369,9 @@ export type Esp32PreflightCode =
   /** the image declares more flash than the part reports having */
   | 'flash-too-small'
   /** this SURFACE does not offer the board (browser only — see `surface`) */
-  | 'board-not-offered';
+  | 'board-not-offered'
+  /** the image about to be written was built for different geometry than this board's spec */
+  | 'image-geometry-mismatch';
 
 /**
  * Which tool is asking. It changes exactly one thing, and getting it wrong in
@@ -391,6 +393,22 @@ export interface Esp32PreflightInput {
   detectedChip: string | undefined;
   /** `detectFlashSize()` output, or undefined when the flash id was unusable */
   detectedFlashSize: string | undefined;
+  /**
+   * What the IMAGE says, read from the release manifest — as opposed to what
+   * this build's SSOT says the board is.
+   *
+   * These are not the same fact and they are deliberately decoupled: the CLI
+   * takes its manifest from a release tag (`--tag`, or the newest published
+   * one) while its board spec is bundled, and the browser page ships from
+   * master while its manifest comes from whichever release Pages deployed. So
+   * the value the guard checks and the value actually written into the
+   * flash-params header can differ, and the guard would be validating a number
+   * nobody writes.
+   *
+   * Omit when writing a hand-supplied image (`--firmware`), where there is no
+   * manifest to disagree with.
+   */
+  imageGeometry?: { chipFamily: string; flashSize: string };
 }
 
 export interface Esp32PreflightVerdict {
@@ -419,6 +437,16 @@ export function esp32PreflightVerdict(input: Esp32PreflightInput): Esp32Prefligh
   const detectedFamily = detectedChip ? esp32ChipFamilyOf(detectedChip) : undefined;
   if (detectedFamily !== board.chipFamily) {
     return { code: 'chip-mismatch', mayWrite: false, detectedFamily };
+  }
+
+  // The guard must check the value that will actually be WRITTEN. Concretely:
+  // the SSOT corrects a board down to 4MB, a pinned manifest still says 16MB,
+  // the part reports 8MB — `4 <= 8` passes while a 16MB header lands on an 8MB
+  // part, which is precisely the brick every other rule here exists to prevent.
+  const { imageGeometry } = input;
+  if (imageGeometry &&
+      (imageGeometry.flashSize !== board.flashSize || imageGeometry.chipFamily !== board.chipFamily)) {
+    return { code: 'image-geometry-mismatch', mayWrite: false, detectedFamily };
   }
 
   const sizeSafe = esp32FlashSizeIsSafe(board.flashSize, detectedFlashSize);

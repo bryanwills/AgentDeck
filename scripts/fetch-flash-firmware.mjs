@@ -84,6 +84,12 @@ function arg(name) {
 
 async function main() {
   const outRoot = resolve(root, arg('out') ?? '_site/flash/fw');
+  // `--print-tag` resolves and prints, writing nothing. The Pages workflow needs
+  // the tag BEFORE actions/cache runs (it is the cache key), and having the
+  // workflow re-derive it in bash meant the real decision was made by an
+  // untested duplicate while the tested resolveTag() only ever saw an explicit
+  // --tag. One implementation, used twice.
+  const printOnly = process.argv.includes('--print-tag');
   const configVersion = existsSync(join(root, 'esp32/src/config.h'))
     ? firmwareVersionFromConfig(readFileSync(join(root, 'esp32/src/config.h'), 'utf8'))
     : undefined;
@@ -94,11 +100,14 @@ async function main() {
     exists: releaseExists,
     latest: latestEsp32Tag,
   });
-  console.log(
-    `firmware tag: ${tag} (from ${
-      { flag: '--tag', config: 'esp32/src/config.h FIRMWARE_VERSION', latest: 'newest esp32-v* release' }[source]
-    })`,
-  );
+  const why = { flag: '--tag', config: 'esp32/src/config.h FIRMWARE_VERSION', latest: 'newest esp32-v* release' }[source];
+  if (printOnly) {
+    // stderr carries the reasoning so stdout stays a bare tag the caller can capture.
+    console.error(`firmware tag: ${tag} (from ${why})`);
+    process.stdout.write(`${tag}\n`);
+    return;
+  }
+  console.log(`firmware tag: ${tag} (from ${why})`);
 
   const dir = join(outRoot, tag);
   mkdirSync(dir, { recursive: true });

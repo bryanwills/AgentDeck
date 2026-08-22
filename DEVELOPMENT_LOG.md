@@ -106,9 +106,70 @@ SSOT notes, `docs/esp32.md`, 브라우저 완료 화면 카피 세 곳에 예외
 빌드 시점에 생성한다 — 체크인한 사본은 의존성이 범프되는 순간 조용히 낡는데, 이 파일이
 가져야 할 유일한 성질이 "실제로 나간 것에 대해 정확함" 이다.
 
+### 적대적 리뷰가 잡은 것 (머지 전, 2종 병렬)
+
+**세 가지가 blocking 이었다.**
+
+1. **CLI 태그 해석이 지금 이 순간 깨져 있었다.** `resolveFirmware` 가 `config.h` 의
+   `FIRMWARE_VERSION` 을 **존재 확인 없이** 썼다. 내가 그 파일을 1.0.7 로 범프했는데
+   `esp32-v1.0.7` 은 아직 없으니, **문서가 첫 줄에 적어 둔 `agentdeck esp32 flash 86box`
+   가 모든 체크아웃에서 실패**했다. 게다가 오류가 두 번 오진했다 — 없는 릴리스의 404 와
+   없는 에셋의 404 가 바이트 동일이라 "이 릴리스엔 매니페스트가 없다"로 보고했고,
+   "더 새 --tag 를 쓰라"는 1.0.7 이 이미 최신이라 실행 불가능한 조언이었다.
+   웃긴 건 `scripts/fetch-flash-firmware.mjs` 에는 **내가 올바른 규칙을 이미 써 뒀고
+   그 주석이 정확히 이 버그를 설명한다** — "규칙 2 단독은 범프와 태그 사이 master push
+   에서 깨진다". CLI 가 규칙 2 단독이었다. 범프→태그 창마다 재발한다.
+2. **워크플로 스텝의 자기 폴백이 `set -e` 때문에 도달 불가능했다.** GitHub 은 `run:` 을
+   `bash -e {0}` 로 돌리므로 대입문 안의 실패한 명령 치환이 스텝 전체를 죽인다
+   (`bash -e -c 'V=$(echo x | grep -oE NOPE); echo reached'` → `reached` 안 찍히고 exit 1).
+   즉 `VERSION` 이 비는 경우를 대비해 써 둔 `${VERSION:-<unset>}` 분기가 **영원히 실행되지
+   않고**, `gh release list` 의 일시적 rate limit 하나가 리포트·디자인시스템·디바이스까지
+   **사이트 전체를 내린다** — 정작 그 아래 두 스텝은 빈 태그에 대해 조심스럽게 fail-soft 인데.
+3. **태그 해석이 두 번 구현돼 있었고 테스트된 쪽이 CI 에서 죽어 있었다.** 워크플로가
+   `--tag` 를 넘기니 `resolveTag()` 는 항상 `source:'flag'` 를 반환했다. 실제 결정은
+   테스트 없는 bash 복제본이 내리고, `docs/pages-site.md` 는 스크립트가 "어느 규칙을 썼는지
+   출력한다"고 적어 뒀는데 CI 에선 `--tag` 밖에 출력할 수 없었다. → `--print-tag` 모드를
+   만들어 **해석기를 하나로** 합쳤다(캐시 키도 그 출력에서 온다).
+
+**그리고 두 가지 HIGH.**
+
+4. **suspend 가 진행 중인 `openPort()` 와 레이스한다.** `pollForDevices` 는 `await
+   openPort()` 동안 포트를 `openingPorts` 에 들고 있는데(fd open + `stty` exec, 수백 ms~초),
+   `releaseESP32SerialPorts` 는 `connections` 만 본다 — 그 포트는 아직 거기 없다. 그래서
+   open 중에 도착한 suspend 는 `released: 0` 을 보고하고, CLI 는 "Daemon serial suspended"
+   를 찍고, 1초 뒤 open 이 완료되며 **살아 있는 연결을 push** 한다. lease 때문에 poll 이
+   조기 반환하니 아무도 그걸 거두지 않고, `sendHeartbeat` 가 5초마다 **esptool 이 펌웨어를
+   쓰고 있는 바로 그 TTY 에 JSON 을 쓴다.** 정확히 lease 가 막으려던 실패다.
+   → 세대 카운터(Swift `ESP32Serial` 의 `OpenAttemptToken` 과 같은 규칙).
+5. **teardown 의 `await` 가 무한히 멈출 수 있고, 그게 lease resume 을 막는다.**
+   `Transport.disconnect()` 는 `waitForUnlock()` 에서 데드라인 없이 스핀하고,
+   `Transport.write()` 에는 **try/finally 가 없다** — 보드를 뽑아 `writer.write()` 가
+   reject 되면 writable 이 영구히 잠기고 그 스핀은 절대 끝나지 않는다. 그 teardown 이
+   CLI 의 `finally` 가 기다리는 자리라, 명령은 출력 없이 멈추고 데몬 시리얼은 lease 만료
+   (420s/900s)까지 죽어 있는다. → 전부 bounded. (레포 규칙: 외부 peer await 엔 timeout.)
+
+**MEDIUM 셋.** `--erase` 가 `stub: false` 보드에서 **조용한 no-op** 이었다
+(`eraseAll` 은 스텁 전용) — 하필 `ttgo_t_display` 가 `webFlash: true` 라, 보드를 남에게
+넘기며 erase 를 체크하고 "MD5 verified" 까지 본 사용자가 **이전 소유자의 WiFi 자격증명과
+페어링 토큰이 남은 보드**를 건네게 된다. 이제 양쪽 다 거부한다. // 가드는 `board.flashSize`
+를 검사하는데 쓰이는 건 `entry.flashSize` 였다 — 둘은 의도적으로 분리돼 있으므로(매니페스트는
+릴리스 태그에서, 스펙은 번들에서) **가드가 아무도 쓰지 않는 값을 검증**할 수 있었다.
+`imageGeometry` 를 SSOT 판정에 추가. // `whoHoldsPort` 가 "볼 수 없었음"을 "아무도 안
+잡고 있음"으로 세탁했다(lsof 미설치·타임아웃·EPERM 전부 `[]`) — 이건 lease 가 닿지 못하는
+샌드박스 데몬에 대한 **유일한** 가드다.
+
+**LOW.** `parseInt` 미검증(`--baud abc` → NaN 이 `?? ` 를 통과해 칩을 정의되지 않은 보율로
+보낸다) · 펌웨어 미배포 상태에서 비활성 보드가 `· verified` 로 렌더(정확히 "미지원으로
+읽힌다"는 그 혼동) · `i18n.ts` 의 `head.kicker` 가 KO/JA 에 없음 · `pages-nav.html` 이
+자기를 "four committed surfaces" 라 부름 · 리드 문구가 카드 여섯에 절 다섯.
+
+리뷰가 확인한 것도 기록해 둔다: 프리플라이트 우회 경로 없음, 데몬 인증 게이트가 세 라우트
+전부 커버, lease 만료/손상 처리 정상, md5 는 14개 크기에서 `node:crypto` 와 일치,
+esptool-js API 사용이 0.6.1 소스와 전부 일치, npm 패키징 정상(`bundle.js` 가 tarball 에 있음).
+
 ### 검증
 
-vitest 3375 통과(+63), 보드 매트릭스 교차검증, docs/스펙카드/GNB/토큰/서피스 미러
+vitest 3387 통과(+75), 보드 매트릭스 교차검증, docs/스펙카드/GNB/토큰/서피스 미러
 게이트 전부 통과, `tools/web-flasher` 디자인 린트 위반 0(추적 파일 기준 총계 89 = 베이스라인).
 로컬에서 Vite 빌드 → 워크플로의 조립 순서 그대로 `_site` 를 만들어 정적 서빙 →
 Chrome 에서 확인: 매니페스트 로드, 미검증 보드 비활성 + 사유 표시, 로케일 전환,

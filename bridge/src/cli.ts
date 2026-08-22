@@ -1631,13 +1631,28 @@ esp32Cmd
 
 async function runEsp32Flash(target: string, opts: Record<string, any>): Promise<void> {
     const {
-      resolveFlashBoard, resolveFirmware, flashBoard, whoHoldsPort, classifyHolders,
+      resolveFlashBoard, resolveFirmware, flashBoard, scanPortHolders, classifyHolders,
       readDeviceIdentity, SERIAL_PROBE_UNAVAILABLE,
     } = await import('./esp32-flash.js');
     const { listCandidatePorts, loadSerialPort } = await import('./esp32-flash-transport.js');
 
     const board = resolveFlashBoard(target);
     log(`Board: ${board.name} (${board.id}) — ${board.chipFamily}, ${board.flashSize}`);
+
+    // Validate the numeric options BEFORE anything else. `parseInt('abc')` is
+    // NaN, and `NaN ?? board.uploadBaud` keeps the NaN (?? only falls through on
+    // null/undefined) — which reaches `changeBaud()` and puts the chip at an
+    // undefined rate. A wrong --daemon-port is milder but silent: the URL throws,
+    // callDaemon swallows it, and the flash proceeds UNSUSPENDED while printing
+    // "No daemon answered".
+    const positiveInt = (raw: unknown, flag: string): number | undefined => {
+      if (raw == null) return undefined;
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n <= 0) throw new Error(`${flag} must be a positive integer, got "${raw}"`);
+      return n;
+    };
+    const flashBaud = positiveInt(opts.baud, '--baud');
+    const daemonPortOpt = positiveInt(opts.daemonPort, '--daemon-port');
 
     // --- resolve the image BEFORE touching hardware. A download that fails
     // after the daemon has been stood down leaves the machine in a worse state
@@ -1691,8 +1706,16 @@ async function runEsp32Flash(target: string, opts: Record<string, any>): Promise
     // --- who holds it? The lease below covers the Node daemon, including a
     // respawn. It cannot cover the sandboxed Swift daemon (which cannot read
     // ~/.agentdeck) or anything else, so look before asking.
-    const holders = await whoHoldsPort(portPath);
-    const { ours, foreign } = classifyHolders(holders);
+    const scan = await scanPortHolders(portPath);
+    if (!scan.known) {
+      // "Could not look" is not "nothing is holding it". The lease covers the
+      // Node daemon including a respawn, but NOT the sandboxed macOS app, and
+      // this check is the only thing that would have caught it — so say the
+      // check did not run rather than implying it passed.
+      log(`WARNING: could not check who holds ${portPath} — ${scan.reason}.`);
+      log('  Quit the AgentDeck app and stop any serial monitor before continuing.');
+    }
+    const { ours, foreign } = classifyHolders(scan.known ? scan.holders : []);
     if (foreign.length > 0) {
       throw new Error(
         `${portPath} is held by ${foreign.map((h) => `${h.command}(${h.pid})`).join(', ')}.\n`
@@ -1700,9 +1723,8 @@ async function runEsp32Flash(target: string, opts: Record<string, any>): Promise
       );
     }
 
-    const daemonPort = opts.daemonPort != null ? parseInt(opts.daemonPort, 10) : undefined;
     const resolvedDaemonPort = await (async () => {
-      if (daemonPort != null) return daemonPort;
+      if (daemonPortOpt != null) return daemonPortOpt;
       const { readDaemonInfo, findDaemonPort } = await import('./session-registry.js');
       const info = readDaemonInfo();
       return info?.httpPort ?? info?.port ?? findDaemonPort() ?? BRIDGE_WS_PORT;
@@ -1743,7 +1765,13 @@ async function runEsp32Flash(target: string, opts: Record<string, any>): Promise
         portPath,
         fw.image,
         fw.entry ?? { flashMode: board.flashMode, flashFreq: board.flashFreq, flashSize: board.flashSize },
-        { eraseAll: Boolean(opts.erase), baud: opts.baud ? parseInt(opts.baud, 10) : undefined },
+        {
+          eraseAll: Boolean(opts.erase),
+          baud: flashBaud,
+          // Only a manifest-sourced image has a geometry that can DISAGREE with
+          // the board spec; a hand-supplied --firmware has none.
+          imageIsFromManifest: fw.entry !== undefined,
+        },
         {
           onPhase: (ph) => log(`  ${ph}…`),
           onProgress: (w, total) => {

@@ -1531,11 +1531,17 @@ async function pollForDevices(): Promise<void> {
       }
 
       openingPorts.add(port);
+      const generation = serialOpenGeneration;
       try {
         const conn = await openPort(port);
-        if (conn && !connections.some(c => c.port === port)) {
+        // Re-checked AFTER the await: a flash lease may have been taken while
+        // this open was in flight, and adopting the connection now would hand
+        // the flasher's TTY back to the heartbeat writer.
+        const stale = generation !== serialOpenGeneration;
+        if (conn && !stale && !connections.some(c => c.port === port)) {
           connections.push(conn);
         } else if (conn) {
+          if (stale) debug('ESP32', `Discarding open of ${port} — ports were released mid-open`);
           conn.connected = false;
           closeConnection(conn);
         }
@@ -1737,6 +1743,26 @@ export function handleESP32Wake(): void {
  * Stop ESP32 serial bridge and close all connections.
  */
 /**
+ * Bumped every time the ports are released. An `openPort()` already in flight
+ * when that happens carries the OLD generation and must throw its result away.
+ *
+ * Without it, suspend has a hole exactly where it matters: `pollForDevices`
+ * holds a port in `openingPorts` across `await openPort()` — an fd open plus an
+ * `stty` exec, hundreds of ms to seconds — and `releaseESP32SerialPorts` only
+ * sees `connections`, which that port is not in yet. So a suspend arriving
+ * mid-open reports `released: 0`, the CLI logs "Daemon serial suspended", and a
+ * second later the open resolves and pushes a live connection holding the fd.
+ * The lease then makes `pollForDevices` early-return for the whole flash, so
+ * nothing reaps it, while `sendHeartbeat` keeps writing JSON into the same TTY
+ * that esptool is writing firmware to. Two writers on one macOS TTY corrupt
+ * each other rather than failing cleanly.
+ *
+ * Same rule as `OpenAttemptToken` in the Swift `ESP32Serial`: teardown must
+ * invalidate async work it cannot await.
+ */
+let serialOpenGeneration = 0;
+
+/**
  * Drop every open serial FD without tearing the bridge down.
  *
  * This is what a flash lease needs and `stopESP32Serial()` is not: the timers
@@ -1747,13 +1773,24 @@ export function handleESP32Wake(): void {
  * steal each other's bytes rather than failing cleanly.
  */
 export function releaseESP32SerialPorts(reason: string): number {
+  // Invalidate in-flight opens FIRST, so an open that resolves during this
+  // function is discarded rather than pushed onto the list we are clearing.
+  serialOpenGeneration++;
+  const inFlight = openingPorts.size;
   const released = connections.length;
   for (const conn of connections) {
     conn.connected = false;
     closeConnection(conn);
   }
   connections = [];
-  if (released > 0) debug('ESP32', `Released ${released} serial port(s): ${reason}`);
+  if (released > 0 || inFlight > 0) {
+    debug(
+      'ESP32',
+      `Released ${released} serial port(s)` +
+        (inFlight > 0 ? ` and invalidated ${inFlight} in-flight open(s)` : '') +
+        `: ${reason}`,
+    );
+  }
   return released;
 }
 

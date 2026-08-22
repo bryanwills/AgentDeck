@@ -12,6 +12,8 @@ import { join } from 'path';
 import { createHash } from 'crypto';
 import {
   classifyHolders,
+  parseLsofHolders,
+  pickFirmwareTag,
   firmwareCacheDir,
   firmwareVersionFromCheckout,
   resolveFirmware,
@@ -71,6 +73,57 @@ describe('classifyHolders', () => {
     // own is never quietly taken over. A deny-list would have to predict every
     // terminal program that can hold a TTY.
     expect(classifyHolders([{ command: 'CoolTerm', pid: 9 }]).foreign).toHaveLength(1);
+  });
+});
+
+describe('pickFirmwareTag', () => {
+  // TWO RULES, IN ORDER, AND NEITHER WORKS ALONE. Taking the checkout's version
+  // unconditionally broke the first command in the docs for every checkout the
+  // moment the version was bumped ahead of its tag.
+  const published = ['esp32-v1.0.6', 'esp32-v1.0.5', 'esp32-v1.0.1'];
+
+  it('prefers the checkout version when that release is published', () => {
+    expect(pickFirmwareTag('1.0.6', published)).toEqual({ tag: 'esp32-v1.0.6', source: 'config' });
+  });
+
+  it('falls back to the newest release in the bump-before-tag window', () => {
+    // The exact state of master right after a version bump: config.h names a
+    // release that does not exist yet.
+    expect(pickFirmwareTag('1.0.7', published)).toEqual({ tag: 'esp32-v1.0.6', source: 'latest' });
+  });
+
+  it('falls back when there is no checkout at all (installed from npm)', () => {
+    expect(pickFirmwareTag(undefined, published)).toEqual({ tag: 'esp32-v1.0.6', source: 'latest' });
+  });
+
+  it('refuses rather than inventing a tag', () => {
+    expect(() => pickFirmwareTag('1.0.7', [])).toThrow(/no esp32-v\* release found/);
+  });
+
+  it('reports WHICH rule it used', () => {
+    // Without it, "the wrong firmware" and "the right firmware" look identical.
+    expect([
+      pickFirmwareTag('1.0.6', published).source,
+      pickFirmwareTag('1.0.7', published).source,
+    ]).toEqual(['config', 'latest']);
+  });
+});
+
+describe('parseLsofHolders', () => {
+  it('pairs each command with its pid and ignores the fd lines', () => {
+    // `-F cp` still emits `f<fd>`; real output, captured from a live port.
+    expect(parseLsofHolders('p14271\ncnode\nf40\n')).toEqual([{ command: 'node', pid: 14271 }]);
+  });
+
+  it('handles several holders', () => {
+    expect(parseLsofHolders('p1\ncnode\nf3\np2\ncscreen\nf7\n')).toEqual([
+      { command: 'node', pid: 1 },
+      { command: 'screen', pid: 2 },
+    ]);
+  });
+
+  it('reads empty output as no holders', () => {
+    expect(parseLsofHolders('')).toEqual([]);
   });
 });
 

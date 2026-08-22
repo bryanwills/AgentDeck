@@ -47,6 +47,7 @@ const EN = {
   "s2.h": "2 · Pick your board",
   "s2.label": "Board",
   "s2.unavailable": "This board is not offered here yet.",
+  "s2.nofirmware": "No firmware is deployed on this page, so no board can be flashed here yet.",
   "s2.alt":
     "Flash it with <code class=\"mono\">agentdeck esp32 flash</code>, or build it from source with PlatformIO.",
 
@@ -62,6 +63,8 @@ const EN = {
   "s4.h": "4 · Install",
   "s4.btn": "Install firmware",
   "s4.erase": "erase the whole flash first (slower; clears saved Wi-Fi and pairing token)",
+  "s4.erase-unavailable":
+    "This board is flashed through its ROM loader, which has no erase command — erasing is unavailable here. The firmware still installs; saved Wi-Fi and the pairing token are kept.",
   "s4.confirm": "Do not unplug the board until this finishes.",
   "s4.detected": "Detected",
   "s4.expected": "Expected",
@@ -77,6 +80,8 @@ const EN = {
   "v.flash-too-small":
     "Refusing to write: the image declares more flash than this part reports. That combination leaves an unbootable header.",
   "v.board-not-offered": "This board is not offered for browser flashing.",
+  "v.image-geometry-mismatch":
+    "Refusing to write: the deployed firmware was built for different flash geometry than this page expects for the board. Flash it from the terminal with a matching release instead.",
   "v.noforce":
     "There is no override. Pick the board you actually have, or flash it from the terminal.",
 
@@ -99,6 +104,8 @@ const EN = {
     "To put Wi-Fi credentials on it, plug it in with the daemon running and use <code class=\"mono\">agentdeck wifi-setup</code>.",
 
   "err.h": "That did not work",
+  "err.page-holds-port":
+    "This page is still holding the serial port from a previous attempt. Reload the page and try again.",
   "err.port-busy":
     "The serial port is held by another program. That is almost always the AgentDeck daemon or the macOS app — stop both, then try again.",
   "err.no-port": "No port was selected.",
@@ -107,6 +114,8 @@ const EN = {
   "err.manifest":
     "No firmware is deployed on this page yet. Flash from the terminal instead, or grab the release assets.",
   "err.download": "The firmware download failed or did not match its published hash. Reload and try again.",
+  "err.erase-unavailable":
+    "Erasing is not available on this board. Untick it and install again — the firmware still installs.",
   "err.md5":
     "The board's flash does not match what was sent. Nothing was verified — flash again before using the board.",
   "err.retry": "Try again",
@@ -119,6 +128,9 @@ const EN = {
 export type MessageKey = keyof typeof EN;
 
 const KO: Partial<Record<MessageKey, string>> = {
+  // A brand name, but present so the dictionaries are complete sets: the only
+  // gate over these is that every key EN defines has a peer here.
+  "head.kicker": "AgentDeck",
   "head.h1": "ESP32 펌웨어 설치",
   "head.lede":
     "보드를 USB로 연결하면 이 페이지에서 바로 AgentDeck 펌웨어를 설치합니다. 체크아웃도, PlatformIO도, 툴체인도 필요 없습니다.",
@@ -146,6 +158,7 @@ const KO: Partial<Record<MessageKey, string>> = {
   "s2.h": "2 · 보드 선택",
   "s2.label": "보드",
   "s2.unavailable": "이 보드는 아직 여기서 제공하지 않습니다.",
+  "s2.nofirmware": "이 페이지에 배포된 펌웨어가 없어서 아직 어떤 보드도 설치할 수 없습니다.",
   "s2.alt":
     "<code class=\"mono\">agentdeck esp32 flash</code>로 설치하거나, PlatformIO로 소스에서 빌드하세요.",
 
@@ -161,6 +174,8 @@ const KO: Partial<Record<MessageKey, string>> = {
   "s4.h": "4 · 설치",
   "s4.btn": "펌웨어 설치",
   "s4.erase": "먼저 플래시 전체 지우기 (느림; 저장된 WiFi와 페어링 토큰이 사라집니다)",
+  "s4.erase-unavailable":
+    "이 보드는 ROM 로더로 플래시되는데 거기엔 지우기 명령이 없어서, 여기서는 지우기를 쓸 수 없습니다. 펌웨어는 정상 설치되며 저장된 WiFi와 페어링 토큰은 남습니다.",
   "s4.confirm": "끝날 때까지 보드를 뽑지 마세요.",
   "s4.detected": "검출",
   "s4.expected": "기대",
@@ -175,6 +190,8 @@ const KO: Partial<Record<MessageKey, string>> = {
   "v.flash-too-small":
     "쓰기를 거부합니다: 이미지가 선언한 플래시 크기가 이 부품이 보고한 크기보다 큽니다. 이 조합은 부팅 불가능한 헤더를 남깁니다.",
   "v.board-not-offered": "이 보드는 브라우저 플래싱을 제공하지 않습니다.",
+  "v.image-geometry-mismatch":
+    "쓰기를 거부합니다: 배포된 펌웨어가 이 페이지가 이 보드에 대해 기대하는 플래시 지오메트리와 다르게 빌드됐습니다. 맞는 릴리스로 터미널에서 설치하세요.",
   "v.noforce": "우회 수단은 없습니다. 실제로 가진 보드를 고르거나, 터미널에서 설치하세요.",
 
   "p.download": "펌웨어 내려받는 중",
@@ -195,6 +212,8 @@ const KO: Partial<Record<MessageKey, string>> = {
     "WiFi 자격 증명은 데몬을 켠 채 케이블을 꽂고 <code class=\"mono\">agentdeck wifi-setup</code>으로 넣으세요.",
 
   "err.h": "실패했습니다",
+  "err.page-holds-port":
+    "이전 시도에서 이 페이지가 아직 시리얼 포트를 잡고 있습니다. 페이지를 새로고침한 뒤 다시 시도하세요.",
   "err.port-busy":
     "다른 프로그램이 시리얼 포트를 잡고 있습니다. 거의 항상 AgentDeck 데몬이나 macOS 앱입니다 — 둘 다 종료하고 다시 시도하세요.",
   "err.no-port": "포트를 선택하지 않았습니다.",
@@ -203,6 +222,8 @@ const KO: Partial<Record<MessageKey, string>> = {
   "err.manifest":
     "이 페이지에 아직 배포된 펌웨어가 없습니다. 터미널에서 설치하거나 릴리스 에셋을 직접 받으세요.",
   "err.download": "펌웨어 내려받기에 실패했거나 게시된 해시와 일치하지 않습니다. 새로고침 후 다시 시도하세요.",
+  "err.erase-unavailable":
+    "이 보드에서는 지우기를 쓸 수 없습니다. 체크를 풀고 다시 설치하세요 — 펌웨어는 정상 설치됩니다.",
   "err.md5":
     "보드의 플래시가 보낸 내용과 다릅니다. 검증되지 않았으니 사용하기 전에 다시 설치하세요.",
   "err.retry": "다시 시도",
@@ -213,6 +234,7 @@ const KO: Partial<Record<MessageKey, string>> = {
 };
 
 const JA: Partial<Record<MessageKey, string>> = {
+  "head.kicker": "AgentDeck",
   "head.h1": "ESP32ファームウェアを書き込む",
   "head.lede":
     "ボードをUSBで接続すれば、このページからAgentDeckファームウェアをインストールできます。チェックアウトもPlatformIOもツールチェーンも不要です。",
@@ -240,6 +262,7 @@ const JA: Partial<Record<MessageKey, string>> = {
   "s2.h": "2 · ボードを選ぶ",
   "s2.label": "ボード",
   "s2.unavailable": "このボードはまだここでは提供していません。",
+  "s2.nofirmware": "このページにデプロイ済みファームウェアがないため、まだどのボードも書き込めません。",
   "s2.alt":
     "<code class=\"mono\">agentdeck esp32 flash</code>で書き込むか、PlatformIOでソースからビルドしてください。",
 
@@ -255,6 +278,8 @@ const JA: Partial<Record<MessageKey, string>> = {
   "s4.h": "4 · インストール",
   "s4.btn": "ファームウェアをインストール",
   "s4.erase": "先にフラッシュ全体を消去する（低速; 保存済みWi-Fiとペアリングトークンが消えます）",
+  "s4.erase-unavailable":
+    "このボードはROMローダー経由で書き込むため消去コマンドがなく、ここでは消去できません。ファームウェアは通常どおりインストールされ、保存済みWi-Fiとペアリングトークンは残ります。",
   "s4.confirm": "完了するまでボードを抜かないでください。",
   "s4.detected": "検出",
   "s4.expected": "期待値",
@@ -269,6 +294,8 @@ const JA: Partial<Record<MessageKey, string>> = {
   "v.flash-too-small":
     "書き込みを拒否します: イメージが宣言するフラッシュ容量が、この部品の報告値より大きいです。この組み合わせは起動不能なヘッダーを残します。",
   "v.board-not-offered": "このボードはブラウザ書き込みに対応していません。",
+  "v.image-geometry-mismatch":
+    "書き込みを拒否します: デプロイ済みファームウェアが、このページがこのボードに期待するフラッシュ形状とは異なる設定でビルドされています。対応するリリースでターミナルから書き込んでください。",
   "v.noforce": "回避手段はありません。実際に持っているボードを選ぶか、ターミナルから書き込んでください。",
 
   "p.download": "ファームウェアをダウンロード中",
@@ -289,6 +316,8 @@ const JA: Partial<Record<MessageKey, string>> = {
     "Wi-Fi認証情報は、daemonを起動した状態でケーブルを挿し<code class=\"mono\">agentdeck wifi-setup</code>で書き込んでください。",
 
   "err.h": "うまくいきませんでした",
+  "err.page-holds-port":
+    "前回の試行からこのページがまだシリアルポートを掴んでいます。ページを再読み込みして再試行してください。",
   "err.port-busy":
     "別のプログラムがシリアルポートを掴んでいます。ほぼ必ずAgentDeck daemonかmacOSアプリです — 両方を終了してから再試行してください。",
   "err.no-port": "ポートが選択されませんでした。",
@@ -297,6 +326,8 @@ const JA: Partial<Record<MessageKey, string>> = {
   "err.manifest":
     "このページにはまだファームウェアがデプロイされていません。ターミナルから書き込むか、リリースアセットを直接取得してください。",
   "err.download": "ファームウェアのダウンロードに失敗したか、公開ハッシュと一致しませんでした。再読み込みして再試行してください。",
+  "err.erase-unavailable":
+    "このボードでは消去できません。チェックを外して再度インストールしてください — ファームウェアは通常どおり入ります。",
   "err.md5": "ボードのフラッシュが送信内容と一致しません。検証できていないので、使う前に書き込み直してください。",
   "err.retry": "再試行",
   "err.raw": "生ログ",

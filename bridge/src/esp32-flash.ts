@@ -78,15 +78,49 @@ const api = async (path: string): Promise<unknown> => {
   return res.json();
 };
 
-/** Newest `esp32-v*` tag, or undefined when the repo has none. */
-export async function latestFirmwareTag(): Promise<string | undefined> {
+/** Every published `esp32-v*` tag, newest first. */
+export async function listFirmwareTags(): Promise<string[]> {
   const releases = (await api(`/repos/${GITHUB_REPO}/releases?per_page=100`)) as Array<{
     tag_name?: string;
     created_at?: string;
   }>;
   return releases
     .filter((r) => typeof r.tag_name === 'string' && r.tag_name.startsWith('esp32-v'))
-    .sort((a, b) => (String(a.created_at) < String(b.created_at) ? 1 : -1))[0]?.tag_name;
+    .sort((a, b) => (String(a.created_at) < String(b.created_at) ? 1 : -1))
+    .map((r) => r.tag_name as string);
+}
+
+/** Newest `esp32-v*` tag, or undefined when the repo has none. */
+export async function latestFirmwareTag(): Promise<string | undefined> {
+  return (await listFirmwareTags())[0];
+}
+
+/**
+ * Which release a bare `agentdeck esp32 flash <board>` takes firmware from.
+ *
+ * TWO RULES, IN THIS ORDER, AND NEITHER WORKS ALONE. The checkout's
+ * `FIRMWARE_VERSION` names the release this source tree belongs to — but it is
+ * bumped BEFORE the tag is pushed, so during that window it names a release
+ * that does not exist yet. Taking it unconditionally is how the first command
+ * in the docs came to fail from every checkout the moment the version was
+ * bumped (and the 404 it produced was indistinguishable from "this release has
+ * no manifest", so it also misdiagnosed itself).
+ *
+ * Deliberately the same shape as `resolveTag` in
+ * `scripts/fetch-flash-firmware.mjs`. That one runs in CI with `gh`; this one
+ * runs on a user's machine with `fetch`. Same rules, same reported `source`.
+ */
+export function pickFirmwareTag(
+  configVersion: string | undefined,
+  published: readonly string[],
+): { tag: string; source: 'config' | 'latest' } {
+  if (configVersion) {
+    const candidate = `esp32-v${configVersion}`;
+    if (published.includes(candidate)) return { tag: candidate, source: 'config' };
+  }
+  const latest = published[0];
+  if (!latest) throw new Error(`no esp32-v* release found in ${GITHUB_REPO}`);
+  return { tag: latest, source: 'latest' };
 }
 
 export function firmwareVersionFromCheckout(configH: string): string | undefined {
@@ -158,14 +192,31 @@ export async function resolveFirmware(
   }
 
   let tag = opts.tag;
-  if (!tag && opts.checkoutConfigH) {
-    const v = firmwareVersionFromCheckout(opts.checkoutConfigH);
-    if (v) tag = `esp32-v${v}`;
+  const configVersion = opts.checkoutConfigH
+    ? firmwareVersionFromCheckout(opts.checkoutConfigH)
+    : undefined;
+  if (!tag && opts.offline) {
+    // Offline cannot ask which releases exist, so it cannot apply rule 2's
+    // existence check. The checkout's own version is a LOCAL fact though, and
+    // using it is the whole point of an offline run against a warm cache — so
+    // take it optimistically here and let the cache lookup below produce the
+    // error if nothing was cached for it.
+    if (!configVersion) throw new Error('--offline needs --tag or --firmware; nothing to resolve');
+    tag = `esp32-v${configVersion}`;
   }
   if (!tag) {
-    if (opts.offline) throw new Error('--offline needs --tag or --firmware; nothing to resolve');
-    tag = await latestFirmwareTag();
-    if (!tag) throw new Error(`no esp32-v* release found in ${GITHUB_REPO}`);
+    // One API call answers both rules: is the checkout's version published, and
+    // what is the newest release. Checking existence is the whole point — see
+    // pickFirmwareTag.
+    const picked = pickFirmwareTag(configVersion, await listFirmwareTags());
+    tag = picked.tag;
+    log(
+      `Firmware release: ${tag} (${
+        picked.source === 'config'
+          ? "this checkout's esp32/src/config.h"
+          : 'newest published esp32-v* release'
+      })`,
+    );
   }
 
   const dir = firmwareCacheDir(tag);
@@ -180,9 +231,15 @@ export async function resolveFirmware(
       // the merged-image pipeline and publishes no manifest at all. Saying so
       // points at the fix; "HTTP 404" points at nothing.
       if (/HTTP 404/.test(String(e))) {
+        // Reached only after the tag was confirmed to exist (pickFirmwareTag
+        // checks the published list), so this is specifically "that release has
+        // no manifest", never "no such release" — the two produce identical
+        // 404s and conflating them misdiagnoses both.
         throw new Error(
           `${tag} publishes no manifest.json — it predates the merged-image pipeline.\n` +
-            '  Use a newer --tag, or pass --firmware with a locally built image.',
+            '  Every release up to esp32-v1.0.6 is in that state. Either cut a newer\n' +
+            '  esp32-v* release, pass --tag once one exists, or pass --firmware with a\n' +
+            '  locally built image.',
         );
       }
       throw e;
@@ -228,22 +285,59 @@ export async function resolveFirmware(
 
 export interface PortHolder { command: string; pid: number }
 
-export async function whoHoldsPort(port: string): Promise<PortHolder[]> {
-  if (process.platform === 'win32') return []; // no lsof; the open() failure is the signal
+/**
+ * Three answers, not two — because this is the ONLY guard against the holder
+ * the lease provably cannot reach (the sandboxed Swift daemon cannot read
+ * `~/.agentdeck`).
+ *
+ * `lsof` exits non-zero when nothing holds the file, so a failed run really is
+ * the common "free" case. But it ALSO exits non-zero when it is not installed
+ * (a minimal Linux container), when the 5s timeout fires, and on EPERM — and
+ * collapsing those into `[]` launders "I could not look" into "nobody is
+ * holding it", which is the exact trap `esp32FlashIdIsUsable` exists to avoid
+ * on the flash-size axis, inverted to the permissive direction.
+ */
+export type PortHolderScan =
+  | { known: true; holders: PortHolder[] }
+  | { known: false; reason: string };
+
+export function parseLsofHolders(stdout: string): PortHolder[] {
+  const holders: PortHolder[] = [];
+  let pid = 0;
+  // `-F cp` still emits `f<fd>` lines; anything that is not p/c is ignored.
+  for (const line of stdout.split('\n')) {
+    if (line.startsWith('p')) pid = Number(line.slice(1));
+    else if (line.startsWith('c')) holders.push({ command: line.slice(1), pid });
+  }
+  return holders;
+}
+
+export async function scanPortHolders(port: string): Promise<PortHolderScan> {
+  if (process.platform === 'win32') {
+    // No lsof at all. Stated as unknown rather than free: on Windows the open()
+    // failure is the only signal, and pretending otherwise would be a claim.
+    return { known: false, reason: 'lsof is not available on Windows' };
+  }
   try {
     const { stdout } = await execFileAsync('lsof', ['-F', 'cp', port], { timeout: 5000 });
-    const holders: PortHolder[] = [];
-    let pid = 0;
-    for (const line of stdout.split('\n')) {
-      if (line.startsWith('p')) pid = Number(line.slice(1));
-      else if (line.startsWith('c')) holders.push({ command: line.slice(1), pid });
+    return { known: true, holders: parseLsofHolders(stdout) };
+  } catch (e) {
+    const err = e as { code?: unknown; killed?: boolean; stdout?: string };
+    // The ONE failure that means "free": lsof ran, found nothing, exited 1 with
+    // no output. Everything else is a failure to observe.
+    if (err.code === 1 && !err.killed && !String(err.stdout ?? '').trim()) {
+      return { known: true, holders: [] };
     }
-    return holders;
-  } catch {
-    // lsof exits non-zero when nothing holds the file. That is the common case
-    // and means "free", not "unknown".
-    return [];
+    if (err.killed) return { known: false, reason: 'lsof timed out after 5s' };
+    if (err.code === 'ENOENT') return { known: false, reason: 'lsof is not installed' };
+    return { known: false, reason: `lsof failed (${String(err.code ?? 'unknown error')})` };
   }
+}
+
+/** Back-compat convenience: holders, or none when they could not be observed. */
+export async function whoHoldsPort(port: string): Promise<PortHolder[]> {
+  const scan = await scanPortHolders(port);
+  return scan.known ? scan.holders : [];
 }
 
 /** Processes AgentDeck itself is responsible for, and can therefore ask to let go. */
@@ -274,6 +368,39 @@ export interface FlashOutcome {
 }
 
 /**
+ * Bound a teardown await that can never be trusted to return.
+ *
+ * `Transport.disconnect()` calls `waitForUnlock()`, a `while (locked)` spin
+ * with NO deadline — and `Transport.write()` has no try/finally, so a rejected
+ * `writer.write()` (board unplugged, native-USB CDC re-enumerating, driver
+ * error mid-write) leaves the writable stream locked permanently. The spin then
+ * never exits.
+ *
+ * That matters far more than a leaked handle: this runs in the `finally` that
+ * the CLI's own `finally` waits on before POSTing `/esp32/serial/resume`. A
+ * hang there means the command produces no further output AND the daemon's
+ * serial layer stays down for the entire 420s/900s lease. Abandoning the
+ * teardown is strictly better than inheriting its hang — the fd is released
+ * when the process exits, and the lease expires on its own clock.
+ *
+ * Repo rule: every await on an external peer gets a bound.
+ */
+async function bounded(work: Promise<unknown>, ms: number, what: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      work.catch(() => undefined),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); }),
+    ]);
+  } catch {
+    // A teardown failure is never worth surfacing over the outcome it follows.
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  void what;
+}
+
+/**
  * Connect, identify, refuse-or-write, verify by MD5. Mirrors the browser's
  * `flash.ts` step for step; the two share `esp32PreflightVerdict` so they can
  * never disagree about which board may be written.
@@ -282,8 +409,9 @@ export async function flashBoard(
   board: Esp32BoardSpec,
   portPath: string,
   image: Buffer,
-  geometry: Pick<ManifestBoardEntry, 'flashMode' | 'flashFreq' | 'flashSize'>,
-  opts: { eraseAll?: boolean; baud?: number } = {},
+  geometry: Pick<ManifestBoardEntry, 'flashMode' | 'flashFreq' | 'flashSize'> &
+    Partial<Pick<ManifestBoardEntry, 'chipFamily'>>,
+  opts: { eraseAll?: boolean; baud?: number; imageIsFromManifest?: boolean } = {},
   cb: FlashProgress = {},
 ): Promise<FlashOutcome> {
   const SerialPort = await loadSerialPort();
@@ -345,16 +473,39 @@ export async function flashBoard(
       surface: 'cli',
       detectedChip: chip,
       detectedFlashSize: flashSize,
+      // Only when the geometry came from a manifest. A hand-supplied
+      // --firmware has none to disagree with, and inventing one from the board
+      // spec would make the check compare a value against itself.
+      imageGeometry: opts.imageIsFromManifest
+        ? { chipFamily: String(geometry.chipFamily), flashSize: geometry.flashSize }
+        : undefined,
     });
     if (!verdict.mayWrite) {
       throw new Error(
         `refusing to write ${board.id}: ${verdict.code}\n` +
           `  detected: ${chip}${flashSize ? `, flash ${flashSize}` : ''}\n` +
           `  expected: ${board.chipFamily}, flash ${board.flashSize}\n` +
+          (verdict.code === 'image-geometry-mismatch'
+            ? `  the image says: ${geometry.chipFamily ?? '?'}, flash ${geometry.flashSize}\n` +
+              '  The release you are installing was built for different geometry than this\n' +
+              '  build knows this board to have. Use a matching --tag.\n'
+            : '') +
           '  There is no --force. Pick the board you actually have.',
       );
     }
 
+    if (opts.eraseAll && !board.stub) {
+      // esptool-js only honours eraseAll on the stub path (esploader.js:
+      // `if (this.IS_STUB === true && options.eraseAll === true)`). Silently
+      // skipping it would hand back a board still carrying the previous owner's
+      // Wi-Fi credentials and pairing token, right after printing "erase" and
+      // "MD5 verified".
+      throw new Error(
+        `--erase cannot be honoured on ${board.id}: it flashes through the ROM loader\n` +
+          '  (--no-stub), where esptool-js has no erase command. Re-run without --erase to\n' +
+          '  write the firmware, or erase the chip with esptool.py.',
+      );
+    }
     cb.onPhase?.(opts.eraseAll ? 'erase' : 'write');
     await loader.writeFlash({
       fileArray: [{ data: new Uint8Array(image), address: 0x0 }],
@@ -378,8 +529,10 @@ export async function flashBoard(
 
     return { chip, mac, flashSize, verdict, bytes: image.length, elapsedMs: Date.now() - t0 };
   } finally {
-    try { await transport.disconnect(); } catch { /* ignore */ }
-    await device.close();
+    // Bounded, in this order: disconnect tries to leave the port unlocked, and
+    // close releases the fd whether or not it managed to.
+    await bounded(transport.disconnect(), 4000, 'transport.disconnect');
+    await bounded(device.close(), 4000, 'device.close');
   }
 }
 

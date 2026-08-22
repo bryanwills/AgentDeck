@@ -82,7 +82,16 @@ function renderBoardOptions() {
     // page; a board shown with its reason sends them to the right one.
     const available = Boolean(offeredIn(loaded, b));
     o.disabled = !available;
-    o.textContent = `${b.name} — ${b.id}${available ? "" : " · " + b.webFlashStatus}`;
+    // The suffix is the REASON this option is disabled, not a status badge. With
+    // no firmware deployed every board is disabled, and reading `webFlashStatus`
+    // there rendered five of them as "· verified" while greyed out — which reads
+    // as a broken page rather than a missing release.
+    const reason = !available
+      ? loaded
+        ? ` · ${b.webFlashStatus}`
+        : " · no firmware deployed"
+      : "";
+    o.textContent = `${b.name} — ${b.id}${reason}`;
     sel.appendChild(o);
   }
   const firstEnabled = BOARDS.find((b) => offeredIn(loaded, b));
@@ -99,7 +108,12 @@ function renderBoardNotes(p: BoardProfile) {
     `${p.chipFamily} · ${p.flashSize} · ${p.flashMode}/${p.flashFreq} · ${p.uploadBaud} baud`,
   ];
   if (!entry) {
-    facts.push(t("s2.unavailable"), p.webFlashVerified, t("s2.alt"));
+    // Same distinction as the option label: "we have not measured this board"
+    // and "this page has no firmware at all" are different problems with
+    // different fixes.
+    facts.push(loaded ? t("s2.unavailable") : t("s2.nofirmware"));
+    if (loaded) facts.push(p.webFlashVerified);
+    facts.push(t("s2.alt"));
   }
   for (const text of [...facts, ...p.notes]) {
     const d = document.createElement("div");
@@ -108,6 +122,18 @@ function renderBoardNotes(p: BoardProfile) {
     host.appendChild(d);
   }
   $("entry-hint").innerHTML = t(p.nativeUsb ? "s3.hint.native" : "s3.hint.uart");
+
+  // esptool-js honours eraseAll only on the stub path, so on a --no-stub board
+  // ticking it would have been silently dropped — after the UI showed an
+  // "erase" phase and "MD5 verified", leaving the previous owner's Wi-Fi
+  // credentials and pairing token in place. Disabled up front, with the reason,
+  // instead of refused after the user commits.
+  const erase = $<HTMLInputElement>("ck-erase");
+  erase.disabled = !p.stub;
+  if (!p.stub) erase.checked = false;
+  $("erase-note").textContent = p.stub ? "" : t("s4.erase-unavailable");
+  $("erase-note").hidden = p.stub;
+
   refreshProbeButton();
 }
 
@@ -167,6 +193,10 @@ function clearError() {
 function classifyOpenError(e: unknown): MessageKey {
   const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
   if (/NotFoundError|No port selected|no port was/i.test(msg)) return "err.no-port";
+  // "already open" means THIS page still holds it, not the daemon. The teardown
+  // paths make that unreachable now, but mapping it to the daemon message would
+  // be a diagnosis the user cannot act on, so it gets its own.
+  if (/InvalidStateError|already open/i.test(msg)) return "err.page-holds-port";
   if (/NetworkError|Failed to open|access denied|busy/i.test(msg)) return "err.port-busy";
   if (/md5/i.test(msg)) return "err.md5";
   return "err.connect";
@@ -187,7 +217,7 @@ async function doProbe() {
     btn.textContent = t("s3.working");
     // Any previous session belongs to a port the user has now replaced.
     if (session) { await finish(session, current ?? p).catch(() => {}); session = null; }
-    session = await connectAndIdentify(device, p, { onLog: log });
+    session = await connectAndIdentify(device, p, offeredIn(loaded, p), { onLog: log });
     current = p;
     $("install-card").hidden = false;
     renderIdentity(p);
@@ -241,7 +271,11 @@ async function doInstall() {
     log(`${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
     const msg = e instanceof Error ? e.message : String(e);
     showError(
-      /sha256|manifest says|HTTP \d/.test(msg) ? "err.download" : classifyOpenError(e),
+      msg === "erase-unavailable"
+        ? "err.erase-unavailable"
+        : /sha256|manifest says|HTTP \d/.test(msg)
+          ? "err.download"
+          : classifyOpenError(e),
       msg,
     );
     btn.disabled = false;

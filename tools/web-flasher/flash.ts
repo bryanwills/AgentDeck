@@ -64,6 +64,7 @@ function terminalFor(onLog?: (line: string) => void) {
 export async function connectAndIdentify(
   device: SerialPort,
   profile: BoardProfile,
+  entry: ManifestBoard | undefined,
   cb: FlashCallbacks = {},
 ): Promise<FlashSession> {
   cb.onPhase?.("connect");
@@ -108,6 +109,13 @@ export async function connectAndIdentify(
       surface: "browser",
       detectedChip: chip,
       detectedFlashSize: flashSize,
+      // The page ships from master; its manifest comes from whichever release
+      // Pages deployed. So the geometry the guard checks and the geometry
+      // written into the flash-params header can legitimately differ, and
+      // checking only the bundled spec would validate a number nobody writes.
+      imageGeometry: entry
+        ? { chipFamily: entry.chipFamily, flashSize: entry.flashSize }
+        : undefined,
     });
 
     // On SUCCESS the session stays open on purpose: a refusing verdict is
@@ -116,7 +124,7 @@ export async function connectAndIdentify(
     // for being the problem. `finish()` is the caller's release.
     return { loader, transport, identified: { chip, mac, flashId, flashSize, verdict } };
   } catch (e) {
-    try { await transport.disconnect(); } catch { /* already gone */ }
+    await bounded(transport.disconnect(), 4000);
     throw e;
   }
 }
@@ -144,6 +152,12 @@ export async function writeMerged(
   if (!session.identified.verdict.mayWrite) {
     throw new Error(`refusing to write: preflight verdict ${session.identified.verdict.code}`);
   }
+  if (opts.eraseAll && !board.stub) {
+    // esptool-js honours eraseAll only on the stub path. Silently skipping it
+    // returns a board still holding the previous owner's Wi-Fi credentials and
+    // pairing token, having just shown "erase" and "MD5 verified".
+    throw new Error("erase-unavailable");
+  }
   const t0 = performance.now();
   cb.onPhase?.(opts.eraseAll ? "erase" : "write");
 
@@ -159,9 +173,8 @@ export async function writeMerged(
     flashMode: board.flashMode,
     flashFreq: board.flashFreq,
     flashSize: board.flashSize,
-    // esptool-js only honours eraseAll on the stub path (`IS_STUB === true`),
-    // so on a --no-stub board this is a no-op rather than an error. Said here
-    // because a silently ignored "erase everything" is worth knowing about.
+    // Reachable only for stub boards — the no-stub case was refused above,
+    // because esptool-js drops eraseAll silently on the ROM loader.
     eraseAll: opts.eraseAll ?? false,
     compress: true,
     reportProgress: (_i, written, total) => {
@@ -179,10 +192,29 @@ export async function writeMerged(
   return { bytes: image.length, elapsedMs: Math.round(performance.now() - t0) };
 }
 
-/** Reset the board into the firmware and drop the port. */
+/**
+ * Bound a teardown await that can never be trusted to return.
+ *
+ * `Transport.disconnect()` spins in `waitForUnlock()` with no deadline, and
+ * `Transport.write()` has no try/finally — so a write rejected by an unplugged
+ * board leaves the stream locked and that spin never exits. Here the cost of
+ * inheriting the hang is the probe button staying disabled forever with no
+ * explanation, which reads as a frozen page.
+ */
+async function bounded(work: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    work.catch(() => undefined),
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); }),
+  ]);
+  if (timer) clearTimeout(timer);
+}
+
+/** Reset the board into the firmware and drop the port. Never throws, never hangs. */
 export async function finish(session: FlashSession, profile: BoardProfile): Promise<void> {
-  try {
-    await session.loader.after(profile.after === "no_reset" ? "no_reset" : "hard_reset");
-  } catch { /* best effort — the write already landed */ }
-  try { await session.transport.disconnect(); } catch { /* ignore */ }
+  await bounded(
+    session.loader.after(profile.after === "no_reset" ? "no_reset" : "hard_reset"),
+    4000,
+  );
+  await bounded(session.transport.disconnect(), 4000);
 }

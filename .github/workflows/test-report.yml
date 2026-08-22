@@ -124,25 +124,25 @@ jobs:
           ANDROID_OUTCOME: ${{ steps.android.outcome }}
           GITHUB_SHA: ${{ github.sha }}
 
-      # The tag is resolved BEFORE the cache step so the cache key can name it.
-      # Resolution order and its reasoning live in the script; it prints which
-      # rule it used, because a silently-chosen tag makes a wrong firmware
-      # deployment indistinguishable from a right one.
+      # Resolved BEFORE the cache step, because the tag IS the cache key.
+      #
+      # One resolver, not two. This used to re-derive the tag in bash, which
+      # meant the real decision was made by an untested duplicate while the
+      # tested resolveTag() only ever saw the explicit --tag this step passed
+      # it. `--print-tag` prints the tag on stdout and its reasoning on stderr.
+      #
+      # `|| true` is load-bearing: GitHub runs `run:` as `bash -e {0}`, so a
+      # failing command substitution in an assignment aborts the whole step —
+      # and a transient rate-limit on the GitHub API would then take down
+      # reports, design-system and devices along with the flasher, while both
+      # steps below are carefully fail-soft on an empty tag.
       - name: Resolve firmware tag
         id: fwtag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=$(grep -oE 'FIRMWARE_VERSION[[:space:]]*=[[:space:]]*"[^"]+"' esp32/src/config.h | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-          TAG=""
-          if [ -n "$VERSION" ] && gh release view "esp32-v$VERSION" --json tagName >/dev/null 2>&1; then
-            TAG="esp32-v$VERSION"
-            echo "tag $TAG (esp32/src/config.h FIRMWARE_VERSION)"
-          else
-            TAG=$(gh release list --limit 100 --json tagName,createdAt \
-                  | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["tagName"].startswith("esp32-v")]; r.sort(key=lambda x: x["createdAt"], reverse=True); print(r[0]["tagName"] if r else "")')
-            echo "tag ${TAG:-<none>} (newest esp32-v* release; config.h says ${VERSION:-<unset>})"
-          fi
+          TAG=$(node scripts/fetch-flash-firmware.mjs --print-tag) || true
+          echo "resolved tag: ${TAG:-<none>}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Cache firmware images
@@ -161,7 +161,7 @@ jobs:
         if: steps.fwtag.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/fetch-flash-firmware.mjs --out _site/flash/fw --tag "${{ steps.fwtag.outputs.tag }}"
+        run: node scripts/fetch-flash-firmware.mjs --out _site/flash/fw
 
       - name: Assemble Pages site
         run: |
