@@ -549,7 +549,13 @@ export async function flashBoard(
       // board that deliberately asks for 'soft_reset' or 'no_reset_stub' — a
       // wrong reset on a board whose flags are an accident record.
       await loader.after(board.after);
-    } catch { /* best effort — the write already landed and was verified */ }
+    } catch (e) {
+      // Say it. The write already landed and was verified, so this never fails
+      // the command — but the reset is exactly what the boot check below
+      // depends on, and swallowing it silently makes a board left parked in the
+      // stub byte-identical to a board that booted and stayed quiet.
+      cb.log?.(`reset after write failed (${e instanceof Error ? e.message : String(e)}) — the board may need a power cycle`);
+    }
 
     return { chip, mac, flashSize, verdict, bytes: image.length, elapsedMs: Date.now() - t0 };
   } finally {

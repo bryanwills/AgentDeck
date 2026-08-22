@@ -1807,8 +1807,18 @@ async function runEsp32Flash(target: string, opts: Record<string, any>): Promise
         log('Waiting for the board to introduce itself…');
         const id = await readDeviceIdentity(portPath);
         if (!id) {
-          log('WARNING: no device_info within 20s. The write verified, but the board did not report in.');
-          log('  Power-cycle it and check `agentdeck devices` before assuming this failed.');
+          // NOT a failure signal, and it must not read like one. esptool-js's
+          // hard reset is a RELEASE with no ASSERT (reset.js HardReset: it only
+          // does `sleep(100); setRTS(false)`), so on boards whose adapter does
+          // not leave EN asserted after the write it is a no-op and the chip is
+          // left parked in the flasher stub rather than booted. Measured on
+          // 86box 2026-08-22: silent for 200s with exclusive port access after
+          // every one of four writes, then up in 2.0s once `esptool --after
+          // hard-reset` pulsed EN for real. The bytes are correct either way —
+          // MD5 already proved that against the chip.
+          log('Flash complete. The board has not restarted itself — power-cycle it.');
+          log('  Some adapters are not reset by the flasher; this is expected, not a failed write.');
+          log('  After replugging, confirm with `agentdeck devices`.');
         } else if (id.board && id.board !== board.id) {
           log(`WARNING: the board reports itself as "${id.board}", not "${board.id}".`);
         } else {
