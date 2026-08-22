@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { request } from 'http';
 import { BRIDGE_WS_PORT } from './types.js';
-import { SESSION_WEIGHT_MIN, SESSION_WEIGHT_MAX, stopDeliveryLoss } from '@agentdeck/shared';
+import { SESSION_WEIGHT_MIN, SESSION_WEIGHT_MAX, stopDeliveryLoss, ESP32_BOARDS } from '@agentdeck/shared';
 import { ensureBleRuntime, getBleRuntimeStatus } from './python-ble-runtime.js';
 import {
   TASK_NAME,
@@ -331,22 +331,19 @@ function prepareBleRuntime() {
 // daemon-server.ts). These are two different namespaces — the pio env `ttgo`
 // vs. the board string `ttgo_t_display` — so a short alias used to build fine
 // locally but fail the upload with "No online WiFi ESP32 target matches …".
-// This SSOT lists each OTA-capable board with its canonical `board` string, its
-// pio `env`, and every accepted alias; the CLI resolves the alias to `board`
-// BEFORE the upload POST so every alias works end-to-end. Add both fields when
-// adding a board.
-interface Esp32OtaBoard { board: string; env: string; aliases: string[]; }
-const ESP32_OTA_BOARDS: Esp32OtaBoard[] = [
-  { board: 'inkdeck', env: 'inkdeck', aliases: [] },
-  { board: 'ulanzi_tc001', env: 'led8x32', aliases: ['led8x32'] },
-  { board: 'ttgo_t_display', env: 'ttgo', aliases: ['ttgo'] },
-  { board: 'round_amoled', env: 'amoled', aliases: ['amoled'] },
-  { board: 'ips_35', env: 'ips35', aliases: ['ips35'] },
-  { board: '86box', env: 'box_86', aliases: ['box_86', 'box_40'] },
-  { board: 'ips_10', env: 'ips10', aliases: ['ips10', 'ips_101'] },
-  { board: 't_embed', env: 't_embed', aliases: ['tembed', 'knob'] },
-  { board: 't_display_pro', env: 't_display_pro', aliases: ['tdisplaypro', 'ticker', 's3pro'] },
-];
+// The CLI resolves the alias to `board` BEFORE the upload POST so every alias
+// works end-to-end.
+//
+// The board list itself lives in `shared/src/esp32-boards.ts` — it was written
+// out by hand here, in the release-workflow matrix, in the spec sheet and in
+// docs/esp32.md, with a gate on only one of those edges. `esp32_c6_147` is
+// absent from the OTA map because it STATES `ota: false` (single-app 4MB, no
+// OTA slot), rather than by being a line nobody wrote.
+const ESP32_OTA_BOARDS = ESP32_BOARDS.filter((b) => b.ota).map((b) => ({
+  board: b.id,
+  env: b.env,
+  aliases: b.aliases,
+}));
 
 // alias/board/env-key → { env, board }. Built from the SSOT above.
 export const ESP32_OTA_BY_TARGET: Record<string, { env: string; board: string }> = {};

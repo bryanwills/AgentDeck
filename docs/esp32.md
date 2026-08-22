@@ -120,6 +120,8 @@ Daemon API는 `POST /esp32/ota` 이며 CLI는 이 엔드포인트를 호출한�
 
 OTA 대상 SSOT. **`agentdeck esp32-ota <target>`의 `<target>`은 로컬 PlatformIO env뿐 아니라 daemon이 연결된 기기를 매칭하는 키(firmware의 `device_info.board` 문자열)로도 그대로 쓰인다 — 아래 굵게 표시한 별칭만 둘 다 만족한다.** 다른 별칭은 `--build`까지는 되어도 실제 보드가 그 이름으로 자신을 보고하지 않아 업로드 단계에서 `No online WiFi ESP32 target matches …`로 실패한다:
 
+> 이 표의 **별칭과 env는 `shared/src/esp32-boards.ts`가 정본**이고, 운영 메모(오른쪽 열)만 사람이 쓴다. `node scripts/generate-esp32-board-matrix.mjs --check` 가 양쪽을 대조해 **문서에만 있고 CLI가 받지 않는 별칭**을 실패로 잡는다 — 실제로 `amoled_18` 이 그 상태였고(문서에는 있는데 CLI에는 없어 `No online WiFi ESP32 target matches` 로 실패), 이 게이트가 처음 잡아냈다.
+
 | Target aliases | PlatformIO env | OTA slot size | 운영 메모 |
 |---|---|---:|---|
 | `inkdeck` | `inkdeck` | ~3.3MB | Seeed XIAO ESP32-S3 Plus BSP와 일치하도록 8MB layout 유지 |

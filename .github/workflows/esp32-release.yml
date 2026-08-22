@@ -30,6 +30,7 @@ jobs:
         # namespaces, so assets are named by the canonical id: the file you
         # download is then literally the target you pass to the OTA command.
         board:
+          # ESP32-BOARDS:BEGIN (generated from shared/src/esp32-boards.ts by scripts/generate-esp32-board-matrix.mjs — do not edit by hand)
           - { env: box_86, board: 86box, name: '86 Box', display: '4" 480x480 ST7701', ota: 'yes' }
           - { env: ips35, board: ips_35, name: 'IPS 3.5"', display: '3.5" 480x320 AXS15231B', ota: 'yes' }
           - { env: amoled, board: round_amoled, name: 'Round AMOLED', display: '1.8" 360x360 ST77916', ota: 'yes' }
@@ -40,6 +41,7 @@ jobs:
           - { env: t_embed, board: t_embed, name: 'T-Embed CC1101', display: '1.9" 320x170 ST7789', ota: 'yes' }
           - { env: t_display_pro, board: t_display_pro, name: 'T-Display-S3-Pro', display: '2.33" 480x222 ST7796U', ota: 'yes' }
           - { env: esp32_c6_147, board: esp32_c6_147, name: 'Waveshare C6-LCD-1.47', display: '1.47" 172x320 ST7789', ota: 'no' }
+          # ESP32-BOARDS:END
 
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +52,21 @@ jobs:
           node scripts/verify-release-version.mjs esp32 "$VERSION"
           node scripts/verify-version-sync.mjs
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The merged image and the manifest are driven by shared/src/esp32-boards.ts,
+      # so the shared package has to be built before either script runs.
+      - name: Build shared (board SSOT)
+        run: |
+          pnpm install --frozen-lockfile --filter @agentdeck/shared...
+          pnpm --filter @agentdeck/shared build
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -57,6 +74,14 @@ jobs:
 
       - name: Install PlatformIO
         run: pip install platformio
+
+      # Pinned deliberately. esptool renamed its subcommands between v4 and v5
+      # (`merge_bin`/`--flash_size` -> `merge-bin`/`--flash-size`); un-pinned, a
+      # routine upstream release breaks a firmware cut at tag time, when the
+      # tag is already pushed. 5.1.2 is the version the merge recipe was
+      # validated against on real hardware.
+      - name: Install esptool
+        run: pip install "esptool==5.1.2"
 
       - name: Build ${{ matrix.board.name }}
         run: |
@@ -66,7 +91,7 @@ jobs:
       - name: Collect firmware
         run: |
           set -euo pipefail
-          mkdir -p dist/meta
+          mkdir -p dist
           ENV='${{ matrix.board.env }}'
           BOARD='${{ matrix.board.board }}'
           cp "esp32/.pio/build/$ENV/firmware.bin" "dist/agentdeck-$BOARD.bin"
@@ -75,13 +100,35 @@ jobs:
           if [ -f "esp32/.pio/build/$ENV/bootloader.bin" ]; then
             cp "esp32/.pio/build/$ENV/bootloader.bin" "dist/agentdeck-$BOARD-bootloader.bin"
           fi
-          # The release notes are rendered from these rows rather than from a
-          # second hand-written table, so a board that built can never be left
-          # out of the table it is listed in (TC001 was, in 1.0.1).
-          printf '%s\t%s\t%s\t%s\t%s\n' \
-            '${{ matrix.board.name }}' "$BOARD" '${{ matrix.board.display }}' "$ENV" '${{ matrix.board.ota }}' \
-            > "dist/meta/$BOARD.tsv"
+          # boot_app0 (0xe000) selects which OTA slot boots. It is the ONE input
+          # that does not live in .pio/build — it ships inside the Arduino
+          # framework package — which is why this step could never have picked
+          # it up, and why a hand-assembled flash could write a fresh app0 and
+          # still boot the previous slot.
+          BOOT_APP0="$(ls -1 "$HOME"/.platformio/packages/framework-arduinoespressif32*/tools/partitions/boot_app0.bin 2>/dev/null | head -1)"
+          if [ -z "$BOOT_APP0" ]; then
+            echo "boot_app0.bin not found under ~/.platformio/packages" >&2
+            exit 1
+          fi
+          cp "$BOOT_APP0" "dist/agentdeck-$BOARD-boot_app0.bin"
+          # The per-board .tsv that used to live here is gone: the release notes
+          # are rendered from manifest.json now, so the tsv had become a second
+          # board list nothing read or checked — the exact shape this change
+          # exists to remove.
           ls -la dist/
+
+      # One file, one offset (0x0), every chip. This is what removes the
+      # bootloader-offset, flash-size and boot_app0 hazards from every consumer
+      # at once — and the script reads the header back OUT of the merged image
+      # to prove it, because merge-bin patches the flash parameters into its own
+      # output and nothing else would notice a wrong geometry.
+      - name: Merge factory image for ${{ matrix.board.name }}
+        run: |
+          node scripts/esp32-merge-firmware.mjs \
+            --board '${{ matrix.board.board }}' \
+            --build-dir "esp32/.pio/build/${{ matrix.board.env }}" \
+            --boot-app0 "dist/agentdeck-${{ matrix.board.board }}-boot_app0.bin" \
+            --out dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -98,6 +145,19 @@ jobs:
       # rendered from CHANGELOG.md, so it needs the repository too.
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build shared (board SSOT)
+        run: |
+          pnpm install --frozen-lockfile --filter @agentdeck/shared...
+          pnpm --filter @agentdeck/shared build
+
       - name: Extract version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#esp32-v}" >> "$GITHUB_OUTPUT"
@@ -109,7 +169,7 @@ jobs:
           merge-multiple: true
 
       - name: List firmware files
-        run: ls -la firmware/ firmware/meta/
+        run: ls -la firmware/
 
       - name: Checksums
         run: |
@@ -118,47 +178,27 @@ jobs:
           sha256sum agentdeck-*.bin > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # The manifest is what the browser flasher and `agentdeck esp32 flash`
+      # actually read: which single file to write, at which offset, and whether
+      # a hardware run ever proved this board flashable. It FAILS when a board
+      # in the SSOT has missing artifacts — the current failure mode is the
+      # opposite, a board that ships nothing while every step stays green.
+      - name: Generate firmware manifest
+        run: |
+          set -euo pipefail
+          node scripts/generate-firmware-manifest.mjs firmware --tag "$GITHUB_REF_NAME" > firmware/manifest.json
+          node -e "const m=require('./firmware/manifest.json');console.log(m.boards.length+' boards in manifest '+m.release)"
+
       - name: Render release notes
         run: |
           set -euo pipefail
-          {
-            echo "Firmware for every board this repository builds. Each asset is named by"
-            echo "the board's **canonical id** — the same string the firmware reports as"
-            echo '`device_info.board` and the one `agentdeck esp32-ota <target>` takes, so'
-            echo "the file you download is the target you pass."
-            echo
-            echo "| Board | Asset | Display | PlatformIO env | Wi-Fi OTA |"
-            echo "|---|---|---|---|---|"
-            cat firmware/meta/*.tsv | sort | while IFS=$'\t' read -r name board display env ota; do
-              echo "| $name | \`agentdeck-$board.bin\` | $display | \`$env\` | $ota |"
-            done
-            echo
-            echo "Each board also ships \`-partitions.bin\` and \`-bootloader.bin\` for a full"
-            echo "USB flash. \`SHA256SUMS.txt\` covers every attached binary."
-            echo
-            echo "### Update over Wi-Fi"
-            echo
-            echo '```bash'
-            echo "agentdeck esp32-ota <board> --firmware agentdeck-<board>.bin"
-            echo '```'
-            echo
-            echo "The board must already be provisioned and connected to the daemon over"
-            echo "Wi-Fi. \`86box\` and \`ips_10\` units flashed before 2026-07-05 may still carry"
-            echo "a factory/NO_OTA layout and need one USB full flash first."
-            echo
-            echo "### Flash over USB"
-            echo
-            echo '```bash'
-            echo "# from a checkout — PlatformIO knows each chip's bootloader offset"
-            echo "cd esp32 && pio run -e <env> -t upload"
-            echo
-            echo "# or the application image alone; app0 starts at 0x10000 on every board here"
-            echo "esptool.py --port PORT write_flash 0x10000 agentdeck-<board>.bin"
-            echo '```'
-          } > firmware-detail.md
-          # The board table is rendered from the artifacts that actually built,
-          # so it cannot be a checked-in template — it is passed in as the tail
-          # that follows this version's CHANGELOG section.
+          # The board table and the USB instructions are rendered from the
+          # manifest, so a board that built cannot be left out of the table it
+          # is listed in, and the instructions cannot describe a file set that
+          # did not ship. This replaces a hand-echoed block whose USB recipe
+          # (`write_flash 0x10000 <app>`) was incomplete — no bootloader offset,
+          # no boot_app0 — in a way that quietly boots the previous OTA slot.
+          node scripts/render-esp32-release-notes.mjs firmware/manifest.json > firmware-detail.md
           node scripts/release-notes.mjs "$GITHUB_REF_NAME" --template firmware-detail.md > notes.md
           cat notes.md
 
@@ -169,4 +209,5 @@ jobs:
           body_path: notes.md
           files: |
             firmware/agentdeck-*.bin
+            firmware/manifest.json
             firmware/SHA256SUMS.txt

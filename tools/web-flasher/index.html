@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flash AgentDeck firmware</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+KR:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+</head>
+<body>
+<main class="wrap">
+  <header class="head">
+    <p class="kicker">AgentDeck</p>
+    <h1>Flash ESP32 firmware</h1>
+    <p class="lede">Connect a board over USB and install AgentDeck firmware from the browser.
+      No checkout, no PlatformIO, no toolchain.</p>
+    <p class="fw" id="fw-line">Firmware: <span class="mono" id="fw-version">not loaded</span></p>
+  </header>
+
+  <!-- Shown INSTEAD of the flow when Web Serial is unavailable. Checked before
+       anything renders, because failing after a user commits is the worst order. -->
+  <section class="card block" id="unsupported" hidden>
+    <h2>This browser cannot flash</h2>
+    <p id="unsupported-why"></p>
+    <p>Use <strong>Chrome</strong> or <strong>Edge</strong> on a desktop computer, or flash from the terminal:</p>
+    <pre class="code"><code id="cli-fallback">agentdeck esp32 flash &lt;board&gt;</code></pre>
+    <button class="btn ghost" id="copy-cli" type="button">Copy command</button>
+  </section>
+
+  <div id="flow">
+    <section class="card block">
+      <h2>1 · Free the serial port</h2>
+      <p>A running AgentDeck daemon holds <code>/dev/cu.*</code>, and every open resets the board.
+        This is the most common cause of a failed flash — and this page
+        <strong>cannot detect it</strong> (an HTTPS page may not probe your local daemon).</p>
+      <label class="check"><input type="checkbox" id="ck-daemon">
+        <span>I ran <code class="mono">agentdeck daemon stop</code> and quit the AgentDeck app</span></label>
+      <p class="hint">Verify with <code class="mono">lsof /dev/cu.*</code> — it should print nothing.</p>
+    </section>
+
+    <section class="card block">
+      <h2>2 · Pick your board</h2>
+      <label class="field"><span>Board</span>
+        <select id="board"></select></label>
+      <div id="board-notes" class="notes"></div>
+    </section>
+
+    <section class="card block">
+      <h2>3 · Connect</h2>
+      <p class="hint" id="entry-hint"></p>
+      <div class="row">
+        <button class="btn" id="probe" type="button" disabled>Connect &amp; identify</button>
+        <label class="check inline"><input type="checkbox" id="ck-baud" checked>
+          <span>also test the board's upload baud</span></label>
+      </div>
+      <p class="hint">This step only <strong>reads</strong> from the board. Nothing is written.</p>
+    </section>
+
+    <section class="card block" id="result-card" hidden>
+      <h2>Result</h2>
+      <div id="verdict"></div>
+      <table class="tbl" id="attempts"></table>
+      <details class="log"><summary>Raw log</summary><pre class="code" id="raw"></pre></details>
+      <button class="btn ghost" id="copy-json" type="button">Copy result JSON</button>
+    </section>
+  </div>
+</main>
+<script type="module" src="./main.ts"></script>
+</body>
+</html>

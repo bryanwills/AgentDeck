@@ -11,6 +11,15 @@ allowBuilds:
   node-pty: true
   sharp: true
   '@resvg/resvg-js': true
+  # serialport ships prebuilt bindings (node-gyp-build) and enumerates/opens
+  # ports fine without running its build script — verified 2026-08-22 against
+  # the real fleet. esbuild is already declined in ignoredBuiltDependencies.
+  '@serialport/bindings-cpp': false
+  # esbuild arrives via tsx. Its install script only fetches the platform
+  # binary, which pnpm already provides as @esbuild/darwin-arm64 — every tsx run
+  # in this repo worked with the script declined. Also listed in
+  # ignoredBuiltDependencies below; pnpm 11 wants the explicit decision here.
+  esbuild: false
 
 ignoredBuiltDependencies:
   - esbuild

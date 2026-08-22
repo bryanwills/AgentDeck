@@ -38,6 +38,14 @@ jobs:
       - name: Verify Markdown links, anchors, and heading structure
         run: node scripts/check-docs.mjs
 
+      # The ESP32 board set is written out in four places and only one edge had
+      # a gate. A board missing from the release matrix ships no firmware and
+      # nothing else fails — which is how three boards had no binaries at 1.0.1.
+      - name: Verify ESP32 board table
+        run: |
+          pnpm --filter @agentdeck/shared build
+          node scripts/generate-esp32-board-matrix.mjs --check
+
       # The Pages GNB is single-sourced from scripts/pages-nav.html; the four
       # committed surfaces must match the rendered partial (Build Health
       # renders it at generation time and cannot drift).
