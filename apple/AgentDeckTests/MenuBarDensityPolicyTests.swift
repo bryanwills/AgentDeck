@@ -3,6 +3,89 @@ import XCTest
 @testable import AgentDeck
 
 final class MenuBarDensityPolicyTests: XCTestCase {
+    private func activityRow(
+        key: String,
+        agent: String,
+        project: String?,
+        startedAt: Int,
+        endedAt: Int?
+    ) -> ApmeActivityHistory.Row {
+        ApmeActivityHistory.Row(
+            originKey: key,
+            agentType: agent,
+            sessionId: "session-\(key)",
+            taskIndex: 0,
+            projectName: project,
+            modelId: nil,
+            task: "Task \(key)",
+            startedAt: startedAt,
+            endedAt: endedAt,
+            durationMs: 999 * 60 * 60 * 1_000,
+            turnCount: 1,
+            inputTokens: nil,
+            outputTokens: nil,
+            costUsd: nil,
+            overallScore: nil,
+            provenance: ["swift"]
+        )
+    }
+
+    func testActivityGlanceCountsCompletionsInNamedWindowWithoutUsingDuration() {
+        let now = 200_000_000
+        let snapshot = ApmeActivityHistory.makeSnapshot(rows: [
+            activityRow(
+                key: "old-start-recent-finish", agent: "claude-code", project: "AgentDeck",
+                startedAt: now - MenuBarActivityGlance.windowMs - 10_000,
+                endedAt: now - 1_000
+            ),
+            activityRow(
+                key: "boundary", agent: "codex-cli", project: "AgentDeck",
+                startedAt: now - MenuBarActivityGlance.windowMs - 1_000,
+                endedAt: now - MenuBarActivityGlance.windowMs
+            ),
+            activityRow(
+                key: "open", agent: "codex-cli", project: "Other",
+                startedAt: now - 5_000,
+                endedAt: nil
+            ),
+            activityRow(
+                key: "future", agent: "codex-cli", project: "Other",
+                startedAt: now,
+                endedAt: now + 1_000
+            ),
+        ])
+
+        let glance = MenuBarActivityGlance.make(from: snapshot, nowMs: now)
+
+        XCTAssertEqual(glance.completedCount, 2)
+        XCTAssertEqual(glance.projectCount, 1)
+        XCTAssertEqual(glance.agents, [
+            MenuBarActivityAgent(agentType: "claude-code", completedCount: 1, lastCompletedAt: now - 1_000),
+            MenuBarActivityAgent(
+                agentType: "codex-cli", completedCount: 1,
+                lastCompletedAt: now - MenuBarActivityGlance.windowMs
+            ),
+        ])
+        XCTAssertEqual(glance.recentRows.map(\.originKey), ["old-start-recent-finish", "boundary"])
+    }
+
+    func testActivityGlanceKeepsLatestCompletedContextWhenWindowIsEmpty() {
+        let now = 300_000_000
+        let old = activityRow(
+            key: "old", agent: "claude-code", project: nil,
+            startedAt: now - MenuBarActivityGlance.windowMs * 2,
+            endedAt: now - MenuBarActivityGlance.windowMs - 1
+        )
+        let snapshot = ApmeActivityHistory.makeSnapshot(rows: [old])
+
+        let glance = MenuBarActivityGlance.make(from: snapshot, nowMs: now)
+
+        XCTAssertEqual(glance.completedCount, 0)
+        XCTAssertTrue(glance.agents.isEmpty)
+        XCTAssertEqual(glance.lastCompletedAt, old.endedAt)
+        XCTAssertEqual(glance.recentRows.map(\.originKey), ["old"])
+    }
+
     func testCollectionDensityUsesStableDetailBands() {
         XCTAssertEqual(MenuBarDensityPolicy.collectionDensity(count: 0), .detailed)
         XCTAssertEqual(MenuBarDensityPolicy.collectionDensity(count: 6), .detailed)

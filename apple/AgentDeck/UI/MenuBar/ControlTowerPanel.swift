@@ -304,42 +304,66 @@ struct ControlTowerPanel: View {
                 detail: "Start the daemon to load activity."
             )
         } else if let snapshot = activitySnapshot, !snapshot.rows.isEmpty {
+            let glance = MenuBarActivityGlance.make(from: snapshot)
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(compactActivityDuration(snapshot.agents.reduce(0) { $0 + $1.durationMs }))
+                        Text("\(glance.completedCount) completed")
                             .font(.system(size: 23, weight: .semibold, design: .rounded))
                             .foregroundStyle(TerrariumHUD.text)
-                        Text("agent work · \(snapshot.rows.count) \(snapshot.rows.count == 1 ? "task" : "tasks")")
+                        Text(activityScopeLabel(glance))
                             .font(.system(size: 10))
                             .foregroundStyle(TerrariumHUD.subtext)
                     }
                     Spacer()
-                    Text(activitySourceLabel(snapshot))
+                    Text(activityFreshnessLabel(snapshot))
                         .font(.system(size: 9.5, weight: .medium))
-                        .foregroundStyle(TerrariumHUD.subtext)
+                        .foregroundStyle(activityFreshnessColor(snapshot))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(Capsule().fill(Color.white.opacity(0.07)))
                 }
 
-                VStack(spacing: 5) {
-                    ForEach(snapshot.agents, id: \.agentType) { agent in
-                        activityAgentRow(agent)
+                if glance.agents.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("No completed work in the last 24h")
+                            .font(.system(size: 10.5, weight: .medium))
+                        if let lastCompletedAt = glance.lastCompletedAt {
+                            Text("Last completion \(relativeActivityTime(lastCompletedAt))")
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(TerrariumHUD.subtext)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(Color.white.opacity(0.045))
+                    )
+                } else {
+                    VStack(spacing: 5) {
+                        ForEach(glance.agents) { agent in
+                            activityAgentRow(agent)
+                        }
                     }
                 }
 
-                Divider()
-                    .overlay(Color.white.opacity(0.08))
+                if !glance.recentRows.isEmpty {
+                    Divider()
+                        .overlay(Color.white.opacity(0.08))
 
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(snapshot.rows.count > 2 ? "RECENT TASKS · 2 OF \(snapshot.rows.count)" : "RECENT TASKS")
-                        .font(.system(size: 9.5, weight: .bold))
-                        .kerning(0.45)
-                        .foregroundStyle(TerrariumHUD.subtext)
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(glance.completedRowCount > glance.recentRows.count
+                            ? "RECENTLY COMPLETED · LATEST \(glance.recentRows.count)"
+                            : "RECENTLY COMPLETED")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .kerning(0.45)
+                            .foregroundStyle(TerrariumHUD.subtext)
 
-                    ForEach(Array(snapshot.rows.prefix(2)), id: \.originKey) { row in
-                        activityTaskRow(row)
+                        ForEach(glance.recentRows, id: \.originKey) { row in
+                            activityTaskRow(row)
+                        }
                     }
                 }
             }
@@ -367,7 +391,7 @@ struct ControlTowerPanel: View {
         }
     }
 
-    private func activityAgentRow(_ agent: ApmeActivityHistory.AgentSummary) -> some View {
+    private func activityAgentRow(_ agent: MenuBarActivityAgent) -> some View {
         HStack(spacing: 7) {
             SessionCreatureIcon(
                 agentType: agent.agentType,
@@ -379,13 +403,13 @@ struct ControlTowerPanel: View {
                 .font(.system(size: 10.5, weight: .medium))
                 .lineLimit(1)
             Spacer(minLength: 5)
-            Text(compactActivityDuration(agent.durationMs))
-                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-            Text("\(agent.taskCount)")
-                .font(.system(size: 9.5, design: .monospaced))
-                .foregroundStyle(TerrariumHUD.subtext)
-                .frame(width: 20, alignment: .trailing)
-                .accessibilityLabel("\(agent.taskCount) tasks")
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("\(agent.completedCount) completed")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                Text(relativeActivityTime(agent.lastCompletedAt))
+                    .font(.system(size: 9))
+                    .foregroundStyle(TerrariumHUD.subtext)
+            }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
@@ -411,7 +435,7 @@ struct ControlTowerPanel: View {
                     .foregroundStyle(TerrariumHUD.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text("\(displayAgentLabel(row.agentType)) · \(compactActivityDuration(row.durationMs)) · \(relativeActivityTime(row.startedAt))")
+                Text(activityTaskMetadata(row))
                     .font(.system(size: 9.5))
                     .foregroundStyle(TerrariumHUD.subtext)
                     .lineLimit(1)
@@ -435,15 +459,6 @@ struct ControlTowerPanel: View {
         .frame(maxWidth: .infinity, minHeight: 112)
     }
 
-    private func compactActivityDuration(_ milliseconds: Int) -> String {
-        let minutes = max(0, milliseconds) / 60_000
-        if minutes < 1 { return "<1m" }
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        let remainder = minutes % 60
-        return remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
-    }
-
     private func relativeActivityTime(_ milliseconds: Int) -> String {
         let seconds = max(0, Int(Date().timeIntervalSince1970) - milliseconds / 1_000)
         if seconds < 60 { return "now" }
@@ -454,11 +469,39 @@ struct ControlTowerPanel: View {
         return "\(hours / 24)d ago"
     }
 
-    private func activitySourceLabel(_ snapshot: ApmeActivityHistory.Snapshot) -> String {
-        let sources = Set(snapshot.rows.flatMap(\.provenance))
-        if sources.contains("swift") && sources.contains("node") { return "Swift + CLI" }
-        if sources.contains("node") { return "CLI" }
-        return "Swift"
+    private func activityScopeLabel(_ glance: MenuBarActivityGlance) -> String {
+        var parts = ["last 24h"]
+        if !glance.agents.isEmpty {
+            parts.append("\(glance.agents.count) \(glance.agents.count == 1 ? "agent" : "agents")")
+        }
+        if glance.projectCount > 0 {
+            parts.append("\(glance.projectCount) \(glance.projectCount == 1 ? "project" : "projects")")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func activityTaskMetadata(_ row: ApmeActivityHistory.Row) -> String {
+        var parts = [displayAgentLabel(row.agentType)]
+        if let project = row.projectName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !project.isEmpty {
+            parts.append(project)
+        }
+        if let endedAt = row.endedAt {
+            parts.append(relativeActivityTime(endedAt))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func activityFreshnessLabel(_ snapshot: ApmeActivityHistory.Snapshot) -> String {
+        let ageSeconds = max(0, Int(Date().timeIntervalSince1970) - snapshot.capturedAt / 1_000)
+        if ageSeconds < 60 { return "Updated now" }
+        if ageSeconds < 3_600 { return "Updated \(ageSeconds / 60)m ago" }
+        return "Data \(ageSeconds / 3_600)h old"
+    }
+
+    private func activityFreshnessColor(_ snapshot: ApmeActivityHistory.Snapshot) -> Color {
+        let ageSeconds = max(0, Int(Date().timeIntervalSince1970) - snapshot.capturedAt / 1_000)
+        return ageSeconds < 3_600 ? TerrariumHUD.subtext : DesignTokens.UI.attn
     }
 
     private func refreshActivitySummaryIfStale(force: Bool = false) {
