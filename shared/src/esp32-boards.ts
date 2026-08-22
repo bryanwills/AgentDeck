@@ -443,6 +443,23 @@ export function esp32PreflightVerdict(input: Esp32PreflightInput): Esp32Prefligh
   // the SSOT corrects a board down to 4MB, a pinned manifest still says 16MB,
   // the part reports 8MB — `4 <= 8` passes while a 16MB header lands on an 8MB
   // part, which is precisely the brick every other rule here exists to prevent.
+  //
+  // STRICT EQUALITY, NOT DIRECTIONAL, and deliberately so. Unlike the size rule
+  // below, these two values are not "declared vs actual": they are two
+  // descriptions of the SAME board from two sources that are supposed to agree
+  // (a release manifest, and this build's SSOT). A disagreement in either
+  // direction means they describe different boards and there is no way to tell
+  // which one is true.
+  //
+  // It is also the ONLY size check left when the flash id is unreadable — a
+  // stubless TTGO answers 0xffffff, `esp32FlashSizeIsSafe` returns undefined,
+  // and the size axis goes unchecked. Loosening this to a directional test
+  // would remove the sole guard in exactly the case with the least information.
+  //
+  // The cost is a release-ordering constraint, not a defect: after any SSOT
+  // flash-size change, the browser flasher refuses against the previously
+  // deployed release until Pages redeploys with the new manifest. Cut the esp32
+  // release, then push master. See RELEASING.md.
   const { imageGeometry } = input;
   if (imageGeometry &&
       (imageGeometry.flashSize !== board.flashSize || imageGeometry.chipFamily !== board.chipFamily)) {

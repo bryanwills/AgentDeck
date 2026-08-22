@@ -259,6 +259,17 @@ first:
    **Release**, not from Pages (it is not in a browser, so CORS does not apply,
    and Pages can lag a firmware cut by a whole master push).
 
+**A flash-size change in `shared/src/esp32-boards.ts` makes that order mandatory
+rather than merely preferable.** The write-time preflight compares the release
+manifest's geometry against the board SSOT with **strict equality**, in both
+directions — because the two are descriptions of the same board from sources
+that are supposed to agree, and because it is the only size check left on a
+board whose flash id cannot be read (a stubless TTGO answers `0xffffff`). So
+between an SSOT flash-size edit and the Pages redeploy that carries the matching
+manifest, the browser flasher refuses that board with `image-geometry-mismatch`.
+That is the guard working, not a regression: cut the `esp32-v*` release first,
+then push master.
+
 Assets are named by the board's **canonical id** (`agentdeck-<board>.bin`) — the string the firmware reports as `device_info.board` and the one `agentdeck esp32-ota <target>` resolves, so a downloaded file is directly the OTA target. The PlatformIO env is a separate namespace and appears only in the notes table. The release notes are rendered from the built artifacts rather than a second hand-written list, so a board that built cannot be missing from the table describing it. `fail-fast` plus the release job's `needs: build` mean a partial firmware set never publishes.
 
 ### Stream Deck plugin

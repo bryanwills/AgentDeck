@@ -193,6 +193,48 @@ describe('esp32PreflightVerdict', () => {
       expect(v).toMatchObject({ code: 'image-geometry-mismatch', mayWrite: false });
     });
 
+    it('refuses the CONSERVATIVE direction too — this is not the directional size rule', () => {
+      // A manifest saying 8MB against an SSOT saying 16MB would boot fine, so
+      // this refusal looks over-strict. It is not, and it must not be
+      // "corrected" into a directional test: these two values are two
+      // descriptions of the SAME board from sources that are supposed to agree,
+      // so a disagreement either way means they describe different boards with
+      // no way to tell which is true.
+      const v = esp32PreflightVerdict({
+        board: b,
+        surface: 'browser',
+        detectedChip: 'ESP32-S3 (QFN56) (revision v0.2)',
+        detectedFlashSize: '16MB',
+        imageGeometry: { chipFamily: b.chipFamily, flashSize: '8MB' },
+      });
+      expect(v).toMatchObject({ code: 'image-geometry-mismatch', mayWrite: false });
+    });
+
+    it('is the ONLY size check when the flash id is unreadable', () => {
+      // The decisive reason strictness stays. A stubless TTGO answers flashId
+      // 0xffffff, so esp32FlashSizeIsSafe returns undefined and the size axis
+      // goes unchecked — a directional test here would leave that board with no
+      // size guard at all.
+      const ttgo = board('ttgo_t_display');
+      const agreeing = esp32PreflightVerdict({
+        board: ttgo,
+        surface: 'browser',
+        detectedChip: 'ESP32-D0WDQ6 (revision v1.1)',
+        detectedFlashSize: undefined,
+        imageGeometry: { chipFamily: ttgo.chipFamily, flashSize: ttgo.flashSize },
+      });
+      expect(agreeing).toMatchObject({ code: 'ok-unknown-flash', mayWrite: true });
+
+      const disagreeing = esp32PreflightVerdict({
+        board: ttgo,
+        surface: 'browser',
+        detectedChip: 'ESP32-D0WDQ6 (revision v1.1)',
+        detectedFlashSize: undefined,
+        imageGeometry: { chipFamily: ttgo.chipFamily, flashSize: '4MB' },
+      });
+      expect(disagreeing).toMatchObject({ code: 'image-geometry-mismatch', mayWrite: false });
+    });
+
     it('refuses an image built for a different chip family', () => {
       const v = esp32PreflightVerdict({
         board: b,
