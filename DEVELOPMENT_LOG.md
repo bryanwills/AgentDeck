@@ -49,13 +49,30 @@ I05(타임라인 한 줄 요약, 되돌린-접근 함정). 프롬프트는 Agent
 dense Qwen3.8(8801, `enable_thinking:false`) 쪽에 앉혀야 한다** — MoE 는 요약(I05 만점)엔
 충분하지만 판정 계약엔 부족하다.
 
+### 추가 라운드 — Apple Foundation Models 를 계측에 넣었다 (같은 날)
+
+model-eval 러너가 `openclaw infer` 경유라 FM 은 계측 밖이었는데, AgentDeck 의
+`fm-helper`(JSON-lines stdin/stdout)를 model-eval 이 직접 부르는 러너 분기
+(`runner: "fm-helper"`, `run_v2.py::_run_fm_helper`)로 등재했다. 두 함정: 헬퍼는
+generate 를 별도 작업 체인에 넘기므로 **stdin 을 응답 한 줄 읽을 때까지 열어 둬야**
+하고(`communicate()` 는 응답 전에 프로세스를 죽인다), fm 출력은 이미 모델 본문이라
+openclaw JSON 봉투 해체(`_extract`)를 타면 판정 JSON 이 재직렬화된다.
+
+39종 × 3반복 실측(전회통과 15/96 · 루브릭 0.580): **기본 judge 백엔드인 FM 은
+판정자로 부적격이다.** J01 실패 런에 후한 점수, J02 성공 런에 유령 missed(diff 의
+테스트 헌크를 못 봄), J04 무결함 diff 에 결함 발명, J03 은
+`unsupportedLanguageOrLocale` 로 3/3 실행 거부 — diff·압축요약·번역류 입력 15회가
+같은 언어 감지에 걸렸다(지시문을 바꿔도 동일 — 프롬프트 내용이 원인). 반면 요약(I05)은
+0.93(끝 마침표 하나) — **요약기 1순위 티어로는 타당, 판정 기본값으로는 재고 대상**.
+`agentdeck-judge` 프로파일에서는 품질 게이트(0.58 < 0.8)로 자동 제외된다.
+
 ### 남긴 것
 
 REVIEW 판정 가이드의 Ollama 예시 모델은 `qwen3-coder:30b` 로 갱신. 장문 입력
 열화(judge 프롬프트 10K+ 토큰 체제) 시나리오는 후속 — 현 시나리오는 16K 로컬 컨텍스트를
-건드리지 않는 길이다. Apple Foundation Models 는 여전히 model-eval 미등재(러너가
-`openclaw infer` 경유라 OpenAI 호환 엔드포인트가 필요) — 기본 judge 백엔드인데 유일하게
-계측 밖이다.
+건드리지 않는 길이다. APME 기본 judge 백엔드를 FM 에서 바꿀지는 별도 결정으로 남긴다 —
+폴백 체인(FM→MLX)이 있어 즉시 사고는 아니지만, FM 이 성공적으로 응답한 판정일수록
+(파싱은 되는데 방향이 틀린 점수) 폴백 없이 DB 에 적힌다는 점이 나쁘다.
 
 ### 문제
 
