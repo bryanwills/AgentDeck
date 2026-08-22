@@ -2,6 +2,43 @@
 
 import SwiftUI
 
+/// Shared landscape bounds for HUD cards. The water region ends where the
+/// Timeline begins, so both side rails must consume the same finite budget.
+/// Width grows modestly on larger dashboards to reduce wrapped session names,
+/// then caps so the terrarium remains the visual center.
+enum DashboardHUDLayout {
+    static let edgePadding: CGFloat = 12
+    static let timelineClearance: CGFloat = 12
+    static let minimumPanelHeight: CGFloat = 80
+
+    static func landscapePanelMaxHeight(
+        availableHeight: CGFloat,
+        showsTimeline: Bool
+    ) -> CGFloat {
+        let visibleRegion = showsTimeline
+            ? availableHeight * (1 - MonitorLayout.sandFraction)
+            : availableHeight
+        return max(0, visibleRegion - edgePadding - timelineClearance)
+    }
+
+    static func sessionPanelWidth(availableWidth: CGFloat) -> CGFloat {
+        min(max(220, availableWidth * 0.25), 280)
+    }
+
+    static func setupCardLeadingInset(
+        availableWidth: CGFloat,
+        isLandscape: Bool,
+        showsSessionList: Bool
+    ) -> CGFloat {
+        guard isLandscape, showsSessionList else { return 14 }
+        return edgePadding + sessionPanelWidth(availableWidth: availableWidth) + timelineClearance
+    }
+
+    static func usesCompactSessionRows(sessionCount: Int) -> Bool {
+        sessionCount > 6
+    }
+}
+
 struct MonitorHUD: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
     @EnvironmentObject private var preferences: AppPreferences
@@ -13,12 +50,22 @@ struct MonitorHUD: View {
             if isLandscape {
                 // iPad landscape: matches Android Box layout
                 ZStack(alignment: .topLeading) {
-                    // Top-left: Session list (max 220dp)
+                    let panelMaxHeight = DashboardHUDLayout.landscapePanelMaxHeight(
+                        availableHeight: geo.size.height,
+                        showsTimeline: preferences.showTimeline
+                    )
+
+                    // Top-left: bounded session roster. Unlike the previous
+                    // natural-height card, this can never paint into Timeline.
                     if preferences.showSessionList {
-                        SessionListPanel()
-                            .frame(maxWidth: min(geo.size.width * 0.22, 220))
-                            .padding(.leading, 12)
-                            .padding(.top, 12)
+                        if panelMaxHeight >= DashboardHUDLayout.minimumPanelHeight {
+                            SessionListPanel(maxHeight: panelMaxHeight)
+                                .frame(width: DashboardHUDLayout.sessionPanelWidth(
+                                    availableWidth: geo.size.width
+                                ))
+                                .padding(.leading, DashboardHUDLayout.edgePadding)
+                                .padding(.top, DashboardHUDLayout.edgePadding)
+                        }
                     }
 
                     // Top-right: relationship-centric topology rail
@@ -27,19 +74,13 @@ struct MonitorHUD: View {
                     // rail is a single unified view so we don't try to hide
                     // upstream or downstream independently anymore.
                     if preferences.showTankStatus || preferences.showDeviceDiagnostic {
-                        // The rail must never grow behind the timeline strip
-                        // (bottom sandFraction of the window). 24 = 12 top
-                        // padding + 12 breathing room above the sand line.
-                        let railMaxHeight = (preferences.showTimeline
-                            ? geo.size.height * (1 - MonitorLayout.sandFraction)
-                            : geo.size.height) - 24
-                        if railMaxHeight >= 80 {
+                        if panelMaxHeight >= DashboardHUDLayout.minimumPanelHeight {
                             HStack {
                                 Spacer()
-                                TopologyRail(maxHeight: railMaxHeight)
+                                TopologyRail(maxHeight: panelMaxHeight)
                                     .frame(maxWidth: min(geo.size.width * 0.32, 300))
-                                    .padding(.trailing, 12)
-                                    .padding(.top, 12)
+                                    .padding(.trailing, DashboardHUDLayout.edgePadding)
+                                    .padding(.top, DashboardHUDLayout.edgePadding)
                             }
                         }
                     }

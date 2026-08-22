@@ -760,7 +760,7 @@
       group: 'Containers',
       title: 'Bounded collection summary',
       classes: '.ad-rollup · .ad-rollup-row · --disclosure',
-      note: 'DESIGN.md §5.11. Detail through 6 items, group at 7–15, summarize at 16+. Disclosures name the category and exact count; generic “+N more” and single-letter provider aliases are forbidden. Collection size never changes the containing surface height.',
+      note: 'DESIGN.md §5.11. Detail through 6 items, group at 7–15, summarize at 16+. A card sharing a canvas reserves neighboring regions, widens within a cap, compacts repeated rows, then scrolls its complete collection. Generic “+N more”, arbitrary first-N truncation, and single-letter provider aliases are forbidden.',
       wide: true,
       html: `<div class="ad-rollup">
           <div class="ad-rollup-head"><span>Surfaces</span><strong>26 connected · 1 needs attention</strong></div>

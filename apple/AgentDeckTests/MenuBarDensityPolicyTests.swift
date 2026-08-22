@@ -107,6 +107,64 @@ final class MenuBarDensityPolicyTests: XCTestCase {
         XCTAssertEqual(MenuBarDensityPolicy.panelHeight(availableHeight: 470), 450)
     }
 
+    func testDashboardSidePanelsReserveTheTimelineRegion() {
+        XCTAssertEqual(
+            DashboardHUDLayout.landscapePanelMaxHeight(
+                availableHeight: 800,
+                showsTimeline: true
+            ),
+            496,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            DashboardHUDLayout.landscapePanelMaxHeight(
+                availableHeight: 800,
+                showsTimeline: false
+            ),
+            776,
+            accuracy: 0.001
+        )
+    }
+
+    func testDashboardSessionPanelWidensWithinATerrariumSafeCap() {
+        XCTAssertEqual(DashboardHUDLayout.sessionPanelWidth(availableWidth: 640), 220)
+        XCTAssertEqual(DashboardHUDLayout.sessionPanelWidth(availableWidth: 1_100), 275)
+        XCTAssertEqual(DashboardHUDLayout.sessionPanelWidth(availableWidth: 1_400), 280)
+    }
+
+    func testDashboardSetupCardMovesBesideTheLandscapeSessionPanel() {
+        XCTAssertEqual(
+            DashboardHUDLayout.setupCardLeadingInset(
+                availableWidth: 1_100,
+                isLandscape: true,
+                showsSessionList: true
+            ),
+            299
+        )
+        XCTAssertEqual(
+            DashboardHUDLayout.setupCardLeadingInset(
+                availableWidth: 1_100,
+                isLandscape: false,
+                showsSessionList: true
+            ),
+            14
+        )
+        XCTAssertEqual(
+            DashboardHUDLayout.setupCardLeadingInset(
+                availableWidth: 1_100,
+                isLandscape: true,
+                showsSessionList: false
+            ),
+            14
+        )
+    }
+
+    func testDashboardSessionRowsCompactOnlyForLargerRosters() {
+        XCTAssertFalse(DashboardHUDLayout.usesCompactSessionRows(sessionCount: 6))
+        XCTAssertTrue(DashboardHUDLayout.usesCompactSessionRows(sessionCount: 7))
+        XCTAssertTrue(DashboardHUDLayout.usesCompactSessionRows(sessionCount: 500))
+    }
+
     func testSurfaceRollupScalesByFamilyAndDeduplicatesDualHomedESP32() {
         var health = ModuleHealthState()
         health.streamDeck = StreamDeckHealth(devices: [
