@@ -24,7 +24,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,9 +55,25 @@ function releaseAssets(tag) {
   }
 }
 
+/**
+ * `--limit` is a SILENT cap, so it is raised well past the fleet's cadence AND
+ * checked. This repo cuts ~6 tags a round across its channels, so a 100-release
+ * window stops containing the newest esp32 tag after ~16 rounds with no esp32
+ * cut — and the failure is not "no answer" but a wrong one: an older tag, or
+ * none, with nothing saying the list was truncated.
+ */
+const RELEASE_LIST_LIMIT = 1000;
+
 function latestEsp32Tag() {
-  const out = gh(['release', 'list', '--limit', '100', '--json', 'tagName,createdAt']);
-  const rows = JSON.parse(out)
+  const out = gh(['release', 'list', '--limit', String(RELEASE_LIST_LIMIT), '--json', 'tagName,createdAt']);
+  const all = JSON.parse(out);
+  if (all.length >= RELEASE_LIST_LIMIT) {
+    // Say it rather than truncate quietly (repo rule: no silent caps).
+    console.error(
+      `WARNING: hit the ${RELEASE_LIST_LIMIT}-release listing limit — an esp32-v* tag may be missing from it.`,
+    );
+  }
+  const rows = all
     .filter((r) => /^esp32-v/.test(r.tagName))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   return rows[0]?.tagName;
@@ -125,6 +141,18 @@ async function main() {
   // it means the deployed page would write bytes nobody can vouch for, and
   // that fails hard, below.
   if (!releaseAssets(tag).includes('manifest.json')) {
+    // Remove any index.json a previous run left behind. Without this the page
+    // would be told to load `fw/<tag>/manifest.json` for a directory this run
+    // deliberately did not populate — worse than "no firmware", because the
+    // failure then looks like a broken deploy rather than a missing release.
+    // Today the tag-keyed cache makes that unreachable; a `restore-keys`
+    // added later, or any local run into a reused --out, makes it reachable
+    // again, and the guarantee belongs in the script rather than in a cache key.
+    const stale = join(outRoot, 'index.json');
+    if (existsSync(stale)) {
+      rmSync(stale);
+      console.log('removed a previous run\'s fw/index.json — this release has no firmware to point at');
+    }
     console.log(
       `${tag} publishes no manifest.json — it predates the merged-image pipeline.\n` +
         '  The flasher will deploy WITHOUT firmware and will say so. Cut an esp32-v* release\n' +

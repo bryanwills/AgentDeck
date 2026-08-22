@@ -78,16 +78,35 @@ const api = async (path: string): Promise<unknown> => {
   return res.json();
 };
 
-/** Every published `esp32-v*` tag, newest first. */
-export async function listFirmwareTags(): Promise<string[]> {
-  const releases = (await api(`/repos/${GITHUB_REPO}/releases?per_page=100`)) as Array<{
-    tag_name?: string;
-    created_at?: string;
-  }>;
-  return releases
-    .filter((r) => typeof r.tag_name === 'string' && r.tag_name.startsWith('esp32-v'))
-    .sort((a, b) => (String(a.created_at) < String(b.created_at) ? 1 : -1))
-    .map((r) => r.tag_name as string);
+/**
+ * Every published `esp32-v*` tag, newest first.
+ *
+ * PAGED, because a single page is a silent cap. `per_page` maxes at 100 and
+ * this repo cuts ~6 tags a round across its channels, so once ~100 releases
+ * accumulate after the newest esp32 cut, one page stops containing it — and the
+ * damage is not "no answer" but a WRONG one: the existence check would report a
+ * genuinely published version as unpublished and quietly fall back to an older
+ * release. Stops at the first page that yields no esp32 tag once some are
+ * already known, so the common case is still one request.
+ */
+export async function listFirmwareTags(maxPages = 5): Promise<string[]> {
+  const found: Array<{ tag: string; at: string }> = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const releases = (await api(`/repos/${GITHUB_REPO}/releases?per_page=100&page=${page}`)) as Array<{
+      tag_name?: string;
+      created_at?: string;
+    }>;
+    if (releases.length === 0) break;
+    const esp32 = releases.filter(
+      (r) => typeof r.tag_name === 'string' && r.tag_name.startsWith('esp32-v'),
+    );
+    found.push(...esp32.map((r) => ({ tag: r.tag_name as string, at: String(r.created_at) })));
+    // Releases come back newest-first, so once this page has none and we
+    // already have some, everything older is older still.
+    if (esp32.length === 0 && found.length > 0) break;
+    if (releases.length < 100) break;
+  }
+  return found.sort((a, b) => (a.at < b.at ? 1 : -1)).map((r) => r.tag);
 }
 
 /** Newest `esp32-v*` tag, or undefined when the repo has none. */
@@ -524,7 +543,12 @@ export async function flashBoard(
 
     cb.onPhase?.('verify');
     try {
-      await loader.after(board.after === 'no_reset' ? 'no_reset' : 'hard_reset');
+      // Pass the SSOT value straight through. esptool-js's after() handles all
+      // four of Esp32ResetAfter natively (esploader.js:1523), so collapsing
+      // everything but 'no_reset' into a hard reset would silently override a
+      // board that deliberately asks for 'soft_reset' or 'no_reset_stub' — a
+      // wrong reset on a board whose flags are an accident record.
+      await loader.after(board.after);
     } catch { /* best effort — the write already landed and was verified */ }
 
     return { chip, mac, flashSize, verdict, bytes: image.length, elapsedMs: Date.now() - t0 };
@@ -573,8 +597,8 @@ export async function readDeviceIdentity(
     // function promises. Which matters because it runs AFTER a successful
     // write: a throw here reports a good flash as a failure.
     let settled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let asker: ReturnType<typeof setInterval> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined = undefined;
+    let asker: ReturnType<typeof setInterval> | undefined = undefined;
     let port: InstanceType<typeof SerialPort> | undefined;
 
     const done = (v: DeviceIdentity | null) => {
