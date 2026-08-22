@@ -78,10 +78,24 @@ jobs:
       # Pinned deliberately. esptool renamed its subcommands between v4 and v5
       # (`merge_bin`/`--flash_size` -> `merge-bin`/`--flash-size`); un-pinned, a
       # routine upstream release breaks a firmware cut at tag time, when the
-      # tag is already pushed. 5.1.2 is the version the merge recipe was
-      # validated against on real hardware.
+      # tag is already pushed.
+      #
+      # TAKE THIS NUMBER FROM PyPI, NEVER FROM A LOCAL `pip show esptool`.
+      # PlatformIO vendors its own esptool as the `tool-esptoolpy` package and
+      # installs it EDITABLE into ~/.platformio/penv, so a dev machine answers
+      # `pip show esptool` -> 5.1.2 for a version PyPI has never published (its
+      # 5.1 line stops at 5.1.0). That is where the previous pin came from, and
+      # it failed the only way it could: at tag time, on `esp32-v1.0.7`, with
+      # "No matching distribution found for esptool==5.1.2" — the exact failure
+      # the pin exists to prevent, caused by the pin. Two registries, one name.
+      #
+      # 5.2.0 is measured, not remembered: on 2026-08-22 it merged and passed
+      # esp32-merge-firmware.mjs's header read-back for all four chip families
+      # in this fleet and all three bootloader offsets — 86box/inkdeck/
+      # t_display_pro (S3, 0x0), ttgo_t_display/ulanzi_tc001 (ESP32, 0x1000),
+      # ips_10 (P4, 0x2000), esp32_c6_147 (C6, 0x0).
       - name: Install esptool
-        run: pip install "esptool==5.1.2"
+        run: pip install "esptool==5.2.0"
 
       - name: Build ${{ matrix.board.name }}
         run: |
