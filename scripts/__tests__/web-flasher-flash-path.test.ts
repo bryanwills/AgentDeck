@@ -217,6 +217,20 @@ describe('esp32PreflightVerdict', () => {
     });
   });
 
+  it('the erase refusal is reachable — a board the browser OFFERS flashes stubless', () => {
+    // esptool-js honours `eraseAll` only on the stub path, so on a `stub: false`
+    // board ticking "erase (clears saved Wi-Fi and pairing token)" was silently
+    // dropped after showing an erase phase and "MD5 verified" — handing back a
+    // board still carrying the previous owner's credentials.
+    //
+    // This pins WHY both surfaces refuse rather than skip: it is not a
+    // hypothetical combination. If the fleet ever has no stubless offered board
+    // this test goes red, and the refusal can then be reconsidered — it must not
+    // quietly become dead code nobody re-reads.
+    const stubless = ESP32_BOARDS.filter((b) => b.webFlash && !b.stub);
+    expect(stubless.map((b) => b.id)).toContain('ttgo_t_display');
+  });
+
   it('every board the browser offers accepts its own declared identity', () => {
     // Pins the invariant, not the membership: adding a verified board needs no
     // test edit, but a board whose SSOT row contradicts itself fails here.
