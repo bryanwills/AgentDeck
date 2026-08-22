@@ -25,10 +25,19 @@ dashboard 이름/id와 ADB model/serial이 강하게 일치할 때만 한 장치
 Claude/Codex는 canonical agent mark와 전체 이름으로 구분하고, 모든 disclosure는
 `Model limits · 2`, `Recent tasks · 2 of 8`처럼 생략된 대상과 정확한 수를 말한다.
 
+Activity도 누적 `997h 28m`을 핵심 정보로 두지 않는다. 실데이터를 역추적하니 오래 열린
+turn, 누락된 Stop, 병렬 에이전트의 시간이 하나의 총합에 섞여 있어 사용자가 판단할 수
+있는 기간·신뢰도를 제공하지 못했다. 메뉴바는 이제 **최근 24시간 완료 수**를 headline으로
+삼고 참여 agent/project 수, agent별 완료 수와 마지막 완료, snapshot freshness를 보여준다.
+기간 안에 완료가 없으면 이를 명시하면서 가장 최근 완료 2개는 맥락으로 유지한다. 원본
+duration은 호환성과 전체 report를 위해 보존하되, 신뢰도 메타데이터가 생기기 전에는
+glance에서 노출하지 않는다.
+
 이 규칙을 `DESIGN.md`의 **Bounded collection summary**와
-`design/components.css`/Component lab specimen으로 올렸다. 같은 원칙을 이후 session,
+**Time-scoped activity glance**, `design/components.css`/Component lab specimen으로 올렸다.
+같은 원칙을 이후 session,
 hardware, provider-limit 반복 컬렉션에 재사용한다. App Store feature matrix도 구현 전에
-갱신했다. 검증: macOS XCTest 659개(2 skip, 0 failure), 신규 density/rollup 7개,
+갱신했다. 검증: macOS XCTest 661개(2 skip, 0 failure), 신규 density/rollup/activity 9개,
 macOS Debug build, 디자인 토큰 7개 미러, viewer JS 문법, R6 17개 fixture 통과.
 
 ## 2026-08-22 — 그 펌웨어에 닿는 길을 냈다: `/flash/` 웹 플래셔 + `agentdeck esp32 flash`

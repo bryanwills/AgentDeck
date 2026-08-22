@@ -267,6 +267,22 @@ its exact count (`7 idle sessions hidden`, `12 surface details`); generic
 identity uses the canonical agent mark plus its full name. Single-letter aliases
 such as `C` and `X` are not user-facing labels.
 
+### 5.12 Time-scoped activity glance
+
+A glance metric must answer a current user question and name its time window.
+For agent activity, prefer recent completed work, participating agents and
+projects, the latest completion, and data freshness. The menu bar uses a fixed
+24-hour completion window; live state belongs to the session roster and the
+durable report owns full history.
+
+Never headline an unbounded sum of task durations. Missed lifecycle events can
+inflate a single task, and concurrent agents make summed wall-clock time
+ambiguous even when every event is present. Duration may appear only when both
+its period and confidence are explicit. If the recent window is empty, say so
+and retain the latest completed item as context instead of showing a blank
+surface. A bounded recent list names its limit (`Latest 2`) rather than using a
+generic `+N more` disclosure.
+
 ---
 
 ## 6. Iconography

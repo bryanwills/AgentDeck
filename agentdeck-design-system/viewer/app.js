@@ -770,6 +770,19 @@
         </div>`,
     },
     {
+      group: 'Containers',
+      title: 'Time-scoped activity glance',
+      classes: '.ad-rollup · .ad-rollup-head · .ad-rollup-row',
+      note: 'DESIGN.md §5.12. Headline recent completions in a named window, then show participants, latest completion, and data freshness. Unbounded duration totals are forbidden because missed lifecycle events and parallel work make them misleading.',
+      wide: true,
+      html: `<div class="ad-rollup">
+          <div class="ad-rollup-head"><span>Activity · Updated now</span><strong>21 completed · last 24h</strong></div>
+          <div class="ad-rollup-row"><span class="ad-dot ad-dot--processing"></span>Claude Code<strong>14 completed · 37m ago</strong></div>
+          <div class="ad-rollup-row"><span class="ad-dot ad-dot--processing"></span>Codex<strong>7 completed · 52m ago</strong></div>
+          <div class="ad-rollup-row ad-rollup-disclosure"><span class="ad-dot ad-dot--idle"></span>Recently completed<strong>Latest 2 · Open report</strong></div>
+        </div>`,
+    },
+    {
       group: 'Patterns',
       title: 'Hatch and honest placeholder',
       classes: '.ad-hatch · .ad-placeholder',

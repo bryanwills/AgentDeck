@@ -49,6 +49,84 @@ enum MenuBarDensityPolicy {
     }
 }
 
+struct MenuBarActivityAgent: Equatable, Identifiable {
+    let agentType: String
+    let completedCount: Int
+    let lastCompletedAt: Int
+
+    var id: String { agentType }
+}
+
+/// Action-oriented projection for the menu bar. The durable Activity report
+/// keeps the full history; this glance answers what finished recently and who
+/// did it. Duration is intentionally absent: legacy/missed Stop rows cannot
+/// support a trustworthy time total, and parallel agents make a sum ambiguous.
+struct MenuBarActivityGlance: Equatable {
+    static let windowMs = 24 * 60 * 60 * 1_000
+
+    let completedCount: Int
+    let projectCount: Int
+    let lastCompletedAt: Int?
+    let agents: [MenuBarActivityAgent]
+    let recentRows: [ApmeActivityHistory.Row]
+    let completedRowCount: Int
+
+    static func make(
+        from snapshot: ApmeActivityHistory.Snapshot,
+        nowMs explicitNowMs: Int? = nil,
+        recentLimit: Int = 2
+    ) -> MenuBarActivityGlance {
+        let nowMs = explicitNowMs ?? snapshot.capturedAt
+        let cutoff = nowMs - windowMs
+        let allCompleted = snapshot.rows.compactMap { row -> (ApmeActivityHistory.Row, Int)? in
+            guard let endedAt = row.endedAt, endedAt <= nowMs else { return nil }
+            return (row, endedAt)
+        }.sorted {
+            $0.1 == $1.1 ? $0.0.originKey < $1.0.originKey : $0.1 > $1.1
+        }
+        let inWindow = allCompleted.filter { $0.1 >= cutoff }
+
+        var agentGroups: [String: MenuBarActivityAgent] = [:]
+        for (row, endedAt) in inWindow {
+            if let current = agentGroups[row.agentType] {
+                agentGroups[row.agentType] = MenuBarActivityAgent(
+                    agentType: row.agentType,
+                    completedCount: current.completedCount + 1,
+                    lastCompletedAt: max(current.lastCompletedAt, endedAt)
+                )
+            } else {
+                agentGroups[row.agentType] = MenuBarActivityAgent(
+                    agentType: row.agentType,
+                    completedCount: 1,
+                    lastCompletedAt: endedAt
+                )
+            }
+        }
+        let agents = agentGroups.values.sorted {
+            if $0.completedCount != $1.completedCount {
+                return $0.completedCount > $1.completedCount
+            }
+            if $0.lastCompletedAt != $1.lastCompletedAt {
+                return $0.lastCompletedAt > $1.lastCompletedAt
+            }
+            return $0.agentType < $1.agentType
+        }
+        let projects = Set(inWindow.compactMap { row, _ in
+            let name = row.projectName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return name.isEmpty ? nil : name
+        })
+
+        return MenuBarActivityGlance(
+            completedCount: inWindow.count,
+            projectCount: projects.count,
+            lastCompletedAt: allCompleted.first?.1,
+            agents: agents,
+            recentRows: Array(allCompleted.prefix(max(0, recentLimit)).map(\.0)),
+            completedRowCount: allCompleted.count
+        )
+    }
+}
+
 struct MenuBarSurfaceFamily: Equatable, Identifiable {
     let name: String
     let count: Int
