@@ -346,3 +346,88 @@ export const ESP32_PARTITION_TABLE_OFFSET = 0x8000;
 export const ESP32_BOOT_APP0_OFFSET = 0xe000;
 /** app0 — the first application slot. Same on every board here. */
 export const ESP32_APP0_OFFSET = 0x10000;
+
+/* ------------------------------------------------------- write-time preflight
+ * The guards above answer two narrow questions. This function answers the one
+ * the user actually faces — *may this image be written to the board in front of
+ * me?* — and it is SSOT material for the same reason the guards are: the browser
+ * flasher and `agentdeck esp32 flash` must refuse the SAME boards. A rule that
+ * exists twice is a rule that will disagree once, and the disagreement here is a
+ * bricked board.
+ *
+ * The two runtimes do NOT share the esptool-js driving code (one runs on Web
+ * Serial, the other on a `serialport` shim), so this decision is the seam that
+ * holds them together.
+ */
+export type Esp32PreflightCode =
+  /** every check the link could answer agreed */
+  | 'ok'
+  /** connected, but the flash id was unreadable — chip family is all we verified */
+  | 'ok-unknown-flash'
+  /** the chip on the wire is not the family this image was built for */
+  | 'chip-mismatch'
+  /** the image declares more flash than the part reports having */
+  | 'flash-too-small'
+  /** this SURFACE does not offer the board (browser only — see `surface`) */
+  | 'board-not-offered';
+
+/**
+ * Which tool is asking. It changes exactly one thing, and getting it wrong in
+ * either direction is a real defect:
+ *
+ * - `'browser'` additionally requires `webFlash`, because the page only offers
+ *   boards a hardware run measured.
+ * - `'cli'` does NOT. `webFlash` means "offered in the browser", never "may be
+ *   written at all" — and `esp32_c6_147` has no OTA slot, so USB is its ONLY
+ *   update path. A CLI that inherited the browser's list would leave that board
+ *   with no way to be updated at all.
+ */
+export type Esp32FlashSurface = 'browser' | 'cli';
+
+export interface Esp32PreflightInput {
+  board: Esp32BoardSpec;
+  surface: Esp32FlashSurface;
+  /** raw `getChipDescription()` output, e.g. "ESP32-S3 (QFN56) (revision v0.2)" */
+  detectedChip: string | undefined;
+  /** `detectFlashSize()` output, or undefined when the flash id was unusable */
+  detectedFlashSize: string | undefined;
+}
+
+export interface Esp32PreflightVerdict {
+  code: Esp32PreflightCode;
+  /** the only field a caller may branch on to start a write */
+  mayWrite: boolean;
+  /** what was compared, for the UI to show detected-vs-expected */
+  detectedFamily?: Esp32ChipFamily | 'other';
+}
+
+/**
+ * There is deliberately no `force` parameter.
+ *
+ * Writing a 16MB-header image to an 8MB part, or an S3 image to a classic
+ * ESP32, is precisely how these boards are bricked — and the recovery for a
+ * bricked board is the very tool that refused. An override switch would make
+ * the guard advisory, and an advisory guard is the one that gets clicked
+ * through at 2am. Callers that legitimately need to bypass have esptool.
+ */
+export function esp32PreflightVerdict(input: Esp32PreflightInput): Esp32PreflightVerdict {
+  const { board, surface, detectedChip, detectedFlashSize } = input;
+  if (surface === 'browser' && !board.webFlash) {
+    return { code: 'board-not-offered', mayWrite: false };
+  }
+
+  const detectedFamily = detectedChip ? esp32ChipFamilyOf(detectedChip) : undefined;
+  if (detectedFamily !== board.chipFamily) {
+    return { code: 'chip-mismatch', mayWrite: false, detectedFamily };
+  }
+
+  const sizeSafe = esp32FlashSizeIsSafe(board.flashSize, detectedFlashSize);
+  if (sizeSafe === false) return { code: 'flash-too-small', mayWrite: false, detectedFamily };
+  // Unknown is its own answer, and it is a PASS: the merged image bakes its
+  // flash-size field at build time from this same SSOT and CI asserts it with
+  // `esptool image-info`, so the geometry is already correct in the bits. What
+  // is lost is the runtime cross-check, and that has to be said in the UI
+  // rather than quietly downgraded to a full pass.
+  if (sizeSafe === undefined) return { code: 'ok-unknown-flash', mayWrite: true, detectedFamily };
+  return { code: 'ok', mayWrite: true, detectedFamily };
+}

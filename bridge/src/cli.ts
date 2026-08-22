@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command, InvalidArgumentError } from 'commander';
-import { writeFileSync, unlinkSync, existsSync, realpathSync } from 'fs';
+import { writeFileSync, unlinkSync, existsSync, realpathSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { execFileSync, execSync, spawn } from 'child_process';
@@ -1597,6 +1597,191 @@ program
     }
     log(`OTA complete: ${body.board ?? target} ${formatBytes(body.bytes)} in ${body.chunks} chunks`);
   });
+
+// ===== `agentdeck esp32 …` =====
+//
+// A SUBCOMMAND GROUP on purpose. `esp32 flash` is the first member; making it a
+// group now means `esp32 ota` can later become the canonical spelling of the
+// existing top-level `esp32-ota` without a second rename. `esp32-ota` is
+// untouched in this change.
+const esp32Cmd = program.command('esp32').description('ESP32 firmware and device commands');
+
+esp32Cmd
+  .command('flash <board>')
+  .description('Install AgentDeck firmware on an ESP32 over USB serial')
+  .option('-p, --port <path>', 'Serial port (auto-detected when only one candidate is present)')
+  .option('-f, --firmware <path>', 'Write this .bin instead of downloading a release image')
+  .option('--tag <tag>', 'Release tag to take firmware from (default: this checkout, else newest)')
+  .option('--baud <n>', 'Override the board\'s upload baud')
+  .option('--erase', 'Erase the whole flash first (clears saved WiFi and pairing token)')
+  .option('--offline', 'Fail rather than reach the network')
+  .option('--no-suspend', 'Do not ask the daemon to release its serial ports')
+  .option('--daemon-port <port>', 'Daemon port for the suspend/resume calls')
+  .action(async (target, opts) => {
+    // Errors are reported, not thrown: every failure here is a thing the user
+    // can act on (wrong board, port held, no firmware for this tag) and a raw
+    // Node stack trace buries the sentence that says which.
+    try {
+      await runEsp32Flash(target, opts);
+    } catch (err) {
+      log(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+async function runEsp32Flash(target: string, opts: Record<string, any>): Promise<void> {
+    const {
+      resolveFlashBoard, resolveFirmware, flashBoard, whoHoldsPort, classifyHolders,
+      readDeviceIdentity, SERIAL_PROBE_UNAVAILABLE,
+    } = await import('./esp32-flash.js');
+    const { listCandidatePorts, loadSerialPort } = await import('./esp32-flash-transport.js');
+
+    const board = resolveFlashBoard(target);
+    log(`Board: ${board.name} (${board.id}) — ${board.chipFamily}, ${board.flashSize}`);
+
+    // --- resolve the image BEFORE touching hardware. A download that fails
+    // after the daemon has been stood down leaves the machine in a worse state
+    // than it started, for no gain.
+    const checkoutConfig = (() => {
+      try {
+        return readFileSync(join(projectRootPath(), 'esp32', 'src', 'config.h'), 'utf8');
+      } catch {
+        return undefined; // installed from npm, not a checkout
+      }
+    })();
+    const fw = await resolveFirmware(board, {
+      tag: opts.tag,
+      firmwarePath: opts.firmware,
+      offline: opts.offline,
+      checkoutConfigH: checkoutConfig,
+      log,
+    });
+    log(`Firmware: ${fw.tag} · ${formatBytes(fw.image.length)} (${fw.source})`);
+
+    // --- pick a port
+    const SerialPort = await loadSerialPort();
+    if (!SerialPort) {
+      throw new Error(
+        'serialport is not installed (optional native dependency).\n'
+        + '  Reinstall with:  npx @agentdeck/setup\n'
+        + '  or flash from a browser: https://puritysb.github.io/AgentDeck/flash/',
+      );
+    }
+    const candidates = await listCandidatePorts();
+    let portPath: string;
+    if (opts.port) {
+      portPath = opts.port;
+    } else if (candidates.length === 1) {
+      portPath = candidates[0].path;
+      log(`Port: ${portPath} (only candidate)`);
+    } else {
+      // Never guess. There is no VID/PID → board mapping in this repo (identity
+      // comes from the firmware's own device_info), and picking one of several
+      // usbmodem nodes is exactly the mistake flash.sh refuses to make.
+      throw new Error(
+        candidates.length === 0
+          ? 'No candidate serial ports found. Plug the board in'
+            + (board.nativeUsb
+              ? ', and enter download mode (hold BOOT, tap RST, release BOOT) — the download-mode port has a DIFFERENT name.'
+              : '.')
+          : `Several candidate ports — pass -p:\n${candidates.map((c) => `  ${c.path}${c.manufacturer ? `  (${c.manufacturer})` : ''}`).join('\n')}`,
+      );
+    }
+
+    // --- who holds it? The lease below covers the Node daemon, including a
+    // respawn. It cannot cover the sandboxed Swift daemon (which cannot read
+    // ~/.agentdeck) or anything else, so look before asking.
+    const holders = await whoHoldsPort(portPath);
+    const { ours, foreign } = classifyHolders(holders);
+    if (foreign.length > 0) {
+      throw new Error(
+        `${portPath} is held by ${foreign.map((h) => `${h.command}(${h.pid})`).join(', ')}.\n`
+        + '  AgentDeck will not take a port from a process it does not own. Close it and retry.',
+      );
+    }
+
+    const daemonPort = opts.daemonPort != null ? parseInt(opts.daemonPort, 10) : undefined;
+    const resolvedDaemonPort = await (async () => {
+      if (daemonPort != null) return daemonPort;
+      const { readDaemonInfo, findDaemonPort } = await import('./session-registry.js');
+      const info = readDaemonInfo();
+      return info?.httpPort ?? info?.port ?? findDaemonPort() ?? BRIDGE_WS_PORT;
+    })();
+
+    // A generous lease: a 16MB erase plus a 2MB write at 115200 is minutes, and
+    // the lease expiring mid-write would hand the port back to the daemon.
+    const leaseSeconds = opts.erase ? 900 : 420;
+    let suspended = false;
+    const callDaemon = async (path: string, body: unknown) => {
+      try {
+        const { statusCode } = await postJsonWithTimeout<Record<string, unknown>>(
+          `http://127.0.0.1:${resolvedDaemonPort}${path}`, body, 10_000,
+        );
+        return statusCode >= 200 && statusCode < 300;
+      } catch {
+        return false; // no daemon running is the easy case, not an error
+      }
+    };
+
+    if (opts.suspend !== false) {
+      suspended = await callDaemon('/esp32/serial/suspend', {
+        seconds: leaseSeconds, reason: 'agentdeck esp32 flash', pid: process.pid, board: board.id,
+      });
+      log(suspended
+        ? `Daemon serial suspended for ${leaseSeconds}s (survives a daemon respawn).`
+        : 'No daemon answered — nothing to suspend.');
+      if (ours.length > 0 && !suspended) {
+        log(`WARNING: ${portPath} is held by ${ours.map((h) => `${h.command}(${h.pid})`).join(', ')}`
+          + ' and no daemon answered the suspend call. If this is the macOS app, quit it.');
+      }
+    }
+
+    try {
+      let lastPct = -1;
+      const outcome = await flashBoard(
+        board,
+        portPath,
+        fw.image,
+        fw.entry ?? { flashMode: board.flashMode, flashFreq: board.flashFreq, flashSize: board.flashSize },
+        { eraseAll: Boolean(opts.erase), baud: opts.baud ? parseInt(opts.baud, 10) : undefined },
+        {
+          onPhase: (ph) => log(`  ${ph}…`),
+          onProgress: (w, total) => {
+            const pct = total ? Math.floor((w / total) * 100) : 0;
+            if (pct >= lastPct + 10) { lastPct = pct; log(`  writing ${pct}%`); }
+          },
+        },
+      );
+      log(`Wrote ${formatBytes(outcome.bytes)} in ${(outcome.elapsedMs / 1000).toFixed(1)}s`
+        + ` — ${outcome.chip}, MAC ${outcome.mac}. MD5 verified.`);
+
+      // --- prove it BOOTS, not just that the bytes landed. MD5 passes on an
+      // image with a wrong flash-size header that then bootloops.
+      if (SERIAL_PROBE_UNAVAILABLE.has(board.id)) {
+        log(`${board.id} cannot answer a serial probe (its CH340 TX is broken in hardware).`);
+        log('  Verify by what the matrix shows and by the board joining WiFi: `agentdeck devices`.');
+      } else {
+        log('Waiting for the board to introduce itself…');
+        const id = await readDeviceIdentity(portPath);
+        if (!id) {
+          log('WARNING: no device_info within 20s. The write verified, but the board did not report in.');
+          log('  Power-cycle it and check `agentdeck devices` before assuming this failed.');
+        } else if (id.board && id.board !== board.id) {
+          log(`WARNING: the board reports itself as "${id.board}", not "${board.id}".`);
+        } else {
+          log(`Running: ${id.board ?? board.id} ${id.version ?? '?'}${id.buildHash ? ` (${id.buildHash})` : ''}`);
+        }
+      }
+    } finally {
+      // ALWAYS, including on a thrown preflight refusal or a killed write. The
+      // lease also expires on its own, so this is the fast path, not the only
+      // one.
+      if (suspended) {
+        const ok = await callDaemon('/esp32/serial/resume', {});
+        log(ok ? 'Daemon serial resumed.' : `Daemon did not answer resume; the lease expires in ≤${leaseSeconds}s.`);
+      }
+    }
+}
 
 program
   .command('qr')

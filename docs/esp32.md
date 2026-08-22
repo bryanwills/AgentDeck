@@ -54,6 +54,107 @@ WiFi/WebSockets/LovyanGFX never enter the native build. Limitations: Latin label
 only (CJK stubbed); e-ink is a single full-buffer pass (no partial-refresh
 ghosting). See [esp32/sim/README.md](../esp32/sim/README.md).
 
+## Flash over USB
+
+Two paths, both writing the same file. The rest of this section is the reasoning;
+the commands are the first two blocks.
+
+**브라우저에서** — 설치할 것이 없습니다. Chrome 또는 Edge 데스크톱에서
+[**puritysb.github.io/AgentDeck/flash/**](https://puritysb.github.io/AgentDeck/flash/)
+를 열고, 보드를 고르고, 케이블을 꽂으세요. Safari·Firefox·모바일은 Web Serial API를
+구현하지 않으므로 동작하지 않습니다(페이지가 먼저 그렇게 말하고 CLI 명령을 대신 줍니다).
+
+**터미널에서** — 더 신뢰할 수 있는 쪽입니다. 데몬을 자동으로 비켜세우고, 쓴 뒤에
+보드가 실제로 부팅했는지까지 확인합니다.
+
+```bash
+agentdeck esp32 flash 86box            # release image, auto-detected port
+agentdeck esp32 flash inkdeck -p /dev/cu.usbmodem3111101
+agentdeck esp32 flash ttgo --tag esp32-v1.0.7   # pin a release
+agentdeck esp32 flash 86box -f .pio/build/box_86/firmware.bin   # local build
+```
+
+### One file, one offset, on every chip
+
+A release publishes `agentdeck-<board>-merged.bin`, and **both tools write it at
+`0x0` regardless of chip family**. `esptool merge-bin --target-offset 0x0` has
+already put each board's bootloader where its ROM looks for it — classic ESP32 at
+`0x1000` inside the image behind `0xFF` padding the ROM never reads, ESP32-P4 at
+`0x2000`, S3/C6 at `0x0`. So no consumer branches on chip family, and
+`bootloaderOffset` in the board SSOT is an audit field, not a runtime input.
+
+이 파일이 존재하는 이유: 예전 릴리스 노트는 `esptool.py write_flash 0x10000
+agentdeck-<board>.bin` 을 안내했는데 **그 길로는 보드가 살아나지 않습니다.**
+`boot_app0.bin`(`0xe000`)이 릴리스에 아예 없었고, 과거 OTA로 app1을 가리키던 otadata가
+남아 있으면 새 이미지를 써도 구버전으로 부팅합니다. 게다가 부트로더 오프셋은 칩마다
+다르고 이 플릿은 **세 값에 걸쳐 있는데** 노트는 그것을 말하지 않았습니다.
+
+### The guard has no override
+
+Both tools identify the chip **before** writing and refuse on a mismatch:
+
+| Check | Refuses when | Why |
+|---|---|---|
+| Chip family | the chip on the wire is not the board's family | an S3 image on a classic ESP32 bricks it |
+| Flash size | the image declares **more** flash than the part reports | the header claims a geometry the chip cannot serve |
+
+The size check is **directional** — declaring *less* is fine, and on InkDeck it is
+mandatory (the XIAO ESP32-S3 Plus is physically 16MB but its BSP bakes an 8MB
+field). An unreadable flash id stays **unknown**: `detectFlashSize()` silently
+answers `"4MB"` when it cannot decode the id, so trusting it would turn "no
+answer" into a confident wrong number. When the size is unknown the guard
+degrades to chip-family only and both surfaces say so.
+
+There is deliberately no `--force` and no "flash anyway" button. The recovery
+tool for a bricked board is the tool that refused. The rule lives once, in
+`shared/src/esp32-boards.ts` (`esp32PreflightVerdict`), so the browser and the
+CLI cannot disagree about which board may be written.
+
+### Freeing the serial port
+
+Every serial open toggles DTR/RTS and **resets the board**, so a daemon holding
+`/dev/cu.*` is the most common cause of a failed flash.
+
+- `agentdeck esp32 flash` handles it: it POSTs `/esp32/serial/suspend`, which
+  writes a lease to `~/.agentdeck/esp32-flash-lease.json` and drops every open
+  port. The lease is a **file** because the daemon that stole the port was the
+  *respawned* one — an in-process pause cannot span a respawn. Expiry is enforced
+  when the lease is read, never by a timer, so a flasher killed mid-write
+  recovers with nothing running. `--no-suspend` opts out.
+- The **browser cannot do this**: an HTTPS page may not probe `http://127.0.0.1`,
+  so the page asks you to confirm you stopped the daemon and quit the app. Verify
+  with `lsof /dev/cu.*` — it should print nothing.
+- 샌드박스된 Swift 데몬은 `~/.agentdeck` 를 읽지 못하므로 lease 가 덮지 못합니다.
+  그래서 CLI 가 `lsof` 사전 점검을 하고, AgentDeck 이 아닌 프로세스가 포트를 잡고 있으면
+  **시작을 거부**하며, 언제나 쓰기 후 검증을 합니다.
+
+### Native-USB boards re-enumerate
+
+Entering download mode gives a native-USB board a **different device node** from
+the one it runs on (measured: InkDeck failed on its original node and connected
+on `usbmodem3111101`). Hold BOOT, tap RST, release BOOT — then pick the port that
+*appears*, not the one you saw before.
+
+### Verifying the write
+
+MD5 is checked against the chip inside `writeFlash`, so a bad write throws rather
+than reporting success. That proves the bytes landed; it does not prove the board
+boots them, so the CLI then reopens at 115200 and waits for `device_info`.
+
+**`ulanzi_tc001` skips that step and must.** Its CH340 TX is broken in hardware,
+so it never answers any serial probe — running the check would report a good
+flash as a failure. Verify a TC001 by what the matrix renders and by the board
+joining Wi-Fi (`agentdeck devices`).
+
+### Which boards, and where
+
+`webFlash` in `shared/src/esp32-boards.ts` means "measured on hardware and
+offered in the browser" — **not** "may be written at all". The CLI writes every
+board in the SSOT, which matters most for `esp32_c6_147`: it has no OTA slot, so
+USB is its only update path. Unverified boards are still listed in the browser,
+disabled, with the reason shown — a board missing from the picker reads as
+"unsupported" and sends its owner to the wrong page.
+
 ## Flash Safety
 
 - **절대 `usbmodem` 포트 번호만 보고 IPS 3.5"와 Round AMOLED를 구분하지 말 것.** Native USB JTAG 보드는 허브 위치, 재연결 순서, 복구 모드에 따라 `/dev/cu.usbmodem*` 번호가 계속 바뀐다.

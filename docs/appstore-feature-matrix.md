@@ -81,7 +81,7 @@ All surfaces follow the same rule:
 | Timebox Mini | Yes | Yes | Tier 1 CoreBluetooth; Tier 2 BLE helper path |
 | iDotMatrix | Yes | Yes | Tier 1 CoreBluetooth; one BLE display connection at a time |
 | ESP32 state display and Wi-Fi provisioning | Yes | Yes | Native serial and network frameworks |
-| ESP32 serial firmware flash | No | Yes | Requires `esptool.py` |
+| ESP32 serial firmware flash | No | Yes | `agentdeck esp32 flash` bundles esptool-js and drives the port through the optional native `serialport` module — no user-installed `esptool.py`. Also available with no install at all from the browser flasher (Chrome/Edge desktop, Web Serial). **The App Store target is unchanged and stays No**: the sandbox is not the obstacle (`com.apple.security.device.serial` is already granted and the app already does raw POSIX serial writes) — the no-subprocess contract is, and clearing it would mean reimplementing the ESP32 ROM loader in Swift. Not planned. |
 | ESP32 Wi-Fi OTA push | Yes | Yes | Firmware bytes pushed over existing WS; firmware build remains CLI-only |
 | Ulanzi TC001 | Pending | Yes | Swift `led8x32` hardware verification gap, not sandbox restriction |
 | InkDeck | Experimental | Experimental | Registration exists; physical render/refresh release validation incomplete |

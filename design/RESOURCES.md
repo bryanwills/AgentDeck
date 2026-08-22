@@ -89,6 +89,8 @@ diff package/icons/<name>.svg design/brand/<name>.svg   # path data must match
 | App Store screenshots `apple/appstore-submission/screenshots/{en,ko,ja}/` | `screenshots-raw/` captures + captions | `scripts/compose-appstore-screenshots.py` |
 | App Store previews | demo feed (`scripts/appstore-demo-orchestrator.mjs`) | `scripts/record-appstore-previews.sh` |
 | Marketplace listing assets | app captures | `scripts/generate-elgato-marketplace-assets.mjs` |
+| GitHub Pages **`/flash/`** (browser ESP32 flasher) | `tools/web-flasher/` (Vite app) + the release's `manifest.json` and merged images | `pnpm flash:build`, then the Pages workflow's *Fetch firmware for the flasher* step (`scripts/fetch-flash-firmware.mjs`) |
+| `dist/flash/THIRD-PARTY.txt` | the installed `esptool-js` / `pako` / `atob-lite` / `tslib` licence + NOTICE files | `scripts/generate-flash-third-party.mjs` |
 
 ## Reference-only surfaces (historical, superseded for publication)
 
@@ -111,6 +113,27 @@ build and render inline; anything larger becomes a pointer card that links to th
 source, so the Pages artifact never turns into an image host (`assets/` and
 `docs/media/` together are ~80 MB). Directories are summarised with a real file
 count and byte total read at build time, never a number typed into a doc.
+
+### `/flash/` — gates it is already inside
+
+The flasher is a **Vite app, not a self-contained HTML file**: esptool-js is an
+npm package with runtime dependencies, and the CDN ban means something has to
+bundle it. `tools/creature-simulator/` is the same shape and the same precedent.
+
+Two consequences worth stating, because both are easy to get wrong:
+
+- **`design/lint.sh` prunes `./tools/creature-simulator` but NOT
+  `./tools/web-flasher`.** The flasher is inside the lint scope, so it must stay
+  token-clean — no raw hex, no `#fff`/`#000`, IBM Plex and JetBrains Mono only.
+  Written clean rather than added to the prune list.
+- **Its GNB is generated**, like every other Pages surface: markup markers in
+  `tools/web-flasher/index.html`, CSS markers in `tools/web-flasher/style.css`
+  (a linked stylesheet, so the two markers live in different files — same split
+  as the design-system viewer). `node scripts/sync-pages-nav.mjs --check` gates
+  it. Editing either marked region by hand is what the checker exists to catch.
+
+Because the flasher owns nothing under `docs/`, it adds no `catalog.json`
+coverage decision. `docs/esp32.md` (already cataloged) carries its documentation.
 
 ## Rules of thumb
 

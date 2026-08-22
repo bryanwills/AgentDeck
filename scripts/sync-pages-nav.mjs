@@ -26,6 +26,14 @@ const cssPath = resolve(root, 'scripts/pages-nav.css');
 const SURFACES = [
   { file: 'scripts/pages-index.html', base: './', active: 'overview' },
   { file: 'docs/hardware/index.html', base: '../', active: 'devices' },
+  // The flasher keeps its CSS in a linked stylesheet (it is a Vite app, so
+  // main.ts imports it) — same split as the design-system viewer below.
+  {
+    file: 'tools/web-flasher/index.html',
+    cssFile: 'tools/web-flasher/style.css',
+    base: '../',
+    active: 'flash',
+  },
   { file: 'tools/creature-simulator/index.html', base: '../', active: 'demo' },
   {
     file: 'agentdeck-design-system/viewer/index.html',

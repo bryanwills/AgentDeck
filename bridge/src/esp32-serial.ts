@@ -30,6 +30,7 @@ import type { BridgeEvent } from './types.js';
 import { SERIAL_FORWARDED_EVENTS } from '@agentdeck/shared/protocol';
 import type { AuthProvisionMessage, ESP32ToHostMessage, WifiProvisionMessage } from '@agentdeck/shared/protocol';
 import { formatResetTime, truncateUtf8Bytes } from '@agentdeck/shared';
+import { readLease } from './esp32-flash-lease.js';
 import { debug, logTagged } from './logger.js';
 
 /** @internal Exported for testing only */
@@ -1428,6 +1429,19 @@ function checkStaleConnections(): void {
 export function startESP32Serial(): void {
   loadDeviceInfoCache();
 
+  // A flash may be in flight from BEFORE this process existed. The recorded
+  // failure was never the daemon that was asked to stand down — it was the one
+  // that respawned underneath the write and reopened every port. An in-process
+  // pause cannot span a respawn; the lease file can, so it is read here.
+  const lease = readLease();
+  if (lease) {
+    debug(
+      'ESP32',
+      `serial suspended by flash lease until ${new Date(lease.until).toISOString()}` +
+        `${lease.board ? ` (${lease.board})` : ''} — not opening any port`,
+    );
+  }
+
   // Fire-and-forget initial detection (non-blocking)
   pollForDevices().catch(err => {
     debug('ESP32', `Initial poll failed: ${err.message}`);
@@ -1448,6 +1462,15 @@ export function startESP32Serial(): void {
 
 async function pollForDevices(): Promise<void> {
   if (pollInProgress) return;
+  // Checked at the top of the poll, not on a timer: a timer that fires late on
+  // a sleeping laptop would extend the suspension past what was promised, and a
+  // read-time check self-heals if the flasher dies mid-write. Nothing has to run
+  // to end the lease — it simply stops being true.
+  const lease = readLease();
+  if (lease) {
+    debug('ESP32', `poll skipped — flash lease active for ${Math.ceil((lease.until - Date.now()) / 1000)}s`);
+    return;
+  }
   pollInProgress = true;
 
   try {
@@ -1713,6 +1736,27 @@ export function handleESP32Wake(): void {
 /**
  * Stop ESP32 serial bridge and close all connections.
  */
+/**
+ * Drop every open serial FD without tearing the bridge down.
+ *
+ * This is what a flash lease needs and `stopESP32Serial()` is not: the timers
+ * stay armed, so once the lease expires the very next poll re-opens whatever is
+ * still plugged in — nobody has to remember to resume. Refusing to open (in
+ * `pollForDevices`) is only half the job; a port this daemon is ALREADY holding
+ * would still block the flasher's own open, and on macOS two readers on one TTY
+ * steal each other's bytes rather than failing cleanly.
+ */
+export function releaseESP32SerialPorts(reason: string): number {
+  const released = connections.length;
+  for (const conn of connections) {
+    conn.connected = false;
+    closeConnection(conn);
+  }
+  connections = [];
+  if (released > 0) debug('ESP32', `Released ${released} serial port(s): ${reason}`);
+  return released;
+}
+
 export function stopESP32Serial(): void {
   if (pollTimer) {
     clearInterval(pollTimer);

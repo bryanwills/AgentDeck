@@ -26,6 +26,67 @@ inventing a changelog after the fact states things nobody measured:
 `streamdeck 1.0.4`–`1.0.5`, `esp32 1.0.2`–`1.0.4`, `ulanzi 1.0.2`.
 Their content is recoverable from the commit range between their tags.
 
+## 2026-08-22 — npm 1.0.23 · ESP32 1.0.7
+
+Firmware was building correctly for ten boards every release and piling up
+somewhere nobody could reach it. All 31 assets of `esp32-v1.0.6` were downloaded
+zero times, no page linked them, and the only documented way in assumed a source
+checkout with PlatformIO installed. This release is the way in.
+
+### Flash from a browser — nothing to install
+
+[**puritysb.github.io/AgentDeck/flash/**](https://puritysb.github.io/AgentDeck/flash/)
+writes firmware to a board over USB from desktop Chrome or Edge. Pick a board,
+plug it in, done — no checkout, no toolchain, no `esptool.py`. Safari, Firefox
+and mobile browsers do not implement Web Serial; the page checks that *before*
+rendering the flow and hands you the terminal command instead, in English,
+Korean or Japanese.
+
+Five boards are offered — 86 Box, InkDeck, TTGO T-Display, Ulanzi TC001,
+T-Display-S3-Pro — each because a hardware run measured it. The other five are
+listed too, disabled, with the reason on screen: a board missing from the picker
+reads as "unsupported" and sends its owner to the wrong page.
+
+### `agentdeck esp32 flash <board>`
+
+The same write from a terminal, with the two things a web page cannot do:
+
+- **It frees the serial port itself.** Every serial open toggles DTR/RTS and
+  resets the board, so a running daemon is the commonest cause of a failed
+  flash. The CLI takes a lease the daemon honours — a *file*, because the daemon
+  that steals the port is the one that respawns underneath the write, and an
+  in-process pause cannot span a respawn. The lease expires when it is read, not
+  on a timer, so a flasher killed mid-write needs nothing to run to recover.
+- **It checks the board booted, not just that the bytes landed.** MD5 against the
+  chip proves the write; an image with a wrong flash-size header passes that and
+  then bootloops. So it reopens the port and waits for the board to introduce
+  itself. `ulanzi_tc001` skips that step by name — its CH340 TX is broken in
+  hardware and would report a good flash as a failure.
+
+`serialport` is an optional native dependency; without it the command says which
+two things to install and points at the browser flasher.
+
+### The write is refused when the board is wrong
+
+Both tools identify the chip before writing, and neither has an override. An S3
+image on a classic ESP32, or a 16MB-header image on an 8MB part, is how these
+boards get bricked — and the recovery tool for a bricked board is the tool that
+refused. The size check is directional: declaring *less* flash than the part has
+is fine, and on InkDeck it is required. An unreadable flash id stays unknown
+rather than becoming `detectFlashSize()`'s silent "4MB", and the surface says the
+check was unavailable instead of implying it passed.
+
+### ESP32 1.0.7 — one file, one offset
+
+A release now ships `agentdeck-<board>-merged.bin`, written at `0x0` on **every**
+chip, plus a `manifest.json` whose sizes and hashes are computed from the
+artifacts. The previous asset set could not bring a board up: `boot_app0.bin` was
+never published, so a stale otadata boots the previous slot; the bootloader
+offset is chip-specific and this fleet spans three values, documented nowhere;
+and an unstated flash size leaves a wrong header. A board that fails to build now
+fails the release instead of shipping nothing quietly — the failure that left
+three boards with no binaries at all in 1.0.1.
+
 ## 2026-08-22 — npm 1.0.22 · Apple 1.0.8
 
 Codex usage was reporting the wrong number in two independent ways. Both are

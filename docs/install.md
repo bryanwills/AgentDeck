@@ -20,6 +20,14 @@ one-command path in [README → Start here](../README.md#start-here) instead.
 | **JDK 17+** | For Android | `brew install openjdk@17` |
 | **Stream Deck CLI** | Auto | Installed by `pnpm setup` if missing |
 | **Microphone + Speech Recognition** | For voice | Grant on first use (macOS Settings → Privacy). No sox, whisper, or model download — Apple SFSpeech on-device |
+| **Chrome or Edge, desktop** | For browser flashing only | Nothing to install: [puritysb.github.io/AgentDeck/flash/](https://puritysb.github.io/AgentDeck/flash/) writes ESP32 firmware over Web Serial. Safari, Firefox, and every mobile browser do not implement Web Serial — use `agentdeck esp32 flash <board>` there |
+
+> **Putting firmware on an ESP32 board needs none of the above.** Open
+> [puritysb.github.io/AgentDeck/flash/](https://puritysb.github.io/AgentDeck/flash/)
+> in desktop Chrome or Edge — no checkout, no PlatformIO, no toolchain. From a
+> terminal, `agentdeck esp32 flash <board>` does the same thing and additionally
+> stands the daemon down and verifies the board booted. See
+> [docs/esp32.md § Flash over USB](esp32.md#flash-over-usb).
 
 ---
 

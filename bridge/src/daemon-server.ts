@@ -189,7 +189,8 @@ import {
   describeDaemonPosture,
   resolveDaemonPosture,
 } from './network-posture.js';
-import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendAuthProvisionToAll, sendWifiProvision, sendWifiProvisionToAll, handleESP32Wake, getESP32Ports, getSerialConnectionStatus, getSerialLastError, getSerialReachableBoards } from './esp32-serial.js';
+import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendAuthProvisionToAll, sendWifiProvision, sendWifiProvisionToAll, handleESP32Wake, getESP32Ports, getSerialConnectionStatus, getSerialLastError, getSerialReachableBoards, releaseESP32SerialPorts } from './esp32-serial.js';
+import { clampLeaseSeconds, clearLease, readLease, writeLease } from './esp32-flash-lease.js';
 import { loadWifiConfig } from './wifi-config.js';
 import { getConnectedAdbDevices, hasAdb, getAdbDeviceCount } from './adb-reverse.js';
 import { getPixooDeviceDetails, pixooDeviceCount } from './pixoo/pixoo-bridge.js';
@@ -1835,6 +1836,62 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         };
         writeNext();
       }
+      return;
+    }
+    // ===== Serial suspend / resume (USB flashing) =====
+    // Both sit BEHIND the normal auth gate — `isAuthorizedHttpRequest()` treats
+    // same-machine as authenticated, which is exactly the audience here, so
+    // this adds no standing unauthenticated route. The one always-on pre-auth
+    // route is still `GET /health`.
+    //
+    // `agentdeck esp32 flash` calls suspend, flashes, and calls resume in a
+    // `finally`. Neither call is load-bearing on its own: expiry is enforced
+    // when the lease is READ, so a CLI that is killed mid-flash recovers with
+    // nothing running.
+    if (req.method === 'POST' && pathname === '/esp32/serial/suspend') {
+      (async () => {
+        const body = await readJsonBody(req);
+        const seconds = clampLeaseSeconds(body.seconds ?? 120);
+        const lease = writeLease({
+          until: Date.now() + seconds * 1000,
+          reason: typeof body.reason === 'string' ? body.reason : 'usb flash',
+          pid: typeof body.pid === 'number' ? body.pid : undefined,
+          board: typeof body.board === 'string' ? body.board : undefined,
+        });
+        // Refusing to OPEN is only half of it — a port this daemon already
+        // holds still blocks the flasher, and two readers on one TTY steal
+        // each other's bytes instead of failing cleanly.
+        const released = releaseESP32SerialPorts(`flash lease (${lease.board ?? 'usb flash'})`);
+        return { ok: true, until: lease.until, seconds, released };
+      })().then((result) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      }).catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+      });
+      return;
+    }
+    if (req.method === 'POST' && pathname === '/esp32/serial/resume') {
+      // Idempotent by contract: resuming when nothing is suspended is a
+      // success. The CLI calls this from a `finally`, where it may well run
+      // after the lease has already expired on its own.
+      const was = readLease();
+      clearLease();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, wasSuspended: was !== null }));
+      return;
+    }
+    if (req.method === 'GET' && pathname === '/esp32/serial/status') {
+      const lease = readLease();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        ok: true,
+        suspended: lease !== null,
+        until: lease?.until,
+        board: lease?.board,
+        ports: getESP32Ports(),
+      }));
       return;
     }
     if (req.method === 'POST' && pathname === '/esp32/ota') {

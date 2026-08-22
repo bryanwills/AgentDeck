@@ -64,6 +64,12 @@ jobs:
       - name: Build design system viewer
         run: pnpm run design-system:build
 
+      # The browser flasher. A Vite app, not a self-contained HTML file:
+      # esptool-js is an npm package with runtime deps and the CDN ban applies,
+      # so something has to bundle it (same reason as the creature simulator).
+      - name: Build web flasher
+        run: pnpm run flash:build
+
       - name: Run Vitest with coverage
         id: vitest
         continue-on-error: true
@@ -118,9 +124,48 @@ jobs:
           ANDROID_OUTCOME: ${{ steps.android.outcome }}
           GITHUB_SHA: ${{ github.sha }}
 
+      # The tag is resolved BEFORE the cache step so the cache key can name it.
+      # Resolution order and its reasoning live in the script; it prints which
+      # rule it used, because a silently-chosen tag makes a wrong firmware
+      # deployment indistinguishable from a right one.
+      - name: Resolve firmware tag
+        id: fwtag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep -oE 'FIRMWARE_VERSION[[:space:]]*=[[:space:]]*"[^"]+"' esp32/src/config.h | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          TAG=""
+          if [ -n "$VERSION" ] && gh release view "esp32-v$VERSION" --json tagName >/dev/null 2>&1; then
+            TAG="esp32-v$VERSION"
+            echo "tag $TAG (esp32/src/config.h FIRMWARE_VERSION)"
+          else
+            TAG=$(gh release list --limit 100 --json tagName,createdAt \
+                  | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["tagName"].startswith("esp32-v")]; r.sort(key=lambda x: x["createdAt"], reverse=True); print(r[0]["tagName"] if r else "")')
+            echo "tag ${TAG:-<none>} (newest esp32-v* release; config.h says ${VERSION:-<unset>})"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Cache firmware images
+        if: steps.fwtag.outputs.tag != ''
+        uses: actions/cache@v4
+        with:
+          path: _site/flash/fw
+          key: flash-fw-${{ steps.fwtag.outputs.tag }}
+
+      # GitHub Release assets carry no CORS headers (measured), so the browser
+      # cannot fetch them — the images must be served from this origin. The
+      # script re-verifies every file's sha256 against the release manifest,
+      # cache hits included, and fails the deploy on a mismatch: a flasher that
+      # ships the wrong firmware is worse than a deploy that went red.
+      - name: Fetch firmware for the flasher
+        if: steps.fwtag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/fetch-flash-firmware.mjs --out _site/flash/fw --tag "${{ steps.fwtag.outputs.tag }}"
+
       - name: Assemble Pages site
         run: |
-          mkdir -p _site/reports _site/demo _site/hardware _site/gallery _site/docs _site/design-system
+          mkdir -p _site/reports _site/demo _site/hardware _site/gallery _site/docs _site/design-system _site/flash
           # Landing page at root
           cp scripts/pages-index.html _site/index.html
           cp docs/media/agentdeck-icon.png _site/icon.png
@@ -141,6 +186,10 @@ jobs:
           cp -R dist/design-system/. _site/design-system/
           # Live demo under /demo/
           cp -R dist/demo/. _site/demo/
+          # Browser flasher under /flash/. The firmware images under
+          # _site/flash/fw/ were written by the fetch step above; copying the
+          # built app on top leaves them alone.
+          cp -R dist/flash/. _site/flash/
           # Test report under /reports/
           cp coverage/test-report/index.html _site/reports/index.html
           cp coverage/test-report/history.json _site/reports/history.json 2>/dev/null || true

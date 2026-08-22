@@ -4,67 +4,119 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flash AgentDeck firmware</title>
+<meta name="description" content="Install AgentDeck ESP32 firmware over USB from Chrome or Edge — no checkout, no PlatformIO.">
+<link rel="icon" href="../icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+KR:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+KR:wght@400;500;600&amp;family=IBM+Plex+Sans+JP:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
 </head>
 <body>
+<!-- GNB:BEGIN (generated from scripts/pages-nav.html — do not edit by hand) -->
+<nav class="nav" aria-label="Primary" data-gnb>
+  <div class="nav-in">
+    <a class="brand" href="../"><img src="../icon.png" alt="">AgentDeck</a>
+    <div class="nav-links">
+      <a href="../">Overview</a>
+      <a href="../hardware/">Devices</a>
+      <a class="active" href="../flash/">Flash</a>
+      <a href="../demo/">Live Preview</a>
+      <a href="../design-system/">Design System</a>
+      <a href="../reports/">Test Report</a>
+      <a class="gh" href="https://github.com/puritysb/AgentDeck">GitHub</a>
+      <select id="lang" class="lang" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="ko">KO</option>
+        <option value="ja">JA</option>
+      </select>
+    </div>
+  </div>
+</nav>
+<!-- GNB:END -->
+
 <main class="wrap">
   <header class="head">
-    <p class="kicker">AgentDeck</p>
-    <h1>Flash ESP32 firmware</h1>
-    <p class="lede">Connect a board over USB and install AgentDeck firmware from the browser.
-      No checkout, no PlatformIO, no toolchain.</p>
-    <p class="fw" id="fw-line">Firmware: <span class="mono" id="fw-version">not loaded</span></p>
+    <p class="kicker" data-i18n="head.kicker">AgentDeck</p>
+    <h1 data-i18n="head.h1">Flash ESP32 firmware</h1>
+    <p class="lede" data-i18n="head.lede">Connect a board over USB and install AgentDeck firmware from this page. No checkout, no PlatformIO, no toolchain.</p>
+    <p class="fw"><span data-i18n="head.fw">Firmware</span>: <span class="mono" id="fw-version">…</span></p>
   </header>
 
   <!-- Shown INSTEAD of the flow when Web Serial is unavailable. Checked before
-       anything renders, because failing after a user commits is the worst order. -->
+       anything else renders: telling someone their browser cannot do this after
+       they have picked a board and plugged in a cable is the worst order. -->
   <section class="card block" id="unsupported" hidden>
-    <h2>This browser cannot flash</h2>
+    <h2 data-i18n="unsupported.h">This browser cannot flash</h2>
     <p id="unsupported-why"></p>
-    <p>Use <strong>Chrome</strong> or <strong>Edge</strong> on a desktop computer, or flash from the terminal:</p>
+    <p data-i18n="unsupported.use">Use <strong>Chrome</strong> or <strong>Edge</strong> on a desktop computer, or flash from the terminal:</p>
     <pre class="code"><code id="cli-fallback">agentdeck esp32 flash &lt;board&gt;</code></pre>
-    <button class="btn ghost" id="copy-cli" type="button">Copy command</button>
+    <div class="row">
+      <button class="btn ghost" id="copy-cli" type="button" data-i18n="unsupported.copy">Copy command</button>
+      <a class="btn ghost" id="docs-link" href="https://github.com/puritysb/AgentDeck/blob/master/docs/esp32.md#flash-over-usb" data-i18n="unsupported.docs">USB flashing guide</a>
+    </div>
   </section>
 
   <div id="flow">
     <section class="card block">
-      <h2>1 · Free the serial port</h2>
-      <p>A running AgentDeck daemon holds <code>/dev/cu.*</code>, and every open resets the board.
-        This is the most common cause of a failed flash — and this page
-        <strong>cannot detect it</strong> (an HTTPS page may not probe your local daemon).</p>
+      <h2 data-i18n="s1.h">1 · Free the serial port</h2>
+      <p data-i18n="s1.p">A running AgentDeck daemon holds the board's serial port, and every open resets the board. This is the most common cause of a failed flash — and this page <strong>cannot detect it</strong>, because an HTTPS page is not allowed to probe your local daemon.</p>
       <label class="check"><input type="checkbox" id="ck-daemon">
-        <span>I ran <code class="mono">agentdeck daemon stop</code> and quit the AgentDeck app</span></label>
-      <p class="hint">Verify with <code class="mono">lsof /dev/cu.*</code> — it should print nothing.</p>
+        <span data-i18n="s1.check">I ran <code class="mono">agentdeck daemon stop</code> and quit the AgentDeck app</span></label>
+      <p class="hint" data-i18n="s1.hint">Verify with <code class="mono">lsof /dev/cu.*</code> — it should print nothing.</p>
     </section>
 
     <section class="card block">
-      <h2>2 · Pick your board</h2>
-      <label class="field"><span>Board</span>
+      <h2 data-i18n="s2.h">2 · Pick your board</h2>
+      <label class="field"><span data-i18n="s2.label">Board</span>
         <select id="board"></select></label>
       <div id="board-notes" class="notes"></div>
     </section>
 
     <section class="card block">
-      <h2>3 · Connect</h2>
+      <h2 data-i18n="s3.h">3 · Connect and identify</h2>
       <p class="hint" id="entry-hint"></p>
       <div class="row">
-        <button class="btn" id="probe" type="button" disabled>Connect &amp; identify</button>
-        <label class="check inline"><input type="checkbox" id="ck-baud" checked>
-          <span>also test the board's upload baud</span></label>
+        <button class="btn" id="probe" type="button" disabled data-i18n="s3.btn">Connect &amp; identify</button>
       </div>
-      <p class="hint">This step only <strong>reads</strong> from the board. Nothing is written.</p>
+      <p class="hint" data-i18n="s3.read">This step only <strong>reads</strong> from the board. Nothing is written yet.</p>
     </section>
 
-    <section class="card block" id="result-card" hidden>
-      <h2>Result</h2>
+    <section class="card block" id="install-card" hidden>
+      <h2 data-i18n="s4.h">4 · Install</h2>
       <div id="verdict"></div>
-      <table class="tbl" id="attempts"></table>
-      <details class="log"><summary>Raw log</summary><pre class="code" id="raw"></pre></details>
-      <button class="btn ghost" id="copy-json" type="button">Copy result JSON</button>
+      <table class="tbl" id="identity"></table>
+      <label class="check"><input type="checkbox" id="ck-erase">
+        <span data-i18n="s4.erase">erase the whole flash first (slower; clears saved Wi-Fi and pairing token)</span></label>
+      <div class="row">
+        <button class="btn" id="install" type="button" disabled data-i18n="s4.btn">Install firmware</button>
+      </div>
+      <p class="hint" data-i18n="s4.confirm">Do not unplug the board until this finishes.</p>
+      <div id="progress" hidden>
+        <p class="phase mono" id="phase"></p>
+        <div class="bar"><div class="bar-fill" id="bar-fill"></div></div>
+      </div>
+    </section>
+
+    <section class="card block" id="done-card" hidden>
+      <h2 data-i18n="done.h">Firmware installed</h2>
+      <p data-i18n="done.p">The board was written and its MD5 matched. Unplug it and plug it back in, then start the daemon again.</p>
+      <div id="done-extra"></div>
+      <p><span data-i18n="done.next">Check it appeared:</span></p>
+      <pre class="code"><code>agentdeck daemon start
+agentdeck devices</code></pre>
+      <p class="hint" data-i18n="done.wifi">To put Wi-Fi credentials on it, plug it in with the daemon running and use <code class="mono">agentdeck wifi-setup</code>.</p>
+    </section>
+
+    <section class="card block" id="error-card" hidden>
+      <h2 data-i18n="err.h">That did not work</h2>
+      <div id="error-body"></div>
+      <details class="log"><summary data-i18n="err.raw">Raw log</summary><pre class="code" id="raw"></pre></details>
     </section>
   </div>
+
+  <footer class="foot">
+    <p class="hint" data-i18n="foot.built">Firmware images are downloaded from this site, not from a third party.</p>
+    <p class="hint"><a href="./THIRD-PARTY.txt" data-i18n="foot.third">Third-party licences</a></p>
+  </footer>
 </main>
 <script type="module" src="./main.ts"></script>
 </body>

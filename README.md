@@ -131,7 +131,7 @@ Any of these attach to the same daemon, and you can add them in any order:
 | **macOS app** | [Download on the App Store](https://apps.apple.com/app/id6784822497) — the SwiftUI dashboard carries its own daemon, so it needs no Node.js |
 | **iPhone / iPad companion** | Same [App Store listing](https://apps.apple.com/app/id6784822497) — pairs with a daemon on your Mac over the LAN (QR pairing) |
 | **Android tablet / e-ink** | [Install from Google Play](https://play.google.com/store/apps/details?id=dev.agentdeck) (recommended), or use the signed APK from [Releases](https://github.com/puritysb/AgentDeck/releases). Android is a companion dashboard: keep the AgentDeck daemon running on a Mac/PC on the same network. See the [3-step setup guide](docs/android.md#quick-start-google-play-or-github-apk). |
-| **ESP32 panels · InkDeck e-ink** | Flash firmware, then Wi-Fi OTA — see [docs/esp32.md](docs/esp32.md) |
+| **ESP32 panels · InkDeck e-ink** | Flash from your browser at [**puritysb.github.io/AgentDeck/flash/**](https://puritysb.github.io/AgentDeck/flash/) (Chrome/Edge desktop, nothing to install) or run `agentdeck esp32 flash <board>`. After the first USB flash, updates go over Wi-Fi OTA — see [docs/esp32.md](docs/esp32.md#flash-over-usb) |
 | **Pixoo64 · TC001 · Timebox · iDotMatrix** | `agentdeck pixoo scan` / `agentdeck timebox scan` — see [docs/devices.md](docs/devices.md) |
 
 > **Android, Stream Deck, and Ulanzi are companion surfaces.** They talk to the

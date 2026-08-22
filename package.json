@@ -9,6 +9,7 @@
     "demo": "node scripts/render-creature-simulator.mjs && node scripts/render-esp32-sim-frames.mjs && npx --yes vite tools/creature-simulator",
     "demo:build": "node scripts/render-creature-simulator.mjs && node scripts/render-esp32-sim-frames.mjs && node scripts/render-device-previews.mjs && vite build tools/creature-simulator --base=/AgentDeck/demo/ --outDir ../../dist/demo --emptyOutDir && cp tools/creature-simulator/sim-data.js dist/demo/sim-data.js && cp -R tools/creature-simulator/sim-frames dist/demo/sim-frames && cp -R tools/creature-simulator/previews dist/demo/previews",
     "clean": "pnpm -r clean",
+    "flash:build": "vite build tools/web-flasher --base=/AgentDeck/flash/ --outDir ../../dist/flash --emptyOutDir && node scripts/generate-flash-third-party.mjs dist/flash",
     "typecheck": "pnpm -r typecheck",
     "generate-icons": "node scripts/generate-icons.mjs",
     "generate-creature-glyphs": "node scripts/generate-creature-glyphs.mjs",

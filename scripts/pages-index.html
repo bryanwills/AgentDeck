@@ -255,6 +255,7 @@
     <div class="nav-links">
       <a class="active" href="./">Overview</a>
       <a href="./hardware/">Devices</a>
+      <a href="./flash/">Flash</a>
       <a href="./demo/">Live Preview</a>
       <a href="./design-system/">Design System</a>
       <a href="./reports/">Test Report</a>
@@ -308,12 +309,17 @@
   </header>
 
   <h2 data-i18n="explore.h">Explore AgentDeck</h2>
-  <p class="section-lede" data-i18n="explore.p">Four focused views: what runs where, how it looks, how it works, and whether the tests pass.</p>
+  <p class="section-lede" data-i18n="explore.p">Six focused views: what runs where, how to put firmware on it, how it looks, how it works, and whether the tests pass.</p>
   <div class="cards">
     <a class="card" href="hardware/">
       <div class="ci" data-i18n="card.devices.ci">Surface catalog</div>
       <h3>Devices</h3>
       <p data-i18n="card.devices.p">Browse supported displays and controllers, then open the detailed compatibility matrix.</p>
+    </a>
+    <a class="card" href="flash/">
+      <div class="ci" data-i18n="card.flash.ci">Browser flasher</div>
+      <h3>Flash firmware</h3>
+      <p data-i18n="card.flash.p">Install ESP32 firmware over USB straight from Chrome or Edge — no checkout, no PlatformIO.</p>
     </a>
     <a class="card" href="design-system/">
       <div class="ci" data-i18n="card.design.ci">Living system</div>
@@ -438,9 +444,11 @@
         'stat.local': '로컬 — 클라우드 없음',
         'hero.caption': '하나의 데몬, 하나의 세션 모델 — 위의 모든 서피스가 동시에 살아 있습니다.',
         'explore.h': 'AgentDeck 둘러보기',
-        'explore.p': '네 가지 뷰 — 무엇이 어디서 돌아가는지, 어떻게 보이는지, 어떻게 동작하는지, 테스트는 통과하는지.',
+        'explore.p': '여섯 가지 뷰 — 무엇이 어디서 돌아가는지, 펌웨어는 어떻게 넣는지, 어떻게 보이는지, 어떻게 동작하는지, 테스트는 통과하는지.',
         'card.devices.ci': '서피스 카탈로그',
         'card.devices.p': '지원 디스플레이·컨트롤러를 둘러보고 상세 호환성 매트릭스를 열어보세요.',
+        'card.flash.ci': '브라우저 플래셔',
+        'card.flash.p': 'Chrome이나 Edge에서 바로 USB로 ESP32 펌웨어를 설치하세요 — 체크아웃도 PlatformIO도 필요 없습니다.',
         'card.design.ci': '살아있는 시스템',
         'card.design.p': '렌더링된 스펙, 원본 Markdown, 메타데이터, 토큰, 에셋, 검증, 에이전트 인계 문서.',
         'card.demo.ci': '인터랙티브 렌더러',
@@ -471,9 +479,11 @@
         'stat.local': 'ローカル — クラウドなし',
         'hero.caption': 'ひとつのdaemon、ひとつのセッションモデル — 上のすべてのサーフェスが同時に生きています。',
         'explore.h': 'AgentDeckを見る',
-        'explore.p': '4つのビュー — 何がどこで動くか、どう見えるか、どう動くか、テストは通るか。',
+        'explore.p': '6つのビュー — 何がどこで動くか、ファームウェアをどう書き込むか、どう見えるか、どう動くか、テストは通るか。',
         'card.devices.ci': 'サーフェスカタログ',
         'card.devices.p': '対応ディスプレイとコントローラーを眺めて、詳細な互換性マトリクスを開けます。',
+        'card.flash.ci': 'ブラウザ書き込みツール',
+        'card.flash.p': 'ChromeやEdgeからUSBで直接ESP32ファームウェアをインストール — チェックアウトもPlatformIOも不要です。',
         'card.design.ci': 'リビングシステム',
         'card.design.p': 'レンダリング済み仕様、元Markdown、メタデータ、トークン、アセット、検証、エージェント引き継ぎ。',
         'card.demo.ci': 'インタラクティブレンダラー',
