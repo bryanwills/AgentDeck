@@ -31,22 +31,6 @@ struct ControlTowerPanel: View {
     /// NotificationCenter observers below.
     @State private var dashboardVisible: Bool = false
 
-    /// Cumulative height of the popup's chrome (header + banner+pill bar +
-    /// footer), measured via `ChromeHeightKey` PreferenceKey. Replaces the
-    /// previous fixed 140pt reserve so `scrollContentMaxHeight` reflects
-    /// the actual chrome footprint — chrome shrinks (CalmHeader, no banner)
-    /// → scroll budget grows; chrome grows (AttentionTheater + offline
-    /// banner) → scroll budget shrinks to match.
-    @State private var measuredChromeHeight: CGFloat = 0
-
-    /// Natural height of the body ScrollView's content, measured via
-    /// `ContentHeightKey`. Used to bind the ScrollView's frame to
-    /// `min(scrollContentMaxHeight, contentHeight)` so the ScrollView
-    /// shrinks to fit when content is shorter than the cap — SwiftUI's
-    /// ScrollView is otherwise greedy and claims the full proposed
-    /// maxHeight, which surfaces a scrollbar even when content fits.
-    @State private var measuredContentHeight: CGFloat = 0
-
     /// Room the popup window actually has, measured from its own top edge down
     /// to the bottom of *its* screen's usable area. 0 until the hosting window
     /// exists, which falls `availablePanelHeight` back to the screen estimate.
@@ -60,19 +44,31 @@ struct ControlTowerPanel: View {
     @State private var activityRefreshInFlight = false
     @State private var activityRefreshAttempted = false
     @State private var activityLastRefresh: Date? = nil
+    @State private var idleSessionsExpanded = false
+    @State private var fullTopologyExpanded = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            primaryPanel
-                .frame(minWidth: 380, idealWidth: 420, maxWidth: 460)
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
+                primaryPanel
+                    .frame(width: MenuBarDensityPolicy.sessionColumnWidth)
 
-            Divider()
-                .overlay(Color.white.opacity(0.08))
+                Divider()
+                    .overlay(DesignTokens.Tide.s50.opacity(0.08))
 
-            activitySummaryPanel
-                .frame(width: 276, alignment: .topLeading)
+                overviewPanel
+                    .frame(width: MenuBarDensityPolicy.overviewColumnWidth)
+            }
+            .frame(maxHeight: .infinity)
+
+            bottomActionArea
         }
-        .frame(minWidth: 676, idealWidth: 696, maxWidth: 736, alignment: .topLeading)
+        .frame(
+            width: MenuBarDensityPolicy.sessionColumnWidth
+                + MenuBarDensityPolicy.overviewColumnWidth + 1,
+            height: adaptivePanelHeight,
+            alignment: .topLeading
+        )
         .background(PanelAvailableHeightReader { height in
             // Ignore sub-point jitter: this feeds the ScrollView cap, which
             // resizes the window, and a 0.5pt oscillation would relayout forever.
@@ -90,7 +86,6 @@ struct ControlTowerPanel: View {
             )
         )
         .foregroundColor(TerrariumHUD.text)
-        .onPreferenceChange(ChromeHeightKey.self) { measuredChromeHeight = $0 }
         .onAppear {
             refreshStreamDeckDetectionIfStale()
             dashboardVisible = evaluateDashboardVisibility()
@@ -146,40 +141,31 @@ struct ControlTowerPanel: View {
                     )
                 }
             }
-            .measureChromeHeight()
 
-            Group {
-                if measuredContentHeight > scrollContentMaxHeight {
-                    ScrollView(.vertical, showsIndicators: true) {
-                        innerContentVStack
-                    }
-                    .frame(height: scrollContentMaxHeight)
-                } else {
-                    innerContentVStack
-                }
-            }
-            .onPreferenceChange(ContentHeightKey.self) { measuredContentHeight = $0 }
-
-            VStack(spacing: 0) {
-                if showDaemonOfflineBanner {
-                    daemonOfflineBanner
-                }
-                pillActionsBar
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-            }
-            .background(Color.black.opacity(0.35))
-            .overlay(
-                Rectangle()
-                    .fill(Color.white.opacity(0.08))
-                    .frame(height: 0.5),
-                alignment: .top
-            )
-            .measureChromeHeight()
-
-            footerSection
-                .measureChromeHeight()
+            sessionsPane
+                .frame(maxHeight: .infinity)
         }
+    }
+
+    private var overviewPanel: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                activitySummaryPanel
+
+                Divider()
+                    .overlay(DesignTokens.Tide.s50.opacity(0.08))
+
+                compactUsageSummary
+                    .padding(14)
+
+                Divider()
+                    .overlay(DesignTokens.Tide.s50.opacity(0.08))
+
+                adaptiveTopologySummary
+                    .padding(14)
+            }
+        }
+        .background(DesignTokens.UI.popupBgDeep.opacity(0.18))
     }
 
     /// True when a window with the dashboard scene id is on screen and not
@@ -338,14 +324,8 @@ struct ControlTowerPanel: View {
                 }
 
                 VStack(spacing: 5) {
-                    ForEach(Array(snapshot.agents.prefix(4)), id: \.agentType) { agent in
+                    ForEach(snapshot.agents, id: \.agentType) { agent in
                         activityAgentRow(agent)
-                    }
-                    if snapshot.agents.count > 4 {
-                        Text("+\(snapshot.agents.count - 4) more agents")
-                            .font(.system(size: 9.5))
-                            .foregroundStyle(TerrariumHUD.subtext)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
 
@@ -353,12 +333,12 @@ struct ControlTowerPanel: View {
                     .overlay(Color.white.opacity(0.08))
 
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("RECENT TASKS")
+                    Text(snapshot.rows.count > 2 ? "RECENT TASKS · 2 OF \(snapshot.rows.count)" : "RECENT TASKS")
                         .font(.system(size: 9.5, weight: .bold))
                         .kerning(0.45)
                         .foregroundStyle(TerrariumHUD.subtext)
 
-                    ForEach(Array(snapshot.rows.prefix(3)), id: \.originKey) { row in
+                    ForEach(Array(snapshot.rows.prefix(2)), id: \.originKey) { row in
                         activityTaskRow(row)
                     }
                 }
@@ -389,9 +369,12 @@ struct ControlTowerPanel: View {
 
     private func activityAgentRow(_ agent: ApmeActivityHistory.AgentSummary) -> some View {
         HStack(spacing: 7) {
-            Circle()
-                .fill(SessionBrand.color(for: agent.agentType))
-                .frame(width: 7, height: 7)
+            SessionCreatureIcon(
+                agentType: agent.agentType,
+                tint: SessionBrand.color(for: agent.agentType),
+                size: 14,
+                contentInset: 1
+            )
             Text(displayAgentLabel(agent.agentType))
                 .font(.system(size: 10.5, weight: .medium))
                 .lineLimit(1)
@@ -501,15 +484,6 @@ struct ControlTowerPanel: View {
 
     // MARK: - Layout sizing
 
-    /// Cap on the inner ScrollView height so the popover never overruns
-    /// the screen when the user has many devices wired up. The cap is
-    /// computed against `visibleFrame` (already excludes menu bar + Dock)
-    /// minus the *measured* chrome (header + banner+pill bar + footer)
-    /// rather than a fixed reserve — so AttentionTheater + offline banner
-    /// don't crowd content, and CalmHeader doesn't waste headroom. Below
-    /// the cap, the ScrollView reports its content's natural height (via
-    /// `fixedSize(vertical: true)`) so the panel shrinks to fit when
-    /// devices are sparse.
     /// Vertical room the popup has to lay itself out in.
     ///
     /// Measured from the hosting window's own top edge, NOT from a screen
@@ -527,19 +501,12 @@ struct ControlTowerPanel: View {
         return NSScreen.main?.visibleFrame.height ?? 900
     }
 
-    private var scrollContentMaxHeight: CGFloat {
-        // First frame may render before PreferenceKey lands — fall back to
-        // the legacy 140pt reserve so the popup never starts overflowing.
-        let chrome = max(140, measuredChromeHeight)
-        // Visual cushion against the bottom edge (popup corner radius/shadow
-        // inset, Dock auto-hide reveal strip).
-        let safety: CGFloat = 24
-        // Low floor (80pt ≈ one session row visible). When chrome is huge
-        // — AttentionTheater with many options + DaemonOfflineBanner —
-        // the body shrinks and scrolls internally instead of pushing the
-        // popup past the screen edge. The previous 360pt floor stacked
-        // with the AttentionTheater options cap to exceed visibleFrame.
-        return max(80, availablePanelHeight - chrome - safety)
+    /// The popup is a bounded command glance, not a miniature Dashboard.
+    /// Its height therefore follows the screen budget but never the number of
+    /// sessions or connected surfaces. Both columns scroll internally if a
+    /// pathological attention prompt consumes more than its normal share.
+    private var adaptivePanelHeight: CGFloat {
+        MenuBarDensityPolicy.panelHeight(availableHeight: availablePanelHeight)
     }
 
     // MARK: - Session Classification
@@ -587,68 +554,182 @@ struct ControlTowerPanel: View {
 
     // MARK: - Sessions list
 
-    /// Sessions displayed in the main list. When the attention theater is
-    /// showing a featured session at the top, we exclude it here so it
-    /// isn't duplicated — matches `option-d.jsx`'s `remaining` filter.
-    private var remainingSessions: [SessionInfo] {
-        guard let featured = featuredAwaitingSession else { return sortedSessions }
-        return sortedSessions.filter { $0.id != featured.id }
+    private var remainingAttentionSessions: [SessionInfo] {
+        guard let featured = featuredAwaitingSession else { return attentionSessions }
+        return attentionSessions.filter { $0.id != featured.id }
     }
 
-    private var innerContentVStack: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sessionsListSection
-            topologySection
-            utilityLinksRow
-            rateLimitsSection
-            anthropicApiUsageSection
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: ContentHeightKey.self,
-                    value: proxy.size.height
-                )
+    private var sessionsPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                Text("SESSIONS")
+                    .font(.system(size: 10, weight: .bold))
+                    .kerning(0.5)
+                    .foregroundStyle(TerrariumHUD.subtext)
+                Spacer(minLength: 6)
+                sessionCountChip(activeSessions.count, label: "working", color: DesignTokens.UI.cyan)
+                sessionCountChip(attentionSessions.count, label: "waiting", color: DesignTokens.UI.attn)
+                sessionCountChip(idleSessions.count, label: "idle", color: DesignTokens.UI.idle)
             }
-        )
-    }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
 
-    private var sessionsListSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("SESSIONS")
-                .font(.system(size: 10, weight: .bold))
-                .kerning(0.5)
-                .foregroundColor(TerrariumHUD.subtext)
+            Divider()
+                .overlay(DesignTokens.Tide.s50.opacity(0.08))
 
             if sortedSessions.isEmpty {
                 VStack(spacing: 6) {
                     Text("No active sessions")
-                        .font(.system(size: 11))
-                        .foregroundColor(TerrariumHUD.subtext)
-                    Text("Sessions appear here automatically once the bridge picks one up.")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("Sessions appear automatically when AgentDeck observes one.")
                         .font(.system(size: 10))
-                        .foregroundColor(TerrariumHUD.subtext.opacity(0.85))
+                        .foregroundStyle(TerrariumHUD.subtext)
                         .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(18)
             } else {
-                VStack(spacing: 4) {
-                    ForEach(remainingSessions) { session in
-                        SessionJumpRow(
-                            session: session,
-                            tool: currentToolFor(session),
-                            onFocus: {
-                                stateHolder.sendCommand(.focusSession(sessionId: session.id))
-                            }
-                        )
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 13) {
+                        if !remainingAttentionSessions.isEmpty {
+                            sessionGroup(
+                                title: featuredAwaitingSession == nil ? "NEEDS YOU" : "ALSO NEEDS YOU",
+                                sessions: remainingAttentionSessions,
+                                color: DesignTokens.UI.attn
+                            )
+                        }
+                        if !activeSessions.isEmpty {
+                            sessionGroup(
+                                title: "WORKING",
+                                sessions: activeSessions,
+                                color: DesignTokens.UI.cyan
+                            )
+                        }
+                        idleSessionsSection
+                        if remainingAttentionSessions.isEmpty,
+                           activeSessions.isEmpty,
+                           idleSessions.isEmpty,
+                           featuredAwaitingSession != nil {
+                            Text("The session needing input is shown above.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(TerrariumHUD.subtext)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 12)
+                        }
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                 }
             }
         }
+    }
+
+    private func sessionCountChip(_ count: Int, label: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 5, height: 5)
+            Text("\(count) \(label)")
+                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(count > 0 ? TerrariumHUD.text : TerrariumHUD.subtext)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func sessionGroup(title: String, sessions: [SessionInfo], color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Circle().fill(color).frame(width: 5, height: 5)
+                Text(title)
+                    .font(.system(size: 9.5, weight: .bold))
+                    .kerning(0.45)
+                    .foregroundStyle(TerrariumHUD.subtext)
+                Text("\(sessions.count)")
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext)
+            }
+
+            VStack(spacing: 4) {
+                ForEach(sessions) { session in
+                    SessionJumpRow(
+                        session: session,
+                        tool: currentToolFor(session),
+                        onFocus: {
+                            stateHolder.sendCommand(.focusSession(sessionId: session.id))
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var idleSessionsSection: some View {
+        if !idleSessions.isEmpty {
+            let inlineCount = MenuBarDensityPolicy.inlineIdleSessionCount(
+                totalSessionCount: sortedSessions.count,
+                idleSessionCount: idleSessions.count
+            )
+            let visibleIdle = idleSessionsExpanded ? idleSessions : Array(idleSessions.prefix(inlineCount))
+            let hiddenCount = idleSessions.count - visibleIdle.count
+
+            if !visibleIdle.isEmpty {
+                sessionGroup(title: "IDLE", sessions: visibleIdle, color: DesignTokens.UI.idle)
+            }
+
+            if hiddenCount > 0 {
+                idleDisclosureButton(
+                    title: inlineCount == 0
+                        ? "Idle sessions \(idleSessions.count)"
+                        : "\(hiddenCount) idle \(hiddenCount == 1 ? "session" : "sessions") hidden",
+                    actionLabel: "Show all",
+                    systemImage: "chevron.down"
+                ) {
+                    idleSessionsExpanded = true
+                }
+            } else if idleSessionsExpanded && inlineCount < idleSessions.count {
+                idleDisclosureButton(
+                    title: "All \(idleSessions.count) idle sessions shown",
+                    actionLabel: "Collapse",
+                    systemImage: "chevron.up"
+                ) {
+                    idleSessionsExpanded = false
+                }
+            }
+        }
+    }
+
+    private func idleDisclosureButton(
+        title: String,
+        actionLabel: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(DesignTokens.UI.idle)
+                    .frame(width: 5, height: 5)
+                Text(title)
+                    .font(.system(size: 9.5, weight: .medium))
+                Spacer()
+                Text(actionLabel)
+                Image(systemName: systemImage)
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .foregroundStyle(TerrariumHUD.subtext)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
+                    .fill(DesignTokens.Tide.s50.opacity(0.045))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
+                    .stroke(DesignTokens.Tide.s50.opacity(0.10), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     /// Secondary text-link row below the topology. Preserves access to
@@ -731,6 +812,173 @@ struct ControlTowerPanel: View {
     }
 
     // MARK: - Compact rate limits
+
+    /// Bounded quota glance for the overview column. It deliberately renders
+    /// only the two canonical windows per provider; model-scoped limits and
+    /// organization usage remain available in Dashboard. Their count is kept
+    /// visible so compression never looks like missing data.
+    @ViewBuilder
+    private var compactUsageSummary: some View {
+        let isApi = stateHolder.state.costLimit.map { $0 > 0 } ?? false
+        let codex = stateHolder.state.codexRateLimits
+        let hasClaude = stateHolder.state.fiveHourPercent != nil
+            || (!isApi && stateHolder.state.sevenDayPercent != nil)
+        let hasCodex = codex?.primary?.usedPercent != nil
+            || codex?.secondary?.usedPercent != nil
+            || codex?.credits != nil
+
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Text("USAGE")
+                    .font(.system(size: 9.5, weight: .bold))
+                    .kerning(0.5)
+                    .foregroundStyle(TerrariumHUD.subtext)
+                if stateHolder.state.usageStale == true {
+                    Text("stale")
+                        .font(.system(size: 9))
+                        .foregroundStyle(DesignTokens.UI.attn)
+                }
+                Spacer()
+            }
+
+            if hasClaude {
+                usageProviderHeader(agentType: "claude-code", title: "Claude")
+                if let pct5h = stateHolder.state.fiveHourPercent {
+                    compactGauge(
+                        label: isApi ? "API" : "5h",
+                        percent: pct5h,
+                        resetTime: isApi ? nil : stateHolder.state.fiveHourResetsAt,
+                        customSuffix: isApi
+                            ? String(
+                                format: "$%.2f/$%.0f",
+                                stateHolder.state.costSpent ?? 0,
+                                stateHolder.state.costLimit ?? 0
+                            )
+                            : nil
+                    )
+                }
+                if !isApi, let pct7d = stateHolder.state.sevenDayPercent {
+                    compactGauge(label: "7d", percent: pct7d, resetTime: stateHolder.state.sevenDayResetsAt)
+                }
+            }
+
+            if hasCodex {
+                usageProviderHeader(agentType: "codex-cli", title: "Codex")
+                if let primary = codex?.primary, let percent = primary.usedPercent {
+                    compactGauge(
+                        label: TopologyRail.windowLabel(primary.windowMinutes),
+                        percent: percent,
+                        resetTime: primary.resetsAt,
+                        stale: primary.stale == true,
+                        footnote: CodexUsageFreshness.footnote(window: primary, capturedAt: codex?.capturedAt)
+                    )
+                }
+                if let secondary = codex?.secondary, let percent = secondary.usedPercent {
+                    compactGauge(
+                        label: TopologyRail.windowLabel(secondary.windowMinutes),
+                        percent: percent,
+                        resetTime: secondary.resetsAt,
+                        stale: secondary.stale == true,
+                        footnote: CodexUsageFreshness.footnote(window: secondary, capturedAt: codex?.capturedAt)
+                    )
+                }
+                if codex?.primary == nil, codex?.secondary == nil, let credits = codex?.credits {
+                    HStack {
+                        Text((codex?.limitId ?? "Credits").capitalized)
+                        Spacer()
+                        Text(credits.unlimited == true ? "∞ credits" : "\(credits.balance ?? "—") credits")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    }
+                    .font(.system(size: 10))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                }
+            }
+            if let scopes = stateHolder.state.scopedLimits, !scopes.isEmpty {
+                Text("Model limits · \(scopes.count) · View in Dashboard")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            if !hasClaude && !hasCodex {
+                Text("Quota data appears when a provider reports it.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(TerrariumHUD.subtext)
+            }
+        }
+    }
+
+    private func usageProviderHeader(agentType: String, title: String) -> some View {
+        HStack(spacing: 6) {
+            SessionCreatureIcon(
+                agentType: agentType,
+                tint: SessionBrand.color(for: agentType),
+                size: 14,
+                contentInset: 1
+            )
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(TerrariumHUD.text)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var adaptiveTopologySummary: some View {
+        let rollup = MenuBarSurfaceRollup.make(from: stateHolder.state.moduleHealth)
+        let density = MenuBarDensityPolicy.collectionDensity(count: rollup.total)
+
+        VStack(alignment: .leading, spacing: 9) {
+            if density == .detailed || fullTopologyExpanded {
+                MenuBarTopologyList()
+                if density != .detailed {
+                    topologyDisclosureButton(
+                        title: "All \(rollup.total) surface details shown",
+                        actionLabel: "Collapse",
+                        systemImage: "chevron.up"
+                    ) {
+                        fullTopologyExpanded = false
+                    }
+                }
+            } else {
+                MenuBarSurfaceSummary()
+                topologyDisclosureButton(
+                    title: "\(rollup.total) surface details",
+                    actionLabel: "Show all",
+                    systemImage: "chevron.down"
+                ) {
+                    fullTopologyExpanded = true
+                }
+            }
+        }
+    }
+
+    private func topologyDisclosureButton(
+        title: String,
+        actionLabel: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                Spacer(minLength: 4)
+                Text(actionLabel)
+                Image(systemName: systemImage)
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .font(.system(size: 9.5, weight: .medium))
+            .foregroundStyle(DesignTokens.UI.cyan)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
+                    .fill(DesignTokens.Tide.s50.opacity(0.045))
+            )
+        }
+        .buttonStyle(.plain)
+    }
 
     /// Claude's subscription rate limits depend on Claude Code's OAuth token,
     /// which is structurally unreachable from the App Store sandbox, so those
@@ -1073,9 +1321,60 @@ struct ControlTowerPanel: View {
             pillButton(label: "Report") { openApmeDashboard() }
                 .disabled(daemonService.port == 0)
                 .daemonOfflineAffordance(isOffline: daemonService.port == 0)
+            devicesPillMenu
             Spacer()
             settingsPillButton
         }
+    }
+
+    private var bottomActionArea: some View {
+        VStack(spacing: 0) {
+            if showDaemonOfflineBanner {
+                daemonOfflineBanner
+            }
+            pillActionsBar
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+        }
+        .background(DesignTokens.UI.popupBgDeep.opacity(0.72))
+        .overlay(
+            Rectangle()
+                .fill(DesignTokens.Tide.s50.opacity(0.08))
+                .frame(height: 0.5),
+            alignment: .top
+        )
+    }
+
+    private var devicesPillMenu: some View {
+        Menu {
+            Button("Preview Devices", action: openDevicePreview)
+            Button("Pair iPad") {
+                DockVisibilityController.shared.prepareToShowWindow()
+                openWindow(id: "pairing-qr")
+            }
+            .disabled(daemonService.port == 0)
+            if streamDeckDetection.streamDeckPlusConnected {
+                Divider()
+                if !streamDeckDetection.elgatoAppInstalled {
+                    Button("Stream Deck+ Setup", action: openStreamDeckDownloadPage)
+                } else if !streamDeckDetection.pluginInstalled {
+                    Button("Install SD Plugin", action: openStreamDeckPluginInstaller)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("Devices")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(TerrariumHUD.text)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(DesignTokens.Tide.s50.opacity(0.08)))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     /// Dashboard pill with active/inactive visual state. The pill reflects
@@ -1167,19 +1466,34 @@ struct ControlTowerPanel: View {
     }
 
     private var settingsPillButton: some View {
-        Button {
-            DockVisibilityController.shared.prepareToShowWindow()
-            NSApp.activate(ignoringOtherApps: true)
-            openWindow(id: "settings")
+        Menu {
+            Button("Open Settings") {
+                DockVisibilityController.shared.prepareToShowWindow()
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "settings")
+            }
+            Toggle("Start at Login", isOn: Binding(
+                get: { daemonService.isLoginItemEnabled },
+                set: { enabled in
+                    if enabled { daemonService.registerLoginItem() }
+                    else { daemonService.unregisterLoginItem() }
+                }
+            ))
+            Divider()
+            Button("Quit AgentDeck") {
+                stateHolder.prepareForTermination()
+                NSApplication.shared.terminate(nil)
+            }
         } label: {
             Image(systemName: "gearshape")
                 .font(.system(size: 14, weight: .regular))
                 .foregroundColor(TerrariumHUD.text)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
-                .background(Capsule().fill(Color.white.opacity(0.08)))
+                .background(Capsule().fill(DesignTokens.Tide.s50.opacity(0.08)))
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
         .help("Open Settings")
     }
 
@@ -1242,34 +1556,6 @@ struct ControlTowerPanel: View {
         if let url = URL(string: "https://github.com/puritysb/AgentDeck/releases/latest") {
             NSWorkspace.shared.open(url)
         }
-    }
-
-    // MARK: - Footer
-
-    private var footerSection: some View {
-        HStack {
-            Toggle("Start at Login", isOn: Binding(
-                get: { daemonService.isLoginItemEnabled },
-                set: { enabled in
-                    if enabled { daemonService.registerLoginItem() }
-                    else { daemonService.unregisterLoginItem() }
-                }
-            ))
-            .toggleStyle(.checkbox)
-            .font(.system(size: 11))
-
-            Spacer()
-
-            Button("Quit") {
-                stateHolder.prepareForTermination()
-                NSApplication.shared.terminate(nil)
-            }
-            .font(.system(size: 11))
-            .buttonStyle(.plain)
-            .foregroundColor(TerrariumHUD.subtext)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
     }
 
     // MARK: - Helpers
@@ -1441,32 +1727,6 @@ struct StreamDeckDetection {
     }
 }
 
-// MARK: - Chrome height measurement
-
-/// Sums the measured heights of every chrome region in the popup. The root
-/// `ControlTowerPanel` reads the total via `onPreferenceChange` to compute
-/// its inner ScrollView's max height against the *actual* chrome footprint
-/// instead of a fixed 140pt reserve.
-private struct ChromeHeightKey: PreferenceKey {
-    // `let` keeps Swift 6 strict-concurrency happy — PreferenceKey only
-    // uses defaultValue as an initial accumulator, never mutates it.
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value += nextValue()
-    }
-}
-
-/// Carries the body ScrollView content's natural height so the parent
-/// can shrink the ScrollView's frame to fit. Unlike `ChromeHeightKey`,
-/// this is a single-source measurement (one GeometryReader on the
-/// content VStack), so reduce just adopts the latest value.
-private struct ContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 /// Reports how much vertical room the hosting popup window actually has:
 /// from its own top edge down to the bottom of its screen's usable area.
 ///
@@ -1493,21 +1753,6 @@ private struct PanelAvailableHeightReader: NSViewRepresentable {
         let available = window.frame.maxY - screen.visibleFrame.minY
         guard available > 0 else { return }
         onChange(available)
-    }
-}
-
-private extension View {
-    /// Adds this view's measured height to the cumulative `ChromeHeightKey`
-    /// total carried up the SwiftUI tree.
-    func measureChromeHeight() -> some View {
-        background(
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: ChromeHeightKey.self,
-                    value: proxy.size.height
-                )
-            }
-        )
     }
 }
 #endif

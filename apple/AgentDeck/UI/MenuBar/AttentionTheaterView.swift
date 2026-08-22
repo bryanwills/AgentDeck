@@ -168,20 +168,12 @@ struct AttentionTheaterView: View {
                 }
             }
         } else {
-            // Adaptive cap that shares the screen budget with the body
-            // ScrollView + footer chrome below. Sizing rule:
-            //   options + ~140 (badge/question chrome) + ~150 (banner+
-            //   pill+footer) + 80 (body floor) + 24 (safety) ≤ screen
-            // → options ≤ screen - 394. We use 0.35 * screen with an
-            // absolute 380pt ceiling: that satisfies the invariant on
-            // typical screens (≥800pt) while keeping the cap reasonable
-            // on 4K displays. Typical prompts (Yes/No/Always, plan-
-            // approval trios, ≤8 options) never reach the ceiling so no
-            // scrollbar appears; pathological lists (e.g. /openclaw
-            // scope's 30+ entries) scroll internally instead of pushing
-            // the sessions list and footer off the popup.
-            let screenHeight = NSScreen.main?.visibleFrame.height ?? 900
-            let optionsCap = min(380, screenHeight * 0.35)
+            // The control-tower popup has a bounded height independent of
+            // session/surface count. Long option sets therefore get their own
+            // compact viewport: the first choices remain immediately visible,
+            // while the session roster below never gets pushed off-screen.
+            // The complete picker is still reachable by scrolling here.
+            let optionsCap: CGFloat = 120
             ScrollView(
                 .vertical,
                 showsIndicators: measuredOptionsHeight > optionsCap

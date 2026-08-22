@@ -245,6 +245,28 @@ background:
 ```
 Mono caption inside: 12px, `--ink-500`, 0.04em tracked, e.g. `// menubar popup — sessions list`.
 
+### 5.11 Bounded collection summary
+
+Glance surfaces never grow with collection size. Preserve urgent and active
+items as rows, collapse passive repetition into a labeled count, and keep the
+complete roster one action away on the owning detail surface. A summary must
+retain three truths even at extreme scale: total count, semantic state, and the
+number needing attention. Do not use an arbitrary “first N” list that silently
+hides failures.
+
+Use the same structure for session rosters, connected hardware, provider
+limits, and any future repeated surface family. Small collections may stay
+expanded; once collapsed, expansion happens inside a bounded scroll region and
+must not resize its containing popup.
+
+Use three stable density bands: detailed through 6 items, grouped from 7–15,
+and summarized from 16 upward. Urgent, waiting, error, stale, and focused items
+remain explicit at every density. A disclosure names the hidden category and
+its exact count (`7 idle sessions hidden`, `12 surface details`); generic
+`+N more` copy is forbidden because it hides what was omitted. Provider
+identity uses the canonical agent mark plus its full name. Single-letter aliases
+such as `C` and `X` are not user-facing labels.
+
 ---
 
 ## 6. Iconography

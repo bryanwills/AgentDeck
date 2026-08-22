@@ -149,8 +149,8 @@ struct MenuBarTopologyList: View {
     private var mlxRow: some View {
         if !stateHolder.state.mlxModels.isEmpty {
             let primary = stateHolder.state.mlxModels.first ?? ""
-            let extra = max(0, stateHolder.state.mlxModels.count - 1)
-            let subtitle = extra > 0 ? "\(primary) · +\(extra)" : primary
+            let count = stateHolder.state.mlxModels.count
+            let subtitle = count > 1 ? "\(primary) · \(count) models" : primary
             RailRow(status: .ok, name: "MLX", subtitle: subtitle)
         }
     }
@@ -165,7 +165,7 @@ struct MenuBarTopologyList: View {
                 let source = running.isEmpty ? ollama.models : running
                 if source.isEmpty { return "idle" }
                 return source.prefix(1).map(\.name).joined() +
-                    (source.count > 1 ? " · +\(source.count - 1)" : "")
+                    (source.count > 1 ? " · \(source.count) models" : "")
             }()
             RailRow(status: status, name: "Ollama", subtitle: subtitle)
         }
