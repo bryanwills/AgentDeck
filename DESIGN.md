@@ -267,6 +267,13 @@ its exact count (`7 idle sessions hidden`, `12 surface details`); generic
 identity uses the canonical agent mark plus its full name. Single-letter aliases
 such as `C` and `X` are not user-facing labels.
 
+When a glance card shares a canvas with an owned lower region, such as the
+Dashboard session HUD above Timeline, that boundary is part of the card's
+layout contract. First use available horizontal space within a surface-safe
+cap, then compact repeated rows, then scroll the complete collection inside the
+card. Never let natural content height paint over the neighboring region, and
+never replace a scrollable full roster with an arbitrary first-N truncation.
+
 ### 5.12 Time-scoped activity glance
 
 A glance metric must answer a current user question and name its time window.

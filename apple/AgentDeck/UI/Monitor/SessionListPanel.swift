@@ -18,11 +18,49 @@ enum TerrariumHUD {
 struct SessionListPanel: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
 
-    /// Maximum visible sessions before showing overflow summary
-    private let maxVisibleSessions = 10
+    /// Landscape passes the water-region budget so a large roster scrolls
+    /// inside the card instead of growing over Timeline. Portrait keeps the
+    /// existing natural-height layout.
+    var maxHeight: CGFloat? = nil
+    @State private var measuredContentHeight: CGFloat = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        Group {
+            if let maxHeight {
+                let viewportCap = max(0, maxHeight - 16) // card padding 8×2
+                ScrollView(.vertical, showsIndicators: true) {
+                    panelContent
+                        .modifier(SessionListContentHeightReader {
+                            measuredContentHeight = $0
+                        })
+                }
+                .onPreferenceChange(SessionListContentHeightKey.self) {
+                    measuredContentHeight = $0
+                }
+                .frame(height: min(
+                    measuredContentHeight > 0 ? measuredContentHeight : .infinity,
+                    viewportCap
+                ))
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollClipDisabled(
+                    measuredContentHeight > 0 && measuredContentHeight <= viewportCap
+                )
+                .accessibilityLabel("Agent sessions")
+            } else {
+                panelContent
+            }
+        }
+        .padding(8)
+        .background(TerrariumHUD.bg, in: RoundedRectangle(cornerRadius: 8))
+        .opacity(stateHolder.state.bridgeConnected ? 1.0 : 0.6)
+    }
+
+    private var panelContent: some View {
+        let entries = buildEntries()
+        let compact = DashboardHUDLayout.usesCompactSessionRows(sessionCount: entries.count)
+        let rows = Self.buildDisplayRows(entries)
+
+        return VStack(alignment: .leading, spacing: 4) {
             // Brand logo — stacked-deck mark + "AgentDeck" wordmark. Unified
             // with the menubar brand direction so the same logo shape appears
             // in both surfaces, just retinted (neon cyan for the aquarium
@@ -32,6 +70,11 @@ struct SessionListPanel: View {
                 Text("AgentDeck")
                     .font(.system(size: 22, weight: .bold, design: .monospaced))
                     .foregroundStyle(TerrariumHUD.text)
+                Spacer(minLength: 4)
+                Text("\(entries.count) \(entries.count == 1 ? "session" : "sessions")")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .frame(maxWidth: .infinity)
 
@@ -54,31 +97,14 @@ struct SessionListPanel: View {
 
             Spacer().frame(height: 4)
 
-            // Build unified entry list, clustered into project work groups
-            // (IPS10 office huddle port — SessionGrouping.swift). Worktree/task
-            // folders sharing a long prefix render under one group header with
-            // only their differentiating tail; singletons render flat.
-            let entries = buildEntries()
-            let visibleEntries = entries.count > maxVisibleSessions
-                ? Array(entries.prefix(maxVisibleSessions))
-                : entries
-            let rows = Self.buildDisplayRows(visibleEntries)
-
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 switch row {
                 case .header(let key, let count):
-                    groupHeaderRow(key: key, count: count)
+                    groupHeaderRow(key: key, count: count, compact: compact)
                 case .session(let entry, let label, let indent):
-                    sessionRowInteractive(entry: entry, label: label)
+                    sessionRowInteractive(entry: entry, label: label, compact: compact)
                         .padding(.leading, indent ? 10 : 0)
                 }
-            }
-
-            // Overflow indicator
-            if entries.count > maxVisibleSessions {
-                Text("and \(entries.count - maxVisibleSessions) more...")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(TerrariumHUD.subtext)
             }
 
             // Worker count
@@ -88,9 +114,6 @@ struct SessionListPanel: View {
                     .foregroundStyle(TerrariumHUD.text)
             }
         }
-        .padding(8)
-        .background(TerrariumHUD.bg, in: RoundedRectangle(cornerRadius: 8))
-        .opacity(stateHolder.state.bridgeConnected ? 1.0 : 0.6)
     }
 
     // MARK: - Entry Builder
@@ -279,7 +302,7 @@ struct SessionListPanel: View {
     }
 
     /// Work-group header strip above clustered member rows.
-    private func groupHeaderRow(key: String, count: Int) -> some View {
+    private func groupHeaderRow(key: String, count: Int, compact: Bool) -> some View {
         HStack(spacing: 4) {
             Text(key)
                 .font(.system(size: 10, weight: .bold))
@@ -293,7 +316,7 @@ struct SessionListPanel: View {
                 .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 5)
-        .padding(.vertical, 2)
+        .padding(.vertical, compact ? 1 : 2)
         .background(TerrariumHUD.subtext.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
     }
 
@@ -301,7 +324,11 @@ struct SessionListPanel: View {
     /// dashboard/terrarium centers this session. Tapping the focused row again
     /// clears explicit focus so the HUD can return to neutral.
     @ViewBuilder
-    private func sessionRowInteractive(entry: SessionEntry, label: String) -> some View {
+    private func sessionRowInteractive(
+        entry: SessionEntry,
+        label: String,
+        compact: Bool
+    ) -> some View {
         Button {
             if let sid = entry.sessionId {
                 if entry.isFocused {
@@ -311,9 +338,9 @@ struct SessionListPanel: View {
                 }
             }
         } label: {
-            sessionRow(entry: entry, label: label)
+            sessionRow(entry: entry, label: label, compact: compact)
                 .padding(.horizontal, 5)
-                .padding(.vertical, 3)
+                .padding(.vertical, compact ? 2 : 3)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .background(
@@ -329,26 +356,31 @@ struct SessionListPanel: View {
                 }
         }
         .buttonStyle(.plain)
+        .help(label)
     }
 
-    private func sessionRow(entry: SessionEntry, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
+    private func sessionRow(entry: SessionEntry, label: String, compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 0 : 1) {
             // Icon + session name
             HStack(spacing: 4) {
                 agentIconView(for: entry.agentType)
                 Text(label)
-                    .font(.system(size: 12, weight: entry.isFocused || entry.isPrimary ? .bold : .regular))
+                    .font(.system(
+                        size: compact ? 11 : 12,
+                        weight: entry.isFocused || entry.isPrimary ? .bold : .regular
+                    ))
                     .foregroundStyle(TerrariumHUD.text)
-                    .lineLimit(2)
+                    .lineLimit(compact ? 1 : 2)
+                    .truncationMode(.tail)
             }
 
-            sessionMetaRow(entry: entry)
+            sessionMetaRow(entry: entry, compact: compact)
 
             // Shared activity one-liner (bridge SSOT) — same summary the
             // InkDeck cards and Android rows show, so surfaces don't drift.
             if let activity = entry.activity, !activity.isEmpty {
                 Text(activity)
-                    .font(.system(size: 10))
+                    .font(.system(size: compact ? 9.5 : 10))
                     .foregroundStyle(TerrariumHUD.subtext)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -356,12 +388,12 @@ struct SessionListPanel: View {
         }
     }
 
-    private func sessionMetaRow(entry: SessionEntry) -> some View {
+    private func sessionMetaRow(entry: SessionEntry, compact: Bool) -> some View {
         let detailText = buildDetailText(entry: entry)
         let running = entry.subagents?.active ?? 0
         return HStack(spacing: 4) {
             Text(compactStateMarker(entry.state))
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: compact ? 9.5 : 10, design: .monospaced))
                 .foregroundStyle(stateColor(entry.state))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
@@ -381,7 +413,7 @@ struct SessionListPanel: View {
             // does not collide with the group header's `×N` (sessions).
             if running > 0 {
                 Text("+\(running)")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: compact ? 9.5 : 10, design: .monospaced))
                     .foregroundStyle(DesignTokens.Amber.s500)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -390,11 +422,11 @@ struct SessionListPanel: View {
 
             if let detailText {
                 Text("·")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: compact ? 9.5 : 10, design: .monospaced))
                     .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
                     .fixedSize(horizontal: true, vertical: false)
                 Text(detailText)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: compact ? 9.5 : 10, design: .monospaced))
                     .foregroundStyle(TerrariumHUD.subtext)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -543,5 +575,38 @@ private extension SessionListPanel {
         case .awaitingPermission, .awaitingOption, .awaitingDiff: TerrariumHUD.ledAmber
         case .disconnected: TerrariumHUD.subtext
         }
+    }
+}
+
+/// Reports the natural roster height across the AppKit-hosted ScrollView
+/// boundary. macOS preference propagation is unreliable there, so current
+/// platforms use geometry change directly; iOS 17 keeps the preference
+/// fallback used by TopologyRail.
+private struct SessionListContentHeightReader: ViewModifier {
+    let onChange: (CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                onChange(height)
+            }
+        } else {
+            content.background(GeometryReader { proxy in
+                Color.clear.preference(
+                    key: SessionListContentHeightKey.self,
+                    value: proxy.size.height
+                )
+            })
+        }
+    }
+}
+
+private struct SessionListContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }

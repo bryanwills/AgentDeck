@@ -251,11 +251,16 @@ struct MonitorScreen: View {
             let items = stateHolder.setupNeededItems(preferences: preferences)
             #endif
             if !items.isEmpty, !isCaptureFeedPinned {
+                let setupLeadingInset = DashboardHUDLayout.setupCardLeadingInset(
+                    availableWidth: geo.size.width,
+                    isLandscape: geo.size.width > geo.size.height,
+                    showsSessionList: preferences.showSessionList
+                )
                 VStack {
                     Spacer()
                     HStack {
                         setupCard(items: items)
-                            .padding(.leading, 14)
+                            .padding(.leading, setupLeadingInset)
                             .padding(.bottom, preferences.showTimeline
                                      ? geo.size.height * MonitorLayout.sandFraction + 14
                                      : 18)
