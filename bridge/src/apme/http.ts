@@ -2,6 +2,7 @@
  * APME HTTP routes — mounted by the daemon's raw createServer handler.
  *
  * Routes:
+ *   GET  /apme/activity                    — merged Swift/CLI activity projection
  *   GET  /apme/runs?limit=&agent=&model=   — recent runs with their evals
  *   GET  /apme/run/:id                     — single run detail (steps + evals)
  *   GET  /apme/scorecard                   — model scorecard (v_model_scorecard)
@@ -18,6 +19,7 @@ import type { ApmeModule } from './index.js';
 import { loadApmeConfig } from './settings.js';
 import { apmeDashboardHtml } from './dashboard-html.js';
 import { EVAL_SCHEMA_VERSION } from '@agentdeck/shared';
+import { activitySnapshotForStore } from './activity-history.js';
 
 export async function handleApmeRequest(
   req: IncomingMessage,
@@ -67,6 +69,14 @@ export async function handleApmeRequest(
         };
       });
       sendJson(res, 200, { schema: EVAL_SCHEMA_VERSION, runs: withEvals });
+      return true;
+    }
+
+    // Content-minimized, daemon-owner-neutral history for the simple activity
+    // dashboard and Swift↔CLI handover cache. This is a derived projection;
+    // importing it never mutates APME source rows.
+    if (method === 'GET' && path === '/apme/activity') {
+      sendJson(res, 200, activitySnapshotForStore(apme.store));
       return true;
     }
 

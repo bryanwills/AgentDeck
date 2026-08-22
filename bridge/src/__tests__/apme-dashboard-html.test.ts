@@ -30,4 +30,10 @@ describe('apmeDashboardHtml — data-quality affordances', () => {
   it('active sessions are flagged as pending, not silently score-less', () => {
     expect(HTML).toContain('Session active');
   });
+
+  it('opens on the simple deduplicated activity view', () => {
+    expect(HTML).toContain("showTab('activity')");
+    expect(HTML).toContain('/apme/activity');
+    expect(HTML).toContain('Swift + CLI merged');
+  });
 });

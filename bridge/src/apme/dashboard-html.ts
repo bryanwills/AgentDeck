@@ -101,6 +101,11 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 .panel{display:none}.panel.visible{display:block;height:100%}
 /* Graph needs a column flex box so the canvas can claim the leftover height. */
 .panel#panel-graph.visible{display:flex;flex-direction:column}
+.activity-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;padding:10px;background:var(--surface);border-bottom:1px solid var(--border)}
+.activity-card{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px}
+.activity-card .agent{font-size:11px;color:var(--muted);font-weight:600}
+.activity-card .time{font-size:20px;font-weight:700;margin:4px 0;color:var(--text)}
+.activity-card .count{font-size:10px;color:var(--dim)}
 .empty{color:var(--dim);font-style:italic;padding:20px;text-align:center}
 </style>
 </head>
@@ -114,7 +119,8 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
   <!-- Left: runs list + tabs -->
   <div class="left">
     <div class="tabs">
-      <button class="tab active" onclick="showTab('runs')">Runs</button>
+      <button class="tab active" onclick="showTab('activity')">Activity</button>
+      <button class="tab" onclick="showTab('runs')">Runs</button>
       <button class="tab" onclick="showTab('tasks')">Tasks</button>
       <button class="tab" onclick="showTab('graph')">Graph</button>
       <button class="tab" onclick="showTab('recommend')">Recommend</button>
@@ -122,7 +128,13 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
       <button class="tab" onclick="showTab('categories')">Categories</button>
     </div>
     <div class="table-wrap">
-      <div class="panel visible" id="panel-runs">
+      <div class="panel visible" id="panel-activity">
+        <div class="activity-cards" id="activity-cards"></div>
+        <table><thead><tr>
+          <th>Agent</th><th>Task</th><th>Project</th><th>When</th><th>Time</th>
+        </tr></thead><tbody id="activity-body"></tbody></table>
+      </div>
+      <div class="panel" id="panel-runs">
         <div style="display:flex;gap:6px;padding:8px 10px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
           <select id="f-agent" onchange="applyFilter()" style="background:var(--bg);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px"><option value="">All Agents</option></select>
           <select id="f-model" onchange="applyFilter()" style="background:var(--bg);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px"><option value="">All Models</option></select>
@@ -173,7 +185,7 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 
   <!-- Right: detail -->
   <div class="right" id="detail-panel">
-    <div class="detail-empty">Select a run to view details</div>
+    <div class="detail-empty">Select an activity to view details</div>
   </div>
 </div>
 
@@ -181,6 +193,7 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 const B=location.origin;let selId=null;let allRuns=[];
 let selTaskId=null,taskOffset=0,taskTotal=0,tasksLoaded=false,taskSearchTimer=null;const TASK_PAGE=50;
 let graphSim=null;
+let activityRows=[];
 const AUTH=new URLSearchParams(location.search).get('token')||'';
 function api(path){const sep=path.includes('?')?'&':'?';return B+path+(AUTH?sep+'token='+encodeURIComponent(AUTH):'')}
 
@@ -194,12 +207,32 @@ function showTab(n){
   // while its panel is display:none.
   if(n==='tasks'&&!tasksLoaded){tasksLoaded=true;loadTasks(0)}
   if(n==='graph'){requestAnimationFrame(()=>loadGraph())}
+  if(n==='activity'){loadActivity()}
 }
 function fs(s){if(s==null)return'<span class="score score-na">—</span>';const p=Math.round(s*100),c=p>=70?'high':p>=40?'mid':'low';return'<span class="score score-'+c+'">'+p+'%</span>'}
 function fo(o){if(!o)return'';return'<span class="badge badge-'+o+'">'+o+'</span>'}
-function fd(ms){if(!ms)return'';const s=Math.round(ms/1000);return s>=3600?Math.floor(s/3600)+'h'+Math.floor((s%3600)/60)+'m':s>=60?Math.floor(s/60)+'m'+s%60+'s':s+'s'}
+function fd(ms){if(ms==null)return'—';const s=Math.max(0,Math.round(ms/1000));return s>=3600?Math.floor(s/3600)+'h'+Math.floor((s%3600)/60)+'m':s>=60?Math.floor(s/60)+'m'+s%60+'s':s+'s'}
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function barColor(pct){return pct>=70?'var(--green)':pct>=40?'var(--yellow)':'var(--red)'}
+
+async function loadActivity(){
+  try{
+    const r=await fetch(api('/apme/activity'));const d=await r.json();activityRows=d.rows||[];
+    const cards=document.getElementById('activity-cards');
+    cards.innerHTML=(d.agents||[]).map(a=>'<div class="activity-card"><div class="agent">'+esc(a.agentType)+'</div><div class="time">'+fd(a.durationMs)+'</div><div class="count">'+a.taskCount+' task'+(a.taskCount===1?'':'s')+'</div></div>').join('')||'<div class="empty">No activity yet</div>';
+    const body=document.getElementById('activity-body');
+    body.innerHTML=activityRows.map((x,i)=>'<tr onclick="selectActivity('+i+')"><td>'+esc(x.agentType)+'</td><td class="task-col" title="'+esc(x.task)+'">'+esc(x.task.slice(0,90))+'</td><td>'+esc(x.projectName||'—')+'</td><td>'+new Date(x.startedAt).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</td><td>'+fd(x.durationMs)+'</td></tr>').join('')||'<tr><td colspan="5" class="empty">No collected tasks yet</td></tr>';
+    document.getElementById('status').textContent=activityRows.length+' tasks · '+new Date().toLocaleTimeString();
+  }catch(e){document.getElementById('status').textContent='Error: '+e.message}
+}
+function selectActivity(i){
+  const x=activityRows[i];if(!x)return;
+  const merged=(x.provenance||[]).length>1?' · Swift + CLI merged':'';
+  let h='<div class="detail-header"><h2>'+esc(x.task)+'</h2><div class="meta-row"><span>'+esc(x.agentType)+'</span><span>'+esc(x.projectName||'No project')+'</span><span>'+new Date(x.startedAt).toLocaleString()+' · '+fd(x.durationMs)+'</span></div></div>';
+  h+='<div class="metric-grid"><div class="metric-card"><div class="val">'+x.turnCount+'</div><div class="lbl">Turns</div></div><div class="metric-card"><div class="val">'+((x.inputTokens||0)+(x.outputTokens||0)).toLocaleString()+'</div><div class="lbl">Tokens</div></div><div class="metric-card"><div class="val">'+(x.overallScore==null?'—':Math.round(x.overallScore*100)+'%')+'</div><div class="lbl">Score</div></div></div>';
+  h+='<div class="section" style="margin-top:16px"><div class="section-head">Collection</div><div style="color:var(--muted);line-height:1.6">Duplicates are collapsed by agent, native session, task index and time overlap. Source records remain unchanged'+merged+'.</div></div>';
+  document.getElementById('detail-panel').innerHTML=h;
+}
 
 function populateFilters(runs){
   const sets={agent:new Set(),model:new Set(),project:new Set(),cat:new Set(),outcome:new Set()};
@@ -275,7 +308,7 @@ async function loadRuns(){
   try{
     const r=await fetch(api('/apme/runs?limit=50'));const d=await r.json();allRuns=(d.runs||[]).filter(r=>r.taskCategory!=='_empty'&&r.taskPrompt);
     populateFilters(allRuns);renderRuns(allRuns);
-    document.getElementById('status').textContent=allRuns.length+' runs · '+new Date().toLocaleTimeString();
+    if(document.getElementById('panel-runs').classList.contains('visible'))document.getElementById('status').textContent=allRuns.length+' runs · '+new Date().toLocaleTimeString();
   }catch(e){document.getElementById('status').textContent='Error: '+e.message}
 }
 
@@ -800,11 +833,12 @@ function showTabById(n){
   if(btn)btn.click();
 }
 
-loadRuns();loadRecommend();loadScorecard();loadCategories();
+loadActivity();loadRuns();loadRecommend();loadScorecard();loadCategories();
 setInterval(loadRuns,15000);setInterval(loadRecommend,30000);setInterval(loadScorecard,30000);setInterval(loadCategories,30000);
 // Tasks refresh only while its tab is up — the query is server-paged and there
 // is no reason to run it against the store every 15s in the background.
 setInterval(()=>{if(document.getElementById('panel-tasks').classList.contains('visible'))loadTasks(taskOffset)},15000);
+setInterval(()=>{if(document.getElementById('panel-activity').classList.contains('visible'))loadActivity()},15000);
 </script>
 </body>
 </html>`;

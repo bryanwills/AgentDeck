@@ -414,6 +414,10 @@ final class DaemonServer {
     /// Live timeline rows for observed Kiro sessions — Kiro emits no hooks, so
     /// nothing else would ever fill its strip. See the class doc.
     private let kiroTimelineFeed = KiroTimelineFeed()
+    /// Transcript-derived APME state for Kiro CLI, which emits no lifecycle
+    /// hooks. Entries are bounded by the observer's current live-session set.
+    private var kiroApmeSessions: Set<String> = []
+    private var kiroApmeResponseBySession: [String: String] = [:]
     private let logStream = BridgeLogStream()
     private let usageAPI = UsageAPIClient.shared
     private var serialModule: SerialModule?
@@ -428,8 +432,9 @@ final class DaemonServer {
 
     // APME
     private var apmeStore: ApmeStore?
-    private var apmeCollector: ApmeCollector?        // Claude Code hooks
+    private var apmeCollector: ApmeCollector?        // Claude/Codex/OpenCode hooks
     private var apmeCollectorGateway: ApmeCollector? // OpenClaw gateway (separate to avoid activeHookSession collision)
+    private var apmeCollectorKiro: ApmeCollector?    // passive transcript feed (separate for the same reason)
     private var apmeRunner: ApmeRunner?
     private var apmeEvalTimerTask: Task<Void, Never>?
     /// Slow display_state heartbeat — see startDisplayStateResync().
@@ -1103,6 +1108,8 @@ final class DaemonServer {
             apmeCollector = collector
             let gatewayCollector = ApmeCollector(store: store)
             apmeCollectorGateway = gatewayCollector
+            let kiroCollector = ApmeCollector(store: store)
+            apmeCollectorKiro = kiroCollector
             // Runner wraps the judge pipeline. In Phase 1 the only backend
             // is Apple Foundation Models (on-device, zero-config). If it's
             // unavailable (Intel Mac, Apple Intelligence off), turn_judge
@@ -1111,6 +1118,7 @@ final class DaemonServer {
             apmeRunner = runner
             collector.runner = runner
             gatewayCollector.runner = runner
+            kiroCollector.runner = runner
 
             // Wire task lifecycle → timeline. The collector mints task_start /
             // task_end DaemonTimelineEntry rows on TodoWrite-complete /
@@ -3786,13 +3794,8 @@ final class DaemonServer {
         // plugin, hooks/src/opencode-install.ts) ride the same observed-
         // session pipeline as codex_*: session ids are namespaced
         // `opencode:<id>` (so hook rows converge with the SSE observer's
-        // rows, which use the same prefix), they get their own switch cases
-        // below, and they stay OUT of the Claude-keyed ApmeCollector — the
-        // collector's run/turn model is Claude-lifecycle-shaped, the same
-        // exclusion codex_ carries. Before 2026-07-12 these events were
-        // dropped wholesale, which left standalone `opencode` TUI sessions
-        // invisible on the Swift daemon (the SSE observer can't discover a
-        // bare TUI's ephemeral port; hooks are the only signal).
+        // rows), and the APME boundary below normalizes both prefixes into the
+        // same agent-neutral lifecycle the collector already understands.
         let isOpenCodeEvent = event.hasPrefix("opencode_")
 
         // Per-session id extraction. The global state_machine transitions
@@ -3892,16 +3895,21 @@ final class DaemonServer {
             return
         }
 
-        // For `user_prompt_submit`, run the APME collector BEFORE the switch's
+        // For every agent's prompt boundary, run the APME collector BEFORE the switch's
         // `appendClaudeCodeChatStart` so the chat row can be tagged with the
         // task it belongs to — consecutive prompts then nest under one task
         // header instead of each reading as a separate task. Only this event is
         // hoisted; every other event keeps the post-switch collector call below
         // so, e.g., `session_end`'s `task_end` still emits after the turn's
         // `chat_end` (natural order). `apmeHandledEarly` prevents a double-run.
+        let normalizedApmeHook = Self.normalizeApmeObservedHook(
+            event: event,
+            json: apmeEnrichedHookPayload(json: json, sessionId: sessionId),
+            sessionId: sessionId
+        )
         var apmeHandledEarly = false
-        if event == "user_prompt_submit" {
-            apmeCollector?.handleHook(event: event, data: apmeEnrichedHookPayload(json: json, sessionId: sessionId))
+        if normalizedApmeHook?.event == "user_prompt_submit", let hook = normalizedApmeHook {
+            apmeCollector?.handleHook(event: hook.event, data: hook.payload)
             apmeHandledEarly = true
         }
 
@@ -4303,18 +4311,15 @@ final class DaemonServer {
         default: break
         }
 
-        // APME: route every Claude Code hook event through the collector.
-        // The collector manages its own session lifecycle (session_start opens
-        // a run, session_end closes it, everything in between is a step).
-        //
-        // Codex and OpenCode events are deliberately excluded: the
-        // collector's run/turn/task model is built around Claude's hook
-        // lifecycle; APME for those agents needs a distinct collector path
-        // (out of scope for this observation pass). Because their sessions
-        // never open a collector task, their timeline rows carry no taskId —
-        // they render flat, never nested under a Claude session's TASK header.
-        if !event.hasPrefix("codex_") && !isOpenCodeEvent && !apmeHandledEarly {
-            apmeCollector?.handleHook(event: event, data: apmeEnrichedHookPayload(json: json, sessionId: sessionId))
+        // APME: Claude, Codex and OpenCode all cross one agent-neutral
+        // lifecycle boundary. The source-specific switch above still owns
+        // session/timeline behaviour; the collector only sees normalized
+        // session_start / prompt / tool / stop / session_end events. Running
+        // prompt boundaries early lets their timeline rows receive the newly
+        // opened task id. Storage's existing duplicate-turn guard and
+        // UNIQUE(task_id, dedup_key) collapse hook/SSE echoes inside one DB.
+        if !apmeHandledEarly, let hook = normalizedApmeHook {
+            apmeCollector?.handleHook(event: hook.event, data: hook.payload)
         }
 
         // Attribute the next state_update + timeline entries to the session
@@ -7026,12 +7031,25 @@ final class DaemonServer {
         // install. A hook-pushed Kiro row (Kiro IDE does fire the standalone
         // hooks; CLI chat does not) still wins — observation only fills gaps.
         let observedKiroSessions = LocalKiroObserver.collect()
+        let currentKiroIds = Set(observedKiroSessions.map { ObservedAgentRules.rawSessionId($0.id) })
+        for sessionId in kiroApmeSessions.subtracting(currentKiroIds) {
+            apmeCollectorKiro?.handleHook(event: "session_end", data: [
+                "session_id": sessionId,
+                "agent_type": "kiro-cli",
+            ])
+            kiroApmeSessions.remove(sessionId)
+            kiroApmeResponseBySession.removeValue(forKey: sessionId)
+        }
         if !observedKiroSessions.isEmpty {
+            let projectBySession = Dictionary(uniqueKeysWithValues: observedKiroSessions.map {
+                (ObservedAgentRules.rawSessionId($0.id), $0.projectName)
+            })
             let idsAfterCodex = Set(merged.map(\.id))
             for observed in observedKiroSessions where !idsAfterCodex.contains(observed.id) {
                 merged.append(observed)
             }
             for row in kiroTimelineFeed.pump(observedKiroSessions.map(\.id)) {
+                ingestObservedKiroActivity(row, projectName: row.sessionId.flatMap { projectBySession[$0] })
                 await timelineStore.add(row)
                 // Storing is not showing. Every other producer here pairs the
                 // store with a `timeline_event` push, and without it the rows
@@ -7067,6 +7085,38 @@ final class DaemonServer {
             return livePushedIds.contains(entry.id)
         })
         broadcastSessionsList()
+    }
+
+    /// Feed only rows already admitted by KiroTimelineFeed's watermark. This
+    /// preserves its "latest turn on first sighting, then new rows only"
+    /// contract and avoids replaying transcript history into APME.
+    private func ingestObservedKiroActivity(_ row: DaemonTimelineEntry, projectName: String?) {
+        guard let collector = apmeCollectorKiro,
+              let sessionId = row.sessionId, !sessionId.isEmpty else { return }
+        let text = (row.detail?.isEmpty == false ? row.detail : row.raw) ?? ""
+        switch row.type {
+        case "chat_start":
+            kiroApmeSessions.insert(sessionId)
+            kiroApmeResponseBySession.removeValue(forKey: sessionId)
+            collector.handleHook(event: "user_prompt_submit", data: [
+                "session_id": sessionId,
+                "agent_type": "kiro-cli",
+                "project_name": projectName ?? "Kiro",
+                "prompt": text,
+            ])
+        case "chat_response":
+            guard kiroApmeSessions.contains(sessionId) else { return }
+            let response = [kiroApmeResponseBySession[sessionId], text]
+                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+            kiroApmeResponseBySession[sessionId] = response
+            collector.setTurnResponse(response, sessionId: sessionId)
+            collector.handleHook(event: "stop", data: [
+                "session_id": sessionId,
+                "agent_type": "kiro-cli",
+            ])
+        default:
+            break
+        }
     }
 
     private func enrichSessionsWithState(_ sessions: [DaemonSessionEntry]) async -> [DaemonSessionEntry] {
@@ -9091,6 +9141,56 @@ final class DaemonServer {
         return enriched
     }
 
+    /// Source-specific hook names stop here. APME's run/turn/task model is
+    /// agent-neutral; feeding `codex_user_prompt_submit` verbatim used to make
+    /// it a harmless step row instead of a turn boundary, while excluding the
+    /// event entirely lost it. Keep this pure and test-visible so the Swift
+    /// mirror cannot silently drift from Node's `classifyObservedHookEvent`.
+    nonisolated static func normalizeApmeObservedHook(
+        event: String,
+        json: [String: Any],
+        sessionId: String?
+    ) -> (event: String, payload: [String: Any])? {
+        let source: (prefix: String, agentType: String)?
+        if event.hasPrefix("codex_") {
+            source = ("codex_", "codex-cli")
+        } else if event.hasPrefix("opencode_") {
+            source = ("opencode_", "opencode")
+        } else {
+            source = nil
+        }
+
+        var normalizedEvent = event
+        var payload = json
+        if let source {
+            // A source-prefixed event without a durable native session id is
+            // not safe to merge: Codex occasionally puts short turn-local ids
+            // in session_id. The observation layer already rejected those;
+            // do not mint an unrelated APME run with a fallback key.
+            guard let sessionId, !sessionId.isEmpty else { return nil }
+            normalizedEvent = String(event.dropFirst(source.prefix.count)).lowercased()
+            if normalizedEvent == "turn_complete" { normalizedEvent = "stop" }
+            payload["session_id"] = sessionId
+            payload["agent_type"] = source.agentType
+        } else {
+            payload["agent_type"] = (payload["agent_type"] as? String) ?? "claude-code"
+            if let sessionId, !sessionId.isEmpty { payload["session_id"] = sessionId }
+        }
+
+        // Only these names carry collector lifecycle semantics. Other source
+        // events remain useful raw steps, but their prefix must be retained so
+        // a permission/notification from one agent is never confused with
+        // another agent's event family.
+        let lifecycle = Set([
+            "session_start", "session_end", "user_prompt_submit",
+            "tool_start", "tool_end", "tool_failure", "stop",
+        ])
+        if source != nil, !lifecycle.contains(normalizedEvent) {
+            normalizedEvent = event.lowercased()
+        }
+        return (normalizedEvent, payload)
+    }
+
     /// Explicit new-turn signal for a Codex thread (`codex_session_start`,
     /// `codex_user_prompt_submit`, OTel `turnStart`). Clears the terminal
     /// record AND its tombstone (late progress from the *finished* turn can
@@ -9148,6 +9248,7 @@ final class DaemonServer {
         entry.sessionId = sessionId
         entry.projectName = codexTimelineProjectName(sessionId: sessionId, json: json)
         entry.startedAt = ts
+        entry.taskId = apmeCollector?.activeTaskId(sessionId: sessionId)
         noteCodexChatStart(sid: sessionId, ts: ts)
         if let topic = Self.extractTopicHint(from: prompt) {
             codexLastPromptTopicBySession[sessionId] = topic
@@ -9226,6 +9327,10 @@ final class DaemonServer {
         // returns early — no spurious "Completed" row.
         let startTs = claimedTs ?? codexTurnAnchors.lastChatStart(sid: sessionId)
         let projectName = codexTimelineProjectName(sessionId: sessionId, json: json)
+        let turnTaskId = apmeCollector?.activeTaskId(sessionId: sessionId)
+        if !assistantText.isEmpty {
+            apmeCollector?.setTurnResponse(assistantText, sessionId: sessionId, chatEndTs: startTs)
+        }
         if !assistantText.isEmpty {
             var respEntry = DaemonTimelineEntry(
                 ts: now - 1,
@@ -9242,12 +9347,9 @@ final class DaemonServer {
             respEntry.projectName = projectName
             respEntry.startedAt = startTs
             respEntry.endedAt = now
-            // NO taskId here: Codex sessions are not ingested by the APME
-            // collector (no codex_* collector path), so they never own a
-            // task. The previous `apmeCollector?.activeTaskId` stamp copied
-            // whichever CLAUDE session's task happened to be active,
-            // nesting unrelated Codex turns under a Claude TASK header
-            // (cross-session subtree contamination).
+            // Session-scoped lookup is essential: the old global accessor
+            // could borrow another agent's active task under concurrency.
+            respEntry.taskId = turnTaskId
             Task { await timelineStore.add(respEntry) }
             broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(respEntry)] as [String: Any])
         }
@@ -9285,6 +9387,7 @@ final class DaemonServer {
             endEntry.projectName = projectName
             endEntry.startedAt = startTs
             endEntry.endedAt = now
+            endEntry.taskId = turnTaskId
             endEntry.summaryKind = summary?.kind ?? (topic == nil ? nil : "heuristic")
             await timelineStore.add(endEntry)
             broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(endEntry)] as [String: Any])
@@ -9334,6 +9437,7 @@ final class DaemonServer {
         entry.sessionId = sessionId
         entry.projectName = openCodeTimelineProjectName(sessionId: sessionId, json: json)
         entry.startedAt = ts
+        entry.taskId = apmeCollector?.activeTaskId(sessionId: sessionId)
         // Newest chat_start IS the open turn (serial per session); the next
         // Stop claims exactly this ts — same self-healing semantics as the
         // Claude/Codex trackers.
@@ -9373,10 +9477,10 @@ final class DaemonServer {
     }
 
     /// Append a `chat_response` (when the plugin captured assistant text) or
-    /// a terminating `chat_end` for an `opencode_stop` hook. No taskId is
-    /// stamped: OpenCode sessions are not ingested by the APME collector, so
-    /// they never own a task (same rationale as the Codex appenders —
-    /// borrowing a Claude session's active task cross-contaminates subtrees).
+    /// a terminating `chat_end` for an `opencode_stop` hook. The normalized
+    /// APME prompt boundary ran before this source-specific timeline path, so
+    /// every row can use the session-scoped task id without borrowing another
+    /// agent's task.
     private func appendOpenCodeChatEnd(json: [String: Any], sessionId: String?, interrupted: Bool = false) {
         guard let sessionId else { return }
         let now = Date().timeIntervalSince1970 * 1000
@@ -9391,6 +9495,10 @@ final class DaemonServer {
         // Anchor fallback (see ChatTurnAnchorTracker.lastChatStart): claimed-nil
         // response still anchors to the session's last chat_start, not null.
         let startTs = claimedTs ?? openCodeTurnAnchors.lastChatStart(sid: sessionId)
+        let turnTaskId = apmeCollector?.activeTaskId(sessionId: sessionId)
+        if !assistantText.isEmpty {
+            apmeCollector?.setTurnResponse(assistantText, sessionId: sessionId, chatEndTs: startTs)
+        }
         if !assistantText.isEmpty {
             var respEntry = DaemonTimelineEntry(
                 ts: now - 1,
@@ -9407,6 +9515,7 @@ final class DaemonServer {
             respEntry.projectName = projectName
             respEntry.startedAt = startTs
             respEntry.endedAt = now
+            respEntry.taskId = turnTaskId
             Task { await timelineStore.add(respEntry) }
             broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(respEntry)] as [String: Any])
             return
@@ -9434,6 +9543,7 @@ final class DaemonServer {
         endEntry.projectName = projectName
         endEntry.startedAt = startTs
         endEntry.endedAt = now
+        endEntry.taskId = turnTaskId
         endEntry.summaryKind = topicFromPrompt == nil ? nil : "heuristic"
         Task { await timelineStore.add(endEntry) }
         broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(endEntry)] as [String: Any])

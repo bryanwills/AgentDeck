@@ -221,7 +221,7 @@ final class ApmeCollector {
             // Restarted/resumed session: finalize the previous run first so
             // its open turn/task don't linger under the new run.
             if let priorRunId = sessionToRun[sessionKey] {
-                closeTurn(sessionKey: sessionKey)
+                closeTurn(sessionKey: sessionKey, source: "session_end")
                 emitDeferredTaskStartIfNeeded(sessionKey: sessionKey)
                 closeTask(sessionKey: sessionKey, boundarySignal: "session_end")
                 runTaskCount.removeValue(forKey: priorRunId)
@@ -235,7 +235,7 @@ final class ApmeCollector {
             guard let sessionKey = payloadSessionKey(data),
                   let runId = sessionToRun.removeValue(forKey: sessionKey) else { return }
             if activeHookSession == sessionKey { activeHookSession = nil }
-            closeTurn(sessionKey: sessionKey) // close last turn
+            closeTurn(sessionKey: sessionKey, source: "session_end") // close last turn
             // Ensure task_start is emitted before closing, so task_end is also emitted.
             // Without this, a session that never triggered emitDeferredTaskStartIfNeeded
             // (e.g., single-turn session with no TodoWrite) would have task_start
@@ -305,7 +305,7 @@ final class ApmeCollector {
                 // session_end, so /clear leaves the open task — and its
                 // task_start timeline row — spinning forever.
                 if let p = prompt, Self.isClearCommand(p) {
-                    closeTurn(sessionKey: key)
+                    closeTurn(sessionKey: key, source: "clear")
                     closeTask(sessionKey: key, boundarySignal: "clear")
                     return
                 }
@@ -452,6 +452,22 @@ final class ApmeCollector {
                                       kind: "state", core: "todos_complete:\(turnIndex)",
                                       payload: ["state": "todos_completed"])
                 emitTaskMilestoneIfNeeded(sessionKey: key, task: task, turnIndex: turnIndex)
+            }
+
+            // A real Stop is the authoritative end of agent work for this
+            // turn. Leaving it open until the next prompt includes the user's
+            // think/typing time in duration and makes an overnight pause look
+            // like a multi-hour model call. Codex/OpenCode reach this branch
+            // through DaemonServer's agent-neutral normalization; duplicate
+            // stop + turn_complete signals are harmless because close is
+            // idempotent once sessionToTurn has been removed.
+            if event.lowercased() == "stop" {
+                let source = (data["interrupted"] as? Bool) == true ? "interrupted"
+                    : (data["aborted"] as? Bool) == true ? "aborted"
+                    : ((data["synthetic"] as? Bool) == true || (data["synthetic_stop"] as? Bool) == true)
+                        ? "synthetic_stop"
+                        : "stop"
+                closeTurn(sessionKey: key, source: source)
             }
         }
     }
@@ -618,7 +634,7 @@ final class ApmeCollector {
 
     // MARK: - Private
 
-    private func closeTurn(sessionKey: String) {
+    private func closeTurn(sessionKey: String, source: String = "next_prompt") {
         guard let turn = sessionToTurn.removeValue(forKey: sessionKey) else { return }
         lastClosedTurnByRun[turn.runId] = turn.id
         store.updateTurn(id: turn.id, fields: [
@@ -626,6 +642,7 @@ final class ApmeCollector {
             "toolCalls": turn.toolCalls,
             "filesModified": turn.filesModified,
             "filesCreated": turn.filesCreated,
+            "endSource": source,
         ])
         // NOTE: idle-gap arming used to live here, but `closeTurn` runs at
         // the start of every `user_prompt_submit` — *just before* a new

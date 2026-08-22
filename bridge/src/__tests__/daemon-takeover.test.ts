@@ -47,7 +47,9 @@ const UNPROVEN = () => 'unknown' as const;
 
 describe('negotiateIncumbentDaemon', () => {
   it('takes neither the token nor the port from another user\'s daemon', async () => {
-    const { calls, deps } = spies();
+    const { calls, deps } = spies({
+      captureActivity: vi.fn(async () => { calls.push('activity'); return true; }),
+    });
     const outcome = await negotiateIncumbentDaemon(
       { port: 9120, incumbent: { mode: 'daemon', pid: 4242, isSwift: true, pairingToken: 'a'.repeat(32) }, portWasExplicit: false },
       { ...deps, ownership: FOREIGN },
@@ -78,6 +80,19 @@ describe('negotiateIncumbentDaemon', () => {
     );
     expect(outcome).toBe('proceed');
     expect(calls).toEqual(['adopt', 'stand-down']);
+  });
+
+  it('captures the Swift activity projection before the listener stands down', async () => {
+    const { calls, deps } = spies({
+      captureActivity: vi.fn(async () => { calls.push('activity'); return true; }),
+      standDown: vi.fn(async () => { calls.push('stand-down'); return true; }),
+    });
+    const outcome = await negotiateIncumbentDaemon(
+      { port: 9120, incumbent: { mode: 'daemon', pid: 4242, isSwift: true, pairingToken: 'a'.repeat(32) }, portWasExplicit: false },
+      { ...deps, ownership: MINE },
+    );
+    expect(outcome).toBe('proceed');
+    expect(calls).toEqual(['adopt', 'activity', 'stand-down']);
   });
 
   it('proceeds when ownership cannot be proven, because absence is not evidence', async () => {

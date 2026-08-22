@@ -52,7 +52,76 @@ struct ControlTowerPanel: View {
     /// exists, which falls `availablePanelHeight` back to the screen estimate.
     @State private var measuredAvailableHeight: CGFloat = 0
 
+    /// Compact, already-deduplicated Swift/CLI activity projection shown in
+    /// the right-hand glance pane. It is fetched only while this popup exists
+    /// and no more than once per 30 seconds; a transient failure leaves the
+    /// last good snapshot visible instead of flashing the panel empty.
+    @State private var activitySnapshot: ApmeActivityHistory.Snapshot? = nil
+    @State private var activityRefreshInFlight = false
+    @State private var activityRefreshAttempted = false
+    @State private var activityLastRefresh: Date? = nil
+
     var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            primaryPanel
+                .frame(minWidth: 380, idealWidth: 420, maxWidth: 460)
+
+            Divider()
+                .overlay(Color.white.opacity(0.08))
+
+            activitySummaryPanel
+                .frame(width: 276, alignment: .topLeading)
+        }
+        .frame(minWidth: 676, idealWidth: 696, maxWidth: 736, alignment: .topLeading)
+        .background(PanelAvailableHeightReader { height in
+            // Ignore sub-point jitter: this feeds the ScrollView cap, which
+            // resizes the window, and a 0.5pt oscillation would relayout forever.
+            if abs(height - measuredAvailableHeight) > 1 { measuredAvailableHeight = height }
+        })
+        // Dark ocean theme matching Dashboard / Monitor HUD.
+        // `deepSea` → `midWater` gives the popup a subtle gradient so the
+        // top edge reads as shallower water and the bottom reads as the
+        // deck floor, echoing the rest of the app's aquarium metaphor.
+        .background(
+            LinearGradient(
+                colors: [TerrariumColors.deepSea, TerrariumColors.midWater],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .foregroundColor(TerrariumHUD.text)
+        .onPreferenceChange(ChromeHeightKey.self) { measuredChromeHeight = $0 }
+        .onAppear {
+            refreshStreamDeckDetectionIfStale()
+            dashboardVisible = evaluateDashboardVisibility()
+            refreshActivitySummaryIfStale(force: true)
+        }
+        .onReceive(
+            Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+        ) { _ in
+            refreshStreamDeckDetectionIfStale()
+            dashboardVisible = evaluateDashboardVisibility()
+            refreshActivitySummaryIfStale()
+        }
+        // NSWindow notifications give us immediate response to user gestures
+        // (⌘W, traffic-light close, miniaturize) without waiting for the 5s
+        // timer tick. willClose fires while the window is still listed as
+        // visible, so re-evaluate on the next runloop iteration.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            dashboardVisible = evaluateDashboardVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
+            DispatchQueue.main.async { dashboardVisible = evaluateDashboardVisibility() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMiniaturizeNotification)) { _ in
+            dashboardVisible = evaluateDashboardVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didDeminiaturizeNotification)) { _ in
+            dashboardVisible = evaluateDashboardVisibility()
+        }
+    }
+
+    private var primaryPanel: some View {
         VStack(spacing: 0) {
             // Header: Attention Theater when any session awaits input,
             // otherwise a quiet "all calm" strip with the AgentDeck mark.
@@ -110,51 +179,6 @@ struct ControlTowerPanel: View {
 
             footerSection
                 .measureChromeHeight()
-        }
-        .frame(minWidth: 380, idealWidth: 420, maxWidth: 460)
-        .background(PanelAvailableHeightReader { height in
-            // Ignore sub-point jitter: this feeds the ScrollView cap, which
-            // resizes the window, and a 0.5pt oscillation would relayout forever.
-            if abs(height - measuredAvailableHeight) > 1 { measuredAvailableHeight = height }
-        })
-        // Dark ocean theme matching Dashboard / Monitor HUD.
-        // `deepSea` → `midWater` gives the popup a subtle gradient so the
-        // top edge reads as shallower water and the bottom reads as the
-        // deck floor, echoing the rest of the app's aquarium metaphor.
-        .background(
-            LinearGradient(
-                colors: [TerrariumColors.deepSea, TerrariumColors.midWater],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .foregroundColor(TerrariumHUD.text)
-        .onPreferenceChange(ChromeHeightKey.self) { measuredChromeHeight = $0 }
-        .onAppear {
-            refreshStreamDeckDetectionIfStale()
-            dashboardVisible = evaluateDashboardVisibility()
-        }
-        .onReceive(
-            Timer.publish(every: 5, on: .main, in: .common).autoconnect()
-        ) { _ in
-            refreshStreamDeckDetectionIfStale()
-            dashboardVisible = evaluateDashboardVisibility()
-        }
-        // NSWindow notifications give us immediate response to user gestures
-        // (⌘W, traffic-light close, miniaturize) without waiting for the 5s
-        // timer tick. willClose fires while the window is still listed as
-        // visible, so re-evaluate on the next runloop iteration.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-            dashboardVisible = evaluateDashboardVisibility()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
-            DispatchQueue.main.async { dashboardVisible = evaluateDashboardVisibility() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMiniaturizeNotification)) { _ in
-            dashboardVisible = evaluateDashboardVisibility()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didDeminiaturizeNotification)) { _ in
-            dashboardVisible = evaluateDashboardVisibility()
         }
     }
 
@@ -240,6 +264,239 @@ struct ControlTowerPanel: View {
         }
         streamDeckDetection = StreamDeckDetection.detect()
         streamDeckDetectionLastRun = Date()
+    }
+
+    // MARK: - Activity glance
+
+    private var activitySummaryPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ACTIVITY")
+                        .font(.system(size: 10, weight: .bold))
+                        .kerning(0.6)
+                        .foregroundStyle(TerrariumHUD.subtext)
+                    Text("Agent work at a glance")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+
+                Spacer(minLength: 6)
+
+                Button(action: openApmeDashboard) {
+                    HStack(spacing: 4) {
+                        Text("Full report")
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(daemonService.port > 0 ? TerrariumColors.tetraNeon : TerrariumHUD.subtext)
+                }
+                .buttonStyle(.plain)
+                .disabled(daemonService.port == 0)
+                .help("Open the complete Activity and Evaluation report")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            Divider()
+                .overlay(Color.white.opacity(0.08))
+
+            activitySummaryContent
+                .padding(14)
+        }
+        .background(Color.black.opacity(0.14))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Agent activity summary")
+    }
+
+    @ViewBuilder
+    private var activitySummaryContent: some View {
+        if daemonService.port == 0 {
+            activityEmptyState(
+                icon: "bolt.slash",
+                title: "Daemon offline",
+                detail: "Start the daemon to load activity."
+            )
+        } else if let snapshot = activitySnapshot, !snapshot.rows.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(compactActivityDuration(snapshot.agents.reduce(0) { $0 + $1.durationMs }))
+                            .font(.system(size: 23, weight: .semibold, design: .rounded))
+                            .foregroundStyle(TerrariumHUD.text)
+                        Text("agent work · \(snapshot.rows.count) \(snapshot.rows.count == 1 ? "task" : "tasks")")
+                            .font(.system(size: 10))
+                            .foregroundStyle(TerrariumHUD.subtext)
+                    }
+                    Spacer()
+                    Text(activitySourceLabel(snapshot))
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(TerrariumHUD.subtext)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.white.opacity(0.07)))
+                }
+
+                VStack(spacing: 5) {
+                    ForEach(Array(snapshot.agents.prefix(4)), id: \.agentType) { agent in
+                        activityAgentRow(agent)
+                    }
+                    if snapshot.agents.count > 4 {
+                        Text("+\(snapshot.agents.count - 4) more agents")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(TerrariumHUD.subtext)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+
+                Divider()
+                    .overlay(Color.white.opacity(0.08))
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("RECENT TASKS")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .kerning(0.45)
+                        .foregroundStyle(TerrariumHUD.subtext)
+
+                    ForEach(Array(snapshot.rows.prefix(3)), id: \.originKey) { row in
+                        activityTaskRow(row)
+                    }
+                }
+            }
+        } else if activityRefreshInFlight && !activityRefreshAttempted {
+            VStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Loading activity…")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(TerrariumHUD.subtext)
+            }
+            .frame(maxWidth: .infinity, minHeight: 112)
+        } else if activityRefreshAttempted, activitySnapshot == nil {
+            activityEmptyState(
+                icon: "exclamationmark.arrow.triangle.2.circlepath",
+                title: "Summary unavailable",
+                detail: "Try again when the daemon is ready."
+            )
+        } else {
+            activityEmptyState(
+                icon: "clock.arrow.circlepath",
+                title: "No activity yet",
+                detail: "Completed agent work appears here automatically."
+            )
+        }
+    }
+
+    private func activityAgentRow(_ agent: ApmeActivityHistory.AgentSummary) -> some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(SessionBrand.color(for: agent.agentType))
+                .frame(width: 7, height: 7)
+            Text(displayAgentLabel(agent.agentType))
+                .font(.system(size: 10.5, weight: .medium))
+                .lineLimit(1)
+            Spacer(minLength: 5)
+            Text(compactActivityDuration(agent.durationMs))
+                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+            Text("\(agent.taskCount)")
+                .font(.system(size: 9.5, design: .monospaced))
+                .foregroundStyle(TerrariumHUD.subtext)
+                .frame(width: 20, alignment: .trailing)
+                .accessibilityLabel("\(agent.taskCount) tasks")
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color.white.opacity(0.055))
+        )
+    }
+
+    private func activityTaskRow(_ row: ApmeActivityHistory.Row) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            SessionCreatureIcon(
+                agentType: row.agentType,
+                tint: SessionBrand.color(for: row.agentType),
+                size: 15,
+                contentInset: 1
+            )
+            .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.task)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(TerrariumHUD.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text("\(displayAgentLabel(row.agentType)) · \(compactActivityDuration(row.durationMs)) · \(relativeActivityTime(row.startedAt))")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func activityEmptyState(icon: String, title: String, detail: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 17))
+                .foregroundStyle(TerrariumHUD.subtext)
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+            Text(detail)
+                .font(.system(size: 10))
+                .foregroundStyle(TerrariumHUD.subtext)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, minHeight: 112)
+    }
+
+    private func compactActivityDuration(_ milliseconds: Int) -> String {
+        let minutes = max(0, milliseconds) / 60_000
+        if minutes < 1 { return "<1m" }
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        return remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
+    }
+
+    private func relativeActivityTime(_ milliseconds: Int) -> String {
+        let seconds = max(0, Int(Date().timeIntervalSince1970) - milliseconds / 1_000)
+        if seconds < 60 { return "now" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m ago" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h ago" }
+        return "\(hours / 24)d ago"
+    }
+
+    private func activitySourceLabel(_ snapshot: ApmeActivityHistory.Snapshot) -> String {
+        let sources = Set(snapshot.rows.flatMap(\.provenance))
+        if sources.contains("swift") && sources.contains("node") { return "Swift + CLI" }
+        if sources.contains("node") { return "CLI" }
+        return "Swift"
+    }
+
+    private func refreshActivitySummaryIfStale(force: Bool = false) {
+        guard daemonService.port > 0, !activityRefreshInFlight else { return }
+        if !force, let last = activityLastRefresh,
+           Date().timeIntervalSince(last) < 30 {
+            return
+        }
+
+        let port = Int(daemonService.port)
+        let token = AuthManager.shared.token
+        activityRefreshInFlight = true
+        Task { @MainActor in
+            let snapshot = await ApmeActivityHistory.fetchSnapshot(port: port, token: token)
+            if Int(daemonService.port) == port, let snapshot {
+                activitySnapshot = snapshot
+            }
+            activityRefreshAttempted = true
+            activityLastRefresh = Date()
+            activityRefreshInFlight = false
+        }
     }
 
     // MARK: - Layout sizing
@@ -813,7 +1070,7 @@ struct ControlTowerPanel: View {
     private var pillActionsBar: some View {
         HStack(spacing: 6) {
             dashboardTogglePill
-            pillButton(label: "Evaluation") { openApmeDashboard() }
+            pillButton(label: "Report") { openApmeDashboard() }
                 .disabled(daemonService.port == 0)
                 .daemonOfflineAffordance(isOffline: daemonService.port == 0)
             Spacer()
@@ -859,7 +1116,7 @@ struct ControlTowerPanel: View {
                 Text("Daemon offline")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(TerrariumHUD.text)
-                Text("Evaluation · Pair iPad · Preview require the daemon to be running.")
+                Text("Report · Pair iPad · Preview require the daemon to be running.")
                     .font(.system(size: 10))
                     .foregroundColor(TerrariumHUD.subtext)
                     .lineLimit(1)

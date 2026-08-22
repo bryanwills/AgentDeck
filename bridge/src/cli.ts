@@ -810,6 +810,7 @@ daemon
     // owns that process — lives in `negotiateIncumbentDaemon` so it can be
     // driven in tests against a foreign-owned incumbent.
     const { negotiateIncumbentDaemon } = await import('./daemon-takeover.js');
+    const { capturePeerActivity } = await import('./apme/activity-history.js');
     const incumbent = await probeDaemonHealth(targetPort);
     const outcome = await negotiateIncumbentDaemon(
       { port: targetPort, incumbent, portWasExplicit: !!opts.port },
@@ -819,6 +820,7 @@ daemon
         shutdown: requestDaemonShutdown,
         waitForExit: waitForDaemonExit,
         waitForBindable: waitForPortBindable,
+        captureActivity: capturePeerActivity,
       },
     );
     if (outcome === 'already-running') process.exit(0);

@@ -435,6 +435,7 @@ composite = 0.40 × outcomeScore
 | Method | Path | Description |
 |---|---|---|
 | GET | `/apme` | 대시보드 HTML (inline SPA) |
+| GET | `/apme/activity` | Swift/CLI 로컬 기록을 자동 중복 제거·병합한 간단한 에이전트 활동 요약 |
 | GET | `/apme/runs?limit=&agent=&model=` | 최근 runs + evals + overallScore |
 | GET | `/apme/run/:id` | 단일 run 상세 (steps, turns, per-turn evals, vibe) |
 | GET | `/apme/tasks?limit=&offset=&agent=&project=&category=&outcome=&state=&q=` | **처리된 task 단위 전체 목록** (paged + faceted) |
@@ -452,6 +453,22 @@ composite = 0.40 × outcomeScore
 라우트 표는 `bridge/src/apme/http.ts` 의 실제 분기와 1:1이다. 예전에 실려 있던 `POST /apme/tune` 은 구현된 적이 없어 삭제했다(위 auto-tuning 절 참고).
 
 모든 응답은 JSON + `Access-Control-Allow-Origin: *`. APME 미초기화 시 503.
+
+### Unified activity projection
+
+`/apme/activity`의 안정 계약은 `agentdeck-activity/v1`이다. 각 데몬은 자기 APME SQLite만
+읽고, 상대 데몬의 DB나 App Store 컨테이너를 직접 열지 않는다. CLI가 Swift 리스너를
+인계받기 직전과 Swift가 외부 CLI 데몬을 관찰하는 동안, 인증된 loopback HTTP로 최대
+500개의 작은 파생 행만 교환해 각 데이터 디렉터리의 삭제 가능한
+`apme-peer-activity.json` 캐시에 보관한다.
+
+동일 행은 agent + native session + task index + 정규화한 첫 프롬프트의 SHA-256 기반
+`originKey`를 만든다. 키가 같아도 시간 구간이 겹치거나 5분 이내로 맞닿아야 합치며,
+구버전/인계 조각 역시 같은 agent/session/task index와 같은 시간 조건을 모두 만족할 때만
+보수적으로 합친다. 애매하면 별도 행으로 둔다. 숫자는 합산하지
+않고 더 완전한 쪽의 최대값을 택해 이중 계측을 부풀리지 않는다. 표시하는 사용 시간은
+task 벽시계가 아니라 닫힌 turn 실행 구간의 합이며, 현재 실행 중인 turn만 현재까지
+누적한다. 따라서 사용자가 응답을 읽거나 다음 프롬프트를 고민한 시간은 제외된다.
 
 ## WS protocol additions
 

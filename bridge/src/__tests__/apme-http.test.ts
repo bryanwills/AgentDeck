@@ -114,6 +114,28 @@ describe('APME HTTP routes', () => {
     expect(oc.runs.length).toBe(1);
   });
 
+  it('GET /apme/activity returns the stable, deduplicated activity projection', async () => {
+    apme.collector.openRun({ sessionId: 'thread-activity', agentType: 'codex-cli', projectName: 'AgentDeck' });
+    apme.collector.ingestHook('thread-activity', 'UserPromptSubmit', { prompt: 'Add activity view' });
+    apme.collector.setTurnResponse('thread-activity', 'Done');
+    apme.collector.noteTurnStop('thread-activity');
+    apme.collector.closeRun('thread-activity');
+
+    const resp = await fetch(`${base}/apme/activity`);
+    expect(resp.status).toBe(200);
+    const body = await resp.json() as {
+      schema: string;
+      rows: Array<{ agentType: string; task: string; durationMs: number }>;
+      agents: Array<{ agentType: string; taskCount: number }>;
+    };
+    expect(body.schema).toBe('agentdeck-activity/v1');
+    expect(body.rows).toContainEqual(expect.objectContaining({
+      agentType: 'codex-cli', task: 'Add activity view',
+    }));
+    expect(body.rows.find((row) => row.agentType === 'codex-cli')?.durationMs).toBeGreaterThanOrEqual(0);
+    expect(body.agents).toContainEqual(expect.objectContaining({ agentType: 'codex-cli', taskCount: 1 }));
+  });
+
   it('GET /apme/run/:id returns run detail with steps and evals', async () => {
     const runId = apme.collector.openRun({
       sessionId: 's', agentType: 'claude-code', projectName: 'p', projectPath: '/tmp/p',

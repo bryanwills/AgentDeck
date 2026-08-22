@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: required
 owner: Apple product maintainers
-reviewed: 2026-08-12
-revision: 2026-08-12
+reviewed: 2026-08-22
+revision: 2026-08-22
 source_of_truth: docs/appstore-feature-matrix.md
 validators: [bash apple/scripts/verify-appstore-archive.sh]
 ---
@@ -56,6 +56,7 @@ All surfaces follow the same rule:
 | Device Preview catalog | Yes | Yes | macOS exposes the full catalog window; iOS/iPadOS exposes the same synthetic previews from the no-Mac connection state so the app remains inspectable without a paired host. CLI-only targets appear only with external daemon |
 | APME Layer 2 LLM evaluation | Yes | Yes | Apple Intelligence default; opt-in HTTP alternatives |
 | APME Layer 1 deterministic evaluation | No | Yes | Requires `git` / package-manager subprocesses |
+| Unified agent activity history (Swift/CLI dedup + merge) | Yes | Yes | Each daemon keeps its own APME database. Tier 1 collects supported hook/transcript events without subprocesses; when the same user's daemon ownership changes, the two tiers exchange only an authenticated, content-minimized activity snapshot over loopback HTTP. The dashboard and macOS menu-bar glance pane render that same merged projection by deterministic source identity and completeness precedence; neither opens the other tier's database, rewrites source rows, reads the App Store container from Node, or treats prompt text alone as identity. Historical rows without a strong identity remain separate rather than being destructively guessed together. |
 | Timeline completion summary | Yes | Yes | Foundation Models → optional MLX HTTP → heuristic |
 | Native App Store rating request and review link | Yes | — | StoreKit system prompt is attempted only after every live session is idle on three distinct days, with a 180-day local cooldown; processing and awaiting states never qualify. Settings keeps a user-initiated review link. Engagement dates and the last attempt stay in `UserDefaults` and are never uploaded. |
 | App Store Connect engagement reports | Yes | — | Maintainer tooling creates ONGOING reports plus an optional ONE_TIME_SNAPSHOT for existing history, then downloads Apple's opt-in, privacy-thresholded aggregate analytics through the App Store Connect API. Creating requests requires Admin access; existing reports can be downloaded with Admin, Finance, or Sales and Reports access. No analytics SDK, device identifier, event upload, or AgentDeck-operated analytics backend is added to the app. |

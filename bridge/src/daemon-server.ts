@@ -1334,6 +1334,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   /** Produces live timeline rows for observed Kiro sessions — see the class
    *  doc for why Kiro needs a producer when hook agents do not. */
   const kiroTimelineFeed = new KiroTimelineFeed();
+  /** Kiro has no CLI hooks, so transcript rows also feed APME. These maps are
+   *  bounded by the observer's current live set and discarded on disappearance. */
+  const kiroApmeSessions = new Set<string>();
+  const kiroApmeResponseBySession = new Map<string, string>();
 
   /** Observed Claude sessions whose AskUserQuestion PreToolUse is held open for
    *  a device answer, keyed by the bare Claude session UUID. Its presence is
@@ -3679,11 +3683,43 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // beside it stays empty. #218 taught the per-session QUERY to read Kiro's
     // own transcript; the main timeline is a STREAM, and this is what feeds it.
     try {
-      const kiroIds = passiveSessionObserver.collect([])
-        .filter((s) => typeof s.agentType === 'string' && s.agentType.startsWith('kiro'))
-        .map((s) => s.id);
+      const observedKiro = passiveSessionObserver.collect([])
+        .filter((s) => typeof s.agentType === 'string' && s.agentType.startsWith('kiro'));
+      const kiroIds = observedKiro.map((s) => s.id);
+      const projectBySession = new Map(observedKiro.map((s) => [rawSessionId(s.id), s.projectName]));
+      const currentSessions = new Set(kiroIds.map(rawSessionId));
+      for (const sessionId of kiroApmeSessions) {
+        if (currentSessions.has(sessionId)) continue;
+        apme?.collector.closeRun(sessionId);
+        kiroApmeSessions.delete(sessionId);
+        kiroApmeResponseBySession.delete(sessionId);
+      }
       for (const entry of kiroTimelineFeed.pump(kiroIds)) {
         core.bridgeTimeline.addEntry(entry);
+        if (!apme || !entry.sessionId) continue;
+        const sessionId = rawSessionId(entry.sessionId);
+        if (entry.type === 'chat_start') {
+          if (!apme.collector.getRunId(sessionId)) {
+            apme.collector.openRun({
+              sessionId,
+              agentType: 'kiro-cli',
+              projectName: projectBySession.get(sessionId) ?? undefined,
+            });
+          }
+          kiroApmeSessions.add(sessionId);
+          kiroApmeResponseBySession.delete(sessionId);
+          apme.collector.ingestHook(sessionId, 'user_prompt_submit', {
+            prompt: entry.detail || entry.raw,
+            agent_type: 'kiro-cli',
+            project_name: projectBySession.get(sessionId),
+          });
+        } else if (entry.type === 'chat_response' && apme.collector.getRunId(sessionId)) {
+          const piece = entry.detail || entry.raw;
+          const response = [kiroApmeResponseBySession.get(sessionId), piece].filter(Boolean).join('\n');
+          kiroApmeResponseBySession.set(sessionId, response);
+          apme.collector.setTurnResponse(sessionId, response);
+          apme.collector.noteTurnStop(sessionId);
+        }
       }
     } catch (err) {
       debug('daemon', `kiro timeline feed failed: ${String(err)}`);

@@ -1034,7 +1034,7 @@ struct SettingsScreen: View {
 
             Divider()
 
-            Text("APME data is stored locally on this device. The dashboard is accessible from the menu bar APME button.")
+            Text("APME data is stored locally on this device. See the summary in the menu bar, then choose Full report for details.")
                 .font(.system(size: 10))
                 .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
         }

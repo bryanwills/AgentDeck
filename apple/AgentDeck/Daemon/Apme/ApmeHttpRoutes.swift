@@ -88,6 +88,13 @@ enum ApmeHttpRoutes {
             return .json(["schema": Self.schemaVersion, "runs": result])
         }
 
+        // Daemon-owner-neutral activity projection. Source SQLite rows remain
+        // untouched; cached peer rows are merged only for display/export.
+        await httpServer.get("/apme/activity") { request in
+            if let denied = Self.requireToken(request) { return denied }
+            return .json(ApmeActivityHistory.snapshot(store: store).dictionary)
+        }
+
         // Run detail — supports both Node-compatible /apme/run/<id> and the
         // older Swift fallback /apme/run?id=<id>.
         await httpServer.get("/apme/run/*") { request in

@@ -94,6 +94,10 @@ final class DaemonService: ObservableObject {
     private var healthMonitorTask: Task<Void, Never>?
     private var externalFailureCount = 0
     private var localFailureCount = 0
+    /// The activity projection changes slowly compared with live dashboard
+    /// state. Sync once per minute while Node owns the port; the last good
+    /// snapshot remains available if Node later exits and Swift is promoted.
+    private var lastApmePeerSyncAt: Date?
     /// Re-entrancy guard for reclaimCanonicalPortIfNeeded — a patient probe
     /// (up to 5s) can outlive one 5s health tick.
     private var isReclaimingPort = false
@@ -698,6 +702,20 @@ final class DaemonService: ObservableObject {
                 // refuses a foreign daemon before we ever get here).
                 if !LocalPeerOwnership.isForeignDaemon(health: health) {
                     AuthManager.shared.adoptPeerToken(health?["pairingToken"] as? String)
+                    if lastApmePeerSyncAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true {
+                        lastApmePeerSyncAt = Date()
+                        let synced = await ApmeActivityHistory.syncFromPeer(
+                            port: currentPort,
+                            token: AuthManager.shared.token
+                        )
+                        if synced {
+                            DaemonLogger.shared.throttledDebug(
+                                "APME", key: "peer-activity-sync",
+                                "Merged external daemon activity into the local dashboard cache",
+                                minInterval: 60
+                            )
+                        }
+                    }
                 }
                 return
             }

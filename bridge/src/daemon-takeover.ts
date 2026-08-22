@@ -47,6 +47,9 @@ export interface TakeoverDeps {
   shutdown: (port: number) => Promise<void>;
   waitForExit: (port: number, timeoutMs: number) => Promise<boolean>;
   waitForBindable: (port: number, timeoutMs: number) => Promise<boolean>;
+  /** Best-effort derived APME projection capture before the Swift listener
+   *  disappears. Never blocks takeover on failure. */
+  captureActivity?: (port: number, token: unknown) => Promise<boolean>;
 }
 
 export type TakeoverOutcome =
@@ -130,6 +133,11 @@ export async function negotiateIncumbentDaemon(
   if (!incumbent.isSwift) {
     log(`Daemon already running on port ${port}. Use 'agentdeck daemon stop' first.`);
     return 'already-running';
+  }
+
+  if (deps.captureActivity) {
+    const captured = await deps.captureActivity(port, incumbent.pairingToken);
+    if (captured) log(`Merged the app daemon's activity history into the CLI dashboard cache.`);
   }
 
   // Reverse two-tier upgrade path: the macOS app may already own the canonical
