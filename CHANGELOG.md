@@ -57,11 +57,19 @@ The same write from a terminal, with the two things a web page cannot do:
   that steals the port is the one that respawns underneath the write, and an
   in-process pause cannot span a respawn. The lease expires when it is read, not
   on a timer, so a flasher killed mid-write needs nothing to run to recover.
-- **It checks the board booted, not just that the bytes landed.** MD5 against the
-  chip proves the write; an image with a wrong flash-size header passes that and
-  then bootloops. So it reopens the port and waits for the board to introduce
-  itself. `ulanzi_tc001` skips that step by name — its CH340 TX is broken in
-  hardware and would report a good flash as a failure.
+- **It asks the board to introduce itself after the write.** MD5 against the
+  chip proves the bytes; an image with a wrong flash-size header passes that and
+  then bootloops, so the port is reopened and the firmware's own `device_info`
+  is read back. Treat a reply as confirmation and its absence as no
+  information: esptool-js's hard reset is a *release* with no *assert*
+  (`reset.js` `HardReset` is `sleep(100); setRTS(false)`), so on an adapter that
+  does not leave EN asserted after the write it is a no-op and the chip stays
+  parked in the flasher stub. Measured on 86box, 2026-08-22: silent for 200s
+  with exclusive port access after four separate writes, then up in 2.0s the
+  moment `esptool --after hard-reset` pulsed EN for real — the firmware was
+  correct the whole time. So the command reports "power-cycle it" rather than a
+  warning, and a real per-board reset is still open work. `ulanzi_tc001` skips
+  the read-back entirely by name — its CH340 TX is broken in hardware.
 
 `serialport` is an optional native dependency; without it the command says which
 two things to install and points at the browser flasher.

@@ -115,7 +115,15 @@ export const ESP32_BOARDS: Esp32BoardSpec[] = [
     before: 'default_reset', after: 'hard_reset', stub: true, nativeUsb: false,
     ota: true,
     webFlash: true, webFlashStatus: 'verified',
-    webFlashVerified: EV + 'default_reset/stub · ESP32-S3 (QFN56) rev v0.2 · flash 16MB · 460800 ok',
+    webFlashVerified:
+      EV +
+      'default_reset/stub · ESP32-S3 (QFN56) rev v0.2 · flash 16MB · 460800 ok. ' +
+      'Writes and MD5-verifies from the released merged image (4 runs, esp32-v1.0.7). ' +
+      'POST-WRITE RESET DOES NOT WORK ON THIS BOARD: it stays parked in the flasher stub — silent for 200s ' +
+      'with exclusive port access — after every write, and comes up in 2.0s only once python esptool pulses EN. ' +
+      'A serialport RTS pulse, a DTR pulse, an RTS pulse through the Transport shim, and ' +
+      'main(default_reset)+after(hard_reset) were each measured and none reboot it; esptool-js HardReset is a ' +
+      'release with no assert. The firmware written is correct — the user must power-cycle.',
     notes: ['CH340 USB-serial bridge.'],
   },
   {
@@ -157,7 +165,7 @@ export const ESP32_BOARDS: Esp32BoardSpec[] = [
     ota: true,
     webFlash: false, webFlashStatus: 'blocked',
     webFlashVerified:
-      '2026-08-22 · enters download mode but never answers. esptool.py v5.1.2 reports "Download mode successfully detected, but getting no sync reply: The serial TX path seems to be down" — board-side, not esptool-js.',
+      '2026-08-22 · enters download mode but never answers. esptool.py 5.1.2 (the PlatformIO-vendored tool-esptoolpy build — NOT a PyPI release: the PyPI 5.1 line stops at 5.1.0, which is how a CI pin read off a local `pip show esptool` failed the esp32-v1.0.7 cut) reports "Download mode successfully detected, but getting no sync reply: The serial TX path seems to be down" — board-side, not esptool-js.',
     notes: ['ESP32-P4: the bootloader lives at 0x2000, not 0x0.'],
   },
   {
@@ -212,7 +220,7 @@ export const ESP32_BOARDS: Esp32BoardSpec[] = [
     ota: true,
     webFlash: false, webFlashStatus: 'unverified',
     webFlashVerified:
-      '2026-08-22 · no auto entry into download mode; esptool.py v5.1.2 fails identically ("No serial data received"), so this is the board, not esptool-js. Needs a physical BOOT press to verify.',
+      '2026-08-22 · no auto entry into download mode; esptool.py 5.1.2 (the PlatformIO-vendored tool-esptoolpy build, not a PyPI release) fails identically ("No serial data received"), so this is the board, not esptool-js. Needs a physical BOOT press to verify.',
     notes: [
       'Native USB CDC needs esptool\'s NORMAL reset — copying the no_reset/no-stub flags from the CH340 envs made every upload fail (2026-07-26).',
     ],
