@@ -60,11 +60,6 @@ function terminalFor(onLog?: (line: string) => void) {
 /**
  * Connect, identify, and decide. Returns a live session — the caller inspects
  * `identified.verdict` and only then calls `writeMerged`.
- *
- * The session stays OPEN on a refusing verdict rather than disconnecting: the
- * user's next move is usually "pick the right board", and making them re-enter
- * download mode to hear a second refusal is how a guard earns a reputation for
- * being the problem.
  */
 export async function connectAndIdentify(
   device: SerialPort,
@@ -80,35 +75,50 @@ export async function connectAndIdentify(
     debugLogging: false,
   });
 
-  let chip: string;
-  if (profile.stub) {
-    chip = await loader.main(profile.before);
-  } else {
-    // The no-stub equivalent of main(): everything except runStub(). Measured on
-    // a TTGO T-Display 2026-08-22 — writeFlash has real IS_STUB === false
-    // branches, so the ROM loader really does flash.
-    await loader.detectChip(profile.before);
-    chip = await loader.chip.getChipDescription(loader);
-    if (loader.chip.postConnect) await loader.chip.postConnect(loader);
-    if (profile.uploadBaud !== 115200) await loader.changeBaud();
+  // A FAILURE HERE MUST RELEASE THE PORT. Failing to connect is the COMMON
+  // path — a board that is not in download mode — and Web Serial keeps the port
+  // open and locked to this page until someone closes it. Leaking it makes the
+  // user's next attempt fail with "already open", which this page reports as
+  // "the daemon is holding the port": a diagnosis that is wrong and that the
+  // user cannot act on, because the page itself is the holder.
+  try {
+    let chip: string;
+    if (profile.stub) {
+      chip = await loader.main(profile.before);
+    } else {
+      // The no-stub equivalent of main(): everything except runStub(). Measured
+      // on a TTGO T-Display 2026-08-22 — writeFlash has real IS_STUB === false
+      // branches, so the ROM loader really does flash.
+      await loader.detectChip(profile.before);
+      chip = await loader.chip.getChipDescription(loader);
+      if (loader.chip.postConnect) await loader.chip.postConnect(loader);
+      if (profile.uploadBaud !== 115200) await loader.changeBaud();
+    }
+
+    cb.onPhase?.("identify");
+    const mac = await loader.chip.readMac(loader);
+    const flashId = (await loader.readFlashId()).toString(16);
+    // Ask for a size only when the id was real. detectFlashSize() answers "4MB"
+    // when it cannot decode the id, so trusting it turns "no answer" into a
+    // confident wrong number — and this number gates the write.
+    const flashSize = flashIdIsUsable(flashId) ? await loader.detectFlashSize() : undefined;
+
+    const verdict = esp32PreflightVerdict({
+      board: profile,
+      surface: "browser",
+      detectedChip: chip,
+      detectedFlashSize: flashSize,
+    });
+
+    // On SUCCESS the session stays open on purpose: a refusing verdict is
+    // usually followed by "pick the right board", and making the user re-enter
+    // download mode to hear a second refusal is how a guard earns a reputation
+    // for being the problem. `finish()` is the caller's release.
+    return { loader, transport, identified: { chip, mac, flashId, flashSize, verdict } };
+  } catch (e) {
+    try { await transport.disconnect(); } catch { /* already gone */ }
+    throw e;
   }
-
-  cb.onPhase?.("identify");
-  const mac = await loader.chip.readMac(loader);
-  const flashId = (await loader.readFlashId()).toString(16);
-  // Ask for a size only when the id was real. detectFlashSize() answers "4MB"
-  // when it cannot decode the id, so trusting it turns "no answer" into a
-  // confident wrong number — and this number gates the write.
-  const flashSize = flashIdIsUsable(flashId) ? await loader.detectFlashSize() : undefined;
-
-  const verdict = esp32PreflightVerdict({
-    board: profile,
-    surface: "browser",
-    detectedChip: chip,
-    detectedFlashSize: flashSize,
-  });
-
-  return { loader, transport, identified: { chip, mac, flashId, flashSize, verdict } };
 }
 
 export interface WriteResult {

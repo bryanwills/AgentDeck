@@ -46,6 +46,13 @@ function browserBlocker(): MessageKey | null {
 /* ------------------------------------------------------------------- state */
 let loaded: LoadedManifest | null = null;
 let session: FlashSession | null = null;
+/**
+ * The board the live `session` belongs to — NOT whatever the <select> shows.
+ * By the time the change handler runs, the element already reads the new value,
+ * so releasing the old session by reading the picker would apply the wrong
+ * board's `after` reset mode to it.
+ */
+let current: BoardProfile | null = null;
 let image: Uint8Array | null = null;
 const logLines: string[] = [];
 
@@ -179,8 +186,9 @@ async function doProbe() {
     const device = await navigator.serial.requestPort();
     btn.textContent = t("s3.working");
     // Any previous session belongs to a port the user has now replaced.
-    if (session) { await finish(session, p).catch(() => {}); session = null; }
+    if (session) { await finish(session, current ?? p).catch(() => {}); session = null; }
     session = await connectAndIdentify(device, p, { onLog: log });
+    current = p;
     $("install-card").hidden = false;
     renderIdentity(p);
   } catch (e) {
@@ -221,6 +229,7 @@ async function doInstall() {
     setPhase(t("p.done"), 100);
     await finish(session, p);
     session = null;
+    current = null;
     $("done-card").hidden = false;
     // TC001's CH340 TX is broken in hardware: it never answers a serial probe,
     // so telling its owner to run a serial check would report a good flash as a
@@ -310,11 +319,20 @@ function init() {
   wireLocale();
   $<HTMLSelectElement>("board").addEventListener("change", () => {
     // A different board means a different image and a stale identification.
-    image = null;
+    // RELEASE the old session rather than just forgetting it: Web Serial keeps
+    // the port open and locked to this page, so dropping the reference leaves
+    // the port held with nothing able to close it — and the next connect then
+    // fails with "already open", which this page reports as "the daemon is
+    // holding it". A wrong diagnosis the user cannot act on.
+    const previous = session;
+    const previousBoard = current;
     session = null;
+    image = null;
+    if (previous && previousBoard) void finish(previous, previousBoard).catch(() => {});
     $("install-card").hidden = true;
     $("done-card").hidden = true;
     const p = boardById($<HTMLSelectElement>("board").value);
+    current = p ?? null;
     if (p) renderBoardNotes(p);
   });
   $<HTMLInputElement>("ck-daemon").addEventListener("change", refreshProbeButton);
