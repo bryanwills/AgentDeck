@@ -245,6 +245,20 @@ background:
 ```
 Mono caption inside: 12px, `--ink-500`, 0.04em tracked, e.g. `// menubar popup — sessions list`.
 
+### 5.11 Bounded collection summary
+
+Glance surfaces never grow with collection size. Preserve urgent and active
+items as rows, collapse passive repetition into a labeled count, and keep the
+complete roster one action away on the owning detail surface. A summary must
+retain three truths even at extreme scale: total count, semantic state, and the
+number needing attention. Do not use an arbitrary “first N” list that silently
+hides failures.
+
+Use the same structure for session rosters, connected hardware, provider
+limits, and any future repeated surface family. Small collections may stay
+expanded; once collapsed, expansion happens inside a bounded scroll region and
+must not resize its containing popup.
+
 ---
 
 ## 6. Iconography

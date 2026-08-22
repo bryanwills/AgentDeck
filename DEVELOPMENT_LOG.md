@@ -2,6 +2,28 @@
 
 ---
 
+## 2026-08-22 — 메뉴바는 목록의 크기가 아니라 긴급도에 따라 커진다
+
+세션과 연결 surface가 많아질수록 `ControlTowerPanel` 자체가 화면 높이만큼 자라던
+구조를 bounded command glance로 바꿨다. 팝업은 최대 560pt이고 두 열이 각자 내부
+스크롤한다. 왼쪽은 `needs you → working → idle` 순서이며, 유휴 세션은 3개를 넘으면
+개수 한 줄로 접힌다. 대기 세션은 첫 요청만 theater에 두고 나머지는 roster 안에서
+계속 보이므로, 압축이 곧 누락이 되지는 않는다.
+
+오른쪽 topology는 장치를 한 행씩 복제하지 않는다. `MenuBarSurfaceRollup`이 Controls,
+E-ink, LED, ESP32, Apps 다섯 계열로 집계하고 문제 수를 별도로 보존한다. USB로 이미
+표시된 ESP32의 Wi-Fi hot-standby는 제외해 물리 장치 중복을 막는다. Android도 Wi-Fi
+dashboard 이름/id와 ADB model/serial이 강하게 일치할 때만 한 장치로 합친다(애매하면
+별개로 남기는 보수적 규칙). 500개 surface fixture도 정확히 5행만 생성한다. 전체 장치와
+topology는 Dashboard/Devices가 계속 소유하고, 메뉴바는
+`total + semantic state + needs attention`만 보존한다.
+
+이 규칙을 `DESIGN.md`의 **Bounded collection summary**와
+`design/components.css`/Component lab specimen으로 올렸다. 같은 원칙을 이후 session,
+hardware, provider-limit 반복 컬렉션에 재사용한다. App Store feature matrix도 구현 전에
+갱신했다. 검증: macOS XCTest 658개(2 skip, 0 failure), 신규 density/rollup 6개,
+macOS Debug build, 디자인 토큰 7개 미러, viewer JS 문법, R6 17개 fixture 통과.
+
 ## 2026-08-22 — 그 펌웨어에 닿는 길을 냈다: `/flash/` 웹 플래셔 + `agentdeck esp32 flash`
 
 앞 항목이 **merged factory image 와 `manifest.json` 을 만들어 둔 상태**에서 멈춰 있었다.

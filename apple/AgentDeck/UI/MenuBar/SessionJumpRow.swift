@@ -20,10 +20,10 @@ struct SessionJumpRow: View {
 
     private var stateDotColor: Color {
         switch state {
-        case .processing: .cyan
-        case .awaitingPermission, .awaitingOption, .awaitingDiff: .orange
-        case .idle: .green
-        case .disconnected: .gray
+        case .processing: DesignTokens.UI.cyan
+        case .awaitingPermission, .awaitingOption, .awaitingDiff: DesignTokens.UI.attn
+        case .idle: DesignTokens.UI.idle
+        case .disconnected: DesignTokens.UI.idleDark
         }
     }
 
@@ -76,12 +76,12 @@ struct SessionJumpRow: View {
         }
         .buttonStyle(.plain)
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.04))
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
+                .fill(DesignTokens.Tide.s50.opacity(0.04))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
+                .stroke(DesignTokens.Tide.s50.opacity(0.10), lineWidth: 0.5)
         )
     }
 
