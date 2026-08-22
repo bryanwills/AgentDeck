@@ -4,8 +4,14 @@
 import CoreGraphics
 
 /// One policy shared by the menu bar session roster and surface summary.
-/// The Dashboard owns exhaustive lists; the menu bar owns interruption-first
-/// triage and must not grow with the number of sessions or connected surfaces.
+/// The menu bar adapts the amount of detail before falling back to a semantic
+/// rollup; its outer window must never grow with collection size.
+enum MenuBarCollectionDensity: Equatable {
+    case detailed
+    case grouped
+    case summarized
+}
+
 enum MenuBarDensityPolicy {
     static let preferredPanelHeight: CGFloat = 560
     static let minimumPanelHeight: CGFloat = 420
@@ -14,8 +20,24 @@ enum MenuBarDensityPolicy {
     static let sessionColumnWidth: CGFloat = 424
     static let overviewColumnWidth: CGFloat = 286
 
-    static func collapsesIdleSessions(_ count: Int) -> Bool {
-        count > maxInlineIdleSessions
+    static func collectionDensity(count: Int) -> MenuBarCollectionDensity {
+        switch max(0, count) {
+        case 0...6: return .detailed
+        case 7...15: return .grouped
+        default: return .summarized
+        }
+    }
+
+    static func inlineIdleSessionCount(totalSessionCount: Int, idleSessionCount: Int) -> Int {
+        let idleCount = max(0, idleSessionCount)
+        switch collectionDensity(count: totalSessionCount) {
+        case .detailed:
+            return idleCount
+        case .grouped:
+            return min(maxInlineIdleSessions, idleCount)
+        case .summarized:
+            return 0
+        }
     }
 
     static func panelHeight(availableHeight: CGFloat) -> CGFloat {
@@ -34,6 +56,13 @@ struct MenuBarSurfaceFamily: Equatable, Identifiable {
     var id: String { name }
 }
 
+struct MenuBarSurfaceIssue: Equatable, Identifiable {
+    let label: String
+    let count: Int
+
+    var id: String { label }
+}
+
 /// Transport-aware rollup for the bounded menu bar topology summary.
 /// Serial-active ESP32 Wi-Fi sockets are excluded because the USB row already
 /// represents that physical board, matching the full TopologyRail rule.
@@ -41,10 +70,11 @@ struct MenuBarSurfaceRollup: Equatable {
     let total: Int
     let issueCount: Int
     let families: [MenuBarSurfaceFamily]
+    let issues: [MenuBarSurfaceIssue]
 
     static func make(from health: ModuleHealthState?) -> MenuBarSurfaceRollup {
         guard let health else {
-            return MenuBarSurfaceRollup(total: 0, issueCount: 0, families: [])
+            return MenuBarSurfaceRollup(total: 0, issueCount: 0, families: [], issues: [])
         }
 
         let streamDeck = health.streamDeck?.devices.count ?? 0
@@ -88,28 +118,53 @@ struct MenuBarSurfaceRollup: Equatable {
         ]
         let families = candidates.filter { $0.count > 0 }
 
-        var issues = 0
-        if health.d200h?.connected == false { issues += 1 }
-        if let pixooHealth = health.pixoo {
-            let reportedIssues = pixooHealth.devices.filter {
-                !$0.online || $0.backedOff || $0.failures > 0 || !pixooHealth.hasFrame
-            }.count
-            issues += reportedIssues
-            issues += max(0, pixooHealth.configuredDeviceCount - pixooHealth.devices.count)
+        var issues: [MenuBarSurfaceIssue] = []
+        if health.d200h?.connected == false {
+            issues.append(MenuBarSurfaceIssue(label: "D200H disconnected", count: 1))
         }
-        for matrix in [health.timebox, health.idotmatrix].compactMap({ $0 }) {
-            if matrix.configuredDeviceCount > 0 && !matrix.connected {
-                issues += matrix.configuredDeviceCount
+        if let pixooHealth = health.pixoo {
+            for device in pixooHealth.devices where
+                !device.online || device.backedOff || device.failures > 0 || !pixooHealth.hasFrame {
+                let state: String
+                if !device.online { state = "offline" }
+                else if device.backedOff { state = "retry paused" }
+                else if device.failures > 0 { state = "retrying" }
+                else { state = "waiting for frame" }
+                issues.append(MenuBarSurfaceIssue(label: "Pixoo \(device.ip) · \(state)", count: 1))
+            }
+            let missing = max(0, pixooHealth.configuredDeviceCount - pixooHealth.devices.count)
+            if missing > 0 {
+                issues.append(MenuBarSurfaceIssue(label: "Pixoo devices not reporting", count: missing))
             }
         }
-        issues += (health.esp32Wifi?.devices ?? []).filter { !$0.serialActive && $0.stale }.count
-        if health.adb?.lastError?.isEmpty == false { issues += 1 }
-        if health.serial?.lastError?.isEmpty == false { issues += 1 }
+        for (name, matrix) in [("Timebox Mini", health.timebox), ("iDotMatrix", health.idotmatrix)] {
+            guard let matrix else { continue }
+            if matrix.configuredDeviceCount > 0 && !matrix.connected {
+                issues.append(MenuBarSurfaceIssue(
+                    label: "\(name) disconnected",
+                    count: matrix.configuredDeviceCount
+                ))
+            }
+        }
+        for device in (health.esp32Wifi?.devices ?? []) where !device.serialActive && device.stale {
+            let address = device.ip ?? "unknown address"
+            issues.append(MenuBarSurfaceIssue(
+                label: "\(device.board) \(address) · stale",
+                count: 1
+            ))
+        }
+        if health.adb?.lastError?.isEmpty == false {
+            issues.append(MenuBarSurfaceIssue(label: "ADB connection error", count: 1))
+        }
+        if health.serial?.lastError?.isEmpty == false {
+            issues.append(MenuBarSurfaceIssue(label: "ESP32 serial error", count: 1))
+        }
 
         return MenuBarSurfaceRollup(
             total: families.reduce(0) { $0 + $1.count },
-            issueCount: issues,
-            families: families
+            issueCount: issues.reduce(0) { $0 + $1.count },
+            families: families,
+            issues: issues
         )
     }
 

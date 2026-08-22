@@ -760,7 +760,7 @@
       group: 'Containers',
       title: 'Bounded collection summary',
       classes: '.ad-rollup · .ad-rollup-row · --disclosure',
-      note: 'DESIGN.md §5.11. Keep urgent/active rows explicit, collapse passive repetition into counted families, and retain failures in the header. Collection size never changes the containing surface height.',
+      note: 'DESIGN.md §5.11. Detail through 6 items, group at 7–15, summarize at 16+. Disclosures name the category and exact count; generic “+N more” and single-letter provider aliases are forbidden. Collection size never changes the containing surface height.',
       wide: true,
       html: `<div class="ad-rollup">
           <div class="ad-rollup-head"><span>Surfaces</span><strong>26 connected · 1 needs attention</strong></div>

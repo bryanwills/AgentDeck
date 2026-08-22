@@ -80,6 +80,38 @@ struct MenuBarSurfaceSummary: View {
                     }
                 }
             }
+
+            if !rollup.issues.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("NEEDS ATTENTION")
+                        .font(.system(size: 9, weight: .bold))
+                        .kerning(0.45)
+                        .foregroundStyle(DesignTokens.UI.attn)
+
+                    ForEach(rollup.issues) { issue in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(DesignTokens.UI.attn)
+                            Text(issue.label)
+                                .lineLimit(2)
+                            Spacer(minLength: 3)
+                            if issue.count > 1 {
+                                Text("\(issue.count)")
+                                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                            }
+                        }
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(TerrariumHUD.text)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
+                                .fill(DesignTokens.UI.attn.opacity(0.08))
+                        )
+                    }
+                }
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Connected surfaces summary")

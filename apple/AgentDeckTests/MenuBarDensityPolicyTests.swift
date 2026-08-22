@@ -3,11 +3,19 @@ import XCTest
 @testable import AgentDeck
 
 final class MenuBarDensityPolicyTests: XCTestCase {
-    func testIdleSessionsStayInlineOnlyAtGlanceableCounts() {
-        XCTAssertFalse(MenuBarDensityPolicy.collapsesIdleSessions(0))
-        XCTAssertFalse(MenuBarDensityPolicy.collapsesIdleSessions(3))
-        XCTAssertTrue(MenuBarDensityPolicy.collapsesIdleSessions(4))
-        XCTAssertTrue(MenuBarDensityPolicy.collapsesIdleSessions(400))
+    func testCollectionDensityUsesStableDetailBands() {
+        XCTAssertEqual(MenuBarDensityPolicy.collectionDensity(count: 0), .detailed)
+        XCTAssertEqual(MenuBarDensityPolicy.collectionDensity(count: 6), .detailed)
+        XCTAssertEqual(MenuBarDensityPolicy.collectionDensity(count: 7), .grouped)
+        XCTAssertEqual(MenuBarDensityPolicy.collectionDensity(count: 15), .grouped)
+        XCTAssertEqual(MenuBarDensityPolicy.collectionDensity(count: 16), .summarized)
+        XCTAssertEqual(MenuBarDensityPolicy.collectionDensity(count: 500), .summarized)
+    }
+
+    func testIdleSessionRowsAdaptWithoutLosingTheirCount() {
+        XCTAssertEqual(MenuBarDensityPolicy.inlineIdleSessionCount(totalSessionCount: 6, idleSessionCount: 6), 6)
+        XCTAssertEqual(MenuBarDensityPolicy.inlineIdleSessionCount(totalSessionCount: 7, idleSessionCount: 6), 3)
+        XCTAssertEqual(MenuBarDensityPolicy.inlineIdleSessionCount(totalSessionCount: 16, idleSessionCount: 6), 0)
     }
 
     func testPanelHeightIsIndependentOfCollectionSizeAndRespectsScreenBudget() {
@@ -62,6 +70,11 @@ final class MenuBarDensityPolicyTests: XCTestCase {
         XCTAssertEqual(rollup.total, 4)
         XCTAssertEqual(rollup.issueCount, 3)
         XCTAssertEqual(rollup.families.map(\.name), ["LED", "ESP32"])
+        XCTAssertEqual(rollup.issues, [
+            MenuBarSurfaceIssue(label: "Pixoo 10.0.0.11 · offline", count: 1),
+            MenuBarSurfaceIssue(label: "Pixoo devices not reporting", count: 1),
+            MenuBarSurfaceIssue(label: "ips35 10.0.0.20 · stale", count: 1),
+        ])
     }
 
     func testHundredsOfSurfacesStillProduceOnlyBoundedFamilyRows() {

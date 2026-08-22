@@ -259,6 +259,14 @@ limits, and any future repeated surface family. Small collections may stay
 expanded; once collapsed, expansion happens inside a bounded scroll region and
 must not resize its containing popup.
 
+Use three stable density bands: detailed through 6 items, grouped from 7–15,
+and summarized from 16 upward. Urgent, waiting, error, stale, and focused items
+remain explicit at every density. A disclosure names the hidden category and
+its exact count (`7 idle sessions hidden`, `12 surface details`); generic
+`+N more` copy is forbidden because it hides what was omitted. Provider
+identity uses the canonical agent mark plus its full name. Single-letter aliases
+such as `C` and `X` are not user-facing labels.
+
 ---
 
 ## 6. Iconography

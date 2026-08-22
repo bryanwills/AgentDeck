@@ -45,6 +45,7 @@ struct ControlTowerPanel: View {
     @State private var activityRefreshAttempted = false
     @State private var activityLastRefresh: Date? = nil
     @State private var idleSessionsExpanded = false
+    @State private var fullTopologyExpanded = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -160,7 +161,7 @@ struct ControlTowerPanel: View {
                 Divider()
                     .overlay(DesignTokens.Tide.s50.opacity(0.08))
 
-                MenuBarSurfaceSummary()
+                adaptiveTopologySummary
                     .padding(14)
             }
         }
@@ -323,14 +324,8 @@ struct ControlTowerPanel: View {
                 }
 
                 VStack(spacing: 5) {
-                    ForEach(Array(snapshot.agents.prefix(3)), id: \.agentType) { agent in
+                    ForEach(snapshot.agents, id: \.agentType) { agent in
                         activityAgentRow(agent)
-                    }
-                    if snapshot.agents.count > 3 {
-                        Text("+\(snapshot.agents.count - 3) more agents")
-                            .font(.system(size: 9.5))
-                            .foregroundStyle(TerrariumHUD.subtext)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
 
@@ -338,7 +333,7 @@ struct ControlTowerPanel: View {
                     .overlay(Color.white.opacity(0.08))
 
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("RECENT TASKS")
+                    Text(snapshot.rows.count > 2 ? "RECENT TASKS · 2 OF \(snapshot.rows.count)" : "RECENT TASKS")
                         .font(.system(size: 9.5, weight: .bold))
                         .kerning(0.45)
                         .foregroundStyle(TerrariumHUD.subtext)
@@ -374,9 +369,12 @@ struct ControlTowerPanel: View {
 
     private func activityAgentRow(_ agent: ApmeActivityHistory.AgentSummary) -> some View {
         HStack(spacing: 7) {
-            Circle()
-                .fill(SessionBrand.color(for: agent.agentType))
-                .frame(width: 7, height: 7)
+            SessionCreatureIcon(
+                agentType: agent.agentType,
+                tint: SessionBrand.color(for: agent.agentType),
+                size: 14,
+                contentInset: 1
+            )
             Text(displayAgentLabel(agent.agentType))
                 .font(.system(size: 10.5, weight: .medium))
                 .lineLimit(1)
@@ -668,51 +666,70 @@ struct ControlTowerPanel: View {
     @ViewBuilder
     private var idleSessionsSection: some View {
         if !idleSessions.isEmpty {
-            let collapses = MenuBarDensityPolicy.collapsesIdleSessions(idleSessions.count)
-            if collapses && !idleSessionsExpanded {
-                Button {
+            let inlineCount = MenuBarDensityPolicy.inlineIdleSessionCount(
+                totalSessionCount: sortedSessions.count,
+                idleSessionCount: idleSessions.count
+            )
+            let visibleIdle = idleSessionsExpanded ? idleSessions : Array(idleSessions.prefix(inlineCount))
+            let hiddenCount = idleSessions.count - visibleIdle.count
+
+            if !visibleIdle.isEmpty {
+                sessionGroup(title: "IDLE", sessions: visibleIdle, color: DesignTokens.UI.idle)
+            }
+
+            if hiddenCount > 0 {
+                idleDisclosureButton(
+                    title: inlineCount == 0
+                        ? "Idle sessions \(idleSessions.count)"
+                        : "\(hiddenCount) idle \(hiddenCount == 1 ? "session" : "sessions") hidden",
+                    actionLabel: "Show all",
+                    systemImage: "chevron.down"
+                ) {
                     idleSessionsExpanded = true
-                } label: {
-                    HStack(spacing: 7) {
-                        Circle()
-                            .fill(DesignTokens.UI.idle)
-                            .frame(width: 5, height: 5)
-                        Text("IDLE SESSIONS")
-                            .font(.system(size: 9.5, weight: .bold))
-                            .kerning(0.45)
-                        Text("\(idleSessions.count)")
-                            .font(.system(size: 9.5, design: .monospaced))
-                        Spacer()
-                        Text("Show")
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .bold))
-                    }
-                    .foregroundStyle(TerrariumHUD.subtext)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
-                            .fill(DesignTokens.Tide.s50.opacity(0.045))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
-                            .stroke(DesignTokens.Tide.s50.opacity(0.10), lineWidth: 0.5)
-                    )
                 }
-                .buttonStyle(.plain)
-            } else {
-                sessionGroup(title: "IDLE", sessions: idleSessions, color: DesignTokens.UI.idle)
-                if collapses {
-                    Button("Collapse idle sessions") {
-                        idleSessionsExpanded = false
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(DesignTokens.UI.cyan)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+            } else if idleSessionsExpanded && inlineCount < idleSessions.count {
+                idleDisclosureButton(
+                    title: "All \(idleSessions.count) idle sessions shown",
+                    actionLabel: "Collapse",
+                    systemImage: "chevron.up"
+                ) {
+                    idleSessionsExpanded = false
                 }
             }
         }
+    }
+
+    private func idleDisclosureButton(
+        title: String,
+        actionLabel: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(DesignTokens.UI.idle)
+                    .frame(width: 5, height: 5)
+                Text(title)
+                    .font(.system(size: 9.5, weight: .medium))
+                Spacer()
+                Text(actionLabel)
+                Image(systemName: systemImage)
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .foregroundStyle(TerrariumHUD.subtext)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
+                    .fill(DesignTokens.Tide.s50.opacity(0.045))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
+                    .stroke(DesignTokens.Tide.s50.opacity(0.10), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     /// Secondary text-link row below the topology. Preserves access to
@@ -824,53 +841,60 @@ struct ControlTowerPanel: View {
                 Spacer()
             }
 
-            if let pct5h = stateHolder.state.fiveHourPercent {
-                compactGauge(
-                    label: isApi ? "API" : "C 5h",
-                    percent: pct5h,
-                    resetTime: isApi ? nil : stateHolder.state.fiveHourResetsAt,
-                    customSuffix: isApi
-                        ? String(
-                            format: "$%.2f/$%.0f",
-                            stateHolder.state.costSpent ?? 0,
-                            stateHolder.state.costLimit ?? 0
-                        )
-                        : nil
-                )
-            }
-            if !isApi, let pct7d = stateHolder.state.sevenDayPercent {
-                compactGauge(label: "C 7d", percent: pct7d, resetTime: stateHolder.state.sevenDayResetsAt)
-            }
-            if let primary = codex?.primary, let percent = primary.usedPercent {
-                compactGauge(
-                    label: "X \(TopologyRail.windowLabel(primary.windowMinutes))",
-                    percent: percent,
-                    resetTime: primary.resetsAt,
-                    stale: primary.stale == true,
-                    footnote: CodexUsageFreshness.footnote(window: primary, capturedAt: codex?.capturedAt)
-                )
-            }
-            if let secondary = codex?.secondary, let percent = secondary.usedPercent {
-                compactGauge(
-                    label: "X \(TopologyRail.windowLabel(secondary.windowMinutes))",
-                    percent: percent,
-                    resetTime: secondary.resetsAt,
-                    stale: secondary.stale == true,
-                    footnote: CodexUsageFreshness.footnote(window: secondary, capturedAt: codex?.capturedAt)
-                )
-            }
-            if codex?.primary == nil, codex?.secondary == nil, let credits = codex?.credits {
-                HStack {
-                    Text((codex?.limitId ?? "Codex").capitalized)
-                    Spacer()
-                    Text(credits.unlimited == true ? "∞ credits" : "\(credits.balance ?? "—") credits")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+            if hasClaude {
+                usageProviderHeader(agentType: "claude-code", title: "Claude")
+                if let pct5h = stateHolder.state.fiveHourPercent {
+                    compactGauge(
+                        label: isApi ? "API" : "5h",
+                        percent: pct5h,
+                        resetTime: isApi ? nil : stateHolder.state.fiveHourResetsAt,
+                        customSuffix: isApi
+                            ? String(
+                                format: "$%.2f/$%.0f",
+                                stateHolder.state.costSpent ?? 0,
+                                stateHolder.state.costLimit ?? 0
+                            )
+                            : nil
+                    )
                 }
-                .font(.system(size: 10))
-                .foregroundStyle(TerrariumHUD.subtext)
+                if !isApi, let pct7d = stateHolder.state.sevenDayPercent {
+                    compactGauge(label: "7d", percent: pct7d, resetTime: stateHolder.state.sevenDayResetsAt)
+                }
+            }
+
+            if hasCodex {
+                usageProviderHeader(agentType: "codex-cli", title: "Codex")
+                if let primary = codex?.primary, let percent = primary.usedPercent {
+                    compactGauge(
+                        label: TopologyRail.windowLabel(primary.windowMinutes),
+                        percent: percent,
+                        resetTime: primary.resetsAt,
+                        stale: primary.stale == true,
+                        footnote: CodexUsageFreshness.footnote(window: primary, capturedAt: codex?.capturedAt)
+                    )
+                }
+                if let secondary = codex?.secondary, let percent = secondary.usedPercent {
+                    compactGauge(
+                        label: TopologyRail.windowLabel(secondary.windowMinutes),
+                        percent: percent,
+                        resetTime: secondary.resetsAt,
+                        stale: secondary.stale == true,
+                        footnote: CodexUsageFreshness.footnote(window: secondary, capturedAt: codex?.capturedAt)
+                    )
+                }
+                if codex?.primary == nil, codex?.secondary == nil, let credits = codex?.credits {
+                    HStack {
+                        Text((codex?.limitId ?? "Credits").capitalized)
+                        Spacer()
+                        Text(credits.unlimited == true ? "∞ credits" : "\(credits.balance ?? "—") credits")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    }
+                    .font(.system(size: 10))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                }
             }
             if let scopes = stateHolder.state.scopedLimits, !scopes.isEmpty {
-                Text("+\(scopes.count) model \(scopes.count == 1 ? "limit" : "limits") in Dashboard")
+                Text("Model limits · \(scopes.count) · View in Dashboard")
                     .font(.system(size: 9.5))
                     .foregroundStyle(TerrariumHUD.subtext)
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -881,6 +905,79 @@ struct ControlTowerPanel: View {
                     .foregroundStyle(TerrariumHUD.subtext)
             }
         }
+    }
+
+    private func usageProviderHeader(agentType: String, title: String) -> some View {
+        HStack(spacing: 6) {
+            SessionCreatureIcon(
+                agentType: agentType,
+                tint: SessionBrand.color(for: agentType),
+                size: 14,
+                contentInset: 1
+            )
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(TerrariumHUD.text)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var adaptiveTopologySummary: some View {
+        let rollup = MenuBarSurfaceRollup.make(from: stateHolder.state.moduleHealth)
+        let density = MenuBarDensityPolicy.collectionDensity(count: rollup.total)
+
+        VStack(alignment: .leading, spacing: 9) {
+            if density == .detailed || fullTopologyExpanded {
+                MenuBarTopologyList()
+                if density != .detailed {
+                    topologyDisclosureButton(
+                        title: "All \(rollup.total) surface details shown",
+                        actionLabel: "Collapse",
+                        systemImage: "chevron.up"
+                    ) {
+                        fullTopologyExpanded = false
+                    }
+                }
+            } else {
+                MenuBarSurfaceSummary()
+                topologyDisclosureButton(
+                    title: "\(rollup.total) surface details",
+                    actionLabel: "Show all",
+                    systemImage: "chevron.down"
+                ) {
+                    fullTopologyExpanded = true
+                }
+            }
+        }
+    }
+
+    private func topologyDisclosureButton(
+        title: String,
+        actionLabel: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                Spacer(minLength: 4)
+                Text(actionLabel)
+                Image(systemName: systemImage)
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .font(.system(size: 9.5, weight: .medium))
+            .foregroundStyle(DesignTokens.UI.cyan)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
+                    .fill(DesignTokens.Tide.s50.opacity(0.045))
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     /// Claude's subscription rate limits depend on Claude Code's OAuth token,
