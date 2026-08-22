@@ -203,19 +203,30 @@ static void blitGlyph(const uint8_t* a8, int cx, int cy, int dw, int dh, uint16_
     }
 }
 
-// ── 3×5 micro-glyphs for status bubbles (office.js GLY) ──
-static const uint8_t GLY_q[5][3] = {{1,1,1},{0,0,1},{0,1,1},{0,0,0},{0,1,0}};
-static const uint8_t GLY_b[5][3] = {{0,1,0},{0,1,0},{0,1,0},{0,0,0},{0,1,0}};
-static const uint8_t GLY_z[5][3] = {{1,1,1},{0,0,1},{0,1,0},{1,0,0},{1,1,1}};
-static const uint8_t GLY_w[5][3] = {{1,0,1},{0,1,0},{1,1,1},{0,1,0},{1,0,1}};  // 'working' spark
-static void drawBubble(int bx, int by, char g, uint16_t col) {
-    int bw = 5 * u, bh = 5 * u;
-    blk(bx, by, bw, bh, C_bubble);
-    blk(bx + u, by - u, bw - 2 * u, u, C_bubble);   // top notch
-    blk(bx + u, by + bh, u, u, C_bubble);           // tail
-    const uint8_t (*m)[3] = g == '?' ? GLY_q : g == '!' ? GLY_b : g == 'w' ? GLY_w : GLY_z;
+// ── Status marks ─────────────────────────────────────────────────────────────
+// State must read from shape before text: a cyan spark means work, while a
+// solid warm badge means the agent needs the user. Idle has no badge at all;
+// the dim, stationary creature is deliberately quieter than active states.
+static const uint8_t GLY_bang[5][3] = {{0,1,0},{0,1,0},{0,1,0},{0,0,0},{0,1,0}};
+static const uint8_t GLY_spark[5][5] = {
+    {0,0,1,0,0}, {0,1,1,1,0}, {1,1,1,1,1}, {0,1,1,1,0}, {0,0,1,0,0}
+};
+static void drawStatusMark(int bx, int by, char mark, uint16_t col) {
+    if (mark == 'w') {
+        // No speech-bubble silhouette: the diamond remains legible even when
+        // several workers are packed into a small office pod.
+        for (int r = 0; r < 5; r++) for (int c = 0; c < 5; c++)
+            if (GLY_spark[r][c]) blk(bx + c * u, by + r * u, u, u, col);
+        return;
+    }
+
+    // Attention/error use the same unmistakable shape; colour carries severity.
+    // Chamfered corners keep it distinct from the cyan work spark.
+    blk(bx + u, by, 3 * u, u, col);
+    blk(bx, by + u, 5 * u, 3 * u, col);
+    blk(bx + u, by + 4 * u, 3 * u, u, col);
     for (int r = 0; r < 5; r++) for (int c = 0; c < 3; c++)
-        if (m[r][c]) blk(bx + (c + 1) * u, by + r * u, u, u, col);
+        if (GLY_bang[r][c]) blk(bx + (c + 1) * u, by + r * u, u, u, C_bubble);
 }
 
 // ── Minecraft block world ─────────────────────────────────────────────────────
@@ -588,10 +599,10 @@ static WDraw computeWorker(Worker& w, uint32_t now) {
     d.galpha = idle ? 120 : 235;                     // resting agents dim in place
     d.ringR = 0; d.ringCol = 0; d.animPhase = 0;
     if (awaiting) {
-        d.bub = '?'; d.bubCol = HEX565(0xFFA93D);
+        d.bub = 'a'; d.bubCol = HEX565(0xFFA93D);
         d.animPhase = (int)((fabsf(sinf(now / 250.0f + w.bobPhase))) * 16);
     } else if (error) {
-        d.bub = '!'; d.bubCol = HEX565(0xFF6B6B);
+        d.bub = 'e'; d.bubCol = HEX565(0xFF6B6B);
         d.animPhase = (int)(now / 55) & 0x0F;
     } else if (working && !moving) {                 // in place → bob + pulsing floor glow + spark
         d.bub = 'w'; d.bubCol = HEX565(0x3ED6E8);
@@ -599,8 +610,6 @@ static WDraw computeWorker(Worker& w, uint32_t now) {
         d.ringR = (int)(d.sz * (0.34f + 0.18f * pr));
         d.ringCol = HEX565(0x3ED6E8);
         d.animPhase = (int)(pr * 16);
-    } else if (idle && !moving) {
-        d.bub = 'z'; d.bubCol = HEX565(0x9fb0ac);    // static (no toggle → no redraw)
     }
     return d;
 }
@@ -635,7 +644,9 @@ static void drawWorker(Worker& w, uint32_t now) {
             if (e <= 1.0f) blendPx((int)(d.cx+d.jit)+dx, (int)(d.cyT + tile*0.32f)+dy, HEX565(0x06120f), 120);
         }
     blitGlyph(agentGlyphA8(w.agent), d.icx, d.icy, d.dw, d.dh, HEX565((uint32_t)w.accent), w.facing == 'L', d.galpha);
-    if (d.bub) drawBubble(d.icx + (int)(d.sz * 0.3f), d.icy - (int)(d.sz * 0.6f) - 5 * u, d.bub, d.bubCol);
+    if (d.bub) drawStatusMark(d.icx + (int)(d.sz * 0.3f),
+                              d.icy - (int)(d.sz * 0.6f) - 5 * u,
+                              d.bub, d.bubCol);
 }
 
 static uint32_t lastDrawMs = 0, lastTickMs = 0, tickN = 0;

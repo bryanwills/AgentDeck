@@ -206,7 +206,9 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     }
 
 #if !defined(BOARD_TTGO) && !defined(BOARD_ESP32_C6_147)
-    // Name tag with text (always shown)
+    // Dense scenes keep active/attention labels explicit and let quiet
+    // creatures act as the idle roster. This prevents overlapping pills from
+    // obscuring the terrarium when many surfaces are connected.
     // Read session name from state — prefer sessionNames, fall back to projectName
     lockState();
     char name[32] = "";
@@ -218,7 +220,10 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         strncpy(name, "", sizeof(name) - 1);
     }
     name[sizeof(name) - 1] = '\0';
+    const bool showName = g_state.sessionCount <= 4 ||
+                          state == CreatureState::WORKING || state == CreatureState::ASKING;
     unlockState();
+    if (!showName) return;
 
     // Name tag — LVGL text rendering directly on canvas
     // Use LVGL's text width calculation (handles Korean + Latin mixed text)

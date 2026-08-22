@@ -9,6 +9,7 @@
 // (BOARD_LED8X32) is LVGL-free and renders its CRGB pages upscaled instead.
 //
 // Usage (LCD):    sim [--scene NAME] [--frames N] [--out PATH] [--label NAME]
+//                 T-Display Pro also accepts --page focus|usage|sessions
 //                 sim --all [--frames N] [--outdir DIR] [--label NAME]
 // Usage (matrix): sim [--scene NAME] [--page usage|agents] [--scale N] [--out PATH]
 //                 sim --all [--outdir DIR] [--scale N]
@@ -32,7 +33,7 @@ bool flag(int argc, char** argv, const char* key) {
     if (std::strcmp(argv[i], key) == 0) return true;
   return false;
 }
-const char* SCENES[] = {"empty", "idle", "display-off", "working", "multi", "permission"};
+const char* SCENES[] = {"empty", "idle", "display-off", "working", "multi", "crowd", "dense", "permission"};
 }  // namespace
 
 #if defined(BOARD_LED8X32)
@@ -121,13 +122,24 @@ void treeCreate() { SimDisplay::loadScreen(Screens::aquariumCreate()); }
 void treeUpdate(float dt) { Screens::aquariumUpdate(dt); }
 #endif
 
-bool renderScene(const char* scene, const char* path, int frames) {
+bool renderScene(const char* scene, const char* path, int frames, const char* page) {
   if (!SimScenes::apply(scene)) {
     std::fprintf(stderr, "[sim] unknown scene '%s' (have: %s)\n", scene, SimScenes::catalog());
     return false;
   }
   randomSeed(0xA6E7DECC);  // deterministic frames per run
   g_sim_millis = 0;
+#if defined(BOARD_T_DISPLAY_PRO)
+  // Physical rocker navigation, exercised without a hand-authored preview.
+  // Attention scenes still correctly snap back to Focus inside update().
+  if (std::strcmp(page, "usage") == 0) Ticker::nextPage();
+  else if (std::strcmp(page, "sessions") == 0) {
+    Ticker::nextPage();
+    Ticker::nextPage();
+  }
+#else
+  (void)page;
+#endif
   for (int i = 0; i < frames; i++) {
     SimDisplay::tick(FRAME_MS);
     treeUpdate(FRAME_DT);
@@ -144,6 +156,7 @@ bool renderScene(const char* scene, const char* path, int frames) {
 
 int main(int argc, char** argv) {
   const char* label = arg(argc, argv, "--label", "board");
+  const char* page = arg(argc, argv, "--page", "focus");
   int frames = std::atoi(arg(argc, argv, "--frames", "90"));  // 3s settle
   if (frames < 1) frames = 1;
 
@@ -159,14 +172,18 @@ int main(int argc, char** argv) {
     bool allOk = true;
     for (const char* s : SCENES) {
       std::string path = std::string(outdir) + "/" + label + "-" + s + ".png";
-      allOk &= renderScene(s, path.c_str(), frames);
+      allOk &= renderScene(s, path.c_str(), frames, "focus");
     }
     return allOk ? 0 : 1;
   }
 
   const char* scene = arg(argc, argv, "--scene", "working");
-  std::string def = std::string("sim-out/") + label + "-" + scene + ".png";
+  std::string def = std::string("sim-out/") + label + "-" + scene;
+#if defined(BOARD_T_DISPLAY_PRO)
+  if (std::strcmp(page, "focus") != 0) def += std::string("-") + page;
+#endif
+  def += ".png";
   const char* out = arg(argc, argv, "--out", def.c_str());
-  return renderScene(scene, out, frames) ? 0 : 1;
+  return renderScene(scene, out, frames, page) ? 0 : 1;
 }
 #endif

@@ -427,11 +427,10 @@ static void renderSessionsPage() {
         bool focused;
     } rows[3];
     uint8_t n = 0;
-    uint8_t total = 0;
+    uint8_t hiddenInput = 0, hiddenWork = 0, hiddenIdle = 0, hiddenReady = 0;
     s_sessionRowCount = 0;
     memset(s_sessionRowIds, 0, sizeof(s_sessionRowIds));
     lockState();
-    total = g_state.sessionCount;
     uint8_t order[10];
     uint8_t orderCount = 0;
     auto addIndex = [&](uint8_t idx) {
@@ -460,8 +459,27 @@ static void renderSessionsPage() {
         strncpy(s_sessionRowIds[n], s.id, sizeof(s_sessionRowIds[n]) - 1);
         n++;
     }
+    for (uint8_t oi = n; oi < orderCount; oi++) {
+        const char* state = g_state.sessions[order[oi]].state;
+        if (strstr(state, "awaiting") != nullptr) hiddenInput++;
+        else if (strcmp(state, "processing") == 0) hiddenWork++;
+        else if (strcmp(state, "idle") == 0) hiddenIdle++;
+        else hiddenReady++;
+    }
     s_sessionRowCount = n;
     unlockState();
+
+    char hidden[64] = "";
+    auto appendHidden = [&](uint8_t count, const char* label) {
+        if (!count) return;
+        size_t used = strlen(hidden);
+        snprintf(hidden + used, sizeof(hidden) - used, "%s%d %s",
+                 used ? " / " : "hidden: ", count, label);
+    };
+    appendHidden(hiddenInput, "input");
+    appendHidden(hiddenWork, "working");
+    appendHidden(hiddenIdle, "idle");
+    appendHidden(hiddenReady, "ready");
 
     if (n == 0) {
         lv_obj_t* l = makeLabel(s_body, &lv_font_montserrat_14, Theme::HUDDim,
@@ -506,10 +524,9 @@ static void renderSessionsPage() {
         lv_label_set_long_mode(proj, LV_LABEL_LONG_DOT);
         lv_obj_align(proj, LV_ALIGN_TOP_LEFT, 122, y - 1);
 
-        // The third row's milestone line yields space to the "+N" overflow
-        // marker so the two never collide.
+        // The third row yields space to the category-specific roster summary.
         lv_obj_t* line = makeLabel(s_body, &font_kr_16, Theme::HUDDim, rows[i].line);
-        lv_obj_set_width(line, (total > n && i == n - 1) ? 350 : 430);
+        lv_obj_set_width(line, (hidden[0] && i == n - 1) ? 330 : 430);
         lv_label_set_long_mode(line, LV_LABEL_LONG_DOT);
         lv_obj_align(line, LV_ALIGN_TOP_LEFT, 30, y + 24);
 
@@ -522,12 +539,10 @@ static void renderSessionsPage() {
         lv_obj_align(st, LV_ALIGN_TOP_RIGHT, -12, y);
     }
 
-    // Three readable rows beat five tiny ones — but say when the roster is
-    // larger than the page, or three rows silently reads as "three sessions".
-    if (total > n) {
-        char more[16];
-        snprintf(more, sizeof(more), "+%d more", total - n);
-        lv_obj_t* m = makeLabel(s_body, &lv_font_montserrat_12, Theme::HUDFaint, more);
+    // Three readable rows beat five tiny ones, but the disclosure says exactly
+    // what was collapsed instead of the ambiguous "+N more" pattern.
+    if (hidden[0]) {
+        lv_obj_t* m = makeLabel(s_body, &lv_font_montserrat_12, Theme::HUDFaint, hidden);
         lv_obj_align(m, LV_ALIGN_BOTTOM_RIGHT, -12, -3);
     }
 }

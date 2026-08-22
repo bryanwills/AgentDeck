@@ -2143,22 +2143,59 @@ void update() {
     size_t pos = 0;
 
     if (sessionCount > 0) {
-        // Show real session list from bridge
-        for (uint8_t i = 0; i < sessionCount && i < 10; i++) {
-            if (!sessions[i].alive) continue;
+        const uint8_t limit = sessionCount < 10 ? sessionCount : 10;
+        uint8_t aliveCount = 0;
+        for (uint8_t i = 0; i < limit; i++) if (sessions[i].alive) aliveCount++;
 
-            // Pick color by agent type
-            uint32_t dotColor = agentDotColor(sessions[i].agentType);
-
-            // State color for status dot
-            uint32_t sColor = sessionStateColor(sessions[i].state);
-
-            // Format: colored-type-dot + project name + state dot
+        bool shown[10] = {};
+        uint8_t visible = 0;
+        auto appendSession = [&](uint8_t i) {
+            const uint32_t dotColor = agentDotColor(sessions[i].agentType);
+            const uint32_t sColor = sessionStateColor(sessions[i].state);
             appendBounded(buf, sizeof(buf), pos,
                 "#%06lX " LV_SYMBOL_BULLET "# %s  #%06lX " LV_SYMBOL_BULLET "#\n",
                 (unsigned long)dotColor,
                 sessions[i].projectName[0] ? sessions[i].projectName : sessions[i].id,
                 (unsigned long)sColor);
+            shown[i] = true;
+            visible++;
+        };
+
+        if (aliveCount <= 6) {
+            for (uint8_t i = 0; i < limit; i++) if (sessions[i].alive) appendSession(i);
+        } else {
+            // A bounded glance: input first, then active work, then enough quiet
+            // context to reach five rows. The final row names every hidden state.
+            for (uint8_t pass = 0; pass < 3 && visible < 5; pass++) {
+                for (uint8_t i = 0; i < limit && visible < 5; i++) {
+                    if (!sessions[i].alive || shown[i]) continue;
+                    const bool input = strstr(sessions[i].state, "awaiting") != nullptr;
+                    const bool working = strcmp(sessions[i].state, "processing") == 0;
+                    if ((pass == 0 && input) || (pass == 1 && working) || pass == 2)
+                        appendSession(i);
+                }
+            }
+
+            uint8_t hiddenInput = 0, hiddenWork = 0, hiddenIdle = 0, hiddenReady = 0;
+            for (uint8_t i = 0; i < limit; i++) {
+                if (!sessions[i].alive || shown[i]) continue;
+                if (strstr(sessions[i].state, "awaiting") != nullptr) hiddenInput++;
+                else if (strcmp(sessions[i].state, "processing") == 0) hiddenWork++;
+                else if (strcmp(sessions[i].state, "idle") == 0) hiddenIdle++;
+                else hiddenReady++;
+            }
+            char hidden[96] = "";
+            auto appendHidden = [&](uint8_t count, const char* label) {
+                if (!count) return;
+                size_t used = strlen(hidden);
+                snprintf(hidden + used, sizeof(hidden) - used, "%s%d %s",
+                         used ? " / " : "", count, label);
+            };
+            appendHidden(hiddenInput, "input");
+            appendHidden(hiddenWork, "working");
+            appendHidden(hiddenIdle, "idle");
+            appendHidden(hiddenReady, "ready");
+            if (hidden[0]) appendBounded(buf, sizeof(buf), pos, "#94A3B8 %s hidden#\n", hidden);
         }
     } else if (hasData) {
         // Fallback: show primary session info (only when real data received)
@@ -2658,9 +2695,10 @@ void update() {
             // cell (32–60px). Skipped on tiny cells and for unknown agents with no mask.
             const lv_image_dsc_t* gdsc = ips10AgentGlyph(mc[i].agent);
             int glyphSz = 0;
-            // pw gate raised 92→150: on narrow idle tiles the top-right glyph
-            // ate the name's width and wrapped it mid-word ("Claud/e").
-            if (gdsc && pw >= 150 && ph >= 52) {
+            // On narrow idle tiles the mark used to consume the name column and
+            // split provider names mid-word. Text is the primary identity here;
+            // the large decorative mark earns space only on genuinely wide cards.
+            if (gdsc && pw >= 220 && ph >= 52) {
                 const bool agGlyph = ips10IsAntigravityAgent(mc[i].agent);
                 glyphSz = (pw < ph ? pw : ph) * 42 / 100;
                 if (glyphSz < 32) glyphSz = 32;
@@ -2680,10 +2718,12 @@ void update() {
             }
 
             int nameW = innerW - (glyphSz ? glyphSz + 8 : 0); if (nameW < 24) nameW = 24;
-            // Narrow tiles drop the name a size instead of mid-word wrapping
-            // ("Ope/nCo/de" at 20px in a 110px idle tile).
-            lv_obj_set_style_text_font(cellName[i], pw < 170 ? &font_kr_16 : &font_kr_20, 0);
+            // A fixed one-line box lets LONG_DOT do its job. Without the height
+            // constraint LVGL wrapped long provider names despite LONG_DOT.
+            const bool compactName = pw < 220;
+            lv_obj_set_style_text_font(cellName[i], compactName ? &font_kr_16 : &font_kr_20, 0);
             lv_obj_set_width(cellName[i], nameW);
+            lv_obj_set_height(cellName[i], compactName ? 24 : 30);
             lv_obj_set_width(cellProj[i], innerW);
             lv_obj_set_width(cellTool[i], innerW);
             lv_obj_set_width(cellBody[i], innerW);

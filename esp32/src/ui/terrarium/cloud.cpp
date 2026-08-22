@@ -207,7 +207,10 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         strncpy(name, "", sizeof(name) - 1);
     }
     name[sizeof(name) - 1] = '\0';
+    const bool showName = g_state.sessionCount <= 4 ||
+                          state == CreatureState::WORKING || state == CreatureState::ASKING;
     unlockState();
+    if (!showName) return;
 
     // Name tag — LVGL text rendering on canvas
     lv_point_t txtSize;

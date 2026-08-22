@@ -342,6 +342,15 @@ The menu bar uses the small-size aquarium-deck symbol, not the full app icon ill
 ### 6.4 Creature marks
 Each agent (Claude Code, Codex, OpenClaw, OpenCode, Antigravity) has a creature avatar derived from its canonical mark. Motion and state effects may surround or transform the mark, but must not replace its identifying geometry.
 
+Creature status is a shape-and-contrast grammar, never a set of tiny letter
+codes. Idle creatures are dim and still with no badge. Working creatures keep
+their identity mark and add a cyan geometric spark or floor halo. Input-needed
+creatures use a solid amber `!` badge; errors use the same high-salience badge
+in coral. Colour is redundant with shape and motion so working, idle, and
+attention remain distinguishable at a distance and under reduced saturation.
+In dense spatial scenes, working and attention name tags remain explicit while
+idle name tags collapse; the bounded roster summary carries the omitted count.
+
 ---
 
 ## 7. Hardware surfaces
@@ -359,6 +368,8 @@ Each panel has its own pixel grid, dynamic range, and refresh rate. Designs MUST
 | iDotMatrix LED       | 32×32        | BLE, diffuser, constrained detail   | Native compact terrarium           |
 | Timebox Mini LED     | 11×11        | 121 LEDs, 4-bit packed color        | Official mark + perimeter status rail |
 | TC001 LED            | 32×8         | RGB matrix, blocky                  | Multi-mark status strip            |
+| IPS 10.1 office      | 1280×800     | Many pods/cards, glance distance    | Shape-coded state + text-first cards |
+| InkDeck native       | 800×480      | 1-bit, fixed card capacity          | Priority grid + exact hidden-state counts |
 | ESP32 round AMOLED   | 466×466      | Round mask, low brightness          | Single creature centered           |
 
 Dot-matrix marks are generated from `design/brand/*.svg`; device code may tune color and surrounding motion, not invent replacement geometry. At 11×11, Timebox uses the dedicated Agent Beacon grammar: the 9×9 identity mark is stable and all motion lives on the one-pixel perimeter. At 32×32, iDotMatrix composes natively instead of reducing a completed 64×64 scene. Pixoo64 keeps HTTP load low by preloading a short loop for device-side playback.

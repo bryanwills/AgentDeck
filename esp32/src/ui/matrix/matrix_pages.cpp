@@ -232,7 +232,10 @@ static void drawStateDot(CRGB* leds, float animTime) {
             break;
         }
         case ST_AWAITING: {
-            float pulse = 0.5f + 0.5f * sinf(animTime * 3.0f);
+            // Attention may breathe, but it must never disappear on an 8-row
+            // matrix. Keep a 45% luminance floor throughout the pulse.
+            float wave = 0.5f + 0.5f * sinf(animTime * 3.0f);
+            float pulse = 0.45f + 0.55f * wave;
             c = CRGB((uint8_t)(200 * pulse), (uint8_t)(140 * pulse), 0);
             break;
         }
@@ -600,7 +603,10 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             }
         }
         else if (strstr(state, "awaiting")) {
-            float pulse = 0.3f + 0.7f * sinf(animTime * 3.0f);
+            // The old -0.4..1.0 envelope underflowed uint8_t and periodically
+            // rendered the entire attention glyph black. Use a stable floor.
+            float wave = 0.5f + 0.5f * sinf(animTime * 3.0f);
+            float pulse = 0.45f + 0.55f * wave;
             baseColor = CRGB((uint8_t)(200 * pulse), (uint8_t)(120 * pulse), 0);
         }
         else if (strcmp(state, "idle") == 0) {
