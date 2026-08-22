@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +51,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
@@ -64,6 +66,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.agentdeck.ui.component.AgentDeckMark
 import dev.agentdeck.data.DashboardOrientation
 import dev.agentdeck.data.DisplayPreferences
@@ -112,6 +115,11 @@ import kotlinx.coroutines.launch
 
 private const val TABLET_CRAYFISH_CENTER_X_FRACTION = 0.70f
 private const val TABLET_CRAYFISH_CENTER_Y_FRACTION = 0.575f
+
+private enum class CompactHudPage(val label: String) {
+    Sessions("Sessions"),
+    System("System"),
+}
 
 /**
  * Unified Dashboard screen — terrarium fills the background,
@@ -943,6 +951,10 @@ private fun MonitorHUD(
 ) {
     val systemBarsPadding = WindowInsets.systemBars.asPaddingValues()
     val scale = rememberMonitorLayoutScale()
+    val configuration = LocalConfiguration.current
+    val isPhonePortrait = !scale.isTablet &&
+        configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+    var compactPage by rememberSaveable { mutableStateOf(CompactHudPage.Sessions) }
     BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(top = systemBarsPadding.calculateTopPadding())) {
         // Both rails are proportional, on every size class. Tablets keep the
         // SwiftUI MonitorHUD proportions (0.22 / 0.32) so the dashboard rails
@@ -955,56 +967,122 @@ private fun MonitorHUD(
         // topology rail simply drew through each other for ~109dp, and the HUD
         // was two unreadable columns of overlapping text.
         val parentWidth = maxWidth
-        val sessionPanelWidth = minOf(parentWidth * scale.sessionPanelWidthFraction, scale.sessionPanelMaxWidth)
-        val topologyPanelWidth = minOf(parentWidth * scale.topologyPanelWidthFraction, scale.topologyPanelMaxWidth)
-        // Top-left: Agent list (logo + sessions + mode). AnimatedVisibility
-        // both fades AND removes from composition when hidden so the
-        // collapsed panels stop intercepting any future tap dispatch.
-        AnimatedVisibility(
-            visible = !hudHidden && showSessionList,
-            enter = fadeIn(animationSpec = tween(durationMillis = 250)),
-            exit = fadeOut(animationSpec = tween(durationMillis = 250)),
-            modifier = Modifier.align(Alignment.TopStart),
-        ) {
-            SessionListPanel(
-                projectName = dashState.projectName,
-                agentType = dashState.agentType,
-                modelName = dashState.modelName,
-                effortLevel = dashState.effortLevel,
-                agentState = dashState.agentState,
-                sessionId = dashState.sessionId,
-                siblingSessions = dashState.siblingSessions,
-                workerSessionCount = dashState.workerSessionCount?.takeIf { dashState.gatewayConnected == true },
-                permissionMode = dashState.permissionMode,
-                scale = scale,
-                onFocusSession = { BridgeConnection.instance.sendFocusSession(it) },
-                modifier = Modifier
-                    .padding(start = scale.panelEdgeInset, top = scale.panelEdgeInset)
-                    // Cap the panel height so a long session list scrolls inside
-                    // the panel instead of painting over the timeline strip that
-                    // occupies the bottom third of the screen.
-                    .heightIn(max = maxHeight * 0.60f)
-                    .width(sessionPanelWidth),
+        val compactRailHeightCap = maxHeight * 0.54f
+        val dualRailHeightCap = maxHeight * 0.60f
+        if (isPhonePortrait) {
+            // A compact portrait cannot carry two readable rails at once.
+            // Keep every row available, but let one nearly-full-width panel
+            // own the water region with an explicit Sessions/System switch.
+            val pages = buildList {
+                if (showSessionList) add(CompactHudPage.Sessions)
+                if (showTopologyRail) add(CompactHudPage.System)
+            }
+            val resolvedPage = compactPage.takeIf { it in pages } ?: pages.firstOrNull()
+            val readableScale = MonitorLayoutScale.phoneReadable
+            val readableWidth = minOf(
+                parentWidth - readableScale.panelEdgeInset * 2,
+                readableScale.sessionPanelMaxWidth,
             )
-        }
+            AnimatedVisibility(
+                visible = !hudHidden && resolvedPage != null,
+                enter = fadeIn(animationSpec = tween(durationMillis = 250)),
+                exit = fadeOut(animationSpec = tween(durationMillis = 250)),
+                modifier = Modifier.align(Alignment.TopCenter),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(top = readableScale.panelEdgeInset)
+                        .width(readableWidth),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (pages.size > 1) {
+                        CompactHudSwitcher(
+                            pages = pages,
+                            selection = compactPage,
+                            onSelect = { compactPage = it },
+                        )
+                    }
+                    when (resolvedPage) {
+                        CompactHudPage.Sessions -> SessionListPanel(
+                            projectName = dashState.projectName,
+                            agentType = dashState.agentType,
+                            modelName = dashState.modelName,
+                            effortLevel = dashState.effortLevel,
+                            agentState = dashState.agentState,
+                            sessionId = dashState.sessionId,
+                            siblingSessions = dashState.siblingSessions,
+                            workerSessionCount = dashState.workerSessionCount
+                                ?.takeIf { dashState.gatewayConnected == true },
+                            permissionMode = dashState.permissionMode,
+                            scale = readableScale,
+                            onFocusSession = { BridgeConnection.instance.sendFocusSession(it) },
+                            modifier = Modifier
+                                .heightIn(max = compactRailHeightCap)
+                                .fillMaxWidth(),
+                        )
+                        CompactHudPage.System -> TopologyRail(
+                            state = dashState,
+                            scale = readableScale,
+                            modifier = Modifier
+                                .heightIn(max = compactRailHeightCap)
+                                .fillMaxWidth(),
+                        )
+                        null -> Unit
+                    }
+                }
+            }
+        } else {
+            val sessionPanelWidth = minOf(parentWidth * scale.sessionPanelWidthFraction, scale.sessionPanelMaxWidth)
+            val topologyPanelWidth = minOf(parentWidth * scale.topologyPanelWidthFraction, scale.topologyPanelMaxWidth)
+            // Top-left: Agent list (logo + sessions + mode). AnimatedVisibility
+            // both fades AND removes from composition when hidden so the
+            // collapsed panels stop intercepting any future tap dispatch.
+            AnimatedVisibility(
+                visible = !hudHidden && showSessionList,
+                enter = fadeIn(animationSpec = tween(durationMillis = 250)),
+                exit = fadeOut(animationSpec = tween(durationMillis = 250)),
+                modifier = Modifier.align(Alignment.TopStart),
+            ) {
+                SessionListPanel(
+                    projectName = dashState.projectName,
+                    agentType = dashState.agentType,
+                    modelName = dashState.modelName,
+                    effortLevel = dashState.effortLevel,
+                    agentState = dashState.agentState,
+                    sessionId = dashState.sessionId,
+                    siblingSessions = dashState.siblingSessions,
+                    workerSessionCount = dashState.workerSessionCount?.takeIf { dashState.gatewayConnected == true },
+                    permissionMode = dashState.permissionMode,
+                    scale = scale,
+                    onFocusSession = { BridgeConnection.instance.sendFocusSession(it) },
+                    modifier = Modifier
+                        .padding(start = scale.panelEdgeInset, top = scale.panelEdgeInset)
+                        // Cap the panel height so a long session list scrolls inside
+                        // the panel instead of painting over the timeline strip that
+                        // occupies the bottom third of the screen.
+                        .heightIn(max = dualRailHeightCap)
+                        .width(sessionPanelWidth),
+                )
+            }
 
-        // Top-right: Relationship-centric topology rail replaces the former
-        // TankStatusPanel. Shows upstream providers → AgentDeck hub →
-        // downstream devices as a single vertical flow instead of disjoint
-        // list boxes.
-        AnimatedVisibility(
-            visible = !hudHidden && showTopologyRail,
-            enter = fadeIn(animationSpec = tween(durationMillis = 250)),
-            exit = fadeOut(animationSpec = tween(durationMillis = 250)),
-            modifier = Modifier.align(Alignment.TopEnd),
-        ) {
-            TopologyRail(
-                state = dashState,
-                scale = scale,
-                modifier = Modifier
-                    .padding(end = scale.panelEdgeInset, top = scale.panelEdgeInset)
-                    .width(topologyPanelWidth),
-            )
+            // Top-right: Relationship-centric topology rail replaces the former
+            // TankStatusPanel. It shares the same Timeline-safe height budget as
+            // the session roster instead of relying on its natural height.
+            AnimatedVisibility(
+                visible = !hudHidden && showTopologyRail,
+                enter = fadeIn(animationSpec = tween(durationMillis = 250)),
+                exit = fadeOut(animationSpec = tween(durationMillis = 250)),
+                modifier = Modifier.align(Alignment.TopEnd),
+            ) {
+                TopologyRail(
+                    state = dashState,
+                    scale = scale,
+                    modifier = Modifier
+                        .padding(end = scale.panelEdgeInset, top = scale.panelEdgeInset)
+                        .heightIn(max = dualRailHeightCap)
+                        .width(topologyPanelWidth),
+                )
+            }
         }
 
         // Floating attention theater — renders whatever PromptOption[] the
@@ -1054,6 +1132,45 @@ private fun MonitorHUD(
                     .padding(top = 14.dp),
                 scale = scale,
             )
+        }
+    }
+}
+
+@Composable
+private fun CompactHudSwitcher(
+    pages: List<CompactHudPage>,
+    selection: CompactHudPage,
+    onSelect: (CompactHudPage) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(TerrariumColors.HUDBg, RoundedCornerShape(8.dp))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        pages.forEach { page ->
+            val selected = selection == page
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(
+                        if (selected) TerrariumColors.TetraNeon.copy(alpha = 0.18f)
+                        else Color.Transparent,
+                    )
+                    .clickable { onSelect(page) }
+                    .padding(vertical = 7.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = page.label,
+                    color = if (selected) TerrariumColors.HUDText else TerrariumColors.HUDSubtext,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }

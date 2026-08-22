@@ -4,7 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.agentdeck.util.DeviceProfile
 import dev.agentdeck.util.ScreenSizeClass
 
@@ -25,6 +27,13 @@ data class EinkLayoutScale(
     val chromeHeight: Dp,
     val attentionHeightLandscape: Dp,
     val attentionHeightPortrait: Dp,
+    val contentPadding: Dp,
+    val rowSpacing: Dp,
+    val sectionFont: TextUnit,
+    val sessionTitleFont: TextUnit,
+    val sessionMetaFont: TextUnit,
+    val timelinePrimaryFont: TextUnit,
+    val timelineSecondaryFont: TextUnit,
 ) {
     companion object {
         /** 6" class readers (shortest edge under 600dp) — reclaim vertical space. */
@@ -33,6 +42,13 @@ data class EinkLayoutScale(
             chromeHeight = 36.dp,
             attentionHeightLandscape = 92.dp,
             attentionHeightPortrait = 112.dp,
+            contentPadding = 10.dp,
+            rowSpacing = 4.dp,
+            sectionFont = 11.sp,
+            sessionTitleFont = 14.sp,
+            sessionMetaFont = 10.sp,
+            timelinePrimaryFont = 20.sp,
+            timelineSecondaryFont = 14.sp,
         )
 
         /** 7-10" class readers: the original hand-tuned values (Crema, Pantone). */
@@ -41,6 +57,13 @@ data class EinkLayoutScale(
             chromeHeight = 44.dp,
             attentionHeightLandscape = 112.dp,
             attentionHeightPortrait = 136.dp,
+            contentPadding = 12.dp,
+            rowSpacing = 5.dp,
+            sectionFont = 12.sp,
+            sessionTitleFont = 15.sp,
+            sessionMetaFont = 11.sp,
+            timelinePrimaryFont = 22.sp,
+            timelineSecondaryFont = 15.sp,
         )
 
         /** 10-13" class readers (Boox Tab X, Max Lumi) — bands scale with the panel. */
@@ -49,6 +72,13 @@ data class EinkLayoutScale(
             chromeHeight = 52.dp,
             attentionHeightLandscape = 128.dp,
             attentionHeightPortrait = 156.dp,
+            contentPadding = 14.dp,
+            rowSpacing = 6.dp,
+            sectionFont = 13.sp,
+            sessionTitleFont = 17.sp,
+            sessionMetaFont = 12.sp,
+            timelinePrimaryFont = 24.sp,
+            timelineSecondaryFont = 16.sp,
         )
 
         internal fun forSizeClass(sizeClass: ScreenSizeClass): EinkLayoutScale = when (sizeClass) {

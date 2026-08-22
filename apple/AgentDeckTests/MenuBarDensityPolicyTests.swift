@@ -165,6 +165,34 @@ final class MenuBarDensityPolicyTests: XCTestCase {
         XCTAssertTrue(DashboardHUDLayout.usesCompactSessionRows(sessionCount: 500))
     }
 
+    func testDashboardUsesOneReadableRailOnlyOnCompactPortraitScreens() {
+        XCTAssertTrue(DashboardHUDLayout.usesSingleReadableRail(
+            availableWidth: 430,
+            availableHeight: 932
+        ))
+        XCTAssertFalse(DashboardHUDLayout.usesSingleReadableRail(
+            availableWidth: 932,
+            availableHeight: 430
+        ))
+        XCTAssertFalse(DashboardHUDLayout.usesSingleReadableRail(
+            availableWidth: 834,
+            availableHeight: 1_194
+        ))
+    }
+
+    func testCompactDashboardRailKeepsReadableWidthAndTimelineClearance() {
+        XCTAssertEqual(DashboardHUDLayout.compactPanelWidth(availableWidth: 390), 374)
+        XCTAssertEqual(DashboardHUDLayout.compactPanelWidth(availableWidth: 500), 420)
+        XCTAssertEqual(
+            DashboardHUDLayout.compactPanelMaxHeight(
+                availableHeight: 844,
+                showsTimeline: true
+            ),
+            488.6,
+            accuracy: 0.001
+        )
+    }
+
     func testSurfaceRollupScalesByFamilyAndDeduplicatesDualHomedESP32() {
         var health = ModuleHealthState()
         health.streamDeck = StreamDeckHealth(devices: [

@@ -783,6 +783,16 @@
         </div>`,
     },
     {
+      group: 'Containers',
+      title: 'Compact Dashboard rail switch',
+      classes: '.ad-dashboard-switch',
+      note: 'DESIGN.md §5.13. Phone portrait gives one readable rail the full width and keeps the alternate rail explicit. Phone landscape, tablet, and desktop retain the dual-rail composition; e-ink never adds animated paging.',
+      html: `<div class="ad-dashboard-switch" role="group" aria-label="Dashboard information rail">
+          <button type="button" aria-pressed="true">Sessions</button>
+          <button type="button" aria-pressed="false">System</button>
+        </div>`,
+    },
+    {
       group: 'Patterns',
       title: 'Hatch and honest placeholder',
       classes: '.ad-hatch · .ad-placeholder',

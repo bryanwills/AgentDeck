@@ -101,6 +101,16 @@ class MonitorLayoutScaleTest {
     }
 
     @Test
+    fun `single rail phone mode restores readable type without tablet insets`() {
+        val compact = MonitorLayoutScale.phone
+        val readable = MonitorLayoutScale.phoneReadable
+        assertTrue(readable.fontBody.value >= compact.fontBody.value)
+        assertTrue(readable.fontSub.value >= compact.fontSub.value)
+        assertTrue(readable.sessionPanelMaxWidth.value > compact.sessionPanelMaxWidth.value)
+        assertTrue(readable.panelEdgeInset.value < MonitorLayoutScale.tablet.panelEdgeInset.value)
+    }
+
+    @Test
     fun `every size class resolves to an eink scale`() {
         assertEquals(EinkLayoutScale.compact, EinkLayoutScale.forSizeClass(ScreenSizeClass.Tiny))
         assertEquals(EinkLayoutScale.compact, EinkLayoutScale.forSizeClass(ScreenSizeClass.Compact))
@@ -125,6 +135,14 @@ class MonitorLayoutScaleTest {
             assertTrue(
                 "chrome must not shrink from ${smaller.sizeClass} to ${larger.sizeClass}",
                 larger.chromeHeight.value >= smaller.chromeHeight.value,
+            )
+            assertTrue(
+                "session type must not shrink from ${smaller.sizeClass} to ${larger.sizeClass}",
+                larger.sessionTitleFont.value >= smaller.sessionTitleFont.value,
+            )
+            assertTrue(
+                "timeline type must not shrink from ${smaller.sizeClass} to ${larger.sizeClass}",
+                larger.timelinePrimaryFont.value >= smaller.timelinePrimaryFont.value,
             )
         }
     }

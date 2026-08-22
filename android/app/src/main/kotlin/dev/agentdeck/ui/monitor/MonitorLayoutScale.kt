@@ -94,6 +94,26 @@ data class MonitorLayoutScale(
             fontHeader = 10.sp,
         )
 
+        /** Phone portrait uses one full-width rail at a time. Once the two
+         *  panels stop competing for width, restore the tablet-readable type
+         *  step while keeping compact phone insets. */
+        val phoneReadable = MonitorLayoutScale(
+            sizeClass = ScreenSizeClass.Compact,
+            sessionPanelMaxWidth = 420.dp,
+            topologyPanelMaxWidth = 420.dp,
+            sessionPanelWidthFraction = 1f,
+            topologyPanelWidthFraction = 1f,
+            panelPadding = 9.dp,
+            panelEdgeInset = 8.dp,
+            sessionRowSpacing = 5.dp,
+            topologyRowSpacing = 2.dp,
+            topologySectionSpacing = 6.dp,
+            providerRowSpacing = 5.dp,
+            fontBody = 12.sp,
+            fontSub = 10.sp,
+            fontHeader = 11.sp,
+        )
+
         /** Tablet density — macOS HUD proportions, not enlarged tablet cards.
          *  Session panel runs wider than the macOS 220dp cap: long worktree
          *  project names dominate the list on tablets and 220dp wrapped nearly

@@ -63,6 +63,7 @@ fun EinkAgentPanel(
     showFooterControls: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+    val layoutScale = rememberEinkLayoutScale()
     val scope = rememberCoroutineScope()
     val isCurrentlyLandscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -170,8 +171,8 @@ fun EinkAgentPanel(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
+            .padding(layoutScale.contentPadding),
+        verticalArrangement = Arrangement.spacedBy(layoutScale.rowSpacing),
     ) {
         if (showBrandHeader) {
             // Brand logo — centered with accent bar.
@@ -186,16 +187,16 @@ fun EinkAgentPanel(
             ) {
                 Text(
                     text = "Sessions",
-                    fontSize = 12.sp,
-                    lineHeight = 15.sp,
+                    fontSize = layoutScale.sectionFont,
+                    lineHeight = layoutScale.sectionFont * 1.25f,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     text = displayEntries.size.toString(),
-                    fontSize = 12.sp,
-                    lineHeight = 15.sp,
+                    fontSize = layoutScale.sectionFont,
+                    lineHeight = layoutScale.sectionFont * 1.25f,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -238,6 +239,7 @@ fun EinkAgentPanel(
                 activity = entry.activity,
                 isFocused = isFocused,
                 isAwaiting = isAwaiting,
+                layoutScale = layoutScale,
                 modifier = if (sessionId != null) {
                     Modifier.clickable { onFocusSession(sessionId) }
                 } else {
@@ -250,8 +252,8 @@ fun EinkAgentPanel(
         state.workerSessionCount?.takeIf { state.gatewayConnected == true && it > 0 }?.let {
             Text(
                 text = "Workers: $it",
-                fontSize = 14.sp,
-                lineHeight = 18.sp,
+                fontSize = layoutScale.sessionTitleFont,
+                lineHeight = layoutScale.sessionTitleFont * 1.25f,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -321,6 +323,7 @@ internal fun EinkAgentBlock(
     activity: String? = null,
     isFocused: Boolean = false,
     isAwaiting: Boolean = false,
+    layoutScale: EinkLayoutScale,
     modifier: Modifier = Modifier,
 ) {
     val stateMarker = compactStateMarker(agentState)
@@ -380,8 +383,8 @@ internal fun EinkAgentBlock(
             BrandIcon(agentType = agentType, isEink = true, tint = iconTint)
             Text(
                 text = displayName,
-                fontSize = 15.sp,
-                lineHeight = 19.sp,
+                fontSize = layoutScale.sessionTitleFont,
+                lineHeight = layoutScale.sessionTitleFont * 1.27f,
                 fontWeight = FontWeight.Bold,
                 color = nameColor,
                 maxLines = 1,
@@ -390,8 +393,8 @@ internal fun EinkAgentBlock(
             )
             Text(
                 text = stateMarker,
-                fontSize = 11.sp,
-                lineHeight = 14.sp,
+                fontSize = layoutScale.sessionMetaFont,
+                lineHeight = layoutScale.sessionMetaFont * 1.27f,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
                 color = stateColor,
@@ -401,8 +404,8 @@ internal fun EinkAgentBlock(
         if (subLine != null) {
             Text(
                 text = subLine,
-                fontSize = 11.sp,
-                lineHeight = 14.sp,
+                fontSize = layoutScale.sessionMetaFont,
+                lineHeight = layoutScale.sessionMetaFont * 1.27f,
                 fontFamily = FontFamily.Monospace,
                 color = subColor,
                 maxLines = 1,
@@ -415,8 +418,8 @@ internal fun EinkAgentBlock(
         if (activity != null) {
             Text(
                 text = activity,
-                fontSize = 11.sp,
-                lineHeight = 14.sp,
+                fontSize = layoutScale.sessionMetaFont,
+                lineHeight = layoutScale.sessionMetaFont * 1.27f,
                 color = subColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
