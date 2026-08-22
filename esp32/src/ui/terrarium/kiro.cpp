@@ -181,9 +181,11 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         strncpy(name, g_state.projectName, sizeof(name) - 1);
     }
     name[sizeof(name) - 1] = '\0';
+    const bool showName = g_state.sessionCount <= 4 ||
+                          state == CreatureState::WORKING || state == CreatureState::ASKING;
     unlockState();
 
-    if (name[0]) {
+    if (name[0] && showName) {
         lv_point_t txtSize;
         lv_text_get_size(&txtSize, name, &font_kr_12, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
         int textW = txtSize.x + (total >= 3 ? 8 : 12);

@@ -273,6 +273,29 @@ bool SimScenes::apply(const char* name) {
                 "권한 요청: rm -rf build/ 실행을 허용할까요?", nullptr);
     return true;
   }
+  if (std::strcmp(name, "dense") == 0) {
+    // Maximum daemon roster: attention and work must stay explicit while the
+    // six passive sessions collapse into category-specific summaries on small
+    // surfaces. Also stresses IPS10's narrow treemap cells and office pods.
+    base(CreatureState::WORKING);
+    addSession("claude-code", "awaiting_permission", "AgentDeck");
+    addSession("codex-cli", "processing", "firmware");
+    addSession("opencode", "processing", "dashboard");
+    addSession("antigravity", "processing", "apple");
+    addSession("kiro-cli", "idle", "hooks");
+    addSession("claude-code", "idle", "bridge");
+    addSession("codex-app", "idle", "analytics");
+    addSession("opencode", "idle", "docs");
+    addSession("antigravity", "idle", "release");
+    addSession("kiro-ide", "idle", "design-system");
+    setStr(g_state.sessions[0].question, sizeof(g_state.sessions[0].question),
+           "Allow the firmware flash on the connected IPS 10.1 panel?");
+    setStr(g_state.sessions[1].lastEventText, sizeof(g_state.sessions[1].lastEventText),
+           "Building the adaptive ESP32 dashboard");
+    setStr(g_state.sessions[2].lastEventText, sizeof(g_state.sessions[2].lastEventText),
+           "Checking dense roster disclosure");
+    return true;
+  }
   if (std::strcmp(name, "permission") == 0) {
     base(CreatureState::ASKING);
     addSession("claude-code", "awaiting_permission", "AgentDeck");
@@ -283,6 +306,6 @@ bool SimScenes::apply(const char* name) {
 }
 
 const char* SimScenes::catalog() {
-  return "empty, idle, display-off, working, multi, permission, "
+  return "empty, idle, display-off, working, multi, crowd, crowded, dense, permission, "
          "demo:<agent>:<state>";
 }

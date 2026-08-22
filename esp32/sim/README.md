@@ -21,6 +21,8 @@ cd esp32/sim
 ./render.sh                 # all boards, all scenes → sim-out/*.png
 ./render.sh box_86          # one board, all scenes
 ./render.sh box_86 working  # one board, one scene
+# T-Display Pro: render a physical-navigation page directly
+.pio/build/t_display_pro/program --scene crowded --page sessions --out sim-out/t_display_pro-crowded-sessions.png
 ```
 
 Requires PlatformIO (`pio`) — same tool the firmware uses. LVGL and (for the
@@ -89,7 +91,8 @@ aren't a multiple of 16 (TTGO 135/144, etc.) work without extra changes.
 
 `empty` (pre-connection), `idle`, `display-off` (idle dashboard with the host
 Mac display asleep), `working`, `multi` (Claude + Codex + OpenCode + Antigravity
-+ OpenClaw gateway crayfish), `permission` (awaiting → "?" bubble). Scenes
++ OpenClaw gateway crayfish), `crowd`/`dense` (7/10-session bounded-roster
+stress), `permission` (awaiting → solid attention badge). Scenes
 populate the same `g_state` the firmware fills from the daemon's `state_update`,
 so they exercise the real session → creature/card derivation. On InkDeck,
 `display-off` intentionally renders byte-identically to `idle`; the e-ink panel

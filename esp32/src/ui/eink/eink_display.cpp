@@ -598,7 +598,52 @@ void drawStateMarker(int16_t x, int16_t y, int16_t sz, const char* state) {
 
 // ===== Screens =====
 
-void drawBrandHeader(const Snap& s) {
+bool needsAttention(const RowSnap& r) {
+    AgentDeckEink::StatusKind status = AgentDeckEink::classifyStatus(r.state);
+    return status == AgentDeckEink::StatusKind::Attention ||
+           status == AgentDeckEink::StatusKind::Processing;
+}
+
+uint8_t prioritizedSessionOrder(const Snap& s, uint8_t* order) {
+    uint8_t n = 0;
+    // User input is always the first thing on paper, followed by live work and
+    // finally quiet/offline context. Preserve daemon order within each tier.
+    for (uint8_t i = 0; i < s.rowCount; i++)
+        if (AgentDeckEink::classifyStatus(s.rows[i].state) == AgentDeckEink::StatusKind::Attention)
+            order[n++] = i;
+    for (uint8_t i = 0; i < s.rowCount; i++)
+        if (AgentDeckEink::classifyStatus(s.rows[i].state) == AgentDeckEink::StatusKind::Processing)
+            order[n++] = i;
+    for (uint8_t i = 0; i < s.rowCount; i++) if (!needsAttention(s.rows[i])) order[n++] = i;
+    return n;
+}
+
+void hiddenSessionSummary(const Snap& s, const AgentDeckEink::Layout& layout,
+                          char* out, size_t outLen) {
+    out[0] = '\0';
+    uint8_t order[MAX_ROWS];
+    const uint8_t n = prioritizedSessionOrder(s, order);
+    uint8_t input = 0, working = 0, idle = 0, offline = 0;
+    for (uint8_t k = layout.capacity; k < n; k++) {
+        switch (AgentDeckEink::classifyStatus(s.rows[order[k]].state)) {
+            case AgentDeckEink::StatusKind::Attention:  input++; break;
+            case AgentDeckEink::StatusKind::Processing: working++; break;
+            case AgentDeckEink::StatusKind::Idle:       idle++; break;
+            default:                                   offline++; break;
+        }
+    }
+    auto append = [&](uint8_t count, const char* label) {
+        if (!count) return;
+        size_t used = strlen(out);
+        snprintf(out + used, outLen - used, "%s%d %s", used ? " / " : "", count, label);
+    };
+    append(input, "input");
+    append(working, "working");
+    append(idle, "idle");
+    append(offline, "offline");
+}
+
+void drawBrandHeader(const Snap& s, const AgentDeckEink::Layout& layout) {
     // Dome-over-deck product mark + wordmark — the same lockup as the
     // menubar icon and app icon silhouette.
     drawAgentDeckMark(12, 4, 56);
@@ -618,11 +663,22 @@ void drawBrandHeader(const Snap& s) {
         textAt(chipX + 12, 38, link, &FreeSansBold9pt7b);
     }
 
-    // Session count, left of the chip
+    // Session count, left of the chip. When the fixed paper grid is full, say
+    // exactly which passive/active categories were collapsed.
     if (s.totalSessions > 0) {
-        char cnt[24];
-        snprintf(cnt, sizeof(cnt), "%d session%s", s.totalSessions, s.totalSessions == 1 ? "" : "s");
-        textRight(chipX - 14, 38, cnt, &FreeSans9pt7b);
+        char hidden[72];
+        hiddenSessionSummary(s, layout, hidden, sizeof(hidden));
+        char cnt[112];
+        if (hidden[0]) {
+            snprintf(cnt, sizeof(cnt), "%d sessions | hidden: %s", s.totalSessions, hidden);
+        } else {
+            snprintf(cnt, sizeof(cnt), "%d session%s", s.totalSessions,
+                     s.totalSessions == 1 ? "" : "s");
+        }
+        const int16_t available = chipX - 14 - 270;
+        const GFXfont* countFont = textWidth(cnt, &FreeSans9pt7b) <= available
+            ? &FreeSans9pt7b : CLASSIC_FONT;
+        textRight(chipX - 14, 38, cnt, countFont);
     }
 
     // Double rule (print-style)
@@ -915,12 +971,6 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
     setInk(false);
 }
 
-bool needsAttention(const RowSnap& r) {
-    AgentDeckEink::StatusKind status = AgentDeckEink::classifyStatus(r.state);
-    return status == AgentDeckEink::StatusKind::Attention ||
-           status == AgentDeckEink::StatusKind::Processing;
-}
-
 void drawSessionGrid(const Snap& s, const AgentDeckEink::Layout& layout) {
     if (s.rowCount == 0) {
         // Empty state — connected but no sessions
@@ -936,9 +986,8 @@ void drawSessionGrid(const Snap& s, const AgentDeckEink::Layout& layout) {
     // Partition: attention (awaiting/processing) ahead of idle, daemon order
     // preserved within each group. Shared geometry decides whether this panel
     // can show 1/2/3 columns and how many readable rows fit.
-    uint8_t order[MAX_ROWS]; uint8_t nAttention = 0, nOrder = 0;
-    for (uint8_t i = 0; i < s.rowCount; i++) if (needsAttention(s.rows[i])) order[nOrder++] = i, nAttention++;
-    for (uint8_t i = 0; i < s.rowCount; i++) if (!needsAttention(s.rows[i])) order[nOrder++] = i;
+    uint8_t order[MAX_ROWS];
+    uint8_t nOrder = prioritizedSessionOrder(s, order);
 
     uint8_t nCards = nOrder < layout.capacity ? nOrder : layout.capacity;
 
@@ -959,7 +1008,7 @@ void drawSearching(const Snap& s) {
     display.setTextColor(GxEPD_BLACK);
     setInk(false);
     const AgentDeckEink::Layout layout = dashboardLayout(s);
-    drawBrandHeader(s);
+    drawBrandHeader(s, layout);
     const int16_t centerY = layout.cards.y + layout.cards.h / 2;
     drawAgentDeckMark(W / 2 - 44, centerY - 88, 88);
     const char* msg = s.wifiUp || s.serialUp ? "searching for AgentDeck daemon..."
@@ -977,7 +1026,7 @@ void drawDashboard(const Snap& s) {
     display.setTextColor(GxEPD_BLACK);
     setInk(false);
     const AgentDeckEink::Layout layout = dashboardLayout(s);
-    drawBrandHeader(s);
+    drawBrandHeader(s, layout);
     drawSessionGrid(s, layout);
     drawUsageFooter(s, false, layout);
     // NOTE: no Serial logging here — this runs on Core 1 while Core 0 emits
