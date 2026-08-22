@@ -218,6 +218,30 @@
   color: var(--tide-50);
 }
 
+/* === Compact Dashboard rail switch === */
+.ad-dashboard-switch {
+  display: flex;
+  width: min(100%, 360px);
+  padding: 3px;
+  gap: 3px;
+  border-radius: var(--r-lg);
+  background: var(--ink-900);
+}
+.ad-dashboard-switch button {
+  flex: 1;
+  border: 0;
+  border-radius: var(--r-md);
+  padding: 7px 14px;
+  background: transparent;
+  color: var(--tide-300);
+  font: 600 11px/1 var(--font-mono);
+  letter-spacing: 0.02em;
+}
+.ad-dashboard-switch button[aria-pressed="true"] {
+  background: var(--kelp-700);
+  color: var(--tide-50);
+}
+
 /* === Device tile === */
 .ad-device {
   background: var(--tide-100);

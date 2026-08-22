@@ -57,6 +57,7 @@ fun EinkTimelinePanel(
     entries: List<TimelineEntry>,
     modifier: Modifier = Modifier,
 ) {
+    val layoutScale = rememberEinkLayoutScale()
     // Newest meaningful groups, newest first. groupConsecutive+displayGroups
     // drops low-signal rows and merges a turn's chat_start/response, so each
     // element is a real work unit rather than a stray tool row. Cap at 3 — the
@@ -68,13 +69,13 @@ fun EinkTimelinePanel(
             .asReversed()
     }
 
-    Box(modifier = modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp)) {
+    Box(modifier = modifier.fillMaxSize().padding(layoutScale.contentPadding)) {
         val primary = recent.firstOrNull()
         if (primary == null) {
             Text(
                 text = "IDLE — no active work",
                 color = Color.Black,
-                fontSize = 16.sp,
+                fontSize = layoutScale.sessionTitleFont,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.align(Alignment.Center),
             )
@@ -91,17 +92,18 @@ fun EinkTimelinePanel(
             }
             val secondaries = recent.drop(1).take(secondaryBudget)
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(layoutScale.rowSpacing + 3.dp)) {
                 EinkLatestActivity(
                     entry = primary,
                     taskLabel = resolveTaskLabel(primary, entries),
                     summaryMaxLines = if (secondaries.isEmpty()) 5 else 3,
                     showDetail = secondaries.isEmpty(),
+                    layoutScale = layoutScale,
                 )
                 if (secondaries.isNotEmpty()) {
                     HorizontalDivider(thickness = 1.dp, color = Color.Black)
                     secondaries.forEach { entry ->
-                        EinkSecondaryActivity(entry)
+                        EinkSecondaryActivity(entry, layoutScale)
                     }
                 }
             }
@@ -124,13 +126,14 @@ private fun EinkLatestActivity(
     taskLabel: String?,
     summaryMaxLines: Int = 5,
     showDetail: Boolean = true,
+    layoutScale: EinkLayoutScale,
 ) {
     val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
     val iconKey = timelineIconKey(entry.type, entry.status)
     val agent = agentDisplayLabel(entry.agentType)
     val project = entry.projectName?.takeIf { it.isNotBlank() }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(layoutScale.rowSpacing + 3.dp)) {
         // ── Attribution header: brand glyph + agent + status marker ──
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -143,7 +146,7 @@ private fun EinkLatestActivity(
             Text(
                 text = agent.ifEmpty { "Agent" },
                 color = Color.Black,
-                fontSize = 20.sp,
+                fontSize = (layoutScale.timelinePrimaryFont.value - 2f).sp,
                 fontWeight = FontWeight.ExtraBold,
                 fontFamily = FontFamily.Monospace,
                 style = tight,
@@ -151,7 +154,7 @@ private fun EinkLatestActivity(
             Text(
                 text = iconKey.einkGlyph,
                 color = Color.Black,
-                fontSize = 18.sp,
+                fontSize = (layoutScale.timelinePrimaryFont.value - 4f).sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
                 style = tight,
@@ -159,7 +162,7 @@ private fun EinkLatestActivity(
             Text(
                 text = formatTime(entry.timestamp),
                 color = Color.Black,
-                fontSize = 13.sp,
+                fontSize = (layoutScale.sessionMetaFont.value + 2f).sp,
                 fontFamily = FontFamily.Monospace,
                 style = tight,
                 modifier = Modifier.weight(1f),
@@ -172,7 +175,7 @@ private fun EinkLatestActivity(
             Text(
                 text = context,
                 color = Color.Black,
-                fontSize = 14.sp,
+                fontSize = (layoutScale.timelineSecondaryFont.value - 1f).sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 2,
@@ -185,7 +188,7 @@ private fun EinkLatestActivity(
         Text(
             text = entry.summary,
             color = Color.Black,
-            fontSize = 22.sp,
+            fontSize = layoutScale.timelinePrimaryFont,
             fontWeight = FontWeight.Normal,
             maxLines = summaryMaxLines,
             overflow = TextOverflow.Ellipsis,
@@ -203,7 +206,7 @@ private fun EinkLatestActivity(
                         Text(
                             text = plain,
                             color = Color.Black,
-                            fontSize = 14.sp,
+                            fontSize = (layoutScale.timelineSecondaryFont.value - 1f).sp,
                             fontStyle = FontStyle.Italic,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
@@ -222,7 +225,7 @@ private fun EinkLatestActivity(
  * dominates the glance, but enough to answer "and what happened just before".
  */
 @Composable
-private fun EinkSecondaryActivity(entry: TimelineEntry) {
+private fun EinkSecondaryActivity(entry: TimelineEntry, layoutScale: EinkLayoutScale) {
     val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
     val iconKey = timelineIconKey(entry.type, entry.status)
     val agent = agentDisplayLabel(entry.agentType)
@@ -240,7 +243,7 @@ private fun EinkSecondaryActivity(entry: TimelineEntry) {
             Text(
                 text = agent.ifEmpty { "Agent" },
                 color = Color.Black,
-                fontSize = 13.sp,
+                fontSize = (layoutScale.timelineSecondaryFont.value - 2f).sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
                 style = tight,
@@ -248,14 +251,14 @@ private fun EinkSecondaryActivity(entry: TimelineEntry) {
             Text(
                 text = iconKey.einkGlyph,
                 color = Color.Black,
-                fontSize = 12.sp,
+                fontSize = (layoutScale.timelineSecondaryFont.value - 3f).sp,
                 fontFamily = FontFamily.Monospace,
                 style = tight,
             )
             Text(
                 text = formatShortTime(entry.timestamp),
                 color = Color.Black,
-                fontSize = 11.sp,
+                fontSize = layoutScale.sessionMetaFont,
                 fontFamily = FontFamily.Monospace,
                 style = tight,
                 modifier = Modifier.weight(1f),
@@ -264,7 +267,7 @@ private fun EinkSecondaryActivity(entry: TimelineEntry) {
         Text(
             text = summary,
             color = Color.Black,
-            fontSize = 15.sp,
+            fontSize = layoutScale.timelineSecondaryFont,
             fontWeight = FontWeight.Normal,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,

@@ -290,6 +290,26 @@ and retain the latest completed item as context instead of showing a blank
 surface. A bounded recent list names its limit (`Latest 2`) rather than using a
 generic `+N more` disclosure.
 
+### 5.13 Form-factor-readable Dashboard
+
+The Dashboard keeps one information hierarchy across platforms, but it does
+not keep one physical arrangement. Readability wins over showing every panel
+simultaneously.
+
+| Surface | HUD composition | Type and motion |
+|---|---|---|
+| Phone portrait | One near-full-width rail at a time, selected by an explicit `Sessions / System` control | Restore the normal body-text step; every rail scrolls inside the water-region budget |
+| Phone landscape | Two compact side rails | Compact type is acceptable because line length grows; both rails remain above Timeline |
+| Tablet / iPad / macOS | Two independent side rails with the terrarium retained as the visual centre | Regular or expanded type step; width grows only within a surface-safe cap |
+| Android E-ink | Static Sessions + terrarium + recent-work projection | Black-on-paper, no animated paging or moving history; padding and type scale with compact/regular/expanded reader size |
+| Native E-ink firmware | Card grid from the short-edge density SSOT | Preserve 1-bit hierarchy and refresh budget; orientation changes geometry, not density identity |
+
+On compact portrait, the alternate rail must be named and directly reachable;
+silently hiding topology is not adaptation. On larger screens, do not stretch
+phone cards to fill space: spend extra room on line length, type, and breathing
+room while preserving the terrarium. All rails share the Timeline boundary and
+scroll internally when their content exceeds it.
+
 ---
 
 ## 6. Iconography
