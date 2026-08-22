@@ -25,6 +25,7 @@ import { ESPLoader, Transport } from './esptool-js-node.js';
 import {
   ESP32_BOARD_BY_TARGET,
   esp32FlashIdIsUsable,
+  esp32PostWriteResetSequence,
   esp32PreflightVerdict,
   type Esp32BoardSpec,
   type Esp32PreflightVerdict,
@@ -534,7 +535,13 @@ export async function flashBoard(
       // Only honoured on the stub path; a no-op rather than an error on a
       // --no-stub board.
       eraseAll: opts.eraseAll ?? false,
-      compress: true,
+      // COMPRESSED WRITES NEED THE STUB. The ROM loader has no compressed
+      // flash mode, so a --no-stub board fails at the first block with
+      // "Failed to enter compressed flash mode failed with status 1,5" —
+      // before a single byte is written. ttgo_t_display is `webFlash: true`
+      // and stubless, so it was offered on /flash/ and could not be written by
+      // either surface; its evidence only ever recorded that it CONNECTS.
+      compress: board.stub,
       reportProgress: (_i, written, total) => cb.onProgress?.(written, total),
       // Hashed AFTER esptool-js patches the flash-params header, which is why
       // this is a callback and not a hash of `image`. A mismatch throws.
@@ -548,7 +555,15 @@ export async function flashBoard(
       // everything but 'no_reset' into a hard reset would silently override a
       // board that deliberately asks for 'soft_reset' or 'no_reset_stub' — a
       // wrong reset on a board whose flags are an accident record.
-      await loader.after(board.after);
+      // NOT `after(board.after)`. esptool-js's hard reset is a release with no
+      // assert, so once a write has finished it is a no-op: the chip stays
+      // parked in the flasher stub, the firmware never runs, and the
+      // device_info read-back below cannot succeed however long it waits. The
+      // SSOT sequence is measured to boot both adapter classes. A board that
+      // asks not to be reset resolves to undefined and keeps its own `after`.
+      const resetSeq = esp32PostWriteResetSequence(board);
+      if (resetSeq) await loader.after('custom_reset', undefined, resetSeq);
+      else await loader.after(board.after);
     } catch (e) {
       // Say it. The write already landed and was verified, so this never fails
       // the command — but the reset is exactly what the boot check below

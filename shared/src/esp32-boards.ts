@@ -73,6 +73,12 @@ export interface Esp32BoardSpec {
   after: Esp32ResetAfter;
   /** does the flasher stub load on this board? (some envs pin --no-stub) */
   stub: boolean;
+  /**
+   * Override for the post-write reset (esptool-js `custom_reset` syntax).
+   * Omit to take ESP32_POST_WRITE_RESET_SEQUENCE; set to '' to write nothing.
+   * See esp32PostWriteResetSequence().
+   */
+  postWriteReset?: string;
   /** native-USB CDC/JTAG: entering download mode RE-ENUMERATES the device node */
   nativeUsb: boolean;
 
@@ -189,13 +195,33 @@ export const ESP32_BOARDS: Esp32BoardSpec[] = [
     aliases: ['ttgo'],
     chipFamily: 'ESP32', flashSize: '16MB', flashMode: 'dio', flashFreq: '80m',
     bootloaderOffset: 0x1000, uploadBaud: 115200, esptoolFlags: ['--no-stub'],
-    before: 'default_reset', after: 'hard_reset', stub: false, nativeUsb: false,
+    before: 'default_reset', after: 'hard_reset', stub: true, nativeUsb: false,
     ota: true,
-    webFlash: true, webFlashStatus: 'verified-partial',
+    webFlash: true, webFlashStatus: 'verified',
     webFlashVerified:
       EV +
-      'BOTH default_reset/stub and default_reset/no-stub connect · ESP32-D0WDQ6 rev v1.1. This is the measurement that proves the --no-stub path works. Flash size reads 16MB WITH the stub and is unreadable without it (flashId 0xffffff), so the size guard is unavailable stubless.',
-    notes: ['Stubless SPI flash-id reads return 0xffffff on this board; the size guard degrades to chip-family only.'],
+      'default_reset/stub · ESP32-D0WDQ6 rev 1 · 460800 not used (115200 pinned). ' +
+      'FULL END-TO-END on 2026-08-23: wrote agentdeck-ttgo_t_display-merged.bin from ' +
+      'esp32-v1.0.7 in 138.1s, MD5 verified against the chip, and the board reported ' +
+      'itself as ttgo_t_display 1.0.7 (1958da41) — the first post-write boot check in ' +
+      'this fleet to pass. Both --no-stub and stub CONNECT here, which is why it was ' +
+      'pinned --no-stub; connecting is not writing, and stubless it could not be ' +
+      'written at all. With the stub the flash id reads 16MB, so the size guard is ' +
+      'available rather than degraded.',
+    notes: [
+      'stub: true while esptoolFlags still carries --no-stub, and that is deliberate. '
+      + 'The two describe DIFFERENT TOOLS: `stub` drives esptool-js (the browser flasher '
+      + 'and `agentdeck esp32 flash`), esptoolFlags mirrors esp32/platformio.ini upload_flags '
+      + 'for esptool.py, and the board-matrix gate cross-checks only the latter pair. '
+      + 'Stubless, esptool-js CANNOT WRITE this board at all: compressed dies at "Failed to '
+      + 'enter compressed flash mode" and uncompressed one step later at "Failed to enter '
+      + 'Flash download mode", both before a byte lands (measured 2026-08-23). With the stub '
+      + 'it writes and boots end-to-end. The platformio pin is left alone because an '
+      + 'esptool.py upload was NOT re-measured — changing it on evidence from another tool '
+      + 'is the guess this note exists to avoid.',
+      'Stubless SPI flash-id reads return 0xffffff on this board, degrading the size guard '
+      + 'to chip-family only; with the stub the id reads 16MB and the guard is available.',
+    ],
   },
   {
     id: 'ulanzi_tc001', env: 'led8x32', name: 'Ulanzi TC001', display: '32x8 WS2812B matrix',
@@ -349,6 +375,49 @@ export const ESP32_IMAGE_CHIP_ID: Record<Esp32ChipFamily, number> = {
 };
 
 /** Where the partition table lives; also where the bootloader region ends. */
+/**
+ * The reset that actually boots a board after a write, as an esptool-js
+ * `custom_reset` sequence.
+ *
+ * WHY THIS EXISTS. esptool-js's `after('hard_reset')` cannot boot these boards.
+ * Its non-USB-OTG implementation is, in full, `sleep(100); setRTS(false)` — a
+ * RELEASE with no ASSERT. That works only when the preceding step left EN
+ * asserted, which `--before default-reset` does and a finished `writeFlash`
+ * does not. So the chip is left parked in the flasher stub, the firmware never
+ * runs, and the post-write `device_info` read-back can never succeed.
+ *
+ * Measured 2026-08-23 with a non-destructive probe (connect exactly as the
+ * flash does, apply a candidate reset, ask the firmware to identify itself),
+ * with a firmware-identity guard so a concurrent write on the same board aborts
+ * the run instead of producing a confident wrong answer:
+ *
+ *   sequence          t_display_pro (0x303a/0x1001, native USB)   86box (0x1a86/0x7523, CH340)
+ *   after('hard_reset')  PARKED                                    PARKED
+ *   R1|W250|R0           booted                                    PARKED
+ *   D0|R1|W100|R0        booted (48s -> 5s)                        booted (39s -> 3s)
+ *
+ * `D0` IS LOAD-BEARING, and only one of the two boards shows it. Pulsing EN
+ * without first driving IO0 high leaves the CH340 board in download mode —
+ * indistinguishable, from the outside, from a board that failed to boot. The
+ * two adapter classes take different reset strategies inside esptool-js
+ * (UsbJtagSerialReset vs ClassicReset), so a sequence verified on one is not
+ * evidence for the other; this one is measured on both.
+ *
+ * Boards whose `after` is `no_reset` are deliberately excluded: ips_10 asks not
+ * to be reset and that is a property of the board, not an oversight.
+ */
+export const ESP32_POST_WRITE_RESET_SEQUENCE = 'D0|R1|W100|R0';
+
+/**
+ * The sequence to run after writing `board`, or undefined when it must not be
+ * reset. Per-board override first, so a future board that needs different
+ * timing states it in the SSOT rather than in a flasher.
+ */
+export function esp32PostWriteResetSequence(board: Esp32BoardSpec): string | undefined {
+  if (board.postWriteReset !== undefined) return board.postWriteReset || undefined;
+  return board.after === 'no_reset' ? undefined : ESP32_POST_WRITE_RESET_SEQUENCE;
+}
+
 export const ESP32_PARTITION_TABLE_OFFSET = 0x8000;
 /** boot_app0 (the OTA-selection blob) offset. Absent, a board can boot a stale slot. */
 export const ESP32_BOOT_APP0_OFFSET = 0xe000;

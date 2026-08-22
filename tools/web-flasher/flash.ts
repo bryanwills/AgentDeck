@@ -18,7 +18,7 @@
  */
 
 import { ESPLoader, Transport } from "esptool-js";
-import { esp32PreflightVerdict } from "../../shared/src/esp32-boards.js";
+import { esp32PostWriteResetSequence, esp32PreflightVerdict } from "../../shared/src/esp32-boards.js";
 import type { Esp32PreflightVerdict } from "../../shared/src/esp32-boards.js";
 import { flashIdIsUsable } from "./probe";
 import type { BoardProfile } from "./boards";
@@ -176,7 +176,9 @@ export async function writeMerged(
     // Reachable only for stub boards — the no-stub case was refused above,
     // because esptool-js drops eraseAll silently on the ROM loader.
     eraseAll: opts.eraseAll ?? false,
-    compress: true,
+    // The ROM loader has no compressed flash mode, so a --no-stub board
+    // (ttgo_t_display is the one offered here) fails before writing a byte.
+    compress: board.stub,
     reportProgress: (_i, written, total) => {
       cb.onPhase?.("write");
       cb.onProgress?.(written, total);
@@ -212,8 +214,16 @@ async function bounded(work: Promise<unknown>, ms: number): Promise<void> {
 
 /** Reset the board into the firmware and drop the port. Never throws, never hangs. */
 export async function finish(session: FlashSession, profile: BoardProfile): Promise<void> {
+  // Same defect the CLI had: esptool-js's hard reset is a release with no
+  // assert, so after a write it is a no-op and the chip stays parked in the
+  // flasher stub — the board never runs what was just written, and from the
+  // browser that is indistinguishable from a failed flash. The measured
+  // sequence lives in the board SSOT so both flashers reset identically.
+  const resetSeq = esp32PostWriteResetSequence(profile);
   await bounded(
-    session.loader.after(profile.after === "no_reset" ? "no_reset" : "hard_reset"),
+    resetSeq
+      ? session.loader.after("custom_reset", undefined, resetSeq)
+      : session.loader.after("no_reset"),
     4000,
   );
   await bounded(session.transport.disconnect(), 4000);

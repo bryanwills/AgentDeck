@@ -259,18 +259,29 @@ describe('esp32PreflightVerdict', () => {
     });
   });
 
-  it('the erase refusal is reachable — a board the browser OFFERS flashes stubless', () => {
+  it('the erase refusal is still reachable — stubless boards exist, on the CLI', () => {
     // esptool-js honours `eraseAll` only on the stub path, so on a `stub: false`
     // board ticking "erase (clears saved Wi-Fi and pairing token)" was silently
     // dropped after showing an erase phase and "MD5 verified" — handing back a
     // board still carrying the previous owner's credentials.
     //
-    // This pins WHY both surfaces refuse rather than skip: it is not a
-    // hypothetical combination. If the fleet ever has no stubless offered board
-    // this test goes red, and the refusal can then be reconsidered — it must not
-    // quietly become dead code nobody re-reads.
-    const stubless = ESP32_BOARDS.filter((b) => b.webFlash && !b.stub);
-    expect(stubless.map((b) => b.id)).toContain('ttgo_t_display');
+    // THIS TEST WENT RED ON 2026-08-23 AND THAT WAS CORRECT. It used to assert
+    // that ttgo_t_display was offered in the browser AND stubless. ttgo is now
+    // `stub: true`, because stubless esptool-js could not write it at all — the
+    // write died before a byte landed, so the one browser-offered stubless board
+    // was also the one board the browser could never flash. Its own note carries
+    // the measurement.
+    //
+    // The refusal is NOT dead code, so it stays: the stubless boards are still
+    // in the fleet, they are simply CLI-only now (webFlash: false), and
+    // `agentdeck esp32 flash` reaches every one of them. Pinned as an invariant
+    // rather than a membership list, so promoting one of them needs no edit here.
+    const stubless = ESP32_BOARDS.filter((b) => !b.stub);
+    expect(stubless.length).toBeGreaterThan(0);
+    // If this ever fails, a stubless board became browser-offered again — which
+    // is allowed, both surfaces refuse identically, but re-read the note on that
+    // board first: stubless writes have failed on every board measured so far.
+    expect(stubless.every((b) => !b.webFlash)).toBe(true);
   });
 
   it('every board the browser offers accepts its own declared identity', () => {
