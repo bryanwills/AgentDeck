@@ -413,7 +413,7 @@ final class ApmeStore: @unchecked Sendable {
             "outcome": "outcome", "compositeScore": "composite_score",
             "efficiencyJson": "efficiency_json",
             "prompt": "prompt", "response": "response",
-            "taskId": "task_id",
+            "taskId": "task_id", "endSource": "end_source",
         ]
         var sets: [String] = []
         var vals: [Any?] = []
@@ -1131,6 +1131,9 @@ final class ApmeStore: @unchecked Sendable {
             exec("ALTER TABLE turns ADD COLUMN task_id TEXT")
             exec("CREATE INDEX IF NOT EXISTS idx_turns_task ON turns(task_id)")
         }
+        if !turnsCols.contains("end_source") {
+            exec("ALTER TABLE turns ADD COLUMN end_source TEXT")
+        }
 
         // tasks sample-header columns (model identity + cost) — SessionSample rebuild.
         let tasksCols = query("PRAGMA table_info(tasks)").compactMap { $0["name"] as? String }
@@ -1242,12 +1245,15 @@ final class ApmeStore: @unchecked Sendable {
                 - overall: Your holistic judgment. Weight task_completion most heavily — a session that completes the task with decent quality is better than a perfect-style session that misses the point.
 
                 Important: Explain your reasoning with specific references to what was done and what was missed. List concrete items with checkmarks (done) and crosses (missed). This reasoning will be shown to the user for verification.
+                "missed" lists only parts of the user's request that were not done — style nits and improvement ideas belong in "reasoning", and an empty missed array is the correct output for a fully completed request.
 
                 Return strict JSON: {"task_completion":N,"code_quality":N,"efficiency":N,"overall":N,"reasoning":"...", "done":["item1","item2"], "missed":["item1"]}.
                 """,
                 weights: #"{"task_completion":0.5,"code_quality":0.3,"efficiency":0.2}"#,
                 notes: "seeded default"
             )
+        } else {
+            upgradeLegacyGeneralRubric(db: db, now: now)
         }
 
         // 2. Category-specific rubrics — each matches TS store.ts CATEGORY_RUBRICS.
@@ -1415,6 +1421,81 @@ final class ApmeStore: @unchecked Sendable {
         }
     }
 
+    /// Upgrade an untouched legacy general rubric to the missed-axis-clarified
+    /// wording (mirrors bridge/src/apme/store.ts). Judges filed style nits under
+    /// `missed`, which the scorecard renders as skipped work — a completed task
+    /// then read as incomplete (found by model-eval J02). Byte-identical match
+    /// only: an edited rubric belongs to the user and is never overwritten; the
+    /// append keeps full version history via parent_ver.
+    private func upgradeLegacyGeneralRubric(db: OpaquePointer, now: Int) {
+        let legacyPrompt = """
+        You are a senior engineer evaluating whether an AI coding agent completed the user's task.
+
+        Given the task prompt and the git diff produced, evaluate the agent's contribution.
+        Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+        Axes:
+        - task_completion: Did the agent actually do what the user asked? A perfect score means the task prompt's request was fully addressed in the diff. A zero means nothing relevant was done.
+        - code_quality: Is the code correct, safe, and maintainable? Check for bugs, missing error handling, security issues, and dead code.
+        - efficiency: Did the agent make minimal, focused changes? Penalize unrelated modifications, unnecessary refactoring, or verbose solutions to simple problems.
+        - overall: Your holistic judgment. Weight task_completion most heavily — a session that completes the task with decent quality is better than a perfect-style session that misses the point.
+
+        Important: Explain your reasoning with specific references to what was done and what was missed. List concrete items with checkmarks (done) and crosses (missed). This reasoning will be shown to the user for verification.
+
+        Return strict JSON: {"task_completion":N,"code_quality":N,"efficiency":N,"overall":N,"reasoning":"...", "done":["item1","item2"], "missed":["item1"]}.
+        """
+        let clarifiedPrompt = """
+        You are a senior engineer evaluating whether an AI coding agent completed the user's task.
+
+        Given the task prompt and the git diff produced, evaluate the agent's contribution.
+        Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+        Axes:
+        - task_completion: Did the agent actually do what the user asked? A perfect score means the task prompt's request was fully addressed in the diff. A zero means nothing relevant was done.
+        - code_quality: Is the code correct, safe, and maintainable? Check for bugs, missing error handling, security issues, and dead code.
+        - efficiency: Did the agent make minimal, focused changes? Penalize unrelated modifications, unnecessary refactoring, or verbose solutions to simple problems.
+        - overall: Your holistic judgment. Weight task_completion most heavily — a session that completes the task with decent quality is better than a perfect-style session that misses the point.
+
+        Important: Explain your reasoning with specific references to what was done and what was missed. List concrete items with checkmarks (done) and crosses (missed). This reasoning will be shown to the user for verification.
+        "missed" lists only parts of the user's request that were not done — style nits and improvement ideas belong in "reasoning", and an empty missed array is the correct output for a fully completed request.
+
+        Return strict JSON: {"task_completion":N,"code_quality":N,"efficiency":N,"overall":N,"reasoning":"...", "done":["item1","item2"], "missed":["item1"]}.
+        """
+
+        // Latest general rubric: prompt + version.
+        var readStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "SELECT prompt, version FROM rubrics WHERE purpose = 'general' ORDER BY version DESC LIMIT 1",
+            -1, &readStmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(readStmt) }
+        guard sqlite3_step(readStmt) == SQLITE_ROW,
+              let promptC = sqlite3_column_text(readStmt, 0) else { return }
+        let latestPrompt = String(cString: promptC)
+        let latestVersion = Int(sqlite3_column_int(readStmt, 1))
+        guard latestPrompt == legacyPrompt else { return }
+
+        var maxStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT COALESCE(MAX(version),0)+1 FROM rubrics", -1, &maxStmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(maxStmt) }
+        guard sqlite3_step(maxStmt) == SQLITE_ROW else { return }
+        let nextVersion = Int(sqlite3_column_int(maxStmt, 0))
+
+        var insStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "INSERT INTO rubrics (version, purpose, prompt, weights, created_at, parent_ver, notes) VALUES (?,?,?,?,?,?,?)",
+            -1, &insStmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(insStmt) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_int(insStmt, 1, Int32(nextVersion))
+        sqlite3_bind_text(insStmt, 2, ("general" as NSString).utf8String, -1, transient)
+        sqlite3_bind_text(insStmt, 3, (clarifiedPrompt as NSString).utf8String, -1, transient)
+        sqlite3_bind_text(insStmt, 4, (#"{"task_completion":0.5,"code_quality":0.3,"efficiency":0.2}"# as NSString).utf8String, -1, transient)
+        sqlite3_bind_int64(insStmt, 5, Int64(now))
+        sqlite3_bind_int(insStmt, 6, Int32(latestVersion))
+        sqlite3_bind_text(insStmt, 7, ("seeded default (missed-axis clarified)" as NSString).utf8String, -1, transient)
+        sqlite3_step(insStmt)
+    }
+
     private func query(_ sql: String) -> [[String: Any]] {
         guard let db else { return [] }
         var stmt: OpaquePointer?
@@ -1503,7 +1584,8 @@ final class ApmeStore: @unchecked Sendable {
       ended_at INTEGER, tool_calls INTEGER DEFAULT 0,
       files_modified INTEGER DEFAULT 0, files_created INTEGER DEFAULT 0,
       git_before TEXT, git_after TEXT, task_category TEXT,
-      outcome TEXT, composite_score REAL, efficiency_json TEXT
+      outcome TEXT, composite_score REAL, efficiency_json TEXT,
+      end_source TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_turns_run ON turns(run_id);
     CREATE INDEX IF NOT EXISTS idx_turns_task ON turns(task_id);

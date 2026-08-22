@@ -4,17 +4,18 @@
 // Provider chain (when `.auto`):
 //   Apple Intelligence (FoundationModels, macOS 26+ / iOS 26+)
 //     → MLX local server (127.0.0.1:8800)
-//     → Ollama (127.0.0.1:11434)
 //     → heuristic (extractTopicHint)
 //
-// All backends are cost-free (FoundationModels is on-device free, MLX/Ollama
-// are user-run, heuristic is pure-Swift). API-paid backends are intentionally
+// All backends are cost-free (FoundationModels is on-device free, MLX is
+// user-run, heuristic is pure-Swift). API-paid backends are intentionally
 // not part of this chain — see feedback_cost_sensitive_defaults.md.
+// The Ollama tier was removed 2026-08-22 (Node mirror too): it hard-pinned
+// the outdated `qwen2.5:7b`, and the Settings picker never offered it.
 //
 // App Store safety:
 //   - No subprocess spawn (verify-appstore-archive.sh-clean)
-//   - No bundled interpreters (FoundationModels comes from the OS, MLX/Ollama
-//     are external user-run services discovered via outbound localhost which
+//   - No bundled interpreters (FoundationModels comes from the OS, MLX is
+//     an external user-run service discovered via outbound localhost which
 //     is allowed by `com.apple.security.network.client`)
 //   - No install nudge — silent fallback when a backend is unavailable
 
@@ -39,7 +40,6 @@ enum TimelineSummarizer {
     /// than "heuristic" as an LLM-derived summary.
     typealias SummaryResult = (text: String, kind: String)
 
-    private static let ollamaPort = 11434
     private static let maxChars = 80
 
     /// Preferred MLX model when the live catalog advertises it. Mirrors
@@ -149,7 +149,6 @@ enum TimelineSummarizer {
         case .auto:
             if let r = await queryFoundationModels(text) { return r }
             if let r = await queryMLX(text) { return r }
-            if let r = await queryOllama(text) { return r }
             return heuristic(text)
         }
     }
@@ -258,34 +257,6 @@ enum TimelineSummarizer {
         return nil
     }
 
-    // MARK: - Ollama
-
-    private static func queryOllama(_ text: String) async -> SummaryResult? {
-        let url = URL(string: "http://127.0.0.1:\(ollamaPort)/api/generate")!
-        let truncated = String(text.prefix(2000))
-        let body: [String: Any] = [
-            "model": "qwen2.5:7b",
-            "prompt": "\(summarySystemPrompt)\n\n\(truncated)",
-            "stream": false,
-        ]
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        request.timeoutInterval = 15
-
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let response = json["response"] as? String,
-               let cleaned = cleanLLMOutput(response) {
-                return (cleaned, "ollama")
-            }
-        } catch { /* Ollama not available */ }
-        return nil
-    }
-
     // MARK: - Heuristic
 
     static func extractTopicHint(_ text: String) -> String? {
@@ -357,7 +328,7 @@ enum TimelineSummarizer {
 
     /// FoundationModels uses a separate `instructions` channel rather than a
     /// system message, so the wording is tuned for that API surface. The
-    /// rules still match the MLX / Ollama prompt.
+    /// rules still match the MLX prompt.
     private static let foundationModelsInstructions = """
     You summarize an AI coding agent's response in a single short line for a timeline UI.
     Rules:

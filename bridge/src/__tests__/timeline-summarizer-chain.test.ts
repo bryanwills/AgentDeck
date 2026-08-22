@@ -7,8 +7,10 @@
  * daemon was up — and a CLI-only user with Apple Intelligence available but no
  * MLX server got heuristic rows for no reason.
  *
- * Order under test (mirror of Swift `.auto`): FM → MLX → Ollama → null
- * (null = caller falls back to the heuristic).
+ * Order under test (mirror of Swift `.auto`): FM → MLX → null
+ * (null = caller falls back to the heuristic). The Ollama tier was removed
+ * 2026-08-22 — it hard-pinned the outdated `qwen2.5:7b`; a request reaching
+ * 11434 now means the chain grew a tier the Swift mirror doesn't have.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -27,7 +29,7 @@ const { summarizeResponse, clearSummarizerProviderCacheForTests } = await import
 
 const RESPONSE = 'Fixed the daemon reconnect loop and added a regression test for the backoff ladder.';
 
-/** Minimal OpenAI/Ollama-shaped chat responses keyed by URL. */
+/** Minimal OpenAI-shaped chat responses keyed by URL. */
 function stubHttp(routes: Record<string, unknown | null>): void {
   vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
     const url = String(input);
@@ -39,7 +41,6 @@ function stubHttp(routes: Record<string, unknown | null>): void {
 }
 
 const MLX_REPLY = { choices: [{ message: { content: 'mlx summary' } }] };
-const OLLAMA_REPLY = { message: { content: 'ollama summary' } };
 
 beforeEach(() => {
   clearSummarizerProviderCacheForTests();
@@ -55,7 +56,7 @@ afterEach(() => {
 
 describe('summarizeResponse provider chain', () => {
   it('prefers on-device Foundation Models over MLX', async () => {
-    stubHttp({ '8800': MLX_REPLY, '11434': OLLAMA_REPLY });
+    stubHttp({ '8800': MLX_REPLY });
 
     const out = await summarizeResponse(RESPONSE);
 
@@ -68,16 +69,18 @@ describe('summarizeResponse provider chain', () => {
 
   it('falls to MLX when the helper is unavailable', async () => {
     fm.probe.mockResolvedValue({ available: false, reason: 'macOS < 26' });
-    stubHttp({ '8800': MLX_REPLY, '11434': OLLAMA_REPLY });
+    stubHttp({ '8800': MLX_REPLY });
 
     expect(await summarizeResponse(RESPONSE)).toBe('mlx summary');
   });
 
-  it('falls to Ollama when the helper and MLX are both down', async () => {
+  it('never dials the removed Ollama tier, even when 11434 would answer', async () => {
     fm.probe.mockResolvedValue({ available: false, reason: 'not installed' });
-    stubHttp({ '11434': OLLAMA_REPLY });
+    stubHttp({ '11434': { message: { content: 'ollama summary' } } });
 
-    expect(await summarizeResponse(RESPONSE)).toBe('ollama summary');
+    expect(await summarizeResponse(RESPONSE)).toBeNull();
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(calls.map((c) => String(c[0])).filter((u) => u.includes('11434'))).toEqual([]);
   });
 
   it('returns null when every provider is down so the caller uses the heuristic', async () => {

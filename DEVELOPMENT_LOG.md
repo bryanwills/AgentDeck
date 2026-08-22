@@ -2,7 +2,60 @@
 
 ---
 
-## 2026-08-22 — Codex 사용량이 0%로 보였다: 한도가 하나가 아니라 계열이 여럿이었다
+## 2026-08-22 — 로컬 LLM 워크로드가 model-eval 에 처음 계측되다: Ollama 폴백 제거 + APME missed 축 명확화
+
+### 배경
+
+`../foundby-eval`(생성기 `OpenClaw/model-eval`)이 GLM·Qwen 세대 교체를 38종 시나리오로
+재던 동안, AgentDeck 이 같은 로컬 모델 플릿에게 시키는 일 — 타임라인 한 줄 요약,
+APME 세션 판정, REVIEW diff 리스크 평가 — 은 어느 시나리오도 덮지 않았다.
+게다가 요약기의 Ollama 폴백 티어는 `qwen2.5:7b` 를 하드코딩하고 있었다.
+평가 플릿보다 두 세대 전 모델이고, Settings 피커는 이 티어를 선택지로 보여주지도 않았다
+(auto 설명문도 "FM → MLX → heuristic"이라고 적혀 있었다).
+
+### 조치 (AgentDeck)
+
+- **요약기 Ollama 티어 제거** — Node(`timeline-summarizer.ts`)·Swift(`TimelineSummarizer.swift`)
+  미러 동시. MLX 티어는 서버가 실제로 서빙하는 모델을 프로브하므로 같은 방식으로 낡을 수 없다.
+  체인 테스트는 "11434 로 다이얼하지 않는다"를 못박는 부정 케이스로 교체. 과거 타임라인 행의
+  `summaryKind:"ollama"` 라벨 매핑(Swift/Kotlin)은 렌더용이므로 유지. judge-detect 의 Ollama
+  후보는 동적 프로브라 유지.
+- **APME general 루브릭 `missed` 축 명확화** — model-eval 신규 시나리오 J02 스모크에서
+  프런티어급 판정자(GLM-5.3)가 스타일 nit 를 `missed` 에 넣는 걸 확인했다. 스코어카드는
+  `missed` 를 "빠뜨린 작업"으로 렌더하므로 완수한 태스크가 미완으로 읽힌다. 프롬프트에
+  "missed 는 요청 중 안 한 것만, nit 는 reasoning 으로" 한 줄을 추가하고, **시드 마이그레이션**
+  (Node `seedDefaultRubric` + Swift `upgradeLegacyGeneralRubric`)으로 기존 설치본의
+  legacy 원문과 byte-identical 할 때만 새 버전을 append (사용자가 고친 루브릭은 불가침,
+  parent_ver 로 이력 보존, 양 데몬 공존 시 한 번만). 게이트:
+  `apme-rubric-migration.test.ts`.
+
+### 조치 (model-eval 쪽, 교차 저장소)
+
+시나리오 5종 신설 — `judging` 분류 + `judge-fidelity@1` 루브릭(계약/보정/근거/절제):
+J01·J02(APME 판정, 명백한 실패/성공 런 쌍), J03·J04(REVIEW diff, 심은 결함/무결함 함정),
+I05(타임라인 한 줄 요약, 되돌린-접근 함정). 프롬프트는 AgentDeck 이 실제로 보내는
+계약을 그대로 복사했다. `agentdeck-judge` 프로파일 신설. 계측기 검증에서 J04 v1 의
+"무결함" diff 가 코드 없는 기능 주장(CHANGELOG)을 담아 함정이 뒤집혔던 것을 GLM-5.3 이
+정당하게 지적해 v2 로 교정 — fixture 를 계측하라는 규칙이 여기서도 맞았다.
+
+### 측정 결과 (full-2026-08-20 에 75회 append, 5모델 × 5시나리오 × 3반복)
+
+클라우드 3종(GLM-5.2/5.3, DeepSeek V4 Pro)과 **dense Qwen3.8-27B 는 전회통과 15/15 ·
+가중 1.000**. **현행 로컬 모델 Qwen3.6-35B-A3B(MoE) 만 9/15 · 0.860** 으로 무너졌고,
+실패가 정확히 AgentDeck 의 아픈 지점 둘이다: J02(성공 런 판정)에서 3회 전부 JSON 을
+닫지 못하고 잘렸고(= `parseJudgeJson` null → 판정 행 유실), J04(무결함 diff)에서 3회
+전부 "오타 수정" 을 finding 으로 채워 넣었다(= REVIEW 거짓 경보). 8800 서버 그대로의
+서빙 설정으로 잰 값이라 생태적으로 유효하다. 실무 함의: **APME judge 를 로컬로 쓰려면
+dense Qwen3.8(8801, `enable_thinking:false`) 쪽에 앉혀야 한다** — MoE 는 요약(I05 만점)엔
+충분하지만 판정 계약엔 부족하다.
+
+### 남긴 것
+
+REVIEW 판정 가이드의 Ollama 예시 모델은 `qwen3-coder:30b` 로 갱신. 장문 입력
+열화(judge 프롬프트 10K+ 토큰 체제) 시나리오는 후속 — 현 시나리오는 16K 로컬 컨텍스트를
+건드리지 않는 길이다. Apple Foundation Models 는 여전히 model-eval 미등재(러너가
+`openclaw infer` 경유라 OpenAI 호환 엔드포인트가 필요) — 기본 judge 백엔드인데 유일하게
+계측 밖이다.
 
 ### 문제
 

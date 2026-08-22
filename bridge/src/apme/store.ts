@@ -284,11 +284,33 @@ Axes:
 - overall: Your holistic judgment. Weight task_completion most heavily — a session that completes the task with decent quality is better than a perfect-style session that misses the point.
 
 Important: Explain your reasoning with specific references to what was done and what was missed. List concrete items with checkmarks (done) and crosses (missed). This reasoning will be shown to the user for verification.
+"missed" lists only parts of the user's request that were not done — style nits and improvement ideas belong in "reasoning", and an empty missed array is the correct output for a fully completed request.
 
 Return strict JSON: {"task_completion":N,"code_quality":N,"efficiency":N,"overall":N,"reasoning":"...", "done":["item1","item2"], "missed":["item1"]}.`,
   weights: JSON.stringify({ task_completion: 0.5, code_quality: 0.3, efficiency: 0.2 }),
   notes: 'seeded default',
 };
+
+/** The pre-2026-08-22 general prompt, kept verbatim so seeding can recognize
+ *  an untouched v1 and upgrade it in place. Judges routinely filed style nits
+ *  under `missed`, which the scorecard renders as "work the agent skipped" —
+ *  a completed task then reads as incomplete (found by model-eval J02). Only
+ *  a byte-identical legacy prompt is upgraded: any user edit means the rubric
+ *  is theirs, not ours. */
+export const DEFAULT_RUBRIC_PROMPT_LEGACY = `You are a senior engineer evaluating whether an AI coding agent completed the user's task.
+
+Given the task prompt and the git diff produced, evaluate the agent's contribution.
+Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+Axes:
+- task_completion: Did the agent actually do what the user asked? A perfect score means the task prompt's request was fully addressed in the diff. A zero means nothing relevant was done.
+- code_quality: Is the code correct, safe, and maintainable? Check for bugs, missing error handling, security issues, and dead code.
+- efficiency: Did the agent make minimal, focused changes? Penalize unrelated modifications, unnecessary refactoring, or verbose solutions to simple problems.
+- overall: Your holistic judgment. Weight task_completion most heavily — a session that completes the task with decent quality is better than a perfect-style session that misses the point.
+
+Important: Explain your reasoning with specific references to what was done and what was missed. List concrete items with checkmarks (done) and crosses (missed). This reasoning will be shown to the user for verification.
+
+Return strict JSON: {"task_completion":N,"code_quality":N,"efficiency":N,"overall":N,"reasoning":"...", "done":["item1","item2"], "missed":["item1"]}.`;
 
 // ─── Category-specific rubrics ──────────────────────────────────────────────
 // Each category has evaluation axes suited to its domain.
@@ -643,6 +665,20 @@ export class ApmeStore {
     // Seed general rubric if none exists
     const row = this.db.prepare('SELECT COUNT(*) AS n FROM rubrics WHERE purpose = ?').get('general') as { n: number };
     if (row.n > 0) {
+      // Upgrade an untouched legacy general prompt to the missed-axis-clarified
+      // wording. Byte-identical match only — an edited rubric belongs to the
+      // user and is never overwritten; the append keeps full version history.
+      const latestGeneral = this.getCurrentRubric('general');
+      if (latestGeneral && latestGeneral.prompt === DEFAULT_RUBRIC_PROMPT_LEGACY) {
+        this.appendRubric({
+          purpose: 'general',
+          prompt: DEFAULT_RUBRIC_V1.prompt,
+          weights: DEFAULT_RUBRIC_V1.weights,
+          createdAt: Date.now(),
+          parentVer: latestGeneral.version,
+          notes: 'seeded default (missed-axis clarified)',
+        });
+      }
       // Seed category rubrics that don't exist yet (idempotent)
       for (const [, rubric] of Object.entries(CATEGORY_RUBRICS)) {
         const exists = this.db.prepare('SELECT COUNT(*) AS n FROM rubrics WHERE purpose = ?').get(rubric.purpose) as { n: number };

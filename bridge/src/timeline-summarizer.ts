@@ -3,15 +3,20 @@
  * of OpenClaw chat responses for timeline display.
  *
  * Tries: on-device Foundation Models → local mlx-serve qwen (port 8800) →
- * Ollama → heuristic fallback. Non-blocking — caller should fire-and-forget,
+ * heuristic fallback. Non-blocking — caller should fire-and-forget,
  * update entry when ready.
  *
  * The provider order is the Node mirror of Swift's `TimelineSummarizer`
- * `.auto` chain (FoundationModels → MLX → Ollama → heuristic). It was
+ * `.auto` chain (FoundationModels → MLX → heuristic). It was
  * MLX-first for a long time, which meant a CLI-only user on macOS 26 with
  * Apple Intelligence available still got heuristic rows unless they also ran
  * an MLX server — the same machine summarized differently depending on which
  * daemon happened to be up. Keep the two chains in the same order.
+ *
+ * The Ollama tier was removed 2026-08-22: it hard-pinned `qwen2.5:7b`, a
+ * model two generations behind anything the model-eval fleet measures, and
+ * the Settings UI never offered it as a choice. MLX rides whatever model the
+ * server actually serves (probed), so it cannot go stale the same way.
  */
 
 import { debug, log } from './logger.js';
@@ -41,26 +46,21 @@ async function resolveModelForCall(): Promise<string> {
   }
   return resolveMlxModel(probedFirstModel);
 }
-const OLLAMA_URL = 'http://localhost:11434/api/chat';
 const TIMEOUT_MS = 30_000; // 30s — first inference needs model load time
 const MAX_INPUT_CHARS = 2000;
 
 let fmAvailable: boolean | null = null;
 let mlxAvailable: boolean | null = null;
-let ollamaAvailable: boolean | null = null;
 let fmFailedAt = 0;
 let mlxFailedAt = 0;
-let ollamaFailedAt = 0;
 const RETRY_INTERVAL_MS = 60_000; // retry failed providers after 60s
 
 /** Reset the cached provider availability (tests only). */
 export function clearSummarizerProviderCacheForTests(): void {
   fmAvailable = null;
   mlxAvailable = null;
-  ollamaAvailable = null;
   fmFailedAt = 0;
   mlxFailedAt = 0;
-  ollamaFailedAt = 0;
   probedFirstModel = null;
   probedAt = 0;
 }
@@ -77,14 +77,13 @@ export async function summarizeResponse(text: string): Promise<string | null> {
     : text;
 
   let mlxJustFailed = false;
-  let ollamaJustFailed = false;
 
   // Try on-device Foundation Models first — no server for the user to run,
   // and it is the same helper process the APME judge already keeps warm.
   // A miss here is not an error state: off-macOS, on macOS < 26, or with
   // Apple Intelligence disabled the probe simply reports unavailable and the
-  // chain moves on. Only MLX+Ollama failing together is worth telling the
-  // user about (that pair is what the user opts into by installing them).
+  // chain moves on. Only MLX failing is worth telling the user about
+  // (that is what the user opts into by installing it).
   if (fmAvailable !== false || (Date.now() - fmFailedAt > RETRY_INTERVAL_MS)) {
     try {
       const result = await callFoundationModels(input);
@@ -120,40 +119,19 @@ export async function summarizeResponse(text: string): Promise<string | null> {
     }
   }
 
-  // Try Ollama (retry after RETRY_INTERVAL_MS)
-  if (ollamaAvailable !== false || (Date.now() - ollamaFailedAt > RETRY_INTERVAL_MS)) {
-    try {
-      const result = await callOllama(input);
-      if (result) {
-        if (ollamaAvailable === false) {
-          debug('summarizer', 'Ollama recovered');
-        }
-        ollamaAvailable = true;
-        return result;
-      }
-    } catch (err) {
-      ollamaJustFailed = ollamaAvailable !== false;
-      ollamaAvailable = false;
-      ollamaFailedAt = Date.now();
-      debug('summarizer', `Ollama not available: ${String(err)}`);
-    }
-  }
-
   // Surface backend-down state to the user — but ONLY on the transition
-  // (first time we observe both providers failing) and via `log`, NOT
+  // (first time we observe the provider failing) and via `log`, NOT
   // `logError`. The summarizer is *optional* — when the user hasn't
-  // installed MLX/Ollama, the heuristic row is the intended UX. Routing
+  // installed MLX, the heuristic row is the intended UX. Routing
   // through `log` means PTY mode (`agentdeck claude`) suppresses it
   // entirely (the message would otherwise bleed into Claude's terminal
   // session and read as a critical error). Daemon/CLI surfaces still see
   // it in stderr as a regular `[agentdeck]` info line.
-  if ((mlxJustFailed && ollamaJustFailed)
-      || (mlxJustFailed && ollamaAvailable === false)
-      || (ollamaJustFailed && mlxAvailable === false)) {
+  if (mlxJustFailed) {
     log(
-      `[timeline] LLM summary backend offline (on-device Foundation Models: ${fmAvailable === false ? 'unavailable' : 'not reached'}, MLX:8800, Ollama:11434).`,
+      `[timeline] LLM summary backend offline (on-device Foundation Models: ${fmAvailable === false ? 'unavailable' : 'not reached'}, MLX:8800).`,
       'Timeline rows will use heuristic summaries.',
-      'Install MLX (`mlx_vlm.server`) or Ollama to get LLM-summarized chat_end rows.',
+      'Install MLX (`mlx_vlm.server`) to get LLM-summarized chat_end rows.',
     );
   }
 
@@ -220,39 +198,3 @@ async function callMLX(input: string): Promise<string | null> {
   }
 }
 
-async function callOllama(input: string): Promise<string | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-  try {
-    const resp = await fetch(OLLAMA_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'qwen2.5:7b',
-        messages: [
-          { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
-          { role: 'user', content: input },
-        ],
-        stream: false,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-
-    if (!resp.ok) throw new Error(`Ollama ${resp.status}`);
-
-    const data = await resp.json() as {
-      message?: { content?: string };
-    };
-    const content = data.message?.content?.trim();
-    if (!content) return null;
-
-    const result = cleanLLMOutput(content);
-    if (result) debug('summarizer', `Ollama summary: ${result}`);
-    return result;
-  } catch (err) {
-    clearTimeout(timer);
-    throw err;
-  }
-}

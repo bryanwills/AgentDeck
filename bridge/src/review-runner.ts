@@ -368,7 +368,7 @@ ${detectedBlock}
   <h2><span class="rank">4</span>Local Ollama / LM Studio / MLX <span class="tier">— free &amp; private; needs a capable model</span></h2>
   <pre># Ollama (default port)
 { "apme": { "judge": { "backend": "openai",
-    "endpoint": "http://127.0.0.1:11434/v1", "model": "qwen2.5-coder:32b" } } }</pre>
+    "endpoint": "http://127.0.0.1:11434/v1", "model": "qwen3-coder:30b" } } }</pre>
   <p style="font-size:13px">Any local OpenAI-compatible server (Ollama :11434, LM Studio :1234, MLX, vLLM, llama.cpp). Realistic minimum is an <strong>8B-class instruct model</strong>; 30B-class recommended.</p>
 
   <h2><span class="rank">5</span>Apple Intelligence <span class="tier">— free, on-device, basic screening only</span></h2>

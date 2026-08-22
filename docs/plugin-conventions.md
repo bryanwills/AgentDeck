@@ -79,7 +79,7 @@ entry로 변환한다. 과거 `log-stream.ts`의 `openclaw logs --follow --json`
 1. Gateway `chat` delta에서 `message.content[].text` 추출 (`extractMessageText()`) → `accumulatedResponse` 축적
 2. 20~200자 축적 시 `extractTopicHint()` → `chat_start` 업데이트 (프롬프트 없는 cron/웹 작업용)
 3. Final에서 `chat_response` (응답 전문) + `chat_end` (도구/시간 요약) 생성
-4. async `summarizeResponse()` → MLX qwen (port 8800, `/no_think`) → Ollama fallback → 한국어 1줄 요약으로 `chat_end` enrichment
+4. async `summarizeResponse()` → on-device Foundation Models → MLX qwen (port 8800, `/no_think`) → 한국어 1줄 요약으로 `chat_end` enrichment (Ollama 폴백은 2026-08-22 제거 — 구형 `qwen2.5:7b` 고정핀이었다)
 
 Bridge(daemon)에서만 요약 수행 — plugin은 daemon 경유 단일 경로. LLM 실패 시 60s TTL 후 재시도 (영구 disable 방지). 플러그인은 더 이상 `timeline_event`/`timeline_history`를 구독하지 않는다(렌더 대상이 없음) — 두 이벤트는 `FORWARDED_EVENTS`에서 빠졌다.
 
