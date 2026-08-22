@@ -4,9 +4,18 @@
  * Reads `~/.agentdeck/settings.json` and returns a fully resolved APME config
  * merged with cost-sensitive defaults. The contract is intentionally strict:
  *
- *   - Default judge backend = Foundation Models via the Swift daemon, then
- *     the bundled CLI Swift helper, with explicit MLX fallback when neither
- *     Foundation Models path is available.
+ *   - Default judge backend = a local MLX server, with on-device Foundation
+ *     Models as the fallback when no MLX server answers. Both are free and
+ *     local; the order is a QUALITY order, measured (2026-08-22, model-eval
+ *     `judging` category): FM scores 0.580 on the judge-fidelity rubric —
+ *     generous scores on failed runs, invented findings on clean diffs — and
+ *     its 4,096-token window (measured, hard `exceededContextWindowSize`)
+ *     refuses 4.2% of this machine's real task_rollup judge prompts. The MLX
+ *     tier scores 0.86 (MoE) to 1.00 (dense) on the same scenarios. FM stays
+ *     the floor so a machine with no MLX server still gets evals.
+ *   - The FM fallback applies to the DEFAULT only. A user who names `mlx`
+ *     explicitly and whose server is offline gets a skipped eval, not a
+ *     silent downgrade — same rule the Swift runner already states.
  *   - `backend: "api"` (Anthropic API via @anthropic-ai/sdk) is supported on
  *     both daemons but strictly OPT-IN: the user must set it explicitly and
  *     provide a credential (`apme.judge.apiKey`, ANTHROPIC_API_KEY, or an
@@ -43,6 +52,12 @@ export interface ApmeJudgeConfig {
    *  skipping the eval. Default `true` on the Node bridge so CLI-only setups
    *  still get zero-cost local evals when the Swift daemon is not running. */
   fallbackToMlx?: boolean;
+  /** Reverse of `fallbackToMlx`: when the MLX server does not answer, retry
+   *  on-device Foundation Models instead of skipping. Enabled ONLY for the
+   *  default (unset `judge.backend`) — an explicit `backend: "mlx"` keeps the
+   *  cost-sensitive-defaults rule that a named backend which is offline
+   *  produces a visible skip, not a silent downgrade to a weaker judge. */
+  fallbackToFoundationModels?: boolean;
 }
 
 export interface ApmeDeterministicConfig {
@@ -65,7 +80,9 @@ export interface ApmeConfig {
   availableModels: string[];
 }
 
-/** Cost-sensitive defaults: Foundation Models first, local MLX fallback, no API calls. */
+/** Cost-sensitive defaults: local MLX first, on-device Foundation Models
+ *  fallback, no API calls. Both tiers are free; the order is the measured
+ *  judge-quality order (see the header). */
 export const DEFAULT_APME_CONFIG: ApmeConfig = {
   enabled: true,
   deterministic: {
@@ -74,13 +91,14 @@ export const DEFAULT_APME_CONFIG: ApmeConfig = {
     commands: {},
   },
   judge: {
-    backend: 'foundationModels',
+    backend: 'mlx',
     // Legacy MLX placeholder retained so sanitizeForMlx() and older settings
     // loaders still resolve through llm.mlx / probe / MLX_FALLBACK_MODEL.
     model: 'qwen3-30b',
     sampleRate: 1.0,
     onlyWhenDisagreement: false,
     fallbackToMlx: true,
+    fallbackToFoundationModels: true,
   },
   availableModels: [],
 };
@@ -107,10 +125,18 @@ export function loadApmeConfig(): ApmeConfig {
   if (!apme || typeof apme !== 'object') return { ...DEFAULT_APME_CONFIG };
 
   const a = apme as Partial<ApmeConfig> & { judge?: Partial<ApmeJudgeConfig> };
+  // Whether the user NAMED a backend. The FM fallback rides the default only:
+  // an explicit `mlx` that is offline must skip visibly (cost-sensitive
+  // defaults), while the unset default must never leave a machine with no
+  // MLX server without any eval at all.
+  const backendNamed = typeof a.judge?.backend === 'string';
   const judge: ApmeJudgeConfig = {
     ...DEFAULT_APME_CONFIG.judge,
     ...(a.judge ?? {}),
   };
+  if (backendNamed) {
+    judge.fallbackToFoundationModels = Boolean(a.judge?.fallbackToFoundationModels);
+  }
   // Clamp pathological values.
   judge.sampleRate = Math.max(0, Math.min(1, Number(judge.sampleRate) || 0));
 
@@ -128,6 +154,9 @@ export function loadApmeConfig(): ApmeConfig {
   if (!['mlx', 'api', 'openclaw', 'foundationModels', 'openai'].includes(judge.backend)) {
     resetBackendCoupledFields(`unknown judge.backend=${judge.backend}, falling back to mlx`);
     judge.backend = 'mlx';
+    // The named backend was discarded, so this is the default path again —
+    // and the default must not leave an MLX-less machine with no judge.
+    judge.fallbackToFoundationModels = DEFAULT_APME_CONFIG.judge.fallbackToFoundationModels;
   }
   // The 'api' backend is implemented on the Node bridge via the official
   // @anthropic-ai/sdk (2026-07-12; it used to be a stub that was silently
@@ -136,6 +165,7 @@ export function loadApmeConfig(): ApmeConfig {
   // 'unavailable' with setup guidance when no credential is present. Swift
   // parity: apple/AgentDeck/Daemon/Apme/ApmeJudgeApi.swift.
   judge.fallbackToMlx = Boolean(judge.fallbackToMlx);
+  judge.fallbackToFoundationModels = Boolean(judge.fallbackToFoundationModels);
 
   const det: ApmeDeterministicConfig = {
     ...DEFAULT_APME_CONFIG.deterministic,

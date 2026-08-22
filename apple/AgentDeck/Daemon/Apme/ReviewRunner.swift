@@ -63,11 +63,29 @@ enum ReviewRunner {
         }
     }
 
+    /// Resolve the backend that will ACTUALLY answer. The default judge chain
+    /// is `mlx → foundationModels`, and the two legs differ by 4× in context
+    /// (16K vs a measured hard 4,096), so the tier and the trajectory budget
+    /// have to be chosen from the leg that runs — not from the configured one.
+    /// Without this, a Mac with no MLX server would size an advanced-tier
+    /// prompt and then hand it to the on-device model, which refuses it.
+    /// Mirrors `resolveJudgeBackend` in bridge/src/apme/runner.ts.
+    static func resolveBackend(for config: ApmeJudgeConfig) async -> ApmeJudgeBackend {
+        guard config.backend == .mlx, config.fallbackToFoundationModels else { return config.backend }
+        if await ApmeJudgeMlx.isReachable() { return .mlx }
+        return .foundationModels
+    }
+
     /// Trajectory budget per tier. Basic must keep the WHOLE prompt inside
-    /// the on-device ~4k-token window (see trajectorySummary doc); advanced
-    /// judges can read far more of the session.
+    /// the on-device window, which is a MEASURED 4,096 tokens (the model
+    /// refuses anything larger with `exceededContextWindowSize`, reporting
+    /// the count). Trajectory text is the user's own prompts, i.e. routinely
+    /// Korean, measured at ~1.15 chars/token on 2026-08-22 — so the old
+    /// 6,000-char cap was worth up to ~5,200 tokens, 27% past the window of
+    /// the very tier it was written for. 3,000 chars ≈ 2,600 tokens worst
+    /// case, leaving room for the prompt shell and the answer.
     static func trajectoryCharCap(for tier: ReviewJudgeTier) -> Int {
-        tier == .basic ? 6_000 : 24_000
+        tier == .basic ? 3_000 : 24_000
     }
 
     static func trajectoryEntryCap(for tier: ReviewJudgeTier) -> Int {

@@ -430,7 +430,9 @@ describe('ApmeRunner.runOne', () => {
     expect(judgeMetrics).toContain('correctness');
     const overall = evals.find((e) => e.layer === 'llm_judge' && e.metric === 'overall');
     expect(overall?.score).toBeCloseTo(0.55);
-    expect(overall?.judgeModel).toBe('foundationModels:apple-intelligence');
+    // Default chain's first leg. `mlx:` + the llm.mlx pin (unset here, so the
+    // legacy placeholder) — see effectiveJudgeModelTag.
+    expect(overall?.judgeModel).toBe('mlx:qwen3-30b');
     expect(overall?.rubricVer).toBe(1);
 
     // Judge received the run context + task prompt

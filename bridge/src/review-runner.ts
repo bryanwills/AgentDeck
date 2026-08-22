@@ -19,7 +19,7 @@ import { execFile } from 'child_process';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { callJudgeWithMeta, probeJudgeBackend } from './apme/runner.js';
+import { callJudgeWithMeta, resolveJudgeBackend } from './apme/runner.js';
 import { loadApmeConfig } from './apme/settings.js';
 import type { ApmeJudgeBackend } from './apme/settings.js';
 import { debug, logError } from './logger.js';
@@ -48,11 +48,24 @@ interface ReviewState {
 
 const DIFF_BYTE_CAP = 60_000;
 /** Basic-tier judges (on-device FM relay) overflow long diffs — keep the
- *  whole prompt inside a small context window. */
-const BASIC_DIFF_BYTE_CAP = 12_000;
+ *  whole prompt inside a small context window.
+ *
+ *  Sized against a MEASURED window, not a guess. Apple's on-device model
+ *  refuses anything over 4,096 tokens outright (`exceededContextWindowSize`,
+ *  which reports the count it counted), and its tokenizer was measured on
+ *  2026-08-22 at ~3.19 chars/token for diff text and ~1.15 for Korean. The
+ *  previous pair of caps (12,000 + 4,000) therefore built a 5,161-token
+ *  prompt at its own limits — 26% over the window of the very backend this
+ *  tier exists for, so a large review failed outright instead of reviewing a
+ *  smaller slice. Worst case now: 5,000/3.19 + 1,200/1.15 + ~300 ≈ 2,900
+ *  tokens, leaving ~1,200 for the answer. */
+const BASIC_DIFF_BYTE_CAP = 5_000;
 /** Recent user-request ↔ agent-response context appended to the prompt so
- *  the judge evaluates the diff against what the user actually asked. */
+ *  the judge evaluates the diff against what the user actually asked.
+ *  This text is the user's own prompts, i.e. routinely Korean — the densest
+ *  input the tokenizer sees — so the basic tier gets its own smaller cap. */
 const ACTIVITY_CHAR_CAP = 4_000;
+const BASIC_ACTIVITY_CHAR_CAP = 1_200;
 const GIT_TIMEOUT_MS = 10_000;
 
 /**
@@ -153,13 +166,13 @@ function buildJudgePrompt(
   const activity = recentActivity?.trim()
     ? [
       '--- recent session activity (what the user asked ↔ what the agent answered) ---',
-      recentActivity.slice(-ACTIVITY_CHAR_CAP),
+      recentActivity.slice(tier === 'basic' ? -BASIC_ACTIVITY_CHAR_CAP : -ACTIVITY_CHAR_CAP),
       '',
     ]
     : [];
   const shared = [
     `Project: ${projectName}`,
-    delta.truncated ? `(diff truncated to the first ${tier === 'basic' ? '12' : '60'}KB)` : '',
+    delta.truncated ? `(diff truncated to the first ${tier === 'basic' ? '5' : '60'}KB)` : '',
     '',
     ...activity,
     '--- git diff --stat ---',
@@ -428,8 +441,13 @@ export async function runSessionReview(opts: {
     // Judge preflight FIRST — the most common setup gap, and the one with an
     // actionable fix. When no usable judge exists, open the setup guide in
     // the browser (the same channel the report uses) instead of a bare error.
-    const judgeCfg = loadApmeConfig().judge;
-    const probe = await probeJudgeBackend(judgeCfg);
+    const configured = loadApmeConfig().judge;
+    // Resolve the backend that will actually answer BEFORE sizing anything.
+    // The default chain is mlx → foundationModels, and the two legs have
+    // different windows (16K vs a measured hard 4,096), so probing only the
+    // configured leg would both refuse to run on an MLX-less machine and,
+    // worse, hand a 60KB advanced-tier diff to the on-device model.
+    const { cfg: judgeCfg, probe } = await resolveJudgeBackend(configured);
     if (probe.status !== 'ready') {
       try {
         // Offer the user's already-running local servers first.

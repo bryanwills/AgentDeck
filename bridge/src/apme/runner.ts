@@ -943,6 +943,51 @@ export function sanitizeForMlx(judgeCfg: ApmeJudgeConfig): ApmeJudgeConfig {
   };
 }
 
+/** Mirror of `sanitizeForMlx` for the reverse leg of the default chain.
+ *  An MLX cfg carries an MLX `endpoint` (`http://127.0.0.1:8800`), and
+ *  `callFoundationModels` treats a set endpoint as an explicit FM relay URL —
+ *  so handing the cfg over unchanged POSTs the judge prompt at the MLX server
+ *  we just failed to reach and never tries the on-device model at all. */
+export function sanitizeForFoundationModels(judgeCfg: ApmeJudgeConfig): ApmeJudgeConfig {
+  return {
+    ...judgeCfg,
+    backend: 'foundationModels',
+    endpoint: undefined,
+    model: DEFAULT_APME_CONFIG.judge.model,
+  };
+}
+
+/** Resolve which backend will ACTUALLY answer, for callers that must decide
+ *  something before the call — the REVIEW runner sizes its diff budget and
+ *  picks its prompt shape from the backend, and it refuses to run at all when
+ *  the probe is not ready. Without this, flipping the default to `mlx` would
+ *  have turned "no MLX server" from a working on-device review into a setup
+ *  guide, i.e. removed a capability from every machine that has no MLX.
+ *
+ *  Returns the configured backend when it probes ready; otherwise the fallback
+ *  leg of the default chain when that probes ready; otherwise the configured
+ *  backend's failed probe, so the caller reports what the user asked for. */
+export async function resolveJudgeBackend(
+  cfg: ApmeJudgeConfig,
+): Promise<{ cfg: ApmeJudgeConfig; probe: JudgeBackendStatus }> {
+  const probe = await probeJudgeBackend(cfg);
+  if (probe.status === 'ready') return { cfg, probe };
+
+  const fallback = cfg.backend === 'mlx' && cfg.fallbackToFoundationModels
+    ? sanitizeForFoundationModels(cfg)
+    : cfg.backend === 'foundationModels' && cfg.fallbackToMlx
+      ? sanitizeForMlx(cfg)
+      : null;
+  if (!fallback) return { cfg, probe };
+
+  const fallbackProbe = await probeJudgeBackend(fallback);
+  if (fallbackProbe.status === 'ready') {
+    debug('APME', `judge ${cfg.backend} not ready (${probe.reason ?? '—'}); using ${fallback.backend}`);
+    return { cfg: fallback, probe: fallbackProbe };
+  }
+  return { cfg, probe };
+}
+
 /** Result of a judge call that knows which backend ACTUALLY produced the
  *  text — important when the FM→MLX fallback path runs, because the caller
  *  needs the effective label (not the original cfg.backend) for the
@@ -1002,6 +1047,21 @@ export function clearFoundationModelsAutoCacheForTests(): void {
 /** Like `callJudge`, but returns the effective backend + label so callers
  *  can record `judge_model` correctly across fallback paths. */
 export async function callJudgeWithMeta(prompt: string, judgeCfg: ApmeJudgeConfig): Promise<JudgeResult> {
+  if (judgeCfg.backend === 'mlx' && judgeCfg.fallbackToFoundationModels) {
+    // Default chain: local MLX first (measured the better judge), on-device
+    // FM as the floor so a machine with no MLX server still gets evals.
+    // Only reachable for the DEFAULT config — loadApmeConfig clears the flag
+    // when the user named `mlx` themselves.
+    try {
+      const text = await callMlx(prompt, judgeCfg);
+      return { text, effectiveBackend: 'mlx', effectiveLabel: effectiveJudgeModelTag(judgeCfg) };
+    } catch (err) {
+      debug('APME', `mlx unavailable, fallback to foundationModels: ${String(err)}`);
+      const fmCfg = sanitizeForFoundationModels(judgeCfg);
+      const text = await callFoundationModels(prompt, fmCfg);
+      return { text, effectiveBackend: 'foundationModels', effectiveLabel: effectiveJudgeModelTag(fmCfg) };
+    }
+  }
   if (judgeCfg.backend === 'foundationModels') {
     try {
       const text = await callFoundationModels(prompt, judgeCfg);

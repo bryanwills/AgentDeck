@@ -27,15 +27,23 @@ enum ApmeJudgeBackend: String, Codable {
     case openai
 
     /// Tolerate unknown/future backend strings by falling back to the
-    /// on-device default instead of throwing during Codable decode.
+    /// default chain's first leg instead of throwing during Codable decode.
+    /// Mirrors settings.ts, which resets an unknown backend to `mlx`.
     init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
-        self = ApmeJudgeBackend(rawValue: raw) ?? .foundationModels
+        self = ApmeJudgeBackend(rawValue: raw) ?? .mlx
     }
 }
 
 struct ApmeJudgeConfig: Codable {
-    var backend: ApmeJudgeBackend = .foundationModels
+    /// Default = local MLX, with on-device Foundation Models as the fallback
+    /// leg (`fallbackToFoundationModels`). Both are free and local; the order
+    /// is the measured judge-quality order — see settings.ts's header for the
+    /// 2026-08-22 model-eval numbers (FM 0.580 on judge-fidelity, and a hard
+    /// 4,096-token window that refuses 4.2% of this machine's real rollup
+    /// judge prompts) — and FM stays the floor so a Mac with no MLX server
+    /// still produces evals.
+    var backend: ApmeJudgeBackend = .mlx
     /// Model id — unused for `foundationModels` (system picks on-device model),
     /// retained for forward-compat with other backends.
     var model: String = "default"
@@ -49,6 +57,11 @@ struct ApmeJudgeConfig: Codable {
     /// Bearer key for the `openai` backend (OpenRouter etc.). Optional for
     /// local servers (Ollama/LM Studio). Also read by `api` (Anthropic).
     var apiKey: String?
+    /// When the MLX server does not answer, retry on-device Foundation Models
+    /// instead of skipping the eval. True for the DEFAULT only: a user who
+    /// names `mlx` and whose server is offline still gets a visible skip
+    /// rather than a silent downgrade (the rule `callJudge` already stated).
+    var fallbackToFoundationModels: Bool = true
 }
 
 struct ApmeDeterministicConfig: Codable {
@@ -158,6 +171,13 @@ enum ApmeSettings {
             if let b = judge["backend"] as? String,
                let parsed = ApmeJudgeBackend(rawValue: b) {
                 cfg.judge.backend = parsed
+                // The user NAMED a backend, so the default chain's FM leg is
+                // off unless they asked for it. An unparseable/unknown string
+                // is not a choice — it leaves the default (and its fallback)
+                // in place, matching settings.ts.
+                cfg.judge.fallbackToFoundationModels = judge["fallbackToFoundationModels"] as? Bool ?? false
+            } else if let f = judge["fallbackToFoundationModels"] as? Bool {
+                cfg.judge.fallbackToFoundationModels = f
             }
             if let m = judge["model"] as? String { cfg.judge.model = m }
             if let s = judge["sampleRate"] as? Double { cfg.judge.sampleRate = max(0, min(1, s)) }

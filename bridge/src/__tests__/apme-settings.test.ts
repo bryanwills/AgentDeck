@@ -32,7 +32,8 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
       expect(cfg.enabled).toBe(true);
       expect(cfg.deterministic.enabled).toBe(true);
       expect(cfg.deterministic.timeoutSec).toBe(DEFAULT_APME_CONFIG.deterministic.timeoutSec);
-      expect(cfg.judge.backend).toBe('foundationModels');
+      expect(cfg.judge.backend).toBe('mlx');
+      expect(cfg.judge.fallbackToFoundationModels).toBe(true);
       expect(cfg.judge.model).toBe('qwen3-30b');
       expect(cfg.judge.sampleRate).toBe(1.0);
       expect(cfg.judge.onlyWhenDisagreement).toBe(false);
@@ -50,7 +51,7 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
       );
       const cfg = loadApmeConfig();
       expect(cfg.enabled).toBe(true);
-      expect(cfg.judge.backend).toBe('foundationModels');
+      expect(cfg.judge.backend).toBe('mlx');
     });
   });
 
@@ -59,7 +60,7 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
       writeFileSync(join(dir, 'settings.json'), '{not valid json', 'utf-8');
       const cfg = loadApmeConfig();
       expect(cfg.enabled).toBe(true);
-      expect(cfg.judge.backend).toBe('foundationModels');
+      expect(cfg.judge.backend).toBe('mlx');
     });
   });
 
@@ -82,6 +83,52 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
       expect(cfg.judge.sampleRate).toBe(0.5);
       expect(cfg.judge.onlyWhenDisagreement).toBe(false); // unchanged default
       expect(cfg.availableModels).toEqual(['claude-opus', 'gpt-4']);
+    });
+  });
+
+  // The FM leg of the default chain exists so an MLX-less machine still gets
+  // evals. It must NOT apply to a backend the user named: cost-sensitive
+  // defaults say a named backend that is offline produces a visible skip,
+  // not a silent downgrade to a judge measured at 0.580.
+  it('keeps the Foundation Models fallback for the default backend only', () => {
+    withTempDataDir((dir) => {
+      writeFileSync(
+        join(dir, 'settings.json'),
+        JSON.stringify({ apme: { judge: { sampleRate: 0.5 } } }),
+        'utf-8',
+      );
+      expect(loadApmeConfig().judge.backend).toBe('mlx');
+      expect(loadApmeConfig().judge.fallbackToFoundationModels).toBe(true);
+
+      writeFileSync(
+        join(dir, 'settings.json'),
+        JSON.stringify({ apme: { judge: { backend: 'mlx' } } }),
+        'utf-8',
+      );
+      expect(loadApmeConfig().judge.backend).toBe('mlx');
+      expect(loadApmeConfig().judge.fallbackToFoundationModels).toBe(false);
+
+      writeFileSync(
+        join(dir, 'settings.json'),
+        JSON.stringify({ apme: { judge: { backend: 'mlx', fallbackToFoundationModels: true } } }),
+        'utf-8',
+      );
+      expect(loadApmeConfig().judge.fallbackToFoundationModels).toBe(true);
+    });
+  });
+
+  // An unparseable backend string is not a choice — the user is left on the
+  // default path, so the default's fallback has to come back with it.
+  it('restores the default chain when judge.backend is an unknown string', () => {
+    withTempDataDir((dir) => {
+      writeFileSync(
+        join(dir, 'settings.json'),
+        JSON.stringify({ apme: { judge: { backend: 'gpt5-turbo-max' } } }),
+        'utf-8',
+      );
+      const cfg = loadApmeConfig();
+      expect(cfg.judge.backend).toBe('mlx');
+      expect(cfg.judge.fallbackToFoundationModels).toBe(true);
     });
   });
 
@@ -209,8 +256,14 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
 });
 
 describe('loadApmeConfig — DEFAULT_APME_CONFIG sanity', () => {
-  it('default backend is Foundation Models with local MLX fallback (cost-sensitive policy)', () => {
-    expect(DEFAULT_APME_CONFIG.judge.backend).toBe('foundationModels');
+  // Both legs are free and local; the ORDER is the measured judge-quality
+  // order (model-eval `judging`, 2026-08-22: FM 0.580 vs MLX 0.86–1.00), and
+  // FM stays the floor so a machine with no MLX server still gets evals.
+  it('default backend is local MLX with on-device Foundation Models fallback', () => {
+    expect(DEFAULT_APME_CONFIG.judge.backend).toBe('mlx');
+    expect(DEFAULT_APME_CONFIG.judge.fallbackToFoundationModels).toBe(true);
+    // Retained for the reverse leg: a user who picks FM explicitly still
+    // gets the MLX retry.
     expect(DEFAULT_APME_CONFIG.judge.fallbackToMlx).toBe(true);
   });
   it('default sampleRate is 1.0 (judge every closed run; cost is local)', () => {

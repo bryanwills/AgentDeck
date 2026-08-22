@@ -14,11 +14,12 @@
       "commands": {}
     },
     "judge": {
-      "backend": "foundationModels",
+      "backend": "mlx",
       "model": "qwen3-30b",
       "sampleRate": 1.0,
       "onlyWhenDisagreement": false,
-      "fallbackToMlx": true
+      "fallbackToMlx": true,
+      "fallbackToFoundationModels": true
     },
     "availableModels": []
   }

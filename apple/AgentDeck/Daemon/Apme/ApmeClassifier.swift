@@ -220,7 +220,14 @@ enum ApmeClassifier {
         case .foundationModels:
             return await ApmeJudgeFoundationModels.judge(prompt: prompt)
         case .mlx:
-            return await ApmeJudgeMlx.judge(prompt: prompt, config: config.judge)
+            if let text = await ApmeJudgeMlx.judge(prompt: prompt, config: config.judge) {
+                return text
+            }
+            // Default chain (mlx → on-device FM). Cleared by the loader when
+            // the user named the backend, so an explicit MLX still fails
+            // visibly into the rule-based classifier.
+            guard config.judge.fallbackToFoundationModels else { return nil }
+            return await ApmeJudgeFoundationModels.judge(prompt: prompt)
         case .openai:
             return await ApmeJudgeOpenAI.judge(prompt: prompt, config: config.judge)
         case .api:

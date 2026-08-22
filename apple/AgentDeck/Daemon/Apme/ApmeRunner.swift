@@ -225,18 +225,18 @@ actor ApmeRunner {
             agentResponse: response
         )
 
-        guard let judgeText = await callJudge(prompt: judgePrompt) else {
+        guard let judgeOutput = await callJudge(prompt: judgePrompt) else {
             DaemonLogger.shared.debug("APME", "turn judge returned nil for turn=\(turnId.prefix(8)) category=\(category)")
             return
         }
-        guard let parsed = Self.parseJudgeJson(judgeText) else {
+        guard let parsed = Self.parseJudgeJson(judgeOutput.text) else {
             DaemonLogger.shared.debug("APME", "turn judge unparseable for turn=\(turnId.prefix(8))")
             return
         }
 
         let now = Int(Date().timeIntervalSince1970 * 1000)
         let rubricVer = rubric["version"] as? Int
-        let judgeModel = self.judgeModelLabel
+        let judgeModel = judgeOutput.label
 
         for (axis, score) in parsed.scores {
             var raw: String? = nil
@@ -338,18 +338,18 @@ actor ApmeRunner {
             turns: turns
         )
 
-        guard let judgeText = await callJudge(prompt: judgePrompt) else {
+        guard let judgeOutput = await callJudge(prompt: judgePrompt) else {
             DaemonLogger.shared.debug("APME", "task judge returned nil task=\(taskId.prefix(8))")
             return
         }
-        guard let parsed = Self.parseJudgeJson(judgeText) else {
+        guard let parsed = Self.parseJudgeJson(judgeOutput.text) else {
             DaemonLogger.shared.debug("APME", "task judge unparseable task=\(taskId.prefix(8))")
             return
         }
 
         let now = Int(Date().timeIntervalSince1970 * 1000)
         let rubricVer = rubric["version"] as? Int
-        let judgeModel = self.judgeModelLabel
+        let judgeModel = judgeOutput.label
 
         for (axis, score) in parsed.scores {
             var raw: String? = nil
@@ -508,12 +508,12 @@ actor ApmeRunner {
             store: store
         )
 
-        guard let judgeText = await callJudge(prompt: judgePrompt) else { return }
-        guard let parsed = Self.parseJudgeJson(judgeText) else { return }
+        guard let judgeOutput = await callJudge(prompt: judgePrompt) else { return }
+        guard let parsed = Self.parseJudgeJson(judgeOutput.text) else { return }
 
         let now = Int(Date().timeIntervalSince1970 * 1000)
         let rubricVer = rubric["version"] as? Int
-        let judgeModel = self.judgeModelLabel
+        let judgeModel = judgeOutput.label
         for (axis, score) in parsed.scores {
             var raw: String? = nil
             if axis == "overall" {
@@ -565,32 +565,43 @@ actor ApmeRunner {
     /// `openclaw` remains a round-trip compatibility stub (settings.json
     /// can round-trip it but the adapter isn't wired yet). It degrades to
     /// Foundation Models until Phase 3.
-    private func callJudge(prompt: String) async -> String? {
+    /// Judge output plus the label of the backend that ACTUALLY produced it.
+    /// The default chain can answer from either leg, and a row attributed to
+    /// the leg that did not run is worse than no attribution — the whole
+    /// point of measuring per-backend judge quality is lost. Mirrors the Node
+    /// runner's `JudgeResult`.
+    struct JudgeOutput {
+        let text: String
+        let label: String
+    }
+
+    private func callJudge(prompt: String) async -> JudgeOutput? {
         switch config.judge.backend {
         case .foundationModels:
             return await ApmeJudgeFoundationModels.judge(prompt: prompt)
+                .map { JudgeOutput(text: $0, label: ApmeJudgeFoundationModels.judgeModelLabel) }
         case .mlx:
-            return await ApmeJudgeMlx.judge(prompt: prompt, config: config.judge)
+            if let text = await ApmeJudgeMlx.judge(prompt: prompt, config: config.judge) {
+                return JudgeOutput(text: text, label: ApmeJudgeMlx.judgeModelLabel)
+            }
+            // Default chain only: an explicitly named `mlx` keeps the
+            // cost-sensitive-defaults rule that an offline backend produces a
+            // visible skip rather than a silent downgrade. The loader clears
+            // this flag whenever the user named the backend.
+            guard config.judge.fallbackToFoundationModels else { return nil }
+            DaemonLogger.shared.debug("APME", "mlx unavailable, falling back to foundationModels")
+            return await ApmeJudgeFoundationModels.judge(prompt: prompt)
+                .map { JudgeOutput(text: $0, label: ApmeJudgeFoundationModels.judgeModelLabel) }
         case .openai:
             return await ApmeJudgeOpenAI.judge(prompt: prompt, config: config.judge)
+                .map { JudgeOutput(text: $0, label: ApmeJudgeOpenAI.judgeModelLabel) }
         case .api:
             return await ApmeJudgeApi.judge(prompt: prompt, config: config.judge)
+                .map { JudgeOutput(text: $0, label: ApmeJudgeApi.judgeModelLabel) }
         case .openclaw:
             DaemonLogger.shared.debug("APME", "openclaw backend not wired, degrading to foundationModels")
             return await ApmeJudgeFoundationModels.judge(prompt: prompt)
-        }
-    }
-
-    /// Judge model label to persist on the eval row. Matches `callJudge`
-    /// dispatch so the `evals.judge_model` column correctly identifies
-    /// which backend produced each row.
-    private var judgeModelLabel: String {
-        switch config.judge.backend {
-        case .foundationModels: return ApmeJudgeFoundationModels.judgeModelLabel
-        case .mlx:              return ApmeJudgeMlx.judgeModelLabel
-        case .openai:           return ApmeJudgeOpenAI.judgeModelLabel
-        case .api:              return ApmeJudgeApi.judgeModelLabel
-        case .openclaw:         return "openclaw:\(config.judge.model)"
+                .map { JudgeOutput(text: $0, label: ApmeJudgeFoundationModels.judgeModelLabel) }
         }
     }
 

@@ -18,7 +18,25 @@ validators: [pnpm test]
 
 평가는 **카테고리별로 방법이 다르다** — 코딩 태스크는 run-level + git diff + 결정론 레이어, 비코딩 태스크는 turn-level + judge only. 모든 데이터는 `~/.agentdeck/apme.sqlite`에 저장되고, daemon HTTP API + WS 프로토콜로 Apple/Android/Stream Deck/ESP32 UI에 실시간 노출된다.
 
-**비용 정책**: judge 백엔드는 App Store Swift daemon 에서는 **Apple Intelligence Foundation Models** 기본, CLI-only 경로에서는 Swift daemon proxy 를 먼저 쓰고 없으면 내장 Swift helper 로 Foundation Models 를 호출한다. 둘 다 불가능하면 **MLX**(`mlx-community/Qwen3-1.7B-4bit` fallback) / OpenClaw Gateway 를 사용한다. 모든 run을 평가해도 비용이 0이 되도록 설계.
+**비용 정책**: 기본 judge 체인은 **로컬 MLX 서버 → 온디바이스 Apple Intelligence Foundation Models** 다. 둘 다 무료·로컬이고, 순서는 **실측한 판정 품질 순서**다 — 아래 [기본 judge 백엔드](#기본-judge-백엔드는-왜-mlx-foundation-models-순서인가) 참고. 유료 백엔드(`api`, OpenRouter 계열 `openai`)는 사용자가 명시할 때만 선택된다. 모든 run 을 평가해도 비용이 0 이 되도록 설계.
+
+### 기본 judge 백엔드는 왜 MLX → Foundation Models 순서인가
+
+2026-08-22 실측(`OpenClaw/model-eval`, `judging` 분류 6 시나리오 × 3 반복, 결과는 <https://eval.foundby.kr>):
+
+| 백엔드 | judge-fidelity 루브릭 | 무너지는 지점 |
+|---|---|---|
+| Apple FM (온디바이스, 이전 기본값) | **0.580** | 실패한 런에 후한 점수, 무결함 diff 에 결함 발명, diff·번역 입력 15회 `unsupportedLanguageOrLocale` 거부 |
+| MLX MoE (Qwen3.6-35B-A3B) | 0.86 | 장문 입력에서 JSON 을 닫지 못하고 잘림(= 판정 행 유실) |
+| MLX dense (Qwen3.8-27B) | 1.00 | — |
+
+두 번째 축은 컨텍스트다. FM 창은 **하드 4,096 토큰**이고(초과 시 `exceededContextWindowSize` 로 즉시 거부하며 센 토큰 수를 알려준다), 이 기계의 실제 `task_rollup` 판정 프롬프트 1,294건을 재구성해 애플 토크나이저로 재보니 **4.2% 가 그 창을 넘는다**(p90 2,968 · p99 7,371 · 최대 12,336 토큰). 넘는 순간 판정은 실패하고, 넘지 않으면 방향이 틀린 점수가 그대로 DB 에 적힌다 — 후자가 더 나쁘다.
+
+그래서 기본값을 뒤집되 **FM 을 바닥으로 남긴다**: MLX 서버가 없는 기계(App Store 단독 설치 포함)는 예전과 똑같이 온디바이스로 평가된다. 기능이 사라지지 않는다.
+
+**폴백은 기본값에만 붙는다.** 사용자가 `judge.backend` 를 직접 적었는데 그 서버가 꺼져 있으면 조용히 약한 판정자로 내려가지 않고 **평가를 건너뛴다**(눈에 보이는 실패). `judge.fallbackToFoundationModels` 를 명시하면 되살릴 수 있다.
+
+REVIEW 는 판정 전에 **실제로 답할 백엔드를 먼저 확정한다**(`resolveJudgeBackend` / Swift `ReviewRunner.resolveBackend`). 두 다리의 창이 4배 차이라 diff·궤적 예산을 설정값이 아니라 실행될 다리 기준으로 잡아야 한다. 같은 실측에서 basic 티어(=FM 전용 티어)의 기존 상한 조합이 창을 26% 초과하는 프롬프트를 만들 수 있다는 것도 드러나 상한을 실측값 기준으로 줄였다(diff 12KB → 5KB, 활동 4,000자 → 1,200자, Swift 궤적 6,000자 → 3,000자).
 
 > **관련 문서**
 > - [why-apme.md](./why-apme.md) — 왜 APME를 만들었는가 (설계 의도, 카테고리별 평가 전략)
@@ -534,10 +552,11 @@ TUI `renderer.ts`. 글랜스 표면(ESP32 카드/티커, 양 데몬의
       }
     },
     "judge": {
-      "backend": "foundationModels",
+      "backend": "mlx",
       "model": "qwen3-30b",
       "sampleRate": 1.0,
       "onlyWhenDisagreement": false,
+      "fallbackToFoundationModels": true,
       "fallbackToMlx": true,
       "endpoint": "http://127.0.0.1:8800/v1/chat/completions"
     },
@@ -552,11 +571,12 @@ TUI `renderer.ts`. 글랜스 표면(ESP32 카드/티커, 양 데몬의
 | `deterministic.enabled` | `true` | Layer 1 (lint/build/test) 실행 여부 |
 | `deterministic.timeoutSec` | `180` | 단계별 하드 타임아웃 (초) |
 | `deterministic.commands` | `{}` | 언어별 명령 override |
-| `judge.backend` | `"foundationModels"` | `"foundationModels"` \| `"mlx"` \| `"openclaw"` \| `"api"` |
+| `judge.backend` | `"mlx"` | `"mlx"` \| `"foundationModels"` \| `"openai"` \| `"openclaw"` \| `"api"` |
 | `judge.model` | `"qwen3-30b"` | 백엔드에서 사용할 모델 id. `qwen3-30b`는 legacy placeholder 로 취급되고, 실제 MLX fallback 은 `mlx-community/Qwen3-1.7B-4bit` |
 | `judge.sampleRate` | `1.0` | judge 호출 비율 (0..1) — 로컬 backend는 비용 0이므로 전수 평가 기본 |
 | `judge.onlyWhenDisagreement` | `false` | `true`면 결정론 clear pass는 judge skip |
-| `judge.fallbackToMlx` | `true` | CLI에서 Swift daemon Foundation Models endpoint가 없을 때 MLX로 fallback |
+| `judge.fallbackToMlx` | `true` | `backend:"foundationModels"` 일 때 FM 경로가 없으면 MLX 로 재시도 |
+| `judge.fallbackToFoundationModels` | `true` (기본값일 때만) | MLX 서버가 응답하지 않으면 온디바이스 FM 으로 재시도. **사용자가 `backend` 를 직접 적으면 꺼진다** — 명시한 백엔드가 죽어 있으면 조용한 강등 대신 보이는 skip |
 | `availableModels` | `[]` | 추천 엔진이 필터할 가용 모델 목록 |
 
 ## HW sampler

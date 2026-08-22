@@ -5743,7 +5743,16 @@ final class DaemonServer {
             }
             // Judge tier decides the prompt shape AND the trajectory budget,
             // so load the config before summarizing.
-            let judgeCfg = ApmeSettings.load().judge
+            // Resolve the chain BEFORE sizing anything: the default is
+            // mlx → foundationModels and the legs have different windows.
+            // `let` (not `var`) because the escaping judge closures below
+            // capture it — a captured `var` is a concurrency error.
+            let resolvedBackend = await ReviewRunner.resolveBackend(for: ApmeSettings.load().judge)
+            let judgeCfg: ApmeJudgeConfig = {
+                var c = ApmeSettings.load().judge
+                c.backend = resolvedBackend
+                return c
+            }()
             let tier = ReviewRunner.judgeTier(for: judgeCfg.backend)
             let entries = await self.timelineStore.historyForSession(sessionId, since: nil)
             let trajectory = ReviewRunner.trajectorySummary(
