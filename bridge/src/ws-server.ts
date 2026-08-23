@@ -122,11 +122,42 @@ export class WsServer {
               try {
                 ws.send(JSON.stringify({ type: 'auth_provision', ...payload }));
               } catch { /* peer vanished mid-handshake */ }
+              // Listen while the socket is briefly up. Firmware announces
+              // `device_info` the instant a WebSocket connects — precisely so a
+              // WiFi-only board is not anonymous — and the board that most needs
+              // adopting is the one too old to put `board=` in its query string,
+              // so hanging up without reading is throwing away the only
+              // self-identification such a board can make. It stays a LOG: the
+              // peer is unauthenticated, so nothing here registers a client,
+              // enters a roster, or is trusted beyond being printed.
+              let identified = false;
+              const onIdentify = (raw: unknown): void => {
+                if (identified) return;
+                const text = typeof raw === 'string' ? raw : String(raw);
+                // An unauthenticated peer's frame heading for a log line.
+                if (text.length > 4096) return;
+                let msg: { type?: unknown; board?: unknown; version?: unknown };
+                try { msg = JSON.parse(text); } catch { return; }
+                if (!msg || msg.type !== 'device_info') return;
+                identified = true;
+                const clean = (v: unknown, max: number): string | undefined =>
+                  typeof v === 'string' ? v.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, max) || undefined : undefined;
+                const named = clean(msg.board, 24);
+                const version = clean(msg.version, 16);
+                if (named) {
+                  log(`[agentdeck] Adopted board at ${remoteIp} identifies as ${named}`
+                    + (version ? ` v${version}` : ''));
+                }
+              };
+              ws.on('message', onIdentify);
+
               noteEsp32Adopted(remoteIp, board || undefined);
               // Normal close, not 4001: the board should redial immediately with
               // its new credential, not treat this endpoint as one that refused
-              // it. Delayed so the frame flushes first.
+              // it. Delayed so the frame flushes first — and so the announcement
+              // above has a moment to arrive.
               const bye = setTimeout(() => {
+                ws.off('message', onIdentify);
                 try { ws.close(1000, 'Re-armed — reconnect with the new token'); } catch { /* gone */ }
               }, 500);
               bye.unref?.();
