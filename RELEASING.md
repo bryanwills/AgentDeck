@@ -39,6 +39,37 @@ CI going green is the first of five, not the last. Keep them apart in your head 
 
 **Never report a state you did not measure.** Each has its own instrument: the workflow log for 1, `gh release list` for 2, the portal or `npm view <pkg> version` for 3, and the portal for 4 and 5. Deriving one from another is how "released" gets claimed for a build sitting in a portal — it happened on 2026-08-09, when CI upload was reported as a completed Stream Deck and Ulanzi release while neither had been submitted.
 
+### Every instrument above is keyed from a tag, so audit the tag surface too
+
+`gh release list`, `git log <tag>..HEAD`, and the gap calculation all start from a
+tag, so a version that shipped **without** one is invisible to every one of them —
+it does not read as late or as broken, it does not read at all. Three cheap checks
+close that blind spot, and they are the audit's own fourth leg beside tag / source /
+external:
+
+- **Local and remote tag sets are identical.** `git ls-remote --tags origin` against
+  `git tag -l`; a tag that exists only locally has published nothing.
+- **Every tag is reachable from `master`,** and tags and GitHub Releases pair 1:1
+  with no drafts on either side.
+- **Read the registry's whole version list, not just `latest`.**
+  `npm view @agentdeck/bridge versions` is what surfaces a published-but-untagged
+  version; `npm view … version` cannot, because it answers with the newest one.
+
+That last check found `npm 1.0.14` on 2026-08-23 — live on the registry, no tag, no
+Release, superseded six minutes later by 1.0.15, which is why the tag step never ran.
+See CHANGELOG.md § Known gaps for the commit that is now its record.
+
+**Do not backfill such a tag.** Since npm publishing became mandatory (state 1 above),
+pushing `npm-v1.0.14` is not a bookkeeping fix — it is a publish attempt against a
+version the registry already holds, and its first gate would fail anyway because
+CHANGELOG.md forbids reconstructing the notes. Record the commit instead.
+
+**Deleting a stale tag is also a content decision.** `verification-streamdeck-v1.0.3-windows.1`
+looks like leftover scaffolding and is kept: a comment in the closed issue #88 links
+to its release as the evidence of that Windows verification round, it is flagged
+prerelease so it never reads as latest, and `verification-*` does not match the
+`streamdeck-v*` workflow trigger. Check for inbound links before removing any tag.
+
 ### "Manual" means an interactive portal, not "only a human"
 
 Several steps here are marked _manual_ or _a separate App Store Connect action_. That describes the **absence of an API**, not the absence of an agent. Portals accept a signed-in browser, and browser automation is available to agents working in this repo.
