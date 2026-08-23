@@ -79,6 +79,89 @@ final class OpenClawToolNoiseTests: XCTestCase {
         XCTAssertNil(OpenClawAdapter.resolveToolName(payload))
     }
 
+    // MARK: - The REAL `session.tool` shape (captured off a live Gateway)
+    //
+    // Every case below this adapter's `data`-aware fix used the flat shape
+    // (`["name": "shell", "input": …]`) — a shape the Gateway has never sent.
+    // The real frame nests its tool facts under `data`, so `resolveToolName`
+    // returned nil for all of them, `isPlaceholderOnlySessionTool` reported
+    // true, and the adapter dropped 100% of real tool rows AS NOISE. The
+    // adapter had subscribed and was receiving them the whole time.
+
+    /// `session.tool` phase=start. Facts under `data`, args included.
+    private var realToolStart: [String: Any] {
+        [
+            "runId": "e38dc766-a373-4249-b720-a0dee9f37103",
+            "stream": "tool",
+            "sessionKey": "agent:main:agentdeck-probe",
+            "seq": 2,
+            "ts": 1_787_462_373_731,
+            // The session snapshot the Gateway spreads over every `session.*`
+            // frame. `status` here is the SESSION's, not the tool's.
+            "status": "running",
+            "model": "glm-5.2",
+            "data": [
+                "phase": "start",
+                "name": "read",
+                "toolCallId": "call_49c5d5c018d5497ca4ca7666",
+                "args": ["path": "/Users/example/workspace/heartbeat-state.json"],
+            ] as [String: Any],
+        ]
+    }
+
+    /// `session.tool` phase=result, carrying the tool output.
+    private var realToolResult: [String: Any] {
+        [
+            "runId": "e38dc766-a373-4249-b720-a0dee9f37103",
+            "stream": "tool",
+            "sessionKey": "agent:main:agentdeck-probe",
+            "seq": 4,
+            "ts": 1_787_462_373_775,
+            "status": "running",
+            "data": [
+                "phase": "result",
+                "name": "read",
+                "toolCallId": "call_49c5d5c018d5497ca4ca7666",
+                "isError": false,
+                "result": ["content": [["type": "text", "text": "{}"]]],
+            ] as [String: Any],
+        ]
+    }
+
+    func testRealSessionToolStartIsNotDroppedAsPlaceholder() {
+        XCTAssertFalse(OpenClawAdapter.isPlaceholderOnlySessionTool(realToolStart),
+            "a real tool frame must never be dropped as noise")
+        XCTAssertEqual(OpenClawAdapter.resolveToolName(realToolStart), "read")
+        XCTAssertNotNil(OpenClawAdapter.resolveToolInput(realToolStart))
+    }
+
+    func testRealSessionToolResultCarriesItsOutput() {
+        XCTAssertFalse(OpenClawAdapter.isPlaceholderOnlySessionTool(realToolResult))
+        XCTAssertEqual(OpenClawAdapter.resolveToolName(realToolResult), "read")
+        XCTAssertNotNil(OpenClawAdapter.resolveToolOutput(realToolResult))
+    }
+
+    /// The tool's status is its `data.phase`, never the frame's top-level
+    /// `status` — that one belongs to the session snapshot, so reading it
+    /// labelled a finished tool with whatever the SESSION happened to be doing.
+    func testToolStatusComesFromPhaseNotTheSessionSnapshot() {
+        XCTAssertEqual(OpenClawAdapter.resolveToolStatus(realToolStart), "running")
+        XCTAssertEqual(OpenClawAdapter.resolveToolStatus(realToolResult), "success")
+        var errored = realToolResult
+        var data = errored["data"] as! [String: Any]
+        data["isError"] = true
+        errored["data"] = data
+        XCTAssertEqual(OpenClawAdapter.resolveToolStatus(errored), "error")
+    }
+
+    /// A frame carrying only the session snapshot (no `data`) is still noise
+    /// and must still be dropped — the fix widens where we look, it does not
+    /// weaken the guard.
+    func testSnapshotOnlyFrameIsStillDropped() {
+        let payload: [String: Any] = ["sessionKey": "agent:main:main", "status": "running"]
+        XCTAssertTrue(OpenClawAdapter.isPlaceholderOnlySessionTool(payload))
+    }
+
     /// Real tool with name only (no input/output yet — start of a tool that
     /// emits ack before arguments resolve) must NOT be dropped. The name
     /// alone carries enough signal for the user to see what's happening.
@@ -799,6 +882,89 @@ final class OpenClawToolNoiseTests: XCTestCase {
         XCTAssertTrue(
             store.subagentActivityBySession(now: 1_000, activeTtlMs: 100).isEmpty
         )
+    }
+
+    // MARK: - session.message, driven through the parser from the real fixtures
+    //
+    // These load `tests/parity/gateway-frames/*.json` and run the ADAPTER over
+    // them. GatewayParityTests loads the same files but only asserts on the
+    // fixture's own dictionary, so it passes with the production fix reverted —
+    // it documents the shape without testing anything that reads it. A fixture
+    // earns its place by driving the real parser, which is the rule this repo's
+    // own fixture README states and the Swift side had not been held to.
+
+    private func parityFixture(_ name: String) throws -> [String: Any] {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("tests/parity/gateway-frames/\(name)")
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+        guard let frame = json as? [String: Any],
+              let payload = frame["payload"] as? [String: Any] else {
+            throw XCTSkip("fixture \(name) has no payload")
+        }
+        return payload
+    }
+
+    /// An assistant message's `content` is an ARRAY of typed blocks; only a user
+    /// message's is a plain string. A lone `as? String` therefore yielded "" for
+    /// every assistant frame, and the empty-text guard dropped 100% of real
+    /// replies while reading as noise suppression.
+    func testAssistantSessionMessageTextIsExtractedFromContentBlocks() throws {
+        let payload = try parityFixture("session-message-assistant-text.json")
+        let message = payload["message"] as? [String: Any]
+        XCTAssertNil(payload["content"], "the frame's top level is the session snapshot")
+        XCTAssertFalse(message?["content"] is String, "an assistant content is blocks, not a string")
+        let text = OpenClawAdapter.sessionMessageText(message?["content"])
+        XCTAssertFalse(text.isEmpty, "assistant reply text must survive the block array")
+    }
+
+    /// `role` lives on the message, not at the frame's top level — so the
+    /// `model_response` branch was unreachable and every row was a `model_call`.
+    func testSessionMessageRoleComesFromTheMessageNotTheFrame() throws {
+        for (name, expected) in [
+            ("session-message-user.json", "user"),
+            ("session-message-assistant-text.json", "assistant"),
+        ] {
+            let payload = try parityFixture(name)
+            XCTAssertNil(payload["role"], "[\(name)] no top-level role")
+            let role = (payload["message"] as? [String: Any])?["role"] as? String
+            XCTAssertEqual(role, expected, "[\(name)] role is nested")
+        }
+    }
+
+    /// A `toolCall`-only assistant message still carries its text blocks; the
+    /// extractor must not choke on a mixed content array.
+    func testToolCallAssistantMessageDoesNotCrashTheExtractor() throws {
+        let payload = try parityFixture("session-message-assistant-toolcall.json")
+        let message = payload["message"] as? [String: Any]
+        _ = OpenClawAdapter.sessionMessageText(message?["content"])
+    }
+
+    /// `phase: "error"` is terminal and means the tool FAILED, with or without a
+    /// companion `isError`.
+    ///
+    /// **This is a contract pin, not a mutation-verified gate**, and the
+    /// difference is worth stating rather than leaving for the next reader to
+    /// discover: the pre-fix Swift code returned the phase verbatim, so it
+    /// answered `"error"` too and this assertion passes on both sides of the
+    /// change. The defect it describes was NODE's — deriving status from
+    /// `isError` alone scored this frame a SUCCESS — and the gate that actually
+    /// fails without the fix lives there
+    /// (`apme-sample-timeline.test.ts`, "treats phase 'error' as a failure even
+    /// when isError is absent"). What this pin still buys is the opposite
+    /// regression: it goes red if someone later folds `error` into the
+    /// non-terminal branch and reports a failed tool as running.
+    func testErrorPhaseIsTerminalAndFails() {
+        let frame: [String: Any] = ["data": ["phase": "error", "name": "bash"]]
+        XCTAssertEqual(OpenClawAdapter.resolveToolStatus(frame), "error")
+    }
+
+    /// An unrecognised phase reads as still running rather than leaking the wire
+    /// word into `TimelineEntry.status`, which has its own rendered vocabulary.
+    func testUnknownPhaseReadsAsRunning() {
+        let frame: [String: Any] = ["data": ["phase": "progress", "name": "bash"]]
+        XCTAssertEqual(OpenClawAdapter.resolveToolStatus(frame), "running")
     }
 }
 #endif
