@@ -2,6 +2,192 @@
 
 ---
 
+## 2026-08-23 — transcript 피드는 켜져 있었지만, 한 줄도 나간 적이 없었다
+
+### 문제
+
+앞 라운드에서 붙인 OpenClaw transcript 피드(`openclaw-transcript-timeline.ts` +
+`openclaw-timeline-feed.ts`)의 **라이브 발행이 한 번도 실측된 적이 없었다.** "OpenClaw 이
+유휴라 30분 활동창에 든 세션이 0개였다"고 기록돼 있었지만, 그건 관측 실패의 이유가 아니라
+관측을 안 한 이유였다.
+
+### 실측
+
+먼저 계측기부터 검증했다. 리더는 멀쩡했다 — 실제 스토어에서 `read · …heartbeat-state.json`
+행을 정상 파싱했고 `detail` 머리도 규격대로였다. 그리고 9120 을 쥔 데몬이 **10:18:59 기동,
+빌드는 12:19, 커밋은 12:18/12:22** 였다. 즉 돌고 있던 데몬에는 이 코드가 아예 없었다.
+"유휴라서 안 나왔다"는 검증 불가능한 가설이었다.
+
+전용 프로브 세션(`agent:main:agentdeck-probe`)으로 턴을 돌려 실측했다. **연속 3턴 —
+스토어에는 매번 tool 행이 쓰였고, 리더는 매번 그걸 돌려줬고, 타임라인 `tool_exec` 는
+0이었다.** 서로 독립인 결함 두 개가 겹쳐 있었다.
+
+**1. 프로듀서가 자기 주체가 움직일 수 없는 신호에 매달려 있었다.**
+pump 가 `passiveSessionObserver.onRefreshed` 를 타고 있었는데, 이건 관측된 **프로세스
+집합이 바뀔 때만** 발화한다(`scan()` 이 `next` 와 캐시를 비교). 다른 transcript 피드는
+전부 이 엣지를 타도 된다 — 주체가 그 집합 안에 있으니까. Kiro 턴은 자기 행의
+`state`/`lastActivityAt` 를 움직인다. **OpenClaw 은 Gateway 로만 닿고 프로세스 행이 아예
+없다.** 그래서 OpenClaw 턴은 옵저버가 볼 수 있는 걸 아무것도 안 움직였고, pump 는 무관한
+에이전트가 뜨거나 죽을 때만 돌았다. 데몬 로그 실측: pump 는 정확히 **2번, 둘 다 기동
+직후**(빈 캐시 → 채워짐 = 항상 변화) 돌았고 그 뒤로 끝이었다.
+→ 전용 타이머 `OPENCLAW_FEED_INTERVAL_MS`(5s, 옵저버 SCAN_INTERVAL 과 동일).
+
+**2. 이 피드가 내는 유일한 타입이 eviction 이 첫 번째로 버리는 타입이었다.**
+1번을 고치고 재측정하니 `openclaw-feed emitting 1 row(s)` 는 찍히는데 타임라인은 여전히 0.
+버퍼 전체(200행)에 `tool_exec` 가 **어느 에이전트 것도** 하나도 없었다. `addEntry` 는
+push 후 evict 하고, `evictOne` 은 평범한 `tool_exec` 를 가장 먼저 턴다 — 방금 넣은 그 행이
+버퍼의 유일한 평범한 `tool_exec` 였으므로 **삽입되면서 자기 자신을 지웠다.** 스토어 단위로
+결정론적 재현 확인.
+→ subagent dispatch 행 선례 그대로 OpenClaw 을 그 규칙에서 제외. **양 데몬 모두** — 둘이
+`timeline.json` 을 교대로 소유하므로 한쪽만 파면 replay 버퍼가 갈린다.
+
+두 실패 모드는 밖에서 보면 완전히 동일하다(아무것도 안 내는 tick 은 아무것도 안 쓴다).
+그래서 emit 경로에 로그를 남겼다 — 이 모호함이 1번을 숨긴 장본인이다.
+
+**최종 실측(양쪽 수정 후):** 프로브 턴 → `openclaw-feed emitting 1 row(s)` →
+타임라인에 행 안착. `detail` 머리 = `session: agentdeck-probe`, 귀속 =
+`openclaw-gateway` / `agentType: openclaw`.
+
+### trajectory → APME: 연결하지 않는다
+
+전제부터 틀렸다. `<uuid>.trajectory.jsonl` 이 canonical `SessionSample` 과 1:1 이라고
+봤지만, 스토어의 **trajectory 484개 전수 조사 결과 이벤트 타입은 8종뿐이고 tool 이벤트는
+0개다.** 턴 경계(`session.started`/`prompt.submitted`/`model.completed`/`session.ended`,
+턴당 `runId` 1개)와 턴별 provider/model + 토큰 사용량은 있지만 **스텝은 없다.** 즉
+trajectory 로 만든 SessionSample 은 tool 스텝이 빈 껍데기다. 툴 호출은 `<uuid>.jsonl`
+(transcript) 쪽에만 있고, 그게 이번 피드가 읽는 파일이다.
+
+경계 주인 판정: **Gateway 스트림이 계속 주인.** 유일한 push 채널이고 이미 소유 중이다.
+trajectory 는 5초 폴링이라 사후에 도착하므로, 경계를 넘기면 늦어지기만 하고 이중계상
+위험은 그대로다. trajectory 가 Gateway 에 없는 걸 유일하게 가진 축은 **턴별 정체성과
+비용**(`runId`, `sessionKey`, 턴별 provider/model, 토큰)이며 이건 경계 축이 아니라
+**보강 축**이다. 나중에 붙인다면 기존 APME 턴을 enrich 하는 용도이지 run 을 열고 닫는
+용도가 아니다.
+
+다만 그 전에 정해야 할 게 따로 있다(이번엔 안 건드림 — 사용자 eval 데이터의 의미가 바뀜):
+APME run 이 **Gateway 접속 단위**로 열린다(`openclaw-<uuid>`, connect 시 1개, disconnect 시
+close). 어댑터의 `apmeSessionId` 는 단일 값이라 사용자 채팅 + cron heartbeat + 동시
+eval run 6개가 **전부 한 run 에 들어가고 model 필드도 하나**다. 턴 경계도 idle-gap 타이머
+휴리스틱이다. eval 관점에선 이쪽이 진짜 결함이고, trajectory 를 붙이기 전에 먼저 정리돼야
+한다.
+
+### Swift 데몬 미러: 보류
+
+피드 자체는 포팅하지 않는다. 샌드박스 데몬이 `~/.openclaw` 에 닿으려면 Kiro 선례
+(`AppPreferences.withKiroDirectoryAccess`)와 같은 security-scoped bookmark 동의 흐름이
+선행돼야 하고, 그건 코드 포팅이 아니라 Settings 플로우다. 더구나 방금 본 대로 Node 쪽
+라이브 경로는 실측 전까지 결함 두 개를 숨기고 있었다 — 실사용 검증이 안 된 동작을 계측이
+더 어려운 표면(App Store 빌드, debug 로그 없음)으로 먼저 미러링할 이유가 없다.
+단, **eviction 카브아웃은 이번에 양쪽 다 반영했다.** 피드는 Node 전용이어도
+`timeline.json` 은 두 데몬이 교대로 소유하므로 그 규칙만은 갈리면 안 된다.
+
+### 게이트
+
+vitest 222 files / 3455 tests, Swift TimelineTests 74 tests, macOS 빌드 성공.
+양쪽 회귀 테스트는 카브아웃을 빼고 돌려 **실제로 실패하는 것까지 확인**했다(Node 는 수정 전
+dist 를 대조군으로, Swift 는 술어를 되돌려 `TEST FAILED` 확인).
+
+---
+
+## 2026-08-23 — 승인 요청은 읽히지 않았고, 데이터는 처음부터 다 있었다
+
+### 문제
+
+사용자가 OpenClaw exec approve 요청을 승인하지 못했다. 거부한 게 아니라 **무엇을 승인하는
+건지 읽을 수 없었다.** 실측: 그날 승인 8건 중 7건이 75~402초 뒤 무응답으로 닫혔고, 같은
+명령이 1시간 반 동안 7번 반복 요청됐다.
+
+프로듀서는 멀쩡했다. `parseExecApprovalRequest` 는 명령 전문과 정책 경고
+(`strict inline-eval mode requires reviewer or explicit approval for sed inline program`)
+를 정확히 뽑고 있었고 `timeline.json` 에 온전히 남아 있었다. **유실은 전적으로 표면
+렌더 단계**였다.
+
+### 실측으로 드러난 것
+
+**1. 데크의 head-cut 이 목적어를 죽인다.** `truncateStr(question, 18)`. 승인 질문은 전부
+셸 명령이고 명령은 동사가 앞, 목적어가 뒤다. 그래서 18자를 앞에서 자르면 *모든 요청이
+공유하는 부분*을 남기고 *이 요청을 식별하는 부분*을 버린다. 실제 렌더는
+`sed -n '20,35p' ~…` — 경로가 시작되는 바로 그 바이트에서 잘렸다. 기록된 두 요청 모두
+같은 지점에서 잘렸다.
+
+**2. "왜 승인이 필요한가" 가 와이어에 필드가 없었다.** `injectOpenClawSession` 이
+`prompt.detail` 을 세션 행으로 옮기지 않았고 `SessionInfo` 에 대응 필드도 없었다. 무해해
+보이는 `sed -n` 이 왜 승인을 요구하는지 알 방법이 어느 표면에도 없었다.
+
+**3. D200H 는 질문을 그리는 픽셀이 0이었다.** `d200h-layout.ts` 의 `question` 은 press
+echo 전용이었고 hero 셀 `renderDetailInfo` 에는 question 파라미터 자체가 없었다.
+Allow/Deny/Always 세 개의 라이브 버튼이 주어(主語) 없이 떠 있었다.
+
+**4. 부수 — 포기가 거부로 기록됐다.** 7건은 사용자가 거부한 게 아니라 OpenClaw run 이
+취소되며 포기된 것인데(`abandonPendingApprovalForTurnEnd`), 행은 `status:'denied'` 였다.
+사용자의 명시적 거부와 "아무도 답한 적 없음" 이 같은 값이었고, 후자가 압도적으로 흔하며
+그게 바로 "프롬프트가 사람에게 못 닿았다" 는 신호다.
+
+### 해결
+
+- `summarizeQuestionForKey` (shared SSOT): 동사 + 목적어 basename, 중간 생략 →
+  `sed … config.py`. 목적어는 **앞에서부터** 찾는다 — 남긴 동사의 목적어여야 하기
+  때문. 복합 명령에서 뒤에서 찾으면 `sed … serve.py` 처럼 실제로 함께 등장한 적 없는
+  쌍이 나온다(부분 정보가 아니라 틀린 정보). `rm … build-cache` 가 이게 가독성이 아니라
+  **안전** 규칙인 이유.
+- `SessionInfo.questionDetail` (additive): 정책 이유 + cwd + **어느 OpenClaw 세션이
+  물었는지**. SSOT 파서의 `detail` 을 most-decisive-first 로 재정렬 — 한 줄만 들어가는
+  표면이 head 를 집는데 cwd 가 선두면 에이전트마다 늘 같은, 아무것도 구분 못 하는 값이
+  그 한 줄을 차지한다. `approvalReasonHead` 가 `Warning:` 라벨을 벗긴다(amber 톤이 이미
+  말하는 걸 22자 예산의 9자로 반복하고 있었다).
+- `renderDetailInfo` 가 대기 중일 때 질문 3줄 + 이유를 그린다. 파라미터 추가가 아니라
+  `session` 에서 읽으므로 모든 호출부와 미러가 자동으로 받는다.
+- `status` 에 `'abandoned'` 추가. 겸사겸사 `tool_resolved` 아이콘이 status 무관 success
+  였던 잠복 버그도 드러났다(거부에 초록 체크).
+
+### OpenClaw 관측 티어 — Gateway 스트림의 보수(補數)
+
+"OpenClaw 이 뭘 하는지 더 보고 싶다" 는 요청에서 나온 두 번째 절반. Gateway WS 는
+프롬프트·최종 응답·차단해야 하는 승인만 나른다. 그래서 **타임라인에 나타난 툴은 승인이
+필요했던 것뿐**이었다 — 로그가 아니라 편향된 표본.
+
+OpenClaw 은 어차피 세션마다 전문 transcript 를 쓴다
+(`~/.openclaw/agents/<agent>/sessions/<uuid>.jsonl` + 타입 있는 `.trajectory.jsonl`,
+인덱스 `sessions.json` 의 **키가 세션 키**). `openclaw-transcript-timeline.ts` +
+`openclaw-timeline-feed.ts` 가 이를 읽어 **`tool_exec` 행만** 낸다.
+
+경계 셋, 전부 실측 근거:
+- 활동창 30분 안의 세션만 (스토어는 세션을 영원히 보관 — 이 머신에 103개)
+- **첫 관측은 무발행.** `KiroTimelineFeed` 와 정반대다: Kiro 는 라이브 행 옆 빈 스트립이
+  고장으로 읽혀서 마지막 턴을 시딩하지만, OpenClaw 은 Gateway 스트림이 이미 스트립을
+  채우고 있어 그 문제가 없다. 시딩하면 끝난 eval 런의 낡은 툴콜만 주입된다.
+- 가상 `openclaw-gateway` 행에 귀속, 세션 신설 금지 (eval 스위트가 런마다 새 키를 연다 —
+  측정한 3시간에 6개)
+
+### 핵심 설계 결정
+
+**"macOS 앱에 대화 기록이 없다" 는 앱 버그가 아니었다.** 승인 8건 전부
+`agent:main:eval-full-unified-mlx-…__r2` — model-eval 하네스 런 소속이었고, 앱이 보여주는
+`agent:main:main` 은 그 시각 3시간째 조용했다. 찾는 세션이 없는 게 아니라 다른 세션 키에
+있었다. `main` / `cron:<id>` / `eval-…__r2` 가 전부 단일 리터럴 "OpenClaw" 로 도착하는
+게 원인이므로, 세션 키가 `questionDetail` 과 모든 tool 행 `detail` 머리에 실린다.
+
+**fixture 는 실제 스토어에서 그대로 복사.** 특히 `isError:true` 인데 `exitCode` 가 **없는**
+실제 실패 케이스를 넣었다 — exitCode 만 믿으면 성공으로 읽는다. (이 저장소는 상상으로
+쓴 Kiro fixture 가 테스트를 통과하면서 아무것도 매치하지 않은 전과가 있다.)
+
+**`clip()` 이 개행까지 뭉개던 버그를 만들면서 잡았다.** most-decisive-first 정렬의 전제는
+소비자가 `split('\n')[0]` 로 머리를 집는다는 것인데, 블록 전체를 flatten 하면 집을 머리가
+없다 — 정렬이 장식이 되고 표면은 이어붙은 문자열의 앞 22자를 보여준다. `clipLines()` 로
+줄 단위 예산 분배.
+
+### 남은 것
+
+- **trajectory → APME 미연결.** `.trajectory.jsonl` 이 canonical `SessionSample` 과 거의
+  1:1 이라 가장 탐나지만, Gateway 어댑터가 이미 OpenClaw APME run 을 열고 있어 화해 규칙
+  없이 두 번째 프로듀서를 달면 이중계상된다. turn/task 경계의 주인을 먼저 정해야 한다.
+- **Swift 데몬 미러 없음.** 샌드박스가 `~/.openclaw` 를 user-granted security-scoped
+  bookmark 없이 못 읽는다 — Kiro 와 같은 동의 흐름이 선행돼야 하는 별건.
+- **피드의 라이브 발행은 미관측.** 실제 스토어 단독 실행(6개 세션 키/28행)과 컴파일된
+  배선까지만 확인. OpenClaw 이 유휴라 30분 창에 드는 세션이 0개였다.
+
+---
+
 ## 2026-08-23 — stubless 쓰기는 stub 문제가 아니었다: ips_10 의 SYNC 무응답과 계측기 두 번의 거짓말
 
 ### 문제
