@@ -26,6 +26,16 @@ inventing a changelog after the fact states things nobody measured:
 `streamdeck 1.0.4`–`1.0.5`, `esp32 1.0.2`–`1.0.4`, `ulanzi 1.0.2`.
 Their content is recoverable from the commit range between their tags.
 
+One of them has no tag to recover it from. **`npm 1.0.14` is live on the
+registry and was never tagged** — it was published from `8ee5a764` (the commit's
+`bridge/package.json` reads `1.0.14`, and its timestamp matches the registry's
+publish time to the second) and superseded by 1.0.15 six minutes later, so the
+tag step never ran. It is left untagged deliberately: pushing `npm-v1.0.14` now
+would fire the release workflow against a version npm already holds, and this
+file's own rule forbids reconstructing its notes. The commit above is the
+record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
+bumped, superseded by 1.0.17, and never published, so it exists only in git.
+
 ## 2026-08-23 — npm 1.0.24
 
 1.0.23 shipped the flashers. A hardware run over the fleet then found two
