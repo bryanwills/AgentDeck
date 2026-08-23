@@ -26,6 +26,68 @@ inventing a changelog after the fact states things nobody measured:
 `streamdeck 1.0.4`–`1.0.5`, `esp32 1.0.2`–`1.0.4`, `ulanzi 1.0.2`.
 Their content is recoverable from the commit range between their tags.
 
+## 2026-08-23 — npm 1.0.24
+
+1.0.23 shipped the flashers. A hardware run over the fleet then found two
+defects in them, and both had the same shape: a write that fully succeeded
+reported as a failure, or was refused before it started. Neither could be seen
+from a green test suite, because both live in the wire between the host and a
+board.
+
+### The board now reboots into the firmware you just wrote
+
+1.0.23's own notes called a real per-board reset open work. This closes it.
+
+esptool-js's non-USB-OTG hard reset is, in full, `sleep(100); setRTS(false)` — a
+*release* with no *assert*. That works only if whatever ran before left EN
+asserted: `--before default-reset` does, and a finished `writeFlash` does not. So
+every flash left the chip parked in the flasher stub. The firmware never ran, the
+post-write `device_info` read-back could not succeed however long it waited, and
+the CLI told users to power-cycle a board that had been written perfectly.
+
+Both flashers now drive the reset themselves, from one sequence in the board
+SSOT rather than one per flasher. Measured 2026-08-23 across three boards
+spanning both of esptool-js's adapter strategies and the no-stub path:
+
+| sequence            | T-Display-S3-Pro (native USB) | 86 Box (CH340) | TTGO T-Display (CH340) |
+|---------------------|-------------------------------|----------------|------------------------|
+| `after(hard_reset)` | parked                        | parked         | parked                 |
+| `R1 W250 R0`        | booted                        | parked         | —                      |
+| `D0 R1 W100 R0`     | booted                        | booted         | booted                 |
+
+The `D0` is load-bearing and only the CH340 boards reveal it: pulsing EN without
+first driving IO0 high leaves them in download mode, which from outside is
+indistinguishable from a board that failed to boot.
+
+### TTGO T-Display can actually be flashed
+
+1.0.23 offered it in the browser picker. It could not be written there, or
+anywhere: it was pinned `--no-stub`, the ROM loader has no compressed flash
+mode, and the write died at `Failed to enter compressed flash mode` — before a
+single byte landed. Making compression conditional moved the failure exactly one
+step, to `Failed to enter Flash download mode`.
+
+The evidence recorded for that board only ever claimed that it *connects*.
+Connecting is not writing, and a board's verification now has to name a
+completed write. With the stub it writes and boots end to end — 2.6 MB in 138
+seconds, MD5 verified against the chip, and the board came up reporting its own
+version. It also fixes the size guard as a side effect: stubless, this board's
+flash id reads `0xffffff` and no size can be checked at all.
+
+`esp32/platformio.ini` keeps its `--no-stub`, deliberately. That pin drives
+`esptool.py`, a different tool, and changing it on evidence gathered from
+esptool-js would be the guess this whole round exists to stop making.
+
+### Still open
+
+Stubless writing itself. Every `--no-stub` board measured so far fails before
+writing a byte, and that is its own investigation. No board offered in the
+browser is stubless now, so this affects only the CLI-only boards.
+
+The browser flasher at [/flash/](https://puritysb.github.io/AgentDeck/flash/)
+deploys from `master` and already carries both fixes; this release is the
+terminal half.
+
 ## 2026-08-22 — npm 1.0.23 · ESP32 1.0.7
 
 Firmware was building correctly for ten boards every release and piling up
