@@ -88,6 +88,47 @@ The browser flasher at [/flash/](https://puritysb.github.io/AgentDeck/flash/)
 deploys from `master` and already carries both fixes; this release is the
 terminal half.
 
+## 2026-08-23 — ESP32 1.0.8
+
+A small screen that runs out of room used to just stop drawing sessions. The
+T-Display Pro said `+N more`, the general HUD had no bound at all, and InkDeck's
+fixed grid simply ended — so a session waiting on your input could vanish behind
+a full screen with nothing saying it had. Every ESP32 surface now shares one
+glance order — **input → working → quiet context** — and states what it left
+out: `4 idle hidden`, `hidden: 2 input / 3 working`. What is dropped is now a
+fact on screen rather than an absence.
+
+InkDeck applies the same order past its card capacity and prints the per-state
+hidden counts in its header. The dense terrarium keeps the names of sessions
+that are working or waiting and folds only the idle tags, so the creatures and
+the summary roster split the job instead of competing for the same pixels.
+
+### The IPS 10.1 office says state in more than one channel
+
+The tiny `w` / `z` / `?` letter codes are gone. Idle is still and dimmed with no
+badge at all, working is a cyan spark with a floor halo, awaiting input is an
+amber `!`, error a coral `!`. Shape, motion and contrast now carry the state
+redundantly with colour, so it survives distance and a washed-out panel. In a
+narrow cell the session card gives the one-line name priority over the
+decorative glyph — `OpenCode` and `Antigravity` no longer break mid-name.
+
+### Two rendering defects
+
+- **TC001's awaiting-input pulse went black.** The brightness curve ran through
+  its negative half, so the one state that must never be missed disappeared for
+  part of every cycle. Floored at 45%.
+- **The new bounds allocate nothing.** Fixed arrays and stack buffers only —
+  a render loop that allocates is how a no-PSRAM board OOMs under exactly the
+  crowded scene these bounds exist to handle.
+
+### Verified
+
+Pixel-exact simulator scenes for IPS 10.1 dense and permission, Box dense,
+T-Display Pro crowded Sessions, TC001 permission, and InkDeck dense — plus a new
+10-session `dense` scene kept for future regressions. The e-ink layout
+regression tests pass, as do the PlatformIO builds for `ips35`, `box_86`,
+`led8x32`, `inkdeck`, `t_display_pro` and `ips10`.
+
 ## 2026-08-22 — npm 1.0.23 · ESP32 1.0.7
 
 Firmware was building correctly for ten boards every release and piling up
