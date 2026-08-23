@@ -17,10 +17,23 @@ jobs:
         with:
           python-version: '3.12'
 
+      # pnpm BEFORE setup-node, because `cache: pnpm` needs the binary to exist
+      # when the cache key is computed. The "Verify ESP32 board table" step below
+      # builds @agentdeck/shared, so this job needs the workspace installed —
+      # without it that step exits 127 (`pnpm: command not found`), which is a
+      # gate that never checks anything while still failing the branch.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.0
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       # Token mirrors must match design/tokens.css — drift here is always a bug.
       - name: Verify token mirrors are in sync
