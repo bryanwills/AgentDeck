@@ -1,6 +1,6 @@
 import Bonjour from 'bonjour-service';
 import { randomUUID } from 'node:crypto';
-import { hostname, userInfo } from 'node:os';
+import { hostname, networkInterfaces, userInfo } from 'node:os';
 import type { AgentType } from './types.js';
 import { debug, log } from './logger.js';
 import {
@@ -10,6 +10,60 @@ import {
   sanitizeMdnsLabel,
   MDNS_TXT_SCHEMA_VERSION,
 } from '@agentdeck/shared';
+
+/**
+ * True when a LAN peer could actually route to this IPv4 address.
+ *
+ * `bonjour-service` publishes one A record per non-internal IPv4 address it
+ * finds, with no routability test (`service.js` -> `records()`). That set is
+ * captured at PUBLISH time, and the daemon publishes seconds after start — so a
+ * machine whose second interface is still negotiating DHCP advertises its
+ * transient `169.254/16` APIPA address as a way to reach the daemon. Nothing
+ * ever retracts it: the address disappears from `os.networkInterfaces()`, so no
+ * later announcement carries it and no goodbye is ever sent for it, while every
+ * resolver that heard it keeps handing it out.
+ *
+ * Measured on this repo's own fleet (2026-08-23): the advertised host resolved
+ * to `192.168.68.100`, `192.168.68.60` AND `169.254.213.161` while no interface
+ * on the machine held that third address. A board that picks it dials a dead
+ * address at max backoff forever, and — because it never reaches the daemon —
+ * leaves no trace in the daemon's log at all. That is the failure mode this
+ * predicate exists to prevent, and the reason the filter belongs on the
+ * PUBLISHING side: a client cannot tell a stale record from a live one.
+ */
+export function isRoutableIpv4(addr: string): boolean {
+  // Link-local / APIPA. Self-assigned; never reachable from another host.
+  if (addr.startsWith('169.254.')) return false;
+  // Loopback. `internal` already covers 127.0.0.1, but an alias on a
+  // non-internal interface would not be caught by that flag.
+  if (addr.startsWith('127.')) return false;
+  if (addr === '0.0.0.0') return false;
+  return true;
+}
+
+/**
+ * The IPv4 addresses this host would advertise, after the routability filter.
+ *
+ * This is the value the republish trigger watches. It deliberately returns the
+ * whole SET rather than one address: the publisher emits an A record per
+ * interface while `getLanIp()` names only the default-route one, so watching
+ * `getLanIp()` alone cannot see an address appear or vanish on any OTHER
+ * interface — which is exactly how the stale APIPA record above survived for
+ * hours with the recovery timer running the whole time. A change detector must
+ * watch what actually varies.
+ */
+export function advertisedIpv4Addresses(): string[] {
+  const out: string[] = [];
+  for (const addrs of Object.values(networkInterfaces())) {
+    for (const addr of addrs ?? []) {
+      if (addr.family !== 'IPv4') continue;
+      if (addr.internal || addr.mac === '00:00:00:00:00:00') continue;
+      if (!isRoutableIpv4(addr.address)) continue;
+      out.push(addr.address);
+    }
+  }
+  return out.sort();
+}
 
 let instance: Bonjour | null = null;
 
@@ -174,6 +228,24 @@ export function advertiseBridge(
         txt,
       });
 
+      // Drop unroutable A records at the source. `records()` is recomputed on
+      // every announce AND on the goodbye, so wrapping the instance method
+      // covers both: what we never announce, we never have to retract.
+      //
+      // This is a wrap rather than a config flag because `bonjour-service`
+      // offers none — it hard-codes "every non-internal IPv4 address" — and
+      // the `interface` option below pins only the SOCKET, not the record set,
+      // so even the Windows egress pin ships the bogus addresses inside the
+      // packet it sends out the right adapter.
+      const svc = service as unknown as { records?: () => Array<{ type?: string; data?: unknown }> };
+      const baseRecords = svc.records?.bind(service);
+      if (baseRecords) {
+        svc.records = () => baseRecords().filter((r) => {
+          if (r.type !== 'A') return true;
+          return typeof r.data === 'string' && isRoutableIpv4(r.data);
+        });
+      }
+
       // Catch async publish errors — mDNS is non-critical
       service.on?.('error', (err: Error) => {
         debug('mDNS', `Service error (ignored): ${err.message}`);
@@ -201,11 +273,17 @@ export function advertiseBridge(
     }
   }
 
-  // Track published IP to detect changes (DHCP renewal, interface switch)
+  // Track the published ADDRESS SET, not just the default-route IP. A record
+  // per interface goes out, so an address appearing or vanishing on a
+  // non-default interface changes what we advertise while `getLanIp()` stays
+  // put — and that gap is what let a transient APIPA address stay advertised
+  // for hours with this very timer running. See `advertisedIpv4Addresses`.
   let publishedIp: string | undefined;
+  let publishedAddrs = '';
 
   function publishAndTrackIp(): boolean {
     publishedIp = getLanIp();
+    publishedAddrs = advertisedIpv4Addresses().join(',');
     return publish();
   }
 
@@ -236,6 +314,12 @@ export function advertiseBridge(
     } else if (lanIp !== publishedIp) {
       log(`[mDNS] IP changed (${publishedIp} → ${lanIp}) — re-publishing service`);
       publishAndTrackIp();
+    } else {
+      const addrs = advertisedIpv4Addresses().join(',');
+      if (addrs !== publishedAddrs) {
+        log(`[mDNS] Advertised address set changed (${publishedAddrs || 'none'} → ${addrs || 'none'}) — re-publishing service`);
+        publishAndTrackIp();
+      }
     }
   }, MDNS_RECOVERY_INTERVAL);
 

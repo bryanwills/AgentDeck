@@ -107,10 +107,18 @@ export class WsServer {
           // The socket is still unauthenticated and stays that way: it is never
           // registered as a client, never added to any roster, and receives this
           // one frame and nothing else. The board reconnects holding the token.
+          // The firmware puts its model in the query of the very connection
+          // being refused (`/?clientType=esp32&board=<name>`), so a refusal can
+          // say WHICH board it is instead of only its address. Without it an
+          // operator has to cross-reference ARP against a DHCP pool to find the
+          // one unit that needs a cable — the same cross-referencing by hand
+          // that `peerKind` was added to end, left half-done because the second
+          // field in the same query string went unread.
+          const board = url.searchParams.get('board')?.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 24);
+
           if (peerKind === 'esp32' && this.esp32AdoptionProvider && mayAdoptEsp32(remoteIp)) {
             const payload = this.esp32AdoptionProvider();
             if (payload) {
-              const board = url.searchParams.get('board')?.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 24);
               try {
                 ws.send(JSON.stringify({ type: 'auth_provision', ...payload }));
               } catch { /* peer vanished mid-handshake */ }
@@ -126,7 +134,7 @@ export class WsServer {
             }
           }
 
-          this.logUnauthorized(remoteIp, token.length > 0, peerKind);
+          this.logUnauthorized(remoteIp, token.length > 0, peerKind, board);
           ws.close(4001, 'Unauthorized');
           return;
         }
@@ -381,7 +389,7 @@ export class WsServer {
    * companion app") was in the rejected request's own query string the whole
    * time. The firmware tags itself `?clientType=esp32`; log what it said.
    */
-  private logUnauthorized(ip: string, presentedToken: boolean, peerKind?: string): void {
+  private logUnauthorized(ip: string, presentedToken: boolean, peerKind?: string, board?: string): void {
     const now = Date.now();
     const prev = this.unauthorizedByIp.get(ip);
     if (prev && now - prev.loggedAt < WsServer.UNAUTHORIZED_LOG_INTERVAL_MS) {
@@ -393,7 +401,13 @@ export class WsServer {
     if (this.unauthorizedByIp.size > 64) this.unauthorizedByIp.clear();
     const repeated = prev?.suppressed ? ` — plus ${prev.suppressed} more since the last line` : '';
     this.unauthorizedByIp.set(ip, { loggedAt: now, suppressed: 0 });
-    const who = peerKind ? `${ip} (${peerKind})` : ip;
+    // `board` is absent on firmware old enough to predate the query parameter,
+    // and that absence is itself dating information — say so rather than
+    // printing an empty pair of parentheses.
+    const what = peerKind && board ? `${peerKind}, ${board}`
+      : peerKind ? `${peerKind}, board not reported — firmware predates the board query param`
+      : undefined;
+    const who = what ? `${ip} (${what})` : ip;
     // The advice differs by peer: an ESP32 has a USB serial channel that works
     // precisely when authentication is what is broken, and a companion app or
     // reader does not — for those, an operator-opened pairing code is the path

@@ -157,6 +157,7 @@ import { handlePixooWake } from './pixoo/pixoo-client.js';
 import { triggerMdnsRecovery } from './mdns.js';
 import { rgbToBmp, pixooLiveHtml } from './hook-server.js';
 import { enableDebugLog, debug, debugThrottled } from './logger.js';
+import { LegacyRearmLedger } from './legacy-rearm-ledger.js';
 import { CodexOtelTracker, CODEX_OTEL_TRACES_PATH, spanNameSummary } from './codex-otel.js';
 import { HookCodexSessions } from './hook-codex-sessions.js';
 import { ObservedTurnWatchdogs } from './observed-turn-watchdogs.js';
@@ -3587,6 +3588,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // fires once per board per token, only after the silence, and only when the
     // user has auto-provisioning on (it carries their WiFi credentials).
     const legacyRearmTimers = new Map<string, NodeJS.Timeout>();
+    // Bounds the fallback to once per board per token. The rule and the
+    // measurement that forced it live in the module.
+    const legacyRearm = new LegacyRearmLedger();
     const cancelLegacyRearm = (portPath: string): void => {
       const timer = legacyRearmTimers.get(portPath);
       if (!timer) return;
@@ -3610,10 +3614,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         });
         if (armed.length > 0) log(`[agentdeck] Pairing token armed on ${armed.length} ESP32 device(s) after ${portPath}`);
         if (wifiConfig?.autoProvision) {
+          const currentToken = getOrCreateToken();
           for (const armedPort of armed) {
             if (legacyRearmTimers.has(armedPort)) continue;
+            if (!legacyRearm.needsRearm(armedPort, currentToken)) continue;
             const timer = setTimeout(() => {
               legacyRearmTimers.delete(armedPort);
+              // Record BEFORE the send: a write that fails is still an attempt
+              // this token made, and retrying it on the next device_info is the
+              // loop this map exists to end. A board that stays unreachable is
+              // re-armed again when the token next changes, or when the daemon
+              // restarts — both of which are real events, unlike a 30s poll.
+              legacyRearm.markRearmed(armedPort, currentToken);
               const sent = sendWifiProvision(armedPort, {
                 type: 'wifi_provision' as const,
                 ssid: wifiConfig.ssid,
@@ -3631,7 +3643,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           }
         }
       } else if (msg.type === 'auth_provision_ack') {
+        // The board understood `auth_provision`, so the legacy WiFi re-provision
+        // is not needed for it at all. Mark the current token as handled so a
+        // later device_info cannot schedule one behind the cancelled timer.
         cancelLegacyRearm(portPath);
+        legacyRearm.markUnderstood(portPath, getOrCreateToken());
         if (msg.changed) log(`[agentdeck] ESP32 pairing token re-armed on ${portPath}`);
       }
 

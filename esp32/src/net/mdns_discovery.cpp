@@ -1,6 +1,8 @@
 #include "mdns_discovery.h"
 #include <ESPmDNS.h>
 #include "config.h"
+#include <cstdio>
+#include <cstring>
 
 static Net::BridgeInfo discovered;
 static bool hasNew = false;
@@ -16,6 +18,30 @@ void mdnsInit() {
     }
     Serial.println("[mDNS] Started, browsing for _agentdeck._tcp");
     memset(&discovered, 0, sizeof(discovered));
+}
+
+/**
+ * True when a dotted-quad string is an address a board could actually reach.
+ *
+ * Deliberately conservative: it must PARSE as four octets and must not be
+ * link-local (169.254/16), loopback (127/8) or 0.0.0.0. Anything it cannot
+ * confirm it rejects, so a malformed TXT value can never displace a working
+ * A-record answer.
+ */
+static bool isRoutableIpv4Literal(const char* s) {
+    if (!s || !s[0]) return false;
+    int octets[4];
+    char extra;
+    if (sscanf(s, "%d.%d.%d.%d%c", &octets[0], &octets[1], &octets[2], &octets[3], &extra) != 4) {
+        return false;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (octets[i] < 0 || octets[i] > 255) return false;
+    }
+    if (octets[0] == 169 && octets[1] == 254) return false;  // APIPA
+    if (octets[0] == 127) return false;                      // loopback
+    if (octets[0] == 0) return false;
+    return true;
 }
 
 bool mdnsPoll(BridgeInfo& out) {
@@ -69,6 +95,7 @@ bool mdnsPoll(BridgeInfo& out) {
         discovered.found = true;
 
         // Parse TXT records
+        char txtIp[sizeof(discovered.ip)] = {0};
         int numKeys = MDNS.numTxt(selected);
         for (int k = 0; k < numKeys; k++) {
             String key = MDNS.txtKey(selected, k);
@@ -79,7 +106,29 @@ bool mdnsPoll(BridgeInfo& out) {
                 strncpy(discovered.project, val.c_str(), sizeof(discovered.project) - 1);
             } else if (key == "agent") {
                 strncpy(discovered.agent, val.c_str(), sizeof(discovered.agent) - 1);
+            } else if (key == "ip") {
+                strncpy(txtIp, val.c_str(), sizeof(txtIp) - 1);
             }
+        }
+
+        // The daemon states, in TXT `ip`, the ONE address it believes it is
+        // reachable at (its default-route LAN IP). Prefer it over the resolved
+        // A record.
+        //
+        // A host publishes an A record per interface and the resolver hands
+        // back whichever it cached — including addresses the daemon never
+        // meant as an endpoint. On 2026-08-22 a board here resolved
+        // `169.254.124.88` from a Mac whose daemon was on 192.168.68.x, dialed
+        // it at max backoff, and reached nothing; because it never reached the
+        // daemon, the daemon logged nothing, so the board looked simply absent.
+        // The correct address was in the same record the whole time.
+        //
+        // Only override with something that parses as a routable IPv4 — an
+        // unparseable or link-local TXT value means "no information", not
+        // "use this", and must leave the A-record answer standing.
+        if (txtIp[0] != '\0' && isRoutableIpv4Literal(txtIp)) {
+            strncpy(discovered.ip, txtIp, sizeof(discovered.ip) - 1);
+            discovered.ip[sizeof(discovered.ip) - 1] = '\0';
         }
 
         Serial.printf("[mDNS] Found bridge: %s:%d agent=%s project=%s\n",
