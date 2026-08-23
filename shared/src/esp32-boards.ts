@@ -142,8 +142,11 @@ export const ESP32_BOARDS: Esp32BoardSpec[] = [
     ota: true,
     webFlash: false, webFlashStatus: 'unverified',
     webFlashVerified:
-      '2026-08-22 · owned and live on Wi-Fi, but not USB-attached during the spike. A --no-stub board like the TTGO that did pass, so it is the best next candidate.',
-    notes: ['esptool misdetects the flash as 8MB during a bootloop — 16MB must be explicit.'],
+      '2026-08-22 · owned and live on Wi-Fi, but not USB-attached during the spike, and still not attached on 2026-08-23. Untested, not failing — nothing on this board has been measured either way.',
+    notes: [
+      'esptool misdetects the flash as 8MB during a bootloop — 16MB must be explicit.',
+      "`stub: false` here is INHERITED from platformio's --no-stub, never measured. That pin arrived in 2cf5fc754, a commit about displays and connectivity whose message does not mention the stub at all — the same shape as the TTGO pin that turned out to be wrong. So this board's stub axis is UNKNOWN, and it cannot be cited as evidence that stubless writing is broken.",
+    ],
   },
   {
     id: 'round_amoled', env: 'amoled', name: 'Round AMOLED', display: '1.8" 360x360 ST77916',
@@ -158,8 +161,11 @@ export const ESP32_BOARDS: Esp32BoardSpec[] = [
     before: 'no_reset', after: 'hard_reset', stub: false, nativeUsb: true,
     ota: true,
     webFlash: false, webFlashStatus: 'unverified',
-    webFlashVerified: '2026-08-22 · owned and live on Wi-Fi, but not USB-attached during the spike.',
-    notes: [],
+    webFlashVerified:
+      '2026-08-22 · owned and live on Wi-Fi, but not USB-attached during the spike, and still not attached on 2026-08-23. Untested, not failing.',
+    notes: [
+      "`stub: false` here is INHERITED from platformio's --no-stub, never measured — same commit (2cf5fc754) and same caveat as ips_35.",
+    ],
   },
   {
     id: 'ips_10', env: 'ips10', name: 'IPS 10.1"', display: '10.1" 800x1280 JD9365',
@@ -171,8 +177,14 @@ export const ESP32_BOARDS: Esp32BoardSpec[] = [
     ota: true,
     webFlash: false, webFlashStatus: 'blocked',
     webFlashVerified:
-      '2026-08-22 · enters download mode but never answers. esptool.py 5.1.2 (the PlatformIO-vendored tool-esptoolpy build — NOT a PyPI release: the PyPI 5.1 line stops at 5.1.0, which is how a CI pin read off a local `pip show esptool` failed the esp32-v1.0.7 cut) reports "Download mode successfully detected, but getting no sync reply: The serial TX path seems to be down" — board-side, not esptool-js.',
-    notes: ['ESP32-P4: the bootloader lives at 0x2000, not 0x0.'],
+      '2026-08-23 · reaches download mode and then never answers SYNC. NOT a stub problem: SYNC precedes stub loading in both tools, so `stub: true` cannot reach this failure. Both serial directions are proven up (see notes); what does not answer is the ROM loader itself.',
+    notes: [
+      'ESP32-P4: the bootloader lives at 0x2000, not 0x0.',
+      'Download mode IS reached: `boot:0x307 (DOWNLOAD(USB/UART0/SPI))` followed by `waiting for download`, read over this same CH340 UART. So chip->host is UP in download mode — the banner arrived on it. esptool.py says "The serial TX path seems to be down"; that sentence is esptool guessing from a failed round trip, and it is wrong here. It was carried in this field as a finding until 2026-08-23; do not carry it again.',
+      'host->chip is up too: the identical open-and-write path gets 1403 bytes back from the running app. That contrast is the measurement, not the write itself — `drain()` times out on this adapter in BOTH states, so the timeout is a node-serialport/CH340 artifact and is evidence of nothing. Reading it as "the bytes never left" is a wrong answer this board hands out for free.',
+      'Yet SYNC returns ZERO bytes: 5 tries from esptool.py 5.2.0, 3 more from a hand-built SYNC frame on a port already proven to be in download mode. The remaining suspect is the ROM download channel itself. The banner lists USB first, and this board has no cable on the P4 native USB port — that is where the next attempt goes.',
+      'Only esptool.py UnixTightReset reaches download mode here; ClassicReset reads 0 bytes at either delay. esptool-js implements ClassicReset and UsbJtagSerialReset ONLY, so no built-in esptool-js strategy can get this board there at all. Its CustomReset CAN: `D0|R0|D1|R1|D0|W100|D1|R0|W50|D0` reached download mode reproducibly. The load-bearing part is the PREAMBLE, not atomicity — a preamble-less atomic IO0+EN edge reads 0 bytes, which is the opposite of what the "set both lines together" rule predicts. Deliberately NOT wired up: entering download mode does not make the board writable while SYNC still fails, and a field claiming a capability nobody has is worse than an absent one.',
+    ],
   },
   {
     id: 'inkdeck', env: 'inkdeck', name: 'InkDeck', display: '7.5" 800x480 e-ink UC8179',
