@@ -8,7 +8,7 @@ import { ApmeRecommender } from '../apme/recommend.js';
 import type { ApmeSampleScorecardRow } from '@agentdeck/shared';
 
 function sc(modelId: string, quality: number, totalCost: number, samples = 10): ApmeSampleScorecardRow {
-  return { agentType: 'claude-code', modelId, taskCategory: 'coding', samples, avgQuality: quality, totalCost, avgLatencyMs: 1000, costPerQuality: quality > 0 ? totalCost / quality : null };
+  return { agentType: 'claude-code', modelId, provider: null, taskCategory: 'coding', samples, avgQuality: quality, totalCost, costKnown: true, avgLatencyMs: 1000, costPerQuality: quality > 0 ? totalCost / quality : null };
 }
 
 describe('computePareto', () => {
@@ -64,7 +64,7 @@ describe('ApmeRecommender on the Pareto frontier', () => {
     const taskId = `task-${runId}`;
     store.insertRun({ id: runId, sessionId: 's', agentType: 'claude-code', modelId: model, startedAt: 1, endedAt: 2 });
     store.insertTask({ id: taskId, runId, taskIndex: 0, boundarySignal: 'session_end', startedAt: 1 });
-    store.updateTask(taskId, { endedAt: 2, taskCategory: 'coding', compositeScore: quality, costUsd, modelId: model, latencyMs: 1000 });
+    store.updateTask(taskId, { endedAt: 2, taskCategory: 'coding', compositeScore: quality, costUsd, costKnown: true, modelId: model, latencyMs: 1000 });
   }
 
   it('recommends only frontier models, cheapest-first under a tight budget', () => {
@@ -79,5 +79,26 @@ describe('ApmeRecommender on the Pareto frontier', () => {
     const ids = out.map((c) => c.modelId);
     expect(ids).not.toContain('worse');         // dominated → never recommended
     expect(ids[0]).toBe('mlx:qwen3-30b');        // cheapest on the frontier first
+  });
+
+  it('returns null for an unpriced model and excludes it from a dollar budget', () => {
+    for (let i = 0; i < 3; i++) {
+      const model = 'future-provider/model-without-price';
+      const runId = `unpriced-run-${i}`;
+      const taskId = `unpriced-task-${i}`;
+      store.insertRun({ id: runId, sessionId: `s-${i}`, agentType: 'openclaw', modelId: model, startedAt: 1, endedAt: 2 });
+      store.insertTask({ id: taskId, runId, taskIndex: 0, boundarySignal: 'session_end', startedAt: 1 });
+      store.updateTask(taskId, {
+        endedAt: 2, taskCategory: 'coding', compositeScore: 0.95,
+        costUsd: 0, costKnown: false, modelId: model, latencyMs: 100,
+      });
+    }
+
+    const rec = new ApmeRecommender(store);
+    expect(rec.recommend({ taskKind: 'coding' })[0]).toMatchObject({
+      modelId: 'future-provider/model-without-price',
+      expectedCostUsd: null,
+    });
+    expect(rec.recommend({ taskKind: 'coding', budgetUsd: 1 })).toEqual([]);
   });
 });

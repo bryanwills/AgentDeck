@@ -39,6 +39,7 @@ import {
   readKiroNativeSessionSnapshots,
   type KiroSessionSnapshot,
 } from './kiro-session.js';
+import { locateCodexRollout } from './codex-rollout-response.js';
 
 export type ObservedState = 'idle' | 'processing';
 
@@ -69,6 +70,8 @@ export interface CodexRolloutSummary extends TranscriptSummary {
   hasPendingCalls?: boolean;
   /** Internal companion rollouts never become top-level dashboard sessions. */
   isSubagent: boolean;
+  /** `codex-tui` for CLI, `Codex Desktop` for the desktop client. */
+  originator?: string;
 }
 
 /** Pull display text out of a Claude user message (string or text blocks). */
@@ -406,6 +409,7 @@ export function parseCodexRollout(raw: string): CodexRolloutSummary {
   let lastContextTokens = 0;
   let contextWindow = 0;
   let isSubagent = false;
+  let originator: string | undefined;
   // A turn is in flight from task_started/user_message until task_complete/
   // turn_aborted. Mid-turn events (agent_message, function_call) must NOT end
   // it: most of a working turn is the thinking gap between a tool result and
@@ -423,6 +427,7 @@ export function parseCodexRollout(raw: string): CodexRolloutSummary {
       if (!payload) continue;
       sessionId = stringAt(payload, 'id') ?? sessionId;
       cwd = stringAt(payload, 'cwd') ?? cwd;
+      originator = stringAt(payload, 'originator') ?? originator;
       startedAt = timestampMs(stringAt(payload, 'timestamp')) ?? startedAt;
       const source = payload.source;
       isSubagent = isSubagent || (isRecord(source) && 'subagent' in source);
@@ -501,6 +506,7 @@ export function parseCodexRollout(raw: string): CodexRolloutSummary {
   return {
     hasPendingCalls: pendingCalls.size > 0,
     isSubagent,
+    originator,
     sessionId,
     cwd,
     startedAt,
@@ -514,6 +520,31 @@ export function parseCodexRollout(raw: string): CodexRolloutSummary {
       ? (lastContextTokens / contextWindow) * 100
       : undefined,
   };
+}
+
+export interface LocatedCodexRolloutSummary {
+  path: string;
+  mtimeMs: number;
+  summary: CodexRolloutSummary;
+}
+
+/** Locate and summarize a rollout by the stable id carried by lifecycle hooks.
+ * This path is independent of pid/fd enumeration, so it works on Windows and
+ * can distinguish desktop from TUI via session_meta.originator. */
+export function codexRolloutSummaryForSession(
+  sessionId: string,
+  sessionsRoot?: string,
+): LocatedCodexRolloutSummary | null {
+  const path = locateCodexRollout(sessionId, sessionsRoot);
+  if (!path) return null;
+  try {
+    const stat = statSync(path);
+    const raw = readFileHeadAndTail(path, 256 * 1024, MAX_SAMPLE_BYTES);
+    if (!raw) return null;
+    return { path, mtimeMs: stat.mtimeMs, summary: parseCodexRollout(raw) };
+  } catch {
+    return null;
+  }
 }
 
 export async function collectProcessInfo(): Promise<ProcInfo[]> {

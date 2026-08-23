@@ -38,6 +38,7 @@ export type ModelProvider =
   | 'xai'
   | 'mistral'
   | 'meta'
+  | 'local'
   | 'unknown';
 
 /** Display names. Kept beside the ids so a surface never spells one itself. */
@@ -52,6 +53,7 @@ export const MODEL_PROVIDER_LABELS: Readonly<Record<ModelProvider, string>> = {
   xai: 'xAI',
   mistral: 'Mistral',
   meta: 'Meta',
+  local: 'Local',
   unknown: '',
 };
 
@@ -89,7 +91,31 @@ export const VENDOR_PREFIXES: Readonly<Record<string, ModelProvider>> = {
   xai: 'xai',
   mistral: 'mistral',
   meta: 'meta',
+  local: 'local',
+  mlx: 'local',
+  ollama: 'local',
+  lmstudio: 'local',
 };
+
+/** Normalize an endpoint/provider label carried separately from the model id.
+ *
+ * Gateway producers use several spellings (`zai`, `z-ai`, `zhipu`) for the
+ * same endpoint. Persisting the raw string would create separate scorecard
+ * identities for one provider, so the allow-list above owns normalization.
+ * When the producer omits or does not recognize the provider, the model id is
+ * the honest fallback; two unknown inputs remain `unknown`.
+ */
+export function normalizeModelProvider(
+  providerName?: string | null,
+  modelName?: string | null,
+): ModelProvider {
+  const raw = (providerName ?? '').trim().toLowerCase();
+  if (raw) {
+    const normalized = VENDOR_PREFIXES[raw];
+    if (normalized) return normalized;
+  }
+  return modelProvider(modelName);
+}
 
 /**
  * Name the provider behind a model id, or `'unknown'` when nothing matches.

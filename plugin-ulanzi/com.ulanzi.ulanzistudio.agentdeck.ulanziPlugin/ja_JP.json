@@ -1,6 +1,6 @@
 {
   "Name": "AgentDeck",
-  "Description": "D200H から AI コーディングエージェントを監視・操作。",
+  "Description": "D200H または D200X から AI コーディングエージェントを監視・操作。",
   "Actions": [
     {
       "Name": "AgentDeck",

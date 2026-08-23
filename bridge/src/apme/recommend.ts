@@ -23,8 +23,9 @@ export interface RecommendInput {
 export interface RecommendCandidate {
   modelId: string;
   agentType: AgentType;
+  provider: string | null;
   expectedScore: number;
-  expectedCostUsd: number;
+  expectedCostUsd: number | null;
   confidence: number;
   rationale: string;
 }
@@ -32,19 +33,14 @@ export interface RecommendCandidate {
 /**
  * Order a cost-per-quality key, putting anything with no usable price LAST.
  *
- * `null` has always meant "no cost recorded". **Zero has to join it**, because
- * `runs.cost_usd` is one REAL column with no room to say why it is zero: a
- * provider that ships no price table reports `usage.cost.total = 0` on every
- * message, and so does a model that is genuinely free. Collapsing them at the
- * column is unavoidable; ranking on the collapsed value is not. Sorting zero
- * FIRST made "cheapest per unit of quality" answerable by having no prices at
- * all — `apme recommend --budget 3` would return whichever model is worst
- * instrumented as the best buy. Last is the honest place for both: a claim we
- * cannot support, ordered behind every model whose cost we actually measured.
+ * `null` means the price source is unknown and sorts last. Zero is now a valid
+ * known-free value: `cost_known` carries the provenance that the old REAL-only
+ * schema lacked, so local models no longer have to be penalized to keep an
+ * unpriced remote model from masquerading as free.
  */
 /** Exported for the ordering gate — the rule is the whole finding. */
 export function unpricedLast(costPerQuality: number | null | undefined): number {
-  return costPerQuality ? costPerQuality : Infinity;
+  return costPerQuality == null ? Infinity : costPerQuality;
 }
 
 /**
@@ -93,7 +89,7 @@ export class ApmeRecommender {
       candidates = candidates.filter((p) => input.availableModels!.includes(p.modelId));
     }
     if (input.budgetUsd !== undefined) {
-      candidates = candidates.filter((p) => p.costPerSample <= input.budgetUsd!);
+      candidates = candidates.filter((p) => p.costPerSample != null && p.costPerSample <= input.budgetUsd!);
     }
     if (input.latencyBudgetMs !== undefined) {
       candidates = candidates.filter((p) => p.avgLatencyMs == null || p.avgLatencyMs <= input.latencyBudgetMs!);
@@ -102,18 +98,19 @@ export class ApmeRecommender {
     candidates = [...candidates].sort((a, b) => {
       // Budget-conscious or local-preferring → cheapest first; else best quality.
       if (input.preferLocal || (input.budgetUsd !== undefined && input.budgetUsd < 5)) {
-        return a.costPerSample - b.costPerSample || b.quality - a.quality;
+        return byCostPerQuality(a.costPerSample, b.costPerSample) || b.quality - a.quality;
       }
-      return b.quality - a.quality || a.costPerSample - b.costPerSample;
+      return b.quality - a.quality || byCostPerQuality(a.costPerSample, b.costPerSample);
     });
 
     return candidates.slice(0, 3).map((p) => ({
       modelId: p.modelId,
       agentType: p.agentType as AgentType,
+      provider: p.provider,
       expectedScore: p.quality,
       expectedCostUsd: p.costPerSample,
       confidence: Math.min(1, p.samples / 20),
-      rationale: `${p.samples} samples, avg ${(p.quality * 100).toFixed(0)}%, $${p.costPerSample.toFixed(4)}/sample${
+      rationale: `${p.samples} samples, avg ${(p.quality * 100).toFixed(0)}%, ${p.costPerSample == null ? 'cost unpriced' : `$${p.costPerSample.toFixed(4)}/sample`}${
         p.avgLatencyMs != null ? `, ${Math.round(p.avgLatencyMs)}ms` : ''
       } — on the cost/quality frontier`,
     }));
@@ -123,9 +120,10 @@ export class ApmeRecommender {
    *  sample-granularity composite scores exist yet. */
   private recommendFromRuns(input: RecommendInput): RecommendCandidate[] {
     const rows = this.store.scorecard();
-    const filtered = input.availableModels
+    let filtered = input.availableModels
       ? rows.filter((r) => input.availableModels!.includes(r.modelId))
       : rows;
+    if (input.budgetUsd !== undefined) filtered = filtered.filter((r) => r.costKnown);
     return filtered
       .filter((r) => r.runs >= 3 && (r.avgOverall ?? 0) > 0)
       .sort((a, b) => {
@@ -138,8 +136,11 @@ export class ApmeRecommender {
       .map((r) => ({
         modelId: r.modelId,
         agentType: r.agentType as AgentType,
+        provider: r.provider,
         expectedScore: r.avgOverall ?? 0,
-        expectedCostUsd: (r.totalCost ?? 0) / Math.max(r.runs, 1),
+        expectedCostUsd: r.costKnown && r.totalCost != null
+          ? r.totalCost / Math.max(r.runs, 1)
+          : null,
         confidence: Math.min(1, r.runs / 20),
         rationale: `${r.runs} runs, avg ${((r.avgOverall ?? 0) * 100).toFixed(0)}%${
           r.avgTestsPass != null ? `, tests ${((r.avgTestsPass) * 100).toFixed(0)}%` : ''

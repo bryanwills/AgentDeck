@@ -1,7 +1,9 @@
 /**
  * AgentDeck Ulanzi Studio plugin — Node.js main service entry.
  *
- * ONE dynamic action ("AgentDeck"): the user fills the D200H keys with it.
+ * ONE dynamic action ("AgentDeck"): the user fills the D200H or D200X LCD
+ * keys with it. Both devices expose the same 14-key surface to Studio; D200X
+ * encoders are intentionally a separate action/UX and are not claimed here.
  * Session-centric two-level UX (AgentDeck v4):
  *   • LIST  — one session per key (fixed position, awaiting emphasized).
  *   • DETAIL — press a session → keys reflow to its options / permission /

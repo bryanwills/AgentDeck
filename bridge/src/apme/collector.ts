@@ -24,7 +24,7 @@ import type { SessionEntry } from '../session-registry.js';
 import type { ApmeStore } from './store.js';
 import type { ApmeRunRow } from './types.js';
 import type { AgentType, TelemetrySpan, ApmeSampleEventRow, TrajectoryEventKind, TurnEndSource } from '@agentdeck/shared';
-import { priceUsd, providerFor } from '@agentdeck/shared';
+import { isPricedModel, normalizeModelProvider, priceUsd } from '@agentdeck/shared';
 import type { ApmeHwSampler } from './hw-sampler.js';
 import { classifyRunSmart, computeSignals, classify } from './classifier.js';
 import { readOpenTurnEvidence, type OpenTurnEvidence } from './claude-transcript-reader.js';
@@ -200,7 +200,7 @@ export class ApmeCollector {
   private readonly sessionToLastTurnId = new Map<string, string>(); // survives closeTurn()
   private readonly sessionToTask = new Map<string, ActiveTask>(); // sessionId → current task
   private readonly runTaskCount = new Map<string, number>();      // runId → next task_index
-  private readonly sessionToUsage = new Map<string, { in: number; out: number }>(); // last cumulative usage
+  private readonly sessionToUsage = new Map<string, { in: number; out: number; cost: number | null }>(); // last cumulative usage
   /** Running cost total for producers that report PER-MESSAGE cost.
    *  Separate from `sessionToUsage` because `updateUsage` writes the cost
    *  column absolutely and would otherwise stamp one message's cost as the
@@ -248,6 +248,7 @@ export class ApmeCollector {
       sessionId: input.sessionId,
       agentType: input.agentType,
       modelId: input.modelId ?? null,
+      provider: input.modelId ? normalizeModelProvider(undefined, input.modelId) : null,
       projectName: input.projectName ?? (input.projectPath ? resolveProjectName({ cwd: input.projectPath }) : null),
       projectPath: input.projectPath ?? null,
       taskPrompt: input.taskPrompt ?? null,
@@ -881,6 +882,7 @@ export class ApmeCollector {
       inputTokens?: number | null;
       outputTokens?: number | null;
       costUsd?: number | null;
+      costKnown?: boolean | null;
       latencyMs?: number | null;
       toolName?: string | null;
       toolStatus?: string | null;
@@ -902,6 +904,7 @@ export class ApmeCollector {
       inputTokens: ev.inputTokens ?? null,
       outputTokens: ev.outputTokens ?? null,
       costUsd: ev.costUsd ?? null,
+      costKnown: ev.costKnown ?? null,
       latencyMs: ev.latencyMs ?? null,
       toolName: ev.toolName ?? null,
       toolStatus: ev.toolStatus ?? null,
@@ -936,21 +939,37 @@ export class ApmeCollector {
    *  Falls back to the last closed turn if closeTurn() already ran (race with session exit).
    *  Tags turns.efficiency_json.response_kind so the runner can skip tool-only / empty
    *  turns — judging silence produces noise scores. */
-  setTurnResponse(sessionId: string, response: string): void {
+  setTurnResponse(
+    sessionId: string,
+    response: string,
+    source: 'chat_final' | 'session_message_projection' | 'direct' = 'direct',
+  ): void {
     if (!this.store.enabled) return;
     const turn = this.sessionToTurn.get(sessionId);
     const turnId = turn?.id ?? this.sessionToLastTurnId.get(sessionId);
     debug('APME', `setTurnResponse session=${sessionId.slice(0,8)} turnId=${turnId?.slice(0,8) ?? 'null'} respLen=${response.length}`);
     if (!turnId) return;
+    const existingTurn = this.store.getTurn(turnId);
+    const existingMeta = parseEfficiencyJson(existingTurn);
+    const existingSource = typeof existingMeta.response_source === 'string'
+      ? existingMeta.response_source
+      : (existingTurn?.response ? 'direct' : undefined);
+    if (responseSourcePriority(source) < responseSourcePriority(existingSource)) {
+      debug('APME', `setTurnResponse ignored lower-priority source=${source} existing=${existingSource}`);
+      return;
+    }
     const trimmedLen = response.trim().length;
     // Active-turn toolCalls is authoritative; after closeTurn() the counter is
     // already flushed to the DB row, so we fetch from there instead.
     const toolCalls = turn?.toolCalls
-      ?? ((this.store.getTurn(turnId)?.tool_calls as number | undefined) ?? 0);
+      ?? ((existingTurn?.tool_calls as number | undefined) ?? 0);
     const kind: 'text' | 'tool_only' | 'empty' = trimmedLen >= 1
       ? 'text'
       : (toolCalls > 0 ? 'tool_only' : 'empty');
-    const efficiencyJson = mergeEfficiencyJson(this.store.getTurn(turnId), { response_kind: kind });
+    const efficiencyJson = mergeEfficiencyJson(existingTurn, {
+      response_kind: kind,
+      response_source: source,
+    });
     try {
       this.store.updateTurn(turnId, {
         response: response.slice(0, 10_000),
@@ -961,11 +980,17 @@ export class ApmeCollector {
     // Sample trajectory: the assistant response closes the turn's event arc.
     const ctx = this.sampleCtxForTurn(sessionId, turnId);
     if (ctx) {
-      this.appendSampleEvent(ctx, {
-        kind: 'assistant_message',
-        dedupCore: hashCore(response.slice(0, 400)),
-        payloadObj: { text: response.slice(0, 10_000), responseKind: kind },
-      });
+      const payload = safeStringify({ text: response.slice(0, 10_000), responseKind: kind });
+      const existingEvent = this.store.findAssistantMessageEvent(ctx.taskId, turnId);
+      if (existingEvent?.id != null) {
+        this.store.updateSampleEvent(existingEvent.id, { payload, ts: Date.now() });
+      } else {
+        this.appendSampleEvent(ctx, {
+          kind: 'assistant_message',
+          dedupCore: `turn:${turnId}`,
+          payloadObj: { text: response.slice(0, 10_000), responseKind: kind },
+        });
+      }
     }
   }
 
@@ -1020,9 +1045,10 @@ export class ApmeCollector {
       }
       case 'turn_response': {
         const text = (a['agentdeck.response_text'] as string | undefined) ?? '';
+        const source = (a['agentdeck.response_source'] as 'chat_final' | 'session_message_projection' | 'direct' | undefined) ?? 'direct';
         const fallback = a['agentdeck.fallback_to_last_closed'] === true;
         if (fallback) this.setLastClosedTurnResponse(sessionId, text);
-        else this.setTurnResponse(sessionId, text);
+        else this.setTurnResponse(sessionId, text, source);
         return;
       }
       case 'turn_end': {
@@ -1087,7 +1113,8 @@ export class ApmeCollector {
       }
       case 'session_meta': {
         const model = a['gen_ai.request.model'] as string | undefined;
-        if (model) this.updateModel(sessionId, model);
+        const rawProvider = a['gen_ai.system'] as string | undefined;
+        if (model || rawProvider) this.updateTurnIdentity(sessionId, model, rawProvider);
         const inputTokens = a['agentdeck.usage.input_tokens'] as number | undefined;
         const outputTokens = a['agentdeck.usage.output_tokens'] as number | undefined;
         const costUsd = a['agentdeck.usage.cost_usd'] as number | undefined;
@@ -1185,7 +1212,7 @@ export class ApmeCollector {
     // accumulators with different failure modes is the same defect shape as a
     // guard cleared only by a `defer` it shares a failure mode with.
     if (!this.sessionToRun.get(sessionId)) return;
-    const prev = this.sessionToUsage.get(sessionId) ?? { in: 0, out: 0 };
+    const prev = this.sessionToUsage.get(sessionId) ?? { in: 0, out: 0, cost: null };
     const prevCost = this.sessionToCostTotal.get(sessionId) ?? { total: 0, seen: false };
     const reported = typeof delta.costUsd === 'number';
     const cost = { total: prevCost.total + (reported ? delta.costUsd as number : 0),
@@ -1206,41 +1233,76 @@ export class ApmeCollector {
     if (!this.store.enabled) return;
     const runId = this.sessionToRun.get(sessionId);
     if (!runId) return;
+    const curIn = snapshot.inputTokens ?? 0;
+    const curOut = snapshot.outputTokens ?? 0;
+    const prev = this.sessionToUsage.get(sessionId) ?? { in: 0, out: 0, cost: null };
+    const hadPreviousUsage = prev.in > 0 || prev.out > 0;
+    const dIn = Math.max(0, curIn - prev.in);
+    const dOut = Math.max(0, curOut - prev.out);
+    const run = this.store.getRun(runId);
+    const turnId = this.turnIdFor(sessionId);
+    const turn = turnId ? this.store.getTurn(turnId) : null;
+    const model = (turn?.model_id as string | null | undefined) ?? run?.modelId ?? null;
+    const reportedTotal = snapshot.estimatedCostUsd ?? snapshot.costSpent ?? null;
+    const reportedDelta = reportedTotal == null
+      ? null
+      : Math.max(0, reportedTotal - (prev.cost ?? 0));
+    const priced = isPricedModel(model);
+    const eventCostKnown = priced || (reportedDelta != null && reportedDelta > 0);
+    const eventCost = reportedDelta ?? priceUsd(model, dIn, dOut);
+    const hasUsageDelta = dIn > 0 || dOut > 0;
+    const hasAccountingDelta = hasUsageDelta || (reportedDelta ?? 0) > 0;
+    const runCostKnown = !hasAccountingDelta
+      ? Boolean(run?.costKnown)
+      : hadPreviousUsage
+        ? Boolean(run?.costKnown) && eventCostKnown
+        : eventCostKnown;
+    const runCost = reportedTotal ?? (priced ? priceUsd(model, curIn, curOut) : null);
+    this.sessionToUsage.set(sessionId, { in: curIn, out: curOut, cost: reportedTotal });
     try {
       this.store.updateRun(runId, {
         inputTokens: snapshot.inputTokens,
         outputTokens: snapshot.outputTokens,
-        costUsd: snapshot.estimatedCostUsd ?? snapshot.costSpent ?? null,
+        costUsd: runCost,
+        costKnown: runCostKnown,
       });
     } catch { /* ignore */ }
 
     // ── Per-task ModelEvent from the cumulative delta ──
-    const curIn = snapshot.inputTokens ?? 0;
-    const curOut = snapshot.outputTokens ?? 0;
-    const prev = this.sessionToUsage.get(sessionId) ?? { in: 0, out: 0 };
-    const dIn = Math.max(0, curIn - prev.in);
-    const dOut = Math.max(0, curOut - prev.out);
-    this.sessionToUsage.set(sessionId, { in: curIn, out: curOut });
     if (dIn === 0 && dOut === 0) return;
-
     const task = this.sessionToTask.get(sessionId);
     if (!task) return;
-    const run = this.store.getRun(runId);
-    const model = run?.modelId ?? null;
+    const provider = (turn?.provider as string | null | undefined)
+      ?? run?.provider
+      ?? normalizeModelProvider(undefined, model);
+    const taskRow = this.store.getTask(task.id);
+    const taskModel = !model
+      ? taskRow?.modelId
+      : !taskRow?.modelId || taskRow.modelId === model
+        ? model
+        : 'mixed';
+    const taskProvider = !provider || provider === 'unknown'
+      ? taskRow?.provider
+      : !taskRow?.provider || taskRow.provider === provider
+        ? provider
+        : 'mixed';
     const turnIndex = this.sessionToTurn.get(sessionId)?.index ?? task.lastTurnIndex ?? 0;
-    // Prefer the agent-reported marginal cost when available, else price the delta.
-    const cost = priceUsd(model, dIn, dOut);
     this.appendSampleEvent(
-      { taskId: task.id, runId, turnIndex, turnId: this.turnIdFor(sessionId) },
+      { taskId: task.id, runId, turnIndex, turnId },
       {
         kind: 'model', model: model ?? undefined, inputTokens: dIn, outputTokens: dOut,
-        costUsd: cost, latencyMs: 0, dedupCore: `${curIn}:${curOut}`,
+        costUsd: eventCost, costKnown: eventCostKnown,
+        latencyMs: 0, dedupCore: `${curIn}:${curOut}`,
       },
     );
     try {
       this.store.updateTask(task.id, {
-        modelId: model ?? undefined,
-        modelConfig: JSON.stringify({ modelId: model ?? 'unknown', provider: providerFor(model) }),
+        modelId: taskModel,
+        provider: taskProvider,
+        modelConfig: JSON.stringify({
+          modelId: taskModel ?? 'unknown',
+          provider: taskProvider ?? null,
+        }),
       });
       this.store.recomputeSampleCost(task.id);
     } catch { /* ignore */ }
@@ -1283,7 +1345,72 @@ export class ApmeCollector {
     if (!this.store.enabled || !modelId) return;
     const runId = this.sessionToRun.get(sessionId);
     if (!runId) return;
-    try { this.store.updateRun(runId, { modelId }); } catch { /* ignore */ }
+    try {
+      this.store.updateRun(runId, {
+        modelId,
+        provider: normalizeModelProvider(undefined, modelId),
+      });
+    } catch { /* ignore */ }
+  }
+
+  /** Persist the model/provider on the assistant message's own turn.
+   * `session_meta` can arrive after `chat.final` closed that turn, so the same
+   * current→last fallback used by setTurnResponse is required here too. */
+  private updateTurnIdentity(
+    sessionId: string,
+    reportedModel?: string,
+    reportedProvider?: string,
+  ): void {
+    const runId = this.sessionToRun.get(sessionId);
+    if (!runId) return;
+    const turnId = this.turnIdFor(sessionId);
+    const turn = turnId ? this.store.getTurn(turnId) : null;
+    const run = this.store.getRun(runId);
+    const model = reportedModel ?? (turn?.model_id as string | undefined) ?? run?.modelId ?? undefined;
+    if (!model && !reportedProvider) return;
+    const normalized = normalizeModelProvider(reportedProvider, model);
+    const provider = normalized === 'unknown' ? null : normalized;
+
+    if (turnId) {
+      try {
+        this.store.updateTurn(turnId, {
+          ...(model ? { modelId: model } : {}),
+          provider,
+        });
+      } catch { /* ignore */ }
+    }
+
+    // Preserve the established run-level "latest observed model" contract for
+    // legacy consumers. Scorecards no longer depend on it when a turn has its
+    // own identity, so updating this compatibility fallback cannot reassign
+    // earlier turns.
+    if (run) {
+      const patch: Partial<ApmeRunRow> = {
+        ...(model ? { modelId: model } : {}),
+        provider,
+      };
+      if (Object.keys(patch).length > 0) {
+        try { this.store.updateRun(runId, patch); } catch { /* ignore */ }
+      }
+    }
+
+    const taskId = (turn?.task_id as string | undefined) ?? this.sessionToTask.get(sessionId)?.id;
+    if (!taskId || !model) return;
+    const task = this.store.getTask(taskId);
+    if (!task) return;
+    const taskModel = !task.modelId || task.modelId === model ? model : 'mixed';
+    const taskProvider = !provider
+      ? task.provider
+      : task.provider == null || task.provider === provider
+        ? provider
+        : 'mixed';
+    try {
+      this.store.updateTask(taskId, {
+        modelId: taskModel,
+        provider: taskProvider,
+        modelConfig: JSON.stringify({ modelId: taskModel, provider: taskProvider }),
+      });
+    } catch { /* ignore */ }
   }
 
   /** Finalize a run. Returns the runId so callers can enqueue evaluation.
@@ -1506,6 +1633,11 @@ function mergeEfficiencyJson(
   turn: Record<string, unknown> | null,
   patch: Record<string, unknown>,
 ): string {
+  const base = parseEfficiencyJson(turn);
+  return JSON.stringify({ ...base, ...patch });
+}
+
+function parseEfficiencyJson(turn: Record<string, unknown> | null): Record<string, unknown> {
   let base: Record<string, unknown> = {};
   const raw = turn?.efficiency_json;
   if (typeof raw === 'string' && raw.length > 0) {
@@ -1516,5 +1648,14 @@ function mergeEfficiencyJson(
       }
     } catch { /* replace */ }
   }
-  return JSON.stringify({ ...base, ...patch });
+  return base;
+}
+
+/** Full/final responses outrank lossy session-message projections. Unknown
+ *  historical provenance is treated as direct so a new projection cannot
+ *  downgrade data written before source tracking existed. */
+function responseSourcePriority(source: unknown): number {
+  if (source === 'session_message_projection') return 1;
+  if (source === 'chat_final') return 3;
+  return source ? 2 : 0;
 }

@@ -1,6 +1,6 @@
 {
   "Name": "AgentDeck",
-  "Description": "D200H에서 AI 코딩 에이전트를 보고 조종합니다.",
+  "Description": "D200H 또는 D200X에서 AI 코딩 에이전트를 보고 조종합니다.",
   "Actions": [
     {
       "Name": "AgentDeck",

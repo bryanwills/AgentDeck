@@ -168,8 +168,12 @@ export class DaemonClient extends EventEmitter {
     this.send({
       type: 'client_register',
       clientType: 'ulanzi-plugin',
-      clientLabel: 'Ulanzi D200H',
-      devices: [{ id: 'd200h', name: 'Ulanzi D200H', family: 'd200h', columns: 5, rows: 3 }],
+      // Studio does not include the concrete device model in the main-service
+      // handshake. Keep the historical d200h wire identity (the health route
+      // and existing clients depend on it), but label the plugin truthfully now
+      // that the same 14-key action also runs on D200X.
+      clientLabel: 'Ulanzi D200H / D200X',
+      devices: [{ id: 'd200h', name: 'Ulanzi D200H / D200X', family: 'd200h', columns: 5, rows: 3 }],
     });
   }
 

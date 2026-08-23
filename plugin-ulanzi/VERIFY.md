@@ -134,13 +134,13 @@ first thing to check is the encode/push log above, not the socket.
 
 ## Real Ulanzi Studio + hardware (recommended over the simulator)
 
-The simulator's key grid is generic and doesn't match the real D200H. To test on
-the actual device, install into **Ulanzi Studio** — which launches the Node main
+The simulator's key grid is generic and doesn't match the real D200H or D200X.
+To test on the actual device, install into **Ulanzi Studio** — which launches the Node main
 service itself from the installed plugin folder, so the plugin must be
 **self-contained** (bundled + shipped `node_modules` with the resvg native + ws).
 
 1. **Install Ulanzi Studio for Mac** from <https://www.ulanzi.com/pages/downloads>
-   (Apple silicon build), launch it once, plug in the D200H.
+   (Apple silicon build), launch it once, plug in the D200H or D200X.
 
 2. **Build + install the self-contained package** (one command):
    ```bash
@@ -154,8 +154,11 @@ service itself from the installed plugin folder, so the plugin must be
 3. **Restart Ulanzi Studio.** The **AgentDeck** plugin appears in the action list
    with its single dynamic **AgentDeck** action.
 
-4. Drag that action onto D200H keys, run a daemon + agent session, and verify on real
-   hardware: tile rendering, GIF animation on awaiting/processing, key-press dispatch.
+4. Drag that action onto all D200H or D200X LCD keys, run a daemon + agent session,
+   and verify on real hardware: tile rendering, GIF animation on
+   awaiting/processing, and key-press dispatch. D200X encoder rotation, press,
+   and dial-area feedback are a separate unimplemented action and are not part
+   of this keypad pass.
 
 Debug the Studio-launched Node service: launch Studio with
 `open "/Applications/Ulanzi Studio.app" --args --nodeRemoteDebug`, then open

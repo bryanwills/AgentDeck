@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: required
 owner: Apple product maintainers
-reviewed: 2026-08-22
-revision: 2026-08-22
+reviewed: 2026-08-24
+revision: 2026-08-24
 source_of_truth: docs/appstore-feature-matrix.md
 validators: [bash apple/scripts/verify-appstore-archive.sh]
 ---
@@ -77,6 +77,7 @@ All surfaces follow the same rule:
 | Device / operation | App Store | CLI | Boundary |
 |---|:---:|:---:|---|
 | Ulanzi D200H | Yes | Yes | Ulanzi Studio plugin is the only driver; no direct HID |
+| Ulanzi D200X LCD keys | Partial | Partial | Same 14-key Ulanzi Studio action as D200H; SDK/simulator contract is covered, but real-hardware verification is pending and the three encoders are not supported |
 | Pixoo64 | Yes | Yes | Native LAN HTTP |
 | Timebox Mini | Yes | Yes | Tier 1 CoreBluetooth; Tier 2 BLE helper path |
 | iDotMatrix | Yes | Yes | Tier 1 CoreBluetooth; one BLE display connection at a time |

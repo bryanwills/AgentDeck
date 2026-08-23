@@ -19,7 +19,11 @@
 //     job; a hook row that guessed them would flicker against the real values
 //     the moment the scan recovered.
 
-import type { ObservedSession } from './passive-observer.js';
+import {
+  codexRolloutSummaryForSession,
+  type LocatedCodexRolloutSummary,
+  type ObservedSession,
+} from './passive-observer.js';
 import { resolveProjectNameFromCwdCached } from './utils/project-name.js';
 
 /** Reaped this long after the turn-ending hook — Swift's `codexPostTerminalTTL`. */
@@ -67,6 +71,16 @@ export class HookCodexSessions {
 
   /** Fired when a hook changed something worth broadcasting. */
   onChanged: (() => void) | undefined;
+
+  private readonly resolveRollout: (sessionId: string) => LocatedCodexRolloutSummary | null;
+
+  constructor(resolveRollout?: (sessionId: string) => LocatedCodexRolloutSummary | null) {
+    // macOS/Linux already get richer rows from pid→open-fd observation. The
+    // id-keyed fallback is specifically the Windows bridge over that missing
+    // primitive; keeping it platform-scoped also avoids duplicate disk scans.
+    this.resolveRollout = resolveRollout
+      ?? (process.platform === 'win32' ? codexRolloutSummaryForSession : () => null);
+  }
 
   /**
    * Record a `codex_*` lifecycle hook. Returns true when the sessions list
@@ -170,19 +184,29 @@ export class HookCodexSessions {
     const extra: ObservedSession[] = [];
     for (const session of this.sessions.values()) {
       if (seen.has(session.sessionId)) continue;
+      const located = this.resolveRollout(session.sessionId);
+      if (located?.summary.isSubagent) continue;
+      const rollout = located?.summary;
+      const desktop = rollout?.originator?.toLowerCase().includes('desktop') === true;
+      const cwd = rollout?.cwd ?? session.cwd;
       extra.push({
-        id: `observed:codex:${session.sessionId}`,
+        id: `observed:${desktop ? 'codex-app' : 'codex'}:${session.sessionId}`,
         port: 0,
         pid: 0,
-        projectName: session.projectName || 'Codex',
-        agentType: 'codex-cli',
+        projectName: cwd ? resolveProjectNameFromCwdCached(cwd) : (session.projectName || 'Codex'),
+        agentType: desktop ? 'codex-app' : 'codex-cli',
         alive: true,
         state: session.state,
         controlMode: 'observed',
-        cwd: session.cwd,
-        currentTask: session.currentTool,
-        startedAt: new Date(session.startedAt).toISOString(),
-        lastActivityAt: session.lastHookAt,
+        cwd,
+        appName: desktop ? 'ChatGPT' : undefined,
+        modelName: rollout?.modelName,
+        currentTask: rollout?.currentTask ?? session.currentTool,
+        goal: rollout?.goal,
+        contextPercent: rollout?.contextPercent,
+        totalTokens: rollout?.totalTokens,
+        startedAt: new Date(rollout?.startedAt ?? session.startedAt).toISOString(),
+        lastActivityAt: Math.max(session.lastHookAt, located?.mtimeMs ?? 0),
       });
     }
     return extra.length > 0 ? [...observed, ...extra] : observed;

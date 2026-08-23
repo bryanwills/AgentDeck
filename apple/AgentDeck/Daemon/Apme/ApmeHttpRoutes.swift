@@ -342,8 +342,9 @@ enum ApmeHttpRoutes {
             [
                 "modelId": c.modelId,
                 "agentType": c.agentType,
+                "provider": c.provider ?? NSNull(),
                 "expectedScore": c.expectedScore,
-                "expectedCostUsd": c.expectedCostUsd,
+                "expectedCostUsd": c.expectedCostUsd ?? NSNull(),
                 "confidence": c.confidence,
                 "rationale": c.rationale,
             ]

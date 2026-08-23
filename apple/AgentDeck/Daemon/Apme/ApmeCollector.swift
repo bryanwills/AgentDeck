@@ -116,7 +116,7 @@ final class ApmeCollector {
     private var runTaskCount: [String: Int] = [:]
     /// Last cumulative usage per session — ModelEvents are emitted from the
     /// delta (snapshots carry session totals).
-    private var sessionToUsage: [String: (inp: Int, out: Int)] = [:]
+    private var sessionToUsage: [String: (inp: Int, out: Int, cost: Double?)] = [:]
 
     /// Pending idle-gap timer per session. After every `setTurnResponse` we
     /// arm an `idleGapSec` timer; if no new `user_prompt_submit` arrives for
@@ -191,7 +191,7 @@ final class ApmeCollector {
         )
         store.insertRun(run)
         sessionToRun[sessionKey] = runId
-        sessionToUsage[sessionKey] = (0, 0) // reset the cumulative-usage delta baseline per session
+        sessionToUsage[sessionKey] = (0, 0, nil) // reset the cumulative-usage delta baseline per session
         return runId
     }
 
@@ -479,39 +479,116 @@ final class ApmeCollector {
         guard let hookSession = activeHookSession,
               let runId = sessionToRun[hookSession],
               let model = modelId else { return }
-        store.updateRun(id: runId, fields: ["modelId": model])
+        store.updateRun(id: runId, fields: [
+            "modelId": model,
+            "provider": Self.normalizedProvider(nil, model: model) as Any?,
+        ])
+    }
+
+    /// Attribute gateway model/provider metadata to the assistant message's
+    /// own turn. The run remains a latest-value compatibility fallback.
+    func updateTurnIdentity(modelId: String?, provider: String?, sessionId: String) {
+        guard let runId = sessionToRun[sessionId] else { return }
+        let turnId = sessionToTurn[sessionId]?.id ?? lastClosedTurnByRun[runId]
+        let turn = turnId.flatMap { store.getTurn(id: $0) }
+        let run = store.getRun(id: runId)
+        let model = modelId ?? turn?["model_id"] as? String ?? run?.modelId
+        let normalized = Self.normalizedProvider(provider, model: model)
+        if let turnId {
+            store.updateTurn(id: turnId, fields: [
+                "modelId": model as Any?, "provider": normalized as Any?,
+            ])
+        }
+        store.updateRun(id: runId, fields: [
+            "modelId": model as Any?, "provider": normalized as Any?,
+        ])
+        guard let task = sessionToTask[sessionId], let model,
+              let taskRow = store.getTask(id: task.id) else { return }
+        let taskModel = taskRow.modelId == nil || taskRow.modelId == model ? model : "mixed"
+        let taskProvider: String? = normalized == nil ? taskRow.provider
+            : (taskRow.provider == nil || taskRow.provider == normalized ? normalized : "mixed")
+        let config: [String: Any] = ["modelId": taskModel, "provider": taskProvider ?? NSNull()]
+        let configString = (try? JSONSerialization.data(withJSONObject: config))
+            .flatMap { String(data: $0, encoding: .utf8) }
+        store.updateTask(id: task.id, fields: [
+            "modelId": taskModel, "provider": taskProvider as Any?,
+            "modelConfig": configString as Any?,
+        ])
     }
 
     /// Update token/cost usage (called when usage_update is received).
     /// No session context on this path — attributed to the most recent session.
     func updateUsage(inputTokens: Int, outputTokens: Int, costUsd: Double?) {
-        guard let hookSession = activeHookSession,
+        updateUsage(inputTokens: inputTokens, outputTokens: outputTokens,
+                    costUsd: costUsd, sessionId: activeHookSession)
+    }
+
+    func updateUsage(inputTokens: Int, outputTokens: Int, costUsd: Double?, sessionId: String?) {
+        guard let hookSession = sessionId,
               let runId = sessionToRun[hookSession] else { return }
-        var fields: [String: Any?] = [
-            "inputTokens": inputTokens,
-            "outputTokens": outputTokens,
-        ]
-        if let c = costUsd { fields["costUsd"] = c }
-        store.updateRun(id: runId, fields: fields)
 
         // ── Per-task ModelEvent from the cumulative delta ──
-        let lastUsage = sessionToUsage[hookSession] ?? (0, 0)
+        let lastUsage = sessionToUsage[hookSession] ?? (0, 0, nil)
         let dIn = max(0, inputTokens - lastUsage.inp)
         let dOut = max(0, outputTokens - lastUsage.out)
-        sessionToUsage[hookSession] = (inputTokens, outputTokens)
+        let dCost = costUsd.map { max(0, $0 - (lastUsage.cost ?? 0)) }
+        let turnId = sessionToTurn[hookSession]?.id ?? lastClosedTurnByRun[runId]
+        let turn = turnId.flatMap { store.getTurn(id: $0) }
+        let run = store.getRun(id: runId)
+        let model = turn?["model_id"] as? String ?? run?.modelId
+        let priced = ApmePricing.isPriced(model)
+        let eventCostKnown = priced || (dCost ?? 0) > 0
+        let eventCost = dCost ?? ApmePricing.usd(model: model, inputTokens: dIn, outputTokens: dOut)
+        let hadPrevious = lastUsage.inp > 0 || lastUsage.out > 0 || lastUsage.cost != nil
+        let hasUsageDelta = dIn > 0 || dOut > 0
+        let hasAccountingDelta = hasUsageDelta || (dCost ?? 0) > 0
+        let runKnown = !hasAccountingDelta ? (run?.costKnown == true)
+            : (hadPrevious ? (run?.costKnown == true && eventCostKnown) : eventCostKnown)
+        let runCost = costUsd ?? (priced ? ApmePricing.usd(model: model, inputTokens: inputTokens, outputTokens: outputTokens) : nil)
+        sessionToUsage[hookSession] = (inputTokens, outputTokens, costUsd)
+        store.updateRun(id: runId, fields: [
+            "inputTokens": inputTokens, "outputTokens": outputTokens,
+            "costUsd": runCost as Any?, "costKnown": runKnown,
+        ])
         if (dIn > 0 || dOut > 0), let task = sessionToTask[hookSession] {
-            let model = store.getRun(id: runId)?.modelId
             let turnIndex = sessionToTurn[hookSession]?.index ?? task.lastTurnIndex ?? 0
-            let cost = ApmePricing.usd(model: model, inputTokens: dIn, outputTokens: dOut)
             appendSampleEvent(taskId: task.id, runId: runId, turnIndex: turnIndex,
                               kind: "model", core: "\(inputTokens):\(outputTokens)",
                               model: model, inputTokens: dIn, outputTokens: dOut,
-                              costUsd: cost, latencyMs: 0)
-            let mc: [String: Any] = ["modelId": model ?? "unknown", "provider": ApmePricing.provider(for: model)]
+                              costUsd: eventCost, costKnown: eventCostKnown, latencyMs: 0)
+            let provider = turn?["provider"] as? String ?? run?.provider ?? Self.normalizedProvider(nil, model: model)
+            let taskRow = store.getTask(id: task.id)
+            let taskModel = model == nil ? taskRow?.modelId
+                : (taskRow?.modelId == nil || taskRow?.modelId == model ? model : "mixed")
+            let taskProvider = provider == nil ? taskRow?.provider
+                : (taskRow?.provider == nil || taskRow?.provider == provider ? provider : "mixed")
+            let mc: [String: Any] = ["modelId": taskModel ?? "unknown", "provider": taskProvider ?? NSNull()]
             let mcStr = (try? JSONSerialization.data(withJSONObject: mc)).flatMap { String(data: $0, encoding: .utf8) }
-            store.updateTask(id: task.id, fields: ["modelId": model as Any?, "modelConfig": mcStr as Any?])
+            store.updateTask(id: task.id, fields: [
+                "modelId": taskModel as Any?, "provider": taskProvider as Any?,
+                "modelConfig": mcStr as Any?,
+            ])
             store.recomputeSampleCost(task.id)
         }
+    }
+
+    /// Convert one message's usage into the cumulative series updateUsage owns.
+    func addUsageIncrement(inputTokens: Int, outputTokens: Int, costUsd: Double?, sessionId: String) {
+        let previous = sessionToUsage[sessionId] ?? (0, 0, nil)
+        // A later message may omit cost. Preserve the numeric total for
+        // provenance, while updateUsage marks the new event unknown and turns
+        // the run's aggregate costKnown false.
+        let totalCost = costUsd.map { (previous.cost ?? 0) + $0 } ?? previous.cost
+        updateUsage(inputTokens: previous.inp + max(0, inputTokens),
+                    outputTokens: previous.out + max(0, outputTokens),
+                    costUsd: totalCost, sessionId: sessionId)
+    }
+
+    private static func normalizedProvider(_ provider: String?, model: String?) -> String? {
+        let raw = provider?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let normalized = raw.isEmpty ? ModelProviderRules.provider(model: model)
+            : (ModelProviderRules.vendorPrefixes[raw] ?? ModelProviderRules.provider(model: model))
+        return normalized == .unknown ? nil : normalized.rawValue
     }
 
     // MARK: - Sibling session tracking
@@ -556,7 +633,7 @@ final class ApmeCollector {
     private func appendSampleEvent(taskId: String, runId: String, turnIndex: Int, kind: String,
                                    core: String, ts: Int? = nil, model: String? = nil,
                                    inputTokens: Int? = nil, outputTokens: Int? = nil,
-                                   costUsd: Double? = nil, latencyMs: Int? = nil,
+                                   costUsd: Double? = nil, costKnown: Bool? = nil, latencyMs: Int? = nil,
                                    toolName: String? = nil, toolStatus: String? = nil,
                                    toolError: String? = nil, payload: [String: Any]? = nil) -> Bool {
         var payloadStr: String? = nil
@@ -564,9 +641,10 @@ final class ApmeCollector {
            let data = try? JSONSerialization.data(withJSONObject: payload),
            let s = String(data: data, encoding: .utf8) { payloadStr = s }
         let inserted = store.insertSampleEvent(
-            taskId: taskId, runId: runId, turnIndex: turnIndex, seq: store.nextSampleSeq(taskId),
+            taskId: taskId, runId: runId, turnIndex: turnIndex,
+            turnId: store.turnId(runId: runId, turnIndex: turnIndex), seq: store.nextSampleSeq(taskId),
             ts: ts ?? nowMs(), kind: kind, model: model, inputTokens: inputTokens,
-            outputTokens: outputTokens, costUsd: costUsd, latencyMs: latencyMs,
+            outputTokens: outputTokens, costUsd: costUsd, costKnown: costKnown, latencyMs: latencyMs,
             toolName: toolName, toolStatus: toolStatus, toolError: toolError,
             payload: payloadStr, dedupKey: makeDedupKey(kind: kind, turnIndex: turnIndex, core: core))
         // Phase 6: project the event to a timeline row (bypasses suppression).
@@ -1015,7 +1093,8 @@ final class ApmeCollector {
     ///
     /// Returns the turnId that was updated, or nil if no turn is in scope.
     @discardableResult
-    func setTurnResponse(_ response: String, sessionId: String? = nil, runId overrideRunId: String? = nil, chatEndTs: Double? = nil) -> String? {
+    func setTurnResponse(_ response: String, sessionId: String? = nil, runId overrideRunId: String? = nil,
+                         chatEndTs: Double? = nil, source: String = "direct") -> String? {
         guard store.isOpen else { return nil }
         guard !response.isEmpty else { return nil }
 
@@ -1071,7 +1150,14 @@ final class ApmeCollector {
         // Parity with bridge/src/apme/collector.ts mergeEfficiencyJson.
         let clamped = String(response.prefix(10_000))
         let existingTurn = store.getTurn(id: turnId)
-        let efficiencyJson = Self.mergeEfficiencyJson(existing: existingTurn, patch: ["response_kind": "text"])
+        let existingSource = Self.efficiencyDict(existingTurn)["response_source"] as? String
+            ?? ((existingTurn?["response"] as? String)?.isEmpty == false ? "direct" : nil)
+        guard Self.responseSourcePriority(source) >= Self.responseSourcePriority(existingSource) else {
+            return turnId
+        }
+        let efficiencyJson = Self.mergeEfficiencyJson(existing: existingTurn, patch: [
+            "response_kind": "text", "response_source": source,
+        ])
         store.updateTurn(id: turnId, fields: [
             "response": clamped,
             "efficiencyJson": efficiencyJson,
@@ -1082,9 +1168,15 @@ final class ApmeCollector {
         // Sample trajectory: the assistant response closes the turn's event arc.
         if let taskId = existingTurn?["task_id"] as? String {
             let tIdx = (existingTurn?["turn_index"] as? Int) ?? candidateTurn?.index ?? 0
-            appendSampleEvent(taskId: taskId, runId: runId, turnIndex: tIdx,
-                              kind: "assistant_message", core: String(clamped.prefix(200)),
-                              payload: ["text": clamped, "responseKind": "text"])
+            let payload = jsonString(["text": clamped, "responseKind": "text"])
+            if let event = store.findAssistantMessageEvent(taskId: taskId, turnId: turnId),
+               let eventId = event["id"] as? Int {
+                store.updateSampleEvent(id: eventId, fields: ["payload": payload, "ts": nowMs()])
+            } else {
+                appendSampleEvent(taskId: taskId, runId: runId, turnIndex: tIdx,
+                                  kind: "assistant_message", core: "turn:\(turnId)",
+                                  payload: ["text": clamped, "responseKind": "text"])
+            }
         }
         DaemonLogger.shared.debug("APME", "setTurnResponse turn=\(turnId.prefix(8)) respLen=\(clamped.count) kind=text")
 
@@ -1162,19 +1254,30 @@ final class ApmeCollector {
         existing turn: [String: Any]?,
         patch: [String: Any]
     ) -> String {
-        var base: [String: Any] = [:]
-        if let raw = turn?["efficiency_json"] as? String,
-           !raw.isEmpty,
-           let data = raw.data(using: .utf8),
-           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            base = parsed
-        }
+        var base = efficiencyDict(turn)
         for (k, v) in patch { base[k] = v }
         if let data = try? JSONSerialization.data(withJSONObject: base),
            let str = String(data: data, encoding: .utf8) {
             return str
         }
         return "{}"
+    }
+
+    private static func efficiencyDict(_ turn: [String: Any]?) -> [String: Any] {
+        guard let raw = turn?["efficiency_json"] as? String, !raw.isEmpty,
+              let data = raw.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        return parsed
+    }
+
+    private static func responseSourcePriority(_ source: String?) -> Int {
+        switch source {
+        case "session_message_projection": return 1
+        case "chat_final": return 3
+        case .some: return 2
+        case .none: return 0
+        }
     }
 
     private func nowMs() -> Int { Int(Date().timeIntervalSince1970 * 1000) }

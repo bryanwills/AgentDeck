@@ -772,9 +772,12 @@ extension ADDeckSlotConfig {
 struct ADApmeRecommendation: Codable, Equatable {
     var agentType: ADAgentType
     var confidence: Double
-    var expectedCostUsd: Double
+    /// Explicit null when the model has no trustworthy price source.
+    var expectedCostUsd: Double?
     var expectedScore: Double
     var modelId: String
+    /// Normalized endpoint provider, explicit null when unattributed.
+    var provider: String?
     var rationale: String
 
     enum CodingKeys: String, CodingKey {
@@ -783,6 +786,7 @@ struct ADApmeRecommendation: Codable, Equatable {
         case expectedCostUsd = "expectedCostUsd"
         case expectedScore = "expectedScore"
         case modelId = "modelId"
+        case provider = "provider"
         case rationale = "rationale"
     }
 }
@@ -808,9 +812,10 @@ extension ADApmeRecommendation {
     func with(
         agentType: ADAgentType? = nil,
         confidence: Double? = nil,
-        expectedCostUsd: Double? = nil,
+        expectedCostUsd: Double?? = nil,
         expectedScore: Double? = nil,
         modelId: String? = nil,
+        provider: String?? = nil,
         rationale: String? = nil
     ) -> ADApmeRecommendation {
         return ADApmeRecommendation(
@@ -819,6 +824,7 @@ extension ADApmeRecommendation {
             expectedCostUsd: expectedCostUsd ?? self.expectedCostUsd,
             expectedScore: expectedScore ?? self.expectedScore,
             modelId: modelId ?? self.modelId,
+            provider: provider ?? self.provider,
             rationale: rationale ?? self.rationale
         )
     }
@@ -2075,8 +2081,11 @@ struct ADApmeModelScorecard: Codable, Equatable {
     var agentType: ADAgentType
     var avgOverall: Double?
     var avgTestsPass: Double?
+    var costKnown: Bool
     var costPerQuality: Double?
     var modelId: String
+    /// Normalized endpoint provider, explicit null when unattributed.
+    var provider: String?
     var runs: Double
     var totalCost: Double?
 
@@ -2084,8 +2093,10 @@ struct ADApmeModelScorecard: Codable, Equatable {
         case agentType = "agentType"
         case avgOverall = "avgOverall"
         case avgTestsPass = "avgTestsPass"
+        case costKnown = "costKnown"
         case costPerQuality = "costPerQuality"
         case modelId = "modelId"
+        case provider = "provider"
         case runs = "runs"
         case totalCost = "totalCost"
     }
@@ -2113,8 +2124,10 @@ extension ADApmeModelScorecard {
         agentType: ADAgentType? = nil,
         avgOverall: Double?? = nil,
         avgTestsPass: Double?? = nil,
+        costKnown: Bool? = nil,
         costPerQuality: Double?? = nil,
         modelId: String? = nil,
+        provider: String?? = nil,
         runs: Double? = nil,
         totalCost: Double?? = nil
     ) -> ADApmeModelScorecard {
@@ -2122,8 +2135,10 @@ extension ADApmeModelScorecard {
             agentType: agentType ?? self.agentType,
             avgOverall: avgOverall ?? self.avgOverall,
             avgTestsPass: avgTestsPass ?? self.avgTestsPass,
+            costKnown: costKnown ?? self.costKnown,
             costPerQuality: costPerQuality ?? self.costPerQuality,
             modelId: modelId ?? self.modelId,
+            provider: provider ?? self.provider,
             runs: runs ?? self.runs,
             totalCost: totalCost ?? self.totalCost
         )

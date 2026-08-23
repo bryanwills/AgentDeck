@@ -586,10 +586,13 @@ export interface ApmeEvalEvent {
 export interface ApmeModelScorecard {
   agentType: AgentType;
   modelId: string;
+  /** Normalized endpoint provider, explicit null when unattributed. */
+  provider: string | null;
   runs: number;
   avgOverall?: number;
   avgTestsPass?: number;
   totalCost?: number;
+  costKnown: boolean;
   costPerQuality?: number;
 }
 
@@ -602,8 +605,11 @@ export interface ApmeScorecardEvent {
 export interface ApmeRecommendation {
   modelId: string;
   agentType: AgentType;
+  /** Normalized endpoint provider, explicit null when unattributed. */
+  provider: string | null;
   expectedScore: number;    // 0-1
-  expectedCostUsd: number;
+  /** Explicit null when the model has no trustworthy price source. */
+  expectedCostUsd: number | null;
   confidence: number;       // 0-1
   rationale: string;
 }

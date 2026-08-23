@@ -38,6 +38,40 @@ describe('HookCodexSessions', () => {
     });
   });
 
+  it('enriches a hook-only Windows row from its id-keyed desktop rollout', () => {
+    const hooks = new HookCodexSessions(() => ({
+      path: `C:\\Users\\dev\\.codex\\sessions\\rollout-${SID}.jsonl`,
+      mtimeMs: 1_150,
+      summary: {
+        sessionId: SID,
+        cwd: 'C:\\dev\\BabelForge',
+        startedAt: 900,
+        modelName: 'gpt-5.6-sol high',
+        state: 'processing',
+        currentTask: 'exec_command pnpm test',
+        goal: 'fix the Windows observer',
+        contextPercent: 42,
+        totalTokens: 12_345,
+        isSubagent: false,
+        originator: 'Codex Desktop',
+      },
+    }));
+    hooks.note('codex_session_start', { sessionId: SID }, 1_000);
+    const row = hooks.applyTo([], 1_200)[0];
+    expect(row).toMatchObject({
+      id: `observed:codex-app:${SID}`,
+      agentType: 'codex-app',
+      appName: 'ChatGPT',
+      cwd: 'C:\\dev\\BabelForge',
+      modelName: 'gpt-5.6-sol high',
+      currentTask: 'exec_command pnpm test',
+      goal: 'fix the Windows observer',
+      contextPercent: 42,
+      totalTokens: 12_345,
+      lastActivityAt: 1_150,
+    });
+  });
+
   it('yields to the observer instead of doubling the row', () => {
     // The observer's row carries model/tokens/goal the hooks can't know; a
     // second row for the same conversation would render as two creatures.

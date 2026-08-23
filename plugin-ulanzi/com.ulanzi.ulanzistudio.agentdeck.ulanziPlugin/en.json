@@ -1,6 +1,6 @@
 {
   "Name": "AgentDeck",
-  "Description": "Monitor and steer AI coding agents from your D200H.",
+  "Description": "Monitor and steer AI coding agents from your D200H or D200X.",
   "Actions": [
     {
       "Name": "AgentDeck",

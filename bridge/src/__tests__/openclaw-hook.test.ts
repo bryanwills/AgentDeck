@@ -48,6 +48,7 @@ describe('openclaw-hook → telemetry spans', () => {
     expect(kinds.filter((k) => k === 'tool_result').length).toBe(2);
     const tr = spans.find((s) => s.kind === 'turn_response')!;
     expect(tr.attributes['agentdeck.response_text']).toContain('refactored');
+    expect(tr.attributes['agentdeck.response_source']).toBe('chat_final');
   });
 
   it('chat.delta emits no spans — deltas are streaming chunks, not eval signals', () => {

@@ -22,6 +22,7 @@ import {
   MODEL_PROVIDER_LABELS,
   harnessNativeProvider,
   modelProvider,
+  normalizeModelProvider,
   offHarnessProvider,
   offHarnessProviderLabel,
 } from '../model-provider.js';
@@ -53,6 +54,16 @@ describe('modelProvider', () => {
     // `unknown` must have no label, so a surface that renders the label
     // unconditionally still shows nothing.
     expect(MODEL_PROVIDER_LABELS.unknown).toBe('');
+  });
+});
+
+describe('normalizeModelProvider', () => {
+  it('normalizes the provider field before falling back to the model id', () => {
+    expect(normalizeModelProvider('z-ai', 'glm-5.3')).toBe('zai');
+    expect(normalizeModelProvider('zhipu', 'unknown-model')).toBe('zai');
+    expect(normalizeModelProvider('mlx', 'qwen3')).toBe('local');
+    expect(normalizeModelProvider(undefined, 'claude-opus-5')).toBe('anthropic');
+    expect(normalizeModelProvider('future-provider', 'future-model')).toBe('unknown');
   });
 });
 

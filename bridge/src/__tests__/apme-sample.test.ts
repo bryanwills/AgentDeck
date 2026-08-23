@@ -89,6 +89,7 @@ describe('ApmeStore sample events', () => {
     expect(sample!.cost.outputTokens).toBe(1500);
     expect(sample!.cost.latencyMs).toBe(5000);
     expect(sample!.cost.costUsd).toBeCloseTo(0.1575, 4);
+    expect(sample!.cost.costKnown).toBe(true);
   });
 
   it('local models price at $0; unknown models fall back to $0 but flag unpriced', () => {

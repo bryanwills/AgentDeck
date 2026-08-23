@@ -7,10 +7,10 @@ locale: ja
 canonical: false
 status: reader-translation
 owner: Hardware maintainers
-reviewed: 2026-08-05
-revision: 2026-08-05-ja
+reviewed: 2026-08-24
+revision: 2026-08-24-ja
 translation_of: hardware.compatibility
-source_revision: 2026-08-05
+source_revision: 2026-08-24
 source_of_truth: docs/hardware-compatibility.md
 validators: [node scripts/build-design-system-viewer.mjs --check]
 ---
@@ -48,6 +48,7 @@ AgentDeck の dashboard surface を一覧する読者向け翻訳です。英語
 | iDotMatrix          | Pixel display  | BLE SoC               | RGB · 32×32                    | BLE GATT                |   対応    |
 | Divoom Timebox Mini | Commercial LED | BLE SoC               | RGB LED · 11×11                | BLE GATT                |   対応    |
 | Ulanzi D200H        | HID deck       | SigmaStar SSD210      | LCD keys · logical 960×540     | Ulanzi Studio plugin    |   対応    |
+| Ulanzi D200X        | HID deck / dock | Ulanzi controller    | LCD key 14個 · encoder 3個 · 960×540 | Ulanzi Studio plugin | 一部 |
 | Stream Deck         | HID deck       | Elgato                | 15 LCD keys · 5×3              | Elgato plugin → WS      |   対応    |
 | Stream Deck Mini    | HID deck       | Elgato                | 6 LCD keys · 3×2               | Elgato plugin → WS      |   対応    |
 | Stream Deck+        | HID deck       | Elgato                | 8 keys · 4 dials · touch strip | Elgato plugin → WS      |   対応    |
@@ -62,7 +63,7 @@ AgentDeck の dashboard surface を一覧する読者向け翻訳です。英語
 
 ## 主な制約
 
-- **集計サーフェス数: 26。** 公開サーフェス数(README、ランディング)はこの算定をミラーします — プロトコル行(SSE stream)を除く全行を数えます。XTeink X3/X4は正常稼働中(両daemonにWi-Fi登録)ですが、コミュニティのCrossPointフォークで駆動され、一部表記はその配布上の制約を示します。
+- **集計サーフェス数: 27。** 公開サーフェス数(README、ランディング)はこの算定をミラーします — プロトコル行(SSE stream)を除く全行を数えます。D200X は14キーactionをSDK/simulatorで検証済みですが実機検証待ちで、3 encoder は未実装のため「一部」です。XTeink X3/X4は正常稼働中(両daemonにWi-Fi登録)ですが、コミュニティのCrossPointフォークで駆動され、一部表記はその配布上の制約を示します。
 - App Store 列は第三者アプリの同梱ではなく、提出する Apple アプリと Swift daemon との互換性を示します。
 - D200H は Ulanzi Studio plugin のみ対応し、direct-HID は廃止済みです。
 - Stream Deck family には Elgato アプリが必要です。

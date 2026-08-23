@@ -115,6 +115,7 @@ describe('OpenClaw session.tool / session.message → spans', () => {
     expect(a[0].attributes['agentdeck.usage.input_tokens']).toBe(10);
     expect(a[0].attributes['agentdeck.usage.cost_usd']).toBe(0.5);
     expect(a[1].attributes['agentdeck.response_text']).toBe('hi back');
+    expect(a[1].attributes['agentdeck.response_source']).toBe('session_message_projection');
   });
 
   it('does not count an assistant toolCall block as a tool', () => {

@@ -113,4 +113,37 @@ describe('observed turn response archiving', () => {
     const turns = store.listTurns(collector.getRunId(SID)!);
     expect(turns[0].response).toBe('real answer');
   });
+
+  it.each(['projection-first', 'final-first'] as const)(
+    'keeps the full OpenClaw final in one assistant slot (%s)',
+    (order) => {
+      driveTurn(collector, `long response ${order}`);
+      const full = `${'full-response-block '.repeat(550)}AUTHORITATIVE-TAIL`;
+      const projection = full.slice(0, 8_000);
+      if (order === 'projection-first') {
+        collector.setTurnResponse(SID, projection, 'session_message_projection');
+        collector.setTurnResponse(SID, full, 'chat_final');
+      } else {
+        collector.setTurnResponse(SID, full, 'chat_final');
+        collector.setTurnResponse(SID, projection, 'session_message_projection');
+      }
+
+      const turn = store.listTurns(collector.getRunId(SID)!)[0];
+      expect(turn.response).toBe(full.slice(0, 10_000));
+      expect(JSON.parse(String(turn.efficiency_json)).response_source).toBe('chat_final');
+      const assistants = store.getSample(collector.getActiveTaskId(SID)!)!.events
+        .filter((event) => event.kind === 'assistant_message');
+      expect(assistants).toHaveLength(1);
+      expect(assistants[0]).toMatchObject({ text: full.slice(0, 10_000) });
+    },
+  );
+
+  it('retains a session-message projection when no chat final is observable', () => {
+    driveTurn(collector, 'hidden run');
+    collector.setTurnResponse(SID, 'projection-only answer', 'session_message_projection');
+    const turn = store.listTurns(collector.getRunId(SID)!)[0];
+    expect(turn.response).toBe('projection-only answer');
+    expect(JSON.parse(String(turn.efficiency_json)).response_source)
+      .toBe('session_message_projection');
+  });
 });

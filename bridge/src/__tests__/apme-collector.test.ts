@@ -385,6 +385,50 @@ describe('ApmeCollector', () => {
     expect(run?.inputTokens).toBe(52222);
   });
 
+  it('attributes model and provider to each turn without reassigning earlier turns', () => {
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({ sessionId: 's-model-switch', agentType: 'openclaw', projectName: 'p' })!;
+
+    const completeTurn = (prompt: string, response: string, model: string, provider: string) => {
+      collector.ingestSpan('s-model-switch', span('turn_start', { 'agentdeck.prompt_text': prompt }));
+      collector.ingestSpan('s-model-switch', span('turn_response', { 'agentdeck.response_text': response }));
+      collector.ingestSpan('s-model-switch', span('turn_end', { 'agentdeck.turn_end_source': 'stop' }));
+      // OpenClaw's session.message metadata commonly arrives after chat.final,
+      // so attribution must use the collector's current→last turn fallback.
+      collector.ingestSpan('s-model-switch', span('session_meta', {
+        'gen_ai.request.model': model,
+        'gen_ai.system': provider,
+      }));
+    };
+
+    completeTurn('first', 'one', 'glm-5.3', 'z-ai');
+    completeTurn('second', 'two', 'claude-sonnet-4-6', 'anthropic');
+
+    const turns = store.listTurns(runId);
+    expect(turns.map((turn) => [turn.model_id, turn.provider])).toEqual([
+      ['glm-5.3', 'zai'],
+      ['claude-sonnet-4-6', 'anthropic'],
+    ]);
+
+    const task = store.listTasksForRun(runId)[0];
+    expect(task.modelId).toBe('mixed');
+    expect(task.provider).toBe('mixed');
+
+    // The run remains a latest-value compatibility fallback, while scorecard
+    // attribution is sourced from each turn and therefore keeps both models.
+    expect(store.getRun(runId)).toMatchObject({
+      modelId: 'claude-sonnet-4-6',
+      provider: 'anthropic',
+    });
+    store.updateTurn(turns[0].id as string, { compositeScore: 0.6 });
+    store.updateTurn(turns[1].id as string, { compositeScore: 0.9 });
+    expect(store.scorecard().map((card) => [card.modelId, card.provider, card.avgOverall]))
+      .toEqual([
+        ['claude-sonnet-4-6', 'anthropic', 0.9],
+        ['glm-5.3', 'zai', 0.6],
+      ]);
+  });
+
   it('closes the turn on an explicit turn_end and records which signal closed it', async () => {
     // The turn_end span emission was gated by a test; ACTING on it was not.
     // Reverting the collector's close left the whole suite green, so
@@ -441,10 +485,10 @@ describe('ApmeCollector', () => {
     expect(run?.costUsd).toBeCloseTo(0.5, 6);
   });
 
-  it('records a reported cost of zero as zero, not as unknown', async () => {
-    // glm-5.2 answers `usage.cost.total = 0` on every assistant message, so
-    // folding a reported zero into null would record a whole class of run as
-    // "cost unknown" when the producer actually said "free".
+  it('does not mistake an unpriced provider zero for a known-free model', async () => {
+    // Some providers answer `usage.cost.total = 0` even when AgentDeck has no
+    // price table. The numeric value is retained for provenance, but the
+    // separate bit prevents recommendations from presenting it as free.
     const collector = new ApmeCollector(store);
     const runId = collector.openRun({ sessionId: 's5', agentType: 'openclaw', projectName: 'p' });
     collector.ingestSpan('s5', span('turn_start', { 'agentdeck.prompt_text': 'go' }));
@@ -454,6 +498,27 @@ describe('ApmeCollector', () => {
       'agentdeck.usage.output_tokens': 1,
       'agentdeck.usage.cost_usd': 0,
     }));
-    expect(store.getRun(runId!)?.costUsd).toBe(0);
+    expect(store.getRun(runId!)).toMatchObject({ costUsd: 0, costKnown: false });
+    const task = store.listTasksForRun(runId!)[0];
+    expect(task).toMatchObject({ costUsd: null, costKnown: false });
+  });
+
+  it('keeps a prior numeric cost but makes the aggregate unknown when a later call is unpriced', () => {
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({ sessionId: 's6', agentType: 'openclaw', projectName: 'p' });
+    collector.ingestSpan('s6', span('turn_start', { 'agentdeck.prompt_text': 'go' }));
+    collector.ingestSpan('s6', span('session_meta', {
+      'gen_ai.request.model': 'future/model',
+      'agentdeck.usage.input_tokens': 10,
+      'agentdeck.usage.output_tokens': 1,
+      'agentdeck.usage.cost_usd': 0.5,
+    }));
+    collector.ingestSpan('s6', span('session_meta', {
+      'gen_ai.request.model': 'future/model',
+      'agentdeck.usage.input_tokens': 5,
+      'agentdeck.usage.output_tokens': 1,
+    }));
+    expect(store.getRun(runId!)).toMatchObject({ costUsd: 0.5, costKnown: false });
+    expect(store.listTasksForRun(runId!)[0]).toMatchObject({ costUsd: null, costKnown: false });
   });
 });

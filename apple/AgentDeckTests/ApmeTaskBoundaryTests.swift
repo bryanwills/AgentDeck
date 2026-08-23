@@ -1175,6 +1175,98 @@ final class ApmeTaskBoundaryTests: XCTestCase {
         XCTAssertNil(turnB?["response"] as? String, "B's turn must stay untouched")
     }
 
+    func testOpenClawTurnIdentityDoesNotReassignEarlierTurns() async throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let collector = ApmeCollector(store: tmp.store)
+        let sid = "openclaw-model-switch"
+        collector.handleHook(event: "session_start", data: ["session_id": sid, "agent_type": "openclaw"])
+
+        func complete(_ prompt: String, _ model: String, _ provider: String) {
+            collector.handleHook(event: "UserPromptSubmit", data: ["session_id": sid, "prompt": prompt])
+            _ = collector.setTurnResponse("answer \(prompt)", sessionId: sid)
+            collector.handleHook(event: "stop", data: ["session_id": sid])
+            collector.updateTurnIdentity(modelId: model, provider: provider, sessionId: sid)
+        }
+        complete("one", "glm-5.3", "z-ai")
+        complete("two", "claude-sonnet-4-6", "anthropic")
+
+        guard let run = tmp.store.listRuns().first(where: { $0.sessionId == sid }) else {
+            return XCTFail("run missing")
+        }
+        let turns = tmp.store.listTurns(runId: run.id)
+        XCTAssertEqual(turns.map { $0["model_id"] as? String }, ["glm-5.3", "claude-sonnet-4-6"])
+        XCTAssertEqual(turns.map { $0["provider"] as? String }, ["zai", "anthropic"])
+        let task = tmp.store.listTasksForRun(run.id).first
+        XCTAssertEqual(task?.modelId, "mixed")
+        XCTAssertEqual(task?.provider, "mixed")
+    }
+
+    func testOpenClawFullFinalWinsBothResponseArrivalOrders() async throws {
+        for projectionFirst in [true, false] {
+            let tmp = try makeTempStore()
+            defer { cleanup(tmp) }
+            let collector = ApmeCollector(store: tmp.store)
+            let sid = "openclaw-response-\(projectionFirst)"
+            collector.handleHook(event: "session_start", data: ["session_id": sid, "agent_type": "openclaw"])
+            collector.handleHook(event: "UserPromptSubmit", data: ["session_id": sid, "prompt": "long answer"])
+            let full = String(repeating: "full-response-block ", count: 550) + "AUTHORITATIVE-TAIL"
+            let projection = String(full.prefix(8_000))
+            if projectionFirst {
+                _ = collector.setTurnResponse(projection, sessionId: sid, source: "session_message_projection")
+                _ = collector.setTurnResponse(full, sessionId: sid, source: "chat_final")
+            } else {
+                _ = collector.setTurnResponse(full, sessionId: sid, source: "chat_final")
+                _ = collector.setTurnResponse(projection, sessionId: sid, source: "session_message_projection")
+            }
+            guard let run = tmp.store.listRuns().first(where: { $0.sessionId == sid }),
+                  let turn = tmp.store.listTurns(runId: run.id).first,
+                  let task = tmp.store.listTasksForRun(run.id).first else {
+                return XCTFail("response rows missing")
+            }
+            XCTAssertEqual(turn["response"] as? String, String(full.prefix(10_000)))
+            let assistantRows = tmp.store.listSampleEventRows(task.id)
+                .filter { ($0["kind"] as? String) == "assistant_message" }
+            XCTAssertEqual(assistantRows.count, 1)
+        }
+    }
+
+    func testCostProvenanceSeparatesUnpricedZeroFromKnownFreeLocal() async throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let collector = ApmeCollector(store: tmp.store)
+
+        for (sid, model) in [("remote-zero", "future/model"), ("local-zero", "mlx:qwen3")] {
+            collector.handleHook(event: "session_start", data: ["session_id": sid, "agent_type": "openclaw"])
+            collector.handleHook(event: "UserPromptSubmit", data: ["session_id": sid, "prompt": "go"])
+            collector.updateTurnIdentity(modelId: model, provider: nil, sessionId: sid)
+            collector.addUsageIncrement(inputTokens: 10, outputTokens: 1, costUsd: 0, sessionId: sid)
+        }
+
+        let runs = tmp.store.listRuns()
+        XCTAssertEqual(runs.first(where: { $0.sessionId == "remote-zero" })?.costKnown, false)
+        XCTAssertEqual(runs.first(where: { $0.sessionId == "local-zero" })?.costKnown, true)
+    }
+
+    func testLaterUnpricedCallPoisonsAggregateButKeepsPriorNumericCost() async throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let collector = ApmeCollector(store: tmp.store)
+        let sid = "partial-cost"
+        collector.handleHook(event: "session_start", data: ["session_id": sid, "agent_type": "openclaw"])
+        collector.handleHook(event: "UserPromptSubmit", data: ["session_id": sid, "prompt": "go"])
+        collector.updateTurnIdentity(modelId: "future/model", provider: nil, sessionId: sid)
+        collector.addUsageIncrement(inputTokens: 10, outputTokens: 1, costUsd: 0.5, sessionId: sid)
+        collector.addUsageIncrement(inputTokens: 5, outputTokens: 1, costUsd: nil, sessionId: sid)
+
+        guard let run = tmp.store.listRuns().first(where: { $0.sessionId == sid }) else {
+            return XCTFail("run missing")
+        }
+        XCTAssertEqual(run.costUsd, 0.5)
+        XCTAssertEqual(run.costKnown, false)
+        XCTAssertEqual(tmp.store.listTasksForRun(run.id).first?.costKnown, false)
+    }
+
     /// session_end for one session must not tear down the other session's
     /// task (the single-activeHookSession design attributed a session_end
     /// to whichever session started most recently).

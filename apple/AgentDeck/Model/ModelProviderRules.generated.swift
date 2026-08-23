@@ -21,6 +21,7 @@ enum ADModelProvider: String, Equatable {
     case xai = "xai"
     case mistral = "mistral"
     case meta = "meta"
+    case local = "local"
     case unknown = "unknown"
 
     /// Display name; empty for `.unknown`, which must render as nothing.
@@ -36,6 +37,7 @@ enum ADModelProvider: String, Equatable {
         case .xai: return "xAI"
         case .mistral: return "Mistral"
         case .meta: return "Meta"
+        case .local: return "Local"
         case .unknown: return ""
         }
     }
@@ -114,6 +116,10 @@ enum ModelProviderRules {
         "xai": .xai,
         "mistral": .mistral,
         "meta": .meta,
+        "local": .local,
+        "mlx": .local,
+        "ollama": .local,
+        "lmstudio": .local,
     ]
 
     /// The provider a harness talks to when nobody redirected it. Absent for

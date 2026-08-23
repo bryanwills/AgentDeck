@@ -21,6 +21,7 @@ enum class ModelProvider(val id: String, val label: String) {
     XAI("xai", "xAI"),
     MISTRAL("mistral", "Mistral"),
     META("meta", "Meta"),
+    LOCAL("local", "Local"),
     UNKNOWN("unknown", ""),
 }
 
@@ -97,6 +98,10 @@ object ModelProviderRules {
         "xai" to ModelProvider.XAI,
         "mistral" to ModelProvider.MISTRAL,
         "meta" to ModelProvider.META,
+        "local" to ModelProvider.LOCAL,
+        "mlx" to ModelProvider.LOCAL,
+        "ollama" to ModelProvider.LOCAL,
+        "lmstudio" to ModelProvider.LOCAL,
     )
 
     /** The provider a harness talks to when nobody redirected it. Absent for

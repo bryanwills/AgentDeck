@@ -1,6 +1,6 @@
 {
   "Name": "AgentDeck",
-  "Description": "在 D200H 上监看并操控 AI 编程助手。",
+  "Description": "在 D200H 或 D200X 上监看并操控 AI 编程助手。",
   "Actions": [
     {
       "Name": "AgentDeck",

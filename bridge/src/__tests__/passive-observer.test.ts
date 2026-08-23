@@ -190,6 +190,7 @@ describe('passive-observer parsers', () => {
           id: 'codex-session-1',
           cwd: '/Users/example/github/AgentDeck',
           timestamp: '2026-04-26T01:00:00.000Z',
+          originator: 'Codex Desktop',
         },
       },
       {
@@ -226,6 +227,7 @@ describe('passive-observer parsers', () => {
       state: 'processing',
       currentTask: 'exec_command pnpm typecheck',
       totalTokens: 1500,
+      originator: 'Codex Desktop',
     }));
     expect(Math.round(summary.contextPercent ?? 0)).toBe(15);
   });

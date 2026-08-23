@@ -409,11 +409,21 @@ data class DeckSlotConfig (
 data class ApmeRecommendation (
     val agentType: AgentType,
     val confidence: Double,
-    val expectedCostUsd: Double,
+
+    /**
+     * Explicit null when the model has no trustworthy price source.
+     */
+    val expectedCostUsd: Double? = null,
+
     val expectedScore: Double,
 
     @Json(name = "modelId")
     val modelID: String,
+
+    /**
+     * Normalized endpoint provider, explicit null when unattributed.
+     */
+    val provider: String? = null,
 
     val rationale: String
 )
@@ -1087,10 +1097,16 @@ data class ApmeModelScorecard (
     val agentType: AgentType,
     val avgOverall: Double? = null,
     val avgTestsPass: Double? = null,
+    val costKnown: Boolean,
     val costPerQuality: Double? = null,
 
     @Json(name = "modelId")
     val modelID: String,
+
+    /**
+     * Normalized endpoint provider, explicit null when unattributed.
+     */
+    val provider: String? = null,
 
     val runs: Double,
     val totalCost: Double? = null

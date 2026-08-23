@@ -26,6 +26,8 @@ export interface ApmeRunRow {
   sessionId: string;
   agentType: AgentType;
   modelId?: string | null;
+  /** Normalized endpoint provider. */
+  provider?: string | null;
   projectName?: string | null;
   projectPath?: string | null;
   taskPrompt?: string | null;
@@ -34,6 +36,8 @@ export interface ApmeRunRow {
   inputTokens?: number | null;
   outputTokens?: number | null;
   costUsd?: number | null;
+  /** True only when every recorded model call has a known price source. */
+  costKnown?: boolean | null;
   exitCode?: number | null;
   gitBefore?: string | null;
   gitAfter?: string | null;
@@ -148,12 +152,16 @@ export interface ApmeTaskRow {
   // ── Sample header: agent identity + cost (req #2 / #7) ──
   /** Real model id for this sample (the task IS the SessionSample header). */
   modelId?: string | null;
+  /** Normalized endpoint provider. `null` means no attributable provider. */
+  provider?: string | null;
   /** JSON string of SampleModelConfig (provider, subagents, mcpServers). */
   modelConfig?: string | null;
   /** Aggregated from the sample's ModelEvents. */
   inputTokens?: number | null;
   outputTokens?: number | null;
   costUsd?: number | null;
+  /** False distinguishes an unpriced model from a genuinely free local one. */
+  costKnown?: boolean | null;
   latencyMs?: number | null;
 }
 
@@ -162,10 +170,12 @@ export interface ApmeTaskRow {
 export interface ApmeSampleScorecardRow {
   agentType: string;
   modelId: string;
+  provider: string | null;
   taskCategory: string | null;
   samples: number;
   avgQuality: number | null;
   totalCost: number | null;
+  costKnown: boolean;
   avgLatencyMs: number | null;
   costPerQuality: number | null;
 }
@@ -194,20 +204,24 @@ export interface ApmeVibeRow {
 export interface ApmeScorecardRow {
   agentType: string;
   modelId: string;
+  provider: string | null;
   runs: number;
   avgOverall: number | null;
   avgTestsPass: number | null;
   totalCost: number | null;
+  costKnown: boolean;
   costPerQuality: number | null;
 }
 
 export interface ApmeCategoryScorecardRow {
   taskCategory: string;
   modelId: string;
+  provider: string | null;
   runs: number;
   avgOverall: number | null;
   avgTestsPass: number | null;
   totalCost: number | null;
+  costKnown: boolean;
 }
 
 // ─── Judge output (parsed JSON shape) ─────────────────────────────────────────

@@ -21,7 +21,7 @@ session: it shows which agent is running, in which project, and whether it is
 working, waiting on you, or idle — and it repaints itself as that changes. Press a
 key to jump in.
 
-It started on an Elgato Stream Deck+ and now drives **26 surfaces** at once —
+It started on an Elgato Stream Deck+ and now drives **27 surfaces** at once —
 decks, tablets, e-ink readers, ESP32 panels, LED matrices, and your terminal.
 
 <p align="center">
@@ -127,7 +127,7 @@ Any of these attach to the same daemon, and you can add them in any order:
 | Surface | How to attach |
 |---|---|
 | **Stream Deck / Mini / XL / Plus / + XL** | One click from the [Elgato Marketplace](https://marketplace.elgato.com/product/agentdeck-dce3806b-176e-40f2-be7d-e029bec0f464) — or `cd plugin && streamdeck link bound.serendipity.agentdeck.sdPlugin` from a checkout |
-| **Ulanzi D200H** | Install the plugin in Ulanzi Studio — see [plugin-ulanzi/VERIFY.md](plugin-ulanzi/VERIFY.md) |
+| **Ulanzi D200H / D200X LCD keys** | Install the plugin in Ulanzi Studio — see [plugin-ulanzi/VERIFY.md](plugin-ulanzi/VERIFY.md). D200X encoders are not supported yet. |
 | **macOS app** | [Download on the App Store](https://apps.apple.com/app/id6784822497) — the SwiftUI dashboard carries its own daemon, so it needs no Node.js |
 | **iPhone / iPad companion** | Same [App Store listing](https://apps.apple.com/app/id6784822497) — pairs with a daemon on your Mac over the LAN (QR pairing) |
 | **Android tablet / e-ink** | [Install from Google Play](https://play.google.com/store/apps/details?id=dev.agentdeck) (recommended), or use the signed APK from [Releases](https://github.com/puritysb/AgentDeck/releases). Android is a companion dashboard: keep the AgentDeck daemon running on a Mac/PC on the same network. See the [3-step setup guide](docs/android.md#quick-start-google-play-or-github-apk). |
@@ -173,7 +173,7 @@ Full build-from-source and manual steps: **[docs/install.md](docs/install.md)**.
 </table>
 
 <p align="center">
-  <strong><a href="https://puritysb.github.io/AgentDeck/hardware/">→ Browse all 26 surfaces, with live renderer previews</a></strong>
+  <strong><a href="https://puritysb.github.io/AgentDeck/hardware/">→ Browse all 27 surfaces, with live renderer previews</a></strong>
 </p>
 
 ---

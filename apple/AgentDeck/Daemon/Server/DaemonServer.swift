@@ -6590,7 +6590,8 @@ final class DaemonServer {
                 // APME: record response text → triggers inline classification + eval
                 let response = chatPayload["response"] as? String ?? ""
                 if !response.isEmpty {
-                    apmeCollectorGateway?.setTurnResponse(response, sessionId: "openclaw-gateway")
+                    apmeCollectorGateway?.setTurnResponse(
+                        response, sessionId: "openclaw-gateway", source: "chat_final")
                 }
             case "error":
                 gatewaySessionState = "idle"
@@ -6604,6 +6605,27 @@ final class DaemonServer {
             // every streaming delta, and a sessions_list per delta is a broadcast
             // storm on a fleet of boards.
             if hadApproval && gatewayPendingApproval == nil { broadcastSessionsList() }
+        case "gateway_session_message":
+            guard (event["role"] as? String) == "assistant" else { break }
+            let model = event["model"] as? String
+            let provider = event["provider"] as? String
+            apmeCollectorGateway?.updateTurnIdentity(
+                modelId: model, provider: provider, sessionId: "openclaw-gateway")
+            if let usage = event["usage"] as? [String: Any] {
+                let input = (usage["input"] as? NSNumber)?.intValue ?? 0
+                let output = (usage["output"] as? NSNumber)?.intValue ?? 0
+                let cost = ((usage["cost"] as? [String: Any])?["total"] as? NSNumber)?.doubleValue
+                if input > 0 || output > 0 || cost != nil {
+                    apmeCollectorGateway?.addUsageIncrement(
+                        inputTokens: input, outputTokens: output, costUsd: cost,
+                        sessionId: "openclaw-gateway")
+                }
+            }
+            if let response = event["response"] as? String, !response.isEmpty {
+                apmeCollectorGateway?.setTurnResponse(
+                    response, sessionId: "openclaw-gateway",
+                    source: "session_message_projection")
+            }
         case "gateway_approval":
             gatewaySessionState = "awaiting_permission"
             // `prompt` is the adapter's SSOT-parsed form. The old

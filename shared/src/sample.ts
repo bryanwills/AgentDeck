@@ -42,6 +42,8 @@ export interface SampleCost {
   outputTokens: number;
   /** Sum over the sample's ModelEvents (priced at ingestion). 0 for local. */
   costUsd: number;
+  /** False when `costUsd` is only an unknown-model $0 fallback. */
+  costKnown?: boolean;
   /** Sum of per-model-call latencies (ms). */
   latencyMs: number;
 }
@@ -185,6 +187,8 @@ export interface ApmeSampleEventRow {
   inputTokens?: number | null;
   outputTokens?: number | null;
   costUsd?: number | null;
+  /** True for a priced model or a known-free local model. */
+  costKnown?: boolean | null;
   latencyMs?: number | null;
   // tool columns (kind='tool')
   toolName?: string | null;

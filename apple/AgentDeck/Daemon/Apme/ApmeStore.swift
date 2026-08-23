@@ -76,11 +76,11 @@ final class ApmeStore: @unchecked Sendable {
         guard let db else { return }
         let sql = """
         INSERT INTO runs
-          (id, session_id, agent_type, model_id, project_name, project_path,
+          (id, session_id, agent_type, model_id, provider, project_name, project_path,
            task_prompt, started_at, ended_at, input_tokens, output_tokens,
-           cost_usd, exit_code, git_before, git_after, hw_profile,
+           cost_usd, cost_known, exit_code, git_before, git_after, hw_profile,
            task_signals, task_category, task_category_source)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
@@ -89,21 +89,23 @@ final class ApmeStore: @unchecked Sendable {
         bindText(stmt, 2, run.sessionId)
         bindText(stmt, 3, run.agentType)
         bindTextOrNull(stmt, 4, run.modelId)
-        bindTextOrNull(stmt, 5, run.projectName)
-        bindTextOrNull(stmt, 6, run.projectPath)
-        bindTextOrNull(stmt, 7, run.taskPrompt)
-        sqlite3_bind_int64(stmt, 8, Int64(run.startedAt))
-        if let e = run.endedAt { sqlite3_bind_int64(stmt, 9, Int64(e)) } else { sqlite3_bind_null(stmt, 9) }
-        if let v = run.inputTokens { sqlite3_bind_int(stmt, 10, Int32(v)) } else { sqlite3_bind_null(stmt, 10) }
-        if let v = run.outputTokens { sqlite3_bind_int(stmt, 11, Int32(v)) } else { sqlite3_bind_null(stmt, 11) }
-        if let v = run.costUsd { sqlite3_bind_double(stmt, 12, v) } else { sqlite3_bind_null(stmt, 12) }
-        if let v = run.exitCode { sqlite3_bind_int(stmt, 13, Int32(v)) } else { sqlite3_bind_null(stmt, 13) }
-        bindTextOrNull(stmt, 14, run.gitBefore)
-        bindTextOrNull(stmt, 15, run.gitAfter)
-        bindTextOrNull(stmt, 16, run.hwProfile)
-        bindTextOrNull(stmt, 17, run.taskSignals)
-        bindTextOrNull(stmt, 18, run.taskCategory)
-        bindTextOrNull(stmt, 19, run.taskCategorySource)
+        bindTextOrNull(stmt, 5, run.provider)
+        bindTextOrNull(stmt, 6, run.projectName)
+        bindTextOrNull(stmt, 7, run.projectPath)
+        bindTextOrNull(stmt, 8, run.taskPrompt)
+        sqlite3_bind_int64(stmt, 9, Int64(run.startedAt))
+        if let e = run.endedAt { sqlite3_bind_int64(stmt, 10, Int64(e)) } else { sqlite3_bind_null(stmt, 10) }
+        if let v = run.inputTokens { sqlite3_bind_int(stmt, 11, Int32(v)) } else { sqlite3_bind_null(stmt, 11) }
+        if let v = run.outputTokens { sqlite3_bind_int(stmt, 12, Int32(v)) } else { sqlite3_bind_null(stmt, 12) }
+        if let v = run.costUsd { sqlite3_bind_double(stmt, 13, v) } else { sqlite3_bind_null(stmt, 13) }
+        sqlite3_bind_int(stmt, 14, (run.costKnown || (run.costUsd ?? 0) > 0) ? 1 : 0)
+        if let v = run.exitCode { sqlite3_bind_int(stmt, 15, Int32(v)) } else { sqlite3_bind_null(stmt, 15) }
+        bindTextOrNull(stmt, 16, run.gitBefore)
+        bindTextOrNull(stmt, 17, run.gitAfter)
+        bindTextOrNull(stmt, 18, run.hwProfile)
+        bindTextOrNull(stmt, 19, run.taskSignals)
+        bindTextOrNull(stmt, 20, run.taskCategory)
+        bindTextOrNull(stmt, 21, run.taskCategorySource)
         sqlite3_step(stmt)
     }
 
@@ -122,10 +124,10 @@ final class ApmeStore: @unchecked Sendable {
         // run IDs cycling 217×). Mirror the columns in `readRun` and
         // `turns` / `tasks` colMaps when extending.
         let colMap: [String: String] = [
-            "modelId": "model_id", "projectName": "project_name", "projectPath": "project_path",
+            "modelId": "model_id", "provider": "provider", "projectName": "project_name", "projectPath": "project_path",
             "taskPrompt": "task_prompt", "endedAt": "ended_at",
             "inputTokens": "input_tokens", "outputTokens": "output_tokens",
-            "costUsd": "cost_usd", "exitCode": "exit_code",
+            "costUsd": "cost_usd", "costKnown": "cost_known", "exitCode": "exit_code",
             "gitBefore": "git_before", "gitAfter": "git_after", "hwProfile": "hw_profile",
             "taskSignals": "task_signals", "taskCategory": "task_category",
             "taskCategorySource": "task_category_source",
@@ -139,6 +141,10 @@ final class ApmeStore: @unchecked Sendable {
             setClauses.append("\(col) = ?")
             values.append(val)
         }
+        if let cost = fields["costUsd"] as? Double, cost > 0, fields["costKnown"] == nil {
+            setClauses.append("cost_known = ?")
+            values.append(true)
+        }
         guard !setClauses.isEmpty else { return }
         values.append(id)
         let sql = "UPDATE runs SET \(setClauses.joined(separator: ", ")) WHERE id = ?"
@@ -151,6 +157,7 @@ final class ApmeStore: @unchecked Sendable {
             case let s as String: sqlite3_bind_text(stmt, idx, (s as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
             case let n as Int: sqlite3_bind_int64(stmt, idx, Int64(n))
             case let d as Double: sqlite3_bind_double(stmt, idx, d)
+            case let b as Bool: sqlite3_bind_int(stmt, idx, b ? 1 : 0)
             default: sqlite3_bind_null(stmt, idx)
             }
         }
@@ -414,6 +421,7 @@ final class ApmeStore: @unchecked Sendable {
             "efficiencyJson": "efficiency_json",
             "prompt": "prompt", "response": "response",
             "taskId": "task_id", "endSource": "end_source",
+            "modelId": "model_id", "provider": "provider",
         ]
         var sets: [String] = []
         var vals: [Any?] = []
@@ -421,6 +429,10 @@ final class ApmeStore: @unchecked Sendable {
             guard let col = colMap[key] else { continue }
             sets.append("\(col) = ?")
             vals.append(val)
+        }
+        if let cost = fields["costUsd"] as? Double, cost > 0, fields["costKnown"] == nil {
+            sets.append("cost_known = ?")
+            vals.append(true)
         }
         guard !sets.isEmpty else { return }
         vals.append(id)
@@ -434,6 +446,7 @@ final class ApmeStore: @unchecked Sendable {
             case let s as String: sqlite3_bind_text(stmt, idx, (s as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
             case let n as Int: sqlite3_bind_int64(stmt, idx, Int64(n))
             case let d as Double: sqlite3_bind_double(stmt, idx, d)
+            case let b as Bool: sqlite3_bind_int(stmt, idx, b ? 1 : 0)
             default: sqlite3_bind_null(stmt, idx)
             }
         }
@@ -457,6 +470,19 @@ final class ApmeStore: @unchecked Sendable {
         bindText(stmt, 1, id)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return rowToDict(stmt)
+    }
+
+    func turnId(runId: String, turnIndex: Int) -> String? {
+        guard let db else { return nil }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "SELECT id FROM turns WHERE run_id = ? AND turn_index = ? LIMIT 1",
+            -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, runId); sqlite3_bind_int(stmt, 2, Int32(turnIndex))
+        guard sqlite3_step(stmt) == SQLITE_ROW,
+              let raw = sqlite3_column_text(stmt, 0) else { return nil }
+        return String(cString: raw)
     }
 
     // MARK: - Tasks
@@ -493,10 +519,12 @@ final class ApmeStore: @unchecked Sendable {
             "notesJson": "notes_json",
             "boundarySignal": "boundary_signal",
             "modelId": "model_id",
+            "provider": "provider",
             "modelConfig": "model_config",
             "inputTokens": "input_tokens",
             "outputTokens": "output_tokens",
             "costUsd": "cost_usd",
+            "costKnown": "cost_known",
             "latencyMs": "latency_ms",
         ]
         var sets: [String] = []
@@ -518,6 +546,7 @@ final class ApmeStore: @unchecked Sendable {
             case let s as String: sqlite3_bind_text(stmt, idx, (s as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
             case let n as Int: sqlite3_bind_int64(stmt, idx, Int64(n))
             case let d as Double: sqlite3_bind_double(stmt, idx, d)
+            case let b as Bool: sqlite3_bind_int(stmt, idx, b ? 1 : 0)
             default: sqlite3_bind_null(stmt, idx)
             }
         }
@@ -629,36 +658,40 @@ final class ApmeStore: @unchecked Sendable {
     /// (task_id, dedup_key) index makes storage-time dedup atomic. Returns true
     /// if a row was actually inserted. Mirrors bridge/src/apme/store.ts.
     @discardableResult
-    func insertSampleEvent(taskId: String, runId: String, turnIndex: Int?, seq: Int, ts: Int,
+    func insertSampleEvent(taskId: String, runId: String, turnIndex: Int?, turnId: String?, seq: Int, ts: Int,
                            kind: String, model: String?, inputTokens: Int?, outputTokens: Int?,
-                           costUsd: Double?, latencyMs: Int?, toolName: String?, toolStatus: String?,
+                           costUsd: Double?, costKnown: Bool?, latencyMs: Int?, toolName: String?, toolStatus: String?,
                            toolError: String?, payload: String?, dedupKey: String?) -> Bool {
         guard let db else { return false }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db,
             """
             INSERT OR IGNORE INTO sample_events
-              (task_id, run_id, turn_index, seq, ts, kind, model, input_tokens, output_tokens,
-               cost_usd, latency_ms, tool_name, tool_status, tool_error, payload, dedup_key)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              (task_id, run_id, turn_index, turn_id, seq, ts, kind, model, input_tokens, output_tokens,
+               cost_usd, cost_known, latency_ms, tool_name, tool_status, tool_error, payload, dedup_key)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, taskId)
         bindText(stmt, 2, runId)
         if let v = turnIndex { sqlite3_bind_int(stmt, 3, Int32(v)) } else { sqlite3_bind_null(stmt, 3) }
-        sqlite3_bind_int(stmt, 4, Int32(seq))
-        sqlite3_bind_int64(stmt, 5, Int64(ts))
-        bindText(stmt, 6, kind)
-        bindTextOrNull(stmt, 7, model)
-        if let v = inputTokens { sqlite3_bind_int64(stmt, 8, Int64(v)) } else { sqlite3_bind_null(stmt, 8) }
-        if let v = outputTokens { sqlite3_bind_int64(stmt, 9, Int64(v)) } else { sqlite3_bind_null(stmt, 9) }
-        if let v = costUsd { sqlite3_bind_double(stmt, 10, v) } else { sqlite3_bind_null(stmt, 10) }
-        if let v = latencyMs { sqlite3_bind_int64(stmt, 11, Int64(v)) } else { sqlite3_bind_null(stmt, 11) }
-        bindTextOrNull(stmt, 12, toolName)
-        bindTextOrNull(stmt, 13, toolStatus)
-        bindTextOrNull(stmt, 14, toolError)
-        bindTextOrNull(stmt, 15, payload)
-        bindTextOrNull(stmt, 16, dedupKey)
+        bindTextOrNull(stmt, 4, turnId)
+        sqlite3_bind_int(stmt, 5, Int32(seq))
+        sqlite3_bind_int64(stmt, 6, Int64(ts))
+        bindText(stmt, 7, kind)
+        bindTextOrNull(stmt, 8, model)
+        if let v = inputTokens { sqlite3_bind_int64(stmt, 9, Int64(v)) } else { sqlite3_bind_null(stmt, 9) }
+        if let v = outputTokens { sqlite3_bind_int64(stmt, 10, Int64(v)) } else { sqlite3_bind_null(stmt, 10) }
+        if let v = costUsd { sqlite3_bind_double(stmt, 11, v) } else { sqlite3_bind_null(stmt, 11) }
+        // Positive cost is self-proving provenance for legacy callers. Zero is
+        // still ambiguous and only becomes known when the producer says so.
+        sqlite3_bind_int(stmt, 12, (costKnown == true || (costUsd ?? 0) > 0) ? 1 : 0)
+        if let v = latencyMs { sqlite3_bind_int64(stmt, 13, Int64(v)) } else { sqlite3_bind_null(stmt, 13) }
+        bindTextOrNull(stmt, 14, toolName)
+        bindTextOrNull(stmt, 15, toolStatus)
+        bindTextOrNull(stmt, 16, toolError)
+        bindTextOrNull(stmt, 17, payload)
+        bindTextOrNull(stmt, 18, dedupKey)
         sqlite3_step(stmt)
         return sqlite3_changes(db) > 0
     }
@@ -704,12 +737,24 @@ final class ApmeStore: @unchecked Sendable {
         return rowToDict(stmt)
     }
 
+    func findAssistantMessageEvent(taskId: String, turnId: String) -> [String: Any]? {
+        guard let db else { return nil }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "SELECT * FROM sample_events WHERE task_id = ? AND turn_id = ? AND kind = 'assistant_message' ORDER BY seq ASC LIMIT 1",
+            -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, taskId); bindText(stmt, 2, turnId)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return rowToDict(stmt)
+    }
+
     /// Update a previously-inserted event (tool pending→resolved) by id.
     func updateSampleEvent(id: Int, fields: [String: Any?]) {
         guard let db, !fields.isEmpty else { return }
         let colMap: [String: String] = [
             "toolStatus": "tool_status", "toolError": "tool_error", "payload": "payload",
-            "costUsd": "cost_usd", "latencyMs": "latency_ms", "model": "model",
+            "costUsd": "cost_usd", "costKnown": "cost_known", "latencyMs": "latency_ms", "model": "model",
             "inputTokens": "input_tokens", "outputTokens": "output_tokens", "ts": "ts",
         ]
         var sets: [String] = []
@@ -718,6 +763,10 @@ final class ApmeStore: @unchecked Sendable {
             guard let col = colMap[key] else { continue }
             sets.append("\(col) = ?")
             vals.append(val)
+        }
+        if let cost = fields["costUsd"] as? Double, cost > 0, fields["costKnown"] == nil {
+            sets.append("cost_known = ?")
+            vals.append(true)
         }
         guard !sets.isEmpty else { return }
         vals.append(id)
@@ -730,6 +779,7 @@ final class ApmeStore: @unchecked Sendable {
             case let s as String: sqlite3_bind_text(stmt, idx, (s as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
             case let n as Int: sqlite3_bind_int64(stmt, idx, Int64(n))
             case let d as Double: sqlite3_bind_double(stmt, idx, d)
+            case let b as Bool: sqlite3_bind_int(stmt, idx, b ? 1 : 0)
             default: sqlite3_bind_null(stmt, idx)
             }
         }
@@ -743,17 +793,27 @@ final class ApmeStore: @unchecked Sendable {
         guard sqlite3_prepare_v2(db,
             """
             SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
-                   COALESCE(SUM(cost_usd),0), COALESCE(SUM(latency_ms),0)
+                   CASE WHEN COUNT(*) > 0 AND MIN(COALESCE(cost_known,0))=1
+                        THEN SUM(cost_usd) ELSE NULL END,
+                   CASE WHEN COUNT(*) > 0 AND MIN(COALESCE(cost_known,0))=1
+                        THEN 1 ELSE 0 END,
+                   COALESCE(SUM(latency_ms),0)
             FROM sample_events WHERE task_id = ? AND kind = 'model'
             """, -1, &stmt, nil) == SQLITE_OK else { return }
         var it = 0, ot = 0, lm = 0
-        var cu = 0.0
+        var cu: Double? = nil
+        var costKnown = false
         if sqlite3_step(stmt) == SQLITE_ROW {
             it = Int(sqlite3_column_int64(stmt, 0)); ot = Int(sqlite3_column_int64(stmt, 1))
-            cu = sqlite3_column_double(stmt, 2); lm = Int(sqlite3_column_int64(stmt, 3))
+            if sqlite3_column_type(stmt, 2) != SQLITE_NULL { cu = sqlite3_column_double(stmt, 2) }
+            costKnown = sqlite3_column_int(stmt, 3) == 1
+            lm = Int(sqlite3_column_int64(stmt, 4))
         }
         sqlite3_finalize(stmt)
-        updateTask(id: taskId, fields: ["inputTokens": it, "outputTokens": ot, "costUsd": cu, "latencyMs": lm])
+        updateTask(id: taskId, fields: [
+            "inputTokens": it, "outputTokens": ot, "costUsd": cu as Any?,
+            "costKnown": costKnown, "latencyMs": lm,
+        ])
     }
 
     /// Sample-granularity scorecard (quality vs cost) — the recommender + Pareto input.
@@ -782,7 +842,10 @@ final class ApmeStore: @unchecked Sendable {
             "boundarySignal": task.boundarySignal,
             "startedAt": task.startedAt,
             "endedAt": task.endedAt as Any,
-            "model": modelConfig ?? ["modelId": modelId],
+            "model": modelConfig ?? [
+                "modelId": modelId,
+                "provider": (task.provider ?? run?.provider).map { $0 as Any } ?? NSNull(),
+            ],
             "projectName": run?.projectName as Any,
             "projectPath": run?.projectPath as Any,
             "events": events,
@@ -790,6 +853,7 @@ final class ApmeStore: @unchecked Sendable {
                 "inputTokens": task.inputTokens ?? 0,
                 "outputTokens": task.outputTokens ?? 0,
                 "costUsd": task.costUsd ?? 0,
+                "costKnown": task.costKnown,
                 "latencyMs": task.latencyMs ?? 0,
             ],
             "summary": task.summary as Any,
@@ -851,10 +915,12 @@ final class ApmeStore: @unchecked Sendable {
             taskCategory: d["task_category"] as? String,
             notesJson: d["notes_json"] as? String,
             modelId: d["model_id"] as? String,
+            provider: d["provider"] as? String,
             modelConfig: d["model_config"] as? String,
             inputTokens: d["input_tokens"] as? Int,
             outputTokens: d["output_tokens"] as? Int,
             costUsd: d["cost_usd"] as? Double,
+            costKnown: (d["cost_known"] as? Int) == 1,
             latencyMs: d["latency_ms"] as? Int
         )
     }
@@ -1095,6 +1161,8 @@ final class ApmeStore: @unchecked Sendable {
         // runs table
         let runsCols = query("PRAGMA table_info(runs)").compactMap { $0["name"] as? String }
         let runsMigrations: [(String, String)] = [
+            ("provider",             "ALTER TABLE runs ADD COLUMN provider TEXT"),
+            ("cost_known",           "ALTER TABLE runs ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0"),
             ("task_signals",         "ALTER TABLE runs ADD COLUMN task_signals TEXT"),
             ("task_category",        "ALTER TABLE runs ADD COLUMN task_category TEXT"),
             ("task_category_source", "ALTER TABLE runs ADD COLUMN task_category_source TEXT DEFAULT 'auto'"),
@@ -1113,6 +1181,8 @@ final class ApmeStore: @unchecked Sendable {
             ("outcome",         "ALTER TABLE turns ADD COLUMN outcome TEXT"),
             ("composite_score", "ALTER TABLE turns ADD COLUMN composite_score REAL"),
             ("efficiency_json", "ALTER TABLE turns ADD COLUMN efficiency_json TEXT"),
+            ("model_id",       "ALTER TABLE turns ADD COLUMN model_id TEXT"),
+            ("provider",       "ALTER TABLE turns ADD COLUMN provider TEXT"),
         ]
         for (col, sql) in turnsMigrations where !turnsCols.contains(col) { exec(sql) }
 
@@ -1139,10 +1209,12 @@ final class ApmeStore: @unchecked Sendable {
         let tasksCols = query("PRAGMA table_info(tasks)").compactMap { $0["name"] as? String }
         let tasksMigrations: [(String, String)] = [
             ("model_id",      "ALTER TABLE tasks ADD COLUMN model_id TEXT"),
+            ("provider",      "ALTER TABLE tasks ADD COLUMN provider TEXT"),
             ("model_config",  "ALTER TABLE tasks ADD COLUMN model_config TEXT"),
             ("input_tokens",  "ALTER TABLE tasks ADD COLUMN input_tokens INTEGER"),
             ("output_tokens", "ALTER TABLE tasks ADD COLUMN output_tokens INTEGER"),
             ("cost_usd",      "ALTER TABLE tasks ADD COLUMN cost_usd REAL"),
+            ("cost_known",    "ALTER TABLE tasks ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0"),
             ("latency_ms",    "ALTER TABLE tasks ADD COLUMN latency_ms INTEGER"),
         ]
         for (col, sql) in tasksMigrations where !tasksCols.contains(col) { exec(sql) }
@@ -1155,6 +1227,9 @@ final class ApmeStore: @unchecked Sendable {
         //  2. `/clear` opens a fresh run with no pointer to the one it
         //     continues, so one conversation appeared as N disconnected runs.
         let sevCols = query("PRAGMA table_info(sample_events)").compactMap { $0["name"] as? String }
+        if !sevCols.contains("cost_known") {
+            exec("ALTER TABLE sample_events ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0")
+        }
         if !sevCols.contains("turn_id") {
             exec("ALTER TABLE sample_events ADD COLUMN turn_id TEXT")
             exec("CREATE INDEX IF NOT EXISTS idx_sevents_turn ON sample_events(turn_id)")
@@ -1170,6 +1245,9 @@ final class ApmeStore: @unchecked Sendable {
             exec("ALTER TABLE runs ADD COLUMN parent_run_id TEXT")
             exec("CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_run_id)")
         }
+        exec("UPDATE runs SET cost_known=1 WHERE cost_usd > 0")
+        exec("UPDATE tasks SET cost_known=1 WHERE cost_usd > 0")
+        exec("UPDATE sample_events SET cost_known=1 WHERE cost_usd > 0")
 
         // ── Covering indexes for the per-run/per-task rollups ──
         // `MAX(ts)` over a run's steps was reading full rows to reach one
@@ -1183,6 +1261,10 @@ final class ApmeStore: @unchecked Sendable {
             "CREATE INDEX IF NOT EXISTS idx_evals_task ON evals(task_id)",
             "CREATE INDEX IF NOT EXISTS idx_tasks_started ON tasks(started_at)",
         ] { exec(sql) }
+        for view in ["v_sample_scorecard", "v_category_scorecard", "v_model_scorecard", "v_run_metrics"] {
+            exec("DROP VIEW IF EXISTS \(view)")
+        }
+        exec(Self.scorecardDDL)
     }
 
     private func seedDefaultRubric() {
@@ -1530,6 +1612,7 @@ final class ApmeStore: @unchecked Sendable {
             sessionId: d["session_id"] as? String ?? "",
             agentType: d["agent_type"] as? String ?? "",
             modelId: d["model_id"] as? String,
+            provider: d["provider"] as? String,
             projectName: d["project_name"] as? String,
             projectPath: d["project_path"] as? String,
             taskPrompt: d["task_prompt"] as? String,
@@ -1538,6 +1621,7 @@ final class ApmeStore: @unchecked Sendable {
             inputTokens: d["input_tokens"] as? Int,
             outputTokens: d["output_tokens"] as? Int,
             costUsd: d["cost_usd"] as? Double,
+            costKnown: (d["cost_known"] as? Int) == 1,
             exitCode: d["exit_code"] as? Int,
             gitBefore: d["git_before"] as? String,
             gitAfter: d["git_after"] as? String,
@@ -1562,12 +1646,81 @@ final class ApmeStore: @unchecked Sendable {
 
     // MARK: - DDL (identical to Node.js store.ts)
 
+    private static let scorecardDDL = """
+    CREATE VIEW IF NOT EXISTS v_run_metrics AS
+    SELECT run_id,
+      MAX(CASE WHEN metric='overall' AND layer='llm_judge' THEN score END) AS overall,
+      MAX(CASE WHEN metric='tests_pass' AND layer='deterministic' THEN score END) AS tests_pass
+    FROM evals GROUP BY run_id;
+    CREATE VIEW IF NOT EXISTS v_model_scorecard AS
+    WITH turn_eval AS (
+      SELECT turn_id,
+        MAX(CASE WHEN metric='overall' THEN score END) AS overall,
+        MAX(CASE WHEN metric='tests_pass' THEN score END) AS tests_pass
+      FROM evals WHERE turn_id IS NOT NULL GROUP BY turn_id
+    ), turn_cost AS (
+      SELECT turn_id,
+        CASE WHEN MIN(COALESCE(cost_known,0))=1 THEN SUM(cost_usd) ELSE NULL END AS cost_usd,
+        MIN(COALESCE(cost_known,0)) AS cost_known
+      FROM sample_events WHERE turn_id IS NOT NULL AND kind='model' GROUP BY turn_id
+    ), attributed_units AS (
+      SELECT r.agent_type, t.run_id, t.id AS turn_id, t.model_id,
+        COALESCE(t.provider,r.provider) AS provider,
+        COALESCE(t.composite_score,e.overall) AS overall, e.tests_pass,
+        c.cost_usd, COALESCE(c.cost_known,0) AS cost_known
+      FROM turns t JOIN runs r ON r.id=t.run_id
+      LEFT JOIN turn_eval e ON e.turn_id=t.id
+      LEFT JOIN turn_cost c ON c.turn_id=t.id
+      WHERE t.model_id IS NOT NULL AND t.model_id != ''
+    ), legacy_units AS (
+      SELECT r.agent_type, r.id AS run_id, NULL AS turn_id,
+        COALESCE(r.model_id,'unknown') AS model_id, r.provider,
+        m.overall, m.tests_pass,
+        CASE WHEN r.cost_known=1 THEN r.cost_usd ELSE NULL END AS cost_usd,
+        COALESCE(r.cost_known,0) AS cost_known
+      FROM runs r LEFT JOIN v_run_metrics m ON m.run_id=r.id
+      WHERE NOT EXISTS (SELECT 1 FROM turns t WHERE t.run_id=r.id AND t.model_id IS NOT NULL AND t.model_id != '')
+    ), units AS (
+      SELECT * FROM attributed_units UNION ALL SELECT * FROM legacy_units
+    )
+    SELECT agent_type, model_id, provider, COUNT(DISTINCT run_id) AS runs,
+      AVG(overall) AS avg_overall, AVG(tests_pass) AS avg_tests_pass,
+      CASE WHEN MIN(cost_known)=1 THEN SUM(cost_usd) ELSE NULL END AS total_cost,
+      MIN(cost_known) AS cost_known,
+      CASE WHEN MIN(cost_known)=1 AND AVG(overall)>0 THEN SUM(cost_usd)/AVG(overall) ELSE NULL END AS cost_per_quality
+    FROM units GROUP BY agent_type, model_id, provider;
+    CREATE VIEW IF NOT EXISTS v_category_scorecard AS
+    WITH task_metrics AS (
+      SELECT task_id, MAX(CASE WHEN metric='tests_pass' AND layer='deterministic' THEN score END) AS tests_pass
+      FROM evals WHERE task_id IS NOT NULL GROUP BY task_id
+    )
+    SELECT t.task_category, COALESCE(t.model_id,r.model_id,'unknown') AS model_id,
+      COALESCE(t.provider,r.provider) AS provider, COUNT(DISTINCT t.run_id) AS runs,
+      AVG(t.composite_score) AS avg_overall, AVG(m.tests_pass) AS avg_tests_pass,
+      CASE WHEN MIN(COALESCE(t.cost_known,0))=1 THEN SUM(t.cost_usd) ELSE NULL END AS total_cost,
+      MIN(COALESCE(t.cost_known,0)) AS cost_known
+    FROM tasks t JOIN runs r ON r.id=t.run_id LEFT JOIN task_metrics m ON m.task_id=t.id
+    WHERE t.task_category IS NOT NULL AND t.task_category != 'unknown'
+    GROUP BY t.task_category, COALESCE(t.model_id,r.model_id,'unknown'), COALESCE(t.provider,r.provider);
+    CREATE VIEW IF NOT EXISTS v_sample_scorecard AS
+    SELECT r.agent_type, COALESCE(t.model_id,r.model_id,'unknown') AS model_id,
+      COALESCE(t.provider,r.provider) AS provider, t.task_category,
+      COUNT(*) AS samples, AVG(t.composite_score) AS avg_quality,
+      CASE WHEN MIN(COALESCE(t.cost_known,0))=1 THEN SUM(t.cost_usd) ELSE NULL END AS total_cost,
+      MIN(COALESCE(t.cost_known,0)) AS cost_known, AVG(t.latency_ms) AS avg_latency_ms,
+      CASE WHEN MIN(COALESCE(t.cost_known,0))=1 AND AVG(t.composite_score)>0
+           THEN SUM(t.cost_usd)/AVG(t.composite_score) ELSE NULL END AS cost_per_quality
+    FROM tasks t JOIN runs r ON r.id=t.run_id
+    WHERE t.ended_at IS NOT NULL AND t.composite_score IS NOT NULL
+    GROUP BY r.agent_type, COALESCE(t.model_id,r.model_id,'unknown'), COALESCE(t.provider,r.provider), t.task_category;
+    """
+
     private static let ddl = """
     CREATE TABLE IF NOT EXISTS runs (
       id TEXT PRIMARY KEY, session_id TEXT NOT NULL, agent_type TEXT NOT NULL,
-      model_id TEXT, project_name TEXT, project_path TEXT, task_prompt TEXT,
+      model_id TEXT, provider TEXT, project_name TEXT, project_path TEXT, task_prompt TEXT,
       started_at INTEGER NOT NULL, ended_at INTEGER,
-      input_tokens INTEGER, output_tokens INTEGER, cost_usd REAL,
+      input_tokens INTEGER, output_tokens INTEGER, cost_usd REAL, cost_known INTEGER NOT NULL DEFAULT 0,
       exit_code INTEGER, git_before TEXT, git_after TEXT, hw_profile TEXT,
       task_signals TEXT, task_category TEXT, task_category_source TEXT DEFAULT 'auto',
       outcome TEXT, outcome_confidence TEXT, efficiency_json TEXT, composite_score REAL
@@ -1580,7 +1733,7 @@ final class ApmeStore: @unchecked Sendable {
     CREATE TABLE IF NOT EXISTS turns (
       id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
       task_id TEXT,
-      turn_index INTEGER NOT NULL, prompt TEXT, response TEXT, started_at INTEGER NOT NULL,
+      turn_index INTEGER NOT NULL, model_id TEXT, provider TEXT, prompt TEXT, response TEXT, started_at INTEGER NOT NULL,
       ended_at INTEGER, tool_calls INTEGER DEFAULT 0,
       files_modified INTEGER DEFAULT 0, files_created INTEGER DEFAULT 0,
       git_before TEXT, git_after TEXT, task_category TEXT,
@@ -1604,10 +1757,12 @@ final class ApmeStore: @unchecked Sendable {
       task_category TEXT,
       notes_json TEXT,
       model_id TEXT,
+      provider TEXT,
       model_config TEXT,
       input_tokens INTEGER,
       output_tokens INTEGER,
       cost_usd REAL,
+      cost_known INTEGER NOT NULL DEFAULT 0,
       latency_ms INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
@@ -1618,11 +1773,14 @@ final class ApmeStore: @unchecked Sendable {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
       run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-      turn_index INTEGER, seq INTEGER NOT NULL, ts INTEGER NOT NULL, kind TEXT NOT NULL,
-      model TEXT, input_tokens INTEGER, output_tokens INTEGER, cost_usd REAL, latency_ms INTEGER,
+      turn_index INTEGER, turn_id TEXT REFERENCES turns(id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL, ts INTEGER NOT NULL, kind TEXT NOT NULL,
+      model TEXT, input_tokens INTEGER, output_tokens INTEGER, cost_usd REAL,
+      cost_known INTEGER NOT NULL DEFAULT 0, latency_ms INTEGER,
       tool_name TEXT, tool_status TEXT, tool_error TEXT, payload TEXT, dedup_key TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_sevents_task ON sample_events(task_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_sevents_turn ON sample_events(turn_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_sevents_dedup ON sample_events(task_id, dedup_key);
     CREATE TABLE IF NOT EXISTS artifacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1651,32 +1809,7 @@ final class ApmeStore: @unchecked Sendable {
     CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
     CREATE INDEX IF NOT EXISTS idx_evals_run ON evals(run_id);
     CREATE INDEX IF NOT EXISTS idx_steps_run ON steps(run_id);
-    CREATE VIEW IF NOT EXISTS v_run_metrics AS
-    SELECT run_id,
-      MAX(CASE WHEN metric='overall' AND layer='llm_judge' THEN score END) AS overall,
-      MAX(CASE WHEN metric='tests_pass' AND layer='deterministic' THEN score END) AS tests_pass
-    FROM evals GROUP BY run_id;
-    CREATE VIEW IF NOT EXISTS v_model_scorecard AS
-    SELECT r.agent_type, COALESCE(r.model_id,'unknown') AS model_id,
-      COUNT(*) AS runs, AVG(m.overall) AS avg_overall, AVG(m.tests_pass) AS avg_tests_pass,
-      SUM(r.cost_usd) AS total_cost,
-      CASE WHEN AVG(m.overall)>0 THEN SUM(r.cost_usd)/AVG(m.overall) ELSE NULL END AS cost_per_quality
-    FROM runs r LEFT JOIN v_run_metrics m ON m.run_id=r.id GROUP BY r.agent_type, r.model_id;
-    CREATE VIEW IF NOT EXISTS v_category_scorecard AS
-    SELECT r.task_category, COALESCE(r.model_id,'unknown') AS model_id,
-      COUNT(*) AS runs, AVG(m.overall) AS avg_overall, AVG(m.tests_pass) AS avg_tests_pass,
-      SUM(r.cost_usd) AS total_cost
-    FROM runs r LEFT JOIN v_run_metrics m ON m.run_id=r.id
-    WHERE r.task_category IS NOT NULL AND r.task_category != 'unknown'
-    GROUP BY r.task_category, r.model_id;
-    CREATE VIEW IF NOT EXISTS v_sample_scorecard AS
-    SELECT r.agent_type, COALESCE(t.model_id, r.model_id, 'unknown') AS model_id,
-      t.task_category, COUNT(*) AS samples, AVG(t.composite_score) AS avg_quality,
-      SUM(t.cost_usd) AS total_cost, AVG(t.latency_ms) AS avg_latency_ms,
-      CASE WHEN AVG(t.composite_score)>0 THEN SUM(t.cost_usd)/AVG(t.composite_score) ELSE NULL END AS cost_per_quality
-    FROM tasks t JOIN runs r ON r.id=t.run_id
-    WHERE t.ended_at IS NOT NULL AND t.composite_score IS NOT NULL
-    GROUP BY r.agent_type, COALESCE(t.model_id, r.model_id, 'unknown'), t.task_category;
+    \(scorecardDDL)
     """
 }
 
@@ -1687,6 +1820,7 @@ struct ApmeRun {
     let sessionId: String
     let agentType: String
     var modelId: String?
+    var provider: String? = nil
     var projectName: String?
     var projectPath: String?
     var taskPrompt: String?
@@ -1695,6 +1829,7 @@ struct ApmeRun {
     var inputTokens: Int?
     var outputTokens: Int?
     var costUsd: Double?
+    var costKnown: Bool = false
     var exitCode: Int?
     var gitBefore: String?
     var gitAfter: String?
@@ -1750,10 +1885,12 @@ struct ApmeTask {
     var notesJson: String?
     // Sample header: agent identity + cost (req #2 / #7).
     var modelId: String?
+    var provider: String? = nil
     var modelConfig: String?
     var inputTokens: Int?
     var outputTokens: Int?
     var costUsd: Double?
+    var costKnown: Bool = false
     var latencyMs: Int?
 }
 

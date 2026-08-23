@@ -31,8 +31,9 @@ struct ApmeRecommendInput {
 struct ApmeRecommendCandidate {
     let modelId: String
     let agentType: String
+    let provider: String?
     let expectedScore: Double
-    let expectedCostUsd: Double
+    let expectedCostUsd: Double?
     let confidence: Double
     let rationale: String
 }
@@ -42,8 +43,9 @@ enum ApmeRecommender {
     private struct ParetoPoint {
         let agentType: String
         let modelId: String
+        let provider: String?
         let quality: Double
-        let costPerSample: Double
+        let costPerSample: Double?
         let avgLatencyMs: Double?
         let samples: Int
     }
@@ -55,22 +57,30 @@ enum ApmeRecommender {
             let samples = (r["samples"] as? Int) ?? 0
             let quality = (r["avg_quality"] as? Double) ?? 0
             guard samples >= minSamples, quality > 0 else { return nil }
-            let total = (r["total_cost"] as? Double) ?? 0
+            let known = (r["cost_known"] as? Int) == 1
+            let total = r["total_cost"] as? Double
             return ParetoPoint(
                 agentType: (r["agent_type"] as? String) ?? "unknown",
                 modelId: (r["model_id"] as? String) ?? "unknown",
+                provider: r["provider"] as? String,
                 quality: quality,
-                costPerSample: samples > 0 ? total / Double(samples) : 0,
+                costPerSample: known && samples > 0 ? total.map { $0 / Double(samples) } : nil,
                 avgLatencyMs: r["avg_latency_ms"] as? Double,
                 samples: samples)
         }
         func dominates(_ b: ParetoPoint, _ a: ParetoPoint) -> Bool {
-            let ge = b.quality >= a.quality && b.costPerSample <= a.costPerSample
-            let gt = b.quality > a.quality || b.costPerSample < a.costPerSample
+            let bc = b.costPerSample ?? .greatestFiniteMagnitude
+            let ac = a.costPerSample ?? .greatestFiniteMagnitude
+            let ge = b.quality >= a.quality && bc <= ac
+            let gt = b.quality > a.quality || bc < ac
             return ge && gt
         }
         var frontier = points.filter { a in !points.contains { b in b.modelId != a.modelId && dominates(b, a) } }
-        frontier.sort { $0.costPerSample < $1.costPerSample || ($0.costPerSample == $1.costPerSample && $0.quality > $1.quality) }
+        frontier.sort {
+            let ac = $0.costPerSample ?? .greatestFiniteMagnitude
+            let bc = $1.costPerSample ?? .greatestFiniteMagnitude
+            return ac < bc || (ac == bc && $0.quality > $1.quality)
+        }
         return frontier
     }
 
@@ -92,22 +102,26 @@ enum ApmeRecommender {
                 candidates = candidates.filter { available.contains($0.modelId) }
             }
             if let budget = input.budgetUsd {
-                candidates = candidates.filter { $0.costPerSample <= budget }
+                candidates = candidates.filter { $0.costPerSample != nil && $0.costPerSample! <= budget }
             }
             if let latency = input.latencyBudgetMs {
                 candidates = candidates.filter { $0.avgLatencyMs == nil || $0.avgLatencyMs! <= latency }
             }
             candidates.sort { a, b in
                 if input.preferLocal || (input.budgetUsd != nil && input.budgetUsd! < 5) {
-                    return a.costPerSample < b.costPerSample || (a.costPerSample == b.costPerSample && a.quality > b.quality)
+                    let ac = a.costPerSample ?? .greatestFiniteMagnitude
+                    let bc = b.costPerSample ?? .greatestFiniteMagnitude
+                    return ac < bc || (ac == bc && a.quality > b.quality)
                 }
-                return a.quality > b.quality || (a.quality == b.quality && a.costPerSample < b.costPerSample)
+                let ac = a.costPerSample ?? .greatestFiniteMagnitude
+                let bc = b.costPerSample ?? .greatestFiniteMagnitude
+                return a.quality > b.quality || (a.quality == b.quality && ac < bc)
             }
             if !candidates.isEmpty {
                 return candidates.prefix(3).map { (p: ParetoPoint) -> ApmeRecommendCandidate in
                     let pct: Int = Int((p.quality * 100).rounded())
-                    let costStr: String = String(format: "%.4f", p.costPerSample)
-                    var rationale: String = "\(p.samples) samples, avg \(pct)%, $\(costStr)/sample"
+                    let costLabel = p.costPerSample.map { "$\(String(format: "%.4f", $0))/sample" } ?? "cost unpriced"
+                    var rationale: String = "\(p.samples) samples, avg \(pct)%, \(costLabel)"
                     if let l = p.avgLatencyMs {
                         let ms: Int = Int(l.rounded())
                         rationale += ", \(ms)ms"
@@ -116,6 +130,7 @@ enum ApmeRecommender {
                     let conf: Double = min(1.0, Double(p.samples) / 20.0)
                     return ApmeRecommendCandidate(
                         modelId: p.modelId, agentType: p.agentType,
+                        provider: p.provider,
                         expectedScore: p.quality, expectedCostUsd: p.costPerSample,
                         confidence: conf, rationale: rationale)
                 }
@@ -127,7 +142,7 @@ enum ApmeRecommender {
         let rows = store.scorecard()
 
         // Filter by availableModels if user provided a subscription list.
-        let filtered: [[String: Any]] = {
+        var filtered: [[String: Any]] = {
             guard let available = input.availableModels, !available.isEmpty else {
                 return rows
             }
@@ -136,6 +151,9 @@ enum ApmeRecommender {
                 return available.contains(modelId)
             }
         }()
+        if input.budgetUsd != nil {
+            filtered = filtered.filter { ($0["cost_known"] as? Int) == 1 }
+        }
 
         // Eligibility: at least 3 runs AND non-zero avg_overall.
         let eligible = filtered.filter { row in
@@ -163,7 +181,8 @@ enum ApmeRecommender {
             let agentType = (row["agent_type"] as? String) ?? "unknown"
             let runs = (row["runs"] as? Int) ?? 0
             let avgOverall = (row["avg_overall"] as? Double) ?? 0
-            let totalCost = (row["total_cost"] as? Double) ?? 0
+            let totalCost = row["total_cost"] as? Double
+            let costKnown = (row["cost_known"] as? Int) == 1
             let avgTests = row["avg_tests_pass"] as? Double
 
             var rationale = "\(runs) runs, avg \(Int((avgOverall * 100).rounded()))%"
@@ -174,8 +193,9 @@ enum ApmeRecommender {
             return ApmeRecommendCandidate(
                 modelId: modelId,
                 agentType: agentType,
+                provider: row["provider"] as? String,
                 expectedScore: avgOverall,
-                expectedCostUsd: totalCost / Double(max(runs, 1)),
+                expectedCostUsd: costKnown ? totalCost.map { $0 / Double(max(runs, 1)) } : nil,
                 confidence: min(1.0, Double(runs) / 20.0),
                 rationale: rationale
             )

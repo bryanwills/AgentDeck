@@ -160,11 +160,21 @@
         "avgTestsPass": {
           "type": "number"
         },
+        "costKnown": {
+          "type": "boolean"
+        },
         "costPerQuality": {
           "type": "number"
         },
         "modelId": {
           "type": "string"
+        },
+        "provider": {
+          "description": "Normalized endpoint provider, explicit null when unattributed.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "runs": {
           "type": "number"
@@ -176,7 +186,9 @@
       "required": [
         "agentType",
         "modelId",
-        "runs"
+        "provider",
+        "runs",
+        "costKnown"
       ],
       "type": "object"
     },
@@ -190,13 +202,24 @@
           "type": "number"
         },
         "expectedCostUsd": {
-          "type": "number"
+          "description": "Explicit null when the model has no trustworthy price source.",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "expectedScore": {
           "type": "number"
         },
         "modelId": {
           "type": "string"
+        },
+        "provider": {
+          "description": "Normalized endpoint provider, explicit null when unattributed.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "rationale": {
           "type": "string"
@@ -205,6 +228,7 @@
       "required": [
         "modelId",
         "agentType",
+        "provider",
         "expectedScore",
         "expectedCostUsd",
         "confidence",

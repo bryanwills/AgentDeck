@@ -18,11 +18,12 @@ import type { ApmeSampleScorecardRow } from '@agentdeck/shared';
 export interface ParetoPoint {
   agentType: string;
   modelId: string;
+  provider: string | null;
   taskCategory: string | null;
   /** Quality axis (avg composite, [0,1]). Higher is better. */
   quality: number;
   /** Cost axis: average USD per sample. Lower is better. */
-  costPerSample: number;
+  costPerSample: number | null;
   avgLatencyMs: number | null;
   samples: number;
 }
@@ -36,9 +37,12 @@ function toPoint(r: ApmeSampleScorecardRow): ParetoPoint {
   return {
     agentType: r.agentType,
     modelId: r.modelId,
+    provider: r.provider,
     taskCategory: r.taskCategory,
     quality: r.avgQuality ?? 0,
-    costPerSample: r.samples > 0 ? (r.totalCost ?? 0) / r.samples : 0,
+    costPerSample: r.costKnown && r.totalCost != null && r.samples > 0
+      ? r.totalCost / r.samples
+      : null,
     avgLatencyMs: r.avgLatencyMs,
     samples: r.samples,
   };
@@ -47,8 +51,10 @@ function toPoint(r: ApmeSampleScorecardRow): ParetoPoint {
 /** True when `b` dominates `a`: at least as good on both axes and strictly
  *  better on at least one (higher quality, lower cost). */
 function dominates(b: ParetoPoint, a: ParetoPoint): boolean {
-  const betterOrEqual = b.quality >= a.quality && b.costPerSample <= a.costPerSample;
-  const strictlyBetter = b.quality > a.quality || b.costPerSample < a.costPerSample;
+  const bCost = b.costPerSample ?? Infinity;
+  const aCost = a.costPerSample ?? Infinity;
+  const betterOrEqual = b.quality >= a.quality && bCost <= aCost;
+  const strictlyBetter = b.quality > a.quality || bCost < aCost;
   return betterOrEqual && strictlyBetter;
 }
 
@@ -72,7 +78,12 @@ export function computePareto(
     else frontier.push(a);
   }
   // Frontier sorted cheapest → most expensive (the natural tradeoff curve).
-  frontier.sort((x, y) => x.costPerSample - y.costPerSample || y.quality - x.quality);
+  frontier.sort((x, y) => {
+    const xc = x.costPerSample ?? Infinity;
+    const yc = y.costPerSample ?? Infinity;
+    if (xc !== yc) return xc < yc ? -1 : 1;
+    return y.quality - x.quality;
+  });
   return { frontier, dominated };
 }
 

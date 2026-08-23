@@ -199,7 +199,10 @@ export function openclawChatEventToSpans(
   if (payload.state === 'final') {
     const spans: TelemetrySpan[] = [];
     if (payload.response) {
-      spans.push(make('turn_response', { 'agentdeck.response_text': payload.response }));
+      spans.push(make('turn_response', {
+        'agentdeck.response_text': payload.response,
+        'agentdeck.response_source': 'chat_final',
+      }));
     }
     if (Array.isArray(payload.tools)) {
       for (const t of payload.tools) {
@@ -453,7 +456,10 @@ export function openclawSessionMessageToSpans(
         ...(typeof cost === 'number' ? { 'agentdeck.usage.cost_usd': cost } : {}),
       }));
     }
-    if (text) spans.push(make('turn_response', { 'agentdeck.response_text': text }));
+    if (text) spans.push(make('turn_response', {
+      'agentdeck.response_text': text,
+      'agentdeck.response_source': 'session_message_projection',
+    }));
     return spans;
   }
 

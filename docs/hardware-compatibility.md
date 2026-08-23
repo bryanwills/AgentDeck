@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: stable
 owner: Hardware maintainers
-reviewed: 2026-08-05
-revision: 2026-08-05
+reviewed: 2026-08-24
+revision: 2026-08-24
 source_of_truth: docs/hardware-compatibility.md
 validators: [node scripts/build-design-system-viewer.mjs --check, bash esp32/robot/run.sh all]
 translations: [ko, ja]
@@ -61,6 +61,7 @@ Do not copy numeric specifications into domain guides. Link back to this matrix 
 | iDotMatrix | Commercial pixel display | BLE SoC | RGB · 32×32 | BLE GATT | Yes |
 | Divoom Timebox Mini | Commercial LED | BLE SoC | RGB LED · 11×11 | BLE GATT | Yes |
 | Ulanzi D200H | HID deck | SigmaStar SSD210 | LCD keys · logical 960×540 | Ulanzi Studio plugin | Yes |
+| Ulanzi D200X | HID deck / dock | Ulanzi controller | 14 LCD keys · 3 encoders · 960×540 | Ulanzi Studio plugin | Partial |
 | Stream Deck | HID deck | Elgato | 15 LCD keys · 5×3 | Elgato plugin → WS | Yes |
 | Stream Deck Mini | HID deck | Elgato | 6 LCD keys · 3×2 | Elgato plugin → WS | Yes |
 | Stream Deck+ | HID deck | Elgato | 8 keys · 4 dials · touch strip | Elgato plugin → WS | Yes |
@@ -75,7 +76,7 @@ Do not copy numeric specifications into domain guides. Link back to this matrix 
 
 `App Store` describes compatibility with the submitted Apple app and its Swift daemon, not whether third-party host software is bundled. Stream Deck and D200H still require their vendor applications.
 
-**Counted surfaces: 26.** Public surface-count claims (README, landing page) mirror this derivation: every row above except the protocol rows (SSE stream) counts. XTeink X3/X4 operate normally (both register with the daemon over Wi-Fi) but run the community CrossPoint fork — their Partial mark states that distribution limitation, see operational exceptions. Update this line and the mirrors together when rows change.
+**Counted surfaces: 27.** Public surface-count claims (README, landing page) mirror this derivation: every row above except the protocol rows (SSE stream) counts. D200X is Partial because its 14-key action is SDK/simulator-covered but awaits real-hardware verification and its three encoders are not implemented. XTeink X3/X4 operate normally (both register with the daemon over Wi-Fi) but run the community CrossPoint fork — their Partial mark states that distribution limitation, see operational exceptions. Update this line and the mirrors together when rows change.
 
 ## ESP32 board specification sheet
 

@@ -39,12 +39,142 @@ import type {
 
 // ─── Schema ────────────────────────────────────────────────────────────────────
 
+const SCORECARD_DDL = `
+-- Pre-aggregate metrics at the level they actually describe. New rows prefer
+-- turn attribution; runs with no turn identity remain available as a legacy
+-- fallback instead of being silently dropped after the schema migration.
+CREATE VIEW IF NOT EXISTS v_run_metrics AS
+SELECT
+  run_id,
+  MAX(CASE WHEN metric='overall' AND layer='llm_judge' THEN score END) AS overall,
+  MAX(CASE WHEN metric='tests_pass' AND layer='deterministic' THEN score END) AS tests_pass
+FROM evals
+GROUP BY run_id;
+
+CREATE VIEW IF NOT EXISTS v_model_scorecard AS
+WITH turn_eval AS (
+  SELECT
+    turn_id,
+    MAX(CASE WHEN metric='overall' THEN score END) AS overall,
+    MAX(CASE WHEN metric='tests_pass' THEN score END) AS tests_pass
+  FROM evals
+  WHERE turn_id IS NOT NULL
+  GROUP BY turn_id
+), turn_cost AS (
+  SELECT
+    turn_id,
+    CASE WHEN MIN(COALESCE(cost_known, 0))=1 THEN SUM(cost_usd) ELSE NULL END AS cost_usd,
+    MIN(COALESCE(cost_known, 0)) AS cost_known
+  FROM sample_events
+  WHERE turn_id IS NOT NULL AND kind='model'
+  GROUP BY turn_id
+), attributed_units AS (
+  SELECT
+    r.agent_type AS agent_type,
+    t.run_id AS run_id,
+    t.id AS turn_id,
+    t.model_id AS model_id,
+    COALESCE(t.provider, r.provider) AS provider,
+    COALESCE(
+      t.composite_score,
+      e.overall
+    ) AS overall,
+    e.tests_pass AS tests_pass,
+    c.cost_usd AS cost_usd,
+    COALESCE(c.cost_known, 0) AS cost_known
+  FROM turns t
+  JOIN runs r ON r.id=t.run_id
+  LEFT JOIN turn_eval e ON e.turn_id=t.id
+  LEFT JOIN turn_cost c ON c.turn_id=t.id
+  WHERE t.model_id IS NOT NULL AND t.model_id != ''
+), legacy_units AS (
+  SELECT
+    r.agent_type AS agent_type,
+    r.id AS run_id,
+    NULL AS turn_id,
+    COALESCE(r.model_id, 'unknown') AS model_id,
+    r.provider AS provider,
+    m.overall AS overall,
+    m.tests_pass AS tests_pass,
+    CASE WHEN r.cost_known=1 THEN r.cost_usd ELSE NULL END AS cost_usd,
+    COALESCE(r.cost_known, 0) AS cost_known
+  FROM runs r
+  LEFT JOIN v_run_metrics m ON m.run_id=r.id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM turns t
+    WHERE t.run_id=r.id AND t.model_id IS NOT NULL AND t.model_id != ''
+  )
+), units AS (
+  SELECT * FROM attributed_units
+  UNION ALL
+  SELECT * FROM legacy_units
+)
+SELECT
+  agent_type,
+  model_id,
+  provider,
+  COUNT(DISTINCT run_id) AS runs,
+  AVG(overall) AS avg_overall,
+  AVG(tests_pass) AS avg_tests_pass,
+  CASE WHEN MIN(cost_known)=1 THEN SUM(cost_usd) ELSE NULL END AS total_cost,
+  MIN(cost_known) AS cost_known,
+  CASE WHEN MIN(cost_known)=1 AND AVG(overall)>0 THEN SUM(cost_usd)/AVG(overall) ELSE NULL END AS cost_per_quality
+FROM units
+GROUP BY agent_type, model_id, provider;
+
+CREATE VIEW IF NOT EXISTS v_category_scorecard AS
+WITH task_metrics AS (
+  SELECT
+    task_id,
+    MAX(CASE WHEN metric='tests_pass' AND layer='deterministic' THEN score END) AS tests_pass
+  FROM evals
+  WHERE task_id IS NOT NULL
+  GROUP BY task_id
+)
+SELECT
+  t.task_category AS task_category,
+  COALESCE(t.model_id, r.model_id, 'unknown') AS model_id,
+  COALESCE(t.provider, r.provider) AS provider,
+  COUNT(DISTINCT t.run_id) AS runs,
+  AVG(t.composite_score) AS avg_overall,
+  AVG(m.tests_pass) AS avg_tests_pass,
+  CASE WHEN MIN(COALESCE(t.cost_known, 0))=1 THEN SUM(t.cost_usd) ELSE NULL END AS total_cost,
+  MIN(COALESCE(t.cost_known, 0)) AS cost_known
+FROM tasks t
+JOIN runs r ON r.id=t.run_id
+LEFT JOIN task_metrics m ON m.task_id=t.id
+WHERE t.task_category IS NOT NULL AND t.task_category != 'unknown'
+GROUP BY t.task_category, COALESCE(t.model_id, r.model_id, 'unknown'), COALESCE(t.provider, r.provider);
+
+-- Sample-granularity scorecard: quality vs cost per (agent, provider, model,
+-- category). A task that used more than one model is stored as 'mixed' rather
+-- than attributed to whichever assistant message happened to arrive last.
+CREATE VIEW IF NOT EXISTS v_sample_scorecard AS
+SELECT
+  r.agent_type AS agent_type,
+  COALESCE(t.model_id, r.model_id, 'unknown') AS model_id,
+  COALESCE(t.provider, r.provider) AS provider,
+  t.task_category AS task_category,
+  COUNT(*) AS samples,
+  AVG(t.composite_score) AS avg_quality,
+  CASE WHEN MIN(COALESCE(t.cost_known, 0))=1 THEN SUM(t.cost_usd) ELSE NULL END AS total_cost,
+  MIN(COALESCE(t.cost_known, 0)) AS cost_known,
+  AVG(t.latency_ms) AS avg_latency_ms,
+  CASE WHEN MIN(COALESCE(t.cost_known, 0))=1 AND AVG(t.composite_score)>0
+       THEN SUM(t.cost_usd)/AVG(t.composite_score) ELSE NULL END AS cost_per_quality
+FROM tasks t
+JOIN runs r ON r.id=t.run_id
+WHERE t.ended_at IS NOT NULL AND t.composite_score IS NOT NULL
+GROUP BY r.agent_type, COALESCE(t.model_id, r.model_id, 'unknown'), COALESCE(t.provider, r.provider), t.task_category;
+`;
+
 const DDL = `
 CREATE TABLE IF NOT EXISTS runs (
   id            TEXT PRIMARY KEY,
   session_id    TEXT NOT NULL,
   agent_type    TEXT NOT NULL,
   model_id      TEXT,
+  provider      TEXT,
   project_name  TEXT,
   project_path  TEXT,
   task_prompt   TEXT,
@@ -53,6 +183,7 @@ CREATE TABLE IF NOT EXISTS runs (
   input_tokens  INTEGER,
   output_tokens INTEGER,
   cost_usd      REAL,
+  cost_known    INTEGER NOT NULL DEFAULT 0,
   exit_code     INTEGER,
   git_before    TEXT,
   git_after     TEXT,
@@ -80,6 +211,8 @@ CREATE TABLE IF NOT EXISTS turns (
   run_id      TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
   task_id     TEXT,
   turn_index  INTEGER NOT NULL,
+  model_id    TEXT,
+  provider    TEXT,
   prompt      TEXT,
   response    TEXT,
   started_at  INTEGER NOT NULL,
@@ -122,10 +255,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   task_category    TEXT,
   notes_json       TEXT,
   model_id         TEXT,
+  provider         TEXT,
   model_config     TEXT,
   input_tokens     INTEGER,
   output_tokens    INTEGER,
   cost_usd         REAL,
+  cost_known       INTEGER NOT NULL DEFAULT 0,
   latency_ms       INTEGER
 );
 
@@ -146,6 +281,7 @@ CREATE TABLE IF NOT EXISTS sample_events (
   input_tokens  INTEGER,
   output_tokens INTEGER,
   cost_usd      REAL,
+  cost_known    INTEGER NOT NULL DEFAULT 0,
   latency_ms    INTEGER,
   tool_name     TEXT,
   tool_status   TEXT,
@@ -204,67 +340,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_evals_run ON evals(run_id);
 CREATE INDEX IF NOT EXISTS idx_steps_run ON steps(run_id);
 
--- Pre-aggregate per-run eval metrics to avoid inflating cost_usd when
--- multiple eval rows exist per run (e.g. 3 deterministic + 5 judge axes).
-CREATE VIEW IF NOT EXISTS v_run_metrics AS
-SELECT
-  run_id,
-  MAX(CASE WHEN metric='overall' AND layer='llm_judge' THEN score END) AS overall,
-  MAX(CASE WHEN metric='tests_pass' AND layer='deterministic' THEN score END) AS tests_pass
-FROM evals
-GROUP BY run_id;
-
-CREATE VIEW IF NOT EXISTS v_model_scorecard AS
-SELECT
-  r.agent_type AS agent_type,
-  COALESCE(r.model_id, 'unknown') AS model_id,
-  COUNT(*) AS runs,
-  AVG(m.overall) AS avg_overall,
-  AVG(m.tests_pass) AS avg_tests_pass,
-  SUM(r.cost_usd) AS total_cost,
-  CASE
-    WHEN AVG(m.overall) > 0
-    THEN SUM(r.cost_usd) / AVG(m.overall)
-    ELSE NULL
-  END AS cost_per_quality
-FROM runs r
-LEFT JOIN v_run_metrics m ON m.run_id = r.id
-GROUP BY r.agent_type, r.model_id;
-
-CREATE VIEW IF NOT EXISTS v_category_scorecard AS
-SELECT
-  r.task_category AS task_category,
-  COALESCE(r.model_id, 'unknown') AS model_id,
-  COUNT(*) AS runs,
-  AVG(m.overall) AS avg_overall,
-  AVG(m.tests_pass) AS avg_tests_pass,
-  SUM(r.cost_usd) AS total_cost
-FROM runs r
-LEFT JOIN v_run_metrics m ON m.run_id = r.id
-WHERE r.task_category IS NOT NULL AND r.task_category != 'unknown'
-GROUP BY r.task_category, r.model_id;
-
--- Sample-granularity scorecard: quality vs cost per (agent, model, category).
--- The recommender + Pareto frontier read this. Uses the task's own model_id /
--- cost (the sample header), falling back to the run's model when unset.
-CREATE VIEW IF NOT EXISTS v_sample_scorecard AS
-SELECT
-  r.agent_type AS agent_type,
-  COALESCE(t.model_id, r.model_id, 'unknown') AS model_id,
-  t.task_category AS task_category,
-  COUNT(*) AS samples,
-  AVG(t.composite_score) AS avg_quality,
-  SUM(t.cost_usd) AS total_cost,
-  AVG(t.latency_ms) AS avg_latency_ms,
-  CASE
-    WHEN AVG(t.composite_score) > 0
-    THEN SUM(t.cost_usd) / AVG(t.composite_score)
-    ELSE NULL
-  END AS cost_per_quality
-FROM tasks t
-JOIN runs r ON r.id = t.run_id
-WHERE t.ended_at IS NOT NULL AND t.composite_score IS NOT NULL
-GROUP BY r.agent_type, COALESCE(t.model_id, r.model_id, 'unknown'), t.task_category;
+${SCORECARD_DDL}
 `;
 
 // ─── Default rubric v1 (seeded on first boot) ──────────────────────────────────
@@ -558,6 +634,8 @@ export class ApmeStore {
     if (!this.db) return;
     const cols = (this.db.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>).map(c => c.name);
     const migrations: Array<[string, string]> = [
+      ['provider', 'ALTER TABLE runs ADD COLUMN provider TEXT'],
+      ['cost_known', 'ALTER TABLE runs ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0'],
       ['task_signals', 'ALTER TABLE runs ADD COLUMN task_signals TEXT'],
       ['task_category', 'ALTER TABLE runs ADD COLUMN task_category TEXT'],
       ['task_category_source', "ALTER TABLE runs ADD COLUMN task_category_source TEXT DEFAULT 'auto'"],
@@ -589,6 +667,12 @@ export class ApmeStore {
     if (!turnCols.includes('end_source')) {
       try { this.db.exec('ALTER TABLE turns ADD COLUMN end_source TEXT'); } catch { /* ignore */ }
     }
+    if (!turnCols.includes('model_id')) {
+      try { this.db.exec('ALTER TABLE turns ADD COLUMN model_id TEXT'); } catch { /* ignore */ }
+    }
+    if (!turnCols.includes('provider')) {
+      try { this.db.exec('ALTER TABLE turns ADD COLUMN provider TEXT'); } catch { /* ignore */ }
+    }
     const evalCols = (this.db.prepare("PRAGMA table_info(evals)").all() as Array<{ name: string }>).map(c => c.name);
     if (!evalCols.includes('task_id')) {
       try { this.db.exec('ALTER TABLE evals ADD COLUMN task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE'); }
@@ -599,10 +683,12 @@ export class ApmeStore {
     const taskCols = (this.db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>).map(c => c.name);
     for (const [col, sql] of [
       ['model_id', 'ALTER TABLE tasks ADD COLUMN model_id TEXT'],
+      ['provider', 'ALTER TABLE tasks ADD COLUMN provider TEXT'],
       ['model_config', 'ALTER TABLE tasks ADD COLUMN model_config TEXT'],
       ['input_tokens', 'ALTER TABLE tasks ADD COLUMN input_tokens INTEGER'],
       ['output_tokens', 'ALTER TABLE tasks ADD COLUMN output_tokens INTEGER'],
       ['cost_usd', 'ALTER TABLE tasks ADD COLUMN cost_usd REAL'],
+      ['cost_known', 'ALTER TABLE tasks ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0'],
       ['latency_ms', 'ALTER TABLE tasks ADD COLUMN latency_ms INTEGER'],
     ] as Array<[string, string]>) {
       if (!taskCols.includes(col)) {
@@ -621,6 +707,9 @@ export class ApmeStore {
     //     pointer to the run it continues, so one conversation shows up as N
     //     disconnected components. One live session here had 127 such runs.
     const sevCols = (this.db.prepare("PRAGMA table_info(sample_events)").all() as Array<{ name: string }>).map(c => c.name);
+    if (!sevCols.includes('cost_known')) {
+      try { this.db.exec('ALTER TABLE sample_events ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0'); } catch { /* ignore */ }
+    }
     if (!sevCols.includes('turn_id')) {
       try { this.db.exec('ALTER TABLE sample_events ADD COLUMN turn_id TEXT'); } catch { /* ignore */ }
       try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_sevents_turn ON sample_events(turn_id)'); } catch { /* ignore */ }
@@ -640,6 +729,13 @@ export class ApmeStore {
       try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_run_id)'); } catch { /* ignore */ }
     }
 
+    // A positive historical value proves that a price existed. Historical
+    // zeroes remain unknown because they could be either a free local model or
+    // the old UNKNOWN_PRICE fallback — the ambiguity this column removes.
+    try { this.db.exec('UPDATE runs SET cost_known=1 WHERE cost_usd > 0'); } catch { /* ignore */ }
+    try { this.db.exec('UPDATE tasks SET cost_known=1 WHERE cost_usd > 0'); } catch { /* ignore */ }
+    try { this.db.exec('UPDATE sample_events SET cost_known=1 WHERE cost_usd > 0'); } catch { /* ignore */ }
+
     // ── Covering indexes for the per-run/per-task rollups ──
     // better-sqlite3 is synchronous on a single connection, so ANY slow query
     // here stalls the daemon's whole HTTP path — this is a latency budget, not
@@ -658,6 +754,14 @@ export class ApmeStore {
     ]) {
       try { this.db.exec(sql); } catch { /* ignore */ }
     }
+
+    // CREATE VIEW IF NOT EXISTS preserves stale executable SQL forever. Rebuild
+    // after the ALTERs above so both fresh and upgraded databases group by the
+    // turn/provider identity this version actually writes.
+    for (const view of ['v_sample_scorecard', 'v_category_scorecard', 'v_model_scorecard', 'v_run_metrics']) {
+      try { this.db.exec(`DROP VIEW IF EXISTS ${view}`); } catch { /* ignore */ }
+    }
+    this.db.exec(SCORECARD_DDL);
   }
 
   private seedDefaultRubric(): void {
@@ -713,17 +817,19 @@ export class ApmeStore {
 
   insertRun(row: ApmeRunRow): void {
     if (!this.db) return;
+    const costKnown = row.costKnown === true || (row.costUsd != null && row.costUsd > 0);
     this.db.prepare(
       `INSERT INTO runs
-        (id, session_id, agent_type, model_id, project_name, project_path, task_prompt,
-         started_at, ended_at, input_tokens, output_tokens, cost_usd, exit_code,
+        (id, session_id, agent_type, model_id, provider, project_name, project_path, task_prompt,
+         started_at, ended_at, input_tokens, output_tokens, cost_usd, cost_known, exit_code,
          git_before, git_after, hw_profile)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       row.id,
       row.sessionId,
       row.agentType,
       row.modelId ?? null,
+      row.provider ?? null,
       row.projectName ?? null,
       row.projectPath ?? null,
       row.taskPrompt ?? null,
@@ -732,6 +838,7 @@ export class ApmeStore {
       row.inputTokens ?? null,
       row.outputTokens ?? null,
       row.costUsd ?? null,
+      costKnown ? 1 : 0,
       row.exitCode ?? null,
       row.gitBefore ?? null,
       row.gitAfter ?? null,
@@ -745,6 +852,7 @@ export class ApmeStore {
     const values: unknown[] = [];
     const map: Record<string, string> = {
       modelId: 'model_id',
+      provider: 'provider',
       projectName: 'project_name',
       projectPath: 'project_path',
       taskPrompt: 'task_prompt',
@@ -752,6 +860,7 @@ export class ApmeStore {
       inputTokens: 'input_tokens',
       outputTokens: 'output_tokens',
       costUsd: 'cost_usd',
+      costKnown: 'cost_known',
       exitCode: 'exit_code',
       gitBefore: 'git_before',
       gitAfter: 'git_after',
@@ -769,7 +878,10 @@ export class ApmeStore {
       const col = map[k];
       if (!col || v === undefined) continue;
       fields.push(`${col} = ?`);
-      values.push(v);
+      values.push(k === 'costKnown' ? (v ? 1 : 0) : v);
+    }
+    if (patch.costUsd != null && patch.costUsd > 0 && patch.costKnown === undefined) {
+      fields.push('cost_known = ?'); values.push(1);
     }
     if (fields.length === 0) return;
     values.push(id);
@@ -825,6 +937,7 @@ export class ApmeStore {
       outcome: 'outcome', compositeScore: 'composite_score', efficiencyJson: 'efficiency_json',
       prompt: 'prompt', response: 'response', taskId: 'task_id',
       endSource: 'end_source',
+      modelId: 'model_id', provider: 'provider',
     };
     const sets: string[] = []; const vals: unknown[] = [];
     for (const [k, v] of Object.entries(fields)) {
@@ -927,10 +1040,12 @@ export class ApmeStore {
       notesJson: 'notes_json',
       boundarySignal: 'boundary_signal',
       modelId: 'model_id',
+      provider: 'provider',
       modelConfig: 'model_config',
       inputTokens: 'input_tokens',
       outputTokens: 'output_tokens',
       costUsd: 'cost_usd',
+      costKnown: 'cost_known',
       latencyMs: 'latency_ms',
     };
     const sets: string[] = [];
@@ -939,7 +1054,10 @@ export class ApmeStore {
       const col = map[k];
       if (!col || v === undefined) continue;
       sets.push(`${col} = ?`);
-      vals.push(v);
+      vals.push(k === 'costKnown' ? (v ? 1 : 0) : v);
+    }
+    if (patch.costUsd != null && patch.costUsd > 0 && patch.costKnown === undefined) {
+      sets.push('cost_known = ?'); vals.push(1);
     }
     if (sets.length === 0) return;
     vals.push(id);
@@ -1376,15 +1494,19 @@ export class ApmeStore {
    *  never persist. Returns true if a row was actually inserted. */
   insertSampleEvent(row: ApmeSampleEventRow): boolean {
     if (!this.db) return false;
+    // A positive monetary amount is self-proving provenance even for legacy
+    // callers that predate costKnown. Zero remains ambiguous and must only be
+    // marked known by a pricing table / known-local producer.
+    const costKnown = row.costKnown === true || (row.costUsd != null && row.costUsd > 0);
     const res = this.db.prepare(
       `INSERT OR IGNORE INTO sample_events
         (task_id, run_id, turn_index, turn_id, seq, ts, kind, model, input_tokens, output_tokens,
-         cost_usd, latency_ms, tool_name, tool_status, tool_error, payload, dedup_key)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         cost_usd, cost_known, latency_ms, tool_name, tool_status, tool_error, payload, dedup_key)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       row.taskId, row.runId, row.turnIndex ?? null, row.turnId ?? null, row.seq, row.ts, row.kind,
       row.model ?? null, row.inputTokens ?? null, row.outputTokens ?? null,
-      row.costUsd ?? null, row.latencyMs ?? null,
+      row.costUsd ?? null, costKnown ? 1 : 0, row.latencyMs ?? null,
       row.toolName ?? null, row.toolStatus ?? null, row.toolError ?? null,
       row.payload ?? null, row.dedupKey ?? null,
     );
@@ -1396,13 +1518,16 @@ export class ApmeStore {
     if (!this.db) return;
     const map: Record<string, string> = {
       toolStatus: 'tool_status', toolError: 'tool_error', payload: 'payload',
-      costUsd: 'cost_usd', latencyMs: 'latency_ms', model: 'model',
+      costUsd: 'cost_usd', costKnown: 'cost_known', latencyMs: 'latency_ms', model: 'model',
       inputTokens: 'input_tokens', outputTokens: 'output_tokens', ts: 'ts',
     };
     const sets: string[] = []; const vals: unknown[] = [];
     for (const [k, v] of Object.entries(fields)) {
       const col = map[k]; if (!col || v === undefined) continue;
-      sets.push(`${col} = ?`); vals.push(v);
+      sets.push(`${col} = ?`); vals.push(k === 'costKnown' ? (v ? 1 : 0) : v);
+    }
+    if (fields.costUsd != null && fields.costUsd > 0 && fields.costKnown === undefined) {
+      sets.push('cost_known = ?'); vals.push(1);
     }
     if (sets.length === 0) return;
     vals.push(id);
@@ -1418,6 +1543,19 @@ export class ApmeStore {
          AND (tool_status IS NULL OR tool_status = 'pending')
        ORDER BY seq DESC LIMIT 1`,
     ).get(taskId, turnIndex, toolName) as Record<string, unknown> | undefined;
+    return row ? rowToSampleEvent(row) : null;
+  }
+
+  /** One assistant-message slot per turn. Response producers overlap, so text
+   *  hashes cannot be the identity: a truncated projection and the full final
+   *  are two payload versions of the same logical event. */
+  findAssistantMessageEvent(taskId: string, turnId: string): ApmeSampleEventRow | null {
+    if (!this.db) return null;
+    const row = this.db.prepare(
+      `SELECT * FROM sample_events
+       WHERE task_id = ? AND turn_id = ? AND kind = 'assistant_message'
+       ORDER BY seq ASC LIMIT 1`,
+    ).get(taskId, turnId) as Record<string, unknown> | undefined;
     return row ? rowToSampleEvent(row) : null;
   }
 
@@ -1467,6 +1605,7 @@ export class ApmeStore {
         inputTokens: task.inputTokens ?? 0,
         outputTokens: task.outputTokens ?? 0,
         costUsd: task.costUsd ?? 0,
+        costKnown: task.costKnown ?? false,
         latencyMs: task.latencyMs ?? 0,
       },
       summary: task.summary ?? null,
@@ -1481,11 +1620,16 @@ export class ApmeStore {
     if (!this.db) return;
     const row = this.db.prepare(
       `SELECT COALESCE(SUM(input_tokens),0) AS it, COALESCE(SUM(output_tokens),0) AS ot,
-              COALESCE(SUM(cost_usd),0) AS cu, COALESCE(SUM(latency_ms),0) AS lm
+              CASE WHEN COUNT(*) > 0 AND MIN(COALESCE(cost_known,0))=1
+                   THEN SUM(cost_usd) ELSE NULL END AS cu,
+              CASE WHEN COUNT(*) > 0 AND MIN(COALESCE(cost_known,0))=1
+                   THEN 1 ELSE 0 END AS ck,
+              COALESCE(SUM(latency_ms),0) AS lm
        FROM sample_events WHERE task_id = ? AND kind = 'model'`,
-    ).get(taskId) as { it: number; ot: number; cu: number; lm: number };
+    ).get(taskId) as { it: number; ot: number; cu: number | null; ck: number; lm: number };
     this.updateTask(taskId, {
-      inputTokens: row.it, outputTokens: row.ot, costUsd: row.cu, latencyMs: row.lm,
+      inputTokens: row.it, outputTokens: row.ot, costUsd: row.cu,
+      costKnown: row.ck === 1, latencyMs: row.lm,
     });
   }
 
@@ -1495,10 +1639,12 @@ export class ApmeStore {
     return rows.map((r) => ({
       agentType: r.agent_type as string,
       modelId: r.model_id as string,
+      provider: (r.provider as string | null) ?? null,
       taskCategory: (r.task_category as string | null) ?? null,
       samples: r.samples as number,
       avgQuality: (r.avg_quality as number | null) ?? null,
       totalCost: (r.total_cost as number | null) ?? null,
+      costKnown: r.cost_known === 1,
       avgLatencyMs: (r.avg_latency_ms as number | null) ?? null,
       costPerQuality: (r.cost_per_quality as number | null) ?? null,
     }));
@@ -1512,24 +1658,28 @@ export class ApmeStore {
     return rows.map((r) => ({
       agentType: r.agent_type as string,
       modelId: r.model_id as string,
+      provider: (r.provider as string | null) ?? null,
       runs: r.runs as number,
       avgOverall: (r.avg_overall as number | null) ?? null,
       avgTestsPass: (r.avg_tests_pass as number | null) ?? null,
       totalCost: (r.total_cost as number | null) ?? null,
+      costKnown: r.cost_known === 1,
       costPerQuality: (r.cost_per_quality as number | null) ?? null,
     }));
   }
 
-  categoryScorecard(): Array<{ taskCategory: string; modelId: string; runs: number; avgOverall: number | null; avgTestsPass: number | null; totalCost: number | null }> {
+  categoryScorecard(): Array<{ taskCategory: string; modelId: string; provider: string | null; runs: number; avgOverall: number | null; avgTestsPass: number | null; totalCost: number | null; costKnown: boolean }> {
     if (!this.db) return [];
     const rows = this.db.prepare('SELECT * FROM v_category_scorecard').all() as Record<string, unknown>[];
     return rows.map((r) => ({
       taskCategory: r.task_category as string,
       modelId: r.model_id as string,
+      provider: (r.provider as string | null) ?? null,
       runs: r.runs as number,
       avgOverall: (r.avg_overall as number | null) ?? null,
       avgTestsPass: (r.avg_tests_pass as number | null) ?? null,
       totalCost: (r.total_cost as number | null) ?? null,
+      costKnown: r.cost_known === 1,
     }));
   }
 }
@@ -1542,6 +1692,7 @@ function rowToRun(r: Record<string, unknown>): ApmeRunRow {
     sessionId: r.session_id as string,
     agentType: r.agent_type as ApmeRunRow['agentType'],
     modelId: (r.model_id as string | null) ?? null,
+    provider: (r.provider as string | null) ?? null,
     projectName: (r.project_name as string | null) ?? null,
     projectPath: (r.project_path as string | null) ?? null,
     taskPrompt: (r.task_prompt as string | null) ?? null,
@@ -1550,6 +1701,7 @@ function rowToRun(r: Record<string, unknown>): ApmeRunRow {
     inputTokens: (r.input_tokens as number | null) ?? null,
     outputTokens: (r.output_tokens as number | null) ?? null,
     costUsd: (r.cost_usd as number | null) ?? null,
+    costKnown: r.cost_known === 1,
     exitCode: (r.exit_code as number | null) ?? null,
     gitBefore: (r.git_before as string | null) ?? null,
     gitAfter: (r.git_after as string | null) ?? null,
@@ -1581,10 +1733,12 @@ function rowToTask(r: Record<string, unknown>): ApmeTaskRow {
     taskCategory: (r.task_category as string | null) ?? null,
     notesJson: (r.notes_json as string | null) ?? null,
     modelId: (r.model_id as string | null) ?? null,
+    provider: (r.provider as string | null) ?? null,
     modelConfig: (r.model_config as string | null) ?? null,
     inputTokens: (r.input_tokens as number | null) ?? null,
     outputTokens: (r.output_tokens as number | null) ?? null,
     costUsd: (r.cost_usd as number | null) ?? null,
+    costKnown: r.cost_known === 1,
     latencyMs: (r.latency_ms as number | null) ?? null,
   };
 }
@@ -1625,6 +1779,7 @@ function rowToSampleEvent(r: Record<string, unknown>): ApmeSampleEventRow {
     inputTokens: (r.input_tokens as number | null) ?? null,
     outputTokens: (r.output_tokens as number | null) ?? null,
     costUsd: (r.cost_usd as number | null) ?? null,
+    costKnown: r.cost_known === 1,
     latencyMs: (r.latency_ms as number | null) ?? null,
     toolName: (r.tool_name as string | null) ?? null,
     toolStatus: (r.tool_status as string | null) ?? null,

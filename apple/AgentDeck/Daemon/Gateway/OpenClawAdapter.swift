@@ -1705,8 +1705,18 @@ actor OpenClawAdapter {
         let message = payload["message"] as? [String: Any]
         var text = Self.sessionMessageText(message?["content"])
         if text.isEmpty { text = message?["text"] as? String ?? "" }
-        guard !text.isEmpty else { return }
         let role = (message?["role"] as? String)?.lowercased() ?? "message"
+        if role == "assistant" {
+            var event: [String: Any] = [
+                "type": "gateway_session_message", "role": role,
+                "response": String(text.prefix(10_000)),
+            ]
+            if let model = message?["model"] as? String { event["model"] = model }
+            if let provider = message?["provider"] as? String { event["provider"] = provider }
+            if let usage = message?["usage"] as? [String: Any] { event["usage"] = usage }
+            self._onEvent?(event)
+        }
+        guard !text.isEmpty else { return }
         // Mirror the chat-event path: cap `detail` (cron/instruction prompts can be
         // multi-KB blobs of shell-verb text) and flag scheduled turns `automated`
         // so the dashboard can dim/collapse the raw prompt instead of surfacing it.

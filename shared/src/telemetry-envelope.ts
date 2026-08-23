@@ -73,6 +73,8 @@ export interface TelemetryAttributes {
   'agentdeck.prompt_text'?: string;
   /** Assistant response text for turn_response. */
   'agentdeck.response_text'?: string;
+  /** Provenance used to resolve overlapping OpenClaw response channels. */
+  'agentdeck.response_source'?: 'chat_final' | 'session_message_projection' | 'direct';
   /** Task boundary discriminator. */
   'agentdeck.boundary_signal'?: 'todo_complete' | 'clear' | 'session_end' | 'manual' | 'idle_gap';
   /** Original event name for raw_step. */
