@@ -161,6 +161,38 @@ export type OnTaskMilestone = (args: {
   at: number;
 }) => void;
 
+/**
+ * Is `echo` the same user prompt as `original`, arriving a second time?
+ *
+ * Two producers open a turn for one prompt: our own `chat.send` span, which
+ * carries the text verbatim, and the Gateway's `session.message`(user) echo,
+ * which has been trimmed, envelope-stripped and capped at 8,000 characters
+ * before it reaches us. Exact equality therefore misses on inputs as ordinary
+ * as a trailing newline — and a miss is not benign: the duplicate then closes
+ * the open turn with `resolveDisplacedTurnSource`, which for a non-`claude-code`
+ * agent returns `next_prompt`, i.e. the unrecovered-Stop-loss bucket. A stray
+ * "\n" would invent a Stop loss for an agent that has no Stop hook at all,
+ * strand an empty turn, and shift every later `turn_index`.
+ *
+ * Comparing TRIMMED is the whole fix, and deliberately all of it. A first pass
+ * here also allowed a prefix match when the shorter side sat at the Gateway's
+ * 8,000-character cap — that branch could never fire: both operands reach this
+ * function through the caller's own `slice(0, 8_000)`, so "the shorter one is
+ * at 8,000" forces both to be exactly 8,000 characters, and two equal-length
+ * strings where one is a prefix of the other are identical, which the equality
+ * check above already answered. Reintroducing truncation tolerance means
+ * comparing BEFORE that slice, not adding a branch after it.
+ *
+ * Known and NOT closed by this: because the caller slices first, two genuinely
+ * different prompts that share their first 8,000 characters compare equal and
+ * collapse into one turn — an eval harness sending a long fixed preamble with a
+ * differing tail is exactly that shape. That predates this comparison and is
+ * fixed by keying on a hash of the unsliced prompt, not here.
+ */
+function samePromptEcho(original: string, echo: string): boolean {
+  return original.trim() === echo.trim();
+}
+
 export class ApmeCollector {
   private readonly sessionToRun = new Map<string, string>(); // sessionId → runId
   private readonly sessionToAgentType = new Map<string, AgentType>(); // sessionId → agentType (survives closeRun for late-attributed timeline rows)
@@ -169,6 +201,13 @@ export class ApmeCollector {
   private readonly sessionToTask = new Map<string, ActiveTask>(); // sessionId → current task
   private readonly runTaskCount = new Map<string, number>();      // runId → next task_index
   private readonly sessionToUsage = new Map<string, { in: number; out: number }>(); // last cumulative usage
+  /** Running cost total for producers that report PER-MESSAGE cost.
+   *  Separate from `sessionToUsage` because `updateUsage` writes the cost
+   *  column absolutely and would otherwise stamp one message's cost as the
+   *  run's. `seen` keeps a reported ZERO distinct from nothing reported —
+   *  glm-5.2 answers `usage.cost.total = 0` on every message, so folding the
+   *  two would record "free" as "unknown" for a whole class of run. */
+  private readonly sessionToCostTotal = new Map<string, { total: number; seen: boolean }>();
 
   /** Optional listener fired after `closeTask` persists the row. The runner
    *  wires this to enqueue a task-level judge call. */
@@ -257,7 +296,8 @@ export class ApmeCollector {
       // prompt landing on a fresh, still-empty turn is a no-op.
       const openTurn = this.sessionToTurn.get(sessionId);
       if (
-        openTurn && prompt !== null && openTurn.prompt === prompt &&
+        openTurn && prompt !== null && openTurn.prompt !== null &&
+        samePromptEcho(openTurn.prompt, prompt) &&
         openTurn.toolCalls === 0 && !openTurn.hasResponse &&
         Date.now() - openTurn.startedAt < DUPLICATE_TURN_OPEN_WINDOW_MS
       ) {
@@ -1052,12 +1092,12 @@ export class ApmeCollector {
         const outputTokens = a['agentdeck.usage.output_tokens'] as number | undefined;
         const costUsd = a['agentdeck.usage.cost_usd'] as number | undefined;
         if (inputTokens !== undefined || outputTokens !== undefined || costUsd !== undefined) {
-          // Synthesize a UsageSnapshot-compatible shape. Missing fields stay null.
-          this.updateUsage(sessionId, {
+          // PER-MESSAGE numbers, not a running total — see `addUsageIncrement`.
+          this.addUsageIncrement(sessionId, {
             inputTokens: inputTokens ?? 0,
             outputTokens: outputTokens ?? 0,
-            estimatedCostUsd: costUsd ?? null,
-          } as unknown as UsageSnapshot);
+            costUsd: costUsd ?? null,
+          });
         }
         return;
       }
@@ -1113,6 +1153,55 @@ export class ApmeCollector {
    *  Snapshots carry CUMULATIVE session totals, so we emit a priced ModelEvent
    *  for the delta and attribute it to the active task (the SessionSample cost
    *  is the sum of its ModelEvents). */
+  /**
+   * Record usage a producer reports for ONE message.
+   *
+   * `updateUsage` is cumulative by contract: it assigns `inputTokens` to the run
+   * row absolutely and derives its per-task ModelEvent as `max(0, cur - prev)`.
+   * Its original and only other caller is the PTY poller's `UsageTracker`
+   * snapshot, which really is a running total.
+   *
+   * A `session.message`(assistant) frame reports THIS message's tokens, and those
+   * are not monotonic — measured on a real OpenClaw session: 30302, 21375, 335,
+   * 96, 114. Fed to `updateUsage` directly, the run row ends at the LAST
+   * message's count (114 for a session that consumed 52,222), every decrease
+   * clamps its delta to 0 so most messages append no ModelEvent at all, and
+   * `recomputeSampleCost` then prices the run from what survives. Two messages
+   * sharing an `(in,out)` pair are additionally deduped away, because the dedup
+   * key assumes cumulative values are unique.
+   *
+   * So convert here rather than at each producer: keep the running total and
+   * hand `updateUsage` the cumulative series its arithmetic is written for.
+   */
+  addUsageIncrement(
+    sessionId: string,
+    delta: { inputTokens: number; outputTokens: number; costUsd: number | null },
+  ): void {
+    if (!this.store.enabled) return;
+    // ONE guard for both accumulators. `updateUsage` drops everything when the
+    // session has no open run, so advancing the cost total before that check
+    // let cost count messages the token total did not: a span arriving before
+    // the run opened, then one after, recorded 7 tokens at $10.50. Two
+    // accumulators with different failure modes is the same defect shape as a
+    // guard cleared only by a `defer` it shares a failure mode with.
+    if (!this.sessionToRun.get(sessionId)) return;
+    const prev = this.sessionToUsage.get(sessionId) ?? { in: 0, out: 0 };
+    const prevCost = this.sessionToCostTotal.get(sessionId) ?? { total: 0, seen: false };
+    const reported = typeof delta.costUsd === 'number';
+    const cost = { total: prevCost.total + (reported ? delta.costUsd as number : 0),
+                   seen: prevCost.seen || reported };
+    this.sessionToCostTotal.set(sessionId, cost);
+    this.updateUsage(sessionId, {
+      // The clamp is deliberate, not defensive: `updateUsage` derives its
+      // ModelEvent as `max(0, cur - prev)`, so the series handed to it must be
+      // monotonic. No producer here reports a negative correction; if one ever
+      // does, it needs its own path rather than silently shrinking the total.
+      inputTokens: prev.in + Math.max(0, delta.inputTokens),
+      outputTokens: prev.out + Math.max(0, delta.outputTokens),
+      estimatedCostUsd: cost.seen ? cost.total : null,
+    } as unknown as UsageSnapshot);
+  }
+
   updateUsage(sessionId: string, snapshot: UsageSnapshot): void {
     if (!this.store.enabled) return;
     const runId = this.sessionToRun.get(sessionId);
@@ -1218,6 +1307,7 @@ export class ApmeCollector {
     this.sessionToLastTurnId.delete(sessionId);
     this.runTaskCount.delete(runId);
     this.sessionToUsage.delete(sessionId);
+    this.sessionToCostTotal.delete(sessionId);
 
     // Mark empty runs so the dashboard can filter them out.
     // Don't delete — FK constraints and concurrent access make deletion risky.

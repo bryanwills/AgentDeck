@@ -915,7 +915,7 @@ daemon
       probeDaemonHealth: probeHealth, readDaemonInfo, findDaemonPort,
       waitForDaemonExit, waitForPortBindable,
     } = await import('./session-registry.js');
-    const { resolveDaemonPort } = await import('./daemon-port.js');
+    const { resolveDaemonPort, PREFERRED_PORT_RECLAIM_MS } = await import('./daemon-port.js');
     const preferredPort = resolveDaemonPort({ flag: opts.port });
     const info = readDaemonInfo();
     const runningPort = info?.httpPort ?? info?.port ?? findDaemonPort() ?? preferredPort.port;
@@ -936,13 +936,21 @@ daemon
     }
 
     await stopDaemon(runningPort);
-    // Two conditions, not a fixed sleep. `waitForDaemonExit` proves the old
-    // daemon stopped ANSWERING; between that and "the port is free" sits the
-    // socket close, plus a NECP reservation macOS holds for ~14s after a
-    // listener is cancelled. The 1500ms guess that used to sit here covered
-    // neither reliably — it was simply longer than the common case.
-    await waitForDaemonExit(runningPort, 8000);
-    await waitForPortBindable(preferredPort.port, 8000);
+    // Wait for the old daemon to stop ANSWERING — a real condition, not the
+    // 1500ms guess that used to sit here and merely outlasted the common case.
+    //
+    // The parent deliberately does NOT also wait for the port to become
+    // bindable. Its probe opens a listener and closes it again, so it proves
+    // nothing the child does not re-prove seconds later — and the child does it
+    // better, because it KEEPS the port on success. Waiting here serialized two
+    // port-reclaim waits back to back (macOS holds a NECP reservation for ~14s
+    // after a listener is cancelled) and made a contended restart twice as slow
+    // for no extra information. Whether the child got the port is answered
+    // below, by asking the daemon that came up who it is.
+    const exited = await waitForDaemonExit(runningPort, 8000);
+    if (!exited) {
+      log(`Warning: the daemon on port ${runningPort} was still answering when the stop budget ran out.`);
+    }
 
     const scriptPath = fileURLToPath(import.meta.url);
     const args = [scriptPath, 'daemon', 'start', '--foreground'];
@@ -965,6 +973,10 @@ daemon
       stdio: ['ignore', rOut, rErr],
       windowsHide: true,
     });
+    // Liveness is what the wait below actually keys on. `detached` + `unref`
+    // still delivers 'exit' to this process for as long as it is running.
+    let childAlive = true;
+    child.once('exit', () => { childAlive = false; });
     child.unref();
 
     // `spawn` resolving a pid means the OS forked a process — it is not
@@ -975,12 +987,18 @@ daemon
     // daemon log. Verify by asking the daemon who it is.
     const spawnedPid = child.pid;
     const started = spawnedPid !== undefined
-      ? await waitForDaemonPid(spawnedPid, preferredPort.port, probeHealth, readDaemonInfo, findDaemonPort)
+      ? await waitForDaemonPid(spawnedPid, preferredPort.port, probeHealth, readDaemonInfo, findDaemonPort,
+          PREFERRED_PORT_RECLAIM_MS, () => childAlive, undefined,
+          (p) => log(`Still starting — child PID ${p} is alive; waiting for it to bind.`))
       : null;
 
     if (!started) {
       log(`Daemon restart FAILED — no daemon with PID ${spawnedPid ?? '?'} is answering.`);
-      log(`The reason is in ${join(homedir(), '.agentdeck', 'daemon-stderr.log')}.`);
+      // Both streams, not just stderr: the likeliest failure is the child
+      // hitting `daemon start`'s incumbent guard, which reports through `log()`
+      // — i.e. stdout. Naming only stderr pointed at the empty file.
+      log(`The reason is in ${join(homedir(), '.agentdeck', 'daemon-stdout.log')}`
+        + ` or ${join(homedir(), '.agentdeck', 'daemon-stderr.log')}.`);
       process.exit(1);
     }
     if (started.port !== preferredPort.port) {
@@ -1008,8 +1026,29 @@ export async function waitForDaemonPid(
   readDaemonInfo: () => { httpPort?: number; port?: number } | null,
   findDaemonPort: () => number | null,
   timeoutMs = 20_000,
+  /**
+   * Is the spawned child still running?
+   *
+   * A derived timeout is still a guess, and this one was wrong twice: the
+   * budget has to cover not just the child's port-reclaim wait but its
+   * incumbent negotiation first — a Swift daemon standing down costs up to
+   * `EXIT_WAIT_MS + BINDABLE_WAIT_MS` before `startDaemon` is even reached, so
+   * the whole worst case runs past a minute. Giving up early prints
+   * "restart FAILED" while the daemon is coming up, and the user's natural
+   * retry then kills it.
+   *
+   * "The child is still running" is a real condition rather than a derived one,
+   * so `timeoutMs` becomes a floor: while the child is alive we keep waiting,
+   * and only a child that EXITED without a matching pid is a failure. The
+   * ceiling still bounds a child that hangs forever.
+   */
+  isChildAlive?: () => boolean,
+  ceilingMs = 180_000,
+  onStillWaiting?: (pid: number) => void,
 ): Promise<{ pid: number; port: number } | null> {
-  const deadline = Date.now() + timeoutMs;
+  let announcedWait = false;
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
   for (;;) {
     const candidates = new Set<number>([preferredPort]);
     const info = readDaemonInfo();
@@ -1021,7 +1060,17 @@ export async function waitForDaemonPid(
       const health = await probeHealth(port);
       if (health?.pid === pid) return { pid, port };
     }
-    if (Date.now() >= deadline) return null;
+    const now = Date.now();
+    if (now >= startedAt + ceilingMs) return null;
+    if (now >= deadline && !(isChildAlive?.() ?? false)) return null;
+    // Past the floor with the child still alive, this can legitimately run for
+    // another couple of minutes (a Swift incumbent standing down, then a port
+    // reclaim). Say so once, or a correct wait is indistinguishable from a hung
+    // terminal.
+    if (now >= deadline && !announcedWait) {
+      announcedWait = true;
+      onStillWaiting?.(pid);
+    }
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
 }
