@@ -120,24 +120,43 @@ daemon** (the macOS-app Swift daemon does not support remote attach and is
 never auto-selected). See
 [docs/daemon.md § Remote attach](docs/daemon.md#remote-attach-cross-machine-sessions).
 
-### Then add surfaces
+### Official AgentDeck products and integrations
 
-Any of these attach to the same daemon, and you can add them in any order:
+These products are maintained and released by the AgentDeck project. They attach
+to the same daemon and can be added in any order:
 
-| Surface | How to attach |
+| Official product / integration | How to attach |
 |---|---|
-| **Stream Deck / Mini / XL / Plus / + XL** | One click from the [Elgato Marketplace](https://marketplace.elgato.com/product/agentdeck-dce3806b-176e-40f2-be7d-e029bec0f464) — or `cd plugin && streamdeck link bound.serendipity.agentdeck.sdPlugin` from a checkout |
-| **Ulanzi D200H / D200X LCD keys** | Install the plugin in Ulanzi Studio — see [plugin-ulanzi/VERIFY.md](plugin-ulanzi/VERIFY.md). D200X encoders are not supported yet. |
-| **macOS app** | [Download on the App Store](https://apps.apple.com/app/id6784822497) — the SwiftUI dashboard carries its own daemon, so it needs no Node.js |
-| **iPhone / iPad companion** | Same [App Store listing](https://apps.apple.com/app/id6784822497) — pairs with a daemon on your Mac over the LAN (QR pairing) |
-| **Android tablet / e-ink** | [Install from Google Play](https://play.google.com/store/apps/details?id=dev.agentdeck) (recommended), or use the signed APK from [Releases](https://github.com/puritysb/AgentDeck/releases). Android is a companion dashboard: keep the AgentDeck daemon running on a Mac/PC on the same network. See the [3-step setup guide](docs/android.md#quick-start-google-play-or-github-apk). |
-| **ESP32 panels · InkDeck e-ink** | Flash from your browser at [**puritysb.github.io/AgentDeck/flash/**](https://puritysb.github.io/AgentDeck/flash/) (Chrome/Edge desktop, nothing to install) or run `agentdeck esp32 flash <board>`. After the first USB flash, updates go over Wi-Fi OTA — see [docs/esp32.md](docs/esp32.md#flash-over-usb) |
-| **Pixoo64 · TC001 · Timebox · iDotMatrix** | `agentdeck pixoo scan` / `agentdeck timebox scan` — see [docs/devices.md](docs/devices.md) |
+| **macOS AgentDeck Dashboard** | [Download on the App Store](https://apps.apple.com/app/id6784822497) — the SwiftUI dashboard carries its own daemon, so it needs no Node.js |
+| **iOS / Android AgentDeck Companion** | iPhone/iPad use the same [App Store listing](https://apps.apple.com/app/id6784822497); Android installs from [Google Play](https://play.google.com/store/apps/details?id=dev.agentdeck). Both pair with a daemon over the LAN. |
+| **AgentDeck ESP32 Dashboard Firmware** | Flash panels and InkDeck from [**puritysb.github.io/AgentDeck/flash/**](https://puritysb.github.io/AgentDeck/flash/) or run `agentdeck esp32 flash <board>`. After the first USB flash, supported boards update over Wi-Fi OTA. |
+| **Official Stream Deck integration** | Install for Stream Deck / Mini / XL / Plus / + XL from the [Elgato Marketplace](https://marketplace.elgato.com/product/agentdeck-dce3806b-176e-40f2-be7d-e029bec0f464). |
+| **Official Ulanzi integration** | Install from the [Ulanzi Studio Marketplace](https://ugc.ulanzistudio.com/contentView/1141) — the published 1.0.3 covers the D200H; D200X LCD keys are in the repository and ship with the next submission, and D200X encoders are not supported at all. Building it yourself: [plugin-ulanzi/VERIFY.md](plugin-ulanzi/VERIFY.md). |
+| **Official device integrations** | Pixoo64, TC001, Timebox, and iDotMatrix are driven by the daemon — see [docs/devices.md](docs/devices.md). |
 
 > **Android, Stream Deck, and Ulanzi are companion surfaces.** They talk to the
 > AgentDeck daemon the way an OBS plugin talks to OBS, and never embed it. Keep the
 > daemon running on the same computer/network; without it these surfaces show an
 > offline or searching state.
+
+### Compatible Companion Projects
+
+Independent projects keep their own product identity, repository, releases, and
+support tracker. They integrate through an allow-listed
+[AgentDeck Surface Protocol v1](docs/surface-protocol.md) profile rather than making
+the daemon's entire internal WebSocket API a public contract.
+
+| Project | Level | Surface profile | What it does |
+|---|---|---|---|
+| [Pocket Daily Reader](https://github.com/puritysb/crosspoint-reader) | Community | `portable-reader/v1` | Independent offline-first e-reader. Pulls bounded cards and Glance, records choices offline, and keeps AgentDeck as an invisible sync source. |
+| [companion-module-agentdeck](https://github.com/houtacheng/companion-module-agentdeck) | Community | `companion-control/v1` | Independent Bitfocus Companion module for session tiles, approval controls, usage gauges, and status creatures (by [@houtacheng](https://github.com/houtacheng)). |
+
+Compatibility levels are **Community**, **Verified Compatible**, and **Official**.
+Verified Compatible means a named release passed the published manifest and
+conformance suite; it does not transfer maintenance or imply endorsement. Official
+means AgentDeck-maintained. Definitions, version negotiation, capability policy, OTA
+isolation, and the integration manifest schema are in the
+[Surface Protocol](docs/surface-protocol.md).
 
 Full build-from-source and manual steps: **[docs/install.md](docs/install.md)**.
 
@@ -260,7 +279,7 @@ build health.
 |---|---|
 | **Using it** | [CLI reference](docs/cli.md) · [Configuration](docs/configuration.md) · [Troubleshooting](docs/troubleshooting.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md) |
 | **Surfaces** | [Hardware matrix](docs/hardware-compatibility.md) · [Stream Deck layout](docs/streamdeck-layout.md) · [Devices](docs/devices.md) · [ESP32](docs/esp32.md) · [Android](docs/android.md) · [Apple](docs/apple-app.md) · [TUI](docs/tui-dashboard.md) |
-| **Internals** | [Architecture](docs/architecture.md) · [Daemon](docs/daemon.md) · [Protocol](docs/protocol.md) · [Gateway protocol](docs/gateway-protocol.md) · [Testing](docs/testing.md) |
+| **Internals** | [Architecture](docs/architecture.md) · [Surface protocol](docs/surface-protocol.md) · [Internal bridge protocol](docs/protocol.md) · [Daemon](docs/daemon.md) · [Gateway protocol](docs/gateway-protocol.md) · [Testing](docs/testing.md) |
 | **Evaluation** | [Why APME](docs/why-apme.md) · [APME](docs/apme.md) · [Pipeline](docs/apme-pipeline.md) |
 | **Design** | [DESIGN.md](DESIGN.md) · [Tokens](design/tokens.css) · [Resource map](design/RESOURCES.md) |
 | **Project** | [Roadmap](docs/roadmap.md) · [Releasing](RELEASING.md) · [Changelog](CHANGELOG.md) · [Agent harness](docs/agent-harness.md) · [AI-assisted maintenance](docs/ai-assisted-maintenance.md) |
@@ -276,17 +295,10 @@ in [SECURITY.md](SECURITY.md) for vulnerabilities, and follow the
 agents is human-owned and documented in
 [AI-assisted maintenance](docs/ai-assisted-maintenance.md).
 
-### Community integrations
-
-Independent projects that drive AgentDeck through the daemon's WebSocket API.
-Each is maintained by its own author — report issues on that project's tracker,
-not here. The daemon protocol has no stability guarantee for external clients;
-changes aim to be additive, but integrations are expected to track
-[`shared/src/protocol.ts`](shared/src/protocol.ts) themselves.
-
-| Integration | What it does |
-|---|---|
-| [companion-module-agentdeck](https://github.com/houtacheng/companion-module-agentdeck) | Unofficial [Bitfocus Companion](https://bitfocus.io/companion) module — session tiles, approval queue, usage gauges, and creatures on any Companion-supported surface (by [@houtacheng](https://github.com/houtacheng)) |
+Independent integration submissions are welcome. Start with the
+[Surface Protocol](docs/surface-protocol.md), publish an integration manifest in
+your own repository, and keep support links pointed at the project that owns the
+code. Listing an integration does not make AgentDeck its maintainer.
 
 ---
 
@@ -301,7 +313,7 @@ builds on [Releases](https://github.com/puritysb/AgentDeck/releases).
 | **npm** — `@agentdeck/setup` | `npm-v*` | [1.0.24](https://github.com/puritysb/AgentDeck/releases/tag/npm-v1.0.24) live on the registry — all four packages (`shared`, `hooks`, `bridge`, `setup`) report `dist-tags.latest = 1.0.24`, read from the registry itself on 2026-08-23. The release workflow publishes over OIDC with no enable flag and re-reads every package from the registry afterwards, so a green `npm-v*` build and the registry cannot disagree |
 | **Apple App Store** — macOS + iPhone/iPad | `apple-v*` | [1.0.8 live on both platforms](https://apps.apple.com/app/id6784822497) — build 5301, iPhone/iPad released 2026-08-22T18:41Z and macOS within the same window, each read from the store's own record rather than the approval mail. Submitted 2026-08-22; **each platform is its own submission draft in App Store Connect**, so one click per platform, not one for the app |
 | **Elgato Marketplace** — Stream Deck plugin | `streamdeck-v*` | [1.0.6 live](https://marketplace.elgato.com/product/agentdeck-dce3806b-176e-40f2-be7d-e029bec0f464) — published 2026-08-18, `status: published` on the product page's own payload |
-| **Ulanzi Marketplace** — D200H plugin | `ulanzi-v*` | [1.0.3 release](https://github.com/puritysb/AgentDeck/releases/tag/ulanzi-v1.0.3); submitted 2026-08-07, **still under review** as of 2026-08-20 and never published. The reviewer confirmed on 2026-08-14 that review had begun with no outstanding issues ([details](marketplace/ulanzi/LISTING.md)) |
+| **Ulanzi Marketplace** — D200H / D200X plugin | `ulanzi-v*` | [1.0.3 live](https://ugc.ulanzistudio.com/contentView/1141) — submitted 2026-08-07, published on or before 2026-08-24, and carried in the public Plugins listing. **1.0.4 is built and awaiting submission** (D200X keypad, Kiro/Antigravity marks, answerable OpenClaw prompts, de/es/pt locales); the portal's new *Create review version* flow leaves 1.0.3 serving while it is reviewed ([details](marketplace/ulanzi/LISTING.md)) |
 | **GitHub Release** — Android APK | `android-v*` | [1.0.10](https://github.com/puritysb/AgentDeck/releases/tag/android-v1.0.10) |
 | **GitHub Release** — ESP32 firmware | `esp32-v*` | [1.0.7](https://github.com/puritysb/AgentDeck/releases/tag/esp32-v1.0.7) — 52 assets published 2026-08-22: for each of the 10 boards in `shared/src/esp32-boards.ts` a merged factory image written at `0x0` plus the four loose parts, and a `manifest.json` + `SHA256SUMS.txt` whose sizes and hashes are computed from the artifacts. `esp32/src/config.h` already declares **1.0.8** (the dense-dashboard readability pass) and its notes are in the CHANGELOG, but no `esp32-v1.0.8` tag exists — 1.0.7 is the newest firmware actually delivered |
 | **Google Play** — Android AAB | `android-v*` | [1.0.10 live](https://play.google.com/store/apps/details?id=dev.agentdeck) (versionCode 12, published 2026-08-19 at 100% across 177 countries), superseding 1.0.9. Listing copy, assets and the console runbook are in [marketplace/play/](marketplace/play/LISTING.md) |

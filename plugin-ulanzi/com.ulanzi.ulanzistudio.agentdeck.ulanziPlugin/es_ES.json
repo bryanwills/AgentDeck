@@ -1,0 +1,42 @@
+{
+  "Name": "AgentDeck",
+  "Description": "Supervisa y controla agentes de programación con IA desde tu D200H o D200X.",
+  "Actions": [
+    {
+      "Name": "AgentDeck",
+      "Tooltip": "AgentDeck — llena tus teclas con esto; cada tecla se adapta al estado del agente (sesiones, opciones, modo, parada, uso). Pulsa para actuar."
+    }
+  ],
+  "Localization": {
+    "lede": "Una tecla por sesión de programación con IA — estado en vivo en la tecla, y tu respuesta enviada de vuelta.",
+    "setupHeading": "Configuración en 3 pasos",
+    "openTutorial": "Guía de configuración",
+    "s1Title": "Ejecuta el daemon de AgentDeck",
+    "s1MacApp": "Instala AgentDeck Dashboard — gratis en la Mac App Store, macOS 26 o posterior — y ábrelo. No hace falta terminal.",
+    "s1MacOr": "En un macOS anterior, o donde la app de la App Store no esté disponible, usa la Terminal:",
+    "s1Win": "Abre la Terminal o PowerShell y ejecuta:",
+    "s1Note": "Node.js 22+ es el único requisito. Las CLI de Claude y Codex son opcionales: sin ninguna de las dos, la instalación se completa igual.",
+    "s2Title": "Inicia un agente de programación con IA",
+    "s2Body": "En cualquier carpeta de proyecto, inicia tu agente como siempre — claude, codex u opencode. No hay ningún comando propio de AgentDeck.",
+    "s2Note": "Las apps de escritorio también cuentan: macOS detecta sesiones de Codex desde la app de ChatGPT en cuanto la integración de Codex está registrada — la instalación por terminal lo hace por ti, y la app de la App Store lo pregunta en Ajustes.",
+    "s3Title": "Llena tus teclas",
+    "s3Body": "Arrastra la acción AgentDeck a todas las teclas que quieras usar — es la única acción que hay, y cada tecla decide por sí misma qué mostrar. El diseño se reparte exactamente entre las teclas que colocaste: primero una por sesión, luego las teclas de respuesta, modo, parada y uso según quepan.",
+    "s3Note": "Antes de completar los pasos 1 y 2, la tecla central muestra OFFLINE y el resto queda atenuado. Eso es el plugin funcionando: te está diciendo que falta el daemon.",
+    "thin": "AgentDeck es un cliente ligero, como un plugin de OBS: dibuja lo que informa el daemon local y no incluye ningún daemon propio.",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "recheck": "Comprobar de nuevo",
+    "guide": "Guía completa",
+    "done": "Listo",
+    "checking": "Buscando el daemon de AgentDeck…",
+    "foundApp": "La app AgentDeck está en marcha (puerto {port}).",
+    "foundCli": "El daemon de AgentDeck está en marcha (puerto {port}).",
+    "foundOpaque": "Algo responde en el puerto {port}: ese es el daemon.",
+    "notFound": "Ningún daemon de AgentDeck respondió en este ordenador.",
+    "detailNoSession": "Todavía no hay sesión de agente. Haz el paso 2 y las teclas se llenarán.",
+    "detailSession": "Hay una sesión activa. Tus teclas deberían estar mostrándola ya.",
+    "detailOpaque": "Este panel no puede leer los detalles desde aquí, así que el paso 2 queda sin marcar. Las propias teclas son el indicador real.",
+    "detailNotFound": "Empieza por el paso 1. Si está en marcha y aun así no se encuentra nada, puede que la comprobación esté bloqueada aquí — fíate de las teclas.",
+    "tutorialOpened": "Se abre en una ventana aparte, que puede aparecer detrás de la ventana de Ulanzi Studio."
+  }
+}

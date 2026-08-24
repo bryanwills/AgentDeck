@@ -1,0 +1,42 @@
+{
+  "Name": "AgentDeck",
+  "Description": "KI-Coding-Agenten vom D200H oder D200X aus überwachen und steuern.",
+  "Actions": [
+    {
+      "Name": "AgentDeck",
+      "Tooltip": "AgentDeck — belege deine Tasten damit; jede Taste passt sich dem Agentenzustand an (Sitzungen, Optionen, Modus, Stopp, Verbrauch). Drücken zum Handeln."
+    }
+  ],
+  "Localization": {
+    "lede": "Eine Taste pro KI-Coding-Sitzung — Live-Status auf der Taste, und deine Antwort geht zurück.",
+    "setupHeading": "Einrichtung in 3 Schritten",
+    "openTutorial": "Einrichtungs-Anleitung",
+    "s1Title": "AgentDeck-Daemon starten",
+    "s1MacApp": "Installiere AgentDeck Dashboard — kostenlos im Mac App Store, ab macOS 26 — und öffne es. Kein Terminal nötig.",
+    "s1MacOr": "Unter älterem macOS oder wo die App Store-App nicht angeboten wird, im Terminal:",
+    "s1Win": "Terminal oder PowerShell öffnen und ausführen:",
+    "s1Note": "Node.js 22+ ist die einzige Voraussetzung. Die Claude- und Codex-CLIs sind optional — auch ohne beide läuft die Einrichtung durch.",
+    "s2Title": "Einen KI-Coding-Agenten starten",
+    "s2Body": "Starte deinen Agenten in einem beliebigen Projektordner wie gewohnt — claude, codex oder opencode. Es gibt keinen AgentDeck-eigenen Befehl.",
+    "s2Note": "Desktop-Apps zählen ebenfalls: macOS erkennt Codex-Sitzungen aus der ChatGPT-App, sobald die Codex-Integration registriert ist — die Terminal-Einrichtung erledigt das, die App Store-App fragt in den Einstellungen danach.",
+    "s3Title": "Tasten belegen",
+    "s3Body": "Zieh die AgentDeck-Aktion auf jede Taste, die du nutzen willst — es ist die einzige Aktion, und jede Taste entscheidet selbst, was sie zeigt. Das Layout verteilt sich über genau die Tasten, die du belegt hast: zuerst eine pro Sitzung, dann Antwort-Tasten, Modus, Stopp und Verbrauch, soweit Platz ist.",
+    "s3Note": "Solange Schritt 1 und 2 fehlen, zeigt die mittlere Taste OFFLINE und der Rest bleibt gedimmt. Genau so soll es sein — das Plugin sagt dir damit, dass der Daemon fehlt.",
+    "thin": "AgentDeck ist ein Thin Client, wie ein OBS-Plugin: es zeichnet, was der lokale Daemon meldet, und bringt keinen eigenen Daemon mit.",
+    "copy": "Kopieren",
+    "copied": "Kopiert",
+    "recheck": "Erneut prüfen",
+    "guide": "Vollständige Anleitung",
+    "done": "Fertig",
+    "checking": "Suche nach dem AgentDeck-Daemon…",
+    "foundApp": "Die AgentDeck-App läuft (Port {port}).",
+    "foundCli": "Der AgentDeck-Daemon läuft (Port {port}).",
+    "foundOpaque": "Auf Port {port} antwortet etwas — das ist der Daemon.",
+    "notFound": "Auf diesem Computer hat kein AgentDeck-Daemon geantwortet.",
+    "detailNoSession": "Noch keine Agenten-Sitzung. Mach Schritt 2, dann füllen sich die Tasten.",
+    "detailSession": "Eine Sitzung läuft. Deine Tasten sollten sie jetzt zeigen.",
+    "detailOpaque": "Dieses Panel kann die Details von hier aus nicht lesen, deshalb bleibt Schritt 2 ungeprüft. Die Tasten selbst sind der eigentliche Indikator.",
+    "detailNotFound": "Beginn mit Schritt 1. Läuft er und hier wird trotzdem nichts gefunden, ist die Prüfung womöglich blockiert — verlass dich auf die Tasten.",
+    "tutorialOpened": "Öffnet sich in einem eigenen Fenster, das hinter dem Ulanzi Studio-Fenster erscheinen kann."
+  }
+}

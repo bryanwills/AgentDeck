@@ -25,7 +25,7 @@ import sharp from 'sharp';
 import { buildSessionDeck } from '../shared/dist/d200h-layout.js';
 
 const root = resolve(import.meta.dirname, '..');
-const out = resolve(root, 'marketplace/ulanzi/1.0.1');
+const out = resolve(root, 'marketplace/ulanzi/1.0.4');
 const media = resolve(root, 'docs/media');
 const brand = resolve(root, 'design/brand');
 
@@ -53,21 +53,20 @@ const backdrop = (w, h, cx = 0.5, cy = 0.55, r = 0.72) =>
 // A representative live deck: one agent working, one waiting on the user, two
 // idle, plus the pinned 5H/7D quota gauges on the bottom-left strip. Mirrors the
 // fixture shape used by scripts/render-device-previews.mjs.
-// Twelve sessions fill every key the usage strip leaves free, so the deck reads
-// as a working surface rather than a mostly-empty grid.
+// Ten sessions fill every key the usage strip leaves free — one page, no MORE
+// key — and the set spans all six agents the plugin renders, so the marks row
+// below the deck and the deck itself describe the same product.
 const SESSIONS = [
-  { id: 's01', alive: true, agentType: 'claude-code', state: 'processing', projectName: 'AgentDeck', modelName: 'opus-4' },
-  { id: 's02', alive: true, agentType: 'codex-cli', state: 'awaiting_input', projectName: 'bridge', modelName: 'gpt-5-codex' },
-  { id: 's03', alive: true, agentType: 'opencode', state: 'idle', projectName: 'esp32', modelName: 'opencode' },
-  { id: 's04', alive: true, agentType: 'openclaw', state: 'idle', projectName: 'gateway', modelName: 'OPENCLAW' },
-  { id: 's05', alive: true, agentType: 'claude-code', state: 'processing', projectName: 'apple', modelName: 'opus-4' },
-  { id: 's06', alive: true, agentType: 'antigravity', state: 'idle', projectName: 'android', modelName: 'gemini' },
-  { id: 's07', alive: true, agentType: 'antigravity', state: 'processing', projectName: 'docs', modelName: 'gemini' },
-  { id: 's08', alive: true, agentType: 'claude-code', state: 'awaiting_input', projectName: 'shared', modelName: 'opus-4' },
-  { id: 's09', alive: true, agentType: 'opencode', state: 'processing', projectName: 'hooks', modelName: 'opencode' },
-  { id: 's10', alive: true, agentType: 'codex-cli', state: 'idle', projectName: 'plugin', modelName: 'gpt-5-codex' },
-  { id: 's11', alive: true, agentType: 'opencode', state: 'idle', projectName: 'setup', modelName: 'opencode' },
-  { id: 's12', alive: true, agentType: 'openclaw', state: 'processing', projectName: 'terrarium', modelName: 'OPENCLAW' },
+  { id: 's01', alive: true, agentType: 'openclaw', state: 'idle', projectName: 'gateway', modelName: 'OPENCLAW' },
+  { id: 's02', alive: true, agentType: 'claude-code', state: 'processing', projectName: 'AgentDeck', modelName: 'opus-4' },
+  { id: 's03', alive: true, agentType: 'claude-code', state: 'awaiting_input', projectName: 'shared', modelName: 'opus-4' },
+  { id: 's04', alive: true, agentType: 'codex-cli', state: 'processing', projectName: 'bridge', modelName: 'gpt-5-codex' },
+  { id: 's05', alive: true, agentType: 'codex-cli', state: 'idle', projectName: 'plugin', modelName: 'gpt-5-codex' },
+  { id: 's06', alive: true, agentType: 'opencode', state: 'processing', projectName: 'esp32', modelName: 'opencode' },
+  { id: 's07', alive: true, agentType: 'antigravity', state: 'idle', projectName: 'android', modelName: 'gemini' },
+  { id: 's08', alive: true, agentType: 'antigravity', state: 'processing', projectName: 'docs', modelName: 'gemini' },
+  { id: 's09', alive: true, agentType: 'kiro-cli', state: 'awaiting_input', projectName: 'apple', modelName: 'kiro' },
+  { id: 's10', alive: true, agentType: 'kiro-cli', state: 'idle', projectName: 'setup', modelName: 'kiro' },
 ];
 
 // parseState reads the quota fields off the event ROOT, not a nested `usage`
@@ -151,7 +150,7 @@ async function deckFace(key, gap, pad) {
  * would be just as invisible here, so the row is monochrome tide instead.
  */
 async function agentMarks(size, gap) {
-  const names = ['claudecode', 'codex', 'opencode', 'openclaw'];
+  const names = ['claudecode', 'codex', 'opencode', 'openclaw', 'kiro', 'antigravity'];
   const marks = [];
   for (const n of names) {
     const raw = await readFile(resolve(brand, `${n}.svg`), 'utf8');
@@ -219,32 +218,71 @@ async function agentMarks(size, gap) {
 }
 
 // ------------------------------------------------------------ banner 02 (3:2)
-// A tight crop of the 4032x3024 closeup around the D200H alone. The wider desk
-// shot was rejected for this slot: it renders the D200H as a small dark strip
-// while an Elgato Stream Deck reads as the most legible device in frame, which
-// is not what belongs on Ulanzi's storefront.
+// The one asset that proves this is a real device doing real work — so it stays
+// a photograph. What changed for 1.0.4 is WHICH part of the photograph: the
+// published banner framed the whole face, and nine of the fourteen keys were
+// unassigned on the day of the shoot, so the storefront's hardware shot read as
+// a mostly-dark deck with visible lint on the empty keys. The lit top row is the
+// same photograph with nothing invented — five live session keys and the
+// device's own wordmark — so it is cropped to that band and set on the ink
+// canvas, which also leaves the type on a surface it can actually be read on.
+// Tone is corrected (the shoot was under warm room light at 01:26), never
+// composited: no key content here comes from a renderer.
 {
   const W = 1920;
   const H = 1280;
+  const bandW = 1768;
 
-  const text = svg(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-    <defs><linearGradient id="scrim" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="${INK_900}" stop-opacity="0.92"/>
-      <stop offset="0.30" stop-color="${INK_900}" stop-opacity="0.58"/>
-      <stop offset="0.58" stop-color="${INK_900}" stop-opacity="0"/>
-    </linearGradient></defs>
-    <rect width="${W}" height="${H}" fill="url(#scrim)"/>
-    <text x="110" y="1108" fill="${TIDE_50}" font-family="${FONT}" font-size="66" font-weight="700">On your desk, not in a tab</text>
-    <text x="114" y="1176" fill="${KELP_300}" font-family="${FONT}" font-size="33" font-weight="500">Session keys, agent creatures, and quota gauges on one deck</text>
+  const band = await sharp(resolve(media, 'd200h-hero.jpg'))
+    .extract({ left: 520, top: 400, width: 3060, height: 748 })
+    .resize(bandW, null)
+    // Lift contrast and colour rather than exposure: the shoot was under warm
+    // room light at 01:26, and a brightness lift on a dark, noisy frame raises
+    // the sensor grain with it — which is what made the deck body read grey.
+    .modulate({ brightness: 1.03, saturation: 1.14 })
+    .linear(1.2, -20)
+    .sharpen()
+    .png()
+    .toBuffer();
+  const bandH = (await sharp(band).metadata()).height;
+  const bx = Math.round((W - bandW) / 2);
+  const by = 452;
+
+  // Feather the cut edges so the band reads as a framed detail, not a torn crop.
+  const feather = svg(`<svg width="${bandW}" height="${bandH}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="fx" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="${INK_900}" stop-opacity="0.95"/>
+        <stop offset="0.06" stop-color="${INK_900}" stop-opacity="0"/>
+        <stop offset="0.94" stop-color="${INK_900}" stop-opacity="0"/>
+        <stop offset="1" stop-color="${INK_900}" stop-opacity="0.95"/>
+      </linearGradient>
+      <linearGradient id="fy" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="${INK_900}" stop-opacity="0.9"/>
+        <stop offset="0.14" stop-color="${INK_900}" stop-opacity="0"/>
+        <stop offset="0.86" stop-color="${INK_900}" stop-opacity="0"/>
+        <stop offset="1" stop-color="${INK_900}" stop-opacity="0.9"/>
+      </linearGradient>
+    </defs>
+    <rect width="${bandW}" height="${bandH}" fill="url(#fx)"/>
+    <rect width="${bandW}" height="${bandH}" fill="url(#fy)"/>
   </svg>`);
 
-  await sharp(resolve(media, 'd200h-hero.jpg'))
-    .extract({ left: 260, top: 420, width: 3600, height: 2400 })
-    .resize(W, H, { fit: 'cover', position: 'centre' })
-    .composite([{ input: text }])
+  const text = svg(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <text x="${W / 2}" y="196" fill="${TIDE_50}" font-family="${FONT}" font-size="86" font-weight="700" text-anchor="middle">On your desk, not in a tab</text>
+    <text x="${W / 2}" y="272" fill="${KELP_300}" font-family="${FONT}" font-size="37" font-weight="500" text-anchor="middle">A real D200H, mid-session — photographed, not mocked up</text>
+    <text x="${W / 2}" y="${by + bandH + 92}" fill="${TIDE_50}" font-family="${FONT}" font-size="32" opacity="0.78" text-anchor="middle">Each key names its project and shows what that agent is doing right now</text>
+    <text x="${W / 2}" y="${by + bandH + 168}" fill="${KELP_300}" font-family="${FONT}" font-size="28" font-weight="500" opacity="0.85" text-anchor="middle">Ulanzi Studio plugin · macOS &amp; Windows · connects to the AgentDeck daemon on your computer</text>
+  </svg>`);
+
+  await sharp(backdrop(W, H, 0.5, 0.46, 0.8))
+    .composite([
+      { input: await sharp(band).composite([{ input: feather }]).png().toBuffer(), left: bx, top: by },
+      { input: text },
+    ])
     .jpeg({ quality: 92, mozjpeg: true })
     .toFile(resolve(out, 'banner-02-1920x1280.jpg'));
-  console.log('banner-02 photo 3600x2400 -> 1920 (0.53x downscale)');
+  console.log(`banner-02 photo band 3060x800 -> ${bandW}x${bandH} (0.56x downscale), tone-corrected, no composite`);
 }
 
 // ------------------------------------------------------------ banner 03 (3:2)

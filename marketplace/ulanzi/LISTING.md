@@ -4,11 +4,101 @@ Submission target: **https://ugc.ulanzistudio.com** → `작품 업로드` (Uplo
 The original **1.0.0** entry #1064 was rejected/removed by Ulanzi support on
 2026-07-22. The corrected **1.0.1** form, ZIP, and media were submitted after
 the portal's main-file uploader began working later that day. AgentDeck now
-appears under `Works under review`, but its generated `/contentView/32` link
-displays an unrelated Chinese Profile work, `Douyin Live Studio` v1.0.0. The
-content-record mismatch was reported in the original support thread with the
-reproduction URL and AgentDeck UUID/category; wait for Ulanzi to confirm the
-review entry is linked correctly before treating the submission as healthy.
+appeared under `Works under review` with a generated `/contentView/32` link that
+displayed an unrelated Chinese Profile work, `Douyin Live Studio` v1.0.0 — a
+content-record mismatch reported in the original support thread with the
+reproduction URL and AgentDeck UUID/category. **Resolved:** the published record
+is `/contentView/1141` and resolves to AgentDeck.
+
+## 1.0.4 — the catch-up submission (2026-08-24)
+
+Prepared as a *Create review version* against the published 1.0.3, which keeps
+serving downloads throughout. What it carries, and why each item is in a
+storefront submission rather than only in a release:
+
+- **`Devices: ["D200H", "D200X"]`** — the D200X keypad, requested in issue #174.
+  Encoders stay unclaimed.
+- **Kiro, Kiro IDE and Antigravity marks**, plus the OpenClaw approval that can
+  actually be answered from the key. The published build predates all of it.
+- **de_DE / es_ES / pt_PT locale files** — the listing has always demanded seven
+  languages while the plugin shipped five, so German, Spanish and Portuguese
+  users read an English palette entry and an English setup panel.
+- **`zh_HK` corrected**: it still described a D200H-only plugin after the other
+  four were updated in one edit.
+- **Sub-category `Office` → `AI`**, and the seven-language Summary /
+  Detailed introduction restored — the live record holds one sentence in every
+  language, at 51 of 300 and 51 of 1000 characters in English.
+- **New media** from `scripts/generate-ulanzi-marketplace-assets.mjs`
+  (`marketplace/ulanzi/1.0.4/`): the deck face now spans all six agents on one
+  page with no MORE key, the marks row shows six, and the hardware banner is
+  cropped to the five *live* keys of the same photograph — the published one
+  framed the whole face on a day when nine of fourteen keys were unassigned.
+
+### Update note (portal field, one per submission)
+
+```
+1.0.4 adds the D200X. Its 14 LCD keys run the same session UI as the D200H — the layout sizes itself off the keys you actually placed — so both are now declared. The three rotary encoders are deliberately not claimed yet: they need their own action, and a plugin that half-supports a device is worse than one that supports fewer.
+
+Also in this build:
+• Kiro, Kiro IDE and Antigravity sessions now draw with their own marks
+• An OpenClaw permission prompt can be answered from the key, not just read
+• German, Spanish and Portuguese join the plugin's own localization (the palette entry, the setup panel and the H5 tutorial), and the Traditional Chinese description was corrected
+• Listing copy and media refreshed: the deck shown now spans all six supported agents
+
+Still a thin client: no bundled daemon, no USB HID access, no analytics. It needs the free AgentDeck daemon on the same computer — the Mac App Store app, or `npx @agentdeck/setup` on macOS and Windows.
+```
+
+## Published — 1.0.3 is live (measured 2026-08-24)
+
+The listing is public at **<https://ugc.ulanzistudio.com/contentView/1141>** and
+carried in the Plugins category browse page. Personal Center reads
+`Works under review: 0` / `Published works: 1`. Submitted 2026-08-07, so review
+ran 17 days; the reviewer's 2026-08-14 "live next week" held.
+
+**Updating is now a *new review version*, not an edit of the live record.** The
+portal was rebuilt between 2026-08-08 and 2026-08-24. The published card's pencil
+opens *Create review version*: "the published version stays unchanged and remains
+available until the new version is approved." So the old rule — never touch a
+record while it is in review — no longer applies to a published work: 1.0.3 keeps
+serving while 1.0.4 is reviewed. The **delete** (trash) control sits next to that
+pencil on the same card; there is no undo, and deleting is not how an update is
+made.
+
+The rebuilt form, field by field, because the portal is the only place these
+constraints are written down:
+
+| Section | Field | Constraint |
+|---|---|---|
+| 1. Upload assets | Main work file | compressed, ≤50 MB |
+| | Cover image | **1:1** |
+| | Banner 01 | required, **3:2** |
+| | Banner 02 / 03 | optional, 3:2 |
+| 2. Multilingual content | 中文 · English · German · Japanese · Korean · Portuguese · Spanish | submission writes **all seven**; *Copy English to current* seeds a tab |
+| | Name | 40 |
+| | Summary | **300** — card summary + search results |
+| | Detailed introduction | **1000** — renders as *Overview* on the detail page |
+| 3. Metadata | Category | Plugins |
+| | Category (sub) | currently **Office** |
+| | Version number / Unique ID / Additional link / Update note | update note 1000 |
+| 4. Compatibility | Devices | D200 · D200H · D200X · Dial |
+| | Systems | Windows · macOS (Apple Silicon) · macOS (Intel) |
+
+Two gaps in the live record, read from that form rather than inferred:
+
+- **Sub-category is `Office`.** The neighbouring AI-agent plugins — Ulanzi's own
+  first-party *Codex Micro* (`github.com/UlanziTechnology/OpenCodexMicro`) and
+  *Claude Code Usage* — are filed under **AI**.
+- **All seven `Summary` / `Detailed introduction` pairs hold one sentence.**
+  English measures **51 / 300** and **51 / 1000** characters ("Monitor and steer
+  AI coding agents from your D200H."), Chinese 23. The full seven-language copy
+  below was authored for the 1.0.0 form and is *not* what is published — the
+  detail page's Overview is that one line, where Codex Micro's runs to features,
+  environment, and installation steps. Restoring it costs no new writing.
+
+Version drift to settle before the next upload: the published record declares
+`D200, D200H` and ships the D200H-only manifest, while `plugin-ulanzi` in this
+repository is three commits past `ulanzi-v1.0.3` with `Devices: ["D200H",
+"D200X"]` at the **same version number**. The next submission is `1.0.4`.
 
 ## 1.0.3 — the setup tutorial lives in the panel, and it is live
 
@@ -215,19 +305,20 @@ trademark disclaimer. The only visible symptom was a counter reading exactly
 `이름` 40 · `요약` 1000 · `상세 소개` 1000 characters, per language.
 All seven language tabs are required — an empty tab blocks submission.
 
-## Metadata (as submitted)
+## Metadata (1.0.4 submission)
 
-- **유형 (Type)**: `插件` (plugin)
-- **버전 번호**: `1.0.0`
-- **카테고리**: `工具` — the five options are 直播 / 创作 / 灯光 / 办公 / 工具; there is no developer or monitoring category, so 工具 is the closest fit
-- **고유 ID**: `com.ulanzi.ulanzistudio.agentdeck`
-- **추가 링크**: `https://puritysb.github.io/AgentDeck/`
+- **Category**: `Plugins`
+- **Version number**: `1.0.4`
+- **Sub-category**: `AI` — changed from `Office`. The 1.0.0 form offered 直播 / 创作 / 灯光 / 办公 / 工具 with nothing closer than 工具, and that choice carried forward through every in-place update. The rebuilt portal has an `AI` bucket, which is where the neighbouring agent plugins (Ulanzi's own Codex Micro, Claude Code Usage) sit; a plugin whose entire subject is AI coding agents was filed away from the people looking for exactly that.
+- **Unique ID**: `com.ulanzi.ulanzistudio.agentdeck`
+- **Additional link**: `https://puritysb.github.io/AgentDeck/`
+- **Update note**: see below
 
-## Compatibility (as submitted)
+## Compatibility (1.0.4 submission)
 
-- **지원 언어**: all seven — 中文 / English / Deutsch / 日本語 / 한국어 / Português / Español. The field controls "프론트엔드 표시 범위와 필터 태그", i.e. which localized listings surface, so it tracks the copy below rather than the plugin's UI language (the plugin ships only `en.json`).
-- **지원 장치**: **D200H only.** The form pre-selects D200, D200H, D200X and Dial; `manifest.json` declares `Devices: ["D200H"]` and no code path handles the others, so the other three are deselected.
-- **지원 시스템**: Windows · macOS (Apple Silicon) · macOS (Intel). Verified against the shipped archive, which carries `resvgjs.darwin-arm64`, `darwin-x64`, `win32-x64`, `win32-arm64` and `win32-ia32` binaries. Note the manifest's own floor (mac 10.11 / Windows 10) is optimistic — the plugin would load but find no daemon; the real floor is the daemon's, macOS 15 / Windows 11.
+- **Supported languages**: all seven — 中文 / English / Deutsch / 日本語 / 한국어 / Português / Español. The field controls "프론트엔드 표시 범위와 필터 태그", i.e. which localized listings surface, so it tracks the copy below rather than the plugin's UI language (the plugin ships only `en.json`).
+- **Supported devices**: **D200H and D200X.** `manifest.json` declares `Devices: ["D200H", "D200X"]` — both present the same 14 LCD keys to Studio and the layout engine sizes itself off the keys the user placed, not off a model string. `Dial` stays deselected, and so do the D200X's three rotary encoders: they need their own action and UX (issue #174), and claiming a device the plugin half-supports is worse than claiming fewer. `D200` remains selected because the published record carries it and the D200H reports `DeviceType: "D200"`.
+- **Supported systems**: Windows · macOS (Apple Silicon) · macOS (Intel). Verified against the shipped archive, which carries `resvgjs.darwin-arm64`, `darwin-x64`, `win32-x64`, `win32-arm64` and `win32-ia32` binaries. Note the manifest's own floor (mac 10.11 / Windows 10) is optimistic — the plugin would load but find no daemon; the real floor is the daemon's, macOS 15 / Windows 11.
 
 ---
 
@@ -242,7 +333,7 @@ AgentDeck
 ### Summary
 
 ```
-Turn the D200H into a live control surface for AI coding agents. Session keys reflow by agent state — Claude Code, Codex, OpenCode, and OpenClaw activity, attention, prompt choices, modes, stop controls, and usage, all on your deck.
+Turn the D200H or D200X into a live control surface for AI coding agents. Session keys reflow by agent state — Claude Code, Codex, OpenCode, OpenClaw, Kiro, and Antigravity activity, attention, prompt choices, modes, stop controls, and usage, all on your deck.
 ```
 
 ### Description
@@ -250,10 +341,10 @@ Turn the D200H into a live control surface for AI coding agents. Session keys re
 ```
 Stop Chatting. Start Steering.
 
-AgentDeck brings your AI coding agents out of the terminal and onto the D200H. The plugin ships one dynamic action — fill your keys with it and each key reflows on its own as work happens.
+AgentDeck brings your AI coding agents out of the terminal and onto the D200H or D200X. The plugin ships one dynamic action — fill your keys with it and each key reflows on its own as work happens.
 
 Features
-• Live session keys for Claude Code, Codex, OpenCode, and OpenClaw
+• Live session keys for Claude Code, Codex, OpenCode, OpenClaw, Kiro, and Antigravity
 • Distinct attention state — see which agent is waiting on you
 • Prompt steering, mode toggle, and stop from the key
 • Token and quota gauges with reset countdowns
@@ -268,7 +359,7 @@ That is the whole setup.
 
 The plugin bundles no daemon, touches no USB HID, and collects no analytics.
 
-AgentDeck is an independent project, not affiliated with any third party mentioned. All trademarks belong to their owners.
+Independent project, not affiliated with any third party mentioned. Trademarks belong to their owners.
 ```
 
 ---
@@ -284,20 +375,20 @@ AgentDeck
 ### Summary
 
 ```
-D200H를 AI 코딩 에이전트 조종석으로. 키가 에이전트 상태에 따라 스스로 재배치됩니다 — Claude Code, Codex, OpenCode, OpenClaw의 진행 상태·응답 대기·프롬프트 선택·모드·중단·사용량을 데크 위에서 바로.
+D200H·D200X를 AI 코딩 에이전트 조종석으로. 키가 에이전트 상태에 따라 스스로 재배치됩니다 — Claude Code, Codex, OpenCode, OpenClaw, Kiro, Antigravity의 진행 상태·응답 대기·프롬프트 선택·모드·중단·사용량을 데크 위에서 바로.
 ```
 
 ### Description
 
 ```
-AgentDeck은 AI 코딩 에이전트를 터미널 밖 D200H 위로 꺼내 놓습니다.
+AgentDeck은 AI 코딩 에이전트를 터미널 밖 D200H·D200X 위로 꺼내 놓습니다.
 
 대화 말고 조종하세요.
 
 플러그인이 제공하는 동적 액션은 하나입니다. 키를 이걸로 채워 두면 작업이 진행되는 대로 각 키가 알아서 바뀝니다 — 실행 중인 세션, 답을 기다리는 에이전트, 고를 프롬프트 선택지, 모드 전환, 중단 버튼, 사용량 게이지.
 
 주요 기능
-• Claude Code, Codex, OpenCode, OpenClaw 실시간 세션 키
+• Claude Code, Codex, OpenCode, OpenClaw, Kiro, Antigravity 실시간 세션 키
 • 응답 대기 상태를 별도 표시 — 어떤 에이전트가 기다리는지 한눈에
 • 프롬프트 조종 — 키에서 바로 선택지 고르기
 • 포커스된 세션의 모드 전환 및 중단
@@ -329,20 +420,20 @@ AgentDeck
 ### Summary
 
 ```
-D200HをAIコーディングエージェントの操縦席に。キーはエージェントの状態に応じて自動で組み替わります — Claude Code、Codex、OpenCode、OpenClawの進行状況・応答待ち・プロンプト選択・モード・停止・使用量をデッキ上で。
+D200H・D200XをAIコーディングエージェントの操縦席に。キーはエージェントの状態に応じて自動で組み替わります — Claude Code、Codex、OpenCode、OpenClaw、Kiro、Antigravityの進行状況・応答待ち・プロンプト選択・モード・停止・使用量をデッキ上で。
 ```
 
 ### Description
 
 ```
-AgentDeckは、AIコーディングエージェントをターミナルの外、D200Hの上に引き出します。
+AgentDeckは、AIコーディングエージェントをターミナルの外、D200H・D200Xの上に引き出します。
 
 会話ではなく、操縦を。
 
 このプラグインが提供する動的アクションは1つだけです。キーをこれで埋めておけば、作業の進行に合わせて各キーが自動で切り替わります — 実行中のセッション、応答を待っているエージェント、選ぶべきプロンプトの選択肢、モード切替、停止ボタン、使用量ゲージ。
 
 主な機能
-• Claude Code、Codex、OpenCode、OpenClawのリアルタイムセッションキー
+• Claude Code、Codex、OpenCode、OpenClaw、Kiro、Antigravityのリアルタイムセッションキー
 • 応答待ち状態を個別に表示 — どのエージェントが待っているか一目で
 • プロンプト操作 — キーから直接選択肢を選ぶ
 • フォーカス中セッションのモード切替と中断
@@ -374,7 +465,7 @@ AgentDeck
 ### Summary
 
 ```
-把 D200H 变成 AI 编程助手的实时控制台。按键会随助手状态自动重排 —— Claude Code、Codex、OpenCode、OpenClaw 的运行状态、待回复提醒、提示选项、模式、停止和用量，全部呈现在你的 Deck 上。
+把 D200H、D200X 变成 AI 编程助手的实时控制台。按键会随助手状态自动重排 —— Claude Code、Codex、OpenCode、OpenClaw、Kiro、Antigravity 的运行状态、待回复提醒、提示选项、模式、停止和用量，全部呈现在你的 Deck 上。
 ```
 
 ### Description
@@ -382,10 +473,10 @@ AgentDeck
 ```
 别只是聊天，直接操控。
 
-AgentDeck 把 AI 编程助手从终端里搬到 D200H 上。插件只提供一个动态动作 —— 用它铺满按键，每个键都会随着工作进展自动切换。
+AgentDeck 把 AI 编程助手从终端里搬到 D200H、D200X 上。插件只提供一个动态动作 —— 用它铺满按键，每个键都会随着工作进展自动切换。
 
 主要功能
-• Claude Code、Codex、OpenCode、OpenClaw 的实时会话按键
+• Claude Code、Codex、OpenCode、OpenClaw、Kiro、Antigravity 的实时会话按键
 • 单独标示待回复状态 —— 一眼看出哪个助手在等你
 • 直接在按键上选择提示选项、切换模式、中断任务
 • 令牌与配额仪表，并显示重置倒计时
@@ -416,7 +507,7 @@ AgentDeck
 ### Summary
 
 ```
-Machen Sie das D200H zur Steuerzentrale für KI-Coding-Agents. Die Tasten ordnen sich je nach Agent-Status neu an — Aktivität, Wartezustände, Prompt-Optionen, Modi, Stopp und Verbrauch von Claude Code, Codex, OpenCode und OpenClaw, direkt auf Ihrem Deck.
+Machen Sie das D200H oder D200X zur Steuerzentrale für KI-Coding-Agents. Die Tasten ordnen sich je nach Agent-Status neu an — Aktivität, Wartezustände, Prompt-Optionen, Modi, Stopp und Verbrauch von Claude Code, Codex, OpenCode, OpenClaw, Kiro und Antigravity.
 ```
 
 ### Description
@@ -424,10 +515,10 @@ Machen Sie das D200H zur Steuerzentrale für KI-Coding-Agents. Die Tasten ordnen
 ```
 Schluss mit Chatten. Steuern Sie.
 
-AgentDeck bringt Ihre KI-Coding-Agents aus dem Terminal auf das D200H. Belegen Sie die Tasten mit der dynamischen Aktion; sie passen sich dem Arbeitsstatus automatisch an.
+AgentDeck bringt Ihre KI-Coding-Agents aus dem Terminal auf das D200H oder D200X. Belegen Sie die Tasten mit der dynamischen Aktion; sie passen sich dem Arbeitsstatus automatisch an.
 
 Funktionen
-• Live-Tasten für Claude Code, Codex, OpenCode und OpenClaw
+• Live-Tasten für Claude Code, Codex, OpenCode, OpenClaw, Kiro und Antigravity
 • Klarer Wartezustand für Agents, die Ihre Antwort brauchen
 • Prompt-Auswahl, Moduswechsel und Stopp auf der Taste
 • Token- und Kontingentanzeigen mit Countdown
@@ -442,7 +533,7 @@ Mehr ist nicht nötig.
 
 Das Plugin enthält keinen Daemon, greift nicht direkt auf USB HID zu und sammelt keine Analysedaten.
 
-AgentDeck ist ein unabhängiges Projekt ohne Verbindung zu den genannten Dritten. Marken gehören ihren Inhabern.
+Unabhängiges Projekt ohne Verbindung zu den genannten Dritten. Marken gehören ihren Inhabern.
 ```
 
 ---
@@ -458,7 +549,7 @@ AgentDeck
 ### Summary
 
 ```
-Transforme o D200H em um painel de controle ao vivo para agentes de programação com IA. As teclas se reorganizam conforme o estado do agente — atividade, espera por resposta, opções de prompt, modos, parada e uso do Claude Code, Codex, OpenCode e OpenClaw, tudo no seu deck.
+Transforme o D200H ou D200X em um painel de controle ao vivo para agentes de programação com IA. As teclas se reorganizam conforme o estado do agente — atividade, espera, opções de prompt, modos, parada e uso do Claude Code, Codex, OpenCode, OpenClaw, Kiro e Antigravity.
 ```
 
 ### Description
@@ -466,10 +557,10 @@ Transforme o D200H em um painel de controle ao vivo para agentes de programaçã
 ```
 Pare de conversar. Comece a pilotar.
 
-O AgentDeck leva seus agentes de programação com IA do terminal ao D200H. Preencha as teclas com a ação dinâmica; elas se adaptam automaticamente ao estado do trabalho.
+O AgentDeck leva seus agentes de programação com IA do terminal ao D200H ou D200X. Preencha as teclas com a ação dinâmica; elas se adaptam automaticamente ao estado do trabalho.
 
 Recursos
-• Teclas ao vivo para Claude Code, Codex, OpenCode e OpenClaw
+• Teclas ao vivo para Claude Code, Codex, OpenCode, OpenClaw, Kiro e Antigravity
 • Destaque para o agente que aguarda sua resposta
 • Escolha de prompt, modo e parada direto da tecla
 • Medidores de tokens e cota com contagem regressiva
@@ -484,7 +575,7 @@ O cliente leve precisa do daemon gratuito no mesmo computador. No macOS, use o a
 
 O plugin não inclui daemon, não acessa USB HID diretamente e não coleta dados de análise.
 
-O AgentDeck é um projeto independente, sem afiliação com terceiros mencionados. As marcas pertencem aos seus proprietários.
+Projeto independente, sem afiliação com terceiros mencionados. As marcas pertencem aos seus proprietários.
 ```
 
 ---
@@ -500,7 +591,7 @@ AgentDeck
 ### Summary
 
 ```
-Convierte el D200H en un panel de control en vivo para agentes de programación con IA. Las teclas se reorganizan según el estado del agente: actividad, espera de respuesta, opciones de prompt, modos, parada y uso de Claude Code, Codex, OpenCode y OpenClaw, todo en tu deck.
+Convierte el D200H o D200X en un panel de control en vivo para agentes de programación con IA. Las teclas se reorganizan según el estado del agente: actividad, espera, opciones de prompt, modos, parada y uso de Claude Code, Codex, OpenCode, OpenClaw, Kiro y Antigravity.
 ```
 
 ### Description
@@ -508,10 +599,10 @@ Convierte el D200H en un panel de control en vivo para agentes de programación 
 ```
 Deja de conversar. Empieza a pilotar.
 
-AgentDeck lleva tus agentes de programación con IA de la terminal al D200H. Llena las teclas con la acción dinámica y se adaptarán automáticamente al estado del trabajo.
+AgentDeck lleva tus agentes de programación con IA de la terminal al D200H o D200X. Llena las teclas con la acción dinámica y se adaptarán automáticamente al estado del trabajo.
 
 Funciones
-• Teclas en vivo para Claude Code, Codex, OpenCode y OpenClaw
+• Teclas en vivo para Claude Code, Codex, OpenCode, OpenClaw, Kiro y Antigravity
 • Estado claro para el agente que espera tu respuesta
 • Elección de prompt, modo y parada desde la tecla
 • Medidores de tokens y cuota con cuenta atrás
@@ -526,7 +617,7 @@ Eso es todo.
 
 El plugin no incluye daemon, no accede directamente a USB HID y no recopila datos de análisis.
 
-AgentDeck es un proyecto independiente, sin afiliación con los terceros mencionados. Las marcas pertenecen a sus propietarios.
+Proyecto independiente, sin afiliación con los terceros mencionados. Las marcas pertenecen a sus propietarios.
 ```
 
 ---
@@ -540,14 +631,34 @@ rasterise crisp at any size (DESIGN.md R7). That replaced the previous
 that also filled only 53% of the 1920 canvas, making it the soft one in the
 carousel.
 
+Current set: `marketplace/ulanzi/1.0.4/`, emitted by
+`node scripts/generate-ulanzi-marketplace-assets.mjs`.
+
 | File | Source |
 |---|---|
-| `cover-1024x1024.jpg` | Accurate D200H 5 + 5 + 3 + clock shell with `buildSessionDeck` @132px/key + `design/brand/agentdeck-icon.png` + the four upstream agent marks |
+| `cover-1024x1024.jpg` | Accurate D200H 5 + 5 + 3 + clock shell with `buildSessionDeck` @132px/key + `design/brand/agentdeck-icon.png` + the **six** upstream agent marks |
 | `banner-01-1920x1280.jpg` | Accurate D200H shell with `buildSessionDeck` @250px/key |
-| `banner-02-1920x1280.jpg` | `docs/media/d200h-hero.jpg` 4032×3024, framed on the whole deck (0.53× downscale) |
+| `banner-02-1920x1280.jpg` | `docs/media/d200h-hero.jpg` 4032×3024, cropped to the **live top row** (0.56× downscale), tone-corrected only |
 | `banner-03-1920x1280.jpg` | `docs/media/macos-dashboard.png` 2362×1430, timeline pane cropped (0.71× downscale) |
 
-Photographic imagery is deliberately D200H-only. Desk shots that also contain an
+**The deck fixture is part of the claim.** It now runs ten sessions spanning all
+six agents the plugin renders — one page, no MORE key — so the deck, the marks
+row under it, and the listing copy name the same set. At twelve sessions the two
+Kiro rows sorted onto page 2 (`agentTypeRank` puts Kiro last), which is correct
+product behaviour and a banner that silently omits two of the six agents.
+
+**banner-02 is a photograph and stays one.** No key content is composited in.
+The published 1.0.3 banner framed the entire face, and nine of the fourteen keys
+were unassigned when the shot was taken, so the one asset that proves this is a
+real device read as a mostly-dark deck with visible lint on the empty keys. The
+crop is to the five lit keys and the device wordmark — the same frame, nothing
+invented — with contrast and saturation corrected for the warm room light it was
+shot under. Brightness is deliberately NOT lifted: on a dark, noisy frame that
+raises the sensor grain with it and turns the deck body grey. A re-shoot with all
+fourteen keys assigned is the only thing that beats this crop; re-run the
+generator afterwards and the banner picks it up.
+
+Photographic imagery is deliberately Ulanzi-only. Desk shots that also contain an
 Elgato Stream Deck were tried and rejected — a competitor's device reading as the
 most legible thing in frame does not belong on Ulanzi's own storefront.
 

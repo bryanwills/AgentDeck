@@ -36,6 +36,45 @@ file's own rule forbids reconstructing its notes. The commit above is the
 record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
 bumped, superseded by 1.0.17, and never published, so it exists only in git.
 
+## 2026-08-24 — Ulanzi 1.0.4
+
+1.0.3 went live on the Ulanzi Marketplace on or before 2026-08-24 — the first
+AgentDeck build that store has ever published, seventeen days after it was
+submitted. It was also, by then, seventeen days behind the repository. This is
+the catch-up release, and the portal's rebuilt update flow is what makes it
+cheap: a new version is now a *review version* that leaves the published one
+serving downloads while it is checked, so there is no longer a reason to sit on
+plugin work during a review.
+
+### The D200X is claimed, once, and only for what it does
+
+`Devices` now declares `D200H` and `D200X`. Both present the same 14 LCD keys to
+Ulanzi Studio, and the layout engine is already sized off the keys the user
+placed rather than off a device model, so the keypad needed no new code — only
+an honest declaration. The D200X's three rotary encoders are deliberately NOT
+claimed: they need their own action and their own UX, and a plugin that lists a
+device it half-supports is worse than one that lists fewer devices. Requested in
+[#174](https://github.com/puritysb/AgentDeck/issues/174).
+
+### Three agents the published build could not draw
+
+The store's 1.0.3 predates Kiro entirely and predates the OpenClaw approval work.
+This build carries the current renderers, so Kiro CLI, Kiro IDE and Antigravity
+sessions arrive with their own marks instead of falling through to a neutral
+tile, and an OpenClaw permission prompt is both readable and answerable from the
+key — 1.0.3 rendered its options as an inert mirror of a prompt nobody could
+reach, because the live-answer path was gated on a session being *observed* and
+the Gateway row is not.
+
+### German, Spanish and Portuguese
+
+The plugin shipped five languages while the Marketplace listing has always
+required seven. `de_DE.json`, `es_ES.json` and `pt_PT.json` close that gap for
+the palette entry, the setup panel and the H5 tutorial, in the SDK's own file
+layout. Separately, `zh_HK.json` still described a D200H-only plugin after the
+other four were updated — a locale left behind by a one-line edit, which is the
+failure a per-file sweep exists to catch.
+
 ## 2026-08-23 — npm 1.0.24
 
 1.0.23 shipped the flashers. A hardware run over the fleet then found two
