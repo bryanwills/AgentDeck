@@ -30,8 +30,18 @@ echo "==> clean $OUT"
 rm -rf "$PKG/dist"
 mkdir -p "$OUT/plugin" "$OUT/resources"
 
-echo "==> bundle main service (esbuild, ESM, external resvg+ws)"
-npx --yes esbuild "$PKG/src/app.ts" \
+# The bundler is PINNED, and it is invoked by version on purpose. Bare
+# `npx --yes esbuild` asks npx to resolve a name, and npx answers from whatever
+# is nearest: locally it finds the root `node_modules/.bin/esbuild` that vite
+# happens to link, while a clean CI checkout has no such bin and npx fell
+# through to `sh -c esbuild` — "esbuild: not found", at tag time, on the one
+# step that produces the release artifact (ulanzi-v1.0.4, 2026-08-24). A version
+# spec makes npx install that exact build instead of resolving a name, so the
+# release archive is bundled by the same compiler locally and in CI. Keep this
+# in step with the esbuild version the workspace resolves.
+ESBUILD_VERSION="0.28.2"
+echo "==> bundle main service (esbuild@$ESBUILD_VERSION, ESM, external resvg+ws)"
+npx --yes "esbuild@$ESBUILD_VERSION" "$PKG/src/app.ts" \
   --bundle --platform=node --format=esm --target=node20 \
   --external:@resvg/resvg-js --external:ws \
   --outfile="$OUT/plugin/app.js" \
