@@ -131,6 +131,7 @@ import {
   readDaemonInfo,
   removeDaemonSession,
   getCandidateDataDirs,
+  getDataDir,
   getOwnTimelineFile,
 } from './session-registry.js';
 import { isForeignDaemon } from './daemon-takeover.js';
@@ -201,6 +202,7 @@ import { getLanIp, stripUnsafeText, cleanRawText, prepareMarkdownDetail, normali
 import { injectOpenClawSession, OPENCLAW_SESSION_ID } from './openclaw-session.js';
 import {
   buildCardFeed, buildGlance, applyOutboxDecisions, FeedPullTracker, formatFeedPull,
+  OutboxIdempotencyLedger,
   normalizeClientIp, parsePullTelemetry,
 } from './card-feed.js';
 import { threadModule } from './card-modules.js';
@@ -212,6 +214,19 @@ import {
 import { WeatherProvider, parseWeatherSettings } from './weather.js';
 import { CalendarProvider, parseCalendarSettings } from './calendar.js';
 import { renderGlanceFrame, GLANCE_FRAME_BOARDS } from './glance-frame.js';
+import {
+  isPortableReaderProfile,
+  negotiateSurface,
+  parseHttpSurfaceIdentity,
+  surfaceErrorBody,
+  surfaceAllowsEvent,
+  SurfaceProtocolError,
+  validateSurfaceOtaIdentity,
+  validateSurfaceQueryTuple,
+  usesPortableReaderProjection,
+  type SurfaceNegotiation,
+  type SurfaceOtaIdentity,
+} from './surface-protocol.js';
 import type { UsageEvent } from './types.js';
 import { resolveRelayedUsageEvent } from './relayed-usage.js';
 import { CARD_FEED_PATH, CARD_OUTBOX_PATH, GLANCE_FRAME_PATH, type CardFeedResponse, type SessionInfo, type OutboxPushRequest } from '@agentdeck/shared';
@@ -246,6 +261,11 @@ function exitProcessNow(code = 0): void {
 // leave ghosts in `agentdeck devices`.
 interface WifiEsp32Device {
   board: string;
+  productId?: string;
+  productName?: string;
+  surfaceProfile?: string;
+  surfaceProtocol?: number;
+  updateChannel?: string;
   version?: string;
   buildHash?: string;
   buildEpoch?: number;
@@ -278,6 +298,7 @@ const wifiEsp32Sockets = new Map<string, WebSocket>();
  *  single-path dedup kept it in the registry above. */
 const wsSelfBoard = new Map<WebSocket, string>();
 const wsSelfCaps = new Map<WebSocket, string[]>();
+const surfaceNegotiations = new Map<WebSocket, SurfaceNegotiation>();
 
 interface OtaWaiter {
   stage: string;
@@ -312,6 +333,7 @@ function listWifiEsp32Devices(): Array<WifiEsp32Device & { stale: boolean; seria
  *  other observable — a battery client with an empty outbox never identifies
  *  itself and never opens a socket. */
 const feedPulls = new FeedPullTracker();
+const outboxIdempotency = new OutboxIdempotencyLedger();
 
 /** Daemon-owned personal feed. It persists aggregate bandit state only — no
  *  card copy, session names, calendar titles or weather locations. */
@@ -325,7 +347,11 @@ const pocketReaderModules = pocketCardModules.filter((module) => module.id !== '
 /** Glance weather for the card-feed sleep dashboard. Config is read from
  *  settings.json per pull (cheap; honors edits without a restart); the
  *  provider caches the upstream fetch itself. */
-const glanceWeather = new WeatherProvider();
+const glanceWeather = new WeatherProvider(
+  fetch,
+  (message) => log(`[agentdeck] ${message}`),
+  join(getDataDir(), 'weather-cache-v1.json'),
+);
 
 /** Glance schedule (today's ICS events) — same config/caching contract as
  *  weather: settings.json `calendar: {ics}`, 30 min cache, never throws. */
@@ -341,15 +367,43 @@ const glanceCalendar = new CalendarProvider();
 // Persisted across daemon restarts; a device that already took an md5 skips it
 // (its applied-marker), so a stale staging is harmless.
 interface StagedFw { firmwarePath: string; md5: string; size: number; stagedAt: number; }
-const stagedFwByBoard = new Map<string, StagedFw>();
-const stagedFwStatePath = (): string => join(homedir(), '.agentdeck', 'staged-fw.json');
+interface PersistedStagedFwV2 {
+  version: 2;
+  identities: Array<StagedFw & SurfaceOtaIdentity>;
+  legacy: Record<string, StagedFw>;
+}
+const legacyStagedFwByBoard = new Map<string, StagedFw>();
+const stagedFwByIdentity = new Map<string, StagedFw & SurfaceOtaIdentity>();
+const stagedFwStatePath = (): string => join(getDataDir(), 'staged-fw.json');
+
+function otaIdentityKey(identity: SurfaceOtaIdentity): string {
+  return JSON.stringify([identity.productId, identity.board, identity.updateChannel]);
+}
 
 function loadStagedFw(): void {
   try {
-    const raw = JSON.parse(readFileSync(stagedFwStatePath(), 'utf8')) as Record<string, StagedFw>;
+    const raw = JSON.parse(readFileSync(stagedFwStatePath(), 'utf8')) as PersistedStagedFwV2 | Record<string, StagedFw>;
+    if ('version' in raw && raw.version === 2 && Array.isArray(raw.identities)) {
+      for (const candidate of raw.identities) {
+        try {
+          const identity = validateSurfaceOtaIdentity(candidate);
+          if (typeof candidate.firmwarePath === 'string' && typeof candidate.md5 === 'string' && typeof candidate.size === 'number') {
+            stagedFwByIdentity.set(otaIdentityKey(identity), { ...candidate, ...identity });
+          }
+        } catch { /* invalid/stale registration: do not widen its namespace */ }
+      }
+      for (const [board, s] of Object.entries(raw.legacy ?? {})) {
+        if (s && typeof s.firmwarePath === 'string' && typeof s.md5 === 'string' && typeof s.size === 'number') {
+          legacyStagedFwByBoard.set(board, s);
+        }
+      }
+      return;
+    }
+    // Version 1 was a board-keyed object. Preserve it only in the legacy
+    // namespace; product-aware requests must never inherit those images.
     for (const [board, s] of Object.entries(raw)) {
       if (s && typeof s.firmwarePath === 'string' && typeof s.md5 === 'string' && typeof s.size === 'number') {
-        stagedFwByBoard.set(board, s);
+        legacyStagedFwByBoard.set(board, s);
       }
     }
   } catch { /* no staging file — nothing staged */ }
@@ -358,7 +412,12 @@ loadStagedFw();
 
 function saveStagedFw(): void {
   try {
-    writeFileSync(stagedFwStatePath(), JSON.stringify(Object.fromEntries(stagedFwByBoard), null, 2));
+    const state: PersistedStagedFwV2 = {
+      version: 2,
+      identities: [...stagedFwByIdentity.values()],
+      legacy: Object.fromEntries(legacyStagedFwByBoard),
+    };
+    writeFileSync(stagedFwStatePath(), JSON.stringify(state, null, 2));
   } catch (err) {
     log(`[agentdeck] staged-fw persist failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -399,33 +458,55 @@ function resolveStagedFwBoard(target: string): string {
  *  image; a board that holds a live WS never asks, so its stage sits forever
  *  while the CLI says it is handled. It is daemon-lifetime state, so `false`
  *  means "not seen since this daemon started" — not "cannot pull". */
-function stageEsp32Fw(target: string, firmwarePath: string): { board: string; bytes: number; md5: string; pullSeen: boolean } {
+function stageEsp32Fw(
+  target: string,
+  firmwarePath: string,
+  offeredIdentity?: SurfaceOtaIdentity,
+): { board: string; bytes: number; md5: string; pullSeen: boolean; productId?: string; updateChannel?: string } {
   const board = resolveStagedFwBoard(target);
+  const identity = offeredIdentity ? validateSurfaceOtaIdentity(offeredIdentity) : undefined;
+  if (identity && identity.board !== board) {
+    throw new SurfaceProtocolError(409, 'surface_stage_target_mismatch', 'Stage target does not match OTA identity board');
+  }
   const firmware = readFileSync(firmwarePath);
   const md5 = createHash('md5').update(firmware).digest('hex');
-  stagedFwByBoard.set(board, { firmwarePath, md5, size: firmware.length, stagedAt: Date.now() });
+  const staged = { firmwarePath, md5, size: firmware.length, stagedAt: Date.now() };
+  if (identity) stagedFwByIdentity.set(otaIdentityKey(identity), { ...staged, ...identity });
+  else legacyStagedFwByBoard.set(board, staged);
   saveStagedFw();
-  const pullSeen = feedPulls.clients().some((c) => c.board === board);
-  log(`[agentdeck] staged firmware for ${board}: ${firmware.length} bytes md5=${md5} — ${
+  const pullSeen = feedPulls.clients().some((c) => c.board === board
+    && (!identity || c.productId === identity.productId));
+  const namespace = identity ? `${identity.productId}/${board}/${identity.updateChannel}` : `legacy/${board}`;
+  log(`[agentdeck] staged firmware for ${namespace}: ${firmware.length} bytes md5=${md5} — ${
     pullSeen ? 'installs on its next feed pull' : 'NO feed pull seen from this board since daemon start'}`);
-  return { board, bytes: firmware.length, md5, pullSeen };
+  return { board, bytes: firmware.length, md5, pullSeen,
+    ...(identity ? { productId: identity.productId, updateChannel: identity.updateChannel } : {}) };
 }
 
 /** The staged advert for a feed response, re-validated against the file on
  *  disk so a rebuilt-in-place binary never adverts a stale md5. */
-function stagedFwAdvert(board: string | undefined): { size: number; md5: string } | undefined {
+function stagedFwAdvert(
+  board: string | undefined,
+  identity?: SurfaceOtaIdentity,
+): ({ size: number; md5: string } & Partial<SurfaceOtaIdentity>) | undefined {
   if (!board) return undefined;
-  const staged = stagedFwByBoard.get(board);
+  const validatedIdentity = identity ? validateSurfaceOtaIdentity(identity) : undefined;
+  const staged = validatedIdentity
+    ? stagedFwByIdentity.get(otaIdentityKey(validatedIdentity))
+    : legacyStagedFwByBoard.get(board);
   if (!staged) return undefined;
   try {
     const firmware = readFileSync(staged.firmwarePath);
     const md5 = createHash('md5').update(firmware).digest('hex');
     if (md5 !== staged.md5 || firmware.length !== staged.size) {
-      stagedFwByBoard.set(board, { ...staged, md5, size: firmware.length });
+      if (validatedIdentity) stagedFwByIdentity.set(otaIdentityKey(validatedIdentity), {
+        ...staged, ...validatedIdentity, md5, size: firmware.length,
+      });
+      else legacyStagedFwByBoard.set(board, { ...staged, md5, size: firmware.length });
       saveStagedFw();
-      return { size: firmware.length, md5 };
+      return { size: firmware.length, md5, ...(validatedIdentity ?? {}) };
     }
-    return { size: staged.size, md5: staged.md5 };
+    return { size: staged.size, md5: staged.md5, ...(validatedIdentity ?? {}) };
   } catch {
     return undefined;  // file gone — advert nothing rather than a dead download
   }
@@ -499,6 +580,11 @@ function registerWifiEsp32(d: Record<string, unknown>, ws: WebSocket): void {
   const resetReasonCode = typeof d.resetReasonCode === 'number' ? d.resetReasonCode : undefined;
   wifiEsp32Devices.set(key, {
     board: typeof d.board === 'string' ? d.board : 'unknown',
+    productId: typeof d.productId === 'string' ? d.productId : undefined,
+    productName: typeof d.productName === 'string' ? d.productName : undefined,
+    surfaceProfile: typeof d.surfaceProfile === 'string' ? d.surfaceProfile : undefined,
+    surfaceProtocol: typeof d.surfaceProtocol === 'number' ? d.surfaceProtocol : undefined,
+    updateChannel: typeof d.updateChannel === 'string' ? d.updateChannel : undefined,
     version: typeof d.version === 'string' ? d.version : undefined,
     buildHash: typeof d.buildHash === 'string' ? d.buildHash : undefined,
     buildEpoch: typeof d.buildEpoch === 'number' ? d.buildEpoch : undefined,
@@ -688,7 +774,8 @@ export const __wifiOtaTestApi = {
   stageEsp32Fw,
   stagedFwAdvert,
   feedPulls,
-  clearStagedFwForTest: (): void => { stagedFwByBoard.clear(); },
+  getStagedFw: (identity: SurfaceOtaIdentity): StagedFw | undefined => stagedFwByIdentity.get(otaIdentityKey(identity)),
+  clearStagedFwForTest: (): void => { legacyStagedFwByBoard.clear(); stagedFwByIdentity.clear(); },
 };
 
 async function performWifiEsp32Ota(core: BridgeCore, target: string, firmwarePath: string): Promise<Record<string, unknown>> {
@@ -1906,17 +1993,32 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           throw new Error('target and firmwarePath are required');
         }
         // Pull-OTA staging: remember the build; the board installs it on its
-        // next feed pull (no live WS needed). See stagedFwByBoard.
+        // next feed pull (no live WS needed). Product-aware stages live in an
+        // exact productId + board + updateChannel namespace.
         if (body.stage === true) {
-          return { ok: true, staged: true, ...stageEsp32Fw(target, firmwarePath) };
+          const tupleValues = [body.productId, body.board, body.updateChannel];
+          const tuplePresent = tupleValues.filter((value) => typeof value === 'string' && value.length > 0).length;
+          if (tuplePresent !== 0 && tuplePresent !== 3) {
+            throw new SurfaceProtocolError(400, 'surface_stage_identity_incomplete', 'productId, board, and updateChannel are required together');
+          }
+          if (tuplePresent === 0 && (target === 'xteink_x3' || target === 'xteink_x4')) {
+            throw new SurfaceProtocolError(400, 'surface_stage_identity_required', 'XTeink pull OTA requires productId, board, and updateChannel');
+          }
+          const identity = tuplePresent === 3 ? {
+            productId: String(body.productId), board: String(body.board), updateChannel: String(body.updateChannel),
+          } : undefined;
+          return { ok: true, staged: true, ...stageEsp32Fw(target, firmwarePath, identity) };
         }
         return performWifiEsp32Ota(core, target, firmwarePath);
       })().then((result) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       }).catch((err) => {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        const status = err instanceof SurfaceProtocolError ? err.status : 500;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(err instanceof SurfaceProtocolError
+          ? { ok: false, ...surfaceErrorBody(err) }
+          : { ok: false, error: err instanceof Error ? err.message : String(err) }));
       });
       return;
     }
@@ -1933,11 +2035,38 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           return;
         }
       }
-      const board = parsedUrl.searchParams.get('board') ?? '';
-      const staged = stagedFwByBoard.get(board);
+      let surfaceIdentity;
+      try {
+        surfaceIdentity = parseHttpSurfaceIdentity(req.headers, 'ota.feed');
+        if (surfaceIdentity) validateSurfaceQueryTuple(surfaceIdentity, parsedUrl.searchParams);
+      } catch (err) {
+        if (err instanceof SurfaceProtocolError) {
+          res.writeHead(err.status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(surfaceErrorBody(err)));
+          return;
+        }
+        throw err;
+      }
+      const board = surfaceIdentity?.board ?? parsedUrl.searchParams.get('board') ?? '';
+      const hasProductQuery = parsedUrl.searchParams.has('productId') || parsedUrl.searchParams.has('updateChannel');
+      if (!surfaceIdentity && hasProductQuery) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'surface_identity_required', message: 'Product-aware OTA requires all Surface identity headers' }));
+        return;
+      }
+      const otaIdentity = surfaceIdentity ? {
+        productId: surfaceIdentity.productId,
+        board: surfaceIdentity.board,
+        updateChannel: surfaceIdentity.updateChannel,
+      } : undefined;
+      const staged = otaIdentity
+        ? stagedFwByIdentity.get(otaIdentityKey(otaIdentity))
+        : legacyStagedFwByBoard.get(board);
       if (!staged) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: `nothing staged for board "${board}"` }));
+        res.end(JSON.stringify({ error: 'firmware_not_staged', message: otaIdentity
+          ? `Nothing staged for ${otaIdentity.productId}/${board}/${otaIdentity.updateChannel}`
+          : `Nothing staged for legacy board "${board}"` }));
         return;
       }
       try {
@@ -1987,8 +2116,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           return;
         }
       }
+      let surfaceIdentity;
+      try {
+        surfaceIdentity = parseHttpSurfaceIdentity(req.headers, 'glance.read');
+        if (surfaceIdentity) validateSurfaceQueryTuple(surfaceIdentity, parsedUrl.searchParams);
+      } catch (err) {
+        if (err instanceof SurfaceProtocolError) {
+          res.writeHead(err.status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(surfaceErrorBody(err)));
+          return;
+        }
+        throw err;
+      }
       (async () => {
-        const board = parsedUrl.searchParams.get('board') ?? 'xteink_x3';
+        const board = surfaceIdentity?.board ?? parsedUrl.searchParams.get('board') ?? 'xteink_x3';
         const preset = GLANCE_FRAME_BOARDS[board];
         const w = Number(parsedUrl.searchParams.get('w'));
         const h = Number(parsedUrl.searchParams.get('h'));
@@ -2042,6 +2183,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           return;
         }
       }
+      let surfaceIdentity;
+      try {
+        surfaceIdentity = parseHttpSurfaceIdentity(req.headers,
+          req.method === 'GET' ? 'feed.pull' : 'outbox.push');
+        if (surfaceIdentity) validateSurfaceQueryTuple(surfaceIdentity, parsedUrl.searchParams);
+      } catch (err) {
+        if (err instanceof SurfaceProtocolError) {
+          res.writeHead(err.status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(surfaceErrorBody(err)));
+          return;
+        }
+        throw err;
+      }
       (async () => {
         if (req.method === 'GET') {
           const sessions = await core.buildSessionsSnapshot();
@@ -2057,24 +2211,30 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             events: await glanceCalendar.get(parseCalendarSettings(settings)),
           });
           const now = Date.now();
-          const pocketReader = parsedUrl.searchParams.get('surface') === 'pocket-reader';
+          const pocketReader = usesPortableReaderProjection(surfaceIdentity, parsedUrl.searchParams);
           const feed = buildCardFeed(sessions as unknown as SessionInfo[], now,
             pocketReader ? pocketReaderModules : pocketCardModules, {
             glance,
             echoSig: parsedUrl.searchParams.get('sig') ?? undefined,
             includeSessions: !pocketReader,
-          }) as CardFeedResponse & { fw?: { size: number; md5: string } };
+          }) as CardFeedResponse & { fw?: { size: number; md5: string } & Partial<SurfaceOtaIdentity> };
           // Pull-OTA advert: rides full AND `unchanged` responses, so a
           // sleeping board learns about a staged build on any pull. Board
           // identity from the query (newer firmware) or the IP memory.
-          const pullBoard = parsedUrl.searchParams.get('board') ?? boardForClientIp(ip);
+          const pullBoard = surfaceIdentity?.board ?? parsedUrl.searchParams.get('board') ?? boardForClientIp(ip);
           if (!feed.unchanged) pocketAutonomy.observeDelivery(feed.cards, now, pullBoard ?? undefined);
-          const fwAdvert = stagedFwAdvert(pullBoard ?? undefined);
+          const otaIdentity = surfaceIdentity ? {
+            productId: surfaceIdentity.productId,
+            board: surfaceIdentity.board,
+            updateChannel: surfaceIdentity.updateChannel,
+          } : undefined;
+          const fwAdvert = stagedFwAdvert(pullBoard ?? undefined, otaIdentity);
           if (fwAdvert) feed.fw = fwAdvert;
           // A sleeping client's whole visit is this one request: no body, no
           // board id, nothing pushed. Record it, because the gap between two
           // pulls is the only evidence that the timer wake fired at all.
-          feedPulls.noteBoard(ip, boardForClientIp(ip));
+          feedPulls.noteBoard(ip, pullBoard);
+          if (surfaceIdentity) feedPulls.noteIdentity(ip, surfaceIdentity);
           log(`[agentdeck] ${formatFeedPull(feedPulls.record(ip, {
             cards: feed.cards.length,
             nextPullSec: feed.nextPullSec,
@@ -2085,15 +2245,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         }
         const body = await readJsonBody(req);
         const board = typeof body.board === 'string' ? body.board : 'unknown';
+        if (surfaceIdentity && board !== surfaceIdentity.board) {
+          throw new SurfaceProtocolError(409, 'surface_outbox_board_mismatch', 'Outbox board does not match Surface identity');
+        }
         // An outbox push is the one request that names the board — bind it to
         // the IP so the (anonymous) feed pulls that follow are attributable.
         if (board !== 'unknown') feedPulls.noteBoard(ip, board);
+        if (surfaceIdentity) feedPulls.noteIdentity(ip, surfaceIdentity);
         const sessions = await core.buildSessionsSnapshot();
         const result = applyOutboxDecisions(body as unknown as OutboxPushRequest, {
           sessions: sessions as unknown as SessionInfo[],
           isPendingRequest,
           dispatch: (cmd) => handleDeviceCommand(cmd as unknown as PluginCommand),
           modules: pocketCardModules,
+          idempotency: outboxIdempotency,
         });
         const applied = result.results.filter((r) => r.status === 'applied').length;
         if (result.results.length > 0) {
@@ -2104,8 +2269,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
         res.end(JSON.stringify(payload));
       }).catch((err) => {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        const status = err instanceof SurfaceProtocolError ? err.status : 500;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(err instanceof SurfaceProtocolError
+          ? surfaceErrorBody(err)
+          : { error: err instanceof Error ? err.message : String(err) }));
       });
       return;
     }
@@ -3192,6 +3360,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     'device_info_request',
   ]);
   core.wsServer.setEventTransformer((event, client) => {
+    const surface = surfaceNegotiations.get(client);
+    if (surface && isPortableReaderProfile(surface.profile)) {
+      // portable-reader/v1 is pull-first. A negotiated socket gets only its
+      // acknowledgement and bounded liveness/device probes; it never inherits
+      // the daemon's private dashboard state burst or command plane.
+      if (!surfaceAllowsEvent(surface.profile, event.type)) return null;
+      return event;
+    }
     if (!core.wsServer.isEsp32Client(client)) return event;
     if (!esp32WifiEvents.has(event.type)) return null;
     // Single-path guard: only the duplicated *display* payloads are deduped.
@@ -4233,6 +4409,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // ===== Commands from WS clients =====
   // ===== Internal WS: session push channel =====
   core.wsServer.onRawMessage((msg, sender) => {
+    if (msg.type === 'client_register' && (msg as { surface?: unknown }).surface !== undefined) {
+      try {
+        const negotiation = negotiateSurface((msg as { surface: Record<string, unknown> }).surface);
+        surfaceNegotiations.set(sender, negotiation);
+        core.wsServer.sendTo(sender, negotiation.welcome as unknown as BridgeEvent);
+        debug('daemon', `Surface negotiated ${negotiation.profile} client=${negotiation.clientId} product=${negotiation.productId}`);
+      } catch (err) {
+        if (err instanceof SurfaceProtocolError) {
+          try { sender.send(JSON.stringify({ type: 'surface_error', ...surfaceErrorBody(err) })); } catch { /* gone */ }
+          try { sender.close(1008, err.code.slice(0, 120)); } catch { /* gone */ }
+          return true;
+        }
+        throw err;
+      }
+    }
     // WiFi ESP32 boards announce device_info over WS on connect. Capture the
     // sender here so OTA can address the exact socket instead of broadcasting.
     if (msg.type === 'device_info') {
@@ -5593,21 +5784,34 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
 
   // ===== Client connect =====
   core.wsServer.onClientConnect((ws) => {
-    const gwAlive = gatewayAdapter?.isAlive() ?? false;
-    core.sendInitialState(ws, {
-      agentType: gwAlive ? 'openclaw' : 'daemon' as any,
-      agentCapabilities: gwAlive ? OPENCLAW_CAPABILITIES : undefined,
-      isAlive: true,  // WS client IS connected to daemon — gateway status conveyed via state_update
-    });
+    // The WS class invokes this before installing its message listener. Give a
+    // Surface client one short turn to send client_register; legacy clients
+    // still receive the exact same initial payload, only 75 ms later.
+    const initialTimer = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      const surface = surfaceNegotiations.get(ws);
+      const gwAlive = gatewayAdapter?.isAlive() ?? false;
+      if (surface && isPortableReaderProfile(surface.profile)) {
+        core.wsServer.sendTo(ws, { type: 'connection', status: 'connected' });
+        return;
+      }
+      core.sendInitialState(ws, {
+        agentType: gwAlive ? 'openclaw' : 'daemon' as any,
+        agentCapabilities: gwAlive ? OPENCLAW_CAPABILITIES : undefined,
+        isAlive: true,
+      });
 
-    // Fetch usage on connect if stale
-    const cacheAge = Date.now() - core.lastApiFetchTime;
-    if (!core.cachedApiUsage || (core.lastApiFetchTime > 0 && cacheAge > 5 * 60 * 1000)) {
-      fetchUsageRelayed(port).then((result) => core.applyUsageResult(result));
-    }
+      // Fetch usage on connect if stale
+      const cacheAge = Date.now() - core.lastApiFetchTime;
+      if (!core.cachedApiUsage || (core.lastApiFetchTime > 0 && cacheAge > 5 * 60 * 1000)) {
+        fetchUsageRelayed(port).then((result) => core.applyUsageResult(result));
+      }
+    }, 75);
+    initialTimer.unref?.();
   });
 
   core.wsServer.onClientDisconnect((ws) => {
+    surfaceNegotiations.delete(ws);
     unregisterWifiEsp32Socket(ws);
   });
 

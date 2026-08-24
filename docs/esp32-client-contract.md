@@ -21,13 +21,20 @@ that a board firmware implements; the machine-readable source of truth is
 implementation is [`esp32/src/net/protocol.cpp`](../esp32/src/net/protocol.cpp).
 
 **Who this is for.** First-party `esp32/` boards already implement the full contract. This
-doc exists so a *third-party or forked* firmware — today the **XTeink X3/X4** (an external
-CrossPoint Reader fork, `crosspoint-agentdeck`; see
+doc exists so a third-party firmware — today the independent **Pocket Daily Reader**
+for **XTeink X3/X4** (canonical repository `pocket-daily-reader`; see
 [hardware-compatibility.md](hardware-compatibility.md) footnote ⁷) — can port a minimal,
-correct client without reading the whole 39KB reference parser. The X3/X4 fork's `src/agentdeck/`
+correct client without reading the whole 39KB reference parser. Pocket Daily's `src/agentdeck/`
 is explicitly a *"TRIMMED port of AgentDeck esp32/src/net/protocol"*; this is the contract
 it ports **from**. When the events or `device_info` fields below change, that port must be
 re-synced — see [esp32.md § Downstream client port sync](esp32.md#downstream-client-port-sync).
+
+For external product governance, this constrained implementation maps to the
+[`display-only/v1`](surface-protocol.md#display-onlyv1) and
+[`portable-reader/v1`](surface-protocol.md#portable-readerv1) profiles of AgentDeck
+Surface Protocol v1. In particular, Pocket Daily Reader is an independent product:
+`productId` names Pocket, `board` names XTeink hardware, and OTA routing must also
+match its `updateChannel`. The board string alone is not product ownership.
 
 There is **no C/C++ codegen** for this contract. `pnpm generate-protocol` emits Swift and
 Kotlin only; quicktype's C++ output (exceptions, `std::string`, nlohmann/json) is unusable
@@ -127,7 +134,7 @@ A client with buttons must derive controls from the wire payload, never merely f
 
 - First-party boards: [`esp32/src/net/protocol.cpp`](../esp32/src/net/protocol.cpp) (full
   parser + `sendDeviceInfo` + OTA).
-- X3/X4 port: `crosspoint-agentdeck` `src/agentdeck/{ws_client,protocol,mdns_discovery,udp_discovery,agent_state,agent_commands}.*`.
+- X3/X4 port: Pocket Daily Reader `src/agentdeck/{ws_client,protocol,mdns_discovery,udp_discovery,agent_state,agent_commands}.*`.
   It emits `client_register` plus `device_info` on connect; `display_state`/`set_orientation`
   remain optional accept-and-ignore messages for this reader activity.
 - Change discipline: edits to `DISPLAY_FORWARDED_EVENTS`/`SERIAL_FORWARDED_EVENTS` in
@@ -140,10 +147,17 @@ A client with buttons must derive controls from the wire payload, never merely f
 
 The HTTP counterpart to the WS live mode, for clients that deep-sleep between
 syncs (XTeink X3/X4 on battery). Types: `shared/src/protocol.ts` § Card Feed
-Pull Sync; server: `bridge/src/card-feed.ts` + the daemon routes (Node daemon
-only today — the Swift in-process daemon does not serve these routes yet).
+Pull Sync; server: `bridge/src/card-feed.ts` + the daemon routes. The Node daemon
+implements the full portable runtime. The Swift in-process daemon validates Surface
+identity and negotiates only its weather-only Feed subset (`feed.pull`,
+`feed.conditional`, `glance.read`); it does not grant Outbox, Glance Frame pixels,
+full-tuple pull OTA, telemetry, or Inbox and is not fully portable-reader conformant.
 Always-powered clients keep using WS; a dual-mode client uses WS while docked
 and pull while on battery.
+
+The stable external contract for this subset is `portable-reader/v1`. The details
+below remain the constrained C/C++ mapping and compatibility history for the current
+Card Feed implementation.
 
 - **`GET /feed`** (daemon port 9120) → `CardFeedResponse`: one `FeedCard` per
   session (`cardId: "session:<id>"`, body = the same `SessionInfo` shape as
@@ -151,7 +165,8 @@ and pull while on battery.
   RTCs), and `nextPullSec` — the daemon's suggested sleep interval (3600 idle /
   900 when any session is mid-turn or awaiting). Devices may clamp but should
   not poll faster on battery.
-- **Pocket-reader projection:** `GET /feed?surface=pocket-reader` omits live
+- **Pocket-reader projection:** a valid eight-header `portable-reader/v1` request,
+  or legacy `GET /feed?surface=pocket-reader`, omits live
   session rows and returns only daemon-authored portable modules. Omitting the
   parameter preserves the legacy feed for other clients.
 - **Per-card `actionClass`** decides offline behaviour: `live` (permission
@@ -198,8 +213,21 @@ and pull while on battery.
   (`HH:MM`), never relative ages — the frame persists on an unpowered panel and
   only absolute times stay true without a repaint. Types:
   `shared/src/protocol.ts` § Glance; producers: `buildGlance` in
-  `bridge/src/card-feed.ts` + `bridge/src/weather.ts` (Open-Meteo, 30 min
-  cache, bounded fetch, stale-serve up to 3 h).
+  `bridge/src/card-feed.ts` + `bridge/src/weather.ts` (MET Norway by default,
+  30 min/upstream-directed cache, bounded fetch and persisted fallback).
+- **Seven-day weather cache and cues (2026-08-24)**: `glance.weather` may also
+  carry provider attribution, `issuedAt`/`validUntil`, at most seven `days` and
+  eight absolute-time `cues`. Persist them with the deck snapshot. Schedule a
+  cue only from a trusted `serverTime`-anchored clock, deduplicate by
+  `(id,revision)`, remove missing cues on a full replacement, and never display
+  or notify after `expiresAt`; a `notifyAt` already in the past at ingest is
+  missed, not replayed. After `validUntil`, keep the bytes only for
+  diagnostics; do not present them as forecast. `probability` is optional;
+  MET Norway may provide `amountMm` instead. A no-browser panel exposes the
+  cached attribution URL through an About QR/text view; optional provider mark
+  URLs are for capable color clients and need not be downloaded by constrained
+  firmware. Legacy firmware ignores these optional fields, so the extension is
+  additive.
 - **Glance events (today's schedule, M9 stage 2, 2026-08-04)**: `glance` may
   additionally carry `events` — today's *remaining* schedule, ≤3 entries,
   all-day first then by start time: `{startHm?, endHm?, title}` where a
@@ -220,20 +248,24 @@ and pull while on battery.
   pull log line and `agentdeck devices` › `Card feed`. Newer firmware also
   appends `board=<id>` so the daemon can target board-specific adverts (Pull
   OTA below) without relying on its IP→board memory.
-- **Pull OTA (feed-carried firmware, 2026-08-04)**: WS OTA needs a live
+- **Pull OTA (feed-carried firmware, updated 2026-08-24)**: WS OTA needs a live
   socket, which a battery client on the pull cadence never holds. Instead the
-  host stages a build — `agentdeck esp32-ota <board> --firmware <bin>
-  --stage` — and every `GET /feed` response (full AND `unchanged`) carries
-  `fw: {size, md5}` for that board. On its next pull the device: checks the
+  host stages a user-supplied build with `--manifest <agentdeck-surface.json>`
+  or explicit `--product-id <id> --update-channel <channel>`. Every Surface
+  `GET /feed` response (full AND `unchanged`) carries
+  `fw: {productId, board, updateChannel, size, md5}` for that exact tuple. On
+  its next pull the device: checks the
   md5 against its applied-marker (`/.crosspoint/agentdeck-fw-applied.txt` —
   written *before* flashing so a bad image can't re-download every pull),
-  guards battery ≥30% and the OTA slot size, downloads `GET
-  /esp32/fw?board=<id>&token=<t>` to the shared SD OTA cache, validates
+  guards battery ≥30% and the OTA slot size, downloads `GET /esp32/fw` with
+  the same tuple in query + Surface headers to the shared SD OTA cache, validates
   (whole-file MD5 + bootloader-mirror structural check), and flashes +
   restarts on that same wake. Staging persists across daemon restarts
   (`~/.agentdeck/staged-fw.json`); re-staging a rebuilt binary refreshes the
-  md5. Device: `src/agentdeck/ota_pull.*` (crosspoint-agentdeck fork); daemon:
-  `stagedFwByBoard` in `bridge/src/daemon-server.ts`.
+  md5. Product-aware requests never consult board-only stages; X3/X4 CLI staging
+  without a full tuple is refused. Existing board-only state is retained only for
+  headerless legacy AgentDeck requests. Device: Pocket Daily `src/agentdeck/ota_pull.*`;
+  daemon: the versioned full-tuple staging store in `bridge/src/daemon-server.ts`.
 - **Glance Frame (M8, 2026-07-31)**: `GET /glance-frame?board=<id>` returns
   the daemon-**rendered** glance as packed 1bpp framebuffer rows (MSB-first,
   bit 1 = white) with `X-Frame-Width`/`X-Frame-Height`/`X-Frame-Sig` headers —
@@ -296,8 +328,9 @@ carries its own body in `FeedCard.module` (`ModuleCard`) instead of
 ### Autonomous Pocket (Node daemon)
 
 `AutonomousPocketEngine` is the initial authoring and learning loop. It runs in
-the Node daemon only (the Swift in-process daemon still does not serve Card Feed
-routes), and is injected into the feed builder rather than added to the pure
+the Node daemon only. The Swift in-process daemon's Card Feed route is a
+weather-only bounded subset and never claims to author autonomous Pocket cards.
+The engine is injected into the Node feed builder rather than added to the pure
 default module list.
 
 - **Inputs are already-resolved context.** It considers the live session roster

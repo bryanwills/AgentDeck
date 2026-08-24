@@ -24,11 +24,242 @@
 //                       SICK crayfish + error row in topology.
 
 import Foundation
+import CryptoKit
 import IOKit
 import IOKit.ps
 import Network
 
 private let kIOMessageSystemHasPoweredOn: UInt32 = 0xe0000300
+
+private struct SwiftWeatherConfig {
+    let latitude: Double
+    let longitude: Double
+    let place: String?
+    let timeZone: String
+}
+
+
+private struct SwiftWeatherDayAccumulator {
+    var temperatures: [Double] = []
+    var precipitationMm: Double = 0
+    var symbol = "fair_day"
+}
+
+/// Open-data producer for portable readers. Apple Weather stays inside the
+/// Apple app; a seven-day redistributable/offline feed uses MET Norway under
+/// its own attribution and cache contract.
+@DaemonActor
+private final class SwiftPortableMetWeatherProvider {
+    private let cacheURL = AgentDeckPaths.baseDirectory.appendingPathComponent("portable-weather-cache-v1.json")
+    private var cached: [String: Any]?
+    private var cachedKey = ""
+    private var fetchedAt: TimeInterval = 0
+    private var refreshAt: TimeInterval = 0
+    private var lastModified: String?
+
+    init() {
+        guard let data = try? Data(contentsOf: cacheURL),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let snapshot = root["snapshot"] as? [String: Any] else { return }
+        cached = snapshot
+        cachedKey = root["key"] as? String ?? ""
+        fetchedAt = (root["fetchedAt"] as? NSNumber)?.doubleValue ?? 0
+        refreshAt = (root["refreshAt"] as? NSNumber)?.doubleValue ?? 0
+        lastModified = root["lastModified"] as? String
+    }
+
+    func get(_ config: SwiftWeatherConfig, now: Date = Date()) async -> [String: Any]? {
+        let key = String(format: "%.3f,%.3f:%@", config.latitude, config.longitude, config.timeZone)
+        if key == cachedKey, let cached, now.timeIntervalSince1970 < refreshAt { return cached }
+        do {
+            var components = URLComponents(string: "https://api.met.no/weatherapi/locationforecast/2.0/compact")
+            components?.queryItems = [
+                URLQueryItem(name: "lat", value: String(format: "%.3f", config.latitude)),
+                URLQueryItem(name: "lon", value: String(format: "%.3f", config.longitude)),
+            ]
+            guard let url = components?.url else { return nil }
+            var request = URLRequest(url: url, timeoutInterval: 5)
+            request.setValue("AgentDeck/1.0 (+https://github.com/puritysb/AgentDeck)", forHTTPHeaderField: "User-Agent")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            if key == cachedKey, let lastModified {
+                request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
+            }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            if http.statusCode == 304, key == cachedKey, let cached {
+                refreshAt = now.timeIntervalSince1970 + 30 * 60
+                persist()
+                return cached
+            }
+            guard (200..<300).contains(http.statusCode),
+                  let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw URLError(.badServerResponse)
+            }
+            let snapshot = normalize(root, config: config, now: now)
+            cached = snapshot
+            cachedKey = key
+            fetchedAt = now.timeIntervalSince1970
+            refreshAt = max(fetchedAt, Self.httpDate(http.value(forHTTPHeaderField: "Expires"))?.timeIntervalSince1970
+                ?? fetchedAt + 30 * 60)
+            lastModified = http.value(forHTTPHeaderField: "Last-Modified")
+            persist()
+            return snapshot
+        } catch {
+            if key == cachedKey, let cached,
+               let valid = (cached["validUntil"] as? NSNumber)?.doubleValue,
+               valid >= now.timeIntervalSince1970 * 1000 { return cached }
+            DaemonLogger.shared.error("[Weather] MET Norway fetch failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func normalize(_ root: [String: Any], config: SwiftWeatherConfig, now: Date) -> [String: Any] {
+        let properties = root["properties"] as? [String: Any] ?? [:]
+        let meta = properties["meta"] as? [String: Any] ?? [:]
+        let rawPoints = Array((properties["timeseries"] as? [[String: Any]] ?? []).prefix(24 * 7 + 12))
+        let iso = ISO8601DateFormatter()
+        let issued = (meta["updated_at"] as? String).flatMap(iso.date(from:)) ?? now
+        let issuedAt = Int(issued.timeIntervalSince1970 * 1000)
+        let dayFormatter = DateFormatter(); dayFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dayFormatter.timeZone = TimeZone(identifier: config.timeZone); dayFormatter.dateFormat = "yyyy-MM-dd"
+        let hm = DateFormatter(); hm.locale = Locale(identifier: "en_US_POSIX")
+        hm.timeZone = TimeZone(identifier: config.timeZone); hm.dateFormat = "HH:mm"
+
+        var points: [(date: Date, raw: [String: Any])] = []
+        var daysByDate: [String: SwiftWeatherDayAccumulator] = [:]
+        var dayOrder: [String] = []
+        for raw in rawPoints {
+            guard let value = raw["time"] as? String, let date = iso.date(from: value) else { continue }
+            points.append((date, raw))
+            let key = dayFormatter.string(from: date)
+            if daysByDate[key] == nil { daysByDate[key] = SwiftWeatherDayAccumulator(); dayOrder.append(key) }
+            var day = daysByDate[key]!
+            if let temp = Self.temperature(raw) { day.temperatures.append(temp) }
+            let period = Self.period(raw)
+            day.precipitationMm += ((period["details"] as? [String: Any])?["precipitation_amount"] as? NSNumber)?.doubleValue ?? 0
+            if let symbol = (period["summary"] as? [String: Any])?["symbol_code"] as? String,
+               day.symbol == "fair_day" || Self.isWet(raw) { day.symbol = symbol }
+            daysByDate[key] = day
+        }
+        let days: [[String: Any]] = dayOrder.prefix(7).compactMap { key in
+            guard let day = daysByDate[key] else { return nil }
+            let code = Self.wmo(day.symbol)
+            var out: [String: Any] = ["date": key, "code": code, "summary": Self.summary(code)]
+            if let low = day.temperatures.min(), let high = day.temperatures.max() {
+                out["minC"] = Int(low.rounded()); out["maxC"] = Int(high.rounded())
+            }
+            if day.precipitationMm > 0 { out["precipitationMm"] = (day.precipitationMm * 10).rounded() / 10 }
+            return out
+        }
+
+        var cues: [[String: Any]] = []
+        var index = 0
+        while index < points.count && cues.count < 8 {
+            if !Self.isWet(points[index].raw) { index += 1; continue }
+            let start = points[index].date
+            var end = start.addingTimeInterval(TimeInterval(Self.periodHours(points[index].raw) * 3600))
+            var amount = 0.0
+            var snow = false
+            while index < points.count, Self.isWet(points[index].raw) {
+                let period = Self.period(points[index].raw)
+                amount += ((period["details"] as? [String: Any])?["precipitation_amount"] as? NSNumber)?.doubleValue ?? 0
+                let symbol = (period["summary"] as? [String: Any])?["symbol_code"] as? String ?? ""
+                snow = snow || symbol.contains("snow") || symbol.contains("sleet")
+                end = points[index].date.addingTimeInterval(TimeInterval(Self.periodHours(points[index].raw) * 3600))
+                index += 1
+            }
+            if end <= now { continue }
+            let kind = snow ? "snow.start" : "precipitation.start"
+            let startsAt = Int(start.timeIntervalSince1970 * 1000)
+            let notifyAt = startsAt - 30 * 60 * 1000
+            var cue: [String: Any] = [
+                "id": "\(kind):\(startsAt / 3_600_000)", "revision": 1, "kind": kind,
+                "severity": amount >= 5 ? "warning" : "notice",
+                "displayAt": max(issuedAt, startsAt - 3 * 3_600_000),
+                "startsAt": startsAt,
+                "endsAt": Int(end.timeIntervalSince1970 * 1000),
+                "expiresAt": Int(end.timeIntervalSince1970 * 1000),
+                "title": "\(snow ? "Snow" : "Rain") around \(hm.string(from: start))",
+                "detail": "\((amount * 10).rounded() / 10) mm forecast",
+            ]
+            if notifyAt > Int(now.timeIntervalSince1970 * 1000) { cue["notifyAt"] = notifyAt }
+            cues.append(cue)
+        }
+
+        let current = points.first(where: { $0.date >= now }) ?? points.first
+        let code = Self.wmo(current.map { Self.symbol($0.raw) } ?? "fair_day")
+        let valid = points.last.map {
+            $0.date.addingTimeInterval(TimeInterval(Self.periodHours($0.raw) * 3600))
+        } ?? issued
+        var out: [String: Any] = [
+            "code": code, "summary": Self.summary(code), "issuedAt": issuedAt,
+            "validUntil": Int(valid.timeIntervalSince1970 * 1000), "timeZone": config.timeZone,
+            "days": days, "cues": cues,
+            "source": ["id": "met-no", "displayName": "MET Norway",
+                       "attributionText": "Data from MET Norway", "attributionUrl": "https://api.met.no/",
+                       "modified": true],
+        ]
+        if let temp = current.flatMap({ Self.temperature($0.raw) }) { out["tempC"] = Int(temp.rounded()) }
+        if let place = config.place { out["place"] = place }
+        if let today = days.first { out["todayMinC"] = today["minC"]; out["todayMaxC"] = today["maxC"] }
+        if days.count > 1 { out["tomorrow"] = days[1] }
+        if let first = cues.first,
+           let startsAt = (first["startsAt"] as? NSNumber)?.doubleValue,
+           let endsAt = (first["endsAt"] as? NSNumber)?.doubleValue {
+            out["rain"] = ["startHm": hm.string(from: Date(timeIntervalSince1970: startsAt / 1000)),
+                           "endHm": hm.string(from: Date(timeIntervalSince1970: endsAt / 1000))]
+        }
+        return out
+    }
+
+    private static func period(_ raw: [String: Any]) -> [String: Any] {
+        let data = raw["data"] as? [String: Any] ?? [:]
+        return data["next_1_hours"] as? [String: Any] ?? data["next_6_hours"] as? [String: Any] ?? [:]
+    }
+    private static func periodHours(_ raw: [String: Any]) -> Int {
+        let data = raw["data"] as? [String: Any] ?? [:]
+        return data["next_1_hours"] != nil ? 1 : 6
+    }
+    private static func temperature(_ raw: [String: Any]) -> Double? {
+        let data = raw["data"] as? [String: Any]
+        let instant = data?["instant"] as? [String: Any]
+        let details = instant?["details"] as? [String: Any]
+        return (details?["air_temperature"] as? NSNumber)?.doubleValue
+    }
+    private static func symbol(_ raw: [String: Any]) -> String {
+        ((period(raw)["summary"] as? [String: Any])?["symbol_code"] as? String) ?? "fair_day"
+    }
+    private static func isWet(_ raw: [String: Any]) -> Bool {
+        let p = period(raw)
+        let amount = ((p["details"] as? [String: Any])?["precipitation_amount"] as? NSNumber)?.doubleValue ?? 0
+        return amount >= 0.05 || symbol(raw).range(of: "rain|snow|sleet", options: .regularExpression) != nil
+    }
+    private static func wmo(_ symbol: String) -> Int {
+        if symbol.contains("thunder") { return 95 }; if symbol.contains("snow") || symbol.contains("sleet") { return 75 }
+        if symbol.contains("rainshowers") { return 81 }; if symbol.contains("rain") { return 63 }
+        if symbol.contains("fog") { return 45 }; if symbol.contains("cloudy") { return 3 }
+        if symbol.contains("partlycloudy") { return 2 }; if symbol.contains("fair") { return 1 }; return 0
+    }
+    private static func summary(_ code: Int) -> String {
+        switch code { case 0: "Clear"; case 1, 2: "Fair"; case 3: "Cloudy"; case 45: "Fog"
+        case 63, 81: "Rain"; case 75: "Snow"; case 95: "Storm"; default: "Cloudy" }
+    }
+    private static func httpDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0); formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: value)
+    }
+    private func persist() {
+        guard let cached else { return }
+        var root: [String: Any] = ["key": cachedKey, "fetchedAt": fetchedAt,
+                                  "refreshAt": refreshAt, "snapshot": cached]
+        if let lastModified { root["lastModified"] = lastModified }
+        guard JSONSerialization.isValidJSONObject(root),
+              let data = try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys]) else { return }
+        try? data.write(to: cacheURL, options: .atomic)
+    }
+}
 
 extension Notification.Name {
     static let pixooSettingsChanged = Notification.Name("dev.agentdeck.pixooSettingsChanged")
@@ -369,6 +600,140 @@ struct JudgeBackendStatus: Sendable {
 /// than making this type an `actor`.
 @DaemonActor
 final class DaemonServer {
+    struct SurfaceRuntimeError: Error, Equatable {
+        let status: Int
+        let code: String
+        let message: String
+    }
+
+    struct SurfaceRuntimeIdentity: Equatable {
+        let clientId: String
+        let clientVersion: String
+        let productId: String
+        let profile: String
+        let capabilities: [String]
+        let board: String
+        let updateChannel: String
+    }
+
+    struct SurfaceRuntimeNegotiation: Equatable {
+        let clientId: String
+        let clientVersion: String
+        let productId: String
+        let profile: String
+        let capabilities: [String]
+    }
+
+    /// Swift Tier 1 exposes only the portable operations it actually owns.
+    /// Outbox execution and pull-OTA staging remain Node Tier 2 capabilities;
+    /// Inbox remains unimplemented on both daemons.
+    nonisolated static let swiftPortableCapabilities: Set<String> = [
+        "feed.pull", "feed.conditional", "glance.read",
+    ]
+
+    nonisolated private static func validSurfaceToken(_ value: String, max: Int = 128) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= max,
+              value.first?.isLetter == true || value.first?.isNumber == true else { return false }
+        return value.allSatisfy { $0.isLetter || $0.isNumber || $0 == "." || $0 == "_" || $0 == "-" }
+    }
+
+    /// Parse the all-or-nothing HTTP declaration. `nil` is the legacy baseline;
+    /// a declaration with one missing member fails closed rather than widening.
+    nonisolated static func parseSurfaceHTTPIdentity(
+        headers: [String: String],
+        query: [String: String] = [:],
+        requiredCapability: String
+    ) -> Result<SurfaceRuntimeIdentity?, SurfaceRuntimeError> {
+        let names = [
+            "agentdeck-surface-protocol", "agentdeck-surface-profile",
+            "agentdeck-client-id", "agentdeck-client-version", "agentdeck-product-id",
+            "agentdeck-capabilities", "agentdeck-board", "agentdeck-update-channel",
+        ]
+        let values = names.map { headers[$0]?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let present = values.compactMap { $0 }.count
+        if present == 0 { return .success(nil) }
+        guard present == names.count else {
+            return .failure(.init(status: 400, code: "surface_identity_incomplete",
+                                  message: "All eight AgentDeck Surface identity headers are required"))
+        }
+        guard values[0] == "1" else {
+            return .failure(.init(status: 426, code: "surface_protocol_unsupported",
+                                  message: "Surface protocol \(values[0] ?? "") is not supported"))
+        }
+        guard values[1] == "portable-reader/v1" else {
+            return .failure(.init(status: 406, code: "surface_profile_route_mismatch",
+                                  message: "This HTTP route requires portable-reader/v1"))
+        }
+        let clientId = values[2]!, clientVersion = values[3]!, productId = values[4]!
+        let board = values[6]!, updateChannel = values[7]!
+        guard validSurfaceToken(clientId), validSurfaceToken(clientVersion, max: 96),
+              validSurfaceToken(productId), validSurfaceToken(board, max: 96),
+              validSurfaceToken(updateChannel, max: 48) else {
+            return .failure(.init(status: 400, code: "surface_identity_invalid",
+                                  message: "Surface identity contains a malformed token"))
+        }
+        guard productId == "io.pocketdaily.reader" else {
+            return .failure(.init(status: 422, code: "surface_product_unsupported",
+                                  message: "Surface product is not registered for Swift portable Feed"))
+        }
+        guard board == "xteink_x3" || board == "xteink_x4" else {
+            return .failure(.init(status: 409, code: "surface_product_board_mismatch",
+                                  message: "Surface product and board do not match"))
+        }
+        guard updateChannel == "stable" else {
+            return .failure(.init(status: 409, code: "surface_product_channel_mismatch",
+                                  message: "Surface product and update channel do not match"))
+        }
+        let offered = values[5]!.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        let granted = offered.filter { swiftPortableCapabilities.contains($0) }.reduce(into: [String]()) {
+            if !$0.contains($1) { $0.append($1) }
+        }
+        guard granted.contains(requiredCapability) else {
+            return .failure(.init(status: 403, code: "surface_capability_required",
+                                  message: "Capability \"\(requiredCapability)\" was not granted"))
+        }
+        for (key, expected) in [("productId", productId), ("board", board), ("updateChannel", updateChannel)] {
+            if let repeated = query[key], repeated != expected {
+                return .failure(.init(status: 409, code: "surface_query_identity_mismatch",
+                                      message: "Query \(key) does not match Surface identity"))
+            }
+        }
+        return .success(.init(clientId: clientId, clientVersion: clientVersion,
+                              productId: productId, profile: values[1]!, capabilities: granted,
+                              board: board, updateChannel: updateChannel))
+    }
+
+    nonisolated static func negotiateSurface(_ offer: [String: Any])
+        -> Result<SurfaceRuntimeNegotiation, SurfaceRuntimeError> {
+        guard (offer["protocol"] as? NSNumber)?.intValue == 1 else {
+            return .failure(.init(status: 426, code: "surface_protocol_unsupported",
+                                  message: "Surface protocol is not supported"))
+        }
+        guard let clientId = offer["clientId"] as? String,
+              let clientVersion = offer["clientVersion"] as? String,
+              let productId = offer["productId"] as? String,
+              validSurfaceToken(clientId), validSurfaceToken(clientVersion, max: 96),
+              validSurfaceToken(productId) else {
+            return .failure(.init(status: 400, code: "surface_identity_invalid",
+                                  message: "Surface client identity is malformed"))
+        }
+        guard productId == "io.pocketdaily.reader" else {
+            return .failure(.init(status: 422, code: "surface_product_unsupported",
+                                  message: "Portable-reader product is not registered"))
+        }
+        let profiles = offer["profiles"] as? [[String: Any]] ?? []
+        guard let selected = profiles.first(where: { ($0["id"] as? String) == "portable-reader/v1" }) else {
+            return .failure(.init(status: 406, code: "surface_profile_unsupported",
+                                  message: "No offered Surface profile is supported"))
+        }
+        let offered = selected["capabilities"] as? [String] ?? []
+        let granted = offered.filter { swiftPortableCapabilities.contains($0) }.reduce(into: [String]()) {
+            if !$0.contains($1) { $0.append($1) }
+        }
+        return .success(.init(clientId: clientId, clientVersion: clientVersion, productId: productId,
+                              profile: "portable-reader/v1", capabilities: granted))
+    }
+
     nonisolated let port: UInt16
     /// Network posture (Settings → Local server). Resolved once at init so the
     /// bind address, the Bonjour advertisement, the module set, and the
@@ -384,6 +749,8 @@ final class DaemonServer {
     private let stateMachine = StateMachine()
     private let registry = SessionRegistry.shared
     private let auth = AuthManager.shared
+    private let portableWeather = SwiftPortableMetWeatherProvider()
+    private var surfaceNegotiations: [UUID: SurfaceRuntimeNegotiation] = [:]
 
     // Modules
     private let moduleManager = ModuleManager()
@@ -1932,6 +2299,43 @@ final class DaemonServer {
         return ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any]) ?? [:]
     }
 
+    private func weatherConfig() -> SwiftWeatherConfig? {
+        guard let data = try? Data(contentsOf: AgentDeckPaths.settingsJson),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let weather = root["weather"] as? [String: Any],
+              let lat = (weather["lat"] as? NSNumber)?.doubleValue,
+              let lon = (weather["lon"] as? NSNumber)?.doubleValue,
+              (-90...90).contains(lat), (-180...180).contains(lon) else { return nil }
+        let zone = (weather["timeZone"] as? String).flatMap(TimeZone.init(identifier:))?.identifier
+            ?? TimeZone.current.identifier
+        return SwiftWeatherConfig(latitude: lat, longitude: lon,
+                                  place: weather["place"] as? String, timeZone: zone)
+    }
+
+    private func portableWeatherFeedResponse(echoSig: String?, now: Date = Date()) async -> HTTPServer.HTTPResponse {
+        let config = weatherConfig()
+        let snapshot: [String: Any]?
+        if let config { snapshot = await portableWeather.get(config, now: now) }
+        else { snapshot = nil }
+        var glance: [String: Any] = [:]
+        if let snapshot { glance["weather"] = snapshot }
+        let signed: [String: Any] = ["cards": [], "glance": glance]
+        let signedData = (try? JSONSerialization.data(withJSONObject: signed, options: [.sortedKeys])) ?? Data()
+        let sig = SHA256.hash(data: signedData).prefix(8).map { String(format: "%02x", $0) }.joined()
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current; formatter.dateFormat = "HH:mm"
+        var feed: [String: Any] = [
+            "type": "card_feed", "rev": 1, "serverTime": Int(now.timeIntervalSince1970 * 1000),
+            "serverHm": formatter.string(from: now), "nextPullSec": 1800, "deckSig": sig, "cards": [],
+        ]
+        if echoSig == sig {
+            feed["unchanged"] = true
+        } else if !glance.isEmpty {
+            feed["glance"] = glance
+        }
+        return .json(feed)
+    }
+
     private func setupHTTPRoutes() async {
         let daemonPort = self.port
         // Captured by value: posture is immutable for the server's lifetime,
@@ -2079,6 +2483,22 @@ final class DaemonServer {
                 "usage": usage?["usage"] as Any,
                 "fetchedAt": usage?["fetchedAt"] as? Int ?? 0,
             ] as [String: Any])
+        }
+
+        // Portable Surface weather parity. Tier 1 has no PTY-authored reading
+        // cards, but it can keep an intermittently connected reader supplied
+        // with the same Card Feed envelope and seven-day MET Norway snapshot.
+        await httpServer.get("/feed") { [weak self] request in
+            guard let self else { return .json(["error": "daemon unavailable"], status: 503) }
+            switch Self.parseSurfaceHTTPIdentity(
+                headers: request.headers, query: request.queryParams, requiredCapability: "feed.pull"
+            ) {
+            case .failure(let error):
+                return .json(["error": error.code, "message": error.message], status: error.status)
+            case .success:
+                break // nil = legacy; non-nil = validated portable-reader/v1
+            }
+            return await self.portableWeatherFeedResponse(echoSig: request.queryParams["sig"])
         }
 
         await httpServer.get("/devices") { [weak self] _ in
@@ -2819,6 +3239,14 @@ final class DaemonServer {
             try? await Task.sleep(for: .milliseconds(100))
             guard !conn.isDisconnected else { return }
 
+            // A Surface offer arrives immediately after the socket opens. The
+            // first 100 ms grace preserves legacy connection timing while
+            // allowing a portable reader to opt out of the private dashboard
+            // burst. Its authoritative content remains HTTP Feed.
+            if self.surfaceNegotiations[conn.id]?.profile == "portable-reader/v1" {
+                return
+            }
+
             let gwAlive = self.cachedGatewayConnected
             let stateEvent = self.buildFullStateEvent(agentType: gwAlive ? "openclaw" : "daemon")
             self.lastStateEvent = stateEvent
@@ -2912,6 +3340,7 @@ final class DaemonServer {
     /// close frame never arrives.
     private func handleClientDisconnect(_ conn: WebSocketConnection) {
         activeWSConnectionIds.remove(conn.id)
+        surfaceNegotiations.removeValue(forKey: conn.id)
         if let sd = cachedStreamDeck, sd.connectionId == conn.id {
             cachedStreamDeck = nil
             DaemonLogger.shared.debug("Daemon", "Evicted streamdeck registration: WS closed")
@@ -4369,6 +4798,30 @@ final class DaemonServer {
             DaemonLogger.shared.debug("Daemon", "client_register dropped: WS already closed")
             return
         }
+        if let offer = cmd["surface"] as? [String: Any] {
+            switch Self.negotiateSurface(offer) {
+            case .success(let negotiation):
+                surfaceNegotiations[conn.id] = negotiation
+                let welcome: [String: Any] = [
+                    "type": "surface_welcome", "protocol": 1,
+                    "profile": negotiation.profile,
+                    "capabilities": negotiation.capabilities,
+                    "serverVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0",
+                ]
+                if let data = welcome.jsonData { conn.send(data) }
+                DaemonLogger.shared.debug(
+                    "Daemon",
+                    "Surface negotiated \(negotiation.profile) client=\(negotiation.clientId) product=\(negotiation.productId)"
+                )
+            case .failure(let error):
+                let failure: [String: Any] = [
+                    "type": "surface_error", "error": error.code, "message": error.message,
+                ]
+                if let data = failure.jsonData { conn.send(data) }
+                conn.close()
+                return
+            }
+        }
         guard let clientType = cmd["clientType"] as? String else { return }
         switch clientType {
         case "streamdeck-plugin":
@@ -4439,6 +4892,10 @@ final class DaemonServer {
         if conn.isDisconnected { return }
         guard let board = cmd["board"] as? String, !board.isEmpty else { return }
         var info: [String: Any] = ["board": board]
+        for key in ["productId", "productName", "surfaceProfile", "sourceProvider", "updateChannel"] {
+            if let value = cmd[key] as? String, !value.isEmpty { info[key] = value }
+        }
+        if let protocolMajor = cmd["surfaceProtocol"] as? Int { info["surfaceProtocol"] = protocolMajor }
         if let ip = cmd["ip"] as? String, !ip.isEmpty { info["ip"] = ip }
         if let version = cmd["version"] as? String { info["version"] = version }
         if let hash = cmd["buildHash"] as? String { info["buildHash"] = hash }

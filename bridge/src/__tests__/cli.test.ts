@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   program,
   resolveEsp32OtaDaemonTarget,
+  resolveOtaIdentityFromManifest,
   ESP32_OTA_BY_TARGET,
   tokenizeArgString,
   applyGlobalEnvArgs,
@@ -23,6 +24,11 @@ const { startSessionMock } = vi.hoisted(() => ({
 vi.mock('../index.js', () => ({ startSession: startSessionMock }));
 
 describe('agentdeck CLI parser', () => {
+  it('registers a weather command with set/show/clear subcommands', () => {
+    const weather = program.commands.find((command) => command.name() === 'weather');
+    expect(weather?.commands.map((command) => command.name())).toEqual(['set', 'show', 'clear']);
+  });
+
   it('reports a misspelled top-level command as unknown and suggests the closest command', () => {
     let stderr = '';
     program.configureOutput({
@@ -86,6 +92,21 @@ describe('esp32-ota target resolution', () => {
   it('drops the retired esp32_c6_147 board from the OTA target set', () => {
     expect(ESP32_OTA_BY_TARGET['esp32_c6_147']).toBeUndefined();
     expect(ESP32_OTA_BY_TARGET['c6_147']).toBeUndefined();
+  });
+});
+
+describe('esp32-ota manifest identity resolution', () => {
+  it('selects one exact product + board + channel tuple', () => {
+    const fixture = new URL('../../../schemas/surface-protocol/v1/fixtures/pocket-daily-reader.json', import.meta.url);
+    expect(resolveOtaIdentityFromManifest(fixture.pathname, 'xteink_x3')).toEqual({
+      productId: 'io.pocketdaily.reader', board: 'xteink_x3', updateChannel: 'stable',
+    });
+  });
+
+  it('fails instead of guessing when a board has no registered identity', () => {
+    const fixture = new URL('../../../schemas/surface-protocol/v1/fixtures/pocket-daily-reader.json', import.meta.url);
+    expect(() => resolveOtaIdentityFromManifest(fixture.pathname, 'ttgo_t_display'))
+      .toThrow(/no OTA identity/);
   });
 });
 

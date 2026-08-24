@@ -113,6 +113,54 @@
           },
           "type": "array"
         },
+        "surface": {
+          "additionalProperties": false,
+          "description": "Optional AgentDeck Surface Protocol offer. Its presence opts this socket into bounded public negotiation; absence preserves the internal WS API.",
+          "properties": {
+            "clientId": {
+              "type": "string"
+            },
+            "clientVersion": {
+              "type": "string"
+            },
+            "productId": {
+              "type": "string"
+            },
+            "profiles": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "capabilities": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "capabilities"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "protocol": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "protocol",
+            "clientId",
+            "clientVersion",
+            "productId",
+            "profiles"
+          ],
+          "type": "object"
+        },
         "type": {
           "const": "client_register",
           "type": "string"

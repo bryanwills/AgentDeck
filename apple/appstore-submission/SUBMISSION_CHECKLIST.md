@@ -28,9 +28,10 @@
 
 ## Compliance answers
 
-- [ ] App Privacy: **Yes** — optional Anthropic API backend only
+- [ ] App Privacy: **Yes** — optional Anthropic API backend plus optional coarse location for Dashboard weather
 - [ ] Other User Content — linked to user, App Functionality, not tracking
 - [ ] Product Interaction — linked to user, App Functionality, not tracking
+- [ ] Coarse Location — not linked to user, App Functionality, not tracking
 - [ ] Tracking: No
 - [ ] Advertising/marketing use: None
 - [ ] Privacy policy URL entered for both iOS and macOS
@@ -58,8 +59,9 @@
 - [ ] Complete Section B first on a clean iPad while no AgentDeck Mac is present; capture the stable no-Mac screen and offline Device Preview as review evidence
 - [ ] Run `bash apple/scripts/validate-appstore-submission.sh --network`
 - [ ] Build the Release archive
+- [ ] Confirm WeatherKit is enabled for the production App ID and the selected macOS distribution profile contains `com.apple.developer.weatherkit`
 - [ ] Run `bash apple/scripts/verify-appstore-archive.sh <path-to-AgentDeck.app>` on the Release app
-- [ ] Confirm `PrivacyInfo.xcprivacy` is embedded and declares the same two collected data types as App Store Connect, with tracking disabled
+- [ ] Confirm `PrivacyInfo.xcprivacy` is embedded and declares the same three collected data types as App Store Connect, with tracking disabled
 - [ ] Upload and wait for processing; select the correct build for both platform versions
 - [ ] Recheck export compliance, content rights, age rating, and App Privacy before “Add for Review”
 - [ ] Choose release method: manual release is recommended for the 1.0.2 update
@@ -72,5 +74,6 @@
 - [ ] Metadata consistently says 17 Swift-standalone display previews
 - [ ] Product description and screenshots claim only built-in Swift-daemon behavior; no developer-daemon-only feature appears
 - [ ] Claims about on-device speech and Foundation Models match the submitted binary
+- [ ] WeatherKit mark/legal link are visible with weather, MET Norway attribution travels with portable-feed weather, and neither provider is silently substituted
 - [ ] Support and privacy URLs are publicly reachable without login
 - [ ] App Review notes still match the current archive and feature matrix

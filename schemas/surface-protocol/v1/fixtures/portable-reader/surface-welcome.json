@@ -1,0 +1,14 @@
+{
+  "type": "surface_welcome",
+  "protocol": 1,
+  "profile": "portable-reader/v1",
+  "capabilities": [
+    "feed.pull",
+    "feed.conditional",
+    "outbox.push",
+    "glance.read",
+    "ota.feed",
+    "device.telemetry"
+  ],
+  "serverVersion": "1.0.24"
+}

@@ -145,6 +145,30 @@ Enterprise and shared-network posture](daemon.md#enterprise-and-shared-network-p
 | `agentdeck diag kiro [--json]` | Privacy-safe Kiro passive-observation diagnostic; no daemon required |
 | `agentdeck inject-test` | Exercise observed-answer injection against one host, for tuning (`--tty <ttysNNN>` or `--app <Name>`; `--label <text>`, `-i <n>`, `--text <text>`) |
 
+### Weather context
+
+| Command | Description |
+|---------|-------------|
+| `agentdeck weather set --lat <n> --lon <n> [--place <label>] [--timezone <iana>]` | Save an explicit coarse forecast location for Dashboard and portable-reader Glance |
+| `agentdeck weather show` | Show the saved location, time zone, and portable provider without printing a custom API key |
+| `agentdeck weather clear` | Remove the location and persisted Node forecast cache |
+
+The default portable provider is the keyless MET Norway Locationforecast service;
+there is no account screen, API key, or IP-location lookup. Coordinates are rounded
+to two decimals before they are written (roughly a 1 km privacy boundary), and the
+host time zone is used when `--timezone` is omitted. The daemon reads the setting on
+the next feed pull, so none of these commands require a restart.
+
+```bash
+agentdeck weather set --lat 37.5665 --lon 126.9780 --place Seoul --timezone Asia/Seoul
+agentdeck weather show
+```
+
+An intermittently connected `portable-reader/v1` client receives a provider-attributed
+outlook of up to seven days plus bounded absolute-time display/notification cues. It
+persists those with the Card Feed and must stop using them after `validUntil`; the
+daemon never asks the reader to fetch a weather service directly.
+
 `agentdeck diag kiro` is designed to be attached to an issue. It reports whether
 native Kiro CLI/IDE processes, conversation stores, schema markers, and
 process-to-session correlation are visible. It never includes prompt or response
@@ -237,6 +261,6 @@ not the same act as finding one you never asked for.
 | `agentdeck timebox test [target]` | Send one frame (BLE) |
 | `agentdeck timebox sync [target]` | Run foreground Timebox frame sync (BLE) |
 | `agentdeck wifi-setup` | ESP32 WiFi provisioning (serial) |
-| `agentdeck esp32-ota <target>` | Push ESP32 firmware over WiFi OTA (`--build` or `--firmware <path>`) |
+| `agentdeck esp32-ota <target>` | Push ESP32 firmware over WiFi OTA (`--build` or `--firmware <path>`). Pull staging uses `--stage`; X3/X4 additionally require `--manifest <agentdeck-surface.json>` or both `--product-id` and `--update-channel`. |
 
 ---

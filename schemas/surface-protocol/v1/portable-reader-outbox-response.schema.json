@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/puritysb/AgentDeck/master/schemas/surface-protocol/v1/portable-reader-outbox-response.schema.json",
+  "title": "AgentDeck Surface Protocol portable-reader/v1 Outbox Response",
+  "description": "Stable external POST /outbox response subset. Results are positional acknowledgements for the request decisions.",
+  "type": "object",
+  "required": ["ok", "results"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "results": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": ["cardId", "status"],
+        "properties": {
+          "cardId": { "type": "string", "maxLength": 192 },
+          "status": {
+            "enum": ["applied", "expired", "unknown_card", "rejected", "error"]
+          },
+          "reason": { "type": "string", "maxLength": 512 }
+        }
+      }
+    }
+  }
+}

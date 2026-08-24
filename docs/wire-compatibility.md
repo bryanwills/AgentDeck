@@ -18,6 +18,11 @@ validators: [pnpm test, pnpm generate-protocol]
 
 Scope is the daemon↔client surface: the dashboard WebSocket, the daemon's HTTP routes, discovery, and the ESP32 serial link. The Gateway frame protocol has its own contract in `docs/gateway-protocol.md`; the authentication boundary has its own in [Daemon Hub → LAN security model](daemon.md). This document does not restate either.
 
+For independent clients, fleet-safe evolution is necessary but not sufficient:
+[`docs/surface-protocol.md`](surface-protocol.md) defines the smaller public allow-list.
+An internal message can satisfy every rule in this document and still remain outside
+the external Surface contract.
+
 ## 1. The compatibility surface
 
 Every change ships into a fleet that is already running. As of 2026-08-09:

@@ -1,0 +1,24 @@
+{
+  "board": "pocket-daily-v1",
+  "decisions": [
+    {
+      "cardId": "module:nudge:morning-walk:2026-08-24",
+      "action": "card_choice",
+      "choiceId": "done",
+      "ageSec": 21600
+    },
+    {
+      "cardId": "session:01J5Y8W7Y3K5J8H2Q0N7B6M4F2",
+      "sessionId": "01J5Y8W7Y3K5J8H2Q0N7B6M4F2",
+      "action": "select_option",
+      "index": 1,
+      "question": "Apply the proposed changes?",
+      "ageSec": 900
+    },
+    {
+      "cardId": "module:quest:read-docs:2026-08-24",
+      "action": "dismiss",
+      "ageSec": 120
+    }
+  ]
+}

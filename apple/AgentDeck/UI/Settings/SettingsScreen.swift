@@ -1,6 +1,42 @@
 // SettingsScreen.swift — Settings dialog (matches Android TabletSettingsDialog.kt)
 
 import SwiftUI
+#if os(macOS)
+import CoreLocation
+
+@MainActor
+private final class WeatherLocationPicker: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private var completion: ((Result<CLLocation, Error>) -> Void)?
+
+    override init() { super.init(); manager.delegate = self; manager.desiredAccuracy = kCLLocationAccuracyKilometer }
+
+    func request(_ completion: @escaping (Result<CLLocation, Error>) -> Void) {
+        self.completion = completion
+        switch manager.authorizationStatus {
+        case .notDetermined: manager.requestWhenInUseAuthorization()
+        case .authorized, .authorizedAlways: manager.requestLocation()
+        default: completion(.failure(CLError(.denied))); self.completion = nil
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        if manager.authorizationStatus == .authorized || manager.authorizationStatus == .authorizedAlways {
+            manager.requestLocation()
+        } else if manager.authorizationStatus != .notDetermined {
+            completion?(.failure(CLError(.denied))); completion = nil
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        completion?(.success(location)); completion = nil
+    }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        completion?(.failure(error)); completion = nil
+    }
+}
+#endif
 
 struct SettingsScreen: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
@@ -23,6 +59,8 @@ struct SettingsScreen: View {
     @State private var anthropicAdminApiKeyError: String?
     #if os(macOS)
     @State private var portInput: String = ""
+    @StateObject private var weatherLocationPicker = WeatherLocationPicker()
+    @State private var weatherLocationStatus = ""
     /// Which section is visible in the macOS NavigationSplitView detail.
     /// Default lands on Integrations so first-run users see the actions
     /// that actually unblock quota / OpenClaw / hooks, not an "Advanced"
@@ -894,6 +932,30 @@ struct SettingsScreen: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Weather context").font(.system(size: 12, weight: .semibold))
+                Text("One tap supplies WeatherKit forecasts to this Dashboard and paired offline-first readers. AgentDeck stores a coarse location locally; it does not use IP location.")
+                    .font(.system(size: 10)).foregroundStyle(TerrariumHUD.subtext)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Use Current Location") {
+                    weatherLocationStatus = "Locating…"
+                    weatherLocationPicker.request { result in
+                        switch result {
+                        case .success(let location):
+                            saveWeatherLocation(location)
+                            weatherLocationStatus = "Weather location saved"
+                        case .failure:
+                            weatherLocationStatus = "Location permission is required; change it in System Settings"
+                        }
+                    }
+                }
+                if !weatherLocationStatus.isEmpty {
+                    Text(weatherLocationStatus).font(.system(size: 10)).foregroundStyle(TerrariumHUD.subtext)
+                }
+            }
+
+            Divider()
             #endif
 
             Text("Visible Panels")
@@ -932,6 +994,25 @@ struct SettingsScreen: View {
             #endif
         }
     }
+
+    #if os(macOS)
+    private func saveWeatherLocation(_ location: CLLocation) {
+        let url = AgentDeckPaths.settingsJson
+        var root: [String: Any] = [:]
+        if let data = try? Data(contentsOf: url),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { root = parsed }
+        // Roughly 1 km. Precise coordinates add no useful forecast value and
+        // Apple's privacy taxonomy treats three-decimal coordinates as precise.
+        let lat = (location.coordinate.latitude * 100).rounded() / 100
+        let lon = (location.coordinate.longitude * 100).rounded() / 100
+        root["weather"] = ["lat": lat, "lon": lon, "place": "Current location",
+                           "timeZone": TimeZone.current.identifier]
+        guard JSONSerialization.isValidJSONObject(root),
+              let out = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else { return }
+        try? out.write(to: url, options: .atomic)
+        NotificationCenter.default.post(name: .weatherSettingsChanged, object: nil)
+    }
+    #endif
 
     // MARK: - APME section
 

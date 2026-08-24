@@ -15,6 +15,7 @@
     "arch.overview": { "en": "Architecture", "ko": "아키텍처", "ja": "アーキテクチャ" },
     "arch.daemon": { "en": "Daemon", "ko": "데몬", "ja": "デーモン" },
     "arch.protocol": { "en": "Bridge protocol", "ko": "브리지 규약", "ja": "ブリッジ規約" },
+    "spec.surface-protocol": { "en": "Surface protocol", "ko": "Surface 규약", "ja": "Surface 規約" },
     "arch.gateway-protocol": { "en": "Gateway protocol", "ko": "Gateway 규약", "ja": "Gateway 規約" },
     "spec.wire-compatibility": { "en": "Wire compatibility", "ko": "와이어 호환성", "ja": "ワイヤ互換性" },
     "arch.apme": { "en": "APME", "ko": "APME", "ja": "APME" },
@@ -111,6 +112,12 @@
       "id": "arch.protocol",
       "sources": {
         "en": "docs/protocol.md"
+      }
+    },
+    {
+      "id": "spec.surface-protocol",
+      "sources": {
+        "en": "docs/surface-protocol.md"
       }
     },
     {

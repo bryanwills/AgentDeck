@@ -68,7 +68,7 @@ Two operational constraints are load-bearing and documented in [hardware-compati
 
 ## XTeink X3 / X4 (external-fork client)
 
-**XTeink X3 and X4** are ESP32-C3 e-ink readers driven **not** by AgentDeck's own `esp32/` firmware but by an external **CrossPoint Reader fork** (`crosspoint-agentdeck`, AgentDeck stack on default branch `master`). Its `src/agentdeck/` module is a hand-port of AgentDeck's wire client that renders a "Decision Card" — live agent state + usage, with button-based approve/deny — over the same **WiFi WebSocket** LAN path as other ESP32 boards (plus a UDP-broadcast discovery fallback on 9121). **One firmware** auto-detects the model at runtime (`gpio.deviceIsX3()`, via an I2C IMU fingerprint) and reports the board string `xteink_x3` or `xteink_x4`. No subprocess, so it is not a sandbox-gated surface.
+**XTeink X3 and X4** are ESP32-C3 e-ink readers supported by the independent [Pocket Daily Reader](https://github.com/puritysb/pocket-daily-reader), **not** by AgentDeck's own `esp32/` firmware. Its `src/agentdeck/` compatibility module is a hand-port of the bounded AgentDeck client contract and adds offline-first Feed/Glance/Outbox operation. **One firmware** auto-detects the model at runtime (`gpio.deviceIsX3()`, via an I2C IMU fingerprint) and reports `xteink_x3` or `xteink_x4`. AgentDeck treats it as a Compatible Companion Project with its own product identity and releases.
 
 **Dual registration — the two daemons register it differently:**
 - **macOS Swift daemon** (the macOS Dashboard) registers WiFi panels via `client_register {clientType:"eink-device", devices:[…]}` → the **E-ink rail** (`handleClientRegister` → `cachedEinkDevices` → `einkSection`). The fork already sends this, labelled "XTeink X3/X4".

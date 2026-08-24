@@ -104,6 +104,12 @@ data class PluginCommand (
      */
     val devices: List<Device>? = null,
 
+    /**
+     * Optional AgentDeck Surface Protocol offer. Its presence opts this socket into bounded
+     * public negotiation; absence preserves the internal WS API.
+     */
+    val surface: Surface? = null,
+
     val note: String? = null,
 
     @Json(name = "runId")
@@ -240,6 +246,28 @@ enum class Mode(val value: String) {
         }
     }
 }
+
+/**
+ * Optional AgentDeck Surface Protocol offer. Its presence opts this socket into bounded
+ * public negotiation; absence preserves the internal WS API.
+ */
+data class Surface (
+    @Json(name = "clientId")
+    val clientID: String,
+
+    val clientVersion: String,
+
+    @Json(name = "productId")
+    val productID: String,
+
+    val profiles: List<Profile>,
+    val protocol: Double
+)
+
+data class Profile (
+    val capabilities: List<String>,
+    val id: String
+)
 
 enum class Type(val value: String) {
     ApmeRecommend("apme_recommend"),

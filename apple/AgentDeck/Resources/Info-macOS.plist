@@ -39,6 +39,10 @@
 	<string>AgentDeck uses the camera to scan QR codes for bridge pairing.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AgentDeck discovers and connects to local bridge servers on your network.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>AgentDeck uses a coarse location to provide local weather context on your Dashboard and paired displays.</string>
+	<key>NSLocationDefaultAccuracyReduced</key>
+	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>AgentDeck needs microphone access for voice commands to your AI coding agent.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

@@ -271,11 +271,53 @@ export interface OutboxApplyDeps {
   /** Card modules a `card_choice` may route to (M7). Defaults to the
    *  registered set — overridden in tests. */
   modules?: CardModule[];
+  /** Daemon-lifetime duplicate suppression for response-loss retries. */
+  idempotency?: OutboxIdempotencyLedger;
 }
 
 const OUTBOX_ACTIONS = new Set([
   'permission_decision', 'select_option', 'respond', 'send_prompt', 'dismiss', 'card_choice',
 ]);
+
+function outboxDecisionKey(d: OutboxDecision): string {
+  // `ageSec` is intentionally absent: Pocket recomputes it on each retry, so
+  // including it would turn a lost HTTP response into a second control press.
+  return JSON.stringify({
+    cardId: d.cardId,
+    sessionId: d.sessionId,
+    requestId: d.requestId,
+    action: d.action,
+    choiceId: d.choiceId,
+    decision: d.decision,
+    index: d.index,
+    value: d.value,
+    text: d.text,
+    question: d.question,
+  });
+}
+
+/** Bounded daemon-lifetime ledger for response-loss retries. */
+export class OutboxIdempotencyLedger {
+  private readonly outcomes = new Map<string, OutboxDecisionResult>();
+
+  constructor(private readonly limit = 1024) {}
+
+  get(decision: OutboxDecision): OutboxDecisionResult | undefined {
+    const result = this.outcomes.get(outboxDecisionKey(decision));
+    return result ? { ...result } : undefined;
+  }
+
+  remember(decision: OutboxDecision, result: OutboxDecisionResult): void {
+    const key = outboxDecisionKey(decision);
+    if (this.outcomes.has(key)) this.outcomes.delete(key);
+    this.outcomes.set(key, { ...result });
+    while (this.outcomes.size > this.limit) {
+      const oldest = this.outcomes.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.outcomes.delete(oldest);
+    }
+  }
+}
 
 function sessionIdOf(d: OutboxDecision): string | undefined {
   if (typeof d.sessionId === 'string' && d.sessionId) return d.sessionId;
@@ -368,6 +410,10 @@ export interface FeedPullEvent {
   client: string;
   /** Board id, learned from an outbox push or the WiFi WS registry. */
   board?: string;
+  productId?: string;
+  clientId?: string;
+  clientVersion?: string;
+  profile?: string;
   at: number;
   cards: number;
   /** Cadence advertised to this client on *this* pull. */
@@ -392,6 +438,10 @@ export interface FeedPullEvent {
 export interface FeedPullClient {
   client: string;
   board?: string;
+  productId?: string;
+  clientId?: string;
+  clientVersion?: string;
+  profile?: string;
   pulls: number;
   firstPullAt: number;
   lastPullAt: number;
@@ -420,6 +470,10 @@ export function normalizeClientIp(ip: string): string {
 
 interface PullState {
   board?: string;
+  productId?: string;
+  clientId?: string;
+  clientVersion?: string;
+  profile?: string;
   pulls: number;
   firstPullAt: number;
   lastPullAt: number;
@@ -440,15 +494,26 @@ export interface PullTelemetry {
   rssiDbm?: number;
 }
 
+export interface FeedPullIdentity {
+  board?: string;
+  productId?: string;
+  clientId?: string;
+  clientVersion?: string;
+  profile?: string;
+}
+
 /** Parse `batt`/`mv`/`rssi` query params, dropping anything non-numeric or
  *  out of physical range — telemetry is advisory, never trusted blindly. */
 export function parsePullTelemetry(params: URLSearchParams): PullTelemetry {
   const out: PullTelemetry = {};
-  const batt = Number(params.get('batt'));
+  const battRaw = params.get('batt');
+  const batt = battRaw === null ? Number.NaN : Number(battRaw);
   if (Number.isFinite(batt) && batt >= 0 && batt <= 100) out.battPct = Math.round(batt);
-  const mv = Number(params.get('mv'));
+  const mvRaw = params.get('mv');
+  const mv = mvRaw === null ? Number.NaN : Number(mvRaw);
   if (Number.isFinite(mv) && mv > 0 && mv < 10000) out.battMv = Math.round(mv);
-  const rssi = Number(params.get('rssi'));
+  const rssiRaw = params.get('rssi');
+  const rssi = rssiRaw === null ? Number.NaN : Number(rssiRaw);
   if (Number.isFinite(rssi) && rssi >= -120 && rssi < 0) out.rssiDbm = Math.round(rssi);
   return out;
 }
@@ -462,6 +527,7 @@ export class FeedPullTracker {
   /** Kept past the WiFi registry's 1h TTL: a client that sleeps for an hour
    *  ages out of the roster but must not lose its name here. */
   private readonly boards = new Map<string, string>();
+  private readonly identities = new Map<string, FeedPullIdentity>();
   private readonly intervalWindow = 16;
 
   constructor(opts: { historyLimit?: number } = {}) {
@@ -477,6 +543,21 @@ export class FeedPullTracker {
     if (st) st.board = board;
   }
 
+  /** Bind the non-secret Surface declaration to the pulling peer for
+   * diagnostics. Token/auth material is deliberately not accepted here. */
+  noteIdentity(client: string, identity: FeedPullIdentity): void {
+    const ip = normalizeClientIp(client);
+    if (!ip) return;
+    const clean = Object.fromEntries(
+      Object.entries(identity).filter(([, value]) => typeof value === 'string' && value),
+    ) as FeedPullIdentity;
+    if (Object.keys(clean).length === 0) return;
+    this.identities.set(ip, { ...this.identities.get(ip), ...clean });
+    if (clean.board) this.noteBoard(ip, clean.board);
+    const state = this.states.get(ip);
+    if (state) Object.assign(state, clean);
+  }
+
   record(
     client: string,
     info: { cards: number; nextPullSec: number; now?: number; unchanged?: boolean; telemetry?: PullTelemetry },
@@ -485,9 +566,14 @@ export class FeedPullTracker {
     const at = info.now ?? Date.now();
     const prev = this.states.get(ip);
     const board = this.boards.get(ip) ?? prev?.board;
+    const identity = this.identities.get(ip);
 
     const event: FeedPullEvent = { client: ip, at, cards: info.cards, nextPullSec: info.nextPullSec };
     if (board) event.board = board;
+    if (identity?.productId) event.productId = identity.productId;
+    if (identity?.clientId) event.clientId = identity.clientId;
+    if (identity?.clientVersion) event.clientVersion = identity.clientVersion;
+    if (identity?.profile) event.profile = identity.profile;
     if (info.unchanged) event.unchanged = true;
     const tel = info.telemetry;
     if (tel?.battPct !== undefined) event.battPct = tel.battPct;
@@ -511,6 +597,7 @@ export class FeedPullTracker {
       if (prev.intervals.length > this.intervalWindow) prev.intervals.shift();
       if (event.cadenceHonoured) prev.cadenceHonouredCount += 1;
       if (board) prev.board = board;
+      if (identity) Object.assign(prev, identity);
       if (info.unchanged) prev.unchangedCount += 1;
       if (tel?.battPct !== undefined) prev.lastBattPct = tel.battPct;
       if (tel?.battMv !== undefined) prev.lastBattMv = tel.battMv;
@@ -518,6 +605,7 @@ export class FeedPullTracker {
     } else {
       this.states.set(ip, {
         board,
+        ...identity,
         pulls: 1,
         firstPullAt: at,
         lastPullAt: at,
@@ -553,6 +641,10 @@ export class FeedPullTracker {
       out.push({
         client,
         ...(st.board ? { board: st.board } : {}),
+        ...(st.productId ? { productId: st.productId } : {}),
+        ...(st.clientId ? { clientId: st.clientId } : {}),
+        ...(st.clientVersion ? { clientVersion: st.clientVersion } : {}),
+        ...(st.profile ? { profile: st.profile } : {}),
         pulls: st.pulls,
         firstPullAt: st.firstPullAt,
         lastPullAt: st.lastPullAt,
@@ -573,7 +665,8 @@ export class FeedPullTracker {
 /** One-line log form. `+3.2%` is the sleeping client's timer drift against the
  *  cadence the daemon advertised — the M6 power-ladder verification signal. */
 export function formatFeedPull(ev: FeedPullEvent): string {
-  const who = ev.board ? `${ev.board} (${ev.client})` : ev.client;
+  const product = ev.productId ? `${ev.productId}${ev.clientVersion ? ` v${ev.clientVersion}` : ''} · ` : '';
+  const who = ev.board ? `${product}${ev.board} (${ev.client})` : `${product}${ev.client}`;
   const what = ev.unchanged ? 'unchanged' : `${ev.cards} card${ev.cards === 1 ? '' : 's'}`;
   const tel = [
     ev.battPct !== undefined ? `batt ${ev.battPct}%` : undefined,
@@ -594,15 +687,20 @@ export function formatFeedPull(ev: FeedPullEvent): string {
 export function applyOutboxDecisions(req: OutboxPushRequest, deps: OutboxApplyDeps): OutboxPushResponse {
   const decisions = Array.isArray(req?.decisions) ? req.decisions : [];
   const results = decisions.map((d) => {
+    const cached = deps.idempotency?.get(d);
+    if (cached) return cached;
+    let result: OutboxDecisionResult;
     try {
-      return applyOne(d ?? ({} as OutboxDecision), deps);
+      result = applyOne(d ?? ({} as OutboxDecision), deps);
     } catch (err) {
-      return {
+      result = {
         cardId: typeof d?.cardId === 'string' ? d.cardId : '',
         status: 'error' as const,
         reason: err instanceof Error ? err.message : String(err),
       };
     }
+    deps.idempotency?.remember(d, result);
+    return result;
   });
   return { ok: results.every((r) => r.status !== 'error'), results };
 }

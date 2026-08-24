@@ -430,6 +430,9 @@
           "$ref": "#/definitions/ReviewResultEvent"
         },
         {
+          "$ref": "#/definitions/SurfaceWelcomeEvent"
+        },
+        {
           "$ref": "#/definitions/Esp32OtaBeginEvent"
         },
         {
@@ -1555,6 +1558,40 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "SurfaceWelcomeEvent": {
+      "additionalProperties": false,
+      "description": "Additive public-protocol acknowledgement. Legacy WS clients never receive or need this event.",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "protocol": {
+          "description": "Negotiated major. Runtime v1 emits exactly `1`; modeled as a number here so the cross-language generator does not collapse it into a Swift enum.",
+          "type": "number"
+        },
+        "serverVersion": {
+          "type": "string"
+        },
+        "type": {
+          "const": "surface_welcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "protocol",
+        "profile",
+        "capabilities",
+        "serverVersion"
       ],
       "type": "object"
     },

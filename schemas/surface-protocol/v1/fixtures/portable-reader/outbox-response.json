@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "results": [
+    {
+      "cardId": "module:nudge:morning-walk:2026-08-24",
+      "status": "applied"
+    },
+    {
+      "cardId": "session:01J5Y8W7Y3K5J8H2Q0N7B6M4F2",
+      "status": "expired",
+      "reason": "prompt changed since the decision was recorded"
+    },
+    {
+      "cardId": "module:quest:read-docs:2026-08-24",
+      "status": "applied"
+    }
+  ]
+}

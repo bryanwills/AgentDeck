@@ -221,7 +221,9 @@ function weatherBlock(c: Ctx, x: number, y: number, width: number, w: GlanceWeat
   y += 112;
   if (w.rain) {
     const range = w.rain.endHm ? `${w.rain.startHm}–${w.rain.endHm}` : `~${w.rain.startHm}`;
-    text(c, x, y + 8, 22, `☂ Rain ${range} · ${w.rain.probability}%`, { weight: 600 });
+    const amount = w.rain.amountMm !== undefined ? ` · ${w.rain.amountMm} mm` : '';
+    const probability = w.rain.probability !== undefined ? ` · ${w.rain.probability}%` : '';
+    text(c, x, y + 8, 22, `☂ Rain ${range}${probability}${amount}`, { weight: 600 });
     y += 34;
   }
   if (w.tomorrow && (w.tomorrow.summary || w.tomorrow.minC !== undefined)) {

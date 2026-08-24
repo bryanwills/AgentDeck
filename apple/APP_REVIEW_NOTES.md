@@ -109,6 +109,20 @@ Note that these are BLE peripherals reached directly through CoreBluetooth, so t
 - Microphone (`com.apple.security.device.audio-input`) drives the optional voice-command input for AI sessions. Usage description in Info.plist explains the purpose at the system prompt.
 - Serial (`com.apple.security.device.serial`) is only used by optional ESP32-based status displays over USB-serial. Inert unless the user connects such hardware.
 
+## WeatherKit entitlement (`com.apple.developer.weatherkit`)
+
+The macOS Dashboard uses Apple's WeatherKit framework to show current conditions
+after the user explicitly chooses Use Current Location. Apple Weather values stay
+inside the app and use only an in-memory refresh cache; the Dashboard displays the
+provider's Apple Weather mark and legal attribution link. The local-network portable
+feed uses separately attributed MET Norway open data, not Apple Weather. AgentDeck
+does not infer location from an IP address or retain location history. No analytics,
+AgentDeck cloud backend, or subprocess is involved.
+
+The one-time Core Location result is immediately rounded to two decimal places
+(roughly 1 km), stored only in the app container, and declared as unlinked coarse
+location for app functionality in `PrivacyInfo.xcprivacy`.
+
 ## Subprocess execution
 
 **The App Store build of AgentDeck does not spawn any subprocess or create shell scripts for Terminal.** The macOS source tree contains no `Process()` invocation, no `.command` script writer, no AppleScript paths, and no probes for external binaries (`security`, `sqlite3`, `bin/sh`, `/usr/bin/env`, `openclaw`, `whisper-cli`, `networksetup`, `node`, `adb`). The `AGENTDECK_APP_STORE` Swift compile condition is retained as a defense-in-depth gate, and a CI script (`apple/scripts/verify-appstore-archive.sh`) runs after archive to fail the pipeline if any forbidden path string ever reappears in the shipped `.app`'s main Mach-O, or if any bundled executable besides the signed AgentDeck binary is present.
@@ -407,6 +421,7 @@ ENTITLEMENT RATIONALE
 • Bonjour (_agentdeck._tcp) — lets the companion find the Mac without typing an IP. Explained via NSLocalNetworkUsageDescription.
 • device.bluetooth — optional iDotMatrix and Divoom Timebox Mini LED displays via CoreBluetooth, BLE central only. Inert unless the user pairs one.
 • device.audio-input — optional voice input. device.serial — optional ESP32 USB-serial displays; inert without such hardware.
+• weatherkit — after location consent, Dashboard shows current conditions with Apple's mark/legal link. Apple Weather stays in-app and in-memory; the portable feed uses MET Norway.
 • files.user-selected.read-write + bookmarks.app-scope — hook installation is fully opt-in: an NSAlert explains it, then an NSOpenPanel requires the user to pick ~/.claude/settings.json themselves. Only then do we take a security-scoped bookmark and write. A Remove button reverts it.
 
 PRIVACY / EVALUATION BACKENDS

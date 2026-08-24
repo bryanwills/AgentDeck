@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/puritysb/AgentDeck/master/schemas/surface-protocol/v1/portable-reader.schema.json",
+  "title": "AgentDeck Surface Protocol portable-reader/v1 Card Feed",
+  "description": "Stable external subset of CardFeedResponse. Unknown optional fields remain allowed so additive v1 changes do not break tolerant clients.",
+  "$ref": "#/$defs/cardFeedResponse",
+  "$defs": {
+    "epochMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hm": {
+      "type": "string",
+      "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
+    "weatherSource": {
+      "type": "object",
+      "required": ["id", "displayName", "attributionText", "attributionUrl", "modified"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 96 },
+        "attributionText": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "attributionUrl": { "type": "string", "pattern": "^https://", "maxLength": 512 },
+        "markUrlDark": { "type": "string", "pattern": "^https://", "maxLength": 512 },
+        "markUrlLight": { "type": "string", "pattern": "^https://", "maxLength": 512 },
+        "modified": { "type": "boolean" }
+      }
+    },
+    "weatherDay": {
+      "type": "object",
+      "required": ["summary"],
+      "properties": {
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "code": { "type": "integer", "minimum": 0, "maximum": 99 },
+        "summary": { "type": "string", "maxLength": 32 },
+        "minC": { "type": "number", "minimum": -100, "maximum": 100 },
+        "maxC": { "type": "number", "minimum": -100, "maximum": 100 },
+        "rainProbability": { "type": "number", "minimum": 0, "maximum": 100 },
+        "precipitationMm": { "type": "number", "minimum": 0, "maximum": 2000 }
+      }
+    },
+    "weatherCue": {
+      "type": "object",
+      "required": ["id", "revision", "kind", "severity", "displayAt", "startsAt", "expiresAt", "title"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "kind": {
+          "enum": ["precipitation.start", "snow.start", "temperature.high", "temperature.low"]
+        },
+        "severity": { "enum": ["info", "notice", "warning"] },
+        "displayAt": { "$ref": "#/$defs/epochMs" },
+        "notifyAt": { "$ref": "#/$defs/epochMs" },
+        "startsAt": { "$ref": "#/$defs/epochMs" },
+        "endsAt": { "$ref": "#/$defs/epochMs" },
+        "expiresAt": { "$ref": "#/$defs/epochMs" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 96 },
+        "detail": { "type": "string", "maxLength": 160 }
+      }
+    },
+    "weather": {
+      "type": "object",
+      "properties": {
+        "place": { "type": "string", "maxLength": 96 },
+        "tempC": { "type": "number", "minimum": -100, "maximum": 100 },
+        "code": { "type": "integer", "minimum": 0, "maximum": 99 },
+        "summary": { "type": "string", "maxLength": 32 },
+        "todayMinC": { "type": "number", "minimum": -100, "maximum": 100 },
+        "todayMaxC": { "type": "number", "minimum": -100, "maximum": 100 },
+        "rain": {
+          "type": "object",
+          "required": ["startHm"],
+          "properties": {
+            "startHm": { "$ref": "#/$defs/hm" },
+            "endHm": { "$ref": "#/$defs/hm" },
+            "probability": { "type": "number", "minimum": 0, "maximum": 100 },
+            "amountMm": { "type": "number", "minimum": 0, "maximum": 2000 }
+          }
+        },
+        "tomorrow": { "$ref": "#/$defs/weatherDay" },
+        "issuedAt": { "$ref": "#/$defs/epochMs" },
+        "validUntil": { "$ref": "#/$defs/epochMs" },
+        "timeZone": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "source": { "$ref": "#/$defs/weatherSource" },
+        "days": {
+          "type": "array",
+          "maxItems": 7,
+          "items": { "$ref": "#/$defs/weatherDay" }
+        },
+        "cues": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/weatherCue" }
+        }
+      }
+    },
+    "usageRow": {
+      "type": "object",
+      "required": ["provider", "label", "stale"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "primaryPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "primaryResetHm": { "$ref": "#/$defs/hm" },
+        "secondaryPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "stale": { "type": "boolean" }
+      }
+    },
+    "event": {
+      "type": "object",
+      "required": ["title"],
+      "properties": {
+        "startHm": { "$ref": "#/$defs/hm" },
+        "endHm": { "$ref": "#/$defs/hm" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 48 }
+      }
+    },
+    "glance": {
+      "type": "object",
+      "properties": {
+        "weather": { "$ref": "#/$defs/weather" },
+        "usage": { "type": "array", "maxItems": 3, "items": { "$ref": "#/$defs/usageRow" } },
+        "wrapup": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "type": "string", "maxLength": 64 }
+        },
+        "events": { "type": "array", "maxItems": 3, "items": { "$ref": "#/$defs/event" } }
+      }
+    },
+    "moduleChoice": {
+      "type": "object",
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 96 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "intent": { "enum": ["affirm", "deny", "neutral"] }
+      }
+    },
+    "moduleCard": {
+      "type": "object",
+      "required": ["module", "title", "question"],
+      "properties": {
+        "module": { "enum": ["thread", "pulse", "nudge", "quest"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "question": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "context": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "type": "string", "maxLength": 160 }
+        },
+        "choices": {
+          "type": "array",
+          "maxItems": 3,
+          "items": { "$ref": "#/$defs/moduleChoice" }
+        },
+        "sessionId": { "type": "string", "maxLength": 160 }
+      }
+    },
+    "feedCard": {
+      "type": "object",
+      "required": ["cardId", "actionClass"],
+      "properties": {
+        "cardId": { "type": "string", "minLength": 1, "maxLength": 192 },
+        "actionClass": { "enum": ["live", "day", "info"] },
+        "expiresAt": { "$ref": "#/$defs/epochMs" },
+        "session": { "type": "object" },
+        "module": { "$ref": "#/$defs/moduleCard" }
+      },
+      "oneOf": [
+        {
+          "properties": { "session": {} },
+          "required": ["session"],
+          "not": { "properties": { "module": {} }, "required": ["module"] }
+        },
+        {
+          "properties": { "module": {} },
+          "required": ["module"],
+          "not": { "properties": { "session": {} }, "required": ["session"] }
+        }
+      ]
+    },
+    "firmwareAdvert": {
+      "type": "object",
+      "required": ["productId", "board", "updateChannel", "size", "md5"],
+      "properties": {
+        "productId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "board": { "enum": ["xteink_x3", "xteink_x4"] },
+        "updateChannel": { "const": "stable" },
+        "size": { "type": "integer", "minimum": 1 },
+        "md5": { "type": "string", "pattern": "^[0-9a-f]{32}$" }
+      }
+    },
+    "cardFeedResponse": {
+      "type": "object",
+      "required": ["type", "rev", "serverTime", "serverHm", "nextPullSec", "cards"],
+      "properties": {
+        "type": { "const": "card_feed" },
+        "rev": { "const": 1 },
+        "serverTime": { "$ref": "#/$defs/epochMs" },
+        "serverHm": { "$ref": "#/$defs/hm" },
+        "nextPullSec": { "type": "integer", "minimum": 60, "maximum": 86400 },
+        "deckSig": { "type": "string", "pattern": "^[0-9a-f]{8,64}$" },
+        "unchanged": { "const": true },
+        "glance": { "$ref": "#/$defs/glance" },
+        "fw": { "$ref": "#/$defs/firmwareAdvert" },
+        "cards": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/feedCard" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "unchanged": { "const": true } },
+            "required": ["unchanged"]
+          },
+          "then": {
+            "required": ["deckSig"],
+            "properties": {
+              "deckSig": {},
+              "cards": { "type": "array", "maxItems": 0 }
+            },
+            "not": {
+              "properties": { "glance": {} },
+              "required": ["glance"]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

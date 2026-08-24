@@ -1,0 +1,17 @@
+{
+  "type": "card_feed",
+  "rev": 1,
+  "serverTime": 1787520600000,
+  "serverHm": "06:30",
+  "nextPullSec": 1800,
+  "deckSig": "2f19a80c",
+  "unchanged": true,
+  "fw": {
+    "productId": "io.pocketdaily.reader",
+    "board": "xteink_x3",
+    "updateChannel": "stable",
+    "size": 3145728,
+    "md5": "0123456789abcdef0123456789abcdef"
+  },
+  "cards": []
+}

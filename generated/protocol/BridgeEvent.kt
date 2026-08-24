@@ -49,6 +49,9 @@ private val klaxon = Klaxon()
  * (ReviewRunCommand) — the daemon reviews the session's latest work with an independent
  * judge model (Node: working-tree diff; Swift: APME trajectory) and reports risk findings.
  * Needs no agent control, so it works for every session type including observed codex.
+ *
+ * Additive public-protocol acknowledgement. Legacy WS clients never receive or need this
+ * event.
  */
 data class BridgeEvent (
     val agentCapabilities: AgentCapabilities? = null,
@@ -275,6 +278,16 @@ data class BridgeEvent (
 
     val risk: Risk? = null,
     val summary: String? = null,
+    val capabilities: List<String>? = null,
+    val profile: String? = null,
+
+    /**
+     * Negotiated major. Runtime v1 emits exactly `1`; modeled as a number here so the
+     * cross-language generator does not collapse it into a Swift enum.
+     */
+    val protocol: Double? = null,
+
+    val serverVersion: String? = null,
     val md5: String? = null,
 
     @Json(name = "otaId")
@@ -1416,6 +1429,7 @@ enum class Type(val value: String) {
     ReviewStatus("review_status"),
     SessionsList("sessions_list"),
     StateUpdate("state_update"),
+    SurfaceWelcome("surface_welcome"),
     TimelineEvent("timeline_event"),
     TimelineHistory("timeline_history"),
     UsageUpdate("usage_update"),
@@ -1443,6 +1457,7 @@ enum class Type(val value: String) {
             "review_status"         -> ReviewStatus
             "sessions_list"         -> SessionsList
             "state_update"          -> StateUpdate
+            "surface_welcome"       -> SurfaceWelcome
             "timeline_event"        -> TimelineEvent
             "timeline_history"      -> TimelineHistory
             "usage_update"          -> UsageUpdate

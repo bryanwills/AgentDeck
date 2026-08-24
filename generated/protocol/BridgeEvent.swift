@@ -21,6 +21,9 @@ import Foundation
 /// (ReviewRunCommand) — the daemon reviews the session's latest work with an independent
 /// judge model (Node: working-tree diff; Swift: APME trajectory) and reports risk findings.
 /// Needs no agent control, so it works for every session type including observed codex.
+///
+/// Additive public-protocol acknowledgement. Legacy WS clients never receive or need this
+/// event.
 // MARK: - ADBridgeEvent
 struct ADBridgeEvent: Codable, Equatable {
     var agentCapabilities: ADAgentCapabilities?
@@ -152,6 +155,12 @@ struct ADBridgeEvent: Codable, Equatable {
     var reportPath: String?
     var risk: ADRisk?
     var summary: String?
+    var capabilities: [String]?
+    var profile: String?
+    /// Negotiated major. Runtime v1 emits exactly `1`; modeled as a number here so the
+    /// cross-language generator does not collapse it into a Swift enum.
+    var bridgeEventProtocol: Double?
+    var serverVersion: String?
     var md5: String?
     var otaId: String?
     var size: Double?
@@ -253,6 +262,10 @@ struct ADBridgeEvent: Codable, Equatable {
         case reportPath = "reportPath"
         case risk = "risk"
         case summary = "summary"
+        case capabilities = "capabilities"
+        case profile = "profile"
+        case bridgeEventProtocol = "protocol"
+        case serverVersion = "serverVersion"
         case md5 = "md5"
         case otaId = "otaId"
         case size = "size"
@@ -374,6 +387,10 @@ extension ADBridgeEvent {
         reportPath: String?? = nil,
         risk: ADRisk?? = nil,
         summary: String?? = nil,
+        capabilities: [String]?? = nil,
+        profile: String?? = nil,
+        bridgeEventProtocol: Double?? = nil,
+        serverVersion: String?? = nil,
         md5: String?? = nil,
         otaId: String?? = nil,
         size: Double?? = nil,
@@ -475,6 +492,10 @@ extension ADBridgeEvent {
             reportPath: reportPath ?? self.reportPath,
             risk: risk ?? self.risk,
             summary: summary ?? self.summary,
+            capabilities: capabilities ?? self.capabilities,
+            profile: profile ?? self.profile,
+            bridgeEventProtocol: bridgeEventProtocol ?? self.bridgeEventProtocol,
+            serverVersion: serverVersion ?? self.serverVersion,
             md5: md5 ?? self.md5,
             otaId: otaId ?? self.otaId,
             size: size ?? self.size,
@@ -2655,6 +2676,7 @@ enum ADType: String, Codable, Equatable {
     case reviewStatus = "review_status"
     case sessionsList = "sessions_list"
     case stateUpdate = "state_update"
+    case surfaceWelcome = "surface_welcome"
     case timelineEvent = "timeline_event"
     case timelineHistory = "timeline_history"
     case usageUpdate = "usage_update"

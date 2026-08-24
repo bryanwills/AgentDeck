@@ -68,6 +68,9 @@ struct ADPluginCommand: Codable, Equatable {
     var clientType: String?
     /// Physical device roster this client is driving, if any.
     var devices: [ADDevice]?
+    /// Optional AgentDeck Surface Protocol offer. Its presence opts this socket into bounded
+    /// public negotiation; absence preserves the internal WS API.
+    var surface: ADSurface?
     var note: String?
     var runId: String?
     var verdict: ADVerdict?
@@ -100,6 +103,7 @@ struct ADPluginCommand: Codable, Equatable {
         case clientLabel = "clientLabel"
         case clientType = "clientType"
         case devices = "devices"
+        case surface = "surface"
         case note = "note"
         case runId = "runId"
         case verdict = "verdict"
@@ -152,6 +156,7 @@ extension ADPluginCommand {
         clientLabel: String?? = nil,
         clientType: String?? = nil,
         devices: [ADDevice]?? = nil,
+        surface: ADSurface?? = nil,
         note: String?? = nil,
         runId: String?? = nil,
         verdict: ADVerdict?? = nil,
@@ -184,6 +189,7 @@ extension ADPluginCommand {
             clientLabel: clientLabel ?? self.clientLabel,
             clientType: clientType ?? self.clientType,
             devices: devices ?? self.devices,
+            surface: surface ?? self.surface,
             note: note ?? self.note,
             runId: runId ?? self.runId,
             verdict: verdict ?? self.verdict,
@@ -361,6 +367,128 @@ enum ADMode: String, Codable, Equatable {
     case acceptEdits = "acceptEdits"
     case modeDefault = "default"
     case plan = "plan"
+}
+
+//
+// Hashable or Equatable:
+// The compiler will not be able to synthesize the implementation of Hashable or Equatable
+// for types that require the use of JSONAny, nor will the implementation of Hashable be
+// synthesized for types that have collections (such as arrays or dictionaries).
+
+/// Optional AgentDeck Surface Protocol offer. Its presence opts this socket into bounded
+/// public negotiation; absence preserves the internal WS API.
+// MARK: - ADSurface
+struct ADSurface: Codable, Equatable {
+    var clientId: String
+    var clientVersion: String
+    var productId: String
+    var profiles: [ADProfile]
+    var surfaceProtocol: Double
+
+    enum CodingKeys: String, CodingKey {
+        case clientId = "clientId"
+        case clientVersion = "clientVersion"
+        case productId = "productId"
+        case profiles = "profiles"
+        case surfaceProtocol = "protocol"
+    }
+}
+
+// MARK: ADSurface convenience initializers and mutators
+
+extension ADSurface {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ADSurface.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        clientId: String? = nil,
+        clientVersion: String? = nil,
+        productId: String? = nil,
+        profiles: [ADProfile]? = nil,
+        surfaceProtocol: Double? = nil
+    ) -> ADSurface {
+        return ADSurface(
+            clientId: clientId ?? self.clientId,
+            clientVersion: clientVersion ?? self.clientVersion,
+            productId: productId ?? self.productId,
+            profiles: profiles ?? self.profiles,
+            surfaceProtocol: surfaceProtocol ?? self.surfaceProtocol
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+//
+// Hashable or Equatable:
+// The compiler will not be able to synthesize the implementation of Hashable or Equatable
+// for types that require the use of JSONAny, nor will the implementation of Hashable be
+// synthesized for types that have collections (such as arrays or dictionaries).
+
+// MARK: - ADProfile
+struct ADProfile: Codable, Equatable {
+    var capabilities: [String]
+    var id: String
+
+    enum CodingKeys: String, CodingKey {
+        case capabilities = "capabilities"
+        case id = "id"
+    }
+}
+
+// MARK: ADProfile convenience initializers and mutators
+
+extension ADProfile {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ADProfile.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        capabilities: [String]? = nil,
+        id: String? = nil
+    ) -> ADProfile {
+        return ADProfile(
+            capabilities: capabilities ?? self.capabilities,
+            id: id ?? self.id
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
 }
 
 enum ADType: String, Codable, Equatable {

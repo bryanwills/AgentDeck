@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/puritysb/AgentDeck/master/schemas/surface-protocol/v1/surface-welcome.schema.json",
+  "title": "AgentDeck Surface Protocol v1 welcome",
+  "type": "object",
+  "required": ["type", "protocol", "profile", "capabilities", "serverVersion"],
+  "properties": {
+    "type": { "const": "surface_welcome" },
+    "protocol": { "const": 1 },
+    "profile": {
+      "enum": ["dashboard-live/v1", "companion-control/v1", "portable-reader/v1", "display-only/v1"]
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 96 }
+    },
+    "serverVersion": { "type": "string", "minLength": 1, "maxLength": 96 }
+  }
+}

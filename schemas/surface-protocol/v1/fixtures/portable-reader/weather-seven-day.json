@@ -1,0 +1,86 @@
+{
+  "type": "card_feed",
+  "rev": 1,
+  "serverTime": 1787518800000,
+  "serverHm": "06:00",
+  "nextPullSec": 1800,
+  "deckSig": "2f19a80c",
+  "glance": {
+    "weather": {
+      "place": "Seoul",
+      "tempC": 24,
+      "code": 2,
+      "summary": "Fair",
+      "todayMinC": 21,
+      "todayMaxC": 29,
+      "rain": {
+        "startHm": "16:00",
+        "endHm": "18:00",
+        "amountMm": 2.4
+      },
+      "tomorrow": {
+        "date": "2026-08-25",
+        "code": 63,
+        "summary": "Rain",
+        "minC": 22,
+        "maxC": 27,
+        "precipitationMm": 8.1
+      },
+      "issuedAt": 1787517000000,
+      "validUntil": 1788134400000,
+      "timeZone": "Asia/Seoul",
+      "source": {
+        "id": "met-no",
+        "displayName": "MET Norway",
+        "attributionText": "Data from MET Norway",
+        "attributionUrl": "https://api.met.no/",
+        "modified": true
+      },
+      "days": [
+        { "date": "2026-08-24", "code": 2, "summary": "Fair", "minC": 21, "maxC": 29, "precipitationMm": 2.4 },
+        { "date": "2026-08-25", "code": 63, "summary": "Rain", "minC": 22, "maxC": 27, "precipitationMm": 8.1 },
+        { "date": "2026-08-26", "code": 3, "summary": "Cloudy", "minC": 21, "maxC": 28 },
+        { "date": "2026-08-27", "code": 1, "summary": "Fair", "minC": 22, "maxC": 30 },
+        { "date": "2026-08-28", "code": 0, "summary": "Clear", "minC": 23, "maxC": 31 },
+        { "date": "2026-08-29", "code": 81, "summary": "Rain", "minC": 22, "maxC": 28, "precipitationMm": 5.2 },
+        { "date": "2026-08-30", "code": 2, "summary": "Fair", "minC": 21, "maxC": 29 }
+      ],
+      "cues": [
+        {
+          "id": "precipitation.start:2026-08-24T07",
+          "revision": 1,
+          "kind": "precipitation.start",
+          "severity": "notice",
+          "displayAt": 1787518800000,
+          "notifyAt": 1787553000000,
+          "startsAt": 1787554800000,
+          "endsAt": 1787562000000,
+          "expiresAt": 1787562000000,
+          "title": "Rain around 16:00",
+          "detail": "2.4 mm forecast"
+        },
+        {
+          "id": "precipitation.start:2026-08-25T02",
+          "revision": 1,
+          "kind": "precipitation.start",
+          "severity": "warning",
+          "displayAt": 1787612400000,
+          "notifyAt": 1787621400000,
+          "startsAt": 1787623200000,
+          "endsAt": 1787637600000,
+          "expiresAt": 1787637600000,
+          "title": "Rain around 11:00",
+          "detail": "8.1 mm forecast"
+        }
+      ]
+    }
+  },
+  "fw": {
+    "productId": "io.pocketdaily.reader",
+    "board": "xteink_x3",
+    "updateChannel": "stable",
+    "size": 5458176,
+    "md5": "13ca5419a015c749dfe7909f7a42ddc3"
+  },
+  "cards": []
+}

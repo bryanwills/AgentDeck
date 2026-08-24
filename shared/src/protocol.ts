@@ -657,6 +657,13 @@ export interface AuthProvisionMessage {
 
 export interface DeviceInfoMessage {
   type: 'device_info';
+  /** Stable product namespace; absent on legacy AgentDeck firmware. */
+  productId?: string;
+  productName?: string;
+  surfaceProfile?: string;
+  surfaceProtocol?: number;
+  updateChannel?: string;
+  sourceProvider?: string;
   // "86box" | "round_amoled" | "ips_35" | "ips_10" | "ttgo_t_display"
   // | "ulanzi_tc001" | "inkdeck" | "t_embed" (wire strings — see esp32/src/net/protocol.cpp)
   // | "xteink_x3" | "xteink_x4" (external CrossPoint fork; see docs/esp32-client-contract.md)
@@ -1005,12 +1012,17 @@ export interface GlanceRainWindow {
   startHm: string;
   /** Local "HH:MM" the window closes. Absent = rest of the day. */
   endHm?: string;
-  /** Peak probability inside the window, 0–100. */
-  probability: number;
+  /** Peak probability inside the window, 0–100, when the provider supplies
+   *  one. MET Norway's global forecast supplies precipitation amount instead. */
+  probability?: number;
+  /** Total forecast precipitation in the window, millimetres. */
+  amountMm?: number;
 }
 
 /** One-day outlook (used for tomorrow). */
 export interface GlanceDayWeather {
+  /** Local calendar date (`YYYY-MM-DD`) when carried in the seven-day outlook. */
+  date?: string;
   /** WMO weather interpretation code (Open-Meteo native). */
   code?: number;
   /** Short pre-rendered summary word ("Clear", "Rain", …). */
@@ -1019,6 +1031,52 @@ export interface GlanceDayWeather {
   maxC?: number;
   /** Max precipitation probability for the day, 0–100. */
   rainProbability?: number;
+  /** Forecast precipitation total for the local day, millimetres. */
+  precipitationMm?: number;
+}
+
+/** Attribution travels with cached weather because an offline Surface may show
+ *  the snapshot days after it last saw the daemon. */
+export interface GlanceWeatherSource {
+  /** Stable provider id (`met-no`, `apple-weather`, `open-meteo`). */
+  id: string;
+  displayName: string;
+  attributionText: string;
+  attributionUrl: string;
+  /** Provider-supplied marks. A capable color UI should prefer the variant
+   *  matching its surface; constrained readers may expose attributionText. */
+  markUrlDark?: string;
+  markUrlLight?: string;
+  /** True when AgentDeck mapped or derived the provider's source values. */
+  modified: boolean;
+}
+
+export type GlanceWeatherCueKind =
+  | 'precipitation.start'
+  | 'snow.start'
+  | 'temperature.high'
+  | 'temperature.low';
+
+/** A daemon-authored offline schedule entry. The reader persists it and does
+ *  no meteorological inference of its own. All times are epoch-ms. */
+export interface GlanceWeatherCue {
+  /** Stable across refreshes while the same forecast event remains. */
+  id: string;
+  /** Bumps when timing or copy for this event changes. */
+  revision: number;
+  kind: GlanceWeatherCueKind;
+  severity: 'info' | 'notice' | 'warning';
+  /** Earliest time the cue may enter an ambient surface. */
+  displayAt: number;
+  /** Suggested attention time. Local permission and quiet-hours still win. */
+  notifyAt?: number;
+  startsAt: number;
+  endsAt?: number;
+  /** Never display or notify this cue after this instant. */
+  expiresAt: number;
+  /** Bounded daemon-authored copy for constrained clients. */
+  title: string;
+  detail?: string;
 }
 
 export interface GlanceWeather {
@@ -1035,6 +1093,17 @@ export interface GlanceWeather {
   /** Today's next rain window; absent = no rain expected today. */
   rain?: GlanceRainWindow;
   tomorrow?: GlanceDayWeather;
+  /** Time the provider snapshot was normalized, epoch-ms. */
+  issuedAt?: number;
+  /** Last instant at which forecast-derived UI/cues remain valid. */
+  validUntil?: number;
+  /** IANA time-zone used to derive dates and display copy. */
+  timeZone?: string;
+  source?: GlanceWeatherSource;
+  /** Bounded local-day outlook, today first, at most seven entries. */
+  days?: GlanceDayWeather[];
+  /** Bounded offline display/notification schedule. */
+  cues?: GlanceWeatherCue[];
 }
 
 /** One provider quota row for the glance. Mirrors the wire-boolean rule:
@@ -1087,6 +1156,16 @@ export const GLANCE_LINE_MAX_BYTES = 64;
 export const GLANCE_EVENT_TITLE_MAX_BYTES = 48;
 /** Hourly rain probability at or above this counts as a rain window. */
 export const GLANCE_RAIN_PROBABILITY_MIN = 40;
+export const GLANCE_MAX_WEATHER_DAYS = 7;
+export const GLANCE_MAX_WEATHER_CUES = 8;
+
+export interface SurfaceFirmwareAdvert {
+  productId: string;
+  board: string;
+  updateChannel: string;
+  size: number;
+  md5: string;
+}
 
 export interface CardFeedResponse {
   type: 'card_feed';
@@ -1114,6 +1193,9 @@ export interface CardFeedResponse {
   unchanged?: boolean;
   /** Sleep-dashboard summary. Omitted when `unchanged`. */
   glance?: CardFeedGlance;
+  /** Exact pull-OTA namespace. Surface clients reject board-only adverts;
+   * legacy clients may still receive the historical `{size,md5}` shape. */
+  fw?: SurfaceFirmwareAdvert | { size: number; md5: string };
   cards: FeedCard[];
 }
 
@@ -1244,6 +1326,18 @@ export interface ReviewResultEvent {
   reportPath?: string;
 }
 
+/** Additive public-protocol acknowledgement. Legacy WS clients never receive
+ * or need this event. */
+export interface SurfaceWelcomeEvent {
+  type: 'surface_welcome';
+  /** Negotiated major. Runtime v1 emits exactly `1`; modeled as a number here
+   * so the cross-language generator does not collapse it into a Swift enum. */
+  protocol: number;
+  profile: string;
+  capabilities: string[];
+  serverVersion: string;
+}
+
 export type BridgeEvent =
   | StateUpdateEvent
   | PromptOptionsEvent
@@ -1265,6 +1359,7 @@ export type BridgeEvent =
   | ApmeRecommendationEvent
   | ReviewStatusEvent
   | ReviewResultEvent
+  | SurfaceWelcomeEvent
   | Esp32OtaBeginEvent
   | Esp32OtaChunkEvent
   | Esp32OtaEndEvent
@@ -1394,6 +1489,15 @@ export interface ClientRegisterCommand {
   clientType: string;
   /** Human-readable label for the surface (appears verbatim in diagnostics). */
   clientLabel?: string;
+  /** Optional AgentDeck Surface Protocol offer. Its presence opts this socket
+   * into bounded public negotiation; absence preserves the internal WS API. */
+  surface?: {
+    protocol: number;
+    clientId: string;
+    clientVersion: string;
+    productId: string;
+    profiles: Array<{ id: string; capabilities: string[] }>;
+  };
   /** Physical device roster this client is driving, if any. */
   devices?: Array<{
     id: string;

@@ -5,12 +5,15 @@ import {
   findTodayRainWindow,
   toGlanceWeather,
   buildForecastUrl,
+  buildMetNoForecastUrl,
+  toMetNoGlanceWeather,
   WeatherProvider,
   WEATHER_CACHE_MS,
   WEATHER_STALE_SERVE_MS,
 } from '../weather.js';
 
 const CFG = { lat: 37.57, lon: 126.98, place: 'Seoul' };
+const OPEN_CFG = { ...CFG, provider: 'open-meteo' as const };
 // A fixed local instant: 2026-07-31 09:30.
 const NOW = new Date(2026, 6, 31, 9, 30);
 const TODAY = '2026-07-31';
@@ -33,6 +36,12 @@ describe('parseWeatherSettings', () => {
     expect(parseWeatherSettings({ weather: { lat: 'x', lon: 1 } })).toBeNull();
     expect(parseWeatherSettings({ weather: { lat: 91, lon: 0 } })).toBeNull();
     expect(parseWeatherSettings({ weather: { lat: 0, lon: 200 } })).toBeNull();
+  });
+
+  it('keeps an explicit paid/custom Open-Meteo boundary opt-in', () => {
+    const cfg = { ...OPEN_CFG, endpoint: 'https://weather.example.test/forecast', apiKey: 'secret' };
+    expect(buildForecastUrl(cfg)).toMatch(/^https:\/\/weather\.example\.test\/forecast\?/);
+    expect(buildForecastUrl(cfg)).toContain('apikey=secret');
   });
 });
 
@@ -103,6 +112,33 @@ describe('toGlanceWeather', () => {
   });
 });
 
+describe('MET Norway normalization', () => {
+  it('builds seven-day offline data and precipitation cues without inventing probability', () => {
+    const base = Date.UTC(2026, 6, 31, 0);
+    const timeseries = Array.from({ length: 8 * 24 }, (_, i) => ({
+      time: new Date(base + i * 3_600_000).toISOString(),
+      data: {
+        instant: { details: { air_temperature: 20 + (i % 8) } },
+        next_1_hours: {
+          summary: { symbol_code: i === 5 || i === 6 ? 'rain' : 'fair_day' },
+          details: { precipitation_amount: i === 5 || i === 6 ? 1.2 : 0 },
+        },
+      },
+    }));
+    const raw = { properties: { meta: { updated_at: new Date(base).toISOString() }, timeseries } };
+    const g = toMetNoGlanceWeather(raw, { ...CFG, timeZone: 'UTC' }, new Date(base));
+    expect(g.source?.id).toBe('met-no');
+    expect(g.days).toHaveLength(7);
+    expect(g.validUntil).toBeGreaterThan(base + 6 * 86_400_000);
+    expect(g.cues?.[0]).toMatchObject({ kind: 'precipitation.start', startsAt: base + 5 * 3_600_000 });
+    expect(g.rain?.probability).toBeUndefined();
+    expect(g.rain?.amountMm).toBeGreaterThan(0);
+    expect(buildMetNoForecastUrl(CFG)).toContain('lat=37.570');
+    const ongoing = toMetNoGlanceWeather(raw, { ...CFG, timeZone: 'UTC' }, new Date(base + 5.5 * 3_600_000));
+    expect(ongoing.cues?.[0]?.notifyAt).toBeUndefined();
+  });
+});
+
 function okResponse(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as unknown as Response;
 }
@@ -121,12 +157,12 @@ describe('WeatherProvider', () => {
     const fetchImpl = vi.fn(async (..._args: unknown[]) => okResponse(RAW));
     const p = new WeatherProvider(fetchImpl as never);
     const t0 = NOW.getTime();
-    const a = await p.get(CFG, t0);
-    const b = await p.get(CFG, t0 + WEATHER_CACHE_MS - 1000);
+    const a = await p.get(OPEN_CFG, t0);
+    const b = await p.get(OPEN_CFG, t0 + WEATHER_CACHE_MS - 1000);
     expect(a?.tempC).toBe(20);
     expect(b).toBe(a);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(String(fetchImpl.mock.calls[0]![0])).toBe(buildForecastUrl(CFG));
+    expect(String(fetchImpl.mock.calls[0]![0])).toBe(buildForecastUrl(OPEN_CFG));
   });
 
   it('serves the stale cache on fetch failure, up to the stale-serve bound', async () => {
@@ -137,15 +173,38 @@ describe('WeatherProvider', () => {
     });
     const p = new WeatherProvider(fetchImpl as never);
     const t0 = NOW.getTime();
-    await p.get(CFG, t0);
+    await p.get(OPEN_CFG, t0);
     fail = true;
-    expect((await p.get(CFG, t0 + WEATHER_CACHE_MS + 1000))?.tempC).toBe(20);
-    expect(await p.get(CFG, t0 + WEATHER_STALE_SERVE_MS + 1000)).toBeUndefined();
+    expect((await p.get(OPEN_CFG, t0 + WEATHER_CACHE_MS + 1000))?.tempC).toBe(20);
+    expect(await p.get(OPEN_CFG, t0 + WEATHER_STALE_SERVE_MS + 1000)).toBeUndefined();
   });
 
   it('failure with no cache → undefined (never throws)', async () => {
     const fetchImpl = vi.fn(async () => { throw new Error('dns'); });
     const p = new WeatherProvider(fetchImpl as never);
-    expect(await p.get(CFG, NOW.getTime())).toBeUndefined();
+    expect(await p.get(OPEN_CFG, NOW.getTime())).toBeUndefined();
+  });
+
+  it('keeps a future-bearing seven-day snapshot through a long provider outage', async () => {
+    const t0 = NOW.getTime();
+    const raw = {
+      properties: {
+        meta: { updated_at: new Date(t0).toISOString() },
+        timeseries: Array.from({ length: 8 * 24 }, (_, i) => ({
+          time: new Date(t0 + i * 3_600_000).toISOString(),
+          data: { instant: { details: { air_temperature: 20 } },
+            next_1_hours: { summary: { symbol_code: 'fair_day' }, details: { precipitation_amount: 0 } } },
+        })),
+      },
+    };
+    let fail = false;
+    const fetchImpl = vi.fn(async () => {
+      if (fail) throw new Error('offline');
+      return okResponse(raw);
+    });
+    const p = new WeatherProvider(fetchImpl as never);
+    await p.get(CFG, t0);
+    fail = true;
+    expect((await p.get(CFG, t0 + WEATHER_STALE_SERVE_MS + 60_000))?.days).toHaveLength(7);
   });
 });

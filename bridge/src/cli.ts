@@ -363,6 +363,41 @@ export function resolveEsp32OtaDaemonTarget(target: string): string {
   return ESP32_OTA_BY_TARGET[target]?.board ?? target;
 }
 
+export interface CliOtaIdentity {
+  productId: string;
+  board: string;
+  updateChannel: string;
+}
+
+/** Resolve one exact OTA namespace from an integration manifest. Ambiguity is
+ * an error: a release command must never guess which product or channel owns
+ * an image. */
+export function resolveOtaIdentityFromManifest(
+  manifestPath: string,
+  board: string,
+  productId?: string,
+  updateChannel?: string,
+): CliOtaIdentity {
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    products?: Array<{ productId?: unknown; otaIdentities?: Array<{ board?: unknown; updateChannel?: unknown }> }>;
+  };
+  const matches: CliOtaIdentity[] = [];
+  for (const product of manifest.products ?? []) {
+    if (typeof product.productId !== 'string' || (productId && product.productId !== productId)) continue;
+    for (const ota of product.otaIdentities ?? []) {
+      if (ota.board !== board || typeof ota.updateChannel !== 'string') continue;
+      if (updateChannel && ota.updateChannel !== updateChannel) continue;
+      matches.push({ productId: product.productId, board, updateChannel: ota.updateChannel });
+    }
+  }
+  if (matches.length !== 1) {
+    throw new Error(matches.length === 0
+      ? `Manifest has no OTA identity for board=${board}${productId ? ` productId=${productId}` : ''}${updateChannel ? ` updateChannel=${updateChannel}` : ''}`
+      : `Manifest OTA identity is ambiguous for board=${board}; add --product-id and/or --update-channel`);
+  }
+  return matches[0]!;
+}
+
 function resolveEsp32FirmwarePath(target: string, envOpt?: string, firmwareOpt?: string): string {
   if (firmwareOpt) return realpathSync(firmwareOpt);
   const env = envOpt || ESP32_OTA_BY_TARGET[target]?.env || target;
@@ -512,6 +547,83 @@ program
   .name('agentdeck')
   .description('AgentDeck — Physical Controller for AI Coding Agents')
   .version(packageJson.version);
+
+// ===== Weather context =====
+
+const weatherCommand = program
+  .command('weather')
+  .description('Configure weather for Dashboard and offline Surface readers');
+
+weatherCommand
+  .command('set')
+  .description('Set a coarse forecast location (no account, API key, or IP lookup)')
+  .requiredOption('--lat <latitude>', 'Latitude, -90 to 90')
+  .requiredOption('--lon <longitude>', 'Longitude, -180 to 180')
+  .option('--place <label>', 'Short display label, for example Seoul')
+  .option('--timezone <iana>', 'IANA time zone; defaults to this host, for example Asia/Seoul')
+  .action(async (opts: { lat: string; lon: string; place?: string; timezone?: string }) => {
+    const { loadDaemonSettings, updateDaemonSetting, ownSettingsPath } = await import('./daemon-settings.js');
+    const { buildWeatherSetting, WeatherConfigError } = await import('./weather-config.js');
+    const settings = loadDaemonSettings();
+    const existing =
+      settings.weather && typeof settings.weather === 'object' ? (settings.weather as Record<string, unknown>) : {};
+    try {
+      const weather = buildWeatherSetting(
+        {
+          latitude: opts.lat,
+          longitude: opts.lon,
+          place: opts.place,
+          timeZone: opts.timezone,
+        },
+        existing,
+      );
+      updateDaemonSetting('weather', weather);
+      log(`Weather location saved in ${ownSettingsPath()}.`);
+      log(
+        `Coarse location: ${weather.lat.toFixed(2)}, ${weather.lon.toFixed(2)}${weather.place ? ` (${weather.place})` : ''}`,
+      );
+      log(
+        `Time zone: ${weather.timeZone}; portable provider: MET Norway unless an explicit custom provider is retained.`,
+      );
+      log('The running daemon reads this setting on the next feed pull; no restart is required.');
+    } catch (error) {
+      if (error instanceof WeatherConfigError) {
+        log(`Weather location was not changed: ${error.message}.`);
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
+    }
+  });
+
+weatherCommand
+  .command('show')
+  .description('Show the configured forecast location and portable provider')
+  .action(async () => {
+    const { loadDaemonSettings, ownSettingsPath } = await import('./daemon-settings.js');
+    const { describeWeatherSetting } = await import('./weather-config.js');
+    for (const line of describeWeatherSetting(loadDaemonSettings().weather)) log(line);
+    log(`Settings: ${ownSettingsPath()}`);
+  });
+
+weatherCommand
+  .command('clear')
+  .description('Remove the saved forecast location and persisted forecast cache')
+  .action(async () => {
+    const { updateDaemonSetting, ownSettingsPath } = await import('./daemon-settings.js');
+    updateDaemonSetting('weather', undefined);
+    const cachePath = join(getDataDir(), 'weather-cache-v1.json');
+    try {
+      if (existsSync(cachePath)) unlinkSync(cachePath);
+    } catch (error) {
+      log(`Weather location was cleared, but the old cache could not be removed: ${String(error)}`);
+      process.exitCode = 1;
+      return;
+    }
+    log(`Weather location cleared from ${ownSettingsPath()}.`);
+    log(`Persisted forecast cache removed from ${cachePath}.`);
+    log('The running daemon stops adding weather on the next feed pull; no restart is required.');
+  });
 
 // ===== Agent session commands =====
 
@@ -1506,6 +1618,7 @@ program
               const ver = dev.version ? ` v${dev.version}` : '';
               const hash = dev.buildHash ? ` (${dev.buildHash})` : '';
               const board = dev.board ?? 'esp32';
+              const product = dev.productId ? ` ${dev.productId}/${dev.updateChannel ?? '?'}` : '';
               const ota = dev.otaSupported === true
                 ? ` OTA ${formatBytes(dev.otaSlotSize)}`
                 : dev.otaReason ? ` OTA no:${dev.otaReason}` : '';
@@ -1513,7 +1626,7 @@ program
               // Single-path: a board also live on USB serial is driven over
               // serial; its WiFi link is a hot standby (no duplicate traffic).
               const transport = dev.serialActive ? ' [serial-active · wifi standby]' : '';
-              lines.push(`                 ${board}${ver}${hash}${ota}${stale}${transport} @ ${dev.ip ?? 'wifi'}`);
+              lines.push(`                 ${board}${ver}${hash}${product}${ota}${stale}${transport} @ ${dev.ip ?? 'wifi'}`);
             }
             total += devices.length;
           }
@@ -1526,6 +1639,9 @@ program
             lines.push(`  Card feed    ${clients.length} pull client${clients.length !== 1 ? 's' : ''}`);
             for (const c of clients) {
               const who = c.board ? `${c.board} @ ${c.client}` : c.client;
+              const product = c.productId
+                ? ` ${c.productId}${c.clientVersion ? ` v${c.clientVersion}` : ''}`
+                : '';
               const ago = `${Math.round((Date.now() - c.lastPullAt) / 1000)}s ago`;
               const cadence = c.lastIntervalSec !== undefined
                 ? `, last gap ${c.lastIntervalSec}s vs ${c.lastNextPullSec}s asked`
@@ -1533,7 +1649,7 @@ program
               const honoured = c.pulls > 1
                 ? ` [${c.cadenceHonouredCount}/${c.pulls - 1} on cadence]`
                 : '';
-              lines.push(`                 ${who} — ${c.pulls} pull${c.pulls !== 1 ? 's' : ''}, last ${ago}${cadence}${honoured}`);
+              lines.push(`                 ${who}${product} — ${c.pulls} pull${c.pulls !== 1 ? 's' : ''}, last ${ago}${cadence}${honoured}`);
             }
           }
         } else if (d.type === 'pixoo') {
@@ -1635,6 +1751,9 @@ program
   .option('-f, --firmware <path>', 'Firmware .bin path')
   .option('--build', 'Build the PlatformIO environment before upload')
   .option('--stage', 'Stage for pull OTA: the board installs it on its next feed pull (no live WS needed)')
+  .option('--manifest <path>', 'Integration manifest used to resolve the exact pull-OTA identity')
+  .option('--product-id <id>', 'Surface productId for pull-OTA isolation')
+  .option('--update-channel <channel>', 'Surface update channel for pull-OTA isolation')
   .action(async (target, opts) => {
     const { readDaemonInfo, findDaemonPort } = await import('./session-registry.js');
     const info = readDaemonInfo();
@@ -1658,12 +1777,26 @@ program
     const daemonTarget = resolveEsp32OtaDaemonTarget(target);
     const firmwarePath = resolveEsp32FirmwarePath(target, opts.env, opts.firmware);
     if (opts.stage) {
+      let otaIdentity: CliOtaIdentity | undefined;
+      if (opts.manifest) {
+        otaIdentity = resolveOtaIdentityFromManifest(
+          realpathSync(opts.manifest), daemonTarget, opts.productId, opts.updateChannel,
+        );
+      } else if (opts.productId || opts.updateChannel) {
+        if (!opts.productId || !opts.updateChannel) {
+          throw new Error('--product-id and --update-channel are required together (or use --manifest)');
+        }
+        otaIdentity = { productId: opts.productId, board: daemonTarget, updateChannel: opts.updateChannel };
+      }
+      if (!otaIdentity && (daemonTarget === 'xteink_x3' || daemonTarget === 'xteink_x4')) {
+        throw new Error('XTeink pull OTA requires --manifest, or both --product-id and --update-channel');
+      }
       // Pull-OTA staging: for wake-sync-sleep boards (XTeink X3/X4) that never
       // hold a live WS. The daemon adverts the build on the board's feed pulls;
       // the board downloads + flashes itself on its next wake.
       const { statusCode, body } = await postJsonWithTimeout<Record<string, any>>(
         `http://127.0.0.1:${port}/esp32/ota`,
-        { target: daemonTarget, firmwarePath, stage: true },
+        { target: daemonTarget, firmwarePath, stage: true, ...(otaIdentity ?? {}) },
         30_000,
       );
       if (statusCode < 200 || statusCode >= 300 || body.ok === false) {

@@ -3,6 +3,7 @@ import {
   classifySessionCard,
   buildCardFeed,
   applyOutboxDecisions,
+  OutboxIdempotencyLedger,
   FeedPullTracker,
   formatFeedPull,
   normalizeClientIp,
@@ -190,6 +191,23 @@ describe('applyOutboxDecisions', () => {
     const res = applyOutboxDecisions({ decisions: [] }, makeDeps());
     expect(res).toEqual({ ok: true, results: [] });
   });
+
+  it('deduplicates a response-loss retry even when its computed age changed', () => {
+    const idempotency = new OutboxIdempotencyLedger();
+    const deps = makeDeps({
+      sessions: [session({ id: 'sid-1', state: 'awaiting_option', question: 'Pick one' })],
+      idempotency,
+    });
+    const first = push([{
+      cardId: 'session:sid-1', action: 'select_option', index: 1, question: 'Pick one', ageSec: 30,
+    }], deps);
+    const retry = push([{
+      cardId: 'session:sid-1', action: 'select_option', index: 1, question: 'Pick one', ageSec: 90,
+    }], deps);
+    expect(first.results).toEqual([{ cardId: 'session:sid-1', status: 'applied' }]);
+    expect(retry.results).toEqual(first.results);
+    expect(deps.dispatch).toHaveBeenCalledOnce();
+  });
 });
 
 describe('FeedPullTracker', () => {
@@ -245,6 +263,26 @@ describe('FeedPullTracker', () => {
     const named = t.record(IP, { cards: 1, nextPullSec: 3600, now: NOW + 3600_000 });
     expect(named.board).toBe('xteink_x4');
     expect(t.clients()[0]!.board).toBe('xteink_x4');
+  });
+
+  it('retains non-secret Surface product identity for card-feed diagnostics', () => {
+    const t = new FeedPullTracker();
+    t.noteIdentity(IP, {
+      board: 'xteink_x3',
+      productId: 'io.pocketdaily.reader',
+      clientId: 'io.pocketdaily.reader',
+      clientVersion: '1.4.1-pocket',
+      profile: 'portable-reader/v1',
+    });
+    const event = t.record(IP, { cards: 2, nextPullSec: 1800, now: NOW });
+    expect(event).toMatchObject({
+      board: 'xteink_x3', productId: 'io.pocketdaily.reader', clientVersion: '1.4.1-pocket',
+    });
+    expect(t.clients()[0]).toMatchObject({
+      clientId: 'io.pocketdaily.reader', profile: 'portable-reader/v1',
+    });
+    expect(formatFeedPull(event)).toContain('io.pocketdaily.reader v1.4.1-pocket · xteink_x3');
+    expect(JSON.stringify(t.clients())).not.toMatch(/token|secret/i);
   });
 
   it('tracks clients independently and reports the median observed interval', () => {
@@ -410,6 +448,10 @@ describe('glance builders', () => {
 });
 
 describe('pull telemetry', () => {
+  it('keeps omitted telemetry absent rather than inventing a zero-percent battery', () => {
+    expect(parsePullTelemetry(new URLSearchParams())).toEqual({});
+  });
+
   it('parsePullTelemetry keeps in-range values and drops garbage', () => {
     const p = new URLSearchParams('batt=87&mv=4012&rssi=-71');
     expect(parsePullTelemetry(p)).toEqual({ battPct: 87, battMv: 4012, rssiDbm: -71 });

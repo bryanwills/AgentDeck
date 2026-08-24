@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/puritysb/AgentDeck/master/schemas/surface-protocol/v1/integration-manifest.schema.json",
+  "schemaVersion": 1,
+  "id": "io.bitfocus.companion.agentdeck",
+  "name": "companion-module-agentdeck",
+  "version": "1.16.0",
+  "manifestStatus": "draft",
+  "compatibilityTier": "community",
+  "ownership": {
+    "type": "independent",
+    "owner": "houtacheng/companion-module-agentdeck maintainers"
+  },
+  "repository": "https://github.com/houtacheng/companion-module-agentdeck",
+  "issues": "https://github.com/houtacheng/companion-module-agentdeck/issues",
+  "license": "MIT",
+  "maintainers": [
+    {
+      "name": "companion-module-agentdeck maintainers",
+      "url": "https://github.com/houtacheng/companion-module-agentdeck"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "companion-control/v1",
+      "transports": ["websocket"],
+      "capabilities": [
+        "sessions.read",
+        "usage.read",
+        "session.focus",
+        "permission.decide",
+        "prompt.select",
+        "session.prompt",
+        "session.interrupt",
+        "session.escape",
+        "review.run"
+      ],
+      "legacyBaseline": true
+    }
+  ],
+  "products": [
+    {
+      "productId": "io.bitfocus.companion.agentdeck",
+      "name": "AgentDeck module for Bitfocus Companion",
+      "defaultProfile": "companion-control/v1"
+    }
+  ],
+  "conformance": {
+    "status": "untested"
+  },
+  "notes": "Illustrative AgentDeck-side draft. The independent module repository has not adopted or published this manifest yet."
+}

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/puritysb/AgentDeck/master/schemas/surface-protocol/v1/portable-reader-outbox-request.schema.json",
+  "title": "AgentDeck Surface Protocol portable-reader/v1 Outbox Request",
+  "description": "Stable external POST /outbox request subset. Unknown optional fields remain allowed for additive v1 changes.",
+  "type": "object",
+  "required": ["decisions"],
+  "properties": {
+    "board": { "type": "string", "minLength": 1, "maxLength": 96 },
+    "decisions": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/decision" }
+    }
+  },
+  "$defs": {
+    "decision": {
+      "type": "object",
+      "required": ["cardId", "action"],
+      "properties": {
+        "cardId": { "type": "string", "minLength": 1, "maxLength": 192 },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "requestId": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "action": {
+          "enum": [
+            "permission_decision",
+            "select_option",
+            "respond",
+            "send_prompt",
+            "dismiss",
+            "card_choice"
+          ]
+        },
+        "choiceId": { "type": "string", "minLength": 1, "maxLength": 96 },
+        "decision": { "enum": ["allow", "deny"] },
+        "index": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "value": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "question": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "ageSec": { "type": "integer", "minimum": 0, "maximum": 2592000 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "action": { "const": "permission_decision" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["requestId", "decision"],
+            "properties": { "requestId": {}, "decision": {} }
+          }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "select_option" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["index"],
+            "properties": { "index": {} }
+          }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "respond" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["value"],
+            "properties": { "value": {} }
+          }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "send_prompt" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["text"],
+            "properties": { "text": {} }
+          }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "card_choice" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["choiceId"],
+            "properties": { "choiceId": {} }
+          }
+        }
+      ]
+    }
+  }
+}

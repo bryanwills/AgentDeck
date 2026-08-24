@@ -103,4 +103,23 @@ describe('pull-OTA staging', () => {
 
     expect(__wifiOtaTestApi.resolveStagedFwBoard('192.168.68.91')).toBe('xteink_x3');
   });
+
+  it('isolates X3 and X4 stages by the complete product tuple', () => {
+    const x3 = { productId: 'io.pocketdaily.reader', board: 'xteink_x3', updateChannel: 'stable' };
+    const x4 = { productId: 'io.pocketdaily.reader', board: 'xteink_x4', updateChannel: 'stable' };
+    __wifiOtaTestApi.stageEsp32Fw('xteink_x3', firmware, x3);
+
+    expect(__wifiOtaTestApi.stagedFwAdvert('xteink_x3', x3)).toMatchObject({ ...x3, size: 2048 });
+    expect(__wifiOtaTestApi.stagedFwAdvert('xteink_x4', x4)).toBeUndefined();
+    expect(__wifiOtaTestApi.stagedFwAdvert('xteink_x3')).toBeUndefined();
+  });
+
+  it('rejects cross-product and cross-channel stages before persisting', () => {
+    expect(() => __wifiOtaTestApi.stageEsp32Fw('xteink_x3', firmware, {
+      productId: 'dev.agentdeck.dashboard-firmware', board: 'xteink_x3', updateChannel: 'stable',
+    })).toThrow(/product and board do not match/i);
+    expect(() => __wifiOtaTestApi.stageEsp32Fw('xteink_x3', firmware, {
+      productId: 'io.pocketdaily.reader', board: 'xteink_x3', updateChannel: 'beta',
+    })).toThrow(/update channel do not match/i);
+  });
 });

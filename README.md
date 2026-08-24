@@ -148,8 +148,12 @@ the daemon's entire internal WebSocket API a public contract.
 
 | Project | Level | Surface profile | What it does |
 |---|---|---|---|
-| [Pocket Daily Reader](https://github.com/puritysb/crosspoint-reader) | Community | `portable-reader/v1` | Independent offline-first e-reader. Pulls bounded cards and Glance, records choices offline, and keeps AgentDeck as an invisible sync source. |
+| [Pocket Daily Reader](https://github.com/puritysb/pocket-daily-reader) | Community | `portable-reader/v1` | Independent offline-first e-reader. Pulls bounded cards and Glance, records choices offline, and keeps AgentDeck as an invisible sync source. Published manifest remains `community` / `untested`. |
 | [companion-module-agentdeck](https://github.com/houtacheng/companion-module-agentdeck) | Community | `companion-control/v1` | Independent Bitfocus Companion module for session tiles, approval controls, usage gauges, and status creatures (by [@houtacheng](https://github.com/houtacheng)). |
+
+Pocket Daily's complete Feed/Outbox/OTA runtime is provided by the Node CLI daemon.
+The macOS app's Swift daemon intentionally negotiates only its weather Feed subset;
+see the [runtime status](docs/surface-protocol.md#rollout-status).
 
 Compatibility levels are **Community**, **Verified Compatible**, and **Official**.
 Verified Compatible means a named release passed the published manifest and
@@ -206,6 +210,7 @@ Full build-from-source and manual steps: **[docs/install.md](docs/install.md)**.
 - **Switch modes** — cycle Plan / Accept Edits / Default
 - **Quick actions** — GO ON / REVIEW / COMMIT / CLEAR, plus custom prompt templates
 - **Usage gauges** — subscription quota with reset countdowns
+- **Weather context** — optional Apple Weather conditions on the macOS Dashboard; attributed seven-day Glance and offline cues for portable readers
 - **Subagent count** — how many children a session has running, beside its own state
 - **Voice** — push-to-talk and wake word, on-device via Apple SFSpeech, no model download
 - **Display sync** — host sleep dims every surface; wake restores them
