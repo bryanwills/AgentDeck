@@ -11,7 +11,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentDeck — Stop Chatting. Start Steering.</title>
-<meta name="description" content="AgentDeck is a physical control surface for AI coding agents — one bridge, 26 display surfaces: Stream Deck+, e-ink readers, tablets, ESP32 displays, LED matrices, HID decks, and terminals.">
+<meta name="description" content="AgentDeck is a physical control surface for AI coding agents — one bridge, 27 display surfaces: Stream Deck+, e-ink readers, tablets, ESP32 displays, LED matrices, HID decks, and terminals.">
 <!--
   Social cards. Absolute URLs are required: og:image is fetched by crawlers that
   have no page context, so a relative path silently yields a bare link preview.
@@ -25,7 +25,7 @@
 <meta property="og:image:alt" content="A desk running AgentDeck across many surfaces at once — Stream Deck+, Ulanzi D200H, tablets, e-ink panels, ESP32 displays, and LED matrices">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="AgentDeck — Stop Chatting. Start Steering.">
-<meta name="twitter:description" content="Put your AI coding agents on a physical control surface. One local daemon, 26 live display surfaces.">
+<meta name="twitter:description" content="Put your AI coding agents on a physical control surface. One local daemon, 27 live display surfaces.">
 <meta name="twitter:image" content="https://puritysb.github.io/AgentDeck/media/setup-full.jpg">
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -168,7 +168,7 @@
   h1 { font-size: clamp(44px, 6vw, 72px); letter-spacing: -0.035em; line-height: 1.02; margin: 0 0 var(--s-4); }
   .tagline { color: var(--coral-700); font-weight: 600; }
   .lede { font-size: 18px; color: var(--ink-700); max-width: 62ch; margin: 0 auto var(--s-6); }
-  .cta { display: flex; gap: var(--s-3); justify-content: center; flex-wrap: wrap; margin-bottom: var(--s-8); }
+  .cta { display: flex; gap: var(--s-3); justify-content: center; flex-wrap: wrap; }
   .btn {
     display: inline-flex; align-items: center; gap: var(--s-2); text-decoration: none; font-weight: 600; font-size: 15px;
     padding: var(--s-3) var(--s-5); border-radius: var(--r-pill); border: 1px solid transparent;
@@ -177,15 +177,28 @@
   .btn-primary:hover { background: var(--kelp-500); }
   .btn-ghost { background: var(--tide-100); color: var(--ink-800); border-color: var(--tide-200); }
   .btn-ghost:hover { background: var(--tide-200); }
-  .android-callout {
-    display: flex; align-items: center; justify-content: space-between; gap: var(--s-6);
-    margin: var(--s-8) auto 0; max-width: 920px; padding: var(--s-5) var(--s-6);
-    text-align: left; background: var(--tide-100); border: 1px solid var(--tide-200);
-    border-radius: var(--r-2xl); box-shadow: var(--sh-card);
+  .get-started { margin: var(--s-10) auto 0; text-align: left; }
+  .get-started-head { max-width: 660px; margin: 0 auto var(--s-5); text-align: center; }
+  .get-started-head .eyebrow {
+    margin: 0 0 var(--s-1); color: var(--kelp-700); font-family: var(--font-mono);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
   }
-  .android-callout strong { display: block; margin-bottom: var(--s-1); font-size: 17px; color: var(--ink-900); }
-  .android-callout p { margin: 0; color: var(--ink-500); font-size: 14px; }
-  .android-callout .actions { display: flex; gap: var(--s-2); flex: 0 0 auto; flex-wrap: wrap; }
+  .get-started h2 { margin: 0 0 var(--s-2); font-size: clamp(26px, 3vw, 34px); }
+  .get-started-head p:last-child { margin: 0; color: var(--ink-500); }
+  .access-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-3); }
+  .access-card {
+    display: flex; min-width: 0; flex-direction: column; padding: var(--s-5);
+    background: var(--tide-100); border: 1px solid var(--tide-200); border-radius: var(--r-2xl);
+  }
+  .access-card.primary { border-color: var(--kelp-300); box-shadow: var(--sh-card); }
+  .access-role {
+    color: var(--coral-700); font-family: var(--font-mono); font-size: 11px;
+    font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .access-card h3 { margin: var(--s-2) 0 var(--s-1); font-size: 19px; }
+  .access-card p { margin: 0 0 var(--s-4); color: var(--ink-500); font-size: 14px; }
+  .access-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: auto; }
+  .access-actions .btn { padding: 9px 14px; font-size: 13px; }
 
   /* ── Stat strip ── */
   .stats { display: flex; justify-content: center; gap: var(--s-10); flex-wrap: wrap; margin: var(--s-8) 0 0; }
@@ -242,7 +255,8 @@
   @media (max-width: 720px) {
     /* GNB responsive rules live in the canonical GNB-CSS block above. */
     .wrap { padding: var(--s-12) var(--s-4) var(--s-16); }
-    .android-callout { align-items: flex-start; flex-direction: column; }
+    .access-grid { grid-template-columns: 1fr; }
+    .get-started { margin-top: var(--s-8); }
   }
 </style>
 </head>
@@ -280,24 +294,46 @@
       across 27 surfaces — and lets you steer them without leaving the keyboard.
     </p>
     <div class="cta">
-      <a class="btn btn-primary" href="https://apps.apple.com/us/app/agentdeck-dashboard/id6784822497" data-i18n="cta.appstore">Get the Mac app</a>
-      <a class="btn btn-primary" href="https://play.google.com/store/apps/details?id=dev.agentdeck" data-i18n="cta.play">Get it on Google Play</a>
-      <a class="btn btn-ghost" href="https://marketplace.elgato.com/product/agentdeck-dce3806b-176e-40f2-be7d-e029bec0f464" data-i18n="cta.streamdeck">Get the Stream Deck plugin</a>
-      <a class="btn btn-ghost" href="https://www.npmjs.com/package/@agentdeck/setup" data-i18n="cta.npm">Install the CLI (npm)</a>
-      <a class="btn btn-ghost" href="https://ugc.ulanzistudio.com/contentView/1141" data-i18n="cta.ulanzi">Get the Ulanzi D200H plugin</a>
-      <a class="btn btn-ghost" href="hardware/" data-i18n="cta.devices">Explore the devices</a>
+      <a class="btn btn-primary" href="#get-agentdeck" data-i18n="cta.start">Choose your setup</a>
       <a class="btn btn-ghost" href="demo/" data-i18n="cta.demo">Try the live preview</a>
     </div>
-    <aside class="android-callout" aria-label="Android setup">
-      <div>
-        <strong data-i18n="android.h">Android needs AgentDeck on your computer</strong>
-        <p data-i18n="android.p">The Android app is a companion dashboard. Start the Mac app or run <code>npx @agentdeck/setup</code> on macOS, Windows, or Linux, then keep both devices on the same network.</p>
+    <section id="get-agentdeck" class="get-started" aria-labelledby="get-agentdeck-title">
+      <div class="get-started-head">
+        <p class="eyebrow" data-i18n="get.eyebrow">Get AgentDeck</p>
+        <h2 id="get-agentdeck-title" data-i18n="get.h">Start on your computer</h2>
+        <p data-i18n="get.p">The AgentDeck hub runs on your computer. Everything else connects as an optional companion surface.</p>
       </div>
-      <div class="actions">
-        <a class="btn btn-ghost" href="https://play.google.com/store/apps/details?id=dev.agentdeck" data-i18n="android.install">Install Android app</a>
-        <a class="btn btn-ghost" href="https://github.com/puritysb/AgentDeck/blob/master/docs/android.md#quick-start-google-play-or-github-apk" data-i18n="android.guide">3-step setup guide</a>
+      <div class="access-grid">
+        <article class="access-card primary">
+          <span class="access-role" data-i18n="hub.role">1 · Computer hub</span>
+          <h3 data-i18n="hub.h">Run AgentDeck</h3>
+          <p data-i18n="hub.p">Choose the native Mac app, or use the CLI on macOS, Windows, and Linux.</p>
+          <div class="access-actions">
+            <a class="btn btn-primary" href="https://apps.apple.com/app/id6784822497" data-i18n="hub.appstore">Mac App Store</a>
+            <a class="btn btn-ghost" href="https://www.npmjs.com/package/@agentdeck/setup" data-i18n="hub.npm">CLI · macOS / Windows / Linux</a>
+          </div>
+        </article>
+        <article class="access-card">
+          <span class="access-role" data-i18n="companion.role">Optional · Companion apps</span>
+          <h3 data-i18n="companion.h">Keep sessions in view</h3>
+          <p data-i18n="companion.p">iPhone, iPad, and Android mirror the hub over your local network. They do not run the hub themselves.</p>
+          <div class="access-actions">
+            <a class="btn btn-ghost" href="https://apps.apple.com/app/id6784822497" data-i18n="companion.apple">iPhone &amp; iPad</a>
+            <a class="btn btn-ghost" href="https://play.google.com/store/apps/details?id=dev.agentdeck" data-i18n="companion.android">Android · Google Play</a>
+            <a class="btn btn-ghost" href="https://github.com/puritysb/AgentDeck/blob/master/docs/android.md#quick-start-google-play-or-github-apk" data-i18n="companion.guide">Setup guide</a>
+          </div>
+        </article>
+        <article class="access-card">
+          <span class="access-role" data-i18n="hardware.role">Optional · Hardware controls</span>
+          <h3 data-i18n="hardware.h">Put controls on your desk</h3>
+          <p data-i18n="hardware.p">Add Stream Deck or Ulanzi D200H/D200X through each maker's marketplace.</p>
+          <div class="access-actions">
+            <a class="btn btn-ghost" href="https://marketplace.elgato.com/product/agentdeck-dce3806b-176e-40f2-be7d-e029bec0f464" data-i18n="hardware.streamdeck">Elgato Marketplace</a>
+            <a class="btn btn-ghost" href="https://ugc.ulanzistudio.com/contentView/1141" data-i18n="hardware.ulanzi">Ulanzi Marketplace</a>
+          </div>
+        </article>
       </div>
-    </aside>
+    </section>
     <div class="stats">
       <div class="stat"><div class="n">27</div><div class="l" data-i18n="stat.surfaces">display surfaces</div></div>
       <div class="stat"><div class="n">4</div><div class="l" data-i18n="stat.agents">coding agents</div></div>
@@ -431,17 +467,27 @@
       ko: {
         'hero.kicker': 'AI 코딩 에이전트를 위한 피지컬 컨트롤 서피스',
         'hero.lede': 'AgentDeck은 코딩 에이전트를 책상 위로 꺼내 놓습니다. 하나의 데몬 허브가 모든 세션을 27개 서피스에 라이브로 렌더링하고 — 키보드를 떠나지 않고 조종하게 해줍니다.',
-        'cta.appstore': 'Mac 앱 받기',
-        'cta.play': 'Google Play에서 받기',
-        'cta.streamdeck': 'Stream Deck 플러그인 받기',
-        'cta.npm': 'CLI 설치 (npm)',
-        'cta.ulanzi': 'Ulanzi D200H 플러그인 받기',
-        'cta.devices': '디바이스 살펴보기',
+        'cta.start': '내 환경에 맞게 시작하기',
         'cta.demo': '라이브 프리뷰 열기',
-        'android.h': 'Android에서는 컴퓨터의 AgentDeck이 필요합니다',
-        'android.p': 'Android 앱은 컴패니언 대시보드입니다. Mac 앱을 실행하거나 macOS·Windows·Linux에서 <code>npx @agentdeck/setup</code>을 실행한 뒤, 두 기기를 같은 네트워크에 두세요.',
-        'android.install': 'Android 앱 설치',
-        'android.guide': '3단계 설정 가이드',
+        'get.eyebrow': 'AgentDeck 시작하기',
+        'get.h': '컴퓨터에서 먼저 시작하세요',
+        'get.p': 'AgentDeck 허브는 컴퓨터에서 실행됩니다. 앱과 하드웨어는 필요할 때 연결하는 컴패니언 서피스입니다.',
+        'hub.role': '1 · 컴퓨터 허브',
+        'hub.h': 'AgentDeck 실행',
+        'hub.p': '네이티브 Mac 앱을 사용하거나 macOS·Windows·Linux에서 CLI를 실행하세요.',
+        'hub.appstore': 'Mac App Store',
+        'hub.npm': 'CLI · macOS / Windows / Linux',
+        'companion.role': '선택 · 컴패니언 앱',
+        'companion.h': '어디서든 세션 확인',
+        'companion.p': 'iPhone·iPad·Android가 로컬 네트워크에서 허브 화면을 이어받습니다. 앱 자체가 허브를 실행하지는 않습니다.',
+        'companion.apple': 'iPhone · iPad',
+        'companion.android': 'Android · Google Play',
+        'companion.guide': '설정 가이드',
+        'hardware.role': '선택 · 하드웨어 컨트롤',
+        'hardware.h': '책상 위에서 직접 조종',
+        'hardware.p': 'Stream Deck 또는 Ulanzi D200H/D200X를 각 제조사의 마켓플레이스에서 추가하세요.',
+        'hardware.streamdeck': 'Elgato 마켓플레이스',
+        'hardware.ulanzi': 'Ulanzi 마켓플레이스',
         'stat.surfaces': '디스플레이 서피스',
         'stat.agents': '코딩 에이전트',
         'stat.local': '로컬 — 클라우드 없음',
@@ -467,17 +513,27 @@
       ja: {
         'hero.kicker': 'AIコーディングエージェントのためのフィジカルコントロールサーフェス',
         'hero.lede': 'AgentDeckはコーディングエージェントを机の上に連れ出します。ひとつのdaemonハブがすべてのセッションを27のサーフェスにライブ描画し — キーボードを離れずに操縦させてくれます。',
-        'cta.appstore': 'Macアプリを入手',
-        'cta.play': 'Google Playで入手',
-        'cta.streamdeck': 'Stream Deckプラグインを入手',
-        'cta.npm': 'CLIをインストール (npm)',
-        'cta.ulanzi': 'Ulanzi D200Hプラグインを入手',
-        'cta.devices': 'デバイスを見る',
+        'cta.start': '環境に合わせて始める',
         'cta.demo': 'ライブプレビューを試す',
-        'android.h': 'Androidにはパソコン側のAgentDeckが必要です',
-        'android.p': 'Androidアプリはコンパニオンダッシュボードです。Macアプリを起動するか、macOS・Windows・Linuxで<code>npx @agentdeck/setup</code>を実行し、両方の端末を同じネットワークに接続してください。',
-        'android.install': 'Androidアプリをインストール',
-        'android.guide': '3ステップ設定ガイド',
+        'get.eyebrow': 'AgentDeckを始める',
+        'get.h': 'まずパソコンで始めましょう',
+        'get.p': 'AgentDeckハブはパソコンで動作します。アプリとハードウェアは必要に応じて接続するコンパニオンサーフェスです。',
+        'hub.role': '1 · パソコンのハブ',
+        'hub.h': 'AgentDeckを実行',
+        'hub.p': 'ネイティブMacアプリ、またはmacOS・Windows・Linux対応のCLIを選べます。',
+        'hub.appstore': 'Mac App Store',
+        'hub.npm': 'CLI · macOS / Windows / Linux',
+        'companion.role': 'オプション · コンパニオンアプリ',
+        'companion.h': 'どこでもセッションを確認',
+        'companion.p': 'iPhone・iPad・Androidはローカルネットワーク経由でハブを映します。アプリ自体がハブを実行するわけではありません。',
+        'companion.apple': 'iPhone · iPad',
+        'companion.android': 'Android · Google Play',
+        'companion.guide': '設定ガイド',
+        'hardware.role': 'オプション · ハードウェア操作',
+        'hardware.h': '机の上から直接操作',
+        'hardware.p': 'Stream DeckまたはUlanzi D200H/D200Xを各メーカーのマーケットプレイスから追加できます。',
+        'hardware.streamdeck': 'Elgato Marketplace',
+        'hardware.ulanzi': 'Ulanzi Marketplace',
         'stat.surfaces': 'ディスプレイサーフェス',
         'stat.agents': 'コーディングエージェント',
         'stat.local': 'ローカル — クラウドなし',

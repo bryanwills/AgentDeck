@@ -8,15 +8,16 @@ one-command path in [README → Start here](../README.md#start-here) instead.
 | Item | Required | Install |
 |------|----------|---------|
 | **macOS 26+** | Yes (App Store dashboard) | Primary Swift dashboard platform. Foundation Models integration requires Apple Intelligence availability at runtime. |
-| **macOS 15+** (Sequoia) | Yes (Node bridge) | CLI daemon / Stream Deck plugin host. Windows 11 bridge support is below; Linux not supported |
+| **macOS 15+** (Sequoia) | Yes (Node bridge) | CLI daemon / deck-plugin host. Windows 11 and Linux are also supported; see [Windows](windows.md) and [Linux](linux.md). |
 | **Xcode Command Line Tools** | Only if the prebuilt fails | `xcode-select --install`. `npx @agentdeck/setup` installs node-pty's prebuilt binary and falls back to a source build — which is the only step needing a compiler |
 | **Node.js** >= 22 | Yes | `brew install node` |
 | **pnpm** >= 9 | Yes | `npm install -g pnpm` |
 | **Python 3** | Yes | `brew install python` (display sleep detection) |
-| **Elgato Stream Deck app** >= 6.7 | For Stream Deck only | [Elgato Downloads](https://www.elgato.com/downloads). The daemon runs headless — D200H, the macOS app, `agentdeck dashboard` and ESP32 boards need none of it |
-| **Elgato Stream Deck hardware** | For Stream Deck only | 15-key, Mini, or Stream Deck+ |
+| **Elgato Stream Deck app** >= 6.9 | For Stream Deck only | [Elgato Downloads](https://www.elgato.com/downloads). The daemon runs headless — Ulanzi D200H/D200X, the macOS app, `agentdeck dashboard`, and ESP32 boards need none of it. |
+| **Elgato Stream Deck hardware** | For Stream Deck only | Stream Deck, Mini, XL, Plus, or + XL |
+| **Ulanzi Studio** | For D200H/D200X only | [Ulanzi Download Center](https://www.ulanzi.com/pages/downloads). Install AgentDeck from the separate [Ulanzi Studio Marketplace](https://ugc.ulanzistudio.com/contentView/1141). |
 | **iTerm2** | For PTY session management | Terminal management, voice paste, session switching |
-| **Claude Code CLI** | Yes | `npm install -g @anthropic-ai/claude-code` |
+| **Supported coding agent** | For live sessions | Claude Code, Codex, OpenCode, Kiro CLI/IDE, OpenClaw, or Antigravity; observation depth differs by agent. |
 | **JDK 17+** | For Android | `brew install openjdk@17` |
 | **Stream Deck CLI** | Auto | Installed by `pnpm setup` if missing |
 | **Microphone + Speech Recognition** | For voice | Grant on first use (macOS Settings → Privacy). No sox, whisper, or model download — Apple SFSpeech on-device |
@@ -68,13 +69,21 @@ cd plugin && streamdeck link bound.serendipity.agentdeck.sdPlugin
 
 Creates a symlink in `~/Library/Application Support/com.elgato.StreamDeck/Plugins/`. **Restart the Stream Deck app** to load. Unlink before installing the Marketplace build — two copies of the same UUID conflict.
 
-## 3. Link `agentdeck` CLI
+## 3. Install the Ulanzi Studio Plugin
+
+Install [AgentDeck from the Ulanzi Studio Marketplace](https://ugc.ulanzistudio.com/contentView/1141). The public 1.0.3 build supports D200H; 1.0.4 is under review and adds D200X LCD-key support. D200X encoders are not supported. Ulanzi Studio is a separate host from Elgato Stream Deck, so Stream Deck plugins cannot be installed onto a D200H or D200X.
+
+For a development checkout or manual package verification, follow
+[plugin-ulanzi/VERIFY.md](../plugin-ulanzi/VERIFY.md) instead of hand-building the
+Marketplace archive.
+
+## 4. Link `agentdeck` CLI
 
 ```bash
 cd bridge && pnpm link --global
 ```
 
-## 4. Voice Setup (Zero install)
+## 5. Voice Setup (Zero install)
 
 Voice input uses Apple's on-device `SFSpeechRecognizer` (Speech framework). **No sox, no whisper.cpp, no model downloads** — the OS manages the dictation model via Settings → General → Keyboard → Dictation, which AgentDeck piggybacks on. The only user action is granting Microphone + Speech Recognition permission the first time the voice button is pressed (macOS shows the standard TCC prompts backed by `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription`).
 

@@ -8,6 +8,7 @@
   <a href="https://apps.apple.com/app/id6784822497"><img src="https://img.shields.io/badge/App%20Store-Mac%20%C2%B7%20iPhone%20%C2%B7%20iPad-1f6157.svg?logo=apple" alt="App Store — Mac, iPhone, and iPad"></a>
   <a href="https://play.google.com/store/apps/details?id=dev.agentdeck"><img src="https://img.shields.io/badge/Google%20Play-Android-1f6157.svg?logo=googleplay" alt="Google Play — Android"></a>
   <a href="https://marketplace.elgato.com/product/agentdeck-dce3806b-176e-40f2-be7d-e029bec0f464"><img src="https://img.shields.io/badge/Elgato%20Marketplace-Stream%20Deck%20plugin-1f6157.svg" alt="Elgato Marketplace"></a>
+  <a href="https://ugc.ulanzistudio.com/contentView/1141"><img src="https://img.shields.io/badge/Ulanzi%20Marketplace-Studio%20plugin-1f6157.svg" alt="Ulanzi Marketplace"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="https://www.npmjs.com/package/@agentdeck/setup"><img src="https://img.shields.io/npm/v/@agentdeck/setup.svg" alt="npm version"></a>
   <a href="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml"><img src="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -71,9 +72,10 @@ subscription quota gauges, ADB-driven Android/e-ink surfaces, PTY session
 launching, and cross-machine remote attach. The exact split is documented in
 [docs/appstore-feature-matrix.md](docs/appstore-feature-matrix.md).
 
-**You need:** macOS 15+ (or Windows 11 — see [docs/windows.md](docs/windows.md), or
-Linux — see [docs/linux.md](docs/linux.md)), Node.js 22+, and at least one agent CLI
-(Claude Code, Codex, or OpenCode).
+**The CLI path needs:** macOS 15+, Windows 11 ([guide](docs/windows.md)), or Linux
+([guide](docs/linux.md)); Node.js 22+; and at least one supported agent. The native
+App Store dashboard instead requires macOS 26+ and needs no Node.js. iPhone/iPad
+companions require iOS/iPadOS 17+.
 
 ### 2. Look at it — no hardware required
 
@@ -131,7 +133,7 @@ to the same daemon and can be added in any order:
 | **iOS / Android AgentDeck Companion** | iPhone/iPad use the same [App Store listing](https://apps.apple.com/app/id6784822497); Android installs from [Google Play](https://play.google.com/store/apps/details?id=dev.agentdeck). Both pair with a daemon over the LAN. |
 | **AgentDeck ESP32 Dashboard Firmware** | Flash panels and InkDeck from [**puritysb.github.io/AgentDeck/flash/**](https://puritysb.github.io/AgentDeck/flash/) or run `agentdeck esp32 flash <board>`. After the first USB flash, supported boards update over Wi-Fi OTA. |
 | **Official Stream Deck integration** | Install for Stream Deck / Mini / XL / Plus / + XL from the [Elgato Marketplace](https://marketplace.elgato.com/product/agentdeck-dce3806b-176e-40f2-be7d-e029bec0f464). |
-| **Official Ulanzi integration** | Install from the [Ulanzi Studio Marketplace](https://ugc.ulanzistudio.com/contentView/1141) — the published 1.0.3 covers the D200H; D200X LCD keys are in the repository and ship with the next submission, and D200X encoders are not supported at all. Building it yourself: [plugin-ulanzi/VERIFY.md](plugin-ulanzi/VERIFY.md). |
+| **Official Ulanzi integration** | Install from the [Ulanzi Studio Marketplace](https://ugc.ulanzistudio.com/contentView/1141). Version 1.0.3 is live for D200H; 1.0.4 is under review and adds D200X LCD-key support. D200X encoders remain unsupported. See the [listing/review status](marketplace/ulanzi/LISTING.md) or [build it yourself](plugin-ulanzi/VERIFY.md). |
 | **Official device integrations** | Pixoo64, TC001, Timebox, and iDotMatrix are driven by the daemon — see [docs/devices.md](docs/devices.md). |
 
 > **Android, Stream Deck, and Ulanzi are companion surfaces.** They talk to the
@@ -221,14 +223,17 @@ Full build-from-source and manual steps: **[docs/install.md](docs/install.md)**.
 |---|---|---|
 | **Claude Code** | Supported (primary) | Lifecycle hooks |
 | **Codex CLI** | Supported | Lifecycle hooks + rollout JSONL |
+| **Codex Desktop** | Observed (macOS; Windows verification pending) | Lifecycle hooks + rollout JSONL |
 | **OpenCode** | Supported | Observer plugin (SSE) |
-| **Kiro** | Observed | Kiro's own transcript, polled |
+| **Kiro CLI / IDE** | Observed | Kiro's own transcript, polled |
+| **Antigravity** | Observed (CLI daemon) | Passive process/session observation |
 | **OpenClaw** | Experimental | Gateway |
 
 State comes from agent-native lifecycle and event channels — hooks for Claude Code
-and Codex, OpenCode SSE, and the OpenClaw Gateway — rather than terminal-screen
-scraping. CLI-managed sessions retain an optional terminal UI observer only for
-real mode/diff/option affordances that those lifecycle payloads do not expose.
+and Codex, OpenCode SSE, the OpenClaw Gateway, Kiro transcript polling, and passive
+Antigravity process/session observation — rather than terminal-screen scraping.
+CLI-managed sessions retain an optional terminal UI observer only for real
+mode/diff/option affordances that those lifecycle payloads do not expose.
 
 **Kiro is observed, never managed.** Run `kiro-cli` or the Kiro IDE exactly as
 usual; there is no `agentdeck kiro` command, because Kiro's hook surface does not
@@ -251,7 +256,7 @@ disagree.
 ```
                               ┌── Daemon (port 9120, sole hub) ──┐
 Stream Deck Plugin ◄── WS ──►│                                   │
-D200H via Studio  ◄── WS ──►│                                   │
+Ulanzi Studio keys ◄── WS ──►│                                   │
 Android Dashboard  ◄── WS ──►│  WS Server + mDNS + Device Mods   │
 Apple Dashboard    ◄── WS ──►│  Gateway Proxy + Usage Relay      │
 TUI Dashboard      ◄── WS ──►│  Pixoo + ESP32 + Timebox + SSE    │
@@ -265,7 +270,7 @@ Agent Hooks     ─── HTTP ───►│  Hook Server → State Machine   
 ```
 
 One daemon aggregates every session and broadcasts to every surface. Interactive
-surfaces (Stream Deck, D200H, Android, Apple) can steer when a PTY-managed session
+surfaces (Stream Deck, Ulanzi D200H/D200X keys, Android, Apple) can steer when a PTY-managed session
 supplies real options; observed sessions remain display-only. On macOS the SwiftUI
 app ships a **standalone in-process Swift dashboard daemon** with no Node.js. The
 PTY Session Bridge remains a CLI feature.
