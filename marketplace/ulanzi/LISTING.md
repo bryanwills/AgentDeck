@@ -10,10 +10,23 @@ content-record mismatch reported in the original support thread with the
 reproduction URL and AgentDeck UUID/category. **Resolved:** the published record
 is `/contentView/1141` and resolves to AgentDeck.
 
-## 1.0.4 — the catch-up submission (2026-08-24)
+## 1.0.4 — the catch-up submission (2026-08-24, submitted)
 
-Prepared as a *Create review version* against the published 1.0.3, which keeps
-serving downloads throughout. What it carries, and why each item is in a
+**Submitted 2026-08-24** as a *Create review version* against the published
+1.0.3. Verified after the press, both halves: Personal Center reads
+`Works under review: 1` (card shows the update note), and `contentView/1141`
+still serves **Version 1.0.3 / Office / D200, D200H** — the published record is
+untouched, exactly as the dialog promises. Portal-side values were read back
+before submitting rather than assumed: all seven `Summary` / `Detailed
+introduction` pairs matched this file's character counts exactly (中文 141/505,
+English 260/988, German 260/982, Japanese 149/710, Korean 159/720, Portuguese
+271/921, Spanish 270/943), and the update note measured 965/1000.
+
+One thing the form does on its own and one it gets wrong: parsing the uploaded
+ZIP prefills **Version `1.0.4`** from the manifest, and it pre-selects **every**
+supported device — `Dial` included — so the device set has to be corrected by
+hand on each submission. Deselecting it is not cosmetic: the plugin declares no
+Dial support and the encoders are unimplemented. What it carries, and why each item is in a
 storefront submission rather than only in a release:
 
 - **`Devices: ["D200H", "D200X"]`** — the D200X keypad, requested in issue #174.
@@ -45,7 +58,7 @@ Also in this build:
 • German, Spanish and Portuguese join the plugin's own localization (the palette entry, the setup panel and the H5 tutorial), and the Traditional Chinese description was corrected
 • Listing copy and media refreshed: the deck shown now spans all six supported agents
 
-Still a thin client: no bundled daemon, no USB HID access, no analytics. It needs the free AgentDeck daemon on the same computer — the Mac App Store app, or `npx @agentdeck/setup` on macOS and Windows.
+Still a thin client: no bundled daemon, no USB HID access, no analytics. It needs the free AgentDeck daemon on the same computer — the Mac App Store app, or npx @agentdeck/setup on macOS and Windows.
 ```
 
 ## Published — 1.0.3 is live (measured 2026-08-24)

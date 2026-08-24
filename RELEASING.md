@@ -317,7 +317,7 @@ The live version is verifiable without signing in to the Maker Console: the prod
 
 ### Ulanzi plugin
 
-`1.0.3` was uploaded on 2026-08-07 and **published on or before 2026-08-24** — the first AgentDeck version ever live on this Marketplace. `1.0.4` is the catch-up submission prepared the same day (D200X keypad, the three agents the published build predates, three new locales, `AI` sub-category, restored seven-language copy, refreshed media).
+`1.0.3` was uploaded on 2026-08-07 and **published on or before 2026-08-24** — the first AgentDeck version ever live on this Marketplace. `1.0.4` was **submitted the same day** as a *Create review version* (D200X keypad, the three agents the published build predates, three new locales, `AI` sub-category, restored seven-language copy, refreshed media); 1.0.3 keeps serving while it is reviewed, verified on the public page after the press.
 
 **An update is a new review version, not an edit of the live listing.** The portal was rebuilt some time between 2026-08-08 and 2026-08-24: the published card's pencil now opens *Create review version*, which states that "the published version stays unchanged and remains available until the new version is approved". That retires the old rule that a version under review must not be touched — it applied when the record under review *was* the only record. The live 1.0.3 listing keeps serving downloads while 1.0.4 is reviewed.
 
