@@ -17,6 +17,7 @@ import { fileURLToPath } from 'url';
  */
 const bridgeRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const plistPath = join(bridgeRoot, 'fm-helper', 'Info.plist');
+const sourcePath = join(bridgeRoot, 'fm-helper', 'AgentDeckFMHelper.swift');
 const scriptPath = join(bridgeRoot, 'scripts', 'build-fm-helper.mjs');
 const binaryPath = join(bridgeRoot, 'assets', 'fm-helper', 'agentdeck-fm-helper');
 
@@ -85,6 +86,17 @@ describe('fm-helper build invariants', () => {
     expect(bundleId).toBeTruthy();
     expect(script).toContain('codesign');
     expect(script).toContain(`'${bundleId}'`);
+  });
+
+  it('exposes instruction-less eval sessions and the native output limit', () => {
+    const source = codeOnly(readFileSync(sourcePath, 'utf8'));
+    expect(source).toContain('let instructionsMode: String?');
+    expect(source).toContain('request.instructionsMode == "none"');
+    expect(source).toContain('let maximumResponseTokens: Int?');
+    expect(source).toContain('maximumResponseTokens: maximumResponseTokens');
+    expect(source).toContain('"generationProtocol": 2');
+    expect(source).toContain('case .exceededContextWindowSize:');
+    expect(source).toContain('return "unsupportedLanguageOrLocale"');
   });
 
   // Only meaningful where a dev build has run (`pnpm --filter @agentdeck/bridge

@@ -10,7 +10,11 @@ struct HelperRequest: Decodable {
     let type: String?
     let prompt: String?
     let instructions: String?
+    /// `none` creates a real instruction-less Foundation Models session.
+    /// Omitted preserves AgentDeck's strict-JSON evaluator default.
+    let instructionsMode: String?
     let temperature: Double?
+    let maximumResponseTokens: Int?
     /// `transcribe`: absolute path to a WAV file the daemon already wrote.
     let wav: String?
     /// BCP-47 locale hint, e.g. "ko-KR". Falls back to the current locale then en-US.
@@ -113,14 +117,25 @@ struct AgentDeckFMHelper {
             }
 
             do {
-                let session = LanguageModelSession(
-                    instructions: request.instructions ?? "You are an exacting code evaluator. Reply with strict JSON only."
+                let instructions: String? = request.instructionsMode == "none"
+                    ? nil
+                    : request.instructions ?? "You are an exacting code evaluator. Reply with strict JSON only."
+                let session = LanguageModelSession(instructions: instructions)
+                let maximumResponseTokens = request.maximumResponseTokens.map {
+                    max(1, min($0, 4_096))
+                }
+                let options = GenerationOptions(
+                    temperature: request.temperature ?? 0,
+                    maximumResponseTokens: maximumResponseTokens
                 )
-                let options = GenerationOptions(temperature: request.temperature ?? 0)
                 let response = try await session.respond(to: prompt, options: options)
                 write(["id": request.id, "text": response.content])
             } catch {
-                write(["id": request.id, "error": "session_error", "reason": String(describing: error)])
+                write([
+                    "id": request.id,
+                    "error": generationErrorCode(error),
+                    "reason": String(describing: error),
+                ])
             }
         } else {
             write(["id": request.id, "error": "unavailable", "reason": "macOS 26 or later required"])
@@ -129,6 +144,37 @@ struct AgentDeckFMHelper {
         write(["id": request.id, "error": "unavailable", "reason": "FoundationModels framework not present"])
 #endif
     }
+
+#if canImport(FoundationModels)
+    @available(macOS 26.0, *)
+    private static func generationErrorCode(_ error: Error) -> String {
+        guard let generationError = error as? LanguageModelSession.GenerationError else {
+            return "session_error"
+        }
+        switch generationError {
+        case .exceededContextWindowSize:
+            return "exceededContextWindowSize"
+        case .assetsUnavailable:
+            return "assetsUnavailable"
+        case .guardrailViolation:
+            return "guardrailViolation"
+        case .unsupportedGuide:
+            return "unsupportedGuide"
+        case .unsupportedLanguageOrLocale:
+            return "unsupportedLanguageOrLocale"
+        case .decodingFailure:
+            return "decodingFailure"
+        case .rateLimited:
+            return "rateLimited"
+        case .concurrentRequests:
+            return "concurrentRequests"
+        case .refusal:
+            return "refusal"
+        @unknown default:
+            return "session_error"
+        }
+    }
+#endif
 
     // MARK: - Speech to text
 
@@ -440,7 +486,7 @@ struct AgentDeckFMHelper {
 #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             if case .available = SystemLanguageModel.default.availability {
-                return ["id": id, "status": "ready"]
+                return ["id": id, "status": "ready", "generationProtocol": 2]
             }
             return ["id": id, "status": "unavailable", "reason": unavailableReason()]
         }
