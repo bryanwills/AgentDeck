@@ -26,6 +26,9 @@ export interface IncumbentHealth {
   mode?: string;
   pid?: number;
   isSwift?: boolean;
+  /** Digest of the built JavaScript this daemon STARTED with (may be absent
+   *  on a daemon older than the field). See daemon-build-identity.ts. */
+  build?: string;
   pairingToken?: string;
 }
 
@@ -88,10 +91,23 @@ const EXIT_WAIT_MS = 12_000;
 const BINDABLE_WAIT_MS = 30_000;
 
 export async function negotiateIncumbentDaemon(
-  args: { port: number; incumbent: IncumbentHealth | null; portWasExplicit: boolean },
+  args: {
+    port: number;
+    incumbent: IncumbentHealth | null;
+    portWasExplicit: boolean;
+    /** Digest of the build THIS process would start (daemon-build-identity.ts).
+     *  Absent when it could not be computed — which must read as "no
+     *  information", never as "different". */
+    localBuild?: string | null;
+    /** Replace an incumbent of ours that is running a different build.
+     *  Default true: `daemon start` is a request for this build to be the one
+     *  serving the port. `--no-upgrade` turns it off. */
+    replaceStaleBuild?: boolean;
+  },
   deps: TakeoverDeps,
 ): Promise<TakeoverOutcome> {
-  const { port, incumbent, portWasExplicit } = args;
+  const { port, incumbent, portWasExplicit, localBuild } = args;
+  const replaceStaleBuild = args.replaceStaleBuild !== false;
   if (incumbent?.mode !== 'daemon') return 'proceed';
 
   const log = deps.log ?? defaultLog;
@@ -131,8 +147,37 @@ export async function negotiateIncumbentDaemon(
   }
 
   if (!incumbent.isSwift) {
-    log(`Daemon already running on port ${port}. Use 'agentdeck daemon stop' first.`);
-    return 'already-running';
+    // Same code as the one we would start? Then it IS this daemon, and the
+    // command has already achieved what it asked for.
+    //
+    // A different build is a different answer, and the difference is invisible
+    // from outside: `dist/cli.js` is rewritten in place, so a daemon started
+    // before a rebuild keeps executing bytes that no longer exist on disk while
+    // reporting the same pid, port and version as one started after it. Exiting
+    // 0 there says "already running" about code the user just replaced. Both
+    // sides must be KNOWN to differ — an absent `build` (a daemon predating the
+    // field) is no information, and evicting on no information would make every
+    // start a restart.
+    const stale = !!localBuild && !!incumbent.build && incumbent.build !== localBuild;
+    if (!stale) {
+      log(`Daemon already running on port ${port}. Use 'agentdeck daemon stop' first.`);
+      return 'already-running';
+    }
+    if (!replaceStaleBuild) {
+      log(`Daemon already running on port ${port}, on an OLDER build `
+        + `(${incumbent.build} — this CLI is ${localBuild}).`);
+      log(`Left alone because --no-upgrade was passed. Run 'agentdeck daemon restart' to pick up the new build.`);
+      return 'already-running';
+    }
+    log(`Daemon on port ${port} (PID ${incumbent.pid ?? '?'}) is running build ${incumbent.build}; `
+      + `this CLI is build ${localBuild}.`);
+    log(`Restarting it so the port serves the current build (pass --no-upgrade to leave it alone).`);
+    await deps.shutdown(port);
+    return finishYield(true, { port, portWasExplicit }, deps, log, {
+      subject: `The previous daemon`,
+      onExplicitPort: `Run 'agentdeck daemon stop' and retry, or choose another port.`,
+      onFallbackPort: `For the canonical port, run 'agentdeck daemon stop' and retry.`,
+    });
   }
 
   if (deps.captureActivity) {
@@ -154,23 +199,46 @@ export async function negotiateIncumbentDaemon(
     acked = true; // shutdown is best-effort (no ack body); rely on the exit wait
   }
 
-  // Two conditions, not one. `waitForDaemonExit` proves the app stopped
-  // answering; `waitForBindable` proves the socket is actually gone. The app
-  // releases the port with NWListener.cancel(), which returns before the
-  // teardown completes — binding on the first signal alone is what silently
-  // demoted this daemon to the 9121 fallback and left the canonical port
-  // ownerless. The app's takeover-yield window is longer (45s), so it stays
-  // off the port until well after this wait has claimed it.
+  return finishYield(acked, { port, portWasExplicit }, deps, log, {
+    subject: `The AgentDeck app`,
+    onExplicitPort: `Quit the AgentDeck app and retry, or choose another port.`,
+    onFallbackPort: `For the canonical port, quit the AgentDeck app and retry, or pass -p.`,
+  });
+}
+
+/**
+ * Wait for an incumbent that has agreed to go away to actually be gone, and say
+ * what happened when it is not.
+ *
+ * Shared by both eviction paths — the macOS app standing down, and one of our
+ * own daemons being replaced because it runs an older build — because the wait
+ * is about the PORT, not about who was holding it.
+ *
+ * Two conditions, not one. `waitForExit` proves the incumbent stopped
+ * answering; `waitForBindable` proves the socket is actually gone. The app
+ * releases the port with NWListener.cancel(), which returns before the teardown
+ * completes — binding on the first signal alone is what silently demoted this
+ * daemon to the 9121 fallback and left the canonical port ownerless.
+ */
+async function finishYield(
+  acked: boolean,
+  args: { port: number; portWasExplicit: boolean },
+  deps: TakeoverDeps,
+  log: (msg: string) => void,
+  who: { subject: string; onExplicitPort: string; onFallbackPort: string },
+): Promise<TakeoverOutcome> {
+  const { port, portWasExplicit } = args;
+  const { subject } = who;
   const yielded = acked
     && await deps.waitForExit(port, EXIT_WAIT_MS)
     && await deps.waitForBindable(port, BINDABLE_WAIT_MS);
   if (yielded) {
-    log(`App daemon yielded port ${port}. Starting CLI daemon…`);
+    log(`${subject} yielded port ${port}. Starting CLI daemon…`);
     return 'proceed';
   }
 
-  // The app yielded but the PORT did not come back, and that is often not the
-  // app's doing: a WiFi device that has gone to sleep with bytes still queued
+  // The incumbent yielded but the PORT did not come back, and that is often not
+  // its doing: a WiFi device that has gone to sleep with bytes still queued
   // leaves its socket in LAST_ACK on this port, and TCP holds that until it
   // exhausts retransmits — minutes, sometimes. Network.framework exposes no
   // SO_LINGER, so the app cannot RST out of it (measured 2026-08-06: two
@@ -182,16 +250,15 @@ export async function negotiateIncumbentDaemon(
   // app itself re-reads when its yield window ends — so the deck keeps working.
   // What must NOT happen is this being silent, which is how the canonical port
   // ended up owned by nobody with the CLI reporting success.
-  log(`The AgentDeck app yielded port ${port} but the port has not been released `
+  log(`${subject} yielded port ${port} but the port has not been released `
     + `(usually a sleeping WiFi device holding a half-closed socket on it).`);
   if (portWasExplicit) {
     // The port was ASKED for, not defaulted to. Quietly binding a different one
     // would answer a question the user did not ask; an explicit choice fails
     // loudly instead.
-    log(`Quit the AgentDeck app and retry, or choose another port.`);
+    log(who.onExplicitPort);
     return 'refuse';
   }
-  log(`Starting on a fallback port instead — clients resolve it from daemon.json. `
-    + `For the canonical port, quit the AgentDeck app and retry, or pass -p.`);
+  log(`Starting on a fallback port instead — clients resolve it from daemon.json. ${who.onFallbackPort}`);
   return 'proceed';
 }

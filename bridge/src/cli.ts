@@ -4,7 +4,7 @@ import { Command, InvalidArgumentError } from 'commander';
 import { writeFileSync, unlinkSync, existsSync, realpathSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
-import { execFileSync, execSync, spawn } from 'child_process';
+import { execFileSync, execSync, spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { request } from 'http';
@@ -857,6 +857,108 @@ async function openDaemonLogs(logDir: string): Promise<[number, number]> {
 }
 
 
+/**
+ * Whether this command may rebuild stale workspace packages before it runs.
+ *
+ * `auto` is the default and means "yes, if a human is watching": the rebuild
+ * prints a compiler's worth of output and can fail, and the one caller with no
+ * human attached is the autostart unit (LaunchAgent / Scheduled Task / systemd),
+ * which runs `daemon start --foreground` at login with its stdio pointed at a
+ * log file. Building there would block the daemon behind a 30-second `tsc` and,
+ * on a broken tree, turn a failed build into a KeepAlive respawn loop. So a
+ * non-interactive start says what it found and starts the build it has.
+ */
+type BuildMode = 'auto' | 'force' | 'never';
+
+/** Read `--build` / `--no-build` as three states, not two. */
+function buildModeFrom(cmd: { getOptionValueSource?: (key: string) => string | undefined },
+                       opts: { build?: boolean }): BuildMode {
+  const source = cmd.getOptionValueSource?.('build');
+  if (source !== 'cli') return 'auto';
+  return opts.build === false ? 'never' : 'force';
+}
+
+/**
+ * Make this process the newest build on disk before it starts (or restarts) a
+ * daemon.
+ *
+ * On a dev checkout `agentdeck` is a shim onto `bridge/dist/cli.js`, so
+ * "latest version" means "whatever tsc last wrote" — and an edit that has not
+ * been built is invisible: the daemon comes up, reports success, and serves the
+ * previous build with nothing anywhere naming the gap.
+ *
+ * When a rebuild happens this function does NOT return: it re-executes the
+ * command from the top with `--no-build`. Continuing in place would leave a
+ * process that had already loaded the OLD `cli.js` dynamically importing the
+ * NEW `daemon-server.js` a moment later — a mixture of two builds that nobody
+ * chose and no version string describes.
+ *
+ * An installed (non-checkout) copy has no sources to compare and returns
+ * immediately.
+ */
+async function ensureLatestBuild(mode: BuildMode): Promise<void> {
+  const {
+    findSourceCheckout, findStaleSources, buildPackages, computeDistBuildIdentity,
+  } = await import('./daemon-build-identity.js');
+  const root = findSourceCheckout();
+  if (!root) return;
+  const stale = findStaleSources(root);
+  if (stale.length === 0) return;
+
+  const names = stale.map((s) => s.pkg).join(', ');
+  const newest = stale.reduce((a, b) => (a.sourceMtimeMs > b.sourceMtimeMs ? a : b));
+  const rel = newest.newestSource.startsWith(root) ? newest.newestSource.slice(root.length + 1) : newest.newestSource;
+  log(`Source is newer than the build in ${names} (newest: ${rel}).`);
+
+  if (mode === 'never') {
+    log(`Not rebuilding (--no-build) — running the build already on disk.`);
+    return;
+  }
+  if (mode === 'auto' && !process.stdout.isTTY) {
+    // Non-interactive: almost always the autostart unit, whose stdio is a log
+    // file. Say what was found; do not spend a compiler run on it. Building
+    // here would block the daemon behind `tsc` at login and, on a tree that
+    // does not compile, turn a failed build into a KeepAlive respawn loop.
+    log(`Not rebuilding (no terminal attached — this is the autostart path). `
+      + `Run 'pnpm build' and 'agentdeck daemon restart' to pick it up.`);
+    return;
+  }
+
+  log(`Rebuilding ${names} first (pass --no-build to skip)…`);
+  const before = computeDistBuildIdentity().id;
+  const result = buildPackages(root, stale.map((s) => s.pkg));
+  if (!result.ok) {
+    log(result.reason
+      ? `Could not run the build: ${result.reason}.`
+      : `Build FAILED — the compiler's errors are above.`);
+    // Refusing is the point. Starting here would run the previous build, which
+    // is exactly the silent substitution this check exists to prevent — and it
+    // would do it right after telling the user a build was needed.
+    log(`Not starting. Fix the build, or pass --no-build to start the previous build deliberately.`);
+    process.exit(1);
+  }
+
+  // Did the build actually produce different code? Very often it did not: an
+  // mtime moves for a rebase, a worktree switch or a plain `touch`, and a
+  // composite project then compiles nothing at all. Re-executing on that would
+  // charge a second process — and a second round of this same message — for a
+  // build that changed no byte, so the delta decides, not the fact that tsc ran.
+  const after = computeDistBuildIdentity().id;
+  if (after === before) {
+    log(`Build was already current (${after ?? 'unknown'}) — the timestamps had moved, the code had not.`);
+    return;
+  }
+
+  // From here the process itself is stale: it loaded the OLD `cli.js` and would
+  // dynamically import the NEW `daemon-server.js` a moment later. Start over.
+  const scriptPath = fileURLToPath(import.meta.url);
+  log(`Rebuilt (${before ?? 'unknown'} → ${after ?? 'unknown'}). Re-running with the new build…`);
+  const rerun = spawnSync(process.execPath, [scriptPath, ...process.argv.slice(2), '--no-build'], {
+    stdio: 'inherit',
+  });
+  process.exit(rerun.status ?? 1);
+}
+
 daemon
   .command('start')
   .description('Start monitoring daemon (WS + mDNS + Gateway proxy)')
@@ -873,9 +975,20 @@ daemon
   .option('--local', 'Disable all device modules (no mDNS, UDP beacon, LAN sweep, BLE, ADB or serial); still binds all interfaces for paired companion apps')
   .option('--loopback', 'Bind 127.0.0.1 only and emit nothing onto the LAN (no mDNS, UDP beacon, LAN sweep or BLE; USB serial and ADB reverse stay on). Same as AGENTDECK_LOOPBACK_ONLY=1')
   .option('--port-window <range>', 'Work in a non-default daemon port window, e.g. 9200-9209. Only for running a throwaway daemon beside the real one: the singleton guard sweeps this range, and a daemon outside the documented 9120-9139 window is invisible to clients that scan it. Same as AGENTDECK_PORT_WINDOW')
-  .action(async (opts) => {
+  .option('--build', 'Rebuild stale workspace packages first even with no terminal attached (dev checkout only)')
+  .option('--no-build', 'Never rebuild — start whatever build is already on disk')
+  .option('--no-upgrade', 'Leave a running daemon of yours alone even when it is serving an older build')
+  .action(async (opts, cmd) => {
+    // Before anything else: be the newest build on disk. Everything below —
+    // the incumbent comparison especially — is a claim about which code is
+    // serving the port, and it is worthless if this process is itself stale.
+    // Re-executes and never returns when it rebuilds.
+    await ensureLatestBuild(buildModeFrom(cmd, opts));
+
     const { findExistingDaemon, probeDaemonHealth, readDaemonInfo, removeDaemonInfo, removeDaemonSession, requestDaemonStandDown, requestDaemonShutdown, waitForDaemonExit, waitForPortBindable } = await import('./session-registry.js');
     const { adoptPeerToken } = await import('./auth.js');
+    const { distBuildId } = await import('./daemon-build-identity.js');
+    const localBuild = distBuildId();
 
     // Reverse two-tier upgrade path: the macOS app may already own the canonical
     // port with its in-process Swift daemon (Tier 1 — limited: no ADB devices,
@@ -922,7 +1035,13 @@ daemon
     const { capturePeerActivity } = await import('./apme/activity-history.js');
     const incumbent = await probeDaemonHealth(targetPort);
     const outcome = await negotiateIncumbentDaemon(
-      { port: targetPort, incumbent, portWasExplicit: !!opts.port },
+      {
+        port: targetPort,
+        incumbent,
+        portWasExplicit: !!opts.port,
+        localBuild,
+        replaceStaleBuild: opts.upgrade !== false,
+      },
       {
         adoptToken: adoptPeerToken,
         standDown: requestDaemonStandDown,
@@ -935,26 +1054,56 @@ daemon
     if (outcome === 'already-running') process.exit(0);
     if (outcome === 'refuse') process.exit(1);
 
-    const daemonInfo = readDaemonInfo();
-    if (daemonInfo) {
-      const probePort = daemonInfo.httpPort ?? daemonInfo.port;
+    // The same decision again, for a daemon that is NOT on the port we aimed at
+    // — one that fell back to 9121+ once and has been there since. It answers
+    // `daemon start` the same way (exit 0, "already running"), so without this
+    // it is the one daemon on the machine that could serve an old build
+    // forever. Routed through the same negotiation rather than a second copy of
+    // the rule: the ownership gate, the token adoption and the build comparison
+    // must not differ by which file found the daemon.
+    const settleIncumbentOn = async (
+      probePort: number,
+      reportedPort: number,
+      pid: number | undefined,
+      forget: () => void,
+      what: string,
+    ): Promise<void> => {
       const health = await probeDaemonHealth(probePort);
       if (health?.mode === 'daemon') {
-        log(`Daemon already running on port ${daemonInfo.port} (PID ${daemonInfo.pid}). Use 'agentdeck daemon stop' first.`);
-        process.exit(0);
+        const decision = await negotiateIncumbentDaemon(
+          { port: probePort, incumbent: health, portWasExplicit: false, localBuild, replaceStaleBuild: opts.upgrade !== false },
+          {
+            adoptToken: adoptPeerToken,
+            standDown: requestDaemonStandDown,
+            shutdown: requestDaemonShutdown,
+            waitForExit: waitForDaemonExit,
+            waitForBindable: waitForPortBindable,
+            captureActivity: capturePeerActivity,
+          },
+        );
+        if (decision === 'already-running') process.exit(0);
+        if (decision === 'refuse') process.exit(1);
+        // 'proceed' — it stood down or was replaced; its registry row is dead.
+        forget();
+        return;
       }
-      log(`Ignoring stale daemon entry on port ${daemonInfo.port} (PID ${daemonInfo.pid}; /health did not respond).`);
-      removeDaemonInfo();
+      log(`Ignoring stale ${what} on port ${reportedPort} (PID ${pid}; /health did not respond).`);
+      forget();
+    };
+
+    const daemonInfo = readDaemonInfo();
+    if (daemonInfo) {
+      await settleIncumbentOn(
+        daemonInfo.httpPort ?? daemonInfo.port, daemonInfo.port, daemonInfo.pid,
+        removeDaemonInfo, 'daemon entry',
+      );
     }
     const existing = findExistingDaemon();
     if (existing) {
-      const health = await probeDaemonHealth(existing.port);
-      if (health?.mode === 'daemon') {
-        log(`Daemon already running on port ${existing.port} (PID ${existing.pid}). Use 'agentdeck daemon stop' first.`);
-        process.exit(0);
-      }
-      log(`Ignoring stale daemon session on port ${existing.port} (PID ${existing.pid}; /health did not respond).`);
-      removeDaemonSession(existing);
+      await settleIncumbentOn(
+        existing.port, existing.port, existing.pid,
+        () => removeDaemonSession(existing), 'daemon session',
+      );
     }
 
     // Background fork unless --foreground
@@ -976,6 +1125,11 @@ daemon
       // Same reason as the posture flags: the forked process IS the daemon, and
       // a window that only applies to the parent moves nothing.
       if (opts.portWindow) args.push('--port-window', String(opts.portWindow));
+      // Freshness was settled by this process, above. The child inherits log
+      // files rather than a terminal, so it would decline to build anyway —
+      // saying so explicitly keeps the child's log free of a warning about a
+      // staleness the parent has already resolved.
+      args.push('--no-build');
 
       const [out, err] = await openDaemonLogs(logDir);
 
@@ -985,7 +1139,7 @@ daemon
         windowsHide: true,
       });
       child.unref();
-      log(`Daemon started (PID ${child.pid})`);
+      log(`Daemon started (PID ${child.pid}, build ${localBuild ?? 'unknown'})`);
       process.exit(0);
     }
 
@@ -1015,7 +1169,15 @@ daemon
   .option('-d, --debug', 'Enable debug logging')
   .option('--local', 'Disable all device modules on the restarted daemon')
   .option('--loopback', 'Restart with a loopback-only posture (see `daemon start --loopback`)')
-  .action(async (opts) => {
+  .option('--build', 'Rebuild stale workspace packages first even with no terminal attached (dev checkout only)')
+  .option('--no-build', 'Never rebuild — restart onto whatever build is already on disk')
+  .action(async (opts, cmd) => {
+    // `daemon restart` is the command a developer runs to put an edit live, so
+    // it answers to the same freshness rule as `start`. Re-executes and never
+    // returns when it rebuilds — before anything has been stopped, so a failed
+    // build costs the machine nothing.
+    await ensureLatestBuild(buildModeFrom(cmd, opts));
+
     // Two different ports, and conflating them is what made this command lose
     // the posture. The daemon must be PROBED and STOPPED where it actually is
     // (daemon.json — which is 9121+ whenever it once fell back), but RESTARTED
@@ -1072,6 +1234,9 @@ daemon
     if (opts.debug) args.push('-d');
     if (useLocal) args.push('--local');
     if (useLoopback) args.push('--loopback');
+    // Same as the `start` fork: freshness is this process's job, and the child
+    // has log files rather than a terminal.
+    args.push('--no-build');
     if ((inheritedLocal && !opts.local) || (inheritedLoopback && !opts.loopback)) {
       log(`Carrying over the running daemon's posture (${[
         inheritedLoopback ? 'loopback-only' : null,
@@ -1218,6 +1383,23 @@ daemon
         log(`Note: this daemon prefers port ${preferred.port} (${describeDaemonPortSource(preferred.source)}) `
           + `but is serving ${registryPort} — it fell back at startup. `
           + `Run 'agentdeck daemon restart' to aim at ${preferred.port} again.`);
+      }
+      // Is the daemon that answered running the code on this disk? `build` in
+      // the payload above is what it STARTED with; `dist/cli.js` is overwritten
+      // in place, so nothing else here would show a divergence.
+      const { distBuildId, findSourceCheckout, findStaleSources } = await import('./daemon-build-identity.js');
+      const onDisk = distBuildId();
+      const running = typeof data.build === 'string' ? data.build : null;
+      if (onDisk && running && onDisk !== running) {
+        log(`Note: it is serving build ${running}; the build on disk is ${onDisk}. `
+          + `Run 'agentdeck daemon restart' to serve the current build.`);
+      }
+      const checkout = findSourceCheckout();
+      const stale = checkout ? findStaleSources(checkout) : [];
+      if (stale.length > 0) {
+        log(`Note: ${stale.map((x) => x.pkg).join(', ')} ${stale.length === 1 ? 'has' : 'have'} `
+          + `source files newer than the build. Run 'pnpm build' if you expect that edit to be live `
+          + `(a bare timestamp move — rebase, worktree switch — compiles to nothing).`);
       }
     } catch {
       if (info) removeDaemonInfo();

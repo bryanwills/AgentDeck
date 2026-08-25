@@ -164,6 +164,70 @@ export function buildGlance(input: {
   return Object.keys(glance).length > 0 ? glance : undefined;
 }
 
+/** Wire projection for constrained portable readers.
+ *
+ * The provider weather object also carries attribution and scheduled cues for
+ * richer clients. Portable readers receive only fields they negotiated. The
+ * five-day outlook is reduced to date/WMO/min/max/rain, avoiding verbose
+ * summaries and provider metadata while still answering practical forecast
+ * questions on-device. This also keeps the response compact on dual-NIC LANs. */
+export function projectPortableReaderGlance(
+  glance: CardFeedGlance | undefined,
+  includeOutlook = false,
+): CardFeedGlance | undefined {
+  if (!glance) return undefined;
+  const projected: CardFeedGlance = {};
+  const w = glance.weather;
+  if (w) {
+    projected.weather = {
+      ...(w.place !== undefined ? { place: w.place } : {}),
+      ...(w.tempC !== undefined ? { tempC: w.tempC } : {}),
+      ...(w.code !== undefined ? { code: w.code } : {}),
+      ...(w.summary !== undefined ? { summary: w.summary } : {}),
+      ...(w.todayMinC !== undefined ? { todayMinC: w.todayMinC } : {}),
+      ...(w.todayMaxC !== undefined ? { todayMaxC: w.todayMaxC } : {}),
+      ...(w.rain ? {
+        rain: {
+          startHm: w.rain.startHm,
+          ...(w.rain.endHm !== undefined ? { endHm: w.rain.endHm } : {}),
+          ...(w.rain.probability !== undefined ? { probability: w.rain.probability } : {}),
+        },
+      } : {}),
+      ...(includeOutlook && w.days && w.days.length >= 2 ? {
+        // Five columns fit the X3 portrait ribbon. Summaries are intentionally
+        // omitted here: the WMO code drives the local glyph and preserving
+        // dates/temperature/rain probability is more useful per wire byte.
+        days: w.days.slice(0, 5).map((day) => ({
+          ...(day.date !== undefined ? { date: day.date } : {}),
+          ...(day.code !== undefined ? { code: day.code } : {}),
+          ...(day.minC !== undefined ? { minC: day.minC } : {}),
+          ...(day.maxC !== undefined ? { maxC: day.maxC } : {}),
+          ...(day.rainProbability !== undefined && day.rainProbability > 0
+            ? { rainProbability: day.rainProbability }
+            : {}),
+        })),
+      } : w.tomorrow ? {
+        tomorrow: {
+          ...(w.tomorrow.summary !== undefined ? { summary: w.tomorrow.summary } : {}),
+          ...(w.tomorrow.code !== undefined ? { code: w.tomorrow.code } : {}),
+          ...(w.tomorrow.minC !== undefined ? { minC: w.tomorrow.minC } : {}),
+          ...(w.tomorrow.maxC !== undefined ? { maxC: w.tomorrow.maxC } : {}),
+          ...(w.tomorrow.rainProbability !== undefined
+            ? { rainProbability: w.tomorrow.rainProbability }
+            : {}),
+        },
+      } : {}),
+    };
+  }
+  // Provider quotas and workstation wrap-up are AgentDeck Dashboard content,
+  // not part of the current Pocket face. Omitting them is semantic projection,
+  // not lossy compression: the X3/X4 parser stores them but no Pocket renderer
+  // consumes them. Add them back only with a profile capability and UI that
+  // actually presents them.
+  if (glance.events?.length) projected.events = glance.events;
+  return Object.keys(projected).length > 0 ? projected : undefined;
+}
+
 // ===== Conditional pull — the content signature =====
 
 /** Fields excluded from the deck signature because they are derived from the

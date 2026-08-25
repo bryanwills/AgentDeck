@@ -192,7 +192,7 @@
       "type": "string",
       "minLength": 3,
       "maxLength": 64,
-      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z][a-z0-9]*)+$"
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$"
     },
     "profile": {
       "type": "object",

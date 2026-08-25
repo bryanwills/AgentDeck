@@ -11,7 +11,7 @@
  * Exports `startDaemon()` called by cli.ts.
  */
 
-import { createServer, type Server } from 'http';
+import { createServer, type Server, type ServerResponse } from 'http';
 import { createHash, randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import { BridgeCore, buildCappedTimelineHistory } from './bridge-core.js';
@@ -20,6 +20,7 @@ import { SERIAL_FORWARDED_EVENTS } from '@agentdeck/shared/protocol';
 import { prepareForSerial } from './esp32-serial.js';
 import { OpenClawAdapter } from './adapters/openclaw.js';
 import { BridgeLogStream } from './log-stream.js';
+import { distBuildId } from './daemon-build-identity.js';
 import { PassiveSessionObserver } from './passive-observer.js';
 import { SessionTimelineRelay } from './session-timeline-relay.js';
 import { SessionFocusRelay } from './session-focus-relay.js';
@@ -201,7 +202,7 @@ import { loadTimeboxDevices } from './timebox/timebox-settings.js';
 import { getLanIp, stripUnsafeText, cleanRawText, prepareMarkdownDetail, normalizeCommandPrompt, formatDurationSec, type TimelineEntry, PluginCommand } from '@agentdeck/shared';
 import { injectOpenClawSession, OPENCLAW_SESSION_ID } from './openclaw-session.js';
 import {
-  buildCardFeed, buildGlance, applyOutboxDecisions, FeedPullTracker, formatFeedPull,
+  buildCardFeed, buildGlance, projectPortableReaderGlance, applyOutboxDecisions, FeedPullTracker, formatFeedPull,
   OutboxIdempotencyLedger,
   normalizeClientIp, parsePullTelemetry,
 } from './card-feed.js';
@@ -218,6 +219,7 @@ import {
   isPortableReaderProfile,
   negotiateSurface,
   parseHttpSurfaceIdentity,
+  pullOtaResponseStatus,
   surfaceErrorBody,
   surfaceAllowsEvent,
   SurfaceProtocolError,
@@ -232,7 +234,7 @@ import { resolveRelayedUsageEvent } from './relayed-usage.js';
 import { CARD_FEED_PATH, CARD_OUTBOX_PATH, GLANCE_FRAME_PATH, type CardFeedResponse, type SessionInfo, type OutboxPushRequest } from '@agentdeck/shared';
 import { readFileSync, statSync, writeFileSync, appendFileSync } from 'fs';
 import { readFile, rm } from 'fs/promises';
-import { tmpdir } from 'os';
+import { tmpdir, networkInterfaces, type NetworkInterfaceInfo } from 'os';
 import { join } from 'path';
 import { homedir } from 'os';
 import {
@@ -371,6 +373,64 @@ interface PersistedStagedFwV2 {
   version: 2;
   identities: Array<StagedFw & SurfaceOtaIdentity>;
   legacy: Record<string, StagedFw>;
+}
+// Keep each response below the 256 KiB size that the measured X3 completed in
+// 1–2 seconds even on its lossy path. The device asks again immediately and
+// keeps six attempts per Sync, so 128 KiB segments make useful progress
+// durable before the 60-second socket timeout instead of gambling the whole
+// remaining image on one long response.
+const PULL_OTA_SEGMENT_BYTES = 128 * 1024;
+
+function pullOtaSegment(firmware: Buffer, requestedFrom: number): { from: number; body: Buffer } {
+  const from = Number.isFinite(requestedFrom) && requestedFrom > 0
+    ? Math.min(Math.floor(requestedFrom), firmware.length) : 0;
+  return { from, body: firmware.subarray(from, Math.min(from + PULL_OTA_SEGMENT_BYTES, firmware.length)) };
+}
+
+/** The route above keeps dual-homed hosts on the device-side Wi-Fi interface.
+ * Once there, hand the bounded remainder to Node directly: timer-paced 1 KiB
+ * writes stretched a 1.6 MB transfer past the device's 60-second read timeout.
+ * TCP backpressure still governs the socket; res.end does not retain another
+ * firmware copy because `body` is a view over the already-loaded image. */
+function sendPullOtaBody(res: ServerResponse, body: Buffer): void {
+  res.socket?.setNoDelay(true);
+  res.end(body);
+}
+
+function ipv4Number(address: string): number | undefined {
+  const parts = address.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return undefined;
+  return (((parts[0]! << 24) >>> 0) + (parts[1]! << 16) + (parts[2]! << 8) + parts[3]!) >>> 0;
+}
+
+/** Pick the host's Wi-Fi address only when it shares the device subnet. This
+ * avoids the measured Ethernet→AP return-path loss on dual-homed Macs without
+ * changing global routes or affecting non-OTA traffic. */
+function preferredPullOtaIp(
+  remoteAddress: string,
+  localAddress: string,
+  interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
+): string | undefined {
+  const remote = ipv4Number(normalizeClientIp(remoteAddress));
+  const local = normalizeClientIp(localAddress);
+  if (remote === undefined) return undefined;
+  const candidates: Array<{ name: string; address: string }> = [];
+  for (const [name, entries] of Object.entries(interfaces)) {
+    for (const entry of entries ?? []) {
+      if (entry.internal || entry.family !== 'IPv4') continue;
+      const address = ipv4Number(entry.address);
+      const mask = ipv4Number(entry.netmask);
+      if (address === undefined || mask === undefined || (address & mask) !== (remote & mask)) continue;
+      candidates.push({ name, address: entry.address });
+    }
+  }
+  if (candidates.length < 2) return undefined;
+  candidates.sort((a, b) => {
+    const wireless = (name: string): number => /^(en1|wlan)|wi-?fi/i.test(name) ? 0 : 1;
+    return wireless(a.name) - wireless(b.name) || a.name.localeCompare(b.name);
+  });
+  const preferred = candidates[0]?.address;
+  return preferred && preferred !== local ? preferred : undefined;
 }
 const legacyStagedFwByBoard = new Map<string, StagedFw>();
 const stagedFwByIdentity = new Map<string, StagedFw & SurfaceOtaIdentity>();
@@ -773,6 +833,8 @@ export const __wifiOtaTestApi = {
   resolveStagedFwBoard,
   stageEsp32Fw,
   stagedFwAdvert,
+  pullOtaSegment,
+  preferredPullOtaIp,
   feedPulls,
   getStagedFw: (identity: SurfaceOtaIdentity): StagedFw | undefined => stagedFwByIdentity.get(otaIdentityKey(identity)),
   clearStagedFwForTest: (): void => { legacyStagedFwByBoard.clear(); stagedFwByIdentity.clear(); },
@@ -1209,7 +1271,16 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
 
 // ===== startDaemon =====
 
+/**
+ * The build this daemon process started with — the answer `/health` gives for
+ * as long as it runs. Captured once in `startDaemon`, never refreshed: a
+ * daemon that recomputed it would start reporting the newest build on disk the
+ * moment someone rebuilt, which is precisely the state a caller asks about.
+ */
+let startupBuildId: string | null = null;
+
 export async function startDaemon(opts: DaemonOptions): Promise<void> {
+  startupBuildId = distBuildId();
   if (opts.debug) {
     enableDebugLog();
     log('[agentdeck] Debug logging enabled');
@@ -1646,6 +1717,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         status: 'ok', mode: 'daemon', state: snap.state,
         gateway: gatewayAdapter?.isAlive() ? 'connected' : 'disconnected',
         uptime: process.uptime(), port, pid: process.pid,
+        // Which build is SERVING this port. Captured when this process started
+        // (see daemon-build-identity.ts) and never recomputed, so a rebuild
+        // underneath a running daemon reads as a mismatch instead of being
+        // absorbed — `dist/cli.js` is overwritten in place, and nothing else
+        // here distinguishes the code on disk from the code in memory.
+        build: startupBuildId,
         pairingToken: core.authToken,
         // Capability: this daemon drives remote sessions down their own push
         // socket (session_focus_down / session_command_down / session_event_up).
@@ -2047,6 +2124,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         }
         throw err;
       }
+      const preferredIp = preferredPullOtaIp(ip, req.socket.localAddress ?? '');
+      if (preferredIp) {
+        const port = req.socket.localPort ?? 9120;
+        const redirectBoard = surfaceIdentity?.board ?? parsedUrl.searchParams.get('board') ?? 'unknown';
+        log(`[agentdeck] pull-OTA path redirect: ${redirectBoard} (${ip}) via ${preferredIp}`);
+        res.writeHead(307, {
+          Location: `http://${preferredIp}:${port}${parsedUrl.pathname}${parsedUrl.search}`,
+          'Cache-Control': 'no-store',
+        });
+        res.end();
+        return;
+      }
       const board = surfaceIdentity?.board ?? parsedUrl.searchParams.get('board') ?? '';
       const hasProductQuery = parsedUrl.searchParams.has('productId') || parsedUrl.searchParams.has('updateChannel');
       if (!surfaceIdentity && hasProductQuery) {
@@ -2078,20 +2167,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         // never converge there). The device appends whatever arrives and
         // re-asks from where it stopped, so partial transfers accumulate.
         const fromRaw = Number(parsedUrl.searchParams.get('from') ?? 0);
-        const from = Number.isFinite(fromRaw) && fromRaw > 0 ? Math.min(Math.floor(fromRaw), firmware.length) : 0;
-        const body = from > 0 ? firmware.subarray(from) : firmware;
+        const { from, body } = pullOtaSegment(firmware, fromRaw);
         log(`[agentdeck] pull-OTA download: ${board} (${ip}) ← ${body.length} bytes`
           + (from > 0 ? ` (resume from ${from}/${firmware.length})` : ''));
-        res.writeHead(from > 0 ? 206 : 200, {
+        // Early Pocket Daily builds persisted partial bodies but treated 206
+        // as an error. Keep their private `?from=` resume convergent with a
+        // 200 response; clients that explicitly negotiate ota.resume-206 get
+        // the standards-shaped partial response. This is capability-gated,
+        // not version-sniffed, so independent reader implementations have an
+        // unambiguous migration path.
+        const partialStatus = pullOtaResponseStatus(from, surfaceIdentity);
+        res.writeHead(partialStatus, {
           'Content-Type': 'application/octet-stream',
           'Content-Length': String(body.length),
           ...(from > 0
-            ? { 'Content-Range': `bytes ${from}-${Math.max(from, firmware.length - 1)}/${firmware.length}` }
+            ? { 'Content-Range': body.length > 0
+              ? `bytes ${from}-${from + body.length - 1}/${firmware.length}`
+              : `bytes */${firmware.length}` }
             : {}),
           'X-FW-MD5': staged.md5,
           'Cache-Control': 'no-store',
         });
-        res.end(body);
+        sendPullOtaBody(res, body);
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
@@ -2212,9 +2309,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           });
           const now = Date.now();
           const pocketReader = usesPortableReaderProjection(surfaceIdentity, parsedUrl.searchParams);
+          const includeWeatherOutlook = surfaceIdentity?.capabilities.includes('weather.snapshot.read') === true;
+          const feedGlance = pocketReader ? projectPortableReaderGlance(glance, includeWeatherOutlook) : glance;
           const feed = buildCardFeed(sessions as unknown as SessionInfo[], now,
             pocketReader ? pocketReaderModules : pocketCardModules, {
-            glance,
+            glance: feedGlance,
             echoSig: parsedUrl.searchParams.get('sig') ?? undefined,
             includeSessions: !pocketReader,
           }) as CardFeedResponse & { fw?: { size: number; md5: string } & Partial<SurfaceOtaIdentity> };
@@ -2266,8 +2365,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         }
         return result;
       })().then((payload) => {
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-        res.end(JSON.stringify(payload));
+        const body = JSON.stringify(payload);
+        // A fixed length lets esp_http_client prove completion without relying
+        // on a keep-alive chunk terminator. This is especially important when
+        // the daemon host has Ethernet and Wi-Fi on the same LAN: the request
+        // may arrive while a later return segment is lost on the competing
+        // route. Portable-reader projection above normally keeps this body in
+        // one TCP payload; Content-Length makes any short read fail explicitly.
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Content-Length': String(Buffer.byteLength(body)),
+          'Cache-Control': 'no-store',
+          'Connection': 'close',
+        });
+        res.end(body);
       }).catch((err) => {
         const status = err instanceof SurfaceProtocolError ? err.status : 500;
         res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -6119,5 +6230,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   broadcastFocusedState();
   core.broadcastUsage();
 
-  log(`[agentdeck] Daemon running. Gateway probe active.`);
+  // Name the build in the log, once. A daemon log that does not say which build
+  // wrote it cannot answer "was this fixed before or after that restart?" —
+  // and on a dev checkout the answer changes several times a day.
+  log(`[agentdeck] Daemon running (build ${startupBuildId ?? 'unknown'}). Gateway probe active.`);
 }

@@ -94,9 +94,24 @@ agentdeck daemon port --clear  # 저장값 삭제 → 기본 9120 으로 복귀
 
 ## Daemon singleton guard
 
-4단계 — (1) `readDaemonInfo()` from `~/.agentdeck/daemon.json` (PID alive 검증) (2) `findExistingDaemon()` from `sessions.json` fallback (3) `probeDaemonHealth()` HTTP `/health` probe (default port에 응답하는 daemon 감지) (4) `scanDaemonPortWindow()` — 9120–9139 전 구간 `/health` 병렬 sweep. (4)가 필요한 이유: App Store Swift daemon 의 `daemon.json` 은 sandbox private container 에 있어 Node 가 읽지 못하고, 일시적 9120 경합으로 daemon 이 fallback port (9121+) 에 앉아 있을 수 있다 — 파일/기본포트 검사만으로는 둘 다 놓쳐 split-brain (이중 mDNS 광고, Gateway/timeline 중복 relay, adb reverse flapping) 이 된다. `daemon-server.ts` + `cli.ts` + `daemon.ts`(legacy) 에서 체크. 기존 Node daemon 있으면 `process.exit(0)` (LaunchAgent KeepAlive 재시작 루프 방지); Swift daemon 이면 `/shutdown` 요청 후 `waitForDaemonExit()` 로 health 가 사라질 때까지 poll (고정 sleep 아님 — Swift 가 serial/ADB/BLE 모듈을 정리하기 전에 인수하면 tty/adb reverse 를 잠시 두 프로세스가 잡는다). Port occupied by non-daemon → auto-fallback to next available port.
+4단계 — (1) `readDaemonInfo()` from `~/.agentdeck/daemon.json` (PID alive 검증) (2) `findExistingDaemon()` from `sessions.json` fallback (3) `probeDaemonHealth()` HTTP `/health` probe (default port에 응답하는 daemon 감지) (4) `scanDaemonPortWindow()` — 9120–9139 전 구간 `/health` 병렬 sweep. (4)가 필요한 이유: App Store Swift daemon 의 `daemon.json` 은 sandbox private container 에 있어 Node 가 읽지 못하고, 일시적 9120 경합으로 daemon 이 fallback port (9121+) 에 앉아 있을 수 있다 — 파일/기본포트 검사만으로는 둘 다 놓쳐 split-brain (이중 mDNS 광고, Gateway/timeline 중복 relay, adb reverse flapping) 이 된다. `daemon-server.ts` + `cli.ts` + `daemon.ts`(legacy) 에서 체크. 기존 Node daemon 있으면 `process.exit(0)` (LaunchAgent KeepAlive 재시작 루프 방지 — 단 CLI 층에서는 그 데몬이 **다른 빌드**를 서빙 중일 때만 예외로 인수한다, 아래 § 어떤 빌드가 포트를 잡고 있는가); Swift daemon 이면 `/shutdown` 요청 후 `waitForDaemonExit()` 로 health 가 사라질 때까지 poll (고정 sleep 아님 — Swift 가 serial/ADB/BLE 모듈을 정리하기 전에 인수하면 tty/adb reverse 를 잠시 두 프로세스가 잡는다). Port occupied by non-daemon → auto-fallback to next available port.
 
 이 sweep 범위는 `--port-window <lo-hi>` (또는 `AGENTDECK_PORT_WINDOW=9200-9209`) 로 바꿀 수 있다. 용도는 하나뿐이다 — **운영 데몬 옆에서 일회용 데몬을 띄워 검증하는 것**. sweep 이 창 전체를 훑고 살아있는 Node daemon 을 만나면 `process.exit(0)` 하므로, `AGENTDECK_DATA_DIR` 로 데이터 디렉토리를 분리하고 `-p` 로 포트를 지정해도 격리 데몬은 뜨지 못했다(가드 자체는 올바른 동작). **기본 창을 벗어난 데몬은 9120–9139 를 훑는 클라이언트에게 보이지 않는다** — 명시 host/port 로만 닿는다. 그래서 `daemon start` 는 창이 기본값이 아닐 때 그 사실을 반드시 출력한다. 파싱 불가한 값은 조용히 무시되지 않고 **기본 창으로 되돌아간다** — 잘못된 창이 split-brain 가드를 무력화해서는 안 되기 때문이다.
+
+## 어떤 빌드가 포트를 잡고 있는가 (dev checkout)
+
+`/health` 는 `build` — 그 데몬이 **기동할 때 로드한** JS 트리(`bridge/dist` + `shared/dist` + `hooks/dist`)의 내용 해시 12자 — 를 실어 보낸다. 이유는 하나다: source checkout 에서 `agentdeck` 은 `bridge/dist/cli.js` 를 가리키는 shim 이고 그 파일은 **제자리에서 덮어써진다**. 리빌드 이전에 뜬 데몬은 디스크에 더 이상 존재하지 않는 바이트를 계속 실행하면서 pid·port·package version 을 리빌드 이후에 뜬 데몬과 똑같이 보고한다 — 즉 "already running" 과 "네가 방금 갈아치운 코드가 아직 돌고 있다" 를 구별할 방법이 없었다(2026-08-24 실측: 04:19 에 뜬 데몬이 19:20 리빌드 뒤에도 9120 을 점유).
+
+- 해시는 **mtime 이 아니라 내용** 이다. `tsc` 는 매 실행마다 산출물을 다시 쓰므로 mtime 기반이면 아무것도 바뀌지 않은 리빌드가 "다른 빌드" 로 읽히고, 멀쩡한 데몬을 재시작시킨다.
+- 데몬은 이 값을 **기동 시 한 번 캡처하고 다시 계산하지 않는다**(`startupBuildId`). 요청 시점에 다시 계산하면 누군가 리빌드한 순간부터 "최신 빌드" 를 보고하게 되는데, 그게 바로 이 필드가 탐지하려던 상태다.
+- `daemon start` 는 자기 소유의 Node 데몬이 **다른** 빌드를 서빙 중이면 `exit 0` 대신 그 데몬을 세우고 포트를 인수한다. 단 **양쪽 해시를 모두 알 때만** — 이 필드 이전 데몬은 `build` 를 보내지 않고, 정보 없음을 근거로 축출하면 모든 start 가 restart 가 된다(autostart 유닛 포함). `--no-upgrade` 로 끈다. 소유권 게이트가 우선이라 **다른 사용자의 데몬은 빌드가 낡았어도 건드리지 않는다**.
+- fallback 포트(9121+)에 앉은 데몬도 같은 판정을 받는다 — `daemon.json`/`sessions.json` 로 찾은 데몬 역시 `negotiateIncumbentDaemon` 을 거친다. 규칙이 "누가 그 데몬을 찾았는가" 에 따라 달라지면 안 되기 때문.
+
+빌드 자체를 최신으로 만드는 쪽은 CLI 가 담당한다. checkout 에서 `daemon start` / `daemon restart` 는 stale 패키지를 먼저 빌드하고 **자기 자신을 re-exec** 한다(옛 `cli.js` 를 이미 로드한 프로세스가 잠시 뒤 새 `daemon-server.js` 를 동적 import 하는 혼합 빌드를 만들지 않기 위해). 세 가지 경계가 있다:
+
+- **터미널이 붙어 있을 때만** 빌드한다. autostart 경로(LaunchAgent/Scheduled Task/systemd)는 stdio 가 로그 파일이고, 거기서 빌드에 실패하면 `KeepAlive` 재시작 루프가 된다. 그 경우엔 사실만 로그에 적고 있는 빌드로 뜬다. `--build` 로 강제, `--no-build` 로 금지.
+- stale 판정(`findStaleSources`)은 **한 방향으로만 신뢰한다**. "src 가 dist 보다 새것이 아니다" 는 확실하므로 컴파일러를 건너뛰어도 되지만, 반대 방향은 과보고한다 — `shared` 는 composite 프로젝트라 rebase/worktree 전환/`touch` 로 mtime 만 움직이면 `tsc` 는 `.tsbuildinfo` 조차 다시 쓰지 않는다. 그래서 최종 판정은 빌드 전/후 **해시 델타** 로 한다: 델타가 없으면 re-exec 도 없고 경고도 없다.
+- 빌드가 실패하면 **시작하지 않는다**(exit 1). 여기서 그냥 뜨면 방금 "빌드가 필요하다" 고 말해놓고 이전 빌드를 조용히 대신 실행하는 셈이다.
 
 ## Shutdown timeout
 

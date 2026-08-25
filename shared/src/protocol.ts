@@ -1026,7 +1026,7 @@ export interface GlanceDayWeather {
   /** WMO weather interpretation code (Open-Meteo native). */
   code?: number;
   /** Short pre-rendered summary word ("Clear", "Rain", …). */
-  summary: string;
+  summary?: string;
   minC?: number;
   maxC?: number;
   /** Max precipitation probability for the day, 0–100. */

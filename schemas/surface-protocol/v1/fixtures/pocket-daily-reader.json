@@ -28,7 +28,9 @@
         "feed.conditional",
         "outbox.push",
         "glance.read",
+        "weather.snapshot.read",
         "ota.feed",
+        "ota.resume-206",
         "device.telemetry"
       ],
       "legacyBaseline": true

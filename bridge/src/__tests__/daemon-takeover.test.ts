@@ -131,6 +131,117 @@ describe('negotiateIncumbentDaemon', () => {
     expect(calls).not.toContain('stand-down');
   });
 
+  it('replaces a daemon of ours that is serving an older build', async () => {
+    // `dist/cli.js` is rewritten in place, so a daemon started before a rebuild
+    // is byte-for-byte indistinguishable from a current one over /health apart
+    // from this digest — same pid, same port, same package version. Exiting 0
+    // there reports "already running" about code the user just replaced.
+    const { calls, deps } = spies();
+    const outcome = await negotiateIncumbentDaemon(
+      {
+        port: 9120,
+        incumbent: { mode: 'daemon', pid: 1, isSwift: false, build: 'aaaaaaaaaaaa' },
+        portWasExplicit: false,
+        localBuild: 'bbbbbbbbbbbb',
+      },
+      { ...deps, ownership: MINE },
+    );
+    expect(outcome).toBe('proceed');
+    expect(calls).toContain('shutdown');
+    expect(deps.waitForBindable).toHaveBeenCalled();
+    const said = deps.log.mock.calls.flat().join(' ');
+    expect(said).toContain('aaaaaaaaaaaa');
+    expect(said).toContain('bbbbbbbbbbbb');
+  });
+
+  it('leaves a matching build alone — that daemon IS this build', async () => {
+    const { calls, deps } = spies();
+    const outcome = await negotiateIncumbentDaemon(
+      {
+        port: 9120,
+        incumbent: { mode: 'daemon', pid: 1, isSwift: false, build: 'aaaaaaaaaaaa' },
+        portWasExplicit: false,
+        localBuild: 'aaaaaaaaaaaa',
+      },
+      { ...deps, ownership: MINE },
+    );
+    expect(outcome).toBe('already-running');
+    expect(calls).not.toContain('shutdown');
+  });
+
+  it('treats a missing build on either side as no information, never as different', async () => {
+    // A daemon older than the field reports no `build`, and a copy whose dist
+    // could not be read computes none. Evicting on that would make every
+    // `daemon start` a restart — including the autostart unit's, in a loop.
+    for (const [incumbentBuild, localBuild] of [
+      [undefined, 'bbbbbbbbbbbb'],
+      ['aaaaaaaaaaaa', null],
+      [undefined, null],
+    ] as const) {
+      const { calls, deps } = spies();
+      const outcome = await negotiateIncumbentDaemon(
+        {
+          port: 9120,
+          incumbent: { mode: 'daemon', pid: 1, isSwift: false, build: incumbentBuild },
+          portWasExplicit: false,
+          localBuild,
+        },
+        { ...deps, ownership: MINE },
+      );
+      expect(outcome).toBe('already-running');
+      expect(calls).not.toContain('shutdown');
+    }
+  });
+
+  it('--no-upgrade leaves the older daemon running, and says which build it is', async () => {
+    const { calls, deps } = spies();
+    const outcome = await negotiateIncumbentDaemon(
+      {
+        port: 9120,
+        incumbent: { mode: 'daemon', pid: 1, isSwift: false, build: 'aaaaaaaaaaaa' },
+        portWasExplicit: false,
+        localBuild: 'bbbbbbbbbbbb',
+        replaceStaleBuild: false,
+      },
+      { ...deps, ownership: MINE },
+    );
+    expect(outcome).toBe('already-running');
+    expect(calls).not.toContain('shutdown');
+    expect(deps.log.mock.calls.flat().join(' ')).toMatch(/OLDER build/);
+  });
+
+  it('never evicts another user\'s daemon over a build mismatch', async () => {
+    // The ownership gate outranks freshness: a stale daemon of THEIRS is still
+    // theirs, and "mine is newer" is not a licence to stop someone else's.
+    const { calls, deps } = spies();
+    const outcome = await negotiateIncumbentDaemon(
+      {
+        port: 9120,
+        incumbent: { mode: 'daemon', pid: 4242, isSwift: false, build: 'aaaaaaaaaaaa' },
+        portWasExplicit: false,
+        localBuild: 'bbbbbbbbbbbb',
+      },
+      { ...deps, ownership: FOREIGN },
+    );
+    expect(outcome).toBe('proceed');
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses rather than silently moving when the replaced daemon will not free an explicit port', async () => {
+    const { deps } = spies({ waitForBindable: vi.fn(async () => false) });
+    const outcome = await negotiateIncumbentDaemon(
+      {
+        port: 9120,
+        incumbent: { mode: 'daemon', pid: 1, isSwift: false, build: 'aaaaaaaaaaaa' },
+        portWasExplicit: true,
+        localBuild: 'bbbbbbbbbbbb',
+      },
+      { ...deps, ownership: MINE },
+    );
+    expect(outcome).toBe('refuse');
+    expect(deps.log.mock.calls.flat().join(' ')).toMatch(/daemon stop/);
+  });
+
   it('an empty port is not a negotiation', async () => {
     const { calls, deps } = spies();
     expect(await negotiateIncumbentDaemon(

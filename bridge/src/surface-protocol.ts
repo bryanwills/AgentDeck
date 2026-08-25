@@ -3,6 +3,7 @@ import { ESP32_BOARDS } from '@agentdeck/shared';
 
 export const SURFACE_PROTOCOL_MAJOR = 1 as const;
 export const PORTABLE_READER_PROFILE = 'portable-reader/v1' as const;
+export const OTA_RESUME_PARTIAL_CAPABILITY = 'ota.resume-206' as const;
 export const AGENTDECK_FIRMWARE_PRODUCT_ID = 'dev.agentdeck.dashboard-firmware' as const;
 export const POCKET_DAILY_PRODUCT_ID = 'io.pocketdaily.reader' as const;
 
@@ -20,7 +21,7 @@ const PROFILE_CAPABILITIES = {
   [PORTABLE_READER_PROFILE]: new Set([
     'feed.pull', 'feed.conditional', 'outbox.push', 'glance.read',
     'weather.snapshot.read', 'weather.cues.display', 'weather.cues.notify',
-    'ota.feed', 'device.telemetry',
+    'ota.feed', OTA_RESUME_PARTIAL_CAPABILITY, 'device.telemetry',
     // Deliberately no inbox.ws until the public invalidation runtime exists.
   ]),
   'display-only/v1': new Set([
@@ -212,6 +213,17 @@ export function parseHttpSurfaceIdentity(
   };
   validateProductTuple(identity);
   return identity;
+}
+
+/** Select the resumable OTA response shape without guessing from a client
+ * version. Legacy clients append `?from=` bodies but only accept status 200;
+ * negotiated clients explicitly opt into the standard 206 response. */
+export function pullOtaResponseStatus(
+  from: number,
+  identity: Pick<SurfaceIdentity, 'capabilities'> | undefined,
+): 200 | 206 {
+  return from > 0 && identity?.capabilities.includes(OTA_RESUME_PARTIAL_CAPABILITY) === true
+    ? 206 : 200;
 }
 
 /** A product-aware request may repeat the tuple in the query, but repetition

@@ -108,6 +108,10 @@ all-or-nothing HTTP identity headers on Feed, Outbox, Glance Frame, and pull OTA
 capability intersection; header-driven Pocket projection; ordered/idempotent Outbox;
 full-tuple OTA staging and download; and bounded `surface_welcome` negotiation.
 Headerless clients and `surface=pocket-reader` retain their previous baseline.
+Resumable OTA clients may offer `ota.resume-206`; negotiated clients receive
+`206 Partial Content` for `?from=` downloads, while older clients receive the
+same remaining bytes with status `200` so an already persisted partial image can
+still converge instead of requiring SD-card recovery.
 
 The in-process Swift daemon serves a weather-only Card Feed envelope, validates the
 same eight Pocket identity headers, and negotiates a bounded subset:
@@ -292,6 +296,11 @@ fields and may add `issuedAt`, `validUntil`, `timeZone`, `source`, up to seven
 `days`, and up to eight `cues`. The daemon normalizes provider data and authors
 the cues; a constrained reader never infers a notification threshold from raw
 forecast points.
+
+A `portable-reader/v1` client that negotiates `weather.snapshot.read` receives
+a compact five-day projection (`date`, WMO `code`, min/max temperature, and an
+optional real provider probability). Clients without that capability retain
+the current/today/tomorrow baseline, so the richer ribbon is additive.
 
 - `deckSig` covers the complete weather snapshot and cue list. An `unchanged`
   response retains the persisted copy.

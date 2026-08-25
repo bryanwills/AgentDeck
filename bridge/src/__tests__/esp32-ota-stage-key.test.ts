@@ -122,4 +122,38 @@ describe('pull-OTA staging', () => {
       productId: 'io.pocketdaily.reader', board: 'xteink_x3', updateChannel: 'beta',
     })).toThrow(/update channel do not match/i);
   });
+
+  it('serves pull OTA as bounded, contiguous resume segments', () => {
+    const image = Buffer.alloc(300 * 1024);
+    image.fill(0x11, 0, 128 * 1024);
+    image.fill(0x22, 128 * 1024, 256 * 1024);
+    image.fill(0x33, 256 * 1024);
+
+    const first = __wifiOtaTestApi.pullOtaSegment(image, 0);
+    const second = __wifiOtaTestApi.pullOtaSegment(image, first.body.length);
+    const tail = __wifiOtaTestApi.pullOtaSegment(image, second.from + second.body.length);
+
+    expect(first).toMatchObject({ from: 0 });
+    expect(first.body).toHaveLength(128 * 1024);
+    expect(second).toMatchObject({ from: 128 * 1024 });
+    expect(second.body).toHaveLength(128 * 1024);
+    expect(second.body[0]).toBe(0x22);
+    expect(tail).toMatchObject({ from: 256 * 1024 });
+    expect(tail.body).toHaveLength(44 * 1024);
+    expect(tail.body[0]).toBe(0x33);
+  });
+
+  it('redirects dual-homed OTA traffic to the device-side Wi-Fi interface once', () => {
+    const interfaces = {
+      en0: [{ address: '192.168.68.100', netmask: '255.255.252.0', family: 'IPv4',
+        mac: '00:00:00:00:00:01', internal: false, cidr: '192.168.68.100/22' }],
+      en1: [{ address: '192.168.68.60', netmask: '255.255.252.0', family: 'IPv4',
+        mac: '00:00:00:00:00:02', internal: false, cidr: '192.168.68.60/22' }],
+    } as Parameters<typeof __wifiOtaTestApi.preferredPullOtaIp>[2];
+
+    expect(__wifiOtaTestApi.preferredPullOtaIp('192.168.68.57', '192.168.68.100', interfaces))
+      .toBe('192.168.68.60');
+    expect(__wifiOtaTestApi.preferredPullOtaIp('192.168.68.57', '192.168.68.60', interfaces))
+      .toBeUndefined();
+  });
 });

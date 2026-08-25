@@ -13,6 +13,7 @@ import {
   buildGlanceUsage,
   buildGlanceWrapup,
   buildGlance,
+  projectPortableReaderGlance,
   parsePullTelemetry,
   type OutboxApplyDeps,
 } from '../card-feed.js';
@@ -444,6 +445,65 @@ describe('glance builders', () => {
 
   it('buildGlance returns undefined when there is nothing to say', () => {
     expect(buildGlance({ sessions: [] })).toBeUndefined();
+  });
+
+  it('projects portable-reader weather to exactly the fields firmware renders', () => {
+    const projected = projectPortableReaderGlance({
+      weather: {
+        place: 'Seongnam', tempC: 25, code: 0, summary: 'Clear', todayMinC: 23, todayMaxC: 31,
+        rain: { startHm: '05:00', endHm: '06:00', probability: 70, amountMm: 2.4 },
+        tomorrow: { date: '2026-08-25', summary: 'Showers', code: 81, minC: 24, maxC: 31,
+          rainProbability: 78, precipitationMm: 1.6 },
+        issuedAt: NOW, validUntil: NOW + 3600_000,
+        source: { id: 'met-no', displayName: 'MET Norway', attributionText: 'Data',
+          attributionUrl: 'https://example.invalid', modified: true },
+        days: [{ date: '2026-08-25', summary: 'Showers' }],
+        cues: [{ id: 'rain', revision: 1, kind: 'precipitation.start', severity: 'notice',
+          displayAt: NOW, startsAt: NOW, expiresAt: NOW + 3600_000, title: 'Rain' }],
+      },
+      usage: [{ provider: 'codex', label: 'Codex', primaryPercent: 20, stale: false }],
+      wrapup: ['Pocket Daily · testing'],
+      events: [{ startHm: '09:00', title: 'Review' }],
+    });
+    expect(projected).toEqual({
+      weather: {
+        place: 'Seongnam', tempC: 25, code: 0, summary: 'Clear', todayMinC: 23, todayMaxC: 31,
+        rain: { startHm: '05:00', endHm: '06:00', probability: 70 },
+        tomorrow: { summary: 'Showers', code: 81, minC: 24, maxC: 31, rainProbability: 78 },
+      },
+      events: [{ startHm: '09:00', title: 'Review' }],
+    });
+    expect(JSON.stringify(projected)).not.toContain('source');
+    expect(JSON.stringify(projected)).not.toContain('cues');
+    expect(JSON.stringify(projected)).not.toContain('days');
+  });
+
+  it('projects a compact five-day outlook only when the reader negotiated it', () => {
+    const projected = projectPortableReaderGlance({
+      weather: {
+        place: 'Seongnam', tempC: 25, code: 2, summary: 'Cloudy',
+        tomorrow: { summary: 'Legacy', minC: 20, maxC: 30 },
+        days: Array.from({ length: 7 }, (_, i) => ({
+          date: `2026-08-${String(24 + i).padStart(2, '0')}`,
+          summary: i === 2 ? 'Rain' : 'Clear',
+          code: i === 2 ? 61 : 0,
+          minC: 20 + i,
+          maxC: 28 + i,
+          rainProbability: i === 2 ? 70 : 0,
+          precipitationMm: i === 2 ? 4.5 : 0,
+        })),
+      },
+    }, true);
+    expect(projected?.weather?.days).toEqual([
+      { date: '2026-08-24', code: 0, minC: 20, maxC: 28 },
+      { date: '2026-08-25', code: 0, minC: 21, maxC: 29 },
+      { date: '2026-08-26', code: 61, minC: 22, maxC: 30, rainProbability: 70 },
+      { date: '2026-08-27', code: 0, minC: 23, maxC: 31 },
+      { date: '2026-08-28', code: 0, minC: 24, maxC: 32 },
+    ]);
+    expect(projected?.weather?.tomorrow).toBeUndefined();
+    expect(JSON.stringify(projected)).not.toContain('precipitationMm');
+    expect(JSON.stringify(projected)).not.toContain('summary":"Rain');
   });
 });
 

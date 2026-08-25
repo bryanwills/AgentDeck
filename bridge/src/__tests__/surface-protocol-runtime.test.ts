@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   negotiateSurface,
   parseHttpSurfaceIdentity,
+  pullOtaResponseStatus,
   SurfaceProtocolError,
   surfaceAllowsEvent,
   validateSurfaceQueryTuple,
@@ -79,6 +80,17 @@ describe('Surface Protocol HTTP identity', () => {
     expect(usesPortableReaderProjection(identity, new URLSearchParams())).toBe(true);
     expect(usesPortableReaderProjection(undefined, new URLSearchParams('surface=pocket-reader'))).toBe(true);
     expect(usesPortableReaderProjection(undefined, new URLSearchParams())).toBe(false);
+  });
+
+  it('keeps legacy partial OTA resumable and grants 206 only by capability', () => {
+    const legacy = parseHttpSurfaceIdentity(pocketHeaders(), 'ota.feed');
+    const partial = parseHttpSurfaceIdentity(pocketHeaders({
+      'agentdeck-capabilities': 'ota.feed,ota.resume-206',
+    }), 'ota.feed');
+
+    expect(pullOtaResponseStatus(230_959, legacy)).toBe(200);
+    expect(pullOtaResponseStatus(230_959, partial)).toBe(206);
+    expect(pullOtaResponseStatus(0, partial)).toBe(200);
   });
 });
 
