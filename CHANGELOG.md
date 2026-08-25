@@ -36,6 +36,45 @@ file's own rule forbids reconstructing its notes. The commit above is the
 record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
 bumped, superseded by 1.0.17, and never published, so it exists only in git.
 
+## 2026-08-25 — Ulanzi 1.0.5
+
+The plugin no longer ships a native binary on any platform. The Ulanzi Studio
+team reported that macOS raises "Apple could not verify this file" on Apple
+Silicon for `resvgjs.darwin-arm64.node`, the SVG rasterizer 1.0.4 bundled.
+
+### Why a signature was never going to be the fix
+
+A loose native module inside a folder Ulanzi Studio downloads and unpacks has
+nobody who can sign it in a way Gatekeeper will accept for the process that
+loads it: we do not build Studio, and Studio does not build our dependency.
+`@resvg/resvg-js` also required one `.node` per architecture, so the single
+Marketplace bundle had to carry five — 18.5 MB of a 20 MB plugin, four of which
+any given user cannot run.
+
+### One WASM file instead of five binaries
+
+`@resvg/resvg-wasm` is the same resvg version (2.6.2) and the same Rust core,
+pinned in lockstep with the native one it replaces, and it ships as one 2.4 MB
+file that is identical on every OS and CPU. Measured against the 1.0.4 renderer
+over 34 tiles spanning both raster sizes, every session state and every agent —
+`feGaussianBlur` glow included — the output is **byte-identical**: same RGBA,
+same PNG hash. This is not a renderer swap, and there is nothing left for
+Gatekeeper or SmartScreen to adjudicate.
+
+The cost is ~3.6–3.9× per uncached render (2.2 ms → 7.9 ms at 144 px, 3.1 ms →
+12.0 ms at 196 px, plus 15.6 ms once at startup), which sits behind the existing
+256-entry raster cache and well inside the Studio→device link's own budget.
+
+Fonts were already explicit bundled faces with `loadSystemFonts: false`, so this
+is a `fontFiles` → `fontBuffers` change and not a typography change. They are
+load-bearing now in a way they were not before — the WASM build has no
+filesystem and therefore no system-font fallback — so the packaging step refuses
+to build a bundle missing them, and refuses one containing any `.node`, `.dylib`,
+`.so` or `.dll` anywhere in the tree rather than trusting a list of package names.
+
+The upload archive drops from 9.15 MB to 1.39 MB, and the installed plugin from
+20 MB to 3.5 MB.
+
 ## 2026-08-24 — Ulanzi 1.0.4
 
 1.0.3 went live on the Ulanzi Marketplace on or before 2026-08-24 — the first

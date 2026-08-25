@@ -2,11 +2,12 @@
 # Package the AgentDeck Ulanzi Studio plugin into a self-contained, installable
 # `.ulanziPlugin` folder. Ulanzi Studio launches the Node main service from the
 # INSTALLED plugin dir (no access to our workspace node_modules), so we:
-#   1. esbuild-bundle our TS + @agentdeck/shared + gifenc + vendored SDK → app.js
-#      (ESM; @resvg/resvg-js and ws left external — native / optional-native).
-#   2. ship a clean npm-layout node_modules with @resvg/resvg-js, every native
-#      binary needed by the manifest's macOS/Windows support matrix, and ws.
-#   3. assemble manifest + en.json + resources (icons + fonts) + plugin/app.js.
+#   1. esbuild-bundle our TS + @agentdeck/shared + gifenc + resvg-wasm's JS glue
+#      + vendored SDK → app.js (ESM; only `ws` is left external).
+#   2. ship a clean npm-layout node_modules holding `ws` and nothing else. The
+#      package contains NO native binary on any platform — see resources/resvg.wasm.
+#   3. assemble manifest + en.json + resources (icons + fonts + resvg.wasm)
+#      + plugin/app.js.
 #
 # Output: plugin-ulanzi/dist/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/
 set -euo pipefail
@@ -23,7 +24,10 @@ VERSION=$(node -p "require('$SRC_PLUGIN/manifest.json').Version")
 # portal's client-side root check.
 ARCHIVE="$ROOT/dist/${NAME}.zip"
 
-RESVG_VERSION="2.6.2"
+# Keep in lockstep with plugin-ulanzi/package.json: the WASM and native builds of
+# resvg render identically ONLY at the same version, and that identity is the
+# whole argument for having dropped the native one.
+RESVG_WASM_VERSION="2.6.2"
 WS_VERSION="^8.20.0"
 
 echo "==> clean $OUT"
@@ -44,10 +48,13 @@ mkdir -p "$OUT/plugin" "$OUT/resources"
 # `pnpm install --frozen-lockfile`, then run this script. Keep the pin in step
 # with the esbuild version the workspace resolves.
 ESBUILD_VERSION="0.28.2"
-echo "==> bundle main service (esbuild@$ESBUILD_VERSION, ESM, external resvg+ws)"
+echo "==> bundle main service (esbuild@$ESBUILD_VERSION, ESM, external ws)"
+# resvg-wasm's glue is plain JS and bundles; only its .wasm is a separate file,
+# shipped under resources/ and read at runtime by raster.ts. `ws` stays external
+# because it is the one dependency npm must lay out itself.
 pnpm dlx "esbuild@$ESBUILD_VERSION" "$PKG/src/app.ts" \
   --bundle --platform=node --format=esm --target=node20 \
-  --external:@resvg/resvg-js --external:ws \
+  --external:ws \
   --outfile="$OUT/plugin/app.js" \
   --log-level=warning
 # ESM marker so node treats app.js (and import.meta.url) as a module.
@@ -100,62 +107,62 @@ for required in \
   fi
 done
 
-echo "==> build runtime node_modules (resvg native + ws) via npm"
+echo "==> stage resvg.wasm + runtime node_modules (ws) via npm"
 TMP="$(mktemp -d)"
 cat > "$TMP/package.json" <<JSON
 { "name": "agentdeck-ulanzi-runtime", "private": true,
   "dependencies": {
-    "@resvg/resvg-js": "$RESVG_VERSION",
-    "@resvg/resvg-js-darwin-arm64": "$RESVG_VERSION",
-    "@resvg/resvg-js-darwin-x64": "$RESVG_VERSION",
-    "@resvg/resvg-js-win32-x64-msvc": "$RESVG_VERSION",
-    "@resvg/resvg-js-win32-arm64-msvc": "$RESVG_VERSION",
-    "@resvg/resvg-js-win32-ia32-msvc": "$RESVG_VERSION",
+    "@resvg/resvg-wasm": "$RESVG_WASM_VERSION",
     "ws": "$WS_VERSION"
   } }
 JSON
-# npm normally skips optional packages for other OS/CPU pairs. These are
-# direct dependencies because one Marketplace bundle must run on every OS
-# declared in manifest.json; --force permits assembling that universal set.
-( cd "$TMP" && npm install --force --omit=dev --no-audit --no-fund --silent )
+( cd "$TMP" && npm install --omit=dev --no-audit --no-fund --silent )
+
+# The WASM module is the ONE renderer artifact, identical on every OS and CPU.
+# Until 1.0.4 this step assembled five per-platform `.node` binaries instead —
+# 18.5 MB of a 20 MB plugin — and macOS raised "Apple could not verify" on the
+# arm64 one, because a loose native module inside a folder Ulanzi Studio
+# downloads and unpacks has nobody who can sign it. It lives beside the fonts
+# rather than in node_modules so raster.ts resolves it the same way (and so the
+# esbuild bundle stays the only JS).
+cp "$TMP/node_modules/@resvg/resvg-wasm/index_bg.wasm" "$OUT/resources/resvg.wasm"
+
+# `ws` is now the only runtime dependency npm lays out. It is pure JS; its two
+# native accelerators (bufferutil, utf-8-validate) are optional and are NOT
+# installed, which the no-native check below enforces rather than assumes.
 mkdir -p "$OUT/node_modules"
-cp -R "$TMP/node_modules/." "$OUT/node_modules/"
+cp -R "$TMP/node_modules/ws" "$OUT/node_modules/ws"
 rm -rf "$TMP"
 
-# npm also installs the *host* platform's optional binary on top of the five
-# requested above, so a Linux CI runner silently adds resvg-js-linux-x64-gnu —
-# 4.4 MB for a platform manifest.json does not declare. That made the released
-# archive 11.5 MB while a local build was 9.1 MB: same version, different bytes,
-# and the bigger one is the one users would have downloaded. Prune to the
-# declared set so the artifact does not depend on where it was built.
-KEEP="darwin-arm64 darwin-x64 win32-x64-msvc win32-arm64-msvc win32-ia32-msvc"
-for dir in "$OUT"/node_modules/@resvg/resvg-js-*; do
-  [ -d "$dir" ] || continue
-  target="$(basename "$dir" | sed 's/^resvg-js-//')"
-  case " $KEEP " in
-    *" $target "*) ;;
-    *) echo "    prune @resvg/resvg-js-$target (not a declared platform)"; rm -rf "$dir" ;;
-  esac
-done
-
 echo "==> verify"
-node -e "const fs=require('fs');const p='$OUT';
+node -e "const fs=require('fs');const path=require('path');const p='$OUT';
   for (const f of ['manifest.json','plugin/app.js','plugin/package.json']) if(!fs.existsSync(p+'/'+f)) throw new Error('missing '+f);
-  const nm=p+'/node_modules';
-  if(!fs.existsSync(nm+'/@resvg/resvg-js')) throw new Error('missing resvg');
-  if(!fs.existsSync(nm+'/ws')) throw new Error('missing ws');
-  const targets=['darwin-arm64','darwin-x64','win32-x64-msvc','win32-arm64-msvc','win32-ia32-msvc'];
-  for (const target of targets) {
-    const dir=nm+'/@resvg/resvg-js-'+target;
-    if(!fs.existsSync(dir)) throw new Error('missing resvg target '+target);
-    if(!require('child_process').execSync('find '+dir+' -name *.node').toString().trim()) throw new Error('missing native binary '+target);
-  }
-  // The prune above must leave EXACTLY the declared set: an extra host-platform
-  // binary is what made a CI archive differ from a local one by 4.4 MB.
-  const present=fs.readdirSync(nm+'/@resvg').filter(d=>d.startsWith('resvg-js-')).map(d=>d.slice('resvg-js-'.length)).sort();
-  const extra=present.filter(t=>!targets.includes(t));
-  if(extra.length) throw new Error('undeclared platform binary in package: '+extra.join(', '));
-  console.log('OK — bundle '+(fs.statSync(p+'/plugin/app.js').size/1024|0)+'KB, resvg targets: '+targets.join(', '));
+  if(!fs.existsSync(p+'/node_modules/ws')) throw new Error('missing ws');
+
+  // The renderer: one WASM file, no per-platform anything.
+  const wasm=p+'/resources/resvg.wasm';
+  if(!fs.existsSync(wasm)) throw new Error('missing resources/resvg.wasm');
+  if(fs.readFileSync(wasm).subarray(0,4).toString('hex')!=='0061736d') throw new Error('resources/resvg.wasm is not a WebAssembly module');
+
+  // Fonts are load-bearing now: the WASM build has no filesystem and therefore no
+  // system-font fallback, so a package missing them renders every tile textless
+  // rather than merely differently.
+  for (const f of ['IBMPlexSans-Regular.ttf','IBMPlexSans-Bold.ttf','JetBrainsMono-Regular.ttf','JetBrainsMono-Bold.ttf'])
+    if(!fs.existsSync(p+'/resources/fonts/'+f)) throw new Error('missing bundled font '+f);
+
+  // The point of the whole change: nothing in the shipped bundle may be a native
+  // binary. Walked over the tree rather than checked against a list of package
+  // names, so a dependency that grows an optional native accelerator later cannot
+  // slip one in unnoticed.
+  const all=fs.readdirSync(p,{recursive:true,withFileTypes:true});
+  const native=all.filter(e=>e.isFile()&&/[.](node|dylib|so|dll)\$/.test(e.name)).map(e=>path.join(e.parentPath||e.path,e.name));
+  if(native.length) throw new Error('native binary in package: '+native.join(', '));
+
+  // And app.js must not still import the native package.
+  if(fs.readFileSync(p+'/plugin/app.js','utf8').includes('@resvg/resvg-js')) throw new Error('app.js still references @resvg/resvg-js');
+
+  let bytes=0; for (const e of all) if(e.isFile()) bytes+=fs.statSync(path.join(e.parentPath||e.path,e.name)).size;
+  console.log('OK — bundle '+(fs.statSync(p+'/plugin/app.js').size/1024|0)+'KB, resvg.wasm '+(fs.statSync(wasm).size/1024|0)+'KB, no native binaries, plugin '+(bytes/1048576).toFixed(1)+'MB');
 "
 echo "==> packaged at: $OUT"
 

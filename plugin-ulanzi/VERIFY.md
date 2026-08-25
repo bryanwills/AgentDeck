@@ -46,7 +46,7 @@ Already set up for you:
    Open <http://127.0.0.1:39069>.
 
 4. **Start our main service** (its own terminal — runs from the workspace so
-   `node_modules`/`@agentdeck/shared`/resvg/gifenc resolve):
+   `node_modules`/`@agentdeck/shared`/resvg-wasm/gifenc resolve):
    ```bash
    pnpm --filter @agentdeck/plugin-ulanzi sim
    ```
@@ -137,7 +137,8 @@ first thing to check is the encode/push log above, not the socket.
 The simulator's key grid is generic and doesn't match the real D200H or D200X.
 To test on the actual device, install into **Ulanzi Studio** — which launches the Node main
 service itself from the installed plugin folder, so the plugin must be
-**self-contained** (bundled + shipped `node_modules` with the resvg native + ws).
+**self-contained** (bundled app.js + `resources/resvg.wasm` + a shipped
+`node_modules` holding only `ws` — no native binary on any platform).
 
 1. **Install Ulanzi Studio for Mac** from <https://www.ulanzi.com/pages/downloads>
    (Apple silicon build), launch it once, plug in the D200H or D200X.
@@ -146,7 +147,7 @@ service itself from the installed plugin folder, so the plugin must be
    ```bash
    pnpm --filter @agentdeck/plugin-ulanzi package:install
    ```
-   This bundles the main service, ships `@resvg/resvg-js` (+ native) and `ws`, and
+   This bundles the main service, stages `resources/resvg.wasm` and `ws`, and
    copies the `.ulanziPlugin` into
    `~/Library/Application Support/Ulanzi/UlanziDeck/Plugins/`.
    (Omit `:install` to only build under `plugin-ulanzi/dist/`.)

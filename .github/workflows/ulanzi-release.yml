@@ -10,9 +10,10 @@ permissions:
 
 jobs:
   build:
-    # The packaging script ships @resvg/resvg-js native binaries for every
-    # darwin/win32 target in the manifest's OS matrix by resolving them from
-    # the pnpm store, so the host platform does not constrain the artifact.
+    # The artifact contains no native binary at all: the rasterizer is
+    # @resvg/resvg-wasm, one file identical on every OS and CPU. The host
+    # platform therefore cannot leak into the archive, and the packaging step's
+    # verify refuses a bundle carrying a .node/.dylib/.so/.dll anywhere.
     runs-on: ubuntu-latest
 
     steps:

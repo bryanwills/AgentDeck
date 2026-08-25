@@ -2,6 +2,63 @@
 
 ---
 
+## 2026-08-25 — Ulanzi 플러그인에서 네이티브 바이너리를 전부 걷어낸다 (1.0.5)
+
+Ulanzi Studio 팀이 Apple Silicon에서 `resvgjs.darwin-arm64.node`에 macOS
+Gatekeeper 경고("Apple cannot verify…")가 뜬다고 알려왔다. 심사 중이던 1.0.4 얘기다.
+
+**서명은 처음부터 답이 아니었다.** Studio가 내려받아 압축을 푸는 폴더 안의 loose
+네이티브 모듈은, 그것을 로드하는 프로세스 기준으로 서명해줄 주체가 없다 — Studio는
+우리가 만들지 않고, 우리 의존성은 Studio가 만들지 않는다. 게다가 `@resvg/resvg-js`는
+아키텍처마다 `.node`가 따로 필요한데 마켓플레이스 번들은 하나로 모든 OS를 커버해야
+하므로 5개를 실었다: 20MB 플러그인 중 18.5MB, 그중 4개는 어떤 기계에서도 못 쓴다.
+
+**`@resvg/resvg-wasm`은 같은 resvg 버전, 같은 Rust 코어다.** 그래서 렌더러 교체가
+아니다 — 두 래스터 크기 × 모든 세션 상태 × 모든 에이전트 34타일을 측정해
+`feGaussianBlur` 글로우까지 **바이트 동일**(같은 RGBA, 같은 PNG 해시)을 확인하고서야
+바꿨다. 비용은 캐시 미스 렌더당 3.6~3.9배(144px 2.2→7.9ms, 196px 3.1→12.0ms,
+시작 시 1회 15.6ms)인데 256개짜리 래스터 캐시 뒤에 있고 Studio→기기 링크 예산에
+한참 못 미친다. **두 빌드의 버전은 lockstep으로 고정할 것** — 동일성이 논거 전부다.
+
+측정은 빌드된 산출물로 했다. 패키징된 `resources/resvg.wasm` + 번들 폰트로 34/34
+동일을 확인하고, 그 다음 **패키징된 `app.js`를 가짜 Ulanzi Studio WS에 붙여** 실제로
+196×196 PNG가 푸시되는 것까지 봤다(컴파일 성공은 실행 증거가 아니다).
+
+세 가지 파생 규칙:
+
+- `initWasm`은 async인데 타일 렌더는 전부 sync다. 그래서 `app.ts`가 **Studio 브리지가
+  열리기 전에** `initRaster()`를 await한다 — 어떤 `onAdd`도 키 이미지를 요구하기 전.
+- 폰트가 load-bearing이 됐다. WASM 빌드는 파일시스템이 없어 `loadSystemFonts` 폴백
+  자체가 없으므로, 폰트 빠진 번들은 "조금 다르게"가 아니라 **모든 타일이 글자 없이**
+  그려진다. 패키징이 거부한다.
+- 패키징 verify는 패키지 **이름 목록이 아니라 트리를 걸어서** `.node`/`.dylib`/`.so`/
+  `.dll`을 찾는다. 나중에 어떤 의존성이 optional 네이티브 가속기를 달아도 잡힌다.
+
+업로드 아카이브 9.15MB → 1.39MB, 설치본 20MB → 3.5MB.
+
+---
+
+## 2026-08-25 — fm-helper에 평가용 instruction-less 세션과 출력 상한을 연다
+
+model-eval의 Apple Foundation Models 호출을 OpenClaw 공통 하네스에 연결하려면
+OpenAI 호환 어댑터가 헬퍼에 두 조건을 전달할 수 있어야 했다. 기존 헬퍼는 instructions가
+빠지면 AgentDeck 판정용 strict-JSON 지시문을 자동으로 넣었고, `maxTokens`도 Foundation
+Models의 `GenerationOptions`까지 내려가지 않았다.
+
+`HelperRequest`에 선택적 `instructionsMode`와 `maximumResponseTokens`를 추가했다.
+`instructionsMode: "none"`은 실제 instruction-less `LanguageModelSession`을 만들고,
+출력 상한은 1–4,096 범위로 정규화해 `GenerationOptions.maximumResponseTokens`에 전달한다.
+두 필드가 없는 AgentDeck 기존 호출은 strict-JSON 기본값과 온도 0을 그대로 유지한다.
+health 응답의 `generationProtocol: 2`로 평가 어댑터가 오래된 캐시 바이너리를 감지할 수 있다.
+`GenerationError`의 컨텍스트 초과·언어 거부·rate limit·동시 요청·refusal도 각 enum 이름으로
+내보내 어댑터와 평가 기록이 원인을 보존한다.
+
+검증: `fm-helper-build.test.ts` 7개 통과, macOS 26 SDK 실컴파일 통과, 새 바이너리 health가
+`generationProtocol: 2`를 반환했다. model-eval의 localhost 어댑터를 거친
+`openclaw infer model run --model apple-fm/on-device` 실호출에서 요청 문자열을 정확히 돌려받았다.
+
+---
+
 ## 2026-08-24 — Ulanzi 마켓플레이스 첫 게재, 그리고 태그를 걸어야만 드러나는 결함
 
 ### 문제

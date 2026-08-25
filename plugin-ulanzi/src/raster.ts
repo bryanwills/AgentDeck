@@ -1,18 +1,38 @@
 /**
  * SVG → PNG rasterization for Ulanzi key icons.
  *
- * Mirrors bridge/src/d200h/image-renderer.ts: resvg with EXPLICIT bundled fonts
- * (fontFiles, NOT loadSystemFonts — which would re-scan the OS font tree on every
- * `new Resvg()`). `defaultFontFamily` makes the shared renderers' `Inter`/`Arial`/
- * `monospace` families fall back to a design face instead of dropping all <text>.
+ * WASM, not native. resvg ships two builds of one Rust core: `@resvg/resvg-js`
+ * (a per-platform `.node` binary) and `@resvg/resvg-wasm`. We shipped the native
+ * one until 1.0.4, which meant five unsigned `.node` files in the Marketplace
+ * bundle — 18.5 MB of a 20 MB plugin — and macOS Gatekeeper raising "Apple could
+ * not verify this file" on Apple Silicon for `resvgjs.darwin-arm64.node`
+ * (reported by the Ulanzi Studio team, 2026-08-25). A loose native module inside
+ * a folder Studio downloads and unpacks has no owner who can sign it: we do not
+ * build Studio, and Studio does not build our dependency. The WASM build removes
+ * the question rather than answering it — no per-architecture artifacts, nothing
+ * for Gatekeeper to adjudicate, one file for every OS in the manifest.
+ *
+ * It is the SAME resvg version (2.6.2, pinned in lockstep), so this is not a
+ * renderer swap: measured over our own tiles at both raster sizes, native and
+ * WASM produce BYTE-IDENTICAL RGBA and PNG output, feGaussianBlur included. The
+ * cost is ~3.6-3.9x per uncached render (2.2ms → 7.9ms at 144, 3.1ms → 12.0ms at
+ * 196, plus 15.6ms once at init) which sits behind `pngCache` and is far under
+ * the Studio→device link's own budget.
+ *
+ * Fonts are EXPLICIT bundled buffers, never the OS font tree — same rule as
+ * before (`fontFiles` → `fontBuffers`; the WASM build cannot reach the
+ * filesystem, so buffers are the only form it takes). `defaultFontFamily` makes
+ * the shared renderers' `Inter`/`Arial`/`monospace` families fall back to a
+ * design face instead of dropping all <text>.
  *
  * Ulanzi Studio scales the icon to the key, so we render a fixed square.
  */
-import { Resvg } from '@resvg/resvg-js';
+import { initWasm, Resvg } from '@resvg/resvg-wasm';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
-import { derr } from './log.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { derr, dinfo } from './log.js';
 
 export const ICON_SIZE = 196;
 
@@ -27,50 +47,99 @@ export const ICON_SIZE = 196;
  */
 export const GIF_ICON_SIZE = 144;
 
-const FONT_OPTS: { fontFiles?: string[]; loadSystemFonts: boolean; defaultFontFamily: string } = (() => {
-  try {
-    // compiled app lives at <plugin>/plugin/*.js → fonts at <plugin>/resources/fonts
-    const here = dirname(fileURLToPath(import.meta.url));
-    const candidates = [
-      join(here, '..', 'resources', 'fonts'),
-      join(here, '..', '..', 'resources', 'fonts'),
-    ];
-    for (const fontsDir of candidates) {
-      const files = [
-        'IBMPlexSans-Regular.ttf',
-        'IBMPlexSans-Bold.ttf',
-        'JetBrainsMono-Regular.ttf',
-        'JetBrainsMono-Bold.ttf',
-      ]
-        .map((n) => join(fontsDir, n))
-        .filter((p) => existsSync(p));
-      if (files.length > 0) {
-        return { fontFiles: files, loadSystemFonts: false, defaultFontFamily: 'IBM Plex Sans' };
+/** `<plugin>/plugin/*.js` → resources at `<plugin>/resources`. */
+function resourceDirs(): string[] {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return [join(here, '..', 'resources'), join(here, '..', '..', 'resources')];
+}
+
+const FONT_FILES = [
+  'IBMPlexSans-Regular.ttf',
+  'IBMPlexSans-Bold.ttf',
+  'JetBrainsMono-Regular.ttf',
+  'JetBrainsMono-Bold.ttf',
+];
+
+const FONT_OPTS: { fontBuffers: Uint8Array[]; loadSystemFonts: boolean; defaultFontFamily: string } =
+  (() => {
+    try {
+      for (const dir of resourceDirs()) {
+        const buffers = FONT_FILES.map((n) => join(dir, 'fonts', n))
+          .filter((p) => existsSync(p))
+          .map((p) => new Uint8Array(readFileSync(p)));
+        if (buffers.length > 0) {
+          return { fontBuffers: buffers, loadSystemFonts: false, defaultFontFamily: 'IBM Plex Sans' };
+        }
       }
+    } catch {
+      /* fall through */
     }
-  } catch {
-    /* fall through */
+    // No system-font fallback exists here, unlike the native build: the WASM
+    // module has no filesystem. Every <text> would drop, so say so once rather
+    // than shipping silently blank tiles — the packaging script's verify step
+    // refuses to build a bundle without these files for the same reason.
+    derr('raster', 'bundled fonts not found — text will not render');
+    return { fontBuffers: [], loadSystemFonts: false, defaultFontFamily: 'IBM Plex Sans' };
+  })();
+
+/** Locate `resvg.wasm`: packaged next to the fonts, else the dev node_modules copy. */
+function wasmPath(): string | null {
+  for (const dir of resourceDirs()) {
+    const p = join(dir, 'resvg.wasm');
+    if (existsSync(p)) return p;
   }
-  return { loadSystemFonts: true, defaultFontFamily: 'Helvetica Neue' };
-})();
+  try {
+    return createRequire(import.meta.url).resolve('@resvg/resvg-wasm/index_bg.wasm');
+  } catch {
+    return null;
+  }
+}
+
+let ready: Promise<void> | null = null;
+let initialized = false;
+
+/**
+ * Load the WASM module. MUST be awaited before the first raster — `initWasm` is
+ * async and may be called only once, so the promise is memoized rather than the
+ * boolean checked (two concurrent callers would otherwise both call it and the
+ * second would throw "Already initialized").
+ */
+export function initRaster(): Promise<void> {
+  if (!ready) {
+    ready = (async () => {
+      const path = wasmPath();
+      if (!path) throw new Error('resvg.wasm not found');
+      await initWasm(readFileSync(path));
+      initialized = true;
+      dinfo('raster', `resvg wasm ready (${path})`);
+    })().catch((err) => {
+      derr('raster', `initWasm failed: ${err}`);
+    });
+  }
+  return ready;
+}
+
+/** 1×1 transparent PNG — the tile a failed raster falls back to. */
+const BLANK_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+function wrap(svg144: string, size: number): string {
+  const inner = svg144.replace(/<\/?svg[^>]*>/g, '');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 144 144">${inner}</svg>`;
+}
 
 /** Rasterize a 144×144 shared-renderer SVG into a square PNG Buffer. */
 export function svgToPng(svg144: string, size = ICON_SIZE): Buffer {
-  const inner = svg144.replace(/<\/?svg[^>]*>/g, '');
-  const wrapped = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 144 144">${inner}</svg>`;
   try {
-    const resvg = new Resvg(wrapped, {
+    if (!initialized) throw new Error('resvg wasm not initialized');
+    const resvg = new Resvg(wrap(svg144, size), {
       fitTo: { mode: 'width', value: size },
       font: FONT_OPTS,
     });
     return Buffer.from(resvg.render().asPng());
   } catch (err) {
     derr('raster', `svgToPng failed: ${err}`);
-    // 1×1 transparent PNG fallback
-    return Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
-      'base64',
-    );
+    return Buffer.from(BLANK_PNG, 'base64');
   }
 }
 
@@ -102,9 +171,11 @@ export interface RgbaImage {
 
 /** Rasterize a 144×144 SVG to raw RGBA pixels (for the GIF encoder). */
 export function svgToRgba(svg144: string, size = ICON_SIZE): RgbaImage {
-  const inner = svg144.replace(/<\/?svg[^>]*>/g, '');
-  const wrapped = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 144 144">${inner}</svg>`;
-  const resvg = new Resvg(wrapped, { fitTo: { mode: 'width', value: size }, font: FONT_OPTS });
+  if (!initialized) throw new Error('resvg wasm not initialized');
+  const resvg = new Resvg(wrap(svg144, size), {
+    fitTo: { mode: 'width', value: size },
+    font: FONT_OPTS,
+  });
   const rendered = resvg.render();
   return {
     data: new Uint8Array(rendered.pixels),

@@ -31,10 +31,15 @@ import { DaemonClient } from './daemon-client.js';
 import { ReconnectSupervisor } from './reconnect-supervisor.js';
 import { StateStore } from './state-store.js';
 import { deckSignature } from './deck-signature.js';
-import { svgToBase64Png, GIF_ICON_SIZE } from './raster.js';
+import { svgToBase64Png, GIF_ICON_SIZE, initRaster } from './raster.js';
 import { framesToGifBase64 } from './gif.js';
 import { launchCompanionApp } from './launch.js';
 import { dinfo, dlog, derr, flog } from './log.js';
+
+// resvg is the WASM build (see raster.ts): its module load is async and every
+// tile render is synchronous, so the whole service waits here once — before the
+// Studio bridge opens, i.e. before any onAdd can ask us for a key image. ~16ms.
+await initRaster();
 
 const PLUGIN_UUID = 'com.ulanzi.ulanzistudio.agentdeck';
 const TAG = 'app';
