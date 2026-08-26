@@ -21,6 +21,12 @@
 `pnpm docs:check`, `pnpm design-system:check`, `pnpm verify-version`,
 `pnpm verify-release-version npm 1.1.0` 통과.
 
+배포: `esp32-v1.0.8` workflow `32971682385`가 10보드를 순차 빌드해 일반 firmware,
+merged factory image, `manifest.json`, `SHA256SUMS.txt` 총 52개 자산을 공개했다. Pages
+workflow `32977828402` 뒤 실제 `/flash/fw/index.json`도 `esp32-v1.0.8`을 가리킨다.
+그 다음 `npm-v1.1.0` workflow `32978803731`이 네 패키지를 dependency order로 게시했고,
+registry에서 exact version과 `dist-tags.latest = 1.1.0`, setup README를 다시 확인했다.
+
 ---
 
 ## 2026-08-26 — Codex App의 보존된 채팅과 AgentDeck의 활성 세션을 분리한다
