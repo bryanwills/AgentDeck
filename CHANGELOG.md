@@ -1,11 +1,13 @@
 # Changelog
 
-All delivery channels share one `major.minor` compatibility line. Patch versions
+All delivery channels share one compatibility major. Minor and patch versions,
 and prefixed release tags (`apple-v*`, `streamdeck-v*`, `ulanzi-v*`, `npm-v*`,
-`android-v*`, `esp32-v*`) advance independently by target. Root `VERSION` is the
-repository baseline, not a patch ceiling: any numeric `A.B.C` and `A.B.D` are
-mutually compatible. `pnpm verify-version` gates the shared `A.B` line and
-target-internal version consistency. See [RELEASING.md](RELEASING.md).
+`android-v*`, `esp32-v*`), advance independently by target. Root `VERSION` is
+the repository baseline, not a minor/patch ceiling: any numeric `A.B.C` and
+`A.D.E` are mutually compatible. Minor releases add substantial backward-compatible
+features; patches carry small backward-compatible fixes. `pnpm verify-version`
+gates the shared major and target-internal version consistency. See
+[RELEASING.md](RELEASING.md).
 
 **This file is the source of every GitHub Release body.** `scripts/release-notes.mjs`
 looks up a delivery tag here and renders the release page from what it finds;
@@ -35,6 +37,46 @@ would fire the release workflow against a version npm already holds, and this
 file's own rule forbids reconstructing its notes. The commit above is the
 record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
 bumped, superseded by 1.0.17, and never published, so it exists only in git.
+
+## 2026-08-26 — npm 1.1.0
+
+This is the first release under the compatibility-major version policy. It stays
+on protocol-compatible major 1, but uses a minor bump because the delivery since
+1.0.24 contains several substantial backward-compatible features rather than one
+isolated fix.
+
+### Surface Protocol, resumable OTA and offline weather
+
+Surface Protocol v1 gives low-power and intermittently connected displays a
+bounded Feed/Outbox contract instead of requiring a continuous WebSocket. Pocket
+firmware downloads can resume with negotiated segments, discover an update before
+a full feed transfer, survive dual-homed hosts through subnet-aware redirects,
+and close a staged update after the installed version reports back. The same feed
+now carries a cached weather outlook, and `/health` exposes build identity for
+deployment diagnostics.
+
+### OpenClaw activity is observable and actionable
+
+The daemon now subscribes to the Gateway events that carry user messages, tool
+calls and assistant metadata. APME receives real turn boundaries, provenance,
+per-message usage and tool results instead of mostly empty 30-minute runs. Approval
+prompts can be answered from AgentDeck, including sessions reached through relays,
+without inventing duplicate activity when Gateway event paths overlap.
+
+### Codex dashboards show the sessions and limits that are actually active
+
+Codex Plus once again renders its 5-hour window alongside 7-day usage, while Pro
+renders only the 7-day window it actually supplies. TUI and compact dashboard
+layouts use `windowMinutes` rather than positional assumptions. Codex App chats
+whose rollout files remain open but inactive leave the active roster after 90
+seconds; project duplicates are folded consistently across consumers. A cached
+serial endpoint also no longer suppresses fresher Wi-Fi display traffic.
+
+### Device identity and routing are more reliable
+
+Adopted boards report their configured identity, network discovery stops
+advertising addresses devices cannot reach, and relayed Codex limits reconcile
+against the authoritative snapshot before reaching dashboards.
 
 ## 2026-08-25 — Ulanzi 1.0.5
 

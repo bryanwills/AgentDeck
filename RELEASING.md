@@ -1,31 +1,51 @@
 ---
 id: policy.releasing
 title: Releasing and Versioning
-description: Shared compatibility line, per-target patch versions, release tags, and monotonic constraints.
+description: Shared compatibility major, per-target feature/fix versions, release tags, and monotonic constraints.
 category: Engineering
 locale: en
 canonical: true
 status: required
 owner: Release maintainers
-reviewed: 2026-08-21
-revision: 2026-08-21
+reviewed: 2026-08-26
+revision: 2026-08-26
 source_of_truth: RELEASING.md
 validators: [node scripts/build-design-system-viewer.mjs --check, pnpm verify-version]
 ---
 
 # Releasing & Versioning
 
-AgentDeck uses one `major.minor` compatibility line across every maintained surface. Two numeric `X.Y.Z` product versions are mutually compatible if and only if their first two components match. Patch values are ignored in both directions: for example, `1.0.1` and `1.0.9` are compatible regardless of which side is newer.
+AgentDeck uses one compatibility major across every maintained surface. Two numeric
+`X.Y.Z` product versions are mutually compatible if and only if their first
+component matches. Minor and patch values are ignored in both directions for
+compatibility: for example, `1.0.9` and `1.3.0` are compatible regardless of which
+side is newer.
 
-Root [`VERSION`](VERSION) is the repository baseline and compatibility-line anchor, not a patch ceiling and not a runtime negotiation value. It currently reads **1.0.2**, so every maintained target must remain on compatibility line **1.0**. npm/CLI is at `1.0.21`; Stream Deck is at `1.0.6`; Android is at `1.0.10`; Apple is at `1.0.7`; ESP32 is at `1.0.6`; Ulanzi is at `1.0.5`. A target may also advance beyond root's patch without forcing unrelated targets or root to ship. **This sentence is a mirror, not a source** — take the declared values from `pnpm verify-version`, which reads each target's own manifest, and distinguish them from delivered state. Delivered state as of 2026-08-20, each line read from that channel's own instrument rather than from a tag. **Live:** npm `1.0.21` (registry), ESP32 `1.0.6` (GitHub Release, marked latest), Elgato Stream Deck `1.0.6` (the product page's embedded `versions` payload reports `status: published`, `publish_date: 2026-08-18T16:46Z`, so the Maker Console's "automatically publish after being approved" toggle did the release), Apple iOS `1.0.7` build 5201 (lookup API reports `1.0.7`, released 2026-08-18T17:06Z), Apple macOS `1.0.7` build 5201 (App Store Connect shows `배포 준비됨`, and the public product page with `platform=mac` reports `Version 1.0.7`, released 2026-08-19T22:11Z), and Google Play `1.0.10` versionCode 12 (production track reads `Google Play에 제공됨`, published 2026-08-19T17:31Z at 100% across 177 countries). The two Apple platforms were released a day apart from one submission, so neither one's state may be read off the other. **Ulanzi `1.0.3` is live**, measured in the portal on 2026-08-24: Personal Center reads **Works under review: 0 / Published works: 1**, and the public Plugins listing carries the AgentDeck card (second row, author `puritysb`) linking to [contentView/1141](https://ugc.ulanzistudio.com/contentView/1141). The submission was open from 2026-08-07 through publication — 17 days. **The published record and the repository have now diverged at the same version number**: `plugin-ulanzi` is three commits ahead of `ulanzi-v1.0.3` and its manifest declares `Devices: ["D200H", "D200X"]`, while the published 1.0.3 lists D200/D200H. Any further D200X work therefore ships as `1.0.4`; do not rebuild an artifact at 1.0.3.
+The three components communicate release scope:
 
-Two portal facts worth keeping, both measured during that submission:
+- **Major (`X`)** — a protocol compatibility break or an exceptionally large,
+  coordinated product migration. Every maintained target moves together.
+- **Minor (`Y`)** — a substantial backward-compatible feature or feature bundle.
+  A target may advance independently while older same-major targets keep working.
+- **Patch (`Z`)** — a small backward-compatible bug fix or refinement. Bump only
+  the target being delivered.
+
+Root [`VERSION`](VERSION) is the repository baseline and compatibility-major
+anchor, not a minor/patch ceiling and not a runtime negotiation value. It
+currently reads **1.0.2**, so every maintained target must remain on major **1**.
+A target may advance its minor or patch without forcing unrelated targets or
+root to ship. Read declared values from `pnpm verify-version`, which reads each
+target's own manifest, and distinguish them from delivered state. The release
+table in [`README.md`](README.md#releases) records delivered state only after it
+has been measured with that channel's own instrument.
+
+Three portal facts worth keeping from the recent Android delivery:
 
 - **Android developer verification covers apps you ship OUTSIDE Play too.** The Play release was blocked by "이 출시를 진행하려면 모든 키를 등록하여…" even though the Play app-signing key was registered. The missing key was the **upload key** (`10:60:3A:F8…`), which is what `scripts/build-android-release.sh` signs the GitHub APK with. Registering it cleared the error immediately. Diagnose by comparing the fingerprints on the app-signing page against the registered list — a package showing `등록됨` is not proof that every key it ships under is there. Deleting an unrelated stale package entry does **not** help; that was tried first and changed nothing.
 - **Saving a Play release does NOT submit it.** With managed publishing disabled, the release still lands as `아직 검토를 위해 전송되지 않음` on the track's 출시 tab, and the publishing overview reads `변경사항이 아직 검토를 위해 제출되지 않음` with a `검토를 위해 변경사항 N개 제출` button that must be pressed. The track summary says `최신 출시 버전: 12 (1.0.10)` either way, so that line cannot distinguish saved from submitted — read the per-release status, and confirm the summary flips to `출시 버전 12 (1.0.10) 검토 중`. Checking the publishing overview immediately after saving is also unreliable: it reported no pending changes while the save was still settling.
 - **Play's release-notes field silently drops every language but the first on each save.** All three (`en-US`, `ko-KR`, `ja-JP`) must be re-pasted immediately before the final save, and the "N개의 언어로 출시 노트 제공됨" counter is the only confirmation that they took.
 
-Run `pnpm verify-version` before every build or release. CI rejects a `major.minor` compatibility split or a target-internal mismatch. Release CI additionally requires a channel tag's full `X.Y.Z` to equal that target's own declared version; it does not compare the tag's patch with root `VERSION`.
+Run `pnpm verify-version` before every build or release. CI rejects a compatibility-major split or a target-internal mismatch. Release CI additionally requires a channel tag's full `X.Y.Z` to equal that target's own declared version; it does not compare the tag's minor or patch with root `VERSION`.
 
 ## A release has five states, and only one of them is "released"
 
@@ -94,7 +114,7 @@ So when a channel first goes live, sweep the surfaces that state its status: the
 
 **Play's live state reads without a console login.** `curl "https://play.google.com/store/apps/details?id=dev.agentdeck&hl=en"` returns the download bucket, the content rating, `Updated on`, and the localized *What's new* — so the notes a store is actually serving can be transcribed instead of reconstructed from the changelog — and `store/search?q=<term>&c=apps` measures whether the listing surfaces for anything besides its own name. Only the exact install count and the acquisition funnel (listing views versus installs) need the owner's login; that pair is what separates "nobody arrived" from "arrived and did not install".
 
-## Compatible line, independent patch and delivery
+## Shared major, independent minor/patch and delivery
 
 | Surface                                                   | Target version                               | Independent monotonic value                                                | Tag / delivery                             |
 | --------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------ |
@@ -106,17 +126,17 @@ So when a channel first goes live, sweep the surfaces that state its status: the
 | **Ulanzi**                                                | Ulanzi manifest `Version`                    | marketplace submission record                                              | `ulanzi-v*` → Ulanzi Studio Marketplace    |
 | **Private JS workspaces**                                 | their `package.json` files                   | not published                                                              | no independent delivery                    |
 
-Tag prefixes remain because channels ship independently and may point to different commits. A patch bump updates only the target being delivered. A channel is considered shipped only when its prefixed tag and external release/submission exist. Do not claim an unsubmitted marketplace artifact as released merely because another target advanced.
+Tag prefixes remain because channels ship independently and may point to different commits. A minor or patch bump updates only the target being delivered. A channel is considered shipped only when its prefixed tag and external release/submission exist. Do not claim an unsubmitted marketplace artifact as released merely because another target advanced.
 
 ## Version rules
 
-1. All targets must share root `VERSION`'s `major.minor`; changing either component is a coordinated compatibility release.
-2. Patch versions may differ by target without ordering constraints. `A.B.C` and `A.B.D` are mutually compatible for any numeric `C` and `D`; bump only the target being delivered.
+1. All targets must share root `VERSION`'s major. Changing it is a coordinated compatibility release.
+2. Minor and patch versions may differ by target without ordering constraints. `A.B.C` and `A.D.E` are mutually compatible for any numeric `B`–`E`; bump only the target being delivered.
 3. Never reuse, delete-and-recreate, or lower a version that reached an external registry/store. Git tags do not reset external version floors.
 4. Apple build number and Android versionCode increase only when those targets are actually built for delivery.
 5. Public npm packages stay in lockstep and publish in dependency order: `hooks` + `shared` → `bridge` → `setup`.
 6. Keep prefixed tags; there is no unprefixed repo-wide release tag.
-7. Every release tag must exactly match its own target source (`apple-v1.0.3` requires Apple `MARKETING_VERSION` `1.0.3`, for example), even when root or another target has a different patch.
+7. Every release tag must exactly match its own target source (`apple-v1.0.3` requires Apple `MARKETING_VERSION` `1.0.3`, for example), even when root or another target has a different minor or patch.
 8. The only valid version reset is a genuinely new external identity (for example a new Apple bundle ID or npm package name). Document that migration before changing source versions.
 
 ## Hard external constraints
@@ -126,10 +146,10 @@ Tag prefixes remain because channels ship independently and may point to differe
 - **npm**: published versions are immutable. At convergence, registry floors were hooks `0.2.0`, shared `0.2.0`, bridge `0.2.2`, setup `0.2.0`, so the unified train begins at `0.2.3`.
 - **Marketplaces**: plugin identifiers are immutable after distribution; only their versions advance.
 
-## Preparing a target patch release
+## Preparing a target release
 
-1. Choose the next SemVer for the target, preserving the shared `major.minor` compatibility line.
-2. Update that target's internal mirrors. Do not bump unrelated targets merely to align patch values.
+1. Choose the next SemVer for the target, preserving the shared compatibility major. Use minor for substantial backward-compatible features and patch for small fixes.
+2. Update that target's internal mirrors. Do not bump unrelated targets merely to align minor or patch values.
 3. Increment Apple `CURRENT_PROJECT_VERSION` or Android `versionCode` only when releasing that target.
 4. **Write the `CHANGELOG.md` entry, and the delivery table in `README.md`.** The
    changelog is not a courtesy copy — `scripts/release-notes.mjs` renders the
@@ -265,13 +285,13 @@ Run `snapshot` once when onboarding an existing app, save the returned request i
 
 ### Android (Google Play + APK)
 
-1. Confirm the Android `versionName` remains on the shared compatibility line and increment `versionCode`. Play refuses any upload whose `versionCode` is not strictly higher than the live one.
+1. Confirm the Android `versionName` remains on the shared compatibility major and increment `versionCode`. Play refuses any upload whose `versionCode` is not strictly higher than the live one.
 2. Follow `.agents/workflows/build-android.md` for the signed release APK.
 3. Tag and push `android-v<ANDROID_VERSION>` to create the GitHub Release. CI's Play upload stays gated by `ANDROID_PLAY_ENABLED` and its service-account secret, so in practice the AAB is built locally (`./gradlew bundleRelease`) and uploaded through the console — see [marketplace/play/LISTING.md](marketplace/play/LISTING.md) for the runbook, including that saving a release is not submitting it and that release notes keep only the first language across a save.
 
 ### ESP32 firmware
 
-1. Confirm `FIRMWARE_VERSION` remains on the shared compatibility line and run the relevant PlatformIO/hardware verification.
+1. Confirm `FIRMWARE_VERSION` remains on the shared compatibility major and run the relevant PlatformIO/hardware verification.
 2. Confirm the `esp32-release.yml` build matrix still covers **every board marked Shipping** in the ESP32 board table of [docs/hardware-compatibility.md](docs/hardware-compatibility.md). A Shipping board absent from the matrix ships no firmware at all, and nothing else fails — the release simply comes out short, which is how `t_embed`, `t_display_pro` and `esp32_c6_147` had no binaries in `1.0.1`.
 3. Tag and push `esp32-v<ESP32_VERSION>`.
 

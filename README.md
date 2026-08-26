@@ -314,8 +314,10 @@ code. Listing an integration does not make AgentDeck its maintainer.
 
 ## Releases
 
-One `major.minor` compatibility line across every artifact; target patches and
-delivery tags advance independently without patch-order constraints. Root [`VERSION`](VERSION) anchors the compatibility line but is not a patch ceiling — policy in [RELEASING.md](RELEASING.md),
+One compatibility major across every artifact; target minor/patch versions and
+delivery tags advance independently. A minor adds substantial backward-compatible
+features, while a patch carries small fixes. Root [`VERSION`](VERSION) anchors
+the compatibility major but is not a minor/patch ceiling — policy in [RELEASING.md](RELEASING.md),
 builds on [Releases](https://github.com/puritysb/AgentDeck/releases).
 
 | Channel | Tag | Status |

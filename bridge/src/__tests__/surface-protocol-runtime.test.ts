@@ -4,6 +4,7 @@ import {
   negotiateSurface,
   parseHttpSurfaceIdentity,
   pullOtaResponseStatus,
+  SURFACE_SERVER_VERSION,
   SurfaceProtocolError,
   surfaceAllowsEvent,
   validateSurfaceQueryTuple,
@@ -112,7 +113,7 @@ describe('Surface Protocol WebSocket negotiation', () => {
       profile: 'portable-reader/v1',
       capabilities: ['feed.pull', 'ota.feed'],
     });
-    expect(result.welcome.serverVersion).toMatch(/^1\.0\./);
+    expect(result.welcome.serverVersion).toBe(SURFACE_SERVER_VERSION);
   });
 
   it('keeps the checked welcome fixture derived from runtime negotiation', () => {

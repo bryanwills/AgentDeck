@@ -2,6 +2,27 @@
 
 ---
 
+## 2026-08-26 — 호환성 경계를 major로 옮기고 기능과 수정의 버전 의미를 분리한다
+
+실제 배포에서는 프로토콜 호환성이 minor 기능 추가로 거의 깨지지 않았는데, 기존 검증은
+모든 타깃의 `major.minor`가 같아야 한다고 강제했다. 그 결과 큰 기능 묶음도 patch를 계속
+올리거나, 한 타깃의 기능 릴리즈 때문에 무관한 타깃까지 같은 minor로 맞춰야 했다.
+
+- `X.Y.Z`의 `X`만 교차 타깃 호환성 경계다. 프로토콜 비호환 또는 예외적으로 큰 공동
+  마이그레이션에서만 모든 타깃이 함께 올린다.
+- `Y`는 substantial backward-compatible feature, `Z`는 작은 호환 버그 수정이다. 같은
+  major 안에서는 타깃별 minor/patch가 달라도 양방향 호환으로 검증한다.
+- `verify-version`과 단위 테스트, `CLAUDE.md`, `RELEASING.md`, README, CHANGELOG의
+  설명을 같은 계약으로 바꿨다.
+- npm 1.0.24 이후 묶음은 Surface Protocol v1, resumable OTA/weather, OpenClaw APME를
+  포함하므로 새 규칙의 첫 minor 릴리즈 `1.1.0`으로 준비했다.
+
+검증: `pnpm build`, `pnpm typecheck`, Vitest 3,603/3,603,
+`pnpm docs:check`, `pnpm design-system:check`, `pnpm verify-version`,
+`pnpm verify-release-version npm 1.1.0` 통과.
+
+---
+
 ## 2026-08-26 — Codex App의 보존된 채팅과 AgentDeck의 활성 세션을 분리한다
 
 Codex App의 단일 `app-server`는 사용자가 열어 본 여러 채팅의 rollout FD를 며칠씩

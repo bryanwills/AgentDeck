@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { areVersionsCompatible, compatibilityLine, parseNumericVersion } from './version-policy.mjs';
+import { areVersionsCompatible, compatibilityMajor, parseNumericVersion } from './version-policy.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const productVersion = readFileSync(resolve(root, 'VERSION'), 'utf8').trim();
@@ -21,7 +21,7 @@ function expectValue(path, actual, expected) {
   if (actual !== expected) failures.push(`${path}: expected ${expected}, found ${actual ?? '<missing>'}`);
 }
 
-const productCompatibilityLine = compatibilityLine(productVersion) ?? '<invalid>';
+const productCompatibilityMajor = compatibilityMajor(productVersion) ?? '<invalid>';
 
 function expectCompatible(path, actual) {
   if (!parseNumericVersion(actual)) {
@@ -29,7 +29,7 @@ function expectCompatible(path, actual) {
     return;
   }
   if (!areVersionsCompatible(productVersion, actual)) {
-    failures.push(`${path}: expected compatibility line ${productCompatibilityLine}.x, found ${actual}`);
+    failures.push(`${path}: expected compatibility major ${productCompatibilityMajor}.x.x, found ${actual}`);
   }
 }
 
@@ -39,8 +39,9 @@ function jsonVersion(path, key = 'version') {
 
 expectValue('package.json', jsonVersion('package.json'), productVersion);
 
-// Major.minor is the cross-target compatibility contract. Patch versions are
-// delivery counters and may lag on targets that were not part of a hotfix.
+// Major is the cross-target compatibility contract. Minor versions describe
+// backward-compatible feature releases; patch versions describe small fixes.
+// Both may advance independently for targets that ship on different schedules.
 // Packages that ship together inside one target must still agree exactly.
 const npmVersion = jsonVersion('bridge/package.json');
 expectCompatible('bridge/package.json', npmVersion);
@@ -116,7 +117,7 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Compatibility line ${productCompatibilityLine} is synchronized (patch ordering is independent); target patches: ` +
+  `Compatibility major ${productCompatibilityMajor} is synchronized (minor/patch ordering is independent); target versions: ` +
     `npm ${npmVersion}, Apple ${appleVersion}, Android ${androidVersion}, ESP32 ${esp32Version}, ` +
     `Stream Deck ${streamDeckVersion}, Ulanzi ${ulanziVersion}.`,
 );

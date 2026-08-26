@@ -2,20 +2,21 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { readTargetVersion, releaseTargets, validateReleaseVersion } from '../release-version.mjs';
-import { areVersionsCompatible, compatibilityLine, parseNumericVersion } from '../version-policy.mjs';
+import { areVersionsCompatible, compatibilityMajor, parseNumericVersion } from '../version-policy.mjs';
 
 // fileURLToPath, not URL.pathname: the latter yields '/E:/…' on Windows, which
 // path.resolve() mangles into 'E:\E:\…'.
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
 describe('cross-target version compatibility', () => {
-  it('ignores patch values and ordering within the same major.minor line', () => {
+  it('ignores minor and patch values and ordering within the same major line', () => {
     expect(areVersionsCompatible('1.0.0', '1.0.999')).toBe(true);
     expect(areVersionsCompatible('1.0.999', '1.0.0')).toBe(true);
+    expect(areVersionsCompatible('1.0.999', '1.7.0')).toBe(true);
+    expect(areVersionsCompatible('1.7.0', '1.0.999')).toBe(true);
   });
 
-  it('rejects different major or minor lines', () => {
-    expect(areVersionsCompatible('1.0.2', '1.1.0')).toBe(false);
+  it('rejects different major lines', () => {
     expect(areVersionsCompatible('1.0.2', '2.0.0')).toBe(false);
   });
 
@@ -23,7 +24,7 @@ describe('cross-target version compatibility', () => {
     expect(parseNumericVersion('1.0.2')).toEqual({ major: 1, minor: 0, patch: 2 });
     expect(parseNumericVersion('v1.0.2')).toBeNull();
     expect(parseNumericVersion('1.0')).toBeNull();
-    expect(compatibilityLine('1.0.27')).toBe('1.0');
+    expect(compatibilityMajor('1.0.27')).toBe('1');
   });
 });
 
