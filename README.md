@@ -153,9 +153,10 @@ the daemon's entire internal WebSocket API a public contract.
 | [Pocket Daily Reader](https://github.com/puritysb/pocket-daily-reader) | Community | `portable-reader/v1` | Independent offline-first e-reader. Pulls bounded cards and Glance, records choices offline, and keeps AgentDeck as an invisible sync source. Published manifest remains `community` / `untested`. |
 | [companion-module-agentdeck](https://github.com/houtacheng/companion-module-agentdeck) | Community | `companion-control/v1` | Independent Bitfocus Companion module for session tiles, approval controls, usage gauges, and status creatures (by [@houtacheng](https://github.com/houtacheng)). |
 
-Pocket Daily's complete Feed/Outbox/OTA runtime is provided by the Node CLI daemon.
-The macOS app's Swift daemon intentionally negotiates only its weather Feed subset;
-see the [runtime status](docs/surface-protocol.md#rollout-status).
+Pocket Daily's Feed/Outbox/telemetry/resumable-OTA runtime works with both the Node
+CLI daemon and the macOS app's standalone Swift daemon. Node additionally provides
+adaptive personal card modules and daemon-rendered Glance Frame pixels; see the
+[runtime status](docs/surface-protocol.md#rollout-status).
 
 Compatibility levels are **Community**, **Verified Compatible**, and **Official**.
 Verified Compatible means a named release passed the published manifest and

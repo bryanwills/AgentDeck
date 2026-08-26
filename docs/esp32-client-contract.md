@@ -147,11 +147,12 @@ A client with buttons must derive controls from the wire payload, never merely f
 
 The HTTP counterpart to the WS live mode, for clients that deep-sleep between
 syncs (XTeink X3/X4 on battery). Types: `shared/src/protocol.ts` § Card Feed
-Pull Sync; server: `bridge/src/card-feed.ts` + the daemon routes. The Node daemon
-implements the full portable runtime. The Swift in-process daemon validates Surface
-identity and negotiates only its weather-only Feed subset (`feed.pull`,
-`feed.conditional`, `glance.read`); it does not grant Outbox, Glance Frame pixels,
-full-tuple pull OTA, telemetry, or Inbox and is not fully portable-reader conformant.
+Pull Sync; server: `bridge/src/card-feed.ts` + the daemon routes. Both Node and the
+Swift in-process daemon implement the portable transport runtime: full identity,
+conditional Feed, Outbox replay, telemetry, product-scoped persistent pull OTA,
+bounded resume, negotiated 206, and install acknowledgement. Swift authors a bounded
+THREAD digest plus MET Norway weather; Node additionally owns adaptive personal card
+modules and Glance Frame pixels. Neither daemon grants Inbox.
 Always-powered clients keep using WS; a dual-mode client uses WS while docked
 and pull while on battery.
 
@@ -274,7 +275,7 @@ Card Feed implementation.
   without a full tuple is refused. Existing board-only state is retained only for
   headerless legacy AgentDeck requests. Device: Pocket Daily `src/agentdeck/ota_pull.*`;
   daemon: the versioned full-tuple staging store in `bridge/src/daemon-server.ts`.
-- **Dual-homed Surface routing (2026-08-26)**: Feed, Glance Frame, and pull OTA
+- **Dual-homed Surface routing (2026-08-26, Node daemon)**: Feed, Glance Frame, and pull OTA
   can answer `307` when a Mac has Ethernet and Wi-Fi addresses on the device
   subnet. Outbox is served on the accepted interface so older Pocket builds do
   not stall before Feed; current clients nevertheless support safe replay of
@@ -282,6 +283,9 @@ Card Feed implementation.
   origin in their persisted endpoint candidates. This prevents a successful
   request from losing its response on the competing return interface after
   host wake without breaking the OTA bootstrap path for legacy clients.
+  The Swift in-process daemon currently serves the accepted local interface
+  directly; subnet-aware redirect is an optional Node reliability optimization,
+  not a `portable-reader/v1` capability.
 - **Glance Frame (M8, 2026-07-31)**: `GET /glance-frame?board=<id>` returns
   the daemon-**rendered** glance as packed 1bpp framebuffer rows (MSB-first,
   bit 1 = white) with `X-Frame-Width`/`X-Frame-Height`/`X-Frame-Sig` headers —
@@ -344,8 +348,9 @@ carries its own body in `FeedCard.module` (`ModuleCard`) instead of
 ### Autonomous Pocket (Node daemon)
 
 `AutonomousPocketEngine` is the initial authoring and learning loop. It runs in
-the Node daemon only. The Swift in-process daemon's Card Feed route is a
-weather-only bounded subset and never claims to author autonomous Pocket cards.
+the Node daemon only. The Swift in-process daemon's Card Feed route authors a
+deterministic THREAD digest and weather glance, but does not claim to author
+adaptive Pocket cards.
 The engine is injected into the Node feed builder rather than added to the pure
 default module list.
 

@@ -155,6 +155,19 @@ AgentDeck은 독립적인 프로젝트이며 Anthropic, OpenAI, Google, SST, Cor
 claude code,ai,agent,dashboard,stream deck,monitoring,apme,openclaw,codex,ipad,companion,developer
 ```
 
+### What's New (v1.1.0, macOS — 제출 문구)
+
+```
+Mac 앱의 독립 실행형 데몬을 크게 확장했습니다.
+
+• 저전력 리더가 Node.js 없이 Feed를 동기화하고 오프라인 선택을 전달할 수 있습니다
+• 중단된 펌웨어 다운로드를 이어받고, 설치된 버전이 확인된 뒤에만 업데이트를 완료 처리합니다
+• Surface 연결마다 허용된 이벤트와 명령 범위를 협상하고 검증합니다
+• 모든 업데이트 데이터는 Mac의 앱 컨테이너 안에만 저장됩니다
+
+기존 대시보드와 페어링 방식은 그대로 호환됩니다.
+```
+
 ### What's New (v1.0.6, macOS — 제출 문구)
 
 ```
@@ -465,6 +478,19 @@ AgentDeckは独立したプロジェクトであり、Anthropic、OpenAI、Googl
 claude code,ai,エージェント,ダッシュボード,stream deck,monitoring,apme,openclaw,codex,ipad,developer
 ```
 
+### What's New (v1.1.0, macOS — 提出文言)
+
+```
+Macアプリのスタンドアロンデーモンを大幅に拡張しました。
+
+• 低消費電力リーダーがNode.jsなしでFeedを同期し、オフラインの選択を送信できます
+• 中断したファームウェアのダウンロードを再開し、インストール済みバージョンの確認後にのみ更新を完了します
+• Surface接続ごとに許可されたイベントとコマンドの範囲をネゴシエートして検証します
+• 更新データはすべてMacのApp Container内だけに保存されます
+
+既存のダッシュボードとペアリング方式は引き続き互換です。
+```
+
 ### What's New (v1.0.6, macOS — 提出文言)
 
 ```
@@ -771,6 +797,19 @@ AgentDeck is independent and is not affiliated with or endorsed by Anthropic, Op
 
 ```
 claude code,ai,agent,dashboard,monitoring,apme,openclaw,codex,ipad,stream deck,developer
+```
+
+### What's New (v1.1.0, macOS — submission copy)
+
+```
+The Mac app's standalone daemon is substantially more capable.
+
+• Low-power readers can sync Feed and replay offline choices without Node.js
+• Interrupted firmware downloads resume, and an update clears only after the installed version is confirmed
+• Every Surface connection negotiates and enforces its allowed event and command scope
+• All staged update data stays inside the Mac app's container
+
+Existing dashboards and pairing flows remain compatible.
 ```
 
 ### What's New (v1.0.6, macOS — submission copy)

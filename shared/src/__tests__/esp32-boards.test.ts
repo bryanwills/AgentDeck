@@ -41,6 +41,17 @@ describe('ESP32 board SSOT', () => {
     expect(renderWorkflow(ESP32_BOARDS)).toBe(onDisk);
   });
 
+  it('keeps the Swift Surface product allow-list on the board SSOT', () => {
+    const swift = readFileSync(
+      join(repoRoot, 'apple/AgentDeck/Daemon/Server/DaemonServer.swift'), 'utf8',
+    );
+    const block = swift.match(
+      /BEGIN GENERATED-SSOT-MIRROR: shared\/src\/esp32-boards\.ts([\s\S]*?)END GENERATED-SSOT-MIRROR/,
+    )?.[1] ?? '';
+    const ids = [...block.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]);
+    expect(ids).toEqual(ESP32_BOARDS.map((board) => board.id));
+  });
+
   it('never claims a browser-flashable board without evidence', () => {
     // A flag nobody measured is indistinguishable from one a board produced.
     // The evidence string is what tells them apart, so it is required.
