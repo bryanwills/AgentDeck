@@ -438,8 +438,14 @@ actor WebSocketServer {
     /// Serial-relay `broadcastHooks` always get the full frame — the serial
     /// module runs its own per-connection shaping. Mirrors Node's ws-server
     /// `eventTransformer` + `esp32Clients` split.
-    func broadcastRaw(_ data: Data, esp32Payloads: [UUID: Data] = [:], esp32ConnIds: Set<UUID> = []) {
+    func broadcastRaw(
+        _ data: Data,
+        esp32Payloads: [UUID: Data] = [:],
+        esp32ConnIds: Set<UUID> = [],
+        blockedConnIds: Set<UUID> = []
+    ) {
         for conn in connections {
+            if blockedConnIds.contains(conn.id) { continue }
             if esp32ConnIds.contains(conn.id) {
                 if let shaped = esp32Payloads[conn.id] { conn.send(shaped) }
             } else if conn.isEsp32 {

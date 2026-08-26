@@ -31,6 +31,7 @@
 		0B04CA71C040BE9955B8C032 /* AdbModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83589BA4C41B89C8EF1A46FD /* AdbModule.swift */; };
 		0B0D2D3CF0D97D237B671C5B /* DaemonPosture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21FC16ECE363684E997BE01E /* DaemonPosture.swift */; };
 		0B12EC87653840EF7BA4555C /* SessionAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */; };
+		0B5C74B616EFAC3B3D82CFB2 /* SwiftSurfaceProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C734B04F5E770B8B5FE2B70 /* SwiftSurfaceProtocolTests.swift */; };
 		0C1C2B2A6F3ED44152244E55 /* DemoPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C8A40550B31856011EBBCB7 /* DemoPlayback.swift */; };
 		0C1F83A74830BA41D99566C9 /* IDotMatrixIdentity.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6218B1AC0EA6F206DB424EC5 /* IDotMatrixIdentity.generated.swift */; };
 		0D27F8A8833CCEC21A91E867 /* ConnectionOverlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66917928C455891D401F29E6 /* ConnectionOverlayTests.swift */; };
@@ -159,6 +160,7 @@
 		4FD60583B159F1FD944DC526 /* DevicePreviewCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C4FB1F847E5695EF75A4FB /* DevicePreviewCatalog.swift */; };
 		4FF0657D874D06594ED97850 /* BridgeDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F34DE9E44936BAC6D96F19 /* BridgeDiscovery.swift */; };
 		50C1853357255E13C2F9EB93 /* DaemonService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BD296835DE366BFDBB15B9 /* DaemonService.swift */; };
+		50D04081E2C11AAD2D67C254 /* SwiftSurfaceFirmwareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDEFB32CAC64614A563E7C31 /* SwiftSurfaceFirmwareStore.swift */; };
 		5110D91D663BA602A485005E /* DaemonActorIndependenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E84D819AA86894944600240C /* DaemonActorIndependenceTests.swift */; };
 		52277012C5AE29828E911577 /* ESP32WifiOta.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6176599CD3E03A96EA977362 /* ESP32WifiOta.swift */; };
 		52482527CC6CB84FEB4BD188 /* DaemonTopologyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E14C9F6E83FDFE6C204970 /* DaemonTopologyTests.swift */; };
@@ -178,6 +180,7 @@
 		58591ABC081F2367FEE6B563 /* OpenClawAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 427B912EBD043285F0A0008D /* OpenClawAdapter.swift */; };
 		5885567AA794EB28CB6FF248 /* BridgeConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A702CCCE11B4450E9EED163 /* BridgeConnection.swift */; };
 		58B1139E0CFD432AC3D07C6E /* QRPairingWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC54EAD04F534E783D87D4DB /* QRPairingWindow.swift */; };
+		58E5710560C2B86ACFA1A460 /* SwiftSurfaceProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C734B04F5E770B8B5FE2B70 /* SwiftSurfaceProtocolTests.swift */; };
 		590D75801E10021127334F88 /* ActivityPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6186E147F760B85461F02022 /* ActivityPanel.swift */; };
 		5A90801088DFF80C8E0EDED6 /* CrayfishCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FD30721AD4CBA74DD049A1F /* CrayfishCreature.swift */; };
 		5ADCEA267661D3C4934EC6BD /* LocalCodexAppObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118F64508CC1FE2827516440 /* LocalCodexAppObserver.swift */; };
@@ -401,6 +404,7 @@
 		D14972CEAF0D69E6918C86BA /* AgentDeckPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 056D70153C3F720A6D935C9F /* AgentDeckPaths.swift */; };
 		D169DFD5EA54C323E1128E7B /* AgentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F55435772A15B8F0E92C1 /* AgentState.swift */; };
 		D2335AB9E3A5DEE25405617F /* TimeboxProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A351E073AB448BEE1DA392 /* TimeboxProtocolTests.swift */; };
+		D285BA530EBC08FD2C5CCF32 /* SwiftSurfaceFirmwareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDEFB32CAC64614A563E7C31 /* SwiftSurfaceFirmwareStore.swift */; };
 		D369DAE31A2E86FD08922453 /* GatewayParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234CFF4B2832E6B1CA98AF10 /* GatewayParityTests.swift */; };
 		D38FF377AB2134058D342B5C /* ApmeJudgeFoundationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9413D054382510FF4664C89 /* ApmeJudgeFoundationModels.swift */; };
 		D4EA545B7FD41B8A5032F515 /* ESP32Serial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C62F7ABA6BDEE39F39DBDFA /* ESP32Serial.swift */; };
@@ -543,6 +547,7 @@
 		2AD17B846036A2F78B153024 /* ApmeActivityHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeActivityHistory.swift; sourceTree = "<group>"; };
 		2B5C866AF54937CD8E433F49 /* SingletonGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingletonGuard.swift; sourceTree = "<group>"; };
 		2B6B05AD3CC720BD76A681F9 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
+		2C734B04F5E770B8B5FE2B70 /* SwiftSurfaceProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftSurfaceProtocolTests.swift; sourceTree = "<group>"; };
 		2D2F35C5E4DF5DAE1C93F54B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2D66C7EEA9726686205AF8EC /* DockVisibilityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DockVisibilityController.swift; sourceTree = "<group>"; };
 		2DB04CEEDD6C769AD9056561 /* ApmeParseJudgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeParseJudgeTests.swift; sourceTree = "<group>"; };
@@ -695,6 +700,7 @@
 		BBAB8DFED8E277FFB6136742 /* SessionGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionGrouping.swift; sourceTree = "<group>"; };
 		BC54EAD04F534E783D87D4DB /* QRPairingWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRPairingWindow.swift; sourceTree = "<group>"; };
 		BC6DDE006B6FC16D2E76AFFE /* AuthTokenAdoptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthTokenAdoptionTests.swift; sourceTree = "<group>"; };
+		BDEFB32CAC64614A563E7C31 /* SwiftSurfaceFirmwareStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftSurfaceFirmwareStore.swift; sourceTree = "<group>"; };
 		BF517661B1BEF3ACD330054D /* RockFormation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RockFormation.swift; sourceTree = "<group>"; };
 		C0A8B27A341D1DAE1FCF1D01 /* ApmeRecommender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeRecommender.swift; sourceTree = "<group>"; };
 		C18016AE81D6E5779F262104 /* DaemonPttVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonPttVoice.swift; sourceTree = "<group>"; };
@@ -856,6 +862,7 @@
 				41CF82AE8E20EDCAE99DCEDD /* SessionLauncherTests.swift */,
 				73BB88D8C2921CB4B93EC8B9 /* SessionPushRegisterMergeTests.swift */,
 				279EAD7034309F8B8641DF78 /* SpokenDigestParityTests.swift */,
+				2C734B04F5E770B8B5FE2B70 /* SwiftSurfaceProtocolTests.swift */,
 				BB282455F078889B6DB35F93 /* TerrariumCloudFoldTests.swift */,
 				2E75D955A31F999F568B7BED /* TerrariumCrayfishPresenceTests.swift */,
 				27A351E073AB448BEE1DA392 /* TimeboxProtocolTests.swift */,
@@ -1277,6 +1284,7 @@
 				6176599CD3E03A96EA977362 /* ESP32WifiOta.swift */,
 				7FF390BEA92326B1152B55A9 /* HTTPServer.swift */,
 				E6F0B91327EB48703713A68C /* PairingWindowStore.swift */,
+				BDEFB32CAC64614A563E7C31 /* SwiftSurfaceFirmwareStore.swift */,
 				7AC67585E8BFBBB8B0250FF2 /* WebSocketServer.swift */,
 			);
 			path = Server;
@@ -1405,10 +1413,10 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				CAB442A856E23517772A7850 /* AgentDeckTests_iOS */,
-				3BF710A3BC80FD9626668CA0 /* AgentDeckTests_macOS */,
 				1B95C9515EBB97FD5022C08C /* AgentDeck_iOS */,
 				E4D80DB9ABDABC379778AF7C /* AgentDeck_macOS */,
+				CAB442A856E23517772A7850 /* AgentDeckTests_iOS */,
+				3BF710A3BC80FD9626668CA0 /* AgentDeckTests_macOS */,
 			);
 		};
 /* End PBXProject section */
@@ -1502,6 +1510,7 @@
 				6D2EA7E15F98B8510CF048E9 /* SessionLauncherTests.swift in Sources */,
 				D98FDB40FEA236A6370DE45E /* SessionPushRegisterMergeTests.swift in Sources */,
 				70055CA070869B45C0E300A7 /* SpokenDigestParityTests.swift in Sources */,
+				58E5710560C2B86ACFA1A460 /* SwiftSurfaceProtocolTests.swift in Sources */,
 				56228049434E99DBC2BFD016 /* TerrariumCloudFoldTests.swift in Sources */,
 				805AC8BBF1600EA9BFB044F5 /* TerrariumCrayfishPresenceTests.swift in Sources */,
 				008D05FDF30426FE1B0DC37F /* TimeboxProtocolTests.swift in Sources */,
@@ -1558,6 +1567,7 @@
 				9B1DF1D553619B6728566E86 /* SessionLauncherTests.swift in Sources */,
 				D0668EACC4D50BE30B10ACE5 /* SessionPushRegisterMergeTests.swift in Sources */,
 				D68284901B3BD6ED764CB572 /* SpokenDigestParityTests.swift in Sources */,
+				0B5C74B616EFAC3B3D82CFB2 /* SwiftSurfaceProtocolTests.swift in Sources */,
 				7409E65BFDFE78944B389B63 /* TerrariumCloudFoldTests.swift in Sources */,
 				E1027789C4EBBF134CA8D464 /* TerrariumCrayfishPresenceTests.swift in Sources */,
 				D2335AB9E3A5DEE25405617F /* TimeboxProtocolTests.swift in Sources */,
@@ -1737,6 +1747,7 @@
 				A8293F557BD8D3FB91BF4CF4 /* StateTimelineGenerator.swift in Sources */,
 				740636215420FB785070986C /* StateTransitions.generated.swift in Sources */,
 				DF804392C56333041A3C2784 /* StatusBadge.swift in Sources */,
+				50D04081E2C11AAD2D67C254 /* SwiftSurfaceFirmwareStore.swift in Sources */,
 				98B8B1F86B399218B89247D8 /* TUITerrariumRenderer.swift in Sources */,
 				F940158912CF7ACA80C3376C /* TailDecoder.swift in Sources */,
 				F20373DB53552C2F36204EDF /* TerrariumConfig.swift in Sources */,
@@ -1933,6 +1944,7 @@
 				942DEF7F0BE77DF0FA264AF8 /* StateTimelineGenerator.swift in Sources */,
 				24342C374127614A2DD3F8D1 /* StateTransitions.generated.swift in Sources */,
 				67FA80518E8F347B39576FCC /* StatusBadge.swift in Sources */,
+				D285BA530EBC08FD2C5CCF32 /* SwiftSurfaceFirmwareStore.swift in Sources */,
 				7F401B71F68C95DEBD74DAFE /* TUITerrariumRenderer.swift in Sources */,
 				BCBA361B299FFE8F5C9CE65E /* TailDecoder.swift in Sources */,
 				076E08E5217ECF4528B4AC9A /* TerrariumConfig.swift in Sources */,
@@ -2055,7 +2067,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0.8;
+				MARKETING_VERSION = 1.1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -2136,7 +2148,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0.8;
+				MARKETING_VERSION = 1.1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

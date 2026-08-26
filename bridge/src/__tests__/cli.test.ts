@@ -3,6 +3,7 @@ import {
   program,
   resolveEsp32OtaDaemonTarget,
   resolveOtaIdentityFromManifest,
+  inlineOtaPayload,
   ESP32_OTA_BY_TARGET,
   tokenizeArgString,
   applyGlobalEnvArgs,
@@ -107,6 +108,26 @@ describe('esp32-ota manifest identity resolution', () => {
     const fixture = new URL('../../../schemas/surface-protocol/v1/fixtures/pocket-daily-reader.json', import.meta.url);
     expect(() => resolveOtaIdentityFromManifest(fixture.pathname, 'ttgo_t_display'))
       .toThrow(/no OTA identity/);
+  });
+});
+
+describe('esp32-ota sandbox retry payload', () => {
+  it('preserves stage and the exact Surface namespace on inline retry', () => {
+    expect(inlineOtaPayload('xteink_x3', 'ZmlybXdhcmU=', {
+      stage: true,
+      identity: {
+        productId: 'io.pocketdaily.reader', board: 'xteink_x3', updateChannel: 'stable',
+      },
+    })).toEqual({
+      target: 'xteink_x3', firmwareB64: 'ZmlybXdhcmU=', stage: true,
+      productId: 'io.pocketdaily.reader', board: 'xteink_x3', updateChannel: 'stable',
+    });
+  });
+
+  it('keeps the live retry a live OTA request', () => {
+    expect(inlineOtaPayload('inkdeck', 'AA==')).toEqual({
+      target: 'inkdeck', firmwareB64: 'AA==',
+    });
   });
 });
 

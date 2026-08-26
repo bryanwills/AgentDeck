@@ -369,6 +369,19 @@ export interface CliOtaIdentity {
   updateChannel: string;
 }
 
+export function inlineOtaPayload(
+  target: string,
+  firmwareB64: string,
+  opts: { stage?: boolean; identity?: CliOtaIdentity } = {},
+): Record<string, unknown> {
+  return {
+    target,
+    firmwareB64,
+    ...(opts.stage ? { stage: true } : {}),
+    ...(opts.identity ?? {}),
+  };
+}
+
 /** Resolve one exact OTA namespace from an integration manifest. Ambiguity is
  * an error: a release command must never guess which product or channel owns
  * an image. */
@@ -1976,11 +1989,25 @@ program
       // Pull-OTA staging: for wake-sync-sleep boards (XTeink X3/X4) that never
       // hold a live WS. The daemon adverts the build on the board's feed pulls;
       // the board downloads + flashes itself on its next wake.
-      const { statusCode, body } = await postJsonWithTimeout<Record<string, any>>(
+      let { statusCode, body } = await postJsonWithTimeout<Record<string, any>>(
         `http://127.0.0.1:${port}/esp32/ota`,
         { target: daemonTarget, firmwarePath, stage: true, ...(otaIdentity ?? {}) },
         30_000,
       );
+      if (body.ok === false && String(body.error ?? '').startsWith('firmware_unreadable')) {
+        // The App Store daemon cannot reopen an arbitrary CLI path. Preserve
+        // the stage bit and exact product namespace when retrying inline — the
+        // live-OTA retry below is a different operation and must not consume a
+        // pull-stage request by accident.
+        log('Daemon cannot read the firmware path (sandbox) — resending stage inline...');
+        const { readFileSync } = await import('fs');
+        const firmwareB64 = readFileSync(firmwarePath).toString('base64');
+        ({ statusCode, body } = await postJsonWithTimeout<Record<string, any>>(
+          `http://127.0.0.1:${port}/esp32/ota`,
+          inlineOtaPayload(daemonTarget, firmwareB64, { stage: true, identity: otaIdentity }),
+          30_000,
+        ));
+      }
       if (statusCode < 200 || statusCode >= 300 || body.ok === false) {
         throw new Error(String(body.error ?? `HTTP ${statusCode}`));
       }
@@ -2016,7 +2043,7 @@ program
       const firmwareB64 = readFileSync(firmwarePath).toString('base64');
       ({ statusCode, body } = await postJsonWithTimeout<Record<string, any>>(
         `http://127.0.0.1:${port}/esp32/ota`,
-        { target: daemonTarget, firmwareB64 },
+        inlineOtaPayload(daemonTarget, firmwareB64),
         15 * 60_000,
       ));
     }

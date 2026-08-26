@@ -624,12 +624,66 @@ final class DaemonServer {
         let capabilities: [String]
     }
 
-    /// Swift Tier 1 exposes only the portable operations it actually owns.
-    /// Outbox execution and pull-OTA staging remain Node Tier 2 capabilities;
-    /// Inbox remains unimplemented on both daemons.
-    nonisolated static let swiftPortableCapabilities: Set<String> = [
-        "feed.pull", "feed.conditional", "glance.read",
+    nonisolated static let surfaceProfileCapabilities: [String: Set<String>] = [
+        "dashboard-live/v1": [
+            "sessions.read", "usage.read", "timeline.read", "display-state.read",
+        ],
+        "companion-control/v1": [
+            "sessions.read", "usage.read", "session.focus", "permission.decide",
+            "prompt.select", "session.prompt", "session.interrupt", "session.escape", "review.run",
+        ],
+        "portable-reader/v1": [
+            "feed.pull", "feed.conditional", "outbox.push", "glance.read",
+            "weather.snapshot.read", "weather.cues.display", "weather.cues.notify",
+            "ota.feed", "ota.resume-206", "device.telemetry",
+            // Deliberately no inbox.ws until a public invalidation runtime exists.
+        ],
+        "display-only/v1": [
+            "sessions.read", "usage.read", "timeline.read", "display-state.read",
+        ],
     ]
+
+    nonisolated static var swiftPortableCapabilities: Set<String> {
+        surfaceProfileCapabilities["portable-reader/v1"] ?? []
+    }
+
+    // BEGIN GENERATED-SSOT-MIRROR: shared/src/esp32-boards.ts
+    // Gated by shared/src/__tests__/esp32-boards.test.ts. Swift cannot import a
+    // TypeScript workspace module, so this exact product allow-list is a
+    // generated-mirror boundary, never an independently edited board catalog.
+    nonisolated static let surfaceFirmwareBoards: Set<String> = [
+        "86box", "ips_35", "round_amoled", "ips_10", "inkdeck", "ttgo_t_display",
+        "ulanzi_tc001", "t_embed", "t_display_pro", "esp32_c6_147",
+    ]
+    // END GENERATED-SSOT-MIRROR: shared/src/esp32-boards.ts
+
+    nonisolated static func validateSurfaceProduct(
+        productId: String, profile: String, board: String?, updateChannel: String?
+    ) -> SurfaceRuntimeError? {
+        let allowedBoards: Set<String>
+        switch productId {
+        case "io.pocketdaily.reader":
+            allowedBoards = ["xteink_x3", "xteink_x4"]
+        case "dev.agentdeck.dashboard-firmware":
+            allowedBoards = surfaceFirmwareBoards
+        default:
+            return .init(status: 422, code: "surface_product_unsupported",
+                         message: "Surface product is not registered")
+        }
+        guard profile == "portable-reader/v1" else {
+            return .init(status: 409, code: "surface_product_profile_mismatch",
+                         message: "Surface product and profile do not match")
+        }
+        if let board, !allowedBoards.contains(board) {
+            return .init(status: 409, code: "surface_product_board_mismatch",
+                         message: "Surface product and board do not match")
+        }
+        if let updateChannel, updateChannel != "stable" {
+            return .init(status: 409, code: "surface_product_channel_mismatch",
+                         message: "Surface product and update channel do not match")
+        }
+        return nil
+    }
 
     nonisolated private static func validSurfaceToken(_ value: String, max: Int = 128) -> Bool {
         guard !value.isEmpty, value.utf8.count <= max,
@@ -660,7 +714,11 @@ final class DaemonServer {
             return .failure(.init(status: 426, code: "surface_protocol_unsupported",
                                   message: "Surface protocol \(values[0] ?? "") is not supported"))
         }
-        guard values[1] == "portable-reader/v1" else {
+        guard let profile = values[1], surfaceProfileCapabilities[profile] != nil else {
+            return .failure(.init(status: 406, code: "surface_profile_unsupported",
+                                  message: "Surface profile is not supported"))
+        }
+        guard profile == "portable-reader/v1" else {
             return .failure(.init(status: 406, code: "surface_profile_route_mismatch",
                                   message: "This HTTP route requires portable-reader/v1"))
         }
@@ -672,20 +730,13 @@ final class DaemonServer {
             return .failure(.init(status: 400, code: "surface_identity_invalid",
                                   message: "Surface identity contains a malformed token"))
         }
-        guard productId == "io.pocketdaily.reader" else {
-            return .failure(.init(status: 422, code: "surface_product_unsupported",
-                                  message: "Surface product is not registered for Swift portable Feed"))
-        }
-        guard board == "xteink_x3" || board == "xteink_x4" else {
-            return .failure(.init(status: 409, code: "surface_product_board_mismatch",
-                                  message: "Surface product and board do not match"))
-        }
-        guard updateChannel == "stable" else {
-            return .failure(.init(status: 409, code: "surface_product_channel_mismatch",
-                                  message: "Surface product and update channel do not match"))
+        if let error = validateSurfaceProduct(productId: productId, profile: profile,
+                                              board: board, updateChannel: updateChannel) {
+            return .failure(error)
         }
         let offered = values[5]!.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        let granted = offered.filter { swiftPortableCapabilities.contains($0) }.reduce(into: [String]()) {
+        let known = surfaceProfileCapabilities[profile] ?? []
+        let granted = offered.filter { known.contains($0) }.reduce(into: [String]()) {
             if !$0.contains($1) { $0.append($1) }
         }
         guard granted.contains(requiredCapability) else {
@@ -699,7 +750,7 @@ final class DaemonServer {
             }
         }
         return .success(.init(clientId: clientId, clientVersion: clientVersion,
-                              productId: productId, profile: values[1]!, capabilities: granted,
+                              productId: productId, profile: profile, capabilities: granted,
                               board: board, updateChannel: updateChannel))
     }
 
@@ -717,21 +768,76 @@ final class DaemonServer {
             return .failure(.init(status: 400, code: "surface_identity_invalid",
                                   message: "Surface client identity is malformed"))
         }
-        guard productId == "io.pocketdaily.reader" else {
-            return .failure(.init(status: 422, code: "surface_product_unsupported",
-                                  message: "Portable-reader product is not registered"))
-        }
         let profiles = offer["profiles"] as? [[String: Any]] ?? []
-        guard let selected = profiles.first(where: { ($0["id"] as? String) == "portable-reader/v1" }) else {
+        guard let selected = profiles.first(where: {
+            guard let id = $0["id"] as? String else { return false }
+            return surfaceProfileCapabilities[id] != nil
+        }), let profile = selected["id"] as? String else {
             return .failure(.init(status: 406, code: "surface_profile_unsupported",
                                   message: "No offered Surface profile is supported"))
         }
+        if profile == "portable-reader/v1",
+           let error = validateSurfaceProduct(productId: productId, profile: profile,
+                                              board: nil, updateChannel: nil) {
+            return .failure(error)
+        }
         let offered = selected["capabilities"] as? [String] ?? []
-        let granted = offered.filter { swiftPortableCapabilities.contains($0) }.reduce(into: [String]()) {
+        let known = surfaceProfileCapabilities[profile] ?? []
+        let granted = offered.filter { known.contains($0) }.reduce(into: [String]()) {
             if !$0.contains($1) { $0.append($1) }
         }
         return .success(.init(clientId: clientId, clientVersion: clientVersion, productId: productId,
-                              profile: "portable-reader/v1", capabilities: granted))
+                              profile: profile, capabilities: granted))
+    }
+
+    nonisolated static func surfaceAllowsEvent(
+        negotiation: SurfaceRuntimeNegotiation, eventType: String
+    ) -> Bool {
+        switch eventType {
+        case "surface_welcome", "connection", "device_info_request":
+            return true
+        case "sessions_list":
+            return negotiation.capabilities.contains("sessions.read")
+        case "usage_update":
+            return negotiation.capabilities.contains("usage.read")
+        case "timeline_event", "timeline_history":
+            return negotiation.capabilities.contains("timeline.read")
+        case "display_state":
+            return negotiation.capabilities.contains("display-state.read")
+        case "review_status", "review_result":
+            return negotiation.capabilities.contains("review.run")
+        default:
+            // Internal state/APME/voice/layout events are not part of a public
+            // Surface profile. Negotiated clients fail closed; headerless
+            // legacy sockets continue through the unchanged broadcast path.
+            return false
+        }
+    }
+
+    /// Nil means the command is outside the public command plane and is
+    /// rejected for every negotiated profile. Legacy clients remain unchanged.
+    nonisolated static func surfaceCapabilityForCommand(_ command: [String: Any]) -> String? {
+        switch command["type"] as? String {
+        case "query_usage": return "usage.read"
+        case "query_session_timeline": return "timeline.read"
+        case "focus_session", "session_switch", "clear_session_focus": return "session.focus"
+        case "permission_decision", "respond": return "permission.decide"
+        case "select_option", "navigate_option": return "prompt.select"
+        case "send_prompt": return "session.prompt"
+        case "interrupt": return "session.interrupt"
+        case "escape": return "session.escape"
+        case "review_run": return "review.run"
+        case "session_command":
+            guard let inner = command["command"] as? [String: Any] else { return nil }
+            switch inner["type"] as? String {
+            case "respond", "select_option": return "prompt.select"
+            case "send_prompt": return "session.prompt"
+            case "interrupt": return "session.interrupt"
+            case "escape": return "session.escape"
+            default: return nil
+            }
+        default: return nil
+        }
     }
 
     nonisolated let port: UInt16
@@ -750,7 +856,28 @@ final class DaemonServer {
     private let registry = SessionRegistry.shared
     private let auth = AuthManager.shared
     private let portableWeather = SwiftPortableMetWeatherProvider()
+    private let surfaceFirmware = SwiftSurfaceFirmwareStore(baseDirectory: AgentDeckPaths.baseDirectory)
     private var surfaceNegotiations: [UUID: SurfaceRuntimeNegotiation] = [:]
+    private var surfaceOutboxLedger: [String: [String: Any]] = [:]
+    private var surfaceOutboxOrder: [String] = []
+    private struct SurfaceFeedClientState {
+        var client: String
+        var board: String?
+        var productId: String?
+        var clientId: String?
+        var clientVersion: String?
+        var profile: String?
+        var pulls = 0
+        var firstPullAt: Int64 = 0
+        var lastPullAt: Int64 = 0
+        var lastNextPullSec = 1800
+        var lastBattPct: Int?
+        var lastBattMv: Int?
+        var lastRssiDbm: Int?
+        var unchangedCount = 0
+    }
+    private var surfaceFeedClients: [String: SurfaceFeedClientState] = [:]
+    private var recentSurfaceFeedPulls: [[String: Any]] = []
 
     // Modules
     private let moduleManager = ModuleManager()
@@ -2312,28 +2439,264 @@ final class DaemonServer {
                                   place: weather["place"] as? String, timeZone: zone)
     }
 
-    private func portableWeatherFeedResponse(echoSig: String?, now: Date = Date()) async -> HTTPServer.HTTPResponse {
+    private func portableWeatherFeedResponse(
+        identity: SurfaceRuntimeIdentity?, echoSig: String?, now: Date = Date()
+    ) async -> HTTPServer.HTTPResponse {
         let config = weatherConfig()
         let snapshot: [String: Any]?
         if let config { snapshot = await portableWeather.get(config, now: now) }
         else { snapshot = nil }
         var glance: [String: Any] = [:]
-        if let snapshot { glance["weather"] = snapshot }
-        let signed: [String: Any] = ["cards": [], "glance": glance]
+        if var snapshot {
+            if identity != nil {
+                if identity?.capabilities.contains("weather.snapshot.read") != true {
+                    snapshot.removeValue(forKey: "days")
+                } else if let days = snapshot["days"] as? [[String: Any]], days.count >= 2 {
+                    snapshot["days"] = days.prefix(5).map { day in
+                        var projected: [String: Any] = [:]
+                        for key in ["date", "code", "minC", "maxC", "rainProbability"] {
+                            if let value = day[key] { projected[key] = value }
+                        }
+                        return projected
+                    }
+                    snapshot.removeValue(forKey: "tomorrow")
+                }
+                if identity?.capabilities.contains("weather.cues.display") != true {
+                    snapshot.removeValue(forKey: "cues")
+                } else if identity?.capabilities.contains("weather.cues.notify") != true,
+                          var cues = snapshot["cues"] as? [[String: Any]] {
+                    cues = cues.map { cue in
+                        var projected = cue; projected.removeValue(forKey: "notifyAt"); return projected
+                    }
+                    snapshot["cues"] = cues
+                }
+                // Provider metadata is useful on rich dashboards but the
+                // portable reader negotiated bounded weather values, not a
+                // provider-detail page.
+                snapshot.removeValue(forKey: "source")
+            }
+            glance["weather"] = snapshot
+        }
+
+        let sessions = buildSessionsListEvent()["sessions"] as? [[String: Any]] ?? []
+        var cards: [[String: Any]] = []
+        if identity != nil, !sessions.isEmpty {
+            let attention = sessions.filter {
+                (($0["state"] as? String)?.hasPrefix("awaiting") == true) || $0["requestId"] != nil
+            }.count
+            let context = sessions.prefix(4).map { session -> String in
+                let project = session["projectName"] as? String ?? session["agentType"] as? String ?? "session"
+                let state = session["state"] as? String ?? "idle"
+                let activity = session["currentTool"] as? String ?? state
+                return Self.trimSurfaceUTF8("\(project) — \(activity)", maxBytes: 96)
+            }
+            cards.append([
+                "cardId": "module:thread:open", "actionClass": "info",
+                "module": [
+                    "module": "thread", "title": "THREAD",
+                    "question": attention > 0
+                        ? "\(attention) of \(sessions.count) threads need you"
+                        : "\(sessions.count) thread\(sessions.count == 1 ? "" : "s") open",
+                    "context": context,
+                ] as [String: Any],
+            ])
+        }
+
+        let signed: [String: Any] = ["cards": cards, "glance": glance]
         let signedData = (try? JSONSerialization.data(withJSONObject: signed, options: [.sortedKeys])) ?? Data()
         let sig = SHA256.hash(data: signedData).prefix(8).map { String(format: "%02x", $0) }.joined()
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current; formatter.dateFormat = "HH:mm"
         var feed: [String: Any] = [
             "type": "card_feed", "rev": 1, "serverTime": Int(now.timeIntervalSince1970 * 1000),
-            "serverHm": formatter.string(from: now), "nextPullSec": 1800, "deckSig": sig, "cards": [],
+            "serverHm": formatter.string(from: now), "nextPullSec": 1800, "deckSig": sig, "cards": cards,
         ]
-        if echoSig == sig {
+        let conditional = identity == nil || identity?.capabilities.contains("feed.conditional") == true
+        if conditional, echoSig == sig {
             feed["unchanged"] = true
-        } else if !glance.isEmpty {
+            feed["cards"] = []
+        } else if !glance.isEmpty, identity == nil || identity?.capabilities.contains("glance.read") == true {
             feed["glance"] = glance
         }
+        if let identity, identity.capabilities.contains("ota.feed") {
+            let otaIdentity = SwiftSurfaceFirmwareStore.Identity(
+                productId: identity.productId, board: identity.board, updateChannel: identity.updateChannel)
+            if let advert = await surfaceFirmware.advert(
+                identity: otaIdentity, board: identity.board, clientVersion: identity.clientVersion
+            ) {
+                feed["fw"] = [
+                    "productId": otaIdentity.productId, "board": otaIdentity.board,
+                    "updateChannel": otaIdentity.updateChannel, "size": advert.size, "md5": advert.md5,
+                ] as [String: Any]
+                // OTA-first bootstrap: the durable reader deck can wait; the
+                // resumable image must be discovered before a large content body.
+                feed["cards"] = []
+                feed["unchanged"] = true
+                feed.removeValue(forKey: "glance")
+            }
+        }
         return .json(feed)
+    }
+
+    nonisolated static func trimSurfaceUTF8(_ value: String, maxBytes: Int) -> String {
+        guard value.utf8.count > maxBytes else { return value }
+        var out = ""
+        var used = 0
+        for character in value {
+            let bytes = String(character).utf8.count
+            if used + bytes > maxBytes - 1 { break }
+            out.append(character); used += bytes
+        }
+        return out.trimmingCharacters(in: .whitespaces) + "."
+    }
+
+    private func applySurfaceOutboxDecision(_ decision: [String: Any]) -> [String: Any] {
+        let cardId = decision["cardId"] as? String ?? ""
+        let action = decision["action"] as? String ?? ""
+        let supported: Set<String> = [
+            "permission_decision", "select_option", "respond", "send_prompt", "dismiss", "card_choice",
+        ]
+        func result(_ status: String, _ reason: String? = nil) -> [String: Any] {
+            var value: [String: Any] = ["cardId": cardId, "status": status]
+            if let reason { value["reason"] = reason }
+            return value
+        }
+        guard !cardId.isEmpty, supported.contains(action) else {
+            return result("rejected", "malformed decision")
+        }
+
+        // ageSec changes on every retry, so it is deliberately excluded from
+        // the daemon-lifetime idempotency key.
+        var stable = decision; stable.removeValue(forKey: "ageSec")
+        let keyData = (try? JSONSerialization.data(withJSONObject: stable, options: [.sortedKeys])) ?? Data()
+        let key = SHA256.hash(data: keyData).map { String(format: "%02x", $0) }.joined()
+        if let prior = surfaceOutboxLedger[key] { return prior }
+
+        let outcome: [String: Any]
+        if action == "dismiss" {
+            outcome = result("applied")
+        } else if action == "card_choice" {
+            outcome = result("rejected", "Swift-authored cards currently take no choices")
+        } else if action == "permission_decision" {
+            guard let requestId = decision["requestId"] as? String, !requestId.isEmpty,
+                  let value = decision["decision"] as? String, value == "allow" || value == "deny" else {
+                return rememberSurfaceOutbox(key: key, result: result("rejected", "requestId and decision required"))
+            }
+            guard cachedSessions.contains(where: { $0.requestId == requestId }) else {
+                return rememberSurfaceOutbox(key: key, result: result("expired", "permission gate no longer pending"))
+            }
+            handleCommand(["type": "permission_decision", "requestId": requestId, "decision": value])
+            outcome = result("applied")
+        } else {
+            let sessionId = (decision["sessionId"] as? String)
+                ?? (cardId.hasPrefix("session:") ? String(cardId.dropFirst("session:".count)) : nil)
+            guard let sessionId, let session = cachedSessions.first(where: { $0.id == sessionId }) else {
+                return rememberSurfaceOutbox(key: key, result: result("unknown_card", "session not in current roster"))
+            }
+            if action == "select_option" || action == "respond" {
+                guard session.state?.hasPrefix("awaiting") == true || session.requestId != nil else {
+                    return rememberSurfaceOutbox(key: key, result: result("expired", "session is no longer awaiting"))
+                }
+                if let echo = decision["question"] as? String, !echo.isEmpty,
+                   let current = session.question, echo != current {
+                    return rememberSurfaceOutbox(key: key, result: result("expired", "prompt changed since the decision was recorded"))
+                }
+                if action == "select_option" {
+                    guard let index = (decision["index"] as? NSNumber)?.intValue, index >= 0 else {
+                        return rememberSurfaceOutbox(key: key, result: result("rejected", "index required"))
+                    }
+                    handleCommand(["type": "select_option", "index": index, "sessionId": sessionId,
+                                   "question": decision["question"] as Any])
+                } else {
+                    guard let value = decision["value"] as? String, !value.isEmpty else {
+                        return rememberSurfaceOutbox(key: key, result: result("rejected", "value required"))
+                    }
+                    handleCommand(["type": "session_command", "sessionId": sessionId,
+                                   "command": ["type": "respond", "value": value,
+                                               "question": decision["question"] as Any]])
+                }
+                outcome = result("applied")
+            } else {
+                guard let text = decision["text"] as? String, !text.isEmpty else {
+                    return rememberSurfaceOutbox(key: key, result: result("rejected", "text required"))
+                }
+                handleCommand(["type": "session_command", "sessionId": sessionId,
+                               "command": ["type": "send_prompt", "text": text]])
+                outcome = result("applied")
+            }
+        }
+        return rememberSurfaceOutbox(key: key, result: outcome)
+    }
+
+    private func rememberSurfaceOutbox(key: String, result: [String: Any]) -> [String: Any] {
+        if surfaceOutboxLedger[key] == nil { surfaceOutboxOrder.append(key) }
+        surfaceOutboxLedger[key] = result
+        while surfaceOutboxOrder.count > 1024 {
+            surfaceOutboxLedger.removeValue(forKey: surfaceOutboxOrder.removeFirst())
+        }
+        return result
+    }
+
+    private func recordSurfaceFeedPull(
+        remoteIP: String, identity: SurfaceRuntimeIdentity?, query: [String: String],
+        response: HTTPServer.HTTPResponse
+    ) {
+        let key = identity?.clientId ?? remoteIP
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var state = surfaceFeedClients[key] ?? SurfaceFeedClientState(client: remoteIP)
+        state.client = remoteIP
+        state.board = identity?.board ?? query["board"] ?? state.board
+        state.productId = identity?.productId ?? state.productId
+        state.clientId = identity?.clientId ?? state.clientId
+        state.clientVersion = identity?.clientVersion ?? state.clientVersion
+        state.profile = identity?.profile ?? state.profile
+        state.pulls += 1
+        if state.firstPullAt == 0 { state.firstPullAt = now }
+        state.lastPullAt = now
+        if let batt = Int(query["batt"] ?? ""), (0...100).contains(batt) { state.lastBattPct = batt }
+        if let mv = Int(query["mv"] ?? ""), (1..<10_000).contains(mv) { state.lastBattMv = mv }
+        if let rssi = Int(query["rssi"] ?? ""), (-120 ..< 0).contains(rssi) { state.lastRssiDbm = rssi }
+        let payload = response.body.flatMap {
+            (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+        }
+        state.lastNextPullSec = (payload?["nextPullSec"] as? NSNumber)?.intValue ?? 1800
+        let unchanged = payload?["unchanged"] as? Bool == true
+        if unchanged { state.unchangedCount += 1 }
+        surfaceFeedClients[key] = state
+
+        var event: [String: Any] = [
+            "client": remoteIP, "at": now, "cards": (payload?["cards"] as? [Any])?.count ?? 0,
+            "nextPullSec": state.lastNextPullSec,
+        ]
+        if let value = state.board { event["board"] = value }
+        if let value = state.productId { event["productId"] = value }
+        if let value = state.clientVersion { event["clientVersion"] = value }
+        if unchanged { event["unchanged"] = true }
+        if let value = state.lastBattPct { event["battPct"] = value }
+        if let value = state.lastBattMv { event["battMv"] = value }
+        if let value = state.lastRssiDbm { event["rssiDbm"] = value }
+        recentSurfaceFeedPulls.append(event)
+        if recentSurfaceFeedPulls.count > 32 { recentSurfaceFeedPulls.removeFirst() }
+    }
+
+    private func surfaceFeedClientPayloads() -> [[String: Any]] {
+        surfaceFeedClients.values.sorted { $0.lastPullAt > $1.lastPullAt }.map { state in
+            var value: [String: Any] = [
+                "client": state.client, "pulls": state.pulls,
+                "firstPullAt": state.firstPullAt, "lastPullAt": state.lastPullAt,
+                "lastNextPullSec": state.lastNextPullSec,
+                "unchangedCount": state.unchangedCount,
+            ]
+            if let v = state.board { value["board"] = v }
+            if let v = state.productId { value["productId"] = v }
+            if let v = state.clientId { value["clientId"] = v }
+            if let v = state.clientVersion { value["clientVersion"] = v }
+            if let v = state.profile { value["profile"] = v }
+            if let v = state.lastBattPct { value["lastBattPct"] = v }
+            if let v = state.lastBattMv { value["lastBattMv"] = v }
+            if let v = state.lastRssiDbm { value["lastRssiDbm"] = v }
+            return value
+        }
     }
 
     private func setupHTTPRoutes() async {
@@ -2485,20 +2848,55 @@ final class DaemonServer {
             ] as [String: Any])
         }
 
-        // Portable Surface weather parity. Tier 1 has no PTY-authored reading
-        // cards, but it can keep an intermittently connected reader supplied
-        // with the same Card Feed envelope and seven-day MET Norway snapshot.
+        // Surface Card Feed. Swift authors its own bounded THREAD digest and
+        // MET Norway glance, while sharing the same conditional/OTA envelope
+        // as the Node daemon.
         await httpServer.get("/feed") { [weak self] request in
             guard let self else { return .json(["error": "daemon unavailable"], status: 503) }
+            let identity: SurfaceRuntimeIdentity?
             switch Self.parseSurfaceHTTPIdentity(
                 headers: request.headers, query: request.queryParams, requiredCapability: "feed.pull"
             ) {
             case .failure(let error):
                 return .json(["error": error.code, "message": error.message], status: error.status)
-            case .success:
-                break // nil = legacy; non-nil = validated portable-reader/v1
+            case .success(let parsed):
+                identity = parsed // nil = legacy; non-nil = validated portable-reader/v1
             }
-            return await self.portableWeatherFeedResponse(echoSig: request.queryParams["sig"])
+            let response = await self.portableWeatherFeedResponse(
+                identity: identity, echoSig: request.queryParams["sig"])
+            await self.recordSurfaceFeedPull(
+                remoteIP: request.remoteIP, identity: identity,
+                query: request.queryParams, response: response)
+            return response
+        }
+
+        await httpServer.post("/outbox") { [weak self] request in
+            guard let self else { return .json(["error": "daemon unavailable"], status: 503) }
+            let identity: SurfaceRuntimeIdentity?
+            switch Self.parseSurfaceHTTPIdentity(
+                headers: request.headers, query: request.queryParams, requiredCapability: "outbox.push"
+            ) {
+            case .failure(let error):
+                return .json(["error": error.code, "message": error.message], status: error.status)
+            case .success(let parsed): identity = parsed
+            }
+            let body = Self.jsonBody(request.body)
+            let board = body["board"] as? String ?? "unknown"
+            if let identity, board != identity.board {
+                return .json([
+                    "error": "surface_outbox_board_mismatch",
+                    "message": "Outbox board does not match Surface identity",
+                ], status: 409)
+            }
+            guard let decisions = body["decisions"] as? [[String: Any]] else {
+                return .json(["ok": false, "error": "decisions array is required"], status: 400)
+            }
+            let decisionBoxes = decisions.map(SendableDict.init)
+            let resultBoxes = await DaemonActor.run {
+                decisionBoxes.map { SendableDict(self.applySurfaceOutboxDecision($0.value)) }
+            }
+            let results = resultBoxes.map(\.value)
+            return .json(["ok": true, "results": results] as [String: Any])
         }
 
         await httpServer.get("/devices") { [weak self] _ in
@@ -2562,6 +2960,56 @@ final class DaemonServer {
                 return .json(["ok": false, "error": "firmwarePath or firmwareB64 is required"], status: 400)
             }
 
+            if json["stage"] as? Bool == true {
+                let tuple = [json["productId"] as? String, json["board"] as? String,
+                             json["updateChannel"] as? String]
+                let present = tuple.compactMap { $0 }.filter { !$0.isEmpty }.count
+                if present != 0 && present != 3 {
+                    return .json([
+                        "ok": false, "error": "surface_stage_identity_incomplete",
+                        "message": "productId, board, and updateChannel are required together",
+                    ], status: 400)
+                }
+                if present == 0 && (target == "xteink_x3" || target == "xteink_x4") {
+                    return .json([
+                        "ok": false, "error": "surface_stage_identity_required",
+                        "message": "XTeink pull OTA requires productId, board, and updateChannel",
+                    ], status: 400)
+                }
+                let identity: SwiftSurfaceFirmwareStore.Identity?
+                if present == 3 {
+                    let productId = tuple[0]!, board = tuple[1]!, channel = tuple[2]!
+                    if let error = Self.validateSurfaceProduct(
+                        productId: productId, profile: "portable-reader/v1",
+                        board: board, updateChannel: channel
+                    ) {
+                        return .json(["ok": false, "error": error.code, "message": error.message],
+                                     status: error.status)
+                    }
+                    identity = .init(productId: productId, board: board, updateChannel: channel)
+                } else {
+                    identity = nil
+                }
+                do {
+                    let result = try await self.surfaceFirmware.stage(
+                        firmware: firmware, target: target, identity: identity)
+                    let pullSeen = await DaemonActor.run {
+                        self.surfaceFeedClients.values.contains { $0.board == result.board }
+                    }
+                    return .json([
+                        "ok": true, "staged": true, "board": result.board,
+                        "bytes": result.bytes, "md5": result.md5, "pullSeen": pullSeen,
+                    ] as [String: Any])
+                } catch SwiftSurfaceFirmwareStore.StoreError.targetMismatch {
+                    return .json([
+                        "ok": false, "error": "surface_stage_target_mismatch",
+                        "message": "Stage target does not match OTA identity board",
+                    ], status: 409)
+                } catch {
+                    return .json(["ok": false, "error": error.localizedDescription], status: 500)
+                }
+            }
+
             do {
                 let result = try await self.esp32Ota.performOta(target: target, firmware: firmware)
                 return .json([
@@ -2577,6 +3025,62 @@ final class DaemonServer {
                 let message = (error as? ESP32WifiOtaManager.OtaError)?.errorDescription
                     ?? error.localizedDescription
                 return .json(["ok": false, "error": message], status: 500)
+            }
+        }
+
+        await httpServer.get("/esp32/fw") { [weak self] request in
+            guard let self else { return .json(["error": "daemon unavailable"], status: 503) }
+            let identity: SurfaceRuntimeIdentity?
+            switch Self.parseSurfaceHTTPIdentity(
+                headers: request.headers, query: request.queryParams, requiredCapability: "ota.feed"
+            ) {
+            case .failure(let error):
+                return .json(["error": error.code, "message": error.message], status: error.status)
+            case .success(let parsed): identity = parsed
+            }
+            if identity == nil,
+               request.queryParams["productId"] != nil || request.queryParams["updateChannel"] != nil {
+                return .json([
+                    "error": "surface_identity_required",
+                    "message": "Product-aware OTA requires all Surface identity headers",
+                ], status: 400)
+            }
+            let board = identity?.board ?? request.queryParams["board"] ?? ""
+            let otaIdentity = identity.map {
+                SwiftSurfaceFirmwareStore.Identity(
+                    productId: $0.productId, board: $0.board, updateChannel: $0.updateChannel)
+            }
+            let from = Int(request.queryParams["from"] ?? "") ?? 0
+            let limit = Int(request.queryParams["limit"] ?? "")
+            do {
+                let segment = try await self.surfaceFirmware.segment(
+                    identity: otaIdentity, board: board, requestedFrom: from, requestedLimit: limit)
+                let negotiated206 = identity?.capabilities.contains("ota.resume-206") == true
+                let status = segment.from > 0 && negotiated206 ? 206 : 200
+                var headers = [
+                    "Content-Type": "application/octet-stream",
+                    "Content-Length": String(segment.data.count),
+                    "X-FW-MD5": segment.md5,
+                    "Cache-Control": "no-store",
+                    "Connection": "close",
+                ]
+                if segment.from > 0 {
+                    headers["Content-Range"] = segment.data.isEmpty
+                        ? "bytes */\(segment.total)"
+                        : "bytes \(segment.from)-\(segment.from + segment.data.count - 1)/\(segment.total)"
+                }
+                return HTTPServer.HTTPResponse(status: status, headers: headers, body: segment.data)
+            } catch SwiftSurfaceFirmwareStore.StoreError.notStaged {
+                return .json([
+                    "error": "firmware_not_staged",
+                    "message": otaIdentity.map {
+                        "Nothing staged for \($0.productId)/\($0.board)/\($0.updateChannel)"
+                    } ?? "Nothing staged for legacy board \"\(board)\"",
+                ], status: 404)
+            } catch SwiftSurfaceFirmwareStore.StoreError.corruptStage {
+                return .json(["error": "firmware_stage_corrupt"], status: 500)
+            } catch {
+                return .json(["error": error.localizedDescription], status: 500)
             }
         }
 
@@ -3111,6 +3615,12 @@ final class DaemonServer {
             ])
         }
 
+        devices.append([
+            "type": "card-feed",
+            "clients": surfaceFeedClientPayloads(),
+            "recent": Array(recentSurfaceFeedPulls.suffix(8).reversed()),
+        ])
+
         if !cachedTuiDashboards.isEmpty {
             devices.append([
                 "type": "tui",
@@ -3162,6 +3672,25 @@ final class DaemonServer {
         if cmd["type"] as? String == "client_register" {
             handleClientRegister(cmd, from: conn)
             return
+        }
+        if let surface = surfaceNegotiations[conn.id] {
+            let type = cmd["type"] as? String ?? ""
+            let permitted: Bool
+            if type == "device_info" {
+                permitted = surface.capabilities.contains("device.telemetry")
+            } else if let capability = Self.surfaceCapabilityForCommand(cmd) {
+                permitted = surface.capabilities.contains(capability)
+            } else {
+                permitted = false
+            }
+            guard permitted else {
+                let failure: [String: Any] = [
+                    "type": "surface_error", "error": "surface_capability_required",
+                    "message": "Command \"\(type)\" is outside the negotiated Surface capability set",
+                ]
+                if let data = failure.jsonData { conn.send(data) }
+                return
+            }
         }
         // WiFi-WS ESP32 boards self-identify with a spontaneous `device_info`
         // frame on connect (and re-announce on device_info_request). Capture it
@@ -3229,6 +3758,12 @@ final class DaemonServer {
                 return ESP32Serial.wifiEsp32Forward(event, deviceInfo: ESP32Serial.wifiDeviceInfo(reg.devices.first))?.jsonData
             }
 
+            @DaemonActor func surfaceAllows(_ event: [String: Any]) -> Bool {
+                guard let negotiation = self.surfaceNegotiations[conn.id] else { return true }
+                let eventType = event["type"] as? String ?? ""
+                return Self.surfaceAllowsEvent(negotiation: negotiation, eventType: eventType)
+            }
+
             let connectionEvent: [String: Any] = [
                 "type": "connection",
                 "status": "connected",
@@ -3250,14 +3785,14 @@ final class DaemonServer {
             let gwAlive = self.cachedGatewayConnected
             let stateEvent = self.buildFullStateEvent(agentType: gwAlive ? "openclaw" : "daemon")
             self.lastStateEvent = stateEvent
-            if let data = esp32Shaped(stateEvent) { conn.send(data) }
+            if surfaceAllows(stateEvent), let data = esp32Shaped(stateEvent) { conn.send(data) }
 
             try? await Task.sleep(for: .milliseconds(100))
             guard !conn.isDisconnected else { return }
 
             // Sessions list
             let sessionsEvent = self.buildSessionsListEvent()
-            if let data = esp32Shaped(sessionsEvent) { conn.send(data) }
+            if surfaceAllows(sessionsEvent), let data = esp32Shaped(sessionsEvent) { conn.send(data) }
 
             try? await Task.sleep(for: .milliseconds(100))
             guard !conn.isDisconnected else { return }
@@ -3269,7 +3804,7 @@ final class DaemonServer {
             // carried it in its initial set (SerialEventSnapshot.initialEvents);
             // the WS burst did not. Node sends it on connect for the same reason.
             let displayEvent = self.serialEventSnapshot.currentDisplayStateEvent()
-            if let data = esp32Shaped(displayEvent) { conn.send(data) }
+            if surfaceAllows(displayEvent), let data = esp32Shaped(displayEvent) { conn.send(data) }
 
             try? await Task.sleep(for: .milliseconds(100))
             guard !conn.isDisconnected else { return }
@@ -3302,7 +3837,7 @@ final class DaemonServer {
                     "type": "timeline_history",
                     "entries": recentEntries.map { Self.daemonTimelineEntryDict($0) },
                 ]
-                if let data = historyEvent.jsonData { conn.send(data) }
+                if surfaceAllows(historyEvent), let data = historyEvent.jsonData { conn.send(data) }
 
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !conn.isDisconnected else { return }
@@ -3315,7 +3850,7 @@ final class DaemonServer {
                     "type": "timeline_history",
                     "entries": self.recentTimelineForBoards,
                 ]
-                if let data = esp32Shaped(historyEvent) { conn.send(data) }
+                if surfaceAllows(historyEvent), let data = esp32Shaped(historyEvent) { conn.send(data) }
 
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !conn.isDisconnected else { return }
@@ -3323,7 +3858,7 @@ final class DaemonServer {
 
             // Usage
             let usageEvent = self.buildUsageEvent()
-            if let ue = usageEvent, let data = esp32Shaped(ue) { conn.send(data) }
+            if let ue = usageEvent, surfaceAllows(ue), let data = esp32Shaped(ue) { conn.send(data) }
 
             // Fetch usage if stale
             if self.cachedApiUsage == nil || Date().timeIntervalSince(self.lastApiFetchTime) > 300 {
@@ -8128,6 +8663,10 @@ final class DaemonServer {
         // event isn't display-forwardable is simply left out of the map → the
         // WS layer drops that frame for it.
         let esp32ConnIds = Set(cachedWifiEsp32.keys)
+        let eventType = event["type"] as? String ?? ""
+        let blockedSurfaceConnIds = Set(surfaceNegotiations.compactMap { id, negotiation in
+            Self.surfaceAllowsEvent(negotiation: negotiation, eventType: eventType) ? nil : id
+        })
         var esp32Payloads: [UUID: Data] = [:]
         if !esp32ConnIds.isEmpty {
             for (id, reg) in cachedWifiEsp32 {
@@ -8137,7 +8676,11 @@ final class DaemonServer {
                 }
             }
         }
-        Task { await wsServer.broadcastRaw(data, esp32Payloads: esp32Payloads, esp32ConnIds: esp32ConnIds) }
+        Task {
+            await wsServer.broadcastRaw(
+                data, esp32Payloads: esp32Payloads, esp32ConnIds: esp32ConnIds,
+                blockedConnIds: blockedSurfaceConnIds)
+        }
     }
 
     /// Read the `displaySleepDim` object from settings.json into

@@ -38,6 +38,26 @@ file's own rule forbids reconstructing its notes. The commit above is the
 record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
 bumped, superseded by 1.0.17, and never published, so it exists only in git.
 
+## 2026-08-27 — Apple 1.1.0
+
+### The standalone Mac daemon now speaks the complete portable transport
+
+The macOS app no longer needs a Node daemon for Surface Feed, offline Outbox
+replay, pull telemetry, or resumable firmware delivery. Its native Swift daemon
+validates the same product identity, stores staged firmware inside the App
+Container, serves bounded resume segments, and clears an update only after the
+reader reports the installed build.
+
+Surface-aware WebSocket clients now negotiate the dashboard, companion,
+portable-reader, or display-only profile. The Swift daemon enforces both the
+events it sends and the commands it accepts against that negotiated capability
+set; legacy clients keep their existing wire behavior.
+
+Node remains the richer content author: adaptive Pocket cards and rendered
+Glance Frame pixels are not copied into the App Store app. The Apple release
+adds the transport/runtime needed for standalone operation without adding a
+subprocess, companion executable, or external service.
+
 ## 2026-08-26 — npm 1.1.0
 
 This is the first release under the compatibility-major version policy. It stays

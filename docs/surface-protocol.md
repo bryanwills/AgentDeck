@@ -125,13 +125,22 @@ on the accepted interface for compatibility with Pocket builds that predate
 explicit POST replay; current clients can replay its idempotency-keyed body but
 are not required to do so. Successful clients cache the redirected GET origin
 as their next preferred route.
+This subnet-aware redirect is currently a Node reliability optimization rather
+than a portable-profile capability. The Swift daemon serves the accepted local
+interface directly; Feed, Outbox, and OTA semantics remain identical once the
+client has reached that interface.
 
-The in-process Swift daemon serves a weather-only Card Feed envelope, validates the
-same eight Pocket identity headers, and negotiates a bounded subset:
-`feed.pull`, `feed.conditional`, and `glance.read`. It does not grant Outbox,
-Glance Frame pixels, pull OTA, device telemetry, or Inbox and therefore must not
-advertise full Node portable-reader conformance. WebSocket Inbox is not implemented
-or granted by either daemon. Pocket Daily remains
+The in-process Swift daemon implements the same `portable-reader/v1` transport
+runtime as the Node daemon: all-or-nothing eight-header identity, bounded Feed and
+weather projection, conditional pulls, idempotent Outbox replay, pull telemetry,
+product-scoped persisted OTA staging, 32–512 KiB resume segments, negotiated 206,
+and installed-version acknowledgement. Its app-container firmware store copies
+inline bytes rather than retaining a CLI path the App Sandbox cannot reopen. It
+also negotiates the four public WebSocket profiles and enforces both outbound event
+and inbound command capability boundaries. Swift does not grant Inbox, and neither
+daemon implements it. Glance Frame pixels and Node's adaptive PULSE/NUDGE/QUEST
+content engine remain Node-only features; they are not capabilities required by
+the portable profile. Pocket Daily remains
 Community / untested until a named release is exercised against the live conformance
 suite; implementation does not itself promote the integration.
 
@@ -533,10 +542,12 @@ integration release that has not been named and tested.
 `weather-seven-day.json` and `unchanged.json` are secret-free, sanitized Node
 portable-feed captures; `surface-welcome.json` is pinned byte-for-byte to the Node
 negotiator in its runtime test. Outbox fixtures exercise the same pure applier used by
-the HTTP route. A release conformance report still captures fresh frames from the
-specific daemon build under test. Swift's documented weather-only subset needs its
-own evidence, but full `portable-reader/v1` conformance evidence is required only if
-Swift later claims the complete profile.
+the HTTP route. Swift's XCTest suite independently gates header/product fail-closed
+behavior, all four profile negotiations, command/event capability boundaries, exact
+firmware namespaces, persistence across daemon restart, bounded resume segments, and
+installed-version stage clearing. A release conformance report still captures fresh
+frames from the specific daemon build under test; static/runtime coverage alone does
+not promote a Community integration.
 
 The current runner is
 `pnpm vitest run scripts/__tests__/surface-protocol-manifest.test.ts
