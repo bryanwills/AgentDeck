@@ -131,12 +131,18 @@ export function parseLiveCodexRateLimits(result: unknown, capturedAt: string): C
   // answer in the map — take it rather than reporting a single model's quota as
   // the account's. Reachable in two ways: a named top-level block, and a top
   // level whose weekly reset fingerprints as a pool this same response names.
-  const rl = pickAccountWideLiveLimits(res?.rateLimits, res?.rateLimitsByLimitId);
-  if (!rl || typeof rl !== 'object') return null;
+  const picked = pickAccountWideLiveLimits(res?.rateLimits, res?.rateLimitsByLimitId);
+  if (!picked) return null;
+  const rl = picked.limits;
   const primary = toWindow(rl.primary);
   const secondary = toWindow(rl.secondary);
   const credits = toCredits(rl.credits);
-  const limitId = typeof rl.limitId === 'string' ? rl.limitId : undefined;
+  // The map key rides out with the block. Without it a value that carries no
+  // `limitId` produces a snapshot with none, and `codexSnapshotsShareLimitFamily`
+  // then short-circuits on the missing id and answers "same family" for every
+  // comparison — the guard silently switched off, while
+  // `codexBlockHasLiveFamilyAuthority` went on reporting authority.
+  const limitId = typeof picked.limitId === 'string' ? picked.limitId : undefined;
   if (!primary && !secondary && !credits && !limitId) return null;
   return {
     primary,
@@ -195,7 +201,7 @@ function liveWeeklyResetsAt(rl?: RawLiveRateLimits | null): number | undefined {
 export function pickAccountWideLiveLimits(
   top?: RawLiveRateLimits | null,
   byLimitId?: Record<string, RawLiveRateLimits> | null,
-): RawLiveRateLimits | null {
+): { limits: RawLiveRateLimits; limitId?: string } | null {
   // Keep the KEYS. They are the one discriminator this response is trusted for
   // — CLAUDE.md's account of the incident identifies the pool as
   // `rateLimitsByLimitId.codex_bengalfox` — while `limitName` is the field this
@@ -207,8 +213,14 @@ export function pickAccountWideLiveLimits(
   const entries = Object.entries(byLimitId ?? {}).filter(
     (entry): entry is [string, RawLiveRateLimits] => !!entry[1],
   );
+  // The KEY first, then the value's own id — the opposite order reinstates the
+  // exact failure this guards: a `codex_bengalfox` entry carrying
+  // `limitId: "codex"` (the mislabelling shape already recorded on the rollout
+  // path) would drop out of the scoped set AND pass as account-wide, so the pool
+  // could be returned as the account block and become the authority that rejects
+  // the true account rollout.
   const keyIsAccountWide = (key: string, candidate: RawLiveRateLimits): boolean =>
-    ACCOUNT_WIDE_LIVE_LIMIT_IDS.has(candidate.limitId ?? key);
+    ACCOUNT_WIDE_LIVE_LIMIT_IDS.has(key) && ACCOUNT_WIDE_LIVE_LIMIT_IDS.has(candidate.limitId ?? key);
   const scopedWeeklyResets = entries
     .filter(([key, candidate]) => isModelScopedCodexLimit(candidate.limitName) || !keyIsAccountWide(key, candidate))
     .map(([, candidate]) => liveWeeklyResetsAt(candidate))
@@ -224,7 +236,7 @@ export function pickAccountWideLiveLimits(
     return !scopedWeeklyResets.some((pool) => sameWeeklyReset(weekly * 1000, pool * 1000));
   };
 
-  if (unnamed(top) && notAKnownPool(top)) return top;
+  if (unnamed(top) && notAKnownPool(top)) return { limits: top, limitId: top.limitId };
   // The key tightens the PREFERRED rungs only. An id this file has never seen is
   // excluded from them but still reachable by the last resort — OpenAI adds
   // families on its own schedule, and an allow-list that could return nothing at
@@ -245,20 +257,22 @@ export function pickAccountWideLiveLimits(
       notAKnownPool(candidate) &&
       liveWeeklyResetsAt(candidate) != null
     ) {
-      return candidate;
+      return { limits: candidate, limitId: candidate.limitId ?? key };
     }
   }
-  if (unnamed(top)) return top;
+  if (unnamed(top)) return { limits: top, limitId: top.limitId };
   // Last resort, and it keeps the same preference: an unnamed entry that has a
   // window before one that has none. Reached when the top level is absent or
   // named-scoped, and without the ordering it returns whatever comes first in
   // key order — which is how a windowless `premium` credit block was picked
   // ahead of a real windowed `codex` entry sitting in the same map.
-  for (const [, candidate] of entries) {
-    if (unnamed(candidate) && liveWeeklyResetsAt(candidate) != null) return candidate;
+  for (const [key, candidate] of entries) {
+    if (unnamed(candidate) && liveWeeklyResetsAt(candidate) != null) {
+      return { limits: candidate, limitId: candidate.limitId ?? key };
+    }
   }
-  for (const [, candidate] of entries) {
-    if (unnamed(candidate)) return candidate;
+  for (const [key, candidate] of entries) {
+    if (unnamed(candidate)) return { limits: candidate, limitId: candidate.limitId ?? key };
   }
   return null;
 }
@@ -407,6 +421,10 @@ function weeklyAnchorIsRolling(rl: CodexRateLimits): boolean | undefined {
   const capturedMs = rl.capturedAt ? new Date(rl.capturedAt).getTime() : NaN;
   if (!window || resetsMs == null || isNaN(capturedMs)) return undefined;
   return resetsMs - capturedMs >= window.windowMinutes * 60 * 1000 - FAMILY_RESET_TOLERANCE_MS;
+}
+
+function hasAnyWindow(rl: CodexRateLimits): boolean {
+  return rl.primary != null || rl.secondary != null;
 }
 
 function weeklyResetsAtMs(rl: CodexRateLimits): number | undefined {
@@ -636,6 +654,13 @@ export function pickBestCodexRateLimits(
   if (opts.liveOwnsFamilyAuthority !== false && liveRejectsPassiveFamily(passive, live, nowMs)) {
     return live;
   }
+  // A block with no windows never displaces one that has them, on the recency
+  // path either. The live answer is captured "now" by construction, so it wins
+  // every recency comparison — and when the ladder above has fallen through to a
+  // windowless credit block, that means a fully-windowed reading is replaced by
+  // one carrying no gauge at all and every slot-based Codex surface blanks.
+  // Guarding only the reject path left this open, since it needs no rejection.
+  if (hasAnyWindow(passive) && !hasAnyWindow(live)) return passive;
   return codexSnapshotOutranks(
     { planType: live.planType, capturedAtMs: capturedAtMs(live) },
     { planType: passive.planType, capturedAtMs: capturedAtMs(passive) },
@@ -760,6 +785,14 @@ export function liveCorroboratesPassiveFamily(
 ): boolean {
   if (!passive || !live) return false;
   if (!codexSnapshotsShareLimitFamily(passive, live)) return false;
+  // A credit-based plan reports no windows at all (`limit_id: "premium"`), so no
+  // live answer it ever returns can carry a weekly fingerprint. Demanding one
+  // makes corroboration structurally impossible there: the skip is disabled
+  // forever, the query succeeds every time so the failure backoff never engages,
+  // and the daemon spawns `codex app-server` every five minutes for as long as
+  // Codex is in use, with no state that can end it. "Has no fingerprint to
+  // offer" is a different answer from "has one that no longer means anything".
+  if (weeklyWindow(live) == null) return true;
   return familyFingerprintCanReject(live, nowMs);
 }
 

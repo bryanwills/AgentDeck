@@ -110,6 +110,29 @@ describe('parseLiveCodexRateLimits', () => {
   });
 });
 
+describe('parseLiveCodexRateLimits — limit id provenance', () => {
+  it('takes the limit id from the map key when the value carries none', () => {
+    // The picker resolves the family by key; if the parser then reads the id off
+    // the value only, a keyed entry with no `limitId` yields a snapshot with
+    // none — and `codexSnapshotsShareLimitFamily` short-circuits on the missing
+    // id, answering "same family" for every comparison. The guard switches off
+    // silently while `codexBlockHasLiveFamilyAuthority` keeps claiming it holds.
+    const parsed = parseLiveCodexRateLimits(
+      {
+        rateLimitsByLimitId: {
+          codex: {
+            limitName: null,
+            primary: { usedPercent: 4, windowDurationMins: 10080, resetsAt: 1788274890 },
+          },
+        },
+      },
+      '2026-08-27T13:10:00.000Z',
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.limitId).toBe('codex');
+  });
+});
+
 describe('pickAccountWideLiveLimits', () => {
   // Shapes from the real `account/rateLimits/read` result on 2026-08-22: the
   // top-level block is the account's, and `rateLimitsByLimitId` carries every
@@ -122,11 +145,11 @@ describe('pickAccountWideLiveLimits', () => {
   };
 
   it('keeps the top-level block, which is what the Codex CLI itself shows', () => {
-    expect(pickAccountWideLiveLimits(account, { codex: account, codex_bengalfox: spark })).toBe(account);
+    expect(pickAccountWideLiveLimits(account, { codex: account, codex_bengalfox: spark })?.limits).toBe(account);
   });
 
   it('falls back to the unnamed family when the top level is scoped to one model', () => {
-    expect(pickAccountWideLiveLimits(spark, { codex_bengalfox: spark, codex: account })).toBe(account);
+    expect(pickAccountWideLiveLimits(spark, { codex_bengalfox: spark, codex: account })?.limits).toBe(account);
   });
 
   it('answers null when every family is model-scoped', () => {
@@ -151,7 +174,7 @@ describe('pickAccountWideLiveLimits', () => {
       pickAccountWideLiveLimits(unnamedPoolAtTop, {
         codex_bengalfox: namedPool,
         codex: realAccount,
-      }),
+      })?.limits,
     ).toBe(realAccount);
   });
 
@@ -171,7 +194,7 @@ describe('pickAccountWideLiveLimits', () => {
         premium: creditBlock,
         codex: collidingTop,
         codex_bengalfox: namedPool,
-      }),
+      })?.limits,
     ).toBe(collidingTop);
   });
 
@@ -186,8 +209,8 @@ describe('pickAccountWideLiveLimits', () => {
     const pool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: shared };
     const credit = { limitId: 'premium', limitName: null, credits: { hasCredits: false, unlimited: false, balance: '0' } };
     const byLimitId = { premium: credit, codex: account, codex_bengalfox: pool };
-    expect(pickAccountWideLiveLimits(null, byLimitId)).toBe(account);
-    expect(pickAccountWideLiveLimits(pool, byLimitId)).toBe(account);
+    expect(pickAccountWideLiveLimits(null, byLimitId)?.limits).toBe(account);
+    expect(pickAccountWideLiveLimits(pool, byLimitId)?.limits).toBe(account);
   });
 
   it('identifies a pool by its map key when the value leaves limitName null', () => {
@@ -201,8 +224,31 @@ describe('pickAccountWideLiveLimits', () => {
     const namelessPool = { limitName: null, primary: poolWeekly };
     const account = { limitId: 'codex', limitName: null, primary: accountWeekly };
     expect(
-      pickAccountWideLiveLimits(namelessPool, { codex_bengalfox: namelessPool, codex: account }),
+      pickAccountWideLiveLimits(namelessPool, { codex_bengalfox: namelessPool, codex: account })
+        ?.limits,
     ).toBe(account);
+  });
+
+  it('trusts the key over a value that claims the account id', () => {
+    // The mislabelling shape, moved to the live path: a `codex_bengalfox` entry
+    // whose value says `limitId: "codex"`. Resolved value-first it drops out of
+    // the scoped set AND passes as account-wide, so the pool becomes the block
+    // the whole family guard is then built on — and inverts it.
+    const poolWeekly = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
+    const accountWeekly = { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1788274890 };
+    const lyingPool = { limitId: 'codex', limitName: null, primary: poolWeekly };
+    const account = { limitId: 'codex', limitName: null, primary: accountWeekly };
+    expect(
+      pickAccountWideLiveLimits(lyingPool, { codex_bengalfox: lyingPool, codex: account })?.limits,
+    ).toBe(account);
+  });
+
+  it('carries the map key out as the limit id', () => {
+    // Without it a value with no `limitId` yields a snapshot with none, and
+    // `codexSnapshotsShareLimitFamily` short-circuits on the missing id — the
+    // guard answers "same family" for everything and switches itself off.
+    const account = { limitName: null, primary: { usedPercent: 4, windowDurationMins: 10080, resetsAt: 1788274890 } };
+    expect(pickAccountWideLiveLimits(null, { codex: account })?.limitId).toBe('codex');
   });
 
   it('keeps an unnamed block when a reset collision is all it has to go on', () => {
@@ -213,7 +259,8 @@ describe('pickAccountWideLiveLimits', () => {
     const onlyAccount = { limitId: 'codex', limitName: null, primary: shared };
     const namedPool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: shared };
     expect(
-      pickAccountWideLiveLimits(onlyAccount, { codex: onlyAccount, codex_bengalfox: namedPool }),
+      pickAccountWideLiveLimits(onlyAccount, { codex: onlyAccount, codex_bengalfox: namedPool })
+        ?.limits,
     ).toBe(onlyAccount);
   });
 });
@@ -420,6 +467,32 @@ describe('pickBestCodexRateLimits', () => {
     expect(
       pickBestCodexRateLimits(passive, other, 'prolite', now, { liveOwnsFamilyAuthority: false }),
     ).toBe(passive);
+  });
+
+  it('does not let a windowless live block win on recency either', () => {
+    // The reject path was guarded; the recency path was not. A live answer is
+    // captured "now" by construction, so when the account-wide ladder falls
+    // through to a windowless credit block it wins every recency comparison —
+    // replacing a fully-windowed reading with one carrying no gauge at all, and
+    // every slot-based Codex surface blanks.
+    const windowedPassive = {
+      limitId: 'premium',
+      planType: 'prolite',
+      capturedAt: '2026-08-27T13:00:00.000Z',
+      primary: { usedPercent: 12, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30.000Z' },
+    };
+    const windowlessLive = {
+      limitId: 'premium',
+      planType: 'prolite',
+      capturedAt: '2026-08-27T13:09:00.000Z',
+      credits: { hasCredits: false, unlimited: false, balance: '0' },
+    };
+    const now = Date.parse('2026-08-27T13:09:30.000Z');
+    // Same family, live is newer — recency alone would take it.
+    expect(codexSnapshotsShareLimitFamily(windowedPassive, windowlessLive)).toBe(true);
+    expect(pickBestCodexRateLimits(windowedPassive, windowlessLive, 'prolite', now)).toBe(
+      windowedPassive,
+    );
   });
 
   it('does not let a windowless live block veto a fully-windowed passive reading', () => {
@@ -656,6 +729,27 @@ describe('liveCorroboratesPassiveFamily', () => {
     expect(liveRejectsPassiveFamily(passive, staleAgreeingLive, now)).toBe(false);
     // ...and it may not buy the skip either. Both false at once.
     expect(liveCorroboratesPassiveFamily(passive, staleAgreeingLive, now)).toBe(false);
+  });
+
+  it('lets a plan that structurally has no weekly window earn the skip', () => {
+    // A credit plan reports no windows at all, so no live answer it returns can
+    // ever carry a fingerprint. Demanding one made corroboration impossible
+    // there: the skip disabled forever, the query succeeding every time so the
+    // failure backoff never engages, and a `codex app-server` spawn every five
+    // minutes for as long as Codex is in use, with no state that could end it.
+    const creditPassive = {
+      limitId: 'premium',
+      planType: 'prolite',
+      capturedAt: '2026-08-27T13:29:58.000Z',
+      credits: { hasCredits: false, unlimited: false, balance: '0' },
+    };
+    const creditLive = {
+      limitId: 'premium',
+      planType: 'prolite',
+      capturedAt: '2026-08-27T13:28:00.000Z',
+      credits: { hasCredits: false, unlimited: false, balance: '0' },
+    };
+    expect(liveCorroboratesPassiveFamily(creditPassive, creditLive, now)).toBe(true);
   });
 
   it('earns the skip only with a present, current, agreeing answer', () => {
