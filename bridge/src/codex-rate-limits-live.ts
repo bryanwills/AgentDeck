@@ -129,8 +129,8 @@ export function parseLiveCodexRateLimits(result: unknown, capturedAt: string): C
   // itself presents. But the app-server also returns every family keyed by id,
   // so when the top level is scoped to one model there is still an account-wide
   // answer in the map — take it rather than reporting a single model's quota as
-  // the account's. (Not currently reachable; the guard costs one lookup and the
-  // alternative is the rollout bug in a place with no second source.)
+  // the account's. Reachable in two ways: a named top-level block, and a top
+  // level whose weekly reset fingerprints as a pool this same response names.
   const rl = pickAccountWideLiveLimits(res?.rateLimits, res?.rateLimitsByLimitId);
   if (!rl || typeof rl !== 'object') return null;
   const primary = toWindow(rl.primary);
@@ -224,6 +224,14 @@ export function pickAccountWideLiveLimits(
     }
   }
   if (unnamed(top)) return top;
+  // Last resort, and it keeps the same preference: an unnamed entry that has a
+  // window before one that has none. Reached when the top level is absent or
+  // named-scoped, and without the ordering it returns whatever comes first in
+  // key order — which is how a windowless `premium` credit block was picked
+  // ahead of a real windowed `codex` entry sitting in the same map.
+  for (const candidate of entries) {
+    if (unnamed(candidate) && liveWeeklyResetsAt(candidate) != null) return candidate;
+  }
   for (const candidate of entries) {
     if (unnamed(candidate)) return candidate;
   }
@@ -391,6 +399,12 @@ function weeklyResetsAtMs(rl: CodexRateLimits): number | undefined {
  */
 const FAMILY_RESET_TOLERANCE_MS = 10 * 60 * 1000;
 
+/** How long a live answer may speak for the account's current weekly window.
+ *  Three query intervals: a healthy daemon refreshes every
+ *  `MIN_QUERY_INTERVAL_MS`, so this survives a couple of skipped builds while
+ *  still expiring long before a re-anchor could go unnoticed. */
+const LIVE_FAMILY_AUTHORITY_MAX_AGE_MS = 3 * MIN_QUERY_INTERVAL_MS;
+
 function sameWeeklyReset(aMs: number, bMs: number): boolean {
   return Math.abs(aMs - bMs) <= FAMILY_RESET_TOLERANCE_MS;
 }
@@ -419,6 +433,21 @@ function familyFingerprintCanReject(rl: CodexRateLimits, nowMs: number): boolean
   const resetsMs = weeklyResetsAtMs(rl);
   if (!window || resetsMs == null) return false;
   if (resetsMs <= nowMs) return false;
+  // An anchor is a discriminator, but it is never immutable, so authority has to
+  // decay with the reading's own age. Measured over 45,743 account-family weekly
+  // readings (2026-07-03 → 08-27): 104 distinct anchors, and in 103 of the 104
+  // changes the OLD anchor was still 1.6–7.0 days in the future when the new one
+  // first appeared. So window expiry cannot detect a re-anchor — at every one of
+  // them a cached snapshot would go on vetoing the fresh rollout, indefinitely
+  // once the query enters its 30-minute backoff or the `codex` binary goes away
+  // after one good answer. A live answer refreshed at most every
+  // MIN_QUERY_INTERVAL_MS may speak for the current window for a few intervals;
+  // past that it is a claim about a window that may no longer be the one running,
+  // and the fresh rollout is the better guess. An unstamped reading has no age
+  // and therefore no authority.
+  const capturedForAge = rl.capturedAt ? new Date(rl.capturedAt).getTime() : NaN;
+  if (isNaN(capturedForAge)) return false;
+  if (nowMs - capturedForAge > LIVE_FAMILY_AUTHORITY_MAX_AGE_MS) return false;
   // A ROLLING window identifies nothing. Measured in the same store, the
   // per-model pool's weekly reset takes 749 distinct values — one per request,
   // sliding 43 minutes in step with the clock — because `resets_at` there is

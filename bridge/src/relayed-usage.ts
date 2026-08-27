@@ -90,9 +90,19 @@ export function resolveRelayedUsageEvent(input: {
    *  than its own rollout read. Defaults to false: without a live reading there
    *  is no family authority here, and the tie falls back to recency. */
   ownIsLiveBacked?: boolean;
+  /** Injectable clock. The family guard's authority decays with a reading's age,
+   *  so a test that leaves this to the wall clock changes its answer as the
+   *  fixtures age past it. */
+  nowMs?: number;
   buildOwnUsage: () => UsageEvent;
 }): UsageEvent {
-  const { relayed, ownCodexRateLimits, ownIsLiveBacked = false, buildOwnUsage } = input;
+  const {
+    relayed,
+    ownCodexRateLimits,
+    ownIsLiveBacked = false,
+    nowMs = Date.now(),
+    buildOwnUsage,
+  } = input;
 
   const hasClaudeData = relayed.fiveHourPercent != null || relayed.sevenDayPercent != null;
   if (!hasClaudeData) {
@@ -100,7 +110,7 @@ export function resolveRelayedUsageEvent(input: {
   }
 
   const relayedCodex = (relayed.codexRateLimits ?? null) as CodexRateLimits | null;
-  const best = pickBestCodexRateLimits(relayedCodex, ownCodexRateLimits, undefined, Date.now(), {
+  const best = pickBestCodexRateLimits(relayedCodex, ownCodexRateLimits, undefined, nowMs, {
     liveOwnsFamilyAuthority: ownIsLiveBacked,
   });
   // Identity, not deep-equality: the picker returns one of its two arguments, so

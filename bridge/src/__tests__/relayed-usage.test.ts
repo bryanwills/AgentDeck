@@ -125,27 +125,28 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
     // seconds old, because the rollout is appended every couple of seconds. The
     // daemon's block is the one backed by the live `codex app-server` answer, so
     // a cross-family disagreement is resolved in its favour rather than by age.
-    // Dated far ahead so the resolver's own clock cannot age them out, with the
-    // capture-to-reset offsets a real reading has: a weekly window sitting a
-    // full window ahead of its own capture is a countdown, not an anchor, and
-    // `familyFingerprintCanReject` refuses to arbitrate on one.
+    // Verbatim shapes from 2026-08-27, driven against an injected clock: the
+    // guard's authority decays with a reading's age and its window eventually
+    // elapses, so left to the wall clock these assertions would invert on a
+    // date in the future rather than on a change to the code.
     const poolUnderAccountId = {
       planType: 'prolite',
       limitId: 'codex',
-      capturedAt: '2099-08-27T13:09:40.628Z',
-      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2099-08-27T18:01:28Z' },
-      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2099-09-03T13:01:28Z' },
+      capturedAt: '2026-08-27T13:09:40.628Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2026-08-27T18:01:28Z' },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2026-09-03T13:01:28Z' },
     } as CodexRateLimits;
     const accountExhausted = {
       planType: 'prolite',
       limitId: 'codex',
-      capturedAt: '2099-08-27T13:05:00.000Z',
-      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2099-09-01T15:01:30Z' },
+      capturedAt: '2026-08-27T13:05:00.000Z',
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30Z' },
     } as CodexRateLimits;
     const out = resolveRelayedUsageEvent({
       relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: poolUnderAccountId },
       ownCodexRateLimits: accountExhausted,
       ownIsLiveBacked: true,
+      nowMs: Date.parse('2026-08-27T13:09:41Z'),
       buildOwnUsage: () => { throw new Error('must not build'); },
     }) as any;
     expect(out.codexRateLimits).toBe(accountExhausted);
@@ -159,19 +160,20 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
     const relayedFresh = {
       planType: 'prolite',
       limitId: 'codex',
-      capturedAt: '2099-08-27T13:09:40.628Z',
-      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2099-08-27T18:01:28Z' },
-      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2099-09-03T13:01:28Z' },
+      capturedAt: '2026-08-27T13:09:40.628Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2026-08-27T18:01:28Z' },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2026-09-03T13:01:28Z' },
     } as CodexRateLimits;
     const ownOlder = {
       planType: 'prolite',
       limitId: 'codex',
-      capturedAt: '2099-08-27T13:05:00.000Z',
-      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2099-09-01T15:01:30Z' },
+      capturedAt: '2026-08-27T13:05:00.000Z',
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30Z' },
     } as CodexRateLimits;
     const out = resolveRelayedUsageEvent({
       relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: relayedFresh },
       ownCodexRateLimits: ownOlder,
+      nowMs: Date.parse('2026-08-27T13:09:41Z'),
       buildOwnUsage: () => { throw new Error('must not build'); },
     }) as any;
     expect(out.codexRateLimits).toBe(relayedFresh);
@@ -187,14 +189,14 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
     const relayedWindowed = {
       planType: 'prolite',
       limitId: 'codex',
-      capturedAt: '2099-08-27T13:09:40.628Z',
-      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2099-08-27T18:01:28Z' },
-      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2099-09-03T13:01:28Z' },
+      capturedAt: '2026-08-27T13:09:40.628Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2026-08-27T18:01:28Z' },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2026-09-03T13:01:28Z' },
     } as CodexRateLimits;
     const ownCreditGauge = {
       planType: 'prolite',
       limitId: 'premium',
-      capturedAt: '2099-08-27T13:00:00.000Z',
+      capturedAt: '2026-08-27T13:00:00.000Z',
       primary: { usedPercent: 100, windowMinutes: 0 },
     } as unknown as CodexRateLimits;
     const out = resolveRelayedUsageEvent({
@@ -203,6 +205,7 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
       // Without this the authority gate short-circuits first and the assertion
       // holds on recency alone — the windowless bound it names is never reached.
       ownIsLiveBacked: true,
+      nowMs: Date.parse('2026-08-27T13:09:41Z'),
       buildOwnUsage: () => { throw new Error('must not build'); },
     }) as any;
     expect(out.codexRateLimits).toBe(relayedWindowed);

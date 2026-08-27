@@ -172,6 +172,21 @@ describe('pickAccountWideLiveLimits', () => {
     ).toBe(collidingTop);
   });
 
+  it('prefers a windowed entry even on the last-resort rung', () => {
+    // Reached when the top level is absent or named-scoped. Without the same
+    // preference the rung returns whatever comes first in key order, and a
+    // windowless `premium` credit block was picked ahead of a real windowed
+    // `codex` entry sitting in the same map — the inversion the rung above it
+    // is written to prevent, re-exposed one rung down.
+    const shared = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
+    const account = { limitId: 'codex', limitName: null, primary: shared };
+    const pool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: shared };
+    const credit = { limitId: 'premium', limitName: null, credits: { hasCredits: false, unlimited: false, balance: '0' } };
+    const byLimitId = { premium: credit, codex: account, codex_bengalfox: pool };
+    expect(pickAccountWideLiveLimits(null, byLimitId)).toBe(account);
+    expect(pickAccountWideLiveLimits(pool, byLimitId)).toBe(account);
+  });
+
   it('keeps an unnamed block when a reset collision is all it has to go on', () => {
     // Two windows opened in the same instant share a reset without anything
     // being wrong. Degrading to "no reading" there would delete a real one, so
@@ -250,7 +265,12 @@ describe('pickBestCodexRateLimits', () => {
       capturedAt: '2026-08-27T13:09:40.628Z',
     };
     const live = { ...ACCOUNT_EXHAUSTED, capturedAt: '2026-08-27T13:05:00.000Z' };
-    expect(pickBestCodexRateLimits(passive, live, 'prolite')).toBe(live);
+    // `nowMs` explicitly: read against the wall clock this assertion inverts on
+    // 2026-09-01, when the fixture's weekly window elapses and the picker falls
+    // back to recency — the flagship gate for this change was a time bomb.
+    expect(
+      pickBestCodexRateLimits(passive, live, 'prolite', Date.parse('2026-08-27T13:09:41Z')),
+    ).toBe(live);
   });
 
   it('does not let the family guard outrank the plan test', () => {
@@ -289,6 +309,49 @@ describe('pickBestCodexRateLimits', () => {
     expect(
       pickBestCodexRateLimits(currentPlanPassive, retiredPlanLive, 'prolite', duringBothWindows),
     ).toBe(currentPlanPassive);
+  });
+
+  it('stops arbitrating once the live answer is older than a few query intervals', () => {
+    // Measured over 45,743 account-family weekly readings: 104 distinct anchors,
+    // and in 103 of the 104 changes the OLD anchor was still 1.6-7.0 days in the
+    // future when the new one appeared — a re-anchor, not an expiry. So window
+    // expiry alone can never detect one, and a cached snapshot would go on
+    // vetoing every fresh rollout: bounded to one query interval normally, but
+    // unbounded once the query enters its 30-minute backoff or the `codex`
+    // binary disappears after a single good answer.
+    const reanchoredPassive = {
+      limitId: 'codex',
+      planType: 'prolite',
+      capturedAt: '2026-08-04T16:27:32.000Z',
+      primary: {
+        usedPercent: 42,
+        windowMinutes: 10080,
+        resetsAt: new Date(1786459585 * 1000).toISOString(),
+      },
+    };
+    const staleLive = {
+      limitId: 'codex',
+      planType: 'prolite',
+      capturedAt: '2026-08-04T13:27:04.000Z',
+      primary: {
+        usedPercent: 91,
+        windowMinutes: 10080,
+        resetsAt: new Date(1786179739 * 1000).toISOString(),
+      },
+    };
+    const atReanchor = Date.parse('2026-08-04T16:27:40.000Z');
+    // Both anchors are days from expiry, so only the age bound can separate them.
+    expect(codexSnapshotsShareLimitFamily(reanchoredPassive, staleLive)).toBe(false);
+    expect(liveRejectsPassiveFamily(reanchoredPassive, staleLive, atReanchor)).toBe(false);
+    expect(pickBestCodexRateLimits(reanchoredPassive, staleLive, 'prolite', atReanchor)).toBe(
+      reanchoredPassive,
+    );
+    // A live answer inside the window still arbitrates — this bound is about
+    // age, not about giving the guard up.
+    const freshLive = { ...staleLive, capturedAt: '2026-08-04T16:25:00.000Z' };
+    expect(pickBestCodexRateLimits(reanchoredPassive, freshLive, 'prolite', atReanchor)).toBe(
+      freshLive,
+    );
   });
 
   it('ignores a family fingerprint whose own weekly window has already elapsed', () => {
@@ -371,7 +434,9 @@ describe('pickBestCodexRateLimits', () => {
     // snapshot of the SAME weekly window stays the cheaper, more exact source.
     const passive = { ...ACCOUNT_EXHAUSTED, capturedAt: '2026-08-27T13:09:40.628Z' };
     const live = { ...ACCOUNT_EXHAUSTED, capturedAt: '2026-08-27T13:05:00.000Z' };
-    expect(pickBestCodexRateLimits(passive, live, 'prolite')).toBe(passive);
+    expect(
+      pickBestCodexRateLimits(passive, live, 'prolite', Date.parse('2026-08-27T13:09:41Z')),
+    ).toBe(passive);
   });
 });
 
@@ -459,6 +524,7 @@ describe('codexBlockHasLiveFamilyAuthority', () => {
   const now = Date.parse('2026-08-27T13:10:00.000Z');
   const live = {
     ...ACCOUNT_EXHAUSTED,
+    capturedAt: '2026-08-27T13:08:00.000Z',
     primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30.000Z' },
   };
 
@@ -485,6 +551,14 @@ describe('codexBlockHasLiveFamilyAuthority', () => {
     ).toBe(false);
     expect(
       codexBlockHasLiveFamilyAuthority(live, live, Date.parse('2026-09-02T00:00:00.000Z')),
+    ).toBe(false);
+    // Unstamped, and stale: an anchor is a discriminator but never an immutable
+    // one, so a reading with no age — or one older than a few query intervals —
+    // is no longer speaking about the window that is running now.
+    const { capturedAt: _dropped, ...unstamped } = live;
+    expect(codexBlockHasLiveFamilyAuthority(live, unstamped, now)).toBe(false);
+    expect(
+      codexBlockHasLiveFamilyAuthority(live, live, Date.parse('2026-08-27T14:00:00.000Z')),
     ).toBe(false);
   });
 
@@ -655,10 +729,12 @@ describe('shouldQueryCodexRateLimitsLive', () => {
     // genuinely unreachable.
     const passive = {
       limitId: 'codex',
+      capturedAt: '2026-08-30T23:59:00.000Z',
       primary: { usedPercent: 3, windowMinutes: 10080, resetsAt: '2026-09-08T15:01:30.000Z' },
     };
     const elapsedLive = {
       limitId: 'codex',
+      capturedAt: '2026-08-30T23:58:00.000Z',
       primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30.000Z' },
     };
     const beforeReset = Date.parse('2026-08-31T00:00:00.000Z');
