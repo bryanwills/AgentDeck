@@ -148,6 +148,12 @@ export function parseLiveCodexRateLimits(result: unknown, capturedAt: string): C
   };
 }
 
+/** The limit ids this file knows to be account-wide. An allow-list, like every
+ *  other family test here: a new model pool must not inherit the account's
+ *  meaning by default, and the cost of being wrong the other way is a fallback
+ *  to the rollout rather than a wrong number. */
+const ACCOUNT_WIDE_LIVE_LIMIT_IDS = new Set(['codex', 'premium']);
+
 /** The weekly window's reset instant on a raw live block — the same fingerprint
  *  `codexSnapshotsShareLimitFamily` uses, read off the app-server's spelling. */
 function liveWeeklyResetsAt(rl?: RawLiveRateLimits | null): number | undefined {
@@ -190,12 +196,22 @@ export function pickAccountWideLiveLimits(
   top?: RawLiveRateLimits | null,
   byLimitId?: Record<string, RawLiveRateLimits> | null,
 ): RawLiveRateLimits | null {
-  const entries = Object.values(byLimitId ?? {}).filter(
-    (candidate): candidate is RawLiveRateLimits => !!candidate,
+  // Keep the KEYS. They are the one discriminator this response is trusted for
+  // — CLAUDE.md's account of the incident identifies the pool as
+  // `rateLimitsByLimitId.codex_bengalfox` — while `limitName` is the field this
+  // whole change declares unreliable. Dropping them left the pool defence
+  // resting entirely on a name the map values are not guaranteed to carry: null
+  // there and `scopedWeeklyResets` is empty AND the pool reads as unnamed, so it
+  // could be returned as the account block and become the authority that rejects
+  // the real account rollout.
+  const entries = Object.entries(byLimitId ?? {}).filter(
+    (entry): entry is [string, RawLiveRateLimits] => !!entry[1],
   );
+  const keyIsAccountWide = (key: string, candidate: RawLiveRateLimits): boolean =>
+    ACCOUNT_WIDE_LIVE_LIMIT_IDS.has(candidate.limitId ?? key);
   const scopedWeeklyResets = entries
-    .filter((candidate) => isModelScopedCodexLimit(candidate.limitName))
-    .map((candidate) => liveWeeklyResetsAt(candidate))
+    .filter(([key, candidate]) => isModelScopedCodexLimit(candidate.limitName) || !keyIsAccountWide(key, candidate))
+    .map(([, candidate]) => liveWeeklyResetsAt(candidate))
     .filter((resetsAt): resetsAt is number => typeof resetsAt === 'number');
   const unnamed = (candidate?: RawLiveRateLimits | null): candidate is RawLiveRateLimits =>
     !!candidate && !isModelScopedCodexLimit(candidate.limitName);
@@ -209,6 +225,10 @@ export function pickAccountWideLiveLimits(
   };
 
   if (unnamed(top) && notAKnownPool(top)) return top;
+  // The key tightens the PREFERRED rungs only. An id this file has never seen is
+  // excluded from them but still reachable by the last resort — OpenAI adds
+  // families on its own schedule, and an allow-list that could return nothing at
+  // all would turn a new account-wide id into a vanished gauge.
   // Overriding the top level is the strong move, so it takes positive evidence:
   // a replacement must be unnamed, unlike any pool this response names, AND
   // actually carry a weekly window. Without that last clause the ladder could
@@ -218,8 +238,13 @@ export function pickAccountWideLiveLimits(
   // collide with. `parseLiveCodexRateLimits` then accepts it on `limitId` alone
   // and, being the newest reading by construction, it displaces the account's
   // real windows with a synthetic 100% credit gauge.
-  for (const candidate of entries) {
-    if (unnamed(candidate) && notAKnownPool(candidate) && liveWeeklyResetsAt(candidate) != null) {
+  for (const [key, candidate] of entries) {
+    if (
+      unnamed(candidate) &&
+      keyIsAccountWide(key, candidate) &&
+      notAKnownPool(candidate) &&
+      liveWeeklyResetsAt(candidate) != null
+    ) {
       return candidate;
     }
   }
@@ -229,10 +254,10 @@ export function pickAccountWideLiveLimits(
   // named-scoped, and without the ordering it returns whatever comes first in
   // key order — which is how a windowless `premium` credit block was picked
   // ahead of a real windowed `codex` entry sitting in the same map.
-  for (const candidate of entries) {
+  for (const [, candidate] of entries) {
     if (unnamed(candidate) && liveWeeklyResetsAt(candidate) != null) return candidate;
   }
-  for (const candidate of entries) {
+  for (const [, candidate] of entries) {
     if (unnamed(candidate)) return candidate;
   }
   return null;
@@ -371,6 +396,19 @@ function weeklyWindow(rl: CodexRateLimits): CodexRateLimitWindow | undefined {
   return undefined;
 }
 
+/**
+ * Whether a reading's weekly anchor is ROLLING — sitting a full window ahead of
+ * its own capture — rather than pinned to a window that has already started.
+ * Undefined when the reading carries no capture stamp: no claim either way.
+ */
+function weeklyAnchorIsRolling(rl: CodexRateLimits): boolean | undefined {
+  const window = weeklyWindow(rl);
+  const resetsMs = weeklyResetsAtMs(rl);
+  const capturedMs = rl.capturedAt ? new Date(rl.capturedAt).getTime() : NaN;
+  if (!window || resetsMs == null || isNaN(capturedMs)) return undefined;
+  return resetsMs - capturedMs >= window.windowMinutes * 60 * 1000 - FAMILY_RESET_TOLERANCE_MS;
+}
+
 function weeklyResetsAtMs(rl: CodexRateLimits): number | undefined {
   const resetsAt = weeklyWindow(rl)?.resetsAt;
   if (!resetsAt) return undefined;
@@ -391,11 +429,14 @@ function weeklyResetsAtMs(rl: CodexRateLimits): number | undefined {
  * old, the mid-turn spawn skip is lifted for as long as Codex is in use, and the
  * relay guard's authority reads false in the ordinary good case.
  *
- * Ten minutes is chosen from the two distances the data actually shows: jitter
- * of seconds on one side, and ~1.5 DAYS between the closest genuinely different
- * windows (`1788137317` → `1788274890`, account vs pool `1788274890` →
- * `1788440488`) on the other. Anything between those two scales separates them;
- * this sits three orders of magnitude above the noise and two below the signal.
+ * Ten minutes is the middle of a band that is narrower than it first looks.
+ * Clustering the account family's 105 raw anchors at successive tolerances: at
+ * 600s they collapse to 33 windows whose widest internal spread is 240s, and the
+ * closest two DISTINCT windows sit 1,848s apart. So the floor is ~4 minutes of
+ * jitter and the ceiling is ~31 minutes of real separation — an earlier draft of
+ * this comment claimed the ceiling was 1.5 days, which was true only of the
+ * 14-day sample it was measured on. 600s is ~2.5× the observed jitter and ~1/3
+ * of the closest real gap.
  */
 const FAMILY_RESET_TOLERANCE_MS = 10 * 60 * 1000;
 
@@ -445,9 +486,9 @@ function familyFingerprintCanReject(rl: CodexRateLimits, nowMs: number): boolean
   // past that it is a claim about a window that may no longer be the one running,
   // and the fresh rollout is the better guess. An unstamped reading has no age
   // and therefore no authority.
-  const capturedForAge = rl.capturedAt ? new Date(rl.capturedAt).getTime() : NaN;
-  if (isNaN(capturedForAge)) return false;
-  if (nowMs - capturedForAge > LIVE_FAMILY_AUTHORITY_MAX_AGE_MS) return false;
+  const capturedMs = rl.capturedAt ? new Date(rl.capturedAt).getTime() : NaN;
+  if (isNaN(capturedMs)) return false;
+  if (nowMs - capturedMs > LIVE_FAMILY_AUTHORITY_MAX_AGE_MS) return false;
   // A ROLLING window identifies nothing. Measured in the same store, the
   // per-model pool's weekly reset takes 749 distinct values — one per request,
   // sliding 43 minutes in step with the clock — because `resets_at` there is
@@ -457,12 +498,7 @@ function familyFingerprintCanReject(rl: CodexRateLimits, nowMs: number): boolean
   // retire it, so left unchecked such a fingerprint could veto every passive
   // reading for as long as it stayed cached. A fixed window looks like this
   // only in its first minutes, where falling back to recency costs nothing.
-  const capturedMs = rl.capturedAt ? new Date(rl.capturedAt).getTime() : NaN;
-  if (!isNaN(capturedMs)) {
-    const windowMs = window.windowMinutes * 60 * 1000;
-    if (resetsMs - capturedMs >= windowMs - FAMILY_RESET_TOLERANCE_MS) return false;
-  }
-  return true;
+  return weeklyAnchorIsRolling(rl) !== true;
 }
 
 /**
@@ -481,7 +517,9 @@ function familyFingerprintCanReject(rl: CodexRateLimits, nowMs: number): boolean
  * live snapshot minted under a retired plan is itself a reason to spend a query
  * — the answer that replaces it is the only thing that can end the disagreement.
  * The cost is bounded by the same spawn throttles as everything else here.
- * Exported for unit testing.
+ *
+ * The throttle must NOT reuse this predicate, and that is the whole point of
+ * `liveCorroboratesPassiveFamily` below. Exported for unit testing.
  */
 export function liveRejectsPassiveFamily(
   passive?: CodexRateLimits | null,
@@ -533,6 +571,18 @@ export function codexSnapshotsShareLimitFamily(
   const aWeekly = weeklyResetsAtMs(a);
   const bWeekly = weeklyResetsAtMs(b);
   if (aWeekly == null || bWeekly == null) return true;
+  // KNOWN BLIND SPOT, stated rather than papered over. The pool's anchor slides a
+  // second per second, so once a week it sweeps THROUGH the account's fixed
+  // anchor and spends ~20 minutes inside the tolerance, during which a pool
+  // reading is indistinguishable from the account's here. Two things that look
+  // like fixes are not. Shrinking the tolerance cannot close it — the floor is
+  // 240s of measured jitter. And "one anchor is rolling, the other is pinned"
+  // cannot either: the sweep instant is by construction the account window's own
+  // start (the pool's anchor equals A exactly when captured at A − 7d, which is
+  // when the account's window beginning at A − 7d starts), so at that moment BOTH
+  // readings sit a full window ahead of their capture and the shape test answers
+  // "same" too. What bounds the damage is that the account has just reset there,
+  // so the reading being shadowed is the one at ~0%.
   return sameWeeklyReset(aWeekly, bWeekly);
 }
 
@@ -683,6 +733,36 @@ export function codexBlockHasLiveFamilyAuthority(
   return codexSnapshotsShareLimitFamily(published, live);
 }
 
+/**
+ * Whether the cached live answer positively vouches for the passive reading's
+ * family — the THROTTLE's question, and deliberately not the picker's.
+ *
+ * Routing the throttle through `liveRejectsPassiveFamily` deadlocked the two
+ * bounds against each other on exactly the busy machine this change is for. The
+ * skip suppresses queries while the rollout is fresh, so under continuous Codex
+ * use the cached answer is never refreshed; fifteen minutes in it loses its
+ * authority; and from then on a disagreement could no longer be REPORTED as one,
+ * because the age bound lives inside the rejection test. `passiveMatchesAccountFamily`
+ * stayed true, the skip stayed engaged, no query ever fired, and the picker fell
+ * through to recency — publishing the mislabelled pool reading for the rest of
+ * the run.
+ *
+ * So the polarity is inverted here on purpose: the skip is earned by a live
+ * answer that is present, still able to arbitrate, and in agreement. Anything
+ * else — no answer, a stale one, a disagreeing one — is a REASON to spend a
+ * query, never a reason to skip one. The spawn throttles bound the cost either
+ * way. Exported for unit testing.
+ */
+export function liveCorroboratesPassiveFamily(
+  passive?: CodexRateLimits | null,
+  live?: CodexRateLimits | null,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!passive || !live) return false;
+  if (!codexSnapshotsShareLimitFamily(passive, live)) return false;
+  return familyFingerprintCanReject(live, nowMs);
+}
+
 let cachedLive: CodexRateLimits | null = null;
 let lastAttemptMs = 0;
 let consecutiveFailures = 0;
@@ -723,7 +803,7 @@ export function codexRateLimitsWithLiveRefresh(
         consecutiveFailures,
         passiveCapturedAtMs: capturedAtMs(passive),
         passivePlanMatchesAccount: codexSnapshotMatchesAccountPlan(passive?.planType, accountPlan),
-        passiveMatchesAccountFamily: !liveRejectsPassiveFamily(passive, cachedLive, nowMs),
+        passiveMatchesAccountFamily: liveCorroboratesPassiveFamily(passive, cachedLive, nowMs),
       })
     ) {
       inFlight = true;
@@ -749,9 +829,18 @@ export function codexRateLimitsWithLiveRefresh(
 }
 
 /** Test hook — clears the module-level cache and throttle state. */
-export function __resetCodexRateLimitsLiveForTest(): void {
-  cachedLive = null;
-  lastAttemptMs = 0;
+export function __resetCodexRateLimitsLiveForTest(seed?: {
+  cachedLive?: CodexRateLimits | null;
+  lastAttemptMs?: number;
+}): void {
+  cachedLive = seed?.cachedLive ?? null;
+  lastAttemptMs = seed?.lastAttemptMs ?? 0;
   consecutiveFailures = 0;
   inFlight = false;
+}
+
+/** Throttle state, so a test can tell "a query was spent" from "the skip held".
+ *  `lastAttemptMs` moves synchronously, before any subprocess exists. */
+export function __peekCodexRateLimitsLiveForTest(): { lastAttemptMs: number } {
+  return { lastAttemptMs };
 }

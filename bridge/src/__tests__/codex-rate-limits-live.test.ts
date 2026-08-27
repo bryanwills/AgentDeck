@@ -8,11 +8,14 @@ import {
   pickBestCodexRateLimits,
   codexSnapshotsShareLimitFamily,
   liveRejectsPassiveFamily,
+  liveCorroboratesPassiveFamily,
   codexBlockHasLiveFamilyAuthority,
   shouldQueryCodexRateLimitsLive,
   queryCodexRateLimitsLive,
   codexSpawnPlan,
   __resetCodexRateLimitsLiveForTest,
+  __peekCodexRateLimitsLiveForTest,
+  codexRateLimitsWithLiveRefresh,
 } from '../codex-rate-limits-live.js';
 
 // The exact `account/rateLimits/read` result observed from codex-cli 0.146.0 on
@@ -185,6 +188,21 @@ describe('pickAccountWideLiveLimits', () => {
     const byLimitId = { premium: credit, codex: account, codex_bengalfox: pool };
     expect(pickAccountWideLiveLimits(null, byLimitId)).toBe(account);
     expect(pickAccountWideLiveLimits(pool, byLimitId)).toBe(account);
+  });
+
+  it('identifies a pool by its map key when the value leaves limitName null', () => {
+    // `limitName` is the field this change declares unreliable, so the pool
+    // defence must not rest on it alone. With it null inside the values the
+    // scoped set is empty AND the pool reads as unnamed — it could be returned
+    // as the account block and become the authority that rejects the real
+    // account rollout.
+    const poolWeekly = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
+    const accountWeekly = { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1788274890 };
+    const namelessPool = { limitName: null, primary: poolWeekly };
+    const account = { limitId: 'codex', limitName: null, primary: accountWeekly };
+    expect(
+      pickAccountWideLiveLimits(namelessPool, { codex_bengalfox: namelessPool, codex: account }),
+    ).toBe(account);
   });
 
   it('keeps an unnamed block when a reset collision is all it has to go on', () => {
@@ -608,6 +626,97 @@ describe('codexBlockHasLiveFamilyAuthority', () => {
     expect(
       codexBlockHasLiveFamilyAuthority(SPARK_MISLABELLED_AS_ACCOUNT, live, now),
     ).toBe(false);
+  });
+});
+
+describe('liveCorroboratesPassiveFamily', () => {
+  const anchored = (capturedAt: string, resetsAt: string, usedPercent = 100) => ({
+    limitId: 'codex',
+    planType: 'prolite',
+    capturedAt,
+    primary: { usedPercent, windowMinutes: 10080, resetsAt },
+  });
+  const now = Date.parse('2026-08-27T13:30:00.000Z');
+
+  it('is NOT the complement of liveRejectsPassiveFamily, which is the point', () => {
+    // Routed through the rejection test, the throttle inherited its age bound
+    // and the two deadlocked: the skip suppresses queries while the rollout is
+    // fresh, so under continuous use the cached answer is never refreshed; past
+    // fifteen minutes it can no longer arbitrate; and a disagreement could then
+    // no longer be REPORTED as one, so the skip stayed engaged, no query ever
+    // fired, and the picker fell through to recency — publishing the mislabelled
+    // pool reading for the rest of the run.
+    // Same anchor on both sides — the earlier draft of this fixture put two
+    // days between them, so the share test answered first and the age bound the
+    // assertion names was never reached.
+    const passive = anchored('2026-08-27T13:29:58.000Z', '2026-09-01T15:01:30.000Z', 24);
+    const staleAgreeingLive = anchored('2026-08-27T13:00:00.000Z', '2026-09-01T15:01:30.000Z');
+    expect(codexSnapshotsShareLimitFamily(passive, staleAgreeingLive)).toBe(true);
+    // Stale: it may not reject...
+    expect(liveRejectsPassiveFamily(passive, staleAgreeingLive, now)).toBe(false);
+    // ...and it may not buy the skip either. Both false at once.
+    expect(liveCorroboratesPassiveFamily(passive, staleAgreeingLive, now)).toBe(false);
+  });
+
+  it('earns the skip only with a present, current, agreeing answer', () => {
+    const passive = anchored('2026-08-27T13:29:58.000Z', '2026-09-01T15:01:30.000Z', 99);
+    const freshAgreeing = anchored('2026-08-27T13:28:00.000Z', '2026-09-01T15:01:30.000Z');
+    expect(liveCorroboratesPassiveFamily(passive, freshAgreeing, now)).toBe(true);
+    expect(liveCorroboratesPassiveFamily(passive, null, now)).toBe(false);
+    const freshDisagreeing = anchored('2026-08-27T13:28:00.000Z', '2026-09-03T13:01:28.000Z');
+    expect(liveCorroboratesPassiveFamily(passive, freshDisagreeing, now)).toBe(false);
+  });
+});
+
+describe('codexRateLimitsWithLiveRefresh — throttle wiring', () => {
+  const original = process.env.AGENTDECK_CODEX_BIN;
+  beforeEach(() => {
+    // A binary that cannot exist: `spawn` emits 'error' and the query resolves
+    // null. The assertion is on `lastAttemptMs`, which moves synchronously
+    // before any subprocess does, so nothing here depends on the child.
+    process.env.AGENTDECK_CODEX_BIN = '/nonexistent/agentdeck-codex-probe';
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.AGENTDECK_CODEX_BIN;
+    else process.env.AGENTDECK_CODEX_BIN = original;
+    __resetCodexRateLimitsLiveForTest();
+  });
+
+  const reading = (ageMs: number, resetsInDays: number, usedPercent: number) => ({
+    limitId: 'codex',
+    planType: 'prolite',
+    capturedAt: new Date(Date.now() - ageMs).toISOString(),
+    primary: {
+      usedPercent,
+      windowMinutes: 10080,
+      resetsAt: new Date(Date.now() + resetsInDays * 86400_000).toISOString(),
+    },
+  });
+
+  it('spends a query when the cached live answer has aged out, mid-turn or not', () => {
+    // The deadlock: under continuous Codex use the skip suppresses every query,
+    // so the cached answer is never refreshed and eventually cannot arbitrate —
+    // and routed through the rejection predicate, "cannot arbitrate" read as
+    // "no disagreement", which re-engaged the skip. No query ever fired again.
+    __resetCodexRateLimitsLiveForTest({
+      cachedLive: reading(20 * 60_000, 3, 100),
+      lastAttemptMs: Date.now() - 6 * 60_000,
+    });
+    const before = __peekCodexRateLimitsLiveForTest().lastAttemptMs;
+    codexRateLimitsWithLiveRefresh(reading(2_000, 3, 99), 'prolite');
+    expect(__peekCodexRateLimitsLiveForTest().lastAttemptMs).toBeGreaterThan(before);
+  });
+
+  it('keeps the mid-turn skip while the cached answer is fresh and agrees', () => {
+    // The bound is about a stale answer, not about giving the skip up: a live
+    // answer that is present, current and in agreement still earns it.
+    __resetCodexRateLimitsLiveForTest({
+      cachedLive: reading(60_000, 3, 100),
+      lastAttemptMs: Date.now() - 6 * 60_000,
+    });
+    const before = __peekCodexRateLimitsLiveForTest().lastAttemptMs;
+    codexRateLimitsWithLiveRefresh(reading(2_000, 3, 99), 'prolite');
+    expect(__peekCodexRateLimitsLiveForTest().lastAttemptMs).toBe(before);
   });
 });
 
