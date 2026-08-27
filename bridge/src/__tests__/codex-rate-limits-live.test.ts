@@ -9,7 +9,7 @@ import {
   codexSnapshotsShareLimitFamily,
   liveRejectsPassiveFamily,
   liveCorroboratesPassiveFamily,
-  codexBlockHasLiveFamilyAuthority,
+  codexLiveFamilyAuthorityExpiry,
   shouldQueryCodexRateLimitsLive,
   queryCodexRateLimitsLive,
   codexSpawnPlan,
@@ -227,6 +227,47 @@ describe('pickAccountWideLiveLimits', () => {
       pickAccountWideLiveLimits(namelessPool, { codex_bengalfox: namelessPool, codex: account })
         ?.limits,
     ).toBe(account);
+  });
+
+  it('refuses rather than hand back a block it has identified as a pool', () => {
+    // Rung 1 computes `notAKnownPool(top)` and, before this, threw the answer
+    // away: a lower rung returned the same block "because it is at least
+    // unnamed". Cached as the live answer it carries the account's id, refuses
+    // to be rejected (its anchor is rolling), and wins on recency because a live
+    // reading is captured "now" — publishing 54% / 24% while the account sits at
+    // 100%, which is the incident this whole change exists to fix. "No
+    // account-wide reading" is the honest answer; the caller then keeps whatever
+    // the rollout found.
+    const poolWeekly = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
+    const poolAtTop = { limitId: 'codex', limitName: null, primary: poolWeekly };
+    const namedPool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: poolWeekly };
+    expect(pickAccountWideLiveLimits(poolAtTop, { codex_bengalfox: namedPool })).toBeNull();
+  });
+
+  it('does not accept an unnamed entry whose key is not an account-wide one', () => {
+    // The last resort used to drop the key requirement, so a `codex_bengalfox`
+    // entry with a null name was returned as the account block. Two costs at
+    // once: the pool wins the pick on recency, and its id then genuinely differs
+    // from the rollout's, so corroboration fails forever and the mid-turn skip
+    // is pinned open — a `codex app-server` spawn every five minutes for as long
+    // as Codex is in use.
+    const namelessPool = {
+      limitName: null,
+      primary: { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 },
+    };
+    const namedTop = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark' };
+    expect(pickAccountWideLiveLimits(namedTop, { codex_bengalfox: namelessPool })).toBeNull();
+  });
+
+  it('adopts a matching entry key when the top-level block names no id', () => {
+    // The preferred rung emitted `limitId: undefined` whenever the app-server's
+    // top level omits it, which is the state the guard cannot survive: the
+    // family test short-circuits on a missing id and answers "same family" for
+    // everything.
+    const weekly = { usedPercent: 4, windowDurationMins: 10080, resetsAt: 1788274890 };
+    const topNoId = { limitName: null, primary: weekly };
+    const account = { limitId: 'codex', limitName: null, primary: weekly };
+    expect(pickAccountWideLiveLimits(topNoId, { codex: account })?.limitId).toBe('codex');
   });
 
   it('trusts the key over a value that claims the account id', () => {
@@ -611,7 +652,7 @@ describe('codexSnapshotsShareLimitFamily', () => {
   });
 });
 
-describe('codexBlockHasLiveFamilyAuthority', () => {
+describe('codexLiveFamilyAuthorityExpiry', () => {
   const now = Date.parse('2026-08-27T13:10:00.000Z');
   const live = {
     ...ACCOUNT_EXHAUSTED,
@@ -630,27 +671,37 @@ describe('codexBlockHasLiveFamilyAuthority', () => {
       capturedAt: '2026-08-27T13:09:58.000Z',
     };
     expect(publishedPassive).not.toBe(live);
-    expect(codexBlockHasLiveFamilyAuthority(publishedPassive, live, now)).toBe(true);
+    const expiry = codexLiveFamilyAuthorityExpiry(publishedPassive, live);
+    expect(expiry).not.toBeNull();
+    // Measured from the LIVE answer's capture, not from the published block's:
+    // the picker keeps the fresher rollout, so a bound read off that block would
+    // outlive the live evidence that granted it.
+    expect(expiry).toBe(Date.parse(live.capturedAt) + 15 * 60 * 1000);
+    expect(expiry! > now).toBe(true);
   });
 
   it('is false with no live reading, and false when the live one cannot reject', () => {
-    expect(codexBlockHasLiveFamilyAuthority(live, null, now)).toBe(false);
-    expect(codexBlockHasLiveFamilyAuthority(null, live, now)).toBe(false);
-    // Windowless, and expired: neither is a fingerprint anything may rest on.
+    expect(codexLiveFamilyAuthorityExpiry(live, null)).toBeNull();
+    expect(codexLiveFamilyAuthorityExpiry(null, live)).toBeNull();
+    // Windowless: no fingerprint anything may rest on.
     expect(
-      codexBlockHasLiveFamilyAuthority(live, { limitId: 'premium', planType: 'prolite' }, now),
-    ).toBe(false);
-    expect(
-      codexBlockHasLiveFamilyAuthority(live, live, Date.parse('2026-09-02T00:00:00.000Z')),
-    ).toBe(false);
-    // Unstamped, and stale: an anchor is a discriminator but never an immutable
-    // one, so a reading with no age — or one older than a few query intervals —
-    // is no longer speaking about the window that is running now.
+      codexLiveFamilyAuthorityExpiry(live, {
+        limitId: 'premium',
+        planType: 'prolite',
+        capturedAt: '2026-08-27T13:08:00.000Z',
+      }),
+    ).toBeNull();
+    // Unstamped: an anchor is a discriminator but never an immutable one, so a
+    // reading with no age has no authority to lend.
     const { capturedAt: _dropped, ...unstamped } = live;
-    expect(codexBlockHasLiveFamilyAuthority(live, unstamped, now)).toBe(false);
-    expect(
-      codexBlockHasLiveFamilyAuthority(live, live, Date.parse('2026-08-27T14:00:00.000Z')),
-    ).toBe(false);
+    expect(codexLiveFamilyAuthorityExpiry(live, unstamped)).toBeNull();
+    // Already elapsed at its own capture instant.
+    const bornExpired = {
+      ...live,
+      capturedAt: '2026-09-02T00:00:00.000Z',
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30.000Z' },
+    };
+    expect(codexLiveFamilyAuthorityExpiry(bornExpired, bornExpired)).toBeNull();
   });
 
   it('refuses a rolling window, which is a countdown rather than an anchor', () => {
@@ -679,8 +730,8 @@ describe('codexBlockHasLiveFamilyAuthority', () => {
       },
     };
     const now = Date.parse('2026-08-27T13:05:00.000Z');
-    expect(codexBlockHasLiveFamilyAuthority(rolling, rolling, now)).toBe(false);
-    expect(codexBlockHasLiveFamilyAuthority(anchored, anchored, now)).toBe(true);
+    expect(codexLiveFamilyAuthorityExpiry(rolling, rolling)).toBeNull();
+    expect(codexLiveFamilyAuthorityExpiry(anchored, anchored)).not.toBeNull();
     // And it cannot reject through the picker either.
     const passive = {
       limitId: 'codex',
@@ -696,9 +747,7 @@ describe('codexBlockHasLiveFamilyAuthority', () => {
   });
 
   it('is false when what was published belongs to another family', () => {
-    expect(
-      codexBlockHasLiveFamilyAuthority(SPARK_MISLABELLED_AS_ACCOUNT, live, now),
-    ).toBe(false);
+    expect(codexLiveFamilyAuthorityExpiry(SPARK_MISLABELLED_AS_ACCOUNT, live)).toBeNull();
   });
 });
 

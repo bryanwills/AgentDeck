@@ -63,8 +63,9 @@ import { pickBestCodexRateLimits } from './codex-rate-limits-live.js';
  * disagreement between two rollout reads by which process is holding one is not
  * a rule, and with the roles reversed (the daemon on the mislabelled pool line,
  * the bridge on the account line) it would invert the fix it exists to deliver.
- * So `ownIsLiveBacked` gates the guard, and without it the tie falls back to
- * recency as before. A second bound applies whenever the guard does fire: a
+ * So `ownLiveFamilyAuthorityExpiresAtMs` gates the guard — an instant, judged
+ * against this event's clock, because the flag is produced by a usage build and
+ * consumed here later; without it the tie falls back to recency as before. A second bound applies whenever the guard does fire: a
  * block with no weekly window — the synthetic credit gauge, a voided snapshot —
  * can never reject anything, so a windowless block cannot displace a windowed
  * one. Inside one family nothing changes: the fresher rollout still wins.
@@ -86,10 +87,11 @@ import { pickBestCodexRateLimits } from './codex-rate-limits-live.js';
 export function resolveRelayedUsageEvent(input: {
   relayed: Record<string, unknown>;
   ownCodexRateLimits: CodexRateLimits | null;
-  /** Whether the daemon's block is the live `codex app-server` answer rather
-   *  than its own rollout read. Defaults to false: without a live reading there
-   *  is no family authority here, and the tie falls back to recency. */
-  ownIsLiveBacked?: boolean;
+  /** When the daemon's live-backed family authority lapses, or null/absent when
+   *  it has none. An instant rather than a flag so it is judged against THIS
+   *  event's clock: without a live reading there is no family authority here,
+   *  and the tie falls back to recency. */
+  ownLiveFamilyAuthorityExpiresAtMs?: number | null;
   /** Injectable clock. The family guard's authority decays with a reading's age,
    *  so a test that leaves this to the wall clock changes its answer as the
    *  fixtures age past it. */
@@ -99,7 +101,7 @@ export function resolveRelayedUsageEvent(input: {
   const {
     relayed,
     ownCodexRateLimits,
-    ownIsLiveBacked = false,
+    ownLiveFamilyAuthorityExpiresAtMs = null,
     nowMs = Date.now(),
     buildOwnUsage,
   } = input;
@@ -111,7 +113,8 @@ export function resolveRelayedUsageEvent(input: {
 
   const relayedCodex = (relayed.codexRateLimits ?? null) as CodexRateLimits | null;
   const best = pickBestCodexRateLimits(relayedCodex, ownCodexRateLimits, undefined, nowMs, {
-    liveOwnsFamilyAuthority: ownIsLiveBacked,
+    liveOwnsFamilyAuthority:
+      ownLiveFamilyAuthorityExpiresAtMs != null && nowMs < ownLiveFamilyAuthorityExpiresAtMs,
   });
   // Identity, not deep-equality: the picker returns one of its two arguments, so
   // an unchanged pick must leave the relayed event object untouched — including

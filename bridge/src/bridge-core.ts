@@ -13,7 +13,7 @@ import { buildSubscriptions, buildUsageEvent } from './usage-event.js';
 import { readCodexAuthStatus } from './codex-auth.js';
 import { readCodexRateLimits } from './codex-rate-limits.js';
 import {
-  codexBlockHasLiveFamilyAuthority,
+  codexLiveFamilyAuthorityExpiry,
   codexRateLimitsWithLiveRefresh,
   getLiveCodexRateLimits,
 } from './codex-rate-limits-live.js';
@@ -425,9 +425,13 @@ export class BridgeCore {
    * `codex` binary holds nothing but a rollout read, and letting that arbitrate
    * a cross-family disagreement against a session bridge would decide it by
    * which process is holding the block — able to invert the very fix the family
-   * guard delivers. See `codexBlockHasLiveFamilyAuthority`.
+   * guard delivers. See `codexLiveFamilyAuthorityExpiry`.
+   *
+   * An INSTANT rather than a flag: the relay path consumes this later, on its
+   * own clock, and a boolean frozen at build time would let the authority
+   * outlive the age bound that granted it.
    */
-  lastBuiltCodexHasLiveFamilyAuthority = false;
+  lastBuiltCodexLiveFamilyAuthorityExpiresAtMs: number | null = null;
 
   /** Build and return a usage event */
   buildUsage(): BridgeEvent {
@@ -478,7 +482,7 @@ export class BridgeCore {
     // travels with `lastBuiltCodexRateLimits`, and normalization can void or
     // strip that value. A flag describing a different object than the one it
     // rides with is one normalization change away from lying.
-    this.lastBuiltCodexHasLiveFamilyAuthority = codexBlockHasLiveFamilyAuthority(
+    this.lastBuiltCodexLiveFamilyAuthorityExpiresAtMs = codexLiveFamilyAuthorityExpiry(
       this.lastBuiltCodexRateLimits,
       getLiveCodexRateLimits(),
     );

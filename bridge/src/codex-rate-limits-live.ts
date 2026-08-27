@@ -236,20 +236,35 @@ export function pickAccountWideLiveLimits(
     return !scopedWeeklyResets.some((pool) => sameWeeklyReset(weekly * 1000, pool * 1000));
   };
 
-  if (unnamed(top) && notAKnownPool(top)) return { limits: top, limitId: top.limitId };
-  // The key tightens the PREFERRED rungs only. An id this file has never seen is
-  // excluded from them but still reachable by the last resort — OpenAI adds
-  // families on its own schedule, and an allow-list that could return nothing at
-  // all would turn a new account-wide id into a vanished gauge.
+  // Adopt a map entry's key when the top level names no id of its own. Without
+  // it the PREFERRED path emits a snapshot with `limitId: undefined`, and
+  // `codexSnapshotsShareLimitFamily` short-circuits on the missing id — the
+  // guard answers "same family" for every comparison and switches itself off
+  // while `codexBlockHasLiveFamilyAuthority` goes on reporting authority.
+  const keyMatching = (candidate: RawLiveRateLimits): string | undefined => {
+    const weekly = liveWeeklyResetsAt(candidate);
+    if (typeof weekly !== 'number') return undefined;
+    for (const [key, other] of entries) {
+      const otherWeekly = liveWeeklyResetsAt(other);
+      if (typeof otherWeekly === 'number' && sameWeeklyReset(weekly * 1000, otherWeekly * 1000)) {
+        return other.limitId ?? key;
+      }
+    }
+    return undefined;
+  };
+
+  if (unnamed(top) && notAKnownPool(top)) {
+    return { limits: top, limitId: top.limitId ?? keyMatching(top) };
+  }
   // Overriding the top level is the strong move, so it takes positive evidence:
-  // a replacement must be unnamed, unlike any pool this response names, AND
-  // actually carry a weekly window. Without that last clause the ladder could
-  // answer a fingerprint COLLISION — two windows opened in the same instant —
-  // by returning whichever unnamed entry came first in iteration order, and a
-  // windowless credit block qualifies precisely because it has no fingerprint to
-  // collide with. `parseLiveCodexRateLimits` then accepts it on `limitId` alone
-  // and, being the newest reading by construction, it displaces the account's
-  // real windows with a synthetic 100% credit gauge.
+  // an account-wide KEY, no scoping name, unlike any pool this response names,
+  // and an actual weekly window. Without that last clause a fingerprint
+  // COLLISION — two windows opened in the same instant — is answered by
+  // whichever unnamed entry comes first in iteration order, and a windowless
+  // credit block qualifies precisely because it has no fingerprint to collide
+  // with; `parseLiveCodexRateLimits` then accepts it on `limitId` alone and,
+  // being the newest reading by construction, it displaces the account's real
+  // windows with a synthetic 100% credit gauge.
   for (const [key, candidate] of entries) {
     if (
       unnamed(candidate) &&
@@ -260,19 +275,35 @@ export function pickAccountWideLiveLimits(
       return { limits: candidate, limitId: candidate.limitId ?? key };
     }
   }
-  if (unnamed(top)) return { limits: top, limitId: top.limitId };
-  // Last resort, and it keeps the same preference: an unnamed entry that has a
-  // window before one that has none. Reached when the top level is absent or
-  // named-scoped, and without the ordering it returns whatever comes first in
-  // key order — which is how a windowless `premium` credit block was picked
-  // ahead of a real windowed `codex` entry sitting in the same map.
+  // Last resort keeps the account-wide KEY requirement, and there is no rung
+  // below it. Two earlier rungs did drop it and both handed back the one thing
+  // this function exists to withhold. Returning the top level "because it is at
+  // least unnamed" gives back a block rung 1 has POSITIVELY identified as a pool
+  // — `notAKnownPool` said false and the answer was then discarded — and the
+  // pool, carrying the account's id, is cached as the live answer, refuses to be
+  // rejected (its anchor is rolling), and wins on recency because a live reading
+  // is captured "now": 54% / 24% published while the account sits at 100%, which
+  // is the incident. Accepting any unnamed ENTRY regardless of key does the same
+  // through the map, and additionally pins the mid-turn skip open forever, since
+  // its id then genuinely differs from the rollout's.
+  //
+  // So the honest answer here is "no account-wide reading", which is what the
+  // caller is built for: it keeps whatever the rollout path found. A family this
+  // file has never seen still reaches the gauge that way, and through the
+  // top-level rung above, which needs no allow-list.
+  // Two tiers, because a windowed reading is worth more than a windowless one
+  // and iteration order is not an argument: a `premium` credit block is unnamed
+  // and account-keyed like the real thing, so ordered by key it can be handed
+  // back ahead of a windowed `codex` entry sitting in the same map.
   for (const [key, candidate] of entries) {
-    if (unnamed(candidate) && liveWeeklyResetsAt(candidate) != null) {
+    if (unnamed(candidate) && keyIsAccountWide(key, candidate) && liveWeeklyResetsAt(candidate) != null) {
       return { limits: candidate, limitId: candidate.limitId ?? key };
     }
   }
   for (const [key, candidate] of entries) {
-    if (unnamed(candidate)) return { limits: candidate, limitId: candidate.limitId ?? key };
+    if (unnamed(candidate) && keyIsAccountWide(key, candidate)) {
+      return { limits: candidate, limitId: candidate.limitId ?? key };
+    }
   }
   return null;
 }
@@ -746,16 +777,25 @@ export function shouldQueryCodexRateLimitsLive(input: {
  * authority to a passive block that outranked it for unrelated reasons.
  *
  * Takes the live block rather than reading the module cache, so the rule can be
- * driven directly instead of only through a spawn.
+ * driven directly instead of only through a spawn, and answers with the instant
+ * the authority lapses rather than a yes/no read against the caller's clock.
  */
-export function codexBlockHasLiveFamilyAuthority(
+export function codexLiveFamilyAuthorityExpiry(
   published?: CodexRateLimits | null,
   live?: CodexRateLimits | null,
-  nowMs: number = Date.now(),
-): boolean {
-  if (!published || !live) return false;
-  if (!familyFingerprintCanReject(live, nowMs)) return false;
-  return codexSnapshotsShareLimitFamily(published, live);
+): number | null {
+  if (!published || !live) return null;
+  const capturedMs = live.capturedAt ? new Date(live.capturedAt).getTime() : NaN;
+  if (isNaN(capturedMs)) return null;
+  // Judged at the live answer's OWN capture instant, then handed out as the
+  // instant it lapses. A boolean frozen at build time is a claim about a clock
+  // that has since moved: the relay path can only re-check the age of the block
+  // it received, and when the picker kept the fresher rollout — the common case
+  // — that block is younger than the live answer that granted the authority, so
+  // a `true` outlived the fifteen minutes this file says it lasts.
+  if (!familyFingerprintCanReject(live, capturedMs)) return null;
+  if (!codexSnapshotsShareLimitFamily(published, live)) return null;
+  return capturedMs + LIVE_FAMILY_AUTHORITY_MAX_AGE_MS;
 }
 
 /**
