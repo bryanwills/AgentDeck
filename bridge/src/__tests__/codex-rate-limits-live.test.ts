@@ -6,6 +6,7 @@ import {
   parseLiveCodexRateLimits,
   pickAccountWideLiveLimits,
   pickBestCodexRateLimits,
+  codexSnapshotsShareLimitFamily,
   shouldQueryCodexRateLimitsLive,
   queryCodexRateLimitsLive,
   codexSpawnPlan,
@@ -28,6 +29,39 @@ const liveResult = {
     rateLimitReachedType: 'rate_limit_reached',
   },
   rateLimitResetCredits: { availableCount: 0, credits: [] },
+};
+
+// Both halves of the 2026-08-27 reading, copied off `account/rateLimits/read`
+// and the rollout tail written at the same minute. The account family is
+// exhausted; `codex_bengalfox` ("GPT-5.3-Codex-Spark") is the per-model pool the
+// turns were actually served from, and the rollout stamped it `limit_id:
+// "codex"`, `limit_name: null` — identical to what the account family looks
+// like. The reset instants are what tell them apart.
+const ACCOUNT_EXHAUSTED = {
+  primary: {
+    usedPercent: 100,
+    windowMinutes: 10080,
+    resetsAt: new Date(1788274890 * 1000).toISOString(),
+  },
+  planType: 'prolite',
+  limitId: 'codex',
+  credits: { hasCredits: false, unlimited: false, balance: '0' },
+};
+
+const SPARK_MISLABELLED_AS_ACCOUNT = {
+  primary: {
+    usedPercent: 54,
+    windowMinutes: 300,
+    resetsAt: new Date(1787853688 * 1000).toISOString(),
+  },
+  secondary: {
+    usedPercent: 24,
+    windowMinutes: 10080,
+    resetsAt: new Date(1788440488 * 1000).toISOString(),
+  },
+  planType: 'prolite',
+  limitId: 'codex',
+  credits: { hasCredits: false, unlimited: false, balance: '0' },
 };
 
 describe('parseLiveCodexRateLimits', () => {
@@ -150,6 +184,71 @@ describe('pickBestCodexRateLimits', () => {
     const live = { ...at('2026-08-22T01:35:00.000Z', 0), planType: 'prolite' };
     expect(pickBestCodexRateLimits(passive, live, 'prolite')).toBe(passive);
   });
+
+  it('takes the live reading over a NEWER rollout describing a different limit family', () => {
+    // Measured 2026-08-27. The account's weekly quota was exhausted, Codex began
+    // serving turns from the per-model Spark pool, and the rollout recorded THAT
+    // pool under `limit_id: "codex"` with no `limit_name` — so the name-based
+    // filter admitted it and recency crowned it, every two seconds, for as long
+    // as the session ran. Both snapshots carry the account's own plan, so no
+    // existing axis separates them: only the weekly reset instant does
+    // (1788440488 is the Spark window; 1788274890 is the account's).
+    const passive = {
+      ...SPARK_MISLABELLED_AS_ACCOUNT,
+      capturedAt: '2026-08-27T13:09:40.628Z',
+    };
+    const live = { ...ACCOUNT_EXHAUSTED, capturedAt: '2026-08-27T13:05:00.000Z' };
+    expect(pickBestCodexRateLimits(passive, live, 'prolite')).toBe(live);
+  });
+
+  it('keeps preferring the fresher passive reading within the account family', () => {
+    // The guard is about identity, not about distrusting the rollout: a passive
+    // snapshot of the SAME weekly window stays the cheaper, more exact source.
+    const passive = { ...ACCOUNT_EXHAUSTED, capturedAt: '2026-08-27T13:09:40.628Z' };
+    const live = { ...ACCOUNT_EXHAUSTED, capturedAt: '2026-08-27T13:05:00.000Z' };
+    expect(pickBestCodexRateLimits(passive, live, 'prolite')).toBe(passive);
+  });
+});
+
+describe('codexSnapshotsShareLimitFamily', () => {
+  it('separates the Spark pool from the account even when both claim `codex`', () => {
+    expect(codexSnapshotsShareLimitFamily(SPARK_MISLABELLED_AS_ACCOUNT, ACCOUNT_EXHAUSTED)).toBe(false);
+  });
+
+  it('treats a missing side as no information rather than a mismatch', () => {
+    // Absence must never manufacture a verdict: a pre-`limit_id` rollout and a
+    // credit plan with no weekly window both land here, and refusing them would
+    // drop real readings on the strength of a field that was never sent.
+    expect(codexSnapshotsShareLimitFamily(ACCOUNT_EXHAUSTED, null)).toBe(true);
+    expect(codexSnapshotsShareLimitFamily(null, ACCOUNT_EXHAUSTED)).toBe(true);
+    expect(
+      codexSnapshotsShareLimitFamily({ ...ACCOUNT_EXHAUSTED, limitId: undefined }, ACCOUNT_EXHAUSTED),
+    ).toBe(true);
+    expect(
+      codexSnapshotsShareLimitFamily(
+        { limitId: 'premium', credits: { hasCredits: false, unlimited: false, balance: '0' } },
+        { limitId: 'premium', primary: { usedPercent: 4, windowMinutes: 10080, resetsAt: 'x' } },
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores the 5h window, whose reset instant slides with every request', () => {
+    // Observed within one minute of Spark traffic: resets_at 1787716807 →
+    // 1787716837 → 1787716845. A fingerprint including it would report a new
+    // family on every turn.
+    const a = { ...SPARK_MISLABELLED_AS_ACCOUNT };
+    const b = {
+      ...SPARK_MISLABELLED_AS_ACCOUNT,
+      primary: { usedPercent: 55, windowMinutes: 300, resetsAt: '2026-08-27T18:31:28.000Z' },
+    };
+    expect(codexSnapshotsShareLimitFamily(a, b)).toBe(true);
+  });
+
+  it('reports a different id as a different family', () => {
+    expect(
+      codexSnapshotsShareLimitFamily({ limitId: 'premium' }, { limitId: 'codex' }),
+    ).toBe(false);
+  });
 });
 
 describe('shouldQueryCodexRateLimitsLive', () => {
@@ -170,11 +269,25 @@ describe('shouldQueryCodexRateLimitsLive', () => {
     expect(
       shouldQueryCodexRateLimitsLive({
         nowMs: now,
-        lastAttemptMs: 0,
+        lastAttemptMs: now - 6 * 60 * 1000,
         consecutiveFailures: 0,
         passiveCapturedAtMs: now - 30 * 1000,
       }),
     ).toBe(false);
+  });
+
+  it('always asks once, even mid-turn, when nothing has been asked yet', () => {
+    // The first query is what establishes which limit family belongs to the
+    // account. Skipping it because the rollout is busy means the family guard
+    // never has a baseline on precisely the machine that needs it.
+    expect(
+      shouldQueryCodexRateLimitsLive({
+        nowMs: now,
+        lastAttemptMs: 0,
+        consecutiveFailures: 0,
+        passiveCapturedAtMs: now - 2 * 1000,
+      }),
+    ).toBe(true);
   });
 
   it('queries a fresh passive snapshot when its plan is one the account no longer holds', () => {
@@ -212,6 +325,31 @@ describe('shouldQueryCodexRateLimitsLive', () => {
         consecutiveFailures: 3,
         passiveCapturedAtMs: now - 30 * 1000,
         passivePlanMatchesAccount: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('queries a fresh passive snapshot that describes a different limit family', () => {
+    // A rollout pouring out per-model pool readings every two seconds is the
+    // state in which the account's own number is least visible and most wanted.
+    // Skipping on its freshness suppresses the only source that can report it.
+    expect(
+      shouldQueryCodexRateLimitsLive({
+        nowMs: now,
+        lastAttemptMs: 0,
+        consecutiveFailures: 0,
+        passiveCapturedAtMs: now - 2 * 1000,
+        passiveMatchesAccountFamily: false,
+      }),
+    ).toBe(true);
+    // ...but it is still not a licence to spawn on every usage build.
+    expect(
+      shouldQueryCodexRateLimitsLive({
+        nowMs: now,
+        lastAttemptMs: now - 60 * 1000,
+        consecutiveFailures: 0,
+        passiveCapturedAtMs: now - 2 * 1000,
+        passiveMatchesAccountFamily: false,
       }),
     ).toBe(false);
   });

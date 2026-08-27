@@ -35,6 +35,13 @@ import type { CodexCredits, CodexRateLimits, CodexRateLimitWindow } from '@agent
  * must never spawn anything — it keeps the passive read). While Codex is actively
  * working, the passive reading is free and exact, so the live query only fires
  * once the rollout snapshot has gone quiet.
+ *
+ * It is also the only source that says WHICH limit the numbers belong to. The
+ * rollout's own `limit_id`/`limit_name` stopped answering that on 2026-08-27
+ * (see `codexSnapshotsShareLimitFamily`), and `rateLimitsByLimitId` keys every
+ * family correctly — which is why the passive-only daemon has no equivalent
+ * defence and will report the per-model pool as the account's once the account
+ * limit is reached.
  */
 
 /** Hard ceiling on one query — the child is killed and the read reported as a
@@ -274,6 +281,62 @@ function capturedAtMs(rl?: CodexRateLimits | null): number {
   return isNaN(ms) ? 0 : ms;
 }
 
+/** A window this long or longer is the weekly one. The 5h window's `resetsAt`
+ *  slides with every request, so only the weekly reset instant is stable enough
+ *  to identify a limit family across snapshots. */
+const WEEKLY_WINDOW_MIN_MINUTES = 1440;
+
+function weeklyResetsAt(rl: CodexRateLimits): string | undefined {
+  for (const window of [rl.primary, rl.secondary]) {
+    if (!window || typeof window.windowMinutes !== 'number') continue;
+    if (window.windowMinutes >= WEEKLY_WINDOW_MIN_MINUTES) return window.resetsAt;
+  }
+  return undefined;
+}
+
+/**
+ * True when two snapshots describe the same limit FAMILY — or when there is not
+ * enough information to say they do not.
+ *
+ * `isModelScopedCodexLimit` reads the family off the snapshot's own `limit_name`,
+ * and that discriminator stopped being reliable on the rollout path. Measured
+ * 2026-08-27, inside a single rollout file, after the account's weekly quota was
+ * exhausted:
+ *
+ *   ...T20:59:45Z  limit_id "codex"    limit_name null   weekly resets 1788274890   (the account)
+ *   ...T20:59:46Z  limit_id "premium"  limit_name null   no windows at all
+ *   ...T13:01:31Z  limit_id "codex"    limit_name null   5h + weekly resets 1788440488
+ *
+ * That third shape is `codex_bengalfox` ("GPT-5.3-Codex-Spark") wearing the
+ * account's id: `account/rateLimits/read` returned the SAME two reset instants
+ * under `rateLimitsByLimitId.codex_bengalfox` at that moment, while the account
+ * family sat at 100% with `rateLimitReachedType: "rate_limit_reached"`. So once
+ * the account limit is reached and Codex serves the turn from a per-model pool,
+ * the rollout records that pool's numbers under an unnamed `codex` label and the
+ * name-based filter admits them: the deck read 54% / 24% for an exhausted week.
+ *
+ * The live read is the only source that keys families correctly, so it is what
+ * the passive reading is checked against. Two rules keep the check honest:
+ * an unknown on either side is "no information" and matches (a pre-`limit_id`
+ * rollout, a credit plan with no weekly window), and a mismatch is resolved by
+ * preferring the LIVE snapshot rather than by dropping both — the mismatch also
+ * arises legitimately for a few minutes after the account's weekly window rolls
+ * over, and there the live answer is merely stale, never wrong about whose
+ * quota it is. Exported for unit testing.
+ */
+export function codexSnapshotsShareLimitFamily(
+  a?: CodexRateLimits | null,
+  b?: CodexRateLimits | null,
+): boolean {
+  if (!a || !b) return true;
+  if (!a.limitId || !b.limitId) return true;
+  if (a.limitId !== b.limitId) return false;
+  const aWeekly = weeklyResetsAt(a);
+  const bWeekly = weeklyResetsAt(b);
+  if (!aWeekly || !bWeekly) return true;
+  return aWeekly === bWeekly;
+}
+
 /**
  * Choose between the passive rollout reading and the live app-server reading.
  *
@@ -284,7 +347,16 @@ function capturedAtMs(rl?: CodexRateLimits | null): number {
  * current, and the ONLY source carrying the new tier — lost every comparison and
  * was then voided as a mismatch. A snapshot with no `capturedAt` at all loses to
  * a stamped one within its match class; ties keep the passive reading, which is
- * the on-disk ground truth. Exported for unit testing.
+ * the on-disk ground truth.
+ *
+ * Family agreement outranks both, because recency cannot see it: the rollout is
+ * appended every couple of seconds while Codex works, so a snapshot describing
+ * a per-model pool under the account's id (see `codexSnapshotsShareLimitFamily`)
+ * wins every recency comparison for as long as the session runs, and the true
+ * account reading only surfaces in the gaps where the live query gets to fire.
+ * That is the oscillation this guard removes — the same gauge alternating
+ * between an exhausted week and a half-used one depending on which source
+ * answered last. Exported for unit testing.
  */
 export function pickBestCodexRateLimits(
   passive: CodexRateLimits | null,
@@ -293,6 +365,7 @@ export function pickBestCodexRateLimits(
 ): CodexRateLimits | null {
   if (!live) return passive;
   if (!passive) return live;
+  if (!codexSnapshotsShareLimitFamily(passive, live)) return live;
   return codexSnapshotOutranks(
     { planType: live.planType, capturedAtMs: capturedAtMs(live) },
     { planType: passive.planType, capturedAtMs: capturedAtMs(passive) },
@@ -312,6 +385,12 @@ export function shouldQueryCodexRateLimitsLive(input: {
    *  longer holds — i.e. it is about to be voided and carries no usable number.
    *  Defaults to true so callers that know no account tier behave as before. */
   passivePlanMatchesAccount?: boolean;
+  /** False when the passive snapshot describes a different limit family from the
+   *  last live answer — it is then a different QUANTITY, not a fresher reading of
+   *  the same one, so its freshness must not suppress the query that carries the
+   *  account's number. Defaults to true (no live answer yet ⇒ nothing to compare
+   *  against). */
+  passiveMatchesAccountFamily?: boolean;
 }): boolean {
   const {
     nowMs,
@@ -319,18 +398,31 @@ export function shouldQueryCodexRateLimitsLive(input: {
     consecutiveFailures,
     passiveCapturedAtMs,
     passivePlanMatchesAccount = true,
+    passiveMatchesAccountFamily = true,
   } = input;
   const interval =
     consecutiveFailures >= MAX_CONSECUTIVE_FAILURES ? FAILURE_BACKOFF_MS : MIN_QUERY_INTERVAL_MS;
   // Spawn throttles are unconditional: a mismatch is a reason to prefer the live
   // read, never a licence to spawn a subprocess on every usage build.
   if (lastAttemptMs > 0 && nowMs - lastAttemptMs < interval) return false;
+  // Nothing has ever been asked. There is no baseline to compare a passive
+  // snapshot's limit family against, and on a machine where Codex is in constant
+  // use the freshness skip below would keep it that way for as long as the
+  // daemon lives — the family guard would then never engage, which is exactly
+  // the busy machine it exists for. One spawn per daemon start buys the
+  // baseline; the throttles govern every query after it.
+  if (lastAttemptMs === 0) return true;
   // Codex is mid-turn: the rollout is already writing fresh readings — but only
   // if those readings are usable at all. A snapshot stamped with a retired plan
   // is voided downstream, so "the passive read is fresh" would suppress the one
   // source that still has a number, precisely while Codex is being used hardest.
+  // The same reasoning covers the family axis: a rollout pouring out per-model
+  // pool readings every two seconds is the state in which the account's own
+  // number is least visible and most wanted, so it must not throttle the only
+  // source that can still report it.
   if (
     passivePlanMatchesAccount &&
+    passiveMatchesAccountFamily &&
     passiveCapturedAtMs > 0 &&
     nowMs - passiveCapturedAtMs < PASSIVE_FRESH_MS
   ) {
@@ -359,6 +451,11 @@ export function getLiveCodexRateLimits(): CodexRateLimits | null {
  * `accountPlan` is the live tier from `auth.json`. Passing it is what lets both
  * halves of this function tell "old" from "void"; omitting it keeps the previous
  * newest-wins behaviour.
+ *
+ * The third axis needs no argument: the last live answer is itself the record of
+ * which limit family belongs to the account, so a passive snapshot describing a
+ * different one is neither preferred nor allowed to throttle the next query
+ * (`codexSnapshotsShareLimitFamily`).
  */
 export function codexRateLimitsWithLiveRefresh(
   passive: CodexRateLimits | null,
@@ -374,6 +471,7 @@ export function codexRateLimitsWithLiveRefresh(
         consecutiveFailures,
         passiveCapturedAtMs: capturedAtMs(passive),
         passivePlanMatchesAccount: codexSnapshotMatchesAccountPlan(passive?.planType, accountPlan),
+        passiveMatchesAccountFamily: codexSnapshotsShareLimitFamily(passive, cachedLive),
       })
     ) {
       inFlight = true;
