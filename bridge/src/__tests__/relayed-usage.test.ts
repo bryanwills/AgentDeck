@@ -210,7 +210,7 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
     expect(out.codexRateLimits).toBe(relayedFresh);
   });
 
-  it("never lets the daemon's windowless block displace a windowed relayed one", () => {
+  it("never lets the daemon's contentless block displace a windowed relayed one", () => {
     // `ownCodexRateLimits` is the daemon's last PUBLISHED block, not necessarily
     // a live reading — and one rollout can carry `limit_id: "codex"` and
     // `limit_id: "premium"` a second apart, so two processes reading the same
@@ -229,15 +229,14 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
     // one. An earlier fixture used `windowMinutes: 0`, which still counts as a
     // window present, so the assertion held on recency and deleting the bound
     // left it green.
-    const ownCreditGauge = {
+    const ownContentless = {
       planType: 'prolite',
       limitId: 'codex',
       capturedAt: '2026-08-27T13:20:00.000Z',
-      credits: { hasCredits: false, unlimited: false, balance: '0' },
     } as unknown as CodexRateLimits;
     const out = resolveRelayedUsageEvent({
       relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: relayedWindowed },
-      ownCodexRateLimits: ownCreditGauge,
+      ownCodexRateLimits: ownContentless,
       ownLiveFamilyAuthorityExpiresAtMs: Date.parse('2099-01-01T00:00:00Z'),
       nowMs: Date.parse('2026-08-27T13:20:30Z'),
       buildOwnUsage: () => { throw new Error('must not build'); },

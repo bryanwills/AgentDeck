@@ -141,7 +141,7 @@ export function parseLiveCodexRateLimits(result: unknown, capturedAt: string): C
   // `limitId` produces a snapshot with none, and `codexSnapshotsShareLimitFamily`
   // then short-circuits on the missing id and answers "same family" for every
   // comparison — the guard silently switched off, while
-  // `codexBlockHasLiveFamilyAuthority` went on reporting authority.
+  // `codexLiveFamilyAuthorityExpiry` went on reporting authority.
   const limitId = typeof picked.limitId === 'string' ? picked.limitId : undefined;
   if (!primary && !secondary && !credits && !limitId) return null;
   return {
@@ -154,14 +154,8 @@ export function parseLiveCodexRateLimits(result: unknown, capturedAt: string): C
   };
 }
 
-/** The limit ids this file knows to be account-wide. An allow-list, like every
- *  other family test here: a new model pool must not inherit the account's
- *  meaning by default, and the cost of being wrong the other way is a fallback
- *  to the rollout rather than a wrong number. */
-const ACCOUNT_WIDE_LIVE_LIMIT_IDS = new Set(['codex', 'premium']);
-
 /** The weekly window's reset instant on a raw live block — the same fingerprint
- *  `codexSnapshotsShareLimitFamily` uses, read off the app-server's spelling. */
+ *  the passive side uses, read off the app-server's spelling of the fields. */
 function liveWeeklyResetsAt(rl?: RawLiveRateLimits | null): number | undefined {
   for (const window of [rl?.primary, rl?.secondary]) {
     const minutes =
@@ -175,73 +169,56 @@ function liveWeeklyResetsAt(rl?: RawLiveRateLimits | null): number | undefined {
 }
 
 /**
- * The account-wide limit block among what `account/rateLimits/read` returned.
+ * The account-wide limit block among what `account/rateLimits/read` returned,
+ * plus the id it should be recorded under.
  *
- * Prefers the top-level `rateLimits` (what the Codex CLI shows) and falls back
- * to an unnamed entry of `rateLimitsByLimitId`. Returns null when every family
- * is model-scoped: "no account-wide reading" is the honest answer, and the
- * caller then keeps whatever the rollout path found rather than adopting one
- * model's quota as the account's.
+ * Prefers the top-level `rateLimits` — what the Codex CLI itself shows, and
+ * measured correct on 2026-08-27 at the exact moment the rollout was lying (the
+ * account at 100% up there, the Spark pool only under its own map key). Falls
+ * back to an unnamed entry of `rateLimitsByLimitId`, windowed before windowless
+ * so a `premium` credit block cannot be handed back ahead of a real windowed
+ * `codex` entry on iteration order alone. Returns null when every family is
+ * model-scoped: "no account-wide reading" is the honest answer, and the caller
+ * then keeps whatever the rollout path found rather than adopting one model's
+ * quota as the account's.
  *
- * `limit_name` alone is not enough here for the same reason it stopped being
- * enough on the rollout: it is the label, and the label is what went wrong. So a
- * candidate that carries the WEEKLY RESET of a family this very response names
- * as model-scoped is treated as that family whatever it calls itself — the
- * fingerprint outranks the name on both paths, or the live source could hand
- * back a pool reading and the guard built on it would invert.
+ * ## What this deliberately does NOT do any more
  *
- * Measured 2026-08-27 the top level was correct (the account at 100% while the
- * pool sat under `rateLimitsByLimitId.codex_bengalfox`), so this is defence, not
- * a fix for an observed miss — which is why it degrades in one direction only.
- * A collision is possible without anything being wrong (two windows opened in
- * the same instant share a reset), so the ladder ends by keeping an unnamed
- * block rather than reporting nothing: a coincidence must not delete a real
- * reading. Exported for unit testing.
+ * Three successive review rounds found HIGH-severity defects in machinery added
+ * here to defend a shape that has never been observed: a top-level block that
+ * mislabels itself the way the ROLLOUT does. The defence fingerprinted every
+ * candidate against the weekly resets of the response's own named pools, and
+ * each version of it failed in a new direction — handing back a block it had
+ * just identified as a pool, admitting a pool through a rung that dropped the
+ * key test, and finally refusing everything, because the response mirrors its
+ * top-level block into the map under its own key and any account id outside a
+ * hardcoded allow-list therefore fingerprint-matched ITSELF (`codex_pro` →
+ * `null` → no live read at all, which disables the 100%-wall detection this
+ * whole path exists for, pins the mid-turn spawn skip open, and leaves the relay
+ * guard permanently unarmed).
+ *
+ * The measured discriminators are `limitName` (non-empty ⇒ scoped, across 823
+ * rollouts and every live sample) and the map key, and they are enough. Guessing
+ * at a failure the producer has not shown produced three real ones. If the live
+ * top level is ever seen mislabelling itself, the fix belongs here — with that
+ * observation attached.
  */
 export function pickAccountWideLiveLimits(
   top?: RawLiveRateLimits | null,
   byLimitId?: Record<string, RawLiveRateLimits> | null,
 ): { limits: RawLiveRateLimits; limitId?: string } | null {
-  // Keep the KEYS. They are the one discriminator this response is trusted for
-  // — CLAUDE.md's account of the incident identifies the pool as
-  // `rateLimitsByLimitId.codex_bengalfox` — while `limitName` is the field this
-  // whole change declares unreliable. Dropping them left the pool defence
-  // resting entirely on a name the map values are not guaranteed to carry: null
-  // there and `scopedWeeklyResets` is empty AND the pool reads as unnamed, so it
-  // could be returned as the account block and become the authority that rejects
-  // the real account rollout.
   const entries = Object.entries(byLimitId ?? {}).filter(
     (entry): entry is [string, RawLiveRateLimits] => !!entry[1],
   );
-  // The KEY first, then the value's own id — the opposite order reinstates the
-  // exact failure this guards: a `codex_bengalfox` entry carrying
-  // `limitId: "codex"` (the mislabelling shape already recorded on the rollout
-  // path) would drop out of the scoped set AND pass as account-wide, so the pool
-  // could be returned as the account block and become the authority that rejects
-  // the true account rollout.
-  const keyIsAccountWide = (key: string, candidate: RawLiveRateLimits): boolean =>
-    ACCOUNT_WIDE_LIVE_LIMIT_IDS.has(key) && ACCOUNT_WIDE_LIVE_LIMIT_IDS.has(candidate.limitId ?? key);
-  const scopedWeeklyResets = entries
-    .filter(([key, candidate]) => isModelScopedCodexLimit(candidate.limitName) || !keyIsAccountWide(key, candidate))
-    .map(([, candidate]) => liveWeeklyResetsAt(candidate))
-    .filter((resetsAt): resetsAt is number => typeof resetsAt === 'number');
   const unnamed = (candidate?: RawLiveRateLimits | null): candidate is RawLiveRateLimits =>
     !!candidate && !isModelScopedCodexLimit(candidate.limitName);
-  const notAKnownPool = (candidate: RawLiveRateLimits): boolean => {
-    const weekly = liveWeeklyResetsAt(candidate);
-    if (typeof weekly !== 'number') return true;
-    // Tolerant, like the passive-side comparison and for the same reason: the
-    // instants jitter by seconds, so an exact set membership would answer "not a
-    // pool" for a reading that is one.
-    return !scopedWeeklyResets.some((pool) => sameWeeklyReset(weekly * 1000, pool * 1000));
-  };
 
   // Adopt a map entry's key when the top level names no id of its own. Without
-  // it the PREFERRED path emits a snapshot with `limitId: undefined`, and
+  // it the preferred path emits a snapshot with `limitId: undefined`, and
   // `codexSnapshotsShareLimitFamily` short-circuits on the missing id — the
   // guard answers "same family" for every comparison and switches itself off
-  // while `codexBlockHasLiveFamilyAuthority` goes on reporting authority.
-  const keyMatching = (candidate: RawLiveRateLimits): string | undefined => {
+  // while `codexLiveFamilyAuthorityExpiry` goes on granting authority.
+  const keyMirroring = (candidate: RawLiveRateLimits): string | undefined => {
     const weekly = liveWeeklyResetsAt(candidate);
     if (typeof weekly !== 'number') return undefined;
     for (const [key, other] of entries) {
@@ -253,57 +230,14 @@ export function pickAccountWideLiveLimits(
     return undefined;
   };
 
-  if (unnamed(top) && notAKnownPool(top)) {
-    return { limits: top, limitId: top.limitId ?? keyMatching(top) };
-  }
-  // Overriding the top level is the strong move, so it takes positive evidence:
-  // an account-wide KEY, no scoping name, unlike any pool this response names,
-  // and an actual weekly window. Without that last clause a fingerprint
-  // COLLISION — two windows opened in the same instant — is answered by
-  // whichever unnamed entry comes first in iteration order, and a windowless
-  // credit block qualifies precisely because it has no fingerprint to collide
-  // with; `parseLiveCodexRateLimits` then accepts it on `limitId` alone and,
-  // being the newest reading by construction, it displaces the account's real
-  // windows with a synthetic 100% credit gauge.
+  if (unnamed(top)) return { limits: top, limitId: top.limitId ?? keyMirroring(top) };
   for (const [key, candidate] of entries) {
-    if (
-      unnamed(candidate) &&
-      keyIsAccountWide(key, candidate) &&
-      notAKnownPool(candidate) &&
-      liveWeeklyResetsAt(candidate) != null
-    ) {
-      return { limits: candidate, limitId: candidate.limitId ?? key };
-    }
-  }
-  // Last resort keeps the account-wide KEY requirement, and there is no rung
-  // below it. Two earlier rungs did drop it and both handed back the one thing
-  // this function exists to withhold. Returning the top level "because it is at
-  // least unnamed" gives back a block rung 1 has POSITIVELY identified as a pool
-  // — `notAKnownPool` said false and the answer was then discarded — and the
-  // pool, carrying the account's id, is cached as the live answer, refuses to be
-  // rejected (its anchor is rolling), and wins on recency because a live reading
-  // is captured "now": 54% / 24% published while the account sits at 100%, which
-  // is the incident. Accepting any unnamed ENTRY regardless of key does the same
-  // through the map, and additionally pins the mid-turn skip open forever, since
-  // its id then genuinely differs from the rollout's.
-  //
-  // So the honest answer here is "no account-wide reading", which is what the
-  // caller is built for: it keeps whatever the rollout path found. A family this
-  // file has never seen still reaches the gauge that way, and through the
-  // top-level rung above, which needs no allow-list.
-  // Two tiers, because a windowed reading is worth more than a windowless one
-  // and iteration order is not an argument: a `premium` credit block is unnamed
-  // and account-keyed like the real thing, so ordered by key it can be handed
-  // back ahead of a windowed `codex` entry sitting in the same map.
-  for (const [key, candidate] of entries) {
-    if (unnamed(candidate) && keyIsAccountWide(key, candidate) && liveWeeklyResetsAt(candidate) != null) {
+    if (unnamed(candidate) && liveWeeklyResetsAt(candidate) != null) {
       return { limits: candidate, limitId: candidate.limitId ?? key };
     }
   }
   for (const [key, candidate] of entries) {
-    if (unnamed(candidate) && keyIsAccountWide(key, candidate)) {
-      return { limits: candidate, limitId: candidate.limitId ?? key };
-    }
+    if (unnamed(candidate)) return { limits: candidate, limitId: candidate.limitId ?? key };
   }
   return null;
 }
@@ -454,8 +388,13 @@ function weeklyAnchorIsRolling(rl: CodexRateLimits): boolean | undefined {
   return resetsMs - capturedMs >= window.windowMinutes * 60 * 1000 - FAMILY_RESET_TOLERANCE_MS;
 }
 
-function hasAnyWindow(rl: CodexRateLimits): boolean {
-  return rl.primary != null || rl.secondary != null;
+/** Whether a reading carries anything a surface can render. Credits count: on a
+ *  credit plan with a partial balance that is the ONLY reading there is, and
+ *  treating it as empty discarded the one current answer in favour of a leftover
+ *  windowed rollout. What this excludes is a block with no measurement at all —
+ *  a voided snapshot, or an empty credit shell. */
+function hasRenderableContent(rl: CodexRateLimits): boolean {
+  return rl.primary != null || rl.secondary != null || rl.credits != null;
 }
 
 function weeklyResetsAtMs(rl: CodexRateLimits): number | undefined {
@@ -685,13 +624,16 @@ export function pickBestCodexRateLimits(
   if (opts.liveOwnsFamilyAuthority !== false && liveRejectsPassiveFamily(passive, live, nowMs)) {
     return live;
   }
-  // A block with no windows never displaces one that has them, on the recency
-  // path either. The live answer is captured "now" by construction, so it wins
-  // every recency comparison — and when the ladder above has fallen through to a
-  // windowless credit block, that means a fully-windowed reading is replaced by
-  // one carrying no gauge at all and every slot-based Codex surface blanks.
-  // Guarding only the reject path left this open, since it needs no rejection.
-  if (hasAnyWindow(passive) && !hasAnyWindow(live)) return passive;
+  // A reading with no measurement at all never displaces one that has some, in
+  // EITHER direction. Guarding only the `live` side covered only half the
+  // callers: the relay passes (relayed, own), so the unguarded direction was a
+  // newer contentless relayed block blanking the daemon's real one. Recency
+  // cannot see this — a live answer is captured "now" by construction and a
+  // relayed rollout is seconds old — and the result is every slot-based Codex
+  // surface going empty.
+  if (hasRenderableContent(passive) !== hasRenderableContent(live)) {
+    return hasRenderableContent(passive) ? passive : live;
+  }
   return codexSnapshotOutranks(
     { planType: live.planType, capturedAtMs: capturedAtMs(live) },
     { planType: passive.planType, capturedAtMs: capturedAtMs(passive) },

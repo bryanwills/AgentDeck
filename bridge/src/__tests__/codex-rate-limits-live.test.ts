@@ -160,42 +160,27 @@ describe('pickAccountWideLiveLimits', () => {
     expect(pickAccountWideLiveLimits(null, null)).toBeNull();
   });
 
-  it('recognises a pool by its weekly reset even when the top level leaves it unnamed', () => {
-    // The whole defect being fixed is that `limit_name` can be absent on a pool
-    // reading. If the app-server's top level ever mirrors what the rollout does,
-    // trusting the name here would make `cachedLive` the pool — and the guard
-    // built on top of it would then prefer the pool over a correct rollout.
-    const sparkWeekly = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
-    const accountWeekly = { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1788274890 };
-    const unnamedPoolAtTop = { limitId: 'codex', limitName: null, primary: sparkWeekly };
-    const namedPool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: sparkWeekly };
-    const realAccount = { limitId: 'codex', limitName: null, primary: accountWeekly };
+  it('does not let the top-level block fingerprint against its own mirror', () => {
+    // The response mirrors the top-level block into the map under its own key.
+    // Fingerprinting candidates against the response's own pools therefore made
+    // any account id outside a hardcoded allow-list match ITSELF: rung 1 refused,
+    // every lower rung required the allow-list, and the whole live read returned
+    // null — no 100%-wall detection, no cached answer, the mid-turn spawn skip
+    // pinned open and the relay guard permanently unarmed. Third HIGH from that
+    // machinery, which is why it is gone rather than patched again.
+    const account = {
+      limitId: 'codex_pro',
+      limitName: null,
+      primary: { usedPercent: 42, windowDurationMins: 10080, resetsAt: 1788274890 },
+    };
+    const spark = {
+      limitId: 'codex_bengalfox',
+      limitName: 'GPT-5.3-Codex-Spark',
+      primary: { usedPercent: 1, windowDurationMins: 300, resetsAt: 1787853688 },
+    };
     expect(
-      pickAccountWideLiveLimits(unnamedPoolAtTop, {
-        codex_bengalfox: namedPool,
-        codex: realAccount,
-      })?.limits,
-    ).toBe(realAccount);
-  });
-
-  it('does not answer a reset collision with an unrelated windowless entry', () => {
-    // The ladder must not treat "not a known pool" as sufficient: a windowless
-    // credit block qualifies precisely because it has no fingerprint to collide
-    // with, so on a collision it could be returned ahead of the top-level block
-    // purely on iteration order — and downstream it displaces the account's real
-    // windows with a synthetic 100% credit gauge. Overriding the top level takes
-    // positive evidence: an unnamed entry that carries a weekly window.
-    const sharedWeekly = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
-    const collidingTop = { limitId: 'codex', limitName: null, primary: sharedWeekly };
-    const namedPool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: sharedWeekly };
-    const creditBlock = { limitId: 'premium', limitName: null, credits: { hasCredits: false, unlimited: false, balance: '0' } };
-    expect(
-      pickAccountWideLiveLimits(collidingTop, {
-        premium: creditBlock,
-        codex: collidingTop,
-        codex_bengalfox: namedPool,
-      })?.limits,
-    ).toBe(collidingTop);
+      pickAccountWideLiveLimits(account, { codex_pro: account, codex_bengalfox: spark })?.limits,
+    ).toBe(account);
   });
 
   it('prefers a windowed entry even on the last-resort rung', () => {
@@ -213,52 +198,6 @@ describe('pickAccountWideLiveLimits', () => {
     expect(pickAccountWideLiveLimits(pool, byLimitId)?.limits).toBe(account);
   });
 
-  it('identifies a pool by its map key when the value leaves limitName null', () => {
-    // `limitName` is the field this change declares unreliable, so the pool
-    // defence must not rest on it alone. With it null inside the values the
-    // scoped set is empty AND the pool reads as unnamed — it could be returned
-    // as the account block and become the authority that rejects the real
-    // account rollout.
-    const poolWeekly = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
-    const accountWeekly = { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1788274890 };
-    const namelessPool = { limitName: null, primary: poolWeekly };
-    const account = { limitId: 'codex', limitName: null, primary: accountWeekly };
-    expect(
-      pickAccountWideLiveLimits(namelessPool, { codex_bengalfox: namelessPool, codex: account })
-        ?.limits,
-    ).toBe(account);
-  });
-
-  it('refuses rather than hand back a block it has identified as a pool', () => {
-    // Rung 1 computes `notAKnownPool(top)` and, before this, threw the answer
-    // away: a lower rung returned the same block "because it is at least
-    // unnamed". Cached as the live answer it carries the account's id, refuses
-    // to be rejected (its anchor is rolling), and wins on recency because a live
-    // reading is captured "now" — publishing 54% / 24% while the account sits at
-    // 100%, which is the incident this whole change exists to fix. "No
-    // account-wide reading" is the honest answer; the caller then keeps whatever
-    // the rollout found.
-    const poolWeekly = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
-    const poolAtTop = { limitId: 'codex', limitName: null, primary: poolWeekly };
-    const namedPool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: poolWeekly };
-    expect(pickAccountWideLiveLimits(poolAtTop, { codex_bengalfox: namedPool })).toBeNull();
-  });
-
-  it('does not accept an unnamed entry whose key is not an account-wide one', () => {
-    // The last resort used to drop the key requirement, so a `codex_bengalfox`
-    // entry with a null name was returned as the account block. Two costs at
-    // once: the pool wins the pick on recency, and its id then genuinely differs
-    // from the rollout's, so corroboration fails forever and the mid-turn skip
-    // is pinned open — a `codex app-server` spawn every five minutes for as long
-    // as Codex is in use.
-    const namelessPool = {
-      limitName: null,
-      primary: { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 },
-    };
-    const namedTop = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark' };
-    expect(pickAccountWideLiveLimits(namedTop, { codex_bengalfox: namelessPool })).toBeNull();
-  });
-
   it('adopts a matching entry key when the top-level block names no id', () => {
     // The preferred rung emitted `limitId: undefined` whenever the app-server's
     // top level omits it, which is the state the guard cannot survive: the
@@ -270,20 +209,6 @@ describe('pickAccountWideLiveLimits', () => {
     expect(pickAccountWideLiveLimits(topNoId, { codex: account })?.limitId).toBe('codex');
   });
 
-  it('trusts the key over a value that claims the account id', () => {
-    // The mislabelling shape, moved to the live path: a `codex_bengalfox` entry
-    // whose value says `limitId: "codex"`. Resolved value-first it drops out of
-    // the scoped set AND passes as account-wide, so the pool becomes the block
-    // the whole family guard is then built on — and inverts it.
-    const poolWeekly = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
-    const accountWeekly = { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1788274890 };
-    const lyingPool = { limitId: 'codex', limitName: null, primary: poolWeekly };
-    const account = { limitId: 'codex', limitName: null, primary: accountWeekly };
-    expect(
-      pickAccountWideLiveLimits(lyingPool, { codex_bengalfox: lyingPool, codex: account })?.limits,
-    ).toBe(account);
-  });
-
   it('carries the map key out as the limit id', () => {
     // Without it a value with no `limitId` yields a snapshot with none, and
     // `codexSnapshotsShareLimitFamily` short-circuits on the missing id — the
@@ -292,18 +217,6 @@ describe('pickAccountWideLiveLimits', () => {
     expect(pickAccountWideLiveLimits(null, { codex: account })?.limitId).toBe('codex');
   });
 
-  it('keeps an unnamed block when a reset collision is all it has to go on', () => {
-    // Two windows opened in the same instant share a reset without anything
-    // being wrong. Degrading to "no reading" there would delete a real one, so
-    // the ladder ends by keeping the unnamed block.
-    const shared = { usedPercent: 12, windowDurationMins: 10080, resetsAt: 1788440488 };
-    const onlyAccount = { limitId: 'codex', limitName: null, primary: shared };
-    const namedPool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: shared };
-    expect(
-      pickAccountWideLiveLimits(onlyAccount, { codex: onlyAccount, codex_bengalfox: namedPool })
-        ?.limits,
-    ).toBe(onlyAccount);
-  });
 });
 
 describe('pickBestCodexRateLimits', () => {
@@ -510,7 +423,31 @@ describe('pickBestCodexRateLimits', () => {
     ).toBe(passive);
   });
 
-  it('does not let a windowless live block win on recency either', () => {
+  it('lets a credits-only live answer win over a leftover windowed rollout', () => {
+    // On a credit plan with a partial balance nothing synthesizes a window, so a
+    // credits block is the ONLY current reading there is. Counting it as empty
+    // discarded it on every build in favour of a stale windowed rollout, and the
+    // credits tile — which renders only when both windows are absent — could
+    // never appear.
+    const staleWindowed = {
+      limitId: 'premium',
+      planType: 'prolite',
+      capturedAt: '2026-08-27T12:00:00.000Z',
+      primary: { usedPercent: 40, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30.000Z' },
+    };
+    const creditsOnlyLive = {
+      limitId: 'premium',
+      planType: 'prolite',
+      capturedAt: '2026-08-27T13:09:00.000Z',
+      credits: { hasCredits: true, unlimited: false, balance: '12.50' },
+    };
+    const now = Date.parse('2026-08-27T13:09:30.000Z');
+    expect(pickBestCodexRateLimits(staleWindowed, creditsOnlyLive, 'prolite', now)).toBe(
+      creditsOnlyLive,
+    );
+  });
+
+  it('does not let a contentless block win on recency, in either direction', () => {
     // The reject path was guarded; the recency path was not. A live answer is
     // captured "now" by construction, so when the account-wide ladder falls
     // through to a windowless credit block it wins every recency comparison —
@@ -522,16 +459,24 @@ describe('pickBestCodexRateLimits', () => {
       capturedAt: '2026-08-27T13:00:00.000Z',
       primary: { usedPercent: 12, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30.000Z' },
     };
-    const windowlessLive = {
+    // Contentless, not merely windowless: a credits block is a real reading on a
+    // credit plan and must still be able to win, so the guard is about a block
+    // carrying no measurement at all — a voided snapshot.
+    const contentlessLive = {
       limitId: 'premium',
       planType: 'prolite',
       capturedAt: '2026-08-27T13:09:00.000Z',
-      credits: { hasCredits: false, unlimited: false, balance: '0' },
     };
     const now = Date.parse('2026-08-27T13:09:30.000Z');
     // Same family, live is newer — recency alone would take it.
-    expect(codexSnapshotsShareLimitFamily(windowedPassive, windowlessLive)).toBe(true);
-    expect(pickBestCodexRateLimits(windowedPassive, windowlessLive, 'prolite', now)).toBe(
+    expect(codexSnapshotsShareLimitFamily(windowedPassive, contentlessLive)).toBe(true);
+    expect(pickBestCodexRateLimits(windowedPassive, contentlessLive, 'prolite', now)).toBe(
+      windowedPassive,
+    );
+    // Symmetric: the relay calls this with (relayed, own), so the mirrored
+    // direction had to hold too or a newer contentless relayed block would blank
+    // the daemon's real one.
+    expect(pickBestCodexRateLimits(contentlessLive, windowedPassive, 'prolite', now)).toBe(
       windowedPassive,
     );
   });
