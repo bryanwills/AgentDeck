@@ -198,6 +198,23 @@ describe('pickAccountWideLiveLimits', () => {
     expect(pickAccountWideLiveLimits(pool, byLimitId)?.limits).toBe(account);
   });
 
+  it('never adopts a model-scoped entry\'s key for the account block', () => {
+    // During the weekly sweep the pool's rolling anchor sits inside the
+    // tolerance of the account's fixed one. An unfiltered scan then stamps
+    // `codex_bengalfox` onto the correct account reading, which afterwards
+    // mismatches every correct passive `codex` reading.
+    const weekly = { usedPercent: 4, windowDurationMins: 10080, resetsAt: 1788274890 };
+    const topNoId = { limitName: null, primary: weekly };
+    const poolSharingTheAnchor = {
+      limitId: 'codex_bengalfox',
+      limitName: 'GPT-5.3-Codex-Spark',
+      primary: weekly,
+    };
+    expect(
+      pickAccountWideLiveLimits(topNoId, { codex_bengalfox: poolSharingTheAnchor })?.limitId,
+    ).toBeUndefined();
+  });
+
   it('adopts a matching entry key when the top-level block names no id', () => {
     // The preferred rung emitted `limitId: undefined` whenever the app-server's
     // top level omits it, which is the state the guard cannot survive: the
@@ -744,6 +761,26 @@ describe('liveCorroboratesPassiveFamily', () => {
       credits: { hasCredits: false, unlimited: false, balance: '0' },
     };
     expect(liveCorroboratesPassiveFamily(creditPassive, creditLive, now)).toBe(true);
+  });
+
+  it('does not let a content-free answer corroborate its way into the deadlock', () => {
+    // The carve-out is for a credit plan, which has no weekly window to offer.
+    // Extended to "no weekly window" in general it admits a block with nothing
+    // at all — a shape the ladder's third rung can return and the parser accepts
+    // on `limitId` alone. That answer counts as a success so the backoff never
+    // engages, the family test short-circuits on the missing weekly, and the
+    // skip stays engaged for as long as Codex is in use while `cachedLive`
+    // freezes on a block that can never arbitrate anything.
+    const passive = anchored('2026-08-27T13:29:58.000Z', '2026-09-01T15:01:30.000Z', 24);
+    const contentFreeLive = { limitId: 'codex', planType: 'prolite', capturedAt: '2026-08-27T13:28:00.000Z' };
+    expect(liveCorroboratesPassiveFamily(passive, contentFreeLive, now)).toBe(false);
+    const fiveHourOnlyLive = {
+      limitId: 'codex',
+      planType: 'prolite',
+      capturedAt: '2026-08-27T13:28:00.000Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2026-08-27T18:01:28.000Z' },
+    };
+    expect(liveCorroboratesPassiveFamily(passive, fiveHourOnlyLive, now)).toBe(false);
   });
 
   it('earns the skip only with a present, current, agreeing answer', () => {

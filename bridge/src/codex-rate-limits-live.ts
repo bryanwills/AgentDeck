@@ -129,8 +129,9 @@ export function parseLiveCodexRateLimits(result: unknown, capturedAt: string): C
   // itself presents. But the app-server also returns every family keyed by id,
   // so when the top level is scoped to one model there is still an account-wide
   // answer in the map — take it rather than reporting a single model's quota as
-  // the account's. Reachable in two ways: a named top-level block, and a top
-  // level whose weekly reset fingerprints as a pool this same response names.
+  // the account's. Reached when the top-level block carries a scoping name; the
+  // fingerprint-based second path was deleted with the rest of that machinery,
+  // and `pickAccountWideLiveLimits` records why.
   const picked = pickAccountWideLiveLimits(res?.rateLimits, res?.rateLimitsByLimitId);
   if (!picked) return null;
   const rl = picked.limits;
@@ -222,6 +223,13 @@ export function pickAccountWideLiveLimits(
     const weekly = liveWeeklyResetsAt(candidate);
     if (typeof weekly !== 'number') return undefined;
     for (const [key, other] of entries) {
+      // Unnamed only, like every other family test here. The pool's anchor
+      // sweeps through the account's once a week (see
+      // `codexSnapshotsShareLimitFamily`), and during that stretch an unfiltered
+      // scan would stamp `codex_bengalfox` onto the correct account reading —
+      // after which it mismatches every correct passive `codex` reading and the
+      // relay guard is denied its authority.
+      if (!unnamed(other)) continue;
       const otherWeekly = liveWeeklyResetsAt(other);
       if (typeof otherWeekly === 'number' && sameWeeklyReset(weekly * 1000, otherWeekly * 1000)) {
         return other.limitId ?? key;
@@ -774,7 +782,17 @@ export function liveCorroboratesPassiveFamily(
   // and the daemon spawns `codex app-server` every five minutes for as long as
   // Codex is in use, with no state that can end it. "Has no fingerprint to
   // offer" is a different answer from "has one that no longer means anything".
-  if (weeklyWindow(live) == null) return true;
+  //
+  // But it must NAME that shape, not just the absence of a weekly window, or it
+  // reopens the deadlock one door down. A content-free block — `{limitId,
+  // capturedAt}`, which this file's own third rung can return and
+  // `parseLiveCodexRateLimits` accepts on `limitId` alone — would otherwise
+  // corroborate forever: the answer counts as a success so the failure backoff
+  // never engages, the family test short-circuits on the missing weekly, the
+  // skip stays engaged for as long as Codex is in use, and `cachedLive` freezes
+  // on a block that can never arbitrate anything downstream. Same for a 5h-only
+  // answer. Granting the skip to those buys nothing and costs the whole fix.
+  if (weeklyWindow(live) == null) return live.credits != null;
   return familyFingerprintCanReject(live, nowMs);
 }
 
