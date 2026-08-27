@@ -207,8 +207,19 @@ export function pickAccountWideLiveLimits(
   };
 
   if (unnamed(top) && notAKnownPool(top)) return top;
+  // Overriding the top level is the strong move, so it takes positive evidence:
+  // a replacement must be unnamed, unlike any pool this response names, AND
+  // actually carry a weekly window. Without that last clause the ladder could
+  // answer a fingerprint COLLISION — two windows opened in the same instant —
+  // by returning whichever unnamed entry came first in iteration order, and a
+  // windowless credit block qualifies precisely because it has no fingerprint to
+  // collide with. `parseLiveCodexRateLimits` then accepts it on `limitId` alone
+  // and, being the newest reading by construction, it displaces the account's
+  // real windows with a synthetic 100% credit gauge.
   for (const candidate of entries) {
-    if (unnamed(candidate) && notAKnownPool(candidate)) return candidate;
+    if (unnamed(candidate) && notAKnownPool(candidate) && liveWeeklyResetsAt(candidate) != null) {
+      return candidate;
+    }
   }
   if (unnamed(top)) return top;
   for (const candidate of entries) {
@@ -377,15 +388,22 @@ function familyFingerprintCanReject(rl: CodexRateLimits, nowMs: number): boolean
 }
 
 /**
- * Whether the live reading contradicts the passive one about WHOSE quota it is —
- * the single question both consumers ask, so they cannot answer it differently.
+ * Whether the live reading contradicts the passive one about WHOSE quota it is.
  * The picker uses it to prefer the live snapshot; the throttle uses its negation
  * to decide whether the passive snapshot's freshness may suppress the next
- * query. Written as two expressions, the two drifted immediately: the throttle
- * compared families against a cached live snapshot with no bound at all, so once
- * that snapshot's window elapsed the mid-turn skip was lifted permanently while
- * the picker had already stopped honouring the same fingerprint. Exported for
- * unit testing.
+ * query. One expression, because written as two they drifted immediately: the
+ * throttle compared families against a cached live snapshot with no bound at
+ * all, so once that snapshot's window elapsed the mid-turn skip was lifted
+ * permanently while the picker had already stopped honouring the same
+ * fingerprint.
+ *
+ * The two consumers still REACH it differently, and that is deliberate rather
+ * than drift. The picker settles plan disagreement first and never asks this at
+ * all when the classes differ; the throttle asks it regardless, because a cached
+ * live snapshot minted under a retired plan is itself a reason to spend a query
+ * — the answer that replaces it is the only thing that can end the disagreement.
+ * The cost is bounded by the same spawn throttles as everything else here.
+ * Exported for unit testing.
  */
 export function liveRejectsPassiveFamily(
   passive?: CodexRateLimits | null,
@@ -480,13 +498,16 @@ export function pickBestCodexRateLimits(
   live: CodexRateLimits | null,
   accountPlan?: string,
   nowMs: number = Date.now(),
+  opts: { liveOwnsFamilyAuthority?: boolean } = {},
 ): CodexRateLimits | null {
   if (!live) return passive;
   if (!passive) return live;
   const livePlanMatches = codexSnapshotMatchesAccountPlan(live.planType, accountPlan);
   const passivePlanMatches = codexSnapshotMatchesAccountPlan(passive.planType, accountPlan);
   if (livePlanMatches !== passivePlanMatches) return livePlanMatches ? live : passive;
-  if (liveRejectsPassiveFamily(passive, live, nowMs)) return live;
+  if (opts.liveOwnsFamilyAuthority !== false && liveRejectsPassiveFamily(passive, live, nowMs)) {
+    return live;
+  }
   return codexSnapshotOutranks(
     { planType: live.planType, capturedAtMs: capturedAtMs(live) },
     { planType: passive.planType, capturedAtMs: capturedAtMs(passive) },

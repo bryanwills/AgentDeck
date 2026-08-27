@@ -56,17 +56,18 @@ import { pickBestCodexRateLimits } from './codex-rate-limits-live.js';
  * is appended every couple of seconds while Codex works. So a cross-family
  * disagreement is resolved toward the daemon's block rather than by age.
  *
- * Be exact about what that block is: `lastBuiltCodexRateLimits` is the daemon's
- * last PUBLISHED value, which is the live `codex app-server` answer only when
- * the live answer won its own pick — otherwise it is the daemon's own passive
- * read. The guard is worth having anyway, because the case it fires on is the
- * one that matters (a bridge relaying a pool reading while the daemon holds the
- * account's), and in the remaining case two rollout reads disagree and the
- * daemon's is no worse. What keeps it from inverting #253 is the bound on the
- * rejecting side: a block with no weekly window — the synthetic credit gauge, a
- * voided snapshot — cannot reject anything, so the windowless block can never
- * displace a windowed one. Inside one family nothing changes: the fresher
- * rollout still wins.
+ * But only when the daemon actually HAS that answer. `lastBuiltCodexRateLimits`
+ * is the daemon's last published value, which is the app-server reading only
+ * when it won its own pick — a daemon whose PATH carries no `codex` binary holds
+ * nothing but a rollout read, exactly like the bridge. Deciding a cross-family
+ * disagreement between two rollout reads by which process is holding one is not
+ * a rule, and with the roles reversed (the daemon on the mislabelled pool line,
+ * the bridge on the account line) it would invert the fix it exists to deliver.
+ * So `ownIsLiveBacked` gates the guard, and without it the tie falls back to
+ * recency as before. A second bound applies whenever the guard does fire: a
+ * block with no weekly window — the synthetic credit gauge, a voided snapshot —
+ * can never reject anything, so a windowless block cannot displace a windowed
+ * one. Inside one family nothing changes: the fresher rollout still wins.
  *
  * ## Why `buildOwnUsage` is a thunk
  *
@@ -85,9 +86,13 @@ import { pickBestCodexRateLimits } from './codex-rate-limits-live.js';
 export function resolveRelayedUsageEvent(input: {
   relayed: Record<string, unknown>;
   ownCodexRateLimits: CodexRateLimits | null;
+  /** Whether the daemon's block is the live `codex app-server` answer rather
+   *  than its own rollout read. Defaults to false: without a live reading there
+   *  is no family authority here, and the tie falls back to recency. */
+  ownIsLiveBacked?: boolean;
   buildOwnUsage: () => UsageEvent;
 }): UsageEvent {
-  const { relayed, ownCodexRateLimits, buildOwnUsage } = input;
+  const { relayed, ownCodexRateLimits, ownIsLiveBacked = false, buildOwnUsage } = input;
 
   const hasClaudeData = relayed.fiveHourPercent != null || relayed.sevenDayPercent != null;
   if (!hasClaudeData) {
@@ -95,7 +100,9 @@ export function resolveRelayedUsageEvent(input: {
   }
 
   const relayedCodex = (relayed.codexRateLimits ?? null) as CodexRateLimits | null;
-  const best = pickBestCodexRateLimits(relayedCodex, ownCodexRateLimits);
+  const best = pickBestCodexRateLimits(relayedCodex, ownCodexRateLimits, undefined, Date.now(), {
+    liveOwnsFamilyAuthority: ownIsLiveBacked,
+  });
   // Identity, not deep-equality: the picker returns one of its two arguments, so
   // an unchanged pick must leave the relayed event object untouched — including
   // an absent `codexRateLimits` key, which under retain-on-absent merging is

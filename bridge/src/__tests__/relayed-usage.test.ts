@@ -141,9 +141,36 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
     const out = resolveRelayedUsageEvent({
       relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: poolUnderAccountId },
       ownCodexRateLimits: accountExhausted,
+      ownIsLiveBacked: true,
       buildOwnUsage: () => { throw new Error('must not build'); },
     }) as any;
     expect(out.codexRateLimits).toBe(accountExhausted);
+  });
+
+  it('falls back to recency when the daemon has no live reading to arbitrate with', () => {
+    // Same inputs, no live answer behind the daemon's block. Two rollout reads
+    // disagreeing about the family is not something either side can settle, and
+    // with the roles reversed — the daemon on the mislabelled pool line, the
+    // bridge on the account line — preferring the daemon would invert the fix.
+    const relayedFresh = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:09:40.628Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2099-01-01T00:00:00Z' },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2099-09-03T00:00:00Z' },
+    } as CodexRateLimits;
+    const ownOlder = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:05:00.000Z',
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2099-09-01T00:00:00Z' },
+    } as CodexRateLimits;
+    const out = resolveRelayedUsageEvent({
+      relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: relayedFresh },
+      ownCodexRateLimits: ownOlder,
+      buildOwnUsage: () => { throw new Error('must not build'); },
+    }) as any;
+    expect(out.codexRateLimits).toBe(relayedFresh);
   });
 
   it("never lets the daemon's windowless block displace a windowed relayed one", () => {

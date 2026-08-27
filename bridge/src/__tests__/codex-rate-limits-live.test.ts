@@ -151,6 +151,26 @@ describe('pickAccountWideLiveLimits', () => {
     ).toBe(realAccount);
   });
 
+  it('does not answer a reset collision with an unrelated windowless entry', () => {
+    // The ladder must not treat "not a known pool" as sufficient: a windowless
+    // credit block qualifies precisely because it has no fingerprint to collide
+    // with, so on a collision it could be returned ahead of the top-level block
+    // purely on iteration order — and downstream it displaces the account's real
+    // windows with a synthetic 100% credit gauge. Overriding the top level takes
+    // positive evidence: an unnamed entry that carries a weekly window.
+    const sharedWeekly = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
+    const collidingTop = { limitId: 'codex', limitName: null, primary: sharedWeekly };
+    const namedPool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: sharedWeekly };
+    const creditBlock = { limitId: 'premium', limitName: null, credits: { hasCredits: false, unlimited: false, balance: '0' } };
+    expect(
+      pickAccountWideLiveLimits(collidingTop, {
+        premium: creditBlock,
+        codex: collidingTop,
+        codex_bengalfox: namedPool,
+      }),
+    ).toBe(collidingTop);
+  });
+
   it('keeps an unnamed block when a reset collision is all it has to go on', () => {
     // Two windows opened in the same instant share a reset without anything
     // being wrong. Degrading to "no reading" there would delete a real one, so
@@ -303,6 +323,21 @@ describe('pickBestCodexRateLimits', () => {
         beforeReset,
       ),
     ).toBe(stillRunningLive);
+  });
+
+  it('lets a caller with no live reading opt out of the family guard entirely', () => {
+    // The guard's authority is the live answer. Where the second argument is not
+    // one — the relay path hands it the daemon's last published block, which is
+    // a rollout read whenever no live query has succeeded — a cross-family
+    // disagreement would otherwise be settled by which process holds the block,
+    // and with the roles reversed that inverts the fix.
+    const passive = { ...SPARK_MISLABELLED_AS_ACCOUNT, capturedAt: '2026-08-27T13:09:40.628Z' };
+    const other = { ...ACCOUNT_EXHAUSTED, capturedAt: '2026-08-27T13:05:00.000Z' };
+    const now = Date.parse('2026-08-27T13:10:00.000Z');
+    expect(pickBestCodexRateLimits(passive, other, 'prolite', now)).toBe(other);
+    expect(
+      pickBestCodexRateLimits(passive, other, 'prolite', now, { liveOwnsFamilyAuthority: false }),
+    ).toBe(passive);
   });
 
   it('does not let a windowless live block veto a fully-windowed passive reading', () => {

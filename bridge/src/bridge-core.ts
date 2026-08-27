@@ -12,7 +12,7 @@ import { readAntigravityLocalStatus } from './antigravity-local.js';
 import { buildSubscriptions, buildUsageEvent } from './usage-event.js';
 import { readCodexAuthStatus } from './codex-auth.js';
 import { readCodexRateLimits } from './codex-rate-limits.js';
-import { codexRateLimitsWithLiveRefresh } from './codex-rate-limits-live.js';
+import { codexRateLimitsWithLiveRefresh, getLiveCodexRateLimits } from './codex-rate-limits-live.js';
 import { fetchMlxModels } from './mlx-probe.js';
 import { buildDisplayStateEvent } from './display-dim.js';
 import { foldCodexSessionsForDisplay, loadMlxSettings, sortSessions } from '@agentdeck/shared';
@@ -413,6 +413,17 @@ export class BridgeCore {
    */
   lastBuiltCodexRateLimits: CodexRateLimits | null = null;
 
+  /**
+   * Whether that block came from the live `codex app-server` answer rather than
+   * from this core's own rollout read. It is the difference between a reading
+   * that KNOWS which limit family it describes and one that only claims to, and
+   * the relay path needs it: a daemon whose PATH has no `codex` binary holds
+   * nothing but a rollout read, and letting that arbitrate a cross-family
+   * disagreement against a session bridge would decide it by which process is
+   * holding the block — able to invert the very fix the family guard delivers.
+   */
+  lastBuiltCodexFromLiveQuery = false;
+
   /** Build and return a usage event */
   buildUsage(): BridgeEvent {
     const snapshot = this.stateMachine.getSnapshot();
@@ -422,6 +433,12 @@ export class BridgeCore {
     // disagree about which plan this build belongs to.
     const codexAuth = readCodexAuthStatus();
     const codexAccountPlan = codexAuth?.planType;
+    const codexRateLimits = this.isDaemon
+      ? codexRateLimitsWithLiveRefresh(
+          readCodexRateLimits(undefined, codexAccountPlan),
+          codexAccountPlan,
+        )
+      : readCodexRateLimits(undefined, codexAccountPlan);
     const event = buildUsageEvent(
       snapshot,
       this.cachedApiUsage,
@@ -444,14 +461,14 @@ export class BridgeCore {
       // selection on recency (a Codex session left open across a plan change
       // keeps minting exactly such snapshots), and its freshness must not
       // suppress the live query that carries the only usable number.
-      this.isDaemon
-        ? codexRateLimitsWithLiveRefresh(
-            readCodexRateLimits(undefined, codexAccountPlan),
-            codexAccountPlan,
-          )
-        : readCodexRateLimits(undefined, codexAccountPlan),
+      codexRateLimits,
     );
     this.lastBuiltCodexRateLimits = event.codexRateLimits ?? null;
+    // Identity against the live cache, not a field on the value: the block that
+    // rides the wire is the normalized copy, so provenance has to be captured
+    // where the choice was made.
+    this.lastBuiltCodexFromLiveQuery =
+      codexRateLimits != null && codexRateLimits === getLiveCodexRateLimits();
     return event;
   }
 
