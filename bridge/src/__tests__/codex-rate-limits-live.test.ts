@@ -131,6 +131,36 @@ describe('pickAccountWideLiveLimits', () => {
     expect(pickAccountWideLiveLimits(spark, { codex_bengalfox: spark })).toBeNull();
     expect(pickAccountWideLiveLimits(null, null)).toBeNull();
   });
+
+  it('recognises a pool by its weekly reset even when the top level leaves it unnamed', () => {
+    // The whole defect being fixed is that `limit_name` can be absent on a pool
+    // reading. If the app-server's top level ever mirrors what the rollout does,
+    // trusting the name here would make `cachedLive` the pool — and the guard
+    // built on top of it would then prefer the pool over a correct rollout.
+    const sparkWeekly = { usedPercent: 24, windowDurationMins: 10080, resetsAt: 1788440488 };
+    const accountWeekly = { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1788274890 };
+    const unnamedPoolAtTop = { limitId: 'codex', limitName: null, primary: sparkWeekly };
+    const namedPool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: sparkWeekly };
+    const realAccount = { limitId: 'codex', limitName: null, primary: accountWeekly };
+    expect(
+      pickAccountWideLiveLimits(unnamedPoolAtTop, {
+        codex_bengalfox: namedPool,
+        codex: realAccount,
+      }),
+    ).toBe(realAccount);
+  });
+
+  it('keeps an unnamed block when a reset collision is all it has to go on', () => {
+    // Two windows opened in the same instant share a reset without anything
+    // being wrong. Degrading to "no reading" there would delete a real one, so
+    // the ladder ends by keeping the unnamed block.
+    const shared = { usedPercent: 12, windowDurationMins: 10080, resetsAt: 1788440488 };
+    const onlyAccount = { limitId: 'codex', limitName: null, primary: shared };
+    const namedPool = { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: shared };
+    expect(
+      pickAccountWideLiveLimits(onlyAccount, { codex: onlyAccount, codex_bengalfox: namedPool }),
+    ).toBe(onlyAccount);
+  });
 });
 
 describe('pickBestCodexRateLimits', () => {
@@ -199,6 +229,79 @@ describe('pickBestCodexRateLimits', () => {
     };
     const live = { ...ACCOUNT_EXHAUSTED, capturedAt: '2026-08-27T13:05:00.000Z' };
     expect(pickBestCodexRateLimits(passive, live, 'prolite')).toBe(live);
+  });
+
+  it('does not let the family guard outrank the plan test', () => {
+    // A plan change moves the weekly reset instant under the same `limit_id`
+    // (both lines are verbatim fixtures in codex-rate-limits.test.ts), so ranked
+    // above the plan test the family guard answers an upgrade by returning the
+    // retired-plan live snapshot — which `normalizeCodexRateLimits` voids to a
+    // windowless block, blanking every Codex gauge until a live query lands.
+    const retiredPlanLive = {
+      primary: {
+        usedPercent: 100,
+        windowMinutes: 10080,
+        resetsAt: new Date(1787805401 * 1000).toISOString(),
+      },
+      planType: 'plus',
+      limitId: 'codex',
+      capturedAt: '2026-08-21T16:55:00.000Z',
+    };
+    const currentPlanPassive = {
+      primary: {
+        usedPercent: 0,
+        windowMinutes: 10080,
+        resetsAt: new Date(1787934975 * 1000).toISOString(),
+      },
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-21T16:43:09.009Z',
+    };
+    expect(codexSnapshotsShareLimitFamily(currentPlanPassive, retiredPlanLive)).toBe(false);
+    // `nowMs` sits inside BOTH weekly windows on purpose. A retired plan's window
+    // stays future-dated for up to seven days — that is the whole reason the plan
+    // axis exists — so evaluating this at today's clock would let the elapsed-
+    // window bound answer instead, and the ordering itself would go ungated:
+    // hoisting the family guard above the plan test then leaves the suite green.
+    const duringBothWindows = Date.parse('2026-08-21T17:00:00.000Z');
+    expect(
+      pickBestCodexRateLimits(currentPlanPassive, retiredPlanLive, 'prolite', duringBothWindows),
+    ).toBe(currentPlanPassive);
+  });
+
+  it('ignores a family fingerprint whose own weekly window has already elapsed', () => {
+    // The account's weekly rollover reaches the rollout first, and reads as a
+    // family mismatch. An expired live snapshot describes a window that no
+    // longer exists, so it is not evidence about the current one — and a live
+    // query that starts missing would otherwise pin it for the whole backoff.
+    const elapsedLive = { ...ACCOUNT_EXHAUSTED, capturedAt: '2026-09-01T14:00:00.000Z' };
+    const rolledOverPassive = {
+      primary: {
+        usedPercent: 3,
+        windowMinutes: 10080,
+        resetsAt: '2026-09-08T15:01:30.000Z',
+      },
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-09-01T15:30:00.000Z',
+    };
+    const afterReset = Date.parse('2026-09-01T15:30:00.000Z');
+    expect(codexSnapshotsShareLimitFamily(rolledOverPassive, elapsedLive)).toBe(false);
+    expect(pickBestCodexRateLimits(rolledOverPassive, elapsedLive, 'prolite', afterReset)).toBe(
+      rolledOverPassive,
+    );
+    // Before that window elapses the guard still holds — this bound is about an
+    // expired fingerprint, not a licence to trust the rollout again.
+    const beforeReset = Date.parse('2026-08-27T13:09:40.628Z');
+    const stillRunningLive = { ...ACCOUNT_EXHAUSTED, capturedAt: '2026-08-27T13:05:00.000Z' };
+    expect(
+      pickBestCodexRateLimits(
+        { ...SPARK_MISLABELLED_AS_ACCOUNT, capturedAt: '2026-08-27T13:09:40.628Z' },
+        stillRunningLive,
+        'prolite',
+        beforeReset,
+      ),
+    ).toBe(stillRunningLive);
   });
 
   it('keeps preferring the fresher passive reading within the account family', () => {
@@ -333,22 +436,29 @@ describe('shouldQueryCodexRateLimitsLive', () => {
     // A rollout pouring out per-model pool readings every two seconds is the
     // state in which the account's own number is least visible and most wanted.
     // Skipping on its freshness suppresses the only source that can report it.
-    expect(
-      shouldQueryCodexRateLimitsLive({
-        nowMs: now,
-        lastAttemptMs: 0,
-        consecutiveFailures: 0,
-        passiveCapturedAtMs: now - 2 * 1000,
-        passiveMatchesAccountFamily: false,
-      }),
-    ).toBe(true);
+    //
+    // `lastAttemptMs` must be past the interval but non-zero, or neither branch
+    // under test is the one that answers: at 0 the baseline rule returns true on
+    // its own, and inside the interval the throttle returns false on its own.
+    // Written the vacuous way, deleting the flag from the skip left the suite
+    // green.
+    const midTurn = {
+      nowMs: now,
+      lastAttemptMs: now - 6 * 60 * 1000,
+      consecutiveFailures: 0,
+      passiveCapturedAtMs: now - 2 * 1000,
+    };
+    expect(shouldQueryCodexRateLimitsLive({ ...midTurn, passiveMatchesAccountFamily: false })).toBe(
+      true,
+    );
+    expect(shouldQueryCodexRateLimitsLive({ ...midTurn, passiveMatchesAccountFamily: true })).toBe(
+      false,
+    );
     // ...but it is still not a licence to spawn on every usage build.
     expect(
       shouldQueryCodexRateLimitsLive({
-        nowMs: now,
+        ...midTurn,
         lastAttemptMs: now - 60 * 1000,
-        consecutiveFailures: 0,
-        passiveCapturedAtMs: now - 2 * 1000,
         passiveMatchesAccountFamily: false,
       }),
     ).toBe(false);

@@ -148,22 +148,71 @@ export function parseLiveCodexRateLimits(result: unknown, capturedAt: string): C
   };
 }
 
+/** The weekly window's reset instant on a raw live block — the same fingerprint
+ *  `codexSnapshotsShareLimitFamily` uses, read off the app-server's spelling. */
+function liveWeeklyResetsAt(rl?: RawLiveRateLimits | null): number | undefined {
+  for (const window of [rl?.primary, rl?.secondary]) {
+    const minutes =
+      typeof window?.windowDurationMins === 'number'
+        ? window.windowDurationMins
+        : window?.windowMinutes;
+    if (typeof minutes !== 'number' || minutes < WEEKLY_WINDOW_MIN_MINUTES) continue;
+    if (typeof window?.resetsAt === 'number' && window.resetsAt > 0) return window.resetsAt;
+  }
+  return undefined;
+}
+
 /**
  * The account-wide limit block among what `account/rateLimits/read` returned.
  *
  * Prefers the top-level `rateLimits` (what the Codex CLI shows) and falls back
- * to the first unnamed entry of `rateLimitsByLimitId`. Returns null when every
- * family is model-scoped: "no account-wide reading" is the honest answer, and
- * the caller then keeps whatever the rollout path found rather than adopting one
- * model's quota as the account's. Exported for unit testing.
+ * to an unnamed entry of `rateLimitsByLimitId`. Returns null when every family
+ * is model-scoped: "no account-wide reading" is the honest answer, and the
+ * caller then keeps whatever the rollout path found rather than adopting one
+ * model's quota as the account's.
+ *
+ * `limit_name` alone is not enough here for the same reason it stopped being
+ * enough on the rollout: it is the label, and the label is what went wrong. So a
+ * candidate that carries the WEEKLY RESET of a family this very response names
+ * as model-scoped is treated as that family whatever it calls itself — the
+ * fingerprint outranks the name on both paths, or the live source could hand
+ * back a pool reading and the guard built on it would invert.
+ *
+ * Measured 2026-08-27 the top level was correct (the account at 100% while the
+ * pool sat under `rateLimitsByLimitId.codex_bengalfox`), so this is defence, not
+ * a fix for an observed miss — which is why it degrades in one direction only.
+ * A collision is possible without anything being wrong (two windows opened in
+ * the same instant share a reset), so the ladder ends by keeping an unnamed
+ * block rather than reporting nothing: a coincidence must not delete a real
+ * reading. Exported for unit testing.
  */
 export function pickAccountWideLiveLimits(
   top?: RawLiveRateLimits | null,
   byLimitId?: Record<string, RawLiveRateLimits> | null,
 ): RawLiveRateLimits | null {
-  if (top && !isModelScopedCodexLimit(top.limitName)) return top;
-  for (const candidate of Object.values(byLimitId ?? {})) {
-    if (candidate && !isModelScopedCodexLimit(candidate.limitName)) return candidate;
+  const entries = Object.values(byLimitId ?? {}).filter(
+    (candidate): candidate is RawLiveRateLimits => !!candidate,
+  );
+  const scopedWeeklyResets = new Set(
+    entries
+      .filter((candidate) => isModelScopedCodexLimit(candidate.limitName))
+      .map((candidate) => liveWeeklyResetsAt(candidate))
+      .filter((resetsAt): resetsAt is number => typeof resetsAt === 'number'),
+  );
+  const unnamed = (candidate?: RawLiveRateLimits | null): candidate is RawLiveRateLimits =>
+    !!candidate && !isModelScopedCodexLimit(candidate.limitName);
+  const notAKnownPool = (candidate: RawLiveRateLimits): boolean => {
+    const weekly = liveWeeklyResetsAt(candidate);
+    return typeof weekly !== 'number' || !scopedWeeklyResets.has(weekly);
+  };
+
+  if (unnamed(top) && notAKnownPool(top)) return top;
+  for (const candidate of entries) {
+    if (unnamed(candidate) && notAKnownPool(candidate)) return candidate;
+  }
+  if (unnamed(top)) return top;
+  for (const candidate of entries) {
+    if (unnamed(candidate)) return candidate;
   }
   return null;
 }
@@ -294,6 +343,16 @@ function weeklyResetsAt(rl: CodexRateLimits): string | undefined {
   return undefined;
 }
 
+/** Whether a snapshot's weekly window is still running. An unstamped or
+ *  unparseable reset is "cannot tell", which counts as current — absence never
+ *  manufactures a verdict here either. */
+function weeklyWindowIsCurrent(rl: CodexRateLimits, nowMs: number): boolean {
+  const resetsAt = weeklyResetsAt(rl);
+  if (!resetsAt) return true;
+  const ms = new Date(resetsAt).getTime();
+  return isNaN(ms) ? true : ms > nowMs;
+}
+
 /**
  * True when two snapshots describe the same limit FAMILY — or when there is not
  * enough information to say they do not.
@@ -349,23 +408,47 @@ export function codexSnapshotsShareLimitFamily(
  * a stamped one within its match class; ties keep the passive reading, which is
  * the on-disk ground truth.
  *
- * Family agreement outranks both, because recency cannot see it: the rollout is
- * appended every couple of seconds while Codex works, so a snapshot describing
- * a per-model pool under the account's id (see `codexSnapshotsShareLimitFamily`)
- * wins every recency comparison for as long as the session runs, and the true
- * account reading only surfaces in the gaps where the live query gets to fire.
- * That is the oscillation this guard removes — the same gauge alternating
- * between an exhausted week and a half-used one depending on which source
- * answered last. Exported for unit testing.
+ * Family agreement is a tie-break WITHIN the plan class, and settled before
+ * recency, which cannot see it: the rollout is appended every couple of seconds
+ * while Codex works, so a snapshot describing a per-model pool under the
+ * account's id (see `codexSnapshotsShareLimitFamily`) wins every recency
+ * comparison for as long as the session runs, and the true account reading only
+ * surfaces in the gaps where the live query gets to fire. That is the
+ * oscillation this guard removes — the same gauge alternating between an
+ * exhausted week and a half-used one depending on which source answered last.
+ *
+ * It must stay UNDER the plan test, because a plan change moves the weekly reset
+ * instant too (`1787805401` under `plus` → `1787934975` under `prolite`, same
+ * `limit_id: "codex"`, both verbatim in `codex-rate-limits.test.ts`). Ranked
+ * above it, the family guard would answer a plan change by handing back the
+ * retired-plan live snapshot — which `normalizeCodexRateLimits` then voids to a
+ * windowless block, blanking every Codex gauge for up to the failure backoff.
+ * That is precisely the regression `codexSnapshotOutranks` exists to prevent,
+ * reintroduced through the door next to it.
+ *
+ * A live snapshot whose own weekly window has ALREADY ELAPSED does not get to
+ * reject anything: its fingerprint describes a window that no longer exists, so
+ * it is not evidence about which family the current one belongs to. Without that
+ * bound, the account's own weekly rollover — passive picks up the new anchor
+ * first — reads as a family mismatch, and a live query that then starts missing
+ * (Codex CLI gone, login expired) would pin an expired snapshot for the whole
+ * 30-minute backoff while discarding a correct fresh rollout on every build.
+ * Exported for unit testing; `nowMs` is injectable for the same reason.
  */
 export function pickBestCodexRateLimits(
   passive: CodexRateLimits | null,
   live: CodexRateLimits | null,
   accountPlan?: string,
+  nowMs: number = Date.now(),
 ): CodexRateLimits | null {
   if (!live) return passive;
   if (!passive) return live;
-  if (!codexSnapshotsShareLimitFamily(passive, live)) return live;
+  const livePlanMatches = codexSnapshotMatchesAccountPlan(live.planType, accountPlan);
+  const passivePlanMatches = codexSnapshotMatchesAccountPlan(passive.planType, accountPlan);
+  if (livePlanMatches !== passivePlanMatches) return livePlanMatches ? live : passive;
+  if (!codexSnapshotsShareLimitFamily(passive, live) && weeklyWindowIsCurrent(live, nowMs)) {
+    return live;
+  }
   return codexSnapshotOutranks(
     { planType: live.planType, capturedAtMs: capturedAtMs(live) },
     { planType: passive.planType, capturedAtMs: capturedAtMs(passive) },

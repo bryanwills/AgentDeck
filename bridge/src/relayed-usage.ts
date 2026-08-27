@@ -49,6 +49,15 @@ import { pickBestCodexRateLimits } from './codex-rate-limits-live.js';
  * directions — the daemon's block is normally the better one, but a bridge that
  * just read a newer rollout than the daemon's last build still wins on recency.
  *
+ * Recency rules WITHIN a limit family, not across one, and this call site is
+ * where that distinction bites hardest. A bridge has only the passive read, so
+ * once the account's weekly quota is exhausted its block is the per-model pool
+ * wearing the account's `limit_id` — and always seconds old, because the rollout
+ * is appended every couple of seconds while Codex works. The daemon's block is
+ * the one backed by the live `codex app-server` answer, so `pickBestCodexRateLimits`
+ * resolves a cross-family disagreement in its favour rather than by age. Inside
+ * one family nothing changes: the fresher rollout still wins.
+ *
  * ## Why `buildOwnUsage` is a thunk
  *
  * `BridgeCore.buildUsage()` is the call that arms the throttled `codex

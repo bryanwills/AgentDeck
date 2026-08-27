@@ -118,6 +118,34 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
     expect(out.codexRateLimits).toBe(relayedCodex);
   });
 
+  it("keeps the daemon's block when the bridge relays a different limit family", () => {
+    // Recency rules WITHIN a family, not across one. A session bridge has only
+    // the passive rollout read, and once the account's weekly quota is exhausted
+    // that read is the per-model pool wearing the account's `limit_id` — always
+    // seconds old, because the rollout is appended every couple of seconds. The
+    // daemon's block is the one backed by the live `codex app-server` answer, so
+    // a cross-family disagreement is resolved in its favour rather than by age.
+    const poolUnderAccountId = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:09:40.628Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2099-01-01T00:00:00Z' },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2099-09-03T00:00:00Z' },
+    } as CodexRateLimits;
+    const accountExhausted = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:05:00.000Z',
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2099-09-01T00:00:00Z' },
+    } as CodexRateLimits;
+    const out = resolveRelayedUsageEvent({
+      relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: poolUnderAccountId },
+      ownCodexRateLimits: accountExhausted,
+      buildOwnUsage: () => { throw new Error('must not build'); },
+    }) as any;
+    expect(out.codexRateLimits).toBe(accountExhausted);
+  });
+
   it("supplies the daemon's block when the relay says nothing about Codex", () => {
     const live = stamped('2026-08-23T00:00:00Z');
     const out = resolveRelayedUsageEvent({
