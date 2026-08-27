@@ -397,6 +397,28 @@ describe('codexSnapshotsShareLimitFamily', () => {
     ).toBe(true);
   });
 
+  it('tolerates the seconds of jitter Codex puts on the same weekly window', () => {
+    // Measured over 32,753 weekly-bearing lines: the account family's 21 raw
+    // reset values are 10 windows plus jitter — `1788274878` and `1788274890`
+    // are the same window twelve seconds apart. Compared exactly, ~4% of
+    // same-family pairs read as a family change, and the passive and live
+    // readings are by construction taken at different instants.
+    const at = (resetsAt: number) => ({
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:00:00.000Z',
+      primary: {
+        usedPercent: 100,
+        windowMinutes: 10080,
+        resetsAt: new Date(resetsAt * 1000).toISOString(),
+      },
+    });
+    expect(codexSnapshotsShareLimitFamily(at(1788274878), at(1788274890))).toBe(true);
+    // ...without blurring the windows apart. The closest genuinely different
+    // ones in that store sit ~1.5 days apart.
+    expect(codexSnapshotsShareLimitFamily(at(1788274890), at(1788440488))).toBe(false);
+    expect(codexSnapshotsShareLimitFamily(at(1788137317), at(1788274890))).toBe(false);
+  });
+
   it('ignores the 5h window, whose reset instant slides with every request', () => {
     // Observed within one minute of Spark traffic: resets_at 1787716807 →
     // 1787716837 → 1787716845. A fingerprint including it would report a new
@@ -464,6 +486,48 @@ describe('codexBlockHasLiveFamilyAuthority', () => {
     expect(
       codexBlockHasLiveFamilyAuthority(live, live, Date.parse('2026-09-02T00:00:00.000Z')),
     ).toBe(false);
+  });
+
+  it('refuses a rolling window, which is a countdown rather than an anchor', () => {
+    // The per-model pool reports `resets_at` one full window ahead of every
+    // reading (749 distinct values in 14 days, `resets_at - timestamp` pinned at
+    // ~604,790s of 604,800). It never elapses, so the elapsed-window escape can
+    // never retire it — left unchecked it could veto every passive reading for
+    // as long as it stayed cached.
+    const capturedAt = '2026-08-27T13:00:00.000Z';
+    const rolling = {
+      limitId: 'codex',
+      capturedAt,
+      primary: {
+        usedPercent: 24,
+        windowMinutes: 10080,
+        resetsAt: new Date(Date.parse(capturedAt) + 604790 * 1000).toISOString(),
+      },
+    };
+    const anchored = {
+      limitId: 'codex',
+      capturedAt,
+      primary: {
+        usedPercent: 100,
+        windowMinutes: 10080,
+        resetsAt: new Date(Date.parse(capturedAt) + 3 * 86400 * 1000).toISOString(),
+      },
+    };
+    const now = Date.parse('2026-08-27T13:05:00.000Z');
+    expect(codexBlockHasLiveFamilyAuthority(rolling, rolling, now)).toBe(false);
+    expect(codexBlockHasLiveFamilyAuthority(anchored, anchored, now)).toBe(true);
+    // And it cannot reject through the picker either.
+    const passive = {
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:04:59.000Z',
+      primary: {
+        usedPercent: 7,
+        windowMinutes: 10080,
+        resetsAt: new Date(Date.parse(capturedAt) + 4 * 86400 * 1000).toISOString(),
+      },
+    };
+    expect(codexSnapshotsShareLimitFamily(passive, rolling)).toBe(false);
+    expect(pickBestCodexRateLimits(passive, rolling, undefined, now)).toBe(passive);
   });
 
   it('is false when what was published belongs to another family', () => {

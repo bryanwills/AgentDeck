@@ -473,8 +473,13 @@ export class BridgeCore {
     // pick" — when the two agree on family the picker keeps the fresher rollout,
     // which is every build while Codex is working, and reading that as "no live
     // reading" switched the relay guard off precisely when it was needed.
+    //
+    // Computed from the PUBLISHED block, not the pick it came from: the flag
+    // travels with `lastBuiltCodexRateLimits`, and normalization can void or
+    // strip that value. A flag describing a different object than the one it
+    // rides with is one normalization change away from lying.
     this.lastBuiltCodexHasLiveFamilyAuthority = codexBlockHasLiveFamilyAuthority(
-      codexRateLimits,
+      this.lastBuiltCodexRateLimits,
       getLiveCodexRateLimits(),
     );
     return event;

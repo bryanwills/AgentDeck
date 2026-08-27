@@ -193,17 +193,19 @@ export function pickAccountWideLiveLimits(
   const entries = Object.values(byLimitId ?? {}).filter(
     (candidate): candidate is RawLiveRateLimits => !!candidate,
   );
-  const scopedWeeklyResets = new Set(
-    entries
-      .filter((candidate) => isModelScopedCodexLimit(candidate.limitName))
-      .map((candidate) => liveWeeklyResetsAt(candidate))
-      .filter((resetsAt): resetsAt is number => typeof resetsAt === 'number'),
-  );
+  const scopedWeeklyResets = entries
+    .filter((candidate) => isModelScopedCodexLimit(candidate.limitName))
+    .map((candidate) => liveWeeklyResetsAt(candidate))
+    .filter((resetsAt): resetsAt is number => typeof resetsAt === 'number');
   const unnamed = (candidate?: RawLiveRateLimits | null): candidate is RawLiveRateLimits =>
     !!candidate && !isModelScopedCodexLimit(candidate.limitName);
   const notAKnownPool = (candidate: RawLiveRateLimits): boolean => {
     const weekly = liveWeeklyResetsAt(candidate);
-    return typeof weekly !== 'number' || !scopedWeeklyResets.has(weekly);
+    if (typeof weekly !== 'number') return true;
+    // Tolerant, like the passive-side comparison and for the same reason: the
+    // instants jitter by seconds, so an exact set membership would answer "not a
+    // pool" for a reading that is one.
+    return !scopedWeeklyResets.some((pool) => sameWeeklyReset(weekly * 1000, pool * 1000));
   };
 
   if (unnamed(top) && notAKnownPool(top)) return top;
@@ -346,7 +348,7 @@ function capturedAtMs(rl?: CodexRateLimits | null): number {
  *  to identify a limit family across snapshots. */
 const WEEKLY_WINDOW_MIN_MINUTES = 1440;
 
-function weeklyResetsAt(rl: CodexRateLimits): string | undefined {
+function weeklyWindow(rl: CodexRateLimits): CodexRateLimitWindow | undefined {
   for (const window of [rl.primary, rl.secondary]) {
     if (!window || typeof window.windowMinutes !== 'number') continue;
     if (window.windowMinutes < WEEKLY_WINDOW_MIN_MINUTES) continue;
@@ -356,9 +358,41 @@ function weeklyResetsAt(rl: CodexRateLimits): string | undefined {
     // while the other slot still carries one. Its twin `liveWeeklyResetsAt`
     // reads the same way — two helpers documented as computing one fingerprint
     // must not disagree about which slot answers.
-    if (window.resetsAt) return window.resetsAt;
+    if (window.resetsAt) return window;
   }
   return undefined;
+}
+
+function weeklyResetsAtMs(rl: CodexRateLimits): number | undefined {
+  const resetsAt = weeklyWindow(rl)?.resetsAt;
+  if (!resetsAt) return undefined;
+  const ms = new Date(resetsAt).getTime();
+  return isNaN(ms) ? undefined : ms;
+}
+
+/**
+ * How far two weekly reset instants may sit apart and still be the same window.
+ *
+ * Codex does not report a fixed instant. Measured over 32,753 weekly-bearing
+ * `rate_limits` lines in a real store (14 days), the account family's 21 raw
+ * values collapse to 10 windows, each carrying a few seconds of jitter — the
+ * same window appears as `1788274878` and `1788274890`, twelve seconds apart —
+ * while the passive and live readings are by construction taken at different
+ * instants. Compared exactly, ~4% of same-family pairs read as a family change:
+ * a correct rollout is discarded for a cached live snapshot up to five minutes
+ * old, the mid-turn spawn skip is lifted for as long as Codex is in use, and the
+ * relay guard's authority reads false in the ordinary good case.
+ *
+ * Ten minutes is chosen from the two distances the data actually shows: jitter
+ * of seconds on one side, and ~1.5 DAYS between the closest genuinely different
+ * windows (`1788137317` → `1788274890`, account vs pool `1788274890` →
+ * `1788440488`) on the other. Anything between those two scales separates them;
+ * this sits three orders of magnitude above the noise and two below the signal.
+ */
+const FAMILY_RESET_TOLERANCE_MS = 10 * 60 * 1000;
+
+function sameWeeklyReset(aMs: number, bMs: number): boolean {
+  return Math.abs(aMs - bMs) <= FAMILY_RESET_TOLERANCE_MS;
 }
 
 /**
@@ -381,10 +415,25 @@ function weeklyResetsAt(rl: CodexRateLimits): string | undefined {
  * that exists and is current may make it.
  */
 function familyFingerprintCanReject(rl: CodexRateLimits, nowMs: number): boolean {
-  const resetsAt = weeklyResetsAt(rl);
-  if (!resetsAt) return false;
-  const ms = new Date(resetsAt).getTime();
-  return !isNaN(ms) && ms > nowMs;
+  const window = weeklyWindow(rl);
+  const resetsMs = weeklyResetsAtMs(rl);
+  if (!window || resetsMs == null) return false;
+  if (resetsMs <= nowMs) return false;
+  // A ROLLING window identifies nothing. Measured in the same store, the
+  // per-model pool's weekly reset takes 749 distinct values — one per request,
+  // sliding 43 minutes in step with the clock — because `resets_at` there is
+  // always one full window ahead of the reading (`resets_at − timestamp` pinned
+  // at ~604,790s of a 604,800s window). That is a countdown, not an anchor, and
+  // an anchor is the entire job here: the elapsed-window escape can never
+  // retire it, so left unchecked such a fingerprint could veto every passive
+  // reading for as long as it stayed cached. A fixed window looks like this
+  // only in its first minutes, where falling back to recency costs nothing.
+  const capturedMs = rl.capturedAt ? new Date(rl.capturedAt).getTime() : NaN;
+  if (!isNaN(capturedMs)) {
+    const windowMs = window.windowMinutes * 60 * 1000;
+    if (resetsMs - capturedMs >= windowMs - FAMILY_RESET_TOLERANCE_MS) return false;
+  }
+  return true;
 }
 
 /**
@@ -452,10 +501,10 @@ export function codexSnapshotsShareLimitFamily(
   if (!a || !b) return true;
   if (!a.limitId || !b.limitId) return true;
   if (a.limitId !== b.limitId) return false;
-  const aWeekly = weeklyResetsAt(a);
-  const bWeekly = weeklyResetsAt(b);
-  if (!aWeekly || !bWeekly) return true;
-  return aWeekly === bWeekly;
+  const aWeekly = weeklyResetsAtMs(a);
+  const bWeekly = weeklyResetsAtMs(b);
+  if (aWeekly == null || bWeekly == null) return true;
+  return sameWeeklyReset(aWeekly, bWeekly);
 }
 
 /**
