@@ -12,7 +12,11 @@ import { readAntigravityLocalStatus } from './antigravity-local.js';
 import { buildSubscriptions, buildUsageEvent } from './usage-event.js';
 import { readCodexAuthStatus } from './codex-auth.js';
 import { readCodexRateLimits } from './codex-rate-limits.js';
-import { codexRateLimitsWithLiveRefresh, getLiveCodexRateLimits } from './codex-rate-limits-live.js';
+import {
+  codexBlockHasLiveFamilyAuthority,
+  codexRateLimitsWithLiveRefresh,
+  getLiveCodexRateLimits,
+} from './codex-rate-limits-live.js';
 import { fetchMlxModels } from './mlx-probe.js';
 import { buildDisplayStateEvent } from './display-dim.js';
 import { foldCodexSessionsForDisplay, loadMlxSettings, sortSessions } from '@agentdeck/shared';
@@ -414,15 +418,16 @@ export class BridgeCore {
   lastBuiltCodexRateLimits: CodexRateLimits | null = null;
 
   /**
-   * Whether that block came from the live `codex app-server` answer rather than
-   * from this core's own rollout read. It is the difference between a reading
-   * that KNOWS which limit family it describes and one that only claims to, and
-   * the relay path needs it: a daemon whose PATH has no `codex` binary holds
-   * nothing but a rollout read, and letting that arbitrate a cross-family
-   * disagreement against a session bridge would decide it by which process is
-   * holding the block — able to invert the very fix the family guard delivers.
+   * Whether a live `codex app-server` answer stands behind that block's limit
+   * FAMILY — not whether the live snapshot itself was published. It is the
+   * difference between a reading that KNOWS which family it describes and one
+   * that only claims to, and the relay path needs it: a daemon whose PATH has no
+   * `codex` binary holds nothing but a rollout read, and letting that arbitrate
+   * a cross-family disagreement against a session bridge would decide it by
+   * which process is holding the block — able to invert the very fix the family
+   * guard delivers. See `codexBlockHasLiveFamilyAuthority`.
    */
-  lastBuiltCodexFromLiveQuery = false;
+  lastBuiltCodexHasLiveFamilyAuthority = false;
 
   /** Build and return a usage event */
   buildUsage(): BridgeEvent {
@@ -464,11 +469,14 @@ export class BridgeCore {
       codexRateLimits,
     );
     this.lastBuiltCodexRateLimits = event.codexRateLimits ?? null;
-    // Identity against the live cache, not a field on the value: the block that
-    // rides the wire is the normalized copy, so provenance has to be captured
-    // where the choice was made.
-    this.lastBuiltCodexFromLiveQuery =
-      codexRateLimits != null && codexRateLimits === getLiveCodexRateLimits();
+    // "Is this block backed by a live answer", not "did the live answer win the
+    // pick" — when the two agree on family the picker keeps the fresher rollout,
+    // which is every build while Codex is working, and reading that as "no live
+    // reading" switched the relay guard off precisely when it was needed.
+    this.lastBuiltCodexHasLiveFamilyAuthority = codexBlockHasLiveFamilyAuthority(
+      codexRateLimits,
+      getLiveCodexRateLimits(),
+    );
     return event;
   }
 

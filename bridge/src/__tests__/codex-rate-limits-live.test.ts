@@ -8,6 +8,7 @@ import {
   pickBestCodexRateLimits,
   codexSnapshotsShareLimitFamily,
   liveRejectsPassiveFamily,
+  codexBlockHasLiveFamilyAuthority,
   shouldQueryCodexRateLimitsLive,
   queryCodexRateLimitsLive,
   codexSpawnPlan,
@@ -428,6 +429,46 @@ describe('codexSnapshotsShareLimitFamily', () => {
   it('reports a different id as a different family', () => {
     expect(
       codexSnapshotsShareLimitFamily({ limitId: 'premium' }, { limitId: 'codex' }),
+    ).toBe(false);
+  });
+});
+
+describe('codexBlockHasLiveFamilyAuthority', () => {
+  const now = Date.parse('2026-08-27T13:10:00.000Z');
+  const live = {
+    ...ACCOUNT_EXHAUSTED,
+    primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30.000Z' },
+  };
+
+  it('holds for the fresher rollout the picker keeps, not only for the live block itself', () => {
+    // Written as identity with the pick, this read false on every build while
+    // Codex was working — the picker keeps the fresher rollout whenever the two
+    // agree on family — and the relay guard switched off exactly where the
+    // daemon did hold a verified baseline.
+    const publishedPassive = {
+      ...ACCOUNT_EXHAUSTED,
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30.000Z' },
+      capturedAt: '2026-08-27T13:09:58.000Z',
+    };
+    expect(publishedPassive).not.toBe(live);
+    expect(codexBlockHasLiveFamilyAuthority(publishedPassive, live, now)).toBe(true);
+  });
+
+  it('is false with no live reading, and false when the live one cannot reject', () => {
+    expect(codexBlockHasLiveFamilyAuthority(live, null, now)).toBe(false);
+    expect(codexBlockHasLiveFamilyAuthority(null, live, now)).toBe(false);
+    // Windowless, and expired: neither is a fingerprint anything may rest on.
+    expect(
+      codexBlockHasLiveFamilyAuthority(live, { limitId: 'premium', planType: 'prolite' }, now),
+    ).toBe(false);
+    expect(
+      codexBlockHasLiveFamilyAuthority(live, live, Date.parse('2026-09-02T00:00:00.000Z')),
+    ).toBe(false);
+  });
+
+  it('is false when what was published belongs to another family', () => {
+    expect(
+      codexBlockHasLiveFamilyAuthority(SPARK_MISLABELLED_AS_ACCOUNT, live, now),
     ).toBe(false);
   });
 });

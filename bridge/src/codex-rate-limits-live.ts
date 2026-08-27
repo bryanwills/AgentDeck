@@ -573,6 +573,38 @@ export function shouldQueryCodexRateLimitsLive(input: {
   return true;
 }
 
+/**
+ * Whether a published Codex block may speak for the account's limit FAMILY —
+ * the question the relay path has to answer before it lets that block reject a
+ * session bridge's.
+ *
+ * It is deliberately NOT "did the live snapshot win the last pick". Identity
+ * with the pick is false in the ordinary good case: when the two readings agree
+ * on family the picker keeps the fresher rollout, which while Codex is working
+ * is every single build. Read that way, the guard switched itself off exactly
+ * when the daemon did hold a verified baseline — and a bridge sampling a
+ * mislabelled pool line a second later then won on recency, which is the
+ * oscillation this whole change removes, surviving at the one call site that
+ * had no other defence.
+ *
+ * The real question is whether a live answer exists, carries a fingerprint that
+ * may reject (`familyFingerprintCanReject`), and agrees with what was published.
+ * A plan-voided live snapshot fails the second test rather than lending its
+ * authority to a passive block that outranked it for unrelated reasons.
+ *
+ * Takes the live block rather than reading the module cache, so the rule can be
+ * driven directly instead of only through a spawn.
+ */
+export function codexBlockHasLiveFamilyAuthority(
+  published?: CodexRateLimits | null,
+  live?: CodexRateLimits | null,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!published || !live) return false;
+  if (!familyFingerprintCanReject(live, nowMs)) return false;
+  return codexSnapshotsShareLimitFamily(published, live);
+}
+
 let cachedLive: CodexRateLimits | null = null;
 let lastAttemptMs = 0;
 let consecutiveFailures = 0;

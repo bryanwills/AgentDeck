@@ -196,6 +196,9 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
     const out = resolveRelayedUsageEvent({
       relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: relayedWindowed },
       ownCodexRateLimits: ownCreditGauge,
+      // Without this the authority gate short-circuits first and the assertion
+      // holds on recency alone — the windowless bound it names is never reached.
+      ownIsLiveBacked: true,
       buildOwnUsage: () => { throw new Error('must not build'); },
     }) as any;
     expect(out.codexRateLimits).toBe(relayedWindowed);

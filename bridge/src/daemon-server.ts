@@ -3801,7 +3801,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       core.wsServer.broadcast(resolveRelayedUsageEvent({
         relayed: u,
         ownCodexRateLimits: core.lastBuiltCodexRateLimits,
-        ownIsLiveBacked: core.lastBuiltCodexFromLiveQuery,
+        ownIsLiveBacked: core.lastBuiltCodexHasLiveFamilyAuthority,
         buildOwnUsage: () => core.buildUsage() as UsageEvent,
       }));
     } else {
