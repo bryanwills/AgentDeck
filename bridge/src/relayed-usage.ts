@@ -49,6 +49,27 @@ import { pickBestCodexRateLimits } from './codex-rate-limits-live.js';
  * directions — the daemon's block is normally the better one, but a bridge that
  * just read a newer rollout than the daemon's last build still wins on recency.
  *
+ * Recency rules WITHIN a limit family, not across one, and this call site is
+ * where that distinction bites hardest. A bridge has only the passive read, so
+ * once the account's weekly quota is exhausted its block is the per-model pool
+ * wearing the account's `limit_id` — and always seconds old, because the rollout
+ * is appended every couple of seconds while Codex works. So a cross-family
+ * disagreement is resolved toward the daemon's block rather than by age.
+ *
+ * But only when the daemon actually HAS that answer. `lastBuiltCodexRateLimits`
+ * is the daemon's last published value, which is the app-server reading only
+ * when it won its own pick — a daemon whose PATH carries no `codex` binary holds
+ * nothing but a rollout read, exactly like the bridge. Deciding a cross-family
+ * disagreement between two rollout reads by which process is holding one is not
+ * a rule, and with the roles reversed (the daemon on the mislabelled pool line,
+ * the bridge on the account line) it would invert the fix it exists to deliver.
+ * So `ownLiveFamilyAuthorityExpiresAtMs` gates the guard — an instant, judged
+ * against this event's clock, because the flag is produced by a usage build and
+ * consumed here later; without it the tie falls back to recency as before. A second bound applies whenever the guard does fire: a
+ * block with no weekly window — the synthetic credit gauge, a voided snapshot —
+ * can never reject anything, so a windowless block cannot displace a windowed
+ * one. Inside one family nothing changes: the fresher rollout still wins.
+ *
  * ## Why `buildOwnUsage` is a thunk
  *
  * `BridgeCore.buildUsage()` is the call that arms the throttled `codex
@@ -66,9 +87,24 @@ import { pickBestCodexRateLimits } from './codex-rate-limits-live.js';
 export function resolveRelayedUsageEvent(input: {
   relayed: Record<string, unknown>;
   ownCodexRateLimits: CodexRateLimits | null;
+  /** When the daemon's live-backed family authority lapses, or null/absent when
+   *  it has none. An instant rather than a flag so it is judged against THIS
+   *  event's clock: without a live reading there is no family authority here,
+   *  and the tie falls back to recency. */
+  ownLiveFamilyAuthorityExpiresAtMs?: number | null;
+  /** Injectable clock. The family guard's authority decays with a reading's age,
+   *  so a test that leaves this to the wall clock changes its answer as the
+   *  fixtures age past it. */
+  nowMs?: number;
   buildOwnUsage: () => UsageEvent;
 }): UsageEvent {
-  const { relayed, ownCodexRateLimits, buildOwnUsage } = input;
+  const {
+    relayed,
+    ownCodexRateLimits,
+    ownLiveFamilyAuthorityExpiresAtMs = null,
+    nowMs = Date.now(),
+    buildOwnUsage,
+  } = input;
 
   const hasClaudeData = relayed.fiveHourPercent != null || relayed.sevenDayPercent != null;
   if (!hasClaudeData) {
@@ -76,7 +112,10 @@ export function resolveRelayedUsageEvent(input: {
   }
 
   const relayedCodex = (relayed.codexRateLimits ?? null) as CodexRateLimits | null;
-  const best = pickBestCodexRateLimits(relayedCodex, ownCodexRateLimits);
+  const best = pickBestCodexRateLimits(relayedCodex, ownCodexRateLimits, undefined, nowMs, {
+    liveOwnsFamilyAuthority:
+      ownLiveFamilyAuthorityExpiresAtMs != null && nowMs < ownLiveFamilyAuthorityExpiresAtMs,
+  });
   // Identity, not deep-equality: the picker returns one of its two arguments, so
   // an unchanged pick must leave the relayed event object untouched — including
   // an absent `codexRateLimits` key, which under retain-on-absent merging is

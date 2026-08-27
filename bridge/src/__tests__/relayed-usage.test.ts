@@ -118,6 +118,132 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
     expect(out.codexRateLimits).toBe(relayedCodex);
   });
 
+  it("keeps the daemon's block when the bridge relays a different limit family", () => {
+    // Recency rules WITHIN a family, not across one. A session bridge has only
+    // the passive rollout read, and once the account's weekly quota is exhausted
+    // that read is the per-model pool wearing the account's `limit_id` — always
+    // seconds old, because the rollout is appended every couple of seconds. The
+    // daemon's block is the one backed by the live `codex app-server` answer, so
+    // a cross-family disagreement is resolved in its favour rather than by age.
+    // Verbatim shapes from 2026-08-27, driven against an injected clock: the
+    // guard's authority decays with a reading's age and its window eventually
+    // elapses, so left to the wall clock these assertions would invert on a
+    // date in the future rather than on a change to the code.
+    const poolUnderAccountId = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:09:40.628Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2026-08-27T18:01:28Z' },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2026-09-03T13:01:28Z' },
+    } as CodexRateLimits;
+    const accountExhausted = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:05:00.000Z',
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30Z' },
+    } as CodexRateLimits;
+    const out = resolveRelayedUsageEvent({
+      relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: poolUnderAccountId },
+      ownCodexRateLimits: accountExhausted,
+      ownLiveFamilyAuthorityExpiresAtMs: Date.parse('2099-01-01T00:00:00Z'),
+      nowMs: Date.parse('2026-08-27T13:09:41Z'),
+      buildOwnUsage: () => { throw new Error('must not build'); },
+    }) as any;
+    expect(out.codexRateLimits).toBe(accountExhausted);
+  });
+
+  it('lets the authority lapse on this event\'s clock, not the build\'s', () => {
+    // The flag is produced by a usage build and consumed here later. Frozen as a
+    // boolean it outlived its own fifteen-minute bound — the relay can only
+    // re-check the age of the block it received, and when the picker kept the
+    // fresher rollout that block is younger than the live answer behind it.
+    const poolUnderAccountId = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:09:40.628Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2026-08-27T18:01:28Z' },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2026-09-03T13:01:28Z' },
+    } as CodexRateLimits;
+    const accountExhausted = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:05:00.000Z',
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30Z' },
+    } as CodexRateLimits;
+    const call = (nowMs: number, expiresAtMs: number) =>
+      (resolveRelayedUsageEvent({
+        relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: poolUnderAccountId },
+        ownCodexRateLimits: accountExhausted,
+        ownLiveFamilyAuthorityExpiresAtMs: expiresAtMs,
+        nowMs,
+        buildOwnUsage: () => { throw new Error('must not build'); },
+      }) as any).codexRateLimits;
+    const expires = Date.parse('2026-08-27T13:15:00.000Z');
+    expect(call(Date.parse('2026-08-27T13:09:41Z'), expires)).toBe(accountExhausted);
+    expect(call(Date.parse('2026-08-27T13:20:00Z'), expires)).toBe(poolUnderAccountId);
+  });
+
+  it('falls back to recency when the daemon has no live reading to arbitrate with', () => {
+    // Same inputs, no live answer behind the daemon's block. Two rollout reads
+    // disagreeing about the family is not something either side can settle, and
+    // with the roles reversed — the daemon on the mislabelled pool line, the
+    // bridge on the account line — preferring the daemon would invert the fix.
+    const relayedFresh = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:09:40.628Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2026-08-27T18:01:28Z' },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2026-09-03T13:01:28Z' },
+    } as CodexRateLimits;
+    const ownOlder = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:05:00.000Z',
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30Z' },
+    } as CodexRateLimits;
+    const out = resolveRelayedUsageEvent({
+      relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: relayedFresh },
+      ownCodexRateLimits: ownOlder,
+      nowMs: Date.parse('2026-08-27T13:09:41Z'),
+      buildOwnUsage: () => { throw new Error('must not build'); },
+    }) as any;
+    expect(out.codexRateLimits).toBe(relayedFresh);
+  });
+
+  it("never lets the daemon's contentless block displace a windowed relayed one", () => {
+    // `ownCodexRateLimits` is the daemon's last PUBLISHED block, not necessarily
+    // a live reading — and one rollout can carry `limit_id: "codex"` and
+    // `limit_id: "premium"` a second apart, so two processes reading the same
+    // tail legitimately land on different ids. Were a block with no weekly
+    // window allowed to reject on that difference, the synthetic credit gauge
+    // would pin over a real reading and #253 would come back sticky.
+    const relayedWindowed = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:09:40.628Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2026-08-27T18:01:28Z' },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2026-09-03T13:01:28Z' },
+    } as CodexRateLimits;
+    // Genuinely windowless, and NEWER than the relayed block, so recency alone
+    // would take it — the bound is the only thing that can keep the windowed
+    // one. An earlier fixture used `windowMinutes: 0`, which still counts as a
+    // window present, so the assertion held on recency and deleting the bound
+    // left it green.
+    const ownContentless = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:20:00.000Z',
+    } as unknown as CodexRateLimits;
+    const out = resolveRelayedUsageEvent({
+      relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: relayedWindowed },
+      ownCodexRateLimits: ownContentless,
+      ownLiveFamilyAuthorityExpiresAtMs: Date.parse('2099-01-01T00:00:00Z'),
+      nowMs: Date.parse('2026-08-27T13:20:30Z'),
+      buildOwnUsage: () => { throw new Error('must not build'); },
+    }) as any;
+    expect(out.codexRateLimits).toBe(relayedWindowed);
+  });
+
   it("supplies the daemon's block when the relay says nothing about Codex", () => {
     const live = stamped('2026-08-23T00:00:00Z');
     const out = resolveRelayedUsageEvent({
