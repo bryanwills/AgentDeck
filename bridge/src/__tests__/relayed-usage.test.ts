@@ -146,6 +146,34 @@ describe('resolveRelayedUsageEvent — Codex block reconciliation (#253)', () =>
     expect(out.codexRateLimits).toBe(accountExhausted);
   });
 
+  it("never lets the daemon's windowless block displace a windowed relayed one", () => {
+    // `ownCodexRateLimits` is the daemon's last PUBLISHED block, not necessarily
+    // a live reading — and one rollout can carry `limit_id: "codex"` and
+    // `limit_id: "premium"` a second apart, so two processes reading the same
+    // tail legitimately land on different ids. Were a block with no weekly
+    // window allowed to reject on that difference, the synthetic credit gauge
+    // would pin over a real reading and #253 would come back sticky.
+    const relayedWindowed = {
+      planType: 'prolite',
+      limitId: 'codex',
+      capturedAt: '2026-08-27T13:09:40.628Z',
+      primary: { usedPercent: 54, windowMinutes: 300, resetsAt: '2099-01-01T00:00:00Z' },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2099-09-03T00:00:00Z' },
+    } as CodexRateLimits;
+    const ownCreditGauge = {
+      planType: 'prolite',
+      limitId: 'premium',
+      capturedAt: '2026-08-27T13:00:00.000Z',
+      primary: { usedPercent: 100, windowMinutes: 0 },
+    } as unknown as CodexRateLimits;
+    const out = resolveRelayedUsageEvent({
+      relayed: { type: 'usage_update', fiveHourPercent: 63, codexRateLimits: relayedWindowed },
+      ownCodexRateLimits: ownCreditGauge,
+      buildOwnUsage: () => { throw new Error('must not build'); },
+    }) as any;
+    expect(out.codexRateLimits).toBe(relayedWindowed);
+  });
+
   it("supplies the daemon's block when the relay says nothing about Codex", () => {
     const live = stamped('2026-08-23T00:00:00Z');
     const out = resolveRelayedUsageEvent({

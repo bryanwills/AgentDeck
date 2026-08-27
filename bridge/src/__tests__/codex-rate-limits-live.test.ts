@@ -7,6 +7,7 @@ import {
   pickAccountWideLiveLimits,
   pickBestCodexRateLimits,
   codexSnapshotsShareLimitFamily,
+  liveRejectsPassiveFamily,
   shouldQueryCodexRateLimitsLive,
   queryCodexRateLimitsLive,
   codexSpawnPlan,
@@ -304,6 +305,31 @@ describe('pickBestCodexRateLimits', () => {
     ).toBe(stillRunningLive);
   });
 
+  it('does not let a windowless live block veto a fully-windowed passive reading', () => {
+    // `codexSnapshotsShareLimitFamily` answers on the ids alone here and never
+    // reaches its own weekly check, so a credit-plan block (`limit_id:
+    // "premium"`, no windows — a shape `parseLiveCodexRateLimits` admits on the
+    // strength of `limitId` alone) counted as a mismatch AND as evidence. It
+    // then displaced a reading captured seconds ago, and since consumers test
+    // for a window rather than for the block, every Codex gauge blanked.
+    const windowlessLive = {
+      planType: 'prolite',
+      limitId: 'premium',
+      capturedAt: '2026-08-27T13:00:00.000Z',
+      credits: { hasCredits: false, unlimited: false, balance: '0' },
+    };
+    const windowedPassive = {
+      ...SPARK_MISLABELLED_AS_ACCOUNT,
+      capturedAt: '2026-08-27T13:09:40.628Z',
+    };
+    const now = Date.parse('2026-08-27T13:10:00.000Z');
+    expect(codexSnapshotsShareLimitFamily(windowedPassive, windowlessLive)).toBe(false);
+    expect(liveRejectsPassiveFamily(windowedPassive, windowlessLive, now)).toBe(false);
+    expect(pickBestCodexRateLimits(windowedPassive, windowlessLive, 'prolite', now)).toBe(
+      windowedPassive,
+    );
+  });
+
   it('keeps preferring the fresher passive reading within the account family', () => {
     // The guard is about identity, not about distrusting the rollout: a passive
     // snapshot of the SAME weekly window stays the cheaper, more exact source.
@@ -345,6 +371,23 @@ describe('codexSnapshotsShareLimitFamily', () => {
       primary: { usedPercent: 55, windowMinutes: 300, resetsAt: '2026-08-27T18:31:28.000Z' },
     };
     expect(codexSnapshotsShareLimitFamily(a, b)).toBe(true);
+  });
+
+  it('reads the weekly fingerprint off whichever slot still carries a reset', () => {
+    // An elapsed weekly window has its reset stripped by `normalizeCodexWindow`,
+    // so stopping at the first long slot reports "no fingerprint" while another
+    // slot still holds one. The live-side twin already scanned on; these two are
+    // documented as computing one fingerprint and must not disagree.
+    const strippedFirstSlot = {
+      limitId: 'codex',
+      primary: { usedPercent: 100, windowMinutes: 10080 },
+      secondary: { usedPercent: 24, windowMinutes: 10080, resetsAt: '2026-09-03T13:01:28.000Z' },
+    };
+    const otherFamily = {
+      limitId: 'codex',
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30.000Z' },
+    };
+    expect(codexSnapshotsShareLimitFamily(strippedFirstSlot, otherFamily)).toBe(false);
   });
 
   it('reports a different id as a different family', () => {
@@ -462,6 +505,27 @@ describe('shouldQueryCodexRateLimitsLive', () => {
         passiveMatchesAccountFamily: false,
       }),
     ).toBe(false);
+  });
+
+  it('stops treating an elapsed live fingerprint as a family mismatch', () => {
+    // The throttle asks the same question as the picker and must get the same
+    // answer. Compared without a bound, a cached live snapshot whose weekly
+    // window has elapsed mismatches every passive read forever — lifting the
+    // mid-turn skip permanently instead of while the account's number is
+    // genuinely unreachable.
+    const passive = {
+      limitId: 'codex',
+      primary: { usedPercent: 3, windowMinutes: 10080, resetsAt: '2026-09-08T15:01:30.000Z' },
+    };
+    const elapsedLive = {
+      limitId: 'codex',
+      primary: { usedPercent: 100, windowMinutes: 10080, resetsAt: '2026-09-01T15:01:30.000Z' },
+    };
+    const beforeReset = Date.parse('2026-08-31T00:00:00.000Z');
+    const afterReset = Date.parse('2026-09-01T16:00:00.000Z');
+    expect(liveRejectsPassiveFamily(passive, elapsedLive, beforeReset)).toBe(true);
+    expect(liveRejectsPassiveFamily(passive, elapsedLive, afterReset)).toBe(false);
+    expect(liveRejectsPassiveFamily(passive, null, beforeReset)).toBe(false);
   });
 
   it('honours the minimum interval between spawns', () => {

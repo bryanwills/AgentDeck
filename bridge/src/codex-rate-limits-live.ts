@@ -338,19 +338,63 @@ const WEEKLY_WINDOW_MIN_MINUTES = 1440;
 function weeklyResetsAt(rl: CodexRateLimits): string | undefined {
   for (const window of [rl.primary, rl.secondary]) {
     if (!window || typeof window.windowMinutes !== 'number') continue;
-    if (window.windowMinutes >= WEEKLY_WINDOW_MIN_MINUTES) return window.resetsAt;
+    if (window.windowMinutes < WEEKLY_WINDOW_MIN_MINUTES) continue;
+    // `continue`, not `return`: a weekly window can reach here with its reset
+    // stripped (`normalizeCodexWindow` clears it once the window has elapsed),
+    // and returning on the first long slot would then report "no fingerprint"
+    // while the other slot still carries one. Its twin `liveWeeklyResetsAt`
+    // reads the same way — two helpers documented as computing one fingerprint
+    // must not disagree about which slot answers.
+    if (window.resetsAt) return window.resetsAt;
   }
   return undefined;
 }
 
-/** Whether a snapshot's weekly window is still running. An unstamped or
- *  unparseable reset is "cannot tell", which counts as current — absence never
- *  manufactures a verdict here either. */
-function weeklyWindowIsCurrent(rl: CodexRateLimits, nowMs: number): boolean {
+/**
+ * Whether a snapshot's family fingerprint is good enough to REJECT another
+ * reading — it must carry a weekly window, and that window must still be
+ * running.
+ *
+ * Both halves are the same rule seen twice, and both directions were wrong
+ * before. An ELAPSED window describes something that no longer exists, so it is
+ * not evidence about the current family; the account's own weekly rollover
+ * reaches the rollout first and reads as a mismatch, and without this bound a
+ * live query that then starts missing pins an expired snapshot for the whole
+ * backoff. An ABSENT window is not evidence either, and reading absence as "no
+ * reason to doubt it" is how a windowless credit-plan block (`limit_id:
+ * "premium"`, no windows — a shape `parseLiveCodexRateLimits` explicitly admits)
+ * came to veto a fully-windowed passive reading captured seconds ago: the ids
+ * differ, so `codexSnapshotsShareLimitFamily` answers before its own weekly
+ * check ever runs, and every Codex gauge blanks because consumers test for a
+ * window, not for the block. Rejecting is the strong move; only a fingerprint
+ * that exists and is current may make it.
+ */
+function familyFingerprintCanReject(rl: CodexRateLimits, nowMs: number): boolean {
   const resetsAt = weeklyResetsAt(rl);
-  if (!resetsAt) return true;
+  if (!resetsAt) return false;
   const ms = new Date(resetsAt).getTime();
-  return isNaN(ms) ? true : ms > nowMs;
+  return !isNaN(ms) && ms > nowMs;
+}
+
+/**
+ * Whether the live reading contradicts the passive one about WHOSE quota it is —
+ * the single question both consumers ask, so they cannot answer it differently.
+ * The picker uses it to prefer the live snapshot; the throttle uses its negation
+ * to decide whether the passive snapshot's freshness may suppress the next
+ * query. Written as two expressions, the two drifted immediately: the throttle
+ * compared families against a cached live snapshot with no bound at all, so once
+ * that snapshot's window elapsed the mid-turn skip was lifted permanently while
+ * the picker had already stopped honouring the same fingerprint. Exported for
+ * unit testing.
+ */
+export function liveRejectsPassiveFamily(
+  passive?: CodexRateLimits | null,
+  live?: CodexRateLimits | null,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!passive || !live) return false;
+  if (codexSnapshotsShareLimitFamily(passive, live)) return false;
+  return familyFingerprintCanReject(live, nowMs);
 }
 
 /**
@@ -426,13 +470,9 @@ export function codexSnapshotsShareLimitFamily(
  * That is precisely the regression `codexSnapshotOutranks` exists to prevent,
  * reintroduced through the door next to it.
  *
- * A live snapshot whose own weekly window has ALREADY ELAPSED does not get to
- * reject anything: its fingerprint describes a window that no longer exists, so
- * it is not evidence about which family the current one belongs to. Without that
- * bound, the account's own weekly rollover — passive picks up the new anchor
- * first — reads as a family mismatch, and a live query that then starts missing
- * (Codex CLI gone, login expired) would pin an expired snapshot for the whole
- * 30-minute backoff while discarding a correct fresh rollout on every build.
+ * Only a live snapshot whose own weekly window exists AND is still running gets
+ * to reject anything (`familyFingerprintCanReject`) — an expired or absent
+ * fingerprint is not evidence about which family the current window belongs to.
  * Exported for unit testing; `nowMs` is injectable for the same reason.
  */
 export function pickBestCodexRateLimits(
@@ -446,9 +486,7 @@ export function pickBestCodexRateLimits(
   const livePlanMatches = codexSnapshotMatchesAccountPlan(live.planType, accountPlan);
   const passivePlanMatches = codexSnapshotMatchesAccountPlan(passive.planType, accountPlan);
   if (livePlanMatches !== passivePlanMatches) return livePlanMatches ? live : passive;
-  if (!codexSnapshotsShareLimitFamily(passive, live) && weeklyWindowIsCurrent(live, nowMs)) {
-    return live;
-  }
+  if (liveRejectsPassiveFamily(passive, live, nowMs)) return live;
   return codexSnapshotOutranks(
     { planType: live.planType, capturedAtMs: capturedAtMs(live) },
     { planType: passive.planType, capturedAtMs: capturedAtMs(passive) },
@@ -554,7 +592,7 @@ export function codexRateLimitsWithLiveRefresh(
         consecutiveFailures,
         passiveCapturedAtMs: capturedAtMs(passive),
         passivePlanMatchesAccount: codexSnapshotMatchesAccountPlan(passive?.planType, accountPlan),
-        passiveMatchesAccountFamily: codexSnapshotsShareLimitFamily(passive, cachedLive),
+        passiveMatchesAccountFamily: !liveRejectsPassiveFamily(passive, cachedLive, nowMs),
       })
     ) {
       inFlight = true;

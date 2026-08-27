@@ -53,10 +53,20 @@ import { pickBestCodexRateLimits } from './codex-rate-limits-live.js';
  * where that distinction bites hardest. A bridge has only the passive read, so
  * once the account's weekly quota is exhausted its block is the per-model pool
  * wearing the account's `limit_id` — and always seconds old, because the rollout
- * is appended every couple of seconds while Codex works. The daemon's block is
- * the one backed by the live `codex app-server` answer, so `pickBestCodexRateLimits`
- * resolves a cross-family disagreement in its favour rather than by age. Inside
- * one family nothing changes: the fresher rollout still wins.
+ * is appended every couple of seconds while Codex works. So a cross-family
+ * disagreement is resolved toward the daemon's block rather than by age.
+ *
+ * Be exact about what that block is: `lastBuiltCodexRateLimits` is the daemon's
+ * last PUBLISHED value, which is the live `codex app-server` answer only when
+ * the live answer won its own pick — otherwise it is the daemon's own passive
+ * read. The guard is worth having anyway, because the case it fires on is the
+ * one that matters (a bridge relaying a pool reading while the daemon holds the
+ * account's), and in the remaining case two rollout reads disagree and the
+ * daemon's is no worse. What keeps it from inverting #253 is the bound on the
+ * rejecting side: a block with no weekly window — the synthetic credit gauge, a
+ * voided snapshot — cannot reject anything, so the windowless block can never
+ * displace a windowed one. Inside one family nothing changes: the fresher
+ * rollout still wins.
  *
  * ## Why `buildOwnUsage` is a thunk
  *
