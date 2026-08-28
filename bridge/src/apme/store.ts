@@ -32,6 +32,7 @@ import type {
 import type {
   ApmeSampleEventRow,
   ApmeSampleScorecardRow,
+  ApmeTaskView,
   SessionSample,
   SampleModelConfig,
   TrajectoryEvent,
@@ -575,6 +576,73 @@ type BetterSqliteDb = {
   transaction: <T>(fn: () => T) => () => T;
 };
 
+/** The latest overall judge score for a task, else its composite. Inlined into
+ *  several `TASK_VIEW_SQL` buckets so "judged" means one thing everywhere. */
+const TASK_SCORE_SQL =
+  `COALESCE((SELECT e.score FROM evals e WHERE e.task_id = t.id AND e.metric = 'overall'
+             ORDER BY e.created_at DESC LIMIT 1), t.composite_score)`;
+
+/** Attention is triage, so it is bounded by recency: measured on the real
+ *  store (2026-08-28), an unwindowed bucket held 1,412 of 1,519 tasks — the
+ *  entire pre-idle-gap orphan history plus the response-capture-gap era —
+ *  which is an archive, not a to-do list. Older debt stays countable and
+ *  reachable through the unwindowed `orphaned`/`reported` buckets. */
+export const TASK_ATTENTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** The attention bucket, anchored at a caller-supplied cutoff (epoch ms) so
+ *  the filter, the row flag and the badge are computed against the SAME
+ *  instant within one request. Needs eyes = recent AND (reaper-closed, a
+ *  closed task with an unarchived reply the judge can only partly see, or a
+ *  judged score below the dashboard's red band). `cutoffMs` is always a
+ *  number we computed — never user input — so inlining it is safe. */
+function taskAttentionSql(cutoffMs: number): string {
+  // IFNULL is load-bearing: a NULL score makes `score < 0.4` NULL, NULL OR
+  // false is NULL, and SQLite sorts NULL LAST under DESC — so without it,
+  // recent unjudged rows sank BELOW week-old rows (which get a determinate 0
+  // from the cutoff test) on the attention-first ordering.
+  return `IFNULL((t.started_at >= ${Math.floor(cutoffMs)}
+      AND (t.boundary_signal = 'orphaned'
+        OR (t.ended_at IS NOT NULL AND EXISTS (
+              SELECT 1 FROM turns tu WHERE tu.task_id = t.id AND tu.response IS NULL))
+        OR ${TASK_SCORE_SQL} < 0.4)), 0)`;
+}
+
+/** The NARROWING filters `listTaskPage` and `taskViewCounts` share — one
+ *  builder so a filtered board's badges and its rows read the same WHERE. */
+function buildTaskFilterWhere(opts: {
+  agentType?: string; projectName?: string; category?: string; outcome?: string; q?: string;
+}): { where: string[]; args: unknown[] } {
+  const where: string[] = [];
+  const args: unknown[] = [];
+  // `_empty` runs are bookkeeping shells, never work the user did.
+  where.push("COALESCE(r.task_category, '') != '_empty'");
+  if (opts.agentType) { where.push('r.agent_type = ?'); args.push(opts.agentType); }
+  if (opts.projectName) { where.push('r.project_name = ?'); args.push(opts.projectName); }
+  if (opts.category) { where.push('COALESCE(t.task_category, r.task_category) = ?'); args.push(opts.category); }
+  if (opts.outcome) { where.push('t.outcome = ?'); args.push(opts.outcome); }
+  if (opts.q) {
+    where.push('(t.summary LIKE ? OR r.task_prompt LIKE ?)');
+    const like = `%${opts.q}%`; args.push(like, like);
+  }
+  return { where, args };
+}
+
+/** ONE SQL definition per Work-board lifecycle bucket — the filter, the row's
+ *  `attention` flag and the tab badges all read these same expressions, so a
+ *  badge count can never disagree with the rows its tab lists.
+ *
+ *  attention  — see `taskAttentionSql` (recency-windowed, hence a function).
+ *  inprogress — still accumulating turns.
+ *  judged     — carries an overall judge score or a composite.
+ *  reported   — closed but never scored (no judge configured / skipped).
+ *  orphaned   — reaper-closed; the un-windowed ledger of segmentation debt. */
+const TASK_VIEW_SQL: Record<Exclude<ApmeTaskView, 'attention'>, string> = {
+  inprogress: 't.ended_at IS NULL',
+  judged: `${TASK_SCORE_SQL} IS NOT NULL`,
+  reported: `(t.ended_at IS NOT NULL AND ${TASK_SCORE_SQL} IS NULL)`,
+  orphaned: `t.boundary_signal = 'orphaned'`,
+};
+
 export class ApmeStore {
   private db: BetterSqliteDb | null = null;
   public enabled = false;
@@ -1109,27 +1177,29 @@ export class ApmeStore {
     outcome?: string;
     /** 'closed' — boundary hit; 'open' — still accumulating; default both. */
     state?: 'closed' | 'open';
+    /** Work-board lifecycle bucket — see `TASK_VIEW_SQL` for the one
+     *  definition each bucket has. */
+    view?: ApmeTaskView;
+    /** Row ordering. Default is pure recency — the pre-existing contract that
+     *  buildApmeGraph ("most recent task units"), the activity snapshot and
+     *  the Tasks tab all assume. `'attention'` (Work board only) floats the
+     *  attention bucket first, then recency. */
+    order?: 'recency' | 'attention';
     /** Substring match over the task summary and its run's first prompt. */
     q?: string;
   } = {}): { total: number; tasks: ApmeTaskListRow[] } {
     if (!this.db) return { total: 0, tasks: [] };
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
     const offset = Math.max(opts.offset ?? 0, 0);
-    const where: string[] = [];
-    const args: unknown[] = [];
-    // `_empty` runs are bookkeeping shells, never work the user did.
-    where.push("COALESCE(r.task_category, '') != '_empty'");
-    if (opts.agentType) { where.push('r.agent_type = ?'); args.push(opts.agentType); }
-    if (opts.projectName) { where.push('r.project_name = ?'); args.push(opts.projectName); }
-    if (opts.category) { where.push('COALESCE(t.task_category, r.task_category) = ?'); args.push(opts.category); }
-    if (opts.outcome) { where.push('t.outcome = ?'); args.push(opts.outcome); }
+    const { where, args } = buildTaskFilterWhere(opts);
+    const attentionSql = taskAttentionSql(Date.now() - TASK_ATTENTION_WINDOW_MS);
+    if (opts.view) where.push(opts.view === 'attention' ? attentionSql : TASK_VIEW_SQL[opts.view]);
     if (opts.state === 'closed') where.push('t.ended_at IS NOT NULL');
     if (opts.state === 'open') where.push('t.ended_at IS NULL');
-    if (opts.q) {
-      where.push('(t.summary LIKE ? OR r.task_prompt LIKE ?)');
-      const like = `%${opts.q}%`; args.push(like, like);
-    }
     const whereSql = `WHERE ${where.join(' AND ')}`;
+    const orderSql = opts.order === 'attention'
+      ? 'ORDER BY attention DESC, t.started_at DESC'
+      : 'ORDER BY t.started_at DESC';
     const total = (this.db.prepare(
       `SELECT COUNT(*) AS n FROM tasks t JOIN runs r ON r.id = t.run_id ${whereSql}`,
     ).get(...args) as { n: number }).n;
@@ -1141,15 +1211,82 @@ export class ApmeStore {
               (SELECT COUNT(*) FROM turns tu WHERE tu.task_id = t.id AND tu.response IS NOT NULL) AS answered_turns,
               (SELECT COUNT(*) FROM sample_events se WHERE se.task_id = t.id) AS event_count,
               (SELECT COUNT(*) FROM sample_events se WHERE se.task_id = t.id AND se.kind = 'tool') AS tool_count,
+              (SELECT COALESCE(SUM(COALESCE(tu.files_modified, 0) + COALESCE(tu.files_created, 0)), 0)
+                 FROM turns tu WHERE tu.task_id = t.id) AS files_touched,
               (SELECT tu.prompt FROM turns tu WHERE tu.task_id = t.id ORDER BY tu.turn_index ASC LIMIT 1) AS first_prompt,
               (SELECT e.score FROM evals e WHERE e.task_id = t.id AND e.metric = 'overall' ORDER BY e.created_at DESC LIMIT 1) AS overall_score,
-              (SELECT COUNT(*) FROM evals e WHERE e.task_id = t.id) AS eval_count
+              (SELECT COUNT(*) FROM evals e WHERE e.task_id = t.id) AS eval_count,
+              (${attentionSql}) AS attention
        FROM tasks t JOIN runs r ON r.id = t.run_id
        ${whereSql}
-       ORDER BY t.started_at DESC
+       ${orderSql}
        LIMIT ? OFFSET ?`,
     ).all(...args, limit, offset) as Array<Record<string, unknown>>;
     return { total, tasks: rows.map(rowToTaskListRow) };
+  }
+
+  /** 10 s TTL cache for `taskViewCounts`, keyed by the filter tuple. The Work
+   *  board polls every 15 s and refetches on every interaction; the badges
+   *  are a full-table aggregate with correlated eval subqueries, so paying it
+   *  at most once per TTL bounds the cost of leaving the dashboard open. */
+  private viewCountsCache = new Map<string, { at: number; value: Record<'all' | ApmeTaskView, number> }>();
+
+  /** Per-lifecycle-bucket totals for the Work board's tab badges. Takes the
+   *  same NARROWING filters as `listTaskPage` (agent/project/category/
+   *  outcome/q) so a filtered board's badges count what its tabs would list —
+   *  buckets and filters read the same SQL definitions, so the two cannot
+   *  disagree. */
+  taskViewCounts(filters: {
+    agentType?: string; projectName?: string; category?: string; outcome?: string; q?: string;
+  } = {}): Record<'all' | ApmeTaskView, number> {
+    const empty = { all: 0, attention: 0, inprogress: 0, judged: 0, reported: 0, orphaned: 0 } as const;
+    if (!this.db) return { ...empty };
+    const key = JSON.stringify([filters.agentType, filters.projectName, filters.category, filters.outcome, filters.q]);
+    const cached = this.viewCountsCache.get(key);
+    if (cached && Date.now() - cached.at < 10_000) return cached.value;
+    const attentionSql = taskAttentionSql(Date.now() - TASK_ATTENTION_WINDOW_MS);
+    const { where, args } = buildTaskFilterWhere(filters);
+    const row = this.db.prepare(
+      `SELECT COUNT(*) AS all_n,
+              SUM(CASE WHEN ${attentionSql} THEN 1 ELSE 0 END) AS attention_n,
+              SUM(CASE WHEN ${TASK_VIEW_SQL.inprogress} THEN 1 ELSE 0 END) AS inprogress_n,
+              SUM(CASE WHEN ${TASK_VIEW_SQL.judged} THEN 1 ELSE 0 END) AS judged_n,
+              SUM(CASE WHEN ${TASK_VIEW_SQL.reported} THEN 1 ELSE 0 END) AS reported_n,
+              SUM(CASE WHEN ${TASK_VIEW_SQL.orphaned} THEN 1 ELSE 0 END) AS orphaned_n
+       FROM tasks t JOIN runs r ON r.id = t.run_id
+       WHERE ${where.join(' AND ')}`,
+    ).get(...args) as Record<string, number | null>;
+    const value = {
+      all: row.all_n ?? 0,
+      attention: row.attention_n ?? 0,
+      inprogress: row.inprogress_n ?? 0,
+      judged: row.judged_n ?? 0,
+      reported: row.reported_n ?? 0,
+      orphaned: row.orphaned_n ?? 0,
+    };
+    if (this.viewCountsCache.size > 20) this.viewCountsCache.clear();
+    this.viewCountsCache.set(key, { at: Date.now(), value });
+    return value;
+  }
+
+  /** Per-tool call counts for a page of tasks, in one grouped query. Feeds the
+   *  shared `foldActionCounts` projection — the store returns raw counts, the
+   *  HTTP layer folds. */
+  toolCountsForTasks(taskIds: readonly string[]): Map<string, Array<{ name: string; count: number }>> {
+    const out = new Map<string, Array<{ name: string; count: number }>>();
+    if (!this.db || taskIds.length === 0) return out;
+    const placeholders = taskIds.map(() => '?').join(',');
+    const rows = this.db.prepare(
+      `SELECT task_id, tool_name, COUNT(*) AS n FROM sample_events
+       WHERE kind = 'tool' AND tool_name IS NOT NULL AND task_id IN (${placeholders})
+       GROUP BY task_id, tool_name`,
+    ).all(...taskIds) as Array<{ task_id: string; tool_name: string; n: number }>;
+    for (const r of rows) {
+      const list = out.get(r.task_id) ?? [];
+      list.push({ name: r.tool_name, count: r.n });
+      out.set(r.task_id, list);
+    }
+    return out;
   }
 
   /** Distinct values behind the task list's filters, so the UI offers what the
@@ -1756,12 +1893,17 @@ function rowToTaskListRow(r: Record<string, unknown>): ApmeTaskListRow {
     projectPath: (r.project_path as string | null) ?? null,
     parentRunId: (r.parent_run_id as string | null) ?? null,
     firstPrompt: (r.first_prompt as string | null) ?? (r.run_prompt as string | null) ?? null,
+    // The task's OWN first turn prompt, with NO run-prompt fallback: title
+    // derivation must never name task 2+ of a split run after task 0's intent.
+    ownFirstPrompt: (r.first_prompt as string | null) ?? null,
     turnCount: (r.turn_count as number | null) ?? 0,
     answeredTurns: (r.answered_turns as number | null) ?? 0,
     eventCount: (r.event_count as number | null) ?? 0,
     toolCount: (r.tool_count as number | null) ?? 0,
+    filesTouched: (r.files_touched as number | null) ?? 0,
     evalCount: (r.eval_count as number | null) ?? 0,
     overallScore: (r.overall_score as number | null) ?? (r.composite_score as number | null) ?? null,
+    attention: r.attention === 1,
   };
 }
 

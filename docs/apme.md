@@ -456,7 +456,7 @@ composite = 0.40 × outcomeScore
 | GET | `/apme/activity` | Swift/CLI 로컬 기록을 자동 중복 제거·병합한 간단한 에이전트 활동 요약 |
 | GET | `/apme/runs?limit=&agent=&model=` | 최근 runs + evals + overallScore |
 | GET | `/apme/run/:id` | 단일 run 상세 (steps, turns, per-turn evals, vibe) |
-| GET | `/apme/tasks?limit=&offset=&agent=&project=&category=&outcome=&state=&q=` | **처리된 task 단위 전체 목록** (paged + faceted) |
+| GET | `/apme/tasks?limit=&offset=&agent=&project=&category=&outcome=&state=&view=&sort=&q=` | **처리된 task 단위 전체 목록** (paged + faceted) — Work 판의 데이터 소스. `view` = 라이프사이클 버킷(`attention`/`inprogress`/`judged`/`reported`/`orphaned`), `sort=attention` 은 Work 판 **전용** attention-first 정렬(기본은 순수 최신순 — graph/activity 등 다른 `listTaskPage` 소비자의 기존 계약). 응답에 `viewCounts`(탭 배지 — 행과 **같은 협소 필터**를 받아 배지·행이 어긋날 수 없고, 10초 TTL 캐시)와 행별 `title`(`deriveTaskTitle`, `ownFirstPrompt` 전용)·`actionFold`(`foldActionCounts`)·`coordination`(dispatch/메시징 카운트)·`attention` 플래그 포함. 버킷 정의는 store 의 `TASK_VIEW_SQL`/`taskAttentionSql` 한 곳이고 attention 식은 `IFNULL(...,0)` — NULL 점수 행이 DESC 정렬에서 맨 뒤로 가라앉는 SQLite 함정 방지. attention 은 7일 최근성 창(`TASK_ATTENTION_WINDOW_MS`): 실측(2026-08-28)에서 무창 버킷이 1,519개 중 1,412개를 담아 트리아지가 아니라 아카이브였다. **Swift 데몬 미지원**: Swift 는 `/apme/tasks/:id` 상세만 서빙하며 자체 번들 대시보드(`apple/AgentDeck/Resources/apme-dashboard.html`)를 우선 서빙하므로, 포트를 Swift 가 잡은 동안 Work 판은 도달하지 않는다 — Node 대시보드는 이 경우를 라벨된 상태로 표시("Task list unavailable"). Swift 목록 라우트 + Work 판 포팅은 명시적 후속 부채 |
 | GET | `/apme/tasks/:id` | 단일 task 상세 — task row + run context + turns + evals + SessionSample |
 | GET | `/apme/graph?limit=&minHubDegree=&turns=&files=&agent=&project=&category=` | 행 저장소의 property-graph 투영 (nodes/edges/stats) |
 | GET | `/apme/scorecard` | `v_model_scorecard` |
@@ -531,6 +531,44 @@ SSOT: `shared/src/timeline-task-display.ts` (`timelineShouldRenderTaskRow` /
 `TimelineStripView.swift`, Android `TimelineDisplay.kt`+`TimelineStrip.kt`,
 TUI `renderer.ts`. 글랜스 표면(ESP32 카드/티커, 양 데몬의
 `lastEventText` milestone 선정)은 task 행을 아예 제외하고 turn 행만 쓴다.
+
+### 태스크 이름 — intent 제목 + judge 요약의 우선순위 (2026-08-28)
+
+`task_start.raw` 는 더 이상 `Task N` 이 아니다. 승격 시점에 태스크의 **첫 user
+prompt** 에서 제목을 파생한다 — SSOT `shared/src/task-title.ts`
+(`deriveTaskTitle`). 규칙: 마크업으로 **시작하는** 프롬프트는 기계 주입이므로
+통째로 null(내부 본문을 제목으로 승격하지 않음), 그 외 첫 줄 중 ASCII 슬래시
+**명령**(경로 `/Users/...` 는 명령이 아님 — 두 번째 `/` 로 구분)·마크업·코드
+펜스가 아닌 줄, 마크다운 장식 제거, **72 code point** 캡(모든 인덱스 연산이
+code point — UTF-16 단위 금지), 4 미만이면 null → `Task N` 폴백.
+
+**한 줄 슬롯의 우선순위는 judge 요약 > intent 제목** (`timelineTaskHeaderDisplay`
+2026-08-28 계약 플립): 타임라인 행이 갖는 유일한 한 줄에서 outcome 문장이
+intent 를 이긴다 — intent 제목은 판정 전(그리고 영원히 미판정인 대다수)의
+공백을 채운다. 미러 3곳(Swift `TimelineStripView`, Kotlin `TimelineDisplay`,
+TUI=shared 직수입)과 Work 판 라벨이 같은 우선순위를 쓴다.
+
+파생 구현은 Node(`shared/src/task-title.ts`)와 Swift
+`ApmeCollector.deriveTaskTitle` 손 미러 두 곳이지만, 패리티는 산문이 아니라
+**공유 벡터 파일** `shared/task-title-vectors.json` 이 고정한다 — vitest 와
+XCTest 가 같은 파일을 리플레이하므로 한쪽만 고친 규칙 변경은 반대쪽에서
+빨간불이 된다. `/apme/tasks` 의 `title` 은 태스크 **자신의** 첫 턴 프롬프트
+(`ownFirstPrompt`)에서만 파생한다 — run 프롬프트 폴백을 쓰면 분할된 run 의
+태스크 2+가 태스크 0 의 의도로 이름 붙는다.
+
+### 범용 idle-gap 경계 (2026-08-28)
+
+claude-code/codex 는 명시적 경계(`/clear`·manual·session_end)뿐이어서 유일한
+암묵 종결이 30분 orphan reaper 였다 — 실측: codex 태스크 **289/289 (100%)**
+가 `orphaned`, 평균 2.4시간 열려 있다가 10%만 judge 도달(open-task eval
+starvation). collector 가 이제 **turn 종료(closeTurn)에 15분 타이머**를 걸고
+새 turn 이 열리면 해제한다(`AGENT_IDLE_GAP_MS`, 측정 근거: 실제 turn 간격의
+96%(claude)/87%(codex)가 15분 미만이고 그 위는 대부분 리퍼의 30분도 넘겨 이미
+분할되던 구간). 에이전트 무관 범용 — OpenClaw/OpenCode 는 어댑터 소유 90초
+타이머(명시적 idle 이벤트 기반)가 먼저 닫고, 이 타이머는 활성 태스크가 없어
+no-op. Swift 데몬의 기존 `idleGapSec`(1800→900)도 같은 값으로 정렬(응답 후
+arm, min-turn-age 가드 포함 — arm 지점은 다르지만 상수는 한 사실). 게이트:
+`bridge/src/__tests__/apme-idle-gap-and-title.test.ts`.
 
 ## Settings
 

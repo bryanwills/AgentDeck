@@ -1267,6 +1267,34 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(header.taskOutcome, "abandoned")
     }
 
+    func testJudgeSummaryOutranksMeaningfulOwnTitle() {
+        // Contract flip 2026-08-28 (shared/src/timeline-task-display.ts):
+        // intent-derived titles hold the slot until the judge answers; once a
+        // summary exists it wins, so the outcome sentence is never invisible.
+        let entries = [
+            TimelineEntry(
+                ts: 1000,
+                type: .taskStart,
+                raw: "Fix eink ticker",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                taskId: "task-1"
+            ),
+            TimelineEntry(
+                ts: 2000,
+                type: .taskEnd,
+                raw: "Session end · 2 turns · 6m 5s",
+                agentType: "claude-code",
+                projectName: "AgentDeck",
+                taskId: "task-1",
+                boundarySignal: .sessionEnd,
+                taskSummary: "Fixed the ticker overflow"
+            ),
+        ]
+        let header = timelineTaskHeaderDisplay(for: entries[0], in: entries)
+        XCTAssertEqual(header.title, "Fixed the ticker overflow")
+    }
+
     func testDashboardDisplayHidesInterruptedReaperClosurePair() {
         // Reaper-synthesized interrupted closures carry no judge payload —
         // the whole pair stays invisible instead of surfacing lifecycle noise.

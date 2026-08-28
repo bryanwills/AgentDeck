@@ -382,22 +382,68 @@ export interface ApmeTaskListRow extends ApmeTaskRow {
   /** The task's own first prompt; falls back to the run prompt when the task
    *  predates per-turn prompt capture. */
   firstPrompt: string | null;
+  /** The task's own first turn prompt with NO run-prompt fallback — the only
+   *  legitimate input to title derivation (a fallback would name task 2+ of a
+   *  split run after task 0's intent). */
+  ownFirstPrompt: string | null;
   turnCount: number;
   /** Turns whose assistant reply was archived. `turnCount - answeredTurns > 0`
    *  marks a unit the judge can only partly see. */
   answeredTurns: number;
   eventCount: number;
   toolCount: number;
+  /** Sum of files modified + created across the task's turns. */
+  filesTouched: number;
   evalCount: number;
   overallScore: number | null;
+  /** True when the row matches the Work board's attention bucket (orphaned
+   *  boundary, unarchived reply on a closed task, or a red-band score). The
+   *  flag is computed by the same SQL expression that filters the Attention
+   *  tab, so a striped row and the tab's membership can never disagree. */
+  attention: boolean;
+}
+
+/** Generic idle-gap boundary, in ms: a session whose last turn CLOSED this
+ *  long ago with no new prompt closes its active task with
+ *  `boundary_signal='idle_gap'`. Shared because BOTH daemons enforce it
+ *  (Node `ApmeCollector.armIdleGapTimer`, Swift `ApmeCollector.idleGapSec` —
+ *  the Swift value is this constant in seconds; change the two together).
+ *
+ *  Why 15 minutes (measured 2026-08-28 on the real store): 96% of claude-code
+ *  inter-turn gaps (87% codex) are under 15 min, and nearly everything above
+ *  is also past the 30-minute orphan reaper — already split today, just
+ *  mislabeled `orphaned` and judged hours late (codex tasks averaged 2.4 h
+ *  open; 10% ever judged). */
+export const AGENT_IDLE_GAP_MS = 900_000;
+
+/** Work-board lifecycle buckets. `attention` is a cross-cutting triage bucket;
+ *  the other four partition a task's lifecycle. One SQL definition per bucket
+ *  lives in the store (`TASK_VIEW_SQL`) — filter, row flag and tab badge all
+ *  read it. */
+export type ApmeTaskView = 'attention' | 'inprogress' | 'judged' | 'reported' | 'orphaned';
+
+/** A task list row enriched at the HTTP layer with the display projections the
+ *  Work board renders — the intent-derived title (`deriveTaskTitle`) and the
+ *  folded action line (`foldActionCounts`). Kept out of `ApmeTaskListRow` so
+ *  the store returns raw facts and the projections stay in their SSOTs. */
+export interface ApmeWorkBoardRow extends ApmeTaskListRow {
+  /** Intent title from the task's first prompt, or null (render `Task N`). */
+  title: string | null;
+  /** `Edit×9 Read×24 · 2 files`, or null when there is nothing to fold. */
+  actionFold: string | null;
+  /** Subagent dispatches / agent-to-agent messages this task made
+   *  (`agentCoordinationSummary`), or null for a plain single-agent task. */
+  coordination: { dispatches: number; messages: number } | null;
 }
 
 export interface ApmeTaskListResponse extends ApmeApiEnvelope {
   total: number;
   limit: number;
   offset: number;
-  tasks: ApmeTaskListRow[];
+  tasks: ApmeWorkBoardRow[];
   facets: { agents: string[]; projects: string[]; categories: string[]; outcomes: string[] };
+  /** Tab badges for the Work board — same bucket definitions as `view`. */
+  viewCounts: Record<'all' | ApmeTaskView, number>;
 }
 
 export interface ApmeRunDetailResponse extends ApmeApiEnvelope {

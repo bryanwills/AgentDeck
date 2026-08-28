@@ -1303,5 +1303,30 @@ final class ApmeTaskBoundaryTests: XCTestCase {
             XCTAssertTrue(prompt.contains("summary"), "rubric asks for summary")
         }
     }
+
+    // MARK: - deriveTaskTitle parity (hand mirror of shared/src/task-title.ts)
+
+    /// Replays the SHARED vector file (shared/task-title-vectors.json) — the
+    /// same file vitest replays against the TS implementation. A rule change
+    /// that edits only one side goes red on the other; that is the whole
+    /// parity gate for this hand mirror.
+    func testDeriveTaskTitleMatchesSharedVectors() async throws {
+        struct Vector: Decodable {
+            let input: String?
+            let expected: String?
+            let note: String
+        }
+        let vectorsURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // AgentDeckTests/
+            .deletingLastPathComponent()   // apple/
+            .deletingLastPathComponent()   // repo root
+            .appendingPathComponent("shared/task-title-vectors.json")
+        let data = try Data(contentsOf: vectorsURL)
+        let vectors = try JSONDecoder().decode([Vector].self, from: data)
+        XCTAssertGreaterThanOrEqual(vectors.count, 12, "vector file too small to be a gate")
+        for v in vectors {
+            XCTAssertEqual(ApmeCollector.deriveTaskTitle(v.input), v.expected, v.note)
+        }
+    }
 }
 #endif

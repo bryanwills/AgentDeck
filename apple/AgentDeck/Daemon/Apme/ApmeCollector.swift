@@ -97,6 +97,10 @@ final class ApmeCollector {
         let startedAt: Int
         var firstTurnIndex: Int?
         var lastTurnIndex: Int?
+        /// First user prompt attached to this task — `deriveTaskTitle` turns
+        /// it into the task_start display title at promotion time. Mirrors
+        /// ActiveTask.firstPrompt in bridge/src/apme/collector.ts.
+        var firstPrompt: String? = nil
         /// True once a `task_start` row has been broadcast to the dashboard
         /// timeline. Stays false for short single-turn conversations that
         /// never trip TodoWrite or a second prompt — keeping the noisy
@@ -139,7 +143,14 @@ final class ApmeCollector {
     /// Claude hook path at all; this generous backstop keeps the two daemons
     /// behaving the same for every normal session while still bounding the
     /// truly-idle ones. Tests inject a small value to exercise the timer.
-    var idleGapSec: TimeInterval = 1800
+    /// 900 s = the shared SSOT `AGENT_IDLE_GAP_MS` in seconds
+    /// (shared/src/eval-schema.ts — change the two together). Measured
+    /// 2026-08-28 on the real store: 96% of claude-code inter-turn gaps
+    /// (87% codex) are under 15 min, and nearly everything above it is also
+    /// above the 30-minute orphan reaper — i.e. already split today, just
+    /// mislabeled `orphaned` and judged hours late (codex tasks averaged
+    /// 2.4 h open; only 10% were ever judged).
+    var idleGapSec: TimeInterval = 900
 
     /// Minimum age of the session's active turn (in seconds) for
     /// `setTurnResponse` to be allowed to arm the idle-gap timer. Defends
@@ -335,13 +346,20 @@ final class ApmeCollector {
                 let turnIndex = prevIndex + 1
                 let turnId = UUID().uuidString
                 sessionToTurn[key] = ActiveTurn(id: turnId, runId: runId, index: turnIndex, startedAt: nowMs(), prompt: prompt)
+                // The displaced-close above re-armed the idle-gap timer; a new
+                // turn is the "still working" signal, so disarm it again
+                // (mirrors the Node collector's clear at sessionToTurn.set).
+                idleGapTasks.removeValue(forKey: key)?.cancel()
                 // Ensure an active task exists so the new turn can attach to it.
                 // openTaskIfNone is idempotent — back-to-back turns within a task
                 // all share the same task_id until a boundary signal closes it.
                 let task = openTaskIfNone(sessionKey: key, runId: runId)
                 let priorFirstTurn = sessionToTask[key]?.firstTurnIndex
                 if var t = sessionToTask[key] {
-                    if t.firstTurnIndex == nil { t.firstTurnIndex = turnIndex }
+                    if t.firstTurnIndex == nil {
+                        t.firstTurnIndex = turnIndex
+                        t.firstPrompt = prompt
+                    }
                     t.lastTurnIndex = turnIndex
                     sessionToTask[key] = t
                 }
@@ -722,14 +740,18 @@ final class ApmeCollector {
             "filesCreated": turn.filesCreated,
             "endSource": source,
         ])
-        // NOTE: idle-gap arming used to live here, but `closeTurn` runs at
-        // the start of every `user_prompt_submit` — *just before* a new
-        // turn opens. That meant the timer was armed for 90 s of the
-        // freshly-started turn, and a long agent generation / tool call
-        // could trip it mid-turn. Codex stop-time review flagged the race.
-        // Arming now lives at the end of `setTurnResponse`, which fires
-        // when the assistant's reply lands (chat_end / Stop hook): the
-        // true "user is now idle" moment.
+        // Idle-gap arming returns here (2026-08-28), but with the OPPOSITE
+        // fire guard from the setTurnResponse arm: this one fires only when
+        // NO turn is open. The race that evicted the first attempt — closeTurn
+        // runs at the start of every user_prompt_submit, just before a new
+        // turn opens, so the timer covered a freshly-started turn — is closed
+        // twice over: the prompt branch cancels the timer again AFTER the new
+        // turn opens, and `handleIdleGapFire` with a nil turn snapshot
+        // refuses to close while any turn is open. Without this arm,
+        // stop-emitting agents (Claude/Codex/OpenCode — whose Stop removes
+        // the turn) could NEVER hit the setTurnResponse guard, so idle_gap
+        // never fired for exactly the sessions the measurement was about.
+        scheduleIdleGapClose(sessionKey: sessionKey, afterTurnClose: true)
     }
 
     // MARK: - Task lifecycle
@@ -804,7 +826,10 @@ final class ApmeCollector {
         emitTimelineEntry?(DaemonTimelineEntry(
             ts: Double(task.startedAt),
             type: "task_start",
-            raw: "Task \(task.index + 1)",
+            // Intent-derived title (first user prompt); the `Task N` fallback
+            // is deliberately the display SSOT's "non-meaningful" shape, so an
+            // unnamed header keeps the judge-summary-as-title behavior.
+            raw: Self.deriveTaskTitle(task.firstPrompt) ?? "Task \(task.index + 1)",
             agentType: run?.agentType,
             projectName: run?.projectName,
             sessionId: run?.sessionId,
@@ -814,6 +839,70 @@ final class ApmeCollector {
         ))
         task.timelineEmitted = true
         sessionToTask[sessionKey] = task
+    }
+
+    /// Derive a task's display title from its first user prompt.
+    ///
+    /// Hand mirror of `deriveTaskTitle` in shared/src/task-title.ts — same
+    /// rules, same constants, and the same UNITS: every index compares code
+    /// points (unicode scalars), never UTF-16 units or grapheme clusters.
+    /// Parity is pinned by `shared/task-title-vectors.json`, replayed by BOTH
+    /// suites (vitest task-title.test.ts / ApmeTaskBoundaryTests) — a rule
+    /// change that edits only one implementation goes red on the other.
+    ///
+    /// Rules: a markup-first prompt is nil (machine plumbing); otherwise the
+    /// first line that is not blank / an ASCII slash command / markup / a
+    /// code fence, markdown furniture stripped, whitespace collapsed, capped
+    /// at 72 code points with an ellipsis (word boundary preferred in the
+    /// back half), rejecting fragments shorter than 4 code points.
+    static func deriveTaskTitle(_ firstPrompt: String?) -> String? {
+        guard let prompt = firstPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !prompt.isEmpty else { return nil }
+        let maxChars = 72
+        let minChars = 4
+
+        var line = ""
+        var sawAnyLine = false
+        for rawLine in prompt.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\n" || $0 == "\r\n" }) {
+            let candidate = rawLine.trimmingCharacters(in: .whitespaces)
+            if candidate.isEmpty { continue }
+            // A prompt STARTING with markup (<task-notification>, a pasted
+            // reminder) is machine plumbing — never promote its inner body.
+            if !sawAnyLine, candidate.hasPrefix("<") { return nil }
+            sawAnyLine = true
+            // A slash COMMAND, not a slash PATH: one ASCII-word token after
+            // the slash, then whitespace or end-of-line ('/task close', not
+            // '/Users/x/cli.ts crashes'). ASCII on purpose — slash commands
+            // are ASCII by construction, so '/작업 정리해줘' stays a title.
+            if candidate.range(of: "^/[a-zA-Z][a-zA-Z0-9_-]*(\\s|$)", options: .regularExpression) != nil { continue }
+            // Markup after a real first line, and code fences, are skipped.
+            if candidate.hasPrefix("<") { continue }
+            if candidate.hasPrefix("```") { continue }
+            line = candidate
+            break
+        }
+        if line.isEmpty { return nil }
+
+        // Markdown furniture: heading #, list -/*, quote >.
+        if let range = line.range(of: "^#{1,6}\\s+", options: .regularExpression) { line.removeSubrange(range) }
+        if let range = line.range(of: "^[-*]\\s+", options: .regularExpression) { line.removeSubrange(range) }
+        if let range = line.range(of: "^>\\s+", options: .regularExpression) { line.removeSubrange(range) }
+        line = line.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+
+        let points = Array(line.unicodeScalars)
+        if points.count < minChars { return nil }
+        if points.count <= maxChars { return line }
+
+        // All index math is in CODE POINTS (unicode scalars) — never
+        // Character distance, which counts grapheme clusters and would put
+        // the word-boundary threshold in a different place than the TS side.
+        let window = Array(points.prefix(maxChars))
+        let lastSpace = window.lastIndex(of: " " as Unicode.Scalar)
+        let cutLen = (lastSpace != nil && lastSpace! >= maxChars / 2) ? lastSpace! : maxChars
+        var cut = String(String.UnicodeScalarView(window.prefix(cutLen)))
+        while cut.hasSuffix(" ") { cut.removeLast() }
+        return cut + "…"
     }
 
     /// Arm the idle-gap timer for one session. After `idleGapSec` of no new
@@ -834,31 +923,38 @@ final class ApmeCollector {
     /// after the next `user_prompt_submit` has already rotated the active
     /// turn to a brand-new (still generating) turn — without that guard the
     /// fresh turn would get an idle-gap timer pointed at it.
-    private func scheduleIdleGapClose(sessionKey: String) {
+    private func scheduleIdleGapClose(sessionKey: String, afterTurnClose: Bool = false) {
         idleGapTasks.removeValue(forKey: sessionKey)?.cancel()
         guard let snapshotTaskId = sessionToTask[sessionKey]?.id else { return }
-        guard let turn = sessionToTurn[sessionKey] else {
-            // No active turn → we're not at a "user is idle" boundary
-            // (we're either between session events or mid-cleanup). Arming
-            // here would be incorrect; skip.
-            return
+        var snapshotTurnId: String? = nil
+        if afterTurnClose {
+            // Arm from closeTurn: idle begins when the turn ENDS. The fire
+            // guard for this arm is "no turn open" (nil snapshot), so a turn
+            // that opens later — even if the cancel loses a race — makes the
+            // fire a no-op. Mirrors the Node collector's armIdleGapTimer.
+            guard sessionToTurn[sessionKey] == nil else { return }
+        } else {
+            guard let turn = sessionToTurn[sessionKey] else {
+                // No active turn → the closeTurn arm owns this shape.
+                return
+            }
+            let now = nowMs()
+            let turnAgeMs = max(0, now - turn.startedAt)
+            let minAgeMs = Int(idleGapMinTurnAgeSec * 1000)
+            if turnAgeMs < minAgeMs {
+                // Race-tainted: the active turn was opened so recently that the
+                // response we're claiming to have just captured almost certainly
+                // belongs to the previous (now closed) turn. Skip arming — a
+                // genuine setTurnResponse for the current turn will arrive
+                // later (after the agent finishes) and arm correctly then.
+                DaemonLogger.shared.debug(
+                    "APME",
+                    "scheduleIdleGapClose skipped — activeTurn age \(turnAgeMs)ms < min \(minAgeMs)ms (race guard)"
+                )
+                return
+            }
+            snapshotTurnId = turn.id
         }
-        let now = nowMs()
-        let turnAgeMs = max(0, now - turn.startedAt)
-        let minAgeMs = Int(idleGapMinTurnAgeSec * 1000)
-        if turnAgeMs < minAgeMs {
-            // Race-tainted: the active turn was opened so recently that the
-            // response we're claiming to have just captured almost certainly
-            // belongs to the previous (now closed) turn. Skip arming — a
-            // genuine setTurnResponse for the current turn will arrive
-            // later (after the agent finishes) and arm correctly then.
-            DaemonLogger.shared.debug(
-                "APME",
-                "scheduleIdleGapClose skipped — activeTurn age \(turnAgeMs)ms < min \(minAgeMs)ms (race guard)"
-            )
-            return
-        }
-        let snapshotTurnId = turn.id
         let delaySec = idleGapSec
         idleGapTasks[sessionKey] = Task { [weak self] in
             let nanos = UInt64(max(0, delaySec) * 1_000_000_000)
@@ -868,13 +964,20 @@ final class ApmeCollector {
         }
     }
 
-    /// Called by the idle-gap Task when the timer matures. Closes only the
-    /// originally-snapshotted (task, turn) pair. If a new turn has opened —
-    /// continuation prompt arrived during the gap and beat the cancel to
-    /// the main actor — the snapshot mismatch keeps the task alive.
-    private func handleIdleGapFire(sessionKey: String, snapshotTaskId: String, snapshotTurnId: String) {
+    /// Called by the idle-gap Task when the timer matures. Two arm shapes,
+    /// two guards: a `setTurnResponse` arm (snapshotTurnId set — the
+    /// lost-Stop shape where the turn stays open with its reply captured)
+    /// closes only the originally-snapshotted (task, turn) pair; a
+    /// `closeTurn` arm (snapshotTurnId nil — stop-emitting agents) closes
+    /// only while NO turn is open. Either way a continuation prompt that
+    /// beat the cancel keeps the task alive.
+    private func handleIdleGapFire(sessionKey: String, snapshotTaskId: String, snapshotTurnId: String?) {
         guard let active = sessionToTask[sessionKey], active.id == snapshotTaskId else { return }
-        guard let turn = sessionToTurn[sessionKey], turn.id == snapshotTurnId else { return }
+        if let snapshotTurnId {
+            guard let turn = sessionToTurn[sessionKey], turn.id == snapshotTurnId else { return }
+        } else {
+            guard sessionToTurn[sessionKey] == nil else { return }
+        }
         closeTask(sessionKey: sessionKey, boundarySignal: "idle_gap")
     }
 

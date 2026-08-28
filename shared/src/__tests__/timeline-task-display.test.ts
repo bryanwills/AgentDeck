@@ -108,9 +108,18 @@ describe('timelineTaskHeaderDisplay', () => {
     expect(d.closedAtMs).toBe(4800);
   });
 
-  it('keeps a meaningful own title over the judge summary', () => {
+  it('the judge summary outranks a meaningful own title (outcome > intent in the one line a row gets)', () => {
+    // Contract flip 2026-08-28: intent-derived titles (deriveTaskTitle) fill
+    // the slot until the judge answers; once a summary exists it wins, so the
+    // outcome sentence is never rendered nowhere.
     const start = row({ taskId: 'a', raw: 'Fix eink ticker' });
     const end = row({ type: 'task_end', taskId: 'a', taskSummary: 'Fixed the ticker overflow' });
+    expect(timelineTaskHeaderDisplay(start, [start, end]).title).toBe('Fixed the ticker overflow');
+  });
+
+  it('a meaningful own title holds the slot while the task is unjudged', () => {
+    const start = row({ taskId: 'a', raw: 'Fix eink ticker' });
+    const end = row({ type: 'task_end', taskId: 'a', raw: 'Session end · 2 turns · 1m' });
     expect(timelineTaskHeaderDisplay(start, [start, end]).title).toBe('Fix eink ticker');
   });
 

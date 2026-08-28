@@ -118,7 +118,9 @@ internal fun taskHeaderDisplay(entry: TimelineEntry, siblings: List<TimelineEntr
     val closure = taskClosure(entry, siblings)
     val ownTitle = entry.summary.trim()
     val summary = (closure?.taskSummary ?: entry.taskSummary)?.trim().orEmpty()
-    val title = if (isMeaningfulTaskTitle(ownTitle)) ownTitle else summary.ifEmpty { ownTitle }
+    // Summary-first — the judge's outcome sentence outranks the intent title
+    // in the one line a task gets. Mirrors shared/src/timeline-task-display.ts.
+    val title = summary.ifEmpty { ownTitle }
     val closureText = closure?.summary?.trim()?.takeIf { it.isNotEmpty() }
     val outcome = (closure?.taskOutcome ?: entry.taskOutcome)?.trim()?.takeIf { it.isNotEmpty() }
     return TaskHeaderDisplay(

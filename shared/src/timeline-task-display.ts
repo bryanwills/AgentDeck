@@ -13,8 +13,11 @@
  *     boundaries: the noise showed and the signal hid.
  *   - A task renders as at most ONE row: its `task_start` header, which FOLDS
  *     IN the matching closure's fields — closure label (`task_end.raw`, e.g.
- *     "Session end · 2 turns · 6m 5s"), judge summary as the title when the
- *     header's own title is a bare "Task N", and the score/outcome badge.
+ *     "Session end · 2 turns · 6m 5s"), the judge's one-line summary as the
+ *     title WHENEVER it exists (the outcome outranks the intent in the single
+ *     line a row gets; the intent-derived header title — `deriveTaskTitle` —
+ *     fills the slot until the judge answers, and forever for unjudged
+ *     tasks), and the score/outcome badge.
  *   - Header visibility: meaningful title OR eval payload (own or closure).
  *     `_empty` category always hides. Bare unjudged tasks — including every
  *     interrupted reaper closure — render nothing; the timeline stays an
@@ -85,8 +88,9 @@ export function timelineShouldRenderTaskRow(
 }
 
 export interface TaskHeaderDisplay {
-  /** Header title: the row's own title when meaningful, else the judge's
-   *  one-line summary from the closure, else the raw title as-is. */
+  /** Header title: the judge's one-line summary when it exists (outcome
+   *  outranks intent in the one line a row gets), else the row's own title —
+   *  intent-derived via `deriveTaskTitle`, or the raw `Task N` fallback. */
   title: string;
   /** Closure label to render as a trailing chip ("Session end · 2 turns ·
    *  6m 5s"). Undefined while the task is open. */
@@ -110,7 +114,10 @@ export function timelineTaskHeaderDisplay(
   const closure = timelineTaskClosure(entry, siblings);
   const ownTitle = (entry.raw ?? '').trim();
   const summary = (closure?.taskSummary ?? entry.taskSummary ?? '').trim();
-  const title = timelineIsMeaningfulTaskTitle(ownTitle) ? ownTitle : (summary || ownTitle);
+  // Summary-first: this is the ONLY line a task gets on the timeline, and the
+  // judge's outcome sentence is strictly more informative than the prompt it
+  // answered. Intent titles (deriveTaskTitle) cover the unjudged majority.
+  const title = summary || ownTitle;
   const closureText = closure?.raw?.trim() || undefined;
   const score = closure?.taskScore ?? entry.taskScore;
   const outcome = (closure?.taskOutcome ?? entry.taskOutcome)?.trim() || undefined;

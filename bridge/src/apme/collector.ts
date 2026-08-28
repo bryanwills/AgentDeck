@@ -24,7 +24,7 @@ import type { SessionEntry } from '../session-registry.js';
 import type { ApmeStore } from './store.js';
 import type { ApmeRunRow } from './types.js';
 import type { AgentType, TelemetrySpan, ApmeSampleEventRow, TrajectoryEventKind, TurnEndSource } from '@agentdeck/shared';
-import { isPricedModel, normalizeModelProvider, priceUsd } from '@agentdeck/shared';
+import { AGENT_IDLE_GAP_MS, deriveTaskTitle, isPricedModel, normalizeModelProvider, priceUsd } from '@agentdeck/shared';
 import type { ApmeHwSampler } from './hw-sampler.js';
 import { classifyRunSmart, computeSignals, classify } from './classifier.js';
 import { readOpenTurnEvidence, type OpenTurnEvidence } from './claude-transcript-reader.js';
@@ -67,6 +67,15 @@ const DUPLICATE_TURN_OPEN_WINDOW_MS = 15_000;
  *  Matches the watchdog's `TURN_OPEN_SLACK_MS` — same comparison, same risk. */
 const TURN_INTERRUPT_SLACK_MS = 2_000;
 
+/** The constant (and its measurement) lives in the shared SSOT — both daemons
+ *  enforce it. The timer here is armed in `closeTurn` (work finished, idle
+ *  begins) and cleared on the next turn open, so it can never fire mid-turn
+ *  however long the agent works. It is deliberately generic across agents:
+ *  OpenClaw/OpenCode close earlier via their adapter-owned 90 s timers (those
+ *  ride an explicit idle event; this one rides the absence of one), after
+ *  which this timer finds no active task and no-ops. */
+export { AGENT_IDLE_GAP_MS };
+
 interface ActiveTask {
   id: string;
   runId: string;
@@ -76,6 +85,9 @@ interface ActiveTask {
   firstTurnIndex: number | null;
   /** turn_index of the last turn attached; updated on every insertTurn. */
   lastTurnIndex: number | null;
+  /** First user prompt attached to this task — the material `deriveTaskTitle`
+   *  turns into the task's display title at promotion time. */
+  firstPrompt: string | null;
   /** Whether the `task_start` timeline row has been emitted yet. Deferred:
    *  a single-turn Q&A never trips this, so it produces no TASK header on the
    *  dashboard (just its chat rows). Promoted to true by
@@ -143,6 +155,10 @@ export type OnTaskOpened = (args: {
   projectName: string | null;
   taskIndex: number;
   startedAt: number;
+  /** Display title derived from the task's first user prompt
+   *  (`deriveTaskTitle` SSOT), or null when the prompt yields nothing
+   *  meaningful — consumers keep their `Task N` fallback on null. */
+  title: string | null;
 }) => void;
 
 /** Callback fired when the agent declares its todos done mid-task (the
@@ -229,6 +245,11 @@ export class ApmeCollector {
    *  several all-completed TodoWrite calls; surface only the first. */
   private readonly sessionToLastMilestone = new Map<string, string>();
 
+  /** Per-session idle-gap timers — armed in `closeTurn`, cleared on the next
+   *  turn open / task close. See `AGENT_IDLE_GAP_MS` for the measurement the
+   *  constant rests on. */
+  private readonly sessionToIdleGapTimer = new Map<string, ReturnType<typeof setTimeout>>();
+
   constructor(
     private readonly store: ApmeStore,
     private readonly hwSampler?: ApmeHwSampler,
@@ -236,6 +257,8 @@ export class ApmeCollector {
      *  client abort, or never having run at all. Injectable for tests; the
      *  default reads the Claude transcript tail once for all three. */
     private readonly openTurnProbe: (transcriptPath: string, sinceMs: number) => OpenTurnEvidence | null = readOpenTurnEvidence,
+    /** Injectable for tests only — production call sites take the default. */
+    private readonly idleGapMs: number = AGENT_IDLE_GAP_MS,
   ) {}
 
   /** Start a new run and return its id. Safe to call if store disabled (returns ''). */
@@ -336,13 +359,18 @@ export class ApmeCollector {
         prompt, hasResponse: false,
       };
       this.sessionToTurn.set(sessionId, turn);
+      // A new turn is the "still working" signal the idle-gap timer waits on.
+      this.clearIdleGapTimer(sessionId);
       // Ensure an active task exists so this turn can attach to it. Tasks group
       // consecutive turns between boundary signals (TodoWrite all-completed,
       // /clear, session_end). First turn in a run opens task 0.
       const task = this.openTaskIfNone(sessionId, runId);
       if (task) {
         const wasFirstTurn = task.firstTurnIndex === null;
-        if (wasFirstTurn) task.firstTurnIndex = turnIndex;
+        if (wasFirstTurn) {
+          task.firstTurnIndex = turnIndex;
+          task.firstPrompt = prompt ?? null;
+        }
         task.lastTurnIndex = turnIndex;
         // Second (or later) turn on the same task proves it's a real,
         // multi-turn work unit → promote the deferred TASK header so the
@@ -584,6 +612,9 @@ export class ApmeCollector {
     } catch (err) {
       debug('APME', `closeTurn failed: ${String(err)}`);
     }
+    // Idle starts when the turn ends. The timer is cleared by the next turn
+    // open (still working) or by closeTask (boundary reached another way).
+    this.armIdleGapTimer(sessionId);
   }
 
   /** Get the current active turn ID for a session (if any). */
@@ -654,6 +685,7 @@ export class ApmeCollector {
       startedAt: Date.now(),
       firstTurnIndex: null,
       lastTurnIndex: null,
+      firstPrompt: null,
       timelineEmitted: false,
     };
     this.sessionToTask.set(sessionId, task);
@@ -693,9 +725,37 @@ export class ApmeCollector {
         projectName: run?.projectName ?? null,
         taskIndex: task.index,
         startedAt: task.startedAt,
+        title: deriveTaskTitle(task.firstPrompt),
       });
     } catch (err) {
       debug('APME', `onTaskOpened listener threw: ${String(err)}`);
+    }
+  }
+
+  /** Arm the per-session idle-gap timer. Called from `closeTurn` — the turn
+   *  just finished, so the gap being measured is genuine idle time, never the
+   *  agent's own working time. Re-arming replaces any previous timer. */
+  private armIdleGapTimer(sessionId: string): void {
+    this.clearIdleGapTimer(sessionId);
+    const timer = setTimeout(() => {
+      this.sessionToIdleGapTimer.delete(sessionId);
+      // A turn opened since (and its clear lost a race), or work is mid-turn:
+      // never split under an active turn.
+      if (this.sessionToTurn.has(sessionId)) return;
+      if (!this.sessionToTask.has(sessionId)) return;
+      debug('APME', `idle gap (${Math.round(this.idleGapMs / 1000)}s) → closing task for ${sessionId.slice(0, 8)}`);
+      this.closeTask(sessionId, 'idle_gap');
+    }, this.idleGapMs);
+    // Never hold the process open for an idle bookkeeping timer.
+    timer.unref?.();
+    this.sessionToIdleGapTimer.set(sessionId, timer);
+  }
+
+  private clearIdleGapTimer(sessionId: string): void {
+    const timer = this.sessionToIdleGapTimer.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this.sessionToIdleGapTimer.delete(sessionId);
     }
   }
 
@@ -730,6 +790,7 @@ export class ApmeCollector {
     if (!task) return;
     this.sessionToTask.delete(sessionId);
     this.sessionToLastMilestone.delete(sessionId);
+    this.clearIdleGapTimer(sessionId);
 
     // Empty task: no turns ever attached. Drop the row so the dashboard
     // doesn't show phantom entries from back-to-back boundary signals.

@@ -93,6 +93,23 @@ class TimelineTaskHierarchyTest {
     }
 
     @Test
+    fun `judge summary outranks a meaningful own title`() {
+        // Contract flip 2026-08-28 (shared/src/timeline-task-display.ts):
+        // intent-derived titles hold the slot until the judge answers; once a
+        // summary exists it wins, so the outcome sentence is never invisible.
+        val entries = listOf(
+            entry("task_start", timestamp = 1_000, summary = "Fix eink ticker", taskId = "a"),
+            entry(
+                "task_end", timestamp = 6_500, taskId = "a", boundarySignal = "session_end",
+                summary = "Session end · 2 turns · 6m 5s",
+                taskSummary = "Fixed the ticker overflow",
+            ),
+        )
+        val header = taskHeaderDisplay(entries[0], entries)
+        assertEquals("Fixed the ticker overflow", header.title)
+    }
+
+    @Test
     fun `interrupted reaper closure pair leaves no visible row`() {
         val entries = listOf(
             entry("task_start", timestamp = 1_000, summary = "Task 1", taskId = "a"),

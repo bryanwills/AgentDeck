@@ -1361,7 +1361,9 @@ func timelineTaskHeaderDisplay(
     let ownTitle = entry.raw.trimmingCharacters(in: .whitespacesAndNewlines)
     let summary = (closure?.taskSummary ?? entry.taskSummary)?
         .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    let title = timelineIsMeaningfulTaskTitle(ownTitle) ? ownTitle : (summary.isEmpty ? ownTitle : summary)
+    // Summary-first — the judge's outcome sentence outranks the intent title
+    // in the one line a task gets. Mirrors shared/src/timeline-task-display.ts.
+    let title = summary.isEmpty ? ownTitle : summary
     let closureText = closure?.raw.trimmingCharacters(in: .whitespacesAndNewlines)
     let outcome = (closure?.taskOutcome ?? entry.taskOutcome)?
         .trimmingCharacters(in: .whitespacesAndNewlines)

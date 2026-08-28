@@ -148,13 +148,17 @@ export async function initApme(
   // dashboard does — so we keep this strictly local to the timeline path.
   if (emitTimeline) {
     collector.onTaskOpened = ({
-      taskId, runId, sessionId, agentType, projectName, taskIndex, startedAt,
+      taskId, runId, sessionId, agentType, projectName, taskIndex, startedAt, title,
     }) => {
       promotedTaskIds.add(taskId);
       emitTimeline({
         ts: startedAt,
         type: 'task_start',
-        raw: `Task ${taskIndex + 1}`,
+        // Intent-derived title (first user prompt, `deriveTaskTitle` SSOT).
+        // The `Task N` fallback is deliberately the display SSOT's
+        // "non-meaningful" shape, so an unnamed header keeps today's
+        // judge-summary-as-title behavior downstream.
+        raw: title ?? `Task ${taskIndex + 1}`,
         agentType: agentType ?? undefined,
         projectName: projectName ?? undefined,
         sessionId,

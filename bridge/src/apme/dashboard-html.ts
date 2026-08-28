@@ -99,6 +99,25 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 .vibe-current{font-size:11px;color:var(--dim);display:flex;align-items:center;margin-left:8px}
 
 .panel{display:none}.panel.visible{display:block;height:100%}
+
+/* ── Work board ── */
+.work-tabs{display:flex;gap:4px;padding:8px 10px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
+.work-tab{padding:3px 10px;border-radius:10px;font-size:11px;color:var(--dim);cursor:pointer;border:1px solid transparent;background:none}
+.work-tab:hover{color:var(--muted)}
+.work-tab.active{background:rgba(129,140,248,0.15);color:var(--accent);border-color:rgba(129,140,248,0.3)}
+.work-tab .n{opacity:0.75;margin-left:3px;font-variant-numeric:tabular-nums}
+.work-row{padding:9px 12px;border-bottom:1px solid rgba(51,65,85,0.5);cursor:pointer}
+.work-row:hover{background:rgba(30,42,59,0.8)}
+.work-row.selected{background:rgba(99,102,241,0.15)}
+.work-row.attn{box-shadow:inset 3px 0 0 var(--yellow)}
+.work-title{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);font-weight:600;min-width:0}
+.work-title .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.work-title .t.unnamed{color:var(--muted);font-weight:500;font-style:italic}
+.work-sub{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:10.5px;color:var(--dim);margin-top:3px;font-variant-numeric:tabular-nums}
+.chip{font-size:10px;padding:1px 7px;border-radius:9px;background:var(--surface);color:var(--muted);border:1px solid var(--border);white-space:nowrap}
+.chip-ok{background:rgba(34,197,94,0.12);color:var(--green);border-color:rgba(34,197,94,0.3)}
+.chip-warn{background:rgba(245,158,11,0.12);color:var(--yellow);border-color:rgba(245,158,11,0.3)}
+.chip-bad{background:rgba(239,68,68,0.12);color:var(--red);border-color:rgba(239,68,68,0.3)}
 /* Graph needs a column flex box so the canvas can claim the leftover height. */
 .panel#panel-graph.visible{display:flex;flex-direction:column}
 .activity-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;padding:10px;background:var(--surface);border-bottom:1px solid var(--border)}
@@ -119,7 +138,8 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
   <!-- Left: runs list + tabs -->
   <div class="left">
     <div class="tabs">
-      <button class="tab active" onclick="showTab('activity')">Activity</button>
+      <button class="tab active" onclick="showTab('work')">Work</button>
+      <button class="tab" onclick="showTab('activity')">Activity</button>
       <button class="tab" onclick="showTab('runs')">Runs</button>
       <button class="tab" onclick="showTab('tasks')">Tasks</button>
       <button class="tab" onclick="showTab('graph')">Graph</button>
@@ -128,7 +148,22 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
       <button class="tab" onclick="showTab('categories')">Categories</button>
     </div>
     <div class="table-wrap">
-      <div class="panel visible" id="panel-activity">
+      <!-- Work board: task-first default view. One row = intent title +
+           outcome/score, sub-line = boundary provenance chip + folded actions.
+           Lifecycle sub-tabs are triage (attention first, then recency) and
+           their badge counts come from the same SQL bucket definitions as the
+           filter, so tab and rows cannot disagree. -->
+      <div class="panel visible" id="panel-work">
+        <div class="work-tabs" id="work-tabs"></div>
+        <div style="display:flex;gap:6px;padding:6px 10px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap">
+          <input id="w-q" placeholder="Search prompt / summary" oninput="workSearchDebounced()" style="background:var(--bg);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;flex:1;min-width:140px">
+          <select id="w-agent" onchange="loadWork(0)" style="background:var(--bg);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px"><option value="">All Agents</option></select>
+          <select id="w-project" onchange="loadWork(0)" style="background:var(--bg);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px"><option value="">All Projects</option></select>
+        </div>
+        <div id="work-rows"></div>
+        <div id="work-pager" style="display:flex;gap:8px;align-items:center;justify-content:center;padding:10px;font-size:11px;color:var(--dim)"></div>
+      </div>
+      <div class="panel" id="panel-activity">
         <div class="activity-cards" id="activity-cards"></div>
         <table><thead><tr>
           <th>Agent</th><th>Task</th><th>Project</th><th>When</th><th>Time</th>
@@ -208,6 +243,7 @@ function showTab(n){
   if(n==='tasks'&&!tasksLoaded){tasksLoaded=true;loadTasks(0)}
   if(n==='graph'){requestAnimationFrame(()=>loadGraph())}
   if(n==='activity'){loadActivity()}
+  if(n==='work'){loadWork(workOffset)}
 }
 function fs(s){if(s==null)return'<span class="score score-na">—</span>';const p=Math.round(s*100),c=p>=70?'high':p>=40?'mid':'low';return'<span class="score score-'+c+'">'+p+'%</span>'}
 function fo(o){if(!o)return'';return'<span class="badge badge-'+o+'">'+o+'</span>'}
@@ -222,7 +258,8 @@ async function loadActivity(){
     cards.innerHTML=(d.agents||[]).map(a=>'<div class="activity-card"><div class="agent">'+esc(a.agentType)+'</div><div class="time">'+fd(a.durationMs)+'</div><div class="count">'+a.taskCount+' task'+(a.taskCount===1?'':'s')+'</div></div>').join('')||'<div class="empty">No activity yet</div>';
     const body=document.getElementById('activity-body');
     body.innerHTML=activityRows.map((x,i)=>'<tr onclick="selectActivity('+i+')"><td>'+esc(x.agentType)+'</td><td class="task-col" title="'+esc(x.task)+'">'+esc(x.task.slice(0,90))+'</td><td>'+esc(x.projectName||'—')+'</td><td>'+new Date(x.startedAt).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</td><td>'+fd(x.durationMs)+'</td></tr>').join('')||'<tr><td colspan="5" class="empty">No collected tasks yet</td></tr>';
-    document.getElementById('status').textContent=activityRows.length+' tasks · '+new Date().toLocaleTimeString();
+    if(document.getElementById('panel-activity').classList.contains('visible'))
+      document.getElementById('status').textContent=activityRows.length+' tasks · '+new Date().toLocaleTimeString();
   }catch(e){document.getElementById('status').textContent='Error: '+e.message}
 }
 function selectActivity(i){
@@ -593,6 +630,116 @@ function fillTaskFacets(f){
 }
 function taskSearchDebounced(){clearTimeout(taskSearchTimer);taskSearchTimer=setTimeout(()=>loadTasks(0),250)}
 
+/* ── Work board ────────────────────────────────────────────────────────────
+   Task-first default view. Rows come from /apme/tasks (server-paged), whose
+   ordering is attention-first, then recency. The lifecycle sub-tabs map to
+   the endpoint's \`view\` buckets; badge counts ride the same response so a
+   tab can never disagree with its rows. */
+let workOffset=0,workTotal=0,workView='',workSearchTimer=null,workCounts=null;const WORK_PAGE=50;
+const WORK_VIEWS=[['','All'],['attention','Attention'],['judged','Judged'],['reported','Reported'],['inprogress','In progress'],['orphaned','Orphaned']];
+const SIG_LABEL={todo_complete:'TODO done',clear:'/clear',session_end:'Session end',manual:'Manual',idle_gap:'Idle gap',orphaned:'Orphaned',open:'open'};
+/* Boundary provenance: explicit (user/agent said so) > inferred (idle gap) >
+   default (session end) > reaper (orphaned). The chip color says how much to
+   trust the segmentation, not how well the task went. */
+function sigChip(sig){
+  const cls=(sig==='clear'||sig==='manual'||sig==='todo_complete')?'chip chip-ok'
+    :sig==='idle_gap'?'chip chip-warn'
+    :sig==='orphaned'?'chip chip-bad':'chip';
+  return '<span class="'+cls+'" title="task boundary source">'+esc(SIG_LABEL[sig]||sig||'—')+'</span>';
+}
+function ago(ts){
+  if(!ts)return'—';const s=Math.max(0,Math.round((Date.now()-ts)/1000));
+  if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';
+  if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';
+}
+function renderWorkTabs(){
+  const counts=workCounts||{};
+  document.getElementById('work-tabs').innerHTML=WORK_VIEWS.map(([v,label])=>{
+    const n=v===''?counts.all:counts[v];
+    return '<button class="work-tab'+(workView===v?' active':'')+'" onclick="setWorkView(\\''+v+'\\')">'+label+
+      (n!=null?'<span class="n">'+n+'</span>':'')+'</button>';
+  }).join('')+'<span style="margin-left:auto;font-size:10px;color:var(--dim)">attention first, then recency</span>';
+}
+function setWorkView(v){workView=v;loadWork(0)}
+async function loadWork(offset){
+  workOffset=offset||0;
+  const rowsEl=document.getElementById('work-rows');
+  const p=new URLSearchParams();
+  p.set('limit',String(WORK_PAGE));p.set('offset',String(workOffset));p.set('sort','attention');
+  if(workView)p.set('view',workView);
+  const q=document.getElementById('w-q').value.trim();if(q)p.set('q',q);
+  const ag=document.getElementById('w-agent').value;if(ag)p.set('agent',ag);
+  const pr=document.getElementById('w-project').value;if(pr)p.set('project',pr);
+  try{
+    const r=await fetch(api('/apme/tasks?'+p.toString()));
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    const tasks=d.tasks||[];workTotal=d.total||0;workCounts=d.viewCounts||null;
+    renderWorkTabs();
+    // A page that shrank under us (idle-gap closes, filters) leaves a stale
+    // offset past the new total — clamp back instead of rendering an empty
+    // page with no pager (which the 15s tick would then refetch forever).
+    if(!tasks.length&&workTotal>0&&workOffset>0){
+      loadWork(Math.max(0,Math.floor((workTotal-1)/WORK_PAGE)*WORK_PAGE));
+      return;
+    }
+    const fill=(id,vals)=>{const s=document.getElementById(id);const cur=s.value;
+      while(s.options.length>1)s.remove(1);
+      (vals||[]).forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;s.add(o)});
+      s.value=cur;};
+    fill('w-agent',(d.facets||{}).agents);fill('w-project',(d.facets||{}).projects);
+    if(!tasks.length){rowsEl.innerHTML='<div class="empty">No tasks in this view</div>';document.getElementById('work-pager').textContent='';return}
+    let h='';
+    for(const t of tasks){
+      // Summary-first, like the timeline SSOT: the judge's outcome sentence
+      // outranks the intent title; the intent covers the unjudged majority.
+      const label=t.summary||t.title||('Task '+(t.taskIndex+1));
+      const unnamed=!t.title&&!t.summary;
+      const gap=t.turnCount>t.answeredTurns
+        ?'<span title="'+(t.turnCount-t.answeredTurns)+' turn(s) archived without a reply" style="color:var(--yellow)">◍</span>':'';
+      const open=!t.endedAt;
+      const score=t.overallScore!=null?fs(t.overallScore)
+        :open?'<span class="badge badge-pending">open</span>'
+        :'<span style="font-size:10px;color:var(--dim)">unjudged</span>';
+      // Cost basis grammar: bare $ only for a KNOWN figure, ≈$ for estimates.
+      const cost=t.costUsd!=null?(t.costKnown?'$':'≈$')+t.costUsd.toFixed(2):'';
+      const turns=t.turnCount?t.turnCount+' turn'+(t.turnCount===1?'':'s'):'';
+      h+='<div class="work-row'+(t.attention?' attn':'')+(selTaskId===t.id?' selected':'')+'" id="wr-'+t.id+'" onclick="selectTask(\\''+t.id+'\\')">'+
+        '<div class="work-title"><span class="t'+(unnamed?' unnamed':'')+'" title="'+esc(t.firstPrompt||label)+'">'+esc(label)+'</span>'+gap+
+          (t.outcome?fo(t.outcome):'')+score+'</div>'+
+        '<div class="work-sub">'+
+          sigChip(open?'open':t.boundarySignal)+
+          '<span class="chip">'+esc(t.agentType||'—')+'</span>'+
+          (t.taskCategory?'<span class="badge-cat">'+esc(t.taskCategory)+'</span>':'')+
+          (t.coordination?'<span class="chip" title="subagent dispatches / agent-to-agent messages" style="color:var(--accent);border-color:rgba(129,140,248,0.3)">'+
+            (t.coordination.dispatches?'⑂×'+t.coordination.dispatches:'')+
+            (t.coordination.dispatches&&t.coordination.messages?' ':'')+
+            (t.coordination.messages?'✉×'+t.coordination.messages:'')+'</span>':'')+
+          (t.actionFold?'<span>'+esc(t.actionFold)+'</span>':'')+
+          (turns?'<span>'+turns+'</span>':'')+
+          (cost?'<span>'+cost+'</span>':'')+
+          '<span style="margin-left:auto">'+ago(t.startedAt)+'</span>'+
+        '</div></div>';
+    }
+    rowsEl.innerHTML=h;
+    const from=workTotal?workOffset+1:0,to=Math.min(workOffset+tasks.length,workTotal);
+    document.getElementById('work-pager').innerHTML=
+      '<button onclick="loadWork('+Math.max(0,workOffset-WORK_PAGE)+')" '+(workOffset<=0?'disabled':'')+' style="background:var(--surface);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:3px 10px;cursor:pointer">Prev</button>'+
+      '<span>'+from+'–'+to+' of '+workTotal+'</span>'+
+      '<button onclick="loadWork('+(workOffset+WORK_PAGE)+')" '+(to>=workTotal?'disabled':'')+' style="background:var(--surface);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:3px 10px;cursor:pointer">Next</button>';
+    if(document.getElementById('panel-work').classList.contains('visible'))
+      document.getElementById('status').textContent=workTotal+' tasks · '+new Date().toLocaleTimeString();
+  }catch(e){
+    // The Swift daemon build ships no /apme/tasks LIST route (only the detail
+    // route) — say which capability is missing instead of a bare error, so a
+    // degraded board is a labeled state, not a mystery.
+    rowsEl.innerHTML='<div class="empty">Task list unavailable ('+esc(e.message)+').<br>'+
+      'This daemon build may not serve /apme/tasks — the Node.js daemon does; Activity and Runs tabs still work.</div>';
+    document.getElementById('work-pager').textContent='';
+  }
+}
+function workSearchDebounced(){clearTimeout(workSearchTimer);workSearchTimer=setTimeout(()=>loadWork(0),250)}
+
 async function selectTask(id){
   selTaskId=id;
   const el=document.getElementById('detail-panel');
@@ -607,7 +754,7 @@ async function selectTask(id){
        '<span>'+(t.startedAt?new Date(t.startedAt).toLocaleString():'—')+'</span>'+
        '<span>'+(t.endedAt?fd(t.endedAt-t.startedAt):'<span style="color:var(--yellow)">open</span>')+'</span>'+
        '<span>boundary '+esc(t.boundarySignal||'—')+'</span></div></div>';
-    h+='<div class="section"><div class="metric-grid">'
+    h+='<div class="section"><div class="metric-grid">'+
        '<div class="metric-card"><div class="lbl">Score</div><div class="val">'+fs(d.overallScore??t.compositeScore)+'</div></div>'+
        '<div class="metric-card"><div class="lbl">Turns</div><div class="val">'+turns.length+'</div></div>'+
        '<div class="metric-card"><div class="lbl">Events</div><div class="val">'+((sample&&sample.events?sample.events.length:0))+'</div></div>'+
@@ -635,7 +782,12 @@ async function selectTask(id){
     h+='</div>';
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div class="detail-empty">Error: '+esc(e.message)+'</div>'}
-  loadTasks(taskOffset);
+  // Move the selection highlight in place — a full list refetch just to move
+  // a CSS class was the dashboard's most expensive click.
+  if(document.getElementById('panel-work').classList.contains('visible')){
+    document.querySelectorAll('.work-row.selected').forEach(r=>r.classList.remove('selected'));
+    const row=document.getElementById('wr-'+id);if(row)row.classList.add('selected');
+  } else loadTasks(taskOffset);
 }
 
 async function loadScorecard(){
@@ -833,12 +985,13 @@ function showTabById(n){
   if(btn)btn.click();
 }
 
-loadActivity();loadRuns();loadRecommend();loadScorecard();loadCategories();
+loadWork(0);loadActivity();loadRuns();loadRecommend();loadScorecard();loadCategories();
 setInterval(loadRuns,15000);setInterval(loadRecommend,30000);setInterval(loadScorecard,30000);setInterval(loadCategories,30000);
-// Tasks refresh only while its tab is up — the query is server-paged and there
-// is no reason to run it against the store every 15s in the background.
+// Tasks/Work refresh only while their tab is up — the query is server-paged and
+// there is no reason to run it against the store every 15s in the background.
 setInterval(()=>{if(document.getElementById('panel-tasks').classList.contains('visible'))loadTasks(taskOffset)},15000);
 setInterval(()=>{if(document.getElementById('panel-activity').classList.contains('visible'))loadActivity()},15000);
+setInterval(()=>{if(document.getElementById('panel-work').classList.contains('visible'))loadWork(workOffset)},15000);
 </script>
 </body>
 </html>`;
