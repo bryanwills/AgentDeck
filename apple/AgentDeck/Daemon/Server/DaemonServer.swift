@@ -858,7 +858,22 @@ final class DaemonServer {
     private let auth = AuthManager.shared
     private let portableWeather = SwiftPortableMetWeatherProvider()
     private let surfaceFirmware = SwiftSurfaceFirmwareStore(baseDirectory: AgentDeckPaths.baseDirectory)
-    private let surfaceLearningPack = try? SwiftSurfaceLearningPack.load()
+    // A failed load must be distinguishable from "no pack bundled": a bare
+    // `try?` here made a corrupt bundle / digest mismatch silently serve 503
+    // forever with nothing in the log saying why. `resourceMissing` is the
+    // legitimate not-bundled case and stays quiet-ish; every other throw is a
+    // shipped-but-broken pack and logs as an error.
+    private let surfaceLearningPack: SwiftSurfaceLearningPack? = {
+        do {
+            return try SwiftSurfaceLearningPack.load()
+        } catch SwiftSurfaceLearningPack.ValidationError.resourceMissing {
+            DaemonLogger.shared.info("[Surface] no learning pack bundled")
+            return nil
+        } catch {
+            DaemonLogger.shared.error("[Surface] learning pack failed to load: \(error)")
+            return nil
+        }
+    }()
     private var surfaceNegotiations: [UUID: SurfaceRuntimeNegotiation] = [:]
     private var surfaceOutboxLedger: [String: [String: Any]] = [:]
     private var surfaceOutboxOrder: [String] = []
@@ -2911,13 +2926,15 @@ final class DaemonServer {
                 id: request.queryParams["id"], version: request.queryParams["version"]) else {
                 return .json(["error": "learning_pack_not_found"], status: 404)
             }
+            // Content-Length and Connection are appended by
+            // HTTPServer.formatHTTPResponse for EVERY response — setting them
+            // here again shipped both headers twice, which is an RFC 9110
+            // violation strict clients refuse.
             return HTTPServer.HTTPResponse(status: 200, headers: [
                 "Content-Type": "application/vnd.pocketdaily.learning-pack",
-                "Content-Length": String(pack.bytes.count),
                 "X-Learning-Pack-MD5": pack.advert.md5,
                 "X-Learning-Pack-License": pack.advert.licenseSpdx,
                 "Cache-Control": "no-store",
-                "Connection": "close",
             ], body: pack.bytes)
         }
 

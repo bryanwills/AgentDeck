@@ -12,7 +12,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { SurfaceLearningPackAdvert } from '@agentdeck/shared';
 
-export const LEARNING_PACK_PATH = '/learning/pack' as const;
+// The HTTP path constant lives in shared/src/protocol.ts (LEARNING_PACK_PATH)
+// — the wire SSOT the daemon routes on. Do not re-declare it here.
 export const POCKET_DAILY_LEARNING_PACK_ID = 'jp-n3-ko' as const;
 export const LEARNING_PACK_FORMAT = 1 as const;
 export const LEARNING_PACK_MAX_BYTES = 16 * 1024 * 1024;
