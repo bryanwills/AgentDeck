@@ -7,8 +7,8 @@ locale: en
 canonical: true
 status: required
 owner: Apple release maintainers
-reviewed: 2026-08-12
-revision: 2026-08-12
+reviewed: 2026-08-28
+revision: 2026-08-28
 source_of_truth: apple/APP_REVIEW_NOTES.md
 validators: [bash apple/scripts/verify-appstore-archive.sh]
 ---
@@ -44,12 +44,14 @@ AgentDeck Dashboard requires `com.apple.security.network.server`. The app is not
 1. **The AgentDeck Dashboard iOS companion app** (same bundle family, `bound.serendipity.agent.deck`). The user's own iPhone/iPad discovers the Mac over Bonjour on the same Wi-Fi network and opens a WebSocket connection to the Mac to receive live session events. The Mac cannot reach the iOS device as a client — the iOS app is a pure client with no server entitlement, so this data path only exists if the Mac accepts inbound connections.
 2. **AI coding-agent lifecycle hooks.** When the user opts in, Claude Code / Codex (the user's own separately-installed CLIs, running in their own terminal under their own process tree) POST session events to `http://127.0.0.1:<port>/hooks/...`. AgentDeck is the HTTP server receiving those POSTs.
 3. **Optional hardware plugins** on the same machine or LAN — the Elgato Stream Deck plugin and the Ulanzi Studio plugin connect inbound over WebSocket to render session state on the user's deck hardware.
+4. **Optional paired Pocket Daily readers** on the same LAN — an offline-first e-reader pulls a bounded Surface feed and a bundled Japanese study pack. The read-only pack endpoint requires the same pairing token plus the registered eight-field Surface identity and explicit learning-pack capabilities.
 
 **Scope and safety.**
 
 - Binding is limited to loopback and the local network interfaces. The app opens no firewall rules, performs no port mapping/UPnP, and accepts no traffic from the public internet.
 - Endpoints are read-only dashboard reads plus the local hook POST endpoint.
 - Connections from outside the machine must be paired (the iOS companion pairs via a QR code / auth token shown on the Mac). This is enforced at the socket layer: a non-local WebSocket upgrade without the pairing token is rejected with 401, non-local HTTP requests without the token are denied except a minimal `GET /health` that carries no credentials or session data, and the Bonjour TXT record never contains the token.
+- The learning pack is a non-executable signed-bundle resource. Before serving it, the Swift daemon verifies its CC BY-SA 4.0 source ledger and attribution, transfer MD5, fixed-format header checksum, and payload SHA-256. It reads no external file and starts no process.
 
 **How to verify during review.** Launch the app, then open Settings → Port to see the active listening port (9120 by default), and use "Pair iPad" in the menu bar to display the pairing QR code the iOS companion scans to connect inbound. With the app running, `lsof -nP -iTCP -sTCP:LISTEN | grep AgentDeck` shows the AgentDeck process listening on it.
 
@@ -133,7 +135,7 @@ Claude Code hooks run `python3` / `curl` at the user's shell prompt, in their ow
 
 ### Bundled helpers
 
-The App Store archive contains no `Contents/Helpers/`, no `Contents/Resources/node`, no `Contents/Resources/agentdeck-runtime`, and no `Contents/Resources/bridge/cli.js`. The sole binary is `Contents/MacOS/AgentDeck`; every feature claimed on the product page is implemented by that Swift app and its sandbox-approved frameworks.
+The App Store archive contains no `Contents/Helpers/`, no `Contents/Resources/node`, no `Contents/Resources/agentdeck-runtime`, and no `Contents/Resources/bridge/cli.js`. The sole binary is `Contents/MacOS/AgentDeck`; non-executable resources include the attributed CC BY-SA Japanese study pack. Every feature claimed on the product page is implemented by that Swift app and its sandbox-approved frameworks.
 
 ### OpenClaw Gateway integration
 

@@ -191,6 +191,18 @@
         "md5": { "type": "string", "pattern": "^[0-9a-f]{32}$" }
       }
     },
+    "learningPackAdvert": {
+      "type": "object",
+      "required": ["id", "version", "format", "size", "md5", "licenseSpdx"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 31 },
+        "version": { "type": "integer", "minimum": 1 },
+        "format": { "const": 1 },
+        "size": { "type": "integer", "minimum": 1, "maximum": 16777216 },
+        "md5": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "licenseSpdx": { "enum": ["CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0"] }
+      }
+    },
     "cardFeedResponse": {
       "type": "object",
       "required": ["type", "rev", "serverTime", "serverHm", "nextPullSec", "cards"],
@@ -204,6 +216,7 @@
         "unchanged": { "const": true },
         "glance": { "$ref": "#/$defs/glance" },
         "fw": { "$ref": "#/$defs/firmwareAdvert" },
+        "learningPack": { "$ref": "#/$defs/learningPackAdvert" },
         "cards": {
           "type": "array",
           "maxItems": 64,

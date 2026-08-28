@@ -33,7 +33,7 @@ function clone<T>(value: T): T {
 describe('Surface Protocol portable-reader/v1 Card Feed', () => {
   const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
 
-  it.each(['weather-seven-day', 'unchanged'])('validates the %s fixture', (name) => {
+  it.each(['weather-seven-day', 'unchanged', 'unchanged-learning-pack'])('validates the %s fixture', (name) => {
     const value = fixture(name);
     expect(validate(value), JSON.stringify(validate.errors, null, 2)).toBe(true);
   });
@@ -98,6 +98,16 @@ describe('Surface Protocol portable-reader/v1 Card Feed', () => {
     expect(validate(value)).toBe(false);
   });
 
+  it('bounds the licensed learning-pack advert on an unchanged feed', () => {
+    const value = fixture('unchanged-learning-pack');
+    expect(value.learningPack).toEqual({
+      id: 'jp-n3-ko', version: 1, format: 1, size: 15_236,
+      md5: 'c1c9695e8d8f531729deb25ddbea8845', licenseSpdx: 'CC-BY-SA-4.0',
+    });
+    (value.learningPack as JsonObject).licenseSpdx = 'LicenseRef-Proprietary';
+    expect(validate(value)).toBe(false);
+  });
+
   it('allows an additive optional weather field for tolerant v1 clients', () => {
     const value = fixture('weather-seven-day');
     ((value.glance as JsonObject).weather as JsonObject).futureAdditiveField = { safelyIgnored: true };
@@ -157,7 +167,7 @@ describe('Surface Protocol negotiation fixtures', () => {
   });
 
   it('keeps public fixtures free of credentials and authorization material', () => {
-    for (const name of ['weather-seven-day', 'unchanged', 'outbox-request', 'outbox-response', 'surface-welcome']) {
+    for (const name of ['weather-seven-day', 'unchanged', 'unchanged-learning-pack', 'outbox-request', 'outbox-response', 'surface-welcome']) {
       const serialized = JSON.stringify(fixture(name)).toLowerCase();
       expect(serialized).not.toMatch(/pairingtoken|authorization|auth-token|machine-token|"token"|"secret"/);
     }

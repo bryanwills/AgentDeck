@@ -184,4 +184,132 @@ actor SwiftSurfaceFirmwareStore {
         "\(identity.productId)-\(identity.board)-\(identity.updateChannel)"
     }
 }
+
+/// Signed-bundle counterpart to the Node provider's `learning-pack.ts`.
+/// It verifies licence provenance, transfer MD5, and the complete PDLP
+/// checksum contract before the daemon advertises or serves any bytes.
+struct SwiftSurfaceLearningPack: Sendable {
+    struct Advert: Codable, Equatable, Sendable {
+        let id: String
+        let version: Int
+        let format: Int
+        let size: Int
+        let md5: String
+        let licenseSpdx: String
+    }
+
+    private struct Source: Codable {
+        let name: String
+        let url: String
+        let revision: String
+        let licenseSpdx: String
+        let attribution: String
+    }
+
+    private struct Manifest: Codable {
+        let learningPack: Advert
+        let attribution: String
+        let sources: [Source]
+    }
+
+    enum ValidationError: Error, Equatable {
+        case resourceMissing
+        case invalidManifest
+        case unsupportedLicence
+        case invalidPack
+    }
+
+    let advert: Advert
+    let attribution: String
+    let bytes: Data
+
+    nonisolated static func load(bundle: Bundle = .main) throws -> Self {
+        func resource(_ name: String, extension ext: String) -> URL? {
+            bundle.url(forResource: name, withExtension: ext, subdirectory: "learning")
+                ?? bundle.url(forResource: name, withExtension: ext)
+        }
+        guard let manifestURL = resource("jp-n3-ko", extension: "manifest.json"),
+              let packURL = resource("jp-n3-ko", extension: "pdl"),
+              let manifest = try? Data(contentsOf: manifestURL),
+              let pack = try? Data(contentsOf: packURL) else {
+            throw ValidationError.resourceMissing
+        }
+        return try validate(manifestBytes: manifest, packBytes: pack)
+    }
+
+    nonisolated static func validate(manifestBytes: Data, packBytes: Data) throws -> Self {
+        guard let manifest = try? JSONDecoder().decode(Manifest.self, from: manifestBytes),
+              manifest.learningPack.id == "jp-n3-ko",
+              manifest.learningPack.version > 0,
+              manifest.learningPack.format == 1,
+              manifest.learningPack.size > 0,
+              manifest.learningPack.size <= 16 * 1024 * 1024,
+              manifest.learningPack.md5.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil,
+              !manifest.attribution.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !manifest.sources.isEmpty else {
+            throw ValidationError.invalidManifest
+        }
+        let allowed = Set(["CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0"])
+        guard allowed.contains(manifest.learningPack.licenseSpdx),
+              manifest.sources.allSatisfy({ source in
+                  allowed.contains(source.licenseSpdx)
+                      && !source.name.isEmpty && !source.url.isEmpty && !source.revision.isEmpty
+                      && !source.attribution.isEmpty
+              }) else {
+            throw ValidationError.unsupportedLicence
+        }
+        guard packBytes.count == manifest.learningPack.size,
+              SwiftSurfaceFirmwareStore.md5(packBytes) == manifest.learningPack.md5,
+              packBytes.count >= 388,
+              String(data: packBytes.subdata(in: 0..<4), encoding: .ascii) == "PDLP",
+              uint16(packBytes, 4) == 1,
+              uint16(packBytes, 6) == 388,
+              uint16(packBytes, 8) == 928 else {
+            throw ValidationError.invalidPack
+        }
+        let records = Int(uint32(packBytes, 12))
+        guard records > 0,
+              Int(uint32(packBytes, 16)) == manifest.learningPack.version,
+              Int(uint32(packBytes, 20)) == packBytes.count,
+              388 + records * 928 == packBytes.count,
+              fixedString(packBytes, start: 24, length: 32) == manifest.learningPack.id,
+              fixedString(packBytes, start: 120, length: 32) == manifest.learningPack.licenseSpdx,
+              !fixedString(packBytes, start: 152, length: 40).isEmpty,
+              !fixedString(packBytes, start: 192, length: 160).isEmpty,
+              fnv32(packBytes.subdata(in: 0..<384)) == uint32(packBytes, 384),
+              Data(SHA256.hash(data: packBytes.subdata(in: 388..<packBytes.count)))
+                  == packBytes.subdata(in: 352..<384) else {
+            throw ValidationError.invalidPack
+        }
+        return Self(advert: manifest.learningPack, attribution: manifest.attribution, bytes: packBytes)
+    }
+
+    nonisolated func matchesRequest(id: String?, version: String?) -> Bool {
+        guard id == advert.id, let version, version.first != "0",
+              !version.isEmpty, version.allSatisfy(\.isNumber),
+              Int(version) == advert.version else { return false }
+        return true
+    }
+
+    nonisolated private static func uint16(_ data: Data, _ offset: Int) -> UInt16 {
+        UInt16(data[offset]) | (UInt16(data[offset + 1]) << 8)
+    }
+
+    nonisolated private static func uint32(_ data: Data, _ offset: Int) -> UInt32 {
+        UInt32(data[offset]) | (UInt32(data[offset + 1]) << 8)
+            | (UInt32(data[offset + 2]) << 16) | (UInt32(data[offset + 3]) << 24)
+    }
+
+    nonisolated private static func fixedString(_ data: Data, start: Int, length: Int) -> String {
+        let field = data.subdata(in: start..<(start + length))
+        let end = field.firstIndex(of: 0) ?? field.endIndex
+        return String(data: field[..<end], encoding: .utf8) ?? ""
+    }
+
+    nonisolated private static func fnv32(_ data: Data) -> UInt32 {
+        data.reduce(UInt32(0x811c9dc5)) { value, byte in
+            (value ^ UInt32(byte)) &* 0x01000193
+        }
+    }
+}
 #endif

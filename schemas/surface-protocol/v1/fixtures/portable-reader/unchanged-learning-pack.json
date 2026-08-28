@@ -1,0 +1,18 @@
+{
+  "type": "card_feed",
+  "rev": 1,
+  "serverTime": 1787520600000,
+  "serverHm": "06:30",
+  "nextPullSec": 1800,
+  "deckSig": "2f19a80c",
+  "unchanged": true,
+  "learningPack": {
+    "id": "jp-n3-ko",
+    "version": 1,
+    "format": 1,
+    "size": 15236,
+    "md5": "c1c9695e8d8f531729deb25ddbea8845",
+    "licenseSpdx": "CC-BY-SA-4.0"
+  },
+  "cards": []
+}

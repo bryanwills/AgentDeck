@@ -150,7 +150,7 @@ syncs (XTeink X3/X4 on battery). Types: `shared/src/protocol.ts` § Card Feed
 Pull Sync; server: `bridge/src/card-feed.ts` + the daemon routes. Both Node and the
 Swift in-process daemon implement the portable transport runtime: full identity,
 conditional Feed, Outbox replay, telemetry, product-scoped persistent pull OTA,
-bounded resume, negotiated 206, and install acknowledgement. Swift authors a bounded
+bounded resume, negotiated 206, licensed offline learning-pack delivery, and install acknowledgement. Swift authors a bounded
 THREAD digest plus MET Norway weather; Node additionally owns adaptive personal card
 modules and Glance Frame pixels. Neither daemon grants Inbox.
 Always-powered clients keep using WS; a dual-mode client uses WS while docked
@@ -249,6 +249,17 @@ Card Feed implementation.
   pull log line and `agentdeck devices` › `Card feed`. Newer firmware also
   appends `board=<id>` so the daemon can target board-specific adverts (Pull
   OTA below) without relying on its IP→board memory.
+- **Licensed learning packs (2026-08-28)**: a Pocket Daily request negotiating
+  `learning.pack.update` receives `learningPack: {id,version,format,size,md5,licenseSpdx}`
+  on both full and unchanged Feed responses. An explicit foreground Sync then
+  retrieves `GET /learning/pack?id=<id>&version=<version>` with the same Surface
+  identity and pairing token; that route additionally requires
+  `learning.pack.read`. Both Node and Swift providers validate the bundled
+  manifest, approved SPDX licence, attribution/source ledger, transfer MD5,
+  PDLP header checksum, and payload SHA-256 before advertising it. The reader
+  repeats the format and integrity validation into a temporary SD file and
+  atomically rotates the active pack. The advert is omitted while firmware OTA
+  is staged so the firmware-first recovery path keeps priority.
 - **Pull OTA (feed-carried firmware, updated 2026-08-24)**: WS OTA needs a live
   socket, which a battery client on the pull cadence never holds. Instead the
   host stages a user-supplied build with `--manifest <agentdeck-surface.json>`

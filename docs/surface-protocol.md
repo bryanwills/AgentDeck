@@ -95,7 +95,7 @@ refine that profile; they do not grant access outside it.
 | ---------------------- | --------------------------------- | --------------------------------------------------------------------- | ---------------------------------------- |
 | `dashboard-live/v1`    | WebSocket                         | live session roster, connection state, usage, and timeline projection | rich dashboard                           |
 | `companion-control/v1` | WebSocket                         | live roster plus capability-gated, correlated session control         | Bitfocus or hardware control integration |
-| `portable-reader/v1`   | HTTP pull/push; optional WS Inbox | Card Feed, Glance, conditional pull, and offline Outbox               | Pocket Daily Reader                      |
+| `portable-reader/v1`   | HTTP pull/push; optional WS Inbox | Card Feed, Glance, learning packs, conditional pull, and offline Outbox | Pocket Daily Reader                    |
 | `display-only/v1`      | WebSocket                         | connection state and bounded session projection; no commands          | status panel or sign                     |
 
 The `/v1` suffix is the profile's major version. Compatible additions stay within
@@ -257,6 +257,8 @@ profile major.
 | `weather.cues.display`  | schedule daemon-authored weather cues while disconnected                                 |
 | `weather.cues.notify`   | request local attention for an unexpired cue, subject to user permission and quiet hours |
 | `inbox.ws`              | receive a bounded feed-invalidated hint over WebSocket                                   |
+| `learning.pack.read`    | retrieve an advertised, licensed offline content pack over authenticated HTTP             |
+| `learning.pack.update`  | receive a learning-pack advert in full and unchanged Card Feed responses                  |
 | `ota.feed`              | receive a product-isolated pull-OTA advert in Card Feed                                  |
 | `device.telemetry`      | send bounded battery/link telemetry with a pull                                          |
 
@@ -310,6 +312,25 @@ This profile makes a disconnected reader useful and honest:
    `unknown_card`, and `rejected`;
 8. `board`, `productId`, and capabilities identify different facts and never
    substitute for one another.
+
+#### Licensed offline learning packs
+
+A client that negotiates `learning.pack.update` may receive a `learningPack`
+advert in either a full or `unchanged` Card Feed response. The advert contains
+the immutable package id, monotonically increasing content version, disk-format
+version, exact byte size, transfer MD5, and SPDX licence identifier. It is
+independent of `deckSig`: changing course bytes does not force a card-cache
+rewrite.
+
+The client retrieves the bytes with
+`GET /learning/pack?id=<id>&version=<version>`. That request carries the same
+eight Surface identity headers and pairing token as Feed and must negotiate
+`learning.pack.read`. Providers fail closed on an absent identity, unsupported
+product, unknown id/version, corrupt bundle, missing attribution/source ledger,
+or an unapproved content licence. Pocket Daily additionally validates the PDLP
+header checksum and complete payload SHA-256 before atomically installing it on
+SD. A staged firmware advert takes precedence, so providers omit the learning
+advert during OTA-first bootstrap and offer it on the next sync.
 
 #### Seven-day offline weather
 
@@ -527,13 +548,14 @@ schemas/surface-protocol/v1/
     └── portable-reader/
         ├── weather-seven-day.json
         ├── unchanged.json
+        ├── unchanged-learning-pack.json
         ├── outbox-request.json
         ├── outbox-response.json
         └── surface-welcome.json
 ```
 
 `portable-reader.schema.json` bounds the public Card Feed/Glance shape, including seven
-weather days and eight cues. The two Outbox schemas independently validate the HTTP
+weather days, eight cues, and the licensed learning-pack advert. The two Outbox schemas independently validate the HTTP
 request and its positional terminal acknowledgements. Unknown optional properties stay
 allowed so an additive v1 producer does not break a tolerant client. The checked-in
 examples are secret-free canonical conformance fixtures, not a claim about a daemon or

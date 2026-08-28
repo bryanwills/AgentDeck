@@ -29,6 +29,7 @@
     "dist",
     "!dist/__tests__",
     "assets/fonts",
+    "assets/learning",
     "fm-helper",
     "scripts/build-fm-helper.mjs",
     "python",

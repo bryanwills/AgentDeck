@@ -150,7 +150,7 @@ the daemon's entire internal WebSocket API a public contract.
 
 | Project | Level | Surface profile | What it does |
 |---|---|---|---|
-| [Pocket Daily Reader](https://github.com/puritysb/pocket-daily-reader) | Community | `portable-reader/v1` | Independent offline-first e-reader. Pulls bounded cards and Glance, records choices offline, and keeps AgentDeck as an invisible sync source. Published manifest remains `community` / `untested`. |
+| [Pocket Daily Reader](https://github.com/puritysb/pocket-daily-reader) | Community | `portable-reader/v1` | Independent offline-first e-reader. Pulls bounded cards, Glance, and licensed SD learning-pack updates, records choices offline, and keeps AgentDeck as an invisible sync source. Published manifest remains `community` / `untested`. |
 | [companion-module-agentdeck](https://github.com/houtacheng/companion-module-agentdeck) | Community | `companion-control/v1` | Independent Bitfocus Companion module for session tiles, approval controls, usage gauges, and status creatures (by [@houtacheng](https://github.com/houtacheng)). |
 
 Pocket Daily's Feed/Outbox/telemetry/resumable-OTA runtime works with both the Node

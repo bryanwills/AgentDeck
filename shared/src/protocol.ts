@@ -1167,6 +1167,18 @@ export interface SurfaceFirmwareAdvert {
   md5: string;
 }
 
+/** Immutable, licensed offline course package advertised by a Surface
+ * provider. The binary body is retrieved separately from `/learning/pack` so
+ * an unchanged Card Feed stays small. */
+export interface SurfaceLearningPackAdvert {
+  id: string;
+  version: number;
+  format: number;
+  size: number;
+  md5: string;
+  licenseSpdx: string;
+}
+
 export interface CardFeedResponse {
   type: 'card_feed';
   /** Contract revision — bump on breaking shape changes. */
@@ -1196,6 +1208,9 @@ export interface CardFeedResponse {
   /** Exact pull-OTA namespace. Surface clients reject board-only adverts;
    * legacy clients may still receive the historical `{size,md5}` shape. */
   fw?: SurfaceFirmwareAdvert | { size: number; md5: string };
+  /** Present on full and unchanged responses when the client negotiated
+   * `learning.pack.update`. */
+  learningPack?: SurfaceLearningPackAdvert;
   cards: FeedCard[];
 }
 
@@ -1269,6 +1284,7 @@ export interface OutboxPushResponse {
 /** HTTP paths on the daemon port (BRIDGE_HTTP_PORT). */
 export const CARD_FEED_PATH = '/feed';
 export const CARD_OUTBOX_PATH = '/outbox';
+export const LEARNING_PACK_PATH = '/learning/pack';
 /**
  * Glance Frame (M8) — the daemon-rendered pixel form of the glance, for
  * clients that display rather than lay out. `GET /glance-frame?board=<id>`

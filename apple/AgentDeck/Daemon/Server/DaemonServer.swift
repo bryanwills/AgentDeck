@@ -635,6 +635,7 @@ final class DaemonServer {
         "portable-reader/v1": [
             "feed.pull", "feed.conditional", "outbox.push", "glance.read",
             "weather.snapshot.read", "weather.cues.display", "weather.cues.notify",
+            "learning.pack.read", "learning.pack.update",
             "ota.feed", "ota.resume-206", "device.telemetry",
             // Deliberately no inbox.ws until a public invalidation runtime exists.
         ],
@@ -857,6 +858,7 @@ final class DaemonServer {
     private let auth = AuthManager.shared
     private let portableWeather = SwiftPortableMetWeatherProvider()
     private let surfaceFirmware = SwiftSurfaceFirmwareStore(baseDirectory: AgentDeckPaths.baseDirectory)
+    private let surfaceLearningPack = try? SwiftSurfaceLearningPack.load()
     private var surfaceNegotiations: [UUID: SurfaceRuntimeNegotiation] = [:]
     private var surfaceOutboxLedger: [String: [String: Any]] = [:]
     private var surfaceOutboxOrder: [String] = []
@@ -2535,6 +2537,16 @@ final class DaemonServer {
                 feed.removeValue(forKey: "glance")
             }
         }
+        if feed["fw"] == nil, let identity,
+           identity.productId == "io.pocketdaily.reader",
+           identity.capabilities.contains("learning.pack.update"),
+           let pack = surfaceLearningPack {
+            feed["learningPack"] = [
+                "id": pack.advert.id, "version": pack.advert.version,
+                "format": pack.advert.format, "size": pack.advert.size,
+                "md5": pack.advert.md5, "licenseSpdx": pack.advert.licenseSpdx,
+            ] as [String: Any]
+        }
         return .json(feed)
     }
 
@@ -2868,6 +2880,45 @@ final class DaemonServer {
                 remoteIP: request.remoteIP, identity: identity,
                 query: request.queryParams, response: response)
             return response
+        }
+
+        await httpServer.get("/learning/pack") { [weak self] request in
+            guard let self else { return .json(["error": "daemon unavailable"], status: 503) }
+            let identity: SurfaceRuntimeIdentity
+            switch Self.parseSurfaceHTTPIdentity(
+                headers: request.headers, query: request.queryParams,
+                requiredCapability: "learning.pack.read"
+            ) {
+            case .failure(let error):
+                return .json(["error": error.code, "message": error.message], status: error.status)
+            case .success(nil):
+                return .json([
+                    "error": "surface_identity_required",
+                    "message": "Learning-pack delivery requires all Surface identity headers",
+                ], status: 400)
+            case .success(let parsed?): identity = parsed
+            }
+            guard identity.productId == "io.pocketdaily.reader" else {
+                return .json([
+                    "error": "surface_learning_product_mismatch",
+                    "message": "This learning pack is registered for Pocket Daily Reader",
+                ], status: 409)
+            }
+            guard let pack = self.surfaceLearningPack else {
+                return .json(["error": "learning_pack_unavailable"], status: 503)
+            }
+            guard pack.matchesRequest(
+                id: request.queryParams["id"], version: request.queryParams["version"]) else {
+                return .json(["error": "learning_pack_not_found"], status: 404)
+            }
+            return HTTPServer.HTTPResponse(status: 200, headers: [
+                "Content-Type": "application/vnd.pocketdaily.learning-pack",
+                "Content-Length": String(pack.bytes.count),
+                "X-Learning-Pack-MD5": pack.advert.md5,
+                "X-Learning-Pack-License": pack.advert.licenseSpdx,
+                "Cache-Control": "no-store",
+                "Connection": "close",
+            ], body: pack.bytes)
         }
 
         await httpServer.post("/outbox") { [weak self] request in

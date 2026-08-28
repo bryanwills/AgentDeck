@@ -57,6 +57,17 @@ not imply endorsement, sponsorship, or affiliation with the respective owners.
 All other trademarks used in this project are the property of their
 respective owners.
 
+## Pocket Daily Japanese learning content
+
+The offline `jp-n3-ko` learning pack distributed by the Node and Swift Surface
+providers contains 612 cumulative N5–N3 kanji lessons adapted from the pinned
+[OpenJLPT dataset](https://github.com/evanclan/OpenJLPT), whose notice credits
+EDRDG KANJIDIC2/JMdict, Jonathan Waller's unofficial JLPT assignments, and
+Tatoeba examples. Pocket Daily contributors added Korean glosses and
+translations. The pack, source ledger, bundled `NOTICE.md`, and adaptations are
+licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+AgentDeck's MIT licence applies to the provider code, not to lesson records.
+
 ## Independence Statement
 
 AgentDeck is an independent software project developed and distributed by

@@ -10,7 +10,7 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
             "agentdeck-client-id": "io.pocketdaily.reader",
             "agentdeck-client-version": "1.4.1-pocket",
             "agentdeck-product-id": "io.pocketdaily.reader",
-            "agentdeck-capabilities": "feed.pull,feed.conditional,outbox.push,glance.read,ota.feed,device.telemetry,future.unknown",
+            "agentdeck-capabilities": "feed.pull,feed.conditional,outbox.push,glance.read,learning.pack.read,learning.pack.update,ota.feed,device.telemetry,future.unknown",
             "agentdeck-board": "xteink_x3",
             "agentdeck-update-channel": "stable",
         ]
@@ -33,6 +33,7 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
         XCTAssertEqual(identity.board, "xteink_x3")
         XCTAssertEqual(identity.capabilities, [
             "feed.pull", "feed.conditional", "outbox.push", "glance.read",
+            "learning.pack.read", "learning.pack.update",
             "ota.feed", "device.telemetry",
         ])
     }
@@ -66,11 +67,17 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
             "productId": "io.pocketdaily.reader",
             "profiles": [[
                 "id": "portable-reader/v1",
-                "capabilities": ["feed.pull", "glance.read", "outbox.push", "ota.feed", "inbox.ws"],
+                "capabilities": [
+                    "feed.pull", "glance.read", "outbox.push",
+                    "learning.pack.read", "learning.pack.update", "ota.feed", "inbox.ws",
+                ],
             ]],
         ]).get()
         XCTAssertEqual(negotiation.profile, "portable-reader/v1")
-        XCTAssertEqual(negotiation.capabilities, ["feed.pull", "glance.read", "outbox.push", "ota.feed"])
+        XCTAssertEqual(negotiation.capabilities, [
+            "feed.pull", "glance.read", "outbox.push",
+            "learning.pack.read", "learning.pack.update", "ota.feed",
+        ])
         XCTAssertFalse(negotiation.capabilities.contains("inbox.ws"))
     }
 
@@ -211,6 +218,33 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
         }
         let legacyAdvert = await store.advert(identity: nil, board: "inkdeck", clientVersion: nil)
         XCTAssertNotNil(legacyAdvert)
+    }
+
+    func testBundledLearningPackCarriesVerifiedLicenceAndPayload() throws {
+        let pack = try SwiftSurfaceLearningPack.load(bundle: .main)
+        XCTAssertEqual(pack.advert, .init(
+            id: "jp-n3-ko", version: 2, format: 1, size: 568_324,
+            md5: "95ce0ba2fef9d1f5b7555a35ed5e903b", licenseSpdx: "CC-BY-SA-4.0"))
+        XCTAssertEqual(String(data: pack.bytes.prefix(4), encoding: .ascii), "PDLP")
+        XCTAssertTrue(pack.attribution.contains("OpenJLPT"))
+        XCTAssertTrue(pack.matchesRequest(id: "jp-n3-ko", version: "2"))
+        XCTAssertFalse(pack.matchesRequest(id: "jp-n3-ko", version: "02"))
+        XCTAssertFalse(pack.matchesRequest(id: "../jp-n3-ko", version: "2"))
+    }
+
+    func testLearningPackRejectsBytesChangedAfterManifest() throws {
+        func resource(_ name: String, extension ext: String) throws -> URL {
+            try XCTUnwrap(
+                Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "learning")
+                    ?? Bundle.main.url(forResource: name, withExtension: ext))
+        }
+        let manifest = try Data(contentsOf: resource("jp-n3-ko", extension: "manifest.json"))
+        var bytes = try Data(contentsOf: resource("jp-n3-ko", extension: "pdl"))
+        bytes[bytes.index(before: bytes.endIndex)] ^= 0x01
+        XCTAssertThrowsError(try SwiftSurfaceLearningPack.validate(
+            manifestBytes: manifest, packBytes: bytes)) { error in
+            XCTAssertEqual(error as? SwiftSurfaceLearningPack.ValidationError, .invalidPack)
+        }
     }
 }
 #endif

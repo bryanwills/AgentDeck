@@ -21,6 +21,7 @@ const PROFILE_CAPABILITIES = {
   [PORTABLE_READER_PROFILE]: new Set([
     'feed.pull', 'feed.conditional', 'outbox.push', 'glance.read',
     'weather.snapshot.read', 'weather.cues.display', 'weather.cues.notify',
+    'learning.pack.read', 'learning.pack.update',
     'ota.feed', OTA_RESUME_PARTIAL_CAPABILITY, 'device.telemetry',
     // Deliberately no inbox.ws until the public invalidation runtime exists.
   ]),
