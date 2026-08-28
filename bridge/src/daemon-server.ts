@@ -216,6 +216,7 @@ import {
 import { WeatherProvider, parseWeatherSettings } from './weather.js';
 import { CalendarProvider, parseCalendarSettings } from './calendar.js';
 import { loadLearningPack, matchesLearningPackRequest, type SurfaceLearningPack } from './learning-pack.js';
+import { loadFontPack, matchesFontPackRequest, type SurfaceFontPack } from './font-pack.js';
 import { renderGlanceFrame, GLANCE_FRAME_BOARDS } from './glance-frame.js';
 import {
   isPortableReaderProfile,
@@ -233,7 +234,7 @@ import {
 } from './surface-protocol.js';
 import type { UsageEvent } from './types.js';
 import { resolveRelayedUsageEvent } from './relayed-usage.js';
-import { CARD_FEED_PATH, CARD_OUTBOX_PATH, GLANCE_FRAME_PATH, LEARNING_PACK_PATH, type CardFeedResponse, type SessionInfo, type OutboxPushRequest } from '@agentdeck/shared';
+import { CARD_FEED_PATH, CARD_OUTBOX_PATH, FONT_PACK_PATH, GLANCE_FRAME_PATH, LEARNING_PACK_PATH, type CardFeedResponse, type SessionInfo, type OutboxPushRequest } from '@agentdeck/shared';
 import { readFileSync, statSync, writeFileSync, appendFileSync } from 'fs';
 import { readFile, rm } from 'fs/promises';
 import { tmpdir, networkInterfaces, type NetworkInterfaceInfo } from 'os';
@@ -1680,6 +1681,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   } catch (err) {
     log(`[agentdeck] Surface learning pack disabled: ${err instanceof Error ? err.message : String(err)}`);
   }
+  let surfaceFontPack: SurfaceFontPack | null = null;
+  try {
+    surfaceFontPack = loadFontPack();
+    log(`[agentdeck] Surface font pack ready: ${surfaceFontPack.advert.id}`
+      + ` v${surfaceFontPack.advert.version} (${surfaceFontPack.advert.size} bytes,`
+      + ` ${surfaceFontPack.advert.licenseSpdx})`);
+  } catch (err) {
+    log(`[agentdeck] Surface font pack disabled: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   // ===== HTTP server =====
   const httpServer = createServer((req, res) => {
@@ -2320,6 +2330,65 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       res.end(surfaceLearningPack.bytes);
       return;
     }
+    // ===== Licensed automatic font-pack delivery — portable-reader/v1 =====
+    if (req.method === 'GET' && pathname === FONT_PACK_PATH) {
+      const ip = req.socket.remoteAddress ?? '';
+      let surfaceIdentity;
+      try {
+        surfaceIdentity = parseHttpSurfaceIdentity(req.headers, 'font.pack.read');
+        if (!surfaceIdentity) {
+          throw new SurfaceProtocolError(400, 'surface_identity_required',
+            'Font-pack delivery requires all Surface identity headers');
+        }
+        validateSurfaceQueryTuple(surfaceIdentity, parsedUrl.searchParams);
+        if (surfaceIdentity.productId !== 'io.pocketdaily.reader') {
+          throw new SurfaceProtocolError(409, 'surface_font_product_mismatch',
+            'This font pack is registered for Pocket Daily Reader');
+        }
+      } catch (err) {
+        if (err instanceof SurfaceProtocolError) {
+          res.writeHead(err.status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(surfaceErrorBody(err)));
+          return;
+        }
+        throw err;
+      }
+      if (!surfaceFontPack) {
+        res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ error: 'font_pack_unavailable' }));
+        return;
+      }
+      if (!matchesFontPackRequest(surfaceFontPack,
+        parsedUrl.searchParams.get('id'), parsedUrl.searchParams.get('version'))) {
+        res.writeHead(404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ error: 'font_pack_not_found' }));
+        return;
+      }
+      const preferredIp = preferredPullOtaIp(ip, req.socket.localAddress ?? '');
+      if (preferredIp) {
+        const routePort = req.socket.localPort ?? 9120;
+        log(`[agentdeck] Surface path redirect: font-pack ${surfaceIdentity.board} (${ip}) via ${preferredIp}`);
+        res.writeHead(307, {
+          Location: `http://${preferredIp}:${routePort}${parsedUrl.pathname}${parsedUrl.search}`,
+          'Cache-Control': 'no-store',
+          'Connection': 'close',
+        });
+        res.end();
+        return;
+      }
+      log(`[agentdeck] font-pack download: ${surfaceIdentity.board} (${ip})`
+        + ` ← ${surfaceFontPack.advert.id} v${surfaceFontPack.advert.version}`);
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.pocketdaily.cpfont',
+        'Content-Length': String(surfaceFontPack.bytes.length),
+        'X-Font-Pack-MD5': surfaceFontPack.advert.md5,
+        'X-Font-Pack-License': surfaceFontPack.advert.licenseSpdx,
+        'Cache-Control': 'no-store',
+        'Connection': 'close',
+      });
+      res.end(surfaceFontPack.bytes);
+      return;
+    }
 
     // ===== Card Feed pull sync (M6) — wake-sync-sleep battery clients =====
     // Auth mirrors /apme: local connections are free; anything else needs the
@@ -2494,6 +2563,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             // during OTA-first bootstrap so the device installs firmware before
             // spending its battery/link budget on content bytes.
             feed.learningPack = surfaceLearningPack.advert;
+          }
+          if (!fwAdvert && surfaceFontPack
+            && surfaceIdentity?.productId === 'io.pocketdaily.reader'
+            && surfaceIdentity.capabilities.includes('font.pack.update')) {
+            feed.fontPack = surfaceFontPack.advert;
           }
           const telemetry = parsePullTelemetry(parsedUrl.searchParams);
           if (applyPullOtaBootstrap(feed, fwAdvert !== undefined)) {

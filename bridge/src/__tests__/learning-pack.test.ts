@@ -13,10 +13,10 @@ describe('Surface learning pack', () => {
     const pack = loadLearningPack();
     expect(pack.advert).toEqual({
       id: 'jp-n3-ko',
-      version: 2,
+      version: 3,
       format: 1,
       size: 568_324,
-      md5: '95ce0ba2fef9d1f5b7555a35ed5e903b',
+      md5: '34681b78b5a1d65bc787dc57e863cba7',
       licenseSpdx: 'CC-BY-SA-4.0',
     });
     expect(pack.attribution).toContain('OpenJLPT');
@@ -56,9 +56,9 @@ describe('Surface learning pack', () => {
 
   it('serves only the exact id and advertised version', () => {
     const pack = loadLearningPack();
-    expect(matchesLearningPackRequest(pack, 'jp-n3-ko', '2')).toBe(true);
+    expect(matchesLearningPackRequest(pack, 'jp-n3-ko', '3')).toBe(true);
     expect(matchesLearningPackRequest(pack, 'jp-n3-ko', '02')).toBe(false);
-    expect(matchesLearningPackRequest(pack, 'jp-n3-ko', '1')).toBe(false);
-    expect(matchesLearningPackRequest(pack, '../jp-n3-ko', '2')).toBe(false);
+    expect(matchesLearningPackRequest(pack, 'jp-n3-ko', '2')).toBe(false);
+    expect(matchesLearningPackRequest(pack, '../jp-n3-ko', '3')).toBe(false);
   });
 });

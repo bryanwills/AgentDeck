@@ -203,6 +203,18 @@
         "licenseSpdx": { "enum": ["CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0"] }
       }
     },
+    "fontPackAdvert": {
+      "type": "object",
+      "required": ["id", "version", "format", "size", "md5", "licenseSpdx"],
+      "properties": {
+        "id": { "const": "pocket-sans-world" },
+        "version": { "type": "integer", "minimum": 1 },
+        "format": { "const": 4 },
+        "size": { "type": "integer", "minimum": 64, "maximum": 14680064 },
+        "md5": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "licenseSpdx": { "const": "OFL-1.1" }
+      }
+    },
     "cardFeedResponse": {
       "type": "object",
       "required": ["type", "rev", "serverTime", "serverHm", "nextPullSec", "cards"],
@@ -217,6 +229,7 @@
         "glance": { "$ref": "#/$defs/glance" },
         "fw": { "$ref": "#/$defs/firmwareAdvert" },
         "learningPack": { "$ref": "#/$defs/learningPackAdvert" },
+        "fontPack": { "$ref": "#/$defs/fontPackAdvert" },
         "cards": {
           "type": "array",
           "maxItems": 64,

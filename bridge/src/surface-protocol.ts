@@ -22,6 +22,7 @@ const PROFILE_CAPABILITIES = {
     'feed.pull', 'feed.conditional', 'outbox.push', 'glance.read',
     'weather.snapshot.read', 'weather.cues.display', 'weather.cues.notify',
     'learning.pack.read', 'learning.pack.update',
+    'font.pack.read', 'font.pack.update',
     'ota.feed', OTA_RESUME_PARTIAL_CAPABILITY, 'device.telemetry',
     // Deliberately no inbox.ws until the public invalidation runtime exists.
   ]),

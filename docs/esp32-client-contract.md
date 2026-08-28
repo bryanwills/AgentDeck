@@ -260,6 +260,13 @@ Card Feed implementation.
   repeats the format and integrity validation into a temporary SD file and
   atomically rotates the active pack. The advert is omitted while firmware OTA
   is staged so the firmware-first recovery path keeps priority.
+- **Automatic reader font pack (2026-08-29)**: Pocket Daily requests negotiating
+  `font.pack.update` receive `fontPack: {id,version,format,size,md5,licenseSpdx}`
+  on full and unchanged Feed responses. Foreground Sync retrieves the immutable
+  cpfont from `GET /fonts/pack?id=<id>&version=<version>` with `font.pack.read`.
+  Both providers validate the OFL source ledger, transfer digests, and cpfont
+  header; the X3 repeats size, MD5, format, and style validation before atomic
+  SD installation. The advert is suppressed while firmware OTA is staged.
 - **Pull OTA (feed-carried firmware, updated 2026-08-24)**: WS OTA needs a live
   socket, which a battery client on the pull cadence never holds. Instead the
   host stages a user-supplied build with `--manifest <agentdeck-surface.json>`

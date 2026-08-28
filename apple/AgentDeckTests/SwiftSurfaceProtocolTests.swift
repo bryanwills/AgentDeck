@@ -10,7 +10,7 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
             "agentdeck-client-id": "io.pocketdaily.reader",
             "agentdeck-client-version": "1.4.1-pocket",
             "agentdeck-product-id": "io.pocketdaily.reader",
-            "agentdeck-capabilities": "feed.pull,feed.conditional,outbox.push,glance.read,learning.pack.read,learning.pack.update,ota.feed,device.telemetry,future.unknown",
+            "agentdeck-capabilities": "feed.pull,feed.conditional,outbox.push,glance.read,learning.pack.read,learning.pack.update,font.pack.read,font.pack.update,ota.feed,device.telemetry,future.unknown",
             "agentdeck-board": "xteink_x3",
             "agentdeck-update-channel": "stable",
         ]
@@ -34,6 +34,7 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
         XCTAssertEqual(identity.capabilities, [
             "feed.pull", "feed.conditional", "outbox.push", "glance.read",
             "learning.pack.read", "learning.pack.update",
+            "font.pack.read", "font.pack.update",
             "ota.feed", "device.telemetry",
         ])
     }
@@ -70,6 +71,7 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
                 "capabilities": [
                     "feed.pull", "glance.read", "outbox.push",
                     "learning.pack.read", "learning.pack.update", "ota.feed", "inbox.ws",
+                    "font.pack.read", "font.pack.update",
                 ],
             ]],
         ]).get()
@@ -77,6 +79,7 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
         XCTAssertEqual(negotiation.capabilities, [
             "feed.pull", "glance.read", "outbox.push",
             "learning.pack.read", "learning.pack.update", "ota.feed",
+            "font.pack.read", "font.pack.update",
         ])
         XCTAssertFalse(negotiation.capabilities.contains("inbox.ws"))
     }
@@ -223,13 +226,13 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
     func testBundledLearningPackCarriesVerifiedLicenceAndPayload() throws {
         let pack = try SwiftSurfaceLearningPack.load(bundle: .main)
         XCTAssertEqual(pack.advert, .init(
-            id: "jp-n3-ko", version: 2, format: 1, size: 568_324,
-            md5: "95ce0ba2fef9d1f5b7555a35ed5e903b", licenseSpdx: "CC-BY-SA-4.0"))
+            id: "jp-n3-ko", version: 3, format: 1, size: 568_324,
+            md5: "34681b78b5a1d65bc787dc57e863cba7", licenseSpdx: "CC-BY-SA-4.0"))
         XCTAssertEqual(String(data: pack.bytes.prefix(4), encoding: .ascii), "PDLP")
         XCTAssertTrue(pack.attribution.contains("OpenJLPT"))
-        XCTAssertTrue(pack.matchesRequest(id: "jp-n3-ko", version: "2"))
+        XCTAssertTrue(pack.matchesRequest(id: "jp-n3-ko", version: "3"))
         XCTAssertFalse(pack.matchesRequest(id: "jp-n3-ko", version: "02"))
-        XCTAssertFalse(pack.matchesRequest(id: "../jp-n3-ko", version: "2"))
+        XCTAssertFalse(pack.matchesRequest(id: "../jp-n3-ko", version: "3"))
     }
 
     func testLearningPackRejectsBytesChangedAfterManifest() throws {
@@ -244,6 +247,33 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
         XCTAssertThrowsError(try SwiftSurfaceLearningPack.validate(
             manifestBytes: manifest, packBytes: bytes)) { error in
             XCTAssertEqual(error as? SwiftSurfaceLearningPack.ValidationError, .invalidPack)
+        }
+    }
+
+    func testBundledFontPackCarriesVerifiedLicenceAndPayload() throws {
+        let pack = try SwiftSurfaceFontPack.load(bundle: .main)
+        XCTAssertEqual(pack.advert, .init(
+            id: "pocket-sans-world", version: 1, format: 4, size: 10_903_872,
+            md5: "a6844503c142be1a62e4bac8be7c7802", licenseSpdx: "OFL-1.1"))
+        XCTAssertEqual(String(data: pack.bytes.prefix(6), encoding: .ascii), "CPFONT")
+        XCTAssertTrue(pack.attribution.contains("Noto Sans"))
+        XCTAssertTrue(pack.matchesRequest(id: "pocket-sans-world", version: "1"))
+        XCTAssertFalse(pack.matchesRequest(id: "pocket-sans-world", version: "01"))
+        XCTAssertFalse(pack.matchesRequest(id: "../pocket-sans-world", version: "1"))
+    }
+
+    func testFontPackRejectsBytesChangedAfterManifest() throws {
+        func resource(_ name: String, extension ext: String) throws -> URL {
+            try XCTUnwrap(
+                Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Fonts")
+                    ?? Bundle.main.url(forResource: name, withExtension: ext))
+        }
+        let manifest = try Data(contentsOf: resource("pocket-sans-world", extension: "manifest.json"))
+        var bytes = try Data(contentsOf: resource("PocketSansWorld_12", extension: "cpfont"))
+        bytes[bytes.index(before: bytes.endIndex)] ^= 0x01
+        XCTAssertThrowsError(try SwiftSurfaceFontPack.validate(
+            manifestBytes: manifest, fontBytes: bytes)) { error in
+            XCTAssertEqual(error as? SwiftSurfaceFontPack.ValidationError, .invalidPack)
         }
     }
 }

@@ -14,5 +14,13 @@
     "md5": "c1c9695e8d8f531729deb25ddbea8845",
     "licenseSpdx": "CC-BY-SA-4.0"
   },
+  "fontPack": {
+    "id": "pocket-sans-world",
+    "version": 1,
+    "format": 4,
+    "size": 10903872,
+    "md5": "a6844503c142be1a62e4bac8be7c7802",
+    "licenseSpdx": "OFL-1.1"
+  },
   "cards": []
 }

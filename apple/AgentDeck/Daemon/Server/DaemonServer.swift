@@ -636,6 +636,7 @@ final class DaemonServer {
             "feed.pull", "feed.conditional", "outbox.push", "glance.read",
             "weather.snapshot.read", "weather.cues.display", "weather.cues.notify",
             "learning.pack.read", "learning.pack.update",
+            "font.pack.read", "font.pack.update",
             "ota.feed", "ota.resume-206", "device.telemetry",
             // Deliberately no inbox.ws until a public invalidation runtime exists.
         ],
@@ -871,6 +872,17 @@ final class DaemonServer {
             return nil
         } catch {
             DaemonLogger.shared.error("[Surface] learning pack failed to load: \(error)")
+            return nil
+        }
+    }()
+    private let surfaceFontPack: SwiftSurfaceFontPack? = {
+        do {
+            return try SwiftSurfaceFontPack.load()
+        } catch SwiftSurfaceFontPack.ValidationError.resourceMissing {
+            DaemonLogger.shared.info("[Surface] no font pack bundled")
+            return nil
+        } catch {
+            DaemonLogger.shared.error("[Surface] font pack failed to load: \(error)")
             return nil
         }
     }()
@@ -2562,6 +2574,16 @@ final class DaemonServer {
                 "md5": pack.advert.md5, "licenseSpdx": pack.advert.licenseSpdx,
             ] as [String: Any]
         }
+        if feed["fw"] == nil, let identity,
+           identity.productId == "io.pocketdaily.reader",
+           identity.capabilities.contains("font.pack.update"),
+           let pack = surfaceFontPack {
+            feed["fontPack"] = [
+                "id": pack.advert.id, "version": pack.advert.version,
+                "format": pack.advert.format, "size": pack.advert.size,
+                "md5": pack.advert.md5, "licenseSpdx": pack.advert.licenseSpdx,
+            ] as [String: Any]
+        }
         return .json(feed)
     }
 
@@ -2934,6 +2956,43 @@ final class DaemonServer {
                 "Content-Type": "application/vnd.pocketdaily.learning-pack",
                 "X-Learning-Pack-MD5": pack.advert.md5,
                 "X-Learning-Pack-License": pack.advert.licenseSpdx,
+                "Cache-Control": "no-store",
+            ], body: pack.bytes)
+        }
+
+        await httpServer.get("/fonts/pack") { [weak self] request in
+            guard let self else { return .json(["error": "daemon unavailable"], status: 503) }
+            let identity: SurfaceRuntimeIdentity
+            switch Self.parseSurfaceHTTPIdentity(
+                headers: request.headers, query: request.queryParams,
+                requiredCapability: "font.pack.read"
+            ) {
+            case .failure(let error):
+                return .json(["error": error.code, "message": error.message], status: error.status)
+            case .success(nil):
+                return .json([
+                    "error": "surface_identity_required",
+                    "message": "Font-pack delivery requires all Surface identity headers",
+                ], status: 400)
+            case .success(let parsed?): identity = parsed
+            }
+            guard identity.productId == "io.pocketdaily.reader" else {
+                return .json([
+                    "error": "surface_font_product_mismatch",
+                    "message": "This font pack is registered for Pocket Daily Reader",
+                ], status: 409)
+            }
+            guard let pack = self.surfaceFontPack else {
+                return .json(["error": "font_pack_unavailable"], status: 503)
+            }
+            guard pack.matchesRequest(
+                id: request.queryParams["id"], version: request.queryParams["version"]) else {
+                return .json(["error": "font_pack_not_found"], status: 404)
+            }
+            return HTTPServer.HTTPResponse(status: 200, headers: [
+                "Content-Type": "application/vnd.pocketdaily.cpfont",
+                "X-Font-Pack-MD5": pack.advert.md5,
+                "X-Font-Pack-License": pack.advert.licenseSpdx,
                 "Cache-Control": "no-store",
             ], body: pack.bytes)
         }

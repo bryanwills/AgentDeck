@@ -1179,6 +1179,17 @@ export interface SurfaceLearningPackAdvert {
   licenseSpdx: string;
 }
 
+/** Immutable OFL font bundle used by portable readers for automatic script
+ * coverage. The binary body is retrieved separately from `/fonts/pack`. */
+export interface SurfaceFontPackAdvert {
+  id: string;
+  version: number;
+  format: number;
+  size: number;
+  md5: string;
+  licenseSpdx: string;
+}
+
 export interface CardFeedResponse {
   type: 'card_feed';
   /** Contract revision — bump on breaking shape changes. */
@@ -1211,6 +1222,9 @@ export interface CardFeedResponse {
   /** Present on full and unchanged responses when the client negotiated
    * `learning.pack.update`. */
   learningPack?: SurfaceLearningPackAdvert;
+  /** Present on full and unchanged responses when the client negotiated
+   * `font.pack.update`. */
+  fontPack?: SurfaceFontPackAdvert;
   cards: FeedCard[];
 }
 
@@ -1285,6 +1299,7 @@ export interface OutboxPushResponse {
 export const CARD_FEED_PATH = '/feed';
 export const CARD_OUTBOX_PATH = '/outbox';
 export const LEARNING_PACK_PATH = '/learning/pack';
+export const FONT_PACK_PATH = '/fonts/pack';
 /**
  * Glance Frame (M8) — the daemon-rendered pixel form of the glance, for
  * clients that display rather than lay out. `GET /glance-frame?board=<id>`

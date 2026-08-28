@@ -155,6 +155,20 @@ describe('Surface Protocol WebSocket negotiation', () => {
     expect(result.capabilities).toEqual(['learning.pack.read', 'learning.pack.update']);
   });
 
+  it('negotiates automatic font-pack delivery for portable readers', () => {
+    const result = negotiateSurface({
+      protocol: 1,
+      clientId: 'io.pocketdaily.reader',
+      clientVersion: '1.4.1-pocket',
+      productId: 'io.pocketdaily.reader',
+      profiles: [{
+        id: 'portable-reader/v1',
+        capabilities: ['font.pack.read', 'font.pack.update'],
+      }],
+    });
+    expect(result.capabilities).toEqual(['font.pack.read', 'font.pack.update']);
+  });
+
   it('bounds portable WebSocket traffic to welcome and liveness events', () => {
     expect(surfaceAllowsEvent('portable-reader/v1', 'surface_welcome')).toBe(true);
     expect(surfaceAllowsEvent('portable-reader/v1', 'connection')).toBe(true);

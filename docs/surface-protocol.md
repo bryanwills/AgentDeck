@@ -259,6 +259,8 @@ profile major.
 | `inbox.ws`              | receive a bounded feed-invalidated hint over WebSocket                                   |
 | `learning.pack.read`    | retrieve an advertised, licensed offline content pack over authenticated HTTP             |
 | `learning.pack.update`  | receive a learning-pack advert in full and unchanged Card Feed responses                  |
+| `font.pack.read`        | retrieve an advertised OFL font pack over authenticated HTTP                              |
+| `font.pack.update`      | receive a font-pack advert in full and unchanged Card Feed responses                      |
 | `ota.feed`              | receive a product-isolated pull-OTA advert in Card Feed                                  |
 | `device.telemetry`      | send bounded battery/link telemetry with a pull                                          |
 
@@ -331,6 +333,22 @@ or an unapproved content licence. Pocket Daily additionally validates the PDLP
 header checksum and complete payload SHA-256 before atomically installing it on
 SD. A staged firmware advert takes precedence, so providers omit the learning
 advert during OTA-first bootstrap and offer it on the next sync.
+
+#### Automatic reader font packs
+
+A portable reader negotiating `font.pack.update` may receive `fontPack` in a
+full or `unchanged` Feed response. The immutable advert contains id, version,
+cpfont format, exact byte size, transfer MD5, and SPDX licence. The client
+retrieves it from `GET /fonts/pack?id=<id>&version=<version>` using the same
+Surface identity and token; the route requires `font.pack.read`.
+
+Providers validate the bundled source ledger, OFL licence, MD5, SHA-256, and
+cpfont header before advertising it. Pocket Daily downloads only during an
+explicit foreground Sync, validates again into a temporary SD file, and
+atomically rotates the installed family. The one flattened family covers the
+reader's Japanese, Korean, Chinese, Latin, Greek, and Cyrillic paths, so book
+rendering does not require a per-language font setting. Firmware OTA retains
+priority and suppresses the advert until the next Sync.
 
 #### Seven-day offline weather
 

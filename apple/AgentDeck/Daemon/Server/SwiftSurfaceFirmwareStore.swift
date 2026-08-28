@@ -312,4 +312,115 @@ struct SwiftSurfaceLearningPack: Sendable {
         }
     }
 }
+
+/// Signed-bundle counterpart to `bridge/src/font-pack.ts`. The original font
+/// licences and source ledger are validated before any advert becomes visible.
+struct SwiftSurfaceFontPack: Sendable {
+    struct Advert: Codable, Equatable, Sendable {
+        let id: String
+        let version: Int
+        let format: Int
+        let size: Int
+        let md5: String
+        let licenseSpdx: String
+    }
+
+    private struct ManifestAdvert: Codable {
+        let id: String
+        let version: Int
+        let format: Int
+        let size: Int
+        let md5: String
+        let sha256: String
+        let licenseSpdx: String
+    }
+
+    private struct Source: Codable {
+        let name: String
+        let url: String
+        let revision: String
+        let licenseSpdx: String
+        let attribution: String
+    }
+
+    private struct Manifest: Codable {
+        let fontPack: ManifestAdvert
+        let attribution: String
+        let sources: [Source]
+    }
+
+    enum ValidationError: Error, Equatable {
+        case resourceMissing
+        case invalidManifest
+        case unsupportedLicence
+        case invalidPack
+    }
+
+    let advert: Advert
+    let attribution: String
+    let bytes: Data
+
+    nonisolated static func load(bundle: Bundle = .main) throws -> Self {
+        func resource(_ name: String, extension ext: String) -> URL? {
+            bundle.url(forResource: name, withExtension: ext, subdirectory: "Fonts")
+                ?? bundle.url(forResource: name, withExtension: ext)
+        }
+        guard let manifestURL = resource("pocket-sans-world", extension: "manifest.json"),
+              let packURL = resource("PocketSansWorld_12", extension: "cpfont"),
+              let manifest = try? Data(contentsOf: manifestURL),
+              let pack = try? Data(contentsOf: packURL) else {
+            throw ValidationError.resourceMissing
+        }
+        return try validate(manifestBytes: manifest, fontBytes: pack)
+    }
+
+    nonisolated static func validate(manifestBytes: Data, fontBytes: Data) throws -> Self {
+        guard let manifest = try? JSONDecoder().decode(Manifest.self, from: manifestBytes),
+              manifest.fontPack.id == "pocket-sans-world",
+              manifest.fontPack.version > 0,
+              manifest.fontPack.format == 4,
+              manifest.fontPack.size >= 64,
+              manifest.fontPack.size <= 14 * 1024 * 1024,
+              manifest.fontPack.md5.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil,
+              manifest.fontPack.sha256.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+              !manifest.attribution.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !manifest.sources.isEmpty else {
+            throw ValidationError.invalidManifest
+        }
+        guard manifest.fontPack.licenseSpdx == "OFL-1.1",
+              manifest.sources.allSatisfy({ source in
+                  source.licenseSpdx == "OFL-1.1"
+                      && !source.name.isEmpty && !source.url.isEmpty && !source.revision.isEmpty
+                      && !source.attribution.isEmpty
+              }) else {
+            throw ValidationError.unsupportedLicence
+        }
+        guard fontBytes.count == manifest.fontPack.size,
+              SwiftSurfaceFirmwareStore.md5(fontBytes) == manifest.fontPack.md5,
+              SHA256.hash(data: fontBytes).map({ String(format: "%02x", $0) }).joined()
+                  == manifest.fontPack.sha256,
+              fontBytes.count >= 32,
+              String(data: fontBytes.subdata(in: 0..<6), encoding: .ascii) == "CPFONT",
+              uint16(fontBytes, 8) == 4,
+              fontBytes[12] > 0, fontBytes[12] <= 4 else {
+            throw ValidationError.invalidPack
+        }
+        let advert = Advert(
+            id: manifest.fontPack.id, version: manifest.fontPack.version,
+            format: manifest.fontPack.format, size: manifest.fontPack.size,
+            md5: manifest.fontPack.md5, licenseSpdx: manifest.fontPack.licenseSpdx)
+        return Self(advert: advert, attribution: manifest.attribution, bytes: fontBytes)
+    }
+
+    nonisolated func matchesRequest(id: String?, version: String?) -> Bool {
+        guard id == advert.id, let version, version.first != "0",
+              !version.isEmpty, version.allSatisfy(\.isNumber),
+              Int(version) == advert.version else { return false }
+        return true
+    }
+
+    nonisolated private static func uint16(_ data: Data, _ offset: Int) -> UInt16 {
+        UInt16(data[offset]) | (UInt16(data[offset + 1]) << 8)
+    }
+}
 #endif
