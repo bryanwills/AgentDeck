@@ -74,7 +74,6 @@ const TURN_INTERRUPT_SLACK_MS = 2_000;
  *  OpenClaw/OpenCode close earlier via their adapter-owned 90 s timers (those
  *  ride an explicit idle event; this one rides the absence of one), after
  *  which this timer finds no active task and no-ops. */
-export { AGENT_IDLE_GAP_MS };
 
 interface ActiveTask {
   id: string;

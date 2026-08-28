@@ -66,14 +66,19 @@ export function deriveTaskTitle(firstPrompt: string | null | undefined): string 
 
   let line = '';
   let sawAnyLine = false;
+  let inFence = false;
   for (const rawLine of prompt.split(/\r?\n/)) {
     const candidate = rawLine.trim();
     if (!candidate) continue;
+    // A fence swallows its whole BODY, not just the marker lines — a
+    // paste-code-then-ask prompt must be titled by the ask, never by the
+    // first line of the pasted code.
+    if (CODE_FENCE_LINE.test(candidate)) { inFence = !inFence; sawAnyLine = true; continue; }
+    if (inFence) { sawAnyLine = true; continue; }
     if (!sawAnyLine && MARKUP_LINE.test(candidate)) return null;
     sawAnyLine = true;
     if (SLASH_COMMAND_LINE.test(candidate)) continue;
     if (MARKUP_LINE.test(candidate)) continue;
-    if (CODE_FENCE_LINE.test(candidate)) continue;
     line = candidate;
     break;
   }

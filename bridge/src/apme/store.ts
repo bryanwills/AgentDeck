@@ -1233,9 +1233,10 @@ export class ApmeStore {
 
   /** Per-lifecycle-bucket totals for the Work board's tab badges. Takes the
    *  same NARROWING filters as `listTaskPage` (agent/project/category/
-   *  outcome/q) so a filtered board's badges count what its tabs would list —
-   *  buckets and filters read the same SQL definitions, so the two cannot
-   *  disagree. */
+   *  outcome/q) so a filtered board's badges count what its tabs would list.
+   *  Buckets and filters read the same SQL definitions; the TTL means a badge
+   *  may lag its rows by up to 10 s after a task moves buckets — a bounded
+   *  staleness, not a different definition. */
   taskViewCounts(filters: {
     agentType?: string; projectName?: string; category?: string; outcome?: string; q?: string;
   } = {}): Record<'all' | ApmeTaskView, number> {

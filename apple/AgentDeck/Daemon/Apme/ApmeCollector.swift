@@ -861,11 +861,22 @@ final class ApmeCollector {
         let maxChars = 72
         let minChars = 4
 
+        // JS `trim()`/`\s` also strip U+FEFF and \v; CharacterSet's
+        // whitespace classes do not, so widen to match — a BOM-prefixed
+        // prompt must derive the same title on both daemons.
+        let jsWhitespace = CharacterSet.whitespacesAndNewlines
+            .union(CharacterSet(charactersIn: "\u{FEFF}\u{000B}\u{000C}"))
         var line = ""
         var sawAnyLine = false
+        var inFence = false
         for rawLine in prompt.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\n" || $0 == "\r\n" }) {
-            let candidate = rawLine.trimmingCharacters(in: .whitespaces)
+            let candidate = rawLine.trimmingCharacters(in: jsWhitespace)
             if candidate.isEmpty { continue }
+            // A fence swallows its whole BODY, not just the marker lines — a
+            // paste-code-then-ask prompt must be titled by the ask, never by
+            // the first line of the pasted code.
+            if candidate.hasPrefix("```") { inFence.toggle(); sawAnyLine = true; continue }
+            if inFence { sawAnyLine = true; continue }
             // A prompt STARTING with markup (<task-notification>, a pasted
             // reminder) is machine plumbing — never promote its inner body.
             if !sawAnyLine, candidate.hasPrefix("<") { return nil }
@@ -875,9 +886,8 @@ final class ApmeCollector {
             // '/Users/x/cli.ts crashes'). ASCII on purpose — slash commands
             // are ASCII by construction, so '/작업 정리해줘' stays a title.
             if candidate.range(of: "^/[a-zA-Z][a-zA-Z0-9_-]*(\\s|$)", options: .regularExpression) != nil { continue }
-            // Markup after a real first line, and code fences, are skipped.
+            // Markup after a real first line is skipped.
             if candidate.hasPrefix("<") { continue }
-            if candidate.hasPrefix("```") { continue }
             line = candidate
             break
         }

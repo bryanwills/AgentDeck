@@ -101,7 +101,8 @@ private fun hasTaskEvalPayload(entry: TimelineEntry?): Boolean {
 /** Displayed pieces of a task header with its closure folded in. Mirrors
  *  `timelineTaskHeaderDisplay` in shared/src/timeline-task-display.ts. */
 internal data class TaskHeaderDisplay(
-    /** Own title when meaningful, else the judge's one-line summary, else raw. */
+    /** Judge's one-line summary when it exists (outcome outranks intent —
+     *  2026-08-28 contract flip), else the row's own title, else raw. */
     val title: String,
     /** Closure label chip ("Session end · 2 turns · 6m 5s"); null while open. */
     val closureText: String?,

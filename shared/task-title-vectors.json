@@ -1,20 +1,107 @@
 [
-  { "input": "  Fix the   flaky payment test\nmore detail below", "expected": "Fix the flaky payment test", "note": "first line, trimmed, whitespace collapsed" },
-  { "input": null, "expected": null, "note": "null prompt" },
-  { "input": "   \n \n", "expected": null, "note": "blank prompt" },
-  { "input": "/task close", "expected": null, "note": "bare slash command" },
-  { "input": "/compact\nInvestigate the perf regression", "expected": "Investigate the perf regression", "note": "slash command skipped, next line wins" },
-  { "input": "/Users/x/cli.ts crashes on startup", "expected": "/Users/x/cli.ts crashes on startup", "note": "slash PATH is not a command" },
-  { "input": "/작업 정리해줘\nsecond line", "expected": "/작업 정리해줘", "note": "non-ASCII after slash is not a command" },
-  { "input": "<task-notification>\nBackground task db3f completed", "expected": null, "note": "markup-first prompt is machine plumbing" },
-  { "input": "Summarize the review findings\n<system-reminder>context</system-reminder>", "expected": "Summarize the review findings", "note": "markup after a real first line" },
-  { "input": "```bash\necho hi\n```\nrun this and explain the output", "expected": "echo hi", "note": "code-fence lines are never titles" },
-  { "input": "## Refactor the collector", "expected": "Refactor the collector", "note": "markdown heading stripped" },
-  { "input": "- add tests for the fold", "expected": "add tests for the fold", "note": "list marker stripped" },
-  { "input": "> quoted request", "expected": "quoted request", "note": "quote marker stripped" },
-  { "input": "ok", "expected": null, "note": "below minimum length" },
-  { "input": "Task 3", "expected": "Task 3", "note": "derivation does not special-case Task N; the display SSOT rejects it" },
-  { "input": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word", "expected": "word word word word word word word word word word word word word word…", "note": "word-boundary cap with ellipsis" },
-  { "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가", "expected": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가…", "note": "boundary-less CJK hard cut at 72 code points" },
-  { "input": "🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙 🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙", "expected": "🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙…", "note": "code-point index math — astral word boundary at point 40" }
+  {
+    "input": "  Fix the   flaky payment test\nmore detail below",
+    "expected": "Fix the flaky payment test",
+    "note": "first line, trimmed, whitespace collapsed"
+  },
+  {
+    "input": null,
+    "expected": null,
+    "note": "null prompt"
+  },
+  {
+    "input": "   \n \n",
+    "expected": null,
+    "note": "blank prompt"
+  },
+  {
+    "input": "/task close",
+    "expected": null,
+    "note": "bare slash command"
+  },
+  {
+    "input": "/compact\nInvestigate the perf regression",
+    "expected": "Investigate the perf regression",
+    "note": "slash command skipped, next line wins"
+  },
+  {
+    "input": "/Users/x/cli.ts crashes on startup",
+    "expected": "/Users/x/cli.ts crashes on startup",
+    "note": "slash PATH is not a command"
+  },
+  {
+    "input": "/작업 정리해줘\nsecond line",
+    "expected": "/작업 정리해줘",
+    "note": "non-ASCII after slash is not a command"
+  },
+  {
+    "input": "<task-notification>\nBackground task db3f completed",
+    "expected": null,
+    "note": "markup-first prompt is machine plumbing"
+  },
+  {
+    "input": "Summarize the review findings\n<system-reminder>context</system-reminder>",
+    "expected": "Summarize the review findings",
+    "note": "markup after a real first line"
+  },
+  {
+    "input": "```bash\necho hi\n```\nrun this and explain the output",
+    "expected": "run this and explain the output",
+    "note": "a fence swallows its whole body — the ask after the fence wins, never the pasted code"
+  },
+  {
+    "input": "## Refactor the collector",
+    "expected": "Refactor the collector",
+    "note": "markdown heading stripped"
+  },
+  {
+    "input": "- add tests for the fold",
+    "expected": "add tests for the fold",
+    "note": "list marker stripped"
+  },
+  {
+    "input": "> quoted request",
+    "expected": "quoted request",
+    "note": "quote marker stripped"
+  },
+  {
+    "input": "ok",
+    "expected": null,
+    "note": "below minimum length"
+  },
+  {
+    "input": "Task 3",
+    "expected": "Task 3",
+    "note": "derivation does not special-case Task N; the display SSOT rejects it"
+  },
+  {
+    "input": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+    "expected": "word word word word word word word word word word word word word word…",
+    "note": "word-boundary cap with ellipsis"
+  },
+  {
+    "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+    "expected": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가…",
+    "note": "boundary-less CJK hard cut at 72 code points"
+  },
+  {
+    "input": "🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙 🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙",
+    "expected": "🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙🐙…",
+    "note": "code-point index math — astral word boundary at point 40"
+  },
+  {
+    "input": "﻿BOM 프롬프트도 같은 제목이어야 한다",
+    "expected": "BOM 프롬프트도 같은 제목이어야 한다",
+    "note": "U+FEFF is whitespace on both sides (JS trim strips it; Swift widens CharacterSet)"
+  },
+  {
+    "input": "\u000b\nreal request after a vertical-tab-only line",
+    "expected": "real request after a vertical-tab-only line",
+    "note": "a \\v-only line is blank on both sides"
+  },
+  {
+    "input": "```js\nconst x = 1;\nthrow new Error('boom')\n```\nwhy does this throw?",
+    "expected": "why does this throw?",
+    "note": "paste-code-then-ask: title is the ask"
+  }
 ]

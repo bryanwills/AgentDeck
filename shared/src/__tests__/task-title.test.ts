@@ -48,9 +48,11 @@ describe('deriveTaskTitle', () => {
       .toBe('Summarize the review findings');
   });
 
-  it('code-fence lines are never titles', () => {
+  it('a fence swallows its whole body — the ask wins, never the pasted code', () => {
     expect(deriveTaskTitle('```bash\necho hi\n```\nrun this and explain the output'))
-      .toBe('echo hi');
+      .toBe('run this and explain the output');
+    expect(deriveTaskTitle('```\nTypeError: cannot read foo\n```\n이 스택트레이스 원인 찾아줘'))
+      .toBe('이 스택트레이스 원인 찾아줘');
   });
 
   it('strips markdown furniture', () => {

@@ -1341,7 +1341,8 @@ private func timelineTaskHasEvalPayload(_ entry: TimelineEntry?) -> Bool {
 /// Displayed pieces of a task header with its closure folded in. Mirrors
 /// `timelineTaskHeaderDisplay` in shared/src/timeline-task-display.ts.
 struct TimelineTaskHeaderDisplay {
-    /// Own title when meaningful, else the judge's one-line summary, else raw.
+    /// Judge's one-line summary when it exists (outcome outranks intent —
+    /// 2026-08-28 contract flip), else the row's own title, else raw.
     let title: String
     /// Closure label chip ("Session end · 2 turns · 6m 5s"); nil while open.
     let closureText: String?
