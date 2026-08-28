@@ -21,6 +21,8 @@
     "generate-codex-freshness-rules": "node scripts/generate-codex-freshness-rules.mjs",
     "generate-idotmatrix-identity": "node scripts/generate-idotmatrix-identity.mjs",
     "generate-pairing-code-rules": "node scripts/generate-pairing-code-rules.mjs",
+    "generate-apme-display-rules": "node scripts/generate-apme-display-rules.mjs",
+    "generate-apme-dashboard": "node scripts/generate-apme-dashboard.mjs",
     "generate-esp32-board-matrix": "node scripts/generate-esp32-board-matrix.mjs",
     "generate-mdns-identity": "node scripts/generate-mdns-identity.mjs",
     "generate-observed-agent-rules": "node scripts/generate-observed-agent-rules.mjs",

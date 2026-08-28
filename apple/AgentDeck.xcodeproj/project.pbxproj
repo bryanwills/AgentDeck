@@ -260,8 +260,10 @@
 		811D1351A028B31CC72F4784 /* TerrariumState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 593C80232028E1DBC0227E17 /* TerrariumState.swift */; };
 		812F3BFFE7AA293804D39234 /* SessionLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31609846ED73DC70F674FCF0 /* SessionLauncher.swift */; };
 		81D7B5B58DF4D7429082432B /* ControlTowerPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D60A0390EDEA34DD8F09055 /* ControlTowerPanel.swift */; };
+		82E9E69FDCEB956332E0D117 /* TaskTitleRules.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECF625C2B3057379F5CFA1B0 /* TaskTitleRules.generated.swift */; };
 		830C151322C62CF4B3ADA406 /* ApmeCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF540FF89BA54744CF94CC4 /* ApmeCollector.swift */; };
 		838450A0CF588614736D3F60 /* ConnectionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5A10C1FD79BB64BD2BB8D5 /* ConnectionOverlay.swift */; };
+		839448229FB93D6553CF0677 /* ActionFoldRules.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69DC64FA090F06CB556BEC40 /* ActionFoldRules.generated.swift */; };
 		83C7FC17B750D369087AF18E /* PixooRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 730925E1194B8183122443CA /* PixooRenderer.swift */; };
 		83FE9645B23326BD78B52126 /* PixooPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DC38F54A1C54AB134DB0535 /* PixooPreview.swift */; };
 		840FBBACA9DC9EF12D49D37D /* UtilityProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC83A78EA479592D015AA2F6 /* UtilityProxy.swift */; };
@@ -347,6 +349,7 @@
 		B6674B508C256A29E68E3E12 /* InkDeckPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8404D4037BF665BA54E03F0 /* InkDeckPreview.swift */; };
 		B73219DB62E81E164F0149F0 /* IDotMatrixSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0C496748B5F5315E3551E69 /* IDotMatrixSheet.swift */; };
 		B777A61FBB6AD6F51B165DA5 /* SessionListPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40755F64E4C39A49B99D88CA /* SessionListPanel.swift */; };
+		B7AC1325F3226677AF160B50 /* TaskTitleRules.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECF625C2B3057379F5CFA1B0 /* TaskTitleRules.generated.swift */; };
 		B8830354996DCFC054A9AD5A /* TimelineRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8884FD5EE02A0EDAF5D6C448 /* TimelineRelay.swift */; };
 		B88EAABE4E7D9CEB126CE830 /* ApmeJudgeOpenAI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26A4C8A53C312709350735F5 /* ApmeJudgeOpenAI.swift */; };
 		B9625008665F0FFF8CB98581 /* PairingCodeRules.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C75E7B3676BD283B9A4BE27 /* PairingCodeRules.generated.swift */; };
@@ -399,6 +402,7 @@
 		CD8B866925EF6BC839EC467D /* HttpAccessPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D805A12FAC706136018710BC /* HttpAccessPolicyTests.swift */; };
 		CDABC5CCE965EF7FA30DE280 /* LocalKiroObserverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B49DE4157BFB50F9F51EF40 /* LocalKiroObserverTests.swift */; };
 		CF27ABB66E4B268C31C44E6E /* IntegrationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B7BAB1080F7958F74A1B74 /* IntegrationsView.swift */; };
+		CF6C9C3C7D97F3585DD07FCD /* ActionFoldRules.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69DC64FA090F06CB556BEC40 /* ActionFoldRules.generated.swift */; };
 		CFCABF9422E74B8CF2A23C7E /* CodexOtelParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BE1D983995443760EDE3A4A /* CodexOtelParserTests.swift */; };
 		CFDDFF75A732BEA08DDA7A95 /* UsageRelayFreshnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004AFFB1B0E061D54CDCDED0 /* UsageRelayFreshnessTests.swift */; };
 		D036600F5679C1A191132F87 /* SingletonGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5C866AF54937CD8E433F49 /* SingletonGuard.swift */; };
@@ -633,6 +637,7 @@
 		68F068BCFDB979A23AEDA5C3 /* IDotMatrixBLE.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IDotMatrixBLE.swift; sourceTree = "<group>"; };
 		69470A0782BDF6A29012E9F0 /* DaemonActor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonActor.swift; sourceTree = "<group>"; };
 		69BCA057209786EF62993762 /* TerrariumView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrariumView.swift; sourceTree = "<group>"; };
+		69DC64FA090F06CB556BEC40 /* ActionFoldRules.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionFoldRules.generated.swift; sourceTree = "<group>"; };
 		6C930EA1785B14EE276FC29A /* BridgeEventParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeEventParser.swift; sourceTree = "<group>"; };
 		6D587189DB0E504028BE4BEF /* AgentDeckApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDeckApp.swift; sourceTree = "<group>"; };
 		6DDD4BFFE8B182F5EEBC3365 /* CreatureLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreatureLayout.swift; sourceTree = "<group>"; };
@@ -758,6 +763,7 @@
 		E9342D343A701D2BDC92C845 /* PixooModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixooModule.swift; sourceTree = "<group>"; };
 		EB1470AE66304DC838676016 /* ApmeJudgeDetect.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeJudgeDetect.swift; sourceTree = "<group>"; };
 		EC83A78EA479592D015AA2F6 /* UtilityProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityProxy.swift; sourceTree = "<group>"; };
+		ECF625C2B3057379F5CFA1B0 /* TaskTitleRules.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTitleRules.generated.swift; sourceTree = "<group>"; };
 		EF126528728AEF6E07C3C7ED /* KiroCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KiroCreature.swift; sourceTree = "<group>"; };
 		F028824993D611B356EA86D3 /* SessionFormatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionFormatters.swift; sourceTree = "<group>"; };
 		F15F55435772A15B8F0E92C1 /* AgentState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentState.swift; sourceTree = "<group>"; };
@@ -1075,6 +1081,7 @@
 		A9B0D6366E16F371CE0469CD /* Apme */ = {
 			isa = PBXGroup;
 			children = (
+				69DC64FA090F06CB556BEC40 /* ActionFoldRules.generated.swift */,
 				2AD17B846036A2F78B153024 /* ApmeActivityHistory.swift */,
 				5857149AEB13F8BEC5CDE41B /* ApmeClassifier.swift */,
 				8EF540FF89BA54744CF94CC4 /* ApmeCollector.swift */,
@@ -1092,6 +1099,7 @@
 				CBBE1258602AB5ABC83560EE /* ApmeSettings.swift */,
 				F8E176199605E14D2EAF35A1 /* ApmeStore.swift */,
 				F8A8384A78E6B40497C01168 /* ReviewRunner.swift */,
+				ECF625C2B3057379F5CFA1B0 /* TaskTitleRules.generated.swift */,
 			);
 			path = Apme;
 			sourceTree = "<group>";
@@ -1617,6 +1625,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CF6C9C3C7D97F3585DD07FCD /* ActionFoldRules.generated.swift in Sources */,
 				07B804BD8A367595E8FF639F /* ActivityPanel.swift in Sources */,
 				7DBB3B78D2F8A74614C9047E /* Adapter.swift in Sources */,
 				4D7595686B60FDBDE4A5210D /* AdbModule.swift in Sources */,
@@ -1782,6 +1791,7 @@
 				50D04081E2C11AAD2D67C254 /* SwiftSurfaceFirmwareStore.swift in Sources */,
 				98B8B1F86B399218B89247D8 /* TUITerrariumRenderer.swift in Sources */,
 				F940158912CF7ACA80C3376C /* TailDecoder.swift in Sources */,
+				B7AC1325F3226677AF160B50 /* TaskTitleRules.generated.swift in Sources */,
 				F20373DB53552C2F36204EDF /* TerrariumConfig.swift in Sources */,
 				20BC342C63610F58CFF51A74 /* TerrariumRenderer.swift in Sources */,
 				AA5C41BFDE43A8EDC2C85AA3 /* TerrariumRules.generated.swift in Sources */,
@@ -1813,6 +1823,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				839448229FB93D6553CF0677 /* ActionFoldRules.generated.swift in Sources */,
 				590D75801E10021127334F88 /* ActivityPanel.swift in Sources */,
 				1D193B9524AA5E561A899882 /* Adapter.swift in Sources */,
 				0B04CA71C040BE9955B8C032 /* AdbModule.swift in Sources */,
@@ -1979,6 +1990,7 @@
 				D285BA530EBC08FD2C5CCF32 /* SwiftSurfaceFirmwareStore.swift in Sources */,
 				7F401B71F68C95DEBD74DAFE /* TUITerrariumRenderer.swift in Sources */,
 				BCBA361B299FFE8F5C9CE65E /* TailDecoder.swift in Sources */,
+				82E9E69FDCEB956332E0D117 /* TaskTitleRules.generated.swift in Sources */,
 				076E08E5217ECF4528B4AC9A /* TerrariumConfig.swift in Sources */,
 				BC74AE57E83DCC133989A7C9 /* TerrariumRenderer.swift in Sources */,
 				A5FEB3C538CE2A4C9C385F2F /* TerrariumRules.generated.swift in Sources */,

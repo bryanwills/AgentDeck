@@ -1,0 +1,63 @@
+// Drift gate for the generated APME work-display mirrors
+// (shared/src/task-title.ts + shared/src/action-fold.ts → Swift). A hand edit
+// to either generated file, or a skipped `pnpm generate-apme-display-rules`,
+// fails here in CI — the pairing-code-rules sync-test pattern. This replaces
+// the former task-title-swift-sync.test.ts constants grep: the title/fold
+// constants now ride the emitters, so a one-sided tune is a byte diff.
+//
+// The BEHAVIOR of the mirrors stays pinned by the shared vector files
+// (task-title-vectors.json / action-fold-vectors.json), which both suites
+// replay — a byte-identical mirror emitted from wrong rules goes red there.
+//
+// The idle-gap boundary is still a hand-mirrored constant in
+// ApmeCollector.swift (a task-segmentation rule both daemons must enforce at
+// the same instant), so its grep gate stays here.
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import * as taskTitle from '../task-title.js';
+import * as actionFold from '../action-fold.js';
+import { OUTPUTS, rulesFrom } from '../../../scripts/generate-apme-display-rules.mjs';
+
+const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+const rules = rulesFrom(taskTitle, actionFold);
+
+describe('generated APME display-rule mirrors in sync', () => {
+  for (const [rel, emit] of OUTPUTS) {
+    it(`${rel} matches the SSOT`, () => {
+      const onDisk = readFileSync(`${repoRoot}${rel}`, 'utf8');
+      expect(onDisk).toBe(emit(rules));
+    });
+  }
+
+  it('emitters embed the SSOT constants (sanity on the emitters themselves)', () => {
+    const [titleOut, foldOut] = OUTPUTS;
+    const swiftTitle = titleOut[1](rules);
+    const swiftFold = foldOut[1](rules);
+    expect(swiftTitle).toContain(`static let maxChars = ${taskTitle.TASK_TITLE_MAX_CHARS}`);
+    expect(swiftTitle).toContain(`static let minChars = ${taskTitle.TASK_TITLE_MIN_CHARS}`);
+    expect(swiftFold).toContain(`static let maxTools = ${actionFold.ACTION_FOLD_MAX_TOOLS}`);
+    for (const name of actionFold.DISPATCH_TOOL_NAMES) {
+      expect(swiftFold).toContain(JSON.stringify(name));
+    }
+    for (const name of actionFold.MESSAGING_TOOL_NAMES) {
+      expect(swiftFold).toContain(JSON.stringify(name));
+    }
+  });
+
+  it('the Swift suite replays both shared vector files (grep the test wiring)', () => {
+    const swiftTest = readFileSync(
+      `${repoRoot}apple/AgentDeckTests/ApmeTaskBoundaryTests.swift`, 'utf8');
+    expect(swiftTest).toContain('shared/task-title-vectors.json');
+    expect(swiftTest).toContain('shared/action-fold-vectors.json');
+  });
+});
+
+describe('ApmeCollector.swift still mirrors the idle-gap constant', () => {
+  it('idle-gap boundary matches AGENT_IDLE_GAP_MS (Swift keeps seconds)', async () => {
+    const { AGENT_IDLE_GAP_MS } = await import('../eval-schema.js');
+    const swift = readFileSync(
+      `${repoRoot}apple/AgentDeck/Daemon/Apme/ApmeCollector.swift`, 'utf8');
+    expect(swift).toContain(`var idleGapSec: TimeInterval = ${AGENT_IDLE_GAP_MS / 1000}`);
+  });
+});

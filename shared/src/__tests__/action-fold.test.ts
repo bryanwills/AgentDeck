@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   ACTION_FOLD_MAX_TOOLS,
   agentCoordinationSummary,
@@ -87,5 +90,31 @@ describe('foldActionCounts', () => {
   it('returns null when there is nothing to say', () => {
     expect(foldActionCounts({ tools: [] })).toBeNull();
     expect(foldActionCounts({ tools: [{ name: 'Read', count: 0 }], filesTouched: 0 })).toBeNull();
+  });
+});
+
+describe('shared vector file parity (shared/action-fold-vectors.json)', () => {
+  // The same vectors are replayed by ApmeTaskBoundaryTests against the
+  // GENERATED Swift mirror (ActionFoldRules) — a rule change that edits only
+  // one side goes red on the other. Keep vectors additive.
+  interface Vector {
+    tools: Array<{ name: string; count: number }>;
+    filesTouched: number | null;
+    fold: string | null;
+    coordination: { dispatches: number; messages: number } | null;
+    note: string;
+  }
+  const here = dirname(fileURLToPath(import.meta.url));
+  const vectors: Vector[] = JSON.parse(
+    readFileSync(join(here, '..', '..', 'action-fold-vectors.json'), 'utf-8'),
+  );
+
+  it('has enough vectors to be a gate', () => {
+    expect(vectors.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it.each(vectors.map((v) => [v.note, v] as const))('%s', (_note, v) => {
+    expect(foldActionCounts({ tools: v.tools, filesTouched: v.filesTouched })).toBe(v.fold);
+    expect(agentCoordinationSummary(v.tools)).toEqual(v.coordination);
   });
 });

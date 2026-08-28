@@ -111,6 +111,63 @@ enum ApmeHttpRoutes {
             return Self.runDetailResponse(id: id, store: store)
         }
 
+        // Tasks: the accumulating browse surface — mirrors Node bridge
+        // `GET /apme/tasks` (bridge/src/apme/http.ts). Paged + filtered +
+        // faceted; `view` selects a Work-board lifecycle bucket and
+        // `sort=attention` floats the attention bucket first. Serving this
+        // here is what makes the bundled dashboard's Work board reachable
+        // when the Swift daemon owns port 9120 (it used to be Node-only).
+        await httpServer.get("/apme/tasks") { request in
+            if let denied = Self.requireToken(request) { return denied }
+            let q = request.queryParams
+            let limit = min(max(Int(q["limit"] ?? "") ?? 50, 1), 500)
+            let offset = min(max(Int(q["offset"] ?? "") ?? 0, 0), 1_000_000)
+            let views: Set<String> = ["attention", "inprogress", "judged", "reported", "orphaned"]
+            let view = q["view"].flatMap { views.contains($0) ? $0 : nil }
+            let state = (q["state"] == "closed" || q["state"] == "open") ? q["state"] : nil
+            let page = store.listTaskPage(
+                limit: limit, offset: offset,
+                agentType: q["agent"], projectName: q["project"],
+                category: q["category"], outcome: q["outcome"],
+                state: state, view: view,
+                // Attention-first is the Work board's ordering and ONLY the
+                // Work board's — every other consumer keeps pure recency.
+                order: q["sort"] == "attention" ? "attention" : nil,
+                q: q["q"])
+            // Work-board display projections, enriched here so the store
+            // keeps returning raw facts: intent title (generated
+            // TaskTitleRules — the same rules that name the timeline's
+            // task_start header, over the task's OWN first prompt, never the
+            // run fallback) and the folded action line (ActionFoldRules)
+            // over one grouped tool query.
+            let toolCounts = store.toolCountsForTasks(page.tasks.compactMap { $0["id"] as? String })
+            let enriched = page.tasks.map { t -> [String: Any] in
+                var d = t
+                let tools = toolCounts[t["id"] as? String ?? ""] ?? []
+                if let title = TaskTitleRules.deriveTaskTitle(t["ownFirstPrompt"] as? String) {
+                    d["title"] = title
+                }
+                if let fold = ActionFoldRules.foldActionCounts(
+                    tools: tools, filesTouched: t["filesTouched"] as? Int) {
+                    d["actionFold"] = fold
+                }
+                if let coord = ActionFoldRules.agentCoordinationSummary(tools) {
+                    d["coordination"] = ["dispatches": coord.dispatches, "messages": coord.messages]
+                }
+                return d
+            }
+            return .json([
+                "schema": Self.schemaVersion,
+                "total": page.total, "limit": limit, "offset": offset,
+                "tasks": enriched,
+                "facets": store.taskFacets(),
+                // Badges honor the same narrowing filters as the rows.
+                "viewCounts": store.taskViewCounts(
+                    agentType: q["agent"], projectName: q["project"],
+                    category: q["category"], outcome: q["outcome"], q: q["q"]),
+            ])
+        }
+
         // Single task detail — mirrors Node bridge `GET /apme/tasks/:id`.
         // Returns the task row, its evals, and the turns belonging to it.
         await httpServer.get("/apme/tasks/*") { request in
@@ -304,7 +361,7 @@ enum ApmeHttpRoutes {
         }
         let evals = store.listEvalsForTask(id)
         let turns = store.listTurnsForTask(id)
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "schema": schemaVersion,
             "task": taskDict(task),
             "evals": evals.map { evalDict($0, includeRaw: true) },
@@ -313,26 +370,57 @@ enum ApmeHttpRoutes {
                 ?? task.compositeScore
                 ?? NSNull(),
         ]
+        // Run context: the task row alone names no agent, model or project —
+        // a task reached directly (the Work board's click path) had no way to
+        // say whose work it was. Mirrors Node's GET /apme/tasks/:id.
+        if let run = store.getRun(id: task.runId) {
+            var runDict: [String: Any] = [
+                "id": run.id,
+                "sessionId": run.sessionId,
+                "agentType": run.agentType,
+                "startedAt": run.startedAt,
+            ]
+            if let v = run.modelId { runDict["modelId"] = v }
+            if let v = run.projectName { runDict["projectName"] = v }
+            if let v = run.endedAt { runDict["endedAt"] = v }
+            body["run"] = runDict
+        }
+        // The canonical SessionSample — the typed trajectory the detail pane
+        // replays. Without it a task page can show scores but not the work.
+        if let sample = store.getSampleDict(id) { body["sample"] = sample }
         return .json(body)
     }
 
-    /// Serialize ApmeTask → JSON dict using snake_case keys for Node-bridge parity.
+    /// Serialize ApmeTask → JSON dict. camelCase, key-for-key with Node's
+    /// rowToTask (bridge/src/apme/store.ts) — the shared dashboard reads
+    /// `t.taskIndex`/`t.startedAt`/… and the run-detail Tasks section
+    /// normalizes both casings, so camelCase is the parity shape. (The old
+    /// snake_case keys here claimed "Node-bridge parity" but Node's route
+    /// returns camelCase — the detail pane rendered blanks on this daemon.)
     private static func taskDict(_ t: ApmeTask) -> [String: Any] {
         var dict: [String: Any] = [
             "id": t.id,
-            "run_id": t.runId,
-            "task_index": t.taskIndex,
-            "boundary_signal": t.boundarySignal,
-            "started_at": t.startedAt,
+            "runId": t.runId,
+            "taskIndex": t.taskIndex,
+            "boundarySignal": t.boundarySignal,
+            "startedAt": t.startedAt,
         ]
-        if let v = t.endedAt { dict["ended_at"] = v }
-        if let v = t.firstTurnIndex { dict["first_turn_index"] = v }
-        if let v = t.lastTurnIndex { dict["last_turn_index"] = v }
+        if let v = t.endedAt { dict["endedAt"] = v }
+        if let v = t.firstTurnIndex { dict["firstTurnIndex"] = v }
+        if let v = t.lastTurnIndex { dict["lastTurnIndex"] = v }
         if let v = t.summary { dict["summary"] = v }
         if let v = t.outcome { dict["outcome"] = v }
-        if let v = t.compositeScore { dict["composite_score"] = v }
-        if let v = t.taskCategory { dict["task_category"] = v }
-        if let v = t.notesJson { dict["notes_json"] = v }
+        if let v = t.compositeScore { dict["compositeScore"] = v }
+        if let v = t.taskCategory { dict["taskCategory"] = v }
+        if let v = t.notesJson { dict["notesJson"] = v }
+        if let v = t.modelId { dict["modelId"] = v }
+        if let v = t.provider { dict["provider"] = v }
+        if let v = t.modelConfig { dict["modelConfig"] = v }
+        if let v = t.inputTokens { dict["inputTokens"] = v }
+        if let v = t.outputTokens { dict["outputTokens"] = v }
+        if let v = t.costUsd { dict["costUsd"] = v }
+        dict["costKnown"] = t.costKnown
+        if let v = t.latencyMs { dict["latencyMs"] = v }
         return dict
     }
 

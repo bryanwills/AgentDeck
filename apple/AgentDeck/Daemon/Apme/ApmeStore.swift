@@ -596,6 +596,290 @@ final class ApmeStore: @unchecked Sendable {
         return result
     }
 
+    // MARK: - Task page (Work board) — mirrors bridge/src/apme/store.ts
+    //
+    // ONE SQL definition per lifecycle bucket: the filter, the row's
+    // `attention` flag and the tab badges all read these same expressions, so
+    // a badge count can never disagree with the rows its tab lists. Keep the
+    // expressions textually in step with TASK_VIEW_SQL / taskAttentionSql /
+    // TASK_SCORE_SQL in bridge/src/apme/store.ts — both daemons serve the
+    // same Work board off the same sqlite layout.
+
+    /// Attention is triage, so it is bounded by recency — see
+    /// TASK_ATTENTION_WINDOW_MS in bridge/src/apme/store.ts for the measured
+    /// rationale (an unwindowed bucket held 93% of all history).
+    static let taskAttentionWindowMs = 7 * 24 * 60 * 60 * 1000
+
+    /// Latest task-level `overall` eval, falling back to the composite.
+    private static let taskScoreSql = """
+        COALESCE((SELECT e.score FROM evals e WHERE e.task_id = t.id AND e.metric = 'overall' \
+        ORDER BY e.created_at DESC LIMIT 1), t.composite_score)
+        """
+
+    /// The attention bucket, anchored at a caller-supplied cutoff (epoch ms)
+    /// so the filter, the row flag and the badge are computed against the
+    /// SAME instant within one request. IFNULL is load-bearing: a NULL score
+    /// makes `score < 0.4` NULL, and SQLite sorts NULL LAST under DESC — so
+    /// without it, recent unjudged rows sank BELOW week-old rows on the
+    /// attention-first ordering. `cutoffMs` is always a number we computed —
+    /// never user input — so inlining it is safe.
+    private static func taskAttentionSql(cutoffMs: Int) -> String {
+        """
+        IFNULL((t.started_at >= \(cutoffMs) \
+        AND (t.boundary_signal = 'orphaned' \
+        OR (t.ended_at IS NOT NULL AND EXISTS ( \
+        SELECT 1 FROM turns tu WHERE tu.task_id = t.id AND tu.response IS NULL)) \
+        OR \(taskScoreSql) < 0.4)), 0)
+        """
+    }
+
+    /// Non-attention lifecycle buckets. `orphaned` stays un-windowed — the
+    /// ledger of segmentation debt.
+    private static let taskViewSql: [String: String] = [
+        "inprogress": "t.ended_at IS NULL",
+        "judged": "\(taskScoreSql) IS NOT NULL",
+        "reported": "(t.ended_at IS NOT NULL AND \(taskScoreSql) IS NULL)",
+        "orphaned": "t.boundary_signal = 'orphaned'",
+    ]
+
+    /// The NARROWING filters `listTaskPage` and `taskViewCounts` share — one
+    /// builder so a filtered board's badges and its rows read the same WHERE.
+    private static func buildTaskFilterWhere(
+        agentType: String?, projectName: String?, category: String?, outcome: String?, q: String?
+    ) -> (where: [String], args: [Any]) {
+        var conds: [String] = []
+        var args: [Any] = []
+        // `_empty` runs are bookkeeping shells, never work the user did.
+        conds.append("COALESCE(r.task_category, '') != '_empty'")
+        if let v = agentType, !v.isEmpty { conds.append("r.agent_type = ?"); args.append(v) }
+        if let v = projectName, !v.isEmpty { conds.append("r.project_name = ?"); args.append(v) }
+        if let v = category, !v.isEmpty { conds.append("COALESCE(t.task_category, r.task_category) = ?"); args.append(v) }
+        if let v = outcome, !v.isEmpty { conds.append("t.outcome = ?"); args.append(v) }
+        if let v = q, !v.isEmpty {
+            conds.append("(t.summary LIKE ? OR r.task_prompt LIKE ?)")
+            args.append("%\(v)%"); args.append("%\(v)%")
+        }
+        return (conds, args)
+    }
+
+    /// One page of task units with the run context needed to read them
+    /// without a second query — the Work board's row source. Returns
+    /// camelCase dicts matching Node's rowToTaskListRow so the shared
+    /// dashboard HTML reads both daemons' responses identically.
+    func listTaskPage(
+        limit rawLimit: Int = 50, offset rawOffset: Int = 0,
+        agentType: String? = nil, projectName: String? = nil,
+        category: String? = nil, outcome: String? = nil,
+        state: String? = nil, view: String? = nil,
+        order: String? = nil, q: String? = nil
+    ) -> (total: Int, tasks: [[String: Any]]) {
+        guard let db else { return (0, []) }
+        let limit = min(max(rawLimit, 1), 500)
+        let offset = max(rawOffset, 0)
+        var (conds, args) = Self.buildTaskFilterWhere(
+            agentType: agentType, projectName: projectName,
+            category: category, outcome: outcome, q: q)
+        let attentionSql = Self.taskAttentionSql(
+            cutoffMs: Int(Date().timeIntervalSince1970 * 1000) - Self.taskAttentionWindowMs)
+        if let view {
+            if view == "attention" { conds.append(attentionSql) }
+            else if let sql = Self.taskViewSql[view] { conds.append(sql) }
+        }
+        if state == "closed" { conds.append("t.ended_at IS NOT NULL") }
+        if state == "open" { conds.append("t.ended_at IS NULL") }
+        let whereSql = "WHERE \(conds.joined(separator: " AND "))"
+        // Attention-first is the Work board's ordering and ONLY the Work
+        // board's — every other consumer keeps pure recency.
+        let orderSql = order == "attention"
+            ? "ORDER BY attention DESC, t.started_at DESC"
+            : "ORDER BY t.started_at DESC"
+        var total = 0
+        if let row = queryWithArgs(
+            "SELECT COUNT(*) AS n FROM tasks t JOIN runs r ON r.id = t.run_id \(whereSql)", args
+        ).first { total = row["n"] as? Int ?? 0 }
+        let rows = queryWithArgs(
+            """
+            SELECT t.*,
+                   r.session_id, r.agent_type, r.model_id AS run_model_id, r.project_name,
+                   r.project_path, r.task_prompt AS run_prompt, r.parent_run_id,
+                   (SELECT COUNT(*) FROM turns tu WHERE tu.task_id = t.id) AS turn_count,
+                   (SELECT COUNT(*) FROM turns tu WHERE tu.task_id = t.id AND tu.response IS NOT NULL) AS answered_turns,
+                   (SELECT COUNT(*) FROM sample_events se WHERE se.task_id = t.id) AS event_count,
+                   (SELECT COUNT(*) FROM sample_events se WHERE se.task_id = t.id AND se.kind = 'tool') AS tool_count,
+                   (SELECT COALESCE(SUM(COALESCE(tu.files_modified, 0) + COALESCE(tu.files_created, 0)), 0)
+                      FROM turns tu WHERE tu.task_id = t.id) AS files_touched,
+                   (SELECT tu.prompt FROM turns tu WHERE tu.task_id = t.id ORDER BY tu.turn_index ASC LIMIT 1) AS first_prompt,
+                   (SELECT e.score FROM evals e WHERE e.task_id = t.id AND e.metric = 'overall' ORDER BY e.created_at DESC LIMIT 1) AS overall_score,
+                   (SELECT COUNT(*) FROM evals e WHERE e.task_id = t.id) AS eval_count,
+                   (\(attentionSql)) AS attention
+            FROM tasks t JOIN runs r ON r.id = t.run_id
+            \(whereSql)
+            \(orderSql)
+            LIMIT ? OFFSET ?
+            """,
+            args + [limit, offset])
+        return (total, rows.map(Self.taskListRowDict))
+    }
+
+    /// 10 s TTL cache for `taskViewCounts`, keyed by the filter tuple — the
+    /// badges are a full-table aggregate with correlated eval subqueries, so
+    /// paying it at most once per TTL bounds the cost of a polling dashboard.
+    /// NSLock because ApmeStore is shared across actors (@unchecked Sendable).
+    private let viewCountsCacheLock = NSLock()
+    private var viewCountsCache: [String: (at: Date, value: [String: Int])] = [:]
+
+    /// Per-lifecycle-bucket totals for the Work board's tab badges. Same
+    /// NARROWING filters as `listTaskPage`, same bucket SQL — a badge may lag
+    /// its rows by up to 10 s, a bounded staleness, never a different
+    /// definition.
+    func taskViewCounts(
+        agentType: String? = nil, projectName: String? = nil,
+        category: String? = nil, outcome: String? = nil, q: String? = nil
+    ) -> [String: Int] {
+        let empty = ["all": 0, "attention": 0, "inprogress": 0, "judged": 0, "reported": 0, "orphaned": 0]
+        guard db != nil else { return empty }
+        let key = [agentType, projectName, category, outcome, q].map { $0 ?? "\u{0}" }.joined(separator: "|")
+        viewCountsCacheLock.lock()
+        if let cached = viewCountsCache[key], Date().timeIntervalSince(cached.at) < 10 {
+            viewCountsCacheLock.unlock()
+            return cached.value
+        }
+        viewCountsCacheLock.unlock()
+        let attentionSql = Self.taskAttentionSql(
+            cutoffMs: Int(Date().timeIntervalSince1970 * 1000) - Self.taskAttentionWindowMs)
+        let (conds, args) = Self.buildTaskFilterWhere(
+            agentType: agentType, projectName: projectName,
+            category: category, outcome: outcome, q: q)
+        guard let row = queryWithArgs(
+            """
+            SELECT COUNT(*) AS all_n,
+                   SUM(CASE WHEN \(attentionSql) THEN 1 ELSE 0 END) AS attention_n,
+                   SUM(CASE WHEN \(Self.taskViewSql["inprogress"]!) THEN 1 ELSE 0 END) AS inprogress_n,
+                   SUM(CASE WHEN \(Self.taskViewSql["judged"]!) THEN 1 ELSE 0 END) AS judged_n,
+                   SUM(CASE WHEN \(Self.taskViewSql["reported"]!) THEN 1 ELSE 0 END) AS reported_n,
+                   SUM(CASE WHEN \(Self.taskViewSql["orphaned"]!) THEN 1 ELSE 0 END) AS orphaned_n
+            FROM tasks t JOIN runs r ON r.id = t.run_id
+            WHERE \(conds.joined(separator: " AND "))
+            """,
+            args).first else { return empty }
+        let value = [
+            "all": row["all_n"] as? Int ?? 0,
+            "attention": row["attention_n"] as? Int ?? 0,
+            "inprogress": row["inprogress_n"] as? Int ?? 0,
+            "judged": row["judged_n"] as? Int ?? 0,
+            "reported": row["reported_n"] as? Int ?? 0,
+            "orphaned": row["orphaned_n"] as? Int ?? 0,
+        ]
+        viewCountsCacheLock.lock()
+        if viewCountsCache.count > 20 { viewCountsCache.removeAll() }
+        viewCountsCache[key] = (Date(), value)
+        viewCountsCacheLock.unlock()
+        return value
+    }
+
+    /// Per-tool call counts for a page of tasks, in one grouped query. Feeds
+    /// the generated `ActionFoldRules` projection — the store returns raw
+    /// counts, the HTTP layer folds. Mirrors toolCountsForTasks in
+    /// bridge/src/apme/store.ts.
+    func toolCountsForTasks(_ taskIds: [String]) -> [String: [(name: String, count: Int)]] {
+        guard db != nil, !taskIds.isEmpty else { return [:] }
+        let placeholders = taskIds.map { _ in "?" }.joined(separator: ",")
+        let rows = queryWithArgs(
+            """
+            SELECT task_id, tool_name, COUNT(*) AS n FROM sample_events
+            WHERE kind = 'tool' AND tool_name IS NOT NULL AND task_id IN (\(placeholders))
+            GROUP BY task_id, tool_name
+            """,
+            taskIds)
+        var out: [String: [(name: String, count: Int)]] = [:]
+        for r in rows {
+            guard let taskId = r["task_id"] as? String,
+                  let name = r["tool_name"] as? String,
+                  let n = r["n"] as? Int else { continue }
+            out[taskId, default: []].append((name: name, count: n))
+        }
+        return out
+    }
+
+    /// Distinct values behind the task list's filters, so the UI offers what
+    /// the data actually contains rather than a hardcoded menu.
+    func taskFacets() -> [String: [String]] {
+        guard db != nil else { return ["agents": [], "projects": [], "categories": [], "outcomes": []] }
+        func col(_ sql: String) -> [String] {
+            query(sql).compactMap { $0["v"] as? String }.filter { !$0.isEmpty }
+        }
+        return [
+            "agents": col("SELECT DISTINCT agent_type AS v FROM runs ORDER BY v"),
+            "projects": col("SELECT DISTINCT project_name AS v FROM runs ORDER BY v"),
+            "categories": col("SELECT DISTINCT COALESCE(task_category,'') AS v FROM tasks WHERE v != '' ORDER BY v"),
+            "outcomes": col("SELECT DISTINCT COALESCE(outcome,'') AS v FROM tasks WHERE v != '' ORDER BY v"),
+        ]
+    }
+
+    /// Task row + run context as a camelCase JSON dict — key-for-key with
+    /// Node's rowToTaskListRow so the shared dashboard reads both daemons
+    /// identically. Nulls become absent keys (JS reads undefined == null for
+    /// every check the dashboard makes).
+    private static func taskListRowDict(_ r: [String: Any]) -> [String: Any] {
+        var d: [String: Any] = [:]
+        func put(_ key: String, _ col: String) { if let v = r[col], !(v is NSNull) { d[key] = v } }
+        put("id", "id"); put("runId", "run_id"); put("taskIndex", "task_index")
+        put("boundarySignal", "boundary_signal"); put("startedAt", "started_at")
+        put("endedAt", "ended_at"); put("firstTurnIndex", "first_turn_index")
+        put("lastTurnIndex", "last_turn_index"); put("summary", "summary")
+        put("outcome", "outcome"); put("compositeScore", "composite_score")
+        put("taskCategory", "task_category"); put("notesJson", "notes_json")
+        put("provider", "provider"); put("modelConfig", "model_config")
+        put("inputTokens", "input_tokens"); put("outputTokens", "output_tokens")
+        put("costUsd", "cost_usd"); put("latencyMs", "latency_ms")
+        d["costKnown"] = (r["cost_known"] as? Int) == 1
+        // Task's own sample-header model, falling back to the run's.
+        if let v = r["model_id"], !(v is NSNull) { d["modelId"] = v }
+        else if let v = r["run_model_id"], !(v is NSNull) { d["modelId"] = v }
+        put("sessionId", "session_id"); put("agentType", "agent_type")
+        put("projectName", "project_name"); put("projectPath", "project_path")
+        put("parentRunId", "parent_run_id")
+        // Display prompt keeps the run fallback; the title source must NOT —
+        // title derivation must never name task 2+ of a split run after task
+        // 0's intent.
+        if let v = r["first_prompt"], !(v is NSNull) { d["firstPrompt"] = v; d["ownFirstPrompt"] = v }
+        else if let v = r["run_prompt"], !(v is NSNull) { d["firstPrompt"] = v }
+        d["turnCount"] = r["turn_count"] as? Int ?? 0
+        d["answeredTurns"] = r["answered_turns"] as? Int ?? 0
+        d["eventCount"] = r["event_count"] as? Int ?? 0
+        d["toolCount"] = r["tool_count"] as? Int ?? 0
+        d["filesTouched"] = r["files_touched"] as? Int ?? 0
+        d["evalCount"] = r["eval_count"] as? Int ?? 0
+        if let v = r["overall_score"], !(v is NSNull) { d["overallScore"] = v }
+        else if let v = r["composite_score"], !(v is NSNull) { d["overallScore"] = v }
+        d["attention"] = (r["attention"] as? Int) == 1
+        return d
+    }
+
+    /// `query` with positional bindings (String/Int/Double; anything else
+    /// binds NULL). The unparameterized `query` stays for static SQL.
+    private func queryWithArgs(_ sql: String, _ args: [Any]) -> [[String: Any]] {
+        guard let db else { return [] }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            DaemonLogger.shared.error("[APME] queryWithArgs prepare failed: \(String(cString: sqlite3_errmsg(db)))")
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        for (i, arg) in args.enumerated() {
+            let idx = Int32(i + 1)
+            switch arg {
+            case let s as String: bindText(stmt, idx, s)
+            case let n as Int: sqlite3_bind_int64(stmt, idx, Int64(n))
+            case let dbl as Double: sqlite3_bind_double(stmt, idx, dbl)
+            default: sqlite3_bind_null(stmt, idx)
+            }
+        }
+        var rows: [[String: Any]] = []
+        while sqlite3_step(stmt) == SQLITE_ROW { rows.append(rowToDict(stmt)) }
+        return rows
+    }
+
     /// Drop a task row. Used for empty tasks (no turns attached) so the
     /// dashboard doesn't show phantom entries from back-to-back boundary
     /// signals. Mirrors the empty-task drop path in bridge/src/apme/collector.ts.

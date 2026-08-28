@@ -1,0 +1,89 @@
+[
+  {
+    "tools": [{ "name": "Edit", "count": 9 }, { "name": "Read", "count": 24 }, { "name": "Bash", "count": 11 }],
+    "filesTouched": 3,
+    "fold": "Read×24 Bash×11 Edit×9 · 3 files",
+    "coordination": null,
+    "note": "count-desc ordering with a files suffix"
+  },
+  {
+    "tools": [{ "name": "mcp__claude-in-chrome__navigate", "count": 2 }],
+    "filesTouched": null,
+    "fold": "navigate×2",
+    "coordination": null,
+    "note": "MCP server prefix folded away"
+  },
+  {
+    "tools": [{ "name": "mcp__a__Read", "count": 2 }, { "name": "Read", "count": 3 }],
+    "filesTouched": 0,
+    "fold": "Read×5",
+    "coordination": null,
+    "note": "folded names merge their counts"
+  },
+  {
+    "tools": [{ "name": "Bash", "count": 2 }, { "name": "apply", "count": 2 }],
+    "filesTouched": null,
+    "fold": "Bash×2 apply×2",
+    "coordination": null,
+    "note": "tie-break is UTF-16 code-unit order (uppercase before lowercase), never locale order"
+  },
+  {
+    "tools": [
+      { "name": "Read", "count": 6 }, { "name": "Edit", "count": 5 }, { "name": "Bash", "count": 4 },
+      { "name": "Write", "count": 3 }, { "name": "Grep", "count": 2 }, { "name": "Glob", "count": 1 }
+    ],
+    "filesTouched": null,
+    "fold": "Read×6 Edit×5 Bash×4 Write×3 +2",
+    "coordination": null,
+    "note": "collapses past ACTION_FOLD_MAX_TOOLS to +N"
+  },
+  {
+    "tools": [],
+    "filesTouched": 3,
+    "fold": "3 files",
+    "coordination": null,
+    "note": "files-only line"
+  },
+  {
+    "tools": [],
+    "filesTouched": 1,
+    "fold": "1 file",
+    "coordination": null,
+    "note": "singular file"
+  },
+  {
+    "tools": [],
+    "filesTouched": 0,
+    "fold": null,
+    "coordination": null,
+    "note": "nothing to say folds to null, never an empty string"
+  },
+  {
+    "tools": [{ "name": "Read", "count": 0 }, { "name": "", "count": 4 }],
+    "filesTouched": null,
+    "fold": null,
+    "coordination": null,
+    "note": "zero counts and empty names are filtered out"
+  },
+  {
+    "tools": [{ "name": "Agent", "count": 3 }, { "name": "SendMessage", "count": 2 }, { "name": "Read", "count": 8 }],
+    "filesTouched": null,
+    "fold": "Read×8 Agent×3 SendMessage×2",
+    "coordination": { "dispatches": 3, "messages": 2 },
+    "note": "dispatch + messaging counted from raw names"
+  },
+  {
+    "tools": [{ "name": "Task", "count": 1 }, { "name": "task", "count": 2 }, { "name": "Workflow", "count": 1 }],
+    "filesTouched": null,
+    "fold": "task×2 Task×1 Workflow×1",
+    "coordination": { "dispatches": 4, "messages": 0 },
+    "note": "all dispatch spellings count; TaskCreate-style bookkeeping names do not exist here"
+  },
+  {
+    "tools": [{ "name": "TaskCreate", "count": 5 }, { "name": "Read", "count": 1 }],
+    "filesTouched": null,
+    "fold": "TaskCreate×5 Read×1",
+    "coordination": null,
+    "note": "todo bookkeeping is not dispatch — coordination stays null"
+  }
+]

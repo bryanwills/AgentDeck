@@ -1304,12 +1304,137 @@ final class ApmeTaskBoundaryTests: XCTestCase {
         }
     }
 
-    // MARK: - deriveTaskTitle parity (hand mirror of shared/src/task-title.ts)
+    // MARK: - Work board task page (mirrors bridge listTaskPage/taskViewCounts)
+
+    /// The Work board's lifecycle buckets, attention ordering and badge
+    /// counts — the Swift half of the single-source bucket SQL. The badge
+    /// consistency loop is the load-bearing assertion: a badge count must
+    /// equal the row total its tab lists, per bucket, because both read the
+    /// same SQL expressions.
+    func testListTaskPageBucketsAndViewCounts() async throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let store = tmp.store
+
+        let now = Int(Date().timeIntervalSince1970 * 1000)
+        let dayMs = 24 * 60 * 60 * 1000
+        let runId = UUID().uuidString
+        store.insertRun(ApmeRun(
+            id: runId, sessionId: "s1", agentType: "claude-code",
+            modelId: "m1", projectName: "demo", projectPath: nil,
+            taskPrompt: "run prompt", startedAt: now - dayMs
+        ))
+
+        func addTask(_ id: String, index: Int, startedAt: Int,
+                     endedAt: Int? = nil, boundary: String? = nil,
+                     score: Double? = nil) {
+            store.insertTask(ApmeTask(
+                id: id, runId: runId, taskIndex: index,
+                boundarySignal: "open", startedAt: startedAt))
+            var fields: [String: Any?] = [:]
+            if let endedAt { fields["endedAt"] = endedAt }
+            if let boundary { fields["boundarySignal"] = boundary }
+            if !fields.isEmpty { store.updateTask(id: id, fields: fields) }
+            if let score {
+                store.insertEvalForTask(ApmeEval(
+                    runId: runId, layer: "task_judge", metric: "overall",
+                    score: score, createdAt: now), taskId: id)
+            }
+        }
+
+        // Recent reaper-closed → attention + orphaned.
+        addTask("t-orphan", index: 0, startedAt: now - 3600_000,
+                endedAt: now - 1800_000, boundary: "orphaned")
+        // Still accumulating → inprogress, not attention (open ≠ needs eyes).
+        addTask("t-open", index: 1, startedAt: now - 1200_000)
+        // Closed and well-judged → judged, not attention.
+        addTask("t-good", index: 2, startedAt: now - 7200_000,
+                endedAt: now - 7000_000, boundary: "clear", score: 0.9)
+        // Closed, never scored → reported.
+        addTask("t-report", index: 3, startedAt: now - 9000_000,
+                endedAt: now - 8000_000, boundary: "session_end")
+        // Judged badly → judged AND attention (red-band score).
+        addTask("t-bad", index: 4, startedAt: now - 5400_000,
+                endedAt: now - 5000_000, boundary: "clear", score: 0.2)
+        // Orphaned a month ago → orphaned but OUTSIDE the attention window.
+        addTask("t-old-orphan", index: 5, startedAt: now - 30 * dayMs,
+                endedAt: now - 30 * dayMs + 1800_000, boundary: "orphaned")
+
+        // A prompt on the task's own first turn feeds firstPrompt AND
+        // ownFirstPrompt; a task with no turns keeps the run fallback for
+        // firstPrompt only (title derivation must never inherit it).
+        store.insertTurn(id: "tu1", runId: runId, turnIndex: 0,
+                         prompt: "fix the flaky test", startedAt: now - 3600_000,
+                         taskId: "t-orphan")
+
+        let attention = store.listTaskPage(view: "attention")
+        XCTAssertEqual(Set(attention.tasks.compactMap { $0["id"] as? String }),
+                       ["t-orphan", "t-bad"],
+                       "attention = recent AND (orphaned | unanswered reply | red score)")
+
+        let counts = store.taskViewCounts()
+        XCTAssertEqual(counts["all"], 6)
+        for view in ["attention", "inprogress", "judged", "reported", "orphaned"] {
+            XCTAssertEqual(store.listTaskPage(view: view).total, counts[view],
+                           "badge for \(view) must count exactly the rows its tab lists")
+        }
+        XCTAssertEqual(counts["orphaned"], 2, "orphaned stays un-windowed")
+        XCTAssertEqual(counts["inprogress"], 1)
+        XCTAssertEqual(counts["judged"], 2)
+        // Buckets overlap by design: an unjudged orphan is also "reported"
+        // (closed, never scored) — same expressions as Node's TASK_VIEW_SQL.
+        XCTAssertEqual(counts["reported"], 3)
+
+        // Attention-first ordering floats the attention rows above newer
+        // non-attention rows; recency breaks the tie within each half.
+        let ordered = store.listTaskPage(order: "attention")
+        let ids = ordered.tasks.compactMap { $0["id"] as? String }
+        XCTAssertEqual(Array(ids.prefix(2)), ["t-orphan", "t-bad"])
+        XCTAssertEqual(ordered.total, 6)
+
+        // Row projection: camelCase keys + prompt ownership.
+        guard let orphanRow = ordered.tasks.first(where: { ($0["id"] as? String) == "t-orphan" })
+        else { return XCTFail("t-orphan row missing") }
+        XCTAssertEqual(orphanRow["agentType"] as? String, "claude-code")
+        XCTAssertEqual(orphanRow["projectName"] as? String, "demo")
+        XCTAssertEqual(orphanRow["firstPrompt"] as? String, "fix the flaky test")
+        XCTAssertEqual(orphanRow["ownFirstPrompt"] as? String, "fix the flaky test")
+        XCTAssertEqual(orphanRow["attention"] as? Bool, true)
+        XCTAssertEqual(orphanRow["turnCount"] as? Int, 1)
+        guard let openRow = ordered.tasks.first(where: { ($0["id"] as? String) == "t-open" })
+        else { return XCTFail("t-open row missing") }
+        XCTAssertEqual(openRow["firstPrompt"] as? String, "run prompt",
+                       "display prompt keeps the run fallback")
+        XCTAssertNil(openRow["ownFirstPrompt"],
+                     "title source must NOT inherit the run prompt")
+        XCTAssertEqual(openRow["attention"] as? Bool, false)
+
+        // Narrowing filters ride rows and badges identically.
+        let filtered = store.taskViewCounts(agentType: "codex-cli")
+        XCTAssertEqual(filtered["all"], 0)
+        XCTAssertEqual(store.listTaskPage(agentType: "codex-cli").total, 0)
+
+        // Tool counts group by task in one query.
+        for seq in 0..<2 {
+            _ = store.insertSampleEvent(
+                taskId: "t-orphan", runId: runId, turnIndex: 0, turnId: "tu1",
+                seq: seq, ts: now + seq, kind: "tool", model: nil,
+                inputTokens: nil, outputTokens: nil, costUsd: nil, costKnown: nil,
+                latencyMs: nil, toolName: "Read", toolStatus: nil, toolError: nil,
+                payload: nil, dedupKey: "tool-\(seq)")
+        }
+        let toolCounts = store.toolCountsForTasks(["t-orphan"])
+        XCTAssertEqual(toolCounts["t-orphan"]?.first?.name, "Read")
+        XCTAssertEqual(toolCounts["t-orphan"]?.first?.count, 2)
+    }
+
+    // MARK: - Generated display-rules parity (shared/src/task-title.ts, action-fold.ts)
 
     /// Replays the SHARED vector file (shared/task-title-vectors.json) — the
-    /// same file vitest replays against the TS implementation. A rule change
-    /// that edits only one side goes red on the other; that is the whole
-    /// parity gate for this hand mirror.
+    /// same file vitest replays against the TS implementation. The Swift copy
+    /// is generated (pnpm generate-apme-display-rules) and byte-gated, but the
+    /// vectors stay the BEHAVIOR gate: an emitter edit that compiles yet
+    /// diverges from the TS rules goes red here, not just on a byte diff.
     func testDeriveTaskTitleMatchesSharedVectors() async throws {
         struct Vector: Decodable {
             let input: String?
@@ -1325,7 +1450,38 @@ final class ApmeTaskBoundaryTests: XCTestCase {
         let vectors = try JSONDecoder().decode([Vector].self, from: data)
         XCTAssertGreaterThanOrEqual(vectors.count, 12, "vector file too small to be a gate")
         for v in vectors {
-            XCTAssertEqual(ApmeCollector.deriveTaskTitle(v.input), v.expected, v.note)
+            XCTAssertEqual(TaskTitleRules.deriveTaskTitle(v.input), v.expected, v.note)
+        }
+    }
+
+    /// Same contract for the action-fold mirror: shared/action-fold-vectors.json
+    /// replayed against the generated `ActionFoldRules`.
+    func testActionFoldMatchesSharedVectors() async throws {
+        struct ToolCount: Decodable { let name: String; let count: Int }
+        struct Coordination: Decodable { let dispatches: Int; let messages: Int }
+        struct Vector: Decodable {
+            let tools: [ToolCount]
+            let filesTouched: Int?
+            let fold: String?
+            let coordination: Coordination?
+            let note: String
+        }
+        let vectorsURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("shared/action-fold-vectors.json")
+        let data = try Data(contentsOf: vectorsURL)
+        let vectors = try JSONDecoder().decode([Vector].self, from: data)
+        XCTAssertGreaterThanOrEqual(vectors.count, 8, "vector file too small to be a gate")
+        for v in vectors {
+            let tools = v.tools.map { (name: $0.name, count: $0.count) }
+            XCTAssertEqual(
+                ActionFoldRules.foldActionCounts(tools: tools, filesTouched: v.filesTouched),
+                v.fold, v.note)
+            let coord = ActionFoldRules.agentCoordinationSummary(tools)
+            XCTAssertEqual(coord?.dispatches, v.coordination?.dispatches, v.note)
+            XCTAssertEqual(coord?.messages, v.coordination?.messages, v.note)
         }
     }
 }

@@ -81,7 +81,10 @@ export function agentCoordinationSummary(
  *
  * Determinism: ties sort by name so the same task always folds to the same
  * line (renderer output is used as identity in dedup paths — see the
- * session-slot renderer rule in CLAUDE.md).
+ * session-slot renderer rule in CLAUDE.md). The tie-break is a plain
+ * code-unit compare, NOT localeCompare: localeCompare's order depends on the
+ * host locale (and case-folds, so `Bash` vs `apply` flips), which both breaks
+ * determinism across machines and cannot be mirrored by Swift's `<`.
  */
 export function foldActionCounts(input: ActionFoldInput): string | null {
   const merged = new Map<string, number>();
@@ -90,7 +93,7 @@ export function foldActionCounts(input: ActionFoldInput): string | null {
     if (!name || !(t.count > 0)) continue;
     merged.set(name, (merged.get(name) ?? 0) + t.count);
   }
-  const sorted = [...merged.entries()].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
+  const sorted = [...merged.entries()].sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   const parts: string[] = [];
   if (sorted.length > 0) {
     const shown = sorted.slice(0, ACTION_FOLD_MAX_TOOLS);

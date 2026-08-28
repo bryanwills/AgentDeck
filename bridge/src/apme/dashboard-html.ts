@@ -730,11 +730,11 @@ async function loadWork(offset){
     if(document.getElementById('panel-work').classList.contains('visible'))
       document.getElementById('status').textContent=workTotal+' tasks · '+new Date().toLocaleTimeString();
   }catch(e){
-    // The Swift daemon build ships no /apme/tasks LIST route (only the detail
-    // route) — say which capability is missing instead of a bare error, so a
-    // degraded board is a labeled state, not a mystery.
+    // Both daemons serve /apme/tasks now (Swift since 2026-08-29), but an
+    // OLDER Swift daemon build may not — say which capability is missing
+    // instead of a bare error, so a degraded board is a labeled state.
     rowsEl.innerHTML='<div class="empty">Task list unavailable ('+esc(e.message)+').<br>'+
-      'This daemon build may not serve /apme/tasks — the Node.js daemon does; Activity and Runs tabs still work.</div>';
+      'An older daemon build may not serve /apme/tasks; Activity and Runs tabs still work.</div>';
     document.getElementById('work-pager').textContent='';
   }
 }
@@ -747,18 +747,25 @@ async function selectTask(id){
   try{
     const r=await fetch(api('/apme/tasks/'+id));const d=await r.json();
     const t=d.task||{},run=d.run||{},turns=d.turns||[],evals=d.evals||[],sample=d.sample;
+    // Normalize both casings like selectRun does — an older Swift daemon
+    // build serves this detail with snake_case keys.
+    const taskIndex=t.taskIndex??t.task_index;
+    const startedAt=t.startedAt??t.started_at;
+    const endedAt=t.endedAt??t.ended_at;
+    const boundarySignal=t.boundarySignal??t.boundary_signal;
+    const costUsd=t.costUsd??t.cost_usd;
     let h='';
-    h+='<div class="detail-header"><h2>'+esc(t.summary||('Task '+t.taskIndex))+'</h2>';
-    h+='<div class="meta-row"><span>'+esc(run.agentType||'')+'</span><span>'+esc(run.modelId||'—')+'</span>'+
-       '<span>'+esc(run.projectName||'—')+'</span>'+
-       '<span>'+(t.startedAt?new Date(t.startedAt).toLocaleString():'—')+'</span>'+
-       '<span>'+(t.endedAt?fd(t.endedAt-t.startedAt):'<span style="color:var(--yellow)">open</span>')+'</span>'+
-       '<span>boundary '+esc(t.boundarySignal||'—')+'</span></div></div>';
+    h+='<div class="detail-header"><h2>'+esc(t.summary||('Task '+((taskIndex??0)+1)))+'</h2>';
+    h+='<div class="meta-row"><span>'+esc(run.agentType||run.agent_type||'')+'</span><span>'+esc(run.modelId||run.model_id||'—')+'</span>'+
+       '<span>'+esc(run.projectName||run.project_name||'—')+'</span>'+
+       '<span>'+(startedAt?new Date(startedAt).toLocaleString():'—')+'</span>'+
+       '<span>'+(endedAt?fd(endedAt-startedAt):'<span style="color:var(--yellow)">open</span>')+'</span>'+
+       '<span>boundary '+esc(boundarySignal||'—')+'</span></div></div>';
     h+='<div class="section"><div class="metric-grid">'+
-       '<div class="metric-card"><div class="lbl">Score</div><div class="val">'+fs(d.overallScore??t.compositeScore)+'</div></div>'+
+       '<div class="metric-card"><div class="lbl">Score</div><div class="val">'+fs(d.overallScore??t.compositeScore??t.composite_score)+'</div></div>'+
        '<div class="metric-card"><div class="lbl">Turns</div><div class="val">'+turns.length+'</div></div>'+
        '<div class="metric-card"><div class="lbl">Events</div><div class="val">'+((sample&&sample.events?sample.events.length:0))+'</div></div>'+
-       '<div class="metric-card"><div class="lbl">Cost</div><div class="val">'+(t.costUsd!=null?'$'+t.costUsd.toFixed(4):'—')+'</div></div>'+
+       '<div class="metric-card"><div class="lbl">Cost</div><div class="val">'+(costUsd!=null?'$'+costUsd.toFixed(4):'—')+'</div></div>'+
        '</div></div>';
     if(evals.length){
       h+='<div class="section"><div class="section-head"><span>Evals</span></div><table><tbody>';

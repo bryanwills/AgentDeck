@@ -2,6 +2,46 @@
 
 ---
 
+## 2026-08-29 — Work 판이 두 데몬 모두에서 서빙되고, 태스크 이름 규칙은 생성 미러가 된다
+
+Work 판(`/apme` 기본 탭)은 Node가 9120을 잡은 동안만 도달했다 — Swift 데몬은
+`/apme/tasks` 상세만 서빙했고, 번들 대시보드는 손복사 스냅샷이라 Work 판이
+통째로 빠진 31KB 구본이었다(생성본 66KB). 이번에 세 조각을 함께 닫았다:
+
+- **Swift `/apme/tasks` 목록 라우트** — `ApmeStore.listTaskPage` /
+  `taskViewCounts`(10초 TTL) / `toolCountsForTasks` / `taskFacets` 를 Node
+  store 의 버킷 SQL(`TASK_VIEW_SQL`/`taskAttentionSql`/`TASK_SCORE_SQL`)과
+  표현식 단위로 맞춰 추가. 배지=행 일치는 `ApmeTaskBoundaryTests` 의 버킷별
+  루프가 고정한다(버킷은 의도적으로 겹친다 — 미채점 orphan 은 reported 이기도
+  하다). 상세 라우트의 "Node-bridge parity" snake_case 는 실제 Node 응답이
+  camelCase 라 상세 패널이 이 데몬에서 공란을 그리고 있었다 — camelCase 로
+  맞추고 `run`/`sample` 을 채웠으며, 대시보드 쪽은 구식 데몬을 위해 양쪽
+  케이싱을 정규화한다.
+- **태스크 이름/액션 표시 규칙의 generator 전환** — `deriveTaskTitle` 손미러
+  (CLAUDE.md 등재 부채)를 `pnpm generate-apme-display-rules` 로 전환:
+  `TaskTitleRules.generated.swift` + `ActionFoldRules.generated.swift`
+  (Swift 목록 라우트가 fold/coordination 을 필요로 했고, 새 손미러는 금지).
+  동작은 공유 벡터 파일(`task-title-vectors.json` + 신규
+  `action-fold-vectors.json`)을 양 스위트가 리플레이해 고정하고, 바이트는
+  `apme-display-rules-sync.test.ts` 가 게이트한다. fold 의 tie-break 는
+  `localeCompare`(호스트 로케일 의존, Swift 로 미러 불가)에서 코드유닛 비교로
+  바꿨다 — 렌더러 출력이 identity 로 쓰이는 곳에서 로케일은 결정론이 아니다.
+- **번들 대시보드의 생성 미러화** — `pnpm generate-apme-dashboard` 가
+  `apmeDashboardHtml()` 출력을 앱 리소스로 쓰고,
+  `apme-dashboard-html.test.ts` 가 바이트 단위로 drift 를 게이트한다. 손복사
+  시절 이 파일은 조용히 한 기능 전체 뒤처진 채 App Store 로 나가고 있었다.
+
+idle-gap 검증 예비 실측(머지 00:33, 데몬 재기동 02:52 — 재기동 전 태스크 3개는
+구코드가 만든 orphan): 재기동 후 ~3.3시간 동안 태스크 6개 = idle_gap 종결 2,
+진행중 4, **orphan 0**. 직전 7일은 orphaned 202/256(79%)였다. 표본이 작으므로
+attention 창(7일)이 전부 머지 후 데이터로 채워지는 ~9/5 이후 재측정이 확정
+판정이다(현재 attention 215건 중 199건이 구시대 orphan 부채).
+
+검증: vitest 3707 전건, `ApmeTaskBoundaryTests` 58건(신규 Work-판 store 테스트
+포함), macOS 앱 빌드, 생성기 3종 왕복(재실행 시 무변경).
+
+---
+
 ## 2026-08-28 — Surface portable-reader에 라이선스 학습팩 배포를 넣는다
 
 Pocket Daily의 SD 오프라인 학습팩이 기기 쪽에서만 구현되어 AgentDeck은 Feed 광고와
