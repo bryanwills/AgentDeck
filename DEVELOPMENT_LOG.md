@@ -37,8 +37,21 @@ idle-gap 검증 예비 실측(머지 00:33, 데몬 재기동 02:52 — 재기동
 attention 창(7일)이 전부 머지 후 데이터로 채워지는 ~9/5 이후 재측정이 확정
 판정이다(현재 attention 215건 중 199건이 구시대 orphan 부채).
 
-검증: vitest 3707 전건, `ApmeTaskBoundaryTests` 58건(신규 Work-판 store 테스트
-포함), macOS 앱 빌드, 생성기 3종 왕복(재실행 시 무변경).
+머지 후 적대적 리뷰가 4건을 잡았고 전부 후속 커밋으로 반영했다. 핵심 교훈
+하나: **한 파일을 지켜보는 게이트가 이미 있는지, 미러를 생성물로 바꾸기
+전에 확인하라.** 번들 대시보드는 `verify-tokens-sync.py`의 7개 토큰 미러
+중 하나였고, 렌더러 출력으로 덮어쓰는 순간 새 바이트 게이트와 기존 토큰
+게이트가 같은 파일에 서로 모순된 내용을 요구했다 — 해소는 토큰 :root
+미러를 렌더러 SSOT 자체에 이식하는 것뿐이다(전 색상 var()/color-mix(),
+캔버스는 getComputedStyle 런타임 해석). 나머지: Swift 쿼리스트링 폼
+디코딩 부재(한국어/공백 검색이 Swift 데몬에서만 0건), attention 창·red
+band의 새 손미러 리터럴(shared SSOT 이동 + grep-pin), Tasks 탭 0-기반
+'Task 0' 라벨.
+
+검증: vitest 3707→3713 전건, `ApmeTaskBoundaryTests` 58건(신규 Work-판
+store 테스트 포함)+`HTTPServerParseTests` 4건, macOS 앱 빌드, 토큰 미러
+7종 sync, 생성기 3종 왕복(재실행 시 무변경). 데몬 재시작 후 실데이터
+1,547 태스크로 Work 판·상세 패널 브라우저 실측.
 
 ---
 
