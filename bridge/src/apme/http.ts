@@ -134,6 +134,7 @@ export async function handleApmeRequest(
       const view = TASK_VIEWS.find((v) => v === viewParam);
       const filters = {
         ...(url.searchParams.get('agent') ? { agentType: url.searchParams.get('agent')! } : {}),
+        ...(url.searchParams.get('session') ? { sessionId: url.searchParams.get('session')! } : {}),
         ...(url.searchParams.get('project') ? { projectName: url.searchParams.get('project')! } : {}),
         ...(url.searchParams.get('category') ? { category: url.searchParams.get('category')! } : {}),
         ...(url.searchParams.get('outcome') ? { outcome: url.searchParams.get('outcome')! } : {}),

@@ -651,13 +651,14 @@ final class ApmeStore: @unchecked Sendable {
     /// The NARROWING filters `listTaskPage` and `taskViewCounts` share — one
     /// builder so a filtered board's badges and its rows read the same WHERE.
     private static func buildTaskFilterWhere(
-        agentType: String?, projectName: String?, category: String?, outcome: String?, q: String?
+        agentType: String?, sessionId: String?, projectName: String?, category: String?, outcome: String?, q: String?
     ) -> (where: [String], args: [Any]) {
         var conds: [String] = []
         var args: [Any] = []
         // `_empty` runs are bookkeeping shells, never work the user did.
         conds.append("COALESCE(r.task_category, '') != '_empty'")
         if let v = agentType, !v.isEmpty { conds.append("r.agent_type = ?"); args.append(v) }
+        if let v = sessionId, !v.isEmpty { conds.append("r.session_id = ?"); args.append(v) }
         if let v = projectName, !v.isEmpty { conds.append("r.project_name = ?"); args.append(v) }
         if let v = category, !v.isEmpty { conds.append("COALESCE(t.task_category, r.task_category) = ?"); args.append(v) }
         if let v = outcome, !v.isEmpty { conds.append("t.outcome = ?"); args.append(v) }
@@ -674,7 +675,7 @@ final class ApmeStore: @unchecked Sendable {
     /// dashboard HTML reads both daemons' responses identically.
     func listTaskPage(
         limit rawLimit: Int = 50, offset rawOffset: Int = 0,
-        agentType: String? = nil, projectName: String? = nil,
+        agentType: String? = nil, sessionId: String? = nil, projectName: String? = nil,
         category: String? = nil, outcome: String? = nil,
         state: String? = nil, view: String? = nil,
         order: String? = nil, q: String? = nil
@@ -683,7 +684,7 @@ final class ApmeStore: @unchecked Sendable {
         let limit = min(max(rawLimit, 1), 500)
         let offset = max(rawOffset, 0)
         var (conds, args) = Self.buildTaskFilterWhere(
-            agentType: agentType, projectName: projectName,
+            agentType: agentType, sessionId: sessionId, projectName: projectName,
             category: category, outcome: outcome, q: q)
         let attentionSql = Self.taskAttentionSql(
             cutoffMs: Int(Date().timeIntervalSince1970 * 1000) - Self.taskAttentionWindowMs)
@@ -739,12 +740,12 @@ final class ApmeStore: @unchecked Sendable {
     /// its rows by up to 10 s, a bounded staleness, never a different
     /// definition.
     func taskViewCounts(
-        agentType: String? = nil, projectName: String? = nil,
+        agentType: String? = nil, sessionId: String? = nil, projectName: String? = nil,
         category: String? = nil, outcome: String? = nil, q: String? = nil
     ) -> [String: Int] {
         let empty = ["all": 0, "attention": 0, "inprogress": 0, "judged": 0, "reported": 0, "orphaned": 0]
         guard db != nil else { return empty }
-        let key = [agentType, projectName, category, outcome, q].map { $0 ?? "\u{0}" }.joined(separator: "|")
+        let key = [agentType, sessionId, projectName, category, outcome, q].map { $0 ?? "\u{0}" }.joined(separator: "|")
         viewCountsCacheLock.lock()
         if let cached = viewCountsCache[key], Date().timeIntervalSince(cached.at) < 10 {
             viewCountsCacheLock.unlock()
@@ -754,7 +755,7 @@ final class ApmeStore: @unchecked Sendable {
         let attentionSql = Self.taskAttentionSql(
             cutoffMs: Int(Date().timeIntervalSince1970 * 1000) - Self.taskAttentionWindowMs)
         let (conds, args) = Self.buildTaskFilterWhere(
-            agentType: agentType, projectName: projectName,
+            agentType: agentType, sessionId: sessionId, projectName: projectName,
             category: category, outcome: outcome, q: q)
         guard let row = queryWithArgs(
             """

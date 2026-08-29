@@ -53,6 +53,27 @@ store 테스트 포함)+`HTTPServerParseTests` 4건, macOS 앱 빌드, 토큰 �
 7종 sync, 생성기 3종 왕복(재실행 시 무변경). 데몬 재시작 후 실데이터
 1,547 태스크로 Work 판·상세 패널 브라우저 실측.
 
+후속 사용성 점검에서 Work 행은 무엇을 했는지는 보여도 **어느 native session의
+연속 작업인지**를 보여주거나 모을 수 없었다. 실데이터는 1,553 task / 538
+session(평균 2.89 task/session, 최대 24)이어서 전역 session 드롭다운은 새
+탐색 문제를 만든다. 대신 행의 `project · short-session` 칩과 Run/Task 상세의
+`View session work`를 추가했다. 두 데몬의 `/apme/tasks?session=`이 exact
+`session_id` 필터와 같은 범위의 탭 배지를 반환하며, 선택 중에는 scope strip과
+`All sessions ×`를 노출한다. 전체 Work는 attention-first를 유지하고 한 session
+안에서는 연속 작업을 읽도록 recent-first다. 브라우저에서 전체 1,553 → 선택
+session 8 → 전체 1,553 왕복을 확인했다.
+
+같은 시점의 idle-gap **예비치**(read-only DB, `2026-08-29 02:52 KST` 재기동
+경계 이후)는 orphan 3/24 = **12.5%**, idle-gap 15/24였다. 현재 DB를 같은
+정의로 다시 읽은 직전 7일 구간은 200/253 = **79.1%**(당시 스냅샷
+202/256과 표본 수가 달라짐)다. 방향은 크게 개선됐지만 아직 당일 24건뿐이며
+머지 후 데이터로 7일 창이 채워지는 ~9/5 전에는 확정 판정하지 않는다. 남은
+orphan 3건은 codex 2 / claude 1이고 모두 unanswered turn 1건을 포함하므로,
+확정 측정 때 boundary 오분류와 실제 미응답을 나눠 본다.
+
+후속 검증: vitest 3,713건, `ApmeTaskBoundaryTests` 58건, bridge TypeScript
+빌드, dashboard 생성 미러 check, design-system/docs check, 토큰 7미러 sync.
+
 ---
 
 ## 2026-08-28 — Surface portable-reader에 라이선스 학습팩 배포를 넣는다

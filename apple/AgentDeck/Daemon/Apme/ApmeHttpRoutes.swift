@@ -127,7 +127,7 @@ enum ApmeHttpRoutes {
             let state = (q["state"] == "closed" || q["state"] == "open") ? q["state"] : nil
             let page = store.listTaskPage(
                 limit: limit, offset: offset,
-                agentType: q["agent"], projectName: q["project"],
+                agentType: q["agent"], sessionId: q["session"], projectName: q["project"],
                 category: q["category"], outcome: q["outcome"],
                 state: state, view: view,
                 // Attention-first is the Work board's ordering and ONLY the
@@ -163,7 +163,7 @@ enum ApmeHttpRoutes {
                 "facets": store.taskFacets(),
                 // Badges honor the same narrowing filters as the rows.
                 "viewCounts": store.taskViewCounts(
-                    agentType: q["agent"], projectName: q["project"],
+                    agentType: q["agent"], sessionId: q["session"], projectName: q["project"],
                     category: q["category"], outcome: q["outcome"], q: q["q"]),
             ])
         }

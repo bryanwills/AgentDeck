@@ -1413,6 +1413,9 @@ final class ApmeTaskBoundaryTests: XCTestCase {
         let filtered = store.taskViewCounts(agentType: "codex-cli")
         XCTAssertEqual(filtered["all"], 0)
         XCTAssertEqual(store.listTaskPage(agentType: "codex-cli").total, 0)
+        XCTAssertEqual(store.listTaskPage(sessionId: "s1").total, 6)
+        XCTAssertEqual(store.listTaskPage(sessionId: "another-session").total, 0)
+        XCTAssertEqual(store.taskViewCounts(sessionId: "another-session")["all"], 0)
 
         // Tool counts group by task in one query.
         for seq in 0..<2 {

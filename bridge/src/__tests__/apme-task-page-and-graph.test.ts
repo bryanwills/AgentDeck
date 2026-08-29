@@ -106,12 +106,14 @@ describe('task page', () => {
     expect(p2.tasks.map(t => t.id)).toEqual(['t2', 't1']);
   });
 
-  it('filters by agent, project and open/closed state', () => {
-    seedTask(store, { run: 'r1', task: 't1', ts: 1000, agent: 'codex-cli', project: 'apple' });
-    seedTask(store, { run: 'r2', task: 't2', ts: 2000, agent: 'claude-code', project: 'AgentDeck' });
+  it('filters by native session, agent, project and open/closed state', () => {
+    seedTask(store, { run: 'r1', task: 't1', ts: 1000, session: 'session-a', agent: 'codex-cli', project: 'apple' });
+    seedTask(store, { run: 'r2', task: 't2', ts: 2000, session: 'session-b', agent: 'claude-code', project: 'AgentDeck' });
     store.insertTask({ id: 't3', runId: 'r2', taskIndex: 1, boundarySignal: 'open', startedAt: 3000 });
 
     expect(store.listTaskPage({ agentType: 'codex-cli' }).tasks.map(t => t.id)).toEqual(['t1']);
+    expect(store.listTaskPage({ sessionId: 'session-b' }).tasks.map(t => t.id)).toEqual(['t3', 't2']);
+    expect(store.taskViewCounts({ sessionId: 'session-b' }).all).toBe(2);
     expect(store.listTaskPage({ projectName: 'AgentDeck' }).tasks.map(t => t.id).sort()).toEqual(['t2', 't3']);
     expect(store.listTaskPage({ state: 'open' }).tasks.map(t => t.id)).toEqual(['t3']);
     expect(store.listTaskPage({ state: 'closed' }).tasks.map(t => t.id)).toEqual(['t2', 't1']);

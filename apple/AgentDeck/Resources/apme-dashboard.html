@@ -124,6 +124,11 @@ tr.selected td{background:color-mix(in srgb,var(--accent) 15%,transparent);borde
 .work-title .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 .work-title .t.unnamed{color:var(--muted);font-weight:500;font-style:italic}
 .work-sub{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:10.5px;color:var(--dim);margin-top:3px;font-variant-numeric:tabular-nums}
+.session-link{appearance:none;background:transparent;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-radius:9px;padding:1px 6px;font:inherit;cursor:pointer;white-space:nowrap}
+.session-link:hover{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--text)}
+.work-scope{display:none;align-items:center;gap:8px;padding:6px 10px;background:color-mix(in srgb,var(--accent) 9%,var(--surface));border-bottom:1px solid color-mix(in srgb,var(--accent) 25%,var(--border));font-size:11px;color:var(--muted)}
+.work-scope code{color:var(--text);font-size:10.5px}
+.work-scope .clear{margin-left:auto;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:9px;padding:1px 7px;cursor:pointer}
 .chip{font-size:10px;padding:1px 7px;border-radius:9px;background:var(--surface);color:var(--muted);border:1px solid var(--border);white-space:nowrap}
 .chip-ok{background:color-mix(in srgb,var(--green) 12%,transparent);color:var(--green);border-color:color-mix(in srgb,var(--green) 30%,transparent)}
 .chip-warn{background:color-mix(in srgb,var(--yellow) 12%,transparent);color:var(--yellow);border-color:color-mix(in srgb,var(--yellow) 30%,transparent)}
@@ -170,6 +175,7 @@ tr.selected td{background:color-mix(in srgb,var(--accent) 15%,transparent);borde
           <select id="w-agent" onchange="loadWork(0)" style="background:var(--bg);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px"><option value="">All Agents</option></select>
           <select id="w-project" onchange="loadWork(0)" style="background:var(--bg);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px"><option value="">All Projects</option></select>
         </div>
+        <div class="work-scope" id="work-scope"></div>
         <div id="work-rows"></div>
         <div id="work-pager" style="display:flex;gap:8px;align-items:center;justify-content:center;padding:10px;font-size:11px;color:var(--dim)"></div>
       </div>
@@ -371,6 +377,7 @@ async function selectRun(id){
     const startedAt=run.started_at??run.startedAt;
     const endedAt=run.ended_at??run.endedAt;
     const agentType=run.agent_type??run.agentType??'';
+    const sessionId=run.session_id??run.sessionId??'';
     const modelId=run.model_id??run.modelId??'—';
     const projectName=run.project_name??run.projectName??'—';
     const taskPrompt=run.task_prompt??run.taskPrompt;
@@ -390,6 +397,7 @@ async function selectRun(id){
     h+='<span>🕐 '+tm+(dur?' · '+fd(dur):'')+'</span>';
     if(taskCategory)h+='<span><span class="badge-cat">'+taskCategory+'</span></span>';
     h+='<span style="font-family:monospace;font-size:11px;color:var(--dim);cursor:pointer" onclick="navigator.clipboard.writeText(\''+run.id+'\');this.textContent=\'copied!\';;setTimeout(()=>this.textContent=\''+run.id.slice(0,12)+'\',1000)" title="Click to copy full ID">'+run.id.slice(0,12)+'</span>';
+    if(sessionId)h+='<button class="session-link" data-session="'+esc(sessionId)+'" data-project="'+esc(projectName==='—'?'':projectName)+'" data-agent="'+esc(agentType)+'" onclick="openWorkSessionFrom(this,event)" title="Open every task collected from this native session">View session work</button>';
     h+='</div></div>';
 
     // Task prompt
@@ -645,7 +653,7 @@ function taskSearchDebounced(){clearTimeout(taskSearchTimer);taskSearchTimer=set
    ordering is attention-first, then recency. The lifecycle sub-tabs map to
    the endpoint's `view` buckets; badge counts ride the same response so a
    tab can never disagree with its rows. */
-let workOffset=0,workTotal=0,workView='',workSearchTimer=null,workCounts=null;const WORK_PAGE=50;
+let workOffset=0,workTotal=0,workView='',workSearchTimer=null,workCounts=null,workSession='',workSessionMeta=null;const WORK_PAGE=50;
 const WORK_VIEWS=[['','All'],['attention','Attention'],['judged','Judged'],['reported','Reported'],['inprogress','In progress'],['orphaned','Orphaned']];
 const SIG_LABEL={todo_complete:'TODO done',clear:'/clear',session_end:'Session end',manual:'Manual',idle_gap:'Idle gap',orphaned:'Orphaned',open:'open'};
 /* Boundary provenance: explicit (user/agent said so) > inferred (idle gap) >
@@ -668,15 +676,56 @@ function renderWorkTabs(){
     const n=v===''?counts.all:counts[v];
     return '<button class="work-tab'+(workView===v?' active':'')+'" onclick="setWorkView(\''+v+'\')">'+label+
       (n!=null?'<span class="n">'+n+'</span>':'')+'</button>';
-  }).join('')+'<span style="margin-left:auto;font-size:10px;color:var(--dim)">attention first, then recency</span>';
+  }).join('')+'<span style="margin-left:auto;font-size:10px;color:var(--dim)">'+(workSession?'session · recent first':'attention first, then recency')+'</span>';
 }
 function setWorkView(v){workView=v;loadWork(0)}
+function shortSession(id){
+  if(!id)return'unknown';
+  if(id.includes(':'))return id.length>22?'…'+id.slice(-20):id;
+  return id.length>10?id.slice(0,8)+'…':id;
+}
+function renderWorkScope(){
+  const el=document.getElementById('work-scope');
+  if(!workSession){el.style.display='none';el.innerHTML='';return}
+  const m=workSessionMeta||{};
+  el.style.display='flex';
+  el.innerHTML='<strong style="color:var(--accent)">Session</strong>'+
+    (m.project?'<span>'+esc(m.project)+'</span>':'')+
+    (m.agent?'<span class="chip">'+esc(m.agent)+'</span>':'')+
+    '<code title="'+esc(workSession)+'">'+esc(shortSession(workSession))+'</code>'+
+    '<span>'+workTotal+' task'+(workTotal===1?'':'s')+'</span>'+
+    '<button class="clear" onclick="clearWorkSession()" title="Return to all sessions">All sessions ×</button>';
+}
+function setWorkSession(id,project,agent){
+  if(!id)return;
+  workSession=id;workSessionMeta={project:project||'',agent:agent||''};workView='';
+  document.getElementById('w-q').value='';
+  document.getElementById('w-agent').value='';
+  document.getElementById('w-project').value='';
+  loadWork(0);
+}
+function clearWorkSession(){workSession='';workSessionMeta=null;workView='';loadWork(0)}
+function openWorkSessionFrom(el,ev){
+  if(ev)ev.stopPropagation();
+  const id=el.dataset.session||'';if(!id)return;
+  const visible=document.getElementById('panel-work').classList.contains('visible');
+  if(visible){setWorkSession(id,el.dataset.project||'',el.dataset.agent||'');return}
+  // Switching from Run/Task detail: prime the scope first, then let showTab's
+  // single load render it. Calling setWorkSession here would fetch twice.
+  workSession=id;workSessionMeta={project:el.dataset.project||'',agent:el.dataset.agent||''};workView='';
+  document.getElementById('w-q').value='';
+  document.getElementById('w-agent').value='';
+  document.getElementById('w-project').value='';
+  showTabById('work');
+}
 async function loadWork(offset){
   workOffset=offset||0;
   const rowsEl=document.getElementById('work-rows');
   const p=new URLSearchParams();
-  p.set('limit',String(WORK_PAGE));p.set('offset',String(workOffset));p.set('sort','attention');
+  p.set('limit',String(WORK_PAGE));p.set('offset',String(workOffset));
+  if(!workSession)p.set('sort','attention');
   if(workView)p.set('view',workView);
+  if(workSession)p.set('session',workSession);
   const q=document.getElementById('w-q').value.trim();if(q)p.set('q',q);
   const ag=document.getElementById('w-agent').value;if(ag)p.set('agent',ag);
   const pr=document.getElementById('w-project').value;if(pr)p.set('project',pr);
@@ -685,7 +734,9 @@ async function loadWork(offset){
     if(!r.ok)throw new Error('HTTP '+r.status);
     const d=await r.json();
     const tasks=d.tasks||[];workTotal=d.total||0;workCounts=d.viewCounts||null;
+    if(workSession&&tasks[0])workSessionMeta={project:tasks[0].projectName||'',agent:tasks[0].agentType||''};
     renderWorkTabs();
+    renderWorkScope();
     // A page that shrank under us (idle-gap closes, filters) leaves a stale
     // offset past the new total — clamp back instead of rendering an empty
     // page with no pager (which the 15s tick would then refetch forever).
@@ -720,6 +771,7 @@ async function loadWork(offset){
         '<div class="work-sub">'+
           sigChip(open?'open':t.boundarySignal)+
           '<span class="chip">'+esc(t.agentType||'—')+'</span>'+
+          (t.sessionId?'<button class="session-link" data-session="'+esc(t.sessionId)+'" data-project="'+esc(t.projectName||'')+'" data-agent="'+esc(t.agentType||'')+'" onclick="openWorkSessionFrom(this,event)" title="Show all work in this session">'+esc(t.projectName||'No project')+' · '+esc(shortSession(t.sessionId))+'</button>':'')+
           (t.taskCategory?'<span class="badge-cat">'+esc(t.taskCategory)+'</span>':'')+
           (t.coordination?'<span class="chip" title="subagent dispatches / agent-to-agent messages" style="color:var(--accent);border-color:color-mix(in srgb,var(--accent) 30%,transparent)">'+
             (t.coordination.dispatches?'⑂×'+t.coordination.dispatches:'')+
@@ -764,13 +816,18 @@ async function selectTask(id){
     const endedAt=t.endedAt??t.ended_at;
     const boundarySignal=t.boundarySignal??t.boundary_signal;
     const costUsd=t.costUsd??t.cost_usd;
+    const taskSessionId=run.sessionId??run.session_id??'';
+    const taskAgent=run.agentType||run.agent_type||'';
+    const taskProject=run.projectName||run.project_name||'';
     let h='';
     h+='<div class="detail-header"><h2>'+esc(t.summary||('Task '+((taskIndex??0)+1)))+'</h2>';
     h+='<div class="meta-row"><span>'+esc(run.agentType||run.agent_type||'')+'</span><span>'+esc(run.modelId||run.model_id||'—')+'</span>'+
        '<span>'+esc(run.projectName||run.project_name||'—')+'</span>'+
        '<span>'+(startedAt?new Date(startedAt).toLocaleString():'—')+'</span>'+
        '<span>'+(endedAt?fd(endedAt-startedAt):'<span style="color:var(--yellow)">open</span>')+'</span>'+
-       '<span>boundary '+esc(boundarySignal||'—')+'</span></div></div>';
+       '<span>boundary '+esc(boundarySignal||'—')+'</span>'+
+       (taskSessionId?'<button class="session-link" data-session="'+esc(taskSessionId)+'" data-project="'+esc(taskProject)+'" data-agent="'+esc(taskAgent)+'" onclick="openWorkSessionFrom(this,event)" title="Open every task collected from this native session">View session work</button>':'')+
+       '</div></div>';
     h+='<div class="section"><div class="metric-grid">'+
        '<div class="metric-card"><div class="lbl">Score</div><div class="val">'+fs(d.overallScore??t.compositeScore??t.composite_score)+'</div></div>'+
        '<div class="metric-card"><div class="lbl">Turns</div><div class="val">'+turns.length+'</div></div>'+

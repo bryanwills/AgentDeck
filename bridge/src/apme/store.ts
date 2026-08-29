@@ -610,13 +610,14 @@ function taskAttentionSql(cutoffMs: number): string {
 /** The NARROWING filters `listTaskPage` and `taskViewCounts` share — one
  *  builder so a filtered board's badges and its rows read the same WHERE. */
 function buildTaskFilterWhere(opts: {
-  agentType?: string; projectName?: string; category?: string; outcome?: string; q?: string;
+  agentType?: string; sessionId?: string; projectName?: string; category?: string; outcome?: string; q?: string;
 }): { where: string[]; args: unknown[] } {
   const where: string[] = [];
   const args: unknown[] = [];
   // `_empty` runs are bookkeeping shells, never work the user did.
   where.push("COALESCE(r.task_category, '') != '_empty'");
   if (opts.agentType) { where.push('r.agent_type = ?'); args.push(opts.agentType); }
+  if (opts.sessionId) { where.push('r.session_id = ?'); args.push(opts.sessionId); }
   if (opts.projectName) { where.push('r.project_name = ?'); args.push(opts.projectName); }
   if (opts.category) { where.push('COALESCE(t.task_category, r.task_category) = ?'); args.push(opts.category); }
   if (opts.outcome) { where.push('t.outcome = ?'); args.push(opts.outcome); }
@@ -1172,6 +1173,7 @@ export class ApmeStore {
     limit?: number;
     offset?: number;
     agentType?: string;
+    sessionId?: string;
     projectName?: string;
     category?: string;
     outcome?: string;
@@ -1238,11 +1240,11 @@ export class ApmeStore {
    *  may lag its rows by up to 10 s after a task moves buckets — a bounded
    *  staleness, not a different definition. */
   taskViewCounts(filters: {
-    agentType?: string; projectName?: string; category?: string; outcome?: string; q?: string;
+    agentType?: string; sessionId?: string; projectName?: string; category?: string; outcome?: string; q?: string;
   } = {}): Record<'all' | ApmeTaskView, number> {
     const empty = { all: 0, attention: 0, inprogress: 0, judged: 0, reported: 0, orphaned: 0 } as const;
     if (!this.db) return { ...empty };
-    const key = JSON.stringify([filters.agentType, filters.projectName, filters.category, filters.outcome, filters.q]);
+    const key = JSON.stringify([filters.agentType, filters.sessionId, filters.projectName, filters.category, filters.outcome, filters.q]);
     const cached = this.viewCountsCache.get(key);
     if (cached && Date.now() - cached.at < 10_000) return cached.value;
     const attentionSql = taskAttentionSql(Date.now() - TASK_ATTENTION_WINDOW_MS);
