@@ -295,6 +295,8 @@ interface WifiEsp32Device {
   touchDownSamples?: number;
   touchGestures?: number;
   alsReady?: boolean;
+  repaintCount?: number;
+  fullRefreshCount?: number;
   lastSeenMs: number;
 }
 const wifiEsp32Devices = new Map<string, WifiEsp32Device>();
@@ -720,6 +722,8 @@ function registerWifiEsp32(d: Record<string, unknown>, ws: WebSocket): void {
     touchDownSamples: typeof d.touchDownSamples === 'number' ? d.touchDownSamples : undefined,
     touchGestures: typeof d.touchGestures === 'number' ? d.touchGestures : undefined,
     alsReady: typeof d.alsReady === 'boolean' ? d.alsReady : undefined,
+    repaintCount: typeof d.repaintCount === 'number' ? d.repaintCount : undefined,
+    fullRefreshCount: typeof d.fullRefreshCount === 'number' ? d.fullRefreshCount : undefined,
     lastSeenMs: Date.now(),
   });
   wifiEsp32Sockets.set(key, ws);
@@ -4034,6 +4038,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           version: d.version ?? null,
           stale: d.stale,
           serialActive: d.serialActive,
+          repaintCount: d.repaintCount ?? null,
+          fullRefreshCount: d.fullRefreshCount ?? null,
         })),
       };
     }

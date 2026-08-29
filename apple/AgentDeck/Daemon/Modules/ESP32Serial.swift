@@ -85,6 +85,8 @@ actor ESP32Serial {
         var protocolRevision: Int?
         var wifiConfigured: Bool?
         var wifiConnected: Bool?
+        var repaintCount: Int?
+        var fullRefreshCount: Int?
     }
 
     private struct PortFailure {
@@ -241,6 +243,8 @@ actor ESP32Serial {
                         "protocolRevision": conn.deviceInfo?.protocolRevision as Any,
                         "wifiConfigured": conn.deviceInfo?.wifiConfigured as Any,
                         "wifiConnected": conn.deviceInfo?.wifiConnected as Any,
+                        "repaintCount": conn.deviceInfo?.repaintCount as Any,
+                        "fullRefreshCount": conn.deviceInfo?.fullRefreshCount as Any,
                     ] as [String: Any],
                 ] as [String: Any]
             },
@@ -800,7 +804,9 @@ actor ESP32Serial {
                     version: msg["version"] as? String,
                     protocolRevision: msg["protocolRevision"] as? Int,
                     wifiConfigured: msg["wifiConfigured"] as? Bool,
-                    wifiConnected: msg["wifiConnected"] as? Bool
+                    wifiConnected: msg["wifiConnected"] as? Bool,
+                    repaintCount: msg["repaintCount"] as? Int,
+                    fullRefreshCount: msg["fullRefreshCount"] as? Int
                 )
                 failedPorts.removeValue(forKey: port)
                 if !hadDeviceInfo {
@@ -1283,7 +1289,9 @@ actor ESP32Serial {
                 version: msg["version"] as? String,
                 protocolRevision: msg["protocolRevision"] as? Int,
                 wifiConfigured: msg["wifiConfigured"] as? Bool,
-                wifiConnected: msg["wifiConnected"] as? Bool
+                wifiConnected: msg["wifiConnected"] as? Bool,
+                repaintCount: msg["repaintCount"] as? Int,
+                fullRefreshCount: msg["fullRefreshCount"] as? Int
             )
         }
         return nil
@@ -1369,7 +1377,9 @@ actor ESP32Serial {
             version: dict["version"] as? String,
             protocolRevision: dict["protocolRevision"] as? Int,
             wifiConfigured: nil,
-            wifiConnected: nil)
+            wifiConnected: nil,
+            repaintCount: dict["repaintCount"] as? Int,
+            fullRefreshCount: dict["fullRefreshCount"] as? Int)
     }
 
     /// The payload a WiFi-WS ESP32 *display* board should receive for a broadcast

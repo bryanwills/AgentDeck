@@ -5584,8 +5584,9 @@ final class DaemonServer {
     /// Register a WiFi-WS ESP32 board from its spontaneous `device_info`
     /// announcement. Keyed by WS connection like the other volunteer rosters —
     /// evicted the moment the board's socket closes, TTL as the safety net.
-    /// Only the identity fields the topology needs are kept; diagnostic fields
-    /// (uptime, reset reason, OTA capability) stay a Node-daemon concern.
+    /// Keep identity plus operator-visible diagnostics. A battery e-ink board
+    /// may only ever announce over WiFi during its wake window, so dropping
+    /// refresh counters here would make Swift-daemon evaluation impossible.
     private func handleWifiEsp32DeviceInfo(_ cmd: [String: Any], from conn: WebSocketConnection) {
         if conn.isDisconnected { return }
         guard let board = cmd["board"] as? String, !board.isEmpty else { return }
@@ -5603,6 +5604,8 @@ final class DaemonServer {
         if let ota = cmd["otaSupported"] as? Bool { info["otaSupported"] = ota }
         if let slot = cmd["otaSlotSize"] as? Int { info["otaSlotSize"] = slot }
         if let reason = cmd["otaReason"] as? String { info["otaReason"] = reason }
+        if let count = cmd["repaintCount"] as? Int { info["repaintCount"] = count }
+        if let count = cmd["fullRefreshCount"] as? Int { info["fullRefreshCount"] = count }
         let identity = wifiEsp32Identity(board: board, ip: info["ip"] as? String)
         let identityPresent = wifiEsp32IdentityPresent(identity)
         cachedWifiEsp32[conn.id] = StreamDeckRegistration(

@@ -2,6 +2,30 @@
 
 ---
 
+## 2026-08-30 — E-ink 면은 push/pull별 상태 집합이 되고 패널 실측은 device_info가 맡는다
+
+InkDeck 24시간 실측에서 2,757회 재도색 중 행동 가능한 변경은 0.22%였고 이미지
+중앙 수명은 3초로 레이트리밋에 포화돼 있었다. 이를 단순 주기 튜닝 문제가 아니라
+면 상태기계 문제로 승격했다. `docs/eink-surface-contract.md`가 다섯 면
+(`DECISION`/`ANSWER`/`DIGEST`/`GLANCE`/`ROSTER`), 본문/밴드 경계, 8분 hold와
+expiry, 항상 같은 escape 의미를 정본으로 고정한다. 상시 연결 push는 다섯 면,
+딥슬립 pull은 세 면이 기본이며 물리 웨이크 뒤의 제한된 interactive lease에서만
+두 상호작용 면을 연다.
+
+실물/공식 자료 대조 결과 InkDeck은 push, RockBase NM-EPD-420과 LilyGo EPD47은
+pull 기본으로 분류했다. NM은 BOOT(GPIO0) wake/PTT와 USER(GPIO45) escape,
+EPD47은 GPIO21 wake/escape이며 온보드 오디오가 없어 PTT가 없다. USB 재점검에서는
+NM-EPD-420을 ESP32-S3R8과 factory Dashboard 이미지로 식별했고 EPD47은 아직
+열거되지 않았다.
+
+재설계 후 평가를 손재현하지 않도록 InkDeck의 실제 패널 I/O choke point에
+`repaintCount`/`fullRefreshCount` 부팅 이후 누적치를 추가했다. `device_info`의
+직렬·WiFi 경로를 Node/Swift 양 데몬에서 보존해 `/devices`와 module health로
+노출하며, 요청됐으나 gating에서 버려진 render는 세지 않는다.
+
+검증: vitest 3,713건, Node typecheck, Swift `ESP32WifiForwardTests`, InkDeck
+PlatformIO release 빌드, 문서 링크/H1 및 design-system catalog coverage 게이트.
+
 ## 2026-08-29 — Work 판이 두 데몬 모두에서 서빙되고, 태스크 이름 규칙은 생성 미러가 된다
 
 Work 판(`/apme` 기본 탭)은 Node가 9120을 잡은 동안만 도달했다 — Swift 데몬은

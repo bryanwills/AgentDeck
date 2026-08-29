@@ -1046,11 +1046,19 @@ bool firstDraw = true;
 bool forceFull = false;
 bool wasSearching = true;
 char lastTickerShown[104] = "";
+uint32_t repaintCountValue = 0;
+uint32_t fullRefreshCountValue = 0;
 
 bool key1Prev = true, key2Prev = true;
 uint32_t keyLastMs = 0;
 
 void refresh(void (*draw)(const Snap&), const Snap& s, bool full) {
+    // Count at the one choke point that performs physical panel I/O, not at
+    // render requests (most of which content-hash/rate gates intentionally
+    // discard). Relaxed atomics keep device_info reads race-free across the
+    // network and UI tasks without putting a lock around a multi-second draw.
+    __atomic_add_fetch(&repaintCountValue, 1u, __ATOMIC_RELAXED);
+    if (full) __atomic_add_fetch(&fullRefreshCountValue, 1u, __ATOMIC_RELAXED);
     if (full) {
         display.setFullWindow();
         partialCount = 0;
@@ -1069,6 +1077,14 @@ void refresh(void (*draw)(const Snap&), const Snap& s, bool full) {
 }  // namespace
 
 namespace Eink {
+
+uint32_t repaintCount() {
+    return __atomic_load_n(&repaintCountValue, __ATOMIC_RELAXED);
+}
+
+uint32_t fullRefreshCount() {
+    return __atomic_load_n(&fullRefreshCountValue, __ATOMIC_RELAXED);
+}
 
 void init() {
     pinMode(PIN_KEY1, INPUT_PULLUP);

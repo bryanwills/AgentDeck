@@ -168,6 +168,8 @@ export interface SerialConnection {
     sessionCount?: number;
     usageFiveH?: number;
     processingCount?: number;
+    repaintCount?: number;
+    fullRefreshCount?: number;
     /** Peripheral telemetry/diag (capability-advertising boards). */
     capabilities?: string[];
     batteryPercent?: number;
@@ -837,6 +839,8 @@ export function handleSerialLine(conn: SerialConnection, line: string): void {
           sessionCount: (msg as any).sessionCount,
           usageFiveH: (msg as any).usageFiveH,
           processingCount: (msg as any).processingCount,
+          repaintCount: (msg as any).repaintCount,
+          fullRefreshCount: (msg as any).fullRefreshCount,
           capabilities: (msg as any).capabilities,
           batteryPercent: (msg as any).batteryPercent,
           batteryVoltageMv: (msg as any).batteryVoltageMv,
