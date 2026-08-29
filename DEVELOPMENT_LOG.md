@@ -4,6 +4,11 @@
 
 ## 2026-08-30 — E-ink 면은 push/pull별 상태 집합이 되고 패널 실측은 device_info가 맡는다
 
+후속 실물 방향 확인에서 LilyGo EPD47의 native scan 방향이 케이스의 읽기 방향과
+180° 반대임을 확인했다. 보드 정본에 `BOARD_EINK_ROTATION=2`를 두고 4-bit PSRAM
+canvas가 논리 좌표를 물리 좌표로 회전해 기록하도록 수정했으며, 960×540 host
+preview도 같은 raw panel orientation을 쓴다.
+
 InkDeck 24시간 실측에서 2,757회 재도색 중 행동 가능한 변경은 0.22%였고 이미지
 중앙 수명은 3초로 레이트리밋에 포화돼 있었다. 이를 단순 주기 튜닝 문제가 아니라
 면 상태기계 문제로 승격했다. `docs/eink-surface-contract.md`가 다섯 면

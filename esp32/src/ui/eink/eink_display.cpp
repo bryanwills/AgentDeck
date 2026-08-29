@@ -61,6 +61,12 @@ constexpr int8_t PIN_EPD_BUSY = BOARD_PIN_EPD_BUSY;
 constexpr uint8_t PIN_KEY1    = BOARD_PIN_KEY1;
 constexpr uint8_t PIN_KEY2    = BOARD_PIN_KEY2;
 
+#ifndef BOARD_EINK_ROTATION
+#define BOARD_EINK_ROTATION 0
+#endif
+static_assert(BOARD_EINK_ROTATION == 0 || BOARD_EINK_ROTATION == 2,
+              "Paper-face renderer currently supports upright or 180-degree panels");
+
 // ===== Refresh policy =====
 // Partial refresh (~0.3s) accumulates ghosting on the UC8179; Good Display
 // recommends a flashing full refresh roughly every 5 partials. Content-hash
@@ -104,9 +110,15 @@ public:
 
     void drawPixel(int16_t x, int16_t y, uint16_t color) override {
         if (!pixels_ || x < 0 || y < 0 || x >= SCREEN_W || y >= SCREEN_H) return;
-        const size_t i = ((size_t)y * SCREEN_W + (size_t)x) / 2;
+        int16_t px = x;
+        int16_t py = y;
+        if (getRotation() == 2) {
+            px = (int16_t)(SCREEN_W - 1 - x);
+            py = (int16_t)(SCREEN_H - 1 - y);
+        }
+        const size_t i = ((size_t)py * SCREEN_W + (size_t)px) / 2;
         const uint8_t shade = color == GxEPD_WHITE ? 0x0F : 0x00;
-        if (x & 1) pixels_[i] = (uint8_t)((pixels_[i] & 0x0F) | (shade << 4));
+        if (px & 1) pixels_[i] = (uint8_t)((pixels_[i] & 0x0F) | (shade << 4));
         else       pixels_[i] = (uint8_t)((pixels_[i] & 0xF0) | shade);
     }
 
@@ -1523,7 +1535,7 @@ void init() {
         while (true) vTaskDelay(pdMS_TO_TICKS(1000));
     }
     epd_init();
-    display.setRotation(0);
+    display.setRotation(BOARD_EINK_ROTATION);
     u8f.begin(display);
     Serial.printf("[Eink] LilyGo ED047TC2 init %dx%d, PSRAM framebuffer=%u bytes\n",
                   display.width(), display.height(), (unsigned)(SCREEN_W * SCREEN_H / 2));
@@ -1535,7 +1547,7 @@ void init() {
     // corrupts newline-framed replies (observed: mangled device_info + inbound
     // parse failures from the TX congestion).
     display.init(0, true, 2, false);
-    display.setRotation(0);
+    display.setRotation(BOARD_EINK_ROTATION);
     u8f.begin(display);  // UTF-8/한글 text path (unifont) on the same canvas
     Serial.printf("[Eink] %s init %dx%d, partial=%d\n",
 #if defined(BOARD_NM_EPD_420)

@@ -118,7 +118,7 @@ must enter deep sleep.
 |---|---|---|---|---|---|
 | Seeed TRMNL 7.5 DIY Kit · UC8179 800×480 landscape | XIAO ESP32-S3 Plus · 8 MB | USB only | Front KEY1/2/3 are RTC-capable GPIO2/3/5; unused because this surface is push | None | None |
 | RockBase NM-EPD-420 · GDEY042Z98 400×300 landscape, black/white/red | ESP32-S3-WROOM-1-N16R8 · 8 MB | USB-C or Li-ion | **BOOT GPIO0 yes**; USER GPIO45 no | ES8311 full-duplex I2S: MCLK21, BCLK15, LRCLK17, ADC→ESP16, ESP→DAC18; codec enable GPIO44 | **GPIO41** |
-| LilyGo T5 ePaper S3 V2.4 · ED047TC2 960×540 landscape, 4-bit grayscale buffer | ESP32-S3-WROOM-1-N16R8 · 8 MB | USB-C or Li-Po JST-PH 2.0; battery ADC GPIO14 | **User GPIO21 yes**; BOOT GPIO0 is recovery; RST is hard reset | None; touch IRQ GPIO47 is not a microphone or wake route | None |
+| LilyGo T5 ePaper S3 V2.4 · ED047TC2 960×540 landscape, 4-bit grayscale buffer · owned unit rotation 2 (180°) | ESP32-S3-WROOM-1-N16R8 · 8 MB | USB-C or Li-Po JST-PH 2.0; battery ADC GPIO14 | **User GPIO21 yes**; BOOT GPIO0 is recovery; RST is hard reset | None; touch IRQ GPIO47 is not a microphone or wake route | None |
 
 The owned LilyGo V2.4 unit must be flashed in **DIO** mode. Its merged firmware
 header also declares DIO; a forced QIO write produced a TG0WDT reset loop, and
