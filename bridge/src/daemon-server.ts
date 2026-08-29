@@ -2319,15 +2319,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       }
       log(`[agentdeck] learning-pack download: ${surfaceIdentity.board} (${ip})`
         + ` ← ${surfaceLearningPack.advert.id} v${surfaceLearningPack.advert.version}`);
+      const requestedFrom = Number(parsedUrl.searchParams.get('from') ?? '0');
+      const requestedLimitRaw = parsedUrl.searchParams.get('limit');
+      const requestedLimit = requestedLimitRaw == null ? undefined : Number(requestedLimitRaw);
+      const { from, body } = pullOtaSegment(surfaceLearningPack.bytes, requestedFrom, requestedLimit);
       res.writeHead(200, {
         'Content-Type': 'application/vnd.pocketdaily.learning-pack',
-        'Content-Length': String(surfaceLearningPack.bytes.length),
+        'Content-Length': String(body.length),
+        ...(from > 0
+          ? { 'Content-Range': body.length > 0
+            ? `bytes ${from}-${from + body.length - 1}/${surfaceLearningPack.bytes.length}`
+            : `bytes */${surfaceLearningPack.bytes.length}` }
+          : {}),
         'X-Learning-Pack-MD5': surfaceLearningPack.advert.md5,
         'X-Learning-Pack-License': surfaceLearningPack.advert.licenseSpdx,
         'Cache-Control': 'no-store',
         'Connection': 'close',
       });
-      res.end(surfaceLearningPack.bytes);
+      res.end(body);
       return;
     }
     // ===== Licensed automatic font-pack delivery — portable-reader/v1 =====
@@ -2378,15 +2387,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       }
       log(`[agentdeck] font-pack download: ${surfaceIdentity.board} (${ip})`
         + ` ← ${surfaceFontPack.advert.id} v${surfaceFontPack.advert.version}`);
+      const requestedFrom = Number(parsedUrl.searchParams.get('from') ?? '0');
+      const requestedLimitRaw = parsedUrl.searchParams.get('limit');
+      const requestedLimit = requestedLimitRaw == null ? undefined : Number(requestedLimitRaw);
+      const { from, body } = pullOtaSegment(surfaceFontPack.bytes, requestedFrom, requestedLimit);
       res.writeHead(200, {
         'Content-Type': 'application/vnd.pocketdaily.cpfont',
-        'Content-Length': String(surfaceFontPack.bytes.length),
+        'Content-Length': String(body.length),
+        ...(from > 0
+          ? { 'Content-Range': body.length > 0
+            ? `bytes ${from}-${from + body.length - 1}/${surfaceFontPack.bytes.length}`
+            : `bytes */${surfaceFontPack.bytes.length}` }
+          : {}),
         'X-Font-Pack-MD5': surfaceFontPack.advert.md5,
         'X-Font-Pack-License': surfaceFontPack.advert.licenseSpdx,
         'Cache-Control': 'no-store',
         'Connection': 'close',
       });
-      res.end(surfaceFontPack.bytes);
+      res.end(body);
       return;
     }
 

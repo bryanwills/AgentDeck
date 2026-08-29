@@ -177,7 +177,7 @@ describe('pull-OTA staging', () => {
     expect(tail.body).toHaveLength(0);
   });
 
-  it('honors a bounded cooperative OTA segment limit', () => {
+  it('honors the bounded cooperative Surface binary segment limit', () => {
     const image = Buffer.alloc(700 * 1024);
     expect(__wifiOtaTestApi.pullOtaSegment(image, 0, 128 * 1024).body).toHaveLength(128 * 1024);
     expect(__wifiOtaTestApi.pullOtaSegment(image, 0, 1).body).toHaveLength(32 * 1024);

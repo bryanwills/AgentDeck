@@ -331,7 +331,11 @@ eight Surface identity headers and pairing token as Feed and must negotiate
 product, unknown id/version, corrupt bundle, missing attribution/source ledger,
 or an unapproved content licence. Pocket Daily additionally validates the PDLP
 header checksum and complete payload SHA-256 before atomically installing it on
-SD. A staged firmware advert takes precedence, so providers omit the learning
+SD. A cooperative client may append `from=<offset>&limit=<bytes>`; providers
+clamp the response to 32–512 KiB, retain status 200 for legacy readers, and add
+`Content-Range` when the offset is nonzero. The client concatenates contiguous
+segments and validates the advert's MD5 over the complete file. A staged
+firmware advert takes precedence, so providers omit the learning
 advert during OTA-first bootstrap and offer it on the next sync.
 
 #### Automatic reader font packs
@@ -341,6 +345,11 @@ full or `unchanged` Feed response. The immutable advert contains id, version,
 cpfont format, exact byte size, transfer MD5, and SPDX licence. The client
 retrieves it from `GET /fonts/pack?id=<id>&version=<version>` using the same
 Surface identity and token; the route requires `font.pack.read`.
+
+Font bytes use the same optional, bounded `from` / `limit` contract as learning
+packs. Pocket Daily requests 64 KiB per foreground service pass, polls controls
+between responses, and may discard the temporary candidate without disturbing
+the installed family when the user leaves the screen.
 
 Providers validate the bundled source ledger, OFL licence, MD5, SHA-256, and
 cpfont header before advertising it. Pocket Daily downloads only during an

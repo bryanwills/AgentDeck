@@ -235,6 +235,27 @@ final class SwiftSurfaceProtocolTests: XCTestCase {
         XCTAssertFalse(pack.matchesRequest(id: "../jp-n3-ko", version: "3"))
     }
 
+    func testReaderAssetsAreServedAsBoundedContiguousSegments() {
+        let bytes = Data((0..<(700 * 1024)).map { UInt8($0 % 251) })
+        let first = DaemonServer.boundedSurfaceAssetSegment(
+            bytes, requestedFrom: 0, requestedLimit: 64 * 1024)
+        let second = DaemonServer.boundedSurfaceAssetSegment(
+            bytes, requestedFrom: first.data.count, requestedLimit: 64 * 1024)
+        XCTAssertEqual(first.from, 0)
+        XCTAssertEqual(first.data.count, 64 * 1024)
+        XCTAssertEqual(second.from, 64 * 1024)
+        XCTAssertEqual(second.data, bytes.subdata(in: (64 * 1024)..<(128 * 1024)))
+
+        XCTAssertEqual(DaemonServer.boundedSurfaceAssetSegment(
+            bytes, requestedFrom: 0, requestedLimit: 1).data.count, 32 * 1024)
+        XCTAssertEqual(DaemonServer.boundedSurfaceAssetSegment(
+            bytes, requestedFrom: 0, requestedLimit: 2 * 1024 * 1024).data.count, 512 * 1024)
+        let tail = DaemonServer.boundedSurfaceAssetSegment(
+            bytes, requestedFrom: bytes.count + 1, requestedLimit: nil)
+        XCTAssertEqual(tail.from, bytes.count)
+        XCTAssertTrue(tail.data.isEmpty)
+    }
+
     func testLearningPackRejectsBytesChangedAfterManifest() throws {
         func resource(_ name: String, extension ext: String) throws -> URL {
             try XCTUnwrap(

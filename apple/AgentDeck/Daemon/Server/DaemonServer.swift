@@ -659,6 +659,20 @@ final class DaemonServer {
     ]
     // END GENERATED-SSOT-MIRROR: shared/src/esp32-boards.ts
 
+    /// Shared bounded-body contract for SD-backed reader assets. The firmware
+    /// asks for 64 KiB so its main input loop runs between responses; clamps
+    /// match the Node pull-OTA provider and reject neither older nor newer
+    /// cooperative clients.
+    nonisolated static func boundedSurfaceAssetSegment(
+        _ bytes: Data, requestedFrom: Int, requestedLimit: Int?
+    ) -> (from: Int, data: Data) {
+        let from = requestedFrom > 0 ? min(requestedFrom, bytes.count) : 0
+        let defaultLimit = 256 * 1024
+        let limit = requestedLimit.map { max(32 * 1024, min($0, 512 * 1024)) } ?? defaultLimit
+        let end = min(from + limit, bytes.count)
+        return (from, bytes.subdata(in: from..<end))
+    }
+
     nonisolated static func validateSurfaceProduct(
         productId: String, profile: String, board: String?, updateChannel: String?
     ) -> SurfaceRuntimeError? {
@@ -2948,16 +2962,27 @@ final class DaemonServer {
                 id: request.queryParams["id"], version: request.queryParams["version"]) else {
                 return .json(["error": "learning_pack_not_found"], status: 404)
             }
-            // Content-Length and Connection are appended by
-            // HTTPServer.formatHTTPResponse for EVERY response — setting them
-            // here again shipped both headers twice, which is an RFC 9110
-            // violation strict clients refuse.
-            return HTTPServer.HTTPResponse(status: 200, headers: [
+            let segment = Self.boundedSurfaceAssetSegment(
+                pack.bytes,
+                requestedFrom: Int(request.queryParams["from"] ?? "") ?? 0,
+                requestedLimit: Int(request.queryParams["limit"] ?? "")
+            )
+            var headers = [
                 "Content-Type": "application/vnd.pocketdaily.learning-pack",
                 "X-Learning-Pack-MD5": pack.advert.md5,
                 "X-Learning-Pack-License": pack.advert.licenseSpdx,
                 "Cache-Control": "no-store",
-            ], body: pack.bytes)
+            ]
+            if segment.from > 0 {
+                headers["Content-Range"] = segment.data.isEmpty
+                    ? "bytes */\(pack.bytes.count)"
+                    : "bytes \(segment.from)-\(segment.from + segment.data.count - 1)/\(pack.bytes.count)"
+            }
+            // Content-Length and Connection are appended by
+            // HTTPServer.formatHTTPResponse for EVERY response — setting them
+            // here again shipped both headers twice, which is an RFC 9110
+            // violation strict clients refuse.
+            return HTTPServer.HTTPResponse(status: 200, headers: headers, body: segment.data)
         }
 
         await httpServer.get("/fonts/pack") { [weak self] request in
@@ -2989,12 +3014,23 @@ final class DaemonServer {
                 id: request.queryParams["id"], version: request.queryParams["version"]) else {
                 return .json(["error": "font_pack_not_found"], status: 404)
             }
-            return HTTPServer.HTTPResponse(status: 200, headers: [
+            let segment = Self.boundedSurfaceAssetSegment(
+                pack.bytes,
+                requestedFrom: Int(request.queryParams["from"] ?? "") ?? 0,
+                requestedLimit: Int(request.queryParams["limit"] ?? "")
+            )
+            var headers = [
                 "Content-Type": "application/vnd.pocketdaily.cpfont",
                 "X-Font-Pack-MD5": pack.advert.md5,
                 "X-Font-Pack-License": pack.advert.licenseSpdx,
                 "Cache-Control": "no-store",
-            ], body: pack.bytes)
+            ]
+            if segment.from > 0 {
+                headers["Content-Range"] = segment.data.isEmpty
+                    ? "bytes */\(pack.bytes.count)"
+                    : "bytes \(segment.from)-\(segment.from + segment.data.count - 1)/\(pack.bytes.count)"
+            }
+            return HTTPServer.HTTPResponse(status: 200, headers: headers, body: segment.data)
         }
 
         await httpServer.post("/outbox") { [weak self] request in
